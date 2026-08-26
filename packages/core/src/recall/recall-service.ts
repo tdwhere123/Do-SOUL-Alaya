@@ -68,7 +68,10 @@ export { computeRecallTokenEconomy } from "./runtime/diagnostics.js";
 export { RECALL_FUSION_STREAMS } from "./delivery/fusion-delivery.js";
 export type { RecallDiagnosticCapture } from
   "./runtime/recall-service-runner-types.js";
-export type { RecallReadSnapshotPort } from "./runtime/recall-read-snapshot.js";
+export {
+  withRecallReadSnapshot,
+  type RecallReadSnapshotPort
+} from "./runtime/recall-read-snapshot.js";
 export type {
   SelectGammaSynthesisPort,
   SelectGammaSynthesisStatus

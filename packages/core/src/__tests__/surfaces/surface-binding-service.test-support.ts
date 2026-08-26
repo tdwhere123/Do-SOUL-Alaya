@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { BindingState, CrossCuttingState, type CrossCuttingPermission, type GovernanceDriftLease, type SurfaceBinding } from "@do-soul/alaya-protocol";
+import { BindingState, CrossCuttingState, type CrossCuttingPermission, type EventLogEntry, type GovernanceDriftLease, type SurfaceBinding } from "@do-soul/alaya-protocol";
 import { type SurfaceBindingServiceDependencies } from "../../surfaces/surface-binding-service.js";
 
 export const BINDING_ID_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -118,7 +118,10 @@ export function createDependencies(seed?: {
   // call sites: `single`/`many` buckets disambiguate them post-hoc by the
   // batch length so existing assertions keep working.
   const eventPublisher = {
-    appendManyWithMutation: vi.fn(async (events: readonly any[], mutate: (entries: any[]) => any) => {
+    appendManyWithMutation: vi.fn(async (
+      events: readonly EventLogEntry[],
+      mutate: (entries: EventLogEntry[]) => unknown
+    ) => {
       if (events.length === 1) {
         order.push("event_publish");
         publishedEvents.single.push(events[0]);

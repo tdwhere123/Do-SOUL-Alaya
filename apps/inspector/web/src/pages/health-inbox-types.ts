@@ -20,8 +20,13 @@ export interface HealthInboxEnvelope {
   readonly data: {
     readonly workspace_id: string;
     readonly groups: readonly HealthIssueGroupRow[];
-    readonly total_count: number;
+    readonly returned_count?: number;
+    readonly total_count?: number;
   };
+}
+
+export function healthInboxReturnedCount(data: HealthInboxEnvelope["data"]): number {
+  return data.returned_count ?? data.groups.length;
 }
 
 export type HealthIssueCauseKind =

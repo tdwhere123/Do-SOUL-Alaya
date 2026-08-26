@@ -117,7 +117,7 @@ export class SynthesisService {
         subCode: "PORT_UNAVAILABLE"
       });
     }
-    return transactional(() => {
+    return transactional.call(this.dependencies.eventLogRepo, () => {
       const event = appendMemoryEventLogSynchronously(
         this.dependencies.eventLogRepo,
         {

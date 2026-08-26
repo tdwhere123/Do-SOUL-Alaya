@@ -6,6 +6,7 @@ import {
   RunState,
   WorkspaceKind,
   WorkspaceState,
+  type EngineBindingRecord,
   type Run,
   type Workspace
 } from "@do-soul/alaya-protocol";
@@ -23,9 +24,9 @@ function fakeAppendManyWithMutationForTest(publishedEvents?: Array<unknown>) {
 describe("EngineBindingService", () => {
   it("saves a workspace binding, records an event, and points the workspace default binding at it", async () => {
     let defaultBindingId: string | null = null;
-    const savedRecords = new Map<string, any>();
-    const publishedEvents: Array<any> = [];
-    const upsertImpl = (record: any) => {
+    const savedRecords = new Map<string, EngineBindingRecord>();
+    const publishedEvents: Array<unknown> = [];
+    const upsertImpl = (record: Omit<EngineBindingRecord, "created_at" | "updated_at">) => {
       const saved = {
         ...record,
         created_at: "2026-03-18T00:00:00.000Z",
@@ -93,7 +94,7 @@ describe("EngineBindingService", () => {
   it("creates a fresh binding id for each workspace binding update and preserves older rows", async () => {
     let defaultBindingId: string | null = null;
     const savedRecords = new Map<string, any>();
-    const upsertImpl = (record: any) => {
+    const upsertImpl = (record: Omit<EngineBindingRecord, "created_at" | "updated_at">) => {
       const persisted = {
         ...record,
         created_at: "2026-03-18T00:00:00.000Z",
@@ -164,7 +165,7 @@ describe("EngineBindingService", () => {
         })
       },
       bindingRepo: {
-        upsert: vi.fn((record: any) => {
+        upsert: vi.fn((record: Omit<EngineBindingRecord, "created_at" | "updated_at">) => {
           const persisted = {
             ...record,
             created_at: "2026-03-18T00:00:00.000Z",

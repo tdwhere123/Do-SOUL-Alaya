@@ -25,6 +25,57 @@ const hasCoverageReportsDirectoryArg = extraArgs.some(
   (arg) =>
     arg === "--coverage.reportsDirectory" || arg.startsWith("--coverage.reportsDirectory=")
 );
+const hasCoverageIncludeArg = extraArgs.some(
+  (arg) => arg === "--coverage.include" || arg.startsWith("--coverage.include=")
+);
+const hasCoverageThresholdArg = extraArgs.some((arg) => arg.startsWith("--coverage.thresholds."));
+
+const PROJECT_COVERAGE = {
+  "@do-soul/alaya-protocol": {
+    include: "packages/protocol/src/**",
+    statements: 40, lines: 40, functions: 30, branches: 20
+  },
+  "@do-soul/alaya-graph-algorithms": {
+    include: "packages/graph-algorithms/src/**",
+    statements: 40, lines: 40, functions: 30, branches: 20
+  },
+  "@do-soul/alaya-storage": {
+    include: "packages/storage/src/**",
+    statements: 40, lines: 40, functions: 30, branches: 20
+  },
+  "@do-soul/alaya-core": {
+    include: "packages/core/src/**",
+    statements: 40, lines: 40, functions: 30, branches: 20
+  },
+  "@do-soul/alaya-soul": {
+    include: "packages/soul/src/**",
+    statements: 40, lines: 40, functions: 30, branches: 20
+  },
+  "@do-soul/alaya-engine-gateway": {
+    include: "packages/engine-gateway/src/**",
+    statements: 88, lines: 90, functions: 95, branches: 74
+  },
+  "@do-soul/alaya-eval": {
+    include: "packages/eval/src/**",
+    statements: 40, lines: 40, functions: 30, branches: 20
+  },
+  "@do-soul/alaya-core-daemon": {
+    include: "apps/core-daemon/src/**",
+    statements: 40, lines: 40, functions: 30, branches: 20
+  },
+  "@do-soul/alaya-inspector": {
+    include: "apps/inspector/src/**",
+    statements: 40, lines: 40, functions: 30, branches: 20
+  },
+  "@do-soul/alaya-inspector-web": {
+    include: "apps/inspector/web/src/**",
+    statements: 40, lines: 40, functions: 30, branches: 20
+  },
+  "@do-soul/alaya-bench-runner": {
+    include: "apps/bench-runner/src/**",
+    statements: 40, lines: 40, functions: 30, branches: 20
+  }
+};
 
 for (const project of PROJECTS) {
   console.log(`\n==> vitest project: ${project}`);
@@ -73,10 +124,26 @@ function buildVitestArgs(project) {
 }
 
 function buildCoverageArgs(project) {
-  if (!coverageEnabled || hasCoverageReportsDirectoryArg) {
+  if (!coverageEnabled) {
     return [];
   }
-  return ["--coverage.reportsDirectory", `coverage/${sanitizeProjectName(project)}`];
+  const config = PROJECT_COVERAGE[project];
+  const args = [];
+  if (!hasCoverageReportsDirectoryArg) {
+    args.push("--coverage.reportsDirectory", `coverage/${sanitizeProjectName(project)}`);
+  }
+  if (!hasCoverageIncludeArg && config?.include !== undefined) {
+    args.push(`--coverage.include=${config.include}`);
+  }
+  if (!hasCoverageThresholdArg && config !== undefined) {
+    args.push(
+      `--coverage.thresholds.statements=${config.statements}`,
+      `--coverage.thresholds.lines=${config.lines}`,
+      `--coverage.thresholds.functions=${config.functions}`,
+      `--coverage.thresholds.branches=${config.branches}`
+    );
+  }
+  return args;
 }
 
 function sanitizeProjectName(project) {

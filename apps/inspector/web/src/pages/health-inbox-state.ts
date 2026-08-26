@@ -2,12 +2,13 @@ import { useCallback, useMemo, useState } from "react";
 import { apiFetch } from "../api";
 import { useApiQuery } from "../hooks/useApiQuery";
 import { useToasts } from "../components/toast";
-import type {
-  CauseFilter,
-  HealthInboxEnvelope,
-  HealthIssueCauseKind,
-  HealthIssueGroupRow,
-  StateFilter
+import {
+  healthInboxReturnedCount,
+  type CauseFilter,
+  type HealthInboxEnvelope,
+  type HealthIssueCauseKind,
+  type HealthIssueGroupRow,
+  type StateFilter
 } from "./health-inbox-types";
 
 export interface HealthInboxState {
@@ -65,7 +66,7 @@ function useHealthInboxFetcher(
       `/workspaces/${workspaceId}/health-inbox${query}`,
       { signal }
     );
-    return envelope.data.groups;
+    return envelope.data.groups.slice(0, healthInboxReturnedCount(envelope.data));
   }, [causeFilter, stateFilter, workspaceId]);
 }
 

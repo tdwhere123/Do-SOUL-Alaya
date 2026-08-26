@@ -26,6 +26,25 @@ describe("withRecallReadSnapshot", () => {
     })).rejects.toThrow("read failed");
     expect(events).toEqual(["begin", "work", "rollback"]);
   });
+
+  it("isolates work onto the snapshot session before begin", async () => {
+    const events: string[] = [];
+    const snapshot: RecallReadSnapshotPort = {
+      isolate: async (work) => {
+        events.push("isolate");
+        return await work();
+      },
+      beginDeferred: () => events.push("begin"),
+      commit: () => events.push("commit"),
+      rollback: () => events.push("rollback")
+    };
+
+    await expect(withRecallReadSnapshot(snapshot, async () => {
+      events.push("work");
+      return "ok";
+    })).resolves.toBe("ok");
+    expect(events).toEqual(["isolate", "begin", "work", "commit"]);
+  });
 });
 
 function createRecordingSnapshot(events: string[]): RecallReadSnapshotPort {

@@ -284,7 +284,7 @@ export class SignalService {
         subCode: "PORT_UNAVAILABLE"
       });
     }
-    return transactional(() => {
+    return transactional.call(this.dependencies.eventLogRepo, () => {
       const triagedEvent = appendMemoryEventLogSynchronously(
         this.dependencies.eventLogRepo,
         {

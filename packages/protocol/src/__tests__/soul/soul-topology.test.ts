@@ -25,6 +25,7 @@ describe("SOUL topology protocol schemas", () => {
       max_in_degree: 1,
       avg_degree: 1,
       strongly_connected_components: 2,
+      truncated: false,
       trend,
       explored_at: validTimestamp
     };

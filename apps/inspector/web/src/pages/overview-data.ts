@@ -27,7 +27,10 @@ export interface BenchSummaryData {
 
 interface PendingCountEnvelope {
   readonly success: boolean;
-  readonly data: { readonly total_count: number };
+  readonly data: {
+    readonly returned_count?: number;
+    readonly total_count?: number;
+  };
 }
 
 interface BenchSummaryEnvelope {
@@ -104,7 +107,7 @@ async function fetchPendingCount(
   const envelope = await apiFetch<PendingCountEnvelope>(`/proposals/${workspaceId}/pending`, {
     signal
   });
-  return envelope.data.total_count;
+  return envelope.data.returned_count ?? envelope.data.total_count ?? 0;
 }
 
 async function fetchRecallStats(

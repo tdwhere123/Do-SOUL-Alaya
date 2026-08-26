@@ -144,10 +144,6 @@ function createToolSpec(toolId: ToolSpec["tool_id"]): ToolSpec {
 
 afterEach(cleanupToolRuntimeTempDirs);
 
-function skipUnlessLinuxExecShellCopy(): boolean {
-  return process.platform !== "linux";
-}
-
 describe("tool-runtime relative path handling", () => {
 
   it("reads a relative tools.read_file path from the workspace root through the live handler contract", async () => {
@@ -204,10 +200,7 @@ describe("tool-runtime relative path handling", () => {
     });
   });
 
-  it("executes tools.exec_shell through argv without shell expansion and without leaking ambient secrets", async () => {
-    if (skipUnlessLinuxExecShellCopy()) {
-      return;
-    }
+  it.skipIf(process.platform !== "linux")("executes tools.exec_shell through argv without shell expansion and without leaking ambient secrets", async () => {
     const workspaceDir = await createWorkspace();
     const nodeExecutable = await createContainedNodeExecutable(workspaceDir);
     process.env.ALAYA_EXEC_SHELL_TEST_SECRET = "sk-env-leak";
@@ -276,10 +269,7 @@ describe("tool-runtime relative path handling", () => {
     });
   });
 
-  it("pins the executable inode when the workspace path is swapped before spawn", async () => {
-    if (skipUnlessLinuxExecShellCopy()) {
-      return;
-    }
+  it.skipIf(process.platform !== "linux")("pins the executable inode when the workspace path is swapped before spawn", async () => {
 
     const workspaceDir = await createWorkspace();
     const nodeExecutable = await createContainedNodeExecutable(workspaceDir);
@@ -298,10 +288,7 @@ describe("tool-runtime relative path handling", () => {
     }
   });
 
-  it("maps tools.exec_shell nonzero exits and timeouts to structured results", async () => {
-    if (skipUnlessLinuxExecShellCopy()) {
-      return;
-    }
+  it.skipIf(process.platform !== "linux")("maps tools.exec_shell nonzero exits and timeouts to structured results", async () => {
     const workspaceDir = await createWorkspace();
     const nodeExecutable = await createContainedNodeExecutable(workspaceDir);
 
@@ -335,6 +322,50 @@ describe("tool-runtime relative path handling", () => {
       ok: false,
       code: "TIMEOUT",
       message: "Command timed out after 1ms."
+    });
+  });
+
+  it("contains exec_shell by realpath when /proc/self/fd is unavailable", async () => {
+    await withWin32Platform(async () => {
+      const workspaceDir = await createWorkspace();
+      const nodeExecutable = await createContainedNodeExecutable(workspaceDir);
+      await expect(
+        executeConversationTool(
+          "tools.exec_shell",
+          {
+            command: nodeExecutable,
+            args: ["-e", "require('node:fs').writeFileSync(1, 'realpath-fence')"]
+          },
+          [workspaceDir]
+        )
+      ).resolves.toEqual({
+        ok: true,
+        exitCode: 0,
+        stdout: "realpath-fence",
+        stderr: ""
+      });
+    });
+  });
+
+  it("denies exec_shell symlink escapes on the win32 realpath fence", async () => {
+    await withWin32Platform(async () => {
+      const workspaceDir = await createWorkspace();
+      const binLink = path.join(workspaceDir, "bin-link");
+      await symlink(path.dirname(process.execPath), binLink, "dir");
+      await expect(
+        executeConversationTool(
+          "tools.exec_shell",
+          {
+            command: path.join(binLink, path.basename(process.execPath)),
+            args: ["-e", "require('node:fs').writeFileSync(1, 'escaped')"]
+          },
+          [workspaceDir]
+        )
+      ).resolves.toEqual({
+        ok: false,
+        code: "ACCESS_DENIED",
+        message: "Command must be a real non-symlink executable inside a writable root."
+      });
     });
   });
 
@@ -470,6 +501,20 @@ describe("tool-runtime relative path handling", () => {
     );
   });
 });
+
+async function withWin32Platform(run: () => Promise<void>): Promise<void> {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+  try {
+    await run();
+  } finally {
+    if (platform === undefined) {
+      delete (process as { platform?: string }).platform;
+    } else {
+      Object.defineProperty(process, "platform", platform);
+    }
+  }
+}
 
 async function createContainedNodeExecutable(workspaceDir: string): Promise<string> {
   const binDir = path.join(workspaceDir, ".tool-bin");

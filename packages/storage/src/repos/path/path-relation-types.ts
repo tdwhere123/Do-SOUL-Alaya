@@ -43,7 +43,7 @@ export interface PathRelationRepo {
     page: PathRelationPageOptions
   ): Promise<readonly Readonly<PathRelation>[]>;
   findActive(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
-  findActiveAll(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
+  findActiveAll(workspaceId: string): Promise<Readonly<PathRelationListResult>>;
   findDormant(
     workspaceId: string,
     olderThanIso: string
@@ -63,4 +63,9 @@ export interface PathRelationRepo {
 export interface PathRelationPageOptions {
   readonly limit: number;
   readonly offset: number;
+}
+
+export interface PathRelationListResult {
+  readonly relations: readonly Readonly<PathRelation>[];
+  readonly truncated: boolean;
 }

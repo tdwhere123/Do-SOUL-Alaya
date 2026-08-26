@@ -33,6 +33,7 @@ type PathLifecycleWithStatus = PathRelation["lifecycle"] & {
 };
 
 export const PARSED_ROW_CACHE_MAX = 50_000;
+export const PATH_RELATION_ACTIVE_LIST_HARD_CAP = 10_000;
 export const DEFAULT_PATH_RELATION_PAGE = Object.freeze({
   limit: DEFAULT_REPO_LIST_PAGE_LIMIT,
   offset: 0

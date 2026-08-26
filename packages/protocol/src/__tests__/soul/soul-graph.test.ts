@@ -256,6 +256,11 @@ describe("Soul graph protocol schemas", () => {
       }
     });
 
+    expect(parsed.truncated).toBe(false);
+    expect(SoulPathGraphContractSchema.parse({
+      ...parsed,
+      truncated: true
+    }).truncated).toBe(true);
     const edge = parsed.edges[0]!;
     expect(edge.relation_kind).toBe("supports");
     expect(edge.source_anchor).toEqual(relation.anchors.source_anchor);

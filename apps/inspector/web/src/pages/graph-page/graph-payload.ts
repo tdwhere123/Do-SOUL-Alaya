@@ -20,12 +20,13 @@ export function parseInspectorPathGraph(payload: unknown): InspectorPathGraphPar
   if (envelope.success) {
     return {
       graph: envelope.data.data,
-      truncated: envelope.data.truncated === true
+      truncated: envelope.data.truncated === true || envelope.data.data.truncated === true
     };
   }
+  const graph = SoulPathGraphContractSchema.parse(payload);
   return {
-    graph: SoulPathGraphContractSchema.parse(payload),
-    truncated: truncatedFlag(payload)
+    graph,
+    truncated: graph.truncated === true || truncatedFlag(payload)
   };
 }
 

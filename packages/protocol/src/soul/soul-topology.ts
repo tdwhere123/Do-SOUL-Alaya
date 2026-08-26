@@ -26,6 +26,7 @@ export const TopologyExplorationResultSchema = z
     max_in_degree: NonNegativeIntSchema,
     avg_degree: z.number(),
     strongly_connected_components: NonNegativeIntSchema,
+    truncated: z.boolean().default(false),
     trend: TopologyTrendSchema.optional(),
     explored_at: IsoDatetimeStringSchema
   })

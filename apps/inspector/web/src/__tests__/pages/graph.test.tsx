@@ -86,7 +86,10 @@ describe("GraphPage (react-force-graph driven)", () => {
 
   it("honors server truncated on the inspector graph payload", async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ success: true, data: SAMPLE_GRAPH, truncated: true }), {
+      new Response(JSON.stringify({
+        success: true,
+        data: { ...SAMPLE_GRAPH, truncated: true }
+      }), {
         status: 200
       })
     );

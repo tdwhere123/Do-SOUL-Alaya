@@ -5,7 +5,7 @@ import path from "node:path";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-const patterns = [String.raw`\bas any\b`];
+const patterns = [String.raw`\bas any\b`, String.raw`:\s*any\b(?![\w-])`];
 const testFileGlobs = ["*test*.ts", "*test*.tsx", "**/__tests__/**/*.ts", "**/__tests__/**/*.tsx"];
 
 let files = [];
@@ -13,6 +13,7 @@ try {
   files = execFileSync(
     "rg",
     [
+      "--pcre2",
       "--files-with-matches",
       ...testFileGlobs.flatMap((glob) => ["-g", glob]),
       "-g",
@@ -38,6 +39,7 @@ if (files.length > 0) {
   const details = execFileSync(
     "rg",
     [
+      "--pcre2",
       "-n",
       ...testFileGlobs.flatMap((glob) => ["-g", glob]),
       "-g",

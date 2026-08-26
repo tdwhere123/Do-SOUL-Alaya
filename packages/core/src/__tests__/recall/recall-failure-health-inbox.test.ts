@@ -22,6 +22,24 @@ describe("wrapRecallFaultWarn", () => {
     });
   });
 
+  it("records activation_topk_sql_fallback onto the existing inbox port", async () => {
+    const recordRecallFailure = vi.fn(async () => undefined);
+    const warn = wrapRecallFaultWarn(vi.fn(), { recordRecallFailure }, "workspace-1", () => "now");
+
+    warn("activation top-k sql fallback", {
+      code: "activation_topk_sql_fallback",
+      workspace_id: "workspace-1",
+      error: "sql unavailable"
+    });
+    await Promise.resolve();
+
+    expect(recordRecallFailure).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      operation: "activation_topk_sql_fallback",
+      observedAt: "now"
+    });
+  });
+
   it("does not record for expected degradation error names", async () => {
     const recordRecallFailure = vi.fn(async () => undefined);
     const warn = wrapRecallFaultWarn(vi.fn(), { recordRecallFailure }, "workspace-1", () => "now");

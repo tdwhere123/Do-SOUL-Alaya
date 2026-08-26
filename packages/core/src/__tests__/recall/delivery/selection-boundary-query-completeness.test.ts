@@ -20,8 +20,23 @@ import { deriveQueryFactFrameOsfObligation } from
   "../../../recall/field/open-semantic-factors/query-obligation.js";
 import { captureFineAssessmentSelectionBoundary } from
   "../selection-boundary-live-capture-fixture.js";
+import type { FineAssessmentSelectionBoundaryCase } from
+  "../../../recall/delivery/selection-boundary/selection-boundary-types.js";
 
 const QUERY = "What degree did I graduate with?";
+
+type CompletenessMutationTarget = {
+  queryOpenSemanticFactorCompletenessReceipt?: WritableReceipt;
+  queryOpenSemanticFactorFormation?: {
+    graph: { factors: Array<{ semantic_identity: string }> };
+  };
+  queryProbes: { normalized_query: string };
+  queryFactFrameExtraction: { frames: Array<{ slots: Array<{ text: string }> }> };
+};
+
+type WritableReceipt = {
+  -readonly [K in keyof QueryOsfSemanticCompletenessReceipt]: QueryOsfSemanticCompletenessReceipt[K];
+};
 
 describe("selection boundary query completeness authority", () => {
   it("replays the exact certified query and unavailable queries", async () => {
@@ -33,30 +48,43 @@ describe("selection boundary query completeness authority", () => {
   });
 
   it.each([
-    ["missing receipt", (data: any) => { delete data.queryOpenSemanticFactorCompletenessReceipt; }],
-    ["missing formation", (data: any) => { delete data.queryOpenSemanticFactorFormation; }],
-    ["changed graph", (data: any) => {
-      data.queryOpenSemanticFactorFormation.graph.factors[0].semantic_identity = "foreign";
+    ["missing receipt", (data: CompletenessMutationTarget) => {
+      delete data.queryOpenSemanticFactorCompletenessReceipt;
     }],
-    ["changed query", (data: any) => { data.queryProbes.normalized_query = "foreign"; }],
-    ["changed fact frame", (data: any) => {
-      data.queryFactFrameExtraction.frames[0].slots[0].text = "foreign";
+    ["missing formation", (data: CompletenessMutationTarget) => {
+      delete data.queryOpenSemanticFactorFormation;
     }],
-    ["changed span", (data: any) => mutateReceipt(data, (receipt) => {
+    ["changed graph", (data: CompletenessMutationTarget) => {
+      const factor = data.queryOpenSemanticFactorFormation?.graph.factors[0];
+      if (factor === undefined) throw new Error("expected formation factor");
+      factor.semantic_identity = "foreign";
+    }],
+    ["changed query", (data: CompletenessMutationTarget) => {
+      data.queryProbes.normalized_query = "foreign";
+    }],
+    ["changed fact frame", (data: CompletenessMutationTarget) => {
+      const slot = data.queryFactFrameExtraction.frames[0]?.slots[0];
+      if (slot === undefined) throw new Error("expected fact-frame slot");
+      slot.text = "foreign";
+    }],
+    ["changed span", (data: CompletenessMutationTarget) => mutateReceipt(data, (receipt) => {
       receipt.subject.source_span = [0, 1];
     })],
-    ["changed arity", (data: any) => mutateReceipt(data, (receipt) => {
+    ["changed arity", (data: CompletenessMutationTarget) => mutateReceipt(data, (receipt) => {
       receipt.arity = 3;
     })],
-    ["old receipt", (data: any) => mutateReceipt(data, (receipt) => {
+    ["old receipt", (data: CompletenessMutationTarget) => mutateReceipt(data, (receipt) => {
       receipt.operator_id = "query_osf_semantic_completeness_v0";
     })]
-  ])("rejects %s even when the boundary is otherwise current", async (_, mutate) => {
-    const boundary = structuredClone(await certifiedBoundary()) as any;
-    mutate(boundary.input.supplementary_data);
-    expect(() => replayFineAssessmentSelectionBoundary(boundary))
-      .toThrow(/selection boundary fidelity mismatch|schema_version|digest/u);
-  });
+  ] satisfies ReadonlyArray<readonly [string, (data: CompletenessMutationTarget) => void]>)(
+    "rejects %s even when the boundary is otherwise current",
+    async (_, mutate) => {
+      const boundary = cloneBoundary(await certifiedBoundary());
+      mutate(boundary.input.supplementary_data as CompletenessMutationTarget);
+      expect(() => replayFineAssessmentSelectionBoundary(boundary))
+        .toThrow(/selection boundary fidelity mismatch|schema_version|digest/u);
+    }
+  );
 
   it("rejects the prior boundary schema", async () => {
     const old = { ...await certifiedBoundary(), schema_version: 4 };
@@ -90,11 +118,18 @@ async function certifiedBoundary() {
   });
 }
 
+function cloneBoundary(
+  boundary: FineAssessmentSelectionBoundaryCase
+): FineAssessmentSelectionBoundaryCase {
+  return structuredClone(boundary);
+}
+
 function mutateReceipt(
-  data: any,
-  mutate: (receipt: any) => void
+  data: CompletenessMutationTarget,
+  mutate: (receipt: WritableReceipt) => void
 ): void {
   const receipt = data.queryOpenSemanticFactorCompletenessReceipt;
+  if (receipt === undefined) throw new Error("expected completeness receipt");
   mutate(receipt);
   const { receipt_digest: _digest, ...body } = receipt;
   receipt.receipt_digest = digest(

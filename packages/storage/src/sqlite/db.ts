@@ -21,6 +21,7 @@ import {
   migrateVerifiedProjectionBindKey
 } from "./temporal-verified-bind-key.js";
 import { bindEmbeddingOverlayIfPresent } from "./embedding-overlay-bind.js";
+import { restrictSqliteFileModes } from "./sqlite-file-modes.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 
 export { TEMPORAL_OFFLINE_MIGRATION_VERSION, type TemporalDatabaseMode } from "./temporal-cutover-gate.js";
@@ -280,37 +281,6 @@ function openDatabase(filename: string): SqliteConnection {
     if (error instanceof StorageError) throw error;
     throw new StorageError("DATABASE_OPEN_FAILED", `Failed to open database: ${filename}`, error);
   }
-}
-
-function restrictSqliteFileModes(filename: string): void {
-  if (filename === ":memory:") return;
-  try {
-    fs.chmodSync(path.dirname(filename), 0o700);
-    fs.chmodSync(filename, 0o600);
-    chmodExistingSqliteSidecar(`${filename}-wal`);
-    chmodExistingSqliteSidecar(`${filename}-shm`);
-  } catch (error) {
-    throw new StorageError(
-      "DATABASE_OPEN_FAILED",
-      `Failed to restrict database file modes: ${filename}`,
-      error
-    );
-  }
-}
-
-function chmodExistingSqliteSidecar(filename: string): void {
-  try {
-    fs.chmodSync(filename, 0o600);
-  } catch (error) {
-    if (!isEnoent(error)) throw error;
-  }
-}
-
-function isEnoent(error: unknown): boolean {
-  return error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    (error as { readonly code?: unknown }).code === "ENOENT";
 }
 
 function runMigrations(database: SqliteConnection, temporalMode: TemporalDatabaseMode): void {

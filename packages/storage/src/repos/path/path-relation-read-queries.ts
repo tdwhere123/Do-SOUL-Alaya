@@ -5,9 +5,10 @@ import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 import { findByAnchorsSql, findByBackingObjectIdsSql } from "./path-relation-sql.js";
 import type { PathRelationStatements } from "./path-relation-statements.js";
-import type { PathRelationPageOptions } from "./path-relation-types.js";
+import type { PathRelationListResult, PathRelationPageOptions } from "./path-relation-types.js";
 import {
   DEFAULT_PATH_RELATION_PAGE,
+  PATH_RELATION_ACTIVE_LIST_HARD_CAP,
   parsePathAnchorRef,
   parsePathRelationPage,
   type PathRelationRow
@@ -249,13 +250,19 @@ export async function findActivePathRelations(
 
 export async function findAllActivePathRelations(
   ctx: PathRelationQueryContext,
-  workspaceId: string
-): Promise<readonly Readonly<PathRelation>[]> {
+  workspaceId: string,
+  hardCap = PATH_RELATION_ACTIVE_LIST_HARD_CAP
+): Promise<Readonly<PathRelationListResult>> {
   const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+  const cap = parseActiveListHardCap(hardCap);
 
   try {
-    const rows = ctx.statements.findActiveStatement.all(parsedWorkspaceId) as PathRelationRow[];
-    return ctx.parseRows(rows);
+    const rows = ctx.statements.findActivePagedStatement.all(
+      parsedWorkspaceId,
+      cap + 1,
+      0
+    ) as PathRelationRow[];
+    return capPathRelationList(ctx.parseRows(rows), cap);
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;
@@ -267,6 +274,24 @@ export async function findAllActivePathRelations(
       error
     );
   }
+}
+
+export function capPathRelationList<T>(
+  rows: readonly T[],
+  cap: number
+): Readonly<{ readonly relations: readonly T[]; readonly truncated: boolean }> {
+  const truncated = rows.length > cap;
+  return {
+    relations: truncated ? rows.slice(0, cap) : rows,
+    truncated
+  };
+}
+
+function parseActiveListHardCap(value: number): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate path relation active-list cap.");
+  }
+  return value;
 }
 
 export async function findActivePathRelationPage(

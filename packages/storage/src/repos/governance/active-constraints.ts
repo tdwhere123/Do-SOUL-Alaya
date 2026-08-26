@@ -30,7 +30,8 @@ export async function findActiveConstraints(input: {
     )
   );
   const claims = activeClaims.flat();
-  const paths = await input.pathRelationRepo.findActiveAll(input.workspaceId);
+  const listed = await input.pathRelationRepo.findActiveAll(input.workspaceId);
+  const paths = listed.relations;
   const linkedMemories = await input.memoryRepo.findByIds(
     input.workspaceId,
     listActiveConstraintCandidateMemoryIds({ claims, paths })

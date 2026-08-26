@@ -13,7 +13,10 @@ import { deepFreeze } from "../../shared/deep-freeze.js";
 const GRAPH_CONTRACT_SNAPSHOT_HISTORY_LIMIT = 5;
 
 export interface GraphContractServicePathRelationRepoPort {
-  findActiveAll(workspaceId: string): Promise<readonly Readonly<PathRelation>[]>;
+  findActiveAll(workspaceId: string): Promise<Readonly<{
+    readonly relations: readonly Readonly<PathRelation>[];
+    readonly truncated: boolean;
+  }>>;
 }
 
 export interface GraphContractServiceSnapshotHistoryPort {
@@ -50,8 +53,8 @@ export class GraphContractService {
   }
 
   public async derive(workspaceId: string): Promise<Readonly<SoulPathGraphContract>> {
-    const relations = await this.dependencies.pathRelationRepo.findActiveAll(workspaceId);
-    const built = buildPathGraph(relations);
+    const listed = await this.dependencies.pathRelationRepo.findActiveAll(workspaceId);
+    const built = buildPathGraph(listed.relations);
     const generatedAt = this.now().toISOString();
     const snapshotTrend = await this.buildSnapshotTrend(workspaceId);
 
@@ -62,6 +65,7 @@ export class GraphContractService {
       nodes: built.nodes,
       edges: built.edges,
       topology: built.topology,
+      truncated: listed.truncated,
       ...(snapshotTrend === undefined ? {} : { snapshot_trend: snapshotTrend })
     });
   }

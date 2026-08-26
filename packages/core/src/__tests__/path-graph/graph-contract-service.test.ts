@@ -14,7 +14,7 @@ describe("GraphContractService", () => {
     const relation = createPathRelation();
     const service = new GraphContractService({
       pathRelationRepo: {
-        findActiveAll: vi.fn(async () => [relation])
+        findActiveAll: vi.fn(async () => ({ relations: [relation], truncated: false }))
       },
       snapshotHistory: {
         findHistory: vi.fn(async () => [createSnapshot("latest", 2), createSnapshot("baseline", 1)])
@@ -61,6 +61,18 @@ describe("GraphContractService", () => {
     expect(graph.edges[0]!.target_anchor).toEqual(relation.anchors.target_anchor);
     expect(graph.edges[0]!.relation.lifecycle).toEqual(relation.lifecycle);
     expect(graph.edges[0]!.relation.legitimacy.evidence_basis).toEqual(["evidence-1", "evidence-2"]);
+    expect(graph.truncated).toBe(false);
+  });
+
+  it("propagates truncated from a capped active-path list", async () => {
+    const service = new GraphContractService({
+      pathRelationRepo: {
+        findActiveAll: vi.fn(async () => ({ relations: [createPathRelation()], truncated: true }))
+      },
+      now: () => new Date("2026-05-02T00:00:00.000Z")
+    });
+
+    await expect(service.derive("workspace-1")).resolves.toMatchObject({ truncated: true });
   });
 
   it("omits optional snapshot trend and warns when history reads fail", async () => {
@@ -68,7 +80,7 @@ describe("GraphContractService", () => {
     try {
       const service = new GraphContractService({
         pathRelationRepo: {
-          findActiveAll: vi.fn(async () => [])
+          findActiveAll: vi.fn(async () => ({ relations: [], truncated: false }))
         },
         snapshotHistory: {
           findHistory: vi.fn(async () => {
@@ -104,7 +116,7 @@ describe("GraphContractService", () => {
     let relations = [createPathRelation()];
     const service = new GraphContractService({
       pathRelationRepo: {
-        findActiveAll: vi.fn(async () => relations)
+        findActiveAll: vi.fn(async () => ({ relations, truncated: false }))
       },
       now: () => new Date("2026-05-02T00:00:00.000Z")
     });

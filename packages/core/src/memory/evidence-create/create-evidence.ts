@@ -209,7 +209,7 @@ function persistCreatedEvidence(
       subCode: "PORT_UNAVAILABLE"
     });
   }
-  return transactional(() => {
+  return transactional.call(input.eventLogRepo, () => {
     const event = appendCreatedSynchronously(input.eventLogRepo, evidence);
     const created = createInCurrentTransaction.call(
       input.evidenceCapsuleRepo,

@@ -186,6 +186,8 @@ export {
 } from "./repos/memory/index.js";
 export {
   SqlitePathRelationRepo,
+  PATH_RELATION_ACTIVE_LIST_HARD_CAP,
+  type PathRelationListResult,
   type PathRelationPageOptions,
   type PathRelationRepo
 } from "./repos/path/index.js";

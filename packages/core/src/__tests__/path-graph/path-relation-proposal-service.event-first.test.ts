@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { EventLogEntry } from "@do-soul/alaya-protocol";
+import type { EventLogEntry, PathRelation } from "@do-soul/alaya-protocol";
 import { EventPublisherPropagationError } from "../../runtime/event-publisher.js";
 import {
   PathRelationProposalService,
@@ -42,7 +42,7 @@ function inMemoryCounterStore(): CoUsageCounterPort {
 describe("PathRelationProposalService — EventLog-first contract", () => {
   it("invokes appendManyWithMutation once per propose, with the path.relation_created event before the row insert", async () => {
     const order: string[] = [];
-    const repoCreate = vi.fn((relation: any) => {
+    const repoCreate = vi.fn((relation: PathRelation) => {
       order.push(`row_insert:${relation.path_id}`);
       return relation;
     });
@@ -134,7 +134,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
 
     const service = new PathRelationProposalService({
       repo: {
-        create: vi.fn((relation: any) => relation),
+        create: vi.fn((relation: PathRelation) => relation),
         findByAnchorMemoryId: vi.fn(async () => [])
       },
       counterStore: inMemoryCounterStore(),
@@ -185,7 +185,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
 
     const service = new PathRelationProposalService({
       repo: {
-        create: vi.fn((relation: any) => relation),
+        create: vi.fn((relation: PathRelation) => relation),
         findByAnchorMemoryId: vi.fn(async () => [])
       },
       counterStore: inMemoryCounterStore(),
@@ -218,7 +218,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
   // does not record a misleading PATH_MINT_FAILED audit and needlessly revert an
   // accepted proposal whose path exists.
   it("returns applied (not failed) when propagation throws AFTER the row committed", async () => {
-    const repoCreate = vi.fn((relation: any) => relation);
+    const repoCreate = vi.fn((relation: PathRelation) => relation);
     const committedEntries: EventLogEntry[] = [];
     const appendManyWithMutation = vi.fn(
       async <T,>(
@@ -291,7 +291,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
     const warn = vi.fn();
     const service = new PathRelationProposalService({
       repo: {
-        create: vi.fn((relation: any) => relation),
+        create: vi.fn((relation: PathRelation) => relation),
         findByAnchorMemoryId: vi.fn(async () => [])
       },
       counterStore: inMemoryCounterStore(),

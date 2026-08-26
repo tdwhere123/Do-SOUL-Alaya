@@ -31,6 +31,9 @@ export const RECALL_READ_WORKER_OPERATIONS = [
   "path.findByTimeConcernWindowDigests",
   "pathPlasticity.getStrengthByMemoryId",
   "constraints.findActive",
+  "snapshot.beginDeferred",
+  "snapshot.commit",
+  "snapshot.rollback",
   "close"
 ] as const;
 

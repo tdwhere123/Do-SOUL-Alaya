@@ -59,6 +59,9 @@ function packageProject(name, packageDir, options = {}) {
       environment: "node",
       include: [testIncludeGlob(testDir)],
       exclude: ["**/dist/**"],
+      coverage: {
+        include: [`${packageDir}/src/**`]
+      },
       ...options
     }
   });
@@ -79,7 +82,10 @@ function appProject(name, appDir) {
       name,
       environment: "node",
       include: [testIncludeGlob(testDir)],
-      exclude: ["**/dist/**"]
+      exclude: ["**/dist/**"],
+      coverage: {
+        include: [`${appDir}/src/**`]
+      }
     }
   });
 }
@@ -109,7 +115,10 @@ export default [
         environment: "node",
         setupFiles: [path.resolve(appRoot, "src/__tests__/vitest-setup.ts")],
         include: [testIncludeGlob(testDir)],
-        exclude: ["**/dist/**"]
+        exclude: ["**/dist/**"],
+        coverage: {
+          include: ["apps/bench-runner/src/**"]
+        }
       }
     });
   })()

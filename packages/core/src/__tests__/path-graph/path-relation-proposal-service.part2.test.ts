@@ -32,7 +32,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
   it("mints once on submission with the LLM supports profile (0.5 / attention_only / +bias)", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher, appendManyWithMutation } = createEventPublisher();
@@ -66,7 +66,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
   it("seeds shares_entity at hint_only / 0.2 and signal_graph_ref at recall_allowed / 0.6", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
@@ -110,7 +110,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
   it("negative family seeds a negative recall_bias with the harder initial parameters", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
@@ -157,7 +157,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
   it("neutral exception_to profile (sign 0) mints recall_bias exactly 0", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
@@ -190,7 +190,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
   it("sign 0 with a non-zero magnitude still mints recall_bias 0", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
@@ -216,7 +216,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
   it("clamps a strictly_governed request down to the auto-build ceiling (recall_allowed)", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const { publisher } = createEventPublisher();
@@ -245,7 +245,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
       effect_vector: { recall_bias: 0.5 }
     } as PathRelation;
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn<NonNullable<PathRelationProposalRepoPort["findByAnchorMemoryId"]>>(
         async () => [existing]
       )
@@ -332,7 +332,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
       effect_vector: { recall_bias: 0.5 }
     } as PathRelation;
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn<NonNullable<PathRelationProposalRepoPort["findByAnchorMemoryId"]>>(
         async () => [existing]
       )
@@ -370,7 +370,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
       effect_vector: { recall_bias: -0.5 }
     } as PathRelation;
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn<NonNullable<PathRelationProposalRepoPort["findByAnchorMemoryId"]>>(
         async () => [existing]
       )
@@ -391,7 +391,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
   it("rejects a foreign object_facet backing object before materializing", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const memoryExistence: MemoryAnchorExistencePort = {
@@ -427,7 +427,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
   it("rejects a missing time_concern backing object before materializing", async () => {
     const repo = {
-      create: vi.fn((relation: any) => relation),
+      create: vi.fn((relation: PathRelation) => relation),
       findByAnchorMemoryId: vi.fn(async () => [])
     };
     const memoryExistence: MemoryAnchorExistencePort = {
