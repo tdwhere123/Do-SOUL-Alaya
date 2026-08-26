@@ -161,6 +161,7 @@ describe("packed workspace slice explode", () => {
       expect(countTableWhere(sliceA, "relation_path_projections", WORKSPACE_B)).toBe(1);
       expect(readProjectionCount(sliceA)).toBe(2);
       expect(readHistoryDigest(sliceA)).toBe(packedHistory);
+      expect(countTable(sliceA, "relation_assertion_evidence")).toBe(2);
       expect(countTable(sliceB, "relation_path_projections")).toBe(2);
       expect(countTableWhere(sliceB, "relation_path_projections", WORKSPACE_A)).toBe(1);
       expect(readProjectionCount(sliceB)).toBe(2);
@@ -179,6 +180,7 @@ describe("packed workspace slice explode", () => {
     const working = initDatabase({ filename: workingAlayaDbPath(dataDir) });
     try {
       expect(countTable(working, "relation_path_projections")).toBe(2);
+      expect(countTable(working, "relation_assertion_evidence")).toBe(2);
       expect(countTableWhere(working, "relation_path_projections", WORKSPACE_B)).toBe(1);
       expect(readProjectionCount(working)).toBe(2);
       expect(readHistoryDigest(working)).toBe(packedHistory);
