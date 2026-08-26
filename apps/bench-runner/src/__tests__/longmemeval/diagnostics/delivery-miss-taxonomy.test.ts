@@ -48,6 +48,20 @@ describe("classifyDeliveryMissTaxonomy", () => {
     ).toBe("candidate_absent");
   });
 
+  it("classifies delivery_order_drop when membership is in-field without a candidate row", () => {
+    expect(
+      classifyDeliveryMissTaxonomy({
+        deliveredRank: null,
+        candidate: undefined,
+        anyObjectCandidate: undefined,
+        fineAssessmentPruned: false,
+        anyObjectFineAssessmentPruned: false,
+        diagnosticsAvailable: true,
+        inField: true
+      })
+    ).toBe("delivery_order_drop");
+  });
+
   it("classifies materialization_drop when only a non-memory_entry row exists", () => {
     expect(
       classifyDeliveryMissTaxonomy({

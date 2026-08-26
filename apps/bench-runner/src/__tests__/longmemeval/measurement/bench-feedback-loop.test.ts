@@ -74,7 +74,8 @@ describe("per-plane recall coverage", () => {
       source_planes: ["lexical", "facet_concept"],
       source_channels: ["facet_concept", "plane:facet_concept"]
     });
-    expect(row.miss_classification).toBe("candidate_absent");
+    expect(row.miss_classification).toBe("under_ranked");
+    expect(row.miss_taxonomy).toBe("delivery_order_drop");
   });
 
   it("aggregates gold and hit_at_5 counts per plane without a hardcoded plane list", () => {

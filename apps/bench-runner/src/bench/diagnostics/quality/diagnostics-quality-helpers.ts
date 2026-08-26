@@ -1,16 +1,22 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
+import {
+  emptyGoldFieldContext,
+  isGoldInField,
+  type GoldFieldContext
+} from "../gold-field-membership.js";
 import type {
   DiagnosticRecallResult,
   LongMemEvalGoldDiagnostic
 } from "../schema/diagnostics-types.js";
 
-type GoldRankBucketKey =
+export type GoldRankBucketKey =
   | "delivered_top5"
   | "pre_budget_6_10"
   | "pre_budget_11_25"
   | "pre_budget_26_50"
   | "pre_budget_51_100"
   | "pre_budget_gt_100"
+  | "in_field_unranked"
   | "candidate_absent";
 
 export function emptyGoldRankBucketTally(): Record<GoldRankBucketKey, number> {
@@ -21,20 +27,44 @@ export function emptyGoldRankBucketTally(): Record<GoldRankBucketKey, number> {
     pre_budget_26_50: 0,
     pre_budget_51_100: 0,
     pre_budget_gt_100: 0,
+    in_field_unranked: 0,
     candidate_absent: 0
   };
 }
 
-// Mirror the best-gold bucket thresholds (lines above): delivered in top-5 wins;
-// otherwise the pre-budget pool rank (fused_rank fallback) places the gold.
+// Delivered top-5 wins; otherwise an ordinal pool rank places the gold.
+// In-field canonical golds omit fused/pre-budget ranks, so they are not
+// booked as candidate_absent.
 export function classifyGoldRankBucket(
-  gold: LongMemEvalGoldDiagnostic
+  gold: LongMemEvalGoldDiagnostic,
+  field?: GoldFieldContext
 ): GoldRankBucketKey {
   if (gold.final_rank !== null && gold.final_rank <= 5) {
     return "delivered_top5";
   }
   const rank = gold.pre_budget_rank ?? gold.fused_rank;
-  if (rank === null) return "candidate_absent";
+  if (rank !== null) return bucketFromPoolRank(rank);
+  if (isGoldInField(gold, field ?? emptyGoldFieldContext())) return "in_field_unranked";
+  return "candidate_absent";
+}
+
+export function classifyBestGoldRank(
+  golds: readonly LongMemEvalGoldDiagnostic[],
+  field?: GoldFieldContext
+): GoldRankBucketKey {
+  let bestRank: number | null = null;
+  for (const gold of golds) {
+    const rank = gold.pre_budget_rank ?? gold.fused_rank;
+    if (rank !== null && (bestRank === null || rank < bestRank)) bestRank = rank;
+  }
+  if (bestRank !== null) return bucketFromPoolRank(bestRank);
+  const context = field ?? emptyGoldFieldContext();
+  return golds.some((gold) => isGoldInField(gold, context))
+    ? "in_field_unranked"
+    : "candidate_absent";
+}
+
+function bucketFromPoolRank(rank: number): GoldRankBucketKey {
   if (rank <= 10) return "pre_budget_6_10";
   if (rank <= 25) return "pre_budget_11_25";
   if (rank <= 50) return "pre_budget_26_50";

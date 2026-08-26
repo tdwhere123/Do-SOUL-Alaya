@@ -37,6 +37,7 @@ export function classifyGoldDeliveryMissTaxonomy(input: {
   readonly fineAssessmentPruned?: boolean;
   readonly anyObjectFineAssessmentPruned?: boolean;
   readonly diagnosticsAvailable: boolean;
+  readonly inField?: boolean;
 }): Exclude<LongMemEvalMissTaxonomy, "evaluation_or_gold_issue"> | null {
   return classifyDeliveryMissTaxonomy({
     deliveredRank: input.deliveredRank,
@@ -50,7 +51,8 @@ export function classifyGoldDeliveryMissTaxonomy(input: {
         : toDeliveryMissCandidateInput(input.anyObjectCandidate),
     fineAssessmentPruned: input.fineAssessmentPruned,
     anyObjectFineAssessmentPruned: input.anyObjectFineAssessmentPruned,
-    diagnosticsAvailable: input.diagnosticsAvailable
+    diagnosticsAvailable: input.diagnosticsAvailable,
+    inField: input.inField
   });
 }
 

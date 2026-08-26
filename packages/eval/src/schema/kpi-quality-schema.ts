@@ -81,8 +81,9 @@ const PathVsGraphFaninSchema = z
 
 // @anchor longmemeval-gold-rank-buckets: per-answerable-question best-gold
 // rank distribution. delivered_top5 == hit@5; the pre_budget_* buckets place
-// the best gold's pre-budget rank for misses. Heavy 6-25 mass = rerank
-// headroom; heavy 100+/absent mass = pool/segment structure is the wall.
+// the best gold's pre-budget rank for misses. in_field_unranked is membership
+// without an ordinal pool rank (canonical rows omit fused_rank). candidate_absent
+// is true field absence, not an in-field ordering miss.
 const GoldRankBucketsSchema = z
   .object({
     delivered_top5: z.number().int().nonnegative(),
@@ -91,6 +92,7 @@ const GoldRankBucketsSchema = z
     pre_budget_26_50: z.number().int().nonnegative(),
     pre_budget_51_100: z.number().int().nonnegative(),
     pre_budget_gt_100: z.number().int().nonnegative(),
+    in_field_unranked: z.number().int().nonnegative().default(0),
     candidate_absent: z.number().int().nonnegative()
   })
   .strict();
@@ -250,6 +252,8 @@ export const QualityMetricsSchema = z
     evaluator_identity_issue_denominator: z.number().int().nonnegative().optional(),
     evaluator_identity_unscorable_count: z.number().int().nonnegative().optional(),
     evaluator_identity_unscorable_denominator: z.number().int().nonnegative().optional(),
+    // Diagnostic: evidence-plane share among golds already delivered in top-5.
+    // Not a delivery rate and not a retained ranking gate.
     evidence_stream_gold_delivery_rate: RatioSchema.default(0),
     evidence_stream_gold_delivery_count: z.number().int().nonnegative().default(0),
     evidence_stream_gold_delivery_denominator: z.number().int().nonnegative().default(0),

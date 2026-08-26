@@ -14,6 +14,7 @@ import {
   type QuestionMeasurementStatus
 } from "../../measurement/question-validity.js";
 import {
+  classifyBestGoldRank,
   classifyGoldRankBucket,
   classifyTopDistractor,
   emptyGoldRankBucketTally,
@@ -25,6 +26,7 @@ import {
   isDeliveredOrderNonMonotonic,
   type TopDistractorBucket
 } from "../quality/diagnostics-quality-helpers.js";
+import { readQuestionFieldContext } from "../gold-field-membership.js";
 import { readGoldObjectIds } from "../gold-object-identities.js";
 
 type GoldRankBuckets = NonNullable<QualityMetrics["gold_rank_buckets"]>;
@@ -389,31 +391,16 @@ function recordBestGoldMiss(
     state.goldRankBuckets.delivered_top5++;
     return;
   }
-  state.goldRankBuckets[classifyBestGoldRank(question.gold)]++;
+  state.goldRankBuckets[classifyBestGoldRank(
+    question.gold,
+    readQuestionFieldContext(question)
+  )]++;
   for (const delivered of question.delivered_results) {
     if (delivered.rank <= 5) {
       state.topDistractorBreakdown[classifyTopDistractor(delivered)]++;
     }
   }
   recordGoldFacetSeparation(state, question);
-}
-
-function classifyBestGoldRank(
-  golds: readonly LongMemEvalGoldDiagnostic[]
-): keyof GoldRankBuckets {
-  let bestRank: number | null = null;
-  for (const gold of golds) {
-    const rank = gold.pre_budget_rank ?? gold.fused_rank;
-    if (rank !== null && (bestRank === null || rank < bestRank)) {
-      bestRank = rank;
-    }
-  }
-  if (bestRank === null) return "candidate_absent";
-  if (bestRank <= 10) return "pre_budget_6_10";
-  if (bestRank <= 25) return "pre_budget_11_25";
-  if (bestRank <= 50) return "pre_budget_26_50";
-  if (bestRank <= 100) return "pre_budget_51_100";
-  return "pre_budget_gt_100";
 }
 
 function recordGoldFacetSeparation(
@@ -445,11 +432,12 @@ function recordPerGoldRankBuckets(
   state: QualityMetricsState,
   question: LongMemEvalQuestionDiagnostic
 ): void {
+  const field = readQuestionFieldContext(question);
   const orderedGold = [...question.gold].sort(
     (left, right) => goldOrdinalSortRank(left) - goldOrdinalSortRank(right)
   );
   orderedGold.forEach((gold, ordinal) => {
-    const bucket = classifyGoldRankBucket(gold);
+    const bucket = classifyGoldRankBucket(gold, field);
     const tally =
       ordinal === 0
         ? state.perGoldRankBuckets.gold_ordinal_0

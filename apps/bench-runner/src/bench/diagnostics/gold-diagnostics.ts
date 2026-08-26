@@ -1,4 +1,8 @@
 import { classifyGoldMissTaxonomy } from "./miss/diagnostics-miss-taxonomy.js";
+import {
+  isGoldInField,
+  readDiagnosticsFieldContext
+} from "./gold-field-membership.js";
 import type {
   CandidateDiagnostic,
   LongMemEvalGoldDiagnostic,
@@ -45,16 +49,18 @@ function buildGoldDiagnostic(
   const anyObjectCandidate = input.diagnostics?.candidatesByObjectId.get(objectId);
   const anyObjectFineAssessmentPruned = anyObjectCandidate === undefined && input.diagnostics
     ?.fineAssessmentPrunedObjectIds.has(objectId) === true;
+  const field = readDiagnosticsFieldContext(input.diagnostics);
+  const candidateStatus = resolveCandidateStatus(
+    deliveredRank,
+    activeConstraintRank,
+    candidate,
+    fineAssessmentPruned,
+    input.diagnostics !== null
+  );
   return {
     object_id: objectId,
     object_kind: objectKind,
-    candidate_status: resolveCandidateStatus(
-      deliveredRank,
-      activeConstraintRank,
-      candidate,
-      fineAssessmentPruned,
-      input.diagnostics !== null
-    ),
+    candidate_status: candidateStatus,
     ...buildGoldRankingFields(candidate, deliveredRank, activeConstraintRank),
     ...buildGoldPlaneFields(candidate),
     miss_taxonomy: classifyGoldMissTaxonomy({
@@ -63,7 +69,16 @@ function buildGoldDiagnostic(
       anyObjectCandidate,
       fineAssessmentPruned,
       anyObjectFineAssessmentPruned,
-      diagnosticsAvailable: input.diagnostics !== null
+      diagnosticsAvailable: input.diagnostics !== null,
+      inField: isGoldInField(
+        {
+          object_id: objectId,
+          object_kind: objectKind,
+          candidate_status: candidateStatus,
+          final_rank: deliveredRank
+        },
+        field
+      )
     }),
     ...buildGoldDeliveryFields(candidate)
   };

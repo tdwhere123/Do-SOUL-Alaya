@@ -77,6 +77,7 @@ export interface ClassifyDeliveryMissInput {
   readonly fineAssessmentPruned?: boolean;
   readonly anyObjectFineAssessmentPruned?: boolean;
   readonly diagnosticsAvailable: boolean;
+  readonly inField?: boolean;
 }
 
 export function classifyDeliveryMissTaxonomy(
@@ -92,6 +93,7 @@ export function classifyDeliveryMissTaxonomy(
     return "fine_assessment_drop";
   }
   if (input.candidate === undefined) {
+    if (input.inField === true) return "delivery_order_drop";
     return input.anyObjectCandidate === undefined &&
       input.anyObjectFineAssessmentPruned !== true
       ? "candidate_absent"
