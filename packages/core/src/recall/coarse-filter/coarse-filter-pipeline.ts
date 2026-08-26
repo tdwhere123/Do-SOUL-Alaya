@@ -22,6 +22,7 @@ import { memoizePathFindByAnchors } from "../expansion/path-find-by-anchors-cach
 import {
   addSemanticSupplementCandidates
 } from "./coarse-filter-semantic.js";
+import { hydrateMemoriesById } from "./pagination/recall-id-hydrate.js";
 import {
   ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR,
   queryHasObjectProbeSignal,
@@ -153,9 +154,9 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly tier: MemoryEntry["storage_tier"];
-  readonly tierMemories: readonly Readonly<MemoryEntry>[];
   readonly tierScopedSearchEligible: boolean;
-  readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+  readonly fieldScopedHydrate: boolean;
+  readonly byId: Map<string, Readonly<MemoryEntry>>;
   readonly deliveryMaxEntries?: number;
   readonly temporalCandidateBudget?: TemporalWindowCandidateBudget;
   readonly referenceTime?: string;
@@ -167,7 +168,7 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   const pathExpansionPort = memoizePathFindByAnchors(params.context.dependencies.pathExpansionPort);
   const { entityHits, temporalEntries } = await loadDynamicCandidateInputs(params);
   const sourceCohortKeys = await admitSourceProximityCandidates(params);
-  const graphExpansionSeedIds = admitPrefetchedEntityGraphSeeds(params, entityHits);
+  const graphExpansionSeedIds = await admitPrefetchedEntityGraphSeeds(params, entityHits);
   const graphResult = await admitPathAndGraphExpansionCandidates(
     params,
     graphExpansionSeedIds,
@@ -184,6 +185,7 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
     suppressionScores: params.state.pathSuppressionScores,
     pathExpansionPort,
     pathProjectionAsOf: params.pathProjectionAsOf,
+    ...fieldScopedHydratePorts(params),
     warn: params.context.warn,
     degradationReasons: params.context.degradationReasons
   });
@@ -212,6 +214,8 @@ async function loadDynamicCandidateInputs(
     entitySeedPerEntityTopKStrong: ENTITY_SEED_PER_ENTITY_TOP_K_STRONG,
     entitySeedPerEntityTopKWeak: ENTITY_SEED_PER_ENTITY_TOP_K_WEAK,
     entitySeedMinSurfaceLength: ENTITY_SEED_MIN_SURFACE_LENGTH,
+    fieldScopedHydrate: params.fieldScopedHydrate,
+    tier: params.tier,
     degradationReasons: params.context.degradationReasons
   });
   const temporalEntriesPromise = loadTemporalWindowEntries({
@@ -315,8 +319,18 @@ async function admitSemanticAndContentCandidates(
     evidenceProjectionMatchesByRef: params.state.evidenceProjectionMatchesByRef,
     retrievalFieldBundle: params.retrievalFieldBundle
   });
+  const fieldMemories = [...params.byId.values()];
+  if (params.fieldScopedHydrate) {
+    // Paged HOT already probed the universe in admitInitial; a second scan is wasted.
+    addObjectProbeCandidates(
+      fieldMemories,
+      params.queryProbes,
+      params.state.addCandidate,
+      () => { params.state.retrievalFieldTruncation.explicit_pointer = true; }
+    );
+  }
   addContentDerivedExpansionCandidates({
-    tierMemories: params.tierMemories,
+    tierMemories: fieldMemories,
     drafts: params.state.drafts,
     queryProbes: params.queryProbes,
     addCandidate: params.state.addCandidate,
@@ -333,7 +347,7 @@ async function admitSourceProximityCandidates(
 ): Promise<Readonly<Record<string, string>>> {
   return addSourceProximityCandidates({
     workspaceId: params.workspaceId,
-    tierMemories: params.tierMemories,
+    tierMemories: [...params.byId.values()],
     drafts: params.state.drafts,
     addCandidate: params.state.addCandidate,
     admissionLimit: resolveSourceProximityAdmissionLimit(params.deliveryMaxEntries),
@@ -343,13 +357,20 @@ async function admitSourceProximityCandidates(
   });
 }
 
-function admitPrefetchedEntityGraphSeeds(
+async function admitPrefetchedEntityGraphSeeds(
   params: Parameters<typeof admitDynamicCoarseCandidates>[0],
   loaded: Awaited<ReturnType<typeof loadEntityDerivedSeedHits>>
-): readonly string[] {
+): Promise<readonly string[]> {
   if (loaded === null) {
     return [];
   }
+  await hydrateMemoriesById({
+    memoryRepo: params.context.dependencies.memoryRepo,
+    workspaceId: params.workspaceId,
+    tier: params.tier,
+    byId: params.byId,
+    objectIds: loaded.hitBatches.flatMap((batch) => batch.map((hit) => hit.object_id))
+  });
   const entityDerivedSeeds = admitLoadedEntityDerivedSeeds({
     byId: params.byId,
     addCandidate: params.state.addCandidate,
@@ -380,6 +401,7 @@ async function admitPathAndGraphExpansionCandidates(
     dynamicRecallPlaneCap: DYNAMIC_RECALL_PLANE_CAP,
     pathExpansionPort,
     pathProjectionAsOf: params.pathProjectionAsOf,
+    ...fieldScopedHydratePorts(params),
     warn: params.context.warn,
     degradationReasons: params.context.degradationReasons
   });
@@ -401,7 +423,21 @@ async function admitPathAndGraphExpansionCandidates(
     maxGraphHops: MAX_GRAPH_HOPS,
     dynamicRecallEdgeFanout: DYNAMIC_RECALL_EDGE_FANOUT,
     multiSeedGraphFanOutCap: MULTI_SEED_GRAPH_FAN_OUT_CAP,
+    ...fieldScopedHydratePorts(params),
     warn: params.context.warn,
     degradationReasons: params.context.degradationReasons
+  });
+}
+
+function fieldScopedHydratePorts(
+  params: Parameters<typeof admitDynamicCoarseCandidates>[0]
+): Readonly<{
+  readonly memoryRepo?: typeof params.context.dependencies.memoryRepo;
+  readonly tier?: typeof params.tier;
+}> {
+  if (!params.fieldScopedHydrate) return {};
+  return Object.freeze({
+    memoryRepo: params.context.dependencies.memoryRepo,
+    tier: params.tier
   });
 }

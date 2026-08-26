@@ -28,6 +28,7 @@ import { classifyPathIndexReadFailure } from "../runtime/legacy-path-index-unbou
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
+import { hydrateMemoriesById } from "../coarse-filter/pagination/recall-id-hydrate.js";
 import type {
   RecallPathExpansionSourceDiagnostic,
   RecallServiceDependencies,
@@ -43,6 +44,8 @@ export async function addPathExpansionCandidates(params: Readonly<{
   readonly dynamicRecallPlaneCap: number;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly pathProjectionAsOf?: string;
+  readonly memoryRepo?: RecallServiceDependencies["memoryRepo"];
+  readonly tier?: MemoryEntry["storage_tier"];
   readonly warn: RecallServiceWarnPort;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }>): Promise<void> {
@@ -58,6 +61,8 @@ export async function addPathExpansionCandidates(params: Readonly<{
     dynamicRecallPlaneCap: params.dynamicRecallPlaneCap,
     pathExpansionPort,
     pathProjectionAsOf: params.pathProjectionAsOf,
+    memoryRepo: params.memoryRepo,
+    tier: params.tier,
     warn: params.warn,
     degradationReasons: params.degradationReasons
   });
@@ -80,6 +85,7 @@ export async function addPathExpansionCandidates(params: Readonly<{
     "path expansion lookup failed",
     params.degradationReasons
   );
+  await hydratePathRelationTargets(params, paths);
   added = admitSeededPathExpansionCandidates(params, paths, seedIds, seedRelevanceById, added);
 }
 
@@ -98,6 +104,8 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   readonly dynamicRecallPlaneCap: number;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly pathProjectionAsOf?: string;
+  readonly memoryRepo?: RecallServiceDependencies["memoryRepo"];
+  readonly tier?: MemoryEntry["storage_tier"];
   readonly warn: RecallServiceWarnPort;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }>): Promise<number> {
@@ -114,6 +122,7 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
     return 0;
   }
   const paths = await loadTimeConcernPathExpansionPaths(params, windowDigests);
+  await hydratePathRelationTargets(params, paths);
   return admitTimeConcernPathExpansionCandidates(params, paths, windowDigests);
 }
 
@@ -126,6 +135,8 @@ export async function collectNegativePathSuppressions(params: Readonly<{
   readonly suppressionScores: Map<string, number>;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly pathProjectionAsOf?: string;
+  readonly memoryRepo?: RecallServiceDependencies["memoryRepo"];
+  readonly tier?: MemoryEntry["storage_tier"];
   readonly warn: RecallServiceWarnPort;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }>): Promise<void> {
@@ -147,7 +158,28 @@ export async function collectNegativePathSuppressions(params: Readonly<{
     "path suppression lookup failed",
     params.degradationReasons
   );
+  await hydratePathRelationTargets(params, paths);
   applyNegativePathSuppressions(params, paths, seedIds);
+}
+
+async function hydratePathRelationTargets(
+  params: Readonly<{
+    readonly workspaceId: string;
+    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+    readonly memoryRepo?: RecallServiceDependencies["memoryRepo"];
+    readonly tier?: MemoryEntry["storage_tier"];
+  }>,
+  paths: readonly Readonly<PathRelation>[]
+): Promise<void> {
+  if (params.memoryRepo === undefined || params.tier === undefined) return;
+  // Path rows name neighbor ids; skip-missing would drop HOT neighbors never paged into JS.
+  await hydrateMemoriesById({
+    memoryRepo: params.memoryRepo,
+    workspaceId: params.workspaceId,
+    tier: params.tier,
+    byId: params.byId,
+    objectIds: paths.flatMap((path) => [...pathRelationMemoryIds(path)])
+  });
 }
 
 function buildSeedPathAnchors(

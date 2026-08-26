@@ -1,3 +1,4 @@
+import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import type {
@@ -20,6 +21,8 @@ type LoadEntitySeedHitBatchesParams = Readonly<{
   readonly workspaceId: string;
   readonly lookups: readonly EntitySeedLookup[];
   readonly candidateIds: readonly string[];
+  readonly searchScope?: "object_ids" | "tier";
+  readonly tier?: MemoryEntry["storage_tier"];
   readonly memoryRepo: RecallServiceDependencies["memoryRepo"];
   readonly warn: RecallServiceWarnPort;
   readonly degradationReasons?: Set<RecallDegradationReason>;
@@ -27,8 +30,10 @@ type LoadEntitySeedHitBatchesParams = Readonly<{
 export async function loadEntitySeedHitBatches(
   params: LoadEntitySeedHitBatchesParams
 ): Promise<readonly (readonly EntitySeedHit[])[]> {
-  const bulkSearch = params.memoryRepo.searchManyByKeywordWithinObjectIds;
-  const hasScalar = hasScalarSearch(params.memoryRepo);
+  const bulkSearch = params.searchScope === "tier"
+    ? undefined
+    : params.memoryRepo.searchManyByKeywordWithinObjectIds;
+  const hasScalar = hasScalarSearch(params);
   return loadIndexAlignedSearchBatches({
     lookups: params.lookups,
     ...(bulkSearch === undefined ? {} : {
@@ -52,17 +57,7 @@ async function loadScalarHits(
   lookup: EntitySeedLookup
 ): Promise<readonly EntitySeedHit[]> {
   try {
-    const scoped = params.memoryRepo.searchByKeywordWithinObjectIds;
-    if (scoped !== undefined) {
-      return await scoped.call(
-        params.memoryRepo, params.workspaceId, lookup.surface, lookup.limit, params.candidateIds
-      );
-    }
-    const unscoped = params.memoryRepo.searchByKeyword;
-    if (unscoped === undefined) return [];
-    return await unscoped.call(
-      params.memoryRepo, params.workspaceId, lookup.surface, lookup.limit
-    );
+    return await searchEntitySeedHits(params, lookup);
   } catch (error) {
     params.warn("entity seed lookup failed", {
       workspace_id: params.workspaceId,
@@ -76,9 +71,54 @@ async function loadScalarHits(
   }
 }
 
-function hasScalarSearch(memoryRepo: RecallServiceDependencies["memoryRepo"]): boolean {
-  return memoryRepo.searchByKeywordWithinObjectIds !== undefined ||
-    memoryRepo.searchByKeyword !== undefined;
+async function searchEntitySeedHits(
+  params: LoadEntitySeedHitBatchesParams,
+  lookup: EntitySeedLookup
+): Promise<readonly EntitySeedHit[]> {
+  if (params.searchScope === "tier") {
+    return searchEntitySeedHitsWithinTier(params, lookup);
+  }
+  const scoped = params.memoryRepo.searchByKeywordWithinObjectIds;
+  if (scoped !== undefined) {
+    return await scoped.call(
+      params.memoryRepo, params.workspaceId, lookup.surface, lookup.limit, params.candidateIds
+    );
+  }
+  return searchEntitySeedHitsUnscoped(params, lookup);
+}
+
+async function searchEntitySeedHitsWithinTier(
+  params: LoadEntitySeedHitBatchesParams,
+  lookup: EntitySeedLookup
+): Promise<readonly EntitySeedHit[]> {
+  // Field-scoped recall must not shrink entity FTS to the activation id set.
+  const withinTier = params.memoryRepo.searchByKeywordWithinTier;
+  if (withinTier !== undefined && params.tier !== undefined) {
+    return await withinTier.call(
+      params.memoryRepo, params.workspaceId, lookup.surface, lookup.limit, params.tier
+    );
+  }
+  return searchEntitySeedHitsUnscoped(params, lookup);
+}
+
+async function searchEntitySeedHitsUnscoped(
+  params: LoadEntitySeedHitBatchesParams,
+  lookup: EntitySeedLookup
+): Promise<readonly EntitySeedHit[]> {
+  const unscoped = params.memoryRepo.searchByKeyword;
+  if (unscoped === undefined) return [];
+  return await unscoped.call(
+    params.memoryRepo, params.workspaceId, lookup.surface, lookup.limit
+  );
+}
+
+function hasScalarSearch(params: LoadEntitySeedHitBatchesParams): boolean {
+  if (params.searchScope === "tier") {
+    return params.memoryRepo.searchByKeywordWithinTier !== undefined ||
+      params.memoryRepo.searchByKeyword !== undefined;
+  }
+  return params.memoryRepo.searchByKeywordWithinObjectIds !== undefined ||
+    params.memoryRepo.searchByKeyword !== undefined;
 }
 
 function isEntitySeedHit(value: unknown): value is EntitySeedHit {

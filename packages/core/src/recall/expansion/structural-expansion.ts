@@ -51,6 +51,8 @@ type EntityDerivedSeedLoadParams = Readonly<{
   readonly entitySeedPerEntityTopKStrong: number;
   readonly entitySeedPerEntityTopKWeak: number;
   readonly entitySeedMinSurfaceLength: number;
+  readonly fieldScopedHydrate?: boolean;
+  readonly tier?: MemoryEntry["storage_tier"];
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }>;
 
@@ -83,6 +85,7 @@ export async function loadEntityDerivedSeedHits(
     return null;
   }
   const lookups = buildEntitySeedLookups(params, entities);
+  // Field-scoped recall must not shrink entity FTS to the activation id set.
   const hitBatches = await loadEntitySeedBatchesForCollection(params, lookups, [...params.byId.keys()]);
   return Object.freeze({ lookups, hitBatches });
 }
@@ -133,6 +136,8 @@ export async function addGraphExpansionCandidates(params: Readonly<{
   readonly maxGraphHops: number;
   readonly dynamicRecallEdgeFanout: number;
   readonly multiSeedGraphFanOutCap: number;
+  readonly memoryRepo?: RecallServiceDependencies["memoryRepo"];
+  readonly tier?: MemoryEntry["storage_tier"];
   readonly warn: RecallServiceWarnPort;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }>): Promise<Readonly<GraphExpansionCandidatesResult>> {
@@ -215,6 +220,8 @@ async function collectDraftGraphExpansionCandidates(
       seedEntries: draftSeedEntries,
       maxGraphHops: params.maxGraphHops,
       dynamicRecallEdgeFanout: params.dynamicRecallEdgeFanout,
+      memoryRepo: params.memoryRepo,
+      tier: params.tier,
       warn: params.warn,
       degradationReasons: params.degradationReasons,
       onCandidate: (candidate) => {
@@ -245,6 +252,8 @@ async function collectEntityGraphExpansionCandidates(
       seedEntries: entitySeedEntries,
       maxGraphHops: params.maxGraphHops,
       dynamicRecallEdgeFanout: params.dynamicRecallEdgeFanout,
+      memoryRepo: params.memoryRepo,
+      tier: params.tier,
       warn: params.warn,
       degradationReasons: params.degradationReasons,
       onCandidate: (seedIndex, candidate) => {
@@ -327,11 +336,15 @@ function incrementGraphExpansionHopCount(
 function shouldSkipEntitySeedCollection(params: Readonly<{
   readonly queryEntityExtraction: Readonly<RecallQueryEntityExtractionCapture>;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+  readonly fieldScopedHydrate?: boolean;
 }>): boolean {
-  return (
-    params.queryEntityExtraction.status !== "returned" ||
-    params.byId.size === 0
-  );
+  if (params.queryEntityExtraction.status !== "returned") {
+    return true;
+  }
+  if (params.fieldScopedHydrate === true) {
+    return false;
+  }
+  return params.byId.size === 0;
 }
 
 function buildEntitySeedLookups(
@@ -354,7 +367,10 @@ async function loadEntitySeedBatchesForCollection(
   return loadEntitySeedHitBatches({
     workspaceId: params.workspaceId,
     lookups,
-    candidateIds,
+    candidateIds: params.fieldScopedHydrate === true ? [] : candidateIds,
+    ...(params.fieldScopedHydrate === true
+      ? { searchScope: "tier" as const, tier: params.tier }
+      : {}),
     memoryRepo: params.memoryRepo,
     warn: params.warn,
     degradationReasons: params.degradationReasons

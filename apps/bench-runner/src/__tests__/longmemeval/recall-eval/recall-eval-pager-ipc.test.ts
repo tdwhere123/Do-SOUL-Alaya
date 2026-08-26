@@ -52,15 +52,15 @@ describe("recall-eval pager IPC isolation", () => {
     expect(parentMapsAlayaDb()).toBe(false);
   });
 
-  it("spawns a fresh child for each question instead of reusing one address space", async () => {
+  it("reuses the same child pid across questions", async () => {
     const counted = countingHost();
     const session = openSession(undefined, counted.host);
     await session.open({});
     expect(counted.pids).toHaveLength(1);
     await session.recall({ questionId: "q1" });
     await session.recall({ questionId: "q2" });
-    expect(counted.pids).toHaveLength(2);
-    expect(counted.pids[1]).not.toBe(counted.pids[0]);
+    expect(counted.pids).toHaveLength(1);
+    expect(counted.pids[0]).toBe(session.pid);
   });
 
   it("fail-closes when the child exits mid-request", async () => {
@@ -115,7 +115,7 @@ describe("recall-eval pager IPC isolation", () => {
     expect(pack.questionId).toBe("ok");
   });
 
-  it("assembles every recycled child selection artifact in evaluated order", async () => {
+  it("assembles every recalled question selection record in evaluated order", async () => {
     const root = mkdtempSync(join(tmpdir(), "pager-selection-test-"));
     roots.push(root);
     const selectionRootLogPath = join(root, "roots.log");
@@ -145,7 +145,7 @@ describe("recall-eval pager IPC isolation", () => {
     ]);
     expect(artifact.binding.record_count).toBe(2);
     const childRoots = readFileSync(selectionRootLogPath, "utf8").trim().split("\n");
-    expect(childRoots).toHaveLength(2);
+    expect(childRoots).toHaveLength(1);
     for (const childRoot of childRoots) {
       expect(() => accessSync(childRoot)).toThrow();
     }

@@ -111,24 +111,24 @@ describe("applyBenchFastPragmaIfRequested", () => {
     expect(readPragmaNumber(dataDir, "cache_size")).toBe(-65536);
   });
 
-  it("scales cache_size from file size and sets mmap once the DB is large", async () => {
+  it("scales cache_size from file size and disables mmap once the DB is large", async () => {
     const dataDir = await newDataDir();
     truncateSync(join(dataDir, "alaya.db"), 512 * 1024 * 1024);
     const result = applyBenchFastPragmaIfRequested(dataDir);
     expect(result.pragmas).toContain("cache_size=-131072");
-    expect(result.pragmas).toContain("mmap_size=536870912");
+    expect(result.pragmas).toContain("mmap_size=0");
     expect(readPragmaNumber(dataDir, "cache_size")).toBe(-131072);
-    expect(readPragmaNumber(dataDir, "mmap_size")).toBe(536870912);
+    expect(readPragmaNumber(dataDir, "mmap_size")).toBe(0);
   });
 
-  it("caps auto cache_size at 1 GiB and mmap_size at SQLite's mmap ceiling", async () => {
+  it("caps auto cache_size at 1 GiB and disables mmap on large files", async () => {
     const dataDir = await newDataDir();
     truncateSync(join(dataDir, "alaya.db"), 8 * 1024 * 1024 * 1024);
     const result = applyBenchFastPragmaIfRequested(dataDir);
     expect(result.pragmas).toContain("cache_size=-1048576");
-    expect(result.pragmas).toContain("mmap_size=2147418112");
+    expect(result.pragmas).toContain("mmap_size=0");
     expect(readPragmaNumber(dataDir, "cache_size")).toBe(-1048576);
-    expect(readPragmaNumber(dataDir, "mmap_size")).toBe(2147418112);
+    expect(readPragmaNumber(dataDir, "mmap_size")).toBe(0);
   });
 
   it("disables mmap when an embedding overlay is bound to the working copy", async () => {
@@ -140,14 +140,15 @@ describe("applyBenchFastPragmaIfRequested", () => {
     expect(readPragmaNumber(dataDir, "mmap_size")).toBe(0);
   });
 
-  it("sizes cache and mmap from the restored working path after a larger replace", async () => {
+  it("sizes cache from the restored working path and disables mmap after a larger replace", async () => {
     const dataDir = await newDataDir();
     closeCachedDatabase(join(dataDir, "alaya.db"));
     truncateSync(join(dataDir, "alaya.db"), 512 * 1024 * 1024);
     const result = applyBenchFastPragmaIfRequested(dataDir);
     expect(result.pragmas).toContain("cache_size=-131072");
-    expect(result.pragmas).toContain("mmap_size=536870912");
+    expect(result.pragmas).toContain("mmap_size=0");
     expect(readPragmaNumber(dataDir, "cache_size")).toBe(-131072);
+    expect(readPragmaNumber(dataDir, "mmap_size")).toBe(0);
   });
 
   it("applies when env is explicitly truthy", async () => {
