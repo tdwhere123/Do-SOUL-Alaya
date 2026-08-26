@@ -170,6 +170,12 @@ describe("projection generation artifact intern", () => {
     )).toThrow(/persisted projection generation artifacts are invalid/u);
   });
 
+  it("rejects interned slice keys that only declare key_id and schema_version", () => {
+    expect(() => internProjectionGenerationArtifacts(graphOf([
+      { key_id: "k", schema_version: 2 } as never
+    ]))).toThrow(/persisted projection generation artifacts are invalid/u);
+  });
+
   it("rejects an interned key whose source_state_id is missing", () => {
     const interned = internProjectionGenerationArtifacts(graphOf([
       sourceKey("evidence-a", "ada", sourceState())

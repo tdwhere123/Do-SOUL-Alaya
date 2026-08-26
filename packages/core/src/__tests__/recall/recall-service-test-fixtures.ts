@@ -280,6 +280,9 @@ export function withFineDeliveryPath(
   policy: Readonly<RecallPolicy>,
   path: "legacy" | "canonical"
 ): RecallPolicy {
+  if (path === "legacy") {
+    process.env.ALAYA_RECALL_ALLOW_LEGACY_DELIVERY = "1";
+  }
   return {
     ...policy,
     fine_assessment: {

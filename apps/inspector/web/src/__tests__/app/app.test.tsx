@@ -84,7 +84,10 @@ function stubInspectorFetch(options?: {
   return fetchMock;
 }
 
-function renderApp(initialEntry: string, options?: { readonly strict?: boolean }) {
+function renderApp(
+  initialEntry: string | { readonly pathname: string; readonly search?: string; readonly hash?: string },
+  options?: { readonly strict?: boolean }
+) {
   const tree = (
     <MemoryRouter initialEntries={[initialEntry]}>
       <LocaleProvider>
@@ -119,6 +122,14 @@ describe("AppContent", () => {
     vi.unstubAllGlobals();
     sessionStorage.clear();
     setWorkspaceId(null);
+  });
+
+  it("redeems a launch code posted from the URL fragment", async () => {
+    const fetchMock = vi.mocked(fetch);
+    renderApp({ pathname: "/", search: "?workspaceId=ws1", hash: "#launch=fragment-code" });
+
+    expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
+    expect(launchRedeemBodies(fetchMock)).toEqual([{ code: "fragment-code" }]);
   });
 
   it("keeps the launch session after redirecting from / to the real overview surface", async () => {

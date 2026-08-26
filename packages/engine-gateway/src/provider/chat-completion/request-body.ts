@@ -1,3 +1,4 @@
+import { assertAllowedProviderChatUrl } from "./provider-url-guard.js";
 import type {
   ProviderChatCompletionRequest,
   ProviderRequestProfile
@@ -24,7 +25,9 @@ export function normalizeProviderBaseUrl(endpoint: string): string {
 }
 
 export function providerChatCompletionsUrl(providerUrl: string): string {
-  return `${normalizeProviderBaseUrl(providerUrl)}/chat/completions`;
+  const url = `${normalizeProviderBaseUrl(providerUrl)}/chat/completions`;
+  assertAllowedProviderChatUrl(url);
+  return url;
 }
 
 export function buildProviderChatRequestInit(

@@ -33,6 +33,21 @@ describe("inspector auth", () => {
     expect(constantTimeTokenEqual("secret-token", "secret-token-2")).toBe(false);
     expect(constantTimeTokenEqual("short", "a-much-longer-token")).toBe(false);
   });
+
+  it("allows only an exact public path and method", async () => {
+    const app = new Hono();
+    app.use("*", createInspectorAuthMiddleware("secret-token", {
+      publicRoutes: [{ path: "/api/launch-session", method: "POST" }]
+    }));
+    app.all("*", (context) => context.json({ ok: true }));
+
+    const allowed = await app.request("/api/launch-session", { method: "POST" });
+    expect(allowed.status).toBe(200);
+
+    await expectStatus(app, "/api/launch-session", 401);
+    await expectStatus(app, "/api/launch-session/extra", 401, undefined, "POST");
+    await expectStatus(app, "/api/launch-session-extra", 401, undefined, "POST");
+  });
 });
 
 function createApp(): Hono {
@@ -46,9 +61,10 @@ async function expectStatus(
   app: Hono,
   path: string,
   status: number,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  method = "GET"
 ): Promise<void> {
-  const response = await app.request(path, { headers });
+  const response = await app.request(path, { method, headers });
   expect(response.status).toBe(status);
   expect(await response.json()).toEqual({ error: "unauthorized" });
 }

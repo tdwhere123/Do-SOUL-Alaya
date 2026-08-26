@@ -49,6 +49,7 @@ import type { PinnedProjectionCandidateSelection } from
 import type { SelectGammaSynthesisDependencies } from
   "../delivery/select-gamma/synthesis-adapter.js";
 import type { RecallRequestTimeContext } from "./query/recall-request-time.js";
+import type { RecallReadSnapshotPort } from "./recall-read-snapshot.js";
 
 export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
 
@@ -88,6 +89,7 @@ export interface RecallExecutionContext {
   readonly dependencies: RecallServiceDependencies & SelectGammaSynthesisDependencies;
   readonly warn: RecallServiceWarnPort;
   readonly now: () => string;
+  readonly readSnapshot?: RecallReadSnapshotPort;
   readonly buildDefaultPolicy: (
     strategy: NodeStrategy,
     taskSurfaceRef: string,

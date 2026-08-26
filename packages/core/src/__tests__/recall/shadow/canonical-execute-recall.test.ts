@@ -50,6 +50,42 @@ describe("omitted delivery_path executeRecall", () => {
       .toBe("prefix_sk");
   });
 
+  it("commits an injectable read snapshot before recall side effects", async () => {
+    const events: string[] = [];
+    const memory = createMemoryEntry({
+      object_id: "memory-snapshot",
+      content: "I take yoga classes at Serenity Yoga."
+    });
+    const { dependencies } = createDependencies([memory]);
+    const service = new RecallService({
+      ...dependencies,
+      defaultPolicyDecorator: (policy) => policy,
+      readSnapshot: {
+        beginDeferred: () => events.push("begin"),
+        commit: () => events.push("commit"),
+        rollback: () => events.push("rollback")
+      },
+      eventLogRepo: {
+        ...dependencies.eventLogRepo,
+        append: async (...args) => {
+          events.push("side-effect");
+          return await dependencies.eventLogRepo.append(...args);
+        }
+      }
+    });
+
+    await service.recall({
+      taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+
+    expect(events.indexOf("begin")).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf("commit")).toBeGreaterThan(events.indexOf("begin"));
+    expect(events.indexOf("side-effect")).toBeGreaterThan(events.indexOf("commit"));
+    expect(events).not.toContain("rollback");
+  });
+
   it("fails closed duplicate live candidates with one exact diagnostic row", async () => {
     const memory = createMemoryEntry({
       object_id: "memory-duplicate",

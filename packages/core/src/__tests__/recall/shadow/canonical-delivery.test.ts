@@ -64,6 +64,16 @@ const CANONICAL_SRC = readFileSync(
 describe("reversible delivery cutover", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    delete process.env.ALAYA_RECALL_ALLOW_LEGACY_DELIVERY;
+  });
+
+  it("rejects legacy delivery unless the experiment flag is set", () => {
+    delete process.env.ALAYA_RECALL_ALLOW_LEGACY_DELIVERY;
+    const config = { ...policyOf().fine_assessment, delivery_path: "legacy" as const };
+    expect(() => resolveFineAssessmentDeliveryPath(config))
+      .toThrow(/ALAYA_RECALL_ALLOW_LEGACY_DELIVERY/u);
+    process.env.ALAYA_RECALL_ALLOW_LEGACY_DELIVERY = "1";
+    expect(resolveFineAssessmentDeliveryPath(config)).toBe("legacy");
   });
 
   it("defaults omitted delivery_path to canonical", () => {

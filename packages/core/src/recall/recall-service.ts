@@ -68,6 +68,7 @@ export { computeRecallTokenEconomy } from "./runtime/diagnostics.js";
 export { RECALL_FUSION_STREAMS } from "./delivery/fusion-delivery.js";
 export type { RecallDiagnosticCapture } from
   "./runtime/recall-service-runner-types.js";
+export type { RecallReadSnapshotPort } from "./runtime/recall-read-snapshot.js";
 export type {
   SelectGammaSynthesisPort,
   SelectGammaSynthesisStatus
@@ -106,7 +107,8 @@ export class RecallService {
         this.buildDefaultPolicy(strategy, taskSurfaceRef, capturedAt),
       fieldQuerySession: this.fieldQuerySession,
       sha256: this.sha256,
-      projectionPinHeartbeatScheduler: this.dependencies.projectionPinHeartbeatScheduler
+      projectionPinHeartbeatScheduler: this.dependencies.projectionPinHeartbeatScheduler,
+      readSnapshot: this.dependencies.readSnapshot
     }, params);
   }
 

@@ -1,8 +1,13 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Context, MiddlewareHandler, Next } from "hono";
 
+export interface InspectorPublicRoute {
+  readonly path: string;
+  readonly method: string;
+}
+
 export interface InspectorAuthOptions {
-  readonly publicPathPrefixes?: readonly string[];
+  readonly publicRoutes?: readonly InspectorPublicRoute[];
 }
 
 export function createInspectorAuthMiddleware(token: string, options: InspectorAuthOptions = {}): MiddlewareHandler {
@@ -10,10 +15,10 @@ export function createInspectorAuthMiddleware(token: string, options: InspectorA
   if (expectedToken === null) {
     throw new Error("inspector_token_missing");
   }
-  const publicPathPrefixes = options.publicPathPrefixes ?? [];
+  const publicRoutes = options.publicRoutes ?? [];
 
   return async (context: Context, next: Next) => {
-    if (isPublicPath(context.req.path, publicPathPrefixes)) {
+    if (isPublicRoute(context.req.path, context.req.method, publicRoutes)) {
       await next();
       return;
     }
@@ -56,6 +61,13 @@ function readHeaderToken(context: Context): string | null {
     : null;
 }
 
-function isPublicPath(pathname: string, prefixes: readonly string[]): boolean {
-  return prefixes.some((prefix) => pathname.startsWith(prefix));
+function isPublicRoute(
+  pathname: string,
+  method: string,
+  routes: readonly InspectorPublicRoute[]
+): boolean {
+  const normalizedMethod = method.toUpperCase();
+  return routes.some((route) =>
+    route.path === pathname && route.method.toUpperCase() === normalizedMethod
+  );
 }

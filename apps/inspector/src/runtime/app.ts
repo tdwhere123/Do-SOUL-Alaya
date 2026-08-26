@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { isZodValidationError } from "@do-soul/alaya-protocol";
 import { createInspectorAuthMiddleware } from "../middleware/auth.js";
+import { createApiSecurityHeadersMiddleware } from "../middleware/security-headers.js";
 import { applyLazyRequestBodyLimit } from "../middleware/lazy-request-body-limit.js";
 import { registerInspectorBenchSummaryRoutes } from "../routes/bench-summary.js";
 import { registerInspectorConfigRoutes } from "../routes/config.js";
@@ -58,7 +59,7 @@ const defaultStaticRoot = resolve(__dirname, "..", "..", "web", "dist");
 export const MAX_INSPECTOR_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
 export const INSPECTOR_REQUEST_ID_HEADER = "x-request-id";
 export const INSPECTOR_CORRELATION_ID_HEADER = "x-correlation-id";
-export const DEFAULT_INSPECTOR_DAEMON_TIMEOUT_MS = 10_000;
+export const DEFAULT_INSPECTOR_DAEMON_TIMEOUT_MS = 30_000;
 
 export interface InspectorAppOptions {
   readonly token: string;
@@ -99,7 +100,10 @@ function registerLaunchSession(
 function registerInspectorMiddleware(app: Hono, token: string): void {
   registerRequestIdMiddleware(app);
   registerErrorHandler(app);
-  app.use("/api/*", createInspectorAuthMiddleware(token, { publicPathPrefixes: ["/api/launch-session"] }));
+  app.use("*", createApiSecurityHeadersMiddleware());
+  app.use("/api/*", createInspectorAuthMiddleware(token, {
+    publicRoutes: [{ path: "/api/launch-session", method: "POST" }]
+  }));
   app.use("*", async (context, next) => {
     if (isBodylessMethod(context.req.method)) {
       await next();

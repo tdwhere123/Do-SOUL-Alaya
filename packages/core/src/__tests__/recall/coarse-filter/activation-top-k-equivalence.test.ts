@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, StorageTier } from "@do-soul/alaya-protocol";
 import { SqliteMemoryEntryRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { compareMemoryEntriesForActivationAdmission } from "../../../recall/runtime/recall-service-helpers.js";
@@ -116,6 +116,50 @@ describe("JS fallback activation-admission floor", () => {
     });
 
     expect(selected.map((entry) => entry.object_id)).toEqual(["memory-high"]);
+  });
+
+  it("warns with activation_topk_sql_fallback then uses the in-memory window", async () => {
+    const high = createMemoryEntry({ object_id: "memory-high", activation_score: 0.9 });
+    const warn = vi.fn();
+
+    const selected = await loadActivationAdmissionTopK({
+      memoryRepo: {
+        findByWorkspaceId: async () => [],
+        findByDimension: async () => [],
+        findByScopeClass: async () => [],
+        findRecallActivationTopK: async () => {
+          throw new Error("sql unavailable");
+        }
+      },
+      workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID,
+      tier: StorageTier.HOT,
+      config: {
+        deterministic_match: {
+          scope_filter: null,
+          dimension_filter: null,
+          domain_tag_filter: null
+        },
+        precomputed_rank: {
+          max_candidates: 5,
+          min_activation_score: 0.5
+        },
+        semantic_supplement: {
+          enabled: false,
+          max_supplement: 0
+        }
+      },
+      eligible: [high],
+      excludeObjectIds: new Set(),
+      allowSql: true,
+      warn
+    });
+
+    expect(selected.map((entry) => entry.object_id)).toEqual(["memory-high"]);
+    expect(warn).toHaveBeenCalledWith("activation top-k sql fallback", expect.objectContaining({
+      code: "activation_topk_sql_fallback",
+      workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
+      error: "sql unavailable"
+    }));
   });
 });
 

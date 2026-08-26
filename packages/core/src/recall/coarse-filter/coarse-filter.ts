@@ -187,7 +187,8 @@ async function loadCoarseFilterInput(
     config,
     eligible: deterministicMatches,
     excludeObjectIds: protectedIds,
-    allowSql: canUseSqlActivationAdmissionTopK(config, options.timeFilter)
+    allowSql: canUseSqlActivationAdmissionTopK(config, options.timeFilter),
+    warn: context.warn
   });
   return Object.freeze({
     tier,

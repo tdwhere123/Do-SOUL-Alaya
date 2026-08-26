@@ -288,6 +288,32 @@ describe("inspector routes", () => {
   });
 
 
+  it("sets CSP frame-ancestors and X-Frame-Options on API and HTML responses", async () => {
+    const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-static-csp-"));
+    await writeFile(path.join(staticRoot, "index.html"), "<!doctype html><html></html>", "utf8");
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      staticRoot,
+      fetchImpl: async () => Response.json({ success: true, data: { ok: true } })
+    });
+
+    const apiResponse = await authenticatedRequest(app, "/api/status");
+    expect(apiResponse.status).toBe(200);
+    expect(apiResponse.headers.get("content-security-policy"))
+      .toContain("frame-ancestors 'none'");
+    expect(apiResponse.headers.get("x-frame-options")).toBe("DENY");
+    expect(apiResponse.headers.get("x-content-type-options")).toBe("nosniff");
+
+    const htmlResponse = await authenticatedRequest(app, "/");
+    expect(htmlResponse.status).toBe(200);
+    expect(htmlResponse.headers.get("content-security-policy"))
+      .toContain("frame-ancestors 'none'");
+    expect(htmlResponse.headers.get("x-frame-options")).toBe("DENY");
+  });
+
+
   it("sets cache headers for static assets and the html shell", async () => {
     const staticRoot = await mkdtemp(path.join(tmpdir(), "inspector-static-cache-"));
     await mkdir(path.join(staticRoot, "assets"), { recursive: true });
