@@ -1,12 +1,10 @@
 import { assertSourceBoundF3SealCurrent, sourceBoundF3Seal } from "@do-soul/alaya-soul";
 import { proveCacheOnlyExtraction } from "../diagnostic-loop/cache-only.js";
 import type { DiagnosticLoopRequest } from "../diagnostic-loop/types.js";
+import { resolveDiagnosticQueryFactorCacheIdentity } from
+  "../diagnostic-loop/authority/identity.js";
 import {
-  assertQuerySemanticFactorCacheMatchesRequest
-} from "../query-factors/query-semantic-factor-cache-identity.js";
-import {
-  assertBoundQuerySemanticFactorCacheFileDigest,
-  bindQuerySemanticFactorCacheFileToRequest
+  assertBoundQuerySemanticFactorCacheFileDigest
 } from "../query-factors/query-semantic-factor-cache.js";
 import {
   EXTRACTION_REQUEST_PROFILES,
@@ -77,11 +75,7 @@ async function assertReplayQueryCacheAuthority(
   expectedFileSha256: string | undefined
 ): Promise<void> {
   if (request.treatmentFactorCachePath === undefined) return;
-  const bound = await bindQuerySemanticFactorCacheFileToRequest(
-    request.treatmentFactorCachePath,
-    request
-  );
-  assertQuerySemanticFactorCacheMatchesRequest(bound.binding, request);
+  await resolveDiagnosticQueryFactorCacheIdentity(request);
   if (expectedFileSha256 !== undefined) {
     assertBoundQuerySemanticFactorCacheFileDigest(
       request.treatmentFactorCachePath, expectedFileSha256

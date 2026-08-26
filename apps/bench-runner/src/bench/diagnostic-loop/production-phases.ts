@@ -4,9 +4,10 @@ import { proveCacheOnlyExtraction } from "./cache-only.js";
 import { DiagnosticLoopFailure } from "./failures.js";
 import { sha256Utf8 } from "./identity.js";
 import {
-  assertBoundQuerySemanticFactorCacheFileDigest,
-  bindQuerySemanticFactorCacheFileToRequest
+  assertBoundQuerySemanticFactorCacheFileDigest
 } from "../query-factors/query-semantic-factor-cache.js";
+import { resolveDiagnosticQueryFactorCacheIdentity } from
+  "./authority/identity.js";
 import { recordedQueryCacheFileSha256 } from "./run-state.js";
 import {
   runProductionMissLedgerPhase,
@@ -77,7 +78,7 @@ export async function runPreflightPhase(
   try {
     const path = context.request.treatmentFactorCachePath;
     if (path !== undefined) {
-      await bindQuerySemanticFactorCacheFileToRequest(path, context.request);
+      await resolveDiagnosticQueryFactorCacheIdentity(context.request);
       const recorded = recordedQueryCacheFileSha256(context.workRoot);
       if (recorded !== undefined) {
         assertBoundQuerySemanticFactorCacheFileDigest(path, recorded);

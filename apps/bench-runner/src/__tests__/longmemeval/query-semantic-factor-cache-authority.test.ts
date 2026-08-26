@@ -7,7 +7,10 @@ import {
   materializeOpenSemanticFactorFormation,
   stableStringify
 } from "@do-soul/alaya-core";
-import { resolveDiagnosticLoopIdentity } from
+import {
+  resolveDiagnosticLoopIdentity,
+  resolveDiagnosticQueryFactorCacheIdentity
+} from
   "../../bench/diagnostic-loop/authority/identity.js";
 import {
   bindCurrentQuerySemanticFactorCache,
@@ -178,6 +181,47 @@ describe("query semantic factor cache authority", () => {
     expect(identity.query_factor_cache?.source_set_sha256).toBe(
       querySemanticFactorCacheSourceSetSha256(["Question q-1?"])
     );
+  });
+
+  it("binds a snapshot-out query cache to the pinned dataset window", async () => {
+    const root = await tempRoot();
+    const cachePath = join(root, "query-cache.json");
+    await writeQueryFactorCacheFixture(cachePath, "Question q-1?");
+    const request = loopRequest({
+      snapshotOutPath: join(root, "snapshot.db"),
+      treatmentFactorCachePath: cachePath,
+      limit: 1,
+      offset: 0
+    });
+
+    const identity = await resolveDiagnosticQueryFactorCacheIdentity(
+      request,
+      async () => ({
+        datasetRevision: request.datasetRevision,
+        questions: [{ question: "Question q-1?" }]
+      })
+    );
+
+    expect(identity.source_set_sha256).toBe(
+      querySemanticFactorCacheSourceSetSha256(["Question q-1?"])
+    );
+    await expect(resolveDiagnosticQueryFactorCacheIdentity(
+      request,
+      async () => ({
+        datasetRevision: "other-revision",
+        questions: [{ question: "Question q-1?" }]
+      })
+    )).rejects.toThrow(/dataset revision/u);
+    await expect(resolveDiagnosticQueryFactorCacheIdentity(
+      request,
+      async () => ({
+        datasetRevision: request.datasetRevision,
+        questions: [
+          { question: "Question q-1?" },
+          { question: "Question q-2?" }
+        ]
+      })
+    )).rejects.toThrow(/dataset window/u);
   });
 
   it("does not resume a partial fill across request profiles", async () => {

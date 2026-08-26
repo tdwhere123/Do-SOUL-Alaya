@@ -1,10 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { DiagnosticLoopFailure } from "../../../bench/diagnostic-loop/failures.js";
 import {
   createProductionDiagnosticLoopAdapters,
   runPreflightPhase
 } from "../../../bench/diagnostic-loop/production-phases.js";
-import { loopRequest } from "./fixture.js";
+import { loopRequest, writeDiagnosticSnapshotFixture } from "./fixture.js";
+
+const roots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 describe("diagnostic-loop production preflight", () => {
   it("rejects credentialled or live-extraction environments", async () => {
@@ -37,14 +46,18 @@ describe("diagnostic-loop production preflight", () => {
   });
 
   it("fail-closes a bound query cache that is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "diagnostic-preflight-"));
+    roots.push(root);
+    const snapshotPath = await writeDiagnosticSnapshotFixture(root, "missing-query-cache");
     await expect(runPreflightPhase({
-      workRoot: "/tmp/loop",
+      workRoot: root,
       request: loopRequest({
-        treatmentFactorCachePath: "/tmp/missing-query-factor-cache.json"
+        snapshotPath,
+        treatmentFactorCachePath: join(root, "missing-query-factor-cache.json")
       }),
       mode: "run",
       checkpoints: new Map()
-    }, { ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "0" })).rejects.toThrow(/request source set/u);
+    }, { ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "0" })).rejects.toThrow(/missing or unreadable/u);
   });
 
   it("issues a no-provider-port receipt only through the credentialless gate", async () => {

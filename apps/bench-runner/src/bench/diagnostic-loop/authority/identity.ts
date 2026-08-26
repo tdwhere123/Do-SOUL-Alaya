@@ -47,6 +47,8 @@ import type {
 } from "../types.js";
 import { CACHED_F3_EXPOSURE_POLICY } from
   "../../diagnostics/stage-attribution/exposure/contract.js";
+import { loadDatasetWindowWithIdentity } from
+  "../../../longmemeval/ingestion/fetch.js";
 
 export interface DiagnosticExtractionCacheIdentity {
   readonly root: string;
@@ -102,6 +104,20 @@ type CompleteExtractionManifest = ExtractionCacheManifestV3 & Readonly<{
   window_limit: number;
 }>;
 
+interface DiagnosticQuerySourceWindow {
+  readonly datasetRevision: string;
+  readonly questions: readonly Readonly<{ readonly question: string }>[];
+}
+
+export type DiagnosticQuerySourceWindowLoader = (
+  request: DiagnosticLoopRequest
+) => Promise<DiagnosticQuerySourceWindow>;
+
+const querySourceWindows = new WeakMap<
+  DiagnosticLoopRequest,
+  Promise<DiagnosticQuerySourceWindow>
+>();
+
 export async function resolveDiagnosticLoopIdentity(
   request: DiagnosticLoopRequest
 ): Promise<ResolvedDiagnosticLoopIdentity> {
@@ -113,7 +129,7 @@ export async function resolveDiagnosticLoopIdentity(
     : await resolveSnapshotIdentity(request.snapshotPath, request.variant);
   const query = request.treatmentFactorCachePath === undefined
     ? undefined
-    : await resolveQueryFactorCacheIdentity(request);
+    : await resolveDiagnosticQueryFactorCacheIdentity(request);
   const sealedRequest = sealedDiagnosticLoopRequest(request);
   return {
     schema_version: 3,
@@ -266,20 +282,55 @@ function readSnapshotAuthority(snapshotPath: string) {
   );
 }
 
-async function resolveQueryFactorCacheIdentity(
-  request: DiagnosticLoopRequest
+export async function resolveDiagnosticQueryFactorCacheIdentity(
+  request: DiagnosticLoopRequest,
+  loadSourceWindow: DiagnosticQuerySourceWindowLoader = loadPinnedQuerySourceWindow
 ): Promise<DiagnosticQueryFactorCacheIdentity> {
   const path = request.treatmentFactorCachePath;
   if (path === undefined) {
     throw new Error("query semantic factor cache path is required");
   }
-  if (request.snapshotPath === undefined) {
-    throw new Error("query semantic factor cache current bind requires a request source set");
-  }
-  const bound = await bindQuerySemanticFactorCacheFileToRequest(path, request);
+  const requiredSourceTexts = request.snapshotPath === undefined
+    ? await querySourceTexts(request, loadSourceWindow)
+    : undefined;
+  const bound = await bindQuerySemanticFactorCacheFileToRequest(path, {
+    ...request,
+    ...(requiredSourceTexts === undefined ? {} : { requiredSourceTexts })
+  });
   return {
     path: resolve(path),
     file_sha256: bound.file_sha256,
     ...bound.binding
   };
+}
+
+async function querySourceTexts(
+  request: DiagnosticLoopRequest,
+  loadSourceWindow: DiagnosticQuerySourceWindowLoader
+): Promise<readonly string[]> {
+  const window = await loadSourceWindow(request);
+  if (window.datasetRevision !== request.datasetRevision) {
+    throw new Error("query semantic factor cache dataset revision does not match this request");
+  }
+  if (request.limit !== undefined && window.questions.length !== request.limit) {
+    throw new Error("query semantic factor cache dataset window does not match this request");
+  }
+  return window.questions.map(({ question }) => question);
+}
+
+function loadPinnedQuerySourceWindow(
+  request: DiagnosticLoopRequest
+): Promise<DiagnosticQuerySourceWindow> {
+  const cached = querySourceWindows.get(request);
+  if (cached !== undefined) return cached;
+  const pending = loadDatasetWindowWithIdentity(request.variant, {
+    ...(request.dataDir === undefined ? {} : { dataDir: request.dataDir }),
+    offset: Math.max(0, request.offset ?? 0),
+    ...(request.limit === undefined ? {} : { limit: request.limit })
+  }).then((window) => ({
+    datasetRevision: window.sha256,
+    questions: window.questions
+  }));
+  querySourceWindows.set(request, pending);
+  return pending;
 }

@@ -102,24 +102,25 @@ describe("provider cache-only replay", () => {
     const cacheRoot = await tempRoot();
     const key = digest("query-cache-key");
     const authority = writeCompleteMimoCache(cacheRoot, key);
+    const snapshot = await writeDiagnosticSnapshotFixture(cacheRoot, "replay-bind");
     const request = loopRequest({
       extractionCacheRoot: cacheRoot,
       requestedKeys: [key],
       model: MIMO.id,
       requestProfile: MIMO.requestProfile,
       promptDigest: authority.systemPromptSha256,
+      snapshotPath: snapshot,
       treatmentFactorCachePath: join(cacheRoot, "missing-query-cache.json")
     });
     await expect(proveProviderZeroCallReplay({ request }))
-      .rejects.toThrow(/request source set|missing or unreadable/u);
+      .rejects.toThrow(/missing or unreadable/u);
 
     const queryPath = join(cacheRoot, "query-cache.json");
     await writeQueryFactorCacheFixture(queryPath, "Question A?");
     await expect(proveProviderZeroCallReplay({
       request: { ...request, treatmentFactorCachePath: queryPath }
-    })).rejects.toThrow(/request source set|snapshot/u);
+    })).rejects.toThrow(/missing a required query source|source set/u);
 
-    const snapshot = await writeDiagnosticSnapshotFixture(cacheRoot, "replay-bind");
     await rm(queryPath);
     await writeQueryFactorCacheFixture(queryPath, "Question q-1?");
     const bound = { ...request, snapshotPath: snapshot, treatmentFactorCachePath: queryPath };
