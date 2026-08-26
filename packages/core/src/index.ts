@@ -300,3 +300,23 @@ export * from "./security/worker-safety-gate.js";
 export * from "./security/worker-trust-assessor.js";
 export * from "./runs/workspace-service.js";
 export * from "./security/zero-day-security-layer.js";
+export {
+  deterministicTailDecidedThisPick,
+  type DeterministicTailPickEvidence
+} from "./recall/shadow/walk.js";
+export {
+  FIRST_PICK_TAIL_DEGENERACY_PROPERTY,
+  FIRST_PICK_TAIL_DECIDED_SHARE_MAX,
+  evaluateFirstPickTailDegeneracy,
+  evaluateFirstPickTailDegeneracyStream,
+  type FirstPickTailDegeneracyReport
+} from "./recall/shadow/ranking/tail-degeneracy.js";
+export {
+  CHEAP_RANKING_RUNG_COST,
+  CHEAP_RANKING_RUNG_ID,
+  CHEAP_RANKING_RUNG_K,
+  cheapRungAnyAt5,
+  scoreCheapRankingRung,
+  type CheapRankingRungReport,
+  type CheapRankingRungRow
+} from "./recall/shadow/ranking/cheap-rung.js";
