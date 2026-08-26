@@ -59,12 +59,12 @@ function classifyTable(
     return { kind: "fts_shadow", name: table.name };
   }
   const columns = reader.listColumns(table.name).map((column) => column.name);
-  if (columns.includes("workspace_id")) {
-    return { kind: "workspace", name: table.name, columns: Object.freeze(columns) };
-  }
   const policy = policyForGlobalTable(table.name);
   if (policy !== undefined) {
     return { kind: "global", name: table.name, policy };
+  }
+  if (columns.includes("workspace_id")) {
+    return { kind: "workspace", name: table.name, columns: Object.freeze(columns) };
   }
   throw new Error(
     `packed working copy has unhandled table ${table.name} without workspace_id`

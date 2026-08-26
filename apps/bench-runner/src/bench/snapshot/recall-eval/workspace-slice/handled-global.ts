@@ -23,6 +23,11 @@ export const GLOBAL_TABLE_POLICY: Readonly<Record<string, GlobalTablePolicy>> = 
   temporal_projection_generations: COPY_ALL,
   temporal_projection_selection_audit: COPY_ALL,
   temporal_schema_state: COPY_ALL,
+  // invariant: history operator is corpus-wide; workspace_id is membership.
+  relation_assertions: COPY_ALL,
+  relation_assertion_resolution_current: COPY_ALL,
+  relation_assertion_quarantine: COPY_ALL,
+  relation_path_projections: COPY_ALL,
   global_memory_entries: COPY_ALL,
   reconciliation_leases: COPY_NONE,
   proposal_reviewer_assignments: Object.freeze({

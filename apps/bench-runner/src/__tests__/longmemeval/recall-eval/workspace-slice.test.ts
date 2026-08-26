@@ -151,15 +151,20 @@ describe("packed workspace slice explode", () => {
       destDir,
       workspaceIds: [WORKSPACE_A, WORKSPACE_B]
     });
+    const packed = initDatabase({ filename: packedPath });
+    const packedHistory = readHistoryDigest(packed);
+    packed.close();
     const sliceA = initDatabase({ filename: exploded.sliceDbPaths[WORKSPACE_A]! });
     const sliceB = initDatabase({ filename: exploded.sliceDbPaths[WORKSPACE_B]! });
     try {
-      expect(countTable(sliceA, "relation_path_projections")).toBe(1);
-      expect(countTableWhere(sliceA, "relation_path_projections", WORKSPACE_B)).toBe(0);
-      expect(readProjectionCount(sliceA)).toBe(1);
-      expect(countTable(sliceB, "relation_path_projections")).toBe(1);
-      expect(countTableWhere(sliceB, "relation_path_projections", WORKSPACE_A)).toBe(0);
-      expect(readProjectionCount(sliceB)).toBe(1);
+      expect(countTable(sliceA, "relation_path_projections")).toBe(2);
+      expect(countTableWhere(sliceA, "relation_path_projections", WORKSPACE_B)).toBe(1);
+      expect(readProjectionCount(sliceA)).toBe(2);
+      expect(readHistoryDigest(sliceA)).toBe(packedHistory);
+      expect(countTable(sliceB, "relation_path_projections")).toBe(2);
+      expect(countTableWhere(sliceB, "relation_path_projections", WORKSPACE_A)).toBe(1);
+      expect(readProjectionCount(sliceB)).toBe(2);
+      expect(readHistoryDigest(sliceB)).toBe(packedHistory);
     } finally {
       sliceA.close();
       sliceB.close();
@@ -173,9 +178,10 @@ describe("packed workspace slice explode", () => {
     });
     const working = initDatabase({ filename: workingAlayaDbPath(dataDir) });
     try {
-      expect(countTable(working, "relation_path_projections")).toBe(1);
-      expect(countTableWhere(working, "relation_path_projections", WORKSPACE_B)).toBe(0);
-      expect(readProjectionCount(working)).toBe(1);
+      expect(countTable(working, "relation_path_projections")).toBe(2);
+      expect(countTableWhere(working, "relation_path_projections", WORKSPACE_B)).toBe(1);
+      expect(readProjectionCount(working)).toBe(2);
+      expect(readHistoryDigest(working)).toBe(packedHistory);
     } finally {
       working.close();
     }
@@ -418,6 +424,13 @@ function readProjectionCount(database: ReturnType<typeof initDatabase>): number 
     "SELECT projection_count AS n FROM temporal_schema_state WHERE state_id = 1"
   ).get() as { n: number };
   return row.n;
+}
+
+function readHistoryDigest(database: ReturnType<typeof initDatabase>): string {
+  const row = database.connection.prepare(
+    "SELECT history_digest AS digest FROM temporal_schema_state WHERE state_id = 1"
+  ).get() as { digest: string };
+  return row.digest;
 }
 
 function countTableWhere(
