@@ -3,7 +3,26 @@ import {
   refuseRetiredLocalCrossEncoderTreatment
 } from "../strict-treatment-config.js";
 
-interface EmbeddingTreatmentDiagnostics {
+export interface BiEncoderCandidateDiagnostics {
+  readonly capture_receipt?: Readonly<{
+    readonly observations_by_candidate_key: Readonly<Record<string, Readonly<{
+      readonly lineages: Readonly<{
+        readonly embedding?: Readonly<{
+          readonly envelope: Readonly<{ readonly state: string; readonly value?: number }>;
+        }>;
+      }>;
+    }>>> | null;
+  }> | null;
+  readonly candidates: readonly (
+    | Readonly<{
+      readonly score_factors:
+        Readonly<{ readonly embedding_similarity?: number }> | null;
+    }>
+    | Readonly<{ readonly ranking_authority: "prefix_sk" }>
+  )[];
+}
+
+interface EmbeddingTreatmentDiagnostics extends BiEncoderCandidateDiagnostics {
   readonly embedding_provider_status: string;
   readonly provider_degradation_reason: string | null;
   readonly evidence_embedding_status?: string;
@@ -16,21 +35,6 @@ interface EmbeddingTreatmentDiagnostics {
   readonly embedding_workspace_provider_kind?: string;
   readonly embedding_workspace_model_id?: string;
   readonly embedding_workspace_schema_version?: number;
-  readonly capture_receipt?: Readonly<{
-    readonly observations_by_candidate_key: Readonly<Record<string, Readonly<{
-      readonly lineages: Readonly<{
-        readonly embedding?: Readonly<{
-          readonly envelope: Readonly<{ readonly state: string; readonly value?: number }>;
-        }>;
-      }>;
-    }>>> | null;
-  }>;
-  readonly candidates: readonly (
-    | Readonly<{
-      readonly score_factors: Readonly<{ readonly embedding_similarity?: number }>;
-    }>
-    | Readonly<{ readonly ranking_authority: "prefix_sk" }>
-  )[];
 }
 
 export interface BiEncoderTreatmentActivationEvidence {
@@ -108,7 +112,7 @@ function toActivationEvidence(
   return {
     providerState: diagnostics.embedding_provider_status,
     providerDegradationReason: diagnostics.provider_degradation_reason,
-    embeddingSimilarities: readEmbeddingSimilarities(diagnostics),
+    embeddingSimilarities: readBiEncoderCandidateSimilarities(diagnostics),
     workspaceScannedCount: diagnostics.embedding_workspace_scanned_count,
     workspaceTruncated: diagnostics.embedding_workspace_truncated,
     workspaceProviderKind: diagnostics.embedding_workspace_provider_kind,
@@ -121,7 +125,8 @@ function assertControlInactive(diagnostics: EmbeddingTreatmentDiagnostics): void
   const inactive = diagnostics.embedding_provider_status === "provider_not_requested" &&
     isEvidenceEmbeddingInactive(diagnostics) &&
     !hasLegacyEmbeddingEvidenceKey(diagnostics) &&
-    readEmbeddingSimilarities(diagnostics).every((similarity) => similarity === undefined) &&
+    readBiEncoderCandidateSimilarities(diagnostics)
+      .every((similarity) => similarity === undefined) &&
     diagnostics.embedding_workspace_scanned_count === undefined &&
     diagnostics.embedding_workspace_provider_kind === undefined &&
     diagnostics.embedding_workspace_model_id === undefined &&
@@ -135,14 +140,14 @@ function hasLegacyEmbeddingEvidenceKey(
   diagnostics: EmbeddingTreatmentDiagnostics
 ): boolean {
   if (diagnostics.capture_receipt !== undefined) return false;
-  return diagnostics.candidates.some((candidate) =>
-    "score_factors" in candidate &&
-    "embedding_similarity" in candidate.score_factors
-  );
+  return diagnostics.candidates.some((candidate) => {
+    const factors = "score_factors" in candidate ? candidate.score_factors : null;
+    return factors !== null && "embedding_similarity" in factors;
+  });
 }
 
-function readEmbeddingSimilarities(
-  diagnostics: EmbeddingTreatmentDiagnostics
+export function readBiEncoderCandidateSimilarities(
+  diagnostics: BiEncoderCandidateDiagnostics
 ): readonly (number | undefined)[] {
   const observations = diagnostics.capture_receipt?.observations_by_candidate_key;
   if (observations !== undefined && observations !== null) {
@@ -151,11 +156,12 @@ function readEmbeddingSimilarities(
       return envelope?.state === "observed" ? envelope.value : undefined;
     });
   }
-  return diagnostics.candidates.map(
-    (candidate) => "score_factors" in candidate
-      ? candidate.score_factors.embedding_similarity
-      : undefined
-  );
+  return diagnostics.candidates.map((candidate) => {
+    if (!("score_factors" in candidate) || candidate.score_factors === null) {
+      return undefined;
+    }
+    return candidate.score_factors.embedding_similarity;
+  });
 }
 
 function assertEvidenceEmbeddingTreatmentActive(

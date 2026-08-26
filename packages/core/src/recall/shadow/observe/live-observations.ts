@@ -222,8 +222,13 @@ function liveEmbedding(
   const evidence = strongestEvidenceEmbedding(
     context.evidenceActivations.get(buildRecallCandidateDedupeKey(candidate))
   );
+  const objectContentHash = context.contentHashes[objectId];
+  const objectHasAuthority = objectContentHash !== undefined && objectContentHash.length > 0;
+  const evidenceHasAuthority = evidence?.contentHash !== undefined &&
+    evidence.contentHash.length > 0;
   const useEvidence = evidence !== null &&
-    (objectScore === undefined || evidence.score >= objectScore);
+    evidenceHasAuthority &&
+    (!objectHasAuthority || objectScore === undefined || evidence.score >= objectScore);
   const score = useEvidence ? evidence.score : objectScore;
   if (score === undefined) {
     return parsePointwiseObservation({
@@ -235,7 +240,7 @@ function liveEmbedding(
     });
   }
   const value = clamp01(score);
-  const contentHash = useEvidence ? evidence.contentHash : context.contentHashes[objectId];
+  const contentHash = useEvidence ? evidence.contentHash : objectContentHash;
   if (context.embeddingDomain === undefined || contentHash === undefined ||
       contentHash.length === 0) {
     return parsePointwiseObservation({

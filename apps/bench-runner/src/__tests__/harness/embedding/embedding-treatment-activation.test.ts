@@ -3,6 +3,7 @@ import {
   assertBiEncoderRunActivation,
   assertBiEncoderTreatmentActive,
   assertEmbeddingTreatmentDiagnosticsPresent,
+  readBiEncoderCandidateSimilarities,
   requiresEmbeddingTreatmentDiagnostics
 } from "../../../harness/embedding/embedding-treatment-activation.js";
 import {
@@ -25,6 +26,21 @@ describe("embedding treatment activation", () => {
       providerDegradationReason: null,
       embeddingSimilarities: [0]
     })).not.toThrow();
+  });
+
+  it("reads canonical capture observations before legacy candidate factors", () => {
+    expect(readBiEncoderCandidateSimilarities({
+      capture_receipt: {
+        observations_by_candidate_key: {
+          candidate: {
+            lineages: {
+              embedding: { envelope: { state: "observed", value: 0.4 } }
+            }
+          }
+        }
+      },
+      candidates: [{ score_factors: { embedding_similarity: 0.9 } }]
+    })).toEqual([0.4]);
   });
 
   it.each([

@@ -164,7 +164,7 @@ describe("live shadow observations", () => {
     });
   });
 
-  it("projects direct evidence semantic scores as the candidate embedding observation", () => {
+  it("uses attributable evidence when a stronger object score lacks authority", () => {
     const domain = Object.freeze({
       provider_kind: "local_onnx",
       model_id: "model",
@@ -176,6 +176,7 @@ describe("live shadow observations", () => {
       query: "operator workspace",
       embedding_enabled: true,
       objectKind: "evidence_capsule",
+      embeddingSimilarityScores: { "cand-a": 0.91 },
       embeddingObservationDomain: domain,
       evidenceSemanticActivationsByCandidateKey: new Map([[candidateKey, {
         schema_version: 1,

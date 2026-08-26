@@ -5,7 +5,10 @@ import type {
   LocalCrossEncoderRuntimeProvenance
 } from "../embedding/local-onnx.js";
 import { embeddingInputIdentityForSchemaVersion } from "../../../harness/strict-treatment-config.js";
-import { assertBiEncoderTreatmentActive } from "../../../harness/embedding/embedding-treatment-activation.js";
+import {
+  assertBiEncoderTreatmentActive,
+  readBiEncoderCandidateSimilarities
+} from "../../../harness/embedding/embedding-treatment-activation.js";
 import { RecallTokenEconomySchema } from "../../../harness/recall/recall-diagnostics-schema.js";
 import {
   writeGzipChunks,
@@ -359,10 +362,7 @@ function assertEnabledEmbeddingEvidence(
   assertBiEncoderTreatmentActive({
     providerState: diagnostics.provider_state,
     providerDegradationReason: diagnostics.provider_degradation_reason,
-    embeddingSimilarities: diagnostics.candidates.map((candidate) => {
-      const similarity = candidate.score_factors.embedding_similarity;
-      return typeof similarity === "number" ? similarity : undefined;
-    }),
+    embeddingSimilarities: readBiEncoderCandidateSimilarities(diagnostics),
     workspaceScannedCount: diagnostics.embedding_workspace_scanned_count,
     workspaceTruncated: diagnostics.embedding_workspace_truncated,
     workspaceProviderKind: diagnostics.embedding_workspace_provider_kind,
