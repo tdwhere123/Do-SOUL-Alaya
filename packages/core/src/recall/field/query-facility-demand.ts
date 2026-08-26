@@ -13,6 +13,7 @@ import {
 import { normalizeRecallQueryDemand } from
   "./query-attribution/query-field-attribution.js";
 import {
+  cleanFactFrameDemandFactor,
   semanticDemandKindForRole,
   type FactFrameSemanticFactor
 } from "./fact-frame-semantic-factors.js";
@@ -54,11 +55,14 @@ export function materializeAttributedQueryFacilityDemand(params: Readonly<{
     weights,
     params.semantic_factors ?? []
   );
+  const usedFactors = demandAtoms.flatMap((atom) =>
+    atom.semantic_factor === undefined ? [] : [atom.semantic_factor]
+  );
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: ATTRIBUTED_QUERY_FACILITY_DEMAND_OPERATOR_ID,
     query_demand_digest: query.digest,
-    semantic_factor_digest: digestSemanticFactors(params.semantic_factors ?? []),
+    semantic_factor_digest: digestSemanticFactors(usedFactors),
     weight_configuration_digest: digestRecallFieldIdentity(weights),
     demand_atoms: demandAtoms
   });
@@ -104,8 +108,10 @@ function materializeDemandAtoms(
       : [facilityDemandAtom(atom, kind, weights, "typed_query_atom")];
   });
   for (const factor of semanticFactors) {
-    const kind = semanticDemandKindForRole(factor.role);
-    if (kind !== null) atoms.push(factFrameDemandAtom(factor, kind, weights));
+    const cleaned = cleanFactFrameDemandFactor(factor);
+    if (cleaned === null) continue;
+    const kind = semanticDemandKindForRole(cleaned.role);
+    if (kind !== null) atoms.push(factFrameDemandAtom(cleaned, kind, weights));
   }
   return Object.freeze(atoms.sort(compareDemandAtoms));
 }

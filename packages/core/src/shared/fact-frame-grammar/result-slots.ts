@@ -17,6 +17,9 @@ const CJK_GENERIC_SPEAKERS: ReadonlySet<string> = new Set(["我", "我们"]);
 const ENGLISH_GENERIC_SPEAKERS: ReadonlySet<string> = new Set([
   "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours"
 ]);
+export const SUBJECT_PRONOUNS: ReadonlySet<string> = new Set([
+  "i", "you", "he", "she", "it", "we", "they"
+]);
 
 export function isRuleBasedCopularMeasureValue(surface: string): boolean {
   const tokens = tokenizeFactFrameSource(surface);

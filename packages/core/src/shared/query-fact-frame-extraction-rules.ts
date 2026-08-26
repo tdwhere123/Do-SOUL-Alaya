@@ -24,14 +24,18 @@ import {
   tokenizeFactFrameSource,
   type FactFrameSourceToken
 } from "./fact-frame-grammar/source-text.js";
-import { COPULAR_MEASURE_WORDS } from "./fact-frame-grammar/result-slots.js";
+import {
+  COPULAR_MEASURE_WORDS,
+  SUBJECT_PRONOUNS
+} from "./fact-frame-grammar/result-slots.js";
 
 export {
   COPULAR_MEASURE_WORDS,
   isRuleBasedCopularMeasureValue,
   isRuleBasedCopularPredicate,
   isRuleBasedGenericSpeaker,
-  isRuleBasedLocationResultValue
+  isRuleBasedLocationResultValue,
+  SUBJECT_PRONOUNS
 } from "./fact-frame-grammar/result-slots.js";
 
 type SubjectSpan = Readonly<{
@@ -382,9 +386,6 @@ const TAIL_CONSTRAINT_LINKERS: ReadonlySet<string> = new Set(["on"]);
 const EMPTY_TOKEN: FactFrameSourceToken = Object.freeze({
   text: "", normalized: "", start: 0, end: 0
 });
-const SUBJECT_PRONOUNS: ReadonlySet<string> = new Set([
-  "i", "you", "he", "she", "it", "we", "they"
-]);
 const POSSESSIVE_DETERMINERS: ReadonlySet<string> = new Set([
   "my", "your", "his", "her", "its", "our", "their"
 ]);

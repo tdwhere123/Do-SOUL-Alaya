@@ -1,4 +1,16 @@
-import type { AssociativeFactSlotRole } from "@do-soul/alaya-protocol";
+import {
+  classifyQueryObligationStructuralRole,
+  type AssociativeFactSlotRole
+} from "@do-soul/alaya-protocol";
+import { WH_WORDS } from "../../shared/fact-frame-grammar/clause-boundaries.js";
+import { CJK_INTERROGATIVE_CUES } from
+  "../../shared/fact-frame-grammar/interrogative-cues.js";
+import { isCjkSegmentationCandidate, segmentCjkRun } from
+  "../../shared/cjk-segmentation.js";
+import {
+  isRuleBasedGenericSpeaker,
+  SUBJECT_PRONOUNS
+} from "../../shared/fact-frame-grammar/result-slots.js";
 import { regularRelationInflectionEquivalent } from "./facility/relation-inflection-alignment.js";
 import { containsAlignedTokenSequence } from "./facility/token-sequence-alignment.js";
 
@@ -41,6 +53,17 @@ export function semanticDemandKindForRole(
   return role === "subject" || role === "value" || role === "qualifier"
     ? "entity"
     : null;
+}
+
+export function cleanFactFrameDemandFactor(
+  factor: Readonly<FactFrameSemanticFactor>
+): Readonly<FactFrameSemanticFactor> | null {
+  if (semanticDemandKindForRole(factor.role) === null) return null;
+  const surface = demandObligationSurface(factor);
+  if (surface === null) return null;
+  return surface === factor.normalized_text
+    ? factor
+    : Object.freeze({ ...factor, normalized_text: surface });
 }
 
 export function alignFactFrameSemanticFactor(params: Readonly<{
@@ -90,11 +113,45 @@ function regularSingular(token: string): string | null {
   return null;
 }
 
+function demandObligationSurface(
+  factor: Readonly<FactFrameSemanticFactor>
+): string | null {
+  if (classifyQueryObligationStructuralRole(factor.normalized_text) !== null) {
+    return null;
+  }
+  const kept = canonicalTokens(factor.normalized_text)
+    .filter((token) => !isDroppedObligationToken(token));
+  if (kept.length === 0) return null;
+  return semanticDemandKindForRole(factor.role) === "entity"
+    ? kept.join(" ")
+    : factor.normalized_text;
+}
+
+function isDroppedObligationToken(token: string): boolean {
+  return WH_WORDS.has(token) ||
+    SUBJECT_PRONOUNS.has(token) ||
+    isRuleBasedGenericSpeaker(token) ||
+    CJK_INTERROGATIVE_TOKEN_SET.has(token);
+}
+
 function normalizeSemanticText(value: string): string {
   return value.trim().replace(/[.]+$/u, "").replace(/\s+/gu, " ").toLocaleLowerCase();
 }
 
 function canonicalTokens(value: string): readonly string[] {
-  return Object.freeze(value.normalize("NFKC").toLocaleLowerCase()
-    .match(/[\p{L}\p{N}_]+/gu) ?? []);
+  const runs = value.normalize("NFKC").toLocaleLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
+  const tokens: string[] = [];
+  for (const run of runs) {
+    if (!isCjkSegmentationCandidate(run)) {
+      tokens.push(run);
+      continue;
+    }
+    for (const piece of segmentCjkRun(run)) {
+      const normalized = piece.trim().toLocaleLowerCase();
+      if (normalized.length > 0) tokens.push(normalized);
+    }
+  }
+  return Object.freeze(tokens);
 }
+
+const CJK_INTERROGATIVE_TOKEN_SET: ReadonlySet<string> = new Set(CJK_INTERROGATIVE_CUES);

@@ -113,6 +113,42 @@ describe("typed query facility demand", () => {
       query_demand_digest: `sha256:${"f".repeat(64)}`
     } as typeof receipt)).toThrow(/digest/u);
   });
+
+  it("cleans WH spans and bare pronouns so obligation keys can match a stored fact", () => {
+    const receipt = materializeAttributedQueryFacilityDemand({
+      query_demand: demand([
+        atom("lexical_term:degree", "lexical_term", "degree", "supporting"),
+        atom("phrase:what degree", "phrase", "what degree", "supporting")
+      ]),
+      weights: unitWeights(),
+      semantic_factors: projectFactFrameSemanticFactors([
+        { role: "value", text: "What degree" },
+        { role: "subject", text: "I" },
+        { role: "relation", text: "graduate" }
+      ], 0)
+    });
+
+    expect(receipt.demand_atoms.map(({ kind, value }) => [kind, value])).toEqual([
+      ["entity", "degree"],
+      ["relation", "graduate"]
+    ]);
+    expect(receipt.demand_atoms.some(({ value }) =>
+      value === "what degree" || value === "i" || value === "what"
+    )).toBe(false);
+    expect(() => verifyAttributedQueryFacilityDemand(receipt)).not.toThrow();
+  });
+
+  it("does not let lexical_term or phrase atoms buy a facility obligation", () => {
+    const receipt = materializeAttributedQueryFacilityDemand({
+      query_demand: demand([
+        atom("lexical_term:degree", "lexical_term", "degree", "supporting"),
+        atom("phrase:undergraduate degree", "phrase", "undergraduate degree", "supporting")
+      ]),
+      weights: unitWeights()
+    });
+
+    expect(receipt.demand_atoms).toEqual([]);
+  });
 });
 
 function demand(atoms: readonly Readonly<RecallQueryDemandAtom>[]): RecallQueryDemand {
