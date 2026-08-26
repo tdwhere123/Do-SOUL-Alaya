@@ -14,7 +14,7 @@ describe("EvidenceService", () => {
     const order: string[] = [];
     const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const store = new Map<string, EvidenceCapsule>();
-    const create = vi.fn(async (capsule: EvidenceCapsule) => {
+    const create = vi.fn((capsule: EvidenceCapsule) => {
       order.push("repo_create");
       store.set(capsule.object_id, Object.freeze({ ...capsule }));
       return store.get(capsule.object_id)!;
@@ -24,7 +24,7 @@ describe("EvidenceService", () => {
       now: () => "2026-03-20T01:00:00.000Z",
       generateObjectId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       eventLogRepo: {
-        append: vi.fn(async (event) => {
+        append: vi.fn((event) => {
           order.push("event_log");
           appendedEvents.push(event);
           return {
@@ -33,10 +33,12 @@ describe("EvidenceService", () => {
             revision: 0,
             ...event
           };
-        })
+        }),
+        transactional: <T>(fn: () => T) => fn()
       },
       evidenceCapsuleRepo: {
         create,
+        createInCurrentTransaction: create,
         deleteById: vi.fn(async () => {
           throw new Error("not used");
         }),
@@ -91,6 +93,58 @@ describe("EvidenceService", () => {
         run_id: "run-1"
       }
     });
+  });
+
+  it("rolls back the EventLog row when evidence create throws", async () => {
+    const events: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
+    const notify = vi.fn();
+    const service = new EvidenceService({
+      now: () => "2026-03-20T01:00:00.000Z",
+      generateObjectId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+      eventLogRepo: {
+        append: vi.fn((event) => {
+          events.push(event);
+          return {
+            event_id: "event-1",
+            created_at: "2026-03-20T01:00:00.000Z",
+            revision: 0,
+            ...event
+          };
+        }),
+        transactional: <T>(fn: () => T) => {
+          const start = events.length;
+          try {
+            return fn();
+          } catch (error) {
+            events.length = start;
+            throw error;
+          }
+        }
+      },
+      evidenceCapsuleRepo: {
+        create: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        createInCurrentTransaction: vi.fn(() => {
+          throw new Error("row failed");
+        }),
+        deleteById: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        findById: vi.fn(async () => null),
+        findByRunId: vi.fn(async () => []),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByHealth: vi.fn(async () => []),
+        updateHealth: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      },
+      runtimeNotifier: { notifyEntry: notify }
+    });
+
+    await expect(service.create(createEvidenceInput())).rejects.toThrow("row failed");
+    expect(events).toEqual([]);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("writes soul.evidence.health_changed and updates repo health", async () => {
@@ -201,15 +255,21 @@ describe("EvidenceService", () => {
       now: () => "2026-03-20T01:00:00.000Z",
       generateObjectId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       eventLogRepo: {
-        append: vi.fn(async (event) => ({
+        append: vi.fn((event) => ({
           event_id: "event-immutable",
           created_at: "2026-03-20T01:00:00.000Z",
           revision: 0,
           ...event
-        }))
+        })),
+        transactional: <T>(fn: () => T) => fn()
       },
       evidenceCapsuleRepo: {
-        create: vi.fn(async (capsule) => {
+        create: vi.fn((capsule) => {
+          const frozen = Object.freeze({ ...capsule });
+          store.set(capsule.object_id, frozen);
+          return frozen;
+        }),
+        createInCurrentTransaction: vi.fn((capsule) => {
           const frozen = Object.freeze({ ...capsule });
           store.set(capsule.object_id, frozen);
           return frozen;

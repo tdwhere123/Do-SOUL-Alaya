@@ -13,6 +13,10 @@ import {
   type SourceAdmissionPort
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import {
+  appendEventLogSynchronously,
+  EventLogSyncAppendRequiredError
+} from "../../runtime/event-publisher.js";
 import type { OpenSemanticFactorExtractionPort } from
   "../../semantic/open-semantic-factor-extraction-port.js";
 import type { EvidenceFactFrameProposalNormalizer } from
@@ -41,10 +45,18 @@ export async function createEvidenceCapsule(input: Readonly<{
       semanticFactorFormation?: EvidenceFormationPlan["semanticFormation"]
       , semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"]
     ): Promise<Readonly<EvidenceCapsule>>;
+    createInCurrentTransaction?(
+      capsule: EvidenceCapsule,
+      searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
+      factFrameFormation?: EvidenceFormationPlan["factFrameCapture"],
+      semanticFactorFormation?: EvidenceFormationPlan["semanticFormation"]
+      , semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"]
+    ): Readonly<EvidenceCapsule>;
   };
   readonly eventLogRepo: {
     append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">):
       EventLogEntry | Promise<EventLogEntry>;
+    transactional?<T>(fn: () => T): T;
   };
   readonly runtimeNotifier: {
     notifyEntry(entry: EventLogEntry): void | Promise<void>;
@@ -62,14 +74,7 @@ export async function createEvidenceCapsule(input: Readonly<{
   const timestamp = input.now();
   const evidence = parseCreatedCapsule(input, timestamp);
   const formation = planOptionalFormation(input, evidence);
-  const event = await appendCreated(input.eventLogRepo, evidence);
-  const created = await input.evidenceCapsuleRepo.create(
-    evidence,
-    formation.searchProjections,
-    formation.factFrameCapture,
-    formation.semanticFormation,
-    formation.semanticCompleteness
-  );
+  const { event, created } = persistCreatedEvidence(input, evidence, formation);
   await admitOptionalFieldFormation(input, created, formation);
   await input.runtimeNotifier.notifyEntry(event);
   return created;
@@ -172,27 +177,84 @@ async function admitOptionalFieldFormation(
   }
 }
 
-async function appendCreated(
+function persistCreatedEvidence(
+  input: Readonly<{
+    readonly evidenceCapsuleRepo: {
+      createInCurrentTransaction?(
+        capsule: EvidenceCapsule,
+        searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
+        factFrameFormation?: EvidenceFormationPlan["factFrameCapture"],
+        semanticFactorFormation?: EvidenceFormationPlan["semanticFormation"],
+        semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"]
+      ): Readonly<EvidenceCapsule>;
+    };
+    readonly eventLogRepo: {
+      append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">):
+        EventLogEntry | Promise<EventLogEntry>;
+      transactional?<T>(fn: () => T): T;
+    };
+  }>,
+  evidence: EvidenceCapsule,
+  formation: EvidenceFormationPlan
+): { readonly event: EventLogEntry; readonly created: Readonly<EvidenceCapsule> } {
+  const transactional = input.eventLogRepo.transactional;
+  if (transactional === undefined) {
+    throw new CoreError("CONFLICT", "Evidence create requires a transactional EventLog port", {
+      subCode: "PORT_UNAVAILABLE"
+    });
+  }
+  const createInCurrentTransaction = input.evidenceCapsuleRepo.createInCurrentTransaction;
+  if (createInCurrentTransaction === undefined) {
+    throw new CoreError("CONFLICT", "Evidence create transaction port is not available", {
+      subCode: "PORT_UNAVAILABLE"
+    });
+  }
+  return transactional(() => {
+    const event = appendCreatedSynchronously(input.eventLogRepo, evidence);
+    const created = createInCurrentTransaction.call(
+      input.evidenceCapsuleRepo,
+      evidence,
+      formation.searchProjections,
+      formation.factFrameCapture,
+      formation.semanticFormation,
+      formation.semanticCompleteness
+    );
+    return { event, created };
+  });
+}
+
+function appendCreatedSynchronously(
   eventLogRepo: {
     append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">):
       EventLogEntry | Promise<EventLogEntry>;
   },
   evidence: EvidenceCapsule
-): Promise<EventLogEntry> {
-  return await eventLogRepo.append({
-    event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED,
-    entity_type: "evidence_capsule",
-    entity_id: evidence.object_id,
-    workspace_id: evidence.workspace_id,
-    run_id: evidence.run_id,
-    caused_by: evidence.created_by,
-    payload_json: SoulEvidenceCreatedPayloadSchema.parse({
-      object_id: evidence.object_id,
-      object_kind: evidence.object_kind,
+): EventLogEntry {
+  try {
+    return appendEventLogSynchronously(eventLogRepo, {
+      event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED,
+      entity_type: "evidence_capsule",
+      entity_id: evidence.object_id,
       workspace_id: evidence.workspace_id,
-      run_id: evidence.run_id
-    })
-  });
+      run_id: evidence.run_id,
+      caused_by: evidence.created_by,
+      payload_json: SoulEvidenceCreatedPayloadSchema.parse({
+        object_id: evidence.object_id,
+        object_kind: evidence.object_kind,
+        workspace_id: evidence.workspace_id,
+        run_id: evidence.run_id
+      })
+    });
+  } catch (error) {
+    if (error instanceof EventLogSyncAppendRequiredError) {
+      throw new CoreError(
+        "CONFLICT",
+        "Evidence create transaction requires a synchronous EventLog append port.",
+        { cause: error }
+      );
+    }
+    throw error;
+  }
 }
 
 function idleExtractor(extractor?: OpenSemanticFactorExtractionPort): void {

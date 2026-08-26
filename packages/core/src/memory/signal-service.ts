@@ -3,7 +3,8 @@ import {
   SignalEventType,
   SignalState,
   SoulSignalTriagedPayloadSchema,
-  type CandidateMemorySignal
+  type CandidateMemorySignal,
+  type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import {
   assertReplayMatchesExistingSignal,
@@ -36,6 +37,7 @@ import type {
   SignalServiceWarnPort
 } from "./signal-service-types.js";
 import { CoreError } from "../shared/errors.js";
+import { appendMemoryEventLogSynchronously } from "./memory-service/memory-audit-append.js";
 export type {
   SignalListPageOptions,
   SignalMaterializationFailureResult,
@@ -235,22 +237,11 @@ export class SignalService {
   ): Promise<SignalServiceReceiveResult> {
     const triageResult = evaluateSignalTriage(storedSignal);
     const triagedState = mapTriageResultToSignalState(triageResult);
-    const triagedEvent = await this.dependencies.eventLogRepo.append({
-      event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
-      entity_type: "candidate_memory_signal",
-      entity_id: storedSignal.signal_id,
-      workspace_id: storedSignal.workspace_id,
-      run_id: storedSignal.run_id,
-      caused_by: "deterministic_rule",
-      payload_json: SoulSignalTriagedPayloadSchema.parse({
-        signal_id: storedSignal.signal_id,
-        workspace_id: storedSignal.workspace_id,
-        run_id: storedSignal.run_id,
-        triage_result: triageResult
-      })
-    });
-
-    const triagedSignal = await this.dependencies.signalRepo.updateState(storedSignal.signal_id, triagedState);
+    const { triagedEvent, triagedSignal } = this.persistTriagedSignal(
+      storedSignal,
+      triagedState,
+      triageResult
+    );
 
     if (triagedEvent.run_id !== null) {
       await this.dependencies.runtimeNotifier.notifyEntry(triagedEvent);
@@ -271,6 +262,54 @@ export class SignalService {
       triageResult,
       context
     );
+  }
+
+  private persistTriagedSignal(
+    storedSignal: CandidateMemorySignal,
+    triagedState: CandidateMemorySignal["signal_state"],
+    triageResult: ReturnType<typeof evaluateSignalTriage>
+  ): {
+    readonly triagedEvent: EventLogEntry;
+    readonly triagedSignal: CandidateMemorySignal;
+  } {
+    const transactional = this.dependencies.eventLogRepo.transactional;
+    if (transactional === undefined) {
+      throw new CoreError("CONFLICT", "Signal triage requires a transactional EventLog port", {
+        subCode: "PORT_UNAVAILABLE"
+      });
+    }
+    const updateStateInCurrentTransaction = this.dependencies.signalRepo.updateStateInCurrentTransaction;
+    if (updateStateInCurrentTransaction === undefined) {
+      throw new CoreError("CONFLICT", "Signal triage transaction port is not available", {
+        subCode: "PORT_UNAVAILABLE"
+      });
+    }
+    return transactional(() => {
+      const triagedEvent = appendMemoryEventLogSynchronously(
+        this.dependencies.eventLogRepo,
+        {
+          event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
+          entity_type: "candidate_memory_signal",
+          entity_id: storedSignal.signal_id,
+          workspace_id: storedSignal.workspace_id,
+          run_id: storedSignal.run_id,
+          caused_by: "deterministic_rule",
+          payload_json: SoulSignalTriagedPayloadSchema.parse({
+            signal_id: storedSignal.signal_id,
+            workspace_id: storedSignal.workspace_id,
+            run_id: storedSignal.run_id,
+            triage_result: triageResult
+          })
+        },
+        "Signal triage transaction requires a synchronous EventLog append port."
+      );
+      const triagedSignal = updateStateInCurrentTransaction.call(
+        this.dependencies.signalRepo,
+        storedSignal.signal_id,
+        triagedState
+      );
+      return { triagedEvent, triagedSignal };
+    });
   }
 
   /** Compatibility path for isolated fakes; daemon wiring always supplies emissionWriter. */

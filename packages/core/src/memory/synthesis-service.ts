@@ -15,6 +15,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
+import { appendMemoryEventLogSynchronously } from "./memory-service/memory-audit-append.js";
 
 export type SynthesisCapsuleInput = Omit<
   SynthesisCapsule,
@@ -30,10 +31,12 @@ export type SynthesisCapsuleInput = Omit<
 export interface SynthesisServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  transactional?<T>(fn: () => T): T;
 }
 
 export interface SynthesisServiceSynthesisCapsuleRepoPort {
   create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>>;
+  createInCurrentTransaction?(capsule: SynthesisCapsule): Readonly<SynthesisCapsule>;
   findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<SynthesisCapsule>[]>;
   findByTopicKey(workspaceId: string, topicKey: string): Promise<readonly Readonly<SynthesisCapsule>[]>;
@@ -93,24 +96,52 @@ export class SynthesisService {
       this.validateEvidenceRefs(synthesis.evidence_refs),
       this.validateSourceMemoryRefs(synthesis.source_memory_refs)
     ]);
-    const event = await this.dependencies.eventLogRepo.append({
-      event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED,
-      entity_type: "synthesis_capsule",
-      entity_id: synthesis.object_id,
-      workspace_id: synthesis.workspace_id,
-      run_id: synthesis.run_id,
-      caused_by: synthesis.created_by,
-      payload_json: SoulSynthesisCreatedPayloadSchema.parse({
-        object_id: synthesis.object_id,
-        object_kind: synthesis.object_kind,
-        workspace_id: synthesis.workspace_id,
-        run_id: synthesis.run_id
-      })
-    });
-
-    const created = await this.dependencies.synthesisCapsuleRepo.create(synthesis);
+    const { event, created } = this.persistCreatedSynthesis(synthesis);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return created;
+  }
+
+  private persistCreatedSynthesis(synthesis: SynthesisCapsule): {
+    readonly event: EventLogEntry;
+    readonly created: Readonly<SynthesisCapsule>;
+  } {
+    const transactional = this.dependencies.eventLogRepo.transactional;
+    if (transactional === undefined) {
+      throw new CoreError("CONFLICT", "Synthesis create requires a transactional EventLog port", {
+        subCode: "PORT_UNAVAILABLE"
+      });
+    }
+    const createInCurrentTransaction = this.dependencies.synthesisCapsuleRepo.createInCurrentTransaction;
+    if (createInCurrentTransaction === undefined) {
+      throw new CoreError("CONFLICT", "Synthesis create transaction port is not available", {
+        subCode: "PORT_UNAVAILABLE"
+      });
+    }
+    return transactional(() => {
+      const event = appendMemoryEventLogSynchronously(
+        this.dependencies.eventLogRepo,
+        {
+          event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED,
+          entity_type: "synthesis_capsule",
+          entity_id: synthesis.object_id,
+          workspace_id: synthesis.workspace_id,
+          run_id: synthesis.run_id,
+          caused_by: synthesis.created_by,
+          payload_json: SoulSynthesisCreatedPayloadSchema.parse({
+            object_id: synthesis.object_id,
+            object_kind: synthesis.object_kind,
+            workspace_id: synthesis.workspace_id,
+            run_id: synthesis.run_id
+          })
+        },
+        "Synthesis create transaction requires a synchronous EventLog append port."
+      );
+      const created = createInCurrentTransaction.call(
+        this.dependencies.synthesisCapsuleRepo,
+        synthesis
+      );
+      return { event, created };
+    });
   }
 
   public async transitionStatus(

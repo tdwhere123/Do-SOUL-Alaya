@@ -46,6 +46,7 @@ export type EvidenceCapsuleInput = Omit<
 
 export interface EvidenceServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
+  transactional?<T>(fn: () => T): T;
 }
 
 export interface EvidenceListPageOptions {
@@ -62,6 +63,14 @@ export interface EvidenceServiceEvidenceCapsuleRepoPort {
     , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
       .EvidenceOsfSemanticCompletenessReceipt>
   ): Promise<Readonly<EvidenceCapsule>>;
+  createInCurrentTransaction?(
+    capsule: EvidenceCapsule,
+    searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
+    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
+    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
+    , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
+      .EvidenceOsfSemanticCompletenessReceipt>
+  ): Readonly<EvidenceCapsule>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds?(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;

@@ -15,6 +15,7 @@ export type { SourceGroundingDeferStats };
 export interface SignalServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
   queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  transactional?<T>(fn: () => T): T;
 }
 
 export interface SignalServiceSignalRepoPort {
@@ -23,6 +24,10 @@ export interface SignalServiceSignalRepoPort {
   listByRun(runId: string, page?: SignalListPageOptions): Promise<readonly CandidateMemorySignal[]>;
   countByRun?(runId: string): Promise<number>;
   updateState(signalId: string, state: SignalStateValue): Promise<CandidateMemorySignal>;
+  updateStateInCurrentTransaction?(
+    signalId: string,
+    state: SignalStateValue
+  ): CandidateMemorySignal;
 }
 
 /**

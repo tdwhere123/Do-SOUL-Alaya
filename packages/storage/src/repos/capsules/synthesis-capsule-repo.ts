@@ -33,6 +33,7 @@ export type { SynthesisCapsuleKeywordHit } from
 
 export interface SynthesisCapsuleRepo {
   create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>>;
+  createInCurrentTransaction(capsule: SynthesisCapsule): Readonly<SynthesisCapsule>;
   findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null>;
   findByIds(
     workspaceId: string,
@@ -187,8 +188,15 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   }
 
   public async create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>> {
-    const parsedCapsule = parseSynthesisCapsule(capsule);
+    const run = () => this.createInCurrentTransaction(capsule);
+    if (this.db.connection.inTransaction) {
+      return run();
+    }
+    return this.db.connection.transaction(run)();
+  }
 
+  public createInCurrentTransaction(capsule: SynthesisCapsule): Readonly<SynthesisCapsule> {
+    const parsedCapsule = parseSynthesisCapsule(capsule);
     try {
       this.statements.createStatement.run(
         parsedCapsule.object_id,
@@ -214,7 +222,6 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
         error
       );
     }
-
     return parsedCapsule;
   }
 

@@ -453,36 +453,21 @@ describe("EventPublisher.appendManyWithMutation wiring (fake EventLog repo)", ()
     expect(repo.rows).toHaveLength(3);
   });
 
-  it("treats an empty event list as a passthrough mutate call", async () => {
+  it("rejects an empty event list without running mutate", async () => {
     const repo = buildFakeRepo();
     const publisher = new EventPublisher({
       eventLogRepo: repo,
       runHotStateService: { apply: vi.fn() },
       runtimeNotifier: { notify: vi.fn(), notifyEntry: vi.fn() }
     });
+    const mutate = vi.fn(() => "should-not-run");
 
-    const result = await publisher.appendManyWithMutation([], (entries) => {
-      expect(entries).toEqual([]);
-      return "no-op";
+    await expect(publisher.appendManyWithMutation([], mutate)).rejects.toMatchObject({
+      name: "CoreError",
+      code: "CONFLICT",
+      message: "Empty EventPublisher batches cannot mutate"
     });
-    expect(result).toBe("no-op");
-    expect(repo.rows).toEqual([]);
-  });
-
-  it("rejects an accidentally-async empty-batch mutate callback", async () => {
-    const repo = buildFakeRepo();
-    const publisher = new EventPublisher({
-      eventLogRepo: repo,
-      runHotStateService: { apply: vi.fn() },
-      runtimeNotifier: { notify: vi.fn(), notifyEntry: vi.fn() }
-    });
-
-    await expect(
-      publisher.appendManyWithMutation(
-        [],
-        (async () => "should-not-commit") as unknown as () => string
-      )
-    ).rejects.toThrow(/must be synchronous/);
+    expect(mutate).not.toHaveBeenCalled();
     expect(repo.rows).toEqual([]);
   });
 });

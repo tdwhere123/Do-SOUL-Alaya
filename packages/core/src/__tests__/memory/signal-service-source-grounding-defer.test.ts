@@ -10,7 +10,7 @@ import {
   type SourceGroundingDeferTransitionPort
 } from "../../memory/signal-service.js";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
-import { createSignal } from "./signal-service.test-support.js";
+import { atomicUpdateState, createSignal } from "./signal-service.test-support.js";
 function createDeferredMaterialization(reason: string) {
   return {
     signal_id: "signal-1",
@@ -143,7 +143,8 @@ function createHarness(options?: {
         appendedEvents.filter(
           (event) => event.entity_type === entityType && event.entity_id === entityId
         )
-      )
+      ),
+      transactional: <T>(fn: () => T) => fn()
     },
     signalRepo: {
       create: vi.fn(async (signal) => {
@@ -153,7 +154,7 @@ function createHarness(options?: {
       }),
       getById: vi.fn(async (signalId) => signals.get(signalId) ?? null),
       listByRun: vi.fn(async () => []),
-      updateState: vi.fn(async (signalId, state) => {
+      ...atomicUpdateState((signalId, state) => {
         const existing = signals.get(signalId) ?? createSignal({ signal_id: signalId });
         const next = { ...existing, signal_state: state };
         signals.set(signalId, next);

@@ -155,6 +155,17 @@ export interface MemoryEntryWritePort {
     workspaceId: string,
     fields: MemoryEntryRepoUpdateFields
   ): Promise<Readonly<MemoryEntry>>;
+  // invariant: callbacks commit atomically with the row update.
+  // see also: packages/storage/src/repos/memory-entry/sqlite-memory-entry-repo.ts:updateWithinTransaction.
+  updateWithinTransaction?(
+    objectId: string,
+    fields: MemoryEntryRepoUpdateFields,
+    callbacks: {
+      readonly beforeUpdate?: () => void;
+      readonly afterUpdate?: () => void;
+    },
+    workspaceId?: string
+  ): Readonly<MemoryEntry>;
 }
 
 export interface MemoryEntryLifecyclePort {

@@ -4,8 +4,7 @@ import { vi, type Mock } from "vitest";
 import {
   EvidenceService,
   type EvidenceCapsuleInput,
-  type EvidenceServiceDependencies,
-  type EvidenceServiceEvidenceCapsuleRepoPort
+  type EvidenceServiceDependencies
 } from "../../memory/evidence-service.js";
 
 export function createEvidenceInput(
@@ -47,14 +46,12 @@ export function createCreationHarness(
   } = {}
 ) {
   const store = new Map<string, EvidenceCapsule>();
-  const create = vi.fn<EvidenceServiceEvidenceCapsuleRepoPort["create"]>(
-    async (capsule) => {
-      const frozen = Object.freeze({ ...capsule });
-      store.set(capsule.object_id, frozen);
-      return frozen;
-    }
-  );
-  const append = vi.fn(async (
+  const create = vi.fn((capsule: EvidenceCapsule) => {
+    const frozen = Object.freeze({ ...capsule });
+    store.set(capsule.object_id, frozen);
+    return frozen;
+  });
+  const append = vi.fn((
     event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
   ) => ({
     ...event,
@@ -66,10 +63,11 @@ export function createCreationHarness(
   const service = new EvidenceService({
     now: () => "2026-03-20T01:00:00.000Z",
     generateObjectId: generateObjectId ?? (() => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"),
-    eventLogRepo: { append },
+    eventLogRepo: { append, transactional: <T>(fn: () => T) => fn() },
     ...serviceDependencies,
     evidenceCapsuleRepo: {
       create,
+      createInCurrentTransaction: create,
       deleteById: deleteById ?? vi.fn(),
       findById: vi.fn(async (objectId: string) => store.get(objectId) ?? null),
       findByRunId: vi.fn(async () => []),

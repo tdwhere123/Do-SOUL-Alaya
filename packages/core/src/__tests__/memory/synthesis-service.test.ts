@@ -76,7 +76,7 @@ function createDependencies(overrides: Partial<SynthesisServiceDependencies> = {
   readonly memoryFindByIdSpy: ReturnType<typeof vi.fn>;
   readonly notifySpy: ReturnType<typeof vi.fn>;
 } {
-  const appendSpy = vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+  const appendSpy = vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
     event_id: `event-${event.event_type}`,
     created_at: "2026-03-21T00:00:00.000Z",
     revision: 0,
@@ -92,6 +92,7 @@ function createDependencies(overrides: Partial<SynthesisServiceDependencies> = {
     generateObjectId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
     synthesisCapsuleRepo: {
       create: vi.fn(async (capsule) => Object.freeze({ ...capsule })),
+      createInCurrentTransaction: vi.fn((capsule) => Object.freeze({ ...capsule })),
       findById: vi.fn(async () => createSynthesisCapsule()),
       findByWorkspaceId: vi.fn(async () => []),
       findByTopicKey: vi.fn(async () => []),
@@ -107,7 +108,8 @@ function createDependencies(overrides: Partial<SynthesisServiceDependencies> = {
     },
     eventLogRepo: {
       append: appendSpy,
-      queryByEntity: queryByEntitySpy
+      queryByEntity: queryByEntitySpy,
+      transactional: <T>(fn: () => T) => fn()
     },
     runtimeNotifier: {
       notifyEntry: notifySpy
@@ -129,9 +131,13 @@ describe("SynthesisService", () => {
   it("writes soul.synthesis.created before persistence and runtime notification", async () => {
     const order: string[] = [];
 
+    const persist = vi.fn((capsule: SynthesisCapsule) => {
+      order.push("repo_create");
+      return Object.freeze({ ...capsule });
+    });
     const { dependencies } = createDependencies({
       eventLogRepo: {
-        append: vi.fn(async (event) => {
+        append: vi.fn((event) => {
           order.push("event_log");
           return {
             event_id: "event-created",
@@ -143,13 +149,12 @@ describe("SynthesisService", () => {
         queryByEntity: vi.fn(async () => {
           order.push("event_query");
           return [];
-        })
+        }),
+        transactional: <T>(fn: () => T) => fn()
       },
       synthesisCapsuleRepo: {
-        create: vi.fn(async (capsule) => {
-          order.push("repo_create");
-          return Object.freeze({ ...capsule });
-        }),
+        create: vi.fn(async (capsule) => persist(capsule)),
+        createInCurrentTransaction: persist,
         findById: vi.fn(async () => null),
         findByWorkspaceId: vi.fn(async () => []),
         findByTopicKey: vi.fn(async () => []),
@@ -169,6 +174,52 @@ describe("SynthesisService", () => {
 
     expect(order).toEqual(["event_log", "repo_create", "notify"]);
     expect(created.object_id).toBe("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9");
+  });
+
+  it("rolls back the EventLog row when synthesis create throws", async () => {
+    const events: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
+    const notify = vi.fn();
+    const { dependencies } = createDependencies({
+      eventLogRepo: {
+        append: vi.fn((event) => {
+          events.push(event);
+          return {
+            event_id: "event-created",
+            created_at: "2026-03-21T01:00:00.000Z",
+            revision: 0,
+            ...event
+          };
+        }),
+        queryByEntity: vi.fn(async () => []),
+        transactional: <T>(fn: () => T) => {
+          const start = events.length;
+          try {
+            return fn();
+          } catch (error) {
+            events.length = start;
+            throw error;
+          }
+        }
+      },
+      synthesisCapsuleRepo: {
+        create: vi.fn(async (capsule) => capsule),
+        createInCurrentTransaction: vi.fn(() => {
+          throw new Error("row failed");
+        }),
+        findById: vi.fn(async () => null),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByTopicKey: vi.fn(async () => []),
+        updateStatus: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      },
+      runtimeNotifier: { notifyEntry: notify }
+    });
+
+    const service = new SynthesisService(dependencies);
+    await expect(service.create(createSynthesisInput())).rejects.toThrow("row failed");
+    expect(events).toEqual([]);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("rejects create when evidence reference is missing before EventLog writes", async () => {
