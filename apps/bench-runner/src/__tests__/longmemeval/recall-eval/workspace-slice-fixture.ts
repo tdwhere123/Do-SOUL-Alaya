@@ -61,8 +61,7 @@ export async function createPackedTwoWorkspaceDb(path: string): Promise<void> {
   database.close();
 }
 
-// Packed receipts stay corpus-wide; each slice keeps only one workspace's
-// relation_path_projections. The runtime gate compares those two numbers.
+// History operator tables stay corpus-wide even though they carry workspace_id.
 export function plantPackedPathProjections(path: string): void {
   const database = initDatabase({ filename: path });
   try {
