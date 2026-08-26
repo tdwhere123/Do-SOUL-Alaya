@@ -57,15 +57,17 @@ export function createRecallReadWorkerClient(input: {
     return null;
   }
 
+  // Source vitest must not inherit a leftover dist worker.
+  if (input.workerUrl === undefined && isSourceRuntimeUrl(import.meta.url)) {
+    input.warn?.(
+      "recall read worker script unavailable in source runtime; using direct sqlite recall reads",
+      { reason: "worker_script_missing" }
+    );
+    return null;
+  }
+
   const workerUrl = input.workerUrl ?? resolveDefaultWorkerUrl();
   if (workerUrl === null) {
-    if (isSourceRuntimeUrl(import.meta.url)) {
-      input.warn?.(
-        "recall read worker script unavailable in source runtime; using direct sqlite recall reads",
-        { reason: "worker_script_missing" }
-      );
-      return null;
-    }
     throw new Error("recall read worker script is missing");
   }
 

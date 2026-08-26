@@ -29,7 +29,8 @@ import {
   TOKEN_B,
   WORKSPACE_A,
   WORKSPACE_B,
-  writeOverlayBindBeside
+  writeOverlayBindBeside,
+  writeRealMemoryOverlayBeside
 } from "./workspace-slice-fixture.js";
 
 const OVERLAY_SHA = "a".repeat(64);
@@ -287,6 +288,33 @@ describe("workspace slice install and daemon reopen", () => {
       .toContain(MEMORY_B);
     await attachedB.detach();
   }, 120_000);
+
+  it("loads slice B on a live overlay-attached connection without losing the projection", () => {
+    const dataDir = join(root, "overlay-live-slice");
+    installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
+    writeRealMemoryOverlayBeside(workingAlayaDbPath(dataDir), MEMORY_A, WORKSPACE_A);
+    const slices = explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
+    expect(slices).not.toBeNull();
+    installRecallEvalWorkspaceSlice({
+      dataDirRoot: dataDir,
+      workspaceId: WORKSPACE_A,
+      slices: slices!
+    });
+    const live = initDatabase({ filename: workingAlayaDbPath(dataDir) });
+    try {
+      expect(() => installRecallEvalWorkspaceSlice({
+        dataDirRoot: dataDir,
+        workspaceId: WORKSPACE_B,
+        slices: slices!
+      })).not.toThrow();
+      expect(matchObjectIds(live, "memory_content_fts_porter", TOKEN_B)).toEqual([MEMORY_B]);
+      expect(matchObjectIds(live, "memory_content_fts_porter", TOKEN_A)).toEqual([]);
+      expect(countTable(live, "memory_embeddings")).toBe(1);
+      expect(countTable(live, "main.memory_embeddings")).toBe(0);
+    } finally {
+      live.close();
+    }
+  });
 
   it("restores foreign_keys after a failed slice attach", () => {
     const dataDir = join(root, "fk-restore");

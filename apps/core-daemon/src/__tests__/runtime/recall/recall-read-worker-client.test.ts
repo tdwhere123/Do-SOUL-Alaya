@@ -24,6 +24,18 @@ function assertBuiltWorker(): void {
 }
 
 describe("RecallReadWorkerClient", () => {
+  it("does not attach a leftover dist worker when default-constructed from source", async () => {
+    expect(existsSync(fileURLToPath(builtWorkerUrl))).toBe(true);
+    const client = createRecallReadWorkerClient({
+      databaseFilename: join(tmpdir(), `alaya-source-runtime-${randomUUID()}.db`)
+    });
+    try {
+      expect(client).toBeNull();
+    } finally {
+      await client?.close();
+    }
+  });
+
   it("keeps the daemon event loop available during a file-backed SQLite recall read", async () => {
     assertBuiltWorker();
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-test-"));

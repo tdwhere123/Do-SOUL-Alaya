@@ -1,4 +1,8 @@
-import type { StorageDatabase } from "@do-soul/alaya-storage";
+import {
+  bindEmbeddingOverlayIfPresent,
+  detachEmbeddingOverlay,
+  type StorageDatabase
+} from "@do-soul/alaya-storage";
 import { createSqliteCatalogReader } from "./catalog-reader.js";
 import { classifyPackedTables, type ClassifiedCatalog } from "./classify-tables.js";
 import {
@@ -15,8 +19,10 @@ export function loadSliceIntoOpenDatabase(
   live: StorageDatabase,
   sliceDbPath: string
 ): void {
-  const catalog = classifyPackedTables(createSqliteCatalogReader(live.connection));
   const triggers = readTriggers(live);
+  // TEMP overlay views must not shadow main table DML during slice replace.
+  detachEmbeddingOverlay(live.connection);
+  const catalog = classifyPackedTables(createSqliteCatalogReader(live.connection));
   dropTriggers(live, triggers);
   live.connection.pragma("foreign_keys = OFF");
   let attached = false;
@@ -36,6 +42,7 @@ export function loadSliceIntoOpenDatabase(
     }
     live.connection.pragma("foreign_keys = ON");
     restoreTriggers(live, triggers);
+    bindEmbeddingOverlayIfPresent(live.connection, live.filename);
   }
 }
 

@@ -22,8 +22,10 @@ import {
   SqliteWorkspaceRepo,
   writeEmbeddingOverlayBind
 } from "@do-soul/alaya-storage";
-import { writeFileSync } from "node:fs";
+import BetterSqlite3 from "better-sqlite3";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { createOverlaySchema } from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/overlay-schema.js";
 
 export const WORKSPACE_A = "workspace-a";
 export const WORKSPACE_B = "workspace-b";
@@ -67,6 +69,52 @@ export function writeOverlayBindBeside(dbPath: string, overlaySha256: string): s
     overlaySha256
   });
   return overlayPath;
+}
+
+export function writeRealMemoryOverlayBeside(
+  dbPath: string,
+  objectId: string,
+  workspaceId: string
+): string {
+  const overlayFilename = "overlay.sqlite";
+  const overlayPath = join(dirname(dbPath), overlayFilename);
+  const overlay = new BetterSqlite3(overlayPath);
+  try {
+    createOverlaySchema(overlay);
+    overlay.prepare(`
+      INSERT INTO memory_embeddings (
+        object_id, workspace_id, content_hash, provider_kind, model_id,
+        schema_version, dimensions, embedding_blob, vector_valid, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(
+      objectId,
+      workspaceId,
+      "sha256:memory",
+      "local_onnx",
+      "fixture-model",
+      1,
+      2,
+      encodeVector(new Float32Array([1, 2])),
+      CLOCK,
+      CLOCK
+    );
+  } finally {
+    overlay.close();
+  }
+  writeEmbeddingOverlayBind({
+    databaseFilename: dbPath,
+    overlayFilename,
+    overlaySha256: createHash("sha256").update(readFileSync(overlayPath)).digest("hex")
+  });
+  return overlayPath;
+}
+
+function encodeVector(vector: Float32Array): Buffer {
+  const bytes = Buffer.alloc(vector.length * Float32Array.BYTES_PER_ELEMENT);
+  vector.forEach((value, index) => bytes.writeFloatLE(
+    value, index * Float32Array.BYTES_PER_ELEMENT
+  ));
+  return bytes;
 }
 
 async function seedHaystack(
