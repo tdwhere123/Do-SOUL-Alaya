@@ -11,8 +11,6 @@ const BENCH_CACHE_SIZE_KIB_ENV = "ALAYA_BENCH_CACHE_SIZE_KIB";
 // working set; cap stops a multi-GB snapshot from pinning the whole file.
 const CACHE_FLOOR_KIB = 65_536;
 const CACHE_CAP_KIB = 1_048_576;
-// SQLite's default SQLITE_MAX_MMAP_SIZE is 2 GiB minus 64 KiB (0x7fff0000).
-const MMAP_CAP_BYTES = 0x7fff0000;
 
 function isBenchFastPragmaEnabled(): boolean {
   const raw = process.env[BENCH_FAST_PRAGMA_ENV];
@@ -62,14 +60,12 @@ function resolveBenchCacheSizeKib(fileBytes: number): number {
   return Math.min(CACHE_CAP_KIB, Math.max(CACHE_FLOOR_KIB, quarterKib));
 }
 
-// Skip mmap on tiny files so they keep SQLite's default (typically 0)
-// instead of a size-dependent mapping that does not help recall-eval.
-// Overlay-bound eval keeps mmap off so ORT and a multi-GB pager do not share
-// a 2 GiB mapping on the working copy.
+// Tiny DBs leave mmap at SQLite's default. Large working copies set mmap_size=0:
+// WSL2 SIGBUS'd a long-lived pager that mmap'd a multi-GB working copy.
 function resolveBenchMmapSize(fileBytes: number, workingDbPath: string): number | undefined {
   if (hasEmbeddingOverlayBind(workingDbPath)) return 0;
   if (fileBytes < CACHE_FLOOR_KIB * 1024) return undefined;
-  return Math.min(fileBytes, MMAP_CAP_BYTES);
+  return 0;
 }
 
 function benchPragmaList(

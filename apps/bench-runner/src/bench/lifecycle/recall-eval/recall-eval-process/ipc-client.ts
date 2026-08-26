@@ -93,7 +93,7 @@ export class RecallEvalPagerIpcSession {
   private child: RecallEvalPagerIpcProcess | null = null;
   private nextId = 0;
   private childEpoch = 0;
-  private recycling = false;
+  private closing = false;
   private openPayload: unknown | undefined;
   private readonly selectionArtifacts = new RecallEvalSelectionArtifactCollector();
   private readonly pending = new Map<number, PendingIpcRequest>();
@@ -138,7 +138,6 @@ export class RecallEvalPagerIpcSession {
     if (response.pack === undefined || !hasRecallPack(response.pack)) {
       throw new Error("recall-eval pager child returned an empty pack.");
     }
-    await this.recycleChild(timeoutMs);
     this.selectionArtifacts.recordQuestion(payload);
     return response.pack;
   }
@@ -148,15 +147,16 @@ export class RecallEvalPagerIpcSession {
   ): Promise<unknown> {
     const child = this.child;
     if (child === null) return this.selectionArtifacts.finalize();
+    this.closing = true;
     try {
       await this.closeAttachedChild(timeoutMs);
-      return await this.selectionArtifacts.finalize();
     } catch (error) {
       this.exitError ??= toPagerExitError(error, this.childPid, this.mapsHint);
       throw this.exitError;
     } finally {
-      this.reapChild(child, true);
+      this.reapChild(child, this.exitError !== null);
     }
+    return this.selectionArtifacts.finalize();
   }
 
   private async ensureOpened(timeoutMs: number): Promise<void> {
@@ -167,19 +167,6 @@ export class RecallEvalPagerIpcSession {
     }
     const response = await this.request("open", { open: this.openPayload }, timeoutMs);
     this.recordIdentity(response);
-  }
-
-  private async recycleChild(timeoutMs: number): Promise<void> {
-    const child = this.child;
-    if (child === null) return;
-    // Long-lived pager SIGBUS'd after Q1; Q2 must not inherit that address space.
-    this.recycling = true;
-    try {
-      await this.closeAttachedChild(timeoutMs);
-    } finally {
-      this.recycling = false;
-      this.reapChild(child, this.exitError !== null);
-    }
   }
 
   private async closeAttachedChild(timeoutMs: number): Promise<void> {
@@ -276,7 +263,8 @@ export class RecallEvalPagerIpcSession {
   ): void {
     if (epoch !== this.childEpoch) return;
     this.child = null;
-    if (this.recycling && isCleanPagerExit(code, exitSignal)) {
+    // Session close() exit 0/SIGTERM must not fail-close the in-flight close.
+    if (this.closing && isCleanPagerExit(code, exitSignal)) {
       resolvePendingAsSuccess(this.pending);
       return;
     }

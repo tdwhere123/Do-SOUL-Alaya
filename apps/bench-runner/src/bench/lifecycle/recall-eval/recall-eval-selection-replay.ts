@@ -1,5 +1,5 @@
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { rm } from "node:fs/promises";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from
@@ -61,8 +61,18 @@ export async function assembleRecallEvalSelectionBoundaryArtifacts(input: {
   if (input.artifacts.length === 0 && input.expectedQuestionIds.length === 0) {
     return null;
   }
-  if (input.artifacts.length !== input.expectedQuestionIds.length) {
+  const keepAliveWindow = input.artifacts.length === 1 &&
+    input.expectedQuestionIds.length > 1;
+  if (!keepAliveWindow &&
+      input.artifacts.length !== input.expectedQuestionIds.length) {
     throw new Error("selection replay child artifact count differs from evaluated window");
+  }
+  if (keepAliveWindow) {
+    const artifact = input.artifacts[0];
+    if (artifact === undefined) {
+      throw new Error("selection replay assembly lost an evaluated question");
+    }
+    return adoptKeepAliveSelectionArtifact(artifact, input.expectedQuestionIds);
   }
   const spool = await createLongMemEvalSelectionBoundarySpool({
     env: { ALAYA_BENCH_SELECTION_REPLAY: "1" },
@@ -96,6 +106,30 @@ export async function assembleRecallEvalSelectionBoundaryArtifacts(input: {
     return assembled;
   } catch (error) {
     await spool.dispose();
+    throw error;
+  }
+}
+
+// Keep-alive pager emits one child artifact for the evaluated window.
+async function adoptKeepAliveSelectionArtifact(
+  artifact: RecallEvalSelectionBoundaryArtifact,
+  expectedQuestionIds: readonly string[]
+): Promise<RecallEvalSelectionBoundaryArtifact> {
+  const verified = await verifyLongMemEvalSelectionBoundaryArtifact(
+    artifact.sourcePath
+  );
+  const expectedDigest = computeLongMemEvalQuestionIdDigest(expectedQuestionIds);
+  if (verified.questionCount !== expectedQuestionIds.length ||
+      verified.questionIdDigest !== expectedDigest) {
+    throw new Error("selection replay run artifact differs from evaluated window");
+  }
+  const rootPath = await mkdtemp(join(tmpdir(), "alaya-selection-replay-"));
+  const sourcePath = join(rootPath, RECALL_EVAL_SELECTION_BOUNDARY_FILENAME);
+  try {
+    await copyFile(artifact.sourcePath, sourcePath);
+    return { rootPath, sourcePath, binding: artifact.binding };
+  } catch (error) {
+    await rm(rootPath, { recursive: true, force: true });
     throw error;
   }
 }

@@ -102,7 +102,32 @@ describe("evidence semantic completeness", () => {
       evidence_formations: { evidence: certified.semanticFormation }
     })).toMatchObject({ status: "no_match", solution_count: 0 });
   });
+
+  it("does not reject a formed Garden graph when the fact-frame never formed", () => {
+    const source = "I graduated with a degree in Business Administration, which has definitely helped me in my new role.";
+    const semanticFormation = formation(source, graduationGraph());
+    const factFrame = unavailableFrame(source);
+    const certified = certifyEvidenceSemanticCompleteness({
+      sourceText: source,
+      factFrame,
+      semanticFormation
+    });
+
+    expect(semanticFormation.status).toBe("formed");
+    expect(factFrame.status).not.toBe("formed");
+    expect(certified).toMatchObject({
+      receipt: { status: "not_applicable", reason_code: "upstream_not_formed" },
+      semanticFormation: { status: "unavailable", graph: null }
+    });
+  });
 });
+
+function unavailableFrame(source: string) {
+  return materializeEvidenceFactFrameFormation({
+    sourceAssertion: source,
+    sourceHash: "sha256:test-source"
+  }).capture;
+}
 
 function factFrame(
   source: string,

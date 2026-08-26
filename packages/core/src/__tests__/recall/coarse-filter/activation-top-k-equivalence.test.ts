@@ -118,10 +118,43 @@ describe("JS fallback activation-admission floor", () => {
     expect(selected.map((entry) => entry.object_id)).toEqual(["memory-high"]);
   });
 
+  it("rethrows SQL failure when fallbackOnSqlFailure is false", async () => {
+    await expect(loadActivationAdmissionTopK({
+      memoryRepo: {
+        findByWorkspaceId: async () => [],
+        findByDimension: async () => [],
+        findByScopeClass: async () => [],
+        findRecallActivationTopK: async () => {
+          throw new Error("sql top-K failed");
+        }
+      },
+      workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID,
+      tier: StorageTier.HOT,
+      config: {
+        deterministic_match: {
+          scope_filter: null,
+          dimension_filter: null,
+          domain_tag_filter: null
+        },
+        precomputed_rank: {
+          max_candidates: 5,
+          min_activation_score: null
+        },
+        semantic_supplement: {
+          enabled: false,
+          max_supplement: 0
+        }
+      },
+      eligible: [],
+      excludeObjectIds: new Set(),
+      allowSql: true,
+      fallbackOnSqlFailure: false
+    })).rejects.toThrow("sql top-K failed");
+  });
+
   it("warns with activation_topk_sql_fallback then uses the in-memory window", async () => {
     const high = createMemoryEntry({ object_id: "memory-high", activation_score: 0.9 });
     const warn = vi.fn();
-
     const selected = await loadActivationAdmissionTopK({
       memoryRepo: {
         findByWorkspaceId: async () => [],

@@ -150,11 +150,10 @@ describe("formation eligibility live producer to consumer path", () => {
       .not.toBe("rejected");
   });
 
-  it("canonicalizes an incomplete garden graph from the formed fact frame", async () => {
+  it("canonicalizes an incomplete Official API graph from the live fact-frame", async () => {
     const runtime = await openEligibilityRuntime();
     const received = await runtime.signalService.receiveSignal(
       assertionSignal("signal-incomplete", {
-        fact_frame: binaryUseFactFrame(),
         semantic_factor_graph: unaryUseEvidenceGraph()
       })
     );

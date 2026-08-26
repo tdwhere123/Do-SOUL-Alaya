@@ -196,7 +196,7 @@ describe("EvidenceService source formation", () => {
     expect(base.listIncidences("workspace-1").length).toBeGreaterThan(0);
   });
 
-  it("rejects a formed graph when no formed fact frame exists", async () => {
+  it("keeps a formed graph unavailable when no formed fact frame exists", async () => {
     const stores = createInMemoryFieldStores();
     const { service, create } = createCreationHarness({
       fieldStores: stores,
@@ -213,7 +213,7 @@ describe("EvidenceService source formation", () => {
     });
 
     const capture = create.mock.calls[0]?.[3];
-    expect(capture).toMatchObject({ status: "rejected", graph: null });
+    expect(capture).toMatchObject({ status: "unavailable", graph: null });
     const identity = hashDerivationJobId({
       purpose: "f3_semantic_capture",
       operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,

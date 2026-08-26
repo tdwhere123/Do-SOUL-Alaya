@@ -24,14 +24,23 @@ export interface TemporalProjectionReadOptions {
   readonly asOf?: string;
 }
 
+type TemporalProjectionRepo = Pick<RelationAssertionRepo,
+  "findActiveProjectionByWorkspace" | "findProjectionByWorkspaceAtAsOf">
+  & Partial<Pick<RelationAssertionRepo, "readActiveProjectionGenerationInCurrentTransaction">>;
+
 /**
  * Read-only adapter for temporal PathRelation projections. It deliberately
  * has no legacy-table fallback: selection decides which reader the runtime
  * receives, and this reader only exposes verified projection generations.
  */
 export class SqliteTemporalPathProjectionReader {
-  public constructor(private readonly relationAssertions: Pick<RelationAssertionRepo,
-    "findActiveProjectionByWorkspace" | "findProjectionByWorkspaceAtAsOf">) {}
+  // findByAnchors filters in JS; re-parse of the same generation is wasted.
+  private readonly parsedProjections = new Map<
+    string,
+    Promise<readonly Readonly<PathRelation>[]>
+  >();
+
+  public constructor(private readonly relationAssertions: TemporalProjectionRepo) {}
 
   public async findByWorkspace(
     workspaceId: string,
@@ -70,6 +79,34 @@ export class SqliteTemporalPathProjectionReader {
   }
 
   private async readProjection(
+    workspaceId: string,
+    asOf: string | undefined
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    const cacheKey = this.projectionCacheKey(workspaceId, asOf);
+    const cached = this.parsedProjections.get(cacheKey);
+    if (cached !== undefined) return cached;
+    const pending = this.loadProjection(workspaceId, asOf).then(
+      (loaded) => loaded,
+      (error: unknown) => {
+        this.parsedProjections.delete(cacheKey);
+        throw error;
+      }
+    );
+    this.parsedProjections.set(cacheKey, pending);
+    return pending;
+  }
+
+  private projectionCacheKey(workspaceId: string, asOf: string | undefined): string {
+    const generation = asOf === undefined ? this.activeGenerationOrEmpty() : "";
+    return `${workspaceId}\0${asOf ?? ""}\0${generation}`;
+  }
+
+  private activeGenerationOrEmpty(): string {
+    // A rebuilt active generation is invisible unless the repo exposes the generation id.
+    return this.relationAssertions.readActiveProjectionGenerationInCurrentTransaction?.() ?? "";
+  }
+
+  private async loadProjection(
     workspaceId: string,
     asOf: string | undefined
   ): Promise<readonly Readonly<PathRelation>[]> {

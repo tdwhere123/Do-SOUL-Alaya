@@ -26,6 +26,7 @@ export async function loadActivationAdmissionTopK(params: Readonly<{
   readonly eligible: readonly Readonly<MemoryEntry>[];
   readonly excludeObjectIds: ReadonlySet<string>;
   readonly allowSql: boolean;
+  readonly fallbackOnSqlFailure?: boolean;
   readonly warn?: RecallServiceWarnPort;
 }>): Promise<readonly Readonly<MemoryEntry>[]> {
   const limit = params.config.precomputed_rank.max_candidates;
@@ -56,6 +57,8 @@ export async function loadActivationAdmissionTopK(params: Readonly<{
       limit
     );
   } catch (error) {
+    // Empty eligible is not a HOT window; swallowing would drop the activation plane.
+    if (params.fallbackOnSqlFailure === false) throw error;
     params.warn?.("activation top-k sql fallback", {
       code: "activation_topk_sql_fallback",
       workspace_id: params.workspaceId,

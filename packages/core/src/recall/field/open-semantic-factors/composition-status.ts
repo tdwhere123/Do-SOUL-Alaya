@@ -22,13 +22,12 @@ export function classifyOpenSemanticFactorCompositionStatus(params: Readonly<{
   if (query.status !== "formed") return "unavailable";
   if (solutionCount > 0) return "composed";
   const statuses = new Set(trace.entries.map(({ receipt }) => receipt.status));
-  if (trace.incomparable_seal === "rejected" || statuses.has("rejected")) {
+  const finishedMatchable = !truncated && !trace.truncated && trace.entries.length > 0;
+  // Remainder rows cannot change the match set once every matchable graph was searched.
+  if (finishedMatchable) return "no_match";
+  if (statuses.has("rejected") || trace.incomparable_seal === "rejected") {
     return "rejected";
   }
-  const finishedIncompatible = !truncated && !trace.truncated &&
-    trace.entries.length > 0 &&
-    trace.entries.every(({ receipt }) => receipt.status === "incompatible");
-  if (finishedIncompatible) return "no_match";
   if (trace.incomparable_seal === "unavailable" || statuses.has("unavailable")) {
     return "unavailable";
   }

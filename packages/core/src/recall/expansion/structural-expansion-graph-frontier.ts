@@ -15,6 +15,7 @@ import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { classifyPathIndexReadFailure } from "../runtime/legacy-path-index-unbound-error.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
+import { hydrateMemoriesById } from "../coarse-filter/pagination/recall-id-hydrate.js";
 import type {
   RecallServiceDependencies,
   RecallServiceWarnPort
@@ -28,6 +29,8 @@ type ExpandGraphFrontierParams = Readonly<{
   readonly seedEntries: readonly Readonly<MemoryEntry>[];
   readonly maxGraphHops: number;
   readonly dynamicRecallEdgeFanout: number;
+  readonly memoryRepo?: RecallServiceDependencies["memoryRepo"];
+  readonly tier?: MemoryEntry["storage_tier"];
   readonly warn: RecallServiceWarnPort;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
   readonly onCandidate: (candidate: Readonly<GraphExpansionCandidateDraft>) => void;
@@ -67,7 +70,7 @@ export async function expandGraphFrontier(params: ExpandGraphFrontierParams): Pr
     if (frontierIds.length === 0) {
       break;
     }
-    const eligiblePaths = await loadEligibleGraphExpansionPaths(params, frontierIds);
+    const eligiblePaths = await loadHydratedGraphExpansionPaths(params, frontierIds);
     if (eligiblePaths === null) {
       break;
     }
@@ -93,7 +96,7 @@ export async function expandGraphFrontiersBySeed(
       break;
     }
     const frontierIds = collectUnionFrontierIds(pendingStates);
-    const eligiblePaths = await loadEligibleGraphExpansionPaths(
+    const eligiblePaths = await loadHydratedGraphExpansionPaths(
       params,
       frontierIds,
       []
@@ -115,7 +118,7 @@ async function expandPendingGraphFrontiersIndividually(
   hop: 1 | 2
 ): Promise<void> {
   for (const pending of pendingStates) {
-    const eligiblePaths = await loadEligibleGraphExpansionPaths(params, pending.frontierIds);
+    const eligiblePaths = await loadHydratedGraphExpansionPaths(params, pending.frontierIds);
     if (eligiblePaths === null) {
       pending.state.frontier = [];
       continue;
@@ -205,6 +208,41 @@ function collectFrontierIdsToExpand(
   return frontier
     .map((node) => node.memoryId)
     .filter((memoryId) => !expandedIds.has(memoryId));
+}
+
+async function loadHydratedGraphExpansionPaths(
+  params: ExpandGraphFrontierParams | ExpandGraphFrontiersBySeedParams,
+  frontierIds: readonly string[],
+  failureSeedCounts: readonly number[] = [frontierIds.length]
+): Promise<readonly Readonly<PathRelation>[] | null> {
+  const eligiblePaths = await loadEligibleGraphExpansionPaths(
+    params, frontierIds, failureSeedCounts
+  );
+  if (eligiblePaths === null || eligiblePaths.length === 0) {
+    return eligiblePaths;
+  }
+  await hydrateGraphPathNeighbors(params, eligiblePaths);
+  return eligiblePaths;
+}
+
+async function hydrateGraphPathNeighbors(
+  params: Readonly<{
+    readonly workspaceId: string;
+    readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+    readonly memoryRepo?: RecallServiceDependencies["memoryRepo"];
+    readonly tier?: MemoryEntry["storage_tier"];
+  }>,
+  paths: readonly Readonly<PathRelation>[]
+): Promise<void> {
+  if (params.memoryRepo === undefined || params.tier === undefined) return;
+  // Path rows name neighbor ids; skip-missing would drop HOT neighbors never paged into JS.
+  await hydrateMemoriesById({
+    memoryRepo: params.memoryRepo,
+    workspaceId: params.workspaceId,
+    tier: params.tier,
+    byId: params.byId,
+    objectIds: paths.flatMap((path) => [...pathRelationMemoryIds(path)])
+  });
 }
 
 async function loadEligibleGraphExpansionPaths(

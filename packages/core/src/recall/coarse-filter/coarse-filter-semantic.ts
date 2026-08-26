@@ -20,6 +20,7 @@ import {
 } from "./coarse-candidates.js";
 import type { RunCoarseFilterContext } from "./coarse-filter.js";
 import type { AddCoarseCandidate } from "./coarse-filter-admission.js";
+import { hydrateMemoriesById } from "./pagination/recall-id-hydrate.js";
 import { selectEvidenceSearchQueries } from "./evidence/search-query-planner.js";
 import { admitQualifiedEvidenceMatches } from
   "./evidence/qualified-evidence-admission.js";
@@ -36,7 +37,7 @@ export interface SemanticSupplementParams {
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly tier: MemoryEntry["storage_tier"];
   readonly tierScopedSearchEligible: boolean;
-  readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
+  readonly byId: Map<string, Readonly<MemoryEntry>> | ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly addCandidate: AddCoarseCandidate;
   readonly ftsRanks: Map<string, number>;
   readonly trigramFtsRanks: Map<string, number>;
@@ -54,6 +55,23 @@ type KeywordHit = Readonly<{
   readonly normalized_rank: number;
   readonly trigram_rank?: number;
 }>;
+
+async function hydrateSemanticKeywordHits(
+  params: SemanticSupplementParams,
+  relaxed: readonly KeywordHit[],
+  expanded: readonly KeywordHit[]
+): Promise<void> {
+  const memoryRepo = params.context.dependencies.memoryRepo;
+  if (memoryRepo === undefined) return;
+  // FTS hits are the field; skip-missing hid them unless HOT was paged first.
+  await hydrateMemoriesById({
+    memoryRepo,
+    workspaceId: params.workspaceId,
+    tier: params.tier,
+    byId: params.byId,
+    objectIds: [...relaxed, ...expanded].map((hit) => hit.object_id)
+  });
+}
 
 export async function addSemanticSupplementCandidates(params: SemanticSupplementParams): Promise<void> {
   if (
@@ -86,6 +104,7 @@ export async function addSemanticSupplementCandidates(params: SemanticSupplement
     expandedPromise,
     evidencePromise
   ]);
+  await hydrateSemanticKeywordHits(params, relaxed, expanded);
   admitRelaxedKeywordMatches(params, relaxed);
   admitExpandedKeywordMatches(params, expanded);
   if (evidenceHitBatches !== null) {

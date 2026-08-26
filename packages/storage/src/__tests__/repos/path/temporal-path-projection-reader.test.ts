@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createTimeConcernWindowDigest,
+  serializePathAnchorRef,
+  type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
@@ -68,6 +70,62 @@ describe("temporal path projection reader as-of lookup", () => {
   });
 });
 
+describe("temporal path projection reader parse cache", () => {
+  it("loads the active projection once across disjoint findByAnchors hops", async () => {
+    const pathBySource = objectPath("memory-a", "memory-x");
+    const pathByTarget = objectPath("memory-y", "memory-b");
+    const unrelated = objectPath("memory-c", "memory-d");
+    const universe = [pathBySource, pathByTarget, unrelated];
+    const repo = countingProjectionRepo(universe);
+    const reader = new SqliteTemporalPathProjectionReader(repo);
+    const sourceAnchor = objectAnchor("memory-a");
+    const targetAnchor = objectAnchor("memory-b");
+
+    const bySource = await reader.findByAnchors("workspace-1", [sourceAnchor]);
+    const byTarget = await reader.findByAnchors("workspace-1", [targetAnchor]);
+
+    expect(repo.activeCalls).toBe(1);
+    expect(bySource).toEqual(filterByAnchors(universe, [sourceAnchor]));
+    expect(byTarget).toEqual(filterByAnchors(universe, [targetAnchor]));
+  });
+
+  it("shares the cached projection between findByWorkspace and findByAnchors", async () => {
+    const matching = objectPath("memory-a", "memory-x");
+    const other = objectPath("memory-c", "memory-d");
+    const repo = countingProjectionRepo([matching, other]);
+    const reader = new SqliteTemporalPathProjectionReader(repo);
+    const anchor = objectAnchor("memory-a");
+
+    const viaWorkspace = await reader.findByWorkspace("workspace-1");
+    const viaAnchors = await reader.findByAnchors("workspace-1", [anchor]);
+    const viaWorkspaceAgain = await reader.findByWorkspace("workspace-1");
+
+    expect(repo.activeCalls).toBe(1);
+    expect(viaWorkspaceAgain).toBe(viaWorkspace);
+    expect(viaAnchors).toEqual(filterByAnchors(viaWorkspace, [anchor]));
+  });
+
+  it("does not let a missing as-of lookup poison a later active read", async () => {
+    const activePath = objectPath("memory-a", "memory-x");
+    const repo = countingProjectionRepo([activePath], { asOfResult: null });
+    const reader = new SqliteTemporalPathProjectionReader(repo);
+
+    await expect(reader.findByWorkspace("workspace-1", { asOf: QUESTION_AS_OF }))
+      .rejects.toMatchObject({
+        name: "TemporalProjectionGenerationMissingError",
+        code: "NOT_FOUND"
+      });
+    await expect(reader.findByWorkspace("workspace-1", { asOf: QUESTION_AS_OF }))
+      .rejects.toMatchObject({ name: "TemporalProjectionGenerationMissingError" });
+
+    const active = await reader.findByWorkspace("workspace-1");
+
+    expect(repo.asOfCalls).toBe(2);
+    expect(repo.activeCalls).toBe(1);
+    expect(active).toEqual([activePath]);
+  });
+});
+
 function openReaderWithBuildTimeGeneration(): SqliteTemporalPathProjectionReader {
   const database = initDatabase({ filename: ":memory:" });
   databases.push(database);
@@ -82,4 +140,52 @@ function openReaderWithBuildTimeGeneration(): SqliteTemporalPathProjectionReader
     WHERE state_id = 1
   `).run(BUILD_AS_OF);
   return new SqliteTemporalPathProjectionReader(new SqliteRelationAssertionRepo(database));
+}
+
+function objectAnchor(objectId: string): PathAnchorRef {
+  return { kind: "object", object_id: objectId };
+}
+
+function objectPath(sourceId: string, targetId: string): PathRelation {
+  return {
+    anchors: {
+      source_anchor: objectAnchor(sourceId),
+      target_anchor: objectAnchor(targetId)
+    }
+  } as PathRelation;
+}
+
+function filterByAnchors(
+  paths: readonly PathRelation[],
+  anchorRefs: readonly PathAnchorRef[]
+): PathRelation[] {
+  const anchorKeys = new Set(anchorRefs.map(serializePathAnchorRef));
+  return paths.filter((path) =>
+    anchorKeys.has(serializePathAnchorRef(path.anchors.source_anchor)) ||
+    anchorKeys.has(serializePathAnchorRef(path.anchors.target_anchor))
+  );
+}
+
+function countingProjectionRepo(
+  paths: readonly PathRelation[],
+  options: { readonly asOfResult?: readonly PathRelation[] | null } = {}
+) {
+  let activeCalls = 0;
+  let asOfCalls = 0;
+  return {
+    get activeCalls() {
+      return activeCalls;
+    },
+    get asOfCalls() {
+      return asOfCalls;
+    },
+    findActiveProjectionByWorkspace: async () => {
+      activeCalls += 1;
+      return paths.slice();
+    },
+    findProjectionByWorkspaceAtAsOf: async () => {
+      asOfCalls += 1;
+      return options.asOfResult ?? null;
+    }
+  };
 }

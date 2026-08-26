@@ -19,7 +19,7 @@ let selectionBoundaryFixture;
 let selectionRootLogPath;
 let selectionQuestionIdOverride;
 let selectionRootPath;
-let recalledQuestionId;
+const selectionRecords = [];
 
 async function handle(message) {
   const id = message?.id;
@@ -74,27 +74,30 @@ async function handle(message) {
     process.send({ id, ok: true });
     return;
   }
-  recalledQuestionId = typeof probe === "string" ? probe : "q";
+  const questionId = typeof probe === "string" ? probe : "q";
+  if (selectionBoundaryFixture !== undefined) {
+    selectionRecords.push({
+      question_id: typeof selectionQuestionIdOverride === "string"
+        ? selectionQuestionIdOverride
+        : questionId,
+      invocation_index: 0,
+      authoritative: true,
+      boundary: selectionBoundaryFixture
+    });
+  }
   process.send({
     id,
     ok: true,
-    pack: stubPack(typeof probe === "string" ? probe : "q")
+    pack: stubPack(questionId)
   });
 }
 
 function writeSelectionArtifact() {
-  if (selectionBoundaryFixture === undefined || recalledQuestionId === undefined) return null;
+  if (selectionBoundaryFixture === undefined || selectionRecords.length === 0) return null;
   const rootPath = selectionRootPath;
   if (rootPath === undefined) throw new Error("selection root was not opened");
   const sourcePath = join(rootPath, "selection-boundaries.ndjson.gz");
-  const record = JSON.stringify({
-    question_id: typeof selectionQuestionIdOverride === "string"
-      ? selectionQuestionIdOverride
-      : recalledQuestionId,
-    invocation_index: 0,
-    authoritative: true,
-    boundary: selectionBoundaryFixture
-  }) + "\n";
+  const record = `${selectionRecords.map((row) => JSON.stringify(row)).join("\n")}\n`;
   const artifact = gzipSync(Buffer.from(record, "utf8"));
   writeFileSync(sourcePath, artifact);
   return {
@@ -104,7 +107,7 @@ function writeSelectionArtifact() {
       filename: "selection-boundaries.ndjson.gz",
       sha256: createHash("sha256").update(artifact).digest("hex"),
       bytes: artifact.byteLength,
-      record_count: 1
+      record_count: selectionRecords.length
     }
   };
 }
