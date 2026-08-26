@@ -201,6 +201,32 @@ describe("recall-eval diagnostics spool lifecycle", () => {
     expect(mocks.archive).not.toHaveBeenCalled();
   });
 
+  it("recycles the pager after every evaluated question", async () => {
+    const recycle = vi.fn(async () => undefined);
+    mocks.prepareContext.mockResolvedValueOnce({
+      ...runContext(),
+      window: [
+        { questionId: "q-1", question: "first" },
+        { questionId: "q-2", question: "second" }
+      ]
+    });
+    mocks.createPager.mockImplementation(() => ({
+      open: async () => ({ ok: true, pid: 1, mapsHint: null }),
+      recall: async () => {
+        mocks.captureCommitted = true;
+        return mocks.question();
+      },
+      recycle,
+      close: async () => null,
+      pid: 1,
+      lastMapsHint: null
+    }));
+
+    await expect(runRecallEval(options())).resolves.toMatchObject({ slug: "fixture-slug" });
+    expect(recycle).toHaveBeenCalledTimes(2);
+    expect(mocks.append).toHaveBeenCalledTimes(2);
+  });
+
   it("disposes the assembled selection artifact when a later question fails", async () => {
     const root = await mkdtemp(join(tmpdir(), "alaya-selection-replay-failure-"));
     roots.push(root);
@@ -221,6 +247,7 @@ describe("recall-eval diagnostics spool lifecycle", () => {
         mocks.captureCommitted = true;
         return fullQuestion();
       },
+      recycle: async () => undefined,
       close: async () => ({
         rootPath: root,
         sourcePath: join(root, "selection-boundaries.ndjson.gz"),
@@ -378,6 +405,7 @@ function configureRuntimeHarness(): void {
       mocks.captureCommitted = true;
       return mocks.question();
     },
+    recycle: async () => undefined,
     close: async () => null,
     pid: 1,
     lastMapsHint: null
