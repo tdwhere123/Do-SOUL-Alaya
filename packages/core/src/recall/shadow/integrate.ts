@@ -163,7 +163,7 @@ function runShadowIntegration(
   const observations = resolveObservations(input, keys);
   const channels = resolveChannels(observations, input);
   const eligible = eligibleCandidateKeys(observations).filter((key) => keys.includes(key));
-  const psi = input.psi ?? psiPredicate(observations, channels);
+  const psi = memoizeRequestPsi(input.psi ?? psiPredicate(observations, channels));
   const peeled = peelUndominated(eligible, psi);
   if (isPsiCycleFailure(peeled)) return failClosed("psi_cycle_contract_failure", activation);
   const walked = walkShadowCapture(
@@ -172,6 +172,22 @@ function runShadowIntegration(
   if (!isCapturedWalk(walked)) return failClosed("psi_cycle_contract_failure", activation);
   if (!prefixMonotone(walked.S_infty)) return failClosed("prefix_violation", activation);
   return assembleCaptured(input, eligible, peeled, walked, observations);
+}
+
+export function memoizeRequestPsi(psi: PsiQuery): PsiQuery {
+  const outcomes = new Map<string, Map<string, boolean>>();
+  return (dominator, dominated) => {
+    const byDominated = outcomes.get(dominator);
+    const cached = byDominated?.get(dominated);
+    if (cached !== undefined) return cached;
+    const outcome = psi(dominator, dominated);
+    if (byDominated === undefined) {
+      outcomes.set(dominator, new Map([[dominated, outcome]]));
+    } else {
+      byDominated.set(dominated, outcome);
+    }
+    return outcome;
+  };
 }
 
 function membershipHolds(

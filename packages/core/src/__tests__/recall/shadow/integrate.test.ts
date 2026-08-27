@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { fineAssess } from "../../../recall/delivery/fine-assessment.js";
 import { compileRecallQueryProbes } from "../../../recall/query/recall-query-probes.js";
 import { buildDefaultPolicy } from "../../../recall/runtime/orchestration.js";
+import { buildRecallLogicalObjectKey } from "../../../recall/runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   RecallSupplementaryData
 } from "../../../recall/runtime/recall-service-types.js";
+import { isPsiCycleFailure, peelUndominated } from "../../../recall/shadow/frontier-peel.js";
+import type { ShadowFrontierReceipt } from "../../../recall/shadow/frontiers.js";
 import {
   CAPTURE_IDENTITY_DIGEST,
   SHADOW_ALGORITHM_VERSION,
@@ -14,12 +17,19 @@ import {
 import {
   captureShadowIntegration,
   isFailClosedShadowTrace,
+  memoizeRequestPsi,
   prefixSK,
   SHADOW_CUTOVER_SEAM,
   type FineAssessmentShadowTrace,
+  type PsiQuery,
   type ShadowCapturedTrace
 } from "../../../recall/shadow/integrate.js";
-import { prefixSK as walkPrefixSK } from "../../../recall/shadow/walk.js";
+import {
+  isCapturedWalk,
+  prefixSK as walkPrefixSK,
+  walkShadowCapture,
+  type ShadowCaptureWalkCandidate
+} from "../../../recall/shadow/walk.js";
 import { FIELD_PINS } from "../fine-assessment-selection-fixtures.js";
 import { createMemoryEntry, withFineDeliveryPath } from "../recall-service-test-fixtures.js";
 import {
@@ -31,6 +41,7 @@ import {
 
 const NOW = "2026-07-12T00:00:00.000Z";
 const IDS = ["cand-a", "cand-b", "cand-c"] as const;
+const THREE_CANDIDATE_UNCACHED_PSI_CALLS = 19;
 
 describe("shadow integration at fineAssess", () => {
   it("planted guard: shadow cannot change production ids, order, or delivery diagnostics", () => {
@@ -75,6 +86,73 @@ describe("shadow integration at fineAssess", () => {
       digest: CAPTURE_IDENTITY_DIGEST,
       cutover_seam: SHADOW_CUTOVER_SEAM
     });
+  });
+
+  it("evaluates each directed Psi pair once across canonical capture", () => {
+    const keys = IDS.map(keyOf);
+    const a = keys[0]!;
+    const b = keys[1]!;
+    const planted: PsiQuery = (dominator, dominated) =>
+      directedPair(dominator, dominated) === directedPair(a, b);
+    const candidates = fieldCandidates();
+    const params = assessParams(candidates);
+    const memoized = countingPsi(planted);
+    const actual = fineAssess({ ...params, shadowPsi: memoized.fn });
+    const captured = asCaptured(actual.shadowTrace);
+    const uncached = countingPsi(planted);
+    const peeled = peelUndominated(captured.eligible_keys, uncached.fn);
+    expect(isPsiCycleFailure(peeled)).toBe(false);
+    if (isPsiCycleFailure(peeled)) return;
+    const walked = walkShadowCapture({
+      candidates: walkCandidatesFrom(candidates, captured, peeled),
+      psi: uncached.fn,
+      token_budget: params.policy.fine_assessment.budgets.max_total_tokens,
+      per_dimension_limits: params.policy.fine_assessment.budgets.per_dimension_limits
+    });
+    expect(isCapturedWalk(walked)).toBe(true);
+    if (!isCapturedWalk(walked)) return;
+
+    expect(peeled).toEqual(captured.frontiers);
+    expect(walked.S_infty).toEqual(captured.S_infty);
+    expect(walked.decisions).toEqual(captured.decisions);
+    expect(walked.walk_rejects).toEqual(captured.walk_rejects);
+    expect(actual.candidates.map((candidate) => keyOf(candidate.object_id)))
+      .toEqual(captured.prefix_proposal);
+    expect(memoized.total()).toBe(memoized.calls.size);
+    expect(memoized.calls.size).toBe(keys.length * keys.length);
+    expect(memoized.calls.get(directedPair(a, b))).toBe(1);
+    expect(memoized.calls.get(directedPair(b, a))).toBe(1);
+    expect(uncached.total()).toBe(THREE_CANDIDATE_UNCACHED_PSI_CALLS);
+    expect(uncached.total()).toBeGreaterThan(memoized.calls.size);
+  });
+
+  it("keeps Psi failures request-local and observable", () => {
+    const failure = new Error("planted Psi failure");
+    const a = keyOf(IDS[0]);
+    const b = keyOf(IDS[1]);
+    let shouldFail = true;
+    const wrapped = memoizeRequestPsi((dominator, dominated) => {
+      if (shouldFail && dominator === a && dominated === b) {
+        shouldFail = false;
+        throw failure;
+      }
+      return false;
+    });
+    expect(() => wrapped(a, b)).toThrow(failure);
+    expect(wrapped(a, b)).toBe(false);
+
+    shouldFail = true;
+    const requestPsi: PsiQuery = () => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw failure;
+      }
+      return false;
+    };
+    expect(() => captureShadowIntegration({ ...shadowInput(), psi: requestPsi }))
+      .toThrow(failure);
+    expect(asCaptured(captureShadowIntegration({ ...shadowInput(), psi: requestPsi })).kind)
+      .toBe("captured");
   });
 
   it("records prefix S_K ⊆ S_(K+1) on the shadow trace", () => {
@@ -154,6 +232,46 @@ describe("shadow integration at fineAssess", () => {
   });
 });
 
+function countingPsi(psi: PsiQuery): {
+  readonly fn: PsiQuery;
+  readonly calls: Map<string, number>;
+  readonly total: () => number;
+} {
+  const calls = new Map<string, number>();
+  return {
+    calls,
+    fn: (dominator, dominated) => {
+      const pair = directedPair(dominator, dominated);
+      calls.set(pair, (calls.get(pair) ?? 0) + 1);
+      return psi(dominator, dominated);
+    },
+    total: () => [...calls.values()].reduce((sum, count) => sum + count, 0)
+  };
+}
+
+function walkCandidatesFrom(
+  candidates: readonly CoarseRecallCandidate[],
+  captured: ShadowCapturedTrace,
+  frontiers: ShadowFrontierReceipt
+): ShadowCaptureWalkCandidate[] {
+  const indexByKey = new Map<string, number>();
+  for (const layer of frontiers.layers) {
+    for (const key of layer.member_keys) indexByKey.set(key, layer.index);
+  }
+  return candidates.map((candidate, offset) => {
+    const key = keyOf(candidate.entry.object_id);
+    return {
+      candidate_key: key,
+      object_key: buildRecallLogicalObjectKey(candidate),
+      token_cost: 4,
+      dimension: candidate.entry.dimension,
+      h_eligible: captured.observations_by_candidate_key[key]?.h_gate === "none",
+      utility: captured.set_utilities[offset]!,
+      static_frontier_index: indexByKey.get(key) ?? null
+    };
+  });
+}
+
 function asCaptured(trace: FineAssessmentShadowTrace | undefined): ShadowCapturedTrace {
   expect(trace).toBeDefined();
   expect(isFailClosedShadowTrace(trace!)).toBe(false);
@@ -193,6 +311,10 @@ function plantedTransitivity() {
 
 function keyOf(objectId: string): string {
   return `workspace_local:memory_entry:${objectId}`;
+}
+
+function directedPair(dominator: string, dominated: string): string {
+  return JSON.stringify([dominator, dominated]);
 }
 
 function shadowInput() {
