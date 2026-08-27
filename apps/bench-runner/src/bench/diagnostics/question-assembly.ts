@@ -86,6 +86,9 @@ export function assembleQuestionDiagnostic(
     query_probes: parts.diagnostics?.queryProbes ?? null,
     ranking_authority: parts.diagnostics?.rankingAuthority ?? null,
     capture_receipt: parts.diagnostics?.captureReceipt ?? null,
+    lexical_bound_proofs: parts.diagnostics?.lexicalBoundProofs ?? null,
+    candidate_proposition_provenance:
+      parts.diagnostics?.candidatePropositionProvenance ?? null,
     retrieval_field_captures: parts.diagnostics?.retrievalFieldCaptures ?? null,
     retrieval_field_refinement_receipts:
       parts.diagnostics?.retrievalFieldRefinementReceipts ?? null,

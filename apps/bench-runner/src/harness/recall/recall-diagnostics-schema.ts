@@ -48,6 +48,10 @@ import { KindConstraintAlignmentReceiptSchema } from
 import { CanonicalSelectionReceiptSchema } from "./capture/capture-receipt-schema.js";
 import { CanonicalCandidateDiagnosticSchema } from
   "./capture/canonical-candidate-diagnostic-schema.js";
+import {
+  CandidatePropositionProvenanceDiagnosticsSchema,
+  LexicalBoundProofsDiagnosticsSchema
+} from "./capture/capture-proof-diagnostics-schema.js";
 export { RecallEvidenceProjectionMatchReceiptSchema } from
   "./candidate-projection-diagnostics-schema.js";
 export {
@@ -380,6 +384,9 @@ export const BenchRecallDiagnosticsSchema = z
     kind_constraint_alignment:
       KindConstraintAlignmentReceiptSchema.optional(),
     answer_shape_plan: RecallAnswerShapePlanSchema.nullable().optional(),
+    lexical_bound_proofs: LexicalBoundProofsDiagnosticsSchema.optional(),
+    candidate_proposition_provenance:
+      CandidatePropositionProvenanceDiagnosticsSchema.optional(),
     query_sought_facets: z.array(z.string()).readonly().default([]),
     total_scanned: z.number().int().nonnegative(),
     candidate_pool_count: z.number().int().nonnegative(),

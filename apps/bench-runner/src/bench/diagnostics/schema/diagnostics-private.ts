@@ -23,6 +23,10 @@ import { RecallPacketPlanTraceSchema } from
   "../../../harness/recall/recall-diagnostics-support-schema.js";
 import { CanonicalSelectionReceiptSchema } from
   "../../../harness/recall/capture/capture-receipt-schema.js";
+import {
+  CandidatePropositionProvenanceDiagnosticsSchema,
+  LexicalBoundProofsDiagnosticsSchema
+} from "../../../harness/recall/capture/capture-proof-diagnostics-schema.js";
 import { readDiagnosticFields } from "./field/diagnostic-field-readers.js";
 import {
   readAnswerRerankFailureClass,
@@ -66,6 +70,16 @@ export function readRecallDiagnostics(
   const candidates = readCandidates(record);
   const captureReceipt = CanonicalSelectionReceiptSchema.safeParse(record.capture_receipt);
   if (record.capture_receipt !== undefined && !captureReceipt.success) return null;
+  const lexicalBoundProofs = LexicalBoundProofsDiagnosticsSchema.safeParse(
+    record.lexical_bound_proofs
+  );
+  if (record.lexical_bound_proofs != null && !lexicalBoundProofs.success) return null;
+  const candidatePropositionProvenance =
+    CandidatePropositionProvenanceDiagnosticsSchema.safeParse(
+      record.candidate_proposition_provenance
+    );
+  if (record.candidate_proposition_provenance != null &&
+      !candidatePropositionProvenance.success) return null;
   return {
     keys: Object.keys(record).sort(),
     rankingAuthority: readRankingAuthority(recallResult),
@@ -74,6 +88,10 @@ export function readRecallDiagnostics(
     ...buildNarrowCandidateEvidence(candidates),
     ...stages,
     packetPlanTrace: readPacketPlanTrace(record.packet_plan_trace),
+    lexicalBoundProofs: lexicalBoundProofs.success ? lexicalBoundProofs.data : null,
+    candidatePropositionProvenance: candidatePropositionProvenance.success
+      ? candidatePropositionProvenance.data
+      : null,
     graphExpansionPlaneCountPerHop:
       readGraphExpansionPlaneCountPerHop(record.graph_expansion_plane_count_per_hop) ??
       createEmptyGraphExpansionPlaneCountPerHop(),

@@ -45,6 +45,10 @@ import { OpenSemanticFactorCandidateActivationsSchema } from
   "./field/open-semantic-candidate-activation-schema.js";
 import { CanonicalSelectionReceiptSchema } from
   "../../../harness/recall/capture/capture-receipt-schema.js";
+import {
+  CandidatePropositionProvenanceDiagnosticsSchema,
+  LexicalBoundProofsDiagnosticsSchema
+} from "../../../harness/recall/capture/capture-proof-diagnostics-schema.js";
 import { archiveStaleOpenSemanticFactorFields } from
   "./field/open-semantic-factor-archive.js";
 
@@ -365,6 +369,9 @@ export const LongMemEvalQuestionDiagnosticSchema = z.preprocess(
     candidate_pool_complete: z.boolean().default(false),
     ranking_authority: z.enum(["prefix_sk", "select_gamma"]).nullable().default(null),
     capture_receipt: CanonicalSelectionReceiptSchema.nullable().default(null),
+    lexical_bound_proofs: LexicalBoundProofsDiagnosticsSchema.nullable().optional(),
+    candidate_proposition_provenance:
+      CandidatePropositionProvenanceDiagnosticsSchema.nullable().optional(),
     candidate_pool_count: z.number().int().nonnegative().nullable().default(null),
     fine_pruned_count: z.number().int().nonnegative().nullable().default(null),
     fine_assessment_pruned_candidates: z

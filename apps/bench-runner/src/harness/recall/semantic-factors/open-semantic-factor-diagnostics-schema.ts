@@ -9,7 +9,7 @@ const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const IdSchema = z.string().min(1);
 const CountSchema = z.number().int().nonnegative();
 const StringArraySchema = z.array(IdSchema).readonly();
-const CompositionStatusSchema = z.enum([
+export const OpenSemanticFactorCompositionStatusSchema = z.enum([
   "composed",
   "no_match",
   "ineligible",
@@ -115,7 +115,7 @@ const CompositionSolutionSchema = z.object({
 export const OpenSemanticFactorCompositionReceiptSchema = z.object({
   schema_version: z.literal(2),
   operator_id: z.literal("open_semantic_factor_composition_v2"),
-  status: CompositionStatusSchema,
+  status: OpenSemanticFactorCompositionStatusSchema,
   compatibility_trace_digest: DigestSchema,
   query_capture_digest: DigestSchema,
   result_variable_ids: StringArraySchema,
@@ -156,7 +156,7 @@ export const OpenSemanticFactorCompositionReceiptSchema = z.object({
 export const OpenSemanticFactorActivationReceiptSchema = z.object({
   schema_version: z.literal(2),
   operator_id: z.literal("open_semantic_solution_membership_activation_v2"),
-  status: CompositionStatusSchema,
+  status: OpenSemanticFactorCompositionStatusSchema,
   composition_receipt_digest: DigestSchema,
   entry_count: CountSchema,
   truncated: z.boolean(),

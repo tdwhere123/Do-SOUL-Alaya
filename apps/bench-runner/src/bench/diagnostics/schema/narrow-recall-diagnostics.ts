@@ -56,6 +56,9 @@ export interface NarrowRecallDiagnostics {
   readonly evidenceEmbeddingFailureClass: BenchRecallDiagnostics["evidence_embedding_failure_class"] | null;
   readonly evidenceEmbeddingSelectionReceipt: BenchRecallDiagnostics["evidence_embedding_selection_receipt"] | null;
   readonly packetPlanTrace: BenchRecallDiagnostics["packet_plan_trace"] | null;
+  readonly lexicalBoundProofs: NonNullable<BenchRecallDiagnostics["lexical_bound_proofs"]> | null;
+  readonly candidatePropositionProvenance:
+    NonNullable<BenchRecallDiagnostics["candidate_proposition_provenance"]> | null;
   readonly graphExpansionPlaneCountPerHop: LongMemEvalGraphExpansionPlaneCountPerHop;
   readonly graphExpansionPlaneCountPerEdgeType: Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType>;
   readonly phaseLatencyMs: LongMemEvalPhaseLatencyMs | null;
