@@ -89,7 +89,7 @@ const LexicalIdentitySchema = z.object({
   request_digest: z.union([DigestSchema, identityGap("request_not_sealed")]),
   workspace_id: z.union([z.string().min(1), identityGap("workspace_not_sealed")]),
   snapshot_digest: z.union([DigestSchema, identityGap("snapshot_not_sealed")])
-}).strict().readonly();
+}).strict().superRefine(refineDistinctIdentityDigests).readonly();
 const LexicalFieldPrefixSchema = z.enum(["lexical_relaxed", "lexical_expanded"]);
 const LexicalCapturedProofSchema = z.object({
   schema_version: z.literal(1),
@@ -247,6 +247,26 @@ function lexicalRankingKeysAreMonotone(
     if (kind === "matched_token_count" && next > previous) return false;
   }
   return true;
+}
+
+function refineDistinctIdentityDigests(
+  identity: {
+    readonly request_digest: string | Readonly<{ readonly status: "unavailable" }>;
+    readonly snapshot_digest: string | Readonly<{ readonly status: "unavailable" }>;
+  },
+  context: z.RefinementCtx
+): void {
+  if (
+    typeof identity.request_digest === "string" &&
+    typeof identity.snapshot_digest === "string" &&
+    identity.request_digest === identity.snapshot_digest
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["snapshot_digest"],
+      message: "snapshot digest must not equal request digest"
+    });
+  }
 }
 
 function refineLexicalLane(

@@ -175,4 +175,57 @@ describe("lexical bound proof capture path", () => {
     expect(searchByKeywordField).toHaveBeenCalledWith("workspace-1", "stable", 2, {});
     expect(bundle.memoryLexicalBoundProofs()).toEqual([]);
   });
+
+  it("does not invent a snapshot when capture-proof is off even if a digest is supplied", async () => {
+    const searchByKeywordField = vi.fn(async () => fieldResult(truncatedReceipt()));
+    const bundle = createRecallRetrievalFieldBundle({
+      workspaceId: "workspace-1",
+      queryText: "stable",
+      snapshotDigest: `sha256:${"b".repeat(64)}`,
+      memoryRepo: stubMemoryRepo(searchByKeywordField)
+    });
+    await bundle.searchMemoryKeyword({
+      variant: "lexical_relaxed",
+      queryText: "stable",
+      limit: 2,
+      scope: {}
+    });
+    expect(searchByKeywordField).toHaveBeenCalledWith("workspace-1", "stable", 2, {});
+    expect(bundle.memoryLexicalBoundProofs()).toEqual([]);
+  });
+
+  it("seals the supplied snapshot only on the capture-proof path", async () => {
+    const snapshotDigest = `sha256:${"b".repeat(64)}`;
+    const searchByKeywordField = vi.fn(async () => fieldResult(truncatedReceipt()));
+    const bundle = createRecallRetrievalFieldBundle({
+      workspaceId: "workspace-1",
+      queryText: "stable",
+      captureProof: true,
+      snapshotDigest,
+      memoryRepo: stubMemoryRepo(searchByKeywordField)
+    });
+    await bundle.searchMemoryKeyword({
+      variant: "lexical_relaxed",
+      queryText: "stable",
+      limit: 2,
+      scope: {}
+    });
+    expect(searchByKeywordField).toHaveBeenCalledWith(
+      "workspace-1", "stable", 2, {}, undefined, { variant: "lexical_relaxed" }
+    );
+    expect(searchByKeywordField.mock.calls[0]?.[5]).toEqual({ variant: "lexical_relaxed" });
+    const sealed = bundle.memoryLexicalBoundProofs()[0];
+    if (sealed === undefined || sealed.status !== "captured") {
+      throw new Error("expected sealed bound proof");
+    }
+    expect(sealed.identity.snapshot_digest).toBe(snapshotDigest);
+    expect(sealed.identity.request_digest).not.toBe(snapshotDigest);
+    expect(sealed.evaluated_universe).toEqual({
+      status: "unavailable",
+      reason: "candidate_universe_not_proved"
+    });
+    const capture = bundle.captures()[0];
+    expect(capture?.source_snapshot_digest).not.toBe(snapshotDigest);
+    verifyLexicalBoundProof(sealed);
+  });
 });

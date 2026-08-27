@@ -191,6 +191,7 @@ function assembleCaptured(
   fieldPrefix: LexicalBoundFieldPrefix | LexicalBoundIdentityUnavailable,
   keyDomain: LexicalBoundCandidateKeyDomain | LexicalBoundIdentityUnavailable
 ): LexicalBoundProofCaptured {
+  assertDistinctRequestAndSnapshot(identity);
   assertUniversesMatchIdentity(
     receipt,
     typeof identity.workspace_id === "string" ? identity.workspace_id : undefined
@@ -215,7 +216,7 @@ function assembleCaptured(
 function freezeIdentity(value: unknown): LexicalBoundIdentitySeal {
   if (value === undefined) return unavailableIdentity();
   if (!isRecord(value)) throw new TypeError("lexical bound identity is invalid");
-  return Object.freeze({
+  const identity = Object.freeze({
     request_digest: freezeSealed(
       value.request_digest, presentDigest, "lexical bound digest identity is invalid"
     ),
@@ -226,6 +227,8 @@ function freezeIdentity(value: unknown): LexicalBoundIdentitySeal {
       value.snapshot_digest, presentDigest, "lexical bound digest identity is invalid"
     )
   });
+  assertDistinctRequestAndSnapshot(identity);
+  return identity;
 }
 
 function freezeFieldPrefix(
@@ -261,11 +264,35 @@ function sealedIdentity(
   seal: LexicalBoundSealInput,
   previous: LexicalBoundIdentitySeal
 ): LexicalBoundIdentitySeal {
-  return Object.freeze({
+  const identity = Object.freeze({
     request_digest: presentDigest(seal.request_digest) ?? previous.request_digest,
     workspace_id: presentWorkspace(seal.workspace_id) ?? previous.workspace_id,
-    snapshot_digest: presentDigest(seal.snapshot_digest) ?? previous.snapshot_digest
+    snapshot_digest: sealedSnapshotDigest(seal.snapshot_digest, previous.snapshot_digest)
   });
+  assertDistinctRequestAndSnapshot(identity);
+  return identity;
+}
+
+function sealedSnapshotDigest(
+  value: string | undefined,
+  previous: RecallFieldDigest | LexicalBoundIdentityUnavailable
+): RecallFieldDigest | LexicalBoundIdentityUnavailable {
+  if (value === undefined) return previous;
+  const digest = presentDigest(value);
+  if (digest === undefined) {
+    throw new TypeError("lexical bound digest identity is invalid");
+  }
+  return digest;
+}
+
+function assertDistinctRequestAndSnapshot(identity: LexicalBoundIdentitySeal): void {
+  if (
+    typeof identity.request_digest === "string" &&
+    typeof identity.snapshot_digest === "string" &&
+    identity.request_digest === identity.snapshot_digest
+  ) {
+    throw new TypeError("lexical bound snapshot digest must not equal request digest");
+  }
 }
 
 function unavailableIdentity(): LexicalBoundIdentitySeal {

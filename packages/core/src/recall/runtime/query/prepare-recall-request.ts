@@ -254,7 +254,7 @@ function createRetrievalBundle(
     synthesisSearchPort: context.dependencies.synthesisSearchPort,
     refinementMaxDepth: policy.coarse_filter.semantic_supplement.field_observation_max_depth,
     ...(capturesRecallAnswerFeatures(params.diagnosticCapture)
-      ? { captureProof: true }
+      ? captureProofFields(params)
       : {}),
     onFailure: (operation, error) => context.warn("retrieval field query failed", {
       workspace_id: params.workspaceId,
@@ -266,6 +266,13 @@ function createRetrievalBundle(
       { workspace_id: params.workspaceId, operation, ...failure }
     )
   });
+}
+
+function captureProofFields(params: RecallExecutionParams) {
+  return {
+    captureProof: true as const,
+    ...(params.snapshotDigest === undefined ? {} : { snapshotDigest: params.snapshotDigest })
+  };
 }
 
 async function resolveFieldProjectionMemories(

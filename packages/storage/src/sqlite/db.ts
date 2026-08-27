@@ -134,17 +134,20 @@ export class StorageDatabase {
     this.connection.pragma("optimize");
   }
 
-  public close(): void {
+  public close(options?: Readonly<{ readonly optimize?: boolean }>): void {
     if (this.closed) {
       return;
     }
 
     // Final stats refresh on close (SQLite-recommended) so a reopened DB starts
-    // with a healthy plan.
-    try {
-      this.connection.pragma("optimize");
-    } catch {
-      // best-effort; never block close on optimize
+    // with a healthy plan. Slice snapshot sealing skips this so hashed bytes
+    // cannot change after the last intentional write.
+    if (options?.optimize !== false) {
+      try {
+        this.connection.pragma("optimize");
+      } catch {
+        // best-effort; never block close on optimize
+      }
     }
     this.connection.close();
     this.closed = true;

@@ -189,6 +189,52 @@ describe("invokeBoundRecall shared input contract", () => {
       selectionBoundaryObserver
     }));
   });
+
+  it("forwards snapshotDigest only when the benchmark supplies it", async () => {
+    const policy = makeSharedPolicy();
+    const taskSurface = TaskObjectSurfaceSchema.parse({
+      runtime_id: policy.task_surface_ref,
+      object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
+      task_surface_ref: null,
+      expires_at: null,
+      derived_from: null,
+      retention_policy: RetentionPolicy.SESSION_ONLY,
+      surface_kind: "mcp_memory_tool",
+      display_name: "deployment rules",
+      context_refs: []
+    });
+    const recallService = {
+      recall: vi.fn(async () => buildSeededRecallResult("deployment rules"))
+    };
+    const snapshotDigest = `sha256:${"b".repeat(64)}`;
+    await invokeBoundRecall({
+      sideEffectMode: "benchmark",
+      recallService,
+      taskSurface,
+      workspaceId: "ws-snapshot",
+      policyOverride: policy,
+      snapshotDigest
+    });
+    expect(recallService.recall).toHaveBeenCalledWith(expect.objectContaining({ snapshotDigest }));
+    await runProductionBoundRecall({
+      deps: { recallService } as unknown as RecallUsageHandlerDependencies,
+      request: {
+        query: "deployment rules", max_results: 5, scope_class: null,
+        dimension: null, domain_tags: null
+      },
+      context: {
+        workspaceId: "ws-snapshot",
+        runId: null,
+        agentTarget: "codex",
+        sessionId: "s"
+      },
+      taskSurface,
+      policyOverride: policy
+    });
+    const productionCall = (recallService.recall as ReturnType<typeof vi.fn>).mock.calls[1]?.[0] as
+      { readonly snapshotDigest?: string };
+    expect(productionCall).not.toHaveProperty("snapshotDigest");
+  });
 });
 
 function buildSeededRecallResult(query: string) {

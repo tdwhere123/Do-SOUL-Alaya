@@ -6,6 +6,7 @@ import {
   workspaceSliceDbPath,
   type ExplodedWorkspaceSlices
 } from "./explode.js";
+import { readValidWorkspaceSliceSnapshotDigest } from "./slice-snapshot.js";
 import type { WorkspaceSliceProgress } from "./stream-copy.js";
 import {
   installWorkspaceSlice,
@@ -65,18 +66,26 @@ function completeSlicesOrNull(
   workspaceIds: readonly string[]
 ): ExplodedWorkspaceSlices | null {
   const sliceDbPaths: Record<string, string> = {};
+  const sliceSnapshotDigests: Record<string, string> = {};
   for (const workspaceId of workspaceIds) {
     const sliceDbPath = workspaceSliceDbPath(destDir, workspaceId);
     if (!existsSync(sliceDbPath) || !sliceContainsOnlyWorkspace(sliceDbPath, workspaceId)) {
       return null;
     }
+    const snapshotDigest = readValidWorkspaceSliceSnapshotDigest({
+      workspaceId,
+      dbPath: sliceDbPath
+    });
+    if (snapshotDigest === null) return null;
     sliceDbPaths[workspaceId] = sliceDbPath;
+    sliceSnapshotDigests[workspaceId] = snapshotDigest;
   }
   return Object.freeze({
     packedDbPath,
     destDir,
     workspaceIds,
-    sliceDbPaths: Object.freeze(sliceDbPaths)
+    sliceDbPaths: Object.freeze(sliceDbPaths),
+    sliceSnapshotDigests: Object.freeze(sliceSnapshotDigests)
   });
 }
 

@@ -175,15 +175,21 @@ function assertSchemaLedgerMatches(
   dest: CopyConnection,
   table: string
 ): void {
-  const destVersions = dest.prepare(
+  const packedRows = packed.prepare(
+    `SELECT version, applied_at FROM ${quoteIdent(table)} ORDER BY version`
+  ).all() as ReadonlyArray<{ readonly version: number; readonly applied_at: string }>;
+  const destRows = dest.prepare(
     `SELECT version FROM ${quoteIdent(table)} ORDER BY version`
   ).all() as ReadonlyArray<{ readonly version: number }>;
-  const packedVersions = packed.prepare(
-    `SELECT version FROM ${quoteIdent(table)} ORDER BY version`
-  ).all() as ReadonlyArray<{ readonly version: number }>;
-  if (JSON.stringify(destVersions) !== JSON.stringify(packedVersions)) {
+  if (JSON.stringify(destRows.map((row) => row.version)) !==
+      JSON.stringify(packedRows.map((row) => row.version))) {
     throw new Error("packed working copy schema_version ledger does not match dest migrations");
   }
+  const update = dest.prepare(
+    `UPDATE ${quoteIdent(table)} SET applied_at = ? WHERE version = ?`
+  );
+  // Dest init stamps wall-clock applied_at; the sealed slice must follow packed.
+  for (const row of packedRows) update.run(row.applied_at, row.version);
 }
 
 function reportProgress(

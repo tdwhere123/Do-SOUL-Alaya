@@ -19,6 +19,7 @@ import { RecallEvalDiagnosticsSpool } from
 import {
   capturedTruncatedProof,
   provenanceMap,
+  sealLexicalProof,
   unavailableOsfRow
 } from "../../harness/recall/capture-proof-diagnostics-fixture.js";
 import {
@@ -110,6 +111,33 @@ describe("capture-proof question diagnostic archive", () => {
       ...promotionMeasurementDiagnostic("q-invalid", "scorable", true),
       lexical_bound_proofs: []
     })).toThrow();
+  });
+
+  it("roundtrips a sealed snapshot digest through gzip", async () => {
+    const snapshotDigest = `sha256:${"b".repeat(64)}`;
+    const { proof_digest: _digest, ...body } = capturedTruncatedProof();
+    const lexical_bound_proofs = [sealLexicalProof({
+      ...body,
+      identity: {
+        request_digest: `sha256:${"a".repeat(64)}`,
+        workspace_id: "workspace-1",
+        snapshot_digest: snapshotDigest
+      }
+    })];
+    const assembled = assembleQuestion({
+      diagnostics: { lexical_bound_proofs }
+    });
+    const archived = await gzipDiagnostics(assembled);
+    const parsed = LongMemEvalQuestionDiagnosticSchema.parse(
+      JSON.parse(archived).questions[0]?.diagnostics
+    );
+    expect(parsed.lexical_bound_proofs?.[0]?.identity.snapshot_digest).toBe(snapshotDigest);
+    expect(parsed.lexical_bound_proofs?.[0]?.identity.request_digest)
+      .not.toBe(snapshotDigest);
+    expect(parsed.lexical_bound_proofs?.[0]?.evaluated_universe).toEqual({
+      status: "unavailable",
+      reason: "candidate_universe_not_proved"
+    });
   });
 
   it("parses older artifacts that omit both siblings", () => {

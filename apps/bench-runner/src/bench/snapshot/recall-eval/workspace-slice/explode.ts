@@ -20,6 +20,7 @@ import { WORKSPACE_SLICE_DB_FILENAME } from "./names.js";
 import { replicateEmbeddingOverlayBind } from "./overlay-replicate.js";
 import { rebuildWorkspaceFts } from "./rebuild-fts.js";
 import { rebindTemporalProjectionIdentity } from "./rebind-temporal.js";
+import { sealFinalizedWorkspaceSlice } from "./slice-snapshot.js";
 import {
   applyGlobalTablePolicies,
   copyWorkspaceTablesOnce,
@@ -39,6 +40,7 @@ export interface ExplodedWorkspaceSlices {
   readonly destDir: string;
   readonly workspaceIds: readonly string[];
   readonly sliceDbPaths: Readonly<Record<string, string>>;
+  readonly sliceSnapshotDigests: Readonly<Record<string, string>>;
 }
 
 export function workspaceSliceDbPath(destDir: string, workspaceId: string): string {
@@ -53,6 +55,7 @@ export async function explodePackedWorkingCopy(
     fileMustExist: true
   });
   const dests: PreparedSliceDest[] = [];
+  let sliceSnapshotDigests: Readonly<Record<string, string>> = Object.freeze({});
   try {
     const workspaceIds = resolveWorkspaceIds(packed, input.workspaceIds);
     const catalog = classifyPackedTables(createSqliteCatalogReader(packed));
@@ -62,7 +65,7 @@ export async function explodePackedWorkingCopy(
     }
     copyIntoDests(packed, dests, catalog, input.onProgress);
     await rebuildTemporalOperators(dests, input.onProgress);
-    finalizeDests(dests, catalog.ftsVirtual, input.onProgress);
+    sliceSnapshotDigests = finalizeDests(dests, catalog.ftsVirtual, input.onProgress);
   } catch (error) {
     for (const dest of dests) closeSliceDest(dest);
     throw error;
@@ -78,7 +81,8 @@ export async function explodePackedWorkingCopy(
     packedDbPath: input.packedDbPath,
     destDir: input.destDir,
     workspaceIds: Object.freeze(dests.map((dest) => dest.workspaceId)),
-    sliceDbPaths: Object.freeze(sliceDbPaths)
+    sliceDbPaths: Object.freeze(sliceDbPaths),
+    sliceSnapshotDigests
   });
 }
 
@@ -172,13 +176,15 @@ function finalizeDests(
   dests: readonly PreparedSliceDest[],
   ftsVirtual: readonly string[],
   onProgress?: (progress: WorkspaceSliceProgress) => void
-): void {
+): Readonly<Record<string, string>> {
+  const sliceSnapshotDigests: Record<string, string> = {};
   for (const [index, dest] of dests.entries()) {
     rebuildWorkspaceFts(dest.database.connection, ftsVirtual);
     finalizeSliceDest(dest);
-    dest.database.close();
+    sliceSnapshotDigests[dest.workspaceId] = sealFinalizedWorkspaceSlice(dest);
     reportProgress(onProgress, "finalize_slices", index, dests.length);
   }
+  return Object.freeze(sliceSnapshotDigests);
 }
 
 function reportProgress(

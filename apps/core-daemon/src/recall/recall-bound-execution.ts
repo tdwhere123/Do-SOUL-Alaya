@@ -33,6 +33,7 @@ export type BoundRecallInvokeParams = Readonly<{
   readonly querySemanticFactorFormationCapture?: Readonly<OpenSemanticFactorFormationCapture>;
   readonly querySemanticFactorCompletenessReceipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
+  readonly snapshotDigest?: string;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
@@ -58,6 +59,7 @@ export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
   readonly querySemanticFactorFormationCapture?: Readonly<OpenSemanticFactorFormationCapture>;
   readonly querySemanticFactorCompletenessReceipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
+  readonly snapshotDigest?: string;
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
@@ -89,6 +91,7 @@ export async function invokeBoundRecall<TRecallResult>(
       querySemanticFactorCompletenessReceipt: params.querySemanticFactorCompletenessReceipt
     }),
     ...(params.diagnosticCapture === undefined ? {} : { diagnosticCapture: params.diagnosticCapture }),
+    ...(params.snapshotDigest === undefined ? {} : { snapshotDigest: params.snapshotDigest }),
     ...(params.selectionBoundaryObserver === undefined
       ? {}
       : { selectionBoundaryObserver: params.selectionBoundaryObserver }),

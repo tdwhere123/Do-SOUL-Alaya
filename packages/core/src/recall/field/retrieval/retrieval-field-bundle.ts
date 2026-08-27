@@ -95,6 +95,7 @@ export type RecallRetrievalFieldBundleSource = Readonly<{
   readonly synthesisSearchPort?: Readonly<RecallServiceSynthesisSearchPort>;
   readonly refinementMaxDepth?: number;
   readonly captureProof?: boolean;
+  readonly snapshotDigest?: string;
   readonly onFailure?: (operation: string, error: unknown) => void;
   readonly onBatchFailure?: (
     operation: string,
@@ -365,17 +366,31 @@ function collectMemoryLexicalBoundProofs(
     if (producer === undefined) return [];
     const proof = freezeLexicalBoundProof(producer);
     if (proof === undefined || proof.status !== "captured") return [];
-    return [sealLexicalBoundProof(proof, {
+    return [sealLexicalBoundProof(proof, lexicalProofSeal(params, {
       request_digest: record.request_digest,
-      workspace_id: params.workspaceId,
-      field_prefix: record.prefix,
-      candidate_key_domain: "memory_object_id"
-    })];
+      field_prefix: record.prefix
+    }))];
   });
   if (proofs.length > 0) return Object.freeze(proofs);
-  return Object.freeze([absentLexicalBoundProof({
-    workspace_id: params.workspaceId
-  })]);
+  return Object.freeze([absentLexicalBoundProof(lexicalProofSeal(params))]);
+}
+
+function lexicalProofSeal(
+  params: RecallRetrievalFieldBundleSource,
+  sealed?: Readonly<{
+    readonly request_digest: RecallFieldDigest;
+    readonly field_prefix: RecallMemoryFieldVariant;
+  }>
+) {
+  return {
+    workspace_id: params.workspaceId,
+    ...(sealed === undefined ? {} : {
+      request_digest: sealed.request_digest,
+      field_prefix: sealed.field_prefix,
+      candidate_key_domain: "memory_object_id" as const
+    }),
+    ...(params.snapshotDigest === undefined ? {} : { snapshot_digest: params.snapshotDigest })
+  };
 }
 
 function isLexicalMemoryPrefix(

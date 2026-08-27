@@ -76,6 +76,7 @@ export interface RecallExecutionParams {
     import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
   >;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
+  readonly snapshotDigest?: string;
   // Observer attachment is observation-only; answer features follow diagnosticCapture.
   readonly selectionBoundaryObserver?: (
     boundary: FineAssessmentSelectionBoundaryPendingCapture

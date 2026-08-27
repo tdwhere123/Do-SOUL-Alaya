@@ -31,7 +31,8 @@ export function loadSliceIntoOpenDatabase(
     attached = true;
     replaceAttachedTables(live, catalog);
     rebuildWorkspaceFts(live.connection, catalog.ftsVirtual);
-    live.connection.exec("ANALYZE");
+    // Unqualified ANALYZE writes sqlite_stat on every attached schema, including the sealed slice.
+    live.connection.exec("ANALYZE main");
   } finally {
     if (attached) {
       try {

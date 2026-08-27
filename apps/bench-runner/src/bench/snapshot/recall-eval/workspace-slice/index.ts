@@ -5,6 +5,16 @@ export {
   type ExplodedWorkspaceSlices
 } from "./explode.js";
 export {
+  digestWorkspaceSliceSnapshotIdentity,
+  readValidWorkspaceSliceSnapshotDigest,
+  sealFinalizedWorkspaceSlice,
+  assertQuiescentMainDb,
+  WORKSPACE_SLICE_EXPLODE_RECIPE_ID,
+  WORKSPACE_SLICE_EXPLODE_RECIPE_VERSION,
+  WORKSPACE_SLICE_SNAPSHOT_SIDECAR_FILENAME,
+  WORKSPACE_SLICE_SQLITE_KIND
+} from "./slice-snapshot.js";
+export {
   installWorkspaceSlice,
   packedWorkingDbPath,
   preservePackedWorkingCopy,

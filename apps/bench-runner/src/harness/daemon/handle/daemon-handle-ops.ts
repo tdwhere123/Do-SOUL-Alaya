@@ -178,6 +178,7 @@ function createBenchRecallOperation(
         ? {}
         : { querySemanticFactorCompletenessReceipt:
             opts.querySemanticFactorCompletenessReceipt }),
+      ...(opts.snapshotDigest === undefined ? {} : { snapshotDigest: opts.snapshotDigest }),
       activeConstraintsCap: null
     });
     const recallResult = validateBenchRecallDiagnostics(rawRecallResult, input.effectiveEnv);

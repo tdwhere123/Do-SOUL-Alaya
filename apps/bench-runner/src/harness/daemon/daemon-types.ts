@@ -92,6 +92,7 @@ export interface BenchRecallOptions {
   readonly diagnosticObserver?: (
     capture: FineAssessmentDiagnosticCapture
   ) => undefined;
+  readonly snapshotDigest?: string;
 }
 
 export interface BenchEdgeFormationMember {

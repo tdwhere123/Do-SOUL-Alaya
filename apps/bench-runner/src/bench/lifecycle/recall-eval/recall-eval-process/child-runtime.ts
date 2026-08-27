@@ -24,6 +24,7 @@ import {
   combineSelectionBoundaryObservers,
   createCandidateActivationCapture
 } from "../recall-eval-candidate-activation.js";
+import { resolveWorkspaceSliceSnapshotDigest } from "./child-snapshot-digest.js";
 import { readRecallEvalPagerMapsHint } from "./maps-hint.js";
 import type {
   RecallEvalPagerCloseResult,
@@ -103,6 +104,10 @@ export async function recallRecallEvalPagerChild(
   const activation = createCandidateActivationCapture(
     current.open.captureOpenSemanticFactorCandidateActivations
   );
+  const snapshotDigest = resolveWorkspaceSliceSnapshotDigest(
+    current.slices,
+    payload.question.workspaceId
+  );
   const result = await captureRecallEvalQuestion(
     current.spool,
     payload.question.questionId,
@@ -113,7 +118,8 @@ export async function recallRecallEvalPagerChild(
       embeddingMode: current.open.embeddingMode,
       recallOptions: {
         ...payload.recallOptions,
-        ...observerFields(observer, activation.observer)
+        ...observerFields(observer, activation.observer),
+        ...(snapshotDigest === undefined ? {} : { snapshotDigest })
       },
       simulateReport: current.open.simulateReport,
       measurement: payload.measurement
