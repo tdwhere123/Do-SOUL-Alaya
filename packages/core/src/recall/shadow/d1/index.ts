@@ -31,7 +31,11 @@ export {
 
 export {
   applicableChannelsOf,
+  compareD1FrozenCandidatePairs,
   D1_NONBINDING_TOKEN_BUDGET,
   replayD1FrozenCapture,
+  type D1FrozenCandidatePair,
+  type D1FrozenCandidatePairBlocking,
+  type D1FrozenCandidatePairInput,
   type D1FrozenCaptureInput
 } from "./frozen-capture.js";

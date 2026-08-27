@@ -22,7 +22,12 @@ import type {
   ShadowPsiLineages,
   ShadowPsiObservationField
 } from "../psi.js";
-import { replayD1CaptureWalk, type D1ReplayResult } from "./replay.js";
+import { psiOutcome } from "../psi.js";
+import { d1PsiOutcome } from "./interval-psi.js";
+import {
+  replayD1CaptureWalk,
+  type D1ReplayResult
+} from "./replay.js";
 
 export const D1_NONBINDING_TOKEN_BUDGET = 1_000_000_000;
 
@@ -33,6 +38,22 @@ export type D1FrozenCaptureInput = Readonly<{
   readonly set_utilities: unknown;
   readonly lexical_bound_proofs: unknown;
   readonly gold_keys?: readonly string[];
+}>;
+
+export type D1FrozenCandidatePair = Readonly<{
+  readonly left_candidate_key: string;
+  readonly right_candidate_key: string;
+}>;
+
+export type D1FrozenCandidatePairBlocking = Readonly<{
+  readonly production_blocked: boolean;
+  readonly d1_blocked: boolean;
+}>;
+
+export type D1FrozenCandidatePairInput = Readonly<{
+  readonly observations_by_candidate_key: unknown;
+  readonly lexical_bound_proofs: unknown;
+  readonly candidate_pairs: readonly D1FrozenCandidatePair[];
 }>;
 
 export function replayD1FrozenCapture(input: D1FrozenCaptureInput): D1ReplayResult {
@@ -47,6 +68,37 @@ export function replayD1FrozenCapture(input: D1FrozenCaptureInput): D1ReplayResu
     token_budget: D1_NONBINDING_TOKEN_BUDGET,
     per_dimension_limits: null
   });
+}
+
+export function compareD1FrozenCandidatePairs(
+  input: D1FrozenCandidatePairInput
+): readonly D1FrozenCandidatePairBlocking[] {
+  const observations = parseObservationField(input.observations_by_candidate_key);
+  const channels = applicableChannelsOf(observations);
+  const proofs = parseBoundProofs(input.lexical_bound_proofs);
+  return Object.freeze(input.candidate_pairs.map((pair) => {
+    const production = psiOutcome(
+      pair.left_candidate_key,
+      pair.right_candidate_key,
+      observations,
+      channels
+    );
+    const d1 = d1PsiOutcome(
+      pair.left_candidate_key,
+      pair.right_candidate_key,
+      observations,
+      channels,
+      proofs
+    );
+    if (production.kind === "not_a_dominance_compare" ||
+        d1.kind === "not_a_dominance_compare") {
+      throw new ShadowContractError("candidate pair is outside H");
+    }
+    return Object.freeze({
+      production_blocked: production.kind === "blocked",
+      d1_blocked: d1.kind === "blocked"
+    });
+  }));
 }
 
 export function applicableChannelsOf(

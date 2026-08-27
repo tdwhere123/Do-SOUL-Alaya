@@ -6,6 +6,7 @@ import {
 } from "../../../../recall/shadow/index.js";
 import {
   applicableChannelsOf,
+  compareD1FrozenCandidatePairs,
   replayD1CaptureWalk,
   replayD1FrozenCapture
 } from "../../../../recall/shadow/d1/index.js";
@@ -78,6 +79,28 @@ describe("d1 frozen capture adapter", () => {
     if (replayed.kind !== "replayed") return;
     expect(replayed.metrics.any_at_5).toBe(true);
     expect(replayed.prefix_sk_5).toEqual(["A"]);
+  });
+
+  it("compares a frozen pair without walking Gamma", () => {
+    const observations = field({
+      A: view({ lexical: lexicalAt("observed") }),
+      B: view({ lexical: lexicalAt("not_observed") })
+    });
+    expect(compareD1FrozenCandidatePairs({
+      observations_by_candidate_key: observations,
+      lexical_bound_proofs: [plantProof({
+        lanes: {
+          porter: {
+            rows: [{ key: "A", ordinal: 5 }],
+            universeKeys: ["A", "B"]
+          }
+        }
+      })],
+      candidate_pairs: [{ left_candidate_key: "A", right_candidate_key: "B" }]
+    })).toEqual([{
+      production_blocked: true,
+      d1_blocked: false
+    }]);
   });
 });
 

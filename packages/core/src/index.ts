@@ -322,6 +322,7 @@ export {
 } from "./recall/shadow/ranking/cheap-rung.js";
 export {
   applicableChannelsOf,
+  compareD1FrozenCandidatePairs,
   D1_NONBINDING_TOKEN_BUDGET,
   d1HasLegalEnvelope,
   d1IdentitiesEqual,
@@ -337,6 +338,9 @@ export {
   type D1EnvelopeIdentity,
   type D1EnvelopeValue,
   type D1FrozenCaptureInput,
+  type D1FrozenCandidatePair,
+  type D1FrozenCandidatePairBlocking,
+  type D1FrozenCandidatePairInput,
   type D1IntervalEnvelope,
   type D1LaneEnvelope,
   type D1MissingnessCoverage,
