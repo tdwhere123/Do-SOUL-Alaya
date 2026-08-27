@@ -58,7 +58,6 @@ export type D1ReplayMetrics = Readonly<{
   readonly mean_max_g_cohort_size: number;
   readonly deterministic_tail_share: number;
   readonly any_at_5: boolean | null;
-  readonly prefix_monotonic: boolean;
 }>;
 
 export type D1ReplayResult =
@@ -153,8 +152,7 @@ function metricsFrom(
       : tailHits.length / d1Walk.decisions.length,
     any_at_5: input.gold_keys === undefined
       ? null
-      : goldInPrefix(input.gold_keys, prefixSK(d1Walk.S_infty, 5)),
-    prefix_monotonic: prefixMonotonic(d1Walk.S_infty)
+      : goldInPrefix(input.gold_keys, prefixSK(d1Walk.S_infty, 5))
   });
 }
 
@@ -266,14 +264,6 @@ function psiCohortSize(
   receipt: ShadowCapturedWalk["decisions"][number]
 ): number {
   return receipt.max_g_cohort.length - receipt.equal_g_dominance_rejects.length;
-}
-
-function prefixMonotonic(sInfty: readonly string[]): boolean {
-  for (let k = 1; k <= sInfty.length; k += 1) {
-    const prefix = prefixSK(sInfty, k);
-    if (!prefix.every((key, index) => key === sInfty[index])) return false;
-  }
-  return true;
 }
 
 function goldInPrefix(golds: readonly string[], prefix: readonly string[]): boolean {

@@ -98,15 +98,20 @@ function lexicalVote(
   index: EnvelopeIndex
 ): ShadowChannelVote {
   const votes: ShadowChannelVote[] = [];
+  const rights = index(u);
   for (const left of index(v)) {
-    for (const right of index(u)) {
-      if (!sameProofIdentity(left, right)) continue;
-      votes.push(d1LexicalChannelVote(left, right));
-    }
+    const right = rights.find((item) => sameProofIdentity(left, item));
+    if (right === undefined) continue;
+    votes.push(d1LexicalChannelVote(left, right));
   }
-  if (votes.length === 0) return "skip";
-  const first = votes[0]!;
-  return votes.every((vote) => vote === first) ? first : "incomparable";
+  return reduceIdentityVotes(votes);
+}
+
+function reduceIdentityVotes(votes: readonly ShadowChannelVote[]): ShadowChannelVote {
+  const remaining = votes.filter((vote) => vote !== "skip");
+  if (remaining.length === 0) return "skip";
+  const first = remaining[0]!;
+  return remaining.every((vote) => vote === first) ? first : "incomparable";
 }
 
 function sameProofIdentity(

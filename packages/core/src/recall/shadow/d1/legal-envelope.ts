@@ -83,12 +83,13 @@ export function d1IdentitiesEqual(
   return left.field_prefix === right.field_prefix &&
     left.query_run_id === right.query_run_id &&
     left.snapshot_digest === right.snapshot_digest &&
-    left.request_digest === right.request_digest;
+    left.request_digest === right.request_digest &&
+    left.workspace_id === right.workspace_id;
 }
 
 export function d1HasLegalEnvelope(map: D1CandidateEnvelopeMap): boolean {
   return Object.values(map.lanes).some((lane) =>
-    lane !== undefined && lane.value.kind !== "unbounded");
+    lane !== undefined && lane.value.kind === "interval");
 }
 
 function lanesFrom(

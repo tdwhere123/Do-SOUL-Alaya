@@ -87,11 +87,11 @@ function sharedLegalValues(
 ): readonly (readonly [D1EnvelopeValue, D1EnvelopeValue])[] {
   const pairs: Array<readonly [D1EnvelopeValue, D1EnvelopeValue]> = [];
   for (const lane of Object.values(left.lanes)) {
-    if (lane === undefined || lane.domain === null || lane.value.kind === "unbounded") {
+    if (lane === undefined || lane.domain === null || lane.value.kind !== "interval") {
       continue;
     }
     const other = envelopeOnDomain(right, lane.domain);
-    if (other === undefined || other.kind === "unbounded") continue;
+    if (other === undefined || other.kind !== "interval") continue;
     pairs.push([lane.value, other]);
   }
   return pairs;

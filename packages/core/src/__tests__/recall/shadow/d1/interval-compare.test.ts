@@ -4,7 +4,10 @@ import {
   d1LaneEnvelopes,
   d1LexicalChannelVote
 } from "../../../../recall/shadow/d1/index.js";
-import { plantProof } from "./d1-proof-fixture.js";
+import { D1_REQUEST, D1_SNAPSHOT, plantProof } from "./d1-proof-fixture.js";
+
+const SNAPSHOT_OTHER = `sha256:${"c".repeat(64)}`;
+const REQUEST_OTHER = `sha256:${"d".repeat(64)}`;
 
 describe("d1 interval channel vote", () => {
   it("votes gt / lt / eq / skip on the same LexDomain", () => {
@@ -176,19 +179,52 @@ describe("d1 interval channel vote", () => {
   });
 
   it("skips when both lanes are no_tokens_routed", () => {
-    const proof = plantProof({
-      lanes: {
-        exact: { tokensRouted: false },
-        porter: { tokensRouted: false },
-        trigram: { tokensRouted: false },
-        object_key_porter: { tokensRouted: false },
-        object_key_trigram: { tokensRouted: false }
-      }
-    });
+    const proof = plantProof({ lanes: noTokensLanes() });
     expect(d1LexicalChannelVote(
       d1LaneEnvelopes(proof, "v"),
       d1LaneEnvelopes(proof, "u")
     )).toBe("skip");
+  });
+
+  it("does not let inapplicable sibling lanes veto a shared interval family vote", () => {
+    const proof = plantProof({
+      includeProvenance: false,
+      lanes: {
+        ...noTokensLanes(),
+        porter: { universeKeys: ["miss", "other"] }
+      }
+    });
+    expect(d1LaneEnvelopes(proof, "miss").lanes.exact?.value).toEqual({ kind: "inapplicable" });
+    expect(d1LaneEnvelopes(proof, "miss").lanes.porter?.value)
+      .toEqual({ kind: "interval", lower: 0, upper: 0 });
+    expect(d1LexicalChannelVote(
+      d1LaneEnvelopes(proof, "miss"),
+      d1LaneEnvelopes(proof, "other")
+    )).toBe("eq");
+  });
+
+  it("does not mix distinct snapshot, request, or workspace identities", () => {
+    const lanes = {
+      porter: { rows: [{ key: "hit", ordinal: 5 }], universeKeys: ["hit", "miss"] }
+    };
+    const base = plantProof({ lanes });
+    expect(d1LexicalChannelVote(
+      d1LaneEnvelopes(base, "hit"),
+      d1LaneEnvelopes(plantProof({ lanes, snapshotDigest: SNAPSHOT_OTHER }), "miss")
+    )).toBe("incomparable");
+    expect(d1LexicalChannelVote(
+      d1LaneEnvelopes(base, "hit"),
+      d1LaneEnvelopes(plantProof({ lanes, requestDigest: REQUEST_OTHER }), "miss")
+    )).toBe("incomparable");
+    expect(d1LexicalChannelVote(
+      d1LaneEnvelopes(base, "hit"),
+      d1LaneEnvelopes(plantProof({
+        lanes,
+        workspaceId: "workspace-2",
+        snapshotDigest: D1_SNAPSHOT,
+        requestDigest: D1_REQUEST
+      }), "miss")
+    )).toBe("incomparable");
   });
 });
 
@@ -209,4 +245,14 @@ function truncatedPorter() {
       }
     }
   });
+}
+
+function noTokensLanes() {
+  return {
+    exact: { tokensRouted: false as const },
+    porter: { tokensRouted: false as const },
+    trigram: { tokensRouted: false as const },
+    object_key_porter: { tokensRouted: false as const },
+    object_key_trigram: { tokensRouted: false as const }
+  };
 }

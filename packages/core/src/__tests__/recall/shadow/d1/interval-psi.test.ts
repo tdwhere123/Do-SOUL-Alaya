@@ -90,7 +90,7 @@ describe("d1 pair Psi", () => {
     expect(d1PsiOutcome("hit", "miss", obs, LEX_TEMP, [proof]).kind).toBe("blocked");
   });
 
-  it("keeps a non-admitted producer-observed point comparable", () => {
+  it("compares a producer-observed point against a missing_rank peer", () => {
     const proof = plantProof({
       lanes: {
         porter: {
@@ -100,7 +100,39 @@ describe("d1 pair Psi", () => {
       }
     });
     const obs = missingLexical(["p3", "miss"]);
+    expect(obs.p3?.lineages.lexical?.envelope).toEqual({
+      state: "not_observed",
+      reason: "missing_rank"
+    });
+    expect(obs.miss?.lineages.lexical?.envelope).toEqual({
+      state: "not_observed",
+      reason: "missing_rank"
+    });
+    expect(d1PsiQ("p3", "miss", obs, LEX, [proof])).toBe(true);
     expect(d1PsiPredicate(obs, LEX, [proof])("p3", "miss")).toBe(true);
+  });
+
+  it("skips lexical comparison when no proofs are supplied", () => {
+    const obs = missingLexical(["hit", "miss"]);
+    expect(d1PsiOutcome("hit", "miss", obs, LEX, []).kind).toBe("skip");
+    expect(d1PsiQ("hit", "miss", obs, LEX, [])).toBe(false);
+  });
+
+  it("lets a dual-prefix skip identity keep the other identity's gt", () => {
+    const comparable = {
+      ...noTokensLanes(),
+      porter: {
+        rows: [{ key: "hit", ordinal: 5 }],
+        universeKeys: ["hit", "miss"]
+      }
+    };
+    const relaxed = plantProof({ fieldPrefix: "lexical_relaxed", lanes: comparable });
+    const expanded = plantProof({ fieldPrefix: "lexical_expanded", lanes: noTokensLanes() });
+    const obs = missingLexical(["hit", "miss"]);
+    const proofs = [relaxed, expanded];
+    expect(d1PsiQ("hit", "miss", obs, LEX, proofs)).toBe(true);
+    expect(d1PsiOutcome("hit", "miss", obs, LEX, proofs).kind).toBe("dominates");
+    expect(d1PsiPredicate(obs, LEX, proofs)("hit", "miss")).toBe(true);
   });
 
   it("is incomparable across lanes and field prefixes", () => {
@@ -178,4 +210,14 @@ function missingLexical(keys: readonly string[]) {
     key,
     view({ lexical: lexicalAt("not_observed") })
   ])));
+}
+
+function noTokensLanes() {
+  return {
+    exact: { tokensRouted: false as const },
+    porter: { tokensRouted: false as const },
+    trigram: { tokensRouted: false as const },
+    object_key_porter: { tokensRouted: false as const },
+    object_key_trigram: { tokensRouted: false as const }
+  };
 }

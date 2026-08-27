@@ -13,7 +13,7 @@ import { plantProof } from "./d1-proof-fixture.js";
 const LEX = ["lexical"] as const;
 
 describe("d1 frozen-Gamma walk replay", () => {
-  it("keeps prefix_sk monotonic and shrinks an equal-G cohort on a receipt edge", () => {
+  it("replays prefix_sk with frozen Gamma and shrinks an equal-G cohort on a receipt edge", () => {
     const proof = plantProof({
       lanes: {
         porter: {
@@ -44,9 +44,8 @@ describe("d1 frozen-Gamma walk replay", () => {
     });
     expect(replayed.kind).toBe("replayed");
     if (replayed.kind !== "replayed") return;
-    expect(replayed.metrics.prefix_monotonic).toBe(true);
-    expect(prefixSK(replayed.d1_walk.S_infty, 1).every((key, index) =>
-      key === prefixSK(replayed.d1_walk.S_infty, 2)[index])).toBe(true);
+    expect(candidates[0]?.utility).toBe(utilities.A);
+    expect(candidates[1]?.utility).toBe(utilities.B);
     expect(replayed.d1_walk.S_infty[0]).toBe("A");
     expect(replayed.metrics.receipt_backed_dominance_edges).toBeGreaterThan(0);
     expect(replayed.metrics.equal_g_cohort_shrink.baseline_cohorts_gt_1).toBeGreaterThan(0);
@@ -63,7 +62,6 @@ describe("d1 frozen-Gamma walk replay", () => {
     expect(replayed.metrics.f1_size).toBe(1);
     expect(replayed.metrics.h_size).toBe(2);
     expect(replayed.metrics.f1_over_h).toBeCloseTo(0.5);
-    expect(candidates[0]?.utility).toBe(utilities.A);
     expect(replayed.metrics.mean_max_g_cohort_size).toBeGreaterThan(0);
     expect(replayed.metrics.deterministic_tail_share).toBeGreaterThanOrEqual(0);
     expect(replayed.metrics.blocked_pair_share).toBeGreaterThanOrEqual(0);
