@@ -15,11 +15,87 @@ import {
 
 const clock = vi.hoisted(() => ({
   value: 0,
+  preparationCost: 0,
+  selectionSynthesisCost: 0,
+  resultBuildCost: 0,
+  sideEffectsCost: 0,
+  unattributedCost: 0,
   assessmentCost: 0,
   deliveryCost: 0,
   assessmentCalls: vi.fn(),
   deliveryCalls: vi.fn()
 }));
+
+vi.mock("../../../recall/runtime/query/prepare-recall-request.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../recall/runtime/query/prepare-recall-request.js")
+  >();
+  return {
+    ...actual,
+    prepareRecallRequest: async (...args: Parameters<typeof actual.prepareRecallRequest>) => {
+      clock.value += clock.preparationCost;
+      return actual.prepareRecallRequest(...args);
+    }
+  };
+});
+
+vi.mock("../../../recall/delivery/select-gamma/synthesis-adapter.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../recall/delivery/select-gamma/synthesis-adapter.js")
+  >();
+  return {
+    ...actual,
+    applySelectGammaSynthesis: async (
+      ...args: Parameters<typeof actual.applySelectGammaSynthesis>
+    ) => {
+      clock.value += clock.selectionSynthesisCost;
+      return actual.applySelectGammaSynthesis(...args);
+    }
+  };
+});
+
+vi.mock("../../../recall/runtime/recall-result-builder.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../recall/runtime/recall-result-builder.js")
+  >();
+  return {
+    ...actual,
+    buildRecallResult: (...args: Parameters<typeof actual.buildRecallResult>) => {
+      clock.value += clock.resultBuildCost;
+      return actual.buildRecallResult(...args);
+    }
+  };
+});
+
+vi.mock("../../../recall/runtime/recall-read-snapshot.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../recall/runtime/recall-read-snapshot.js")
+  >();
+  return {
+    ...actual,
+    withRecallReadSnapshot: async (
+      ...args: Parameters<typeof actual.withRecallReadSnapshot>
+    ) => {
+      clock.value += clock.unattributedCost;
+      return actual.withRecallReadSnapshot(...args);
+    }
+  };
+});
+
+vi.mock("../../../recall/runtime/orchestration.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../recall/runtime/orchestration.js")
+  >();
+  return {
+    ...actual,
+    appendWeightTransferTelemetry: async (
+      ...args: Parameters<typeof actual.appendWeightTransferTelemetry>
+    ) => {
+      clock.value += clock.sideEffectsCost;
+      return actual.appendWeightTransferTelemetry(...args);
+    }
+  };
+});
 
 vi.mock("../../../recall/delivery/fine-assessment.js", async (importOriginal) => {
   const actual = await importOriginal<
@@ -47,6 +123,11 @@ vi.mock("../../../recall/delivery/fine-assessment.js", async (importOriginal) =>
 describe("recall phase attribution", () => {
   beforeEach(() => {
     clock.value = 0;
+    clock.preparationCost = 3;
+    clock.selectionSynthesisCost = 7;
+    clock.resultBuildCost = 17;
+    clock.sideEffectsCost = 19;
+    clock.unattributedCost = 23;
     clock.assessmentCost = 5;
     clock.deliveryCost = 11;
     clock.assessmentCalls.mockClear();
@@ -76,8 +157,11 @@ async function verifySnapshotAttribution() {
 
   expect(result.diagnostics?.phase_latency_ms).toEqual({
     coarse: 0, synthesis: 0, embedding: 5, assessment: 5,
-    cross_rerank: 0, delivery: 11, manifestation: 13
+    cross_rerank: 0, delivery: 11, manifestation: 13,
+    preparation: 3, select_gamma_synthesis: 7, result_build: 17,
+    side_effects: 19, unattributed_residual: 23, accounting_overage: 0
   });
+  expect(reconcilePhaseLatency(result)).toBe(clock.value);
   expect(clock.assessmentCalls).toHaveBeenCalledOnce();
   expect(clock.deliveryCalls).toHaveBeenCalledOnce();
 }
@@ -93,8 +177,11 @@ async function verifyCustomAttribution() {
 
   expect(result.diagnostics?.phase_latency_ms).toEqual({
     coarse: 0, synthesis: 0, embedding: 10, assessment: 5,
-    cross_rerank: 0, delivery: 11, manifestation: 0
+    cross_rerank: 0, delivery: 11, manifestation: 0,
+    preparation: 3, select_gamma_synthesis: 7, result_build: 17,
+    side_effects: 19, unattributed_residual: 23, accounting_overage: 0
   });
+  expect(reconcilePhaseLatency(result)).toBe(clock.value);
   expect(clock.assessmentCalls).toHaveBeenCalledOnce();
   expect(clock.deliveryCalls).toHaveBeenCalledOnce();
 }
@@ -110,8 +197,11 @@ async function verifyLegacyAttribution() {
 
   expect(result.diagnostics?.phase_latency_ms).toEqual({
     coarse: 0, synthesis: 0, embedding: 17, assessment: 8,
-    cross_rerank: 0, delivery: 11, manifestation: 0
+    cross_rerank: 0, delivery: 11, manifestation: 0,
+    preparation: 3, select_gamma_synthesis: 7, result_build: 17,
+    side_effects: 19, unattributed_residual: 23, accounting_overage: 3
   });
+  expect(reconcilePhaseLatency(result)).toBe(clock.value);
   expect(clock.assessmentCalls).toHaveBeenCalledOnce();
   expect(clock.deliveryCalls).toHaveBeenCalledOnce();
 }
@@ -135,8 +225,19 @@ async function verifyCoarseOwnership() {
   expect(synthesisSearch).toHaveBeenCalled();
   expect(result.diagnostics?.phase_latency_ms).toEqual({
     coarse: 13, synthesis: 0, embedding: 0, assessment: 5,
-    cross_rerank: 0, delivery: 11, manifestation: 0
+    cross_rerank: 0, delivery: 11, manifestation: 0,
+    preparation: 3, select_gamma_synthesis: 7, result_build: 17,
+    side_effects: 19, unattributed_residual: 23, accounting_overage: 0
   });
+  expect(reconcilePhaseLatency(result)).toBe(clock.value);
+}
+
+function reconcilePhaseLatency(result: Awaited<ReturnType<typeof runEmbeddingRecall>>): number {
+  const phases = result.diagnostics?.phase_latency_ms ?? {};
+  return Object.entries(phases).reduce(
+    (sum, [name, value]) => sum + (name === "accounting_overage" ? -value : value),
+    0
+  );
 }
 
 function createSnapshotPort(memoryId: string): RecallServiceEmbeddingRecallPort {

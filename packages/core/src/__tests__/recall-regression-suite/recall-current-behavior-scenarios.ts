@@ -12,7 +12,13 @@ export const RECALL_PHASES = Object.freeze([
   "assessment",
   "cross_rerank",
   "delivery",
-  "manifestation"
+  "manifestation",
+  "preparation",
+  "select_gamma_synthesis",
+  "result_build",
+  "side_effects",
+  "unattributed_residual",
+  "accounting_overage"
 ]);
 
 export function createAnswerableSourceWindowScenario() {

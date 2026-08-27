@@ -24,6 +24,13 @@ import type {
 import type { SelectGammaSynthesisStatus } from
   "../delivery/select-gamma/synthesis-adapter.js";
 
+type RecallExecutionPhaseLatencyMs = Readonly<{
+  readonly preparation: number;
+  readonly select_gamma_synthesis: number;
+  readonly result_build: number;
+  readonly side_effects: number;
+}>;
+
 export function buildRecallResult(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
@@ -127,6 +134,42 @@ export function buildRecallResult(
       phaseLatencyMs
     })
   });
+}
+
+export function addRecallExecutionPhaseLatencies(
+  result: RecallResult,
+  executionPhases: RecallExecutionPhaseLatencyMs,
+  elapsedMs: number,
+  existingPhaseOwnerElapsedMs: number
+): RecallResult {
+  const diagnostics = result.diagnostics;
+  const existingPhases = diagnostics?.phase_latency_ms;
+  if (diagnostics === undefined || existingPhases === undefined) {
+    return result;
+  }
+  const existingPhaseTotalMs = sumPhaseLatency(existingPhases);
+  const existingPhaseOverageMs = Math.max(
+    0,
+    existingPhaseTotalMs - existingPhaseOwnerElapsedMs
+  );
+  const namedPhases = Object.freeze({ ...existingPhases, ...executionPhases });
+  const namedEffectiveTotalMs = sumPhaseLatency(namedPhases) - existingPhaseOverageMs;
+  const residualMs = elapsedMs - namedEffectiveTotalMs;
+  return Object.freeze({
+    ...result,
+    diagnostics: Object.freeze({
+      ...diagnostics,
+      phase_latency_ms: Object.freeze({
+        ...namedPhases,
+        unattributed_residual: Math.max(0, residualMs),
+        accounting_overage: existingPhaseOverageMs + Math.max(0, -residualMs)
+      })
+    })
+  });
+}
+
+function sumPhaseLatency(phases: Readonly<Record<string, number>>): number {
+  return Object.values(phases).reduce((sum, latencyMs) => sum + latencyMs, 0);
 }
 
 function buildFineAssessmentPrunedDiagnostics(

@@ -413,8 +413,15 @@ const EXCLUSIVE_PHASES = [
   "assessment",
   "cross_rerank",
   "delivery",
-  "manifestation"
+  "manifestation",
+  "preparation",
+  "select_gamma_synthesis",
+  "result_build",
+  "side_effects",
+  "unattributed_residual",
+  "accounting_overage"
 ] as const;
+const FINAL_ACCOUNTING_OVERHEAD_TOLERANCE_MS = 5;
 
 function expectExclusivePhaseLatency(
   phaseLatencyMs: Readonly<Record<string, number>> | undefined,
@@ -427,5 +434,12 @@ function expectExclusivePhaseLatency(
     expect(Number.isFinite(value)).toBe(true);
     expect(value).toBeGreaterThanOrEqual(0);
   }
-  expect(values.reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(elapsedMs);
+  const accountedMs = Object.entries(phaseLatencyMs ?? {}).reduce(
+    (sum, [name, value]) => sum + (name === "accounting_overage" ? -value : value),
+    0
+  );
+  expect(accountedMs).toBeLessThanOrEqual(elapsedMs);
+  expect(elapsedMs - accountedMs).toBeLessThanOrEqual(
+    FINAL_ACCOUNTING_OVERHEAD_TOLERANCE_MS
+  );
 }

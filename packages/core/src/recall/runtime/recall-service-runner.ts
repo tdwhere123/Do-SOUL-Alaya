@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import {
   RecallContextEventType,
   SoulRecallCompletedPayloadSchema,
@@ -34,7 +35,8 @@ import {
   startEmbeddingAssessmentPreparation,
   type EmbeddingAssessmentData
 } from "./orchestration/recall-embedding-assessment.js";
-import { buildRecallResult } from "./recall-result-builder.js";
+import { addRecallExecutionPhaseLatencies, buildRecallResult } from
+  "./recall-result-builder.js";
 import {
   buildFineAssessParams,
   collectTimedSupplementaryData,
@@ -72,6 +74,7 @@ type PreparedRecallOutcome = Readonly<{
   readonly assessment: AssessmentStageResult;
   readonly manifested: ManifestedRecallResult;
   readonly synthesis: Awaited<ReturnType<typeof applySelectGammaSynthesis>>;
+  readonly selectGammaSynthesisLatencyMs: number;
 }>;
 type AssessmentPhaseSeed = Readonly<{
   readonly embedding: number;
@@ -84,42 +87,55 @@ export async function executeRecall(
   context: RecallExecutionContext,
   params: RecallExecutionParams
 ): Promise<RecallResult> {
-  const degradationReasons = new Set<RecallDegradationReason>();
-  const executionContext = Object.freeze({ ...context, degradationReasons });
-  const time = captureRecallRequestTime({
-    explicitAsOf: params.referenceTime,
-    now: executionContext.now
-  });
-  const prepared = await prepareRecallRequest(executionContext, params, time);
+  const executionStartedAt = performance.now();
+  const preparation = await prepareRecallExecution(context, params);
+  const { degradationReasons, executionContext, time, prepared } = preparation.value;
   let outcome: PreparedRecallOutcome;
+  let outcomeElapsedMs: number;
   try {
-    outcome = await withRecallReadSnapshot(executionContext.readSnapshot, () =>
-      collectPreparedRecallOutcome(executionContext, params, prepared)
+    const collectedOutcome = await withRecallReadSnapshot(executionContext.readSnapshot, () =>
+      measureAsync(() => collectPreparedRecallOutcome(executionContext, params, prepared))
     );
+    outcome = collectedOutcome.value;
+    outcomeElapsedMs = collectedOutcome.latencyMs;
   } catch (error) {
     finishProjectionPinAfterFailure(prepared, executionContext.warn, error);
   }
   finishPreparedProjectionPin(prepared, executionContext.warn);
-  const result = buildRecallResult(
-    prepared,
-    outcome.coarse,
-    outcome.assessment,
-    outcome.manifested,
-    degradationReasons,
-    outcome.synthesis.synthesis,
+  const resultBuild = measureSync(() => buildRecallResult(
+    prepared, outcome.coarse, outcome.assessment, outcome.manifested,
+    degradationReasons, outcome.synthesis.synthesis,
     capturesRecallAnswerFeatures(params.diagnosticCapture)
+  ));
+  const sideEffects = await measureAsync(() => recordRecallSideEffects(
+    executionContext, params, outcome.coarse, outcome.assessment,
+    outcome.manifested, time.captureOperationalTime()
+  ));
+  return addRecallExecutionPhaseLatencies(
+    resultBuild.value,
+    {
+      preparation: preparation.latencyMs,
+      select_gamma_synthesis: outcome.selectGammaSynthesisLatencyMs,
+      result_build: resultBuild.latencyMs,
+      side_effects: sideEffects.latencyMs
+    },
+    Math.max(0, performance.now() - executionStartedAt),
+    Math.max(0, outcomeElapsedMs - outcome.selectGammaSynthesisLatencyMs)
   );
-  await recordRecallSideEffects(
-    executionContext,
-    params,
-    outcome.coarse,
-    outcome.assessment,
-    outcome.manifested,
-    time.captureOperationalTime()
-  );
-  return result;
 }
 
+async function prepareRecallExecution(context: RecallExecutionContext, params: RecallExecutionParams) {
+  return measureAsync(async () => {
+    const degradationReasons = new Set<RecallDegradationReason>();
+    const executionContext = Object.freeze({ ...context, degradationReasons });
+    const time = captureRecallRequestTime({
+      explicitAsOf: params.referenceTime,
+      now: executionContext.now
+    });
+    const prepared = await prepareRecallRequest(executionContext, params, time);
+    return Object.freeze({ degradationReasons, executionContext, time, prepared });
+  });
+}
 async function collectPreparedRecallOutcome(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
@@ -129,18 +145,18 @@ async function collectPreparedRecallOutcome(
   prepared.projectionPinLease.assertHealthy();
   const assessment = await assessCandidateStage(context, params, prepared, coarse);
   prepared.projectionPinLease.assertHealthy();
-  const synthesis = await applySelectGammaSynthesis({
+  const synthesis = await measureAsync(() => applySelectGammaSynthesis({
     workspace_id: params.workspaceId,
     run_id: params.runId ?? null,
     query_text: prepared.queryText,
     selected_evidence: assessment.finalAssessment.candidates,
     port: context.dependencies.selectGammaSynthesisPort
-  });
+  }));
   prepared.projectionPinLease.assertHealthy();
   const manifested = await manifestCandidateStage(
     context,
     params,
-    synthesis.selected_evidence,
+    synthesis.value.selected_evidence,
     assessment.finalAssessment.diagnostics,
     assessment.finalAssessment.capture_receipt
   );
@@ -149,7 +165,8 @@ async function collectPreparedRecallOutcome(
     coarse,
     assessment,
     manifested,
-    synthesis
+    synthesis: synthesis.value,
+    selectGammaSynthesisLatencyMs: synthesis.latencyMs
   });
 }
 
