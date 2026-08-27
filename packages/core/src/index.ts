@@ -320,3 +320,28 @@ export {
   type CheapRankingRungReport,
   type CheapRankingRungRow
 } from "./recall/shadow/ranking/cheap-rung.js";
+export {
+  applicableChannelsOf,
+  D1_NONBINDING_TOKEN_BUDGET,
+  d1HasLegalEnvelope,
+  d1IdentitiesEqual,
+  d1IntervalVote,
+  d1LaneEnvelopes,
+  d1LexicalChannelVote,
+  d1PsiOutcome,
+  d1PsiPredicate,
+  d1PsiQ,
+  replayD1CaptureWalk,
+  replayD1FrozenCapture,
+  type D1CandidateEnvelopeMap,
+  type D1EnvelopeIdentity,
+  type D1EnvelopeValue,
+  type D1FrozenCaptureInput,
+  type D1IntervalEnvelope,
+  type D1LaneEnvelope,
+  type D1MissingnessCoverage,
+  type D1PrimaryObservation,
+  type D1ReplayInput,
+  type D1ReplayMetrics,
+  type D1ReplayResult
+} from "./recall/shadow/d1/index.js";

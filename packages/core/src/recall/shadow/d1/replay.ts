@@ -191,11 +191,12 @@ function blockedPairs(
 ): Readonly<{ readonly pairs: number; readonly blocked: number; readonly share: number }> {
   let pairs = 0;
   let blocked = 0;
+  const index = envelopeCache(input.proofs);
   for (let i = 0; i < eligible.length; i += 1) {
     for (let j = i + 1; j < eligible.length; j += 1) {
       pairs += 1;
       const outcome = d1PsiOutcome(
-        eligible[i]!, eligible[j]!, input.observations, input.applicableChannels, input.proofs
+        eligible[i]!, eligible[j]!, input.observations, input.applicableChannels, index
       );
       if (isBlocked(outcome)) blocked += 1;
     }
@@ -280,4 +281,17 @@ function isBlocked(
 function mean(values: readonly number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function envelopeCache(
+  proofs: D1ReplayInput["proofs"]
+): (key: string) => readonly ReturnType<typeof d1LaneEnvelopes>[] {
+  const cache = new Map<string, readonly ReturnType<typeof d1LaneEnvelopes>[]>();
+  return (key) => {
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const maps = Object.freeze(proofs.map((proof) => d1LaneEnvelopes(proof, key)));
+    cache.set(key, maps);
+    return maps;
+  };
 }

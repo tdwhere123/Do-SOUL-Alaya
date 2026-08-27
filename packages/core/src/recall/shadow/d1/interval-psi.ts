@@ -43,10 +43,11 @@ export function d1PsiOutcome(
   u: string,
   observations: ShadowPsiObservationField,
   applicableChannels: readonly ShadowLineageId[],
-  proofs: readonly LexicalBoundProof[]
+  proofs: readonly LexicalBoundProof[] | EnvelopeIndex
 ): ShadowPsiOutcome | ShadowNotADominanceCompare {
   if (v === u) return freezeShadow({ kind: "skip", n_gt: 0, n_lt: 0, n_eq: 0 });
-  return evaluateD1Pair(v, u, observations, applicableChannels, envelopeIndex(proofs));
+  const index = typeof proofs === "function" ? proofs : envelopeIndex(proofs);
+  return evaluateD1Pair(v, u, observations, applicableChannels, index);
 }
 
 export function d1PsiQ(

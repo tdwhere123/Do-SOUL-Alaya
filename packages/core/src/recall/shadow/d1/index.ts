@@ -28,3 +28,10 @@ export {
   type D1ReplayMetrics,
   type D1ReplayResult
 } from "./replay.js";
+
+export {
+  applicableChannelsOf,
+  D1_NONBINDING_TOKEN_BUDGET,
+  replayD1FrozenCapture,
+  type D1FrozenCaptureInput
+} from "./frozen-capture.js";

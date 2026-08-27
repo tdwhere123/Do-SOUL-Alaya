@@ -53,3 +53,9 @@ export {
   evaluateRecallEvalGzipTailDegeneracy,
   scoreRecallEvalGzipRankingRung
 } from "./diagnostics/ranking/score-stored-ranking-rung.js";
+export {
+  evaluateRecallEvalGzipD1Counterfactual,
+  type D1CounterfactualCaptureIdentity,
+  type D1CounterfactualRate,
+  type D1CounterfactualReport
+} from "./diagnostics/ranking/score-d1-counterfactual.js";
