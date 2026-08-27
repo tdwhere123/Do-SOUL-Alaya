@@ -8,6 +8,13 @@ import {
 import { z } from "zod";
 import { OpenSemanticFactorCompositionStatusSchema } from
   "../semantic-factors/open-semantic-factor-diagnostics-schema.js";
+import {
+  LexicalLaneEvaluatedUniverseSchema,
+  LexicalLaneIdSchema,
+  refineLaneUniverse,
+  refineReceiptUniverses,
+  refineUniversesMatchWorkspace
+} from "./lexical-lane-universe-schema.js";
 
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const identityGap = <Reason extends string>(reason: Reason) => z.object({
@@ -23,13 +30,6 @@ const UnseenFrontierSchema = z.union([
     status: z.literal("unavailable"),
     reason: z.literal("producer_order_not_monotone")
   }).strict().readonly()
-]);
-const LexicalLaneIdSchema = z.enum([
-  "exact",
-  "porter",
-  "trigram",
-  "object_key_porter",
-  "object_key_trigram"
 ]);
 const LexicalListStatusSchema = z.enum(["empty", "complete", "truncated"]);
 const LexicalRawKeyKindSchema = z.enum(["matched_token_count", "bm25_raw_rank"]);
@@ -49,7 +49,8 @@ const LexicalLaneCaptureSchema = z.object({
   requested_limit: z.number().int().nonnegative(),
   status: LexicalListStatusSchema,
   rows: z.array(LexicalLaneRowSchema).readonly(),
-  unseen_upper_bound: UnseenFrontierSchema
+  unseen_upper_bound: UnseenFrontierSchema,
+  evaluated_universe: LexicalLaneEvaluatedUniverseSchema.optional()
 }).strict().superRefine(refineLexicalLane).readonly();
 const LexicalLaneHitSchema = z.object({
   lane_id: LexicalLaneIdSchema,
@@ -81,7 +82,9 @@ const LexicalProducerReceiptSchema = z.object({
   lanes: z.array(LexicalLaneCaptureSchema).readonly(),
   candidates: z.array(LexicalCandidateProvenanceSchema).readonly(),
   post_merge: z.array(LexicalPostMergeRowSchema).readonly()
-}).strict().readonly();
+}).strict().superRefine((receipt, context) => {
+  refineReceiptUniverses(receipt.lanes, context);
+}).readonly();
 const LexicalIdentitySchema = z.object({
   request_digest: z.union([DigestSchema, identityGap("request_not_sealed")]),
   workspace_id: z.union([z.string().min(1), identityGap("workspace_not_sealed")]),
@@ -248,18 +251,22 @@ function lexicalRankingKeysAreMonotone(
 
 function refineLexicalLane(
   lane: {
+    readonly lane_id: "exact" | "porter" | "trigram" | "object_key_porter" | "object_key_trigram";
     readonly list_n: number;
     readonly requested_limit: number;
     readonly status: "empty" | "complete" | "truncated";
     readonly raw_key_kind: "matched_token_count" | "bm25_raw_rank";
     readonly rows: readonly {
+      readonly candidate_key: string;
       readonly grouped_ordinal: number;
       readonly raw_group_key: number;
     }[];
     readonly unseen_upper_bound: number | Readonly<{ readonly status: "unavailable" }>;
+    readonly evaluated_universe?: z.infer<typeof LexicalLaneEvaluatedUniverseSchema>;
   },
   context: z.RefinementCtx
 ): void {
+  refineLaneUniverse(lane, context);
   if (lane.list_n !== lane.rows.length) {
     context.addIssue({ code: "custom", path: ["list_n"], message: "lane list_n must equal rows" });
   }
@@ -276,7 +283,20 @@ function refineLexicalLane(
       message: "closed lane frontier must be zero"
     });
   }
-  if (lane.status !== "truncated") return;
+  if (lane.status === "truncated") refineTruncatedLaneFrontier(lane, context);
+}
+
+function refineTruncatedLaneFrontier(
+  lane: {
+    readonly raw_key_kind: "matched_token_count" | "bm25_raw_rank";
+    readonly rows: readonly {
+      readonly grouped_ordinal: number;
+      readonly raw_group_key: number;
+    }[];
+    readonly unseen_upper_bound: number | Readonly<{ readonly status: "unavailable" }>;
+  },
+  context: z.RefinementCtx
+): void {
   const monotone = lexicalRankingKeysAreMonotone(lane.rows, lane.raw_key_kind);
   if (typeof lane.unseen_upper_bound === "number") {
     const last = lane.rows.at(-1)?.grouped_ordinal;
@@ -303,17 +323,22 @@ function refineCapturedLexicalProof(
     readonly proof_digest: string;
     readonly field_prefix: "lexical_relaxed" | "lexical_expanded";
     readonly observed_candidate_keys: readonly string[];
+    readonly identity: {
+      readonly workspace_id: string | Readonly<{ readonly status: "unavailable" }>;
+    };
     readonly receipt: {
       readonly query_run_id: string;
       readonly merge_limit: number;
       readonly lanes: readonly {
         readonly rows: readonly { readonly candidate_key: string }[];
+        readonly evaluated_universe?: z.infer<typeof LexicalLaneEvaluatedUniverseSchema>;
       }[];
     };
   },
   context: z.RefinementCtx
 ): void {
   refineLexicalProofDigest(proof, context);
+  refineUniversesMatchWorkspace(proof.identity.workspace_id, proof.receipt.lanes, context);
   const expected = uniqueSortedKeys(
     proof.receipt.lanes.flatMap((lane) => lane.rows.map((row) => row.candidate_key))
   );

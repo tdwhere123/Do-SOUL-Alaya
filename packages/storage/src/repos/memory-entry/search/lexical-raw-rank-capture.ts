@@ -6,18 +6,18 @@ import {
   type FtsKeywordSearchRow
 } from "../keyword-search.js";
 import type { MemoryEntryKeywordSearchResult } from "../types.js";
+import type {
+  LexicalLaneEvaluatedUniverseWitness,
+  LexicalLaneUniverseMap,
+  LexicalRawRankLaneId
+} from "./lexical-lane-universe.js";
+
+export type { LexicalRawRankLaneId } from "./lexical-lane-universe.js";
 
 export const LEXICAL_RAW_RANK_RECEIPT_SCHEMA_VERSION = 1 as const;
 export const LEXICAL_RAW_RANK_RECEIPT_ID = "alaya.recall.x0.lexical-raw-rank.v1";
 export const LEXICAL_RAW_RANK_PRODUCER_ID =
   "alaya.storage.mergeKeywordSearchRows.v1";
-
-export type LexicalRawRankLaneId =
-  | "exact"
-  | "porter"
-  | "trigram"
-  | "object_key_porter"
-  | "object_key_trigram";
 
 export type LexicalRawKeyKind = "matched_token_count" | "bm25_raw_rank";
 export type LexicalLaneListStatus = "empty" | "complete" | "truncated";
@@ -43,6 +43,7 @@ export interface LexicalLaneCapture {
   readonly status: LexicalLaneListStatus;
   readonly rows: readonly LexicalLaneRowReceipt[];
   readonly unseen_upper_bound: LexicalUnseenFrontier;
+  readonly evaluated_universe?: LexicalLaneEvaluatedUniverseWitness;
 }
 
 export interface LexicalLaneHit {
@@ -90,6 +91,7 @@ export interface LexicalRawRankCaptureInput {
     readonly porter?: readonly FtsKeywordSearchRow[];
     readonly trigram?: readonly FtsKeywordSearchRow[];
   }>;
+  readonly universes?: LexicalLaneUniverseMap;
 }
 
 type LaneSpec = Readonly<{
@@ -173,7 +175,9 @@ export function captureLexicalRawRankReceipt(
     readonly merged: readonly Readonly<MemoryEntryKeywordSearchResult>[];
   }
 ): LexicalRawRankReceipt {
-  const lanes = Object.freeze(laneSpecs(input).map((spec) => captureOneLane(spec, input.limit)));
+  const lanes = Object.freeze(laneSpecs(input).map((spec) =>
+    captureOneLane(spec, input.limit, input.universes?.[spec.lane_id])
+  ));
   return Object.freeze({
     schema_version: LEXICAL_RAW_RANK_RECEIPT_SCHEMA_VERSION,
     receipt_id: LEXICAL_RAW_RANK_RECEIPT_ID,
@@ -225,7 +229,11 @@ function ftsLaneSpec(
   });
 }
 
-function captureOneLane(spec: LaneSpec, limit: number): LexicalLaneCapture {
+function captureOneLane(
+  spec: LaneSpec,
+  limit: number,
+  universe?: LexicalLaneEvaluatedUniverseWitness
+): LexicalLaneCapture {
   const scores = buildGroupedOrdinalScores(spec.rows, (row) => row.raw_group_key);
   const rows = Object.freeze(spec.rows.map((row, index) => Object.freeze({
     candidate_key: row.object_id,
@@ -244,7 +252,8 @@ function captureOneLane(spec: LaneSpec, limit: number): LexicalLaneCapture {
     requested_limit: limit,
     status,
     rows,
-    unseen_upper_bound: laneUnseenFrontier(rows, spec.raw_key_kind, status)
+    unseen_upper_bound: laneUnseenFrontier(rows, spec.raw_key_kind, status),
+    ...(universe === undefined ? {} : { evaluated_universe: universe })
   });
 }
 

@@ -12,6 +12,7 @@ import {
   type LexicalBoundRawKeyKind,
   type LexicalUnseenFrontier
 } from "../../recall-search-port-types.js";
+import { assertReceiptUniverseSet, freezeLaneUniverse } from "./lexical-lane-universe-freeze.js";
 
 export {
   LEXICAL_BOUND_PRODUCER_ID,
@@ -41,13 +42,15 @@ export function freezeProducerReceipt(value: unknown): LexicalBoundProducerRecei
       !Array.isArray(value.post_merge) || !isDenseArray(value.post_merge)) {
     throw new TypeError("lexical bound producer receipt is invalid");
   }
+  const lanes = Object.freeze(value.lanes.map(freezeLane));
+  assertReceiptUniverseSet(lanes);
   return Object.freeze({
     schema_version: 1 as const,
     receipt_id: LEXICAL_RAW_RANK_RECEIPT_ID,
     producer_id: LEXICAL_BOUND_PRODUCER_ID,
     query_run_id: value.query_run_id,
     merge_limit: Number(value.merge_limit),
-    lanes: Object.freeze(value.lanes.map(freezeLane)),
+    lanes,
     candidates: Object.freeze(value.candidates.map(freezeCandidate)),
     post_merge: Object.freeze(value.post_merge.map(freezePostMerge))
   });
@@ -85,6 +88,7 @@ function freezeLane(value: unknown): LexicalBoundLaneCapture {
   if (listN !== rows.length || value.status !== expectedStatus(listN, requestedLimit)) {
     throw new TypeError("lexical bound lane closure is inconsistent");
   }
+  const universe = freezeLaneUniverse(value.evaluated_universe, value.lane_id);
   return Object.freeze({
     lane_id: value.lane_id,
     raw_key_kind: value.raw_key_kind,
@@ -96,7 +100,8 @@ function freezeLane(value: unknown): LexicalBoundLaneCapture {
     rows,
     unseen_upper_bound: freezeFrontier(
       value.unseen_upper_bound, value.raw_key_kind, value.status, rows
-    )
+    ),
+    ...(universe === undefined ? {} : { evaluated_universe: universe })
   });
 }
 

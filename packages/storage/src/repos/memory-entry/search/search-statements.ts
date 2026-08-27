@@ -1,5 +1,6 @@
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL } from "../semantic-tie-order.js";
+import { ACTIVE_MEMORY_ENTRIES_FILTER_SQL } from "../recall/active-memory-filter-sql.js";
 import {
   prepareStatementGroup,
   type SqlDefinitionMap,
@@ -21,8 +22,7 @@ const MEMORY_ENTRY_SEARCH_SQL: SqlDefinitionMap<MemoryEntrySearchStatements> = {
       WHERE
         memory_content_fts.workspace_id = ?
         AND memory_content_fts MATCH ?
-        AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
+        ${ACTIVE_MEMORY_ENTRIES_FILTER_SQL}
       ORDER BY raw_rank ASC, ${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL}, memory_content_fts.object_id ASC
       LIMIT ?
     `,
@@ -35,8 +35,7 @@ const MEMORY_ENTRY_SEARCH_SQL: SqlDefinitionMap<MemoryEntrySearchStatements> = {
       WHERE
         memory_content_fts_porter.workspace_id = ?
         AND memory_content_fts_porter MATCH ?
-        AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
+        ${ACTIVE_MEMORY_ENTRIES_FILTER_SQL}
       ORDER BY raw_rank ASC, ${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL}, memory_content_fts_porter.object_id ASC
       LIMIT ?
     `

@@ -2,6 +2,10 @@ import type { StorageTier } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { buildWorkspaceScopedFtsMatch } from "../../shared/fts-lane-routing.js";
 import {
+  ACTIVE_MEMORY_ENTRIES_FILTER_SQL,
+  memoryTierFilterSql
+} from "../recall/active-memory-filter-sql.js";
+import {
   buildObjectIdFilterSql,
   createShortKeywordMatcher,
   objectKeyExactTokens,
@@ -77,15 +81,14 @@ function searchObjectKeyFtsLane(
     candidateObjectIds,
     objectIdFilterColumnForKeyTable(table)
   );
-  const tierPredicate = tier === undefined ? "" : "AND memory_entries.storage_tier = ?";
+  const tierPredicate = memoryTierFilterSql(tier, "memory_entries.storage_tier");
   return this.activeConnection().prepare(`
     SELECT ${table}.owner_id AS object_id, bm25(${table}) AS raw_rank
     FROM ${table}
     JOIN memory_entries ON memory_entries.object_id = ${table}.owner_id
     WHERE ${table}.workspace_id = ?
       AND ${table} MATCH ?
-      AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-      AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
+      ${ACTIVE_MEMORY_ENTRIES_FILTER_SQL}
       ${tierPredicate}
       ${objectIdFilter.sql}
     ORDER BY raw_rank ASC, ${table}.owner_id ASC
@@ -99,7 +102,7 @@ function searchObjectKeyFtsLane(
   ) as readonly FtsKeywordSearchRow[];
 }
 
-function objectIdFilterColumnForKeyTable(
+export function objectIdFilterColumnForKeyTable(
   table: typeof KEY_FTS_PORTER | typeof KEY_FTS_TRIGRAM
 ): ObjectIdFilterColumn {
   return table === KEY_FTS_TRIGRAM
@@ -158,14 +161,13 @@ function readExactObjectKeyBatch(
   const keysetPredicate = cursor === null
     ? ""
     : "AND (k.owner_id > ? OR (k.owner_id = ? AND k.key_id > ?))";
-  const tierPredicate = tier === undefined ? "" : "AND memory_entries.storage_tier = ?";
+  const tierPredicate = memoryTierFilterSql(tier, "memory_entries.storage_tier");
   return this.activeConnection().prepare(`
     SELECT k.owner_id, k.key_id, k.surface
     FROM memory_object_keys k
     JOIN memory_entries ON memory_entries.object_id = k.owner_id
     WHERE k.workspace_id = ?
-      AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-      AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
+      ${ACTIVE_MEMORY_ENTRIES_FILTER_SQL}
       ${objectIdFilter.sql}
       ${tierPredicate}
       ${keysetPredicate}

@@ -16,6 +16,10 @@ import {
   type ObjectIdFilterColumn
 } from "./keyword-search.js";
 import {
+  ACTIVE_MEMORY_ENTRIES_FILTER_SQL,
+  memoryTierFilterSql
+} from "./recall/active-memory-filter-sql.js";
+import {
   MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL
 } from "./semantic-tie-order.js";
 import type { SqliteAllStatement } from "./statement-types.js";
@@ -161,15 +165,14 @@ export function searchMemoryFtsLaneRows(
     candidateObjectIds,
     objectIdFilterColumnForFtsTable(table)
   );
-  const tierPredicate = tier === undefined ? "" : "AND memory_entries.storage_tier = ?";
+  const tierPredicate = memoryTierFilterSql(tier, "memory_entries.storage_tier");
   return this.activeConnection().prepare(`
     SELECT ${table}.object_id, bm25(${table}) AS raw_rank
     FROM ${table}
     JOIN memory_entries ON memory_entries.object_id = ${table}.object_id
     WHERE ${table}.workspace_id = ?
       AND ${table} MATCH ?
-      AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-      AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
+      ${ACTIVE_MEMORY_ENTRIES_FILTER_SQL}
       ${tierPredicate}
       ${objectIdFilter.sql}
     ORDER BY raw_rank ASC, ${MEMORY_ENTRY_SEMANTIC_TIE_ORDER_SQL}, ${table}.object_id ASC

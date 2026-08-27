@@ -1,6 +1,10 @@
 import type { StorageTier } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import {
+  ACTIVE_MEMORY_FILTER_SQL,
+  memoryTierFilterSql
+} from "../recall/active-memory-filter-sql.js";
+import {
   buildObjectIdFilterSql,
   createShortKeywordMatcher,
   type ExactKeywordCandidateRow,
@@ -60,7 +64,7 @@ function readExactKeywordCandidateBatch(
   tier?: StorageTier
 ): readonly ExactKeywordCandidateRow[] {
   const keysetPredicate = lastObjectId === null ? "" : "AND object_id > ?";
-  const tierPredicate = tier === undefined ? "" : "AND storage_tier = ?";
+  const tierPredicate = memoryTierFilterSql(tier);
   return this.activeConnection().prepare(`
     SELECT
       object_id,
@@ -79,8 +83,7 @@ function readExactKeywordCandidateBatch(
       facet_tags
     FROM memory_entries
     WHERE workspace_id = ?
-    AND COALESCE(retention_state, '') != 'tombstoned'
-    AND COALESCE(lifecycle_state, '') != 'dormant'
+    ${ACTIVE_MEMORY_FILTER_SQL}
     ${objectIdFilter.sql}
     ${tierPredicate}
     ${keysetPredicate}

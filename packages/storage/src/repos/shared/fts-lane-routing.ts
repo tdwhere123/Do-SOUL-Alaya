@@ -17,15 +17,23 @@ export {
   type FtsLaneSplit
 } from "@do-soul/alaya-protocol";
 
+export function quoteFtsLiteral(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
 export function buildFtsMatchExpression(tokens: readonly string[]): string {
-  return tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" OR ");
+  return tokens.map((token) => quoteFtsLiteral(token)).join(" OR ");
+}
+
+export function buildWorkspaceFtsScopeMatch(workspaceId: string): string {
+  return `workspace_id:${quoteFtsLiteral(workspaceId)}`;
 }
 
 export function buildWorkspaceScopedFtsMatch(
   workspaceId: string,
   tokens: readonly string[]
 ): string {
-  return `workspace_id:"${workspaceId.replace(/"/g, '""')}" AND content:(${buildFtsMatchExpression(tokens)})`;
+  return `${buildWorkspaceFtsScopeMatch(workspaceId)} AND content:(${buildFtsMatchExpression(tokens)})`;
 }
 
 // Require ≥1 anchor token, but keep all terms in the MATCH so BM25 still ranks
@@ -45,7 +53,7 @@ export function buildAnchorScopedFtsMatch(
     allTerms.length === anchors.length
       ? required
       : `${required} AND (${buildFtsMatchExpression(allTerms)})`;
-  return `workspace_id:"${workspaceId.replace(/"/g, '""')}" AND content:(${body})`;
+  return `${buildWorkspaceFtsScopeMatch(workspaceId)} AND content:(${body})`;
 }
 
 function dedupeNonEmpty(tokens: readonly string[]): readonly string[] {

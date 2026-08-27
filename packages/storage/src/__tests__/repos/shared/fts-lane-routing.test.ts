@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildAnchorScopedFtsMatch,
   buildFtsMatchExpression,
+  buildWorkspaceFtsScopeMatch,
   buildWorkspaceScopedFtsMatch,
   queryFtsLaneRows
 } from "../../../repos/shared/fts-lane-routing.js";
@@ -18,6 +19,7 @@ describe("buildWorkspaceScopedFtsMatch", () => {
     expect(buildWorkspaceScopedFtsMatch("workspace-1", ["alpha", "beta"])).toBe(
       'workspace_id:"workspace-1" AND content:("alpha" OR "beta")'
     );
+    expect(buildWorkspaceFtsScopeMatch("workspace-1")).toBe('workspace_id:"workspace-1"');
     expect(buildWorkspaceScopedFtsMatch('workspace-"quoted"', ["alpha"])).toBe(
       'workspace_id:"workspace-""quoted""" AND content:("alpha")'
     );

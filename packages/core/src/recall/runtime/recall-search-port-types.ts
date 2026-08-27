@@ -12,6 +12,19 @@ import type {
 export const LEXICAL_RAW_RANK_RECEIPT_ID = "alaya.recall.x0.lexical-raw-rank.v1";
 export const LEXICAL_BOUND_PRODUCER_ID =
   "alaya.storage.mergeKeywordSearchRows.v1";
+export const LEXICAL_LANE_UNIVERSE_PRODUCER_ID =
+  "alaya.storage.lexicalLaneEvaluatedUniverse.v1";
+
+export const LEXICAL_LANE_INDEX_KIND = Object.freeze({
+  exact: "memory_entries",
+  porter: "memory_content_fts_porter",
+  trigram: "memory_content_fts",
+  object_key_porter: "memory_object_key_fts",
+  object_key_trigram: "memory_object_key_fts_trigram"
+} as const);
+
+export type LexicalLaneIndexKind =
+  typeof LEXICAL_LANE_INDEX_KIND[keyof typeof LEXICAL_LANE_INDEX_KIND];
 
 export interface KeywordSearchResult {
   readonly object_id: string;
@@ -128,6 +141,25 @@ export type MemoryKeywordFieldCapture = Readonly<{
 export type LexicalBoundLaneId = KeywordLexicalLaneId;
 export type LexicalBoundRawKeyKind = "matched_token_count" | "bm25_raw_rank";
 export type LexicalBoundListStatus = "empty" | "complete" | "truncated";
+export type LexicalLaneUniverseApplicability =
+  | Readonly<{ readonly applicable: true }>
+  | Readonly<{ readonly applicable: false; readonly reason: "no_tokens_routed" }>;
+export type LexicalLaneUniverseScope = Readonly<{
+  readonly workspace_id: string;
+  readonly object_ids: readonly string[] | null;
+  readonly tier: StorageTierType | null;
+}>;
+export type LexicalLaneEvaluatedUniverseWitness = Readonly<{
+  readonly producer_id: typeof LEXICAL_LANE_UNIVERSE_PRODUCER_ID;
+  readonly lane_id: LexicalBoundLaneId;
+  readonly index_kind: LexicalLaneIndexKind;
+  readonly tokens_routed: boolean;
+  readonly applicability: LexicalLaneUniverseApplicability;
+  readonly scope: LexicalLaneUniverseScope;
+  readonly candidate_keys: readonly string[];
+  readonly count: number;
+  readonly universe_digest: `sha256:${string}`;
+}>;
 export type LexicalUnseenFrontier =
   | number
   | Readonly<{
@@ -153,6 +185,7 @@ export interface LexicalBoundLaneCapture {
   readonly status: LexicalBoundListStatus;
   readonly rows: readonly LexicalBoundLaneRow[];
   readonly unseen_upper_bound: LexicalUnseenFrontier;
+  readonly evaluated_universe?: LexicalLaneEvaluatedUniverseWitness;
 }
 
 export interface LexicalBoundLaneHit {

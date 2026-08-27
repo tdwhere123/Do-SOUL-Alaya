@@ -2,6 +2,7 @@ import { compareCodeUnits } from "@do-soul/alaya-protocol";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../field/field-identity.js";
 import { freezeProducerReceipt } from "./capture-proof/lexical-bound-receipt-freeze.js";
+import { assertUniversesMatchIdentity } from "./capture-proof/lexical-lane-universe-freeze.js";
 import type { LexicalBoundProducerReceipt } from "../recall-search-port-types.js";
 export type {
   LexicalBoundCandidateProvenance,
@@ -13,7 +14,15 @@ export type {
   LexicalBoundPostMergeRow,
   LexicalBoundProducerReceipt,
   LexicalBoundRawKeyKind,
+  LexicalLaneEvaluatedUniverseWitness,
+  LexicalLaneIndexKind,
+  LexicalLaneUniverseApplicability,
+  LexicalLaneUniverseScope,
   LexicalUnseenFrontier
+} from "../recall-search-port-types.js";
+export {
+  LEXICAL_LANE_INDEX_KIND,
+  LEXICAL_LANE_UNIVERSE_PRODUCER_ID
 } from "../recall-search-port-types.js";
 
 export const LEXICAL_BOUND_PROOF_SCHEMA_VERSION = 1 as const;
@@ -182,6 +191,10 @@ function assembleCaptured(
   fieldPrefix: LexicalBoundFieldPrefix | LexicalBoundIdentityUnavailable,
   keyDomain: LexicalBoundCandidateKeyDomain | LexicalBoundIdentityUnavailable
 ): LexicalBoundProofCaptured {
+  assertUniversesMatchIdentity(
+    receipt,
+    typeof identity.workspace_id === "string" ? identity.workspace_id : undefined
+  );
   const body = Object.freeze({
     schema_version: LEXICAL_BOUND_PROOF_SCHEMA_VERSION,
     proof_id: LEXICAL_BOUND_PROOF_ID,

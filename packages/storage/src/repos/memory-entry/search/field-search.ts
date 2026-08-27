@@ -33,6 +33,8 @@ import {
   captureLexicalRawRankReceipt,
   stripLexicalRawRankForLiveCapture
 } from "./lexical-raw-rank-capture.js";
+import { enumerateLexicalLaneUniverses } from "./lexical-lane-universe-query.js";
+import type { LexicalLaneUniverseMap } from "./lexical-lane-universe.js";
 
 type KeywordFieldLane = MemoryEntryKeywordLaneReceipt["lane"];
 
@@ -57,39 +59,17 @@ export async function searchByKeywordField(
     : normalizeKeywordSearchObjectIds(scope.objectIds);
   const depths = normalizeRefinementDepths(limit, refinementDepths);
   const maxDepth = depths.at(-1) ?? limit;
-  const rows = this.activeConnection().transaction(() => {
-    const objectKeys = searchObjectKeyKeywordLanes.call(this, {
-      workspaceId,
-      porterTokens: laneTokens.porter,
-      trigramTokens: laneTokens.trigram,
-      exactTokens: laneTokens.exact,
-      limit: maxDepth,
-      candidateObjectIds: objectIds,
-      tier: scope.tier
-    });
-    return Object.freeze({
-      exact: mergeExactKeywordSearchRows(
-        searchExactKeywordRows.call(
-          this, workspaceId, laneTokens.exact, maxDepth, objectIds, scope.tier
-        ),
-        objectKeys.exact
-      ),
-      porter: searchPorterKeywordRows.call(
-        this, workspaceId, laneTokens.porter, maxDepth, objectIds, scope.tier
-      ),
-      trigram: searchTrigramKeywordRows.call(
-        this, workspaceId, laneTokens.trigram, maxDepth, objectIds, scope.tier
-      ),
-      keyPorter: objectKeys.porter,
-      keyTrigram: objectKeys.trigram
-    });
-  })();
-  const base = buildKeywordFieldView(rows, laneTokens, limit, capture);
+  const snapshot = this.activeConnection().transaction(() =>
+    collectKeywordFieldSnapshot.call(
+      this, workspaceId, laneTokens, maxDepth, objectIds, scope.tier, capture
+    )
+  )();
+  const base = buildKeywordFieldView(snapshot, laneTokens, limit, capture);
   // Refinements recompute matches/lanes only so diagnostic siblings stay on the base view.
   return fieldWithRefinements(base, buildMonotoneFieldRefinementLevels(
     base.matches,
     depths,
-    (depth) => buildKeywordFieldCore(rows, laneTokens, depth)
+    (depth) => buildKeywordFieldCore(snapshot, laneTokens, depth)
   ));
 }
 
@@ -132,7 +112,50 @@ type KeywordFieldRows = Readonly<{
   readonly trigram: readonly FtsKeywordSearchRow[];
   readonly keyPorter: readonly FtsKeywordSearchRow[];
   readonly keyTrigram: readonly FtsKeywordSearchRow[];
+  readonly universes?: LexicalLaneUniverseMap;
 }>;
+
+function collectKeywordFieldSnapshot(
+  this: MemoryEntrySearchWorkflowHost,
+  workspaceId: string,
+  laneTokens: KeywordLaneTokens,
+  maxDepth: number,
+  objectIds: readonly string[] | undefined,
+  tier: StorageTier | undefined,
+  capture: Readonly<MemoryKeywordFieldCapture> | undefined
+): KeywordFieldRows {
+  const objectKeys = searchObjectKeyKeywordLanes.call(this, {
+    workspaceId,
+    porterTokens: laneTokens.porter,
+    trigramTokens: laneTokens.trigram,
+    exactTokens: laneTokens.exact,
+    limit: maxDepth,
+    candidateObjectIds: objectIds,
+    tier
+  });
+  return Object.freeze({
+    exact: mergeExactKeywordSearchRows(
+      searchExactKeywordRows.call(this, workspaceId, laneTokens.exact, maxDepth, objectIds, tier),
+      objectKeys.exact
+    ),
+    porter: searchPorterKeywordRows.call(
+      this, workspaceId, laneTokens.porter, maxDepth, objectIds, tier
+    ),
+    trigram: searchTrigramKeywordRows.call(
+      this, workspaceId, laneTokens.trigram, maxDepth, objectIds, tier
+    ),
+    keyPorter: objectKeys.porter,
+    keyTrigram: objectKeys.trigram,
+    ...(capture === undefined ? {} : {
+      universes: enumerateLexicalLaneUniverses.call(this, {
+        workspaceId,
+        objectIds,
+        tier,
+        tokens: laneTokens
+      })
+    })
+  });
+}
 
 function buildKeywordFieldCore(
   rows: KeywordFieldRows,
@@ -151,6 +174,7 @@ function buildKeywordFieldCore(
     trigramRows,
     porterRows,
     objectKeyLanes,
+    universes: rows.universes,
     matches: mergeKeywordSearchRows(
       exactRows, trigramRows, depth, porterRows, objectKeyLanes
     ),
@@ -185,6 +209,7 @@ function buildKeywordFieldView(
     trigramRows: core.trigramRows,
     porterRows: core.porterRows,
     objectKeyLanes: core.objectKeyLanes,
+    ...(core.universes === undefined ? {} : { universes: core.universes }),
     merged: core.matches
   });
   return Object.freeze({

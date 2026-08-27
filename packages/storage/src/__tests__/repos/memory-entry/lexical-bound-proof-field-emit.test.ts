@@ -21,6 +21,7 @@ describe("keyword field lexical raw-rank receipt emit", () => {
 
     expect(field.lexical_raw_rank).toBeDefined();
     expect(field.lexical_raw_rank?.lanes.every((lane) => !("rows" in lane))).toBe(true);
+    expect(field.lexical_raw_rank?.lanes.every((lane) => !("evaluated_universe" in lane))).toBe(true);
     expect(field).not.toHaveProperty("lexical_raw_rank_receipt");
     expect(field).not.toHaveProperty("lexical_bound_proof");
   });
@@ -41,6 +42,13 @@ describe("keyword field lexical raw-rank receipt emit", () => {
     expect(porter?.requested_limit).toBe(1);
     expect(porter?.rows.length).toBeGreaterThan(0);
     expect(porter?.unseen_upper_bound).toBe(porter?.rows.at(-1)?.grouped_ordinal);
+    expect(porter?.evaluated_universe?.tokens_routed).toBe(true);
+    expect(porter?.evaluated_universe?.candidate_keys.length).toBeGreaterThan(0);
+    expect(field.lexical_raw_rank_receipt?.lanes.find((lane) => lane.lane_id === "exact")
+      ?.evaluated_universe).toMatchObject({
+      tokens_routed: false,
+      applicability: { applicable: false, reason: "no_tokens_routed" }
+    });
 
     const expanded = await repo.searchByKeywordField!(
       "workspace-1", "stable", 1, {}, [], { variant: "lexical_expanded" }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { digestRecallFieldIdentity } from "@do-soul/alaya-core";
 import { QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID } from "@do-soul/alaya-protocol";
 
@@ -75,6 +76,73 @@ export function capturedTruncatedProof() {
     field_prefix: "lexical_relaxed" as const,
     candidate_key_domain: "memory_object_id" as const,
     identity: CAPTURE_PROOF_IDENTITY
+  });
+}
+
+export function laneUniverse(input: Readonly<{
+  readonly laneId?: "exact" | "porter" | "trigram" | "object_key_porter" | "object_key_trigram";
+  readonly candidateKeys?: readonly string[];
+  readonly tokensRouted?: boolean;
+  readonly workspaceId?: string;
+  readonly objectIds?: readonly string[] | null;
+  readonly tier?: "hot" | "warm" | "cold" | null;
+  readonly indexKind?: string;
+}> = {}) {
+  const laneId = input.laneId ?? "porter";
+  const tokensRouted = input.tokensRouted ?? true;
+  const indexKind = input.indexKind ?? {
+    exact: "memory_entries",
+    porter: "memory_content_fts_porter",
+    trigram: "memory_content_fts",
+    object_key_porter: "memory_object_key_fts",
+    object_key_trigram: "memory_object_key_fts_trigram"
+  }[laneId];
+  const candidateKeys = tokensRouted ? [...(input.candidateKeys ?? ["p1", "p2"])] : [];
+  const body = {
+    producer_id: "alaya.storage.lexicalLaneEvaluatedUniverse.v1" as const,
+    lane_id: laneId,
+    index_kind: indexKind,
+    tokens_routed: tokensRouted,
+    applicability: tokensRouted
+      ? { applicable: true as const }
+      : { applicable: false as const, reason: "no_tokens_routed" as const },
+    scope: {
+      workspace_id: input.workspaceId ?? "workspace-1",
+      object_ids: input.objectIds === undefined ? null : input.objectIds,
+      tier: input.tier === undefined ? null : input.tier
+    },
+    candidate_keys: candidateKeys,
+    count: candidateKeys.length
+  };
+  return {
+    ...body,
+    universe_digest: `sha256:${createHash("sha256").update(JSON.stringify({
+      producer_id: body.producer_id,
+      lane_id: body.lane_id,
+      index_kind: body.index_kind,
+      tokens_routed: body.tokens_routed,
+      applicability: body.applicability,
+      scope: {
+        workspace_id: body.scope.workspace_id,
+        object_ids: body.scope.object_ids,
+        tier: body.scope.tier
+      },
+      candidate_keys: body.candidate_keys,
+      count: body.count
+    }), "utf8").digest("hex")}`
+  };
+}
+
+export function capturedProofWithUniverse() {
+  const proof = capturedTruncatedProof();
+  const { proof_digest: _digest, ...body } = proof;
+  const [lane] = body.receipt.lanes;
+  return sealLexicalProof({
+    ...body,
+    receipt: {
+      ...body.receipt,
+      lanes: [{ ...lane!, evaluated_universe: laneUniverse() }]
+    }
   });
 }
 
