@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
-import { RECALL_PIPELINE_VERSION } from "../../../shared/version.js";
+import { RECALL_RANKING_IDENTITY } from "../../../shared/version.js";
 
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
@@ -207,7 +207,7 @@ describe("LongMemEval runner", () => {
 
       // harness_mode must reflect the real MCP chain, never direct_db_seed.
       expect(result.payload.harness_mode).toBe("mcp_propose_review");
-      expect(result.payload.recall_pipeline_version).toBe(RECALL_PIPELINE_VERSION);
+      expect(result.payload.recall_pipeline_version).toBe(RECALL_RANKING_IDENTITY);
       expect(result.payload.embedding_provider).toBe("none");
       expect(result.payload.policy_shape).toBe("chat");
       expect(result.payload.simulate_report).toBe("mixed");
@@ -237,7 +237,7 @@ describe("LongMemEval runner", () => {
       expect(parseResult.success).toBe(true);
       const report = await readFile(result.reportPath, "utf8");
       expect(report).toContain("Recall weights: source=cli");
-      expect(report).toContain(`Recall pipeline: ${RECALL_PIPELINE_VERSION}`);
+      expect(report).toContain(`Recall pipeline: ${RECALL_RANKING_IDENTITY}`);
       expect(report).toContain(
         "Seed policy: label_independent_open_vocabulary_extraction (label-independent)"
       );
@@ -316,7 +316,7 @@ describe("LongMemEval runner", () => {
         unavailable: false,
         sha7: expect.stringMatching(/^[0-9a-f]{7}$/iu)
       });
-      expect(diagnostics.recall_pipeline_version).toBe(RECALL_PIPELINE_VERSION);
+      expect(diagnostics.recall_pipeline_version).toBe(RECALL_RANKING_IDENTITY);
       expect(diagnostics.policy_shape).toBe("chat");
       expect(diagnostics.simulate_report).toBe("mixed");
       expect(diagnostics.seed_extraction_path).toMatchObject({

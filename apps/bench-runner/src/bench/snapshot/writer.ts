@@ -1,13 +1,12 @@
 import { basename, resolve } from "node:path";
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
-import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../../shared/version.js";
+import { SNAPSHOT_SEED_IDENTITY, resolveBenchRunnerVersion } from "../../shared/version.js";
 import type { LongMemEvalQuestion, LongMemEvalVariant } from "../../longmemeval/ingestion/dataset.js";
 import type { LongMemEvalRunProvenance } from "../provenance/run.js";
 import {
   BENCH_DAEMON_DB_FILENAME,
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   checkpointAndCopyBenchDb,
-  readSchemaMigrationVersion,
   snapshotQuestionIdDigest,
   snapshotExtractionAuthorityPath,
   writeSnapshotManifest,
@@ -16,6 +15,7 @@ import {
   type LongMemEvalSnapshotSidecarFile,
   type SnapshotExtractionProvenanceV3
 } from "./materialize.js";
+import { readSchemaMigrationVersion } from "./snapshot-seed-identity.js";
 import { deriveSnapshotAttribution } from "./attribution.js";
 import {
   assertCurrentPostFillCacheAuthorityProofManifest,
@@ -195,7 +195,7 @@ function buildManifest(context: {
     schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
     variant: input.variant,
     question_count: input.snapshotQuestions.length,
-    recall_pipeline_version: RECALL_PIPELINE_VERSION,
+    recall_pipeline_version: SNAPSHOT_SEED_IDENTITY,
     schema_migration_version: context.schemaMigrationVersion,
     bench_runner_version: resolveBenchRunnerVersion(),
     alaya_commit: input.commitSha7,

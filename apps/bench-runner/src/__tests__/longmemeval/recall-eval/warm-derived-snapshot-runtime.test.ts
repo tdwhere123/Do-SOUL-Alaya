@@ -14,7 +14,7 @@ import type { RecallEvalSnapshotBundle } from
 import { sha256File } from "../../../bench/snapshot/integrity.js";
 import type { LongMemEvalSnapshotManifest } from
   "../../../bench/snapshot/materialize.js";
-import { RECALL_PIPELINE_VERSION } from "../../../shared/version.js";
+import { SNAPSHOT_SEED_IDENTITY } from "../../../shared/version.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 
 const SOURCE_SHA = "a".repeat(64);
@@ -112,7 +112,7 @@ function bundle(): RecallEvalSnapshotBundle {
         sidecar_sha256: "e".repeat(64)
       },
       schema_migration_version: 113,
-      recall_pipeline_version: RECALL_PIPELINE_VERSION
+      recall_pipeline_version: SNAPSHOT_SEED_IDENTITY
     } as LongMemEvalSnapshotManifest
   } as RecallEvalSnapshotBundle;
 }

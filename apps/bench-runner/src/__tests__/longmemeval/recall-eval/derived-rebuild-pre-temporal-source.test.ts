@@ -14,7 +14,7 @@ import { prepareRecallEvalRestoredDb } from
   "../../../bench/snapshot/recall-eval/recall-eval-db.js";
 import type { LongMemEvalSnapshotManifest } from
   "../../../bench/snapshot/materialize.js";
-import { RECALL_PIPELINE_VERSION } from "../../../shared/version.js";
+import { SNAPSHOT_SEED_IDENTITY } from "../../../shared/version.js";
 
 const APPLIED_AT = "2026-08-19T00:00:00.000Z";
 const roots: string[] = [];
@@ -83,7 +83,7 @@ function derivedRebuildManifest(schemaMigrationVersion: number): LongMemEvalSnap
     schema_version: 1,
     variant: "longmemeval_s",
     question_count: 0,
-    recall_pipeline_version: RECALL_PIPELINE_VERSION,
+    recall_pipeline_version: SNAPSHOT_SEED_IDENTITY,
     schema_migration_version: schemaMigrationVersion,
     bench_runner_version: "test",
     alaya_commit: "0000000",

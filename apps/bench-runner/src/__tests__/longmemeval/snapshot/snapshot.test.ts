@@ -5,13 +5,11 @@ import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initDatabase } from "@do-soul/alaya-storage";
-import { RECALL_PIPELINE_VERSION } from "../../../shared/version.js";
+import { SNAPSHOT_SEED_IDENTITY } from "../../../shared/version.js";
 import {
   BENCH_DAEMON_DB_FILENAME,
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
-  assertSnapshotVersionMatch,
   checkpointAndCopyBenchDb,
-  readSchemaMigrationVersion,
   readSnapshotManifest,
   readSnapshotSidecar,
   restoreSnapshotToDataDir,
@@ -22,6 +20,10 @@ import {
   type LongMemEvalSnapshotManifest,
   type SnapshotExtractionProvenanceV3
 } from "../../../bench/snapshot/materialize.js";
+import {
+  assertSnapshotConsumeIdentity,
+  readSchemaMigrationVersion
+} from "../../../bench/snapshot/snapshot-seed-identity.js";
 import { sha256File } from "../../../bench/snapshot/integrity.js";
 import {
   copyRegularFileNoFollow,
@@ -53,7 +55,7 @@ function manifestFor(
     schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
     variant: "longmemeval_oracle",
     question_count: 1,
-    recall_pipeline_version: RECALL_PIPELINE_VERSION,
+    recall_pipeline_version: SNAPSHOT_SEED_IDENTITY,
     schema_migration_version: readSchemaMigrationVersion(dbPath),
     bench_runner_version: "0.3.11-test",
     alaya_commit: "test123",
@@ -284,7 +286,7 @@ describe("snapshot plumbing", () => {
     expect(existsSync(snapshotSidecarPath(snapshotDbPath))).toBe(true);
 
     const readManifest = readSnapshotManifest(snapshotDbPath);
-    expect(readManifest.recall_pipeline_version).toBe(RECALL_PIPELINE_VERSION);
+    expect(readManifest.recall_pipeline_version).toBe(SNAPSHOT_SEED_IDENTITY);
     expect(readManifest.attribution).toEqual({
       status: "legacy_unattributed",
       gate_eligible: false
@@ -427,7 +429,11 @@ describe("snapshot plumbing", () => {
     const restoredDbPath = join(restoreRoot, BENCH_DAEMON_DB_FILENAME);
 
     expect(() =>
-      assertSnapshotVersionMatch(manifestFor(restoredDbPath), restoredDbPath)
+      assertSnapshotConsumeIdentity({
+        manifest: manifestFor(restoredDbPath),
+        restoredDbPath,
+        runningSeedIdentity: SNAPSHOT_SEED_IDENTITY
+      })
     ).not.toThrow();
   });
 
@@ -441,12 +447,13 @@ describe("snapshot plumbing", () => {
     const restoredDbPath = join(restoreRoot, BENCH_DAEMON_DB_FILENAME);
 
     expect(() =>
-      assertSnapshotVersionMatch(
-        manifestFor(restoredDbPath, {
+      assertSnapshotConsumeIdentity({
+        manifest: manifestFor(restoredDbPath, {
           recall_pipeline_version: "stale-pipeline-v0"
         }),
-        restoredDbPath
-      )
+        restoredDbPath,
+        runningSeedIdentity: SNAPSHOT_SEED_IDENTITY
+      })
     ).toThrow(/recall_pipeline_version/u);
   });
 
@@ -460,10 +467,11 @@ describe("snapshot plumbing", () => {
     const restoredDbPath = join(restoreRoot, BENCH_DAEMON_DB_FILENAME);
 
     expect(() =>
-      assertSnapshotVersionMatch(
-        manifestFor(restoredDbPath, { schema_migration_version: 99999 }),
-        restoredDbPath
-      )
+      assertSnapshotConsumeIdentity({
+        manifest: manifestFor(restoredDbPath, { schema_migration_version: 99999 }),
+        restoredDbPath,
+        runningSeedIdentity: SNAPSHOT_SEED_IDENTITY
+      })
     ).toThrow(/schema_migration_version/u);
   });
 });

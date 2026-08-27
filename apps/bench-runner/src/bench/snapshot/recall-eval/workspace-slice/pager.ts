@@ -1,45 +1,58 @@
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import BetterSqlite3 from "better-sqlite3";
 import {
   explodePackedWorkingCopy,
   workspaceSliceDbPath,
   type ExplodedWorkspaceSlices
 } from "./explode.js";
-import { readValidWorkspaceSliceSnapshotDigest } from "./slice-snapshot.js";
 import type { WorkspaceSliceProgress } from "./stream-copy.js";
 import {
   installWorkspaceSlice,
   packedWorkingDbPath,
-  preservePackedWorkingCopy,
   workingAlayaDbPath
 } from "./install.js";
-import { isWorkspaceSliceSkipped, WORKSPACE_SLICE_DIRNAME } from "./names.js";
+import {
+  isSliceReuseRequired,
+  isWorkspaceSliceSkipped,
+  WORKSPACE_SLICE_DIRNAME
+} from "./names.js";
+import { completeSlicesOrNull, listWorkspaceIds } from "./complete-slices.js";
+import {
+  resolvePackedWorkingCopy,
+  reuseOrExplodeSealedSlices
+} from "./sealed-cache.js";
 
 export async function explodeRecallEvalWorkingCopyIfNeeded(input: {
   readonly dataDirRoot: string;
+  readonly snapshotDbPath?: string;
+  readonly requireReuse?: boolean;
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly onProgress?: (progress: WorkspaceSliceProgress) => void;
 }): Promise<ExplodedWorkspaceSlices | null> {
-  if (isWorkspaceSliceSkipped(input.env ?? process.env)) return null;
-  const packed = packedWorkingDbPath(input.dataDirRoot);
-  const working = workingAlayaDbPath(input.dataDirRoot);
-  // After Q1, alaya.db is a one-workspace slice; the corpus stays in packed.alaya.db.
-  const source = existsSync(packed) ? packed : working;
+  const env = input.env ?? process.env;
+  if (isWorkspaceSliceSkipped(env)) return null;
+  const source = existsSync(packedWorkingDbPath(input.dataDirRoot))
+    ? packedWorkingDbPath(input.dataDirRoot)
+    : workingAlayaDbPath(input.dataDirRoot);
   if (!existsSync(source)) return null;
   const workspaceIds = listWorkspaceIds(source);
   if (workspaceIds.length < 2) return null;
-  const destDir = join(input.dataDirRoot, WORKSPACE_SLICE_DIRNAME);
-  const reused = completeSlicesOrNull(source, destDir, workspaceIds);
-  if (reused !== null) return reused;
-  if (existsSync(destDir)) {
-    rmSync(destDir, { recursive: true, force: true });
+  const packedDbPath = resolvePackedWorkingCopy(input.dataDirRoot);
+  const requireReuse = input.requireReuse === true || isSliceReuseRequired(env);
+  if (input.snapshotDbPath !== undefined) {
+    return await reuseOrExplodeSealedSlices({
+      snapshotDbPath: input.snapshotDbPath,
+      packedDbPath,
+      workspaceIds,
+      requireReuse,
+      onProgress: input.onProgress
+    });
   }
-  const packedDbPath = existsSync(packed) ? packed : preservePackedWorkingCopy(input.dataDirRoot);
-  return await explodePackedWorkingCopy({
+  return await reuseOrExplodeLocalSlices({
     packedDbPath,
-    destDir,
+    destDir: join(input.dataDirRoot, WORKSPACE_SLICE_DIRNAME),
     workspaceIds,
+    requireReuse,
     onProgress: input.onProgress
   });
 }
@@ -60,65 +73,27 @@ export function installRecallEvalWorkspaceSlice(input: {
   });
 }
 
-function completeSlicesOrNull(
-  packedDbPath: string,
-  destDir: string,
-  workspaceIds: readonly string[]
-): ExplodedWorkspaceSlices | null {
-  const sliceDbPaths: Record<string, string> = {};
-  const sliceSnapshotDigests: Record<string, string> = {};
-  for (const workspaceId of workspaceIds) {
-    const sliceDbPath = workspaceSliceDbPath(destDir, workspaceId);
-    if (!existsSync(sliceDbPath) || !sliceContainsOnlyWorkspace(sliceDbPath, workspaceId)) {
-      return null;
-    }
-    const snapshotDigest = readValidWorkspaceSliceSnapshotDigest({
-      workspaceId,
-      dbPath: sliceDbPath
-    });
-    if (snapshotDigest === null) return null;
-    sliceDbPaths[workspaceId] = sliceDbPath;
-    sliceSnapshotDigests[workspaceId] = snapshotDigest;
+async function reuseOrExplodeLocalSlices(input: {
+  readonly packedDbPath: string;
+  readonly destDir: string;
+  readonly workspaceIds: readonly string[];
+  readonly requireReuse: boolean;
+  readonly onProgress?: (progress: WorkspaceSliceProgress) => void;
+}): Promise<ExplodedWorkspaceSlices> {
+  const reused = completeSlicesOrNull(input.packedDbPath, input.destDir, input.workspaceIds);
+  if (reused !== null) return reused;
+  if (input.requireReuse) {
+    throw new Error(
+      "[recall-eval] workspace-slice reuse is required and the cache is missing or drifted"
+    );
   }
-  return Object.freeze({
-    packedDbPath,
-    destDir,
-    workspaceIds,
-    sliceDbPaths: Object.freeze(sliceDbPaths),
-    sliceSnapshotDigests: Object.freeze(sliceSnapshotDigests)
+  if (existsSync(input.destDir)) {
+    rmSync(input.destDir, { recursive: true, force: true });
+  }
+  return await explodePackedWorkingCopy({
+    packedDbPath: input.packedDbPath,
+    destDir: input.destDir,
+    workspaceIds: input.workspaceIds,
+    onProgress: input.onProgress
   });
-}
-
-function sliceContainsOnlyWorkspace(dbPath: string, workspaceId: string): boolean {
-  const database = new BetterSqlite3(dbPath, { readonly: true, fileMustExist: true });
-  try {
-    return !hasForeignWorkspaceRow(database, "relation_assertions", workspaceId) &&
-      !hasForeignWorkspaceRow(database, "relation_path_projections", workspaceId);
-  } catch {
-    return false;
-  } finally {
-    database.close();
-  }
-}
-
-function hasForeignWorkspaceRow(
-  database: BetterSqlite3.Database,
-  table: string,
-  workspaceId: string
-): boolean {
-  return database.prepare(
-    `SELECT 1 FROM "${table}" WHERE workspace_id <> ? LIMIT 1`
-  ).get(workspaceId) !== undefined;
-}
-
-function listWorkspaceIds(dbPath: string): readonly string[] {
-  const database = new BetterSqlite3(dbPath, { readonly: true, fileMustExist: true });
-  try {
-    const rows = database.prepare(
-      "SELECT workspace_id FROM workspaces ORDER BY workspace_id"
-    ).all() as ReadonlyArray<{ readonly workspace_id: string }>;
-    return rows.map((row) => row.workspace_id);
-  } finally {
-    database.close();
-  }
 }

@@ -13,11 +13,8 @@ import {
   type SeedExtractionPath
 } from "@do-soul/alaya-eval";
 import {
-  closeCachedDatabase,
-  getCurrentSchemaSummary,
-  initDatabase
+  closeCachedDatabase
 } from "@do-soul/alaya-storage";
-import { RECALL_PIPELINE_VERSION } from "../../shared/version.js";
 import type { LongMemEvalSeedDropReasons } from "../extraction/seed-fuel/seed-drop-reasons.js";
 import type { LongMemEvalSourceRound } from "../provenance/source-rounds.js";
 import type { LongMemEvalSnapshotRunProvenance } from
@@ -167,9 +164,10 @@ export interface LongMemEvalSnapshotSidecarFile {
 }
 
 /**
- * The snapshot manifest. Binds the DB+sidecar to the code/migration version
- * that produced them. recall-eval refuses a snapshot whose recall pipeline
- * version or schema migration version disagrees with the running binary.
+ * The snapshot manifest. Binds the DB+sidecar to seed/schema/cache/question
+ * identity. recall-eval refuses a snapshot whose seed identity or schema
+ * migration disagrees with the running binary. Ranking identity is not a
+ * consume needle.
  */
 export interface LongMemEvalSnapshotManifest {
   readonly schema_version: number;
@@ -177,7 +175,7 @@ export interface LongMemEvalSnapshotManifest {
   readonly variant: string;
   /** Question count seeded into the snapshot DB. */
   readonly question_count: number;
-  /** RECALL_PIPELINE_VERSION at seed time — recall-eval must match it. */
+  /** SNAPSHOT_SEED_IDENTITY at seed time — recall-eval must match it. */
   readonly recall_pipeline_version: string;
   /** SQLite max migration version of the seeded DB — recall-eval must match. */
   readonly schema_migration_version: number;
@@ -271,17 +269,6 @@ export function snapshotSidecarPath(snapshotDbPath: string): string {
 
 export function snapshotExtractionAuthorityPath(snapshotDbPath: string): string {
   return `${snapshotDbPath}.extraction-authority.json`;
-}
-
-/**
- * Read the SQLite max migration version off a DB file (the version recall-eval
- * binds the snapshot to). Opens via the storage connection cache; never closes
- * the connection (the cache owns the lifecycle).
- */
-export function readSchemaMigrationVersion(dbPath: string): number {
-  const db = initDatabase({ filename: dbPath });
-  const summary = getCurrentSchemaSummary(db);
-  return summary.persistedMaxVersion ?? summary.knownMaxVersion;
 }
 
 /**
@@ -440,36 +427,6 @@ function snapshotConsumerQuestionIdDigest(
 ): string {
   if (manifest.schema_version !== 1) return snapshotQuestionIdDigest(questions);
   throw new Error("legacy snapshot digest is not supported");
-}
-
-/**
- * Version-binding guard. Throws when a snapshot's recall-pipeline or schema
- * migration version disagrees with the running binary — a materialization /
- * recall pipeline change makes the frozen materialized state stale, so the
- * snapshot must be rebuilt rather than silently scored against.
- */
-export function assertSnapshotVersionMatch(
-  manifest: LongMemEvalSnapshotManifest,
-  restoredDbPath: string
-): void {
-  const restoredSchemaVersion = readSchemaMigrationVersion(restoredDbPath);
-  if (manifest.recall_pipeline_version !== RECALL_PIPELINE_VERSION) {
-    throw new Error(
-      "[recall-eval] snapshot recall_pipeline_version " +
-        `"${manifest.recall_pipeline_version}" != running binary ` +
-        `"${RECALL_PIPELINE_VERSION}". The recall/materialization pipeline ` +
-        "changed since the snapshot was seeded; rebuild the snapshot " +
-        "(seed with --snapshot-out) before recall-eval."
-    );
-  }
-  if (restoredSchemaVersion !== manifest.schema_migration_version) {
-    throw new Error(
-      "[recall-eval] snapshot schema_migration_version " +
-        `${manifest.schema_migration_version} != restored DB migration ` +
-        `version ${restoredSchemaVersion}. The schema migrated since the ` +
-        "snapshot was seeded; rebuild the snapshot before recall-eval."
-    );
-  }
 }
 
 function atomicWriteJson(filePath: string, value: unknown): void {

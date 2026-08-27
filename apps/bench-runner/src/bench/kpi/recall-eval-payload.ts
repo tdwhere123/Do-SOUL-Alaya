@@ -5,7 +5,7 @@ import {
   type BenchSplit,
   type KpiPayload
 } from "@do-soul/alaya-eval";
-import { RECALL_PIPELINE_VERSION } from "../../shared/version.js";
+import { RECALL_RANKING_IDENTITY } from "../../shared/version.js";
 import type { BenchRecallWeightOverrides } from "../../harness/recall/recall-weight-overrides.js";
 import {
   buildLongMemEvalQualityMetrics,
@@ -102,7 +102,7 @@ function renderRecallEvalPayload(
   return {
     bench_name: "public", split: VARIANT_TO_SPLIT[input.variant],
     run_at: input.runAt.toISOString(), alaya_commit: input.commitSha7,
-    alaya_version: input.alayaVersion, recall_pipeline_version: RECALL_PIPELINE_VERSION,
+    alaya_version: input.alayaVersion, recall_pipeline_version: RECALL_RANKING_IDENTITY,
     embedding_provider: input.embeddingProviderLabel, chat_provider: "none",
     policy_shape: input.policyShape, simulate_report: input.simulateReport,
     recall_eval_attribution: input.runtimeAttribution,

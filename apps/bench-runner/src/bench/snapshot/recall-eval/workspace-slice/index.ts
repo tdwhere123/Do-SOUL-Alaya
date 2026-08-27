@@ -28,7 +28,12 @@ export {
 export {
   isWorkspaceSliceSkipped,
   PACKED_WORKING_DB_FILENAME,
+  REQUIRE_SLICE_REUSE_ENV,
   SKIP_WORKSPACE_SLICE_ENV,
   WORKSPACE_SLICE_DIRNAME
 } from "./names.js";
+export {
+  sealedWorkspaceSliceCacheDir,
+  SEALED_SLICE_CACHE_IDENTITY_FILENAME
+} from "./sealed-cache.js";
 export type { WorkspaceSliceProgress } from "./stream-copy.js";

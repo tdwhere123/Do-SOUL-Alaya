@@ -328,6 +328,25 @@ describe("recall-eval provenance producer contract", () => {
         computeExecutedDistIdentity: async () => null
       })).rejects.toThrow(/executed dist closure/u);
       expect(isRecallEvalRunEvidenceEligible({
+        runtimeAttribution: runtimeAttribution(biSha),
+        provenance: {
+          ...control,
+          code: {
+            ...control.code,
+            executed_dist: {
+              algorithm: "sha256-reachable-path-file-sha256-v1",
+              sha256: "9".repeat(64),
+              file_count: 3
+            }
+          }
+        },
+        expectedQuestionIdDigest: selection.selected_id_digest,
+        actualQuestionIdDigest: selection.selected_id_digest,
+        evaluatedCount: dataset.length,
+        offset: 0,
+        limit: null
+      })).toBe(true);
+      expect(isRecallEvalRunEvidenceEligible({
         runtimeAttribution: {
           ...runtimeAttribution(biSha),
           status: "legacy_unattributed",

@@ -27,7 +27,7 @@ import {
   type LocalCrossEncoderRuntimeProvenance
 } from "../../provenance/embedding/local-onnx.js";
 import {
-  RECALL_PIPELINE_VERSION
+  RECALL_RANKING_IDENTITY
 } from "../../../shared/version.js";
 import {
   deriveSnapshotAttribution,
@@ -235,7 +235,7 @@ function isRecallEvalRuntimeGateEligible(
   return manifest.attribution?.status === "attributed" && snapshotGateEligible;
 }
 
-function buildRecallEvalSnapshotBinding(
+export function buildRecallEvalSnapshotBinding(
   manifest: LongMemEvalSnapshotManifest,
   snapshotManifestSha256: string | null
 ): RecallEvalRuntimeAttribution["snapshot_binding"] {
@@ -253,7 +253,7 @@ function buildRecallEvalSnapshotBinding(
     question_id_digest: manifest.question_id_digest ?? null,
     snapshot_manifest_sha256: snapshotManifestSha256,
     producer_recall_pipeline_version: manifest.recall_pipeline_version,
-    consumer_recall_pipeline_version: RECALL_PIPELINE_VERSION,
+    consumer_recall_pipeline_version: RECALL_RANKING_IDENTITY,
     producer_schema_migration_version: manifest.schema_migration_version
   };
 }

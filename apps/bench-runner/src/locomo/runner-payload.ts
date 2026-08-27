@@ -24,7 +24,7 @@ import {
 import { buildLongMemEvalDetailedGoldCoverage } from
   "../bench/diagnostics/diagnostics-full-gold-coverage.js";
 import { aggregateRecallTokenEconomy } from "../bench/qa/recall-token-economy.js";
-import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
+import { RECALL_RANKING_IDENTITY } from "../shared/version.js";
 import {
   computePercentile,
   summarizeEmbeddingVectorCache,
@@ -63,7 +63,7 @@ export function buildLocomoPayload(input: {
     run_at: input.runAt.toISOString(),
     alaya_commit: input.commitSha7,
     alaya_version: input.alayaVersion,
-    recall_pipeline_version: RECALL_PIPELINE_VERSION,
+    recall_pipeline_version: RECALL_RANKING_IDENTITY,
     embedding_provider: input.embeddingProvider,
     chat_provider: "none",
     policy_shape: "stress",

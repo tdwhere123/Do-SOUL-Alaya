@@ -1,4 +1,4 @@
-import { RECALL_PIPELINE_VERSION } from "../../../shared/version.js";
+import { RECALL_RANKING_IDENTITY } from "../../../shared/version.js";
 import {
   aggregateEdgeProposalAutoAccept,
   aggregateEdgeProposalRate,
@@ -130,7 +130,7 @@ function buildPayload(
     run_at: input.runAt.toISOString(),
     alaya_commit: input.commitSha7,
     alaya_version: input.alayaVersion,
-    recall_pipeline_version: RECALL_PIPELINE_VERSION,
+    recall_pipeline_version: RECALL_RANKING_IDENTITY,
     embedding_provider: input.embeddingProviderLabel,
     chat_provider: "none",
     policy_shape: input.policyShape,

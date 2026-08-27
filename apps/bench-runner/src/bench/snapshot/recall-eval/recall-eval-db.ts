@@ -1,12 +1,10 @@
-import {
-  assertSnapshotVersionMatch,
-  type LongMemEvalSnapshotManifest
-} from "../materialize.js";
+import type { LongMemEvalSnapshotManifest } from "../materialize.js";
+import { assertSnapshotConsumeIdentity } from "../snapshot-seed-identity.js";
 import {
   readSchemaMigrationLedger,
   TEMPORAL_OFFLINE_MIGRATION_VERSION
 } from "@do-soul/alaya-storage";
-import { RECALL_PIPELINE_VERSION } from "../../../shared/version.js";
+import { SNAPSHOT_SEED_IDENTITY } from "../../../shared/version.js";
 import type { WarmDerivedSnapshotReceipt } from
   "./warm-derived/warm-derived-snapshot-receipt.js";
 
@@ -31,7 +29,11 @@ export function prepareRecallEvalRestoredDb(input: {
   if (input.legacySnapshot) {
     throw new Error("legacy snapshots are not supported");
   }
-  assertSnapshotVersionMatch(input.manifest, input.restoredDbPath);
+  assertSnapshotConsumeIdentity({
+    manifest: input.manifest,
+    restoredDbPath: input.restoredDbPath,
+    runningSeedIdentity: SNAPSHOT_SEED_IDENTITY
+  });
 }
 
 function assertWarmDerivedSnapshot(input: {
@@ -43,8 +45,8 @@ function assertWarmDerivedSnapshot(input: {
   if (input.legacySnapshot) {
     throw new Error("warm derived snapshot cannot use a legacy source");
   }
-  if (input.manifest.recall_pipeline_version !== RECALL_PIPELINE_VERSION) {
-    throw new Error("[recall-eval] warm derived snapshot recall pipeline version mismatch");
+  if (input.manifest.recall_pipeline_version !== SNAPSHOT_SEED_IDENTITY) {
+    throw new Error("[recall-eval] warm derived snapshot seed identity mismatch");
   }
   const restoredVersion = readSchemaMigrationLedger(input.restoredDbPath).at(-1);
   if (restoredVersion !== input.warmDerivedSnapshot.databaseSchemaVersion) {
@@ -60,9 +62,9 @@ function assertDerivedRebuildSource(input: {
   if (input.legacySnapshot) {
     throw new Error("derived evidence projection rebuild cannot use a legacy snapshot");
   }
-  if (input.manifest.recall_pipeline_version !== RECALL_PIPELINE_VERSION) {
+  if (input.manifest.recall_pipeline_version !== SNAPSHOT_SEED_IDENTITY) {
     throw new Error(
-      "[recall-eval] derived rebuild snapshot recall pipeline version mismatch"
+      "[recall-eval] derived rebuild snapshot seed identity mismatch"
     );
   }
   const sourceVersion = readSchemaMigrationLedger(input.restoredDbPath).at(-1);

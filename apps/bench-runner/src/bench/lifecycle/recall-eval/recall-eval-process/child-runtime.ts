@@ -64,6 +64,7 @@ export async function openRecallEvalPagerChild(
   });
   const slices = await explodeRecallEvalWorkingCopyIfNeeded({
     dataDirRoot: payload.dataDirRoot,
+    snapshotDbPath: payload.options.snapshotDbPath,
     onProgress
   });
   if (slices !== null && slices.workspaceIds[0] !== undefined) {

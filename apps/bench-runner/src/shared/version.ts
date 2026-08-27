@@ -12,7 +12,8 @@ import { fileURLToPath } from "node:url";
 // see also: apps/bench-runner/package.json
 let cachedVersion: string | null = null;
 
-export const RECALL_PIPELINE_VERSION = "fusion-evidence-first-v3";
+export const SNAPSHOT_SEED_IDENTITY = "fusion-evidence-first-v3";
+export const RECALL_RANKING_IDENTITY = "fusion-evidence-first-v3";
 
 export interface BenchCommitResolution {
   readonly sha7: string;
