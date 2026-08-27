@@ -21,3 +21,4 @@ export {
   SKIP_WORKSPACE_SLICE_ENV,
   WORKSPACE_SLICE_DIRNAME
 } from "./names.js";
+export type { WorkspaceSliceProgress } from "./stream-copy.js";

@@ -5,6 +5,7 @@ import {
   RunMode,
   RunState,
   ScopeClass,
+  SignalEventType,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   WorkspaceKind,
   WorkspaceState,
@@ -13,11 +14,20 @@ import {
   hashFactorId,
   hashIncidenceId,
   hashSourceRecordId,
+  type EventLogEntry,
   type FieldContractSha256
 } from "@do-soul/alaya-protocol";
 import {
+  EventPublisher,
+  RelationAssertionService,
+  stableStringify
+} from "@do-soul/alaya-core";
+import {
+  digestRelationFormationEventSource,
   initDatabase,
+  SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
+  SqliteRelationAssertionRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
   writeEmbeddingOverlayBind
@@ -40,8 +50,6 @@ const CLOCK = "2026-08-10T00:00:00.000Z";
 const fieldSha256: FieldContractSha256 = (preimage) =>
   createHash("sha256").update(preimage, "utf8").digest("hex");
 
-const PLANTED_PACKED_PROJECTION_DIGEST = "c".repeat(64);
-
 export async function createPackedTwoWorkspaceDb(path: string): Promise<void> {
   const database = initDatabase({ filename: path });
   await seedHaystack(database, {
@@ -61,86 +69,113 @@ export async function createPackedTwoWorkspaceDb(path: string): Promise<void> {
   database.close();
 }
 
-// History operator tables stay corpus-wide even though they carry workspace_id.
-export function plantPackedPathProjections(path: string): void {
+export async function plantPackedPathProjections(path: string): Promise<void> {
   const database = initDatabase({ filename: path });
   try {
-    const generation = readActiveProjectionGeneration(database);
-    plantOneWorkspaceProjection(database, generation, WORKSPACE_A, "path-a");
-    plantOneWorkspaceProjection(database, generation, WORKSPACE_B, "path-b");
-    database.connection.prepare(`
-      UPDATE temporal_projection_generations
-      SET projection_count = 2, projection_digest = ?
-      WHERE generation = ?
-    `).run(PLANTED_PACKED_PROJECTION_DIGEST, generation);
-    database.connection.prepare(`
-      UPDATE temporal_schema_state
-      SET projection_count = 2, projection_digest = ?
-      WHERE state_id = 1
-    `).run(PLANTED_PACKED_PROJECTION_DIGEST);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const service = new RelationAssertionService({
+      repo: new SqliteRelationAssertionRepo(database),
+      eventHistory: eventLogRepo,
+      eventPublisher: new EventPublisher({
+        eventLogRepo,
+        runHotStateService: { apply: () => undefined },
+        runtimeNotifier: {
+          notify: () => undefined,
+          notifyEntry: () => undefined
+        }
+      }),
+      now: () => CLOCK
+    });
+    await plantOneWorkspaceProjection(database, eventLogRepo, service, {
+      workspaceId: WORKSPACE_A,
+      runId: "run-a",
+      memoryId: MEMORY_A,
+      evidenceId: EVIDENCE_A,
+      pathId: "path-a"
+    });
+    await plantOneWorkspaceProjection(database, eventLogRepo, service, {
+      workspaceId: WORKSPACE_B,
+      runId: "run-b",
+      memoryId: MEMORY_B,
+      evidenceId: EVIDENCE_B,
+      pathId: "path-b"
+    });
   } finally {
     database.close();
   }
 }
 
-function readActiveProjectionGeneration(
-  database: ReturnType<typeof initDatabase>
-): string {
-  const row = database.connection.prepare(`
-    SELECT active_projection_generation AS generation
-    FROM temporal_schema_state
-    WHERE state_id = 1
-  `).get() as { readonly generation: string | null } | undefined;
-  if (row?.generation === undefined || row.generation === null || row.generation.length === 0) {
-    throw new Error("planted packed db is missing an active temporal projection generation");
+async function plantOneWorkspaceProjection(
+  database: ReturnType<typeof initDatabase>,
+  eventLogRepo: SqliteEventLogRepo,
+  service: RelationAssertionService,
+  input: {
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly memoryId: string;
+    readonly evidenceId: string;
+    readonly pathId: string;
   }
-  return row.generation;
+): Promise<void> {
+  const sourceEvent = await eventLogRepo.append({
+    event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
+    entity_type: "candidate_memory_signal",
+    entity_id: `signal-${input.pathId}`,
+    workspace_id: input.workspaceId,
+    run_id: input.runId,
+    caused_by: "workspace-slice-test",
+    payload_json: { source: "workspace-slice-test" }
+  });
+  const sourceAnchor = {
+    event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
+    event_id: sourceEvent.event_id,
+    occurred_at: sourceEvent.created_at
+  };
+  database.connection.prepare(`
+    UPDATE evidence_capsules
+    SET event_anchor = ?
+    WHERE object_id = ?
+  `).run(JSON.stringify(sourceAnchor), input.evidenceId);
+  await service.admit({
+    assertionId: `assertion-${input.pathId}`,
+    workspaceId: input.workspaceId,
+    runId: input.runId,
+    causedBy: "workspace-slice-test",
+    evidenceReceipts: [{
+      evidence_id: input.evidenceId,
+      source_event_anchor: sourceAnchor
+    }],
+    formationReceipt: formationReceipt(sourceEvent),
+    anchors: {
+      source_anchor: { kind: "object", object_id: input.memoryId },
+      target_anchor: { kind: "object", object_id: input.evidenceId }
+    },
+    relationKind: "supports",
+    validity: { kind: "open", valid_from: CLOCK },
+    admittedAt: CLOCK
+  });
 }
 
-function plantOneWorkspaceProjection(
-  database: ReturnType<typeof initDatabase>,
-  generation: string,
-  workspaceId: string,
-  pathId: string
-): void {
-  database.connection.prepare(`
-    INSERT INTO relation_assertions (
-      assertion_id, workspace_id, admission_event_id, identity_key,
-      anchors_json, relation_kind, validity_json, formation_receipt_json, admitted_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    `assertion-${pathId}`,
-    workspaceId,
-    `admission-${pathId}`,
-    `identity-${pathId}`,
-    "[]",
-    "related_to",
-    JSON.stringify({ kind: "open", valid_from: CLOCK }),
-    "{}",
-    CLOCK
-  );
-  database.connection.prepare(`
-    INSERT INTO relation_assertion_evidence (
-      assertion_id, evidence_id, source_event_type, source_event_id, source_occurred_at
-    ) VALUES (?, ?, ?, ?, ?)
-  `).run(
-    `assertion-${pathId}`,
-    `evidence-${pathId}`,
-    "signal_ingested",
-    `event-${pathId}`,
-    CLOCK
-  );
-  database.connection.prepare(`
-    INSERT INTO relation_path_projections (
-      generation, path_id, assertion_id, workspace_id, projection_json
-    ) VALUES (?, ?, ?, ?, ?)
-  `).run(
-    generation,
-    pathId,
-    `assertion-${pathId}`,
-    workspaceId,
-    JSON.stringify({ path_id: pathId, workspace_id: workspaceId })
-  );
+function formationReceipt(sourceEvent: Readonly<EventLogEntry>) {
+  const parameters = { relation_kind: "supports" };
+  const decision = { source_event_ids: [sourceEvent.event_id] };
+  return {
+    operator_id: "workspace_slice_fixture_relation_v1",
+    operator_sha256: "a".repeat(64),
+    parameters,
+    parameter_sha256: digestFixture(parameters),
+    source_observations: [{
+      source_kind: "event_log_entry" as const,
+      source_id: sourceEvent.event_id,
+      source_sha256: digestRelationFormationEventSource(sourceEvent)
+    }],
+    decision,
+    decision_sha256: digestFixture(decision)
+  };
+}
+
+function digestFixture(value: unknown): string {
+  return createHash("sha256").update(stableStringify(value), "utf8").digest("hex");
 }
 
 export function writeOverlayBindBeside(dbPath: string, overlaySha256: string): string {

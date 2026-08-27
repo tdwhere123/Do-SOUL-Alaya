@@ -34,6 +34,7 @@ async function handle(message) {
     selectionBoundaryFixture = message?.open?.selectionBoundaryFixture;
     selectionRootLogPath = message?.open?.selectionRootLogPath;
     selectionQuestionIdOverride = message?.open?.selectionQuestionIdOverride;
+    await emitOpenProgress(id, message?.open);
     if (selectionBoundaryFixture !== undefined) {
       selectionRootPath = mkdtempSync(join(tmpdir(), "alaya-selection-replay-stub-"));
       if (typeof selectionRootLogPath === "string") {
@@ -90,6 +91,26 @@ async function handle(message) {
     ok: true,
     pack: stubPack(questionId)
   });
+}
+
+async function emitOpenProgress(id, open) {
+  const everyMs = open?.progressEveryMs;
+  const count = open?.progressCount;
+  if (!Number.isInteger(everyMs) || everyMs < 1 ||
+      !Number.isInteger(count) || count < 1) {
+    return;
+  }
+  for (let completed = 1; completed <= count; completed += 1) {
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+    process.send({
+      id,
+      progress: true,
+      sequence: open?.constantProgressSequence === true ? 1 : completed,
+      stage: "stub_open",
+      completed,
+      total: count
+    });
+  }
 }
 
 function writeSelectionArtifact() {

@@ -7,7 +7,8 @@ import { openRecallEvalWorkingSqlite, recallEvalWorkingDbPath } from
 import {
   explodeRecallEvalWorkingCopyIfNeeded,
   installRecallEvalWorkspaceSlice,
-  type ExplodedWorkspaceSlices
+  type ExplodedWorkspaceSlices,
+  type WorkspaceSliceProgress
 } from "../../../snapshot/recall-eval/workspace-slice/index.js";
 import {
   readWarmDerivedSnapshotReceipt,
@@ -44,7 +45,8 @@ interface PagerRuntime {
 let runtime: PagerRuntime | null = null;
 
 export async function openRecallEvalPagerChild(
-  payload: RecallEvalPagerOpenPayload
+  payload: RecallEvalPagerOpenPayload,
+  onProgress?: (progress: WorkspaceSliceProgress) => void
 ): Promise<RecallEvalPagerOpenResult> {
   if (runtime !== null) throw new Error("recall-eval pager child is already open");
   const sqlite = await openRecallEvalWorkingSqlite({
@@ -59,8 +61,9 @@ export async function openRecallEvalPagerChild(
       ? {}
       : { overlayExpected: payload.overlayExpected })
   });
-  const slices = explodeRecallEvalWorkingCopyIfNeeded({
-    dataDirRoot: payload.dataDirRoot
+  const slices = await explodeRecallEvalWorkingCopyIfNeeded({
+    dataDirRoot: payload.dataDirRoot,
+    onProgress
   });
   if (slices !== null && slices.workspaceIds[0] !== undefined) {
     installRecallEvalWorkspaceSlice({

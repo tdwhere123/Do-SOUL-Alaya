@@ -12,13 +12,28 @@ export interface CopyConnection {
   };
 }
 
+export interface WorkspaceSliceProgress {
+  readonly stage:
+    | "prepare_slices"
+    | "workspace_tables"
+    | "global_tables"
+    | "rebind_slices"
+    | "commit_slices"
+    | "rebuild_temporal_slices"
+    | "finalize_slices";
+  readonly completed: number;
+  readonly total: number;
+}
+
 export function copyWorkspaceTablesOnce(input: {
   readonly packed: CopyConnection;
   readonly destByWorkspace: ReadonlyMap<string, CopyConnection>;
   readonly catalog: ClassifiedCatalog;
+  readonly onProgress?: (progress: WorkspaceSliceProgress) => void;
 }): void {
-  for (const table of input.catalog.workspace) {
+  for (const [index, table] of input.catalog.workspace.entries()) {
     copyOneWorkspaceTable(input.packed, input.destByWorkspace, table.name, table.columns);
+    reportProgress(input.onProgress, "workspace_tables", index, input.catalog.workspace.length);
   }
 }
 
@@ -26,9 +41,11 @@ export function applyGlobalTablePolicies(input: {
   readonly packed: CopyConnection;
   readonly destByWorkspace: ReadonlyMap<string, CopyConnection>;
   readonly catalog: ClassifiedCatalog;
+  readonly onProgress?: (progress: WorkspaceSliceProgress) => void;
 }): void {
-  for (const table of input.catalog.global) {
+  for (const [index, table] of input.catalog.global.entries()) {
     applyOneGlobalPolicy(input.packed, input.destByWorkspace, table.name, table.policy);
+    reportProgress(input.onProgress, "global_tables", index, input.catalog.global.length);
   }
 }
 
@@ -167,4 +184,13 @@ function assertSchemaLedgerMatches(
   if (JSON.stringify(destVersions) !== JSON.stringify(packedVersions)) {
     throw new Error("packed working copy schema_version ledger does not match dest migrations");
   }
+}
+
+function reportProgress(
+  onProgress: ((progress: WorkspaceSliceProgress) => void) | undefined,
+  stage: WorkspaceSliceProgress["stage"],
+  index: number,
+  total: number
+): void {
+  if (total > 0) onProgress?.({ stage, completed: index + 1, total });
 }

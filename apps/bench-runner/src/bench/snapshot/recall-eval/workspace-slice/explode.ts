@@ -1,4 +1,12 @@
 import { join } from "node:path";
+import {
+  EventPublisher,
+  RelationAssertionService
+} from "@do-soul/alaya-core";
+import {
+  SqliteEventLogRepo,
+  SqliteRelationAssertionRepo
+} from "@do-soul/alaya-storage";
 import BetterSqlite3 from "better-sqlite3";
 import { createSqliteCatalogReader } from "./catalog-reader.js";
 import { classifyPackedTables } from "./classify-tables.js";
@@ -15,13 +23,15 @@ import { rebindTemporalProjectionIdentity } from "./rebind-temporal.js";
 import {
   applyGlobalTablePolicies,
   copyWorkspaceTablesOnce,
-  type CopyConnection
+  type CopyConnection,
+  type WorkspaceSliceProgress
 } from "./stream-copy.js";
 
 export interface ExplodePackedWorkingCopyInput {
   readonly packedDbPath: string;
   readonly destDir: string;
   readonly workspaceIds?: readonly string[];
+  readonly onProgress?: (progress: WorkspaceSliceProgress) => void;
 }
 
 export interface ExplodedWorkspaceSlices {
@@ -35,9 +45,9 @@ export function workspaceSliceDbPath(destDir: string, workspaceId: string): stri
   return join(destDir, encodeURIComponent(workspaceId), WORKSPACE_SLICE_DB_FILENAME);
 }
 
-export function explodePackedWorkingCopy(
+export async function explodePackedWorkingCopy(
   input: ExplodePackedWorkingCopyInput
-): ExplodedWorkspaceSlices {
+): Promise<ExplodedWorkspaceSlices> {
   const packed = new BetterSqlite3(input.packedDbPath, {
     readonly: true,
     fileMustExist: true
@@ -46,11 +56,13 @@ export function explodePackedWorkingCopy(
   try {
     const workspaceIds = resolveWorkspaceIds(packed, input.workspaceIds);
     const catalog = classifyPackedTables(createSqliteCatalogReader(packed));
-    for (const workspaceId of workspaceIds) {
+    for (const [index, workspaceId] of workspaceIds.entries()) {
       dests.push(createSliceDest(workspaceId, workspaceSliceDbPath(input.destDir, workspaceId)));
+      reportProgress(input.onProgress, "prepare_slices", index, workspaceIds.length);
     }
-    copyIntoDests(packed, dests, catalog);
-    finalizeDests(dests, catalog.ftsVirtual);
+    copyIntoDests(packed, dests, catalog, input.onProgress);
+    await rebuildTemporalOperators(dests, input.onProgress);
+    finalizeDests(dests, catalog.ftsVirtual, input.onProgress);
   } catch (error) {
     for (const dest of dests) closeSliceDest(dest);
     throw error;
@@ -89,17 +101,24 @@ function resolveWorkspaceIds(
 function copyIntoDests(
   packed: CopyConnection,
   dests: readonly PreparedSliceDest[],
-  catalog: ReturnType<typeof classifyPackedTables>
+  catalog: ReturnType<typeof classifyPackedTables>,
+  onProgress?: (progress: WorkspaceSliceProgress) => void
 ): void {
   const destByWorkspace = new Map(
     dests.map((dest) => [dest.workspaceId, dest.database.connection])
   );
   for (const dest of dests) dest.database.connection.exec("BEGIN");
   try {
-    copyWorkspaceTablesOnce({ packed, destByWorkspace, catalog });
-    applyGlobalTablePolicies({ packed, destByWorkspace, catalog });
-    for (const dest of dests) rebindTemporalProjectionIdentity(dest.database.connection);
-    for (const dest of dests) dest.database.connection.exec("COMMIT");
+    copyWorkspaceTablesOnce({ packed, destByWorkspace, catalog, onProgress });
+    applyGlobalTablePolicies({ packed, destByWorkspace, catalog, onProgress });
+    for (const [index, dest] of dests.entries()) {
+      rebindTemporalProjectionIdentity(dest.database.connection);
+      reportProgress(onProgress, "rebind_slices", index, dests.length);
+    }
+    for (const [index, dest] of dests.entries()) {
+      dest.database.connection.exec("COMMIT");
+      reportProgress(onProgress, "commit_slices", index, dests.length);
+    }
   } catch (error) {
     for (const dest of dests) {
       try {
@@ -112,13 +131,61 @@ function copyIntoDests(
   }
 }
 
+async function rebuildTemporalOperators(
+  dests: readonly PreparedSliceDest[],
+  onProgress?: (progress: WorkspaceSliceProgress) => void
+): Promise<void> {
+  for (const [index, dest] of dests.entries()) {
+    const eventLogRepo = new SqliteEventLogRepo(dest.database);
+    const repo = new SqliteRelationAssertionRepo(dest.database);
+    const service = new RelationAssertionService({
+      repo,
+      eventHistory: eventLogRepo,
+      eventPublisher: new EventPublisher({
+        eventLogRepo,
+        runHotStateService: { apply: () => undefined },
+        runtimeNotifier: {
+          notify: () => undefined,
+          notifyEntry: () => undefined
+        }
+      }),
+      now: () => readActiveAsOf(dest)
+    });
+    await service.verifyAndRebuild();
+    reportProgress(onProgress, "rebuild_temporal_slices", index, dests.length);
+  }
+}
+
+function readActiveAsOf(dest: PreparedSliceDest): string {
+  const row = dest.database.connection.prepare(`
+    SELECT active_as_of
+    FROM temporal_schema_state
+    WHERE state_id = 1
+  `).get() as Readonly<{ active_as_of: string }> | undefined;
+  if (row === undefined || row.active_as_of.length === 0) {
+    throw new Error("workspace slice temporal operator is missing active_as_of");
+  }
+  return row.active_as_of;
+}
+
 function finalizeDests(
   dests: readonly PreparedSliceDest[],
-  ftsVirtual: readonly string[]
+  ftsVirtual: readonly string[],
+  onProgress?: (progress: WorkspaceSliceProgress) => void
 ): void {
-  for (const dest of dests) {
+  for (const [index, dest] of dests.entries()) {
     rebuildWorkspaceFts(dest.database.connection, ftsVirtual);
     finalizeSliceDest(dest);
     dest.database.close();
+    reportProgress(onProgress, "finalize_slices", index, dests.length);
   }
+}
+
+function reportProgress(
+  onProgress: ((progress: WorkspaceSliceProgress) => void) | undefined,
+  stage: WorkspaceSliceProgress["stage"],
+  index: number,
+  total: number
+): void {
+  if (total > 0) onProgress?.({ stage, completed: index + 1, total });
 }

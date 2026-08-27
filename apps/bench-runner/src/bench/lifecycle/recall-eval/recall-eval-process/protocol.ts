@@ -17,6 +17,15 @@ export interface RecallEvalPagerIpcRequest {
   readonly recall?: unknown;
 }
 
+export interface RecallEvalPagerIpcProgress {
+  readonly id: number;
+  readonly progress: true;
+  readonly sequence: number;
+  readonly stage: string;
+  readonly completed: number;
+  readonly total: number;
+}
+
 export type RecallEvalPagerIpcResponse =
   | RecallEvalPagerIpcSuccess
   | RecallEvalPagerIpcFailure;
@@ -62,6 +71,21 @@ export function isRecallEvalPagerIpcResponse(
   return typeof record.id === "number" && typeof record.ok === "boolean";
 }
 
+export function isRecallEvalPagerIpcProgress(
+  value: unknown
+): value is RecallEvalPagerIpcProgress {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Partial<RecallEvalPagerIpcProgress>;
+  return record.progress === true &&
+    isNonNegativeInteger(record.id) &&
+    isPositiveInteger(record.sequence) &&
+    typeof record.stage === "string" &&
+    record.stage.length > 0 &&
+    isPositiveInteger(record.completed) &&
+    isPositiveInteger(record.total) &&
+    record.completed <= record.total;
+}
+
 export function serializeRecallEvalPagerIpcError(
   error: unknown
 ): RecallEvalPagerIpcFailure["error"] {
@@ -73,4 +97,12 @@ export function serializeRecallEvalPagerIpcError(
 
 function isRecallEvalPagerIpcOp(value: unknown): value is RecallEvalPagerIpcOp {
   return value === "open" || value === "recall" || value === "close";
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
 }

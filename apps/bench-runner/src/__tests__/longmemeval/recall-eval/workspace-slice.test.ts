@@ -63,9 +63,9 @@ afterEach(async () => {
 });
 
 describe("packed workspace slice explode", () => {
-  it("copies workspace-scoped rows so each slice matches packed WHERE workspace_id", () => {
+  it("copies workspace-scoped rows so each slice matches packed WHERE workspace_id", async () => {
     const destDir = join(root, "slices");
-    const exploded = explodePackedWorkingCopy({
+    const exploded = await explodePackedWorkingCopy({
       packedDbPath: packedPath,
       destDir,
       workspaceIds: [WORKSPACE_A, WORKSPACE_B]
@@ -79,9 +79,34 @@ describe("packed workspace slice explode", () => {
     }
   });
 
-  it("MATCH on slice A never returns B object_ids and vice versa", () => {
+  it("reports completed slice work as bounded monotonic progress", async () => {
+    const progress: Array<{
+      readonly stage: string;
+      readonly completed: number;
+      readonly total: number;
+    }> = [];
+    await explodePackedWorkingCopy({
+      packedDbPath: packedPath,
+      destDir: join(root, "slices-progress"),
+      workspaceIds: [WORKSPACE_A, WORKSPACE_B],
+      onProgress: (event) => progress.push(event)
+    });
+    const lastByStage = new Map<string, number>();
+    for (const event of progress) {
+      expect(event.completed).toBe((lastByStage.get(event.stage) ?? 0) + 1);
+      expect(event.total).toBeGreaterThanOrEqual(event.completed);
+      lastByStage.set(event.stage, event.completed);
+    }
+    expect(progress.at(-1)).toEqual({
+      stage: "finalize_slices",
+      completed: 2,
+      total: 2
+    });
+  });
+
+  it("MATCH on slice A never returns B object_ids and vice versa", async () => {
     const destDir = join(root, "slices-fts");
-    const exploded = explodePackedWorkingCopy({
+    const exploded = await explodePackedWorkingCopy({
       packedDbPath: packedPath,
       destDir,
       workspaceIds: [WORKSPACE_A, WORKSPACE_B]
@@ -103,10 +128,10 @@ describe("packed workspace slice explode", () => {
     }
   });
 
-  it("replicates overlay bind and sidecar into each slice dir", () => {
+  it("replicates overlay bind and sidecar into each slice dir", async () => {
     const overlayPath = writeOverlayBindBeside(packedPath, OVERLAY_SHA);
     const destDir = join(root, "slices-overlay");
-    const exploded = explodePackedWorkingCopy({
+    const exploded = await explodePackedWorkingCopy({
       packedDbPath: packedPath,
       destDir,
       workspaceIds: [WORKSPACE_A, WORKSPACE_B]
@@ -130,23 +155,23 @@ describe("packed workspace slice explode", () => {
     }
   });
 
-  it("fails when a product table is neither workspace-scoped nor handled", () => {
+  it("fails when a product table is neither workspace-scoped nor handled", async () => {
     const packed = initDatabase({ filename: packedPath });
     packed.connection.exec("CREATE TABLE orphan_global_probe (id TEXT PRIMARY KEY)");
     packed.connection.prepare("INSERT INTO orphan_global_probe (id) VALUES (?)").run("leak");
     packed.close();
-    expect(() => explodePackedWorkingCopy({
+    await expect(explodePackedWorkingCopy({
       packedDbPath: packedPath,
       destDir: join(root, "slices-unhandled"),
       workspaceIds: [WORKSPACE_A, WORKSPACE_B]
-    })).toThrow(/unhandled table orphan_global_probe/u);
+    })).rejects.toThrow(/unhandled table orphan_global_probe/u);
   });
 
-  it("rebinds temporal receipts so a sliced dest still passes the runtime gate", () => {
-    plantPackedPathProjections(packedPath);
+  it("rebuilds a workspace-local temporal operator from complete local history", async () => {
+    await plantPackedPathProjections(packedPath);
     closeCachedDatabase(packedPath);
     const destDir = join(root, "slices-temporal");
-    const exploded = explodePackedWorkingCopy({
+    const exploded = await explodePackedWorkingCopy({
       packedDbPath: packedPath,
       destDir,
       workspaceIds: [WORKSPACE_A, WORKSPACE_B]
@@ -157,15 +182,15 @@ describe("packed workspace slice explode", () => {
     const sliceA = initDatabase({ filename: exploded.sliceDbPaths[WORKSPACE_A]! });
     const sliceB = initDatabase({ filename: exploded.sliceDbPaths[WORKSPACE_B]! });
     try {
-      expect(countTable(sliceA, "relation_path_projections")).toBe(2);
-      expect(countTableWhere(sliceA, "relation_path_projections", WORKSPACE_B)).toBe(1);
-      expect(readProjectionCount(sliceA)).toBe(2);
-      expect(readHistoryDigest(sliceA)).toBe(packedHistory);
-      expect(countTable(sliceA, "relation_assertion_evidence")).toBe(2);
-      expect(countTable(sliceB, "relation_path_projections")).toBe(2);
-      expect(countTableWhere(sliceB, "relation_path_projections", WORKSPACE_A)).toBe(1);
-      expect(readProjectionCount(sliceB)).toBe(2);
-      expect(readHistoryDigest(sliceB)).toBe(packedHistory);
+      expect(countTable(sliceA, "relation_path_projections")).toBeGreaterThanOrEqual(1);
+      expect(countTableWhere(sliceA, "relation_path_projections", WORKSPACE_B)).toBe(0);
+      expect(readProjectionCount(sliceA)).toBe(1);
+      expect(readHistoryDigest(sliceA)).not.toBe(packedHistory);
+      expect(countTable(sliceA, "relation_assertion_evidence")).toBe(1);
+      expect(countTable(sliceB, "relation_path_projections")).toBeGreaterThanOrEqual(1);
+      expect(countTableWhere(sliceB, "relation_path_projections", WORKSPACE_A)).toBe(0);
+      expect(readProjectionCount(sliceB)).toBe(1);
+      expect(readHistoryDigest(sliceB)).not.toBe(packedHistory);
     } finally {
       sliceA.close();
       sliceB.close();
@@ -179,11 +204,11 @@ describe("packed workspace slice explode", () => {
     });
     const working = initDatabase({ filename: workingAlayaDbPath(dataDir) });
     try {
-      expect(countTable(working, "relation_path_projections")).toBe(2);
-      expect(countTable(working, "relation_assertion_evidence")).toBe(2);
-      expect(countTableWhere(working, "relation_path_projections", WORKSPACE_B)).toBe(1);
-      expect(readProjectionCount(working)).toBe(2);
-      expect(readHistoryDigest(working)).toBe(packedHistory);
+      expect(countTable(working, "relation_path_projections")).toBeGreaterThanOrEqual(1);
+      expect(countTable(working, "relation_assertion_evidence")).toBe(1);
+      expect(countTableWhere(working, "relation_path_projections", WORKSPACE_B)).toBe(0);
+      expect(readProjectionCount(working)).toBe(1);
+      expect(readHistoryDigest(working)).not.toBe(packedHistory);
     } finally {
       working.close();
     }
@@ -191,10 +216,10 @@ describe("packed workspace slice explode", () => {
 });
 
 describe("workspace slice install and daemon reopen", () => {
-  it("installing slice B after A leaves only B on the search path", () => {
+  it("installing slice B after A leaves only B on the search path", async () => {
     const destDir = join(root, "slices-install");
     const dataDir = join(root, "data");
-    const exploded = explodePackedWorkingCopy({
+    const exploded = await explodePackedWorkingCopy({
       packedDbPath: packedPath,
       destDir,
       workspaceIds: [WORKSPACE_A, WORKSPACE_B]
@@ -221,7 +246,7 @@ describe("workspace slice install and daemon reopen", () => {
   it("reopening the daemon working db does not read stale packed pages", async () => {
     const destDir = join(root, "slices-daemon");
     const dataDir = join(root, "daemon-data");
-    const exploded = explodePackedWorkingCopy({
+    const exploded = await explodePackedWorkingCopy({
       packedDbPath: packedPath,
       destDir,
       workspaceIds: [WORKSPACE_A, WORKSPACE_B]
@@ -261,10 +286,10 @@ describe("workspace slice install and daemon reopen", () => {
     await attachedB.detach();
   }, 120_000);
 
-  it("reuses packed.alaya.db after a one-workspace working copy is installed", () => {
+  it("reuses packed.alaya.db after a one-workspace working copy is installed", async () => {
     const dataDir = join(root, "reopen-data");
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
-    const first = explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
+    const first = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
     expect(first).not.toBeNull();
     expect(first!.workspaceIds).toEqual([WORKSPACE_A, WORKSPACE_B]);
     installRecallEvalWorkspaceSlice({
@@ -278,7 +303,7 @@ describe("workspace slice install and daemon reopen", () => {
     } finally {
       working.close();
     }
-    const second = explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
+    const second = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
     expect(second).not.toBeNull();
     expect(second!.packedDbPath).toBe(packedWorkingDbPath(dataDir));
     expect(second!.sliceDbPaths[WORKSPACE_A]).toBe(first!.sliceDbPaths[WORKSPACE_A]);
@@ -296,10 +321,43 @@ describe("workspace slice install and daemon reopen", () => {
     }
   });
 
+  it("rejects a cached slice containing foreign temporal membership", async () => {
+    const dataDir = join(root, "stale-slice-data");
+    installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
+    const first = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
+    const stale = initDatabase({ filename: first!.sliceDbPaths[WORKSPACE_A]! });
+    stale.connection.pragma("foreign_keys = OFF");
+    stale.connection.prepare(`
+      INSERT INTO relation_assertions (
+        assertion_id, workspace_id, admission_event_id, identity_key,
+        anchors_json, relation_kind, validity_json, formation_receipt_json, admitted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "stale-foreign-assertion",
+      WORKSPACE_B,
+      "stale-admission",
+      "stale-identity",
+      "[]",
+      "related_to",
+      JSON.stringify({ kind: "open", valid_from: "2026-08-10T00:00:00.000Z" }),
+      "{}",
+      "2026-08-10T00:00:00.000Z"
+    );
+    stale.close();
+
+    const second = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
+    const rebuilt = initDatabase({ filename: second!.sliceDbPaths[WORKSPACE_A]! });
+    try {
+      expect(countTableWhere(rebuilt, "relation_assertions", WORKSPACE_B)).toBe(0);
+    } finally {
+      rebuilt.close();
+    }
+  });
+
   it("boots the daemon after explode then switches A to B", async () => {
     const dataDir = join(root, "boot-after-explode");
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
-    const slices = explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
+    const slices = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
     expect(slices).not.toBeNull();
     installRecallEvalWorkspaceSlice({
       dataDirRoot: dataDir,
@@ -337,11 +395,11 @@ describe("workspace slice install and daemon reopen", () => {
     await attachedB.detach();
   }, 120_000);
 
-  it("loads slice B on a live overlay-attached connection without losing the projection", () => {
+  it("loads slice B on a live overlay-attached connection without losing the projection", async () => {
     const dataDir = join(root, "overlay-live-slice");
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
     writeRealMemoryOverlayBeside(workingAlayaDbPath(dataDir), MEMORY_A, WORKSPACE_A);
-    const slices = explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
+    const slices = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
     expect(slices).not.toBeNull();
     installRecallEvalWorkspaceSlice({
       dataDirRoot: dataDir,
@@ -380,13 +438,13 @@ describe("workspace slice install and daemon reopen", () => {
     }
   });
 
-  it("pager explode is skipped when the skip env is set", () => {
+  it("pager explode is skipped when the skip env is set", async () => {
     const dataDir = join(root, "skip-data");
     installWorkspaceSlice({
       dataDir,
       sliceDbPath: packedPath
     });
-    const exploded = explodeRecallEvalWorkingCopyIfNeeded({
+    const exploded = await explodeRecallEvalWorkingCopyIfNeeded({
       dataDirRoot: dataDir,
       env: { ALAYA_RECALL_EVAL_SKIP_WORKSPACE_SLICE: "1" }
     });

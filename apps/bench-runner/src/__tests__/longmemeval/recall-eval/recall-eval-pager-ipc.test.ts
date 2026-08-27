@@ -113,6 +113,23 @@ describe("recall-eval pager IPC isolation", () => {
     await expect(session.recall({ questionId: "__hang__" }, 40)).rejects.toThrow(/timed out/u);
   });
 
+  it("treats advancing child work as activity instead of an absolute timeout", async () => {
+    const session = openSession(200);
+    await expect(session.open({
+      progressEveryMs: 100,
+      progressCount: 3
+    })).resolves.toMatchObject({ ok: true });
+  });
+
+  it("does not let duplicate progress mask an inactive child", async () => {
+    const session = openSession(120);
+    await expect(session.open({
+      progressEveryMs: 50,
+      progressCount: 5,
+      constantProgressSequence: true
+    })).rejects.toThrow(/timed out/u);
+  });
+
   it("fail-closes when the child returns an empty pack", async () => {
     const session = openSession();
     await session.open({});

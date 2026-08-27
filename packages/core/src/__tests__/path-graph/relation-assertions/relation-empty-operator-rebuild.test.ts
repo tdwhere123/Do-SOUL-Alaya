@@ -107,9 +107,16 @@ describe("legacy empty-history operator rebuild", () => {
     )).toEqual([BOOTSTRAP_GENERATION]);
     expect(result.projectionGeneration).toBe(BOOTSTRAP_GENERATION);
   });
+
+  it("keeps schema identity equal to the stored generation on current epoch reuse", async () => {
+    const harness = await createHarness(EPOCH_AS_OF);
+    await harness.service.verifyAndRebuild();
+    expect(readSchemaProjectionIdentity(harness.database))
+      .toEqual(readActiveGenerationProjectionIdentity(harness.database));
+  });
 });
 
-async function createHarness() {
+async function createHarness(now = NOW) {
   const database = initDatabase({ filename: ":memory:" });
   databases.add(database);
   await new SqliteWorkspaceRepo(database).create({
@@ -144,9 +151,27 @@ async function createHarness() {
         runtimeNotifier: { notify: vi.fn(), notifyEntry: vi.fn() }
       }),
       eventHistory: eventLogRepo,
-      now: () => NOW
+      now: () => now
     })
   };
+}
+
+function readSchemaProjectionIdentity(database: StorageDatabase) {
+  return database.connection.prepare(`
+    SELECT projection_count, projection_digest
+    FROM temporal_schema_state
+    WHERE state_id = 1
+  `).get();
+}
+
+function readActiveGenerationProjectionIdentity(database: StorageDatabase) {
+  return database.connection.prepare(`
+    SELECT projection_count, projection_digest
+    FROM temporal_projection_generations
+    WHERE generation = (
+      SELECT active_projection_generation FROM temporal_schema_state WHERE state_id = 1
+    )
+  `).get();
 }
 
 function retargetLiveOperatorToLegacyStructuredEmpty(database: StorageDatabase): string {

@@ -2,6 +2,7 @@ import {
   RECALL_EVAL_PAGER_CHILD_PROCESS_TITLE,
   isRecallEvalPagerIpcRequest,
   serializeRecallEvalPagerIpcError,
+  type RecallEvalPagerIpcProgress,
   type RecallEvalPagerIpcRequest,
   type RecallEvalPagerIpcResponse
 } from "./protocol.js";
@@ -67,8 +68,15 @@ async function runChildRequest(
     return { id: request.id, ok: true, selectionArtifact: closed.selectionArtifact };
   }
   if (request.op === "open") {
+    let progressSequence = 0;
     const opened = await openRecallEvalPagerChild(
-      request.open as RecallEvalPagerOpenPayload
+      request.open as RecallEvalPagerOpenPayload,
+      (progress) => sendChildProgress({
+        id: request.id,
+        progress: true,
+        sequence: progressSequence += 1,
+        ...progress
+      })
     );
     return {
       id: request.id,
@@ -102,6 +110,13 @@ function sendChildResponse(response: RecallEvalPagerIpcResponse): Promise<void> 
       else resolve();
     });
   });
+}
+
+function sendChildProgress(progress: RecallEvalPagerIpcProgress): void {
+  if (typeof process.send !== "function") {
+    throw new Error("recall-eval pager child lost its IPC channel");
+  }
+  process.send(progress);
 }
 
 function readMessageId(message: unknown): number | null {

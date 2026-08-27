@@ -14,6 +14,12 @@ type StoredGeneration = ProjectionIdentity & Readonly<{
   readonly history_digest: string;
 }>;
 
+type ResolvedGeneration = Readonly<{
+  readonly generation: string;
+  readonly projectionCount: number;
+  readonly projectionDigest: string;
+}>;
+
 export function markProjectionRefreshRequired(db: StorageDatabase): void {
   try {
     const updated = db.connection.prepare(`
@@ -53,11 +59,12 @@ export function writeProjectionGeneration(
     if (options.activate) {
       activateProjectionGeneration(db, {
         ...generation,
-        generation: resolvedGeneration
-      }, projections.length);
+        generation: resolvedGeneration.generation,
+        projectionDigest: resolvedGeneration.projectionDigest
+      }, resolvedGeneration.projectionCount);
     }
     pruneUnreadableProjectionHistories(db, readSchemaHistoryDigest(db));
-    return resolvedGeneration;
+    return resolvedGeneration.generation;
   } catch (error) {
     if (error instanceof StorageError) throw error;
     throw wrapRelationAssertionStorageError("replace active relation projection", error);
@@ -96,12 +103,12 @@ function resolveProjectionGeneration(
   db: StorageDatabase,
   generation: RelationAssertionProjectionGeneration,
   projections: readonly Readonly<PathRelation>[]
-): string {
+): ResolvedGeneration {
   const incoming = incomingIdentity(generation, projections);
   const byBindKey = findVerifiedBindKey(db, generation.asOf, generation.historyDigest);
   if (byBindKey !== undefined) {
     assertCompatibleStoredGeneration(byBindKey, generation, incoming);
-    return byBindKey.generation;
+    return resolvedGeneration(byBindKey);
   }
   const byId = findGenerationById(db, generation.generation);
   if (byId !== undefined) {
@@ -112,10 +119,22 @@ function resolveProjectionGeneration(
       );
     }
     assertCompatibleStoredGeneration(byId, generation, incoming);
-    return byId.generation;
+    return resolvedGeneration(byId);
   }
   insertProjectionGeneration(db, generation, projections);
-  return generation.generation;
+  return {
+    generation: generation.generation,
+    projectionCount: projections.length,
+    projectionDigest: generation.projectionDigest
+  };
+}
+
+function resolvedGeneration(generation: StoredGeneration): ResolvedGeneration {
+  return {
+    generation: generation.generation,
+    projectionCount: generation.projection_count,
+    projectionDigest: generation.projection_digest
+  };
 }
 
 function findVerifiedBindKey(

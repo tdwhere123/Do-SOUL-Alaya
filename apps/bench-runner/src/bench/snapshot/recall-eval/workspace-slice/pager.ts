@@ -6,6 +6,7 @@ import {
   workspaceSliceDbPath,
   type ExplodedWorkspaceSlices
 } from "./explode.js";
+import type { WorkspaceSliceProgress } from "./stream-copy.js";
 import {
   installWorkspaceSlice,
   packedWorkingDbPath,
@@ -14,10 +15,11 @@ import {
 } from "./install.js";
 import { isWorkspaceSliceSkipped, WORKSPACE_SLICE_DIRNAME } from "./names.js";
 
-export function explodeRecallEvalWorkingCopyIfNeeded(input: {
+export async function explodeRecallEvalWorkingCopyIfNeeded(input: {
   readonly dataDirRoot: string;
   readonly env?: Readonly<Record<string, string | undefined>>;
-}): ExplodedWorkspaceSlices | null {
+  readonly onProgress?: (progress: WorkspaceSliceProgress) => void;
+}): Promise<ExplodedWorkspaceSlices | null> {
   if (isWorkspaceSliceSkipped(input.env ?? process.env)) return null;
   const packed = packedWorkingDbPath(input.dataDirRoot);
   const working = workingAlayaDbPath(input.dataDirRoot);
@@ -33,10 +35,11 @@ export function explodeRecallEvalWorkingCopyIfNeeded(input: {
     rmSync(destDir, { recursive: true, force: true });
   }
   const packedDbPath = existsSync(packed) ? packed : preservePackedWorkingCopy(input.dataDirRoot);
-  return explodePackedWorkingCopy({
+  return await explodePackedWorkingCopy({
     packedDbPath,
     destDir,
-    workspaceIds
+    workspaceIds,
+    onProgress: input.onProgress
   });
 }
 
@@ -64,7 +67,9 @@ function completeSlicesOrNull(
   const sliceDbPaths: Record<string, string> = {};
   for (const workspaceId of workspaceIds) {
     const sliceDbPath = workspaceSliceDbPath(destDir, workspaceId);
-    if (!existsSync(sliceDbPath)) return null;
+    if (!existsSync(sliceDbPath) || !sliceContainsOnlyWorkspace(sliceDbPath, workspaceId)) {
+      return null;
+    }
     sliceDbPaths[workspaceId] = sliceDbPath;
   }
   return Object.freeze({
@@ -73,6 +78,28 @@ function completeSlicesOrNull(
     workspaceIds,
     sliceDbPaths: Object.freeze(sliceDbPaths)
   });
+}
+
+function sliceContainsOnlyWorkspace(dbPath: string, workspaceId: string): boolean {
+  const database = new BetterSqlite3(dbPath, { readonly: true, fileMustExist: true });
+  try {
+    return !hasForeignWorkspaceRow(database, "relation_assertions", workspaceId) &&
+      !hasForeignWorkspaceRow(database, "relation_path_projections", workspaceId);
+  } catch {
+    return false;
+  } finally {
+    database.close();
+  }
+}
+
+function hasForeignWorkspaceRow(
+  database: BetterSqlite3.Database,
+  table: string,
+  workspaceId: string
+): boolean {
+  return database.prepare(
+    `SELECT 1 FROM "${table}" WHERE workspace_id <> ? LIMIT 1`
+  ).get(workspaceId) !== undefined;
 }
 
 function listWorkspaceIds(dbPath: string): readonly string[] {

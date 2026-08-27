@@ -2,8 +2,10 @@ import { fork, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  isRecallEvalPagerIpcProgress,
   isRecallEvalPagerIpcResponse,
   type RecallEvalPagerIpcOp,
+  type RecallEvalPagerIpcProgress,
   type RecallEvalPagerIpcRequest,
   type RecallEvalPagerIpcSuccess,
   type RecallEvalPagerMapsHint
@@ -40,6 +42,7 @@ interface PendingIpcRequest {
   readonly resolve: (value: RecallEvalPagerIpcSuccess) => void;
   readonly reject: (error: unknown) => void;
   readonly clearAbort: () => void;
+  readonly observeProgress: (progress: RecallEvalPagerIpcProgress) => void;
 }
 
 export class RecallEvalPagerChildExitedError extends Error {
@@ -263,6 +266,10 @@ export class RecallEvalPagerIpcSession {
   }
 
   private onMessage(message: unknown): void {
+    if (isRecallEvalPagerIpcProgress(message)) {
+      this.pending.get(message.id)?.observeProgress(message);
+      return;
+    }
     if (!isRecallEvalPagerIpcResponse(message)) return;
     const pending = this.pending.get(message.id);
     if (pending === undefined) return;
@@ -357,18 +364,33 @@ function waitForPagerIpcResponse(
   timeoutMs: number
 ): Promise<RecallEvalPagerIpcSuccess> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      failPending(
-        pending,
-        message.id,
-        new Error(`recall-eval pager child timed out after ${timeoutMs}ms.`)
-      );
-    }, timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let lastProgressSequence = 0;
+    const armTimeout = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = setTimeout(() => {
+        failPending(
+          pending,
+          message.id,
+          new Error(
+            `recall-eval pager child timed out after ${timeoutMs}ms without progress.`
+          )
+        );
+      }, timeoutMs);
+    };
+    armTimeout();
     pending.set(message.id, {
       op,
       resolve,
       reject,
-      clearAbort: () => clearTimeout(timer)
+      clearAbort: () => {
+        if (timer !== undefined) clearTimeout(timer);
+      },
+      observeProgress: (progress) => {
+        if (progress.sequence <= lastProgressSequence) return;
+        lastProgressSequence = progress.sequence;
+        armTimeout();
+      }
     });
     try {
       // False means the IPC write queue is full, not that the child is gone.
