@@ -232,18 +232,21 @@ function invokeMemoryKeywordField(
   input: Parameters<RecallRetrievalFieldBundle["searchMemoryKeyword"]>[0],
   refinementDepths: readonly number[] | undefined
 ) {
-  const search = params.memoryRepo.searchByKeywordField!;
+  const repo = params.memoryRepo;
   const capture: Readonly<MemoryKeywordFieldCapture> | undefined =
     params.captureProof === true ? Object.freeze({ variant: input.variant }) : undefined;
+  // Method-call form keeps class-repo `this`; extracting the function unbinds it.
   if (capture === undefined && refinementDepths === undefined) {
-    return search(params.workspaceId, input.queryText, input.limit, input.scope);
+    return repo.searchByKeywordField!(
+      params.workspaceId, input.queryText, input.limit, input.scope
+    );
   }
   if (capture === undefined) {
-    return search(
+    return repo.searchByKeywordField!(
       params.workspaceId, input.queryText, input.limit, input.scope, refinementDepths
     );
   }
-  return search(
+  return repo.searchByKeywordField!(
     params.workspaceId, input.queryText, input.limit, input.scope,
     refinementDepths, capture
   );
