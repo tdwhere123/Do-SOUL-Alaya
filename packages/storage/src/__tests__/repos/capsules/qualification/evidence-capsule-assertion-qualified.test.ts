@@ -99,6 +99,7 @@ describe("verified assertion evidence qualification", () => {
     )).resolves.toEqual([{
       capsule,
       verified_user_projection: false,
+      fact_frame_formation: factFrame,
       semantic_factor_formation: semanticFormation
     }]);
   });
@@ -265,7 +266,8 @@ describe("verified assertion evidence qualification", () => {
         kind: "leave_one_slot_out",
         omitted_slot: { slot_index: 3, role: "qualifier" }
       }],
-      matched_fact_frame: FACT_FRAME
+      matched_fact_frame: FACT_FRAME,
+      fact_frame_formation: factFrameFormationCapture(capsule)
     }]);
     const allFactKeys = await repo.findRecallQualifiedFactKeysByIds(
       "workspace-1",

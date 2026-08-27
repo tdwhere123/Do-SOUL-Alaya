@@ -133,6 +133,13 @@ export interface RecallDiagnostics {
   readonly answer_shape_plan?: Readonly<
     import("../query/recall-answer-shape-plan.js").RecallAnswerShapePlan
   >;
+  readonly lexical_bound_proofs?: readonly Readonly<
+    import("./diagnostics/lexical-bound-proof.js").LexicalBoundProof
+  >[];
+  readonly candidate_proposition_provenance?: Readonly<
+    import("./diagnostics/candidate-proposition-provenance.js")
+      .CandidatePropositionProvenanceMap
+  >;
   readonly query_sought_facets: readonly string[];
   readonly retrieval_field_captures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
   readonly retrieval_field_refinement_receipts?: readonly Readonly<

@@ -5,6 +5,10 @@ import {
   type MemoryEntryRepoUpdateFields as ProtocolMemoryEntryRepoUpdateFields,
   type ScopeClass
 } from "@do-soul/alaya-protocol";
+import type {
+  LexicalLiveMergeCapture,
+  LexicalRawRankReceipt
+} from "./search/lexical-raw-rank-capture.js";
 
 export type MemoryEntryRepoUpdateFields = ProtocolMemoryEntryRepoUpdateFields & {
   readonly last_used_at?: string;
@@ -92,36 +96,19 @@ export interface MemoryEntryKeywordLaneReceipt {
   readonly unseen_upper_bound: number | null;
 }
 
+export type MemoryKeywordFieldCaptureVariant =
+  | "lexical_relaxed"
+  | "lexical_expanded";
+
+export type MemoryKeywordFieldCapture = Readonly<{
+  readonly variant: MemoryKeywordFieldCaptureVariant;
+}>;
+
 export interface MemoryEntryKeywordFieldResult {
   readonly matches: readonly Readonly<MemoryEntryKeywordSearchResult>[];
   readonly lanes: readonly Readonly<MemoryEntryKeywordLaneReceipt>[];
-  readonly lexical_raw_rank?: Readonly<{
-    readonly query_run_id: string;
-    readonly merge_limit: number;
-    readonly lanes: readonly Readonly<{
-      readonly lane_id:
-        | "exact"
-        | "porter"
-        | "trigram"
-        | "object_key_porter"
-        | "object_key_trigram";
-      readonly raw_key_kind: "matched_token_count" | "bm25_raw_rank";
-      readonly list_n: number;
-      readonly status: "empty" | "complete" | "truncated";
-    }>[];
-    readonly candidates: readonly Readonly<{
-      readonly candidate_key: string;
-      readonly chosen_lane_id:
-        | "exact"
-        | "porter"
-        | "trigram"
-        | "object_key_porter"
-        | "object_key_trigram"
-        | null;
-      readonly chosen_normalized_rank: number | null;
-      readonly admitted: boolean;
-    }>[];
-  }>;
+  readonly lexical_raw_rank?: Readonly<LexicalLiveMergeCapture>;
+  readonly lexical_raw_rank_receipt?: Readonly<LexicalRawRankReceipt>;
   readonly refinement_levels?: readonly Readonly<{
     readonly requested_depth: number;
     readonly matches: readonly Readonly<MemoryEntryKeywordSearchResult>[];
@@ -244,7 +231,8 @@ export interface MemoryEntryRepo {
     queryText: string,
     limit: number,
     scope?: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }>,
-    refinementDepths?: readonly number[]
+    refinementDepths?: readonly number[],
+    capture?: Readonly<MemoryKeywordFieldCapture>
   ): Promise<Readonly<MemoryEntryKeywordFieldResult>>;
   searchByKeywordWithinObjectIds?(
     workspaceId: string,

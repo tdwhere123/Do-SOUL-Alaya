@@ -5,6 +5,8 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import { stableStringify } from "../../../shared/stable-stringify.js";
+import { freezeLexicalBoundProducerReceipt } from
+  "../../runtime/diagnostics/lexical-bound-proof.js";
 import type {
   KeywordLexicalLaneId,
   KeywordLexicalMergeCapture,
@@ -19,14 +21,18 @@ export function freezeFieldResult(
   value: unknown,
   maxMatches: number
 ): Readonly<KeywordSearchFieldResult> {
-  const base = freezeFieldView(value, maxMatches);
+  const base = freezeBaseFieldView(value, maxMatches);
   const rawLevels = isRecord(value) ? value.refinement_levels : undefined;
   if (rawLevels === undefined) return base;
   if (!Array.isArray(rawLevels) || !isDenseArray(rawLevels)) {
     throw new TypeError("keyword field refinement levels must be a dense array");
   }
   const levels: Readonly<KeywordSearchFieldRefinementLevel>[] = [];
-  let previous = Object.freeze({ requested_depth: maxMatches, ...base });
+  let previous = Object.freeze({
+    requested_depth: maxMatches,
+    matches: base.matches,
+    lanes: base.lanes
+  });
   for (const rawLevel of rawLevels) {
     const level = freezeRefinementLevel(rawLevel);
     assertFieldRefinement(previous, level);
@@ -47,14 +53,37 @@ function freezeRefinementLevel(value: unknown): Readonly<KeywordSearchFieldRefin
   const requestedDepth = Number(value.requested_depth);
   return Object.freeze({
     requested_depth: requestedDepth,
-    ...freezeFieldView(value, requestedDepth)
+    ...freezeMatchesAndLanes(value, requestedDepth)
   });
 }
 
-function freezeFieldView(
+function freezeBaseFieldView(
   value: unknown,
   maxMatches: number
-): Readonly<Pick<KeywordSearchFieldResult, "matches" | "lanes" | "lexical_raw_rank">> {
+): Readonly<Pick<
+  KeywordSearchFieldResult,
+  "matches" | "lanes" | "lexical_raw_rank" | "lexical_raw_rank_receipt"
+>> {
+  const view = freezeMatchesAndLanes(value, maxMatches);
+  const lexicalRawRank = freezeLexicalMergeCapture(
+    isRecord(value) ? value.lexical_raw_rank : undefined
+  );
+  const lexicalRawRankReceipt = freezeLexicalBoundProducerReceipt(
+    isRecord(value) ? value.lexical_raw_rank_receipt : undefined
+  );
+  return Object.freeze({
+    ...view,
+    ...(lexicalRawRank === undefined ? {} : { lexical_raw_rank: lexicalRawRank }),
+    ...(lexicalRawRankReceipt === undefined
+      ? {}
+      : { lexical_raw_rank_receipt: lexicalRawRankReceipt })
+  });
+}
+
+function freezeMatchesAndLanes(
+  value: unknown,
+  maxMatches: number
+): Readonly<Pick<KeywordSearchFieldResult, "matches" | "lanes">> {
   if (!isRecord(value) || !Array.isArray(value.matches) || !Array.isArray(value.lanes)) {
     throw new TypeError("keyword field result shape is invalid");
   }
@@ -65,12 +94,7 @@ function freezeFieldView(
   const matches = Object.freeze(value.matches.map(freezeSearchResult));
   const lanes = Object.freeze(value.lanes.map(freezeLaneReceipt));
   assertFieldLanes(lanes, maxMatches);
-  const lexicalRawRank = freezeLexicalMergeCapture(value.lexical_raw_rank);
-  return Object.freeze({
-    matches,
-    lanes,
-    ...(lexicalRawRank === undefined ? {} : { lexical_raw_rank: lexicalRawRank })
-  });
+  return Object.freeze({ matches, lanes });
 }
 
 function assertFieldRefinement(

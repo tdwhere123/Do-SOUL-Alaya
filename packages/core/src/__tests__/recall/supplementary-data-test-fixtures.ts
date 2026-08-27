@@ -29,6 +29,7 @@ interface CollectWithParams {
   readonly pathPlasticityPort?: RecallServiceDependencies["pathPlasticityPort"];
   readonly runId?: string | null;
   readonly captureAnswerFeatures?: boolean;
+  readonly captureFactFrameObjectIds?: readonly string[];
   readonly coarseEvidenceFtsRanks?: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef?: Readonly<Record<string, number>>;
   readonly referenceTime?: string;
@@ -93,6 +94,7 @@ export async function collectWith(params: CollectWithParams) {
     coarsePathExpansionScores: {},
     coarsePathSuppressionScores: {},
     captureAnswerFeatures: params.captureAnswerFeatures ?? false,
+    captureFactFrameObjectIds: params.captureFactFrameObjectIds,
     degradationReasons: params.degradationReasons
   });
 }

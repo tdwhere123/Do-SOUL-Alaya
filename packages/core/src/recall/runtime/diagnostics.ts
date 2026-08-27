@@ -52,6 +52,8 @@ import type { KindConstraintAlignmentReceipt } from
   "../field/kind-projection/alignment.js";
 import type { PinnedProjectionCandidateSelection } from
   "../field/retrieval/projection/pinned-projection-selection.js";
+import type { CaptureProofDiagnostics } from
+  "./diagnostics/capture-proof-diagnostics.js";
 
 type BuildRecallDiagnosticsParams = Readonly<{
   readonly captureReceipt?: Readonly<
@@ -87,6 +89,7 @@ type BuildRecallDiagnosticsParams = Readonly<{
     }
   >;
   readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;
+  readonly captureProofDiagnostics?: CaptureProofDiagnostics;
   readonly querySoughtFacets?: readonly string[];
   readonly totalScanned: number;
   readonly candidatePoolCount: number;
@@ -162,6 +165,9 @@ function buildOptionalQueryDiagnosticFields(
   params: BuildRecallDiagnosticsParams
 ): Partial<RecallDiagnostics> {
   return {
+    ...(params.includeCandidateEvidence === false
+      ? {}
+      : (params.captureProofDiagnostics ?? {})),
     ...(params.queryEntityExtraction === undefined
       ? {}
       : { query_entity_extraction: params.queryEntityExtraction }),

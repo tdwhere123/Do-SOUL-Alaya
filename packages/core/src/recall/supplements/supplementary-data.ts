@@ -62,6 +62,8 @@ export async function collectSupplementaryData(
         candidates,
         coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
         coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef,
+        captureFactFrameObjectIds: params.captureFactFrameObjectIds,
+        captureAnswerFeatures: params.captureAnswerFeatures,
         degradationReasons: params.degradationReasons
       }),
       collectRoutingKeySupplement({

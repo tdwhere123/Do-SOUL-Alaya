@@ -17,10 +17,11 @@ import { errorNameOf, normalizeQueryText, toErrorMessage } from
   "../recall-service-helpers.js";
 import type { RecallServiceDependencies } from "../recall-service-types.js";
 import { makeTokenEstimator } from "../recall-service-types.js";
-import type {
-  PreparedRecallRequest,
-  RecallExecutionContext,
-  RecallExecutionParams
+import {
+  capturesRecallAnswerFeatures,
+  type PreparedRecallRequest,
+  type RecallExecutionContext,
+  type RecallExecutionParams
 } from "../recall-service-runner-types.js";
 import { loadActiveConstraints, resolvePolicy } from "../orchestration.js";
 import { capturePreparedRequestCondition } from "./prepare-recall-query-condition.js";
@@ -252,6 +253,9 @@ function createRetrievalBundle(
     evidenceSearchPort: context.dependencies.evidenceSearchPort,
     synthesisSearchPort: context.dependencies.synthesisSearchPort,
     refinementMaxDepth: policy.coarse_filter.semantic_supplement.field_observation_max_depth,
+    ...(capturesRecallAnswerFeatures(params.diagnosticCapture)
+      ? { captureProof: true }
+      : {}),
     onFailure: (operation, error) => context.warn("retrieval field query failed", {
       workspace_id: params.workspaceId,
       operation,

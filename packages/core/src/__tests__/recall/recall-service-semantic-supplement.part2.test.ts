@@ -461,7 +461,8 @@ it("ranks the trigram_fts fusion stream from keyword-search trigram_rank", async
     });
 
     expect(searchByKeywordField).toHaveBeenCalledWith(
-      "workspace-1", "Implement recall", 5, { tier: "hot" }
+      "workspace-1", "Implement recall", 5, { tier: "hot" }, undefined,
+      { variant: "lexical_relaxed" }
     );
     const strong = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-trigram-strong"

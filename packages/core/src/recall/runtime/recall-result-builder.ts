@@ -6,6 +6,8 @@ import {
 } from "./diagnostics.js";
 import { queryConditionParityView } from "./query-condition-parity.js";
 import { buildRecallCandidateDedupeKey } from "./recall-service-helpers.js";
+import { buildCaptureProofDiagnostics } from
+  "./diagnostics/capture-proof-diagnostics.js";
 import type { CoarseStageResult } from "./recall-service-runner-coarse.js";
 import type {
   PreparedRecallRequest,
@@ -87,6 +89,13 @@ export function buildRecallResult(
       }),
       querySoughtFacets: assessment.supplementaryData.querySoughtFacets,
       answerShapePlan: prepared.answerShapePlan,
+      ...(includeCandidateEvidence
+        ? { captureProofDiagnostics: buildCaptureProofDiagnostics(
+          prepared,
+          assessment,
+          coarse.combinedCoarseCandidates
+        ) }
+        : {}),
       totalScanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,
       candidatePoolCount: coarse.combinedCoarseCandidates.length,
       preBudgetCount: includeCandidateEvidence

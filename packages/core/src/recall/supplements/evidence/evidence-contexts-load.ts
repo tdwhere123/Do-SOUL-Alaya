@@ -5,6 +5,7 @@ import {
 } from "../../runtime/recall-service-helpers.js";
 import type { RecallQualifiedEvidence } from "../../runtime/recall-service-ports.js";
 import { compareText } from "../../../shared/compare-text.js";
+import { buildFactFrameFormationsByEvidenceId } from "./evidence-contexts-build.js";
 import type {
   CollectRecallEvidenceContextsParams,
   SemanticFactorFormationLookup
@@ -42,6 +43,27 @@ export async function loadQualifiedSemanticFormations(
     qualified,
     unavailableEvidenceIds: Object.freeze([...unavailableEvidenceIds].sort(compareText))
   });
+}
+
+export async function loadCaptureFactFrameFormations(
+  params: CollectRecallEvidenceContextsParams,
+  evidenceIds: readonly string[]
+): Promise<ReturnType<typeof buildFactFrameFormationsByEvidenceId>> {
+  if (evidenceIds.length === 0) return Object.freeze({});
+  const find = params.dependencies.evidenceSearchPort?.findRecallQualifiedByIds;
+  if (find === undefined) return Object.freeze({});
+  const qualified = await loadQualifiedEvidenceWithIsolation({
+    params,
+    evidenceIds,
+    message: "capture fact-frame evidence lookup failed",
+    operation: "capture_fact_frame_lookup",
+    load: async (ids) => await find.call(
+      params.dependencies.evidenceSearchPort,
+      params.workspaceId,
+      ids.map((objectId) => Object.freeze({ object_id: objectId }))
+    )
+  });
+  return buildFactFrameFormationsByEvidenceId(qualified);
 }
 
 export async function loadQualifiedFactKeys(

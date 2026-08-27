@@ -7,8 +7,16 @@ import type {
   KeywordSearchResult,
   RecallServiceEvidenceSearchPort,
   RecallServiceMemoryRepoPort,
-  RecallServiceSynthesisSearchPort
+  RecallServiceSynthesisSearchPort,
+  MemoryKeywordFieldCapture
 } from "../../runtime/recall-service-types.js";
+import {
+  absentLexicalBoundProof,
+  freezeLexicalBoundProducerReceipt,
+  freezeLexicalBoundProof,
+  sealLexicalBoundProof,
+  type LexicalBoundProof
+} from "../../runtime/diagnostics/lexical-bound-proof.js";
 import type { RecallFiniteFieldChannelCapture } from "../finite-field-capture.js";
 import type { RecallFieldDigest } from "../field-identity.js";
 import {
@@ -60,6 +68,7 @@ export interface RecallRetrievalFieldBundle {
     readonly Readonly<RecallRetrievalFieldRefinementReceipt>[];
   readonly memoryKeywordLanes: () => readonly Readonly<KeywordSearchLaneReceipt>[];
   readonly memoryLexicalCaptures: () => readonly Readonly<KeywordLexicalMergeCapture>[];
+  readonly memoryLexicalBoundProofs: () => readonly Readonly<LexicalBoundProof>[];
 }
 
 export type FieldPrefix =
@@ -85,6 +94,7 @@ export type RecallRetrievalFieldBundleSource = Readonly<{
   readonly evidenceSearchPort?: Readonly<RecallServiceEvidenceSearchPort>;
   readonly synthesisSearchPort?: Readonly<RecallServiceSynthesisSearchPort>;
   readonly refinementMaxDepth?: number;
+  readonly captureProof?: boolean;
   readonly onFailure?: (operation: string, error: unknown) => void;
   readonly onBatchFailure?: (
     operation: string,
@@ -125,7 +135,8 @@ function createBundleView(
     captures: () => materializeRetrievalFieldBundleCaptures(params, records),
     refinementReceipts: () => materializeRefinementReceipts(records),
     memoryKeywordLanes: () => collectMemoryKeywordLanes(records),
-    memoryLexicalCaptures: () => collectMemoryLexicalCaptures(records)
+    memoryLexicalCaptures: () => collectMemoryLexicalCaptures(records),
+    memoryLexicalBoundProofs: () => collectMemoryLexicalBoundProofs(params, records)
   });
 }
 
@@ -212,15 +223,30 @@ function memoryKeywordRequest(
     maxMatches: input.limit,
     invoke: params.memoryRepo.searchByKeywordField === undefined
       ? undefined
-      : async () => refinementDepths === undefined
-        ? await params.memoryRepo.searchByKeywordField!(
-            params.workspaceId, input.queryText, input.limit, input.scope
-          )
-        : await params.memoryRepo.searchByKeywordField!(
-            params.workspaceId, input.queryText, input.limit, input.scope,
-            refinementDepths
-          )
+      : async () => invokeMemoryKeywordField(params, input, refinementDepths)
   };
+}
+
+function invokeMemoryKeywordField(
+  params: RecallRetrievalFieldBundleSource,
+  input: Parameters<RecallRetrievalFieldBundle["searchMemoryKeyword"]>[0],
+  refinementDepths: readonly number[] | undefined
+) {
+  const search = params.memoryRepo.searchByKeywordField!;
+  const capture: Readonly<MemoryKeywordFieldCapture> | undefined =
+    params.captureProof === true ? Object.freeze({ variant: input.variant }) : undefined;
+  if (capture === undefined && refinementDepths === undefined) {
+    return search(params.workspaceId, input.queryText, input.limit, input.scope);
+  }
+  if (capture === undefined) {
+    return search(
+      params.workspaceId, input.queryText, input.limit, input.scope, refinementDepths
+    );
+  }
+  return search(
+    params.workspaceId, input.queryText, input.limit, input.scope,
+    refinementDepths, capture
+  );
 }
 
 function evidenceKeywordRequest(
@@ -323,6 +349,36 @@ function collectMemoryLexicalCaptures(
 ): readonly Readonly<KeywordLexicalMergeCapture>[] {
   const capture = firstRelaxedRecord(records)?.result.lexical_raw_rank;
   return Object.freeze(capture === undefined ? [] : [capture]);
+}
+
+function collectMemoryLexicalBoundProofs(
+  params: RecallRetrievalFieldBundleSource,
+  records: readonly Readonly<RecordedFieldResult>[]
+): readonly Readonly<LexicalBoundProof>[] {
+  if (params.captureProof !== true) return Object.freeze([]);
+  const proofs = records.flatMap((record) => {
+    if (!isLexicalMemoryPrefix(record.prefix)) return [];
+    const producer = freezeLexicalBoundProducerReceipt(record.result.lexical_raw_rank_receipt);
+    if (producer === undefined) return [];
+    const proof = freezeLexicalBoundProof(producer);
+    if (proof === undefined || proof.status !== "captured") return [];
+    return [sealLexicalBoundProof(proof, {
+      request_digest: record.request_digest,
+      workspace_id: params.workspaceId,
+      field_prefix: record.prefix,
+      candidate_key_domain: "memory_object_id"
+    })];
+  });
+  if (proofs.length > 0) return Object.freeze(proofs);
+  return Object.freeze([absentLexicalBoundProof({
+    workspace_id: params.workspaceId
+  })]);
+}
+
+function isLexicalMemoryPrefix(
+  prefix: FieldPrefix
+): prefix is RecallMemoryFieldVariant {
+  return prefix === "lexical_relaxed" || prefix === "lexical_expanded";
 }
 
 function materializeRefinementReceipts(

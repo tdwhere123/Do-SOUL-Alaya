@@ -2,6 +2,7 @@ import type {
   AssociativeFactFrame,
   AssociativeFactKeyProjectionForm,
   EvidenceCapsule,
+  EvidenceFactFrameFormationCapture,
   EvidenceSearchProjection,
   OpenSemanticFactorFormationCapture,
   FtsLaneId,
@@ -58,6 +59,7 @@ export interface RecallQualifiedEvidence {
   readonly matched_projection?: Readonly<EvidenceSearchProjection>;
   readonly matched_fact_key_forms?: readonly Readonly<AssociativeFactKeyProjectionForm>[];
   readonly matched_fact_frame?: Readonly<AssociativeFactFrame>;
+  readonly fact_frame_formation?: Readonly<EvidenceFactFrameFormationCapture>;
   readonly semantic_factor_formation?: Readonly<OpenSemanticFactorFormationCapture>;
   readonly kind_projection_drafts?: readonly Readonly<{
     readonly factor_id: string;

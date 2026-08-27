@@ -38,6 +38,7 @@ import type {
   KeywordSearchFieldResult,
   KeywordSearchLaneScope,
   KeywordSearchResult,
+  MemoryKeywordFieldCapture,
   RecallEvidenceSearchMatch,
   RecallQualifiedEvidence
 } from "./recall-search-port-types.js";
@@ -66,6 +67,8 @@ export type {
   KeywordSearchLaneScope,
   KeywordSearchLaneStatus,
   KeywordSearchResult,
+  MemoryKeywordFieldCapture,
+  MemoryKeywordFieldCaptureVariant,
   RecallEvidenceSearchMatch,
   RecallEvidenceSearchProjectionIdentity,
   RecallQualifiedEvidence
@@ -114,7 +117,8 @@ export interface RecallServiceMemoryRepoPort {
     queryText: string,
     limit: number,
     scope?: Readonly<KeywordSearchLaneScope>,
-    refinementDepths?: readonly number[]
+    refinementDepths?: readonly number[],
+    capture?: Readonly<MemoryKeywordFieldCapture>
   ): Promise<Readonly<KeywordSearchFieldResult>>;
   searchByKeywordWithinObjectIds?(
     workspaceId: string,

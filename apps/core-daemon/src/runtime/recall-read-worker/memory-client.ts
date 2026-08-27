@@ -42,6 +42,9 @@ type MemoryAnchorReads = Pick<
   RecallServiceMemoryRepoPort,
   "searchByAnchorWithinObjectIds" | "searchByAnchorWithinTier" | "searchByAnchorField"
 >;
+type MemoryKeywordFieldCapture = NonNullable<
+  Parameters<NonNullable<RecallServiceMemoryRepoPort["searchByKeywordField"]>>[5]
+>;
 
 export function createWorkerMemoryRepo(input: Readonly<{
   readonly request: WorkerRequest;
@@ -86,10 +89,12 @@ function createWorkerMemoryKeywordReads(request: WorkerRequest): MemoryKeywordRe
       queryText: string,
       limit: number,
       scope?: Readonly<KeywordSearchLaneScope>,
-      refinementDepths?: readonly number[]
+      refinementDepths?: readonly number[],
+      capture?: Readonly<MemoryKeywordFieldCapture>
     ) => await request("memory.searchByKeywordField", {
       workspaceId, queryText, limit, scope,
-      ...(refinementDepths === undefined ? {} : { refinementDepths })
+      ...(refinementDepths === undefined ? {} : { refinementDepths }),
+      ...(capture === undefined ? {} : { capture })
     }),
     searchByKeywordWithinObjectIds: async (
       workspaceId: string,

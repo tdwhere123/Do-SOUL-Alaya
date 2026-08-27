@@ -1,6 +1,7 @@
 import type {
   CandidateMemorySignal,
   EvidenceCapsule,
+  EvidenceFactFrameFormationCapture,
   GardenSourceTurnFallbackVerifiedReceipt,
   OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
@@ -52,6 +53,7 @@ export interface EvidenceCandidate {
   readonly capsule: Readonly<EvidenceCapsule>;
   readonly signalId: string | null;
   readonly semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>;
 }
 
 export interface QualificationInputs {

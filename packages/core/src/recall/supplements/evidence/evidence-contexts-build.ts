@@ -1,5 +1,6 @@
 import type {
   EvidenceCapsule,
+  EvidenceFactFrameFormationCapture,
   MemoryEntry,
   OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
@@ -24,13 +25,17 @@ import {
 } from "./evidence-contexts-types.js";
 
 export function emptyEvidenceContexts(
-  unavailableEvidenceIds: readonly string[] = []
+  unavailableEvidenceIds: readonly string[] = [],
+  captureAnswerFeatures = false
 ): Readonly<RecallEvidenceContexts> {
   return Object.freeze({
     evidenceGistsByMemoryId: Object.freeze({}),
     evidenceSemanticDocumentsByMemoryId: Object.freeze({}),
     verifiedUserAssertionContextsByMemoryId: Object.freeze({}),
     semanticFactorFormationsByEvidenceId: Object.freeze({}),
+    ...(captureAnswerFeatures
+      ? { factFrameFormationsByEvidenceId: Object.freeze({}) }
+      : {}),
     ...(unavailableEvidenceIds.length === 0
       ? {}
       : {
@@ -46,7 +51,8 @@ export function buildMemoryEvidenceContexts(
   capsules: readonly Readonly<EvidenceCapsule>[],
   qualifiedFactKeys: readonly Readonly<RecallQualifiedEvidence>[],
   qualifiedSemanticFormations: readonly Readonly<RecallQualifiedEvidence>[],
-  semanticUnavailableEvidenceIds: readonly string[]
+  semanticUnavailableEvidenceIds: readonly string[],
+  captureAnswerFeatures = false
 ): Readonly<RecallEvidenceContexts> {
   const evidenceById = buildEvidenceById(workspaceId, capsules);
   const qualifiedAssertionEvidenceIds = collectQualifiedAssertionEvidenceIds(
@@ -88,6 +94,12 @@ export function buildMemoryEvidenceContexts(
     verifiedUserAssertionContextsByMemoryId: Object.freeze(contexts),
     semanticFactorFormationsByEvidenceId:
       buildSemanticFactorFormationsByEvidenceId(qualifiedSemanticFormations),
+    ...(captureAnswerFeatures
+      ? {
+        factFrameFormationsByEvidenceId:
+          buildFactFrameFormationsByEvidenceId(qualifiedSemanticFormations)
+      }
+      : {}),
     ...buildUnavailableSemanticFactorEvidenceIds(
       qualifiedSemanticFormations,
       semanticUnavailableEvidenceIds
@@ -122,6 +134,18 @@ function buildSemanticFactorFormationsByEvidenceId(
     if (item.matched_projection !== undefined ||
         item.semantic_factor_formation === undefined) continue;
     formations[item.capsule.object_id] = item.semantic_factor_formation;
+  }
+  return Object.freeze(formations);
+}
+
+export function buildFactFrameFormationsByEvidenceId(
+  qualified: readonly Readonly<RecallQualifiedEvidence>[]
+): Readonly<Record<string, Readonly<EvidenceFactFrameFormationCapture>>> {
+  const formations: Record<string, Readonly<EvidenceFactFrameFormationCapture>> = {};
+  for (const item of qualified) {
+    if (item.matched_projection !== undefined ||
+        item.fact_frame_formation === undefined) continue;
+    formations[item.capsule.object_id] = item.fact_frame_formation;
   }
   return Object.freeze(formations);
 }

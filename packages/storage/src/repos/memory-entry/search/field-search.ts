@@ -18,7 +18,8 @@ import {
 } from "../keyword-search.js";
 import type {
   MemoryEntryKeywordFieldResult,
-  MemoryEntryKeywordLaneReceipt
+  MemoryEntryKeywordLaneReceipt,
+  MemoryKeywordFieldCapture
 } from "../types.js";
 import {
   searchExactKeywordRows,
@@ -28,7 +29,10 @@ import {
   type MemoryEntrySearchWorkflowHost
 } from "../search-workflows.js";
 import { searchObjectKeyKeywordLanes } from "./object-key-fts.js";
-import { captureLexicalRawRankReceipt } from "./lexical-raw-rank-capture.js";
+import {
+  captureLexicalRawRankReceipt,
+  stripLexicalRawRankForLiveCapture
+} from "./lexical-raw-rank-capture.js";
 
 type KeywordFieldLane = MemoryEntryKeywordLaneReceipt["lane"];
 
@@ -41,7 +45,8 @@ export async function searchByKeywordField(
   queryText: string,
   limit: number,
   scope: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }> = {},
-  refinementDepths: readonly number[] = []
+  refinementDepths: readonly number[] = [],
+  capture?: Readonly<MemoryKeywordFieldCapture>
 ): Promise<Readonly<MemoryEntryKeywordFieldResult>> {
   if (!Number.isInteger(limit) || limit <= 0) return emptyKeywordField();
   const tokens = tokenizeFtsQuery(queryText);
@@ -79,11 +84,12 @@ export async function searchByKeywordField(
       keyTrigram: objectKeys.trigram
     });
   })();
-  const base = buildKeywordFieldView(rows, laneTokens, limit);
+  const base = buildKeywordFieldView(rows, laneTokens, limit, capture);
+  // Refinements recompute matches/lanes only so diagnostic siblings stay on the base view.
   return fieldWithRefinements(base, buildMonotoneFieldRefinementLevels(
     base.matches,
     depths,
-    (depth) => buildKeywordFieldView(rows, laneTokens, depth)
+    (depth) => buildKeywordFieldCore(rows, laneTokens, depth)
   ));
 }
 
@@ -128,7 +134,7 @@ type KeywordFieldRows = Readonly<{
   readonly keyTrigram: readonly FtsKeywordSearchRow[];
 }>;
 
-function buildKeywordFieldView(
+function buildKeywordFieldCore(
   rows: KeywordFieldRows,
   tokens: KeywordLaneTokens,
   depth: number
@@ -140,11 +146,14 @@ function buildKeywordFieldView(
     porter: rows.keyPorter.slice(0, depth),
     trigram: rows.keyTrigram.slice(0, depth)
   });
-  const matches = mergeKeywordSearchRows(
-    exactRows, trigramRows, depth, porterRows, objectKeyLanes
-  );
   return Object.freeze({
-    matches,
+    exactRows,
+    trigramRows,
+    porterRows,
+    objectKeyLanes,
+    matches: mergeKeywordSearchRows(
+      exactRows, trigramRows, depth, porterRows, objectKeyLanes
+    ),
     lanes: Object.freeze([
       buildKeywordFieldLaneReceipt(
         "exact", rows.exact, depth, tokens.exact.length > 0,
@@ -158,17 +167,41 @@ function buildKeywordFieldView(
         "trigram", rows.trigram, depth, tokens.trigram.length > 0,
         (row) => row.raw_rank
       )
-    ]),
-    lexical_raw_rank: captureLexicalRawRankReceipt({
-      query_run_id: `memory.keyword.depth:${depth}`,
-      limit: depth,
-      exactRows,
-      trigramRows,
-      porterRows,
-      objectKeyLanes,
-      merged: matches
-    })
+    ])
   });
+}
+
+function buildKeywordFieldView(
+  rows: KeywordFieldRows,
+  tokens: KeywordLaneTokens,
+  depth: number,
+  capture: Readonly<MemoryKeywordFieldCapture> | undefined
+) {
+  const core = buildKeywordFieldCore(rows, tokens, depth);
+  const receipt = captureLexicalRawRankReceipt({
+    query_run_id: keywordFieldQueryRunId(depth, capture),
+    limit: depth,
+    exactRows: core.exactRows,
+    trigramRows: core.trigramRows,
+    porterRows: core.porterRows,
+    objectKeyLanes: core.objectKeyLanes,
+    merged: core.matches
+  });
+  return Object.freeze({
+    matches: core.matches,
+    lanes: core.lanes,
+    lexical_raw_rank: stripLexicalRawRankForLiveCapture(receipt),
+    ...(capture === undefined ? {} : { lexical_raw_rank_receipt: receipt })
+  });
+}
+
+function keywordFieldQueryRunId(
+  depth: number,
+  capture: Readonly<MemoryKeywordFieldCapture> | undefined
+): string {
+  return capture === undefined
+    ? `memory.keyword.depth:${depth}`
+    : `memory.keyword.${capture.variant}.depth:${depth}`;
 }
 
 function buildAnchorFieldView(

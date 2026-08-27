@@ -1,3 +1,4 @@
+import { compareCodeUnits } from "@do-soul/alaya-protocol";
 import {
   buildGroupedOrdinalScores,
   mergeKeywordSearchRows,
@@ -20,6 +21,9 @@ export type LexicalRawRankLaneId =
 
 export type LexicalRawKeyKind = "matched_token_count" | "bm25_raw_rank";
 export type LexicalLaneListStatus = "empty" | "complete" | "truncated";
+export type LexicalUnseenFrontier =
+  | number
+  | Readonly<{ readonly status: "unavailable"; readonly reason: "producer_order_not_monotone" }>;
 
 export interface LexicalLaneRowReceipt {
   readonly candidate_key: string;
@@ -38,6 +42,7 @@ export interface LexicalLaneCapture {
   readonly requested_limit: number;
   readonly status: LexicalLaneListStatus;
   readonly rows: readonly LexicalLaneRowReceipt[];
+  readonly unseen_upper_bound: LexicalUnseenFrontier;
 }
 
 export interface LexicalLaneHit {
@@ -125,6 +130,44 @@ export function mergeKeywordSearchRowsWithLexicalCapture(
   return merged;
 }
 
+export type LexicalLiveMergeCapture = Readonly<{
+  readonly query_run_id: string;
+  readonly merge_limit: number;
+  readonly lanes: readonly Readonly<{
+    readonly lane_id: LexicalRawRankLaneId;
+    readonly raw_key_kind: LexicalRawKeyKind;
+    readonly list_n: number;
+    readonly status: LexicalLaneListStatus;
+  }>[];
+  readonly candidates: readonly Readonly<{
+    readonly candidate_key: string;
+    readonly chosen_lane_id: LexicalRawRankLaneId | null;
+    readonly chosen_normalized_rank: number | null;
+    readonly admitted: boolean;
+  }>[];
+}>;
+
+export function stripLexicalRawRankForLiveCapture(
+  receipt: LexicalRawRankReceipt
+): LexicalLiveMergeCapture {
+  return Object.freeze({
+    query_run_id: receipt.query_run_id,
+    merge_limit: receipt.merge_limit,
+    lanes: Object.freeze(receipt.lanes.map((lane) => Object.freeze({
+      lane_id: lane.lane_id,
+      raw_key_kind: lane.raw_key_kind,
+      list_n: lane.list_n,
+      status: lane.status
+    }))),
+    candidates: Object.freeze(receipt.candidates.map((candidate) => Object.freeze({
+      candidate_key: candidate.candidate_key,
+      chosen_lane_id: candidate.chosen_lane_id,
+      chosen_normalized_rank: candidate.chosen_normalized_rank,
+      admitted: candidate.admitted
+    })))
+  });
+}
+
 export function captureLexicalRawRankReceipt(
   input: LexicalRawRankCaptureInput & {
     readonly merged: readonly Readonly<MemoryEntryKeywordSearchResult>[];
@@ -191,6 +234,7 @@ function captureOneLane(spec: LaneSpec, limit: number): LexicalLaneCapture {
     grouped_ordinal: scores[index] ?? 0,
     observation_state: "observed" as const
   })));
+  const status = laneStatus(rows.length, limit);
   return Object.freeze({
     lane_id: spec.lane_id,
     raw_key_kind: spec.raw_key_kind,
@@ -198,9 +242,40 @@ function captureOneLane(spec: LaneSpec, limit: number): LexicalLaneCapture {
     applicability_source: "memory_fts_lane",
     list_n: rows.length,
     requested_limit: limit,
-    status: laneStatus(rows.length, limit),
-    rows
+    status,
+    rows,
+    unseen_upper_bound: laneUnseenFrontier(rows, spec.raw_key_kind, status)
   });
+}
+
+// FTS/exact producers emit ranking-key order; last ordinal is a bound only when that order holds.
+
+function laneUnseenFrontier(
+  rows: readonly LexicalLaneRowReceipt[],
+  kind: LexicalRawKeyKind,
+  status: LexicalLaneListStatus
+): LexicalUnseenFrontier {
+  if (status === "empty" || status === "complete") return 0;
+  if (!rankingKeysAreMonotone(rows, kind)) {
+    return Object.freeze({
+      status: "unavailable" as const,
+      reason: "producer_order_not_monotone" as const
+    });
+  }
+  return rows[rows.length - 1]!.grouped_ordinal;
+}
+
+function rankingKeysAreMonotone(
+  rows: readonly LexicalLaneRowReceipt[],
+  kind: LexicalRawKeyKind
+): boolean {
+  for (let index = 1; index < rows.length; index += 1) {
+    const previous = rows[index - 1]!.raw_group_key;
+    const next = rows[index]!.raw_group_key;
+    if (kind === "bm25_raw_rank" && next < previous) return false;
+    if (kind === "matched_token_count" && next > previous) return false;
+  }
+  return true;
 }
 
 function laneStatus(listN: number, limit: number): LexicalLaneListStatus {
@@ -247,7 +322,7 @@ function buildCandidateProvenance(
 ): readonly LexicalCandidateMergeProvenance[] {
   const mergedIndex = new Map(merged.map((row, index) => [row.object_id, index]));
   const keys = [...new Set(lanes.flatMap((lane) => lane.rows.map((row) => row.candidate_key)))]
-    .sort((left, right) => left.localeCompare(right));
+    .sort(compareCodeUnits);
   return Object.freeze(keys.map((candidateKey) =>
     provenanceForCandidate(candidateKey, lanes, winners.get(candidateKey), mergedIndex.get(candidateKey))
   ));

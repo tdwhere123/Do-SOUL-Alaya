@@ -138,6 +138,10 @@ export interface RecallSupplementaryData {
     string,
     Readonly<import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture>
   >>;
+  readonly factFrameFormationsByEvidenceId?: Readonly<Record<
+    string,
+    Readonly<import("@do-soul/alaya-protocol").EvidenceFactFrameFormationCapture>
+  >>;
   readonly openSemanticFactorCompatibilityTrace?: Readonly<
     import("../field/open-semantic-factors/compatibility-trace.js")
       .OpenSemanticFactorCompatibilityTrace

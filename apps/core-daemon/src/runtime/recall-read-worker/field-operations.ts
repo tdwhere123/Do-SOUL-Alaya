@@ -9,6 +9,7 @@ import type { RecallReadWorkerOperation } from "./protocol.js";
 import {
   asPayload,
   readNumber,
+  readOptionalKeywordFieldCapture,
   readPositiveIntegerArray,
   readString,
   readStringArray
@@ -35,7 +36,8 @@ export async function runMemoryFieldOperation(
       readString(payload.queryText, "queryText"),
       limit,
       readKeywordLaneScope(payload.scope),
-      readRefinementDepths(payload.refinementDepths)
+      readRefinementDepths(payload.refinementDepths),
+      readOptionalKeywordFieldCapture(payload.capture)
     );
   }
   if (operation !== "memory.searchByAnchorField" || repo.searchByAnchorField === undefined) {

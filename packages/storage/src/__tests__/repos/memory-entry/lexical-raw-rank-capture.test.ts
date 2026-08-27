@@ -6,6 +6,7 @@ import {
   LEXICAL_RAW_RANK_RECEIPT_SCHEMA_VERSION,
   captureLexicalRawRankReceipt,
   mergeKeywordSearchRowsWithLexicalCapture,
+  stripLexicalRawRankForLiveCapture,
   type LexicalRawRankCaptureInput,
   type LexicalRawRankReceipt
 } from "../../../repos/memory-entry/search/lexical-raw-rank-capture.js";
@@ -118,6 +119,7 @@ describe("lexical raw-rank diagnostics capture", () => {
     expect(porter?.list_n).toBe(3);
     expect(porter?.requested_limit).toBe(2);
     expect(porter?.status).toBe("truncated");
+    expect(porter?.unseen_upper_bound).toBe(porter?.rows.at(-1)?.grouped_ordinal);
     expect(porter?.rows.map((row) => row.raw_group_key)).toEqual([-9, -4, -1]);
     expect(receipt.post_merge).toHaveLength(2);
     expect(receipt.candidates.find((row) => row.candidate_key === "p3")?.admitted).toBe(false);
@@ -151,6 +153,8 @@ describe("lexical raw-rank diagnostics capture", () => {
     expect(receipt.lanes.find((lane) => lane.lane_id === "porter")?.status).toBe("empty");
     expect(receipt.lanes.find((lane) => lane.lane_id === "trigram")?.status).toBe("empty");
     expect(receipt.lanes.find((lane) => lane.lane_id === "exact")?.status).toBe("complete");
+    expect(receipt.lanes.find((lane) => lane.lane_id === "exact")?.unseen_upper_bound).toBe(0);
+    expect(receipt.lanes.find((lane) => lane.lane_id === "porter")?.unseen_upper_bound).toBe(0);
     expect(receipt.post_merge[0]).not.toHaveProperty("raw_group_key");
   });
 
@@ -168,5 +172,31 @@ describe("lexical raw-rank diagnostics capture", () => {
     });
     expect(receipt.candidates.find((row) => row.candidate_key === "A")?.chosen_lane_id)
       .toBe("porter");
+  });
+
+  it("marks truncated frontier unavailable when ranking keys are not monotone", () => {
+    const { receipt } = capturePlanted({
+      exactRows: [],
+      porterRows: [
+        { object_id: "p1", raw_rank: -1 },
+        { object_id: "p2", raw_rank: -9 }
+      ],
+      trigramRows: [],
+      limit: 2
+    });
+    expect(receipt.lanes.find((lane) => lane.lane_id === "porter")?.unseen_upper_bound)
+      .toEqual({ status: "unavailable", reason: "producer_order_not_monotone" });
+  });
+
+  it("strips rows and discarded lanes from the live capture without changing winners", () => {
+    const { receipt } = capturePlanted(DIVERGENT_LANES);
+    const live = stripLexicalRawRankForLiveCapture(receipt);
+    expect(live.lanes[0]).not.toHaveProperty("rows");
+    expect(live.lanes[0]).not.toHaveProperty("requested_limit");
+    expect(live.lanes[0]).not.toHaveProperty("unseen_upper_bound");
+    expect(live.candidates[0]).not.toHaveProperty("discarded_lane_ids");
+    expect(live.candidates.find((row) => row.candidate_key === "A")?.chosen_lane_id)
+      .toBe("porter");
+    expect(receipt.lanes.find((lane) => lane.lane_id === "exact")?.requested_limit).toBe(10);
   });
 });

@@ -1,15 +1,13 @@
-import { createHash } from "node:crypto";
-import {
-  buildVerifiedUserAssertionReceiptPreimage,
-  formatVerifiedUserAssertionSourceHash,
-  type EvidenceCapsule
-} from "@do-soul/alaya-protocol";
+import { formatVerifiedUserAssertionSourceHash } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { collectRecallEvidenceContexts } from
   "../../recall/supplements/evidence/evidence-contexts.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
-
-const ASSERTION = "I bought my bookshelf from IKEA.";
+import {
+  BOOKSHELF_ASSERTION as ASSERTION,
+  createVerifiedAssertionEvidence,
+  materializeBookshelfFactFrame
+} from "./evidence-contexts-assertion-fixture.js";
 
 describe("recall evidence contexts for associative fact keys", () => {
   it("feeds one source-qualified fact-key field to semantic scoring", async () => {
@@ -92,6 +90,48 @@ describe("recall evidence contexts for associative fact keys", () => {
 
     expect(contexts.semanticFactorFormationUnavailableEvidenceIds)
       .toEqual(["evidence-without-formation"]);
+  });
+
+  it("copies owner fact-frame formations by evidence id without joining fact-key rows", async () => {
+    const entry = createMemoryEntry({
+      content: ASSERTION,
+      evidence_refs: ["evidence-1"]
+    });
+    const evidence = createVerifiedAssertionEvidence();
+    const formed = materializeBookshelfFactFrame(evidence.source_hash);
+    const contexts = await collectRecallEvidenceContexts({
+      dependencies: {
+        evidenceSearchPort: {
+          searchByKeyword: vi.fn(async () => []),
+          findByIds: vi.fn(async () => [evidence]),
+          findRecallQualifiedByIds: vi.fn(async () => [{
+            capsule: evidence,
+            verified_user_projection: false,
+            fact_frame_formation: formed
+          }]),
+          findRecallQualifiedFactKeysByIds: vi.fn(async () => [{
+            capsule: evidence,
+            verified_user_projection: false,
+            matched_projection: {
+              projection_id: 5,
+              projection_kind: "fact_key" as const,
+              content: "I bought my bookshelf"
+            },
+            matched_fact_frame: formed.fact_frame ?? undefined
+          }])
+        }
+      },
+      warn: vi.fn(),
+      workspaceId: "workspace-1",
+      candidates: [entry],
+      coarseEvidenceFtsRanks: {},
+      coarseEvidenceFtsRanksPerRef: {},
+      captureAnswerFeatures: true
+    });
+
+    expect(contexts.factFrameFormationsByEvidenceId?.[evidence.object_id]).toEqual(formed);
+    expect(contexts.factFrameFormationsByEvidenceId?.[evidence.object_id]
+      ?.producer_operator_id).toBe("test_grounded_fact_frame_v1");
   });
 
   it("isolates an invalid receipt owner without clearing valid sibling fact keys", async () => {
@@ -330,40 +370,3 @@ describe("recall evidence contexts for associative fact keys", () => {
     );
   });
 });
-
-function createVerifiedAssertionEvidence(input: Readonly<{
-  readonly objectId?: string;
-  readonly assertion?: string;
-}> = {}): EvidenceCapsule {
-  const assertion = input.assertion ?? ASSERTION;
-  const gist = `User: ${assertion}`;
-  const sourceHash = formatVerifiedUserAssertionSourceHash(createHash("sha256")
-    .update(buildVerifiedUserAssertionReceiptPreimage({
-      workspace_id: "workspace-1",
-      run_id: "run-1",
-      surface_id: null,
-      source_assertion: assertion,
-      source_corpus: gist
-    }), "utf8")
-    .digest("hex"));
-  return {
-    object_id: input.objectId ?? "evidence-1",
-    object_kind: "evidence_capsule",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-03-20T00:00:00.000Z",
-    updated_at: "2026-03-20T00:00:00.000Z",
-    created_by: "garden_compile",
-    evidence_kind: "conversation_excerpt",
-    semantic_anchor: { topic: "bookshelf", keywords: [], summary: assertion },
-    event_anchor: null,
-    physical_anchor: null,
-    evidence_health_state: "verified",
-    gist,
-    excerpt: assertion,
-    source_hash: sourceHash,
-    run_id: "run-1",
-    workspace_id: "workspace-1",
-    surface_id: null
-  };
-}

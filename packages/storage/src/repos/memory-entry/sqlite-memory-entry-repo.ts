@@ -52,6 +52,7 @@ import { findRecallActivationTopK } from "./recall/activation-top-k-query.js";
 import {
   type AutonomousTombstoneInput,
   type MemoryEntryKeywordSearchResult,
+  type MemoryKeywordFieldCapture,
   type MemoryEntryRepo,
   type MemoryEntryRepoDiagnosticSink,
   type MemoryEntryRepoDynamicsUpdateFields,
@@ -218,11 +219,12 @@ export class SqliteMemoryEntryRepo
     queryText: string,
     limit: number,
     scope: Readonly<{ readonly objectIds?: readonly string[]; readonly tier?: StorageTier }> = {},
-    refinementDepths: readonly number[] = []
+    refinementDepths: readonly number[] = [],
+    capture?: Readonly<MemoryKeywordFieldCapture>
   ) {
     try {
       return await searchByKeywordField.call(
-        this, workspaceId, queryText, limit, scope, refinementDepths
+        this, workspaceId, queryText, limit, scope, refinementDepths, capture
       );
     } catch (error) {
       throw toFieldSearchStorageError(

@@ -1,6 +1,7 @@
 import type {
   ManifestationState,
   MemoryEntry,
+  EvidenceFactFrameFormationCapture,
   OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
 import type { RecallVerifiedUserAssertionContext } from
@@ -29,6 +30,10 @@ export interface EvidenceAndGovernanceSupplement {
     string,
     Readonly<OpenSemanticFactorFormationCapture>
   >>;
+  readonly factFrameFormationsByEvidenceId?: Readonly<Record<
+    string,
+    Readonly<EvidenceFactFrameFormationCapture>
+  >>;
   readonly semanticFactorFormationUnavailableEvidenceIds?: readonly string[];
   readonly kindProjectionDraftsByEvidenceId?: Readonly<Record<
     string,
@@ -55,6 +60,8 @@ export async function collectEvidenceAndGovernanceSupplement(params: Readonly<{
   readonly candidates: readonly Readonly<MemoryEntry>[];
   readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
+  readonly captureFactFrameObjectIds?: readonly string[];
+  readonly captureAnswerFeatures?: boolean;
   readonly degradationReasons?: Set<RecallDegradationReason>;
 }>): Promise<Readonly<EvidenceAndGovernanceSupplement>> {
   const [evidenceContexts, governanceDerivations] = await Promise.all([
@@ -65,6 +72,8 @@ export async function collectEvidenceAndGovernanceSupplement(params: Readonly<{
       candidates: params.candidates,
       coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
       coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef,
+      captureFactFrameObjectIds: params.captureFactFrameObjectIds,
+      captureAnswerFeatures: params.captureAnswerFeatures,
       degradationReasons: params.degradationReasons
     }),
     collectGovernancePathDerivations({

@@ -78,6 +78,7 @@ export interface CollectSupplementaryDataParams {
   readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
   readonly coarsePathSuppressionScores: Readonly<Record<string, number>>;
   readonly captureAnswerFeatures: boolean;
+  readonly captureFactFrameObjectIds?: readonly string[];
   readonly degradationReasons?: Set<RecallDegradationReason>;
 }
 
@@ -119,6 +120,12 @@ export function freezeSupplementaryData(
     }),
     semanticFactorFormationsByEvidenceId:
       evidenceAndGovernance.semanticFactorFormationsByEvidenceId,
+    ...(evidenceAndGovernance.factFrameFormationsByEvidenceId === undefined
+      ? {}
+      : {
+        factFrameFormationsByEvidenceId:
+          evidenceAndGovernance.factFrameFormationsByEvidenceId
+      }),
     ...semanticSupplements,
     ...(queryTimeWindow === null ? {} : { queryTimeWindow }),
     routingKeysByOwnerIdentity: routingKeySupplement.keysByOwnerIdentity,

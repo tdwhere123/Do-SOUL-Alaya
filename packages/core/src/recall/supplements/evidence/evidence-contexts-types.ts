@@ -1,5 +1,6 @@
 import type {
   EvidenceCapsule,
+  EvidenceFactFrameFormationCapture,
   MemoryEntry,
   OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
@@ -27,6 +28,10 @@ export interface RecallEvidenceContexts {
     string,
     Readonly<OpenSemanticFactorFormationCapture>
   >>;
+  readonly factFrameFormationsByEvidenceId?: Readonly<Record<
+    string,
+    Readonly<EvidenceFactFrameFormationCapture>
+  >>;
   readonly semanticFactorFormationUnavailableEvidenceIds?: readonly string[];
   readonly kindProjectionDraftsByEvidenceId?: Readonly<Record<
     string,
@@ -53,5 +58,7 @@ export type CollectRecallEvidenceContextsParams = Readonly<{
   readonly candidates: readonly Readonly<MemoryEntry>[];
   readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
+  readonly captureFactFrameObjectIds?: readonly string[];
+  readonly captureAnswerFeatures?: boolean;
   readonly degradationReasons?: Set<RecallDegradationReason>;
 }>;

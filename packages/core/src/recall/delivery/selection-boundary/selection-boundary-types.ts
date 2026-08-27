@@ -104,6 +104,7 @@ export type SerializedRecallSupplementaryData = Readonly<
   Omit<
     RecallSupplementaryData,
     "evidenceSemanticDocumentsByMemoryId" |
+    "factFrameFormationsByEvidenceId" |
     "evidenceSemanticActivationsByCandidateKey" |
     "openSemanticFactorCandidateActivationsByCandidateKey" |
     "answerRelevanceScoresByCandidateKey" |

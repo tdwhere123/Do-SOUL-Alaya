@@ -225,6 +225,7 @@ function serializeSupplementaryData(
 ): SerializedRecallSupplementaryData {
   const {
     evidenceSemanticDocumentsByMemoryId: _evidenceSemanticDocumentsByMemoryId,
+    factFrameFormationsByEvidenceId: _factFrameFormationsByEvidenceId,
     evidenceSemanticActivationsByCandidateKey,
     openSemanticFactorCandidateActivationsByCandidateKey,
     answerRelevanceScoresByCandidateKey,

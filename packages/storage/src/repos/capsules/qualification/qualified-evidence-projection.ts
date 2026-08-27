@@ -119,9 +119,11 @@ export function qualifyEvidenceMatch(
   receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null,
   projections: QualifiedProjectionIndex,
   signal?: Readonly<CandidateMemorySignal>,
-  semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
+  semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
+  factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
 ): RecallQualifiedEvidence | null {
   const verifiedUserProjection = hasVerifiedUserProjection(capsule, receipt);
+  const formations = copyStoredFormations(semanticFactorFormation, factFrameFormation);
   if (match.matched_projection?.projection_kind === "assistant_observation") {
     const projection = rederiveAssistantProjection(
       match.matched_projection,
@@ -139,9 +141,7 @@ export function qualifyEvidenceMatch(
       capsule,
       verified_user_projection: verifiedUserProjection,
       matched_projection: projection,
-      ...(semanticFactorFormation === undefined
-        ? {}
-        : { semantic_factor_formation: semanticFactorFormation }),
+      ...formations,
       ...kindProjectionDraftsFromSignal(signal)
     });
   }
@@ -164,9 +164,7 @@ export function qualifyEvidenceMatch(
       matched_projection: attributed.projection,
       matched_fact_key_forms: attributed.forms,
       matched_fact_frame: attributed.frame,
-      ...(semanticFactorFormation === undefined
-        ? {}
-        : { semantic_factor_formation: semanticFactorFormation }),
+      ...formations,
       ...kindProjectionDraftsFromSignal(signal)
     });
   }
@@ -174,9 +172,7 @@ export function qualifyEvidenceMatch(
   return Object.freeze({
     capsule,
     verified_user_projection: verifiedUserProjection,
-    ...(semanticFactorFormation === undefined
-      ? {}
-      : { semantic_factor_formation: semanticFactorFormation }),
+    ...formations,
     ...kindProjectionDraftsFromSignal(signal)
   });
 }
@@ -322,6 +318,21 @@ function kindProjectionDraftsFromSignal(
 ): Readonly<{ readonly kind_projection_drafts?: RecallQualifiedEvidence["kind_projection_drafts"] }> {
   const draft = readKindProjectionDraft(signal?.raw_payload.kind_projection);
   return draft === undefined ? {} : { kind_projection_drafts: Object.freeze([draft]) };
+}
+
+function copyStoredFormations(
+  semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
+  factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
+): Readonly<{
+  readonly semantic_factor_formation?: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly fact_frame_formation?: Readonly<EvidenceFactFrameFormationCapture>;
+}> {
+  return {
+    ...(semanticFactorFormation === undefined
+      ? {}
+      : { semantic_factor_formation: semanticFactorFormation }),
+    ...(factFrameFormation === undefined ? {} : { fact_frame_formation: factFrameFormation })
+  };
 }
 
 function readKindProjectionDraft(

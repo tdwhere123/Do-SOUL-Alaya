@@ -11,6 +11,7 @@ import {
   isWorkspaceMemoryCandidate,
   type RecallTimeFilter
 } from "../recall-service-helpers.js";
+import { directEvidenceCapsuleIds } from "../field-candidate-evidence-ids.js";
 import { collectSupplementaryData } from "../../supplements/supplementary-data.js";
 import type {
   CoarseRecallCandidate,
@@ -151,6 +152,13 @@ export async function collectCoarseFilterSupplementaryData(
     coarsePathExpansionScores: params.coarseFilter.pathExpansionScores,
     coarsePathSuppressionScores: params.coarseFilter.pathSuppressionScores,
     captureAnswerFeatures: params.captureAnswerFeatures ?? false,
+    ...(params.captureAnswerFeatures === true
+      ? {
+        captureFactFrameObjectIds: directEvidenceCapsuleIds(
+          params.coarseFilter.candidates
+        )
+      }
+      : {}),
     degradationReasons: params.degradationReasons
   });
 }

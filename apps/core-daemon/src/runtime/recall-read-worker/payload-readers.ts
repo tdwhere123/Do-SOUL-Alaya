@@ -26,6 +26,20 @@ export function readStringArray(value: unknown, name: string): readonly string[]
   return value;
 }
 
+export function readOptionalKeywordFieldCapture(
+  value: unknown
+): Readonly<{ readonly variant: "lexical_relaxed" | "lexical_expanded" }> | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("worker payload capture must be an object");
+  }
+  const variant = (value as { readonly variant?: unknown }).variant;
+  if (variant !== "lexical_relaxed" && variant !== "lexical_expanded") {
+    throw new Error("worker payload capture.variant is invalid");
+  }
+  return Object.freeze({ variant });
+}
+
 export function readPositiveIntegerArray(
   value: unknown,
   name: string
