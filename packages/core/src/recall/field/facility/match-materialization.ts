@@ -15,8 +15,12 @@ import {
 import {
   alignFactFrameSemanticFactor,
   projectFactFrameSemanticFactors,
-  type FactFrameSemanticAlignment
+  STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID,
+  type FactFrameSemanticAlignment,
+  type FactFrameSemanticFactor
 } from "../fact-frame-semantic-factors.js";
+import { isContentOwnedAssertionFactAtom } from
+  "../../delivery/fine-assessment-selection/content-owned-fact-key.js";
 import { compareText } from "../../../shared/compare-text.js";
 
 export type AttributedFacilityMatchCandidate = Readonly<{
@@ -90,42 +94,78 @@ function matchingFieldProjectionForms(
   if (demand.kind !== "entity" && demand.kind !== "relation" && demand.kind !== "time") {
     return null;
   }
-  if (demand.semantic_factor === undefined) {
-    return null;
-  }
-  const exactKeys = new Set<string>();
-  const relationInflectionKeys = new Set<string>();
-  const pluralKeys = new Set<string>();
-  const demandFactor = demand.semantic_factor;
-  const candidateFactors = projectFactFrameSemanticFactors(atom.projection.fact_slots ?? []);
+  if (demand.semantic_factor === undefined) return null;
+  const keys = {
+    exactKeys: new Set<string>(),
+    relationInflectionKeys: new Set<string>(),
+    pluralKeys: new Set<string>(),
+    storedSlotRelationKeys: new Set<string>()
+  };
+  collectAlignedFormKeys(demand.semantic_factor, demand.kind, demand.attribution_kind,
+    atom, keys);
+  return preferredFieldAlignment(keys);
+}
+
+function collectAlignedFormKeys(
+  demandFactor: Readonly<FactFrameSemanticFactor>,
+  demandKind: "entity" | "relation" | "time",
+  attributionKind: AttributedQueryFacilityDemandAtom["attribution_kind"],
+  atom: Readonly<CandidateCoverageAtom>,
+  keys: Readonly<{
+    readonly exactKeys: Set<string>;
+    readonly relationInflectionKeys: Set<string>;
+    readonly pluralKeys: Set<string>;
+    readonly storedSlotRelationKeys: Set<string>;
+  }>
+): void {
+  const projection = atom.projection;
+  if (projection === null) return;
+  const candidateFactors = projectFactFrameSemanticFactors(projection.fact_slots ?? []);
   for (const candidateFactor of candidateFactors) {
+    const ownedAssertion = isContentOwnedAssertionFactAtom(atom);
     const alignment = alignFactFrameSemanticFactor({
       candidate: candidateFactor,
       demand: demandFactor,
-      demand_kind: demand.kind,
+      demand_kind: demandKind,
       allow_porter: atom.matched_fts_lanes?.includes("porter") === true,
-      require_exact_role: demand.attribution_kind === "typed_fact_frame"
+      allow_owned_assertion_relation_inflection: ownedAssertion,
+      allow_owned_assertion_role_neutrality: ownedAssertion,
+      require_exact_role: attributionKind === "typed_fact_frame"
     });
     if (alignment === null) continue;
-    const keys = alignmentKeys(alignment, {
-      exactKeys,
-      relationInflectionKeys,
-      pluralKeys
-    });
-    for (const form of atom.projection.matched_fact_key_forms) {
+    const bucket = alignmentKeys(alignment, keys);
+    for (const form of projection.matched_fact_key_forms) {
       if (form.kind === "complete" || form.omitted_slot.slot_index !== candidateFactor.slot_index) {
-        keys.add(buildCoverageProjectionFormKey(form));
+        bucket.add(buildCoverageProjectionFormKey(form));
       }
     }
   }
-  if (exactKeys.size > 0) return projectionAlignment(exactKeys, "exact_token_sequence_v1");
-  if (relationInflectionKeys.size > 0) {
+}
+
+function preferredFieldAlignment(keys: Readonly<{
+  readonly exactKeys: ReadonlySet<string>;
+  readonly relationInflectionKeys: ReadonlySet<string>;
+  readonly pluralKeys: ReadonlySet<string>;
+  readonly storedSlotRelationKeys: ReadonlySet<string>;
+}>): ProjectionAlignment | null {
+  if (keys.exactKeys.size > 0) {
+    return projectionAlignment(keys.exactKeys, "exact_token_sequence_v1");
+  }
+  if (keys.relationInflectionKeys.size > 0) {
     return projectionAlignment(
-      relationInflectionKeys,
+      keys.relationInflectionKeys,
       REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID
     );
   }
-  return pluralKeys.size > 0 ? projectionAlignment(pluralKeys, "porter_regular_plural_v1") : null;
+  if (keys.pluralKeys.size > 0) {
+    return projectionAlignment(keys.pluralKeys, "porter_regular_plural_v1");
+  }
+  return keys.storedSlotRelationKeys.size > 0
+    ? projectionAlignment(
+      keys.storedSlotRelationKeys,
+      STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID
+    )
+    : null;
 }
 
 function alignmentKeys(
@@ -134,11 +174,15 @@ function alignmentKeys(
     readonly exactKeys: Set<string>;
     readonly relationInflectionKeys: Set<string>;
     readonly pluralKeys: Set<string>;
+    readonly storedSlotRelationKeys: Set<string>;
   }>
 ): Set<string> {
   if (alignment === "exact_token_sequence_v1") return keys.exactKeys;
-  return alignment === REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID
-    ? keys.relationInflectionKeys
+  if (alignment === REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID) {
+    return keys.relationInflectionKeys;
+  }
+  return alignment === STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID
+    ? keys.storedSlotRelationKeys
     : keys.pluralKeys;
 }
 

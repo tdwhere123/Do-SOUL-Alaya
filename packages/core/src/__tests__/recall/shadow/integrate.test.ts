@@ -102,10 +102,10 @@ describe("shadow integration at fineAssess", () => {
     });
     const captured = asCaptured(on.shadowTrace);
     expect(captured.digest).toBe(
-      "db68fc1dbd2f3e2a71dab08df7feb86c683de12c54ccdc10edfb17916dcef0e3"
+      "384af589ca9be6791147016463a44519aa9405a70d694cf38a1db9b8991913cd"
     );
     expect(captured.digest).toBe(CAPTURE_IDENTITY_DIGEST);
-    expect(captured.version).toBe("safe-dominance-capture.v1.0.0");
+    expect(captured.version).toBe("safe-dominance-capture.v1.0.1");
     expect(captured.cutover_seam.activation).toBe("active");
     expect(captured.cutover_seam.future_delivery_order).toBe("prefixSK(S_infty, K)");
     expect(captured.cutover_seam.rollback).toBe("deliverFineAssessment");

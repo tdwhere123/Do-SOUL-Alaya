@@ -27,10 +27,14 @@ export type FactFrameSemanticFactor = Readonly<{
 
 export type FactFrameSemanticDemandKind = "entity" | "relation" | "time";
 
+export const STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID =
+  "stored_slot_relation_text_v1";
+
 export type FactFrameSemanticAlignment =
   | "exact_token_sequence_v1"
   | "porter_regular_plural_v1"
-  | "porter_regular_relation_inflection_v1";
+  | "porter_regular_relation_inflection_v1"
+  | typeof STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID;
 
 export function projectFactFrameSemanticFactors(
   slots: readonly Readonly<{ readonly role: AssociativeFactSlotRole; readonly text: string }>[],
@@ -66,17 +70,33 @@ export function cleanFactFrameDemandFactor(
     : Object.freeze({ ...factor, normalized_text: surface });
 }
 
-export function alignFactFrameSemanticFactor(params: Readonly<{
+type AlignFactFrameParams = Readonly<{
   readonly candidate: Readonly<FactFrameSemanticFactor>;
   readonly demand: Readonly<FactFrameSemanticFactor>;
   readonly demand_kind: FactFrameSemanticDemandKind;
   readonly allow_porter: boolean;
+  readonly allow_owned_assertion_relation_inflection?: boolean;
+  readonly allow_owned_assertion_role_neutrality?: boolean;
   readonly require_exact_role?: boolean;
-}>): FactFrameSemanticAlignment | null {
-  if (semanticDemandKindForRole(params.candidate.role) !== params.demand_kind ||
-      (params.require_exact_role === true && params.candidate.role !== params.demand.role) ||
-      params.candidate.normalized_text.length === 0 ||
+}>;
+
+export function alignFactFrameSemanticFactor(
+  params: AlignFactFrameParams
+): FactFrameSemanticAlignment | null {
+  if (params.candidate.normalized_text.length === 0 ||
       params.demand.normalized_text.length === 0) {
+    return null;
+  }
+  const candidateKind = semanticDemandKindForRole(params.candidate.role);
+  return candidateKind === params.demand_kind
+    ? alignSameKindFactor(params)
+    : alignRelationTextInStoredSlot(params, candidateKind);
+}
+
+function alignSameKindFactor(params: AlignFactFrameParams): FactFrameSemanticAlignment | null {
+  if (params.require_exact_role === true &&
+      params.allow_owned_assertion_role_neutrality !== true &&
+      params.candidate.role !== params.demand.role) {
     return null;
   }
   const candidateTokens = canonicalTokens(params.candidate.normalized_text);
@@ -100,6 +120,28 @@ export function alignFactFrameSemanticFactor(params: Readonly<{
     : null;
 }
 
+function alignRelationTextInStoredSlot(
+  params: AlignFactFrameParams,
+  candidateKind: FactFrameSemanticDemandKind | null
+): FactFrameSemanticAlignment | null {
+  if (params.demand_kind !== "relation" || candidateKind !== "entity") return null;
+  const candidateTokens = canonicalTokens(params.candidate.normalized_text);
+  const demandTokens = canonicalTokens(params.demand.normalized_text);
+  if (containsAlignedTokenSequence(candidateTokens, demandTokens,
+    (candidateToken, demandToken) => candidateToken === demandToken)) {
+    return STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID;
+  }
+  if (!params.allow_porter && params.allow_owned_assertion_relation_inflection !== true) {
+    return null;
+  }
+  return regularRelationInflectionEquivalent(
+    params.candidate.normalized_text,
+    params.demand.normalized_text
+  )
+    ? STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID
+    : null;
+}
+
 function regularPluralEquivalent(left: string, right: string): boolean {
   return left === right || regularSingular(left) === right || regularSingular(right) === left;
 }
@@ -119,19 +161,22 @@ function demandObligationSurface(
   if (classifyQueryObligationStructuralRole(factor.normalized_text) !== null) {
     return null;
   }
+  const kind = semanticDemandKindForRole(factor.role);
   const kept = canonicalTokens(factor.normalized_text)
-    .filter((token) => !isDroppedObligationToken(token));
+    .filter((token) => !isDroppedObligationToken(token, kind));
   if (kept.length === 0) return null;
-  return semanticDemandKindForRole(factor.role) === "entity"
-    ? kept.join(" ")
-    : factor.normalized_text;
+  return kind === "entity" ? kept.join(" ") : factor.normalized_text;
 }
 
-function isDroppedObligationToken(token: string): boolean {
+function isDroppedObligationToken(
+  token: string,
+  kind: FactFrameSemanticDemandKind | null
+): boolean {
   return WH_WORDS.has(token) ||
     SUBJECT_PRONOUNS.has(token) ||
     isRuleBasedGenericSpeaker(token) ||
-    CJK_INTERROGATIVE_TOKEN_SET.has(token);
+    CJK_INTERROGATIVE_TOKEN_SET.has(token) ||
+    (kind === "entity" && ENTITY_MEASURE_FILLERS.has(token));
 }
 
 function normalizeSemanticText(value: string): string {
@@ -155,3 +200,4 @@ function canonicalTokens(value: string): readonly string[] {
 }
 
 const CJK_INTERROGATIVE_TOKEN_SET: ReadonlySet<string> = new Set(CJK_INTERROGATIVE_CUES);
+const ENTITY_MEASURE_FILLERS: ReadonlySet<string> = new Set(["many", "much"]);

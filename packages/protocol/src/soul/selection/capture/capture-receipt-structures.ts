@@ -97,6 +97,9 @@ export const CaptureSetUtilitySchema = z.object({
     evidence_identity: z.enum(["available", "unavailable"]) }).strict()
 }).strict().readonly();
 
+export const CANONICAL_CAPTURE_DETERMINISTIC_TAIL =
+  "origin_plane_object_id_code_unit_ascending" as const;
+
 const GStatus = z.object({ facility: z.enum(["not_applicable", "available",
   "partially_unavailable", "unavailable"]), values: OsfStatus,
   evidence_identity: z.enum(["available", "unavailable"]) }).strict();
@@ -112,7 +115,7 @@ export const CaptureDecisionSchema = z.object({
   ]), core_candidate_key: Key, status: z.literal("available_known_absent"), basis: Key }).strict()).readonly(),
   max_g_cohort: z.array(Key).readonly(), equal_g_dominance_rejects: z.array(z.object({
     candidate_key: Key, dominated_by: Key }).strict()).readonly(),
-  deterministic_tail: z.literal("candidate_key_code_unit_ascending"),
+  deterministic_tail: z.literal(CANONICAL_CAPTURE_DETERMINISTIC_TAIL),
   unresolved_pointwise_tradeoff: z.boolean(), h_gate: z.enum([
     "none", "event", "temporal", "hidden"
   ]), walk_reject: z.enum(["none", "duplicate_object", "dimension_limit", "max_total_tokens"]),

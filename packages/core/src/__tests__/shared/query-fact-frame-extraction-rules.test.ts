@@ -1,8 +1,26 @@
 import { describe, expect, it } from "vitest";
+import { groundAssociativeFactFrame, type AssociativeFactFrame } from
+  "@do-soul/alaya-protocol";
+import { projectFactFrameSemanticFactors } from
+  "../../recall/field/fact-frame-semantic-factors.js";
+import { materializeAttributedQueryFacilityDemand } from
+  "../../recall/field/query-facility-demand.js";
 import { RuleBasedQueryFactFrameExtractor } from
   "../../shared/query-fact-frame-extraction-rules.js";
 
 const extractor = new RuleBasedQueryFactFrameExtractor();
+
+function expectSourceExactFrame(
+  query: string,
+  frame: Readonly<AssociativeFactFrame> | undefined
+): void {
+  expect(frame).toBeDefined();
+  expect(groundAssociativeFactFrame(frame, query)).toEqual(frame);
+  const roles = new Set(frame!.slots.map((slot) => slot.role));
+  expect(roles.has("subject")).toBe(true);
+  expect(roles.has("relation")).toBe(true);
+  expect(roles.has("value")).toBe(true);
+}
 
 describe("RuleBasedQueryFactFrameExtractor", () => {
   it("extracts a source-ordered do-support question frame", async () => {
@@ -95,10 +113,95 @@ describe("RuleBasedQueryFactFrameExtractor", () => {
     ]);
   });
 
-  it("rejects an of-relation whose subject continues into a relative clause", async () => {
-    await expect(extractor.extract(
-      "What is the name of the playlist I created on Spotify?"
-    )).resolves.toEqual([]);
+  it("keeps a name-of possessive noun phrase as the of-complement subject", async () => {
+    const query = "What is the name of my cat?";
+    const [frame] = await extractor.extract(query);
+    expectSourceExactFrame(query, frame);
+    expect(frame?.slots).toEqual([
+      { role: "value", text: "What" },
+      { role: "relation", text: "name" },
+      { role: "subject", text: "my cat" }
+    ]);
+  });
+
+  it("keeps name-of relative material as source-exact relation and qualifier slots", async () => {
+    const query = "What is the name of the playlist I created on Spotify?";
+    const [frame] = await extractor.extract(query);
+    expectSourceExactFrame(query, frame);
+    expect(frame?.slots).toEqual([
+      { role: "value", text: "What" },
+      { role: "relation", text: "name" },
+      { role: "subject", text: "the playlist" },
+      { role: "relation", text: "created" },
+      { role: "qualifier", text: "Spotify" }
+    ]);
+  });
+
+  it("extracts an unmarked who-subject gift question without fabricating text", async () => {
+    const query = "Who gave me a new stand mixer as a birthday gift?";
+    const [frame] = await extractor.extract(query);
+    expectSourceExactFrame(query, frame);
+    expect(frame?.slots).toEqual([
+      { role: "value", text: "Who" },
+      { role: "relation", text: "gave" },
+      { role: "subject", text: "a new stand mixer" },
+      { role: "qualifier", text: "a birthday gift" }
+    ]);
+  });
+
+  it("extracts a how-many relative without putting the measure filler in a slot", async () => {
+    const query = "How many movie festivals that I attended?";
+    const [frame] = await extractor.extract(query);
+    expectSourceExactFrame(query, frame);
+    expect(frame?.slots).toEqual([
+      { role: "value", text: "movie festivals" },
+      { role: "subject", text: "I" },
+      { role: "relation", text: "attended" }
+    ]);
+    expect(frame?.slots.some((slot) => /\bmany\b/iu.test(slot.text))).toBe(false);
+  });
+
+  it("extracts a how-long locative copular question from the measure layout", async () => {
+    const query = "How long was I in Japan for?";
+    const [frame] = await extractor.extract(query);
+    expectSourceExactFrame(query, frame);
+    expect(frame?.slots).toEqual([
+      { role: "value", text: "How long" },
+      { role: "relation", text: "was" },
+      { role: "subject", text: "I" },
+      { role: "qualifier", text: "Japan" }
+    ]);
+    expect(frame?.slots.some((slot) => slot.text === "I in Japan for")).toBe(false);
+    expect(frame?.slots.some((slot) => slot.text === "Japan")).toBe(true);
+
+    const receipt = materializeAttributedQueryFacilityDemand({
+      query_demand: { schema_version: 1, atoms: [] },
+      weights: {
+        entity: 1,
+        relation: 1,
+        time: 1,
+        logical_object: 1,
+        independent_evidence: 1
+      },
+      semantic_factors: projectFactFrameSemanticFactors(frame!.slots, 0)
+    });
+    const entityValues = receipt.demand_atoms
+      .filter((atom) => atom.kind === "entity")
+      .map((atom) => atom.value);
+    expect(entityValues).toContain("japan");
+    expect(entityValues).not.toContain("in japan for");
+  });
+
+  it("keeps an ordinary copular measure question on the content-relation path", async () => {
+    const query = "How long is my daily commute to work?";
+    const [frame] = await extractor.extract(query);
+    expectSourceExactFrame(query, frame);
+    expect(frame?.slots).toEqual([
+      { role: "value", text: "How long" },
+      { role: "subject", text: "my" },
+      { role: "relation", text: "daily" },
+      { role: "relation", text: "commute" }
+    ]);
   });
 
   it("does not invert an of-complement when the copular predicate continues", async () => {

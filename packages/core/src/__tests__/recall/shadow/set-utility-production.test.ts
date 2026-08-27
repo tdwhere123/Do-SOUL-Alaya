@@ -26,6 +26,22 @@ describe("production capture set utility states", () => {
     expect(utility.cid).toMatchObject({ status: "available", grounding: "content" });
   });
 
+  it("keeps content-owned miss known_zero only when semantic completeness is complete", () => {
+    const item = candidate("candidate-a", [], "I bought a bike");
+    const key = buildRecallCandidateDedupeKey(item);
+    const complete = onlyUtility(item, supplementary(undefined, new Map([
+      [key, evidenceSemanticActivation(0)]
+    ])));
+    const unobserved = onlyUtility(item, supplementary());
+
+    expect(complete.obligations.every((row) =>
+      row.availability === "known_zero" && row.cover === 0 && row.evaluated)).toBe(true);
+    expect(unobserved.obligations.every((row) =>
+      row.availability === "not_observed" && row.cover === 0 && !row.evaluated)).toBe(true);
+    expect(unobserved.availability.facility).toBe("unavailable");
+    expect(complete.availability.facility).not.toBe("unavailable");
+  });
+
   it("emits known-zero only for a complete evaluated producer", () => {
     const item = candidate("candidate-a");
     const key = buildRecallCandidateDedupeKey(item);

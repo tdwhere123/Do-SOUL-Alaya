@@ -54,7 +54,7 @@ describe("remainder separates empty-Psi capture from candidate_key tail", () => 
       G: coverG,
       max_g_cohort: [coverKey],
       equal_g_dominance_rejects: [],
-      deterministic_tail: "candidate_key_code_unit_ascending"
+      deterministic_tail: "origin_plane_object_id_code_unit_ascending"
     });
     expect(deterministicTailDecidedThisPick(walked.decisions[0]!)).toBe(false);
   });
@@ -74,14 +74,57 @@ describe("remainder separates empty-Psi capture from candidate_key tail", () => 
     expect(deterministicTailDecidedThisPick(walked.decisions[0]!)).toBe(false);
   });
 
-  it("does not grant remainder from inflection-only content without a porter lane", async () => {
-    const { coverKey, distractorKey, walked } = await plantDegreeWalk({
+  it("covers relation graduate from owned graduated content without a porter lane", async () => {
+    const { coverKey, distractorKey, cover, walked } = await plantDegreeWalk({
       omitEvidenceRefs: true,
-      coverContent: "she graduated yesterday"
+      coverContent: "I graduated with a degree in mathematics"
     });
     expect(distractorKey < coverKey).toBe(true);
+    expect(cover.obligations.some((row) =>
+      row.key.kind === "relation" && row.key.value === "graduate" &&
+      row.availability === "available" && row.cover > 0
+    )).toBe(true);
+    expect(cover.obligations.some((row) =>
+      row.key.kind === "entity" && row.key.value === "degree" &&
+      row.availability === "available" && row.cover > 0
+    )).toBe(true);
+    expect(walked.S_infty[0]).toBe(coverKey);
+    expect(deterministicTailDecidedThisPick(walked.decisions[0]!)).toBe(false);
+  });
+
+  it("does not inflect an evidence projection without a porter lane", async () => {
+    const { coverKey, distractorKey, cover, walked } = await plantDegreeWalk({
+      coverSlots: [
+        { role: "subject", text: "Alice" },
+        { role: "relation", text: "holds" },
+        { role: "value", text: "she graduated yesterday" }
+      ],
+      coverContent: "a red apple"
+    });
+    expect(distractorKey < coverKey).toBe(true);
+    expect(cover.obligations.filter((row) =>
+      row.key.kind === "relation" && row.key.value === "graduate"
+    ).every((row) => row.cover === 0)).toBe(true);
     expect(walked.S_infty[0]).toBe(distractorKey);
     expect(deterministicTailDecidedThisPick(walked.decisions[0]!)).toBe(true);
+  });
+
+  it("covers degree from owned content even when an unrelated fact_projection exists", async () => {
+    const { coverKey, distractorKey, cover, distractor, walked } =
+      await plantDegreeWalk({
+        coverSlots: appleSlots(),
+        coverContent: "graduated with a degree in mathematics"
+      });
+    expect(distractorKey < coverKey).toBe(true);
+    expect(cover.obligations.some((row) =>
+      row.key.kind === "entity" && row.key.value === "degree" &&
+      row.availability === "available" && row.cover > 0
+    )).toBe(true);
+    expect(distractor.obligations.filter((row) =>
+      row.key.kind === "entity" && row.key.value === "degree"
+    ).every((row) => row.cover === 0)).toBe(true);
+    expect(walked.S_infty[0]).toBe(coverKey);
+    expect(deterministicTailDecidedThisPick(walked.decisions[0]!)).toBe(false);
   });
 
   it("serializes by candidate_key when remainder is zero for both", async () => {
@@ -100,7 +143,7 @@ describe("remainder separates empty-Psi capture from candidate_key tail", () => 
       },
       max_g_cohort: [distractorKey, coverKey].sort(),
       equal_g_dominance_rejects: [],
-      deterministic_tail: "candidate_key_code_unit_ascending"
+      deterministic_tail: "origin_plane_object_id_code_unit_ascending"
     });
     expect(deterministicTailDecidedThisPick(walked.decisions[0]!)).toBe(true);
   });

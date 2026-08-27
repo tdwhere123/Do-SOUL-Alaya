@@ -133,14 +133,14 @@ describe("shadow receipts", () => {
       novelty_core_known_absence: [],
       max_g_cohort: ["a", "b"],
       equal_g_dominance_rejects: [{ candidate_key: "b", dominated_by: "a" }],
-      deterministic_tail: "candidate_key_code_unit_ascending",
+      deterministic_tail: "origin_plane_object_id_code_unit_ascending",
       unresolved_pointwise_tradeoff: false,
       h_gate: "none",
       walk_reject: "none",
       static_frontier_index: 1
     });
     expect(decision.max_g_cohort).toEqual(["a", "b"]);
-    expect(decision.deterministic_tail).toBe("candidate_key_code_unit_ascending");
+    expect(decision.deterministic_tail).toBe("origin_plane_object_id_code_unit_ascending");
     expect("selection_order" in decision).toBe(false);
   });
 

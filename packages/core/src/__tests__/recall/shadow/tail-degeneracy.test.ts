@@ -39,7 +39,7 @@ describe("first-pick tail degeneracy property", () => {
 
   it("keeps the capture identity digest unchanged", () => {
     expect(CAPTURE_IDENTITY_DIGEST).toBe(
-      "db68fc1dbd2f3e2a71dab08df7feb86c683de12c54ccdc10edfb17916dcef0e3"
+      "384af589ca9be6791147016463a44519aa9405a70d694cf38a1db9b8991913cd"
     );
   });
 });

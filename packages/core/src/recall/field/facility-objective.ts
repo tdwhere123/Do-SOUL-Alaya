@@ -18,6 +18,9 @@ import {
 } from "./query-facility-demand.js";
 import { REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID } from
   "./facility/relation-inflection-alignment.js";
+import { STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID } from
+  "./fact-frame-semantic-factors.js";
+
 export const ATTRIBUTED_FACILITY_COVERAGE_OPERATOR_ID =
   "attributed_facility_location_v1";
 
@@ -43,7 +46,8 @@ export type AttributedFacilityCoverageMatch = Readonly<{
     | "identity_v1"
     | "exact_token_sequence_v1"
     | "porter_regular_plural_v1"
-    | typeof REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID;
+    | typeof REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID
+    | typeof STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID;
   readonly match_strength: number;
 }>;
 
@@ -280,6 +284,8 @@ function validateMatch(
   if (fieldDemand === (match.alignment_operator_id === "identity_v1") ||
       (porterAlignment && !atom.matched_fts_lanes?.includes("porter")) ||
       (match.alignment_operator_id === REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID &&
+        demand.kind !== "relation") ||
+      (match.alignment_operator_id === STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID &&
         demand.kind !== "relation")) {
     throw new Error("facility match alignment operator lacks attributed evidence");
   }
@@ -289,7 +295,8 @@ const FACILITY_ALIGNMENT_OPERATORS = new Set([
   "identity_v1",
   "exact_token_sequence_v1",
   "porter_regular_plural_v1",
-  REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID
+  REGULAR_RELATION_INFLECTION_ALIGNMENT_OPERATOR_ID,
+  STORED_SLOT_RELATION_TEXT_ALIGNMENT_OPERATOR_ID
 ]);
 
 function assertCompatibleKind(

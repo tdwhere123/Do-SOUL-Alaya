@@ -4,15 +4,15 @@ import { CaptureExecutionSchema } from "./capture-execution.js";
 import { canonicalJson } from "./canonical-json.js";
 import {
   CaptureCandidateObservationSchema, CaptureDecisionSchema, CaptureFrontierSchema,
-  CaptureRejectSchema, CaptureSetUtilitySchema
+  CaptureRejectSchema, CaptureSetUtilitySchema, CANONICAL_CAPTURE_DETERMINISTIC_TAIL
 } from "./capture-receipt-structures.js";
 
 export const CANONICAL_CAPTURE_ALGORITHM_ID =
   "alaya.recall.shadow.safe-dominance-capture.v1" as const;
 export const CANONICAL_CAPTURE_ALGORITHM_VERSION =
-  "safe-dominance-capture.v1.0.0" as const;
+  "safe-dominance-capture.v1.0.1" as const;
 export const CANONICAL_CAPTURE_IDENTITY_DIGEST =
-  "db68fc1dbd2f3e2a71dab08df7feb86c683de12c54ccdc10edfb17916dcef0e3" as const;
+  "384af589ca9be6791147016463a44519aa9405a70d694cf38a1db9b8991913cd" as const;
 export const CANONICAL_CAPTURE_IDENTITY_BLOB_ID = "alaya.recall.shadow.identity.v1" as const;
 export const CANONICAL_CAPTURE_IDENTITY_BLOB = `${[
   CANONICAL_CAPTURE_IDENTITY_BLOB_ID,
@@ -28,7 +28,8 @@ export const CANONICAL_CAPTURE_IDENTITY_BLOB = `${[
   "Cmp_lexical.comparable: both observed AND LexDomain(u) = LexDomain(v)",
   "Cmp_lexical.numeric: higher-is-better grouped_ordinal of the merge-chosen lane; equal ordinal => channel-equal",
   "lineages: lexical | embedding | temporal | subject_preference",
-  "Gamma_kinds: unscaled_remainder | Values_v | evidence_novelty_redundancy"
+  "Gamma_kinds: unscaled_remainder | Values_v | evidence_novelty_redundancy",
+  `deterministic_tail: ${CANONICAL_CAPTURE_DETERMINISTIC_TAIL}`
 ].join("\n")}\n` as const;
 
 const Key = z.string().min(1);

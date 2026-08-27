@@ -320,8 +320,8 @@ describe("resolveMcpDegradationReason", () => {
       ranking_authority: "prefix_sk",
       capture_identity: {
         algorithm_id: "alaya.recall.shadow.safe-dominance-capture.v1",
-        version: "safe-dominance-capture.v1.0.0",
-        digest: "db68fc1dbd2f3e2a71dab08df7feb86c683de12c54ccdc10edfb17916dcef0e3"
+        version: "safe-dominance-capture.v1.0.1",
+        digest: "384af589ca9be6791147016463a44519aa9405a70d694cf38a1db9b8991913cd"
       },
       capture_execution: {
         status: "fail_closed",

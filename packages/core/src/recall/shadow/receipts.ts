@@ -12,6 +12,7 @@ import {
   ShadowContractError
 } from "./envelope.js";
 import {
+  SHADOW_DETERMINISTIC_TAIL,
   SHADOW_PSI_OPERATOR_ID
 } from "./identity.js";
 import type {
@@ -75,7 +76,7 @@ export type ShadowCoreKnownNoWitness = Readonly<{
 
 export type ShadowCaptureReason = "core_undominated" | "cross_frontier_novelty";
 
-export type ShadowDeterministicTailReason = "candidate_key_code_unit_ascending";
+export type ShadowDeterministicTailReason = typeof SHADOW_DETERMINISTIC_TAIL;
 
 export type ShadowNamedNovelty = Readonly<{
   readonly facility_keys: readonly string[];
@@ -374,7 +375,7 @@ function freezeCaptureDecision(
       typeof input.candidate_key !== "string" || input.candidate_key.length === 0 ||
       (input.capture_reason !== "core_undominated" &&
         input.capture_reason !== "cross_frontier_novelty") ||
-      input.deterministic_tail !== "candidate_key_code_unit_ascending" ||
+      input.deterministic_tail !== SHADOW_DETERMINISTIC_TAIL ||
       typeof input.unresolved_pointwise_tradeoff !== "boolean") {
     throw new ShadowContractError("invalid capture decision identity");
   }
@@ -395,7 +396,7 @@ function freezeCaptureDecision(
     novelty_core_known_absence: absence,
     max_g_cohort: Object.freeze(requireStringList(input.max_g_cohort, "max_g_cohort")),
     equal_g_dominance_rejects: rejects,
-    deterministic_tail: "candidate_key_code_unit_ascending",
+    deterministic_tail: SHADOW_DETERMINISTIC_TAIL,
     unresolved_pointwise_tradeoff: input.unresolved_pointwise_tradeoff,
     h_gate: parseHGate(input.h_gate),
     walk_reject: parseWalkReject(input.walk_reject),

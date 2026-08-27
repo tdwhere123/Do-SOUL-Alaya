@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseCaptureDecisionReceipt,
   parseSetUtilityInput,
+  ShadowContractError,
   type ShadowCoordinateAvailability,
   type ShadowSetUtilityInput
 } from "../../../recall/shadow/index.js";
@@ -168,7 +169,7 @@ describe("shadow lexicographic capture walk", () => {
       capture_reason: "core_undominated",
       max_g_cohort: ["A", "B"],
       equal_g_dominance_rejects: [{ candidate_key: "B", dominated_by: "A" }],
-      deterministic_tail: "candidate_key_code_unit_ascending"
+      deterministic_tail: "origin_plane_object_id_code_unit_ascending"
     });
     expect(deterministicTailDecidedThisPick(result.decisions[0]!)).toBe(false);
   });
@@ -238,6 +239,76 @@ describe("shadow lexicographic capture walk", () => {
     expect(tight.walk_rejects).toEqual([{ candidate_key: "B", walk_reject: "max_total_tokens" }]);
   });
 
+  it("omits object kind from the equal-G tail so membership stays kindful", () => {
+    const origin = "workspace_local";
+    const memoryKind = "memory_entry";
+    const capsuleKind = "evidence_capsule";
+    const earlyId = "aaa";
+    const lateId = "zzz";
+    const memoryEarly = `${origin}:${memoryKind}:${earlyId}`;
+    const capsuleLate = `${origin}:${capsuleKind}:${lateId}`;
+    const memoryLate = `${origin}:${memoryKind}:${lateId}`;
+    const capsuleEarly = `${origin}:${capsuleKind}:${earlyId}`;
+    expect(capsuleLate < memoryEarly).toBe(true);
+    expect(capsuleEarly < memoryLate).toBe(true);
+    expect(`${origin}:${earlyId}` < `${origin}:${lateId}`).toBe(true);
+
+    const memoryWins = walk([
+      plant(capsuleLate, { capsule: 1 }, { cid: "gist:capsule-late" }),
+      plant(memoryEarly, { memory: 1 }, { cid: "gist:memory-early" })
+    ], psiFrom([]));
+    expect(memoryWins.S_infty[0]).toBe(memoryEarly);
+    expect(memoryWins.S_infty).toEqual([memoryEarly, capsuleLate]);
+    expect(memoryWins.S_infty.every((key) =>
+      key.includes(`:${memoryKind}:`) || key.includes(`:${capsuleKind}:`)
+    )).toBe(true);
+    expect(memoryWins.decisions[0]).toMatchObject({
+      max_g_cohort: [capsuleLate, memoryEarly].sort(),
+      equal_g_dominance_rejects: [],
+      deterministic_tail: "origin_plane_object_id_code_unit_ascending"
+    });
+    expect(deterministicTailDecidedThisPick(memoryWins.decisions[0]!)).toBe(true);
+
+    const capsuleWins = walk([
+      plant(memoryLate, { memory: 1 }, { cid: "gist:memory-late" }),
+      plant(capsuleEarly, { capsule: 1 }, { cid: "gist:capsule-early" })
+    ], psiFrom([]));
+    expect(capsuleWins.S_infty[0]).toBe(capsuleEarly);
+    expect(capsuleWins.S_infty).toEqual([capsuleEarly, memoryLate]);
+    expect(capsuleWins.S_infty.every((key) =>
+      key.includes(`:${memoryKind}:`) || key.includes(`:${capsuleKind}:`)
+    )).toBe(true);
+  });
+
+  it("fails closed when equal-G tail keys collide across kinds", () => {
+    const origin = "workspace_local";
+    const objectId = "shared";
+    const memoryKey = `${origin}:memory_entry:${objectId}`;
+    const capsuleKey = `${origin}:evidence_capsule:${objectId}`;
+    expect(memoryKey).toBe("workspace_local:memory_entry:shared");
+    expect(capsuleKey).toBe("workspace_local:evidence_capsule:shared");
+    expect(memoryKey.includes(":memory_entry:")).toBe(true);
+    expect(capsuleKey.includes(":evidence_capsule:")).toBe(true);
+
+    const memory = plant(memoryKey, { memory: 1 }, { cid: "gist:memory" });
+    const capsule = plant(capsuleKey, { capsule: 1 }, { cid: "gist:capsule" });
+    const collide = (
+      candidates: readonly ShadowCaptureWalkCandidate[]
+    ) => walkShadowCapture({
+      candidates,
+      psi: psiFrom([]),
+      token_budget: 10_000,
+      per_dimension_limits: null
+    });
+
+    const memoryFirst = () => collide([memory, capsule]);
+    const capsuleFirst = () => collide([capsule, memory]);
+    expect(memoryFirst).toThrow(ShadowContractError);
+    expect(capsuleFirst).toThrow(ShadowContractError);
+    expect(memoryFirst).toThrow(/equal-G tail key collision/u);
+    expect(capsuleFirst).toThrow(/equal-G tail key collision/u);
+  });
+
   it("serializes heterogeneous equal-G trade-offs by candidate_key only", () => {
     const tradeoff = (left: string, right: string) =>
       (left === "A" && right === "B") || (left === "B" && right === "A");
@@ -264,7 +335,7 @@ describe("shadow lexicographic capture walk", () => {
       max_g_cohort: ["A", "B"],
       equal_g_dominance_rejects: [],
       unresolved_pointwise_tradeoff: true,
-      deterministic_tail: "candidate_key_code_unit_ascending"
+      deterministic_tail: "origin_plane_object_id_code_unit_ascending"
     });
     expect(deterministicTailDecidedThisPick(equal.decisions[0]!)).toBe(true);
   });

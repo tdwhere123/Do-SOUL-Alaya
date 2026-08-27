@@ -1,3 +1,6 @@
+import {
+  RecallCandidateObjectKindSchema
+} from "@do-soul/alaya-protocol";
 import { compareText } from "../../shared/compare-text.js";
 import type { ShadowGammaTuple, ShadowObligationKey, ShadowSetUtilityInput } from "./capture.js";
 import { freezeShadow, ShadowContractError } from "./envelope.js";
@@ -11,7 +14,7 @@ import {
   type ShadowNoveltyAdmit,
   type ShadowSelectedSet
 } from "./gamma-tuple.js";
-import { SHADOW_CAPTURE_OPERATOR_ID } from "./identity.js";
+import { SHADOW_CAPTURE_OPERATOR_ID, SHADOW_DETERMINISTIC_TAIL } from "./identity.js";
 import {
   parseCaptureDecisionReceipt,
   type ShadowCaptureDecisionReceipt,
@@ -275,11 +278,43 @@ function undominated<T extends { readonly candidate_key: string }>(
 function smallestCandidate(
   members: readonly ShadowCaptureWalkCandidate[]
 ): ShadowCaptureWalkCandidate {
+  assertUniqueEqualGTailKeys(members);
   let best = members[0]!;
   for (const member of members) {
-    if (compareText(member.candidate_key, best.candidate_key) < 0) best = member;
+    if (compareText(
+      equalGTailKey(member.candidate_key),
+      equalGTailKey(best.candidate_key)
+    ) < 0) best = member;
   }
   return best;
+}
+
+function assertUniqueEqualGTailKeys(
+  members: readonly ShadowCaptureWalkCandidate[]
+): void {
+  // Distinct membership keys can share origin+object_id; input order is not a tail.
+  const owners = new Map<string, string>();
+  for (const member of members) {
+    const tail = equalGTailKey(member.candidate_key);
+    const owner = owners.get(tail);
+    if (owner !== undefined && owner !== member.candidate_key) {
+      throw new ShadowContractError("equal-G tail key collision");
+    }
+    owners.set(tail, member.candidate_key);
+  }
+}
+
+// Kind in origin:kind:id ranks evidence_capsule before memory_entry.
+function equalGTailKey(candidateKey: string): string {
+  const first = candidateKey.indexOf(":");
+  if (first <= 0) return candidateKey;
+  const second = candidateKey.indexOf(":", first + 1);
+  if (second < 0 || second === candidateKey.length - 1) return candidateKey;
+  const kind = candidateKey.slice(first + 1, second);
+  if (RecallCandidateObjectKindSchema.safeParse(kind).success === false) {
+    return candidateKey;
+  }
+  return `${candidateKey.slice(0, first)}:${candidateKey.slice(second + 1)}`;
 }
 
 function buildDecision(
@@ -313,7 +348,7 @@ function buildDecision(
       maxG.map((row) => row.candidate.candidate_key).sort(compareText)
     ),
     equal_g_dominance_rejects: equalGRejects(maxG, tPsiKeys, state.psi),
-    deterministic_tail: "candidate_key_code_unit_ascending",
+    deterministic_tail: SHADOW_DETERMINISTIC_TAIL,
     unresolved_pointwise_tradeoff: unresolvedTradeoff(tPsi, state.unresolved_tradeoff),
     h_gate: "none",
     walk_reject: "none",

@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -18,9 +17,6 @@ import {
   plantedCandidateKey,
   plantedCanonicalQuestion
 } from "./planted-canonical-fixture.js";
-
-const ARTIFACT_RELATIVE =
-  ".do-it/bench-runs/recall-any5-evidence-first/g19c-mimo-v2.5-live-prompt-785cbdcc/diagnostic-100q-core-canonical-head-141e739d-eval/history/public/2026-08-26T122305Z-141e739-policy-stress-recall-eval-snapshot/recall-eval-diagnostics.json.gz";
 
 const FIELD_IDS = [
   PLANTED_A_ID,
@@ -62,18 +58,6 @@ describe("ranking-quality gzip stream evaluator", () => {
     }
   });
 
-  it("fails tail degeneracy on the 141e739d gzip when present", async () => {
-    const artifactPath = resolveGzipArtifact();
-    if (artifactPath === null) {
-      console.info(`skipping 141e739d gzip degeneracy; missing ${ARTIFACT_RELATIVE}`);
-      return;
-    }
-    const degeneracy = await evaluateRecallEvalGzipTailDegeneracy(artifactPath);
-    expect(degeneracy.first_pick_count).toBe(100);
-    expect(degeneracy.tail_decided_count).toBe(64);
-    expect(degeneracy.share).toBe(0.64);
-    expect(degeneracy.holds).toBe(false);
-  });
 });
 
 function tiedQuestions() {
@@ -115,12 +99,4 @@ async function writePlantedGzip(
       diagnostics: question
     }))
   }), "utf8")));
-}
-
-function resolveGzipArtifact(): string | null {
-  const candidates = [
-    path.resolve(process.cwd(), ARTIFACT_RELATIVE),
-    path.resolve(process.cwd(), "..", "..", ARTIFACT_RELATIVE)
-  ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }

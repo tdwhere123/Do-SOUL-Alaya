@@ -485,8 +485,8 @@ function canonicalReceipt(candidateKey: string) {
     ranking_authority: "prefix_sk" as const,
     identity: {
       algorithm_id: "alaya.recall.shadow.safe-dominance-capture.v1" as const,
-      version: "safe-dominance-capture.v1.0.0" as const,
-      digest: "db68fc1dbd2f3e2a71dab08df7feb86c683de12c54ccdc10edfb17916dcef0e3" as const
+      version: "safe-dominance-capture.v1.0.1" as const,
+      digest: "384af589ca9be6791147016463a44519aa9405a70d694cf38a1db9b8991913cd" as const
     },
     execution: { status: "captured" as const, reason: null },
     field_membership: {
@@ -509,7 +509,7 @@ function canonicalReceipt(candidateKey: string) {
           values: "unavailable", evidence_identity: "unavailable" },
         named_novelty: { facility_keys: [], value_pairs: [], content_ids: [] },
         novelty_core_known_absence: [], max_g_cohort: [candidateKey],
-        equal_g_dominance_rejects: [], deterministic_tail: "candidate_key_code_unit_ascending",
+        equal_g_dominance_rejects: [], deterministic_tail: "origin_plane_object_id_code_unit_ascending",
         unresolved_pointwise_tradeoff: false, h_gate: "none", walk_reject: "none",
         static_frontier_index: 1 }],
       rejects: []

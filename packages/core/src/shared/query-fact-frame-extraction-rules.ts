@@ -1,9 +1,6 @@
 import {
-  AssociativeFactFrameSchema,
   RULE_BASED_QUERY_FACT_FRAME_OPERATOR_ID,
-  type AssociativeFactFrame,
-  type AssociativeFactSlot,
-  type AssociativeFactSlotRole
+  type AssociativeFactFrame
 } from "@do-soul/alaya-protocol";
 import type {
   QueryFactFrameExtractionPort
@@ -20,14 +17,31 @@ import { isCjkSegmentationCandidate, warmCjkSegmentation } from
 import { parseCjkInterrogativeFactFrame } from
   "./fact-frame-grammar/cjk-interrogative.js";
 import {
+  EMPTY_TOKEN,
+  MAX_QUALIFIER_TOKENS,
+  MAX_VALUE_PREFIX_TOKENS,
+  NEGATIONS,
+  frame,
+  isOpenRelationToken,
+  isSubjectToken,
+  selectRelationTokens,
+  skipPreRelationQualifiers,
+  slot,
+  takeSubject,
+  type SubjectSpan
+} from "./fact-frame-grammar/english-clause-tokens.js";
+import {
+  isCopularMeasureLayout,
+  parseCopularMeasureFrame,
+  parseHowManyRelativeFrame,
+  parseOfComplementFrame,
+  parseUnmarkedWhVerbalFrame
+} from "./fact-frame-grammar/english-recoverable-interrogatives.js";
+import {
   sliceFactFrameTokens,
   tokenizeFactFrameSource,
   type FactFrameSourceToken
 } from "./fact-frame-grammar/source-text.js";
-import {
-  COPULAR_MEASURE_WORDS,
-  SUBJECT_PRONOUNS
-} from "./fact-frame-grammar/result-slots.js";
 
 export {
   COPULAR_MEASURE_WORDS,
@@ -37,12 +51,6 @@ export {
   isRuleBasedLocationResultValue,
   SUBJECT_PRONOUNS
 } from "./fact-frame-grammar/result-slots.js";
-
-type SubjectSpan = Readonly<{
-  readonly text: string;
-  readonly startIndex: number;
-  readonly nextIndex: number;
-}>;
 
 export type RuleBasedQueryOsfLayout = Readonly<{
   readonly value: Readonly<{ surface: string; source_span: readonly [number, number] }>;
@@ -88,13 +96,18 @@ function parseInterrogativeFactFrameTrace(query: string): QueryFactFrameParseTra
   const auxiliaryIndex = tokens.findIndex(
     (token, index) => index > 0 && AUXILIARIES.has(token.normalized)
   );
-  if (auxiliaryIndex < 1 || auxiliaryIndex > MAX_VALUE_PREFIX_TOKENS) return null;
+  if (auxiliaryIndex < 1 || auxiliaryIndex > MAX_VALUE_PREFIX_TOKENS) {
+    const parsed = parseUnmarkedWhVerbalFrame(query, tokens) ??
+      parseHowManyRelativeFrame(query, tokens);
+    return parsed === null ? null : { frame: parsed, osfLayout: null };
+  }
   const value = sliceFactFrameTokens(query, tokens, 0, auxiliaryIndex);
   const auxiliary = tokens[auxiliaryIndex]!.normalized;
   if (!BE_AUXILIARIES.has(auxiliary)) {
     return parseDoSupportFrame(query, tokens, auxiliaryIndex + 1, value, auxiliaryIndex);
   }
-  const parsed = parseCopularFrame(query, tokens, auxiliaryIndex + 1, value);
+  const parsed = parseCopularFrame(query, tokens, auxiliaryIndex + 1, value) ??
+    parseCopularMeasureFrame(query, tokens, auxiliaryIndex, value);
   return parsed === null ? null : {
     frame: parsed,
     osfLayout: copularOsfLayout(query, tokens, auxiliaryIndex)
@@ -199,7 +212,7 @@ function parseCopularFrame(
     (token, index) => index > bodyStart && token.normalized === "of"
   );
   if (ofIndex > bodyStart) {
-    return parseRelationBeforeSubjectFrame(query, tokens, bodyStart, ofIndex, value);
+    return parseOfComplementFrame(query, tokens, bodyStart, ofIndex, value);
   }
   const subject = takeSubject(query, tokens, bodyStart);
   if (subject === null) return null;
@@ -209,24 +222,6 @@ function parseCopularFrame(
   return frame([
     slot("value", value), slot("subject", subject.text),
     ...relations.map((token) => slot("relation", token.text))
-  ]);
-}
-
-function parseRelationBeforeSubjectFrame(
-  query: string,
-  tokens: readonly FactFrameSourceToken[],
-  relationStart: number,
-  ofIndex: number,
-  value: string
-): Readonly<AssociativeFactFrame> | null {
-  const relations = selectRelationTokens(tokens, relationStart, ofIndex);
-  const subject = takeSubject(query, tokens, ofIndex + 1);
-  if (relations.length === 0 || subject === null || subject.nextIndex !== tokens.length) {
-    return null;
-  }
-  return frame([
-    slot("value", value), ...relations.map((token) => slot("relation", token.text)),
-    slot("subject", subject.text)
   ]);
 }
 
@@ -247,164 +242,7 @@ function copularOsfLayout(
   });
 }
 
-function isCopularMeasureLayout(
-  valueTokens: readonly FactFrameSourceToken[],
-  subjectTokens: readonly FactFrameSourceToken[]
-): boolean {
-  return valueTokens.length === 2 && valueTokens[0]!.normalized === "how" &&
-    COPULAR_MEASURE_WORDS.has(valueTokens[1]!.normalized) &&
-    subjectTokens.length >= 2 && subjectTokens.length <= MAX_COPULAR_SUBJECT_TOKENS &&
-    !subjectTokens.some(({ normalized }) => NEGATIONS.has(normalized) ||
-      CLAUSE_BOUNDARIES.has(normalized) || normalized === "and" || normalized === "or");
-}
-
-function takeSubject(
-  query: string,
-  tokens: readonly FactFrameSourceToken[],
-  start: number
-): SubjectSpan | null {
-  const first = tokens[start];
-  if (first === undefined || !isSubjectToken(first)) return null;
-  if (SUBJECT_PRONOUNS.has(first.normalized) ||
-      POSSESSIVE_DETERMINERS.has(first.normalized)) {
-    return Object.freeze({ text: first.text, startIndex: start, nextIndex: start + 1 });
-  }
-  if (SUBJECT_DETERMINERS.has(first.normalized)) {
-    return takeDeterminerSubject(query, tokens, start);
-  }
-  let end = start + 1;
-  while (end < tokens.length && end - start < MAX_SUBJECT_TOKENS &&
-    isNamedSubjectToken(tokens[end]!)) {
-    end += 1;
-  }
-  return Object.freeze({
-    text: sliceFactFrameTokens(query, tokens, start, end),
-    startIndex: start,
-    nextIndex: end
-  });
-}
-
-function takeDeterminerSubject(
-  query: string,
-  tokens: readonly FactFrameSourceToken[],
-  start: number
-): SubjectSpan | null {
-  let end = start + 1;
-  while (end < tokens.length && end - start < MAX_SUBJECT_TOKENS &&
-    !isNounPhraseBoundary(tokens[end]!)) {
-    end += 1;
-  }
-  if (end === start + 1) return null;
-  return Object.freeze({
-    text: sliceFactFrameTokens(query, tokens, start, end),
-    startIndex: start,
-    nextIndex: end
-  });
-}
-
-function selectRelationTokens(
-  tokens: readonly FactFrameSourceToken[],
-  start: number,
-  end: number
-): readonly FactFrameSourceToken[] {
-  const boundary = findBoundary(tokens, start, end, COPULAR_RELATION_BOUNDARIES);
-  return tokens.slice(start, boundary)
-    .filter(isRelationToken)
-    .slice(0, MAX_RELATION_TOKENS);
-}
-
-function findBoundary(
-  tokens: readonly FactFrameSourceToken[],
-  start: number,
-  end: number,
-  boundaries: ReadonlySet<string>
-): number {
-  for (let index = start; index < end; index += 1) {
-    if (boundaries.has(tokens[index]!.normalized)) return index;
-  }
-  return end;
-}
-
-function skipPreRelationQualifiers(
-  tokens: readonly FactFrameSourceToken[],
-  start: number
-): number {
-  let index = start;
-  while (index < tokens.length && PRE_RELATION_QUALIFIERS.has(tokens[index]!.normalized)) {
-    index += 1;
-  }
-  return index;
-}
-
-function isSubjectToken(token: FactFrameSourceToken): boolean {
-  return SUBJECT_PRONOUNS.has(token.normalized) ||
-    POSSESSIVE_DETERMINERS.has(token.normalized) ||
-    SUBJECT_DETERMINERS.has(token.normalized) || isNamedSubjectToken(token);
-}
-
-function isNamedSubjectToken(token: FactFrameSourceToken): boolean {
-  return /^\p{Lu}/u.test(token.text) || /^[#@]/u.test(token.text) ||
-    /[_./-]/u.test(token.text);
-}
-
-function isRelationToken(token: FactFrameSourceToken): boolean {
-  return isOpenRelationToken(token) && !AUXILIARIES.has(token.normalized);
-}
-
-function isOpenRelationToken(token: FactFrameSourceToken): boolean {
-  return token.text.length > 1 && !FUNCTION_WORDS.has(token.normalized) &&
-    !BE_AUXILIARIES.has(token.normalized) && !WH_WORDS.has(token.normalized);
-}
-
-function isNounPhraseBoundary(token: FactFrameSourceToken): boolean {
-  return SUBJECT_PRONOUNS.has(token.normalized) ||
-    NOUN_PHRASE_BOUNDARIES.has(token.normalized) ||
-    AUXILIARIES.has(token.normalized);
-}
-
-function slot(role: AssociativeFactSlotRole, text: string): Readonly<AssociativeFactSlot> {
-  return Object.freeze({ role, text });
-}
-
-function frame(slots: readonly Readonly<AssociativeFactSlot>[]): Readonly<AssociativeFactFrame> | null {
-  const parsed = AssociativeFactFrameSchema.safeParse({
-    schema_version: 1,
-    slots
-  });
-  return parsed.success ? parsed.data : null;
-}
-
-const MAX_VALUE_PREFIX_TOKENS = 4;
-const MAX_SUBJECT_TOKENS = 4;
-const MAX_RELATION_TOKENS = 3;
-const MAX_QUALIFIER_TOKENS = 3;
-const MAX_COPULAR_SUBJECT_TOKENS = 6;
 const TERMINAL_COMPLEMENT_MARKERS: ReadonlySet<string> = new Set([
   "with", "about"
 ]);
 const TAIL_CONSTRAINT_LINKERS: ReadonlySet<string> = new Set(["on"]);
-const EMPTY_TOKEN: FactFrameSourceToken = Object.freeze({
-  text: "", normalized: "", start: 0, end: 0
-});
-const POSSESSIVE_DETERMINERS: ReadonlySet<string> = new Set([
-  "my", "your", "his", "her", "its", "our", "their"
-]);
-const SUBJECT_DETERMINERS: ReadonlySet<string> = new Set(["a", "an", "the"]);
-const PRE_RELATION_QUALIFIERS: ReadonlySet<string> = new Set([
-  "also", "ever", "never", "not", "originally", "currently", "recently",
-  "usually", "always", "then"
-]);
-const NEGATIONS: ReadonlySet<string> = new Set(["not", "never"]);
-const NOUN_PHRASE_BOUNDARIES: ReadonlySet<string> = new Set([
-  ...CLAUSE_BOUNDARIES,
-  "of", "to", "for", "from", "in", "on", "at", "by", "with", "about",
-  "into", "over", "under", "and", "or", "but"
-]);
-const COPULAR_RELATION_BOUNDARIES: ReadonlySet<string> =
-  NOUN_PHRASE_BOUNDARIES;
-const FUNCTION_WORDS: ReadonlySet<string> = new Set([
-  "a", "an", "the", "of", "to", "for", "from", "in", "on", "at", "by",
-  "with", "about", "into", "over", "under", "and", "or", "but", "many",
-  "much", "long", "often", "now", ...PRE_RELATION_QUALIFIERS,
-  ...CLAUSE_BOUNDARIES
-]);
