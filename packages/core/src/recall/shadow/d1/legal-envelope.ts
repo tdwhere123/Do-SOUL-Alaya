@@ -14,6 +14,7 @@ import {
 } from "../observations.js";
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
+const MEMORY_ENTRY_FIELD_KEY = /^(?:workspace_local|global):memory_entry:(.+)$/u;
 const UNBOUNDED = Object.freeze({ kind: "unbounded" as const });
 const INAPPLICABLE = Object.freeze({ kind: "inapplicable" as const });
 
@@ -61,19 +62,25 @@ export function d1LaneEnvelopes(
   candidateKey: string
 ): D1CandidateEnvelopeMap {
   if (proof.status !== "captured") return emptyEnvelopes();
+  const lookupKey = proofLookupKey(candidateKey);
   const verifiable = proofVerifiable(proof);
   const identity = verifiable ? readIdentity(proof) : null;
   const proofLegal = identity !== null && proof.candidate_key_domain === "memory_object_id";
-  const lanes = lanesFrom(proof, candidateKey, proofLegal ? identity : null);
+  const lanes = lanesFrom(proof, lookupKey, proofLegal ? identity : null);
   return Object.freeze({
     identity: proofLegal ? identity : null,
     field_prefix: identity?.field_prefix ?? null,
     query_run_id: proof.receipt.query_run_id,
     snapshot_digest: sealedDigest(proof.identity.snapshot_digest),
     request_digest: sealedDigest(proof.identity.request_digest),
-    primary: proofLegal ? primaryOf(proof, candidateKey, lanes) : null,
+    primary: proofLegal ? primaryOf(proof, lookupKey, lanes) : null,
     lanes
   });
+}
+
+function proofLookupKey(candidateKey: string): string {
+  const match = MEMORY_ENTRY_FIELD_KEY.exec(candidateKey);
+  return match?.[1] !== undefined && match[1].length > 0 ? match[1] : candidateKey;
 }
 
 export function d1IdentitiesEqual(

@@ -110,6 +110,10 @@ describe("d1 pair Psi", () => {
     });
     expect(d1PsiQ("p3", "miss", obs, LEX, [proof])).toBe(true);
     expect(d1PsiPredicate(obs, LEX, [proof])("p3", "miss")).toBe(true);
+    const fieldP3 = "workspace_local:memory_entry:p3";
+    const fieldMiss = "workspace_local:memory_entry:miss";
+    const fieldObs = missingLexical([fieldP3, fieldMiss]);
+    expect(d1PsiQ(fieldP3, fieldMiss, fieldObs, LEX, [proof])).toBe(true);
   });
 
   it("skips lexical comparison when no proofs are supplied", () => {
@@ -133,6 +137,24 @@ describe("d1 pair Psi", () => {
     expect(d1PsiQ("hit", "miss", obs, LEX, proofs)).toBe(true);
     expect(d1PsiOutcome("hit", "miss", obs, LEX, proofs).kind).toBe("dominates");
     expect(d1PsiPredicate(obs, LEX, proofs)("hit", "miss")).toBe(true);
+  });
+
+  it("dominates complete absence using memory_entry field keys", () => {
+    const comparable = {
+      ...noTokensLanes(),
+      porter: {
+        rows: [{ key: "hit", ordinal: 5 }],
+        universeKeys: ["hit", "miss"]
+      }
+    };
+    const relaxed = plantProof({ fieldPrefix: "lexical_relaxed", lanes: comparable });
+    const expanded = plantProof({ fieldPrefix: "lexical_expanded", lanes: comparable });
+    const hit = "workspace_local:memory_entry:hit";
+    const miss = "workspace_local:memory_entry:miss";
+    const obs = missingLexical([hit, miss]);
+    const proofs = [relaxed, expanded];
+    expect(d1PsiQ(hit, miss, obs, LEX, proofs)).toBe(true);
+    expect(d1PsiOutcome(hit, miss, obs, LEX, proofs).kind).toBe("dominates");
   });
 
   it("is incomparable across lanes and field prefixes", () => {

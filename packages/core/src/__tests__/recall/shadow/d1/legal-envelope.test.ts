@@ -63,6 +63,41 @@ describe("d1 legal envelopes", () => {
     expect(map.primary?.envelope).toEqual({ kind: "interval", lower: 4, upper: 4 });
   });
 
+  it("maps a memory_entry field key onto truncated proof rows keyed by object id", () => {
+    const proof = plantProof({
+      lanes: {
+        porter: {
+          rows: [
+            { key: "p1", ordinal: 5 },
+            { key: "p2", ordinal: 3 },
+            { key: "p3", ordinal: 0, admitted: false }
+          ],
+          limit: 2,
+          universeKeys: ["p1", "p2", "p3"]
+        }
+      }
+    });
+    const fieldKey = "workspace_local:memory_entry:p3";
+    const raw = d1LaneEnvelopes(proof, "p3");
+    const mapped = d1LaneEnvelopes(proof, fieldKey);
+    expect(laneValue(mapped, "porter")).toEqual(laneValue(raw, "porter"));
+    expect(mapped.primary).toEqual(raw.primary);
+    expect(laneValue(mapped, "porter")).toEqual({ kind: "interval", lower: 0, upper: 0 });
+    expect(laneValue(d1LaneEnvelopes(proof, "workspace_local:evidence_capsule:p3"), "porter"))
+      .toEqual({ kind: "unbounded" });
+  });
+
+  it("forms complete-absence intervals from memory_entry field keys", () => {
+    const proof = plantProof({ lanes: HIT_MISS_PORTER });
+    const miss = "workspace_local:memory_entry:miss";
+    const hit = "global:memory_entry:hit";
+    expect(laneValue(d1LaneEnvelopes(proof, miss), "porter"))
+      .toEqual({ kind: "interval", lower: 0, upper: 0 });
+    expect(laneValue(d1LaneEnvelopes(proof, hit), "porter"))
+      .toEqual({ kind: "interval", lower: 5, upper: 5 });
+    expect(d1LaneEnvelopes(proof, miss).primary).toBeNull();
+  });
+
   it("does not turn one-lane absence into family-zero on another lane", () => {
     const map = d1LaneEnvelopes(plantProof({ lanes: HIT_MISS_PORTER }), "miss");
     expect(laneValue(map, "porter")).toEqual({ kind: "interval", lower: 0, upper: 0 });

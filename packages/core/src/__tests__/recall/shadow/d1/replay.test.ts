@@ -67,6 +67,38 @@ describe("d1 frozen-Gamma walk replay", () => {
     expect(replayed.metrics.blocked_pair_share).toBeGreaterThanOrEqual(0);
   });
 
+  it("counts legal lane envelopes when observations use memory_entry field keys", () => {
+    const proof = plantProof({
+      lanes: {
+        porter: {
+          rows: [{ key: "A", ordinal: 5 }],
+          universeKeys: ["A", "B"]
+        }
+      }
+    });
+    const keyA = "workspace_local:memory_entry:A";
+    const keyB = "workspace_local:memory_entry:B";
+    const utilities = {
+      [keyA]: plantedUtility(keyA),
+      [keyB]: plantedUtility(keyB)
+    };
+    const replayed = replayD1CaptureWalk({
+      observations: field({
+        [keyA]: view({ lexical: lexicalAt("not_observed") }),
+        [keyB]: view({ lexical: lexicalAt("not_observed") })
+      }),
+      applicableChannels: LEX,
+      proofs: [proof],
+      utilities,
+      gold_keys: [keyA]
+    });
+    expect(replayed.kind).toBe("replayed");
+    if (replayed.kind !== "replayed") return;
+    expect(replayed.metrics.missingness.production_not_observed).toBe(2);
+    expect(replayed.metrics.missingness.legal_lane_envelopes).toBeGreaterThan(0);
+    expect(replayed.metrics.any_at_5).toBe(true);
+  });
+
   it("does not rebuild frozen Gamma rows when walk candidates are supplied", () => {
     const proof = plantProof({
       lanes: {
