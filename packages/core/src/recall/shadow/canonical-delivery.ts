@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import {
+  canonicalSelectionReceiptPreimage,
   createCanonicalSelectionReceipt,
   CANONICAL_CAPTURE_IDENTITY,
   RecallCandidateSchema,
   type CanonicalSelectionReceipt,
+  type CanonicalSelectionReceiptBody,
   type FineAssessmentConfig,
   type RecallCandidate
 } from "@do-soul/alaya-protocol";
@@ -160,7 +162,18 @@ function uniqueCandidatesForKeys(
 function capturedSelectionReceipt(
   trace: ShadowCapturedTrace
 ): CanonicalSelectionReceipt {
-  return createCanonicalSelectionReceipt({
+  const body = capturedReceiptBody(trace);
+  return Object.freeze({
+    ...body,
+    receipt_digest: `sha256:${sha256(canonicalSelectionReceiptPreimage(body))}`
+  });
+}
+
+function capturedReceiptBody(
+  trace: ShadowCapturedTrace
+): CanonicalSelectionReceiptBody {
+  // Re-parse would clone the live field and peeled frontiers already on the trace.
+  return Object.freeze({
     schema_version: 1,
     ranking_authority: "prefix_sk" as const,
     identity: CANONICAL_CAPTURE_IDENTITY,
@@ -180,7 +193,7 @@ function capturedSelectionReceipt(
     delivery: Object.freeze(trace.prefix_proposal.map((candidate_key, index) =>
       Object.freeze({ candidate_key, delivery_rank: index + 1 })
     ))
-  }, sha256);
+  }) as CanonicalSelectionReceiptBody;
 }
 
 function failClosedSelectionReceipt(

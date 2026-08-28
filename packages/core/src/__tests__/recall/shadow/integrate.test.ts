@@ -41,7 +41,7 @@ import {
 
 const NOW = "2026-07-12T00:00:00.000Z";
 const IDS = ["cand-a", "cand-b", "cand-c"] as const;
-const THREE_CANDIDATE_UNCACHED_PSI_CALLS = 19;
+const THREE_CANDIDATE_UNCACHED_PSI_CALLS = 14;
 
 describe("shadow integration at fineAssess", () => {
   it("planted guard: shadow cannot change production ids, order, or delivery diagnostics", () => {

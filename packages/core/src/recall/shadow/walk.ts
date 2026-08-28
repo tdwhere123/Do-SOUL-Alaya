@@ -63,6 +63,7 @@ type WalkState = {
   readonly token_budget: number;
   readonly per_dimension_limits: Readonly<Record<string, number>> | null;
   readonly universe: readonly ShadowObligationKey[];
+  readonly startEligibleCount: number;
   remaining: Map<string, ShadowCaptureWalkCandidate>;
   selected_keys: string[];
   object_keys: Set<string>;
@@ -159,7 +160,8 @@ function createWalkState(input: ShadowCaptureWalkInput): WalkState {
     dim_count: new Map(),
     set: emptySelectedSet(),
     decisions: [],
-    walk_rejects: []
+    walk_rejects: [],
+    startEligibleCount: remaining.size
   };
 }
 
@@ -221,7 +223,7 @@ function computePick(
   state: WalkState
 ): ShadowCaptureWalkCandidate | ShadowPsiCycleFailure {
   const feasible = [...state.remaining.values()];
-  const core = undominated(feasible, state.psi);
+  const core = firstLayerOrUndominated(feasible, state);
   if (core.length === 0) return CYCLE;
   const choice = choiceSet(feasible, core, state);
   const scored = choice.map((candidate) => freezeShadow({
@@ -234,6 +236,21 @@ function computePick(
   const winner = smallestCandidate(tPsi);
   state.decisions.push(buildDecision(winner, core, maxG, tPsi, state));
   return winner;
+}
+
+function firstLayerOrUndominated(
+  feasible: readonly ShadowCaptureWalkCandidate[],
+  state: WalkState
+): ShadowCaptureWalkCandidate[] {
+  // Peel already named F1 on this remaining set; another full-H scan repeats it.
+  if (
+    feasible.length === state.startEligibleCount &&
+    feasible.every((candidate) => candidate.static_frontier_index !== null)
+  ) {
+    const first = feasible.filter((candidate) => candidate.static_frontier_index === 1);
+    if (first.length > 0) return first;
+  }
+  return undominated(feasible, state.psi);
 }
 
 function choiceSet(
