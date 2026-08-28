@@ -1,0 +1,92 @@
+import { describe, expect, it } from "vitest";
+import {
+  SnapshotCoherenceContractError,
+  createSnapshotVectorV1,
+  verifySnapshotCoherenceReceiptV1,
+  verifySnapshotVectorV1,
+  createSnapshotCoherenceReceiptV1,
+  type SnapshotVectorV1Input
+} from "../../../../recall/runtime/snapshot-coherence/index.js";
+import { SHA_A, declaration, exactVectorInput } from "./fixtures.js";
+
+function expectCode(code: string, input: SnapshotVectorV1Input): void {
+  expect(() => createSnapshotVectorV1(input)).toThrow(SnapshotCoherenceContractError);
+  try {
+    createSnapshotVectorV1(input);
+  } catch (error) {
+    expect(error).toBeInstanceOf(SnapshotCoherenceContractError);
+    expect((error as SnapshotCoherenceContractError).code).toBe(code);
+  }
+}
+
+describe("snapshot coherence identity rejects", () => {
+  it("rejects malformed digest", () => {
+    expectCode("malformed_digest", exactVectorInput({
+      base_store_digest: "sha256:not-a-digest"
+    }));
+    expectCode("malformed_digest", exactVectorInput({
+      decision_contract_digest: "md5:00"
+    }));
+    const vector = createSnapshotVectorV1(exactVectorInput());
+    expect(() => verifySnapshotVectorV1({
+      ...vector,
+      base_store_digest: SHA_A.replace("a", "b") as typeof SHA_A
+    })).toThrow(SnapshotCoherenceContractError);
+    const receipt = createSnapshotCoherenceReceiptV1(vector);
+    expect(() => verifySnapshotCoherenceReceiptV1({
+      ...receipt,
+      receipt_digest: SHA_A
+    })).toThrow(/malformed_digest|digest/u);
+  });
+
+  it("rejects duplicate source owner", () => {
+    expectCode("duplicate_source_owner", exactVectorInput({
+      retrieval_channel_snapshots: [
+        declaration({ source_owner: "evidence_fts_exact" }),
+        declaration({ source_owner: "evidence_fts_exact" })
+      ]
+    }));
+    expectCode("duplicate_source_owner", exactVectorInput({
+      retrieval_channel_snapshots: [
+        declaration({ source_owner: "embedding_generation_and_model" })
+      ]
+    }));
+  });
+
+  it("rejects mismatched principal and authorized scope", () => {
+    expectCode("mismatched_principal_scope", exactVectorInput({
+      projection_generation: declaration({
+        source_owner: "projection_generation",
+        principal: "other-principal"
+      })
+    }));
+    expectCode("mismatched_principal_scope", exactVectorInput({
+      projection_generation: declaration({
+        source_owner: "projection_generation",
+        authorized_scope: "scope-foreign"
+      })
+    }));
+  });
+
+  it("rejects incompatible base frontier on exact or bounded sources", () => {
+    expectCode("incompatible_base_frontier", exactVectorInput({
+      embedding_generation_and_model: declaration({
+        source_owner: "embedding_generation_and_model",
+        source_frontier: "other-tx"
+      })
+    }));
+    expectCode("incompatible_base_frontier", exactVectorInput({
+      embedding_generation_and_model: declaration({
+        source_owner: "embedding_generation_and_model",
+        source_frontier: "other-tx",
+        lag_bound: { kind: "bounded", remaining_effect: "lag-1" }
+      })
+    }));
+  });
+
+  it("rejects mixed operator or generation identity", () => {
+    expectCode("mixed_operator_generation", exactVectorInput({
+      formation_operator_versions: [["formation", "1"], ["formation", "2"]]
+    }));
+  });
+});
