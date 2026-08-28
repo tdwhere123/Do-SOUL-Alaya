@@ -193,7 +193,9 @@ function skipAvoidedWork(
   if (phase === "extraction") {
     return { providerCallsAvoided: request.requestedKeys.length };
   }
-  if (phase === "snapshot") return { snapshotsReused: 1 };
+  if (phase === "snapshot") {
+    return request.snapshotPath === undefined ? {} : { snapshotsReused: 1 };
+  }
   if (phase === "control_recall" || phase === "treatment_recall") {
     return { questionsSkipped: request.limit ?? request.requestedKeys.length };
   }

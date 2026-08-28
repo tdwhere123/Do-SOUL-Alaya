@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  boundFileFullContentReadCount,
   copyRegularFileNoFollow,
+  hashRegularFileNoFollow,
   readRegularFileNoFollow
 } from "../../../bench/snapshot/bound-file.js";
 
@@ -60,5 +62,18 @@ describe("descriptor-bound file IO", () => {
       expectedSha256: "0".repeat(64)
     })).toThrow(/SHA-256 mismatch/u);
     await expect(readFile(target)).rejects.toThrow();
+  });
+
+  it("hashes a sealed file once while inode identity holds", async () => {
+    const input = await fixture();
+    const before = boundFileFullContentReadCount();
+    const first = hashRegularFileNoFollow(input.source);
+    const second = hashRegularFileNoFollow(input.source);
+    expect(second).toBe(first);
+    expect(boundFileFullContentReadCount() - before).toBe(1);
+
+    await writeFile(input.source, "mutated after digest");
+    expect(hashRegularFileNoFollow(input.source)).not.toBe(first);
+    expect(boundFileFullContentReadCount() - before).toBe(2);
   });
 });

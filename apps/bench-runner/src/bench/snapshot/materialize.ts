@@ -42,9 +42,10 @@ import { validateSnapshotManifest } from "./manifest-validation.js";
 import { parseSnapshotSidecar } from "./sidecar-validation.js";
 import {
   copyRegularFileNoFollow,
-  hashRegularFileNoFollow
+  peekCachedFileSha256,
+  sealedDigestIdentityDrifted
 } from "./bound-file.js";
-import { atomicCopy } from "./freeze/db-copy.js";
+import { atomicCopy, cloneCachedSealedSnapshot } from "./freeze/db-copy.js";
 export { checkpointAndCopyBenchDb } from "./freeze/db-copy.js";
 export { deriveSnapshotAttribution } from "./attribution.js";
 
@@ -300,23 +301,36 @@ export function restoreSnapshotToDataDir(input: {
     rmSync(`${workingDbPath}${suffix}`, { force: true });
   }
   if (input.expectedSha256 !== undefined) {
-    const actualSha256 = hashRegularFileNoFollow(input.snapshotDbPath);
-    if (actualSha256 !== input.expectedSha256) {
-      throw new Error("recall-eval snapshot DB SHA-256 mismatch");
-    }
-    // The target is the daemon authority, so cache only the digest observed
-    // while copying its exact completed bytes.
-    const copyVerifiedSnapshot = dependencies.copyVerifiedSnapshot ??
-      copyRegularFileNoFollow;
-    copyVerifiedSnapshot({
-      sourcePath: input.snapshotDbPath,
-      targetPath: workingDbPath,
-      expectedSha256: input.expectedSha256
-    });
+    restoreVerifiedSnapshot(input.snapshotDbPath, workingDbPath, input.expectedSha256, dependencies);
   } else {
     atomicCopy(input.snapshotDbPath, workingDbPath);
   }
   return input.dataDirRoot;
+}
+
+function restoreVerifiedSnapshot(
+  sourcePath: string,
+  workingDbPath: string,
+  expectedSha256: string,
+  dependencies: RecallEvalSnapshotRestoreDependencies
+): void {
+  if (sealedDigestIdentityDrifted(sourcePath)) {
+    throw new Error(`${sourcePath} changed after cached digest`);
+  }
+  if (peekCachedFileSha256(sourcePath) !== undefined) {
+    cloneCachedSealedSnapshot({
+      sourcePath,
+      targetPath: workingDbPath,
+      expectedSha256
+    });
+    return;
+  }
+  const copyVerifiedSnapshot = dependencies.copyVerifiedSnapshot ?? copyRegularFileNoFollow;
+  copyVerifiedSnapshot({
+    sourcePath,
+    targetPath: workingDbPath,
+    expectedSha256
+  });
 }
 
 export function writeSnapshotManifest(

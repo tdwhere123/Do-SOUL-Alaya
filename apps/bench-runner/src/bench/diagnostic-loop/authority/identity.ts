@@ -1,7 +1,8 @@
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
+  cacheFilePath,
   inspectCachedExtraction
 } from "../../compile-seed/cache/cache-shard.js";
 import {
@@ -118,6 +119,28 @@ const querySourceWindows = new WeakMap<
   Promise<DiagnosticQuerySourceWindow>
 >();
 
+type ShardFileIdentity = Readonly<{
+  readonly dev: number;
+  readonly ino: number;
+  readonly ctimeMs: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+}>;
+
+const verifiedExtractionShards = new Map<string, Map<string, ShardFileIdentity>>();
+let extractionShardPhysicalReads = 0;
+let extractionShardMemoHits = 0;
+
+export function extractionShardInspectCounts(): Readonly<{
+  readonly physicalReads: number;
+  readonly memoHits: number;
+}> {
+  return {
+    physicalReads: extractionShardPhysicalReads,
+    memoHits: extractionShardMemoHits
+  };
+}
+
 export async function resolveDiagnosticLoopIdentity(
   request: DiagnosticLoopRequest
 ): Promise<ResolvedDiagnosticLoopIdentity> {
@@ -170,7 +193,7 @@ export function resolveExtractionCacheIdentity(
   }
   const manifest = identity.manifest as CompleteExtractionManifest;
   assertExtractionRequestBinding(manifest, request);
-  assertExtractionShards(root, manifest);
+  assertExtractionShards(root, manifest, identity.manifestSha256);
   return {
     root,
     manifest_sha256: identity.manifestSha256,
@@ -205,9 +228,18 @@ function assertExtractionRequestBinding(
 
 function assertExtractionShards(
   root: string,
-  manifest: CompleteExtractionManifest
+  manifest: CompleteExtractionManifest,
+  manifestSha256: string
 ): void {
+  const cacheKey = `${root}\0${manifestSha256}`;
+  const cached = verifiedExtractionShards.get(cacheKey);
+  if (cached !== undefined) {
+    assertCachedExtractionShardStats(root, manifest, cached);
+    return;
+  }
+  const stats = new Map<string, ShardFileIdentity>();
   for (const [key, expected] of Object.entries(manifest.content_closure_index)) {
+    extractionShardPhysicalReads += 1;
     const actual = inspectCachedExtraction(
       root, key, manifest.extraction_model, manifest.request_profile
     );
@@ -216,7 +248,50 @@ function assertExtractionShards(
     ], expected)) {
       throw new Error(`diagnostic-loop extraction cache shard drifted: ${key}`);
     }
+    const live = shardFileIdentity(cacheFilePath(root, key));
+    if (live === undefined) {
+      throw new Error(`diagnostic-loop extraction cache shard drifted: ${key}`);
+    }
+    stats.set(key, live);
   }
+  verifiedExtractionShards.set(cacheKey, stats);
+}
+
+function assertCachedExtractionShardStats(
+  root: string,
+  manifest: CompleteExtractionManifest,
+  cached: ReadonlyMap<string, ShardFileIdentity>
+): void {
+  for (const key of Object.keys(manifest.content_closure_index)) {
+    extractionShardMemoHits += 1;
+    const live = shardFileIdentity(cacheFilePath(root, key));
+    const remembered = cached.get(key);
+    if (live === undefined || remembered === undefined || !sameShardIdentity(live, remembered)) {
+      throw new Error(`diagnostic-loop extraction cache shard drifted: ${key}`);
+    }
+  }
+}
+
+function shardFileIdentity(filePath: string): ShardFileIdentity | undefined {
+  try {
+    const metadata = statSync(filePath);
+    if (!metadata.isFile()) return undefined;
+    return {
+      dev: metadata.dev,
+      ino: metadata.ino,
+      ctimeMs: metadata.ctimeMs,
+      size: metadata.size,
+      mtimeMs: metadata.mtimeMs
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function sameShardIdentity(left: ShardFileIdentity, right: ShardFileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino &&
+    left.ctimeMs === right.ctimeMs && left.size === right.size &&
+    left.mtimeMs === right.mtimeMs;
 }
 
 export async function resolveSnapshotIdentity(

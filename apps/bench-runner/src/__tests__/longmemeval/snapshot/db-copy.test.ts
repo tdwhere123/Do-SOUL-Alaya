@@ -6,9 +6,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   atomicCopy,
+  cloneCachedSealedSnapshot,
   cloneOrCopyFile,
   type CopyFileFn
 } from "../../../bench/snapshot/freeze/db-copy.js";
+import { hashRegularFileNoFollow, peekCachedFileSha256 } from "../../../bench/snapshot/bound-file.js";
 
 const roots: string[] = [];
 
@@ -89,6 +91,25 @@ describe("clone-or-copy snapshot restore", () => {
     const linked = join(input.root, "linked.db");
     await symlink(input.source, linked);
     expect(() => atomicCopy(linked, join(input.root, "from-link.db"))).toThrow();
+  });
+
+  it("clones from a cached sealed digest without rewriting the source", async () => {
+    const input = await fixture();
+    const digest = hashRegularFileNoFollow(input.source);
+    const target = join(input.root, "restore", "alaya.db");
+    cloneCachedSealedSnapshot({
+      sourcePath: input.source,
+      targetPath: target,
+      expectedSha256: digest
+    });
+    expect(peekCachedFileSha256(target)).toBe(digest);
+    expect(await readFile(target)).toEqual(input.bytes);
+    await writeFile(input.source, "swapped after digest");
+    expect(() => cloneCachedSealedSnapshot({
+      sourcePath: input.source,
+      targetPath: join(input.root, "restore-drift", "alaya.db"),
+      expectedSha256: digest
+    })).toThrow(/SHA-256 mismatch|changed after cached digest/u);
   });
 });
 

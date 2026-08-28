@@ -95,6 +95,7 @@ async function reuseSnapshot(
     contentIdentity: identity.identity_digest,
     physicalCalls: 0,
     artifactPaths: { snapshot: snapshotPath },
-    details: { ...identity }
+    details: { ...identity },
+    avoidedWork: { snapshotsReused: 1 }
   };
 }

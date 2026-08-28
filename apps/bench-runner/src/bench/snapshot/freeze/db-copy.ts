@@ -5,7 +5,12 @@ import {
   assertRelationProjectionCurrent,
   initDatabase
 } from "@do-soul/alaya-storage";
-import { assertRegularFileNoFollow } from "../bound-file.js";
+import {
+  assertRegularFileNoFollow,
+  peekCachedFileSha256,
+  rememberFileSha256,
+  sealedDigestIdentityDrifted
+} from "../bound-file.js";
 
 export type CopyFileFn = (
   source: string,
@@ -75,6 +80,26 @@ export function atomicCopy(
     rmSync(tmpPath, { force: true });
     throw error;
   }
+}
+
+export function cloneCachedSealedSnapshot(input: {
+  readonly sourcePath: string;
+  readonly targetPath: string;
+  readonly expectedSha256: string;
+}): void {
+  if (sealedDigestIdentityDrifted(input.sourcePath)) {
+    throw new Error(`${input.sourcePath} changed after cached digest`);
+  }
+  const cached = peekCachedFileSha256(input.sourcePath);
+  if (cached === undefined || cached !== input.expectedSha256) {
+    throw new Error("recall-eval snapshot DB SHA-256 mismatch");
+  }
+  atomicCopy(input.sourcePath, input.targetPath);
+  if (peekCachedFileSha256(input.sourcePath) !== input.expectedSha256) {
+    rmSync(input.targetPath, { force: true });
+    throw new Error(`${input.sourcePath} changed after cached digest`);
+  }
+  rememberFileSha256(input.targetPath, input.expectedSha256);
 }
 
 function isReflinkUnsupported(error: unknown): boolean {

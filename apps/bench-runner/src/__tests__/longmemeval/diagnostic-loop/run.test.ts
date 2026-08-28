@@ -6,7 +6,7 @@ import { DiagnosticLoopFailure } from "../../../bench/diagnostic-loop/failures.j
 import { runDiagnosticLoop } from "../../../bench/diagnostic-loop/run.js";
 import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
 import { runRecordDigest } from "../../../bench/diagnostic-loop/run-state.js";
-import { digest, loopRequest, trackingAdapters } from "./fixture.js";
+import { digest, loopRequest, trackingAdapters, writeDiagnosticSnapshotFixture } from "./fixture.js";
 import { createLoopTemp } from "./run-loop-fixture.js";
 
 const { tempRoot, cleanupLoopTemps, completedRun, resume } = createLoopTemp();
@@ -108,21 +108,23 @@ describe("diagnostic-loop run", () => {
 
   it("resumes without repeating a completed phase", async () => {
     const workRoot = await tempRoot();
+    const snapshotPath = await writeDiagnosticSnapshotFixture(workRoot, "planted-snapshot");
+    const request = loopRequest({ snapshotPath });
     const first = trackingAdapters();
     await runDiagnosticLoop({
       workRoot,
-      request: loopRequest(),
+      request,
       mode: "run",
       adapters: first.adapters,
-      argv: []
+      argv: ["--snapshot", snapshotPath]
     });
     const second = trackingAdapters();
     const result = await runDiagnosticLoop({
       workRoot,
-      request: loopRequest(),
+      request,
       mode: "run",
       adapters: second.adapters,
-      argv: []
+      argv: ["--snapshot", snapshotPath]
     });
 
     expect(second.calls).toEqual([]);

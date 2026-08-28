@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -230,10 +231,10 @@ describe("snapshot plumbing", () => {
     expect(existsSync(join(mismatchRoot, BENCH_DAEMON_DB_FILENAME))).toBe(false);
   });
 
-  it("rejects a source swapped after initial validation and leaves no working DB", async () => {
+  it("rejects a source swapped during the first verified copy and leaves no working DB", async () => {
     const sourcePath = join(tmpDir, "race-source.db");
     writeFileSync(sourcePath, "sealed source");
-    const expectedSha256 = await sha256File(sourcePath);
+    const expectedSha256 = createHash("sha256").update("sealed source").digest("hex");
     const restoreRoot = join(tmpDir, "restore-race");
 
     expect(() => restoreSnapshotToDataDir({

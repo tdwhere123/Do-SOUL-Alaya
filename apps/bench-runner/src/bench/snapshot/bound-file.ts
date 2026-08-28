@@ -58,6 +58,7 @@ type CachedFileSha256 = Readonly<{
 }>;
 
 const fileSha256Cache = new Map<string, CachedFileSha256>();
+let fullFileContentReads = 0;
 
 function cachedFileSha256(filePath: string): CachedFileSha256 | undefined {
   try {
@@ -75,6 +76,14 @@ function cachedFileSha256(filePath: string): CachedFileSha256 | undefined {
 
 export function peekCachedFileSha256(filePath: string): string | undefined {
   return cachedFileSha256(filePath)?.sha256;
+}
+
+export function sealedDigestIdentityDrifted(filePath: string): boolean {
+  return fileSha256Cache.has(resolve(filePath)) && peekCachedFileSha256(filePath) === undefined;
+}
+
+export function boundFileFullContentReadCount(): number {
+  return fullFileContentReads;
 }
 
 export function rememberFileSha256(filePath: string, sha256: string): void {
@@ -157,6 +166,7 @@ export function copyRegularFileNoFollow(input: {
 }
 
 function hashOpenFile(source: number): string {
+  fullFileContentReads += 1;
   const hash = createHash("sha256");
   const buffer = Buffer.allocUnsafe(1024 * 1024);
   let position = 0;
@@ -170,6 +180,7 @@ function hashOpenFile(source: number): string {
 }
 
 function copyAndHash(source: number, target: number): string {
+  fullFileContentReads += 1;
   const hash = createHash("sha256");
   const buffer = Buffer.allocUnsafe(1024 * 1024);
   let position = 0;
