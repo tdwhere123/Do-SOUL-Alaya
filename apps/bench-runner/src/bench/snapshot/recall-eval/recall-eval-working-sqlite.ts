@@ -23,6 +23,7 @@ export async function openRecallEvalWorkingSqlite(input: {
   readonly sourceExtractionSystemPromptSha256?: string;
   readonly warm: WarmDerivedSnapshotReceipt | null;
   readonly overlayExpected?: EmbeddingCacheOverlayExpectedSourceBinding;
+  readonly snapshotBytePath?: string;
 }): Promise<Readonly<{
   evidenceProjectionRebuild: EvidenceSearchProjectionRebuildReport | null;
   embeddingCacheOverlay: EmbeddingCacheOverlayBinding | null;
@@ -38,6 +39,7 @@ async function prepareRecallEvalWorkingDb(input: {
   readonly manifest: RecallEvalSnapshotBundle["manifest"];
   readonly sourceExtractionSystemPromptSha256?: string;
   readonly warm: WarmDerivedSnapshotReceipt | null;
+  readonly snapshotBytePath?: string;
 }): Promise<EvidenceSearchProjectionRebuildReport | null> {
   prepareRecallEvalRestoredDb({
     manifest: input.manifest,
@@ -45,7 +47,8 @@ async function prepareRecallEvalWorkingDb(input: {
     legacySnapshot: input.options.legacySnapshot === true,
     derivedEvidenceProjectionRebuild:
       input.options.derivedEvidenceProjectionRebuild === true,
-    ...(input.warm === null ? {} : { warmDerivedSnapshot: input.warm })
+    ...(input.warm === null ? {} : { warmDerivedSnapshot: input.warm }),
+    ...(input.snapshotBytePath === undefined ? {} : { snapshotBytePath: input.snapshotBytePath })
   });
   if (input.options.derivedEvidenceProjectionRebuild !== true) {
     return input.warm?.rebuildReport ?? null;

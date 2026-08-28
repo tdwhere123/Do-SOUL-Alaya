@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import {
   explodeRecallEvalWorkingCopyIfNeeded,
   installWorkspaceSlice,
   packedWorkingDbPath,
+  SEALED_SLICE_RESTORE_ENV,
   sealedWorkspaceSliceCacheDir
 } from "../../../bench/snapshot/recall-eval/workspace-slice/index.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
@@ -136,6 +137,42 @@ describe("sealed workspace slices beside the snapshot", () => {
       snapshotDbPath
     })).rejects.toThrow(/refuse|identity/u);
     expect(readFileSync(join(sealedDir, "KEEP"), "utf8")).toBe("1");
+  });
+
+  it("sealed restore reuses slices without copying packed into the worker dir", async () => {
+    const { snapshotDbPath } = await explodeOnce("data-seal");
+    const workerDir = join(root, "worker-empty");
+    mkdirSync(workerDir);
+    const reused = await explodeRecallEvalWorkingCopyIfNeeded({
+      dataDirRoot: workerDir,
+      snapshotDbPath,
+      requireReuse: true,
+      env: { [SEALED_SLICE_RESTORE_ENV]: "1" }
+    });
+    expect(reused).not.toBeNull();
+    expect(existsSync(join(workerDir, "alaya.db"))).toBe(false);
+    expect(existsSync(packedWorkingDbPath(workerDir))).toBe(false);
+    installWorkspaceSlice({
+      dataDir: workerDir,
+      sliceDbPath: reused!.sliceDbPaths[WORKSPACE_A]!
+    });
+    expect(existsSync(join(workerDir, "alaya.db"))).toBe(true);
+    expect(existsSync(packedWorkingDbPath(workerDir))).toBe(false);
+  });
+
+  it("sealed restore refuses a missing cache without materializing packed in the worker dir", async () => {
+    const snapshotDbPath = join(root, "snapshot-missing-cache.db");
+    copyFileSync(packedPath, snapshotDbPath);
+    const workerDir = join(root, "worker-missing-cache");
+    mkdirSync(workerDir);
+    await expect(explodeRecallEvalWorkingCopyIfNeeded({
+      dataDirRoot: workerDir,
+      snapshotDbPath,
+      requireReuse: true,
+      env: { [SEALED_SLICE_RESTORE_ENV]: "1" }
+    })).rejects.toThrow(/reuse/u);
+    expect(existsSync(join(workerDir, "alaya.db"))).toBe(false);
+    expect(existsSync(packedWorkingDbPath(workerDir))).toBe(false);
   });
 });
 

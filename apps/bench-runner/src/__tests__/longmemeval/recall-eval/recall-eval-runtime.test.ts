@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { arch, platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -245,6 +246,18 @@ describe("prepareRecallEvalDataDir", () => {
     const retained = writes.join("").match(/retained failed run evidence at (.+)\n/)?.[1];
     expect(retained).toBeDefined();
     retainedRoots.push(retained as string, fixtureRoot);
+  });
+
+  it("does not copy the packed snapshot when skipPackedRestore is set", async () => {
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "recall-eval-skip-packed-"));
+    const snapshotPath = join(fixtureRoot, "snapshot.db");
+    await writeFile(snapshotPath, "packed-bytes-must-not-be-copied", "utf8");
+    const root = await prepareRecallEvalDataDir({
+      snapshotDbPath: snapshotPath,
+      skipPackedRestore: true
+    });
+    retainedRoots.push(root.path, fixtureRoot);
+    expect(existsSync(join(root.path, "alaya.db"))).toBe(false);
   });
 
   it("attributes repeated local-ONNX recalls to the same hermetic model bytes", async () => {

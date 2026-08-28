@@ -49,11 +49,17 @@ import {
 } from "./recall-eval-selection-replay.js";
 import type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./recall-eval-contract.js";
 import { executeRecallEvalRun } from "./recall-eval-execute.js";
+import {
+  runRecallEvalSharded,
+  shouldFanOutRecallEvalWorkers,
+  type RecallEvalShardDeps
+} from "./recall-eval-shards.js";
 export type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./recall-eval-contract.js";
 
 /** Run recall-only scoring against an integrity-checked working snapshot copy. */
 export async function runRecallEval(
-  options: RecallEvalOptions
+  options: RecallEvalOptions,
+  deps: RecallEvalShardDeps = {}
 ): Promise<RecallEvalResult> {
   const recallWeightOverrides = resolveBenchRecallWeightOverrides({
     cliJson: options.weightOverridesJson,
@@ -63,6 +69,10 @@ export async function runRecallEval(
     process.stdout.write(
       `[recall-eval weights] ${formatBenchRecallWeightOverrides(recallWeightOverrides)}\n`
     );
+  }
+
+  if (shouldFanOutRecallEvalWorkers(options)) {
+    return runRecallEvalSharded(options, deps);
   }
 
   const profiled = await withRecallEvalMemoryProfile({

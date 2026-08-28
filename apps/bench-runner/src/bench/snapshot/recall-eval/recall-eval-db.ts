@@ -14,6 +14,7 @@ export function prepareRecallEvalRestoredDb(input: {
   readonly legacySnapshot: boolean;
   readonly derivedEvidenceProjectionRebuild?: boolean;
   readonly warmDerivedSnapshot?: WarmDerivedSnapshotReceipt;
+  readonly snapshotBytePath?: string;
 }): void {
   if (input.warmDerivedSnapshot !== undefined) {
     assertWarmDerivedSnapshot({
@@ -32,7 +33,8 @@ export function prepareRecallEvalRestoredDb(input: {
   assertSnapshotConsumeIdentity({
     manifest: input.manifest,
     restoredDbPath: input.restoredDbPath,
-    runningSeedIdentity: SNAPSHOT_SEED_IDENTITY
+    runningSeedIdentity: SNAPSHOT_SEED_IDENTITY,
+    ...(input.snapshotBytePath === undefined ? {} : { snapshotBytePath: input.snapshotBytePath })
   });
 }
 

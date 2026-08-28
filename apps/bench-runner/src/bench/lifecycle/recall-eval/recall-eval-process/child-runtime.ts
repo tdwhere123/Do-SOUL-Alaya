@@ -7,6 +7,7 @@ import { openRecallEvalWorkingSqlite, recallEvalWorkingDbPath } from
 import {
   explodeRecallEvalWorkingCopyIfNeeded,
   installRecallEvalWorkspaceSlice,
+  isSealedSliceRestore,
   type ExplodedWorkspaceSlices,
   type WorkspaceSliceProgress
 } from "../../../snapshot/recall-eval/workspace-slice/index.js";
@@ -50,30 +51,7 @@ export async function openRecallEvalPagerChild(
   onProgress?: (progress: WorkspaceSliceProgress) => void
 ): Promise<RecallEvalPagerOpenResult> {
   if (runtime !== null) throw new Error("recall-eval pager child is already open");
-  const sqlite = await openRecallEvalWorkingSqlite({
-    restoredDbPath: recallEvalWorkingDbPath(payload.dataDirRoot),
-    options: payload.options,
-    manifest: payload.manifest,
-    warm: readWarmReceipt(payload),
-    ...(payload.sourceExtractionSystemPromptSha256 === undefined
-      ? {}
-      : { sourceExtractionSystemPromptSha256: payload.sourceExtractionSystemPromptSha256 }),
-    ...(payload.overlayExpected === undefined
-      ? {}
-      : { overlayExpected: payload.overlayExpected })
-  });
-  const slices = await explodeRecallEvalWorkingCopyIfNeeded({
-    dataDirRoot: payload.dataDirRoot,
-    snapshotDbPath: payload.options.snapshotDbPath,
-    onProgress
-  });
-  if (slices !== null && slices.workspaceIds[0] !== undefined) {
-    installRecallEvalWorkspaceSlice({
-      dataDirRoot: payload.dataDirRoot,
-      workspaceId: slices.workspaceIds[0],
-      slices
-    });
-  }
+  const working = await openRecallEvalPagerWorkingCopy(payload, onProgress);
   const daemon = await startBenchDaemon({
     dataDirRoot: payload.dataDirRoot,
     embeddingMode: payload.daemonLaunch.embeddingMode,
@@ -87,9 +65,9 @@ export async function openRecallEvalPagerChild(
     daemon,
     spool,
     open: payload,
-    slices
+    slices: working.slices
   };
-  return { ...sqlite, selectionSpoolRootPath: spool?.rootPath ?? null };
+  return { ...working.sqlite, selectionSpoolRootPath: spool?.rootPath ?? null };
 }
 
 export async function recallRecallEvalPagerChild(
@@ -170,6 +148,87 @@ export function childMapsHint() {
 function requireRuntime(): PagerRuntime {
   if (runtime === null) throw new Error("recall-eval pager child is not open");
   return runtime;
+}
+
+async function openRecallEvalPagerWorkingCopy(
+  payload: RecallEvalPagerOpenPayload,
+  onProgress?: (progress: WorkspaceSliceProgress) => void
+): Promise<{
+  readonly sqlite: Awaited<ReturnType<typeof openRecallEvalWorkingSqlite>>;
+  readonly slices: ExplodedWorkspaceSlices | null;
+}> {
+  if (isSealedSliceRestore()) {
+    return openSealedSlicePagerWorkingCopy(payload, onProgress);
+  }
+  return openPackedPagerWorkingCopy(payload, onProgress);
+}
+
+async function openSealedSlicePagerWorkingCopy(
+  payload: RecallEvalPagerOpenPayload,
+  onProgress?: (progress: WorkspaceSliceProgress) => void
+): Promise<{
+  readonly sqlite: Awaited<ReturnType<typeof openRecallEvalWorkingSqlite>>;
+  readonly slices: ExplodedWorkspaceSlices;
+}> {
+  const slices = await explodeRecallEvalWorkingCopyIfNeeded({
+    dataDirRoot: payload.dataDirRoot,
+    snapshotDbPath: payload.options.snapshotDbPath,
+    onProgress
+  });
+  if (slices === null || slices.workspaceIds[0] === undefined) {
+    throw new Error(
+      "[recall-eval] sealed workspace-slice reuse is required and the cache is missing or drifted"
+    );
+  }
+  installRecallEvalWorkspaceSlice({
+    dataDirRoot: payload.dataDirRoot,
+    workspaceId: slices.workspaceIds[0],
+    slices
+  });
+  const sqlite = await openPagerSqlite(payload, payload.options.snapshotDbPath);
+  return { sqlite, slices };
+}
+
+async function openPackedPagerWorkingCopy(
+  payload: RecallEvalPagerOpenPayload,
+  onProgress?: (progress: WorkspaceSliceProgress) => void
+): Promise<{
+  readonly sqlite: Awaited<ReturnType<typeof openRecallEvalWorkingSqlite>>;
+  readonly slices: ExplodedWorkspaceSlices | null;
+}> {
+  const sqlite = await openPagerSqlite(payload);
+  const slices = await explodeRecallEvalWorkingCopyIfNeeded({
+    dataDirRoot: payload.dataDirRoot,
+    snapshotDbPath: payload.options.snapshotDbPath,
+    onProgress
+  });
+  if (slices !== null && slices.workspaceIds[0] !== undefined) {
+    installRecallEvalWorkspaceSlice({
+      dataDirRoot: payload.dataDirRoot,
+      workspaceId: slices.workspaceIds[0],
+      slices
+    });
+  }
+  return { sqlite, slices };
+}
+
+async function openPagerSqlite(
+  payload: RecallEvalPagerOpenPayload,
+  snapshotBytePath?: string
+): ReturnType<typeof openRecallEvalWorkingSqlite> {
+  return openRecallEvalWorkingSqlite({
+    restoredDbPath: recallEvalWorkingDbPath(payload.dataDirRoot),
+    options: payload.options,
+    manifest: payload.manifest,
+    warm: readWarmReceipt(payload),
+    ...(payload.sourceExtractionSystemPromptSha256 === undefined
+      ? {}
+      : { sourceExtractionSystemPromptSha256: payload.sourceExtractionSystemPromptSha256 }),
+    ...(payload.overlayExpected === undefined
+      ? {}
+      : { overlayExpected: payload.overlayExpected }),
+    ...(snapshotBytePath === undefined ? {} : { snapshotBytePath })
+  });
 }
 
 function readWarmReceipt(

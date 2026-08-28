@@ -29,6 +29,7 @@ export interface RecallEvalOptions {
   readonly variant: LongMemEvalVariant;
   readonly limit?: number;
   readonly offset?: number;
+  readonly concurrency?: number;
   readonly historyRoot: string;
   readonly policyShape?: BenchPolicyShape;
   readonly simulateReport?: BenchSimulateReportMode;

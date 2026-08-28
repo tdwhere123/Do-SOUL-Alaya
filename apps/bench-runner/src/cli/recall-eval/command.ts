@@ -39,6 +39,7 @@ export function buildRecallEvalOptions(
     simulateReport: opts.simulateReport,
     ...(opts.limit === undefined ? {} : { limit: opts.limit }),
     ...(opts.offset === undefined ? {} : { offset: opts.offset }),
+    ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
     ...(opts.weightOverridesJson === undefined ? {} : { weightOverridesJson: opts.weightOverridesJson }),
     ...(opts.dataDir === undefined ? {} : { dataDir: opts.dataDir }),
     ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),

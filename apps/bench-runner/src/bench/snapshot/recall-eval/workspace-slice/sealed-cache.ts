@@ -63,6 +63,47 @@ export async function reuseOrExplodeSealedSlices(input: {
   return exploded;
 }
 
+export async function reuseSealedSlicesWithoutPackedCopy(input: {
+  readonly snapshotDbPath: string;
+  readonly requireReuse: boolean;
+}): Promise<ExplodedWorkspaceSlices | null> {
+  const destDir = sealedWorkspaceSliceCacheDir(input.snapshotDbPath);
+  const identity = readSealedSliceIdentity(destDir);
+  if (identity === null) {
+    if (input.requireReuse) {
+      throw new Error(
+        "[recall-eval] sealed workspace-slice reuse is required and the cache is missing or drifted"
+      );
+    }
+    return null;
+  }
+  const snapshotSha = hashRegularFileNoFollow(input.snapshotDbPath);
+  const reused = completeSlicesOrNull(
+    input.snapshotDbPath,
+    destDir,
+    identity.workspace_ids
+  );
+  if (reused !== null && sealedRestoreIdentityMatches(identity, snapshotSha, reused)) {
+    return reused;
+  }
+  throw new Error(
+    "[recall-eval] sealed workspace slice identity drifted; refuse reuse"
+  );
+}
+
+function sealedRestoreIdentityMatches(
+  identity: SealedSliceCacheIdentity,
+  snapshotSha: string,
+  reused: ExplodedWorkspaceSlices
+): boolean {
+  return identity.snapshot_db_sha256 === snapshotSha &&
+    identity.recipe_id === WORKSPACE_SLICE_EXPLODE_RECIPE_ID &&
+    identity.recipe_version === WORKSPACE_SLICE_EXPLODE_RECIPE_VERSION &&
+    identity.seed_identity === SNAPSHOT_SEED_IDENTITY &&
+    sameStringList(identity.workspace_ids, reused.workspaceIds) &&
+    sameDigestMap(identity.slice_snapshot_digests, reused.sliceSnapshotDigests);
+}
+
 function identityMatches(
   identity: SealedSliceCacheIdentity | null,
   packedSha: string,

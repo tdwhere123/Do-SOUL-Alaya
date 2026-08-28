@@ -15,10 +15,14 @@ export function assertSnapshotConsumeIdentity(input: {
   readonly manifest: LongMemEvalSnapshotManifest;
   readonly restoredDbPath: string;
   readonly runningSeedIdentity: string;
+  readonly snapshotBytePath?: string;
 }): void {
   assertMatchingSeedIdentity(input.manifest, input.runningSeedIdentity);
   assertMatchingSchemaIdentity(input.manifest, input.restoredDbPath);
-  assertMatchingSnapshotBytes(input.manifest, input.restoredDbPath);
+  assertMatchingSnapshotBytes(
+    input.manifest,
+    input.snapshotBytePath ?? input.restoredDbPath
+  );
   assertMatchingQuestionIdentity(input.manifest);
 }
 

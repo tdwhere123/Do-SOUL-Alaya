@@ -59,6 +59,8 @@ import type {
   EmbeddingCacheOverlayBinding,
   EmbeddingCacheOverlayExpectedSourceBinding
 } from "../../snapshot/recall-eval/embedding-cache-overlay/contract.js";
+import { isSealedSliceRestore } from
+  "../../snapshot/recall-eval/workspace-slice/names.js";
 
 export function recallEvalEmbeddingMode(
   env: Readonly<Record<string, string | undefined>> = process.env
@@ -265,6 +267,7 @@ export async function prepareRecallEvalDataDir(input: {
   readonly validateRestoredDb?: (dbPath: string) => void | Promise<void>;
   readonly restoreSnapshot?: (dataDirRoot: string) => void;
   readonly plannedRoot?: OwnedTempRoot;
+  readonly skipPackedRestore?: boolean;
 }): Promise<OwnedTempRoot> {
   const root = input.plannedRoot ?? (input.requestedRoot === undefined
     ? await createOwnedTempRoot("alaya-recall-eval-")
@@ -272,10 +275,12 @@ export async function prepareRecallEvalDataDir(input: {
   try {
     await assertDistinctSnapshotRestorePaths(input.snapshotDbPath, root.path);
     if (root.owned) await mkdir(root.path, { recursive: true });
-    if (input.artifactIntegrity !== undefined) {
+    if (input.artifactIntegrity !== undefined && input.skipPackedRestore !== true) {
       await verifySnapshotArtifactIntegrity(input.snapshotDbPath, input.artifactIntegrity);
     }
-    if (input.restoreSnapshot === undefined) {
+    if (input.restoreSnapshot !== undefined) {
+      input.restoreSnapshot(root.path);
+    } else if (input.skipPackedRestore !== true) {
       restoreSnapshotToDataDir({
         snapshotDbPath: input.snapshotDbPath,
         dataDirRoot: root.path,
@@ -283,8 +288,6 @@ export async function prepareRecallEvalDataDir(input: {
           ? {}
           : { expectedSha256: input.artifactIntegrity.db_sha256 })
       });
-    } else {
-      input.restoreSnapshot(root.path);
     }
     await input.validateRestoredDb?.(`${root.path}/alaya.db`);
     return root;
@@ -343,6 +346,7 @@ export async function prepareRecallEvalDataRoot(
     ...buildRecallEvalRestoreInput(options, bundle, warmDerivedSnapshot),
     requestedRoot: options.dataDirRoot,
     plannedRoot,
+    skipPackedRestore: isSealedSliceRestore(),
     validateRestoredDb: async () => {
       // File restore only. SQLite open, overlay ATTACH, and projection rehydrate
       // belong in the pager child so the orchestrator never maps the working copy.

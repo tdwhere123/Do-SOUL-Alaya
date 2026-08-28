@@ -37,4 +37,16 @@ describe("recall-eval CLI options", () => {
       querySemanticFactorCachePath: "/tmp/query-cache.json"
     });
   });
+
+  it("forwards process-shard concurrency", () => {
+    const flags = parseFlags([
+      "--snapshot", "/tmp/source.db",
+      "--concurrency", "2"
+    ]);
+
+    expect(buildRecallEvalOptions(flags, flags.snapshot!)).toMatchObject({
+      snapshotDbPath: "/tmp/source.db",
+      concurrency: 2
+    });
+  });
 });

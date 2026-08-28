@@ -12,6 +12,7 @@ import {
   workingAlayaDbPath
 } from "./install.js";
 import {
+  isSealedSliceRestore,
   isSliceReuseRequired,
   isWorkspaceSliceSkipped,
   WORKSPACE_SLICE_DIRNAME
@@ -19,7 +20,8 @@ import {
 import { completeSlicesOrNull, listWorkspaceIds } from "./complete-slices.js";
 import {
   resolvePackedWorkingCopy,
-  reuseOrExplodeSealedSlices
+  reuseOrExplodeSealedSlices,
+  reuseSealedSlicesWithoutPackedCopy
 } from "./sealed-cache.js";
 
 export async function explodeRecallEvalWorkingCopyIfNeeded(input: {
@@ -31,6 +33,9 @@ export async function explodeRecallEvalWorkingCopyIfNeeded(input: {
 }): Promise<ExplodedWorkspaceSlices | null> {
   const env = input.env ?? process.env;
   if (isWorkspaceSliceSkipped(env)) return null;
+  if (isSealedSliceRestore(env)) {
+    return restoreSealedSlicesForWorker(input);
+  }
   const source = existsSync(packedWorkingDbPath(input.dataDirRoot))
     ? packedWorkingDbPath(input.dataDirRoot)
     : workingAlayaDbPath(input.dataDirRoot);
@@ -71,6 +76,24 @@ export function installRecallEvalWorkspaceSlice(input: {
     dataDir: input.dataDirRoot,
     sliceDbPath
   });
+}
+
+async function restoreSealedSlicesForWorker(input: {
+  readonly snapshotDbPath?: string;
+}): Promise<ExplodedWorkspaceSlices> {
+  if (input.snapshotDbPath === undefined) {
+    throw new Error("recall-eval sealed slice restore requires --snapshot");
+  }
+  const reused = await reuseSealedSlicesWithoutPackedCopy({
+    snapshotDbPath: input.snapshotDbPath,
+    requireReuse: true
+  });
+  if (reused === null) {
+    throw new Error(
+      "[recall-eval] sealed workspace-slice reuse is required and the cache is missing or drifted"
+    );
+  }
+  return reused;
 }
 
 async function reuseOrExplodeLocalSlices(input: {

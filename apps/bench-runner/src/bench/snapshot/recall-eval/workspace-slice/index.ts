@@ -26,9 +26,12 @@ export {
   installRecallEvalWorkspaceSlice
 } from "./pager.js";
 export {
+  isSealedSliceRestore,
+  isSliceReuseRequired,
   isWorkspaceSliceSkipped,
   PACKED_WORKING_DB_FILENAME,
   REQUIRE_SLICE_REUSE_ENV,
+  SEALED_SLICE_RESTORE_ENV,
   SKIP_WORKSPACE_SLICE_ENV,
   WORKSPACE_SLICE_DIRNAME
 } from "./names.js";
