@@ -3,10 +3,7 @@ import { resolve } from "node:path";
 import { initDatabase } from "@do-soul/alaya-storage";
 import { atomicCopy } from "../../freeze/db-copy.js";
 import { BENCH_DAEMON_DB_FILENAME } from "../../materialize.js";
-import {
-  applyBenchFastPragmaIfRequested,
-  optimizeBenchDb
-} from "../../../../harness/daemon/runtime/daemon-db-pragmas.js";
+import { reloadBenchWorkingDatabase } from "../../../../harness/daemon/runtime/daemon-db-pragmas.js";
 import { loadSliceIntoOpenDatabase } from "./load-open.js";
 import { PACKED_WORKING_DB_FILENAME } from "./names.js";
 
@@ -43,19 +40,13 @@ export function installWorkspaceSlice(input: {
   const working = workingAlayaDbPath(input.dataDir);
   if (!existsSync(working)) {
     atomicCopy(input.sliceDbPath, working);
-    finishWorkingCopy(input.dataDir, working);
+    reloadBenchWorkingDatabase(input.dataDir);
     return;
   }
   // Replacing the inode would leave the long-lived pager's prepared statements
   // bound to the previous file.
   const live = initDatabase({ filename: working });
   loadSliceIntoOpenDatabase(live, input.sliceDbPath);
-  applyBenchFastPragmaIfRequested(input.dataDir);
-  optimizeBenchDb(input.dataDir);
-}
-
-function finishWorkingCopy(dataDir: string, working: string): void {
-  applyBenchFastPragmaIfRequested(dataDir);
-  optimizeBenchDb(dataDir);
-  initDatabase({ filename: working }).connection.exec("ANALYZE");
+  // Load-open already ANALYZE main; skip a second planner pass.
+  reloadBenchWorkingDatabase(input.dataDir, { analyze: false });
 }

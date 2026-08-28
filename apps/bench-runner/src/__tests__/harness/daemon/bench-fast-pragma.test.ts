@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, truncateSync } from "node:fs";
+import { copyFileSync, readFileSync, truncateSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,11 @@ import {
   writeEmbeddingOverlayBind
 } from "@do-soul/alaya-storage";
 import { applyBenchFastPragmaIfRequested } from "../../../harness/daemon.js";
+import { restoreSnapshotToDataDir } from "../../../bench/snapshot/materialize.js";
+import {
+  installWorkspaceSlice,
+  preservePackedWorkingCopy
+} from "../../../bench/snapshot/recall-eval/workspace-slice/index.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import { createOverlaySchema } from
   "../../../bench/snapshot/recall-eval/embedding-cache-overlay/overlay-schema.js";
@@ -149,6 +154,27 @@ describe("applyBenchFastPragmaIfRequested", () => {
     expect(result.pragmas).toContain("mmap_size=0");
     expect(readPragmaNumber(dataDir, "cache_size")).toBe(-131072);
     expect(readPragmaNumber(dataDir, "mmap_size")).toBe(0);
+  });
+
+  it("re-stats cache and mmap after restore then sealed-slice install", async () => {
+    const dataDir = await newDataDir();
+    const working = join(dataDir, "alaya.db");
+    const snapshotPath = join(dataDir, "snapshot.db");
+    const slicePath = join(dataDir, "slice.db");
+    expect(applyBenchFastPragmaIfRequested(dataDir).pragmas).toContain("cache_size=-65536");
+
+    closeCachedDatabase(working);
+    copyFileSync(working, snapshotPath);
+    copyFileSync(working, slicePath);
+    truncateSync(slicePath, 512 * 1024 * 1024);
+    restoreSnapshotToDataDir({ snapshotDbPath: snapshotPath, dataDirRoot: dataDir });
+    preservePackedWorkingCopy(dataDir);
+    installWorkspaceSlice({ dataDir, sliceDbPath: slicePath });
+    expect(readPragmaNumber(dataDir, "cache_size")).toBe(-131072);
+    expect(readPragmaNumber(dataDir, "mmap_size")).toBe(0);
+    expect(applyBenchFastPragmaIfRequested(dataDir).pragmas).toEqual(
+      expect.arrayContaining(["cache_size=-131072", "mmap_size=0"])
+    );
   });
 
   it("applies when env is explicitly truthy", async () => {

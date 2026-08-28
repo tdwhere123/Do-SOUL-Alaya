@@ -101,11 +101,15 @@ export function optimizeBenchDb(dataDir: string): void {
 
 // Slice install may close the cached handle; reopen so prepared statements
 // bind the current alaya.db inode instead of a renamed packed copy.
-export function reloadBenchWorkingDatabase(dataDir: string): void {
+export function reloadBenchWorkingDatabase(
+  dataDir: string,
+  options?: { readonly analyze?: boolean }
+): void {
   const live = initDatabase({ filename: join(dataDir, "alaya.db") });
   live.reopenIfClosed();
   applyBenchFastPragmaIfRequested(dataDir);
   optimizeBenchDb(dataDir);
+  if (options?.analyze === false) return;
   live.connection.exec("ANALYZE");
 }
 
@@ -121,6 +125,9 @@ export function applyBenchFastPragmaIfRequested(
   // here is a no-op and documents the bench layering.
   const workingDbPath = join(dataDir, "alaya.db");
   const db = initDatabase({ filename: workingDbPath });
+  // Closed handles stay bound to a packed or empty inode; reopen before
+  // stat so cache_size follows the current alaya.db file.
+  db.reopenIfClosed();
   const conn = db.connection;
   conn.pragma("journal_mode = WAL");
   conn.pragma("synchronous = NORMAL");

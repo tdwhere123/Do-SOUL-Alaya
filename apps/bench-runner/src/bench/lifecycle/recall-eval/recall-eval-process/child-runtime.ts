@@ -80,6 +80,8 @@ export async function openRecallEvalPagerChild(
     embeddingProviderKind: payload.daemonLaunch.embeddingProviderKind,
     recallWeightOverrides: payload.recallWeightOverrides
   }, payload.daemonLaunch);
+  // Restore and first-slice install may replace alaya.db after an empty open.
+  daemon.reloadWorkingDatabase();
   const spool = await createRecallEvalSelectionBoundarySpool(process.env);
   runtime = {
     daemon,
@@ -100,6 +102,8 @@ export async function recallRecallEvalPagerChild(
       workspaceId: payload.question.workspaceId,
       slices: current.slices
     });
+    // In-place install retunes the cached handle only; reload rebinds the
+    // daemon connection after table replace.
     current.daemon.reloadWorkingDatabase();
   }
   const activation = createCandidateActivationCapture(
