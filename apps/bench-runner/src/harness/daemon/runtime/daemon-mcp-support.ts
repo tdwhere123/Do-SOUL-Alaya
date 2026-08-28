@@ -7,16 +7,19 @@ import { registerAlayaCliCommands } from "@do-soul/alaya/cli/register";
 export function makeDispatchCli(
   runtime: AlayaDaemonRuntime
 ): (argv: readonly string[]) => Promise<{ exitCode: number; json?: unknown }> {
-  return async (argv) => {
-    const bridge = createAlayaCliBridge(runtime, {
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      isTTY: false
-    });
-    registerAlayaCliCommands(bridge, runtime);
-    return bridge.dispatch(argv);
-  };
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  // Unread PassThrough hits highWaterMark and would stall later reused dispatches.
+  stdout.resume();
+  stderr.resume();
+  const bridge = createAlayaCliBridge(runtime, {
+    stdin: new PassThrough(),
+    stdout,
+    stderr,
+    isTTY: false
+  });
+  registerAlayaCliCommands(bridge, runtime);
+  return async (argv) => bridge.dispatch(argv);
 }
 
 export async function callMcpTool<TOutput>(
