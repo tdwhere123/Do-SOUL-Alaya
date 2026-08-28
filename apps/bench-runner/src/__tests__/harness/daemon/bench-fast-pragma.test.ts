@@ -7,6 +7,8 @@ import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   closeCachedDatabase,
+  configureSqliteWriteQueueSessionPragmas,
+  getSqliteWriteQueueSessionPragmas,
   initDatabase,
   writeEmbeddingOverlayBind
 } from "@do-soul/alaya-storage";
@@ -38,6 +40,7 @@ afterEach(async () => {
   delete process.env.ALAYA_BENCH_TEMP_STORE;
   delete process.env.ALAYA_BENCH_CACHE_SIZE_KIB;
   for (const root of tmpRoots.splice(0)) {
+    configureSqliteWriteQueueSessionPragmas(join(root, "alaya.db"), null);
     await removeTempDirectory(root);
   }
 });
@@ -55,6 +58,10 @@ async function newDataDir(): Promise<string> {
 function readPragmaNumber(dataDir: string, pragma: string): number {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   return Number(db.connection.pragma(pragma, { simple: true }));
+}
+
+function readWorkerHandshake(dataDir: string) {
+  return getSqliteWriteQueueSessionPragmas(join(dataDir, "alaya.db"));
 }
 
 function bindEmptyOverlay(dataDir: string): void {
@@ -84,6 +91,10 @@ describe("applyBenchFastPragmaIfRequested", () => {
     // floor and leave mmap at SQLite's default.
     expect(readPragmaNumber(dataDir, "temp_store")).toBe(1);
     expect(readPragmaNumber(dataDir, "cache_size")).toBe(-65536);
+    expect(readWorkerHandshake(dataDir)).toEqual({
+      cacheSizeKib: 65_536,
+      tempStore: "FILE"
+    });
   });
 
   it("opts back into temp_store=MEMORY when ALAYA_BENCH_TEMP_STORE=memory", async () => {
@@ -95,6 +106,10 @@ describe("applyBenchFastPragmaIfRequested", () => {
 
     // SQLite returns temp_store MEMORY == 2.
     expect(readPragmaNumber(dataDir, "temp_store")).toBe(2);
+    expect(readWorkerHandshake(dataDir)).toEqual({
+      cacheSizeKib: 65_536,
+      tempStore: "MEMORY"
+    });
   });
 
   it("applies ALAYA_BENCH_CACHE_SIZE_KIB as a negative cache_size pragma", async () => {
@@ -104,6 +119,10 @@ describe("applyBenchFastPragmaIfRequested", () => {
     expect(result.applied).toBe(true);
     expect(result.pragmas).toContain("cache_size=-131072");
     expect(readPragmaNumber(dataDir, "cache_size")).toBe(-131072);
+    expect(readWorkerHandshake(dataDir)).toEqual({
+      cacheSizeKib: 131_072,
+      tempStore: "FILE"
+    });
   });
 
   it("ignores invalid ALAYA_BENCH_CACHE_SIZE_KIB and keeps the auto floor", async () => {
@@ -190,6 +209,16 @@ describe("applyBenchFastPragmaIfRequested", () => {
     const result = applyBenchFastPragmaIfRequested(dataDir);
     expect(result.applied).toBe(false);
     expect(result.pragmas).toHaveLength(0);
+    expect(readWorkerHandshake(dataDir)).toBeUndefined();
+  });
+
+  it("clears the write-queue handshake when Fast Pragma is later skipped", async () => {
+    const dataDir = await newDataDir();
+    applyBenchFastPragmaIfRequested(dataDir);
+    expect(readWorkerHandshake(dataDir)?.cacheSizeKib).toBe(65_536);
+    process.env.ALAYA_BENCH_FAST_PRAGMA = "0";
+    applyBenchFastPragmaIfRequested(dataDir);
+    expect(readWorkerHandshake(dataDir)).toBeUndefined();
   });
 
   it("skips on common falsy spellings", async () => {

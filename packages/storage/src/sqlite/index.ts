@@ -35,6 +35,11 @@ export {
   type WorkerThreadSqliteWriteQueueOptions
 } from "./write-queue/worker-port.js";
 export {
+  configureSqliteWriteQueueSessionPragmas,
+  getSqliteWriteQueueSessionPragmas,
+  type SqliteWriteQueueSessionPragmas
+} from "./write-queue/session-pragmas.js";
+export {
   ALAYA_SQLITE_WRITE_QUEUE_ENV,
   installDefaultSqliteWriteQueue,
   isSqliteWriteQueueDisabled

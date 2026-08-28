@@ -1,3 +1,4 @@
+import type { SqliteWriteQueueSessionPragmas } from "../apply-sqlite-write-pragmas.js";
 import type { SqliteWriteJobKind, SqliteWriteStatement } from "./port.js";
 
 export type SqliteWriteQueueWorkerRequest =
@@ -8,6 +9,7 @@ export type SqliteWriteQueueWorkerRequest =
       readonly kind: SqliteWriteJobKind;
       readonly filename: string;
       readonly statements: readonly SqliteWriteStatement[];
+      readonly sessionPragmas?: SqliteWriteQueueSessionPragmas;
     }
   | {
       readonly type: "shutdown";

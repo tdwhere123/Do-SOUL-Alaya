@@ -10,6 +10,7 @@ import {
   isSqliteWriteQueueWorkerResponse,
   type SqliteWriteQueueWorkerRequest
 } from "./worker-protocol.js";
+import { getSqliteWriteQueueSessionPragmas } from "./session-pragmas.js";
 
 export interface WorkerThreadSqliteWriteQueueOptions {
   readonly workerUrl?: URL;
@@ -139,13 +140,15 @@ async function runPayloadJob(session: WorkerSession, job: SqliteWriteJob): Promi
   }
   const requestId = session.nextRequestId;
   session.nextRequestId += 1;
+  const sessionPragmas = getSqliteWriteQueueSessionPragmas(job.filename);
   await postRequest(session, {
     type: "run",
     requestId,
     jobId: job.jobId,
     kind: job.kind,
     filename: job.filename,
-    statements: job.payload.statements
+    statements: job.payload.statements,
+    ...(sessionPragmas === undefined ? {} : { sessionPragmas })
   });
 }
 

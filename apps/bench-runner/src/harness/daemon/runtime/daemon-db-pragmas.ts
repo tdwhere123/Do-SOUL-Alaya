@@ -1,6 +1,10 @@
 import { statSync } from "node:fs";
 import { join } from "node:path";
-import { hasEmbeddingOverlayBind, initDatabase } from "@do-soul/alaya-storage";
+import {
+  configureSqliteWriteQueueSessionPragmas,
+  hasEmbeddingOverlayBind,
+  initDatabase
+} from "@do-soul/alaya-storage";
 import { emitBenchHarnessWarning } from "./daemon-warnings.js";
 
 const BENCH_FAST_PRAGMA_ENV = "ALAYA_BENCH_FAST_PRAGMA";
@@ -116,14 +120,15 @@ export function reloadBenchWorkingDatabase(
 export function applyBenchFastPragmaIfRequested(
   dataDir: string
 ): BenchFastPragmaResult {
+  const workingDbPath = join(dataDir, "alaya.db");
   if (!isBenchFastPragmaEnabled()) {
+    configureSqliteWriteQueueSessionPragmas(workingDbPath, null);
     return Object.freeze({ applied: false, pragmas: Object.freeze([]) });
   }
   // initDatabase caches by path, so this returns the same connection the
   // daemon runtime is already using. The pragmas are session-scoped except
   // journal_mode (file-scoped + persisted) — re-issuing the production set
   // here is a no-op and documents the bench layering.
-  const workingDbPath = join(dataDir, "alaya.db");
   const db = initDatabase({ filename: workingDbPath });
   // Closed handles stay bound to a packed or empty inode; reopen before
   // stat so cache_size follows the current alaya.db file.
@@ -140,6 +145,10 @@ export function applyBenchFastPragmaIfRequested(
   if (mmapSize !== undefined) {
     conn.pragma(`mmap_size = ${mmapSize}`);
   }
+  configureSqliteWriteQueueSessionPragmas(workingDbPath, {
+    cacheSizeKib: cacheKib,
+    tempStore
+  });
   return Object.freeze({
     applied: true,
     pragmas: benchPragmaList(tempStore, cacheKib, mmapSize)
