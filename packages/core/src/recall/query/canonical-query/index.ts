@@ -5,6 +5,7 @@ export {
   type CanonicalAnswerProgramV1,
   type CanonicalCompletionV1,
   type CanonicalConstraintV1,
+  type CanonicalEvidenceProvenanceV1,
   type CanonicalPredicateV1,
   type CanonicalQueryUnsupportedCode,
   type CanonicalQueryV1,
@@ -27,6 +28,7 @@ export {
 } from "./compile.js";
 export {
   compileCanonicalQueryCompilation,
+  verifyCanonicalQueryCompilationV1,
   QUERY_HOLE_IMPACTS,
   type CanonicalQueryCompilationV1,
   type CanonicalQueryCompileStatusV1,

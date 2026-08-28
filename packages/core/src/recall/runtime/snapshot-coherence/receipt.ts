@@ -2,15 +2,13 @@ import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../field/field-identity.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import { classifySnapshotCoherence } from "./coherence-status.js";
-import { digestSnapshotVectorV1 } from "./snapshot-vector.js";
-import { createSourceFrontierDeclaration } from "./source-frontier.js";
+import { admitRestrictedUniverse, derivedSources } from "./sources.js";
 import {
   rejectSnapshotCoherence,
   SNAPSHOT_COHERENCE_OPERATOR_ID,
   type RestrictedUniverseInput,
   type SnapshotCoherenceReceiptV1,
-  type SnapshotVectorV1,
-  type SourceFrontierDeclarationV1
+  type SnapshotVectorV1
 } from "./types.js";
 
 export function createSnapshotCoherenceReceiptV1(
@@ -28,7 +26,7 @@ export function createSnapshotCoherenceReceiptV1(
     coherence_state: classified.state,
     reasons: classified.reasons,
     lag_bounds: classified.lag_bounds,
-    vector_digest: digestSnapshotVectorV1(vector)
+    vector_digest: vector.vector_digest
   });
   return Object.freeze({
     ...body,
@@ -80,35 +78,10 @@ function assertRestrictedUniverse(
   vector: SnapshotVectorV1,
   restricted: RestrictedUniverseInput | undefined
 ): void {
-  const owners = new Set(authorizedOwners(vector));
-  for (const source of restricted?.sources ?? []) {
-    const created = createSourceFrontierDeclaration(source);
-    rejectRestrictedLeak(created, vector, owners);
-    owners.add(created.source_owner);
-  }
-}
-
-function rejectRestrictedLeak(
-  created: SourceFrontierDeclarationV1,
-  vector: SnapshotVectorV1,
-  owners: ReadonlySet<string>
-): void {
-  if (owners.has(created.source_owner)) {
-    rejectSnapshotCoherence("duplicate_source_owner");
-  }
-  if (created.principal !== vector.principal
-    || vector.authorized_scopes.includes(created.authorized_scope)) {
-    rejectSnapshotCoherence("mismatched_principal_scope");
-  }
-}
-
-function authorizedOwners(vector: SnapshotVectorV1): readonly string[] {
-  return [
-    vector.projection_generation.source_owner,
-    ...vector.retrieval_channel_snapshots.map((source) => source.source_owner),
-    vector.embedding_generation_and_model.source_owner,
-    vector.path_graph_generation.source_owner,
-    vector.temporal_index_generation.source_owner,
-    vector.governance_frontier.source_owner
-  ];
+  admitRestrictedUniverse(
+    restricted,
+    derivedSources(vector),
+    vector.principal,
+    vector.authorized_scopes
+  );
 }

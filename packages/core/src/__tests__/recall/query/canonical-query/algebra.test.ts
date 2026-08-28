@@ -127,6 +127,28 @@ describe("canonical query algebra v1", () => {
     expect(digestCanonicalQueryV1(left.query)).toBe(digestCanonicalQueryV1(right.query));
     expect(Object.isFrozen(left.query)).toBe(true);
   });
+
+  it("rejects undeclared Phi arguments and coerced snapshot binds", () => {
+    expect(codeOf({
+      variables: [ENTITY],
+      predicates: [{ id: "p1", relation: "works_at", arguments: ["y"] }],
+      answer: { kind: "scalar", variable: "x" }
+    })).toBe("undeclared_variable");
+    expect(codeOf({
+      variables: [ENTITY],
+      answer: {
+        kind: "distinct",
+        variable: "x",
+        completion: {
+          kind: "all_observable",
+          scope: "scope-1",
+          principal: "principal-1",
+          snapshot_bind: "not_sigma" as "Sigma_q",
+          observer_contract: "observer-v1"
+        }
+      }
+    })).toBe("invalid_all_observable");
+  });
 });
 
 function supported(input: CanonicalQueryInputV1) {

@@ -482,6 +482,18 @@ describe("projection reader lifecycle", () => {
     await expect(runRecall(service)).rejects.toThrow(/planted evidence memory load failure/u);
     expect(release).toHaveBeenCalledTimes(1);
   });
+
+  it("still fail-closes a missing generation after snapshot receipt attach", async () => {
+    const fixture = createDependencies([]).dependencies;
+    const { fieldQuerySession: _seeded, ...unseeded } = fixture;
+    const service = new RecallService({
+      ...unseeded,
+      testOnlyAllowInMemoryFieldQuerySession: true,
+      now: () => CLOCK
+    });
+    await expect(runRecall(service, "workspace-other"))
+      .rejects.toThrow(/active projection generation is missing/u);
+  });
 });
 
 function createService(

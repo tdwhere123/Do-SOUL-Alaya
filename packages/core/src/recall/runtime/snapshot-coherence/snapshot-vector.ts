@@ -1,62 +1,64 @@
 import {
   digestRecallFieldIdentity,
+  isRecallFieldDigest,
   type RecallFieldDigest
 } from "../../field/field-identity.js";
+import { admitRestrictedUniverse, derivedSources } from "./sources.js";
 import { createSourceFrontierDeclaration } from "./source-frontier.js";
 import {
   rejectSnapshotCoherence,
   RESERVED_SOURCE_OWNERS,
-  type RestrictedUniverseInput,
   type SnapshotVectorV1,
   type SnapshotVectorV1Input,
   type SourceFrontierDeclarationV1
 } from "./types.js";
-
-const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 
 export function createSnapshotVectorV1(input: SnapshotVectorV1Input): SnapshotVectorV1 {
   const principal = requirePrincipal(input.principal);
   const authorized_scopes = freezeScopes(input.authorized_scopes);
   const reserved = freezeReserved(input, principal, authorized_scopes);
   const retrieval = freezeRetrieval(input.retrieval_channel_snapshots, principal, authorized_scopes);
-  const sources = collectOwners(reserved, retrieval);
+  const sources = derivedSources({ ...reserved, retrieval_channel_snapshots: retrieval });
   assertUniqueOwners(sources);
-  assertRestricted(input.restricted_universe, sources, authorized_scopes, principal);
+  admitRestrictedUniverse(input.restricted_universe, sources, principal, authorized_scopes);
   assertCompatibleFrontiers(input.transaction_frontier, sources);
-  const vector = Object.freeze({
+  const body = Object.freeze({
     schema_version: 1 as const,
     principal,
     authorized_scopes,
-    effective_as_of: requireToken(input.effective_as_of),
-    transaction_frontier: requireToken(input.transaction_frontier),
+    effective_as_of: requireToken(input.effective_as_of, "mismatched_principal_scope"),
+    transaction_frontier: requireToken(input.transaction_frontier, "incompatible_base_frontier"),
     base_store_digest: requireSha256(input.base_store_digest),
     ...reserved,
     retrieval_channel_snapshots: retrieval,
     formation_operator_versions: freezeFormation(input.formation_operator_versions),
     decision_contract_digest: requireSha256(input.decision_contract_digest)
   });
-  return vector;
+  return Object.freeze({
+    ...body,
+    vector_digest: digestSnapshotVectorV1(body)
+  });
 }
 
 export function verifySnapshotVectorV1(vector: SnapshotVectorV1): void {
   const rebuilt = createSnapshotVectorV1(vector);
-  if (digestSnapshotVectorV1(rebuilt) !== digestSnapshotVectorV1(vector)) {
+  if (rebuilt.vector_digest !== vector.vector_digest) {
     rejectSnapshotCoherence("malformed_digest");
   }
 }
 
-export function digestSnapshotVectorV1(vector: SnapshotVectorV1): RecallFieldDigest {
+export function digestSnapshotVectorV1(
+  vector: Omit<SnapshotVectorV1, "vector_digest">
+): RecallFieldDigest {
   return digestRecallFieldIdentity({
     schema_version: 1,
     principal: vector.principal,
-    authorized_scopes: [...vector.authorized_scopes].sort(),
+    authorized_scopes: vector.authorized_scopes,
     effective_as_of: vector.effective_as_of,
     transaction_frontier: vector.transaction_frontier,
     base_store_digest: vector.base_store_digest,
     projection_generation: vector.projection_generation,
-    retrieval_channel_snapshots: [...vector.retrieval_channel_snapshots]
-      .slice()
-      .sort((left, right) => left.source_owner.localeCompare(right.source_owner)),
+    retrieval_channel_snapshots: vector.retrieval_channel_snapshots,
     embedding_generation_and_model: vector.embedding_generation_and_model,
     path_graph_generation: vector.path_graph_generation,
     temporal_index_generation: vector.temporal_index_generation,
@@ -104,7 +106,7 @@ function freezeRetrieval(
       rejectSnapshotCoherence("duplicate_source_owner");
     }
     return created;
-  }));
+  }).sort((left, right) => left.source_owner.localeCompare(right.source_owner)));
 }
 
 function boundSlot(
@@ -131,20 +133,6 @@ function bindAuthorized(
   return declaration;
 }
 
-function collectOwners(
-  reserved: ReturnType<typeof freezeReserved>,
-  retrieval: readonly SourceFrontierDeclarationV1[]
-): readonly SourceFrontierDeclarationV1[] {
-  return Object.freeze([
-    reserved.projection_generation,
-    ...retrieval,
-    reserved.embedding_generation_and_model,
-    reserved.path_graph_generation,
-    reserved.temporal_index_generation,
-    reserved.governance_frontier
-  ]);
-}
-
 function assertUniqueOwners(sources: readonly SourceFrontierDeclarationV1[]): void {
   const owners = new Set<string>();
   for (const source of sources) {
@@ -153,28 +141,11 @@ function assertUniqueOwners(sources: readonly SourceFrontierDeclarationV1[]): vo
   }
 }
 
-function assertRestricted(
-  restricted: RestrictedUniverseInput | undefined,
-  authorized: readonly SourceFrontierDeclarationV1[],
-  scopes: readonly string[],
-  principal: string
-): void {
-  const owners = new Set(authorized.map((source) => source.source_owner));
-  for (const source of restricted?.sources ?? []) {
-    const created = createSourceFrontierDeclaration(source);
-    if (owners.has(created.source_owner)) rejectSnapshotCoherence("duplicate_source_owner");
-    if (created.principal !== principal || scopes.includes(created.authorized_scope)) {
-      rejectSnapshotCoherence("mismatched_principal_scope");
-    }
-    owners.add(created.source_owner);
-  }
-}
-
 function assertCompatibleFrontiers(
   transactionFrontier: string,
   sources: readonly SourceFrontierDeclarationV1[]
 ): void {
-  const frontier = requireToken(transactionFrontier);
+  const frontier = requireToken(transactionFrontier, "incompatible_base_frontier");
   for (const source of sources) {
     if (source.lag_bound.kind === "unavailable") continue;
     if (source.source_frontier !== frontier) {
@@ -188,7 +159,10 @@ function freezeFormation(
 ): readonly (readonly [string, string])[] {
   const seen = new Set<string>();
   return Object.freeze(rows.map(([id, version]) => {
-    const frozen = Object.freeze([requireToken(id), requireToken(version)] as const);
+    const frozen = Object.freeze([
+      requireToken(id, "mixed_operator_generation"),
+      requireToken(version, "mixed_operator_generation")
+    ] as const);
     if (seen.has(frozen[0])) rejectSnapshotCoherence("mixed_operator_generation");
     seen.add(frozen[0]);
     return frozen;
@@ -197,7 +171,11 @@ function freezeFormation(
 
 function freezeScopes(scopes: readonly string[]): readonly string[] {
   if (scopes.length === 0) rejectSnapshotCoherence("mismatched_principal_scope");
-  const frozen = Object.freeze(scopes.map((scope) => requireToken(scope)));
+  const frozen = Object.freeze(
+    [...scopes]
+      .map((scope) => requireToken(scope, "mismatched_principal_scope"))
+      .sort((left, right) => left.localeCompare(right))
+  );
   if (new Set(frozen).size !== frozen.length) {
     rejectSnapshotCoherence("mismatched_principal_scope");
   }
@@ -205,17 +183,18 @@ function freezeScopes(scopes: readonly string[]): readonly string[] {
 }
 
 function requirePrincipal(value: string): string {
-  return requireToken(value);
+  return requireToken(value, "mismatched_principal_scope");
 }
 
-function requireToken(value: string): string {
-  if (value.length === 0 || value.trim() !== value) {
-    rejectSnapshotCoherence("mismatched_principal_scope");
-  }
+function requireToken(
+  value: string,
+  code: Parameters<typeof rejectSnapshotCoherence>[0]
+): string {
+  if (value.length === 0 || value.trim() !== value) rejectSnapshotCoherence(code);
   return value;
 }
 
 function requireSha256(value: string): RecallFieldDigest {
-  if (!SHA256.test(value)) rejectSnapshotCoherence("malformed_digest");
-  return value as RecallFieldDigest;
+  if (!isRecallFieldDigest(value)) rejectSnapshotCoherence("malformed_digest");
+  return value;
 }

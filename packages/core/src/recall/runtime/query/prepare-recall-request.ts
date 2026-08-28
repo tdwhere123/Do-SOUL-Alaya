@@ -1,5 +1,9 @@
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import { resolvePreparedAnswerShapePlan } from "../../query/recall-answer-shape-plan.js";
+import {
+  compileRecallAnswerShapePlan,
+  resolvePreparedAnswerShapePlan
+} from "../../query/recall-answer-shape-plan.js";
+import { compileRecallQueryDemand } from "../../query/recall-query-demand.js";
 import { compileRecallQueryProbes } from "../../query/recall-query-probes.js";
 import { extendQueryProbesWithOpenSemanticFactors } from
   "../../query/query-factor-expanded-terms.js";
@@ -61,9 +65,19 @@ export async function prepareRecallRequest(
     pin: captured.pin,
     snapshotDigest: params.snapshotDigest
   });
+  const condition = captured.receipt.condition;
+  const baseProbes = compileRecallQueryProbes(queryText);
   const canonicalQueryCompilation = compileCanonicalQueryCompilation({
-    probes: seed.queryProbes,
-    shape: seed.answerShapePlan
+    probes: baseProbes,
+    demand: compileRecallQueryDemand(baseProbes),
+    shape: compileRecallAnswerShapePlan(baseProbes),
+    factFrameCapture: certified?.factFrameCapture,
+    osfCapture: certified?.formation,
+    observer: {
+      principal: condition.principal,
+      scope: condition.authorized_scopes[0] ?? condition.workspace_id,
+      observer_contract: captured.receipt.query_operator_id
+    }
   }, snapshotCoherenceReceipt);
   return await loadPinnedPreparedRequest({
     context, params, time, seed, captured, certified, releaseProjectionPin,
@@ -207,7 +221,7 @@ async function certifyPreparedSemanticCapture(
   const obligation = deriveQueryFactFrameOsfObligation({
     query_text: queryText, fact_frame_capture: factFrameCapture
   });
-  return await captureCertifiedRecallQueryOpenSemanticFactors({
+  const osf = await captureCertifiedRecallQueryOpenSemanticFactors({
     query_text: queryText,
     obligation,
     port: context.dependencies.openSemanticFactorExtractionPort,
@@ -220,6 +234,10 @@ async function certifyPreparedSemanticCapture(
       error: toErrorMessage(error)
     })
   });
+  return {
+    ...osf,
+    factFrameCapture: { status: factFrameCapture.status }
+  };
 }
 
 async function loadPreparationInputs(

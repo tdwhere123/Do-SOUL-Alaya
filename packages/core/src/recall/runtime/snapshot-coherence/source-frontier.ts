@@ -1,3 +1,4 @@
+import { stableStringify } from "../../../shared/stable-stringify.js";
 import {
   rejectSnapshotCoherence,
   type SnapshotLagBoundV1,
@@ -27,7 +28,7 @@ export function verifySourceFrontierDeclaration(
   declaration: SourceFrontierDeclarationV1
 ): void {
   const rebuilt = createSourceFrontierDeclaration(declaration);
-  if (stableDeclaration(rebuilt) !== stableDeclaration(declaration)) {
+  if (stableStringify(rebuilt) !== stableStringify(declaration)) {
     rejectSnapshotCoherence("mixed_operator_generation", "source frontier mismatch");
   }
 }
@@ -67,8 +68,4 @@ function requireToken(
 ): string {
   if (value.length === 0 || value.trim() !== value) rejectSnapshotCoherence(code);
   return value;
-}
-
-function stableDeclaration(declaration: SourceFrontierDeclarationV1): string {
-  return JSON.stringify(declaration);
 }

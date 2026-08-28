@@ -19,10 +19,16 @@ export type CanonicalVariableV1 = Readonly<{
   readonly sort: CanonicalVariableSortV1;
 }>;
 
+export type CanonicalEvidenceProvenanceV1 = Readonly<{
+  readonly source_id: string;
+  readonly producer: string;
+}>;
+
 export type CanonicalPredicateV1 = Readonly<{
   readonly id: string;
   readonly relation: string;
   readonly arguments: readonly string[];
+  readonly provenance?: CanonicalEvidenceProvenanceV1;
 }>;
 
 export type CanonicalConstraintV1 = Readonly<{
@@ -82,7 +88,8 @@ export type CanonicalQueryUnsupportedCode =
   | "limit_overflow"
   | "latest_without_typed_time_key"
   | "count_sum_unsupported"
-  | "unsupported_nesting";
+  | "unsupported_nesting"
+  | "invalid_all_observable";
 
 export type CanonicalQueryValidationV1 =
   | Readonly<{ readonly status: "supported"; readonly query: CanonicalQueryV1 }>

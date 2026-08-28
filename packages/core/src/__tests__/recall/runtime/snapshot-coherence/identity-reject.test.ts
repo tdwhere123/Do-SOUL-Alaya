@@ -30,7 +30,8 @@ describe("snapshot coherence identity rejects", () => {
     const vector = createSnapshotVectorV1(exactVectorInput());
     expect(() => verifySnapshotVectorV1({
       ...vector,
-      base_store_digest: SHA_A.replace("a", "b") as typeof SHA_A
+      base_store_digest: SHA_A,
+      vector_digest: SHA_A
     })).toThrow(SnapshotCoherenceContractError);
     const receipt = createSnapshotCoherenceReceiptV1(vector);
     expect(() => verifySnapshotCoherenceReceiptV1({

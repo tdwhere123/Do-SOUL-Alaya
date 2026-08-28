@@ -1,3 +1,4 @@
+import { derivedSources } from "./sources.js";
 import type {
   SnapshotCoherenceState,
   SnapshotVectorV1,
@@ -25,19 +26,6 @@ export function classifySnapshotCoherence(
     return freezeClass("coherent_bounded", ["declared_lag"], lag_bounds);
   }
   return freezeClass("coherent_exact", [], lag_bounds);
-}
-
-export function derivedSources(
-  vector: SnapshotVectorV1
-): readonly SourceFrontierDeclarationV1[] {
-  return Object.freeze([
-    vector.projection_generation,
-    ...vector.retrieval_channel_snapshots,
-    vector.embedding_generation_and_model,
-    vector.path_graph_generation,
-    vector.temporal_index_generation,
-    vector.governance_frontier
-  ]);
 }
 
 function tornReasons(

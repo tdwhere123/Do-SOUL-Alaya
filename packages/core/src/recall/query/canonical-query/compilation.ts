@@ -3,12 +3,16 @@ import { digestRecallFieldIdentity, type RecallFieldDigest } from
 import type { SnapshotCoherenceReceiptV1 } from
   "../../runtime/snapshot-coherence/index.js";
 import {
+  CANONICAL_QUERY_OPERATOR_ID,
+  type CanonicalAnswerProgramV1,
+  type CanonicalQueryV1
+} from "./types.js";
+import {
   compileCanonicalQueryEvidence,
   type CanonicalQueryCompileV1,
   type CanonicalQueryEvidenceV1,
   type CanonicalQueryUnresolvedV1
 } from "./compile.js";
-import type { CanonicalQueryUnsupportedCode, CanonicalQueryValidationV1 } from "./types.js";
 
 export const QUERY_HOLE_IMPACTS = [
   "blocks_membership",
@@ -40,8 +44,11 @@ export type CanonicalQueryHypotheticalModeV1 =
 
 export type CanonicalQueryCompilationV1 = Readonly<{
   readonly schema_version: 1;
-  readonly hypotheses: readonly CanonicalQueryValidationV1[];
+  readonly operator_id: typeof CANONICAL_QUERY_OPERATOR_ID;
+  readonly hypotheses: readonly CanonicalQueryV1[];
   readonly unresolved: readonly CanonicalQueryUnresolvedV1[];
+  readonly provenance: readonly string[];
+  readonly hypothesis_provenance: CanonicalQueryCompileV1["hypothesis_provenance"];
   readonly holes: readonly CanonicalQueryHoleV1[];
   readonly compile_status: CanonicalQueryCompileStatusV1;
   readonly hypothetical_mode: CanonicalQueryHypotheticalModeV1;
@@ -59,11 +66,14 @@ export function compileCanonicalQueryCompilation(
     ...collectHoles(compiled),
     ...snapshotHoles(snapshot)
   ]);
-  const compile_status = compileStatus(compiled, holes);
+  const compile_status = compileStatus(compiled.hypotheses, holes);
   const body = Object.freeze({
     schema_version: 1 as const,
+    operator_id: CANONICAL_QUERY_OPERATOR_ID,
     hypotheses: compiled.hypotheses,
     unresolved: compiled.unresolved,
+    provenance: compiled.provenance,
+    hypothesis_provenance: compiled.hypothesis_provenance,
     holes,
     compile_status,
     hypothetical_mode: hypotheticalMode(compile_status),
@@ -76,31 +86,59 @@ export function compileCanonicalQueryCompilation(
   });
 }
 
+export function verifyCanonicalQueryCompilationV1(
+  compilation: CanonicalQueryCompilationV1
+): void {
+  const body = {
+    schema_version: compilation.schema_version,
+    operator_id: compilation.operator_id,
+    hypotheses: compilation.hypotheses,
+    unresolved: compilation.unresolved,
+    provenance: compilation.provenance,
+    hypothesis_provenance: compilation.hypothesis_provenance,
+    holes: compilation.holes,
+    compile_status: compilation.compile_status,
+    hypothetical_mode: compilation.hypothetical_mode,
+    sensitivities: compilation.sensitivities,
+    snapshot_receipt_digest: compilation.snapshot_receipt_digest
+  };
+  if (digestRecallFieldIdentity(body) !== compilation.digest) {
+    throw new Error("canonical query compilation digest mismatch");
+  }
+}
+
 function snapshotHoles(
   snapshot: Readonly<Pick<SnapshotCoherenceReceiptV1, "coherence_state">>
 ): readonly CanonicalQueryHoleV1[] {
   if (snapshot.coherence_state === "coherent_exact") return [];
-  const impact = snapshot.coherence_state === "unavailable"
-    ? "blocks_all_delivery"
-    : "blocks_certified_delivery";
+  const impacts = snapshot.coherence_state === "unavailable"
+    ? ["blocks_all_delivery", "blocks_certified_delivery"]
+    : ["blocks_certified_delivery"];
   return [Object.freeze({
     provenance: "snapshot",
     code: snapshot.coherence_state,
-    impacts: Object.freeze([impact, "blocks_certified_delivery"] as QueryHoleImpactV1[])
+    impacts: Object.freeze([...new Set(impacts)] as QueryHoleImpactV1[])
   })];
 }
 
 function collectHoles(compiled: CanonicalQueryCompileV1): CanonicalQueryHoleV1[] {
-  const holes: CanonicalQueryHoleV1[] = [];
-  for (const hypothesis of compiled.hypotheses) {
-    if (hypothesis.status === "unsupported") {
-      holes.push(holeFromCode(hypothesis.reason_code, "hypothesis"));
+  const holes = compiled.unresolved.map((item) => holeFromCode(item.code, item.source));
+  for (const query of compiled.hypotheses) {
+    if (usesAllObservable(query.answer)) {
+      holes.push(holeFromCode("blocks_completeness_claim", "completion"));
     }
   }
-  for (const item of compiled.unresolved) {
-    holes.push(holeFromCode(item.code, item.source));
-  }
   return holes;
+}
+
+function usesAllObservable(answer: CanonicalAnswerProgramV1): boolean {
+  if (answer.kind === "distinct" || answer.kind === "sequence") {
+    return answer.completion.kind === "all_observable";
+  }
+  if (answer.kind === "argmax" || answer.kind === "argmin") {
+    return usesAllObservable(answer.inner);
+  }
+  return false;
 }
 
 function holeFromCode(code: string, provenance: string): CanonicalQueryHoleV1 {
@@ -112,35 +150,31 @@ function holeFromCode(code: string, provenance: string): CanonicalQueryHoleV1 {
 }
 
 function impactsFor(code: string): QueryHoleImpactV1[] {
-  if (code === "unknown_answer_variable" || code === "blocks_all_delivery") {
+  if (code === "unknown_answer_variable") {
     return ["blocks_membership", "blocks_all_delivery"];
   }
-  if (code === "count_sum_unsupported") {
+  if (code === "count_sum_unsupported" || code === "unsupported_nesting"
+    || code === "ambiguous_cjk_segmentation" || code === "latest_without_typed_time_key"
+    || code === "unknown_time_basis" || code === "wrong_temporal_domain"
+    || code === "unbound_order_key" || code === "limit_overflow") {
     return ["blocks_operator_resolution", "blocks_certified_delivery"];
   }
-  if (code === "latest_without_typed_time_key" || code === "unknown_time_basis"
-    || code === "wrong_temporal_domain" || code === "unbound_order_key") {
-    return ["blocks_operator_resolution"];
-  }
-  if (code === "conflicting_demand_shape" || code === "conflicting_shape") {
+  if (code === "conflicting_demand_shape" || code === "conflicting_shape"
+    || code === "unknown_relation") {
     return ["blocks_pointwise_comparison", "blocks_certified_delivery"];
   }
-  if (code === "limit_overflow" || code === "unsupported_nesting") {
-    return ["blocks_operator_resolution", "blocks_certified_delivery"];
-  }
-  if (code === "all_observable" || code === "blocks_completeness_claim") {
-    return ["blocks_completeness_claim"];
+  if (code === "blocks_completeness_claim" || code === "unknown_scope") {
+    return ["blocks_completeness_claim", "blocks_certified_delivery"];
   }
   return ["blocks_certified_delivery"];
 }
 
 function compileStatus(
-  compiled: CanonicalQueryCompileV1,
+  hypotheses: readonly CanonicalQueryV1[],
   holes: readonly CanonicalQueryHoleV1[]
 ): CanonicalQueryCompileStatusV1 {
-  const supported = compiled.hypotheses.some((row) => row.status === "supported");
-  if (supported && holes.length === 0) return "certified_program";
-  if (supported) return "partial_program";
+  if (hypotheses.length > 0 && holes.length === 0) return "certified_program";
+  if (hypotheses.length > 0) return "partial_program";
   return "unsupported";
 }
 
@@ -153,13 +187,10 @@ function hypotheticalMode(
 }
 
 function collectSensitivities(compiled: CanonicalQueryCompileV1): string[] {
-  const names = new Set<string>();
-  for (const hypothesis of compiled.hypotheses) {
-    if (hypothesis.status !== "supported") continue;
-    names.add(hypothesis.query.answer.kind);
-    for (const predicate of hypothesis.query.predicates) names.add(predicate.relation);
+  const names = new Set<string>(compiled.provenance);
+  for (const query of compiled.hypotheses) {
+    names.add(query.answer.kind);
+    for (const predicate of query.predicates) names.add(predicate.relation);
   }
   return [...names].sort();
 }
-
-export type { CanonicalQueryUnsupportedCode };

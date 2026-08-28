@@ -47,9 +47,8 @@ describe("snapshot coherence digest", () => {
     const right = createSnapshotVectorV1(torn);
     expect(createSnapshotCoherenceReceiptV1(left).coherence_state).toBe("incoherent");
     expect(digestSnapshotVectorV1(left)).toBe(digestSnapshotVectorV1(right));
-    expect(createSnapshotCoherenceReceiptV1(left).vector_digest).not.toBe(
-      "coherent_exact"
-    );
+    expect(createSnapshotCoherenceReceiptV1(left).coherence_state).toBe("incoherent");
+    expect(createSnapshotCoherenceReceiptV1(left).vector_digest).toBe(left.vector_digest);
   });
 
   it("changes receipt_digest when authorized generation changes", () => {

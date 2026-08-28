@@ -1,6 +1,9 @@
 import type { ProjectionPin, QueryConditionReceipt } from "@do-soul/alaya-protocol";
-import { digestRecallFieldIdentity, type RecallFieldDigest } from
-  "../../field/field-identity.js";
+import {
+  digestRecallFieldIdentity,
+  isRecallFieldDigest,
+  type RecallFieldDigest
+} from "../../field/field-identity.js";
 import { createSnapshotCoherenceReceiptV1 } from "./receipt.js";
 import { createSourceFrontierDeclaration } from "./source-frontier.js";
 import { createSnapshotVectorV1 } from "./snapshot-vector.js";
@@ -9,8 +12,6 @@ import {
   type SnapshotCoherenceReceiptV1,
   type SourceFrontierDeclarationV1
 } from "./types.js";
-
-const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 
 export function capturePreparedSnapshotCoherenceReceipt(input: Readonly<{
   readonly queryCondition: QueryConditionReceipt;
@@ -21,13 +22,18 @@ export function capturePreparedSnapshotCoherenceReceipt(input: Readonly<{
   if (input.pin.workspace_id !== condition.workspace_id) {
     rejectSnapshotCoherence("mismatched_principal_scope");
   }
+  if (input.pin.generation_id !== input.queryCondition.generation_id) {
+    rejectSnapshotCoherence("mixed_operator_generation");
+  }
   const scope = condition.authorized_scopes[0];
   if (scope === undefined) rejectSnapshotCoherence("mismatched_principal_scope");
+  // Prepare has no separate write-set frontier; the pin is the only declared generation.
+  const pinnedGeneration = input.pin.generation_id;
   const vector = createSnapshotVectorV1({
     principal: condition.principal,
     authorized_scopes: condition.authorized_scopes,
     effective_as_of: condition.effective_as_of,
-    transaction_frontier: input.pin.generation_id,
+    transaction_frontier: pinnedGeneration,
     base_store_digest: declaredBaseDigest(input.snapshotDigest),
     projection_generation: declaredProjection(input, condition.principal, scope),
     retrieval_channel_snapshots: [],
@@ -87,11 +93,14 @@ function unavailableSource(
 }
 
 function declaredBaseDigest(snapshotDigest: string | undefined): RecallFieldDigest {
-  if (snapshotDigest !== undefined && SHA256.test(snapshotDigest)) {
-    return snapshotDigest as RecallFieldDigest;
+  if (snapshotDigest === undefined) {
+    return digestRecallFieldIdentity({
+      status: "producer_receipt_unavailable",
+      owner: "base_store"
+    });
   }
-  return digestRecallFieldIdentity({
-    status: "producer_receipt_unavailable",
-    owner: "base_store"
-  });
+  if (!isRecallFieldDigest(snapshotDigest)) {
+    rejectSnapshotCoherence("malformed_digest");
+  }
+  return snapshotDigest;
 }

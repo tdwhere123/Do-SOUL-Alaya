@@ -82,13 +82,14 @@ export type SnapshotVectorV1 = Readonly<{
   readonly governance_frontier: SourceFrontierDeclarationV1;
   readonly formation_operator_versions: readonly (readonly [string, string])[];
   readonly decision_contract_digest: RecallFieldDigest;
+  readonly vector_digest: RecallFieldDigest;
 }>;
 
 export type RestrictedUniverseInput = Readonly<{
   readonly sources?: readonly SourceFrontierDeclarationV1[];
 }>;
 
-export type SnapshotVectorV1Input = Omit<SnapshotVectorV1, "schema_version"> & Readonly<{
+export type SnapshotVectorV1Input = Omit<SnapshotVectorV1, "schema_version" | "vector_digest"> & Readonly<{
   readonly restricted_universe?: RestrictedUniverseInput;
 }>;
 

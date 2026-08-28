@@ -50,6 +50,7 @@ export function createCanonicalQueryV1(input: CanonicalQueryInputV1 & {
   const constraints = freezeAtoms(input.constraints ?? [], "constraint");
   assertLimits(variables, predicates, constraints, input.answer);
   const names = new Map(variables.map((variable) => [variable.name, variable]));
+  bindPhi(predicates, constraints, names);
   bindAnswer(input.answer, names, { extrema: 0, depth: 0 });
   const query = Object.freeze({
     schema_version: 1 as const,
@@ -128,6 +129,16 @@ function assertLimits(
   }
 }
 
+function bindPhi(
+  predicates: readonly CanonicalPredicateV1[],
+  constraints: readonly CanonicalConstraintV1[],
+  names: ReadonlyMap<string, CanonicalVariableV1>
+): void {
+  for (const atom of [...predicates, ...constraints]) {
+    for (const argument of atom.arguments) requireVariable(argument, names);
+  }
+}
+
 function bindAnswer(
   answer: CanonicalAnswerProgramV1,
   names: ReadonlyMap<string, CanonicalVariableV1>,
@@ -203,11 +214,14 @@ function freezeCompletion(completion: CanonicalCompletionV1): CanonicalCompletio
     }
     return Object.freeze({ kind: "at_most", n: completion.n });
   }
+  if (completion.snapshot_bind !== "Sigma_q") {
+    throw new CanonicalQueryContractError("invalid_all_observable");
+  }
   return Object.freeze({
-    kind: "all_observable",
+    kind: "all_observable" as const,
     scope: requireToken(completion.scope),
     principal: requireToken(completion.principal),
-    snapshot_bind: "Sigma_q",
+    snapshot_bind: "Sigma_q" as const,
     observer_contract: requireToken(completion.observer_contract)
   });
 }
