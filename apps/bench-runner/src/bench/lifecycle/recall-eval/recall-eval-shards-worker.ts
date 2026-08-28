@@ -3,6 +3,7 @@ import {
   buildCredentiallessLongMemEvalWorkerEnv,
   buildLongMemEvalWorkerEnvOverrides,
   freezeProcessEnvForWorkers,
+  runSupervisedWorkerGroup,
   spawnLongMemEvalWorkerProcess,
   shardHasMergeableKpi,
   type LongMemEvalWorkerShardPlan,
@@ -15,7 +16,7 @@ import {
 } from "../../snapshot/recall-eval/workspace-slice/names.js";
 
 export type { LongMemEvalWorkerShardPlan, LongMemEvalWorkerSpawner };
-export { spawnLongMemEvalWorkerProcess, shardHasMergeableKpi };
+export { runSupervisedWorkerGroup, spawnLongMemEvalWorkerProcess, shardHasMergeableKpi };
 
 export function buildRecallEvalWorkerCliArgs(
   opts: RecallEvalOptions,
@@ -63,6 +64,7 @@ export function buildRecallEvalWorkerEnv(input: {
         shardRoot: input.shardRoot,
         historyRoot: input.historyRoot
       }),
+      ALAYA_RECALL_EVAL_EMBEDDING: input.embeddingMode,
       [SEALED_SLICE_RESTORE_ENV]: "1",
       [REQUIRE_SLICE_REUSE_ENV]: "1"
     })

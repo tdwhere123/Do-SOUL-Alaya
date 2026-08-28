@@ -42,6 +42,7 @@ import {
   buildLongMemEvalWorkerCliArgs,
   buildCredentiallessLongMemEvalWorkerEnv,
   buildLongMemEvalWorkerEnvOverrides,
+  runSupervisedWorkerGroup,
   shardHasMergeableKpi,
   spawnLongMemEvalWorkerProcess,
   type LongMemEvalWorkerShardPlan,
@@ -312,9 +313,12 @@ async function loadConcurrentSelection(
 async function runLongMemEvalConcurrentWorkers(
   context: LongMemEvalConcurrentContext
 ): Promise<void> {
-  const results = await Promise.all(
-    context.plans.map((plan) => runLongMemEvalConcurrentWorker(context, plan))
-  );
+  const results = await runSupervisedWorkerGroup({
+    label: "longmemeval --concurrency",
+    starts: context.plans.map((plan) => (signal) =>
+      runLongMemEvalConcurrentWorker(context, plan, signal)),
+    isFatal: (result) => result.fatal
+  });
   if (results.some((result) => result.fatal)) {
     throw new Error(
       `longmemeval --concurrency: one or more worker processes failed (${results.map((result) => result.status).join(",")})`
@@ -324,7 +328,8 @@ async function runLongMemEvalConcurrentWorkers(
 
 async function runLongMemEvalConcurrentWorker(
   context: LongMemEvalConcurrentContext,
-  plan: LongMemEvalWorkerShardPlan
+  plan: LongMemEvalWorkerShardPlan,
+  signal: AbortSignal
 ): Promise<{ readonly status: number; readonly fatal: boolean }> {
   const logPath = join(context.logDir, `shard-${plan.shardIndex}.log`);
   const status = await context.spawnWorker({
@@ -347,7 +352,8 @@ async function runLongMemEvalConcurrentWorker(
           }))
       }
     ),
-    logPath
+    logPath,
+    signal
   });
   const mergeable = status === 1 && await shardHasMergeableKpi(plan.historyRoot);
   if (status !== 0) {

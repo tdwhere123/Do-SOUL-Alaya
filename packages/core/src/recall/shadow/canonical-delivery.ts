@@ -47,6 +47,7 @@ import {
 } from "./integrate.js";
 import { buildProductionSetUtilities } from "./utility/production.js";
 import { ShadowContractError } from "./envelope.js";
+import { assertCanonicalSelectionReceipt } from "./canonical-receipt-validation.js";
 
 export { CANONICAL_CAPTURE_IDENTITY } from "@do-soul/alaya-protocol";
 export type { CanonicalSelectionReceipt } from "@do-soul/alaya-protocol";
@@ -163,10 +164,10 @@ function capturedSelectionReceipt(
   trace: ShadowCapturedTrace
 ): CanonicalSelectionReceipt {
   const body = capturedReceiptBody(trace);
-  return Object.freeze({
+  return assertCanonicalSelectionReceipt(Object.freeze({
     ...body,
     receipt_digest: `sha256:${sha256(canonicalSelectionReceiptPreimage(body))}`
-  });
+  }));
 }
 
 function capturedReceiptBody(

@@ -66,6 +66,9 @@ export const CanonicalSelectionReceiptBodySchema =
 const ReceiptShapeSchema = CanonicalSelectionReceiptBodyObject.extend({
   receipt_digest: ReceiptDigest
 }).strict().readonly();
+export const CANONICAL_SELECTION_RECEIPT_SHAPE_JSON_SCHEMA = Object.freeze(
+  z.toJSONSchema(ReceiptShapeSchema)
+);
 
 export type CanonicalSelectionReceiptBody = z.infer<
   typeof CanonicalSelectionReceiptBodySchema
@@ -73,8 +76,9 @@ export type CanonicalSelectionReceiptBody = z.infer<
 export type CanonicalSelectionReceipt = z.infer<typeof ReceiptShapeSchema>;
 export type CanonicalDisposition = z.infer<typeof CanonicalDispositionSchema>;
 export type CanonicalSelectionSha256 = (preimage: string) => string;
-export const CanonicalSelectionReceiptSchema =
-  ReceiptShapeSchema.superRefine(validateReceipt).readonly();
+export const CanonicalSelectionReceiptSchema = ReceiptShapeSchema.superRefine(
+  (receipt, context) => validateReceipt(receipt, (message) => issue(context, message))
+).readonly();
 
 export function createCanonicalSelectionReceipt(
   input: unknown,
@@ -102,26 +106,38 @@ export function canonicalSelectionReceiptPreimage(body: CanonicalSelectionReceip
   return canonicalJson(body);
 }
 
-function validateReceipt(receipt: CanonicalSelectionReceipt, context: z.RefinementCtx): void {
+export function assertCanonicalSelectionReceiptClosure<T extends CanonicalSelectionReceipt>(
+  receipt: T
+): T {
+  validateReceipt(receipt, (message) => { throw new Error(message); });
+  return receipt;
+}
+
+type ReceiptIssue = (message: string) => void;
+
+function validateReceipt(receipt: CanonicalSelectionReceipt, report: ReceiptIssue): void {
   const membership = receipt.field_membership;
   const captured = receipt.execution.status === "captured";
+  if (captured !== (receipt.execution.reason === null)) {
+    return report("capture execution reason contradicts status");
+  }
   if (captured !== (receipt.observations_by_candidate_key !== null) ||
-      captured !== (receipt.frontiers !== null)) return issue(context, "capture execution mismatch");
+      captured !== (receipt.frontiers !== null)) return report("capture execution mismatch");
   if (![membership.e0_keys, membership.e1_keys, membership.eligible_keys].every(unique) ||
       membership.eligible_keys.some((key) => !membership.e1_keys.includes(key))) {
-    return issue(context, "capture field membership mismatch");
+    return report("capture field membership mismatch");
   }
   if (membership.e0_keys.some((key) => !membership.e1_keys.includes(key)) !==
       (receipt.execution.reason === "membership_shrink")) {
-    return issue(context, "capture membership shrink status mismatch");
+    return report("capture membership shrink status mismatch");
   }
-  if (!captured) return validateFailClosed(receipt, context);
-  validateCapturedClosure(receipt, context);
+  if (!captured) return validateFailClosed(receipt, report);
+  validateCapturedClosure(receipt, report);
 }
 
 function validateFailClosed(
   receipt: CanonicalSelectionReceipt,
-  context: z.RefinementCtx
+  report: ReceiptIssue
 ): void {
   const gammaEmpty = receipt.gamma.set_utilities.length === 0 &&
     receipt.gamma.decisions.length === 0 && receipt.gamma.rejects.length === 0;
@@ -129,12 +145,12 @@ function validateFailClosed(
     row.status === "unavailable" && row.reason === "fail_closed_unavailable");
   if (!gammaEmpty || receipt.delivery.length > 0 ||
       !sameSet(receipt.dispositions.map(keyOf), receipt.field_membership.e1_keys) ||
-      !unavailable) issue(context, "failed capture receipt is not closed");
+      !unavailable) report("failed capture receipt is not closed");
 }
 
 function validateCapturedClosure(
   receipt: CanonicalSelectionReceipt,
-  context: z.RefinementCtx
+  report: ReceiptIssue
 ): void {
   const e1 = receipt.field_membership.e1_keys;
   const observations = Object.keys(receipt.observations_by_candidate_key ?? {});
@@ -143,28 +159,28 @@ function validateCapturedClosure(
   if (!sameSet(observations, e1) || !sameSet(utilities, e1) ||
       !sameSet(dispositions, e1) || receipt.dispositions.some((row) =>
         row.status === "unavailable")) {
-    return issue(context, "captured candidate closure mismatch");
+    return report("captured candidate closure mismatch");
   }
-  validateFrontiers(receipt, context);
-  validateDispositions(receipt, context);
+  validateFrontiers(receipt, report);
+  validateDispositions(receipt, report);
 }
 
 function validateFrontiers(
   receipt: CanonicalSelectionReceipt,
-  context: z.RefinementCtx
+  report: ReceiptIssue
 ): void {
   const members = receipt.frontiers?.layers.flatMap((layer, index) => {
-    if (layer.index !== index + 1 || !unique(layer.member_keys)) issue(context, "invalid frontier");
+    if (layer.index !== index + 1 || !unique(layer.member_keys)) report("invalid frontier");
     return layer.member_keys;
   }) ?? [];
   if (!unique(members) || !sameSet(members, receipt.field_membership.eligible_keys)) {
-    issue(context, "frontiers must partition eligible keys");
+    report("frontiers must partition eligible keys");
   }
 }
 
 function validateDispositions(
   receipt: CanonicalSelectionReceipt,
-  context: z.RefinementCtx
+  report: ReceiptIssue
 ): void {
   const eligible = receipt.field_membership.eligible_keys;
   const decisions = receipt.gamma.decisions.map(keyOf);
@@ -172,17 +188,17 @@ function validateDispositions(
   if (!unique(decisions) || !unique(rejects) ||
       !sameSet([...decisions, ...rejects], eligible) ||
       decisions.some((key) => rejects.includes(key))) {
-    return issue(context, "capture decisions and rejects must partition eligible keys");
+    return report("capture decisions and rejects must partition eligible keys");
   }
   const rejectedReasons = new Map(receipt.gamma.rejects.map((row) =>
     [row.candidate_key, row.walk_reject]));
   const ineligible = receipt.field_membership.e1_keys.filter((key) => !eligible.includes(key));
   for (const row of receipt.dispositions) {
     if (!dispositionMatches(row, decisions, rejectedReasons, ineligible)) {
-      return issue(context, "disposition does not match its authority row");
+      return report("disposition does not match its authority row");
     }
   }
-  validateDeliveryPrefix(receipt, decisions, context);
+  validateDeliveryPrefix(receipt, decisions, report);
 }
 
 function dispositionMatches(
@@ -202,14 +218,14 @@ function dispositionMatches(
 function validateDeliveryPrefix(
   receipt: CanonicalSelectionReceipt,
   decisions: readonly string[],
-  context: z.RefinementCtx
+  report: ReceiptIssue
 ): void {
   const delivered = receipt.delivery.map((row, index) => {
-    if (row.delivery_rank !== index + 1) issue(context, "delivery ranks are not contiguous");
+    if (row.delivery_rank !== index + 1) report("delivery ranks are not contiguous");
     return row.candidate_key;
   });
   if (!unique(delivered) || !delivered.every((key, index) => key === decisions[index])) {
-    issue(context, "delivery is not a selected prefix");
+    report("delivery is not a selected prefix");
   }
 }
 

@@ -23,6 +23,7 @@ import {
   reuseOrExplodeSealedSlices,
   reuseSealedSlicesWithoutPackedCopy
 } from "./sealed-cache.js";
+import { readValidWorkspaceSliceSnapshotReceipt } from "./slice-snapshot.js";
 
 export async function explodeRecallEvalWorkingCopyIfNeeded(input: {
   readonly dataDirRoot: string;
@@ -69,12 +70,24 @@ export function installRecallEvalWorkspaceSlice(input: {
 }): void {
   const sliceDbPath = input.slices.sliceDbPaths[input.workspaceId]
     ?? workspaceSliceDbPath(input.slices.destDir, input.workspaceId);
+  const expectedSha256 = input.slices.sliceMainFileSha256s[input.workspaceId];
   if (!existsSync(sliceDbPath)) {
     throw new Error(`workspace slice is missing for ${input.workspaceId}`);
   }
+  if (expectedSha256 === undefined) {
+    throw new Error(`workspace slice digest is missing for ${input.workspaceId}`);
+  }
+  const receipt = readValidWorkspaceSliceSnapshotReceipt({
+    workspaceId: input.workspaceId,
+    dbPath: sliceDbPath
+  });
+  if (receipt === null || receipt.sqlite_main_file_sha256 !== expectedSha256) {
+    throw new Error(`workspace slice changed after verification for ${input.workspaceId}`);
+  }
   installWorkspaceSlice({
     dataDir: input.dataDirRoot,
-    sliceDbPath
+    sliceDbPath,
+    expectedSha256
   });
 }
 

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import BetterSqlite3 from "better-sqlite3";
 import { workspaceSliceDbPath, type ExplodedWorkspaceSlices } from "./explode.js";
-import { readValidWorkspaceSliceSnapshotDigest } from "./slice-snapshot.js";
+import { readValidWorkspaceSliceSnapshotReceipt } from "./slice-snapshot.js";
 
 export function listWorkspaceIds(dbPath: string): readonly string[] {
   const database = new BetterSqlite3(dbPath, { readonly: true, fileMustExist: true });
@@ -22,25 +22,28 @@ export function completeSlicesOrNull(
 ): ExplodedWorkspaceSlices | null {
   const sliceDbPaths: Record<string, string> = {};
   const sliceSnapshotDigests: Record<string, string> = {};
+  const sliceMainFileSha256s: Record<string, string> = {};
   for (const workspaceId of workspaceIds) {
     const sliceDbPath = workspaceSliceDbPath(destDir, workspaceId);
     if (!existsSync(sliceDbPath) || !sliceContainsOnlyWorkspace(sliceDbPath, workspaceId)) {
       return null;
     }
-    const snapshotDigest = readValidWorkspaceSliceSnapshotDigest({
+    const receipt = readValidWorkspaceSliceSnapshotReceipt({
       workspaceId,
       dbPath: sliceDbPath
     });
-    if (snapshotDigest === null) return null;
+    if (receipt === null) return null;
     sliceDbPaths[workspaceId] = sliceDbPath;
-    sliceSnapshotDigests[workspaceId] = snapshotDigest;
+    sliceSnapshotDigests[workspaceId] = receipt.snapshot_digest;
+    sliceMainFileSha256s[workspaceId] = receipt.sqlite_main_file_sha256;
   }
   return Object.freeze({
     packedDbPath,
     destDir,
     workspaceIds,
     sliceDbPaths: Object.freeze(sliceDbPaths),
-    sliceSnapshotDigests: Object.freeze(sliceSnapshotDigests)
+    sliceSnapshotDigests: Object.freeze(sliceSnapshotDigests),
+    sliceMainFileSha256s: Object.freeze(sliceMainFileSha256s)
   });
 }
 

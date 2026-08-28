@@ -20,6 +20,8 @@ export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
     process.stdout.write(renderStart(opts));
     const result = await runRecallEval(buildRecallEvalOptions(opts, opts.snapshot));
     process.stdout.write(renderResult(result));
+    if (result.completion.status !== "complete" ||
+        result.memoryProfile.status === "incomplete") return 2;
     return exitCodeForReleaseHardGates(result.payload);
   } catch (error) {
     process.stderr.write(

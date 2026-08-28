@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  assertCanonicalSelectionReceiptClosure,
   createCanonicalSelectionReceipt,
   CANONICAL_CAPTURE_IDENTITY_BLOB,
   CANONICAL_CAPTURE_IDENTITY_DIGEST,
@@ -67,6 +68,21 @@ describe("canonical selection receipt", () => {
   ])("rejects captured $name", ({ patch }) => {
     expect(() => createCanonicalSelectionReceipt({ ...capturedBody(), ...patch }, sha256))
       .toThrow();
+  });
+
+  it("validates a zero-copy captured receipt against the closure contract", () => {
+    const valid = createCanonicalSelectionReceipt(capturedBody(), sha256);
+    const digest = valid.receipt_digest;
+    expect(assertCanonicalSelectionReceiptClosure(valid)).toBe(valid);
+    expect(valid.receipt_digest).toBe(digest);
+    expect(() => assertCanonicalSelectionReceiptClosure({
+      ...valid,
+      delivery: [{ candidate_key: "a", delivery_rank: 2 }]
+    })).toThrow(/delivery ranks are not contiguous/u);
+    expect(() => assertCanonicalSelectionReceiptClosure({
+      ...valid,
+      execution: { status: "captured", reason: "invalid_state" }
+    })).toThrow(/reason contradicts status/u);
   });
 });
 

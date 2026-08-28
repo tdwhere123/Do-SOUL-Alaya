@@ -14,6 +14,7 @@ import {
   digestWorkspaceSliceSnapshotIdentity,
   explodePackedWorkingCopy,
   explodeRecallEvalWorkingCopyIfNeeded,
+  installRecallEvalWorkspaceSlice,
   installWorkspaceSlice,
   loadSliceIntoOpenDatabase,
   readValidWorkspaceSliceSnapshotDigest,
@@ -251,6 +252,22 @@ describe("workspace slice snapshot identity", () => {
     })).toBeNull();
     const rebuiltSidecar = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
     expect(rebuiltSidecar!.sliceSnapshotDigests[WORKSPACE_A]).toBe(sealed);
+  });
+
+  it("refuses to install bytes that drift after sealed-slice verification", async () => {
+    const slices = await explodePackedWorkingCopy({
+      packedDbPath: packedPath,
+      destDir: join(root, "install-drift-slices"),
+      workspaceIds: [WORKSPACE_A, WORKSPACE_B]
+    });
+    writeFileSync(slices.sliceDbPaths[WORKSPACE_A]!, "drifted after verification");
+
+    expect(() => installRecallEvalWorkspaceSlice({
+      dataDirRoot: join(root, "install-drift-data"),
+      workspaceId: WORKSPACE_A,
+      slices
+    })).toThrow(/changed after verification/u);
+    expect(existsSync(workingAlayaDbPath(join(root, "install-drift-data")))).toBe(false);
   });
 
   it("does not mutate the sealed source file when installing or reloading", async () => {

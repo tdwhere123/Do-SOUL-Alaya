@@ -16,11 +16,52 @@ export interface LongMemEvalWorkerSpawnOptions {
   readonly args: readonly string[];
   readonly env: NodeJS.ProcessEnv;
   readonly logPath: string;
+  readonly signal: AbortSignal;
 }
 
 export type LongMemEvalWorkerSpawner = (
   options: LongMemEvalWorkerSpawnOptions
 ) => Promise<number>;
+
+export async function runSupervisedWorkerGroup<T>(input: {
+  readonly label: string;
+  readonly starts: readonly ((signal: AbortSignal) => Promise<T>)[];
+  readonly isFatal: (result: T) => boolean;
+}): Promise<readonly T[]> {
+  const controller = new AbortController();
+  let interrupted: NodeJS.Signals | null = null;
+  const onSigint = () => interrupt("SIGINT");
+  const onSigterm = () => interrupt("SIGTERM");
+  const interrupt = (signal: NodeJS.Signals) => {
+    interrupted = signal;
+    controller.abort(new Error(`${input.label} interrupted by ${signal}`));
+  };
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
+  try {
+    const settled = await Promise.allSettled(input.starts.map((start) =>
+      Promise.resolve().then(() => start(controller.signal)).then((result) => {
+        if (input.isFatal(result)) controller.abort(new Error(`${input.label} worker failed`));
+        return result;
+      }, (error: unknown) => {
+        controller.abort(error);
+        throw error;
+      })
+    ));
+    if (interrupted !== null) throw new Error(`${input.label} interrupted by ${interrupted}`);
+    const errors = settled.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : []);
+    if (errors.length > 0) {
+      const first = errors[0];
+      const detail = first instanceof Error ? first.message : String(first);
+      throw new AggregateError(errors, `${input.label}: ${detail}`);
+    }
+    return settled.map((result) => (result as PromiseFulfilledResult<T>).value);
+  } finally {
+    process.removeListener("SIGINT", onSigint);
+    process.removeListener("SIGTERM", onSigterm);
+  }
+}
 
 export function freezeProcessEnvForWorkers(
   env: NodeJS.ProcessEnv = process.env,
@@ -72,17 +113,47 @@ export async function spawnLongMemEvalWorkerProcess(
 ): Promise<number> {
   const logHandle = await open(options.logPath, "w");
   try {
-    return await new Promise<number>((resolveExit, reject) => {
-      const child = spawn(process.execPath, [options.cliPath, ...options.args], {
-        env: options.env,
-        stdio: ["ignore", logHandle.fd, logHandle.fd]
-      });
-      child.once("error", reject);
-      child.once("close", (code) => resolveExit(code ?? 1));
-    });
+    return await waitForWorkerProcess(options, logHandle.fd);
   } finally {
     await logHandle.close();
   }
+}
+
+function waitForWorkerProcess(
+  options: LongMemEvalWorkerSpawnOptions,
+  logFd: number
+): Promise<number> {
+  if (options.signal.aborted) return Promise.reject(workerAbortError(options.signal));
+  return new Promise<number>((resolveExit, reject) => {
+    const child = spawn(process.execPath, [options.cliPath, ...options.args], {
+      env: options.env,
+      stdio: ["ignore", logFd, logFd]
+    });
+    let killTimer: NodeJS.Timeout | undefined;
+    const cleanup = () => {
+      options.signal.removeEventListener("abort", onAbort);
+      if (killTimer !== undefined) clearTimeout(killTimer);
+    };
+    const onAbort = () => {
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      killTimer.unref();
+    };
+    child.once("error", (error) => {
+      cleanup();
+      reject(error);
+    });
+    child.once("close", (code) => {
+      cleanup();
+      resolveExit(code ?? 1);
+    });
+    options.signal.addEventListener("abort", onAbort, { once: true });
+    if (options.signal.aborted) onAbort();
+  });
+}
+
+function workerAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error("worker process aborted");
 }
 
 export async function shardHasMergeableKpi(historyRoot: string): Promise<boolean> {

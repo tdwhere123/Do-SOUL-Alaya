@@ -30,6 +30,7 @@ import { readRegularFileNoFollow } from "../../snapshot/bound-file.js";
 import {
   buildRecallEvalWorkerCliArgs,
   buildRecallEvalWorkerEnv,
+  runSupervisedWorkerGroup,
   shardHasMergeableKpi,
   spawnLongMemEvalWorkerProcess,
   type LongMemEvalWorkerShardPlan,
@@ -73,7 +74,10 @@ export function shouldFanOutRecallEvalWorkers(opts: RecallEvalOptions): boolean 
   return resolveRecallEvalConcurrency(opts) > 1;
 }
 
-export function validateRecallEvalConcurrency(opts: RecallEvalOptions): void {
+export function validateRecallEvalConcurrency(
+  opts: RecallEvalOptions,
+  env: Readonly<Record<string, string | undefined>> = process.env
+): void {
   if (!shouldFanOutRecallEvalWorkers(opts)) return;
   if (opts.dataDirRoot !== undefined) {
     throw new Error(
@@ -81,6 +85,47 @@ export function validateRecallEvalConcurrency(opts: RecallEvalOptions): void {
         "each worker needs an isolated daemon DB."
     );
   }
+  if ((env.ALAYA_RECALL_EVAL_MEMORY_PROFILE_PATH?.trim().length ?? 0) > 0) {
+    throw new Error(
+      "recall-eval --concurrency > 1 is incompatible with memory profiling; " +
+        "a single profile cannot represent multiple worker processes"
+    );
+  }
+  const unsupportedSubstrate = [
+    opts.warmDerivedSnapshotReceiptPath === undefined ? null : "warm derived snapshot",
+    opts.derivedEvidenceProjectionRebuild === true ? "derived projection rebuild" : null,
+    opts.embeddingCacheOverlayReceiptPath === undefined ? null : "embedding cache overlay"
+  ].filter((value): value is string => value !== null);
+  if (unsupportedSubstrate.length > 0) {
+    throw new Error(
+      "recall-eval --concurrency > 1 sealed slices cannot represent: " +
+        unsupportedSubstrate.join(", ")
+    );
+  }
+}
+
+export function buildMergedPerQuestionDelivered(
+  diagnostics: readonly Readonly<{
+    readonly question_id: string;
+    readonly delivered_results?: readonly Readonly<{ readonly object_id: string }>[];
+    readonly delivered_memory_ids?: readonly string[];
+  }>[],
+  perScenario: readonly Readonly<{ readonly id: string }>[]
+): ReadonlyMap<string, readonly string[]> {
+  const expected = new Set(perScenario.map((row) => row.id));
+  const byQuestion = new Map(diagnostics.map((question) => [question.question_id, question]));
+  if (expected.size !== perScenario.length || byQuestion.size !== diagnostics.length ||
+      diagnostics.length !== perScenario.length ||
+      diagnostics.some((question) => !expected.has(question.question_id))) {
+    throw new Error("recall-eval shard delivery coverage mismatch");
+  }
+  return new Map(perScenario.map((row) => {
+    const question = byQuestion.get(row.id);
+    if (question === undefined) throw new Error("recall-eval shard delivery coverage mismatch");
+    const objectIds = question.delivered_results?.map((result) => result.object_id) ??
+      question.delivered_memory_ids ?? [];
+    return [row.id, Object.freeze([...objectIds])];
+  }));
 }
 
 export function resolveRecallEvalShardWindow(
@@ -189,9 +234,12 @@ async function prepareRecallEvalShardedRun(
 async function runRecallEvalShardWorkers(
   context: RecallEvalShardedContext
 ): Promise<void> {
-  const results = await Promise.all(
-    context.plans.map((plan) => runRecallEvalShardWorker(context, plan))
-  );
+  const results = await runSupervisedWorkerGroup({
+    label: "recall-eval --concurrency",
+    starts: context.plans.map((plan) => (signal) =>
+      runRecallEvalShardWorker(context, plan, signal)),
+    isFatal: (result) => result.fatal
+  });
   if (results.some((result) => result.fatal)) {
     throw new Error(
       `recall-eval --concurrency: one or more worker processes failed (${
@@ -203,7 +251,8 @@ async function runRecallEvalShardWorkers(
 
 async function runRecallEvalShardWorker(
   context: RecallEvalShardedContext,
-  plan: LongMemEvalWorkerShardPlan
+  plan: LongMemEvalWorkerShardPlan,
+  signal: AbortSignal
 ): Promise<{ readonly status: number; readonly fatal: boolean }> {
   const logPath = join(context.logDir, `shard-${plan.shardIndex}.log`);
   const status = await context.spawnWorker({
@@ -215,7 +264,8 @@ async function runRecallEvalShardWorker(
       shardRoot: context.shardRoot,
       historyRoot: plan.historyRoot
     }),
-    logPath
+    logPath,
+    signal
   });
   const mergeable = status === 1 && await shardHasMergeableKpi(plan.historyRoot);
   if (status !== 0) {
@@ -273,7 +323,10 @@ async function mergeRecallEvalShardedRunWithSpool(
     findingsPath: join(dirname(archive.kpiPath), "findings.md"),
     payload: archive.merged,
     snapshotManifest: context.snapshotManifest,
-    perQuestionDelivered: new Map(),
+    perQuestionDelivered: buildMergedPerQuestionDelivered(
+      loaded.questionDiagnostics,
+      archive.merged.kpi.per_scenario
+    ),
     completion: { status: "complete", failures: [] },
     memoryProfile: { status: "disabled", failures: [] }
   };

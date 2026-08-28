@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { hashRegularFileNoFollow } from "../../bound-file.js";
 import {
   EventPublisher,
   RelationAssertionService
@@ -41,6 +42,7 @@ export interface ExplodedWorkspaceSlices {
   readonly workspaceIds: readonly string[];
   readonly sliceDbPaths: Readonly<Record<string, string>>;
   readonly sliceSnapshotDigests: Readonly<Record<string, string>>;
+  readonly sliceMainFileSha256s: Readonly<Record<string, string>>;
 }
 
 export function workspaceSliceDbPath(destDir: string, workspaceId: string): string {
@@ -82,7 +84,10 @@ export async function explodePackedWorkingCopy(
     destDir: input.destDir,
     workspaceIds: Object.freeze(dests.map((dest) => dest.workspaceId)),
     sliceDbPaths: Object.freeze(sliceDbPaths),
-    sliceSnapshotDigests
+    sliceSnapshotDigests,
+    sliceMainFileSha256s: Object.freeze(Object.fromEntries(dests.map((dest) =>
+      [dest.workspaceId, hashRegularFileNoFollow(dest.dbPath)]
+    )))
   });
 }
 

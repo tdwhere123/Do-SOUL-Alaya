@@ -1,7 +1,8 @@
 import { existsSync, renameSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { initDatabase } from "@do-soul/alaya-storage";
-import { atomicCopy } from "../../freeze/db-copy.js";
+import { atomicCopy, cloneCachedSealedSnapshot } from "../../freeze/db-copy.js";
 import { BENCH_DAEMON_DB_FILENAME } from "../../materialize.js";
 import { reloadBenchWorkingDatabase } from "../../../../harness/daemon/runtime/daemon-db-pragmas.js";
 import { loadSliceIntoOpenDatabase } from "./load-open.js";
@@ -36,17 +37,39 @@ export function preservePackedWorkingCopy(dataDir: string): string {
 export function installWorkspaceSlice(input: {
   readonly dataDir: string;
   readonly sliceDbPath: string;
+  readonly expectedSha256?: string;
 }): void {
   const working = workingAlayaDbPath(input.dataDir);
   if (!existsSync(working)) {
-    atomicCopy(input.sliceDbPath, working);
+    copySlice(input, working);
     reloadBenchWorkingDatabase(input.dataDir);
     return;
   }
   // Replacing the inode would leave the long-lived pager's prepared statements
   // bound to the previous file.
-  const live = initDatabase({ filename: working });
-  loadSliceIntoOpenDatabase(live, input.sliceDbPath);
-  // Load-open already ANALYZE main; skip a second planner pass.
-  reloadBenchWorkingDatabase(input.dataDir, { analyze: false });
+  const staged = `${working}.${randomUUID()}.slice`;
+  try {
+    copySlice(input, staged);
+    const live = initDatabase({ filename: working });
+    loadSliceIntoOpenDatabase(live, staged);
+    // Load-open already ANALYZE main; skip a second planner pass.
+    reloadBenchWorkingDatabase(input.dataDir, { analyze: false });
+  } finally {
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(`${staged}${suffix}`, { force: true });
+  }
+}
+
+function copySlice(
+  input: { readonly sliceDbPath: string; readonly expectedSha256?: string },
+  targetPath: string
+): void {
+  if (input.expectedSha256 === undefined) {
+    atomicCopy(input.sliceDbPath, targetPath);
+    return;
+  }
+  cloneCachedSealedSnapshot({
+    sourcePath: input.sliceDbPath,
+    targetPath,
+    expectedSha256: input.expectedSha256
+  });
 }

@@ -16,6 +16,7 @@ import {
 } from "../../../bench/snapshot/recall-eval/workspace-slice/index.js";
 import {
   assertExactRecallEvalShardCoverage,
+  buildMergedPerQuestionDelivered,
   resolveRecallEvalShardWindow,
   runRecallEvalSharded,
   validateRecallEvalConcurrency
@@ -41,6 +42,30 @@ describe("validateRecallEvalConcurrency", () => {
       dataDirRoot: "/tmp/shared-db"
     })).toThrow(/--concurrency > 1 is incompatible with --data-dir-root/);
   });
+
+  it.each([
+    ["warm derived snapshot", { warmDerivedSnapshotReceiptPath: "/tmp/warm.json" }],
+    ["derived projection rebuild", { derivedEvidenceProjectionRebuild: true }],
+    ["embedding cache overlay", { embeddingCacheOverlayReceiptPath: "/tmp/overlay.json" }]
+  ])("fails closed when sealed slices cannot represent %s", (_name, incompatible) => {
+    expect(() => validateRecallEvalConcurrency({
+      snapshotDbPath: "/tmp/snapshot.db",
+      variant: "longmemeval_s",
+      historyRoot: "/tmp/history",
+      concurrency: 2,
+      ...incompatible
+    })).toThrow(/sealed slices cannot represent/u);
+  });
+
+  it("fails closed instead of sharing one memory profile across workers", () => {
+    expect(() => validateRecallEvalConcurrency({
+      snapshotDbPath: "/tmp/snapshot.db",
+      variant: "longmemeval_s",
+      historyRoot: "/tmp/history",
+      concurrency: 2
+    }, { ALAYA_RECALL_EVAL_MEMORY_PROFILE_PATH: "/tmp/profile.ndjson" }))
+      .toThrow(/incompatible with memory profiling/u);
+  });
 });
 
 describe("resolveRecallEvalShardWindow", () => {
@@ -59,7 +84,6 @@ describe("resolveRecallEvalShardWindow", () => {
     ]);
   });
 });
-
 describe("buildRecallEvalWorkerCliArgs", () => {
   it("isolates each worker with offset/limit and omits shared data-dir-root", () => {
     const args = buildRecallEvalWorkerCliArgs({
@@ -93,6 +117,50 @@ describe("buildRecallEvalWorkerEnv", () => {
     });
     expect(env[SEALED_SLICE_RESTORE_ENV]).toBe("1");
     expect(env[REQUIRE_SLICE_REUSE_ENV]).toBe("1");
+  });
+
+  it.each([
+    ["disabled", "env"],
+    ["env", "disabled"]
+  ] as const)("pins explicit %s treatment over ambient %s", (explicit, ambient) => {
+    const previous = process.env.ALAYA_RECALL_EVAL_EMBEDDING;
+    process.env.ALAYA_RECALL_EVAL_EMBEDDING = ambient;
+    try {
+      const env = buildRecallEvalWorkerEnv({
+        concurrency: 2,
+        embeddingMode: explicit,
+        shardRoot: "/tmp/shards",
+        historyRoot: "/tmp/shards/shard-0"
+      });
+      expect(env.ALAYA_RECALL_EVAL_EMBEDDING).toBe(explicit);
+    } finally {
+      if (previous === undefined) delete process.env.ALAYA_RECALL_EVAL_EMBEDDING;
+      else process.env.ALAYA_RECALL_EVAL_EMBEDDING = previous;
+    }
+  });
+});
+
+describe("buildMergedPerQuestionDelivered", () => {
+  it("restores question and delivery order from validated shard diagnostics", () => {
+    const delivered = buildMergedPerQuestionDelivered([
+      { question_id: "q-2", delivered_results: [{ object_id: "b-1" }] },
+      { question_id: "q-1", delivered_results: [
+        { object_id: "a-1" },
+        { object_id: "a-2" }
+      ] }
+    ], [{ id: "q-1" }, { id: "q-2" }]);
+
+    expect([...delivered]).toEqual([
+      ["q-1", ["a-1", "a-2"]],
+      ["q-2", ["b-1"]]
+    ]);
+  });
+
+  it("fails closed on missing or duplicate question diagnostics", () => {
+    expect(() => buildMergedPerQuestionDelivered([
+      { question_id: "q-1", delivered_results: [] },
+      { question_id: "q-1", delivered_results: [] }
+    ], [{ id: "q-1" }, { id: "q-2" }])).toThrow(/coverage/u);
   });
 });
 
@@ -188,6 +256,33 @@ describe("runRecallEvalSharded", () => {
     expect(questionHits(result.payload)).toEqual(questionHits(serial));
     expect(result.payload.kpi.seed_extraction_path?.llm_calls).toBe(0);
     expect(result.payload.evaluated_count).toBe(4);
+  });
+
+  it("aborts and joins a sibling when another shard spawn rejects", async () => {
+    let siblingAborted = false;
+    const run = runRecallEvalSharded({
+      snapshotDbPath: join(tmpRoot, "snapshot.db"),
+      variant: "longmemeval_s",
+      historyRoot: join(tmpRoot, "history"),
+      concurrency: 2,
+      limit: 2
+    }, {
+      resolveWindow: async () => ({ baseOffset: 0, windowLength: 2 }),
+      loadSnapshotManifest: async () => stubManifest(2),
+      spawnWorker: async (options) => {
+        const offset = Number(options.args[options.args.indexOf("--offset") + 1]);
+        if (offset === 0) throw new Error("planted spawn failure");
+        return await new Promise<number>((resolve) => {
+          options.signal.addEventListener("abort", () => {
+            siblingAborted = true;
+            resolve(0);
+          }, { once: true });
+        });
+      }
+    });
+
+    await expect(run).rejects.toThrow(/planted spawn failure/u);
+    expect(siblingAborted).toBe(true);
   });
 });
 

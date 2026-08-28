@@ -29,6 +29,7 @@
     "@do-soul/alaya-protocol": "workspace:*",
     "@huggingface/transformers": "^4.2.0",
     "@node-rs/jieba": "2.0.1",
+    "ajv": "^8.20.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

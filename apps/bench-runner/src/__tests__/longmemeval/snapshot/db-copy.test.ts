@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, constants } from "node:fs";
+import { copyFileSync, constants, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,6 +110,41 @@ describe("clone-or-copy snapshot restore", () => {
       targetPath: join(input.root, "restore-drift", "alaya.db"),
       expectedSha256: digest
     })).toThrow(/SHA-256 mismatch|changed after cached digest/u);
+  });
+
+  it("keeps the cached inode bound when its source path is replaced during clone", async () => {
+    const input = await fixture();
+    const digest = hashRegularFileNoFollow(input.source);
+    const target = join(input.root, "restore-bound", "alaya.db");
+    const originalPath = `${input.source}.original`;
+    let planted = false;
+    let failedClosed = false;
+    try {
+      cloneCachedSealedSnapshot({
+        sourcePath: input.source,
+        targetPath: target,
+        expectedSha256: digest,
+        copyFile: (openedSource, dest) => {
+          planted = true;
+          renameSync(input.source, originalPath);
+          writeFileSync(input.source, "untrusted replacement");
+          try {
+            copyFileSync(openedSource, dest);
+          } finally {
+            rmSync(input.source, { force: true });
+            renameSync(originalPath, input.source);
+          }
+        }
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      failedClosed = true;
+    }
+
+    expect(planted).toBe(true);
+    if (failedClosed) await expect(readFile(target)).rejects.toThrow();
+    else expect(await readFile(target)).toEqual(input.bytes);
+    expect(await readFile(input.source)).toEqual(input.bytes);
   });
 });
 

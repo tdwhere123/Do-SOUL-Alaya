@@ -7,6 +7,7 @@ export {
 export {
   digestWorkspaceSliceSnapshotIdentity,
   readValidWorkspaceSliceSnapshotDigest,
+  readValidWorkspaceSliceSnapshotReceipt,
   sealFinalizedWorkspaceSlice,
   assertQuiescentMainDb,
   WORKSPACE_SLICE_EXPLODE_RECIPE_ID,

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { renameSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -75,5 +76,50 @@ describe("descriptor-bound file IO", () => {
     await writeFile(input.source, "mutated after digest");
     expect(hashRegularFileNoFollow(input.source)).not.toBe(first);
     expect(boundFileFullContentReadCount() - before).toBe(2);
+  });
+
+  it("refuses to register a digest against a replacement path", async () => {
+    const input = await fixture();
+    const original = `${input.source}.original`;
+    const replacement = Buffer.from("replacement bytes", "utf8");
+
+    expect(() => hashRegularFileNoFollow(input.source, {
+      beforeCacheRegistration: () => {
+        renameSync(input.source, original);
+        writeFileSync(input.source, replacement);
+      }
+    })).toThrow(/changed before digest registration/u);
+    expect(hashRegularFileNoFollow(input.source)).toBe(
+      createHash("sha256").update(replacement).digest("hex")
+    );
+  });
+
+  it("refuses copy cache registration when source or target paths drift", async () => {
+    const sourceInput = await fixture();
+    const sourceTarget = join(sourceInput.root, "source-drift.db");
+    expect(() => copyRegularFileNoFollow({
+      sourcePath: sourceInput.source,
+      targetPath: sourceTarget,
+      expectedSha256: sourceInput.sha256,
+      beforeCacheRegistration: () => {
+        renameSync(sourceInput.source, `${sourceInput.source}.original`);
+        writeFileSync(sourceInput.source, "source replacement");
+      }
+    })).toThrow(/changed before digest registration/u);
+    await expect(readFile(sourceTarget)).rejects.toThrow();
+
+    const targetInput = await fixture();
+    const target = join(targetInput.root, "target-drift.db");
+    expect(() => copyRegularFileNoFollow({
+      sourcePath: targetInput.source,
+      targetPath: target,
+      expectedSha256: targetInput.sha256,
+      beforeCacheRegistration: () => {
+        renameSync(target, `${target}.original`);
+        writeFileSync(target, "target replacement");
+      }
+    })).toThrow(/changed before digest registration/u);
+    await expect(readFile(target)).rejects.toThrow();
+    expect(await readFile(`${target}.original`)).toEqual(await readFile(targetInput.source));
   });
 });

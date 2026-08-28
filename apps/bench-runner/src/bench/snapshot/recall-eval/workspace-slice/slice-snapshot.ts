@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -6,6 +5,7 @@ import {
   type RecallFieldDigest
 } from "@do-soul/alaya-core";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
+import { hashRegularFileNoFollow } from "../../bound-file.js";
 
 export const WORKSPACE_SLICE_SQLITE_KIND = "alaya.bench.workspace_slice_sqlite";
 export const WORKSPACE_SLICE_EXPLODE_RECIPE_ID = "alaya.bench.workspace-slice-explode";
@@ -53,6 +53,13 @@ export function readValidWorkspaceSliceSnapshotDigest(input: Readonly<{
   readonly workspaceId: string;
   readonly dbPath: string;
 }>): RecallFieldDigest | null {
+  return readValidWorkspaceSliceSnapshotReceipt(input)?.snapshot_digest ?? null;
+}
+
+export function readValidWorkspaceSliceSnapshotReceipt(input: Readonly<{
+  readonly workspaceId: string;
+  readonly dbPath: string;
+}>): WorkspaceSliceSnapshotReceipt | null {
   const receipt = readWorkspaceSliceSnapshotReceipt(sidecarPath(input.dbPath));
   if (receipt === null) return null;
   try {
@@ -60,9 +67,9 @@ export function readValidWorkspaceSliceSnapshotDigest(input: Readonly<{
     assertMatchingWorkspaceSliceSnapshot(
       receipt,
       input.workspaceId,
-      sha256FileHex(input.dbPath)
+      hashRegularFileNoFollow(input.dbPath)
     );
-    return receipt.snapshot_digest;
+    return receipt;
   } catch {
     return null;
   }
@@ -73,7 +80,7 @@ function persistWorkspaceSliceSnapshot(
   dbPath: string
 ): RecallFieldDigest {
   assertQuiescentMainDb(dbPath);
-  const sqliteMainFileSha256 = sha256FileHex(dbPath);
+  const sqliteMainFileSha256 = hashRegularFileNoFollow(dbPath);
   const snapshotDigest = digestWorkspaceSliceSnapshotIdentity({
     workspaceId,
     sqliteMainFileSha256
@@ -116,10 +123,6 @@ function truncateWalOrThrow(database: StorageDatabase): void {
 
 function sidecarPath(dbPath: string): string {
   return join(dirname(dbPath), WORKSPACE_SLICE_SNAPSHOT_SIDECAR_FILENAME);
-}
-
-function sha256FileHex(filePath: string): string {
-  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
 
 function readWorkspaceSliceSnapshotReceipt(

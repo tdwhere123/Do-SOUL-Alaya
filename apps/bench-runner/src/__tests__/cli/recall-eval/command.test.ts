@@ -53,7 +53,7 @@ it("reports bounded post-commit and memory-profile completion failures", async (
     memoryProfile: incomplete("profile_close", "ENOSPC")
   });
 
-  await expect(runRecallEvalCommand(flags())).resolves.toBe(0);
+  await expect(runRecallEvalCommand(flags())).resolves.toBe(2);
   const output = vi.mocked(process.stdout.write).mock.calls.flat().join("");
   expect(output).toContain(
     "completion status=incomplete failures=phase=diagnostics_spool_cleanup name=Error code=EIO"

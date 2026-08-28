@@ -4,12 +4,12 @@ import {
   constants,
   fstatSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   readSync,
   rmSync,
-  statSync,
   writeSync
 } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -48,12 +48,15 @@ export function sha256Buffer(value: Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-type CachedFileSha256 = Readonly<{
+export type OpenedFileIdentity = Readonly<{
   readonly dev: number;
   readonly ino: number;
   readonly ctimeMs: number;
   readonly size: number;
   readonly mtimeMs: number;
+}>;
+
+type CachedFileSha256 = OpenedFileIdentity & Readonly<{
   readonly sha256: string;
 }>;
 
@@ -62,7 +65,8 @@ let fullFileContentReads = 0;
 
 function cachedFileSha256(filePath: string): CachedFileSha256 | undefined {
   try {
-    const metadata = statSync(filePath);
+    const metadata = lstatSync(filePath);
+    if (!metadata.isFile()) return undefined;
     const cached = fileSha256Cache.get(resolve(filePath));
     if (cached === undefined) return undefined;
     if (cached.dev !== metadata.dev || cached.ino !== metadata.ino ||
@@ -82,20 +86,74 @@ export function sealedDigestIdentityDrifted(filePath: string): boolean {
   return fileSha256Cache.has(resolve(filePath)) && peekCachedFileSha256(filePath) === undefined;
 }
 
+export function withRegularFileNoFollow<T>(
+  filePath: string,
+  operation: (openedPath: string) => T
+): T {
+  return withOpenedRegularFile(filePath, undefined, operation);
+}
+
+export function withCachedRegularFileNoFollow<T>(input: {
+  readonly filePath: string;
+  readonly expectedSha256: string;
+  readonly operation: (openedPath: string) => T;
+}): T {
+  const cached = cachedFileSha256(input.filePath);
+  if (cached === undefined || cached.sha256 !== input.expectedSha256) {
+    throw new Error(`${input.filePath} changed after cached digest`);
+  }
+  return withOpenedRegularFile(input.filePath, cached, input.operation);
+}
+
 export function boundFileFullContentReadCount(): number {
   return fullFileContentReads;
 }
 
-export function rememberFileSha256(filePath: string, sha256: string): void {
-  const metadata = statSync(filePath);
-  fileSha256Cache.set(resolve(filePath), Object.freeze({
-    dev: metadata.dev,
-    ino: metadata.ino,
-    ctimeMs: metadata.ctimeMs,
-    size: metadata.size,
-    mtimeMs: metadata.mtimeMs,
-    sha256
+export function openedRegularFileIdentity(descriptor: number): OpenedFileIdentity {
+  const metadata = fstatSync(descriptor);
+  if (!metadata.isFile()) throw new Error("opened file is not regular");
+  return fileIdentity(metadata);
+}
+
+export function rememberOpenedFileSha256(input: {
+  readonly filePath: string;
+  readonly descriptor: number;
+  readonly expectedIdentity: OpenedFileIdentity;
+  readonly sha256: string;
+}): void {
+  const opened = openedRegularFileIdentity(input.descriptor);
+  if (!sameFileIdentity(opened, input.expectedIdentity)) {
+    throw new Error(`${input.filePath} changed before digest registration`);
+  }
+  assertOpenedFilePath(input.filePath, input.descriptor);
+  fileSha256Cache.set(resolve(input.filePath), Object.freeze({
+    ...opened,
+    sha256: input.sha256
   }));
+}
+
+export function assertOpenedFileIdentity(input: {
+  readonly filePath: string;
+  readonly descriptor: number;
+  readonly expectedIdentity: OpenedFileIdentity;
+}): OpenedFileIdentity {
+  const opened = openedRegularFileIdentity(input.descriptor);
+  if (!sameFileIdentity(opened, input.expectedIdentity)) {
+    throw new Error(`${input.filePath} changed before digest registration`);
+  }
+  return assertOpenedFilePath(input.filePath, input.descriptor);
+}
+
+export function assertOpenedFilePath(
+  filePath: string,
+  descriptor: number
+): OpenedFileIdentity {
+  const opened = openedRegularFileIdentity(descriptor);
+  const current = lstatSync(filePath);
+  if (!current.isFile() || !sameFileIdentity(fileIdentity(current), opened)) {
+    throw new Error(`${filePath} changed before digest registration`);
+  }
+  return opened;
 }
 
 export function assertRegularFileNoFollow(filePath: string): void {
@@ -109,28 +167,73 @@ export function assertRegularFileNoFollow(filePath: string): void {
   }
 }
 
-export function hashRegularFileNoFollow(filePath: string): string {
-  const cached = peekCachedFileSha256(filePath);
+function withOpenedRegularFile<T>(
+  filePath: string,
+  expected: CachedFileSha256 | undefined,
+  operation: (openedPath: string) => T
+): T {
+  const descriptor = openSync(filePath, constants.O_RDONLY | NO_FOLLOW);
+  try {
+    const before = openedRegularFileIdentity(descriptor);
+    if (expected !== undefined && !sameFileIdentity(before, expected)) {
+      throw new Error(`${filePath} changed after cached digest`);
+    }
+    const result = operation(openedFileDescriptorPath(descriptor));
+    if (!sameFileIdentity(openedRegularFileIdentity(descriptor), before)) {
+      throw new Error(`${filePath} changed while copying`);
+    }
+    return result;
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+export function openedFileDescriptorPath(descriptor: number): string {
+  if (process.platform === "linux") return `/proc/self/fd/${descriptor}`;
+  if (process.platform === "darwin" || process.platform === "freebsd") {
+    return `/dev/fd/${descriptor}`;
+  }
+  throw new Error(`descriptor-bound file copy is unsupported on ${process.platform}`);
+}
+
+function sameFileIdentity(left: OpenedFileIdentity, right: OpenedFileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino &&
+    left.ctimeMs === right.ctimeMs && left.size === right.size &&
+    left.mtimeMs === right.mtimeMs;
+}
+
+export function hashRegularFileNoFollow(
+  filePath: string,
+  hooks: Readonly<{ readonly beforeCacheRegistration?: () => void }> = {}
+): string {
+  const cached = cachedFileSha256(filePath);
   if (cached !== undefined) {
-    assertRegularFileNoFollow(filePath);
-    return cached;
+    return withOpenedRegularFile(filePath, cached, () => cached.sha256);
   }
   const source = openSync(filePath, constants.O_RDONLY | NO_FOLLOW);
-  let sha256: string;
   try {
-    if (!fstatSync(source).isFile()) throw new Error(`${filePath} is not a regular file`);
-    sha256 = hashOpenFile(source);
+    const before = openedRegularFileIdentity(source);
+    const sha256 = hashOpenFile(source);
+    const after = openedRegularFileIdentity(source);
+    if (!sameFileIdentity(before, after)) throw new Error(`${filePath} changed while hashing`);
+    hooks.beforeCacheRegistration?.();
+    rememberOpenedFileSha256({
+      filePath,
+      descriptor: source,
+      expectedIdentity: after,
+      sha256
+    });
+    return sha256;
   } finally {
     closeSync(source);
   }
-  rememberFileSha256(filePath, sha256);
-  return sha256;
 }
 
 export function copyRegularFileNoFollow(input: {
   readonly sourcePath: string;
   readonly targetPath: string;
   readonly expectedSha256: string;
+  readonly beforeCacheRegistration?: () => void;
 }): void {
   mkdirSync(dirname(input.targetPath), { recursive: true });
   for (const suffix of ["", "-wal", "-shm"]) rmSync(`${input.targetPath}${suffix}`, { force: true });
@@ -139,7 +242,7 @@ export function copyRegularFileNoFollow(input: {
   let failed = false;
   let actualSha: string | undefined;
   try {
-    if (!fstatSync(source).isFile()) throw new Error("legacy snapshot DB is not a regular file");
+    const sourceBefore = openedRegularFileIdentity(source);
     target = openSync(
       input.targetPath,
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NO_FOLLOW,
@@ -150,6 +253,16 @@ export function copyRegularFileNoFollow(input: {
       throw new Error("legacy snapshot DB SHA-256 mismatch");
     }
     fsyncSync(target);
+    const sourceAfter = openedRegularFileIdentity(source);
+    const targetAfter = openedRegularFileIdentity(target);
+    if (!sameFileIdentity(sourceBefore, sourceAfter)) {
+      throw new Error("legacy snapshot DB changed while copying");
+    }
+    input.beforeCacheRegistration?.();
+    rememberOpenedFileSha256({ filePath: input.sourcePath, descriptor: source,
+      expectedIdentity: sourceAfter, sha256: actualSha });
+    rememberOpenedFileSha256({ filePath: input.targetPath, descriptor: target,
+      expectedIdentity: targetAfter, sha256: actualSha });
   } catch (error) {
     failed = true;
     throw error;
@@ -161,8 +274,16 @@ export function copyRegularFileNoFollow(input: {
   if (actualSha === undefined) {
     throw new Error("sealed snapshot copy produced no digest");
   }
-  rememberFileSha256(input.sourcePath, actualSha);
-  rememberFileSha256(input.targetPath, actualSha);
+}
+
+function fileIdentity(metadata: OpenedFileIdentity): OpenedFileIdentity {
+  return Object.freeze({
+    dev: metadata.dev,
+    ino: metadata.ino,
+    ctimeMs: metadata.ctimeMs,
+    size: metadata.size,
+    mtimeMs: metadata.mtimeMs
+  });
 }
 
 function hashOpenFile(source: number): string {

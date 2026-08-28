@@ -22,6 +22,8 @@ import {
 } from "../../../recall/shadow/integrate.js";
 import { FIELD_PINS } from "../fine-assessment-selection-fixtures.js";
 import { withFineDeliveryPath } from "../recall-service-test-fixtures.js";
+import { assertCanonicalSelectionReceipt } from
+  "../../../recall/shadow/canonical-receipt-validation.js";
 import { fieldCandidates } from "./canonical-delivery-fixtures.js";
 import { embeddingObserved, field, temporalObserved, view } from "./psi-test-support.js";
 
@@ -69,6 +71,22 @@ describe("same-result observation and receipt reuse", () => {
     expect(canonicalSelectionReceiptPreimage(body)).not.toBe(omitted);
     expect(Object.keys(body.observations_by_candidate_key ?? {}).sort())
       .toEqual([...body.field_membership.e1_keys].sort());
+  });
+
+  it("validates full receipt shape and closure without replacing live structures", () => {
+    const receipt = requireReceipt(fineAssess(assessParams(fieldCandidates(IDS))).capture_receipt);
+    const observations = receipt.observations_by_candidate_key;
+    const frontiers = receipt.frontiers;
+    const digest = receipt.receipt_digest;
+
+    expect(assertCanonicalSelectionReceipt(receipt)).toBe(receipt);
+    expect(receipt.observations_by_candidate_key).toBe(observations);
+    expect(receipt.frontiers).toBe(frontiers);
+    expect(receipt.receipt_digest).toBe(digest);
+    expect(() => assertCanonicalSelectionReceipt({
+      ...receipt,
+      ranking_authority: "shape-invalid-but-closed"
+    } as CanonicalSelectionReceipt)).toThrow();
   });
 
   it("builds the live field once and peels frontiers once", () => {
