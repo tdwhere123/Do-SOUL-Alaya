@@ -3,7 +3,8 @@ import {
   createSnapshotCoherenceReceiptV1,
   createSnapshotVectorV1,
   digestSnapshotCoherenceReceiptV1,
-  digestSnapshotVectorV1
+  digestSnapshotVectorV1,
+  unavailableProducerDigest
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
 import {
   declaration,
@@ -64,5 +65,39 @@ describe("snapshot coherence digest", () => {
     })));
     expect(changed.vector_digest).not.toBe(exact.vector_digest);
     expect(changed.receipt_digest).not.toBe(exact.receipt_digest);
+  });
+
+  it("does not treat unknown base, empty retrieval, or empty formation as exact", () => {
+    const unknownBase = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(
+      exactVectorInput({ base_store_digest: unavailableProducerDigest("base_store") })
+    ));
+    const emptyRetrieval = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(
+      exactVectorInput({ retrieval_channel_snapshots: [] })
+    ));
+    const emptyFormation = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(
+      exactVectorInput({ formation_operator_versions: [] })
+    ));
+    expect(unknownBase.coherence_state).toBe("unavailable");
+    expect(unknownBase.reasons).toContain("base_store_unknown");
+    expect(emptyRetrieval.coherence_state).toBe("unavailable");
+    expect(emptyRetrieval.reasons).toContain("retrieval_undeclared");
+    expect(emptyFormation.coherence_state).toBe("unavailable");
+    expect(emptyFormation.reasons).toContain("formation_undeclared");
+    expect(unknownBase.coherence_state).not.toBe("coherent_exact");
+    const unknownDecision = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(
+      exactVectorInput({
+        decision_contract_digest: unavailableProducerDigest("decision_contract")
+      })
+    ));
+    expect(unknownDecision.reasons).toContain("decision_contract_unknown");
+    const notApplicable = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(
+      exactVectorInput({
+        path_graph_generation: declaration({
+          source_owner: "path_graph_generation",
+          lag_bound: { kind: "not_applicable" }
+        })
+      })
+    ));
+    expect(notApplicable.coherence_state).toBe("coherent_exact");
   });
 });

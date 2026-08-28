@@ -76,7 +76,7 @@ export function compileCanonicalQueryCompilation(
     hypothesis_provenance: compiled.hypothesis_provenance,
     holes,
     compile_status,
-    hypothetical_mode: hypotheticalMode(compile_status),
+    hypothetical_mode: hypotheticalMode(compile_status, holes),
     sensitivities: Object.freeze(collectSensitivities(compiled)),
     snapshot_receipt_digest: snapshot.receipt_digest
   });
@@ -122,7 +122,7 @@ function snapshotHoles(
 }
 
 function collectHoles(compiled: CanonicalQueryCompileV1): CanonicalQueryHoleV1[] {
-  const holes = compiled.unresolved.map((item) => holeFromCode(item.code, item.source));
+  const holes = compiled.unresolved.map((item) => holeFromUnresolved(item));
   for (const query of compiled.hypotheses) {
     if (usesAllObservable(query.answer)) {
       holes.push(holeFromCode("blocks_completeness_claim", "completion"));
@@ -141,6 +141,18 @@ function usesAllObservable(answer: CanonicalAnswerProgramV1): boolean {
   return false;
 }
 
+function holeFromUnresolved(
+  item: CanonicalQueryUnresolvedV1
+): CanonicalQueryHoleV1 {
+  return holeFromCode(item.code, unresolvedProvenance(item));
+}
+
+function unresolvedProvenance(item: CanonicalQueryUnresolvedV1): string {
+  return [item.source, item.detail, item.capture_digest]
+    .filter((part): part is string => part !== undefined && part.length > 0)
+    .join(":");
+}
+
 function holeFromCode(code: string, provenance: string): CanonicalQueryHoleV1 {
   return Object.freeze({
     provenance,
@@ -156,11 +168,13 @@ function impactsFor(code: string): QueryHoleImpactV1[] {
   if (code === "count_sum_unsupported" || code === "unsupported_nesting"
     || code === "ambiguous_cjk_segmentation" || code === "latest_without_typed_time_key"
     || code === "unknown_time_basis" || code === "wrong_temporal_domain"
-    || code === "unbound_order_key" || code === "limit_overflow") {
+    || code === "unbound_order_key" || code === "limit_overflow"
+    || code === "unadapted_osf") {
     return ["blocks_operator_resolution", "blocks_certified_delivery"];
   }
   if (code === "conflicting_demand_shape" || code === "conflicting_shape"
-    || code === "unknown_relation") {
+    || code === "unknown_relation" || code === "unadapted_fact_frame"
+    || code === "unbound_target_term") {
     return ["blocks_pointwise_comparison", "blocks_certified_delivery"];
   }
   if (code === "blocks_completeness_claim" || code === "unknown_scope") {
@@ -179,8 +193,12 @@ function compileStatus(
 }
 
 function hypotheticalMode(
-  status: CanonicalQueryCompileStatusV1
+  status: CanonicalQueryCompileStatusV1,
+  holes: readonly CanonicalQueryHoleV1[]
 ): CanonicalQueryHypotheticalModeV1 {
+  if (holes.some((hole) => hole.impacts.includes("blocks_all_delivery"))) {
+    return status === "unsupported" ? "unsupported" : "abstained";
+  }
   if (status === "certified_program") return "certified";
   if (status === "partial_program") return "best_effort";
   return "unsupported";

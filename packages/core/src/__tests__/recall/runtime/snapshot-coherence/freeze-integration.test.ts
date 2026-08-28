@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as fineAssessment from "../../../../recall/delivery/fine-assessment.js";
+import * as gamma from "../../../../recall/delivery/select-gamma/select-gamma.js";
 import { captureQueryCondition } from
   "../../../../recall/query/condition/query-condition-capture.js";
 import { prepareRecallRequest } from
@@ -7,7 +9,7 @@ import { captureRecallRequestTime } from
   "../../../../recall/runtime/query/recall-request-time.js";
 import {
   SEALED_EMPTY_FRONTIER,
-  createSeededTestOnlyInMemoryFieldQuerySession
+  createSeededTestOnlyInMemoryFieldQuerySessionWithStore
 } from "../../../../recall/runtime/query/field-query-session.js";
 import { InMemoryProjectionGenerationStore } from
   "../../../../recall/field/retrieval/projection/generation-store.js";
@@ -23,6 +25,7 @@ import {
 import { RecallService } from "../../../../recall/recall-service.js";
 import { CANONICAL_CAPTURE_IDENTITY } from
   "../../../../recall/shadow/canonical-delivery.js";
+import { stableStringify } from "../../../../shared/stable-stringify.js";
 import { buildRecallPolicy } from "../../../../shared/recall-policy.js";
 import { fieldContractSha256 } from "../../../../shared/field-hash.js";
 import {
@@ -41,6 +44,10 @@ import {
 const SHA_A = `sha256:${"a".repeat(64)}`;
 
 describe("snapshot freeze integration", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("captures an unavailable receipt at prepare without changing public delivery", async () => {
     const { prepared, session, store } = await prepareSample();
     expect(prepared.snapshotCoherenceReceipt.coherence_state).toBe("unavailable");
@@ -142,11 +149,57 @@ describe("snapshot freeze integration", () => {
     expect(withStore.coherence_state).toBe("unavailable");
   });
 
+  it("releases the pin when post-pin snapshot capture fails", async () => {
+    let live = 0;
+    const { prepared: seeded, session } = await prepareSample();
+    seeded.releaseProjectionPin();
+    seeded.projectionPinLease.stop();
+    const tracked = {
+      ...session,
+      pinActiveGeneration(workspaceId: string, recordedAt: string) {
+        live += 1;
+        return session.pinActiveGeneration(workspaceId, recordedAt);
+      },
+      release(pin: typeof seeded.projectionPin, releasedAt: string) {
+        live -= 1;
+        return session.release(pin, releasedAt);
+      }
+    };
+    const { dependencies } = createDependencies([]);
+    const taskSurface = createTaskSurface();
+    const policy = buildRecallPolicy({
+      runtimeId: "00000000-0000-0000-0000-000000000000",
+      taskSurfaceId: taskSurface.runtime_id,
+      maxResults: 10,
+      filters: { scopeFilter: null, dimensionFilter: null, domainTagFilter: null },
+      conflictAwareness: false,
+      maxTotalTokens: 1_000
+    });
+    const time = captureRecallRequestTime({ now: () => CLOCK_AS_OF });
+    await expect(prepareRecallRequest({
+      dependencies,
+      warn: () => undefined,
+      now: () => CLOCK_AS_OF,
+      buildDefaultPolicy: () => policy,
+      fieldQuerySession: tracked,
+      sha256: fieldContractSha256
+    }, {
+      taskSurface,
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      snapshotDigest: "not-a-digest"
+    }, time)).rejects.toThrow(SnapshotCoherenceContractError);
+    expect(live).toBe(0);
+  });
+
   it("keeps canonical membership, order, and public receipt identity", async () => {
     const memory = createMemoryEntry({
       object_id: "memory-canonical",
       content: "I take yoga classes at Serenity Yoga."
     });
+    const prepareLegacy = vi.spyOn(fineAssessment, "prepareFineAssessment");
+    const assess = vi.spyOn(fineAssessment, "fineAssess");
+    const gammaWalk = vi.spyOn(gamma, "selectGammaWalk");
     const { dependencies } = createDependencies([memory]);
     const service = new RecallService({
       ...dependencies,
@@ -162,13 +215,28 @@ describe("snapshot freeze integration", () => {
     };
     const first = await service.recall(params);
     const second = await service.recall(params);
-    expect(first.delivery_path).toBe("canonical");
-    expect(first.ranking_authority).toBe("prefix_sk");
-    expect(first.capture_identity).toEqual(CANONICAL_CAPTURE_IDENTITY);
-    expect(second.capture_identity).toEqual(first.capture_identity);
     const firstKeys = first.candidates.map((candidate) => candidate.object_id);
+    const publicDelivery = {
+      delivery_path: first.delivery_path,
+      ranking_authority: first.ranking_authority,
+      capture_identity: first.capture_identity,
+      object_ids: firstKeys,
+      relevance_scores: first.candidates.map((candidate) => candidate.relevance_score)
+    };
+    // Shadow-off transcript: f29002ba canonical-execute-recall.test.ts yoga fixture.
+    expect(stableStringify(publicDelivery)).toBe(stableStringify({
+      delivery_path: "canonical",
+      ranking_authority: "prefix_sk",
+      capture_identity: CANONICAL_CAPTURE_IDENTITY,
+      object_ids: ["memory-canonical"],
+      relevance_scores: [0]
+    }));
+    expect(second.capture_identity).toEqual(first.capture_identity);
     expect(second.candidates.map((candidate) => candidate.object_id)).toEqual(firstKeys);
-    expect(firstKeys).toEqual(["memory-canonical"]);
+    expect(prepareLegacy).not.toHaveBeenCalled();
+    expect(assess).toHaveBeenCalled();
+    expect(gammaWalk).not.toHaveBeenCalled();
+    expect(dependencies.memoryRepo.findByWorkspaceId).toHaveBeenCalled();
   });
 });
 
@@ -185,10 +253,9 @@ async function prepareSample() {
   });
   const time = captureRecallRequestTime({ now: () => CLOCK_AS_OF });
   const store = new InMemoryProjectionGenerationStore(fieldContractSha256);
-  const session = createSeededTestOnlyInMemoryFieldQuerySession(
+  const session = createSeededTestOnlyInMemoryFieldQuerySessionWithStore(
     fieldContractSha256,
     "workspace-1",
-    "1970-01-01T00:00:00.000Z",
     store
   );
   const prepared = await prepareRecallRequest({

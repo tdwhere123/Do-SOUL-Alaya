@@ -6,6 +6,7 @@ export {
   type SnapshotCoherenceRejectCode,
   type SnapshotCoherenceState,
   type SnapshotLagBoundV1,
+  type SnapshotRemainingEffectV1,
   type SnapshotValidTimeDomainV1,
   type SnapshotVectorV1,
   type SnapshotVectorV1Input,
@@ -27,3 +28,4 @@ export {
   verifySnapshotCoherenceReceiptV1
 } from "./receipt.js";
 export { capturePreparedSnapshotCoherenceReceipt } from "./prepare-adapter.js";
+export { unavailableProducerDigest } from "./digest.js";

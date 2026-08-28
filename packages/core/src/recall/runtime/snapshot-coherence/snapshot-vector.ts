@@ -1,8 +1,7 @@
-import {
-  digestRecallFieldIdentity,
-  isRecallFieldDigest,
-  type RecallFieldDigest
-} from "../../field/field-identity.js";
+import { digestRecallFieldIdentity, type RecallFieldDigest } from
+  "../../field/field-identity.js";
+import { isSnapshotDigest } from "./digest.js";
+import { requireSnapshotInstant, requireSnapshotToken } from "./tokens.js";
 import { admitRestrictedUniverse, derivedSources } from "./sources.js";
 import { createSourceFrontierDeclaration } from "./source-frontier.js";
 import {
@@ -26,8 +25,8 @@ export function createSnapshotVectorV1(input: SnapshotVectorV1Input): SnapshotVe
     schema_version: 1 as const,
     principal,
     authorized_scopes,
-    effective_as_of: requireToken(input.effective_as_of, "mismatched_principal_scope"),
-    transaction_frontier: requireToken(input.transaction_frontier, "incompatible_base_frontier"),
+    effective_as_of: requireSnapshotInstant(input.effective_as_of),
+    transaction_frontier: requireSnapshotToken(input.transaction_frontier, "incompatible_base_frontier"),
     base_store_digest: requireSha256(input.base_store_digest),
     ...reserved,
     retrieval_channel_snapshots: retrieval,
@@ -145,9 +144,11 @@ function assertCompatibleFrontiers(
   transactionFrontier: string,
   sources: readonly SourceFrontierDeclarationV1[]
 ): void {
-  const frontier = requireToken(transactionFrontier, "incompatible_base_frontier");
+  const frontier = requireSnapshotToken(transactionFrontier, "incompatible_base_frontier");
   for (const source of sources) {
-    if (source.lag_bound.kind === "unavailable") continue;
+    if (source.lag_bound.kind === "unavailable" || source.lag_bound.kind === "not_applicable") {
+      continue;
+    }
     if (source.source_frontier !== frontier) {
       rejectSnapshotCoherence("incompatible_base_frontier");
     }
@@ -160,8 +161,8 @@ function freezeFormation(
   const seen = new Set<string>();
   return Object.freeze(rows.map(([id, version]) => {
     const frozen = Object.freeze([
-      requireToken(id, "mixed_operator_generation"),
-      requireToken(version, "mixed_operator_generation")
+      requireSnapshotToken(id, "mixed_operator_generation"),
+      requireSnapshotToken(version, "mixed_operator_generation")
     ] as const);
     if (seen.has(frozen[0])) rejectSnapshotCoherence("mixed_operator_generation");
     seen.add(frozen[0]);
@@ -173,7 +174,7 @@ function freezeScopes(scopes: readonly string[]): readonly string[] {
   if (scopes.length === 0) rejectSnapshotCoherence("mismatched_principal_scope");
   const frozen = Object.freeze(
     [...scopes]
-      .map((scope) => requireToken(scope, "mismatched_principal_scope"))
+      .map((scope) => requireSnapshotToken(scope, "mismatched_principal_scope"))
       .sort((left, right) => left.localeCompare(right))
   );
   if (new Set(frozen).size !== frozen.length) {
@@ -183,18 +184,10 @@ function freezeScopes(scopes: readonly string[]): readonly string[] {
 }
 
 function requirePrincipal(value: string): string {
-  return requireToken(value, "mismatched_principal_scope");
-}
-
-function requireToken(
-  value: string,
-  code: Parameters<typeof rejectSnapshotCoherence>[0]
-): string {
-  if (value.length === 0 || value.trim() !== value) rejectSnapshotCoherence(code);
-  return value;
+  return requireSnapshotToken(value, "mismatched_principal_scope");
 }
 
 function requireSha256(value: string): RecallFieldDigest {
-  if (!isRecallFieldDigest(value)) rejectSnapshotCoherence("malformed_digest");
+  if (!isSnapshotDigest(value)) rejectSnapshotCoherence("malformed_digest");
   return value;
 }

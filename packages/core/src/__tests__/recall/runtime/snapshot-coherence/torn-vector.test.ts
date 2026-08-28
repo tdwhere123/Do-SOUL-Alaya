@@ -3,7 +3,7 @@ import {
   createSnapshotCoherenceReceiptV1,
   createSnapshotVectorV1
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
-import { AS_OF, declaration, exactVectorInput } from "./fixtures.js";
+import { AS_OF, declaration, exactVectorInput, remainingEffect } from "./fixtures.js";
 
 describe("snapshot torn vectors", () => {
   it("marks new FTS + stale embedding exact peers incoherent", () => {
@@ -22,11 +22,14 @@ describe("snapshot torn vectors", () => {
       embedding_generation_and_model: declaration({
         source_owner: "embedding_generation_and_model",
         generation: "gen-stale",
-        lag_bound: { kind: "bounded", remaining_effect: "embed-stale" }
+        lag_bound: {
+          kind: "bounded",
+          remaining_effect: remainingEffect("embedding_generation_and_model", "embed-stale")
+        }
       })
     })));
     expect(receipt.coherence_state).toBe("coherent_bounded");
-    expect(receipt.lag_bounds).toContain("embed-stale");
+    expect(receipt.lag_bounds).toContain("embedding_generation_and_model:embed-stale");
     expect(receipt.coherence_state).not.toBe("incoherent");
   });
 

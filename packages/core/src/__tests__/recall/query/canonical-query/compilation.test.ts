@@ -64,6 +64,16 @@ describe("canonical query compilation holes", () => {
     expect(distinct.hypotheses[0]?.answer.kind).toBe("distinct");
     expect(snapshotBlocked.holes.some((hole) =>
       hole.impacts.includes("blocks_all_delivery"))).toBe(true);
+    expect(snapshotBlocked.hypothetical_mode).toBe("abstained");
+    const left = compileCanonicalQueryCompilation({
+      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?"),
+      factFrameCapture: { status: "returned", capture_digest: `sha256:${"a".repeat(64)}` }
+    }, SNAPSHOT);
+    const right = compileCanonicalQueryCompilation({
+      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?"),
+      factFrameCapture: { status: "returned", capture_digest: `sha256:${"b".repeat(64)}` }
+    }, SNAPSHOT);
+    expect(left.digest).not.toBe(right.digest);
   });
 
   it("changes digest on snapshot and operator identity and verifies stored digest", () => {
@@ -83,8 +93,8 @@ describe("canonical query compilation holes", () => {
     expect(first.hypotheses[0]?.predicates[0]?.provenance?.producer)
       .toBe("recall_answer_shape_plan");
     expect(first.hypothesis_provenance[0]?.source_id).toBe("shape.relation_terms");
-    expect(first.compile_status === "certified_program"
-      || first.compile_status === "partial_program").toBe(true);
+    expect(first.compile_status).toBe("partial_program");
+    expect(first.unresolved.some((row) => row.code === "unbound_target_term")).toBe(true);
   });
 
   it("counts silent empty-demand fallbacks as zero on the golden corpus", () => {

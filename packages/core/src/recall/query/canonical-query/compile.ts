@@ -1,22 +1,30 @@
+import { digestRecallFieldIdentity, type RecallFieldDigest } from
+  "../../field/field-identity.js";
+import { isSnapshotDigest } from
+  "../../runtime/snapshot-coherence/digest.js";
 import { compileRecallAnswerShapePlan, type RecallAnswerShapePlan } from
   "../recall-answer-shape-plan.js";
 import { compileRecallQueryDemand, type RecallQueryDemand } from
   "../recall-query-demand.js";
 import type { RecallQueryProbes } from "../recall-query-probes.js";
-import { stableStringify } from "../../../shared/stable-stringify.js";
 import {
   type CanonicalEvidenceProvenanceV1,
   type CanonicalPredicateV1,
   type CanonicalQueryV1
 } from "./types.js";
-import { validateCanonicalQueryV1 } from "./validate.js";
+import { digestCanonicalQueryV1, validateCanonicalQueryV1 } from "./validate.js";
+
+export type CanonicalQueryCaptureEvidenceV1 = Readonly<{
+  readonly status?: string;
+  readonly capture_digest?: string;
+}>;
 
 export type CanonicalQueryEvidenceV1 = Readonly<{
   readonly probes: Readonly<RecallQueryProbes>;
   readonly demand?: Readonly<RecallQueryDemand>;
   readonly shape?: Readonly<RecallAnswerShapePlan>;
-  readonly factFrameCapture?: Readonly<{ readonly status?: string }> | null;
-  readonly osfCapture?: Readonly<{ readonly status?: string }> | null;
+  readonly factFrameCapture?: CanonicalQueryCaptureEvidenceV1 | null;
+  readonly osfCapture?: CanonicalQueryCaptureEvidenceV1 | null;
   readonly observer?: Readonly<{
     readonly principal: string;
     readonly scope: string;
@@ -27,6 +35,8 @@ export type CanonicalQueryEvidenceV1 = Readonly<{
 export type CanonicalQueryUnresolvedV1 = Readonly<{
   readonly code: string;
   readonly source: string;
+  readonly capture_digest?: RecallFieldDigest;
+  readonly detail?: string;
 }>;
 
 export type CanonicalQueryCompileV1 = Readonly<{
@@ -44,15 +54,14 @@ export function compileCanonicalQueryEvidence(
   const demand = evidence.demand ?? compileRecallQueryDemand(evidence.probes);
   const shape = evidence.shape ?? compileRecallAnswerShapePlan(evidence.probes);
   const ordering = demand.atoms.filter((atom) => atom.kind === "ordering");
-  const unresolved: CanonicalQueryUnresolvedV1[] = [
-    ...unadaptedEvidence(evidence),
-    ...unadaptedDemandAtoms(demand, shape)
-  ];
+  const unresolved: CanonicalQueryUnresolvedV1[] = [...unadaptedEvidence(evidence)];
   const provenance = ["probes", "demand", "shape"];
   const hypotheses: CanonicalQueryV1[] = [];
   const hypothesis_provenance: CanonicalEvidenceProvenanceV1[] = [];
   pushShapePrograms(shape, evidence, hypotheses, hypothesis_provenance, unresolved, provenance);
   pushOrderingHoles(ordering, unresolved);
+  unresolved.push(...unadaptedDemandAtoms(demand, hypotheses));
+  unresolved.push(...unboundTargetTerms(shape, hypotheses));
   if (hypotheses.length === 0 && (shape.status === "unknown" || shape.target_terms.length === 0)
     && shape.shape !== "count" && shape.shape !== "sum" && shape.shape !== "duration") {
     unresolved.push({ code: "unknown_answer_variable", source: "shape" });
@@ -69,14 +78,30 @@ export function compileCanonicalQueryEvidence(
 function unadaptedEvidence(
   evidence: CanonicalQueryEvidenceV1
 ): CanonicalQueryUnresolvedV1[] {
-  const items: CanonicalQueryUnresolvedV1[] = [];
-  if (evidence.factFrameCapture !== undefined && evidence.factFrameCapture !== null) {
-    items.push({ code: "unadapted_fact_frame", source: "fact_frame" });
-  }
-  if (evidence.osfCapture !== undefined && evidence.osfCapture !== null) {
-    items.push({ code: "unadapted_osf", source: "osf" });
-  }
-  return items;
+  return [
+    ...unadaptedCapture(evidence.factFrameCapture, "unadapted_fact_frame", "fact_frame"),
+    ...unadaptedCapture(evidence.osfCapture, "unadapted_osf", "osf")
+  ];
+}
+
+function unadaptedCapture(
+  capture: CanonicalQueryCaptureEvidenceV1 | null | undefined,
+  code: string,
+  source: string
+): CanonicalQueryUnresolvedV1[] {
+  if (capture === undefined || capture === null) return [];
+  return [Object.freeze({
+    code,
+    source,
+    capture_digest: captureIdentity(capture),
+    detail: capture.status
+  })];
+}
+
+function captureIdentity(capture: CanonicalQueryCaptureEvidenceV1): RecallFieldDigest {
+  const digest = capture.capture_digest;
+  if (typeof digest === "string" && isSnapshotDigest(digest)) return digest;
+  return digestRecallFieldIdentity(capture);
 }
 
 function pushShapePrograms(
@@ -87,26 +112,7 @@ function pushShapePrograms(
   unresolved: CanonicalQueryUnresolvedV1[],
   provenance: string[]
 ): void {
-  if (shape.shape === "count" || shape.shape === "sum") {
-    unresolved.push({ code: "count_sum_unsupported", source: "shape" });
-    return;
-  }
-  if (shape.shape === "duration") {
-    unresolved.push({ code: "unsupported_nesting", source: "shape" });
-    if (CJK.test(evidence.probes.normalized_query ?? "")) {
-      unresolved.push({ code: "ambiguous_cjk_segmentation", source: "probes" });
-    }
-    return;
-  }
-  if (shape.status === "ambiguous") {
-    unresolved.push({ code: "conflicting_shape", source: "shape" });
-    return;
-  }
-  if (shape.status !== "high_confidence" || shape.target_terms.length === 0) return;
-  if (shape.relation_terms.length === 0) {
-    unresolved.push({ code: "unknown_relation", source: "shape" });
-    return;
-  }
+  if (rejectUnsupportedShape(shape, evidence, unresolved)) return;
   const answer = shape.shape === "distinct_entities"
     ? distinctAnswer(evidence)
     : { kind: "scalar" as const, variable: "x0" };
@@ -127,6 +133,42 @@ function pushShapePrograms(
     }));
     provenance.push("shape.relation_terms");
   }
+}
+
+function rejectUnsupportedShape(
+  shape: Readonly<RecallAnswerShapePlan>,
+  evidence: CanonicalQueryEvidenceV1,
+  unresolved: CanonicalQueryUnresolvedV1[]
+): boolean {
+  if (shape.shape === "count" || shape.shape === "sum") {
+    unresolved.push({ code: "count_sum_unsupported", source: "shape" });
+    return true;
+  }
+  if (shape.shape === "duration") {
+    unresolved.push({ code: "unsupported_nesting", source: "shape" });
+    if (CJK.test(evidence.probes.normalized_query ?? "")) {
+      unresolved.push({ code: "ambiguous_cjk_segmentation", source: "probes" });
+    }
+    return true;
+  }
+  if (shape.status === "ambiguous") {
+    unresolved.push({ code: "conflicting_shape", source: "shape" });
+    return true;
+  }
+  if (shape.status !== "high_confidence" || shape.target_terms.length === 0) return true;
+  if (shape.relation_terms.length === 0) {
+    unresolved.push({ code: "unknown_relation", source: "shape" });
+    return true;
+  }
+  if (shape.relation_terms.length > 8) {
+    unresolved.push({
+      code: "limit_overflow",
+      source: "shape",
+      detail: "relation_terms"
+    });
+    return true;
+  }
+  return false;
 }
 
 function pushOrderingHoles(
@@ -162,20 +204,45 @@ function distinctAnswer(evidence: CanonicalQueryEvidenceV1) {
 
 function unadaptedDemandAtoms(
   demand: Readonly<RecallQueryDemand>,
-  shape: Readonly<RecallAnswerShapePlan>
+  hypotheses: readonly CanonicalQueryV1[]
 ): CanonicalQueryUnresolvedV1[] {
-  const used = new Set([...shape.relation_terms, ...shape.target_terms]);
+  const used = usedHypothesisTokens(hypotheses);
   const items: CanonicalQueryUnresolvedV1[] = [];
   for (const atom of demand.atoms) {
     if (atom.kind === "ordering") continue;
     if (atom.kind === "lexical_term" && used.has(atom.value)) continue;
-    items.push({ code: `unadapted_demand_${atom.kind}`, source: "demand" });
+    items.push({
+      code: `unadapted_demand_${atom.kind}`,
+      source: "demand",
+      detail: atom.id
+    });
   }
   return items;
 }
 
+function unboundTargetTerms(
+  shape: Readonly<RecallAnswerShapePlan>,
+  hypotheses: readonly CanonicalQueryV1[]
+): CanonicalQueryUnresolvedV1[] {
+  const used = usedHypothesisTokens(hypotheses);
+  return shape.target_terms.flatMap((term) => used.has(term)
+    ? []
+    : [{ code: "unbound_target_term", source: "shape", detail: term }]);
+}
+
+function usedHypothesisTokens(hypotheses: readonly CanonicalQueryV1[]): Set<string> {
+  const used = new Set<string>();
+  for (const query of hypotheses) {
+    for (const predicate of query.predicates) {
+      used.add(predicate.relation);
+      for (const argument of predicate.arguments) used.add(argument);
+    }
+  }
+  return used;
+}
+
 function relationPredicates(shape: Readonly<RecallAnswerShapePlan>): CanonicalPredicateV1[] {
-  return shape.relation_terms.slice(0, 8).map((relation, index) => Object.freeze({
+  return shape.relation_terms.map((relation, index) => Object.freeze({
     id: `p${index}`,
     relation,
     arguments: Object.freeze(["x0"]),
@@ -211,7 +278,7 @@ function dedupeQueries(
   const unique: CanonicalQueryV1[] = [];
   const uniqueProvenance: CanonicalEvidenceProvenanceV1[] = [];
   queries.forEach((query, index) => {
-    const key = stableStringify(query);
+    const key = digestCanonicalQueryV1(query);
     if (seen.has(key)) return;
     seen.add(key);
     unique.push(query);

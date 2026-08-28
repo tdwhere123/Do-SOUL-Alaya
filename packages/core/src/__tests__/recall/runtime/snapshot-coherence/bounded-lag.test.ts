@@ -4,21 +4,25 @@ import {
   createSnapshotVectorV1,
   publicSnapshotCoherenceReceiptBytes
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
-import { declaration, exactVectorInput } from "./fixtures.js";
+import { declaration, exactVectorInput, remainingEffect } from "./fixtures.js";
 
 describe("snapshot coherent_bounded lag", () => {
   it("preserves declared lag and never upgrades to exact", () => {
     const vector = createSnapshotVectorV1(exactVectorInput({
       embedding_generation_and_model: declaration({
         source_owner: "embedding_generation_and_model",
-        lag_bound: { kind: "bounded", remaining_effect: "embed-lag-1" }
+        lag_bound: {
+          kind: "bounded",
+          remaining_effect: remainingEffect("embedding_generation_and_model", "embed-lag-1")
+        }
       })
     }));
     const receipt = createSnapshotCoherenceReceiptV1(vector);
     expect(receipt.coherence_state).toBe("coherent_bounded");
     expect(receipt.reasons).toContain("declared_lag");
-    expect(receipt.lag_bounds).toEqual(["embed-lag-1"]);
-    expect(publicSnapshotCoherenceReceiptBytes(receipt)).toContain("embed-lag-1");
+    expect(receipt.lag_bounds).toEqual(["embedding_generation_and_model:embed-lag-1"]);
+    expect(publicSnapshotCoherenceReceiptBytes(receipt))
+      .toContain("embed-lag-1");
     expect(receipt.coherence_state).not.toBe("coherent_exact");
   });
 
@@ -26,13 +30,19 @@ describe("snapshot coherent_bounded lag", () => {
     const bounded = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(exactVectorInput({
       embedding_generation_and_model: declaration({
         source_owner: "embedding_generation_and_model",
-        lag_bound: { kind: "bounded", remaining_effect: "embed-lag-1" }
+        lag_bound: {
+          kind: "bounded",
+          remaining_effect: remainingEffect("embedding_generation_and_model", "embed-lag-1")
+        }
       })
     })));
     const otherBound = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(exactVectorInput({
       embedding_generation_and_model: declaration({
         source_owner: "embedding_generation_and_model",
-        lag_bound: { kind: "bounded", remaining_effect: "embed-lag-2" }
+        lag_bound: {
+          kind: "bounded",
+          remaining_effect: remainingEffect("embedding_generation_and_model", "embed-lag-2")
+        }
       })
     })));
     expect(otherBound.receipt_digest).not.toBe(bounded.receipt_digest);

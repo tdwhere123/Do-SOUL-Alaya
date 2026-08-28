@@ -60,28 +60,8 @@ export async function prepareRecallRequest(
     semanticCapture
   });
   const releaseProjectionPin = projectionPinReleaseHandle(context, captured.pin, time);
-  const snapshotCoherenceReceipt = capturePreparedSnapshotCoherenceReceipt({
-    queryCondition: captured.receipt,
-    pin: captured.pin,
-    snapshotDigest: params.snapshotDigest
-  });
-  const condition = captured.receipt.condition;
-  const baseProbes = compileRecallQueryProbes(queryText);
-  const canonicalQueryCompilation = compileCanonicalQueryCompilation({
-    probes: baseProbes,
-    demand: compileRecallQueryDemand(baseProbes),
-    shape: compileRecallAnswerShapePlan(baseProbes),
-    factFrameCapture: certified?.factFrameCapture,
-    osfCapture: certified?.formation,
-    observer: {
-      principal: condition.principal,
-      scope: condition.authorized_scopes[0] ?? condition.workspace_id,
-      observer_contract: captured.receipt.query_operator_id
-    }
-  }, snapshotCoherenceReceipt);
   return await loadPinnedPreparedRequest({
-    context, params, time, seed, captured, certified, releaseProjectionPin,
-    snapshotCoherenceReceipt, canonicalQueryCompilation
+    context, params, time, seed, captured, certified, releaseProjectionPin
   });
 }
 
@@ -93,11 +73,8 @@ async function loadPinnedPreparedRequest(input: Readonly<{
   captured: ReturnType<typeof capturePreparedRequestCondition>;
   certified: Awaited<ReturnType<typeof certifyPreparedSemanticCapture>>;
   releaseProjectionPin: () => void;
-  snapshotCoherenceReceipt: PreparedRecallRequest["snapshotCoherenceReceipt"];
-  canonicalQueryCompilation: PreparedRecallRequest["canonicalQueryCompilation"];
 }>): Promise<PreparedRecallRequest> {
-  const { context, params, time, seed, captured, certified, releaseProjectionPin,
-    snapshotCoherenceReceipt, canonicalQueryCompilation } = input;
+  const { context, params, time, seed, captured, certified, releaseProjectionPin } = input;
   let projectionPinLease: ProjectionPinLeaseGuard | null = null;
   try {
     projectionPinLease = startProjectionPinLeaseGuard({
@@ -106,6 +83,7 @@ async function loadPinnedPreparedRequest(input: Readonly<{
       captureOperationalTime: time.captureOperationalTime,
       scheduler: context.projectionPinHeartbeatScheduler
     });
+    const world = capturePinnedQueryWorld(captured, params, certified, seed.queryText);
     const fieldSelection = context.fieldQuerySession.selectCandidates(
       captured.receipt,
       captured.pin,
@@ -120,28 +98,76 @@ async function loadPinnedPreparedRequest(input: Readonly<{
       captured.referenceTime
     );
     projectionPinLease.assertHealthy();
-    return Object.freeze({
-      ...seed,
-      ...loaded,
-      time,
-      referenceTime: captured.referenceTime,
-      temporalProjectionAsOf: captured.referenceTime,
-      queryCondition: captured.receipt,
-      fieldProjectionSelection: fieldSelection,
-      projectionPin: captured.pin,
-      projectionPinLease,
-      releaseProjectionPin,
-      querySemanticFactorFormationCapture: certified?.formation,
-      querySemanticFactorCompletenessReceipt: certified === undefined
-        ? undefined
-        : certified.receipt,
-      snapshotCoherenceReceipt,
-      canonicalQueryCompilation
+    return freezePreparedRequest({
+      seed, loaded, time, captured, fieldSelection, projectionPinLease,
+      releaseProjectionPin, certified, world
     });
   } catch (error) {
     cleanupFailedPreparation({ context, projectionPinLease,
       releaseProjectionPin, error });
   }
+}
+
+function capturePinnedQueryWorld(
+  captured: ReturnType<typeof capturePreparedRequestCondition>,
+  params: RecallExecutionParams,
+  certified: Awaited<ReturnType<typeof certifyPreparedSemanticCapture>>,
+  queryText: string | null
+) {
+  const snapshotCoherenceReceipt = capturePreparedSnapshotCoherenceReceipt({
+    queryCondition: captured.receipt,
+    pin: captured.pin,
+    snapshotDigest: params.snapshotDigest
+  });
+  const condition = captured.receipt.condition;
+  const baseProbes = compileRecallQueryProbes(queryText);
+  const canonicalQueryCompilation = compileCanonicalQueryCompilation({
+    probes: baseProbes,
+    demand: compileRecallQueryDemand(baseProbes),
+    shape: compileRecallAnswerShapePlan(baseProbes),
+    factFrameCapture: certified?.factFrameCapture,
+    osfCapture: certified === undefined ? undefined : {
+      status: certified.formation.status,
+      capture_digest: certified.formation.capture_digest
+    },
+    observer: {
+      principal: condition.principal,
+      scope: condition.authorized_scopes[0] ?? condition.workspace_id,
+      observer_contract: captured.receipt.query_operator_id
+    }
+  }, snapshotCoherenceReceipt);
+  return { snapshotCoherenceReceipt, canonicalQueryCompilation };
+}
+
+function freezePreparedRequest(input: Readonly<{
+  seed: ReturnType<typeof prepareQuerySeed>;
+  loaded: Awaited<ReturnType<typeof loadPreparationInputs>>;
+  time: PreparedRecallRequest["time"];
+  captured: ReturnType<typeof capturePreparedRequestCondition>;
+  fieldSelection: PreparedRecallRequest["fieldProjectionSelection"];
+  projectionPinLease: ProjectionPinLeaseGuard;
+  releaseProjectionPin: () => void;
+  certified: Awaited<ReturnType<typeof certifyPreparedSemanticCapture>>;
+  world: ReturnType<typeof capturePinnedQueryWorld>;
+}>): PreparedRecallRequest {
+  return Object.freeze({
+    ...input.seed,
+    ...input.loaded,
+    time: input.time,
+    referenceTime: input.captured.referenceTime,
+    temporalProjectionAsOf: input.captured.referenceTime,
+    queryCondition: input.captured.receipt,
+    fieldProjectionSelection: input.fieldSelection,
+    projectionPin: input.captured.pin,
+    projectionPinLease: input.projectionPinLease,
+    releaseProjectionPin: input.releaseProjectionPin,
+    querySemanticFactorFormationCapture: input.certified?.formation,
+    querySemanticFactorCompletenessReceipt: input.certified === undefined
+      ? undefined
+      : input.certified.receipt,
+    snapshotCoherenceReceipt: input.world.snapshotCoherenceReceipt,
+    canonicalQueryCompilation: input.world.canonicalQueryCompilation
+  });
 }
 
 function cleanupFailedPreparation(input: Readonly<{
@@ -236,7 +262,10 @@ async function certifyPreparedSemanticCapture(
   });
   return {
     ...osf,
-    factFrameCapture: { status: factFrameCapture.status }
+    factFrameCapture: {
+      status: factFrameCapture.status,
+      capture_digest: factFrameCapture.capture_digest
+    }
   };
 }
 

@@ -7,7 +7,7 @@ import {
   createSnapshotCoherenceReceiptV1,
   type SnapshotVectorV1Input
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
-import { SHA_A, declaration, exactVectorInput } from "./fixtures.js";
+import { SHA_A, declaration, exactVectorInput, remainingEffect } from "./fixtures.js";
 
 function expectCode(code: string, input: SnapshotVectorV1Input): void {
   expect(() => createSnapshotVectorV1(input)).toThrow(SnapshotCoherenceContractError);
@@ -80,7 +80,10 @@ describe("snapshot coherence identity rejects", () => {
       embedding_generation_and_model: declaration({
         source_owner: "embedding_generation_and_model",
         source_frontier: "other-tx",
-        lag_bound: { kind: "bounded", remaining_effect: "lag-1" }
+        lag_bound: {
+          kind: "bounded",
+          remaining_effect: remainingEffect("embedding_generation_and_model", "lag-1")
+        }
       })
     }));
   });
@@ -88,6 +91,21 @@ describe("snapshot coherence identity rejects", () => {
   it("rejects mixed operator or generation identity", () => {
     expectCode("mixed_operator_generation", exactVectorInput({
       formation_operator_versions: [["formation", "1"], ["formation", "2"]]
+    }));
+  });
+
+  it("rejects non-instant times and untyped remaining-effect", () => {
+    expectCode("malformed_time", exactVectorInput({
+      effective_as_of: "not-a-time"
+    }));
+    expectCode("mixed_operator_generation", exactVectorInput({
+      embedding_generation_and_model: declaration({
+        source_owner: "embedding_generation_and_model",
+        lag_bound: {
+          kind: "bounded",
+          remaining_effect: "nonsense" as never
+        }
+      })
     }));
   });
 });

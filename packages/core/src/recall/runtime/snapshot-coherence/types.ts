@@ -13,6 +13,7 @@ export type SnapshotCoherenceState = (typeof SNAPSHOT_COHERENCE_STATES)[number];
 
 export type SnapshotCoherenceRejectCode =
   | "malformed_digest"
+  | "malformed_time"
   | "duplicate_source_owner"
   | "mismatched_principal_scope"
   | "incompatible_base_frontier"
@@ -51,10 +52,16 @@ export type SnapshotValidTimeDomainV1 =
   | { readonly kind: "open"; readonly from: string }
   | { readonly kind: "timeless" };
 
+export type SnapshotRemainingEffectV1 = Readonly<{
+  readonly source_owner: string;
+  readonly effect_id: string;
+}>;
+
 export type SnapshotLagBoundV1 =
   | { readonly kind: "exact" }
-  | { readonly kind: "bounded"; readonly remaining_effect: string }
-  | { readonly kind: "unavailable" };
+  | { readonly kind: "bounded"; readonly remaining_effect: SnapshotRemainingEffectV1 }
+  | { readonly kind: "unavailable" }
+  | { readonly kind: "not_applicable" };
 
 export type SourceFrontierDeclarationV1 = Readonly<{
   readonly source_owner: string;

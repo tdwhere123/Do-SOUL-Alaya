@@ -46,8 +46,8 @@ export function createCanonicalQueryV1(input: CanonicalQueryInputV1 & {
   readonly answer: CanonicalAnswerProgramV1;
 }): CanonicalQueryV1 {
   const variables = freezeVariables(input.variables);
-  const predicates = freezeAtoms(input.predicates ?? [], "predicate");
-  const constraints = freezeAtoms(input.constraints ?? [], "constraint");
+  const predicates = freezePredicates(input.predicates ?? []);
+  const constraints = freezeConstraints(input.constraints ?? []);
   assertLimits(variables, predicates, constraints, input.answer);
   const names = new Map(variables.map((variable) => [variable.name, variable]));
   bindPhi(predicates, constraints, names);
@@ -82,6 +82,10 @@ function explicitUnsupported(
   return null;
 }
 
+const VARIABLE_SORTS = new Set<CanonicalVariableV1["sort"]>([
+  "entity", "scalar", "time", "answer", "order_key"
+]);
+
 function freezeVariables(
   variables: readonly CanonicalVariableV1[]
 ): readonly CanonicalVariableV1[] {
@@ -89,26 +93,49 @@ function freezeVariables(
   return Object.freeze(variables.map((variable) => {
     const name = requireToken(variable.name);
     if (names.has(name)) throw new CanonicalQueryContractError("undeclared_variable");
+    if (!VARIABLE_SORTS.has(variable.sort)) {
+      throw new CanonicalQueryContractError("invalid_sort");
+    }
     names.add(name);
     return Object.freeze({ name, sort: variable.sort });
   }));
 }
 
-function freezeAtoms<T extends { readonly id: string; readonly arguments: readonly string[] }>(
-  atoms: readonly T[],
+function freezePredicates(
+  predicates: readonly CanonicalPredicateV1[]
+): readonly CanonicalPredicateV1[] {
+  const ids = uniqueAtomIds(predicates, "predicate");
+  return Object.freeze(predicates.map((predicate) => Object.freeze({
+    ...predicate,
+    id: ids.get(predicate.id) ?? predicate.id,
+    relation: requireToken(predicate.relation),
+    arguments: Object.freeze(predicate.arguments.map(requireToken))
+  })));
+}
+
+function freezeConstraints(
+  constraints: readonly CanonicalConstraintV1[]
+): readonly CanonicalConstraintV1[] {
+  const ids = uniqueAtomIds(constraints, "constraint");
+  return Object.freeze(constraints.map((constraint) => Object.freeze({
+    ...constraint,
+    id: ids.get(constraint.id) ?? constraint.id,
+    constraint: requireToken(constraint.constraint),
+    arguments: Object.freeze(constraint.arguments.map(requireToken))
+  })));
+}
+
+function uniqueAtomIds(
+  atoms: readonly { readonly id: string }[],
   label: "predicate" | "constraint"
-): readonly T[] {
-  const ids = new Set<string>();
-  return Object.freeze(atoms.map((atom) => {
+): Map<string, string> {
+  const ids = new Map<string, string>();
+  for (const atom of atoms) {
     const id = requireToken(atom.id);
     if (ids.has(id)) throw new CanonicalQueryContractError("limit_overflow", label);
-    ids.add(id);
-    return Object.freeze({
-      ...atom,
-      id,
-      arguments: Object.freeze(atom.arguments.map(requireToken))
-    }) as T;
-  }));
+    ids.set(atom.id, id);
+  }
+  return ids;
 }
 
 function assertLimits(

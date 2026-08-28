@@ -13,6 +13,10 @@ export const AS_OF = "2026-08-01T00:00:00.000Z";
 export const TX_FRONTIER = "tx-frontier-1";
 export const GENERATION = "gen-1";
 
+export function remainingEffect(sourceOwner: string, effectId: string) {
+  return { source_owner: sourceOwner, effect_id: effectId };
+}
+
 export function declaration(
   overrides: Partial<SourceFrontierDeclarationV1> & Pick<SourceFrontierDeclarationV1, "source_owner">
 ): SourceFrontierDeclarationV1 {

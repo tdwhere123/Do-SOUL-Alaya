@@ -89,7 +89,8 @@ export type CanonicalQueryUnsupportedCode =
   | "latest_without_typed_time_key"
   | "count_sum_unsupported"
   | "unsupported_nesting"
-  | "invalid_all_observable";
+  | "invalid_all_observable"
+  | "invalid_sort";
 
 export type CanonicalQueryValidationV1 =
   | Readonly<{ readonly status: "supported"; readonly query: CanonicalQueryV1 }>

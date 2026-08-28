@@ -1,9 +1,6 @@
 import type { ProjectionPin, QueryConditionReceipt } from "@do-soul/alaya-protocol";
-import {
-  digestRecallFieldIdentity,
-  isRecallFieldDigest,
-  type RecallFieldDigest
-} from "../../field/field-identity.js";
+import { type RecallFieldDigest } from "../../field/field-identity.js";
+import { isSnapshotDigest, unavailableProducerDigest } from "./digest.js";
 import { createSnapshotCoherenceReceiptV1 } from "./receipt.js";
 import { createSourceFrontierDeclaration } from "./source-frontier.js";
 import { createSnapshotVectorV1 } from "./snapshot-vector.js";
@@ -50,10 +47,7 @@ export function capturePreparedSnapshotCoherenceReceipt(input: Readonly<{
       "governance_frontier", condition.principal, scope
     ),
     formation_operator_versions: [],
-    decision_contract_digest: digestRecallFieldIdentity({
-      status: "producer_receipt_unavailable",
-      owner: "decision_contract"
-    })
+    decision_contract_digest: unavailableProducerDigest("decision_contract")
   });
   return createSnapshotCoherenceReceiptV1(vector);
 }
@@ -93,14 +87,7 @@ function unavailableSource(
 }
 
 function declaredBaseDigest(snapshotDigest: string | undefined): RecallFieldDigest {
-  if (snapshotDigest === undefined) {
-    return digestRecallFieldIdentity({
-      status: "producer_receipt_unavailable",
-      owner: "base_store"
-    });
-  }
-  if (!isRecallFieldDigest(snapshotDigest)) {
-    rejectSnapshotCoherence("malformed_digest");
-  }
+  if (snapshotDigest === undefined) return unavailableProducerDigest("base_store");
+  if (!isSnapshotDigest(snapshotDigest)) rejectSnapshotCoherence("malformed_digest");
   return snapshotDigest;
 }

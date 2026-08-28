@@ -148,6 +148,15 @@ describe("canonical query algebra v1", () => {
         }
       }
     })).toBe("invalid_all_observable");
+    expect(codeOf({
+      variables: [{ name: "x", sort: "nope" as "entity" }],
+      answer: { kind: "scalar", variable: "x" }
+    })).toBe("invalid_sort");
+    expect(codeOf({
+      variables: [ENTITY],
+      predicates: [{ id: "p1", relation: " ", arguments: ["x"] }],
+      answer: { kind: "scalar", variable: "x" }
+    })).toBe("undeclared_variable");
   });
 });
 

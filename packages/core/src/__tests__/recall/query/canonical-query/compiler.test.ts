@@ -21,7 +21,36 @@ describe("canonical query compiler adapters", () => {
       producer: "recall_answer_shape_plan"
     }]);
     expect(english.unresolved.some((row) => row.source === "demand")).toBe(true);
+    expect(english.unresolved.some((row) =>
+      row.code === "unbound_target_term")).toBe(true);
     expect(english.provenance).toContain("shape.relation_terms");
+  });
+
+  it("does not silently truncate relations or accept blank relations", () => {
+    const overflow = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes("Where is Paris?"),
+      shape: {
+        schema_version: 1,
+        status: "high_confidence",
+        shape: "place",
+        target_terms: ["paris"],
+        relation_terms: ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
+      }
+    });
+    expect(overflow.hypotheses).toEqual([]);
+    expect(overflow.unresolved.some((row) => row.code === "limit_overflow")).toBe(true);
+    const blank = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes("Where is Paris?"),
+      shape: {
+        schema_version: 1,
+        status: "high_confidence",
+        shape: "place",
+        target_terms: ["paris"],
+        relation_terms: [" "]
+      }
+    });
+    expect(blank.hypotheses).toEqual([]);
+    expect(blank.unresolved.length).toBeGreaterThan(0);
   });
 
   it("does not certify CJK duration or empty-Phi guesses", () => {
@@ -61,6 +90,28 @@ describe("canonical query compiler adapters", () => {
     });
     expect(compiled.unresolved.some((row) => row.code === "unadapted_fact_frame")).toBe(true);
     expect(compiled.unresolved.some((row) => row.code === "unadapted_osf")).toBe(true);
+    const otherFrames = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?"),
+      factFrameCapture: {
+        status: "returned",
+        capture_digest: `sha256:${"a".repeat(64)}`
+      },
+      osfCapture: { status: "formed", capture_digest: `sha256:${"b".repeat(64)}` }
+    });
+    const shiftedFrames = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?"),
+      factFrameCapture: {
+        status: "returned",
+        capture_digest: `sha256:${"c".repeat(64)}`
+      },
+      osfCapture: { status: "formed", capture_digest: `sha256:${"d".repeat(64)}` }
+    });
+    expect(otherFrames).not.toEqual(shiftedFrames);
+    expect(otherFrames.unresolved.find((row) => row.code === "unadapted_fact_frame")
+      ?.capture_digest).not.toBe(
+      shiftedFrames.unresolved.find((row) => row.code === "unadapted_fact_frame")
+        ?.capture_digest
+    );
     const otherStatus = compileCanonicalQueryEvidence({
       probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?"),
       factFrameCapture: { status: "ineligible" },
