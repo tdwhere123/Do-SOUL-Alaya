@@ -30,6 +30,8 @@ import {
   startProjectionPinLeaseGuard
 } from "./projection-pin-lease.js";
 import type { ProjectionPinLeaseGuard } from "./projection-pin-lease.js";
+import { capturePreparedSnapshotCoherenceReceipt } from
+  "../snapshot-coherence/index.js";
 
 export async function prepareRecallRequest(
   context: RecallExecutionContext,
@@ -52,8 +54,14 @@ export async function prepareRecallRequest(
     semanticCapture
   });
   const releaseProjectionPin = projectionPinReleaseHandle(context, captured.pin, time);
+  const snapshotCoherenceReceipt = capturePreparedSnapshotCoherenceReceipt({
+    queryCondition: captured.receipt,
+    pin: captured.pin,
+    snapshotDigest: params.snapshotDigest
+  });
   return await loadPinnedPreparedRequest({
-    context, params, time, seed, captured, certified, releaseProjectionPin
+    context, params, time, seed, captured, certified, releaseProjectionPin,
+    snapshotCoherenceReceipt
   });
 }
 
@@ -65,8 +73,10 @@ async function loadPinnedPreparedRequest(input: Readonly<{
   captured: ReturnType<typeof capturePreparedRequestCondition>;
   certified: Awaited<ReturnType<typeof certifyPreparedSemanticCapture>>;
   releaseProjectionPin: () => void;
+  snapshotCoherenceReceipt: PreparedRecallRequest["snapshotCoherenceReceipt"];
 }>): Promise<PreparedRecallRequest> {
-  const { context, params, time, seed, captured, certified, releaseProjectionPin } = input;
+  const { context, params, time, seed, captured, certified, releaseProjectionPin,
+    snapshotCoherenceReceipt } = input;
   let projectionPinLease: ProjectionPinLeaseGuard | null = null;
   try {
     projectionPinLease = startProjectionPinLeaseGuard({
@@ -103,7 +113,8 @@ async function loadPinnedPreparedRequest(input: Readonly<{
       querySemanticFactorFormationCapture: certified?.formation,
       querySemanticFactorCompletenessReceipt: certified === undefined
         ? undefined
-        : certified.receipt
+        : certified.receipt,
+      snapshotCoherenceReceipt
     });
   } catch (error) {
     cleanupFailedPreparation({ context, projectionPinLease,

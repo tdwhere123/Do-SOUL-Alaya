@@ -26,3 +26,4 @@ export {
   publicSnapshotCoherenceReceiptBytes,
   verifySnapshotCoherenceReceiptV1
 } from "./receipt.js";
+export { capturePreparedSnapshotCoherenceReceipt } from "./prepare-adapter.js";
