@@ -35,6 +35,8 @@ describe("snapshot freeze integration", () => {
     const prepared = await prepareSample();
     expect(prepared.snapshotCoherenceReceipt.coherence_state).toBe("unavailable");
     expect(prepared.snapshotCoherenceReceipt.reasons).toContain("source_unavailable");
+    expect(prepared.canonicalQueryCompilation.snapshot_receipt_digest)
+      .toBe(prepared.snapshotCoherenceReceipt.receipt_digest);
     expect(Object.isFrozen(prepared.snapshotCoherenceReceipt)).toBe(true);
     const digest = prepared.snapshotCoherenceReceipt.receipt_digest;
     const mutatedPin = { ...prepared.projectionPin, generation_id: SHA_A };

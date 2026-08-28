@@ -32,6 +32,8 @@ import {
 import type { ProjectionPinLeaseGuard } from "./projection-pin-lease.js";
 import { capturePreparedSnapshotCoherenceReceipt } from
   "../snapshot-coherence/index.js";
+import { compileCanonicalQueryCompilation } from
+  "../../query/canonical-query/index.js";
 
 export async function prepareRecallRequest(
   context: RecallExecutionContext,
@@ -59,9 +61,13 @@ export async function prepareRecallRequest(
     pin: captured.pin,
     snapshotDigest: params.snapshotDigest
   });
+  const canonicalQueryCompilation = compileCanonicalQueryCompilation({
+    probes: seed.queryProbes,
+    shape: seed.answerShapePlan
+  }, snapshotCoherenceReceipt);
   return await loadPinnedPreparedRequest({
     context, params, time, seed, captured, certified, releaseProjectionPin,
-    snapshotCoherenceReceipt
+    snapshotCoherenceReceipt, canonicalQueryCompilation
   });
 }
 
@@ -74,9 +80,10 @@ async function loadPinnedPreparedRequest(input: Readonly<{
   certified: Awaited<ReturnType<typeof certifyPreparedSemanticCapture>>;
   releaseProjectionPin: () => void;
   snapshotCoherenceReceipt: PreparedRecallRequest["snapshotCoherenceReceipt"];
+  canonicalQueryCompilation: PreparedRecallRequest["canonicalQueryCompilation"];
 }>): Promise<PreparedRecallRequest> {
   const { context, params, time, seed, captured, certified, releaseProjectionPin,
-    snapshotCoherenceReceipt } = input;
+    snapshotCoherenceReceipt, canonicalQueryCompilation } = input;
   let projectionPinLease: ProjectionPinLeaseGuard | null = null;
   try {
     projectionPinLease = startProjectionPinLeaseGuard({
@@ -114,7 +121,8 @@ async function loadPinnedPreparedRequest(input: Readonly<{
       querySemanticFactorCompletenessReceipt: certified === undefined
         ? undefined
         : certified.receipt,
-      snapshotCoherenceReceipt
+      snapshotCoherenceReceipt,
+      canonicalQueryCompilation
     });
   } catch (error) {
     cleanupFailedPreparation({ context, projectionPinLease,
