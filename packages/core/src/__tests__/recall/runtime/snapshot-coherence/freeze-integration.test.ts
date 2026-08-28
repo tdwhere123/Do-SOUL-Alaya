@@ -22,9 +22,6 @@ import {
   SnapshotCoherenceContractError,
   capturePreparedSnapshotCoherenceReceipt
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
-import { RecallService } from "../../../../recall/recall-service.js";
-import { CANONICAL_CAPTURE_IDENTITY } from
-  "../../../../recall/shadow/canonical-delivery.js";
 import { stableStringify } from "../../../../shared/stable-stringify.js";
 import { buildRecallPolicy } from "../../../../shared/recall-policy.js";
 import { fieldContractSha256 } from "../../../../shared/field-hash.js";
@@ -36,8 +33,12 @@ import {
   testSha256
 } from "../../query/query-condition-test-fixtures.js";
 import {
+  runYogaNeutralityBundle,
+  stringifyNeutralityRun
+} from "../../neutrality-shadow-fixture.js";
+import { captureShadowOffBundle } from "../../neutrality-shadow-off-runner.js";
+import {
   createDependencies,
-  createMemoryEntry,
   createTaskSurface
 } from "../../recall-service-test-fixtures.js";
 
@@ -192,51 +193,37 @@ describe("snapshot freeze integration", () => {
     expect(live).toBe(0);
   });
 
-  it("keeps canonical membership, order, and public receipt identity", async () => {
-    const memory = createMemoryEntry({
-      object_id: "memory-canonical",
-      content: "I take yoga classes at Serenity Yoga."
-    });
+  it("matches f29002ba shadow-off public delivery and embedding traces", async () => {
     const prepareLegacy = vi.spyOn(fineAssessment, "prepareFineAssessment");
     const assess = vi.spyOn(fineAssessment, "fineAssess");
     const gammaWalk = vi.spyOn(gamma, "selectGammaWalk");
-    const { dependencies } = createDependencies([memory]);
-    const service = new RecallService({
-      ...dependencies,
-      defaultPolicyDecorator: (policy) => policy
-    });
-    const params = {
-      taskSurface: {
-        ...createTaskSurface(),
-        display_name: "Where do I take yoga classes?"
-      },
-      workspaceId: "workspace-1" as const,
-      strategy: "analyze" as const
-    };
-    const first = await service.recall(params);
-    const second = await service.recall(params);
-    const firstKeys = first.candidates.map((candidate) => candidate.object_id);
-    const publicDelivery = {
-      delivery_path: first.delivery_path,
-      ranking_authority: first.ranking_authority,
-      capture_identity: first.capture_identity,
-      object_ids: firstKeys,
-      relevance_scores: first.candidates.map((candidate) => candidate.relevance_score)
-    };
-    // Shadow-off transcript: f29002ba canonical-execute-recall.test.ts yoga fixture.
-    expect(stableStringify(publicDelivery)).toBe(stableStringify({
-      delivery_path: "canonical",
-      ranking_authority: "prefix_sk",
-      capture_identity: CANONICAL_CAPTURE_IDENTITY,
-      object_ids: ["memory-canonical"],
-      relevance_scores: [0]
-    }));
-    expect(second.capture_identity).toEqual(first.capture_identity);
-    expect(second.candidates.map((candidate) => candidate.object_id)).toEqual(firstKeys);
+    const head = await runYogaNeutralityBundle();
+    const shadowOff = captureShadowOffBundle();
+    expect(stringifyNeutralityRun(head.miss)).toBe(stringifyNeutralityRun(shadowOff.miss));
+    expect(stringifyNeutralityRun(head.hit)).toBe(stringifyNeutralityRun(shadowOff.hit));
+    expect(stableStringify(head.miss.public_delivery))
+      .toBe(stableStringify(shadowOff.miss.public_delivery));
+    expect(stableStringify(head.hit.public_delivery))
+      .toBe(stableStringify(shadowOff.hit.public_delivery));
+    expect(head.miss.membership).toEqual(shadowOff.miss.membership);
+    expect(head.hit.membership).toEqual(shadowOff.hit.membership);
+    expect(head.miss.order).toEqual(shadowOff.miss.order);
+    expect(head.hit.order).toEqual(shadowOff.hit.order);
+    expect(stableStringify(head.miss.receipt))
+      .toBe(stableStringify(shadowOff.miss.receipt));
+    expect(stableStringify(head.hit.receipt))
+      .toBe(stableStringify(shadowOff.hit.receipt));
+    expect(head.miss.trace.provider_embed_texts)
+      .toEqual(shadowOff.miss.trace.provider_embed_texts);
+    expect(head.hit.trace.provider_embed_texts)
+      .toEqual(shadowOff.hit.trace.provider_embed_texts);
+    expect(head.miss.trace.repo_reads).toEqual(shadowOff.miss.trace.repo_reads);
+    expect(head.hit.trace.repo_reads).toEqual(shadowOff.hit.trace.repo_reads);
+    expect(head.miss.trace.repo_writes).toEqual(shadowOff.miss.trace.repo_writes);
+    expect(head.hit.trace.repo_writes).toEqual(shadowOff.hit.trace.repo_writes);
     expect(prepareLegacy).not.toHaveBeenCalled();
     expect(assess).toHaveBeenCalled();
     expect(gammaWalk).not.toHaveBeenCalled();
-    expect(dependencies.memoryRepo.findByWorkspaceId).toHaveBeenCalled();
   });
 });
 
