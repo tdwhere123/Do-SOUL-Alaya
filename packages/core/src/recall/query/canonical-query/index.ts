@@ -14,6 +14,7 @@ export {
   type CanonicalVariableV1
 } from "./types.js";
 export {
+  bindAllObservableCompletion,
   createCanonicalQueryV1,
   digestCanonicalQueryV1,
   serializeCanonicalQueryV1,
@@ -30,9 +31,12 @@ export {
   compileCanonicalQueryCompilation,
   verifyCanonicalQueryCompilationV1,
   QUERY_HOLE_IMPACTS,
+  UNBOUND_CANONICAL_QUERY_IDENTITY,
+  impactsFor,
   type CanonicalQueryCompilationV1,
   type CanonicalQueryCompileStatusV1,
   type CanonicalQueryHoleV1,
   type CanonicalQueryHypotheticalModeV1,
+  type CanonicalQueryIdentityV1,
   type QueryHoleImpactV1
 } from "./compilation.js";

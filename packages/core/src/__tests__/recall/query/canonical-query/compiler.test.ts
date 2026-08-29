@@ -1,17 +1,41 @@
 import { describe, expect, it } from "vitest";
+import {
+  QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID,
+  type RecallQueryFactFrameCaptureFrame
+} from "../../../../recall/field/query-attribution/query-fact-frame-attribution-producer.js";
+import { digestRecallFieldIdentity } from
+  "../../../../recall/field/field-identity.js";
+import { materializeOpenSemanticFactorFormation } from
+  "../../../../semantic/open-semantic-factor-formation.js";
 import { compileRecallQueryProbes } from
   "../../../../recall/query/recall-query-probes.js";
-import { compileCanonicalQueryEvidence } from
-  "../../../../recall/query/canonical-query/index.js";
+import {
+  compileCanonicalQueryCompilation,
+  compileCanonicalQueryEvidence
+} from "../../../../recall/query/canonical-query/index.js";
+
+const BOOKSHELF = "Where did I buy my new bookshelf from?";
+const CJK_PLACE = "我在哪里兑换了咖啡奶精优惠券？";
+const SNAPSHOT = {
+  receipt_digest: `sha256:${"c".repeat(64)}`,
+  coherence_state: "coherent_exact"
+} as const;
+const QUERY_IDENTITY = Object.freeze({
+  condition_identity: "cond-1",
+  query_operator_id: "recall_query_v1",
+  generation_id: "gen-1",
+  query_cache_key: "cache-1"
+});
+const EMPTY_DEMAND = Object.freeze({ schema_version: 1 as const, atoms: [] });
 
 describe("canonical query compiler adapters", () => {
   it("compiles a type-valid English place program with relation provenance", () => {
     const english = compileCanonicalQueryEvidence({
-      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?")
+      probes: compileRecallQueryProbes(BOOKSHELF)
     });
     expect(english.hypotheses).toHaveLength(1);
     expect(english.hypotheses[0]?.answer.kind).toBe("scalar");
-    expect(english.hypotheses[0]?.predicates.map((row) => row.relation)).toEqual(["buy"]);
+    expect(relationOf(english, "shape.relation_terms")).toBe("buy");
     expect(english.hypotheses[0]?.predicates[0]?.provenance).toEqual({
       source_id: "shape.relation_terms",
       producer: "recall_answer_shape_plan"
@@ -21,9 +45,60 @@ describe("canonical query compiler adapters", () => {
       producer: "recall_answer_shape_plan"
     }]);
     expect(english.unresolved.some((row) => row.source === "demand")).toBe(true);
-    expect(english.unresolved.some((row) =>
-      row.code === "unbound_target_term")).toBe(true);
+    expect(english.unresolved.some((row) => row.code === "unadapted_fact_frame"))
+      .toBe(false);
     expect(english.provenance).toContain("shape.relation_terms");
+  });
+
+  it("certifies an explicit empty-demand English place program", () => {
+    const compiled = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND
+    });
+    expect(compiled.hypotheses).toHaveLength(1);
+    expect(compiled.hypotheses[0]?.answer.kind).toBe("scalar");
+    expect(relationOf(compiled, "shape.relation_terms")).toBe("buy");
+    expect(compiled.unresolved.some((row) => row.code === "unadapted_fact_frame"))
+      .toBe(false);
+    const certified = compileCanonicalQueryCompilation({
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND,
+      query_identity: QUERY_IDENTITY
+    }, SNAPSHOT);
+    expect(certified.compile_status).toBe("certified_program");
+    expect(certified.holes).toEqual([]);
+  });
+
+  it("certifies a CJK place program from grounded shape tokens without jieba", () => {
+    const compiled = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes(CJK_PLACE),
+      demand: EMPTY_DEMAND,
+      shape: {
+        schema_version: 1,
+        status: "high_confidence",
+        shape: "place",
+        target_terms: ["咖啡奶精优惠券"],
+        relation_terms: ["兑换"]
+      }
+    });
+    expect(compiled.hypotheses).toHaveLength(1);
+    expect(compiled.hypotheses[0]?.answer.kind).toBe("scalar");
+    expect(relationOf(compiled, "shape.relation_terms")).toBe("兑换");
+    const certified = compileCanonicalQueryCompilation({
+      probes: compileRecallQueryProbes(CJK_PLACE),
+      demand: EMPTY_DEMAND,
+      shape: {
+        schema_version: 1,
+        status: "high_confidence",
+        shape: "place",
+        target_terms: ["咖啡奶精优惠券"],
+        relation_terms: ["兑换"]
+      },
+      query_identity: QUERY_IDENTITY
+    }, SNAPSHOT);
+    expect(certified.compile_status).toBe("certified_program");
+    expect(certified.holes).toEqual([]);
+    expect(CJK_PLACE.includes("兑换")).toBe(true);
   });
 
   it("does not silently truncate relations or accept blank relations", () => {
@@ -59,7 +134,13 @@ describe("canonical query compiler adapters", () => {
     });
     expect(cjk.hypotheses).toEqual([]);
     expect(cjk.unresolved.some((row) => row.code === "unsupported_nesting")).toBe(true);
-    expect(cjk.unresolved.some((row) => row.code === "ambiguous_cjk_segmentation")).toBe(true);
+    expect(cjk.unresolved.some((row) => row.code === "ambiguous_cjk_segmentation"))
+      .toBe(true);
+    const certified = compileCanonicalQueryCompilation({
+      probes: compileRecallQueryProbes("每天上班通勤要多久？"),
+      demand: EMPTY_DEMAND
+    }, SNAPSHOT);
+    expect(certified.compile_status).not.toBe("certified_program");
   });
 
   it("keeps count/sum and latest-without-time explicit", () => {
@@ -82,16 +163,61 @@ describe("canonical query compiler adapters", () => {
       row.code === "latest_without_typed_time_key")).toBe(true);
   });
 
-  it("records unadapted fact-frame/OSF instead of dropping them", () => {
+  it("adapts a returned fact-frame relation into Phi with fact-frame provenance", () => {
     const compiled = compileCanonicalQueryEvidence({
-      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?"),
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND,
+      factFrameCapture: returnedFactFrame([buyFrame()])
+    });
+    const frameRelation = compiled.hypotheses.flatMap((query) => query.predicates)
+      .find((predicate) => predicate.provenance?.producer
+        === QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID);
+    expect(frameRelation?.relation).toBe("buy");
+    expect(compiled.unresolved.some((row) => row.code === "unadapted_fact_frame"))
+      .toBe(false);
+  });
+
+  it("adapts a formed single-proposition OSF graph without a blanket unadapted_osf", () => {
+    const compiled = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND,
+      osfCapture: formedOsf(BOOKSHELF, 1)
+    });
+    const osfRelation = compiled.hypotheses.flatMap((query) => query.predicates)
+      .find((predicate) => predicate.provenance?.source_id.startsWith("osf.relation.")
+        === true);
+    expect(osfRelation?.relation).toBe("buy");
+    expect(compiled.unresolved.some((row) => row.code === "unadapted_osf")).toBe(false);
+  });
+
+  it("keeps conflicting shape and fact-frame relations as two hypotheses", () => {
+    const compiled = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND,
+      factFrameCapture: returnedFactFrame([purchaseFrame()])
+    });
+    const relations = compiled.hypotheses.map((query) =>
+      query.predicates.find((predicate) =>
+        predicate.provenance?.source_id.includes(".relation") === true
+      )?.relation
+    );
+    expect(new Set(relations)).toEqual(new Set(["buy", "purchase"]));
+    expect(compiled.hypotheses.length).toBeGreaterThanOrEqual(2);
+    expect(compiled.unresolved.some((row) =>
+      row.code === "conflicting_demand_shape" || row.code === "conflicting_shape"))
+      .toBe(true);
+  });
+
+  it("records unadapted fact-frame/OSF for status-only and unavailable captures", () => {
+    const compiled = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes(BOOKSHELF),
       factFrameCapture: { status: "returned" },
       osfCapture: { status: "formed" }
     });
     expect(compiled.unresolved.some((row) => row.code === "unadapted_fact_frame")).toBe(true);
     expect(compiled.unresolved.some((row) => row.code === "unadapted_osf")).toBe(true);
     const otherFrames = compileCanonicalQueryEvidence({
-      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?"),
+      probes: compileRecallQueryProbes(BOOKSHELF),
       factFrameCapture: {
         status: "returned",
         capture_digest: `sha256:${"a".repeat(64)}`
@@ -99,28 +225,28 @@ describe("canonical query compiler adapters", () => {
       osfCapture: { status: "formed", capture_digest: `sha256:${"b".repeat(64)}` }
     });
     const shiftedFrames = compileCanonicalQueryEvidence({
-      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?"),
+      probes: compileRecallQueryProbes(BOOKSHELF),
       factFrameCapture: {
         status: "returned",
         capture_digest: `sha256:${"c".repeat(64)}`
       },
       osfCapture: { status: "formed", capture_digest: `sha256:${"d".repeat(64)}` }
     });
-    expect(otherFrames).not.toEqual(shiftedFrames);
     expect(otherFrames.unresolved.find((row) => row.code === "unadapted_fact_frame")
       ?.capture_digest).not.toBe(
       shiftedFrames.unresolved.find((row) => row.code === "unadapted_fact_frame")
         ?.capture_digest
     );
     const otherStatus = compileCanonicalQueryEvidence({
-      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?"),
-      factFrameCapture: { status: "ineligible" },
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      factFrameCapture: { status: "unavailable" },
       osfCapture: { status: "unavailable" }
     });
-    expect(otherStatus.unresolved.some((row) => row.code === "unadapted_fact_frame")).toBe(true);
+    expect(otherStatus.unresolved.some((row) => row.code === "unadapted_fact_frame"))
+      .toBe(true);
     expect(otherStatus.unresolved.some((row) => row.code === "unadapted_osf")).toBe(true);
     const pinnedDemand = compileCanonicalQueryEvidence({
-      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?"),
+      probes: compileRecallQueryProbes(BOOKSHELF),
       demand: {
         schema_version: 1,
         atoms: [{
@@ -134,11 +260,145 @@ describe("canonical query compiler adapters", () => {
     expect(pinnedDemand.unresolved.some((row) =>
       row.code === "unadapted_demand_temporal" && row.source === "demand")).toBe(true);
     const first = compileCanonicalQueryEvidence({
-      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?")
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND,
+      query_identity: QUERY_IDENTITY
     });
     const second = compileCanonicalQueryEvidence({
-      probes: compileRecallQueryProbes("Where did I buy my new bookshelf from?")
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND,
+      query_identity: QUERY_IDENTITY
     });
     expect(first).toEqual(second);
   });
 });
+
+function relationOf(
+  compiled: ReturnType<typeof compileCanonicalQueryEvidence>,
+  sourceId: string
+): string | undefined {
+  return compiled.hypotheses[0]?.predicates.find((predicate) =>
+    predicate.provenance?.source_id === sourceId
+  )?.relation;
+}
+
+function returnedFactFrame(
+  frames: readonly RecallQueryFactFrameCaptureFrame[]
+) {
+  const body = Object.freeze({
+    schema_version: 1 as const,
+    operator_id: QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID,
+    status: "returned" as const,
+    query_text_digest: digestRecallFieldIdentity({ query_text: BOOKSHELF }),
+    producer_operator_id: "structured_query_frame_v1",
+    frames
+  });
+  return Object.freeze({ ...body, capture_digest: digestRecallFieldIdentity(body) });
+}
+
+function buyFrame(): RecallQueryFactFrameCaptureFrame {
+  return captureFrame([
+    { role: "subject", text: "I" },
+    { role: "relation", text: "buy" },
+    { role: "value", text: "bookshelf" }
+  ]);
+}
+
+function purchaseFrame(): RecallQueryFactFrameCaptureFrame {
+  return captureFrame([
+    { role: "subject", text: "I" },
+    { role: "relation", text: "purchase" },
+    { role: "value", text: "bookshelf" }
+  ]);
+}
+
+function captureFrame(
+  slots: readonly { readonly role: "subject" | "relation" | "value"; readonly text: string }[]
+): RecallQueryFactFrameCaptureFrame {
+  let cursor = 0;
+  return {
+    schema_version: 1,
+    slots: slots.map((slot) => {
+      const start = cursor;
+      const end = start + slot.text.length;
+      cursor = end;
+      return { role: slot.role, text: slot.text, source_offset: [start, end] as const };
+    })
+  };
+}
+
+function formedOsf(source: string, propositions: 1 | 2) {
+  return materializeOpenSemanticFactorFormation({
+    source_kind: "query",
+    source_text: source,
+    proposal: {
+      schema_version: 1,
+      producer_operator_id: "open-factor-test-producer-v1",
+      source_text: source,
+      graph: osfGraph(propositions)
+    }
+  });
+}
+
+function osfGraph(propositions: 1 | 2) {
+  const second = propositions === 2
+    ? [{
+        factor_id: "second",
+        surface: "new",
+        semantic_identity: "own",
+        source_occurrence: 0
+      }]
+    : [];
+  return {
+    schema_version: 2 as const,
+    source_kind: "query" as const,
+    factors: [
+      {
+        factor_id: "predicate",
+        surface: "buy",
+        semantic_identity: "buy",
+        source_occurrence: 0
+      },
+      {
+        factor_id: "object",
+        surface: "bookshelf",
+        semantic_identity: "bookshelf",
+        source_occurrence: 0
+      },
+      ...second
+    ],
+    variables: [{ variable_id: "answer", surface: "Where", source_occurrence: 0 }],
+    result_variable_ids: ["answer"],
+    propositions: [
+      {
+        proposition_id: "buy-query",
+        predicate_factor_id: "predicate",
+        arguments: [
+          argument(0, "object", "factor", "object"),
+          argument(1, "answer", "variable", "answer")
+        ]
+      },
+      ...(propositions === 2
+        ? [{
+            proposition_id: "own-query",
+            predicate_factor_id: "second",
+            arguments: [argument(0, "answer", "variable", "answer")]
+          }]
+        : [])
+    ]
+  };
+}
+
+function argument(
+  position: number,
+  bindingIdentity: string,
+  referenceKind: "factor" | "variable",
+  referenceId: string
+) {
+  return {
+    position,
+    binding_identity: bindingIdentity,
+    reference_kind: referenceKind,
+    reference_id: referenceId
+  };
+}

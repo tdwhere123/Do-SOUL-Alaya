@@ -35,13 +35,17 @@ export function createSnapshotCoherenceReceiptV1(
 }
 
 export function verifySnapshotCoherenceReceiptV1(
-  receipt: SnapshotCoherenceReceiptV1
+  receipt: SnapshotCoherenceReceiptV1,
+  vector: SnapshotVectorV1
 ): void {
   if (receipt.schema_version !== 1
     || receipt.operator_id !== SNAPSHOT_COHERENCE_OPERATOR_ID) {
     rejectSnapshotCoherence("malformed_digest");
   }
   if (digestSnapshotCoherenceReceiptV1(receipt) !== receipt.receipt_digest) {
+    rejectSnapshotCoherence("malformed_digest");
+  }
+  if (!receiptMatchesVector(receipt, vector)) {
     rejectSnapshotCoherence("malformed_digest");
   }
 }
@@ -72,6 +76,32 @@ function digestReceiptBody(
   body: Omit<SnapshotCoherenceReceiptV1, "receipt_digest">
 ): RecallFieldDigest {
   return digestRecallFieldIdentity(body);
+}
+
+function receiptMatchesVector(
+  receipt: SnapshotCoherenceReceiptV1,
+  vector: SnapshotVectorV1
+): boolean {
+  const classified = classifySnapshotCoherence(vector);
+  return receipt.principal === vector.principal
+    && sameIdentity(
+      normalizeScopes(receipt.authorized_scopes),
+      normalizeScopes(vector.authorized_scopes)
+    )
+    && receipt.effective_as_of === vector.effective_as_of
+    && receipt.vector_digest === vector.vector_digest
+    && receipt.coherence_state === classified.state
+    && sameIdentity(receipt.reasons, classified.reasons)
+    && sameIdentity(receipt.lag_bounds, classified.lag_bounds);
+}
+
+function normalizeScopes(scopes: readonly string[]): readonly string[] {
+  // Constructor sorts; compare must not depend on caller order.
+  return [...scopes].sort((left, right) => left.localeCompare(right));
+}
+
+function sameIdentity(left: unknown, right: unknown): boolean {
+  return digestRecallFieldIdentity(left) === digestRecallFieldIdentity(right);
 }
 
 function assertRestrictedUniverse(

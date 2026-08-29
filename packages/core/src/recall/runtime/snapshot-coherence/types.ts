@@ -108,7 +108,7 @@ export type SnapshotCoherenceReceiptV1 = Readonly<{
   readonly effective_as_of: string;
   readonly coherence_state: SnapshotCoherenceState;
   readonly reasons: readonly string[];
-  readonly lag_bounds: readonly string[];
+  readonly lag_bounds: readonly SnapshotRemainingEffectV1[];
   readonly vector_digest: RecallFieldDigest;
   readonly receipt_digest: RecallFieldDigest;
 }>;

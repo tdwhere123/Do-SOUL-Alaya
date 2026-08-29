@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   CANONICAL_QUERY_OPERATOR_ID,
+  bindAllObservableCompletion,
   digestCanonicalQueryV1,
   serializeCanonicalQueryV1,
   validateCanonicalQueryV1,
   type CanonicalAnswerProgramV1,
+  type CanonicalCompletionV1,
   type CanonicalQueryInputV1,
   type CanonicalVariableV1
 } from "../../../../recall/query/canonical-query/index.js";
@@ -27,13 +29,11 @@ describe("canonical query algebra v1", () => {
       answer: {
         kind: "distinct",
         variable: "x",
-        completion: {
-          kind: "all_observable",
+        completion: bindAllObservableCompletion({
           scope: "workspace-1",
           principal: "principal-1",
-          snapshot_bind: "Sigma_q",
-          observer_contract: "observer-v1"
-        }
+          observer_universe: ["obs-1"]
+        })
       }
     }).query.answer.kind).toBe("distinct");
     expect(supported({
@@ -140,11 +140,12 @@ describe("canonical query algebra v1", () => {
         kind: "distinct",
         variable: "x",
         completion: {
-          kind: "all_observable",
-          scope: "scope-1",
-          principal: "principal-1",
-          snapshot_bind: "not_sigma" as "Sigma_q",
-          observer_contract: "observer-v1"
+          ...bindAllObservableCompletion({
+            scope: "scope-1",
+            principal: "principal-1",
+            observer_universe: ["obs-1"]
+          }),
+          snapshot_bind: "not_sigma" as "Sigma_q"
         }
       }
     })).toBe("invalid_all_observable");
@@ -158,7 +159,69 @@ describe("canonical query algebra v1", () => {
       answer: { kind: "scalar", variable: "x" }
     })).toBe("undeclared_variable");
   });
+
+  it("binds all_observable to a finite observer-universe proof", () => {
+    const left = bindAllObservableCompletion({
+      principal: "principal-1",
+      scope: "workspace-1",
+      observer_universe: ["obs-b", "obs-a"]
+    });
+    const right = bindAllObservableCompletion({
+      principal: "principal-1",
+      scope: "workspace-1",
+      observer_universe: ["obs-a", "obs-b"]
+    });
+    const other = bindAllObservableCompletion({
+      principal: "principal-1",
+      scope: "workspace-1",
+      observer_universe: ["obs-c"]
+    });
+    expect(left.observer_universe).toEqual(["obs-a", "obs-b"]);
+    expect(left.observer_contract).toBe(right.observer_contract);
+    expect(left.observer_contract).not.toBe(other.observer_contract);
+    const query = supported(distinctOf(left));
+    expect(query.query.answer.kind).toBe("distinct");
+    expect(serializeCanonicalQueryV1(query.query)).toBe(
+      serializeCanonicalQueryV1(supported(distinctOf(right)).query)
+    );
+    expect(digestCanonicalQueryV1(query.query)).toBe(
+      digestCanonicalQueryV1(supported(distinctOf(right)).query)
+    );
+    expect(Object.isFrozen(left)).toBe(true);
+  });
+
+  it("rejects unbounded and unbound all_observable observer universes", () => {
+    const bound = bindAllObservableCompletion({
+      principal: "principal-1",
+      scope: "workspace-1",
+      observer_universe: ["obs-1"]
+    });
+    expect(codeOf(distinctOf({
+      ...bound,
+      observer_contract: "observer-v1"
+    }))).toBe("invalid_all_observable");
+    expect(codeOf(distinctOf({ ...bound, observer_universe: [] })))
+      .toBe("invalid_all_observable");
+    expect(codeOf(distinctOf({ ...bound, observer_universe: ["obs-1", "obs-1"] })))
+      .toBe("invalid_all_observable");
+    expect(codeOf(distinctOf({ ...bound, observer_universe: ["*"] })))
+      .toBe("invalid_all_observable");
+    expect(codeOf(distinctOf({ ...bound, observer_universe: ["all_known"] })))
+      .toBe("invalid_all_observable");
+    expect(codeOf(distinctOf({
+      ...bound,
+      observer_universe: ["obs-2"],
+      observer_contract: bound.observer_contract
+    }))).toBe("invalid_all_observable");
+  });
 });
+
+function distinctOf(completion: CanonicalCompletionV1): CanonicalQueryInputV1 {
+  return {
+    variables: [ENTITY],
+    answer: { kind: "distinct", variable: "x", completion }
+  };
+}
 
 function supported(input: CanonicalQueryInputV1) {
   const result = validateCanonicalQueryV1(input);

@@ -42,6 +42,20 @@ export type CanonicalQueryHypotheticalModeV1 =
   | "abstained"
   | "unsupported";
 
+export type CanonicalQueryIdentityV1 = Readonly<{
+  readonly condition_identity: string;
+  readonly query_operator_id: string;
+  readonly generation_id: string;
+  readonly query_cache_key: string;
+}>;
+
+export const UNBOUND_CANONICAL_QUERY_IDENTITY: CanonicalQueryIdentityV1 = Object.freeze({
+  condition_identity: "unbound",
+  query_operator_id: "unbound",
+  generation_id: "unbound",
+  query_cache_key: "unbound"
+});
+
 export type CanonicalQueryCompilationV1 = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof CANONICAL_QUERY_OPERATOR_ID;
@@ -54,6 +68,7 @@ export type CanonicalQueryCompilationV1 = Readonly<{
   readonly hypothetical_mode: CanonicalQueryHypotheticalModeV1;
   readonly sensitivities: readonly string[];
   readonly snapshot_receipt_digest: RecallFieldDigest;
+  readonly query_identity: CanonicalQueryIdentityV1;
   readonly digest: RecallFieldDigest;
 }>;
 
@@ -78,7 +93,8 @@ export function compileCanonicalQueryCompilation(
     compile_status,
     hypothetical_mode: hypotheticalMode(compile_status, holes),
     sensitivities: Object.freeze(collectSensitivities(compiled)),
-    snapshot_receipt_digest: snapshot.receipt_digest
+    snapshot_receipt_digest: snapshot.receipt_digest,
+    query_identity: bindQueryIdentity(evidence.query_identity)
   });
   return Object.freeze({
     ...body,
@@ -100,25 +116,41 @@ export function verifyCanonicalQueryCompilationV1(
     compile_status: compilation.compile_status,
     hypothetical_mode: compilation.hypothetical_mode,
     sensitivities: compilation.sensitivities,
-    snapshot_receipt_digest: compilation.snapshot_receipt_digest
+    snapshot_receipt_digest: compilation.snapshot_receipt_digest,
+    query_identity: compilation.query_identity
   };
   if (digestRecallFieldIdentity(body) !== compilation.digest) {
     throw new Error("canonical query compilation digest mismatch");
   }
 }
 
+function bindQueryIdentity(
+  identity: CanonicalQueryIdentityV1 | undefined
+): CanonicalQueryIdentityV1 {
+  if (identity === undefined) return UNBOUND_CANONICAL_QUERY_IDENTITY;
+  const tokens = [
+    identity.condition_identity,
+    identity.query_operator_id,
+    identity.generation_id,
+    identity.query_cache_key
+  ];
+  // Empty tokens would drop identity from the digest instead of remaining unbound.
+  if (tokens.some((token) => token.length === 0 || token.trim() !== token)) {
+    return UNBOUND_CANONICAL_QUERY_IDENTITY;
+  }
+  return Object.freeze({
+    condition_identity: identity.condition_identity,
+    query_operator_id: identity.query_operator_id,
+    generation_id: identity.generation_id,
+    query_cache_key: identity.query_cache_key
+  });
+}
+
 function snapshotHoles(
   snapshot: Readonly<Pick<SnapshotCoherenceReceiptV1, "coherence_state">>
 ): readonly CanonicalQueryHoleV1[] {
   if (snapshot.coherence_state === "coherent_exact") return [];
-  const impacts = snapshot.coherence_state === "unavailable"
-    ? ["blocks_all_delivery", "blocks_certified_delivery"]
-    : ["blocks_certified_delivery"];
-  return [Object.freeze({
-    provenance: "snapshot",
-    code: snapshot.coherence_state,
-    impacts: Object.freeze([...new Set(impacts)] as QueryHoleImpactV1[])
-  })];
+  return [holeFromCode(snapshot.coherence_state, "snapshot")];
 }
 
 function collectHoles(compiled: CanonicalQueryCompileV1): CanonicalQueryHoleV1[] {
@@ -161,7 +193,7 @@ function holeFromCode(code: string, provenance: string): CanonicalQueryHoleV1 {
   });
 }
 
-function impactsFor(code: string): QueryHoleImpactV1[] {
+export function impactsFor(code: string): QueryHoleImpactV1[] {
   if (code === "unknown_answer_variable") {
     return ["blocks_membership", "blocks_all_delivery"];
   }
@@ -174,11 +206,14 @@ function impactsFor(code: string): QueryHoleImpactV1[] {
   }
   if (code === "conflicting_demand_shape" || code === "conflicting_shape"
     || code === "unknown_relation" || code === "unadapted_fact_frame"
-    || code === "unbound_target_term") {
+    || code === "unbound_target_term" || code === "unknown_correlation") {
     return ["blocks_pointwise_comparison", "blocks_certified_delivery"];
   }
   if (code === "blocks_completeness_claim" || code === "unknown_scope") {
     return ["blocks_completeness_claim", "blocks_certified_delivery"];
+  }
+  if (code === "unavailable") {
+    return ["blocks_all_delivery", "blocks_certified_delivery"];
   }
   return ["blocks_certified_delivery"];
 }

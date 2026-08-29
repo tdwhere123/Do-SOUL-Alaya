@@ -18,9 +18,3 @@ export function unavailableProducerDigest(owner: string): RecallFieldDigest {
 export function isSnapshotInstant(value: string): boolean {
   return INSTANT.test(value) && Number.isFinite(Date.parse(value));
 }
-
-export function serializeRemainingEffect(
-  effect: Readonly<{ readonly source_owner: string; readonly effect_id: string }>
-): string {
-  return `${effect.source_owner}:${effect.effect_id}`;
-}

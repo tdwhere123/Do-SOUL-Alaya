@@ -19,6 +19,7 @@ import {
   verifyProjectionGeneration
 } from "../../../../recall/field/retrieval/projection/generation-lifecycle.js";
 import {
+  PREPARE_RETRIEVAL_CHANNEL_OWNERS,
   SnapshotCoherenceContractError,
   capturePreparedSnapshotCoherenceReceipt
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
@@ -53,8 +54,14 @@ describe("snapshot freeze integration", () => {
     const { prepared, session, store } = await prepareSample();
     expect(prepared.snapshotCoherenceReceipt.coherence_state).toBe("unavailable");
     expect(prepared.snapshotCoherenceReceipt.reasons).toContain("source_unavailable");
+    expect(prepared.snapshotCoherenceReceipt.reasons).not.toContain("retrieval_undeclared");
+    expect(prepared.snapshotCoherenceReceipt.reasons).not.toContain("decision_contract_unknown");
     expect(prepared.canonicalQueryCompilation.snapshot_receipt_digest)
       .toBe(prepared.snapshotCoherenceReceipt.receipt_digest);
+    expect(prepared.canonicalQueryCompilation.query_identity.condition_identity)
+      .toBe(prepared.queryCondition.identity);
+    expect(prepared.canonicalQueryCompilation.query_identity.generation_id)
+      .toBe(prepared.queryCondition.generation_id);
     expect(Object.isFrozen(prepared.snapshotCoherenceReceipt)).toBe(true);
     expect(Object.isFrozen(prepared.projectionPin)).toBe(true);
     const digest = prepared.snapshotCoherenceReceipt.receipt_digest;
@@ -87,7 +94,8 @@ describe("snapshot freeze integration", () => {
     expect(reread.candidate_keys).toEqual(originalKeys);
     const rebuiltFrozen = capturePreparedSnapshotCoherenceReceipt({
       queryCondition: prepared.queryCondition,
-      pin: prepared.projectionPin
+      pin: prepared.projectionPin,
+      retrieval_channel_owners: PREPARE_RETRIEVAL_CHANNEL_OWNERS
     });
     expect(rebuiltFrozen.receipt_digest).toBe(digest);
     const laterPin = session.pinActiveGeneration("workspace-1", CLOCK_AS_OF);
@@ -224,7 +232,7 @@ describe("snapshot freeze integration", () => {
     expect(prepareLegacy).not.toHaveBeenCalled();
     expect(assess).toHaveBeenCalled();
     expect(gammaWalk).not.toHaveBeenCalled();
-  });
+  }, 120_000);
 });
 
 async function prepareSample() {

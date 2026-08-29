@@ -34,8 +34,10 @@ import {
   startProjectionPinLeaseGuard
 } from "./projection-pin-lease.js";
 import type { ProjectionPinLeaseGuard } from "./projection-pin-lease.js";
-import { capturePreparedSnapshotCoherenceReceipt } from
-  "../snapshot-coherence/index.js";
+import {
+  PREPARE_RETRIEVAL_CHANNEL_OWNERS,
+  capturePreparedSnapshotCoherenceReceipt
+} from "../snapshot-coherence/index.js";
 import { compileCanonicalQueryCompilation } from
   "../../query/canonical-query/index.js";
 
@@ -117,26 +119,65 @@ function capturePinnedQueryWorld(
   const snapshotCoherenceReceipt = capturePreparedSnapshotCoherenceReceipt({
     queryCondition: captured.receipt,
     pin: captured.pin,
-    snapshotDigest: params.snapshotDigest
+    snapshotDigest: params.snapshotDigest,
+    retrieval_channel_owners: PREPARE_RETRIEVAL_CHANNEL_OWNERS,
+    formation_operator_versions: declaredFormationVersions(certified)
   });
-  const condition = captured.receipt.condition;
   const baseProbes = compileRecallQueryProbes(queryText);
   const canonicalQueryCompilation = compileCanonicalQueryCompilation({
     probes: baseProbes,
     demand: compileRecallQueryDemand(baseProbes),
     shape: compileRecallAnswerShapePlan(baseProbes),
     factFrameCapture: certified?.factFrameCapture,
-    osfCapture: certified === undefined ? undefined : {
-      status: certified.formation.status,
-      capture_digest: certified.formation.capture_digest
-    },
-    observer: {
-      principal: condition.principal,
-      scope: condition.authorized_scopes[0] ?? condition.workspace_id,
-      observer_contract: captured.receipt.query_operator_id
-    }
+    osfCapture: certified?.formation,
+    observer: observerFromReceipt(captured.receipt),
+    query_identity: queryIdentityFromReceipt(captured.receipt)
   }, snapshotCoherenceReceipt);
   return { snapshotCoherenceReceipt, canonicalQueryCompilation };
+}
+
+function observerFromReceipt(
+  receipt: PreparedRecallRequest["queryCondition"]
+) {
+  const condition = receipt.condition;
+  return {
+    principal: condition.principal,
+    scope: condition.authorized_scopes[0] ?? condition.workspace_id,
+    observer_universe: Object.freeze([receipt.query_operator_id])
+  };
+}
+
+function queryIdentityFromReceipt(
+  receipt: PreparedRecallRequest["queryCondition"]
+) {
+  return {
+    condition_identity: receipt.identity,
+    query_operator_id: receipt.query_operator_id,
+    generation_id: receipt.generation_id,
+    query_cache_key: receipt.query_cache_key
+  };
+}
+
+function declaredFormationVersions(
+  certified: Awaited<ReturnType<typeof certifyPreparedSemanticCapture>>
+): readonly (readonly [string, string])[] {
+  if (certified === undefined) return [];
+  const rows = new Map<string, string>();
+  addFormationVersion(rows, certified.factFrameCapture.producer_operator_id,
+    certified.factFrameCapture.schema_version);
+  addFormationVersion(rows, certified.formation.producer_operator_id,
+    certified.formation.schema_version);
+  return Object.freeze([...rows.entries()].map(([id, version]) =>
+    Object.freeze([id, version] as const)));
+}
+
+function addFormationVersion(
+  rows: Map<string, string>,
+  operatorId: string | null | undefined,
+  schemaVersion: number | undefined
+): void {
+  if (operatorId === null || operatorId === undefined || operatorId.length === 0) return;
+  rows.set(operatorId, String(schemaVersion ?? 1));
 }
 
 function freezePreparedRequest(input: Readonly<{
@@ -262,10 +303,7 @@ async function certifyPreparedSemanticCapture(
   });
   return {
     ...osf,
-    factFrameCapture: {
-      status: factFrameCapture.status,
-      capture_digest: factFrameCapture.capture_digest
-    }
+    factFrameCapture
   };
 }
 

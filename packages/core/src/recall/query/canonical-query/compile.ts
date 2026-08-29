@@ -1,18 +1,36 @@
-import { digestRecallFieldIdentity, type RecallFieldDigest } from
-  "../../field/field-identity.js";
-import { isSnapshotDigest } from
-  "../../runtime/snapshot-coherence/digest.js";
+import type { OpenSemanticFactorFormationCapture } from "@do-soul/alaya-protocol";
+import type { RecallQueryFactFrameExtractionCapture } from
+  "../../field/query-attribution/query-fact-frame-attribution-producer.js";
 import { compileRecallAnswerShapePlan, type RecallAnswerShapePlan } from
   "../recall-answer-shape-plan.js";
 import { compileRecallQueryDemand, type RecallQueryDemand } from
   "../recall-query-demand.js";
 import type { RecallQueryProbes } from "../recall-query-probes.js";
+import { adaptFactFrameCapture } from "./adapters/fact-frame.js";
+import { adaptOsfCapture } from "./adapters/osf.js";
 import {
+  normalizeRelationToken,
+  pushUnresolved,
+  type AdapterSink,
+  type AdapterUnresolved
+} from "./adapters/phi.js";
+import {
+  collectProbeHoles,
+  rejectUnsupportedShape,
+  SHAPE_PRODUCER,
+  shapePredicates
+} from "./adapters/shape.js";
+import {
+  CanonicalQueryContractError,
+  type CanonicalAnswerProgramV1,
   type CanonicalEvidenceProvenanceV1,
-  type CanonicalPredicateV1,
   type CanonicalQueryV1
 } from "./types.js";
-import { digestCanonicalQueryV1, validateCanonicalQueryV1 } from "./validate.js";
+import {
+  bindAllObservableCompletion,
+  digestCanonicalQueryV1,
+  validateCanonicalQueryV1
+} from "./validate.js";
 
 export type CanonicalQueryCaptureEvidenceV1 = Readonly<{
   readonly status?: string;
@@ -23,21 +41,28 @@ export type CanonicalQueryEvidenceV1 = Readonly<{
   readonly probes: Readonly<RecallQueryProbes>;
   readonly demand?: Readonly<RecallQueryDemand>;
   readonly shape?: Readonly<RecallAnswerShapePlan>;
-  readonly factFrameCapture?: CanonicalQueryCaptureEvidenceV1 | null;
-  readonly osfCapture?: CanonicalQueryCaptureEvidenceV1 | null;
+  readonly factFrameCapture?:
+    | RecallQueryFactFrameExtractionCapture
+    | CanonicalQueryCaptureEvidenceV1
+    | null;
+  readonly osfCapture?:
+    | OpenSemanticFactorFormationCapture
+    | CanonicalQueryCaptureEvidenceV1
+    | null;
   readonly observer?: Readonly<{
     readonly principal: string;
     readonly scope: string;
-    readonly observer_contract: string;
+    readonly observer_universe: readonly string[];
+  }>;
+  readonly query_identity?: Readonly<{
+    readonly condition_identity: string;
+    readonly query_operator_id: string;
+    readonly generation_id: string;
+    readonly query_cache_key: string;
   }>;
 }>;
 
-export type CanonicalQueryUnresolvedV1 = Readonly<{
-  readonly code: string;
-  readonly source: string;
-  readonly capture_digest?: RecallFieldDigest;
-  readonly detail?: string;
-}>;
+export type CanonicalQueryUnresolvedV1 = Readonly<AdapterUnresolved>;
 
 export type CanonicalQueryCompileV1 = Readonly<{
   readonly hypotheses: readonly CanonicalQueryV1[];
@@ -46,160 +71,117 @@ export type CanonicalQueryCompileV1 = Readonly<{
   readonly hypothesis_provenance: readonly CanonicalEvidenceProvenanceV1[];
 }>;
 
-const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
-
 export function compileCanonicalQueryEvidence(
   evidence: CanonicalQueryEvidenceV1
 ): CanonicalQueryCompileV1 {
-  const demand = evidence.demand ?? compileRecallQueryDemand(evidence.probes);
-  const shape = evidence.shape ?? compileRecallAnswerShapePlan(evidence.probes);
-  const ordering = demand.atoms.filter((atom) => atom.kind === "ordering");
-  const unresolved: CanonicalQueryUnresolvedV1[] = [...unadaptedEvidence(evidence)];
-  const provenance = ["probes", "demand", "shape"];
-  const hypotheses: CanonicalQueryV1[] = [];
-  const hypothesis_provenance: CanonicalEvidenceProvenanceV1[] = [];
-  pushShapePrograms(shape, evidence, hypotheses, hypothesis_provenance, unresolved, provenance);
-  pushOrderingHoles(ordering, unresolved);
-  unresolved.push(...unadaptedDemandAtoms(demand, hypotheses));
-  unresolved.push(...unboundTargetTerms(shape, hypotheses));
-  if (hypotheses.length === 0 && (shape.status === "unknown" || shape.target_terms.length === 0)
-    && shape.shape !== "count" && shape.shape !== "sum" && shape.shape !== "duration") {
-    unresolved.push({ code: "unknown_answer_variable", source: "shape" });
+  const sink = createSink(evidence);
+  const answer = resolveAnswer(sink.shape, evidence, sink.unresolved);
+  collectProbeHoles(evidence.probes, sink.unresolved);
+  pushShapePrograms(sink, answer);
+  const adapterAnswer = answer ?? { kind: "scalar" as const, variable: "x0" };
+  adaptFactFrameCapture(evidence.factFrameCapture, adapterAnswer, sink);
+  adaptOsfCapture(evidence.osfCapture, adapterAnswer, sink);
+  pushOrderingHoles(sink.demand, sink.unresolved);
+  sink.unresolved.push(...unadaptedDemandAtoms(sink.demand, sink.hypotheses));
+  sink.unresolved.push(...unboundTargetTerms(sink.shape, sink.hypotheses));
+  pushUnknownAnswerHole(sink);
+  pushRelationConflicts(sink);
+  return freezeCompile(dedupeQueries(sink));
+}
+
+function createSink(evidence: CanonicalQueryEvidenceV1): AdapterSink & {
+  readonly demand: Readonly<RecallQueryDemand>;
+  readonly shape: Readonly<RecallAnswerShapePlan>;
+} {
+  return {
+    demand: evidence.demand ?? compileRecallQueryDemand(evidence.probes),
+    shape: evidence.shape ?? compileRecallAnswerShapePlan(evidence.probes),
+    hypotheses: [],
+    hypothesis_provenance: [],
+    unresolved: [],
+    provenance: ["probes", "demand", "shape"]
+  };
+}
+
+function resolveAnswer(
+  shape: Readonly<RecallAnswerShapePlan>,
+  evidence: CanonicalQueryEvidenceV1,
+  unresolved: AdapterUnresolved[]
+): CanonicalAnswerProgramV1 | null {
+  if (shape.shape !== "distinct_entities") {
+    return { kind: "scalar", variable: "x0" };
   }
-  const unique = dedupeQueries(hypotheses, hypothesis_provenance);
-  return Object.freeze({
-    hypotheses: Object.freeze(unique.hypotheses),
-    unresolved: Object.freeze(unresolved),
-    provenance: Object.freeze(provenance),
-    hypothesis_provenance: Object.freeze(unique.provenance)
-  });
-}
-
-function unadaptedEvidence(
-  evidence: CanonicalQueryEvidenceV1
-): CanonicalQueryUnresolvedV1[] {
-  return [
-    ...unadaptedCapture(evidence.factFrameCapture, "unadapted_fact_frame", "fact_frame"),
-    ...unadaptedCapture(evidence.osfCapture, "unadapted_osf", "osf")
-  ];
-}
-
-function unadaptedCapture(
-  capture: CanonicalQueryCaptureEvidenceV1 | null | undefined,
-  code: string,
-  source: string
-): CanonicalQueryUnresolvedV1[] {
-  if (capture === undefined || capture === null) return [];
-  return [Object.freeze({
-    code,
-    source,
-    capture_digest: captureIdentity(capture),
-    detail: capture.status
-  })];
-}
-
-function captureIdentity(capture: CanonicalQueryCaptureEvidenceV1): RecallFieldDigest {
-  const digest = capture.capture_digest;
-  if (typeof digest === "string" && isSnapshotDigest(digest)) return digest;
-  return digestRecallFieldIdentity(capture);
+  const answer = distinctAnswer(evidence);
+  if (answer === null) {
+    pushUnresolved(unresolved, { code: "unknown_scope", source: "observer" });
+  }
+  return answer;
 }
 
 function pushShapePrograms(
-  shape: Readonly<RecallAnswerShapePlan>,
-  evidence: CanonicalQueryEvidenceV1,
-  hypotheses: CanonicalQueryV1[],
-  hypothesisProvenance: CanonicalEvidenceProvenanceV1[],
-  unresolved: CanonicalQueryUnresolvedV1[],
-  provenance: string[]
+  sink: AdapterSink & { readonly shape: Readonly<RecallAnswerShapePlan> },
+  answer: CanonicalAnswerProgramV1 | null
 ): void {
-  if (rejectUnsupportedShape(shape, evidence, unresolved)) return;
-  const answer = shape.shape === "distinct_entities"
-    ? distinctAnswer(evidence)
-    : { kind: "scalar" as const, variable: "x0" };
-  if (answer === null) {
-    unresolved.push({ code: "unknown_scope", source: "observer" });
+  if (rejectUnsupportedShape(sink.shape, sink.unresolved)) return;
+  if (answer === null) return;
+  if (sink.shape.status !== "high_confidence") return;
+  const predicates = shapePredicates(sink.shape);
+  if (predicates.length === 0 && sink.shape.shape !== "distinct_entities") return;
+  const result = validateCanonicalQueryV1({
+    variables: [{ name: "x0", sort: "entity" }],
+    predicates,
+    answer
+  });
+  if (result.status !== "supported") {
+    pushUnresolved(sink.unresolved, { code: result.reason_code, source: "validator" });
     return;
   }
-  const query = supportedQuery({
-    variables: [{ name: "x0", sort: "entity" }],
-    predicates: relationPredicates(shape),
-    answer
-  }, unresolved);
-  if (query !== null) {
-    hypotheses.push(query);
-    hypothesisProvenance.push(Object.freeze({
-      source_id: "shape.relation_terms",
-      producer: "recall_answer_shape_plan"
-    }));
-    provenance.push("shape.relation_terms");
-  }
-}
-
-function rejectUnsupportedShape(
-  shape: Readonly<RecallAnswerShapePlan>,
-  evidence: CanonicalQueryEvidenceV1,
-  unresolved: CanonicalQueryUnresolvedV1[]
-): boolean {
-  if (shape.shape === "count" || shape.shape === "sum") {
-    unresolved.push({ code: "count_sum_unsupported", source: "shape" });
-    return true;
-  }
-  if (shape.shape === "duration") {
-    unresolved.push({ code: "unsupported_nesting", source: "shape" });
-    if (CJK.test(evidence.probes.normalized_query ?? "")) {
-      unresolved.push({ code: "ambiguous_cjk_segmentation", source: "probes" });
-    }
-    return true;
-  }
-  if (shape.status === "ambiguous") {
-    unresolved.push({ code: "conflicting_shape", source: "shape" });
-    return true;
-  }
-  if (shape.status !== "high_confidence" || shape.target_terms.length === 0) return true;
-  if (shape.relation_terms.length === 0) {
-    unresolved.push({ code: "unknown_relation", source: "shape" });
-    return true;
-  }
-  if (shape.relation_terms.length > 8) {
-    unresolved.push({
-      code: "limit_overflow",
-      source: "shape",
-      detail: "relation_terms"
-    });
-    return true;
-  }
-  return false;
+  sink.hypotheses.push(result.query);
+  sink.hypothesis_provenance.push(Object.freeze({
+    source_id: "shape.relation_terms",
+    producer: SHAPE_PRODUCER
+  }));
+  sink.provenance.push("shape.relation_terms");
 }
 
 function pushOrderingHoles(
-  ordering: readonly { readonly value: string }[],
-  unresolved: CanonicalQueryUnresolvedV1[]
+  demand: Readonly<RecallQueryDemand>,
+  unresolved: AdapterUnresolved[]
 ): void {
-  for (const atom of ordering) {
+  for (const atom of demand.atoms) {
+    if (atom.kind !== "ordering") continue;
     if (atom.value === "latest" || atom.value === "earliest") {
-      unresolved.push({ code: "latest_without_typed_time_key", source: "demand" });
-      unresolved.push({ code: "unknown_time_basis", source: "demand" });
+      pushUnresolved(unresolved, {
+        code: "latest_without_typed_time_key",
+        source: "demand"
+      });
+      pushUnresolved(unresolved, { code: "unknown_time_basis", source: "demand" });
     }
     if (atom.value === "sequence") {
-      unresolved.push({ code: "unsupported_nesting", source: "demand" });
+      pushUnresolved(unresolved, { code: "unsupported_nesting", source: "demand" });
     }
   }
 }
 
-function distinctAnswer(evidence: CanonicalQueryEvidenceV1) {
+function distinctAnswer(
+  evidence: CanonicalQueryEvidenceV1
+): CanonicalAnswerProgramV1 | null {
   const observer = evidence.observer;
   if (observer === undefined) return null;
-  return {
-    kind: "distinct" as const,
-    variable: "x0",
-    completion: {
-      kind: "all_observable" as const,
-      scope: observer.scope,
-      principal: observer.principal,
-      snapshot_bind: "Sigma_q" as const,
-      observer_contract: observer.observer_contract
-    }
-  };
+  try {
+    return {
+      kind: "distinct",
+      variable: "x0",
+      completion: bindAllObservableCompletion({
+        principal: observer.principal,
+        scope: observer.scope,
+        observer_universe: observer.observer_universe
+      })
+    };
+  } catch (error) {
+    if (error instanceof CanonicalQueryContractError) return null;
+    throw error;
+  }
 }
 
 function unadaptedDemandAtoms(
@@ -207,17 +189,15 @@ function unadaptedDemandAtoms(
   hypotheses: readonly CanonicalQueryV1[]
 ): CanonicalQueryUnresolvedV1[] {
   const used = usedHypothesisTokens(hypotheses);
-  const items: CanonicalQueryUnresolvedV1[] = [];
-  for (const atom of demand.atoms) {
-    if (atom.kind === "ordering") continue;
-    if (atom.kind === "lexical_term" && used.has(atom.value)) continue;
-    items.push({
+  return demand.atoms.flatMap((atom) => {
+    if (atom.kind === "ordering") return [];
+    if (atom.kind === "lexical_term" && used.has(atom.value)) return [];
+    return [{
       code: `unadapted_demand_${atom.kind}`,
       source: "demand",
       detail: atom.id
-    });
-  }
-  return items;
+    }];
+  });
 }
 
 function unboundTargetTerms(
@@ -241,49 +221,78 @@ function usedHypothesisTokens(hypotheses: readonly CanonicalQueryV1[]): Set<stri
   return used;
 }
 
-function relationPredicates(shape: Readonly<RecallAnswerShapePlan>): CanonicalPredicateV1[] {
-  return shape.relation_terms.map((relation, index) => Object.freeze({
-    id: `p${index}`,
-    relation,
-    arguments: Object.freeze(["x0"]),
-    provenance: Object.freeze({
-      source_id: "shape.relation_terms",
-      producer: "recall_answer_shape_plan"
-    })
-  }));
-}
-
-function supportedQuery(
-  input: Parameters<typeof validateCanonicalQueryV1>[0],
-  unresolved: CanonicalQueryUnresolvedV1[]
-): CanonicalQueryV1 | null {
-  if (input.answer === undefined && input.answers === undefined) {
-    unresolved.push({ code: "unknown_scope", source: "observer" });
-    return null;
+function pushUnknownAnswerHole(
+  sink: AdapterSink & { readonly shape: Readonly<RecallAnswerShapePlan> }
+): void {
+  const shape = sink.shape;
+  if (shape.shape === "count" || shape.shape === "sum" || shape.shape === "duration") {
+    return;
   }
-  const result = validateCanonicalQueryV1(input);
-  if (result.status === "supported") return result.query;
-  unresolved.push({ code: result.reason_code, source: "validator" });
-  return null;
+  if (shape.status !== "unknown" && shape.target_terms.length > 0) return;
+  pushUnresolved(sink.unresolved, { code: "unknown_answer_variable", source: "shape" });
 }
 
-function dedupeQueries(
-  queries: readonly CanonicalQueryV1[],
-  provenance: readonly CanonicalEvidenceProvenanceV1[]
-): {
-  hypotheses: CanonicalQueryV1[];
-  provenance: CanonicalEvidenceProvenanceV1[];
-} {
+function pushRelationConflicts(sink: AdapterSink): void {
+  const shape = relationSet(sink.hypotheses, "shape.relation_terms");
+  const frames = relationSet(sink.hypotheses, "fact_frame.relation.");
+  const osf = relationSet(sink.hypotheses, "osf.relation.");
+  if (conflicted(shape, frames) || conflicted(shape, osf) || conflicted(frames, osf)) {
+    pushUnresolved(sink.unresolved, { code: "conflicting_demand_shape", source: "shape" });
+    pushUnresolved(sink.unresolved, { code: "conflicting_shape", source: "shape" });
+  }
+}
+
+function relationSet(
+  hypotheses: readonly CanonicalQueryV1[],
+  sourcePrefix: string
+): ReadonlySet<string> {
+  const tokens = new Set<string>();
+  for (const query of hypotheses) {
+    for (const predicate of query.predicates) {
+      const source = predicate.provenance?.source_id ?? "";
+      if (!source.startsWith(sourcePrefix)) continue;
+      const token = normalizeRelationToken(predicate.relation);
+      if (token.length > 0) tokens.add(token);
+    }
+  }
+  return tokens;
+}
+
+function conflicted(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>
+): boolean {
+  if (left.size === 0 || right.size === 0) return false;
+  if (left.size !== right.size) return true;
+  return [...left].some((token) => !right.has(token));
+}
+
+function dedupeQueries(sink: AdapterSink): AdapterSink {
   const seen = new Set<string>();
-  const unique: CanonicalQueryV1[] = [];
-  const uniqueProvenance: CanonicalEvidenceProvenanceV1[] = [];
-  queries.forEach((query, index) => {
+  const hypotheses: CanonicalQueryV1[] = [];
+  const provenance: CanonicalEvidenceProvenanceV1[] = [];
+  sink.hypotheses.forEach((query, index) => {
     const key = digestCanonicalQueryV1(query);
     if (seen.has(key)) return;
     seen.add(key);
-    unique.push(query);
-    const row = provenance[index];
-    if (row !== undefined) uniqueProvenance.push(row);
+    hypotheses.push(query);
+    const row = sink.hypothesis_provenance[index];
+    if (row !== undefined) provenance.push(row);
   });
-  return { hypotheses: unique, provenance: uniqueProvenance };
+  sink.hypotheses.splice(0, sink.hypotheses.length, ...hypotheses);
+  sink.hypothesis_provenance.splice(
+    0,
+    sink.hypothesis_provenance.length,
+    ...provenance
+  );
+  return sink;
+}
+
+function freezeCompile(sink: AdapterSink): CanonicalQueryCompileV1 {
+  return Object.freeze({
+    hypotheses: Object.freeze([...sink.hypotheses]),
+    unresolved: Object.freeze([...sink.unresolved]),
+    provenance: Object.freeze([...sink.provenance]),
+    hypothesis_provenance: Object.freeze([...sink.hypothesis_provenance])
+  });
 }

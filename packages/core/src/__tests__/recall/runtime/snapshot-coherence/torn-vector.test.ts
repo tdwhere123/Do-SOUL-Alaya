@@ -29,7 +29,9 @@ describe("snapshot torn vectors", () => {
       })
     })));
     expect(receipt.coherence_state).toBe("coherent_bounded");
-    expect(receipt.lag_bounds).toContain("embedding_generation_and_model:embed-stale");
+    expect(receipt.lag_bounds).toEqual([
+      remainingEffect("embedding_generation_and_model", "embed-stale")
+    ]);
     expect(receipt.coherence_state).not.toBe("incoherent");
   });
 

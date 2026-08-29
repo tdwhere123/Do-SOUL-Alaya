@@ -2,6 +2,7 @@ export {
   SNAPSHOT_COHERENCE_OPERATOR_ID,
   SNAPSHOT_COHERENCE_STATES,
   SnapshotCoherenceContractError,
+  type RestrictedUniverseInput,
   type SnapshotCoherenceReceiptV1,
   type SnapshotCoherenceRejectCode,
   type SnapshotCoherenceState,
@@ -27,5 +28,9 @@ export {
   publicSnapshotCoherenceReceiptBytes,
   verifySnapshotCoherenceReceiptV1
 } from "./receipt.js";
-export { capturePreparedSnapshotCoherenceReceipt } from "./prepare-adapter.js";
+export {
+  PREPARE_RETRIEVAL_CHANNEL_OWNERS,
+  capturePreparedSnapshotCoherenceReceipt,
+  capturePreparedSnapshotVector
+} from "./prepare-adapter.js";
 export { unavailableProducerDigest } from "./digest.js";

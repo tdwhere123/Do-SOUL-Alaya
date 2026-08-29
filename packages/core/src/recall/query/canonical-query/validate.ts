@@ -24,6 +24,8 @@ export type CanonicalQueryInputV1 = Readonly<{
   readonly unsupported?: "count" | "sum" | "latest" | "earliest" | "nesting";
 }>;
 
+type AllObservableCompletionV1 = Extract<CanonicalCompletionV1, { kind: "all_observable" }>;
+
 export function validateCanonicalQueryV1(
   input: CanonicalQueryInputV1
 ): CanonicalQueryValidationV1 {
@@ -69,6 +71,26 @@ export function serializeCanonicalQueryV1(query: CanonicalQueryV1): string {
 
 export function digestCanonicalQueryV1(query: CanonicalQueryV1): RecallFieldDigest {
   return digestRecallFieldIdentity(normalizeCanonicalQuery(query));
+}
+
+export function bindAllObservableCompletion(input: {
+  readonly principal: string;
+  readonly scope: string;
+  readonly observer_universe: readonly string[];
+}): AllObservableCompletionV1 {
+  const observer_universe = freezeObserverUniverse(input.observer_universe);
+  return freezeAllObservable({
+    kind: "all_observable",
+    principal: input.principal,
+    scope: input.scope,
+    snapshot_bind: "Sigma_q",
+    observer_universe,
+    observer_contract: digestAllObservableObserverContract({
+      principal: input.principal,
+      scope: input.scope,
+      observer_universe
+    })
+  });
 }
 
 function explicitUnsupported(
@@ -234,6 +256,8 @@ function freezeAnswer(answer: CanonicalAnswerProgramV1): CanonicalAnswerProgramV
   });
 }
 
+const FORBIDDEN_OBSERVER_UNIVERSE_TOKENS = new Set(["*", "all", "all_known", "∞"]);
+
 function freezeCompletion(completion: CanonicalCompletionV1): CanonicalCompletionV1 {
   if (completion.kind === "at_most") {
     if (!Number.isSafeInteger(completion.n) || completion.n < 1) {
@@ -241,15 +265,67 @@ function freezeCompletion(completion: CanonicalCompletionV1): CanonicalCompletio
     }
     return Object.freeze({ kind: "at_most", n: completion.n });
   }
+  return freezeAllObservable(completion);
+}
+
+function freezeAllObservable(completion: AllObservableCompletionV1): AllObservableCompletionV1 {
   if (completion.snapshot_bind !== "Sigma_q") {
+    throw new CanonicalQueryContractError("invalid_all_observable");
+  }
+  const scope = requireToken(completion.scope);
+  const principal = requireToken(completion.principal);
+  const observer_universe = freezeObserverUniverse(completion.observer_universe);
+  const observer_contract = digestAllObservableObserverContract({
+    principal,
+    scope,
+    observer_universe
+  });
+  if (completion.observer_contract !== observer_contract) {
     throw new CanonicalQueryContractError("invalid_all_observable");
   }
   return Object.freeze({
     kind: "all_observable" as const,
-    scope: requireToken(completion.scope),
-    principal: requireToken(completion.principal),
+    scope,
+    principal,
     snapshot_bind: "Sigma_q" as const,
-    observer_contract: requireToken(completion.observer_contract)
+    observer_universe,
+    observer_contract
+  });
+}
+
+function freezeObserverUniverse(universe: readonly string[]): readonly string[] {
+  // Silent unique would bind a different observer set than the caller named.
+  if (!Array.isArray(universe) || universe.length === 0) {
+    throw new CanonicalQueryContractError("invalid_all_observable");
+  }
+  const seen = new Set<string>();
+  const tokens: string[] = [];
+  for (const token of universe) {
+    if (
+      token.length === 0
+      || token.trim() !== token
+      || FORBIDDEN_OBSERVER_UNIVERSE_TOKENS.has(token)
+      || seen.has(token)
+    ) {
+      throw new CanonicalQueryContractError("invalid_all_observable");
+    }
+    seen.add(token);
+    tokens.push(token);
+  }
+  return Object.freeze(tokens.sort((left, right) => left.localeCompare(right)));
+}
+
+function digestAllObservableObserverContract(input: {
+  readonly principal: string;
+  readonly scope: string;
+  readonly observer_universe: readonly string[];
+}): RecallFieldDigest {
+  return digestRecallFieldIdentity({
+    kind: "all_observable_observer_contract_v1",
+    principal: input.principal,
+    scope: input.scope,
+    snapshot_bind: "Sigma_q",
+    observer_universe: input.observer_universe
   });
 }
 

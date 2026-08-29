@@ -1,10 +1,8 @@
-import {
-  serializeRemainingEffect,
-  unavailableProducerDigest
-} from "./digest.js";
+import { unavailableProducerDigest } from "./digest.js";
 import { derivedSources } from "./sources.js";
 import type {
   SnapshotCoherenceState,
+  SnapshotRemainingEffectV1,
   SnapshotVectorV1,
   SnapshotValidTimeDomainV1,
   SourceFrontierDeclarationV1
@@ -13,7 +11,7 @@ import type {
 export type SnapshotCoherenceClassification = Readonly<{
   readonly state: SnapshotCoherenceState;
   readonly reasons: readonly string[];
-  readonly lag_bounds: readonly string[];
+  readonly lag_bounds: readonly SnapshotRemainingEffectV1[];
 }>;
 
 export function classifySnapshotCoherence(
@@ -97,20 +95,31 @@ function validTimeContains(domain: SnapshotValidTimeDomainV1, asOf: string): boo
   return domain.from <= asOf && asOf < domain.to;
 }
 
-function collectLagBounds(sources: readonly SourceFrontierDeclarationV1[]): string[] {
-  const bounds: string[] = [];
+function collectLagBounds(
+  sources: readonly SourceFrontierDeclarationV1[]
+): readonly SnapshotRemainingEffectV1[] {
+  const bounds: SnapshotRemainingEffectV1[] = [];
   for (const source of sources) {
     if (source.lag_bound.kind === "bounded") {
-      bounds.push(serializeRemainingEffect(source.lag_bound.remaining_effect));
+      bounds.push(freezeRemainingEffect(source.lag_bound.remaining_effect));
     }
   }
-  return bounds;
+  return Object.freeze(bounds);
+}
+
+function freezeRemainingEffect(
+  effect: SnapshotRemainingEffectV1
+): SnapshotRemainingEffectV1 {
+  return Object.freeze({
+    source_owner: effect.source_owner,
+    effect_id: effect.effect_id
+  });
 }
 
 function freezeClass(
   state: SnapshotCoherenceState,
   reasons: readonly string[],
-  lag_bounds: readonly string[]
+  lag_bounds: readonly SnapshotRemainingEffectV1[]
 ): SnapshotCoherenceClassification {
   return Object.freeze({
     state,

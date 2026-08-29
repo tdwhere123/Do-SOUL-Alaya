@@ -44,6 +44,7 @@ export type CanonicalCompletionV1 =
       readonly scope: string;
       readonly principal: string;
       readonly snapshot_bind: "Sigma_q";
+      readonly observer_universe: readonly string[];
       readonly observer_contract: string;
     }>;
 

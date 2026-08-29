@@ -37,7 +37,7 @@ describe("snapshot coherence identity rejects", () => {
     expect(() => verifySnapshotCoherenceReceiptV1({
       ...receipt,
       receipt_digest: SHA_A
-    })).toThrow(/malformed_digest|digest/u);
+    }, vector)).toThrow(/malformed_digest|digest/u);
   });
 
   it("rejects duplicate source owner", () => {
