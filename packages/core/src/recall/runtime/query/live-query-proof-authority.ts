@@ -11,10 +11,10 @@ import {
   "../../query/canonical-query/index.js";
 import type { LexicalRequestPin } from
   "../../field/retrieval/retrieval-field-bundle.js";
-import {
-  verifyLexicalIntervalSourceReceiptV1,
-  type LexicalIntervalSourceReceiptV1
-} from "../../field/retrieval/lexical-interval-source-receipt.js";
+import type { LexicalIntervalSourceReceiptV1 } from
+  "../../field/retrieval/lexical-interval-source-receipt.js";
+import { verifyLexicalIntervalSourceReceiptV1 } from
+  "../../field/retrieval/retrieval-field-source-authority.js";
 import { digestRecallFieldIdentity } from "../../field/field-identity.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import {

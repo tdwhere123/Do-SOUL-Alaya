@@ -8,6 +8,8 @@ import {
   type FineAssessParams
 } from "../../delivery/fine-assessment.js";
 import { resolveFineAssessmentDeliveryPath } from "../../shadow/canonical-delivery.js";
+import { readMemoryLexicalIntervalSources } from
+  "../../field/retrieval/retrieval-field-source-authority.js";
 import { buildRecallCandidateDedupeKey } from "../recall-service-helpers.js";
 import type { CoarseStageResult } from "../recall-service-runner-coarse.js";
 import {
@@ -248,8 +250,9 @@ export function buildFineAssessParams(
 function buildPsiV2LiveReceiptInput(
   prepared: PreparedRecallRequest
 ): Partial<FineAssessParams> {
-  const lexicalIntervalSources = prepared.retrievalFieldBundle
-    .memoryLexicalIntervalSourcesForSnapshot(prepared.snapshotVector.vector_digest);
+  const lexicalIntervalSources = readMemoryLexicalIntervalSources(
+    prepared.retrievalFieldBundle
+  );
   return {
     queryProofAuthority: Object.freeze({
       workspace_id: prepared.queryCondition.condition.workspace_id,

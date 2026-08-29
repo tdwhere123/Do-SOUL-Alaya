@@ -10,10 +10,10 @@ import {
   type VerifiedLiveQueryProofPins
 } from "../runtime/query/live-query-proof-authority.js";
 import type { ShadowIntegrateInput } from "./integrate.js";
+import { d1LaneEnvelopes } from "./d1/legal-envelope.js";
 import {
-  lexicalBoundEnvelopes,
   lexicalIntervalSourceEnvelopes
-} from "./measurement/lexical-bound-envelope.js";
+} from "./measurement/lexical-interval-envelope.js";
 import {
   LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
   verifyMeasurementPreparedAuthorityV1,
@@ -211,7 +211,7 @@ function materializeLegacyLexicalIntervals(
     });
     const envelopes = Object.freeze(Object.fromEntries(params.candidates.map((candidate) => {
       const key = buildRecallCandidateDedupeKey(candidate);
-      return [key, lexicalBoundEnvelopes(proof, key)];
+      return [key, d1LaneEnvelopes(proof, key)];
     })));
     return Object.freeze({
       payload: envelopes,

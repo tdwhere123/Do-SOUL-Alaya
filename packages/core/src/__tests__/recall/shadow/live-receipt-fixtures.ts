@@ -2,11 +2,18 @@ import { expect, vi } from "vitest";
 import { fineAssess } from "../../../recall/delivery/fine-assessment.js";
 import { compileRecallQueryProbes } from
   "../../../recall/query/recall-query-probes.js";
+import { compileCanonicalQueryCompilation } from
+  "../../../recall/query/canonical-query/index.js";
 import { buildDefaultPolicy } from "../../../recall/runtime/orchestration.js";
 import { prepareRecallRequest } from
   "../../../recall/runtime/query/prepare-recall-request.js";
 import { captureRecallRequestTime } from
   "../../../recall/runtime/query/recall-request-time.js";
+import {
+  createSnapshotCoherenceReceiptV1,
+  createSnapshotVectorV1,
+  finalizePreparedSnapshotReadLease
+} from "../../../recall/runtime/snapshot-coherence/index.js";
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../../recall/runtime/query/field-query-session.js";
 import type {
@@ -94,6 +101,41 @@ export async function preparedAuthority(): Promise<PreparedRecallRequest> {
     workspaceId: "workspace-1",
     strategy: "analyze"
   }, captureRecallRequestTime({ now: () => NOW }));
+}
+
+export async function capturedLexicalPreparedAuthority(): Promise<PreparedRecallRequest> {
+  const prepared = await preparedAuthority();
+  const lexical = prepared.snapshotVector.retrieval_channel_snapshots.find(
+    ({ source_owner }) => source_owner === "lexical_relaxed"
+  );
+  if (lexical === undefined) throw new Error("lexical test source declaration missing");
+  const { schema_version: _schemaVersion, vector_digest: _vectorDigest, ...input } =
+    prepared.snapshotVector;
+  const snapshotVector = createSnapshotVectorV1({
+    ...input,
+    retrieval_channel_snapshots: Object.freeze(
+      prepared.snapshotVector.retrieval_channel_snapshots.map((declaration) =>
+        declaration.source_owner === lexical.source_owner
+          ? Object.freeze({
+              ...declaration,
+              source_frontier: "lexical-frontier:test-captured",
+              generation: "lexical-generation:test-captured",
+              lag_bound: Object.freeze({ kind: "exact" as const })
+            })
+          : declaration)
+    )
+  });
+  const snapshotCoherenceReceipt = createSnapshotCoherenceReceiptV1(snapshotVector);
+  return Object.freeze({
+    ...prepared,
+    snapshotVector,
+    snapshotCoherenceReceipt,
+    snapshotReadLease: finalizePreparedSnapshotReadLease(snapshotVector),
+    canonicalQueryCompilation: compileCanonicalQueryCompilation(
+      prepared.canonicalQueryEvidence,
+      snapshotCoherenceReceipt
+    )
+  });
 }
 
 export function cleanup(prepared: PreparedRecallRequest): void {

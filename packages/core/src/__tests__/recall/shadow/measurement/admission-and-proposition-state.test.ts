@@ -45,7 +45,7 @@ describe("measurement admission", () => {
       "../../../../recall/shadow/canonical-delivery.ts",
       "../../../../recall/shadow/integrate.ts",
       "../../../../recall/shadow/live-receipt-materialization.ts",
-      "../../../../recall/shadow/measurement/lexical-bound-envelope.ts",
+      "../../../../recall/shadow/measurement/lexical-interval-envelope.ts",
       "../../../../recall/shadow/measurement/lexical-interval.ts",
       "../../../../recall/shadow/psi-v2/compare.ts",
       "../../../../recall/shadow/psi-v2/from-envelope.ts",
@@ -60,6 +60,25 @@ describe("measurement admission", () => {
       expect(imports.every((match) => match[1]?.trimStart().startsWith("type ")))
         .toBe(true);
     }
+  });
+
+  it("keeps D1 runtime ownership in Band0 and Band1 contracts lexically named", () => {
+    const d1Owner = readFileSync(new URL(
+      "../../../../recall/shadow/d1/legal-envelope.ts",
+      import.meta.url
+    ), "utf8");
+    const lexicalInterval = readFileSync(new URL(
+      "../../../../recall/shadow/measurement/lexical-interval-envelope.ts",
+      import.meta.url
+    ), "utf8");
+
+    expect(d1Owner).not.toMatch(/from\s+"\.\.\/measurement\//u);
+    expect(d1Owner).toMatch(/export\s+function\s+d1LaneEnvelopes/u);
+    expect(lexicalInterval).not.toMatch(/export\s+(?:type|function|const)\s+D1/u);
+    expect(lexicalInterval).not.toMatch(/export\s+function\s+d1/u);
+    expect(lexicalInterval).toMatch(
+      /export\s+function\s+lexicalIntervalSourceEnvelopes/u
+    );
   });
 
   it("rejects a structurally identical counterfeit contract", () => {

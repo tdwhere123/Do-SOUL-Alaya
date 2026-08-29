@@ -26,9 +26,10 @@ import {
 import { materializeRetrievalFieldBundleCaptures } from
   "./retrieval-field-captures.js";
 import {
-  issueLexicalIntervalSourceReceiptV1,
-  type LexicalIntervalSourceReceiptV1
-} from "./lexical-interval-source-receipt.js";
+  createRetrievalFieldSourceAuthority,
+  registerRetrievalFieldBundleReadAuthority,
+  type RetrievalFieldSourceAuthority
+} from "./retrieval-field-source-authority.js";
 import {
   createRetrievalFieldRequestStore,
   type RetrievalFieldBatchFailure,
@@ -76,9 +77,6 @@ export interface RecallRetrievalFieldBundle {
   readonly memoryLexicalBoundProofsForSnapshot: (
     snapshotDigest: RecallFieldDigest
   ) => readonly Readonly<LexicalBoundProof>[];
-  readonly memoryLexicalIntervalSourcesForSnapshot: (
-    snapshotDigest: RecallFieldDigest
-  ) => readonly Readonly<LexicalIntervalSourceReceiptV1>[];
   readonly memoryLexicalRequestPins: () => readonly Readonly<LexicalRequestPin>[];
 }
 
@@ -124,13 +122,18 @@ export function createRecallRetrievalFieldBundle(
   params: RecallRetrievalFieldBundleSource
 ): Readonly<RecallRetrievalFieldBundle> {
   const records: RecordedFieldResult[] = [];
-  const store = createRetrievalFieldRequestStore(params, records);
+  const sourceAuthority = createRetrievalFieldSourceAuthority(params, records);
+  const store = createRetrievalFieldRequestStore(params, records, sourceAuthority);
   let requested: Readonly<RecallRetrievalFieldBundle>;
   let maximum: Readonly<RecallRetrievalFieldBundle>;
   const forObservationView = (view: RecallRetrievalFieldObservationView) =>
     view === "requested" ? requested : maximum;
-  requested = createBundleView(params, store, records, "requested", forObservationView);
-  maximum = createBundleView(params, store, records, "maximum", forObservationView);
+  requested = createBundleView(
+    params, store, records, sourceAuthority, "requested", forObservationView
+  );
+  maximum = createBundleView(
+    params, store, records, sourceAuthority, "maximum", forObservationView
+  );
   return requested;
 }
 
@@ -138,10 +141,11 @@ function createBundleView(
   params: RecallRetrievalFieldBundleSource,
   store: Readonly<RetrievalFieldRequestStore>,
   records: RecordedFieldResult[],
+  sourceAuthority: RetrievalFieldSourceAuthority,
   observationView: RecallRetrievalFieldObservationView,
   forObservationView: RecallRetrievalFieldBundle["forObservationView"]
 ): Readonly<RecallRetrievalFieldBundle> {
-  return Object.freeze({
+  const bundle = Object.freeze({
     observationView,
     maximumObservationAvailable: () => records.some((record) =>
       (record.result.refinement_levels?.length ?? 0) > 0
@@ -157,10 +161,10 @@ function createBundleView(
     memoryLexicalBoundProofs: () => collectMemoryLexicalBoundProofs(params, records),
     memoryLexicalBoundProofsForSnapshot: (snapshotDigest: RecallFieldDigest) =>
       sealMemoryLexicalBoundProofs(params, records, snapshotDigest),
-    memoryLexicalIntervalSourcesForSnapshot: (snapshotDigest: RecallFieldDigest) =>
-      collectMemoryLexicalIntervalSources(params, records, snapshotDigest),
     memoryLexicalRequestPins: () => collectMemoryLexicalRequestPins(params, records)
   });
+  registerRetrievalFieldBundleReadAuthority(bundle, sourceAuthority);
+  return bundle;
 }
 
 function createMemoryFieldSearches(
@@ -375,24 +379,6 @@ function collectMemoryLexicalCaptures(
 ): readonly Readonly<KeywordLexicalMergeCapture>[] {
   const capture = firstRelaxedRecord(records)?.result.lexical_raw_rank;
   return Object.freeze(capture === undefined ? [] : [capture]);
-}
-
-function collectMemoryLexicalIntervalSources(
-  params: RecallRetrievalFieldBundleSource,
-  records: readonly Readonly<RecordedFieldResult>[],
-  snapshotDigest: RecallFieldDigest
-): readonly Readonly<LexicalIntervalSourceReceiptV1>[] {
-  if (!/^sha256:[0-9a-f]{64}$/u.test(snapshotDigest)) return Object.freeze([]);
-  return Object.freeze(records.flatMap((record) => isLexicalMemoryPrefix(record.prefix)
-    ? [issueLexicalIntervalSourceReceiptV1({
-      workspace_id: params.workspaceId,
-      request_digest: record.request_digest,
-      snapshot_digest: snapshotDigest,
-      field_prefix: record.prefix,
-      requested_depth: record.requested_depth,
-      result: record.result
-    })]
-    : []));
 }
 
 function collectMemoryLexicalBoundProofs(

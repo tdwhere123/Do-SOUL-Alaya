@@ -49,7 +49,7 @@ import {
   measureSync
 } from "./orchestration/recall-phase-latency.js";
 import { finishProjectionPinCleanup } from "./query/projection-pin-lease.js";
-import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
+import { withRetrievalFieldReadAuthority } from "../field/retrieval/retrieval-field-source-authority.js";
 import { prepareRecallRequest } from "./query/prepare-recall-request.js";
 import { captureRecallRequestTime } from "./query/recall-request-time.js";
 import { applySelectGammaSynthesis } from
@@ -66,7 +66,6 @@ import {
 } from "./recall-service-runner-types.js";
 
 export type { RecallExecutionContext, RecallExecutionParams, PreparedRecallRequest } from "./recall-service-runner-types.js";
-
 type AssessmentStageResult = RecallAssessmentStageResult;
 type ManifestedRecallResult = RecallManifestedResult;
 type PreparedRecallOutcome = Readonly<{
@@ -93,8 +92,10 @@ export async function executeRecall(
   let outcome: PreparedRecallOutcome;
   let outcomeElapsedMs: number;
   try {
-    const collectedOutcome = await withRecallReadSnapshot(executionContext.readSnapshot, () =>
-      measureAsync(() => collectPreparedRecallOutcome(executionContext, params, prepared))
+    const collectedOutcome = await withRetrievalFieldReadAuthority(
+      executionContext.readSnapshot,
+      prepared.retrievalFieldBundle, prepared.snapshotReadLease,
+      () => measureAsync(() => collectPreparedRecallOutcome(executionContext, params, prepared))
     );
     outcome = collectedOutcome.value;
     outcomeElapsedMs = collectedOutcome.latencyMs;

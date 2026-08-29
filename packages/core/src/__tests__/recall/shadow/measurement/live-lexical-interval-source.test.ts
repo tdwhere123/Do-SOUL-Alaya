@@ -8,19 +8,26 @@ import type {
   RecallExecutionContext,
   RecallExecutionParams
 } from "../../../../recall/runtime/recall-service-runner-types.js";
-import { issueLexicalIntervalSourceReceiptV1 } from
+import type { LexicalIntervalSourceReceiptV1 } from
   "../../../../recall/field/retrieval/lexical-interval-source-receipt.js";
+import { createRecallRetrievalFieldBundle } from
+  "../../../../recall/field/retrieval/retrieval-field-bundle.js";
+import {
+  bindRetrievalFieldBundleReadAuthority,
+  readMemoryLexicalIntervalSources
+} from "../../../../recall/field/retrieval/retrieval-field-source-authority.js";
+import { withActiveRecallReadSnapshot } from
+  "../../../../recall/runtime/recall-read-snapshot.js";
 import type {
   KeywordLexicalMergeCapture,
   KeywordSearchFieldResult
 } from "../../../../recall/runtime/recall-service-types.js";
 import { fieldCandidates } from "../canonical-delivery-fixtures.js";
-import { D1_REQUEST } from "../d1/d1-proof-fixture.js";
 import {
   authorityFrom,
   captured,
+  capturedLexicalPreparedAuthority,
   cleanup,
-  lexicalPin,
   params,
   preparedAuthority,
   supplementary,
@@ -28,51 +35,56 @@ import {
 } from "../live-receipt-fixtures.js";
 
 describe("live normal lexical interval source", () => {
-  it("wires the normal source into fine assessment without a diagnostic flag", async () => {
+  it("keeps query authority but omits lexical proof for the normal unavailable source", async () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
     const prepared = await preparedAuthority();
-    const observed = source(
-      prepared.snapshotVector.vector_digest,
-      capture([candidate("cand-a", 0.9, true)]),
-      [match("cand-a", 0.9)]
-    );
-    const built = buildFineAssessParams(
-      { warn: () => undefined } as unknown as RecallExecutionContext,
-      { workspaceId: "workspace-1" } as unknown as RecallExecutionParams,
-      {
-        ...prepared,
-        retrievalFieldBundle: {
-          ...prepared.retrievalFieldBundle,
-          memoryLexicalIntervalSourcesForSnapshot: () => [observed],
-          memoryLexicalRequestPins: () => [lexicalPin()]
-        }
-      } as PreparedRecallRequest,
-      supplementary(candidates),
-      candidates
-    );
+    const bundle = createRecallRetrievalFieldBundle({
+      workspaceId: "workspace-1",
+      queryText: "stable",
+      memoryRepo: { searchByKeywordField: async () => Object.freeze({
+        matches: [match("cand-a", 0.9)],
+        lanes: normalLanes([match("cand-a", 0.9)]),
+        lexical_raw_rank: capture([candidate("cand-a", 0.9, true)])
+      }) }
+    });
+    const built = await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
+      bindRetrievalFieldBundleReadAuthority(bundle, prepared.snapshotReadLease, capability);
+      await bundle.searchMemoryKeyword({
+        variant: "lexical_relaxed", queryText: "stable", limit: 2, scope: {}
+      });
+      return buildFineAssessParams(
+        { warn: () => undefined } as unknown as RecallExecutionContext,
+        { workspaceId: "workspace-1" } as unknown as RecallExecutionParams,
+        { ...prepared, retrievalFieldBundle: bundle } as PreparedRecallRequest,
+        supplementary(candidates),
+        candidates
+      );
+    });
 
-    expect(built.lexicalIntervalSources).toEqual([observed]);
+    expect(built.lexicalIntervalSources).toBeUndefined();
     expect(built.lexicalBoundProofs).toBeUndefined();
-    expect(built.queryProofAuthority?.expected_lexical_request_pins).toEqual([lexicalPin()]);
+    expect(built.queryProofAuthority).toBeDefined();
     cleanup(prepared);
   });
 
   it("reaches Psi from exact normal merge observations without changing delivery", async () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
-    const prepared = await preparedAuthority();
+    const prepared = await capturedLexicalPreparedAuthority();
     const base = fineAssess(params(candidates));
-    const observed = fineAssess({
-      ...params(candidates),
-      queryProofAuthority: authorityFrom(prepared),
-      lexicalIntervalSources: [source(
-        prepared.snapshotVector.vector_digest,
-        capture([
-          candidate("cand-a", 0.9, true),
-          candidate("cand-b", 0.4, true)
-        ]),
-        [match("cand-a", 0.9), match("cand-b", 0.4)]
-      )]
-    });
+    const issued = await source(
+      prepared,
+      capture([
+        candidate("cand-a", 0.9, true), candidate("cand-b", 0.4, true)
+      ]),
+      [match("cand-a", 0.9), match("cand-b", 0.4)],
+      undefined,
+      (lexicalSource) => fineAssess({
+        ...params(candidates),
+        queryProofAuthority: authorityFromSource(prepared, lexicalSource),
+        lexicalIntervalSources: [lexicalSource]
+      })
+    );
+    const observed = issued.assessed!;
     const trace = captured(observed.shadowTrace);
 
     expect(trace.psi_v2_shadow).toMatchObject({
@@ -91,16 +103,16 @@ describe("live normal lexical interval source", () => {
 
   it("keeps a valid source with no candidate observation explicitly unobserved", async () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
-    const prepared = await preparedAuthority();
-    const result = fineAssess({
-      ...params(candidates),
-      queryProofAuthority: authorityFrom(prepared),
-      lexicalIntervalSources: [source(
-        prepared.snapshotVector.vector_digest,
-        capture([]),
-        []
-      )]
-    });
+    const prepared = await capturedLexicalPreparedAuthority();
+    const issued = await source(
+      prepared, capture([]), [], undefined,
+      (observed) => fineAssess({
+        ...params(candidates),
+        queryProofAuthority: authorityFromSource(prepared, observed),
+        lexicalIntervalSources: [observed]
+      })
+    );
+    const result = issued.assessed!;
 
     expect(captured(result.shadowTrace).psi_v2_shadow).toMatchObject({
       observation_status: "not_observed",
@@ -115,17 +127,19 @@ describe("live normal lexical interval source", () => {
 
   it("rejects a source sealed to another snapshot without changing delivery", async () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
-    const prepared = await preparedAuthority();
+    const prepared = await capturedLexicalPreparedAuthority();
     const base = fineAssess(params(candidates));
-    const stale = source(
-      `sha256:${"c".repeat(64)}`,
+    const stale = await sourceReceipt(
+      prepared,
       capture([candidate("cand-a", 0.9, true)]),
       [match("cand-a", 0.9)]
     );
+    const counterfeit = { ...stale, snapshot_digest: `sha256:${"c".repeat(64)}` } as
+      LexicalIntervalSourceReceiptV1;
     const rejected = fineAssess({
       ...params(candidates),
-      queryProofAuthority: authorityFrom(prepared),
-      lexicalIntervalSources: [stale]
+      queryProofAuthority: authorityFromSource(prepared, stale),
+      lexicalIntervalSources: [counterfeit]
     });
 
     expect(captured(rejected.shadowTrace).psi_v2_shadow).toMatchObject({
@@ -142,18 +156,96 @@ describe("live normal lexical interval source", () => {
   });
 });
 
-function source(
-  snapshot_digest: string,
+async function source(
+  prepared: PreparedRecallRequest,
   lexical_raw_rank: Readonly<KeywordLexicalMergeCapture>,
+  matches: Readonly<KeywordSearchFieldResult>["matches"],
+  buildCandidates?: ReturnType<typeof fieldCandidates>,
+  assess?: (receipt: LexicalIntervalSourceReceiptV1) => ReturnType<typeof fineAssess>
+) {
+  const bundle = createRecallRetrievalFieldBundle({
+    workspaceId: "workspace-1",
+    queryText: "stable",
+    memoryRepo: { searchByKeywordField: async () => Object.freeze({
+      matches,
+      lanes: normalLanes(matches),
+      lexical_raw_rank
+    }) }
+  });
+  return await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
+    bindRetrievalFieldBundleReadAuthority(bundle, prepared.snapshotReadLease, capability);
+    await bundle.searchMemoryKeyword({
+      variant: "lexical_relaxed", queryText: "stable", limit: 2, scope: {}
+    });
+    const [receipt] = readMemoryLexicalIntervalSources(bundle);
+    if (receipt === undefined) throw new Error("expected issued lexical source");
+    return {
+      receipt,
+      assessed: assess?.(receipt),
+      built: buildCandidates === undefined ? undefined : buildFineAssessParams(
+        { warn: () => undefined } as unknown as RecallExecutionContext,
+        { workspaceId: "workspace-1" } as unknown as RecallExecutionParams,
+        { ...prepared, retrievalFieldBundle: bundle } as PreparedRecallRequest,
+        supplementary(buildCandidates),
+        buildCandidates
+      )
+    };
+  });
+}
+
+async function sourceReceipt(
+  prepared: PreparedRecallRequest,
+  captureValue: Readonly<KeywordLexicalMergeCapture>,
   matches: Readonly<KeywordSearchFieldResult>["matches"]
 ) {
-  return issueLexicalIntervalSourceReceiptV1({
-    workspace_id: "workspace-1",
-    request_digest: D1_REQUEST,
-    snapshot_digest: snapshot_digest as `sha256:${string}`,
-    field_prefix: "lexical_relaxed",
-    requested_depth: 2,
-    result: Object.freeze({ matches, lanes: Object.freeze([]), lexical_raw_rank })
+  return (await source(prepared, captureValue, matches)).receipt;
+}
+
+function authorityFromSource(
+  prepared: PreparedRecallRequest,
+  receipt: LexicalIntervalSourceReceiptV1
+) {
+  return Object.freeze({ ...authorityFrom(prepared), expected_lexical_request_pins: [pinFrom(receipt)] });
+}
+
+function pinFrom(receipt: LexicalIntervalSourceReceiptV1) {
+  return Object.freeze({
+    workspace_id: receipt.workspace_id,
+    request_digest: receipt.request_digest,
+    field_prefix: receipt.field_prefix,
+    candidate_key_domain: receipt.candidate_key_domain
+  });
+}
+
+function snapshotPort() {
+  return { beginDeferred() {}, commit() {}, rollback() {} };
+}
+
+function normalLanes(matches: Readonly<KeywordSearchFieldResult>["matches"]) {
+  const observations = matches.map((value, index) => Object.freeze({
+    ...value,
+    rank: index + 1
+  }));
+  return Object.freeze([
+    normalLane("exact", "ineligible", []),
+    normalLane("porter", "complete", observations),
+    normalLane("trigram", "ineligible", [])
+  ]);
+}
+
+function normalLane(
+  lane: "exact" | "porter" | "trigram",
+  status: "complete" | "ineligible",
+  observations: readonly Readonly<{
+    readonly object_id: string;
+    readonly normalized_rank: number;
+    readonly rank: number;
+  }>[]
+) {
+  return Object.freeze({
+    lane, status, depth: observations.length,
+    observations: Object.freeze([...observations]),
+    unseen_upper_bound: status === "complete" ? 0 : null
   });
 }
 

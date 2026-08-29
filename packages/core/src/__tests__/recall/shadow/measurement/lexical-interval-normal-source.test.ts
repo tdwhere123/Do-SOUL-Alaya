@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  issueLexicalIntervalSourceReceiptV1,
-  verifyLexicalIntervalSourceReceiptV1
+  createLexicalIntervalSourceReceiptIntegrityV1,
+  verifyLexicalIntervalSourceReceiptIntegrityV1
 } from "../../../../recall/field/retrieval/lexical-interval-source-receipt.js";
 import { createRecallRetrievalFieldBundle } from
   "../../../../recall/field/retrieval/retrieval-field-bundle.js";
@@ -12,7 +12,7 @@ import type {
   KeywordSearchFieldResult
 } from "../../../../recall/runtime/recall-service-types.js";
 import { lexicalIntervalSourceEnvelopes } from
-  "../../../../recall/shadow/measurement/lexical-bound-envelope.js";
+  "../../../../recall/shadow/measurement/lexical-interval-envelope.js";
 
 const REQUEST = `sha256:${"a".repeat(64)}` as const;
 const SNAPSHOT = `sha256:${"b".repeat(64)}` as const;
@@ -20,7 +20,7 @@ const SNAPSHOT = `sha256:${"b".repeat(64)}` as const;
 describe("normal lexical interval source receipt", () => {
   it("adapts only chosen observed points and keeps every other lane unbounded", () => {
     const source = capturedSource(fieldResult(capture()));
-    verifyLexicalIntervalSourceReceiptV1(source);
+    verifyLexicalIntervalSourceReceiptIntegrityV1(source);
 
     const hit = lexicalIntervalSourceEnvelopes(
       source, "workspace_local:memory_entry:hit"
@@ -41,23 +41,23 @@ describe("normal lexical interval source receipt", () => {
     }));
   });
 
-  it("retains an exact observed point even when another field admitted the candidate", () => {
+  it("keeps a non-admitted capture row unbounded", () => {
     const source = capturedSource(fieldResult(capture()));
     const outside = lexicalIntervalSourceEnvelopes(source, "outside");
-    expect(outside.primary?.envelope).toEqual({ kind: "interval", lower: 0.5, upper: 0.5 });
-    expect(outside.primary?.domain.lane_id).toBe("porter");
+    expect(outside.primary).toBeNull();
+    expect(outside.lanes.porter?.value).toEqual({ kind: "unbounded" });
   });
 
   it("accepts a complete lane exactly at the requested depth", () => {
     const source = capturedSource(fieldResult(capture()));
     expect(source.capture.lanes.find((lane) => lane.lane_id === "porter"))
       .toMatchObject({ list_n: 2, status: "complete" });
-    expect(() => verifyLexicalIntervalSourceReceiptV1(source)).not.toThrow();
+    expect(() => verifyLexicalIntervalSourceReceiptIntegrityV1(source)).not.toThrow();
   });
 
   it("rejects a self-consistent receipt whose admitted points differ from normal matches", () => {
     const source = capturedSource(fieldResult(capture(), 0.75));
-    expect(() => verifyLexicalIntervalSourceReceiptV1(source))
+    expect(() => verifyLexicalIntervalSourceReceiptIntegrityV1(source))
       .toThrow(/normal field result/u);
   });
 
@@ -80,21 +80,12 @@ describe("normal lexical interval source receipt", () => {
       ["workspace-1", "stable", 2, {}]
     ]);
     expect(bundle.memoryLexicalBoundProofs()).toEqual([]);
-    const [source] = bundle.memoryLexicalIntervalSourcesForSnapshot(SNAPSHOT);
-    expect(source).toMatchObject({
-      status: "captured",
-      workspace_id: "workspace-1",
-      snapshot_digest: SNAPSHOT,
-      field_prefix: "lexical_relaxed",
-      candidate_key_domain: "memory_object_id"
-    });
-    expect(source?.request_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(source?.request_digest).not.toBe(SNAPSHOT);
+    expect("memoryLexicalIntervalSourcesForSnapshot" in bundle).toBe(false);
   });
 });
 
 function capturedSource(result: Readonly<KeywordSearchFieldResult>) {
-  const source = issueLexicalIntervalSourceReceiptV1({
+  const source = createLexicalIntervalSourceReceiptIntegrityV1({
     workspace_id: "workspace-1",
     request_digest: REQUEST,
     snapshot_digest: SNAPSHOT,

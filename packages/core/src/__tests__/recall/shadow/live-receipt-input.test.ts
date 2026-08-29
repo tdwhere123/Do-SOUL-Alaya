@@ -224,7 +224,6 @@ describe("live Band 1 receipt input", () => {
         retrievalFieldBundle: {
           memoryKeywordLanes: () => [],
           memoryLexicalCaptures: () => [],
-          memoryLexicalIntervalSourcesForSnapshot: () => [],
           memoryLexicalRequestPins: () => [lexicalPin()]
         }
       } as unknown as PreparedRecallRequest,

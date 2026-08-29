@@ -47,7 +47,7 @@ export type LexicalIntervalSourceReceiptV1 =
   | LexicalIntervalSourceReceiptCapturedV1
   | LexicalIntervalSourceReceiptUnavailableV1;
 
-export function issueLexicalIntervalSourceReceiptV1(input: Readonly<{
+export function createLexicalIntervalSourceReceiptIntegrityV1(input: Readonly<{
   readonly workspace_id: string;
   readonly request_digest: RecallFieldDigest;
   readonly snapshot_digest: RecallFieldDigest;
@@ -89,7 +89,7 @@ export function issueLexicalIntervalSourceReceiptV1(input: Readonly<{
   });
 }
 
-export function verifyLexicalIntervalSourceReceiptV1(
+export function verifyLexicalIntervalSourceReceiptIntegrityV1(
   receipt: LexicalIntervalSourceReceiptV1
 ): void {
   verifyCommon(receipt);

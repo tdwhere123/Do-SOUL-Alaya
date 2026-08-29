@@ -13,6 +13,10 @@ import {
   FieldResultLimitError,
   freezeFieldResult
 } from "./retrieval-field-validation.js";
+import {
+  authenticateValidatedRetrievalFieldRecord,
+  type RetrievalFieldSourceAuthority
+} from "./retrieval-field-source-authority.js";
 
 export type RetrievalFieldBatchFailure = Readonly<{
   readonly failureClass:
@@ -50,10 +54,11 @@ export interface RetrievalFieldRequestStore {
 
 export function createRetrievalFieldRequestStore(
   bundle: RecallRetrievalFieldBundleSource,
-  records: RecordedFieldResult[]
+  records: RecordedFieldResult[],
+  sourceAuthority: RetrievalFieldSourceAuthority
 ): Readonly<RetrievalFieldRequestStore> {
   const cache = new Map<string, Promise<Readonly<KeywordSearchFieldResult>>>();
-  const search = createScalarSearch(bundle, records, cache);
+  const search = createScalarSearch(bundle, records, cache, sourceAuthority);
   return Object.freeze({
     search,
     searchBatch: async (
@@ -63,6 +68,7 @@ export function createRetrievalFieldRequestStore(
       records,
       cache,
       search,
+      sourceAuthority,
       params
     )
   });
@@ -71,13 +77,16 @@ export function createRetrievalFieldRequestStore(
 function createScalarSearch(
   bundle: RecallRetrievalFieldBundleSource,
   records: RecordedFieldResult[],
-  cache: Map<string, Promise<Readonly<KeywordSearchFieldResult>>>
+  cache: Map<string, Promise<Readonly<KeywordSearchFieldResult>>>,
+  sourceAuthority: RetrievalFieldSourceAuthority
 ) {
   return async (request: RetrievalFieldRequest): Promise<Readonly<KeywordSearchFieldResult>> => {
     const requestDigest = fieldRequestDigest(bundle.workspaceId, request);
     const cached = cache.get(requestDigest);
     if (cached !== undefined) return await cached;
-    const pending = runScalarSearch(bundle, records, request, requestDigest);
+    const pending = runScalarSearch(
+      bundle, records, request, requestDigest, sourceAuthority
+    );
     cache.set(requestDigest, pending);
     try {
       return await pending;
@@ -92,7 +101,8 @@ async function runScalarSearch(
   bundle: RecallRetrievalFieldBundleSource,
   records: RecordedFieldResult[],
   request: RetrievalFieldRequest,
-  requestDigest: RecallFieldDigest
+  requestDigest: RecallFieldDigest,
+  sourceAuthority: RetrievalFieldSourceAuthority
 ): Promise<Readonly<KeywordSearchFieldResult>> {
   if (request.invoke === undefined) {
     const unavailable = unavailableFieldResult();
@@ -101,7 +111,8 @@ async function runScalarSearch(
   }
   try {
     const result = freezeFieldResult(await request.invoke(), request.maxMatches);
-    recordFieldResult(records, request, requestDigest, result);
+    const record = recordFieldResult(records, request, requestDigest, result);
+    authenticateValidatedRetrievalFieldRecord(sourceAuthority, record);
     return result;
   } catch (error) {
     recordFieldResult(records, request, requestDigest, unavailableFieldResult());
@@ -115,6 +126,7 @@ async function runBatchSearch(
   records: RecordedFieldResult[],
   cache: Map<string, Promise<Readonly<KeywordSearchFieldResult>>>,
   search: RetrievalFieldRequestStore["search"],
+  sourceAuthority: RetrievalFieldSourceAuthority,
   params: Parameters<RetrievalFieldRequestStore["searchBatch"]>[0]
 ): Promise<readonly Readonly<KeywordSearchFieldResult>[]> {
   if (params.requests.length === 0) return Object.freeze([]);
@@ -129,7 +141,9 @@ async function runBatchSearch(
     bundle.onBatchFailure?.(params.operation, outcome.failure);
     return await runScalarFallback(params.requests, search);
   }
-  seedBatchResults(records, cache, params.requests, digests, outcome.results);
+  seedBatchResults(
+    records, cache, params.requests, digests, outcome.results, sourceAuthority
+  );
   return outcome.results;
 }
 
@@ -192,12 +206,14 @@ function seedBatchResults(
   cache: Map<string, Promise<Readonly<KeywordSearchFieldResult>>>,
   requests: readonly RetrievalFieldRequest[],
   digests: readonly RecallFieldDigest[],
-  results: readonly Readonly<KeywordSearchFieldResult>[]
+  results: readonly Readonly<KeywordSearchFieldResult>[],
+  sourceAuthority: RetrievalFieldSourceAuthority
 ): void {
   results.forEach((result, index) => {
     const request = requests[index]!;
     const digest = digests[index]!;
-    recordFieldResult(records, request, digest, result);
+    const record = recordFieldResult(records, request, digest, result);
+    authenticateValidatedRetrievalFieldRecord(sourceAuthority, record);
     cache.set(digest, Promise.resolve(result));
   });
 }
@@ -226,15 +242,17 @@ function recordFieldResult(
   request: RetrievalFieldRequest,
   requestDigest: RecallFieldDigest,
   result: Readonly<KeywordSearchFieldResult>
-): void {
-  records.push(Object.freeze({
+): RecordedFieldResult {
+  const record = Object.freeze({
     request_digest: requestDigest,
     prefix: request.prefix,
     source: request.source,
     object_kind: request.objectKind,
     requested_depth: request.maxMatches,
     result
-  }));
+  });
+  records.push(record);
+  return record;
 }
 
 function unavailableFieldResult(): Readonly<KeywordSearchFieldResult> {
