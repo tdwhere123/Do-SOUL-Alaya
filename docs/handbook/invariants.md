@@ -139,9 +139,11 @@ These rules always win over lower-level docs and task-card convenience.
     a later memory-create failure by deleting the evidence.
 20b. **One query as-of and one pinned generation.** `prepareRecallRequest`
     captures `effective_as_of` once and pins exactly one projection
-    generation. Select_Gamma is the admission-order selector; later
-    consensus does not reorder the delivered set. Missing generation
-    or condition pins fail closed.
+    generation. Canonical `prefixSK` is the admission-order and delivery owner;
+    `selectGammaWalk` is only the explicit outer legacy delivery
+    implementation, not a query-proof decision-contract rollback target.
+    Later consensus does not reorder the delivered set. Missing generation or
+    condition pins fail closed.
 
 ### Temporal Relation Contract
 

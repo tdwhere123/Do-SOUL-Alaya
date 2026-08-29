@@ -113,14 +113,15 @@ operate a compatibility mixture.
 Do not implement recall from flood / SliceKey / fused-score prose.
 The algorithm is the UGAF read path. The live runtime now connects pinned
 field-generation candidate admission, graph/PathRelation expansion, Slice
-compatibility, attributed path/evidence flood, and one Select_Gamma admission
-walk. Production Select_Gamma uses the binding-aware coverage objective
-(query-conditioned facility plus distinct OSF `Values_v`); source hard-dedupe
-is off and duplicate rejection is object-identity only. Those closures, and
-the remaining any@5 diagnostic work, live under the recall authority — not as
-additional architecture axes. Kind/category projections remain independent
-rebuildable routing projections and must not be schema-coupled to strict base
-graph acceptance.
+compatibility, attributed path/evidence flood, canonical
+`prefixSK(S_infty,K)`, and an explicit optional outer legacy
+`selectGammaWalk` path chosen once per request. The legacy path uses the
+binding-aware coverage objective (query-conditioned facility plus distinct OSF
+`Values_v`); source hard-dedupe is off and duplicate rejection is
+object-identity only. Those closures, and the remaining any@5 diagnostic work,
+live under the recall authority — not as additional architecture axes.
+Kind/category projections remain independent rebuildable routing projections
+and must not be schema-coupled to strict base graph acceptance.
 
 Connectedness does not certify relevance algebra. The current `effectiveScore`,
 family-max scalarization, and downstream independent-embedding relevance path
@@ -129,7 +130,9 @@ decision path from attributed observations. The shadow target uses one strict
 safe-dominance relation plus one prefix-monotonic budgeted-capture walk; it does
 not add a second field or selector. The architectural invariants remain one
 monotonically extended field, one pointwise preference authority, and one
-destructive `Select_Gamma` set-capture walk.
+destructive canonical `prefixSK` walk with query-compiled `Gamma_q`. V1 has no
+semantic prior; `selectGammaWalk` is only the optional outer legacy delivery
+implementation, not the future query-proof decision-contract rollback target.
 
 Owner and current closure boundary:
 
@@ -316,8 +319,9 @@ review finding:
    - RecallService (needs Memory + Embedding repos; fusion, delivery,
      graph-expansion, path-relation, field-generation, and diagnostics helpers
      live under `packages/core/src/recall/`). Helper presence is not
-     connectedness. Current HEAD has live field/path/Slice/flood/Select_Gamma
-     wiring, including live F3-only membership; see [`recall.md`](recall.md).
+     connectedness. Current HEAD has live field/path/Slice/flood wiring,
+     canonical `prefixSK`, and explicit legacy `selectGammaWalk`, including
+     live F3-only membership; see [`recall.md`](recall.md).
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService
    - ConversationService (memory-orchestration only; chat-specific orchestration was removed during the v0.1 port — see invariant §20)
