@@ -70,6 +70,15 @@ export function cleanFactFrameDemandFactor(
     : Object.freeze({ ...factor, normalized_text: surface });
 }
 
+export function isFactFrameAnswerFactor(
+  factor: Readonly<FactFrameSemanticFactor>
+): boolean {
+  if (semanticDemandKindForRole(factor.role) !== "entity") return false;
+  if (classifyQueryObligationStructuralRole(factor.normalized_text) !== null) return true;
+  return canonicalTokens(factor.normalized_text).some((token) =>
+    WH_WORDS.has(token) || CJK_INTERROGATIVE_TOKEN_SET.has(token));
+}
+
 type AlignFactFrameParams = Readonly<{
   readonly candidate: Readonly<FactFrameSemanticFactor>;
   readonly demand: Readonly<FactFrameSemanticFactor>;

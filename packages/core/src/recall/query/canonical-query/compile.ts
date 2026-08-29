@@ -82,7 +82,11 @@ export function compileCanonicalQueryEvidence(
   adaptOsfCapture(evidence.osfCapture, answer, sink, evidence.probes);
   pushOrderingHoles(sink.demand, sink.unresolved);
   sink.unresolved.push(...unadaptedDemandAtoms(sink.demand, sink.hypotheses));
-  sink.unresolved.push(...unboundTargetTerms(sink.shape, sink.hypotheses));
+  sink.unresolved.push(...unboundTargetTerms(
+    sink.shape,
+    sink.hypotheses,
+    sink.hypothesis_provenance
+  ));
   pushUnknownAnswerHole(sink);
   pushRelationConflicts(sink);
   return freezeCompile(dedupeQueries(sink));
@@ -207,13 +211,34 @@ function unadaptedDemandAtoms(
 
 function unboundTargetTerms(
   shape: Readonly<RecallAnswerShapePlan>,
-  hypotheses: readonly CanonicalQueryV1[]
+  hypotheses: readonly CanonicalQueryV1[],
+  provenance: readonly CanonicalEvidenceProvenanceV1[]
 ): CanonicalQueryUnresolvedV1[] {
   if (shape.shape === "distinct_entities") return [];
-  const used = usedHypothesisTokens(hypotheses);
-  return shape.target_terms.flatMap((term) => used.has(term)
-    ? []
-    : [{ code: "unbound_target_term", source: "shape", detail: term }]);
+  return hypotheses.flatMap((hypothesis, index) => {
+    if (provenance[index]?.source_id !== "shape.relation_terms") return [];
+    const bindings = usedHypothesisBindings(hypothesis);
+    return shape.target_terms.flatMap((term) => bindings.has(term)
+      ? []
+      : [{
+          code: "unbound_target_term",
+          source: "shape",
+          detail: term,
+          hypothesis_digest: digestCanonicalQueryV1(hypothesis)
+        }]);
+  });
+}
+
+function usedHypothesisBindings(query: CanonicalQueryV1): Set<string> {
+  const used = new Set<string>();
+  for (const constant of query.constants) {
+    used.add(constant.name);
+    used.add(constant.value);
+  }
+  for (const predicate of query.predicates) {
+    for (const argument of predicate.arguments) used.add(argument);
+  }
+  return used;
 }
 
 function usedHypothesisTokens(hypotheses: readonly CanonicalQueryV1[]): Set<string> {

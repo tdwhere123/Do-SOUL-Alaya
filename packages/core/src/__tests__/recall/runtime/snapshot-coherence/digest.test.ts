@@ -37,6 +37,22 @@ describe("snapshot coherence digest", () => {
     expect(receipt.vector_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
   });
 
+  it("normalizes formation operator order before computing vector_digest", () => {
+    const left = createSnapshotVectorV1(exactVectorInput({
+      formation_operator_versions: [["fact-frame", "1"], ["osf", "2"]]
+    }));
+    const right = createSnapshotVectorV1(exactVectorInput({
+      formation_operator_versions: [["osf", "2"], ["fact-frame", "1"]]
+    }));
+    const changed = createSnapshotVectorV1(exactVectorInput({
+      formation_operator_versions: [["fact-frame", "2"], ["osf", "2"]]
+    }));
+
+    expect(left.formation_operator_versions).toEqual(right.formation_operator_versions);
+    expect(left.vector_digest).toBe(right.vector_digest);
+    expect(changed.vector_digest).not.toBe(left.vector_digest);
+  });
+
   it("keeps vector_digest stable on incoherent torn input", () => {
     const torn = exactVectorInput({
       embedding_generation_and_model: declaration({

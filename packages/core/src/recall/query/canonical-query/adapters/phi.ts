@@ -16,6 +16,7 @@ export type AdapterUnresolved = {
   readonly code: string;
   readonly source: string;
   readonly capture_digest?: RecallFieldDigest;
+  readonly hypothesis_digest?: RecallFieldDigest;
   readonly detail?: string;
 };
 
@@ -100,6 +101,7 @@ export function pushUnresolved(
     && row.source === item.source
     && row.detail === item.detail
     && row.capture_digest === item.capture_digest
+    && row.hypothesis_digest === item.hypothesis_digest
   );
   if (exists) return;
   unresolved.push(Object.freeze(item));

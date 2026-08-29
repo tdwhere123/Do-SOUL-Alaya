@@ -15,7 +15,7 @@ import {
   type CanonicalQueryEvidenceV1,
   type CanonicalQueryUnresolvedV1
 } from "./compile.js";
-import { validateCanonicalQueryV1 } from "./validate.js";
+import { digestCanonicalQueryV1, validateCanonicalQueryV1 } from "./validate.js";
 
 export const QUERY_HOLE_IMPACTS = [
   "blocks_membership",
@@ -32,6 +32,7 @@ export type CanonicalQueryHoleV1 = Readonly<{
   readonly provenance: string;
   readonly code: string;
   readonly impacts: readonly QueryHoleImpactV1[];
+  readonly hypothesis_digest?: RecallFieldDigest;
 }>;
 
 export type CanonicalQueryCompileStatusV1 =
@@ -90,9 +91,11 @@ export function compileCanonicalQueryCompilation(
   snapshot: Readonly<Pick<SnapshotCoherenceReceiptV1, "receipt_digest" | "coherence_state">>
 ): CanonicalQueryCompilationV1 {
   const compiled = compileCanonicalQueryEvidence(evidence);
+  const queryIdentity = bindQueryIdentity(evidence.query_identity);
   const holes = Object.freeze([
     ...collectHoles(compiled),
-    ...snapshotHoles(snapshot)
+    ...snapshotHoles(snapshot),
+    ...queryIdentityHoles(queryIdentity.bound)
   ]);
   const compile_status = compileStatus(compiled.hypotheses, holes);
   const body = Object.freeze({
@@ -107,7 +110,7 @@ export function compileCanonicalQueryCompilation(
     hypothetical_mode: hypotheticalMode(compile_status, holes),
     sensitivities: collectSensitivities(compiled.hypotheses),
     snapshot_receipt_digest: snapshot.receipt_digest,
-    query_identity: bindQueryIdentity(evidence.query_identity)
+    query_identity: queryIdentity.identity
   });
   return Object.freeze({
     ...body,
@@ -122,6 +125,7 @@ export function verifyCanonicalQueryCompilationV1(
 ): void {
   verifyHypotheses(compilation.hypotheses);
   verifyHoleImpacts(compilation.holes);
+  verifyHoleBindings(compilation.holes, compilation.hypotheses);
   verifyCompileDisposition(compilation);
   verifySensitivities(compilation);
   if (digestRecallFieldIdentity(compilationBody(compilation)) !== compilation.digest) {
@@ -168,6 +172,21 @@ function verifyHoleImpacts(holes: readonly CanonicalQueryHoleV1[]): void {
   }
 }
 
+function verifyHoleBindings(
+  holes: readonly CanonicalQueryHoleV1[],
+  hypotheses: readonly CanonicalQueryV1[]
+): void {
+  const digests = new Set(hypotheses.map(digestCanonicalQueryV1));
+  for (const hole of holes) {
+    if (hole.code === "unbound_target_term" && hole.hypothesis_digest === undefined) {
+      throw new Error("canonical query target hole is not hypothesis-bound");
+    }
+    if (hole.hypothesis_digest !== undefined && !digests.has(hole.hypothesis_digest)) {
+      throw new Error("canonical query hole references an unknown hypothesis");
+    }
+  }
+}
+
 function verifyCompileDisposition(compilation: CanonicalQueryCompilationV1): void {
   const status = compileStatus(compilation.hypotheses, compilation.holes);
   if (compilation.compile_status !== status) {
@@ -189,24 +208,31 @@ function verifySensitivities(compilation: CanonicalQueryCompilationV1): void {
 
 function bindQueryIdentity(
   identity: CanonicalQueryIdentityV1 | undefined
-): CanonicalQueryIdentityV1 {
-  if (identity === undefined) return UNBOUND_CANONICAL_QUERY_IDENTITY;
-  const tokens = [
-    identity.condition_identity,
-    identity.query_operator_id,
-    identity.generation_id,
-    identity.query_cache_key
-  ];
-  // Empty tokens would drop identity from the digest instead of remaining unbound.
-  if (tokens.some((token) => token.length === 0 || token.trim() !== token)) {
-    return UNBOUND_CANONICAL_QUERY_IDENTITY;
+): Readonly<{ readonly identity: CanonicalQueryIdentityV1; readonly bound: boolean }> {
+  if (!isBoundQueryIdentity(identity)) {
+    return Object.freeze({ identity: UNBOUND_CANONICAL_QUERY_IDENTITY, bound: false });
   }
-  return Object.freeze({
+  return Object.freeze({ identity: Object.freeze({
     condition_identity: identity.condition_identity,
     query_operator_id: identity.query_operator_id,
     generation_id: identity.generation_id,
     query_cache_key: identity.query_cache_key
-  });
+  }), bound: true });
+}
+
+function isBoundQueryIdentity(value: unknown): value is CanonicalQueryIdentityV1 {
+  if (typeof value !== "object" || value === null) return false;
+  const identity = value as Partial<Record<keyof CanonicalQueryIdentityV1, unknown>>;
+  return [
+    identity.condition_identity,
+    identity.query_operator_id,
+    identity.generation_id,
+    identity.query_cache_key
+  ].every((token) => typeof token === "string" && token.length > 0 && token.trim() === token);
+}
+
+function queryIdentityHoles(bound: boolean): readonly CanonicalQueryHoleV1[] {
+  return bound ? [] : [holeFromCode("unbound_query_identity", "query_identity")];
 }
 
 function snapshotHoles(
@@ -244,20 +270,25 @@ function usesAllObservable(answer: CanonicalAnswerProgramV1): boolean {
 function holeFromUnresolved(
   item: CanonicalQueryUnresolvedV1
 ): CanonicalQueryHoleV1 {
-  return holeFromCode(item.code, unresolvedProvenance(item));
+  return holeFromCode(item.code, unresolvedProvenance(item), item.hypothesis_digest);
 }
 
 function unresolvedProvenance(item: CanonicalQueryUnresolvedV1): string {
-  return [item.source, item.detail, item.capture_digest]
+  return [item.source, item.detail, item.capture_digest, item.hypothesis_digest]
     .filter((part): part is string => part !== undefined && part.length > 0)
     .join(":");
 }
 
-function holeFromCode(code: string, provenance: string): CanonicalQueryHoleV1 {
+function holeFromCode(
+  code: string,
+  provenance: string,
+  hypothesisDigest?: RecallFieldDigest
+): CanonicalQueryHoleV1 {
   return Object.freeze({
     provenance,
     code,
-    impacts: Object.freeze(impactsFor(code))
+    impacts: Object.freeze(impactsFor(code)),
+    ...(hypothesisDigest === undefined ? {} : { hypothesis_digest: hypothesisDigest })
   });
 }
 
@@ -281,6 +312,9 @@ export function impactsFor(code: string): QueryHoleImpactV1[] {
     return ["blocks_completeness_claim", "blocks_certified_delivery"];
   }
   if (code === "unavailable") {
+    return ["blocks_all_delivery", "blocks_certified_delivery"];
+  }
+  if (code === "unbound_query_identity") {
     return ["blocks_all_delivery", "blocks_certified_delivery"];
   }
   return ["blocks_certified_delivery"];

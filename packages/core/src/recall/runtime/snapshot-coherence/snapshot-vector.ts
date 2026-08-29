@@ -159,15 +159,16 @@ function freezeFormation(
   rows: readonly (readonly [string, string])[]
 ): readonly (readonly [string, string])[] {
   const seen = new Set<string>();
-  return Object.freeze(rows.map(([id, version]) => {
-    const frozen = Object.freeze([
+  const frozen = rows.map(([id, version]) => {
+    const row = Object.freeze([
       requireSnapshotToken(id, "mixed_operator_generation"),
       requireSnapshotToken(version, "mixed_operator_generation")
     ] as const);
-    if (seen.has(frozen[0])) rejectSnapshotCoherence("mixed_operator_generation");
-    seen.add(frozen[0]);
-    return frozen;
-  }));
+    if (seen.has(row[0])) rejectSnapshotCoherence("mixed_operator_generation");
+    seen.add(row[0]);
+    return row;
+  });
+  return Object.freeze(frozen.sort((left, right) => left[0].localeCompare(right[0])));
 }
 
 function freezeScopes(scopes: readonly string[]): readonly string[] {

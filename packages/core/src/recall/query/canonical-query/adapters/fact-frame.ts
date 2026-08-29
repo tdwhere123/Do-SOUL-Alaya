@@ -6,6 +6,7 @@ import {
 } from "../../../field/query-attribution/query-fact-frame-attribution-producer.js";
 import {
   cleanFactFrameDemandFactor,
+  isFactFrameAnswerFactor,
   projectFactFrameSemanticFactors,
   semanticDemandKindForRole,
   type FactFrameSemanticFactor
@@ -82,10 +83,18 @@ function adaptFrame(
   answer: CanonicalAnswerProgramV1,
   sink: AdapterSink
 ): boolean {
-  const factors = cleanedFactors(frame, frameIndex);
+  const factors = projectFactFrameSemanticFactors(frame.slots, frameIndex);
   pushTimeHoles(frame, sink);
   const program = frameProgram(factors, frameIndex, producerOf(capture));
-  if (program === null) return false;
+  if (program.status === "unbound_answer") {
+    pushUnresolved(sink.unresolved, {
+      code: "unknown_answer_variable",
+      source: "fact_frame",
+      detail: String(frameIndex)
+    });
+    return false;
+  }
+  if (program.status === "unsupported_relation") return false;
   return pushSupportedQuery(
     program.predicates,
     answer,
@@ -96,45 +105,91 @@ function adaptFrame(
   );
 }
 
-function cleanedFactors(
-  frame: Readonly<RecallQueryFactFrameCaptureFrame>,
-  frameIndex: number
-): readonly FactFrameSemanticFactor[] {
-  return projectFactFrameSemanticFactors(frame.slots, frameIndex).flatMap((factor) => {
-    const cleaned = cleanFactFrameDemandFactor(factor);
-    return cleaned === null ? [] : [cleaned];
-  });
-}
-
 function frameProgram(
   factors: readonly FactFrameSemanticFactor[],
   frameIndex: number,
   producer: string
-): {
-  readonly predicates: readonly CanonicalPredicateV1[];
-  readonly constants: readonly CanonicalConstantV1[];
-} | null {
-  const relations = factors.filter((factor) =>
-    semanticDemandKindForRole(factor.role) === "relation" && factor.normalized_text.length > 0
-  );
-  if (relations.length !== 1) return null;
+): FrameProgramResult {
+  const relations = cleanedRelationFactors(factors);
+  if (relations.length !== 1) return { status: "unsupported_relation" };
+  const bindings = bindFrameArguments(factors);
+  if (bindings === null) return { status: "unbound_answer" };
   const relation = relations[0]!;
-  const constants = entityConstantsFrom(factors.flatMap((factor) =>
-    semanticDemandKindForRole(factor.role) === "entity" ? [factor.normalized_text] : []
-  ));
-  const arguments_ = [...constants.map((constant) => constant.name), "x0"];
   return {
-    constants,
+    status: "supported",
+    constants: bindings.constants,
     predicates: [naryPredicate(
       `ff${frameIndex}`,
       relation.normalized_text,
-      arguments_,
+      bindings.arguments,
       {
         source_id: `fact_frame.relation.${frameIndex}.${relation.slot_index}`,
         producer
       }
     )]
   };
+}
+
+type FrameProgramResult =
+  | Readonly<{ readonly status: "unsupported_relation" }>
+  | Readonly<{ readonly status: "unbound_answer" }>
+  | Readonly<{
+      readonly status: "supported";
+      readonly predicates: readonly CanonicalPredicateV1[];
+      readonly constants: readonly CanonicalConstantV1[];
+    }>;
+
+function cleanedRelationFactors(
+  factors: readonly FactFrameSemanticFactor[]
+): readonly FactFrameSemanticFactor[] {
+  return factors.flatMap((factor) => {
+    if (semanticDemandKindForRole(factor.role) !== "relation") return [];
+    const cleaned = cleanFactFrameDemandFactor(factor);
+    return cleaned === null ? [] : [cleaned];
+  });
+}
+
+function bindFrameArguments(
+  factors: readonly FactFrameSemanticFactor[]
+): Readonly<{
+  readonly arguments: readonly string[];
+  readonly constants: readonly CanonicalConstantV1[];
+}> | null {
+  const answers = factors.filter(isFactFrameAnswerFactor);
+  if (answers.length !== 1) return null;
+  const answer = answers[0]!;
+  const rows = factors.flatMap((factor) => frameArgument(factor, answer));
+  rows.sort((left, right) => left.role_order - right.role_order ||
+    left.slot_index - right.slot_index);
+  const arguments_ = rows.map((row) => row.argument);
+  const constants = entityConstantsFrom(arguments_.filter((argument) => argument !== "x0"));
+  return {
+    arguments: Object.freeze(arguments_),
+    constants
+  };
+}
+
+function frameArgument(
+  factor: Readonly<FactFrameSemanticFactor>,
+  answer: Readonly<FactFrameSemanticFactor>
+): readonly Readonly<{ readonly argument: string; readonly role_order: number;
+  readonly slot_index: number }>[] {
+  if (factor.slot_index === answer.slot_index) {
+    return [{ argument: "x0", role_order: roleOrder(answer), slot_index: factor.slot_index }];
+  }
+  const cleaned = cleanFactFrameDemandFactor(factor);
+  if (cleaned === null || semanticDemandKindForRole(cleaned.role) !== "entity") return [];
+  return [{
+    argument: cleaned.normalized_text,
+    role_order: roleOrder(cleaned),
+    slot_index: cleaned.slot_index
+  }];
+}
+
+function roleOrder(factor: Readonly<FactFrameSemanticFactor>): number {
+  if (factor.role === "subject") return 0;
+  if (factor.role === "value") return 1;
+  return 2;
 }
 
 function pushTimeHoles(
