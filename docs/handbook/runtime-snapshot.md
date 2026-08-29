@@ -1,14 +1,30 @@
 # Runtime Snapshot
 
-Package version is `0.3.11`; the current documentation anchor is the
-2026-08-25 budgeted-capture shadow adjudication and sharded plan over the
-relevance-authority/G21/S11-S19 evidence.
-This file is readiness vocabulary and dated snapshots. It is **not** a
-KPI-promotion or merge-readiness claim.
+Package version is `0.3.11`. The live Recall target/shadow direction is the
+2026-08-29 query-proof contract in
+`.do-it/plans/recall-any5-evidence-first/query-proof-architecture-decision.md`
+and [`recall.md`](recall.md). This file is readiness vocabulary and dated
+snapshots. It is **not** a KPI-promotion or merge-readiness claim, and the
+S14–S20 table below is **not** live target authority.
 
 Recall algorithm (target vs live): [`recall.md`](recall.md).
 
-## Recall posture delta (2026-08-24–25, S14–S20)
+## Recall posture (2026-08-29 query-proof target)
+
+| Fact | Status |
+|---|---|
+| Target decision path | `Psi` → `Gamma_q` → query-owned exact tie → deterministic identity → `prefixSK` |
+| V1 semantic prior | **Forbidden**. Query-independent state cannot decide a tie or serialize an unresolved trade-off as a tie |
+| Exact tie | Only after proposition-level and Gamma equality with no unresolved trade-off crossing the boundary |
+| Canonical walk | `prefixSK(S_infty, K)`; `selectGammaWalk` is optional outer legacy delivery only |
+| Query-proof freeze | No unbound mutable read after `SnapshotReadLeaseV1` finalization; later reads must use bound views |
+
+## Recall posture delta (2026-08-24–25, S14–S20) — historical
+
+The rows below record the 2026-08-25 evidence pass and the S20 umbrella then
+called “active.” They remain diagnostic history. They do not authorize a V1
+semantic prior, a final-unresolved-tie prior, or `Select_Gamma` as the
+query-proof target.
 
 | Fact | Status |
 |---|---|
@@ -28,8 +44,8 @@ Recall algorithm (target vs live): [`recall.md`](recall.md).
 | Relevance-authority verdict | **D (B + C)**: family-max additive RRF loses magnitude; short rank lists, uncalibrated intent weights, and a bounded breadth cohort distort relevance. Object/factor embedding re-enters deep-head/facility/Gamma as a second relevance authority |
 | Route adjudication | **B**: neither `effectiveScore` nor family-max `fused_score` is target authority; rebuild from attributed observations and later retire the `existing_score` recycle lane |
 | S19 probe | Closed: sparse Pareto/per-question-linear results are non-discriminating; tie-corrected 89/90/91 claims withdrawn; target reachability remains NOT_VERIFIED |
-| S20 active plan | P0–M1 umbrella: parallel demand/observation/safe-dominance/Gamma audits; exact capture-algebra freeze; behavior-neutral shadow trace; explicit cutover gate; reversible delivery; 100Q isolation; legacy deletion/proof; source-bound 500Q |
-| Shadow algorithm direction | Strict safe dominance; cycles fail contract; frontier index is not gain; cross-frontier set novelty is legal; one prefix-monotonic capture walk; prior only on the final unresolved tie |
+| S20 historical plan (superseded 2026-08-29) | Then-active P0–M1 umbrella: demand/observation/safe-dominance/Gamma audits; capture-algebra freeze; shadow trace; cutover gate; 100Q isolation. Replaced by the query-proof decision/cards |
+| Shadow algorithm direction (historical S20 wording) | Then: strict safe dominance; cycles fail; frontier index is not gain; one prefix-monotonic walk; **prior only on the final unresolved tie**. That prior clause is withdrawn for V1 |
 | E0/E1 target | E1 monotonically extends the candidate field, cannot evict E0 candidates, and adds one embedding observation on shared candidates; admission receipt creates no preference |
 | Complete-form extraction | Withdrawn; formation boundary stays immutable source -> F0-F2 -> optional F3 -> projections |
 
