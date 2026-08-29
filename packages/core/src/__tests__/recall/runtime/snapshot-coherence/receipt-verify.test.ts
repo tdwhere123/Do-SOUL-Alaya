@@ -5,6 +5,7 @@ import {
   createSnapshotVectorV1,
   digestSnapshotCoherenceReceiptV1,
   verifySnapshotCoherenceReceiptV1,
+  verifySnapshotVectorV1,
   type SnapshotCoherenceReceiptV1,
   type SnapshotVectorV1
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
@@ -63,6 +64,20 @@ describe("snapshot coherence receipt verify", () => {
       lag_bounds: [remainingEffect("embedding_generation_and_model", "embed-lag-2")]
     }), vector);
   });
+
+  it("rejects a stale vector_digest after a non-classifying vector mutation", () => {
+    const { receipt, vector } = exactPair();
+    const mutated: SnapshotVectorV1 = {
+      ...vector,
+      path_graph_generation: {
+        ...vector.path_graph_generation,
+        operator_or_model_version: "op-stale"
+      }
+    };
+    const resigned = resign(receipt, { vector_digest: mutated.vector_digest });
+    expectMalformedDigest(() => verifySnapshotVectorV1(mutated));
+    expectMalformed(resigned, mutated);
+  });
 });
 
 function exactPair(): Readonly<{
@@ -85,10 +100,13 @@ function expectMalformed(
   receipt: SnapshotCoherenceReceiptV1,
   vector: SnapshotVectorV1
 ): void {
-  expect(() => verifySnapshotCoherenceReceiptV1(receipt, vector))
-    .toThrow(SnapshotCoherenceContractError);
+  expectMalformedDigest(() => verifySnapshotCoherenceReceiptV1(receipt, vector));
+}
+
+function expectMalformedDigest(run: () => void): void {
+  expect(run).toThrow(SnapshotCoherenceContractError);
   try {
-    verifySnapshotCoherenceReceiptV1(receipt, vector);
+    run();
   } catch (error) {
     expect(error).toBeInstanceOf(SnapshotCoherenceContractError);
     expect((error as SnapshotCoherenceContractError).code).toBe("malformed_digest");

@@ -71,15 +71,21 @@ describe("snapshot coherence identity rejects", () => {
 
   it("rejects incompatible base frontier on exact or bounded sources", () => {
     expectCode("incompatible_base_frontier", exactVectorInput({
+      transaction_frontier: ""
+    }));
+    expectCode("incompatible_base_frontier", exactVectorInput({
+      transaction_frontier: " tx-frontier-1"
+    }));
+    expectCode("incompatible_base_frontier", exactVectorInput({
       embedding_generation_and_model: declaration({
         source_owner: "embedding_generation_and_model",
-        source_frontier: "other-tx"
+        source_frontier: ""
       })
     }));
     expectCode("incompatible_base_frontier", exactVectorInput({
       embedding_generation_and_model: declaration({
         source_owner: "embedding_generation_and_model",
-        source_frontier: "other-tx",
+        source_frontier: " other-tx",
         lag_bound: {
           kind: "bounded",
           remaining_effect: remainingEffect("embedding_generation_and_model", "lag-1")

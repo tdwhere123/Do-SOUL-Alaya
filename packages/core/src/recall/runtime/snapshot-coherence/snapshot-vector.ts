@@ -144,14 +144,10 @@ function assertCompatibleFrontiers(
   transactionFrontier: string,
   sources: readonly SourceFrontierDeclarationV1[]
 ): void {
-  const frontier = requireSnapshotToken(transactionFrontier, "incompatible_base_frontier");
+  // Exact/bounded source_frontier may diverge from transaction_frontier; that is torn.
+  requireSnapshotToken(transactionFrontier, "incompatible_base_frontier");
   for (const source of sources) {
-    if (source.lag_bound.kind === "unavailable" || source.lag_bound.kind === "not_applicable") {
-      continue;
-    }
-    if (source.source_frontier !== frontier) {
-      rejectSnapshotCoherence("incompatible_base_frontier");
-    }
+    requireSnapshotToken(source.source_frontier, "incompatible_base_frontier");
   }
 }
 

@@ -57,7 +57,7 @@ describe("snapshot coherence digest", () => {
     const torn = exactVectorInput({
       embedding_generation_and_model: declaration({
         source_owner: "embedding_generation_and_model",
-        generation: "gen-stale"
+        source_frontier: "tx-frontier-stale"
       })
     });
     const left = createSnapshotVectorV1(torn);

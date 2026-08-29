@@ -30,6 +30,7 @@ import {
   createMemoryEntry,
   createTaskSurface
 } from "../../recall-service-test-fixtures.js";
+import { keywordFieldResult } from "../../fixtures/keyword-field-fixture.js";
 
 const RETRIEVAL_OWNERS = PREPARE_RETRIEVAL_CHANNEL_OWNERS;
 
@@ -185,14 +186,61 @@ describe("post-freeze mutable source isolation", () => {
     empty.prepared.releaseProjectionPin();
     empty.prepared.projectionPinLease.stop();
   });
+
+  it("does not upgrade Sigma_q slots when live ports mutate after freeze", async () => {
+    const original = createMemoryEntry({
+      object_id: FROZEN_EVIDENCE_ID,
+      evidence_refs: [FROZEN_EVIDENCE_ID],
+      content: "frozen pin object"
+    });
+    const { dependencies: base } = createDependencies([original]);
+    const spies = attachLivePortSpies(base);
+    const findByEvidenceRefs = vi.fn(async () => [original]);
+    const prepared = await preparePinnedMemories(
+      [original],
+      findByEvidenceRefs,
+      undefined,
+      spies.dependencies
+    );
+    expect(spies.searchMemory).not.toHaveBeenCalled();
+    expect(spies.searchEvidence).not.toHaveBeenCalled();
+    expect(spies.searchEvidenceField).not.toHaveBeenCalled();
+    expect(spies.searchSynthesisField).not.toHaveBeenCalled();
+    expect(spies.querySupplement).not.toHaveBeenCalled();
+    expect(spies.collectWorkspaceNeighbors).not.toHaveBeenCalled();
+    const receiptDigest = prepared.snapshotCoherenceReceipt.receipt_digest;
+    const cqDigest = prepared.canonicalQueryCompilation.digest;
+    expectFrozenUnavailable(prepared);
+    mutateLivePortSpies(spies);
+    expect(prepared.snapshotCoherenceReceipt.receipt_digest).toBe(receiptDigest);
+    expect(prepared.canonicalQueryCompilation.digest).toBe(cqDigest);
+    expectFrozenUnavailable(prepared);
+    const memoryHits = await prepared.retrievalFieldBundle.searchMemoryKeyword({
+      variant: "lexical_relaxed",
+      queryText: "planted",
+      limit: 1,
+      scope: {}
+    });
+    expect(spies.searchMemory).toHaveBeenCalled();
+    expect(memoryHits.map((hit) => hit.object_id)).toEqual(["planted-memory"]);
+    const evidenceHits = await prepared.retrievalFieldBundle.searchEvidenceKeyword({
+      queryText: "planted",
+      limit: 1
+    });
+    expect(spies.searchEvidenceField).toHaveBeenCalled();
+    expect(evidenceHits.map((hit) => hit.object_id)).toEqual(["planted-evidence"]);
+    prepared.releaseProjectionPin();
+    prepared.projectionPinLease.stop();
+  });
 });
 
 async function preparePinnedMemories(
   live: readonly MemoryEntry[],
   findByEvidenceRefs: MemoryRepoFindByEvidenceRefs,
-  displayName?: string
+  displayName?: string,
+  extra?: ReturnType<typeof createDependencies>["dependencies"]
 ) {
-  const { dependencies: base } = createDependencies([...live]);
+  const base = extra ?? createDependencies([...live]).dependencies;
   const store = new InMemoryProjectionGenerationStore(fieldContractSha256);
   const session = createSeededTestOnlyInMemoryFieldQuerySessionWithStore(
     fieldContractSha256,
@@ -299,3 +347,119 @@ type MemoryRepoFindByEvidenceRefs = (
   workspaceId: string,
   ids: readonly string[]
 ) => Promise<readonly MemoryEntry[]>;
+
+function hit(objectId: string) {
+  return { object_id: objectId, normalized_rank: 1 };
+}
+
+function expectFrozenUnavailable(
+  prepared: Awaited<ReturnType<typeof prepareRecallRequest>>
+): void {
+  const receipt = prepared.snapshotCoherenceReceipt;
+  expect(receipt.coherence_state).toBe("unavailable");
+  expect(receipt.coherence_state).not.toBe("coherent_exact");
+  // Slot kinds live on the vector, not the receipt body.
+  const vector = capturePreparedSnapshotVector({
+    queryCondition: prepared.queryCondition,
+    pin: prepared.projectionPin,
+    retrieval_channel_owners: RETRIEVAL_OWNERS
+  });
+  expect(vector.vector_digest).toBe(receipt.vector_digest);
+  expect(vector.projection_generation.lag_bound.kind).toBe("exact");
+  for (const channel of vector.retrieval_channel_snapshots) {
+    expect(channel.lag_bound.kind).toBe("unavailable");
+    expect(channel.lag_bound.kind).not.toBe("exact");
+  }
+  for (const slot of [
+    vector.embedding_generation_and_model,
+    vector.path_graph_generation,
+    vector.temporal_index_generation,
+    vector.governance_frontier
+  ]) {
+    expect(slot.lag_bound.kind).toBe("unavailable");
+    expect(slot.lag_bound.kind).not.toBe("exact");
+  }
+}
+
+function attachLivePortSpies(
+  base: ReturnType<typeof createDependencies>["dependencies"]
+) {
+  const searchMemory = vi.fn(async () => keywordFieldResult([hit("pre-freeze-memory")]));
+  const searchEvidence = vi.fn(async () => [hit("pre-freeze-evidence")]);
+  const searchEvidenceField = vi.fn(async () => keywordFieldResult([hit("pre-freeze-evidence")]));
+  const searchSynthesisField = vi.fn(async () =>
+    keywordFieldResult([hit("pre-freeze-synthesis")])
+  );
+  const querySupplement = vi.fn(async () => ({
+    supplementaryEntries: Object.freeze([]),
+    similarityHintsByObjectId: Object.freeze({})
+  }));
+  const collectWorkspaceNeighbors = vi.fn(async () => []);
+  const findByAnchors = vi.fn(async () => []);
+  const getStrengthByMemoryId = vi.fn(async () => new Map<string, number>());
+  const findByEventTimeWindow = vi.fn(async () => []);
+  const findActiveConstraints = vi.fn(async () => ({ constraints: [], total_count: 0 }));
+  const spies = {
+    searchMemory, searchEvidence, searchEvidenceField, searchSynthesisField,
+    querySupplement, collectWorkspaceNeighbors, findByAnchors, getStrengthByMemoryId,
+    findByEventTimeWindow, findActiveConstraints
+  };
+  return { ...spies, dependencies: withLiveSpyPorts(base, spies) };
+}
+
+function withLiveSpyPorts(
+  base: ReturnType<typeof createDependencies>["dependencies"],
+  spies: Omit<ReturnType<typeof attachLivePortSpies>, "dependencies">
+) {
+  return {
+    ...base,
+    memoryRepo: {
+      ...base.memoryRepo,
+      searchByKeywordField: spies.searchMemory,
+      findByEventTimeWindow: spies.findByEventTimeWindow
+    },
+    evidenceSearchPort: {
+      searchByKeyword: spies.searchEvidence,
+      searchByKeywordField: spies.searchEvidenceField
+    },
+    synthesisSearchPort: {
+      searchByKeyword: vi.fn(async () => []),
+      searchByKeywordField: spies.searchSynthesisField,
+      findByIds: vi.fn(async () => [])
+    },
+    embeddingRecallService: {
+      querySupplement: spies.querySupplement,
+      collectWorkspaceNeighbors: spies.collectWorkspaceNeighbors
+    },
+    pathExpansionPort: { findByAnchors: spies.findByAnchors },
+    pathPlasticityPort: { getStrengthByMemoryId: spies.getStrengthByMemoryId },
+    activeConstraintsPort: { findActiveConstraints: spies.findActiveConstraints }
+  };
+}
+
+function mutateLivePortSpies(spies: ReturnType<typeof attachLivePortSpies>): void {
+  spies.searchMemory.mockResolvedValue(keywordFieldResult([hit("planted-memory")]));
+  spies.searchEvidence.mockResolvedValue([hit("planted-evidence")]);
+  spies.searchEvidenceField.mockResolvedValue(
+    keywordFieldResult([hit("planted-evidence")])
+  );
+  spies.searchSynthesisField.mockResolvedValue(
+    keywordFieldResult([hit("planted-synthesis")])
+  );
+  spies.querySupplement.mockResolvedValue({
+    supplementaryEntries: Object.freeze([]),
+    similarityHintsByObjectId: Object.freeze({
+      "planted-embed": { object_id: "planted-embed", normalized_similarity: 1 }
+    })
+  });
+  spies.collectWorkspaceNeighbors.mockResolvedValue([
+    { object_id: "planted-neighbor", normalized_similarity: 1 }
+  ]);
+  spies.findByAnchors.mockResolvedValue([]);
+  spies.getStrengthByMemoryId.mockResolvedValue(new Map([["planted-path", 1]]));
+  spies.findByEventTimeWindow.mockResolvedValue([]);
+  spies.findActiveConstraints.mockResolvedValue({
+    constraints: [],
+    total_count: 7
+  });
+}

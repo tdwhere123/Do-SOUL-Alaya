@@ -67,18 +67,23 @@ function tornReasons(
 
 function tornRetrievalEmbedding(vector: SnapshotVectorV1): boolean {
   const embedding = vector.embedding_generation_and_model;
-  if (embedding.lag_bound.kind !== "exact") return false;
   return vector.retrieval_channel_snapshots.some((channel) =>
-    channel.lag_bound.kind === "exact" && channel.generation !== embedding.generation
+    exactFrontierTorn(channel, embedding)
   );
 }
 
 function tornGovernanceProjection(vector: SnapshotVectorV1): boolean {
-  const governance = vector.governance_frontier;
-  const projection = vector.projection_generation;
-  return governance.lag_bound.kind === "exact"
-    && projection.lag_bound.kind === "exact"
-    && governance.generation !== projection.generation;
+  return exactFrontierTorn(vector.governance_frontier, vector.projection_generation);
+}
+
+function exactFrontierTorn(
+  left: SourceFrontierDeclarationV1,
+  right: SourceFrontierDeclarationV1
+): boolean {
+  // Independent generation ids are not a torn signal.
+  return left.lag_bound.kind === "exact"
+    && right.lag_bound.kind === "exact"
+    && left.source_frontier !== right.source_frontier;
 }
 
 function exactTimeMismatch(

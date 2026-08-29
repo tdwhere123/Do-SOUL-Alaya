@@ -2,6 +2,7 @@ import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../field/field-identity.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import { classifySnapshotCoherence } from "./coherence-status.js";
+import { verifySnapshotVectorV1 } from "./snapshot-vector.js";
 import { admitRestrictedUniverse, derivedSources } from "./sources.js";
 import {
   rejectSnapshotCoherence,
@@ -38,6 +39,8 @@ export function verifySnapshotCoherenceReceiptV1(
   receipt: SnapshotCoherenceReceiptV1,
   vector: SnapshotVectorV1
 ): void {
+  // Receipt matching binds vector_digest, not vector fields.
+  verifySnapshotVectorV1(vector);
   if (receipt.schema_version !== 1
     || receipt.operator_id !== SNAPSHOT_COHERENCE_OPERATOR_ID) {
     rejectSnapshotCoherence("malformed_digest");

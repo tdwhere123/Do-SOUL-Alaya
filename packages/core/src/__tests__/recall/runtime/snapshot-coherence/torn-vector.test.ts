@@ -12,7 +12,7 @@ describe("snapshot torn vectors", () => {
     const receipt = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(exactVectorInput({
       embedding_generation_and_model: declaration({
         source_owner: "embedding_generation_and_model",
-        generation: "gen-stale"
+        source_frontier: "tx-frontier-stale"
       })
     })));
     expect(receipt.coherence_state).toBe("incoherent");
@@ -23,7 +23,6 @@ describe("snapshot torn vectors", () => {
     const receipt = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(exactVectorInput({
       embedding_generation_and_model: declaration({
         source_owner: "embedding_generation_and_model",
-        generation: "gen-stale",
         lag_bound: {
           kind: "bounded",
           remaining_effect: remainingEffect("embedding_generation_and_model", "embed-stale")
@@ -39,9 +38,9 @@ describe("snapshot torn vectors", () => {
 
   it("marks new governance + stale projection exact peers incoherent", () => {
     const receipt = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(exactVectorInput({
-      governance_frontier: declaration({
-        source_owner: "governance_frontier",
-        generation: "gen-gov-new"
+      projection_generation: declaration({
+        source_owner: "projection_generation",
+        source_frontier: "tx-frontier-stale"
       })
     })));
     expect(receipt.coherence_state).toBe("incoherent");
@@ -98,5 +97,31 @@ describe("snapshot torn vectors", () => {
     })));
     expect(receipt.coherence_state).toBe("incoherent");
     expect(receipt.reasons).toContain("valid_time_transaction_time_mismatch");
+  });
+
+  it("treats independent generation ids as coherent_exact when source_frontiers match", () => {
+    const receipt = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(exactVectorInput({
+      embedding_generation_and_model: declaration({
+        source_owner: "embedding_generation_and_model",
+        generation: "gen-embed-independent"
+      }),
+      retrieval_channel_snapshots: [
+        declaration({
+          source_owner: "evidence_fts_exact",
+          generation: "gen-fts-independent"
+        })
+      ],
+      governance_frontier: declaration({
+        source_owner: "governance_frontier",
+        generation: "gen-gov-independent"
+      }),
+      projection_generation: declaration({
+        source_owner: "projection_generation",
+        generation: "gen-proj-independent"
+      })
+    })));
+    expect(receipt.coherence_state).toBe("coherent_exact");
+    expect(receipt.reasons).not.toContain("torn_fts_embedding");
+    expect(receipt.reasons).not.toContain("torn_governance_projection");
   });
 });
