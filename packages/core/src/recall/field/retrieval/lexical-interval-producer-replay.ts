@@ -77,6 +77,9 @@ function verifyLaneRows(lane: Readonly<LexicalBoundLaneCapture>): void {
   if (lane.rows.length !== lane.list_n) {
     throw new TypeError("lexical interval producer lane rows are invalid");
   }
+  if (new Set(lane.rows.map((row) => row.candidate_key)).size !== lane.rows.length) {
+    throw new TypeError("lexical interval producer lane has duplicate candidate rows");
+  }
   const expected = groupedOrdinalScores(lane.rows.map((row) => row.raw_group_key));
   lane.rows.forEach((row, index) => {
     if (row.lane_index !== index || row.grouped_ordinal !== expected[index]) {

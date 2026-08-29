@@ -69,6 +69,64 @@ describe("lexical interval producer replay", () => {
       Object.freeze({ ...fixture.receipt, candidates: [...fixture.receipt.candidates].reverse() })
     )).toThrow(/candidate order/u);
   });
+
+  it("rejects synchronized duplicate candidate rows within one lane", () => {
+    const fixture = planted();
+    const rows = [rawRow("a", 2, 0, 1), rawRow("a", 1, 1, 0.5)];
+    const lanes = fixture.receipt.lanes.map((lane) => lane.lane_id === "exact"
+      ? Object.freeze({ ...lane, rows }) : lane);
+    const candidates = [Object.freeze({
+      ...fixture.receipt.candidates[0]!, chosen_normalized_rank: 1, post_merge_index: 0,
+      lane_hits: Object.freeze(rows.map((row) => Object.freeze({
+        lane_id: "exact" as const, raw_group_key: row.raw_group_key,
+        grouped_ordinal: row.grouped_ordinal, lane_index: row.lane_index
+      })))
+    })];
+    const capture = Object.freeze({
+      ...fixture.capture,
+      candidates: [Object.freeze({
+        candidate_key: "a", chosen_lane_id: "exact" as const,
+        chosen_normalized_rank: 1, admitted: true
+      })]
+    });
+    const receipt = Object.freeze({
+      ...fixture.receipt, lanes, candidates,
+      post_merge: [Object.freeze({ candidate_key: "a", normalized_rank: 1 })]
+    });
+    expect(() => verifyLexicalIntervalProducerReplay(capture, receipt))
+      .toThrow(/duplicate candidate rows/u);
+  });
+
+  it("accepts the same candidate observed in different lanes", () => {
+    const fixture = planted();
+    const porterRow = rawRow("a", -1, 0, 1);
+    const lanes = fixture.receipt.lanes.map((lane) => lane.lane_id === "porter"
+      ? Object.freeze({ ...lane, list_n: 1, status: "complete" as const, rows: [porterRow] })
+      : lane);
+    const candidates = fixture.receipt.candidates.map((candidate) =>
+      candidate.candidate_key === "a" ? Object.freeze({
+        ...candidate, chosen_lane_id: "porter" as const, chosen_normalized_rank: 1,
+        lane_hits: Object.freeze([...candidate.lane_hits, Object.freeze({
+          lane_id: "porter" as const, raw_group_key: -1, grouped_ordinal: 1, lane_index: 0
+        })])
+      }) : candidate);
+    const captureLanes = fixture.capture.lanes.map((lane) => lane.lane_id === "porter"
+      ? Object.freeze({ ...lane, list_n: 1, status: "complete" as const }) : lane);
+    const captureCandidates = fixture.capture.candidates.map((candidate) =>
+      candidate.candidate_key === "a" ? Object.freeze({
+        ...candidate, chosen_lane_id: "porter" as const, chosen_normalized_rank: 1
+      }) : candidate);
+    expect(() => verifyLexicalIntervalProducerReplay(
+      Object.freeze({ ...fixture.capture, lanes: captureLanes, candidates: captureCandidates }),
+      Object.freeze({
+        ...fixture.receipt, lanes, candidates,
+        post_merge: Object.freeze([
+          Object.freeze({ candidate_key: "b", normalized_rank: 1 }),
+          Object.freeze({ candidate_key: "a", normalized_rank: 1 })
+        ])
+      })
+    )).not.toThrow();
+  });
 });
 
 function planted() {
