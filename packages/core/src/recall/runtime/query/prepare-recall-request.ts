@@ -85,7 +85,6 @@ async function loadPinnedPreparedRequest(input: Readonly<{
       captureOperationalTime: time.captureOperationalTime,
       scheduler: context.projectionPinHeartbeatScheduler
     });
-    const world = capturePinnedQueryWorld(captured, params, certified, seed.queryText);
     const fieldSelection = context.fieldQuerySession.selectCandidates(
       captured.receipt,
       captured.pin,
@@ -100,6 +99,9 @@ async function loadPinnedPreparedRequest(input: Readonly<{
       captured.referenceTime
     );
     projectionPinLease.assertHealthy();
+    const world = capturePinnedQueryWorld(
+      captured, params, certified, seed.queryText, fieldSelection.candidate_keys
+    );
     return freezePreparedRequest({
       seed, loaded, time, captured, fieldSelection, projectionPinLease,
       releaseProjectionPin, certified, world
@@ -114,7 +116,8 @@ function capturePinnedQueryWorld(
   captured: ReturnType<typeof capturePreparedRequestCondition>,
   params: RecallExecutionParams,
   certified: Awaited<ReturnType<typeof certifyPreparedSemanticCapture>>,
-  queryText: string | null
+  queryText: string | null,
+  observableObjectIds: readonly string[]
 ) {
   const snapshotCoherenceReceipt = capturePreparedSnapshotCoherenceReceipt({
     queryCondition: captured.receipt,
@@ -130,21 +133,36 @@ function capturePinnedQueryWorld(
     shape: compileRecallAnswerShapePlan(baseProbes),
     factFrameCapture: certified?.factFrameCapture,
     osfCapture: certified?.formation,
-    observer: observerFromReceipt(captured.receipt),
+    observer: observerFromPinnedObjects(captured.receipt, observableObjectIds),
     query_identity: queryIdentityFromReceipt(captured.receipt)
   }, snapshotCoherenceReceipt);
   return { snapshotCoherenceReceipt, canonicalQueryCompilation };
 }
 
-function observerFromReceipt(
-  receipt: PreparedRecallRequest["queryCondition"]
+function observerFromPinnedObjects(
+  receipt: PreparedRecallRequest["queryCondition"],
+  objectIds: readonly string[]
 ) {
+  const observer_universe = uniqueObserverIds(objectIds);
+  // Empty pin-view is not a finite authorized observable set.
+  if (observer_universe.length === 0) return undefined;
   const condition = receipt.condition;
   return {
     principal: condition.principal,
     scope: condition.authorized_scopes[0] ?? condition.workspace_id,
-    observer_universe: Object.freeze([receipt.query_operator_id])
+    observer_universe
   };
+}
+
+function uniqueObserverIds(objectIds: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const id of objectIds) {
+    if (id.length === 0 || id.trim() !== id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return Object.freeze(ids.sort((left, right) => left.localeCompare(right)));
 }
 
 function queryIdentityFromReceipt(

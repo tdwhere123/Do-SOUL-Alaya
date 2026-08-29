@@ -6,23 +6,16 @@ import { prepareRecallRequest } from
   "../../../../recall/runtime/query/prepare-recall-request.js";
 import { captureRecallRequestTime } from
   "../../../../recall/runtime/query/recall-request-time.js";
-import {
-  SEALED_EMPTY_FRONTIER,
-  createSeededTestOnlyInMemoryFieldQuerySessionWithStore
-} from "../../../../recall/runtime/query/field-query-session.js";
+import { createSeededTestOnlyInMemoryFieldQuerySessionWithStore } from
+  "../../../../recall/runtime/query/field-query-session.js";
 import { InMemoryProjectionGenerationStore } from
   "../../../../recall/field/retrieval/projection/generation-store.js";
 import {
-  activateProjectionGeneration,
-  buildProjectionGeneration,
-  verifyProjectionGeneration
-} from "../../../../recall/field/retrieval/projection/generation-lifecycle.js";
-import {
   PREPARE_RETRIEVAL_CHANNEL_OWNERS,
-  SnapshotCoherenceContractError,
   capturePreparedSnapshotCoherenceReceipt,
   capturePreparedSnapshotVector
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
+import * as snapshotCoherence from "../../../../recall/runtime/snapshot-coherence/index.js";
 import { buildRecallPolicy } from "../../../../shared/recall-policy.js";
 import { fieldContractSha256 } from "../../../../shared/field-hash.js";
 import {
@@ -72,52 +65,155 @@ describe("prepared snapshot retrieval declarations", () => {
   });
 });
 
+const FROZEN_EVIDENCE_ID = "evidence-frozen";
+const PLANTED_EVIDENCE_ID = "evidence-planted-after-freeze";
+const DISTINCT_QUERY = "How many different doctors did I visit?";
+
 describe("post-freeze mutable source isolation", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("keeps the frozen receipt digest after a live store mutation", async () => {
-    const memories: MemoryEntry[] = [];
-    const { prepared, session, store, dependencies } = await prepareSample(memories);
-    const digest = prepared.snapshotCoherenceReceipt.receipt_digest;
-    const originalKeys = prepared.fieldProjectionSelection.candidate_keys;
-    memories.push(createMemoryEntry({
-      object_id: "22222222-2222-4222-8222-222222222222",
-      content: "planted after freeze"
-    }));
-    const laterGeneration = activateLaterGeneration(store);
-    expect(laterGeneration).not.toBe(prepared.projectionPin.generation_id);
-    expect(prepared.snapshotCoherenceReceipt.receipt_digest).toBe(digest);
-    const findByWorkspaceId = dependencies.memoryRepo.findByWorkspaceId;
-    vi.mocked(findByWorkspaceId).mockClear();
-    expect(prepared.snapshotCoherenceReceipt.reasons).not.toContain("retrieval_undeclared");
-    const rebuilt = capturePreparedSnapshotCoherenceReceipt({
-      queryCondition: prepared.queryCondition,
-      pin: prepared.projectionPin,
-      retrieval_channel_owners: PREPARE_RETRIEVAL_CHANNEL_OWNERS
+  it("does not ingest live memory planted after Sigma_q freeze", async () => {
+    const original = createMemoryEntry({
+      object_id: FROZEN_EVIDENCE_ID,
+      evidence_refs: [FROZEN_EVIDENCE_ID],
+      content: "frozen pin object"
     });
-    expect(rebuilt.receipt_digest).toBe(digest);
-    expect(findByWorkspaceId).not.toHaveBeenCalled();
-    const laterPin = session.pinActiveGeneration("workspace-1", CLOCK_AS_OF);
-    expect(laterPin.generation_id).toBe(laterGeneration);
-    expect(() => capturePreparedSnapshotCoherenceReceipt({
-      queryCondition: prepared.queryCondition,
-      pin: laterPin
-    })).toThrow(SnapshotCoherenceContractError);
-    const reread = session.selectCandidates(
-      prepared.queryCondition,
-      prepared.projectionPin,
-      CLOCK_AS_OF
-    );
-    expect(reread.candidate_keys).toEqual(originalKeys);
+    const planted = createMemoryEntry({
+      object_id: PLANTED_EVIDENCE_ID,
+      evidence_refs: [FROZEN_EVIDENCE_ID],
+      content: "planted after freeze"
+    });
+    const live: MemoryEntry[] = [original];
+    let frozen = false;
+    const findByEvidenceRefs = vi.fn(async (
+      _workspaceId: string,
+      ids: readonly string[]
+    ) => {
+      expect(frozen).toBe(false);
+      return live.filter((entry) =>
+        ids.includes(entry.object_id)
+        || entry.evidence_refs.some((ref) => ids.includes(ref))
+      );
+    });
+    const capture = snapshotCoherence.capturePreparedSnapshotCoherenceReceipt;
+    vi.spyOn(snapshotCoherence, "capturePreparedSnapshotCoherenceReceipt")
+      .mockImplementation((input) => {
+        const receipt = capture(input);
+        frozen = true;
+        live.push(planted);
+        return receipt;
+      });
+    const prepared = await preparePinnedMemories(live, findByEvidenceRefs);
+    expect(snapshotCoherence.capturePreparedSnapshotCoherenceReceipt)
+      .toHaveBeenCalled();
+    expect(frozen).toBe(true);
+    expect(live.map((entry) => entry.object_id)).toContain(PLANTED_EVIDENCE_ID);
+    expect(findByEvidenceRefs).toHaveBeenCalled();
+    const loadedIds = prepared.fieldProjectionMemories.map((entry) => entry.object_id);
+    expect(loadedIds).toEqual([FROZEN_EVIDENCE_ID]);
+    expect(loadedIds).not.toContain(PLANTED_EVIDENCE_ID);
     prepared.releaseProjectionPin();
     prepared.projectionPinLease.stop();
   });
+
+  it("binds observer_universe to pinned Sigma_q objects, not query_operator_id", async () => {
+    const original = createMemoryEntry({
+      object_id: FROZEN_EVIDENCE_ID,
+      evidence_refs: [FROZEN_EVIDENCE_ID]
+    });
+    const findByEvidenceRefs = vi.fn(async () => [original]);
+    const withObjects = await preparePinnedMemories(
+      [original],
+      findByEvidenceRefs,
+      DISTINCT_QUERY
+    );
+    const universes = allObservableUniverses(withObjects.canonicalQueryCompilation);
+    expect(universes).toEqual([[FROZEN_EVIDENCE_ID]]);
+    expect(universes.flat()).not.toContain(
+      withObjects.queryCondition.query_operator_id
+    );
+    expect(withObjects.canonicalQueryCompilation.compile_status)
+      .not.toBe("certified_program");
+    withObjects.releaseProjectionPin();
+    withObjects.projectionPinLease.stop();
+
+    const empty = await prepareSample([], DISTINCT_QUERY);
+    expect(allObservableUniverses(empty.prepared.canonicalQueryCompilation)).toEqual([]);
+    expect(empty.prepared.canonicalQueryCompilation.holes.some((hole) =>
+      hole.code === "unknown_scope"
+    )).toBe(true);
+    expect(empty.prepared.canonicalQueryCompilation.compile_status)
+      .not.toBe("certified_program");
+    empty.prepared.releaseProjectionPin();
+    empty.prepared.projectionPinLease.stop();
+  });
 });
 
-async function prepareSample(memories: MemoryEntry[] = []) {
+async function preparePinnedMemories(
+  live: readonly MemoryEntry[],
+  findByEvidenceRefs: MemoryRepoFindByEvidenceRefs,
+  displayName?: string
+) {
+  const { dependencies: base } = createDependencies([...live]);
+  const store = new InMemoryProjectionGenerationStore(fieldContractSha256);
+  const session = createSeededTestOnlyInMemoryFieldQuerySessionWithStore(
+    fieldContractSha256,
+    "workspace-1",
+    store
+  );
+  return prepareRecallRequest(
+    prepareContext({
+      ...base,
+      memoryRepo: { ...base.memoryRepo, findByEvidenceRefs }
+    }, pinSession(session, FROZEN_EVIDENCE_ID)),
+    prepareParams(displayName),
+    captureRecallRequestTime({ now: () => CLOCK_AS_OF })
+  );
+}
+
+async function prepareSample(memories: MemoryEntry[] = [], displayName?: string) {
   const { dependencies } = createDependencies(memories);
+  const store = new InMemoryProjectionGenerationStore(fieldContractSha256);
+  const session = createSeededTestOnlyInMemoryFieldQuerySessionWithStore(
+    fieldContractSha256,
+    "workspace-1",
+    store
+  );
+  const prepared = await prepareRecallRequest(
+    prepareContext(dependencies, session),
+    prepareParams(displayName),
+    captureRecallRequestTime({ now: () => CLOCK_AS_OF })
+  );
+  return { prepared, session, store, dependencies };
+}
+
+function pinSession(
+  session: ReturnType<typeof createSeededTestOnlyInMemoryFieldQuerySessionWithStore>,
+  evidenceId: string
+) {
+  return {
+    ...session,
+    selectCandidates(
+      condition: Parameters<typeof session.selectCandidates>[0],
+      pin: Parameters<typeof session.selectCandidates>[1],
+      selectedAt: string
+    ) {
+      const base = session.selectCandidates(condition, pin, selectedAt);
+      return Object.freeze({
+        ...base,
+        candidate_keys: Object.freeze([evidenceId])
+      });
+    }
+  };
+}
+
+function prepareContext(
+  dependencies: ReturnType<typeof createDependencies>["dependencies"],
+  session: ReturnType<typeof createSeededTestOnlyInMemoryFieldQuerySessionWithStore>
+    | ReturnType<typeof pinSession>
+) {
   const taskSurface = createTaskSurface();
   const policy = buildRecallPolicy({
     runtimeId: "00000000-0000-0000-0000-000000000000",
@@ -127,42 +223,43 @@ async function prepareSample(memories: MemoryEntry[] = []) {
     conflictAwareness: false,
     maxTotalTokens: 1_000
   });
-  const time = captureRecallRequestTime({ now: () => CLOCK_AS_OF });
-  const store = new InMemoryProjectionGenerationStore(fieldContractSha256);
-  const session = createSeededTestOnlyInMemoryFieldQuerySessionWithStore(
-    fieldContractSha256,
-    "workspace-1",
-    store
-  );
-  const prepared = await prepareRecallRequest({
+  return {
     dependencies,
     warn: () => undefined,
     now: () => CLOCK_AS_OF,
     buildDefaultPolicy: () => policy,
     fieldQuerySession: session,
     sha256: fieldContractSha256
-  }, {
-    taskSurface,
-    workspaceId: "workspace-1",
-    strategy: "analyze"
-  }, time);
-  return { prepared, session, store, dependencies };
+  };
 }
 
-function activateLaterGeneration(store: InMemoryProjectionGenerationStore): string {
-  const later = verifyProjectionGeneration(store, buildProjectionGeneration({
-    store,
-    sha256: fieldContractSha256,
-    workspace_id: "workspace-1",
-    input_event_frontier: "later-frontier",
-    governance_frontier: SEALED_EMPTY_FRONTIER,
-    recorded_at: CLOCK_AS_OF,
-    sliceKeys: []
-  }).generation, fieldContractSha256);
-  activateProjectionGeneration(store, {
-    workspace_id: "workspace-1",
-    active_generation_id: later.generation.generation_id,
-    activated_at: CLOCK_AS_OF
-  });
-  return later.generation.generation_id;
+function prepareParams(displayName?: string) {
+  const taskSurface = displayName === undefined
+    ? createTaskSurface()
+    : { ...createTaskSurface(), display_name: displayName };
+  return {
+    taskSurface,
+    workspaceId: "workspace-1" as const,
+    strategy: "analyze" as const
+  };
 }
+
+function allObservableUniverses(
+  compilation: Awaited<ReturnType<typeof prepareRecallRequest>>["canonicalQueryCompilation"]
+): readonly (readonly string[])[] {
+  return compilation.hypotheses.flatMap((query) => {
+    const answer = query.answer;
+    if (
+      (answer.kind === "distinct" || answer.kind === "sequence")
+      && answer.completion.kind === "all_observable"
+    ) {
+      return [answer.completion.observer_universe];
+    }
+    return [];
+  });
+}
+
+type MemoryRepoFindByEvidenceRefs = (
+  workspaceId: string,
+  ids: readonly string[]
+) => Promise<readonly MemoryEntry[]>;
