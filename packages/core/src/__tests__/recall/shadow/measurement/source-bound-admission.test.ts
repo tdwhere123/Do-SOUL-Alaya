@@ -8,9 +8,11 @@ import type { LexicalIntervalSourceReceiptCapturedV1 } from
 import { lexicalIntervalSourceEnvelopes } from
   "../../../../recall/shadow/measurement/lexical-interval-envelope.js";
 import {
+  collapsedMeasurementCoordinateId,
   collapseMeasurementGroup,
   issueMeasurementGroupAdmission,
   LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+  LEXICAL_INTERVAL_PROPOSITION_ID,
   validateMeasurementAdmissionV1,
   type MeasurementCollapseV1,
   type VerifiedMeasurementAuthorityV1
@@ -45,13 +47,33 @@ describe("source-bound lexical measurement admission", () => {
       { candidate_key: "cand-b", normalized_rank: 0.4 }
     ], (authority, source) => {
       if (source.status !== "captured") throw new Error("captured source expected");
+      const leftKey = fieldKey("cand-a");
+      const rightKey = fieldKey("cand-b");
       const left = psiV2CandidateFromLexicalEnvelope(
-        "cand-a", lexicalIntervalSourceEnvelopes(source, "cand-a"), authority
+        leftKey, lexicalIntervalSourceEnvelopes(source, leftKey), authority
       );
       const right = psiV2CandidateFromLexicalEnvelope(
-        "cand-b", lexicalIntervalSourceEnvelopes(source, "cand-b"), authority
+        rightKey, lexicalIntervalSourceEnvelopes(source, rightKey), authority
       );
-      expect(left.coordinates[0]?.admission).not.toBeNull();
+      const coordinate = left.coordinates[0]!;
+      expect(coordinate.admission).not.toBeNull();
+      if (coordinate.collapse.status !== "collapsed") {
+        throw new Error("production lexical collapse expected");
+      }
+      expect(coordinate.collapse.witness.identity.coordinate_id).toBe(
+        collapsedMeasurementCoordinateId(LEXICAL_INTERVAL_PROPOSITION_ID)
+      );
+      const envelope = lexicalIntervalSourceEnvelopes(source, leftKey);
+      for (const coordinateId of ["x", `${LEXICAL_INTERVAL_PROPOSITION_ID}:${leftKey}`]) {
+        const forged = {
+          ...coordinate.collapse,
+          witness: {
+            ...coordinate.collapse.witness,
+            identity: { ...coordinate.collapse.witness.identity, coordinate_id: coordinateId }
+          }
+        } as MeasurementCollapseV1;
+        expectIssueBlocked(authority, forged, envelope);
+      }
       expect(comparePsiV2(left, right, [authority]).kind).toBe("dominates");
     });
   });
@@ -60,13 +82,20 @@ describe("source-bound lexical measurement admission", () => {
     await withCapturedLexicalMeasurementAuthorityFixture(
       prepared,
       [{ candidate_key: "cand-a", normalized_rank: 0.9 }],
-      (authority) => {
-        expectIssueBlocked(authority, collapse(authority, "cand-missing", 0.9));
-        expectIssueBlocked(authority, collapse(authority, "cand-a", 0.8));
-        expectIssueBlocked(authority, collapse(authority, "cand-a", 0.9, [{
+      (authority, source) => {
+        if (source.status !== "captured") throw new Error("captured source expected");
+        const key = fieldKey("cand-a");
+        const envelope = lexicalIntervalSourceEnvelopes(source, key);
+        expectIssueBlocked(authority, collapse(authority, fieldKey("cand-missing"), 0.9), envelope);
+        expectIssueBlocked(authority, collapse(authority, key, 0.8), envelope);
+        expectIssueBlocked(authority, collapse(authority, key, 0.9, [{
           source_id: "lexical.interval.primary",
           producer: "caller.forged"
-        }]));
+        }]), envelope);
+        expectIssueBlocked(authority, collapse(authority, key, 0.9, [
+          ...PROVENANCE,
+          { source_id: "lexical.interval.extra", producer: "caller.extra" }
+        ]), envelope);
       }
     );
     await withCapturedLexicalMeasurementAuthorityFixture(prepared, [], (authority) => {
@@ -74,13 +103,55 @@ describe("source-bound lexical measurement admission", () => {
     });
   });
 
+  it("rejects scope, kind, lane, status, list, and raw-kind relabeling", async () => {
+    await withCapturedLexicalMeasurementAuthorityFixture(
+      prepared,
+      [{ candidate_key: "shared", normalized_rank: 0.9 }],
+      (authority, source) => {
+        if (source.status !== "captured") throw new Error("captured source expected");
+        const key = fieldKey("shared");
+        const envelope = lexicalIntervalSourceEnvelopes(source, key);
+        expect(psiV2CandidateFromLexicalEnvelope(key, envelope, authority)
+          .coordinates[0]?.admission).not.toBeNull();
+        for (const alias of [
+          "shared",
+          "global:memory_entry:shared",
+          "workspace_local:evidence_capsule:shared",
+          "workspace_local:synthesis_capsule:shared"
+        ]) {
+          const aliased = lexicalIntervalSourceEnvelopes(source, alias);
+          expect(aliased.primary).toBeNull();
+          expect(psiV2CandidateFromLexicalEnvelope(alias, aliased, authority)
+            .coordinates[0]?.admission).toBeNull();
+        }
+        const domain = envelope.primary!.domain;
+        const mutations = [
+          { ...domain, lane_id: "porter" as const, raw_key_kind: "bm25_raw_rank" as const },
+          { ...domain, status: "truncated" as const },
+          { ...domain, list_n: domain.list_n + 1 },
+          { ...domain, raw_key_kind: "bm25_raw_rank" as const }
+        ];
+        for (const mutated of mutations) {
+          const relabeled = { ...envelope, primary: { ...envelope.primary!, domain: mutated } };
+          expect(psiV2CandidateFromLexicalEnvelope(key, relabeled, authority)
+            .coordinates[0]?.admission).toBeNull();
+        }
+      }
+    );
+  });
+
   it("invalidates authority and admissions after commit", async () => {
     const issued = await withCapturedLexicalMeasurementAuthorityFixture(
       prepared,
       [{ candidate_key: "cand-a", normalized_rank: 0.9 }],
-      (authority) => {
-        const measured = collapse(authority, "cand-a", 0.9);
-        return { authority, measured, admission: issue(authority, measured) };
+      (authority, source) => {
+        if (source.status !== "captured") throw new Error("captured source expected");
+        const coordinate = sourceCoordinate(authority, source, "cand-a");
+        if (coordinate.collapse.status !== "collapsed" || coordinate.admission === null) {
+          throw new Error("admitted source coordinate expected");
+        }
+        return { authority, measured: coordinate.collapse,
+          admission: coordinate.admission, coordinate };
       }
     );
     expectIssueBlocked(issued.authority, issued.measured);
@@ -89,7 +160,11 @@ describe("source-bound lexical measurement admission", () => {
       current_authorities: [issued.authority],
       contract: CONTRACT,
       proposition_schema: CONTRACT.proposition_schema,
-      collapse: issued.measured
+      collapse: issued.measured,
+      lexical_source: {
+        lex_domain: issued.coordinate.lex_domain,
+        envelope_identity: issued.coordinate.envelope_identity
+      }
     }).status).toBe("blocked");
   });
 
@@ -118,9 +193,14 @@ describe("source-bound lexical measurement admission", () => {
     await withCapturedLexicalMeasurementAuthorityFixture(
       prepared,
       [{ candidate_key: "cand-a", normalized_rank: 0.9 }],
-      async (first) => {
-        const measured = collapse(first, "cand-a", 0.9);
-        const admission = issue(first, measured);
+      async (first, source) => {
+        if (source.status !== "captured") throw new Error("captured source expected");
+        const coordinate = sourceCoordinate(first, source, "cand-a");
+        if (coordinate.collapse.status !== "collapsed" || coordinate.admission === null) {
+          throw new Error("admitted source coordinate expected");
+        }
+        const measured = coordinate.collapse;
+        const admission = coordinate.admission;
         await withCapturedLexicalMeasurementAuthorityFixture(
           prepared,
           [{ candidate_key: "cand-a", normalized_rank: 0.9 }],
@@ -132,7 +212,11 @@ describe("source-bound lexical measurement admission", () => {
               current_authorities: [second],
               contract: CONTRACT,
               proposition_schema: CONTRACT.proposition_schema,
-              collapse: measured
+              collapse: measured,
+              lexical_source: {
+                lex_domain: coordinate.lex_domain,
+                envelope_identity: coordinate.envelope_identity
+              }
             }).status).toBe("blocked");
             expectIssueBlocked({ ...first } as VerifiedMeasurementAuthorityV1, measured);
             expect(validateMeasurementAdmissionV1({
@@ -140,7 +224,11 @@ describe("source-bound lexical measurement admission", () => {
               current_authorities: [first],
               contract: CONTRACT,
               proposition_schema: CONTRACT.proposition_schema,
-              collapse: measured
+              collapse: measured,
+              lexical_source: {
+                lex_domain: coordinate.lex_domain,
+                envelope_identity: coordinate.envelope_identity
+              }
             }).status).toBe("blocked");
           }
         );
@@ -174,20 +262,43 @@ function collapse(
 
 function issue(
   authority: VerifiedMeasurementAuthorityV1,
-  measured: MeasurementCollapseV1
+  measured: MeasurementCollapseV1,
+  envelope?: ReturnType<typeof lexicalIntervalSourceEnvelopes>
 ) {
   if (measured.status !== "collapsed") throw new Error(measured.reason);
   return issueMeasurementGroupAdmission({
     authority,
     contract: CONTRACT,
     proposition_schema: CONTRACT.proposition_schema,
-    collapse: measured
+    collapse: measured,
+    lexical_source: envelope?.primary === null || envelope?.identity === null ||
+        envelope === undefined ? undefined : {
+      envelope,
+      lex_domain: envelope.primary.domain,
+      envelope_identity: envelope.identity
+    }
   });
 }
 
 function expectIssueBlocked(
   authority: VerifiedMeasurementAuthorityV1,
-  measured: MeasurementCollapseV1
+  measured: MeasurementCollapseV1,
+  envelope?: ReturnType<typeof lexicalIntervalSourceEnvelopes>
 ): void {
-  expect(() => issue(authority, measured)).toThrow();
+  expect(() => issue(authority, measured, envelope)).toThrow();
+}
+
+function sourceCoordinate(
+  authority: VerifiedMeasurementAuthorityV1,
+  source: LexicalIntervalSourceReceiptCapturedV1,
+  objectId: string
+) {
+  const key = fieldKey(objectId);
+  return psiV2CandidateFromLexicalEnvelope(
+    key, lexicalIntervalSourceEnvelopes(source, key), authority
+  ).coordinates[0]!;
+}
+
+function fieldKey(objectId: string): string {
+  return `workspace_local:memory_entry:${objectId}`;
 }

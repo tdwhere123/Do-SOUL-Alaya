@@ -197,6 +197,9 @@ export function verifyLexicalIntervalSourceObservationV1(
     throw new TypeError("lexical interval source observation is unavailable");
   }
   const candidateKey = lexicalCandidateLookupKey(expected.candidate_key);
+  if (candidateKey === null) {
+    throw new TypeError("lexical interval candidate is outside the workspace-local memory domain");
+  }
   const observation = receipt.capture.candidates.find((candidate) =>
     candidate.candidate_key === candidateKey
   );
@@ -207,9 +210,9 @@ export function verifyLexicalIntervalSourceObservationV1(
   }
 }
 
-function lexicalCandidateLookupKey(candidateKey: string): string {
-  const match = /^(?:workspace_local|global):memory_entry:(.+)$/u.exec(candidateKey);
-  return match?.[1] !== undefined && match[1].length > 0 ? match[1] : candidateKey;
+function lexicalCandidateLookupKey(candidateKey: string): string | null {
+  const match = /^workspace_local:memory_entry:(.+)$/u.exec(candidateKey);
+  return match?.[1] !== undefined && match[1].length > 0 ? match[1] : null;
 }
 
 function isLexicalRecord(

@@ -35,7 +35,11 @@ import type { MeasurementGroupContractV1 } from "./contract.js";
 import { LEXICAL_INTERVAL_MEASUREMENT_CONTRACT } from "./lexical-interval.js";
 import {
   assertLexicalMeasurementSourceObservation,
-  bindLexicalMeasurementAuthoritySource
+  bindLexicalMeasurementAuthoritySource,
+  lexicalCoordinateMatchesSourceBinding,
+  type LexicalMeasurementCoordinateContextV1,
+  type LexicalMeasurementSourceContextV1,
+  type VerifiedLexicalSourceBinding
 } from "./lexical-source-admission.js";
 import {
   PROPOSITION_STATE_MEASUREMENT_CONTRACT,
@@ -97,6 +101,7 @@ export type MeasurementAdmissionV1 = Readonly<{
   readonly candidate_id: string;
   readonly proposition_id: string;
   readonly measurement_digest: RecallFieldDigest;
+  readonly source_binding_digest: RecallFieldDigest | null;
   readonly digest: RecallFieldDigest;
 }>;
 
@@ -125,6 +130,7 @@ const PREDECLARED_CONTRACTS = new Set<MeasurementGroupContractV1>([
 const VERIFIED_AUTHORITIES = new WeakSet<object>();
 const ISSUED_ADMISSIONS = new WeakSet<object>();
 const ADMISSION_AUTHORITIES = new WeakMap<object, VerifiedMeasurementAuthorityV1>();
+const ADMISSION_SOURCE_BINDINGS = new WeakMap<object, VerifiedLexicalSourceBinding>();
 
 export function verifyLexicalMeasurementPreparedAuthorityV1(input: Readonly<{
   readonly evidence: LexicalMeasurementAuthorityEvidenceV1;
@@ -181,6 +187,7 @@ export function issueMeasurementGroupAdmission(input: Readonly<{
   readonly contract: MeasurementGroupContractV1;
   readonly proposition_schema: string;
   readonly collapse: MeasurementCollapseV1 | PropositionStateCollapseV1;
+  readonly lexical_source?: LexicalMeasurementSourceContextV1;
 }>): MeasurementAdmissionV1 {
   if (!VERIFIED_AUTHORITIES.has(input.authority)) {
     throw new ShadowContractError("measurement authority capability is not verified");
@@ -199,13 +206,16 @@ export function issueMeasurementGroupAdmission(input: Readonly<{
   }
   const identity = requiredIdentity(collapse.witness.identity);
   assertAuthorityPins(input.authority, identity);
-  assertLexicalMeasurementSourceObservation(input.authority, input.contract, collapse);
+  const sourceBinding = assertLexicalMeasurementSourceObservation(
+    input.authority, input.contract, collapse, input.lexical_source
+  );
   const body = admissionBody(
     input.authority,
     input.contract,
     propositionSchema,
     identity,
-    collapse
+    collapse,
+    sourceBinding?.digest ?? null
   );
   const admission = freezeShadow({
     ...body,
@@ -213,6 +223,7 @@ export function issueMeasurementGroupAdmission(input: Readonly<{
   });
   ISSUED_ADMISSIONS.add(admission);
   ADMISSION_AUTHORITIES.set(admission, input.authority);
+  if (sourceBinding !== null) ADMISSION_SOURCE_BINDINGS.set(admission, sourceBinding);
   return admission;
 }
 
@@ -222,6 +233,7 @@ export function validateMeasurementAdmissionV1(input: Readonly<{
   readonly contract: MeasurementGroupContractV1;
   readonly proposition_schema: string;
   readonly collapse: MeasurementCollapseV1 | PropositionStateCollapseV1;
+  readonly lexical_source?: LexicalMeasurementCoordinateContextV1;
 }>): MeasurementAdmissionValidationV1 {
   if (input.admission === null || !ISSUED_ADMISSIONS.has(input.admission)) {
     return blocked("measurement admission was not issued from verified authority");
@@ -231,11 +243,26 @@ export function validateMeasurementAdmissionV1(input: Readonly<{
     const collapse = requireAdmissibleCollapse(input.contract, input.collapse);
     const identity = requiredIdentity(collapse.witness.identity);
     const authority = ADMISSION_AUTHORITIES.get(input.admission);
+    if (input.current_authorities.some((candidate) => !VERIFIED_AUTHORITIES.has(candidate))) {
+      return blocked("current measurement authority set contains an unverified capability");
+    }
+    const currentJurisdiction = input.current_authorities.filter((candidate) =>
+      candidate.contract_digest === input.contract.digest
+    );
     if (authority === undefined || !VERIFIED_AUTHORITIES.has(authority) ||
-      !input.current_authorities.includes(authority)) {
+      currentJurisdiction.length !== 1 || currentJurisdiction[0] !== authority) {
       return blocked("measurement admission is not bound to current verified authority");
     }
-    assertLexicalMeasurementSourceObservation(authority, input.contract, collapse);
+    const binding = ADMISSION_SOURCE_BINDINGS.get(input.admission) ?? null;
+    assertLexicalMeasurementSourceObservation(
+      authority, input.contract, collapse, binding?.source_context
+    );
+    if (!lexicalCoordinateMatchesSourceBinding(binding, input.lexical_source)) {
+      return blocked("lexical coordinate is not bound to the issued source envelope");
+    }
+    if ((binding?.digest ?? null) !== input.admission.source_binding_digest) {
+      return blocked("lexical source binding digest mismatch");
+    }
     if (input.proposition_schema !== input.contract.proposition_schema ||
       !admissionMatches(input.admission, input.contract, identity, collapse)) {
       return blocked("measurement admission binding mismatch");
@@ -402,7 +429,8 @@ function admissionBody(
   contract: MeasurementGroupContractV1,
   propositionSchema: string,
   identity: ReturnType<typeof requiredIdentity>,
-  collapse: AdmissibleMeasurementCollapseV1
+  collapse: AdmissibleMeasurementCollapseV1,
+  sourceBindingDigest: RecallFieldDigest | null
 ) {
   return freezeShadow({
     schema_version: 1 as const,
@@ -415,7 +443,8 @@ function admissionBody(
     ...identity,
     request_digest: authority.request_digest,
     workspace_id: authority.workspace_id,
-    measurement_digest: measurementDigest(contract, collapse)
+    measurement_digest: measurementDigest(contract, collapse),
+    source_binding_digest: sourceBindingDigest
   });
 }
 
@@ -436,7 +465,8 @@ function admissionMatches(
     ...identity,
     request_digest: admission.request_digest,
     workspace_id: admission.workspace_id,
-    measurement_digest: measurementDigest(contract, collapse)
+    measurement_digest: measurementDigest(contract, collapse),
+    source_binding_digest: admission.source_binding_digest
   };
   return admission.digest === digestRecallFieldIdentity(body) &&
     admission.contract_digest === contract.digest &&

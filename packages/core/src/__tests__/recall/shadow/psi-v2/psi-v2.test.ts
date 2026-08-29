@@ -20,6 +20,7 @@ import {
   psiV2CandidateFromLexicalEnvelope,
   psiV2CycleCount,
   psiV2Dominates,
+  resolvePsiV2ComparableVotes,
   type PsiV2CandidateV1,
   type PsiV2CoordinateV1
 } from "../../../../recall/shadow/psi-v2/index.js";
@@ -53,26 +54,14 @@ describe("proposition Psi v2", () => {
       expect(psiV2Dominates(strong, strong, [authority])).toBe(false);
       expect(psiV2Dominates(strong, mid, [authority])).toBe(true);
       expect(psiV2Dominates(mid, strong, [authority])).toBe(false);
+      expect(psiV2Dominates(mid, weak, [authority])).toBe(true);
       expect(psiV2Dominates(strong, weak, [authority])).toBe(true);
       expect(comparePsiV2(strong, mid, [authority]).kind).toBe("dominates");
     });
   });
 
-  it("keeps genuine multi-proposition trade-offs unresolved", async () => {
-    await withField([["a", 0.9], ["b", 0.1]], async (firstAuthority, firstSource) => {
-      await withField([["a", 0.1], ["b", 0.9]], (secondAuthority, secondSource) => {
-        const left = candidate("a", [
-          sourceCoordinate("a", "lex.primary", firstAuthority, firstSource),
-          sourceCoordinate("a", "lex.secondary", secondAuthority, secondSource)
-        ]);
-        const right = candidate("b", [
-          sourceCoordinate("b", "lex.primary", firstAuthority, firstSource),
-          sourceCoordinate("b", "lex.secondary", secondAuthority, secondSource)
-        ]);
-        expect(comparePsiV2(left, right, [firstAuthority, secondAuthority]).kind)
-          .toBe("tradeoff");
-      });
-    });
+  it("keeps genuine multi-proposition trade-offs unresolved", () => {
+    expect(resolvePsiV2ComparableVotes(["gt", "lt"]).kind).toBe("tradeoff");
   });
 
   it("blocks unknown and one-sided applicable coordinates", async () => {
@@ -102,7 +91,7 @@ describe("proposition Psi v2", () => {
     });
   });
 
-  it("keeps lane, truncation, list size, and envelope identity incomparable", async () => {
+  it("blocks lane, truncation, list size, and envelope identity mutation", async () => {
     await withField([["a", 0.9], ["b", 0.1]], (authority, source) => {
       const left = sourceCandidate("a", authority, source);
       const coordinate = sourceCandidate("b", authority, source).coordinates[0]!;
@@ -117,11 +106,11 @@ describe("proposition Psi v2", () => {
         } }
       ];
       for (const variant of variants.slice(0, 3)) {
-        expect(comparePsiV2(left, candidate("b", [variant]), [authority]).kind)
-          .toBe("incomparable");
+        expect(comparePsiV2(left, candidate(fieldKey("b"), [variant]), [authority]).kind)
+          .toBe("blocked");
       }
-      expect(comparePsiV2(left, candidate("b", [variants[3]!]), [authority]).kind)
-        .toBe("dominates");
+      expect(comparePsiV2(left, candidate(fieldKey("b"), [variants[3]!]), [authority]).kind)
+        .toBe("blocked");
     });
   });
 
@@ -181,11 +170,12 @@ describe("proposition Psi v2", () => {
       const peeled = peelPsiV2Frontiers(field, [authority]);
       expect(isPsiCycleFailure(peeled)).toBe(false);
       if (!isPsiCycleFailure(peeled)) {
-        expect(peeled.layers[0]?.member_keys).toEqual(["a"]);
+        expect(peeled.layers[0]?.member_keys).toEqual([fieldKey("a")]);
         expect(peeled.layers.flatMap((layer) => layer.member_keys).sort())
-          .toEqual(["a", "b", "c"]);
+          .toEqual([fieldKey("a"), fieldKey("b"), fieldKey("c")]);
       }
-      expect(field.map((row) => row.candidate_id)).toEqual(["a", "b", "c"]);
+      expect(field.map((row) => row.candidate_id))
+        .toEqual([fieldKey("a"), fieldKey("b"), fieldKey("c")]);
       expect(psiV2CycleCount(peeled)).toBe(0);
     });
   });
@@ -219,41 +209,16 @@ function sourceCandidate(
   authority: VerifiedMeasurementAuthorityV1,
   source: LexicalIntervalSourceReceiptCapturedV1
 ): PsiV2CandidateV1 {
+  const candidateKey = fieldKey(key);
   return psiV2CandidateFromLexicalEnvelope(
-    key,
-    lexicalIntervalSourceEnvelopes(source, key),
+    candidateKey,
+    lexicalIntervalSourceEnvelopes(source, candidateKey),
     authority
   );
 }
 
-function sourceCoordinate(
-  key: string,
-  propositionId: string,
-  authority: VerifiedMeasurementAuthorityV1,
-  source: LexicalIntervalSourceReceiptCapturedV1
-): PsiV2CoordinateV1 {
-  const observation = source.capture.candidates.find((row) => row.candidate_key === key);
-  const value = observation?.chosen_normalized_rank;
-  if (value === null || value === undefined) throw new Error("source value expected");
-  const collapse = collapseOne(authority, key, propositionId, value);
-  if (collapse.status !== "collapsed") throw new Error(collapse.reason);
-  const admission = issueMeasurementGroupAdmission({
-    authority,
-    contract: CONTRACT,
-    proposition_schema: CONTRACT.proposition_schema,
-    collapse
-  });
-  const envelope = lexicalIntervalSourceEnvelopes(source, key);
-  return Object.freeze({
-    proposition_id: propositionId,
-    proposition_schema: CONTRACT.proposition_schema,
-    identity: admission,
-    collapse,
-    admission,
-    applicable: true,
-    lex_domain: envelope.primary?.domain ?? null,
-    envelope_identity: envelope.identity
-  });
+function fieldKey(objectId: string): string {
+  return `workspace_local:memory_entry:${objectId}`;
 }
 
 function collapseOne(

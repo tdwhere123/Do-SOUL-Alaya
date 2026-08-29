@@ -2,6 +2,7 @@ import type { D1CandidateEnvelopeMap } from "../d1/legal-envelope.js";
 import {
   issueMeasurementGroupAdmission,
   LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+  LEXICAL_INTERVAL_PROPOSITION_ID,
   type MeasurementAdmissionV1,
   type MeasurementCollapseV1,
   type VerifiedMeasurementAuthorityV1
@@ -10,7 +11,6 @@ import { lexDomainsEqual, type LexDomain } from "../observations.js";
 import { adaptLexicalIntervalEnvelopeToCollapse } from "./lexical-interval-adapter.js";
 import type { PsiV2CandidateV1, PsiV2CoordinateV1 } from "./types.js";
 
-const PROPOSITION_ID = "lex.interval";
 const ADAPTER_PROVENANCE = Object.freeze([
   Object.freeze({ source_id: "lexical.interval.primary", producer: "lexical.interval.adapter.v1" })
 ]);
@@ -56,17 +56,17 @@ export function psiV2CandidateFromLexicalEnvelope(
   const collapse = adaptLexicalIntervalEnvelopeToCollapse(
     map.primary.envelope,
     {
-      coordinate_id: `${PROPOSITION_ID}:${key}`,
+      coordinate_id: `${LEXICAL_INTERVAL_PROPOSITION_ID}:${key}`,
       query_id: queryId,
       snapshot_digest: snapshotDigest,
       candidate_id: key,
-      proposition_id: PROPOSITION_ID
+      proposition_id: LEXICAL_INTERVAL_PROPOSITION_ID
     },
     ADAPTER_PROVENANCE,
     envelopeIdentity,
     prepared
   );
-  const admission = issueLexicalAdmission(prepared, collapse);
+  const admission = issueLexicalAdmission(prepared, collapse, map);
   if (collapse.status === "collapsed" && admission === null) {
     return candidate(key, unresolvedCoordinate(
       map.primary.domain,
@@ -75,7 +75,7 @@ export function psiV2CandidateFromLexicalEnvelope(
     ));
   }
   return candidate(key, {
-    proposition_id: PROPOSITION_ID,
+    proposition_id: LEXICAL_INTERVAL_PROPOSITION_ID,
     proposition_schema: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT.proposition_schema,
     applicable: true,
     identity: admission,
@@ -88,15 +88,22 @@ export function psiV2CandidateFromLexicalEnvelope(
 
 function issueLexicalAdmission(
   authority: VerifiedMeasurementAuthorityV1,
-  collapse: MeasurementCollapseV1
+  collapse: MeasurementCollapseV1,
+  envelope: D1CandidateEnvelopeMap
 ): MeasurementAdmissionV1 | null {
-  if (collapse.status !== "collapsed") return null;
+  if (collapse.status !== "collapsed" || envelope.primary === null ||
+      envelope.identity === null) return null;
   try {
     return issueMeasurementGroupAdmission({
       authority,
       contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
       proposition_schema: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT.proposition_schema,
-      collapse
+      collapse,
+      lexical_source: {
+        envelope,
+        lex_domain: envelope.primary.domain,
+        envelope_identity: envelope.identity
+      }
     });
   } catch {
     return null;
@@ -157,7 +164,7 @@ function unresolvedCoordinate(
   reason: string
 ): PsiV2CoordinateV1 {
   return {
-    proposition_id: PROPOSITION_ID,
+    proposition_id: LEXICAL_INTERVAL_PROPOSITION_ID,
     proposition_schema: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT.proposition_schema,
     applicable: true,
     identity: null,

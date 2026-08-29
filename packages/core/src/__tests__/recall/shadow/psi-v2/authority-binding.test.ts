@@ -53,6 +53,16 @@ describe("Psi v2 authority binding", () => {
               .toBe("blocked");
             expect(comparePsiV2(currentLeft, currentRight, [currentAuthority]).kind)
               .toBe("dominates");
+            expect(comparePsiV2(
+              currentLeft, currentRight, [currentAuthority, currentAuthority]
+            ).kind).toBe("blocked");
+            expect(comparePsiV2(
+              currentLeft, currentRight, [originalAuthority, currentAuthority]
+            ).kind).toBe("blocked");
+            expect(comparePsiV2(currentLeft, currentRight, [
+              currentAuthority,
+              { ...currentAuthority } as VerifiedMeasurementAuthorityV1
+            ]).kind).toBe("blocked");
           },
           undefined,
           measurementEvidenceWithAlternateCompilation(prepared, true)
@@ -99,9 +109,10 @@ function candidate(
   authority: VerifiedMeasurementAuthorityV1,
   source: LexicalIntervalSourceReceiptCapturedV1
 ): PsiV2CandidateV1 {
+  const key = `workspace_local:memory_entry:${candidateId}`;
   return psiV2CandidateFromLexicalEnvelope(
-    candidateId,
-    lexicalIntervalSourceEnvelopes(source, candidateId),
+    key,
+    lexicalIntervalSourceEnvelopes(source, key),
     authority
   );
 }

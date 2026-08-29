@@ -1,6 +1,7 @@
 export {
   comparePsiV2,
-  psiV2Dominates
+  psiV2Dominates,
+  resolvePsiV2ComparableVotes
 } from "./compare.js";
 export {
   peelPsiV2Frontiers,

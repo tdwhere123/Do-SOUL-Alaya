@@ -11,7 +11,7 @@ import {
   type LexLaneId
 } from "../observations.js";
 
-const MEMORY_ENTRY_FIELD_KEY = /^(?:workspace_local|global):memory_entry:(.+)$/u;
+const MEMORY_ENTRY_FIELD_KEY = /^workspace_local:memory_entry:(.+)$/u;
 const UNBOUNDED = Object.freeze({ kind: "unbounded" as const });
 
 export function lexicalIntervalSourceEnvelopes(
@@ -33,6 +33,9 @@ export function lexicalIntervalSourceEnvelopes(
     });
   }
   const lookupKey = candidateLookupKey(candidateKey);
+  if (lookupKey === null) {
+    return sourceEnvelope(identity, source.capture.query_run_id, lanes, null);
+  }
   const observation = source.capture.candidates.find((row) =>
     row.candidate_key === lookupKey);
   if (observation?.admitted !== true) {
@@ -70,7 +73,7 @@ function sourceEnvelope(
   });
 }
 
-function candidateLookupKey(candidateKey: string): string {
+function candidateLookupKey(candidateKey: string): string | null {
   const match = MEMORY_ENTRY_FIELD_KEY.exec(candidateKey);
-  return match?.[1] !== undefined && match[1].length > 0 ? match[1] : candidateKey;
+  return match?.[1] !== undefined && match[1].length > 0 ? match[1] : null;
 }

@@ -11,6 +11,10 @@ import {
 } from "../../../../recall/shadow/measurement/index.js";
 import type { PreparedRecallRequest } from
   "../../../../recall/runtime/recall-service-runner-types.js";
+import { lexicalIntervalSourceEnvelopes } from
+  "../../../../recall/shadow/measurement/lexical-interval-envelope.js";
+import { psiV2CandidateFromLexicalEnvelope } from
+  "../../../../recall/shadow/psi-v2/index.js";
 import {
   createFourValuedWitness,
   createNumericIntervalWitness,
@@ -80,17 +84,24 @@ describe("measurement admission", () => {
     await withCapturedLexicalMeasurementAuthorityFixture(
       prepared,
       [{ candidate_key: "cand-1", normalized_rank: 1 }],
-      (authority) => {
-        const collapse = numericCollapse(LEXICAL_INTERVAL_MEASUREMENT_CONTRACT, authority);
-        const admission = issueMeasurementGroupAdmission({
-          authority,
-          contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-          proposition_schema: "lex.interval",
-          collapse
-        });
+      (authority, source) => {
+        if (source.status !== "captured") throw new Error("captured source expected");
+        const key = "workspace_local:memory_entry:cand-1";
+        const envelope = lexicalIntervalSourceEnvelopes(source, key);
+        const coordinate = psiV2CandidateFromLexicalEnvelope(key, envelope, authority)
+          .coordinates[0]!;
+        if (coordinate.collapse.status !== "collapsed" || coordinate.admission === null) {
+          throw new Error("admitted lexical coordinate expected");
+        }
+        const collapse = coordinate.collapse;
+        const admission = coordinate.admission;
+        const lexical_source = {
+          lex_domain: coordinate.lex_domain,
+          envelope_identity: coordinate.envelope_identity
+        };
         expect(validateMeasurementAdmissionV1({
           admission, current_authorities: [authority],
-          contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+          contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT, lexical_source,
           proposition_schema: "lex.interval", collapse
         })).toEqual({ status: "admitted" });
         for (const candidate of [
@@ -104,7 +115,8 @@ describe("measurement admission", () => {
           expect(validateMeasurementAdmissionV1({
             ...candidate,
             contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-            collapse
+            collapse,
+            lexical_source
           }).status).toBe("blocked");
         }
       }

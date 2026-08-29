@@ -231,12 +231,18 @@ function assembleConflict(
 
 function collapsedIdentity(first: NumericIntervalWitness): NumericIntervalWitness["identity"] {
   return {
-    coordinate_id: `measure:${first.identity.proposition_id ?? first.identity.coordinate_id}`,
+    coordinate_id: collapsedMeasurementCoordinateId(
+      first.identity.proposition_id ?? first.identity.coordinate_id
+    ),
     query_id: first.identity.query_id,
     snapshot_digest: first.identity.snapshot_digest,
     candidate_id: first.identity.candidate_id,
     proposition_id: first.identity.proposition_id
   };
+}
+
+export function collapsedMeasurementCoordinateId(propositionId: string): string {
+  return `measure:${propositionId}`;
 }
 
 function mergedProvenance(observations: readonly NumericIntervalWitness[]) {

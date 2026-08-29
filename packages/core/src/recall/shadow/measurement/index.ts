@@ -12,6 +12,7 @@ export {
   type MeasurementUpperBoundRuleV1
 } from "./contract.js";
 export {
+  collapsedMeasurementCoordinateId,
   collapseMeasurementGroup,
   type MeasurementCollapseInputV1,
   type MeasurementCollapseV1
@@ -33,6 +34,7 @@ export {
   compareLexicalIntervals,
   lexicalIntervalIdentitiesEqual,
   LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+  LEXICAL_INTERVAL_PROPOSITION_ID,
   type LexicalIntervalIdentityV1,
   type LexicalIntervalValueV1,
   type LexicalIntervalVoteV1

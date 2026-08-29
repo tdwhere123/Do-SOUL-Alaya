@@ -40,12 +40,22 @@ export function comparePsiV2(
   if (votes.incomparable.length > 0) {
     return verdict("incomparable", ...votes.incomparable);
   }
-  if (votes.gt > 0 && votes.lt > 0) {
+  return resolvePsiV2ComparableVotes([
+    ...Array.from({ length: votes.gt }, () => "gt" as const),
+    ...Array.from({ length: votes.lt }, () => "lt" as const),
+    ...Array.from({ length: votes.eq }, () => "eq" as const)
+  ]);
+}
+
+export function resolvePsiV2ComparableVotes(
+  votes: readonly ("gt" | "lt" | "eq")[]
+): PsiV2VerdictV1 {
+  if (votes.includes("gt") && votes.includes("lt")) {
     return verdict("tradeoff", "heterogeneous propositions disagree");
   }
-  if (votes.gt > 0) return verdict("dominates", "strict safe dominance on collapsed coordinates");
-  if (votes.lt > 0) return verdict("dominated_by", "reverse strict safe dominance");
-  if (votes.eq > 0) return verdict("equal", "collapsed coordinates agree");
+  if (votes.includes("gt")) return verdict("dominates", "strict safe dominance on collapsed coordinates");
+  if (votes.includes("lt")) return verdict("dominated_by", "reverse strict safe dominance");
+  if (votes.includes("eq")) return verdict("equal", "collapsed coordinates agree");
   return verdict("incomparable", "no comparable collapsed proposition");
 }
 
@@ -102,7 +112,11 @@ function candidateBindingFailures(
       current_authorities: currentAuthorities,
       contract: coordinate.collapse.contract,
       proposition_schema: coordinate.proposition_schema,
-      collapse: coordinate.collapse
+      collapse: coordinate.collapse,
+      lexical_source: isNumericCollapse(coordinate.collapse) ? {
+        lex_domain: coordinate.lex_domain,
+        envelope_identity: coordinate.envelope_identity
+      } : undefined
     });
     if (validation.status === "blocked") {
       failures.push(validation.reason);

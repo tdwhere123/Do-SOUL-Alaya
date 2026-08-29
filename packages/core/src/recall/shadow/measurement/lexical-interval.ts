@@ -14,11 +14,13 @@ export type LexicalIntervalVoteV1 =
   | "skip"
   | "incomparable";
 
+export const LEXICAL_INTERVAL_PROPOSITION_ID = "lex.interval" as const;
+
 export const LEXICAL_INTERVAL_MEASUREMENT_CONTRACT =
   createMeasurementGroupContractV1({
     contract_id: "measure.lexical.interval.v1",
     operator_version: "1",
-    proposition_schema: "lex.interval",
+    proposition_schema: LEXICAL_INTERVAL_PROPOSITION_ID,
     measurement_domain: "numeric_interval",
     comparison_direction: "higher_is_stronger",
     correlation_policy: "identity_dedupe",
