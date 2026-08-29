@@ -25,6 +25,13 @@ export type SupportFactFrameV1 = Readonly<{
   readonly evidence_id?: string;
 }>;
 
+export type SupportSupersessionValueV1 = Readonly<{
+  readonly standing: "current" | "superseded";
+  readonly lineage_id: string;
+  readonly proposition_id?: string;
+  readonly counterpart_proposition_id?: string;
+}>;
+
 export type SupportPathReceiptV1 = Readonly<{
   readonly evidence_basis: readonly string[];
   readonly relation_kind: string;
@@ -56,11 +63,7 @@ export type SupportCandidateReceiptV1 = Readonly<{
   readonly validity?: SupportAvailability<Readonly<{
     readonly validity: "active" | "expired" | "unknown";
   }>>;
-  readonly supersession?: SupportAvailability<Readonly<{
-    readonly standing: "current" | "superseded";
-    readonly lineage_id: string;
-    readonly proposition_id?: string;
-  }>>;
+  readonly supersession?: SupportAvailability<SupportSupersessionValueV1>;
   readonly contradiction?: SupportAvailability<Readonly<{
     readonly standing: "contradicted" | "contradicting";
     readonly lineage_id: string;
@@ -85,12 +88,15 @@ export type SupportObservabilityGapV1 = Readonly<{
     | "osf_truncated"
     | "osf_unavailable"
     | "osf_no_match"
+    | "osf_ineligible"
+    | "osf_rejected"
     | "binding_absent"
     | "time_unknown"
     | "time_not_active"
     | "f3_absent"
     | "path_projection_not_proposition"
     | "polarity_unavailable"
+    | "supersedes_open"
     | "write_side_formation_absent";
   readonly owner: string;
   readonly detail: string;

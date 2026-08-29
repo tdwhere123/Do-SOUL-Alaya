@@ -36,8 +36,142 @@ describe("support receipt adapters", () => {
     });
     expect(result.graph.nodes.some((node) => node.kind === "answer_binding" && node.id === "person.alice")).toBe(true);
     expect(result.graph.edges.some((edge) => edge.kind === "yields")).toBe(true);
+    expect(result.graph.edges.some((edge) => edge.kind === "grounds")).toBe(true);
+    expect(result.graph.edges.some((edge) => edge.kind === "supports")).toBe(true);
     expect(result.graph.edges.some((edge) => edge.kind === "sourced_from")).toBe(true);
     expect(result.polarities[0]?.payload?.polarity).toBe("supported_only");
+  });
+
+  it("does not mint a proposition from a binding lemma when query_proposition_id is absent", () => {
+    const result = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        osf: {
+          composition_status: "composed",
+          truncated: false,
+          bindings: [{
+            variable_id: "x",
+            binding_identity: "arg.person",
+            semantic_identity: "person.alice",
+            evidence_id: "eu-1"
+          }]
+        }
+      }]
+    });
+    expect(result.graph.nodes.some((node) => node.kind === "answer_binding" && node.id === "person.alice")).toBe(true);
+    expect(result.graph.nodes.some((node) => node.kind === "proposition")).toBe(false);
+    expect(result.graph.nodes.some((node) => node.id === "person.alice" && node.kind === "proposition")).toBe(false);
+    expect(result.graph.edges.some((edge) => edge.kind === "yields")).toBe(false);
+    expect(result.gaps.some((gap) => gap.kind === "binding_absent")).toBe(true);
+  });
+
+  it("does not vote supports or supported_only from OSF formation alone", () => {
+    const result = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        osf: {
+          composition_status: "composed",
+          truncated: false,
+          bindings: [{
+            variable_id: "x",
+            binding_identity: "arg.person",
+            semantic_identity: "person.alice",
+            evidence_id: "eu-1",
+            query_proposition_id: "prop.works-at",
+            source_lineage_id: "lineage-a"
+          }]
+        }
+      }]
+    });
+    expect(result.graph.edges.some((edge) => edge.kind === "grounds")).toBe(true);
+    expect(result.graph.edges.some((edge) => edge.kind === "yields")).toBe(true);
+    expect(result.graph.edges.some((edge) => edge.kind === "supports")).toBe(false);
+    expect(result.graph.edges.some((edge) => edge.kind === "refutes")).toBe(false);
+    expect(result.polarities).toEqual([]);
+  });
+
+  it("records ineligible and rejected OSF as gaps, not empty bindings", () => {
+    const ineligible = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        osf: {
+          composition_status: "ineligible",
+          truncated: false,
+          bindings: [{
+            variable_id: "x",
+            binding_identity: "arg.person",
+            semantic_identity: "person.alice",
+            evidence_id: "eu-trap",
+            query_proposition_id: "prop.trap"
+          }]
+        }
+      }]
+    });
+    expect(ineligible.graph.nodes.some((node) => node.kind === "answer_binding")).toBe(false);
+    expect(ineligible.graph.nodes.some((node) => node.kind === "proposition")).toBe(false);
+    expect(ineligible.gaps.some((gap) => gap.kind === "osf_ineligible")).toBe(true);
+
+    const rejected = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        osf: { composition_status: "rejected", truncated: false, bindings: [] }
+      }]
+    });
+    expect(rejected.graph.nodes.some((node) => node.kind === "answer_binding")).toBe(false);
+    expect(rejected.gaps.some((gap) => gap.kind === "osf_rejected")).toBe(true);
+  });
+
+  it("emits supersedes from a proposition pair and records an OPEN gap for a single pin", () => {
+    const paired = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        supersession: {
+          status: "available",
+          value: {
+            standing: "superseded",
+            lineage_id: "lineage-old",
+            proposition_id: "prop.old",
+            counterpart_proposition_id: "prop.new"
+          }
+        }
+      }]
+    });
+    expect(paired.graph.edges.some((edge) =>
+      edge.kind === "supersedes"
+      && edge.from.id === "prop.new"
+      && edge.to.id === "prop.old"
+    )).toBe(true);
+    expect(paired.gaps.some((gap) => gap.kind === "supersedes_open")).toBe(false);
+
+    const open = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        supersession: {
+          status: "available",
+          value: {
+            standing: "superseded",
+            lineage_id: "lineage-old",
+            proposition_id: "prop.old"
+          }
+        }
+      }]
+    });
+    expect(open.graph.edges.some((edge) => edge.kind === "supersedes")).toBe(false);
+    expect(open.graph.nodes.filter((node) => node.kind === "proposition").map((node) => node.id))
+      .toEqual(["prop.old"]);
+    expect(open.gaps.some((gap) => gap.kind === "supersedes_open")).toBe(true);
   });
 
   it("collapses opposing distinct lineages to both unless supersession resolves", () => {
@@ -100,6 +234,17 @@ describe("support receipt adapters", () => {
     });
     expect(unavailable.graph.nodes.some((node) => node.kind === "answer_binding")).toBe(false);
     expect(unavailable.gaps.some((gap) => gap.kind === "osf_unavailable")).toBe(true);
+
+    const noMatch = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        osf: { composition_status: "no_match", truncated: false, bindings: [] }
+      }]
+    });
+    expect(noMatch.graph.nodes.some((node) => node.kind === "answer_binding")).toBe(false);
+    expect(noMatch.gaps.some((gap) => gap.kind === "osf_no_match")).toBe(true);
   });
 
   it("keeps F0-F2 evidence when F3 is absent and does not mint bindings from answer-support hashes", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ShadowContractError } from "../../../../recall/shadow/envelope.js";
 import {
+  CORRELATION_CONFLICT_REASON,
   createSupportHypergraph,
   SUPPORT_HYPERGRAPH_OPERATOR_ID
 } from "../../../../recall/shadow/support/index.js";
@@ -138,7 +138,25 @@ describe("support hypergraph contract", () => {
         correlation("eu-1", "eu-2", "certified_independent"),
         correlation("eu-1", "eu-2", "same_evidence_unit")
       ]
-    })).toThrow(ShadowContractError);
+    })).toThrow(CORRELATION_CONFLICT_REASON);
+  });
+
+  it("records alias equal/distinct meet as conflict instead of throwing", () => {
+    const receipt = createSupportHypergraph({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      nodes: [
+        { kind: "answer_binding", id: "bind.alice" },
+        { kind: "answer_binding", id: "bind.alice-aka" }
+      ],
+      aliases: [
+        alias("bind.alice", "bind.alice-aka", "equal"),
+        alias("bind.alice", "bind.alice-aka", "distinct")
+      ]
+    });
+    expect(receipt.aliases).toEqual([
+      { left_id: "bind.alice", right_id: "bind.alice-aka", state: "conflict" }
+    ]);
   });
 });
 

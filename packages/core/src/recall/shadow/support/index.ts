@@ -11,6 +11,7 @@ export {
   provedDistinctBindingCount,
   type ProvedDistinctBindingsV1
 } from "./distinctness.js";
+export { CORRELATION_CONFLICT_REASON } from "./records.js";
 export {
   SUPPORT_EDGE_KINDS,
   SUPPORT_HYPERGRAPH_OPERATOR_ID,

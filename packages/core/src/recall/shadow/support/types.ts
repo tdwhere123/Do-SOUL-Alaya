@@ -1,3 +1,5 @@
+import type { BindingRelationState, CorrelationState } from "../witness/index.js";
+
 export const SUPPORT_HYPERGRAPH_OPERATOR_ID = "recall_support_hypergraph_v1" as const;
 
 export const SUPPORT_NODE_KINDS = [
@@ -42,15 +44,11 @@ export type SupportEdgeV1 = Readonly<{
 export type SupportAliasRecordV1 = Readonly<{
   readonly left_id: string;
   readonly right_id: string;
-  readonly state: "equal" | "may_equal" | "distinct" | "unknown" | "conflict";
+  readonly state: BindingRelationState;
 }>;
 
 export type SupportCorrelationRecordV1 = Readonly<{
   readonly left_id: string;
   readonly right_id: string;
-  readonly state:
-    | "same_evidence_unit"
-    | "same_source_lineage"
-    | "possibly_correlated"
-    | "certified_independent";
+  readonly state: CorrelationState;
 }>;

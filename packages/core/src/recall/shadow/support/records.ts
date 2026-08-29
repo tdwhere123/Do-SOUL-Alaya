@@ -2,8 +2,8 @@ import { freezeShadow, requireNonemptyString, ShadowContractError } from
   "../envelope.js";
 import {
   CORRELATION_STATES,
+  type BindingRelationState,
   type BindingRelationWitness,
-  type CorrelationState,
   type CorrelationWitness
 } from "../witness/index.js";
 import { freezeEndpoint, parseSupportNodeId } from "./identity.js";
@@ -18,6 +18,9 @@ import {
   type SupportNodeKind,
   type SupportNodeV1
 } from "./types.js";
+
+export const CORRELATION_CONFLICT_REASON =
+  "correlation_conflict: not a representable partition state" as const;
 
 export function parseNode(input: unknown): SupportNodeV1 {
   const record = asRecord(input, "support node");
@@ -41,11 +44,11 @@ export function parseEdge(input: unknown): SupportEdgeV1 {
 }
 
 export function aliasRecord(witness: BindingRelationWitness): SupportAliasRecordV1 {
-  assertExactPair(witness.epistemic.kind, "alias");
   const payload = witness.payload;
   if (payload === null) {
     throw new ShadowContractError("alias witness requires binding pair ids");
   }
+  assertAliasEpistemic(witness.epistemic.kind, payload.state);
   const left = requireNonemptyString(payload.left_id, "alias left_id");
   const right = requireNonemptyString(payload.right_id, "alias right_id");
   const ordered = left <= right ? [left, right] : [right, left];
@@ -59,12 +62,17 @@ export function aliasRecord(witness: BindingRelationWitness): SupportAliasRecord
 export function correlationRecord(
   witness: CorrelationWitness
 ): SupportCorrelationRecordV1 {
-  assertExactPair(witness.epistemic.kind, "correlation");
+  if (witness.epistemic.kind === "conflict") {
+    throw new ShadowContractError(CORRELATION_CONFLICT_REASON);
+  }
+  if (witness.epistemic.kind !== "exact") {
+    throw new ShadowContractError(`correlation witness must be exact, not ${witness.epistemic.kind}`);
+  }
   const payload = witness.payload;
   if (payload === null) {
     throw new ShadowContractError("correlation witness requires evidence pair ids");
   }
-  if (!CORRELATION_STATES.includes(payload.state as CorrelationState)) {
+  if (!CORRELATION_STATES.includes(payload.state)) {
     throw new ShadowContractError("unknown correlation state");
   }
   const left = requireNonemptyString(payload.left_id, "correlation left_id");
@@ -104,8 +112,20 @@ function asRecord(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function assertExactPair(kind: string, label: string): void {
+function assertAliasEpistemic(
+  kind: BindingRelationWitness["epistemic"]["kind"],
+  state: BindingRelationState
+): void {
+  if (kind === "conflict") {
+    if (state !== "conflict") {
+      throw new ShadowContractError("alias conflict payload must be conflict");
+    }
+    return;
+  }
   if (kind !== "exact") {
-    throw new ShadowContractError(`${label} witness must be exact, not ${kind}`);
+    throw new ShadowContractError(`alias witness must be exact or conflict, not ${kind}`);
+  }
+  if (state === "conflict") {
+    throw new ShadowContractError("binding conflict is an epistemic conflict");
   }
 }
