@@ -21,11 +21,15 @@ import {
 } from "../../../../recall/shadow/measurement/index.js";
 import { createRecallRetrievalFieldBundle } from
   "../../../../recall/field/retrieval/retrieval-field-bundle.js";
+import type { LexicalIntervalSourceReceiptV1 } from
+  "../../../../recall/field/retrieval/lexical-interval-source-receipt.js";
 import {
   bindRetrievalFieldBundleReadAuthority,
   readMemoryLexicalIntervalSources
 } from "../../../../recall/field/retrieval/retrieval-field-source-authority.js";
 import { withActiveRecallReadSnapshot } from
+  "../../../../recall/runtime/recall-read-snapshot.js";
+import type { RecallReadSnapshotPort } from
   "../../../../recall/runtime/recall-read-snapshot.js";
 import { fieldContractSha256 } from "../../../../shared/field-hash.js";
 import { compileCanonicalQueryCompilation } from
@@ -160,6 +164,84 @@ export async function prepareLexicalMeasurementAuthorityFixture(
   });
 }
 
+export async function withCapturedLexicalMeasurementAuthorityFixture<T>(
+  prepared: PreparedRecallRequest,
+  candidates: readonly Readonly<{
+    readonly candidate_key: string;
+    readonly normalized_rank: number;
+  }>[],
+  work: (
+    authority: VerifiedMeasurementAuthorityV1,
+    source: LexicalIntervalSourceReceiptV1,
+    bundle: ReturnType<typeof createRecallRetrievalFieldBundle>
+  ) => Promise<T> | T,
+  snapshot: RecallReadSnapshotPort = snapshotPort(),
+  evidence: PreparedMeasurementAuthorityEvidenceV1 = measurementEvidence(prepared)
+): Promise<T> {
+  const limit = Math.max(2, candidates.length);
+  const matches = Object.freeze(candidates.map((candidate) => Object.freeze({
+    object_id: candidate.candidate_key,
+    normalized_rank: candidate.normalized_rank
+  })));
+  const observations = Object.freeze(matches.map((candidate, index) => Object.freeze({
+    ...candidate,
+    rank: index + 1
+  })));
+  const result = Object.freeze({
+    matches,
+    lanes: Object.freeze([
+      populatedNormalLane("exact", observations),
+      normalLane("porter"),
+      normalLane("trigram")
+    ]),
+    lexical_raw_rank: Object.freeze({
+      query_run_id: "measurement-authority-captured-fixture",
+      merge_limit: limit,
+      lanes: Object.freeze([
+        populatedLexicalLane("exact", "matched_token_count", candidates.length, limit),
+        lexicalLane("porter", "bm25_raw_rank"),
+        lexicalLane("object_key_porter", "bm25_raw_rank"),
+        lexicalLane("trigram", "bm25_raw_rank"),
+        lexicalLane("object_key_trigram", "bm25_raw_rank")
+      ]),
+      candidates: Object.freeze(candidates.map((candidate) => Object.freeze({
+        candidate_key: candidate.candidate_key,
+        admitted: true,
+        chosen_lane_id: "exact" as const,
+        chosen_normalized_rank: candidate.normalized_rank
+      })))
+    })
+  });
+  const bundle = createRecallRetrievalFieldBundle({
+    workspaceId: "workspace-1",
+    queryText: "measurement authority captured fixture",
+    memoryRepo: { searchByKeywordField: async () => result }
+  });
+  return await withActiveRecallReadSnapshot(snapshot, async (capability) => {
+    bindRetrievalFieldBundleReadAuthority(bundle, prepared.snapshotReadLease, capability);
+    await bundle.searchMemoryKeyword({
+      variant: "lexical_relaxed",
+      queryText: "measurement authority captured fixture",
+      limit,
+      scope: {}
+    });
+    const [source] = readMemoryLexicalIntervalSources(bundle);
+    const [pin] = bundle.memoryLexicalRequestPins();
+    if (source === undefined || pin === undefined) {
+      throw new Error("captured lexical measurement fixture source is unavailable");
+    }
+    const authority = verifyLexicalMeasurementPreparedAuthorityV1({
+      evidence: {
+        ...evidence,
+        lexical_request_pin: pin,
+        lexical_source_receipt: source,
+        lexical_source_bundle: bundle
+      }
+    });
+    return await work(authority, source, bundle);
+  });
+}
+
 function lexicalLane(
   lane_id: "exact" | "porter" | "object_key_porter" | "trigram" | "object_key_trigram",
   raw_key_kind: "matched_token_count" | "bm25_raw_rank"
@@ -179,6 +261,35 @@ function normalLane(lane: "exact" | "porter" | "trigram") {
     depth: 0,
     observations: Object.freeze([]),
     unseen_upper_bound: null
+  });
+}
+
+function populatedNormalLane(
+  lane: "exact" | "porter" | "trigram",
+  observations: readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[]
+) {
+  return Object.freeze({
+    lane,
+    status: "complete" as const,
+    depth: observations.length,
+    observations,
+    unseen_upper_bound: 0
+  });
+}
+
+function populatedLexicalLane(
+  lane_id: "exact",
+  raw_key_kind: "matched_token_count",
+  list_n: number,
+  mergeLimit: number
+) {
+  return Object.freeze({
+    lane_id,
+    raw_key_kind,
+    list_n,
+    status: list_n === 0
+      ? "empty" as const
+      : list_n === mergeLimit ? "truncated" as const : "complete" as const
   });
 }
 

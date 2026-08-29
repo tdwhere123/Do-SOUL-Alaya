@@ -34,6 +34,10 @@ import type { MeasurementCollapseV1 } from "./collapse.js";
 import type { MeasurementGroupContractV1 } from "./contract.js";
 import { LEXICAL_INTERVAL_MEASUREMENT_CONTRACT } from "./lexical-interval.js";
 import {
+  assertLexicalMeasurementSourceObservation,
+  bindLexicalMeasurementAuthoritySource
+} from "./lexical-source-admission.js";
+import {
   PROPOSITION_STATE_MEASUREMENT_CONTRACT,
   type PropositionStateCollapseV1
 } from "./proposition-state.js";
@@ -120,15 +124,18 @@ const PREDECLARED_CONTRACTS = new Set<MeasurementGroupContractV1>([
 ]);
 const VERIFIED_AUTHORITIES = new WeakSet<object>();
 const ISSUED_ADMISSIONS = new WeakSet<object>();
+const ADMISSION_AUTHORITIES = new WeakMap<object, VerifiedMeasurementAuthorityV1>();
 
 export function verifyLexicalMeasurementPreparedAuthorityV1(input: Readonly<{
   readonly evidence: LexicalMeasurementAuthorityEvidenceV1;
 }>): VerifiedMeasurementAuthorityV1 {
-  return verifyPreparedAuthority(
+  const authority = verifyPreparedAuthority(
     input.evidence,
     LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
     lexicalMeasurementSourceIdentity(input.evidence)
   );
+  bindLexicalMeasurementAuthoritySource(authority, input.evidence);
+  return authority;
 }
 
 function verifyPreparedAuthority(
@@ -192,6 +199,7 @@ export function issueMeasurementGroupAdmission(input: Readonly<{
   }
   const identity = requiredIdentity(collapse.witness.identity);
   assertAuthorityPins(input.authority, identity);
+  assertLexicalMeasurementSourceObservation(input.authority, input.contract, collapse);
   const body = admissionBody(
     input.authority,
     input.contract,
@@ -204,6 +212,7 @@ export function issueMeasurementGroupAdmission(input: Readonly<{
     digest: digestRecallFieldIdentity(body)
   });
   ISSUED_ADMISSIONS.add(admission);
+  ADMISSION_AUTHORITIES.set(admission, input.authority);
   return admission;
 }
 
@@ -221,10 +230,12 @@ export function validateMeasurementAdmissionV1(input: Readonly<{
     requirePredeclaredContract(input.contract);
     const collapse = requireAdmissibleCollapse(input.contract, input.collapse);
     const identity = requiredIdentity(collapse.witness.identity);
-    const authority = currentAuthorityFor(input.current_authorities, input.contract.digest);
-    if (authority === null || authority.authority_digest !== input.admission.authority_digest) {
+    const authority = ADMISSION_AUTHORITIES.get(input.admission);
+    if (authority === undefined || !VERIFIED_AUTHORITIES.has(authority) ||
+      !input.current_authorities.includes(authority)) {
       return blocked("measurement admission is not bound to current verified authority");
     }
+    assertLexicalMeasurementSourceObservation(authority, input.contract, collapse);
     if (input.proposition_schema !== input.contract.proposition_schema ||
       !admissionMatches(input.admission, input.contract, identity, collapse)) {
       return blocked("measurement admission binding mismatch");
@@ -235,14 +246,12 @@ export function validateMeasurementAdmissionV1(input: Readonly<{
   }
 }
 
-function currentAuthorityFor(
-  authorities: CurrentMeasurementAuthoritiesV1,
-  contractDigest: RecallFieldDigest
-): VerifiedMeasurementAuthorityV1 | null {
-  const matches = authorities.filter((authority) =>
-    VERIFIED_AUTHORITIES.has(authority) && authority.contract_digest === contractDigest
-  );
-  return matches.length === 1 ? matches[0]! : null;
+export function measurementAdmissionsShareAuthority(
+  left: MeasurementAdmissionV1,
+  right: MeasurementAdmissionV1
+): boolean {
+  const authority = ADMISSION_AUTHORITIES.get(left);
+  return authority !== undefined && ADMISSION_AUTHORITIES.get(right) === authority;
 }
 
 function verifyPreparedEvidence(

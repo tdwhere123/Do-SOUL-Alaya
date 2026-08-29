@@ -183,6 +183,35 @@ export function verifyLexicalIntervalSourceReceiptV1(
   }
 }
 
+export function verifyLexicalIntervalSourceObservationV1(
+  receipt: LexicalIntervalSourceReceiptV1,
+  expected: Readonly<{
+    readonly bundle: Readonly<RecallRetrievalFieldBundle>;
+    readonly lease: SnapshotReadLeaseV1;
+    readonly candidate_key: string;
+    readonly normalized_rank: number;
+  }>
+): void {
+  verifyLexicalIntervalSourceReceiptV1(receipt, expected);
+  if (receipt.status !== "captured") {
+    throw new TypeError("lexical interval source observation is unavailable");
+  }
+  const candidateKey = lexicalCandidateLookupKey(expected.candidate_key);
+  const observation = receipt.capture.candidates.find((candidate) =>
+    candidate.candidate_key === candidateKey
+  );
+  if (observation?.admitted !== true ||
+      observation.chosen_lane_id === null ||
+      observation.chosen_normalized_rank !== expected.normalized_rank) {
+    throw new TypeError("lexical interval source observation is not issued");
+  }
+}
+
+function lexicalCandidateLookupKey(candidateKey: string): string {
+  const match = /^(?:workspace_local|global):memory_entry:(.+)$/u.exec(candidateKey);
+  return match?.[1] !== undefined && match[1].length > 0 ? match[1] : candidateKey;
+}
+
 function isLexicalRecord(
   record: RecordedFieldResult
 ): record is RecordedFieldResult & { readonly prefix: "lexical_relaxed" | "lexical_expanded" } {

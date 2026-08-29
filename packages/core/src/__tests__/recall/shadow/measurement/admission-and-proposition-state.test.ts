@@ -22,16 +22,15 @@ import {
   measurementEvidence,
   prepareLexicalMeasurementAuthorityFixture,
   prepareMeasurementEvidenceFixture,
-  releaseMeasurementEvidenceFixture
+  releaseMeasurementEvidenceFixture,
+  withCapturedLexicalMeasurementAuthorityFixture
 } from "./prepared-authority-fixture.js";
 
 let prepared: PreparedRecallRequest;
-let authority: Awaited<ReturnType<typeof prepareLexicalMeasurementAuthorityFixture>>;
 
 describe("measurement admission", () => {
   beforeAll(async () => {
     prepared = await prepareMeasurementEvidenceFixture();
-    authority = await prepareLexicalMeasurementAuthorityFixture(prepared);
   });
 
   afterAll(() => releaseMeasurementEvidenceFixture(prepared));
@@ -77,71 +76,62 @@ describe("measurement admission", () => {
     );
   });
 
-  it("binds the admission to contract, schema, and collapsed witness bytes", () => {
-    const collapse = numericCollapse(LEXICAL_INTERVAL_MEASUREMENT_CONTRACT);
-    const admission = issueMeasurementGroupAdmission({
-      authority,
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-      proposition_schema: "lex.interval",
-      collapse
-    });
-    expect(validateMeasurementAdmissionV1({
-      admission,
-      current_authorities: [authority],
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-      proposition_schema: "lex.interval",
-      collapse
-    })).toEqual({ status: "admitted" });
-    expect(validateMeasurementAdmissionV1({
-      admission,
-      current_authorities: [authority],
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-      proposition_schema: "lex.interval.drifted",
-      collapse
-    }).status).toBe("blocked");
-    expect(validateMeasurementAdmissionV1({
-      admission: { ...admission },
-      current_authorities: [authority],
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-      proposition_schema: "lex.interval",
-      collapse
-    }).status).toBe("blocked");
-    expect(validateMeasurementAdmissionV1({
-      admission,
-      current_authorities: [],
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-      proposition_schema: "lex.interval",
-      collapse
-    })).toEqual({
-      status: "blocked",
-      reason: "measurement admission is not bound to current verified authority"
-    });
-    expect(validateMeasurementAdmissionV1({
-      admission,
-      current_authorities: [{ ...authority } as typeof authority],
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-      proposition_schema: "lex.interval",
-      collapse
-    }).status).toBe("blocked");
+  it("binds the admission to contract, schema, and collapsed witness bytes", async () => {
+    await withCapturedLexicalMeasurementAuthorityFixture(
+      prepared,
+      [{ candidate_key: "cand-1", normalized_rank: 1 }],
+      (authority) => {
+        const collapse = numericCollapse(LEXICAL_INTERVAL_MEASUREMENT_CONTRACT, authority);
+        const admission = issueMeasurementGroupAdmission({
+          authority,
+          contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+          proposition_schema: "lex.interval",
+          collapse
+        });
+        expect(validateMeasurementAdmissionV1({
+          admission, current_authorities: [authority],
+          contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+          proposition_schema: "lex.interval", collapse
+        })).toEqual({ status: "admitted" });
+        for (const candidate of [
+          { admission, current_authorities: [authority], proposition_schema: "lex.interval.drifted" },
+          { admission: { ...admission }, current_authorities: [authority],
+            proposition_schema: "lex.interval" },
+          { admission, current_authorities: [], proposition_schema: "lex.interval" },
+          { admission, current_authorities: [{ ...authority } as typeof authority],
+            proposition_schema: "lex.interval" }
+        ]) {
+          expect(validateMeasurementAdmissionV1({
+            ...candidate,
+            contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+            collapse
+          }).status).toBe("blocked");
+        }
+      }
+    );
   });
 
-  it("rejects counterfeit authority capabilities and coordinate self-authorization", () => {
-    const collapse = numericCollapse(LEXICAL_INTERVAL_MEASUREMENT_CONTRACT);
-    expect(() => issueMeasurementGroupAdmission({
-      authority: { ...authority } as typeof authority,
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-      proposition_schema: "lex.interval",
-      collapse
-    })).toThrow(/not verified/u);
-    expect(() => issueMeasurementGroupAdmission({
-      authority: {
-        query_id: collapse.witness.identity.query_id,
-        snapshot_digest: collapse.witness.identity.snapshot_digest
-      } as unknown as typeof authority,
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-      proposition_schema: "lex.interval",
-      collapse
-    })).toThrow(/not verified/u);
+  it("rejects counterfeit authority capabilities and coordinate self-authorization", async () => {
+    await withCapturedLexicalMeasurementAuthorityFixture(
+      prepared,
+      [{ candidate_key: "cand-1", normalized_rank: 1 }],
+      (authority) => {
+        const collapse = numericCollapse(LEXICAL_INTERVAL_MEASUREMENT_CONTRACT, authority);
+        expect(() => issueMeasurementGroupAdmission({
+          authority: { ...authority } as typeof authority,
+          contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+          proposition_schema: "lex.interval", collapse
+        })).toThrow(/not verified/u);
+        expect(() => issueMeasurementGroupAdmission({
+          authority: {
+            query_id: collapse.witness.identity.query_id,
+            snapshot_digest: collapse.witness.identity.snapshot_digest
+          } as unknown as typeof authority,
+          contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+          proposition_schema: "lex.interval", collapse
+        })).toThrow(/not verified/u);
+      }
+    );
   });
 
   it("does not expose a prepared-only measurement authority issuer", async () => {
@@ -208,7 +198,10 @@ describe("exact proposition-state measurement", () => {
   });
 });
 
-function numericCollapse(contract: Parameters<typeof collapseMeasurementGroup>[0]["contract"]) {
+function numericCollapse(
+  contract: Parameters<typeof collapseMeasurementGroup>[0]["contract"],
+  authority: Parameters<typeof issueMeasurementGroupAdmission>[0]["authority"]
+) {
   return collapseMeasurementGroup({
     contract,
     observations: [createNumericIntervalWitness({
@@ -219,7 +212,10 @@ function numericCollapse(contract: Parameters<typeof collapseMeasurementGroup>[0
         snapshot_digest: authority.snapshot_digest,
         proposition_id: "lex.interval"
       },
-      provenance: PROV,
+      provenance: [{
+        source_id: "lexical.interval.primary",
+        producer: "lexical.interval.adapter.v1"
+      }],
       epistemic: { kind: "exact" },
       payload: { lower: 1, upper: 1 }
     })]

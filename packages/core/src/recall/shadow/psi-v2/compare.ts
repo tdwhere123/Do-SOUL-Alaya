@@ -1,4 +1,5 @@
 import { freezeShadow } from "../envelope.js";
+import { measurementAdmissionsShareAuthority } from "../measurement/admission.js";
 import {
   compareCollapsedPropositionStatesExact,
   compareLexicalIntervals,
@@ -167,6 +168,7 @@ function sameAdmittedCoordinateJurisdiction(
   const leftAdmission = left.admission;
   const rightAdmission = right.admission;
   return leftAdmission !== null && rightAdmission !== null &&
+    measurementAdmissionsShareAuthority(leftAdmission, rightAdmission) &&
     leftAdmission.contract_digest === rightAdmission.contract_digest &&
     leftAdmission.operator_id === rightAdmission.operator_id &&
     leftAdmission.operator_version === rightAdmission.operator_version &&
