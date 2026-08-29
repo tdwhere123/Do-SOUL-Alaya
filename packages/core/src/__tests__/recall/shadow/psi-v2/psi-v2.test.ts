@@ -1,18 +1,25 @@
 import { describe, expect, it } from "vitest";
+import { d1LaneEnvelopes } from "../../../../recall/shadow/d1/index.js";
+import type { D1EnvelopeIdentity } from "../../../../recall/shadow/d1/legal-envelope.js";
 import { isPsiCycleFailure, peelUndominated } from
   "../../../../recall/shadow/frontier-peel.js";
 import {
   collapseMeasurementGroup,
-  createMeasurementGroupContractV1
+  createMeasurementGroupContractV1,
+  type MeasurementGroupContractV1
 } from "../../../../recall/shadow/measurement/index.js";
+import type { LexDomain } from "../../../../recall/shadow/observations.js";
 import {
   comparePsiV2,
   peelPsiV2Frontiers,
+  psiV2CandidateFromLexicalEnvelope,
   psiV2CycleCount,
   psiV2Dominates,
+  rawMissingFamilyFragment,
   type PsiV2CandidateV1
 } from "../../../../recall/shadow/psi-v2/index.js";
 import { createNumericIntervalWitness } from "../../../../recall/shadow/witness/index.js";
+import { D1_SNAPSHOT, plantProof } from "../d1/d1-proof-fixture.js";
 import { PINS, PROV } from "../witness/fixtures.js";
 
 const CONTRACT = createMeasurementGroupContractV1({
@@ -26,6 +33,34 @@ const CONTRACT = createMeasurementGroupContractV1({
   soundness_preconditions: ["same_binding"],
   upper_bound_rule: "interval_upper"
 });
+
+const EXACT_CONTRACT = createMeasurementGroupContractV1({
+  ...CONTRACT,
+  contract_id: "psi.v2.numeric.exact",
+  comparison_direction: "exact"
+});
+
+const EXACT_DOMAIN: LexDomain = {
+  lane_id: "exact",
+  list_n: 8,
+  status: "complete",
+  raw_key_kind: "matched_token_count"
+};
+
+const PORTER_DOMAIN: LexDomain = {
+  lane_id: "porter",
+  list_n: 8,
+  status: "complete",
+  raw_key_kind: "bm25_raw_rank"
+};
+
+const ENVELOPE_IDENTITY: D1EnvelopeIdentity = {
+  field_prefix: "lexical_relaxed",
+  query_run_id: "memory.keyword.depth:10",
+  snapshot_digest: D1_SNAPSHOT,
+  request_digest: `sha256:${"c".repeat(64)}`,
+  workspace_id: "workspace-1"
+};
 
 describe("proposition Psi v2", () => {
   it("is irreflexive, asymmetric, and transitive on collapsed intervals", () => {
@@ -49,6 +84,8 @@ describe("proposition Psi v2", () => {
       coordinates: [{
         proposition_id: "p",
         applicable: true,
+        lex_domain: null,
+        envelope_identity: null,
         collapse: {
           status: "unresolved",
           reason: "unknown correlation blocks collapse",
@@ -59,10 +96,69 @@ describe("proposition Psi v2", () => {
     expect(comparePsiV2(blocked, unknown).kind).toBe("blocked");
   });
 
+  it("does not treat overlap plus another equal coordinate as equality or dominance", () => {
+    const overlapping = candidate("a", [["p", 3, 5], ["q", 1, 1]]);
+    const other = candidate("b", [["p", 4, 6], ["q", 1, 1]]);
+    expect(comparePsiV2(overlapping, other).kind).toBe("incomparable");
+  });
+
+  it("blocks a pair when one side has an extra applicable coordinate", () => {
+    const extra = candidate("a", [["p", 5, 5], ["q", 2, 2]]);
+    const base = candidate("b", [["p", 5, 5]]);
+    expect(comparePsiV2(extra, base).kind).toBe("blocked");
+    expect(comparePsiV2(base, extra).kind).toBe("blocked");
+  });
+
+  it("treats exact-direction disagreement as incomparable, not dominance", () => {
+    const five = candidate("a", [["p", 5, 5]], { contract: EXACT_CONTRACT });
+    const one = candidate("b", [["p", 1, 1]], { contract: EXACT_CONTRACT });
+    expect(comparePsiV2(five, one).kind).toBe("incomparable");
+    expect(psiV2Dominates(five, one)).toBe(false);
+  });
+
+  it("is incomparable across D1 lane, list_n, truncation, and identity", () => {
+    const exactProof = plantProof({
+      lanes: { exact: { rows: [{ key: "hit", ordinal: 5 }], universeKeys: ["hit"] } }
+    });
+    const porterProof = plantProof({
+      lanes: { porter: { rows: [{ key: "other", ordinal: 1 }], universeKeys: ["other"] } }
+    });
+    const exactHit = fromProof("hit", exactProof);
+    const porterOther = fromProof("other", porterProof);
+    expect(comparePsiV2(exactHit, porterOther).kind).toBe("incomparable");
+    const complete = candidate("a", [["lex.interval", 5, 5]], {
+      domain: PORTER_DOMAIN,
+      identity: ENVELOPE_IDENTITY
+    });
+    const truncated = candidate("b", [["lex.interval", 1, 1]], {
+      domain: { ...PORTER_DOMAIN, status: "truncated" },
+      identity: ENVELOPE_IDENTITY
+    });
+    expect(comparePsiV2(complete, truncated).kind).toBe("incomparable");
+    const shortList = candidate("c", [["lex.interval", 5, 5]], {
+      domain: EXACT_DOMAIN,
+      identity: ENVELOPE_IDENTITY
+    });
+    const longList = candidate("d", [["lex.interval", 1, 1]], {
+      domain: { ...EXACT_DOMAIN, list_n: 32 },
+      identity: ENVELOPE_IDENTITY
+    });
+    expect(comparePsiV2(shortList, longList).kind).toBe("incomparable");
+    const otherIdentity = candidate("e", [["lex.interval", 1, 1]], {
+      domain: EXACT_DOMAIN,
+      identity: { ...ENVELOPE_IDENTITY, query_run_id: "memory.keyword.depth:2" }
+    });
+    expect(comparePsiV2(shortList, otherIdentity).kind).toBe("incomparable");
+  });
+
   it("does not let a missing raw family fragment veto after lawful collapse", () => {
-    const collapsed = candidate("a", [["p", 4, 4]]);
-    const weaker = candidate("b", [["p", 1, 1]]);
-    expect(comparePsiV2(collapsed, weaker).kind).toBe("dominates");
+    const identity = ENVELOPE_IDENTITY;
+    const strongMap = lexicalMap(9, 9, identity, { porter: [4, 4] });
+    const weakMap = lexicalMap(1, 1, identity);
+    expect(rawMissingFamilyFragment(strongMap, weakMap)).toBe(true);
+    const strong = psiV2CandidateFromLexicalEnvelope("a", strongMap, "q", D1_SNAPSHOT);
+    const weak = psiV2CandidateFromLexicalEnvelope("b", weakMap, "q", D1_SNAPSHOT);
+    expect(comparePsiV2(strong, weak).kind).toBe("dominates");
   });
 
   it("peels deterministic frontiers without deleting dominated candidates from the input", () => {
@@ -88,16 +184,32 @@ describe("proposition Psi v2", () => {
   });
 });
 
+function fromProof(key: string, proof: ReturnType<typeof plantProof>): PsiV2CandidateV1 {
+  return psiV2CandidateFromLexicalEnvelope(
+    key,
+    d1LaneEnvelopes(proof, key),
+    "q",
+    D1_SNAPSHOT
+  );
+}
+
 function candidate(
   id: string,
-  rows: readonly [string, number, number][]
+  rows: readonly [string, number, number][],
+  options: {
+    readonly domain?: LexDomain | null;
+    readonly identity?: D1EnvelopeIdentity | null;
+    readonly contract?: MeasurementGroupContractV1;
+  } = {}
 ): PsiV2CandidateV1 {
   return {
     candidate_id: id,
     coordinates: rows.map(([propositionId, lower, upper]) => ({
       proposition_id: propositionId,
       applicable: true,
-      collapse: collapseOne(id, propositionId, lower, upper)
+      lex_domain: options.domain ?? null,
+      envelope_identity: options.identity ?? null,
+      collapse: collapseOne(id, propositionId, lower, upper, options.contract ?? CONTRACT)
     }))
   };
 }
@@ -106,10 +218,11 @@ function collapseOne(
   candidateId: string,
   propositionId: string,
   lower: number,
-  upper: number
+  upper: number,
+  contract: MeasurementGroupContractV1
 ) {
   return collapseMeasurementGroup({
-    contract: CONTRACT,
+    contract,
     observations: [
       createNumericIntervalWitness({
         identity: {
@@ -124,4 +237,29 @@ function collapseOne(
       })
     ]
   });
+}
+
+function lexicalMap(
+  lower: number,
+  upper: number,
+  identity: D1EnvelopeIdentity | null,
+  extra: { readonly porter?: readonly [number, number] } = {}
+) {
+  return {
+    identity,
+    field_prefix: identity?.field_prefix ?? null,
+    query_run_id: identity?.query_run_id ?? null,
+    snapshot_digest: identity?.snapshot_digest ?? null,
+    request_digest: identity?.request_digest ?? null,
+    primary: {
+      domain: EXACT_DOMAIN,
+      envelope: { kind: "interval" as const, lower, upper }
+    },
+    lanes: extra.porter === undefined ? {} : {
+      porter: {
+        domain: PORTER_DOMAIN,
+        value: { kind: "interval" as const, lower: extra.porter[0], upper: extra.porter[1] }
+      }
+    }
+  };
 }

@@ -17,7 +17,13 @@ export {
   LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
 } from "./lexical-interval-adapter.js";
 export {
+  psiV2CandidateFromLexicalEnvelope,
+  rawMissingFamilyFragment
+} from "./from-envelope.js";
+export {
   buildPsiV2ShadowDiagnostics,
   type PsiV2ShadowDiagnosticsV1,
-  type PsiV2ShadowInputV1
+  type PsiV2ShadowInputV1,
+  type PsiV2ShadowObservationStatusV1,
+  type PsiV2ShadowVisibilityV1
 } from "./shadow-diagnostics.js";

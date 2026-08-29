@@ -1,11 +1,17 @@
+import type { ShadowChannelVote } from "../compare.js";
+import { d1IntervalVote } from "../d1/interval-compare.js";
+import { d1IdentitiesEqual } from "../d1/legal-envelope.js";
 import { freezeShadow } from "../envelope.js";
-import type { MeasurementCollapseV1 } from "../measurement/index.js";
+import type { MeasurementComparisonDirectionV1 } from "../measurement/index.js";
+import { lexDomainsEqual } from "../observations.js";
 import type {
   PsiV2CandidateV1,
   PsiV2CoordinateV1,
   PsiV2VerdictKind,
   PsiV2VerdictV1
 } from "./types.js";
+
+type CoordinateVote = "gt" | "lt" | "eq" | "skip" | "blocked" | "incomparable";
 
 export function comparePsiV2(
   left: PsiV2CandidateV1,
@@ -16,6 +22,9 @@ export function comparePsiV2(
   }
   const votes = propositionVotes(left, right);
   if (votes.blocked.length > 0) return verdict("blocked", ...votes.blocked);
+  if (votes.incomparable.length > 0) {
+    return verdict("incomparable", ...votes.incomparable);
+  }
   if (votes.gt > 0 && votes.lt > 0) return verdict("tradeoff", "heterogeneous propositions disagree");
   if (votes.gt > 0) return verdict("dominates", "strict safe dominance on collapsed coordinates");
   if (votes.lt > 0) return verdict("dominated_by", "reverse strict safe dominance");
@@ -32,6 +41,7 @@ function propositionVotes(left: PsiV2CandidateV1, right: PsiV2CandidateV1): {
   lt: number;
   eq: number;
   blocked: string[];
+  incomparable: string[];
 } {
   const ids = new Set([
     ...left.coordinates.map((row) => row.proposition_id),
@@ -41,50 +51,93 @@ function propositionVotes(left: PsiV2CandidateV1, right: PsiV2CandidateV1): {
   let lt = 0;
   let eq = 0;
   const blocked: string[] = [];
+  const incomparable: string[] = [];
   for (const propositionId of ids) {
     const vote = voteProposition(
       findCoordinate(left, propositionId),
       findCoordinate(right, propositionId)
     );
-    if (vote === "blocked") blocked.push(`unknown blocks ${propositionId}`);
+    if (vote === "blocked") blocked.push(`unresolved comparison blocks ${propositionId}`);
+    if (vote === "incomparable") incomparable.push(`incomparable on ${propositionId}`);
     if (vote === "gt") gt += 1;
     if (vote === "lt") lt += 1;
     if (vote === "eq") eq += 1;
   }
-  return { gt, lt, eq, blocked };
+  return { gt, lt, eq, blocked, incomparable };
 }
 
 function voteProposition(
   left: PsiV2CoordinateV1 | undefined,
   right: PsiV2CoordinateV1 | undefined
-): "gt" | "lt" | "eq" | "skip" | "blocked" {
-  if (left !== undefined && !left.applicable && right !== undefined && !right.applicable) {
-    return "skip";
+): CoordinateVote {
+  const applicability = applicabilityVote(left, right);
+  if (applicability !== "compare" || left === undefined || right === undefined) {
+    return applicability === "compare" ? "blocked" : applicability;
   }
-  if (left === undefined || right === undefined) return "skip";
-  if (!left.applicable || !right.applicable) return "skip";
-  if (isBlockingCollapse(left.collapse) || isBlockingCollapse(right.collapse)) return "blocked";
+  if (!identitiesComparable(left, right)) return "incomparable";
+  if (isBlockingCollapse(left) || isBlockingCollapse(right)) return "blocked";
+  if (!domainsComparable(left, right)) return "incomparable";
+  return directedIntervalVote(left, right);
+}
+
+function applicabilityVote(
+  left: PsiV2CoordinateV1 | undefined,
+  right: PsiV2CoordinateV1 | undefined
+): CoordinateVote | "compare" {
+  if (left === undefined && right === undefined) return "skip";
+  if (left === undefined) return right!.applicable ? "blocked" : "skip";
+  if (right === undefined) return left.applicable ? "blocked" : "skip";
+  if (!left.applicable && !right.applicable) return "skip";
+  if (!left.applicable || !right.applicable) return "incomparable";
+  return "compare";
+}
+
+function domainsComparable(left: PsiV2CoordinateV1, right: PsiV2CoordinateV1): boolean {
+  if (left.lex_domain === null && right.lex_domain === null) return true;
+  if (left.lex_domain === null || right.lex_domain === null) return false;
+  return lexDomainsEqual(left.lex_domain, right.lex_domain);
+}
+
+function identitiesComparable(left: PsiV2CoordinateV1, right: PsiV2CoordinateV1): boolean {
+  if (left.envelope_identity === null && right.envelope_identity === null) return true;
+  if (left.envelope_identity === null || right.envelope_identity === null) return false;
+  return d1IdentitiesEqual(left.envelope_identity, right.envelope_identity);
+}
+
+function isBlockingCollapse(coordinate: PsiV2CoordinateV1): boolean {
+  return coordinate.collapse.status !== "collapsed";
+}
+
+function directedIntervalVote(
+  left: PsiV2CoordinateV1,
+  right: PsiV2CoordinateV1
+): CoordinateVote {
   if (left.collapse.status !== "collapsed" || right.collapse.status !== "collapsed") {
     return "blocked";
   }
-  return intervalVote(left.collapse.witness.payload, right.collapse.witness.payload);
+  const direction = left.collapse.contract.comparison_direction;
+  if (direction !== right.collapse.contract.comparison_direction) return "blocked";
+  const leftPayload = left.collapse.witness.payload;
+  const rightPayload = right.collapse.witness.payload;
+  if (leftPayload === null || rightPayload === null) return "blocked";
+  return applyDirection(
+    d1IntervalVote(
+      { kind: "interval", lower: leftPayload.lower, upper: leftPayload.upper },
+      { kind: "interval", lower: rightPayload.lower, upper: rightPayload.upper }
+    ),
+    direction
+  );
 }
 
-function intervalVote(
-  left: { readonly lower: number; readonly upper: number } | null,
-  right: { readonly lower: number; readonly upper: number } | null
-): "gt" | "lt" | "eq" | "skip" | "blocked" {
-  if (left === null || right === null) return "blocked";
-  if (left.lower > right.upper) return "gt";
-  if (right.lower > left.upper) return "lt";
-  if (left.lower === left.upper && right.lower === right.upper && left.lower === right.lower) {
-    return "eq";
-  }
-  return "skip";
-}
-
-function isBlockingCollapse(collapse: MeasurementCollapseV1): boolean {
-  return collapse.status === "unresolved" || collapse.status === "conflict";
+function applyDirection(
+  vote: ShadowChannelVote,
+  direction: MeasurementComparisonDirectionV1
+): CoordinateVote {
+  if (vote === "eq") return "eq";
+  if (vote !== "gt" && vote !== "lt") return "incomparable";
+  if (direction === "exact") return "incomparable";
+  if (direction === "lower_is_stronger") return vote === "gt" ? "lt" : "gt";
+  return vote;
 }
 
 function findCoordinate(

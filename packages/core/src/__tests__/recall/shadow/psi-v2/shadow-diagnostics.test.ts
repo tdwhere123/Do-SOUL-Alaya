@@ -2,13 +2,16 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { D1CandidateEnvelopeMap } from
+import type { D1CandidateEnvelopeMap, D1EnvelopeIdentity } from
   "../../../../recall/shadow/d1/legal-envelope.js";
 import * as frontierPeel from "../../../../recall/shadow/frontier-peel.js";
+import type { LexDomain } from "../../../../recall/shadow/observations.js";
 import {
   adaptLexicalIntervalEnvelopeToCollapse,
   buildPsiV2ShadowDiagnostics,
-  LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
+  LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+  psiV2CandidateFromLexicalEnvelope,
+  comparePsiV2
 } from "../../../../recall/shadow/psi-v2/index.js";
 import { PINS, PROV } from "../witness/fixtures.js";
 
@@ -21,6 +24,28 @@ const CANONICAL_SRC = readFileSync(
   "utf8"
 );
 
+const EXACT_DOMAIN: LexDomain = {
+  lane_id: "exact",
+  list_n: 8,
+  status: "complete",
+  raw_key_kind: "matched_token_count"
+};
+
+const PORTER_DOMAIN: LexDomain = {
+  lane_id: "porter",
+  list_n: 8,
+  status: "complete",
+  raw_key_kind: "bm25_raw_rank"
+};
+
+const ENVELOPE_IDENTITY: D1EnvelopeIdentity = {
+  field_prefix: "lexical_relaxed",
+  query_run_id: "memory.keyword.depth:10",
+  snapshot_digest: SNAPSHOT,
+  request_digest: `sha256:${"c".repeat(64)}`,
+  workspace_id: "workspace-1"
+};
+
 describe("psi v2 shadow diagnostics", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -30,12 +55,14 @@ describe("psi v2 shadow diagnostics", () => {
     const unbounded = adaptLexicalIntervalEnvelopeToCollapse(
       { kind: "unbounded" },
       PINS,
-      PROV
+      PROV,
+      ENVELOPE_IDENTITY
     );
     const inverted = adaptLexicalIntervalEnvelopeToCollapse(
       { kind: "interval", lower: 4, upper: 1 },
       PINS,
-      PROV
+      PROV,
+      ENVELOPE_IDENTITY
     );
     expect(unbounded.status).toBe("unresolved");
     expect(unbounded.reason).toBe("unbounded lexical-bound proof remains unresolved");
@@ -44,9 +71,23 @@ describe("psi v2 shadow diagnostics", () => {
     const exact = adaptLexicalIntervalEnvelopeToCollapse(
       { kind: "interval", lower: 2, upper: 2 },
       { ...PINS, candidate_id: "cand-1", proposition_id: "lex.interval" },
-      PROV
+      PROV,
+      ENVELOPE_IDENTITY
     );
     expect(exact.status).toBe("collapsed");
+  });
+
+  it("does not collapse a well-ordered interval without a legal envelope identity", () => {
+    const tampered = adaptLexicalIntervalEnvelopeToCollapse(
+      { kind: "interval", lower: 4, upper: 4 },
+      PINS,
+      PROV,
+      null
+    );
+    expect(tampered.status).toBe("unresolved");
+    expect(tampered.reason).toBe(
+      "forged lexical interval without legal envelope identity remains unresolved"
+    );
   });
 
   it("binds the lexical-interval contract without plan-card labels", () => {
@@ -78,7 +119,92 @@ describe("psi v2 shadow diagnostics", () => {
     expect(first.digest).toBe(second.digest);
     expect(first.cycle_count).toBe(0);
     expect(first.raw_fragment_veto).toBe(false);
+    expect(first.observation_status).toBe("observed");
     expect(first.frontier_width).toBeGreaterThan(0);
+  });
+
+  it("does not let a raw missing-family fragment veto after lawful collapse", () => {
+    const diagnostics = buildPsiV2ShadowDiagnostics({
+      query_id: "q",
+      snapshot_digest: SNAPSHOT,
+      candidate_keys: ["workspace_local:memory_entry:a", "workspace_local:memory_entry:b"],
+      lexical_interval_by_key: {
+        "workspace_local:memory_entry:a": lexicalIntervalMap(9, 9, { porter: [4, 4] }),
+        "workspace_local:memory_entry:b": lexicalIntervalMap(1, 1)
+      }
+    });
+    expect(diagnostics.raw_fragment_veto).toBe(false);
+    expect(diagnostics.observation_status).toBe("observed");
+  });
+
+  it("keeps an unresolved proposition blocking and records a raw-fragment veto", () => {
+    const diagnostics = buildPsiV2ShadowDiagnostics({
+      query_id: "q",
+      snapshot_digest: SNAPSHOT,
+      candidate_keys: ["workspace_local:memory_entry:a", "workspace_local:memory_entry:b"],
+      lexical_interval_by_key: {
+        "workspace_local:memory_entry:a": lexicalIntervalMap(9, 9, { porter: [4, 4] }),
+        "workspace_local:memory_entry:b": missingPrimaryMap()
+      }
+    });
+    const left = psiV2CandidateFromLexicalEnvelope(
+      "workspace_local:memory_entry:a",
+      lexicalIntervalMap(9, 9, { porter: [4, 4] }),
+      "q",
+      SNAPSHOT
+    );
+    const right = psiV2CandidateFromLexicalEnvelope(
+      "workspace_local:memory_entry:b",
+      missingPrimaryMap(),
+      "q",
+      SNAPSHOT
+    );
+    expect(comparePsiV2(left, right).kind).toBe("blocked");
+    expect(diagnostics.raw_fragment_veto).toBe(true);
+    expect(diagnostics.blocked_share).toBeGreaterThan(0);
+  });
+
+  it("marks empty input not_observed instead of a finished frontier", () => {
+    const empty = buildPsiV2ShadowDiagnostics({
+      query_id: "q",
+      snapshot_digest: SNAPSHOT,
+      candidate_keys: ["workspace_local:memory_entry:a", "workspace_local:memory_entry:b"]
+    });
+    expect(empty.observation_status).toBe("not_observed");
+    expect(empty.undominated_share).toBe(0);
+    expect(empty.frontier_width).toBe(0);
+    expect(empty.blocked_share).toBe(0);
+    expect(empty.visibility).toBeNull();
+  });
+
+  it("emits conflict, alias, unknown-correlation, and unsupported visibility when passed in", () => {
+    const diagnostics = buildPsiV2ShadowDiagnostics({
+      query_id: "q",
+      snapshot_digest: SNAPSHOT,
+      candidate_keys: ["workspace_local:memory_entry:a"],
+      lexical_interval_by_key: {
+        "workspace_local:memory_entry:a": lexicalIntervalMap(2, 2)
+      },
+      aliases: [{ left_id: "bind-a", right_id: "bind-b", state: "may_equal" }],
+      correlations: [{
+        left_id: "ev-a",
+        right_id: "ev-b",
+        state: "possibly_correlated"
+      }],
+      conflicts: [{ kind: "conflict" }],
+      unsupported: [{
+        kind: "osf_unavailable",
+        owner: "osf",
+        detail: "producer missing"
+      }]
+    });
+    expect(diagnostics.observation_status).toBe("observed");
+    expect(diagnostics.visibility).toEqual({
+      conflict: true,
+      alias: true,
+      unknown_correlation: true,
+      unsupported: true
+    });
   });
 
   it("does not peel observation diagnostics through peelUndominated", () => {
@@ -105,22 +231,46 @@ describe("psi v2 shadow diagnostics", () => {
   });
 });
 
-function lexicalIntervalMap(lower: number, upper: number): D1CandidateEnvelopeMap {
-  return {
-    identity: null,
-    field_prefix: null,
-    query_run_id: null,
-    snapshot_digest: null,
-    request_digest: null,
+function lexicalIntervalMap(
+  lower: number,
+  upper: number,
+  extra: { readonly porter?: readonly [number, number] } = {}
+): D1CandidateEnvelopeMap {
+  return envelopeMap({
+    identity: ENVELOPE_IDENTITY,
     primary: {
-      domain: {
-        lane_id: "exact",
-        list_n: 8,
-        status: "complete",
-        raw_key_kind: "matched_token_count"
-      },
+      domain: EXACT_DOMAIN,
       envelope: { kind: "interval", lower, upper }
     },
-    lanes: {}
+    porter: extra.porter
+  });
+}
+
+function missingPrimaryMap(): D1CandidateEnvelopeMap {
+  return envelopeMap({
+    identity: ENVELOPE_IDENTITY,
+    primary: null,
+    porter: [1, 1]
+  });
+}
+
+function envelopeMap(input: {
+  readonly identity: D1EnvelopeIdentity | null;
+  readonly primary: D1CandidateEnvelopeMap["primary"];
+  readonly porter?: readonly [number, number];
+}): D1CandidateEnvelopeMap {
+  return {
+    identity: input.identity,
+    field_prefix: input.identity?.field_prefix ?? null,
+    query_run_id: input.identity?.query_run_id ?? null,
+    snapshot_digest: input.identity?.snapshot_digest ?? null,
+    request_digest: input.identity?.request_digest ?? null,
+    primary: input.primary,
+    lanes: input.porter === undefined ? {} : {
+      porter: {
+        domain: PORTER_DOMAIN,
+        value: { kind: "interval", lower: input.porter[0], upper: input.porter[1] }
+      }
+    }
   };
 }
