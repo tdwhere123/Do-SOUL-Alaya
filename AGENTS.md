@@ -32,17 +32,28 @@ files: `docs/handbook/README.md`.
 - **Build + test** must pass (`rtk pnpm build` + targeted vitest) before claiming done.
 - **Comments:** why-not-what only; no ticket, wave, or experiment labels in source.
 - **One reason to change** per module, class, and function.
-- **Size limits:**
-  - Source files: under **500** lines. At **800+** lines, split before adding behavior.
-  - Functions: under **50** lines. At **100+** lines, extract phases before extending.
+- **Deep modules, not micro-files:** split only at a domain, phase, side-effect,
+  or reuse boundary. Do not create one-use pass-through wrappers, single-call
+  helpers, or tiny barrels merely to satisfy a line count.
+- **Size budgets:**
+  - Source files: target **under 500** lines. At **500+**, review cohesion and
+    name the reason to keep or split it. At **800+**, split before adding behavior.
+  - Functions: target **under 50** lines. At **80+**, review phase and branch
+    cohesion. At **120+**, split before extending code that mixes decisions or
+    effects. A cohesive declarative table or schema is not improved by arbitrary
+    extraction.
+  - The live `ci:src-file-size` check remains authoritative while it enforces
+    the transitional 500-line ceiling; Card S01 owns migration to tiered checks.
 - **Phases, not piles:** separate DB access, computation, EventLog append, and
   other side effects (`compute` → `apply` → `audit`). A function that mixes
   them is a split candidate before you extend it.
-- **Layout:** a flat directory is fine while files stay under the size limits
-  and each name reflects one phase or prefix. When a file would cross **500**
-  lines, or a directory already holds roughly **10+** sibling modules, the
-  next split goes into a **subfolder by phase** — not another top-level peer
-  and not a bigger single file.
+- **Layout:** flat is fine when names and ownership remain predictable. At
+  roughly **10–12** sibling modules, review the directory; create a subfolder
+  only for a real domain or phase boundary, not to reduce a file count. Do not
+  create new `utils`, `helpers`, `misc`, or `common` ownership directories.
+- **Exports:** package-root barrels expose intended public consumers only.
+  Avoid internal barrel chains that hide ownership or cycles. Temporary
+  re-exports require a named consumer and removal gate.
 - **After you change code, re-check:** Can this block move into an existing
   helper? Did you introduce parallel logic that should be one shared path?
   Should scattered copies become one module instead of another near-duplicate file?
