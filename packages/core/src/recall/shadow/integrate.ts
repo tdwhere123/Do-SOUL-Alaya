@@ -40,6 +40,11 @@ import {
   psiPredicate,
   type ShadowPsiObservationField
 } from "./psi.js";
+import {
+  buildPsiV2ShadowDiagnostics,
+  type PsiV2ShadowDiagnosticsV1,
+  type PsiV2ShadowInputV1
+} from "./psi-v2/index.js";
 import type {
   ShadowCoreKnownNoWitness,
   ShadowEqualGReject
@@ -93,6 +98,8 @@ export type ShadowIntegrateInput = Readonly<{
   readonly memoryKeywordLanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
   readonly memoryLexicalCaptures?: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly nowIso?: string;
+  readonly lexicalIntervalEnvelopesByKey?: PsiV2ShadowInputV1["lexical_interval_by_key"];
+  readonly supportMaterialization?: PsiV2ShadowInputV1["support"];
 }>;
 
 export type ShadowFailClosedTrace = Readonly<{
@@ -131,6 +138,7 @@ export type ShadowCapturedTrace = Readonly<{
   readonly gamma_availability: ShadowGStatus | null;
   readonly unresolved_pointwise_tradeoff: boolean;
   readonly core_known_no_witness: readonly ShadowCoreKnownNoWitness[];
+  readonly psi_v2_shadow: PsiV2ShadowDiagnosticsV1;
 }>;
 
 export type FineAssessmentShadowTrace = ShadowCapturedTrace | ShadowFailClosedTrace;
@@ -404,8 +412,19 @@ function assembleCaptured(
     ),
     core_known_no_witness: Object.freeze(
       walked.decisions.flatMap((decision) => [...decision.novelty_core_known_absence])
-    )
+    ),
+    psi_v2_shadow: buildPsiV2ShadowDiagnostics({
+      query_id: "shadow.integrate.v1",
+      snapshot_digest: CAPTURE_IDENTITY_DIGEST,
+      candidate_keys: keysOf(input),
+      lexical_interval_by_key: input.lexicalIntervalEnvelopesByKey,
+      support: input.supportMaterialization
+    })
   });
+}
+
+function keysOf(input: ShadowIntegrateInput): readonly string[] {
+  return input.candidates.map(buildRecallCandidateDedupeKey);
 }
 
 export function failClosedShadowTrace(

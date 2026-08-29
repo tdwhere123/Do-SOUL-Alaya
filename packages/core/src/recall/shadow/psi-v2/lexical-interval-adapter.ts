@@ -1,0 +1,57 @@
+import type { D1EnvelopeValue } from "../d1/legal-envelope.js";
+import {
+  collapseMeasurementGroup,
+  createMeasurementGroupContractV1,
+  type MeasurementCollapseV1
+} from "../measurement/index.js";
+import {
+  createNumericIntervalWitness,
+  type WitnessIdentityPins,
+  type WitnessProvenanceEntry
+} from "../witness/index.js";
+
+export const LEXICAL_INTERVAL_MEASUREMENT_CONTRACT = createMeasurementGroupContractV1({
+  contract_id: "measure.lexical.interval.v1",
+  operator_version: "1",
+  proposition_schema: "lex.interval",
+  measurement_domain: "numeric_interval",
+  comparison_direction: "higher_is_stronger",
+  correlation_policy: "identity_dedupe",
+  combine_operator: "bound_intersection",
+  soundness_preconditions: ["receipt_backed_interval", "lex_domain_frozen"],
+  upper_bound_rule: "interval_upper"
+});
+
+export function adaptLexicalIntervalEnvelopeToCollapse(
+  value: D1EnvelopeValue,
+  identity: WitnessIdentityPins,
+  provenance: readonly WitnessProvenanceEntry[]
+): MeasurementCollapseV1 {
+  if (value.kind !== "interval") {
+    return {
+      status: "unresolved",
+      reason: value.kind === "unbounded"
+        ? "unbounded lexical-bound proof remains unresolved"
+        : "inapplicable lexical envelope is not a bound",
+      observations: []
+    };
+  }
+  if (value.lower > value.upper) {
+    return {
+      status: "unresolved",
+      reason: "inverted lexical interval remains unresolved",
+      observations: []
+    };
+  }
+  return collapseMeasurementGroup({
+    contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+    observations: [
+      createNumericIntervalWitness({
+        identity,
+        provenance,
+        epistemic: { kind: "exact" },
+        payload: { lower: value.lower, upper: value.upper }
+      })
+    ]
+  });
+}

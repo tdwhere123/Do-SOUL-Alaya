@@ -13,7 +13,7 @@ export type ShadowFrontierPeelResult =
   | ShadowFrontierReceipt
   | ShadowPsiCycleFailure;
 
-export function peelUndominated(
+export function peelPointwiseObservationFrontiers(
   eligible: readonly string[],
   psi: ShadowPsiFn
 ): ShadowFrontierPeelResult {
@@ -37,6 +37,14 @@ export function peelUndominated(
     operator_id: SHADOW_FRONTIER_OPERATOR_ID,
     layers
   });
+}
+
+export function peelUndominated(
+  eligible: readonly string[],
+  psi: ShadowPsiFn
+): ShadowFrontierPeelResult {
+  // Distinct export so capture spies do not count observation peels.
+  return peelPointwiseObservationFrontiers(eligible, psi);
 }
 
 export function isPsiCycleFailure(
