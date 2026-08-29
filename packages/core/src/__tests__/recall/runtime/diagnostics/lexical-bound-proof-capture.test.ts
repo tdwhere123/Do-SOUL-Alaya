@@ -80,13 +80,14 @@ describe("lexical bound proof capture path", () => {
     expect(Array.isArray(absent?.evaluated_universe)).toBe(false);
   });
 
-  it("keeps producer calls neutral and source-seals every retained receipt", async () => {
+  it("sends a named explicit capture and source-seals every retained receipt", async () => {
     const searchByKeywordField = vi.fn(async (
       _workspaceId: string,
       queryText: string,
       _limit: number,
       _scope?: unknown,
-      _refinementDepths?: unknown
+      _refinementDepths?: unknown,
+      _capture?: unknown
     ) => {
       const receipt = queryText === "expanded" ? completeReceipt() : truncatedReceipt();
       return fieldResult(receipt);
@@ -110,10 +111,10 @@ describe("lexical bound proof capture path", () => {
       scope: {}
     });
     expect(searchByKeywordField).toHaveBeenNthCalledWith(
-      1, "workspace-1", "relaxed", 2, {}
+      1, "workspace-1", "relaxed", 2, {}, undefined, { variant: "lexical_relaxed" }
     );
     expect(searchByKeywordField).toHaveBeenNthCalledWith(
-      2, "workspace-1", "expanded", 10, {}
+      2, "workspace-1", "expanded", 10, {}, undefined, { variant: "lexical_expanded" }
     );
     const proofs = bundle.memoryLexicalBoundProofs();
     expect(proofs).toHaveLength(2);
@@ -134,7 +135,7 @@ describe("lexical bound proof capture path", () => {
     )).size).toBe(2);
   });
 
-  it("keeps diagnostic on/off call args, results, and bundle cache trajectory identical", async () => {
+  it("keeps normal calls bare while explicit diagnostics retain their capture argument", async () => {
     for (const diagnosticCapture of ["answer_features", "packet_trace"] as const) {
       const normalResult = fieldResult(truncatedReceipt());
       const offSearch = vi.fn(async () => normalResult);
@@ -161,7 +162,9 @@ describe("lexical bound proof capture path", () => {
       const onFirst = await onBundle.searchMemoryKeyword(request);
       const onSecond = await onBundle.searchMemoryKeyword(request);
       expect(offSearch.mock.calls).toEqual([["workspace-1", "stable", 2, {}]]);
-      expect(onSearch.mock.calls).toEqual(offSearch.mock.calls);
+      expect(onSearch.mock.calls).toEqual([[
+        "workspace-1", "stable", 2, {}, undefined, { variant: "lexical_relaxed" }
+      ]]);
       expect([onFirst, onSecond]).toEqual([offFirst, offSecond]);
       expect(offBundle.memoryLexicalBoundProofs()).toEqual([]);
       const sealed = onBundle.memoryLexicalBoundProofs()[0];
@@ -204,7 +207,7 @@ describe("lexical bound proof capture path", () => {
     expect(bundle.memoryLexicalBoundProofs()).toEqual([]);
   });
 
-  it("source-seals against a supplied prepared vector without changing producer args", async () => {
+  it("source-seals an explicit capture against the supplied prepared vector", async () => {
     const searchByKeywordField = vi.fn(async () => fieldResult(truncatedReceipt()));
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
@@ -218,7 +221,9 @@ describe("lexical bound proof capture path", () => {
       limit: 2,
       scope: {}
     });
-    expect(searchByKeywordField).toHaveBeenCalledWith("workspace-1", "stable", 2, {});
+    expect(searchByKeywordField).toHaveBeenCalledWith(
+      "workspace-1", "stable", 2, {}, undefined, { variant: "lexical_relaxed" }
+    );
     const vectorDigest = `sha256:${"a".repeat(64)}` as const;
     const sealed = bundle.memoryLexicalBoundProofsForSnapshot(vectorDigest)[0];
     if (sealed === undefined || sealed.status !== "captured") {

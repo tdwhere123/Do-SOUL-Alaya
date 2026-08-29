@@ -29,8 +29,6 @@ import {
   measureSync,
   type TimedResult
 } from "./recall-phase-latency.js";
-import { buildCaptureProofDiagnostics, type CaptureProofDiagnostics } from
-  "../diagnostics/capture-proof-diagnostics.js";
 
 export type CollectedFineAssessmentData = Readonly<{
   readonly supplementaryData: FineAssessParams["supplementaryData"];
@@ -239,7 +237,7 @@ export function buildFineAssessParams(
     condition_digest: prepared.queryCondition.identity,
     memoryKeywordLanes: prepared.retrievalFieldBundle.memoryKeywordLanes(),
     memoryLexicalCaptures: prepared.retrievalFieldBundle.memoryLexicalCaptures(),
-    ...buildPsiV2LiveReceiptInput(prepared, supplementaryData, candidates),
+    ...buildPsiV2LiveReceiptInput(prepared),
     ...(membership === undefined ? {} : captureFineAssessmentMembership(
       membership.e0Keys,
       candidates
@@ -248,18 +246,10 @@ export function buildFineAssessParams(
 }
 
 function buildPsiV2LiveReceiptInput(
-  prepared: PreparedRecallRequest,
-  supplementaryData: FineAssessParams["supplementaryData"],
-  candidates: FineAssessParams["candidates"]
+  prepared: PreparedRecallRequest
 ): Partial<FineAssessParams> {
-  const diagnostics = buildCaptureProofDiagnostics(
-    prepared,
-    { supplementaryData },
-    candidates
-  );
-  const lexicalBoundProofs = prepared.retrievalFieldBundle
-    .memoryLexicalBoundProofsForSnapshot(prepared.snapshotVector.vector_digest);
-  const supportCandidateReceipts = supportReceiptsFrom(diagnostics, supplementaryData);
+  const lexicalIntervalSources = prepared.retrievalFieldBundle
+    .memoryLexicalIntervalSourcesForSnapshot(prepared.snapshotVector.vector_digest);
   return {
     queryProofAuthority: Object.freeze({
       workspace_id: prepared.queryCondition.condition.workspace_id,
@@ -272,59 +262,8 @@ function buildPsiV2LiveReceiptInput(
       expected_lexical_request_pins:
         prepared.retrievalFieldBundle.memoryLexicalRequestPins()
     }),
-    lexicalBoundProofs,
-    ...(supportCandidateReceipts.length === 0 ? {} : { supportCandidateReceipts })
+    ...(lexicalIntervalSources.length === 0 ? {} : { lexicalIntervalSources })
   };
-}
-
-function supportReceiptsFrom(
-  diagnostics: CaptureProofDiagnostics,
-  supplementaryData: FineAssessParams["supplementaryData"]
-): readonly NonNullable<FineAssessParams["supportCandidateReceipts"]>[number][] {
-  return Object.freeze(Object.values(diagnostics.candidate_proposition_provenance)
-    .flatMap((row) => supportReceiptFrom(row, supplementaryData)));
-}
-
-function supportReceiptFrom(
-  row: CaptureProofDiagnostics["candidate_proposition_provenance"][string],
-  supplementaryData: FineAssessParams["supplementaryData"]
-): readonly NonNullable<FineAssessParams["supportCandidateReceipts"]>[number][] {
-  const available = row.osf.bindings.status === "available" ||
-    row.typed_fact_frames.status === "available" ||
-    row.evidence_links.status === "available";
-  if (!available) return [];
-  const bindings = row.osf.bindings.status === "available"
-    ? row.osf.bindings.value.map((binding) => Object.freeze({
-      variable_id: binding.variable_id,
-      binding_identity: binding.binding_identity,
-      semantic_identity: binding.semantic_identity,
-      evidence_id: binding.evidence_id,
-      ...(binding.query_proposition_id === undefined
-        ? {}
-        : { query_proposition_id: binding.query_proposition_id })
-    }))
-    : undefined;
-  const factFrames = row.typed_fact_frames.status === "available"
-    ? row.typed_fact_frames.value.flatMap(({ capture, evidence_id }) =>
-      capture.fact_frame === null ? [] : capture.fact_frame.slots.map((slot) =>
-        Object.freeze({
-          semantic_identity: slot.text,
-          role: slot.role,
-          evidence_id
-        })))
-    : undefined;
-  return [Object.freeze({
-    candidate_key: row.candidate_key,
-    osf: Object.freeze({
-      composition_status: row.osf.composition_status,
-      truncated: supplementaryData.openSemanticFactorComposition?.truncated ?? false,
-      ...(bindings === undefined ? {} : { bindings: Object.freeze(bindings) })
-    }),
-    ...(factFrames === undefined ? {} : { fact_frames: Object.freeze(factFrames) }),
-    ...(row.evidence_links.status === "available"
-      ? { evidence_ids: row.evidence_links.value }
-      : {})
-  })];
 }
 
 export function captureFineAssessmentMembership(

@@ -22,6 +22,7 @@ import { errorNameOf, normalizeQueryText, toErrorMessage } from
 import type { RecallServiceDependencies } from "../recall-service-types.js";
 import { makeTokenEstimator } from "../recall-service-types.js";
 import {
+  capturesRecallAnswerFeatures,
   type PreparedRecallRequest,
   type RecallExecutionContext,
   type RecallExecutionParams
@@ -401,7 +402,9 @@ function createRetrievalBundle(
     evidenceSearchPort: context.dependencies.evidenceSearchPort,
     synthesisSearchPort: context.dependencies.synthesisSearchPort,
     refinementMaxDepth: policy.coarse_filter.semantic_supplement.field_observation_max_depth,
-    captureProof: true,
+    ...(capturesRecallAnswerFeatures(params.diagnosticCapture)
+      ? { captureProof: true as const }
+      : {}),
     onFailure: (operation, error) => context.warn("retrieval field query failed", {
       workspace_id: params.workspaceId,
       operation,

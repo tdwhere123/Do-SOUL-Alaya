@@ -1,42 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
 import { fineAssess } from "../../../recall/delivery/fine-assessment.js";
-import { compileRecallQueryProbes } from
-  "../../../recall/query/recall-query-probes.js";
-import { buildDefaultPolicy } from "../../../recall/runtime/orchestration.js";
-import { prepareRecallRequest } from
-  "../../../recall/runtime/query/prepare-recall-request.js";
-import { captureRecallRequestTime } from
-  "../../../recall/runtime/query/recall-request-time.js";
-import { createSeededTestOnlyInMemoryFieldQuerySession } from
-  "../../../recall/runtime/query/field-query-session.js";
 import { buildFineAssessParams } from
   "../../../recall/runtime/orchestration/recall-fine-assessment.js";
-import type {
-  CoarseRecallCandidate,
-  RecallSupplementaryData
-} from "../../../recall/runtime/recall-service-types.js";
 import type {
   PreparedRecallRequest,
   RecallExecutionContext,
   RecallExecutionParams
 } from "../../../recall/runtime/recall-service-runner-types.js";
-import { isFailClosedShadowTrace, type ShadowCapturedTrace } from
-  "../../../recall/shadow/integrate.js";
 import type { SupportCandidateReceiptV1 } from
   "../../../recall/shadow/support/index.js";
-import { FIELD_PINS } from "../fine-assessment-selection-fixtures.js";
 import { withFineDeliveryPath } from "../recall-service-test-fixtures.js";
-import { createDependencies, createTaskSurface } from
-  "../recall-service-test-fixtures.js";
-import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { evidenceCandidate, fieldCandidates } from "./canonical-delivery-fixtures.js";
-import { D1_REQUEST, plantProof } from "./d1/d1-proof-fixture.js";
-
-const NOW = "2026-08-29T00:00:00.000Z";
-const QUERY_RUN_ID = "storage-local-lane-label";
+import {
+  authorityFrom,
+  captured,
+  cleanup,
+  diagnostics,
+  keyOf,
+  lexicalPin,
+  lexicalProof,
+  params,
+  policyOf,
+  preparedAuthority,
+  supplementary,
+  supportReceipts,
+  withoutPsi
+} from "./live-receipt-fixtures.js";
 
 describe("live Band 1 receipt input", () => {
-  it("materializes prepared-authority lexical and support receipts only into Psi v2 diagnostics", async () => {
+  it("rejects metadata-only support instead of treating it as a proposition", async () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
     const base = fineAssess(params(candidates));
     const prepared = await preparedAuthority();
@@ -57,10 +49,18 @@ describe("live Band 1 receipt input", () => {
       ]
     });
     expect(observedTrace.psi_v2_shadow).toMatchObject({
-      observation_status: "observed"
+      observation_status: "malformed",
+      producer_outcomes: [
+        { producer_id: "lex.interval", status: "observed" },
+        {
+          producer_id: "support",
+          status: "malformed",
+          contract_code: "producer_contract_invalid"
+        }
+      ]
     });
     expect("support_graph_digest" in observedTrace.psi_v2_shadow &&
-      observedTrace.psi_v2_shadow.support_graph_digest).toMatch(/^sha256:/u);
+      observedTrace.psi_v2_shadow.support_graph_digest).toBeNull();
     expect(withoutPsi(observedTrace)).toEqual(withoutPsi(baseTrace));
     expect(observed.candidates).toEqual(base.candidates);
     expect(observed.capture_receipt).toEqual(base.capture_receipt);
@@ -102,7 +102,11 @@ describe("live Band 1 receipt input", () => {
       observation_status: "observed",
       producer_outcomes: [
         { producer_id: "lex.interval", status: "observed" },
-        { producer_id: "support", status: "not_observed", reason: "input_absent" }
+        {
+          producer_id: "support",
+          status: "not_observed",
+          reason: "applicable_receipt_absent"
+        }
       ]
     });
     cleanup(prepared);
@@ -122,7 +126,12 @@ describe("live Band 1 receipt input", () => {
         supportCandidateReceipts: supportReceipts()
       });
       expect(captured(observed.shadowTrace).psi_v2_shadow).toMatchObject({
-        observation_status: "observed"
+        observation_status: "malformed",
+        producer_outcomes: expect.arrayContaining([{
+          producer_id: "support",
+          status: "malformed",
+          contract_code: "producer_contract_invalid"
+        }])
       });
       expect(observed.candidates).toEqual(base.candidates);
       expect(observed.ranking_authority).toBe("select_gamma");
@@ -183,10 +192,28 @@ describe("live Band 1 receipt input", () => {
     cleanup(prepared);
   });
 
-  it("carries Band 1 authority without a diagnostic flag and ignores query_run_id as query identity", async () => {
+  it("preserves typed prepared-authority rejection in producer diagnostics", async () => {
+    const prepared = await preparedAuthority();
+    const authority = authorityFrom(prepared);
+    const rejected = fineAssess({
+      ...params(fieldCandidates(["cand-a", "cand-b"])),
+      queryProofAuthority: {
+        ...authority,
+        query_condition: { ...authority.query_condition, identity: "untrusted-marker" }
+      },
+      lexicalBoundProofs: [lexicalProof(prepared.snapshotVector.vector_digest)]
+    });
+    expect(diagnostics(captured(rejected.shadowTrace)).producer_outcomes).toContainEqual({
+      producer_id: "lex.interval",
+      status: "malformed",
+      contract_code: "authority_query_condition_invalid"
+    });
+    cleanup(prepared);
+  });
+
+  it("carries prepared authority without a diagnostic flag while support stays absent", async () => {
     const candidates = [evidenceCandidate("cand-a", "evidence-a")];
     const prepared = await preparedAuthority();
-    const proof = lexicalProof(prepared.snapshotVector.vector_digest);
     const built = buildFineAssessParams(
       { warn: vi.fn() } as unknown as RecallExecutionContext,
       {
@@ -197,8 +224,7 @@ describe("live Band 1 receipt input", () => {
         retrievalFieldBundle: {
           memoryKeywordLanes: () => [],
           memoryLexicalCaptures: () => [],
-          memoryLexicalBoundProofs: () => [proof],
-          memoryLexicalBoundProofsForSnapshot: () => [proof],
+          memoryLexicalIntervalSourcesForSnapshot: () => [],
           memoryLexicalRequestPins: () => [lexicalPin()]
         }
       } as unknown as PreparedRecallRequest,
@@ -210,18 +236,23 @@ describe("live Band 1 receipt input", () => {
       .condition_identity).toBe(prepared.queryCondition.identity);
     expect(built.queryProofAuthority?.snapshot_vector.vector_digest)
       .toBe(prepared.snapshotVector.vector_digest);
-    expect(built.lexicalBoundProofs).toEqual([proof]);
-    expect(built.supportCandidateReceipts?.[0]?.evidence_ids).toEqual(["evidence-a"]);
+    expect(built.lexicalIntervalSources).toBeUndefined();
+    expect(built.supportCandidateReceipts).toBeUndefined();
     expect(captured(fineAssess({
       ...built,
       policy: withFineDeliveryPath(built.policy, "canonical")
     }).shadowTrace).psi_v2_shadow).toMatchObject({
-      observation_status: "observed"
+      observation_status: "not_observed",
+      producer_outcomes: expect.arrayContaining([{
+        producer_id: "support",
+        status: "not_observed",
+        reason: "applicable_receipt_absent"
+      }])
     });
     cleanup(prepared);
   });
 
-  it("keeps support observed when the lexical producer is malformed", async () => {
+  it("keeps metadata-only support malformed when the lexical producer is malformed", async () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
     const prepared = await preparedAuthority();
     const base = fineAssess(params(candidates));
@@ -239,7 +270,11 @@ describe("live Band 1 receipt input", () => {
           status: "malformed",
           contract_code: "authority_identity_mismatch"
         },
-        { producer_id: "support", status: "observed" }
+        {
+          producer_id: "support",
+          status: "malformed",
+          contract_code: "producer_contract_invalid"
+        }
       ]
     });
     expect(observed.candidates).toEqual(base.candidates);
@@ -311,164 +346,3 @@ describe("live Band 1 receipt input", () => {
     cleanup(prepared);
   });
 });
-
-function lexicalProof(snapshotDigest: string | null = null) {
-  return plantProof({
-    queryRunId: QUERY_RUN_ID,
-    requestDigest: D1_REQUEST,
-    snapshotDigest,
-    lanes: {
-      porter: {
-        rows: [
-          { key: "cand-a", ordinal: 0.9 },
-          { key: "cand-b", ordinal: 0.4 }
-        ],
-        universeKeys: ["cand-a", "cand-b"]
-      }
-    }
-  });
-}
-
-function lexicalPin() {
-  return Object.freeze({
-    workspace_id: "workspace-1",
-    request_digest: D1_REQUEST,
-    field_prefix: "lexical_relaxed" as const,
-    candidate_key_domain: "memory_object_id" as const
-  });
-}
-
-function authorityFrom(prepared: PreparedRecallRequest) {
-  return Object.freeze({
-    workspace_id: "workspace-1",
-    query_condition: prepared.queryCondition,
-    canonical_query_evidence: prepared.canonicalQueryEvidence,
-    canonical_query_compilation: prepared.canonicalQueryCompilation,
-    snapshot_vector: prepared.snapshotVector,
-    snapshot_coherence_receipt: prepared.snapshotCoherenceReceipt,
-    snapshot_read_lease: prepared.snapshotReadLease,
-    expected_lexical_request_pins: [lexicalPin()]
-  });
-}
-
-function diagnostics(trace: ShadowCapturedTrace) {
-  if (!("producer_outcomes" in trace.psi_v2_shadow)) {
-    throw new Error("expected typed Psi v2 producer outcomes");
-  }
-  return trace.psi_v2_shadow;
-}
-
-async function preparedAuthority(): Promise<PreparedRecallRequest> {
-  const { dependencies } = createDependencies([]);
-  const taskSurface = createTaskSurface();
-  return await prepareRecallRequest({
-    dependencies,
-    warn: () => undefined,
-    now: () => NOW,
-    buildDefaultPolicy: () => policyOf(),
-    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
-      fieldContractSha256, "workspace-1"
-    ),
-    sha256: fieldContractSha256
-  }, {
-    taskSurface,
-    workspaceId: "workspace-1",
-    strategy: "analyze"
-  }, captureRecallRequestTime({ now: () => NOW }));
-}
-
-function cleanup(prepared: PreparedRecallRequest): void {
-  prepared.releaseProjectionPin();
-  prepared.projectionPinLease.stop();
-}
-
-function supportReceipts(): readonly SupportCandidateReceiptV1[] {
-  return [{
-    candidate_key: keyOf("cand-a"),
-    osf: {
-      composition_status: "composed",
-      truncated: false,
-      bindings: [{
-        variable_id: "x0",
-        binding_identity: "binding.operator",
-        semantic_identity: "operator",
-        evidence_id: "evidence-a",
-        query_proposition_id: "proposition.workspace"
-      }]
-    },
-    evidence_ids: ["evidence-a"]
-  }];
-}
-
-function params(
-  candidates: readonly CoarseRecallCandidate[],
-  path: "canonical" | "legacy" = "canonical"
-) {
-  const policy = policyOf();
-  return {
-    ...FIELD_PINS,
-    candidates,
-    policy: withFineDeliveryPath(policy, path),
-    winnerMemoryIds: new Set<string>(),
-    supplementaryData: supplementary(candidates),
-    tokenEstimator: { estimate: () => 4 },
-    now: () => NOW,
-    warn: vi.fn()
-  };
-}
-
-function policyOf() {
-  return buildDefaultPolicy({
-    strategy: "build",
-    taskSurfaceRef: "task-surface-1",
-    now: () => NOW,
-    generateRuntimeId: () => "33333333-3333-4333-8333-333333333333"
-  });
-}
-
-function supplementary(candidates: readonly CoarseRecallCandidate[]): RecallSupplementaryData {
-  return {
-    queryProbes: compileRecallQueryProbes("where does the operator work?"),
-    ftsRanks: Object.fromEntries(candidates.map(({ entry }, index) =>
-      [entry.object_id, 1 - index * 0.1])),
-    trigramFtsRanks: {},
-    synthesisFtsRanks: {},
-    evidenceFtsRanks: {},
-    evidenceProjectionMatchesByRef: {},
-    sourceProximityScores: {},
-    sourceCohortKeys: {},
-    structuralScores: {},
-    graphExpansionScores: {},
-    entitySeedScores: {},
-    pathExpansionScores: {},
-    pathSuppressionScores: {},
-    embeddingSimilarityScores: {},
-    evidenceSemanticActivationsByCandidateKey: new Map(),
-    graphSupportCounts: {},
-    budgetPenaltyFactor: 0,
-    plasticityFactors: {},
-    graphAndPathColdScore: 0,
-    recallsEdgeCount: 0,
-    weightTransferAmount: 0,
-    evidenceGistsByMemoryId: {},
-    governanceCeilingByMemoryId: {}
-  };
-}
-
-function captured(trace: ReturnType<typeof fineAssess>["shadowTrace"]): ShadowCapturedTrace {
-  expect(trace).toBeDefined();
-  expect(isFailClosedShadowTrace(trace!)).toBe(false);
-  if (trace === undefined || isFailClosedShadowTrace(trace)) {
-    throw new Error("expected captured shadow trace");
-  }
-  return trace;
-}
-
-function withoutPsi(trace: ShadowCapturedTrace) {
-  const { psi_v2_shadow: _psi, ...rest } = trace;
-  return rest;
-}
-
-function keyOf(objectId: string): string {
-  return `workspace_local:memory_entry:${objectId}`;
-}

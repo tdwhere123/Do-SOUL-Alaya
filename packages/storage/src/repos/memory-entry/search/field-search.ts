@@ -216,7 +216,7 @@ function buildKeywordFieldView(
     matches: core.matches,
     lanes: core.lanes,
     lexical_raw_rank: stripLexicalRawRankForLiveCapture(receipt),
-    lexical_raw_rank_receipt: receipt
+    ...(capture === undefined ? {} : { lexical_raw_rank_receipt: receipt })
   });
 }
 

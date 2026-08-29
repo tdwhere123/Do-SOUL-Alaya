@@ -58,6 +58,8 @@ import type { LexicalBoundProof } from
   "../runtime/diagnostics/lexical-bound-proof.js";
 import type { LiveQueryProofAuthority } from
   "../runtime/query/live-query-proof-authority.js";
+import type { LexicalIntervalSourceReceiptV1 } from
+  "../field/retrieval/lexical-interval-source-receipt.js";
 import type { SupportCandidateReceiptV1 } from
   "../shadow/support/index.js";
 
@@ -87,6 +89,7 @@ export interface FineAssessParams {
   readonly memoryKeywordLanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
   readonly memoryLexicalCaptures?: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly lexicalBoundProofs?: readonly Readonly<LexicalBoundProof>[];
+  readonly lexicalIntervalSources?: readonly Readonly<LexicalIntervalSourceReceiptV1>[];
   readonly supportCandidateReceipts?: readonly Readonly<SupportCandidateReceiptV1>[];
   readonly queryProofAuthority?: Readonly<LiveQueryProofAuthority>;
   readonly e0Keys?: readonly string[];

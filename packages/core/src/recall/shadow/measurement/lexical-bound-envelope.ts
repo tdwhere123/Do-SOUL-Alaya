@@ -12,6 +12,8 @@ import {
   type LexDomain,
   type LexLaneId
 } from "../observations.js";
+import type { LexicalIntervalSourceReceiptCapturedV1 } from
+  "../../field/retrieval/lexical-interval-source-receipt.js";
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const MEMORY_ENTRY_FIELD_KEY = /^(?:workspace_local|global):memory_entry:(.+)$/u;
@@ -75,6 +77,59 @@ export function lexicalBoundEnvelopes(
     request_digest: sealedDigest(proof.identity.request_digest),
     primary: proofLegal ? primaryOf(proof, lookupKey, lanes) : null,
     lanes
+  });
+}
+
+export function lexicalIntervalSourceEnvelopes(
+  source: Readonly<LexicalIntervalSourceReceiptCapturedV1>,
+  candidateKey: string
+): D1CandidateEnvelopeMap {
+  const identity = Object.freeze({
+    field_prefix: source.field_prefix,
+    query_run_id: source.capture.query_run_id,
+    snapshot_digest: source.snapshot_digest,
+    request_digest: source.request_digest,
+    workspace_id: source.workspace_id
+  });
+  const lanes: Partial<Record<LexLaneId, D1LaneEnvelope>> = {};
+  for (const lane of source.capture.lanes) {
+    lanes[lane.lane_id] = Object.freeze({
+      domain: parseLexDomain(lane),
+      value: UNBOUNDED
+    });
+  }
+  const lookupKey = proofLookupKey(candidateKey);
+  const observation = source.capture.candidates.find((row) =>
+    row.candidate_key === lookupKey);
+  const laneId = observation?.chosen_lane_id;
+  const rank = observation?.chosen_normalized_rank;
+  const lane = laneId === null || laneId === undefined ? undefined : lanes[laneId];
+  if (laneId === null || laneId === undefined || lane === undefined || lane.domain === null ||
+      typeof rank !== "number" || !Number.isFinite(rank)) {
+    return sourceEnvelope(identity, source.capture.query_run_id, lanes, null);
+  }
+  const point = Object.freeze({ kind: "interval" as const, lower: rank, upper: rank });
+  lanes[laneId] = Object.freeze({ domain: lane.domain, value: point });
+  return sourceEnvelope(identity, source.capture.query_run_id, lanes, Object.freeze({
+    domain: lane.domain,
+    envelope: point
+  }));
+}
+
+function sourceEnvelope(
+  identity: D1EnvelopeIdentity,
+  queryRunId: string,
+  lanes: Partial<Record<LexLaneId, D1LaneEnvelope>>,
+  primary: D1PrimaryObservation | null
+): D1CandidateEnvelopeMap {
+  return Object.freeze({
+    identity,
+    field_prefix: identity.field_prefix,
+    query_run_id: queryRunId,
+    snapshot_digest: identity.snapshot_digest,
+    request_digest: identity.request_digest,
+    primary,
+    lanes: Object.freeze(lanes)
   });
 }
 

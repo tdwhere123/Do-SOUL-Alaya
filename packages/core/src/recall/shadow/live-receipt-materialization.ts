@@ -2,20 +2,24 @@ import type { FineAssessParams } from "../delivery/fine-assessment.js";
 import { buildRecallCandidateDedupeKey } from
   "../runtime/recall-service-helpers.js";
 import {
+  admitLiveLexicalIntervalSources,
   admitLiveLexicalProofs,
+  liveQueryProofAuthorityFailureCode,
   verifyLiveQueryProofAuthority,
+  type LiveQueryProofAuthorityFailureCode,
   type VerifiedLiveQueryProofPins
 } from "../runtime/query/live-query-proof-authority.js";
 import type { ShadowIntegrateInput } from "./integrate.js";
-import { lexicalBoundEnvelopes } from "./measurement/lexical-bound-envelope.js";
+import {
+  lexicalBoundEnvelopes,
+  lexicalIntervalSourceEnvelopes
+} from "./measurement/lexical-bound-envelope.js";
 import {
   LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-  PROPOSITION_STATE_MEASUREMENT_CONTRACT,
   verifyMeasurementPreparedAuthorityV1,
   type VerifiedMeasurementAuthorityV1
 } from "./measurement/index.js";
 import {
-  materializeSupportFromReceipts,
   type SupportMaterializationV1
 } from "./support/index.js";
 import type { PsiV2ProducerOutcomeV1 } from "./psi-v2/index.js";
@@ -56,7 +60,8 @@ type AuthorityState =
       readonly pins: VerifiedLiveQueryProofPins }>
   | Readonly<{ readonly status: "unavailable" }>
   | Readonly<{ readonly status: "identity_mismatch" }>
-  | Readonly<{ readonly status: "verification_failed" }>;
+  | Readonly<{ readonly status: "verification_failed";
+      readonly failure_code: LiveQueryProofAuthorityFailureCode | null }>;
 
 function verifyAuthority(
   params: FineAssessParams,
@@ -72,27 +77,115 @@ function verifyAuthority(
       authority,
       pins: verifyLiveQueryProofAuthority(authority)
     });
-  } catch {
-    return Object.freeze({ status: "verification_failed" });
+  } catch (error) {
+    return Object.freeze({
+      status: "verification_failed",
+      failure_code: liveQueryProofAuthorityFailureCode(error)
+    });
   }
-}
-
-function supportAuthority(
-  authority: LiveAuthority
-): VerifiedMeasurementAuthorityV1 {
-  return verifyMeasurementPreparedAuthorityV1({
-    evidence: preparedEvidence(authority),
-    contract: PROPOSITION_STATE_MEASUREMENT_CONTRACT
-  });
 }
 
 function materializeLexicalIntervals(
   params: FineAssessParams,
   authorityState: AuthorityState
 ): ProducerResult<NonNullable<ShadowIntegrateInput["lexicalIntervalEnvelopesByKey"]>> {
+  if (params.lexicalIntervalSources !== undefined) {
+    return materializeLexicalIntervalSources(params, authorityState);
+  }
+  return materializeLegacyLexicalIntervals(params, authorityState);
+}
+
+function materializeLexicalIntervalSources(
+  params: FineAssessParams,
+  authorityState: AuthorityState
+): ProducerResult<NonNullable<ShadowIntegrateInput["lexicalIntervalEnvelopesByKey"]>> {
+  const values = params.lexicalIntervalSources;
+  if (values === undefined || values.length === 0) return absent("lex.interval");
+  const preflight = lexicalIntervalSourcePreflight(values, authorityState);
+  if (preflight !== null) return preflight;
+  if (authorityState.status !== "verified") {
+    return malformed("lex.interval", "diagnostic_contract_failure");
+  }
+  const authority = authorityState.authority;
+  try {
+    const admitted = admitLiveLexicalIntervalSources(authority, values);
+    if (admitted === undefined) return malformed("lex.interval", "producer_contract_invalid");
+    if (admitted.some((source) => source.status === "unavailable")) {
+      return unavailable("lex.interval", "source_unavailable");
+    }
+    const relaxed = admitted.filter((source) =>
+      source.status === "captured" && source.field_prefix === "lexical_relaxed");
+    if (relaxed.length !== 1) return unavailable("lex.interval", "source_unavailable");
+    const source = relaxed[0];
+    if (source === undefined || source.status !== "captured") {
+      return unavailable("lex.interval", "source_unavailable");
+    }
+    const pin = authority.expected_lexical_request_pins.find((candidate) =>
+      sourcePinKey(candidate) === sourcePinKey(source));
+    if (pin === undefined) return malformed("lex.interval", "measurement_identity_pin_absent");
+    const measurementAuthority = verifyMeasurementPreparedAuthorityV1({
+      evidence: { ...preparedEvidence(authority), lexical_request_pin: pin },
+      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
+    });
+    const envelopes = Object.freeze(Object.fromEntries(params.candidates.map((candidate) => {
+      const key = buildRecallCandidateDedupeKey(candidate);
+      return [key, lexicalIntervalSourceEnvelopes(source, key)];
+    })));
+    if (!Object.values(envelopes).some((envelope) => envelope.primary !== null)) {
+      return notObserved("lex.interval", "applicable_receipt_absent");
+    }
+    return Object.freeze({
+      payload: envelopes,
+      measurementAuthority,
+      outcome: observed("lex.interval")
+    });
+  } catch {
+    return malformed("lex.interval", "producer_contract_invalid");
+  }
+}
+
+function lexicalIntervalSourcePreflight(
+  values: NonNullable<FineAssessParams["lexicalIntervalSources"]>,
+  authorityState: AuthorityState
+): ProducerResult<never> | null {
+  const keys = values.map(sourcePinKey);
+  if (new Set(keys).size !== keys.length) return malformed("lex.interval", "duplicate_receipt");
+  const authorityFailure = failureForAuthority("lex.interval", authorityState);
+  if (authorityFailure !== null) return authorityFailure;
+  if (authorityState.status !== "verified") {
+    return malformed("lex.interval", "diagnostic_contract_failure");
+  }
+  const authority = authorityState.authority;
+  if (values.some((source) =>
+    source.snapshot_digest !== authority.snapshot_vector.vector_digest)) {
+    return malformed("lex.interval", "authority_identity_mismatch");
+  }
+  const expected = new Set(authority.expected_lexical_request_pins.map(sourcePinKey));
+  if (keys.some((key) => !expected.has(key))) {
+    return malformed("lex.interval", "authority_identity_mismatch");
+  }
+  if (keys.length < expected.size) return unavailable("lex.interval", "source_unavailable");
+  if (keys.length > expected.size) return malformed("lex.interval", "producer_contract_invalid");
+  return null;
+}
+
+function sourcePinKey(input: Readonly<{
+  readonly workspace_id: string;
+  readonly request_digest: string;
+  readonly field_prefix: string;
+  readonly candidate_key_domain: string;
+}>): string {
+  return [input.workspace_id, input.request_digest,
+    input.field_prefix, input.candidate_key_domain].join("\u0000");
+}
+
+function materializeLegacyLexicalIntervals(
+  params: FineAssessParams,
+  authorityState: AuthorityState
+): ProducerResult<NonNullable<ShadowIntegrateInput["lexicalIntervalEnvelopesByKey"]>> {
   const values = params.lexicalBoundProofs;
   if (values === undefined || values.length === 0) return absent("lex.interval");
-  const preflight = lexicalPreflight(values, authorityState);
+  const preflight = legacyLexicalPreflight(values, authorityState);
   if (preflight !== null) return preflight;
   if (authorityState.status !== "verified") {
     return malformed("lex.interval", "diagnostic_contract_failure");
@@ -130,7 +223,7 @@ function materializeLexicalIntervals(
   }
 }
 
-function lexicalPreflight(
+function legacyLexicalPreflight(
   values: NonNullable<FineAssessParams["lexicalBoundProofs"]>,
   authorityState: AuthorityState
 ): ProducerResult<never> | null {
@@ -174,7 +267,11 @@ function materializeSupport(
   authorityState: AuthorityState
 ): ProducerResult<SupportMaterializationV1> {
   const receipts = params.supportCandidateReceipts;
-  if (receipts === undefined || receipts.length === 0) return absent("support");
+  if (receipts === undefined || receipts.length === 0) {
+    return authorityState.status === "verified"
+      ? notObserved("support", "applicable_receipt_absent")
+      : absent("support");
+  }
   if (receipts.some((receipt) => !supportReceiptShapeValid(receipt))) {
     return malformed("support", "producer_contract_invalid");
   }
@@ -186,29 +283,7 @@ function materializeSupport(
   }
   const authorityFailure = failureForAuthority("support", authorityState);
   if (authorityFailure !== null) return authorityFailure;
-  if (authorityState.status !== "verified") {
-    return malformed("support", "diagnostic_contract_failure");
-  }
-  const { authority, pins } = authorityState;
-  try {
-    const payload = materializeSupportFromReceipts({
-      query_id: pins.query_id,
-      snapshot_digest: pins.snapshot_digest,
-      authority_context: {
-        snapshot_vector: authority.snapshot_vector,
-        snapshot_receipt: authority.snapshot_coherence_receipt,
-        read_lease: authority.snapshot_read_lease
-      },
-      candidates: receipts
-    });
-    return Object.freeze({
-      payload,
-      measurementAuthority: supportAuthority(authority),
-      outcome: observed("support")
-    });
-  } catch {
-    return malformed("support", "producer_contract_invalid");
-  }
+  return malformed("support", "producer_contract_invalid");
 }
 
 function supportReceiptShapeValid(
@@ -234,10 +309,28 @@ function failureForAuthority(
 ): ProducerResult<never> | null {
   if (state.status === "verified") return null;
   if (state.status === "unavailable") return unavailable(producerId, "authority_unavailable");
-  return malformed(producerId, state.status === "identity_mismatch"
-    ? "authority_identity_mismatch"
-    : "authority_verification_failed");
+  if (state.status === "identity_mismatch") {
+    return malformed(producerId, "authority_identity_mismatch");
+  }
+  return malformed(producerId, state.failure_code === null
+    ? "authority_verification_failed"
+    : AUTHORITY_CONTRACT_CODES[state.failure_code]);
 }
+
+type MalformedContractCode =
+  Extract<PsiV2ProducerOutcomeV1, { status: "malformed" }>["contract_code"];
+
+const AUTHORITY_CONTRACT_CODES = Object.freeze({
+  query_condition_invalid: "authority_query_condition_invalid",
+  workspace_identity_mismatch: "authority_workspace_identity_mismatch",
+  canonical_query_invalid: "authority_canonical_query_invalid",
+  canonical_query_identity_mismatch: "authority_canonical_query_identity_mismatch",
+  canonical_snapshot_receipt_mismatch: "authority_canonical_snapshot_receipt_mismatch",
+  snapshot_vector_invalid: "authority_snapshot_vector_invalid",
+  snapshot_coherence_invalid: "authority_snapshot_coherence_invalid",
+  snapshot_lease_invalid: "authority_snapshot_lease_invalid",
+  lexical_request_pin_invalid: "authority_lexical_request_pin_invalid"
+}) satisfies Readonly<Record<LiveQueryProofAuthorityFailureCode, MalformedContractCode>>;
 
 function observed(producer_id: PsiV2ProducerOutcomeV1["producer_id"]): PsiV2ProducerOutcomeV1 {
   return Object.freeze({ producer_id, status: "observed" as const });
@@ -246,6 +339,15 @@ function observed(producer_id: PsiV2ProducerOutcomeV1["producer_id"]): PsiV2Prod
 function absent(producer_id: PsiV2ProducerOutcomeV1["producer_id"]): ProducerResult<never> {
   return Object.freeze({
     outcome: Object.freeze({ producer_id, status: "not_observed", reason: "input_absent" })
+  });
+}
+
+function notObserved(
+  producer_id: PsiV2ProducerOutcomeV1["producer_id"],
+  reason: Extract<PsiV2ProducerOutcomeV1, { status: "not_observed" }>["reason"]
+): ProducerResult<never> {
+  return Object.freeze({
+    outcome: Object.freeze({ producer_id, status: "not_observed", reason })
   });
 }
 

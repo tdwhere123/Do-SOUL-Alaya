@@ -164,7 +164,7 @@ describe("per-lane evaluated universe witness", () => {
     expect(universe(field, "trigram").applicability).toEqual({ applicable: true });
   });
 
-  it("does zero universe queries while exposing the normal producer receipt", async () => {
+  it("does zero universe queries and omits the fat receipt when capture is off", async () => {
     const { repo, database } = await seedPopulation();
     const sql: string[] = [];
     const original = database.connection.prepare.bind(database.connection);
@@ -174,10 +174,8 @@ describe("per-lane evaluated universe witness", () => {
     }) as typeof database.connection.prepare;
 
     const field = await repo.searchByKeywordField!("workspace-1", "go stable", 8);
-    expect(field.lexical_raw_rank_receipt).toBeDefined();
-    expect(field.lexical_raw_rank_receipt?.lanes.every((lane) =>
-      lane.evaluated_universe === undefined
-    )).toBe(true);
+    expect(field).not.toHaveProperty("lexical_raw_rank_receipt");
+    expect(JSON.stringify(field)).not.toContain("evaluated_universe");
     expect(field.lexical_raw_rank?.lanes.every((lane) => !("evaluated_universe" in lane))).toBe(true);
     expect(sql.some(isUniverseExactSql)).toBe(false);
     expect(sql.some(isUniverseIndexedSql)).toBe(false);
