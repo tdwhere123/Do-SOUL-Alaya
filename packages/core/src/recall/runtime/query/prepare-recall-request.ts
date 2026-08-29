@@ -36,7 +36,9 @@ import {
 import type { ProjectionPinLeaseGuard } from "./projection-pin-lease.js";
 import {
   PREPARE_RETRIEVAL_CHANNEL_OWNERS,
-  capturePreparedSnapshotCoherenceReceipt
+  capturePreparedSnapshotVector,
+  createSnapshotCoherenceReceiptV1,
+  finalizePreparedSnapshotReadLease
 } from "../snapshot-coherence/index.js";
 import {
   compileCanonicalQueryCompilation,
@@ -94,16 +96,16 @@ async function loadPinnedPreparedRequest(input: Readonly<{
       time.captureOperationalTime()
     );
     projectionPinLease.assertHealthy();
+    const world = capturePinnedQueryWorld(
+      captured, params, certified, seed.queryText, fieldSelection.candidate_keys
+    );
+    projectionPinLease.assertHealthy();
     const loaded = await loadPreparationInputs(
       context,
       params,
       seed,
       fieldSelection.candidate_keys,
       captured.referenceTime
-    );
-    projectionPinLease.assertHealthy();
-    const world = capturePinnedQueryWorld(
-      captured, params, certified, seed.queryText, fieldSelection.candidate_keys
     );
     return freezePreparedRequest({
       seed, loaded, time, captured, fieldSelection, projectionPinLease,
@@ -122,13 +124,15 @@ function capturePinnedQueryWorld(
   queryText: string | null,
   observableObjectIds: readonly string[]
 ) {
-  const snapshotCoherenceReceipt = capturePreparedSnapshotCoherenceReceipt({
+  const snapshotVector = capturePreparedSnapshotVector({
     queryCondition: captured.receipt,
     pin: captured.pin,
     snapshotDigest: params.snapshotDigest,
     retrieval_channel_owners: PREPARE_RETRIEVAL_CHANNEL_OWNERS,
     formation_operator_versions: declaredFormationVersions(certified)
   });
+  const snapshotReadLease = finalizePreparedSnapshotReadLease(snapshotVector);
+  const snapshotCoherenceReceipt = createSnapshotCoherenceReceiptV1(snapshotVector);
   const baseProbes = compileRecallQueryProbes(queryText);
   const canonicalQueryEvidence = {
     probes: baseProbes,
@@ -148,7 +152,7 @@ function capturePinnedQueryWorld(
     canonicalQueryEvidence,
     snapshotCoherenceReceipt
   );
-  return { snapshotCoherenceReceipt, canonicalQueryCompilation };
+  return { snapshotCoherenceReceipt, snapshotReadLease, canonicalQueryCompilation };
 }
 
 function observerFromPinnedObjects(
@@ -170,7 +174,9 @@ function uniqueObserverIds(objectIds: readonly string[]): readonly string[] {
   const seen = new Set<string>();
   const ids: string[] = [];
   for (const id of objectIds) {
-    if (id.length === 0 || id.trim() !== id || seen.has(id)) continue;
+    if (id.length === 0 || id.trim() !== id || seen.has(id)) {
+      return Object.freeze([]);
+    }
     seen.add(id);
     ids.push(id);
   }
@@ -237,6 +243,7 @@ function freezePreparedRequest(input: Readonly<{
       ? undefined
       : input.certified.receipt,
     snapshotCoherenceReceipt: input.world.snapshotCoherenceReceipt,
+    snapshotReadLease: input.world.snapshotReadLease,
     canonicalQueryCompilation: input.world.canonicalQueryCompilation
   });
 }

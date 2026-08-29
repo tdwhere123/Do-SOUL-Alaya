@@ -54,6 +54,7 @@ export type CanonicalCompletionV1 =
       readonly snapshot_bind: "Sigma_q";
       readonly observer_universe: readonly string[];
       readonly observer_contract: string;
+      readonly snapshot_receipt_digest: string;
     }>;
 
 export type CanonicalAnswerProgramV1 =

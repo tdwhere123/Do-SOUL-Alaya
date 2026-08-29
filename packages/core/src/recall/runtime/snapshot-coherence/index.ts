@@ -34,4 +34,24 @@ export {
   capturePreparedSnapshotVector,
   digestRecallDecisionContractV1
 } from "./prepare-adapter.js";
+export { finalizePreparedSnapshotReadLease } from "./prepare-lease.js";
 export { unavailableProducerDigest } from "./digest.js";
+export {
+  SNAPSHOT_READ_LEASE_OPERATOR_ID,
+  SNAPSHOT_READ_LEASE_REJECT_CODES,
+  SNAPSHOT_READ_LEASE_STATES,
+  SNAPSHOT_READ_LEASE_VIEW_KINDS,
+  SnapshotReadLeaseError,
+  bindSnapshotReadLease,
+  finalizeSnapshotReadLease,
+  openSnapshotReadLease,
+  readSnapshotLeaseCapability,
+  releaseSnapshotReadLease,
+  type SnapshotReadLeaseBindInput,
+  type SnapshotReadLeaseCapabilityV1,
+  type SnapshotReadLeaseOpenInput,
+  type SnapshotReadLeaseRejectCode,
+  type SnapshotReadLeaseState,
+  type SnapshotReadLeaseV1,
+  type SnapshotReadLeaseViewKind
+} from "./lease.js";

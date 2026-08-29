@@ -14,10 +14,11 @@ import { compileRecallQueryProbes } from
   "../../../../recall/query/recall-query-probes.js";
 
 const CJK_PLACE = "咖啡奶精优惠券在哪里兑换？";
-const WHAT_BUY = "What did Alice buy?";
 const BOOKSHELF = "Where did I buy my new bookshelf from?";
 const EMPTY_DEMAND = Object.freeze({ schema_version: 1 as const, atoms: [] });
 const SNAPSHOT = Object.freeze({
+  principal: "principal-1",
+  authorized_scopes: ["scope-1"],
   receipt_digest: `sha256:${"c".repeat(64)}`,
   coherence_state: "coherent_exact" as const
 });
@@ -28,7 +29,7 @@ const QUERY_IDENTITY = Object.freeze({
   query_cache_key: "cache-1"
 });
 
-describe("Card 06 Blocking repair falsifiers", () => {
+describe("canonical query binding holes", () => {
   it("keeps a shape target hole local when another CJK hypothesis binds its answer", () => {
     const compilation = compileCjk(QUERY_IDENTITY);
     const shape = hypothesisFrom(compilation, "shape.relation_terms");
@@ -44,11 +45,12 @@ describe("Card 06 Blocking repair falsifiers", () => {
   });
 
   it("binds x0 from one interrogative slot and rejects a frame with no answer slot", () => {
+    const boundQuery = "Where did Alice buy the book?";
     const bound = compileCanonicalQueryEvidence({
-      probes: compileRecallQueryProbes(WHAT_BUY),
+      probes: compileRecallQueryProbes(boundQuery),
       demand: EMPTY_DEMAND,
-      factFrameCapture: returnedFactFrame(WHAT_BUY, [captureFrame([
-        { role: "value", text: "What" },
+      factFrameCapture: returnedFactFrame(boundQuery, [captureFrame([
+        { role: "value", text: "Where" },
         { role: "subject", text: "Alice" },
         { role: "relation", text: "buy" }
       ])])

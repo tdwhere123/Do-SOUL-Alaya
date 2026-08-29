@@ -86,11 +86,14 @@ export type CanonicalQueryCompilationV1 = Readonly<{
   readonly digest: RecallFieldDigest;
 }>;
 
+type QuerySnapshotInputV1 = Readonly<Pick<SnapshotCoherenceReceiptV1,
+  "principal" | "authorized_scopes" | "receipt_digest" | "coherence_state">>;
+
 export function compileCanonicalQueryCompilation(
   evidence: CanonicalQueryEvidenceV1,
-  snapshot: Readonly<Pick<SnapshotCoherenceReceiptV1, "receipt_digest" | "coherence_state">>
+  snapshot: QuerySnapshotInputV1
 ): CanonicalQueryCompilationV1 {
-  const compiled = compileCanonicalQueryEvidence(evidence);
+  const compiled = compileCanonicalQueryEvidence(evidence, snapshot);
   const queryIdentity = bindQueryIdentity(evidence.query_identity);
   const holes = Object.freeze([
     ...collectHoles(compiled),
@@ -121,7 +124,7 @@ export function compileCanonicalQueryCompilation(
 export function verifyCanonicalQueryCompilationV1(
   compilation: CanonicalQueryCompilationV1,
   evidence: CanonicalQueryEvidenceV1,
-  snapshot: Readonly<Pick<SnapshotCoherenceReceiptV1, "receipt_digest" | "coherence_state">>
+  snapshot: QuerySnapshotInputV1
 ): void {
   verifyHypotheses(compilation.hypotheses);
   verifyHoleImpacts(compilation.holes);
@@ -308,7 +311,11 @@ export function impactsFor(code: string): QueryHoleImpactV1[] {
     || code === "unbound_target_term" || code === "unknown_correlation") {
     return ["blocks_pointwise_comparison", "blocks_certified_delivery"];
   }
-  if (code === "blocks_completeness_claim" || code === "unknown_scope") {
+  if (
+    code === "blocks_completeness_claim"
+    || code === "unknown_scope"
+    || code === "invalid_all_observable"
+  ) {
     return ["blocks_completeness_claim", "blocks_certified_delivery"];
   }
   if (code === "unavailable") {

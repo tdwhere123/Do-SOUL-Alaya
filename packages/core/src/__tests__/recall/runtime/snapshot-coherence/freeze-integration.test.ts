@@ -21,7 +21,10 @@ import {
 import {
   PREPARE_RETRIEVAL_CHANNEL_OWNERS,
   SnapshotCoherenceContractError,
-  capturePreparedSnapshotCoherenceReceipt
+  SnapshotReadLeaseError,
+  bindSnapshotReadLease,
+  capturePreparedSnapshotCoherenceReceipt,
+  readSnapshotLeaseCapability
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
 import { stableStringify } from "../../../../shared/stable-stringify.js";
 import { buildRecallPolicy } from "../../../../shared/recall-policy.js";
@@ -64,6 +67,30 @@ describe("snapshot freeze integration", () => {
       .toBe(prepared.queryCondition.generation_id);
     expect(Object.isFrozen(prepared.snapshotCoherenceReceipt)).toBe(true);
     expect(Object.isFrozen(prepared.projectionPin)).toBe(true);
+    expect(prepared.snapshotReadLease.state).toBe("finalized");
+    expect(prepared.snapshotReadLease.vector_digest)
+      .toBe(prepared.snapshotCoherenceReceipt.vector_digest);
+    expect(readSnapshotLeaseCapability(prepared.snapshotReadLease, "projection_generation").view_kind)
+      .toBe("pinned");
+    expect(
+      readSnapshotLeaseCapability(prepared.snapshotReadLease, "embedding_generation_and_model").view_kind
+    ).toBe("unavailable");
+    expect(() => readSnapshotLeaseCapability(prepared.snapshotReadLease, "unbound_live_port"))
+      .toThrow(SnapshotReadLeaseError);
+    expect(() => bindSnapshotReadLease(prepared.snapshotReadLease, {
+      source_owner: "late_capability",
+      declaration: {
+        source_owner: "late_capability",
+        principal: prepared.snapshotReadLease.principal,
+        authorized_scope: prepared.snapshotReadLease.authorized_scopes[0]!,
+        source_frontier: "unavailable",
+        valid_time_domain: { kind: "timeless" },
+        generation: "unavailable",
+        operator_or_model_version: "unavailable",
+        lag_bound: { kind: "unavailable" }
+      },
+      view_kind: "unavailable"
+    })).toThrow(SnapshotReadLeaseError);
     const digest = prepared.snapshotCoherenceReceipt.receipt_digest;
     const originalKeys = prepared.fieldProjectionSelection.candidate_keys;
     const frozenGeneration = prepared.projectionPin.generation_id;

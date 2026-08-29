@@ -56,42 +56,15 @@ function tornReasons(
   vector: SnapshotVectorV1,
   sources: readonly SourceFrontierDeclarationV1[]
 ): readonly string[] {
+  const exact = sources.filter((source) => source.lag_bound.kind === "exact");
   const reasons: string[] = [];
-  if (tornRetrievalEmbedding(vector)) reasons.push("torn_fts_embedding");
-  if (tornGovernanceProjection(vector)) reasons.push("torn_governance_projection");
-  if (sources.some((source) => exactTimeMismatch(source, vector.effective_as_of))) {
+  if (exact.some((source) => source.source_frontier !== vector.transaction_frontier)) {
+    reasons.push("exact_source_frontier_mismatch");
+  }
+  if (exact.some((source) => !validTimeContains(source.valid_time_domain, vector.effective_as_of))) {
     reasons.push("valid_time_transaction_time_mismatch");
   }
   return Object.freeze(reasons);
-}
-
-function tornRetrievalEmbedding(vector: SnapshotVectorV1): boolean {
-  const embedding = vector.embedding_generation_and_model;
-  return vector.retrieval_channel_snapshots.some((channel) =>
-    exactFrontierTorn(channel, embedding)
-  );
-}
-
-function tornGovernanceProjection(vector: SnapshotVectorV1): boolean {
-  return exactFrontierTorn(vector.governance_frontier, vector.projection_generation);
-}
-
-function exactFrontierTorn(
-  left: SourceFrontierDeclarationV1,
-  right: SourceFrontierDeclarationV1
-): boolean {
-  // Independent generation ids are not a torn signal.
-  return left.lag_bound.kind === "exact"
-    && right.lag_bound.kind === "exact"
-    && left.source_frontier !== right.source_frontier;
-}
-
-function exactTimeMismatch(
-  source: SourceFrontierDeclarationV1,
-  asOf: string
-): boolean {
-  return source.lag_bound.kind === "exact"
-    && !validTimeContains(source.valid_time_domain, asOf);
 }
 
 function validTimeContains(domain: SnapshotValidTimeDomainV1, asOf: string): boolean {

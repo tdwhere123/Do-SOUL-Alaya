@@ -16,6 +16,8 @@ import {
 
 const BOOKSHELF = "Where did I buy my new bookshelf from?";
 const SNAPSHOT = {
+  principal: "principal-1",
+  authorized_scopes: ["scope-1"],
   receipt_digest: `sha256:${"c".repeat(64)}`,
   coherence_state: "coherent_exact"
 } as const;
@@ -187,6 +189,59 @@ describe("canonical query compiler adapters", () => {
     )).toBe(true);
     expect(many.unresolved.some((row) =>
       row.code === "unknown_correlation" || row.code === "unadapted_osf")).toBe(true);
+  });
+
+  it("does not default unknown shape to a scalar program", () => {
+    const queryText = "opaque question";
+    const compiled = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes(queryText),
+      demand: EMPTY_DEMAND,
+      shape: {
+        schema_version: 1,
+        status: "unknown",
+        shape: null,
+        target_terms: [],
+        relation_terms: []
+      },
+      factFrameCapture: returnedFactFrame([
+        captureFrame([
+          { role: "value", text: "What" },
+          { role: "subject", text: "Alice" },
+          { role: "relation", text: "buy" }
+        ])
+      ], queryText)
+    });
+    expect(compiled.hypotheses.some((query) => query.answer.kind === "scalar")).toBe(false);
+    expect(compiled.unresolved.some((row) => row.code === "unknown_answer_variable"))
+      .toBe(true);
+  });
+
+  it("keeps unknown_relation when a sibling fact frame adapts", () => {
+    const compiled = compileCanonicalQueryCompilation({
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND,
+      factFrameCapture: returnedFactFrame([
+        captureFrame([
+          { role: "value", text: "Where" },
+          { role: "subject", text: "I" },
+          { role: "relation", text: "buy" },
+          { role: "qualifier", text: "bookshelf" }
+        ]),
+        captureFrame([
+          { role: "subject", text: "I" },
+          { role: "relation", text: "What" },
+          { role: "value", text: "bookshelf" }
+        ])
+      ])
+    }, SNAPSHOT);
+    expect(compiled.hypotheses.some((query) =>
+      query.predicates.some((predicate) =>
+        predicate.provenance?.source_id.startsWith("fact_frame.relation.") === true
+        && predicate.relation === "buy"
+      )
+    )).toBe(true);
+    expect(compiled.holes.some((hole) => hole.code === "unknown_relation")).toBe(true);
+    expect(compiled.compile_status).not.toBe("certified_program");
   });
 
   it("does not flatten distinct to scalar when the observer is missing", () => {

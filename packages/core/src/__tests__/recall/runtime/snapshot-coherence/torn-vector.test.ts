@@ -16,7 +16,8 @@ describe("snapshot torn vectors", () => {
       })
     })));
     expect(receipt.coherence_state).toBe("incoherent");
-    expect(receipt.reasons).toContain("torn_fts_embedding");
+    expect(receipt.coherence_state).not.toBe("coherent_exact");
+    expect(receipt.reasons).toContain("exact_source_frontier_mismatch");
   });
 
   it("keeps FTS/embedding coherent_bounded when the stale side declares lag", () => {
@@ -44,7 +45,8 @@ describe("snapshot torn vectors", () => {
       })
     })));
     expect(receipt.coherence_state).toBe("incoherent");
-    expect(receipt.reasons).toContain("torn_governance_projection");
+    expect(receipt.coherence_state).not.toBe("coherent_exact");
+    expect(receipt.reasons).toContain("exact_source_frontier_mismatch");
   });
 
   it("marks valid-time excluding as_of incoherent for exact sources", () => {
@@ -59,6 +61,7 @@ describe("snapshot torn vectors", () => {
       })
     })));
     expect(receipt.coherence_state).toBe("incoherent");
+    expect(receipt.coherence_state).not.toBe("coherent_exact");
     expect(receipt.reasons).toContain("valid_time_transaction_time_mismatch");
     expect(AS_OF >= "2026-06-01T00:00:00.000Z").toBe(true);
   });
@@ -121,7 +124,15 @@ describe("snapshot torn vectors", () => {
       })
     })));
     expect(receipt.coherence_state).toBe("coherent_exact");
-    expect(receipt.reasons).not.toContain("torn_fts_embedding");
-    expect(receipt.reasons).not.toContain("torn_governance_projection");
+    expect(receipt.reasons).not.toContain("exact_source_frontier_mismatch");
+  });
+
+  it("marks planted transaction_frontier divergence incoherent", () => {
+    const receipt = createSnapshotCoherenceReceiptV1(createSnapshotVectorV1(exactVectorInput({
+      transaction_frontier: "tx-frontier-NEW"
+    })));
+    expect(receipt.coherence_state).toBe("incoherent");
+    expect(receipt.coherence_state).not.toBe("coherent_exact");
+    expect(receipt.reasons).toContain("exact_source_frontier_mismatch");
   });
 });

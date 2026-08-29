@@ -93,9 +93,15 @@ function adaptProposition(
   const factor = graph.factors.find((item) =>
     item.factor_id === proposition.predicate_factor_id
   );
-  if (factor === undefined || factor.semantic_identity.length === 0) return false;
+  if (factor === undefined || factor.semantic_identity.length === 0) {
+    pushUnknownRelation(sink, proposition.proposition_id);
+    return false;
+  }
   const bound = bindPropositionArguments(proposition, graph);
-  if (bound === null) return false;
+  if (bound === null) {
+    pushUnknownRelation(sink, proposition.proposition_id);
+    return false;
+  }
   return pushSupportedQuery(
     [naryPredicate(
       `osf_${proposition.proposition_id}`,
@@ -146,6 +152,14 @@ function bindPropositionArguments(
     arguments_.push(argument.reference_id);
   }
   return { arguments: arguments_, variables, constants: entityConstantsFrom(factorValues) };
+}
+
+function pushUnknownRelation(sink: AdapterSink, propositionId: string): void {
+  pushUnresolved(sink.unresolved, {
+    code: "unknown_relation",
+    source: "osf",
+    detail: propositionId
+  });
 }
 
 function pushUnadapted(capture: object, sink: AdapterSink): void {

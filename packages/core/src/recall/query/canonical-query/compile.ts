@@ -71,11 +71,24 @@ export type CanonicalQueryCompileV1 = Readonly<{
   readonly hypothesis_provenance: readonly CanonicalEvidenceProvenanceV1[];
 }>;
 
+type SnapshotBindV1 = Readonly<{
+  readonly principal: string;
+  readonly authorized_scopes: readonly string[];
+  readonly receipt_digest: string;
+}>;
+
 export function compileCanonicalQueryEvidence(
-  evidence: CanonicalQueryEvidenceV1
+  evidence: CanonicalQueryEvidenceV1,
+  snapshot?: SnapshotBindV1
 ): CanonicalQueryCompileV1 {
   const sink = createSink(evidence);
-  const answer = resolveAnswer(sink.shape, sink.demand, evidence, sink.unresolved);
+  const answer = resolveAnswer(
+    sink.shape,
+    sink.demand,
+    evidence,
+    sink.unresolved,
+    snapshot
+  );
   collectProbeHoles(evidence.probes, sink.unresolved);
   pushShapePrograms(sink, answer);
   adaptFactFrameCapture(evidence.factFrameCapture, answer, sink, evidence.probes);
@@ -110,20 +123,27 @@ function resolveAnswer(
   shape: Readonly<RecallAnswerShapePlan>,
   demand: Readonly<RecallQueryDemand>,
   evidence: CanonicalQueryEvidenceV1,
-  unresolved: AdapterUnresolved[]
+  unresolved: AdapterUnresolved[],
+  snapshot: SnapshotBindV1 | undefined
 ): CanonicalAnswerProgramV1 | null {
   if (shape.shape === "count" || shape.shape === "sum" || shape.shape === "duration") {
     return null;
   }
-  if (shape.shape !== "distinct_entities") {
-    if (demand.atoms.some((atom) => atom.kind === "ordering")) return null;
+  if (shape.shape === "distinct_entities") {
+    const answer = distinctAnswer(evidence, snapshot);
+    if (answer === null) {
+      pushUnresolved(unresolved, {
+        code: evidence.observer === undefined ? "unknown_scope" : "invalid_all_observable",
+        source: "observer"
+      });
+    }
+    return answer;
+  }
+  if (demand.atoms.some((atom) => atom.kind === "ordering")) return null;
+  if (shape.status === "high_confidence" && shape.shape !== null) {
     return { kind: "scalar", variable: "x0" };
   }
-  const answer = distinctAnswer(evidence);
-  if (answer === null) {
-    pushUnresolved(unresolved, { code: "unknown_scope", source: "observer" });
-  }
-  return answer;
+  return null;
 }
 
 function pushShapePrograms(
@@ -173,10 +193,11 @@ function pushOrderingHoles(
 }
 
 function distinctAnswer(
-  evidence: CanonicalQueryEvidenceV1
+  evidence: CanonicalQueryEvidenceV1,
+  snapshot: SnapshotBindV1 | undefined
 ): CanonicalAnswerProgramV1 | null {
   const observer = evidence.observer;
-  if (observer === undefined) return null;
+  if (observer === undefined || snapshot === undefined) return null;
   try {
     return {
       kind: "distinct",
@@ -184,7 +205,8 @@ function distinctAnswer(
       completion: bindAllObservableCompletion({
         principal: observer.principal,
         scope: observer.scope,
-        observer_universe: observer.observer_universe
+        observer_universe: observer.observer_universe,
+        snapshot
       })
     };
   } catch (error) {

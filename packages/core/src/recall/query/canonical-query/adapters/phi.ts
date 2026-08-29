@@ -108,5 +108,5 @@ export function pushUnresolved(
 }
 
 export function normalizeRelationToken(value: string): string {
-  return value.trim().replace(/\s+/gu, " ").toLocaleLowerCase();
+  return value.trim().replace(/\s+/gu, " ").toLowerCase();
 }

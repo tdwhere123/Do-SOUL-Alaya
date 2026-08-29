@@ -20,7 +20,6 @@ export function createSnapshotVectorV1(input: SnapshotVectorV1Input): SnapshotVe
   const sources = derivedSources({ ...reserved, retrieval_channel_snapshots: retrieval });
   assertUniqueOwners(sources);
   admitRestrictedUniverse(input.restricted_universe, sources, principal, authorized_scopes);
-  assertCompatibleFrontiers(input.transaction_frontier, sources);
   const body = Object.freeze({
     schema_version: 1 as const,
     principal,
@@ -137,17 +136,6 @@ function assertUniqueOwners(sources: readonly SourceFrontierDeclarationV1[]): vo
   for (const source of sources) {
     if (owners.has(source.source_owner)) rejectSnapshotCoherence("duplicate_source_owner");
     owners.add(source.source_owner);
-  }
-}
-
-function assertCompatibleFrontiers(
-  transactionFrontier: string,
-  sources: readonly SourceFrontierDeclarationV1[]
-): void {
-  // Exact/bounded source_frontier may diverge from transaction_frontier; that is torn.
-  requireSnapshotToken(transactionFrontier, "incompatible_base_frontier");
-  for (const source of sources) {
-    requireSnapshotToken(source.source_frontier, "incompatible_base_frontier");
   }
 }
 

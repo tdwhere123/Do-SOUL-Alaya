@@ -21,10 +21,14 @@ import {
 const BOOKSHELF = "Where did I buy my new bookshelf from?";
 const CJK_PLACE = "我在哪里兑换了咖啡奶精优惠券？";
 const SNAPSHOT = {
+  principal: "principal-1",
+  authorized_scopes: ["scope-1"],
   receipt_digest: `sha256:${"c".repeat(64)}`,
   coherence_state: "coherent_exact"
 } as const;
 const OTHER = {
+  principal: "principal-1",
+  authorized_scopes: ["scope-1"],
   receipt_digest: `sha256:${"d".repeat(64)}`,
   coherence_state: "coherent_exact"
 } as const;
@@ -85,6 +89,22 @@ describe("canonical query compilation holes", () => {
     expect(snapshotBlocked.holes.some((hole) =>
       hole.impacts.includes("blocks_all_delivery"))).toBe(true);
     expect(snapshotBlocked.hypothetical_mode).toBe("abstained");
+  });
+
+  it("fails closed when observer principal is not the snapshot principal", () => {
+    const compiled = compileCanonicalQueryCompilation({
+      probes: compileRecallQueryProbes("How many different doctors did I visit?"),
+      observer: {
+        principal: "alice",
+        scope: "scope-1",
+        observer_universe: ["obs-1"]
+      }
+    }, { ...SNAPSHOT, principal: "bob" });
+    expect(compiled.hypotheses.some((query) => query.answer.kind === "distinct"))
+      .toBe(false);
+    expect(compiled.holes.some((hole) => hole.code === "invalid_all_observable"))
+      .toBe(true);
+    expect(compiled.compile_status).not.toBe("certified_program");
   });
 
   it("changes digest on query identity, snapshot, and operator identity", () => {

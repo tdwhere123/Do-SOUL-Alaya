@@ -1,5 +1,7 @@
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../field/field-identity.js";
+import { isSnapshotDigest } from
+  "../../runtime/snapshot-coherence/digest.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import {
   CANONICAL_QUERY_LIMITS,
@@ -81,7 +83,9 @@ export function bindAllObservableCompletion(input: {
   readonly principal: string;
   readonly scope: string;
   readonly observer_universe: readonly string[];
+  readonly snapshot: AllObservableSnapshotBindV1;
 }): AllObservableCompletionV1 {
+  assertObserverMatchesSnapshot(input.principal, input.scope, input.snapshot);
   const observer_universe = freezeObserverUniverse(input.observer_universe);
   return freezeAllObservable({
     kind: "all_observable",
@@ -89,12 +93,34 @@ export function bindAllObservableCompletion(input: {
     scope: input.scope,
     snapshot_bind: "Sigma_q",
     observer_universe,
+    snapshot_receipt_digest: input.snapshot.receipt_digest,
     observer_contract: digestAllObservableObserverContract({
       principal: input.principal,
       scope: input.scope,
-      observer_universe
+      observer_universe,
+      receipt_digest: input.snapshot.receipt_digest
     })
   });
+}
+
+type AllObservableSnapshotBindV1 = Readonly<{
+  readonly principal: string;
+  readonly authorized_scopes: readonly string[];
+  readonly receipt_digest: string;
+}>;
+
+function assertObserverMatchesSnapshot(
+  principal: string,
+  scope: string,
+  snapshot: AllObservableSnapshotBindV1
+): void {
+  if (
+    principal !== snapshot.principal
+    || !snapshot.authorized_scopes.includes(scope)
+    || !isSnapshotDigest(snapshot.receipt_digest)
+  ) {
+    throw new CanonicalQueryContractError("invalid_all_observable");
+  }
 }
 
 function explicitUnsupported(
@@ -353,10 +379,12 @@ function freezeAllObservable(completion: AllObservableCompletionV1): AllObservab
   const scope = requireToken(completion.scope);
   const principal = requireToken(completion.principal);
   const observer_universe = freezeObserverUniverse(completion.observer_universe);
+  const snapshot_receipt_digest = requireSnapshotDigest(completion.snapshot_receipt_digest);
   const observer_contract = digestAllObservableObserverContract({
     principal,
     scope,
-    observer_universe
+    observer_universe,
+    receipt_digest: snapshot_receipt_digest
   });
   if (completion.observer_contract !== observer_contract) {
     throw new CanonicalQueryContractError("invalid_all_observable");
@@ -367,7 +395,8 @@ function freezeAllObservable(completion: AllObservableCompletionV1): AllObservab
     principal,
     snapshot_bind: "Sigma_q" as const,
     observer_universe,
-    observer_contract
+    observer_contract,
+    snapshot_receipt_digest
   });
 }
 
@@ -397,14 +426,23 @@ function digestAllObservableObserverContract(input: {
   readonly principal: string;
   readonly scope: string;
   readonly observer_universe: readonly string[];
+  readonly receipt_digest: string;
 }): RecallFieldDigest {
   return digestRecallFieldIdentity({
     kind: "all_observable_observer_contract_v1",
     principal: input.principal,
     scope: input.scope,
     snapshot_bind: "Sigma_q",
-    observer_universe: input.observer_universe
+    observer_universe: input.observer_universe,
+    receipt_digest: input.receipt_digest
   });
+}
+
+function requireSnapshotDigest(value: string): string {
+  if (!isSnapshotDigest(value)) {
+    throw new CanonicalQueryContractError("invalid_all_observable");
+  }
+  return value;
 }
 
 function answerDepth(answer: CanonicalAnswerProgramV1): number {

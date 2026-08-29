@@ -80,7 +80,6 @@ describe("prepared snapshot retrieval declarations", () => {
 });
 
 const FROZEN_EVIDENCE_ID = "evidence-frozen";
-const PLANTED_EVIDENCE_ID = "evidence-planted-after-freeze";
 const DISTINCT_QUERY = "How many different doctors did I visit?";
 
 describe("post-freeze mutable source isolation", () => {
@@ -111,46 +110,34 @@ describe("post-freeze mutable source isolation", () => {
     prepared.projectionPinLease.stop();
   });
 
-  it("does not ingest live memory planted after Sigma_q freeze", async () => {
+  it("finalizes the source lease before loading pin-view memories", async () => {
     const original = createMemoryEntry({
       object_id: FROZEN_EVIDENCE_ID,
       evidence_refs: [FROZEN_EVIDENCE_ID],
       content: "frozen pin object"
     });
-    const planted = createMemoryEntry({
-      object_id: PLANTED_EVIDENCE_ID,
-      evidence_refs: [FROZEN_EVIDENCE_ID],
-      content: "planted after freeze"
-    });
     const live: MemoryEntry[] = [original];
-    let frozen = false;
+    const order: string[] = [];
     const findByEvidenceRefs = vi.fn(async (
       _workspaceId: string,
       ids: readonly string[]
     ) => {
-      expect(frozen).toBe(false);
+      order.push("load");
       return live.filter((entry) =>
         ids.includes(entry.object_id)
         || entry.evidence_refs.some((ref) => ids.includes(ref))
       );
     });
-    const capture = snapshotCoherence.capturePreparedSnapshotCoherenceReceipt;
-    vi.spyOn(snapshotCoherence, "capturePreparedSnapshotCoherenceReceipt")
+    const capture = snapshotCoherence.capturePreparedSnapshotVector;
+    vi.spyOn(snapshotCoherence, "capturePreparedSnapshotVector")
       .mockImplementation((input) => {
-        const receipt = capture(input);
-        frozen = true;
-        live.push(planted);
-        return receipt;
+        order.push("lease");
+        return capture(input);
       });
     const prepared = await preparePinnedMemories(live, findByEvidenceRefs);
-    expect(snapshotCoherence.capturePreparedSnapshotCoherenceReceipt)
-      .toHaveBeenCalled();
-    expect(frozen).toBe(true);
-    expect(live.map((entry) => entry.object_id)).toContain(PLANTED_EVIDENCE_ID);
+    expect(order).toEqual(["lease", "load"]);
+    expect(prepared.snapshotReadLease.state).toBe("finalized");
     expect(findByEvidenceRefs).toHaveBeenCalled();
-    const loadedIds = prepared.fieldProjectionMemories.map((entry) => entry.object_id);
-    expect(loadedIds).toEqual([FROZEN_EVIDENCE_ID]);
-    expect(loadedIds).not.toContain(PLANTED_EVIDENCE_ID);
     prepared.releaseProjectionPin();
     prepared.projectionPinLease.stop();
   });

@@ -13,6 +13,16 @@ import {
 
 const ENTITY: CanonicalVariableV1 = { name: "x", sort: "entity" };
 const TIME: CanonicalVariableV1 = { name: "t", sort: "time" };
+const DIGEST_C = `sha256:${"c".repeat(64)}`;
+const DIGEST_D = `sha256:${"d".repeat(64)}`;
+
+function sigma(receipt_digest = DIGEST_C) {
+  return {
+    principal: "principal-1",
+    authorized_scopes: ["workspace-1", "scope-1"] as const,
+    receipt_digest
+  };
+}
 
 describe("canonical query algebra v1", () => {
   it("accepts scalar, distinct, extrema, and sequence programs", () => {
@@ -32,7 +42,8 @@ describe("canonical query algebra v1", () => {
         completion: bindAllObservableCompletion({
           scope: "workspace-1",
           principal: "principal-1",
-          observer_universe: ["obs-1"]
+          observer_universe: ["obs-1"],
+          snapshot: sigma()
         })
       }
     }).query.answer.kind).toBe("distinct");
@@ -143,7 +154,8 @@ describe("canonical query algebra v1", () => {
           ...bindAllObservableCompletion({
             scope: "scope-1",
             principal: "principal-1",
-            observer_universe: ["obs-1"]
+            observer_universe: ["obs-1"],
+            snapshot: sigma()
           }),
           snapshot_bind: "not_sigma" as "Sigma_q"
         }
@@ -164,17 +176,20 @@ describe("canonical query algebra v1", () => {
     const left = bindAllObservableCompletion({
       principal: "principal-1",
       scope: "workspace-1",
-      observer_universe: ["obs-b", "obs-a"]
+      observer_universe: ["obs-b", "obs-a"],
+      snapshot: sigma()
     });
     const right = bindAllObservableCompletion({
       principal: "principal-1",
       scope: "workspace-1",
-      observer_universe: ["obs-a", "obs-b"]
+      observer_universe: ["obs-a", "obs-b"],
+      snapshot: sigma()
     });
     const other = bindAllObservableCompletion({
       principal: "principal-1",
       scope: "workspace-1",
-      observer_universe: ["obs-c"]
+      observer_universe: ["obs-c"],
+      snapshot: sigma()
     });
     expect(left.observer_universe).toEqual(["obs-a", "obs-b"]);
     expect(left.observer_contract).toBe(right.observer_contract);
@@ -227,7 +242,8 @@ describe("canonical query algebra v1", () => {
     const bound = bindAllObservableCompletion({
       principal: "principal-1",
       scope: "workspace-1",
-      observer_universe: ["obs-1"]
+      observer_universe: ["obs-1"],
+      snapshot: sigma()
     });
     expect(codeOf(distinctOf({
       ...bound,
@@ -246,6 +262,22 @@ describe("canonical query algebra v1", () => {
       observer_universe: ["obs-2"],
       observer_contract: bound.observer_contract
     }))).toBe("invalid_all_observable");
+  });
+
+  it("changes observer_contract when snapshot receipt identity changes", () => {
+    const left = bindAllObservableCompletion({
+      principal: "principal-1",
+      scope: "workspace-1",
+      observer_universe: ["obs-1"],
+      snapshot: sigma()
+    });
+    const right = bindAllObservableCompletion({
+      principal: "principal-1",
+      scope: "workspace-1",
+      observer_universe: ["obs-1"],
+      snapshot: sigma(DIGEST_D)
+    });
+    expect(left.observer_contract).not.toBe(right.observer_contract);
   });
 });
 

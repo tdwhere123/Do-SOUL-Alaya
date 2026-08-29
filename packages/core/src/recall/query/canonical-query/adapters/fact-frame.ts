@@ -94,7 +94,14 @@ function adaptFrame(
     });
     return false;
   }
-  if (program.status === "unsupported_relation") return false;
+  if (program.status === "unsupported_relation") {
+    pushUnresolved(sink.unresolved, {
+      code: "unknown_relation",
+      source: "fact_frame",
+      detail: String(frameIndex)
+    });
+    return false;
+  }
   return pushSupportedQuery(
     program.predicates,
     answer,
