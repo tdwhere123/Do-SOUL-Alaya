@@ -2,15 +2,21 @@ import { createFourValuedWitness, type FourValuedPolarity, type FourValuedWitnes
   "../../witness/index.js";
 import type { SupportDraft } from "./draft.js";
 import { addEdge, addGap, addNode, supersedeLineage, vote } from "./draft.js";
-import type { SupportCandidateReceiptV1, SupportSupersessionValueV1 } from "./types.js";
+import { admitRelationalReceipt } from "./path-temporal.js";
+import type {
+  SupportCandidateReceiptV1,
+  SupportMaterializationInputV1,
+  SupportSupersessionValueV1
+} from "./types.js";
 
 export function adaptPolarityReceipts(
   draft: SupportDraft,
-  candidate: SupportCandidateReceiptV1
+  candidate: SupportCandidateReceiptV1,
+  input: SupportMaterializationInputV1
 ): void {
-  adaptPolarity(draft, candidate);
-  adaptContradiction(draft, candidate);
-  adaptSupersession(draft, candidate);
+  adaptPolarity(draft, candidate, input);
+  adaptContradiction(draft, candidate, input);
+  adaptSupersession(draft, candidate, input);
 }
 
 export function polaritiesFromDraft(
@@ -36,7 +42,11 @@ export function polaritiesFromDraft(
   return Object.freeze(witnesses);
 }
 
-function adaptPolarity(draft: SupportDraft, candidate: SupportCandidateReceiptV1): void {
+function adaptPolarity(
+  draft: SupportDraft,
+  candidate: SupportCandidateReceiptV1,
+  input: SupportMaterializationInputV1
+): void {
   const polarity = candidate.polarity;
   if (polarity === undefined) return;
   if (polarity.status === "unavailable") {
@@ -48,11 +58,22 @@ function adaptPolarity(draft: SupportDraft, candidate: SupportCandidateReceiptV1
     addGap(draft, "binding_absent", candidate.candidate_key, "polarity without proposition");
     return;
   }
+  if (!admitRelationalReceipt(draft, candidate.candidate_key, polarity.value.receipt, input, {
+    kind: "polarity",
+    proposition_id: propositionId,
+    lineage_id: polarity.value.lineage_id
+  })) {
+    return;
+  }
   const side = polarity.value.polarity === "positive" ? "support" : "refute";
   voteOnProposition(draft, candidate, propositionId, polarity.value.lineage_id, side);
 }
 
-function adaptContradiction(draft: SupportDraft, candidate: SupportCandidateReceiptV1): void {
+function adaptContradiction(
+  draft: SupportDraft,
+  candidate: SupportCandidateReceiptV1,
+  input: SupportMaterializationInputV1
+): void {
   const contradiction = candidate.contradiction;
   if (contradiction === undefined || contradiction.status === "unavailable") return;
   const propositionId = contradiction.value.proposition_id;
@@ -60,18 +81,46 @@ function adaptContradiction(draft: SupportDraft, candidate: SupportCandidateRece
     addGap(draft, "binding_absent", candidate.candidate_key, "contradiction without proposition");
     return;
   }
+  if (!admitRelationalReceipt(
+    draft,
+    candidate.candidate_key,
+    contradiction.value.receipt,
+    input,
+    {
+      kind: "contradiction",
+      proposition_id: propositionId,
+      lineage_id: contradiction.value.lineage_id
+    }
+  )) return;
   voteOnProposition(draft, candidate, propositionId, contradiction.value.lineage_id, "refute");
 }
 
-function adaptSupersession(draft: SupportDraft, candidate: SupportCandidateReceiptV1): void {
+function adaptSupersession(
+  draft: SupportDraft,
+  candidate: SupportCandidateReceiptV1,
+  input: SupportMaterializationInputV1
+): void {
   const supersession = candidate.supersession;
   if (supersession === undefined || supersession.status === "unavailable") return;
   const value = supersession.value;
+  const canAct = value.standing === "superseded" || hasPropositionPair(value);
+  if (!canAct) return;
+  if (value.proposition_id === undefined) {
+    addGap(draft, "supersedes_open", candidate.candidate_key, "supersession proposition identity is absent");
+    return;
+  }
+  if (!admitRelationalReceipt(draft, candidate.candidate_key, value.receipt, input, {
+    kind: "supersession",
+    proposition_id: value.proposition_id,
+    lineage_id: value.lineage_id,
+    ...(value.counterpart_proposition_id === undefined
+      ? {}
+      : { counterpart_proposition_id: value.counterpart_proposition_id })
+  })) return;
   if (value.standing === "superseded" && value.proposition_id !== undefined) {
     addNode(draft, "proposition", value.proposition_id);
     supersedeLineage(draft, value.proposition_id, value.lineage_id);
   }
-  if (value.standing === "current" && !hasPropositionPair(value)) return;
   emitSupersedesOrGap(draft, candidate.candidate_key, value);
 }
 

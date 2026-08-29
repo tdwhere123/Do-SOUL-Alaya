@@ -1,3 +1,9 @@
+import type {
+  SnapshotCoherenceReceiptV1,
+  SnapshotValidTimeDomainV1,
+  SnapshotVectorV1
+} from "../../../runtime/snapshot-coherence/index.js";
+
 export type SupportOsfStatusV1 =
   | "composed"
   | "no_match"
@@ -25,11 +31,43 @@ export type SupportFactFrameV1 = Readonly<{
   readonly evidence_id?: string;
 }>;
 
+export type SupportRelationalSubjectV1 =
+  | Readonly<{
+      readonly kind: "path_projection";
+      readonly proposition_id: string;
+      readonly relation_kind: string;
+    }>
+  | Readonly<{
+      readonly kind: "polarity" | "contradiction";
+      readonly proposition_id: string;
+      readonly lineage_id: string;
+    }>
+  | Readonly<{
+      readonly kind: "supersession";
+      readonly proposition_id: string;
+      readonly lineage_id: string;
+      readonly counterpart_proposition_id?: string;
+    }>;
+
+export type SupportRelationalReceiptV1 = Readonly<{
+  readonly schema_version: 1;
+  readonly query_id: string;
+  readonly snapshot_digest: string;
+  readonly snapshot_receipt_digest: string;
+  readonly effective_as_of: string;
+  readonly transaction_frontier: string;
+  readonly producer_operator_id: string;
+  readonly authorized_scope: string;
+  readonly valid_time: SnapshotValidTimeDomainV1 | Readonly<{ readonly kind: "unknown" }>;
+  readonly subject: SupportRelationalSubjectV1;
+}>;
+
 export type SupportSupersessionValueV1 = Readonly<{
   readonly standing: "current" | "superseded";
   readonly lineage_id: string;
   readonly proposition_id?: string;
   readonly counterpart_proposition_id?: string;
+  readonly receipt?: SupportRelationalReceiptV1;
 }>;
 
 export type SupportPathReceiptV1 = Readonly<{
@@ -39,6 +77,7 @@ export type SupportPathReceiptV1 = Readonly<{
   readonly strength?: number;
   readonly hop?: number;
   readonly path_count?: number;
+  readonly receipt?: SupportRelationalReceiptV1;
 }>;
 
 export type SupportCandidateReceiptV1 = Readonly<{
@@ -59,6 +98,7 @@ export type SupportCandidateReceiptV1 = Readonly<{
     readonly polarity: "positive" | "negative";
     readonly lineage_id: string;
     readonly proposition_id?: string;
+    readonly receipt?: SupportRelationalReceiptV1;
   }>>;
   readonly validity?: SupportAvailability<Readonly<{
     readonly validity: "active" | "expired" | "unknown";
@@ -68,6 +108,7 @@ export type SupportCandidateReceiptV1 = Readonly<{
     readonly standing: "contradicted" | "contradicting";
     readonly lineage_id: string;
     readonly proposition_id?: string;
+    readonly receipt?: SupportRelationalReceiptV1;
   }>>;
   readonly temporal?: Readonly<{
     readonly event_time: string | null;
@@ -80,6 +121,10 @@ export type SupportCandidateReceiptV1 = Readonly<{
 export type SupportMaterializationInputV1 = Readonly<{
   readonly query_id: string;
   readonly snapshot_digest: string;
+  readonly authority_context?: Readonly<{
+    readonly snapshot_vector: SnapshotVectorV1;
+    readonly snapshot_receipt: SnapshotCoherenceReceiptV1;
+  }>;
   readonly candidates?: readonly SupportCandidateReceiptV1[];
 }>;
 
@@ -97,6 +142,9 @@ export type SupportObservabilityGapV1 = Readonly<{
     | "path_projection_not_proposition"
     | "polarity_unavailable"
     | "supersedes_open"
+    | "relational_identity_mismatch"
+    | "transaction_unfrozen"
+    | "authority_untrusted"
     | "write_side_formation_absent";
   readonly owner: string;
   readonly detail: string;

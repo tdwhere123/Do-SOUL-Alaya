@@ -2,7 +2,10 @@ import type { ShadowChannelVote } from "../compare.js";
 import { d1IntervalVote } from "../d1/interval-compare.js";
 import { d1IdentitiesEqual } from "../d1/legal-envelope.js";
 import { freezeShadow } from "../envelope.js";
-import type { MeasurementComparisonDirectionV1 } from "../measurement/index.js";
+import { parseMeasurementGroupContractV1 } from "../measurement/index.js";
+import type {
+  MeasurementComparisonDirectionV1
+} from "../measurement/index.js";
 import { lexDomainsEqual } from "../observations.js";
 import type {
   PsiV2CandidateV1,
@@ -115,8 +118,12 @@ function directedIntervalVote(
   if (left.collapse.status !== "collapsed" || right.collapse.status !== "collapsed") {
     return "blocked";
   }
+  const contractVote = measurementContractVote(
+    left.collapse.contract,
+    right.collapse.contract
+  );
+  if (contractVote !== "compare") return contractVote;
   const direction = left.collapse.contract.comparison_direction;
-  if (direction !== right.collapse.contract.comparison_direction) return "blocked";
   const leftPayload = left.collapse.witness.payload;
   const rightPayload = right.collapse.witness.payload;
   if (leftPayload === null || rightPayload === null) return "blocked";
@@ -127,6 +134,16 @@ function directedIntervalVote(
     ),
     direction
   );
+}
+
+function measurementContractVote(left: unknown, right: unknown): CoordinateVote | "compare" {
+  try {
+    const leftContract = parseMeasurementGroupContractV1(left);
+    const rightContract = parseMeasurementGroupContractV1(right);
+    return leftContract.digest === rightContract.digest ? "compare" : "incomparable";
+  } catch {
+    return "blocked";
+  }
 }
 
 function applyDirection(

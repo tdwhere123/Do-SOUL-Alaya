@@ -48,6 +48,11 @@ import {
 import { buildProductionSetUtilities } from "./utility/production.js";
 import { ShadowContractError } from "./envelope.js";
 import { assertCanonicalSelectionReceipt } from "./canonical-receipt-validation.js";
+import { d1LaneEnvelopes } from "./d1/legal-envelope.js";
+import {
+  materializeSupportFromReceipts,
+  type SupportMaterializationV1
+} from "./support/index.js";
 
 export { CANONICAL_CAPTURE_IDENTITY } from "@do-soul/alaya-protocol";
 export type { CanonicalSelectionReceipt } from "@do-soul/alaya-protocol";
@@ -103,6 +108,7 @@ function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
     cutoverActivation: "active",
     memoryKeywordLanes: params.memoryKeywordLanes,
     memoryLexicalCaptures: params.memoryLexicalCaptures,
+    ...materializePsiV2ShadowInput(params),
     e0Keys: params.e0Keys,
     e1Keys: params.e1Keys,
     utilitiesByKey: buildProductionSetUtilities({
@@ -111,6 +117,78 @@ function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
     }),
     nowIso: params.now()
   };
+}
+
+export function materializePsiV2ShadowInput(
+  params: FineAssessParams
+): Pick<ShadowIntegrateInput,
+  "lexicalIntervalEnvelopesByKey" | "supportMaterialization" |
+  "query_id" | "snapshot_digest"> {
+  const pins = shadowReceiptPins(params);
+  if (pins === undefined) return {};
+  const lexicalIntervalEnvelopesByKey = materializeLexicalIntervals(params, pins);
+  const supportMaterialization = materializeSupport(params, pins);
+  return {
+    ...pins,
+    ...(lexicalIntervalEnvelopesByKey === undefined
+      ? {}
+      : { lexicalIntervalEnvelopesByKey }),
+    ...(supportMaterialization === undefined ? {} : { supportMaterialization })
+  };
+}
+
+function shadowReceiptPins(
+  params: FineAssessParams
+): Readonly<{ readonly query_id: string; readonly snapshot_digest: string }> | undefined {
+  if (params.query_id === undefined || params.query_id.length === 0 ||
+      params.snapshot_digest === undefined || params.snapshot_digest.length === 0) {
+    return undefined;
+  }
+  return Object.freeze({
+    query_id: params.query_id,
+    snapshot_digest: params.snapshot_digest
+  });
+}
+
+function materializeLexicalIntervals(
+  params: FineAssessParams,
+  pins: Readonly<{ readonly query_id: string; readonly snapshot_digest: string }>
+): ShadowIntegrateInput["lexicalIntervalEnvelopesByKey"] {
+  try {
+    const proofs = (params.lexicalBoundProofs ?? []).filter((proof) =>
+      proof.status === "captured" &&
+      proof.field_prefix === "lexical_relaxed" &&
+      proof.receipt.query_run_id === pins.query_id &&
+      proof.identity.snapshot_digest === pins.snapshot_digest
+    );
+    if (proofs.length !== 1) return undefined;
+    const proof = proofs[0]!;
+    return Object.freeze(Object.fromEntries(params.candidates.map((candidate) => {
+      const key = buildRecallCandidateDedupeKey(candidate);
+      return [key, d1LaneEnvelopes(proof, key)];
+    })));
+  } catch {
+    return undefined;
+  }
+}
+
+function materializeSupport(
+  params: FineAssessParams,
+  pins: Readonly<{ readonly query_id: string; readonly snapshot_digest: string }>
+): SupportMaterializationV1 | undefined {
+  const receipts = params.supportCandidateReceipts;
+  if (receipts === undefined || receipts.length === 0) return undefined;
+  const candidateKeys = new Set(params.candidates.map(buildRecallCandidateDedupeKey));
+  const receiptKeys = new Set(receipts.map(({ candidate_key }) => candidate_key));
+  if (receiptKeys.size !== receipts.length ||
+      receipts.some(({ candidate_key }) => !candidateKeys.has(candidate_key))) {
+    return undefined;
+  }
+  try {
+    return materializeSupportFromReceipts({ ...pins, candidates: receipts });
+  } catch {
+    return undefined;
+  }
 }
 
 function capturedCanonicalResult(

@@ -1,4 +1,8 @@
-import type { BindingRelationState, CorrelationState } from "../witness/index.js";
+import type {
+  BindingDistinctnessEvidenceReceiptV1,
+  BindingRelationState,
+  CorrelationState
+} from "../witness/index.js";
 
 export const SUPPORT_HYPERGRAPH_OPERATOR_ID = "recall_support_hypergraph_v1" as const;
 
@@ -45,6 +49,7 @@ export type SupportAliasRecordV1 = Readonly<{
   readonly left_id: string;
   readonly right_id: string;
   readonly state: BindingRelationState;
+  readonly distinctness_receipt?: BindingDistinctnessEvidenceReceiptV1;
 }>;
 
 export type SupportCorrelationRecordV1 = Readonly<{

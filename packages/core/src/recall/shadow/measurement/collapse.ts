@@ -281,7 +281,21 @@ function mergedProvenance(observations: readonly NumericIntervalWitness[]) {
   for (const observation of observations.slice(1)) {
     provenance = unionProvenance(provenance, observation.provenance);
   }
-  return provenance;
+  return canonicalProvenance(provenance);
+}
+
+function canonicalProvenance(
+  provenance: NumericIntervalWitness["provenance"]
+): NumericIntervalWitness["provenance"] {
+  return Object.freeze([...provenance].sort((left, right) =>
+    compareText(left.source_id, right.source_id) ||
+    compareText(left.producer, right.producer)));
+}
+
+function compareText(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function assertSameBinding(observations: readonly NumericIntervalWitness[]): void {
@@ -327,7 +341,15 @@ function mergeDuplicateCoordinate(
     previous.epistemic.completeness.owner !== observation.epistemic.completeness.owner) {
     return "completeness owner mismatch";
   }
-  return nextKnown && !previousKnown ? observation : previous;
+  const selected = nextKnown && !previousKnown ? observation : previous;
+  return createNumericIntervalWitness({
+    identity: selected.identity,
+    provenance: canonicalProvenance(
+      unionProvenance(previous.provenance, observation.provenance)
+    ),
+    epistemic: selected.epistemic,
+    payload: selected.payload
+  });
 }
 
 function samePayload(

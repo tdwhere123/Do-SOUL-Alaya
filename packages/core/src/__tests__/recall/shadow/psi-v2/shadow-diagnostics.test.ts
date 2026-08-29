@@ -40,7 +40,7 @@ const PORTER_DOMAIN: LexDomain = {
 
 const ENVELOPE_IDENTITY: D1EnvelopeIdentity = {
   field_prefix: "lexical_relaxed",
-  query_run_id: "memory.keyword.depth:10",
+  query_run_id: "q",
   snapshot_digest: SNAPSHOT,
   request_digest: `sha256:${"c".repeat(64)}`,
   workspace_id: "workspace-1"
@@ -70,11 +70,39 @@ describe("psi v2 shadow diagnostics", () => {
     expect(inverted.reason).toBe("inverted lexical interval remains unresolved");
     const exact = adaptLexicalIntervalEnvelopeToCollapse(
       { kind: "interval", lower: 2, upper: 2 },
-      { ...PINS, candidate_id: "cand-1", proposition_id: "lex.interval" },
+      {
+        ...PINS,
+        query_id: "q",
+        candidate_id: "cand-1",
+        proposition_id: "lex.interval"
+      },
       PROV,
       ENVELOPE_IDENTITY
     );
     expect(exact.status).toBe("collapsed");
+  });
+
+  it("does not collapse a non-null envelope identity forged for another query or snapshot", () => {
+    const queryMismatch = adaptLexicalIntervalEnvelopeToCollapse(
+      { kind: "interval", lower: 4, upper: 4 },
+      { ...PINS, query_id: "other-query" },
+      PROV,
+      ENVELOPE_IDENTITY
+    );
+    const snapshotMismatch = adaptLexicalIntervalEnvelopeToCollapse(
+      { kind: "interval", lower: 4, upper: 4 },
+      { ...PINS, query_id: "q", snapshot_digest: `sha256:${"d".repeat(64)}` },
+      PROV,
+      ENVELOPE_IDENTITY
+    );
+    expect(queryMismatch).toMatchObject({
+      status: "unresolved",
+      reason: "lexical envelope query identity does not match the observation pin"
+    });
+    expect(snapshotMismatch).toMatchObject({
+      status: "unresolved",
+      reason: "lexical envelope snapshot identity does not match the observation pin"
+    });
   });
 
   it("does not collapse a well-ordered interval without a legal envelope identity", () => {
@@ -135,6 +163,23 @@ describe("psi v2 shadow diagnostics", () => {
     });
     expect(diagnostics.raw_fragment_veto).toBe(false);
     expect(diagnostics.observation_status).toBe("observed");
+  });
+
+  it("does not collapse a stale proof map whose duplicated identity pins disagree", () => {
+    const stale = {
+      ...lexicalIntervalMap(9, 9),
+      snapshot_digest: `sha256:${"e".repeat(64)}`
+    };
+    const candidate = psiV2CandidateFromLexicalEnvelope(
+      "workspace_local:memory_entry:a",
+      stale,
+      "q",
+      SNAPSHOT
+    );
+    expect(candidate.coordinates[0]?.collapse).toMatchObject({
+      status: "unresolved",
+      reason: "lexical envelope proof map identity is inconsistent"
+    });
   });
 
   it("keeps an unresolved proposition blocking and records a raw-fragment veto", () => {

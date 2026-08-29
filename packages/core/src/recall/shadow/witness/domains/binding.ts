@@ -11,6 +11,9 @@ import type {
   WitnessInformationOrder
 } from "../shared/types.js";
 
+export const BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID =
+  "binding_distinctness_evidence_v1" as const;
+
 export const BINDING_RELATION_STATES = [
   "equal",
   "may_equal",
@@ -21,10 +24,22 @@ export const BINDING_RELATION_STATES = [
 
 export type BindingRelationState = (typeof BINDING_RELATION_STATES)[number];
 
+export type BindingDistinctnessEvidenceReceiptV1 = Readonly<{
+  readonly schema_version: 1;
+  readonly operator_id: typeof BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID;
+  readonly query_id: string;
+  readonly snapshot_digest: string;
+  readonly left_id: string;
+  readonly right_id: string;
+  readonly source_id: string;
+  readonly producer: string;
+}>;
+
 export type BindingRelationPayload = Readonly<{
   readonly left_id: string;
   readonly right_id: string;
   readonly state: BindingRelationState;
+  readonly distinctness_receipt?: BindingDistinctnessEvidenceReceiptV1;
 }>;
 
 export type BindingRelationWitness = TypedWitness<"binding_relation", BindingRelationPayload>;
@@ -32,7 +47,7 @@ export type BindingRelationInput = WitnessCreateInput<BindingRelationPayload>;
 
 const BINDING_LEQ: Readonly<Record<BindingRelationState, readonly BindingRelationState[]>> = {
   unknown: ["unknown", "may_equal", "equal", "distinct", "conflict"],
-  may_equal: ["may_equal", "equal", "conflict"],
+  may_equal: ["may_equal", "equal", "distinct", "conflict"],
   equal: ["equal", "conflict"],
   distinct: ["distinct", "conflict"],
   conflict: ["conflict"]
@@ -53,7 +68,9 @@ const BINDING_OPS: PayloadOps<BindingRelationPayload> = Object.freeze({
 export function createBindingRelationWitness(
   input: BindingRelationInput
 ): BindingRelationWitness {
-  return createTypedWitness("binding_relation", input, [], bindingPayload);
+  const witness = createTypedWitness("binding_relation", input, [], bindingPayload);
+  assertDistinctnessEvidence(witness);
+  return witness;
 }
 
 export function compareBindingRelation(
@@ -116,11 +133,67 @@ function parseBindingPayload(
   if (!BINDING_RELATION_STATES.includes(state)) {
     throw new ShadowContractError("unknown binding relation state");
   }
-  return Object.freeze({
+  const pair = {
     left_id: requireNonemptyString(payload.left_id, "left_id"),
     right_id: requireNonemptyString(payload.right_id, "right_id"),
     state
+  };
+  if (state !== "distinct") {
+    if (payload.distinctness_receipt !== undefined && state !== "conflict") {
+      throw new ShadowContractError("distinctness receipt requires distinct state");
+    }
+    return Object.freeze(pair);
+  }
+  return Object.freeze({
+    ...pair,
+    distinctness_receipt: parseDistinctnessEvidence(payload.distinctness_receipt)
   });
+}
+
+function parseDistinctnessEvidence(
+  receipt: BindingDistinctnessEvidenceReceiptV1 | undefined
+): BindingDistinctnessEvidenceReceiptV1 {
+  if (receipt === undefined || receipt.schema_version !== 1 ||
+      receipt.operator_id !== BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID) {
+    throw new ShadowContractError("distinct binding requires a typed distinctness receipt");
+  }
+  return Object.freeze({
+    schema_version: 1 as const,
+    operator_id: BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID,
+    query_id: requireNonemptyString(receipt.query_id, "distinctness query_id"),
+    snapshot_digest: requireNonemptyString(
+      receipt.snapshot_digest,
+      "distinctness snapshot_digest"
+    ),
+    left_id: requireNonemptyString(receipt.left_id, "distinctness left_id"),
+    right_id: requireNonemptyString(receipt.right_id, "distinctness right_id"),
+    source_id: requireNonemptyString(receipt.source_id, "distinctness source_id"),
+    producer: requireNonemptyString(receipt.producer, "distinctness producer")
+  });
+}
+
+function assertDistinctnessEvidence(witness: BindingRelationWitness): void {
+  const payload = witness.payload;
+  if (payload?.state !== "distinct") return;
+  const receipt = payload.distinctness_receipt!;
+  if (receipt.query_id !== witness.identity.query_id ||
+      receipt.snapshot_digest !== witness.identity.snapshot_digest ||
+      !sameUnorderedPair(payload, receipt)) {
+    throw new ShadowContractError("distinctness receipt identity must match the witness");
+  }
+  const provenanceMatch = witness.provenance.some((entry) =>
+    entry.source_id === receipt.source_id && entry.producer === receipt.producer);
+  if (!provenanceMatch) {
+    throw new ShadowContractError("distinctness receipt must name witness provenance");
+  }
+}
+
+function sameUnorderedPair(
+  left: Pick<BindingRelationPayload, "left_id" | "right_id">,
+  right: Pick<BindingRelationPayload, "left_id" | "right_id">
+): boolean {
+  return (left.left_id === right.left_id && left.right_id === right.right_id) ||
+    (left.left_id === right.right_id && left.right_id === right.left_id);
 }
 
 function bindingLeq(wide: BindingRelationPayload, narrow: BindingRelationPayload): boolean {
@@ -145,12 +218,18 @@ function bindingJoin(left: BindingRelationPayload, right: BindingRelationPayload
   if (bindingEqual(left, right)) return left;
   if (bindingLeq(left, right)) return left;
   if (bindingLeq(right, left)) return right;
-  return Object.freeze({ ...left, state: "unknown" as const });
+  const joinedState = pairStates(left, right, "equal", "distinct")
+    ? "may_equal" as const
+    : "unknown" as const;
+  return Object.freeze({
+    left_id: left.left_id,
+    right_id: left.right_id,
+    state: joinedState
+  });
 }
 
 function bindingMeetConflict(left: BindingRelationPayload, right: BindingRelationPayload): boolean {
-  return pairStates(left, right, "equal", "distinct") ||
-    pairStates(left, right, "may_equal", "distinct");
+  return pairStates(left, right, "equal", "distinct");
 }
 
 function bindingRefineConflict(from: BindingRelationPayload, to: BindingRelationPayload): boolean {
@@ -181,5 +260,9 @@ function bindingConflictPayload(
 ): BindingRelationPayload | null {
   const pair = left ?? right;
   if (pair === null) return null;
-  return Object.freeze({ ...pair, state: "conflict" as const });
+  return Object.freeze({
+    left_id: pair.left_id,
+    right_id: pair.right_id,
+    state: "conflict" as const
+  });
 }

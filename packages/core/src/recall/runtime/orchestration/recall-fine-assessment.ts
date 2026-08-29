@@ -29,6 +29,8 @@ import {
   measureSync,
   type TimedResult
 } from "./recall-phase-latency.js";
+import { buildCaptureProofDiagnostics, type CaptureProofDiagnostics } from
+  "../diagnostics/capture-proof-diagnostics.js";
 
 export type CollectedFineAssessmentData = Readonly<{
   readonly supplementaryData: FineAssessParams["supplementaryData"];
@@ -218,6 +220,7 @@ export function buildFineAssessParams(
   candidates: FineAssessParams["candidates"],
   membership?: Readonly<{ readonly e0Keys: readonly string[] }>
 ): FineAssessParams {
+  const captureAnswerFeatures = capturesRecallAnswerFeatures(params.diagnosticCapture);
   return {
     workspace_id: params.workspaceId,
     candidates,
@@ -227,7 +230,7 @@ export function buildFineAssessParams(
     tokenEstimator: prepared.tokenEstimator,
     now: () => prepared.referenceTime,
     warn: context.warn,
-    captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
+    captureAnswerFeatures,
     capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
     answerShapePlan: prepared.answerShapePlan,
     selectionBoundaryObserver: params.selectionBoundaryObserver,
@@ -236,11 +239,103 @@ export function buildFineAssessParams(
     condition_digest: prepared.queryCondition.identity,
     memoryKeywordLanes: prepared.retrievalFieldBundle.memoryKeywordLanes(),
     memoryLexicalCaptures: prepared.retrievalFieldBundle.memoryLexicalCaptures(),
+    ...(captureAnswerFeatures
+      ? buildPsiV2LiveReceiptInput(prepared, supplementaryData, candidates)
+      : {}),
     ...(membership === undefined ? {} : captureFineAssessmentMembership(
       membership.e0Keys,
       candidates
     ))
   };
+}
+
+function buildPsiV2LiveReceiptInput(
+  prepared: PreparedRecallRequest,
+  supplementaryData: FineAssessParams["supplementaryData"],
+  candidates: FineAssessParams["candidates"]
+): Partial<FineAssessParams> {
+  const diagnostics = buildCaptureProofDiagnostics(
+    prepared,
+    { supplementaryData },
+    candidates
+  );
+  const lexicalBoundProofs = diagnostics.lexical_bound_proofs;
+  const lexicalPins = liveLexicalPins(lexicalBoundProofs);
+  const queryId = lexicalPins?.query_id ?? prepared.queryCondition.identity;
+  const snapshotDigest = lexicalPins?.snapshot_digest ??
+    prepared.snapshotReadLease.vector_digest;
+  if (queryId.length === 0 || snapshotDigest === null) return {};
+  const supportCandidateReceipts = supportReceiptsFrom(diagnostics, supplementaryData);
+  return {
+    query_id: queryId,
+    snapshot_digest: snapshotDigest,
+    lexicalBoundProofs,
+    ...(supportCandidateReceipts.length === 0 ? {} : { supportCandidateReceipts })
+  };
+}
+
+function liveLexicalPins(
+  proofs: FineAssessParams["lexicalBoundProofs"]
+): Readonly<{ readonly query_id: string; readonly snapshot_digest: string }> | undefined {
+  const matched = (proofs ?? []).filter((proof) =>
+    proof.status === "captured" && proof.field_prefix === "lexical_relaxed" &&
+    typeof proof.identity.snapshot_digest === "string"
+  );
+  if (matched.length !== 1) return undefined;
+  const proof = matched[0]!;
+  if (proof.status !== "captured" || typeof proof.identity.snapshot_digest !== "string") {
+    return undefined;
+  }
+  return Object.freeze({
+    query_id: proof.receipt.query_run_id,
+    snapshot_digest: proof.identity.snapshot_digest
+  });
+}
+
+function supportReceiptsFrom(
+  diagnostics: CaptureProofDiagnostics,
+  supplementaryData: FineAssessParams["supplementaryData"]
+): readonly NonNullable<FineAssessParams["supportCandidateReceipts"]>[number][] {
+  return Object.freeze(Object.values(diagnostics.candidate_proposition_provenance)
+    .flatMap((row) => supportReceiptFrom(row, supplementaryData)));
+}
+
+function supportReceiptFrom(
+  row: CaptureProofDiagnostics["candidate_proposition_provenance"][string],
+  supplementaryData: FineAssessParams["supplementaryData"]
+): readonly NonNullable<FineAssessParams["supportCandidateReceipts"]>[number][] {
+  const available = row.osf.bindings.status === "available" ||
+    row.evidence_links.status === "available" ||
+    row.relation_validity.status === "available";
+  if (!available) return [];
+  const bindings = row.osf.bindings.status === "available"
+    ? row.osf.bindings.value.map((binding) => Object.freeze({
+      variable_id: binding.variable_id,
+      binding_identity: binding.binding_identity,
+      semantic_identity: binding.semantic_identity,
+      evidence_id: binding.evidence_id,
+      ...(binding.query_proposition_id === undefined
+        ? {}
+        : { query_proposition_id: binding.query_proposition_id })
+    }))
+    : undefined;
+  return [Object.freeze({
+    candidate_key: row.candidate_key,
+    osf: Object.freeze({
+      composition_status: row.osf.composition_status,
+      truncated: supplementaryData.openSemanticFactorComposition?.truncated ?? false,
+      ...(bindings === undefined ? {} : { bindings: Object.freeze(bindings) })
+    }),
+    ...(row.evidence_links.status === "available"
+      ? { evidence_ids: row.evidence_links.value }
+      : {}),
+    ...(row.relation_validity.status === "available"
+      ? { validity: Object.freeze({
+        status: "available" as const,
+        value: Object.freeze({ validity: row.relation_validity.value.validity })
+      }) }
+      : {})
+  })];
 }
 
 export function captureFineAssessmentMembership(

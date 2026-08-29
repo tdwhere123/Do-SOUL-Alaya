@@ -445,8 +445,10 @@ function observePsiV2Shadow(input: ShadowIntegrateInput): PsiV2ShadowSidecar {
 }
 
 function integratePin(value: string | undefined): string {
-  // Capture identity digest is algorithm identity, not a query snapshot pin.
-  return value !== undefined && value.length > 0 ? value : "not_observed";
+  if (value === undefined || value.trim().length === 0) {
+    throw new ShadowContractError("psi v2 shadow identity pin is unavailable");
+  }
+  return value;
 }
 
 function keysOf(input: ShadowIntegrateInput): readonly string[] {

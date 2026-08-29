@@ -155,7 +155,10 @@ function canonicalizeAlias(witness: BindingRelationWitness): BindingRelationWitn
     payload: {
       left_id: record.left_id,
       right_id: record.right_id,
-      state: record.state
+      state: record.state,
+      ...(record.distinctness_receipt === undefined ? {} : {
+        distinctness_receipt: record.distinctness_receipt
+      })
     }
   });
 }

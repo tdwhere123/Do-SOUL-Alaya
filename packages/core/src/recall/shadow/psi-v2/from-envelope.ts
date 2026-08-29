@@ -21,10 +21,18 @@ export function psiV2CandidateFromLexicalEnvelope(
       "missing lexical envelope remains unresolved"
     ));
   }
+  const envelopeIdentity = lexicalEnvelopeIdentity(map);
+  if (map.identity !== null && envelopeIdentity === null) {
+    return candidate(key, unresolvedCoordinate(
+      primaryDomainHint(map),
+      null,
+      "lexical envelope proof map identity is inconsistent"
+    ));
+  }
   if (map.primary === null) {
     return candidate(key, unresolvedCoordinate(
       primaryDomainHint(map),
-      map.identity,
+      envelopeIdentity,
       "missing primary lexical interval remains unresolved"
     ));
   }
@@ -32,7 +40,7 @@ export function psiV2CandidateFromLexicalEnvelope(
     proposition_id: PROPOSITION_ID,
     applicable: true,
     lex_domain: map.primary.domain,
-    envelope_identity: map.identity,
+    envelope_identity: envelopeIdentity,
     collapse: adaptLexicalIntervalEnvelopeToCollapse(
       map.primary.envelope,
       {
@@ -43,9 +51,22 @@ export function psiV2CandidateFromLexicalEnvelope(
         proposition_id: PROPOSITION_ID
       },
       ADAPTER_PROVENANCE,
-      map.identity
+      envelopeIdentity
     )
   });
+}
+
+function lexicalEnvelopeIdentity(
+  map: D1CandidateEnvelopeMap
+): D1CandidateEnvelopeMap["identity"] {
+  const identity = map.identity;
+  if (identity === null) return null;
+  return map.field_prefix === identity.field_prefix &&
+    map.query_run_id === identity.query_run_id &&
+    map.snapshot_digest === identity.snapshot_digest &&
+    map.request_digest === identity.request_digest
+    ? identity
+    : null;
 }
 
 export function rawMissingFamilyFragment(

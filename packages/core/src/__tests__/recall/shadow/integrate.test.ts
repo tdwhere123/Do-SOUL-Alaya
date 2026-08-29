@@ -249,23 +249,44 @@ describe("shadow integration at fineAssess", () => {
     });
   });
 
-  it("does not pin psi v2 diagnostics to the capture identity digest", () => {
+  it("does not invoke psi v2 diagnostics with missing query or snapshot pins", () => {
     const spy = vi.spyOn(psiV2, "buildPsiV2ShadowDiagnostics");
-    asCaptured(captureShadowIntegration(shadowInput()));
-    expect(spy.mock.calls[0]?.[0]).toMatchObject({
-      query_id: "not_observed",
-      snapshot_digest: "not_observed"
+    const missingBoth = asCaptured(captureShadowIntegration(shadowInput()));
+    const missingSnapshot = asCaptured(captureShadowIntegration({
+      ...shadowInput(),
+      query_id: "query-observed"
+    }));
+    const missingQuery = asCaptured(captureShadowIntegration({
+      ...shadowInput(),
+      snapshot_digest: "snapshot-observed"
+    }));
+    expect(missingBoth.psi_v2_shadow).toEqual({
+      status: "unavailable",
+      observation: "not_observed"
     });
-    expect(spy.mock.calls[0]?.[0]?.snapshot_digest).not.toBe(CAPTURE_IDENTITY_DIGEST);
-    asCaptured(captureShadowIntegration({
+    expect(missingSnapshot.psi_v2_shadow).toEqual({
+      status: "unavailable",
+      observation: "not_observed"
+    });
+    expect(missingQuery.psi_v2_shadow).toEqual({
+      status: "unavailable",
+      observation: "not_observed"
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("passes valid query and snapshot pins to psi v2 diagnostics", () => {
+    const spy = vi.spyOn(psiV2, "buildPsiV2ShadowDiagnostics");
+    const trace = asCaptured(captureShadowIntegration({
       ...shadowInput(),
       query_id: "query-observed",
       snapshot_digest: "snapshot-observed"
     }));
-    expect(spy.mock.calls[1]?.[0]).toMatchObject({
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({
       query_id: "query-observed",
       snapshot_digest: "snapshot-observed"
     });
+    expect(trace.psi_v2_shadow).toMatchObject({ observation_status: "not_observed" });
   });
 });
 

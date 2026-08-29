@@ -1,4 +1,5 @@
 export {
+  BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID,
   BINDING_RELATION_STATES,
   bindingInformationLeq,
   compareBindingRelation,
@@ -7,6 +8,7 @@ export {
   meetBindingRelation,
   refineBindingRelation,
   type BindingRelationInput,
+  type BindingDistinctnessEvidenceReceiptV1,
   type BindingRelationPayload,
   type BindingRelationState,
   type BindingRelationWitness

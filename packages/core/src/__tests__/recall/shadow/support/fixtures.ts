@@ -27,11 +27,28 @@ export function alias(
   right: string,
   state: BindingRelationState
 ): BindingRelationWitness {
+  const payload = {
+    left_id: left,
+    right_id: right,
+    state,
+    ...(state === "distinct" ? {
+      distinctness_receipt: {
+        schema_version: 1 as const,
+        operator_id: "binding_distinctness_evidence_v1" as const,
+        query_id: PINS.query_id,
+        snapshot_digest: PINS.snapshot_digest,
+        left_id: left,
+        right_id: right,
+        source_id: PROV[0]!.source_id,
+        producer: PROV[0]!.producer
+      }
+    } : {})
+  };
   return createBindingRelationWitness({
     identity: PINS,
     provenance: PROV,
     epistemic: { kind: "exact" },
-    payload: { left_id: left, right_id: right, state }
+    payload
   });
 }
 

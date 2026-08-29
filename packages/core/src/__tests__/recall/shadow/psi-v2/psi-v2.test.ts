@@ -116,6 +116,58 @@ describe("proposition Psi v2", () => {
     expect(psiV2Dominates(five, one)).toBe(false);
   });
 
+  it("compares only coordinates bound to the identical measurement contract", () => {
+    const variants: readonly [string, MeasurementGroupContractV1][] = [
+      ["contract id", createMeasurementGroupContractV1({
+        ...CONTRACT,
+        contract_id: "psi.v2.numeric.other"
+      })],
+      ["operator version", createMeasurementGroupContractV1({
+        ...CONTRACT,
+        operator_version: "2"
+      })],
+      ["combine operator", createMeasurementGroupContractV1({
+        ...CONTRACT,
+        combine_operator: "exact_agreement"
+      })]
+    ];
+
+    for (const [label, variant] of variants) {
+      const strong = candidate("a", [["p", 5, 5]]);
+      const weak = candidate("b", [["p", 1, 1]], { contract: variant });
+      expect(comparePsiV2(strong, weak), label).toMatchObject({ kind: "incomparable" });
+      expect(psiV2Dominates(strong, weak), label).toBe(false);
+    }
+
+    const identical = candidate("b", [["p", 1, 1]], { contract: CONTRACT });
+    expect(comparePsiV2(candidate("a", [["p", 5, 5]]), identical).kind)
+      .toBe("dominates");
+  });
+
+  it("blocks comparison when measurement contract metadata is missing", () => {
+    const missingContractId = {
+      ...CONTRACT,
+      contract_id: undefined
+    } as unknown as MeasurementGroupContractV1;
+    const strong = candidate("a", [["p", 5, 5]]);
+    const unknown = candidate("b", [["p", 1, 1]], { contract: missingContractId });
+
+    expect(comparePsiV2(strong, unknown).kind).toBe("blocked");
+    expect(psiV2Dominates(strong, unknown)).toBe(false);
+  });
+
+  it("blocks two identically forged contracts whose digest does not bind their metadata", () => {
+    const forged = {
+      ...CONTRACT,
+      contract_id: "psi.v2.numeric.forged"
+    };
+    const strong = candidate("a", [["p", 5, 5]], { contract: forged });
+    const weak = candidate("b", [["p", 1, 1]], { contract: forged });
+
+    expect(comparePsiV2(strong, weak).kind).toBe("blocked");
+    expect(psiV2Dominates(strong, weak)).toBe(false);
+  });
+
   it("is incomparable across D1 lane, list_n, truncation, and identity", () => {
     const exactProof = plantProof({
       lanes: { exact: { rows: [{ key: "hit", ordinal: 5 }], universeKeys: ["hit"] } }
@@ -156,8 +208,18 @@ describe("proposition Psi v2", () => {
     const strongMap = lexicalMap(9, 9, identity, { porter: [4, 4] });
     const weakMap = lexicalMap(1, 1, identity);
     expect(rawMissingFamilyFragment(strongMap, weakMap)).toBe(true);
-    const strong = psiV2CandidateFromLexicalEnvelope("a", strongMap, "q", D1_SNAPSHOT);
-    const weak = psiV2CandidateFromLexicalEnvelope("b", weakMap, "q", D1_SNAPSHOT);
+    const strong = psiV2CandidateFromLexicalEnvelope(
+      "a",
+      strongMap,
+      identity.query_run_id,
+      D1_SNAPSHOT
+    );
+    const weak = psiV2CandidateFromLexicalEnvelope(
+      "b",
+      weakMap,
+      identity.query_run_id,
+      D1_SNAPSHOT
+    );
     expect(comparePsiV2(strong, weak).kind).toBe("dominates");
   });
 
@@ -185,10 +247,11 @@ describe("proposition Psi v2", () => {
 });
 
 function fromProof(key: string, proof: ReturnType<typeof plantProof>): PsiV2CandidateV1 {
+  const map = d1LaneEnvelopes(proof, key);
   return psiV2CandidateFromLexicalEnvelope(
     key,
-    d1LaneEnvelopes(proof, key),
-    "q",
+    map,
+    map.query_run_id ?? "",
     D1_SNAPSHOT
   );
 }

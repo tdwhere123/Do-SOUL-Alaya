@@ -39,6 +39,12 @@ export function adaptLexicalIntervalEnvelopeToCollapse(
   if (envelopeIdentity === null) {
     return unresolved("forged lexical interval without legal envelope identity remains unresolved");
   }
+  if (envelopeIdentity.query_run_id !== identity.query_id) {
+    return unresolved("lexical envelope query identity does not match the observation pin");
+  }
+  if (envelopeIdentity.snapshot_digest !== identity.snapshot_digest) {
+    return unresolved("lexical envelope snapshot identity does not match the observation pin");
+  }
   return collapseMeasurementGroup({
     contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
     observations: [

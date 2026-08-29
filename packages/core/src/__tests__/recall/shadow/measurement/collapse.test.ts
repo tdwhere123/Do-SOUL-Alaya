@@ -9,7 +9,7 @@ import {
   type NumericIntervalWitness,
   type WitnessEpistemic
 } from "../../../../recall/shadow/witness/index.js";
-import { COMPLETE, PINS, PROV } from "../witness/fixtures.js";
+import { COMPLETE, PINS, PROV, PROV_EXTENDED } from "../witness/fixtures.js";
 
 const BASE = {
   contract_id: "measure.support.v1",
@@ -49,6 +49,32 @@ describe("measurement group collapse", () => {
       contract,
       observations: [numeric("c1", 0, 10), numeric("c1", 1, 4)]
     }).status).toBe("conflict");
+  });
+
+  it("unions duplicate-coordinate provenance deterministically across permutations", () => {
+    const contract = createMeasurementGroupContractV1({
+      ...BASE,
+      combine_operator: "bound_intersection"
+    });
+    const first = numeric("c1", 0, 10, {}, PROV);
+    const duplicate = numeric("c1", 0, 10, {}, PROV_EXTENDED.slice(1));
+
+    const forward = collapseMeasurementGroup({
+      contract,
+      observations: [first, duplicate]
+    });
+    const reverse = collapseMeasurementGroup({
+      contract,
+      observations: [duplicate, first]
+    });
+
+    expect(forward.status).toBe("collapsed");
+    expect(reverse.status).toBe("collapsed");
+    if (forward.status === "collapsed" && reverse.status === "collapsed") {
+      expect(forward.witness.provenance).toEqual(PROV_EXTENDED);
+      expect(reverse.witness.provenance).toEqual(PROV_EXTENDED);
+      expect(reverse.witness).toEqual(forward.witness);
+    }
   });
 
   it("rejects mixed bindings, unknown correlation, and exact comparator without an upper rule", () => {
@@ -235,7 +261,8 @@ function numeric(
   coordinate: string,
   lower: number,
   upper: number,
-  identity: { candidate_id?: string } = {}
+  identity: { candidate_id?: string } = {},
+  provenance = PROV
 ): NumericIntervalWitness {
   return createNumericIntervalWitness({
     identity: {
@@ -244,7 +271,7 @@ function numeric(
       candidate_id: identity.candidate_id ?? PINS.candidate_id,
       proposition_id: "prop-1"
     },
-    provenance: PROV,
+    provenance,
     epistemic: { kind: "exact" },
     payload: { lower, upper }
   });

@@ -25,7 +25,7 @@ export function materializeSupportFromReceipts(
 ): SupportMaterializationV1 {
   const draft = createDraft();
   for (const candidate of input.candidates ?? []) {
-    adaptCandidate(draft, candidate);
+    adaptCandidate(draft, candidate, input);
   }
   const graph = createSupportHypergraph({
     query_id: input.query_id,
@@ -41,11 +41,15 @@ export function materializeSupportFromReceipts(
   });
 }
 
-function adaptCandidate(draft: SupportDraft, candidate: SupportCandidateReceiptV1): void {
+function adaptCandidate(
+  draft: SupportDraft,
+  candidate: SupportCandidateReceiptV1,
+  input: SupportMaterializationInputV1
+): void {
   adaptOsfCandidate(draft, candidate);
   adaptFactFrames(draft, candidate);
-  adaptPolarityReceipts(draft, candidate);
-  adaptPathProjection(draft, candidate);
+  adaptPolarityReceipts(draft, candidate, input);
+  adaptPathProjection(draft, candidate, input);
   adaptTemporal(draft, candidate);
   adaptEvidenceAndF3(draft, candidate);
 }

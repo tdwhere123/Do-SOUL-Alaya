@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createBindingRelationWitness,
+  joinBindingRelation,
   meetBindingRelation,
   bindingInformationLeq,
   refineBindingRelation,
@@ -12,15 +13,36 @@ import { assertMonotoneRefinement, assertPoset } from "./order-properties.js";
 
 function binding(
   state: BindingRelationState,
-  extras: { epistemic?: BindingRelationWitness["epistemic"] } = {}
+  extras: {
+    epistemic?: BindingRelationWitness["epistemic"];
+    withDistinctnessReceipt?: boolean;
+  } = {}
 ): BindingRelationWitness {
   const epistemic = extras.epistemic ??
     (state === "conflict" ? { kind: "conflict" as const } : { kind: "exact" as const });
+  const withDistinctnessReceipt = extras.withDistinctnessReceipt ?? state === "distinct";
+  const payload = {
+    left_id: "left",
+    right_id: "right",
+    state,
+    ...(withDistinctnessReceipt ? {
+      distinctness_receipt: {
+        schema_version: 1 as const,
+        operator_id: "binding_distinctness_evidence_v1" as const,
+        query_id: PAIR_PINS.query_id,
+        snapshot_digest: PAIR_PINS.snapshot_digest,
+        left_id: "left",
+        right_id: "right",
+        source_id: PROV[0]!.source_id,
+        producer: PROV[0]!.producer
+      }
+    } : {})
+  };
   return createBindingRelationWitness({
     identity: PAIR_PINS,
     provenance: PROV,
     epistemic,
-    payload: { left_id: "left", right_id: "right", state }
+    payload
   });
 }
 
@@ -44,10 +66,51 @@ describe("binding relation domain", () => {
     expect(refined.payload?.state).toBe("equal");
   });
 
-  it("does not force may_equal to distinct without a receipt", () => {
-    expect(bindingInformationLeq(mayEqual, distinct)).toBe(false);
-    expect(() => refineBindingRelation(mayEqual, distinct)).toThrow(/incomparable|refinement/u);
-    expect(meetBindingRelation(mayEqual, distinct).epistemic.kind).toBe("conflict");
+  it("refines may_equal to proved distinct with identity-bound evidence", () => {
+    expect(bindingInformationLeq(mayEqual, distinct)).toBe(true);
+    expect(refineBindingRelation(mayEqual, distinct).payload?.state).toBe("distinct");
+    expect(meetBindingRelation(mayEqual, distinct).payload?.state).toBe("distinct");
+  });
+
+  it("rejects distinctness without typed positive evidence", () => {
+    expect(() => binding("distinct", { withDistinctnessReceipt: false })).toThrow(/distinctness receipt/u);
+    expect(mayEqual.payload?.state).toBe("may_equal");
+  });
+
+  it("rejects distinctness evidence with drifted identity or provenance", () => {
+    const driftedPayload = {
+      left_id: "left",
+      right_id: "right",
+      state: "distinct" as const,
+      distinctness_receipt: {
+        schema_version: 1 as const,
+        operator_id: "binding_distinctness_evidence_v1" as const,
+        query_id: "other-query",
+        snapshot_digest: PAIR_PINS.snapshot_digest,
+        left_id: "left",
+        right_id: "right",
+        source_id: "missing-source",
+        producer: "missing-producer"
+      }
+    };
+    expect(() => createBindingRelationWitness({
+      identity: PAIR_PINS,
+      provenance: PROV,
+      epistemic: { kind: "exact" },
+      payload: driftedPayload
+    })).toThrow(/identity/u);
+    expect(() => createBindingRelationWitness({
+      identity: PAIR_PINS,
+      provenance: PROV,
+      epistemic: { kind: "exact" },
+      payload: {
+        ...driftedPayload,
+        distinctness_receipt: {
+          ...driftedPayload.distinctness_receipt,
+          query_id: PAIR_PINS.query_id
+        }
+      }
+    })).toThrow(/provenance/u);
   });
 
   it("meets equal and distinct as conflict, not last-write-wins", () => {
@@ -58,6 +121,11 @@ describe("binding relation domain", () => {
     expect(refined.epistemic.kind).toBe("conflict");
     expect(refined.payload?.state).not.toBe("distinct");
     expect(refined.payload?.state).not.toBe("equal");
+  });
+
+  it("joins equal and distinct to their may_equal possibility set", () => {
+    expect(joinBindingRelation(equal, distinct).payload?.state).toBe("may_equal");
+    expect(joinBindingRelation(distinct, equal).payload?.state).toBe("may_equal");
   });
 
   it("rejects weakening a concrete state back to unknown", () => {

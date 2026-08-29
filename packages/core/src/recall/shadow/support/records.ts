@@ -55,7 +55,14 @@ export function aliasRecord(witness: BindingRelationWitness): SupportAliasRecord
   return freezeShadow({
     left_id: ordered[0]!,
     right_id: ordered[1]!,
-    state: payload.state
+    state: payload.state,
+    ...(payload.distinctness_receipt === undefined ? {} : {
+      distinctness_receipt: freezeShadow({
+        ...payload.distinctness_receipt,
+        left_id: ordered[0]!,
+        right_id: ordered[1]!
+      })
+    })
   });
 }
 
