@@ -11,6 +11,8 @@ import {
   "../../query/canonical-query/index.js";
 import type { LexicalRequestPin } from
   "../../field/retrieval/retrieval-field-bundle.js";
+import type { RecallRetrievalFieldBundle } from
+  "../../field/retrieval/retrieval-field-bundle.js";
 import type { LexicalIntervalSourceReceiptV1 } from
   "../../field/retrieval/lexical-interval-source-receipt.js";
 import { verifyLexicalIntervalSourceReceiptV1 } from
@@ -35,6 +37,7 @@ export type LiveQueryProofAuthority = Readonly<{
   readonly snapshot_coherence_receipt: SnapshotCoherenceReceiptV1;
   readonly snapshot_read_lease: SnapshotReadLeaseV1;
   readonly expected_lexical_request_pins: readonly Readonly<LexicalRequestPin>[];
+  readonly lexical_source_bundle?: Readonly<RecallRetrievalFieldBundle>;
 }>;
 
 export type VerifiedLiveQueryProofPins = Readonly<{
@@ -120,12 +123,18 @@ export function admitLiveLexicalIntervalSources(
 ): readonly Readonly<LexicalIntervalSourceReceiptV1>[] | undefined {
   const pins = verifyLiveQueryProofAuthority(authority);
   const expected = authority.expected_lexical_request_pins;
-  if (expected.length === 0 || values.length !== expected.length) return undefined;
+  const bundle = authority.lexical_source_bundle;
+  if (bundle === undefined || expected.length === 0 || values.length !== expected.length) {
+    return undefined;
+  }
   const expectedKeys = new Set(expected.map(pinKey));
   const seen = new Set<string>();
   for (const value of values) {
     try {
-      verifyLexicalIntervalSourceReceiptV1(value);
+      verifyLexicalIntervalSourceReceiptV1(value, {
+        bundle,
+        lease: authority.snapshot_read_lease
+      });
     } catch {
       return undefined;
     }

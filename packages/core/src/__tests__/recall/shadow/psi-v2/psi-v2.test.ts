@@ -8,7 +8,6 @@ import {
   createMeasurementGroupContractV1,
   issueMeasurementGroupAdmission,
   LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-  verifyMeasurementPreparedAuthorityV1,
   type MeasurementGroupContractV1,
   type VerifiedMeasurementAuthorityV1
 } from "../../../../recall/shadow/measurement/index.js";
@@ -28,7 +27,7 @@ import { createNumericIntervalWitness } from "../../../../recall/shadow/witness/
 import { plantProof } from "../d1/d1-proof-fixture.js";
 import { PINS, PROV } from "../witness/fixtures.js";
 import {
-  measurementEvidence,
+  prepareLexicalMeasurementAuthorityFixture,
   prepareMeasurementEvidenceFixture,
   releaseMeasurementEvidenceFixture
 } from "../measurement/prepared-authority-fixture.js";
@@ -74,10 +73,7 @@ const peelPsiV2Frontiers = (candidates: readonly PsiV2CandidateV1[]) =>
 describe("proposition Psi v2", () => {
   beforeAll(async () => {
     prepared = await prepareMeasurementEvidenceFixture();
-    authority = verifyMeasurementPreparedAuthorityV1({
-      evidence: measurementEvidence(prepared, true),
-      contract: CONTRACT
-    });
+    authority = await prepareLexicalMeasurementAuthorityFixture(prepared);
     ENVELOPE_IDENTITY = {
       field_prefix: "lexical_relaxed",
       query_run_id: "memory.keyword.depth:10",

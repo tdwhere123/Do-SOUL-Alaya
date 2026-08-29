@@ -6,9 +6,7 @@ import {
   collapseMeasurementGroup,
   collapsePropositionStateMeasurement,
   compareCollapsedPropositionStatesExact,
-  createMeasurementGroupContractV1,
   issueMeasurementGroupAdmission,
-  verifyMeasurementPreparedAuthorityV1,
   validateMeasurementAdmissionV1
 } from "../../../../recall/shadow/measurement/index.js";
 import type { PreparedRecallRequest } from
@@ -22,20 +20,18 @@ import {
 import { PINS, PROV } from "../witness/fixtures.js";
 import {
   measurementEvidence,
+  prepareLexicalMeasurementAuthorityFixture,
   prepareMeasurementEvidenceFixture,
   releaseMeasurementEvidenceFixture
 } from "./prepared-authority-fixture.js";
 
 let prepared: PreparedRecallRequest;
-let authority: ReturnType<typeof verifyMeasurementPreparedAuthorityV1>;
+let authority: Awaited<ReturnType<typeof prepareLexicalMeasurementAuthorityFixture>>;
 
 describe("measurement admission", () => {
   beforeAll(async () => {
     prepared = await prepareMeasurementEvidenceFixture();
-    authority = verifyMeasurementPreparedAuthorityV1({
-      evidence: measurementEvidence(prepared, true),
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
-    });
+    authority = await prepareLexicalMeasurementAuthorityFixture(prepared);
   });
 
   afterAll(() => releaseMeasurementEvidenceFixture(prepared));
@@ -79,33 +75,6 @@ describe("measurement admission", () => {
     expect(lexicalInterval).toMatch(
       /export\s+function\s+lexicalIntervalSourceEnvelopes/u
     );
-  });
-
-  it("rejects a structurally identical counterfeit contract", () => {
-    const counterfeit = {
-      ...LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
-    } as typeof LEXICAL_INTERVAL_MEASUREMENT_CONTRACT;
-    expect(() => verifyMeasurementPreparedAuthorityV1({
-      evidence: measurementEvidence(prepared, true),
-      contract: counterfeit,
-    })).toThrow(/predeclared/u);
-  });
-
-  it("rejects unknown digest-correct contracts and semantic drift", () => {
-    const unknown = createMeasurementGroupContractV1({
-      ...LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-      contract_id: "measure.lexical.interval.unknown.v1"
-    });
-    const drifted = createMeasurementGroupContractV1({
-      ...LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-      proposition_schema: "lex.interval.drifted"
-    });
-    for (const contract of [unknown, drifted]) {
-      expect(() => verifyMeasurementPreparedAuthorityV1({
-        evidence: measurementEvidence(prepared, true),
-        contract,
-      })).toThrow(/predeclared/u);
-    }
   });
 
   it("binds the admission to contract, schema, and collapsed witness bytes", () => {
@@ -175,47 +144,25 @@ describe("measurement admission", () => {
     })).toThrow(/not verified/u);
   });
 
-  it("does not turn arbitrary prepared strings into a verified authority", () => {
-    expect(() => verifyMeasurementPreparedAuthorityV1({
-      evidence: {
-        workspace_id: "invented-workspace",
-        query_condition: { identity: "invented-query" },
-        canonical_query_compilation: { digest: `sha256:${"a".repeat(64)}` },
-        snapshot_vector: { vector_digest: `sha256:${"b".repeat(64)}` },
-        snapshot_coherence_receipt: { receipt_digest: `sha256:${"c".repeat(64)}` },
-        snapshot_read_lease: { state: "finalized", capabilities: [] }
-      } as unknown as Parameters<typeof verifyMeasurementPreparedAuthorityV1>[0]["evidence"],
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
-    })).toThrow();
-    const evidence = measurementEvidence(prepared, true);
-    expect(() => verifyMeasurementPreparedAuthorityV1({
-      evidence: {
-        ...evidence,
-        query_condition: {
-          ...evidence.query_condition,
-          identity: `sha256:${"f".repeat(64)}`
-        }
-      },
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
-    })).toThrow(/query condition/u);
+  it("does not expose a prepared-only measurement authority issuer", async () => {
+    const measurement = await import(
+      "../../../../recall/shadow/measurement/index.js"
+    );
+    expect("verifyMeasurementPreparedAuthorityV1" in measurement).toBe(false);
   });
 
-  it("rejects stripped and modified finalized lease capabilities", () => {
+  it("rejects stripped and modified finalized lease capabilities", async () => {
     const evidence = measurementEvidence(prepared, true);
     expect(evidence.snapshot_read_lease.capabilities.length).toBeGreaterThan(0);
-    expect(() => verifyMeasurementPreparedAuthorityV1({
-      evidence: {
+    await expect(prepareLexicalMeasurementAuthorityFixture(prepared, {
         ...evidence,
         snapshot_read_lease: {
           ...evidence.snapshot_read_lease,
           capabilities: []
         }
-      },
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
-    })).toThrow(/lease/u);
+    })).rejects.toThrow();
     const first = evidence.snapshot_read_lease.capabilities[0]!;
-    expect(() => verifyMeasurementPreparedAuthorityV1({
-      evidence: {
+    await expect(prepareLexicalMeasurementAuthorityFixture(prepared, {
         ...evidence,
         snapshot_read_lease: {
           ...evidence.snapshot_read_lease,
@@ -227,9 +174,7 @@ describe("measurement admission", () => {
             }
           }, ...evidence.snapshot_read_lease.capabilities.slice(1)]
         }
-      },
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
-    })).toThrow(/lease/u);
+    })).rejects.toThrow();
   });
 });
 

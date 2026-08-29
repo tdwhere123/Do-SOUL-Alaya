@@ -13,8 +13,7 @@ import {
   lexicalIntervalSourceEnvelopes
 } from "./measurement/lexical-interval-envelope.js";
 import {
-  LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
-  verifyMeasurementPreparedAuthorityV1,
+  verifyLexicalMeasurementPreparedAuthorityV1,
   type VerifiedMeasurementAuthorityV1
 } from "./measurement/index.js";
 import {
@@ -121,9 +120,13 @@ function materializeLexicalIntervalSources(
     const pin = authority.expected_lexical_request_pins.find((candidate) =>
       sourcePinKey(candidate) === sourcePinKey(source));
     if (pin === undefined) return malformed("lex.interval", "measurement_identity_pin_absent");
-    const measurementAuthority = verifyMeasurementPreparedAuthorityV1({
-      evidence: { ...preparedEvidence(authority), lexical_request_pin: pin },
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
+    const measurementAuthority = verifyLexicalMeasurementPreparedAuthorityV1({
+      evidence: {
+        ...preparedEvidence(authority),
+        lexical_request_pin: pin,
+        lexical_source_receipt: source,
+        lexical_source_bundle: authority.lexical_source_bundle!
+      }
     });
     const envelopes = Object.freeze(Object.fromEntries(params.candidates.map((candidate) => {
       const key = buildRecallCandidateDedupeKey(candidate);

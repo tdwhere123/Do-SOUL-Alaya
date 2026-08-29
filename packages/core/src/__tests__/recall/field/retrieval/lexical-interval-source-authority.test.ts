@@ -36,7 +36,7 @@ describe("lexical interval source authority", () => {
       [source] = readMemoryLexicalIntervalSources(bundle);
       expect(() => verifyLexicalIntervalSourceReceiptV1(source!)).not.toThrow();
       expect(admitLiveLexicalIntervalSources(
-        authorityFor(prepared, source!), [source!]
+        authorityFor(prepared, source!, bundle), [source!]
       )).toEqual([source]);
       expect(() => verifyLexicalIntervalSourceReceiptV1({ ...source! }))
         .toThrow(/issued source authority/u);
@@ -45,7 +45,7 @@ describe("lexical interval source authority", () => {
     expect(() => verifyLexicalIntervalSourceReceiptV1(source!))
       .toThrow(/active source authority/u);
     expect(admitLiveLexicalIntervalSources(
-      authorityFor(prepared, source!), [source!]
+      authorityFor(prepared, source!, bundle), [source!]
     )).toBeUndefined();
     expect(search.mock.calls).toEqual([["workspace-1", "stable", 1, {}]]);
     expect("memoryLexicalIntervalSourcesForSnapshot" in bundle).toBe(false);
@@ -128,7 +128,7 @@ describe("lexical interval source authority", () => {
       [source] = readMemoryLexicalIntervalSources(bundle);
       expect(() => verifyLexicalIntervalSourceReceiptV1(source!)).not.toThrow();
       expect(admitLiveLexicalIntervalSources(
-        authorityFor(prepared, source!), [source!]
+        authorityFor(prepared, source!, bundle), [source!]
       )).toEqual([source]);
       throw new Error("rollback");
     })).rejects.toThrow("rollback");
@@ -136,7 +136,7 @@ describe("lexical interval source authority", () => {
     expect(() => verifyLexicalIntervalSourceReceiptV1(source!))
       .toThrow(/active source authority/u);
     expect(admitLiveLexicalIntervalSources(
-      authorityFor(prepared, source!), [source!]
+      authorityFor(prepared, source!, bundle), [source!]
     )).toBeUndefined();
     cleanup(prepared);
   });
@@ -268,10 +268,12 @@ function snapshotPort() {
 
 function authorityFor(
   prepared: Awaited<ReturnType<typeof preparedAuthority>>,
-  source: ReturnType<typeof readMemoryLexicalIntervalSources>[number]
+  source: ReturnType<typeof readMemoryLexicalIntervalSources>[number],
+  bundle: ReturnType<typeof createRecallRetrievalFieldBundle>
 ) {
   return Object.freeze({
     ...authorityFrom(prepared),
+    lexical_source_bundle: bundle,
     expected_lexical_request_pins: [Object.freeze({
       workspace_id: source.workspace_id,
       request_digest: source.request_digest,

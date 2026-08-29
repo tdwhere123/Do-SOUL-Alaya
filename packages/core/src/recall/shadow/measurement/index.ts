@@ -19,12 +19,13 @@ export {
 export {
   issueMeasurementGroupAdmission,
   validateMeasurementAdmissionV1,
-  verifyMeasurementPreparedAuthorityV1,
+  verifyLexicalMeasurementPreparedAuthorityV1,
   type AdmissibleMeasurementCollapseV1,
   type MeasurementAdmissionV1,
   type MeasurementAdmissionValidationV1,
   type MeasurementCoordinateIdentityV1,
   type CurrentMeasurementAuthoritiesV1,
+  type LexicalMeasurementAuthorityEvidenceV1,
   type PreparedMeasurementAuthorityEvidenceV1,
   type VerifiedMeasurementAuthorityV1
 } from "./admission.js";

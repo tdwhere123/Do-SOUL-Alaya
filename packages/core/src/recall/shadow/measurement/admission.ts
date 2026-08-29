@@ -7,6 +7,12 @@ import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../field/field-identity.js";
 import type { LexicalRequestPin } from
   "../../field/retrieval/retrieval-field-bundle.js";
+import type { RecallRetrievalFieldBundle } from
+  "../../field/retrieval/retrieval-field-bundle.js";
+import type { LexicalIntervalSourceReceiptV1 } from
+  "../../field/retrieval/lexical-interval-source-receipt.js";
+import { verifyLexicalIntervalSourceReceiptV1 } from
+  "../../field/retrieval/retrieval-field-source-authority.js";
 import {
   verifyCanonicalQueryCompilationV1,
   type CanonicalQueryCompilationV1,
@@ -62,8 +68,14 @@ export type PreparedMeasurementAuthorityEvidenceV1 = Readonly<{
   readonly snapshot_vector: SnapshotVectorV1;
   readonly snapshot_coherence_receipt: SnapshotCoherenceReceiptV1;
   readonly snapshot_read_lease: SnapshotReadLeaseV1;
-  readonly lexical_request_pin?: Readonly<LexicalRequestPin>;
 }>;
+
+export type LexicalMeasurementAuthorityEvidenceV1 =
+  PreparedMeasurementAuthorityEvidenceV1 & Readonly<{
+    readonly lexical_request_pin: Readonly<LexicalRequestPin>;
+    readonly lexical_source_receipt: Readonly<LexicalIntervalSourceReceiptV1>;
+    readonly lexical_source_bundle: Readonly<RecallRetrievalFieldBundle>;
+  }>;
 
 export type MeasurementAdmissionV1 = Readonly<{
   readonly schema_version: 1;
@@ -109,13 +121,27 @@ const PREDECLARED_CONTRACTS = new Set<MeasurementGroupContractV1>([
 const VERIFIED_AUTHORITIES = new WeakSet<object>();
 const ISSUED_ADMISSIONS = new WeakSet<object>();
 
-export function verifyMeasurementPreparedAuthorityV1(input: Readonly<{
-  readonly evidence: PreparedMeasurementAuthorityEvidenceV1;
-  readonly contract: MeasurementGroupContractV1;
+export function verifyLexicalMeasurementPreparedAuthorityV1(input: Readonly<{
+  readonly evidence: LexicalMeasurementAuthorityEvidenceV1;
 }>): VerifiedMeasurementAuthorityV1 {
-  requirePredeclaredContract(input.contract);
-  const livePins = verifyPreparedEvidence(input.evidence);
-  const source = measurementSourceIdentity(input);
+  return verifyPreparedAuthority(
+    input.evidence,
+    LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+    lexicalMeasurementSourceIdentity(input.evidence)
+  );
+}
+
+function verifyPreparedAuthority(
+  evidence: PreparedMeasurementAuthorityEvidenceV1,
+  contract: MeasurementGroupContractV1,
+  source: Readonly<{
+    readonly request_digest: string;
+    readonly field_prefix: LexicalRequestPin["field_prefix"] | null;
+    readonly candidate_key_domain: LexicalRequestPin["candidate_key_domain"] | null;
+  }>
+): VerifiedMeasurementAuthorityV1 {
+  requirePredeclaredContract(contract);
+  const livePins = verifyPreparedEvidence(evidence);
   const body = freezeShadow({
     query_id: livePins.query_id,
     snapshot_digest: livePins.snapshot_digest,
@@ -123,19 +149,19 @@ export function verifyMeasurementPreparedAuthorityV1(input: Readonly<{
     workspace_id: livePins.workspace_id,
     field_prefix: source.field_prefix,
     candidate_key_domain: source.candidate_key_domain,
-    contract_digest: input.contract.digest,
+    contract_digest: contract.digest,
     authority_digest: digestRecallFieldIdentity({
       canonical_query_compilation_digest:
-        input.evidence.canonical_query_compilation.digest,
-      snapshot_vector_digest: input.evidence.snapshot_vector.vector_digest,
+        evidence.canonical_query_compilation.digest,
+      snapshot_vector_digest: evidence.snapshot_vector.vector_digest,
       snapshot_receipt_digest:
-        input.evidence.snapshot_coherence_receipt.receipt_digest,
-      snapshot_read_lease: input.evidence.snapshot_read_lease,
+        evidence.snapshot_coherence_receipt.receipt_digest,
+      snapshot_read_lease: evidence.snapshot_read_lease,
       request_digest: source.request_digest,
       workspace_id: livePins.workspace_id,
       field_prefix: source.field_prefix,
       candidate_key_domain: source.candidate_key_domain,
-      contract_digest: input.contract.digest
+      contract_digest: contract.digest
     })
   });
   const authority = body as VerifiedMeasurementAuthorityV1;
@@ -278,32 +304,35 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
     .every((value, index) => value === normalizedRight[index]);
 }
 
-function measurementSourceIdentity(input: Readonly<{
-  readonly evidence: PreparedMeasurementAuthorityEvidenceV1;
-  readonly contract: MeasurementGroupContractV1;
-}>): Readonly<{
+function lexicalMeasurementSourceIdentity(
+  evidence: LexicalMeasurementAuthorityEvidenceV1
+): Readonly<{
   readonly request_digest: string;
   readonly field_prefix: LexicalRequestPin["field_prefix"] | null;
   readonly candidate_key_domain: LexicalRequestPin["candidate_key_domain"] | null;
 }> {
-  if (input.contract === LEXICAL_INTERVAL_MEASUREMENT_CONTRACT) {
-    const pin = input.evidence.lexical_request_pin;
-    if (pin === undefined || !validLexicalPin(pin, input.evidence.workspace_id)) {
-      throw new ShadowContractError("lexical measurement authority pin is not prepared");
-    }
-    return freezeShadow({
-      request_digest: pin.request_digest,
-      field_prefix: pin.field_prefix,
-      candidate_key_domain: pin.candidate_key_domain
-    });
+  const pin = evidence.lexical_request_pin;
+  const source = evidence.lexical_source_receipt;
+  if (!validLexicalPin(pin, evidence.workspace_id) ||
+      source.workspace_id !== pin.workspace_id ||
+      source.request_digest !== pin.request_digest ||
+      source.field_prefix !== pin.field_prefix ||
+      source.candidate_key_domain !== pin.candidate_key_domain ||
+      source.snapshot_digest !== evidence.snapshot_vector.vector_digest) {
+    throw new ShadowContractError("lexical measurement source identity mismatch");
   }
-  if (input.evidence.lexical_request_pin !== undefined) {
-    throw new ShadowContractError("proposition-state authority cannot consume a lexical pin");
+  try {
+    verifyLexicalIntervalSourceReceiptV1(source, {
+      bundle: evidence.lexical_source_bundle,
+      lease: evidence.snapshot_read_lease
+    });
+  } catch {
+    throw new ShadowContractError("lexical measurement source authority is not issued");
   }
   return freezeShadow({
-    request_digest: input.evidence.canonical_query_compilation.digest,
-    field_prefix: null,
-    candidate_key_domain: null
+    request_digest: pin.request_digest,
+    field_prefix: pin.field_prefix,
+    candidate_key_domain: pin.candidate_key_domain
   });
 }
 

@@ -5,7 +5,6 @@ import {
   LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
   collapseMeasurementGroup,
   issueMeasurementGroupAdmission,
-  verifyMeasurementPreparedAuthorityV1,
   type VerifiedMeasurementAuthorityV1
 } from "../../../../recall/shadow/measurement/index.js";
 import type { LexDomain } from "../../../../recall/shadow/observations.js";
@@ -17,8 +16,8 @@ import { createNumericIntervalWitness } from
   "../../../../recall/shadow/witness/index.js";
 import { PINS, PROV } from "../witness/fixtures.js";
 import {
-  measurementEvidence,
   measurementEvidenceWithAlternateCompilation,
+  prepareLexicalMeasurementAuthorityFixture,
   prepareMeasurementEvidenceFixture,
   releaseMeasurementEvidenceFixture
 } from "../measurement/prepared-authority-fixture.js";
@@ -36,16 +35,16 @@ let originalAuthority: VerifiedMeasurementAuthorityV1;
 describe("Psi v2 authority binding", () => {
   beforeAll(async () => {
     prepared = await prepareMeasurementEvidenceFixture();
-    originalAuthority = verifiedAuthority(prepared);
+    originalAuthority = await verifiedAuthority(prepared);
   });
 
   afterAll(() => releaseMeasurementEvidenceFixture(prepared));
 
-  it("blocks cross-compilation and prior-request reuse but permits current pairs", () => {
-    const currentAuthority = verifyMeasurementPreparedAuthorityV1({
-      evidence: measurementEvidenceWithAlternateCompilation(prepared, true),
-      contract: CONTRACT
-    });
+  it("blocks cross-compilation and prior-request reuse but permits current pairs", async () => {
+    const currentAuthority = await prepareLexicalMeasurementAuthorityFixture(
+      prepared,
+      measurementEvidenceWithAlternateCompilation(prepared, true)
+    );
     expect(currentAuthority.authority_digest).not.toBe(originalAuthority.authority_digest);
     expect({
       query_id: currentAuthority.query_id,
@@ -74,7 +73,7 @@ describe("Psi v2 authority binding", () => {
   it("blocks coordinates admitted under a different query lease", async () => {
     const later = await prepareMeasurementEvidenceFixture("2026-08-29T00:00:01.000Z");
     try {
-      const laterAuthority = verifiedAuthority(later);
+      const laterAuthority = await verifiedAuthority(later);
       expect(laterAuthority.authority_digest).not.toBe(originalAuthority.authority_digest);
       expect(laterAuthority.snapshot_digest).not.toBe(originalAuthority.snapshot_digest);
       expect(comparePsiV2(
@@ -89,10 +88,7 @@ describe("Psi v2 authority binding", () => {
 });
 
 function verifiedAuthority(preparedRequest: PreparedRecallRequest) {
-  return verifyMeasurementPreparedAuthorityV1({
-    evidence: measurementEvidence(preparedRequest, true),
-    contract: CONTRACT
-  });
+  return prepareLexicalMeasurementAuthorityFixture(preparedRequest);
 }
 
 function candidate(

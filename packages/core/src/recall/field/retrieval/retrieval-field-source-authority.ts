@@ -47,6 +47,8 @@ type AuthenticatedRecordAuthority = Readonly<{
 const states = new WeakMap<object, AuthorityState>();
 const bundleAuthorities = new WeakMap<object, RetrievalFieldSourceAuthority>();
 const issuedReceipts = new WeakMap<object, Readonly<{
+  bundle: Readonly<RecallRetrievalFieldBundle>;
+  lease: SnapshotReadLeaseV1;
   capability: ActiveRecallReadCapability;
   snapshot_digest: NonNullable<SnapshotReadLeaseV1["vector_digest"]>;
 }>>();
@@ -147,6 +149,8 @@ export function readMemoryLexicalIntervalSources(
       result: record.result
     });
     issuedReceipts.set(receipt, Object.freeze({
+      bundle,
+      lease: binding.lease,
       capability: provenance.capability,
       snapshot_digest: snapshotDigest
     }));
@@ -156,7 +160,11 @@ export function readMemoryLexicalIntervalSources(
 }
 
 export function verifyLexicalIntervalSourceReceiptV1(
-  receipt: LexicalIntervalSourceReceiptV1
+  receipt: LexicalIntervalSourceReceiptV1,
+  expected?: Readonly<{
+    readonly bundle: Readonly<RecallRetrievalFieldBundle>;
+    readonly lease: SnapshotReadLeaseV1;
+  }>
 ): void {
   verifyLexicalIntervalSourceReceiptIntegrityV1(receipt);
   const issuance = issuedReceipts.get(receipt);
@@ -168,6 +176,10 @@ export function verifyLexicalIntervalSourceReceiptV1(
   }
   if (receipt.snapshot_digest !== issuance.snapshot_digest) {
     throw new TypeError("lexical interval receipt source authority is inconsistent");
+  }
+  if (expected !== undefined &&
+      (issuance.bundle !== expected.bundle || issuance.lease !== expected.lease)) {
+    throw new TypeError("lexical interval receipt source binding is inconsistent");
   }
 }
 

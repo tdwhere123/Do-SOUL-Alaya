@@ -78,9 +78,9 @@ describe("live normal lexical interval source", () => {
       ]),
       [match("cand-a", 0.9), match("cand-b", 0.4)],
       undefined,
-      (lexicalSource) => fineAssess({
+      (lexicalSource, bundle) => fineAssess({
         ...params(candidates),
-        queryProofAuthority: authorityFromSource(prepared, lexicalSource),
+        queryProofAuthority: authorityFromSource(prepared, lexicalSource, bundle),
         lexicalIntervalSources: [lexicalSource]
       })
     );
@@ -106,9 +106,9 @@ describe("live normal lexical interval source", () => {
     const prepared = await capturedLexicalPreparedAuthority();
     const issued = await source(
       prepared, capture([]), [], undefined,
-      (observed) => fineAssess({
+      (observed, bundle) => fineAssess({
         ...params(candidates),
-        queryProofAuthority: authorityFromSource(prepared, observed),
+        queryProofAuthority: authorityFromSource(prepared, observed, bundle),
         lexicalIntervalSources: [observed]
       })
     );
@@ -138,7 +138,7 @@ describe("live normal lexical interval source", () => {
       LexicalIntervalSourceReceiptV1;
     const rejected = fineAssess({
       ...params(candidates),
-      queryProofAuthority: authorityFromSource(prepared, stale),
+      queryProofAuthority: authorityFromSource(prepared, stale, undefined),
       lexicalIntervalSources: [counterfeit]
     });
 
@@ -154,6 +154,70 @@ describe("live normal lexical interval source", () => {
     expect(rejected.capture_receipt).toEqual(base.capture_receipt);
     cleanup(prepared);
   });
+
+  it("requires the exact issued source, bundle, lease, and request", async () => {
+    const candidates = fieldCandidates(["cand-a", "cand-b"]);
+    const prepared = await capturedLexicalPreparedAuthority();
+    const rejected: ReturnType<typeof fineAssess>[] = [];
+    const issued = await source(
+      prepared,
+      capture([candidate("cand-a", 0.9, true)]),
+      [match("cand-a", 0.9)],
+      undefined,
+      (receipt, bundle) => {
+        const exact = authorityFromSource(prepared, receipt, bundle);
+        const otherBundle = createRecallRetrievalFieldBundle({
+          workspaceId: "workspace-1",
+          queryText: "other bundle",
+          memoryRepo: { searchByKeywordField: async () => Object.freeze({
+            matches: [], lanes: normalLanes([])
+          }) }
+        });
+        rejected.push(fineAssess({
+          ...params(candidates),
+          queryProofAuthority: exact,
+          lexicalIntervalSources: [{ ...receipt } as LexicalIntervalSourceReceiptV1]
+        }));
+        rejected.push(fineAssess({
+          ...params(candidates),
+          queryProofAuthority: { ...exact, lexical_source_bundle: otherBundle },
+          lexicalIntervalSources: [receipt]
+        }));
+        rejected.push(fineAssess({
+          ...params(candidates),
+          queryProofAuthority: {
+            ...exact,
+            snapshot_read_lease: { ...exact.snapshot_read_lease }
+          },
+          lexicalIntervalSources: [receipt]
+        }));
+        rejected.push(fineAssess({
+          ...params(candidates),
+          queryProofAuthority: {
+            ...exact,
+            expected_lexical_request_pins: [{
+              ...pinFrom(receipt),
+              request_digest: `sha256:${"d".repeat(64)}`
+            }]
+          },
+          lexicalIntervalSources: [receipt]
+        }));
+        return fineAssess({
+          ...params(candidates),
+          queryProofAuthority: exact,
+          lexicalIntervalSources: [receipt]
+        });
+      }
+    );
+
+    expect(captured(issued.assessed!.shadowTrace).psi_v2_shadow.observation_status)
+      .toBe("observed");
+    for (const result of rejected) {
+      expect(captured(result.shadowTrace).psi_v2_shadow.observation_status)
+        .toBe("malformed");
+    }
+    cleanup(prepared);
+  });
 });
 
 async function source(
@@ -161,7 +225,10 @@ async function source(
   lexical_raw_rank: Readonly<KeywordLexicalMergeCapture>,
   matches: Readonly<KeywordSearchFieldResult>["matches"],
   buildCandidates?: ReturnType<typeof fieldCandidates>,
-  assess?: (receipt: LexicalIntervalSourceReceiptV1) => ReturnType<typeof fineAssess>
+  assess?: (
+    receipt: LexicalIntervalSourceReceiptV1,
+    bundle: ReturnType<typeof createRecallRetrievalFieldBundle>
+  ) => ReturnType<typeof fineAssess>
 ) {
   const bundle = createRecallRetrievalFieldBundle({
     workspaceId: "workspace-1",
@@ -181,7 +248,7 @@ async function source(
     if (receipt === undefined) throw new Error("expected issued lexical source");
     return {
       receipt,
-      assessed: assess?.(receipt),
+      assessed: assess?.(receipt, bundle),
       built: buildCandidates === undefined ? undefined : buildFineAssessParams(
         { warn: () => undefined } as unknown as RecallExecutionContext,
         { workspaceId: "workspace-1" } as unknown as RecallExecutionParams,
@@ -203,9 +270,14 @@ async function sourceReceipt(
 
 function authorityFromSource(
   prepared: PreparedRecallRequest,
-  receipt: LexicalIntervalSourceReceiptV1
+  receipt: LexicalIntervalSourceReceiptV1,
+  bundle: ReturnType<typeof createRecallRetrievalFieldBundle> | undefined
 ) {
-  return Object.freeze({ ...authorityFrom(prepared), expected_lexical_request_pins: [pinFrom(receipt)] });
+  return Object.freeze({
+    ...authorityFrom(prepared),
+    ...(bundle === undefined ? {} : { lexical_source_bundle: bundle }),
+    expected_lexical_request_pins: [pinFrom(receipt)]
+  });
 }
 
 function pinFrom(receipt: LexicalIntervalSourceReceiptV1) {

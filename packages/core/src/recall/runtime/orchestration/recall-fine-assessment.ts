@@ -262,6 +262,7 @@ function buildPsiV2LiveReceiptInput(
       snapshot_vector: prepared.snapshotVector,
       snapshot_coherence_receipt: prepared.snapshotCoherenceReceipt,
       snapshot_read_lease: prepared.snapshotReadLease,
+      lexical_source_bundle: prepared.retrievalFieldBundle,
       expected_lexical_request_pins:
         prepared.retrievalFieldBundle.memoryLexicalRequestPins()
     }),
