@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,11 +17,21 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 describe("neutrality-shadow-off-runner isolation", () => {
   it("refuses the live main checkout recall directory as copy dest", () => {
     const mainRoot = resolveMainCheckoutRoot(here);
+    const fsRoot = path.parse(mainRoot).root;
+    expect(mainRoot).not.toBe(fsRoot);
+    expect(existsSync(path.join(mainRoot, ".git"))).toBe(true);
     const mainDest = path.join(mainRoot, RECALL_TEST_DIR);
     expect(() => assertIsolatedShadowOffDest(mainDest, mainRoot))
       .toThrow(/must not be inside/u);
     expect(() => resolveShadowOffCopyRoot(mainRoot, [mainRoot])).toThrow();
     expect(path.resolve(mainDest)).not.toBe(path.resolve(tmpdir()));
+  });
+
+  it("refuses dest inside filesystem root when that root is forbidden", () => {
+    const fsRoot = path.parse(path.resolve(here)).root;
+    const nested = path.join(fsRoot, "var", "tmp", "alaya-shadow-off-root-case");
+    expect(() => assertIsolatedShadowOffDest(nested, fsRoot))
+      .toThrow(/must not be inside/u);
   });
 
   it("refuses dest inside the current worktree recall directory", () => {

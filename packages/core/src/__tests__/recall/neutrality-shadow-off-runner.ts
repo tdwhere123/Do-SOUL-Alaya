@@ -44,9 +44,9 @@ export function captureShadowOffBundle(): NeutralityBundle {
 }
 
 export function resolveMainCheckoutRoot(from: string): string {
-  const top = git(["rev-parse", "--show-toplevel"], from);
   const common = git(["rev-parse", "--git-common-dir"], from);
-  const gitDir = path.isAbsolute(common) ? common : path.resolve(top, common);
+  // Relative --git-common-dir is vs the git cwd, not toplevel.
+  const gitDir = path.isAbsolute(common) ? common : path.resolve(from, common);
   return path.dirname(gitDir);
 }
 
@@ -253,7 +253,11 @@ function assertUnderTmpdir(target: string): void {
 }
 
 function isInsideRoot(inner: string, outer: string): boolean {
-  return inner === outer || inner.startsWith(`${outer}${path.sep}`);
+  if (inner === outer) {
+    return true;
+  }
+  const prefix = outer.endsWith(path.sep) ? outer : `${outer}${path.sep}`;
+  return inner.startsWith(prefix);
 }
 
 function git(args: readonly string[], cwd: string): string {
