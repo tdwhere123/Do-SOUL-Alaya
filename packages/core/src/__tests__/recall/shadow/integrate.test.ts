@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fineAssess } from "../../../recall/delivery/fine-assessment.js";
 import { compileRecallQueryProbes } from "../../../recall/query/recall-query-probes.js";
 import { buildDefaultPolicy } from "../../../recall/runtime/orchestration.js";
@@ -7,7 +7,9 @@ import type {
   CoarseRecallCandidate,
   RecallSupplementaryData
 } from "../../../recall/runtime/recall-service-types.js";
+import { ShadowContractError } from "../../../recall/shadow/envelope.js";
 import { isPsiCycleFailure, peelUndominated } from "../../../recall/shadow/frontier-peel.js";
+import * as psiV2 from "../../../recall/shadow/psi-v2/index.js";
 import type { ShadowFrontierReceipt } from "../../../recall/shadow/frontiers.js";
 import {
   CAPTURE_IDENTITY_DIGEST,
@@ -44,6 +46,10 @@ const IDS = ["cand-a", "cand-b", "cand-c"] as const;
 const THREE_CANDIDATE_UNCACHED_PSI_CALLS = 14;
 
 describe("shadow integration at fineAssess", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("planted guard: shadow cannot change production ids, order, or delivery diagnostics", () => {
     const params = assessParams(fieldCandidates(), "legacy");
     const planted = plantedTransitivity();
@@ -228,6 +234,37 @@ describe("shadow integration at fineAssess", () => {
       kind: "fail_closed",
       reason: "membership_shrink",
       digest: CAPTURE_IDENTITY_DIGEST
+    });
+  });
+
+  it("keeps captured delivery when psi v2 diagnostics throw", () => {
+    vi.spyOn(psiV2, "buildPsiV2ShadowDiagnostics").mockImplementation(() => {
+      throw new ShadowContractError("planted diagnostic failure");
+    });
+    const trace = captureShadowIntegration(shadowInput());
+    expect(isFailClosedShadowTrace(trace)).toBe(false);
+    expect(asCaptured(trace).psi_v2_shadow).toEqual({
+      status: "unavailable",
+      observation: "not_observed"
+    });
+  });
+
+  it("does not pin psi v2 diagnostics to the capture identity digest", () => {
+    const spy = vi.spyOn(psiV2, "buildPsiV2ShadowDiagnostics");
+    asCaptured(captureShadowIntegration(shadowInput()));
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({
+      query_id: "not_observed",
+      snapshot_digest: "not_observed"
+    });
+    expect(spy.mock.calls[0]?.[0]?.snapshot_digest).not.toBe(CAPTURE_IDENTITY_DIGEST);
+    asCaptured(captureShadowIntegration({
+      ...shadowInput(),
+      query_id: "query-observed",
+      snapshot_digest: "snapshot-observed"
+    }));
+    expect(spy.mock.calls[1]?.[0]).toMatchObject({
+      query_id: "query-observed",
+      snapshot_digest: "snapshot-observed"
     });
   });
 });

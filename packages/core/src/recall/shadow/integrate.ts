@@ -100,6 +100,8 @@ export type ShadowIntegrateInput = Readonly<{
   readonly nowIso?: string;
   readonly lexicalIntervalEnvelopesByKey?: PsiV2ShadowInputV1["lexical_interval_by_key"];
   readonly supportMaterialization?: PsiV2ShadowInputV1["support"];
+  readonly query_id?: string;
+  readonly snapshot_digest?: string;
 }>;
 
 export type ShadowFailClosedTrace = Readonly<{
@@ -138,8 +140,15 @@ export type ShadowCapturedTrace = Readonly<{
   readonly gamma_availability: ShadowGStatus | null;
   readonly unresolved_pointwise_tradeoff: boolean;
   readonly core_known_no_witness: readonly ShadowCoreKnownNoWitness[];
-  readonly psi_v2_shadow: PsiV2ShadowDiagnosticsV1;
+  readonly psi_v2_shadow: PsiV2ShadowSidecar;
 }>;
+
+export type PsiV2ShadowNotObserved = Readonly<{
+  readonly status: "unavailable";
+  readonly observation: "not_observed";
+}>;
+
+export type PsiV2ShadowSidecar = PsiV2ShadowDiagnosticsV1 | PsiV2ShadowNotObserved;
 
 export type FineAssessmentShadowTrace = ShadowCapturedTrace | ShadowFailClosedTrace;
 
@@ -413,14 +422,31 @@ function assembleCaptured(
     core_known_no_witness: Object.freeze(
       walked.decisions.flatMap((decision) => [...decision.novelty_core_known_absence])
     ),
-    psi_v2_shadow: buildPsiV2ShadowDiagnostics({
-      query_id: "shadow.integrate.v1",
-      snapshot_digest: CAPTURE_IDENTITY_DIGEST,
+    psi_v2_shadow: observePsiV2Shadow(input)
+  });
+}
+
+function observePsiV2Shadow(input: ShadowIntegrateInput): PsiV2ShadowSidecar {
+  try {
+    return buildPsiV2ShadowDiagnostics({
+      query_id: integratePin(input.query_id),
+      snapshot_digest: integratePin(input.snapshot_digest),
       candidate_keys: keysOf(input),
       lexical_interval_by_key: input.lexicalIntervalEnvelopesByKey,
       support: input.supportMaterialization
-    })
-  });
+    });
+  } catch {
+    // Sidecar must not throw into capture; delivery stays captured.
+    return freezeShadow({
+      status: "unavailable" as const,
+      observation: "not_observed" as const
+    });
+  }
+}
+
+function integratePin(value: string | undefined): string {
+  // Capture identity digest is algorithm identity, not a query snapshot pin.
+  return value !== undefined && value.length > 0 ? value : "not_observed";
 }
 
 function keysOf(input: ShadowIntegrateInput): readonly string[] {

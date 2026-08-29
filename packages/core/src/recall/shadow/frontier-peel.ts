@@ -13,7 +13,28 @@ export type ShadowFrontierPeelResult =
   | ShadowFrontierReceipt
   | ShadowPsiCycleFailure;
 
+// Capture spies peelUndominated; observation peel must not share that export.
+export function peelUndominated(
+  eligible: readonly string[],
+  psi: ShadowPsiFn
+): ShadowFrontierPeelResult {
+  return peelLayers(eligible, psi);
+}
+
 export function peelPointwiseObservationFrontiers(
+  eligible: readonly string[],
+  psi: ShadowPsiFn
+): ShadowFrontierPeelResult {
+  return peelLayers(eligible, psi);
+}
+
+export function isPsiCycleFailure(
+  result: ShadowFrontierPeelResult
+): result is ShadowPsiCycleFailure {
+  return "kind" in result && result.kind === "psi_cycle_contract_failure";
+}
+
+function peelLayers(
   eligible: readonly string[],
   psi: ShadowPsiFn
 ): ShadowFrontierPeelResult {
@@ -37,20 +58,6 @@ export function peelPointwiseObservationFrontiers(
     operator_id: SHADOW_FRONTIER_OPERATOR_ID,
     layers
   });
-}
-
-export function peelUndominated(
-  eligible: readonly string[],
-  psi: ShadowPsiFn
-): ShadowFrontierPeelResult {
-  // Distinct export so capture spies do not count observation peels.
-  return peelPointwiseObservationFrontiers(eligible, psi);
-}
-
-export function isPsiCycleFailure(
-  result: ShadowFrontierPeelResult
-): result is ShadowPsiCycleFailure {
-  return "kind" in result && result.kind === "psi_cycle_contract_failure";
 }
 
 function uniqueEligible(eligible: readonly string[]): readonly string[] {
