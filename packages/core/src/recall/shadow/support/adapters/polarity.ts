@@ -6,6 +6,7 @@ import { admitRelationalReceipt } from "./path-temporal.js";
 import type {
   SupportCandidateReceiptV1,
   SupportMaterializationInputV1,
+  SupportPropositionObservationV1,
   SupportSupersessionValueV1
 } from "./types.js";
 
@@ -40,6 +41,40 @@ export function polaritiesFromDraft(
     }));
   }
   return Object.freeze(witnesses);
+}
+
+export function candidatePropositionObservationsFromDraft(
+  draft: SupportDraft,
+  queryId: string,
+  snapshot: string
+): readonly SupportPropositionObservationV1[] {
+  return Object.freeze([...draft.candidateVotes.values()].map((row) => {
+    const polarity = polarityOf(
+      row.votes.support,
+      row.votes.refute,
+      row.votes.superseded
+    );
+    return Object.freeze({
+      candidate_id: row.candidateId,
+      local_proposition_id: row.propositionId,
+      hypothesis_digest: row.hypothesisDigest,
+      witness: createFourValuedWitness({
+        identity: {
+          coordinate_id: `support.polarity:${row.candidateId}:${row.propositionId}`,
+          query_id: queryId,
+          snapshot_digest: snapshot,
+          candidate_id: row.candidateId,
+          proposition_id: row.propositionId
+        },
+        provenance: [{ source_id: "support.adapter", producer: "support.polarity.v1" }],
+        epistemic: polarity === "both" ? { kind: "conflict" } : { kind: "exact" },
+        payload: { polarity }
+      })
+    });
+  }).sort((left, right) =>
+    left.candidate_id.localeCompare(right.candidate_id) ||
+    (left.hypothesis_digest ?? "").localeCompare(right.hypothesis_digest ?? "") ||
+    left.local_proposition_id.localeCompare(right.local_proposition_id)));
 }
 
 function adaptPolarity(
@@ -132,7 +167,14 @@ function voteOnProposition(
   side: "support" | "refute"
 ): void {
   addNode(draft, "proposition", propositionId);
-  vote(draft, propositionId, lineageId, side);
+  vote(
+    draft,
+    candidate.candidate_key,
+    candidate.hypothesis_digest,
+    propositionId,
+    lineageId,
+    side
+  );
   const kind = side === "support" ? "supports" : "refutes";
   for (const evidenceId of candidate.evidence_ids ?? []) {
     addNode(draft, "evidence_unit", evidenceId);

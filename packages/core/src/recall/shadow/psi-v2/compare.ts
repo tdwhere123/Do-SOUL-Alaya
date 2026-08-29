@@ -1,10 +1,12 @@
-import type { ShadowChannelVote } from "../compare.js";
-import { d1IntervalVote } from "../d1/interval-compare.js";
-import { d1IdentitiesEqual } from "../d1/legal-envelope.js";
 import { freezeShadow } from "../envelope.js";
-import { parseMeasurementGroupContractV1 } from "../measurement/index.js";
-import type {
-  MeasurementComparisonDirectionV1
+import {
+  compareCollapsedPropositionStatesExact,
+  compareLexicalIntervals,
+  lexicalIntervalIdentitiesEqual,
+  validateMeasurementAdmissionV1,
+  type MeasurementCollapseV1,
+  type MeasurementComparisonDirectionV1,
+  type PropositionStateCollapseV1
 } from "../measurement/index.js";
 import { lexDomainsEqual } from "../observations.js";
 import type {
@@ -15,6 +17,13 @@ import type {
 } from "./types.js";
 
 type CoordinateVote = "gt" | "lt" | "eq" | "skip" | "blocked" | "incomparable";
+type VoteTally = {
+  gt: number;
+  lt: number;
+  eq: number;
+  blocked: string[];
+  incomparable: string[];
+};
 
 export function comparePsiV2(
   left: PsiV2CandidateV1,
@@ -28,7 +37,9 @@ export function comparePsiV2(
   if (votes.incomparable.length > 0) {
     return verdict("incomparable", ...votes.incomparable);
   }
-  if (votes.gt > 0 && votes.lt > 0) return verdict("tradeoff", "heterogeneous propositions disagree");
+  if (votes.gt > 0 && votes.lt > 0) {
+    return verdict("tradeoff", "heterogeneous propositions disagree");
+  }
   if (votes.gt > 0) return verdict("dominates", "strict safe dominance on collapsed coordinates");
   if (votes.lt > 0) return verdict("dominated_by", "reverse strict safe dominance");
   if (votes.eq > 0) return verdict("equal", "collapsed coordinates agree");
@@ -39,34 +50,60 @@ export function psiV2Dominates(left: PsiV2CandidateV1, right: PsiV2CandidateV1):
   return comparePsiV2(left, right).kind === "dominates";
 }
 
-function propositionVotes(left: PsiV2CandidateV1, right: PsiV2CandidateV1): {
-  gt: number;
-  lt: number;
-  eq: number;
-  blocked: string[];
-  incomparable: string[];
-} {
+function propositionVotes(left: PsiV2CandidateV1, right: PsiV2CandidateV1): VoteTally {
+  const tally: VoteTally = { gt: 0, lt: 0, eq: 0, blocked: [], incomparable: [] };
+  tally.blocked.push(...candidateBindingFailures(left), ...candidateBindingFailures(right));
+  if (tally.blocked.length > 0) return tally;
   const ids = new Set([
     ...left.coordinates.map((row) => row.proposition_id),
     ...right.coordinates.map((row) => row.proposition_id)
   ]);
-  let gt = 0;
-  let lt = 0;
-  let eq = 0;
-  const blocked: string[] = [];
-  const incomparable: string[] = [];
   for (const propositionId of ids) {
-    const vote = voteProposition(
+    recordVote(tally, propositionId, voteProposition(
       findCoordinate(left, propositionId),
       findCoordinate(right, propositionId)
-    );
-    if (vote === "blocked") blocked.push(`unresolved comparison blocks ${propositionId}`);
-    if (vote === "incomparable") incomparable.push(`incomparable on ${propositionId}`);
-    if (vote === "gt") gt += 1;
-    if (vote === "lt") lt += 1;
-    if (vote === "eq") eq += 1;
+    ));
   }
-  return { gt, lt, eq, blocked, incomparable };
+  return tally;
+}
+
+function candidateBindingFailures(candidate: PsiV2CandidateV1): string[] {
+  const failures: string[] = [];
+  const ids = new Set<string>();
+  for (const coordinate of candidate.coordinates) {
+    if (ids.has(coordinate.proposition_id)) {
+      failures.push(`duplicate proposition coordinate ${coordinate.proposition_id}`);
+    }
+    ids.add(coordinate.proposition_id);
+    if (coordinate.collapse.status !== "collapsed") continue;
+    if (coordinate.identity === null) {
+      failures.push(`coordinate identity is absent on ${coordinate.proposition_id}`);
+      continue;
+    }
+    const validation = validateMeasurementAdmissionV1({
+      admission: coordinate.admission,
+      contract: coordinate.collapse.contract,
+      proposition_schema: coordinate.proposition_schema,
+      collapse: coordinate.collapse
+    });
+    if (validation.status === "blocked") {
+      failures.push(validation.reason);
+      continue;
+    }
+    if (coordinate.admission?.candidate_id !== candidate.candidate_id) {
+      failures.push(`candidate identity mismatch on ${coordinate.proposition_id}`);
+    }
+    if (coordinate.admission?.proposition_id !== coordinate.proposition_id) {
+      failures.push(`proposition identity mismatch on ${coordinate.proposition_id}`);
+    }
+    if (!coordinateIdentityMatchesAdmission(coordinate)) {
+      failures.push(`raw and collapsed identity mismatch on ${coordinate.proposition_id}`);
+    }
+    if (!lexicalIdentityBound(coordinate)) {
+      failures.push(`lexical identity mismatch on ${coordinate.proposition_id}`);
+    }
+  }
+  return failures;
 }
 
 function voteProposition(
@@ -77,9 +114,20 @@ function voteProposition(
   if (applicability !== "compare" || left === undefined || right === undefined) {
     return applicability === "compare" ? "blocked" : applicability;
   }
-  if (!identitiesComparable(left, right)) return "incomparable";
-  if (isBlockingCollapse(left) || isBlockingCollapse(right)) return "blocked";
-  if (!domainsComparable(left, right)) return "incomparable";
+  if (left.collapse.status !== "collapsed" || right.collapse.status !== "collapsed") {
+    return "blocked";
+  }
+  if (!sameAdmittedCoordinateJurisdiction(left, right)) return "blocked";
+  if (isPropositionStateCollapse(left.collapse) &&
+    isPropositionStateCollapse(right.collapse)) {
+    return compareCollapsedPropositionStatesExact(left.collapse, right.collapse);
+  }
+  if (!isNumericCollapse(left.collapse) || !isNumericCollapse(right.collapse)) {
+    return "blocked";
+  }
+  if (!domainsComparable(left, right) || !identitiesComparable(left, right)) {
+    return "incomparable";
+  }
   return directedIntervalVote(left, right);
 }
 
@@ -95,20 +143,58 @@ function applicabilityVote(
   return "compare";
 }
 
+function sameAdmittedCoordinateJurisdiction(
+  left: PsiV2CoordinateV1,
+  right: PsiV2CoordinateV1
+): boolean {
+  const leftAdmission = left.admission;
+  const rightAdmission = right.admission;
+  return leftAdmission !== null && rightAdmission !== null &&
+    leftAdmission.contract_digest === rightAdmission.contract_digest &&
+    leftAdmission.operator_id === rightAdmission.operator_id &&
+    leftAdmission.operator_version === rightAdmission.operator_version &&
+    leftAdmission.proposition_schema === rightAdmission.proposition_schema &&
+    leftAdmission.proposition_id === rightAdmission.proposition_id &&
+    leftAdmission.query_id === rightAdmission.query_id &&
+    leftAdmission.snapshot_digest === rightAdmission.snapshot_digest &&
+    leftAdmission.request_digest === rightAdmission.request_digest &&
+    leftAdmission.workspace_id === rightAdmission.workspace_id;
+}
+
+function coordinateIdentityMatchesAdmission(coordinate: PsiV2CoordinateV1): boolean {
+  const identity = coordinate.identity;
+  const admission = coordinate.admission;
+  return identity !== null && admission !== null &&
+    identity.coordinate_id === admission.coordinate_id &&
+    identity.query_id === admission.query_id &&
+    identity.snapshot_digest === admission.snapshot_digest &&
+    identity.request_digest === admission.request_digest &&
+    identity.workspace_id === admission.workspace_id &&
+    identity.candidate_id === admission.candidate_id &&
+    identity.proposition_id === admission.proposition_id;
+}
+
+function lexicalIdentityBound(coordinate: PsiV2CoordinateV1): boolean {
+  if (coordinate.collapse.status !== "collapsed" ||
+    coordinate.collapse.contract.measurement_domain !== "numeric_interval") {
+    return true;
+  }
+  const admission = coordinate.admission;
+  const identity = coordinate.envelope_identity;
+  return admission !== null && identity !== null && coordinate.lex_domain !== null &&
+    identity.snapshot_digest === admission.snapshot_digest &&
+    identity.request_digest === admission.request_digest &&
+    identity.workspace_id === admission.workspace_id;
+}
+
 function domainsComparable(left: PsiV2CoordinateV1, right: PsiV2CoordinateV1): boolean {
-  if (left.lex_domain === null && right.lex_domain === null) return true;
-  if (left.lex_domain === null || right.lex_domain === null) return false;
-  return lexDomainsEqual(left.lex_domain, right.lex_domain);
+  return left.lex_domain !== null && right.lex_domain !== null &&
+    lexDomainsEqual(left.lex_domain, right.lex_domain);
 }
 
 function identitiesComparable(left: PsiV2CoordinateV1, right: PsiV2CoordinateV1): boolean {
-  if (left.envelope_identity === null && right.envelope_identity === null) return true;
-  if (left.envelope_identity === null || right.envelope_identity === null) return false;
-  return d1IdentitiesEqual(left.envelope_identity, right.envelope_identity);
-}
-
-function isBlockingCollapse(coordinate: PsiV2CoordinateV1): boolean {
-  return coordinate.collapse.status !== "collapsed";
+  return left.envelope_identity !== null && right.envelope_identity !== null &&
+    lexicalIntervalIdentitiesEqual(left.envelope_identity, right.envelope_identity);
 }
 
 function directedIntervalVote(
@@ -118,36 +204,32 @@ function directedIntervalVote(
   if (left.collapse.status !== "collapsed" || right.collapse.status !== "collapsed") {
     return "blocked";
   }
-  const contractVote = measurementContractVote(
-    left.collapse.contract,
-    right.collapse.contract
-  );
-  if (contractVote !== "compare") return contractVote;
-  const direction = left.collapse.contract.comparison_direction;
+  if (!isNumericCollapse(left.collapse) || !isNumericCollapse(right.collapse)) return "blocked";
+  const leftContract = left.collapse.contract;
   const leftPayload = left.collapse.witness.payload;
   const rightPayload = right.collapse.witness.payload;
   if (leftPayload === null || rightPayload === null) return "blocked";
-  return applyDirection(
-    d1IntervalVote(
-      { kind: "interval", lower: leftPayload.lower, upper: leftPayload.upper },
-      { kind: "interval", lower: rightPayload.lower, upper: rightPayload.upper }
-    ),
-    direction
-  );
+  return applyDirection(compareLexicalIntervals(
+    { kind: "interval", lower: leftPayload.lower, upper: leftPayload.upper },
+    { kind: "interval", lower: rightPayload.lower, upper: rightPayload.upper }
+  ), leftContract.comparison_direction);
 }
 
-function measurementContractVote(left: unknown, right: unknown): CoordinateVote | "compare" {
-  try {
-    const leftContract = parseMeasurementGroupContractV1(left);
-    const rightContract = parseMeasurementGroupContractV1(right);
-    return leftContract.digest === rightContract.digest ? "compare" : "incomparable";
-  } catch {
-    return "blocked";
-  }
+function isNumericCollapse(
+  collapse: PsiV2CoordinateV1["collapse"]
+): collapse is Extract<MeasurementCollapseV1, { status: "collapsed" }> {
+  return collapse.status === "collapsed" && collapse.witness.domain === "numeric_interval";
+}
+
+function isPropositionStateCollapse(
+  collapse: PsiV2CoordinateV1["collapse"]
+): collapse is Extract<PropositionStateCollapseV1, { status: "collapsed" }> {
+  return collapse.status === "collapsed" &&
+    collapse.witness.domain === "four_valued_proposition";
 }
 
 function applyDirection(
-  vote: ShadowChannelVote,
+  vote: ReturnType<typeof compareLexicalIntervals>,
   direction: MeasurementComparisonDirectionV1
 ): CoordinateVote {
   if (vote === "eq") return "eq";
@@ -162,6 +244,14 @@ function findCoordinate(
   propositionId: string
 ): PsiV2CoordinateV1 | undefined {
   return candidate.coordinates.find((row) => row.proposition_id === propositionId);
+}
+
+function recordVote(tally: VoteTally, propositionId: string, vote: CoordinateVote): void {
+  if (vote === "blocked") tally.blocked.push(`unresolved comparison blocks ${propositionId}`);
+  if (vote === "incomparable") tally.incomparable.push(`incomparable on ${propositionId}`);
+  if (vote === "gt") tally.gt += 1;
+  if (vote === "lt") tally.lt += 1;
+  if (vote === "eq") tally.eq += 1;
 }
 
 function verdict(kind: PsiV2VerdictKind, ...reasons: string[]): PsiV2VerdictV1 {

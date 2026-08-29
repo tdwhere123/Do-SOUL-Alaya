@@ -61,6 +61,10 @@ type CoordinateDedupe =
 export function collapseMeasurementGroup(
   input: MeasurementCollapseInputV1
 ): MeasurementCollapseV1 {
+  if (input.contract.measurement_domain !== "numeric_interval" ||
+    input.contract.combine_operator === "exact_state_only") {
+    throw new ShadowContractError("numeric collapse requires a numeric measurement contract");
+  }
   assertSameBinding(input.observations);
   const partitioned = partitionForCollapse(input.observations);
   if (partitioned.status !== "ok") return partitioned;

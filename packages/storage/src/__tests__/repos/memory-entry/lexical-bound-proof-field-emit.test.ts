@@ -15,18 +15,18 @@ afterEach(() => {
 });
 
 describe("keyword field lexical raw-rank receipt emit", () => {
-  it("omits the fat sibling when capture-proof is off", async () => {
+  it("attaches the already-computed producer receipt on the normal call", async () => {
     const repo = await seedRepo();
     const field = await repo.searchByKeywordField!("workspace-1", "stable", 1);
 
     expect(field.lexical_raw_rank).toBeDefined();
     expect(field.lexical_raw_rank?.lanes.every((lane) => !("rows" in lane))).toBe(true);
     expect(field.lexical_raw_rank?.lanes.every((lane) => !("evaluated_universe" in lane))).toBe(true);
-    expect(field).not.toHaveProperty("lexical_raw_rank_receipt");
+    expect(field.lexical_raw_rank_receipt?.query_run_id).toBe("memory.keyword.depth:1");
     expect(field).not.toHaveProperty("lexical_bound_proof");
   });
 
-  it("attaches the full base sibling only when capture-proof is on", async () => {
+  it("retains explicit variant labels for legacy diagnostic callers", async () => {
     const repo = await seedRepo();
     const field = await repo.searchByKeywordField!(
       "workspace-1", "stable", 1, {}, [], { variant: "lexical_relaxed" }

@@ -1,5 +1,5 @@
 import type {
-  BindingDistinctnessEvidenceReceiptV1,
+  BindingRelationEvidenceReceiptV1,
   BindingRelationState,
   CorrelationState
 } from "../witness/index.js";
@@ -49,7 +49,7 @@ export type SupportAliasRecordV1 = Readonly<{
   readonly left_id: string;
   readonly right_id: string;
   readonly state: BindingRelationState;
-  readonly distinctness_receipt?: BindingDistinctnessEvidenceReceiptV1;
+  readonly relation_evidence_receipt?: BindingRelationEvidenceReceiptV1;
 }>;
 
 export type SupportCorrelationRecordV1 = Readonly<{

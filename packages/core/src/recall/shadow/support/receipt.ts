@@ -58,8 +58,8 @@ function canonicalBody(body: SupportHypergraphBodyV1): unknown {
       left_id: alias.left_id,
       right_id: alias.right_id,
       state: alias.state,
-      ...(alias.distinctness_receipt === undefined ? {} : {
-        distinctness_receipt: alias.distinctness_receipt
+      ...(alias.relation_evidence_receipt === undefined ? {} : {
+        relation_evidence_receipt: alias.relation_evidence_receipt
       })
     })),
     correlations: body.correlations.map((row) => ({

@@ -15,7 +15,8 @@ export const MEASUREMENT_COMBINE_OPERATORS = [
   "bound_intersection",
   "exact_agreement",
   "existential_proof",
-  "proved_lower_max"
+  "proved_lower_max",
+  "exact_state_only"
 ] as const;
 
 export type MeasurementCombineOperatorV1 =
@@ -33,13 +34,17 @@ export type MeasurementCorrelationPolicyV1 =
 
 export type MeasurementUpperBoundRuleV1 = "interval_upper" | "none_declared";
 
+export type MeasurementDomainV1 =
+  | "numeric_interval"
+  | "four_valued_proposition";
+
 export type MeasurementGroupContractV1 = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof MEASUREMENT_GROUP_OPERATOR_ID;
   readonly contract_id: string;
   readonly operator_version: string;
   readonly proposition_schema: string;
-  readonly measurement_domain: "numeric_interval";
+  readonly measurement_domain: MeasurementDomainV1;
   readonly comparison_direction: MeasurementComparisonDirectionV1;
   readonly correlation_policy: MeasurementCorrelationPolicyV1;
   readonly combine_operator: MeasurementCombineOperatorV1;
@@ -121,6 +126,18 @@ export function parseMeasurementGroupContractV1(input: unknown): MeasurementGrou
 }
 
 function assertSound(contract: Omit<MeasurementGroupContractV1, "digest">): void {
+  const propositionState = contract.measurement_domain === "four_valued_proposition";
+  if (propositionState !== (contract.combine_operator === "exact_state_only")) {
+    throw new ShadowContractError(
+      "exact_state_only is reserved for the four-valued proposition domain"
+    );
+  }
+  if (propositionState && (contract.comparison_direction !== "exact" ||
+    contract.upper_bound_rule !== "none_declared")) {
+    throw new ShadowContractError(
+      "four-valued proposition state requires exact direction and no numeric upper rule"
+    );
+  }
   if (contract.combine_operator === "proved_lower_max" &&
     contract.upper_bound_rule === "none_declared" &&
     contract.comparison_direction === "exact") {
@@ -128,9 +145,9 @@ function assertSound(contract: Omit<MeasurementGroupContractV1, "digest">): void
   }
 }
 
-function parseDomain(value: unknown): "numeric_interval" {
-  if (value !== "numeric_interval") {
-    throw new ShadowContractError("v1 measurement domain must be numeric_interval");
+function parseDomain(value: unknown): MeasurementDomainV1 {
+  if (value !== "numeric_interval" && value !== "four_valued_proposition") {
+    throw new ShadowContractError("unknown v1 measurement domain");
   }
   return value;
 }

@@ -7,17 +7,25 @@ import { adaptFactFrames } from "./fact-frame.js";
 import { adaptOsfCandidate } from "./osf.js";
 import { adaptPathProjection, adaptEvidenceAndF3, adaptTemporal } from
   "./path-temporal.js";
-import { adaptPolarityReceipts, polaritiesFromDraft } from "./polarity.js";
+import {
+  adaptPolarityReceipts,
+  candidatePropositionObservationsFromDraft,
+  polaritiesFromDraft
+} from "./polarity.js";
 import type {
   SupportCandidateReceiptV1,
+  SupportMaterializationOutcomeV1,
   SupportMaterializationInputV1,
-  SupportObservabilityGapV1
+  SupportObservabilityGapV1,
+  SupportPropositionObservationV1
 } from "./types.js";
 
 export type SupportMaterializationV1 = Readonly<{
   readonly graph: SupportHypergraphReceiptV1;
   readonly polarities: readonly FourValuedWitness[];
+  readonly proposition_observations: readonly SupportPropositionObservationV1[];
   readonly gaps: readonly SupportObservabilityGapV1[];
+  readonly outcomes: readonly SupportMaterializationOutcomeV1[];
 }>;
 
 export function materializeSupportFromReceipts(
@@ -37,7 +45,13 @@ export function materializeSupportFromReceipts(
   return Object.freeze({
     graph,
     polarities: polaritiesFromDraft(draft, input.query_id, input.snapshot_digest),
-    gaps: Object.freeze([...draft.gaps])
+    proposition_observations: candidatePropositionObservationsFromDraft(
+      draft,
+      input.query_id,
+      input.snapshot_digest
+    ),
+    gaps: Object.freeze([...draft.gaps]),
+    outcomes: Object.freeze([...draft.outcomes])
   });
 }
 

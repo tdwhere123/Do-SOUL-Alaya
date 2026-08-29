@@ -1,4 +1,11 @@
 import type { D1CandidateEnvelopeMap } from "../d1/legal-envelope.js";
+import {
+  issueMeasurementGroupAdmission,
+  LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+  type MeasurementAdmissionV1,
+  type MeasurementCollapseV1,
+  type VerifiedMeasurementAuthorityV1
+} from "../measurement/index.js";
 import { lexDomainsEqual, type LexDomain } from "../observations.js";
 import { adaptLexicalIntervalEnvelopeToCollapse } from "./lexical-interval-adapter.js";
 import type { PsiV2CandidateV1, PsiV2CoordinateV1 } from "./types.js";
@@ -11,9 +18,12 @@ const ADAPTER_PROVENANCE = Object.freeze([
 export function psiV2CandidateFromLexicalEnvelope(
   key: string,
   map: D1CandidateEnvelopeMap | undefined,
-  queryId: string,
-  snapshotDigest: string
+  preparedOrQueryId: VerifiedMeasurementAuthorityV1 | string,
+  legacySnapshotDigest?: string
 ): PsiV2CandidateV1 {
+  const prepared = typeof preparedOrQueryId === "string" ? null : preparedOrQueryId;
+  const queryId = prepared?.query_id ?? preparedOrQueryId as string;
+  const snapshotDigest = prepared?.snapshot_digest ?? legacySnapshotDigest ?? "";
   if (map === undefined) {
     return candidate(key, unresolvedCoordinate(
       null,
@@ -36,24 +46,61 @@ export function psiV2CandidateFromLexicalEnvelope(
       "missing primary lexical interval remains unresolved"
     ));
   }
+  if (prepared === null) {
+    return candidate(key, unresolvedCoordinate(
+      map.primary.domain,
+      envelopeIdentity,
+      "prepared lexical request identity is unavailable"
+    ));
+  }
+  const collapse = adaptLexicalIntervalEnvelopeToCollapse(
+    map.primary.envelope,
+    {
+      coordinate_id: `${PROPOSITION_ID}:${key}`,
+      query_id: queryId,
+      snapshot_digest: snapshotDigest,
+      candidate_id: key,
+      proposition_id: PROPOSITION_ID
+    },
+    ADAPTER_PROVENANCE,
+    envelopeIdentity,
+    prepared
+  );
+  const admission = issueLexicalAdmission(prepared, collapse);
+  if (collapse.status === "collapsed" && admission === null) {
+    return candidate(key, unresolvedCoordinate(
+      map.primary.domain,
+      envelopeIdentity,
+      "verified lexical measurement authority is unavailable"
+    ));
+  }
   return candidate(key, {
     proposition_id: PROPOSITION_ID,
+    proposition_schema: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT.proposition_schema,
     applicable: true,
+    identity: admission,
     lex_domain: map.primary.domain,
     envelope_identity: envelopeIdentity,
-    collapse: adaptLexicalIntervalEnvelopeToCollapse(
-      map.primary.envelope,
-      {
-        coordinate_id: `${PROPOSITION_ID}:${key}`,
-        query_id: queryId,
-        snapshot_digest: snapshotDigest,
-        candidate_id: key,
-        proposition_id: PROPOSITION_ID
-      },
-      ADAPTER_PROVENANCE,
-      envelopeIdentity
-    )
+    collapse,
+    admission
   });
+}
+
+function issueLexicalAdmission(
+  authority: VerifiedMeasurementAuthorityV1,
+  collapse: MeasurementCollapseV1
+): MeasurementAdmissionV1 | null {
+  if (collapse.status !== "collapsed") return null;
+  try {
+    return issueMeasurementGroupAdmission({
+      authority,
+      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+      proposition_schema: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT.proposition_schema,
+      collapse
+    });
+  } catch {
+    return null;
+  }
 }
 
 function lexicalEnvelopeIdentity(
@@ -111,9 +158,12 @@ function unresolvedCoordinate(
 ): PsiV2CoordinateV1 {
   return {
     proposition_id: PROPOSITION_ID,
+    proposition_schema: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT.proposition_schema,
     applicable: true,
+    identity: null,
     lex_domain: lexDomain,
     envelope_identity: envelopeIdentity,
+    admission: null,
     collapse: { status: "unresolved", reason, observations: [] }
   };
 }

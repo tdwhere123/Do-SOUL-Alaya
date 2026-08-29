@@ -10,9 +10,11 @@ import type {
   WitnessEpistemic,
   WitnessInformationOrder
 } from "../shared/types.js";
-
-export const BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID =
-  "binding_distinctness_evidence_v1" as const;
+import {
+  verifyBindingRelationEvidenceReceiptV1,
+  type BindingRelationEvidenceReceiptV1,
+  type BindingRelationEvidenceVerifierV1
+} from "./binding-evidence.js";
 
 export const BINDING_RELATION_STATES = [
   "equal",
@@ -24,26 +26,17 @@ export const BINDING_RELATION_STATES = [
 
 export type BindingRelationState = (typeof BINDING_RELATION_STATES)[number];
 
-export type BindingDistinctnessEvidenceReceiptV1 = Readonly<{
-  readonly schema_version: 1;
-  readonly operator_id: typeof BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID;
-  readonly query_id: string;
-  readonly snapshot_digest: string;
-  readonly left_id: string;
-  readonly right_id: string;
-  readonly source_id: string;
-  readonly producer: string;
-}>;
-
 export type BindingRelationPayload = Readonly<{
   readonly left_id: string;
   readonly right_id: string;
   readonly state: BindingRelationState;
-  readonly distinctness_receipt?: BindingDistinctnessEvidenceReceiptV1;
+  readonly relation_evidence_receipt?: BindingRelationEvidenceReceiptV1;
 }>;
 
 export type BindingRelationWitness = TypedWitness<"binding_relation", BindingRelationPayload>;
-export type BindingRelationInput = WitnessCreateInput<BindingRelationPayload>;
+export type BindingRelationInput = WitnessCreateInput<BindingRelationPayload> & Readonly<{
+  readonly evidence_verifier?: BindingRelationEvidenceVerifierV1;
+}>;
 
 const BINDING_LEQ: Readonly<Record<BindingRelationState, readonly BindingRelationState[]>> = {
   unknown: ["unknown", "may_equal", "equal", "distinct", "conflict"],
@@ -68,9 +61,12 @@ const BINDING_OPS: PayloadOps<BindingRelationPayload> = Object.freeze({
 export function createBindingRelationWitness(
   input: BindingRelationInput
 ): BindingRelationWitness {
-  const witness = createTypedWitness("binding_relation", input, [], bindingPayload);
-  assertDistinctnessEvidence(witness);
-  return witness;
+  return createTypedWitness(
+    "binding_relation",
+    normalizeConcreteRelation(input),
+    [],
+    bindingPayload
+  );
 }
 
 export function compareBindingRelation(
@@ -138,54 +134,34 @@ function parseBindingPayload(
     right_id: requireNonemptyString(payload.right_id, "right_id"),
     state
   };
-  if (state !== "distinct") {
-    if (payload.distinctness_receipt !== undefined && state !== "conflict") {
-      throw new ShadowContractError("distinctness receipt requires distinct state");
-    }
-    return Object.freeze(pair);
-  }
-  return Object.freeze({
-    ...pair,
-    distinctness_receipt: parseDistinctnessEvidence(payload.distinctness_receipt)
-  });
+  if ((state !== "equal" && state !== "distinct")
+      || payload.relation_evidence_receipt === undefined) return Object.freeze(pair);
+  return Object.freeze({ ...pair, relation_evidence_receipt: payload.relation_evidence_receipt });
 }
 
-function parseDistinctnessEvidence(
-  receipt: BindingDistinctnessEvidenceReceiptV1 | undefined
-): BindingDistinctnessEvidenceReceiptV1 {
-  if (receipt === undefined || receipt.schema_version !== 1 ||
-      receipt.operator_id !== BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID) {
-    throw new ShadowContractError("distinct binding requires a typed distinctness receipt");
-  }
-  return Object.freeze({
-    schema_version: 1 as const,
-    operator_id: BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID,
-    query_id: requireNonemptyString(receipt.query_id, "distinctness query_id"),
-    snapshot_digest: requireNonemptyString(
-      receipt.snapshot_digest,
-      "distinctness snapshot_digest"
-    ),
-    left_id: requireNonemptyString(receipt.left_id, "distinctness left_id"),
-    right_id: requireNonemptyString(receipt.right_id, "distinctness right_id"),
-    source_id: requireNonemptyString(receipt.source_id, "distinctness source_id"),
-    producer: requireNonemptyString(receipt.producer, "distinctness producer")
-  });
-}
-
-function assertDistinctnessEvidence(witness: BindingRelationWitness): void {
-  const payload = witness.payload;
-  if (payload?.state !== "distinct") return;
-  const receipt = payload.distinctness_receipt!;
-  if (receipt.query_id !== witness.identity.query_id ||
-      receipt.snapshot_digest !== witness.identity.snapshot_digest ||
-      !sameUnorderedPair(payload, receipt)) {
-    throw new ShadowContractError("distinctness receipt identity must match the witness");
-  }
-  const provenanceMatch = witness.provenance.some((entry) =>
-    entry.source_id === receipt.source_id && entry.producer === receipt.producer);
-  if (!provenanceMatch) {
-    throw new ShadowContractError("distinctness receipt must name witness provenance");
-  }
+function normalizeConcreteRelation(input: BindingRelationInput): BindingRelationInput {
+  const payload = input.payload;
+  if (payload === null || payload === undefined
+      || (payload.state !== "equal" && payload.state !== "distinct")) return input;
+  const receipt = payload.relation_evidence_receipt;
+  const admitted = receipt !== undefined
+    && input.evidence_verifier !== undefined
+    && verifyBindingRelationEvidenceReceiptV1(receipt, input.evidence_verifier)
+    && receipt.relation === payload.state
+    && receipt.query_id === input.identity.query_id
+    && receipt.snapshot_digest === input.identity.snapshot_digest
+    && sameUnorderedPair(payload, receipt)
+    && input.provenance.some((entry) => entry.source_id === receipt.source_observation.source_id
+      && entry.producer === receipt.source_observation.producer_operator_id);
+  if (admitted) return input;
+  return {
+    ...input,
+    payload: Object.freeze({
+      left_id: payload.left_id,
+      right_id: payload.right_id,
+      state: "may_equal" as const
+    })
+  };
 }
 
 function sameUnorderedPair(
@@ -247,7 +223,7 @@ function pairStates(
 }
 
 function samePair(left: BindingRelationPayload, right: BindingRelationPayload): boolean {
-  return left.left_id === right.left_id && left.right_id === right.right_id;
+  return sameUnorderedPair(left, right);
 }
 
 function bindingEpistemic(payload: BindingRelationPayload): WitnessEpistemic {

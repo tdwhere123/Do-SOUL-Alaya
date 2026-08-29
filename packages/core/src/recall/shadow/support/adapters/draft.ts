@@ -1,7 +1,10 @@
 import { nodeKey } from "../identity.js";
 import type { SupportEdgeKind, SupportEdgeV1, SupportNodeKind, SupportNodeV1 } from
   "../types.js";
-import type { SupportObservabilityGapV1 } from "./types.js";
+import type {
+  SupportMaterializationOutcomeV1,
+  SupportObservabilityGapV1
+} from "./types.js";
 
 export type PolarityVotes = Readonly<{
   readonly support: Set<string>;
@@ -9,11 +12,20 @@ export type PolarityVotes = Readonly<{
   readonly superseded: Set<string>;
 }>;
 
+export type CandidatePolarityVotes = Readonly<{
+  readonly candidateId: string;
+  readonly propositionId: string;
+  readonly hypothesisDigest: string | null;
+  readonly votes: PolarityVotes;
+}>;
+
 export type SupportDraft = {
   readonly nodes: Map<string, SupportNodeV1>;
   readonly edges: Map<string, SupportEdgeV1>;
   readonly gaps: SupportObservabilityGapV1[];
+  readonly outcomes: SupportMaterializationOutcomeV1[];
   readonly votes: Map<string, PolarityVotes>;
+  readonly candidateVotes: Map<string, CandidatePolarityVotes>;
   readonly evidenceLineage: Map<string, string>;
 };
 
@@ -22,9 +34,18 @@ export function createDraft(): SupportDraft {
     nodes: new Map(),
     edges: new Map(),
     gaps: [],
+    outcomes: [],
     votes: new Map(),
+    candidateVotes: new Map(),
     evidenceLineage: new Map()
   };
+}
+
+export function addOutcome(
+  draft: SupportDraft,
+  outcome: SupportMaterializationOutcomeV1
+): void {
+  draft.outcomes.push(Object.freeze(outcome));
 }
 
 export function addNode(draft: SupportDraft, kind: SupportNodeKind, id: string): void {
@@ -60,12 +81,16 @@ export function addGap(
 
 export function vote(
   draft: SupportDraft,
+  candidateId: string,
+  hypothesisDigest: string | undefined,
   propositionId: string,
   lineageId: string,
   side: "support" | "refute"
 ): void {
   const row = votesFor(draft, propositionId);
   row[side].add(lineageId);
+  candidateVotesFor(draft, candidateId, hypothesisDigest ?? null, propositionId)
+    .votes[side].add(lineageId);
 }
 
 export function supersedeLineage(
@@ -74,16 +99,44 @@ export function supersedeLineage(
   lineageId: string
 ): void {
   votesFor(draft, propositionId).superseded.add(lineageId);
+  for (const row of draft.candidateVotes.values()) {
+    if (row.propositionId !== propositionId) continue;
+    if (!row.votes.support.has(lineageId) && !row.votes.refute.has(lineageId)) continue;
+    row.votes.superseded.add(lineageId);
+  }
+}
+
+function candidateVotesFor(
+  draft: SupportDraft,
+  candidateId: string,
+  hypothesisDigest: string | null,
+  propositionId: string
+): CandidatePolarityVotes {
+  const key = [candidateId, hypothesisDigest ?? "unbound", propositionId].join("\0");
+  const existing = draft.candidateVotes.get(key);
+  if (existing !== undefined) return existing;
+  const created = {
+    candidateId,
+    propositionId,
+    hypothesisDigest,
+    votes: emptyVotes()
+  };
+  draft.candidateVotes.set(key, created);
+  return created;
 }
 
 function votesFor(draft: SupportDraft, propositionId: string): PolarityVotes {
   const existing = draft.votes.get(propositionId);
   if (existing !== undefined) return existing;
-  const created: PolarityVotes = {
+  const created = emptyVotes();
+  draft.votes.set(propositionId, created);
+  return created;
+}
+
+function emptyVotes(): PolarityVotes {
+  return {
     support: new Set(),
     refute: new Set(),
     superseded: new Set()
   };
-  draft.votes.set(propositionId, created);
-  return created;
 }

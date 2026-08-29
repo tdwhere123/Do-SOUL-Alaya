@@ -1,8 +1,9 @@
 import type { D1EnvelopeIdentity, D1EnvelopeValue } from "../d1/legal-envelope.js";
 import {
   collapseMeasurementGroup,
-  createMeasurementGroupContractV1,
-  type MeasurementCollapseV1
+  LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+  type MeasurementCollapseV1,
+  type VerifiedMeasurementAuthorityV1
 } from "../measurement/index.js";
 import {
   createNumericIntervalWitness,
@@ -10,23 +11,12 @@ import {
   type WitnessProvenanceEntry
 } from "../witness/index.js";
 
-export const LEXICAL_INTERVAL_MEASUREMENT_CONTRACT = createMeasurementGroupContractV1({
-  contract_id: "measure.lexical.interval.v1",
-  operator_version: "1",
-  proposition_schema: "lex.interval",
-  measurement_domain: "numeric_interval",
-  comparison_direction: "higher_is_stronger",
-  correlation_policy: "identity_dedupe",
-  combine_operator: "bound_intersection",
-  soundness_preconditions: ["receipt_backed_interval", "lex_domain_frozen"],
-  upper_bound_rule: "interval_upper"
-});
-
 export function adaptLexicalIntervalEnvelopeToCollapse(
   value: D1EnvelopeValue,
   identity: WitnessIdentityPins,
   provenance: readonly WitnessProvenanceEntry[],
-  envelopeIdentity: D1EnvelopeIdentity | null
+  envelopeIdentity: D1EnvelopeIdentity | null,
+  preparedAuthority: VerifiedMeasurementAuthorityV1
 ): MeasurementCollapseV1 {
   if (value.kind !== "interval") {
     return unresolved(value.kind === "unbounded"
@@ -39,11 +29,15 @@ export function adaptLexicalIntervalEnvelopeToCollapse(
   if (envelopeIdentity === null) {
     return unresolved("forged lexical interval without legal envelope identity remains unresolved");
   }
-  if (envelopeIdentity.query_run_id !== identity.query_id) {
-    return unresolved("lexical envelope query identity does not match the observation pin");
+  if (identity.query_id !== preparedAuthority.query_id ||
+    identity.snapshot_digest !== preparedAuthority.snapshot_digest) {
+    return unresolved("prepared query identity does not match the observation pin");
   }
-  if (envelopeIdentity.snapshot_digest !== identity.snapshot_digest) {
-    return unresolved("lexical envelope snapshot identity does not match the observation pin");
+  if (envelopeIdentity.snapshot_digest !== preparedAuthority.snapshot_digest ||
+    envelopeIdentity.request_digest !== preparedAuthority.request_digest ||
+    envelopeIdentity.workspace_id !== preparedAuthority.workspace_id ||
+    envelopeIdentity.field_prefix !== preparedAuthority.field_prefix) {
+    return unresolved("lexical envelope does not match the prepared request identity");
   }
   return collapseMeasurementGroup({
     contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,

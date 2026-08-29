@@ -56,6 +56,8 @@ import {
 } from "../shadow/canonical-delivery.js";
 import type { LexicalBoundProof } from
   "../runtime/diagnostics/lexical-bound-proof.js";
+import type { LiveQueryProofAuthority } from
+  "../runtime/query/live-query-proof-authority.js";
 import type { SupportCandidateReceiptV1 } from
   "../shadow/support/index.js";
 
@@ -86,8 +88,7 @@ export interface FineAssessParams {
   readonly memoryLexicalCaptures?: readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly lexicalBoundProofs?: readonly Readonly<LexicalBoundProof>[];
   readonly supportCandidateReceipts?: readonly Readonly<SupportCandidateReceiptV1>[];
-  readonly query_id?: string;
-  readonly snapshot_digest?: string;
+  readonly queryProofAuthority?: Readonly<LiveQueryProofAuthority>;
   readonly e0Keys?: readonly string[];
   readonly e1Keys?: readonly string[];
 }

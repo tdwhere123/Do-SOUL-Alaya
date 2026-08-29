@@ -6,43 +6,62 @@ import {
   bindingInformationLeq,
   refineBindingRelation,
   type BindingRelationState,
-  type BindingRelationWitness
+  type BindingRelationWitness,
+  type BindingSourceObservationReceiptV1
 } from "../../../../recall/shadow/witness/index.js";
+import { digestRecallFieldIdentity } from
+  "../../../../recall/field/field-identity.js";
 import { PAIR_PINS, PROV, PROV_EXTENDED } from "./fixtures.js";
 import { assertMonotoneRefinement, assertPoset } from "./order-properties.js";
+
+const OBSERVATION_BODY = Object.freeze({
+  schema_version: 1 as const,
+  source_owner: "binding_test_registry",
+  source_observation_id: "binding-observation-1",
+  source_id: PROV[0]!.source_id,
+  producer_operator_id: PROV[0]!.producer,
+  producer_operator_version: "1"
+});
+const SOURCE_OBSERVATION = Object.freeze({
+  ...OBSERVATION_BODY,
+  observation_digest: digestRecallFieldIdentity(OBSERVATION_BODY)
+});
+const EVIDENCE_VERIFIER = Object.freeze({
+  source_owner: OBSERVATION_BODY.source_owner,
+  producer_operator_id: OBSERVATION_BODY.producer_operator_id,
+  producer_operator_version: OBSERVATION_BODY.producer_operator_version,
+  verifySourceObservation(receipt: BindingSourceObservationReceiptV1): boolean {
+    const { observation_digest, ...body } = receipt;
+    return observation_digest === SOURCE_OBSERVATION.observation_digest
+      && digestRecallFieldIdentity(body) === observation_digest;
+  }
+});
 
 function binding(
   state: BindingRelationState,
   extras: {
     epistemic?: BindingRelationWitness["epistemic"];
-    withDistinctnessReceipt?: boolean;
+    withRelationReceipt?: boolean;
   } = {}
 ): BindingRelationWitness {
   const epistemic = extras.epistemic ??
     (state === "conflict" ? { kind: "conflict" as const } : { kind: "exact" as const });
-  const withDistinctnessReceipt = extras.withDistinctnessReceipt ?? state === "distinct";
+  const withRelationReceipt = extras.withRelationReceipt
+    ?? (state === "equal" || state === "distinct");
   const payload = {
     left_id: "left",
     right_id: "right",
     state,
-    ...(withDistinctnessReceipt ? {
-      distinctness_receipt: {
-        schema_version: 1 as const,
-        operator_id: "binding_distinctness_evidence_v1" as const,
-        query_id: PAIR_PINS.query_id,
-        snapshot_digest: PAIR_PINS.snapshot_digest,
-        left_id: "left",
-        right_id: "right",
-        source_id: PROV[0]!.source_id,
-        producer: PROV[0]!.producer
-      }
+    ...(withRelationReceipt && (state === "equal" || state === "distinct") ? {
+      relation_evidence_receipt: relationReceipt(state)
     } : {})
   };
   return createBindingRelationWitness({
     identity: PAIR_PINS,
     provenance: PROV,
     epistemic,
-    payload
+    payload,
+    evidence_verifier: EVIDENCE_VERIFIER
   });
 }
 
@@ -72,45 +91,74 @@ describe("binding relation domain", () => {
     expect(meetBindingRelation(mayEqual, distinct).payload?.state).toBe("distinct");
   });
 
-  it("rejects distinctness without typed positive evidence", () => {
-    expect(() => binding("distinct", { withDistinctnessReceipt: false })).toThrow(/distinctness receipt/u);
-    expect(mayEqual.payload?.state).toBe("may_equal");
+  it("keeps equal and distinct at may_equal without admitted positive evidence", () => {
+    expect(binding("equal", { withRelationReceipt: false }).payload?.state).toBe("may_equal");
+    expect(binding("distinct", { withRelationReceipt: false }).payload?.state).toBe("may_equal");
   });
 
-  it("rejects distinctness evidence with drifted identity or provenance", () => {
-    const driftedPayload = {
-      left_id: "left",
-      right_id: "right",
-      state: "distinct" as const,
-      distinctness_receipt: {
-        schema_version: 1 as const,
-        operator_id: "binding_distinctness_evidence_v1" as const,
-        query_id: "other-query",
-        snapshot_digest: PAIR_PINS.snapshot_digest,
-        left_id: "left",
-        right_id: "right",
-        source_id: "missing-source",
-        producer: "missing-producer"
+  it("rejects caller-authored observation strings not owned by the verifier", () => {
+    const forged = relationReceipt("equal", {
+      source_observation: {
+        ...SOURCE_OBSERVATION,
+        source_observation_id: "caller-forged"
       }
-    };
-    expect(() => createBindingRelationWitness({
-      identity: PAIR_PINS,
-      provenance: PROV,
-      epistemic: { kind: "exact" },
-      payload: driftedPayload
-    })).toThrow(/identity/u);
-    expect(() => createBindingRelationWitness({
+    });
+    const witness = createBindingRelationWitness({
       identity: PAIR_PINS,
       provenance: PROV,
       epistemic: { kind: "exact" },
       payload: {
-        ...driftedPayload,
-        distinctness_receipt: {
-          ...driftedPayload.distinctness_receipt,
-          query_id: PAIR_PINS.query_id
-        }
-      }
-    })).toThrow(/provenance/u);
+        left_id: "left",
+        right_id: "right",
+        state: "equal",
+        relation_evidence_receipt: forged
+      },
+      evidence_verifier: EVIDENCE_VERIFIER
+    });
+    expect(witness.payload?.state).toBe("may_equal");
+  });
+
+  it.each([
+    ["relation", { relation: "equal" as const }],
+    ["query", { query_id: "other-query" }],
+    ["snapshot", { snapshot_digest: `sha256:${"d".repeat(64)}` }],
+    ["pair", { left_id: "other-left" }],
+    ["source", { source_observation: { ...SOURCE_OBSERVATION, source_id: "missing-source" } }],
+    ["version", { source_observation: {
+      ...SOURCE_OBSERVATION,
+      producer_operator_version: "forged"
+    } }],
+    ["digest", { receipt_digest: `sha256:${"e".repeat(64)}` }]
+  ])("fails closed on a tampered %s binding receipt", (_label, override) => {
+    const valid = relationReceipt("distinct");
+    const witness = createBindingRelationWitness({
+      identity: PAIR_PINS,
+      provenance: PROV,
+      epistemic: { kind: "exact" },
+      payload: {
+        left_id: "left",
+        right_id: "right",
+        state: "distinct",
+        relation_evidence_receipt: { ...valid, ...override }
+      },
+      evidence_verifier: EVIDENCE_VERIFIER
+    });
+    expect(witness.payload?.state).toBe("may_equal");
+  });
+
+  it("does not infer equality from matching semantic strings or distinctness from ids", () => {
+    expect(createBindingRelationWitness({
+      identity: PAIR_PINS,
+      provenance: PROV,
+      epistemic: { kind: "exact" },
+      payload: { left_id: "person.alice", right_id: "person.alice", state: "equal" }
+    }).payload?.state).toBe("may_equal");
+    expect(createBindingRelationWitness({
+      identity: PAIR_PINS,
+      provenance: PROV,
+      epistemic: { kind: "exact" },
+      payload: { left_id: "id-a", right_id: "id-b", state: "distinct" }
+    }).payload?.state).toBe("may_equal");
   });
 
   it("meets equal and distinct as conflict, not last-write-wins", () => {
@@ -133,3 +181,24 @@ describe("binding relation domain", () => {
     expect(() => refineBindingRelation(distinct, unknown)).toThrow(/widening/u);
   });
 });
+
+function relationReceipt(
+  relation: "equal" | "distinct",
+  override: Record<string, unknown> = {}
+) {
+  const body = {
+    schema_version: 1 as const,
+    operator_id: "binding_relation_evidence_v1" as const,
+    relation,
+    query_id: PAIR_PINS.query_id,
+    snapshot_digest: PAIR_PINS.snapshot_digest,
+    left_id: "left",
+    right_id: "right",
+    source_observation: SOURCE_OBSERVATION
+  };
+  return {
+    ...body,
+    receipt_digest: digestRecallFieldIdentity(body),
+    ...override
+  };
+}

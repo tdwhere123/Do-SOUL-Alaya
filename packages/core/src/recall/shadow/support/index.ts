@@ -25,11 +25,22 @@ export {
   type SupportNodeV1
 } from "./types.js";
 export {
+  SUPPORT_RELATIONAL_RECEIPT_OPERATOR_ID,
+  verifySupportRelationalReceiptV1,
+  type RelationalAuthorityVerificationV1
+} from "./adapters/relational-authority.js";
+export {
   materializeSupportFromReceipts,
   type SupportMaterializationV1
 } from "./adapters/materialize.js";
 export type {
   SupportCandidateReceiptV1,
+  SupportMaterializationOutcomeV1,
   SupportMaterializationInputV1,
-  SupportObservabilityGapV1
+  SupportObservabilityGapV1,
+  SupportPropositionObservationV1,
+  SupportRelationalReceiptV1,
+  SupportRelationalSourceObservationReceiptV1,
+  SupportRelationalSourceVerifierV1,
+  SupportRelationalSubjectV1
 } from "./adapters/types.js";

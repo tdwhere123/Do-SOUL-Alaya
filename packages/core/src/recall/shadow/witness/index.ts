@@ -1,5 +1,4 @@
 export {
-  BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID,
   BINDING_RELATION_STATES,
   bindingInformationLeq,
   compareBindingRelation,
@@ -8,11 +7,17 @@ export {
   meetBindingRelation,
   refineBindingRelation,
   type BindingRelationInput,
-  type BindingDistinctnessEvidenceReceiptV1,
   type BindingRelationPayload,
   type BindingRelationState,
   type BindingRelationWitness
 } from "./domains/binding.js";
+export {
+  BINDING_RELATION_EVIDENCE_OPERATOR_ID,
+  type BindingConcreteRelation,
+  type BindingRelationEvidenceReceiptV1,
+  type BindingRelationEvidenceVerifierV1,
+  type BindingSourceObservationReceiptV1
+} from "./domains/binding-evidence.js";
 export {
   compareCorrelation,
   CORRELATION_STATES,

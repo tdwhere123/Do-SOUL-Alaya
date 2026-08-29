@@ -1,5 +1,7 @@
 import { ShadowContractError } from "../envelope.js";
-import { BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID } from "../witness/index.js";
+import { verifyBindingRelationEvidenceReceiptV1 } from
+  "../witness/domains/binding-evidence.js";
+import type { BindingRelationEvidenceVerifierV1 } from "../witness/index.js";
 import type { SupportAliasRecordV1 } from "./types.js";
 import type { SupportHypergraphReceiptV1 } from "./receipt.js";
 
@@ -12,7 +14,8 @@ export type ProvedDistinctBindingsV1 = Readonly<{
 }>;
 
 export function provedDistinctBindingCount(
-  receipt: SupportHypergraphReceiptV1
+  receipt: SupportHypergraphReceiptV1,
+  evidenceVerifier?: BindingRelationEvidenceVerifierV1
 ): ProvedDistinctBindingsV1 {
   for (const alias of receipt.aliases) {
     if (alias.state === "conflict") {
@@ -25,13 +28,14 @@ export function provedDistinctBindingCount(
   }
   for (const alias of receipt.aliases) {
     if (alias.state !== "equal") continue;
+    if (!hasValidRelationEvidence(alias, receipt, "equal", evidenceVerifier)) continue;
     union(equalGroups, alias.left_id, alias.right_id);
   }
   const roots = [...new Set([...equalGroups.keys()].map((id) => find(equalGroups, id)))];
   const distinctPairs = new Set<string>();
   for (const alias of receipt.aliases) {
     if (alias.state !== "distinct") continue;
-    if (!hasValidDistinctnessEvidence(alias, receipt)) {
+    if (!hasValidRelationEvidence(alias, receipt, "distinct", evidenceVerifier)) {
       return Object.freeze({
         status: "unknown" as const,
         reason: "incomplete_pairwise_distinctness" as const
@@ -53,18 +57,20 @@ export function provedDistinctBindingCount(
   return Object.freeze({ status: "proved_distinct" as const, count: roots.length });
 }
 
-function hasValidDistinctnessEvidence(
+function hasValidRelationEvidence(
   alias: SupportAliasRecordV1,
-  receipt: SupportHypergraphReceiptV1
+  receipt: SupportHypergraphReceiptV1,
+  relation: "equal" | "distinct",
+  evidenceVerifier: BindingRelationEvidenceVerifierV1 | undefined
 ): boolean {
-  const evidence = alias.distinctness_receipt;
+  const evidence = alias.relation_evidence_receipt;
   return evidence !== undefined &&
-    evidence.schema_version === 1 &&
-    evidence.operator_id === BINDING_DISTINCTNESS_EVIDENCE_OPERATOR_ID &&
+    evidenceVerifier !== undefined &&
+    verifyBindingRelationEvidenceReceiptV1(evidence, evidenceVerifier) &&
+    evidence.relation === relation &&
     evidence.query_id === receipt.query_id &&
     evidence.snapshot_digest === receipt.snapshot_digest &&
-    pairKey(evidence.left_id, evidence.right_id) === pairKey(alias.left_id, alias.right_id) &&
-    evidence.source_id.trim().length > 0 && evidence.producer.trim().length > 0;
+    pairKey(evidence.left_id, evidence.right_id) === pairKey(alias.left_id, alias.right_id);
 }
 
 function hasCompleteDistinctnessGraph(

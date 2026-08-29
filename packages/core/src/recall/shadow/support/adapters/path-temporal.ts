@@ -1,10 +1,6 @@
-import {
-  verifySnapshotCoherenceReceiptV1,
-  type SnapshotCoherenceReceiptV1,
-  type SnapshotVectorV1
-} from "../../../runtime/snapshot-coherence/index.js";
 import type { SupportDraft } from "./draft.js";
-import { addEdge, addGap, addNode } from "./draft.js";
+import { addEdge, addGap, addNode, addOutcome } from "./draft.js";
+import { verifySupportRelationalReceiptV1 } from "./relational-authority.js";
 import type {
   SupportCandidateReceiptV1,
   SupportMaterializationInputV1,
@@ -51,78 +47,39 @@ export function admitRelationalReceipt(
   input: SupportMaterializationInputV1,
   expectedSubject: SupportRelationalSubjectV1
 ): boolean {
-  const context = input.authority_context;
-  if (receipt === undefined || context === undefined) {
+  const sourceOwner = receipt?.source_owner ?? expectedSubject.kind;
+  if (receipt === undefined) {
     addGap(draft, "authority_untrusted", owner, "relational receipt authority is absent");
+    addOutcome(draft, {
+      status: "not_observed",
+      owner,
+      source_owner: sourceOwner,
+      reason: "receipt_absent"
+    });
     return false;
   }
-  const snapshot = context.snapshot_receipt;
-  if (!hasBoundIdentity(receipt, input, snapshot, context.snapshot_vector)) {
-    addGap(draft, "relational_identity_mismatch", owner, "relational receipt is not bound to this query snapshot");
+  const verification = verifySupportRelationalReceiptV1(receipt, input, expectedSubject);
+  if (verification.status === "producer_unavailable") {
+    addGap(draft, "authority_untrusted", owner, verification.reason);
+    addOutcome(draft, {
+      status: "producer_unavailable",
+      owner,
+      source_owner: sourceOwner,
+      reason: verification.reason
+    });
     return false;
   }
-  if (!hasExpectedSubject(receipt.subject, expectedSubject)) {
-    addGap(draft, "relational_identity_mismatch", owner, "relational receipt subject identity does not match");
-    return false;
-  }
-  if (receipt.transaction_frontier !== context.snapshot_vector.transaction_frontier
-      || receipt.transaction_frontier.trim().length === 0) {
-    addGap(draft, "transaction_unfrozen", owner, "relational receipt transaction frontier is not frozen");
-    return false;
-  }
-  if (!hasAuthority(receipt, snapshot)) {
-    addGap(draft, "authority_untrusted", owner, "relational receipt authority is not admitted by the snapshot");
+  if (verification.status === "malformed") {
+    addGap(draft, "relational_identity_mismatch", owner, verification.contract_code);
+    addOutcome(draft, {
+      status: "malformed",
+      owner,
+      source_owner: sourceOwner,
+      contract_code: verification.contract_code
+    });
     return false;
   }
   return admitValidTime(draft, owner, receipt);
-}
-
-function hasExpectedSubject(
-  actual: SupportRelationalSubjectV1,
-  expected: SupportRelationalSubjectV1
-): boolean {
-  if (actual.kind !== expected.kind
-      || actual.proposition_id !== expected.proposition_id) return false;
-  if (actual.kind === "path_projection" && expected.kind === "path_projection") {
-    return actual.relation_kind === expected.relation_kind;
-  }
-  if (actual.kind === "supersession" && expected.kind === "supersession") {
-    return actual.lineage_id === expected.lineage_id
-      && actual.counterpart_proposition_id === expected.counterpart_proposition_id;
-  }
-  return actual.kind !== "path_projection" && expected.kind !== "path_projection"
-    && actual.lineage_id === expected.lineage_id;
-}
-
-function hasBoundIdentity(
-  receipt: SupportRelationalReceiptV1,
-  input: SupportMaterializationInputV1,
-  snapshot: SnapshotCoherenceReceiptV1,
-  vector: SnapshotVectorV1
-): boolean {
-  try {
-    verifySnapshotCoherenceReceiptV1(snapshot, vector);
-  } catch {
-    return false;
-  }
-  return receipt.schema_version === 1
-    && snapshot.schema_version === 1
-    && snapshot.operator_id === "recall_snapshot_coherence_v1"
-    && receipt.query_id === input.query_id
-    && receipt.snapshot_digest === input.snapshot_digest
-    && receipt.snapshot_digest === vector.vector_digest
-    && receipt.snapshot_receipt_digest === snapshot.receipt_digest
-    && receipt.effective_as_of === snapshot.effective_as_of;
-}
-
-function hasAuthority(
-  receipt: SupportRelationalReceiptV1,
-  snapshot: SnapshotCoherenceReceiptV1
-): boolean {
-  return snapshot.coherence_state === "coherent_exact"
-    && snapshot.authorized_scopes.includes(receipt.authorized_scope)
-    && receipt.authorized_scope.trim().length > 0
-    && receipt.producer_operator_id.trim().length > 0;
 }
 
 function admitValidTime(
@@ -131,12 +88,15 @@ function admitValidTime(
   receipt: SupportRelationalReceiptV1
 ): boolean {
   const asOf = Date.parse(receipt.effective_as_of);
-  const validity = receipt.valid_time;
-  if (!Number.isFinite(asOf) || validity.kind === "unknown") {
+  const validity = receipt.valid_time_domain;
+  if (!Number.isFinite(asOf)) {
     addGap(draft, "time_unknown", owner, "relational valid time is absent or invalid");
     return false;
   }
-  if (validity.kind === "timeless") return true;
+  if (validity.kind === "timeless") {
+    addObservedOutcome(draft, owner, receipt);
+    return true;
+  }
   const from = Date.parse(validity.from);
   const to = validity.kind === "bounded" ? Date.parse(validity.to) : Number.POSITIVE_INFINITY;
   if (!Number.isFinite(from) || (validity.kind === "bounded" && !Number.isFinite(to))) {
@@ -145,9 +105,29 @@ function admitValidTime(
   }
   if (from > asOf || asOf >= to || from >= to) {
     addGap(draft, "time_not_active", owner, "relational receipt is inactive at effective_as_of");
+    addOutcome(draft, {
+      status: "not_observed",
+      owner,
+      source_owner: receipt.source_owner,
+      reason: "inactive_at_effective_as_of"
+    });
     return false;
   }
+  addObservedOutcome(draft, owner, receipt);
   return true;
+}
+
+function addObservedOutcome(
+  draft: SupportDraft,
+  owner: string,
+  receipt: SupportRelationalReceiptV1
+): void {
+  addOutcome(draft, {
+    status: "observed",
+    owner,
+    source_owner: receipt.source_owner,
+    receipt_digest: receipt.receipt_digest
+  });
 }
 
 export function adaptTemporal(

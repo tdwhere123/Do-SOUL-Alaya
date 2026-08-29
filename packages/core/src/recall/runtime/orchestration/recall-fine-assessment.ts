@@ -239,9 +239,7 @@ export function buildFineAssessParams(
     condition_digest: prepared.queryCondition.identity,
     memoryKeywordLanes: prepared.retrievalFieldBundle.memoryKeywordLanes(),
     memoryLexicalCaptures: prepared.retrievalFieldBundle.memoryLexicalCaptures(),
-    ...(captureAnswerFeatures
-      ? buildPsiV2LiveReceiptInput(prepared, supplementaryData, candidates)
-      : {}),
+    ...buildPsiV2LiveReceiptInput(prepared, supplementaryData, candidates),
     ...(membership === undefined ? {} : captureFineAssessmentMembership(
       membership.e0Keys,
       candidates
@@ -259,37 +257,24 @@ function buildPsiV2LiveReceiptInput(
     { supplementaryData },
     candidates
   );
-  const lexicalBoundProofs = diagnostics.lexical_bound_proofs;
-  const lexicalPins = liveLexicalPins(lexicalBoundProofs);
-  const queryId = lexicalPins?.query_id ?? prepared.queryCondition.identity;
-  const snapshotDigest = lexicalPins?.snapshot_digest ??
-    prepared.snapshotReadLease.vector_digest;
-  if (queryId.length === 0 || snapshotDigest === null) return {};
+  const lexicalBoundProofs = prepared.retrievalFieldBundle
+    .memoryLexicalBoundProofsForSnapshot(prepared.snapshotVector.vector_digest);
   const supportCandidateReceipts = supportReceiptsFrom(diagnostics, supplementaryData);
   return {
-    query_id: queryId,
-    snapshot_digest: snapshotDigest,
+    queryProofAuthority: Object.freeze({
+      workspace_id: prepared.queryCondition.condition.workspace_id,
+      query_condition: prepared.queryCondition,
+      canonical_query_evidence: prepared.canonicalQueryEvidence,
+      canonical_query_compilation: prepared.canonicalQueryCompilation,
+      snapshot_vector: prepared.snapshotVector,
+      snapshot_coherence_receipt: prepared.snapshotCoherenceReceipt,
+      snapshot_read_lease: prepared.snapshotReadLease,
+      expected_lexical_request_pins:
+        prepared.retrievalFieldBundle.memoryLexicalRequestPins()
+    }),
     lexicalBoundProofs,
     ...(supportCandidateReceipts.length === 0 ? {} : { supportCandidateReceipts })
   };
-}
-
-function liveLexicalPins(
-  proofs: FineAssessParams["lexicalBoundProofs"]
-): Readonly<{ readonly query_id: string; readonly snapshot_digest: string }> | undefined {
-  const matched = (proofs ?? []).filter((proof) =>
-    proof.status === "captured" && proof.field_prefix === "lexical_relaxed" &&
-    typeof proof.identity.snapshot_digest === "string"
-  );
-  if (matched.length !== 1) return undefined;
-  const proof = matched[0]!;
-  if (proof.status !== "captured" || typeof proof.identity.snapshot_digest !== "string") {
-    return undefined;
-  }
-  return Object.freeze({
-    query_id: proof.receipt.query_run_id,
-    snapshot_digest: proof.identity.snapshot_digest
-  });
 }
 
 function supportReceiptsFrom(
@@ -305,8 +290,8 @@ function supportReceiptFrom(
   supplementaryData: FineAssessParams["supplementaryData"]
 ): readonly NonNullable<FineAssessParams["supportCandidateReceipts"]>[number][] {
   const available = row.osf.bindings.status === "available" ||
-    row.evidence_links.status === "available" ||
-    row.relation_validity.status === "available";
+    row.typed_fact_frames.status === "available" ||
+    row.evidence_links.status === "available";
   if (!available) return [];
   const bindings = row.osf.bindings.status === "available"
     ? row.osf.bindings.value.map((binding) => Object.freeze({
@@ -319,6 +304,15 @@ function supportReceiptFrom(
         : { query_proposition_id: binding.query_proposition_id })
     }))
     : undefined;
+  const factFrames = row.typed_fact_frames.status === "available"
+    ? row.typed_fact_frames.value.flatMap(({ capture, evidence_id }) =>
+      capture.fact_frame === null ? [] : capture.fact_frame.slots.map((slot) =>
+        Object.freeze({
+          semantic_identity: slot.text,
+          role: slot.role,
+          evidence_id
+        })))
+    : undefined;
   return [Object.freeze({
     candidate_key: row.candidate_key,
     osf: Object.freeze({
@@ -326,14 +320,9 @@ function supportReceiptFrom(
       truncated: supplementaryData.openSemanticFactorComposition?.truncated ?? false,
       ...(bindings === undefined ? {} : { bindings: Object.freeze(bindings) })
     }),
+    ...(factFrames === undefined ? {} : { fact_frames: Object.freeze(factFrames) }),
     ...(row.evidence_links.status === "available"
       ? { evidence_ids: row.evidence_links.value }
-      : {}),
-    ...(row.relation_validity.status === "available"
-      ? { validity: Object.freeze({
-        status: "available" as const,
-        value: Object.freeze({ validity: row.relation_validity.value.validity })
-      }) }
       : {})
   })];
 }

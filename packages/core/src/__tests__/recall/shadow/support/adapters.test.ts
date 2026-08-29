@@ -1,20 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { materializeSupportFromReceipts } from
-  "../../../../recall/shadow/support/index.js";
 import {
-  createSnapshotCoherenceReceiptV1,
-  createSnapshotVectorV1,
-  type SourceFrontierDeclarationV1
-} from "../../../../recall/runtime/snapshot-coherence/index.js";
+  materializeSupportFromReceipts,
+  type SupportRelationalSubjectV1
+} from
+  "../../../../recall/shadow/support/index.js";
+import { digestRecallFieldIdentity } from
+  "../../../../recall/field/field-identity.js";
 import { QUERY, SNAPSHOT } from "./fixtures.js";
+import {
+  AUTHORITY_CONTEXT,
+  RELATIONAL_SNAPSHOT,
+  authorityContext,
+  createAuthorityContext,
+  createRelationalReceipt,
+  materializePath,
+  pathReceipt,
+  pathMaterialization,
+  pathSubject,
+  polarityCandidate,
+  polarityReceipt,
+  relationalReceipt,
+  resealRelationalReceipt,
+  supersessionReceipt
+} from "./relational-authority-fixtures.js";
 
 const CAND = "workspace_local:memory_entry:cand-1";
 const CAND_B = "workspace_local:memory_entry:cand-2";
-const AS_OF = "2026-08-29T00:00:00.000Z";
-const TX_FRONTIER = "tx-frontier-1";
-const RELATIONAL_SCOPE = "recall.relational";
-const AUTHORITY_CONTEXT = createAuthorityContext();
-const RELATIONAL_SNAPSHOT = AUTHORITY_CONTEXT.snapshot_vector.vector_digest;
 
 describe("support receipt adapters", () => {
   it("materializes OSF bindings, fact frames, polarity, and evidence lineage", () => {
@@ -24,6 +35,7 @@ describe("support receipt adapters", () => {
       authority_context: authorityContext(),
       candidates: [{
         candidate_key: CAND,
+        hypothesis_digest: `sha256:${"1".repeat(64)}`,
         osf: {
           composition_status: "composed",
           truncated: false,
@@ -56,6 +68,15 @@ describe("support receipt adapters", () => {
     expect(result.graph.edges.some((edge) => edge.kind === "supports")).toBe(true);
     expect(result.graph.edges.some((edge) => edge.kind === "sourced_from")).toBe(true);
     expect(result.polarities[0]?.payload?.polarity).toBe("supported_only");
+    expect(result.proposition_observations[0]).toMatchObject({
+      candidate_id: CAND,
+      local_proposition_id: "prop.works-at",
+      hypothesis_digest: `sha256:${"1".repeat(64)}`,
+      witness: {
+        identity: { candidate_id: CAND, proposition_id: "prop.works-at" },
+        payload: { polarity: "supported_only" }
+      }
+    });
   });
 
   it("does not mint a proposition from a binding lemma when query_proposition_id is absent", () => {
@@ -251,26 +272,30 @@ describe("support receipt adapters", () => {
   });
 
   it.each([
-    ["unknown", { kind: "unknown" as const }],
+    ["timeless", { kind: "timeless" as const }],
     ["inactive", {
       kind: "bounded" as const,
       from: "2026-08-01T00:00:00.000Z",
       to: "2026-08-29T00:00:00.000Z"
     }]
-  ])("does not admit proposition or grounds from a %s-time path", (_label, valid_time) => {
-    const result = pathMaterialization({}, pathReceipt({ valid_time }));
+  ])("does not admit proposition or grounds from a tampered %s-time path", (_label, valid_time_domain) => {
+    const result = pathMaterialization({}, pathReceipt({ valid_time_domain }));
     expect(result.graph.nodes.some((node) => node.kind === "proposition")).toBe(false);
     expect(result.graph.edges.some((edge) => edge.kind === "grounds")).toBe(false);
-    expect(result.gaps.some((gap) =>
-      gap.kind === "time_unknown" || gap.kind === "time_not_active"
-    )).toBe(true);
+    expect(result.gaps.some((gap) => gap.kind === "relational_identity_mismatch")).toBe(true);
+    expect(result.outcomes.some((outcome) => outcome.status === "malformed")).toBe(true);
   });
 
   it.each([
     ["query", pathReceipt({ query_id: "wrong-query" })],
     ["snapshot", pathReceipt({ snapshot_digest: `sha256:${"d".repeat(64)}` })],
     ["transaction", pathReceipt({ transaction_frontier: "tx-frontier-wrong" })],
-    ["authority", pathReceipt({ authorized_scope: "recall.untrusted" })]
+    ["authority", pathReceipt({ authorized_scope: "recall.untrusted" })],
+    ["source", pathReceipt({ source_owner: "forged_source" })],
+    ["producer", pathReceipt({ producer_operator_id: "forged_producer" })],
+    ["version", pathReceipt({ producer_operator_version: "forged_version" })],
+    ["generation", pathReceipt({ generation: "forged_generation" })],
+    ["digest", pathReceipt({ receipt_digest: `sha256:${"f".repeat(64)}` })]
   ])("does not let wrong %s binding admit relational truth", (_label, receipt) => {
     const result = pathMaterialization({}, receipt);
     expect(result.graph.nodes.some((node) => node.kind === "proposition")).toBe(false);
@@ -280,6 +305,108 @@ describe("support receipt adapters", () => {
       || gap.kind === "transaction_unfrozen"
       || gap.kind === "authority_untrusted"
     )).toBe(true);
+  });
+
+  it("keeps absent, producer-unavailable, malformed, and observed outcomes distinct", () => {
+    const absent = materializePath(authorityContext(), undefined);
+    expect(absent.outcomes).toContainEqual({
+      status: "not_observed",
+      owner: CAND,
+      source_owner: "path_projection",
+      reason: "receipt_absent"
+    });
+
+    const unavailableContext = createAuthorityContext({ sourceView: "unavailable" });
+    const unavailableReceipt = createRelationalReceipt(
+      unavailableContext,
+      pathSubject(),
+      {}
+    );
+    const unavailable = materializePath(unavailableContext, unavailableReceipt);
+    expect(unavailable.outcomes).toContainEqual({
+      status: "producer_unavailable",
+      owner: CAND,
+      source_owner: "path_relations",
+      reason: "source_view_unavailable"
+    });
+
+    const malformed = pathMaterialization({}, pathReceipt({
+      receipt_digest: `sha256:${"f".repeat(64)}`
+    }));
+    expect(malformed.outcomes[0]).toMatchObject({
+      status: "malformed",
+      contract_code: "receipt_digest_mismatch"
+    });
+    expect(pathMaterialization({}).outcomes[0]).toMatchObject({ status: "observed" });
+  });
+
+  it("keeps a shaped relational receipt unavailable without its source verifier", () => {
+    const context = createAuthorityContext({ includeVerifiers: false });
+    const receipt = createRelationalReceipt(context, pathSubject(), {});
+    expect(materializePath(context, receipt).outcomes[0]).toMatchObject({
+      status: "producer_unavailable",
+      source_owner: "path_relations",
+      reason: "source_verifier_unavailable"
+    });
+  });
+
+  it("rejects caller-owned observations and path-owned polarity even with consistent digests", () => {
+    const context = authorityContext();
+    const validPath = createRelationalReceipt(context, pathSubject(), {});
+    const callerObservationBody = {
+      ...validPath.source_observation,
+      source_observation_id: "caller-owned-observation"
+    };
+    const { observation_digest: _oldDigest, ...unsignedObservation } = callerObservationBody;
+    const callerObservation = {
+      ...unsignedObservation,
+      observation_digest: digestRecallFieldIdentity(unsignedObservation)
+    };
+    const callerReceipt = resealRelationalReceipt({
+      ...validPath,
+      source_observation: callerObservation,
+      source_receipt_digest: digestRecallFieldIdentity(callerObservation)
+    });
+    expect(materializePath(context, callerReceipt).outcomes[0]).toMatchObject({
+      status: "malformed",
+      contract_code: "source_observation_mismatch"
+    });
+
+    const polaritySubject: SupportRelationalSubjectV1 = {
+      kind: "polarity",
+      proposition_id: "prop.works-at",
+      lineage_id: "lineage-forged"
+    };
+    const pathOwnedPolarity = createRelationalReceipt(context, polaritySubject, {
+      test_source_owner: "path_relations"
+    });
+    const result = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: context.snapshot_vector.vector_digest,
+      authority_context: context,
+      candidates: [polarityCandidate(CAND, "lineage-forged", "positive", pathOwnedPolarity)]
+    });
+    expect(result.outcomes[0]).toMatchObject({
+      status: "malformed",
+      contract_code: "source_observation_mismatch"
+    });
+  });
+
+  it("accepts timeless only from a timeless source declaration", () => {
+    const timelessContext = createAuthorityContext({ validTime: { kind: "timeless" } });
+    const timelessReceipt = createRelationalReceipt(timelessContext, pathSubject(), {});
+    expect(materializePath(timelessContext, timelessReceipt).outcomes[0])
+      .toMatchObject({ status: "observed" });
+
+    const forgedBounded = {
+      ...timelessReceipt,
+      valid_time_domain: {
+        kind: "open" as const,
+        from: "2026-08-01T00:00:00.000Z"
+      }
+    };
+    expect(materializePath(timelessContext, forgedBounded).outcomes[0])
+      .toMatchObject({ status: "malformed" });
   });
 
   it("treats truncated or unavailable OSF as unknown, not an empty binding set", () => {
@@ -361,145 +488,3 @@ describe("support receipt adapters", () => {
     expect(withEnergy.graph.nodes.filter((node) => node.kind === "evidence_unit")).toHaveLength(1);
   });
 });
-
-function polarityCandidate(
-  candidateKey: string,
-  lineageId: string,
-  polarity: "positive" | "negative",
-  receipt?: ReturnType<typeof relationalReceipt>
-) {
-  return {
-    candidate_key: candidateKey,
-    polarity: {
-      status: "available" as const,
-      value: {
-        polarity,
-        lineage_id: lineageId,
-        proposition_id: "prop.works-at",
-        ...(receipt === undefined ? {} : { receipt })
-      }
-    },
-    evidence_ids: [`eu-${lineageId}`],
-    contradiction: polarity === "negative"
-      ? {
-        status: "available" as const,
-        value: {
-          standing: "contradicting" as const,
-          lineage_id: lineageId,
-          proposition_id: "prop.works-at",
-          ...(receipt === undefined ? {} : { receipt: contradictionReceipt(lineageId) })
-        }
-      }
-      : undefined
-  };
-}
-
-function pathMaterialization(
-  extras: { strength?: number; hop?: number; path_count?: number },
-  receipt = pathReceipt()
-) {
-  return materializeSupportFromReceipts({
-    query_id: QUERY,
-    snapshot_digest: RELATIONAL_SNAPSHOT,
-    authority_context: authorityContext(),
-    candidates: [{
-      candidate_key: CAND,
-      path: {
-        evidence_basis: ["eu-path", "eu-path"],
-        relation_kind: "works_at",
-        proposition_id: "prop.works-at",
-        receipt,
-        ...extras
-      }
-    }]
-  });
-}
-
-function authorityContext() {
-  return AUTHORITY_CONTEXT;
-}
-
-function relationalReceipt(overrides: Record<string, unknown> = {}) {
-  return {
-    schema_version: 1 as const,
-    query_id: QUERY,
-    snapshot_digest: RELATIONAL_SNAPSHOT,
-    snapshot_receipt_digest: AUTHORITY_CONTEXT.snapshot_receipt.receipt_digest,
-    effective_as_of: AS_OF,
-    transaction_frontier: TX_FRONTIER,
-    producer_operator_id: "relation_assertion_projection_v1",
-    authorized_scope: RELATIONAL_SCOPE,
-    valid_time: { kind: "open" as const, from: "2026-08-01T00:00:00.000Z" },
-    ...overrides
-  };
-}
-
-function pathReceipt(overrides: Record<string, unknown> = {}) {
-  return relationalReceipt({
-    subject: {
-      kind: "path_projection" as const,
-      proposition_id: "prop.works-at",
-      relation_kind: "works_at"
-    },
-    ...overrides
-  });
-}
-
-function polarityReceipt(lineage_id: string) {
-  return relationalReceipt({
-    subject: { kind: "polarity" as const, proposition_id: "prop.works-at", lineage_id }
-  });
-}
-
-function contradictionReceipt(lineage_id: string) {
-  return relationalReceipt({
-    subject: { kind: "contradiction" as const, proposition_id: "prop.works-at", lineage_id }
-  });
-}
-
-function supersessionReceipt(
-  lineage_id: string,
-  proposition_id: string,
-  counterpart_proposition_id?: string
-) {
-  return relationalReceipt({
-    subject: {
-      kind: "supersession" as const,
-      proposition_id,
-      lineage_id,
-      ...(counterpart_proposition_id === undefined ? {} : { counterpart_proposition_id })
-    }
-  });
-}
-
-function createAuthorityContext() {
-  const declaration = (source_owner: string): SourceFrontierDeclarationV1 => ({
-    source_owner,
-    principal: "principal-1",
-    authorized_scope: RELATIONAL_SCOPE,
-    source_frontier: TX_FRONTIER,
-    valid_time_domain: { kind: "open", from: "2026-08-01T00:00:00.000Z" },
-    generation: "generation-1",
-    operator_or_model_version: "operator-1",
-    lag_bound: { kind: "exact" }
-  });
-  const snapshot_vector = createSnapshotVectorV1({
-    principal: "principal-1",
-    authorized_scopes: [RELATIONAL_SCOPE],
-    effective_as_of: AS_OF,
-    transaction_frontier: TX_FRONTIER,
-    base_store_digest: `sha256:${"a".repeat(64)}`,
-    projection_generation: declaration("projection_generation"),
-    retrieval_channel_snapshots: [declaration("path_relations")],
-    embedding_generation_and_model: declaration("embedding_generation_and_model"),
-    path_graph_generation: declaration("path_graph_generation"),
-    temporal_index_generation: declaration("temporal_index_generation"),
-    governance_frontier: declaration("governance_frontier"),
-    formation_operator_versions: [["relation_assertion_projection_v1", "1"]],
-    decision_contract_digest: `sha256:${"b".repeat(64)}`
-  });
-  return Object.freeze({
-    snapshot_vector,
-    snapshot_receipt: createSnapshotCoherenceReceiptV1(snapshot_vector)
-  });
-}

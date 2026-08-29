@@ -4,7 +4,7 @@ import {
   digestSupportHypergraph,
   provedDistinctBindingCount
 } from "../../../../recall/shadow/support/index.js";
-import { alias, QUERY, SNAPSHOT } from "./fixtures.js";
+import { alias, QUERY, RELATION_VERIFIER, SNAPSHOT } from "./fixtures.js";
 
 describe("support binding distinctness", () => {
   it("leaves may_equal aliases unknown and non-certifying", () => {
@@ -17,7 +17,7 @@ describe("support binding distinctness", () => {
       ],
       aliases: [alias("bind.alice", "bind.alice-aka", "may_equal")]
     });
-    expect(provedDistinctBindingCount(receipt)).toEqual({
+    expect(provedDistinctBindingCount(receipt, RELATION_VERIFIER)).toEqual({
       status: "unknown",
       reason: "incomplete_pairwise_distinctness"
     });
@@ -39,7 +39,7 @@ describe("support binding distinctness", () => {
       }],
       correlations: []
     });
-    expect(provedDistinctBindingCount(receipt)).toEqual({
+    expect(provedDistinctBindingCount(receipt, RELATION_VERIFIER)).toEqual({
       status: "unknown",
       reason: "incomplete_pairwise_distinctness"
     });
@@ -59,7 +59,7 @@ describe("support binding distinctness", () => {
       ]
     });
     expect(receipt.aliases[0]?.state).toBe("conflict");
-    expect(() => provedDistinctBindingCount(receipt)).toThrow(/conflict/u);
+    expect(() => provedDistinctBindingCount(receipt, RELATION_VERIFIER)).toThrow(/conflict/u);
   });
 
   it("does not mint distinctness from an incomplete pairwise graph", () => {
@@ -73,7 +73,7 @@ describe("support binding distinctness", () => {
       ],
       aliases: [alias("bind.alice", "bind.alice-aka", "equal")]
     });
-    expect(provedDistinctBindingCount(receipt)).toEqual({
+    expect(provedDistinctBindingCount(receipt, RELATION_VERIFIER)).toEqual({
       status: "unknown",
       reason: "incomplete_pairwise_distinctness"
     });
@@ -93,7 +93,7 @@ describe("support binding distinctness", () => {
         alias("bind.alice", "bind.carol", "distinct")
       ]
     });
-    expect(provedDistinctBindingCount(receipt)).toEqual({
+    expect(provedDistinctBindingCount(receipt, RELATION_VERIFIER)).toEqual({
       status: "proved_distinct",
       count: 2
     });

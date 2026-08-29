@@ -33,6 +33,12 @@ describe("lexical bound proof capture path", () => {
     }
     expect(sealed.identity.workspace_id).toBe("workspace-1");
     expect(sealed.identity.request_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(bundle.memoryLexicalRequestPins()).toEqual([{
+      workspace_id: "workspace-1",
+      request_digest: sealed.identity.request_digest,
+      field_prefix: "lexical_relaxed",
+      candidate_key_domain: "memory_object_id"
+    }]);
     expect(sealed.identity.snapshot_digest).toEqual({
       status: "unavailable",
       reason: "snapshot_not_sealed"
@@ -74,23 +80,16 @@ describe("lexical bound proof capture path", () => {
     expect(Array.isArray(absent?.evaluated_universe)).toBe(false);
   });
 
-  it("sends a named capture variant and seals every memory producer receipt", async () => {
+  it("keeps producer calls neutral and source-seals every retained receipt", async () => {
     const searchByKeywordField = vi.fn(async (
       _workspaceId: string,
       queryText: string,
       _limit: number,
       _scope?: unknown,
-      _refinementDepths?: unknown,
-      capture?: Readonly<{ readonly variant: "lexical_relaxed" | "lexical_expanded" }>
+      _refinementDepths?: unknown
     ) => {
       const receipt = queryText === "expanded" ? completeReceipt() : truncatedReceipt();
-      const variant = capture?.variant;
-      return fieldResult({
-        ...receipt,
-        query_run_id: variant === undefined
-          ? receipt.query_run_id
-          : `memory.keyword.${variant}.depth:${receipt.merge_limit}`
-      });
+      return fieldResult(receipt);
     });
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
@@ -111,10 +110,10 @@ describe("lexical bound proof capture path", () => {
       scope: {}
     });
     expect(searchByKeywordField).toHaveBeenNthCalledWith(
-      1, "workspace-1", "relaxed", 2, {}, undefined, { variant: "lexical_relaxed" }
+      1, "workspace-1", "relaxed", 2, {}
     );
     expect(searchByKeywordField).toHaveBeenNthCalledWith(
-      2, "workspace-1", "expanded", 10, {}, undefined, { variant: "lexical_expanded" }
+      2, "workspace-1", "expanded", 10, {}
     );
     const proofs = bundle.memoryLexicalBoundProofs();
     expect(proofs).toHaveLength(2);
@@ -125,8 +124,8 @@ describe("lexical bound proof capture path", () => {
     expect(proofs.map((proof) =>
       proof.status === "captured" ? proof.receipt.query_run_id : undefined
     )).toEqual([
-      "memory.keyword.lexical_relaxed.depth:2",
-      "memory.keyword.lexical_expanded.depth:10"
+      truncatedReceipt().query_run_id,
+      completeReceipt().query_run_id
     ]);
     expect(proofs[0]?.identity.workspace_id).toBe("workspace-1");
     expect(proofs[1]?.identity.workspace_id).toBe("workspace-1");
@@ -135,25 +134,37 @@ describe("lexical bound proof capture path", () => {
     )).size).toBe(2);
   });
 
-  it("passes a named capture variant for answer_features and packet_trace", async () => {
+  it("keeps diagnostic on/off call args, results, and bundle cache trajectory identical", async () => {
     for (const diagnosticCapture of ["answer_features", "packet_trace"] as const) {
-      const searchByKeywordField = vi.fn(async () => fieldResult(truncatedReceipt()));
-      const bundle = createRecallRetrievalFieldBundle({
+      const normalResult = fieldResult(truncatedReceipt());
+      const offSearch = vi.fn(async () => normalResult);
+      const onSearch = vi.fn(async () => normalResult);
+      const offBundle = createRecallRetrievalFieldBundle({
+        workspaceId: "workspace-1",
+        queryText: "stable",
+        memoryRepo: stubMemoryRepo(offSearch)
+      });
+      const onBundle = createRecallRetrievalFieldBundle({
         workspaceId: "workspace-1",
         queryText: "stable",
         ...(capturesRecallAnswerFeatures(diagnosticCapture) ? { captureProof: true } : {}),
-        memoryRepo: stubMemoryRepo(searchByKeywordField)
+        memoryRepo: stubMemoryRepo(onSearch)
       });
-      await bundle.searchMemoryKeyword({
+      const request = {
         variant: "lexical_relaxed",
         queryText: "stable",
         limit: 2,
         scope: {}
-      });
-      expect(searchByKeywordField).toHaveBeenCalledWith(
-        "workspace-1", "stable", 2, {}, undefined, { variant: "lexical_relaxed" }
-      );
-      const sealed = bundle.memoryLexicalBoundProofs()[0];
+      } as const;
+      const offFirst = await offBundle.searchMemoryKeyword(request);
+      const offSecond = await offBundle.searchMemoryKeyword(request);
+      const onFirst = await onBundle.searchMemoryKeyword(request);
+      const onSecond = await onBundle.searchMemoryKeyword(request);
+      expect(offSearch.mock.calls).toEqual([["workspace-1", "stable", 2, {}]]);
+      expect(onSearch.mock.calls).toEqual(offSearch.mock.calls);
+      expect([onFirst, onSecond]).toEqual([offFirst, offSecond]);
+      expect(offBundle.memoryLexicalBoundProofs()).toEqual([]);
+      const sealed = onBundle.memoryLexicalBoundProofs()[0];
       expect(sealed?.status).toBe("captured");
       expect(sealed?.field_prefix).toBe("lexical_relaxed");
     }
@@ -176,12 +187,11 @@ describe("lexical bound proof capture path", () => {
     expect(bundle.memoryLexicalBoundProofs()).toEqual([]);
   });
 
-  it("does not invent a snapshot when capture-proof is off even if a digest is supplied", async () => {
+  it("does not invent a snapshot when capture-proof is off", async () => {
     const searchByKeywordField = vi.fn(async () => fieldResult(truncatedReceipt()));
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "stable",
-      snapshotDigest: `sha256:${"b".repeat(64)}`,
       memoryRepo: stubMemoryRepo(searchByKeywordField)
     });
     await bundle.searchMemoryKeyword({
@@ -194,14 +204,12 @@ describe("lexical bound proof capture path", () => {
     expect(bundle.memoryLexicalBoundProofs()).toEqual([]);
   });
 
-  it("seals the supplied snapshot only on the capture-proof path", async () => {
-    const snapshotDigest = `sha256:${"b".repeat(64)}`;
+  it("source-seals against a supplied prepared vector without changing producer args", async () => {
     const searchByKeywordField = vi.fn(async () => fieldResult(truncatedReceipt()));
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "stable",
       captureProof: true,
-      snapshotDigest,
       memoryRepo: stubMemoryRepo(searchByKeywordField)
     });
     await bundle.searchMemoryKeyword({
@@ -210,22 +218,19 @@ describe("lexical bound proof capture path", () => {
       limit: 2,
       scope: {}
     });
-    expect(searchByKeywordField).toHaveBeenCalledWith(
-      "workspace-1", "stable", 2, {}, undefined, { variant: "lexical_relaxed" }
-    );
-    expect(searchByKeywordField.mock.calls[0]?.[5]).toEqual({ variant: "lexical_relaxed" });
-    const sealed = bundle.memoryLexicalBoundProofs()[0];
+    expect(searchByKeywordField).toHaveBeenCalledWith("workspace-1", "stable", 2, {});
+    const vectorDigest = `sha256:${"a".repeat(64)}` as const;
+    const sealed = bundle.memoryLexicalBoundProofsForSnapshot(vectorDigest)[0];
     if (sealed === undefined || sealed.status !== "captured") {
       throw new Error("expected sealed bound proof");
     }
-    expect(sealed.identity.snapshot_digest).toBe(snapshotDigest);
-    expect(sealed.identity.request_digest).not.toBe(snapshotDigest);
+    expect(sealed.identity.snapshot_digest).toBe(vectorDigest);
     expect(sealed.evaluated_universe).toEqual({
       status: "unavailable",
       reason: "candidate_universe_not_proved"
     });
     const capture = bundle.captures()[0];
-    expect(capture?.source_snapshot_digest).not.toBe(snapshotDigest);
+    expect(capture?.source_snapshot_digest).not.toBe(sealed.identity.request_digest);
     verifyLexicalBoundProof(sealed);
   });
 });

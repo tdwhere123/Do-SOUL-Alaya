@@ -130,7 +130,7 @@ describe("RecallReadWorkerClient keyword-field capture", () => {
           lane.observations.map(({ object_id }) => object_id)
         ))).toEqual(new Set([workspaceMemoryId]));
         expect(memoryField.refinement_levels?.[0]?.requested_depth).toBe(2);
-        expect(memoryField).not.toHaveProperty("lexical_raw_rank_receipt");
+        expect(memoryField.lexical_raw_rank_receipt).toBeDefined();
         const memoryFieldWithProof = await client.memoryRepo.searchByKeywordField!(
           "workspace-1", "workspace", 1, {}, [2], { variant: "lexical_relaxed" }
         );

@@ -243,13 +243,18 @@ describe("shadow integration at fineAssess", () => {
     });
     const trace = captureShadowIntegration(shadowInput());
     expect(isFailClosedShadowTrace(trace)).toBe(false);
-    expect(asCaptured(trace).psi_v2_shadow).toEqual({
-      status: "unavailable",
-      observation: "not_observed"
+    expect(asCaptured(trace).psi_v2_shadow).toMatchObject({
+      observation_status: "malformed",
+      producer_outcomes: [
+        { producer_id: "lex.interval", status: "malformed",
+          contract_code: "diagnostic_contract_failure" },
+        { producer_id: "support", status: "malformed",
+          contract_code: "diagnostic_contract_failure" }
+      ]
     });
   });
 
-  it("does not invoke psi v2 diagnostics with missing query or snapshot pins", () => {
+  it("renders typed producer absence without requiring query or snapshot pins", () => {
     const spy = vi.spyOn(psiV2, "buildPsiV2ShadowDiagnostics");
     const missingBoth = asCaptured(captureShadowIntegration(shadowInput()));
     const missingSnapshot = asCaptured(captureShadowIntegration({
@@ -260,19 +265,16 @@ describe("shadow integration at fineAssess", () => {
       ...shadowInput(),
       snapshot_digest: "snapshot-observed"
     }));
-    expect(missingBoth.psi_v2_shadow).toEqual({
-      status: "unavailable",
-      observation: "not_observed"
-    });
-    expect(missingSnapshot.psi_v2_shadow).toEqual({
-      status: "unavailable",
-      observation: "not_observed"
-    });
-    expect(missingQuery.psi_v2_shadow).toEqual({
-      status: "unavailable",
-      observation: "not_observed"
-    });
-    expect(spy).not.toHaveBeenCalled();
+    for (const trace of [missingBoth, missingSnapshot, missingQuery]) {
+      expect(trace.psi_v2_shadow).toMatchObject({
+        observation_status: "not_observed",
+        producer_outcomes: [
+          { producer_id: "lex.interval", status: "not_observed", reason: "input_absent" },
+          { producer_id: "support", status: "not_observed", reason: "input_absent" }
+        ]
+      });
+    }
+    expect(spy).toHaveBeenCalledTimes(3);
   });
 
   it("passes valid query and snapshot pins to psi v2 diagnostics", () => {

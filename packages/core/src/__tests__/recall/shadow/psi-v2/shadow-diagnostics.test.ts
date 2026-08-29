@@ -46,6 +46,13 @@ const ENVELOPE_IDENTITY: D1EnvelopeIdentity = {
   workspace_id: "workspace-1"
 };
 
+const PREPARED_IDENTITY = {
+  query_id: "q",
+  snapshot_digest: SNAPSHOT,
+  request_digest: ENVELOPE_IDENTITY.request_digest,
+  workspace_id: ENVELOPE_IDENTITY.workspace_id
+};
+
 describe("psi v2 shadow diagnostics", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -56,13 +63,15 @@ describe("psi v2 shadow diagnostics", () => {
       { kind: "unbounded" },
       PINS,
       PROV,
-      ENVELOPE_IDENTITY
+      ENVELOPE_IDENTITY,
+      PREPARED_IDENTITY
     );
     const inverted = adaptLexicalIntervalEnvelopeToCollapse(
       { kind: "interval", lower: 4, upper: 1 },
       PINS,
       PROV,
-      ENVELOPE_IDENTITY
+      ENVELOPE_IDENTITY,
+      PREPARED_IDENTITY
     );
     expect(unbounded.status).toBe("unresolved");
     expect(unbounded.reason).toBe("unbounded lexical-bound proof remains unresolved");
@@ -77,9 +86,13 @@ describe("psi v2 shadow diagnostics", () => {
         proposition_id: "lex.interval"
       },
       PROV,
-      ENVELOPE_IDENTITY
+      ENVELOPE_IDENTITY,
+      PREPARED_IDENTITY
     );
-    expect(exact.status).toBe("collapsed");
+    expect(exact).toMatchObject({
+      status: "unresolved",
+      reason: "lexical envelope does not match the prepared request identity"
+    });
   });
 
   it("does not collapse a non-null envelope identity forged for another query or snapshot", () => {
@@ -87,21 +100,23 @@ describe("psi v2 shadow diagnostics", () => {
       { kind: "interval", lower: 4, upper: 4 },
       { ...PINS, query_id: "other-query" },
       PROV,
-      ENVELOPE_IDENTITY
+      ENVELOPE_IDENTITY,
+      PREPARED_IDENTITY
     );
     const snapshotMismatch = adaptLexicalIntervalEnvelopeToCollapse(
       { kind: "interval", lower: 4, upper: 4 },
       { ...PINS, query_id: "q", snapshot_digest: `sha256:${"d".repeat(64)}` },
       PROV,
-      ENVELOPE_IDENTITY
+      ENVELOPE_IDENTITY,
+      PREPARED_IDENTITY
     );
     expect(queryMismatch).toMatchObject({
       status: "unresolved",
-      reason: "lexical envelope query identity does not match the observation pin"
+      reason: "prepared query identity does not match the observation pin"
     });
     expect(snapshotMismatch).toMatchObject({
       status: "unresolved",
-      reason: "lexical envelope snapshot identity does not match the observation pin"
+      reason: "prepared query identity does not match the observation pin"
     });
   });
 
@@ -110,7 +125,8 @@ describe("psi v2 shadow diagnostics", () => {
       { kind: "interval", lower: 4, upper: 4 },
       PINS,
       PROV,
-      null
+      null,
+      PREPARED_IDENTITY
     );
     expect(tampered.status).toBe("unresolved");
     expect(tampered.reason).toBe(
@@ -151,7 +167,7 @@ describe("psi v2 shadow diagnostics", () => {
     expect(first.frontier_width).toBeGreaterThan(0);
   });
 
-  it("does not let a raw missing-family fragment veto after lawful collapse", () => {
+  it("records a raw-fragment veto when prepared measurement identity is absent", () => {
     const diagnostics = buildPsiV2ShadowDiagnostics({
       query_id: "q",
       snapshot_digest: SNAPSHOT,
@@ -161,7 +177,7 @@ describe("psi v2 shadow diagnostics", () => {
         "workspace_local:memory_entry:b": lexicalIntervalMap(1, 1)
       }
     });
-    expect(diagnostics.raw_fragment_veto).toBe(false);
+    expect(diagnostics.raw_fragment_veto).toBe(true);
     expect(diagnostics.observation_status).toBe("observed");
   });
 
@@ -220,6 +236,38 @@ describe("psi v2 shadow diagnostics", () => {
     expect(empty.frontier_width).toBe(0);
     expect(empty.blocked_share).toBe(0);
     expect(empty.visibility).toBeNull();
+  });
+
+  it("keeps support absence, unavailability, and malformation visible beside lexical observations", () => {
+    const supportOutcomes = [
+      { producer_id: "support", status: "not_observed", reason: "applicable_receipt_absent" },
+      { producer_id: "support", status: "producer_unavailable", reason: "source_unavailable" },
+      { producer_id: "support", status: "malformed", contract_code: "duplicate_receipt" }
+    ] as const;
+    const diagnostics = supportOutcomes.map((supportOutcome) =>
+      buildPsiV2ShadowDiagnostics({
+        query_id: "q",
+        snapshot_digest: SNAPSHOT,
+        candidate_keys: ["workspace_local:memory_entry:a"],
+        lexical_interval_by_key: {
+          "workspace_local:memory_entry:a": lexicalIntervalMap(2, 2)
+        },
+        producer_outcomes: [
+          { producer_id: "lex.interval", status: "observed" },
+          supportOutcome
+        ]
+      }));
+    expect(diagnostics.map((row) => row.observation_status))
+      .toEqual(["observed", "producer_unavailable", "malformed"]);
+    expect(diagnostics.map((row) => row.producer_outcomes[1])).toEqual(supportOutcomes);
+    expect(new Set(diagnostics.map((row) => JSON.stringify(row.producer_outcomes))).size).toBe(3);
+    expect(new Set(diagnostics.map((row) => row.digest)).size).toBe(3);
+    expect(diagnostics[0]?.reasons).toContain(
+      "support producer not_observed: applicable_receipt_absent");
+    expect(diagnostics[1]?.reasons).toContain(
+      "support producer producer_unavailable: source_unavailable");
+    expect(diagnostics[2]?.reasons).toContain(
+      "support producer malformed: duplicate_receipt");
   });
 
   it("emits conflict, alias, unknown-correlation, and unsupported visibility when passed in", () => {

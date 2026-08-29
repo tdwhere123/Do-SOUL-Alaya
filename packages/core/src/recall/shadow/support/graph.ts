@@ -2,7 +2,6 @@ import { compareText } from "../../../shared/compare-text.js";
 import { ShadowContractError } from "../envelope.js";
 import type { BindingRelationWitness, CorrelationWitness } from "../witness/index.js";
 import {
-  createBindingRelationWitness,
   createCorrelationWitness,
   meetBindingRelation,
   meetCorrelation
@@ -85,15 +84,14 @@ function uniqueAliases(
   const merged = new Map<string, BindingRelationWitness>();
   for (const witness of inputs) {
     assertWitnessPins(witness.identity, queryId, snapshot, "alias");
-    const canonical = canonicalizeAlias(witness);
-    const record = aliasRecord(canonical);
+    const record = aliasRecord(witness);
     assertBinding(nodes, record.left_id);
     assertBinding(nodes, record.right_id);
     const key = pairKey(record.left_id, record.right_id);
     const previous = merged.get(key);
     merged.set(
       key,
-      previous === undefined ? canonical : meetBindingRelation(previous, canonical)
+      previous === undefined ? witness : meetBindingRelation(previous, witness)
     );
   }
   return Object.freeze([...merged.values()].map(aliasRecord).sort(comparePairs));
@@ -144,23 +142,6 @@ function correlatedRecords(
     throw new ShadowContractError("correlation witness requires a correlated edge");
   }
   return records;
-}
-
-function canonicalizeAlias(witness: BindingRelationWitness): BindingRelationWitness {
-  const record = aliasRecord(witness);
-  return createBindingRelationWitness({
-    identity: witness.identity,
-    provenance: witness.provenance,
-    epistemic: witness.epistemic,
-    payload: {
-      left_id: record.left_id,
-      right_id: record.right_id,
-      state: record.state,
-      ...(record.distinctness_receipt === undefined ? {} : {
-        distinctness_receipt: record.distinctness_receipt
-      })
-    }
-  });
 }
 
 function canonicalizeCorrelation(witness: CorrelationWitness): CorrelationWitness {
