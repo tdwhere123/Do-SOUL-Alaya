@@ -78,9 +78,9 @@ describe("live normal lexical interval source", () => {
     const issued = await source(
       prepared,
       capture([
-        candidate("cand-a", 0.9, true), candidate("cand-b", 0.4, true)
+        candidate("cand-a", 1, true), candidate("cand-b", 0.5, true)
       ]),
-      [match("cand-a", 0.9), match("cand-b", 0.4)],
+      [match("cand-a", 1), match("cand-b", 0.5)],
       undefined,
       (lexicalSource, bundle) => fineAssess({
         ...params(candidates),
@@ -135,8 +135,8 @@ describe("live normal lexical interval source", () => {
     const base = fineAssess(params(candidates));
     const stale = await sourceReceipt(
       prepared,
-      capture([candidate("cand-a", 0.9, true)]),
-      [match("cand-a", 0.9)]
+      capture([candidate("cand-a", 1, true)]),
+      [match("cand-a", 1)]
     );
     const counterfeit = { ...stale, snapshot_digest: `sha256:${"c".repeat(64)}` } as
       LexicalIntervalSourceReceiptV1;
@@ -165,8 +165,8 @@ describe("live normal lexical interval source", () => {
     const rejected: ReturnType<typeof fineAssess>[] = [];
     const issued = await source(
       prepared,
-      capture([candidate("cand-a", 0.9, true)]),
-      [match("cand-a", 0.9)],
+      capture([candidate("cand-a", 1, true)]),
+      [match("cand-a", 1)],
       undefined,
       (receipt, bundle) => {
         const exact = authorityFromSource(prepared, receipt, bundle);

@@ -1,3 +1,4 @@
+import { compareCodeUnits } from "@do-soul/alaya-protocol";
 import { buildDefaultPolicy } from
   "../../../../recall/runtime/orchestration.js";
 import { createSeededTestOnlyInMemoryFieldQuerySession } from
@@ -179,10 +180,8 @@ export async function withCapturedLexicalMeasurementAuthorityFixture<T>(
   evidence: PreparedMeasurementAuthorityEvidenceV1 = measurementEvidence(prepared)
 ): Promise<T> {
   const limit = Math.max(2, candidates.length);
-  const matches = Object.freeze(candidates.map((candidate) => Object.freeze({
-    object_id: candidate.candidate_key,
-    normalized_rank: candidate.normalized_rank
-  })));
+  const exact = exactProducerFixture(candidates, limit);
+  const matches = exact.matches;
   const observations = Object.freeze(matches.map((candidate, index) => Object.freeze({
     ...candidate,
     rank: index + 1
@@ -204,14 +203,14 @@ export async function withCapturedLexicalMeasurementAuthorityFixture<T>(
         lexicalLane("trigram", "bm25_raw_rank"),
         lexicalLane("object_key_trigram", "bm25_raw_rank")
       ]),
-      candidates: Object.freeze(candidates.map((candidate) => Object.freeze({
+      candidates: Object.freeze(exact.candidates.map((candidate) => Object.freeze({
         candidate_key: candidate.candidate_key,
         admitted: true,
         chosen_lane_id: "exact" as const,
-        chosen_normalized_rank: candidate.normalized_rank
+        chosen_normalized_rank: candidate.grouped_ordinal
       })))
     }),
-    lexical_raw_rank_receipt: exactProducerReceipt(candidates, limit)
+    lexical_raw_rank_receipt: exact.receipt
   });
   const bundle = createRecallRetrievalFieldBundle({
     workspaceId: "workspace-1",
@@ -294,20 +293,48 @@ function populatedLexicalLane(
   });
 }
 
-function exactProducerReceipt(
+function exactProducerFixture(
   candidates: readonly Readonly<{
     readonly candidate_key: string;
     readonly normalized_rank: number;
   }>[],
   mergeLimit: number
 ) {
-  const rows = Object.freeze(candidates.map((candidate, index) => Object.freeze({
-    candidate_key: candidate.candidate_key,
-    raw_group_key: candidate.normalized_rank,
-    lane_index: index,
-    grouped_ordinal: candidate.normalized_rank,
-    observation_state: "observed" as const
+  const ranked = [...candidates].sort((left, right) =>
+    right.normalized_rank - left.normalized_rank ||
+    left.candidate_key.localeCompare(right.candidate_key)
+  );
+  const rawKeys = exactRawGroupKeys(ranked.map((candidate) => candidate.normalized_rank));
+  const ordinals = groupedOrdinalScores(rawKeys);
+  const rows = Object.freeze(ranked.map((candidate, index) => Object.freeze({
+    candidate_key: candidate.candidate_key, raw_group_key: rawKeys[index]!,
+    lane_index: index, grouped_ordinal: ordinals[index]!, observation_state: "observed" as const
   })));
+  const canonical = [...rows].sort((left, right) =>
+    compareCodeUnits(left.candidate_key, right.candidate_key)
+  );
+  return Object.freeze({
+    matches: Object.freeze(rows.map((row) => Object.freeze({
+      object_id: row.candidate_key, normalized_rank: row.grouped_ordinal
+    }))),
+    candidates: Object.freeze(canonical),
+    receipt: exactProducerReceipt(rows, canonical, mergeLimit)
+  });
+}
+
+type ExactProducerRow = Readonly<{
+  readonly candidate_key: string;
+  readonly raw_group_key: number;
+  readonly lane_index: number;
+  readonly grouped_ordinal: number;
+  readonly observation_state: "observed";
+}>;
+
+function exactProducerReceipt(
+  rows: readonly ExactProducerRow[],
+  canonical: readonly ExactProducerRow[],
+  mergeLimit: number
+) {
   return Object.freeze({
     schema_version: 1 as const,
     receipt_id: "alaya.recall.x0.lexical-raw-rank.v1" as const,
@@ -321,25 +348,46 @@ function exactProducerReceipt(
       producerLane("trigram", "bm25_raw_rank", 2, [], mergeLimit),
       producerLane("object_key_trigram", "bm25_raw_rank", 2, [], mergeLimit)
     ]),
-    candidates: Object.freeze(candidates.map((candidate, index) => Object.freeze({
+    candidates: Object.freeze(canonical.map((candidate) => Object.freeze({
       candidate_key: candidate.candidate_key,
       lane_hits: Object.freeze([Object.freeze({
         lane_id: "exact" as const,
-        raw_group_key: candidate.normalized_rank,
-        grouped_ordinal: candidate.normalized_rank,
-        lane_index: index
+        raw_group_key: candidate.raw_group_key,
+        grouped_ordinal: candidate.grouped_ordinal,
+        lane_index: candidate.lane_index
       })]),
       admitted: true,
       chosen_lane_id: "exact" as const,
-      chosen_normalized_rank: candidate.normalized_rank,
-      post_merge_index: index,
+      chosen_normalized_rank: candidate.grouped_ordinal,
+      post_merge_index: candidate.lane_index,
       discarded_lane_ids: Object.freeze([])
     }))),
-    post_merge: Object.freeze(candidates.map((candidate) => Object.freeze({
-      candidate_key: candidate.candidate_key,
-      normalized_rank: candidate.normalized_rank
+    post_merge: Object.freeze(rows.map((candidate) => Object.freeze({
+      candidate_key: candidate.candidate_key, normalized_rank: candidate.grouped_ordinal
     })))
   });
+}
+
+function exactRawGroupKeys(desiredScores: readonly number[]): readonly number[] {
+  const distinct = new Set(desiredScores).size;
+  let group = distinct;
+  return Object.freeze(desiredScores.map((score, index) => {
+    if (index > 0 && score !== desiredScores[index - 1]) group -= 1;
+    return group;
+  }));
+}
+
+function groupedOrdinalScores(rawKeys: readonly number[]): readonly number[] {
+  const scores = new Array<number>(rawKeys.length);
+  for (let start = 0; start < rawKeys.length;) {
+    let end = start + 1;
+    while (end < rawKeys.length && rawKeys[end] === rawKeys[start]) end += 1;
+    let total = 0;
+    for (let index = start; index < end; index += 1) total += (rawKeys.length - index) / rawKeys.length;
+    for (let index = start; index < end; index += 1) scores[index] = total / (end - start);
+    start = end;
+  }
+  return Object.freeze(scores);
 }
 
 function producerLane(

@@ -43,8 +43,8 @@ describe("source-bound lexical measurement admission", () => {
 
   it("admits captured candidate bytes inside the active read and reaches Psi", async () => {
     await withCapturedLexicalMeasurementAuthorityFixture(prepared, [
-      { candidate_key: "cand-a", normalized_rank: 0.9 },
-      { candidate_key: "cand-b", normalized_rank: 0.4 }
+      { candidate_key: "cand-a", normalized_rank: 1 },
+      { candidate_key: "cand-b", normalized_rank: 0.5 }
     ], (authority, source) => {
       if (source.status !== "captured") throw new Error("captured source expected");
       const leftKey = fieldKey("cand-a");
@@ -81,7 +81,7 @@ describe("source-bound lexical measurement admission", () => {
   it("rejects empty, wrong-candidate, wrong-value, and wrong-provenance collapses", async () => {
     await withCapturedLexicalMeasurementAuthorityFixture(
       prepared,
-      [{ candidate_key: "cand-a", normalized_rank: 0.9 }],
+      [{ candidate_key: "cand-a", normalized_rank: 1 }],
       (authority, source) => {
         if (source.status !== "captured") throw new Error("captured source expected");
         const key = fieldKey("cand-a");
@@ -106,7 +106,7 @@ describe("source-bound lexical measurement admission", () => {
   it("rejects scope, kind, lane, status, list, and raw-kind relabeling", async () => {
     await withCapturedLexicalMeasurementAuthorityFixture(
       prepared,
-      [{ candidate_key: "shared", normalized_rank: 0.9 }],
+      [{ candidate_key: "shared", normalized_rank: 1 }],
       (authority, source) => {
         if (source.status !== "captured") throw new Error("captured source expected");
         const key = fieldKey("shared");
@@ -143,7 +143,7 @@ describe("source-bound lexical measurement admission", () => {
   it("invalidates authority and admissions after commit", async () => {
     const issued = await withCapturedLexicalMeasurementAuthorityFixture(
       prepared,
-      [{ candidate_key: "cand-a", normalized_rank: 0.9 }],
+      [{ candidate_key: "cand-a", normalized_rank: 1 }],
       (authority, source) => {
         if (source.status !== "captured") throw new Error("captured source expected");
         const coordinate = sourceCoordinate(authority, source, "cand-a");
@@ -178,10 +178,10 @@ describe("source-bound lexical measurement admission", () => {
     };
     await expect(withCapturedLexicalMeasurementAuthorityFixture(
       prepared,
-      [{ candidate_key: "cand-a", normalized_rank: 0.9 }],
+      [{ candidate_key: "cand-a", normalized_rank: 1 }],
       (current) => {
         authority = current;
-        measured = collapse(current, "cand-a", 0.9);
+        measured = collapse(current, "cand-a", 1);
         throw new Error("force rollback");
       },
       snapshot
@@ -192,7 +192,7 @@ describe("source-bound lexical measurement admission", () => {
   it("binds admission to the exact authority object, not an equal digest", async () => {
     await withCapturedLexicalMeasurementAuthorityFixture(
       prepared,
-      [{ candidate_key: "cand-a", normalized_rank: 0.9 }],
+      [{ candidate_key: "cand-a", normalized_rank: 1 }],
       async (first, source) => {
         if (source.status !== "captured") throw new Error("captured source expected");
         const coordinate = sourceCoordinate(first, source, "cand-a");
@@ -203,7 +203,7 @@ describe("source-bound lexical measurement admission", () => {
         const admission = coordinate.admission;
         await withCapturedLexicalMeasurementAuthorityFixture(
           prepared,
-          [{ candidate_key: "cand-a", normalized_rank: 0.9 }],
+          [{ candidate_key: "cand-a", normalized_rank: 1 }],
           (second) => {
             expect(second).not.toBe(first);
             expect(second.authority_digest).toBe(first.authority_digest);

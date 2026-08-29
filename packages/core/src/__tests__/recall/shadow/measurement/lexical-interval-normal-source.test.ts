@@ -46,7 +46,11 @@ describe("normal lexical interval source receipt", () => {
   });
 
   it("keeps a non-admitted capture row unbounded", () => {
-    const source = capturedSource(fieldResult(capture()));
+    const source = orderingSource([
+      entry("hit", "exact", 1, 0), entry("other", "porter", 1, 0),
+      entry("outside", "porter", 0.5, 1)
+    ], ["hit", "other"]);
+    verifyLexicalIntervalSourceReceiptIntegrityV1(source);
     const outside = lexicalIntervalSourceEnvelopes(source, "outside");
     expect(outside.primary).toBeNull();
     expect(outside.lanes.porter?.value).toEqual({ kind: "unbounded" });
@@ -108,7 +112,29 @@ describe("normal lexical interval source receipt", () => {
       capture(), 1, Object.freeze({ ...missing, post_merge: Object.freeze([]) })
     ));
     expect(() => verifyLexicalIntervalSourceReceiptIntegrityV1(source))
-      .toThrow(/candidate admission/u);
+      .toThrow(/post-merge set/u);
+  });
+
+  it.each([
+    ["rank order", [entry("b", "porter", 1, 0), entry("a", "porter", 0.5, 1)], ["a", "b"]],
+    ["priority order", [entry("e", "exact", 1, 0), entry("p", "porter", 1, 0)], ["p", "e"]],
+    ["source order", [entry("early", "porter", 1, 0), entry("late", "porter", 1, 1)], ["late", "early"]],
+    ["object-key sibling tie", [
+      entry("a", "object_key_porter", 1, 0), entry("z", "porter", 1, 0)
+    ], ["z", "a"]]
+  ] as const)("rejects forged %s", (_name, entries, order) => {
+    const source = orderingSource(entries, order);
+    expect(() => verifyLexicalIntervalSourceReceiptIntegrityV1(source))
+      .toThrow(/lane row order|post-merge order/u);
+  });
+
+  it("rejects a forged producer post-merge index", () => {
+    const source = orderingSource(
+      [entry("a", "porter", 1, 0), entry("b", "porter", 0.5, 1)],
+      ["a", "b"], true
+    );
+    expect(() => verifyLexicalIntervalSourceReceiptIntegrityV1(source))
+      .toThrow(/post-merge order/u);
   });
 
   it("accepts an object-key winner bound to its producer lane row", () => {
@@ -182,8 +208,15 @@ function fieldResult(
   normalizedRank = 1,
   lexical_raw_rank_receipt = producerReceipt()
 ): Readonly<KeywordSearchFieldResult> {
+  const matches = lexical_raw_rank.candidates.filter((candidateValue) =>
+    candidateValue.admitted
+  ).map((candidateValue) => Object.freeze({
+    object_id: candidateValue.candidate_key,
+    normalized_rank: candidateValue.candidate_key === "hit"
+      ? normalizedRank : candidateValue.chosen_normalized_rank!
+  }));
   return Object.freeze({
-    matches: Object.freeze([{ object_id: "hit", normalized_rank: normalizedRank }]),
+    matches: Object.freeze(matches),
     lanes: Object.freeze([
       fieldLane("exact", "ineligible", []),
       fieldLane("porter", "complete", [
@@ -219,6 +252,7 @@ function capture(options: Readonly<{
   readonly chosenLane?: LexicalBoundLaneId;
   readonly hitRank?: number;
   readonly objectKeyOnly?: boolean;
+  readonly outsideAdmitted?: boolean;
 }> = {}): Readonly<KeywordLexicalMergeCapture> {
   const chosenLane = options.chosenLane ?? "porter";
   const objectKeyOnly = options.objectKeyOnly === true;
@@ -236,7 +270,9 @@ function capture(options: Readonly<{
     ]),
     candidates: Object.freeze([
       candidate("hit", options.hitRank ?? 1, true, chosenLane),
-      ...(objectKeyOnly ? [] : [candidate("outside", 0.5, false, "porter")])
+      ...(objectKeyOnly ? [] : [candidate(
+        "outside", 0.5, options.outsideAdmitted !== false, "porter"
+      )])
     ])
   });
 }
@@ -295,11 +331,16 @@ function producerReceipt(
             { lane_id: "trigram" as const, ...rawHit(-2, 0, 1) }
           ]),
       ...(objectKeyOnly ? [] : [producerCandidate(
-        "outside", "porter", 0.5, false, null,
+        "outside", "porter", 0.5, true, 1,
         [{ lane_id: "porter" as const, ...rawHit(-1, 1, 0.5) }]
       )])
     ]),
-    post_merge: Object.freeze([Object.freeze({ candidate_key: "hit", normalized_rank: 1 })])
+    post_merge: Object.freeze([
+      Object.freeze({ candidate_key: "hit", normalized_rank: 1 }),
+      ...(objectKeyOnly ? [] : [Object.freeze({
+        candidate_key: "outside", normalized_rank: 0.5
+      })])
+    ])
   });
 }
 
@@ -344,6 +385,80 @@ function producerCandidate(
     )
   });
 }
+
+type OrderEntry = Readonly<{
+  readonly key: string;
+  readonly lane: LexicalBoundLaneId;
+  readonly rank: number;
+  readonly laneIndex: number;
+}>;
+
+function entry(
+  key: string, lane: LexicalBoundLaneId, rank: number, laneIndex: number
+): OrderEntry {
+  return Object.freeze({ key, lane, rank, laneIndex });
+}
+
+function orderingSource(
+  entries: readonly OrderEntry[],
+  declaredOrder: readonly string[],
+  forgeIndex = false
+) {
+  const lanes = LANE_ORDER.map((laneId) => producerLane(
+    laneId, laneId === "exact" ? "matched_token_count" : "bm25_raw_rank",
+    laneId === "exact" ? 0 : laneId.includes("porter") ? 1 : 2,
+    entries.filter((item) => item.lane === laneId).map((item) => rawRow(
+      item.key, laneId === "exact" ? item.rank : -item.rank, item.laneIndex, item.rank
+    ))
+  ));
+  const candidates = [...entries].sort((left, right) => left.key.localeCompare(right.key))
+    .map((item) => {
+      const postMergeIndex = declaredOrder.indexOf(item.key);
+      return producerCandidate(
+      item.key, item.lane, item.rank, postMergeIndex >= 0,
+      forgeIndex && item.key === declaredOrder[0] ? 1
+        : postMergeIndex < 0 ? null : postMergeIndex,
+      [{
+        lane_id: item.lane,
+        ...rawHit(item.lane === "exact" ? item.rank : -item.rank, item.laneIndex, item.rank)
+      }]
+    );
+    });
+  const receipt = Object.freeze({
+    schema_version: 1 as const,
+    receipt_id: "alaya.recall.x0.lexical-raw-rank.v1" as const,
+    producer_id: "alaya.storage.mergeKeywordSearchRows.v1" as const,
+    query_run_id: "ordering-fixture", merge_limit: 2,
+    lanes: Object.freeze(lanes), candidates: Object.freeze(candidates),
+    post_merge: Object.freeze(declaredOrder.map((key) => Object.freeze({
+      candidate_key: key, normalized_rank: entries.find((item) => item.key === key)!.rank
+    })))
+  });
+  const captureValue = Object.freeze({
+    query_run_id: receipt.query_run_id, merge_limit: 2,
+    lanes: Object.freeze(receipt.lanes.map(({ lane_id, raw_key_kind, list_n, status }) =>
+      Object.freeze({ lane_id, raw_key_kind, list_n, status })
+    )),
+    candidates: Object.freeze(receipt.candidates.map((candidateValue) => Object.freeze({
+      candidate_key: candidateValue.candidate_key,
+      chosen_lane_id: candidateValue.chosen_lane_id,
+      chosen_normalized_rank: candidateValue.chosen_normalized_rank,
+      admitted: candidateValue.admitted
+    })))
+  });
+  return capturedSource(Object.freeze({
+    matches: Object.freeze(declaredOrder.map((key) => Object.freeze({
+      object_id: key, normalized_rank: entries.find((item) => item.key === key)!.rank
+    }))),
+    lanes: Object.freeze([fieldLane("exact", "ineligible", []),
+      fieldLane("porter", "ineligible", []), fieldLane("trigram", "ineligible", [])]),
+    lexical_raw_rank: captureValue, lexical_raw_rank_receipt: receipt
+  }));
+}
+
+const LANE_ORDER = Object.freeze([
+  "exact", "porter", "object_key_porter", "trigram", "object_key_trigram"
+] as const);
 
 function memoryRepo(searchByKeywordField: (...args: never[]) => Promise<unknown>) {
   return { searchByKeywordField } as unknown as RecallServiceMemoryRepoPort;

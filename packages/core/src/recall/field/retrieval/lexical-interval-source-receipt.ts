@@ -3,9 +3,6 @@ import type {
   KeywordSearchFieldResult
 } from "../../runtime/recall-service-types.js";
 import type {
-  LexicalBoundCandidateProvenance,
-  LexicalBoundLaneCapture,
-  LexicalBoundLaneHit,
   LexicalBoundProducerReceipt
 } from "../../runtime/recall-search-port-types.js";
 import { freezeLexicalBoundProducerReceipt } from
@@ -14,6 +11,8 @@ import {
   digestRecallFieldIdentity,
   type RecallFieldDigest
 } from "../field-identity.js";
+import { verifyLexicalIntervalProducerReplay } from
+  "./lexical-interval-producer-replay.js";
 
 export const LEXICAL_INTERVAL_SOURCE_RECEIPT_ID =
   "alaya.recall.lexical-interval-source.v1";
@@ -21,16 +20,6 @@ export const LEXICAL_INTERVAL_SOURCE_ADAPTER_ID =
   "alaya.recall.lexical-interval.normal-field-adapter.v1";
 
 type LexicalFieldPrefix = "lexical_relaxed" | "lexical_expanded";
-const LEXICAL_LANES = Object.freeze([
-  "exact", "porter", "object_key_porter", "trigram", "object_key_trigram"
-] as const);
-const LEXICAL_LANE_PRIORITY = Object.freeze({
-  exact: 0,
-  porter: 1,
-  object_key_porter: 1,
-  trigram: 2,
-  object_key_trigram: 2
-} as const);
 
 type SourceIdentity = Readonly<{
   readonly workspace_id: string;
@@ -136,8 +125,7 @@ export function verifyLexicalIntervalSourceReceiptIntegrityV1(
     return;
   }
   verifyCapture(receipt.capture, receipt.producer_receipt, receipt.requested_depth);
-  if (receipt.normal_matches_digest !== digestAdmittedCapture(receipt.capture) ||
-      receipt.normal_matches_digest !== digestProducerPostMerge(receipt.producer_receipt)) {
+  if (receipt.normal_matches_digest !== digestProducerPostMerge(receipt.producer_receipt)) {
     throw new TypeError("lexical interval source does not match the normal field result");
   }
 }
@@ -163,8 +151,7 @@ function verifyCapture(
   requestedDepth: number
 ): void {
   verifyCaptureIdentity(capture, producerReceipt, requestedDepth);
-  const lanes = verifiedLaneMaps(capture, producerReceipt);
-  verifyCandidateProjections(capture, producerReceipt, lanes);
+  verifyLexicalIntervalProducerReplay(capture, producerReceipt);
 }
 
 function verifyCaptureIdentity(
@@ -186,223 +173,13 @@ function verifyCaptureIdentity(
   }
 }
 
-function verifiedLaneMaps(
-  capture: Readonly<KeywordLexicalMergeCapture>,
-  producerReceipt: Readonly<LexicalBoundProducerReceipt>
-) {
-  const lanes = new Map(capture.lanes.map((lane) => [lane.lane_id, lane]));
-  if (!canonicalLaneOrder(capture.lanes) || lanes.size !== LEXICAL_LANES.length) {
-    throw new TypeError("lexical interval source lane set is invalid");
-  }
-  const producerLanes = new Map(producerReceipt.lanes.map((lane) => [lane.lane_id, lane]));
-  if (!canonicalLaneOrder(producerReceipt.lanes) ||
-      producerLanes.size !== LEXICAL_LANES.length) {
-    throw new TypeError("lexical interval producer lane set is invalid");
-  }
-  for (const lane of capture.lanes) {
-    verifyLane(lane, capture.merge_limit);
-    verifyLaneProjection(lane, producerLanes.get(lane.lane_id)!, capture.merge_limit);
-  }
-  return Object.freeze({ lanes, producerLanes });
-}
-
-function verifyCandidateProjections(
-  capture: Readonly<KeywordLexicalMergeCapture>,
-  producerReceipt: Readonly<LexicalBoundProducerReceipt>,
-  laneMaps: ReturnType<typeof verifiedLaneMaps>
-): void {
-  const producerCandidates = new Map(
-    producerReceipt.candidates.map((candidate) => [candidate.candidate_key, candidate])
-  );
-  if (producerCandidates.size !== capture.candidates.length) {
-    throw new TypeError("lexical interval producer candidate set is invalid");
-  }
-  const keys = new Set<string>();
-  for (const candidate of capture.candidates) {
-    if (candidate.candidate_key.trim().length === 0 || keys.has(candidate.candidate_key)) {
-      throw new TypeError("lexical interval source candidate identity is invalid");
-    }
-    keys.add(candidate.candidate_key);
-    const producerCandidate = producerCandidates.get(candidate.candidate_key);
-    if (producerCandidate === undefined || !sameCandidateProjection(candidate, producerCandidate)) {
-      throw new TypeError("lexical interval producer candidate projection is invalid");
-    }
-    verifyCandidateObservation(candidate, producerCandidate, laneMaps);
-  }
-  verifyProducerPostMerge(producerReceipt);
-}
-
-function verifyCandidateObservation(
-  candidate: KeywordLexicalMergeCapture["candidates"][number],
-  producerCandidate: Readonly<LexicalBoundCandidateProvenance>,
-  laneMaps: ReturnType<typeof verifiedLaneMaps>
-): void {
-  verifyProducerCandidateRows(producerCandidate, laneMaps.producerLanes);
-  const hasLane = candidate.chosen_lane_id !== null;
-  const hasRank = candidate.chosen_normalized_rank !== null;
-  if (hasLane !== hasRank || (candidate.admitted && !hasLane)) {
-    throw new TypeError("lexical interval source candidate observation is incomplete");
-  }
-  if (!hasLane) return;
-  const lane = laneMaps.lanes.get(candidate.chosen_lane_id!);
-  const rank = candidate.chosen_normalized_rank!;
-  if (lane === undefined || lane.status === "empty" ||
-      !Number.isFinite(rank) || rank <= 0 || rank > 1) {
-    throw new TypeError("lexical interval source candidate observation is invalid");
-  }
-  verifyProducerObservation(
-    laneMaps.producerLanes.get(candidate.chosen_lane_id!)!, producerCandidate, rank
-  );
-}
-
-function verifyProducerCandidateRows(
-  candidate: Readonly<LexicalBoundCandidateProvenance>,
-  lanes: ReturnType<typeof verifiedLaneMaps>["producerLanes"]
-): void {
-  const observed = [...lanes.values()].flatMap((lane) => lane.rows
-    .filter((row) => row.candidate_key === candidate.candidate_key)
-    .map((row) => Object.freeze({ lane, row })));
-  const expectedHits = new Set(observed.map(({ lane, row }) => hitKey({
-    lane_id: lane.lane_id,
-    raw_group_key: row.raw_group_key,
-    grouped_ordinal: row.grouped_ordinal,
-    lane_index: row.lane_index
-  })));
-  const actualHits = new Set(candidate.lane_hits.map(hitKey));
-  if (expectedHits.size !== observed.length || actualHits.size !== candidate.lane_hits.length ||
-      expectedHits.size !== actualHits.size ||
-      [...expectedHits].some((key) => !actualHits.has(key))) {
-    throw new TypeError("lexical interval producer candidate lane hits are invalid");
-  }
-  const winner = observed.reduce<(typeof observed)[number] | undefined>(selectWinner, undefined);
-  if (winner === undefined || candidate.chosen_lane_id !== winner.lane.lane_id ||
-      candidate.chosen_normalized_rank !== winner.row.grouped_ordinal) {
-    throw new TypeError("lexical interval producer candidate winner is invalid");
-  }
-}
-
-function selectWinner(
-  current: ProducerObservedRow | undefined,
-  next: ProducerObservedRow
-) {
-  if (current === undefined || next.row.grouped_ordinal > current.row.grouped_ordinal ||
-      (next.row.grouped_ordinal === current.row.grouped_ordinal &&
-        next.lane.source_priority < current.lane.source_priority)) return next;
-  return current;
-}
-
-type ProducerObservedRow = Readonly<{
-  readonly lane: LexicalBoundLaneCapture;
-  readonly row: LexicalBoundLaneCapture["rows"][number];
-}>;
-
-function hitKey(hit: Readonly<LexicalBoundLaneHit>): string {
-  return JSON.stringify([
-    hit.lane_id, hit.raw_group_key, hit.grouped_ordinal, hit.lane_index
-  ]);
-}
-
-function verifyLaneProjection(
-  lane: KeywordLexicalMergeCapture["lanes"][number],
-  producerLane: Readonly<LexicalBoundLaneCapture>,
-  mergeLimit: number
-): void {
-  if (producerLane.raw_key_kind !== lane.raw_key_kind ||
-      producerLane.list_n !== lane.list_n || producerLane.status !== lane.status ||
-      producerLane.source_priority !== LEXICAL_LANE_PRIORITY[lane.lane_id] ||
-      producerLane.requested_limit !== mergeLimit ||
-      producerLane.list_n !== producerLane.rows.length) {
-    throw new TypeError("lexical interval producer lane projection is invalid");
-  }
-}
-
-function canonicalLaneOrder(
-  lanes: readonly Readonly<{ readonly lane_id: KeywordLexicalMergeCapture["lanes"][number]["lane_id"] }>[]
-): boolean {
-  return lanes.length === LEXICAL_LANES.length &&
-    lanes.every((lane, index) => lane.lane_id === LEXICAL_LANES[index]);
-}
-
-function sameCandidateProjection(
-  candidate: KeywordLexicalMergeCapture["candidates"][number],
-  producerCandidate: Readonly<LexicalBoundCandidateProvenance>
-): boolean {
-  return producerCandidate.admitted === candidate.admitted &&
-    producerCandidate.chosen_lane_id === candidate.chosen_lane_id &&
-    producerCandidate.chosen_normalized_rank === candidate.chosen_normalized_rank;
-}
-
-function verifyProducerObservation(
-  lane: Readonly<LexicalBoundLaneCapture>,
-  candidate: Readonly<LexicalBoundCandidateProvenance>,
-  normalizedRank: number
-): void {
-  const row = lane.rows.find((item) =>
-    item.candidate_key === candidate.candidate_key &&
-    item.grouped_ordinal === normalizedRank
-  );
-  const hit = candidate.lane_hits.find((item) =>
-    item.lane_id === lane.lane_id && item.grouped_ordinal === normalizedRank &&
-    item.lane_index === row?.lane_index && item.raw_group_key === row?.raw_group_key
-  );
-  if (row === undefined || hit === undefined) {
-    throw new TypeError("lexical interval producer lane observation is invalid");
-  }
-}
-
-function verifyLane(
-  lane: KeywordLexicalMergeCapture["lanes"][number],
-  mergeLimit: number
-): void {
-  const expectedKind = lane.lane_id === "exact"
-    ? "matched_token_count" : "bm25_raw_rank";
-  if (lane.raw_key_kind !== expectedKind || !Number.isSafeInteger(lane.list_n) ||
-      lane.list_n < 0 || lane.list_n > mergeLimit ||
-      (lane.status === "empty") !== (lane.list_n === 0) ||
-      (lane.status === "truncated" && lane.list_n !== mergeLimit)) {
-    throw new TypeError("lexical interval source lane is invalid");
-  }
-}
-
 function digestNormalMatches(
   matches: Readonly<KeywordSearchFieldResult>["matches"]
 ): RecallFieldDigest {
   return digestRecallFieldIdentity([...matches].map((match) => Object.freeze({
     candidate_key: match.object_id,
     normalized_rank: match.normalized_rank
-  })).sort(compareObservedMatches));
-}
-
-function digestAdmittedCapture(
-  capture: Readonly<KeywordLexicalMergeCapture>
-): RecallFieldDigest {
-  return digestRecallFieldIdentity(capture.candidates.filter((candidate) =>
-    candidate.admitted
-  ).map((candidate) => Object.freeze({
-    candidate_key: candidate.candidate_key,
-    normalized_rank: candidate.chosen_normalized_rank
-  })).sort(compareObservedMatches));
-}
-
-function verifyProducerPostMerge(receipt: Readonly<LexicalBoundProducerReceipt>): void {
-  const keys = new Set<string>();
-  for (const [index, row] of receipt.post_merge.entries()) {
-    if (keys.has(row.candidate_key)) {
-      throw new TypeError("lexical interval producer post-merge set is invalid");
-    }
-    keys.add(row.candidate_key);
-    const candidate = receipt.candidates.find((item) => item.candidate_key === row.candidate_key);
-    if (candidate?.admitted !== true || candidate.post_merge_index !== index ||
-        candidate.chosen_normalized_rank !== row.normalized_rank) {
-      throw new TypeError("lexical interval producer post-merge admission is invalid");
-    }
-  }
-  for (const candidate of receipt.candidates) {
-    const admitted = candidate.post_merge_index !== null;
-    if (candidate.admitted !== admitted || (admitted && !keys.has(candidate.candidate_key))) {
-      throw new TypeError("lexical interval producer candidate admission is invalid");
-    }
-  }
+  })));
 }
 
 function digestProducerPostMerge(
@@ -411,14 +188,7 @@ function digestProducerPostMerge(
   return digestRecallFieldIdentity(receipt.post_merge.map((row) => Object.freeze({
     candidate_key: row.candidate_key,
     normalized_rank: row.normalized_rank
-  })).sort(compareObservedMatches));
-}
-
-function compareObservedMatches(
-  left: Readonly<{ readonly candidate_key: string; readonly normalized_rank: number | null }>,
-  right: Readonly<{ readonly candidate_key: string; readonly normalized_rank: number | null }>
-): number {
-  return left.candidate_key.localeCompare(right.candidate_key);
+  })));
 }
 
 function dense<T>(values: readonly T[]): boolean {
