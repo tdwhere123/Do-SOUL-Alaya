@@ -18,11 +18,6 @@ import { verifyLexicalIntervalSourceReceiptV1 } from
 import { digestRecallFieldIdentity } from "../../field/field-identity.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import {
-  freezeLexicalBoundProof,
-  verifyLexicalBoundProof,
-  type LexicalBoundProof
-} from "../diagnostics/lexical-bound-proof.js";
-import {
   verifySnapshotCoherenceReceiptV1,
   verifySnapshotVectorV1,
   finalizePreparedSnapshotReadLease,
@@ -117,38 +112,6 @@ export function verifyLiveQueryProofAuthority(
     workspace_id: condition.condition.workspace_id,
     snapshot_digest: vector.vector_digest
   });
-}
-
-export function admitLiveLexicalProofs(
-  authority: LiveQueryProofAuthority,
-  values: readonly Readonly<LexicalBoundProof>[]
-): readonly Readonly<LexicalBoundProof>[] | undefined {
-  const pins = verifyLiveQueryProofAuthority(authority);
-  const expected = authority.expected_lexical_request_pins;
-  if (expected.length === 0 || values.length !== expected.length) return undefined;
-  const expectedByKey = new Map(expected.map((pin) => [pinKey(pin), pin]));
-  const admitted: LexicalBoundProof[] = [];
-  const seen = new Set<string>();
-  for (const value of values) {
-    const proof = freezeLexicalBoundProof(value);
-    if (proof === undefined || proof.status !== "captured" ||
-        typeof proof.identity.request_digest !== "string" ||
-        typeof proof.identity.workspace_id !== "string" ||
-        typeof proof.field_prefix !== "string" ||
-        proof.candidate_key_domain !== "memory_object_id") return undefined;
-    const key = pinKey({
-      workspace_id: proof.identity.workspace_id,
-      request_digest: proof.identity.request_digest,
-      field_prefix: proof.field_prefix,
-      candidate_key_domain: proof.candidate_key_domain
-    });
-    if (seen.has(key) || !expectedByKey.has(key)) return undefined;
-    if (proof.identity.snapshot_digest !== pins.snapshot_digest) return undefined;
-    verifyLexicalBoundProof(proof);
-    seen.add(key);
-    admitted.push(proof);
-  }
-  return seen.size === expectedByKey.size ? Object.freeze(admitted) : undefined;
 }
 
 export function admitLiveLexicalIntervalSources(

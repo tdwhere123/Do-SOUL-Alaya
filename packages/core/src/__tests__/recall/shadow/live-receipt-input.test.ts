@@ -9,6 +9,8 @@ import type {
 } from "../../../recall/runtime/recall-service-runner-types.js";
 import type { SupportCandidateReceiptV1 } from
   "../../../recall/shadow/support/index.js";
+import { absentLexicalBoundProof } from
+  "../../../recall/runtime/diagnostics/lexical-bound-proof.js";
 import { withFineDeliveryPath } from "../recall-service-test-fixtures.js";
 import { evidenceCandidate, fieldCandidates } from "./canonical-delivery-fixtures.js";
 import {
@@ -51,7 +53,11 @@ describe("live Band 1 receipt input", () => {
     expect(observedTrace.psi_v2_shadow).toMatchObject({
       observation_status: "malformed",
       producer_outcomes: [
-        { producer_id: "lex.interval", status: "observed" },
+        {
+          producer_id: "lex.interval",
+          status: "not_observed",
+          reason: "applicable_receipt_absent"
+        },
         {
           producer_id: "support",
           status: "malformed",
@@ -89,7 +95,7 @@ describe("live Band 1 receipt input", () => {
     }
   });
 
-  it("treats storage query_run_id as a lane label for lexical-only live input", async () => {
+  it("does not admit a planted legacy proof as live lexical authority", async () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
     const prepared = await preparedAuthority();
     const observed = fineAssess({
@@ -99,9 +105,13 @@ describe("live Band 1 receipt input", () => {
     });
 
     expect(captured(observed.shadowTrace).psi_v2_shadow).toMatchObject({
-      observation_status: "observed",
+      observation_status: "not_observed",
       producer_outcomes: [
-        { producer_id: "lex.interval", status: "observed" },
+        {
+          producer_id: "lex.interval",
+          status: "not_observed",
+          reason: "applicable_receipt_absent"
+        },
         {
           producer_id: "support",
           status: "not_observed",
@@ -251,7 +261,7 @@ describe("live Band 1 receipt input", () => {
     cleanup(prepared);
   });
 
-  it("keeps metadata-only support malformed when the lexical producer is malformed", async () => {
+  it("does not let a stale legacy proof add lexical authority", async () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
     const prepared = await preparedAuthority();
     const base = fineAssess(params(candidates));
@@ -266,8 +276,8 @@ describe("live Band 1 receipt input", () => {
       producer_outcomes: [
         {
           producer_id: "lex.interval",
-          status: "malformed",
-          contract_code: "authority_identity_mismatch"
+          status: "not_observed",
+          reason: "applicable_receipt_absent"
         },
         {
           producer_id: "support",
@@ -281,7 +291,7 @@ describe("live Band 1 receipt input", () => {
     cleanup(prepared);
   });
 
-  it("keeps absent, unavailable, and malformed producer states digest-distinct", async () => {
+  it("collapses fabricated legacy proof variants to the same explicit absence", async () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
     const prepared = await preparedAuthority();
     const common = {
@@ -295,14 +305,42 @@ describe("live Band 1 receipt input", () => {
       lexicalBoundProofs: [lexicalProof(prepared.snapshotVector.base_store_digest)]
     });
     const traces = [absent, unavailable, malformed].map((result) => captured(result.shadowTrace));
-    expect(traces.map((trace) => diagnostics(trace).observation_status)).toEqual([
-      "not_observed", "producer_unavailable", "malformed"
+    expect(traces.map((trace) => diagnostics(trace).producer_outcomes[0])).toEqual([
+      { producer_id: "lex.interval", status: "not_observed",
+        reason: "applicable_receipt_absent" },
+      { producer_id: "lex.interval", status: "not_observed",
+        reason: "applicable_receipt_absent" },
+      { producer_id: "lex.interval", status: "not_observed",
+        reason: "applicable_receipt_absent" }
     ]);
-    expect(new Set(traces.map((trace) => diagnostics(trace).digest))).toHaveLength(3);
+    expect(new Set(traces.map((trace) => diagnostics(trace).digest))).toHaveLength(1);
     expect(unavailable.candidates).toEqual(absent.candidates);
     expect(malformed.candidates).toEqual(absent.candidates);
     expect(unavailable.capture_receipt).toEqual(absent.capture_receipt);
     expect(malformed.capture_receipt).toEqual(absent.capture_receipt);
+    cleanup(prepared);
+  });
+
+  it("fails a mixed legacy proof collection closed without observing lexical intervals", async () => {
+    const candidates = fieldCandidates(["cand-a", "cand-b"]);
+    const prepared = await preparedAuthority();
+    const result = fineAssess({
+      ...params(candidates),
+      queryProofAuthority: authorityFrom(prepared),
+      lexicalBoundProofs: [
+        lexicalProof(prepared.snapshotVector.vector_digest),
+        absentLexicalBoundProof()
+      ]
+    });
+
+    expect(captured(result.shadowTrace).psi_v2_shadow).toMatchObject({
+      observation_status: "malformed",
+      producer_outcomes: expect.arrayContaining([{
+        producer_id: "lex.interval",
+        status: "malformed",
+        contract_code: "producer_contract_invalid"
+      }])
+    });
     cleanup(prepared);
   });
 
@@ -338,7 +376,11 @@ describe("live Band 1 receipt input", () => {
     expect(captured(result.shadowTrace).psi_v2_shadow).toMatchObject({
       observation_status: "malformed",
       producer_outcomes: [
-        { producer_id: "lex.interval", status: "not_observed", reason: "input_absent" },
+        {
+          producer_id: "lex.interval",
+          status: "not_observed",
+          reason: "applicable_receipt_absent"
+        },
         { producer_id: "support", status: "malformed", contract_code: expectedCode }
       ]
     });

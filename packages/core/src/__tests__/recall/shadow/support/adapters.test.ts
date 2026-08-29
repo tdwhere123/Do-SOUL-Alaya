@@ -103,6 +103,92 @@ describe("support receipt adapters", () => {
     expect(result.gaps.some((gap) => gap.kind === "binding_absent")).toBe(true);
   });
 
+  it.each([
+    ["variable_id", " \t"],
+    ["binding_identity", "\n"],
+    ["semantic_identity", " \t\n"],
+    ["evidence_id", "  "],
+    ["query_proposition_id", "\r\n"],
+    ["source_lineage_id", " \t"]
+  ] as const)("fails closed for a whitespace-only OSF %s", (field, value) => {
+    const result = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        osf: {
+          composition_status: "composed",
+          truncated: false,
+          bindings: [{
+            variable_id: "x",
+            binding_identity: "arg.person",
+            semantic_identity: "person.alice",
+            evidence_id: "eu-1",
+            query_proposition_id: "prop.works-at",
+            source_lineage_id: "lineage-a",
+            [field]: value
+          }]
+        }
+      }]
+    });
+
+    expect(result.graph.nodes.some((node) => node.kind === "answer_binding")).toBe(false);
+    expect(result.graph.edges.some((edge) => edge.kind === "expresses")).toBe(false);
+    expect(result.graph.edges.some((edge) => edge.kind === "yields")).toBe(false);
+    expect(result.graph.edges.some((edge) => edge.kind === "grounds")).toBe(false);
+    expect(result.graph.edges.some((edge) => edge.kind === "sourced_from")).toBe(false);
+    expect(result.gaps).toContainEqual(expect.objectContaining({
+      kind: "binding_absent",
+      owner: CAND,
+      detail: "OSF binding contains a blank identity"
+    }));
+  });
+
+  it("preserves exact valid OSF identity bytes", () => {
+    const semanticIdentity = " person.alice ";
+    const propositionId = " prop.works-at ";
+    const evidenceId = " eu-1 ";
+    const lineageId = " lineage-a ";
+    const result = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        osf: {
+          composition_status: "composed",
+          truncated: false,
+          bindings: [{
+            variable_id: " x ",
+            binding_identity: " arg.person ",
+            semantic_identity: semanticIdentity,
+            evidence_id: evidenceId,
+            query_proposition_id: propositionId,
+            source_lineage_id: lineageId
+          }]
+        }
+      }]
+    });
+
+    expect(result.graph.nodes).toEqual(expect.arrayContaining([
+      { kind: "answer_binding", id: semanticIdentity },
+      { kind: "proposition", id: propositionId },
+      { kind: "evidence_unit", id: evidenceId },
+      { kind: "source_lineage", id: lineageId }
+    ]));
+    expect(result.graph.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "expresses",
+        to: { kind: "answer_binding", id: semanticIdentity }
+      }),
+      expect.objectContaining({
+        kind: "yields",
+        from: { kind: "answer_binding", id: semanticIdentity },
+        to: { kind: "proposition", id: propositionId }
+      })
+    ]));
+    expect(result.gaps).toEqual([]);
+  });
+
   it("does not mint a proposition from a binding lemma when query_proposition_id is absent", () => {
     const result = materializeSupportFromReceipts({
       query_id: QUERY,

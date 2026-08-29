@@ -53,6 +53,15 @@ function adaptOsfBinding(
   candidateKey: string,
   binding: SupportOsfBindingV1
 ): void {
+  if (hasBlankOsfIdentity(binding)) {
+    addGap(
+      draft,
+      "binding_absent",
+      candidateKey,
+      "OSF binding contains a blank identity"
+    );
+    return;
+  }
   addNode(draft, "candidate_projection", candidateKey);
   addNode(draft, "evidence_unit", binding.evidence_id);
   recordOsfLineage(draft, binding);
@@ -88,8 +97,19 @@ function adaptOsfBinding(
 }
 
 function osfBindingId(binding: SupportOsfBindingV1): string | undefined {
-  if (binding.semantic_identity.length > 0) return binding.semantic_identity;
+  if (binding.semantic_identity.trim().length > 0) return binding.semantic_identity;
   return undefined;
+}
+
+function hasBlankOsfIdentity(binding: SupportOsfBindingV1): boolean {
+  return [
+    binding.variable_id,
+    binding.binding_identity,
+    binding.semantic_identity,
+    binding.evidence_id,
+    binding.query_proposition_id,
+    binding.source_lineage_id
+  ].some((identity) => identity !== undefined && identity.trim().length === 0);
 }
 
 function recordOsfLineage(draft: SupportDraft, binding: SupportOsfBindingV1): void {

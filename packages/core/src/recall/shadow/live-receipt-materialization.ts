@@ -3,14 +3,12 @@ import { buildRecallCandidateDedupeKey } from
   "../runtime/recall-service-helpers.js";
 import {
   admitLiveLexicalIntervalSources,
-  admitLiveLexicalProofs,
   liveQueryProofAuthorityFailureCode,
   verifyLiveQueryProofAuthority,
   type LiveQueryProofAuthorityFailureCode,
   type VerifiedLiveQueryProofPins
 } from "../runtime/query/live-query-proof-authority.js";
 import type { ShadowIntegrateInput } from "./integrate.js";
-import { d1LaneEnvelopes } from "./d1/legal-envelope.js";
 import {
   lexicalIntervalSourceEnvelopes
 } from "./measurement/lexical-interval-envelope.js";
@@ -184,81 +182,34 @@ function materializeLegacyLexicalIntervals(
   authorityState: AuthorityState
 ): ProducerResult<NonNullable<ShadowIntegrateInput["lexicalIntervalEnvelopesByKey"]>> {
   const values = params.lexicalBoundProofs;
-  if (values === undefined || values.length === 0) return absent("lex.interval");
+  if (values === undefined || values.length === 0) {
+    return authorityState.status === "verified"
+      ? notObserved("lex.interval", "applicable_receipt_absent")
+      : absent("lex.interval");
+  }
   const preflight = legacyLexicalPreflight(values, authorityState);
   if (preflight !== null) return preflight;
-  if (authorityState.status !== "verified") {
-    return malformed("lex.interval", "diagnostic_contract_failure");
-  }
-  const authority = authorityState.authority;
-  try {
-    const admitted = admitLiveLexicalProofs(authority, values);
-    if (admitted === undefined) return malformed("lex.interval", "producer_contract_invalid");
-    const proofs = admitted.filter((proof) =>
-      proof.status === "captured" && proof.field_prefix === "lexical_relaxed");
-    if (proofs.length !== 1) return unavailable("lex.interval", "source_unavailable");
-    const proof = proofs[0]!;
-    const pin = authority.expected_lexical_request_pins.find((candidate) =>
-      candidate.workspace_id === proof.identity.workspace_id &&
-      candidate.request_digest === proof.identity.request_digest &&
-      candidate.field_prefix === proof.field_prefix &&
-      candidate.candidate_key_domain === proof.candidate_key_domain
-    );
-    if (pin === undefined) return malformed("lex.interval", "measurement_identity_pin_absent");
-    const measurementAuthority = verifyMeasurementPreparedAuthorityV1({
-      evidence: { ...preparedEvidence(authority), lexical_request_pin: pin },
-      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT
-    });
-    const envelopes = Object.freeze(Object.fromEntries(params.candidates.map((candidate) => {
-      const key = buildRecallCandidateDedupeKey(candidate);
-      return [key, d1LaneEnvelopes(proof, key)];
-    })));
-    return Object.freeze({
-      payload: envelopes,
-      measurementAuthority,
-      outcome: observed("lex.interval")
-    });
-  } catch {
-    return malformed("lex.interval", "producer_contract_invalid");
-  }
+  return notObserved("lex.interval", "applicable_receipt_absent");
 }
 
 function legacyLexicalPreflight(
   values: NonNullable<FineAssessParams["lexicalBoundProofs"]>,
   authorityState: AuthorityState
 ): ProducerResult<never> | null {
-  if (values.length === 1 && values[0]?.status === "proof_absent") {
-    return unavailable("lex.interval", "source_unavailable");
+  if (values.every((proof) => proof.status === "proof_absent")) {
+    if (values.length !== 1) return malformed("lex.interval", "duplicate_receipt");
+    return authorityState.status === "verified"
+      ? notObserved("lex.interval", "applicable_receipt_absent")
+      : absent("lex.interval");
   }
   if (values.some((proof) => proof.status !== "captured")) {
     return malformed("lex.interval", "producer_contract_invalid");
   }
-  const keys = values.map((proof) => proof.status === "captured" ? [
-    proof.identity.workspace_id, proof.identity.request_digest,
-    proof.field_prefix, proof.candidate_key_domain
-  ].join("\u0000") : "");
-  if (new Set(keys).size !== keys.length) return malformed("lex.interval", "duplicate_receipt");
   const authorityFailure = failureForAuthority("lex.interval", authorityState);
   if (authorityFailure !== null) return authorityFailure;
   if (authorityState.status !== "verified") {
     return malformed("lex.interval", "diagnostic_contract_failure");
   }
-  const authority = authorityState.authority;
-  if (values.some((proof) => proof.status === "captured" &&
-      proof.identity.snapshot_digest !== authority.snapshot_vector.vector_digest)) {
-    return values.some((proof) => proof.status === "captured" &&
-      typeof proof.identity.snapshot_digest !== "string")
-      ? unavailable("lex.interval", "source_unavailable")
-      : malformed("lex.interval", "authority_identity_mismatch");
-  }
-  const expected = new Set(authority.expected_lexical_request_pins.map((pin) => [
-    pin.workspace_id, pin.request_digest, pin.field_prefix, pin.candidate_key_domain
-  ].join("\u0000")));
-  if (keys.some((key) => !expected.has(key))) {
-    return malformed("lex.interval", "authority_identity_mismatch");
-  }
-  if (keys.length < expected.size) return unavailable("lex.interval", "source_unavailable");
-  if (keys.length > expected.size) return malformed("lex.interval", "producer_contract_invalid");
   return null;
 }
 
