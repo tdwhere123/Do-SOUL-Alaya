@@ -1,10 +1,15 @@
 import { freezeShadow, ShadowContractError } from "../envelope.js";
+import { isZeroInterval, type FiniteInterval } from "../witness/shared/bounds.js";
 import { unionProvenance } from "../witness/shared/provenance.js";
 import {
   createNumericIntervalWitness,
+  exactEpistemic,
+  isKnownZeroEpistemic,
+  knownZeroEpistemic,
   type CorrelationState,
   type CorrelationWitness,
-  type NumericIntervalWitness
+  type NumericIntervalWitness,
+  type WitnessEpistemic
 } from "../witness/index.js";
 import type { MeasurementGroupContractV1 } from "./contract.js";
 import {
@@ -12,7 +17,8 @@ import {
   intersectIntervals,
   nestedInterval,
   provedLowerMaxInterval,
-  requireIntervals
+  requireIntervals,
+  type MeasurementIntervalResult
 } from "./operators.js";
 
 export type MeasurementCollapseInputV1 = Readonly<{
@@ -37,106 +43,190 @@ export type MeasurementCollapseV1 =
       readonly witness: NumericIntervalWitness;
     }>;
 
+type CollapsePass =
+  | MeasurementCollapseV1
+  | {
+      readonly status: "ok";
+      readonly observations: readonly NumericIntervalWitness[];
+    };
+
+type CoordinateDedupe =
+  | {
+      readonly status: "ok";
+      readonly observations: readonly NumericIntervalWitness[];
+    }
+  | { readonly status: "conflict" }
+  | { readonly status: "unresolved"; readonly reason: string };
+
 export function collapseMeasurementGroup(
   input: MeasurementCollapseInputV1
 ): MeasurementCollapseV1 {
   assertSameBinding(input.observations);
-  const exact = input.observations.filter((row) =>
-    row.domain === "numeric_interval" && row.epistemic.kind === "exact" && row.payload !== null
+  const partitioned = partitionForCollapse(input.observations);
+  if (partitioned.status !== "ok") return partitioned;
+  const correlated = applyCorrelation(
+    input.contract,
+    partitioned.observations,
+    input.correlations ?? []
+  );
+  if (correlated.status !== "ok") return correlated;
+  return combine(input.contract, correlated.observations);
+}
+
+function partitionForCollapse(
+  observations: readonly NumericIntervalWitness[]
+): CollapsePass {
+  if (observations.some((row) => row.epistemic.kind === "conflict")) {
+    return conflictFrom(observations);
+  }
+  if (observations.some(isApplicableUnknown)) {
+    return unresolved("applicable unknown observation blocks collapse", observations);
+  }
+  const exact = observations.filter((row) =>
+    row.domain === "numeric_interval" && row.epistemic.kind === "exact"
   );
   if (exact.length === 0) {
-    return unresolved("non-exact observation remains unresolved", input.observations);
+    return unresolved("non-exact observation remains unresolved", observations);
   }
-  const deduped = applyCorrelation(input.contract, exact, input.correlations ?? []);
-  if (deduped.status === "unresolved") return deduped;
-  return combine(input.contract, deduped.observations);
+  return { status: "ok", observations: exact };
+}
+
+function isApplicableUnknown(observation: NumericIntervalWitness): boolean {
+  const kind = observation.epistemic.kind;
+  return kind === "unavailable" || kind === "not_observed" || kind === "negative";
 }
 
 function applyCorrelation(
   contract: MeasurementGroupContractV1,
   observations: readonly NumericIntervalWitness[],
   correlations: readonly CorrelationWitness[]
-): Extract<MeasurementCollapseV1, { status: "unresolved" }> | {
-  readonly status: "ok";
-  readonly observations: readonly NumericIntervalWitness[];
-} {
+): CollapsePass {
   const unique = dedupeByCoordinate(observations);
-  if (contract.correlation_policy === "identity_dedupe") {
-    return { status: "ok", observations: unique };
+  if (unique.status !== "ok") {
+    return unique.status === "conflict"
+      ? conflictFrom(observations)
+      : unresolved(unique.reason, observations);
   }
-  const pairs = distinctCoordinates(unique);
-  for (const [left, right] of pairs) {
+  // identity_dedupe only drops duplicate coordinate_id rows. Distinct
+  // coordinates of the same binding still combine via combine_operator.
+  if (contract.correlation_policy === "identity_dedupe") {
+    return { status: "ok", observations: unique.observations };
+  }
+  return requireDeclaredCorrelation(contract, unique.observations, correlations);
+}
+
+function requireDeclaredCorrelation(
+  contract: MeasurementGroupContractV1,
+  observations: readonly NumericIntervalWitness[],
+  correlations: readonly CorrelationWitness[]
+): CollapsePass {
+  for (const [left, right] of distinctCoordinates(observations)) {
     const state = declaredCorrelation(left, right, correlations);
     if (state === undefined) {
-      return unresolved("unknown correlation blocks collapse", unique);
+      return unresolved("unknown correlation blocks collapse", observations);
     }
     if (state === "possibly_correlated" && contract.correlation_policy === "unknown_blocks") {
-      return unresolved("unknown correlation blocks collapse", unique);
+      return unresolved("unknown correlation blocks collapse", observations);
     }
   }
-  return { status: "ok", observations: unique };
+  return { status: "ok", observations };
 }
 
 function combine(
   contract: MeasurementGroupContractV1,
   observations: readonly NumericIntervalWitness[]
 ): MeasurementCollapseV1 {
-  try {
-    const witness = combineOperator(contract, observations);
-    if (witness.epistemic.kind === "conflict") {
-      return freezeShadow({ status: "conflict" as const, witness });
-    }
-    return freezeShadow({ status: "collapsed" as const, contract, witness });
-  } catch (error) {
-    if (error instanceof ShadowContractError && /nested|agreement|exact comparator/u.test(error.message)) {
-      return unresolved(error.message, observations);
-    }
-    throw error;
+  const bounded = observations.filter((row) => row.payload !== null);
+  if (bounded.length !== observations.length) {
+    return combineNullExact(contract, observations, bounded);
   }
+  return finishCombine(contract, observations, combineOperator(contract, observations));
+}
+
+function combineNullExact(
+  contract: MeasurementGroupContractV1,
+  observations: readonly NumericIntervalWitness[],
+  bounded: readonly NumericIntervalWitness[]
+): MeasurementCollapseV1 {
+  if (bounded.length > 0) return conflictFrom(observations);
+  const epistemic = preservedKnownZero(observations);
+  if (epistemic === "mismatch") {
+    return unresolved("completeness owner mismatch", observations);
+  }
+  if (epistemic === null) {
+    return unresolved("non-exact observation remains unresolved", observations);
+  }
+  return freezeShadow({
+    status: "collapsed" as const,
+    contract,
+    witness: createNumericIntervalWitness({
+      identity: collapsedIdentity(observations[0]!),
+      provenance: mergedProvenance(observations),
+      epistemic,
+      payload: null
+    })
+  });
+}
+
+function finishCombine(
+  contract: MeasurementGroupContractV1,
+  observations: readonly NumericIntervalWitness[],
+  result: MeasurementIntervalResult
+): MeasurementCollapseV1 {
+  if (result.status === "unresolved") return unresolved(result.reason, observations);
+  if (result.status === "conflict") return conflictFrom(observations);
+  const epistemic = collapsedEpistemic(observations, result.interval);
+  if (epistemic === "mismatch") {
+    return unresolved("completeness owner mismatch", observations);
+  }
+  return freezeShadow({
+    status: "collapsed" as const,
+    contract,
+    witness: assembleCollapsed(observations, result.interval, epistemic)
+  });
 }
 
 function combineOperator(
   contract: MeasurementGroupContractV1,
   observations: readonly NumericIntervalWitness[]
-): NumericIntervalWitness {
+): MeasurementIntervalResult {
   const intervals = requireIntervals(observations);
   if (contract.combine_operator === "identity_dedupe" ||
     contract.combine_operator === "exact_agreement") {
-    return assembleCollapsed(observations, identityDedupeIntervals(intervals));
+    return identityDedupeIntervals(intervals);
   }
-  if (contract.combine_operator === "bound_intersection" ||
-    contract.combine_operator === "existential_proof") {
-    const meet = contract.combine_operator === "existential_proof"
-      ? nestedInterval(intervals)
-      : intersectIntervals(intervals);
-    if (meet === "conflict") {
-      return assembleConflict(observations);
-    }
-    return assembleCollapsed(observations, meet);
+  if (contract.combine_operator === "bound_intersection") {
+    return intersectIntervals(intervals);
   }
-  return collapseLowerMax(contract, observations, intervals);
+  if (contract.combine_operator === "existential_proof") {
+    return nestedInterval(intervals);
+  }
+  return collapseLowerMax(contract, intervals);
 }
 
 function collapseLowerMax(
   contract: MeasurementGroupContractV1,
-  observations: readonly NumericIntervalWitness[],
   intervals: ReturnType<typeof requireIntervals>
-): NumericIntervalWitness {
+): MeasurementIntervalResult {
   if (contract.upper_bound_rule !== "interval_upper") {
-    throw new ShadowContractError("proved_lower_max cannot be an exact comparator without an upper-bound rule");
+    return {
+      status: "unresolved",
+      reason: "proved_lower_max requires a declared upper-bound rule"
+    };
   }
-  return assembleCollapsed(observations, provedLowerMaxInterval(intervals));
+  return provedLowerMaxInterval(intervals);
 }
 
 function assembleCollapsed(
   observations: readonly NumericIntervalWitness[],
-  payload: { readonly lower: number; readonly upper: number }
+  payload: FiniteInterval,
+  epistemic: WitnessEpistemic
 ): NumericIntervalWitness {
   const first = observations[0]!;
   return createNumericIntervalWitness({
     identity: collapsedIdentity(first),
     provenance: mergedProvenance(observations),
-    epistemic: { kind: "exact" },
+    epistemic,
     payload
   });
 }
@@ -151,6 +241,29 @@ function assembleConflict(
     epistemic: { kind: "conflict" },
     payload: null
   });
+}
+
+function collapsedEpistemic(
+  observations: readonly NumericIntervalWitness[],
+  interval: FiniteInterval
+): WitnessEpistemic | "mismatch" {
+  if (!isZeroInterval(interval)) return exactEpistemic();
+  return preservedKnownZero(observations) ?? exactEpistemic();
+}
+
+function preservedKnownZero(
+  observations: readonly NumericIntervalWitness[]
+): WitnessEpistemic | "mismatch" | null {
+  let owner: string | null = null;
+  let found = false;
+  for (const observation of observations) {
+    if (!isKnownZeroEpistemic(observation.epistemic)) continue;
+    const next = observation.epistemic.completeness.owner;
+    if (found && owner !== next) return "mismatch";
+    found = true;
+    owner = next;
+  }
+  return found && owner !== null ? knownZeroEpistemic(owner) : null;
 }
 
 function collapsedIdentity(first: NumericIntervalWitness): NumericIntervalWitness["identity"] {
@@ -186,7 +299,7 @@ function assertSameBinding(observations: readonly NumericIntervalWitness[]): voi
 
 function dedupeByCoordinate(
   observations: readonly NumericIntervalWitness[]
-): readonly NumericIntervalWitness[] {
+): CoordinateDedupe {
   const seen = new Map<string, NumericIntervalWitness>();
   for (const observation of observations) {
     const key = observation.identity.coordinate_id;
@@ -195,12 +308,34 @@ function dedupeByCoordinate(
       seen.set(key, observation);
       continue;
     }
-    if (previous.payload?.lower !== observation.payload?.lower ||
-      previous.payload?.upper !== observation.payload?.upper) {
-      throw new ShadowContractError("duplicate coordinate with conflicting exact values");
-    }
+    const merged = mergeDuplicateCoordinate(previous, observation);
+    if (merged === "conflict") return { status: "conflict" };
+    if (typeof merged === "string") return { status: "unresolved", reason: merged };
+    seen.set(key, merged);
   }
-  return Object.freeze([...seen.values()]);
+  return { status: "ok", observations: Object.freeze([...seen.values()]) };
+}
+
+function mergeDuplicateCoordinate(
+  previous: NumericIntervalWitness,
+  observation: NumericIntervalWitness
+): NumericIntervalWitness | "conflict" | "completeness owner mismatch" {
+  if (!samePayload(previous.payload, observation.payload)) return "conflict";
+  const previousKnown = isKnownZeroEpistemic(previous.epistemic);
+  const nextKnown = isKnownZeroEpistemic(observation.epistemic);
+  if (previousKnown && nextKnown &&
+    previous.epistemic.completeness.owner !== observation.epistemic.completeness.owner) {
+    return "completeness owner mismatch";
+  }
+  return nextKnown && !previousKnown ? observation : previous;
+}
+
+function samePayload(
+  left: NumericIntervalWitness["payload"],
+  right: NumericIntervalWitness["payload"]
+): boolean {
+  if (left === null || right === null) return left === right;
+  return left.lower === right.lower && left.upper === right.upper;
 }
 
 function distinctCoordinates(
@@ -229,6 +364,15 @@ function declaredCorrelation(
     }
   }
   return undefined;
+}
+
+function conflictFrom(
+  observations: readonly NumericIntervalWitness[]
+): Extract<MeasurementCollapseV1, { status: "conflict" }> {
+  return freezeShadow({
+    status: "conflict" as const,
+    witness: assembleConflict(observations)
+  });
 }
 
 function unresolved(
