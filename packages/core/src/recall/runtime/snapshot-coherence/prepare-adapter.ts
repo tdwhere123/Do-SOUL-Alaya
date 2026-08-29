@@ -1,6 +1,7 @@
 import type { ProjectionPin, QueryConditionReceipt } from "@do-soul/alaya-protocol";
 import type { FieldPrefix } from "../../field/retrieval/retrieval-field-bundle.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from "../../field/field-identity.js";
+import { CANONICAL_QUERY_OPERATOR_ID } from "../../query/canonical-query/types.js";
 import { isSnapshotDigest, unavailableProducerDigest } from "./digest.js";
 import { createSnapshotCoherenceReceiptV1 } from "./receipt.js";
 import { createSourceFrontierDeclaration } from "./source-frontier.js";
@@ -139,7 +140,7 @@ export function digestRecallDecisionContractV1(): RecallFieldDigest {
   return digestRecallFieldIdentity({
     kind: "recall_decision_contract_v1",
     snapshot_coherence_operator: SNAPSHOT_COHERENCE_OPERATOR_ID,
-    canonical_query_operator: "recall_canonical_query_v1"
+    canonical_query_operator: CANONICAL_QUERY_OPERATOR_ID
   });
 }
 

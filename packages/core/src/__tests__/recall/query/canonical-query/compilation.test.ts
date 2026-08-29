@@ -14,7 +14,8 @@ import {
   impactsFor,
   QUERY_HOLE_IMPACTS,
   verifyCanonicalQueryCompilationV1,
-  type CanonicalQueryCompilationV1
+  type CanonicalQueryCompilationV1,
+  type CanonicalQueryEvidenceV1
 } from "../../../../recall/query/canonical-query/index.js";
 
 const BOOKSHELF = "Where did I buy my new bookshelf from?";
@@ -111,11 +112,13 @@ describe("canonical query compilation holes", () => {
     expect(drifted.digest).not.toBe(first.digest);
     expect(first.operator_id).toBe("recall_canonical_query_v1");
     expect(first.query_identity).toEqual(QUERY_IDENTITY);
-    expect(() => verifyCanonicalQueryCompilationV1(first)).not.toThrow();
+    const firstEvidence = { probes, query_identity: QUERY_IDENTITY };
+    expect(() => verifyCanonicalQueryCompilationV1(first, firstEvidence, SNAPSHOT))
+      .not.toThrow();
     expect(() => verifyCanonicalQueryCompilationV1({
       ...first,
       digest: OTHER.receipt_digest
-    })).toThrow(/digest/u);
+    }, firstEvidence, SNAPSHOT)).toThrow(/digest/u);
     expect(first.hypotheses[0]?.answer.kind).toBe("scalar");
     expect(first.hypotheses[0]?.predicates.find((predicate) =>
       predicate.provenance?.source_id === "shape.relation_terms"
@@ -127,7 +130,10 @@ describe("canonical query compilation holes", () => {
   it("plants unknown_correlation for two fact frames and two OSF propositions", () => {
     const frames = compileCanonicalQueryCompilation({
       probes: compileRecallQueryProbes("How much is one bike?"),
-      factFrameCapture: returnedFactFrame([buyFrame(), visitFrame()])
+      factFrameCapture: returnedFactFrame(
+        [buyFrame(), visitFrame()],
+        "How much is one bike?"
+      )
     }, SNAPSHOT);
     expect(frames.holes.some((hole) => hole.code === "unknown_correlation")).toBe(true);
     const correlation = frames.holes.find((hole) => hole.code === "unknown_correlation");
@@ -173,7 +179,10 @@ describe("canonical query compilation holes", () => {
         scope: "scope-1",
         observer_universe: ["obs-1"]
       },
-      factFrameCapture: returnedFactFrame([buyFrame(), visitFrame()])
+      factFrameCapture: returnedFactFrame(
+        [buyFrame(), visitFrame()],
+        "How many places did I visit? 每天上班通勤要多久？"
+      )
     }, { ...SNAPSHOT, coherence_state: "unavailable" });
     expect(compiled.holes.length).toBeGreaterThan(1);
     expect(new Set(compiled.holes.map((hole) => hole.code)).size)
@@ -184,7 +193,7 @@ describe("canonical query compilation holes", () => {
     const remaining = new Set(compiled.holes.flatMap((hole) => hole.impacts));
     expect([...QUERY_HOLE_IMPACTS].every((impact) => remaining.has(impact))).toBe(true);
     expect(compiled.holes.some((hole) => hole.code === "count_sum_unsupported")).toBe(true);
-    expect(compiled.holes.some((hole) => hole.code === "unknown_relation")).toBe(true);
+    expect(compiled.holes.some((hole) => hole.code === "unknown_correlation")).toBe(true);
     expect(compiled.holes.some((hole) => hole.code === "ambiguous_cjk_segmentation"))
       .toBe(true);
     expect(compiled.holes.some((hole) => hole.code === "unknown_correlation")).toBe(true);
@@ -195,19 +204,26 @@ describe("canonical query compilation holes", () => {
   });
 
   it("rejects hole deletion and silent impact mutation after digest recompute", () => {
-    const compiled = compileCanonicalQueryCompilation({
-      probes: compileRecallQueryProbes("How many places did I visit?")
-    }, SNAPSHOT);
-    expect(compiled.holes.length).toBeGreaterThan(0);
-    expect(() => verifyCanonicalQueryCompilationV1(compiled)).not.toThrow();
-    const deleted = {
-      ...compiled,
-      holes: compiled.holes.slice(1)
+    const evidence: CanonicalQueryEvidenceV1 = {
+      probes: compileRecallQueryProbes("opaque question"),
+      demand: EMPTY_DEMAND,
+      shape: {
+        schema_version: 1,
+        status: "unknown",
+        shape: null,
+        target_terms: [],
+        relation_terms: []
+      }
     };
+    const compiled = compileCanonicalQueryCompilation(evidence, SNAPSHOT);
+    expect(compiled.holes.length).toBeGreaterThan(0);
+    expect(() => verifyCanonicalQueryCompilationV1(compiled, evidence, SNAPSHOT))
+      .not.toThrow();
+    const deleted = { ...compiled, holes: compiled.holes.slice(1) };
     expect(() => verifyCanonicalQueryCompilationV1({
       ...deleted,
       digest: digestRecallFieldIdentity(compilationBody(deleted))
-    })).toThrow(/hole disappeared|impact mismatch/u);
+    }, evidence, SNAPSHOT)).toThrow(/mismatch/u);
     const mutated = {
       ...compiled,
       holes: compiled.holes.map((hole, index) => index === 0
@@ -217,7 +233,28 @@ describe("canonical query compilation holes", () => {
     expect(() => verifyCanonicalQueryCompilationV1({
       ...mutated,
       digest: digestRecallFieldIdentity(compilationBody(mutated))
-    })).toThrow(/impact mismatch/u);
+    }, evidence, SNAPSHOT)).toThrow(/impact mismatch|mismatch/u);
+    const unavailable = { ...SNAPSHOT, coherence_state: "unavailable" as const };
+    const blocked = compileCanonicalQueryCompilation(evidence, unavailable);
+    const snapshotGone = {
+      ...blocked,
+      holes: blocked.holes.filter((hole) => hole.provenance !== "snapshot"),
+      compile_status: "unsupported" as const,
+      hypothetical_mode: "unsupported" as const
+    };
+    expect(() => verifyCanonicalQueryCompilationV1({
+      ...snapshotGone,
+      digest: digestRecallFieldIdentity(compilationBody(snapshotGone))
+    }, evidence, unavailable)).toThrow(/mismatch/u);
+    const coordinated = {
+      ...compiled,
+      unresolved: [],
+      holes: []
+    };
+    expect(() => verifyCanonicalQueryCompilationV1({
+      ...coordinated,
+      digest: digestRecallFieldIdentity(compilationBody(coordinated))
+    }, evidence, SNAPSHOT)).toThrow(/mismatch/u);
   });
 
   it("derives bounded decision effects only from Q_q", () => {
@@ -236,7 +273,7 @@ describe("canonical query compilation holes", () => {
       row.target === "probes" || row.target === "demand" || row.target === "shape"
     )).toBe(false);
     expect(compiled.sensitivities.some((row) =>
-      row.effect === "proposition_bound" && row.target === "buy"
+      row.effect === "proposition_bound" && row.target.endsWith(":buy")
     )).toBe(true);
     expect(compiled.sensitivities.some((row) => row.effect === "answer_binding")).toBe(true);
   });
@@ -274,13 +311,14 @@ describe("canonical query compilation holes", () => {
 });
 
 function returnedFactFrame(
-  frames: readonly RecallQueryFactFrameCaptureFrame[]
+  frames: readonly RecallQueryFactFrameCaptureFrame[],
+  queryText = BOOKSHELF
 ) {
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID,
     status: "returned" as const,
-    query_text_digest: digestRecallFieldIdentity({ query_text: BOOKSHELF }),
+    query_text_digest: digestRecallFieldIdentity({ query_text: queryText }),
     producer_operator_id: "structured_query_frame_v1",
     frames
   });

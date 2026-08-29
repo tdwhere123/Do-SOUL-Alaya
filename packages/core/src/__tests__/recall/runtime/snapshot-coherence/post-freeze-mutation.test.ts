@@ -87,6 +87,29 @@ describe("post-freeze mutable source isolation", () => {
     vi.restoreAllMocks();
   });
 
+  it("keeps frozen entries isolated from post-freeze source mutation", async () => {
+    const original = createMemoryEntry({
+      object_id: FROZEN_EVIDENCE_ID,
+      evidence_refs: [FROZEN_EVIDENCE_ID],
+      content: "frozen pin object",
+      facet_tags: [{ facet: "location_place", value: "seattle" }]
+    });
+    const findByEvidenceRefs = vi.fn(async () => [original]);
+    const prepared = await preparePinnedMemories([original], findByEvidenceRefs);
+    const loaded = prepared.fieldProjectionMemories[0];
+    expect(loaded?.content).toBe("frozen pin object");
+    original.content = "mutated after freeze";
+    (original.domain_tags as string[]).push("planted-tag");
+    const facet = original.facet_tags?.[0];
+    if (facet !== undefined) facet.value = "mutated";
+    expect(loaded?.content).toBe("frozen pin object");
+    expect(loaded?.domain_tags).toEqual(["repo"]);
+    expect(loaded?.facet_tags?.[0]?.value).toBe("seattle");
+    expect(Object.isFrozen(loaded)).toBe(true);
+    prepared.releaseProjectionPin();
+    prepared.projectionPinLease.stop();
+  });
+
   it("does not ingest live memory planted after Sigma_q freeze", async () => {
     const original = createMemoryEntry({
       object_id: FROZEN_EVIDENCE_ID,

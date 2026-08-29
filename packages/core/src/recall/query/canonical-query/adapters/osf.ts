@@ -1,9 +1,12 @@
 import {
   OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID,
+  verifyOpenSemanticFactorFormationCapture,
   type OpenSemanticFactorFormationCapture,
   type OpenSemanticFactorGraph,
   type OpenSemanticProposition
 } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "../../../../shared/field-hash.js";
+import type { RecallQueryProbes } from "../../recall-query-probes.js";
 import type {
   CanonicalAnswerProgramV1,
   CanonicalConstantV1,
@@ -11,6 +14,7 @@ import type {
 } from "../types.js";
 import {
   captureDigest,
+  entityConstantsFrom,
   naryPredicate,
   pushSupportedQuery,
   pushUnresolved,
@@ -20,28 +24,47 @@ import {
 export function adaptOsfCapture(
   capture: unknown,
   answer: CanonicalAnswerProgramV1 | null,
-  sink: AdapterSink
+  sink: AdapterSink,
+  probes: Readonly<RecallQueryProbes>
 ): void {
   if (capture === undefined || capture === null) return;
-  if (!isOsfCapture(capture)) {
-    pushUnadapted(capture, sink);
+  const verified = verifiedOsfCapture(capture);
+  if (verified === null) {
+    pushUnadapted(capture as object, sink);
     return;
   }
-  if (capture.status !== "formed" || capture.graph === null) {
-    pushUnadapted(capture, sink);
+  const expectedSource = probes.normalized_query === null
+    ? null
+    : `sha256:${fieldContractSha256(probes.normalized_query)}`;
+  if (verified.source_sha256 !== expectedSource) {
+    pushUnadapted(verified, sink);
     return;
   }
-  if (capture.graph.propositions.length > 1) {
+  if (verified.status !== "formed" || verified.graph === null) {
+    pushUnadapted(verified, sink);
+    return;
+  }
+  if (verified.graph.result_variable_ids.length !== 1) {
+    pushUnresolved(sink.unresolved, {
+      code: verified.graph.result_variable_ids.length === 0
+        ? "unknown_answer_variable"
+        : "unknown_correlation",
+      source: "osf",
+      capture_digest: captureDigest(verified)
+    });
+    return;
+  }
+  if (verified.graph.propositions.length > 1) {
     // Flattening a 2+ proposition graph would invent a v1 correlation partition.
     pushUnresolved(sink.unresolved, {
       code: "unknown_correlation",
       source: "osf",
-      capture_digest: captureDigest(capture)
+      capture_digest: captureDigest(verified)
     });
   }
   if (answer === null) return;
-  const adapted = adaptGraph(capture, capture.graph, answer, sink);
-  if (!adapted) pushUnadapted(capture, sink);
+  const adapted = adaptGraph(verified, verified.graph, answer, sink);
+  if (!adapted) pushUnadapted(verified, sink);
 }
 
 function adaptGraph(
@@ -101,20 +124,15 @@ function bindPropositionArguments(
 } | null {
   const ordered = [...proposition.arguments].sort((left, right) => left.position - right.position);
   const arguments_: string[] = [];
-  const constants: CanonicalConstantV1[] = [];
+  const factorValues: string[] = [];
   const variables: CanonicalVariableV1[] = [{ name: "x0", sort: "entity" }];
-  const constantNames = new Set<string>();
   const variableNames = new Set<string>(["x0"]);
   for (const argument of ordered) {
     if (argument.reference_kind === "factor") {
       const referenced = graph.factors.find((item) => item.factor_id === argument.reference_id);
       if (referenced === undefined || referenced.semantic_identity.length === 0) return null;
-      const name = referenced.semantic_identity;
-      if (!constantNames.has(name)) {
-        constantNames.add(name);
-        constants.push(Object.freeze({ name, sort: "entity" as const, value: name }));
-      }
-      arguments_.push(name);
+      factorValues.push(referenced.semantic_identity);
+      arguments_.push(referenced.semantic_identity);
       continue;
     }
     if (graph.result_variable_ids.includes(argument.reference_id)) {
@@ -127,7 +145,7 @@ function bindPropositionArguments(
     }
     arguments_.push(argument.reference_id);
   }
-  return { arguments: arguments_, variables, constants };
+  return { arguments: arguments_, variables, constants: entityConstantsFrom(factorValues) };
 }
 
 function pushUnadapted(capture: object, sink: AdapterSink): void {
@@ -139,10 +157,10 @@ function pushUnadapted(capture: object, sink: AdapterSink): void {
   });
 }
 
-function isOsfCapture(value: object): value is OpenSemanticFactorFormationCapture {
-  return "schema_version" in value
-    && "graph" in value
-    && "operator_id" in value
-    && "status" in value
-    && "capture_digest" in value;
+function verifiedOsfCapture(value: unknown): OpenSemanticFactorFormationCapture | null {
+  try {
+    return verifyOpenSemanticFactorFormationCapture(value, fieldContractSha256);
+  } catch {
+    return null;
+  }
 }

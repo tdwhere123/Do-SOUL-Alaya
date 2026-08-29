@@ -3,6 +3,8 @@ export const CANONICAL_QUERY_OPERATOR_ID = "recall_canonical_query_v1" as const;
 export const CANONICAL_QUERY_LIMITS = Object.freeze({
   max_variables: 8,
   max_predicates_and_constraints: 16,
+  max_constants: 16,
+  max_arguments: 8,
   max_extrema: 1,
   max_depth: 3
 });

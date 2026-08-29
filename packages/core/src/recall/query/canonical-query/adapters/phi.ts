@@ -40,12 +40,17 @@ export function naryPredicate(
   });
 }
 
-export function unaryPredicate(
-  id: string,
-  relation: string,
-  provenance: CanonicalEvidenceProvenanceV1
-): CanonicalPredicateV1 {
-  return naryPredicate(id, relation, ["x0"], provenance);
+export function entityConstantsFrom(
+  terms: readonly string[]
+): readonly CanonicalConstantV1[] {
+  const seen = new Set<string>();
+  const constants: CanonicalConstantV1[] = [];
+  for (const term of terms) {
+    if (term.length === 0 || term.trim() !== term || seen.has(term)) continue;
+    seen.add(term);
+    constants.push(Object.freeze({ name: term, sort: "entity" as const, value: term }));
+  }
+  return constants;
 }
 
 export function pushSupportedQuery(

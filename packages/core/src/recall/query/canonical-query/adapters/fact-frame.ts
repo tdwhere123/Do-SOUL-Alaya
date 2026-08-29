@@ -1,5 +1,6 @@
 import {
   QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID,
+  verifyRecallQueryFactFrameExtractionCapture,
   type RecallQueryFactFrameCaptureFrame,
   type RecallQueryFactFrameExtractionCapture
 } from "../../../field/query-attribution/query-fact-frame-attribution-producer.js";
@@ -9,6 +10,8 @@ import {
   semanticDemandKindForRole,
   type FactFrameSemanticFactor
 } from "../../../field/fact-frame-semantic-factors.js";
+import { digestRecallFieldIdentity } from "../../../field/field-identity.js";
+import type { RecallQueryProbes } from "../../recall-query-probes.js";
 import type {
   CanonicalAnswerProgramV1,
   CanonicalConstantV1,
@@ -16,6 +19,7 @@ import type {
 } from "../types.js";
 import {
   captureDigest,
+  entityConstantsFrom,
   naryPredicate,
   pushSupportedQuery,
   pushUnresolved,
@@ -27,28 +31,36 @@ const PRODUCER = QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID;
 export function adaptFactFrameCapture(
   capture: unknown,
   answer: CanonicalAnswerProgramV1 | null,
-  sink: AdapterSink
+  sink: AdapterSink,
+  probes: Readonly<RecallQueryProbes>
 ): void {
   if (capture === undefined || capture === null) return;
-  if (!isFactFrameCapture(capture)) {
-    pushUnadapted(capture, sink);
+  const verified = verifiedFactFrameCapture(capture);
+  if (verified === null) {
+    pushUnadapted(capture as object, sink);
     return;
   }
-  if (capture.status !== "returned" || capture.frames.length === 0) {
-    pushUnadapted(capture, sink);
+  if (verified.query_text_digest !== digestRecallFieldIdentity({
+    query_text: probes.normalized_query
+  })) {
+    pushUnadapted(verified, sink);
     return;
   }
-  if (capture.frames.length > 1) {
+  if (verified.status !== "returned" || verified.frames.length === 0) {
+    pushUnadapted(verified, sink);
+    return;
+  }
+  if (verified.frames.length > 1) {
     // v1 has no join lattice, so source order cannot pick one frame.
     pushUnresolved(sink.unresolved, {
       code: "unknown_correlation",
       source: "fact_frame",
-      capture_digest: captureDigest(capture)
+      capture_digest: captureDigest(verified)
     });
   }
   if (answer === null) return;
-  const adapted = adaptReturnedFrames(capture, answer, sink);
-  if (!adapted) pushUnadapted(capture, sink);
+  const adapted = adaptReturnedFrames(verified, answer, sink);
+  if (!adapted) pushUnadapted(verified, sink);
 }
 
 function adaptReturnedFrames(
@@ -102,9 +114,14 @@ function frameProgram(
   readonly predicates: readonly CanonicalPredicateV1[];
   readonly constants: readonly CanonicalConstantV1[];
 } | null {
-  const relation = factors.find((factor) => semanticDemandKindForRole(factor.role) === "relation");
-  if (relation === undefined || relation.normalized_text.length === 0) return null;
-  const constants = constantsFromEntities(factors);
+  const relations = factors.filter((factor) =>
+    semanticDemandKindForRole(factor.role) === "relation" && factor.normalized_text.length > 0
+  );
+  if (relations.length !== 1) return null;
+  const relation = relations[0]!;
+  const constants = entityConstantsFrom(factors.flatMap((factor) =>
+    semanticDemandKindForRole(factor.role) === "entity" ? [factor.normalized_text] : []
+  ));
   const arguments_ = [...constants.map((constant) => constant.name), "x0"];
   return {
     constants,
@@ -118,24 +135,6 @@ function frameProgram(
       }
     )]
   };
-}
-
-function constantsFromEntities(
-  factors: readonly FactFrameSemanticFactor[]
-): CanonicalConstantV1[] {
-  const seen = new Set<string>();
-  const constants: CanonicalConstantV1[] = [];
-  for (const factor of factors) {
-    if (semanticDemandKindForRole(factor.role) !== "entity") continue;
-    if (factor.normalized_text.length === 0 || seen.has(factor.normalized_text)) continue;
-    seen.add(factor.normalized_text);
-    constants.push(Object.freeze({
-      name: factor.normalized_text,
-      sort: "entity" as const,
-      value: factor.normalized_text
-    }));
-  }
-  return constants;
 }
 
 function pushTimeHoles(
@@ -164,11 +163,15 @@ function producerOf(capture: RecallQueryFactFrameExtractionCapture): string {
   return capture.operator_id.length > 0 ? capture.operator_id : PRODUCER;
 }
 
-function isFactFrameCapture(value: object): value is RecallQueryFactFrameExtractionCapture {
-  return "schema_version" in value
-    && "frames" in value
-    && Array.isArray((value as { readonly frames?: unknown }).frames)
-    && "operator_id" in value
-    && "status" in value
-    && "capture_digest" in value;
+function verifiedFactFrameCapture(
+  value: unknown
+): RecallQueryFactFrameExtractionCapture | null {
+  try {
+    verifyRecallQueryFactFrameExtractionCapture(
+      value as RecallQueryFactFrameExtractionCapture
+    );
+    return value as RecallQueryFactFrameExtractionCapture;
+  } catch {
+    return null;
+  }
 }

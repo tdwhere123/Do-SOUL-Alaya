@@ -6,6 +6,7 @@ import type { SnapshotCoherenceReceiptV1 } from
 import {
   CANONICAL_QUERY_OPERATOR_ID,
   type CanonicalAnswerProgramV1,
+  type CanonicalCompletionV1,
   type CanonicalQueryV1
 } from "./types.js";
 import {
@@ -115,15 +116,20 @@ export function compileCanonicalQueryCompilation(
 }
 
 export function verifyCanonicalQueryCompilationV1(
-  compilation: CanonicalQueryCompilationV1
+  compilation: CanonicalQueryCompilationV1,
+  evidence: CanonicalQueryEvidenceV1,
+  snapshot: Readonly<Pick<SnapshotCoherenceReceiptV1, "receipt_digest" | "coherence_state">>
 ): void {
   verifyHypotheses(compilation.hypotheses);
-  verifyRequiredHoles(compilation);
   verifyHoleImpacts(compilation.holes);
   verifyCompileDisposition(compilation);
   verifySensitivities(compilation);
   if (digestRecallFieldIdentity(compilationBody(compilation)) !== compilation.digest) {
     throw new Error("canonical query compilation digest mismatch");
+  }
+  const expected = compileCanonicalQueryCompilation(evidence, snapshot);
+  if (expected.digest !== compilation.digest) {
+    throw new Error("canonical query compilation evidence mismatch");
   }
 }
 
@@ -150,24 +156,6 @@ function verifyHypotheses(hypotheses: readonly CanonicalQueryV1[]): void {
   for (const hypothesis of hypotheses) {
     if (validateCanonicalQueryV1(hypothesis).status !== "supported") {
       throw new Error("canonical query compilation hypothesis invalid");
-    }
-  }
-}
-
-function verifyRequiredHoles(compilation: CanonicalQueryCompilationV1): void {
-  const required = [
-    ...compilation.unresolved.map((item) => holeFromUnresolved(item)),
-    ...completenessHoles(compilation.hypotheses)
-  ];
-  for (const hole of required) {
-    const found = compilation.holes.find((row) =>
-      row.code === hole.code && row.provenance === hole.provenance
-    );
-    if (found === undefined) {
-      throw new Error("canonical query compilation hole disappeared");
-    }
-    if (stableStringify([...found.impacts]) !== stableStringify([...hole.impacts])) {
-      throw new Error("canonical query compilation hole impact mismatch");
     }
   }
 }
@@ -335,11 +323,12 @@ function collectSensitivities(
   };
   for (const query of hypotheses) {
     collectAnswerSensitivities(query.answer, add);
-    for (const predicate of query.predicates) {
-      add("proposition_bound", predicate.relation);
-      predicate.arguments.forEach((argument, index) => {
+    for (const atom of [...query.predicates, ...query.constraints]) {
+      const relation = "relation" in atom ? atom.relation : atom.constraint;
+      add("proposition_bound", `${atom.id}:${relation}`);
+      atom.arguments.forEach((argument, index) => {
         if (isAnswerVariable(query.answer, argument)) {
-          add("answer_position", `${predicate.id}:${String(index)}`);
+          add("answer_position", `${atom.id}:${String(index)}`);
         }
       });
     }
@@ -357,7 +346,7 @@ function collectAnswerSensitivities(
     add("answer_binding", answer.variable);
   }
   if (answer.kind === "distinct" || answer.kind === "sequence") {
-    add("completion_scope", answer.completion.kind);
+    add("completion_scope", completionTarget(answer.completion));
   }
   if (answer.kind === "argmax" || answer.kind === "argmin" || answer.kind === "sequence") {
     add("extremum_range", answer.order_key);
@@ -372,4 +361,9 @@ function isAnswerVariable(answer: CanonicalAnswerProgramV1, name: string): boole
     return answer.variable === name;
   }
   return isAnswerVariable(answer.inner, name);
+}
+
+function completionTarget(completion: CanonicalCompletionV1): string {
+  if (completion.kind === "at_most") return `at_most:${String(completion.n)}`;
+  return `all_observable:${completion.scope}:${completion.observer_contract}`;
 }

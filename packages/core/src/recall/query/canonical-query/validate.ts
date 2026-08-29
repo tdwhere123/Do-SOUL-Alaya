@@ -53,7 +53,7 @@ export function createCanonicalQueryV1(input: CanonicalQueryInputV1 & {
   const constants = freezeConstants(input.constants ?? []);
   const predicates = freezePredicates(input.predicates ?? []);
   const constraints = freezeConstraints(input.constraints ?? []);
-  assertLimits(variables, predicates, constraints, input.answer);
+  assertLimits(variables, constants, predicates, constraints, input.answer);
   const names = bindNames(variables, constants);
   bindPhi(predicates, constraints, names);
   bindAnswer(input.answer, names, { extrema: 0, depth: 0 });
@@ -220,6 +220,7 @@ function uniqueAtomIds(
 
 function assertLimits(
   variables: readonly CanonicalVariableV1[],
+  constants: readonly CanonicalConstantV1[],
   predicates: readonly CanonicalPredicateV1[],
   constraints: readonly CanonicalConstraintV1[],
   answer: CanonicalAnswerProgramV1
@@ -227,9 +228,17 @@ function assertLimits(
   if (variables.length > CANONICAL_QUERY_LIMITS.max_variables) {
     throw new CanonicalQueryContractError("limit_overflow", "variables");
   }
+  if (constants.length > CANONICAL_QUERY_LIMITS.max_constants) {
+    throw new CanonicalQueryContractError("limit_overflow", "constants");
+  }
   if (predicates.length + constraints.length
     > CANONICAL_QUERY_LIMITS.max_predicates_and_constraints) {
     throw new CanonicalQueryContractError("limit_overflow", "phi");
+  }
+  for (const atom of [...predicates, ...constraints]) {
+    if (atom.arguments.length > CANONICAL_QUERY_LIMITS.max_arguments) {
+      throw new CanonicalQueryContractError("limit_overflow", "arguments");
+    }
   }
   if (answerDepth(answer) > CANONICAL_QUERY_LIMITS.max_depth) {
     throw new CanonicalQueryContractError("limit_overflow", "depth");

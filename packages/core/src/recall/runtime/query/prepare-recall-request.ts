@@ -38,8 +38,11 @@ import {
   PREPARE_RETRIEVAL_CHANNEL_OWNERS,
   capturePreparedSnapshotCoherenceReceipt
 } from "../snapshot-coherence/index.js";
-import { compileCanonicalQueryCompilation } from
-  "../../query/canonical-query/index.js";
+import {
+  compileCanonicalQueryCompilation,
+  verifyCanonicalQueryCompilationV1
+} from "../../query/canonical-query/index.js";
+import { deepFreeze } from "../../../shared/deep-freeze.js";
 
 export async function prepareRecallRequest(
   context: RecallExecutionContext,
@@ -127,7 +130,7 @@ function capturePinnedQueryWorld(
     formation_operator_versions: declaredFormationVersions(certified)
   });
   const baseProbes = compileRecallQueryProbes(queryText);
-  const canonicalQueryCompilation = compileCanonicalQueryCompilation({
+  const canonicalQueryEvidence = {
     probes: baseProbes,
     demand: compileRecallQueryDemand(baseProbes),
     shape: compileRecallAnswerShapePlan(baseProbes),
@@ -135,7 +138,16 @@ function capturePinnedQueryWorld(
     osfCapture: certified?.formation,
     observer: observerFromPinnedObjects(captured.receipt, observableObjectIds),
     query_identity: queryIdentityFromReceipt(captured.receipt)
-  }, snapshotCoherenceReceipt);
+  };
+  const canonicalQueryCompilation = compileCanonicalQueryCompilation(
+    canonicalQueryEvidence,
+    snapshotCoherenceReceipt
+  );
+  verifyCanonicalQueryCompilationV1(
+    canonicalQueryCompilation,
+    canonicalQueryEvidence,
+    snapshotCoherenceReceipt
+  );
   return { snapshotCoherenceReceipt, canonicalQueryCompilation };
 }
 
@@ -406,10 +418,11 @@ async function resolveFieldProjectionMemories(
   if (dependencies.memoryRepo.findByEvidenceRefs === undefined) {
     throw new Error("field projection candidates require evidence-bound memory lookup");
   }
-  return Object.freeze(await dependencies.memoryRepo.findByEvidenceRefs(
+  const loaded = await dependencies.memoryRepo.findByEvidenceRefs(
     workspaceId,
     evidenceObjectIds
-  ));
+  );
+  return Object.freeze(loaded.map((entry) => deepFreeze(structuredClone(entry))));
 }
 
 async function resolveWinnerMemoryIds(

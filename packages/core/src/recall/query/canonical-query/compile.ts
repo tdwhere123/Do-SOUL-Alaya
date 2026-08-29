@@ -75,11 +75,11 @@ export function compileCanonicalQueryEvidence(
   evidence: CanonicalQueryEvidenceV1
 ): CanonicalQueryCompileV1 {
   const sink = createSink(evidence);
-  const answer = resolveAnswer(sink.shape, evidence, sink.unresolved);
+  const answer = resolveAnswer(sink.shape, sink.demand, evidence, sink.unresolved);
   collectProbeHoles(evidence.probes, sink.unresolved);
   pushShapePrograms(sink, answer);
-  adaptFactFrameCapture(evidence.factFrameCapture, answer, sink);
-  adaptOsfCapture(evidence.osfCapture, answer, sink);
+  adaptFactFrameCapture(evidence.factFrameCapture, answer, sink, evidence.probes);
+  adaptOsfCapture(evidence.osfCapture, answer, sink, evidence.probes);
   pushOrderingHoles(sink.demand, sink.unresolved);
   sink.unresolved.push(...unadaptedDemandAtoms(sink.demand, sink.hypotheses));
   sink.unresolved.push(...unboundTargetTerms(sink.shape, sink.hypotheses));
@@ -104,10 +104,15 @@ function createSink(evidence: CanonicalQueryEvidenceV1): AdapterSink & {
 
 function resolveAnswer(
   shape: Readonly<RecallAnswerShapePlan>,
+  demand: Readonly<RecallQueryDemand>,
   evidence: CanonicalQueryEvidenceV1,
   unresolved: AdapterUnresolved[]
 ): CanonicalAnswerProgramV1 | null {
+  if (shape.shape === "count" || shape.shape === "sum" || shape.shape === "duration") {
+    return null;
+  }
   if (shape.shape !== "distinct_entities") {
+    if (demand.atoms.some((atom) => atom.kind === "ordering")) return null;
     return { kind: "scalar", variable: "x0" };
   }
   const answer = distinctAnswer(evidence);
@@ -204,6 +209,7 @@ function unboundTargetTerms(
   shape: Readonly<RecallAnswerShapePlan>,
   hypotheses: readonly CanonicalQueryV1[]
 ): CanonicalQueryUnresolvedV1[] {
+  if (shape.shape === "distinct_entities") return [];
   const used = usedHypothesisTokens(hypotheses);
   return shape.target_terms.flatMap((term) => used.has(term)
     ? []

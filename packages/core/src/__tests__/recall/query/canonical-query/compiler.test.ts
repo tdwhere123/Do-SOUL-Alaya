@@ -50,23 +50,23 @@ describe("canonical query compiler adapters", () => {
     expect(english.provenance).toContain("shape.relation_terms");
   });
 
-  it("certifies an explicit empty-demand English place program", () => {
+  it("keeps shape-only English place programs partial until targets bind", () => {
     const compiled = compileCanonicalQueryEvidence({
       probes: compileRecallQueryProbes(BOOKSHELF),
       demand: EMPTY_DEMAND
     });
     expect(compiled.hypotheses).toHaveLength(1);
     expect(compiled.hypotheses[0]?.answer.kind).toBe("scalar");
+    expect(compiled.hypotheses[0]?.predicates[0]?.arguments).toEqual(["x0"]);
     expect(relationOf(compiled, "shape.relation_terms")).toBe("buy");
-    expect(compiled.unresolved.some((row) => row.code === "unadapted_fact_frame"))
-      .toBe(false);
-    const certified = compileCanonicalQueryCompilation({
+    expect(compiled.unresolved.some((row) => row.code === "unbound_target_term")).toBe(true);
+    const partial = compileCanonicalQueryCompilation({
       probes: compileRecallQueryProbes(BOOKSHELF),
       demand: EMPTY_DEMAND,
       query_identity: QUERY_IDENTITY
     }, SNAPSHOT);
-    expect(certified.compile_status).toBe("certified_program");
-    expect(certified.holes).toEqual([]);
+    expect(partial.compile_status).toBe("partial_program");
+    expect(partial.holes.some((hole) => hole.code === "unbound_target_term")).toBe(true);
   });
 
   it("certifies a CJK place program from grounded shape tokens without jieba", () => {
@@ -84,6 +84,7 @@ describe("canonical query compiler adapters", () => {
     expect(compiled.hypotheses).toHaveLength(1);
     expect(compiled.hypotheses[0]?.answer.kind).toBe("scalar");
     expect(relationOf(compiled, "shape.relation_terms")).toBe("兑换");
+    expect(compiled.hypotheses[0]?.predicates[0]?.arguments).toEqual(["x0"]);
     const certified = compileCanonicalQueryCompilation({
       probes: compileRecallQueryProbes(CJK_PLACE),
       demand: EMPTY_DEMAND,
@@ -94,6 +95,11 @@ describe("canonical query compiler adapters", () => {
         target_terms: ["咖啡奶精优惠券"],
         relation_terms: ["兑换"]
       },
+      factFrameCapture: returnedFactFrame([captureFrame([
+        { role: "subject", text: "我" },
+        { role: "relation", text: "兑换" },
+        { role: "value", text: "咖啡奶精优惠券" }
+      ])], CJK_PLACE),
       query_identity: QUERY_IDENTITY
     }, SNAPSHOT);
     expect(certified.compile_status).toBe("certified_program");
@@ -161,6 +167,21 @@ describe("canonical query compiler adapters", () => {
     expect(dated.hypotheses).toEqual([]);
     expect(dated.unresolved.some((row) =>
       row.code === "latest_without_typed_time_key")).toBe(true);
+    const countWithFrame = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes("How many places did I visit?"),
+      demand: EMPTY_DEMAND,
+      factFrameCapture: returnedFactFrame([visitFrame()], "How many places did I visit?")
+    });
+    expect(countWithFrame.hypotheses).toEqual([]);
+    expect(countWithFrame.unresolved.some((row) => row.code === "count_sum_unsupported"))
+      .toBe(true);
+    const latestWithFrame = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes("What is the latest password?"),
+      factFrameCapture: returnedFactFrame([buyFrame()], "What is the latest password?")
+    });
+    expect(latestWithFrame.hypotheses).toEqual([]);
+    expect(latestWithFrame.unresolved.some((row) =>
+      row.code === "latest_without_typed_time_key")).toBe(true);
   });
 
   it("adapts a returned fact-frame relation into Phi with fact-frame provenance", () => {
@@ -198,11 +219,41 @@ describe("canonical query compiler adapters", () => {
     expect(compiled.unresolved.some((row) => row.code === "unadapted_osf")).toBe(false);
   });
 
+  it("does not flatten OSF graphs with 0 or 2+ result variables", () => {
+    const none = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND,
+      osfCapture: formedOsf(BOOKSHELF, 1, [])
+    });
+    expect(none.hypotheses.every((query) =>
+      query.predicates.every((predicate) =>
+        predicate.provenance?.source_id.startsWith("osf.relation.") !== true
+      )
+    )).toBe(true);
+    expect(none.unresolved.some((row) =>
+      row.code === "unknown_answer_variable" || row.code === "unadapted_osf")).toBe(true);
+    const many = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND,
+      osfCapture: formedOsf(BOOKSHELF, 1, ["answer", "other"])
+    });
+    expect(many.hypotheses.every((query) =>
+      query.predicates.every((predicate) =>
+        predicate.provenance?.source_id.startsWith("osf.relation.") !== true
+      )
+    )).toBe(true);
+    expect(many.unresolved.some((row) =>
+      row.code === "unknown_correlation" || row.code === "unadapted_osf")).toBe(true);
+  });
+
   it("does not flatten distinct to scalar when the observer is missing", () => {
     const compiled = compileCanonicalQueryEvidence({
       probes: compileRecallQueryProbes("How many different doctors did I visit?"),
       demand: EMPTY_DEMAND,
-      factFrameCapture: returnedFactFrame([buyFrame()])
+      factFrameCapture: returnedFactFrame(
+        [buyFrame()],
+        "How many different doctors did I visit?"
+      )
     });
     expect(compiled.unresolved.some((row) => row.code === "unknown_scope")).toBe(true);
     expect(compiled.hypotheses.every((query) => query.answer.kind !== "scalar")).toBe(true);
@@ -301,13 +352,14 @@ function relationOf(
 }
 
 function returnedFactFrame(
-  frames: readonly RecallQueryFactFrameCaptureFrame[]
+  frames: readonly RecallQueryFactFrameCaptureFrame[],
+  queryText = BOOKSHELF
 ) {
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID,
     status: "returned" as const,
-    query_text_digest: digestRecallFieldIdentity({ query_text: BOOKSHELF }),
+    query_text_digest: digestRecallFieldIdentity({ query_text: queryText }),
     producer_operator_id: "structured_query_frame_v1",
     frames
   });
@@ -330,6 +382,14 @@ function purchaseFrame(): RecallQueryFactFrameCaptureFrame {
   ]);
 }
 
+function visitFrame(): RecallQueryFactFrameCaptureFrame {
+  return captureFrame([
+    { role: "subject", text: "I" },
+    { role: "relation", text: "visit" },
+    { role: "value", text: "places" }
+  ]);
+}
+
 function captureFrame(
   slots: readonly { readonly role: "subject" | "relation" | "value"; readonly text: string }[]
 ): RecallQueryFactFrameCaptureFrame {
@@ -345,7 +405,11 @@ function captureFrame(
   };
 }
 
-function formedOsf(source: string, propositions: 1 | 2) {
+function formedOsf(
+  source: string,
+  propositions: 1 | 2,
+  resultVariableIds: readonly string[] = ["answer"]
+) {
   return materializeOpenSemanticFactorFormation({
     source_kind: "query",
     source_text: source,
@@ -353,12 +417,12 @@ function formedOsf(source: string, propositions: 1 | 2) {
       schema_version: 1,
       producer_operator_id: "open-factor-test-producer-v1",
       source_text: source,
-      graph: osfGraph(propositions)
+      graph: osfGraph(propositions, resultVariableIds)
     }
   });
 }
 
-function osfGraph(propositions: 1 | 2) {
+function osfGraph(propositions: 1 | 2, resultVariableIds: readonly string[] = ["answer"]) {
   const second = propositions === 2
     ? [{
         factor_id: "second",
@@ -385,8 +449,12 @@ function osfGraph(propositions: 1 | 2) {
       },
       ...second
     ],
-    variables: [{ variable_id: "answer", surface: "Where", source_occurrence: 0 }],
-    result_variable_ids: ["answer"],
+    variables: resultVariableIds.map((variable_id) => ({
+      variable_id,
+      surface: variable_id === "answer" ? "Where" : variable_id,
+      source_occurrence: 0
+    })),
+    result_variable_ids: [...resultVariableIds],
     propositions: [
       {
         proposition_id: "buy-query",

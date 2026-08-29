@@ -46,7 +46,11 @@ export function rejectUnsupportedShape(
     pushUnresolved(unresolved, { code: "conflicting_shape", source: "shape" });
     skip = true;
   }
-  if (shape.status === "high_confidence" && shape.relation_terms.length === 0) {
+  if (
+    shape.status === "high_confidence"
+    && shape.relation_terms.length === 0
+    && shape.shape !== "distinct_entities"
+  ) {
     pushUnresolved(unresolved, { code: "unknown_relation", source: "shape" });
   }
   if (shape.relation_terms.length > 8) {
@@ -64,28 +68,15 @@ export function shapeProgram(shape: Readonly<RecallAnswerShapePlan>): {
   readonly predicates: CanonicalPredicateV1[];
   readonly constants: CanonicalConstantV1[];
 } {
-  const constants = constantsFromTargets(shape.target_terms);
-  const arguments_ = [...constants.map((constant) => constant.name), "x0"];
   return {
-    constants,
+    constants: [],
     predicates: shape.relation_terms.map((relation, index) => naryPredicate(
       `shape_rel_${index}`,
       relation,
-      arguments_,
+      ["x0"],
       { source_id: "shape.relation_terms", producer: SHAPE_PRODUCER }
     ))
   };
-}
-
-function constantsFromTargets(terms: readonly string[]): CanonicalConstantV1[] {
-  const seen = new Set<string>();
-  const constants: CanonicalConstantV1[] = [];
-  for (const term of terms) {
-    if (term.length === 0 || term.trim() !== term || seen.has(term)) continue;
-    seen.add(term);
-    constants.push(Object.freeze({ name: term, sort: "entity" as const, value: term }));
-  }
-  return constants;
 }
 
 function hasCjkDurationForm(text: string): boolean {
