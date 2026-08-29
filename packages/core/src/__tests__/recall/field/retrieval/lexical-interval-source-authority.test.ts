@@ -34,6 +34,7 @@ describe("lexical interval source authority", () => {
         variant: "lexical_relaxed", queryText: "stable", limit: 1, scope: {}
       });
       [source] = readMemoryLexicalIntervalSources(bundle);
+      expect(source?.status).toBe("captured");
       expect(() => verifyLexicalIntervalSourceReceiptV1(source!)).not.toThrow();
       expect(admitLiveLexicalIntervalSources(
         authorityFor(prepared, source!, bundle), [source!]
@@ -297,7 +298,7 @@ function fieldResult() {
       query_run_id: "memory.keyword.depth:1", merge_limit: 1,
       lanes: Object.freeze([
         lane("exact", "matched_token_count", "empty"),
-        lane("porter", "bm25_raw_rank", "complete", 1),
+        lane("porter", "bm25_raw_rank", "truncated", 1),
         lane("object_key_porter", "bm25_raw_rank", "empty"),
         lane("trigram", "bm25_raw_rank", "empty"),
         lane("object_key_trigram", "bm25_raw_rank", "empty")
@@ -306,7 +307,8 @@ function fieldResult() {
         candidate_key: "hit", chosen_lane_id: "porter" as const,
         chosen_normalized_rank: 1, admitted: true
       })])
-    })
+    }),
+    lexical_raw_rank_receipt: rawRankReceipt()
   });
 }
 
@@ -329,8 +331,65 @@ function fieldLane(
 function lane(
   lane_id: "exact" | "porter" | "object_key_porter" | "trigram" | "object_key_trigram",
   raw_key_kind: "matched_token_count" | "bm25_raw_rank",
-  status: "empty" | "complete",
+  status: "empty" | "complete" | "truncated",
   list_n = 0
 ) {
   return Object.freeze({ lane_id, raw_key_kind, status, list_n });
+}
+
+function rawRankReceipt() {
+  const observed = Object.freeze({
+    candidate_key: "hit", raw_group_key: -1, lane_index: 0,
+    grouped_ordinal: 1, observation_state: "observed" as const
+  });
+  return Object.freeze({
+    schema_version: 1 as const,
+    receipt_id: "alaya.recall.x0.lexical-raw-rank.v1" as const,
+    producer_id: "alaya.storage.mergeKeywordSearchRows.v1" as const,
+    query_run_id: "memory.keyword.depth:1",
+    merge_limit: 1,
+    lanes: Object.freeze([
+      rawLane("exact", "matched_token_count", 0, []),
+      rawLane("porter", "bm25_raw_rank", 1, [observed]),
+      rawLane("object_key_porter", "bm25_raw_rank", 1, []),
+      rawLane("trigram", "bm25_raw_rank", 2, []),
+      rawLane("object_key_trigram", "bm25_raw_rank", 2, [])
+    ]),
+    candidates: Object.freeze([Object.freeze({
+      candidate_key: "hit",
+      lane_hits: Object.freeze([Object.freeze({
+        lane_id: "porter" as const, raw_group_key: -1,
+        grouped_ordinal: 1, lane_index: 0
+      })]),
+      admitted: true,
+      chosen_lane_id: "porter" as const,
+      chosen_normalized_rank: 1,
+      post_merge_index: 0,
+      discarded_lane_ids: Object.freeze([])
+    })]),
+    post_merge: Object.freeze([Object.freeze({
+      candidate_key: "hit", normalized_rank: 1
+    })])
+  });
+}
+
+function rawLane(
+  lane_id: "exact" | "porter" | "object_key_porter" | "trigram" | "object_key_trigram",
+  raw_key_kind: "matched_token_count" | "bm25_raw_rank",
+  source_priority: 0 | 1 | 2,
+  rows: readonly Readonly<{
+    readonly candidate_key: string;
+    readonly raw_group_key: number;
+    readonly lane_index: number;
+    readonly grouped_ordinal: number;
+    readonly observation_state: "observed";
+  }>[]
+) {
+  const status = rows.length === 0 ? "empty" as const : "truncated" as const;
+  return Object.freeze({
+    lane_id, raw_key_kind, source_priority,
+    applicability_source: "memory_fts_lane" as const,
+    list_n: rows.length, requested_limit: 1, status, rows: Object.freeze(rows),
+    unseen_upper_bound: status === "empty" ? 0 : rows.at(-1)!.grouped_ordinal
+  });
 }

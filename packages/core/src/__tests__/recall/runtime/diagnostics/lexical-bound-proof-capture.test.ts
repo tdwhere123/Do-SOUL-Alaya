@@ -6,6 +6,8 @@ import { verifyLexicalBoundProof } from
   "../../../../recall/runtime/diagnostics/lexical-bound-proof.js";
 import { capturesRecallAnswerFeatures } from
   "../../../../recall/runtime/recall-service-runner-types.js";
+import { unavailableProducerDigest } from
+  "../../../../recall/runtime/snapshot-coherence/index.js";
 import {
   completeReceipt,
   fieldResult,
@@ -51,6 +53,13 @@ describe("lexical bound proof capture path", () => {
     expect(supplied.searchByKeywordField).toHaveBeenCalledTimes(
       unavailable.searchByKeywordField.mock.calls.length
     );
+  });
+
+  it("rejects the reserved unavailable base-store digest on the live recall path", async () => {
+    await expect(recallWithLexicalDiagnostic(
+      unavailableProducerDigest("base_store"),
+      true
+    )).rejects.toMatchObject({ code: "malformed_digest" });
   });
 
   it("seals request and workspace from the retrieval bundle without inventing a snapshot", async () => {

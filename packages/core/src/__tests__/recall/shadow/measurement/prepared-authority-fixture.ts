@@ -210,7 +210,8 @@ export async function withCapturedLexicalMeasurementAuthorityFixture<T>(
         chosen_lane_id: "exact" as const,
         chosen_normalized_rank: candidate.normalized_rank
       })))
-    })
+    }),
+    lexical_raw_rank_receipt: exactProducerReceipt(candidates, limit)
   });
   const bundle = createRecallRetrievalFieldBundle({
     workspaceId: "workspace-1",
@@ -290,6 +291,77 @@ function populatedLexicalLane(
     status: list_n === 0
       ? "empty" as const
       : list_n === mergeLimit ? "truncated" as const : "complete" as const
+  });
+}
+
+function exactProducerReceipt(
+  candidates: readonly Readonly<{
+    readonly candidate_key: string;
+    readonly normalized_rank: number;
+  }>[],
+  mergeLimit: number
+) {
+  const rows = Object.freeze(candidates.map((candidate, index) => Object.freeze({
+    candidate_key: candidate.candidate_key,
+    raw_group_key: candidate.normalized_rank,
+    lane_index: index,
+    grouped_ordinal: candidate.normalized_rank,
+    observation_state: "observed" as const
+  })));
+  return Object.freeze({
+    schema_version: 1 as const,
+    receipt_id: "alaya.recall.x0.lexical-raw-rank.v1" as const,
+    producer_id: "alaya.storage.mergeKeywordSearchRows.v1" as const,
+    query_run_id: "measurement-authority-captured-fixture",
+    merge_limit: mergeLimit,
+    lanes: Object.freeze([
+      producerLane("exact", "matched_token_count", 0, rows, mergeLimit),
+      producerLane("porter", "bm25_raw_rank", 1, [], mergeLimit),
+      producerLane("object_key_porter", "bm25_raw_rank", 1, [], mergeLimit),
+      producerLane("trigram", "bm25_raw_rank", 2, [], mergeLimit),
+      producerLane("object_key_trigram", "bm25_raw_rank", 2, [], mergeLimit)
+    ]),
+    candidates: Object.freeze(candidates.map((candidate, index) => Object.freeze({
+      candidate_key: candidate.candidate_key,
+      lane_hits: Object.freeze([Object.freeze({
+        lane_id: "exact" as const,
+        raw_group_key: candidate.normalized_rank,
+        grouped_ordinal: candidate.normalized_rank,
+        lane_index: index
+      })]),
+      admitted: true,
+      chosen_lane_id: "exact" as const,
+      chosen_normalized_rank: candidate.normalized_rank,
+      post_merge_index: index,
+      discarded_lane_ids: Object.freeze([])
+    }))),
+    post_merge: Object.freeze(candidates.map((candidate) => Object.freeze({
+      candidate_key: candidate.candidate_key,
+      normalized_rank: candidate.normalized_rank
+    })))
+  });
+}
+
+function producerLane(
+  lane_id: "exact" | "porter" | "object_key_porter" | "trigram" | "object_key_trigram",
+  raw_key_kind: "matched_token_count" | "bm25_raw_rank",
+  source_priority: 0 | 1 | 2,
+  rows: readonly Readonly<{
+    readonly candidate_key: string;
+    readonly raw_group_key: number;
+    readonly lane_index: number;
+    readonly grouped_ordinal: number;
+    readonly observation_state: "observed";
+  }>[],
+  requested_limit: number
+) {
+  const status = rows.length === 0 ? "empty" as const
+    : rows.length >= requested_limit ? "truncated" as const : "complete" as const;
+  return Object.freeze({
+    lane_id, raw_key_kind, source_priority,
+    applicability_source: "memory_fts_lane" as const,
+    list_n: rows.length, requested_limit, status, rows: Object.freeze(rows),
+    unseen_upper_bound: status === "truncated" ? rows.at(-1)!.grouped_ordinal : 0
   });
 }
 

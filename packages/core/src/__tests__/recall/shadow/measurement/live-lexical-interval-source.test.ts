@@ -22,6 +22,10 @@ import type {
   KeywordLexicalMergeCapture,
   KeywordSearchFieldResult
 } from "../../../../recall/runtime/recall-service-types.js";
+import type {
+  LexicalBoundLaneId,
+  LexicalBoundProducerReceipt
+} from "../../../../recall/runtime/recall-search-port-types.js";
 import { fieldCandidates } from "../canonical-delivery-fixtures.js";
 import {
   authorityFrom,
@@ -236,7 +240,8 @@ async function source(
     memoryRepo: { searchByKeywordField: async () => Object.freeze({
       matches,
       lanes: normalLanes(matches),
-      lexical_raw_rank
+      lexical_raw_rank,
+      lexical_raw_rank_receipt: producerReceipt(lexical_raw_rank, matches)
     }) }
   });
   return await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
@@ -331,7 +336,8 @@ function capture(
       lane("exact", "matched_token_count", 0, "empty"),
       lane(
         "porter", "bm25_raw_rank", candidates.length,
-        candidates.length === 0 ? "empty" : "complete"
+        candidates.length === 0 ? "empty"
+          : candidates.length >= 2 ? "truncated" : "complete"
       ),
       lane("object_key_porter", "bm25_raw_rank", 0, "empty"),
       lane("trigram", "bm25_raw_rank", 0, "empty"),
@@ -361,4 +367,88 @@ function candidate(candidate_key: string, rank: number, admitted: boolean) {
 
 function match(object_id: string, normalized_rank: number) {
   return Object.freeze({ object_id, normalized_rank });
+}
+
+function producerReceipt(
+  captureValue: Readonly<KeywordLexicalMergeCapture>,
+  matches: Readonly<KeywordSearchFieldResult>["matches"]
+): LexicalBoundProducerReceipt {
+  const lanes = captureValue.lanes.map((lane) => producerLane(lane, captureValue));
+  return Object.freeze({
+    schema_version: 1,
+    receipt_id: "alaya.recall.x0.lexical-raw-rank.v1",
+    producer_id: "alaya.storage.mergeKeywordSearchRows.v1",
+    query_run_id: captureValue.query_run_id,
+    merge_limit: captureValue.merge_limit,
+    lanes: Object.freeze(lanes),
+    candidates: Object.freeze(captureValue.candidates.map((candidate) => {
+      const hit = candidate.chosen_lane_id === null || candidate.chosen_normalized_rank === null
+        ? null
+        : rawHit(candidate.chosen_lane_id, candidate.candidate_key,
+          candidate.chosen_normalized_rank, captureValue);
+      return Object.freeze({
+        ...candidate,
+        lane_hits: Object.freeze(hit === null ? [] : [hit]),
+        post_merge_index: matches.findIndex((match) => match.object_id === candidate.candidate_key),
+        discarded_lane_ids: Object.freeze([])
+      });
+    })),
+    post_merge: Object.freeze(matches.map((match) => Object.freeze({
+      candidate_key: match.object_id, normalized_rank: match.normalized_rank
+    })))
+  });
+}
+
+function producerLane(
+  laneValue: KeywordLexicalMergeCapture["lanes"][number],
+  captureValue: Readonly<KeywordLexicalMergeCapture>
+) {
+  const rows = captureValue.candidates.flatMap((candidate) =>
+    candidate.chosen_lane_id === laneValue.lane_id &&
+      candidate.chosen_normalized_rank !== null
+      ? [rawRow(candidate.candidate_key, candidate.chosen_normalized_rank, rowsFor(
+        captureValue, laneValue.lane_id
+      ).indexOf(candidate))]
+      : []
+  );
+  return Object.freeze({
+    ...laneValue,
+    source_priority: lanePriority(laneValue.lane_id),
+    applicability_source: "memory_fts_lane" as const,
+    requested_limit: captureValue.merge_limit,
+    rows: Object.freeze(rows),
+    unseen_upper_bound: laneValue.status === "truncated"
+      ? rows.at(-1)?.grouped_ordinal ?? 0 : 0
+  });
+}
+
+function rowsFor(captureValue: Readonly<KeywordLexicalMergeCapture>, laneId: LexicalBoundLaneId) {
+  return captureValue.candidates.filter((candidate) => candidate.chosen_lane_id === laneId);
+}
+
+function rawRow(candidate_key: string, grouped_ordinal: number, lane_index: number) {
+  return Object.freeze({
+    candidate_key, raw_group_key: -grouped_ordinal, lane_index, grouped_ordinal,
+    observation_state: "observed" as const
+  });
+}
+
+function rawHit(
+  lane_id: LexicalBoundLaneId,
+  candidateKey: string,
+  groupedOrdinal: number,
+  captureValue: Readonly<KeywordLexicalMergeCapture>
+) {
+  const laneIndex = rowsFor(captureValue, lane_id).findIndex(
+    (candidate) => candidate.candidate_key === candidateKey
+  );
+  return Object.freeze({
+    lane_id, raw_group_key: -groupedOrdinal,
+    grouped_ordinal: groupedOrdinal, lane_index: laneIndex
+  });
+}
+
+function lanePriority(laneId: LexicalBoundLaneId): 0 | 1 | 2 {
+  if (laneId === "exact") return 0;
+  return laneId === "porter" || laneId === "object_key_porter" ? 1 : 2;
 }
