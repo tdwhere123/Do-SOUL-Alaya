@@ -1,11 +1,10 @@
 import { freezeShadow, ShadowContractError } from "../envelope.js";
-import { isZeroInterval, type FiniteInterval } from "../witness/shared/bounds.js";
+import type { FiniteInterval } from "../witness/shared/bounds.js";
 import { unionProvenance } from "../witness/shared/provenance.js";
 import {
   createNumericIntervalWitness,
   exactEpistemic,
   isKnownZeroEpistemic,
-  knownZeroEpistemic,
   type CorrelationState,
   type CorrelationWitness,
   type NumericIntervalWitness,
@@ -148,28 +147,15 @@ function combine(
 }
 
 function combineNullExact(
-  contract: MeasurementGroupContractV1,
+  _contract: MeasurementGroupContractV1,
   observations: readonly NumericIntervalWitness[],
   bounded: readonly NumericIntervalWitness[]
 ): MeasurementCollapseV1 {
   if (bounded.length > 0) return conflictFrom(observations);
-  const epistemic = preservedKnownZero(observations);
-  if (epistemic === "mismatch") {
-    return unresolved("completeness owner mismatch", observations);
-  }
-  if (epistemic === null) {
-    return unresolved("non-exact observation remains unresolved", observations);
-  }
-  return freezeShadow({
-    status: "collapsed" as const,
-    contract,
-    witness: createNumericIntervalWitness({
-      identity: collapsedIdentity(observations[0]!),
-      provenance: mergedProvenance(observations),
-      epistemic,
-      payload: null
-    })
-  });
+  return unresolved(
+    "source-coordinate completeness does not authorize collapsed absence",
+    observations
+  );
 }
 
 function finishCombine(
@@ -179,14 +165,10 @@ function finishCombine(
 ): MeasurementCollapseV1 {
   if (result.status === "unresolved") return unresolved(result.reason, observations);
   if (result.status === "conflict") return conflictFrom(observations);
-  const epistemic = collapsedEpistemic(observations, result.interval);
-  if (epistemic === "mismatch") {
-    return unresolved("completeness owner mismatch", observations);
-  }
   return freezeShadow({
     status: "collapsed" as const,
     contract,
-    witness: assembleCollapsed(observations, result.interval, epistemic)
+    witness: assembleCollapsed(observations, result.interval, exactEpistemic())
   });
 }
 
@@ -245,29 +227,6 @@ function assembleConflict(
     epistemic: { kind: "conflict" },
     payload: null
   });
-}
-
-function collapsedEpistemic(
-  observations: readonly NumericIntervalWitness[],
-  interval: FiniteInterval
-): WitnessEpistemic | "mismatch" {
-  if (!isZeroInterval(interval)) return exactEpistemic();
-  return preservedKnownZero(observations) ?? exactEpistemic();
-}
-
-function preservedKnownZero(
-  observations: readonly NumericIntervalWitness[]
-): WitnessEpistemic | "mismatch" | null {
-  let owner: string | null = null;
-  let found = false;
-  for (const observation of observations) {
-    if (!isKnownZeroEpistemic(observation.epistemic)) continue;
-    const next = observation.epistemic.completeness.owner;
-    if (found && owner !== next) return "mismatch";
-    found = true;
-    owner = next;
-  }
-  return found && owner !== null ? knownZeroEpistemic(owner) : null;
 }
 
 function collapsedIdentity(first: NumericIntervalWitness): NumericIntervalWitness["identity"] {
@@ -337,13 +296,14 @@ function dedupeByCoordinate(
 function mergeDuplicateCoordinate(
   previous: NumericIntervalWitness,
   observation: NumericIntervalWitness
-): NumericIntervalWitness | "conflict" | "completeness owner mismatch" {
+): NumericIntervalWitness | "conflict" | "completeness receipt mismatch" {
   if (!samePayload(previous.payload, observation.payload)) return "conflict";
   const previousKnown = isKnownZeroEpistemic(previous.epistemic);
   const nextKnown = isKnownZeroEpistemic(observation.epistemic);
   if (previousKnown && nextKnown &&
-    previous.epistemic.completeness.owner !== observation.epistemic.completeness.owner) {
-    return "completeness owner mismatch";
+    previous.epistemic.completeness.receipt_digest !==
+      observation.epistemic.completeness.receipt_digest) {
+    return "completeness receipt mismatch";
   }
   const selected = nextKnown && !previousKnown ? observation : previous;
   return createNumericIntervalWitness({

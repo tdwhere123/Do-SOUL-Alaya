@@ -95,16 +95,17 @@ export {
   type EnvelopeWitnessFrame
 } from "./envelope-adapter.js";
 export {
+  assertCompletenessApplies,
+  parseCompleteness
+} from "./shared/completeness.js";
+export {
   completenessOwner,
   conflictEpistemic,
   exactEpistemic,
   freezeEpistemic,
   isKnownZeroEpistemic,
   isUnknownEpistemic,
-  knownZeroEpistemic,
-  parseCompleteness,
   parseEpistemic,
-  WITNESS_FORBIDDEN_COMPLETENESS_OWNERS
 } from "./shared/epistemic.js";
 export {
   assembleWitness,

@@ -16,11 +16,11 @@ import type { PreparedRecallRequest } from
   "../../../../recall/runtime/recall-service-runner-types.js";
 import type { LexDomain } from "../../../../recall/shadow/observations.js";
 import {
-  comparePsiV2,
-  peelPsiV2Frontiers,
+  comparePsiV2 as comparePsiV2WithAuthorities,
+  peelPsiV2Frontiers as peelPsiV2FrontiersWithAuthorities,
   psiV2CandidateFromLexicalEnvelope,
   psiV2CycleCount,
-  psiV2Dominates,
+  psiV2Dominates as psiV2DominatesWithAuthorities,
   rawMissingFamilyFragment,
   type PsiV2CandidateV1
 } from "../../../../recall/shadow/psi-v2/index.js";
@@ -59,6 +59,17 @@ let prepared: PreparedRecallRequest;
 let authority: VerifiedMeasurementAuthorityV1;
 let ENVELOPE_IDENTITY: D1EnvelopeIdentity;
 let TEST_ENVELOPE_IDENTITY: D1EnvelopeIdentity;
+
+const comparePsiV2 = (
+  left: PsiV2CandidateV1,
+  right: PsiV2CandidateV1
+) => comparePsiV2WithAuthorities(left, right, [authority]);
+const psiV2Dominates = (
+  left: PsiV2CandidateV1,
+  right: PsiV2CandidateV1
+) => psiV2DominatesWithAuthorities(left, right, [authority]);
+const peelPsiV2Frontiers = (candidates: readonly PsiV2CandidateV1[]) =>
+  peelPsiV2FrontiersWithAuthorities(candidates, [authority]);
 
 describe("proposition Psi v2", () => {
   beforeAll(async () => {

@@ -79,6 +79,30 @@ describe("support receipt adapters", () => {
     });
   });
 
+  it("does not substitute a binding role for an absent semantic identity", () => {
+    const result = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        osf: {
+          composition_status: "composed",
+          truncated: false,
+          bindings: [{
+            variable_id: "x",
+            binding_identity: "agent",
+            semantic_identity: "",
+            evidence_id: "eu-1",
+            query_proposition_id: "prop.works-at"
+          }]
+        }
+      }]
+    });
+    expect(result.graph.nodes.some((node) => node.kind === "answer_binding")).toBe(false);
+    expect(result.graph.edges.some((edge) => edge.kind === "yields")).toBe(false);
+    expect(result.gaps.some((gap) => gap.kind === "binding_absent")).toBe(true);
+  });
+
   it("does not mint a proposition from a binding lemma when query_proposition_id is absent", () => {
     const result = materializeSupportFromReceipts({
       query_id: QUERY,

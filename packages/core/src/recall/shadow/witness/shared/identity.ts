@@ -8,13 +8,17 @@ import type {
 } from "./types.js";
 
 const OPTIONAL_PINS = [
+  "observer_id",
   "candidate_id",
+  "universe_digest",
   "proposition_id"
 ] as const;
 
+type OptionalIdentityPin = (typeof OPTIONAL_PINS)[number];
+
 export function parseIdentityPins(
   input: WitnessIdentityPins,
-  requiredExtra: readonly ("candidate_id" | "proposition_id")[] = []
+  requiredExtra: readonly OptionalIdentityPin[] = []
 ): WitnessIdentityPins {
   const pins: Record<string, string> = {
     coordinate_id: requireNonemptyString(input.coordinate_id, "coordinate_id"),
@@ -53,7 +57,9 @@ export function identityKey(pins: WitnessIdentityPins): string {
     pins.coordinate_id,
     pins.query_id,
     pins.snapshot_digest,
+    pinOrEmpty(pins.observer_id),
     pinOrEmpty(pins.candidate_id),
+    pinOrEmpty(pins.universe_digest),
     pinOrEmpty(pins.proposition_id)
   ].join("\0");
 }
@@ -64,7 +70,7 @@ export function freezeIdentity(pins: WitnessIdentityPins): WitnessIdentityPins {
 
 function presentOptionalPins(
   pins: WitnessIdentityPins
-): readonly ("candidate_id" | "proposition_id")[] {
+): readonly OptionalIdentityPin[] {
   return OPTIONAL_PINS.filter((key) => pins[key] !== undefined);
 }
 

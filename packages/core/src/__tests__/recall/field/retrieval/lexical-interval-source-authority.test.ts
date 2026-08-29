@@ -52,6 +52,67 @@ describe("lexical interval source authority", () => {
     cleanup(prepared);
   });
 
+  it("does not transfer requested-view authority to the maximum view", async () => {
+    const prepared = await capturedLexicalPreparedAuthority();
+    const requested = createRecallRetrievalFieldBundle({
+      workspaceId: "workspace-1", queryText: "stable",
+      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+    });
+    const maximum = requested.forObservationView("maximum");
+    await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
+      bindRetrievalFieldBundleReadAuthority(
+        requested, prepared.snapshotReadLease, capability
+      );
+      await requested.searchMemoryKeyword({
+        variant: "lexical_relaxed", queryText: "stable", limit: 1, scope: {}
+      });
+      expect(readMemoryLexicalIntervalSources(requested)).toHaveLength(1);
+      expect(readMemoryLexicalIntervalSources(maximum)).toEqual([]);
+    });
+    cleanup(prepared);
+  });
+
+  it("does not transfer maximum-view authority to the requested view", async () => {
+    const prepared = await capturedLexicalPreparedAuthority();
+    const requested = createRecallRetrievalFieldBundle({
+      workspaceId: "workspace-1", queryText: "stable",
+      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+    });
+    const maximum = requested.forObservationView("maximum");
+    await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
+      bindRetrievalFieldBundleReadAuthority(
+        maximum, prepared.snapshotReadLease, capability
+      );
+      await maximum.searchMemoryKeyword({
+        variant: "lexical_relaxed", queryText: "stable", limit: 1, scope: {}
+      });
+      expect(readMemoryLexicalIntervalSources(maximum)).toHaveLength(1);
+      expect(readMemoryLexicalIntervalSources(requested)).toEqual([]);
+    });
+    cleanup(prepared);
+  });
+
+  it("does not grant authority to a bundle object clone", async () => {
+    const prepared = await capturedLexicalPreparedAuthority();
+    const bundle = createRecallRetrievalFieldBundle({
+      workspaceId: "workspace-1", queryText: "stable",
+      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+    });
+    const clone = Object.freeze({ ...bundle });
+    await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
+      bindRetrievalFieldBundleReadAuthority(bundle, prepared.snapshotReadLease, capability);
+      await bundle.searchMemoryKeyword({
+        variant: "lexical_relaxed", queryText: "stable", limit: 1, scope: {}
+      });
+      expect(readMemoryLexicalIntervalSources(bundle)).toHaveLength(1);
+      expect(readMemoryLexicalIntervalSources(clone)).toEqual([]);
+      expect(() => bindRetrievalFieldBundleReadAuthority(
+        clone, prepared.snapshotReadLease, capability
+      )).toThrow(/authority is missing/u);
+    });
+    cleanup(prepared);
+  });
+
   it("rejects a genuine receipt after rollback revokes its issuer", async () => {
     const prepared = await capturedLexicalPreparedAuthority();
     const bundle = createRecallRetrievalFieldBundle({

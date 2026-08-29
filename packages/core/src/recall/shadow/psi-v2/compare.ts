@@ -6,6 +6,7 @@ import {
   validateMeasurementAdmissionV1,
   type MeasurementCollapseV1,
   type MeasurementComparisonDirectionV1,
+  type CurrentMeasurementAuthoritiesV1,
   type PropositionStateCollapseV1
 } from "../measurement/index.js";
 import { lexDomainsEqual } from "../observations.js";
@@ -27,12 +28,13 @@ type VoteTally = {
 
 export function comparePsiV2(
   left: PsiV2CandidateV1,
-  right: PsiV2CandidateV1
+  right: PsiV2CandidateV1,
+  currentAuthorities: CurrentMeasurementAuthoritiesV1
 ): PsiV2VerdictV1 {
   if (left.candidate_id === right.candidate_id) {
     return verdict("equal", "irreflexive identity pair is not dominance");
   }
-  const votes = propositionVotes(left, right);
+  const votes = propositionVotes(left, right, currentAuthorities);
   if (votes.blocked.length > 0) return verdict("blocked", ...votes.blocked);
   if (votes.incomparable.length > 0) {
     return verdict("incomparable", ...votes.incomparable);
@@ -46,13 +48,24 @@ export function comparePsiV2(
   return verdict("incomparable", "no comparable collapsed proposition");
 }
 
-export function psiV2Dominates(left: PsiV2CandidateV1, right: PsiV2CandidateV1): boolean {
-  return comparePsiV2(left, right).kind === "dominates";
+export function psiV2Dominates(
+  left: PsiV2CandidateV1,
+  right: PsiV2CandidateV1,
+  currentAuthorities: CurrentMeasurementAuthoritiesV1
+): boolean {
+  return comparePsiV2(left, right, currentAuthorities).kind === "dominates";
 }
 
-function propositionVotes(left: PsiV2CandidateV1, right: PsiV2CandidateV1): VoteTally {
+function propositionVotes(
+  left: PsiV2CandidateV1,
+  right: PsiV2CandidateV1,
+  currentAuthorities: CurrentMeasurementAuthoritiesV1
+): VoteTally {
   const tally: VoteTally = { gt: 0, lt: 0, eq: 0, blocked: [], incomparable: [] };
-  tally.blocked.push(...candidateBindingFailures(left), ...candidateBindingFailures(right));
+  tally.blocked.push(
+    ...candidateBindingFailures(left, currentAuthorities),
+    ...candidateBindingFailures(right, currentAuthorities)
+  );
   if (tally.blocked.length > 0) return tally;
   const ids = new Set([
     ...left.coordinates.map((row) => row.proposition_id),
@@ -67,7 +80,10 @@ function propositionVotes(left: PsiV2CandidateV1, right: PsiV2CandidateV1): Vote
   return tally;
 }
 
-function candidateBindingFailures(candidate: PsiV2CandidateV1): string[] {
+function candidateBindingFailures(
+  candidate: PsiV2CandidateV1,
+  currentAuthorities: CurrentMeasurementAuthoritiesV1
+): string[] {
   const failures: string[] = [];
   const ids = new Set<string>();
   for (const coordinate of candidate.coordinates) {
@@ -82,6 +98,7 @@ function candidateBindingFailures(candidate: PsiV2CandidateV1): string[] {
     }
     const validation = validateMeasurementAdmissionV1({
       admission: coordinate.admission,
+      current_authorities: currentAuthorities,
       contract: coordinate.collapse.contract,
       proposition_schema: coordinate.proposition_schema,
       collapse: coordinate.collapse
@@ -155,6 +172,7 @@ function sameAdmittedCoordinateJurisdiction(
     leftAdmission.operator_version === rightAdmission.operator_version &&
     leftAdmission.proposition_schema === rightAdmission.proposition_schema &&
     leftAdmission.proposition_id === rightAdmission.proposition_id &&
+    leftAdmission.authority_digest === rightAdmission.authority_digest &&
     leftAdmission.query_id === rightAdmission.query_id &&
     leftAdmission.snapshot_digest === rightAdmission.snapshot_digest &&
     leftAdmission.request_digest === rightAdmission.request_digest &&

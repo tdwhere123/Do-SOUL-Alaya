@@ -7,13 +7,12 @@ import {
   createNumericIntervalWitness,
   type NumericIntervalWitness
 } from "./domains/numeric.js";
-import type { WitnessCompleteness, WitnessIdentityPins, WitnessProvenanceEntry } from
+import type { WitnessIdentityPins, WitnessProvenanceEntry } from
   "./shared/types.js";
 
 export type EnvelopeWitnessFrame = Readonly<{
   readonly identity: WitnessIdentityPins;
   readonly provenance: readonly WitnessProvenanceEntry[];
-  readonly completeness?: WitnessCompleteness;
 }>;
 
 export function witnessFromShadowEnvelope(
@@ -25,11 +24,7 @@ export function witnessFromShadowEnvelope(
     return numericFrame(frame, { kind: "negative", named_negative: envelope.named_consumer });
   }
   if (envelope.state === "required_but_missing") {
-    return numericFrame(frame, {
-      kind: "exact",
-      known_zero: true,
-      completeness: { owner: envelope.witnesses.completeness_owner }
-    });
+    return numericFrame(frame, { kind: "not_observed" });
   }
   if (envelope.state === "not_applicable") {
     return numericFrame(frame, { kind: "not_applicable" });
@@ -48,17 +43,6 @@ function mapObserved(
   frame: EnvelopeWitnessFrame
 ): NumericIntervalWitness {
   const value = envelope.value;
-  if (value === 0 && frame.completeness !== undefined) {
-    return createNumericIntervalWitness({
-      identity: frame.identity,
-      provenance: frame.provenance,
-      epistemic: { kind: "exact", known_zero: true, completeness: frame.completeness },
-      payload: { lower: 0, upper: 0 }
-    });
-  }
-  if (value !== 0 && frame.completeness !== undefined) {
-    throw new ShadowContractError("completeness witness does not apply to nonzero exact");
-  }
   return createNumericIntervalWitness({
     identity: frame.identity,
     provenance: frame.provenance,

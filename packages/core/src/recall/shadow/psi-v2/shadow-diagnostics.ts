@@ -115,8 +115,9 @@ export function buildPsiV2ShadowDiagnostics(
     return finish(unobservedBody(input, producerOutcomes));
   }
   const candidates = candidatesFrom(input, producerOutcomes);
-  const peeled = peelPsiV2Frontiers(candidates);
-  const pairShares = pairSharesOf(candidates);
+  const currentAuthorities = measurementAuthorities(input);
+  const peeled = peelPsiV2Frontiers(candidates, currentAuthorities);
+  const pairShares = pairSharesOf(candidates, currentAuthorities);
   const cycleCount = psiV2CycleCount(peeled);
   const frontierWidth = isPsiCycleFailure(peeled) ? 0 : peeled.layers.length;
   const undominated = isPsiCycleFailure(peeled)
@@ -385,9 +386,12 @@ function rawFragmentVeto(
   if (maps === undefined) return false;
   const byId = new Map(candidates.map((row) => [row.candidate_id, row]));
   const keys = input.candidate_keys;
+  const currentAuthorities = measurementAuthorities(input);
   for (let i = 0; i < keys.length; i += 1) {
     for (let j = i + 1; j < keys.length; j += 1) {
-      if (pairRawFragmentVeto(keys[i]!, keys[j]!, maps, byId)) return true;
+      if (pairRawFragmentVeto(
+        keys[i]!, keys[j]!, maps, byId, currentAuthorities
+      )) return true;
     }
   }
   return false;
@@ -397,7 +401,8 @@ function pairRawFragmentVeto(
   leftKey: string,
   rightKey: string,
   maps: Readonly<Record<string, D1CandidateEnvelopeMap>>,
-  byId: ReadonlyMap<string, PsiV2CandidateV1>
+  byId: ReadonlyMap<string, PsiV2CandidateV1>,
+  currentAuthorities: readonly VerifiedMeasurementAuthorityV1[]
 ): boolean {
   const leftMap = maps[leftKey];
   const rightMap = maps[rightKey];
@@ -407,10 +412,13 @@ function pairRawFragmentVeto(
     return false;
   }
   if (!rawMissingFamilyFragment(leftMap, rightMap)) return false;
-  return comparePsiV2(left, right).kind === "blocked";
+  return comparePsiV2(left, right, currentAuthorities).kind === "blocked";
 }
 
-function pairSharesOf(candidates: readonly PsiV2CandidateV1[]): {
+function pairSharesOf(
+  candidates: readonly PsiV2CandidateV1[],
+  currentAuthorities: readonly VerifiedMeasurementAuthorityV1[]
+): {
   blocked: number;
   incomparable: number;
   tradeoff: number;
@@ -424,7 +432,7 @@ function pairSharesOf(candidates: readonly PsiV2CandidateV1[]): {
   for (let i = 0; i < candidates.length; i += 1) {
     for (let j = i + 1; j < candidates.length; j += 1) {
       pairs += 1;
-      const kind = comparePsiV2(candidates[i]!, candidates[j]!).kind;
+      const kind = comparePsiV2(candidates[i]!, candidates[j]!, currentAuthorities).kind;
       if (kind === "blocked") blocked += 1;
       if (kind === "incomparable") incomparable += 1;
       if (kind === "tradeoff") tradeoff += 1;
@@ -437,6 +445,15 @@ function pairSharesOf(candidates: readonly PsiV2CandidateV1[]): {
     tradeoff: share(tradeoff, pairs),
     equal: share(equal, pairs)
   };
+}
+
+function measurementAuthorities(
+  input: PsiV2ShadowInputV1
+): readonly VerifiedMeasurementAuthorityV1[] {
+  return Object.freeze([
+    input.lexical_measurement_authority,
+    input.support_measurement_authority
+  ].filter((authority): authority is VerifiedMeasurementAuthorityV1 => authority !== undefined));
 }
 
 function share(count: number, total: number): number {

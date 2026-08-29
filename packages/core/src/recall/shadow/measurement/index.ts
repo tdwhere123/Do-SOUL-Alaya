@@ -24,6 +24,7 @@ export {
   type MeasurementAdmissionV1,
   type MeasurementAdmissionValidationV1,
   type MeasurementCoordinateIdentityV1,
+  type CurrentMeasurementAuthoritiesV1,
   type PreparedMeasurementAuthorityEvidenceV1,
   type VerifiedMeasurementAuthorityV1
 } from "./admission.js";

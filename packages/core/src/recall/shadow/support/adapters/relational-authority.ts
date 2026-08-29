@@ -1,5 +1,6 @@
 import { digestRecallFieldIdentity } from "../../../field/field-identity.js";
 import {
+  finalizePreparedSnapshotReadLease,
   readSnapshotLeaseCapability,
   verifySnapshotCoherenceReceiptV1
 } from "../../../runtime/snapshot-coherence/index.js";
@@ -112,7 +113,7 @@ function matchesSnapshotAuthority(
 ): boolean {
   const vector = context.snapshot_vector;
   const lease = context.read_lease;
-  return lease.state === "finalized"
+  return matchesFinalizedLease(context)
     && lease.vector_digest === vector.vector_digest
     && receipt.query_id === input.query_id
     && receipt.snapshot_digest === input.snapshot_digest
@@ -123,6 +124,16 @@ function matchesSnapshotAuthority(
     && receipt.transaction_frontier === vector.transaction_frontier
     && receipt.principal === lease.principal
     && lease.authorized_scopes.includes(receipt.authorized_scope);
+}
+
+function matchesFinalizedLease(context: AuthorityContext): boolean {
+  try {
+    const expected = finalizePreparedSnapshotReadLease(context.snapshot_vector);
+    return expected.lease_id === context.read_lease.lease_id
+      && digestRecallFieldIdentity(expected) === digestRecallFieldIdentity(context.read_lease);
+  } catch {
+    return false;
+  }
 }
 
 function matchesCapability(

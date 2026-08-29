@@ -89,7 +89,6 @@ function adaptOsfBinding(
 
 function osfBindingId(binding: SupportOsfBindingV1): string | undefined {
   if (binding.semantic_identity.length > 0) return binding.semantic_identity;
-  if (binding.binding_identity.length > 0) return binding.binding_identity;
   return undefined;
 }
 

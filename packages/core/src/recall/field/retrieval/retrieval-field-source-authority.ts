@@ -31,12 +31,14 @@ type AuthorityState = {
   readonly records: RecordedFieldResult[];
   readonly authenticatedRecords: WeakMap<object, AuthenticatedRecordAuthority>;
   binding?: Readonly<{
+    bundle: Readonly<RecallRetrievalFieldBundle>;
     lease: SnapshotReadLeaseV1;
     capability: ActiveRecallReadCapability;
   }>;
 };
 
 type AuthenticatedRecordAuthority = Readonly<{
+  bundle: Readonly<RecallRetrievalFieldBundle>;
   capability: ActiveRecallReadCapability;
   sourceCapability: SnapshotReadLeaseCapabilityV1;
   snapshot_digest: NonNullable<SnapshotReadLeaseV1["vector_digest"]>;
@@ -81,7 +83,7 @@ export function bindRetrievalFieldBundleReadAuthority(
   if (state.binding !== undefined) {
     throw new TypeError("retrieval field bundle read authority is already bound");
   }
-  state.binding = Object.freeze({ lease, capability });
+  state.binding = Object.freeze({ bundle, lease, capability });
 }
 
 export async function withRetrievalFieldReadAuthority<T>(
@@ -110,6 +112,7 @@ export function authenticateValidatedRetrievalFieldRecord(
   const sourceCapability = readEligibleSourceCapability(binding.lease, record);
   if (sourceCapability === undefined) return;
   state.authenticatedRecords.set(record, Object.freeze({
+    bundle: binding.bundle,
     capability: binding.capability,
     sourceCapability,
     snapshot_digest: binding.lease.vector_digest
@@ -123,12 +126,14 @@ export function readMemoryLexicalIntervalSources(
   if (authority === undefined) return Object.freeze([]);
   const state = requireState(authority);
   const binding = state.binding;
-  if (binding === undefined || !isActiveRecallReadCapability(binding.capability) ||
+  if (binding === undefined || binding.bundle !== bundle ||
+      !isActiveRecallReadCapability(binding.capability) ||
       binding.lease.vector_digest === null) return Object.freeze([]);
   const snapshotDigest = binding.lease.vector_digest;
   const receipts = state.records.flatMap((record) => {
     const provenance = state.authenticatedRecords.get(record);
     if (!isLexicalRecord(record) || provenance === undefined ||
+        provenance.bundle !== bundle ||
         provenance.capability !== binding.capability ||
         provenance.snapshot_digest !== snapshotDigest ||
         !binding.lease.capabilities.includes(provenance.sourceCapability) ||

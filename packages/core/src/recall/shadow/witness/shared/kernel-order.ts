@@ -1,6 +1,5 @@
 import { ShadowContractError } from "../../envelope.js";
 import {
-  completenessOwner,
   isKnownZeroEpistemic,
   isUnknownEpistemic
 } from "./epistemic.js";
@@ -117,7 +116,8 @@ function exactLeq<K extends WitnessDomainKind, P>(
     return false;
   }
   if (isKnownZeroEpistemic(wide.epistemic) && isKnownZeroEpistemic(narrow.epistemic) &&
-    completenessOwner(wide.epistemic) !== completenessOwner(narrow.epistemic)) {
+    wide.epistemic.completeness.receipt_digest !==
+      narrow.epistemic.completeness.receipt_digest) {
     return false;
   }
   return payloadInformationLeq(ops, wide.payload, narrow.payload);

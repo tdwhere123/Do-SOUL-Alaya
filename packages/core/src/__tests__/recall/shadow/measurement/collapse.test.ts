@@ -9,7 +9,8 @@ import {
   type NumericIntervalWitness,
   type WitnessEpistemic
 } from "../../../../recall/shadow/witness/index.js";
-import { COMPLETE, PINS, PROV, PROV_EXTENDED } from "../witness/fixtures.js";
+import { PINS, PROV, PROV_EXTENDED, UNISSUED_COMPLETENESS } from
+  "../witness/fixtures.js";
 
 const BASE = {
   contract_id: "measure.support.v1",
@@ -133,22 +134,20 @@ describe("measurement group collapse", () => {
     }).status).toBe("conflict");
   });
 
-  it("preserves known_zero completeness on a collapsed exact zero", () => {
+  it("does not leak source-coordinate completeness onto a collapsed coordinate", () => {
     const contract = createMeasurementGroupContractV1({
       ...BASE,
       combine_operator: "bound_intersection"
     });
+    expect(() => knownZero("c1")).toThrow(/issued completeness authority/u);
     const collapsed = collapseMeasurementGroup({
       contract,
-      observations: [knownZero("c1"), numeric("c2", 0, 10)]
+      observations: [numeric("c1", 0, 0), numeric("c2", 0, 10)]
     });
     expect(collapsed.status).toBe("collapsed");
     if (collapsed.status === "collapsed") {
       expect(collapsed.witness.payload).toEqual({ lower: 0, upper: 0 });
-      expect(isKnownZeroEpistemic(collapsed.witness.epistemic)).toBe(true);
-      if (isKnownZeroEpistemic(collapsed.witness.epistemic)) {
-        expect(collapsed.witness.epistemic.completeness).toEqual(COMPLETE);
-      }
+      expect(isKnownZeroEpistemic(collapsed.witness.epistemic)).toBe(false);
     }
     const plainZero = collapseMeasurementGroup({
       contract,
@@ -157,20 +156,6 @@ describe("measurement group collapse", () => {
     expect(plainZero.status).toBe("collapsed");
     if (plainZero.status === "collapsed") {
       expect(isKnownZeroEpistemic(plainZero.witness.epistemic)).toBe(false);
-    }
-    const absence = knownZero("c3", null);
-    expect(collapseMeasurementGroup({
-      contract,
-      observations: [numeric("c1", 0, 10), absence]
-    }).status).toBe("conflict");
-    const onlyAbsence = collapseMeasurementGroup({
-      contract,
-      observations: [absence]
-    });
-    expect(onlyAbsence.status).toBe("collapsed");
-    if (onlyAbsence.status === "collapsed") {
-      expect(onlyAbsence.witness.payload).toBeNull();
-      expect(isKnownZeroEpistemic(onlyAbsence.witness.epistemic)).toBe(true);
     }
   });
 
@@ -281,14 +266,22 @@ function knownZero(
   coordinate: string,
   payload: { lower: number; upper: number } | null = { lower: 0, upper: 0 }
 ): NumericIntervalWitness {
+  const identity = {
+    ...PINS,
+    coordinate_id: coordinate,
+    proposition_id: "prop-1"
+  };
   return createNumericIntervalWitness({
-    identity: {
-      ...PINS,
-      coordinate_id: coordinate,
-      proposition_id: "prop-1"
-    },
+    identity,
     provenance: PROV,
-    epistemic: { kind: "exact", known_zero: true, completeness: COMPLETE },
+    epistemic: {
+      kind: "exact",
+      known_zero: true,
+      completeness: {
+        ...UNISSUED_COMPLETENESS,
+        coordinate_id: identity.coordinate_id
+      }
+    },
     payload
   });
 }

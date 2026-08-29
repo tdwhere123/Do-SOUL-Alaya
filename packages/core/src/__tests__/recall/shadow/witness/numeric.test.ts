@@ -12,7 +12,7 @@ import {
   type NumericIntervalWitness,
   type WitnessEpistemic
 } from "../../../../recall/shadow/witness/index.js";
-import { COMPLETE, PINS, PROV, PROV_EXTENDED, pins } from "./fixtures.js";
+import { PINS, PROV, PROV_EXTENDED, UNISSUED_COMPLETENESS, pins } from "./fixtures.js";
 import { assertMonotoneRefinement, assertPoset } from "./order-properties.js";
 
 function numeric(
@@ -35,10 +35,6 @@ describe("numeric interval domain", () => {
   const mid = numeric(EXACT, { lower: 2, upper: 5 });
   const tight = numeric(EXACT, { lower: 3, upper: 4 });
   const zero = numeric(EXACT, { lower: 0, upper: 0 });
-  const knownZero = numeric(
-    { kind: "exact", known_zero: true, completeness: COMPLETE },
-    { lower: 0, upper: 0 }
-  );
   const other = numeric(EXACT, { lower: 20, upper: 21 });
   const missing = numeric({ kind: "not_observed" }, null);
   const unavailable = numeric({ kind: "unavailable" }, null);
@@ -48,7 +44,7 @@ describe("numeric interval domain", () => {
 
   it("has a reflexive antisymmetric transitive information order", () => {
     assertPoset([
-      observed, mid, tight, zero, knownZero, other, missing, unavailable,
+      observed, mid, tight, zero, other, missing, unavailable,
       notApplicable, negative, conflict
     ], numericInformationLeq);
   });
@@ -98,14 +94,14 @@ describe("numeric interval domain", () => {
     const met = meetNumericInterval(zero, other);
     expect(met.epistemic.kind).toBe("conflict");
     expect(serializeWitness(met)).not.toContain("known_zero");
-    expect(serializeWitness(zero)).not.toBe(serializeWitness(knownZero));
   });
 
-  it("keeps exact zero distinct from unknown and known_zero", () => {
-    expect(numericInformationLeq(zero, knownZero)).toBe(true);
-    expect(numericInformationLeq(knownZero, zero)).toBe(false);
+  it("keeps exact zero distinct from unknown and rejects unissued known_zero", () => {
     expect(numericInformationLeq(unavailable, zero)).toBe(true);
     expect(numericInformationLeq(zero, unavailable)).toBe(false);
+    expect(() => numeric({
+      kind: "exact", known_zero: true, completeness: UNISSUED_COMPLETENESS
+    }, { lower: 0, upper: 0 })).toThrow(/issued completeness authority/u);
   });
 
   it("does not join unknown into a fabricated number", () => {

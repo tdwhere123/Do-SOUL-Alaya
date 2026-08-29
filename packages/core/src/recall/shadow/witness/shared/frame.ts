@@ -2,6 +2,7 @@ import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../../field/field-identity.js";
 import { freezeShadow } from "../../envelope.js";
 import { stableStringify } from "../../../../shared/stable-stringify.js";
+import { assertCompletenessApplies } from "./completeness.js";
 import { freezeEpistemic, isKnownZeroEpistemic } from "./epistemic.js";
 import { freezeIdentity } from "./identity.js";
 import { freezeProvenance } from "./provenance.js";
@@ -32,11 +33,16 @@ export function assembleWitness<K extends WitnessDomainKind, P>(
   epistemic: WitnessEpistemic,
   payload: P | null
 ): TypedWitness<K, P> {
+  const frozenIdentity = freezeIdentity(identity);
+  const frozenEpistemic = freezeEpistemic(epistemic);
+  if (isKnownZeroEpistemic(frozenEpistemic)) {
+    assertCompletenessApplies(frozenEpistemic.completeness, domain, frozenIdentity);
+  }
   return freezeShadow({
     domain,
-    identity: freezeIdentity(identity),
+    identity: frozenIdentity,
     provenance: freezeProvenance(provenance),
-    epistemic: freezeEpistemic(epistemic),
+    epistemic: frozenEpistemic,
     payload: freezePayload(payload)
   });
 }

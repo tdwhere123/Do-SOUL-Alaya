@@ -99,6 +99,9 @@ export type MeasurementAdmissionValidationV1 =
   | Readonly<{ readonly status: "admitted" }>
   | Readonly<{ readonly status: "blocked"; readonly reason: string }>;
 
+export type CurrentMeasurementAuthoritiesV1 =
+  readonly VerifiedMeasurementAuthorityV1[];
+
 const PREDECLARED_CONTRACTS = new Set<MeasurementGroupContractV1>([
   LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
   PROPOSITION_STATE_MEASUREMENT_CONTRACT
@@ -180,6 +183,7 @@ export function issueMeasurementGroupAdmission(input: Readonly<{
 
 export function validateMeasurementAdmissionV1(input: Readonly<{
   readonly admission: MeasurementAdmissionV1 | null;
+  readonly current_authorities: CurrentMeasurementAuthoritiesV1;
   readonly contract: MeasurementGroupContractV1;
   readonly proposition_schema: string;
   readonly collapse: MeasurementCollapseV1 | PropositionStateCollapseV1;
@@ -191,6 +195,10 @@ export function validateMeasurementAdmissionV1(input: Readonly<{
     requirePredeclaredContract(input.contract);
     const collapse = requireAdmissibleCollapse(input.contract, input.collapse);
     const identity = requiredIdentity(collapse.witness.identity);
+    const authority = currentAuthorityFor(input.current_authorities, input.contract.digest);
+    if (authority === null || authority.authority_digest !== input.admission.authority_digest) {
+      return blocked("measurement admission is not bound to current verified authority");
+    }
     if (input.proposition_schema !== input.contract.proposition_schema ||
       !admissionMatches(input.admission, input.contract, identity, collapse)) {
       return blocked("measurement admission binding mismatch");
@@ -199,6 +207,16 @@ export function validateMeasurementAdmissionV1(input: Readonly<{
   } catch (error) {
     return blocked(error instanceof Error ? error.message : "measurement admission invalid");
   }
+}
+
+function currentAuthorityFor(
+  authorities: CurrentMeasurementAuthoritiesV1,
+  contractDigest: RecallFieldDigest
+): VerifiedMeasurementAuthorityV1 | null {
+  const matches = authorities.filter((authority) =>
+    VERIFIED_AUTHORITIES.has(authority) && authority.contract_digest === contractDigest
+  );
+  return matches.length === 1 ? matches[0]! : null;
 }
 
 function verifyPreparedEvidence(

@@ -118,18 +118,38 @@ describe("measurement admission", () => {
     });
     expect(validateMeasurementAdmissionV1({
       admission,
+      current_authorities: [authority],
       contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
       proposition_schema: "lex.interval",
       collapse
     })).toEqual({ status: "admitted" });
     expect(validateMeasurementAdmissionV1({
       admission,
+      current_authorities: [authority],
       contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
       proposition_schema: "lex.interval.drifted",
       collapse
     }).status).toBe("blocked");
     expect(validateMeasurementAdmissionV1({
       admission: { ...admission },
+      current_authorities: [authority],
+      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+      proposition_schema: "lex.interval",
+      collapse
+    }).status).toBe("blocked");
+    expect(validateMeasurementAdmissionV1({
+      admission,
+      current_authorities: [],
+      contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
+      proposition_schema: "lex.interval",
+      collapse
+    })).toEqual({
+      status: "blocked",
+      reason: "measurement admission is not bound to current verified authority"
+    });
+    expect(validateMeasurementAdmissionV1({
+      admission,
+      current_authorities: [{ ...authority } as typeof authority],
       contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
       proposition_schema: "lex.interval",
       collapse

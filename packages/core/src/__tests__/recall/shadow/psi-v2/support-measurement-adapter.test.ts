@@ -8,7 +8,7 @@ import {
 } from "../../../../recall/shadow/measurement/index.js";
 import {
   buildPsiV2ShadowDiagnostics,
-  comparePsiV2,
+  comparePsiV2 as comparePsiV2WithAuthorities,
   psiV2CandidatesFromSupport
 } from "../../../../recall/shadow/psi-v2/index.js";
 import type { SupportMaterializationV1 } from
@@ -34,6 +34,10 @@ const HYPOTHESIS_A = `sha256:${"1".repeat(64)}`;
 const HYPOTHESIS_B = `sha256:${"2".repeat(64)}`;
 let prepared: PreparedRecallRequest;
 let authority: VerifiedMeasurementAuthorityV1;
+const comparePsiV2 = (
+  left: Parameters<typeof comparePsiV2WithAuthorities>[0],
+  right: Parameters<typeof comparePsiV2WithAuthorities>[1]
+) => comparePsiV2WithAuthorities(left, right, [authority]);
 
 describe("support proposition measurement adapter", () => {
   beforeAll(async () => {

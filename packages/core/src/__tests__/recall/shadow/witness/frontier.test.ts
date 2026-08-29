@@ -8,7 +8,7 @@ import {
   type MembershipFrontierWitness,
   type WitnessEpistemic
 } from "../../../../recall/shadow/witness/index.js";
-import { COMPLETE, PINS, PROV, PROV_EXTENDED } from "./fixtures.js";
+import { PINS, PROV, PROV_EXTENDED, UNISSUED_COMPLETENESS } from "./fixtures.js";
 import { assertMonotoneRefinement, assertPoset } from "./order-properties.js";
 
 function frontier(
@@ -28,15 +28,11 @@ describe("membership frontier domain", () => {
   const mid = frontier({ kind: "exact" }, { lower: 1, upper: 4 });
   const tight = frontier({ kind: "exact" }, { lower: 2, upper: 2 });
   const other = frontier({ kind: "exact" }, { lower: 9, upper: 10 });
-  const absent = frontier(
-    { kind: "exact", known_zero: true, completeness: COMPLETE },
-    null
-  );
   const outside = frontier({ kind: "not_applicable" }, null);
   const missing = frontier({ kind: "not_observed" }, null);
 
   it("has a reflexive antisymmetric transitive information order", () => {
-    assertPoset([wide, mid, tight, other, absent, outside, missing], frontierInformationLeq);
+    assertPoset([wide, mid, tight, other, outside, missing], frontierInformationLeq);
   });
 
   it("refines by narrowing a nonnegative index range", () => {
@@ -55,13 +51,12 @@ describe("membership frontier domain", () => {
   });
 
   it("requires completeness for known non-membership and marks outside as not_applicable", () => {
-    expect(isKnownZeroEpistemic(absent.epistemic)).toBe(true);
-    expect(absent.payload).toBeNull();
     expect(() => frontier({ kind: "exact" }, null)).toThrow(/index range/u);
     expect(() => frontier(
-      { kind: "exact", known_zero: true, completeness: COMPLETE },
-      { lower: 0, upper: 0 }
-    )).toThrow(/non-membership/u);
+      { kind: "exact", known_zero: true, completeness: {
+        ...UNISSUED_COMPLETENESS, domain: "membership_frontier"
+      } }, null
+    )).toThrow(/issued completeness authority/u);
     expect(outside.epistemic.kind).toBe("not_applicable");
     expect(() => frontier({ kind: "exact" }, { lower: -1, upper: 2 })).toThrow(/nonnegative/u);
     expect(() => frontier({ kind: "exact" }, { lower: 1.5, upper: 2 })).toThrow(/integer/u);

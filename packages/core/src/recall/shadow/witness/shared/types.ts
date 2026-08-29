@@ -14,7 +14,9 @@ export type WitnessIdentityPins = Readonly<{
   readonly coordinate_id: string;
   readonly query_id: string;
   readonly snapshot_digest: string;
+  readonly observer_id?: string;
   readonly candidate_id?: string;
+  readonly universe_digest?: string;
   readonly proposition_id?: string;
 }>;
 
@@ -26,7 +28,19 @@ export type WitnessProvenanceEntry = Readonly<{
 }>;
 
 export type WitnessCompleteness = Readonly<{
+  readonly schema_version: 1;
+  readonly receipt_id: "recall.witness.completeness.v1";
+  readonly authority_id: string;
+  readonly authority_digest: string;
   readonly owner: string;
+  readonly observer_id: string;
+  readonly coordinate_id: string;
+  readonly query_id: string;
+  readonly snapshot_digest: string;
+  readonly candidate_id: string;
+  readonly universe_digest: string;
+  readonly domain: WitnessDomainKind;
+  readonly receipt_digest: string;
 }>;
 
 export type WitnessEpistemic =

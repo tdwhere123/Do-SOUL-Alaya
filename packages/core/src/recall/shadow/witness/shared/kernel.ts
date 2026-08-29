@@ -1,11 +1,10 @@
 import { ShadowContractError } from "../../envelope.js";
 import {
-  completenessOwner,
   conflictEpistemic,
   exactEpistemic,
+  freezeEpistemic,
   isKnownZeroEpistemic,
-  isUnknownEpistemic,
-  knownZeroEpistemic
+  isUnknownEpistemic
 } from "./epistemic.js";
 import { assembleWitness } from "./frame.js";
 import { assertIdentityPreserved } from "./identity.js";
@@ -170,13 +169,18 @@ function meetKnownZeroEpistemic(
   left: WitnessEpistemic,
   right: WitnessEpistemic
 ): WitnessEpistemic {
-  const leftOwner = completenessOwner(left);
-  const rightOwner = completenessOwner(right);
-  if (leftOwner !== null && rightOwner !== null && leftOwner !== rightOwner) {
-    throw new ShadowContractError("completeness owner mismatch");
+  const leftCompleteness = isKnownZeroEpistemic(left) ? left.completeness : null;
+  const rightCompleteness = isKnownZeroEpistemic(right) ? right.completeness : null;
+  if (leftCompleteness !== null && rightCompleteness !== null &&
+    leftCompleteness.receipt_digest !== rightCompleteness.receipt_digest) {
+    throw new ShadowContractError("completeness receipt mismatch");
   }
-  const owner = leftOwner ?? rightOwner;
-  return owner === null ? exactEpistemic() : knownZeroEpistemic(owner);
+  const completeness = leftCompleteness ?? rightCompleteness;
+  return completeness === null ? exactEpistemic() : freezeEpistemic({
+    kind: "exact",
+    known_zero: true,
+    completeness
+  });
 }
 
 function conflictWitness<K extends WitnessDomainKind, P>(

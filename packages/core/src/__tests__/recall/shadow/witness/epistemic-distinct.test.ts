@@ -3,11 +3,12 @@ import {
   consumerView,
   createNumericIntervalWitness,
   isKnownZeroEpistemic,
+  parseCompleteness,
   serializeWitness,
   type NumericIntervalWitness,
   type WitnessEpistemic
 } from "../../../../recall/shadow/witness/index.js";
-import { COMPLETE, PINS, PROV } from "./fixtures.js";
+import { PINS, PROV, UNISSUED_COMPLETENESS } from "./fixtures.js";
 
 function numeric(
   epistemic: WitnessEpistemic,
@@ -23,14 +24,6 @@ function numeric(
 
 describe("epistemic carrier remains distinct from payload", () => {
   const exactZero = numeric({ kind: "exact" }, { lower: 0, upper: 0 });
-  const knownZero = numeric(
-    { kind: "exact", known_zero: true, completeness: COMPLETE },
-    { lower: 0, upper: 0 }
-  );
-  const provenAbsence = numeric(
-    { kind: "exact", known_zero: true, completeness: COMPLETE },
-    null
-  );
   const unavailable = numeric({ kind: "unavailable" }, null);
   const notObserved = numeric({ kind: "not_observed" }, null);
   const notApplicable = numeric({ kind: "not_applicable" }, null);
@@ -39,8 +32,6 @@ describe("epistemic carrier remains distinct from payload", () => {
 
   const states = {
     exact_zero: exactZero,
-    known_zero: knownZero,
-    proven_absence: provenAbsence,
     unavailable,
     not_observed: notObserved,
     not_applicable: notApplicable,
@@ -78,17 +69,28 @@ describe("epistemic carrier remains distinct from payload", () => {
     }
     expect(exactZero.payload).toEqual({ lower: 0, upper: 0 });
     expect(isKnownZeroEpistemic(exactZero.epistemic)).toBe(false);
-    expect(isKnownZeroEpistemic(knownZero.epistemic)).toBe(true);
-    expect(isKnownZeroEpistemic(provenAbsence.epistemic)).toBe(true);
-    expect(provenAbsence.payload).toBeNull();
   });
 
-  it("rejects forbidden completeness owners for known_zero", () => {
-    for (const owner of ["truncated", "cap", "not_run", "unavailable", ""]) {
-      expect(() => numeric(
-        { kind: "exact", known_zero: true, completeness: { owner } },
-        { lower: 0, upper: 0 }
-      )).toThrow(/completeness|truncation/u);
+  it("rejects strings, owner-only objects, and coherent scoped receipts", () => {
+    expect(() => parseCompleteness("arbitrary.owner"))
+      .toThrow(/issued|authority|completeness/u);
+    expect(() => numeric({
+      kind: "exact",
+      known_zero: true,
+      completeness: { owner: "arbitrary.owner" } as typeof UNISSUED_COMPLETENESS
+    }, { lower: 0, upper: 0 })).toThrow(/issued|authority|completeness/u);
+
+    for (const completeness of [
+      UNISSUED_COMPLETENESS,
+      { ...UNISSUED_COMPLETENESS },
+      { ...UNISSUED_COMPLETENESS, snapshot_digest: `sha256:${"e".repeat(64)}` },
+      { ...UNISSUED_COMPLETENESS, universe_digest: `sha256:${"f".repeat(64)}` },
+      { ...UNISSUED_COMPLETENESS, coordinate_id: "coord.foreign" },
+      { ...UNISSUED_COMPLETENESS, domain: "membership_frontier" as const }
+    ]) {
+      expect(() => numeric({
+        kind: "exact", known_zero: true, completeness
+      }, { lower: 0, upper: 0 })).toThrow(/issued|authority|completeness/u);
     }
   });
 });

@@ -1,11 +1,9 @@
 import { digestRecallFieldIdentity } from
   "../../../../recall/field/field-identity.js";
 import {
-  bindSnapshotReadLease,
   createSnapshotCoherenceReceiptV1,
   createSnapshotVectorV1,
-  finalizeSnapshotReadLease,
-  openSnapshotReadLease,
+  finalizePreparedSnapshotReadLease,
   readSnapshotLeaseCapability,
   type SourceFrontierDeclarationV1
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
@@ -179,6 +177,7 @@ export function createAuthorityContext(options: Readonly<{
   readonly sourceView?: "pinned" | "unavailable";
   readonly validTime?: SourceFrontierDeclarationV1["valid_time_domain"];
   readonly includeVerifiers?: boolean;
+  readonly generation?: string;
 }> = {}) {
   const declaration = sourceDeclaration(options);
   const snapshot_vector = createSnapshotVectorV1({
@@ -196,21 +195,7 @@ export function createAuthorityContext(options: Readonly<{
     formation_operator_versions: [["relation_assertion_projection_v1", "1"]],
     decision_contract_digest: `sha256:${"b".repeat(64)}`
   });
-  let read_lease = openSnapshotReadLease({
-    principal: snapshot_vector.principal,
-    authorized_scopes: snapshot_vector.authorized_scopes,
-    effective_as_of: snapshot_vector.effective_as_of
-  });
-  for (const source of snapshotSources(snapshot_vector)) {
-    read_lease = bindSnapshotReadLease(read_lease, {
-      source_owner: source.source_owner,
-      declaration: source,
-      view_kind: source.source_owner === "path_relations"
-        ? options.sourceView ?? "pinned"
-        : "pinned"
-    });
-  }
-  read_lease = finalizeSnapshotReadLease(read_lease, snapshot_vector);
+  const read_lease = finalizePreparedSnapshotReadLease(snapshot_vector);
   return Object.freeze({
     snapshot_vector,
     snapshot_receipt: createSnapshotCoherenceReceiptV1(snapshot_vector),
@@ -282,21 +267,10 @@ function sourceDeclaration(options: Readonly<{
     source_frontier: TX_FRONTIER,
     valid_time_domain: options.validTime
       ?? { kind: "open", from: "2026-08-01T00:00:00.000Z" },
-    generation: "generation-1",
+    generation: options.generation ?? "generation-1",
     operator_or_model_version: "operator-1",
     lag_bound: source_owner === "path_relations" && options.sourceView === "unavailable"
       ? { kind: "unavailable" }
       : { kind: "exact" }
   });
-}
-
-function snapshotSources(vector: ReturnType<typeof createSnapshotVectorV1>) {
-  return [
-    vector.projection_generation,
-    ...vector.retrieval_channel_snapshots,
-    vector.embedding_generation_and_model,
-    vector.path_graph_generation,
-    vector.temporal_index_generation,
-    vector.governance_frontier
-  ];
 }

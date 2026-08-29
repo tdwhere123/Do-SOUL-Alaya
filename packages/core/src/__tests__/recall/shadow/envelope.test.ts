@@ -82,7 +82,9 @@ describe("shadow envelope", () => {
         coordinate_id: "coord.envelope",
         query_id: "query-1",
         snapshot_digest: `sha256:${"a".repeat(64)}`,
-        candidate_id: "cand-1"
+        observer_id: "observer.envelope.numeric.v1",
+        candidate_id: "cand-1",
+        universe_digest: `sha256:${"b".repeat(64)}`
       },
       provenance: [{ source_id: "src-1", producer: "producer.alpha" }]
     };
@@ -92,14 +94,13 @@ describe("shadow envelope", () => {
     expect(isKnownZeroEpistemic(adaptedZero.epistemic)).toBe(false);
     expect(adaptedZero.payload).toEqual({ lower: 0, upper: 0 });
 
-    const missing = witnessFromShadowEnvelope(
-      parseShadowEnvelope({
-        state: "required_but_missing",
-        witnesses: COMPLETE_WITNESSES
-      }),
-      frame
-    );
-    expect(isKnownZeroEpistemic(missing.epistemic)).toBe(true);
+    const missingEnvelope = parseShadowEnvelope({
+      state: "required_but_missing",
+      witnesses: COMPLETE_WITNESSES
+    });
+    const missing = witnessFromShadowEnvelope(missingEnvelope, frame);
+    expect(isKnownZeroEpistemic(missing.epistemic)).toBe(false);
+    expect(missing.epistemic.kind).toBe("not_observed");
     expect(missing.payload).toBeNull();
     expect(witnessFromShadowEnvelope(
       parseShadowEnvelope({ state: "producer_unavailable" }),

@@ -220,7 +220,7 @@ describe("psi v2 shadow diagnostics", () => {
       "q",
       SNAPSHOT
     );
-    expect(comparePsiV2(left, right).kind).toBe("blocked");
+    expect(comparePsiV2(left, right, []).kind).toBe("blocked");
     expect(diagnostics.raw_fragment_veto).toBe(true);
     expect(diagnostics.blocked_share).toBeGreaterThan(0);
   });
