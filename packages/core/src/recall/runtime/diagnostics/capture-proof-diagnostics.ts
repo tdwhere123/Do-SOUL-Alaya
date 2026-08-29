@@ -18,6 +18,8 @@ import {
   absentLexicalBoundProof,
   type LexicalBoundProof
 } from "./lexical-bound-proof.js";
+import type { RecallFieldDigest } from "../../field/field-identity.js";
+import { unavailableProducerDigest } from "../snapshot-coherence/index.js";
 
 export type CaptureProofDiagnostics = Readonly<{
   readonly lexical_bound_proofs: readonly Readonly<LexicalBoundProof>[];
@@ -34,8 +36,14 @@ type CaptureProofFieldCandidate = Readonly<{
 }>;
 
 type CaptureProofPreparedSource = Readonly<{
+  readonly snapshotVector: Readonly<{
+    readonly base_store_digest: RecallFieldDigest;
+  }>;
   readonly retrievalFieldBundle: Readonly<{
     readonly memoryLexicalBoundProofs: () => readonly Readonly<LexicalBoundProof>[];
+    readonly memoryLexicalBoundProofsForSnapshot: (
+      snapshotDigest: RecallFieldDigest
+    ) => readonly Readonly<LexicalBoundProof>[];
   }>;
 }>;
 
@@ -70,7 +78,7 @@ export function buildCaptureProofDiagnostics(
       ...(copied.gap === undefined ? {} : { typed_fact_frame_gap: copied.gap })
     });
   }));
-  const proofs = prepared.retrievalFieldBundle.memoryLexicalBoundProofs();
+  const proofs = memoryLexicalBoundProofsForPreparedSnapshot(prepared);
   return Object.freeze({
     lexical_bound_proofs: proofs.length > 0
       ? proofs
@@ -88,3 +96,12 @@ export function buildCaptureProofDiagnostics(
   });
 }
 
+function memoryLexicalBoundProofsForPreparedSnapshot(
+  prepared: CaptureProofPreparedSource
+): readonly Readonly<LexicalBoundProof>[] {
+  const baseStoreDigest = prepared.snapshotVector.base_store_digest;
+  if (baseStoreDigest === unavailableProducerDigest("base_store")) {
+    return prepared.retrievalFieldBundle.memoryLexicalBoundProofs();
+  }
+  return prepared.retrievalFieldBundle.memoryLexicalBoundProofsForSnapshot(baseStoreDigest);
+}

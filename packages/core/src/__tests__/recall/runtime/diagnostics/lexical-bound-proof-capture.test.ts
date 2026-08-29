@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { RecallService } from "../../../../recall/recall-service.js";
 import { createRecallRetrievalFieldBundle } from
   "../../../../recall/field/retrieval/retrieval-field-bundle.js";
 import { verifyLexicalBoundProof } from
@@ -11,8 +12,47 @@ import {
   stubMemoryRepo,
   truncatedReceipt
 } from "./lexical-bound-proof-fixture.js";
+import {
+  createDependencies,
+  createMemoryEntry,
+  createTaskSurface
+} from "../../recall-service-test-fixtures.js";
 
 describe("lexical bound proof capture path", () => {
+  it("seals only a supplied prepared base-store snapshot on the live recall path", async () => {
+    const snapshotDigest = `sha256:${"b".repeat(64)}` as const;
+    const supplied = await recallWithLexicalDiagnostic(snapshotDigest, true);
+    const unavailable = await recallWithLexicalDiagnostic(undefined, true);
+    const captureOff = await recallWithLexicalDiagnostic(snapshotDigest, false);
+
+    expect(supplied.result.diagnostics?.lexical_bound_proofs).not.toHaveLength(0);
+    expect(supplied.result.diagnostics?.lexical_bound_proofs?.every((proof) =>
+      proof.status === "captured" && proof.identity.snapshot_digest === snapshotDigest
+    )).toBe(true);
+    expect(unavailable.result.diagnostics?.lexical_bound_proofs?.every((proof) =>
+      proof.status === "captured" &&
+      typeof proof.identity.snapshot_digest !== "string" &&
+      proof.identity.snapshot_digest.reason === "snapshot_not_sealed"
+    )).toBe(true);
+    expect(captureOff.result.diagnostics).not.toHaveProperty("lexical_bound_proofs");
+
+    const { diagnostics: _suppliedDiagnostics, ...suppliedPublic } = supplied.result;
+    const { diagnostics: _captureOffDiagnostics, ...captureOffPublic } = captureOff.result;
+    expect(suppliedPublic).toEqual(captureOffPublic);
+    expect(JSON.stringify(supplied.result.diagnostics?.capture_receipt))
+      .toBe(JSON.stringify(captureOff.result.diagnostics?.capture_receipt));
+    expect(JSON.stringify(supplied.result.diagnostics?.capture_receipt))
+      .toBe(JSON.stringify(unavailable.result.diagnostics?.capture_receipt));
+    expect(supplied.result.diagnostics?.token_economy.embedding_inference_calls).toBe(0);
+    expect(captureOff.result.diagnostics?.token_economy.embedding_inference_calls).toBe(0);
+    expect(supplied.searchByKeywordField).toHaveBeenCalledTimes(
+      captureOff.searchByKeywordField.mock.calls.length
+    );
+    expect(supplied.searchByKeywordField).toHaveBeenCalledTimes(
+      unavailable.searchByKeywordField.mock.calls.length
+    );
+  });
+
   it("seals request and workspace from the retrieval bundle without inventing a snapshot", async () => {
     const receipt = truncatedReceipt();
     const bundle = createRecallRetrievalFieldBundle({
@@ -239,3 +279,27 @@ describe("lexical bound proof capture path", () => {
     verifyLexicalBoundProof(sealed);
   });
 });
+
+async function recallWithLexicalDiagnostic(
+  snapshotDigest: `sha256:${string}` | undefined,
+  captureAnswerFeatures: boolean
+) {
+  const memory = createMemoryEntry({
+    object_id: "p1",
+    content: "The stable operator fact is p1."
+  });
+  const { dependencies } = createDependencies([memory]);
+  const searchByKeywordField = vi.fn(async () => fieldResult(truncatedReceipt()));
+  const service = new RecallService({
+    ...dependencies,
+    memoryRepo: { ...dependencies.memoryRepo, searchByKeywordField }
+  });
+  const result = await service.recall({
+    taskSurface: { ...createTaskSurface(), display_name: "stable" },
+    workspaceId: "workspace-1",
+    strategy: "analyze",
+    ...(captureAnswerFeatures ? { diagnosticCapture: "answer_features" as const } : {}),
+    ...(snapshotDigest === undefined ? {} : { snapshotDigest })
+  });
+  return { result, searchByKeywordField };
+}
