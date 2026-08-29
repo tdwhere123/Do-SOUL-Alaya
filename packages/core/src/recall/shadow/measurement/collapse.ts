@@ -67,7 +67,7 @@ function applyCorrelation(
   const pairs = distinctCoordinates(unique);
   for (const [left, right] of pairs) {
     const state = declaredCorrelation(left, right, correlations);
-    if (state === undefined && contract.correlation_policy !== "identity_dedupe") {
+    if (state === undefined) {
       return unresolved("unknown correlation blocks collapse", unique);
     }
     if (state === "possibly_correlated" && contract.correlation_policy === "unknown_blocks") {
