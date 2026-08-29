@@ -210,11 +210,18 @@ function fieldResult(
 ): Readonly<KeywordSearchFieldResult> {
   const matches = lexical_raw_rank.candidates.filter((candidateValue) =>
     candidateValue.admitted
-  ).map((candidateValue) => Object.freeze({
-    object_id: candidateValue.candidate_key,
-    normalized_rank: candidateValue.candidate_key === "hit"
-      ? normalizedRank : candidateValue.chosen_normalized_rank!
-  }));
+  ).map((candidateValue) => {
+    const producer = lexical_raw_rank_receipt.post_merge.find(
+      (row) => row.candidate_key === candidateValue.candidate_key
+    );
+    return Object.freeze({
+      object_id: candidateValue.candidate_key,
+      normalized_rank: candidateValue.candidate_key === "hit"
+        ? normalizedRank : candidateValue.chosen_normalized_rank!,
+      ...(producer?.trigram_rank === undefined ? {} : { trigram_rank: producer.trigram_rank }),
+      ...(producer?.object_key_rank === undefined ? {} : { object_key_rank: producer.object_key_rank })
+    });
+  });
   return Object.freeze({
     matches: Object.freeze(matches),
     lanes: Object.freeze([
@@ -336,7 +343,10 @@ function producerReceipt(
       )])
     ]),
     post_merge: Object.freeze([
-      Object.freeze({ candidate_key: "hit", normalized_rank: 1 }),
+      Object.freeze({
+        candidate_key: "hit", normalized_rank: 1,
+        ...(objectKeyOnly ? {} : { trigram_rank: 1 }), object_key_rank: 1
+      }),
       ...(objectKeyOnly ? [] : [Object.freeze({
         candidate_key: "outside", normalized_rank: 0.5
       })])

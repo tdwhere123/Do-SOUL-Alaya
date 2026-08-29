@@ -180,19 +180,6 @@ describe("lexical interval source authority", () => {
     cleanup(prepared);
   });
 
-  it("rejects a fully synchronized duplicate candidate within one producer lane", () => {
-    const receipt = createLexicalIntervalSourceReceiptIntegrityV1({
-      workspace_id: "workspace-1",
-      request_digest: `sha256:${"a".repeat(64)}`,
-      snapshot_digest: `sha256:${"b".repeat(64)}`,
-      field_prefix: "lexical_relaxed",
-      requested_depth: 2,
-      result: duplicateExactFieldResult()
-    });
-    expect(() => verifyLexicalIntervalSourceReceiptIntegrityV1(receipt))
-      .toThrow(/duplicate candidate rows/u);
-  });
-
   it("rejects missing, counterfeit, and revoked physical-read capabilities", async () => {
     const prepared = await preparedAuthority();
     const bundle = createRecallRetrievalFieldBundle({
@@ -326,66 +313,6 @@ function fieldResult() {
     }),
     lexical_raw_rank_receipt: rawRankReceipt()
   });
-}
-
-function duplicateExactFieldResult() {
-  const rows = Object.freeze([
-    rawRow("hit", 2, 0, 1), rawRow("hit", 1, 1, 0.5)
-  ]);
-  return Object.freeze({
-    matches: Object.freeze([{ object_id: "hit", normalized_rank: 1 }]),
-    lanes: Object.freeze([
-      fieldLane("exact", "complete", [{ object_id: "hit", normalized_rank: 1, rank: 1 }]),
-      fieldLane("porter", "ineligible", []), fieldLane("trigram", "ineligible", [])
-    ]),
-    lexical_raw_rank: Object.freeze({
-      query_run_id: "duplicate-exact-lane", merge_limit: 2,
-      lanes: Object.freeze([
-        lane("exact", "matched_token_count", "truncated", 2),
-        lane("porter", "bm25_raw_rank", "empty"),
-        lane("object_key_porter", "bm25_raw_rank", "empty"),
-        lane("trigram", "bm25_raw_rank", "empty"),
-        lane("object_key_trigram", "bm25_raw_rank", "empty")
-      ]),
-      candidates: Object.freeze([Object.freeze({
-        candidate_key: "hit", chosen_lane_id: "exact" as const,
-        chosen_normalized_rank: 1, admitted: true
-      })])
-    }),
-    lexical_raw_rank_receipt: duplicateExactReceipt(rows)
-  });
-}
-
-function duplicateExactReceipt(rows: readonly ReturnType<typeof rawRow>[]) {
-  return Object.freeze({
-    schema_version: 1 as const, receipt_id: "alaya.recall.x0.lexical-raw-rank.v1" as const,
-    producer_id: "alaya.storage.mergeKeywordSearchRows.v1" as const,
-    query_run_id: "duplicate-exact-lane", merge_limit: 2,
-    lanes: Object.freeze([
-      rawLane("exact", "matched_token_count", 0, rows, 2),
-      rawLane("porter", "bm25_raw_rank", 1, [], 2),
-      rawLane("object_key_porter", "bm25_raw_rank", 1, [], 2),
-      rawLane("trigram", "bm25_raw_rank", 2, [], 2),
-      rawLane("object_key_trigram", "bm25_raw_rank", 2, [], 2)
-    ]),
-    candidates: Object.freeze([Object.freeze({
-      candidate_key: "hit",
-      lane_hits: Object.freeze(rows.map((row) => Object.freeze({
-        lane_id: "exact" as const, raw_group_key: row.raw_group_key,
-        grouped_ordinal: row.grouped_ordinal, lane_index: row.lane_index
-      }))),
-      admitted: true, chosen_lane_id: "exact" as const, chosen_normalized_rank: 1,
-      post_merge_index: 0, discarded_lane_ids: Object.freeze([])
-    })]),
-    post_merge: Object.freeze([{ candidate_key: "hit", normalized_rank: 1 }])
-  });
-}
-
-function rawRow(
-  candidate_key: string, raw_group_key: number, lane_index: number, grouped_ordinal: number
-) {
-  return Object.freeze({ candidate_key, raw_group_key, lane_index, grouped_ordinal,
-    observation_state: "observed" as const });
 }
 
 function fieldLane(

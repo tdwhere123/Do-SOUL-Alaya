@@ -26,8 +26,22 @@ export function verifyLexicalIntervalProducerReplay(
 ): void {
   verifyLanes(capture, receipt);
   const candidates = verifyCandidateClosure(capture, receipt);
-  const winners = candidates.map((candidate) => verifyCandidate(candidate, receipt.lanes));
+  const byKey = new Map(candidates.map((candidate) => [
+    candidate.candidate_key, verifyCandidate(candidate, receipt.lanes)
+  ]));
+  const winners = winnersInProducerEncounterOrder(receipt.lanes, byKey);
   verifyPostMerge(receipt, winners);
+}
+
+function winnersInProducerEncounterOrder(
+  lanes: readonly Readonly<LexicalBoundLaneCapture>[],
+  winners: ReadonlyMap<string, Winner>
+): readonly Winner[] {
+  const ordered = new Map<string, Winner>();
+  for (const lane of lanes) {
+    for (const row of lane.rows) ordered.set(row.candidate_key, winners.get(row.candidate_key)!);
+  }
+  return [...ordered.values()];
 }
 
 function verifyLanes(
@@ -152,13 +166,12 @@ function verifyCandidate(
   const observed = lanes.flatMap((lane) => lane.rows
     .filter((row) => row.candidate_key === candidate.candidate_key)
     .map((row) => Object.freeze({ lane, row })));
-  const expectedHits = new Set(observed.map(({ lane, row }) => hitKey({
+  const expectedHits = observed.map(({ lane, row }) => Object.freeze({
     lane_id: lane.lane_id, raw_group_key: row.raw_group_key,
     grouped_ordinal: row.grouped_ordinal, lane_index: row.lane_index
-  })));
-  const actualHits = new Set(candidate.lane_hits.map(hitKey));
-  if (expectedHits.size !== actualHits.size || actualHits.size !== candidate.lane_hits.length ||
-      [...expectedHits].some((key) => !actualHits.has(key))) {
+  }));
+  if (expectedHits.length !== candidate.lane_hits.length || expectedHits.some((hit, index) =>
+    hitKey(hit) !== hitKey(candidate.lane_hits[index]!))) {
     throw new TypeError("lexical interval producer candidate lane hits are invalid");
   }
   const winner = observed.reduce<ObservedRow | undefined>(selectWinner, undefined);
@@ -166,6 +179,11 @@ function verifyCandidate(
       candidate.chosen_normalized_rank !== winner.row.grouped_ordinal) {
     throw new TypeError("lexical interval producer candidate winner is invalid");
   }
+  const discarded = expectedHits.map((hit) => hit.lane_id)
+    .filter((laneId) => laneId !== winner.lane.lane_id);
+  if (discarded.length !== candidate.discarded_lane_ids.length || discarded.some(
+    (laneId, index) => candidate.discarded_lane_ids[index] !== laneId
+  )) throw new TypeError("lexical interval producer discarded lanes are invalid");
   return Object.freeze({ candidate_key: candidate.candidate_key, ...winner });
 }
 
@@ -191,6 +209,7 @@ function verifyPostMerge(
         candidate?.admitted !== true || candidate.post_merge_index !== index) {
       throw new TypeError("lexical interval producer post-merge order is invalid");
     }
+    verifyOptionalPostMergeRanks(row, winner.candidate_key, receipt.lanes);
   });
   const admitted = new Set(expected.map((winner) => winner.candidate_key));
   if (receipt.candidates.some((candidate) =>
@@ -198,6 +217,41 @@ function verifyPostMerge(
     (!candidate.admitted && candidate.post_merge_index !== null))) {
     throw new TypeError("lexical interval producer candidate admission is invalid");
   }
+}
+
+function verifyOptionalPostMergeRanks(
+  row: LexicalBoundProducerReceipt["post_merge"][number] | undefined,
+  candidateKey: string,
+  lanes: readonly Readonly<LexicalBoundLaneCapture>[]
+): void {
+  const trigram = maxLaneRank(lanes, candidateKey, ["trigram"]);
+  const objectKey = maxLaneRank(
+    lanes, candidateKey, ["object_key_porter", "object_key_trigram"]
+  );
+  if (row === undefined || !sameOptionalRank(row, "trigram_rank", trigram) ||
+      !sameOptionalRank(row, "object_key_rank", objectKey)) {
+    throw new TypeError("lexical interval producer post-merge optional ranks are invalid");
+  }
+}
+
+function maxLaneRank(
+  lanes: readonly Readonly<LexicalBoundLaneCapture>[],
+  candidateKey: string,
+  laneIds: readonly LexicalBoundLaneCapture["lane_id"][]
+): number | undefined {
+  const ranks = lanes.filter((lane) => laneIds.includes(lane.lane_id))
+    .flatMap((lane) => lane.rows.filter((row) => row.candidate_key === candidateKey)
+      .map((row) => row.grouped_ordinal));
+  return ranks.length === 0 ? undefined : Math.max(...ranks);
+}
+
+function sameOptionalRank(
+  row: LexicalBoundProducerReceipt["post_merge"][number],
+  key: "trigram_rank" | "object_key_rank",
+  expected: number | undefined
+): boolean {
+  return Object.prototype.hasOwnProperty.call(row, key) === (expected !== undefined) &&
+    row[key] === expected;
 }
 
 function compareWinners(left: Winner, right: Winner): number {

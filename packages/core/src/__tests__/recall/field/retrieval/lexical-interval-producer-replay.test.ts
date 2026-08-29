@@ -106,6 +106,7 @@ describe("lexical interval producer replay", () => {
     const candidates = fixture.receipt.candidates.map((candidate) =>
       candidate.candidate_key === "a" ? Object.freeze({
         ...candidate, chosen_lane_id: "porter" as const, chosen_normalized_rank: 1,
+        discarded_lane_ids: Object.freeze(["exact" as const]),
         lane_hits: Object.freeze([...candidate.lane_hits, Object.freeze({
           lane_id: "porter" as const, raw_group_key: -1, grouped_ordinal: 1, lane_index: 0
         })])

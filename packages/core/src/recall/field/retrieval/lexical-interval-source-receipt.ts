@@ -178,7 +178,9 @@ function digestNormalMatches(
 ): RecallFieldDigest {
   return digestRecallFieldIdentity([...matches].map((match) => Object.freeze({
     candidate_key: match.object_id,
-    normalized_rank: match.normalized_rank
+    normalized_rank: match.normalized_rank,
+    trigram_rank: match.trigram_rank ?? null,
+    object_key_rank: match.object_key_rank ?? null
   })));
 }
 
@@ -187,7 +189,9 @@ function digestProducerPostMerge(
 ): RecallFieldDigest {
   return digestRecallFieldIdentity(receipt.post_merge.map((row) => Object.freeze({
     candidate_key: row.candidate_key,
-    normalized_rank: row.normalized_rank
+    normalized_rank: row.normalized_rank,
+    trigram_rank: row.trigram_rank ?? null,
+    object_key_rank: row.object_key_rank ?? null
   })));
 }
 
