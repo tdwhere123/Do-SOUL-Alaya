@@ -4,9 +4,11 @@ import { isSnapshotDigest } from
   "../../../runtime/snapshot-coherence/digest.js";
 import {
   type CanonicalAnswerProgramV1,
+  type CanonicalConstantV1,
   type CanonicalEvidenceProvenanceV1,
   type CanonicalPredicateV1,
-  type CanonicalQueryV1
+  type CanonicalQueryV1,
+  type CanonicalVariableV1
 } from "../types.js";
 import { validateCanonicalQueryV1 } from "../validate.js";
 
@@ -24,17 +26,26 @@ export type AdapterSink = {
   readonly provenance: string[];
 };
 
-export function unaryPredicate(
+export function naryPredicate(
   id: string,
   relation: string,
+  args: readonly string[],
   provenance: CanonicalEvidenceProvenanceV1
 ): CanonicalPredicateV1 {
   return Object.freeze({
     id,
     relation,
-    arguments: Object.freeze(["x0"]),
-    provenance: Object.freeze(provenance)
+    arguments: Object.freeze([...args]),
+    provenance: Object.freeze({ ...provenance })
   });
+}
+
+export function unaryPredicate(
+  id: string,
+  relation: string,
+  provenance: CanonicalEvidenceProvenanceV1
+): CanonicalPredicateV1 {
+  return naryPredicate(id, relation, ["x0"], provenance);
 }
 
 export function pushSupportedQuery(
@@ -42,11 +53,16 @@ export function pushSupportedQuery(
   answer: CanonicalAnswerProgramV1,
   provenance: CanonicalEvidenceProvenanceV1,
   sink: AdapterSink,
-  source: string
+  source: string,
+  terms?: Readonly<{
+    readonly variables?: readonly CanonicalVariableV1[];
+    readonly constants?: readonly CanonicalConstantV1[];
+  }>
 ): boolean {
   if (predicates.length === 0) return false;
   const result = validateCanonicalQueryV1({
-    variables: [{ name: "x0", sort: "entity" }],
+    variables: terms?.variables ?? [{ name: "x0", sort: "entity" }],
+    constants: terms?.constants ?? [],
     predicates,
     answer
   });

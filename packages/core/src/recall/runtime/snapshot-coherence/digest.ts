@@ -18,3 +18,7 @@ export function unavailableProducerDigest(owner: string): RecallFieldDigest {
 export function isSnapshotInstant(value: string): boolean {
   return INSTANT.test(value) && Number.isFinite(Date.parse(value));
 }
+
+export function compareSnapshotInstants(left: string, right: string): number {
+  return Date.parse(left) - Date.parse(right);
+}

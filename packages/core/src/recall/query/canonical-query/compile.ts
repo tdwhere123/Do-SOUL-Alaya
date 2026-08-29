@@ -18,7 +18,7 @@ import {
   collectProbeHoles,
   rejectUnsupportedShape,
   SHAPE_PRODUCER,
-  shapePredicates
+  shapeProgram
 } from "./adapters/shape.js";
 import {
   CanonicalQueryContractError,
@@ -78,9 +78,8 @@ export function compileCanonicalQueryEvidence(
   const answer = resolveAnswer(sink.shape, evidence, sink.unresolved);
   collectProbeHoles(evidence.probes, sink.unresolved);
   pushShapePrograms(sink, answer);
-  const adapterAnswer = answer ?? { kind: "scalar" as const, variable: "x0" };
-  adaptFactFrameCapture(evidence.factFrameCapture, adapterAnswer, sink);
-  adaptOsfCapture(evidence.osfCapture, adapterAnswer, sink);
+  adaptFactFrameCapture(evidence.factFrameCapture, answer, sink);
+  adaptOsfCapture(evidence.osfCapture, answer, sink);
   pushOrderingHoles(sink.demand, sink.unresolved);
   sink.unresolved.push(...unadaptedDemandAtoms(sink.demand, sink.hypotheses));
   sink.unresolved.push(...unboundTargetTerms(sink.shape, sink.hypotheses));
@@ -125,11 +124,12 @@ function pushShapePrograms(
   if (rejectUnsupportedShape(sink.shape, sink.unresolved)) return;
   if (answer === null) return;
   if (sink.shape.status !== "high_confidence") return;
-  const predicates = shapePredicates(sink.shape);
-  if (predicates.length === 0 && sink.shape.shape !== "distinct_entities") return;
+  const program = shapeProgram(sink.shape);
+  if (program.predicates.length === 0 && sink.shape.shape !== "distinct_entities") return;
   const result = validateCanonicalQueryV1({
     variables: [{ name: "x0", sort: "entity" }],
-    predicates,
+    constants: program.constants,
+    predicates: program.predicates,
     answer
   });
   if (result.status !== "supported") {
@@ -213,6 +213,10 @@ function unboundTargetTerms(
 function usedHypothesisTokens(hypotheses: readonly CanonicalQueryV1[]): Set<string> {
   const used = new Set<string>();
   for (const query of hypotheses) {
+    for (const constant of query.constants) {
+      used.add(constant.name);
+      used.add(constant.value);
+    }
     for (const predicate of query.predicates) {
       used.add(predicate.relation);
       for (const argument of predicate.arguments) used.add(argument);

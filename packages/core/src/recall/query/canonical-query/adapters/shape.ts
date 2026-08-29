@@ -5,8 +5,8 @@ import { isRuleBasedCopularMeasureValue } from
 import { compileRecallAnswerShapePlan, type RecallAnswerShapePlan } from
   "../../recall-answer-shape-plan.js";
 import type { RecallQueryProbes } from "../../recall-query-probes.js";
-import type { CanonicalPredicateV1 } from "../types.js";
-import { pushUnresolved, unaryPredicate, type AdapterUnresolved } from "./phi.js";
+import type { CanonicalConstantV1, CanonicalPredicateV1 } from "../types.js";
+import { naryPredicate, pushUnresolved, type AdapterUnresolved } from "./phi.js";
 
 export const SHAPE_PRODUCER = "recall_answer_shape_plan";
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
@@ -60,19 +60,32 @@ export function rejectUnsupportedShape(
   return skip;
 }
 
-export function shapePredicates(shape: Readonly<RecallAnswerShapePlan>): CanonicalPredicateV1[] {
-  return [
-    ...shape.relation_terms.map((relation, index) => unaryPredicate(
+export function shapeProgram(shape: Readonly<RecallAnswerShapePlan>): {
+  readonly predicates: CanonicalPredicateV1[];
+  readonly constants: CanonicalConstantV1[];
+} {
+  const constants = constantsFromTargets(shape.target_terms);
+  const arguments_ = [...constants.map((constant) => constant.name), "x0"];
+  return {
+    constants,
+    predicates: shape.relation_terms.map((relation, index) => naryPredicate(
       `shape_rel_${index}`,
       relation,
+      arguments_,
       { source_id: "shape.relation_terms", producer: SHAPE_PRODUCER }
-    )),
-    ...shape.target_terms.map((term, index) => unaryPredicate(
-      `shape_tgt_${index}`,
-      term,
-      { source_id: "shape.target_terms", producer: SHAPE_PRODUCER }
     ))
-  ];
+  };
+}
+
+function constantsFromTargets(terms: readonly string[]): CanonicalConstantV1[] {
+  const seen = new Set<string>();
+  const constants: CanonicalConstantV1[] = [];
+  for (const term of terms) {
+    if (term.length === 0 || term.trim() !== term || seen.has(term)) continue;
+    seen.add(term);
+    constants.push(Object.freeze({ name: term, sort: "entity" as const, value: term }));
+  }
+  return constants;
 }
 
 function hasCjkDurationForm(text: string): boolean {

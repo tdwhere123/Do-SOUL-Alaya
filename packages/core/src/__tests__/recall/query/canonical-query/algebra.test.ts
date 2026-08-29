@@ -190,6 +190,39 @@ describe("canonical query algebra v1", () => {
     expect(Object.isFrozen(left)).toBe(true);
   });
 
+  it("accepts typed constants in Phi and freezes nested provenance", () => {
+    const provenance = { source_id: "src", producer: "prod" };
+    const result = supported({
+      variables: [{ name: "answer", sort: "answer" }],
+      constants: [{ name: "bookshelf", sort: "entity", value: "bookshelf" }],
+      predicates: [{
+        id: "p1",
+        relation: "buy",
+        arguments: ["bookshelf", "answer"],
+        provenance
+      }],
+      answer: { kind: "scalar", variable: "answer" }
+    });
+    expect(result.query.predicates[0]?.arguments).toEqual(["bookshelf", "answer"]);
+    expect(result.query.constants).toEqual([
+      { name: "bookshelf", sort: "entity", value: "bookshelf" }
+    ]);
+    provenance.producer = "mutated";
+    expect(result.query.predicates[0]?.provenance?.producer).toBe("prod");
+    expect(Object.isFrozen(result.query.predicates[0]?.provenance)).toBe(true);
+    expect(codeOf({
+      variables: [ENTITY],
+      constants: [{ name: "bookshelf", sort: "entity", value: "bookshelf" }],
+      predicates: [{ id: "p1", relation: "buy", arguments: ["missing", "x"] }],
+      answer: { kind: "scalar", variable: "x" }
+    })).toBe("undeclared_variable");
+    expect(codeOf({
+      variables: [ENTITY],
+      constants: [{ name: "bookshelf", sort: "entity", value: "bookshelf" }],
+      answer: { kind: "scalar", variable: "bookshelf" }
+    })).toBe("undeclared_variable");
+  });
+
   it("rejects unbounded and unbound all_observable observer universes", () => {
     const bound = bindAllObservableCompletion({
       principal: "principal-1",

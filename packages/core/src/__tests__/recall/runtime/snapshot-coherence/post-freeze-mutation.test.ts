@@ -13,7 +13,8 @@ import { InMemoryProjectionGenerationStore } from
 import {
   PREPARE_RETRIEVAL_CHANNEL_OWNERS,
   capturePreparedSnapshotCoherenceReceipt,
-  capturePreparedSnapshotVector
+  capturePreparedSnapshotVector,
+  digestRecallDecisionContractV1
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
 import * as snapshotCoherence from "../../../../recall/runtime/snapshot-coherence/index.js";
 import { buildRecallPolicy } from "../../../../shared/recall-policy.js";
@@ -59,6 +60,18 @@ describe("prepared snapshot retrieval declarations", () => {
     expect(vector.temporal_index_generation.lag_bound.kind).toBe("unavailable");
     expect(vector.governance_frontier.lag_bound.kind).toBe("unavailable");
     expect(vector.projection_generation.lag_bound.kind).toBe("exact");
+    expect(vector.decision_contract_digest).toBe(digestRecallDecisionContractV1());
+    expect(vector.decision_contract_digest).not.toBe(queryCondition.identity);
+    const otherCondition = captureQueryCondition(
+      conditionDraft({ query_task_factors: ["task:other"] }),
+      { sha256: testSha256(), now: () => CLOCK_AS_OF, pin }
+    );
+    expect(otherCondition.identity).not.toBe(queryCondition.identity);
+    expect(capturePreparedSnapshotVector({
+      queryCondition: otherCondition,
+      pin,
+      retrieval_channel_owners: RETRIEVAL_OWNERS
+    }).decision_contract_digest).toBe(vector.decision_contract_digest);
     const undeclared = capturePreparedSnapshotCoherenceReceipt({ queryCondition, pin });
     expect(undeclared.reasons).toContain("retrieval_undeclared");
     expect(undeclared.receipt_digest).not.toBe(receipt.receipt_digest);

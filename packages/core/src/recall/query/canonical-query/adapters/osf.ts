@@ -4,18 +4,22 @@ import {
   type OpenSemanticFactorGraph,
   type OpenSemanticProposition
 } from "@do-soul/alaya-protocol";
-import type { CanonicalAnswerProgramV1 } from "../types.js";
+import type {
+  CanonicalAnswerProgramV1,
+  CanonicalConstantV1,
+  CanonicalVariableV1
+} from "../types.js";
 import {
   captureDigest,
+  naryPredicate,
   pushSupportedQuery,
   pushUnresolved,
-  unaryPredicate,
   type AdapterSink
 } from "./phi.js";
 
 export function adaptOsfCapture(
   capture: unknown,
-  answer: CanonicalAnswerProgramV1,
+  answer: CanonicalAnswerProgramV1 | null,
   sink: AdapterSink
 ): void {
   if (capture === undefined || capture === null) return;
@@ -27,7 +31,6 @@ export function adaptOsfCapture(
     pushUnadapted(capture, sink);
     return;
   }
-  const adapted = adaptGraph(capture, capture.graph, answer, sink);
   if (capture.graph.propositions.length > 1) {
     // Flattening a 2+ proposition graph would invent a v1 correlation partition.
     pushUnresolved(sink.unresolved, {
@@ -36,6 +39,8 @@ export function adaptOsfCapture(
       capture_digest: captureDigest(capture)
     });
   }
+  if (answer === null) return;
+  const adapted = adaptGraph(capture, capture.graph, answer, sink);
   if (!adapted) pushUnadapted(capture, sink);
 }
 
@@ -66,10 +71,13 @@ function adaptProposition(
     item.factor_id === proposition.predicate_factor_id
   );
   if (factor === undefined || factor.semantic_identity.length === 0) return false;
+  const bound = bindPropositionArguments(proposition, graph);
+  if (bound === null) return false;
   return pushSupportedQuery(
-    [unaryPredicate(
+    [naryPredicate(
       `osf_${proposition.proposition_id}`,
       factor.semantic_identity,
+      bound.arguments,
       {
         source_id: `osf.relation.${proposition.proposition_id}`,
         producer
@@ -78,8 +86,48 @@ function adaptProposition(
     answer,
     { source_id: `osf.${proposition.proposition_id}`, producer },
     sink,
-    "osf"
+    "osf",
+    { variables: bound.variables, constants: bound.constants }
   );
+}
+
+function bindPropositionArguments(
+  proposition: OpenSemanticProposition,
+  graph: OpenSemanticFactorGraph
+): {
+  readonly arguments: readonly string[];
+  readonly variables: readonly CanonicalVariableV1[];
+  readonly constants: readonly CanonicalConstantV1[];
+} | null {
+  const ordered = [...proposition.arguments].sort((left, right) => left.position - right.position);
+  const arguments_: string[] = [];
+  const constants: CanonicalConstantV1[] = [];
+  const variables: CanonicalVariableV1[] = [{ name: "x0", sort: "entity" }];
+  const constantNames = new Set<string>();
+  const variableNames = new Set<string>(["x0"]);
+  for (const argument of ordered) {
+    if (argument.reference_kind === "factor") {
+      const referenced = graph.factors.find((item) => item.factor_id === argument.reference_id);
+      if (referenced === undefined || referenced.semantic_identity.length === 0) return null;
+      const name = referenced.semantic_identity;
+      if (!constantNames.has(name)) {
+        constantNames.add(name);
+        constants.push(Object.freeze({ name, sort: "entity" as const, value: name }));
+      }
+      arguments_.push(name);
+      continue;
+    }
+    if (graph.result_variable_ids.includes(argument.reference_id)) {
+      arguments_.push("x0");
+      continue;
+    }
+    if (!variableNames.has(argument.reference_id)) {
+      variableNames.add(argument.reference_id);
+      variables.push({ name: argument.reference_id, sort: "entity" });
+    }
+    arguments_.push(argument.reference_id);
+  }
+  return { arguments: arguments_, variables, constants };
 }
 
 function pushUnadapted(capture: object, sink: AdapterSink): void {

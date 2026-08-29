@@ -1,11 +1,12 @@
 import type { ProjectionPin, QueryConditionReceipt } from "@do-soul/alaya-protocol";
-import { type RecallFieldDigest } from "../../field/field-identity.js";
 import type { FieldPrefix } from "../../field/retrieval/retrieval-field-bundle.js";
+import { digestRecallFieldIdentity, type RecallFieldDigest } from "../../field/field-identity.js";
 import { isSnapshotDigest, unavailableProducerDigest } from "./digest.js";
 import { createSnapshotCoherenceReceiptV1 } from "./receipt.js";
 import { createSourceFrontierDeclaration } from "./source-frontier.js";
 import { createSnapshotVectorV1 } from "./snapshot-vector.js";
 import {
+  SNAPSHOT_COHERENCE_OPERATOR_ID,
   rejectSnapshotCoherence,
   type RestrictedUniverseInput,
   type SnapshotCoherenceReceiptV1,
@@ -56,8 +57,7 @@ export function capturePreparedSnapshotVector(
     ),
     ...unavailableDerived(principal, scope),
     formation_operator_versions: input.formation_operator_versions ?? [],
-    // Query identity binds the snapshot; it is not a store-frontier claim.
-    decision_contract_digest: declaredDecisionContract(input.queryCondition.identity),
+    decision_contract_digest: digestRecallDecisionContractV1(),
     restricted_universe: input.restricted_universe
   });
 }
@@ -135,9 +135,12 @@ function unavailableSource(
   });
 }
 
-function declaredDecisionContract(identity: string): RecallFieldDigest {
-  if (!isSnapshotDigest(identity)) rejectSnapshotCoherence("malformed_digest");
-  return identity;
+export function digestRecallDecisionContractV1(): RecallFieldDigest {
+  return digestRecallFieldIdentity({
+    kind: "recall_decision_contract_v1",
+    snapshot_coherence_operator: SNAPSHOT_COHERENCE_OPERATOR_ID,
+    canonical_query_operator: "recall_canonical_query_v1"
+  });
 }
 
 function declaredBaseDigest(snapshotDigest: string | undefined): RecallFieldDigest {

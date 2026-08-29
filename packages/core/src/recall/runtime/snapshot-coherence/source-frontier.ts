@@ -6,6 +6,7 @@ import {
   type SnapshotValidTimeDomainV1,
   type SourceFrontierDeclarationV1
 } from "./types.js";
+import { compareSnapshotInstants } from "./digest.js";
 import { requireSnapshotInstant, requireSnapshotToken } from "./tokens.js";
 
 export function createSourceFrontierDeclaration(
@@ -48,7 +49,9 @@ function freezeValidTime(domain: SnapshotValidTimeDomainV1): SnapshotValidTimeDo
   }
   const from = requireSnapshotInstant(domain.from);
   const to = requireSnapshotInstant(domain.to);
-  if (!(from < to)) rejectSnapshotCoherence("mixed_operator_generation", "valid time bounds");
+  if (compareSnapshotInstants(from, to) >= 0) {
+    rejectSnapshotCoherence("mixed_operator_generation", "valid time bounds");
+  }
   return Object.freeze({ kind: "bounded" as const, from, to });
 }
 

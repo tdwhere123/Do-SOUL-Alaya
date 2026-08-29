@@ -1,4 +1,4 @@
-import { unavailableProducerDigest } from "./digest.js";
+import { compareSnapshotInstants, unavailableProducerDigest } from "./digest.js";
 import { derivedSources } from "./sources.js";
 import type {
   SnapshotCoherenceState,
@@ -91,8 +91,9 @@ function exactTimeMismatch(
 
 function validTimeContains(domain: SnapshotValidTimeDomainV1, asOf: string): boolean {
   if (domain.kind === "timeless") return true;
-  if (domain.kind === "open") return domain.from <= asOf;
-  return domain.from <= asOf && asOf < domain.to;
+  if (domain.kind === "open") return compareSnapshotInstants(domain.from, asOf) <= 0;
+  return compareSnapshotInstants(domain.from, asOf) <= 0
+    && compareSnapshotInstants(asOf, domain.to) < 0;
 }
 
 function collectLagBounds(

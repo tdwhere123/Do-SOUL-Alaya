@@ -7,6 +7,7 @@ import {
   CanonicalQueryContractError,
   type CanonicalAnswerProgramV1,
   type CanonicalCompletionV1,
+  type CanonicalConstantV1,
   type CanonicalConstraintV1,
   type CanonicalPredicateV1,
   type CanonicalQueryUnsupportedCode,
@@ -17,6 +18,7 @@ import {
 
 export type CanonicalQueryInputV1 = Readonly<{
   readonly variables: readonly CanonicalVariableV1[];
+  readonly constants?: readonly CanonicalConstantV1[];
   readonly predicates?: readonly CanonicalPredicateV1[];
   readonly constraints?: readonly CanonicalConstraintV1[];
   readonly answer?: CanonicalAnswerProgramV1;
@@ -48,16 +50,18 @@ export function createCanonicalQueryV1(input: CanonicalQueryInputV1 & {
   readonly answer: CanonicalAnswerProgramV1;
 }): CanonicalQueryV1 {
   const variables = freezeVariables(input.variables);
+  const constants = freezeConstants(input.constants ?? []);
   const predicates = freezePredicates(input.predicates ?? []);
   const constraints = freezeConstraints(input.constraints ?? []);
   assertLimits(variables, predicates, constraints, input.answer);
-  const names = new Map(variables.map((variable) => [variable.name, variable]));
+  const names = bindNames(variables, constants);
   bindPhi(predicates, constraints, names);
   bindAnswer(input.answer, names, { extrema: 0, depth: 0 });
   const query = Object.freeze({
     schema_version: 1 as const,
     operator_id: CANONICAL_QUERY_OPERATOR_ID,
     variables,
+    constants,
     predicates,
     constraints,
     answer: freezeAnswer(input.answer)
@@ -123,16 +127,70 @@ function freezeVariables(
   }));
 }
 
+function freezeConstants(
+  constants: readonly CanonicalConstantV1[]
+): readonly CanonicalConstantV1[] {
+  const names = new Set<string>();
+  return Object.freeze(constants.map((constant) => {
+    const name = requireToken(constant.name);
+    const value = requireToken(constant.value);
+    if (names.has(name)) throw new CanonicalQueryContractError("undeclared_variable");
+    if (constant.sort !== "entity" && constant.sort !== "scalar" && constant.sort !== "time") {
+      throw new CanonicalQueryContractError("invalid_sort");
+    }
+    names.add(name);
+    return Object.freeze({ name, sort: constant.sort, value });
+  }));
+}
+
+type NameBinding =
+  | Readonly<{ readonly kind: "variable"; readonly sort: CanonicalVariableV1["sort"] }>
+  | Readonly<{ readonly kind: "constant"; readonly sort: CanonicalConstantV1["sort"] }>;
+
+function bindNames(
+  variables: readonly CanonicalVariableV1[],
+  constants: readonly CanonicalConstantV1[]
+): ReadonlyMap<string, NameBinding> {
+  const names = new Map<string, NameBinding>();
+  for (const variable of variables) {
+    names.set(variable.name, Object.freeze({ kind: "variable", sort: variable.sort }));
+  }
+  for (const constant of constants) {
+    if (names.has(constant.name)) {
+      throw new CanonicalQueryContractError("undeclared_variable");
+    }
+    names.set(constant.name, Object.freeze({ kind: "constant", sort: constant.sort }));
+  }
+  return names;
+}
+
 function freezePredicates(
   predicates: readonly CanonicalPredicateV1[]
 ): readonly CanonicalPredicateV1[] {
   const ids = uniqueAtomIds(predicates, "predicate");
-  return Object.freeze(predicates.map((predicate) => Object.freeze({
-    ...predicate,
-    id: ids.get(predicate.id) ?? predicate.id,
-    relation: requireToken(predicate.relation),
-    arguments: Object.freeze(predicate.arguments.map(requireToken))
-  })));
+  return Object.freeze(predicates.map((predicate) => {
+    const frozen: CanonicalPredicateV1 = {
+      id: ids.get(predicate.id) ?? predicate.id,
+      relation: requireToken(predicate.relation),
+      arguments: Object.freeze(predicate.arguments.map(requireToken))
+    };
+    if (predicate.provenance !== undefined) {
+      return Object.freeze({
+        ...frozen,
+        provenance: freezeProvenance(predicate.provenance)
+      });
+    }
+    return Object.freeze(frozen);
+  }));
+}
+
+function freezeProvenance(
+  provenance: CanonicalPredicateV1["provenance"] & object
+): NonNullable<CanonicalPredicateV1["provenance"]> {
+  return Object.freeze({
+    source_id: requireToken(provenance.source_id),
+    producer: requireToken(provenance.producer)
+  });
 }
 
 function freezeConstraints(
@@ -181,16 +239,16 @@ function assertLimits(
 function bindPhi(
   predicates: readonly CanonicalPredicateV1[],
   constraints: readonly CanonicalConstraintV1[],
-  names: ReadonlyMap<string, CanonicalVariableV1>
+  names: ReadonlyMap<string, NameBinding>
 ): void {
   for (const atom of [...predicates, ...constraints]) {
-    for (const argument of atom.arguments) requireVariable(argument, names);
+    for (const argument of atom.arguments) requireName(argument, names);
   }
 }
 
 function bindAnswer(
   answer: CanonicalAnswerProgramV1,
-  names: ReadonlyMap<string, CanonicalVariableV1>,
+  names: ReadonlyMap<string, NameBinding>,
   walk: { extrema: number; depth: number }
 ): void {
   const depth = walk.depth + 1;
@@ -219,15 +277,26 @@ function bindAnswer(
   }
 }
 
-function requireVariable(
+function requireName(
   name: string,
-  names: ReadonlyMap<string, CanonicalVariableV1>
-): CanonicalVariableV1 {
-  const variable = names.get(name);
-  if (variable === undefined) {
+  names: ReadonlyMap<string, NameBinding>
+): NameBinding {
+  const binding = names.get(name);
+  if (binding === undefined) {
     throw new CanonicalQueryContractError("undeclared_variable");
   }
-  return variable;
+  return binding;
+}
+
+function requireVariable(
+  name: string,
+  names: ReadonlyMap<string, NameBinding>
+): Extract<NameBinding, { kind: "variable" }> {
+  const binding = requireName(name, names);
+  if (binding.kind !== "variable") {
+    throw new CanonicalQueryContractError("undeclared_variable");
+  }
+  return binding;
 }
 
 function freezeAnswer(answer: CanonicalAnswerProgramV1): CanonicalAnswerProgramV1 {
@@ -341,6 +410,9 @@ function normalizeCanonicalQuery(query: CanonicalQueryV1): CanonicalQueryV1 {
     ...query,
     variables: Object.freeze(
       [...query.variables].sort((left, right) => left.name.localeCompare(right.name))
+    ),
+    constants: Object.freeze(
+      [...query.constants].sort((left, right) => left.name.localeCompare(right.name))
     ),
     predicates: Object.freeze(
       [...query.predicates].sort((left, right) => left.id.localeCompare(right.id))

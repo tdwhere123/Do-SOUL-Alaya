@@ -1,5 +1,6 @@
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../field/field-identity.js";
+import { stableStringify } from "../../../shared/stable-stringify.js";
 import type { SnapshotCoherenceReceiptV1 } from
   "../../runtime/snapshot-coherence/index.js";
 import {
@@ -13,6 +14,7 @@ import {
   type CanonicalQueryEvidenceV1,
   type CanonicalQueryUnresolvedV1
 } from "./compile.js";
+import { validateCanonicalQueryV1 } from "./validate.js";
 
 export const QUERY_HOLE_IMPACTS = [
   "blocks_membership",
@@ -49,6 +51,16 @@ export type CanonicalQueryIdentityV1 = Readonly<{
   readonly query_cache_key: string;
 }>;
 
+export type CanonicalQuerySensitivityV1 = Readonly<{
+  readonly effect:
+    | "answer_binding"
+    | "answer_position"
+    | "proposition_bound"
+    | "extremum_range"
+    | "completion_scope";
+  readonly target: string;
+}>;
+
 export const UNBOUND_CANONICAL_QUERY_IDENTITY: CanonicalQueryIdentityV1 = Object.freeze({
   condition_identity: "unbound",
   query_operator_id: "unbound",
@@ -66,7 +78,7 @@ export type CanonicalQueryCompilationV1 = Readonly<{
   readonly holes: readonly CanonicalQueryHoleV1[];
   readonly compile_status: CanonicalQueryCompileStatusV1;
   readonly hypothetical_mode: CanonicalQueryHypotheticalModeV1;
-  readonly sensitivities: readonly string[];
+  readonly sensitivities: readonly CanonicalQuerySensitivityV1[];
   readonly snapshot_receipt_digest: RecallFieldDigest;
   readonly query_identity: CanonicalQueryIdentityV1;
   readonly digest: RecallFieldDigest;
@@ -92,7 +104,7 @@ export function compileCanonicalQueryCompilation(
     holes,
     compile_status,
     hypothetical_mode: hypotheticalMode(compile_status, holes),
-    sensitivities: Object.freeze(collectSensitivities(compiled)),
+    sensitivities: collectSensitivities(compiled.hypotheses),
     snapshot_receipt_digest: snapshot.receipt_digest,
     query_identity: bindQueryIdentity(evidence.query_identity)
   });
@@ -105,7 +117,20 @@ export function compileCanonicalQueryCompilation(
 export function verifyCanonicalQueryCompilationV1(
   compilation: CanonicalQueryCompilationV1
 ): void {
-  const body = {
+  verifyHypotheses(compilation.hypotheses);
+  verifyRequiredHoles(compilation);
+  verifyHoleImpacts(compilation.holes);
+  verifyCompileDisposition(compilation);
+  verifySensitivities(compilation);
+  if (digestRecallFieldIdentity(compilationBody(compilation)) !== compilation.digest) {
+    throw new Error("canonical query compilation digest mismatch");
+  }
+}
+
+function compilationBody(
+  compilation: CanonicalQueryCompilationV1
+): Omit<CanonicalQueryCompilationV1, "digest"> {
+  return {
     schema_version: compilation.schema_version,
     operator_id: compilation.operator_id,
     hypotheses: compilation.hypotheses,
@@ -119,8 +144,58 @@ export function verifyCanonicalQueryCompilationV1(
     snapshot_receipt_digest: compilation.snapshot_receipt_digest,
     query_identity: compilation.query_identity
   };
-  if (digestRecallFieldIdentity(body) !== compilation.digest) {
-    throw new Error("canonical query compilation digest mismatch");
+}
+
+function verifyHypotheses(hypotheses: readonly CanonicalQueryV1[]): void {
+  for (const hypothesis of hypotheses) {
+    if (validateCanonicalQueryV1(hypothesis).status !== "supported") {
+      throw new Error("canonical query compilation hypothesis invalid");
+    }
+  }
+}
+
+function verifyRequiredHoles(compilation: CanonicalQueryCompilationV1): void {
+  const required = [
+    ...compilation.unresolved.map((item) => holeFromUnresolved(item)),
+    ...completenessHoles(compilation.hypotheses)
+  ];
+  for (const hole of required) {
+    const found = compilation.holes.find((row) =>
+      row.code === hole.code && row.provenance === hole.provenance
+    );
+    if (found === undefined) {
+      throw new Error("canonical query compilation hole disappeared");
+    }
+    if (stableStringify([...found.impacts]) !== stableStringify([...hole.impacts])) {
+      throw new Error("canonical query compilation hole impact mismatch");
+    }
+  }
+}
+
+function verifyHoleImpacts(holes: readonly CanonicalQueryHoleV1[]): void {
+  for (const hole of holes) {
+    if (stableStringify([...hole.impacts]) !== stableStringify(impactsFor(hole.code))) {
+      throw new Error("canonical query compilation hole impact mismatch");
+    }
+  }
+}
+
+function verifyCompileDisposition(compilation: CanonicalQueryCompilationV1): void {
+  const status = compileStatus(compilation.hypotheses, compilation.holes);
+  if (compilation.compile_status !== status) {
+    throw new Error("canonical query compilation status mismatch");
+  }
+  if (compilation.hypothetical_mode !== hypotheticalMode(status, compilation.holes)) {
+    throw new Error("canonical query compilation mode mismatch");
+  }
+}
+
+function verifySensitivities(compilation: CanonicalQueryCompilationV1): void {
+  if (
+    stableStringify(compilation.sensitivities)
+    !== stableStringify(collectSensitivities(compilation.hypotheses))
+  ) {
+    throw new Error("canonical query compilation sensitivities mismatch");
   }
 }
 
@@ -154,13 +229,18 @@ function snapshotHoles(
 }
 
 function collectHoles(compiled: CanonicalQueryCompileV1): CanonicalQueryHoleV1[] {
-  const holes = compiled.unresolved.map((item) => holeFromUnresolved(item));
-  for (const query of compiled.hypotheses) {
-    if (usesAllObservable(query.answer)) {
-      holes.push(holeFromCode("blocks_completeness_claim", "completion"));
-    }
-  }
-  return holes;
+  return [
+    ...compiled.unresolved.map((item) => holeFromUnresolved(item)),
+    ...completenessHoles(compiled.hypotheses)
+  ];
+}
+
+function completenessHoles(
+  hypotheses: readonly CanonicalQueryV1[]
+): CanonicalQueryHoleV1[] {
+  return hypotheses.flatMap((query) => usesAllObservable(query.answer)
+    ? [holeFromCode("blocks_completeness_claim", "completion")]
+    : []);
 }
 
 function usesAllObservable(answer: CanonicalAnswerProgramV1): boolean {
@@ -239,11 +319,57 @@ function hypotheticalMode(
   return "unsupported";
 }
 
-function collectSensitivities(compiled: CanonicalQueryCompileV1): string[] {
-  const names = new Set<string>(compiled.provenance);
-  for (const query of compiled.hypotheses) {
-    names.add(query.answer.kind);
-    for (const predicate of query.predicates) names.add(predicate.relation);
+function collectSensitivities(
+  hypotheses: readonly CanonicalQueryV1[]
+): readonly CanonicalQuerySensitivityV1[] {
+  const rows: CanonicalQuerySensitivityV1[] = [];
+  const seen = new Set<string>();
+  const add = (
+    effect: CanonicalQuerySensitivityV1["effect"],
+    target: string
+  ): void => {
+    const key = `${effect}:${target}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(Object.freeze({ effect, target }));
+  };
+  for (const query of hypotheses) {
+    collectAnswerSensitivities(query.answer, add);
+    for (const predicate of query.predicates) {
+      add("proposition_bound", predicate.relation);
+      predicate.arguments.forEach((argument, index) => {
+        if (isAnswerVariable(query.answer, argument)) {
+          add("answer_position", `${predicate.id}:${String(index)}`);
+        }
+      });
+    }
   }
-  return [...names].sort();
+  return Object.freeze(rows.sort((left, right) =>
+    left.effect.localeCompare(right.effect) || left.target.localeCompare(right.target)
+  ));
+}
+
+function collectAnswerSensitivities(
+  answer: CanonicalAnswerProgramV1,
+  add: (effect: CanonicalQuerySensitivityV1["effect"], target: string) => void
+): void {
+  if (answer.kind === "scalar" || answer.kind === "distinct" || answer.kind === "sequence") {
+    add("answer_binding", answer.variable);
+  }
+  if (answer.kind === "distinct" || answer.kind === "sequence") {
+    add("completion_scope", answer.completion.kind);
+  }
+  if (answer.kind === "argmax" || answer.kind === "argmin" || answer.kind === "sequence") {
+    add("extremum_range", answer.order_key);
+  }
+  if (answer.kind === "argmax" || answer.kind === "argmin") {
+    collectAnswerSensitivities(answer.inner, add);
+  }
+}
+
+function isAnswerVariable(answer: CanonicalAnswerProgramV1, name: string): boolean {
+  if (answer.kind === "scalar" || answer.kind === "distinct" || answer.kind === "sequence") {
+    return answer.variable === name;
+  }
+  return isAnswerVariable(answer.inner, name);
 }

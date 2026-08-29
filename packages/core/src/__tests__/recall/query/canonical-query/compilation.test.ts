@@ -13,7 +13,8 @@ import {
   compileCanonicalQueryCompilation,
   impactsFor,
   QUERY_HOLE_IMPACTS,
-  verifyCanonicalQueryCompilationV1
+  verifyCanonicalQueryCompilationV1,
+  type CanonicalQueryCompilationV1
 } from "../../../../recall/query/canonical-query/index.js";
 
 const BOOKSHELF = "Where did I buy my new bookshelf from?";
@@ -193,6 +194,53 @@ describe("canonical query compilation holes", () => {
     expect(compiled.compile_status).not.toBe("certified_program");
   });
 
+  it("rejects hole deletion and silent impact mutation after digest recompute", () => {
+    const compiled = compileCanonicalQueryCompilation({
+      probes: compileRecallQueryProbes("How many places did I visit?")
+    }, SNAPSHOT);
+    expect(compiled.holes.length).toBeGreaterThan(0);
+    expect(() => verifyCanonicalQueryCompilationV1(compiled)).not.toThrow();
+    const deleted = {
+      ...compiled,
+      holes: compiled.holes.slice(1)
+    };
+    expect(() => verifyCanonicalQueryCompilationV1({
+      ...deleted,
+      digest: digestRecallFieldIdentity(compilationBody(deleted))
+    })).toThrow(/hole disappeared|impact mismatch/u);
+    const mutated = {
+      ...compiled,
+      holes: compiled.holes.map((hole, index) => index === 0
+        ? { ...hole, impacts: [] }
+        : hole)
+    };
+    expect(() => verifyCanonicalQueryCompilationV1({
+      ...mutated,
+      digest: digestRecallFieldIdentity(compilationBody(mutated))
+    })).toThrow(/impact mismatch/u);
+  });
+
+  it("derives bounded decision effects only from Q_q", () => {
+    const compiled = compileCanonicalQueryCompilation({
+      probes: compileRecallQueryProbes(BOOKSHELF),
+      demand: EMPTY_DEMAND
+    }, SNAPSHOT);
+    expect(compiled.sensitivities.every((row) => [
+      "answer_binding",
+      "answer_position",
+      "proposition_bound",
+      "extremum_range",
+      "completion_scope"
+    ].includes(row.effect))).toBe(true);
+    expect(compiled.sensitivities.some((row) =>
+      row.target === "probes" || row.target === "demand" || row.target === "shape"
+    )).toBe(false);
+    expect(compiled.sensitivities.some((row) =>
+      row.effect === "proposition_bound" && row.target === "buy"
+    )).toBe(true);
+    expect(compiled.sensitivities.some((row) => row.effect === "answer_binding")).toBe(true);
+  });
+
   it("counts silent empty-demand fallbacks as zero on the golden corpus", () => {
     const corpus = [
       BOOKSHELF,
@@ -326,6 +374,13 @@ function formedOsf(source: string, propositions: 1 | 2) {
       }
     }
   });
+}
+
+function compilationBody(
+  compilation: CanonicalQueryCompilationV1
+): Omit<CanonicalQueryCompilationV1, "digest"> {
+  const { digest: _digest, ...body } = compilation;
+  return body;
 }
 
 function argument(

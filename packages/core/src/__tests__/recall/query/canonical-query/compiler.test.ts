@@ -173,6 +173,10 @@ describe("canonical query compiler adapters", () => {
       .find((predicate) => predicate.provenance?.producer
         === QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID);
     expect(frameRelation?.relation).toBe("buy");
+    expect(frameRelation?.arguments).toEqual(["bookshelf", "x0"]);
+    expect(compiled.hypotheses.some((query) =>
+      query.constants.some((constant) => constant.value === "bookshelf")
+    )).toBe(true);
     expect(compiled.unresolved.some((row) => row.code === "unadapted_fact_frame"))
       .toBe(false);
   });
@@ -187,7 +191,21 @@ describe("canonical query compiler adapters", () => {
       .find((predicate) => predicate.provenance?.source_id.startsWith("osf.relation.")
         === true);
     expect(osfRelation?.relation).toBe("buy");
+    expect(osfRelation?.arguments).toEqual(["bookshelf", "x0"]);
+    expect(compiled.hypotheses.some((query) =>
+      query.constants.some((constant) => constant.value === "bookshelf")
+    )).toBe(true);
     expect(compiled.unresolved.some((row) => row.code === "unadapted_osf")).toBe(false);
+  });
+
+  it("does not flatten distinct to scalar when the observer is missing", () => {
+    const compiled = compileCanonicalQueryEvidence({
+      probes: compileRecallQueryProbes("How many different doctors did I visit?"),
+      demand: EMPTY_DEMAND,
+      factFrameCapture: returnedFactFrame([buyFrame()])
+    });
+    expect(compiled.unresolved.some((row) => row.code === "unknown_scope")).toBe(true);
+    expect(compiled.hypotheses.every((query) => query.answer.kind !== "scalar")).toBe(true);
   });
 
   it("keeps conflicting shape and fact-frame relations as two hypotheses", () => {

@@ -31,6 +31,7 @@ export {
 export {
   PREPARE_RETRIEVAL_CHANNEL_OWNERS,
   capturePreparedSnapshotCoherenceReceipt,
-  capturePreparedSnapshotVector
+  capturePreparedSnapshotVector,
+  digestRecallDecisionContractV1
 } from "./prepare-adapter.js";
 export { unavailableProducerDigest } from "./digest.js";

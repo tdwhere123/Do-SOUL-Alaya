@@ -4,6 +4,7 @@ export {
   CanonicalQueryContractError,
   type CanonicalAnswerProgramV1,
   type CanonicalCompletionV1,
+  type CanonicalConstantV1,
   type CanonicalConstraintV1,
   type CanonicalEvidenceProvenanceV1,
   type CanonicalPredicateV1,
@@ -38,5 +39,6 @@ export {
   type CanonicalQueryHoleV1,
   type CanonicalQueryHypotheticalModeV1,
   type CanonicalQueryIdentityV1,
+  type CanonicalQuerySensitivityV1,
   type QueryHoleImpactV1
 } from "./compilation.js";

@@ -9,12 +9,16 @@ import {
   semanticDemandKindForRole,
   type FactFrameSemanticFactor
 } from "../../../field/fact-frame-semantic-factors.js";
-import type { CanonicalAnswerProgramV1 } from "../types.js";
+import type {
+  CanonicalAnswerProgramV1,
+  CanonicalConstantV1,
+  CanonicalPredicateV1
+} from "../types.js";
 import {
   captureDigest,
+  naryPredicate,
   pushSupportedQuery,
   pushUnresolved,
-  unaryPredicate,
   type AdapterSink
 } from "./phi.js";
 
@@ -22,7 +26,7 @@ const PRODUCER = QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID;
 
 export function adaptFactFrameCapture(
   capture: unknown,
-  answer: CanonicalAnswerProgramV1,
+  answer: CanonicalAnswerProgramV1 | null,
   sink: AdapterSink
 ): void {
   if (capture === undefined || capture === null) return;
@@ -34,7 +38,6 @@ export function adaptFactFrameCapture(
     pushUnadapted(capture, sink);
     return;
   }
-  const adapted = adaptReturnedFrames(capture, answer, sink);
   if (capture.frames.length > 1) {
     // v1 has no join lattice, so source order cannot pick one frame.
     pushUnresolved(sink.unresolved, {
@@ -43,6 +46,8 @@ export function adaptFactFrameCapture(
       capture_digest: captureDigest(capture)
     });
   }
+  if (answer === null) return;
+  const adapted = adaptReturnedFrames(capture, answer, sink);
   if (!adapted) pushUnadapted(capture, sink);
 }
 
@@ -67,19 +72,15 @@ function adaptFrame(
 ): boolean {
   const factors = cleanedFactors(frame, frameIndex);
   pushTimeHoles(frame, sink);
-  const predicates = factors.flatMap((factor) =>
-    factorPredicate(factor, frameIndex, producerOf(capture))
-  );
-  const hasRelation = predicates.some((predicate) =>
-    predicate.provenance?.source_id.startsWith("fact_frame.relation.") === true
-  );
-  if (!hasRelation) return false;
+  const program = frameProgram(factors, frameIndex, producerOf(capture));
+  if (program === null) return false;
   return pushSupportedQuery(
-    predicates,
+    program.predicates,
     answer,
     { source_id: `fact_frame.${frameIndex}`, producer: producerOf(capture) },
     sink,
-    "fact_frame"
+    "fact_frame",
+    { constants: program.constants }
   );
 }
 
@@ -93,22 +94,48 @@ function cleanedFactors(
   });
 }
 
-function factorPredicate(
-  factor: Readonly<FactFrameSemanticFactor>,
+function frameProgram(
+  factors: readonly FactFrameSemanticFactor[],
   frameIndex: number,
   producer: string
-) {
-  const kind = semanticDemandKindForRole(factor.role);
-  if (kind !== "relation" && kind !== "entity") return [];
-  if (factor.normalized_text.length === 0) return [];
-  const source = kind === "relation"
-    ? `fact_frame.relation.${frameIndex}.${factor.slot_index}`
-    : `fact_frame.entity.${frameIndex}.${factor.slot_index}`;
-  return [unaryPredicate(
-    `ff${frameIndex}s${factor.slot_index}`,
-    factor.normalized_text,
-    { source_id: source, producer }
-  )];
+): {
+  readonly predicates: readonly CanonicalPredicateV1[];
+  readonly constants: readonly CanonicalConstantV1[];
+} | null {
+  const relation = factors.find((factor) => semanticDemandKindForRole(factor.role) === "relation");
+  if (relation === undefined || relation.normalized_text.length === 0) return null;
+  const constants = constantsFromEntities(factors);
+  const arguments_ = [...constants.map((constant) => constant.name), "x0"];
+  return {
+    constants,
+    predicates: [naryPredicate(
+      `ff${frameIndex}`,
+      relation.normalized_text,
+      arguments_,
+      {
+        source_id: `fact_frame.relation.${frameIndex}.${relation.slot_index}`,
+        producer
+      }
+    )]
+  };
+}
+
+function constantsFromEntities(
+  factors: readonly FactFrameSemanticFactor[]
+): CanonicalConstantV1[] {
+  const seen = new Set<string>();
+  const constants: CanonicalConstantV1[] = [];
+  for (const factor of factors) {
+    if (semanticDemandKindForRole(factor.role) !== "entity") continue;
+    if (factor.normalized_text.length === 0 || seen.has(factor.normalized_text)) continue;
+    seen.add(factor.normalized_text);
+    constants.push(Object.freeze({
+      name: factor.normalized_text,
+      sort: "entity" as const,
+      value: factor.normalized_text
+    }));
+  }
+  return constants;
 }
 
 function pushTimeHoles(

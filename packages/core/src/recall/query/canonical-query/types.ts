@@ -19,6 +19,12 @@ export type CanonicalVariableV1 = Readonly<{
   readonly sort: CanonicalVariableSortV1;
 }>;
 
+export type CanonicalConstantV1 = Readonly<{
+  readonly name: string;
+  readonly sort: Extract<CanonicalVariableSortV1, "entity" | "scalar" | "time">;
+  readonly value: string;
+}>;
+
 export type CanonicalEvidenceProvenanceV1 = Readonly<{
   readonly source_id: string;
   readonly producer: string;
@@ -76,6 +82,7 @@ export type CanonicalQueryV1 = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof CANONICAL_QUERY_OPERATOR_ID;
   readonly variables: readonly CanonicalVariableV1[];
+  readonly constants: readonly CanonicalConstantV1[];
   readonly predicates: readonly CanonicalPredicateV1[];
   readonly constraints: readonly CanonicalConstraintV1[];
   readonly answer: CanonicalAnswerProgramV1;
