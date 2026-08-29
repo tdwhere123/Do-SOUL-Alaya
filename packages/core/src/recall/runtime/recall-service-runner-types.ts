@@ -50,6 +50,12 @@ import type { SelectGammaSynthesisDependencies } from
   "../delivery/select-gamma/synthesis-adapter.js";
 import type { RecallRequestTimeContext } from "./query/recall-request-time.js";
 import type { RecallReadSnapshotPort } from "./recall-read-snapshot.js";
+import type {
+  SnapshotCoherenceReceiptV1,
+  SnapshotReadLeaseV1
+} from "./snapshot-coherence/index.js";
+import type { CanonicalQueryCompilationV1 } from
+  "../query/canonical-query/index.js";
 
 export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
 
@@ -133,6 +139,9 @@ export interface PreparedRecallRequest {
   readonly querySemanticFactorCompletenessReceipt?: Readonly<
     import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
   > | null;
+  readonly snapshotCoherenceReceipt: SnapshotCoherenceReceiptV1;
+  readonly snapshotReadLease: SnapshotReadLeaseV1;
+  readonly canonicalQueryCompilation: CanonicalQueryCompilationV1;
 }
 
 type PreparedRecallSupplementaryData = Parameters<typeof fineAssess>[0]["supplementaryData"];

@@ -42,7 +42,16 @@ export interface TestOnlyInMemoryFieldQuerySession extends RecallFieldQuerySessi
 export function createTestOnlyInMemoryFieldQuerySession(
   sha256: FieldContractSha256
 ): TestOnlyInMemoryFieldQuerySession {
-  const store = new InMemoryProjectionGenerationStore(sha256);
+  return createTestOnlyInMemoryFieldQuerySessionWithStore(
+    sha256,
+    new InMemoryProjectionGenerationStore(sha256)
+  );
+}
+
+export function createTestOnlyInMemoryFieldQuerySessionWithStore(
+  sha256: FieldContractSha256,
+  store: InMemoryProjectionGenerationStore
+): TestOnlyInMemoryFieldQuerySession {
   return {
     activateEmptyGeneration(workspaceId, recordedAt) {
       return activateTestOnlyEmptyGeneration(store, sha256, workspaceId, recordedAt);
@@ -100,6 +109,17 @@ export function createSeededTestOnlyInMemoryFieldQuerySession(
   recordedAt = "1970-01-01T00:00:00.000Z"
 ): TestOnlyInMemoryFieldQuerySession {
   const session = createTestOnlyInMemoryFieldQuerySession(sha256);
+  session.activateEmptyGeneration(workspaceId, recordedAt);
+  return session;
+}
+
+export function createSeededTestOnlyInMemoryFieldQuerySessionWithStore(
+  sha256: FieldContractSha256,
+  workspaceId: string,
+  store: InMemoryProjectionGenerationStore,
+  recordedAt = "1970-01-01T00:00:00.000Z"
+): TestOnlyInMemoryFieldQuerySession {
+  const session = createTestOnlyInMemoryFieldQuerySessionWithStore(sha256, store);
   session.activateEmptyGeneration(workspaceId, recordedAt);
   return session;
 }
