@@ -23,3 +23,12 @@ export {
   type SupportNodeKind,
   type SupportNodeV1
 } from "./types.js";
+export {
+  materializeSupportFromReceipts,
+  type SupportMaterializationV1
+} from "./adapters/materialize.js";
+export type {
+  SupportCandidateReceiptV1,
+  SupportMaterializationInputV1,
+  SupportObservabilityGapV1
+} from "./adapters/types.js";
