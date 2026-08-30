@@ -204,7 +204,7 @@ function requireVerifiedOsfComposition(
       "support measurement source lacks a verified OSF composition receipt");
   }
   try {
-    return verifyOpenSemanticFactorComposition({
+    const composition = verifyOpenSemanticFactorComposition({
       receipt: evidence.osf_composition,
       trace: evidence.osf_composition_trace,
       query_capture: evidence.osf_query_capture,
@@ -212,11 +212,31 @@ function requireVerifiedOsfComposition(
         ? {}
         : { evidence_formations: evidence.osf_evidence_formations })
     });
+    const current = currentQueryOsfCaptureDigest(evidence.canonical_query_evidence);
+    if (current === undefined ||
+        evidence.osf_query_capture.capture_digest !== current ||
+        composition.query_capture_digest !== current) {
+      throw new ShadowContractError(
+        "osf composition is not bound to the current query capture");
+    }
+    return composition;
   } catch (error) {
+    if (error instanceof ShadowContractError) throw error;
     throw new ShadowContractError(error instanceof Error
       ? error.message
       : "osf composition receipt is not verified");
   }
+}
+
+function currentQueryOsfCaptureDigest(
+  evidence: PreparedMeasurementAuthorityEvidenceV1["canonical_query_evidence"]
+): string | undefined {
+  const capture = evidence.osfCapture;
+  if (capture == null) return undefined;
+  const digest = capture.capture_digest;
+  return typeof digest === "string" && /^sha256:[0-9a-f]{64}$/u.test(digest)
+    ? digest
+    : undefined;
 }
 
 function matchingBoundWitnesses(

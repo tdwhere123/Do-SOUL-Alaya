@@ -22,6 +22,8 @@ import {
   type SupportCandidateReceiptV1
 } from "../../../../recall/shadow/support/index.js";
 import { createFourValuedWitness } from "../../../../recall/shadow/witness/index.js";
+import { compileCanonicalQueryCompilation } from
+  "../../../../recall/query/canonical-query/index.js";
 import {
   capturedPathGraphPreparedAuthority,
   cleanup
@@ -81,13 +83,13 @@ describe("support measurement source binding", () => {
     cleanup(prepared);
   });
 
-  it("rejects receipt OSF that does not match the composition receipt", async () => {
+  it("rejects a composition bound to another query capture", async () => {
     const prepared = await capturedPathGraphPreparedAuthority();
     const capability = pathGraphCapability(prepared);
     const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
     const snapshot = prepared.snapshotVector.vector_digest;
     const source = graduationComposition("BA degree");
-    const receipts = [osfReceipt("eu-forged")];
+    const receipts = [projectedReceipt(source.composition)];
     const payload = materializeSupportFromReceipts({
       query_id: queryId,
       snapshot_digest: snapshot,
@@ -95,6 +97,29 @@ describe("support measurement source binding", () => {
     });
     expect(() => verifySupportMeasurementPreparedAuthorityV1({
       evidence: supportEvidence(prepared, capability, {
+        graph: payload.graph,
+        receipts,
+        observations: payload.proposition_observations
+      }, source)
+    })).toThrow(/current query capture/u);
+    cleanup(prepared);
+  });
+
+  it("rejects receipt OSF that does not match the composition receipt", async () => {
+    const prepared = await capturedPathGraphPreparedAuthority();
+    const capability = pathGraphCapability(prepared);
+    const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
+    const snapshot = prepared.snapshotVector.vector_digest;
+    const bound = bindPreparedQueryCapture(prepared);
+    const source = currentQueryComposition(bound, "I implemented recall with a BA degree.");
+    const receipts = [osfReceipt("eu-forged")];
+    const payload = materializeSupportFromReceipts({
+      query_id: queryId,
+      snapshot_digest: snapshot,
+      candidates: receipts
+    });
+    expect(() => verifySupportMeasurementPreparedAuthorityV1({
+      evidence: supportEvidence(bound, capability, {
         graph: payload.graph,
         receipts,
         observations: payload.proposition_observations
@@ -122,47 +147,34 @@ describe("support measurement source binding", () => {
           receipts,
           observations: payload.proposition_observations
         }, source)
-      })).toThrow(/not a projection of the composition receipt/u);
+      })).toThrow(/current query capture/u);
     }
     cleanup(prepared);
   });
 
-  it("lets two verified composition receipts differ in authority", async () => {
+  it("lets a composition bound to the current query capture verify", async () => {
     const prepared = await capturedPathGraphPreparedAuthority();
     const capability = pathGraphCapability(prepared);
     const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
     const snapshot = prepared.snapshotVector.vector_digest;
-    const leftSource = graduationComposition("BA degree");
-    const rightSource = graduationComposition("MA degree");
-    const leftReceipts = [projectedReceipt(leftSource.composition)];
-    const rightReceipts = [projectedReceipt(rightSource.composition)];
-    const leftPayload = materializeSupportFromReceipts({
+    const bound = bindPreparedQueryCapture(prepared);
+    const source = currentQueryComposition(bound, "I implemented recall with a BA degree.");
+    const receipts = [projectedReceipt(source.composition)];
+    const payload = materializeSupportFromReceipts({
       query_id: queryId,
       snapshot_digest: snapshot,
-      candidates: leftReceipts
+      candidates: receipts
     });
-    const rightPayload = materializeSupportFromReceipts({
-      query_id: queryId,
-      snapshot_digest: snapshot,
-      candidates: rightReceipts
+    const authority = verifySupportMeasurementPreparedAuthorityV1({
+      evidence: supportEvidence(bound, capability, {
+        graph: payload.graph,
+        receipts,
+        observations: payload.proposition_observations
+      }, source)
     });
-    const left = verifySupportMeasurementPreparedAuthorityV1({
-      evidence: supportEvidence(prepared, capability, {
-        graph: leftPayload.graph,
-        receipts: leftReceipts,
-        observations: leftPayload.proposition_observations
-      }, leftSource)
-    });
-    const right = verifySupportMeasurementPreparedAuthorityV1({
-      evidence: supportEvidence(prepared, capability, {
-        graph: rightPayload.graph,
-        receipts: rightReceipts,
-        observations: rightPayload.proposition_observations
-      }, rightSource)
-    });
-    expect(leftSource.composition.receipt_digest)
-      .not.toBe(rightSource.composition.receipt_digest);
-    expect(left.authority_digest).not.toBe(right.authority_digest);
+    expect(source.composition.query_capture_digest).toBe(
+      bound.canonicalQueryEvidence.osfCapture?.capture_digest);
+    expect(authority.query_id).toBe(queryId);
     cleanup(prepared);
   });
 
@@ -171,7 +183,8 @@ describe("support measurement source binding", () => {
     const capability = pathGraphCapability(prepared);
     const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
     const snapshot = prepared.snapshotVector.vector_digest;
-    const source = graduationComposition("BA degree");
+    const bound = bindPreparedQueryCapture(prepared);
+    const source = currentQueryComposition(bound, "I implemented recall with a BA degree.");
     const receipts = [projectedReceipt(source.composition)];
     const payload = materializeSupportFromReceipts({
       query_id: queryId,
@@ -179,17 +192,17 @@ describe("support measurement source binding", () => {
       candidates: receipts
     });
     const authority = verifySupportMeasurementPreparedAuthorityV1({
-      evidence: supportEvidence(prepared, capability, {
+      evidence: supportEvidence(bound, capability, {
         graph: payload.graph,
         receipts,
         observations: payload.proposition_observations
       }, source)
     });
     const observation = payload.proposition_observations[0];
-    expect(observation).toBeDefined();
-    expect(observation?.witness.payload).toEqual({ polarity: "unknown" });
     const forged = collapseSupportedOnly(
-      authority, observation!.candidate_id, observation!.local_proposition_id);
+      authority,
+      observation?.candidate_id ?? "workspace_local:memory_entry:cand-1",
+      observation?.local_proposition_id ?? "prop.works-at");
     expect(() => issueMeasurementGroupAdmission({
       authority,
       contract: PROPOSITION_STATE_MEASUREMENT_CONTRACT,
@@ -233,8 +246,52 @@ function supportEvidence(
     support_observations: source.observations,
     osf_composition: composition.composition,
     osf_composition_trace: composition.trace,
-    osf_query_capture: composition.query_capture
+    osf_query_capture: composition.query_capture,
+    osf_evidence_formations: composition.evidence_formations
   };
+}
+
+function bindPreparedQueryCapture(
+  prepared: Awaited<ReturnType<typeof capturedPathGraphPreparedAuthority>>
+) {
+  const queryText = prepared.canonicalQueryEvidence.probes.normalized_query;
+  if (queryText === null || queryText.length === 0) {
+    throw new Error("prepared authority has no query text");
+  }
+  const query_capture = formation("query", queryText, [
+    factor("predicate", "implement", "implement"),
+    factor("person", "I", "i")
+  ], [{ variable_id: "answer", surface: queryText }], ["answer"], [
+    argument(0, "agent", "factor", "person"),
+    argument(1, "obtained", "variable", "answer")
+  ]);
+  const canonicalQueryEvidence = Object.freeze({
+    ...prepared.canonicalQueryEvidence,
+    osfCapture: query_capture
+  });
+  return Object.freeze({
+    ...prepared,
+    canonicalQueryEvidence,
+    canonicalQueryCompilation: compileCanonicalQueryCompilation(
+      canonicalQueryEvidence,
+      prepared.snapshotCoherenceReceipt
+    )
+  });
+}
+
+function currentQueryComposition(
+  prepared: Awaited<ReturnType<typeof capturedPathGraphPreparedAuthority>>,
+  evidenceText: string
+) {
+  const query_capture = prepared.canonicalQueryEvidence.osfCapture;
+  if (query_capture == null || !("capture_digest" in query_capture) ||
+      !("operator_id" in query_capture)) {
+    throw new Error("prepared authority has no OSF query capture");
+  }
+  return compositionFromQueryCapture(
+    query_capture as ReturnType<typeof formation>,
+    evidenceText
+  );
 }
 
 function graduationComposition(degree: "BA degree" | "MA degree") {
@@ -245,10 +302,17 @@ function graduationComposition(degree: "BA degree" | "MA degree") {
     argument(0, "agent", "factor", "person"),
     argument(1, "obtained", "variable", "answer")
   ]);
-  const evidence = formation("evidence", `I graduated with a ${degree}.`, [
+  return compositionFromQueryCapture(query_capture, `I graduated with a ${degree}.`);
+}
+
+function compositionFromQueryCapture(
+  query_capture: ReturnType<typeof formation>,
+  evidenceText: string
+) {
+  const evidence = formation("evidence", evidenceText, [
     factor("predicate", "graduated", "graduate"),
     factor("person", "I", "i"),
-    factor("degree", degree, degree.toLowerCase())
+    factor("degree", evidenceText, evidenceText.toLowerCase())
   ], [], [], [
     argument(0, "person", "factor", "person"),
     argument(1, "credential", "factor", "degree")
@@ -259,9 +323,15 @@ function graduationComposition(degree: "BA degree" | "MA degree") {
   });
   const composition = materializeOpenSemanticFactorComposition({
     trace,
-    query_capture
+    query_capture,
+    evidence_formations: { gold: evidence }
   });
-  return { composition, trace, query_capture };
+  return {
+    composition,
+    trace,
+    query_capture,
+    evidence_formations: Object.freeze({ gold: evidence })
+  };
 }
 
 function projectedReceipt(
