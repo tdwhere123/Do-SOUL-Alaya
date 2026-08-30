@@ -1,5 +1,5 @@
 import type { SupportDraft } from "./draft.js";
-import { addEdge, addGap, addNode } from "./draft.js";
+import { addEdge, addGap, addNode, recordEvidenceLineage } from "./draft.js";
 import type {
   SupportCandidateReceiptV1,
   SupportOsfBindingV1,
@@ -123,5 +123,5 @@ function recordOsfLineage(draft: SupportDraft, binding: SupportOsfBindingV1): vo
     "source_lineage",
     binding.source_lineage_id
   );
-  draft.evidenceLineage.set(binding.evidence_id, binding.source_lineage_id);
+  recordEvidenceLineage(draft, binding.evidence_id, binding.source_lineage_id);
 }

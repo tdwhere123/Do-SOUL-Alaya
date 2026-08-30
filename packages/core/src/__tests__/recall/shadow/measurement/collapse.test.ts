@@ -171,7 +171,7 @@ describe("measurement group collapse", () => {
     expect(intersection.digest).not.toBe(agreement.digest);
   });
 
-  it("applies proved_lower_max with a declared upper rule and existential nested proof", () => {
+  it("takes the sound maximum of overlapping intervals and preserves existential nesting", () => {
     const lowerMax = collapseMeasurementGroup({
       contract: createMeasurementGroupContractV1({
         ...BASE,
@@ -181,7 +181,7 @@ describe("measurement group collapse", () => {
     });
     expect(lowerMax.status).toBe("collapsed");
     if (lowerMax.status === "collapsed") {
-      expect(lowerMax.witness.payload).toEqual({ lower: 3, upper: 8 });
+      expect(lowerMax.witness.payload).toEqual({ lower: 3, upper: 9 });
     }
     const nested = collapseMeasurementGroup({
       contract: createMeasurementGroupContractV1({
@@ -211,19 +211,40 @@ describe("measurement group collapse", () => {
     }).status).toBe("conflict");
   });
 
-  it("returns typed operator results instead of throwing on unsound composition", () => {
+  it("takes the sound maximum of disjoint intervals independent of input order", () => {
     const lowerMax = createMeasurementGroupContractV1({
       ...BASE,
       combine_operator: "proved_lower_max"
     });
-    expect(() => collapseMeasurementGroup({
+    const forward = collapseMeasurementGroup({
       contract: lowerMax,
       observations: [numeric("c1", 1, 2), numeric("c2", 4, 5)]
-    })).not.toThrow();
-    expect(collapseMeasurementGroup({
+    });
+    const reverse = collapseMeasurementGroup({
       contract: lowerMax,
-      observations: [numeric("c1", 1, 2), numeric("c2", 4, 5)]
-    }).status).toBe("conflict");
+      observations: [numeric("c2", 4, 5), numeric("c1", 1, 2)]
+    });
+    expect(forward.status).toBe("collapsed");
+    expect(reverse.status).toBe("collapsed");
+    if (forward.status === "collapsed" && reverse.status === "collapsed") {
+      expect(forward.witness.payload).toEqual({ lower: 4, upper: 5 });
+      expect(reverse.witness.payload).toEqual(forward.witness.payload);
+    }
+  });
+
+  it("preserves exact points and typed unresolved results for proved_lower_max", () => {
+    const lowerMax = createMeasurementGroupContractV1({
+      ...BASE,
+      combine_operator: "proved_lower_max"
+    });
+    const exact = collapseMeasurementGroup({
+      contract: lowerMax,
+      observations: [numeric("c1", 2, 2), numeric("c2", 4, 4)]
+    });
+    expect(exact.status).toBe("collapsed");
+    if (exact.status === "collapsed") {
+      expect(exact.witness.payload).toEqual({ lower: 4, upper: 4 });
+    }
     expect(collapseMeasurementGroup({
       contract: createMeasurementGroupContractV1({
         ...BASE,

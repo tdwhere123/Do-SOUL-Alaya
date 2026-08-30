@@ -26,7 +26,7 @@ export type SupportDraft = {
   readonly outcomes: SupportMaterializationOutcomeV1[];
   readonly votes: Map<string, PolarityVotes>;
   readonly candidateVotes: Map<string, CandidatePolarityVotes>;
-  readonly evidenceLineage: Map<string, string>;
+  readonly evidenceLineages: Map<string, Set<string>>;
 };
 
 export function createDraft(): SupportDraft {
@@ -37,7 +37,7 @@ export function createDraft(): SupportDraft {
     outcomes: [],
     votes: new Map(),
     candidateVotes: new Map(),
-    evidenceLineage: new Map()
+    evidenceLineages: new Map()
   };
 }
 
@@ -79,6 +79,16 @@ export function addGap(
   draft.gaps.push(Object.freeze({ kind, owner, detail }));
 }
 
+export function recordEvidenceLineage(
+  draft: SupportDraft,
+  evidenceId: string,
+  lineageId: string
+): void {
+  const lineages = draft.evidenceLineages.get(evidenceId) ?? new Set<string>();
+  lineages.add(lineageId);
+  draft.evidenceLineages.set(evidenceId, lineages);
+}
+
 export function vote(
   draft: SupportDraft,
   candidateId: string,
@@ -89,8 +99,14 @@ export function vote(
 ): void {
   const row = votesFor(draft, propositionId);
   row[side].add(lineageId);
-  candidateVotesFor(draft, candidateId, hypothesisDigest ?? null, propositionId)
-    .votes[side].add(lineageId);
+  const candidateVotes = candidateVotesFor(
+    draft,
+    candidateId,
+    hypothesisDigest ?? null,
+    propositionId
+  ).votes;
+  candidateVotes[side].add(lineageId);
+  if (row.superseded.has(lineageId)) candidateVotes.superseded.add(lineageId);
 }
 
 export function supersedeLineage(

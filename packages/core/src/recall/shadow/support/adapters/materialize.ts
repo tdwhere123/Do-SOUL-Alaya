@@ -1,5 +1,6 @@
 import { createCorrelationWitness, type CorrelationWitness, type FourValuedWitness } from
   "../../witness/index.js";
+import { compareText } from "../../../../shared/compare-text.js";
 import { createSupportHypergraph } from "../graph.js";
 import type { SupportHypergraphReceiptV1 } from "../receipt.js";
 import { createDraft, type SupportDraft } from "./draft.js";
@@ -100,19 +101,23 @@ function lineageCorrelationWitnesses(
 
 function lineagePairs(draft: SupportDraft): readonly [string, string][] {
   const byLineage = new Map<string, string[]>();
-  for (const [evidenceId, lineageId] of draft.evidenceLineage) {
-    const group = byLineage.get(lineageId) ?? [];
-    group.push(evidenceId);
-    byLineage.set(lineageId, group);
+  for (const [evidenceId, lineageIds] of draft.evidenceLineages) {
+    for (const lineageId of lineageIds) {
+      const group = byLineage.get(lineageId) ?? [];
+      group.push(evidenceId);
+      byLineage.set(lineageId, group);
+    }
   }
-  const pairs: [string, string][] = [];
+  const pairs = new Map<string, [string, string]>();
   for (const group of byLineage.values()) {
     const unique = [...new Set(group)].sort();
     for (let i = 0; i < unique.length; i += 1) {
       for (let j = i + 1; j < unique.length; j += 1) {
-        pairs.push([unique[i]!, unique[j]!]);
+        const pair: [string, string] = [unique[i]!, unique[j]!];
+        pairs.set(pair.join("\0"), pair);
       }
     }
   }
-  return pairs;
+  return [...pairs.values()].sort(([leftA, rightA], [leftB, rightB]) =>
+    compareText(leftA, leftB) || compareText(rightA, rightB));
 }

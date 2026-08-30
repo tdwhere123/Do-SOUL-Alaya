@@ -70,10 +70,10 @@ export function provedLowerMaxInterval(
   intervals: readonly FiniteInterval[]
 ): MeasurementIntervalResult {
   let lower = Number.NEGATIVE_INFINITY;
-  let upper = Number.POSITIVE_INFINITY;
+  let upper = Number.NEGATIVE_INFINITY;
   for (const interval of intervals) {
     lower = Math.max(lower, interval.lower);
-    upper = Math.min(upper, interval.upper);
+    upper = Math.max(upper, interval.upper);
   }
   if (!Number.isFinite(lower) || !Number.isFinite(upper)) {
     return unresolved("proved_lower_max requires finite bounds");
