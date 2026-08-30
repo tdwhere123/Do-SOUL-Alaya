@@ -74,9 +74,9 @@ export function candidatePropositionObservationsFromDraft(
       })
     });
   }).sort((left, right) =>
-    left.candidate_id.localeCompare(right.candidate_id) ||
-    (left.hypothesis_digest ?? "").localeCompare(right.hypothesis_digest ?? "") ||
-    left.local_proposition_id.localeCompare(right.local_proposition_id)));
+    compareText(left.candidate_id, right.candidate_id) ||
+    compareText(left.hypothesis_digest ?? "", right.hypothesis_digest ?? "") ||
+    compareText(left.local_proposition_id, right.local_proposition_id)));
 }
 
 function adaptPolarity(

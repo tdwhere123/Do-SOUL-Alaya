@@ -16,6 +16,25 @@ import {
 const PROP = "prop.works-at";
 
 describe("support adapter ordering", () => {
+  it("orders normalization-equivalent candidate identities by exact code units", () => {
+    const composed = polarityFor("candidate-é", "lineage-composed", PROP, "positive");
+    const decomposed = polarityFor(
+      "candidate-e\u0301",
+      "lineage-decomposed",
+      PROP,
+      "positive"
+    );
+
+    const forward = materializePolarity([composed, decomposed]);
+    const reverse = materializePolarity([decomposed, composed]);
+
+    expect(forward.proposition_observations).toEqual(reverse.proposition_observations);
+    expect(forward.proposition_observations.map(({ candidate_id }) => candidate_id)).toEqual([
+      "candidate-e\u0301",
+      "candidate-é"
+    ]);
+  });
+
   it("projects multiple propositions identically across receipt permutations", () => {
     const propositionZ = polarityFor(
       "candidate-z",
