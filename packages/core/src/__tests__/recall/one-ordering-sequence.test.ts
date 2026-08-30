@@ -353,7 +353,7 @@ describe("one ordering sequence", () => {
   it("has no production importer of bounded-head displacement", () => {
     const banned = /orderWithBoundedHeadDisplacement|bounded-head-displacement|finalOrderAfterCoverage|maxHeadDropAfterCoverage/u;
     const hits = listProductionSourceFiles(
-      fileURLToPath(new URL("../../", import.meta.url))
+      fileURLToPath(new URL("../..", import.meta.url))
     ).filter((file) => banned.test(readFileSync(file, "utf8")));
     expect(hits).toEqual([]);
   });

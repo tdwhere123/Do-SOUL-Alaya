@@ -13,7 +13,7 @@ import {
 } from "../../../../config/install-core-config.js";
 import { buildDefaultPolicy } from "../../../../recall/runtime/orchestration.js";
 import { buildLiveObservationField } from
-  "../../../../recall/shadow/observe/live-observations.js";
+  "../../../../recall/integration/shadow/live-observations.js";
 import {
   candidateOf,
   completeReceipt,

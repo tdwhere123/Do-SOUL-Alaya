@@ -48,20 +48,20 @@ import {
   type FineAssessmentShadowTrace,
   type PsiQuery,
   type ShadowPsiObservationField
-} from "../shadow/integrate.js";
+} from "../integration/shadow/integrate.js";
 import {
   deliverCanonicalFineAssessment,
   materializePsiV2ShadowInput,
   resolveFineAssessmentDeliveryPath
-} from "../shadow/canonical-delivery.js";
+} from "./canonical-delivery.js";
 import type { LexicalBoundProof } from
   "../runtime/diagnostics/lexical-bound-proof.js";
 import type { LiveQueryProofAuthority } from
-  "../runtime/query/live-query-proof-authority.js";
+  "../decision/query-proof/live-query-proof-authority.js";
 import type { LexicalIntervalSourceReceiptV1 } from
   "../field/retrieval/lexical-interval-source-receipt.js";
 import type { SupportCandidateReceiptV1 } from
-  "../shadow/support/index.js";
+  "../decision/query-proof/support/index.js";
 
 export interface FineAssessParams {
   readonly workspace_id: string;
@@ -134,7 +134,7 @@ export type FineAssessResult = Readonly<{
   readonly ranking_authority: "prefix_sk" | "select_gamma";
   readonly capture_execution?: Readonly<import("@do-soul/alaya-protocol").CaptureExecution>;
   readonly capture_receipt?: Readonly<
-    import("../shadow/canonical-delivery.js").CanonicalSelectionReceipt
+    import("./canonical-delivery.js").CanonicalSelectionReceipt
   >;
   readonly shadowTrace?: FineAssessmentShadowTrace;
 }>;
