@@ -1,6 +1,4 @@
 import type { OpenSemanticFactorFormationCapture } from "@do-soul/alaya-protocol";
-import type { SnapshotReadLeaseCapabilityV1, SnapshotReadLeaseV1 } from
-  "../../runtime/snapshot-coherence/index.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../field/field-identity.js";
 import {
@@ -9,6 +7,10 @@ import {
 } from "../../field/open-semantic-factors/composition.js";
 import type { OpenSemanticFactorCompatibilityTrace } from
   "../../field/open-semantic-factors/compatibility-trace.js";
+import { verifiedCurrentQueryOsfCapture } from
+  "../../query/canonical-query/adapters/osf.js";
+import type { SnapshotReadLeaseCapabilityV1, SnapshotReadLeaseV1 } from
+  "../../runtime/snapshot-coherence/index.js";
 import { freezeShadow, ShadowContractError } from "../envelope.js";
 import { createFourValuedWitness, type FourValuedWitness, type WitnessIdentityPins } from
   "../witness/index.js";
@@ -212,7 +214,7 @@ function requireVerifiedOsfComposition(
         ? {}
         : { evidence_formations: evidence.osf_evidence_formations })
     });
-    const current = currentQueryOsfCaptureDigest(evidence.canonical_query_evidence);
+    const current = currentQueryOsfCaptureDigest(evidence);
     if (current === undefined ||
         evidence.osf_query_capture.capture_digest !== current ||
         composition.query_capture_digest !== current) {
@@ -229,14 +231,15 @@ function requireVerifiedOsfComposition(
 }
 
 function currentQueryOsfCaptureDigest(
-  evidence: PreparedMeasurementAuthorityEvidenceV1["canonical_query_evidence"]
+  evidence: SupportMeasurementAuthorityEvidenceV1
 ): string | undefined {
-  const capture = evidence.osfCapture;
-  if (capture == null) return undefined;
-  const digest = capture.capture_digest;
-  return typeof digest === "string" && /^sha256:[0-9a-f]{64}$/u.test(digest)
-    ? digest
-    : undefined;
+  const canonicalEvidence = evidence.canonical_query_evidence;
+  const queryText = evidence.query_condition.condition.query_task_factors[0] ?? null;
+  return verifiedCurrentQueryOsfCapture(
+    canonicalEvidence.osfCapture,
+    canonicalEvidence.probes,
+    queryText
+  )?.capture_digest;
 }
 
 function matchingBoundWitnesses(

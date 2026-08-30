@@ -24,6 +24,12 @@ import {
 import { createFourValuedWitness } from "../../../../recall/shadow/witness/index.js";
 import { compileCanonicalQueryCompilation } from
   "../../../../recall/query/canonical-query/index.js";
+import { compileRecallAnswerShapePlan } from
+  "../../../../recall/query/recall-answer-shape-plan.js";
+import { compileRecallQueryDemand } from
+  "../../../../recall/query/recall-query-demand.js";
+import { compileRecallQueryProbes } from
+  "../../../../recall/query/recall-query-probes.js";
 import {
   capturedPathGraphPreparedAuthority,
   cleanup
@@ -97,6 +103,46 @@ describe("support measurement source binding", () => {
     });
     expect(() => verifySupportMeasurementPreparedAuthorityV1({
       evidence: supportEvidence(prepared, capability, {
+        graph: payload.graph,
+        receipts,
+        observations: payload.proposition_observations
+      }, source)
+    })).toThrow(/current query capture/u);
+    cleanup(prepared);
+  });
+
+  it("rejects a foreign capture relabeled as canonical query evidence", async () => {
+    const prepared = await capturedPathGraphPreparedAuthority();
+    const capability = pathGraphCapability(prepared);
+    const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
+    const snapshot = prepared.snapshotVector.vector_digest;
+    const foreignQuery = "What degree did I graduate with?";
+    const source = graduationComposition("BA degree");
+    const probes = compileRecallQueryProbes(foreignQuery);
+    expect(prepared.queryCondition.condition.query_task_factors[0]).not.toBe(foreignQuery);
+    const canonicalQueryEvidence = Object.freeze({
+      ...prepared.canonicalQueryEvidence,
+      probes,
+      demand: compileRecallQueryDemand(probes),
+      shape: compileRecallAnswerShapePlan(probes),
+      osfCapture: source.query_capture
+    });
+    const relabeled = Object.freeze({
+      ...prepared,
+      canonicalQueryEvidence,
+      canonicalQueryCompilation: compileCanonicalQueryCompilation(
+        canonicalQueryEvidence,
+        prepared.snapshotCoherenceReceipt
+      )
+    });
+    const receipts = [projectedReceipt(source.composition)];
+    const payload = materializeSupportFromReceipts({
+      query_id: queryId,
+      snapshot_digest: snapshot,
+      candidates: receipts
+    });
+    expect(() => verifySupportMeasurementPreparedAuthorityV1({
+      evidence: supportEvidence(relabeled, capability, {
         graph: payload.graph,
         receipts,
         observations: payload.proposition_observations
