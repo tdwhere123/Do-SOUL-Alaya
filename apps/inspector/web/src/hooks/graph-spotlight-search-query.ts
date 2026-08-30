@@ -1,5 +1,5 @@
-// Lazy module-level cache so chrono-node ships in its own Vite chunk and
-// only downloads on the first English time expression. zh-CN single-day +
+// Graph spotlight search loads chrono-node lazily so it ships in its own Vite
+// chunk and only downloads on the first English time expression. zh-CN single-day +
 // multi-day branches resolve from local regex without touching this cache.
 type ChronoModule = typeof import("chrono-node");
 let chronoPromise: Promise<ChronoModule> | null = null;

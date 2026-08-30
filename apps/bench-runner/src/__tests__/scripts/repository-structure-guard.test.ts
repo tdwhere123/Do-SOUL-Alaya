@@ -194,6 +194,30 @@ describe("repository structure guard", () => {
     expect(result.stdout).toContain("errors=0");
   });
 
+  it("rejects restoring or importing the retired Inspector search-query path", async () => {
+    const root = await createFixtureRoot();
+    await writeSource(
+      root,
+      "apps/inspector/web/src/utils/parse-search-query.ts",
+      "export const parseSearchQuery = () => undefined;"
+    );
+    await writeSource(
+      root,
+      "apps/inspector/web/src/hooks/consumer.ts",
+      'import { parseSearchQuery } from "../utils/parse-search-query";\nparseSearchQuery();'
+    );
+    const policyPath = await writePolicy(root, policy({
+      retired_import_paths: ["apps/inspector/web/src/utils/parse-search-query"]
+    }));
+
+    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringMatching(
+        /retired-import-path[\s\S]+retired-source-path-restored/u
+      )
+    });
+  });
+
   it("rejects numbered and delimited band and wave rollout ownership", async () => {
     const root = await createFixtureRoot();
     const rolloutDirectories = [

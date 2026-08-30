@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch, type ApiError } from "../api";
-import { parseSearchQuery } from "../utils/parse-search-query";
+import { parseSearchQuery } from "./graph-spotlight-search-query";
 
 export interface GraphSearchTimeHits {
   readonly ids: ReadonlySet<string>;

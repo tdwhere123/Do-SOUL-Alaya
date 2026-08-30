@@ -29,8 +29,7 @@
   ],
   "existing_ownership_directory_exceptions": {
     "apps/inspector/web/src/utils": [
-      "apps/inspector/web/src/utils/graph.ts",
-      "apps/inspector/web/src/utils/parse-search-query.ts"
+      "apps/inspector/web/src/utils/graph.ts"
     ]
   },
   "forbidden_rollout_directory_patterns": [
@@ -173,6 +172,7 @@
     }
   },
   "retired_import_paths": [
+    "apps/inspector/web/src/utils/parse-search-query",
     "packages/core/src/recall/shadow",
     "packages/core/src/recall/decision/prefix-capture/envelope",
     "packages/core/src/recall/decision/prefix-capture/compare"
