@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fineAssess } from "../../../recall/delivery/fine-assessment.js";
 import { compileRecallQueryProbes } from "../../../recall/query/recall-query-probes.js";
 import { buildDefaultPolicy } from "../../../recall/runtime/orchestration.js";
@@ -7,7 +7,9 @@ import type {
   CoarseRecallCandidate,
   RecallSupplementaryData
 } from "../../../recall/runtime/recall-service-types.js";
+import { ShadowContractError } from "../../../recall/shadow/envelope.js";
 import { isPsiCycleFailure, peelUndominated } from "../../../recall/shadow/frontier-peel.js";
+import * as psiV2 from "../../../recall/shadow/psi-v2/index.js";
 import type { ShadowFrontierReceipt } from "../../../recall/shadow/frontiers.js";
 import {
   CAPTURE_IDENTITY_DIGEST,
@@ -44,6 +46,10 @@ const IDS = ["cand-a", "cand-b", "cand-c"] as const;
 const THREE_CANDIDATE_UNCACHED_PSI_CALLS = 14;
 
 describe("shadow integration at fineAssess", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("planted guard: shadow cannot change production ids, order, or delivery diagnostics", () => {
     const params = assessParams(fieldCandidates(), "legacy");
     const planted = plantedTransitivity();
@@ -229,6 +235,60 @@ describe("shadow integration at fineAssess", () => {
       reason: "membership_shrink",
       digest: CAPTURE_IDENTITY_DIGEST
     });
+  });
+
+  it("keeps captured delivery when psi v2 diagnostics throw", () => {
+    vi.spyOn(psiV2, "buildPsiV2ShadowDiagnostics").mockImplementation(() => {
+      throw new ShadowContractError("planted diagnostic failure");
+    });
+    const trace = captureShadowIntegration(shadowInput());
+    expect(isFailClosedShadowTrace(trace)).toBe(false);
+    expect(asCaptured(trace).psi_v2_shadow).toMatchObject({
+      observation_status: "malformed",
+      producer_outcomes: [
+        { producer_id: "lex.interval", status: "malformed",
+          contract_code: "diagnostic_contract_failure" },
+        { producer_id: "support", status: "malformed",
+          contract_code: "diagnostic_contract_failure" }
+      ]
+    });
+  });
+
+  it("renders typed producer absence without requiring query or snapshot pins", () => {
+    const spy = vi.spyOn(psiV2, "buildPsiV2ShadowDiagnostics");
+    const missingBoth = asCaptured(captureShadowIntegration(shadowInput()));
+    const missingSnapshot = asCaptured(captureShadowIntegration({
+      ...shadowInput(),
+      query_id: "query-observed"
+    }));
+    const missingQuery = asCaptured(captureShadowIntegration({
+      ...shadowInput(),
+      snapshot_digest: "snapshot-observed"
+    }));
+    for (const trace of [missingBoth, missingSnapshot, missingQuery]) {
+      expect(trace.psi_v2_shadow).toMatchObject({
+        observation_status: "not_observed",
+        producer_outcomes: [
+          { producer_id: "lex.interval", status: "not_observed", reason: "input_absent" },
+          { producer_id: "support", status: "not_observed", reason: "input_absent" }
+        ]
+      });
+    }
+    expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it("passes valid query and snapshot pins to psi v2 diagnostics", () => {
+    const spy = vi.spyOn(psiV2, "buildPsiV2ShadowDiagnostics");
+    const trace = asCaptured(captureShadowIntegration({
+      ...shadowInput(),
+      query_id: "query-observed",
+      snapshot_digest: "snapshot-observed"
+    }));
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({
+      query_id: "query-observed",
+      snapshot_digest: "snapshot-observed"
+    });
+    expect(trace.psi_v2_shadow).toMatchObject({ observation_status: "not_observed" });
   });
 });
 

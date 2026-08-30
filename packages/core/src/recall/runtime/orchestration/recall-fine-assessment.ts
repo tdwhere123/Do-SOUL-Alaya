@@ -8,6 +8,8 @@ import {
   type FineAssessParams
 } from "../../delivery/fine-assessment.js";
 import { resolveFineAssessmentDeliveryPath } from "../../shadow/canonical-delivery.js";
+import { readMemoryLexicalIntervalSources } from
+  "../../field/retrieval/retrieval-field-source-authority.js";
 import { buildRecallCandidateDedupeKey } from "../recall-service-helpers.js";
 import type { CoarseStageResult } from "../recall-service-runner-coarse.js";
 import {
@@ -18,6 +20,8 @@ import {
   type RecallExecutionContext,
   type RecallExecutionParams
 } from "../recall-service-runner-types.js";
+import { projectLiveSupportCandidateReceipts } from
+  "../../shadow/live-support-receipts.js";
 import { collectCoarseFilterSupplementaryData } from "./coarse.js";
 import type { EmbeddingAssessmentData } from "./recall-embedding-assessment.js";
 import { attributeEvidenceSemanticActivations } from
@@ -218,6 +222,7 @@ export function buildFineAssessParams(
   candidates: FineAssessParams["candidates"],
   membership?: Readonly<{ readonly e0Keys: readonly string[] }>
 ): FineAssessParams {
+  const captureAnswerFeatures = capturesRecallAnswerFeatures(params.diagnosticCapture);
   return {
     workspace_id: params.workspaceId,
     candidates,
@@ -227,7 +232,7 @@ export function buildFineAssessParams(
     tokenEstimator: prepared.tokenEstimator,
     now: () => prepared.referenceTime,
     warn: context.warn,
-    captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
+    captureAnswerFeatures,
     capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
     answerShapePlan: prepared.answerShapePlan,
     selectionBoundaryObserver: params.selectionBoundaryObserver,
@@ -236,10 +241,42 @@ export function buildFineAssessParams(
     condition_digest: prepared.queryCondition.identity,
     memoryKeywordLanes: prepared.retrievalFieldBundle.memoryKeywordLanes(),
     memoryLexicalCaptures: prepared.retrievalFieldBundle.memoryLexicalCaptures(),
+    ...buildPsiV2LiveReceiptInput(prepared, candidates, supplementaryData),
     ...(membership === undefined ? {} : captureFineAssessmentMembership(
       membership.e0Keys,
       candidates
     ))
+  };
+}
+
+function buildPsiV2LiveReceiptInput(
+  prepared: PreparedRecallRequest,
+  candidates: FineAssessParams["candidates"],
+  supplementaryData: FineAssessParams["supplementaryData"]
+): Partial<FineAssessParams> {
+  const lexicalIntervalSources = readMemoryLexicalIntervalSources(
+    prepared.retrievalFieldBundle
+  );
+  const supportCandidateReceipts = projectLiveSupportCandidateReceipts(
+    candidates,
+    supplementaryData,
+    prepared.canonicalQueryCompilation
+  );
+  return {
+    queryProofAuthority: Object.freeze({
+      workspace_id: prepared.queryCondition.condition.workspace_id,
+      query_condition: prepared.queryCondition,
+      canonical_query_evidence: prepared.canonicalQueryEvidence,
+      canonical_query_compilation: prepared.canonicalQueryCompilation,
+      snapshot_vector: prepared.snapshotVector,
+      snapshot_coherence_receipt: prepared.snapshotCoherenceReceipt,
+      snapshot_read_lease: prepared.snapshotReadLease,
+      lexical_source_bundle: prepared.retrievalFieldBundle,
+      expected_lexical_request_pins:
+        prepared.retrievalFieldBundle.memoryLexicalRequestPins()
+    }),
+    ...(lexicalIntervalSources.length === 0 ? {} : { lexicalIntervalSources }),
+    ...(supportCandidateReceipts === undefined ? {} : { supportCandidateReceipts })
   };
 }
 

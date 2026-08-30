@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   buildObjectIdFilterSql,
+  mergeExactKeywordSearchRows,
   mergeKeywordSearchRows,
   objectKeyExactTokens,
   tokenizeFtsQuery,
@@ -129,6 +130,59 @@ describe("mergeKeywordSearchRows trigram_rank passthrough", () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]?.object_id).toBe("obj-1");
     expect(merged[0]?.normalized_rank).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("production object_id cutoff stays localeCompare", () => {
+  // "Z" vs "a": localeCompare puts "a" first; UTF-16 code-unit order puts "Z"
+  // first (charCode 90 < 97). Membership of a limit=1 prefix therefore changes
+  // if compareCodeUnits (or any identity sort) is reintroduced at the cutoff.
+  const localeFirst = "a";
+  const codeUnitFirst = "Z";
+
+  it("keeps localeCompare when porter and keyPorter share priority and sourceOrder", () => {
+    expect(localeFirst.localeCompare(codeUnitFirst)).toBeLessThan(0);
+    expect(codeUnitFirst.charCodeAt(0)! - localeFirst.charCodeAt(0)!).toBeLessThan(0);
+
+    // sort key: higher normalized_rank, then lower sourcePriority, then lower
+    // sourceOrder, then object_id. porterRows and objectKeyLanes.porter both
+    // have sourcePriority 1. Index-0 rows from those lanes share sourceOrder 0.
+    // considerKeywordRow inserts porter first then keyPorter; insertion order
+    // only decides the prefix when localeCompare returns 0.
+    const porterThenKey = mergeKeywordSearchRows(
+      [],
+      [],
+      1,
+      [{ object_id: codeUnitFirst, raw_rank: -1 }],
+      { porter: [{ object_id: localeFirst, raw_rank: -1 }] }
+    );
+    const keyThenPorter = mergeKeywordSearchRows(
+      [],
+      [],
+      1,
+      [{ object_id: localeFirst, raw_rank: -1 }],
+      { porter: [{ object_id: codeUnitFirst, raw_rank: -1 }] }
+    );
+
+    expect(porterThenKey.map((row) => row.object_id)).toEqual([localeFirst]);
+    expect(keyThenPorter.map((row) => row.object_id)).toEqual([localeFirst]);
+  });
+
+  it("orders mergeExactKeywordSearchRows ties by localeCompare, not code-units", () => {
+    expect(localeFirst.localeCompare(codeUnitFirst)).toBeLessThan(0);
+    expect(codeUnitFirst.charCodeAt(0)! - localeFirst.charCodeAt(0)!).toBeLessThan(0);
+
+    const merged = mergeExactKeywordSearchRows(
+      [{ object_id: codeUnitFirst, matched_token_count: 1 }],
+      [{ object_id: localeFirst, matched_token_count: 1 }]
+    );
+    const reversed = mergeExactKeywordSearchRows(
+      [{ object_id: localeFirst, matched_token_count: 1 }],
+      [{ object_id: codeUnitFirst, matched_token_count: 1 }]
+    );
+
+    expect(merged.map((row) => row.object_id)).toEqual([localeFirst, codeUnitFirst]);
+    expect(reversed.map((row) => row.object_id)).toEqual([localeFirst, codeUnitFirst]);
   });
 });
 

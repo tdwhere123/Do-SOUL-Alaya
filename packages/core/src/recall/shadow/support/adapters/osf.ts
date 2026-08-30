@@ -1,0 +1,175 @@
+import type { SupportDraft } from "./draft.js";
+import { addEdge, addGap, addNode, noteApplicableProposition, recordEvidenceLineage } from "./draft.js";
+import type {
+  SupportCandidateReceiptV1,
+  SupportOsfBindingV1,
+  SupportOsfStatusV1
+} from "./types.js";
+
+export function adaptOsfCandidate(
+  draft: SupportDraft,
+  candidate: SupportCandidateReceiptV1
+): void {
+  const osf = candidate.osf;
+  if (osf === undefined) {
+    addGap(draft, "write_side_formation_absent", candidate.candidate_key, "osf receipt absent");
+    return;
+  }
+  if (osf.truncated) {
+    addGap(draft, "osf_truncated", candidate.candidate_key, "truncated OSF is unknown, not empty");
+    noteUnknownOsfPropositions(draft, candidate, osf, "support.osf.truncated.v1");
+    return;
+  }
+  if (osf.composition_status !== "composed") {
+    addOsfStatusGap(draft, candidate.candidate_key, osf.composition_status);
+    noteUnknownOsfPropositions(
+      draft, candidate, osf, osfUnknownProducer(osf.composition_status));
+    return;
+  }
+  for (const binding of osf.bindings ?? []) {
+    adaptOsfBinding(draft, candidate, binding);
+  }
+}
+
+function noteUnknownOsfPropositions(
+  draft: SupportDraft,
+  candidate: SupportCandidateReceiptV1,
+  osf: NonNullable<SupportCandidateReceiptV1["osf"]>,
+  producer: string
+): void {
+  for (const binding of osf.bindings ?? []) {
+    if (hasBlankOsfIdentity(binding)) continue;
+    const propositionId = binding.query_proposition_id;
+    if (propositionId === undefined || propositionId.length === 0) continue;
+    addNode(draft, "proposition", propositionId);
+    noteApplicableProposition(
+      draft,
+      candidate.candidate_key,
+      candidate.hypothesis_digest ?? null,
+      propositionId,
+      { source_id: binding.evidence_id, producer }
+    );
+  }
+}
+
+function osfUnknownProducer(status: SupportOsfStatusV1): string {
+  if (status === "no_match") return "support.osf.no_match.v1";
+  if (status === "ineligible") return "support.osf.ineligible.v1";
+  if (status === "rejected") return "support.osf.rejected.v1";
+  return "support.osf.unavailable.v1";
+}
+
+function addOsfStatusGap(
+  draft: SupportDraft,
+  owner: string,
+  status: SupportOsfStatusV1
+): void {
+  if (status === "no_match") {
+    addGap(draft, "osf_no_match", owner, "no_match is not known-zero");
+    return;
+  }
+  if (status === "ineligible") {
+    addGap(draft, "osf_ineligible", owner, "ineligible OSF is unknown, not empty");
+    return;
+  }
+  if (status === "rejected") {
+    addGap(draft, "osf_rejected", owner, "rejected OSF is unknown, not empty");
+    return;
+  }
+  addGap(draft, "osf_unavailable", owner, "unavailable OSF is unknown, not empty");
+}
+
+function adaptOsfBinding(
+  draft: SupportDraft,
+  candidate: SupportCandidateReceiptV1,
+  binding: SupportOsfBindingV1
+): void {
+  const candidateKey = candidate.candidate_key;
+  if (hasBlankOsfIdentity(binding)) {
+    addGap(
+      draft,
+      "binding_absent",
+      candidateKey,
+      "OSF binding contains a blank identity"
+    );
+    return;
+  }
+  addNode(draft, "candidate_projection", candidateKey);
+  addNode(draft, "evidence_unit", binding.evidence_id);
+  recordOsfLineage(draft, binding);
+  const bindingId = osfBindingId(binding);
+  if (bindingId === undefined) {
+    addGap(draft, "binding_absent", candidateKey, "OSF binding lacks semantic identity");
+  } else {
+    addNode(draft, "answer_binding", bindingId);
+    addEdge(
+      draft,
+      "expresses",
+      "candidate_projection",
+      candidateKey,
+      "answer_binding",
+      bindingId
+    );
+  }
+  const propositionId = binding.query_proposition_id;
+  if (propositionId === undefined || propositionId.length === 0) {
+    addGap(
+      draft,
+      "binding_absent",
+      candidateKey,
+      "query proposition pin is absent; binding lemma is not a proposition"
+    );
+    return;
+  }
+  addNode(draft, "proposition", propositionId);
+  noteApplicableProposition(
+    draft,
+    candidateKey,
+    candidate.hypothesis_digest ?? null,
+    propositionId,
+    { source_id: binding.evidence_id, producer: "support.osf.grounds.v1" }
+  );
+  if (binding.source_lineage_id !== undefined) {
+    noteApplicableProposition(
+      draft,
+      candidateKey,
+      candidate.hypothesis_digest ?? null,
+      propositionId,
+      { source_id: binding.source_lineage_id, producer: "support.osf.lineage.v1" }
+    );
+  }
+  if (bindingId !== undefined) {
+    addEdge(draft, "yields", "answer_binding", bindingId, "proposition", propositionId);
+  }
+  addEdge(draft, "grounds", "evidence_unit", binding.evidence_id, "proposition", propositionId);
+}
+
+function osfBindingId(binding: SupportOsfBindingV1): string | undefined {
+  if (binding.semantic_identity.trim().length > 0) return binding.semantic_identity;
+  return undefined;
+}
+
+function hasBlankOsfIdentity(binding: SupportOsfBindingV1): boolean {
+  return [
+    binding.variable_id,
+    binding.binding_identity,
+    binding.semantic_identity,
+    binding.evidence_id,
+    binding.query_proposition_id,
+    binding.source_lineage_id
+  ].some((identity) => identity !== undefined && identity.trim().length === 0);
+}
+
+function recordOsfLineage(draft: SupportDraft, binding: SupportOsfBindingV1): void {
+  if (binding.source_lineage_id === undefined) return;
+  addNode(draft, "source_lineage", binding.source_lineage_id);
+  addEdge(
+    draft,
+    "sourced_from",
+    "evidence_unit",
+    binding.evidence_id,
+    "source_lineage",
+    binding.source_lineage_id
+  );
+  recordEvidenceLineage(draft, binding.evidence_id, binding.source_lineage_id);
+}

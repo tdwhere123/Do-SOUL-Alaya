@@ -1,12 +1,44 @@
 import { describe, expect, it } from "vitest";
 import {
+  isActiveRecallReadCapability,
+  withActiveRecallReadSnapshot,
   withRecallReadSnapshot,
+  type ActiveRecallReadCapability,
   type RecallReadSnapshotPort
 } from "../../../recall/runtime/recall-read-snapshot.js";
 
 describe("withRecallReadSnapshot", () => {
   it("runs work without a snapshot port", async () => {
-    await expect(withRecallReadSnapshot(undefined, async () => 7)).resolves.toBe(7);
+    await expect(withActiveRecallReadSnapshot(undefined, async (capability) => {
+      expect(capability).toBeUndefined();
+      return 7;
+    })).resolves.toBe(7);
+  });
+
+  it("brands a capability only after begin and revokes it after commit", async () => {
+    let captured: ActiveRecallReadCapability | undefined;
+    const snapshot = createRecordingSnapshot([]);
+
+    await withActiveRecallReadSnapshot(snapshot, async (capability) => {
+      captured = capability;
+      expect(isActiveRecallReadCapability(capability)).toBe(true);
+    });
+
+    expect(isActiveRecallReadCapability(captured)).toBe(false);
+    expect(isActiveRecallReadCapability(Object.freeze({}))).toBe(false);
+  });
+
+  it("revokes the capability after rollback", async () => {
+    let captured: ActiveRecallReadCapability | undefined;
+
+    await expect(withActiveRecallReadSnapshot(
+      createRecordingSnapshot([]), async (capability) => {
+      captured = capability;
+      throw new Error("read failed");
+      }
+    )).rejects.toThrow("read failed");
+
+    expect(isActiveRecallReadCapability(captured)).toBe(false);
   });
 
   it("commits after the read path and rolls back on failure", async () => {

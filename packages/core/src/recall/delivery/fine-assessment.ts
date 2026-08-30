@@ -51,8 +51,17 @@ import {
 } from "../shadow/integrate.js";
 import {
   deliverCanonicalFineAssessment,
+  materializePsiV2ShadowInput,
   resolveFineAssessmentDeliveryPath
 } from "../shadow/canonical-delivery.js";
+import type { LexicalBoundProof } from
+  "../runtime/diagnostics/lexical-bound-proof.js";
+import type { LiveQueryProofAuthority } from
+  "../runtime/query/live-query-proof-authority.js";
+import type { LexicalIntervalSourceReceiptV1 } from
+  "../field/retrieval/lexical-interval-source-receipt.js";
+import type { SupportCandidateReceiptV1 } from
+  "../shadow/support/index.js";
 
 export interface FineAssessParams {
   readonly workspace_id: string;
@@ -79,6 +88,10 @@ export interface FineAssessParams {
   readonly shadowPsi?: PsiQuery;
   readonly memoryKeywordLanes?: readonly Readonly<KeywordSearchLaneReceipt>[];
   readonly memoryLexicalCaptures?: readonly Readonly<KeywordLexicalMergeCapture>[];
+  readonly lexicalBoundProofs?: readonly Readonly<LexicalBoundProof>[];
+  readonly lexicalIntervalSources?: readonly Readonly<LexicalIntervalSourceReceiptV1>[];
+  readonly supportCandidateReceipts?: readonly Readonly<SupportCandidateReceiptV1>[];
+  readonly queryProofAuthority?: Readonly<LiveQueryProofAuthority>;
   readonly e0Keys?: readonly string[];
   readonly e1Keys?: readonly string[];
 }
@@ -156,6 +169,7 @@ function deliverLegacyFineAssessment(params: FineAssessParams): FineAssessResult
       psi: params.shadowPsi,
       memoryKeywordLanes: params.memoryKeywordLanes,
       memoryLexicalCaptures: params.memoryLexicalCaptures,
+      ...materializePsiV2ShadowInput(params),
       nowIso: params.now()
     })
     : undefined;

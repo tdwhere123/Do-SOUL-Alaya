@@ -20,6 +20,7 @@ import type {
 import type { loadActiveConstraints } from "./orchestration.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import type { RecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
+import type { CanonicalQueryEvidenceV1 } from "../query/canonical-query/index.js";
 import type { EmbeddingCoarseInjectionResult } from "./recall-service-runner-coarse.js";
 import type { RecallTimeFilter } from "./recall-service-helpers.js";
 import type {
@@ -52,7 +53,8 @@ import type { RecallRequestTimeContext } from "./query/recall-request-time.js";
 import type { RecallReadSnapshotPort } from "./recall-read-snapshot.js";
 import type {
   SnapshotCoherenceReceiptV1,
-  SnapshotReadLeaseV1
+  SnapshotReadLeaseV1,
+  SnapshotVectorV1
 } from "./snapshot-coherence/index.js";
 import type { CanonicalQueryCompilationV1 } from
   "../query/canonical-query/index.js";
@@ -140,7 +142,9 @@ export interface PreparedRecallRequest {
     import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
   > | null;
   readonly snapshotCoherenceReceipt: SnapshotCoherenceReceiptV1;
+  readonly snapshotVector: SnapshotVectorV1;
   readonly snapshotReadLease: SnapshotReadLeaseV1;
+  readonly canonicalQueryEvidence: CanonicalQueryEvidenceV1;
   readonly canonicalQueryCompilation: CanonicalQueryCompilationV1;
 }
 

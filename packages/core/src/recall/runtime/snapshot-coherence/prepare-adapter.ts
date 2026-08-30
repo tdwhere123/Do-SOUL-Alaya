@@ -145,7 +145,10 @@ export function digestRecallDecisionContractV1(): RecallFieldDigest {
 }
 
 function declaredBaseDigest(snapshotDigest: string | undefined): RecallFieldDigest {
-  if (snapshotDigest === undefined) return unavailableProducerDigest("base_store");
-  if (!isSnapshotDigest(snapshotDigest)) rejectSnapshotCoherence("malformed_digest");
+  const unavailableDigest = unavailableProducerDigest("base_store");
+  if (snapshotDigest === undefined) return unavailableDigest;
+  if (!isSnapshotDigest(snapshotDigest) || snapshotDigest === unavailableDigest) {
+    rejectSnapshotCoherence("malformed_digest");
+  }
   return snapshotDigest;
 }

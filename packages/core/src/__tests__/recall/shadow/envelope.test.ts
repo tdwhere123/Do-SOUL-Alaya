@@ -4,6 +4,10 @@ import {
   parseShadowEnvelope,
   ShadowContractError
 } from "../../../recall/shadow/index.js";
+import {
+  isKnownZeroEpistemic,
+  witnessFromShadowEnvelope
+} from "../../../recall/shadow/witness/index.js";
 
 const COMPLETE_WITNESSES = {
   query_requires: true,
@@ -70,5 +74,45 @@ describe("shadow envelope", () => {
       state: "required_but_missing",
       witnesses: COMPLETE_WITNESSES
     }).state).toBe("required_but_missing");
+  });
+
+  it("adapts parsed envelopes onto typed epistemics without changing parse", () => {
+    const frame = {
+      identity: {
+        coordinate_id: "coord.envelope",
+        query_id: "query-1",
+        snapshot_digest: `sha256:${"a".repeat(64)}`,
+        observer_id: "observer.envelope.numeric.v1",
+        candidate_id: "cand-1",
+        universe_digest: `sha256:${"b".repeat(64)}`
+      },
+      provenance: [{ source_id: "src-1", producer: "producer.alpha" }]
+    };
+    const observedZero = parseShadowEnvelope({ state: "observed", value: 0 });
+    const adaptedZero = witnessFromShadowEnvelope(observedZero, frame);
+    expect(isObservedZero(observedZero)).toBe(true);
+    expect(isKnownZeroEpistemic(adaptedZero.epistemic)).toBe(false);
+    expect(adaptedZero.payload).toEqual({ lower: 0, upper: 0 });
+
+    const missingEnvelope = parseShadowEnvelope({
+      state: "required_but_missing",
+      witnesses: COMPLETE_WITNESSES
+    });
+    const missing = witnessFromShadowEnvelope(missingEnvelope, frame);
+    expect(isKnownZeroEpistemic(missing.epistemic)).toBe(false);
+    expect(missing.epistemic.kind).toBe("not_observed");
+    expect(missing.payload).toBeNull();
+    expect(witnessFromShadowEnvelope(
+      parseShadowEnvelope({ state: "producer_unavailable" }),
+      frame
+    ).epistemic.kind).toBe("unavailable");
+    expect(witnessFromShadowEnvelope(
+      parseShadowEnvelope({ state: "not_observed" }),
+      frame
+    ).epistemic.kind).toBe("not_observed");
+    expect(witnessFromShadowEnvelope(
+      parseShadowEnvelope({ state: "not_applicable" }),
+      frame
+    ).epistemic.kind).toBe("not_applicable");
   });
 });

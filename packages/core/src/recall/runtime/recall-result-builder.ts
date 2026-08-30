@@ -100,7 +100,10 @@ export function buildRecallResult(
         ? { captureProofDiagnostics: buildCaptureProofDiagnostics(
           prepared,
           assessment,
-          coarse.combinedCoarseCandidates
+          uniqueCaptureProofField(
+            coarse.combinedCoarseCandidates,
+            assessment.finalAssessment
+          )
         ) }
         : {}),
       totalScanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,
@@ -170,6 +173,26 @@ export function addRecallExecutionPhaseLatencies(
 
 function sumPhaseLatency(phases: Readonly<Record<string, number>>): number {
   return Object.values(phases).reduce((sum, latencyMs) => sum + latencyMs, 0);
+}
+
+function uniqueCaptureProofField(
+  fieldCandidates: readonly Readonly<CoarseRecallCandidate>[],
+  liveAssessment: RecallAssessmentStageResult["finalAssessment"]
+): readonly Readonly<CoarseRecallCandidate>[] {
+  // Live uniqueness already fail-closed delivery; diagnostics must emit one row per key, not rethrow.
+  if (
+    liveAssessment.capture_execution?.status !== "fail_closed" ||
+    liveAssessment.candidates.length > 0
+  ) {
+    return fieldCandidates;
+  }
+  const seen = new Set<string>();
+  return Object.freeze(fieldCandidates.filter((candidate) => {
+    const key = buildRecallCandidateDedupeKey(candidate);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }));
 }
 
 function buildFineAssessmentPrunedDiagnostics(

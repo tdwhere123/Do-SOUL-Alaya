@@ -26,6 +26,11 @@ import {
 import { materializeRetrievalFieldBundleCaptures } from
   "./retrieval-field-captures.js";
 import {
+  createRetrievalFieldSourceAuthority,
+  registerRetrievalFieldBundleReadAuthority,
+  type RetrievalFieldSourceAuthority
+} from "./retrieval-field-source-authority.js";
+import {
   createRetrievalFieldRequestStore,
   type RetrievalFieldBatchFailure,
   type RetrievalFieldRequest,
@@ -69,7 +74,18 @@ export interface RecallRetrievalFieldBundle {
   readonly memoryKeywordLanes: () => readonly Readonly<KeywordSearchLaneReceipt>[];
   readonly memoryLexicalCaptures: () => readonly Readonly<KeywordLexicalMergeCapture>[];
   readonly memoryLexicalBoundProofs: () => readonly Readonly<LexicalBoundProof>[];
+  readonly memoryLexicalBoundProofsForSnapshot: (
+    snapshotDigest: RecallFieldDigest
+  ) => readonly Readonly<LexicalBoundProof>[];
+  readonly memoryLexicalRequestPins: () => readonly Readonly<LexicalRequestPin>[];
 }
+
+export type LexicalRequestPin = Readonly<{
+  readonly workspace_id: string;
+  readonly request_digest: RecallFieldDigest;
+  readonly field_prefix: RecallMemoryFieldVariant;
+  readonly candidate_key_domain: "memory_object_id";
+}>;
 
 export type FieldPrefix =
   | RecallMemoryFieldVariant
@@ -95,7 +111,6 @@ export type RecallRetrievalFieldBundleSource = Readonly<{
   readonly synthesisSearchPort?: Readonly<RecallServiceSynthesisSearchPort>;
   readonly refinementMaxDepth?: number;
   readonly captureProof?: boolean;
-  readonly snapshotDigest?: string;
   readonly onFailure?: (operation: string, error: unknown) => void;
   readonly onBatchFailure?: (
     operation: string,
@@ -107,13 +122,18 @@ export function createRecallRetrievalFieldBundle(
   params: RecallRetrievalFieldBundleSource
 ): Readonly<RecallRetrievalFieldBundle> {
   const records: RecordedFieldResult[] = [];
-  const store = createRetrievalFieldRequestStore(params, records);
+  const sourceAuthority = createRetrievalFieldSourceAuthority(params, records);
+  const store = createRetrievalFieldRequestStore(params, records, sourceAuthority);
   let requested: Readonly<RecallRetrievalFieldBundle>;
   let maximum: Readonly<RecallRetrievalFieldBundle>;
   const forObservationView = (view: RecallRetrievalFieldObservationView) =>
     view === "requested" ? requested : maximum;
-  requested = createBundleView(params, store, records, "requested", forObservationView);
-  maximum = createBundleView(params, store, records, "maximum", forObservationView);
+  requested = createBundleView(
+    params, store, records, sourceAuthority, "requested", forObservationView
+  );
+  maximum = createBundleView(
+    params, store, records, sourceAuthority, "maximum", forObservationView
+  );
   return requested;
 }
 
@@ -121,10 +141,11 @@ function createBundleView(
   params: RecallRetrievalFieldBundleSource,
   store: Readonly<RetrievalFieldRequestStore>,
   records: RecordedFieldResult[],
+  sourceAuthority: RetrievalFieldSourceAuthority,
   observationView: RecallRetrievalFieldObservationView,
   forObservationView: RecallRetrievalFieldBundle["forObservationView"]
 ): Readonly<RecallRetrievalFieldBundle> {
-  return Object.freeze({
+  const bundle = Object.freeze({
     observationView,
     maximumObservationAvailable: () => records.some((record) =>
       (record.result.refinement_levels?.length ?? 0) > 0
@@ -137,8 +158,13 @@ function createBundleView(
     refinementReceipts: () => materializeRefinementReceipts(records),
     memoryKeywordLanes: () => collectMemoryKeywordLanes(records),
     memoryLexicalCaptures: () => collectMemoryLexicalCaptures(records),
-    memoryLexicalBoundProofs: () => collectMemoryLexicalBoundProofs(params, records)
+    memoryLexicalBoundProofs: () => collectMemoryLexicalBoundProofs(params, records),
+    memoryLexicalBoundProofsForSnapshot: (snapshotDigest: RecallFieldDigest) =>
+      sealMemoryLexicalBoundProofs(params, records, snapshotDigest),
+    memoryLexicalRequestPins: () => collectMemoryLexicalRequestPins(params, records)
   });
+  registerRetrievalFieldBundleReadAuthority(bundle, sourceAuthority);
+  return bundle;
 }
 
 function createMemoryFieldSearches(
@@ -375,6 +401,43 @@ function collectMemoryLexicalBoundProofs(
   return Object.freeze([absentLexicalBoundProof(lexicalProofSeal(params))]);
 }
 
+function collectMemoryLexicalRequestPins(
+  params: RecallRetrievalFieldBundleSource,
+  records: readonly Readonly<RecordedFieldResult>[]
+): readonly Readonly<LexicalRequestPin>[] {
+  return Object.freeze(records.flatMap((record) => isLexicalMemoryPrefix(record.prefix)
+    ? [Object.freeze({
+      workspace_id: params.workspaceId,
+      request_digest: record.request_digest,
+      field_prefix: record.prefix,
+      candidate_key_domain: "memory_object_id" as const
+    })]
+    : []));
+}
+
+function sealMemoryLexicalBoundProofs(
+  params: RecallRetrievalFieldBundleSource,
+  records: readonly Readonly<RecordedFieldResult>[],
+  snapshotDigest: RecallFieldDigest
+): readonly Readonly<LexicalBoundProof>[] {
+  if (!/^sha256:[0-9a-f]{64}$/u.test(snapshotDigest)) return Object.freeze([]);
+  const pins = collectMemoryLexicalRequestPins(params, records);
+  const proofs = collectMemoryLexicalBoundProofs(params, records);
+  if (pins.length !== proofs.length) return Object.freeze([]);
+  const sealed: LexicalBoundProof[] = [];
+  for (const [index, proof] of proofs.entries()) {
+    const pin = pins[index];
+    if (pin === undefined || proof.status !== "captured" ||
+        proof.identity.request_digest !== pin.request_digest ||
+        proof.identity.workspace_id !== pin.workspace_id ||
+        proof.field_prefix !== pin.field_prefix ||
+        proof.candidate_key_domain !== pin.candidate_key_domain ||
+        typeof proof.identity.snapshot_digest === "string") return Object.freeze([]);
+    sealed.push(sealLexicalBoundProof(proof, { snapshot_digest: snapshotDigest }));
+  }
+  return Object.freeze(sealed);
+}
+
 function lexicalProofSeal(
   params: RecallRetrievalFieldBundleSource,
   sealed?: Readonly<{
@@ -388,8 +451,7 @@ function lexicalProofSeal(
       request_digest: sealed.request_digest,
       field_prefix: sealed.field_prefix,
       candidate_key_domain: "memory_object_id" as const
-    }),
-    ...(params.snapshotDigest === undefined ? {} : { snapshot_digest: params.snapshotDigest })
+    })
   };
 }
 

@@ -24,7 +24,8 @@ import {
   SnapshotReadLeaseError,
   bindSnapshotReadLease,
   capturePreparedSnapshotCoherenceReceipt,
-  readSnapshotLeaseCapability
+  readSnapshotLeaseCapability,
+  unavailableProducerDigest
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
 import { stableStringify } from "../../../../shared/stable-stringify.js";
 import { buildRecallPolicy } from "../../../../shared/recall-policy.js";
@@ -172,6 +173,11 @@ describe("snapshot freeze integration", () => {
       pin,
       snapshotDigest: "not-a-digest"
     })).toThrow(SnapshotCoherenceContractError);
+    expect(() => capturePreparedSnapshotCoherenceReceipt({
+      queryCondition: receipt,
+      pin,
+      snapshotDigest: unavailableProducerDigest("base_store")
+    })).toThrow(expect.objectContaining({ code: "malformed_digest" }));
     const captured = capturePreparedSnapshotCoherenceReceipt({
       queryCondition: receipt,
       pin

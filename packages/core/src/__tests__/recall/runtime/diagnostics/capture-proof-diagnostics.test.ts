@@ -9,6 +9,8 @@ import {
 import { absentLexicalBoundProof } from
   "../../../../recall/runtime/diagnostics/lexical-bound-proof.js";
 import { buildRecallDiagnostics } from "../../../../recall/runtime/diagnostics.js";
+import { unavailableProducerDigest } from
+  "../../../../recall/runtime/snapshot-coherence/index.js";
 
 const emptyQueryProbes = Object.freeze({
   normalized_query: "where did alice live",
@@ -41,7 +43,7 @@ describe("capture proof diagnostics adapter", () => {
       objectKind: "evidence_capsule" as const
     };
     const diagnostics = buildCaptureProofDiagnostics(
-      { retrievalFieldBundle: { memoryLexicalBoundProofs: () => [] } },
+      preparedWithoutBaseSnapshot(),
       { supplementaryData: {} },
       [memory, capsule]
     );
@@ -86,7 +88,7 @@ describe("capture proof diagnostics adapter", () => {
 
   it("emits an empty provenance map only for an empty field", () => {
     const empty = buildCaptureProofDiagnostics(
-      { retrievalFieldBundle: { memoryLexicalBoundProofs: () => [] } },
+      preparedWithoutBaseSnapshot(),
       { supplementaryData: {} },
       []
     );
@@ -94,7 +96,7 @@ describe("capture proof diagnostics adapter", () => {
     expect(empty.lexical_bound_proofs).toHaveLength(1);
     expect(empty.lexical_bound_proofs[0]?.status).toBe("proof_absent");
     const nonempty = buildCaptureProofDiagnostics(
-      { retrievalFieldBundle: { memoryLexicalBoundProofs: () => [] } },
+      preparedWithoutBaseSnapshot(),
       { supplementaryData: {} },
       [{ entry: { object_id: "mem-1", evidence_refs: [] } }]
     );
@@ -106,7 +108,7 @@ describe("capture proof diagnostics adapter", () => {
   it("rejects duplicate field keys", () => {
     const candidate = { entry: { object_id: "mem-1", evidence_refs: [] } };
     expect(() => buildCaptureProofDiagnostics(
-      { retrievalFieldBundle: { memoryLexicalBoundProofs: () => [] } },
+      preparedWithoutBaseSnapshot(),
       { supplementaryData: {} },
       [candidate, candidate]
     )).toThrow(/duplicate recall candidate field key/);
@@ -115,7 +117,7 @@ describe("capture proof diagnostics adapter", () => {
   it("copies query OSF/composition receipts without certifying unattributed rows", () => {
     const field = [{ entry: { object_id: "mem-1", evidence_refs: ["ev-other"] } }];
     const diagnostics = buildCaptureProofDiagnostics(
-      { retrievalFieldBundle: { memoryLexicalBoundProofs: () => [] } },
+      preparedWithoutBaseSnapshot(),
       {
         supplementaryData: {
           queryOpenSemanticFactorFormation: {
@@ -151,6 +153,18 @@ describe("capture proof diagnostics adapter", () => {
     expect(row.osf.composition_status).toBe("composed");
   });
 });
+
+function preparedWithoutBaseSnapshot() {
+  return {
+    snapshotVector: { base_store_digest: unavailableProducerDigest("base_store") },
+    retrievalFieldBundle: {
+      memoryLexicalBoundProofs: () => [],
+      memoryLexicalBoundProofsForSnapshot: () => {
+        throw new Error("unavailable base-store snapshot must not seal a proof");
+      }
+    }
+  };
+}
 
 describe("capture proof diagnostic gate", () => {
   it("emits both capture siblings only when candidate evidence is included", () => {

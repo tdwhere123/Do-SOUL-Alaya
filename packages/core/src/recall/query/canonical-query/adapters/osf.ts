@@ -28,16 +28,9 @@ export function adaptOsfCapture(
   probes: Readonly<RecallQueryProbes>
 ): void {
   if (capture === undefined || capture === null) return;
-  const verified = verifiedOsfCapture(capture);
+  const verified = verifiedCurrentQueryOsfCapture(capture, probes);
   if (verified === null) {
     pushUnadapted(capture as object, sink);
-    return;
-  }
-  const expectedSource = probes.normalized_query === null
-    ? null
-    : `sha256:${fieldContractSha256(probes.normalized_query)}`;
-  if (verified.source_sha256 !== expectedSource) {
-    pushUnadapted(verified, sink);
     return;
   }
   if (verified.status !== "formed" || verified.graph === null) {
@@ -65,6 +58,20 @@ export function adaptOsfCapture(
   if (answer === null) return;
   const adapted = adaptGraph(verified, verified.graph, answer, sink);
   if (!adapted) pushUnadapted(verified, sink);
+}
+
+export function verifiedCurrentQueryOsfCapture(
+  capture: unknown,
+  probes: Readonly<Pick<RecallQueryProbes, "normalized_query">>,
+  ownerQueryText: string | null = probes.normalized_query
+): OpenSemanticFactorFormationCapture | null {
+  if (probes.normalized_query !== ownerQueryText) return null;
+  const verified = verifiedOsfCapture(capture);
+  if (verified === null) return null;
+  const expectedSource = ownerQueryText === null
+    ? null
+    : `sha256:${fieldContractSha256(ownerQueryText)}`;
+  return verified.source_sha256 === expectedSource ? verified : null;
 }
 
 function adaptGraph(

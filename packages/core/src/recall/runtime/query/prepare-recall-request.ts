@@ -134,7 +134,7 @@ function capturePinnedQueryWorld(
   const snapshotReadLease = finalizePreparedSnapshotReadLease(snapshotVector);
   const snapshotCoherenceReceipt = createSnapshotCoherenceReceiptV1(snapshotVector);
   const baseProbes = compileRecallQueryProbes(queryText);
-  const canonicalQueryEvidence = {
+  const canonicalQueryEvidence = deepFreeze({
     probes: baseProbes,
     demand: compileRecallQueryDemand(baseProbes),
     shape: compileRecallAnswerShapePlan(baseProbes),
@@ -142,7 +142,7 @@ function capturePinnedQueryWorld(
     osfCapture: certified?.formation,
     observer: observerFromPinnedObjects(captured.receipt, observableObjectIds),
     query_identity: queryIdentityFromReceipt(captured.receipt)
-  };
+  });
   const canonicalQueryCompilation = compileCanonicalQueryCompilation(
     canonicalQueryEvidence,
     snapshotCoherenceReceipt
@@ -152,7 +152,13 @@ function capturePinnedQueryWorld(
     canonicalQueryEvidence,
     snapshotCoherenceReceipt
   );
-  return { snapshotCoherenceReceipt, snapshotReadLease, canonicalQueryCompilation };
+  return {
+    snapshotVector,
+    snapshotCoherenceReceipt,
+    snapshotReadLease,
+    canonicalQueryEvidence,
+    canonicalQueryCompilation
+  };
 }
 
 function observerFromPinnedObjects(
@@ -242,8 +248,10 @@ function freezePreparedRequest(input: Readonly<{
     querySemanticFactorCompletenessReceipt: input.certified === undefined
       ? undefined
       : input.certified.receipt,
+    snapshotVector: input.world.snapshotVector,
     snapshotCoherenceReceipt: input.world.snapshotCoherenceReceipt,
     snapshotReadLease: input.world.snapshotReadLease,
+    canonicalQueryEvidence: input.world.canonicalQueryEvidence,
     canonicalQueryCompilation: input.world.canonicalQueryCompilation
   });
 }
@@ -395,7 +403,7 @@ function createRetrievalBundle(
     synthesisSearchPort: context.dependencies.synthesisSearchPort,
     refinementMaxDepth: policy.coarse_filter.semantic_supplement.field_observation_max_depth,
     ...(capturesRecallAnswerFeatures(params.diagnosticCapture)
-      ? captureProofFields(params)
+      ? { captureProof: true as const }
       : {}),
     onFailure: (operation, error) => context.warn("retrieval field query failed", {
       workspace_id: params.workspaceId,
@@ -407,13 +415,6 @@ function createRetrievalBundle(
       { workspace_id: params.workspaceId, operation, ...failure }
     )
   });
-}
-
-function captureProofFields(params: RecallExecutionParams) {
-  return {
-    captureProof: true as const,
-    ...(params.snapshotDigest === undefined ? {} : { snapshotDigest: params.snapshotDigest })
-  };
 }
 
 async function resolveFieldProjectionMemories(

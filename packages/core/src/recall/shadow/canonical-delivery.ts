@@ -48,9 +48,11 @@ import {
 import { buildProductionSetUtilities } from "./utility/production.js";
 import { ShadowContractError } from "./envelope.js";
 import { assertCanonicalSelectionReceipt } from "./canonical-receipt-validation.js";
+import { materializePsiV2ShadowInput } from "./live-receipt-materialization.js";
 
 export { CANONICAL_CAPTURE_IDENTITY } from "@do-soul/alaya-protocol";
 export type { CanonicalSelectionReceipt } from "@do-soul/alaya-protocol";
+export { materializePsiV2ShadowInput } from "./live-receipt-materialization.js";
 
 export function resolveFineAssessmentDeliveryPath(
   config: FineAssessmentConfig
@@ -103,6 +105,7 @@ function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
     cutoverActivation: "active",
     memoryKeywordLanes: params.memoryKeywordLanes,
     memoryLexicalCaptures: params.memoryLexicalCaptures,
+    ...materializePsiV2ShadowInput(params),
     e0Keys: params.e0Keys,
     e1Keys: params.e1Keys,
     utilitiesByKey: buildProductionSetUtilities({
