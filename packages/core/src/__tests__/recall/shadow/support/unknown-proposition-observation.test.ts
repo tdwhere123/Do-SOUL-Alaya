@@ -68,4 +68,46 @@ describe("applicable unknown support propositions", () => {
       expect(collapse.reason).toMatch(/unknown/u);
     }
   });
+
+  it("keeps truncated OSF with a query proposition as decision-relevant unknown", () => {
+    const result = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        hypothesis_digest: HYPOTHESIS,
+        osf: {
+          composition_status: "composed",
+          truncated: true,
+          bindings: [{
+            variable_id: "x",
+            binding_identity: "arg.person",
+            semantic_identity: "person.alice",
+            evidence_id: "eu-1",
+            query_proposition_id: "prop.works-at"
+          }]
+        },
+        evidence_ids: ["eu-1"]
+      }]
+    });
+    expect(result.graph.nodes.some((node) => node.kind === "answer_binding")).toBe(false);
+    expect(result.gaps.some((gap) => gap.kind === "osf_truncated")).toBe(true);
+    expect(result.proposition_observations).toEqual([expect.objectContaining({
+      candidate_id: CAND,
+      local_proposition_id: "prop.works-at",
+      hypothesis_digest: HYPOTHESIS,
+      witness: expect.objectContaining({
+        epistemic: { kind: "exact" },
+        payload: { polarity: "unknown" },
+        provenance: [{ source_id: "eu-1", producer: "support.osf.truncated.v1" }]
+      })
+    })]);
+    const [candidate] = psiV2CandidatesFromSupport({
+      candidate_keys: [CAND],
+      support: result
+    });
+    expect(candidate?.coordinates.length).toBeGreaterThan(0);
+    expect(candidate?.coordinates.every((coordinate) =>
+      coordinate.applicable && coordinate.collapse.status === "blocked")).toBe(true);
+  });
 });

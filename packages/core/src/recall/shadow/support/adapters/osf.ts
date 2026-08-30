@@ -17,6 +17,7 @@ export function adaptOsfCandidate(
   }
   if (osf.truncated) {
     addGap(draft, "osf_truncated", candidate.candidate_key, "truncated OSF is unknown, not empty");
+    noteTruncatedApplicablePropositions(draft, candidate, osf);
     return;
   }
   if (osf.composition_status !== "composed") {
@@ -25,6 +26,26 @@ export function adaptOsfCandidate(
   }
   for (const binding of osf.bindings ?? []) {
     adaptOsfBinding(draft, candidate, binding);
+  }
+}
+
+function noteTruncatedApplicablePropositions(
+  draft: SupportDraft,
+  candidate: SupportCandidateReceiptV1,
+  osf: NonNullable<SupportCandidateReceiptV1["osf"]>
+): void {
+  for (const binding of osf.bindings ?? []) {
+    if (hasBlankOsfIdentity(binding)) continue;
+    const propositionId = binding.query_proposition_id;
+    if (propositionId === undefined || propositionId.length === 0) continue;
+    addNode(draft, "proposition", propositionId);
+    noteApplicableProposition(
+      draft,
+      candidate.candidate_key,
+      candidate.hypothesis_digest ?? null,
+      propositionId,
+      { source_id: binding.evidence_id, producer: "support.osf.truncated.v1" }
+    );
   }
 }
 
