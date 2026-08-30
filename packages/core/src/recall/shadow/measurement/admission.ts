@@ -5,6 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../field/field-identity.js";
+import { sameTextSet } from "../../../shared/compare-text.js";
 import type { LexicalRequestPin } from
   "../../field/retrieval/retrieval-field-bundle.js";
 import type { RecallRetrievalFieldBundle } from
@@ -297,7 +298,7 @@ function verifyPreparedEvidence(
   verifyCanonicalQueryCompilationV1(compilation, canonicalEvidence, receipt);
   if (condition.condition.workspace_id !== evidence.workspace_id ||
     vector.principal !== condition.condition.principal ||
-    !sameStrings(vector.authorized_scopes, condition.condition.authorized_scopes) ||
+    !sameTextSet(vector.authorized_scopes, condition.condition.authorized_scopes) ||
     vector.effective_as_of !== condition.condition.effective_as_of) {
     throw new ShadowContractError("prepared measurement workspace identity mismatch");
   }
@@ -331,13 +332,6 @@ function verifyFullFinalizedLease(
     reconstructed.lease_id !== lease.lease_id) {
     throw new ShadowContractError("prepared measurement snapshot lease mismatch");
   }
-}
-
-function sameStrings(left: readonly string[], right: readonly string[]): boolean {
-  const normalizedRight = [...right].sort((a, b) => a.localeCompare(b));
-  return left.length === right.length && [...left]
-    .sort((a, b) => a.localeCompare(b))
-    .every((value, index) => value === normalizedRight[index]);
 }
 
 function lexicalMeasurementSourceIdentity(

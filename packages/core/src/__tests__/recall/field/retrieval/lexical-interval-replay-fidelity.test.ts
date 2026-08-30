@@ -15,12 +15,17 @@ type LaneHit = Readonly<{
 }>;
 
 describe("lexical interval producer replay fidelity", () => {
-  it("accepts a lawful stable locale tie in producer encounter order", () => {
-    const composed = "é";
+  it("uses code-unit post-merge order for a lawful Unicode pair", () => {
+    const composed = "\u00e9";
     const decomposed = "e\u0301";
+    expect(composed).not.toBe(decomposed);
     expect(composed.localeCompare(decomposed)).toBe(0);
     expect(compareCodeUnits(decomposed, composed)).toBeLessThan(0);
-    expect(() => verify(unicodeTieResult(composed, decomposed))).not.toThrow();
+    const result = unicodeTieResult(composed, decomposed);
+    expect(result.lexical_raw_rank_receipt.post_merge.map((row) => row.candidate_key))
+      .toEqual([decomposed, composed]);
+    expect(result.matches.map((row) => row.object_id)).toEqual([decomposed, composed]);
+    expect(() => verify(result)).not.toThrow();
   });
 
   it("rejects reversed producer lane hits", () => {
@@ -110,8 +115,8 @@ function unicodeTieResult(composed: string, decomposed: string) {
   const porter = hit("porter", -1, 0, 1);
   const objectKey = hit("object_key_porter", -1, 0, 1);
   const candidates = [
-    candidate(composed, "porter", 1, 0, [porter], []),
-    candidate(decomposed, "object_key_porter", 1, 1, [objectKey], [])
+    candidate(composed, "porter", 1, 1, [porter], []),
+    candidate(decomposed, "object_key_porter", 1, 0, [objectKey], [])
   ].sort((left, right) => compareCodeUnits(left.candidate_key, right.candidate_key));
   return resultFixture({
     mergeLimit: 2,
@@ -122,12 +127,12 @@ function unicodeTieResult(composed: string, decomposed: string) {
     ],
     candidates,
     postMerge: [
-      { candidate_key: composed, normalized_rank: 1 },
-      { candidate_key: decomposed, normalized_rank: 1, object_key_rank: 1 }
+      { candidate_key: decomposed, normalized_rank: 1, object_key_rank: 1 },
+      { candidate_key: composed, normalized_rank: 1 }
     ],
     normalMatches: [
-      { object_id: composed, normalized_rank: 1 },
-      { object_id: decomposed, normalized_rank: 1, object_key_rank: 1 }
+      { object_id: decomposed, normalized_rank: 1, object_key_rank: 1 },
+      { object_id: composed, normalized_rank: 1 }
     ]
   });
 }

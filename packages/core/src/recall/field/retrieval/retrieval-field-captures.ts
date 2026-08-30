@@ -4,6 +4,7 @@ import type {
 } from "../../runtime/recall-service-types.js";
 import { buildRecallCandidateDedupeKey } from
   "../../runtime/recall-service-helpers.js";
+import { compareText } from "../../../shared/compare-text.js";
 import {
   createRecallFiniteFieldChannelCapture,
   type RecallFiniteFieldChannelCapture,
@@ -81,7 +82,7 @@ function captureReceipts(
   }>[]
 ): RecallFiniteFieldChannelCapture {
   const ordered = [...entries].sort((left, right) =>
-    left.record.request_digest.localeCompare(right.record.request_digest) ||
+    compareText(left.record.request_digest, right.record.request_digest) ||
     lanePriority(left.receipt.lane) - lanePriority(right.receipt.lane)
   );
   const status = resolveCaptureStatus(bundle, channelId, ordered.map(({ receipt }) => receipt));

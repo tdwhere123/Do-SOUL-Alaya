@@ -1,4 +1,5 @@
 import { digestRecallFieldIdentity } from "../../field/field-identity.js";
+import { compareText } from "../../../shared/compare-text.js";
 import { freezeShadow } from "../envelope.js";
 import {
   collapsePropositionStateMeasurement,
@@ -44,7 +45,7 @@ export function psiV2CandidatesFromSupport(input: Readonly<{
   return Object.freeze([...coordinates].map(([candidateId, rows]) => freezeShadow({
     candidate_id: candidateId,
     coordinates: Object.freeze([...rows.values()].sort((left, right) =>
-      left.proposition_id.localeCompare(right.proposition_id)))
+      compareText(left.proposition_id, right.proposition_id)))
   })));
 }
 

@@ -85,7 +85,7 @@ describe("witness serialization and immutability", () => {
   });
 
   it("canonicalizes must/may members by exact code units", () => {
-    const composed = "é";
+    const composed = "\u00e9";
     const decomposed = "e\u0301";
     expect(composed === decomposed).toBe(false);
 

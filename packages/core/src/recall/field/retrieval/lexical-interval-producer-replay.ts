@@ -258,7 +258,7 @@ function compareWinners(left: Winner, right: Winner): number {
   return right.row.grouped_ordinal - left.row.grouped_ordinal ||
     left.lane.source_priority - right.lane.source_priority ||
     left.row.lane_index - right.row.lane_index ||
-    left.candidate_key.localeCompare(right.candidate_key);
+    compareCodeUnits(left.candidate_key, right.candidate_key);
 }
 
 function hitKey(hit: Readonly<LexicalBoundLaneHit>): string {

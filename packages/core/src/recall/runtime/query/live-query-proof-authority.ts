@@ -3,6 +3,7 @@ import {
   verifyQueryConditionReceipt,
   type QueryConditionReceipt
 } from "@do-soul/alaya-protocol";
+import { sameTextSet } from "../../../shared/compare-text.js";
 import {
   verifyCanonicalQueryCompilationV1,
   type CanonicalQueryCompilationV1,
@@ -87,7 +88,7 @@ export function verifyLiveQueryProofAuthority(
     verifySnapshotCoherenceReceiptV1(receipt, vector));
   if (condition.condition.workspace_id !== authority.workspace_id ||
       vector.principal !== condition.condition.principal ||
-      !sameStrings(vector.authorized_scopes, condition.condition.authorized_scopes) ||
+      !sameTextSet(vector.authorized_scopes, condition.condition.authorized_scopes) ||
       vector.effective_as_of !== condition.condition.effective_as_of) {
     failAuthority("workspace_identity_mismatch");
   }
@@ -186,9 +187,3 @@ function pinKey(pin: LexicalRequestPin): string {
     pin.candidate_key_domain].join("\u0000");
 }
 
-function sameStrings(left: readonly string[], right: readonly string[]): boolean {
-  const normalizedRight = [...right].sort((a, b) => a.localeCompare(b));
-  return left.length === right.length && [...left]
-    .sort((a, b) => a.localeCompare(b))
-    .every((value, index) => value === normalizedRight[index]);
-}

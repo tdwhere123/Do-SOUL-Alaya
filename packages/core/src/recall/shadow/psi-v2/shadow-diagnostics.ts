@@ -1,5 +1,6 @@
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../field/field-identity.js";
+import { compareText } from "../../../shared/compare-text.js";
 import type { D1CandidateEnvelopeMap } from "../d1/legal-envelope.js";
 import { freezeShadow } from "../envelope.js";
 import { isPsiCycleFailure } from "../frontier-peel.js";
@@ -225,7 +226,7 @@ function mergeCandidates(
   return Object.freeze([...byCandidate].map(([candidateId, coordinates]) => freezeShadow({
     candidate_id: candidateId,
     coordinates: Object.freeze([...coordinates.values()].sort((left, right) =>
-      left.proposition_id.localeCompare(right.proposition_id)))
+      compareText(left.proposition_id, right.proposition_id)))
   })));
 }
 

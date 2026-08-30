@@ -101,20 +101,50 @@ describe("support proposition measurement authority", () => {
       reason: "support proposition hypothesis binding is absent"
     });
   });
+
+  it("canonicalizes support coordinates independent of observation order", () => {
+    const composed = "\u00e9";
+    const decomposed = "e\u0301";
+    expect(composed === decomposed).toBe(false);
+
+    const forward = psiV2CandidatesFromSupport({
+      candidate_keys: ["left"],
+      support: support([
+        proposition("left", HYPOTHESIS_DIGEST, composed),
+        proposition("left", HYPOTHESIS_DIGEST, decomposed)
+      ])
+    });
+    const reverse = psiV2CandidatesFromSupport({
+      candidate_keys: ["left"],
+      support: support([
+        proposition("left", HYPOTHESIS_DIGEST, decomposed),
+        proposition("left", HYPOTHESIS_DIGEST, composed)
+      ])
+    });
+    const forwardIds = forward[0]?.coordinates.map((row) => row.proposition_id);
+    expect(forwardIds).toEqual(
+      reverse[0]?.coordinates.map((row) => row.proposition_id)
+    );
+    expect(forwardIds).toEqual([...(forwardIds ?? [])].sort());
+  });
 });
 
-function proposition(candidateId: string, hypothesisDigest: string | null = HYPOTHESIS_DIGEST) {
+function proposition(
+  candidateId: string,
+  hypothesisDigest: string | null = HYPOTHESIS_DIGEST,
+  localPropositionId = "prop-local"
+) {
   return Object.freeze({
     candidate_id: candidateId,
-    local_proposition_id: "prop-local",
+    local_proposition_id: localPropositionId,
     hypothesis_digest: hypothesisDigest,
     witness: createFourValuedWitness({
       identity: {
-        coordinate_id: `raw:${candidateId}:prop-local`,
+        coordinate_id: `raw:${candidateId}:${localPropositionId}`,
         query_id: QUERY_ID,
         snapshot_digest: SNAPSHOT_DIGEST,
         candidate_id: candidateId,
-        proposition_id: "prop-local"
+        proposition_id: localPropositionId
       },
       provenance: [{ source_id: `lineage:${candidateId}`, producer: "support.test" }],
       epistemic: { kind: "exact" },
