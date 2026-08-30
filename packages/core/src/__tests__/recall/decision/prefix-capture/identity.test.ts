@@ -8,9 +8,7 @@ import {
   SHADOW_ALGORITHM_ID,
   SHADOW_ALGORITHM_VERSION,
   SHADOW_CAPTURE_OPERATOR_ID,
-  SHADOW_DETERMINISTIC_TAIL,
-  SHADOW_FRONTIER_OPERATOR_ID,
-  SHADOW_PSI_OPERATOR_ID
+  SHADOW_DETERMINISTIC_TAIL
 } from "../../../../recall/decision/prefix-capture/identity.js";
 
 const PLANTED_BLOB = [
@@ -42,12 +40,10 @@ describe("capture identity digest", () => {
       .toBe(CAPTURE_IDENTITY_DIGEST);
   });
 
-  it("records algorithm, version, and operator ids from the freeze", () => {
+  it("records algorithm, version, and capture operator id from the freeze", () => {
     expect(SHADOW_ALGORITHM_ID).toBe("alaya.recall.shadow.safe-dominance-capture.v1");
     expect(SHADOW_ALGORITHM_VERSION).toBe("safe-dominance-capture.v1.0.1");
     expect(SHADOW_DETERMINISTIC_TAIL).toBe("origin_plane_object_id_code_unit_ascending");
-    expect(SHADOW_PSI_OPERATOR_ID).toBe("shadow.psi.safe_dominance.v1");
-    expect(SHADOW_FRONTIER_OPERATOR_ID).toBe("shadow.frontiers.peel_undominated.v1");
     expect(SHADOW_CAPTURE_OPERATOR_ID).toBe("shadow.select_gamma.lexicographic_set.v1");
   });
 });

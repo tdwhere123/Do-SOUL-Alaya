@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseFrontierReceipt } from "../../../../recall/decision/query-proof/frontiers.js";
-import { SHADOW_FRONTIER_OPERATOR_ID } from "../../../../recall/decision/prefix-capture/identity.js";
-import { ShadowContractError } from "../../../../recall/decision/prefix-capture/envelope.js";
+import {
+  parseFrontierReceipt,
+  SHADOW_FRONTIER_OPERATOR_ID
+} from "../../../../recall/decision/query-proof/frontiers.js";
+import { ShadowContractError } from "../../../../recall/decision/contract-primitives.js";
 import {
   isPsiCycleFailure,
   peelUndominated

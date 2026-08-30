@@ -1,13 +1,17 @@
 import { compareText } from "../../../shared/compare-text.js";
-import { freezeShadow, ShadowContractError } from "../prefix-capture/envelope.js";
+import { ShadowContractError } from "../contract-primitives.js";
+import {
+  createPsiCycleFailure,
+  type PsiQuery,
+  type ShadowPsiCycleFailure
+} from "../dominance-contract.js";
 import {
   parseFrontierReceipt,
+  SHADOW_FRONTIER_OPERATOR_ID,
   type ShadowFrontierReceipt
 } from "./frontiers.js";
-import { SHADOW_FRONTIER_OPERATOR_ID } from "../prefix-capture/identity.js";
-import type { ShadowPsiCycleFailure } from "../prefix-capture/receipts.js";
 
-export type ShadowPsiFn = (v: string, u: string) => boolean;
+export type ShadowPsiFn = PsiQuery;
 
 export type ShadowFrontierPeelResult =
   | ShadowFrontierReceipt
@@ -96,5 +100,5 @@ function isDominatedIn(
 }
 
 function cycleFailure(): ShadowPsiCycleFailure {
-  return freezeShadow({ kind: "psi_cycle_contract_failure" });
+  return createPsiCycleFailure();
 }

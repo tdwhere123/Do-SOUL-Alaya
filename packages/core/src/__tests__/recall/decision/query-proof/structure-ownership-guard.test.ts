@@ -1,22 +1,42 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const SRC_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const PRODUCTION_RECALL = join(SRC_ROOT, "recall");
-const TEST_RECALL = fileURLToPath(new URL("../..", import.meta.url));
 const INDEX_TS = join(SRC_ROOT, "index.ts");
+const REPO_ROOT = resolve(SRC_ROOT, "../../..");
+const REPOSITORY_CODE_ROOTS = ["apps", "packages", "scripts"]
+  .map((path) => join(REPO_ROOT, path))
+  .filter(existsSync);
 
 const PLANTED_OLD_IMPORT = "../../recall/shadow/walk.js";
+const PLANTED_RETIRED_PREFIX_IMPORTS = [
+  "../../recall/decision/prefix-capture/envelope.js",
+  "../../recall/decision/prefix-capture/compare.js",
+  "../prefix-capture/envelope.js",
+  "../prefix-capture/compare.js"
+] as const;
+const PLANTED_SIDE_EFFECT_IMPORT = [
+  "import ",
+  JSON.stringify(PLANTED_RETIRED_PREFIX_IMPORTS[1]),
+  ";"
+].join("");
 const PLANTED_D1_DIR = "packages/core/src/recall/decision/d1/";
 const PLANTED_CARD_DIR = "packages/core/src/recall/card-13r-foo/";
+const PLANTED_BAND_DIR = "packages/core/src/recall/decision/band-1/";
+const PLANTED_PSI_V2_DIR = "packages/core/src/recall/decision/psi-v2/";
 const PLANTED_INTEGRATION_IMPORT = "../../recall/integration/shadow/integrate.js";
 const PLANTED_LEXICAL_BOUND_IMPORT = "lexical-bound/index.js";
 const PLANTED_SYMBOL = "d1PsiOutcome";
 
-const SKIP_DIRECTORY_NAMES = new Set(["__tests__", "node_modules", "dist"]);
-const IMPORT_SPEC = /(?:from\s+|import\s*\(\s*)["']([^"']+)["']/gu;
+const SKIP_GENERATED_DIRECTORY_NAMES = new Set(["node_modules", "dist"]);
+const SKIP_PRODUCTION_DIRECTORY_NAMES = new Set([
+  ...SKIP_GENERATED_DIRECTORY_NAMES,
+  "__tests__"
+]);
+const IMPORT_SPEC = /(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']/gu;
 const EXPORT_BLOCK = /export(?:\s+type)?\s*\{([^}]+)\}\s*from\s*["']([^"']+)["']/gu;
 
 const FROZEN_MOVED_EXPORTS: Readonly<Record<string, readonly string[]>> = {
@@ -80,18 +100,28 @@ const STALE_FROM_PATHS = [
 
 describe("recall structure ownership", () => {
   it("rejects planted retired semantic import", () => {
+    const imports = [PLANTED_OLD_IMPORT, ...PLANTED_RETIRED_PREFIX_IMPORTS];
     expect(detectStructureOwnershipViolations({
-      importSpecifiers: [PLANTED_OLD_IMPORT]
-    })).toEqual([{ kind: "import", value: PLANTED_OLD_IMPORT }]);
+      importSpecifiers: imports
+    })).toEqual(imports.map((value) => ({ kind: "import", value })));
+  });
+
+  it("detects a planted side-effect import", () => {
+    expect(importSpecifiersFromSource(PLANTED_SIDE_EFFECT_IMPORT)).toEqual([
+      "../../recall/decision/prefix-capture/compare.js"
+    ]);
   });
 
   it("rejects planted forbidden directories", () => {
+    const directories = [
+      PLANTED_D1_DIR,
+      PLANTED_CARD_DIR,
+      PLANTED_BAND_DIR,
+      PLANTED_PSI_V2_DIR
+    ];
     expect(detectStructureOwnershipViolations({
-      directories: [PLANTED_D1_DIR, PLANTED_CARD_DIR]
-    })).toEqual([
-      { kind: "directory", value: PLANTED_D1_DIR },
-      { kind: "directory", value: PLANTED_CARD_DIR }
-    ]);
+      directories
+    })).toEqual(directories.map((value) => ({ kind: "directory", value })));
   });
 
   it("accepts integration shadow, lexical-bound, and D1 symbols", () => {
@@ -108,25 +138,36 @@ describe("recall structure ownership", () => {
   it("keeps the retired semantic root absent on disk", () => {
     const shadowRoot = join(PRODUCTION_RECALL, "shadow");
     expect(existsSync(shadowRoot) && statSync(shadowRoot).isDirectory()).toBe(false);
+    expect(existsSync(join(
+      PRODUCTION_RECALL,
+      "decision/prefix-capture/envelope.ts"
+    ))).toBe(false);
+    expect(existsSync(join(
+      PRODUCTION_RECALL,
+      "decision/prefix-capture/compare.ts"
+    ))).toBe(false);
   });
 
-  it("finds no forbidden directories or imports in the live recall tree", () => {
-    const production = walkRecallTree(PRODUCTION_RECALL);
-    const tests = walkRecallTree(TEST_RECALL);
+  it("finds no forbidden directories or imports in live repository code", () => {
+    const production = walkTypeScriptTree(
+      PRODUCTION_RECALL,
+      SKIP_PRODUCTION_DIRECTORY_NAMES
+    );
+    const repositoryFiles = REPOSITORY_CODE_ROOTS.flatMap(
+      (root) => walkTypeScriptTree(root).files
+    );
     expect(detectStructureOwnershipViolations({
       directories: production.directories,
-      importSpecifiers: [
-        ...importSpecifiersIn(production.files),
-        ...importSpecifiersIn(tests.files)
-      ]
+      importSpecifiers: importSpecifiersIn(repositoryFiles)
     })).toEqual([]);
   });
 
   it("keeps prefix-capture from importing query-proof", () => {
     const prefix = join(PRODUCTION_RECALL, "decision/prefix-capture");
-    const hits = importSpecifiersIn(walkRecallTree(prefix).files).filter((spec) =>
-      spec.includes("query-proof")
-    );
+    const hits = importSpecifiersIn(walkTypeScriptTree(
+      prefix,
+      SKIP_PRODUCTION_DIRECTORY_NAMES
+    ).files).filter((spec) => spec.includes("query-proof"));
     expect(hits).toEqual([]);
   });
 
@@ -142,7 +183,10 @@ describe("recall structure ownership", () => {
   });
 });
 
-function walkRecallTree(root: string): {
+function walkTypeScriptTree(
+  root: string,
+  skipDirectoryNames: ReadonlySet<string> = SKIP_GENERATED_DIRECTORY_NAMES
+): {
   directories: string[];
   files: string[];
 } {
@@ -153,7 +197,7 @@ function walkRecallTree(root: string): {
     const directory = stack.pop();
     if (directory === undefined) break;
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (SKIP_DIRECTORY_NAMES.has(entry.name)) continue;
+      if (skipDirectoryNames.has(entry.name)) continue;
       const path = join(directory, entry.name);
       if (entry.isDirectory()) {
         directories.push(path);
@@ -171,12 +215,15 @@ function walkRecallTree(root: string): {
 function importSpecifiersIn(files: readonly string[]): string[] {
   const specifiers: string[] = [];
   for (const file of files) {
-    for (const match of readFileSync(file, "utf8").matchAll(IMPORT_SPEC)) {
-      const specifier = match[1];
-      if (specifier !== undefined) specifiers.push(specifier);
-    }
+    specifiers.push(...importSpecifiersFromSource(readFileSync(file, "utf8")));
   }
   return specifiers;
+}
+
+function importSpecifiersFromSource(source: string): string[] {
+  return [...source.matchAll(IMPORT_SPEC)]
+    .map((match) => match[1])
+    .filter((specifier): specifier is string => specifier !== undefined);
 }
 
 function namedExportsByFromPath(source: string): Map<string, string[]> {
@@ -250,6 +297,7 @@ function isForbiddenImportSpecifier(specifier: string): boolean {
   const spec = posixPath(specifier);
   if (isRetiredShadowImport(spec)) return true;
   if (isRelativeRetiredShadowImport(spec)) return true;
+  if (isRetiredPrefixCaptureImport(spec)) return true;
   return hasForbiddenImportDirectory(spec);
 }
 
@@ -282,6 +330,11 @@ function isRelativeRetiredShadowImport(specifier: string): boolean {
   if (specifier.includes("integration/shadow/")) return false;
   return /(?:^|\/)\.\.\/shadow\//u.test(specifier) ||
     /(?:^|\/)\.\/shadow\//u.test(specifier);
+}
+
+function isRetiredPrefixCaptureImport(specifier: string): boolean {
+  return /(?:^|\/)(?:decision\/)?prefix-capture\/(?:envelope|compare)\.js$/u
+    .test(specifier);
 }
 
 function hasForbiddenImportDirectory(specifier: string): boolean {

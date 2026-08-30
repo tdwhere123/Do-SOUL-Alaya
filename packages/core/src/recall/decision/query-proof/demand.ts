@@ -5,7 +5,7 @@ import type {
 } from "../../query/recall-query-demand.js";
 import { hasTemporalQuerySignal } from "../../query/recall-query-plan.js";
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
-import { freezeShadow } from "../prefix-capture/envelope.js";
+import { freezeShadow } from "../contract-primitives.js";
 import type { ShadowLineageId } from "./observations.js";
 
 export type ShadowFieldArm = "E0" | "E1";

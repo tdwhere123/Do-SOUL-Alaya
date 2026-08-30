@@ -11,7 +11,7 @@ import { digestRecallFieldIdentity, type RecallFieldDigest } from
 import type { D1CandidateEnvelopeMap, D1EnvelopeIdentity } from
   "../adapters/lexical-bound/legal-envelope.js";
 import { d1IdentitiesEqual } from "../adapters/lexical-bound/legal-envelope.js";
-import { requireNonemptyString, ShadowContractError } from "../../prefix-capture/envelope.js";
+import { requireNonemptyString, ShadowContractError } from "../../contract-primitives.js";
 import { lexDomainsEqual, type LexDomain } from "../observations.js";
 import {
   collapsedMeasurementCoordinateId,

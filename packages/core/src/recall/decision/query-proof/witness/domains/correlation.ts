@@ -1,4 +1,4 @@
-import { requireNonemptyString, ShadowContractError } from "../../../prefix-capture/envelope.js";
+import { requireNonemptyString, ShadowContractError } from "../../../contract-primitives.js";
 import { createTypedWitness, rejectPayload } from "../shared/create.js";
 import { joinWitness, meetWitness, refineWitness } from "../shared/kernel.js";
 import { compareWitness, informationLeq } from "../shared/kernel-order.js";

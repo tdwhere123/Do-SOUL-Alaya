@@ -1,15 +1,17 @@
 import {
+  parseShadowEnvelope,
+  type ShadowEnvelope
+} from "./envelope.js";
+import {
   assertAllowedKeys,
   freezeShadow,
-  parseShadowEnvelope,
   requireFiniteNumber,
   requireInteger,
   requireNonemptyString,
   requireShadowRecord,
   requireStringList,
-  ShadowContractError,
-  type ShadowEnvelope
-} from "../prefix-capture/envelope.js";
+  ShadowContractError
+} from "../contract-primitives.js";
 import {
   parseSubjectComponent,
   SUBJECT_COMPONENT_IDS

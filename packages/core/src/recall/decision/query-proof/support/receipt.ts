@@ -1,6 +1,6 @@
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../../field/field-identity.js";
-import { freezeShadow } from "../../prefix-capture/envelope.js";
+import { freezeShadow } from "../../contract-primitives.js";
 import { SUPPORT_HYPERGRAPH_OPERATOR_ID } from "./types.js";
 import type {
   SupportAliasRecordV1,

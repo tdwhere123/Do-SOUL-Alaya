@@ -1,5 +1,5 @@
 import type { CanonicalSelectionReceipt, RecallCandidate } from "@do-soul/alaya-protocol";
-import { ShadowContractError } from "../../decision/prefix-capture/envelope.js";
+import { ShadowContractError } from "../../decision/contract-primitives.js";
 import type {
   CanonicalCandidateDiagnostic,
   RecallCandidateDiagnostic,

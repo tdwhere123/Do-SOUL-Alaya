@@ -1,8 +1,8 @@
 import {
-  ShadowContractError,
   type ShadowEnvelope,
   type ShadowObservedEnvelope
-} from "../../prefix-capture/envelope.js";
+} from "../envelope.js";
+import { ShadowContractError } from "../../contract-primitives.js";
 import {
   createNumericIntervalWitness,
   type NumericIntervalWitness

@@ -17,7 +17,7 @@ import {
   type ShadowSetUtilityInput
 } from "../../decision/prefix-capture/capture.js";
 import { shadowLineageApplicability } from "../../decision/query-proof/demand.js";
-import { freezeShadow, ShadowContractError } from "../../decision/prefix-capture/envelope.js";
+import { freezeShadow, ShadowContractError } from "../../decision/contract-primitives.js";
 import { isPsiCycleFailure, peelUndominated } from "../../decision/query-proof/frontier-peel.js";
 import type { ShadowFrontierReceipt } from "../../decision/query-proof/frontiers.js";
 import {
@@ -54,12 +54,12 @@ import {
   isCapturedWalk,
   prefixSK,
   walkShadowCapture,
-  type PsiQuery,
   type ShadowCapturedWalk,
   type ShadowCaptureWalkCandidate
 } from "../../decision/prefix-capture/walk.js";
+import type { PsiQuery } from "../../decision/dominance-contract.js";
 
-export type { PsiQuery } from "../../decision/prefix-capture/walk.js";
+export type { PsiQuery } from "../../decision/dominance-contract.js";
 export type { ShadowPsiObservationField } from "../../decision/query-proof/psi.js";
 export { prefixSK } from "../../decision/prefix-capture/walk.js";
 

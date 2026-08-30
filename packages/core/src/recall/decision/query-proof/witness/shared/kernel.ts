@@ -1,4 +1,4 @@
-import { ShadowContractError } from "../../../prefix-capture/envelope.js";
+import { ShadowContractError } from "../../../contract-primitives.js";
 import {
   conflictEpistemic,
   exactEpistemic,

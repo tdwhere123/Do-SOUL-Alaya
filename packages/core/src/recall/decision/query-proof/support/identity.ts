@@ -2,7 +2,7 @@ import {
   freezeShadow,
   requireNonemptyString,
   ShadowContractError
-} from "../../prefix-capture/envelope.js";
+} from "../../contract-primitives.js";
 import type { SupportNodeKind } from "./types.js";
 
 const CANDIDATE_KEY = /^(workspace_local|global):[A-Za-z0-9_]+:.+$/u;

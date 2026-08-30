@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ShadowContractError } from "../../../../../recall/decision/prefix-capture/envelope.js";
+import { ShadowContractError } from "../../../../../recall/decision/contract-primitives.js";
 import {
   compareNumericInterval,
   createNumericIntervalWitness,

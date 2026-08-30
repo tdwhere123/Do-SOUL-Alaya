@@ -4,7 +4,7 @@ import {
   isShadowRecord,
   requireFiniteNumber,
   ShadowContractError
-} from "./envelope.js";
+} from "../contract-primitives.js";
 
 export const SHADOW_GAMMA_KINDS = [
   "unscaled_remainder",

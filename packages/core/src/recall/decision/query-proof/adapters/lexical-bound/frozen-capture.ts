@@ -10,7 +10,7 @@ import {
   isShadowRecord,
   requireShadowRecord,
   ShadowContractError
-} from "../../../prefix-capture/envelope.js";
+} from "../../../contract-primitives.js";
 import {
   parsePointwiseObservation,
   SHADOW_LINEAGE_IDS,

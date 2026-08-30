@@ -5,13 +5,13 @@ import {
   type ShadowCoordinateAvailability,
   type ShadowSetUtilityInput
 } from "../../../../recall/decision/prefix-capture/capture.js";
-import { ShadowContractError } from "../../../../recall/decision/prefix-capture/envelope.js";
+import { ShadowContractError } from "../../../../recall/decision/contract-primitives.js";
+import type { PsiQuery } from "../../../../recall/decision/dominance-contract.js";
 import {
   deterministicTailDecidedThisPick,
   isCapturedWalk,
   prefixSK,
   walkShadowCapture,
-  type PsiQuery,
   type ShadowCapturedWalk,
   type ShadowCaptureWalkCandidate,
   type ShadowCaptureWalkResult

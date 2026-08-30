@@ -2,7 +2,7 @@ import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../../field/field-identity.js";
 import { compareText } from "../../../../shared/compare-text.js";
 import type { D1CandidateEnvelopeMap } from "../adapters/lexical-bound/legal-envelope.js";
-import { freezeShadow } from "../../prefix-capture/envelope.js";
+import { freezeShadow } from "../../contract-primitives.js";
 import { isPsiCycleFailure } from "../frontier-peel.js";
 import type { VerifiedMeasurementAuthorityV1 } from "../measurement/index.js";
 import type { SupportMaterializationV1 } from "../support/index.js";

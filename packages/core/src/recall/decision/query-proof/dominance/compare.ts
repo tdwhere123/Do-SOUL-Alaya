@@ -1,4 +1,4 @@
-import { freezeShadow } from "../../prefix-capture/envelope.js";
+import { freezeShadow } from "../../contract-primitives.js";
 import { measurementAdmissionsShareAuthority } from "../measurement/admission.js";
 import {
   compareCollapsedPropositionStatesExact,

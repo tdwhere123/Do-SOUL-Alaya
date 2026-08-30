@@ -2,7 +2,7 @@ import {
   freezeShadow,
   requireNonemptyString,
   ShadowContractError
-} from "../../../prefix-capture/envelope.js";
+} from "../../../contract-primitives.js";
 import type {
   WitnessIdentityPins
 } from "./types.js";

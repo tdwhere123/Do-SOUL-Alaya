@@ -1,4 +1,4 @@
-import { freezeShadow, ShadowContractError } from "../../prefix-capture/envelope.js";
+import { freezeShadow, ShadowContractError } from "../../contract-primitives.js";
 import type { FiniteInterval } from "../witness/shared/bounds.js";
 import { unionProvenance } from "../witness/shared/provenance.js";
 import {

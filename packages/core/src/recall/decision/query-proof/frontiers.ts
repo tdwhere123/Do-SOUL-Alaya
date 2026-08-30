@@ -4,8 +4,9 @@ import {
   freezeShadow,
   isShadowRecord,
   ShadowContractError
-} from "../prefix-capture/envelope.js";
-import { SHADOW_FRONTIER_OPERATOR_ID } from "../prefix-capture/identity.js";
+} from "../contract-primitives.js";
+
+export const SHADOW_FRONTIER_OPERATOR_ID = "shadow.frontiers.peel_undominated.v1";
 
 export type ShadowFrontierLayer = Readonly<{
   readonly index: number;

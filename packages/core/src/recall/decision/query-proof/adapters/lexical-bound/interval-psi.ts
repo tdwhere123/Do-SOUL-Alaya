@@ -1,5 +1,5 @@
-import type { ShadowChannelVote } from "../../../prefix-capture/compare.js";
-import { freezeShadow, ShadowContractError } from "../../../prefix-capture/envelope.js";
+import type { ShadowChannelVote } from "../../compare.js";
+import { freezeShadow, ShadowContractError } from "../../../contract-primitives.js";
 import {
   SHADOW_LINEAGE_IDS,
   type ShadowLineageId
@@ -12,7 +12,7 @@ import {
   type ShadowPsiOutcomeKind,
   type ShadowPsiQResult
 } from "../../psi.js";
-import type { ShadowNotADominanceCompare } from "../../../prefix-capture/receipts.js";
+import type { ShadowNotADominanceCompare } from "../../receipts.js";
 import type { LexicalBoundProof } from "../../../../runtime/diagnostics/lexical-bound-proof.js";
 import { d1LexicalChannelVote } from "./interval-compare.js";
 import {

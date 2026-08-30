@@ -8,7 +8,7 @@ import {
   type ShadowSetUtilityInput,
   type ShadowWitnessStanding
 } from "./capture.js";
-import { freezeShadow } from "./envelope.js";
+import { freezeShadow } from "../contract-primitives.js";
 
 export type ShadowSelectedSet = Readonly<{
   readonly best_cover: ReadonlyMap<string, number>;

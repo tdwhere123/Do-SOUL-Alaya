@@ -1,4 +1,4 @@
-import type { ShadowChannelVote } from "../../../prefix-capture/compare.js";
+import type { ShadowChannelVote } from "../../compare.js";
 import { lexDomainsEqual, type LexDomain } from "../../observations.js";
 import {
   d1HasLegalEnvelope,

@@ -2,13 +2,11 @@ import { compareText } from "../../../shared/compare-text.js";
 import {
   compareChannelEnvelopes,
   type ShadowChannelVote
-} from "../prefix-capture/compare.js";
+} from "./compare.js";
 import {
-  freezeShadow,
-  ShadowContractError,
   type ShadowEnvelope
-} from "../prefix-capture/envelope.js";
-import { SHADOW_PSI_OPERATOR_ID } from "../prefix-capture/identity.js";
+} from "./envelope.js";
+import { freezeShadow, ShadowContractError } from "../contract-primitives.js";
 import {
   embeddingDomainsEqual,
   lexDomainsEqual,
@@ -21,10 +19,11 @@ import {
 import {
   parsePsiEdge,
   parsePsiPairReceipt,
+  SHADOW_PSI_OPERATOR_ID,
   type ShadowNotADominanceCompare,
   type ShadowPsiEdge,
   type ShadowPsiPairReceipt
-} from "../prefix-capture/receipts.js";
+} from "./receipts.js";
 
 export type ShadowPsiHGate = "none" | "event" | "temporal" | "hidden";
 

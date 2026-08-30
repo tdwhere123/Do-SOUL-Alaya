@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseShadowEnvelope,
   type ShadowEnvelope
-} from "../../../../../recall/decision/prefix-capture/envelope.js";
+} from "../../../../../recall/decision/query-proof/envelope.js";
 import {
   consumerView,
   isKnownZeroEpistemic,

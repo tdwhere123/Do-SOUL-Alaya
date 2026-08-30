@@ -3,27 +3,17 @@ import type { SelectGammaRequest } from
   "../../../../recall/delivery/select-gamma/types.js";
 import {
   assertShadowReceiptHasNoDeliveryOrder,
-  observationFromUnsupportedDiagnostic,
+  type ShadowHasDeliveryOrderField
+} from "../../../../recall/decision/contract-primitives.js";
+import {
   parseCaptureDecisionReceipt,
   parseCoreKnownNoWitness,
-  parseEqualGReject,
-  parseFieldMembership,
-  parsePsiEdge,
-  parsePsiPairReceipt,
-  parseUnsupportedRelationalDiagnostic,
-  rejectNegativeRelationalEvidence,
-  type ShadowHasDeliveryOrderField,
-  type ShadowUnsupportedRelationalSource
+  parseEqualGReject
 } from "../../../../recall/decision/prefix-capture/receipts.js";
-import { parseFrontierReceipt } from "../../../../recall/decision/query-proof/frontiers.js";
 import {
   parseSetUtilityInput,
   type ShadowSetUtilityInput
 } from "../../../../recall/decision/prefix-capture/capture.js";
-import {
-  SHADOW_FRONTIER_OPERATOR_ID,
-  SHADOW_PSI_OPERATOR_ID
-} from "../../../../recall/decision/prefix-capture/identity.js";
 
 function acceptSelectGamma(_request: SelectGammaRequest): void {}
 
@@ -44,81 +34,8 @@ function utility(): ShadowSetUtilityInput {
   });
 }
 
-describe("shadow receipts", () => {
-  it("records E0/E1 membership and embedding-admission provenance", () => {
-    const e0 = parseFieldMembership({
-      candidate_key: "cand-a",
-      e0_member: true,
-      e1_member: true,
-      admits: ["fts.admit.v1"],
-      embedding_admission: null
-    });
-    expect(e0.e0_member).toBe(true);
-    expect(e0.embedding_admission).toBeNull();
-    const e1 = parseFieldMembership({
-      candidate_key: "cand-b",
-      e0_member: false,
-      e1_member: true,
-      admits: ["embed.admit.v1"],
-      embedding_admission: {
-        receipt: "embed.admit.v1",
-        membership_only: true,
-        cannot_evict_e0: true
-      }
-    });
-    expect(e1.embedding_admission?.receipt).toBe("embed.admit.v1");
-    expect(() => parseFieldMembership({
-      candidate_key: "cand-c",
-      e0_member: true,
-      e1_member: false,
-      admits: ["fts.admit.v1"],
-      embedding_admission: null
-    })).toThrow(/H_E0/u);
-  });
-
-  it("keeps Path/Flood facts as unsupported diagnostics that cannot construct O", () => {
-    const diagnostic = parseUnsupportedRelationalDiagnostic({
-      kind: "unsupported_relational_diagnostic",
-      source: "flood",
-      facts: { flood_value: 0, path_status: "none" }
-    });
-    expect(diagnostic.kind).toBe("unsupported_relational_diagnostic");
-    expect(() => observationFromUnsupportedDiagnostic(diagnostic))
-      .toThrow(/cannot instantiate v1 observation/u);
-  });
-
-  it.each([
-    "not_observed",
-    "producer_unavailable",
-    "truncation",
-    "cap_exhaustion",
-    "no_path_under_cap"
-  ] satisfies ShadowUnsupportedRelationalSource[])(
-    "rejects %s as negative relational evidence",
-    (source) => {
-      const diagnostic = parseUnsupportedRelationalDiagnostic({
-        kind: "unsupported_relational_diagnostic",
-        source,
-        facts: { truncated: true, cap: 50 }
-      });
-      expect(() => rejectNegativeRelationalEvidence(diagnostic))
-        .toThrow(/negative relational evidence/u);
-    }
-  );
-
-  it("names Psi edges, max-G cohort, equal-G rejects, and the deterministic tail", () => {
-    expect(parsePsiEdge({
-      kind: "psi_edge",
-      operator_id: SHADOW_PSI_OPERATOR_ID,
-      dominator: "a",
-      dominated: "b"
-    })).toMatchObject({ dominator: "a", dominated: "b" });
-    expect(parsePsiPairReceipt({
-      left: "a",
-      right: "b",
-      reason: "blocked",
-      dominates: false
-    }).reason).toBe("blocked");
+describe("prefix-capture receipts", () => {
+  it("records max-G rejects and the deterministic tail without delivery order", () => {
     expect(parseEqualGReject({
       candidate_key: "b",
       dominated_by: "a"
@@ -163,29 +80,17 @@ describe("shadow receipts", () => {
     }).status).toBe("available_known_absent");
   });
 
-  it("serializes frontier members without treating index as gain", () => {
-    const receipt = parseFrontierReceipt({
-      schema_version: 1,
-      operator_id: SHADOW_FRONTIER_OPERATOR_ID,
-      layers: [{ index: 1, member_keys: ["a", "b"] }]
-    });
-    expect(receipt.layers[0]?.index).toBe(1);
-    expect(() => parseFrontierReceipt({
-      schema_version: 1,
-      operator_id: SHADOW_FRONTIER_OPERATOR_ID,
-      layers: [{ index: 1, member_keys: ["a"], score: 0.9 }]
-    })).toThrow(/structure, not gain/u);
-  });
-
-  it("cannot feed shadow receipts into selectGammaWalk", () => {
+  it("cannot feed prefix-capture receipts into selectGammaWalk", () => {
     const receipt = utility();
     const noDelivery: [ShadowHasDeliveryOrderField<ShadowSetUtilityInput>] extends [never]
       ? true
       : false = true;
     expect(noDelivery).toBe(true);
     assertShadowReceiptHasNoDeliveryOrder(receipt);
-    expect("ordering_basis" in receipt).toBe(false);
-    expect("selected_candidate_keys" in receipt).toBe(false);
+    expect(() => assertShadowReceiptHasNoDeliveryOrder({
+      ...receipt,
+      ordering_basis: "forbidden"
+    })).toThrow(/delivery-order field ordering_basis/u);
     // @ts-expect-error shadow set-utility is not a Select_Gamma request
     acceptSelectGamma(receipt);
   });

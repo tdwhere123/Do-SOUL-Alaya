@@ -1,4 +1,4 @@
-import { freezeShadow } from "../../prefix-capture/envelope.js";
+import { freezeShadow } from "../../contract-primitives.js";
 import {
   createFourValuedWitness,
   type FourValuedPolarity,

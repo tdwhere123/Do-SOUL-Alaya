@@ -1,11 +1,11 @@
 import {
-  freezeShadow,
   isCmpIllegalState,
   isUnknownNeutral,
   SHADOW_ENVELOPE_STATES,
   type ShadowEnvelope,
   type ShadowEnvelopeState
 } from "./envelope.js";
+import { freezeShadow } from "../contract-primitives.js";
 
 export type ShadowPairReason = "equal" | "tradeoff" | "blocked" | "skip";
 

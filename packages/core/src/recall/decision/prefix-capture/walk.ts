@@ -3,7 +3,12 @@ import {
 } from "@do-soul/alaya-protocol";
 import { compareText } from "../../../shared/compare-text.js";
 import type { ShadowGammaTuple, ShadowObligationKey, ShadowSetUtilityInput } from "./capture.js";
-import { freezeShadow, ShadowContractError } from "./envelope.js";
+import { freezeShadow, ShadowContractError } from "../contract-primitives.js";
+import {
+  createPsiCycleFailure,
+  type PsiQuery,
+  type ShadowPsiCycleFailure
+} from "../dominance-contract.js";
 import {
   acceptCandidate,
   compareGammaTuple,
@@ -17,11 +22,8 @@ import {
 import { SHADOW_CAPTURE_OPERATOR_ID, SHADOW_DETERMINISTIC_TAIL } from "./identity.js";
 import {
   parseCaptureDecisionReceipt,
-  type ShadowCaptureDecisionReceipt,
-  type ShadowPsiCycleFailure
+  type ShadowCaptureDecisionReceipt
 } from "./receipts.js";
-
-export type PsiQuery = (dominator: string, dominated: string) => boolean;
 
 export type ShadowCaptureWalkCandidate = Readonly<{
   readonly candidate_key: string;
@@ -79,9 +81,7 @@ type ScoredCandidate = Readonly<{
   readonly G: ShadowGammaTuple;
 }>;
 
-const CYCLE: ShadowPsiCycleFailure = freezeShadow({
-  kind: "psi_cycle_contract_failure"
-});
+const CYCLE: ShadowPsiCycleFailure = createPsiCycleFailure();
 
 export function walkShadowCapture(
   input: ShadowCaptureWalkInput

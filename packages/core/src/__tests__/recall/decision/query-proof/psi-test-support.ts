@@ -4,7 +4,7 @@ import {
   type LexDomain,
   type ShadowSubjectComponent
 } from "../../../../recall/decision/query-proof/observations.js";
-import { parseShadowEnvelope } from "../../../../recall/decision/prefix-capture/envelope.js";
+import { parseShadowEnvelope } from "../../../../recall/decision/query-proof/envelope.js";
 import type {
   ShadowPsiCandidateView,
   ShadowPsiHGate,
