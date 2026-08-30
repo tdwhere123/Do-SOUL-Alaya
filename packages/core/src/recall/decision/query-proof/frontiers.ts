@@ -4,7 +4,7 @@ import {
   freezeShadow,
   isShadowRecord,
   ShadowContractError
-} from "./envelope.js";
+} from "../prefix-capture/envelope.js";
 import { SHADOW_FRONTIER_OPERATOR_ID } from "../prefix-capture/identity.js";
 
 export type ShadowFrontierLayer = Readonly<{

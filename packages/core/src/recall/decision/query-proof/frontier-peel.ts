@@ -1,5 +1,5 @@
 import { compareText } from "../../../shared/compare-text.js";
-import { freezeShadow, ShadowContractError } from "./envelope.js";
+import { freezeShadow, ShadowContractError } from "../prefix-capture/envelope.js";
 import {
   parseFrontierReceipt,
   type ShadowFrontierReceipt

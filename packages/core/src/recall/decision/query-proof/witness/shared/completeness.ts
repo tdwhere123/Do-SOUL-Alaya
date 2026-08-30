@@ -2,7 +2,7 @@ import {
   assertAllowedKeys,
   isShadowRecord,
   ShadowContractError
-} from "../../envelope.js";
+} from "../../../prefix-capture/envelope.js";
 import type {
   WitnessCompleteness,
   WitnessDomainKind,

@@ -2,12 +2,12 @@ import { compareText } from "../../../shared/compare-text.js";
 import {
   compareChannelEnvelopes,
   type ShadowChannelVote
-} from "./compare.js";
+} from "../prefix-capture/compare.js";
 import {
   freezeShadow,
   ShadowContractError,
   type ShadowEnvelope
-} from "./envelope.js";
+} from "../prefix-capture/envelope.js";
 import { SHADOW_PSI_OPERATOR_ID } from "../prefix-capture/identity.js";
 import {
   embeddingDomainsEqual,

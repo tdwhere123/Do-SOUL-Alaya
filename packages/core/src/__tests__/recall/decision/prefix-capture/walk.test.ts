@@ -5,7 +5,7 @@ import {
   type ShadowCoordinateAvailability,
   type ShadowSetUtilityInput
 } from "../../../../recall/decision/prefix-capture/capture.js";
-import { ShadowContractError } from "../../../../recall/decision/query-proof/envelope.js";
+import { ShadowContractError } from "../../../../recall/decision/prefix-capture/envelope.js";
 import {
   deterministicTailDecidedThisPick,
   isCapturedWalk,

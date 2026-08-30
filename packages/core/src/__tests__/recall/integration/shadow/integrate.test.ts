@@ -7,7 +7,7 @@ import type {
   CoarseRecallCandidate,
   RecallSupplementaryData
 } from "../../../../recall/runtime/recall-service-types.js";
-import { ShadowContractError } from "../../../../recall/decision/query-proof/envelope.js";
+import { ShadowContractError } from "../../../../recall/decision/prefix-capture/envelope.js";
 import { isPsiCycleFailure, peelUndominated } from "../../../../recall/decision/query-proof/frontier-peel.js";
 import * as psiV2 from "../../../../recall/decision/query-proof/dominance/index.js";
 import type { ShadowFrontierReceipt } from "../../../../recall/decision/query-proof/frontiers.js";

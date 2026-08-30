@@ -11,7 +11,7 @@ import { verifiedCurrentQueryOsfCapture } from
   "../../../query/canonical-query/adapters/osf.js";
 import type { SnapshotReadLeaseCapabilityV1, SnapshotReadLeaseV1 } from
   "../../../runtime/snapshot-coherence/index.js";
-import { freezeShadow, ShadowContractError } from "../envelope.js";
+import { freezeShadow, ShadowContractError } from "../../prefix-capture/envelope.js";
 import { createFourValuedWitness, type FourValuedWitness, type WitnessIdentityPins } from
   "../witness/index.js";
 import { digestSupportHypergraph, type SupportHypergraphReceiptV1 } from

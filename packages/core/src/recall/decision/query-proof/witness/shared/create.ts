@@ -1,4 +1,4 @@
-import { ShadowContractError } from "../../envelope.js";
+import { ShadowContractError } from "../../../prefix-capture/envelope.js";
 import { parseEpistemic } from "./epistemic.js";
 import { assembleWitness } from "./frame.js";
 import { parseIdentityPins } from "./identity.js";

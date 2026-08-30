@@ -1,7 +1,7 @@
 import {
   SHADOW_PAIR_REASONS,
   type ShadowPairReason
-} from "../query-proof/compare.js";
+} from "./compare.js";
 import {
   assertAllowedKeys,
   freezeShadow,
@@ -10,7 +10,7 @@ import {
   requireInteger,
   requireStringList,
   ShadowContractError
-} from "../query-proof/envelope.js";
+} from "./envelope.js";
 import {
   SHADOW_DETERMINISTIC_TAIL,
   SHADOW_PSI_OPERATOR_ID

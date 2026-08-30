@@ -2,7 +2,7 @@ import {
   freezeShadow,
   requireNonemptyString,
   ShadowContractError
-} from "../../envelope.js";
+} from "../../../prefix-capture/envelope.js";
 import type { WitnessProvenanceEntry } from "./types.js";
 
 export function parseProvenance(

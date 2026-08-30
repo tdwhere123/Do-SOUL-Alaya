@@ -21,7 +21,7 @@ import {
 } from "../../../query/canonical-query/index.js";
 import { fieldContractSha256 } from "../../../../shared/field-hash.js";
 import { freezeShadow, requireNonemptyString, ShadowContractError } from
-  "../envelope.js";
+  "../../prefix-capture/envelope.js";
 import {
   finalizePreparedSnapshotReadLease,
   verifySnapshotCoherenceReceiptV1,

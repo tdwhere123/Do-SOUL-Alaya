@@ -9,7 +9,7 @@ import {
   requireStringList,
   ShadowContractError,
   type ShadowEnvelope
-} from "./envelope.js";
+} from "../prefix-capture/envelope.js";
 import {
   parseSubjectComponent,
   SUBJECT_COMPONENT_IDS

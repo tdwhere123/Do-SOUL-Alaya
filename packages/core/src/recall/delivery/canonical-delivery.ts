@@ -46,7 +46,7 @@ import {
   type ShadowIntegrateInput
 } from "../integration/shadow/integrate.js";
 import { buildProductionSetUtilities } from "../decision/prefix-capture/utility/production.js";
-import { ShadowContractError } from "../decision/query-proof/envelope.js";
+import { ShadowContractError } from "../decision/prefix-capture/envelope.js";
 import { assertCanonicalSelectionReceipt } from "./canonical-receipt-validation.js";
 import { materializePsiV2ShadowInput } from "../integration/shadow/live-receipt-materialization.js";
 

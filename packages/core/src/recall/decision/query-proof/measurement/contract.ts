@@ -6,7 +6,7 @@ import {
   isShadowRecord,
   requireNonemptyString,
   ShadowContractError
-} from "../envelope.js";
+} from "../../prefix-capture/envelope.js";
 
 export const MEASUREMENT_GROUP_OPERATOR_ID = "recall_measurement_group_v1" as const;
 

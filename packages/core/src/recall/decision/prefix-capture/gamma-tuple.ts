@@ -8,7 +8,7 @@ import {
   type ShadowSetUtilityInput,
   type ShadowWitnessStanding
 } from "./capture.js";
-import { freezeShadow } from "../query-proof/envelope.js";
+import { freezeShadow } from "./envelope.js";
 
 export type ShadowSelectedSet = Readonly<{
   readonly best_cover: ReadonlyMap<string, number>;

@@ -1,4 +1,4 @@
-import { ShadowContractError } from "../../envelope.js";
+import { ShadowContractError } from "../../../prefix-capture/envelope.js";
 
 export type FiniteInterval = Readonly<{
   readonly lower: number;

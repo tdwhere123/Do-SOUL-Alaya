@@ -10,8 +10,8 @@ import {
   parseFieldMembership,
   parseUnsupportedRelationalDiagnostic
 } from "../../../../recall/decision/prefix-capture/receipts.js";
-import { ShadowContractError } from "../../../../recall/decision/query-proof/envelope.js";
-import { shadowStatePairKind } from "../../../../recall/decision/query-proof/compare.js";
+import { ShadowContractError } from "../../../../recall/decision/prefix-capture/envelope.js";
+import { shadowStatePairKind } from "../../../../recall/decision/prefix-capture/compare.js";
 import { SHADOW_PSI_OPERATOR_ID } from "../../../../recall/decision/prefix-capture/identity.js";
 import {
   cmpChannel,

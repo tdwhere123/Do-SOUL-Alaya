@@ -1,5 +1,5 @@
 import { freezeShadow, requireNonemptyString, ShadowContractError } from
-  "../envelope.js";
+  "../../prefix-capture/envelope.js";
 import {
   CORRELATION_STATES,
   type BindingRelationState,

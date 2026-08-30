@@ -3,7 +3,7 @@ import {
   isObservedZero,
   parseShadowEnvelope,
   ShadowContractError
-} from "../../../../recall/decision/query-proof/envelope.js";
+} from "../../../../recall/decision/prefix-capture/envelope.js";
 import {
   isKnownZeroEpistemic,
   witnessFromShadowEnvelope

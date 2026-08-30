@@ -17,7 +17,7 @@ import {
   type ShadowSetUtilityInput
 } from "../../decision/prefix-capture/capture.js";
 import { shadowLineageApplicability } from "../../decision/query-proof/demand.js";
-import { freezeShadow, ShadowContractError } from "../../decision/query-proof/envelope.js";
+import { freezeShadow, ShadowContractError } from "../../decision/prefix-capture/envelope.js";
 import { isPsiCycleFailure, peelUndominated } from "../../decision/query-proof/frontier-peel.js";
 import type { ShadowFrontierReceipt } from "../../decision/query-proof/frontiers.js";
 import {

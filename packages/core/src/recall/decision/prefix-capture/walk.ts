@@ -3,7 +3,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { compareText } from "../../../shared/compare-text.js";
 import type { ShadowGammaTuple, ShadowObligationKey, ShadowSetUtilityInput } from "./capture.js";
-import { freezeShadow, ShadowContractError } from "../query-proof/envelope.js";
+import { freezeShadow, ShadowContractError } from "./envelope.js";
 import {
   acceptCandidate,
   compareGammaTuple,

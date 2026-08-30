@@ -2,7 +2,7 @@ import {
   ShadowContractError,
   type ShadowEnvelope,
   type ShadowObservedEnvelope
-} from "../envelope.js";
+} from "../../prefix-capture/envelope.js";
 import {
   createNumericIntervalWitness,
   type NumericIntervalWitness

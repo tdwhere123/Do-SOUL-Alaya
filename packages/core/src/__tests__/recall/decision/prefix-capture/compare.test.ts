@@ -4,12 +4,12 @@ import {
   compareEnvelopeStates,
   SHADOW_STATE_PAIR_MATRIX,
   type ShadowStatePairKind
-} from "../../../../recall/decision/query-proof/compare.js";
+} from "../../../../recall/decision/prefix-capture/compare.js";
 import {
   parseShadowEnvelope,
   SHADOW_ENVELOPE_STATES,
   type ShadowEnvelopeState
-} from "../../../../recall/decision/query-proof/envelope.js";
+} from "../../../../recall/decision/prefix-capture/envelope.js";
 
 function plantedKind(
   left: ShadowEnvelopeState,

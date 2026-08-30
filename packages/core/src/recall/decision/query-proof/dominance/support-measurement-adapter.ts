@@ -1,6 +1,6 @@
 import { digestRecallFieldIdentity } from "../../../field/field-identity.js";
 import { compareText } from "../../../../shared/compare-text.js";
-import { freezeShadow } from "../envelope.js";
+import { freezeShadow } from "../../prefix-capture/envelope.js";
 import {
   collapsePropositionStateMeasurement,
   issueMeasurementGroupAdmission,

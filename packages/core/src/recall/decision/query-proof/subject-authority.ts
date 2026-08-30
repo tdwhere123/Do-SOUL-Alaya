@@ -6,7 +6,7 @@ import {
   requireShadowRecord,
   ShadowContractError,
   type ShadowEnvelope
-} from "./envelope.js";
+} from "../prefix-capture/envelope.js";
 import type {
   ShadowSubjectComponent,
   ShadowSubjectComponentId

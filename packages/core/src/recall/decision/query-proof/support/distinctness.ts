@@ -1,4 +1,4 @@
-import { ShadowContractError } from "../envelope.js";
+import { ShadowContractError } from "../../prefix-capture/envelope.js";
 import { verifyBindingRelationEvidenceReceiptV1 } from
   "../witness/domains/binding-evidence.js";
 import type { BindingRelationEvidenceVerifierV1 } from "../witness/index.js";

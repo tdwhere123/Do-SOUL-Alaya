@@ -1,5 +1,5 @@
-import type { ShadowChannelVote } from "../../compare.js";
-import { freezeShadow, ShadowContractError } from "../../envelope.js";
+import type { ShadowChannelVote } from "../../../prefix-capture/compare.js";
+import { freezeShadow, ShadowContractError } from "../../../prefix-capture/envelope.js";
 import {
   SHADOW_LINEAGE_IDS,
   type ShadowLineageId

@@ -122,6 +122,14 @@ describe("recall structure ownership", () => {
     })).toEqual([]);
   });
 
+  it("keeps prefix-capture from importing query-proof", () => {
+    const prefix = join(PRODUCTION_RECALL, "decision/prefix-capture");
+    const hits = importSpecifiersIn(walkRecallTree(prefix).files).filter((spec) =>
+      spec.includes("query-proof")
+    );
+    expect(hits).toEqual([]);
+  });
+
   it("keeps moved package-root export names on the new from-paths", () => {
     const named = namedExportsByFromPath(readFileSync(INDEX_TS, "utf8"));
     for (const stale of STALE_FROM_PATHS) {

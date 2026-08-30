@@ -1,5 +1,5 @@
 import { compareText } from "../../../../../shared/compare-text.js";
-import { ShadowContractError } from "../../envelope.js";
+import { ShadowContractError } from "../../../prefix-capture/envelope.js";
 import { createTypedWitness, rejectPayload } from "../shared/create.js";
 import { joinWitness, meetWitness, refineWitness } from "../shared/kernel.js";
 import { compareWitness, informationLeq } from "../shared/kernel-order.js";

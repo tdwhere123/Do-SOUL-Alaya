@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ShadowContractError } from "../../../../../recall/decision/query-proof/envelope.js";
+import { ShadowContractError } from "../../../../../recall/decision/prefix-capture/envelope.js";
 import { createSupportHypergraph } from "../../../../../recall/decision/query-proof/support/index.js";
 import { QUERY, SNAPSHOT } from "./fixtures.js";
 

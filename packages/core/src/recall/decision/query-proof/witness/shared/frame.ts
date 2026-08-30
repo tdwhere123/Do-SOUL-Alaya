@@ -1,6 +1,6 @@
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../../../field/field-identity.js";
-import { freezeShadow } from "../../envelope.js";
+import { freezeShadow } from "../../../prefix-capture/envelope.js";
 import { stableStringify } from "../../../../../shared/stable-stringify.js";
 import { assertCompletenessApplies } from "./completeness.js";
 import { freezeEpistemic, isKnownZeroEpistemic } from "./epistemic.js";

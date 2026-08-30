@@ -1,5 +1,5 @@
 import type { LexicalBoundProof } from "../../../../runtime/diagnostics/lexical-bound-proof.js";
-import { freezeShadow, ShadowContractError } from "../../envelope.js";
+import { freezeShadow, ShadowContractError } from "../../../prefix-capture/envelope.js";
 import {
   isPsiCycleFailure,
   peelUndominated

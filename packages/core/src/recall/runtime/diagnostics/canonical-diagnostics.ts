@@ -4,7 +4,7 @@ import type {
   RecallCandidate,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import { ShadowContractError } from "../../decision/query-proof/envelope.js";
+import { ShadowContractError } from "../../decision/prefix-capture/envelope.js";
 import { clamp01 } from "../../../shared/clamp.js";
 import {
   buildRecallCandidateDedupeKey,

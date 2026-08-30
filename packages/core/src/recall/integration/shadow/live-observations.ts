@@ -29,7 +29,7 @@ import {
   type QueryTimeWindow
 } from "../../scoring/temporal-fusion-scoring.js";
 import { shadowLineageApplicability, type ShadowLineageApplicability } from "../../decision/query-proof/demand.js";
-import { freezeShadow } from "../../decision/query-proof/envelope.js";
+import { freezeShadow } from "../../decision/prefix-capture/envelope.js";
 import {
   parsePointwiseObservation,
   type ShadowLineageId,

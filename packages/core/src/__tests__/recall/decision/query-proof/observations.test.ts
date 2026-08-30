@@ -8,7 +8,7 @@ import {
   type ShadowSubjectComponent,
   type ShadowTemporalEvaluator
 } from "../../../../recall/decision/query-proof/observations.js";
-import { ShadowContractError } from "../../../../recall/decision/query-proof/envelope.js";
+import { ShadowContractError } from "../../../../recall/decision/prefix-capture/envelope.js";
 
 const PORTER: LexDomain = {
   lane_id: "porter",

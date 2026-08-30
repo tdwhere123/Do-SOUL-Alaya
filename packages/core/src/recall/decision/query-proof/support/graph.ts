@@ -1,5 +1,5 @@
 import { compareText } from "../../../../shared/compare-text.js";
-import { ShadowContractError } from "../envelope.js";
+import { ShadowContractError } from "../../prefix-capture/envelope.js";
 import type { BindingRelationWitness, CorrelationWitness } from "../witness/index.js";
 import {
   createCorrelationWitness,
