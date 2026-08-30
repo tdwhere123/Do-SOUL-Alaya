@@ -38,7 +38,7 @@ export function psiV2CandidatesFromSupport(input: Readonly<{
     addOutcomeCoordinate(coordinates, outcome);
   }
   for (const gap of input.support.gaps) {
-    if (gap.kind !== "binding_absent" && gap.kind !== "osf_truncated") continue;
+    if (!isApplicableUnknownSupportGap(gap.kind)) continue;
     addBlockedCoordinate(
       coordinates,
       gap.owner,
@@ -188,6 +188,15 @@ function blockedCoordinate(
     collapse: freezeShadow({ status: "blocked" as const, reason, observations }),
     admission: null
   });
+}
+
+function isApplicableUnknownSupportGap(kind: string): boolean {
+  return kind === "binding_absent" ||
+    kind === "osf_truncated" ||
+    kind === "osf_unavailable" ||
+    kind === "osf_ineligible" ||
+    kind === "osf_rejected" ||
+    kind === "osf_no_match";
 }
 
 function comparisonPropositionId(observation: SupportPropositionObservationV1): string {

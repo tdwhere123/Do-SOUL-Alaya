@@ -17,11 +17,13 @@ export function adaptOsfCandidate(
   }
   if (osf.truncated) {
     addGap(draft, "osf_truncated", candidate.candidate_key, "truncated OSF is unknown, not empty");
-    noteTruncatedApplicablePropositions(draft, candidate, osf);
+    noteUnknownOsfPropositions(draft, candidate, osf, "support.osf.truncated.v1");
     return;
   }
   if (osf.composition_status !== "composed") {
     addOsfStatusGap(draft, candidate.candidate_key, osf.composition_status);
+    noteUnknownOsfPropositions(
+      draft, candidate, osf, osfUnknownProducer(osf.composition_status));
     return;
   }
   for (const binding of osf.bindings ?? []) {
@@ -29,10 +31,11 @@ export function adaptOsfCandidate(
   }
 }
 
-function noteTruncatedApplicablePropositions(
+function noteUnknownOsfPropositions(
   draft: SupportDraft,
   candidate: SupportCandidateReceiptV1,
-  osf: NonNullable<SupportCandidateReceiptV1["osf"]>
+  osf: NonNullable<SupportCandidateReceiptV1["osf"]>,
+  producer: string
 ): void {
   for (const binding of osf.bindings ?? []) {
     if (hasBlankOsfIdentity(binding)) continue;
@@ -44,9 +47,16 @@ function noteTruncatedApplicablePropositions(
       candidate.candidate_key,
       candidate.hypothesis_digest ?? null,
       propositionId,
-      { source_id: binding.evidence_id, producer: "support.osf.truncated.v1" }
+      { source_id: binding.evidence_id, producer }
     );
   }
+}
+
+function osfUnknownProducer(status: SupportOsfStatusV1): string {
+  if (status === "no_match") return "support.osf.no_match.v1";
+  if (status === "ineligible") return "support.osf.ineligible.v1";
+  if (status === "rejected") return "support.osf.rejected.v1";
+  return "support.osf.unavailable.v1";
 }
 
 function addOsfStatusGap(

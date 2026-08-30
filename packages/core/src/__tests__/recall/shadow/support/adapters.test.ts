@@ -261,7 +261,12 @@ describe("support receipt adapters", () => {
       }]
     });
     expect(ineligible.graph.nodes.some((node) => node.kind === "answer_binding")).toBe(false);
-    expect(ineligible.graph.nodes.some((node) => node.kind === "proposition")).toBe(false);
+    expect(ineligible.graph.nodes.some((node) =>
+      node.kind === "proposition" && node.id === "prop.trap")).toBe(true);
+    expect(ineligible.proposition_observations).toEqual([expect.objectContaining({
+      local_proposition_id: "prop.trap",
+      witness: expect.objectContaining({ payload: { polarity: "unknown" } })
+    })]);
     expect(ineligible.gaps.some((gap) => gap.kind === "osf_ineligible")).toBe(true);
 
     const rejected = materializeSupportFromReceipts({
