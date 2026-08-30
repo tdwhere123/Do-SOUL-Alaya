@@ -186,4 +186,3 @@ function pinKey(pin: LexicalRequestPin): string {
   return [pin.workspace_id, pin.request_digest, pin.field_prefix,
     pin.candidate_key_domain].join("\u0000");
 }
-
