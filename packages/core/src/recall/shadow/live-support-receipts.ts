@@ -1,9 +1,15 @@
 import {
+  digestCanonicalQueryV1,
+  type CanonicalQueryCompilationV1,
+  type CanonicalQueryV1
+} from "../query/canonical-query/index.js";
+import {
   buildRecallCandidateDedupeKey,
   isWorkspaceMemoryCandidate
 } from "../runtime/recall-service-helpers.js";
 import type { CoarseRecallCandidate, RecallSupplementaryData } from
   "../runtime/recall-service-types.js";
+import { stableStringify } from "../../shared/stable-stringify.js";
 import type { SupportCandidateReceiptV1, SupportOsfBindingV1 } from
   "./support/adapters/types.js";
 
@@ -22,12 +28,44 @@ export function supportReceiptIsPropositionLegal(
     binding.semantic_identity.length > 0);
 }
 
+export function bindLiveSupportHypothesisDigest(
+  compilation: Pick<CanonicalQueryCompilationV1, "hypotheses">,
+  receipt: SupportCandidateReceiptV1
+): string | undefined {
+  const matched = compilation.hypotheses.filter((hypothesis) =>
+    receiptBindsHypothesis(receipt, hypothesis));
+  if (matched.length !== 1) return undefined;
+  return digestCanonicalQueryV1(matched[0]!);
+}
+
+export function supportReceiptBindsCurrentQuery(
+  receipt: SupportCandidateReceiptV1,
+  compilation: Pick<CanonicalQueryCompilationV1, "hypotheses">
+): boolean {
+  const bound = bindLiveSupportHypothesisDigest(compilation, receipt);
+  return bound !== undefined && bound === receipt.hypothesis_digest;
+}
+
+export function liveSupportReceiptsMatchProjection(
+  receipts: readonly SupportCandidateReceiptV1[],
+  projected: readonly SupportCandidateReceiptV1[] | undefined
+): boolean {
+  if (projected === undefined || projected.length !== receipts.length) return false;
+  const byKey = new Map(projected.map((receipt) => [receipt.candidate_key, receipt]));
+  if (byKey.size !== projected.length) return false;
+  return receipts.every((receipt) => {
+    const expected = byKey.get(receipt.candidate_key);
+    return expected !== undefined && sameLiveSupportReceipt(receipt, expected);
+  });
+}
+
 export function projectLiveSupportCandidateReceipts(
   candidates: readonly Readonly<CoarseRecallCandidate>[],
-  supplementary: RecallSupplementaryData
+  supplementary: RecallSupplementaryData,
+  compilation: Pick<CanonicalQueryCompilationV1, "hypotheses">
 ): readonly SupportCandidateReceiptV1[] | undefined {
   const receipts = Object.freeze(candidates.flatMap((candidate) => {
-    const receipt = projectCandidateSupportReceipt(candidate, supplementary);
+    const receipt = projectCandidateSupportReceipt(candidate, supplementary, compilation);
     return receipt === undefined ? [] : [receipt];
   }));
   return receipts.length === 0 ? undefined : receipts;
@@ -35,18 +73,63 @@ export function projectLiveSupportCandidateReceipts(
 
 function projectCandidateSupportReceipt(
   candidate: Readonly<CoarseRecallCandidate>,
-  supplementary: RecallSupplementaryData
+  supplementary: RecallSupplementaryData,
+  compilation: Pick<CanonicalQueryCompilationV1, "hypotheses">
 ): SupportCandidateReceiptV1 | undefined {
   const candidate_key = buildRecallCandidateDedupeKey(candidate);
   const evidence_ids = evidenceIdsFor(candidate, supplementary, candidate_key);
   const osf = projectOsf(supplementary, evidence_ids);
   if (osf === undefined && evidence_ids.length === 0) return undefined;
-  const receipt = Object.freeze({
+  const draft = Object.freeze({
     candidate_key,
     ...(osf === undefined ? {} : { osf }),
     ...(evidence_ids.length === 0 ? {} : { evidence_ids: Object.freeze([...evidence_ids]) })
   });
+  const hypothesis_digest = bindLiveSupportHypothesisDigest(compilation, draft);
+  if (hypothesis_digest === undefined) return undefined;
+  const receipt = Object.freeze({ ...draft, hypothesis_digest });
   return supportReceiptIsPropositionLegal(receipt) ? receipt : undefined;
+}
+
+function receiptBindsHypothesis(
+  receipt: SupportCandidateReceiptV1,
+  hypothesis: CanonicalQueryV1
+): boolean {
+  const predicateIds = new Set(hypothesis.predicates.map((predicate) => predicate.id));
+  const vocabulary = hypothesisVocabulary(hypothesis);
+  const bindings = receipt.osf?.bindings ?? [];
+  if (!bindings.some((binding) =>
+    binding.query_proposition_id !== undefined &&
+    predicateIds.has(binding.query_proposition_id))) {
+    return false;
+  }
+  if (bindings.some((binding) =>
+    (binding.query_proposition_id !== undefined &&
+      !predicateIds.has(binding.query_proposition_id)) ||
+    !vocabulary.has(binding.semantic_identity))) {
+    return false;
+  }
+  return (receipt.fact_frames ?? []).every((frame) => vocabulary.has(frame.semantic_identity));
+}
+
+function hypothesisVocabulary(hypothesis: CanonicalQueryV1): Set<string> {
+  return new Set([
+    ...hypothesis.predicates.flatMap((predicate) =>
+      [predicate.id, predicate.relation, ...predicate.arguments]),
+    ...hypothesis.constants.map((constant) => constant.value),
+    ...hypothesis.variables.map((variable) => variable.name)
+  ]);
+}
+
+function sameLiveSupportReceipt(
+  left: SupportCandidateReceiptV1,
+  right: SupportCandidateReceiptV1
+): boolean {
+  return left.candidate_key === right.candidate_key &&
+    left.hypothesis_digest === right.hypothesis_digest &&
+    stableStringify(left.evidence_ids) === stableStringify(right.evidence_ids) &&
+    stableStringify(left.osf) === stableStringify(right.osf) &&
+    stableStringify(left.fact_frames) === stableStringify(right.fact_frames);
 }
 
 function evidenceIdsFor(

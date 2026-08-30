@@ -7,6 +7,8 @@ import type {
   RecallExecutionContext,
   RecallExecutionParams
 } from "../../../recall/runtime/recall-service-runner-types.js";
+import { digestCanonicalQueryV1 } from
+  "../../../recall/query/canonical-query/index.js";
 import { withFineDeliveryPath } from "../recall-service-test-fixtures.js";
 import {
   compositionForValues,
@@ -30,10 +32,13 @@ import {
 } from "./live-receipt-fixtures.js";
 
 describe("live support success path", () => {
-  it("observes Card-09-legal receipts when path_graph generation is captured", async () => {
+  it("does not observe a shape-legal receipt whose hypothesis is absent from CQ_q", async () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
     const base = fineAssess(params(candidates));
     const prepared = await capturedPathGraphPreparedAuthority();
+    const planted = legalSupportReceipts()[0]!.hypothesis_digest!;
+    expect(prepared.canonicalQueryCompilation.hypotheses.map(digestCanonicalQueryV1))
+      .not.toContain(planted);
     const observed = fineAssess({
       ...params(candidates),
       queryProofAuthority: authorityFrom(prepared),
@@ -45,10 +50,14 @@ describe("live support success path", () => {
     expect(pathGraphView(prepared)).toBe("captured");
     expect(shadow.producer_outcomes).toContainEqual({
       producer_id: "support",
-      status: "observed"
+      status: "malformed",
+      contract_code: "authority_identity_mismatch"
     });
-    expect(shadow.support_graph_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(shadow.support_outcome_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(shadow.producer_outcomes).not.toContainEqual(expect.objectContaining({
+      producer_id: "support",
+      status: "observed"
+    }));
+    expect(shadow.support_graph_digest).toBeNull();
     expect(withoutPsi(trace)).toEqual(withoutPsi(captured(base.shadowTrace)));
     expect(observed.candidates).toEqual(base.candidates);
     expect(observed.capture_receipt).toEqual(base.capture_receipt);

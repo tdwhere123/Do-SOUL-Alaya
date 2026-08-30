@@ -259,7 +259,8 @@ function buildPsiV2LiveReceiptInput(
   );
   const supportCandidateReceipts = projectLiveSupportCandidateReceipts(
     candidates,
-    supplementaryData
+    supplementaryData,
+    prepared.canonicalQueryCompilation
   );
   return {
     queryProofAuthority: Object.freeze({

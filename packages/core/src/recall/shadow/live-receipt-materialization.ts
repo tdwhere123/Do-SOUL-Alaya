@@ -21,7 +21,12 @@ import {
   materializeSupportFromReceipts,
   type SupportMaterializationV1
 } from "./support/index.js";
-import { supportReceiptIsPropositionLegal } from "./live-support-receipts.js";
+import {
+  liveSupportReceiptsMatchProjection,
+  projectLiveSupportCandidateReceipts,
+  supportReceiptBindsCurrentQuery,
+  supportReceiptIsPropositionLegal
+} from "./live-support-receipts.js";
 import type { PsiV2ProducerOutcomeV1 } from "./psi-v2/index.js";
 
 type LiveAuthority = NonNullable<FineAssessParams["queryProofAuthority"]>;
@@ -237,7 +242,7 @@ function materializeSupport(
   if (authorityState.status !== "verified") {
     return malformed("support", "diagnostic_contract_failure");
   }
-  return observeVerifiedSupport(authorityState, receipts);
+  return observeVerifiedSupport(params, authorityState, receipts);
 }
 
 function rejectInvalidSupportReceipts(
@@ -258,6 +263,7 @@ function rejectInvalidSupportReceipts(
 }
 
 function observeVerifiedSupport(
+  params: FineAssessParams,
   authorityState: Extract<AuthorityState, { status: "verified" }>,
   receipts: NonNullable<FineAssessParams["supportCandidateReceipts"]>
 ): ProducerResult<SupportMaterializationV1> {
@@ -269,6 +275,18 @@ function observeVerifiedSupport(
   }
   if (capability.view_kind !== "captured" && capability.view_kind !== "pinned") {
     return unavailable("support", "source_unavailable");
+  }
+  const compilation = authorityState.authority.canonical_query_compilation;
+  if (!receipts.every((receipt) => supportReceiptBindsCurrentQuery(receipt, compilation))) {
+    return malformed("support", "authority_identity_mismatch");
+  }
+  const projected = projectLiveSupportCandidateReceipts(
+    params.candidates,
+    params.supplementaryData,
+    compilation
+  );
+  if (!liveSupportReceiptsMatchProjection(receipts, projected)) {
+    return malformed("support", "producer_contract_invalid");
   }
   try {
     const payload = materializeSupportFromReceipts({
