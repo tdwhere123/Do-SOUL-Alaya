@@ -57,7 +57,7 @@ import type { CaptureProofDiagnostics } from
 
 type BuildRecallDiagnosticsParams = Readonly<{
   readonly captureReceipt?: Readonly<
-    import("../shadow/canonical-delivery.js").CanonicalSelectionReceipt
+    import("../delivery/canonical-delivery.js").CanonicalSelectionReceipt
   >;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly queryEntityExtraction?: Readonly<RecallQueryEntityExtractionCapture>;

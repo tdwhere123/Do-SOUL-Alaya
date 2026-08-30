@@ -303,14 +303,14 @@ export * from "./security/zero-day-security-layer.js";
 export {
   deterministicTailDecidedThisPick,
   type DeterministicTailPickEvidence
-} from "./recall/shadow/walk.js";
+} from "./recall/decision/prefix-capture/walk.js";
 export {
   FIRST_PICK_TAIL_DEGENERACY_PROPERTY,
   FIRST_PICK_TAIL_DECIDED_SHARE_MAX,
   evaluateFirstPickTailDegeneracy,
   evaluateFirstPickTailDegeneracyStream,
   type FirstPickTailDegeneracyReport
-} from "./recall/shadow/ranking/tail-degeneracy.js";
+} from "./recall/runtime/diagnostics/tail-degeneracy.js";
 export {
   CHEAP_RANKING_RUNG_COST,
   CHEAP_RANKING_RUNG_ID,
@@ -319,7 +319,7 @@ export {
   scoreCheapRankingRung,
   type CheapRankingRungReport,
   type CheapRankingRungRow
-} from "./recall/shadow/ranking/cheap-rung.js";
+} from "./recall/runtime/diagnostics/cheap-rung.js";
 export {
   applicableChannelsOf,
   compareD1FrozenCandidatePairs,
@@ -348,4 +348,4 @@ export {
   type D1ReplayInput,
   type D1ReplayMetrics,
   type D1ReplayResult
-} from "./recall/shadow/d1/index.js";
+} from "./recall/decision/query-proof/adapters/lexical-bound/index.js";

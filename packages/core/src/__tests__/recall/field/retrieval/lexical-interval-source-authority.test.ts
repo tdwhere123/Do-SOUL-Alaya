@@ -14,13 +14,13 @@ import {
 import { withActiveRecallReadSnapshot } from
   "../../../../recall/runtime/recall-read-snapshot.js";
 import { admitLiveLexicalIntervalSources } from
-  "../../../../recall/runtime/query/live-query-proof-authority.js";
+  "../../../../recall/decision/query-proof/live-query-proof-authority.js";
 import {
   authorityFrom,
   capturedLexicalPreparedAuthority,
   cleanup,
   preparedAuthority
-} from "../../shadow/live-receipt-fixtures.js";
+} from "../../integration/shadow/live-receipt-fixtures.js";
 
 describe("lexical interval source authority", () => {
   it("issues only inside an active physical read and rejects a clone", async () => {

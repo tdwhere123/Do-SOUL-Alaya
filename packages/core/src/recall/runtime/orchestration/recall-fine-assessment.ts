@@ -7,7 +7,7 @@ import {
   prepareFineAssessment,
   type FineAssessParams
 } from "../../delivery/fine-assessment.js";
-import { resolveFineAssessmentDeliveryPath } from "../../shadow/canonical-delivery.js";
+import { resolveFineAssessmentDeliveryPath } from "../../delivery/canonical-delivery.js";
 import { readMemoryLexicalIntervalSources } from
   "../../field/retrieval/retrieval-field-source-authority.js";
 import { buildRecallCandidateDedupeKey } from "../recall-service-helpers.js";
@@ -21,7 +21,7 @@ import {
   type RecallExecutionParams
 } from "../recall-service-runner-types.js";
 import { projectLiveSupportCandidateReceipts } from
-  "../../shadow/live-support-receipts.js";
+  "../../decision/query-proof/support/live-support-receipts.js";
 import { collectCoarseFilterSupplementaryData } from "./coarse.js";
 import type { EmbeddingAssessmentData } from "./recall-embedding-assessment.js";
 import { attributeEvidenceSemanticActivations } from
