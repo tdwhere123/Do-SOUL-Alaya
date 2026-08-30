@@ -46,6 +46,12 @@ import {
   PROPOSITION_STATE_MEASUREMENT_CONTRACT,
   type PropositionStateCollapseV1
 } from "./proposition-state.js";
+import {
+  assertSupportMeasurementSourceObservation,
+  bindSupportMeasurementAuthoritySource,
+  supportMeasurementSourceIdentity,
+  type SupportMeasurementAuthorityEvidenceV1
+} from "./support-source-admission.js";
 
 type CollapsedNumericMeasurementV1 =
   Extract<MeasurementCollapseV1, { status: "collapsed" }>;
@@ -145,6 +151,18 @@ export function verifyLexicalMeasurementPreparedAuthorityV1(input: Readonly<{
   return authority;
 }
 
+export function verifySupportMeasurementPreparedAuthorityV1(input: Readonly<{
+  readonly evidence: SupportMeasurementAuthorityEvidenceV1;
+}>): VerifiedMeasurementAuthorityV1 {
+  const authority = verifyPreparedAuthority(
+    input.evidence,
+    PROPOSITION_STATE_MEASUREMENT_CONTRACT,
+    supportMeasurementSourceIdentity(input.evidence)
+  );
+  bindSupportMeasurementAuthoritySource(authority, input.evidence);
+  return authority;
+}
+
 function verifyPreparedAuthority(
   evidence: PreparedMeasurementAuthorityEvidenceV1,
   contract: MeasurementGroupContractV1,
@@ -210,6 +228,7 @@ export function issueMeasurementGroupAdmission(input: Readonly<{
   const sourceBinding = assertLexicalMeasurementSourceObservation(
     input.authority, input.contract, collapse, input.lexical_source
   );
+  assertSupportMeasurementSourceObservation(input.authority, input.contract);
   const body = admissionBody(
     input.authority,
     input.contract,
@@ -258,6 +277,7 @@ export function validateMeasurementAdmissionV1(input: Readonly<{
     assertLexicalMeasurementSourceObservation(
       authority, input.contract, collapse, binding?.source_context
     );
+    assertSupportMeasurementSourceObservation(authority, input.contract);
     if (!lexicalCoordinateMatchesSourceBinding(binding, input.lexical_source)) {
       return blocked("lexical coordinate is not bound to the issued source envelope");
     }

@@ -14,11 +14,14 @@ import {
 } from "./measurement/lexical-interval-envelope.js";
 import {
   verifyLexicalMeasurementPreparedAuthorityV1,
+  verifySupportMeasurementPreparedAuthorityV1,
   type VerifiedMeasurementAuthorityV1
 } from "./measurement/index.js";
 import {
+  materializeSupportFromReceipts,
   type SupportMaterializationV1
 } from "./support/index.js";
+import { supportReceiptIsPropositionLegal } from "./live-support-receipts.js";
 import type { PsiV2ProducerOutcomeV1 } from "./psi-v2/index.js";
 
 type LiveAuthority = NonNullable<FineAssessParams["queryProofAuthority"]>;
@@ -226,6 +229,22 @@ function materializeSupport(
       ? notObserved("support", "applicable_receipt_absent")
       : absent("support");
   }
+  const rejected = rejectInvalidSupportReceipts(receipts, params, authorityState);
+  if (rejected !== null) return rejected;
+  if (!receipts.every(supportReceiptIsPropositionLegal)) {
+    return malformed("support", "producer_contract_invalid");
+  }
+  if (authorityState.status !== "verified") {
+    return malformed("support", "diagnostic_contract_failure");
+  }
+  return observeVerifiedSupport(authorityState, receipts);
+}
+
+function rejectInvalidSupportReceipts(
+  receipts: NonNullable<FineAssessParams["supportCandidateReceipts"]>,
+  params: FineAssessParams,
+  authorityState: AuthorityState
+): ProducerResult<never> | null {
   if (receipts.some((receipt) => !supportReceiptShapeValid(receipt))) {
     return malformed("support", "producer_contract_invalid");
   }
@@ -235,9 +254,47 @@ function materializeSupport(
   if (receipts.some(({ candidate_key }) => !candidateKeys.has(candidate_key))) {
     return malformed("support", "foreign_candidate_receipt");
   }
-  const authorityFailure = failureForAuthority("support", authorityState);
-  if (authorityFailure !== null) return authorityFailure;
-  return malformed("support", "producer_contract_invalid");
+  return failureForAuthority("support", authorityState);
+}
+
+function observeVerifiedSupport(
+  authorityState: Extract<AuthorityState, { status: "verified" }>,
+  receipts: NonNullable<FineAssessParams["supportCandidateReceipts"]>
+): ProducerResult<SupportMaterializationV1> {
+  const lease = authorityState.authority.snapshot_read_lease;
+  const capability = lease.capabilities.find((bound) =>
+    bound.source_owner === "path_graph_generation");
+  if (capability === undefined) {
+    return notObserved("support", "applicable_receipt_absent");
+  }
+  if (capability.view_kind !== "captured" && capability.view_kind !== "pinned") {
+    return unavailable("support", "source_unavailable");
+  }
+  try {
+    const payload = materializeSupportFromReceipts({
+      query_id: authorityState.pins.query_id,
+      snapshot_digest: authorityState.pins.snapshot_digest,
+      authority_context: {
+        snapshot_vector: authorityState.authority.snapshot_vector,
+        snapshot_receipt: authorityState.authority.snapshot_coherence_receipt,
+        read_lease: lease
+      },
+      candidates: receipts
+    });
+    const measurementAuthority = verifySupportMeasurementPreparedAuthorityV1({
+      evidence: {
+        ...preparedEvidence(authorityState.authority),
+        support_source_capability: capability
+      }
+    });
+    return Object.freeze({
+      payload,
+      measurementAuthority,
+      outcome: observed("support")
+    });
+  } catch {
+    return malformed("support", "producer_contract_invalid");
+  }
 }
 
 function supportReceiptShapeValid(

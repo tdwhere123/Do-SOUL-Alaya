@@ -20,6 +20,8 @@ import {
   type RecallExecutionContext,
   type RecallExecutionParams
 } from "../recall-service-runner-types.js";
+import { projectLiveSupportCandidateReceipts } from
+  "../../shadow/live-support-receipts.js";
 import { collectCoarseFilterSupplementaryData } from "./coarse.js";
 import type { EmbeddingAssessmentData } from "./recall-embedding-assessment.js";
 import { attributeEvidenceSemanticActivations } from
@@ -239,7 +241,7 @@ export function buildFineAssessParams(
     condition_digest: prepared.queryCondition.identity,
     memoryKeywordLanes: prepared.retrievalFieldBundle.memoryKeywordLanes(),
     memoryLexicalCaptures: prepared.retrievalFieldBundle.memoryLexicalCaptures(),
-    ...buildPsiV2LiveReceiptInput(prepared),
+    ...buildPsiV2LiveReceiptInput(prepared, candidates, supplementaryData),
     ...(membership === undefined ? {} : captureFineAssessmentMembership(
       membership.e0Keys,
       candidates
@@ -248,10 +250,16 @@ export function buildFineAssessParams(
 }
 
 function buildPsiV2LiveReceiptInput(
-  prepared: PreparedRecallRequest
+  prepared: PreparedRecallRequest,
+  candidates: FineAssessParams["candidates"],
+  supplementaryData: FineAssessParams["supplementaryData"]
 ): Partial<FineAssessParams> {
   const lexicalIntervalSources = readMemoryLexicalIntervalSources(
     prepared.retrievalFieldBundle
+  );
+  const supportCandidateReceipts = projectLiveSupportCandidateReceipts(
+    candidates,
+    supplementaryData
   );
   return {
     queryProofAuthority: Object.freeze({
@@ -266,7 +274,8 @@ function buildPsiV2LiveReceiptInput(
       expected_lexical_request_pins:
         prepared.retrievalFieldBundle.memoryLexicalRequestPins()
     }),
-    ...(lexicalIntervalSources.length === 0 ? {} : { lexicalIntervalSources })
+    ...(lexicalIntervalSources.length === 0 ? {} : { lexicalIntervalSources }),
+    ...(supportCandidateReceipts === undefined ? {} : { supportCandidateReceipts })
   };
 }
 

@@ -103,6 +103,33 @@ export async function preparedAuthority(): Promise<PreparedRecallRequest> {
   }, captureRecallRequestTime({ now: () => NOW }));
 }
 
+export async function capturedPathGraphPreparedAuthority(): Promise<PreparedRecallRequest> {
+  const prepared = await preparedAuthority();
+  const pathGraph = prepared.snapshotVector.path_graph_generation;
+  const { schema_version: _schemaVersion, vector_digest: _vectorDigest, ...input } =
+    prepared.snapshotVector;
+  const snapshotVector = createSnapshotVectorV1({
+    ...input,
+    path_graph_generation: Object.freeze({
+      ...pathGraph,
+      source_frontier: "path-graph-frontier:test-captured",
+      generation: "path-graph-generation:test-captured",
+      lag_bound: Object.freeze({ kind: "exact" as const })
+    })
+  });
+  const snapshotCoherenceReceipt = createSnapshotCoherenceReceiptV1(snapshotVector);
+  return Object.freeze({
+    ...prepared,
+    snapshotVector,
+    snapshotCoherenceReceipt,
+    snapshotReadLease: finalizePreparedSnapshotReadLease(snapshotVector),
+    canonicalQueryCompilation: compileCanonicalQueryCompilation(
+      prepared.canonicalQueryEvidence,
+      snapshotCoherenceReceipt
+    )
+  });
+}
+
 export async function capturedLexicalPreparedAuthority(): Promise<PreparedRecallRequest> {
   const prepared = await preparedAuthority();
   const lexical = prepared.snapshotVector.retrieval_channel_snapshots.find(
@@ -158,6 +185,27 @@ export function supportReceipts(): readonly SupportCandidateReceiptV1[] {
       }]
     },
     evidence_ids: ["evidence-a"]
+  }];
+}
+
+export function legalSupportReceipts(): readonly SupportCandidateReceiptV1[] {
+  return [{
+    candidate_key: keyOf("cand-a"),
+    hypothesis_digest: `sha256:${"1".repeat(64)}`,
+    osf: {
+      composition_status: "composed",
+      truncated: false,
+      bindings: [{
+        variable_id: "x",
+        binding_identity: "arg.person",
+        semantic_identity: "person.alice",
+        evidence_id: "eu-1",
+        query_proposition_id: "prop.works-at",
+        source_lineage_id: "lineage-a"
+      }]
+    },
+    fact_frames: [{ semantic_identity: "person.alice", role: "entity", evidence_id: "eu-1" }],
+    evidence_ids: ["eu-1"]
   }];
 }
 

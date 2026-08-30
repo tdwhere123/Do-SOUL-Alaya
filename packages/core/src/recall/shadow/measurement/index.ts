@@ -21,6 +21,7 @@ export {
   issueMeasurementGroupAdmission,
   validateMeasurementAdmissionV1,
   verifyLexicalMeasurementPreparedAuthorityV1,
+  verifySupportMeasurementPreparedAuthorityV1,
   type AdmissibleMeasurementCollapseV1,
   type MeasurementAdmissionV1,
   type MeasurementAdmissionValidationV1,
@@ -30,6 +31,9 @@ export {
   type PreparedMeasurementAuthorityEvidenceV1,
   type VerifiedMeasurementAuthorityV1
 } from "./admission.js";
+export type {
+  SupportMeasurementAuthorityEvidenceV1
+} from "./support-source-admission.js";
 export {
   compareLexicalIntervals,
   lexicalIntervalIdentitiesEqual,
