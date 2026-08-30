@@ -1,4 +1,3 @@
-import { compareCodeUnits } from "@do-soul/alaya-protocol";
 import type { MemoryEntrySemanticTieRow } from "./semantic-tie-order.js";
 import type { MemoryEntryKeywordSearchResult } from "./types.js";
 import {
@@ -157,7 +156,7 @@ function compareKeywordRows(left: RankedKeywordSearchResult, right: RankedKeywor
     right.normalized_rank - left.normalized_rank ||
     left.sourcePriority - right.sourcePriority ||
     left.sourceOrder - right.sourceOrder ||
-    compareCodeUnits(left.object_id, right.object_id)
+    left.object_id.localeCompare(right.object_id)
   );
 }
 
