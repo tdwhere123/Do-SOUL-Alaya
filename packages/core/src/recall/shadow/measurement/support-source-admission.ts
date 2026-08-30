@@ -1,13 +1,21 @@
+import type { OpenSemanticFactorFormationCapture } from "@do-soul/alaya-protocol";
 import type { SnapshotReadLeaseCapabilityV1, SnapshotReadLeaseV1 } from
   "../../runtime/snapshot-coherence/index.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../field/field-identity.js";
+import {
+  verifyOpenSemanticFactorComposition,
+  type OpenSemanticFactorCompositionReceipt
+} from "../../field/open-semantic-factors/composition.js";
+import type { OpenSemanticFactorCompatibilityTrace } from
+  "../../field/open-semantic-factors/compatibility-trace.js";
 import { freezeShadow, ShadowContractError } from "../envelope.js";
 import { createFourValuedWitness, type FourValuedWitness, type WitnessIdentityPins } from
   "../witness/index.js";
 import { digestSupportHypergraph, type SupportHypergraphReceiptV1 } from
   "../support/receipt.js";
 import { issuedSupportSourceBinding } from "../support/index.js";
+import { supportReceiptOsfProjectsComposition } from "../live-support-receipts.js";
 import type {
   SupportCandidateReceiptV1,
   SupportPropositionObservationV1
@@ -37,6 +45,13 @@ export type SupportMeasurementAuthorityEvidenceV1 =
     readonly support_graph: SupportHypergraphReceiptV1;
     readonly support_source_receipts: readonly SupportCandidateReceiptV1[];
     readonly support_observations: readonly SupportPropositionObservationV1[];
+    readonly osf_composition: OpenSemanticFactorCompositionReceipt;
+    readonly osf_composition_trace: OpenSemanticFactorCompatibilityTrace;
+    readonly osf_query_capture: OpenSemanticFactorFormationCapture;
+    readonly osf_evidence_formations?: Readonly<Record<
+      string,
+      Readonly<OpenSemanticFactorFormationCapture>
+    >>;
   }>;
 
 export type VerifiedSupportSourceBinding = Readonly<{
@@ -73,7 +88,8 @@ export function supportMeasurementSourceIdentity(
       lease_id: lease.lease_id,
       graph_digest: issued.graph.digest,
       source_digest: digestRecallFieldIdentity(issued.receipts),
-      observation_digest: digestRecallFieldIdentity(issued.observations)
+      observation_digest: digestRecallFieldIdentity(issued.observations),
+      osf_composition_digest: issued.composition.receipt_digest
     }),
     field_prefix: null,
     candidate_key_domain: null
@@ -143,6 +159,7 @@ function requireIssuedSupportSource(
   readonly graph: SupportHypergraphReceiptV1;
   readonly receipts: readonly SupportCandidateReceiptV1[];
   readonly observations: readonly SupportPropositionObservationV1[];
+  readonly composition: OpenSemanticFactorCompositionReceipt;
 }> {
   const graph = evidence.support_graph;
   const issued = issuedSupportSourceBinding(graph);
@@ -164,11 +181,42 @@ function requireIssuedSupportSource(
         digestRecallFieldIdentity(evidence.support_observations)) {
     throw new ShadowContractError("support measurement source receipts do not match the issued graph");
   }
+  const composition = requireVerifiedOsfComposition(evidence);
+  if (!evidence.support_source_receipts.every((receipt) =>
+    supportReceiptOsfProjectsComposition(receipt, composition))) {
+    throw new ShadowContractError("support OSF is not a projection of the composition receipt");
+  }
   return Object.freeze({
     graph,
     receipts: issued.receipts,
-    observations: issued.observations
+    observations: issued.observations,
+    composition
   });
+}
+
+function requireVerifiedOsfComposition(
+  evidence: SupportMeasurementAuthorityEvidenceV1
+): OpenSemanticFactorCompositionReceipt {
+  if (evidence.osf_composition === undefined ||
+      evidence.osf_composition_trace === undefined ||
+      evidence.osf_query_capture === undefined) {
+    throw new ShadowContractError(
+      "support measurement source lacks a verified OSF composition receipt");
+  }
+  try {
+    return verifyOpenSemanticFactorComposition({
+      receipt: evidence.osf_composition,
+      trace: evidence.osf_composition_trace,
+      query_capture: evidence.osf_query_capture,
+      ...(evidence.osf_evidence_formations === undefined
+        ? {}
+        : { evidence_formations: evidence.osf_evidence_formations })
+    });
+  } catch (error) {
+    throw new ShadowContractError(error instanceof Error
+      ? error.message
+      : "osf composition receipt is not verified");
+  }
 }
 
 function matchingBoundWitnesses(

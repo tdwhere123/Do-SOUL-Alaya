@@ -58,6 +58,7 @@ export function materializeSupportFromReceipts(
   });
 }
 
+// Issued-graph identity cache only; OSF composition receipt is source authority.
 const ISSUED_SUPPORT_SOURCES = new WeakMap<SupportHypergraphReceiptV1, Readonly<{
   readonly receipts: readonly SupportCandidateReceiptV1[];
   readonly observations: readonly SupportPropositionObservationV1[];

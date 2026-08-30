@@ -1,4 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { materializeOpenSemanticFactorFormation } from
+  "../../../../semantic/open-semantic-factor-formation.js";
+import { materializeOpenSemanticFactorCompatibilityTrace } from
+  "../../../../recall/field/open-semantic-factors/compatibility-trace.js";
+import { materializeOpenSemanticFactorComposition } from
+  "../../../../recall/field/open-semantic-factors/composition.js";
 import {
   issueMeasurementGroupAdmission,
   PROPOSITION_STATE_MEASUREMENT_CONTRACT,
@@ -7,6 +13,9 @@ import {
 import {
   PATH_GRAPH_GENERATION_SOURCE_OWNER
 } from "../../../../recall/shadow/measurement/support-source-admission.js";
+import {
+  projectLiveSupportOsf
+} from "../../../../recall/shadow/live-support-receipts.js";
 import {
   createSupportHypergraph,
   materializeSupportFromReceipts,
@@ -24,7 +33,8 @@ describe("support measurement source binding", () => {
     const capability = pathGraphCapability(prepared);
     const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
     const snapshot = prepared.snapshotVector.vector_digest;
-    const receipts = [osfReceipt("eu-a")];
+    const source = graduationComposition("BA degree");
+    const receipts = [projectedReceipt(source.composition)];
     const payload = materializeSupportFromReceipts({
       query_id: queryId,
       snapshot_digest: snapshot,
@@ -41,18 +51,91 @@ describe("support measurement source binding", () => {
         graph: forgedGraph,
         receipts,
         observations: payload.proposition_observations
-      })
+      }, source)
     })).toThrow(/not an issued materialization/u);
     cleanup(prepared);
   });
 
-  it("does not let one path_graph capability authorize two issued graphs", async () => {
+  it("rejects invented OSF without a composition receipt", async () => {
     const prepared = await capturedPathGraphPreparedAuthority();
     const capability = pathGraphCapability(prepared);
     const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
     const snapshot = prepared.snapshotVector.vector_digest;
-    const leftReceipts = [osfReceipt("eu-a")];
-    const rightReceipts = [osfReceipt("eu-b")];
+    const receipts = [osfReceipt("eu-a")];
+    const payload = materializeSupportFromReceipts({
+      query_id: queryId,
+      snapshot_digest: snapshot,
+      candidates: receipts
+    });
+    const { osf_composition: _c, osf_composition_trace: _t, osf_query_capture: _q,
+      ...withoutComposition } = supportEvidence(prepared, capability, {
+      graph: payload.graph,
+      receipts,
+      observations: payload.proposition_observations
+    }, graduationComposition("BA degree"));
+    expect(() => verifySupportMeasurementPreparedAuthorityV1({
+      evidence: withoutComposition as Parameters<
+        typeof verifySupportMeasurementPreparedAuthorityV1
+      >[0]["evidence"]
+    })).toThrow(/composition receipt/u);
+    cleanup(prepared);
+  });
+
+  it("rejects receipt OSF that does not match the composition receipt", async () => {
+    const prepared = await capturedPathGraphPreparedAuthority();
+    const capability = pathGraphCapability(prepared);
+    const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
+    const snapshot = prepared.snapshotVector.vector_digest;
+    const source = graduationComposition("BA degree");
+    const receipts = [osfReceipt("eu-forged")];
+    const payload = materializeSupportFromReceipts({
+      query_id: queryId,
+      snapshot_digest: snapshot,
+      candidates: receipts
+    });
+    expect(() => verifySupportMeasurementPreparedAuthorityV1({
+      evidence: supportEvidence(prepared, capability, {
+        graph: payload.graph,
+        receipts,
+        observations: payload.proposition_observations
+      }, source)
+    })).toThrow(/not a projection of the composition receipt/u);
+    cleanup(prepared);
+  });
+
+  it("does not let invented graphs under one capability authorize", async () => {
+    const prepared = await capturedPathGraphPreparedAuthority();
+    const capability = pathGraphCapability(prepared);
+    const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
+    const snapshot = prepared.snapshotVector.vector_digest;
+    const source = graduationComposition("BA degree");
+    for (const evidenceId of ["eu-a", "eu-b"] as const) {
+      const receipts = [osfReceipt(evidenceId)];
+      const payload = materializeSupportFromReceipts({
+        query_id: queryId,
+        snapshot_digest: snapshot,
+        candidates: receipts
+      });
+      expect(() => verifySupportMeasurementPreparedAuthorityV1({
+        evidence: supportEvidence(prepared, capability, {
+          graph: payload.graph,
+          receipts,
+          observations: payload.proposition_observations
+        }, source)
+      })).toThrow(/not a projection of the composition receipt/u);
+    }
+    cleanup(prepared);
+  });
+
+  it("lets two verified composition receipts differ in authority", async () => {
+    const prepared = await capturedPathGraphPreparedAuthority();
+    const capability = pathGraphCapability(prepared);
+    const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
+    const snapshot = prepared.snapshotVector.vector_digest;
+    const leftSource = graduationComposition("BA degree");
+    const rightSource = graduationComposition("MA degree");
+    const leftReceipts = [projectedReceipt(leftSource.composition)];
+    const rightReceipts = [projectedReceipt(rightSource.composition)];
     const leftPayload = materializeSupportFromReceipts({
       query_id: queryId,
       snapshot_digest: snapshot,
@@ -68,24 +151,18 @@ describe("support measurement source binding", () => {
         graph: leftPayload.graph,
         receipts: leftReceipts,
         observations: leftPayload.proposition_observations
-      })
+      }, leftSource)
     });
     const right = verifySupportMeasurementPreparedAuthorityV1({
       evidence: supportEvidence(prepared, capability, {
         graph: rightPayload.graph,
         receipts: rightReceipts,
         observations: rightPayload.proposition_observations
-      })
+      }, rightSource)
     });
-    expect(leftPayload.graph.digest).not.toBe(rightPayload.graph.digest);
+    expect(leftSource.composition.receipt_digest)
+      .not.toBe(rightSource.composition.receipt_digest);
     expect(left.authority_digest).not.toBe(right.authority_digest);
-    expect(() => verifySupportMeasurementPreparedAuthorityV1({
-      evidence: supportEvidence(prepared, capability, {
-        graph: leftPayload.graph,
-        receipts: rightReceipts,
-        observations: rightPayload.proposition_observations
-      })
-    })).toThrow(/do not match the issued graph/u);
     cleanup(prepared);
   });
 
@@ -94,7 +171,8 @@ describe("support measurement source binding", () => {
     const capability = pathGraphCapability(prepared);
     const queryId = prepared.canonicalQueryCompilation.query_identity.condition_identity;
     const snapshot = prepared.snapshotVector.vector_digest;
-    const receipts = [osfReceipt("eu-a")];
+    const source = graduationComposition("BA degree");
+    const receipts = [projectedReceipt(source.composition)];
     const payload = materializeSupportFromReceipts({
       query_id: queryId,
       snapshot_digest: snapshot,
@@ -105,11 +183,13 @@ describe("support measurement source binding", () => {
         graph: payload.graph,
         receipts,
         observations: payload.proposition_observations
-      })
+      }, source)
     });
     const observation = payload.proposition_observations[0];
+    expect(observation).toBeDefined();
     expect(observation?.witness.payload).toEqual({ polarity: "unknown" });
-    const forged = collapseSupportedOnly(authority, observation!.candidate_id, "prop.works-at");
+    const forged = collapseSupportedOnly(
+      authority, observation!.candidate_id, observation!.local_proposition_id);
     expect(() => issueMeasurementGroupAdmission({
       authority,
       contract: PROPOSITION_STATE_MEASUREMENT_CONTRACT,
@@ -136,7 +216,8 @@ function supportEvidence(
     readonly graph: ReturnType<typeof materializeSupportFromReceipts>["graph"];
     readonly receipts: readonly SupportCandidateReceiptV1[];
     readonly observations: ReturnType<typeof materializeSupportFromReceipts>["proposition_observations"];
-  }>
+  }>,
+  composition: ReturnType<typeof graduationComposition>
 ) {
   return {
     workspace_id: "workspace-1",
@@ -149,7 +230,51 @@ function supportEvidence(
     support_source_capability: capability,
     support_graph: source.graph,
     support_source_receipts: source.receipts,
-    support_observations: source.observations
+    support_observations: source.observations,
+    osf_composition: composition.composition,
+    osf_composition_trace: composition.trace,
+    osf_query_capture: composition.query_capture
+  };
+}
+
+function graduationComposition(degree: "BA degree" | "MA degree") {
+  const query_capture = formation("query", "What degree did I graduate with?", [
+    factor("predicate", "graduate", "graduate"),
+    factor("person", "I", "i")
+  ], [{ variable_id: "answer", surface: "What degree" }], ["answer"], [
+    argument(0, "agent", "factor", "person"),
+    argument(1, "obtained", "variable", "answer")
+  ]);
+  const evidence = formation("evidence", `I graduated with a ${degree}.`, [
+    factor("predicate", "graduated", "graduate"),
+    factor("person", "I", "i"),
+    factor("degree", degree, degree.toLowerCase())
+  ], [], [], [
+    argument(0, "person", "factor", "person"),
+    argument(1, "credential", "factor", "degree")
+  ]);
+  const trace = materializeOpenSemanticFactorCompatibilityTrace({
+    query_capture,
+    evidence_formations: { gold: evidence }
+  });
+  const composition = materializeOpenSemanticFactorComposition({
+    trace,
+    query_capture
+  });
+  return { composition, trace, query_capture };
+}
+
+function projectedReceipt(
+  composition: ReturnType<typeof graduationComposition>["composition"]
+): SupportCandidateReceiptV1 {
+  const evidence_ids = ["gold"];
+  const osf = projectLiveSupportOsf(composition, evidence_ids);
+  if (osf === undefined) throw new Error("expected OSF projection from composition");
+  return {
+    candidate_key: "workspace_local:memory_entry:cand-1",
+    hypothesis_digest: `sha256:${"1".repeat(64)}`,
+    osf,
+    evidence_ids
   };
 }
 
@@ -193,5 +318,54 @@ function collapseSupportedOnly(
     status: "collapsed" as const,
     contract: PROPOSITION_STATE_MEASUREMENT_CONTRACT,
     witness
+  };
+}
+
+function formation(
+  sourceKind: "evidence" | "query",
+  sourceText: string,
+  factors: unknown[],
+  variables: unknown[],
+  resultVariableIds: string[],
+  argumentsValue: unknown[]
+) {
+  return materializeOpenSemanticFactorFormation({
+    source_kind: sourceKind,
+    source_text: sourceText,
+    proposal: {
+      schema_version: 1,
+      producer_operator_id: "open-factor-result-slot-test-v1",
+      source_text: sourceText,
+      graph: {
+        schema_version: 2,
+        source_kind: sourceKind,
+        factors,
+        variables,
+        result_variable_ids: resultVariableIds,
+        propositions: [{
+          proposition_id: "graduation",
+          predicate_factor_id: "predicate",
+          arguments: argumentsValue
+        }]
+      }
+    }
+  });
+}
+
+function factor(factorId: string, surface: string, semanticIdentity: string) {
+  return { factor_id: factorId, surface, semantic_identity: semanticIdentity };
+}
+
+function argument(
+  position: number,
+  bindingIdentity: string,
+  referenceKind: "factor" | "variable",
+  referenceId: string
+) {
+  return {
+    position,
+    binding_identity: bindingIdentity,
+    reference_kind: referenceKind,
+    reference_id: referenceId
   };
 }

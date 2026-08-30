@@ -280,6 +280,10 @@ function observeVerifiedSupport(
   if (!receipts.every((receipt) => supportReceiptBindsCurrentQuery(receipt, compilation))) {
     return malformed("support", "authority_identity_mismatch");
   }
+  const composition = supportCompositionAuthority(params);
+  if (composition === null) {
+    return notObserved("support", "applicable_receipt_absent");
+  }
   const projected = projectLiveSupportCandidateReceipts(
     params.candidates,
     params.supplementaryData,
@@ -305,7 +309,8 @@ function observeVerifiedSupport(
         support_source_capability: capability,
         support_graph: payload.graph,
         support_source_receipts: receipts,
-        support_observations: payload.proposition_observations
+        support_observations: payload.proposition_observations,
+        ...composition
       }
     });
     return Object.freeze({
@@ -413,4 +418,24 @@ function preparedEvidence(
     snapshot_coherence_receipt: authority.snapshot_coherence_receipt,
     snapshot_read_lease: authority.snapshot_read_lease
   };
+}
+
+function supportCompositionAuthority(params: FineAssessParams) {
+  const composition = params.supplementaryData.openSemanticFactorComposition;
+  const trace = params.supplementaryData.openSemanticFactorCompatibilityTrace;
+  const queryCapture = params.supplementaryData.queryOpenSemanticFactorFormation;
+  if (composition === undefined || trace === undefined || queryCapture === undefined) {
+    return null;
+  }
+  return Object.freeze({
+    osf_composition: composition,
+    osf_composition_trace: trace,
+    osf_query_capture: queryCapture,
+    ...(params.supplementaryData.semanticFactorFormationsByEvidenceId === undefined
+      ? {}
+      : {
+          osf_evidence_formations:
+            params.supplementaryData.semanticFactorFormationsByEvidenceId
+        })
+  });
 }

@@ -69,6 +69,18 @@ describe("live support query binding", () => {
       ...BOUND_RECEIPT,
       evidence_ids: ["eu-forged"]
     }])).toBe(false);
+    expect(liveSupportReceiptsMatchProjection([BOUND_RECEIPT], [{
+      ...BOUND_RECEIPT,
+      polarity: {
+        status: "available",
+        value: { polarity: "positive", lineage_id: "lin-forged" }
+      }
+    }])).toBe(false);
+    expect(liveSupportReceiptsMatchProjection([BOUND_RECEIPT], [{
+      ...BOUND_RECEIPT,
+      path: { evidence_basis: ["eu-1"], relation_kind: "works_at" },
+      f3_present: true
+    }])).toBe(false);
     expect(liveSupportReceiptsMatchProjection([BOUND_RECEIPT], undefined)).toBe(false);
   });
 

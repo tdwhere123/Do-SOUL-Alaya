@@ -78,7 +78,8 @@ function projectCandidateSupportReceipt(
 ): SupportCandidateReceiptV1 | undefined {
   const candidate_key = buildRecallCandidateDedupeKey(candidate);
   const evidence_ids = evidenceIdsFor(candidate, supplementary, candidate_key);
-  const osf = projectOsf(supplementary, evidence_ids);
+  const osf = projectLiveSupportOsf(
+    supplementary.openSemanticFactorComposition, evidence_ids);
   if (osf === undefined && evidence_ids.length === 0) return undefined;
   const draft = Object.freeze({
     candidate_key,
@@ -125,11 +126,15 @@ function sameLiveSupportReceipt(
   left: SupportCandidateReceiptV1,
   right: SupportCandidateReceiptV1
 ): boolean {
-  return left.candidate_key === right.candidate_key &&
-    left.hypothesis_digest === right.hypothesis_digest &&
-    stableStringify(left.evidence_ids) === stableStringify(right.evidence_ids) &&
-    stableStringify(left.osf) === stableStringify(right.osf) &&
-    stableStringify(left.fact_frames) === stableStringify(right.fact_frames);
+  return stableStringify(left) === stableStringify(right);
+}
+
+export function supportReceiptOsfProjectsComposition(
+  receipt: SupportCandidateReceiptV1,
+  composition: NonNullable<RecallSupplementaryData["openSemanticFactorComposition"]>
+): boolean {
+  return stableStringify(receipt.osf) ===
+    stableStringify(projectLiveSupportOsf(composition, receipt.evidence_ids ?? []));
 }
 
 function evidenceIdsFor(
@@ -145,11 +150,10 @@ function evidenceIdsFor(
   return [...new Set(candidate.entry.evidence_refs)];
 }
 
-function projectOsf(
-  supplementary: RecallSupplementaryData,
+export function projectLiveSupportOsf(
+  composition: RecallSupplementaryData["openSemanticFactorComposition"],
   evidenceIds: readonly string[]
 ): SupportCandidateReceiptV1["osf"] | undefined {
-  const composition = supplementary.openSemanticFactorComposition;
   if (composition === undefined) return undefined;
   const allowed = new Set(evidenceIds);
   const bindings = Object.freeze((composition.bindings ?? [])
