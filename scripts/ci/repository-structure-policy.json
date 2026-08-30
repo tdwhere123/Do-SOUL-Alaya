@@ -1,0 +1,406 @@
+{
+  "schema_version": 1,
+  "file_size": {
+    "review_at": 500,
+    "fail_at": 800,
+    "classifications": {
+      "apps/inspector/web/src/test/setup.ts": {
+        "kind": "test_support",
+        "reason": "Vite test setup lives outside __tests__ and is not production behavior."
+      },
+      "apps/inspector/web/src/vite-env.d.ts": {
+        "kind": "generated",
+        "reason": "Vite owns this generated ambient declaration."
+      }
+    }
+  },
+  "function_size": {
+    "review_at": 80,
+    "split_review_at": 120
+  },
+  "directory_size": {
+    "advisory_at": 10
+  },
+  "forbidden_ownership_directories": [
+    "utils",
+    "helpers",
+    "misc",
+    "common"
+  ],
+  "existing_ownership_directory_exceptions": {
+    "apps/inspector/web/src/utils": [
+      "apps/inspector/web/src/utils/graph.ts",
+      "apps/inspector/web/src/utils/parse-search-query.ts"
+    ]
+  },
+  "forbidden_rollout_directory_patterns": [
+    "^card(?:[-_]?[0-9].*)?$",
+    "^band(?:[0-9]+|[-_][a-z0-9].*)?$",
+    "^wave(?:[0-9]+|[-_][a-z0-9].*)?$",
+    "^psi[-_]?v[0-9]+$",
+    "^d[0-9]+$",
+    "^experiment(?:s|[-_][a-z0-9].*)?$"
+  ],
+  "workspaces": [
+    {
+      "root": "packages/protocol",
+      "package": "@do-soul/alaya-protocol",
+      "allowed_workspace_packages": []
+    },
+    {
+      "root": "packages/graph-algorithms",
+      "package": "@do-soul/alaya-graph-algorithms",
+      "allowed_workspace_packages": []
+    },
+    {
+      "root": "packages/core",
+      "package": "@do-soul/alaya-core",
+      "allowed_workspace_packages": [
+        "@do-soul/alaya-protocol",
+        "@do-soul/alaya-graph-algorithms"
+      ]
+    },
+    {
+      "root": "packages/engine-gateway",
+      "package": "@do-soul/alaya-engine-gateway",
+      "allowed_workspace_packages": [
+        "@do-soul/alaya-protocol"
+      ]
+    },
+    {
+      "root": "packages/eval",
+      "package": "@do-soul/alaya-eval",
+      "allowed_workspace_packages": [
+        "@do-soul/alaya-protocol"
+      ]
+    },
+    {
+      "root": "packages/soul",
+      "package": "@do-soul/alaya-soul",
+      "allowed_workspace_packages": [
+        "@do-soul/alaya-protocol",
+        "@do-soul/alaya-graph-algorithms"
+      ]
+    },
+    {
+      "root": "packages/storage",
+      "package": "@do-soul/alaya-storage",
+      "allowed_workspace_packages": [
+        "@do-soul/alaya-protocol"
+      ]
+    },
+    {
+      "root": "apps/core-daemon",
+      "package": "@do-soul/alaya",
+      "allowed_workspace_packages": [
+        "@do-soul/alaya-protocol",
+        "@do-soul/alaya-graph-algorithms",
+        "@do-soul/alaya-core",
+        "@do-soul/alaya-engine-gateway",
+        "@do-soul/alaya-eval",
+        "@do-soul/alaya-soul",
+        "@do-soul/alaya-storage",
+        "@do-soul/alaya-inspector"
+      ]
+    },
+    {
+      "root": "apps/bench-runner",
+      "package": "@do-soul/alaya-bench-runner",
+      "allowed_workspace_packages": [
+        "@do-soul/alaya-protocol",
+        "@do-soul/alaya-graph-algorithms",
+        "@do-soul/alaya-core",
+        "@do-soul/alaya-engine-gateway",
+        "@do-soul/alaya-eval",
+        "@do-soul/alaya-soul",
+        "@do-soul/alaya-storage",
+        "@do-soul/alaya-inspector",
+        "@do-soul/alaya"
+      ]
+    },
+    {
+      "root": "apps/inspector",
+      "package": "@do-soul/alaya-inspector",
+      "allowed_workspace_packages": [
+        "@do-soul/alaya-protocol",
+        "@do-soul/alaya-eval"
+      ]
+    },
+    {
+      "root": "apps/inspector/web",
+      "package": "@do-soul/alaya-inspector-web",
+      "allowed_workspace_packages": [
+        "@do-soul/alaya-protocol"
+      ]
+    }
+  ],
+  "runtime_artifact_roots": [
+    "packages/protocol/src",
+    "packages/graph-algorithms/src",
+    "packages/core/src",
+    "packages/engine-gateway/src",
+    "packages/soul/src",
+    "packages/storage/src",
+    "apps/core-daemon/src",
+    "apps/inspector/src",
+    "apps/inspector/web/src"
+  ],
+  "artifact_reference_fragments": [
+    ".do-it/bench-runs",
+    "docs/bench-history"
+  ],
+  "existing_artifact_reference_exceptions": {
+    "apps/core-daemon/src/ai/reconciliation-llm-decision.ts": {
+      "max_occurrences_by_fragment": {
+        ".do-it/bench-runs": 0,
+        "docs/bench-history": 1
+      },
+      "reason": "Named post-lock authority decision: production/provider cache currently lives under docs/bench-history."
+    },
+    "apps/core-daemon/src/ai/edge-auto-producer-llm-adapter.ts": {
+      "max_occurrences_by_fragment": {
+        ".do-it/bench-runs": 0,
+        "docs/bench-history": 1
+      },
+      "reason": "Named post-lock authority decision: production/provider cache currently lives under docs/bench-history."
+    },
+    "apps/inspector/src/runtime/app.ts": {
+      "max_occurrences_by_fragment": {
+        ".do-it/bench-runs": 0,
+        "docs/bench-history": 1
+      },
+      "reason": "Inspector exposes the retained read-only benchmark trend endpoint; scratch references remain forbidden."
+    }
+  },
+  "retired_import_paths": [
+    "packages/core/src/recall/shadow",
+    "packages/core/src/recall/decision/prefix-capture/envelope",
+    "packages/core/src/recall/decision/prefix-capture/compare"
+  ],
+  "entry_exports": [
+    {
+      "specifier": "@do-soul/alaya-protocol",
+      "path": "packages/protocol/src/index.ts",
+      "expected_count": 2108,
+      "expected_sha256": "6952d00a67d0564a8ea7a9384a913d3fe4cfbaf96dfb237744440078b533ff7d"
+    },
+    {
+      "specifier": "@do-soul/alaya-graph-algorithms",
+      "path": "packages/graph-algorithms/src/index.ts",
+      "expected_count": 8,
+      "expected_sha256": "28050ed72655594ef7d3c95cca9f57950350a1f26186fbdc60baf54d8402fcf1"
+    },
+    {
+      "specifier": "@do-soul/alaya-core",
+      "path": "packages/core/src/index.ts",
+      "expected_count": 1185,
+      "expected_sha256": "4dd41a0d2dcaf51090e23e2017ba839705d7f1aeb5e1d75ed30bc21f7ed7ec79"
+    },
+    {
+      "specifier": "@do-soul/alaya-engine-gateway",
+      "path": "packages/engine-gateway/src/index.ts",
+      "expected_count": 44,
+      "expected_sha256": "7c2c020a5c8db30f6fee6c9ebb7e4c7026b3803428c570d67c756295f4567371"
+    },
+    {
+      "specifier": "@do-soul/alaya-eval",
+      "path": "packages/eval/src/index.ts",
+      "expected_count": 131,
+      "expected_sha256": "f81c92ba4d639ed7a65dbefb5dc19982b53b83774564f0979fad08c8fdda89c9"
+    },
+    {
+      "specifier": "@do-soul/alaya-eval/authority",
+      "path": "packages/eval/src/authority.ts",
+      "expected_count": 40,
+      "expected_sha256": "00710ed8a2cbe7b0338063a1ef8b681bcade490a65f13a683c69f3b2a7a59861"
+    },
+    {
+      "specifier": "@do-soul/alaya-eval/internal",
+      "path": "packages/eval/src/internal.ts",
+      "expected_count": 56,
+      "expected_sha256": "0dae7389226f271db4e45f4ac7016f3c8151d260df98ee831460845e21b16014"
+    },
+    {
+      "specifier": "@do-soul/alaya-soul",
+      "path": "packages/soul/src/index.ts",
+      "expected_count": 216,
+      "expected_sha256": "0a79a7d380487dddc5b47d60424e7f8bfefd851cc739233f9d41aec003f23425"
+    },
+    {
+      "specifier": "@do-soul/alaya-storage",
+      "path": "packages/storage/src/index.ts",
+      "expected_count": 295,
+      "expected_sha256": "11b66653ccebb136ce1a59333b2fa1b9bbfcd75596f26312e17a83e920d5c04e"
+    },
+    {
+      "specifier": "@do-soul/alaya",
+      "path": "apps/core-daemon/src/index.ts",
+      "expected_count": 21,
+      "expected_sha256": "b7f0cf892c94de40092cefccd726d99943faef518e5d2f1b730bd40ecbead2e6"
+    },
+    {
+      "specifier": "@do-soul/alaya/mcp-server",
+      "path": "apps/core-daemon/src/mcp/server/mcp-server.ts",
+      "expected_count": 8,
+      "expected_sha256": "3ad6e78983f8d56d2a52b2e31ce4fa539c7c2b5e7590b70e08c7c1940d55fc7d"
+    },
+    {
+      "specifier": "@do-soul/alaya/cli/bridge",
+      "path": "apps/core-daemon/src/cli/bridge.ts",
+      "expected_count": 11,
+      "expected_sha256": "05e2956e7bb95ad98982f1557c3756ddc2c833060b7c6896a8cf2edec34bb2b7"
+    },
+    {
+      "specifier": "@do-soul/alaya/cli/register",
+      "path": "apps/core-daemon/src/cli/register.ts",
+      "expected_count": 2,
+      "expected_sha256": "28e3c53e2e4584d5f17ddacaee0e872cff8df883d034523b761e697b71b9857c"
+    },
+    {
+      "specifier": "@do-soul/alaya/recall/bound-execution",
+      "path": "apps/core-daemon/src/recall/recall-bound-execution.ts",
+      "expected_count": 4,
+      "expected_sha256": "ef7cf9de347cea788e114f3d05f881f2495a38849a5f5ea530068c3701c0aafb"
+    },
+    {
+      "specifier": "@do-soul/alaya-inspector/server",
+      "path": "apps/inspector/src/runtime/server.ts",
+      "expected_count": 3,
+      "expected_sha256": "0809572981bc25f476a744854d2d6fe7bcef38da8de2b5c3d0626fafd2b732cc"
+    }
+  ],
+  "private_barrel_snapshot": {
+    "expected_count": 44,
+    "expected_sha256": "a4118ad5d994188ac659f7df290c2e8a9b91660aab8393d6b465f4ed34e7bdc8"
+  },
+  "existing_duplicate_export_authorities": [
+    {
+      "path": "packages/core/src/index.ts",
+      "binding": "EntityCandidate",
+      "sources": [
+        "packages/core/src/shared/entity-extraction-port.ts",
+        "packages/core/src/shared/entity-extraction-rules.ts"
+      ]
+    },
+    {
+      "path": "packages/core/src/index.ts",
+      "binding": "EntityExtractionPort",
+      "sources": [
+        "packages/core/src/shared/entity-extraction-port.ts",
+        "packages/core/src/shared/entity-extraction-rules.ts"
+      ]
+    },
+    {
+      "path": "packages/core/src/index.ts",
+      "binding": "ResolutionDeliveryAuthorityPort",
+      "sources": [
+        "packages/core/src/governance/proposals/resolution-service-effects.ts",
+        "packages/core/src/governance/proposals/resolution-service.ts"
+      ]
+    },
+    {
+      "path": "packages/core/src/index.ts",
+      "binding": "ResolutionEffectAuthorityPort",
+      "sources": [
+        "packages/core/src/governance/proposals/resolution-service-effects.ts",
+        "packages/core/src/governance/proposals/resolution-service.ts"
+      ]
+    },
+    {
+      "path": "packages/core/src/index.ts",
+      "binding": "clamp01",
+      "sources": [
+        "packages/core/src/dynamics/dynamics-constants-runtime.ts",
+        "packages/core/src/shared/clamp.ts"
+      ]
+    },
+    {
+      "path": "packages/protocol/src/index.ts",
+      "binding": "EventLogOrphanExpectedTable",
+      "sources": [
+        "packages/protocol/src/events/event-log-orphan.ts",
+        "packages/protocol/src/workers/auditor-ports.ts"
+      ]
+    },
+    {
+      "path": "packages/protocol/src/index.ts",
+      "binding": "SoulBatchReviewEdgeProposalsRequestSchema",
+      "sources": [
+        "packages/protocol/src/soul/edge-proposal.ts",
+        "packages/protocol/src/soul/mcp-types.ts"
+      ]
+    },
+    {
+      "path": "packages/protocol/src/index.ts",
+      "binding": "SoulBatchReviewEdgeProposalsResponseSchema",
+      "sources": [
+        "packages/protocol/src/soul/edge-proposal.ts",
+        "packages/protocol/src/soul/mcp-types.ts"
+      ]
+    },
+    {
+      "path": "packages/protocol/src/index.ts",
+      "binding": "SoulListPendingEdgeProposalsRequestSchema",
+      "sources": [
+        "packages/protocol/src/soul/edge-proposal.ts",
+        "packages/protocol/src/soul/mcp-types.ts"
+      ]
+    },
+    {
+      "path": "packages/protocol/src/index.ts",
+      "binding": "SoulListPendingEdgeProposalsResponseSchema",
+      "sources": [
+        "packages/protocol/src/soul/edge-proposal.ts",
+        "packages/protocol/src/soul/mcp-types.ts"
+      ]
+    },
+    {
+      "path": "packages/protocol/src/index.ts",
+      "binding": "SoulProposeEdgeRequestSchema",
+      "sources": [
+        "packages/protocol/src/soul/edge-proposal.ts",
+        "packages/protocol/src/soul/mcp-types.ts"
+      ]
+    },
+    {
+      "path": "packages/protocol/src/index.ts",
+      "binding": "SoulProposeEdgeResponseSchema",
+      "sources": [
+        "packages/protocol/src/soul/edge-proposal.ts",
+        "packages/protocol/src/soul/mcp-types.ts"
+      ]
+    }
+  ],
+  "existing_index_to_index_edges": [
+    "apps/core-daemon/src/index.ts -> apps/core-daemon/src/secrets/index.ts",
+    "packages/core/src/index.ts -> packages/core/src/config/index.ts",
+    "packages/core/src/index.ts -> packages/core/src/path-plasticity/index.ts",
+    "packages/core/src/index.ts -> packages/core/src/permission-policy/index.ts",
+    "packages/core/src/index.ts -> packages/core/src/recall/decision/query-proof/adapters/lexical-bound/index.ts",
+    "packages/core/src/recall/decision/query-proof/dominance/index.ts -> packages/core/src/recall/decision/query-proof/measurement/index.ts",
+    "packages/engine-gateway/src/index.ts -> packages/engine-gateway/src/provider/chat-completion/index.ts",
+    "packages/eval/src/index.ts -> packages/eval/src/cli/index.ts",
+    "packages/protocol/src/index.ts -> packages/protocol/src/soul/field-contract/index.ts",
+    "packages/soul/src/garden/index.ts -> packages/protocol/src/index.ts",
+    "packages/soul/src/index.ts -> packages/protocol/src/index.ts",
+    "packages/soul/src/index.ts -> packages/soul/src/garden/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/capsules/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/control/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/field/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/garden/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/governance/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/health/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/lease/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/memory-entry/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/memory/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/path/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/proposal/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/runtime/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/signal/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/surface/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/repos/tooling/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/shared/index.ts",
+    "packages/storage/src/index.ts -> packages/storage/src/sqlite/index.ts",
+    "packages/storage/src/repos/path/index.ts -> packages/storage/src/repos/path/soft-association/index.ts"
+  ]
+}

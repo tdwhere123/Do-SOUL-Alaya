@@ -73,8 +73,8 @@ jobs:
       - name: Guard test as-any
         run: pnpm run ci:test-as-any
 
-      - name: Guard production src file size
-        run: pnpm run ci:src-file-size
+      - name: Guard repository structure
+        run: pnpm run ci:repository-structure
 
       - name: Guard inspector dependency isolation
         run: pnpm run hygiene:inspector-deps

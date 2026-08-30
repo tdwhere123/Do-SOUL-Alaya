@@ -42,8 +42,9 @@ files: `docs/handbook/README.md`.
     cohesion. At **120+**, split before extending code that mixes decisions or
     effects. A cohesive declarative table or schema is not improved by arbitrary
     extraction.
-  - The live `ci:src-file-size` check remains authoritative while it enforces
-    the transitional 500-line ceiling; Card S01 owns migration to tiered checks.
+  - The live `ci:repository-structure` check is authoritative: 500–799 lines
+    require review, while handwritten source at 800+ lines fails. Generated,
+    declarative, and test-support exceptions must remain explicitly classified.
 - **Phases, not piles:** separate DB access, computation, EventLog append, and
   other side effects (`compute` → `apply` → `audit`). A function that mixes
   them is a split candidate before you extend it.
