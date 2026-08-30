@@ -1,4 +1,3 @@
-import { digestRecallFieldIdentity } from "../field/field-identity.js";
 import type { FineAssessParams } from "../delivery/fine-assessment.js";
 import { buildRecallCandidateDedupeKey } from
   "../runtime/recall-service-helpers.js";
@@ -304,9 +303,9 @@ function observeVerifiedSupport(
       evidence: {
         ...preparedEvidence(authorityState.authority),
         support_source_capability: capability,
-        support_graph_digest: payload.graph.digest,
-        support_source_digest: digestRecallFieldIdentity(receipts),
-        support_observation_digest: digestRecallFieldIdentity(payload.proposition_observations)
+        support_graph: payload.graph,
+        support_source_receipts: receipts,
+        support_observations: payload.proposition_observations
       }
     });
     return Object.freeze({

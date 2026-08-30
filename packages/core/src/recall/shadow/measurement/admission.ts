@@ -228,7 +228,7 @@ export function issueMeasurementGroupAdmission(input: Readonly<{
   assertAuthorityPins(input.authority, identity);
   const sourceBinding = assertLexicalMeasurementSourceObservation(
     input.authority, input.contract, collapse, input.lexical_source
-  ) ?? assertSupportMeasurementSourceObservation(input.authority, input.contract);
+  ) ?? assertSupportMeasurementSourceObservation(input.authority, input.contract, collapse);
   const body = admissionBody(
     input.authority,
     input.contract,
@@ -276,7 +276,7 @@ export function validateMeasurementAdmissionV1(input: Readonly<{
     const binding = ADMISSION_SOURCE_BINDINGS.get(input.admission) ?? null;
     assertLexicalMeasurementSourceObservation(
       authority, input.contract, collapse, lexicalSourceContext(binding));
-    assertSupportMeasurementSourceObservation(authority, input.contract);
+    assertSupportMeasurementSourceObservation(authority, input.contract, collapse);
     if (!lexicalCoordinateMatchesSourceBinding(binding, input.lexical_source)) {
       return blocked("lexical coordinate is not bound to the issued source envelope");
     }

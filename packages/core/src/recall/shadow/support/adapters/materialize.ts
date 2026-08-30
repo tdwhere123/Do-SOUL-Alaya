@@ -43,17 +43,44 @@ export function materializeSupportFromReceipts(
     edges: [...draft.edges.values(), ...lineageCorrelationEdges(draft)],
     correlations: lineageCorrelationWitnesses(draft, input.query_id, input.snapshot_digest)
   });
+  const proposition_observations = candidatePropositionObservationsFromDraft(
+    draft,
+    input.query_id,
+    input.snapshot_digest
+  );
+  registerIssuedSupportSource(graph, input.candidates ?? [], proposition_observations);
   return Object.freeze({
     graph,
     polarities: polaritiesFromDraft(draft, input.query_id, input.snapshot_digest),
-    proposition_observations: candidatePropositionObservationsFromDraft(
-      draft,
-      input.query_id,
-      input.snapshot_digest
-    ),
+    proposition_observations,
     gaps: Object.freeze([...draft.gaps]),
     outcomes: Object.freeze([...draft.outcomes])
   });
+}
+
+const ISSUED_SUPPORT_SOURCES = new WeakMap<SupportHypergraphReceiptV1, Readonly<{
+  readonly receipts: readonly SupportCandidateReceiptV1[];
+  readonly observations: readonly SupportPropositionObservationV1[];
+}>>();
+
+function registerIssuedSupportSource(
+  graph: SupportHypergraphReceiptV1,
+  receipts: readonly SupportCandidateReceiptV1[],
+  observations: readonly SupportPropositionObservationV1[]
+): void {
+  ISSUED_SUPPORT_SOURCES.set(graph, Object.freeze({
+    receipts: Object.freeze([...receipts]),
+    observations
+  }));
+}
+
+export function issuedSupportSourceBinding(
+  graph: SupportHypergraphReceiptV1
+): Readonly<{
+  readonly receipts: readonly SupportCandidateReceiptV1[];
+  readonly observations: readonly SupportPropositionObservationV1[];
+}> | undefined {
+  return ISSUED_SUPPORT_SOURCES.get(graph);
 }
 
 function adaptCandidate(

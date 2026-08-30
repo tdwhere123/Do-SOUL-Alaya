@@ -30,6 +30,7 @@ export {
   type RelationalAuthorityVerificationV1
 } from "./adapters/relational-authority.js";
 export {
+  issuedSupportSourceBinding,
   materializeSupportFromReceipts,
   type SupportMaterializationV1
 } from "./adapters/materialize.js";

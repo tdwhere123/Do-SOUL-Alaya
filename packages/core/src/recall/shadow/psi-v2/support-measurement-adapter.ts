@@ -8,12 +8,16 @@ import {
   type PropositionStateCollapseV1,
   type VerifiedMeasurementAuthorityV1
 } from "../measurement/index.js";
+import {
+  boundSupportPropositionWitness,
+  supportPropositionComparisonId
+} from "../measurement/support-source-admission.js";
 import type {
   SupportMaterializationOutcomeV1,
   SupportMaterializationV1,
   SupportPropositionObservationV1
 } from "../support/index.js";
-import { createFourValuedWitness, type FourValuedWitness } from "../witness/index.js";
+import type { FourValuedWitness } from "../witness/index.js";
 import type { PsiV2CandidateV1, PsiV2CoordinateV1 } from "./types.js";
 
 type CandidateCoordinateMap = Map<string, Map<string, PsiV2CoordinateV1>>;
@@ -34,7 +38,7 @@ export function psiV2CandidatesFromSupport(input: Readonly<{
     addOutcomeCoordinate(coordinates, outcome);
   }
   for (const gap of input.support.gaps) {
-    if (gap.kind !== "binding_absent") continue;
+    if (gap.kind !== "binding_absent" && gap.kind !== "osf_truncated") continue;
     addBlockedCoordinate(
       coordinates,
       gap.owner,
@@ -77,7 +81,7 @@ function addPropositionCoordinate(
       "support proposition query or snapshot binding mismatch");
     return;
   }
-  const bound = boundWitness(observation, propositionId);
+  const bound = boundSupportPropositionWitness(observation);
   const previous = group.get(propositionId);
   const observations = previous === undefined
     ? [bound]
@@ -123,28 +127,9 @@ function admittedCoordinate(
   }
 }
 
-function boundWitness(
-  observation: SupportPropositionObservationV1,
-  propositionId: string
-) {
-  const witness = observation.witness;
-  return createFourValuedWitness({
-    identity: {
-      coordinate_id: `support.measure:${propositionId}:${observation.candidate_id}`,
-      query_id: witness.identity.query_id,
-      snapshot_digest: witness.identity.snapshot_digest,
-      candidate_id: observation.candidate_id,
-      proposition_id: propositionId
-    },
-    provenance: witness.provenance,
-    epistemic: witness.epistemic,
-    payload: witness.payload
-  });
-}
-
 function collapseObservations(
   coordinate: PsiV2CoordinateV1,
-  observation: ReturnType<typeof boundWitness>
+  observation: FourValuedWitness
 ): readonly FourValuedWitness[] {
   const collapse = coordinate.collapse;
   const existing = collapse.status === "collapsed" || collapse.status === "conflict"
@@ -206,10 +191,7 @@ function blockedCoordinate(
 }
 
 function comparisonPropositionId(observation: SupportPropositionObservationV1): string {
-  return comparisonId("support.proposition", {
-    hypothesis_digest: observation.hypothesis_digest ?? "unbound",
-    local_proposition_id: observation.local_proposition_id
-  });
+  return supportPropositionComparisonId(observation);
 }
 
 function comparisonId(kind: string, binding: unknown): string {
