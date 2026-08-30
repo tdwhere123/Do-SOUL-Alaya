@@ -4,6 +4,7 @@ import {
   createMeasurementGroupContractV1
 } from "../../../../recall/shadow/measurement/index.js";
 import {
+  createCorrelationWitness,
   createNumericIntervalWitness,
   isKnownZeroEpistemic,
   type NumericIntervalWitness,
@@ -261,7 +262,79 @@ describe("measurement group collapse", () => {
       observations: [numeric("c1", 0, 10), numeric("c2", 5, 12)]
     }).status).toBe("unresolved");
   });
+
+  it("does not let a foreign query or snapshot correlation witness authorize collapse", () => {
+    const contract = createMeasurementGroupContractV1({
+      ...BASE,
+      correlation_policy: "unknown_blocks",
+      combine_operator: "bound_intersection"
+    });
+    const observations = [numeric("c1", 0, 10), numeric("c2", 5, 12)];
+    const live = correlation("c1", "c2");
+    const collapsed = collapseMeasurementGroup({
+      contract,
+      observations,
+      correlations: [live]
+    });
+    expect(collapsed.status).toBe("collapsed");
+    if (collapsed.status === "collapsed") {
+      expect(collapsed.witness.payload).toEqual({ lower: 5, upper: 10 });
+    }
+    expect(collapseMeasurementGroup({
+      contract,
+      observations,
+      correlations: [correlation("c1", "c2", { query_id: "query-stale" })]
+    }).status).toBe("unresolved");
+    expect(collapseMeasurementGroup({
+      contract,
+      observations,
+      correlations: [correlation("c1", "c2", {
+        snapshot_digest: `sha256:${"f".repeat(64)}`
+      })]
+    }).status).toBe("unresolved");
+    expect(collapseMeasurementGroup({
+      contract,
+      observations,
+      correlations: [correlation("c1", "c2", { candidate_id: "other-cand" })]
+    }).status).toBe("unresolved");
+    expect(collapseMeasurementGroup({
+      contract,
+      observations,
+      correlations: [correlation("c1", "c2", { proposition_id: "other-prop" })]
+    }).status).toBe("unresolved");
+  });
 });
+
+function correlation(
+  leftId: string,
+  rightId: string,
+  identity: {
+    query_id?: string;
+    snapshot_digest?: string;
+    candidate_id?: string;
+    proposition_id?: string;
+  } = {}
+) {
+  return createCorrelationWitness({
+    identity: {
+      ...PINS,
+      coordinate_id: `corr:${leftId}:${rightId}`,
+      candidate_id: identity.candidate_id ?? PINS.candidate_id,
+      proposition_id: identity.proposition_id ?? "prop-1",
+      ...(identity.query_id === undefined ? {} : { query_id: identity.query_id }),
+      ...(identity.snapshot_digest === undefined
+        ? {}
+        : { snapshot_digest: identity.snapshot_digest })
+    },
+    provenance: PROV,
+    epistemic: { kind: "exact" },
+    payload: {
+      left_id: leftId,
+      right_id: rightId,
+      state: "certified_independent"
+    }
+  });
+}
 
 function numeric(
   coordinate: string,

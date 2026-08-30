@@ -350,12 +350,32 @@ function declaredCorrelation(
   for (const witness of correlations) {
     const payload = witness.payload;
     if (payload === null || witness.epistemic.kind !== "exact") continue;
+    if (!correlationWitnessPinsMatch(witness, left, right)) continue;
     const ids = new Set([payload.left_id, payload.right_id]);
     if (ids.has(left.identity.coordinate_id) && ids.has(right.identity.coordinate_id)) {
       return payload.state;
     }
   }
   return undefined;
+}
+
+function correlationWitnessPinsMatch(
+  witness: CorrelationWitness,
+  left: NumericIntervalWitness,
+  right: NumericIntervalWitness
+): boolean {
+  const identity = witness.identity;
+  if (identity.query_id !== left.identity.query_id) return false;
+  if (identity.snapshot_digest !== left.identity.snapshot_digest) return false;
+  if (identity.candidate_id !== undefined &&
+    identity.candidate_id !== left.identity.candidate_id) {
+    return false;
+  }
+  if (identity.proposition_id !== undefined &&
+    identity.proposition_id !== left.identity.proposition_id) {
+    return false;
+  }
+  return true;
 }
 
 function conflictFrom(
