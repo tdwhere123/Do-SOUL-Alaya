@@ -1,0 +1,71 @@
+import { describe, expect, it } from "vitest";
+import {
+  collapsePropositionStateMeasurement,
+  PROPOSITION_STATE_MEASUREMENT_CONTRACT
+} from "../../../../recall/shadow/measurement/index.js";
+import { psiV2CandidatesFromSupport } from
+  "../../../../recall/shadow/psi-v2/index.js";
+import { materializeSupportFromReceipts } from
+  "../../../../recall/shadow/support/index.js";
+import { QUERY, SNAPSHOT } from "./fixtures.js";
+
+const CAND = "workspace_local:memory_entry:cand-1";
+const HYPOTHESIS = `sha256:${"1".repeat(64)}`;
+
+describe("applicable unknown support propositions", () => {
+  it("keeps an OSF proposition without polarity as decision-relevant unknown", () => {
+    const result = materializeSupportFromReceipts({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      candidates: [{
+        candidate_key: CAND,
+        hypothesis_digest: HYPOTHESIS,
+        osf: {
+          composition_status: "composed",
+          truncated: false,
+          bindings: [{
+            variable_id: "x",
+            binding_identity: "arg.person",
+            semantic_identity: "person.alice",
+            evidence_id: "eu-1",
+            query_proposition_id: "prop.works-at"
+          }]
+        },
+        evidence_ids: ["eu-1"]
+      }]
+    });
+
+    expect(result.graph.nodes.some((node) =>
+      node.kind === "proposition" && node.id === "prop.works-at")).toBe(true);
+    expect(result.graph.edges.some((edge) => edge.kind === "grounds")).toBe(true);
+    expect(result.graph.edges.some((edge) => edge.kind === "yields")).toBe(true);
+    expect(result.gaps).toEqual([]);
+    expect(result.proposition_observations).toEqual([expect.objectContaining({
+      candidate_id: CAND,
+      local_proposition_id: "prop.works-at",
+      hypothesis_digest: HYPOTHESIS,
+      witness: expect.objectContaining({
+        epistemic: { kind: "exact" },
+        payload: { polarity: "unknown" },
+        provenance: [{ source_id: "eu-1", producer: "support.osf.grounds.v1" }]
+      })
+    })]);
+
+    const [candidate] = psiV2CandidatesFromSupport({
+      candidate_keys: [CAND],
+      support: result
+    });
+    expect(candidate?.coordinates).toHaveLength(1);
+    expect(candidate?.coordinates[0]?.applicable).toBe(true);
+    expect(candidate?.coordinates[0]?.identity).toBeNull();
+    expect(candidate?.coordinates[0]?.collapse.status).toBe("blocked");
+    const collapse = collapsePropositionStateMeasurement({
+      contract: PROPOSITION_STATE_MEASUREMENT_CONTRACT,
+      observations: [result.proposition_observations[0]!.witness]
+    });
+    expect(collapse.status).toBe("blocked");
+    if (collapse.status === "blocked") {
+      expect(collapse.reason).toMatch(/unknown/u);
+    }
+  });
+});

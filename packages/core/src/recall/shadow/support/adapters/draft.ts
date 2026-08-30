@@ -17,6 +17,7 @@ export type CandidatePolarityVotes = Readonly<{
   readonly propositionId: string;
   readonly hypothesisDigest: string | null;
   readonly votes: PolarityVotes;
+  readonly provenance: { source_id: string; producer: string }[];
 }>;
 
 export type SupportDraft = {
@@ -89,6 +90,21 @@ export function recordEvidenceLineage(
   draft.evidenceLineages.set(evidenceId, lineages);
 }
 
+export function noteApplicableProposition(
+  draft: SupportDraft,
+  candidateId: string,
+  hypothesisDigest: string | null,
+  propositionId: string,
+  provenance: Readonly<{ readonly source_id: string; readonly producer: string }>
+): CandidatePolarityVotes {
+  const row = candidateVotesFor(draft, candidateId, hypothesisDigest, propositionId);
+  if (!row.provenance.some((entry) =>
+    entry.source_id === provenance.source_id && entry.producer === provenance.producer)) {
+    row.provenance.push({ source_id: provenance.source_id, producer: provenance.producer });
+  }
+  return row;
+}
+
 export function vote(
   draft: SupportDraft,
   candidateId: string,
@@ -99,11 +115,12 @@ export function vote(
 ): void {
   const row = votesFor(draft, propositionId);
   row[side].add(lineageId);
-  const candidateVotes = candidateVotesFor(
+  const candidateVotes = noteApplicableProposition(
     draft,
     candidateId,
     hypothesisDigest ?? null,
-    propositionId
+    propositionId,
+    { source_id: lineageId, producer: "support.polarity.receipt.v1" }
   ).votes;
   candidateVotes[side].add(lineageId);
   if (row.superseded.has(lineageId)) candidateVotes.superseded.add(lineageId);
@@ -135,7 +152,8 @@ function candidateVotesFor(
     candidateId,
     propositionId,
     hypothesisDigest,
-    votes: emptyVotes()
+    votes: emptyVotes(),
+    provenance: []
   };
   draft.candidateVotes.set(key, created);
   return created;

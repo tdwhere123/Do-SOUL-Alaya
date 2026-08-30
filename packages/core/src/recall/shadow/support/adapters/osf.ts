@@ -1,5 +1,5 @@
 import type { SupportDraft } from "./draft.js";
-import { addEdge, addGap, addNode, recordEvidenceLineage } from "./draft.js";
+import { addEdge, addGap, addNode, noteApplicableProposition, recordEvidenceLineage } from "./draft.js";
 import type {
   SupportCandidateReceiptV1,
   SupportOsfBindingV1,
@@ -24,7 +24,7 @@ export function adaptOsfCandidate(
     return;
   }
   for (const binding of osf.bindings ?? []) {
-    adaptOsfBinding(draft, candidate.candidate_key, binding);
+    adaptOsfBinding(draft, candidate, binding);
   }
 }
 
@@ -50,9 +50,10 @@ function addOsfStatusGap(
 
 function adaptOsfBinding(
   draft: SupportDraft,
-  candidateKey: string,
+  candidate: SupportCandidateReceiptV1,
   binding: SupportOsfBindingV1
 ): void {
+  const candidateKey = candidate.candidate_key;
   if (hasBlankOsfIdentity(binding)) {
     addGap(
       draft,
@@ -90,6 +91,22 @@ function adaptOsfBinding(
     return;
   }
   addNode(draft, "proposition", propositionId);
+  noteApplicableProposition(
+    draft,
+    candidateKey,
+    candidate.hypothesis_digest ?? null,
+    propositionId,
+    { source_id: binding.evidence_id, producer: "support.osf.grounds.v1" }
+  );
+  if (binding.source_lineage_id !== undefined) {
+    noteApplicableProposition(
+      draft,
+      candidateKey,
+      candidate.hypothesis_digest ?? null,
+      propositionId,
+      { source_id: binding.source_lineage_id, producer: "support.osf.lineage.v1" }
+    );
+  }
   if (bindingId !== undefined) {
     addEdge(draft, "yields", "answer_binding", bindingId, "proposition", propositionId);
   }
