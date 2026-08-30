@@ -1,3 +1,4 @@
+import { compareText } from "../../../../shared/compare-text.js";
 import { ShadowContractError } from "../../envelope.js";
 import { createTypedWitness, rejectPayload } from "../shared/create.js";
 import { joinWitness, meetWitness, refineWitness } from "../shared/kernel.js";
@@ -104,7 +105,7 @@ function freezeMembers(values: readonly string[], label: string): readonly strin
   if (!Array.isArray(values) || values.some((item) => typeof item !== "string" || item.length === 0)) {
     throw new ShadowContractError(`${label} must be a nonempty-string list`);
   }
-  return Object.freeze([...new Set(values)].sort((left, right) => left.localeCompare(right)));
+  return Object.freeze([...new Set(values)].sort(compareText));
 }
 
 function isSubset(left: readonly string[], right: readonly string[]): boolean {

@@ -83,6 +83,32 @@ describe("witness serialization and immutability", () => {
     expect(serializeWitness(left)).toBe(serializeWitness(right));
     expect(left.payload?.must).toEqual(["a", "b"]);
   });
+
+  it("canonicalizes must/may members by exact code units", () => {
+    const composed = "é";
+    const decomposed = "e\u0301";
+    expect(composed === decomposed).toBe(false);
+
+    const forward = createMustMayWitness({
+      identity: PINS,
+      provenance: PROV,
+      epistemic: { kind: "exact" },
+      payload: { must: [composed, decomposed], may: [composed, decomposed] }
+    });
+    const reverse = createMustMayWitness({
+      identity: PINS,
+      provenance: PROV,
+      epistemic: { kind: "exact" },
+      payload: { must: [decomposed, composed], may: [decomposed, composed] }
+    });
+
+    expect(forward.payload?.must).toEqual(reverse.payload?.must);
+    expect(forward.payload?.may).toEqual(reverse.payload?.may);
+    expect(serializeWitness(forward)).toBe(serializeWitness(reverse));
+    expect(digestWitness(forward)).toBe(digestWitness(reverse));
+    expect(forward.payload?.must).toEqual([decomposed, composed]);
+    expect(forward.payload?.may).toEqual([decomposed, composed]);
+  });
 });
 
 type WitnessProvenanceEntry = { source_id: string; producer: string };
