@@ -1,5 +1,6 @@
 import { createFourValuedWitness, type FourValuedPolarity, type FourValuedWitness } from
   "../../witness/index.js";
+import { compareText } from "../../../../shared/compare-text.js";
 import type { SupportDraft } from "./draft.js";
 import { addEdge, addGap, addNode, supersedeLineage, vote } from "./draft.js";
 import { admitRelationalReceipt } from "./path-temporal.js";
@@ -26,7 +27,8 @@ export function polaritiesFromDraft(
   snapshot: string
 ): readonly FourValuedWitness[] {
   const witnesses: FourValuedWitness[] = [];
-  for (const [propositionId, votes] of draft.votes) {
+  const propositions = [...draft.votes].sort(([left], [right]) => compareText(left, right));
+  for (const [propositionId, votes] of propositions) {
     const polarity = polarityOf(votes.support, votes.refute, votes.superseded);
     witnesses.push(createFourValuedWitness({
       identity: {

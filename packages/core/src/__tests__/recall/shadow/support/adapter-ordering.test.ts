@@ -6,6 +6,7 @@ import {
 import { QUERY } from "./fixtures.js";
 import {
   authorityContext,
+  createRelationalReceipt,
   polarityCandidate,
   polarityReceipt,
   RELATIONAL_SNAPSHOT,
@@ -15,6 +16,51 @@ import {
 const PROP = "prop.works-at";
 
 describe("support adapter ordering", () => {
+  it("projects multiple propositions identically across receipt permutations", () => {
+    const propositionZ = polarityFor(
+      "candidate-z",
+      "lineage-z",
+      "prop.z",
+      "positive"
+    );
+    const supersedeZ: SupportCandidateReceiptV1 = {
+      candidate_key: "candidate-z-supersession",
+      supersession: {
+        status: "available",
+        value: {
+          standing: "superseded",
+          lineage_id: "lineage-z",
+          proposition_id: "prop.z",
+          receipt: supersessionReceipt("lineage-z", "prop.z")
+        }
+      }
+    };
+    const propositionA = polarityFor(
+      "candidate-a",
+      "lineage-a",
+      "prop.a",
+      "positive"
+    );
+
+    const forward = materializePolarity([propositionZ, supersedeZ, propositionA]);
+    const reverse = materializePolarity([propositionA, supersedeZ, propositionZ]);
+
+    expect(forward.polarities).toEqual(reverse.polarities);
+    expect(forward.polarities.map((witness) => [
+      witness.identity.proposition_id,
+      witness.payload.polarity,
+      witness.provenance
+    ])).toEqual([
+      ["prop.a", "supported_only", [
+        { source_id: "support.adapter", producer: "support.polarity.v1" }
+      ]],
+      ["prop.z", "unknown", [
+        { source_id: "support.adapter", producer: "support.polarity.v1" }
+      ]]
+    ]);
+    expect(forward.proposition_observations).toEqual(reverse.proposition_observations);
+  });
+
   it("resolves supersession identically before or after the superseded vote", () => {
     const support = polarityCandidate(
       "candidate-support",
@@ -99,6 +145,32 @@ function materializeOsf(candidates: readonly SupportCandidateReceiptV1[]) {
     snapshot_digest: `sha256:${"c".repeat(64)}`,
     candidates
   });
+}
+
+function polarityFor(
+  candidateKey: string,
+  lineageId: string,
+  propositionId: string,
+  polarity: "positive" | "negative"
+): SupportCandidateReceiptV1 {
+  const context = authorityContext();
+  const subject = {
+    kind: "polarity" as const,
+    proposition_id: propositionId,
+    lineage_id: lineageId
+  };
+  return {
+    candidate_key: candidateKey,
+    polarity: {
+      status: "available",
+      value: {
+        polarity,
+        lineage_id: lineageId,
+        proposition_id: propositionId,
+        receipt: createRelationalReceipt(context, subject, {})
+      }
+    }
+  };
 }
 
 function lineageCandidates(): readonly SupportCandidateReceiptV1[] {
