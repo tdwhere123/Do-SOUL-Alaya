@@ -71,10 +71,10 @@ describe("support adapter ordering", () => {
       witness.provenance
     ])).toEqual([
       ["prop.a", "supported_only", [
-        { source_id: "support.adapter", producer: "support.polarity.v1" }
+        { source_id: "lineage-a", producer: "support.polarity.receipt.v1" }
       ]],
       ["prop.z", "unknown", [
-        { source_id: "support.adapter", producer: "support.polarity.v1" }
+        { source_id: "lineage-z", producer: "support.polarity.receipt.v1" }
       ]]
     ]);
     expect(forward.proposition_observations).toEqual(reverse.proposition_observations);

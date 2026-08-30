@@ -1,7 +1,7 @@
 import { createFourValuedWitness, type FourValuedPolarity, type FourValuedWitness } from
   "../../witness/index.js";
 import { compareText } from "../../../../shared/compare-text.js";
-import type { SupportDraft } from "./draft.js";
+import type { CandidatePolarityVotes, PolarityVotes, SupportDraft } from "./draft.js";
 import { addEdge, addGap, addNode, supersedeLineage, vote } from "./draft.js";
 import { admitRelationalReceipt } from "./path-temporal.js";
 import type {
@@ -37,7 +37,7 @@ export function polaritiesFromDraft(
         snapshot_digest: snapshot,
         proposition_id: propositionId
       },
-      provenance: [{ source_id: "support.adapter", producer: "support.polarity.v1" }],
+      provenance: polarityProvenance(votes),
       epistemic: polarity === "both" ? { kind: "conflict" } : { kind: "exact" },
       payload: { polarity }
     }));
@@ -68,7 +68,7 @@ export function candidatePropositionObservationsFromDraft(
           candidate_id: row.candidateId,
           proposition_id: row.propositionId
         },
-        provenance: [{ source_id: "support.adapter", producer: "support.polarity.v1" }],
+        provenance: observationProvenance(row),
         epistemic: polarity === "both" ? { kind: "conflict" } : { kind: "exact" },
         payload: { polarity }
       })
@@ -211,6 +211,31 @@ function emitSupersedesOrGap(
 
 function hasPropositionPair(value: SupportSupersessionValueV1): boolean {
   return value.proposition_id !== undefined && value.counterpart_proposition_id !== undefined;
+}
+
+function observationProvenance(
+  row: CandidatePolarityVotes
+): FourValuedWitness["provenance"] {
+  if (row.provenance.length > 0) {
+    return Object.freeze([...row.provenance].sort((left, right) =>
+      compareText(left.source_id, right.source_id) ||
+      compareText(left.producer, right.producer)));
+  }
+  return polarityProvenance(row.votes);
+}
+
+function polarityProvenance(
+  votes: PolarityVotes
+): FourValuedWitness["provenance"] {
+  const lineages = [...new Set([...votes.support, ...votes.refute, ...votes.superseded])]
+    .sort(compareText);
+  if (lineages.length === 0) {
+    return Object.freeze([{ source_id: "support.proposition", producer: "support.osf.grounds.v1" }]);
+  }
+  return Object.freeze(lineages.map((source_id) => Object.freeze({
+    source_id,
+    producer: "support.polarity.receipt.v1" as const
+  })));
 }
 
 function polarityOf(

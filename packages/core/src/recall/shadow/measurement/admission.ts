@@ -38,6 +38,7 @@ import {
   assertLexicalMeasurementSourceObservation,
   bindLexicalMeasurementAuthoritySource,
   lexicalCoordinateMatchesSourceBinding,
+  lexicalSourceContext,
   type LexicalMeasurementCoordinateContextV1,
   type LexicalMeasurementSourceContextV1,
   type VerifiedLexicalSourceBinding
@@ -137,7 +138,7 @@ const PREDECLARED_CONTRACTS = new Set<MeasurementGroupContractV1>([
 const VERIFIED_AUTHORITIES = new WeakSet<object>();
 const ISSUED_ADMISSIONS = new WeakSet<object>();
 const ADMISSION_AUTHORITIES = new WeakMap<object, VerifiedMeasurementAuthorityV1>();
-const ADMISSION_SOURCE_BINDINGS = new WeakMap<object, VerifiedLexicalSourceBinding>();
+const ADMISSION_SOURCE_BINDINGS = new WeakMap<object, VerifiedLexicalSourceBinding | { readonly digest: RecallFieldDigest }>();
 
 export function verifyLexicalMeasurementPreparedAuthorityV1(input: Readonly<{
   readonly evidence: LexicalMeasurementAuthorityEvidenceV1;
@@ -227,8 +228,7 @@ export function issueMeasurementGroupAdmission(input: Readonly<{
   assertAuthorityPins(input.authority, identity);
   const sourceBinding = assertLexicalMeasurementSourceObservation(
     input.authority, input.contract, collapse, input.lexical_source
-  );
-  assertSupportMeasurementSourceObservation(input.authority, input.contract);
+  ) ?? assertSupportMeasurementSourceObservation(input.authority, input.contract);
   const body = admissionBody(
     input.authority,
     input.contract,
@@ -275,14 +275,13 @@ export function validateMeasurementAdmissionV1(input: Readonly<{
     }
     const binding = ADMISSION_SOURCE_BINDINGS.get(input.admission) ?? null;
     assertLexicalMeasurementSourceObservation(
-      authority, input.contract, collapse, binding?.source_context
-    );
+      authority, input.contract, collapse, lexicalSourceContext(binding));
     assertSupportMeasurementSourceObservation(authority, input.contract);
     if (!lexicalCoordinateMatchesSourceBinding(binding, input.lexical_source)) {
       return blocked("lexical coordinate is not bound to the issued source envelope");
     }
     if ((binding?.digest ?? null) !== input.admission.source_binding_digest) {
-      return blocked("lexical source binding digest mismatch");
+      return blocked("source binding digest mismatch");
     }
     if (input.proposition_schema !== input.contract.proposition_schema ||
       !admissionMatches(input.admission, input.contract, identity, collapse)) {

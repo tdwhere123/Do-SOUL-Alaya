@@ -122,11 +122,17 @@ export function assertLexicalMeasurementSourceObservation(
   });
 }
 
+export function lexicalSourceContext(
+  binding: VerifiedLexicalSourceBinding | { readonly digest: RecallFieldDigest } | null
+): LexicalMeasurementSourceContextV1 | undefined {
+  return binding !== null && "source_context" in binding ? binding.source_context : undefined;
+}
+
 export function lexicalCoordinateMatchesSourceBinding(
-  binding: VerifiedLexicalSourceBinding | null,
+  binding: VerifiedLexicalSourceBinding | { readonly digest: RecallFieldDigest } | null,
   context: LexicalMeasurementCoordinateContextV1 | undefined
 ): boolean {
-  if (binding === null) return context === undefined;
+  if (binding === null || !("lex_domain" in binding)) return context === undefined;
   return context !== undefined && context.lex_domain !== null &&
     context.envelope_identity !== null &&
     lexDomainsEqual(binding.lex_domain, context.lex_domain) &&
