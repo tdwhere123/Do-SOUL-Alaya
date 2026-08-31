@@ -142,6 +142,26 @@ export function obligationIdentity(key: ShadowObligationKey): string {
   return `${key.kind}\u0000${key.value}`;
 }
 
+export function emptySetUtilityInput(
+  candidateKey: string,
+  objectKey: string
+): ShadowSetUtilityInput {
+  return parseSetUtilityInput({
+    schema_version: 1,
+    candidate_key: candidateKey,
+    object_key: objectKey,
+    obligations: [],
+    matches: [],
+    values: { status: "no_match", values: [] },
+    cid: { status: "unavailable" },
+    availability: {
+      facility: "not_applicable",
+      values: "no_match",
+      evidence_identity: "unavailable"
+    }
+  });
+}
+
 export function parseSetUtilityInput(input: unknown): ShadowSetUtilityInput {
   if (!isShadowRecord(input)) {
     throw new ShadowContractError("set-utility input must be an object");

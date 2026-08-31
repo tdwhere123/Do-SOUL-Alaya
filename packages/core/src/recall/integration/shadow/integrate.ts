@@ -12,10 +12,14 @@ import type {
   TokenEstimator
 } from "../../runtime/recall-service-types.js";
 import {
-  parseSetUtilityInput,
+  emptySetUtilityInput,
   type ShadowGStatus,
   type ShadowSetUtilityInput
 } from "../../decision/prefix-capture/capture.js";
+import {
+  previewSidecar,
+  type QueryProofPreviewSidecar
+} from "./query-proof-preview.js";
 import { shadowLineageApplicability } from "../../decision/query-proof/demand.js";
 import { freezeShadow, ShadowContractError } from "../../decision/contract-primitives.js";
 import { isPsiCycleFailure, peelUndominated } from "../../decision/query-proof/frontier-peel.js";
@@ -55,7 +59,8 @@ import {
   prefixSK,
   walkShadowCapture,
   type ShadowCapturedWalk,
-  type ShadowCaptureWalkCandidate
+  type ShadowCaptureWalkCandidate,
+  type ShadowWalkUtilityTransfer
 } from "../../decision/prefix-capture/walk.js";
 import type { PsiQuery } from "../../decision/dominance-contract.js";
 
@@ -108,6 +113,9 @@ export type ShadowIntegrateInput = Readonly<{
   readonly psi_v2_producer_outcomes?: PsiV2ShadowInputV1["producer_outcomes"];
   readonly query_id?: string;
   readonly snapshot_digest?: string;
+  readonly query_proof_preview?: Readonly<{
+    readonly utility_transfer: ShadowWalkUtilityTransfer;
+  }>;
 }>;
 
 export type ShadowFailClosedTrace = Readonly<{
@@ -147,6 +155,7 @@ export type ShadowCapturedTrace = Readonly<{
   readonly unresolved_pointwise_tradeoff: boolean;
   readonly core_known_no_witness: readonly ShadowCoreKnownNoWitness[];
   readonly psi_v2_shadow: PsiV2ShadowSidecar;
+  readonly query_proof_preview?: QueryProofPreviewSidecar;
 }>;
 
 export type PsiV2ShadowSidecar = PsiV2ShadowDiagnosticsV1;
@@ -184,12 +193,11 @@ function runShadowIntegration(
   const psi = memoizeRequestPsi(input.psi ?? psiPredicate(observations, channels));
   const peeled = peelUndominated(eligible, psi);
   if (isPsiCycleFailure(peeled)) return failClosed("psi_cycle_contract_failure", activation);
-  const walked = walkShadowCapture(
-    buildWalkInput(input, keys, observations, peeled, psi, channels)
-  );
+  const walkInput = buildWalkInput(input, keys, observations, peeled, psi, channels);
+  const walked = walkShadowCapture(walkInput);
   if (!isCapturedWalk(walked)) return failClosed("psi_cycle_contract_failure", activation);
   if (!prefixMonotone(walked.S_infty)) return failClosed("prefix_violation", activation);
-  return assembleCaptured(input, eligible, peeled, walked, observations);
+  return assembleCaptured(input, eligible, peeled, walked, observations, walkInput);
 }
 
 export function memoizeRequestPsi(psi: PsiQuery): PsiQuery {
@@ -325,24 +333,7 @@ function utilityForCandidate(
   candidateKey: string,
   objectKey: string
 ): ShadowSetUtilityInput {
-  return input.utilitiesByKey?.get(candidateKey) ?? emptyUtility(candidateKey, objectKey);
-}
-
-function emptyUtility(candidateKey: string, objectKey: string): ShadowSetUtilityInput {
-  return parseSetUtilityInput({
-    schema_version: 1,
-    candidate_key: candidateKey,
-    object_key: objectKey,
-    obligations: [],
-    matches: [],
-    values: { status: "no_match", values: [] },
-    cid: { status: "unavailable" },
-    availability: {
-      facility: "not_applicable",
-      values: "no_match",
-      evidence_identity: "unavailable"
-    }
-  });
+  return input.utilitiesByKey?.get(candidateKey) ?? emptySetUtilityInput(candidateKey, objectKey);
 }
 
 function frontierIndexByKey(
@@ -379,7 +370,8 @@ function assembleCaptured(
   eligible: readonly string[],
   frontiers: ShadowFrontierReceipt,
   walked: ShadowCapturedWalk,
-  observations: ShadowPsiObservationField
+  observations: ShadowPsiObservationField,
+  walkInput: Parameters<typeof walkShadowCapture>[0]
 ): ShadowCapturedTrace {
   const k = input.policy.fine_assessment.budgets.max_entries;
   const first = walked.decisions[0];
@@ -423,7 +415,8 @@ function assembleCaptured(
     core_known_no_witness: Object.freeze(
       walked.decisions.flatMap((decision) => [...decision.novelty_core_known_absence])
     ),
-    psi_v2_shadow: observePsiV2Shadow(input)
+    psi_v2_shadow: observePsiV2Shadow(input),
+    ...previewSidecar(input.query_proof_preview, walkInput)
   });
 }
 

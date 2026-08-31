@@ -14,6 +14,18 @@ import type {
   ShadowGStatus
 } from "./capture.js";
 
+export const COMPILED_GAMMA_KEYS = [
+  "answer_binding_position",
+  "required_proposition_support",
+  "certified_independent_support"
+] as const;
+
+export type QueryCompiledWalkGamma = Readonly<{
+  readonly answer_binding_position: number;
+  readonly required_proposition_support: number;
+  readonly certified_independent_support: number;
+}>;
+
 export type ShadowEqualGReject = Readonly<{
   readonly candidate_key: string;
   readonly dominated_by: string;
@@ -34,13 +46,14 @@ export type ShadowNamedNovelty = Readonly<{
   readonly facility_keys: readonly string[];
   readonly value_pairs: readonly string[];
   readonly content_ids: readonly string[];
+  readonly compiled_atom_ids?: readonly string[];
 }>;
 
 export type ShadowCaptureDecisionReceipt = Readonly<{
   readonly schema_version: 1;
   readonly candidate_key: string;
   readonly capture_reason: ShadowCaptureReason;
-  readonly G: ShadowGammaTuple;
+  readonly G: ShadowGammaTuple | QueryCompiledWalkGamma;
   readonly G_status: ShadowGStatus;
   readonly named_novelty: ShadowNamedNovelty;
   readonly novelty_core_known_absence: readonly ShadowCoreKnownNoWitness[];
@@ -147,12 +160,15 @@ function freezeCaptureDecision(
   });
 }
 
-function parseGammaTuple(input: unknown): ShadowGammaTuple {
+function parseGammaTuple(input: unknown): ShadowGammaTuple | QueryCompiledWalkGamma {
   if (!isShadowRecord(input)) {
     throw new ShadowContractError("G must be an object");
   }
   if ("FrontierPriority" in input || "frontier_priority" in input) {
     throw new ShadowContractError("FrontierPriority is not a Gamma field");
+  }
+  if (COMPILED_GAMMA_KEYS.every((key) => key in input)) {
+    return parseCompiledGammaTuple(input);
   }
   assertAllowedKeys(input, [
     "unscaled_remainder", "Values_v", "evidence_novelty_redundancy"
@@ -169,6 +185,26 @@ function parseGammaTuple(input: unknown): ShadowGammaTuple {
     Values_v: values,
     evidence_novelty_redundancy: input.evidence_novelty_redundancy
   });
+}
+
+function parseCompiledGammaTuple(input: Record<string, unknown>): QueryCompiledWalkGamma {
+  if ("unscaled_remainder" in input || "Values_v" in input ||
+      "evidence_novelty_redundancy" in input) {
+    throw new ShadowContractError("compiled Gamma cannot mix live facility fields");
+  }
+  assertAllowedKeys(input, [...COMPILED_GAMMA_KEYS]);
+  const tuple = freezeShadow({
+    answer_binding_position: requireInteger(input.answer_binding_position,
+      "answer_binding_position"),
+    required_proposition_support: requireInteger(input.required_proposition_support,
+      "required_proposition_support"),
+    certified_independent_support: requireInteger(input.certified_independent_support,
+      "certified_independent_support")
+  });
+  if (COMPILED_GAMMA_KEYS.some((key) => tuple[key] < 0)) {
+    throw new ShadowContractError("invalid compiled Gamma tuple");
+  }
+  return tuple;
 }
 
 function parseDecisionGStatus(input: unknown): ShadowGStatus {
@@ -195,14 +231,25 @@ function parseNamedNovelty(
   if (!isShadowRecord(input)) {
     throw new ShadowContractError("named_novelty must be an object");
   }
-  assertAllowedKeys(input, ["facility_keys", "value_pairs", "content_ids"]);
+  assertAllowedKeys(input, [
+    "facility_keys", "value_pairs", "content_ids", "compiled_atom_ids"
+  ]);
+  const compiled = input.compiled_atom_ids === undefined
+    ? undefined
+    : Object.freeze(requireStringList(input.compiled_atom_ids, "compiled_atom_ids"));
   const novelty = freezeShadow({
     facility_keys: Object.freeze(requireStringList(input.facility_keys, "facility_keys")),
     value_pairs: Object.freeze(requireStringList(input.value_pairs, "value_pairs")),
-    content_ids: Object.freeze(requireStringList(input.content_ids, "content_ids"))
+    content_ids: Object.freeze(requireStringList(input.content_ids, "content_ids")),
+    ...(compiled === undefined ? {} : { compiled_atom_ids: compiled })
   });
-  const named = novelty.facility_keys.length + novelty.value_pairs.length +
+  const liveNamed = novelty.facility_keys.length + novelty.value_pairs.length +
     novelty.content_ids.length;
+  const compiledNamed = compiled?.length ?? 0;
+  if (liveNamed > 0 && compiledNamed > 0) {
+    throw new ShadowContractError("live novelty and compiled atoms cannot mix");
+  }
+  const named = liveNamed + compiledNamed;
   if (reason === "cross_frontier_novelty" && named === 0) {
     throw new ShadowContractError("cross-frontier capture must name novelty");
   }
