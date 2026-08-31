@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PathRelationSchema, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
+import { PathRelationSchema, getPathAnchorBackingObjectId, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
 import {
   PathRelationProposalService,
   CO_RECALLED_SEED_PROFILE,
@@ -52,8 +52,8 @@ describe("PathRelationProposalService", () => {
     const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.workspace_id).toBe("workspace-1");
     const anchorIds = [
-      written.anchors.source_anchor.object_id,
-      written.anchors.target_anchor.object_id
+      getPathAnchorBackingObjectId(written.anchors.source_anchor),
+      getPathAnchorBackingObjectId(written.anchors.target_anchor)
     ].sort();
     expect(anchorIds).toEqual(["mem-A", "mem-B"]);
     expect(() => PathRelationSchema.parse(written)).not.toThrow();

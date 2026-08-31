@@ -4,8 +4,14 @@ import { vi, type Mock } from "vitest";
 import {
   EvidenceService,
   type EvidenceCapsuleInput,
-  type EvidenceServiceDependencies
+  type EvidenceServiceDependencies,
+  type EvidenceServiceEvidenceCapsuleRepoPort
 } from "../../memory/evidence-service.js";
+
+type PersistCapsule = NonNullable<
+  EvidenceServiceEvidenceCapsuleRepoPort["createInCurrentTransaction"]
+>;
+type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export function createEvidenceInput(
   overrides: Partial<EvidenceCapsuleInput> = {}
@@ -76,14 +82,18 @@ export function createCreationHarness(
   } = {}
 ) {
   const store = new Map<string, EvidenceCapsule>();
-  const create = vi.fn((capsule: EvidenceCapsule) => {
+  const persistCapsule = vi.fn<PersistCapsule>((
+    capsule,
+    _searchProjections,
+    _factFrameFormation,
+    _semanticFactorFormation,
+    _semanticCompleteness
+  ) => {
     const frozen = Object.freeze({ ...capsule });
     store.set(capsule.object_id, frozen);
     return frozen;
   });
-  const append = vi.fn((
-    event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
-  ) => ({
+  const append = vi.fn((event: EventLogDraft): EventLogEntry => ({
     ...event,
     event_id: "event-create",
     created_at: "2026-03-20T01:00:00.000Z",
@@ -96,9 +106,21 @@ export function createCreationHarness(
     eventLogRepo: { append, transactional: <T>(fn: () => T) => fn() },
     ...serviceDependencies,
     evidenceCapsuleRepo: {
-      create,
-      createInCurrentTransaction: create,
-      deleteById: deleteById ?? vi.fn(),
+      create: vi.fn(async (
+        capsule,
+        searchProjections,
+        factFrameFormation,
+        semanticFactorFormation,
+        semanticCompleteness
+      ) => persistCapsule(
+        capsule,
+        searchProjections,
+        factFrameFormation,
+        semanticFactorFormation,
+        semanticCompleteness
+      )),
+      createInCurrentTransaction: persistCapsule,
+      deleteById: deleteById ?? vi.fn(async (_objectId: string) => {}),
       findById: vi.fn(async (objectId: string) => store.get(objectId) ?? null),
       findByRunId: vi.fn(async () => []),
       findByWorkspaceId: vi.fn(async () => []),
@@ -110,7 +132,7 @@ export function createCreationHarness(
         throw new Error("not used");
       })
     },
-    runtimeNotifier: { notifyEntry: vi.fn() }
+    runtimeNotifier: { notifyEntry: vi.fn(async (_entry: EventLogEntry) => {}) }
   });
-  return { service, create, append };
+  return { service, create: persistCapsule, append };
 }

@@ -1,7 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
 import { SignalService } from "../../memory/signal-service.js";
-
+import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { atomicUpdateState, createSignal, signalServiceDependencies } from "./signal-service.test-support.js";
+
+function typedAtomicUpdateState(
+  impl?: (
+    signalId: string,
+    state: CandidateMemorySignal["signal_state"]
+  ) => CandidateMemorySignal
+) {
+  const atomic = atomicUpdateState(impl);
+  return {
+    updateState: vi.fn(
+      async (
+        signalId: string,
+        state: CandidateMemorySignal["signal_state"]
+      ): Promise<CandidateMemorySignal> => atomic.updateState(signalId, state)
+    ),
+    updateStateInCurrentTransaction: atomic.updateStateInCurrentTransaction
+  };
+}
 
 describe("SignalService", () => {
 it("marks the signal failed when post-triage materializer throws", async () => {
@@ -21,7 +39,7 @@ it("marks the signal failed when post-triage materializer throws", async () => {
         create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
         getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => []),
-        ...atomicUpdateState()
+        ...typedAtomicUpdateState()
       },
       runtimeNotifier: {
         notifyEntry: vi.fn(async () => {})
@@ -60,10 +78,10 @@ it("lists persisted signals for a run", async () => {
         queryByEntity: vi.fn()
       },
       signalRepo: {
-        create: vi.fn(),
-        getById: vi.fn(),
+        create: vi.fn(async (signal: CandidateMemorySignal) => signal),
+        getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => [createSignal(), createSignal({ signal_id: "signal-2" })]),
-        updateState: vi.fn()
+        ...typedAtomicUpdateState()
       }
     }));
 
@@ -99,7 +117,7 @@ it("emits a corrective soul.signal.triaged deferred event after materialization 
         create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
         getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => []),
-        ...atomicUpdateState()
+        ...typedAtomicUpdateState()
       },
       runtimeNotifier: {
         notifyEntry: vi.fn(async (entry) => {

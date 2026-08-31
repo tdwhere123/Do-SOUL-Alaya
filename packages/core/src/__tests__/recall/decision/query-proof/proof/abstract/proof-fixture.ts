@@ -92,7 +92,7 @@ export function identityCoordinate(universe: "finite" | "open"): AbstractCoordin
     owner_id: "owner:identity-tail",
     kind: "identity_tie" as const,
     universe,
-    possible_winner_digests: [`sha256:${"1".repeat(64)}`]
+    possible_winner_digests: [`sha256:${"1".repeat(64)}` as `sha256:${string}`]
   });
 }
 

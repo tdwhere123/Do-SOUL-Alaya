@@ -135,7 +135,11 @@ describe("proposition Psi v2", () => {
       const left = sourceCandidate("a", authority, source);
       const right = sourceCandidate("b", authority, source);
       const coordinate = left.coordinates[0]!;
-      if (coordinate.collapse.status !== "collapsed") throw new Error("collapse expected");
+      const collapse = coordinate.collapse;
+      if (collapse.status !== "collapsed") throw new Error("collapse expected");
+      if (collapse.witness.domain !== "numeric_interval") {
+        throw new Error("numeric collapse expected");
+      }
       const admission = coordinate.admission!;
       const mutations: PsiV2CandidateV1[] = [
         { ...left, candidate_id: "other-candidate" },
@@ -148,13 +152,17 @@ describe("proposition Psi v2", () => {
           ...admission, query_id: "other-query"
         } }]),
         candidate("a", [{ ...coordinate, collapse: {
-          ...coordinate.collapse,
+          status: "collapsed" as const,
+          contract: collapse.contract,
           witness: {
-            ...coordinate.collapse.witness,
+            domain: "numeric_interval" as const,
             identity: {
-              ...coordinate.collapse.witness.identity,
+              ...collapse.witness.identity,
               candidate_id: "other-candidate"
-            }
+            },
+            provenance: collapse.witness.provenance,
+            epistemic: collapse.witness.epistemic,
+            payload: collapse.witness.payload
           }
         } }])
       ];

@@ -65,11 +65,14 @@ describe("support adapter ordering", () => {
     const reverse = materializePolarity([propositionA, supersedeZ, propositionZ]);
 
     expect(forward.polarities).toEqual(reverse.polarities);
-    expect(forward.polarities.map((witness) => [
-      witness.identity.proposition_id,
-      witness.payload.polarity,
-      witness.provenance
-    ])).toEqual([
+    expect(forward.polarities.map((witness) => {
+      if (witness.payload === null) throw new Error("expected polarity payload");
+      return [
+        witness.identity.proposition_id,
+        witness.payload.polarity,
+        witness.provenance
+      ];
+    })).toEqual([
       ["prop.a", "supported_only", [
         { source_id: "lineage-a", producer: "support.polarity.receipt.v1" }
       ]],

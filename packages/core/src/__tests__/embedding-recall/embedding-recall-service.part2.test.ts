@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { HealthEventKind, ComputeRecallGardenEventType, type EventLogEntry, type HealthJournalRecordInput } from "@do-soul/alaya-protocol";
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
-import { type EmbeddingRecallAppendSpy, createEmbeddingRecord, createMemoryEntry, createProvider, hashMemoryContent } from "./embedding-recall-test-helpers.js";
+import { type EmbeddingRecallAppendSpy, createEmbeddingRecord, createMemoryEntry, createProvider, hashMemoryContent, mockEmbedTexts } from "./embedding-recall-test-helpers.js";
 
 describe("EmbeddingRecallService", () => {
 it("records degraded fallback when the prepared query embedding is not ready by merge time", async () => {
@@ -25,7 +25,7 @@ it("records degraded fallback when the prepared query embedding is not ready by 
         ])
       },
       provider: createProvider({
-        embedTexts: vi.fn(async () => await new Promise<readonly Float32Array[]>(() => undefined))
+        embedTexts: mockEmbedTexts(async () => await new Promise<readonly Float32Array[]>(() => undefined))
       }),
       eventLogRepo: {
         append: appendSpy,
@@ -212,7 +212,7 @@ it("degrades to keyword-only recall when query embedding generation fails", asyn
         ])
       },
       provider: createProvider({
-        embedTexts: vi.fn(async () => {
+        embedTexts: mockEmbedTexts(async () => {
           throw new Error("network timeout");
         })
       }),
@@ -296,7 +296,7 @@ it("keeps successful supplement recall on the lexical path when queried/merged t
         ])
       },
       provider: createProvider({
-        embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
+        embedTexts: mockEmbedTexts(async () => [new Float32Array([0, 1])])
       }),
       eventLogRepo: {
         append: appendSpy,

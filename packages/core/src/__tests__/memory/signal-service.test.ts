@@ -2,8 +2,25 @@ import { describe, expect, it, vi } from "vitest";
 import { SignalService } from "../../memory/signal-service.js";
 import { buildSignalEmittedEventInput } from "../../memory/signal-service-helpers.js";
 import type { CandidateMemorySignal, EventLogEntry } from "@do-soul/alaya-protocol";
-
 import { atomicUpdateState, createSignal, signalServiceDependencies } from "./signal-service.test-support.js";
+
+function typedAtomicUpdateState(
+  impl?: (
+    signalId: string,
+    state: CandidateMemorySignal["signal_state"]
+  ) => CandidateMemorySignal
+) {
+  const atomic = atomicUpdateState(impl);
+  return {
+    updateState: vi.fn(
+      async (
+        signalId: string,
+        state: CandidateMemorySignal["signal_state"]
+      ): Promise<CandidateMemorySignal> => atomic.updateState(signalId, state)
+    ),
+    updateStateInCurrentTransaction: atomic.updateStateInCurrentTransaction
+  };
+}
 
 describe("SignalService", () => {
 it("writes emitted/triaged events in order and moves accepted signals to triaged", async () => {
@@ -37,7 +54,7 @@ it("writes emitted/triaged events in order and moves accepted signals to triaged
         }),
         getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => []),
-        ...atomicUpdateState((signalId, state) => {
+        ...typedAtomicUpdateState((signalId, state) => {
           order.push(`repo:update:${state}`);
           return createSignal({ signal_id: signalId, signal_state: state });
         })
@@ -82,7 +99,7 @@ it("redacts emitted EventLog raw_payload while preserving the stored signal payl
       })),
       getById: vi.fn(async () => null),
       listByRun: vi.fn(async () => []),
-      ...atomicUpdateState()
+      ...typedAtomicUpdateState()
     };
     const service = new SignalService({
       eventLogRepo: {
@@ -169,7 +186,7 @@ it("threads source delivery anchors into the emitted EventLog payload", async ()
         create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
         getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => []),
-        ...atomicUpdateState()
+        ...typedAtomicUpdateState()
       },
       runtimeNotifier: {
         notifyEntry: vi.fn(async () => {})
@@ -208,7 +225,7 @@ it("threads first-class graph refs into the emitted EventLog payload", async () 
         create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
         getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => []),
-        ...atomicUpdateState()
+        ...typedAtomicUpdateState()
       },
       runtimeNotifier: {
         notifyEntry: vi.fn(async () => {})
@@ -252,7 +269,7 @@ it("resumes an existing emitted signal through triage and materialization", asyn
       create: vi.fn(async (signal: CandidateMemorySignal) => ({ ...signal, signal_state: "emitted" as const })),
       getById: vi.fn(async () => existingSignal),
       listByRun: vi.fn(async () => []),
-      ...atomicUpdateState((signalId, state) => {
+      ...typedAtomicUpdateState((signalId, state) => {
         stateUpdates.push(state);
         return createSignal({ signal_id: signalId, signal_state: state });
       })
@@ -310,10 +327,10 @@ it("does not replay materialization side effects for post-triage signal states",
       const warn = vi.fn();
       const service = new SignalService(signalServiceDependencies({
         signalRepo: {
-          create: vi.fn(),
+          create: vi.fn(async (signal: CandidateMemorySignal) => signal),
           getById: vi.fn(async () => createSignal({ signal_state: state })),
           listByRun: vi.fn(async () => []),
-          updateState: vi.fn()
+          ...typedAtomicUpdateState()
         },
         postTriageMaterializer: {
           materialize
@@ -341,12 +358,12 @@ it("does not replay materialization side effects for post-triage signal states",
 it("rejects an idempotent replay whose candidate content changed", async () => {
     const service = new SignalService(signalServiceDependencies({
       signalRepo: {
-        create: vi.fn(),
+        create: vi.fn(async (signal: CandidateMemorySignal) => signal),
         getById: vi.fn(async () => createSignal({
           raw_payload: { excerpt: "original signal" }
         })),
         listByRun: vi.fn(async () => []),
-        updateState: vi.fn()
+        ...typedAtomicUpdateState()
       }
     }));
 
@@ -373,7 +390,7 @@ it("defers low-confidence potential_conflict signals", async () => {
         create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
         getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => []),
-        ...atomicUpdateState()
+        ...typedAtomicUpdateState()
       },
       runtimeNotifier: {
         notifyEntry: vi.fn(async () => {})
@@ -416,7 +433,7 @@ it("defers invalid schema-grounded signals before materialization can write memo
         create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
         getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => []),
-        ...atomicUpdateState()
+        ...typedAtomicUpdateState()
       },
       runtimeNotifier: {
         notifyEntry: vi.fn(async () => {})
@@ -460,7 +477,7 @@ it("materializes accepted signals when post-triage materializer succeeds", async
         create: vi.fn(async (signal) => ({ ...signal, signal_state: "emitted" })),
         getById: vi.fn(async () => null),
         listByRun: vi.fn(async () => []),
-        ...atomicUpdateState()
+        ...typedAtomicUpdateState()
       },
       runtimeNotifier: {
         notifyEntry: vi.fn(async () => {})

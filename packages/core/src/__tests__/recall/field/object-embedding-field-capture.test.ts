@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildObjectEmbeddingFieldCaptures } from
   "../../../recall/field/object-embedding-field-capture.js";
 import {
@@ -27,7 +27,7 @@ describe("object embedding field capture query skip", () => {
       queryText: "query",
       poolMemories: [memory],
       maxNeighbors: 4,
-      provider: createProvider({ embedTexts: vi.fn() }),
+      provider: createProvider(),
       queryStatus: "provider_returned",
       queryEmbedding: null,
       scan,
@@ -43,7 +43,7 @@ describe("object embedding field capture query skip", () => {
       queryText: "query",
       poolMemories: [memory],
       maxNeighbors: 4,
-      provider: createProvider({ embedTexts: vi.fn() }),
+      provider: createProvider(),
       queryStatus: "query_embedding_unusable",
       queryEmbedding: null,
       scan,

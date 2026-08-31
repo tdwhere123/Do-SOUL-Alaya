@@ -12,6 +12,9 @@ import {
   createTaskSurface,
   overridePolicy
 } from "./recall-service-test-fixtures.js";
+import {
+  requireLiveCandidateDiagnostics
+} from "./fine-assessment-selection-fixtures.js";
 
 // Synthesis-router delivery via the public RecallService.recall() surface
 // (result.candidates + result.diagnostics).
@@ -124,7 +127,7 @@ describe("synthesis router disables direct capsule delivery", () => {
     const result = await runSynthesisRecall(service, 5);
     const deliveredIds = result.candidates.slice(0, 5).map((candidate) => candidate.object_id);
     expect(deliveredIds).not.toContain("syn-cov");
-    const reservedSynthesis = (result.diagnostics?.candidates ?? []).filter(
+    const reservedSynthesis = (requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? [])).filter(
       (candidate) => candidate.reserved_by === "synthesis"
     );
     expect(reservedSynthesis).toHaveLength(0);
@@ -153,7 +156,7 @@ describe("synthesis router disables direct capsule delivery", () => {
     const result = await runSynthesisRecall(service, 5);
     const deliveredIds = result.candidates.slice(0, 5).map((candidate) => candidate.object_id);
     expect(deliveredIds).not.toContain("syn-uncov");
-    const capsuleDiagnostic = result.diagnostics?.candidates.find(
+    const capsuleDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
       (candidate) => candidate.object_id === "syn-uncov"
     );
     expect(capsuleDiagnostic).toBeUndefined();

@@ -22,7 +22,12 @@ const SNAPSHOT = Object.freeze({
   receipt_digest: `sha256:${"c".repeat(64)}`,
   coherence_state: "coherent_exact" as const
 });
-const QUERY_IDENTITY = Object.freeze({
+const QUERY_IDENTITY: {
+  readonly condition_identity: "cond-1";
+  readonly query_operator_id: "recall_query_v1";
+  readonly generation_id: "gen-1";
+  readonly query_cache_key: string;
+} = Object.freeze({
   condition_identity: "cond-1",
   query_operator_id: "recall_query_v1",
   generation_id: "gen-1",

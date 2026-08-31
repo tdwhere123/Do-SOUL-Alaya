@@ -86,7 +86,7 @@ function facUtility(
     return [{
       obligation: { kind: "entity" as const, value },
       raw_atom_id: `typed:${value}`,
-      attribution_kind: "typed_query_atom" as const,
+      attribution_kind: "typed_query_atom" as "typed_query_atom" | "typed_fact_frame",
       match_strength: strength
     }];
   }).concat((opts.extraMatches ?? []).map((extra) => ({

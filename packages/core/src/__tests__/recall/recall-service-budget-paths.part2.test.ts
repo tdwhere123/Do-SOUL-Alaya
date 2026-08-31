@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { type PathAnchorRef, type PathRelation } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import {
+  requireLiveCandidateDiagnostics
+} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService", () => {
 it("caps stacked recall_allowed negative-path receipts", async () => {
@@ -81,7 +84,7 @@ it("caps stacked recall_allowed negative-path receipts", async () => {
         policyOverride: policy,
       diagnosticCapture: "answer_features"
     });
-      const victim = result.diagnostics?.candidates.find((c) => c.object_id === "victim-target");
+      const victim = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((c) => c.object_id === "victim-target");
       expect(victim).toBeDefined();
       return {
         delivered: result.candidates.some((candidate) => candidate.object_id === "victim-target"),
@@ -159,7 +162,7 @@ it("keeps a low-base candidate on R_obj while exposing suppression", async () =>
         policyOverride: policy,
       diagnosticCapture: "answer_features"
     });
-      const victim = result.diagnostics?.candidates.find((c) => c.object_id === "low-base-victim");
+      const victim = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((c) => c.object_id === "low-base-victim");
       return {
         fusedScore: victim?.fused_score ?? -1,
         present: victim !== undefined,
@@ -241,7 +244,7 @@ it("does not let a weak attention_only negative path move rankings", async () =>
         policyOverride: policy,
       diagnosticCapture: "answer_features"
     });
-      const target = result.diagnostics?.candidates.find((c) => c.object_id === "weak-target");
+      const target = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((c) => c.object_id === "weak-target");
       expect(target).toBeDefined();
       return target?.fused_score ?? -1;
     };

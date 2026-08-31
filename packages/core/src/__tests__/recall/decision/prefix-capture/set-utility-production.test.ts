@@ -14,6 +14,12 @@ import type {
   RecallSupplementaryData
 } from "../../../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "../../recall-service-test-fixtures.js";
+import {
+  OPEN_SEMANTIC_FACTOR_COMPOSITION_OPERATOR_ID,
+  type OpenSemanticFactorCompositionReceipt,
+  type OpenSemanticFactorVariableCollection
+} from "../../../../recall/field/open-semantic-factors/composition.js";
+import type { RecallFieldDigest } from "../../../../recall/field/field-identity.js";
 
 describe("production capture set utility states", () => {
   it("keeps unobserved producer absence unknown and unavailable", () => {
@@ -55,8 +61,7 @@ describe("production capture set utility states", () => {
   it("distinguishes composed no-match from unavailable and correlates aliases", () => {
     const a = candidate("candidate-a", ["evidence-a"], "Equivalent evidence");
     const b = candidate("candidate-b", ["evidence-b"], "Equivalent evidence");
-    const data = supplementary({
-      status: "composed",
+    const data = supplementary(osfComposition({
       truncated: false,
       variable_collections: [{
         variable_id: "answer",
@@ -68,7 +73,7 @@ describe("production capture set utility states", () => {
           evidence_ids: ["evidence-other"]
         }]
       }]
-    });
+    }));
     const utilities = buildProductionSetUtilities({ candidates: [a, b], supplementaryData: data });
     const rows = [...utilities.values()];
 
@@ -106,9 +111,9 @@ describe("production capture set utility states", () => {
   });
 
   it("keeps truncated Values unknown and neutral", () => {
-    const utility = onlyUtility(candidate("candidate-a", ["evidence-a"]), supplementary({
-      status: "composed", truncated: true, variable_collections: []
-    }));
+    const utility = onlyUtility(candidate("candidate-a", ["evidence-a"]), supplementary(
+      osfComposition({ truncated: true, variable_collections: [] })
+    ));
     expect(utility.values).toEqual({ status: "truncated", values: [] });
   });
 
@@ -167,7 +172,7 @@ function candidate(
 }
 
 function supplementary(
-  composition?: RecallSupplementaryData["openSemanticFactorComposition"],
+  composition?: OpenSemanticFactorCompositionReceipt,
   activations: RecallSupplementaryData["evidenceSemanticActivationsByCandidateKey"] = new Map()
 ): RecallSupplementaryData {
   const probes = compileRecallQueryProbes("where does the operator work?");
@@ -183,4 +188,31 @@ function supplementary(
     governanceCeilingByMemoryId: {},
     ...(composition === undefined ? {} : { openSemanticFactorComposition: composition })
   };
+}
+
+const OSF_DIGEST = `sha256:${"a".repeat(64)}` as RecallFieldDigest;
+
+function osfComposition(input: Readonly<{
+  readonly truncated: boolean;
+  readonly variable_collections: readonly OpenSemanticFactorVariableCollection[];
+}>): OpenSemanticFactorCompositionReceipt {
+  return Object.freeze({
+    schema_version: 2,
+    operator_id: OPEN_SEMANTIC_FACTOR_COMPOSITION_OPERATOR_ID,
+    status: "composed",
+    compatibility_trace_digest: OSF_DIGEST,
+    query_capture_digest: OSF_DIGEST,
+    result_variable_ids: Object.freeze(
+      input.variable_collections.map((row) => row.variable_id)
+    ),
+    search_step_count: 1,
+    solution_count: 0,
+    observed_binding_count: 0,
+    binding_observation_count: 0,
+    truncated: input.truncated,
+    bindings: Object.freeze([]),
+    solutions: Object.freeze([]),
+    variable_collections: Object.freeze([...input.variable_collections]),
+    receipt_digest: OSF_DIGEST
+  });
 }

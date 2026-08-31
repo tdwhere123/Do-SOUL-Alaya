@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceRunEventType, GreenGovernanceEventType, RunMessageAppendedPayloadSchema, type EventLogEntry } from "@do-soul/alaya-protocol";
-import { SessionOverrideService } from "../../governance/proposals/session-override-service.js";
-import type { TestMock } from "../shared/mock-types.js";
+import {
+  SessionOverrideService,
+  type SessionOverrideServiceEventLogPort
+} from "../../governance/proposals/session-override-service.js";
 import { requireAt } from "../helpers/defined.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
@@ -436,31 +438,28 @@ describe("SessionOverrideService", () => {
   });
 });
 
-function createEventLogRepo(overrides: Partial<{
-  append: TestMock;
-  queryByRunAndEntityType: TestMock;
-  getLatestUserRunMessageByRun: TestMock;
-}> = {}) {
+function createEventLogRepo(
+  overrides: Partial<SessionOverrideServiceEventLogPort> = {}
+): SessionOverrideServiceEventLogPort {
   const appendedEvents: EventLogEntry[] = [];
   const queryByRunAndEntityType =
     overrides.queryByRunAndEntityType ??
-    vi.fn(async (runId: string, entityType: string) =>
-      appendedEvents.filter((entry) => entry.run_id === runId && entry.entity_type === entityType)
-    );
+    (async (runId: string, entityType: string) =>
+      appendedEvents.filter((entry) => entry.run_id === runId && entry.entity_type === entityType));
 
   return {
     append:
       overrides.append ??
-      vi.fn(async (event) => {
+      (async (event) => {
         const entry = createEventLogEntry(event);
         appendedEvents.push(entry);
         return entry;
       }),
-    queryByEntity: vi.fn(async () => []),
+    queryByEntity: overrides.queryByEntity ?? (async () => []),
     queryByRunAndEntityType,
     getLatestUserRunMessageByRun:
       overrides.getLatestUserRunMessageByRun ??
-      vi.fn(async (runId: string) => {
+      (async (runId: string) => {
         for (let index = appendedEvents.length - 1; index >= 0; index -= 1) {
           const event = requireAt(appendedEvents, index);
           if (event.run_id !== runId || event.event_type !== WorkspaceRunEventType.RUN_MESSAGE_APPENDED) {

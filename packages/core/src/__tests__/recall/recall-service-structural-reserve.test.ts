@@ -5,6 +5,9 @@ import { createFieldBackedRecallService } from
   "./fixtures/keyword-field-fixture.js";
 import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import {
+  requireLiveCandidateDiagnostics
+} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService", () => {
 describe("fusion-only structural delivery", () => {
@@ -178,7 +181,7 @@ it("keeps buried path evidence without overriding the fused budget", async () =>
       const result = await runStructuralRecall(service, 5);
       const delivered = result.candidates;
 
-      const goldDiagnostic = result.diagnostics?.candidates.find(
+      const goldDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
         (candidate) => candidate.object_id === "memory-gold"
       );
       expect(goldDiagnostic?.admission_planes).toContain("path_expansion");
@@ -196,7 +199,7 @@ it("keeps buried path evidence without overriding the fused budget", async () =>
       expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
       expect(goldDiagnostic?.reserved_by).toBeUndefined();
       expect(delivered.length).toBeLessThanOrEqual(5);
-      const headDiagnostic = result.diagnostics?.candidates.find(
+      const headDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
         (candidate) => candidate.object_id === delivered[0]?.object_id
       );
       expect(headDiagnostic?.admission_planes).toContain("lexical");
@@ -225,7 +228,7 @@ it("delivers a structural candidate when fusion ranks it inside the budget", asy
 
       const result = await runStructuralRecall(service, 5);
       const delivered = result.candidates.map((candidate) => candidate.object_id);
-      const goldDiagnostic = result.diagnostics?.candidates.find(
+      const goldDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
         (candidate) => candidate.object_id === "memory-gold"
       );
 
@@ -245,7 +248,7 @@ it("keeps fusion delivery within maxEntries when source-less synthesis rows matc
       const delivered = result.candidates;
       const kinds = delivered.map((candidate) => candidate.object_kind);
       const diagnosticsById = new Map(
-        (result.diagnostics?.candidates ?? []).map((candidate) => [candidate.object_id, candidate])
+        (requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? [])).map((candidate) => [candidate.object_id, candidate])
       );
       const synthesisDelivered = delivered.filter(
         (candidate) => candidate.object_kind === "synthesis_capsule"

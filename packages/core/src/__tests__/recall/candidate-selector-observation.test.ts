@@ -13,7 +13,9 @@ import {
   createCandidate,
   createConfig,
   createSupplementaryData,
-  rankMap
+  rankMap,
+  requireLiveCandidateDiagnostic,
+  requireLiveCandidateDiagnostics
 } from "./fine-assessment-selection-fixtures.js";
 
 describe("candidate selector observation", () => {
@@ -58,7 +60,7 @@ describe("candidate selector observation", () => {
       captureAnswerFeatures: true
     });
     const diagnostics = new Map(
-      result.diagnostics.map((row) => [row.object_id, row])
+      requireLiveCandidateDiagnostics(result.diagnostics).map((row) => [row.object_id, row])
     );
 
     expect(diagnostics.get("memory-1")?.selector_observation).toEqual({
@@ -147,7 +149,7 @@ describe("candidate selector observation", () => {
       rankByCandidateKey: rankMap([memory]),
       captureAnswerFeatures: true
     });
-    const demand = result.diagnostics[0]!.selector_observation!.demand;
+    const demand = requireLiveCandidateDiagnostic(result.diagnostics[0]).selector_observation!.demand;
 
     expect(demand.matches).toEqual(expect.arrayContaining([
       {
@@ -194,7 +196,7 @@ describe("candidate selector observation", () => {
       rankByCandidateKey: rankMap([applicable, distractor]),
       captureAnswerFeatures: true
     });
-    const demandById = new Map(result.diagnostics.map((diagnostic) => [
+    const demandById = new Map(requireLiveCandidateDiagnostics(result.diagnostics).map((diagnostic) => [
       diagnostic.object_id,
       diagnostic.selector_observation!.demand
     ]));
@@ -237,7 +239,7 @@ describe("candidate selector observation", () => {
       captureAnswerFeatures: true
     });
 
-    expect(result.diagnostics[0]?.selector_observation?.demand.matches).toEqual(
+    expect(requireLiveCandidateDiagnostic(result.diagnostics[0])?.selector_observation?.demand.matches).toEqual(
       expect.arrayContaining([
         {
           id: "lexical_term:yoga", kind: "lexical_term", value: "yoga",
@@ -353,7 +355,7 @@ function selectObservation(
     rankByCandidateKey: rankMap([memory]),
     captureAnswerFeatures: true
   });
-  return result.diagnostics[0]!.selector_observation!;
+  return requireLiveCandidateDiagnostic(result.diagnostics[0]).selector_observation!;
 }
 
 function completePathReceipt() {

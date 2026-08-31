@@ -5,13 +5,16 @@ import {
   type EventLogEntry,
   type RuntimeCapabilities
 } from "@do-soul/alaya-protocol";
-import { EventPublisherPropagationError } from "../../runtime/event-publisher.js";
+import {
+  EventPublisherPropagationError,
+  type EventPublisher,
+  type EventPublisherInput
+} from "../../runtime/event-publisher.js";
 import {
   IntegrationGate,
   VERIFIED_CLAUDE_RUNTIME_CAPABILITY_PROFILE,
   WORKER_INTEGRATION_STATUS_EVENT_TYPE
 } from "../../security/integration-gate.js";
-import type { TestMock } from "../shared/mock-types.js";
 
 const FIXED_NOW = "2026-04-14T06:00:00.000Z";
 
@@ -145,22 +148,20 @@ describe("IntegrationGate", () => {
 });
 
 function createHarness(): {
-  readonly eventPublisher: {
-    readonly publish: TestMock;
-  };
-  readonly publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>;
+  readonly eventPublisher: Pick<EventPublisher, "publish">;
+  readonly publishedEvents: EventPublisherInput[];
 } {
-  const publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
-  const eventPublisher = {
-    publish: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+  const publishedEvents: EventPublisherInput[] = [];
+  const eventPublisher: Pick<EventPublisher, "publish"> = {
+    publish: async (event) => {
       publishedEvents.push(event);
       return {
         ...event,
         event_id: `event-${publishedEvents.length}`,
         created_at: FIXED_NOW,
-      revision: 0
+        revision: 0
       } satisfies EventLogEntry;
-    })
+    }
   };
 
   return {

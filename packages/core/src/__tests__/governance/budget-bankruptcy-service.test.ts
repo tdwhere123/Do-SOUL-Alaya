@@ -1,12 +1,33 @@
 import { describe, expect, it, vi } from "vitest";
 import { BankruptcyAction, BankruptcyKind, BankruptcyTriggerKind, BudgetEventType, ProposalResolutionState, RuntimeMode, type Proposal } from "@do-soul/alaya-protocol";
 import { BudgetBankruptcyService } from "../../governance/bankruptcy/budget-bankruptcy-service.js";
+import type {
+  BudgetBankruptcyServiceDependencies,
+  BudgetBankruptcyServiceProposalPort
+} from "../../governance/bankruptcy/budget-bankruptcy-service-types.js";
 
 import { createDeclareParams, createDeferred, createDependencies, createEventLogEntry, createEventLogRepo, createProposalOption, createProposalPort, createStoredProposal } from "./budget-bankruptcy-service.test-support.js";
 
+function budgetDeps(
+  overrides?: Parameters<typeof createDependencies>[0]
+): Omit<ReturnType<typeof createDependencies>, "proposalService" | "proposalPort"> &
+  BudgetBankruptcyServiceDependencies & {
+    proposalPort: BudgetBankruptcyServiceProposalPort;
+  } {
+  const deps = createDependencies(overrides);
+  const proposalService: BudgetBankruptcyServiceProposalPort = {
+    create: deps.proposalService.create as BudgetBankruptcyServiceProposalPort["create"],
+    update: deps.proposalService.update as BudgetBankruptcyServiceProposalPort["update"],
+    findById: deps.proposalService.findById as BudgetBankruptcyServiceProposalPort["findById"],
+    findPendingByRunId:
+      deps.proposalService.findPendingByRunId as BudgetBankruptcyServiceProposalPort["findPendingByRunId"]
+  };
+  return { ...deps, proposalService, proposalPort: proposalService };
+}
+
 describe("BudgetBankruptcyService", () => {
   it("declares a soft bankruptcy, persists the proposal, updates current mode, and broadcasts both budget events", async () => {
-    const dependencies = createDependencies();
+    const dependencies = budgetDeps();
     const service = new BudgetBankruptcyService(dependencies);
 
     const result = await service.declare(createDeclareParams());
@@ -33,7 +54,7 @@ describe("BudgetBankruptcyService", () => {
   });
 
   it("keeps hard bankruptcies pending when no auto-applicable option exists", async () => {
-    const dependencies = createDependencies();
+    const dependencies = budgetDeps();
     const service = new BudgetBankruptcyService(dependencies);
 
     const result = await service.declare(
@@ -54,7 +75,7 @@ describe("BudgetBankruptcyService", () => {
   });
 
   it("rejects a second pending bankruptcy for the same run", async () => {
-    const dependencies = createDependencies({
+    const dependencies = budgetDeps({
       proposalPort: createProposalPort({
         findPendingByRunId: vi.fn(async () =>
           createStoredProposal({ resolution_state: "pending", dossier_ref: "dossier-1" })
@@ -70,9 +91,9 @@ describe("BudgetBankruptcyService", () => {
 
   it("coalesces concurrent declarations for the same run into a single proposal write", async () => {
     const createGate = createDeferred<Proposal>();
-    const dependencies = createDependencies({
+    const dependencies = budgetDeps({
       proposalPort: createProposalPort({
-        create: vi.fn(async (params) => {
+        create: vi.fn(async (params: Parameters<BudgetBankruptcyServiceProposalPort["create"]>[0]) => {
           await createGate.promise;
           return createStoredProposal({
             runtime_id: "proposal-race",
@@ -119,7 +140,7 @@ describe("BudgetBankruptcyService", () => {
   });
 
   it("bounds process-local stateStore entries by least-recently-used run", async () => {
-    const dependencies = createDependencies();
+    const dependencies = budgetDeps();
     const service = new BudgetBankruptcyService({
       ...dependencies,
       stateStoreMaxEntries: 2
@@ -136,7 +157,7 @@ describe("BudgetBankruptcyService", () => {
 
   it("expires stale process-local stateStore entries instead of retaining every run forever", async () => {
     let now = "2026-03-26T00:00:00.000Z";
-    const dependencies = createDependencies();
+    const dependencies = budgetDeps();
     const service = new BudgetBankruptcyService({
       ...dependencies,
       now: () => now,
@@ -156,7 +177,7 @@ describe("BudgetBankruptcyService", () => {
   });
 
   it("resolves a pending bankruptcy with an accepted option and keeps the chosen mode sticky in snapshots", async () => {
-    const dependencies = createDependencies();
+    const dependencies = budgetDeps();
     const service = new BudgetBankruptcyService(dependencies);
     const declared = await service.declare(
       createDeclareParams({
@@ -183,7 +204,7 @@ describe("BudgetBankruptcyService", () => {
   });
 
   it("rejects option ids that are not present on the active pending proposal", async () => {
-    const dependencies = createDependencies();
+    const dependencies = budgetDeps();
     const service = new BudgetBankruptcyService(dependencies);
     await service.declare(
       createDeclareParams({
@@ -214,13 +235,16 @@ describe("BudgetBankruptcyService", () => {
         createProposalOption("abort_high_risk_write", true)
       ]
     });
-    const dependencies = createDependencies({
+    const dependencies = budgetDeps({
       proposalPort: createProposalPort({
         findPendingByRunId: vi.fn(async () => pendingProposal),
         findById: vi.fn(async (proposalId: string) =>
           proposalId === pendingProposal.proposal_id ? pendingProposal : null
         ),
-        update: vi.fn(async (proposalId, patch) => ({
+        update: vi.fn(async (
+          proposalId: string,
+          patch: Parameters<BudgetBankruptcyServiceProposalPort["update"]>[1]
+        ) => ({
           ...pendingProposal,
           proposal_id: proposalId,
           resolution_state: patch.resolution_state,
@@ -287,7 +311,7 @@ describe("BudgetBankruptcyService", () => {
         createProposalOption("abort_high_risk_write", true)
       ]
     });
-    const dependencies = createDependencies({
+    const dependencies = budgetDeps({
       proposalPort: createProposalPort({
         findPendingByRunId: vi.fn(async () => pendingProposal),
         findById: vi.fn(async (proposalId: string) =>
@@ -352,7 +376,7 @@ describe("BudgetBankruptcyService", () => {
   });
 
   it("rejects required actions that are not already valid bankruptcy action values", async () => {
-    const dependencies = createDependencies();
+    const dependencies = budgetDeps();
     const service = new BudgetBankruptcyService(dependencies);
 
     await expect(
@@ -367,7 +391,7 @@ describe("BudgetBankruptcyService", () => {
   });
 
   it("returns the default snapshot when no bankruptcy is active and clears run state on teardown", async () => {
-    const dependencies = createDependencies();
+    const dependencies = budgetDeps();
     const service = new BudgetBankruptcyService(dependencies);
 
     expect(await service.getSnapshot("run-404", "2026-03-26T00:00:00.000Z")).toMatchObject({

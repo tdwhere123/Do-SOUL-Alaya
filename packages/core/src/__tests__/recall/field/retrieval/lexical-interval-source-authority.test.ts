@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createRecallRetrievalFieldBundle } from
   "../../../../recall/field/retrieval/retrieval-field-bundle.js";
 import {
-  createLexicalIntervalSourceReceiptIntegrityV1,
-  verifyLexicalIntervalSourceReceiptIntegrityV1
+  createLexicalIntervalSourceReceiptIntegrityV1
 } from
   "../../../../recall/field/retrieval/lexical-interval-source-receipt.js";
 import {
   bindRetrievalFieldBundleReadAuthority,
+  captureMemoryLexicalIntervalSources,
   readMemoryLexicalIntervalSources,
   verifyLexicalIntervalSourceReceiptV1
 } from "../../../../recall/field/retrieval/retrieval-field-source-authority.js";
@@ -19,7 +19,8 @@ import {
   authorityFrom,
   capturedLexicalPreparedAuthority,
   cleanup,
-  preparedAuthority
+  preparedAuthority,
+  stubMemoryRepo
 } from "../../integration/shadow/live-receipt-fixtures.js";
 
 describe("lexical interval source authority", () => {
@@ -28,7 +29,7 @@ describe("lexical interval source authority", () => {
     const search = vi.fn(async () => fieldResult());
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1", queryText: "stable",
-      memoryRepo: { searchByKeywordField: search }
+      memoryRepo: stubMemoryRepo(search)
     });
     let source: ReturnType<typeof readMemoryLexicalIntervalSources>[number] | undefined;
     await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
@@ -60,7 +61,7 @@ describe("lexical interval source authority", () => {
     const prepared = await capturedLexicalPreparedAuthority();
     const requested = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1", queryText: "stable",
-      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+      memoryRepo: stubMemoryRepo(async () => fieldResult())
     });
     const maximum = requested.forObservationView("maximum");
     await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
@@ -80,7 +81,7 @@ describe("lexical interval source authority", () => {
     const prepared = await capturedLexicalPreparedAuthority();
     const requested = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1", queryText: "stable",
-      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+      memoryRepo: stubMemoryRepo(async () => fieldResult())
     });
     const maximum = requested.forObservationView("maximum");
     await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
@@ -100,7 +101,7 @@ describe("lexical interval source authority", () => {
     const prepared = await capturedLexicalPreparedAuthority();
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1", queryText: "stable",
-      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+      memoryRepo: stubMemoryRepo(async () => fieldResult())
     });
     const clone = Object.freeze({ ...bundle });
     await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
@@ -121,7 +122,7 @@ describe("lexical interval source authority", () => {
     const prepared = await capturedLexicalPreparedAuthority();
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1", queryText: "stable",
-      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+      memoryRepo: stubMemoryRepo(async () => fieldResult())
     });
     let source: ReturnType<typeof readMemoryLexicalIntervalSources>[number] | undefined;
     await expect(withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
@@ -149,7 +150,7 @@ describe("lexical interval source authority", () => {
     const prepared = await capturedLexicalPreparedAuthority();
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1", queryText: "stable",
-      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+      memoryRepo: stubMemoryRepo(async () => fieldResult())
     });
     await bundle.searchMemoryKeyword({
       variant: "lexical_relaxed", queryText: "stable", limit: 1, scope: {}
@@ -184,7 +185,7 @@ describe("lexical interval source authority", () => {
     const prepared = await preparedAuthority();
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1", queryText: "stable",
-      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+      memoryRepo: stubMemoryRepo(async () => fieldResult())
     });
     expect(() => bindRetrievalFieldBundleReadAuthority(
       bundle, prepared.snapshotReadLease, undefined
@@ -207,7 +208,7 @@ describe("lexical interval source authority", () => {
     const prepared = await preparedAuthority();
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1", queryText: "stable",
-      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+      memoryRepo: stubMemoryRepo(async () => fieldResult())
     });
     await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
       bindRetrievalFieldBundleReadAuthority(bundle, prepared.snapshotReadLease, capability);
@@ -223,7 +224,7 @@ describe("lexical interval source authority", () => {
     const prepared = await capturedLexicalPreparedAuthority();
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1", queryText: "stable",
-      memoryRepo: { searchByKeywordField: async () => fieldResult() }
+      memoryRepo: stubMemoryRepo(async () => fieldResult())
     });
     const lease = Object.freeze({
       ...prepared.snapshotReadLease,
@@ -241,14 +242,40 @@ describe("lexical interval source authority", () => {
     cleanup(prepared);
   });
 
+  it("materializes issued receipts so later records do not join the capture", async () => {
+    const prepared = await capturedLexicalPreparedAuthority();
+    const bundle = createRecallRetrievalFieldBundle({
+      workspaceId: "workspace-1", queryText: "stable",
+      memoryRepo: stubMemoryRepo(async () => fieldResult())
+    });
+    await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
+      bindRetrievalFieldBundleReadAuthority(bundle, prepared.snapshotReadLease, capability);
+      await bundle.searchMemoryKeyword({
+        variant: "lexical_relaxed", queryText: "stable", limit: 1, scope: {}
+      });
+      const captured = captureMemoryLexicalIntervalSources(bundle);
+      expect(captured?.receipts).toHaveLength(1);
+      const capturedDigest = captured!.receipts[0]!.receipt_digest;
+      await bundle.searchMemoryKeyword({
+        variant: "lexical_relaxed", queryText: "other", limit: 2, scope: {}
+      });
+      expect(readMemoryLexicalIntervalSources(bundle).length).toBeGreaterThan(1);
+      expect(captured!.receipts).toHaveLength(1);
+      expect(captured!.receipts[0]!.receipt_digest).toBe(capturedDigest);
+      expect(captureMemoryLexicalIntervalSources(bundle)?.receipts.length)
+        .toBeGreaterThan(1);
+    });
+    cleanup(prepared);
+  });
+
   it("never authenticates missing-port or failed synthetic results", async () => {
     const prepared = await capturedLexicalPreparedAuthority();
     const missing = createRecallRetrievalFieldBundle({
-      workspaceId: "workspace-1", queryText: "stable", memoryRepo: {}
+      workspaceId: "workspace-1", queryText: "stable", memoryRepo: stubMemoryRepo()
     });
     const failed = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1", queryText: "stable",
-      memoryRepo: { searchByKeywordField: async () => { throw new Error("failed"); } }
+      memoryRepo: stubMemoryRepo(async () => { throw new Error("failed"); })
     });
     await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
       bindRetrievalFieldBundleReadAuthority(missing, prepared.snapshotReadLease, capability);

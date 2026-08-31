@@ -64,7 +64,8 @@ function fakeAppendManyWithMutation(
     const persisted = events.map((event, idx) => ({
       ...event,
       event_id: `evt_${idx}`,
-      created_at: FIXED_NOW
+      created_at: FIXED_NOW,
+      revision: "revision" in event ? event.revision : 0
     }));
     return mutate(persisted);
   });

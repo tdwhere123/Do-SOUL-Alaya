@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   EVIDENCE_CANDIDATE_EMBEDDING_TOP_N,
   selectLexicalEvidenceEmbeddingPrefix,
   scoreTransientEvidenceCandidates
 } from "../../../embedding-recall/evidence/evidence-candidate-scoring.js";
 import type { EvidenceEmbeddingCandidate } from "../../../embedding-recall/types.js";
-import { createProvider } from "../embedding-recall-test-helpers.js";
+import { createProvider, mockEmbedTexts } from "../embedding-recall-test-helpers.js";
 import { EvidenceDocumentEmbeddingEngine } from
   "../../../embedding-recall/evidence/evidence-document-embedding-engine.js";
 import { QueryEmbeddingEngine } from "../../../embedding-recall/query-embedding-engine.js";
@@ -76,7 +76,7 @@ function rankKeys(
 async function scoreWithDeterministicEmbeddings(
   candidates: readonly EvidenceEmbeddingCandidate[]
 ) {
-  const embedTexts = vi.fn(async (texts: readonly string[]) =>
+  const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
     texts.map((text) => {
       if (text === QUERY_TEXT) return new Float32Array([1, 0]);
       const weight = text.includes("kubernetes") ? 0.9 : 0.1;

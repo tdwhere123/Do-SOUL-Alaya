@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { TransitionCausedBy } from "@do-soul/alaya-protocol";
 import { MemoryService, type MemoryServiceDependencies } from "../../memory/memory-service.js";
-import type { TestMock } from "../shared/mock-types.js";
+import type { Mock } from "vitest";
 import { createDependencies, createMemoryEntry } from "./memory-service-test-fixtures.js";
 
 describe("MemoryService", () => {
@@ -120,7 +120,11 @@ it("autonomousHardDeleteTombstoned REFUSES a judged_useless delete when the atom
   // physical delete so the preserved content can never be permanently lost.
   function compressedDeps(input: {
     readonly capsuleFindById: () => Promise<unknown>;
-    readonly hardDeleteSpy: TestMock;
+    readonly hardDeleteSpy: Mock<
+      NonNullable<
+        MemoryServiceDependencies["memoryEntryRepo"]["hardDeleteTombstonedWithDisposition"]
+      >
+    >;
     readonly forgetDispositionRef?: string | null;
   }) {
     return createDependencies({
@@ -179,8 +183,12 @@ function liveCapsule(overrides: Record<string, unknown> = {}) {
   // append commits atomically with the physical delete. A success fake MUST honor
   // that contract (fire onDeleted) or the service refuses (CONFLICT: an
   // audit-less compressed delete is a forbidden crash-gap).
-  function compressedHardDeleteSuccessSpy(): TestMock {
-    return vi.fn(async (_objectId: string, options?: { readonly onDeleted?: () => void }) => {
+  function compressedHardDeleteSuccessSpy(): Mock<
+    NonNullable<
+      MemoryServiceDependencies["memoryEntryRepo"]["hardDeleteTombstonedWithDisposition"]
+    >
+  > {
+    return vi.fn(async (_objectId, options) => {
       options?.onDeleted?.();
       return true;
     });

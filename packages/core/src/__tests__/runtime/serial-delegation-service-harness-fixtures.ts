@@ -1,12 +1,19 @@
-import { vi } from "vitest";
-import type { AgentRuntimePort, DelegatedWorkerRun, EventLogEntry, RuntimeEvent, WorkerBaselineLock } from "@do-soul/alaya-protocol";
+import { vi, type Mock } from "vitest";
+import type { AgentRuntimePort, DelegatedWorkerRun, EventLogEntry, RuntimeEvent, StrongRef, WorkerBaselineLock } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
 import { WorkerRunLifecycleService } from "../../runtime/worker-run-lifecycle-service.js";
 import { type IntegrationGateDecision } from "../../security/integration-gate.js";
-import { SerialDelegationService } from "../../runtime/serial-delegation-service.js";
+import {
+  SerialDelegationService,
+  type ConstraintProxyPort,
+  type DirtyStatePanicServicePort,
+  type IntegrationGatePort,
+  type StrongRefServicePort,
+  type WorkerSafetyGatePort,
+  type ZeroDaySecurityLayerPort
+} from "../../runtime/serial-delegation-service.js";
 import { ScriptedRuntimeAdapter } from "../../test-doubles/__tests__/scripted-runtime-adapter.js";
-import type { TestMock } from "../shared/mock-types.js";
 
 export const FIXED_NOW = "2026-04-13T11:00:00.000Z";
 
@@ -15,25 +22,12 @@ export const FIXED_WORKER_RUN_ID = "worker-run-serial-1";
 export interface HarnessOptions {
   readonly runtimeAdapter?: AgentRuntimePort;
   readonly runtimeAdapterFactory?: () => AgentRuntimePort;
-  readonly workerSafetyGate?: {
-    readonly enforceBeforeDispatch: TestMock;
-  };
-  readonly zeroDaySecurityLayer?: {
-    readonly augmentLock: TestMock;
-  };
-  readonly integrationGate?: {
-    readonly check: TestMock;
-  };
-  readonly constraintProxy?: {
-    readonly assertNoViolation: TestMock;
-  };
-  readonly dirtyStatePanicService?: {
-    readonly triggerPanic: TestMock;
-  };
-  readonly strongRefService?: {
-    readonly protect: TestMock;
-    readonly releaseBySource: TestMock;
-  };
+  readonly workerSafetyGate?: WorkerSafetyGatePort;
+  readonly zeroDaySecurityLayer?: ZeroDaySecurityLayerPort;
+  readonly integrationGate?: IntegrationGatePort;
+  readonly constraintProxy?: ConstraintProxyPort;
+  readonly dirtyStatePanicService?: DirtyStatePanicServicePort;
+  readonly strongRefService?: StrongRefServicePort;
   readonly reportAsyncFailure?: (
     error: unknown,
     metadata: {
@@ -53,38 +47,44 @@ export type RuntimeNormalizerContext = {
   readonly workerRunId: string;
 };
 
-export type RuntimeNormalizeMock = TestMock<
+export type RuntimeNormalizeMock = Mock<
   (event: RuntimeEvent, context: RuntimeNormalizerContext) => Promise<EventLogEntry | null>
 >;
 
-export type ClearSessionStateMock = TestMock<(sessionId: string) => void>;
+export type ClearSessionStateMock = Mock<(sessionId: string) => void>;
+
+type HarnessWorkerRunRepo = {
+  readonly getById: Mock<(workerRunId: string) => Promise<Readonly<DelegatedWorkerRun> | null>>;
+  readonly deleteIfState: Mock<
+    (workerRunId: string, expectedState: DelegatedWorkerRun["state"]) => Promise<void>
+  >;
+  readonly updateState: Mock<
+    (
+      workerRunId: string,
+      expectedState: DelegatedWorkerRun["state"],
+      nextState: DelegatedWorkerRun["state"],
+      updatedAt: string
+    ) => Readonly<DelegatedWorkerRun>
+  >;
+  readonly insertIfNoActiveForPrincipal: Mock<
+    (principalRunId: string, run: DelegatedWorkerRun) => Promise<Readonly<DelegatedWorkerRun>>
+  >;
+};
 
 export function createHarness(
   events: readonly RuntimeEvent[],
   options: HarnessOptions = {}
 ): {
-  readonly repo: {
-    readonly getById: TestMock;
-    readonly deleteIfState: TestMock;
-    readonly updateState: TestMock;
-    readonly insertIfNoActiveForPrincipal: TestMock;
-  };
+  readonly repo: HarnessWorkerRunRepo;
   readonly publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>;
   readonly runtimeAdapter: AgentRuntimePort;
   readonly eventNormalizer: {
     readonly normalize: RuntimeNormalizeMock;
     readonly clearSessionState: ClearSessionStateMock;
   };
-  readonly constraintProxy: {
-    readonly assertNoViolation: TestMock;
-  };
-  readonly dirtyStatePanicService: {
-    readonly triggerPanic: TestMock;
-  };
-  readonly strongRefService: {
-    readonly protect: TestMock;
-    readonly releaseBySource: TestMock;
-  };
+  readonly constraintProxy: ConstraintProxyPort;
+  readonly dirtyStatePanicService: DirtyStatePanicServicePort;
+  readonly strongRefService: StrongRefServicePort;
   readonly workerRunLifecycle: WorkerRunLifecycleService;
   readonly service: SerialDelegationService;
   getById(workerRunId: string): Readonly<DelegatedWorkerRun> | null;
@@ -210,54 +210,78 @@ export function createHarness(
       async (
         _event: RuntimeEvent,
         _context: RuntimeNormalizerContext
-      ) => null
+      ): Promise<EventLogEntry | null> => null
     ),
-    clearSessionState: vi.fn()
+    clearSessionState: vi.fn((_sessionId: string) => {})
   };
-  const workerSafetyGate =
+  const workerSafetyGate: WorkerSafetyGatePort =
     options.workerSafetyGate ??
-    ({
-      enforceBeforeDispatch: vi.fn(async () => createWorkerBaselineLock())
-    } as const);
-  const zeroDaySecurityLayer =
+    {
+      enforceBeforeDispatch: vi.fn(async (
+        _workerRun: Parameters<WorkerSafetyGatePort["enforceBeforeDispatch"]>[0]
+      ) => createWorkerBaselineLock())
+    };
+  const zeroDaySecurityLayer: ZeroDaySecurityLayerPort =
     options.zeroDaySecurityLayer ??
-    ({
+    {
       augmentLock: vi.fn(async (lock: WorkerBaselineLock) => lock)
-    } as const);
-  const integrationGate =
+    };
+  const integrationGate: IntegrationGatePort =
     options.integrationGate ??
-    ({
-      check: vi.fn(async () => createIntegrationDecision("ignore_drift"))
-    } as const);
-  const constraintProxy =
+    {
+      check: vi.fn(async (
+        _workerRun: Parameters<IntegrationGatePort["check"]>[0],
+        _actualCapabilities: Parameters<IntegrationGatePort["check"]>[1]
+      ) => createIntegrationDecision("ignore_drift"))
+    };
+  const constraintProxy: ConstraintProxyPort =
     options.constraintProxy ??
-    ({
-      assertNoViolation: vi.fn(async () => undefined)
-    } as const);
-  const dirtyStatePanicService =
+    {
+      assertNoViolation: vi.fn(async (
+        _workspaceId: string,
+        _runId: string,
+        _operation: Parameters<ConstraintProxyPort["assertNoViolation"]>[2]
+      ): Promise<void> => {})
+    };
+  const dirtyStatePanicService: DirtyStatePanicServicePort =
     options.dirtyStatePanicService ??
-    ({
-      triggerPanic: vi.fn(
-        async (params: {
-          workerRunId: string;
-          trigger: string;
-          panicSource: string;
-          summary: string;
-          affectedScope: readonly { entity_type: string; entity_id: string }[];
-        }) =>
-          await workerRunLifecycle.freeze(
-            params.workerRunId,
-            params.panicSource,
-            params.summary
-          )
-      )
-    } as const);
-  const strongRefService =
+    {
+      triggerPanic: vi.fn(async (params: Parameters<DirtyStatePanicServicePort["triggerPanic"]>[0]) => {
+        await workerRunLifecycle.freeze(
+          params.workerRunId,
+          params.panicSource,
+          params.summary
+        );
+        return {
+          dossier_id: `dossier-${params.workerRunId}`,
+          worker_run_id: params.workerRunId,
+          principal_run_id: "principal-run-serial-1",
+          workspace_id: "ws-serial-delegation",
+          trigger: params.trigger,
+          panic_source: params.panicSource,
+          panic_summary: params.summary,
+          affected_data_scope: params.affectedScope,
+          created_at: FIXED_NOW
+        };
+      })
+    };
+  const strongRefService: StrongRefServicePort =
     options.strongRefService ??
-    ({
-      protect: vi.fn(async () => undefined),
-      releaseBySource: vi.fn(async () => undefined)
-    } as const);
+    {
+      protect: vi.fn(async (params: Parameters<StrongRefServicePort["protect"]>[0]): Promise<StrongRef> => ({
+        ref_id: "strong-ref-serial-1",
+        source_entity_type: params.sourceEntityType,
+        source_entity_id: params.sourceEntityId,
+        target_entity_type: params.targetEntityType,
+        target_entity_id: params.targetEntityId,
+        workspace_id: params.workspaceId,
+        reason: params.reason,
+        created_at: FIXED_NOW
+      })),
+      releaseBySource: vi.fn(async (
+        _params: Parameters<StrongRefServicePort["releaseBySource"]>[0]
+      ): Promise<void> => {})
+    };
   const service = new SerialDelegationService({
     workerRunLifecycle,
     workerRunRepo: repo,

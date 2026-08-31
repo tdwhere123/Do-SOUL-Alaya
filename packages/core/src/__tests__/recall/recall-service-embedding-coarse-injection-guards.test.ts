@@ -44,7 +44,8 @@ describe("RecallService embedding coarse-injection guards", () => {
   }
 
   it("fetches up to injection_cap neighbors", async () => {
-    const collect = vi.fn(async () => neighbors());
+    const collect = vi.fn<NonNullable<RecallServiceEmbeddingRecallPort[
+      "collectWorkspaceNeighborsWithMetadata"]>>(async () => neighbors());
     const { service } = buildService(collect, vi.fn(async () => [memory]));
     await service.recall({ taskSurface: createTaskSurface(), workspaceId: "workspace-1",
       strategy: "analyze", policyOverride: policy(service, 10) });
@@ -52,7 +53,8 @@ describe("RecallService embedding coarse-injection guards", () => {
   });
 
   it("injects nothing when injection_cap is zero", async () => {
-    const collect = vi.fn(async () => neighbors());
+    const collect = vi.fn<NonNullable<RecallServiceEmbeddingRecallPort[
+      "collectWorkspaceNeighborsWithMetadata"]>>(async () => neighbors());
     const find = vi.fn(async () => [memory]);
     const { service } = buildService(collect, find);
     const result = await service.recall({ taskSurface: createTaskSurface(),
@@ -63,7 +65,9 @@ describe("RecallService embedding coarse-injection guards", () => {
   });
 
   it("drops a stale content hash", async () => {
-    const collect = vi.fn(async () => neighbors(hashMemoryContent("stale content")));
+    const collect = vi.fn<NonNullable<RecallServiceEmbeddingRecallPort[
+      "collectWorkspaceNeighborsWithMetadata"]>>(async () =>
+      neighbors(hashMemoryContent("stale content")));
     const { service, warnSpy } = buildService(collect, vi.fn(async () => [memory]));
     const result = await service.recall({ taskSurface: createTaskSurface(),
       workspaceId: "workspace-1", strategy: "analyze", policyOverride: policy(service, 10) });
@@ -73,7 +77,8 @@ describe("RecallService embedding coarse-injection guards", () => {
   });
 
   it("retains hashless compatibility neighbors", async () => {
-    const collect = vi.fn(async () => neighbors());
+    const collect = vi.fn<NonNullable<RecallServiceEmbeddingRecallPort[
+      "collectWorkspaceNeighborsWithMetadata"]>>(async () => neighbors());
     const { service, warnSpy } = buildService(collect, vi.fn(async () => [memory]));
     const result = await service.recall({ taskSurface: createTaskSurface(),
       workspaceId: "workspace-1", strategy: "analyze", policyOverride: policy(service, 10) });

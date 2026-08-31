@@ -19,7 +19,11 @@ import {
 } from "../../../../../recall/decision/query-proof/measurement/index.js";
 import { comparePsiV2, psiV2CandidateFromLexicalEnvelope } from
   "../../../../../recall/decision/query-proof/dominance/index.js";
+import type { PsiV2CoordinateV1 } from
+  "../../../../../recall/decision/query-proof/dominance/index.js";
 import { createNumericIntervalWitness } from
+  "../../../../../recall/decision/query-proof/witness/index.js";
+import type { WitnessProvenanceEntry } from
   "../../../../../recall/decision/query-proof/witness/index.js";
 import {
   prepareMeasurementEvidenceFixture,
@@ -147,10 +151,12 @@ describe("source-bound lexical measurement admission", () => {
       (authority, source) => {
         if (source.status !== "captured") throw new Error("captured source expected");
         const coordinate = sourceCoordinate(authority, source, "cand-a");
-        if (coordinate.collapse.status !== "collapsed" || coordinate.admission === null) {
+        const collapse = coordinate.collapse;
+        if (!isNumericCollapse(collapse) || coordinate.admission === null) {
           throw new Error("admitted source coordinate expected");
         }
-        return { authority, measured: coordinate.collapse,
+        const measured: MeasurementCollapseV1 = collapse;
+        return { authority, measured,
           admission: coordinate.admission, coordinate };
       }
     );
@@ -196,10 +202,11 @@ describe("source-bound lexical measurement admission", () => {
       async (first, source) => {
         if (source.status !== "captured") throw new Error("captured source expected");
         const coordinate = sourceCoordinate(first, source, "cand-a");
-        if (coordinate.collapse.status !== "collapsed" || coordinate.admission === null) {
+        const collapse = coordinate.collapse;
+        if (!isNumericCollapse(collapse) || coordinate.admission === null) {
           throw new Error("admitted source coordinate expected");
         }
-        const measured = coordinate.collapse;
+        const measured: MeasurementCollapseV1 = collapse;
         const admission = coordinate.admission;
         await withCapturedLexicalMeasurementAuthorityFixture(
           prepared,
@@ -241,7 +248,7 @@ function collapse(
   authority: VerifiedMeasurementAuthorityV1,
   candidateId: string,
   value: number,
-  provenance = PROVENANCE
+  provenance: readonly WitnessProvenanceEntry[] = PROVENANCE
 ): MeasurementCollapseV1 {
   return collapseMeasurementGroup({
     contract: CONTRACT,
@@ -265,7 +272,9 @@ function issue(
   measured: MeasurementCollapseV1,
   envelope?: ReturnType<typeof lexicalIntervalSourceEnvelopes>
 ) {
-  if (measured.status !== "collapsed") throw new Error(measured.reason);
+  if (measured.status !== "collapsed") {
+    throw new Error(measured.status === "unresolved" ? measured.reason : "conflict");
+  }
   return issueMeasurementGroupAdmission({
     authority,
     contract: CONTRACT,
@@ -301,4 +310,10 @@ function sourceCoordinate(
 
 function fieldKey(objectId: string): string {
   return `workspace_local:memory_entry:${objectId}`;
+}
+
+function isNumericCollapse(
+  collapse: PsiV2CoordinateV1["collapse"]
+): collapse is Extract<MeasurementCollapseV1, { status: "collapsed" }> {
+  return collapse.status === "collapsed" && collapse.witness.domain === "numeric_interval";
 }

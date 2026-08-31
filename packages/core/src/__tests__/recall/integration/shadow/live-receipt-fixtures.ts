@@ -1,5 +1,5 @@
-import { expect, vi } from "vitest";
-import { fineAssess } from "../../../../recall/delivery/fine-assessment.js";
+import { expect } from "vitest";
+import { fineAssess, type FineAssessParams } from "../../../../recall/delivery/fine-assessment.js";
 import { compileRecallQueryProbes } from
   "../../../../recall/query/recall-query-probes.js";
 import { compileCanonicalQueryCompilation } from
@@ -18,10 +18,16 @@ import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../../../recall/runtime/query/field-query-session.js";
 import type {
   CoarseRecallCandidate,
+  RecallServiceMemoryRepoPort,
   RecallSupplementaryData
 } from "../../../../recall/runtime/recall-service-types.js";
 import type { PreparedRecallRequest } from
   "../../../../recall/runtime/recall-service-runner-types.js";
+import type { LiveQueryProofAuthority } from
+  "../../../../recall/decision/query-proof/live-query-proof-authority.js";
+import type { LexicalRequestPin } from
+  "../../../../recall/field/retrieval/retrieval-field-bundle.js";
+import type { RecallFieldDigest } from "../../../../recall/field/field-identity.js";
 import { isFailClosedShadowTrace, type ShadowCapturedTrace } from
   "../../../../recall/integration/shadow/integrate.js";
 import type { SupportCandidateReceiptV1 } from
@@ -38,7 +44,7 @@ import { D1_REQUEST, plantProof } from "../../decision/query-proof/adapters/lexi
 const NOW = "2026-08-29T00:00:00.000Z";
 const QUERY_RUN_ID = "storage-local-lane-label";
 
-export function lexicalProof(snapshotDigest: string | null = null) {
+export function lexicalProof(snapshotDigest: RecallFieldDigest | null = null) {
   return plantProof({
     queryRunId: QUERY_RUN_ID,
     requestDigest: D1_REQUEST,
@@ -55,7 +61,7 @@ export function lexicalProof(snapshotDigest: string | null = null) {
   });
 }
 
-export function lexicalPin() {
+export function lexicalPin(): Readonly<LexicalRequestPin> {
   return Object.freeze({
     workspace_id: "workspace-1",
     request_digest: D1_REQUEST,
@@ -64,7 +70,7 @@ export function lexicalPin() {
   });
 }
 
-export function authorityFrom(prepared: PreparedRecallRequest) {
+export function authorityFrom(prepared: PreparedRecallRequest): LiveQueryProofAuthority {
   return Object.freeze({
     workspace_id: "workspace-1",
     query_condition: prepared.queryCondition,
@@ -74,7 +80,18 @@ export function authorityFrom(prepared: PreparedRecallRequest) {
     snapshot_coherence_receipt: prepared.snapshotCoherenceReceipt,
     snapshot_read_lease: prepared.snapshotReadLease,
     expected_lexical_request_pins: [lexicalPin()]
-  });
+  }) satisfies LiveQueryProofAuthority;
+}
+
+export function stubMemoryRepo(
+  searchByKeywordField?: RecallServiceMemoryRepoPort["searchByKeywordField"]
+): RecallServiceMemoryRepoPort {
+  return {
+    findByWorkspaceId: async () => [],
+    findByDimension: async () => [],
+    findByScopeClass: async () => [],
+    ...(searchByKeywordField === undefined ? {} : { searchByKeywordField })
+  } satisfies RecallServiceMemoryRepoPort;
 }
 
 export function diagnostics(trace: ShadowCapturedTrace) {
@@ -212,7 +229,7 @@ export function legalSupportReceipts(): readonly SupportCandidateReceiptV1[] {
 export function params(
   candidates: readonly CoarseRecallCandidate[],
   path: "canonical" | "legacy" = "canonical"
-) {
+): FineAssessParams {
   return {
     ...FIELD_PINS,
     candidates,
@@ -221,7 +238,7 @@ export function params(
     supplementaryData: supplementary(candidates),
     tokenEstimator: { estimate: () => 4 },
     now: () => NOW,
-    warn: vi.fn()
+    warn: () => undefined
   };
 }
 

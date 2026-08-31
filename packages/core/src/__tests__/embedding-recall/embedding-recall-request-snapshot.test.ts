@@ -13,7 +13,8 @@ import {
   createEmbeddingRecord,
   createMemoryEntry,
   createProvider,
-  hashMemoryContent
+  hashMemoryContent,
+  mockEmbedTexts
 } from "./embedding-recall-test-helpers.js";
 
 describe("EmbeddingRecallService request score snapshot", () => {
@@ -172,7 +173,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
   it("records lookup degradation when no vector source succeeds", async () => {
     const memory = createMemoryEntry({ object_id: "pool-lookup-failed", content: "Missing vector." });
     const append = createEventAppendSpy();
-    const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
+    const embedTexts = mockEmbedTexts(async () => [new Float32Array([1, 0])]);
     const service = new EmbeddingRecallService({
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => {
@@ -220,7 +221,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
           throw new Error("exact lookup unavailable");
         })
       },
-      provider: createProvider({ embedTexts: vi.fn(async () => [new Float32Array([1, 0])]) }),
+      provider: createProvider({ embedTexts: mockEmbedTexts(async () => [new Float32Array([1, 0])]) }),
       eventLogRepo: { append, queryByEntity: vi.fn(async () => []) }
     });
 
@@ -257,7 +258,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
           content_hash: hashMemoryContent(memory.content)
         })])
       },
-      provider: createProvider({ embedTexts: vi.fn(async () => { throw new Error("offline"); }) }),
+      provider: createProvider({ embedTexts: mockEmbedTexts(async () => { throw new Error("offline"); }) }),
       eventLogRepo: { append, queryByEntity: vi.fn(async () => []) }
     });
 
@@ -325,7 +326,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
         content_hash: hashMemoryContent(memory.content)
       })
     ]);
-    const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
+    const embedTexts = mockEmbedTexts(async () => [new Float32Array([1, 0])]);
     const append = createEventAppendSpy();
     const service = new EmbeddingRecallService({
       embeddingRepo: { listByWorkspace, listByObjectIds },
@@ -374,7 +375,7 @@ describe("EmbeddingRecallService request score snapshot", () => {
         embedding: new Float32Array([1, 0])
       })
     ]);
-    const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
+    const embedTexts = mockEmbedTexts(async () => [new Float32Array([1, 0])]);
     const service = new EmbeddingRecallService({
       embeddingRepo: { listByWorkspace, listByObjectIds },
       provider: createProvider({ embedTexts }),
@@ -452,7 +453,7 @@ function createHydrationFixture() {
   const memories = createHydrationMemories();
   const listByWorkspace = vi.fn(async () => buildHydrationWorkspaceRecords(memories));
   const listByObjectIds = vi.fn(async () => buildHydrationExactRecords(memories));
-  const embedTexts = vi.fn(async () => [new Float32Array([2, 0])]);
+  const embedTexts = mockEmbedTexts(async () => [new Float32Array([2, 0])]);
   const nowEpochMs = vi.fn()
     .mockReturnValueOnce(100)
     .mockReturnValueOnce(107)
@@ -492,7 +493,7 @@ async function preparePoolScanFallback(scanState: "missing" | "failed") {
   const listByWorkspace = vi.fn(async () => {
     throw new Error("workspace scan unavailable");
   });
-  const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
+  const embedTexts = mockEmbedTexts(async () => [new Float32Array([1, 0])]);
   const append = createEventAppendSpy();
   const service = new EmbeddingRecallService({
     embeddingRepo: {

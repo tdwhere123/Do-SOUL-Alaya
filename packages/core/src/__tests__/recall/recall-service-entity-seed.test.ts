@@ -3,6 +3,9 @@ import { MemoryDimension, MemoryGovernanceEventType, ScopeClass, type PathAnchor
 import { createFieldBackedRecallService } from
   "./fixtures/keyword-field-fixture.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import {
+  requireLiveCandidateDiagnostics
+} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService", () => {
 describe("entity_seed plane", () => {
@@ -94,12 +97,12 @@ it("admits FTS hits for extracted entities on the entity_seed plane and fans int
       expect(ids.has("memory-anchor")).toBe(true);
       expect(ids.has("memory-neighbor")).toBe(true);
 
-      const anchorDiag = result.diagnostics?.candidates.find(
+      const anchorDiag = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
         (c) => c.object_id === "memory-anchor"
       );
       expect(anchorDiag?.admission_planes).toContain("entity_seed");
 
-      const neighborDiag = result.diagnostics?.candidates.find(
+      const neighborDiag = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
         (c) => c.object_id === "memory-neighbor"
       );
       expect(neighborDiag?.admission_planes).toContain("path_expansion");
@@ -141,7 +144,7 @@ it("is a no-op when entityExtractionPort is not wired", async () => {
       diagnosticCapture: "answer_features"
     });
 
-      const diag = result.diagnostics?.candidates.find((c) => c.object_id === "memory-x");
+      const diag = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((c) => c.object_id === "memory-x");
       expect(diag?.admission_planes ?? []).not.toContain("entity_seed");
     });
 
@@ -363,7 +366,7 @@ it("does not double-count fusion when the same memory hits lexical_fts and entit
       diagnosticCapture: "answer_features"
     });
 
-      const diag = result.diagnostics?.candidates.find(
+      const diag = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
         (c) => c.object_id === "memory-overlap"
       );
       // Plane admission diagnostic still records entity_seed alongside

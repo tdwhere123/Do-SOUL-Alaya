@@ -34,7 +34,9 @@ import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { withFineDeliveryPath } from "./recall-service-test-fixtures.js";
-
+import {
+  requireLiveCandidateDiagnostics
+} from "./fine-assessment-selection-fixtures.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -132,7 +134,7 @@ async function inspectSiblingViaPath(relationKind: string): Promise<{
     });
 
   const candidate = result.candidates.find((row) => row.object_id === SIBLING_ID);
-  const diagnostic = result.diagnostics?.candidates.find((row) => row.object_id === SIBLING_ID);
+  const diagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((row) => row.object_id === SIBLING_ID);
   if (diagnostic === undefined) {
     throw new Error("expected path-admitted sibling diagnostics");
   }

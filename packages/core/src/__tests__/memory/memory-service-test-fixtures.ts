@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import {
   FormationKind,
   MemoryDimension,
@@ -13,7 +13,30 @@ import type {
   MemoryEntryRepoUpdateFields,
   MemoryServiceDependencies
 } from "../../memory/memory-service.js";
-import type { TestMock } from "../shared/mock-types.js";
+
+type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+type AppendSpy = Mock<(event: EventLogDraft) => EventLogEntry>;
+type QueryByEntitySpy = Mock<
+  (entityType: string, entityId: string) => Promise<readonly EventLogEntry[]>
+>;
+type EvidenceFindByIdSpy = Mock<
+  (objectId: string) => Promise<{ readonly object_id: string; readonly workspace_id: string }>
+>;
+type NotifySpy = Mock<(entry: EventLogEntry) => Promise<void>>;
+type RepoUpdateSpy = Mock<
+  (objectId: string, fields: MemoryEntryRepoUpdateFields) => Promise<MemoryEntry>
+>;
+type RepoUpdateScopedSpy = Mock<
+  (
+    objectId: string,
+    workspaceId: string,
+    fields: MemoryEntryRepoUpdateFields
+  ) => Promise<MemoryEntry>
+>;
+type RepoArchiveSpy = Mock<
+  (objectId: string, updatedAt: string, onArchived?: () => void) => Promise<MemoryEntry>
+>;
+type RepoFindByScopeClassSpy = Mock<() => Promise<readonly MemoryEntry[]>>;
 
 export function createMemoryInput(overrides: Partial<MemoryEntryInput> = {}): MemoryEntryInput {
   return {
@@ -92,24 +115,29 @@ export function createEventLogHistory(maxRevision: number): readonly EventLogEnt
 
 export function createDependencies(overrides: Partial<MemoryServiceDependencies> = {}): {
   readonly dependencies: MemoryServiceDependencies;
-  readonly appendSpy: TestMock;
-  readonly queryByEntitySpy: TestMock;
-  readonly evidenceFindByIdSpy: TestMock;
-  readonly notifySpy: TestMock;
-  readonly repoUpdateSpy: TestMock;
-  readonly repoUpdateScopedSpy: TestMock;
-  readonly repoArchiveSpy: TestMock;
-  readonly repoFindByScopeClassSpy: TestMock;
+  readonly appendSpy: AppendSpy;
+  readonly queryByEntitySpy: QueryByEntitySpy;
+  readonly evidenceFindByIdSpy: EvidenceFindByIdSpy;
+  readonly notifySpy: NotifySpy;
+  readonly repoUpdateSpy: RepoUpdateSpy;
+  readonly repoUpdateScopedSpy: RepoUpdateScopedSpy;
+  readonly repoArchiveSpy: RepoArchiveSpy;
+  readonly repoFindByScopeClassSpy: RepoFindByScopeClassSpy;
 } {
-  const appendSpy = vi.fn((event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+  const appendSpy: AppendSpy = vi.fn((event: EventLogDraft): EventLogEntry => ({
     event_id: `event-${event.event_type}`,
     created_at: "2026-03-21T00:00:00.000Z",
     revision: 0,
     ...event
   }));
-  const queryByEntitySpy = vi.fn(async () => [] as readonly EventLogEntry[]);
-  const evidenceFindByIdSpy = vi.fn(async () => ({ object_id: "evidence", workspace_id: "workspace-1" }));
-  const notifySpy = vi.fn(async () => {});
+  const queryByEntitySpy: QueryByEntitySpy = vi.fn(
+    async (_entityType: string, _entityId: string): Promise<readonly EventLogEntry[]> => []
+  );
+  const evidenceFindByIdSpy: EvidenceFindByIdSpy = vi.fn(async () => ({
+    object_id: "evidence",
+    workspace_id: "workspace-1"
+  }));
+  const notifySpy: NotifySpy = vi.fn(async (_entry: EventLogEntry) => {});
   const applyUpdateFields = (
     fields: MemoryEntryRepoUpdateFields,
     workspaceId?: string
@@ -138,11 +166,11 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
         preference_polarity: fields.preference_polarity ?? null
       })
     );
-  const repoUpdateSpy = vi.fn((_objectId: string, fields: MemoryEntryRepoUpdateFields) =>
-    applyUpdateFields(fields)
+  const repoUpdateSpy: RepoUpdateSpy = vi.fn(
+    async (_objectId: string, fields: MemoryEntryRepoUpdateFields) => applyUpdateFields(fields)
   );
-  const repoUpdateScopedSpy = vi.fn(
-    (_objectId: string, workspaceId: string, fields: MemoryEntryRepoUpdateFields) =>
+  const repoUpdateScopedSpy: RepoUpdateScopedSpy = vi.fn(
+    async (_objectId: string, workspaceId: string, fields: MemoryEntryRepoUpdateFields) =>
       applyUpdateFields(fields, workspaceId)
   );
   const repoUpdateWithinTransactionSpy = vi.fn(
@@ -155,10 +183,12 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
       workspaceId?: string
     ) => {
       callbacks.beforeUpdate?.();
-      const updated =
-        workspaceId === undefined
-          ? repoUpdateSpy(objectId, fields)
-          : repoUpdateScopedSpy(objectId, workspaceId, fields);
+      const updated = applyUpdateFields(fields, workspaceId);
+      if (workspaceId === undefined) {
+        void repoUpdateSpy(objectId, fields);
+      } else {
+        void repoUpdateScopedSpy(objectId, workspaceId, fields);
+      }
       callbacks.afterUpdate?.();
       return updated;
     }

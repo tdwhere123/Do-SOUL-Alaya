@@ -4,14 +4,15 @@ import {
   EmbeddingRecallService,
   type EmbeddingVectorRecord
 } from "../../embedding-recall/embedding-recall-service.js";
-import { createEmbeddingRecord, createProvider } from "./embedding-recall-test-helpers.js";
+import type { EmbeddingProviderPort } from "../../embedding-recall/types.js";
+import { createEmbeddingRecord, createProvider, mockEmbedTexts } from "./embedding-recall-test-helpers.js";
 
 function buildService(input: {
   readonly queryEmbedding: Float32Array;
   readonly storedVectors: readonly EmbeddingVectorRecord[];
   readonly isAvailable?: boolean;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
-  readonly embedTexts?: (texts: readonly string[]) => Promise<readonly Float32Array[]>;
+  readonly embedTexts?: EmbeddingProviderPort["embedTexts"];
 }): EmbeddingRecallService {
   return new EmbeddingRecallService({
     embeddingRepo: {
@@ -20,10 +21,7 @@ function buildService(input: {
     },
     provider: createProvider({
       isAvailable: input.isAvailable ?? true,
-      embedTexts:
-        input.embedTexts === undefined
-          ? vi.fn(async () => [input.queryEmbedding])
-          : vi.fn(input.embedTexts)
+      embedTexts: input.embedTexts ?? (async () => [input.queryEmbedding])
     }),
     eventLogRepo: {
       append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
@@ -150,7 +148,7 @@ describe("EmbeddingRecallService.scorePoolCandidates", () => {
   });
 
   it("reuses a warmed query embedding instead of calling the provider again", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map(() => new Float32Array([1, 0]))
     );
     const service = buildService({

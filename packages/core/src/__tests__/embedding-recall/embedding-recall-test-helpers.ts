@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import {
   MemoryDimension,
   ScopeClass,
@@ -7,16 +7,26 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
-import type { TestMock } from "../shared/mock-types.js";
+import type { EmbeddingProviderPort } from "../../embedding-recall/types.js";
 
 export type EmbeddingRecallAppendSpy = (
   entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
 ) => Promise<EventLogEntry>;
 
+export type EmbedTextsMock = Mock<EmbeddingProviderPort["embedTexts"]>;
+
+export function mockEmbedTexts(
+  impl?: EmbeddingProviderPort["embedTexts"]
+): EmbedTextsMock {
+  return vi.fn<EmbeddingProviderPort["embedTexts"]>(
+    impl ?? (async (texts) => texts.map(() => new Float32Array([1, 0])))
+  );
+}
+
 export function createProvider(overrides: {
   readonly isAvailable?: boolean;
-  readonly embedTexts?: TestMock;
-} = {}) {
+  readonly embedTexts?: EmbeddingProviderPort["embedTexts"];
+} = {}): EmbeddingProviderPort {
   return {
     providerKind: "openai",
     modelId: "text-embedding-3-small",
@@ -24,7 +34,7 @@ export function createProvider(overrides: {
     isAvailable: overrides.isAvailable ?? true,
     embedTexts:
       overrides.embedTexts ??
-      vi.fn(async (texts: readonly string[]) => texts.map(() => new Float32Array([1, 0])))
+      (async (texts: readonly string[]) => texts.map(() => new Float32Array([1, 0])))
   };
 }
 

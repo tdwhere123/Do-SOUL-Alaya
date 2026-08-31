@@ -7,7 +7,8 @@ import { RecallService } from "../../recall/recall-service.js";
 import {
   createEmbeddingRecord,
   createProvider,
-  hashMemoryContent
+  hashMemoryContent,
+  mockEmbedTexts
 } from "../embedding-recall/embedding-recall-test-helpers.js";
 import {
   createDependencies,
@@ -113,7 +114,7 @@ async function runRecall(
 ) {
   const memories = createFixedMemories();
   const { dependencies } = createDependencies(memories);
-  const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
+  const embedTexts = mockEmbedTexts(async () => [new Float32Array([1, 0])]);
   const embeddingService = new EmbeddingRecallService({
     embeddingRepo: {
       listByObjectIds: vi.fn(async (_workspaceId, objectIds) =>

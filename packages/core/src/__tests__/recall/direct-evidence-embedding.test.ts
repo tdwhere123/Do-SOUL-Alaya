@@ -34,6 +34,9 @@ import {
   createTaskSurface,
   overridePolicy
 } from "./recall-service-test-fixtures.js";
+import {
+  requireLiveCandidateDiagnostics
+} from "./fine-assessment-selection-fixtures.js";
 
 const WORKSPACE_ID = "workspace-1";
 const QUERY_TEXT = "Which color did the assistant recommend?";
@@ -213,7 +216,7 @@ describe("direct evidence transient embedding assessment", () => {
     const result = await runRecall(fixture);
 
     expect(scoreEvidenceCandidates).toHaveBeenCalledOnce();
-    const diagnostics = result.diagnostics?.candidates ?? [];
+    const diagnostics = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []);
     const evidenceDiagnostic = diagnostics.find((candidate) =>
       candidate.candidate_key === evidenceCandidateKey(evidence[0]!.object_id)
     );
@@ -241,7 +244,9 @@ describe("direct evidence transient embedding assessment", () => {
           embedding: new Float32Array([1, 0])
         })])
       },
-      provider: createProvider({ embedTexts }),
+      provider: createProvider({
+        embedTexts: async (texts) => embedTexts(texts)
+      }),
       eventLogRepo: {
         append: vi.fn(async (entry) => ({
           event_id: "event-1",
@@ -552,7 +557,7 @@ function findDiagnostic(
   result: Awaited<ReturnType<RecallService["recall"]>>,
   candidateKey: string
 ) {
-  return result.diagnostics?.candidates.find((candidate) =>
+  return requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((candidate) =>
     candidate.candidate_key === candidateKey
   );
 }

@@ -2,11 +2,13 @@ import { compareText } from "../../../../../shared/compare-text.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../../../field/field-identity.js";
 import {
-  readMemoryLexicalIntervalSources,
   verifyLexicalIntervalSourceReceiptV1
 } from
   "../../../../field/retrieval/retrieval-field-source-authority.js";
-import type { LexicalIntervalSourceReceiptCapturedV1 } from
+import type {
+  LexicalIntervalSourceReceiptCapturedV1,
+  LexicalIntervalSourceReceiptV1
+} from
   "../../../../field/retrieval/lexical-interval-source-receipt.js";
 import type { LiveQueryProofAuthority } from "../../live-query-proof-authority.js";
 import type { ChannelClosureScope } from "../../closure/contract.js";
@@ -25,9 +27,8 @@ export function readLiveLexicalClosureSource(
 ): LiveLexicalClosureSource | null {
   try {
     const captured = captureVerifiedLiveClosureAuthority(authority);
-    const bundle = captured.lexical_source_bundle;
-    if (bundle === undefined || !captured.source_identity_is_stable) return null;
-    const issued = readMemoryLexicalIntervalSources(bundle);
+    const issued = captured.lexical_interval_sources;
+    if (issued === undefined || !captured.source_identity_is_stable) return null;
     const admitted = admitCapturedLexicalSources(captured, issued);
     if (admitted === undefined || admitted.length !== 1 ||
         admitted[0]?.status !== "captured") return null;
@@ -64,7 +65,7 @@ export function readLiveLexicalClosureSource(
 
 function admitCapturedLexicalSources(
   captured: ReturnType<typeof captureVerifiedLiveClosureAuthority>,
-  values: readonly ReturnType<typeof readMemoryLexicalIntervalSources>[number][]
+  values: readonly Readonly<LexicalIntervalSourceReceiptV1>[]
 ) {
   const expected = captured.authority.expected_lexical_request_pins;
   const bundle = captured.lexical_source_bundle;

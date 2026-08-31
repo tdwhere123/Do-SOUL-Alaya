@@ -21,6 +21,9 @@ import {
   createTaskSurface
 } from "../recall-8factor-test-fixtures.js";
 import { qualifyEvidence } from "./qualified-evidence-test-fixture.js";
+import {
+  requireLiveCandidateDiagnostics
+} from "../fine-assessment-selection-fixtures.js";
 
 const EVIDENCE_ID = "00000000-0000-4000-8000-000000000101";
 const SECOND_EVIDENCE_ID = "00000000-0000-4000-8000-000000000102";
@@ -70,10 +73,10 @@ describe("direct evidence recall candidates", () => {
     expect(candidate?.score_factors?.graph_support ?? 0).toBe(0);
     expect(candidate?.score_factors?.path_plasticity ?? 0).toBe(0);
     expect(countInboundSupports).not.toHaveBeenCalledWith(EVIDENCE_ID);
-    const observation = result.diagnostics?.candidates.find((item) =>
+    const observation = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )?.answer_features?.answer_support_observations?.[0];
-    expect(result.diagnostics?.candidates.find((item) =>
+    expect(requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )?.selector_observation?.evidence.source_role).toBe("user");
     expect(observation).toMatchObject({
@@ -138,7 +141,7 @@ describe("direct evidence recall candidates", () => {
     );
     expect(candidate?.content_preview).toContain("I use Atlas for research.");
     expect(candidate?.source_channels).toContain("evidence_fts_direct");
-    expect(result.diagnostics?.candidates.find((item) =>
+    expect(requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )?.answer_features?.answer_support_observations?.[0]).toMatchObject({
       projection_kind: "turn_projection",
@@ -222,7 +225,7 @@ describe("direct evidence recall candidates", () => {
     expect(result.candidates.find((item) =>
       item.object_id === memory.object_id
     )?.source_channels).toContain("evidence_fts");
-    expect(result.diagnostics?.candidates.find((item) =>
+    expect(requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )?.answer_features?.answer_support_observations).toBeUndefined();
   });

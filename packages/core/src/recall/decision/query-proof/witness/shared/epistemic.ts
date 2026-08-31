@@ -5,7 +5,6 @@ import {
 } from "../../../contract-primitives.js";
 import { parseCompleteness } from "./completeness.js";
 import type {
-  WitnessCompleteness,
   WitnessEpistemic
 } from "./types.js";
 

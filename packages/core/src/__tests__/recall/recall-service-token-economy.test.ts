@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import { RecallService, computeRecallTokenEconomy } from "../../recall/recall-service.js";
 import { createActiveConstraint, createDependencies, createMemoryEntry, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import {
+  requireLiveCandidateDiagnostics
+} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService", () => {
   it("forwards active constraints cap to the active constraints port", async () => {
@@ -62,7 +65,7 @@ describe("RecallService", () => {
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-1"]);
     expect(result.diagnostics?.candidate_pool_count).toBe(3);
-    expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "memory-2")).toMatchObject({
+    expect(requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((candidate) => candidate.object_id === "memory-2")).toMatchObject({
       pre_budget_rank: 2,
       final_rank: null,
       dropped_reason: "rank_displaced",
@@ -364,7 +367,7 @@ describe("RecallService fusion-only delivery diagnostics", () => {
       strategy: "analyze",
       diagnosticCapture: "answer_features"
     });
-    const candidates = result.diagnostics?.candidates ?? [];
+    const candidates = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []);
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
       expect(["kept", "promoted", "displaced"]).toContain(
@@ -386,7 +389,7 @@ describe("RecallService fusion-only delivery diagnostics", () => {
       strategy: "analyze",
       diagnosticCapture: "answer_features"
     });
-    const candidates = result.diagnostics?.candidates ?? [];
+    const candidates = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []);
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
       expect(["kept", "promoted", "displaced"]).toContain(

@@ -7,11 +7,11 @@ import type {
   EvidenceDocumentEmbeddingRecord,
   EvidenceDocumentEmbeddingRepoPort
 } from "../../embedding-recall/types.js";
-import { createProvider } from "./embedding-recall-test-helpers.js";
+import { createProvider, mockEmbedTexts } from "./embedding-recall-test-helpers.js";
 
 describe("EvidenceDocumentEmbeddingEngine", () => {
   it("reuses an identity-preserving document batch without another provider call", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const engine = new EvidenceDocumentEmbeddingEngine(createProvider({ embedTexts }), 50);
@@ -28,7 +28,7 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
   });
 
   it("binds cache identity and provider input to normalized document text", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const engine = new EvidenceDocumentEmbeddingEngine(createProvider({ embedTexts }), 50);
@@ -42,7 +42,7 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
   });
 
   it("binds cached documents to the active provider model identity", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const provider = createProvider({ embedTexts });
@@ -56,7 +56,7 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
   });
 
   it("preserves exact input order when a batch contains duplicate documents", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const engine = new EvidenceDocumentEmbeddingEngine(createProvider({ embedTexts }), 50);
@@ -74,7 +74,7 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
   it("single-flights overlapping document misses", async () => {
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => { release = resolve; });
-    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
       await blocked;
       return texts.map((text) => vectorFor(text));
     });
@@ -93,7 +93,7 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
 
   it("clears failed single-flight entries so a later request can retry", async () => {
     let shouldFail = true;
-    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
       if (shouldFail) throw new Error("transient failure");
       return texts.map((text) => vectorFor(text));
     });
@@ -109,7 +109,7 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
   });
 
   it("evicts the least-recently-used document at the configured bound", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const engine = new EvidenceDocumentEmbeddingEngine(createProvider({ embedTexts }), 2);
@@ -124,7 +124,7 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
   });
 
   it("hydrates exact persisted identities without document inference", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const store = createStore([
@@ -147,7 +147,7 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
   });
 
   it("joins an unordered persisted batch by exact document identity", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const store = createStore([
@@ -169,7 +169,7 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
   });
 
   it("embeds one mixed cold batch, preserves order, and persists each missing identity", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const store = createStore([
@@ -218,7 +218,7 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
   });
 
   it("reuses a document persisted by a previous engine instance", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const records: EvidenceDocumentEmbeddingRecord[] = [];

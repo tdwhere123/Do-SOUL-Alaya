@@ -66,17 +66,23 @@ describe("path findByAnchors request cache", () => {
 function changedAnchorIdentities(
   anchors: readonly PathAnchorRef[]
 ): readonly (readonly PathAnchorRef[])[] {
-  return [
-    anchors.with(0, { kind: "object", object_id: "object-z" }),
-    anchors.with(1, { kind: "object_facet", object_id: "object-b", facet_key: "facet-z" }),
-    anchors.with(2, {
-      kind: "obligation", source_object_id: "object-c", obligation_digest: "obligation-z"
-    }),
-    anchors.with(3, {
-      kind: "risk_concern", source_object_id: "object-d", concern_digest: "risk-z"
-    }),
-    anchors.with(4, {
-      kind: "time_concern", source_object_id: "object-e", window_digest: "time-z"
-    })
+  const copies = [
+    [...anchors],
+    [...anchors],
+    [...anchors],
+    [...anchors],
+    [...anchors]
   ];
+  copies[0]![0] = { kind: "object", object_id: "object-z" };
+  copies[1]![1] = { kind: "object_facet", object_id: "object-b", facet_key: "facet-z" };
+  copies[2]![2] = {
+    kind: "obligation", source_object_id: "object-c", obligation_digest: "obligation-z"
+  };
+  copies[3]![3] = {
+    kind: "risk_concern", source_object_id: "object-d", concern_digest: "risk-z"
+  };
+  copies[4]![4] = {
+    kind: "time_concern", source_object_id: "object-e", window_digest: "time-z"
+  };
+  return copies;
 }

@@ -7,6 +7,9 @@ import {
   createEvidenceFanoutScenario,
   createSourceDeliveryBudgetScenario
 } from "./recall-current-behavior-scenarios.js";
+import {
+  requireLiveCandidateDiagnostics
+} from "../recall/fine-assessment-selection-fixtures.js";
 
 describe("recall regression suite (in-memory handler fixtures)", () => {
 it("keeps winning admission diagnostics aligned to the first specific attribution plane", async () => {
@@ -20,7 +23,7 @@ it("keeps winning admission diagnostics aligned to the first specific attributio
       strategy: "analyze",
       diagnosticCapture: "answer_features"
     });
-    const diag = result.diagnostics?.candidates.find((item) => item.object_id === "lexical-gold");
+    const diag = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) => item.object_id === "lexical-gold");
     expect(diag?.plane_first_admitted).toBe("activation");
     expect(diag?.admission_planes).toContain("lexical");
     expect(diag?.plane_winning_admission).toBe("lexical");
@@ -62,7 +65,7 @@ it("records path_expansion as the winning admission plane for path-only linked c
       strategy: "analyze",
       diagnosticCapture: "answer_features"
     });
-    const diag = result.diagnostics?.candidates.find((item) => item.object_id === "linked");
+    const diag = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) => item.object_id === "linked");
     expect(diag?.admission_planes).toContain("path_expansion");
     expect(diag?.plane_winning_admission).toBe("path_expansion");
     expect(diag?.path_expansion_sources).toEqual([
@@ -105,7 +108,7 @@ it("uses source proximity as an independent fusion stream for neighboring eviden
       diagnosticCapture: "answer_features"
     });
 
-    const diag = result.diagnostics?.candidates.find((item) => item.object_id === "neighbor");
+    const diag = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) => item.object_id === "neighbor");
     expect(diag?.admission_planes).toContain("source_proximity");
     expect(diag?.source_channels).toContain("source_proximity");
     expect(diag?.per_stream_rank.source_proximity).not.toBeNull();
@@ -137,10 +140,10 @@ it("promotes answerable source-window neighbors without lifting source-only neig
     expect(result.candidates.map((item) => item.object_id)).not.toContain(sourceOnlyNeighbor.object_id);
     expect(result.diagnostics?.query_probes.normalized_query).toBe("Where did I buy my new bookshelf?");
     expect(result.diagnostics?.query_sought_facets).toEqual([]);
-    const answerDiagnostic = result.diagnostics?.candidates.find(
+    const answerDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
       (item) => item.object_id === answerableNeighbor.object_id
     );
-    const sourceOnlyDiagnostic = result.diagnostics?.candidates.find(
+    const sourceOnlyDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
       (item) => item.object_id === sourceOnlyNeighbor.object_id
     );
     expect(answerDiagnostic?.per_stream_rank.evidence_fts).not.toBeNull();
@@ -188,8 +191,8 @@ it("uses subject alignment only for self-referential personal-memory queries", a
     });
 
     expect(personalResult.candidates.map((item) => item.object_id)).toEqual(["personal-fact"]);
-    const personalDiagnostic = personalResult.diagnostics?.candidates.find((item) => item.object_id === "personal-fact");
-    const adviceDiagnostic = personalResult.diagnostics?.candidates.find((item) => item.object_id === "generic-advice");
+    const personalDiagnostic = requireLiveCandidateDiagnostics(personalResult.diagnostics?.candidates ?? []).find((item) => item.object_id === "personal-fact");
+    const adviceDiagnostic = requireLiveCandidateDiagnostics(personalResult.diagnostics?.candidates ?? []).find((item) => item.object_id === "generic-advice");
     expect(personalDiagnostic?.per_stream_rank.subject_alignment).toBe(1);
     expect(adviceDiagnostic?.per_stream_rank.subject_alignment).toBeNull();
 
@@ -200,7 +203,7 @@ it("uses subject alignment only for self-referential personal-memory queries", a
       policyOverride: policy,
       diagnosticCapture: "answer_features"
     });
-    const thirdPersonPersonalDiagnostic = thirdPersonResult.diagnostics?.candidates.find(
+    const thirdPersonPersonalDiagnostic = requireLiveCandidateDiagnostics(thirdPersonResult.diagnostics?.candidates ?? []).find(
       (item) => item.object_id === "personal-fact"
     );
     expect(thirdPersonPersonalDiagnostic?.per_stream_rank.subject_alignment).toBeNull();
@@ -244,7 +247,7 @@ it("uses evidence capsule artifact refs for source proximity when memory refs ar
     });
 
     expect(findByIds).toHaveBeenCalled();
-    const diag = result.diagnostics?.candidates.find((item) => item.object_id === "neighbor");
+    const diag = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) => item.object_id === "neighbor");
     expect(diag?.admission_planes).toContain("source_proximity");
     expect(diag?.per_stream_rank.source_proximity).not.toBeNull();
     expect(diag?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
@@ -283,12 +286,12 @@ it("keeps final delivery budget filled after source proximity admission", async 
     });
 
     expect(result.candidates).toHaveLength(10);
-    const siblingDiagnostic = result.diagnostics?.candidates.find(
+    const siblingDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
       (item) => item.object_id === siblingId
     );
     expect(siblingDiagnostic?.admission_planes).toEqual(["source_proximity"]);
     expect(siblingDiagnostic?.per_stream_rank.source_proximity).not.toBeNull();
-    const diagnostics = result.diagnostics?.candidates ?? [];
+    const diagnostics = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []);
     const deliveredDiagnostics = diagnostics.filter((item) => item.final_rank !== null);
     expect(deliveredDiagnostics).toHaveLength(10);
     // Deep-head reorder + coverage packing may deliver past fused top-K; admission
@@ -340,7 +343,7 @@ it("bounds source-proximity admission by the delivery budget", async () => {
       diagnosticCapture: "answer_features"
     });
 
-    const sourceOnlyDiagnostics = (result.diagnostics?.candidates ?? [])
+    const sourceOnlyDiagnostics = (requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []))
       .filter((item) => item.admission_planes.includes("source_proximity"))
       .filter((item) => !item.admission_planes.includes("lexical"));
     expect(sourceOnlyDiagnostics.length).toBeLessThanOrEqual(20);

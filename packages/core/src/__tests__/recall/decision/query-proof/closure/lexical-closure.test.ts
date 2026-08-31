@@ -11,6 +11,8 @@ import {
   verifyLexicalIntervalSourceReceiptV1
 } from
   "../../../../../recall/field/retrieval/retrieval-field-source-authority.js";
+import { captureVerifiedLiveClosureAuthority } from
+  "../../../../../recall/decision/query-proof/closure/live-authority-binding.js";
 import { withActiveRecallReadSnapshot } from
   "../../../../../recall/runtime/recall-read-snapshot.js";
 import type { KeywordLexicalMergeCapture, KeywordSearchFieldResult } from
@@ -28,10 +30,13 @@ import type { LexicalBoundProducerReceipt } from
   "../../../../../recall/runtime/recall-search-port-types.js";
 import { admitLiveLexicalIntervalSources } from
   "../../../../../recall/decision/query-proof/live-query-proof-authority.js";
+import type { LiveQueryProofAuthority } from
+  "../../../../../recall/decision/query-proof/live-query-proof-authority.js";
 import {
   authorityFrom,
   capturedLexicalPreparedAuthority,
-  cleanup
+  cleanup,
+  stubMemoryRepo
 } from "../../../integration/shadow/live-receipt-fixtures.js";
 import { plantProof } from "../adapters/lexical-bound/d1-proof-fixture.js";
 import { evaluateAbstractProofKernel } from
@@ -111,6 +116,26 @@ describe("live-source lexical closure", () => {
       expect(closeLexicalBoundChannel(switched)).toBeNull();
     });
   });
+
+  it("closes against captured sources after the live bundle records grow", async () => {
+    await withIssuedSource(allLaneProof(2), async (authority) => {
+      const captured = captureVerifiedLiveClosureAuthority(authority);
+      expect(captured.lexical_interval_sources).toHaveLength(1);
+      const closed = closeLexicalBoundChannel(captured.source_authority);
+      expect(closed?.status).toBe("exact_closed");
+      await authority.lexical_source_bundle.searchMemoryKeyword({
+        variant: "lexical_relaxed",
+        queryText: "other",
+        limit: 2,
+        scope: {}
+      });
+      expect(readMemoryLexicalIntervalSources(authority.lexical_source_bundle).length)
+        .toBeGreaterThan(1);
+      expect(captured.lexical_interval_sources).toHaveLength(1);
+      expect(closeLexicalBoundChannel(captured.source_authority)?.result_digest)
+        .toBe(closed?.result_digest);
+    });
+  });
   it("does not consume a planted lexical proof without a live source bundle", () => {
     expect(closeLexicalBoundChannel(authorityFrom(prepared))).toBeNull();
   });
@@ -131,7 +156,7 @@ describe("live-source lexical closure", () => {
         })
       }))).toBeNull();
       const plantedUniverse = { ...result,
-        universe_digest: `sha256:${"9".repeat(64)}`
+        universe_digest: `sha256:${"9".repeat(64)}` as `sha256:${string}`
       };
       expect(() => verifyChannelClosureResult(plantedUniverse, authority))
         .toThrow(/digest mismatch|binding mismatch/u);
@@ -144,7 +169,7 @@ describe("live-source lexical closure", () => {
       const wrongRequest = Object.freeze({
         ...authority,
         expected_lexical_request_pins: authority.expected_lexical_request_pins.map((pin) =>
-          Object.freeze({ ...pin, request_digest: `sha256:${"8".repeat(64)}` }))
+          Object.freeze({ ...pin, request_digest: `sha256:${"8".repeat(64)}` as `sha256:${string}` }))
       });
       expect(closeLexicalBoundChannel(wrongRequest)).toBeNull();
       expect(closeLexicalBoundChannel(Object.freeze({
@@ -165,7 +190,7 @@ describe("live-source lexical closure", () => {
           }
           return Reflect.get(target, property, receiver);
         }
-      });
+      }) as LiveQueryProofAuthority;
 
       expect(closeLexicalBoundChannel(switching)?.status).toBe("exact_closed");
       expect(workspaceReads).toBe(1);
@@ -197,12 +222,12 @@ async function withIssuedSource<T>(
   const bundle = createRecallRetrievalFieldBundle({
     workspaceId: "workspace-1",
     queryText: "stable",
-    memoryRepo: { searchByKeywordField: async () => Object.freeze({
+    memoryRepo: stubMemoryRepo(async () => Object.freeze({
       matches,
       lanes: normalLanes(matches),
       lexical_raw_rank: capture,
       lexical_raw_rank_receipt: receipt
-    }) }
+    }))
   });
   return await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
     bindRetrievalFieldBundleReadAuthority(bundle, sourcePrepared.snapshotReadLease, capability);

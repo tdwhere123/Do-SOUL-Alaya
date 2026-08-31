@@ -13,6 +13,12 @@ import type { SupportCandidateReceiptV1 } from
   "../../../../../recall/decision/query-proof/support/index.js";
 import { evidenceCandidate } from "../../../delivery/canonical-delivery-fixtures.js";
 import { supplementary } from "../../../integration/shadow/live-receipt-fixtures.js";
+import {
+  OPEN_SEMANTIC_FACTOR_COMPOSITION_OPERATOR_ID,
+  type OpenSemanticFactorCompositionReceipt
+} from "../../../../../recall/field/open-semantic-factors/composition.js";
+import type { RecallFieldDigest } from
+  "../../../../../recall/field/field-identity.js";
 
 const HYPOTHESIS = createCanonicalQueryV1({
   variables: [{ name: "x0", sort: "entity" }],
@@ -27,11 +33,11 @@ const HYPOTHESIS = createCanonicalQueryV1({
 
 const COMPILATION = { hypotheses: [HYPOTHESIS] };
 
-const BOUND_RECEIPT: SupportCandidateReceiptV1 = Object.freeze({
+const BOUND_RECEIPT = Object.freeze({
   candidate_key: "workspace_local:memory_entry:cand-a",
   hypothesis_digest: digestCanonicalQueryV1(HYPOTHESIS),
   osf: {
-    composition_status: "composed",
+    composition_status: "composed" as const,
     truncated: false,
     bindings: [{
       variable_id: "x",
@@ -43,7 +49,7 @@ const BOUND_RECEIPT: SupportCandidateReceiptV1 = Object.freeze({
   },
   fact_frames: [{ semantic_identity: "person.alice", role: "entity", evidence_id: "eu-1" }],
   evidence_ids: ["eu-1"]
-});
+}) satisfies SupportCandidateReceiptV1;
 
 describe("live support query binding", () => {
   it("binds only the current compilation hypothesis and matching live projection", () => {
@@ -99,17 +105,7 @@ describe("live support query binding", () => {
       candidates,
       {
         ...supplementary(candidates),
-        openSemanticFactorComposition: {
-          status: "composed",
-          truncated: false,
-          bindings: [{
-            variable_id: "x",
-            binding_identity: "arg.person",
-            semantic_identity: "person.alice",
-            evidence_id: "eu-1",
-            query_proposition_id: "prop.works-at"
-          }]
-        }
+        openSemanticFactorComposition: osfComposition()
       },
       COMPILATION
     );
@@ -119,3 +115,35 @@ describe("live support query binding", () => {
     })]);
   });
 });
+
+const OSF_DIGEST = `sha256:${"a".repeat(64)}` as RecallFieldDigest;
+
+function osfComposition(): OpenSemanticFactorCompositionReceipt {
+  return Object.freeze({
+    schema_version: 2,
+    operator_id: OPEN_SEMANTIC_FACTOR_COMPOSITION_OPERATOR_ID,
+    status: "composed",
+    compatibility_trace_digest: OSF_DIGEST,
+    query_capture_digest: OSF_DIGEST,
+    result_variable_ids: Object.freeze(["x"]),
+    search_step_count: 1,
+    solution_count: 1,
+    observed_binding_count: 1,
+    binding_observation_count: 1,
+    truncated: false,
+    bindings: Object.freeze([{
+      variable_id: "x",
+      binding_identity: "arg.person",
+      evidence_id: "eu-1",
+      evidence_factor_id: "factor.person",
+      semantic_identity: "person.alice",
+      surface: "alice",
+      source_span: Object.freeze([0, 5] as const),
+      query_proposition_id: "prop.works-at",
+      evidence_proposition_id: "ev.prop.works-at"
+    }]),
+    solutions: Object.freeze([]),
+    variable_collections: Object.freeze([]),
+    receipt_digest: OSF_DIGEST
+  });
+}

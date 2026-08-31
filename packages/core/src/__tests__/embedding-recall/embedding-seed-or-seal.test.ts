@@ -15,7 +15,8 @@ import {
   createEmbeddingRecord,
   createMemoryEntry,
   createProvider,
-  hashMemoryContent
+  hashMemoryContent,
+  mockEmbedTexts
 } from "./embedding-recall-test-helpers.js";
 
 describe("embedding seed-or-seal", () => {
@@ -84,7 +85,7 @@ describe("embedding seed-or-seal", () => {
         ]),
         listByObjectIds: vi.fn(async () => [])
       },
-      provider: createProvider({ embedTexts: vi.fn(async () => [new Float32Array([1, 0])]) }),
+      provider: createProvider({ embedTexts: mockEmbedTexts(async () => [new Float32Array([1, 0])]) }),
       eventLogRepo: {
         append: vi.fn(async (entry) => ({
           event_id: "event-1",

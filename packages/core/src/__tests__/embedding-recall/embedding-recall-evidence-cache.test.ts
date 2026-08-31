@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { hashMemoryContent } from "../../embedding-recall/helpers.js";
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
-import { createProvider } from "./embedding-recall-test-helpers.js";
+import { createProvider, mockEmbedTexts } from "./embedding-recall-test-helpers.js";
 
 describe("EmbeddingRecallService evidence document cache", () => {
   it("keeps query and document inference accounting separate across repeated scoring", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const service = new EmbeddingRecallService({
@@ -47,7 +47,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
   });
 
   it("does not reuse a query vector as the document vector for identical text", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))
     );
     const service = new EmbeddingRecallService({
@@ -80,7 +80,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
   });
 
   it("keeps candidate keys aligned with document vectors in non-sorted order", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => text === "query"
         ? new Float32Array([1, 0])
         : text === "alpha"
@@ -124,7 +124,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
   });
 
   it("attributes the strongest linked document score to one candidate", async () => {
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
       texts.map((text) => text === "query" || text === "strong"
         ? new Float32Array([1, 0])
         : new Float32Array([0, 1]))
@@ -268,7 +268,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
         upsertMany
       },
       provider: createProvider({
-        embedTexts: vi.fn(async (texts: readonly string[]) =>
+        embedTexts: mockEmbedTexts(async (texts: readonly string[]) =>
           texts.map(() => new Float32Array([1, 0])))
       }),
       eventLogRepo: {
@@ -303,7 +303,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
 
   it("fails open on a document batch error and retries it on the next request", async () => {
     let call = 0;
-    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
       call += 1;
       if (call === 2) throw new Error("transient document failure");
       return texts.map((text) => vectorFor(text));
@@ -349,7 +349,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
   });
 
   it("counts a synchronous document provider failure after a prepared query", async () => {
-    const embedTexts = vi.fn(() => {
+    const embedTexts = mockEmbedTexts(() => {
       throw new Error("synchronous document failure");
     });
     const service = new EmbeddingRecallService({
@@ -439,7 +439,7 @@ async function scoreEqualCandidates(
   const service = new EmbeddingRecallService({
     embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
     provider: createProvider({
-      embedTexts: vi.fn(async (texts: readonly string[]) =>
+      embedTexts: mockEmbedTexts(async (texts: readonly string[]) =>
         texts.map(() => new Float32Array([1, 0])))
     }),
     eventLogRepo: {

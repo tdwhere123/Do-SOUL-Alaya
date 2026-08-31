@@ -5,6 +5,9 @@ import {
   createMemoryEntry,
   createTaskSurface
 } from "./recall-service-test-fixtures.js";
+import {
+  requireLiveCandidateDiagnostics
+} from "./fine-assessment-selection-fixtures.js";
 
 const QUESTION_AS_OF = "2023-05-30T23:40:00.000Z";
 
@@ -50,7 +53,7 @@ describe("RecallService historical as-of generation miss", () => {
     expect(result.candidates.map((candidate) => candidate.object_id)).toContain("memory-historical");
     expect(result.active_constraints).toEqual([]);
     expect(result.active_constraints_count).toBe(0);
-    const flood = result.diagnostics?.candidates.find(
+    const flood = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
       (candidate) => candidate.object_id === "memory-historical"
     )?.flood_potential;
     expect(flood?.path_status).toBe("inactive:index_unavailable");

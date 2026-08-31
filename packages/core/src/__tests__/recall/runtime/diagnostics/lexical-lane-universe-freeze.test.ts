@@ -107,7 +107,9 @@ describe("lexical lane evaluated-universe freeze", () => {
         tier: lane.lane_id === "porter" || lane.lane_id === "trigram" ? null : "hot"
       })
     );
-    expect(freezeLexicalBoundProducerReceipt(receipt).lanes.find((lane) =>
+    const frozen = freezeLexicalBoundProducerReceipt(receipt);
+    if (frozen === undefined) throw new Error("expected frozen receipt");
+    expect(frozen.lanes.find((lane) =>
       lane.lane_id === "porter"
     )?.evaluated_universe?.scope.tier).toBeNull();
     expect(() => freezeLexicalBoundProducerReceipt(receiptWithUniverses(truncatedReceipt(), (lane) =>

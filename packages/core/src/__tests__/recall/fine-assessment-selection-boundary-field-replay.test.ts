@@ -30,7 +30,9 @@ import {
   createConfig,
   createRankedCandidate,
   createSupplementaryData,
-  rankMap
+  rankMap,
+  requireLiveCandidateDiagnostic,
+  requireLiveCandidateDiagnostics
 } from "./fine-assessment-selection-fixtures.js";
 import {
   createRecallFiniteFieldChannelCapture,
@@ -344,7 +346,7 @@ describe("fine-assessment selection boundary field replay", () => {
     const captured = selectNegatedAssertion(true, true);
     const disposition = (
       result: ReturnType<typeof selectFineAssessmentCandidates>
-    ) => result.diagnostics.map((row) => ({
+    ) => requireLiveCandidateDiagnostics(result.diagnostics).map((row) => ({
       candidate_key: row.candidate_key,
       dropped_reason: row.dropped_reason
     }));
@@ -352,11 +354,11 @@ describe("fine-assessment selection boundary field replay", () => {
     expect(observerOnly.result.candidates).toEqual(ordinary.result.candidates);
     expect(disposition(observerOnly.result)).toEqual(disposition(ordinary.result));
     expect(observerOnly.boundary?.input.capture_answer_features).toBe(false);
-    for (const row of [...ordinary.result.diagnostics, ...observerOnly.result.diagnostics]) {
+    for (const row of [...requireLiveCandidateDiagnostics(ordinary.result.diagnostics), ...requireLiveCandidateDiagnostics(observerOnly.result.diagnostics)]) {
       expect(row).not.toHaveProperty("selector_observation");
       expect(row).not.toHaveProperty("answer_features");
     }
-    expect(captured.result.diagnostics[0]?.selector_observation?.evidence.event_status)
+    expect(requireLiveCandidateDiagnostic(captured.result.diagnostics[0])?.selector_observation?.evidence.event_status)
       .toBe("negated");
     expect(captured.boundary?.expected.pre_projection?.admission_actions[0])
       .toMatchObject({

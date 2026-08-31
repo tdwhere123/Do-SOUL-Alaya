@@ -15,7 +15,7 @@ describe("recall evidence contexts for typed fact-frame formations", () => {
       evidence_refs: ["evidence-1"]
     });
     const evidence = createVerifiedAssertionEvidence();
-    const formed = materializeBookshelfFactFrame(evidence.source_hash);
+    const formed = materializeBookshelfFactFrame(requireSourceHash(evidence.source_hash));
     const contexts = await collectRecallEvidenceContexts({
       dependencies: {
         evidenceSearchPort: {
@@ -39,7 +39,7 @@ describe("recall evidence contexts for typed fact-frame formations", () => {
 
   it("loads a direct evidence-capsule candidate that no memory references", async () => {
     const evidence = createVerifiedAssertionEvidence({ objectId: "evidence-capsule-only" });
-    const formed = materializeBookshelfFactFrame(evidence.source_hash);
+    const formed = materializeBookshelfFactFrame(requireSourceHash(evidence.source_hash));
     const findByIds = vi.fn(async () => [evidence]);
     const findFactKeys = vi.fn(async () => []);
     const findQualified = vi.fn(async () => [{
@@ -81,8 +81,8 @@ describe("recall evidence contexts for typed fact-frame formations", () => {
     });
     const alice = createVerifiedAssertionEvidence({ objectId: "evidence-alice" });
     const bob = createVerifiedAssertionEvidence({ objectId: "evidence-bob" });
-    const aliceFormed = materializeBookshelfFactFrame(alice.source_hash);
-    const bobFormed = materializeBookshelfFactFrame(bob.source_hash);
+    const aliceFormed = materializeBookshelfFactFrame(requireSourceHash(alice.source_hash));
+    const bobFormed = materializeBookshelfFactFrame(requireSourceHash(bob.source_hash));
     const findByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
       [alice, bob].filter((item) => ids.includes(item.object_id))
     );
@@ -156,3 +156,8 @@ describe("recall evidence contexts for typed fact-frame formations", () => {
       .not.toContain("Berlin");
   });
 });
+
+function requireSourceHash(value: string | null): string {
+  if (value === null) throw new Error("expected source_hash");
+  return value;
+}

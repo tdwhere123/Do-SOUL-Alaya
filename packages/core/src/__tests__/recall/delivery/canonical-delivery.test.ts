@@ -313,7 +313,8 @@ describe("reversible delivery cutover", () => {
       (dominator === keys[2] && dominated === keys[0]);
     const legacy = fineAssess({ ...params, policy: withFineDeliveryPath(params.policy, "legacy") });
     const closed = fineAssess({ ...params, shadowPsi: cyclic });
-    expect(isFailClosedShadowTrace(closed.shadowTrace)).toBe(true);
+    const closedTrace = closed.shadowTrace;
+    expect(closedTrace !== undefined && isFailClosedShadowTrace(closedTrace)).toBe(true);
     expect(closed.capture_execution).toEqual({
       status: "fail_closed",
       reason: "psi_cycle_contract_failure"

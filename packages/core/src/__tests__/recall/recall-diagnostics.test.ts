@@ -131,11 +131,11 @@ describe("recall diagnostics", () => {
       candidatePoolCount: 1,
       preBudgetCount: 1,
       deliveredCount: 1,
-      embeddingProviderStatus: "provider_not_requested",
-      embeddingSupplementStatus: "disabled",
+      embeddingProviderStatus: "provider_not_requested" as const,
+      embeddingSupplementStatus: "disabled" as const,
       evidenceEmbeddingScoring: {
         activationsByCandidateKey: new Map(),
-        status: "not_applicable",
+        status: "not_applicable" as const,
         expectedCount: 0,
         scoredCount: 0,
         inferenceCalls: 0,
@@ -155,17 +155,17 @@ describe("recall diagnostics", () => {
           full_evidence_selected_count: 1,
           owner_gist_excluded_count: 0,
           full_evidence_excluded_count: 0
-        }
+        } as const
       },
       providerDegradationReason: null,
       answerRerankDiagnostics: {
-        status: "not_requested",
+        status: "not_requested" as const,
         expected_count: 0,
         scored_count: 0,
         failure_class: null
       },
       graphExpansionDiagnostics: {
-        graph_expansion_plane_count_per_hop: [0, 0],
+        graph_expansion_plane_count_per_hop: [0, 0] as const,
         graph_expansion_plane_count_per_edge_type: {
           derives_from: 0,
           recalls: 0,

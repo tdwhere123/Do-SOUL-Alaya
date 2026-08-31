@@ -21,7 +21,10 @@ import type {
 import { countFamiliesWithHits } from "../delivery/fusion-delivery-families.js";
 import { isLegacyCandidateDiagnostic } from
   "./diagnostics/finalize-candidate-diagnostics.js";
-export { finalizeRecallCandidateDiagnostics } from
+export {
+  finalizeRecallCandidateDiagnostics,
+  isLegacyCandidateDiagnostic
+} from
   "./diagnostics/finalize-candidate-diagnostics.js";
 import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
 import type { QueryConditionParityView } from "./query-condition-parity.js";

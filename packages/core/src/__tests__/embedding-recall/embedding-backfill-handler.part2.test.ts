@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EmbeddingBackfillHandler, isEmbeddingBackfillPartialFailureError, resolveBackfillBatchConcurrency } from "../../embedding-recall/embedding-backfill-handler.js";
 import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
 
+import { createProvider, mockEmbedTexts } from "./embedding-recall-test-helpers.js";
 import {
   createEmbeddingMetadata,
   createMemoryEntry,
-  createProvider,
   hashContent
 } from "./embedding-backfill-handler.test-support.js";
 
@@ -29,7 +29,7 @@ it("still enforces the write-time CAS stale-skip under concurrency", async () =>
       })
     );
     const staleIds = new Set(["memory-3", "memory-17"]);
-    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
       await Promise.resolve();
       return texts.map(() => new Float32Array([0.7, 0.2, 0.1]));
     });
@@ -76,7 +76,7 @@ it("parses and clamps the concurrency override from an env-style value", async (
     );
     let inFlight = 0;
     let maxObservedInFlight = 0;
-    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
       inFlight += 1;
       maxObservedInFlight = Math.max(maxObservedInFlight, inFlight);
       await new Promise<void>((resolve) => setTimeout(resolve, 1));
@@ -127,7 +127,7 @@ it("settles all already-started in-flight batches before the persistence error p
     let inFlight = 0;
     let maxObservedInFlight = 0;
     let settledCalls = 0;
-    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
       inFlight += 1;
       maxObservedInFlight = Math.max(maxObservedInFlight, inFlight);
       await new Promise<void>((resolve) => setTimeout(resolve, 1));
@@ -195,7 +195,7 @@ it("reports partial durable side effects when a later batch write fails", async 
         upsertIfContentHashMatchesCurrentMemory: upsert
       },
       provider: createProvider({
-        embedTexts: vi.fn(async (texts: readonly string[]) =>
+        embedTexts: mockEmbedTexts(async (texts: readonly string[]) =>
           texts.map(() => new Float32Array([0.1, 0.2, 0.3]))
         )
       }),
@@ -231,7 +231,7 @@ it("persists out-of-order provider resolutions in batch order without buffering 
         content: `Ordered recall content ${index}.`
       })
     );
-    const embedTexts = vi.fn(async (texts: readonly string[]) => {
+    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
       // The first batch (contains "content 0.") resolves after a longer delay
       // than the second, forcing out-of-order provider resolution.
       const isFirstBatch = texts.some((text) => text.endsWith("content 0."));
@@ -272,7 +272,7 @@ it("returns failed audit entries for an all-failing corpus without throwing", as
         content: `Always-fails content ${index}.`
       })
     );
-    const embedTexts = vi.fn(async () => {
+    const embedTexts = mockEmbedTexts(async () => {
       throw new Error("provider permanently down");
     });
     const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
@@ -311,7 +311,7 @@ it.each([
       upsert,
       upsertIfContentHashMatchesCurrentMemory: upsert
     },
-    provider: createProvider({ embedTexts: vi.fn(async () => [vector]) }),
+    provider: createProvider({ embedTexts: mockEmbedTexts(async () => [vector]) }),
     retryDelayMs: 0
   });
 
@@ -334,7 +334,7 @@ it("rebuilds the whole current identity when cached dimensions disagree", async 
     content_hash: hashContent(memory.content),
     dimensions: index === 0 ? 2 : 3
   }));
-  const embedTexts = vi.fn(async (texts: readonly string[]) =>
+  const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
     texts.map(() => new Float32Array([1, 0, 0]))
   );
   const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
@@ -360,7 +360,7 @@ it("rebuilds the whole current identity when cached dimensions disagree", async 
 
 it("rebuilds a dimensionally stale cache after provider restart and reuses a matching cache", async () => {
   const memory = createMemoryEntry({ content: "Restart dimension contract." });
-  const embedTexts = vi.fn(async () => [new Float32Array([1, 0, 0])]);
+  const embedTexts = mockEmbedTexts(async () => [new Float32Array([1, 0, 0])]);
   const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
   const metadata = createEmbeddingMetadata({
     content_hash: hashContent(memory.content),

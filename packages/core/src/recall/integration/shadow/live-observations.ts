@@ -351,10 +351,10 @@ function subjectComponents(entry: Readonly<MemoryEntry>, context: LiveContext) {
   return ([
     subjectComponent("preference", "scorePreferenceProfileAlignment",
       context.probes.dimensions.includes("preference"),
-      () => scorePreferenceProfileAlignment(entry, context.probes), entry, context),
+      () => scorePreferenceProfileAlignment(entry, context.probes), entry),
     subjectComponent("self_reference", "scoreSelfReferenceAlignment",
       context.probes.subject_hints.includes("self_reference"),
-      () => scoreSelfReferenceAlignment(entry, context.probes), entry, context)
+      () => scoreSelfReferenceAlignment(entry, context.probes), entry)
   ] as const).filter((component) => component.envelope.state !== "not_applicable");
 }
 
@@ -363,8 +363,7 @@ function subjectComponent(
   operator_id: string,
   applicable: boolean,
   score: () => number,
-  entry: Readonly<MemoryEntry>,
-  context: LiveContext
+  entry: Readonly<MemoryEntry>
 ) {
   if (!applicable) return freezeShadow({
     component_id, operator_id, authority_state: "not_applicable" as const,

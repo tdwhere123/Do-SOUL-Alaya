@@ -3,6 +3,9 @@ import { MemoryDimension, ScopeClass, SynthesisStatus, type SynthesisCapsule } f
 import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 import { keywordSearchMethods } from "./fixtures/keyword-field-fixture.js";
+import {
+  requireLiveCandidateDiagnostics
+} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService", () => {
 it("merges synthesis-child metadata into a memory_entry when object ids collide", async () => {
@@ -77,7 +80,7 @@ it("merges synthesis-child metadata into a memory_entry when object ids collide"
 
     expect(result.candidates.map((candidate) => `${candidate.object_kind}:${candidate.object_id}`))
       .toEqual([`memory_entry:${sharedObjectId}`]);
-    const memoryDiagnostic = result.diagnostics?.candidates.find(
+    const memoryDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
       (candidate) => candidate.candidate_key === `workspace_local:memory_entry:${sharedObjectId}`
     );
 

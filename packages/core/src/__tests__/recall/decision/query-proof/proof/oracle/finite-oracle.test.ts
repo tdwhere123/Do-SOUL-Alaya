@@ -13,6 +13,8 @@ import {
 import {
   certifyAbstractSingletonWithFiniteOracle
 } from "../../../../../../recall/decision/query-proof/proof/abstract/differential.js";
+import type { LiveQueryProofAuthority } from
+  "../../../../../../recall/decision/query-proof/live-query-proof-authority.js";
 import type { PreparedRecallRequest } from
   "../../../../../../recall/runtime/recall-service-runner-types.js";
 import {
@@ -255,8 +257,14 @@ describe("source-bound finite exhaustive oracle", () => {
     const normalized = normalizeFiniteFixture(mutable);
     base.nested.values[0] = "mutated";
     choices[0]!.value = true;
-    mutable.coordinates.push(coordinate("second", "candidate_membership",
-      "membership", [false]));
+    mutable.coordinates.push({
+      coordinate_id: "second",
+      sensitivity_id: "sensitivity:second",
+      owner_id: "owner:second",
+      kind: "candidate_membership" as const,
+      abstract_kind: "membership" as const,
+      choices: [{ choice_id: "false", value: false }]
+    });
 
     expect(normalized.base_state).toEqual({ nested: { values: ["original"] } });
     expect(normalized.coordinates).toHaveLength(1);
@@ -345,7 +353,7 @@ describe("source-bound finite exhaustive oracle", () => {
         }
         return Reflect.get(target, property, receiver);
       }
-    });
+    }) as LiveQueryProofAuthority;
 
     expect(enumerateFiniteDecisionOracle({
       authority: switching,

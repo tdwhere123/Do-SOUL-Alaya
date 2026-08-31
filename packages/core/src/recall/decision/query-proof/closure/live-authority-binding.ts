@@ -9,6 +9,10 @@ import {
   type VerifiedLiveQueryProofPins
 } from "../live-query-proof-authority.js";
 import {
+  captureMemoryLexicalIntervalSources,
+  type CapturedMemoryLexicalIntervalSources
+} from "../../../field/retrieval/retrieval-field-source-authority.js";
+import {
   CLOSURE_SENSITIVITY_EFFECTS,
   normalizeClosureQuerySensitivities,
   type ChannelClosureScope,
@@ -24,9 +28,12 @@ export type VerifiedLiveClosureAuthorityCapture = Readonly<{
   readonly binding: LiveClosureAuthorityBinding;
   readonly source_snapshot_read_lease: LiveQueryProofAuthority["snapshot_read_lease"];
   readonly lexical_source_bundle: LiveQueryProofAuthority["lexical_source_bundle"];
+  readonly lexical_interval_sources: CapturedMemoryLexicalIntervalSources["receipts"] | undefined;
   readonly source_authority: LiveQueryProofAuthority;
   readonly source_identity_is_stable: boolean;
 }>;
+
+const capturedLiveAuthorities = new WeakMap<object, VerifiedLiveClosureAuthorityCapture>();
 
 export function deriveLiveClosureAuthorityBinding(
   authority: LiveQueryProofAuthority
@@ -37,15 +44,17 @@ export function deriveLiveClosureAuthorityBinding(
 export function captureVerifiedLiveClosureAuthority(
   authority: LiveQueryProofAuthority
 ): VerifiedLiveClosureAuthorityCapture {
+  const reused = capturedLiveAuthorities.get(authority);
+  if (reused !== undefined) return reused;
   assertAuthorityFields(authority);
   const sourceLease = authority.snapshot_read_lease;
   const sourceBundle = authority.lexical_source_bundle;
   if (!isDeeplyFrozenData(sourceLease)) {
     throw new Error("live source snapshot read lease must be deeply frozen");
   }
-  if (sourceBundle !== undefined && !isDeeplyFrozenData(sourceBundle)) {
-    throw new Error("live lexical source bundle must be deeply frozen");
-  }
+  const capturedSources = sourceBundle === undefined
+    ? undefined
+    : captureMemoryLexicalIntervalSources(sourceBundle);
   const captured = Object.freeze({
     workspace_id: captureData(authority.workspace_id),
     query_condition: captureData(authority.query_condition),
@@ -62,14 +71,18 @@ export function captureVerifiedLiveClosureAuthority(
     ...captured,
     snapshot_read_lease: sourceLease
   }) satisfies LiveQueryProofAuthority;
-  return Object.freeze({
+  const result = Object.freeze({
     authority: captured,
     binding: deriveCapturedBinding(captured, pins),
     source_snapshot_read_lease: sourceLease,
     lexical_source_bundle: sourceBundle,
+    lexical_interval_sources: capturedSources?.receipts,
     source_authority: sourceAuthority,
-    source_identity_is_stable: isDeeplyFrozenData(sourceLease)
+    source_identity_is_stable: sourceBundle === undefined || capturedSources !== undefined
   });
+  capturedLiveAuthorities.set(captured, result);
+  capturedLiveAuthorities.set(sourceAuthority, result);
+  return result;
 }
 
 function deriveCapturedBinding(
