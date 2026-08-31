@@ -150,5 +150,3 @@ function parseHalfLifeMs(value: number): number {
 
   return parsed;
 }
-
-export { clamp01 };

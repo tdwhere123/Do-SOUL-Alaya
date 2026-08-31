@@ -17,9 +17,9 @@ import {
 } from "./dynamics-scoring.js";
 import {
   DIMENSION_DEFAULT_DECAY_PROFILE,
-  INITIAL_ACTIVATION_FROM_CONFIDENCE_FACTOR,
-  clamp01
+  INITIAL_ACTIVATION_FROM_CONFIDENCE_FACTOR
 } from "./dynamics-constants-runtime.js";
+import { clamp01 } from "../shared/clamp.js";
 import { KarmaTransitionEngine } from "./karma-transition-engine.js";
 import { RetentionDecayScanner, type RetentionDecayScanResult } from "./retention-decay-scanner.js";
 import {

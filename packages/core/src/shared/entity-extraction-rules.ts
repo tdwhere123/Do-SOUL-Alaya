@@ -20,7 +20,6 @@
  */
 
 import type { EntityCandidate, EntityExtractionPort } from "./entity-extraction-port.js";
-export type { EntityCandidate, EntityExtractionPort } from "./entity-extraction-port.js";
 
 const DEFAULT_MAX_ENTITIES = 8;
 const MIN_NORMALIZED_LENGTH = 2;

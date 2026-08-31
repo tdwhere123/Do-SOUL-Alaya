@@ -9,11 +9,11 @@ import {
 import {
   DIMENSION_DEFAULT_DECAY_PROFILE,
   MS_PER_DAY,
-  clamp01,
   computeFreshnessFactor,
   computeRetentionFromProfile,
   determineManifestation
 } from "./dynamics-constants-runtime.js";
+import { clamp01 } from "../shared/clamp.js";
 
 import { computeDomainMatch } from "./dynamics-service-ports.js";
 

@@ -17,10 +17,6 @@ import {
   decideClaimEffect,
   requireDeliveryAuthority
 } from "./resolution-service-effects.js";
-export type {
-  ResolutionDeliveryAuthorityPort,
-  ResolutionEffectAuthorityPort
-} from "./resolution-service-effects.js";
 import type {
   ResolveInput,
   ResolveOutcome,

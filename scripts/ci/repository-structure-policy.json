@@ -1167,48 +1167,7 @@
     "expected_count": 44,
     "expected_sha256": "0a06abf701272ac89dd6a88c49fe853feb535edf45262c3f87ba11e957c77d05"
   },
-  "existing_duplicate_export_authorities": [
-    {
-      "path": "packages/core/src/index.ts",
-      "binding": "EntityCandidate",
-      "sources": [
-        "packages/core/src/shared/entity-extraction-port.ts",
-        "packages/core/src/shared/entity-extraction-rules.ts"
-      ]
-    },
-    {
-      "path": "packages/core/src/index.ts",
-      "binding": "EntityExtractionPort",
-      "sources": [
-        "packages/core/src/shared/entity-extraction-port.ts",
-        "packages/core/src/shared/entity-extraction-rules.ts"
-      ]
-    },
-    {
-      "path": "packages/core/src/index.ts",
-      "binding": "ResolutionDeliveryAuthorityPort",
-      "sources": [
-        "packages/core/src/governance/proposals/resolution-service-effects.ts",
-        "packages/core/src/governance/proposals/resolution-service.ts"
-      ]
-    },
-    {
-      "path": "packages/core/src/index.ts",
-      "binding": "ResolutionEffectAuthorityPort",
-      "sources": [
-        "packages/core/src/governance/proposals/resolution-service-effects.ts",
-        "packages/core/src/governance/proposals/resolution-service.ts"
-      ]
-    },
-    {
-      "path": "packages/core/src/index.ts",
-      "binding": "clamp01",
-      "sources": [
-        "packages/core/src/dynamics/dynamics-constants-runtime.ts",
-        "packages/core/src/shared/clamp.ts"
-      ]
-    }
-  ],
+  "existing_duplicate_export_authorities": [],
   "existing_index_to_index_edges": [
     "apps/core-daemon/src/index.ts -> apps/core-daemon/src/secrets/index.ts",
     "packages/core/src/index.ts -> packages/core/src/config/index.ts",
