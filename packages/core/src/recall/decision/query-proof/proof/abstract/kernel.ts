@@ -8,6 +8,12 @@ import {
   type FiniteDecisionTrace
 } from "../oracle/contract.js";
 import {
+  readFiniteTransferAuthority,
+  validateFiniteTransferAbstractCoverage,
+  verifyFiniteTransferParticipants,
+  type FiniteTransferAuthorityState
+} from "../oracle/transfer-authority.js";
+import {
   abstractResultIdentity,
   assertDigest,
   assertIdentity,
@@ -40,6 +46,7 @@ type PreparedKernel = Readonly<{
   readonly coordinates: readonly AbstractCoordinate[];
   readonly remaining_effects:
     AbstractProofKernelInput["closures"][number]["remaining_effects"];
+  readonly transfer: FiniteTransferAuthorityState;
 }>;
 
 type KernelPreparation = PreparedKernel | Readonly<{
@@ -50,11 +57,9 @@ type KernelPreparation = PreparedKernel | Readonly<{
 function prepareAbstractDomain(input: AbstractProofKernelInput): KernelPreparation {
   const invalid = validateKernelInput(input);
   if (invalid !== null) return preparedResult(unsupported(input, invalid));
-  const sensitivityCount = new Set([
-    ...input.coordinates.map(({ sensitivity_id }) => sensitivity_id),
-    ...input.closures.flatMap(({ remaining_effects }) =>
-      remaining_effects.map(({ sensitivity_id }) => sensitivity_id))
-  ]).size;
+  const transfer = readFiniteTransferAuthority(input.transfer_authority);
+  const sensitivityCount = new Set(transfer.manifest.map(({ sensitivity_id }) =>
+    sensitivity_id)).size;
   if (input.closures.length > input.limits.max_channels ||
       input.coordinates.length > input.limits.max_coordinates ||
       sensitivityCount > input.limits.max_sensitivities) {
@@ -74,13 +79,25 @@ function prepareAbstractDomain(input: AbstractProofKernelInput): KernelPreparati
       "abstract proposition conflict"));
   }
   const closureRequests = validateClosures(input);
+  if (closureRequests.length > 0) {
+    return preparedResult(open(normalizedInput,
+      "unresolved or invalid channel closure", closureRequests, []));
+  }
+  const transferMismatch = validateFiniteTransferAbstractCoverage({
+    state: transfer,
+    coordinates,
+    closure_sensitivities: input.closures.flatMap((closure) =>
+      closure.sensitivity_manifest)
+  });
+  if (transferMismatch !== null) {
+    return preparedResult(unsupported(normalizedInput, transferMismatch));
+  }
   const scopedEffects = collectScopedEffects(input);
   const joined = joinChannelRemainingEffects(coordinates, scopedEffects);
   const effectiveInput = Object.freeze({ ...input, coordinates: joined.coordinates });
   const strictRequests = joined.coordinates.filter(isStrictlyOpenCoordinate)
     .map((coordinate) => requestFor(coordinate, strictOpenReason(coordinate)));
   const preOperatorRequests = mergeRequests([
-    ...closureRequests,
     ...joined.requested_refinements,
     ...strictRequests
   ]);
@@ -93,16 +110,17 @@ function prepareAbstractDomain(input: AbstractProofKernelInput): KernelPreparati
     kind: "prepared" as const,
     input: effectiveInput,
     coordinates: joined.coordinates,
-    remaining_effects: remainingEffects
+    remaining_effects: remainingEffects,
+    transfer
   });
 }
 
 function evaluatePreparedKernel(prepared: PreparedKernel): AbstractProofKernelResult {
-  const { input, coordinates, remaining_effects: remainingEffects } = prepared;
+  const { input, coordinates, remaining_effects: remainingEffects, transfer } = prepared;
   let evaluation: AbstractOperatorEvaluation;
   try {
     evaluation = evaluateDeterministically(input.operator, coordinates,
-      remainingEffects, input.k_max);
+      remainingEffects, input.k_max, transfer.transfer_digest);
     validateOperatorEvaluation(evaluation);
   } catch (error) {
     return unsupported(input, messageOf(error));
@@ -113,11 +131,12 @@ function evaluatePreparedKernel(prepared: PreparedKernel): AbstractProofKernelRe
   if (evaluation.status === "unsupported") {
     return unsupported(input, evaluation.reason);
   }
-  const missingHandled = remainingEffects.filter((effect) =>
-    !evaluation.handled_sensitivity_ids.includes(effect.sensitivity_id));
-  if (missingHandled.length > 0) {
-    return open(input, "abstract operator did not handle bounded effects",
-      requestsForEffects(missingHandled, coordinates), []);
+  const handled = new Set(evaluation.handled_sensitivity_ids);
+  const missingManifest = transfer.manifest.filter(({ sensitivity_id }) =>
+    !handled.has(sensitivity_id));
+  if (missingManifest.length > 0) {
+    return open(input, "abstract operator did not handle complete sensitivity manifest",
+      requestsForManifest(missingManifest, coordinates), []);
   }
   let outcomes: readonly FiniteDecisionTrace[];
   try {
@@ -150,12 +169,33 @@ function preparedResult(result: AbstractProofKernelResult): KernelPreparation {
 
 function validateKernelInput(input: AbstractProofKernelInput): string | null {
   try {
+    assertExactKeys(input, [
+      "query_digest", "snapshot_digest", "principal_digest", "k_max", "closures",
+      "coordinates", "limits", "operator", "transfer_authority"
+    ], "abstract kernel input");
+    assertExactKeys(input.limits, [
+      "max_channels", "max_coordinates", "max_sensitivities"
+    ], "abstract kernel limits");
+    if (!Array.isArray(input.closures) || !Array.isArray(input.coordinates)) {
+      return "abstract kernel closures and coordinates must be arrays";
+    }
     assertDigest(input.query_digest, "abstract query");
     assertDigest(input.snapshot_digest, "abstract snapshot");
     assertDigest(input.principal_digest, "abstract principal");
     assertIdentity(input.operator.operator_id, "abstract operator id");
-    if (/decide_q|sealchecker_v1/iu.test(input.operator.operator_id)) {
+    if (!/^[a-z0-9][a-z0-9._:-]*$/u.test(input.operator.operator_id) ||
+        input.operator.operator_id.includes("decide_q") ||
+        input.operator.operator_id.includes("sealchecker_v1")) {
       return "abstract fixture operator uses a reserved final operator name";
+    }
+    const transfer = verifyFiniteTransferParticipants({
+      authority: input.transfer_authority,
+      abstract_operator: input.operator
+    });
+    if (transfer.query_digest !== input.query_digest ||
+        transfer.fixture.snapshot_digest !== input.snapshot_digest ||
+        transfer.principal_digest !== input.principal_digest) {
+      return "abstract transfer authority binding mismatch";
     }
     if (!Number.isSafeInteger(input.k_max) || input.k_max < 0 ||
         !Number.isSafeInteger(input.limits.max_channels) ||
@@ -179,7 +219,8 @@ function validateClosures(
     try {
       verifyChannelClosureResult(closure);
     } catch {
-      requests.push(channelRequest(closure.channel_id, "closure receipt digest mismatch"));
+      requests.push(channelRequest(safeChannelId(closure),
+        "closure receipt digest mismatch"));
       continue;
     }
     if (closure.query_digest !== input.query_digest ||
@@ -193,6 +234,14 @@ function validateClosures(
     }
   }
   return mergeRequests(requests);
+}
+
+function safeChannelId(value: unknown): string {
+  if (typeof value === "object" && value !== null && "channel_id" in value &&
+      typeof value.channel_id === "string" && value.channel_id.length > 0) {
+    return value.channel_id;
+  }
+  return "invalid-channel";
 }
 
 function collectScopedEffects(
@@ -212,9 +261,15 @@ function evaluateDeterministically(
   operator: AbstractDecisionOperator,
   coordinates: readonly AbstractCoordinate[],
   remainingEffects: AbstractProofKernelInput["closures"][number]["remaining_effects"],
-  kMax: number
+  kMax: number,
+  transferDigest: FiniteTransferAuthorityState["transfer_digest"]
 ): AbstractOperatorEvaluation {
-  const input = Object.freeze({ coordinates, remaining_effects: remainingEffects, k_max: kMax });
+  const input = Object.freeze({
+    coordinates,
+    remaining_effects: remainingEffects,
+    k_max: kMax,
+    transfer_digest: transferDigest
+  });
   const first = operator.evaluate(input);
   const replay = operator.evaluate(input);
   if (digestRecallFieldIdentity(first) !== digestRecallFieldIdentity(replay)) {
@@ -228,9 +283,13 @@ function evaluateDeterministically(
 
 function validateOperatorEvaluation(evaluation: AbstractOperatorEvaluation): void {
   if (evaluation.status === "conflict" || evaluation.status === "unsupported") {
+    assertExactKeys(evaluation, ["status", "reason"], "abstract operator refusal");
     assertIdentity(evaluation.reason, "abstract operator refusal reason");
     return;
   }
+  assertExactKeys(evaluation, [
+    "status", "handled_sensitivity_ids", "outcomes"
+  ], "abstract operator outcomes");
   if (evaluation.status !== "outcomes" ||
       !Array.isArray(evaluation.handled_sensitivity_ids) ||
       !Array.isArray(evaluation.outcomes)) {
@@ -263,7 +322,7 @@ function isConflictCoordinate(coordinate: AbstractCoordinate): boolean {
 }
 
 function isStrictlyOpenCoordinate(coordinate: AbstractCoordinate): boolean {
-  return coordinate.decision_changing && (
+  return (
     (coordinate.kind === "identity_tie" && coordinate.universe === "open") ||
     (coordinate.kind === "correlation" &&
       coordinate.possible_relations.includes("unknown")) ||
@@ -277,7 +336,6 @@ function isStrictlyOpenCoordinate(coordinate: AbstractCoordinate): boolean {
 }
 
 function isDecisionOpenCoordinate(coordinate: AbstractCoordinate): boolean {
-  if (!coordinate.decision_changing) return false;
   switch (coordinate.kind) {
     case "membership":
     case "semantic_feasibility":
@@ -309,23 +367,34 @@ function strictOpenReason(coordinate: AbstractCoordinate): string {
   }
 }
 
-function requestsForEffects(
-  effects: readonly { readonly effect_id: string; readonly sensitivity_id: string }[],
+function requestsForManifest(
+  rows: readonly {
+    readonly coordinate_id: string;
+    readonly sensitivity_id: string;
+    readonly owner_id: string;
+  }[],
   coordinates: readonly AbstractCoordinate[]
 ): readonly AbstractRefinementRequest[] {
-  return mergeRequests(effects.map((effect) => {
+  return mergeRequests(rows.map((row) => {
     const coordinate = coordinates.find(({ sensitivity_id }) =>
-      sensitivity_id === effect.sensitivity_id);
+      sensitivity_id === row.sensitivity_id);
     return coordinate === undefined
       ? Object.freeze({
-          coordinate_id: `effect:${effect.effect_id}`,
-          sensitivity_id: effect.sensitivity_id,
-          owner_id: "abstract-operator",
+          coordinate_id: row.coordinate_id,
+          sensitivity_id: row.sensitivity_id,
+          owner_id: row.owner_id,
           domain_kind: "channel_closure" as const,
-          reason: "bounded effect is unhandled"
+          reason: "manifest sensitivity is unhandled"
         })
-      : requestFor(coordinate, "bounded effect is unhandled");
+      : requestFor(coordinate, "manifest sensitivity is unhandled");
   }));
+}
+
+function assertExactKeys(value: object, keys: readonly string[], field: string): void {
+  const actual = Object.keys(value).sort(compareText);
+  const expected = [...keys].sort(compareText);
+  if (actual.length !== expected.length || actual.some((key, index) =>
+    key !== expected[index])) throw new Error(`${field} has unknown or missing fields`);
 }
 
 function requestFor(

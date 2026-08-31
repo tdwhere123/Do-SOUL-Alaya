@@ -103,6 +103,8 @@ export type LexicalBoundProofAbsent = Readonly<{
 
 export type LexicalBoundProof = LexicalBoundProofCaptured | LexicalBoundProofAbsent;
 
+const sourceIssuedLexicalBoundProofs = new WeakSet<object>();
+
 export type LexicalBoundSealInput = Readonly<{
   readonly request_digest?: string;
   readonly workspace_id?: string;
@@ -170,12 +172,20 @@ export function sealLexicalBoundProof(
   seal: LexicalBoundSealInput
 ): LexicalBoundProof {
   if (proof.status !== "captured") return absentLexicalBoundProof(seal);
-  return assembleCaptured(
+  const sealed = assembleCaptured(
     proof.receipt,
     sealedIdentity(seal, proof.identity),
     presentFieldPrefix(seal.field_prefix) ?? proof.field_prefix,
     presentKeyDomain(seal.candidate_key_domain) ?? proof.candidate_key_domain
   );
+  sourceIssuedLexicalBoundProofs.add(sealed);
+  return sealed;
+}
+
+export function isSourceIssuedLexicalBoundProof(
+  proof: LexicalBoundProof
+): boolean {
+  return sourceIssuedLexicalBoundProofs.has(proof);
 }
 
 export function verifyLexicalBoundProof(proof: LexicalBoundProof): void {

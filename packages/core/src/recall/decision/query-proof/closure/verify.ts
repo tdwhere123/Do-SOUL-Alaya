@@ -1,7 +1,10 @@
 import { digestRecallFieldIdentity } from "../../../field/field-identity.js";
+import { compareText } from "../../../../shared/compare-text.js";
 import {
   assertClosureStatusPayload,
   CHANNEL_CLOSURE_OPERATOR_ID,
+  isIssuedChannelClosureResult,
+  normalizeClosureQuerySensitivities,
   normalizeChannelRemainingEffect,
   type ChannelClosureResult,
   type ChannelClosureStatus,
@@ -9,10 +12,17 @@ import {
 } from "./contract.js";
 
 export function verifyChannelClosureResult(result: ChannelClosureResult): void {
+  assertExactKeys(result, [
+    "schema_version", "operator_id", "status", "scope_digest", "query_digest",
+    "snapshot_digest", "principal_digest", "observer_id", "channel_id",
+    "domain_id", "universe_digest", "sensitivity_manifest", "remaining_effects",
+    "completeness_refs", "reason", "result_digest"
+  ], "channel closure result");
   const { result_digest: _digest, ...body } = result;
   if (result.schema_version !== 1 ||
       result.operator_id !== CHANNEL_CLOSURE_OPERATOR_ID ||
-      result.result_digest !== digestRecallFieldIdentity(body)) {
+      result.result_digest !== digestRecallFieldIdentity(body) ||
+      !isIssuedChannelClosureResult(result)) {
     throw new Error("channel closure result digest mismatch");
   }
   assertStatus(result.status);
@@ -30,7 +40,11 @@ export function verifyChannelClosureResult(result: ChannelClosureResult): void {
     [result.reason, "reason"]
   ] as const) assertIdentity(value, `channel closure ${field}`);
 
+  const sensitivities = normalizeClosureQuerySensitivities(result.sensitivity_manifest);
+  const sensitivityById = new Map(sensitivities.map((row) => [row.sensitivity_id, row]));
   const effects = result.remaining_effects.map(normalizeChannelRemainingEffect);
+  if (effects.some((effect) => sensitivityById.get(effect.sensitivity_id)?.effect !==
+      effect.effect)) throw new Error("channel closure effect sensitivity mismatch");
   assertUnique(effects.map(({ effect_id }) => effect_id),
     "channel closure remaining effect ids");
   const references = result.completeness_refs.map((reference) =>
@@ -45,8 +59,13 @@ function verifyCompletenessReference(
   result: ChannelClosureResult
 ): ScopedCompletenessReference {
   const { reference_digest: _digest, ...body } = reference;
+  assertExactKeys(reference, [
+    "receipt_id", "source_receipt_digest", "scope_digest", "universe_digest",
+    "domain_id", "coordinate_id", "reference_digest"
+  ], "channel closure completeness reference");
   if (reference.receipt_id !== "query_proof_scoped_completeness_v1" ||
       reference.scope_digest !== result.scope_digest ||
+      reference.universe_digest !== result.universe_digest ||
       reference.domain_id !== result.domain_id ||
       reference.reference_digest !== digestRecallFieldIdentity(body)) {
     throw new Error("channel closure completeness reference mismatch");
@@ -76,6 +95,14 @@ function assertIdentity(value: string, field: string): void {
 
 function assertDigest(value: string, field: string): void {
   if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new Error(`${field} must be sha256`);
+}
+
+function assertExactKeys(value: object, allowed: readonly string[], field: string): void {
+  const keys = Object.keys(value).sort(compareText);
+  const expected = [...allowed].sort(compareText);
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+    throw new Error(`${field} has unknown or missing fields`);
+  }
 }
 
 const STATUSES: ReadonlySet<string> = new Set([

@@ -43,6 +43,9 @@ export type FiniteMutualExclusionReceipt = Readonly<{
   readonly operator_id: "finite_fixture_mutual_exclusion_v1";
   readonly fixture_id: string;
   readonly snapshot_digest: RecallFieldDigest;
+  readonly fixture_premise_digest: RecallFieldDigest;
+  readonly proposition_digest: RecallFieldDigest;
+  readonly evidence_digest: RecallFieldDigest;
   readonly forbidden_combinations:
     readonly (readonly FiniteMutualExclusionAssignment[])[];
   readonly receipt_digest: RecallFieldDigest;
@@ -111,6 +114,9 @@ export type FiniteDecisionOracleResult = Readonly<{
   readonly operator_id: "finite_exhaustive_decision_oracle_v1";
   readonly fixture_digest: RecallFieldDigest;
   readonly decision_operator_id: string;
+  readonly abstract_operator_id: string;
+  readonly transfer_digest: RecallFieldDigest;
+  readonly manifest_digest: RecallFieldDigest;
   readonly refinement_count: number;
   readonly refinements: readonly FiniteOracleRefinementResult[];
   readonly outcomes: readonly FiniteDecisionTrace[];
@@ -121,6 +127,11 @@ export type FiniteDecisionOracleResult = Readonly<{
 export function normalizeFiniteFixture(
   fixture: FiniteOracleFixture
 ): FiniteOracleFixture {
+  assertAllowedKeys(fixture, [
+    "fixture_id", "snapshot_digest", "k_max", "base_state", "coordinates",
+    "mutual_exclusion_receipts"
+  ], ["fixture_id", "snapshot_digest", "k_max", "base_state", "coordinates"],
+  "finite fixture");
   assertIdentity(fixture.fixture_id, "finite fixture id");
   assertDigest(fixture.snapshot_digest, "finite fixture snapshot");
   if (!Number.isSafeInteger(fixture.k_max) || fixture.k_max < 0) {
@@ -131,7 +142,7 @@ export function normalizeFiniteFixture(
   assertUnique(coordinates.map(({ coordinate_id }) => coordinate_id),
     "finite fixture coordinate ids");
   const receipts = (fixture.mutual_exclusion_receipts ?? [])
-    .map((receipt) => verifyMutualExclusionReceipt(receipt, fixture))
+    .map(normalizeMutualExclusionReceipt)
     .sort((left, right) => compareText(left.receipt_digest, right.receipt_digest));
   return Object.freeze({
     fixture_id: fixture.fixture_id,
@@ -153,6 +164,8 @@ export function normalizeDecisionTrace(
   input: FiniteDecisionTraceInput,
   kMax: number
 ): FiniteDecisionTrace {
+  assertExactKeys(input, ["candidate_prefix", "answer_bindings", "pick_reasons"],
+    "finite decision trace");
   if (input.candidate_prefix.length > kMax) {
     throw new Error("finite decision trace exceeds K_max");
   }
@@ -162,6 +175,7 @@ export function normalizeDecisionTrace(
   });
   assertUnique(prefix, "finite trace candidate prefix");
   const bindings = input.answer_bindings.map((binding) => {
+    assertExactKeys(binding, ["binding_id", "value"], "finite trace binding");
     assertIdentity(binding.binding_id, "finite trace binding id");
     return Object.freeze({
       binding_id: binding.binding_id,
@@ -169,7 +183,11 @@ export function normalizeDecisionTrace(
     });
   }).sort((left, right) => compareText(left.binding_id, right.binding_id));
   assertUnique(bindings.map(({ binding_id }) => binding_id), "finite trace binding ids");
-  const reasons = input.pick_reasons.map((reason) => Object.freeze({ ...reason }))
+  const reasons = input.pick_reasons.map((reason) => {
+    assertExactKeys(reason, ["position", "candidate_key", "reason_id"],
+      "finite trace reason");
+    return Object.freeze({ ...reason });
+  })
     .sort((left, right) => left.position - right.position);
   if (reasons.length !== prefix.length || reasons.some((reason, index) =>
     reason.position !== index || reason.candidate_key !== prefix[index] ||
@@ -182,6 +200,20 @@ export function normalizeDecisionTrace(
     pick_reasons: Object.freeze(reasons)
   });
   return Object.freeze({ ...body, trace_digest: digestRecallFieldIdentity(body) });
+}
+
+export function verifyFiniteDecisionTrace(
+  trace: FiniteDecisionTrace,
+  kMax: number
+): void {
+  assertExactKeys(trace, [
+    "candidate_prefix", "answer_bindings", "pick_reasons", "trace_digest"
+  ], "finite decision trace result");
+  const { trace_digest: traceDigest, ...body } = trace;
+  const normalized = normalizeDecisionTrace(body, kMax);
+  if (traceDigest !== normalized.trace_digest) {
+    throw new Error("finite decision trace digest mismatch");
+  }
 }
 
 export function decisionTraceSortKey(trace: FiniteDecisionTrace): string {
@@ -211,6 +243,8 @@ export function freezeFiniteValue(value: FiniteValue): FiniteValue {
 function normalizeCoordinate(
   coordinate: FiniteRefinementCoordinate
 ): FiniteRefinementCoordinate {
+  assertExactKeys(coordinate, ["coordinate_id", "kind", "choices"],
+    "finite coordinate");
   assertIdentity(coordinate.coordinate_id, "finite coordinate id");
   if (!REFINEMENT_KINDS.has(coordinate.kind)) {
     throw new Error("finite coordinate kind is unsupported");
@@ -219,6 +253,7 @@ function normalizeCoordinate(
     throw new Error("finite coordinate requires at least one choice");
   }
   const choices = coordinate.choices.map((choice) => {
+    assertExactKeys(choice, ["choice_id", "value"], "finite choice");
     assertIdentity(choice.choice_id, "finite choice id");
     return Object.freeze({
       choice_id: choice.choice_id,
@@ -229,19 +264,32 @@ function normalizeCoordinate(
   return Object.freeze({ ...coordinate, choices: Object.freeze(choices) });
 }
 
-function verifyMutualExclusionReceipt(
-  receipt: FiniteMutualExclusionReceipt,
-  fixture: Pick<FiniteOracleFixture, "fixture_id" | "snapshot_digest">
+function normalizeMutualExclusionReceipt(
+  receipt: FiniteMutualExclusionReceipt
 ): FiniteMutualExclusionReceipt {
+  assertExactKeys(receipt, [
+    "schema_version", "operator_id", "fixture_id", "snapshot_digest",
+    "fixture_premise_digest", "proposition_digest", "evidence_digest",
+    "forbidden_combinations", "receipt_digest"
+  ], "finite mutual exclusion receipt");
   const { receipt_digest: _digest, ...body } = receipt;
   if (receipt.schema_version !== 1 ||
       receipt.operator_id !== "finite_fixture_mutual_exclusion_v1" ||
-      receipt.fixture_id !== fixture.fixture_id ||
-      receipt.snapshot_digest !== fixture.snapshot_digest ||
       receipt.receipt_digest !== digestRecallFieldIdentity(body)) {
-    throw new Error("finite mutual exclusion receipt digest or binding mismatch");
+    throw new Error("finite mutual exclusion receipt digest mismatch");
   }
-  return Object.freeze({ ...receipt });
+  [receipt.snapshot_digest, receipt.fixture_premise_digest,
+    receipt.proposition_digest, receipt.evidence_digest]
+    .forEach((value) => assertDigest(value, "finite mutual exclusion identity"));
+  return Object.freeze({
+    ...receipt,
+    forbidden_combinations: Object.freeze(receipt.forbidden_combinations.map((rows) =>
+      Object.freeze(rows.map((row) => {
+        assertExactKeys(row, ["coordinate_id", "choice_id"],
+          "finite mutual exclusion assignment");
+        return Object.freeze({ ...row });
+      }))))
+  });
 }
 
 function assertUnique(values: readonly string[], field: string): void {
@@ -256,6 +304,23 @@ export function assertIdentity(value: string, field: string): void {
 
 export function assertDigest(value: string, field: string): asserts value is RecallFieldDigest {
   if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new Error(`${field} must be sha256`);
+}
+
+function assertAllowedKeys(
+  value: object,
+  allowed: readonly string[],
+  required: readonly string[],
+  field: string
+): void {
+  const keys = Object.keys(value);
+  if (keys.some((key) => !allowed.includes(key)) ||
+      required.some((key) => !Object.prototype.hasOwnProperty.call(value, key))) {
+    throw new Error(`${field} has unknown or missing fields`);
+  }
+}
+
+function assertExactKeys(value: object, expected: readonly string[], field: string): void {
+  assertAllowedKeys(value, expected, expected, field);
 }
 
 const REFINEMENT_KINDS: ReadonlySet<string> = new Set([

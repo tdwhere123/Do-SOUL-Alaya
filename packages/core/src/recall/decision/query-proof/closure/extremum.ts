@@ -1,19 +1,15 @@
-import { compareText } from "../../../../shared/compare-text.js";
 import {
-  digestRecallFieldIdentity,
-  type RecallFieldDigest
-} from "../../../field/field-identity.js";
+  readRecallFiniteFieldClosureAuthority,
+  type RecallFiniteFieldClosureAuthority
+} from "../../../field/finite-field-seal.js";
+import { digestRecallFieldIdentity, type RecallFieldDigest } from
+  "../../../field/field-identity.js";
+import { compareText } from "../../../../shared/compare-text.js";
 import type { ChannelClosureResult } from "./contract.js";
 import { verifyChannelClosureResult } from "./verify.js";
 
 export const EXTREMUM_CLOSURE_WITNESS_OPERATOR_ID =
   "query_proof_extremum_closure_witness_v1";
-
-export type ExtremumBindingInterval = Readonly<{
-  readonly binding_id: string;
-  readonly lower: number;
-  readonly upper: number;
-}>;
 
 export type ExtremumClosureWitness = Readonly<{
   readonly schema_version: 1;
@@ -31,38 +27,43 @@ export type ExtremumClosureWitness = Readonly<{
 }>;
 
 export function createExtremumClosureWitness(params: Readonly<{
+  readonly authority: RecallFiniteFieldClosureAuthority;
   readonly closure: ChannelClosureResult;
   readonly operator: "argmax" | "argmin";
   readonly sensitivity_id: string;
-  readonly intervals: readonly ExtremumBindingInterval[];
-  readonly extremal_binding_ids: readonly string[];
-  readonly tie_set_complete: boolean;
 }>): ExtremumClosureWitness | null {
+  let source: ReturnType<typeof readRecallFiniteFieldClosureAuthority>;
   try {
+    assertExactKeys(params, ["authority", "closure", "operator", "sensitivity_id"]);
+    if (params.operator !== "argmax" && params.operator !== "argmin") return null;
+    source = readRecallFiniteFieldClosureAuthority(params.authority);
     verifyChannelClosureResult(params.closure);
   } catch {
     return null;
   }
-  if (params.closure.status !== "exact_closed" ||
-      params.closure.completeness_refs.length === 0 ||
-      !params.tie_set_complete || params.sensitivity_id.length === 0 ||
-      params.sensitivity_id.trim() !== params.sensitivity_id) return null;
-  const intervals = normalizeIntervals(params.intervals);
-  const declared = normalizeIdentities(params.extremal_binding_ids);
-  if (intervals === null || declared === null ||
-      !isClosedExtremum(params.operator, intervals, declared)) return null;
+  const declared = source.sensitivities.find(({ sensitivity_id }) =>
+    sensitivity_id === params.sensitivity_id);
+  if (declared?.effect !== "extremum_interval" ||
+      params.closure.status !== "exact_closed" ||
+      params.closure.query_digest !== source.query_digest ||
+      params.closure.snapshot_digest !== source.snapshot_digest ||
+      params.closure.principal_digest !== source.principal_digest ||
+      params.closure.domain_id !== source.domain_id ||
+      params.closure.universe_digest !== source.universe_digest) return null;
+  const winners = closedExtremumIds(params.operator, source.extremum_intervals);
+  if (winners === null) return null;
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: EXTREMUM_CLOSURE_WITNESS_OPERATOR_ID,
     operator: params.operator,
     closure_result_digest: params.closure.result_digest,
-    query_digest: params.closure.query_digest,
-    snapshot_digest: params.closure.snapshot_digest,
-    principal_digest: params.closure.principal_digest,
-    universe_digest: params.closure.universe_digest,
+    query_digest: source.query_digest,
+    snapshot_digest: source.snapshot_digest,
+    principal_digest: source.principal_digest,
+    universe_digest: source.universe_digest,
     sensitivity_id: params.sensitivity_id,
-    extremal_binding_ids: declared,
-    interval_digest: digestRecallFieldIdentity(intervals)
+    extremal_binding_ids: winners,
+    interval_digest: digestRecallFieldIdentity(source.extremum_intervals)
   });
   return Object.freeze({
     ...body,
@@ -70,40 +71,32 @@ export function createExtremumClosureWitness(params: Readonly<{
   });
 }
 
-function isClosedExtremum(
+function assertExactKeys(value: object, fields: readonly string[]): void {
+  const actual = Object.keys(value).sort(compareText);
+  const expected = [...fields].sort(compareText);
+  if (actual.length !== expected.length || actual.some((key, index) =>
+    key !== expected[index])) throw new Error("extremum witness input has unknown fields");
+}
+
+function closedExtremumIds(
   operator: "argmax" | "argmin",
-  intervals: readonly ExtremumBindingInterval[],
-  declared: readonly string[]
-): boolean {
-  const winners = intervals.filter(({ binding_id }) => declared.includes(binding_id));
-  if (winners.length !== declared.length || winners.length === 0) return false;
-  const winnerPoint = operator === "argmax"
-    ? Math.min(...winners.map(({ lower }) => lower))
-    : Math.max(...winners.map(({ upper }) => upper));
-  if (!winners.every(({ lower, upper }) => lower === upper && lower === winnerPoint)) {
-    return false;
-  }
-  return intervals.filter(({ binding_id }) => !declared.includes(binding_id))
-    .every(({ lower, upper }) => operator === "argmax"
-      ? upper < winnerPoint
-      : lower > winnerPoint);
-}
-
-function normalizeIntervals(
-  values: readonly ExtremumBindingInterval[]
-): readonly ExtremumBindingInterval[] | null {
-  const output = values.map((value) => Object.freeze({ ...value }))
-    .sort((left, right) => compareText(left.binding_id, right.binding_id));
-  if (output.length === 0 || new Set(output.map(({ binding_id }) => binding_id)).size !==
-      output.length || output.some(({ binding_id, lower, upper }) =>
-        binding_id.trim().length === 0 || !Number.isFinite(lower) ||
-        !Number.isFinite(upper) || upper < lower)) return null;
-  return Object.freeze(output);
-}
-
-function normalizeIdentities(values: readonly string[]): readonly string[] | null {
-  const output = [...values].sort(compareText);
-  if (output.length === 0 || new Set(output).size !== output.length ||
-      output.some((value) => value.length === 0 || value.trim() !== value)) return null;
-  return Object.freeze(output);
+  intervals: readonly Readonly<{
+    readonly binding_id: string;
+    readonly lower: number;
+    readonly upper: number;
+  }>[]
+): readonly string[] | null {
+  if (intervals.length === 0) return null;
+  const point = operator === "argmax"
+    ? Math.max(...intervals.map(({ lower }) => lower))
+    : Math.min(...intervals.map(({ upper }) => upper));
+  const winners = intervals.filter(({ lower, upper }) =>
+    lower === upper && lower === point);
+  if (winners.length === 0) return null;
+  const winnerIds = new Set(winners.map(({ binding_id }) => binding_id));
+  const separated = intervals.filter(({ binding_id }) => !winnerIds.has(binding_id))
+    .every(({ lower, upper }) => operator === "argmax" ? upper < point : lower > point);
+  return separated
+    ? Object.freeze(winners.map(({ binding_id }) => binding_id))
+    : null;
 }

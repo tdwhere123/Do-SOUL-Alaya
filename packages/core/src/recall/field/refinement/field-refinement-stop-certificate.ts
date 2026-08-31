@@ -70,6 +70,28 @@ export type RecallFieldRefinementStopCertificate = Readonly<{
   readonly receipt_digest: RecallFieldDigest;
 }>;
 
+export type RecallFieldStopClosureAuthorityState = Readonly<{
+  readonly certificate: RecallFieldRefinementStopCertificate;
+  readonly query_digest: RecallFieldDigest;
+  readonly request_digest: RecallFieldDigest;
+  readonly snapshot_digest: RecallFieldDigest;
+  readonly principal_digest: RecallFieldDigest;
+  readonly workspace_id: string;
+  readonly observer_id: string;
+  readonly channel_id: string;
+  readonly domain_id: string;
+  readonly universe_digest: RecallFieldDigest;
+}>;
+
+declare const fieldStopClosureAuthorityBrand: unique symbol;
+export type RecallFieldStopClosureAuthority = Readonly<{
+  readonly [fieldStopClosureAuthorityBrand]: true;
+}>;
+
+const certificateSourceSeals = new WeakMap<object, RecallFiniteFieldSeal>();
+const stopClosureStates = new WeakMap<object, RecallFieldStopClosureAuthorityState>();
+const stopAuthoritiesByCertificate = new WeakMap<object, RecallFieldStopClosureAuthority>();
+
 export function createRecallFieldRefinementStopCertificate<
   T extends CoverageSelectableCandidate
 >(params: Readonly<{
@@ -92,17 +114,21 @@ export function createRecallFieldRefinementStopCertificate<
   const unavailable = params.fieldSeal.channels.some(
     ({ status }) => status === "unavailable"
   );
-  if (unavailable) return sealCertificate(context, "source_unavailable", []);
+  if (unavailable) {
+    return sealCertificate(context, "source_unavailable", [], params.fieldSeal);
+  }
   const truncated = params.fieldSeal.channels.some(
     ({ status }) => status === "truncated"
   );
-  if (!truncated) return sealCertificate(context, "all_channels_closed", []);
+  if (!truncated) {
+    return sealCertificate(context, "all_channels_closed", [], params.fieldSeal);
+  }
   if (params.relevanceUpperBound === null) {
-    return sealCertificate(context, "relevance_bound_unavailable", []);
+    return sealCertificate(context, "relevance_bound_unavailable", [], params.fieldSeal);
   }
   if (params.preparedSelection.objective.mathematical_class !== "monotone_submodular" ||
       params.preparedSelection.objective.unseenMarginalGainUpperBound === undefined) {
-    return sealCertificate(context, "objective_bound_unavailable", []);
+    return sealCertificate(context, "objective_bound_unavailable", [], params.fieldSeal);
   }
   const bounds = computeExchangeBounds({
     selected,
@@ -117,8 +143,67 @@ export function createRecallFieldRefinementStopCertificate<
     context,
     maximum <= SCORE_EPSILON ? "exchange_dominated" : "exchange_not_dominated",
     bounds,
+    params.fieldSeal,
     maximum
   );
+}
+
+export function issueRecallFieldStopClosureAuthority(params: Readonly<{
+  readonly certificate: RecallFieldRefinementStopCertificate;
+  readonly query_digest: RecallFieldDigest;
+  readonly request_digest: RecallFieldDigest;
+  readonly principal_digest: RecallFieldDigest;
+  readonly workspace_id: string;
+  readonly observer_id: string;
+  readonly channel_id: string;
+  readonly domain_id: string;
+}>): RecallFieldStopClosureAuthority {
+  verifyRecallFieldRefinementStopCertificate(params.certificate);
+  const sourceSeal = certificateSourceSeals.get(params.certificate);
+  if (sourceSeal === undefined) {
+    throw new Error("field stop closure requires a source-issued certificate");
+  }
+  [params.query_digest, params.request_digest, params.principal_digest]
+    .forEach(assertDigest);
+  [params.workspace_id, params.observer_id, params.channel_id, params.domain_id]
+    .forEach(assertCanonicalIdentity);
+  const state = Object.freeze({
+    certificate: params.certificate,
+    query_digest: params.query_digest,
+    request_digest: params.request_digest,
+    snapshot_digest: sourceSeal.upstream_snapshot_digest,
+    principal_digest: params.principal_digest,
+    workspace_id: params.workspace_id,
+    observer_id: params.observer_id,
+    channel_id: params.channel_id,
+    domain_id: params.domain_id,
+    universe_digest: digestRecallFieldIdentity({
+      operator_id: "field_stop_source_universe_v1",
+      field_seal_digest: sourceSeal.seal_digest,
+      selected_candidate_keys: params.certificate.selected_candidate_keys
+    })
+  });
+  const existing = stopAuthoritiesByCertificate.get(params.certificate);
+  if (existing !== undefined) {
+    if (digestRecallFieldIdentity(readRecallFieldStopClosureAuthority(existing)) !==
+        digestRecallFieldIdentity(state)) {
+      throw new Error("field stop certificate is already bound to another closure scope");
+    }
+    return existing;
+  }
+  const authority = Object.freeze({}) as RecallFieldStopClosureAuthority;
+  stopClosureStates.set(authority, state);
+  stopAuthoritiesByCertificate.set(params.certificate, authority);
+  return authority;
+}
+
+export function readRecallFieldStopClosureAuthority(
+  authority: RecallFieldStopClosureAuthority
+): RecallFieldStopClosureAuthorityState {
+  const state = stopClosureStates.get(authority);
+  if (state === undefined) throw new Error("field stop closure authority is invalid");
+  verifyRecallFieldRefinementStopCertificate(state.certificate);
+  return state;
 }
 
 export function verifyRecallFieldRefinementStopCertificate(
@@ -179,6 +264,7 @@ function sealCertificate(
   context: CertificateContext,
   reason: RecallFieldRefinementStopReason,
   bounds: readonly Readonly<RecallFieldExchangeBound>[],
+  sourceSeal: RecallFiniteFieldSeal,
   maximum: number | null = null
 ): RecallFieldRefinementStopCertificate {
   const body = Object.freeze({
@@ -188,7 +274,12 @@ function sealCertificate(
     status: isCertifiedStopReason(reason) ? "certified" : "uncertified",
     reason
   });
-  return Object.freeze({ ...body, receipt_digest: digestRecallFieldIdentity(body) });
+  const certificate = Object.freeze({
+    ...body,
+    receipt_digest: digestRecallFieldIdentity(body)
+  });
+  if (sourceSeal !== undefined) certificateSourceSeals.set(certificate, sourceSeal);
+  return certificate;
 }
 
 function computeExchangeBounds<T extends CoverageSelectableCandidate>(params: {
@@ -314,5 +405,11 @@ function receiptBody(receipt: Readonly<RecallFieldRefinementStopCertificate>) {
 function assertDigest(value: string): void {
   if (!/^sha256:[0-9a-f]{64}$/u.test(value)) {
     throw new Error("field refinement stop certificate digest is invalid");
+  }
+}
+
+function assertCanonicalIdentity(value: string): void {
+  if (value.length === 0 || value.trim() !== value) {
+    throw new Error("field stop closure identity is invalid");
   }
 }

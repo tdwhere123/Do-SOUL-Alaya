@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { closeLexicalBoundChannel } from
+  "../../../../../recall/decision/query-proof/closure/lexical-bound.js";
+import { verifyChannelClosureResult } from
+  "../../../../../recall/decision/query-proof/closure/verify.js";
 import {
-  bindClosureReceiptScope,
-  closeLexicalBoundChannel,
-  verifyChannelClosureResult,
-  type ChannelClosureScope,
-  type ChannelRemainingEffect
-} from "../../../../../recall/decision/query-proof/closure/index.js";
-import { absentLexicalBoundProof } from
-  "../../../../../recall/runtime/diagnostics/lexical-bound-proof.js";
+  issueLexicalClosureAuthority,
+  readLexicalClosureAuthority,
+  type LexicalClosureAuthority
+} from "../../../../../recall/decision/query-proof/adapters/lexical-bound/source-authority.js";
 import {
   D1_REQUEST,
   D1_SNAPSHOT,
@@ -18,141 +18,117 @@ import {
 
 const QUERY = `sha256:${"1".repeat(64)}` as const;
 const PRINCIPAL = `sha256:${"4".repeat(64)}` as const;
-const UNIVERSE = `sha256:${"5".repeat(64)}` as const;
 
-describe("lexical-bound channel closure", () => {
+describe("source-authoritative lexical-bound closure", () => {
   it("closes only when every applicable lexical lane is exact", () => {
-    const proof = plantProof({ lanes: {
-      exact: { rows: [{ key: "candidate-a", ordinal: 1 }] }
-    }});
-    const scope = lexicalScope();
-    const result = closeLexicalBoundChannel({
-      proof,
-      scope,
-      binding: bindClosureReceiptScope({
-        scope,
-        source_receipt_digest: proof.proof_digest,
-        universe_digest: UNIVERSE
-      })
-    });
+    const proof = plantProof({ lanes: allExactLanes() });
+    const authority = lexicalAuthority(proof);
+    const result = closeLexicalBoundChannel(authority)!;
+    const source = readLexicalClosureAuthority(authority);
 
     expect(result.status).toBe("exact_closed");
+    expect(source.scope.request_digest).toBe(D1_REQUEST);
+    expect(source.scope.snapshot_digest).toBe(D1_SNAPSHOT);
+    expect(source.scope.workspace_id).toBe(D1_WORKSPACE);
+    expect(result.domain_id).toBe("LexDomain:lexical_relaxed");
     expect(result.completeness_refs.length).toBeGreaterThan(1);
     expect(() => verifyChannelClosureResult(result)).not.toThrow();
   });
 
-  it("does not promote one-lane absence to family closure", () => {
-    const proof = plantProof({ lanes: {
-      porter: {
-        rows: [{ key: "candidate-a", ordinal: 0.5 }],
-        limit: 1
-      }
-    }});
-    const scope = lexicalScope();
-
-    expect(closeLexicalBoundChannel({
-      proof,
-      scope,
-      binding: bindClosureReceiptScope({
-        scope,
-        source_receipt_digest: proof.proof_digest,
-        universe_digest: UNIVERSE
-      })
-    }).status).toBe("uncertified");
+  it("does not promote one-lane absence or source-unbounded truncation", () => {
+    const proof = plantProof({ universes: false });
+    expect(closeLexicalBoundChannel(lexicalAuthority(proof, [sensitivity("porter")]))
+      ?.status).toBe("uncertified");
   });
 
-  it("keeps truncated lanes bounded only with a legal CQ sensitivity effect", () => {
-    const proof = plantProof({ lanes: {
-      porter: {
-        rows: [{ key: "candidate-a", ordinal: 0.5 }],
-        limit: 1
-      }
-    }});
-    const scope = lexicalScope();
-    const binding = bindClosureReceiptScope({
-      scope,
-      source_receipt_digest: proof.proof_digest,
-      universe_digest: UNIVERSE
-    });
-
-    expect(closeLexicalBoundChannel({ proof, scope, binding }).status)
+  it("does not treat an empty list as exact closure", () => {
+    expect(closeLexicalBoundChannel(lexicalAuthority(plantProof()))?.status)
       .toBe("uncertified");
-    expect(closeLexicalBoundChannel({
-      proof,
-      scope,
-      binding,
-      bounded_effects_by_lane: { porter: [boundedEffect()] }
-    }).status).toBe("bounded_open");
   });
 
-  it("fails closed on unavailable proof or mismatched scope identity", () => {
-    const scope = lexicalScope();
-    const proof = plantProof();
-    const binding = bindClosureReceiptScope({
-      scope,
-      source_receipt_digest: proof.proof_digest,
-      universe_digest: UNIVERSE
-    });
-
-    expect(closeLexicalBoundChannel({
-      proof: absentLexicalBoundProof(),
-      scope,
-      binding
-    }).status).toBe("uncertified");
-    expect(closeLexicalBoundChannel({
-      proof,
-      scope: { ...scope, principal_digest: `sha256:${"9".repeat(64)}` },
-      binding
-    }).status).toBe("uncertified");
-  });
-
-  it("does not exact-close a lane with non-adjacent duplicate candidate keys", () => {
+  it("derives a bounded-open effect only from a source lane frontier", () => {
     const proof = plantProof({ lanes: {
-      exact: { rows: [
-        { key: "candidate-a", ordinal: 1 },
-        { key: "candidate-b", ordinal: 0.8 },
-        { key: "candidate-a", ordinal: 0.6 }
-      ] }
+      ...allExactLanes(),
+      porter: {
+        rows: [{ key: "candidate-a", ordinal: 0.5 }],
+        limit: 1
+      }
     }});
-    const scope = lexicalScope();
+    expect(closeLexicalBoundChannel(lexicalAuthority(proof))?.status)
+      .toBe("uncertified");
+    const result = closeLexicalBoundChannel(lexicalAuthority(
+      plantProof({ lanes: {
+        ...allExactLanes(),
+        porter: { rows: [{ key: "candidate-a", ordinal: 0.5 }], limit: 1 }
+      }}), [sensitivity("porter")]))!;
+    expect(result.status).toBe("bounded_open");
+    expect(result.remaining_effects).toEqual([expect.objectContaining({
+      lower: 0,
+      upper: 0.5
+    })]);
+  });
 
-    expect(closeLexicalBoundChannel({
-      proof,
-      scope,
-      binding: bindClosureReceiptScope({
-        scope,
-        source_receipt_digest: proof.proof_digest,
-        universe_digest: UNIVERSE
-      })
-    }).status).toBe("uncertified");
+  it("rejects proof clones, re-signing, and fabricated authority objects", () => {
+    const proof = plantProof();
+    lexicalAuthority(proof);
+    expect(() => lexicalAuthority(proof, [], {
+      query_digest: `sha256:${"6".repeat(64)}`
+    })).toThrow(/already bound/u);
+    expect(() => lexicalAuthority({ ...proof } as never)).toThrow(/source-issued/u);
+    expect(closeLexicalBoundChannel(Object.freeze({}) as LexicalClosureAuthority))
+      .toBeNull();
+  });
+
+  it("does not exact-close a lane with duplicate candidate identities", () => {
+    const proof = plantProof({ lanes: { exact: { rows: [
+      { key: "candidate-a", ordinal: 1 },
+      { key: "candidate-b", ordinal: 0.8 },
+      { key: "candidate-a", ordinal: 0.6 }
+    ] }}});
+    expect(closeLexicalBoundChannel(lexicalAuthority(proof))?.status)
+      .toBe("uncertified");
+  });
+
+  it("reflects an authorized query change without allowing domain widening", () => {
+    const first = closeLexicalBoundChannel(lexicalAuthority(plantProof()))!;
+    const second = closeLexicalBoundChannel(lexicalAuthority(plantProof(), [], {
+      query_digest: `sha256:${"7".repeat(64)}`
+    }))!;
+    expect(second.query_digest).not.toBe(first.query_digest);
+    expect(second.result_digest).not.toBe(first.result_digest);
+    expect(second.domain_id).toBe("LexDomain:lexical_relaxed");
   });
 });
 
-function lexicalScope(): ChannelClosureScope {
-  return Object.freeze({
+function lexicalAuthority(
+  proof: ReturnType<typeof plantProof>,
+  sensitivities: Parameters<typeof issueLexicalClosureAuthority>[0]["sensitivities"] = [],
+  overrides: Partial<Parameters<typeof issueLexicalClosureAuthority>[0]> = {}
+) {
+  return issueLexicalClosureAuthority({
+    proof,
     query_digest: QUERY,
-    request_digest: D1_REQUEST,
-    snapshot_digest: D1_SNAPSHOT,
     principal_digest: PRINCIPAL,
-    workspace_id: D1_WORKSPACE,
-    observer_id: "memory-keyword-search",
-    channel_id: "lexical_relaxed",
-    domain_id: "LexDomain:lexical_relaxed",
-    universe_digest: UNIVERSE,
-    sensitivities: Object.freeze([{
-      sensitivity_id: "proposition:lexical",
-      effect: "proposition_bound" as const,
-      target: "lexical-match"
-    }])
+    sensitivities,
+    ...overrides
   });
 }
 
-function boundedEffect(): ChannelRemainingEffect {
+function sensitivity(lane_id: "porter") {
   return Object.freeze({
-    effect_id: "proposition:lexical:remaining",
-    sensitivity_id: "proposition:lexical",
-    effect: "proposition_bound",
-    lower: 0,
-    upper: 0.5
+    lane_id,
+    sensitivity_id: `proposition:${lane_id}`,
+    effect: "proposition_bound" as const,
+    target: `lexical:${lane_id}`
+  });
+}
+
+function allExactLanes() {
+  return Object.freeze({
+    exact: { rows: [{ key: "candidate-a", ordinal: 1 }] },
+    porter: { rows: [{ key: "candidate-a", ordinal: 0.9 }] },
+    trigram: { rows: [{ key: "candidate-a", ordinal: 0.8 }] },
+    object_key_porter: { rows: [{ key: "candidate-a", ordinal: 0.7 }] },
+    object_key_trigram: { rows: [{ key: "candidate-a", ordinal: 0.6 }] }
   });
 }

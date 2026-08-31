@@ -2,52 +2,58 @@ import { describe, expect, it } from "vitest";
 
 import { digestRecallFieldIdentity } from
   "../../../../../../recall/field/field-identity.js";
+import type { ChannelClosureResult } from
+  "../../../../../../recall/decision/query-proof/closure/contract.js";
+import { evaluateAbstractProofKernel } from
+  "../../../../../../recall/decision/query-proof/proof/abstract/kernel.js";
+import type {
+  AbstractCoordinate,
+  AbstractDecisionOperator
+} from "../../../../../../recall/decision/query-proof/proof/abstract/contract.js";
 import {
-  createChannelClosureResult,
-  type ChannelClosureResult,
-  type ChannelClosureScope
-} from "../../../../../../recall/decision/query-proof/closure/index.js";
-import {
-  evaluateAbstractProofKernel,
-  type AbstractDecisionOperator,
-  type AbstractProofKernelInput
-} from "../../../../../../recall/decision/query-proof/proof/abstract/index.js";
-
-const QUERY = `sha256:${"a".repeat(64)}` as const;
-const SNAPSHOT = `sha256:${"b".repeat(64)}` as const;
-const PRINCIPAL = `sha256:${"c".repeat(64)}` as const;
+  boundedClosure,
+  createKernelCase,
+  notApplicableClosure,
+  singletonOperator,
+  trace
+} from "./proof-fixture.js";
 
 describe("abstract proof-kernel soundness boundary", () => {
-  it("joins bounded channel effects into the corresponding abstract domain", () => {
-    const proof = evaluateAbstractProofKernel(kernelInput({
-      closures: [createChannelClosureResult({
-        scope: scope("lexical"),
-        status: "bounded_open",
-        remaining_effects: [{
-          effect_id: "binding-tail",
-          sensitivity_id: "answer-binding",
-          effect: "answer_binding",
-          possible_bindings: ["answer-a", "answer-b"]
-        }],
-        reason: "bounded_binding_tail"
-      })],
-      coordinates: [{
-        coordinate_id: "binding",
-        sensitivity_id: "answer-binding",
-        owner_id: "lexical",
-        decision_changing: true,
-        kind: "binding",
-        possible_bindings: ["answer-a"]
-      }],
-      operator: bindingOperator()
-    }));
-
+  it("joins bounded channel effects into the matching abstract domain", () => {
+    const coordinate: AbstractCoordinate = {
+      coordinate_id: "binding",
+      sensitivity_id: "answer-binding",
+      owner_id: "lexical",
+      kind: "binding",
+      possible_bindings: ["answer-a"]
+    };
+    const operator: AbstractDecisionOperator = Object.freeze({
+      operator_id: "fixture_binding_abstract_v1",
+      evaluate: ({ coordinates }) => {
+        const binding = coordinates.find(({ sensitivity_id }) =>
+          sensitivity_id === "answer-binding");
+        const values = binding?.kind === "binding" ? binding.possible_bindings : [];
+        return Object.freeze({
+          status: "outcomes" as const,
+          handled_sensitivity_ids: ["answer-binding"],
+          outcomes: values.map((value) => trace([value]))
+        });
+      }
+    });
+    const closure = boundedClosure("lexical", {
+      effect_id: "binding-tail",
+      sensitivity_id: "answer-binding",
+      effect: "answer_binding",
+      possible_bindings: ["answer-a", "answer-b"]
+    });
+    const proof = evaluateAbstractProofKernel(createKernelCase({
+      closures: [closure], coordinates: [coordinate], operator
+    }).input);
     expect(proof.status).toBe("OPEN");
-    if (proof.status !== "OPEN") throw new Error("expected open proof");
-    expect(proof.possible_outcomes).toHaveLength(2);
+    if (proof.status === "OPEN") expect(proof.possible_outcomes).toHaveLength(2);
   });
 
-  it("rejects self-digested closure payloads that violate status evidence", () => {
+  it("rejects a self-digested but non-issued closure payload", () => {
     const valid = notApplicableClosure("lexical");
     const { result_digest: _digest, ...validBody } = valid;
     const forgedBody = {
@@ -60,134 +66,64 @@ describe("abstract proof-kernel soundness boundary", () => {
       ...forgedBody,
       result_digest: digestRecallFieldIdentity(forgedBody)
     } as ChannelClosureResult;
-
-    const proof = evaluateAbstractProofKernel(kernelInput({
-      closures: [forged],
-      operator: singletonOperator()
-    }));
+    const proof = evaluateAbstractProofKernel(createKernelCase({
+      closures: [forged]
+    }).input);
     expect(proof.status).toBe("OPEN");
   });
 
-  it("returns UNSUPPORTED when the injected operator throws or emits an invalid trace", () => {
-    const throwing: AbstractDecisionOperator = {
+  it("returns UNSUPPORTED for throwing operators and malformed traces", () => {
+    const throwing: AbstractDecisionOperator = Object.freeze({
       operator_id: "fixture_throwing_abstract_v1",
       evaluate: () => { throw new Error("fixture failure"); }
-    };
-    const invalidTrace: AbstractDecisionOperator = {
+    });
+    const invalidTrace: AbstractDecisionOperator = Object.freeze({
       operator_id: "fixture_invalid_trace_abstract_v1",
       evaluate: () => ({
-        status: "outcomes",
-        handled_sensitivity_ids: [],
+        status: "outcomes", handled_sensitivity_ids: [],
         outcomes: [{
           candidate_prefix: ["candidate-a", "candidate-a"],
-          answer_bindings: [],
-          pick_reasons: []
+          answer_bindings: [], pick_reasons: []
         }]
       })
-    };
-
-    expect(() => evaluateAbstractProofKernel(kernelInput({ operator: throwing })))
-      .not.toThrow();
-    expect(evaluateAbstractProofKernel(kernelInput({ operator: throwing })).status)
-      .toBe("UNSUPPORTED");
-    expect(() => evaluateAbstractProofKernel(kernelInput({ operator: invalidTrace })))
-      .not.toThrow();
-    expect(evaluateAbstractProofKernel(kernelInput({ operator: invalidTrace })).status)
-      .toBe("UNSUPPORTED");
+    });
+    expect(evaluateAbstractProofKernel(createKernelCase({
+      closures: [], operator: throwing
+    }).input).status).toBe("UNSUPPORTED");
+    expect(evaluateAbstractProofKernel(createKernelCase({
+      closures: [], operator: invalidTrace
+    }).input).status).toBe("UNSUPPORTED");
   });
 
-  it("binds the proof digest to closure premises but not their input order", () => {
+  it("binds proof bytes to closure premises but canonicalizes their order", () => {
     const a = notApplicableClosure("channel-a");
     const b = notApplicableClosure("channel-b");
-    const onePremise = evaluateAbstractProofKernel(kernelInput({ closures: [a] }));
-    const twoForward = evaluateAbstractProofKernel(kernelInput({ closures: [a, b] }));
-    const twoReversed = evaluateAbstractProofKernel(kernelInput({ closures: [b, a] }));
+    const operator = singletonOperator([]);
+    const one = evaluateAbstractProofKernel(createKernelCase({
+      closures: [a], operator
+    }).input);
+    const forward = evaluateAbstractProofKernel(createKernelCase({
+      closures: [a, b], operator
+    }).input);
+    const reverse = evaluateAbstractProofKernel(createKernelCase({
+      closures: [b, a], operator
+    }).input);
+    expect(one.proof_digest).not.toBe(forward.proof_digest);
+    expect(forward).toEqual(reverse);
+  });
 
-    expect(onePremise.proof_digest).not.toBe(twoForward.proof_digest);
-    expect(twoForward).toEqual(twoReversed);
+  it("rejects unknown coordinate fields and enum variants", () => {
+    const valid: AbstractCoordinate = {
+      coordinate_id: "membership", sensitivity_id: "membership",
+      owner_id: "test-channel", kind: "membership", possible_states: ["present"]
+    };
+    const withExtra = { ...valid, hidden: true } as never;
+    const badEnum = { ...valid, possible_states: ["maybe"] } as never;
+    expect(evaluateAbstractProofKernel(createKernelCase({
+      coordinates: [withExtra], operator: singletonOperator(["membership"])
+    }).input).status).toBe("UNSUPPORTED");
+    expect(evaluateAbstractProofKernel(createKernelCase({
+      coordinates: [badEnum], operator: singletonOperator(["membership"])
+    }).input).status).toBe("UNSUPPORTED");
   });
 });
-
-function kernelInput(
-  overrides: Partial<AbstractProofKernelInput>
-): AbstractProofKernelInput {
-  return {
-    query_digest: QUERY,
-    snapshot_digest: SNAPSHOT,
-    principal_digest: PRINCIPAL,
-    k_max: 2,
-    closures: [notApplicableClosure("lexical")],
-    coordinates: [],
-    limits: { max_channels: 8, max_coordinates: 16, max_sensitivities: 16 },
-    operator: singletonOperator(),
-    ...overrides
-  };
-}
-
-function scope(channelId: string): ChannelClosureScope {
-  return {
-    query_digest: QUERY,
-    request_digest: `sha256:${"d".repeat(64)}`,
-    snapshot_digest: SNAPSHOT,
-    principal_digest: PRINCIPAL,
-    workspace_id: "workspace-1",
-    observer_id: `${channelId}-observer`,
-    channel_id: channelId,
-    domain_id: "query-answer-domain",
-    universe_digest: `sha256:${"e".repeat(64)}`,
-    sensitivities: [{
-      sensitivity_id: "answer-binding",
-      effect: "answer_binding",
-      target: "answer"
-    }]
-  };
-}
-
-function notApplicableClosure(channelId: string): ChannelClosureResult {
-  return createChannelClosureResult({
-    scope: scope(channelId),
-    status: "not_applicable",
-    reason: "not_applicable_fixture"
-  });
-}
-
-function bindingOperator(): AbstractDecisionOperator {
-  return {
-    operator_id: "fixture_binding_abstract_v1",
-    evaluate: ({ coordinates }) => {
-      const coordinate = coordinates.find(({ sensitivity_id }) =>
-        sensitivity_id === "answer-binding");
-      const bindings = coordinate?.kind === "binding"
-        ? coordinate.possible_bindings
-        : [];
-      return {
-        status: "outcomes",
-        handled_sensitivity_ids: ["answer-binding"],
-        outcomes: bindings.map((binding) => trace([binding]))
-      };
-    }
-  };
-}
-
-function singletonOperator(): AbstractDecisionOperator {
-  return {
-    operator_id: "fixture_singleton_abstract_v1",
-    evaluate: () => ({
-      status: "outcomes",
-      handled_sensitivity_ids: [],
-      outcomes: [trace(["candidate-a"])]
-    })
-  };
-}
-
-function trace(candidatePrefix: readonly string[]) {
-  return {
-    candidate_prefix: candidatePrefix,
-    answer_bindings: [],
-    pick_reasons: candidatePrefix.map((candidateKey, position) => ({
-      position,
-      candidate_key: candidateKey,
-      reason_id: "fixture"
-    }))
-  };
-}

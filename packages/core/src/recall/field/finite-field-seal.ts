@@ -1,4 +1,5 @@
 import { stableStringify } from "../../shared/stable-stringify.js";
+import { compareText } from "../../shared/compare-text.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from "./field-identity.js";
 
 export const RECALL_FINITE_FIELD_SEAL_OPERATOR_ID =
@@ -37,11 +38,64 @@ export type RecallFiniteFieldSeal = Readonly<{
   readonly seal_digest: RecallFieldDigest;
 }>;
 
+export type RecallFiniteFieldClosureSensitivity = Readonly<{
+  readonly sensitivity_id: string;
+  readonly effect: "proposition_bound" | "extremum_interval";
+  readonly target: string;
+}>;
+
+export type RecallFiniteFieldClosureAuthorityState = Readonly<{
+  readonly source_seal: RecallFiniteFieldSeal;
+  readonly source_channel: RecallFiniteFieldChannelReceipt;
+  readonly query_digest: RecallFieldDigest;
+  readonly request_digest: RecallFieldDigest;
+  readonly snapshot_digest: RecallFieldDigest;
+  readonly principal_digest: RecallFieldDigest;
+  readonly workspace_id: string;
+  readonly observer_id: string;
+  readonly channel_id: string;
+  readonly domain_id: string;
+  readonly universe_digest: RecallFieldDigest;
+  readonly candidate_key_domain: string;
+  readonly eligible_candidate_keys: readonly string[];
+  readonly sensitivities: readonly RecallFiniteFieldClosureSensitivity[];
+  readonly extremum_intervals: readonly Readonly<{
+    readonly binding_id: string;
+    readonly lower: number;
+    readonly upper: number;
+  }>[];
+  readonly remaining_numeric_effect: Readonly<{
+    readonly effect_id: string;
+    readonly sensitivity_id: string;
+    readonly effect: "proposition_bound" | "extremum_interval";
+    readonly lower: number;
+    readonly upper: number;
+  }> | null;
+}>;
+
+declare const finiteFieldClosureAuthorityBrand: unique symbol;
+export type RecallFiniteFieldClosureAuthority = Readonly<{
+  readonly [finiteFieldClosureAuthorityBrand]: true;
+}>;
+
+const issuedFiniteFieldSeals = new WeakSet<object>();
+const finiteClosureAuthorityStates = new WeakMap<
+  object,
+  RecallFiniteFieldClosureAuthorityState
+>();
+const finiteClosureAuthoritiesBySeal = new WeakMap<
+  object,
+  Map<string, RecallFiniteFieldClosureAuthority>
+>();
+
 export function createRecallFiniteFieldSeal(params: Readonly<{
   readonly upstream_snapshot_digest: RecallFieldDigest;
   readonly channel_catalog: readonly string[];
   readonly channels: readonly Readonly<RecallFiniteFieldChannelInput>[];
 }>): RecallFiniteFieldSeal {
+  assertAllowedKeys(params, ["upstream_snapshot_digest", "channel_catalog", "channels"],
+    ["upstream_snapshot_digest", "channel_catalog", "channels"],
+    "finite field seal input");
   assertSha256(params.upstream_snapshot_digest, "upstream snapshot digest");
   const catalog = freezeUniqueIdentities(params.channel_catalog, "channel catalog");
   const inputs = indexChannels(params.channels, catalog);
@@ -55,10 +109,197 @@ export function createRecallFiniteFieldSeal(params: Readonly<{
     channel_catalog: catalog,
     channels
   });
-  return Object.freeze({ ...body, seal_digest: digestRecallFieldIdentity(body) });
+  const seal = Object.freeze({
+    ...body,
+    seal_digest: digestRecallFieldIdentity(body)
+  });
+  issuedFiniteFieldSeals.add(seal);
+  return seal;
+}
+
+export function issueRecallFiniteFieldClosureAuthority(params: Readonly<{
+  readonly seal: RecallFiniteFieldSeal;
+  readonly channel_id: string;
+  readonly query_digest: RecallFieldDigest;
+  readonly request_digest: RecallFieldDigest;
+  readonly principal_digest: RecallFieldDigest;
+  readonly workspace_id: string;
+  readonly observer_id: string;
+  readonly domain_id: string;
+  readonly candidate_key_domain: string;
+  readonly eligible_candidate_keys?: readonly string[];
+  readonly sensitivity?: RecallFiniteFieldClosureSensitivity;
+  readonly extremum_intervals?: readonly Readonly<{
+    readonly binding_id: string;
+    readonly lower: number;
+    readonly upper: number;
+  }>[];
+}>): RecallFiniteFieldClosureAuthority {
+  assertAllowedKeys(params, [
+    "seal", "channel_id", "query_digest", "request_digest", "principal_digest",
+    "workspace_id", "observer_id", "domain_id", "candidate_key_domain",
+    "eligible_candidate_keys", "sensitivity", "extremum_intervals"
+  ], [
+    "seal", "channel_id", "query_digest", "request_digest", "principal_digest",
+    "workspace_id", "observer_id", "domain_id", "candidate_key_domain"
+  ], "finite field closure authority input");
+  verifyRecallFiniteFieldSeal(params.seal);
+  if (!issuedFiniteFieldSeals.has(params.seal)) {
+    throw new Error("finite field closure requires a source-issued seal");
+  }
+  const channel = params.seal.channels.find(({ channel_id }) =>
+    channel_id === params.channel_id);
+  if (channel === undefined) throw new Error("finite field closure channel is absent");
+  const state = materializeFiniteClosureAuthorityState(params, channel);
+  let byChannel = finiteClosureAuthoritiesBySeal.get(params.seal);
+  if (byChannel === undefined) {
+    byChannel = new Map();
+    finiteClosureAuthoritiesBySeal.set(params.seal, byChannel);
+  }
+  const existing = byChannel.get(params.channel_id);
+  if (existing !== undefined) {
+    const prior = readRecallFiniteFieldClosureAuthority(existing);
+    if (stableStringify(prior) !== stableStringify(state)) {
+      throw new Error("finite field source receipt is already bound to another closure scope");
+    }
+    return existing;
+  }
+  const authority = Object.freeze({}) as RecallFiniteFieldClosureAuthority;
+  finiteClosureAuthorityStates.set(authority, state);
+  byChannel.set(params.channel_id, authority);
+  return authority;
+}
+
+export function readRecallFiniteFieldClosureAuthority(
+  authority: RecallFiniteFieldClosureAuthority
+): RecallFiniteFieldClosureAuthorityState {
+  const state = finiteClosureAuthorityStates.get(authority);
+  if (state === undefined) throw new Error("finite field closure authority is invalid");
+  verifyRecallFiniteFieldSeal(state.source_seal);
+  return state;
+}
+
+function materializeFiniteClosureAuthorityState(
+  params: Parameters<typeof issueRecallFiniteFieldClosureAuthority>[0],
+  channel: RecallFiniteFieldChannelReceipt
+): RecallFiniteFieldClosureAuthorityState {
+  [params.query_digest, params.request_digest, params.principal_digest]
+    .forEach((value) => assertSha256(value, "finite closure identity digest"));
+  [params.workspace_id, params.observer_id, params.domain_id,
+    params.candidate_key_domain].forEach((value) =>
+    assertIdentity(value, "finite closure identity"));
+  const eligible = freezeUniqueIdentities(
+    params.eligible_candidate_keys ?? channel.observations.map(({ candidate_key }) =>
+      candidate_key),
+    "finite closure eligible candidate"
+  ).slice().sort(compareText);
+  if (channel.status === "complete" && channel.observations.some(({ candidate_key }) =>
+    !eligible.includes(candidate_key))) {
+    throw new Error("finite closure eligible universe omits an observed candidate");
+  }
+  const sensitivity = params.sensitivity === undefined
+    ? []
+    : [freezeFiniteClosureSensitivity(params.sensitivity)];
+  const intervals = freezeExtremumIntervals(
+    params.extremum_intervals ?? [],
+    eligible,
+    sensitivity[0]
+  );
+  const universeDigest = digestRecallFieldIdentity({
+    operator_id: "finite_field_source_universe_v1",
+    source_channel_digest: channel.channel_digest,
+    candidate_key_domain: params.candidate_key_domain,
+    eligible_candidate_keys: eligible
+  });
+  const remaining = channel.status === "truncated" && sensitivity[0] !== undefined &&
+      channel.unseen_upper_bound !== null
+    ? Object.freeze({
+        effect_id: `${sensitivity[0].sensitivity_id}:source-unseen`,
+        sensitivity_id: sensitivity[0].sensitivity_id,
+        effect: sensitivity[0].effect,
+        lower: 0,
+        upper: channel.unseen_upper_bound
+      })
+    : null;
+  return Object.freeze({
+    source_seal: params.seal,
+    source_channel: channel,
+    query_digest: params.query_digest,
+    request_digest: params.request_digest,
+    snapshot_digest: params.seal.upstream_snapshot_digest,
+    principal_digest: params.principal_digest,
+    workspace_id: params.workspace_id,
+    observer_id: params.observer_id,
+    channel_id: channel.channel_id,
+    domain_id: params.domain_id,
+    universe_digest: universeDigest,
+    candidate_key_domain: params.candidate_key_domain,
+    eligible_candidate_keys: Object.freeze(eligible),
+    sensitivities: Object.freeze(sensitivity),
+    extremum_intervals: intervals,
+    remaining_numeric_effect: remaining
+  });
+}
+
+function freezeExtremumIntervals(
+  values: readonly Readonly<{
+    readonly binding_id: string;
+    readonly lower: number;
+    readonly upper: number;
+  }>[],
+  eligible: readonly string[],
+  sensitivity: RecallFiniteFieldClosureSensitivity | undefined
+) {
+  if (values.length === 0) return Object.freeze([]);
+  if (sensitivity?.effect !== "extremum_interval") {
+    throw new Error("finite extremum intervals require an extremum sensitivity");
+  }
+  const intervals = values.map((value) => {
+    assertAllowedKeys(value, ["binding_id", "lower", "upper"],
+      ["binding_id", "lower", "upper"], "finite extremum interval");
+    assertIdentity(value.binding_id, "finite extremum binding");
+    if (![value.lower, value.upper].every(Number.isFinite) || value.upper < value.lower) {
+      throw new Error("finite extremum interval is invalid");
+    }
+    return Object.freeze({ ...value });
+  }).sort((left, right) => compareText(left.binding_id, right.binding_id));
+  if (new Set(intervals.map(({ binding_id }) => binding_id)).size !== intervals.length ||
+      intervals.length !== eligible.length ||
+      intervals.some(({ binding_id }, index) => binding_id !== eligible[index])) {
+    throw new Error("finite extremum intervals must exactly cover the eligible universe");
+  }
+  return Object.freeze(intervals);
+}
+
+function freezeFiniteClosureSensitivity(
+  sensitivity: RecallFiniteFieldClosureSensitivity
+): RecallFiniteFieldClosureSensitivity {
+  assertAllowedKeys(sensitivity, ["sensitivity_id", "effect", "target"],
+    ["sensitivity_id", "effect", "target"], "finite closure sensitivity");
+  assertIdentity(sensitivity.sensitivity_id, "finite closure sensitivity");
+  assertIdentity(sensitivity.target, "finite closure sensitivity target");
+  if (sensitivity.effect !== "proposition_bound" &&
+      sensitivity.effect !== "extremum_interval") {
+    throw new Error("finite closure sensitivity effect is unsupported");
+  }
+  return Object.freeze({ ...sensitivity });
 }
 
 export function verifyRecallFiniteFieldSeal(seal: RecallFiniteFieldSeal): void {
+  assertAllowedKeys(seal, [
+    "schema_version", "operator_id", "upstream_snapshot_digest", "channel_catalog",
+    "channels", "seal_digest"
+  ], [
+    "schema_version", "operator_id", "upstream_snapshot_digest", "channel_catalog",
+    "channels", "seal_digest"
+  ], "finite field seal");
+  seal.channels.forEach((channel) => assertAllowedKeys(channel, [
+    "channel_id", "status", "depth", "observations", "unseen_upper_bound",
+    "channel_digest"
+  ], [
+    "channel_id", "status", "depth", "observations", "unseen_upper_bound",
+    "channel_digest"
+  ], "finite field channel receipt"));
   if (seal.schema_version !== 1 ||
       seal.operator_id !== RECALL_FINITE_FIELD_SEAL_OPERATOR_ID) {
     throw new Error("finite field schema or operator mismatch");
@@ -109,6 +350,10 @@ function materializeChannel(
 }
 
 function assertChannel(input: Readonly<RecallFiniteFieldChannelInput>): void {
+  assertAllowedKeys(input, [
+    "channel_id", "status", "depth", "observations", "unseen_upper_bound"
+  ], ["channel_id", "status", "depth", "observations", "unseen_upper_bound"],
+  "finite field channel");
   assertIdentity(input.channel_id, "channel id");
   if (!CHANNEL_STATUSES.has(input.status)) {
     throw new Error("finite field channel status is invalid");
@@ -141,6 +386,8 @@ function assertObservations(
   const identities = new Set<string>();
   let previousRank = 0;
   for (const observation of observations) {
+    assertAllowedKeys(observation, ["observation_id", "candidate_key", "rank"],
+      ["observation_id", "candidate_key", "rank"], "finite field observation");
     assertIdentity(observation.observation_id, "observation id");
     assertIdentity(observation.candidate_key, "candidate key");
     if (identities.has(observation.observation_id)) {
@@ -220,6 +467,19 @@ function isUnit(value: number | null): value is number {
 
 function assertSha256(value: string, field: string): void {
   if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new Error(`${field} must be sha256`);
+}
+
+function assertAllowedKeys(
+  value: object,
+  allowed: readonly string[],
+  required: readonly string[],
+  field: string
+): void {
+  const keys = Object.keys(value);
+  if (keys.some((key) => !allowed.includes(key)) || required.some((key) =>
+    !Object.prototype.hasOwnProperty.call(value, key))) {
+    throw new Error(`${field} has unknown or missing fields`);
+  }
 }
 
 const CHANNEL_STATUSES: ReadonlySet<string> = new Set([

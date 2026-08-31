@@ -6,10 +6,6 @@ import {
 
 export const CHANNEL_CLOSURE_OPERATOR_ID =
   "query_proof_channel_closure_v1";
-export const CLOSURE_SCOPE_BINDING_OPERATOR_ID =
-  "query_proof_closure_scope_binding_v1";
-export const FINITE_CLOSURE_UNIVERSE_OPERATOR_ID =
-  "query_proof_finite_closure_universe_v1";
 
 export type ChannelClosureStatus =
   | "not_applicable"
@@ -78,26 +74,6 @@ export type ChannelRemainingEffect =
       readonly possible_winner_digests: readonly RecallFieldDigest[];
     }>);
 
-export type ClosureReceiptScopeBinding = Readonly<{
-  readonly schema_version: 1;
-  readonly operator_id: typeof CLOSURE_SCOPE_BINDING_OPERATOR_ID;
-  readonly source_receipt_digest: RecallFieldDigest;
-  readonly scope_digest: RecallFieldDigest;
-  readonly universe_digest: RecallFieldDigest;
-  readonly binding_digest: RecallFieldDigest;
-}>;
-
-export type FiniteClosureUniverseWitness = Readonly<{
-  readonly schema_version: 1;
-  readonly operator_id: typeof FINITE_CLOSURE_UNIVERSE_OPERATOR_ID;
-  readonly scope_digest: RecallFieldDigest;
-  readonly source_receipt_digest: RecallFieldDigest;
-  readonly universe_digest: RecallFieldDigest;
-  readonly candidate_key_domain: string;
-  readonly eligible_candidate_keys: readonly string[];
-  readonly witness_digest: RecallFieldDigest;
-}>;
-
 export type ScopedCompletenessReference = Readonly<{
   readonly receipt_id: "query_proof_scoped_completeness_v1";
   readonly source_receipt_digest: RecallFieldDigest;
@@ -120,100 +96,14 @@ export type ChannelClosureResult = Readonly<{
   readonly channel_id: string;
   readonly domain_id: string;
   readonly universe_digest: RecallFieldDigest;
+  readonly sensitivity_manifest: readonly ClosureQuerySensitivity[];
   readonly remaining_effects: readonly ChannelRemainingEffect[];
   readonly completeness_refs: readonly ScopedCompletenessReference[];
   readonly reason: string;
   readonly result_digest: RecallFieldDigest;
 }>;
 
-export function bindClosureReceiptScope(params: Readonly<{
-  readonly scope: ChannelClosureScope;
-  readonly source_receipt_digest: RecallFieldDigest;
-  readonly universe_digest: RecallFieldDigest;
-}>): ClosureReceiptScopeBinding {
-  const scope = freezeClosureScope(params.scope);
-  assertDigest(params.source_receipt_digest, "closure source receipt");
-  assertDigest(params.universe_digest, "closure universe");
-  const body = Object.freeze({
-    schema_version: 1 as const,
-    operator_id: CLOSURE_SCOPE_BINDING_OPERATOR_ID,
-    source_receipt_digest: params.source_receipt_digest,
-    scope_digest: digestClosureScope(scope),
-    universe_digest: params.universe_digest
-  });
-  return Object.freeze({
-    ...body,
-    binding_digest: digestRecallFieldIdentity(body)
-  });
-}
-
-export function closureBindingApplies(params: Readonly<{
-  readonly binding: ClosureReceiptScopeBinding;
-  readonly scope: ChannelClosureScope;
-  readonly source_receipt_digest: RecallFieldDigest;
-  readonly universe_digest?: RecallFieldDigest;
-}>): boolean {
-  try {
-    const expected = bindClosureReceiptScope({
-      scope: params.scope,
-      source_receipt_digest: params.source_receipt_digest,
-      universe_digest: params.universe_digest ?? params.scope.universe_digest
-    });
-    return expected.binding_digest === params.binding.binding_digest &&
-      expected.scope_digest === params.binding.scope_digest &&
-      expected.source_receipt_digest === params.binding.source_receipt_digest &&
-      expected.universe_digest === params.binding.universe_digest;
-  } catch {
-    return false;
-  }
-}
-
-export function createFiniteClosureUniverseWitness(params: Readonly<{
-  readonly scope: ChannelClosureScope;
-  readonly source_receipt_digest: RecallFieldDigest;
-  readonly candidate_key_domain: string;
-  readonly eligible_candidate_keys: readonly string[];
-}>): FiniteClosureUniverseWitness {
-  const scope = freezeClosureScope(params.scope);
-  assertDigest(params.source_receipt_digest, "finite universe source receipt");
-  assertIdentity(params.candidate_key_domain, "finite universe candidate domain");
-  const eligible = freezeIdentities(
-    params.eligible_candidate_keys,
-    "finite universe candidate key"
-  );
-  const body = Object.freeze({
-    schema_version: 1 as const,
-    operator_id: FINITE_CLOSURE_UNIVERSE_OPERATOR_ID,
-    scope_digest: digestClosureScope(scope),
-    source_receipt_digest: params.source_receipt_digest,
-    universe_digest: scope.universe_digest,
-    candidate_key_domain: params.candidate_key_domain,
-    eligible_candidate_keys: eligible
-  });
-  return Object.freeze({
-    ...body,
-    witness_digest: digestRecallFieldIdentity(body)
-  });
-}
-
-export function finiteUniverseApplies(params: Readonly<{
-  readonly witness: FiniteClosureUniverseWitness;
-  readonly scope: ChannelClosureScope;
-  readonly source_receipt_digest: RecallFieldDigest;
-}>): boolean {
-  try {
-    const expected = createFiniteClosureUniverseWitness({
-      scope: params.scope,
-      source_receipt_digest: params.source_receipt_digest,
-      candidate_key_domain: params.witness.candidate_key_domain,
-      eligible_candidate_keys: params.witness.eligible_candidate_keys
-    });
-    return expected.witness_digest === params.witness.witness_digest &&
-      expected.universe_digest === params.witness.universe_digest;
-  } catch {
-    return false;
-  }
-}
+const issuedChannelClosureResults = new WeakSet<object>();
 
 export function createScopedCompletenessReference(params: Readonly<{
   readonly scope: ChannelClosureScope;
@@ -221,10 +111,16 @@ export function createScopedCompletenessReference(params: Readonly<{
   readonly universe_digest: RecallFieldDigest;
   readonly coordinate_id: string;
 }>): ScopedCompletenessReference {
+  assertExactKeys(params, [
+    "scope", "source_receipt_digest", "universe_digest", "coordinate_id"
+  ], "completeness reference input");
   const scope = freezeClosureScope(params.scope);
   assertDigest(params.source_receipt_digest, "completeness source receipt");
   assertDigest(params.universe_digest, "completeness universe");
   assertIdentity(params.coordinate_id, "completeness coordinate");
+  if (params.universe_digest !== scope.universe_digest) {
+    throw new Error("completeness reference universe must equal scope universe");
+  }
   const body = Object.freeze({
     receipt_id: "query_proof_scoped_completeness_v1" as const,
     source_receipt_digest: params.source_receipt_digest,
@@ -246,6 +142,9 @@ export function createChannelClosureResult(params: Readonly<{
   readonly completeness_refs?: readonly ScopedCompletenessReference[];
   readonly reason: string;
 }>): ChannelClosureResult {
+  assertAllowedKeys(params, [
+    "scope", "status", "remaining_effects", "completeness_refs", "reason"
+  ], ["scope", "status", "reason"], "channel closure input");
   const scope = freezeClosureScope(params.scope);
   const effects = freezeEffects(params.remaining_effects ?? [], scope.sensitivities);
   const refs = freezeCompletenessReferences(params.completeness_refs ?? [], scope);
@@ -263,14 +162,21 @@ export function createChannelClosureResult(params: Readonly<{
     channel_id: scope.channel_id,
     domain_id: scope.domain_id,
     universe_digest: scope.universe_digest,
+    sensitivity_manifest: scope.sensitivities,
     remaining_effects: effects,
     completeness_refs: refs,
     reason: params.reason
   });
-  return Object.freeze({
+  const result = Object.freeze({
     ...body,
     result_digest: digestRecallFieldIdentity(body)
   });
+  issuedChannelClosureResults.add(result);
+  return result;
+}
+
+export function isIssuedChannelClosureResult(result: ChannelClosureResult): boolean {
+  return issuedChannelClosureResults.has(result);
 }
 
 export function uncertifiedClosure(
@@ -285,6 +191,11 @@ export function digestClosureScope(scope: ChannelClosureScope): RecallFieldDiges
 }
 
 function freezeClosureScope(scope: ChannelClosureScope): ChannelClosureScope {
+  assertExactKeys(scope, [
+    "query_digest", "request_digest", "snapshot_digest", "principal_digest",
+    "workspace_id", "observer_id", "channel_id", "domain_id",
+    "universe_digest", "sensitivities"
+  ], "closure scope");
   for (const [value, name] of [
     [scope.query_digest, "query"],
     [scope.request_digest, "request"],
@@ -298,7 +209,16 @@ function freezeClosureScope(scope: ChannelClosureScope): ChannelClosureScope {
     [scope.channel_id, "channel"],
     [scope.domain_id, "domain"]
   ] as const) assertIdentity(value, `closure ${name}`);
-  const sensitivities = scope.sensitivities.map((sensitivity) => {
+  const sensitivities = normalizeClosureQuerySensitivities(scope.sensitivities);
+  return Object.freeze({ ...scope, sensitivities });
+}
+
+export function normalizeClosureQuerySensitivities(
+  values: readonly ClosureQuerySensitivity[]
+): readonly ClosureQuerySensitivity[] {
+  const sensitivities = values.map((sensitivity) => {
+    assertExactKeys(sensitivity, ["sensitivity_id", "effect", "target"],
+      "closure sensitivity");
     assertIdentity(sensitivity.sensitivity_id, "closure sensitivity id");
     assertIdentity(sensitivity.target, "closure sensitivity target");
     if (!SENSITIVITY_EFFECTS.has(sensitivity.effect)) {
@@ -310,7 +230,7 @@ function freezeClosureScope(scope: ChannelClosureScope): ChannelClosureScope {
       sensitivities.length) {
     throw new Error("closure sensitivity ids must be unique");
   }
-  return Object.freeze({ ...scope, sensitivities: Object.freeze(sensitivities) });
+  return Object.freeze(sensitivities);
 }
 
 function freezeEffects(
@@ -338,10 +258,15 @@ export function normalizeChannelRemainingEffect(
   assertIdentity(effect.effect_id, "remaining effect id");
   assertIdentity(effect.sensitivity_id, "remaining effect sensitivity id");
   if (effect.effect === "proposition_bound" || effect.effect === "extremum_interval") {
+    assertExactKeys(effect, ["effect_id", "sensitivity_id", "effect", "lower", "upper"],
+      "remaining numeric effect");
     assertInterval(effect.lower, effect.upper, "remaining numeric effect");
     return Object.freeze({ ...effect });
   }
   if (effect.effect === "answer_position") {
+    assertExactKeys(effect, [
+      "effect_id", "sensitivity_id", "effect", "minimum_position", "maximum_position"
+    ], "remaining answer position");
     if (!Number.isSafeInteger(effect.minimum_position) ||
         !Number.isSafeInteger(effect.maximum_position) ||
         effect.minimum_position < 0 || effect.maximum_position < effect.minimum_position) {
@@ -350,6 +275,9 @@ export function normalizeChannelRemainingEffect(
     return Object.freeze({ ...effect });
   }
   if (effect.effect === "answer_binding") {
+    assertExactKeys(effect, [
+      "effect_id", "sensitivity_id", "effect", "possible_bindings"
+    ], "remaining answer binding");
     if (effect.possible_bindings.length === 0) {
       throw new Error("remaining answer binding values must be nonempty");
     }
@@ -357,6 +285,9 @@ export function normalizeChannelRemainingEffect(
       possible_bindings: freezeIdentities(effect.possible_bindings, "answer binding") });
   }
   if (effect.effect === "tie_winner_membership") {
+    assertExactKeys(effect, [
+      "effect_id", "sensitivity_id", "effect", "possible_winner_digests"
+    ], "remaining tie membership");
     if (effect.possible_winner_digests.length === 0) {
       throw new Error("remaining tie winner values must be nonempty");
     }
@@ -367,6 +298,13 @@ export function normalizeChannelRemainingEffect(
         .sort(compareText)) });
   }
   if (effect.effect === "feasibility_change") {
+    assertExactKeys(effect, [
+      "effect_id", "sensitivity_id", "effect", "possible_states"
+    ], "remaining feasibility");
+    if (effect.possible_states.some((value) =>
+      !FEASIBILITY_STATES.has(value))) {
+      throw new Error("remaining feasibility state is invalid");
+    }
     if (effect.possible_states.length === 0 ||
         new Set(effect.possible_states).size !== effect.possible_states.length) {
       throw new Error("remaining finite effect values must be nonempty and unique");
@@ -375,6 +313,13 @@ export function normalizeChannelRemainingEffect(
       possible_states: Object.freeze([...effect.possible_states].sort(compareText)) });
   }
   if (effect.effect === "correlation_group") {
+    assertExactKeys(effect, [
+      "effect_id", "sensitivity_id", "effect", "possible_relations"
+    ], "remaining correlation");
+    if (effect.possible_relations.some((value) =>
+      !CORRELATION_RELATIONS.has(value))) {
+      throw new Error("remaining correlation relation is invalid");
+    }
     if (effect.possible_relations.length === 0 ||
         new Set(effect.possible_relations).size !== effect.possible_relations.length) {
       throw new Error("remaining finite effect values must be nonempty and unique");
@@ -393,6 +338,7 @@ function freezeCompletenessReferences(
   return Object.freeze(references.map((reference) => {
     const { reference_digest: _digest, ...body } = reference;
     if (reference.scope_digest !== expectedScope ||
+        reference.universe_digest !== scope.universe_digest ||
         reference.domain_id !== scope.domain_id ||
         reference.reference_digest !== digestRecallFieldIdentity(body)) {
       throw new Error("scoped completeness reference binding mismatch");
@@ -444,6 +390,39 @@ function assertIdentity(value: string, field: string): void {
 function assertDigest(value: string, field: string): asserts value is RecallFieldDigest {
   if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new Error(`${field} must be sha256`);
 }
+
+function assertExactKeys(
+  value: object,
+  allowed: readonly string[],
+  field: string
+): void {
+  const keys = Object.keys(value).sort(compareText);
+  const expected = [...allowed].sort(compareText);
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+    throw new Error(`${field} has unknown or missing fields`);
+  }
+}
+
+function assertAllowedKeys(
+  value: object,
+  allowed: readonly string[],
+  required: readonly string[],
+  field: string
+): void {
+  const keys = Object.keys(value);
+  if (keys.some((key) => !allowed.includes(key)) || required.some((key) =>
+    !Object.prototype.hasOwnProperty.call(value, key))) {
+    throw new Error(`${field} has unknown or missing fields`);
+  }
+}
+
+const FEASIBILITY_STATES: ReadonlySet<string> = new Set([
+  "feasible", "infeasible", "unresolved"
+]);
+
+const CORRELATION_RELATIONS: ReadonlySet<string> = new Set([
+  "same_group", "different_group"
+]);
 
 const SENSITIVITY_EFFECTS: ReadonlySet<string> = new Set([
   "proposition_bound",

@@ -1,14 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  assertFiniteOracleExhaustive,
-  createFiniteMutualExclusionReceipt,
-  enumerateFiniteDecisionOracle,
-  type FiniteDecisionOperator,
-  type FiniteOracleFixture
-} from "../../../../../../recall/decision/query-proof/proof/oracle/index.js";
+  assertFiniteOracleExhaustive as assertSourceOracleExhaustive,
+  enumerateFiniteDecisionOracle as enumerateSourceOracle
+} from "../../../../../../recall/decision/query-proof/proof/oracle/oracle.js";
+import { createFiniteMutualExclusionReceipt } from
+  "../../../../../../recall/decision/query-proof/proof/oracle/mutual-exclusion.js";
+import {
+  issueFiniteTransferAuthority,
+  type FiniteTransferAuthority,
+  type TransferAbstractKind
+} from "../../../../../../recall/decision/query-proof/proof/oracle/transfer-authority.js";
+import type {
+  FiniteDecisionOperator,
+  FiniteDecisionOracleResult,
+  FiniteOracleFixture
+} from "../../../../../../recall/decision/query-proof/proof/oracle/contract.js";
 
 const SNAPSHOT = `sha256:${"a".repeat(64)}` as const;
+const QUERY = `sha256:${"b".repeat(64)}` as const;
+const PRINCIPAL = `sha256:${"c".repeat(64)}` as const;
+const authorities = new WeakMap<object, FiniteTransferAuthority>();
 
 describe("operator-parametric finite exhaustive oracle", () => {
   it("matches hand-enumerated one-candidate membership outcomes", () => {
@@ -114,8 +126,9 @@ describe("operator-parametric finite exhaustive oracle", () => {
       ]
     };
     const receipt = createFiniteMutualExclusionReceipt({
-      fixture_id: fixture.fixture_id,
-      snapshot_digest: fixture.snapshot_digest,
+      fixture,
+      proposition_digest: QUERY,
+      evidence_digest: PRINCIPAL,
       forbidden_combinations: [[
         { coordinate_id: "left", choice_id: "true" },
         { coordinate_id: "right", choice_id: "true" }
@@ -130,7 +143,11 @@ describe("operator-parametric finite exhaustive oracle", () => {
     expect(() => enumerateFiniteDecisionOracle({
       ...fixture,
       mutual_exclusion_receipts: [{ ...receipt, receipt_digest: SNAPSHOT }]
-    }, membershipPairOperator())).toThrow(/mutual exclusion.*digest/u);
+    }, membershipPairOperator())).toThrow(/mutual exclusion.*(?:authority|binding|digest)/u);
+    expect(() => enumerateFiniteDecisionOracle({
+      ...fixture,
+      mutual_exclusion_receipts: [{ ...receipt }]
+    }, membershipPairOperator())).toThrow(/mutual exclusion.*(?:authority|binding)/u);
   });
 
   it("normalizes coordinate, choice, and input enumeration order", () => {
@@ -145,6 +162,7 @@ describe("operator-parametric finite exhaustive oracle", () => {
     const fixture = oneCandidateFixture();
     const result = enumerateFiniteDecisionOracle(fixture, membershipOperator());
     const omitted = { ...result, refinements: result.refinements.slice(1) };
+    authorities.set(omitted, authorities.get(result)!);
 
     expect(() => assertFiniteOracleExhaustive(fixture, omitted))
       .toThrow(/omitted.*refinement/u);
@@ -178,6 +196,56 @@ describe("operator-parametric finite exhaustive oracle", () => {
 
     expect(result.refinement_count).toBe(128);
     expect(result.choice_coverage).toHaveLength(14);
+  });
+
+  it("rejects operator relabeling even when its id and function are copied", () => {
+    const fixture = oneCandidateFixture();
+    const concrete = membershipOperator();
+    const abstract = Object.freeze({
+      operator_id: "fixture_relabel_abstract_v1",
+      evaluate: () => ({ status: "unsupported", reason: "oracle only" })
+    });
+    const authority = issueFiniteTransferAuthority({
+      fixture,
+      concrete_operator: concrete,
+      abstract_operator: abstract,
+      query_digest: QUERY,
+      principal_digest: PRINCIPAL,
+      manifest: [{
+        coordinate_id: "membership",
+        sensitivity_id: "sensitivity:membership",
+        owner_id: "owner:membership",
+        concrete_kind: "candidate_membership",
+        abstract_kind: "membership"
+      }]
+    });
+    expect(() => enumerateSourceOracle(fixture, Object.freeze({ ...concrete }), authority))
+      .toThrow(/participant identity/u);
+  });
+
+  it("uses locale-independent operator identity validation", () => {
+    const fixture = oneCandidateFixture();
+    const abstract = Object.freeze({
+      operator_id: "fixture_locale_abstract_v1",
+      evaluate: () => ({ status: "unsupported", reason: "oracle only" })
+    });
+    expect(() => issueFiniteTransferAuthority({
+      fixture,
+      concrete_operator: {
+        operator_id: "DECİDE_Q",
+        decide: () => trace([], "invalid")
+      },
+      abstract_operator: abstract,
+      query_digest: QUERY,
+      principal_digest: PRINCIPAL,
+      manifest: [{
+        coordinate_id: "membership",
+        sensitivity_id: "sensitivity:membership",
+        owner_id: "owner:membership",
+        concrete_kind: "candidate_membership",
+        abstract_kind: "membership"
+      }]
+    })).toThrow(/noncanonical|reserved/u);
   });
 });
 
@@ -256,4 +324,53 @@ function trace(candidatePrefix: readonly string[], reason: string) {
       reason_id: reason
     }))
   };
+}
+
+function enumerateFiniteDecisionOracle(
+  fixture: FiniteOracleFixture,
+  concrete: FiniteDecisionOperator
+): FiniteDecisionOracleResult {
+  const abstract = Object.freeze({
+    operator_id: "fixture_reference_abstract_v1",
+    evaluate: () => Object.freeze({ status: "unsupported", reason: "oracle only" })
+  });
+  const authority = issueFiniteTransferAuthority({
+    fixture,
+    concrete_operator: concrete,
+    abstract_operator: abstract,
+    query_digest: QUERY,
+    principal_digest: PRINCIPAL,
+    manifest: fixture.coordinates.map((row) => Object.freeze({
+      coordinate_id: row.coordinate_id,
+      sensitivity_id: `sensitivity:${row.coordinate_id}`,
+      owner_id: `owner:${row.coordinate_id}`,
+      concrete_kind: row.kind,
+      abstract_kind: abstractKind(row.kind)
+    }))
+  });
+  const result = enumerateSourceOracle(fixture, concrete, authority);
+  authorities.set(result, authority);
+  return result;
+}
+
+function assertFiniteOracleExhaustive(
+  fixture: FiniteOracleFixture,
+  result: FiniteDecisionOracleResult
+): void {
+  const authority = authorities.get(result);
+  if (authority === undefined) throw new Error("test oracle authority is unavailable");
+  assertSourceOracleExhaustive(fixture, result, authority);
+}
+
+function abstractKind(kind: FiniteOracleFixture["coordinates"][number]["kind"]):
+TransferAbstractKind {
+  switch (kind) {
+    case "candidate_membership": return "membership";
+    case "witness_refinement": return "numeric_interval";
+    case "semantic_feasibility": return "semantic_feasibility";
+    case "answer_binding": return "binding";
+    case "proposition_conflict": return "four_valued_proposition";
+    case "correlation_state": return "correlation";
+    case "identity_tie": return "identity_tie";
+  }
 }

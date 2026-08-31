@@ -1,6 +1,6 @@
 import {
-  verifyRecallFieldRefinementStopCertificate,
-  type RecallFieldRefinementStopCertificate
+  readRecallFieldStopClosureAuthority,
+  type RecallFieldStopClosureAuthority
 } from "../../../field/refinement/field-refinement-stop-certificate.js";
 import {
   uncertifiedClosure,
@@ -8,19 +8,31 @@ import {
   type ChannelClosureScope
 } from "./contract.js";
 
-export function closeRefinementStopCertificate(params: Readonly<{
-  readonly certificate: Readonly<RecallFieldRefinementStopCertificate>;
-  readonly scope: ChannelClosureScope;
-}>): ChannelClosureResult {
+export function closeRefinementStopCertificate(
+  authority: RecallFieldStopClosureAuthority
+): ChannelClosureResult | null {
+  let source: ReturnType<typeof readRecallFieldStopClosureAuthority>;
   try {
-    verifyRecallFieldRefinementStopCertificate(params.certificate);
+    source = readRecallFieldStopClosureAuthority(authority);
   } catch {
-    return uncertifiedClosure(params.scope, "source_receipt_invalid");
+    return null;
   }
+  const scope: ChannelClosureScope = Object.freeze({
+    query_digest: source.query_digest,
+    request_digest: source.request_digest,
+    snapshot_digest: source.snapshot_digest,
+    principal_digest: source.principal_digest,
+    workspace_id: source.workspace_id,
+    observer_id: source.observer_id,
+    channel_id: source.channel_id,
+    domain_id: source.domain_id,
+    universe_digest: source.universe_digest,
+    sensitivities: Object.freeze([])
+  });
   return uncertifiedClosure(
-    params.scope,
-    params.certificate.reason === "all_channels_closed"
-      ? "finite_universe_and_scope_binding_required"
+    scope,
+    source.certificate.reason === "all_channels_closed"
+      ? "finite_universe_and_query_transfer_required"
       : "legacy_objective_not_query_bound"
   );
 }
