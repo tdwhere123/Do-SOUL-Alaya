@@ -6,7 +6,7 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 
-import { KeyedMutex } from "../../shared/keyed-mutex.js";
+import { KeyedMutex } from "../keyed-mutex.js";
 import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "../policy/run-workspace-guard.js";
 import { ReconciliationDecider } from "./reconciliation-decider.js";
 import {

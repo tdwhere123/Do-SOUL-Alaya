@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isPathActiveForRecall, type PathRelation } from "@do-soul/alaya-protocol";
 import { EventPublisher, fieldContractSha256, RelationAssertionService } from "@do-soul/alaya-core";
 import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from
-  "../../../../../../packages/core/src/path-graph/relation-assertions/legacy-empty-history-digest.js";
+  "../../../../../../packages/core/src/relations/relation-assertions/legacy-empty-history-digest.js";
 import {
   initDatabase,
   SqliteEventLogRepo,

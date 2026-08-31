@@ -1,5 +1,5 @@
 import { beforeEach } from "vitest";
-import { resetCoreConfigForTests } from "./src/config/install-core-config.js";
+import { resetCoreConfigForTests } from "./src/runtime/config/install-core-config.js";
 
 beforeEach(() => {
   resetCoreConfigForTests();

@@ -40,7 +40,7 @@ export interface EdgeProposalReviewInput {
 // caller's audit+reconcile transaction, the repo falls back to a TERMINAL
 // `rejected` carrying supersededReviewReason — P2 carries the retry, so P1 has
 // no owed-path obligation and the mint-failed audit still commits.
-// see also: core/src/path-graph/edge-proposal-service.ts handleMintFailure.
+// see also: packages/core/src/relations/edge-proposals/edge-proposal-service.ts handleMintFailure.
 export interface EdgeProposalMintFailureReconcileInput {
   readonly proposalId: string;
   readonly fromStatus: Extract<EdgeProposalStatusValue, "accepted" | "auto_accepted">;
@@ -73,7 +73,7 @@ export interface EdgeProposalRepo {
   // these and flips each to `expired` through updateReview (CAS-gated on
   // status='pending'). A null expires_at is never selected — only proposals
   // born with a TTL are sweepable, so legacy/null-TTL rows are untouched.
-  // see also: packages/core/src/path-graph/edge-proposal-service.ts sweepExpired
+  // see also: packages/core/src/relations/edge-proposals/edge-proposal-service.ts sweepExpired
   // see also: apps/core-daemon/src/garden-runtime.ts sweepExpiredEdgeProposals
   listExpiredPending(workspaceId: string, nowIso: string, limit: number): readonly EdgeProposal[];
   // invariant: returns ONLY accepted / auto_accepted proposals that still owe a
@@ -86,7 +86,7 @@ export interface EdgeProposalRepo {
   // mint idempotently. Returned rows are bounded by `limit`; accepted
   // candidates are paged through the status/time index until enough true
   // orphans are found or the accepted set is exhausted.
-  // see also: core/src/path-graph/edge-proposal-service.ts reconcileStuckAccepts;
+  // see also: packages/core/src/relations/edge-proposals/edge-proposal-service.ts reconcileStuckAccepts;
   //   path-relation-repo.ts PATH_RELATION_*_BACKING_OBJECT_ID_SQL (the await-path match).
   listAcceptedAwaitingPath(workspaceId: string, limit: number): readonly EdgeProposal[];
   updateReview(input: EdgeProposalReviewInput): EdgeProposal;

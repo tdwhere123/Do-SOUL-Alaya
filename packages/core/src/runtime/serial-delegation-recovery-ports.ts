@@ -1,6 +1,6 @@
 import type { AgentRuntimePort, DelegatedWorkerRun, RuntimeEvent } from "@do-soul/alaya-protocol";
 
-import type { ConstraintProxy } from "../security/constraint-proxy.js";
+import type { ConstraintProxy } from "../governance/security/constraint-proxy.js";
 import type { NormalizerContext, RuntimeEventNormalizer } from "./runtime-event-normalizer.js";
 import type { StrongRefService } from "../memory/strong-ref-service.js";
 import type { WorkerRunLifecycleService } from "./worker-run-lifecycle-service.js";

@@ -1,8 +1,8 @@
 import { StorageTier } from "@do-soul/alaya-protocol";
 import {
   resolveEmbeddingRecallTiersFromConfig
-} from "../config/core-config.js";
-import { getCoreConfig } from "../config/install-core-config.js";
+} from "../runtime/config/core-config.js";
+import { getCoreConfig } from "../runtime/config/install-core-config.js";
 
 const DEFAULT_EMBEDDING_RECALL_TIERS: readonly StorageTier[] = [
   StorageTier.HOT,

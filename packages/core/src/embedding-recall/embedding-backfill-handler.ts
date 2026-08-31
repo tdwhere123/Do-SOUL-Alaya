@@ -1,5 +1,5 @@
 import { type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
-import { getCoreConfig } from "../config/install-core-config.js";
+import { getCoreConfig } from "../runtime/config/install-core-config.js";
 import { toErrorMessage } from "../recall/runtime/recall-service-helpers.js";
 import { persistEmbeddedBackfillBatch } from "./backfill/persist-embedded-batch.js";
 import { resolveEmbedText } from "./embed-text-resolver.js";

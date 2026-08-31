@@ -1,5 +1,5 @@
 import type { ManifestationState, MemoryEntry } from "@do-soul/alaya-protocol";
-import { clampManifestationByGovernance } from "../../path-graph/path-relations/path-manifestation-policy.js";
+import { clampManifestationByGovernance } from "../../relations/path-relations/path-manifestation-policy.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
 import { RECALL_FLOOD_EDGE_REASONS } from
   "../runtime/recall-service-types.js";

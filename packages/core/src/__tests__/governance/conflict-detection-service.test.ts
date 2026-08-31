@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
 import { ConflictDetectionService } from "../../governance/reconciliation/conflict-detection-service.js";
-import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
+import type { PathMintOutcome, SubmitCandidateInput } from "../../relations/edge-proposals/path-relation-proposal-service.js";
 
 import { createMemoryEntry } from "./conflict-detection-service.test-support.js";
 import { requireAt } from "../helpers/defined.js";
@@ -55,7 +55,7 @@ it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable v
   // soul.propose_edge + B-1 cross-link) creates an edge_proposals row and does
   // NOT call submitCandidate at propose time — locked in
   // edge-proposal-service.test.ts ("creates a pending proposal ...").
-  // see also: packages/core/src/path-graph/edge-proposal-service.ts AUTO_ACCEPT_FLOOR_BY_TRIGGER;
+  // see also: packages/core/src/relations/edge-proposals/edge-proposal-service.ts AUTO_ACCEPT_FLOOR_BY_TRIGGER;
   //   docs/archive/v0.3-historical/v0.3.11/kpi-targets.md K4.1.
   it("B-4 direct-materializes a governed weak path (rule attention_only / llm recall_allowed), never edge_proposals, never strictly_governed", async () => {
     const ruleExisting = createMemoryEntry({ object_id: "mem-A", content: "I prefer dark roast coffee." });

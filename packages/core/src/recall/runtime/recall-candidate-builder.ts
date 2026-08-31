@@ -16,7 +16,7 @@ import {
   estimateTokens,
   normalizeActivationScore
 } from "./recall-service-helpers.js";
-import { clampManifestationByGovernance } from "../../path-graph/path-relations/path-manifestation-policy.js";
+import { clampManifestationByGovernance } from "../../relations/path-relations/path-manifestation-policy.js";
 import { createBoundedNonMemoryPreview } from "../coarse-filter/non-memory-preview.js";
 import type { CoarseRecallCandidate, TokenEstimator } from "./recall-service-types.js";
 

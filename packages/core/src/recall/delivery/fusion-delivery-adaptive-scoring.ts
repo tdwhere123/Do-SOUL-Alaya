@@ -1,7 +1,7 @@
 import type { RecallPolicy, RecallScoreFactors } from "@do-soul/alaya-protocol";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
-import { recallEnvRaw } from "../../config/recall-env-access.js";
+import { recallEnvRaw } from "../../runtime/config/recall-env-access.js";
 import type {
   CoarseRecallCandidate,
   RecallFusionStream,

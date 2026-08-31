@@ -26,7 +26,7 @@ export const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdg
   ) as Record<RecallGraphExpansionTrackedEdgeType, number>
 );
 // invariant: traversal maps a path's free-string relation_kind onto EDGE_TYPE_RECALL_MODEL when it names a transitive edge type; path-only kinds (co_recalled/shares_entity/signal_graph_ref) fold onto the weakest recalls tier so they propagate at most one extra hop. Negative/neutral kinds never reach here (traversal follows only recall-eligible paths).
-// see also: protocol/soul/memory-graph.ts EDGE_TYPE_RECALL_MODEL, path-graph/path-relation-proposal-service.ts seed catalog.
+// see also: protocol/memory/memory-graph.ts EDGE_TYPE_RECALL_MODEL, relations/edge-proposals/path-relation-proposal-service.ts seed catalog.
 const PATH_ASSOCIATIVE_RELATION_KIND_FALLBACK: RecallGraphExpansionTrackedEdgeType = "recalls";
 // Folds a path's free-string relation_kind onto the tracked edge-type set; unmapped kinds become recalls so the {derives_from, recalls, supports} diagnostic key set is preserved.
 export function pathRelationKindToTrackedEdgeType(

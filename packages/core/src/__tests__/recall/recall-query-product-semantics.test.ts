@@ -4,7 +4,7 @@ import { RecallService } from "../../recall/recall-service.js";
 import {
   installCoreConfigFromProcessEnv,
   resetCoreConfigForTests
-} from "../../config/index.js";
+} from "../../runtime/config/index.js";
 import { buildExpandedKeywordQuery } from "../../recall/coarse-filter/coarse-candidates.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {

@@ -8,7 +8,7 @@ import { clamp01 } from "../runtime/recall-service-helpers.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { classifyRecallIntent, hasTemporalQuerySignal } from "../query/recall-query-plan.js";
 import type { RecallFusionStream } from "../runtime/recall-service-types.js";
-import { recallProjectionScoringEnabled } from "../../config/recall-env-access.js";
+import { recallProjectionScoringEnabled } from "../../runtime/config/recall-env-access.js";
 
 export function resolveDefaultFusionWeightForIntent(
   stream: RecallFusionStream,
@@ -55,7 +55,7 @@ export function resolveDefaultFusionWeightForIntentWithDiagnostics(
   };
 }
 
-export { recallProjectionScoringEnabled } from "../../config/recall-env-access.js";
+export { recallProjectionScoringEnabled } from "../../runtime/config/recall-env-access.js";
 
 export interface QueryTimeWindow {
   readonly startMs: number;

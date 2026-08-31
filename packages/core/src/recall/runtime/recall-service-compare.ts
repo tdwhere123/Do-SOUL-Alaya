@@ -125,7 +125,7 @@ export function normalizeActivationScore(value: number | null): number {
 }
 
 export function normalizeGraphSupport(count: number): number {
-  // invariant: clamp [count,0,3]/3 over the positive-only inbound weighted sum (negatives filtered upstream); the Math.max(count,0) floor is defensive only. Suppression is handled separately in recall-service.ts. see also: path-graph/graph-explore-service.ts (countInbound* positive-only filter).
+  // invariant: clamp [count,0,3]/3 over the positive-only inbound weighted sum (negatives filtered upstream); the Math.max(count,0) floor is defensive only. Suppression is handled separately in recall-service.ts. see also: relations/path-relations/graph-explore-service.ts (countInbound* positive-only filter).
   return Math.min(Math.max(count, 0), 3) / 3;
 }
 

@@ -11,7 +11,7 @@ import {
 import { CoreError } from "../shared/errors.js";
 import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
-import { parseExtensionToolProvider } from "../shared/extension-descriptor-parsers.js";
+import { parseExtensionToolProvider } from "./extension-descriptor-parsers.js";
 import { readNow } from "../shared/time.js";
 
 type McpDiscoveredTool = ToolProviderToolSpec;

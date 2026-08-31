@@ -5,7 +5,7 @@ import { resolveSystemWorkspaceId } from "../shared/actors.js";
 import {
   parseExtensionSkillPackage,
   parseExtensionToolProvider
-} from "../shared/extension-descriptor-parsers.js";
+} from "./extension-descriptor-parsers.js";
 import {
   buildDefaultToolSpec,
   createProviderCacheSnapshot,

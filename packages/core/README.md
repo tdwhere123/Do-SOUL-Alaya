@@ -19,7 +19,7 @@ runtime collaborators. It must not depend on daemon applications.
 - `src/index.ts` exports the public core surface.
 - `src/memory/` owns memory lifecycle services.
 - `src/recall/` owns recall filtering, scoring, and delivery.
-- `src/path-graph/` owns path relation and edge proposal services.
+- `src/relations/` owns path relation and edge proposal services.
 
 ## Commands
 

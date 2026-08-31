@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   installCoreConfigFromProcessEnv,
   resetCoreConfigForTests
-} from "../../config/index.js";
+} from "../../runtime/config/index.js";
 import { RequestScoreSnapshotBuilder } from
   "../../embedding-recall/scoring/request-score-snapshot.js";
 import type { QueryEmbeddingEngine } from

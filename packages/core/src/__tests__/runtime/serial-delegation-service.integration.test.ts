@@ -15,9 +15,9 @@ import { CoreError } from "../../shared/errors.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
 import { WorkerRunLifecycleService } from "../../runtime/worker-run-lifecycle-service.js";
 import { SerialDelegationService } from "../../runtime/serial-delegation-service.js";
-import { WorkerSafetyGate } from "../../security/worker-safety-gate.js";
-import { ZeroDaySecurityLayer } from "../../security/zero-day-security-layer.js";
-import { IntegrationGate, VERIFIED_CLAUDE_RUNTIME_CAPABILITY_PROFILE } from "../../security/integration-gate.js";
+import { WorkerSafetyGate } from "../../governance/security/worker-safety-gate.js";
+import { ZeroDaySecurityLayer } from "../../governance/security/zero-day-security-layer.js";
+import { IntegrationGate, VERIFIED_CLAUDE_RUNTIME_CAPABILITY_PROFILE } from "../../governance/security/integration-gate.js";
 import { createDispatchInput, createSessionConfig } from "./serial-delegation-service-test-fixtures.js";
 
 const FIXED_NOW = "2026-04-13T11:00:00.000Z";

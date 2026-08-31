@@ -7,7 +7,7 @@ import {
   CONTRADICTS_SEED_PROFILE,
   INCOMPATIBLE_SEED_PROFILE,
   type PathSeedProfile
-} from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
+} from "../../relations/edge-proposals/path-relation-proposal-service.js";
 
 export type ConflictVerdictSource = "rule" | "llm";
 
@@ -51,7 +51,7 @@ export interface ConflictDetectionKarmaEmitterPort {
 
 export interface ConflictDetectionServiceDeps {
   readonly memoryRepo: ConflictDetectionMemoryRepoPort;
-  readonly pathCandidatePort: import("../../path-graph/producers/path-candidate-sink.js").PathCandidateSink;
+  readonly pathCandidatePort: import("../../relations/producers/path-candidate-sink.js").PathCandidateSink;
   readonly llmPort?: ConflictDetectionLlmPort;
   readonly karmaEmitter?: ConflictDetectionKarmaEmitterPort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;

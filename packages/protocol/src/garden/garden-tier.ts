@@ -79,7 +79,7 @@ export const GardenTaskKind = {
   // best-effort LLM-quality verdict that an attached CLI agent (the compute)
   // produces and reports back via garden.complete_task, refining the existing
   // path. A claim that never arrives leaves the heuristic verdict standing.
-  // see also: packages/core/src/path-graph/edge-auto-producer-service.ts decideForNeighbor.
+  // see also: packages/core/src/relations/producers/edge-auto-producer-service.ts decideForNeighbor.
   EDGE_CLASSIFY: "edge_classify"
 } as const;
 

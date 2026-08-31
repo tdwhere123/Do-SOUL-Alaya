@@ -260,7 +260,7 @@ export interface BenchDaemonHandle {
    * Admits sparse answer-relation assertions among seeded memory_entry ids whose
    * pooled HQ content-token sets overlap. Requires memory_hq to be pre-filled.
    *
-   * see also: packages/core/src/path-graph/hq-answer-overlap.ts
+   * see also: packages/core/src/relations/producers/hq-answer-overlap.ts
    */
   accrueAnswersWithCoRelevance(
     members: readonly BenchEdgeFormationMember[],

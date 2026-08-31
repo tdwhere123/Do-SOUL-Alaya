@@ -19,7 +19,7 @@ import { EdgeAutoProducerService } from "@do-soul/alaya-core";
 // see also: apps/core-daemon/src/runtime/daemon-runtime-support.ts:resolveEdgeClassifyWiring
 // see also: apps/core-daemon/src/index.ts:edgeClassifyWiring
 // see also: apps/core-daemon/src/ai/edge-auto-producer-llm-adapter.ts:requestVerdictFromGarden
-// see also: packages/core/src/path-graph/edge-auto-producer-service.ts:deferEdgeClassify
+// see also: packages/core/src/relations/producers/edge-auto-producer-service.ts:deferEdgeClassify
 
 describe("B-2 edge classification (K4.5 no-network, default config)", () => {
   const originalFetch = globalThis.fetch;

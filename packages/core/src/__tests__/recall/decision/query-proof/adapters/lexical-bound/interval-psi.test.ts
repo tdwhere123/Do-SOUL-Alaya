@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   installCoreConfigFromProcessEnv,
   resetCoreConfigForTests
-} from "../../../../../../config/install-core-config.js";
+} from "../../../../../../runtime/config/install-core-config.js";
 import { buildDefaultPolicy } from "../../../../../../recall/runtime/orchestration.js";
 import {
   candidateOf,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { installCoreConfigFromProcessEnv, resetCoreConfigForTests } from "../../config/index.js";
-import { clampAgentReportedConfidenceWithDiagnostics } from "../../path-graph/edge-proposals/edge-proposal-service-ports.js";
+import { installCoreConfigFromProcessEnv, resetCoreConfigForTests } from "../../runtime/config/index.js";
+import { clampAgentReportedConfidenceWithDiagnostics } from "../../relations/edge-proposals/edge-proposal-service-ports.js";
 import {
   scoreSourceProximitySeedDraftWithDiagnostics,
   type CoarseCandidateDraft

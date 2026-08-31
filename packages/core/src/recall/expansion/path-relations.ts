@@ -274,7 +274,7 @@ export function anchorMemoryId(anchor: PathAnchorRef): string | undefined {
 }
 
 // invariant: positive path_expansion consumes only recall-eligible paths (active lifecycle AND recall_bias > 0). This negation excludes in one gate: retired/dormant lifecycle, negative families (would amplify the suppressed memory), and the neutral exception_to marker. Uses the shared predicate so temporal soft-strength projection cannot widen membership; active suppression is handled separately by collectNegativePathSuppressions.
-// see also: path-graph/path-relation-proposal-service.ts (recall_bias = sign*magnitude), protocol/soul/path-relation.ts isPathRecallEligible.
+// see also: relations/edge-proposals/path-relation-proposal-service.ts (recall_bias = sign*magnitude), protocol/relations path-relation isPathRecallEligible.
 export function isPathExcludedFromRecall(path: Readonly<PathRelation>): boolean {
   return !isPathRecallEligible(path);
 }

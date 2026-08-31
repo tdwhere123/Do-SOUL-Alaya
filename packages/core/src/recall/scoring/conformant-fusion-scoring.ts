@@ -35,7 +35,7 @@ import type { RecallFloodEdgeTraceV1 } from "../runtime/recall-service-types.js"
 import { isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
 import {
   readRecallUnitFloat
-} from "../../config/recall-env-access.js";
+} from "../../runtime/config/recall-env-access.js";
 
 export const CONFORMANT_AXES: readonly RecallConformantAxis[] = [
   "object",

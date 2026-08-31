@@ -9,7 +9,7 @@ import {
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type { ResolvedRecallFusionWeights } from "../../recall/delivery/fusion-delivery-adaptive-scoring.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
-import { resetCoreConfigForTests } from "../../config/install-core-config.js";
+import { resetCoreConfigForTests } from "../../runtime/config/install-core-config.js";
 
 const CONF_ENV = [
   "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_FLOOD_CAP",

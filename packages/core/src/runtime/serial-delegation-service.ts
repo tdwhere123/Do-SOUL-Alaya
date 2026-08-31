@@ -11,7 +11,7 @@ import { CoreError } from "../shared/errors.js";
 import {
   IntegrationGatePublicationError,
   type IntegrationGate
-} from "../security/integration-gate.js";
+} from "../governance/security/integration-gate.js";
 import { SerialDelegationEventIntake } from "./serial-delegation-event-intake.js";
 import type {
   NormalizerContext,
@@ -20,12 +20,12 @@ import type {
 import {
   SerialDelegationRecovery,
 } from "./serial-delegation-recovery.js";
-import type { ConstraintProxy } from "../security/constraint-proxy.js";
+import type { ConstraintProxy } from "../governance/security/constraint-proxy.js";
 import type { DirtyStatePanicService } from "./dirty-state-panic-service.js";
 import type { StrongRefService } from "../memory/strong-ref-service.js";
-import type { WorkerSafetyGate } from "../security/worker-safety-gate.js";
+import type { WorkerSafetyGate } from "../governance/security/worker-safety-gate.js";
 import type { WorkerRunLifecycleService } from "./worker-run-lifecycle-service.js";
-import type { ZeroDaySecurityLayer } from "../security/zero-day-security-layer.js";
+import type { ZeroDaySecurityLayer } from "../governance/security/zero-day-security-layer.js";
 import {
   applyAugmentedLockToWorkerRun,
   captureIntegrationGateFailure,

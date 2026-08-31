@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { IntegrationGatePublicationError } from "../../security/integration-gate.js";
+import { IntegrationGatePublicationError } from "../../governance/security/integration-gate.js";
 import { FIXED_NOW, FIXED_WORKER_RUN_ID, createDispatchInput, createHarness, createIntegrationDecision, createWorkerRun } from "./serial-delegation-service-test-fixtures.js";
 
 describe("SerialDelegationService", () => {

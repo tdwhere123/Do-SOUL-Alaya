@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
 
-import { resetCoreConfigForTests } from "../../config/index.js";
+import { resetCoreConfigForTests } from "../../runtime/config/index.js";
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
 import {
   createEmbeddingRecord,
