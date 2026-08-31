@@ -34,6 +34,7 @@ import {
   cleanup,
   params,
   preparedAuthority,
+  stubMemoryRepo,
   supplementary,
   withoutPsi
 } from "../../../integration/shadow/live-receipt-fixtures.js";
@@ -45,11 +46,11 @@ describe("live normal lexical interval source", () => {
     const bundle = createRecallRetrievalFieldBundle({
       workspaceId: "workspace-1",
       queryText: "stable",
-      memoryRepo: { searchByKeywordField: async () => Object.freeze({
+      memoryRepo: stubMemoryRepo(async () => Object.freeze({
         matches: [match("cand-a", 0.9)],
         lanes: normalLanes([match("cand-a", 0.9)]),
         lexical_raw_rank: capture([candidate("cand-a", 0.9, true)])
-      }) }
+      }))
     });
     const built = await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
       bindRetrievalFieldBundleReadAuthority(bundle, prepared.snapshotReadLease, capability);
@@ -173,9 +174,9 @@ describe("live normal lexical interval source", () => {
         const otherBundle = createRecallRetrievalFieldBundle({
           workspaceId: "workspace-1",
           queryText: "other bundle",
-          memoryRepo: { searchByKeywordField: async () => Object.freeze({
+          memoryRepo: stubMemoryRepo(async () => Object.freeze({
             matches: [], lanes: normalLanes([])
-          }) }
+          }))
         });
         rejected.push(fineAssess({
           ...params(candidates),
@@ -237,12 +238,12 @@ async function source(
   const bundle = createRecallRetrievalFieldBundle({
     workspaceId: "workspace-1",
     queryText: "stable",
-    memoryRepo: { searchByKeywordField: async () => Object.freeze({
+    memoryRepo: stubMemoryRepo(async () => Object.freeze({
       matches,
       lanes: normalLanes(matches),
       lexical_raw_rank,
       lexical_raw_rank_receipt: producerReceipt(lexical_raw_rank, matches)
-    }) }
+    }))
   });
   return await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
     bindRetrievalFieldBundleReadAuthority(bundle, prepared.snapshotReadLease, capability);

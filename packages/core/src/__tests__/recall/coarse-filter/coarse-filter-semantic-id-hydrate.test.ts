@@ -10,6 +10,8 @@ import type { RecallRetrievalFieldBundle } from
   "../../../recall/field/retrieval/retrieval-field-bundle.js";
 import type { RunCoarseFilterContext } from
   "../../../recall/coarse-filter/coarse-filter.js";
+import type { RecallDegradationReason } from
+  "../../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "../recall-service-test-fixtures.js";
 
 function coarseFilterConfig(): Readonly<RecallPolicy>["coarse_filter"] {
@@ -223,5 +225,59 @@ describe("semantic FTS hydrate-by-id admission", () => {
 
     expect(findByIds).toHaveBeenCalled();
     expect(admitted).toEqual([]);
+  });
+
+  it("skips FTS hits when findByIds throws instead of aborting recall", async () => {
+    const ftsOnly = createMemoryEntry({
+      object_id: "fts-only",
+      content: "alpha router"
+    });
+    const findByIds = vi.fn(async () => {
+      throw new Error("memory id lookup unavailable");
+    });
+    const warn = vi.fn();
+    const degradationReasons = new Set<RecallDegradationReason>();
+    const state = createCoarseFilterState({
+      config: coarseFilterConfig(),
+      winnerMemoryIds: new Set()
+    });
+    const admitted: string[] = [];
+
+    await expect(addSemanticSupplementCandidates({
+      context: {
+        warn,
+        degradationReasons,
+        dependencies: {
+          memoryRepo: { findByIds }
+        } as unknown as RunCoarseFilterContext["dependencies"]
+      },
+      workspaceId: "workspace-1",
+      config: coarseFilterConfig(),
+      queryText: "alpha router",
+      queryProbes: compileRecallQueryProbes("alpha router"),
+      tier: StorageTier.HOT,
+      tierScopedSearchEligible: true,
+      byId: new Map(),
+      addCandidate: (entry, plane, score, source) => {
+        admitted.push(`${entry.object_id}:${source ?? plane}`);
+        return state.addCandidate(entry, plane, score, source);
+      },
+      ftsRanks: state.ftsRanks,
+      trigramFtsRanks: state.trigramFtsRanks,
+      evidenceFtsRanks: state.evidenceFtsRanks,
+      evidenceFtsRanksPerRef: state.evidenceFtsRanksPerRef,
+      evidenceProjectionMatchesByRef: state.evidenceProjectionMatchesByRef,
+      retrievalFieldBundle: ftsBundle([
+        { object_id: ftsOnly.object_id, normalized_rank: 0.9 }
+      ])
+    })).resolves.toBeUndefined();
+
+    expect(findByIds).toHaveBeenCalledWith("workspace-1", [ftsOnly.object_id]);
+    expect(admitted).toEqual([]);
+    expect(degradationReasons).toEqual(new Set(["memory_id_hydrate_failed"]));
+    expect(warn).toHaveBeenCalledWith("memory hydrate lookup failed", expect.objectContaining({
+      operation: "findByIds",
+      error: "memory id lookup unavailable"
+    }));
   });
 });

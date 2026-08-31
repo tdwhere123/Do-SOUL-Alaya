@@ -401,6 +401,12 @@ describe("direct evidence recall candidates", () => {
       ...overrides
     });
     const { dependencies } = createDependencies([]);
+    const findByIds = lookup === "missing"
+      ? undefined
+      : vi.fn(async () => {
+        if (lookup === "error") throw new Error("memory id lookup unavailable");
+        return [collidingMemory];
+      });
     const service = createFieldBackedRecallService({
       ...dependencies,
       memoryRepo: {
@@ -408,10 +414,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => []),
         findByEvidenceRefs: vi.fn(async () => []),
         findBoundEvidenceRefs: vi.fn(async () => []),
-        findByIds: lookup === "missing" ? undefined : vi.fn(async () => {
-          if (lookup === "error") throw new Error("memory id lookup unavailable");
-          return [collidingMemory];
-        })
+        findByIds
       },
       evidenceSearchPort: {
         searchByKeyword: vi.fn(async () => [
@@ -429,6 +432,10 @@ describe("direct evidence recall candidates", () => {
     });
 
     expect(result.candidates).toEqual([]);
+    if (lookup === "error") {
+      expect(findByIds).toHaveBeenCalledWith("workspace-1", [EVIDENCE_ID]);
+      expect(result.diagnostics?.degradation_reasons).toEqual(["evidence_fts_failed"]);
+    }
   });
 
   it("keeps dormant bound evidence on the memory lane without a direct candidate", async () => {

@@ -8,7 +8,6 @@ import { digestRecallFieldIdentity } from
   "../../../../../recall/field/field-identity.js";
 import { QUERY, SNAPSHOT } from "./fixtures.js";
 import {
-  AUTHORITY_CONTEXT,
   RELATIONAL_SNAPSHOT,
   authorityContext,
   createAuthorityContext,
@@ -19,7 +18,6 @@ import {
   pathSubject,
   polarityCandidate,
   polarityReceipt,
-  relationalReceipt,
   resealRelationalReceipt,
   supersessionReceipt
 } from "./relational-authority-fixtures.js";

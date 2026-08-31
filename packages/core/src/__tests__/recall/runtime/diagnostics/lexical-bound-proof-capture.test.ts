@@ -45,8 +45,8 @@ describe("lexical bound proof capture path", () => {
       .toBe(JSON.stringify(captureOff.result.diagnostics?.capture_receipt));
     expect(JSON.stringify(supplied.result.diagnostics?.capture_receipt))
       .toBe(JSON.stringify(unavailable.result.diagnostics?.capture_receipt));
-    expect(supplied.result.diagnostics?.token_economy.embedding_inference_calls).toBe(0);
-    expect(captureOff.result.diagnostics?.token_economy.embedding_inference_calls).toBe(0);
+    expect(supplied.result.diagnostics?.token_economy?.embedding_inference_calls).toBe(0);
+    expect(captureOff.result.diagnostics?.token_economy?.embedding_inference_calls).toBe(0);
     expect(supplied.searchByKeywordField).toHaveBeenCalledTimes(
       captureOff.searchByKeywordField.mock.calls.length
     );

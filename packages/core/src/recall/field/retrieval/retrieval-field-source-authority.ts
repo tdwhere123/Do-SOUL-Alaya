@@ -26,6 +26,12 @@ export type RetrievalFieldSourceAuthority = Readonly<{
   readonly [retrievalFieldSourceAuthorityBrand]: true;
 }>;
 
+export type CapturedMemoryLexicalIntervalSources = Readonly<{
+  readonly bundle: Readonly<RecallRetrievalFieldBundle>;
+  readonly lease: SnapshotReadLeaseV1;
+  readonly receipts: readonly Readonly<LexicalIntervalSourceReceiptV1>[];
+}>;
+
 type AuthorityState = {
   readonly source: RecallRetrievalFieldBundleSource;
   readonly records: RecordedFieldResult[];
@@ -121,18 +127,39 @@ export function authenticateValidatedRetrievalFieldRecord(
   }));
 }
 
-export function readMemoryLexicalIntervalSources(
+export function captureMemoryLexicalIntervalSources(
   bundle: Readonly<RecallRetrievalFieldBundle>
-): readonly Readonly<LexicalIntervalSourceReceiptV1>[] {
+): CapturedMemoryLexicalIntervalSources | undefined {
   const authority = bundleAuthorities.get(bundle);
-  if (authority === undefined) return Object.freeze([]);
+  if (authority === undefined) return undefined;
   const state = requireState(authority);
   const binding = state.binding;
   if (binding === undefined || binding.bundle !== bundle ||
       !isActiveRecallReadCapability(binding.capability) ||
-      binding.lease.vector_digest === null) return Object.freeze([]);
+      binding.lease.vector_digest === null) return undefined;
+  const records = Object.freeze(state.records.slice());
+  return Object.freeze({
+    bundle,
+    lease: binding.lease,
+    receipts: issueLexicalIntervalReceipts(state, bundle, binding, records)
+  });
+}
+
+export function readMemoryLexicalIntervalSources(
+  bundle: Readonly<RecallRetrievalFieldBundle>
+): readonly Readonly<LexicalIntervalSourceReceiptV1>[] {
+  return captureMemoryLexicalIntervalSources(bundle)?.receipts ?? Object.freeze([]);
+}
+
+function issueLexicalIntervalReceipts(
+  state: AuthorityState,
+  bundle: Readonly<RecallRetrievalFieldBundle>,
+  binding: NonNullable<AuthorityState["binding"]>,
+  records: readonly RecordedFieldResult[]
+): readonly Readonly<LexicalIntervalSourceReceiptV1>[] {
   const snapshotDigest = binding.lease.vector_digest;
-  const receipts = state.records.flatMap((record) => {
+  if (snapshotDigest === null) return Object.freeze([]);
+  const receipts = records.flatMap((record) => {
     const provenance = state.authenticatedRecords.get(record);
     if (!isLexicalRecord(record) || provenance === undefined ||
         provenance.bundle !== bundle ||

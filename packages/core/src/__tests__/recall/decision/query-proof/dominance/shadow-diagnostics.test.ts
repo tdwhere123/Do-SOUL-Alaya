@@ -13,6 +13,8 @@ import {
   psiV2CandidateFromLexicalEnvelope,
   comparePsiV2
 } from "../../../../../recall/decision/query-proof/dominance/index.js";
+import type { VerifiedMeasurementAuthorityV1 } from
+  "../../../../../recall/decision/query-proof/measurement/index.js";
 import { PINS, PROV } from "../witness/fixtures.js";
 
 const SNAPSHOT = PINS.snapshot_digest;
@@ -50,8 +52,12 @@ const PREPARED_IDENTITY = {
   query_id: "q",
   snapshot_digest: SNAPSHOT,
   request_digest: ENVELOPE_IDENTITY.request_digest,
-  workspace_id: ENVELOPE_IDENTITY.workspace_id
-};
+  workspace_id: ENVELOPE_IDENTITY.workspace_id,
+  field_prefix: null,
+  candidate_key_domain: null,
+  contract_digest: `sha256:${"4".repeat(64)}` as `sha256:${string}`,
+  authority_digest: `sha256:${"5".repeat(64)}` as `sha256:${string}`
+} as unknown as VerifiedMeasurementAuthorityV1;
 
 describe("psi v2 shadow diagnostics", () => {
   afterEach(() => {
@@ -73,10 +79,14 @@ describe("psi v2 shadow diagnostics", () => {
       ENVELOPE_IDENTITY,
       PREPARED_IDENTITY
     );
-    expect(unbounded.status).toBe("unresolved");
-    expect(unbounded.reason).toBe("unbounded lexical-bound proof remains unresolved");
-    expect(inverted.status).toBe("unresolved");
-    expect(inverted.reason).toBe("inverted lexical interval remains unresolved");
+    expect(unbounded).toMatchObject({
+      status: "unresolved",
+      reason: "unbounded lexical-bound proof remains unresolved"
+    });
+    expect(inverted).toMatchObject({
+      status: "unresolved",
+      reason: "inverted lexical interval remains unresolved"
+    });
     const exact = adaptLexicalIntervalEnvelopeToCollapse(
       { kind: "interval", lower: 2, upper: 2 },
       {
@@ -128,10 +138,10 @@ describe("psi v2 shadow diagnostics", () => {
       null,
       PREPARED_IDENTITY
     );
-    expect(tampered.status).toBe("unresolved");
-    expect(tampered.reason).toBe(
-      "forged lexical interval without legal envelope identity remains unresolved"
-    );
+    expect(tampered).toMatchObject({
+      status: "unresolved",
+      reason: "forged lexical interval without legal envelope identity remains unresolved"
+    });
   });
 
   it("binds the lexical-interval contract without plan-card labels", () => {

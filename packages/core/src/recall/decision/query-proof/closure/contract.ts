@@ -1,0 +1,453 @@
+import { compareText } from "../../../../shared/compare-text.js";
+import {
+  digestRecallFieldIdentity,
+  type RecallFieldDigest
+} from "../../../field/field-identity.js";
+
+export const CHANNEL_CLOSURE_OPERATOR_ID =
+  "query_proof_channel_closure_v1";
+
+export type ChannelClosureStatus =
+  | "not_applicable"
+  | "exact_closed"
+  | "bounded_open"
+  | "uncertified";
+
+export type ClosureSensitivityEffect =
+  | "proposition_bound"
+  | "feasibility_change"
+  | "answer_binding"
+  | "answer_position"
+  | "extremum_interval"
+  | "correlation_group"
+  | "tie_winner_membership"
+  | "completion_scope";
+
+export type ClosureQuerySensitivity = Readonly<{
+  readonly sensitivity_id: string;
+  readonly effect: ClosureSensitivityEffect;
+  readonly target: string;
+}>;
+
+export type ChannelClosureScope = Readonly<{
+  readonly authority_digest: RecallFieldDigest;
+  readonly query_digest: RecallFieldDigest;
+  readonly request_digest: RecallFieldDigest;
+  readonly snapshot_digest: RecallFieldDigest;
+  readonly principal_digest: RecallFieldDigest;
+  readonly workspace_id: string;
+  readonly observer_id: string;
+  readonly channel_id: string;
+  readonly domain_id: string;
+  readonly universe_digest: RecallFieldDigest;
+  readonly sensitivities: readonly ClosureQuerySensitivity[];
+}>;
+
+type EffectIdentity = Readonly<{
+  readonly effect_id: string;
+  readonly sensitivity_id: string;
+}>;
+
+export type ChannelRemainingEffect =
+  | (EffectIdentity & Readonly<{
+      readonly effect: "proposition_bound" | "extremum_interval";
+      readonly lower: number;
+      readonly upper: number;
+    }>)
+  | (EffectIdentity & Readonly<{
+      readonly effect: "feasibility_change";
+      readonly possible_states: readonly ("feasible" | "infeasible" | "unresolved")[];
+    }>)
+  | (EffectIdentity & Readonly<{
+      readonly effect: "answer_binding";
+      readonly possible_bindings: readonly string[];
+    }>)
+  | (EffectIdentity & Readonly<{
+      readonly effect: "answer_position";
+      readonly minimum_position: number;
+      readonly maximum_position: number;
+    }>)
+  | (EffectIdentity & Readonly<{
+      readonly effect: "correlation_group";
+      readonly possible_relations: readonly ("same_group" | "different_group")[];
+    }>)
+  | (EffectIdentity & Readonly<{
+      readonly effect: "tie_winner_membership";
+      readonly possible_winner_digests: readonly RecallFieldDigest[];
+    }>);
+
+export type ScopedCompletenessReference = Readonly<{
+  readonly receipt_id: "query_proof_scoped_completeness_v1";
+  readonly source_receipt_digest: RecallFieldDigest;
+  readonly scope_digest: RecallFieldDigest;
+  readonly universe_digest: RecallFieldDigest;
+  readonly domain_id: string;
+  readonly coordinate_id: string;
+  readonly reference_digest: RecallFieldDigest;
+}>;
+
+export type ChannelClosureResult = Readonly<{
+  readonly schema_version: 1;
+  readonly operator_id: typeof CHANNEL_CLOSURE_OPERATOR_ID;
+  readonly status: ChannelClosureStatus;
+  readonly scope_digest: RecallFieldDigest;
+  readonly authority_digest: RecallFieldDigest;
+  readonly query_digest: RecallFieldDigest;
+  readonly request_digest: RecallFieldDigest;
+  readonly snapshot_digest: RecallFieldDigest;
+  readonly principal_digest: RecallFieldDigest;
+  readonly workspace_id: string;
+  readonly observer_id: string;
+  readonly channel_id: string;
+  readonly domain_id: string;
+  readonly universe_digest: RecallFieldDigest;
+  readonly sensitivity_manifest: readonly ClosureQuerySensitivity[];
+  readonly remaining_effects: readonly ChannelRemainingEffect[];
+  readonly completeness_refs: readonly ScopedCompletenessReference[];
+  readonly source_kind:
+    | "live_lexical_interval"
+    | "unverified_finite_field"
+    | "legacy_refinement_stop"
+    | "structural_only";
+  readonly source_receipt_digests: readonly RecallFieldDigest[];
+  readonly reason: string;
+  readonly result_digest: RecallFieldDigest;
+}>;
+
+export function createScopedCompletenessReference(params: Readonly<{
+  readonly scope: ChannelClosureScope;
+  readonly source_receipt_digest: RecallFieldDigest;
+  readonly universe_digest: RecallFieldDigest;
+  readonly coordinate_id: string;
+}>): ScopedCompletenessReference {
+  assertExactKeys(params, [
+    "scope", "source_receipt_digest", "universe_digest", "coordinate_id"
+  ], "completeness reference input");
+  const scope = freezeClosureScope(params.scope);
+  assertDigest(params.source_receipt_digest, "completeness source receipt");
+  assertDigest(params.universe_digest, "completeness universe");
+  assertIdentity(params.coordinate_id, "completeness coordinate");
+  if (params.universe_digest !== scope.universe_digest) {
+    throw new Error("completeness reference universe must equal scope universe");
+  }
+  const body = Object.freeze({
+    receipt_id: "query_proof_scoped_completeness_v1" as const,
+    source_receipt_digest: params.source_receipt_digest,
+    scope_digest: digestClosureScope(scope),
+    universe_digest: params.universe_digest,
+    domain_id: scope.domain_id,
+    coordinate_id: params.coordinate_id
+  });
+  return Object.freeze({
+    ...body,
+    reference_digest: digestRecallFieldIdentity(body)
+  });
+}
+
+export function createChannelClosureResult(params: Readonly<{
+  readonly scope: ChannelClosureScope;
+  readonly status: ChannelClosureStatus;
+  readonly remaining_effects?: readonly ChannelRemainingEffect[];
+  readonly completeness_refs?: readonly ScopedCompletenessReference[];
+  readonly source_kind?: ChannelClosureResult["source_kind"];
+  readonly source_receipt_digests?: readonly RecallFieldDigest[];
+  readonly reason: string;
+}>): ChannelClosureResult {
+  assertAllowedKeys(params, [
+    "scope", "status", "remaining_effects", "completeness_refs", "source_kind",
+    "source_receipt_digests", "reason"
+  ], ["scope", "status", "reason"], "channel closure input");
+  const scope = freezeClosureScope(params.scope);
+  const effects = freezeEffects(params.remaining_effects ?? [], scope.sensitivities);
+  const refs = freezeCompletenessReferences(params.completeness_refs ?? [], scope);
+  const sourceReceiptDigests = freezeDigests(
+    params.source_receipt_digests ?? [], "closure source receipt"
+  );
+  assertClosureStatusPayload(params.status, effects, refs);
+  assertIdentity(params.reason, "closure reason");
+  const body = Object.freeze({
+    schema_version: 1 as const,
+    operator_id: CHANNEL_CLOSURE_OPERATOR_ID,
+    status: params.status,
+    scope_digest: digestClosureScope(scope),
+    authority_digest: scope.authority_digest,
+    query_digest: scope.query_digest,
+    request_digest: scope.request_digest,
+    snapshot_digest: scope.snapshot_digest,
+    principal_digest: scope.principal_digest,
+    workspace_id: scope.workspace_id,
+    observer_id: scope.observer_id,
+    channel_id: scope.channel_id,
+    domain_id: scope.domain_id,
+    universe_digest: scope.universe_digest,
+    sensitivity_manifest: scope.sensitivities,
+    remaining_effects: effects,
+    completeness_refs: refs,
+    source_kind: params.source_kind ?? "structural_only",
+    source_receipt_digests: sourceReceiptDigests,
+    reason: params.reason
+  });
+  const result = Object.freeze({
+    ...body,
+    result_digest: digestRecallFieldIdentity(body)
+  });
+  return result;
+}
+
+export function uncertifiedClosure(
+  scope: ChannelClosureScope,
+  reason: string
+): ChannelClosureResult {
+  return createChannelClosureResult({ scope, status: "uncertified", reason });
+}
+
+export function digestClosureScope(scope: ChannelClosureScope): RecallFieldDigest {
+  return digestRecallFieldIdentity(freezeClosureScope(scope));
+}
+
+function freezeClosureScope(scope: ChannelClosureScope): ChannelClosureScope {
+  assertExactKeys(scope, [
+    "authority_digest", "query_digest", "request_digest", "snapshot_digest", "principal_digest",
+    "workspace_id", "observer_id", "channel_id", "domain_id",
+    "universe_digest", "sensitivities"
+  ], "closure scope");
+  for (const [value, name] of [
+    [scope.authority_digest, "authority"],
+    [scope.query_digest, "query"],
+    [scope.request_digest, "request"],
+    [scope.snapshot_digest, "snapshot"],
+    [scope.principal_digest, "principal"],
+    [scope.universe_digest, "universe"]
+  ] as const) assertDigest(value, `closure ${name}`);
+  for (const [value, name] of [
+    [scope.workspace_id, "workspace"],
+    [scope.observer_id, "observer"],
+    [scope.channel_id, "channel"],
+    [scope.domain_id, "domain"]
+  ] as const) assertIdentity(value, `closure ${name}`);
+  const sensitivities = normalizeClosureQuerySensitivities(scope.sensitivities);
+  return Object.freeze({ ...scope, sensitivities });
+}
+
+export function normalizeClosureQuerySensitivities(
+  values: readonly ClosureQuerySensitivity[]
+): readonly ClosureQuerySensitivity[] {
+  const sensitivities = values.map((sensitivity) => {
+    assertExactKeys(sensitivity, ["sensitivity_id", "effect", "target"],
+      "closure sensitivity");
+    assertIdentity(sensitivity.sensitivity_id, "closure sensitivity id");
+    assertIdentity(sensitivity.target, "closure sensitivity target");
+    if (!CLOSURE_SENSITIVITY_EFFECTS.has(sensitivity.effect)) {
+      throw new Error("closure sensitivity effect is invalid");
+    }
+    return Object.freeze({ ...sensitivity });
+  }).sort((left, right) => compareText(left.sensitivity_id, right.sensitivity_id));
+  if (new Set(sensitivities.map(({ sensitivity_id }) => sensitivity_id)).size !==
+      sensitivities.length) {
+    throw new Error("closure sensitivity ids must be unique");
+  }
+  return Object.freeze(sensitivities);
+}
+
+function freezeEffects(
+  effects: readonly ChannelRemainingEffect[],
+  sensitivities: readonly ClosureQuerySensitivity[]
+): readonly ChannelRemainingEffect[] {
+  const sensitivityById = new Map(sensitivities.map((row) => [row.sensitivity_id, row]));
+  const frozen = effects.map((effect) => {
+    assertIdentity(effect.effect_id, "remaining effect id");
+    const sensitivity = sensitivityById.get(effect.sensitivity_id);
+    if (sensitivity?.effect !== effect.effect) {
+      throw new Error("remaining effect is outside CQ_q sensitivities");
+    }
+    return normalizeChannelRemainingEffect(effect);
+  }).sort((left, right) => compareText(left.effect_id, right.effect_id));
+  if (new Set(frozen.map(({ effect_id }) => effect_id)).size !== frozen.length) {
+    throw new Error("remaining effect ids must be unique");
+  }
+  return Object.freeze(frozen);
+}
+
+export function normalizeChannelRemainingEffect(
+  effect: ChannelRemainingEffect
+): ChannelRemainingEffect {
+  assertIdentity(effect.effect_id, "remaining effect id");
+  assertIdentity(effect.sensitivity_id, "remaining effect sensitivity id");
+  if (effect.effect === "proposition_bound" || effect.effect === "extremum_interval") {
+    assertExactKeys(effect, ["effect_id", "sensitivity_id", "effect", "lower", "upper"],
+      "remaining numeric effect");
+    assertInterval(effect.lower, effect.upper, "remaining numeric effect");
+    return Object.freeze({ ...effect });
+  }
+  if (effect.effect === "answer_position") {
+    assertExactKeys(effect, [
+      "effect_id", "sensitivity_id", "effect", "minimum_position", "maximum_position"
+    ], "remaining answer position");
+    if (!Number.isSafeInteger(effect.minimum_position) ||
+        !Number.isSafeInteger(effect.maximum_position) ||
+        effect.minimum_position < 0 || effect.maximum_position < effect.minimum_position) {
+      throw new Error("remaining answer position is invalid");
+    }
+    return Object.freeze({ ...effect });
+  }
+  if (effect.effect === "answer_binding") {
+    assertExactKeys(effect, [
+      "effect_id", "sensitivity_id", "effect", "possible_bindings"
+    ], "remaining answer binding");
+    if (effect.possible_bindings.length === 0) {
+      throw new Error("remaining answer binding values must be nonempty");
+    }
+    return Object.freeze({ ...effect,
+      possible_bindings: freezeIdentities(effect.possible_bindings, "answer binding") });
+  }
+  if (effect.effect === "tie_winner_membership") {
+    assertExactKeys(effect, [
+      "effect_id", "sensitivity_id", "effect", "possible_winner_digests"
+    ], "remaining tie membership");
+    if (effect.possible_winner_digests.length === 0) {
+      throw new Error("remaining tie winner values must be nonempty");
+    }
+    effect.possible_winner_digests.forEach((value) =>
+      assertDigest(value, "possible tie winner"));
+    return Object.freeze({ ...effect,
+      possible_winner_digests: Object.freeze([...new Set(effect.possible_winner_digests)]
+        .sort(compareText)) });
+  }
+  if (effect.effect === "feasibility_change") {
+    assertExactKeys(effect, [
+      "effect_id", "sensitivity_id", "effect", "possible_states"
+    ], "remaining feasibility");
+    if (effect.possible_states.some((value) =>
+      !FEASIBILITY_STATES.has(value))) {
+      throw new Error("remaining feasibility state is invalid");
+    }
+    if (effect.possible_states.length === 0 ||
+        new Set(effect.possible_states).size !== effect.possible_states.length) {
+      throw new Error("remaining finite effect values must be nonempty and unique");
+    }
+    return Object.freeze({ ...effect,
+      possible_states: Object.freeze([...effect.possible_states].sort(compareText)) });
+  }
+  if (effect.effect === "correlation_group") {
+    assertExactKeys(effect, [
+      "effect_id", "sensitivity_id", "effect", "possible_relations"
+    ], "remaining correlation");
+    if (effect.possible_relations.some((value) =>
+      !CORRELATION_RELATIONS.has(value))) {
+      throw new Error("remaining correlation relation is invalid");
+    }
+    if (effect.possible_relations.length === 0 ||
+        new Set(effect.possible_relations).size !== effect.possible_relations.length) {
+      throw new Error("remaining finite effect values must be nonempty and unique");
+    }
+    return Object.freeze({ ...effect,
+      possible_relations: Object.freeze([...effect.possible_relations].sort(compareText)) });
+  }
+  throw new Error("remaining effect kind is invalid");
+}
+
+function freezeCompletenessReferences(
+  references: readonly ScopedCompletenessReference[],
+  scope: ChannelClosureScope
+): readonly ScopedCompletenessReference[] {
+  const expectedScope = digestClosureScope(scope);
+  return Object.freeze(references.map((reference) => {
+    const { reference_digest: _digest, ...body } = reference;
+    if (reference.scope_digest !== expectedScope ||
+        reference.universe_digest !== scope.universe_digest ||
+        reference.domain_id !== scope.domain_id ||
+        reference.reference_digest !== digestRecallFieldIdentity(body)) {
+      throw new Error("scoped completeness reference binding mismatch");
+    }
+    return Object.freeze({ ...reference });
+  }).sort((left, right) => compareText(left.reference_digest, right.reference_digest)));
+}
+
+export function assertClosureStatusPayload(
+  status: ChannelClosureStatus,
+  effects: readonly ChannelRemainingEffect[],
+  refs: readonly ScopedCompletenessReference[]
+): void {
+  if (status === "bounded_open" && effects.length === 0) {
+    throw new Error("bounded-open closure requires remaining effects");
+  }
+  if (status !== "bounded_open" && effects.length > 0) {
+    throw new Error("only bounded-open closure may carry remaining effects");
+  }
+  if (status === "exact_closed" && refs.length === 0) {
+    throw new Error("exact-closed closure requires scoped completeness");
+  }
+  if ((status === "not_applicable" || status === "uncertified") && refs.length > 0) {
+    throw new Error(`${status} closure cannot carry completeness references`);
+  }
+}
+
+function freezeIdentities(values: readonly string[], field: string): readonly string[] {
+  const output = values.map((value) => {
+    assertIdentity(value, field);
+    return value;
+  }).sort(compareText);
+  if (new Set(output).size !== output.length) throw new Error(`${field} must be unique`);
+  return Object.freeze(output);
+}
+
+function assertInterval(lower: number, upper: number, field: string): void {
+  if (![lower, upper].every(Number.isFinite) || upper < lower) {
+    throw new Error(`${field} is invalid`);
+  }
+}
+
+function assertIdentity(value: string, field: string): void {
+  if (typeof value !== "string" || value.length === 0 || value.trim() !== value) {
+    throw new Error(`${field} must be a non-empty canonical identity`);
+  }
+}
+
+function assertDigest(value: string, field: string): asserts value is RecallFieldDigest {
+  if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new Error(`${field} must be sha256`);
+}
+
+function assertExactKeys(
+  value: object,
+  allowed: readonly string[],
+  field: string
+): void {
+  const keys = Object.keys(value).sort(compareText);
+  const expected = [...allowed].sort(compareText);
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+    throw new Error(`${field} has unknown or missing fields`);
+  }
+}
+
+function assertAllowedKeys(
+  value: object,
+  allowed: readonly string[],
+  required: readonly string[],
+  field: string
+): void {
+  const keys = Object.keys(value);
+  if (keys.some((key) => !allowed.includes(key)) || required.some((key) =>
+    !Object.prototype.hasOwnProperty.call(value, key))) {
+    throw new Error(`${field} has unknown or missing fields`);
+  }
+}
+
+const FEASIBILITY_STATES: ReadonlySet<string> = new Set([
+  "feasible", "infeasible", "unresolved"
+]);
+
+const CORRELATION_RELATIONS: ReadonlySet<string> = new Set([
+  "same_group", "different_group"
+]);
+
+export const CLOSURE_SENSITIVITY_EFFECTS: ReadonlySet<string> = new Set([
+  "proposition_bound", "feasibility_change", "answer_binding", "answer_position",
+  "extremum_interval", "correlation_group", "tie_winner_membership", "completion_scope"
+]);
+
+function freezeDigests(values: readonly RecallFieldDigest[], field: string) {
+  values.forEach((value) => assertDigest(value, field));
+  const output = [...new Set(values)].sort(compareText);
+  if (output.length !== values.length) throw new Error(`${field} must be unique`);
+  return Object.freeze(output);
+}

@@ -42,6 +42,9 @@ export function createRecallFiniteFieldSeal(params: Readonly<{
   readonly channel_catalog: readonly string[];
   readonly channels: readonly Readonly<RecallFiniteFieldChannelInput>[];
 }>): RecallFiniteFieldSeal {
+  assertAllowedKeys(params, ["upstream_snapshot_digest", "channel_catalog", "channels"],
+    ["upstream_snapshot_digest", "channel_catalog", "channels"],
+    "finite field seal input");
   assertSha256(params.upstream_snapshot_digest, "upstream snapshot digest");
   const catalog = freezeUniqueIdentities(params.channel_catalog, "channel catalog");
   const inputs = indexChannels(params.channels, catalog);
@@ -55,10 +58,28 @@ export function createRecallFiniteFieldSeal(params: Readonly<{
     channel_catalog: catalog,
     channels
   });
-  return Object.freeze({ ...body, seal_digest: digestRecallFieldIdentity(body) });
+  const seal = Object.freeze({
+    ...body,
+    seal_digest: digestRecallFieldIdentity(body)
+  });
+  return seal;
 }
 
 export function verifyRecallFiniteFieldSeal(seal: RecallFiniteFieldSeal): void {
+  assertAllowedKeys(seal, [
+    "schema_version", "operator_id", "upstream_snapshot_digest", "channel_catalog",
+    "channels", "seal_digest"
+  ], [
+    "schema_version", "operator_id", "upstream_snapshot_digest", "channel_catalog",
+    "channels", "seal_digest"
+  ], "finite field seal");
+  seal.channels.forEach((channel) => assertAllowedKeys(channel, [
+    "channel_id", "status", "depth", "observations", "unseen_upper_bound",
+    "channel_digest"
+  ], [
+    "channel_id", "status", "depth", "observations", "unseen_upper_bound",
+    "channel_digest"
+  ], "finite field channel receipt"));
   if (seal.schema_version !== 1 ||
       seal.operator_id !== RECALL_FINITE_FIELD_SEAL_OPERATOR_ID) {
     throw new Error("finite field schema or operator mismatch");
@@ -109,6 +130,10 @@ function materializeChannel(
 }
 
 function assertChannel(input: Readonly<RecallFiniteFieldChannelInput>): void {
+  assertAllowedKeys(input, [
+    "channel_id", "status", "depth", "observations", "unseen_upper_bound"
+  ], ["channel_id", "status", "depth", "observations", "unseen_upper_bound"],
+  "finite field channel");
   assertIdentity(input.channel_id, "channel id");
   if (!CHANNEL_STATUSES.has(input.status)) {
     throw new Error("finite field channel status is invalid");
@@ -141,6 +166,8 @@ function assertObservations(
   const identities = new Set<string>();
   let previousRank = 0;
   for (const observation of observations) {
+    assertAllowedKeys(observation, ["observation_id", "candidate_key", "rank"],
+      ["observation_id", "candidate_key", "rank"], "finite field observation");
     assertIdentity(observation.observation_id, "observation id");
     assertIdentity(observation.candidate_key, "candidate key");
     if (identities.has(observation.observation_id)) {
@@ -220,6 +247,19 @@ function isUnit(value: number | null): value is number {
 
 function assertSha256(value: string, field: string): void {
   if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new Error(`${field} must be sha256`);
+}
+
+function assertAllowedKeys(
+  value: object,
+  allowed: readonly string[],
+  required: readonly string[],
+  field: string
+): void {
+  const keys = Object.keys(value);
+  if (keys.some((key) => !allowed.includes(key)) || required.some((key) =>
+    !Object.prototype.hasOwnProperty.call(value, key))) {
+    throw new Error(`${field} has unknown or missing fields`);
+  }
 }
 
 const CHANNEL_STATUSES: ReadonlySet<string> = new Set([

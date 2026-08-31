@@ -129,6 +129,9 @@ describe("measurement admission", () => {
       [{ candidate_key: "cand-1", normalized_rank: 1 }],
       (authority) => {
         const collapse = numericCollapse(LEXICAL_INTERVAL_MEASUREMENT_CONTRACT, authority);
+        if (collapse.status !== "collapsed") {
+          throw new Error("expected collapsed measurement");
+        }
         expect(() => issueMeasurementGroupAdmission({
           authority: { ...authority } as typeof authority,
           contract: LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,

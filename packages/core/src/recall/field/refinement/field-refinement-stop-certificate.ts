@@ -28,6 +28,7 @@ import {
   verifyRecallRetrievalFieldRefinementReceipt,
   type RecallRetrievalFieldRefinementReceipt
 } from "./field-refinement-receipt.js";
+import { compareText } from "../../../shared/compare-text.js";
 
 export { RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID };
 const SCORE_EPSILON = 1e-12;
@@ -92,11 +93,15 @@ export function createRecallFieldRefinementStopCertificate<
   const unavailable = params.fieldSeal.channels.some(
     ({ status }) => status === "unavailable"
   );
-  if (unavailable) return sealCertificate(context, "source_unavailable", []);
+  if (unavailable) {
+    return sealCertificate(context, "source_unavailable", []);
+  }
   const truncated = params.fieldSeal.channels.some(
     ({ status }) => status === "truncated"
   );
-  if (!truncated) return sealCertificate(context, "all_channels_closed", []);
+  if (!truncated) {
+    return sealCertificate(context, "all_channels_closed", []);
+  }
   if (params.relevanceUpperBound === null) {
     return sealCertificate(context, "relevance_bound_unavailable", []);
   }
@@ -124,15 +129,24 @@ export function createRecallFieldRefinementStopCertificate<
 export function verifyRecallFieldRefinementStopCertificate(
   receipt: Readonly<RecallFieldRefinementStopCertificate>
 ): void {
+  assertExactKeys(receipt, [
+    "schema_version", "operator_id", "activation_mode", "field_seal_digest",
+    "refinement_receipt_digests", "objective", "relevance_upper_bound",
+    "selection_capacity", "selected_candidate_keys", "exchange_bounds",
+    "maximum_exchange_improvement_upper_bound", "status", "reason",
+    "candidate_membership_changed", "receipt_digest"
+  ], "field refinement stop certificate");
   if (receipt.schema_version !== 1 ||
       receipt.operator_id !== RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID ||
       receipt.activation_mode !== "live" ||
+      !STOP_REASONS.has(receipt.reason) ||
       receipt.candidate_membership_changed !== false ||
       receipt.receipt_digest !== digestRecallFieldIdentity(receiptBody(receipt))) {
     throw new Error("field refinement stop certificate fidelity mismatch");
   }
   assertDigest(receipt.field_seal_digest);
   receipt.refinement_receipt_digests.forEach(assertDigest);
+  receipt.selected_candidate_keys.forEach(assertCanonicalIdentity);
   if (new Set(receipt.refinement_receipt_digests).size !==
       receipt.refinement_receipt_digests.length ||
       new Set(receipt.selected_candidate_keys).size !==
@@ -163,7 +177,7 @@ function baseContext<T extends CoverageSelectableCandidate>(
     activation_mode: "live",
     field_seal_digest: params.fieldSeal.seal_digest,
     refinement_receipt_digests: Object.freeze(params.refinementReceipts
-      .map(({ receipt_digest }) => receipt_digest).sort()),
+      .map(({ receipt_digest }) => receipt_digest).sort(compareText)),
     objective: materializeCoverageSelectionObjectiveReceipt(
       params.preparedSelection.objective
     ),
@@ -188,7 +202,10 @@ function sealCertificate(
     status: isCertifiedStopReason(reason) ? "certified" : "uncertified",
     reason
   });
-  return Object.freeze({ ...body, receipt_digest: digestRecallFieldIdentity(body) });
+  return Object.freeze({
+    ...body,
+    receipt_digest: digestRecallFieldIdentity(body)
+  });
 }
 
 function computeExchangeBounds<T extends CoverageSelectableCandidate>(params: {
@@ -281,6 +298,13 @@ function assertCertificateDecision(
 ): void {
   const bounds = receipt.exchange_bounds;
   bounds.forEach((bound) => {
+    assertExactKeys(bound, [
+      "removed_candidate_key", "incumbent_loss", "unseen_gain_upper_bound",
+      "improvement_upper_bound"
+    ], "field refinement exchange bound");
+    if (bound.removed_candidate_key !== null) {
+      assertCanonicalIdentity(bound.removed_candidate_key);
+    }
     if (![bound.incumbent_loss, bound.unseen_gain_upper_bound,
       bound.improvement_upper_bound].every(Number.isFinite) ||
       bound.incumbent_loss < 0 || bound.unseen_gain_upper_bound < 0 ||
@@ -316,3 +340,22 @@ function assertDigest(value: string): void {
     throw new Error("field refinement stop certificate digest is invalid");
   }
 }
+
+function assertCanonicalIdentity(value: string): void {
+  if (typeof value !== "string" || value.length === 0 || value.trim() !== value) {
+    throw new Error("field stop closure identity is invalid");
+  }
+}
+
+function assertExactKeys(value: object, expected: readonly string[], field: string): void {
+  const actual = Object.keys(value).sort(compareText);
+  const sorted = [...expected].sort(compareText);
+  if (actual.length !== sorted.length || actual.some((key, index) => key !== sorted[index])) {
+    throw new Error(`${field} has unknown or missing fields`);
+  }
+}
+
+const STOP_REASONS: ReadonlySet<string> = new Set([
+  "all_channels_closed", "source_unavailable", "relevance_bound_unavailable",
+  "objective_bound_unavailable", "exchange_dominated", "exchange_not_dominated"
+]);

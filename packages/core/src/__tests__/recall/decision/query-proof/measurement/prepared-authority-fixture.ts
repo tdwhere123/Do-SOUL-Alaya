@@ -37,6 +37,8 @@ import { compileCanonicalQueryCompilation } from
   "../../../../../recall/query/canonical-query/index.js";
 import { createDependencies, createTaskSurface } from
   "../../../recall-service-test-fixtures.js";
+import type { RecallServiceMemoryRepoPort } from
+  "../../../../../recall/runtime/recall-service-types.js";
 
 const NOW = "2026-08-29T00:00:00.000Z";
 
@@ -139,7 +141,7 @@ export async function prepareLexicalMeasurementAuthorityFixture(
   const bundle = createRecallRetrievalFieldBundle({
     workspaceId: evidence.workspace_id,
     queryText: "measurement authority fixture",
-    memoryRepo: { searchByKeywordField: async () => result }
+    memoryRepo: memoryRepo(async () => result)
   });
   return await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
     bindRetrievalFieldBundleReadAuthority(bundle, evidence.snapshot_read_lease, capability);
@@ -215,7 +217,7 @@ export async function withCapturedLexicalMeasurementAuthorityFixture<T>(
   const bundle = createRecallRetrievalFieldBundle({
     workspaceId: "workspace-1",
     queryText: "measurement authority captured fixture",
-    memoryRepo: { searchByKeywordField: async () => result }
+    memoryRepo: memoryRepo(async () => result)
   });
   return await withActiveRecallReadSnapshot(snapshot, async (capability) => {
     bindRetrievalFieldBundleReadAuthority(bundle, prepared.snapshotReadLease, capability);
@@ -266,7 +268,11 @@ function normalLane(lane: "exact" | "porter" | "trigram") {
 
 function populatedNormalLane(
   lane: "exact" | "porter" | "trigram",
-  observations: readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[]
+  observations: readonly Readonly<{
+    readonly object_id: string;
+    readonly normalized_rank: number;
+    readonly rank: number;
+  }>[]
 ) {
   return Object.freeze({
     lane,
@@ -442,4 +448,15 @@ export function measurementEvidenceWithAlternateCompilation(
 export function releaseMeasurementEvidenceFixture(prepared: PreparedRecallRequest): void {
   prepared.releaseProjectionPin();
   prepared.projectionPinLease.stop();
+}
+
+function memoryRepo(
+  searchByKeywordField: NonNullable<RecallServiceMemoryRepoPort["searchByKeywordField"]>
+): RecallServiceMemoryRepoPort {
+  return {
+    findByWorkspaceId: async () => [],
+    findByDimension: async () => [],
+    findByScopeClass: async () => [],
+    searchByKeywordField
+  } satisfies RecallServiceMemoryRepoPort;
 }

@@ -259,6 +259,7 @@ function testSourceVerifier(
 function sourceDeclaration(options: Readonly<{
   readonly sourceView?: "pinned" | "unavailable";
   readonly validTime?: SourceFrontierDeclarationV1["valid_time_domain"];
+  readonly generation?: string;
 }>) {
   return (source_owner: string): SourceFrontierDeclarationV1 => ({
     source_owner,

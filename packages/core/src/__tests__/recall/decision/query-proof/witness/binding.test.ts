@@ -7,7 +7,8 @@ import {
   refineBindingRelation,
   type BindingRelationState,
   type BindingRelationWitness,
-  type BindingSourceObservationReceiptV1
+  type BindingSourceObservationReceiptV1,
+  type BindingRelationEvidenceReceiptV1
 } from "../../../../../recall/decision/query-proof/witness/index.js";
 import { digestRecallFieldIdentity } from
   "../../../../../recall/field/field-identity.js";
@@ -139,7 +140,9 @@ describe("binding relation domain", () => {
         left_id: "left",
         right_id: "right",
         state: "distinct",
-        relation_evidence_receipt: { ...valid, ...override }
+        relation_evidence_receipt: {
+          ...valid, ...override
+        } as BindingRelationEvidenceReceiptV1
       },
       evidence_verifier: EVIDENCE_VERIFIER
     });

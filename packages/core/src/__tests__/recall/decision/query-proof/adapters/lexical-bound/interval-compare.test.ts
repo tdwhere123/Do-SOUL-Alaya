@@ -6,8 +6,8 @@ import {
 } from "../../../../../../recall/decision/query-proof/adapters/lexical-bound/index.js";
 import { D1_REQUEST, D1_SNAPSHOT, plantProof } from "./d1-proof-fixture.js";
 
-const SNAPSHOT_OTHER = `sha256:${"c".repeat(64)}`;
-const REQUEST_OTHER = `sha256:${"d".repeat(64)}`;
+const SNAPSHOT_OTHER = `sha256:${"c".repeat(64)}` as `sha256:${string}`;
+const REQUEST_OTHER = `sha256:${"d".repeat(64)}` as `sha256:${string}`;
 
 describe("d1 interval channel vote", () => {
   it("votes gt / lt / eq / skip on the same LexDomain", () => {

@@ -366,7 +366,9 @@ function correlationWitnessPinsMatch(
 ): boolean {
   const identity = witness.identity;
   if (identity.query_id !== left.identity.query_id) return false;
+  if (identity.query_id !== right.identity.query_id) return false;
   if (identity.snapshot_digest !== left.identity.snapshot_digest) return false;
+  if (identity.snapshot_digest !== right.identity.snapshot_digest) return false;
   if (identity.candidate_id !== undefined &&
     identity.candidate_id !== left.identity.candidate_id) {
     return false;

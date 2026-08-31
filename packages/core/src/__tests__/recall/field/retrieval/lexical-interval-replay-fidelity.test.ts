@@ -4,6 +4,8 @@ import {
   createLexicalIntervalSourceReceiptIntegrityV1,
   verifyLexicalIntervalSourceReceiptIntegrityV1
 } from "../../../../recall/field/retrieval/lexical-interval-source-receipt.js";
+import type { KeywordSearchFieldResult, KeywordSearchResult } from
+  "../../../../recall/runtime/recall-service-types.js";
 
 type LaneId = "exact" | "porter" | "object_key_porter" | "trigram" |
   "object_key_trigram";
@@ -84,8 +86,13 @@ function verify(result: ReturnType<typeof crossLaneFixture>): void {
 function crossLaneFixture(options: Readonly<{
   readonly laneHits?: readonly LaneHit[];
   readonly discarded?: readonly LaneId[];
-  readonly postMerge?: Readonly<Record<string, string | number>>;
-  readonly normalMatch?: Readonly<Record<string, string | number>>;
+  readonly postMerge?: Readonly<{
+    readonly candidate_key: string;
+    readonly normalized_rank: number;
+    readonly trigram_rank?: number;
+    readonly object_key_rank?: number;
+  }>;
+  readonly normalMatch?: Readonly<KeywordSearchResult>;
 }> = {}) {
   const porter = hit("porter", -3, 0, 1);
   const trigram = hit("trigram", -2, 0, 1);
@@ -137,7 +144,10 @@ function unicodeTieResult(composed: string, decomposed: string) {
   });
 }
 
-function exactOnlyResult(optional: Readonly<Record<string, number>>) {
+function exactOnlyResult(optional: Readonly<{
+  readonly trigram_rank?: number;
+  readonly object_key_rank?: number;
+}>) {
   const exact = hit("exact", 1, 0, 1);
   return resultFixture({
     mergeLimit: 1,
@@ -172,12 +182,17 @@ function resultFixture(input: Readonly<{
   readonly mergeLimit: number;
   readonly lanes: readonly ReturnType<typeof producerLane>[];
   readonly candidates: readonly ReturnType<typeof candidate>[];
-  readonly postMerge: readonly Readonly<Record<string, string | number>>[];
-  readonly normalMatches: readonly Readonly<Record<string, string | number>>[];
+  readonly postMerge: readonly Readonly<{
+    readonly candidate_key: string;
+    readonly normalized_rank: number;
+    readonly trigram_rank?: number;
+    readonly object_key_rank?: number;
+  }>[];
+  readonly normalMatches: readonly Readonly<KeywordSearchResult>[];
 }>) {
   return Object.freeze({
     matches: Object.freeze(input.normalMatches),
-    lanes: Object.freeze([]),
+    lanes: Object.freeze([] as const),
     lexical_raw_rank: Object.freeze({
       query_run_id: "replay-fidelity", merge_limit: input.mergeLimit,
       lanes: Object.freeze(input.lanes.map(({ lane_id, raw_key_kind, list_n, status }) =>
@@ -195,7 +210,7 @@ function resultFixture(input: Readonly<{
       lanes: Object.freeze(input.lanes), candidates: Object.freeze(input.candidates),
       post_merge: Object.freeze(input.postMerge)
     })
-  });
+  }) satisfies KeywordSearchFieldResult;
 }
 
 function candidate(

@@ -9,6 +9,7 @@ import type { SupportMaterializationV1 } from
   "../../../../../recall/decision/query-proof/support/index.js";
 import { createFourValuedWitness } from
   "../../../../../recall/decision/query-proof/witness/index.js";
+import { compareText } from "../../../../../shared/compare-text.js";
 
 const QUERY_ID = `sha256:${"1".repeat(64)}`;
 const SNAPSHOT_DIGEST = `sha256:${"2".repeat(64)}`;
@@ -69,13 +70,13 @@ describe("support proposition measurement authority", () => {
         status: "producer_unavailable" as const,
         owner: "left",
         source_owner: "temporal" as const,
-        reason: "source_unavailable" as const
+        reason: "source_view_unavailable" as const
       }),
       Object.freeze({
         status: "malformed" as const,
         owner: "left",
         source_owner: "osf" as const,
-        contract_code: "binding_identity_mismatch" as const
+        contract_code: "subject_identity_mismatch" as const
       })
     ]);
     const [candidate] = psiV2CandidatesFromSupport({
@@ -86,8 +87,8 @@ describe("support proposition measurement authority", () => {
       collapse.status === "blocked" ? collapse.reason : "") ?? [];
     expect(reasons).toEqual(expect.arrayContaining([
       "support producer not_observed: receipt_absent",
-      "support producer producer_unavailable: source_unavailable",
-      "support producer malformed: binding_identity_mismatch"
+      "support producer producer_unavailable: source_view_unavailable",
+      "support producer malformed: subject_identity_mismatch"
     ]));
   });
 
@@ -105,7 +106,7 @@ describe("support proposition measurement authority", () => {
   it("canonicalizes support coordinates independent of observation order", () => {
     const composed = "\u00e9";
     const decomposed = "e\u0301";
-    expect(composed === decomposed).toBe(false);
+    expect(compareText(composed, decomposed)).not.toBe(0);
 
     const forward = psiV2CandidatesFromSupport({
       candidate_keys: ["left"],

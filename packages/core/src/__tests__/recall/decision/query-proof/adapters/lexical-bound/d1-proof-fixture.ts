@@ -5,6 +5,7 @@ import {
   type LexicalBoundLaneCapture,
   type LexicalBoundLaneId,
   type LexicalBoundProof,
+  type LexicalBoundProofCaptured,
   type LexicalBoundProducerReceipt,
   type LexicalBoundRawKeyKind
 } from "../../../../../../recall/runtime/diagnostics/lexical-bound-proof.js";
@@ -16,9 +17,11 @@ import type {
   D1CandidateEnvelopeMap,
   D1EnvelopeValue
 } from "../../../../../../recall/decision/query-proof/adapters/lexical-bound/legal-envelope.js";
+import type { RecallFieldDigest } from
+  "../../../../../../recall/field/field-identity.js";
 
-export const D1_REQUEST = `sha256:${"a".repeat(64)}`;
-export const D1_SNAPSHOT = `sha256:${"b".repeat(64)}`;
+export const D1_REQUEST = `sha256:${"a".repeat(64)}` as `sha256:${string}`;
+export const D1_SNAPSHOT = `sha256:${"b".repeat(64)}` as `sha256:${string}`;
 export const D1_WORKSPACE = "workspace-1";
 
 const LANE_SPECS = [
@@ -52,15 +55,15 @@ export type D1PlantedProofInput = Readonly<{
   readonly fieldPrefix?: LexicalBoundFieldPrefix;
   readonly queryRunId?: string;
   readonly workspaceId?: string;
-  readonly requestDigest?: string | null;
-  readonly snapshotDigest?: string | null;
+  readonly requestDigest?: RecallFieldDigest | null;
+  readonly snapshotDigest?: RecallFieldDigest | null;
   readonly keyDomain?: "memory_object_id" | "omit";
   readonly universes?: boolean;
   readonly includeProvenance?: boolean;
   readonly lanes?: Readonly<Partial<Record<LexicalBoundLaneId, D1PlantedLane>>>;
 }>;
 
-export function plantProof(input: D1PlantedProofInput = {}): LexicalBoundProof {
+export function plantProof(input: D1PlantedProofInput = {}): LexicalBoundProofCaptured {
   const workspaceId = input.workspaceId ?? D1_WORKSPACE;
   const lanes = LANE_SPECS.map((spec) => plantLane(spec, input.lanes?.[spec.lane_id]));
   const receipt = plantReceipt(
@@ -100,7 +103,7 @@ export function withIdentity(
 function sealPlanted(
   proof: LexicalBoundProof,
   input: D1PlantedProofInput
-): LexicalBoundProof {
+): LexicalBoundProofCaptured {
   const sealed = sealLexicalBoundProof(proof, {
     ...(input.requestDigest === null
       ? {}

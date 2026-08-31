@@ -45,6 +45,7 @@ export type RecallDegradationReason =
   | "path_expansion_failed"
   | "packet_plan_trace_capture_failed"
   | "entity_seed_lookup_failed"
+  | "memory_id_hydrate_failed"
   | "evidence_context_bulk_failed"
   | "graph_metrics_bulk_failed";
 

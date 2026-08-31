@@ -170,12 +170,13 @@ export function sealLexicalBoundProof(
   seal: LexicalBoundSealInput
 ): LexicalBoundProof {
   if (proof.status !== "captured") return absentLexicalBoundProof(seal);
-  return assembleCaptured(
+  const sealed = assembleCaptured(
     proof.receipt,
     sealedIdentity(seal, proof.identity),
     presentFieldPrefix(seal.field_prefix) ?? proof.field_prefix,
     presentKeyDomain(seal.candidate_key_domain) ?? proof.candidate_key_domain
   );
+  return sealed;
 }
 
 export function verifyLexicalBoundProof(proof: LexicalBoundProof): void {

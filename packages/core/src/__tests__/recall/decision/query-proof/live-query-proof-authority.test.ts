@@ -151,7 +151,7 @@ describe("live query proof prepared authority", () => {
           ...authority.expected_lexical_request_pins[0]!,
           request_digest: "untrusted-marker"
         }]
-      }]
+      } as unknown as LiveQueryProofAuthority]
     ];
 
     for (const [code, candidate] of cases) {
@@ -172,7 +172,7 @@ function authorityFrom(prepared: PreparedRecallRequest): LiveQueryProofAuthority
     snapshot_coherence_receipt: prepared.snapshotCoherenceReceipt,
     snapshot_read_lease: prepared.snapshotReadLease,
     expected_lexical_request_pins: [lexicalPin(D1_REQUEST, "lexical_relaxed")]
-  });
+  }) satisfies LiveQueryProofAuthority;
 }
 
 function lexicalPin(

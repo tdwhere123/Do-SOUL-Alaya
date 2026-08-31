@@ -82,7 +82,7 @@ describe("support measurement source binding", () => {
       observations: payload.proposition_observations
     }, graduationComposition("BA degree"));
     expect(() => verifySupportMeasurementPreparedAuthorityV1({
-      evidence: withoutComposition as Parameters<
+      evidence: withoutComposition as unknown as Parameters<
         typeof verifySupportMeasurementPreparedAuthorityV1
       >[0]["evidence"]
     })).toThrow(/composition receipt/u);

@@ -69,7 +69,9 @@ async function hydrateSemanticKeywordHits(
     workspaceId: params.workspaceId,
     tier: params.tier,
     byId: params.byId,
-    objectIds: [...relaxed, ...expanded].map((hit) => hit.object_id)
+    objectIds: [...relaxed, ...expanded].map((hit) => hit.object_id),
+    warn: params.context.warn,
+    degradationReasons: params.context.degradationReasons
   });
 }
 
