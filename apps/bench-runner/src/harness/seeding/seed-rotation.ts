@@ -62,7 +62,7 @@ export function rotatingSeedObjectKind(seedIndex: number): SeedObjectKind {
 // raw_payload.extracted_object_kind for audit fidelity.
 // see also: packages/soul/src/garden/materialization-router/inputs.ts
 //   routeByObjectKind
-// see also: apps/bench-runner/src/longmemeval/compile-seed.ts extractSeedInputs
+// see also: apps/bench-runner/src/datasets/longmemeval/compile-seed.ts extractSeedInputs
 const MEMORY_ENTRY_ROUTED_OBJECT_KINDS: ReadonlySet<string> = new Set([
   // routeByObjectKind → memory_and_claim (evidence + memory + claim)
   "preference",

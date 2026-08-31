@@ -1,7 +1,7 @@
 import process from "node:process";
-import { runExtractionFill } from "../../bench/extraction/extraction-fill.js";
+import { runExtractionFill } from "../../runs/extraction/extraction-fill.js";
 import type { ParsedFlags } from "../cli-options.js";
-import { readR3SpendApproval } from "../../longmemeval/promotion/r3-spend-approval.js";
+import { readR3SpendApproval } from "../../datasets/longmemeval/promotion/r3-spend-approval.js";
 import {
   runExtractionFillCommand as runCommand,
   type ExtractionFillCommandDependencies

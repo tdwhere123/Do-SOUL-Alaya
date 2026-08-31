@@ -3,20 +3,20 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeBenchArchive } from "../../../bench/archive.js";
+import { writeBenchArchive } from "../../../runs/archive.js";
 import {
   composeArchiveHistorySlug,
   freezeGitStateMeasurement,
   resolveArchiveGitState
-} from "../../../bench/provenance/identity/archive-git-identity.js";
-import { resolveBenchCheckoutRoot } from "../../../bench/provenance/identity/checkout-root.js";
-import type { MeasuredGitState } from "../../../bench/provenance/contract/frozen-code-contract.js";
+} from "../../../runs/provenance/identity/archive-git-identity.js";
+import { resolveBenchCheckoutRoot } from "../../../runs/provenance/identity/checkout-root.js";
+import type { MeasuredGitState } from "../../../runs/provenance/contract/frozen-code-contract.js";
 import { writeMergedLongMemEvalArchive } from "../../../cli/merge/command/merge-command-archive.js";
 import {
   buildMergedLongMemEvalPayload,
   loadMergeShards
 } from "../../../cli/merge/command/merge-command-shards.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../diagnostics/spool.js";
 import { setupShard } from "../../cli/merge/cli-merge-evidence-fixture.js";
 import { makeShardKpi } from "../../cli/merge/cli-merge-validations-fixture.js";
 

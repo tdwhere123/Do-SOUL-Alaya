@@ -3,8 +3,8 @@ import {
   assertRecallEvalProductPolicyEnvironment,
   buildEffectiveRecallConfigIdentity,
   readRecallEvalMaxResults
-} from "../../../bench/provenance/effective-recall-config.js";
-import { prepareRecallEvalRunContext } from "../../../bench/lifecycle/recall-eval/recall-eval-run-context.js";
+} from "../../../runs/provenance/effective-recall-config.js";
+import { prepareRecallEvalRunContext } from "../../../runs/lifecycle/recall-eval/recall-eval-run-context.js";
 import { resolveBenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
 import { buildBenchDiagnosticRecallPolicy } from "../../../harness/daemon/runtime/daemon-recall-result.js";
 

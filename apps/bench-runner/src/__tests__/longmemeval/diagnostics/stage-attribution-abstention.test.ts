@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { describe, expect, it } from "vitest";
 import { buildStageAttributionTables } from
-  "../../../bench/diagnostics/stage-attribution/index.js";
+  "../../../diagnostics/stage-attribution/index.js";
 import { baseQuestion } from "./stage-attribution-fixture.js";
 import {
   assembledQuestion,

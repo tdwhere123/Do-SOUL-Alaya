@@ -4,11 +4,11 @@ import { describe, expect, it } from "vitest";
 import {
   assertExtractionAuthorityReceipt,
   createExtractionAuthorityReceipt
-} from "../../../../bench/extraction/authority/receipt.js";
+} from "../../../../runs/extraction/authority/receipt.js";
 import { createExtractionRepairScope } from
-  "../../../../bench/extraction/authority/repair/repair-scope.js";
+  "../../../../runs/extraction/authority/repair/repair-scope.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../../../bench/extraction/authority/receipt-limits.js";
+  "../../../../runs/extraction/authority/receipt-limits.js";
 
 const observation = {
   revision: `git-worktree-v1:${"d".repeat(40)}:${"1".repeat(64)}`,

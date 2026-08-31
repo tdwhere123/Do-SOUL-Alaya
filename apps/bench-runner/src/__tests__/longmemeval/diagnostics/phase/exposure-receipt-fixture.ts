@@ -1,8 +1,8 @@
 import { digestRecallFieldIdentity } from "@do-soul/alaya-core";
 import { sealTreatmentExposureReceipt } from
-  "../../../../bench/diagnostics/stage-attribution/exposure/contract.js";
+  "../../../../diagnostics/stage-attribution/exposure/contract.js";
 import type { QuestionStageRow } from
-  "../../../../bench/diagnostics/stage-attribution/types.js";
+  "../../../../diagnostics/stage-attribution/types.js";
 import { notObservedPhaseLedger } from "./not-observed-ledger.js";
 
 export const FIXTURE_CAPTURE_RECEIPT_DIGEST = `sha256:${"d".repeat(64)}`;

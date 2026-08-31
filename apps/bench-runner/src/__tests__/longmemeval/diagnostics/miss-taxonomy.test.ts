@@ -6,7 +6,7 @@ import {
   LongMemEvalGoldDiagnosticSchema,
   LongMemEvalMissTaxonomySchema,
   LongMemEvalQuestionDiagnosticSchema
-} from "../../../bench/diagnostics/schema/diagnostics-schema.js";
+} from "../../../diagnostics/schema/diagnostics-schema.js";
 
 import {
   buildLongMemEvalQualityMetrics,
@@ -17,7 +17,7 @@ import {
   summarizeLongMemEvalRecallEvidence,
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 
 const emptyQueryProbes = {
   object_ids: [],

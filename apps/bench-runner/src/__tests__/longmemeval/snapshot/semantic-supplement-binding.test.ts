@@ -9,12 +9,12 @@ import {
   assertSemanticSupplementRound,
   createSemanticSupplementEntries,
   type SemanticSupplementEntries
-} from "../../../bench/snapshot/seed-ledger/semantic-supplement-binding.js";
+} from "../../../runs/snapshot/seed-ledger/semantic-supplement-binding.js";
 import {
   computeSourceAssertionSupplementEntrySetSha256,
   computeSourceAssertionSupplementSidecarProjectionSha256,
   type SourceAssertionSupplementSidecarProjection
-} from "../../../bench/extraction/cache/semantic-supplement/source-assertion-supplement-closure.js";
+} from "../../../runs/extraction/cache/semantic-supplement/source-assertion-supplement-closure.js";
 
 const PRIMARY_KEY = "1".repeat(64);
 const RECEIPT_SHA = "2".repeat(64);

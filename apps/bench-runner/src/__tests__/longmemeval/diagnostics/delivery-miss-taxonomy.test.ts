@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyDeliveryMissTaxonomy,
   type DeliveryMissCandidateInput
-} from "../../../bench/diagnostics/miss/delivery-miss-taxonomy.js";
+} from "../../../diagnostics/miss/delivery-miss-taxonomy.js";
 
 function candidate(
   overrides: Partial<DeliveryMissCandidateInput> = {}

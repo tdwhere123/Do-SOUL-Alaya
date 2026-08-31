@@ -10,19 +10,19 @@ import {
 } from "../../../harness/daemon.js";
 import {
   createCompileSeedRunner
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import type { LongMemEvalQuestion } from
-  "../../../longmemeval/ingestion/dataset.js";
+  "../../../datasets/longmemeval/ingestion/dataset.js";
 import { seedLongMemEvalQuestion } from
-  "../../../longmemeval/runner/question/runner-question-seeding.js";
+  "../../../datasets/longmemeval/runner/question/runner-question-seeding.js";
 import { scoreLongMemEvalRecallHits } from
-  "../../../longmemeval/runner/runner-scoring.js";
+  "../../../datasets/longmemeval/runner/runner-scoring.js";
 import { buildLongMemEvalSnapshotQuestion } from
-  "../../../longmemeval/runner/question/runner-question-result.js";
+  "../../../datasets/longmemeval/runner/question/runner-question-result.js";
 import { assertSnapshotDatasetSubstrateIdentity } from
-  "../../../bench/snapshot/substrate-binding.js";
+  "../../../runs/snapshot/substrate-binding.js";
 import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from
-  "../../../bench/snapshot/materialize.js";
+  "../../../runs/snapshot/materialize.js";
 import { CREDENTIALLED_CONFIG, withOpenSemanticFactorGraph } from
   "../compile-seed/compile-seed-fixture.js";
 import { providerBackedExtractionResult, writeExtractionCacheTestManifest } from

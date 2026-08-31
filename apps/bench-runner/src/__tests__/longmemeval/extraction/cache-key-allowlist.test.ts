@@ -5,16 +5,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   computeExtractionTurnCacheKey
-} from "../../../bench/compile-seed/compile-seed-cache.js";
+} from "../../../runs/compile-seed/compile-seed-cache.js";
 import { writeCachedExtraction } from
-  "../../../bench/compile-seed/cache/cache-shard.js";
+  "../../../runs/compile-seed/cache/cache-shard.js";
 import {
   resolveCacheKeyAllowlistedTurns,
   resolveContinuationMissingTurns
 } from
-  "../../../bench/extraction/fill/policy/cache-key-allowlist.js";
+  "../../../runs/extraction/fill/policy/cache-key-allowlist.js";
 import type { LongMemEvalExtractionTurn } from
-  "../../../bench/extraction/turn-contents.js";
+  "../../../runs/extraction/turn-contents.js";
 
 const roots: string[] = [];
 const config = {

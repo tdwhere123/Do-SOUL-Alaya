@@ -3,23 +3,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../bench/extraction/authority/inspection.js";
+} from "../../../runs/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../bench/extraction/authority/receipt.js";
+} from "../../../runs/extraction/authority/receipt.js";
 import {
   readExtractionCacheManifest,
   writeExtractionCacheManifest
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import type { SupplementalSourceManifestBinding } from
-  "../../../bench/extraction/cache/supplemental-source-receipt.js";
+  "../../../runs/extraction/cache/supplemental-source-receipt.js";
 import { runExtractionFill } from
-  "../../../bench/extraction/extraction-fill.js";
+  "../../../runs/extraction/extraction-fill.js";
 import {
   assertSnapshotExtractionAuthorityBinding,
   captureSnapshotExtractionAuthority
-} from "../../../bench/snapshot/extraction-authority.js";
+} from "../../../runs/snapshot/extraction-authority.js";
 import {
   buildExtractionFillQuestion,
   EXTRACTION_FILL_VARIANT,

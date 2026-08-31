@@ -25,7 +25,7 @@ if (artifact === null || out === null) {
 }
 
 const diagnosticsUrl = pathToFileURL(
-  path.resolve(path.dirname(new URL(import.meta.url).pathname), "../dist/bench/diagnostics.js")
+  path.resolve(path.dirname(new URL(import.meta.url).pathname), "../dist/diagnostics/diagnostics.js")
 ).href;
 const { evaluateRecallEvalGzipD1Counterfactual } = await import(diagnosticsUrl);
 const report = await evaluateRecallEvalGzipD1Counterfactual(path.resolve(artifact));

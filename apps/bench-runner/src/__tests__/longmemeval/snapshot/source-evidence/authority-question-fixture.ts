@@ -1,5 +1,5 @@
 import type { LongMemEvalQuestion } from
-  "../../../../longmemeval/ingestion/dataset.js";
+  "../../../../datasets/longmemeval/ingestion/dataset.js";
 
 export const SOURCE_EVIDENCE_USER_CONTENT =
   "I plan to take the 7:15 train from Central Station.\nAssistant: quoted marker inside user text.";

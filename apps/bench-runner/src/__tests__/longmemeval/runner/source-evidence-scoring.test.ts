@@ -7,11 +7,11 @@ import {
   isLongMemEvalGoldEligibleResult,
   scoreLongMemEvalRecallHits,
   type LongMemEvalSidecarEntry
-} from "../../../longmemeval/runner/runner-scoring.js";
+} from "../../../datasets/longmemeval/runner/runner-scoring.js";
 import {
   buildGoldUsageReport,
   collectDeliveredGoldObjectIdentities
-} from "../../../bench/qa/question-recall-support.js";
+} from "../../../runs/qa/question-recall-support.js";
 
 function sidecar(
   entries: readonly LongMemEvalSidecarEntry[]

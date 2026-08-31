@@ -14,17 +14,17 @@ import { RECALL_RANKING_IDENTITY } from "../../../shared/version.js";
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   readLongMemEvalDiagnosticsSidecar
-} from "../../../bench/archive/archive-evidence.js";
-import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from "../../../bench/provenance/evidence-manifest.js";
+} from "../../../runs/archive/archive-evidence.js";
+import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from "../../../runs/provenance/evidence-manifest.js";
 
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 
-import { QaChatError } from "../../../bench/qa/qa-chat.js";
+import { QaChatError } from "../../../runs/qa/qa-chat.js";
 
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 
 import {
   buildLongMemEvalSidecarKey,
@@ -34,7 +34,7 @@ import {
   runLongMemEval,
   runLongMemEvalRecallCycle,
   scoreLongMemEvalRecallHits
-} from "../../../longmemeval/runner.js";
+} from "../../../datasets/longmemeval/runner.js";
 
 import {
   buildLongMemEvalArchivePayload,

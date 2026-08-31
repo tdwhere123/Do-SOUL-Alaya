@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
-import { runLongMemEval } from "../../../longmemeval/runner.js";
+import { runLongMemEval } from "../../../datasets/longmemeval/runner.js";
 import {
   snapshotManifestPath,
   snapshotSidecarPath
-} from "../../../bench/snapshot/materialize.js";
+} from "../../../runs/snapshot/materialize.js";
 import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset

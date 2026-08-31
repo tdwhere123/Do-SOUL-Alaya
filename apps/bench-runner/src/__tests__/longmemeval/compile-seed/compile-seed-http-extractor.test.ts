@@ -23,9 +23,9 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import { EXTRACTION_REQUEST_TIMEOUT_MS } from
-  "../../../bench/compile-seed/compile-seed-http.js";
+  "../../../runs/compile-seed/compile-seed-http.js";
 import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG,

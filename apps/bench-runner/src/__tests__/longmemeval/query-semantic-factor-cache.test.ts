@@ -15,16 +15,16 @@ import {
   OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE
 } from "@do-soul/alaya-soul";
 import { queryCacheStableJson } from
-  "../../bench/query-factors/cache/document.js";
+  "../../runs/query-factors/cache/document.js";
 import {
   bindQuerySemanticFactorCacheFileToRequest,
   createQuerySemanticFactorCache,
   fillQuerySemanticFactorSources,
   readQuerySemanticFactorCache,
   writeQuerySemanticFactorCache
-} from "../../bench/query-factors/query-semantic-factor-cache.js";
+} from "../../runs/query-factors/query-semantic-factor-cache.js";
 import { compileCertifiedQueryCacheValue } from
-  "../../bench/query-factors/query-semantic-factor-cache-certification.js";
+  "../../runs/query-factors/query-semantic-factor-cache-certification.js";
 
 const SOURCES = ["What did I buy?", "What did I choose?", "What did I use?"] as const;
 const REQUEST_PROFILE = "provider-default-v1" as const;

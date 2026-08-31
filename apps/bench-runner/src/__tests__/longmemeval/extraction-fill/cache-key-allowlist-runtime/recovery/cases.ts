@@ -4,13 +4,13 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it, vi } from "vitest";
-import type { BenchSignalExtractor } from "../../../../../bench/compile-seed.js";
+import type { BenchSignalExtractor } from "../../../../../runs/compile-seed.js";
 import { extractionCacheManifestPath } from
-  "../../../../../bench/extraction/cache/extraction-cache-manifest.js";
+  "../../../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { runExtractionFill } from
-  "../../../../../bench/extraction/extraction-fill.js";
+  "../../../../../runs/extraction/extraction-fill.js";
 import type { LongMemEvalQuestion } from
-  "../../../../../longmemeval/ingestion/dataset.js";
+  "../../../../../datasets/longmemeval/ingestion/dataset.js";
 import { providerBackedExtractionResult } from "../../fixture.js";
 
 const CRASH_CHILD_ENV = "ALAYA_TEST_CATALOG_REFILL_CRASH_CHILD";

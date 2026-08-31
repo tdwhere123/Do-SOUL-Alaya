@@ -10,18 +10,18 @@ import {
 } from "../../../cli/merge/shard/shard-diagnostics-reader.js";
 import { verifyShardEvidenceBundle } from
   "../../../cli/merge/shard/shard-evidence-verifier.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../diagnostics/spool.js";
 import {
   buildLongMemEvalEvidenceManifest,
   renderLongMemEvalEvidenceManifest,
   type LongMemEvalEvidenceManifest
-} from "../../../bench/provenance/evidence-manifest.js";
+} from "../../../runs/provenance/evidence-manifest.js";
 import { buildMergedRunProvenanceSidecars } from
-  "../../../bench/provenance/shard-aggregate.js";
+  "../../../runs/provenance/shard-aggregate.js";
 import {
   LongMemEvalRunProvenanceSchema,
   renderLongMemEvalRunProvenance
-} from "../../../bench/provenance/run.js";
+} from "../../../runs/provenance/run.js";
 import { syntheticExtractionClosure } from "../../longmemeval/extraction/extraction-closure-fixture.js";
 import { writeMergedLongMemEvalArchive } from "../../../cli/merge/command/merge-command-archive.js";
 import {

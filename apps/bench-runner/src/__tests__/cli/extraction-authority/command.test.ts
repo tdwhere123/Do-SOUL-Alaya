@@ -4,13 +4,13 @@ import {
   runAuthorizeExtractionCommand
 } from "../../../cli/extraction-authority/command.js";
 import type { ExtractionTargetSelectionReceipt } from
-  "../../../bench/extraction/authority/target-selection/receipt.js";
+  "../../../runs/extraction/authority/target-selection/receipt.js";
 import { emptyExtractionAuthorityShardStatus } from
   "../extraction-authority-inspection-fixture.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../../bench/extraction/authority/receipt-limits.js";
+  "../../../runs/extraction/authority/receipt-limits.js";
 import { emptyBenchTerminalRetryClassifications } from
-  "../../../bench/compile-seed/compile-seed-types.js";
+  "../../../runs/compile-seed/compile-seed-types.js";
 
 afterEach(() => {
   vi.restoreAllMocks();

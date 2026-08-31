@@ -20,7 +20,7 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG

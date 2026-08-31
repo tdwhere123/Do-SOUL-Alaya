@@ -2,19 +2,19 @@ import type { KpiPayload } from "@do-soul/alaya-eval";
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   LONGMEMEVAL_DIAGNOSTICS_FILENAME
-} from "../../../bench/archive/archive-evidence.js";
+} from "../../../runs/archive/archive-evidence.js";
 import { LONGMEMEVAL_COHORT_LEDGER_FILENAME } from
-  "../../../bench/selection/cohort-ledger.js";
+  "../../../runs/selection/cohort-ledger.js";
 import {
   buildLongMemEvalEvidenceManifest,
   LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
   renderLongMemEvalEvidenceManifest,
   type LongMemEvalEvidenceArtifactInput
-} from "../../../bench/provenance/evidence-manifest.js";
+} from "../../../runs/provenance/evidence-manifest.js";
 import type { MergedRunProvenanceSidecars } from
-  "../../../bench/provenance/shard-aggregate.js";
+  "../../../runs/provenance/shard-aggregate.js";
 import { selectionContractIdentity } from
-  "../../../bench/selection/contract.js";
+  "../../../runs/selection/contract.js";
 
 export interface MergedEvidenceManifestInput {
   readonly slug: string;

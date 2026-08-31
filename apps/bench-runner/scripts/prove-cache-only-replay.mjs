@@ -8,9 +8,9 @@ import {
 import {
   computeSystemPromptSha256,
   readExtractionCacheManifestIdentity
-} from "../dist/bench/extraction/cache/extraction-cache-manifest.js";
+} from "../dist/runs/extraction/cache/extraction-cache-manifest.js";
 import { computeExtractionKeySetSha256 } from
-  "../dist/bench/extraction/content-closure.js";
+  "../dist/runs/extraction/content-closure.js";
 
 const [outputPath, datasetRevision, promptDigest,
   cacheRoot, rawLimit, rawOffset, providerRoute, model, requestProfile,

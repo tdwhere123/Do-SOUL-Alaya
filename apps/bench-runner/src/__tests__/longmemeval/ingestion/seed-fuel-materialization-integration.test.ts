@@ -25,8 +25,8 @@ import {
   createCachingSignalExtractor,
   toSeedFuelInventoryKpi,
   type CompileSeedExtractionStats
-} from "../../../bench/compile-seed.js";
-import { BENCH_DAEMON_DB_FILENAME } from "../../../bench/snapshot/materialize.js";
+} from "../../../runs/compile-seed.js";
+import { BENCH_DAEMON_DB_FILENAME } from "../../../runs/snapshot/materialize.js";
 import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 import {
   providerBackedExtractionResult,

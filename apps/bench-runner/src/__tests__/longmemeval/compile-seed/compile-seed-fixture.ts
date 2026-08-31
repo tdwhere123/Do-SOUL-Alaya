@@ -7,7 +7,7 @@ import type { SeededObjectResult } from
 import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 
 /**
  * A test CompileSeedDaemon stub. The compile (credentialled) seed path

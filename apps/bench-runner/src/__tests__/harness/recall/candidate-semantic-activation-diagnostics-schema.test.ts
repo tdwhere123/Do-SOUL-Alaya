@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseBenchRecallDiagnosticsForRun } from
   "../../../harness/recall/recall-diagnostics-schema.js";
 import { buildQuestionDiagnostic } from
-  "../../../bench/diagnostics/diagnostics-question.js";
+  "../../../diagnostics/diagnostics-question.js";
 
 const FUSION_STREAMS = [
   "lexical_fts",

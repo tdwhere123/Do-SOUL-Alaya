@@ -8,8 +8,8 @@ import {
   writeEntry,
   type HistoryLayout
 } from "../../history/history.js";
-import { KpiPayloadSchema, type KpiPayload } from "../../schema/kpi-schema.js";
-import { renderFindings, renderReport } from "../../reporting/report.js";
+import { KpiPayloadSchema, type KpiPayload } from "../../contracts/kpi-schema.js";
+import { renderFindings, renderReport } from "../../reports/report.js";
 import { collectReleaseHardGates } from "../../gates/release-gates.js";
 import {
   buildPayload,

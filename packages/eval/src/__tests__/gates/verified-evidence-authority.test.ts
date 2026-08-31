@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { KpiPayloadSchema } from "../../schema/kpi-schema.js";
+import { KpiPayloadSchema } from "../../contracts/kpi-schema.js";
 import { createLongMemEvalSelectionContractIdentity } from
-  "../../schema/longmemeval-selection-contract.js";
+  "../../contracts/longmemeval-selection-contract.js";
 import { verifiedLongMemEvalEvidenceMatches } from
   "../../gates/longmemeval-verified-evidence.js";
 import {

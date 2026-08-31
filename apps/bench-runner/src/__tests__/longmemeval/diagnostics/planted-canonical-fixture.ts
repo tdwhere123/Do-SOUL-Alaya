@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createCanonicalSelectionReceipt } from "@do-soul/alaya-protocol";
-import { buildQuestionDiagnostic } from "../../../bench/diagnostics.js";
+import { buildQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
 
 export const PLANTED_GOLD_ID = "planted-gold";
 export const PLANTED_A_ID = "planted-a";

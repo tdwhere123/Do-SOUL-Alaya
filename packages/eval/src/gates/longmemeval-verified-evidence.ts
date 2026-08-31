@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   KpiPayloadSchema,
   type KpiPayload
-} from "../schema/kpi-schema.js";
+} from "../contracts/kpi-schema.js";
 import {
   computeLongMemEvalCohortAssignmentDigest,
   computeLongMemEvalQuestionIdDigest,
@@ -11,7 +11,7 @@ import {
   LongMemEvalSelectionContractIdentitySchema,
   type LongMemEvalSelectionAssignment,
   type LongMemEvalSelectionContractIdentity
-} from "../schema/longmemeval-selection-contract.js";
+} from "../contracts/longmemeval-selection-contract.js";
 import {
   assertLongMemEvalProvenanceBinding,
   RunProvenanceBindingSchema

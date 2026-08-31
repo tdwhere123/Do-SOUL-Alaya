@@ -11,51 +11,51 @@ const mocks = vi.hoisted(() => ({
   acquireWriteLease: vi.fn()
 }));
 
-vi.mock("../../../bench/extraction/expansion-fill-authority.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../bench/extraction/expansion-fill-authority.js")>(),
+vi.mock("../../../runs/extraction/expansion-fill-authority.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../runs/extraction/expansion-fill-authority.js")>(),
   prepareExpansionFillAuthority: mocks.prepareExpansion
 }));
-vi.mock("../../../bench/extraction/cache/extraction-cache-manifest.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../bench/extraction/cache/extraction-cache-manifest.js")>(),
+vi.mock("../../../runs/extraction/cache/extraction-cache-manifest.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../runs/extraction/cache/extraction-cache-manifest.js")>(),
   readExtractionCacheManifestIdentity: vi.fn(() => undefined)
 }));
-vi.mock("../../../bench/extraction/authority/receipt.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../bench/extraction/authority/receipt.js")>(),
+vi.mock("../../../runs/extraction/authority/receipt.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../runs/extraction/authority/receipt.js")>(),
   readExtractionAuthorityReceipt: mocks.readReceipt,
   assertExtractionAuthorityReceipt: vi.fn(),
   assertExtractionAuthorityRuntimeReadiness: vi.fn()
 }));
-vi.mock("../../../bench/extraction/authority/inspection.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../bench/extraction/authority/inspection.js")>(),
+vi.mock("../../../runs/extraction/authority/inspection.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../runs/extraction/authority/inspection.js")>(),
   inspectExtractionAuthority: mocks.inspectAuthority,
   inspectExtractionAuthorityDisk: vi.fn(),
   readCurrentExtractionAuthorityRevision: vi.fn(() => "revision")
 }));
-vi.mock("../../../bench/extraction/authority/attempt-ledger.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../bench/extraction/authority/attempt-ledger.js")>(),
+vi.mock("../../../runs/extraction/authority/attempt-ledger.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../runs/extraction/authority/attempt-ledger.js")>(),
   readExtractionAttemptLedger: mocks.readLedger,
   openExtractionAttemptLedger: vi.fn()
 }));
-vi.mock("../../../bench/extraction/authority/target-selection/receipt.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../bench/extraction/authority/target-selection/receipt.js")>(),
+vi.mock("../../../runs/extraction/authority/target-selection/receipt.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../runs/extraction/authority/target-selection/receipt.js")>(),
   readExtractionTargetSelectionReceipt: mocks.readTargetSelection,
   assertExtractionTargetSelectionReceipt: mocks.assertTargetSelection,
   assertExtractionTargetSelectionWindow: mocks.assertTargetSelectionWindow
 }));
-vi.mock("../../../bench/extraction/authority/repair/repair-scope.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../bench/extraction/authority/repair/repair-scope.js")>(),
+vi.mock("../../../runs/extraction/authority/repair/repair-scope.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../runs/extraction/authority/repair/repair-scope.js")>(),
   assertRemainingRepairShards: vi.fn()
 }));
-vi.mock("../../../bench/extraction/authority/repair/preserved-valid-closure.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../bench/extraction/authority/repair/preserved-valid-closure.js")>(),
+vi.mock("../../../runs/extraction/authority/repair/preserved-valid-closure.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../runs/extraction/authority/repair/preserved-valid-closure.js")>(),
   assertPreservedValidClosureUnchanged: vi.fn()
 }));
-vi.mock("../../../bench/extraction/fill/manifest/fill-root-guard.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../bench/extraction/fill/manifest/fill-root-guard.js")>(),
+vi.mock("../../../runs/extraction/fill/manifest/fill-root-guard.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../runs/extraction/fill/manifest/fill-root-guard.js")>(),
   acquireExtractionCacheWriteLease: mocks.acquireWriteLease
 }));
 
-import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
+import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 
 describe("500Q R3 receipt binding", () => {
   beforeEach(() => {

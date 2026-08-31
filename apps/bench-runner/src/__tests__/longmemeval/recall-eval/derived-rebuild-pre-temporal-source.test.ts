@@ -9,11 +9,11 @@ import {
   TEMPORAL_OFFLINE_MIGRATION_VERSION
 } from "@do-soul/alaya-storage";
 import { rebuildEvidenceSearchProjectionsOnWorkingCopy } from
-  "../../../bench/snapshot/recall-eval/evidence-search-projection-rebuild.js";
+  "../../../runs/snapshot/recall-eval/evidence-search-projection-rebuild.js";
 import { prepareRecallEvalRestoredDb } from
-  "../../../bench/snapshot/recall-eval/recall-eval-db.js";
+  "../../../runs/snapshot/recall-eval/recall-eval-db.js";
 import type { LongMemEvalSnapshotManifest } from
-  "../../../bench/snapshot/materialize.js";
+  "../../../runs/snapshot/materialize.js";
 import { SNAPSHOT_SEED_IDENTITY } from "../../../shared/version.js";
 
 const APPLIED_AT = "2026-08-19T00:00:00.000Z";

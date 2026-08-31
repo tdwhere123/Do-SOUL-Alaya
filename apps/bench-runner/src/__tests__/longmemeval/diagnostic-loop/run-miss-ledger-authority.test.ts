@@ -1,12 +1,12 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
-import { sha256File } from "../../../bench/snapshot/integrity.js";
+import { checkpointDigest } from "../../../runs/diagnostic-loop/checkpoint.js";
+import { sha256File } from "../../../runs/snapshot/integrity.js";
 import { diagnosticAuthorityDigest } from
-  "../../../bench/diagnostic-loop/authority/identity.js";
+  "../../../runs/diagnostic-loop/authority/identity.js";
 import { compareF0F2VsCachedF3 } from
-  "../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
+  "../../../diagnostics/stage-attribution/diagnostic-100q.js";
 import { row } from "../diagnostics/phase/exposure-receipt-fixture.js";
 import { createLoopTemp } from "./run-loop-fixture.js";
 import { forgedExposureReceipt } from "./forged-exposure-receipt.js";

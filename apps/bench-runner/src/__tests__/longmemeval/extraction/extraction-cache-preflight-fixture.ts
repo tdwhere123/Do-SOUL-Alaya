@@ -6,19 +6,19 @@ import { join } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { afterEach, beforeEach } from "vitest";
 
-import type { CompileSeedExtractionConfig } from "../../../bench/compile-seed.js";
+import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed.js";
 import {
   cacheFilePath,
   computeSourceTurnCacheKey,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
   inspectExtractionRawJson
-} from "../../../bench/compile-seed/compile-seed-cache.js";
+} from "../../../runs/compile-seed/compile-seed-cache.js";
 import {
   computeSystemPromptSha256,
   EXTRACTION_CACHE_KEY_ALGO,
   type ExtractionCacheManifestV3
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 
 export const EXTRACTION_CONFIG: CompileSeedExtractionConfig = {
   providerUrl: "https://yunwu.ai/v1",

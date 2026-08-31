@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LongMemEvalSelectionContractIdentitySchema } from
-  "../schema/longmemeval-selection-contract.js";
+  "../contracts/longmemeval-selection-contract.js";
 import {
   LongMemEvalArtifactDescriptorSchema,
   LongMemEvalExtractionSummarySchema

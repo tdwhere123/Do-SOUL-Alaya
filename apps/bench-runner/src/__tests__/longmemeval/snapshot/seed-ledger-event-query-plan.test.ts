@@ -4,7 +4,7 @@ import { SignalEventType } from "@do-soul/alaya-protocol";
 import {
   SNAPSHOT_RECONCILIATION_NOOP_EVENT_SQL,
   SNAPSHOT_SIGNAL_MATERIALIZATION_EVENT_SQL
-} from "../../../bench/snapshot/seed-ledger/seed-ledger-materialization-proof.js";
+} from "../../../runs/snapshot/seed-ledger/seed-ledger-materialization-proof.js";
 
 describe("snapshot seed-ledger event query plans", () => {
   let db: DatabaseSync;

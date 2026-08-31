@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import type { BenchDaemonHandle, BenchWorkspaceHandle } from "../../../harness/daemon.js";
 import {
   buildQaDeliveredCandidates,
   prepareLongMemEvalQuestion,
   runLongMemEvalQuestion
-} from "../../../longmemeval/runner/question/runner-question.js";
-import { createEmptyLongMemEvalSeedDropReasons } from "../../../bench/extraction/seed-fuel/seed-drop-reasons.js";
+} from "../../../datasets/longmemeval/runner/question/runner-question.js";
+import { createEmptyLongMemEvalSeedDropReasons } from "../../../runs/extraction/seed-fuel/seed-drop-reasons.js";
 import { buildRecallResult } from "./longmemeval-runner-fixture.js";
 
 afterEach(() => {

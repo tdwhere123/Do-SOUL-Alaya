@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildLocomoPayload } from "../../locomo/runner-payload.js";
+import { buildLocomoPayload } from "../../datasets/locomo/runner-payload.js";
 
 describe("LoCoMo KPI full-gold coverage", () => {
   it("writes the memory-only diagnostic view", () => {

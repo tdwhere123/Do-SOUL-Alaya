@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   openExtractionAttemptLedger,
   readExtractionAttemptLedger
-} from "../../../../../bench/extraction/authority/attempt-ledger.js";
+} from "../../../../../runs/extraction/authority/attempt-ledger.js";
 import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from
   "../../extraction-cache-test-fixture.js";
 

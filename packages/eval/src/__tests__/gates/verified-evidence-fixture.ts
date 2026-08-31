@@ -10,9 +10,9 @@ import {
   type LongMemEvalFullDiagnosticsValidator,
   type VerifiedLongMemEvalEvidenceContext
 } from "../../gates/longmemeval-verified-evidence.js";
-import type { KpiPayload } from "../../schema/kpi-schema.js";
+import type { KpiPayload } from "../../contracts/kpi-schema.js";
 import type { LongMemEvalSelectionAssignment } from
-  "../../schema/longmemeval-selection-contract.js";
+  "../../contracts/longmemeval-selection-contract.js";
 
 export async function verifiedEvidenceForPayload(
   payload: KpiPayload,

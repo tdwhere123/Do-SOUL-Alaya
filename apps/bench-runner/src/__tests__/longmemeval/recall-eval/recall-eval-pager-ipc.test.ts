@@ -20,15 +20,15 @@ import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import {
   disposeRecallEvalSelectionBoundaryArtifact,
   type RecallEvalSelectionBoundaryArtifact
-} from "../../../bench/lifecycle/recall-eval/recall-eval-selection-replay.js";
+} from "../../../runs/lifecycle/recall-eval/recall-eval-selection-replay.js";
 import { verifyLongMemEvalSelectionBoundaryArtifact } from
-  "../../../bench/selection-replay/selection-boundary-spool.js";
+  "../../../runs/selection-replay/selection-boundary-spool.js";
 import {
   RecallEvalPagerChildExitedError,
   createForkRecallEvalPagerHost,
   createRecallEvalPagerSession,
   type RecallEvalPagerIpcHost
-} from "../../../bench/lifecycle/recall-eval/recall-eval-process/ipc-client.js";
+} from "../../../runs/lifecycle/recall-eval/recall-eval-process/ipc-client.js";
 
 const stubChildPath = fileURLToPath(
   new URL("./recall-eval-pager-ipc-stub-child.mjs", import.meta.url)

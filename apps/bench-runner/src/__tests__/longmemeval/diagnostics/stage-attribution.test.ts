@@ -9,7 +9,7 @@ import {
   classifyGoldObjectStage,
   classifyQuestionStage,
   writeStageAttributionTables
-} from "../../../bench/diagnostics/stage-attribution/index.js";
+} from "../../../diagnostics/stage-attribution/index.js";
 import { baseQuestion } from "./stage-attribution-fixture.js";
 
 const WORKTREE_ROOT = path.resolve(

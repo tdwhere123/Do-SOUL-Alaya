@@ -3,13 +3,13 @@ import {
   drainAuditedAsyncSideEffects,
   scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
-import { createLongMemEvalSelectionContractFromAssignments } from "../../../bench/selection/contract.js";
-import { executeLongMemEvalRun } from "../../../longmemeval/runner/runner-execution.js";
-import type { LongMemEvalRunContext } from "../../../longmemeval/runner/prepare-context.js";
-import type { LongMemEvalRunOptions } from "../../../longmemeval/runner.js";
+import { createLongMemEvalSelectionContractFromAssignments } from "../../../runs/selection/contract.js";
+import { executeLongMemEvalRun } from "../../../datasets/longmemeval/runner/runner-execution.js";
+import type { LongMemEvalRunContext } from "../../../datasets/longmemeval/runner/prepare-context.js";
+import type { LongMemEvalRunOptions } from "../../../datasets/longmemeval/runner.js";
 import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
 import { emptySeedFuelInventory } from
-  "../../../bench/extraction/seed-fuel/seed-fuel-inventory.js";
+  "../../../runs/extraction/seed-fuel/seed-fuel-inventory.js";
 
 const mocks = vi.hoisted(() => ({
   events: [] as string[],
@@ -43,26 +43,26 @@ interface SnapshotPolicyDrift {
 vi.mock("../../../harness/daemon.js", () => ({
   startBenchDaemon: mocks.startDaemon
 }));
-vi.mock("../../../bench/extraction/seed-fuel/seed-fuel-collector.js", () => ({
+vi.mock("../../../runs/extraction/seed-fuel/seed-fuel-collector.js", () => ({
   collectBenchSeedFuelInventory: mocks.collectInventory
 }));
-vi.mock("../../../bench/snapshot/quiescence.js", () => ({
+vi.mock("../../../runs/snapshot/quiescence.js", () => ({
   awaitLongMemEvalSnapshotQuiescence: mocks.quiesce
 }));
-vi.mock("../../../longmemeval/runner/question/runner-question.js", () => ({
+vi.mock("../../../datasets/longmemeval/runner/question/runner-question.js", () => ({
   prepareLongMemEvalQuestion: mocks.prepare,
   prepareLongMemEvalSnapshotQuestion: mocks.prepareSnapshot,
   runLongMemEvalQuestion: mocks.runQuestion,
   runPreparedLongMemEvalQuestion: mocks.recall
 }));
-vi.mock("../../../longmemeval/runner/runner-helpers.js", () => ({
+vi.mock("../../../datasets/longmemeval/runner/runner-helpers.js", () => ({
   writeRecallEvalSnapshot: mocks.writeSnapshot
 }));
-vi.mock("../../../bench/provenance/run.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../bench/provenance/run.js")>(),
+vi.mock("../../../runs/provenance/run.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../runs/provenance/run.js")>(),
   buildLongMemEvalRunProvenance: mocks.buildProvenance
 }));
-vi.mock("../../../bench/snapshot/current/current-substrate-authority.js", () => ({
+vi.mock("../../../runs/snapshot/current/current-substrate-authority.js", () => ({
   assertCurrentPostFillCacheAuthority: mocks.snapshotAuthority,
   assertCurrentPostFillCacheAuthorityProof: mocks.snapshotAuthorityProof
 }));

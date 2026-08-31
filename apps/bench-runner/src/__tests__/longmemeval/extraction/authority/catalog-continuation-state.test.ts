@@ -1,20 +1,20 @@
 // @ts-nocheck
 import { describe, expect, it } from "vitest";
 import type { ExtractionAttemptLedgerSnapshot } from
-  "../../../../bench/extraction/authority/attempt-ledger.js";
+  "../../../../runs/extraction/authority/attempt-ledger.js";
 import type { ExtractionAuthorityInspection } from
-  "../../../../bench/extraction/authority/inspection.js";
+  "../../../../runs/extraction/authority/inspection.js";
 import type { ExtractionAuthorityReceipt } from
-  "../../../../bench/extraction/authority/receipt.js";
+  "../../../../runs/extraction/authority/receipt.js";
 import {
   assertCatalogPredecessorState,
   assertContinuationInventory,
   assertInheritedContinuationPredecessorState,
   continuationPredecessorNewSuccessfulKeys
 } from
-  "../../../../bench/extraction/authority/continuation/predecessor-state.js";
+  "../../../../runs/extraction/authority/continuation/predecessor-state.js";
 import type { SameRootExtractionContinuation } from
-  "../../../../bench/extraction/authority/continuation/contract.js";
+  "../../../../runs/extraction/authority/continuation/contract.js";
 
 const successfulKey = "1".repeat(64);
 const missingKey = "2".repeat(64);

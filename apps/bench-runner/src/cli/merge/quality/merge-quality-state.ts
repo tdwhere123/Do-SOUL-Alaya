@@ -3,8 +3,8 @@ import {
   buildPerPlaneRecallCoverage,
   emptyGoldRankBucketTally,
   ratio
-} from "../../../bench/diagnostics/quality/diagnostics-quality-helpers.js";
-import { createEmptyMissTaxonomyDistribution } from "../../../bench/diagnostics/miss/diagnostics-miss-taxonomy.js";
+} from "../../../diagnostics/quality/diagnostics-quality-helpers.js";
+import { createEmptyMissTaxonomyDistribution } from "../../../diagnostics/miss/diagnostics-miss-taxonomy.js";
 import {
   accumulateMeasurementAccounting,
   buildMeasurementAccounting,

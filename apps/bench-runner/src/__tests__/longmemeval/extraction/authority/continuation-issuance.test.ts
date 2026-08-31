@@ -12,17 +12,17 @@ import {
   assertContinuationChildClaimBinding,
   assertExtractionAuthorityHasNoContinuationChild,
   continuationChildClaimPath
-} from "../../../../bench/extraction/authority/continuation/child-claim.js";
+} from "../../../../runs/extraction/authority/continuation/child-claim.js";
 import { assertSameRootExtractionContinuationRuntime } from
-  "../../../../bench/extraction/authority/continuation/continuation.js";
+  "../../../../runs/extraction/authority/continuation/continuation.js";
 import { loadSameRootExtractionContinuation } from
-  "../../../../bench/extraction/authority/continuation/runtime.js";
+  "../../../../runs/extraction/authority/continuation/runtime.js";
 import {
   assertExtractionAuthorityReceipt,
   readExtractionAuthorityReceipt
-} from "../../../../bench/extraction/authority/receipt.js";
+} from "../../../../runs/extraction/authority/receipt.js";
 import { readExtractionCacheManifestIdentity } from
-  "../../../../bench/extraction/cache/extraction-cache-manifest.js";
+  "../../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   cleanupContinuationRoots,
   createAuthorityRenewalScenario,

@@ -12,28 +12,28 @@ import {
   computeExtractionKeySetSha256,
   computeExtractionTurnCacheKey,
   computeExtractionTurnCacheKeys
-} from "../../../bench/compile-seed/compile-seed-cache.js";
+} from "../../../runs/compile-seed/compile-seed-cache.js";
 import {
   buildLongMemEvalRoundMessages,
   pairSessionIntoRounds,
   type LongMemEvalQuestion
 } from
-  "../../../longmemeval/ingestion/dataset.js";
+  "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   type ExtractionCacheManifestV3
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import type {
   LongMemEvalSnapshotSeedRound,
   LongMemEvalSnapshotSidecarFile
-} from "../../../bench/snapshot/materialize.js";
+} from "../../../runs/snapshot/materialize.js";
 import { assertSnapshotSeedLedgerBinding } from
-  "../../../bench/snapshot/seed-ledger/seed-ledger-binding.js";
+  "../../../runs/snapshot/seed-ledger/seed-ledger-binding.js";
 import {
   buildSnapshotExtractionAuthority,
   buildSnapshotExtractionSummary
-} from "../../../bench/snapshot/extraction-authority.js";
+} from "../../../runs/snapshot/extraction-authority.js";
 
 const roots: string[] = [];
 const MODEL = "fixture-model";

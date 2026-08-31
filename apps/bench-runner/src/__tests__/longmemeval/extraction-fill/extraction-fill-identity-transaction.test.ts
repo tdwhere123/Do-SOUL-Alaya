@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
+import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import {
   computeSystemPromptSha256,
   readExtractionCacheManifest,
   writeExtractionCacheManifest
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   buildGroundedSignalResponse,
   providerBackedExtractionResult

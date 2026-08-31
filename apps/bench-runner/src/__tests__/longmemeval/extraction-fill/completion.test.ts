@@ -12,21 +12,21 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   readExtractionCacheManifest
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   collectDistinctTurnContents,
   runExtractionFill
-} from "../../../bench/extraction/extraction-fill.js";
+} from "../../../runs/extraction/extraction-fill.js";
 import { computeExtractionTurnCacheKey } from
-  "../../../bench/compile-seed/compile-seed-cache.js";
+  "../../../runs/compile-seed/compile-seed-cache.js";
 import { inspectTurnContentKeySpace, type LongMemEvalExtractionTurn } from
-  "../../../bench/extraction/turn-contents.js";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+  "../../../runs/extraction/turn-contents.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   inspectExtractionFillCompletion
-} from "../../../bench/extraction/fill/fill-completion.js";
+} from "../../../runs/extraction/fill/fill-completion.js";
 import { preflightExtractionCache } from
-  "../../../bench/compile-seed/compile-seed-preflight.js";
+  "../../../runs/compile-seed/compile-seed-preflight.js";
 import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset

@@ -22,7 +22,7 @@ import {
   WORKSPACE_SLICE_EXPLODE_RECIPE_VERSION,
   WORKSPACE_SLICE_SNAPSHOT_SIDECAR_FILENAME,
   workingAlayaDbPath
-} from "../../../bench/snapshot/recall-eval/workspace-slice/index.js";
+} from "../../../runs/snapshot/recall-eval/workspace-slice/index.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import {
   createPackedTwoWorkspaceDb,

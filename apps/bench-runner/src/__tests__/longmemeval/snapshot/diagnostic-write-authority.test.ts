@@ -1,9 +1,9 @@
 // @ts-nocheck
 import { describe, expect, it, vi } from "vitest";
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
-import type { LongMemEvalRunProvenance } from "../../../bench/provenance/run.js";
-import { deriveSnapshotAttribution } from "../../../bench/snapshot/attribution.js";
-import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
+import type { LongMemEvalRunProvenance } from "../../../runs/provenance/run.js";
+import { deriveSnapshotAttribution } from "../../../runs/snapshot/attribution.js";
+import { compactSnapshotRunProvenance } from "../../../runs/snapshot/run-provenance.js";
 import {
   currentCanonicalQuestions as questions,
   currentSnapshotExtractionAuthority as authorityFor,
@@ -11,10 +11,10 @@ import {
   currentSnapshotSidecarFor as sidecarFor
 } from "./current-snapshot-fixture.js";
 
-vi.mock("../../../bench/snapshot/substrate-binding.js", () => ({
+vi.mock("../../../runs/snapshot/substrate-binding.js", () => ({
   assertSnapshotDatasetSubstrateIdentity: vi.fn()
 }));
-vi.mock("../../../bench/snapshot/seed-ledger/seed-ledger-binding.js", () => ({
+vi.mock("../../../runs/snapshot/seed-ledger/seed-ledger-binding.js", () => ({
   assertSnapshotSeedLedgerBinding: vi.fn()
 }));
 
@@ -110,13 +110,13 @@ describe("diagnostic snapshot write authority", () => {
 });
 
 async function loadAuthority() {
-  return import("../../../bench/snapshot/current/current-substrate-authority.js");
+  return import("../../../runs/snapshot/current/current-substrate-authority.js");
 }
 
 async function boundProvenance(): Promise<LongMemEvalRunProvenance> {
   const manifest = manifestFor("q-1");
   const { bindSnapshotRunProvenanceAuthority } = await import(
-    "../../../bench/snapshot/run-provenance.js"
+    "../../../runs/snapshot/run-provenance.js"
   );
   return bindSnapshotRunProvenanceAuthority(manifest.run_provenance!, authorityFor());
 }

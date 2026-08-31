@@ -5,7 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   createRunnerRawShardInspector
-} from "../../../bench/compile-seed/cache/runner-raw-shard-inspector.js";
+} from "../../../runs/compile-seed/cache/runner-raw-shard-inspector.js";
 
 const CACHE_KEY = "a".repeat(64);
 const MODEL = "test-model";

@@ -17,35 +17,35 @@ import {
   type BenchDaemonHandle
 } from "../../../harness/daemon.js";
 import { createCompileSeedRunner } from
-  "../../../bench/compile-seed.js";
+  "../../../runs/compile-seed.js";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256
-} from "../../../bench/compile-seed/compile-seed-cache.js";
+} from "../../../runs/compile-seed/compile-seed-cache.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   type ExtractionCacheManifestV3,
   writeExtractionCacheManifest
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import type { LongMemEvalQuestion } from
-  "../../../longmemeval/ingestion/dataset.js";
+  "../../../datasets/longmemeval/ingestion/dataset.js";
 import { inspectTurnContentKeySpace } from
-  "../../../bench/extraction/turn-contents.js";
+  "../../../runs/extraction/turn-contents.js";
 import { buildLongMemEvalSnapshotQuestion } from
-  "../../../longmemeval/runner/question/runner-question-result.js";
+  "../../../datasets/longmemeval/runner/question/runner-question-result.js";
 import { seedLongMemEvalQuestion } from
-  "../../../longmemeval/runner/question/runner-question-seeding.js";
+  "../../../datasets/longmemeval/runner/question/runner-question-seeding.js";
 import {
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   type LongMemEvalSnapshotSeedRound,
   type LongMemEvalSnapshotSidecarFile
-} from "../../../bench/snapshot/materialize.js";
+} from "../../../runs/snapshot/materialize.js";
 import { captureSnapshotExtractionAuthority } from
-  "../../../bench/snapshot/extraction-authority.js";
+  "../../../runs/snapshot/extraction-authority.js";
 import { assertSnapshotSeedLedgerBinding } from
-  "../../../bench/snapshot/seed-ledger/seed-ledger-binding.js";
-import { assertSnapshotDatasetSubstrateIdentity } from "../../../bench/snapshot/substrate-binding.js";
+  "../../../runs/snapshot/seed-ledger/seed-ledger-binding.js";
+import { assertSnapshotDatasetSubstrateIdentity } from "../../../runs/snapshot/substrate-binding.js";
 import {
   CREDENTIALLED_CONFIG,
   signalsEnvelope

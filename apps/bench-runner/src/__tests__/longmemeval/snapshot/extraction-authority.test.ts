@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { LongMemEvalRunProvenance } from
-  "../../../bench/provenance/run.js";
+  "../../../runs/provenance/run.js";
 import type { ExtractionCacheManifestV3 } from
-  "../../../bench/extraction/cache/extraction-cache-manifest.js";
+  "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
   extractionContentClosureEntriesFromIndex
-} from "../../../bench/extraction/content-closure.js";
+} from "../../../runs/extraction/content-closure.js";
 import {
   MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES,
   assertSnapshotExtractionAuthorityBinding,
@@ -19,14 +19,14 @@ import {
   buildSnapshotExtractionSummary,
   parseSnapshotExtractionAuthorityBytes,
   renderSnapshotExtractionAuthority
-} from "../../../bench/snapshot/extraction-authority.js";
+} from "../../../runs/snapshot/extraction-authority.js";
 import { persistSnapshotExtractionAuthority } from
-  "../../../bench/snapshot/freeze/extraction-authority-publisher.js";
+  "../../../runs/snapshot/freeze/extraction-authority-publisher.js";
 import {
   LongMemEvalSnapshotRunProvenanceSchema,
   bindSnapshotRunProvenanceAuthority,
   compactSnapshotRunProvenance
-} from "../../../bench/snapshot/run-provenance.js";
+} from "../../../runs/snapshot/run-provenance.js";
 import { makeShardProvenance } from "../runner/runner-concurrency-fixture.js";
 
 const SOURCE_SHA = "a".repeat(64);

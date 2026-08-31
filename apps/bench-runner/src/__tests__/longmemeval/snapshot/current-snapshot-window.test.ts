@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SourceAssertionSupplementBindingSchema } from
-  "../../../bench/extraction/cache/semantic-supplement/source-assertion-supplement.js";
+  "../../../runs/extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import { makeShardProvenance } from "../runner/runner-concurrency-fixture.js";
 import {
   currentCanonicalQuestions as questions,
@@ -14,7 +14,7 @@ import {
 
 const roots: string[] = [];
 
-vi.mock("../../../longmemeval/ingestion/fetch.js", () => ({
+vi.mock("../../../datasets/longmemeval/ingestion/fetch.js", () => ({
   loadDatasetWithIdentity: vi.fn(async () => ({
     questions,
     sha256: makeShardProvenance(0, 1).dataset_sha256!,
@@ -23,17 +23,17 @@ vi.mock("../../../longmemeval/ingestion/fetch.js", () => ({
     promotionAuthority: {}
   }))
 }));
-vi.mock("../../../bench/snapshot/integrity.js", async (loadOriginal) => ({
-  ...await loadOriginal<typeof import("../../../bench/snapshot/integrity.js")>(),
+vi.mock("../../../runs/snapshot/integrity.js", async (loadOriginal) => ({
+  ...await loadOriginal<typeof import("../../../runs/snapshot/integrity.js")>(),
   verifySnapshotArtifactIntegrity: vi.fn(async () => undefined)
 }));
-vi.mock("../../../bench/snapshot/substrate-binding.js", () => ({
+vi.mock("../../../runs/snapshot/substrate-binding.js", () => ({
   assertSnapshotDatasetSubstrateIdentity: vi.fn()
 }));
 const { assertSnapshotSeedLedgerBinding } = vi.hoisted(() => ({
   assertSnapshotSeedLedgerBinding: vi.fn()
 }));
-vi.mock("../../../bench/snapshot/seed-ledger/seed-ledger-binding.js", () => ({
+vi.mock("../../../runs/snapshot/seed-ledger/seed-ledger-binding.js", () => ({
   assertSnapshotSeedLedgerBinding
 }));
 
@@ -44,7 +44,7 @@ afterEach(async () => {
 describe("current snapshot execution-window authority", () => {
   it("makes the current loader reject a self-consistent question outside its window", async () => {
     const { verifyCurrentRecallSnapshotAuthority } = await import(
-      "../../../bench/snapshot/current/current-substrate-authority.js"
+      "../../../runs/snapshot/current/current-substrate-authority.js"
     );
     const root = await mkdtemp(join(tmpdir(), "current-window-loader-"));
     roots.push(root);
@@ -63,14 +63,14 @@ describe("current snapshot execution-window authority", () => {
 
   it("makes the writer reject the same out-of-window question before DB access", async () => {
     const { assertCurrentSnapshotWriteAuthority } = await import(
-      "../../../bench/snapshot/current/current-substrate-authority.js"
+      "../../../runs/snapshot/current/current-substrate-authority.js"
     );
     const manifest = manifestFor("q-99");
     const extraction = manifest.extraction_provenance;
     const authority = authorityFor();
     if (extraction?.schema_version !== 3) throw new Error("fixture requires v3 extraction");
     const { bindSnapshotRunProvenanceAuthority } = await import(
-      "../../../bench/snapshot/run-provenance.js"
+      "../../../runs/snapshot/run-provenance.js"
     );
 
     expect(() => assertCurrentSnapshotWriteAuthority({
@@ -90,14 +90,14 @@ describe("current snapshot execution-window authority", () => {
 
   it("forwards semantic supplement authority into the writer substrate ledger", async () => {
     const { assertCurrentSnapshotWriteAuthority } = await import(
-      "../../../bench/snapshot/current/current-substrate-authority.js"
+      "../../../runs/snapshot/current/current-substrate-authority.js"
     );
     const manifest = manifestFor("q-1");
     const extraction = manifest.extraction_provenance;
     const authority = authorityFor();
     if (extraction?.schema_version !== 3) throw new Error("fixture requires v3 extraction");
     const { bindSnapshotRunProvenanceAuthority } = await import(
-      "../../../bench/snapshot/run-provenance.js"
+      "../../../runs/snapshot/run-provenance.js"
     );
     const binding = supplementBinding();
     const runProvenance = {

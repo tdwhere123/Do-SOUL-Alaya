@@ -9,11 +9,11 @@ import {
 import {
   createCachingSignalExtractor,
   type BenchSignalExtractor
-} from "../../../../bench/compile-seed.js";
+} from "../../../../runs/compile-seed.js";
 import { extractLiveDelegate } from
-  "../../../../bench/extraction/cache/cache-live-delegate.js";
+  "../../../../runs/extraction/cache/cache-live-delegate.js";
 import { openExtractionAttemptLedger } from
-  "../../../../bench/extraction/authority/attempt-ledger.js";
+  "../../../../runs/extraction/authority/attempt-ledger.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest

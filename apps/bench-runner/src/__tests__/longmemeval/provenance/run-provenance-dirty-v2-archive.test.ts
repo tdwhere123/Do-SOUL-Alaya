@@ -3,7 +3,7 @@ import {
   assertRecordedRunCodeIdentity,
   isLongMemEvalRunProvenanceGateEligible,
   LongMemEvalRunProvenanceSchema
-} from "../../../bench/provenance/run.js";
+} from "../../../runs/provenance/run.js";
 import {
   createRunProvenanceFixture,
   registerRunProvenanceRootCleanup

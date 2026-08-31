@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   readWarmDerivedSnapshotReceipt
-} from "../../../bench/snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
+} from "../../../runs/snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 
 const SHA_A = "a".repeat(64);

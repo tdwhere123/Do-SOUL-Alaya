@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { buildTreatmentExposureReceipts } from
-  "../../../../bench/diagnostics/stage-attribution/exposure/build-receipts.js";
+  "../../../../diagnostics/stage-attribution/exposure/build-receipts.js";
 import {
   assertTreatmentExposureReceipt,
   sealTreatmentExposureReceipt
-} from "../../../../bench/diagnostics/stage-attribution/exposure/contract.js";
+} from "../../../../diagnostics/stage-attribution/exposure/contract.js";
 import { OpenSemanticFactorCandidateActivationsSchema } from
-  "../../../../bench/diagnostics/schema/field/open-semantic-candidate-activation-schema.js";
+  "../../../../diagnostics/schema/field/open-semantic-candidate-activation-schema.js";
 import { compareF0F2VsCachedF3 } from
-  "../../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
+  "../../../../diagnostics/stage-attribution/diagnostic-100q.js";
 import {
   candidateAttribution,
   diagnostic,

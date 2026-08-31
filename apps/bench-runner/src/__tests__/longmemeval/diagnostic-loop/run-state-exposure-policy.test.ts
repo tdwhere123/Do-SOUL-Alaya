@@ -4,17 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CACHED_F3_EXPOSURE_POLICY } from
-  "../../../bench/diagnostics/stage-attribution/exposure/contract.js";
+  "../../../diagnostics/stage-attribution/exposure/contract.js";
 import {
   resolveDiagnosticLoopIdentity,
   resolvedDiagnosticLoopIdentityDigest
-} from "../../../bench/diagnostic-loop/authority/identity.js";
+} from "../../../runs/diagnostic-loop/authority/identity.js";
 import {
   persistRunRecord,
   readRunRecord,
   runRecordDigest,
   runRecordPath
-} from "../../../bench/diagnostic-loop/run-state.js";
+} from "../../../runs/diagnostic-loop/run-state.js";
 import {
   loopRequest,
   writeDiagnosticSnapshotFixture,

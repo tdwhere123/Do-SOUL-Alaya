@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach } from "vitest";
-import { GIT_REGULAR_FILE_MODE } from "../../../bench/provenance/contract/untracked-worktree-frame.js";
+import { GIT_REGULAR_FILE_MODE } from "../../../runs/provenance/contract/untracked-worktree-frame.js";
 import {
   independentDirtyWorktreeHash,
   specGitIdentityBytes,

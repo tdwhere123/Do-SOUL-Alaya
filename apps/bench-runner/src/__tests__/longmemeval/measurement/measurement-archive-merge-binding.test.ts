@@ -7,10 +7,10 @@ import {
   buildMergedLongMemEvalPayload,
   loadMergeShards
 } from "../../../cli/merge/command/merge-command-shards.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
-import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics.js";
-import { withCurrentMeasurementAttribution } from "../../../bench/measurement/archive-attribution.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../diagnostics/spool.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../diagnostics/schema/diagnostics-schema.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
+import { withCurrentMeasurementAttribution } from "../../../runs/measurement/archive-attribution.js";
 import { makeShardKpi } from "../../cli/merge/cli-merge-validations-fixture.js";
 import {
   cohort,

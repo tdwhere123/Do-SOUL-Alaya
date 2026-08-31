@@ -13,7 +13,7 @@ import {
   type BenchSimulateReportMode,
   type BenchSplit,
   type KpiPayload
-} from "../schema/kpi-schema.js";
+} from "../contracts/kpi-schema.js";
 import { releaseHardGateAllowsLatestPassing } from "../gates/release-gates.js";
 import type { VerifiedLongMemEvalEvidenceContext } from
   "../gates/longmemeval-verified-evidence.js";
@@ -227,8 +227,8 @@ export async function readEntry(
  * above is preserved for integrity-critical callers (e.g. the standalone diff
  * CLI reading the CURRENT entry-under-diff) and merge-longmemeval's direct
  * KpiPayloadSchema.parse stays strict on freshly-produced shard payloads.
- * cross-file: apps/bench-runner/src/longmemeval/recall-eval-archive.ts
- * cross-file: apps/bench-runner/src/longmemeval/archive-evidence.ts
+ * cross-file: apps/bench-runner/src/datasets/longmemeval/recall-eval-archive.ts
+ * cross-file: apps/bench-runner/src/datasets/longmemeval/archive-evidence.ts
  */
 export async function readEntryForDiff(
   layout: HistoryLayout,

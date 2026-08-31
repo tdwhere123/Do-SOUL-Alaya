@@ -9,7 +9,7 @@ import {
   freezeProcessEnvForWorkers,
   validateLongMemEvalConcurrency,
   resolveDefaultBenchRunnerCliPath,
-} from "../../../longmemeval/runner/runner-concurrency.js";
+} from "../../../datasets/longmemeval/runner/runner-concurrency.js";
 
 describe("resolveDefaultBenchRunnerCliPath", () => {
   it("resolves the checked-in bin entrypoint", () => {

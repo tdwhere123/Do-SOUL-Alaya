@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { CompileSeedExtractionStats } from
-  "../../../bench/compile-seed.js";
+  "../../../runs/compile-seed.js";
 import { buildRoundExtractionLedger } from
-  "../../../longmemeval/runner/question/seed-round-extraction-ledger.js";
+  "../../../datasets/longmemeval/runner/question/seed-round-extraction-ledger.js";
 
 describe("seed round extraction ledger", () => {
   it("binds every bounded raw shard without inventing an aggregate raw response", () => {

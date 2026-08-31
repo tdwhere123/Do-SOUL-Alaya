@@ -7,12 +7,12 @@ import { expect, it, vi } from "vitest";
 import {
   createCachingSignalExtractor,
   type BenchSignalExtractor
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import {
   EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS,
   runExtractionPool
-} from "../../../bench/extraction/fill/fill-pool.js";
-import { newFillStats } from "../../../bench/extraction/fill/fill-stats.js";
+} from "../../../runs/extraction/fill/fill-pool.js";
+import { newFillStats } from "../../../runs/extraction/fill/fill-stats.js";
 import {
   providerBackedExtractionResult,
   TEST_EXTRACTION_PROVIDER_URL,

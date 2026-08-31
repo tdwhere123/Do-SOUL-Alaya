@@ -189,7 +189,7 @@ export interface BenchDaemonHandle {
    * credentialled compile path uses proposeMemoriesFromCompileSignals
    * instead so its signals carry source = garden_compile.
    *
-   * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+   * see also: apps/bench-runner/src/datasets/longmemeval/compile-seed.ts
    */
   proposeMemoryFromSignal(
     input: BenchSignalSeedInput
@@ -233,7 +233,7 @@ export interface BenchDaemonHandle {
    *
    * invariant: seeds.length + dropped.length === inputs.length.
    *
-   * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+   * see also: apps/bench-runner/src/datasets/longmemeval/compile-seed.ts
    * see also: apps/core-daemon/src/garden-runtime.ts processPostTurnExtractTask
    */
   proposeMemoriesFromCompileSignals(
@@ -253,7 +253,7 @@ export interface BenchDaemonHandle {
    * The synthesis summary is a deterministic, LLM-free digest of the
    * session's seeded turn content — the bench never calls an LLM here.
    *
-   * see also: apps/bench-runner/src/longmemeval/compile-seed.ts seedSynthesis
+   * see also: apps/bench-runner/src/datasets/longmemeval/compile-seed.ts seedSynthesis
    */
   proposeSynthesis(input: BenchSynthesisSeedInput): Promise<SeededSynthesisResult>;
   /**

@@ -23,22 +23,22 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyEmbeddingCacheOverlay
-} from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/importer.js";
+} from "../../../runs/snapshot/recall-eval/embedding-cache-overlay/importer.js";
 import {
   writeEmbeddingCacheOverlay
-} from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/writer.js";
+} from "../../../runs/snapshot/recall-eval/embedding-cache-overlay/writer.js";
 import {
   emitEmbeddingCacheOverlay,
   productOverlayEmbeddingClientOptions
-} from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/emit.js";
+} from "../../../runs/snapshot/recall-eval/embedding-cache-overlay/emit.js";
 import { sha256File } from
-  "../../../bench/snapshot/integrity.js";
+  "../../../runs/snapshot/integrity.js";
 import { prepareRecallEvalDataRoot } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-runtime.js";
 import { openRecallEvalWorkingSqlite, recallEvalWorkingDbPath } from
-  "../../../bench/snapshot/recall-eval/recall-eval-working-sqlite.js";
+  "../../../runs/snapshot/recall-eval/recall-eval-working-sqlite.js";
 import type { RecallEvalSnapshotBundle } from
-  "../../../bench/snapshot/recall-eval/recall-eval-loader.js";
+  "../../../runs/snapshot/recall-eval/recall-eval-loader.js";
 
 const SOURCE_MANIFEST_SHA = "b".repeat(64);
 const MODEL_ARTIFACT_SHA = "c".repeat(64);

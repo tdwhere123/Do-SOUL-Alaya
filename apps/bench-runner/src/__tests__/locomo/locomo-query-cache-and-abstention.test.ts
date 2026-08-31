@@ -10,9 +10,9 @@ import {
   vi
 } from "./locomo-runner.test-support.js";
 import { readFile } from "node:fs/promises";
-import { runLocomo } from "../../locomo/runner.js";
+import { runLocomo } from "../../datasets/locomo/runner.js";
 import { buildLongMemEvalQualityMetrics } from
-  "../../bench/diagnostics/quality/diagnostics-quality.js";
+  "../../diagnostics/quality/diagnostics-quality.js";
 import { promotionMeasurementDiagnostic } from
   "../longmemeval/recall-eval/specialized-answerable-recall-fixture.js";
 

@@ -27,7 +27,7 @@ import { z } from "zod";
  * see also:
  *   packages/protocol/src/events/graph-auditor.ts (authoritative payloads)
  *   packages/core/src/path-graph/edge-proposal-service.ts (event producer)
- *   apps/bench-runner/src/longmemeval/runner.ts (wiring site)
+ *   apps/bench-runner/src/datasets/longmemeval/runner.ts (wiring site)
  */
 
 // invariant: these strings mirror GraphAuditorEventType in
@@ -82,7 +82,7 @@ interface CreatedRecord {
 import type {
   EdgeProposalAutoAccept,
   EdgeProposalRate
-} from "../schema/kpi-schema.js";
+} from "../contracts/kpi-schema.js";
 
 /**
  * @anchor edge-proposal-rate-per-question — under the

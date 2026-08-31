@@ -3,20 +3,20 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { materializeOpenSemanticFactorFormation } from "@do-soul/alaya-core";
-import { persistRunRecord } from "../../../bench/diagnostic-loop/run-state.js";
+import { persistRunRecord } from "../../../runs/diagnostic-loop/run-state.js";
 import { resolveDiagnosticLoopIdentity } from
-  "../../../bench/diagnostic-loop/authority/identity.js";
-import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
-import { writeDiagnosticLoopReport } from "../../../bench/diagnostic-loop/report.js";
+  "../../../runs/diagnostic-loop/authority/identity.js";
+import { checkpointDigest } from "../../../runs/diagnostic-loop/checkpoint.js";
+import { writeDiagnosticLoopReport } from "../../../runs/diagnostic-loop/report.js";
 import { missLedgerContentIdentity } from
-  "../../../bench/diagnostic-loop/miss-ledger-authority.js";
-import type { DiagnosticLoopCheckpoint } from "../../../bench/diagnostic-loop/types.js";
+  "../../../runs/diagnostic-loop/miss-ledger-authority.js";
+import type { DiagnosticLoopCheckpoint } from "../../../runs/diagnostic-loop/types.js";
 import { rebuildDiagnostic100QComparison } from
-  "../../../bench/diagnostics/stage-attribution/exposure/rebuild-comparison.js";
+  "../../../diagnostics/stage-attribution/exposure/rebuild-comparison.js";
 import {
   createQuerySemanticFactorCache,
   writeQuerySemanticFactorCache
-} from "../../../bench/query-factors/query-semantic-factor-cache.js";
+} from "../../../runs/query-factors/query-semantic-factor-cache.js";
 import { currentSnapshotSidecarFor } from "../snapshot/current-snapshot-fixture.js";
 import { loopIdentity, loopRequest, writeDiagnosticSnapshotFixture } from "./fixture.js";
 import {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { createCanonicalSelectionReceipt } from "@do-soul/alaya-protocol";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../diagnostics/schema/diagnostics-schema.js";
 import {
   RecallAnswerSupportObservationSchema,
   RecallAnswerShapePlanSchema,
@@ -13,15 +13,15 @@ import {
   buildQuestionDiagnostic,
   stripReplayCandidatePoolsForGateWrite,
   type LongMemEvalDiagnosticsSidecar
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 import {
   buildLongMemEvalEvidenceManifest,
   verifyLongMemEvalEvidenceManifest
-} from "../../../bench/provenance/evidence-manifest.js";
-import { collectPairedEnvironment } from "../../../bench/provenance/run.js";
+} from "../../../runs/provenance/evidence-manifest.js";
+import { collectPairedEnvironment } from "../../../runs/provenance/run.js";
 import { completeAnswerFeatures, diagnostic } from "./evidence-contract-test-support.js";
 import { canonicalCandidatePoolComplete } from
-  "../../../bench/diagnostics/artifacts/candidate-readers/canonical-candidate-row.js";
+  "../../../artifacts/candidate-readers/canonical-candidate-row.js";
 
 describe("LongMemEval evidence contract answer features", () => {
   it("accepts a complete canonical selection pool without legacy deep-head evidence", () => {

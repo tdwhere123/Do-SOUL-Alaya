@@ -13,24 +13,24 @@ import { OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID } from "@do-soul/alaya-soul";
 import {
   bindRecallEvalQuerySemanticFactorCache,
   type RecallEvalRunContext
-} from "../../../bench/lifecycle/recall-eval/recall-eval-run-context.js";
+} from "../../../runs/lifecycle/recall-eval/recall-eval-run-context.js";
 import { recallOptionsForQuestion } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-question-options.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-question-options.js";
 import { queryCacheStableJson } from
-  "../../../bench/query-factors/cache/document.js";
+  "../../../runs/query-factors/cache/document.js";
 import {
   createQuerySemanticFactorCache,
   writeQuerySemanticFactorCache
-} from "../../../bench/query-factors/query-semantic-factor-cache.js";
+} from "../../../runs/query-factors/query-semantic-factor-cache.js";
 import { compileCertifiedQueryCacheValue } from
-  "../../../bench/query-factors/query-semantic-factor-cache-certification.js";
+  "../../../runs/query-factors/query-semantic-factor-cache-certification.js";
 import type { RecallEvalSnapshotBundle } from
-  "../../../bench/snapshot/recall-eval/recall-eval-loader.js";
+  "../../../runs/snapshot/recall-eval/recall-eval-loader.js";
 import {
   currentSnapshotExtractionAuthority,
   currentSnapshotManifestFor
 } from "../snapshot/current-snapshot-fixture.js";
-import { redactProvenanceUrl } from "../../../bench/provenance/paired-environment.js";
+import { redactProvenanceUrl } from "../../../runs/provenance/paired-environment.js";
 
 const COUNT = 100;
 const FORMED = "What did I buy?";

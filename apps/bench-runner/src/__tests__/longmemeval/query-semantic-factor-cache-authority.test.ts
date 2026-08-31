@@ -11,14 +11,14 @@ import {
   resolveDiagnosticLoopIdentity,
   resolveDiagnosticQueryFactorCacheIdentity
 } from
-  "../../bench/diagnostic-loop/authority/identity.js";
+  "../../runs/diagnostic-loop/authority/identity.js";
 import {
   bindCurrentQuerySemanticFactorCache,
   createQuerySemanticFactorCache,
   fillQuerySemanticFactorSources,
   querySemanticFactorCacheSourceSetSha256,
   readQuerySemanticFactorCache
-} from "../../bench/query-factors/query-semantic-factor-cache.js";
+} from "../../runs/query-factors/query-semantic-factor-cache.js";
 import {
   loopRequest,
   writeDiagnosticSnapshotFixture,
@@ -30,8 +30,8 @@ import {
   QuerySemanticFactorCacheProvenanceIdentitySchema,
   assertQuerySemanticFactorCacheMatchesRequest,
   inspectQuerySemanticFactorCacheIdentity
-} from "../../bench/query-factors/query-semantic-factor-cache-identity.js";
-import { redactProvenanceUrl } from "../../bench/provenance/paired-environment.js";
+} from "../../runs/query-factors/query-semantic-factor-cache-identity.js";
+import { redactProvenanceUrl } from "../../runs/provenance/paired-environment.js";
 
 const SOURCE = "What did I buy?";
 const PROFILE = "provider-default-v1" as const;

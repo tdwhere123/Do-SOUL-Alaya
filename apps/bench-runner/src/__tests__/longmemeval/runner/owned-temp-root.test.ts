@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createOwnedTempRoot,
   finalizeOwnedTempRoot
-} from "../../../bench/lifecycle/owned-temp-root.js";
+} from "../../../runs/lifecycle/owned-temp-root.js";
 
 describe("owned benchmark temp roots", () => {
   it("removes an owned root after success", async () => {

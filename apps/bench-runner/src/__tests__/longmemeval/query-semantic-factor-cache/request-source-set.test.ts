@@ -8,9 +8,9 @@ import {
   bindQuerySemanticFactorCacheFileToRequest,
   createQuerySemanticFactorCache,
   writeQuerySemanticFactorCache
-} from "../../../bench/query-factors/query-semantic-factor-cache.js";
+} from "../../../runs/query-factors/query-semantic-factor-cache.js";
 import { resolveQueryCacheRequestSourceTexts } from
-  "../../../bench/query-factors/cache/source-set.js";
+  "../../../runs/query-factors/cache/source-set.js";
 
 const SOURCE = "What did I buy?";
 const PROFILE = "provider-default-v1" as const;

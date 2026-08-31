@@ -4,7 +4,7 @@ import {
   createLongMemEvalSelectionContractIdentity,
   type KpiPayload
 } from "@do-soul/alaya-eval";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 
 export function buildMockQuestion(
   id: string,

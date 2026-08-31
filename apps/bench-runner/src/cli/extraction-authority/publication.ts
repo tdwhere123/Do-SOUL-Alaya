@@ -1,20 +1,20 @@
 import {
   inspectExtractionAuthority,
   type ExtractionAuthorityInspection
-} from "../../bench/extraction/authority/inspection.js";
+} from "../../runs/extraction/authority/inspection.js";
 import {
   writeExtractionAuthorityReceipt,
   writeExtractionAuthorityReceiptExclusive,
   type ExtractionAuthorityReceipt
-} from "../../bench/extraction/authority/receipt.js";
+} from "../../runs/extraction/authority/receipt.js";
 import {
   assertExtractionTargetSelectionReceipt,
   type ExtractionTargetSelectionReceipt
-} from "../../bench/extraction/authority/target-selection/receipt.js";
+} from "../../runs/extraction/authority/target-selection/receipt.js";
 import {
   acquireExtractionCacheWriteLease,
   withExtractionCacheWriteLease
-} from "../../bench/extraction/fill/manifest/fill-root-guard.js";
+} from "../../runs/extraction/fill/manifest/fill-root-guard.js";
 import {
   persistContinuationAuthority,
   type AuthorityContinuationDependencies,

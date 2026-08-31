@@ -3,20 +3,20 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compareF0F2VsCachedF3 } from
-  "../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
+  "../../../diagnostics/stage-attribution/diagnostic-100q.js";
 import { DIAGNOSTIC_100Q_KPI_PROMOTION } from
-  "../../../bench/diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
+  "../../../diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
 import { evaluateCanaryPolarityMatrix } from
-  "../../../bench/diagnostics/stage-attribution/exposure/canary-polarity-matrix.js";
+  "../../../diagnostics/stage-attribution/exposure/canary-polarity-matrix.js";
 import {
   CANARY_Q1,
   CANARY_Q2,
   CANARY_Q3
-} from "../../../bench/diagnostics/stage-attribution/exposure/canary-ids.js";
+} from "../../../diagnostics/stage-attribution/exposure/canary-ids.js";
 import { evaluateSupersededAllQuestionRateGate } from
   "./superseded-rate-gate.js";
 import { readDiagnostic100QComparisonArtifact } from
-  "../../../bench/diagnostics/stage-attribution/exposure/comparison-artifact.js";
+  "../../../diagnostics/stage-attribution/exposure/comparison-artifact.js";
 import { exposure } from "./phase/exposure-receipt-fixture.js";
 import {
   liveShapedCanaryReceipts,

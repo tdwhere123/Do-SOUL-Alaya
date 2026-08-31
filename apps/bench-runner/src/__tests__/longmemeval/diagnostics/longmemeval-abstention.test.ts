@@ -4,19 +4,19 @@ import {
   isAbstentionQuestionId,
   resolvePremiseInvalid,
   scoreAbstentionQuestion
-} from "../../../bench/diagnostics/abstention.js";
+} from "../../../diagnostics/abstention.js";
 import {
   ABSTENTION_FUSED_MARGIN_SCALE,
   computeAbstentionConfidenceScore
-} from "../../../bench/diagnostics/abstention-confidence.js";
+} from "../../../diagnostics/abstention-confidence.js";
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 import {
   buildLongMemEvalSidecarKey,
   resolveLongMemEvalHitVerdict
-} from "../../../longmemeval/runner.js";
+} from "../../../datasets/longmemeval/runner.js";
 
 function deliveredResult(
   rank: number,

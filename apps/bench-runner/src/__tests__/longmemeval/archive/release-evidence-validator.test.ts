@@ -8,9 +8,9 @@ import {
   buildFullLongMemEvalPayload,
   selectionContractForRows
 } from "../../../../../../packages/eval/src/__tests__/history/history-fixture.js";
-import { summarizeProviderStates } from "../../../bench/diagnostics/diagnostics-question.js";
-import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics/schema/diagnostics-types.js";
-import { validateLongMemEvalReleaseDiagnostics } from "../../../bench/diagnostics/release-evidence-validator.js";
+import { summarizeProviderStates } from "../../../diagnostics/diagnostics-question.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../diagnostics/schema/diagnostics-types.js";
+import { validateLongMemEvalReleaseDiagnostics } from "../../../diagnostics/release-evidence-validator.js";
 import { promotionMeasurementDiagnostic } from
   "../recall-eval/specialized-answerable-recall-fixture.js";
 

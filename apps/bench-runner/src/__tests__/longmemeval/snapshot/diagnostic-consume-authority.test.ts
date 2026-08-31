@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import type { LongMemEvalSnapshotManifest } from
-  "../../../bench/snapshot/materialize.js";
+  "../../../runs/snapshot/materialize.js";
 import { makeShardProvenance } from "../runner/runner-concurrency-fixture.js";
 import {
   currentCanonicalQuestions as questions,
@@ -15,7 +15,7 @@ import {
 
 const roots: string[] = [];
 
-vi.mock("../../../longmemeval/ingestion/fetch.js", () => ({
+vi.mock("../../../datasets/longmemeval/ingestion/fetch.js", () => ({
   loadDatasetWithIdentity: vi.fn(async () => ({
     questions,
     sha256: makeShardProvenance(0, 1).dataset_sha256!,
@@ -24,14 +24,14 @@ vi.mock("../../../longmemeval/ingestion/fetch.js", () => ({
     promotionAuthority: {}
   }))
 }));
-vi.mock("../../../bench/snapshot/integrity.js", async (loadOriginal) => ({
-  ...await loadOriginal<typeof import("../../../bench/snapshot/integrity.js")>(),
+vi.mock("../../../runs/snapshot/integrity.js", async (loadOriginal) => ({
+  ...await loadOriginal<typeof import("../../../runs/snapshot/integrity.js")>(),
   verifySnapshotArtifactIntegrity: vi.fn(async () => undefined)
 }));
-vi.mock("../../../bench/snapshot/substrate-binding.js", () => ({
+vi.mock("../../../runs/snapshot/substrate-binding.js", () => ({
   assertSnapshotDatasetSubstrateIdentity: vi.fn()
 }));
-vi.mock("../../../bench/snapshot/seed-ledger/seed-ledger-binding.js", () => ({
+vi.mock("../../../runs/snapshot/seed-ledger/seed-ledger-binding.js", () => ({
   assertSnapshotSeedLedgerBinding: vi.fn()
 }));
 
@@ -105,7 +105,7 @@ describe("diagnostic snapshot consume authority", () => {
 });
 
 async function loadAuthority() {
-  return import("../../../bench/snapshot/current/current-substrate-authority.js");
+  return import("../../../runs/snapshot/current/current-substrate-authority.js");
 }
 
 async function consumeInput(manifest: LongMemEvalSnapshotManifest) {

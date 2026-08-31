@@ -2,21 +2,21 @@ import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { LongMemEvalQuestion } from
-  "../../../longmemeval/ingestion/dataset.js";
+  "../../../datasets/longmemeval/ingestion/dataset.js";
 import type { BenchSignalExtractor } from
-  "../../../bench/compile-seed.js";
+  "../../../runs/compile-seed.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
-  "../../../bench/extraction/authority/inspection.js";
+  "../../../runs/extraction/authority/inspection.js";
 import { createExtractionRepairScope } from
-  "../../../bench/extraction/authority/repair/repair-scope.js";
+  "../../../runs/extraction/authority/repair/repair-scope.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../../bench/extraction/authority/receipt-limits.js";
+  "../../../runs/extraction/authority/receipt-limits.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../bench/extraction/authority/receipt.js";
+} from "../../../runs/extraction/authority/receipt.js";
 import { runExtractionFill } from
-  "../../../bench/extraction/extraction-fill.js";
+  "../../../runs/extraction/extraction-fill.js";
 import {
   buildGroundedSignalResponse,
   buildAuthorityQuestion as buildExtractionFillQuestion,

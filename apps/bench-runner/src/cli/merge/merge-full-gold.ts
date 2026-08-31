@@ -1,7 +1,7 @@
 import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
-import type { LongMemEvalQuestionDiagnostic } from "../../bench/diagnostics.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../diagnostics/diagnostics.js";
 import { buildLongMemEvalDetailedGoldCoverage } from
-  "../../bench/diagnostics/diagnostics-full-gold-coverage.js";
+  "../../diagnostics/diagnostics-full-gold-coverage.js";
 
 export function buildMergedFullGoldCoverage(
   questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[],

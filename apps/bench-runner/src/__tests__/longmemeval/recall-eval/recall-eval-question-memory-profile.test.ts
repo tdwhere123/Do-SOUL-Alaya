@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecallEvalOneQuestionInput } from
-  "../../../bench/lifecycle/recall-eval/question/recall-eval-question.js";
+  "../../../runs/lifecycle/recall-eval/question/recall-eval-question.js";
 
 const mocks = vi.hoisted(() => ({
   warm: vi.fn(),
@@ -11,10 +11,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock(
-  "../../../bench/provenance/embedding/embedding-cache-warmup.js",
+  "../../../runs/provenance/embedding/embedding-cache-warmup.js",
   () => ({ warmLongMemEvalEmbeddingCaches: mocks.warm })
 );
-vi.mock("../../../longmemeval/runner.js", () => ({
+vi.mock("../../../datasets/longmemeval/runner.js", () => ({
   buildLongMemEvalSidecarKey: vi.fn(() => "key"),
   deriveLongMemEvalGoldEvidenceIds: vi.fn(() => []),
   deriveLongMemEvalGoldMemoryIds: vi.fn(() => []),
@@ -24,29 +24,29 @@ vi.mock("../../../longmemeval/runner.js", () => ({
   })),
   runLongMemEvalRecallCycle: mocks.recall
 }));
-vi.mock("../../../bench/diagnostics.js", () => ({
+vi.mock("../../../diagnostics/diagnostics.js", () => ({
   buildQuestionDiagnostic: vi.fn(() => ({
     delivered_results: [], candidates: [], is_abstention: false
   }))
 }));
-vi.mock("../../../bench/diagnostics/diagnostics-measurement-axes.js", () => ({
+vi.mock("../../../diagnostics/diagnostics-measurement-axes.js", () => ({
   attachQuestionMeasurementAxes: vi.fn((diagnostic) => diagnostic)
 }));
-vi.mock("../../../bench/diagnostics/gold-object-identities.js", () => ({
+vi.mock("../../../diagnostics/gold-object-identities.js", () => ({
   buildGoldObjectIdentities: vi.fn(() => [])
 }));
-vi.mock("../../../bench/provenance/recall-eval/recall-eval-pool-dump.js", () => ({
+vi.mock("../../../runs/provenance/recall-eval/recall-eval-pool-dump.js", () => ({
   writeRecallEvalPoolDump: vi.fn()
 }));
-vi.mock("../../../bench/qa/recall-token-economy.js", () => ({
+vi.mock("../../../runs/qa/recall-token-economy.js", () => ({
   extractRecallTokenEconomy: vi.fn(() => null)
 }));
-vi.mock("../../../longmemeval/runner/runner-helpers.js", () => ({
+vi.mock("../../../datasets/longmemeval/runner/runner-helpers.js", () => ({
   deriveLongMemEvalMemoryObjectIds: vi.fn(() => [])
 }));
 
 import { recallEvalOneQuestion } from
-  "../../../bench/lifecycle/recall-eval/question/recall-eval-question.js";
+  "../../../runs/lifecycle/recall-eval/question/recall-eval-question.js";
 
 describe("recall-eval question memory profile wiring", () => {
   beforeEach(() => {

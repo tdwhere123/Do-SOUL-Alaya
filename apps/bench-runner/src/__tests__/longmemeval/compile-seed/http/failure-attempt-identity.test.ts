@@ -4,7 +4,7 @@ import { safeProviderIdentityToken } from "@do-soul/alaya-engine-gateway";
 import {
   markGardenHttpFailure,
   toBenchTransportFailureAttempt
-} from "../../../../bench/compile-seed/http/garden-http-failure-attempt.js";
+} from "../../../../runs/compile-seed/http/garden-http-failure-attempt.js";
 
 describe("garden HTTP failure attempt identity", () => {
   it("reuses the provider identity allowlist for Error.name and Error.code", () => {

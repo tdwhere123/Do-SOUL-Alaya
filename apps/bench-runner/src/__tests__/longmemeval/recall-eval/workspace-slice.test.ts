@@ -17,7 +17,7 @@ import {
   loadSliceIntoOpenDatabase,
   packedWorkingDbPath,
   workingAlayaDbPath
-} from "../../../bench/snapshot/recall-eval/workspace-slice/index.js";
+} from "../../../runs/snapshot/recall-eval/workspace-slice/index.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import {
   createPackedTwoWorkspaceDb,

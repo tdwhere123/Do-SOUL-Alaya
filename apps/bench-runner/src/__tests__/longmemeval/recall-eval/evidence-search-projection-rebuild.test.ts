@@ -10,9 +10,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   EvidenceSearchProjectionRebuildError,
   rebuildEvidenceSearchProjectionsOnWorkingCopy
-} from "../../../bench/snapshot/recall-eval/evidence-search-projection-rebuild.js";
+} from "../../../runs/snapshot/recall-eval/evidence-search-projection-rebuild.js";
 import { prepareRecallEvalRunContext } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-run-context.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-run-context.js";
 import {
   cleanupProjectionRebuildFixtures,
   createSourceFixture,

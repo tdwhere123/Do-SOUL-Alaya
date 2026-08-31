@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { buildTreatmentExposureReceipts } from
-  "../../../../../bench/diagnostics/stage-attribution/exposure/build-receipts.js";
+  "../../../../../diagnostics/stage-attribution/exposure/build-receipts.js";
 import {
   assertTreatmentExposureReceipt,
   sealTreatmentExposureReceipt
-} from "../../../../../bench/diagnostics/stage-attribution/exposure/contract.js";
+} from "../../../../../diagnostics/stage-attribution/exposure/contract.js";
 import type { LongMemEvalQuestionDiagnostic } from
-  "../../../../../bench/diagnostics/schema/diagnostics-types.js";
+  "../../../../../diagnostics/schema/diagnostics-types.js";
 import type { QuestionStageRow } from
-  "../../../../../bench/diagnostics/stage-attribution/types.js";
+  "../../../../../diagnostics/stage-attribution/types.js";
 import { controlCanaryDiagnostics, passingTreatmentCanaryDiagnostics } from
   "../../../diagnostic-loop/canary-arm-diagnostics.js";
 

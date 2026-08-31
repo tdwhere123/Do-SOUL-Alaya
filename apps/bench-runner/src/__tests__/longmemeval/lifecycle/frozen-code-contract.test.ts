@@ -1,7 +1,7 @@
 import { readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveFrozenCodeIdentity } from "../../../bench/provenance/contract/frozen-code-contract.js";
+import { resolveFrozenCodeIdentity } from "../../../runs/provenance/contract/frozen-code-contract.js";
 import {
   createFrozenCodeFixtureHarness,
   git,

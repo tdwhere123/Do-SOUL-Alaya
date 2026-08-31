@@ -1,16 +1,16 @@
 import process from "node:process";
-import { ExtractionFillTaskError } from "../../bench/extraction/fill/fill-pool.js";
-import type { runExtractionFill } from "../../bench/extraction/extraction-fill.js";
+import { ExtractionFillTaskError } from "../../runs/extraction/fill/fill-pool.js";
+import type { runExtractionFill } from "../../runs/extraction/extraction-fill.js";
 import type { ParsedFlags } from "../cli-options.js";
-import type { readR3SpendApproval } from "../../longmemeval/promotion/r3-spend-approval.js";
+import type { readR3SpendApproval } from "../../datasets/longmemeval/promotion/r3-spend-approval.js";
 import { pct } from "../result-format.js";
-import { countTerminalProviderFailures } from "../../bench/extraction/fill/fill-stats.js";
+import { countTerminalProviderFailures } from "../../runs/extraction/fill/fill-stats.js";
 import {
   ExtractionFillInterruptedError,
   withExtractionFillSignalScope,
   type ExtractionFillSignalSource
 } from "./signal-scope.js";
-import type { ExtractionFillResult } from "../../bench/extraction/extraction-fill.js";
+import type { ExtractionFillResult } from "../../runs/extraction/extraction-fill.js";
 
 export interface ExtractionFillCommandDependencies {
   readonly runExtractionFill: typeof runExtractionFill;

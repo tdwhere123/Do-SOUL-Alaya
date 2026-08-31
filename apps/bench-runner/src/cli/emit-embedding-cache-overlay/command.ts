@@ -1,6 +1,6 @@
 import process from "node:process";
 import { emitProductOverlayForSnapshot } from
-  "../../bench/snapshot/recall-eval/embedding-cache-overlay/product-emit.js";
+  "../../runs/snapshot/recall-eval/embedding-cache-overlay/product-emit.js";
 import {
   matchFlagToken,
   nextIndex,

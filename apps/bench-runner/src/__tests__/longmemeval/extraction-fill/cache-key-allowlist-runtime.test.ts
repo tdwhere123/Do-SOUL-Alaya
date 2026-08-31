@@ -3,35 +3,35 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
+import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import { computeExtractionTurnCacheKey } from
-  "../../../bench/compile-seed/compile-seed-cache.js";
+  "../../../runs/compile-seed/compile-seed-cache.js";
 import { extractionCacheManifestPath } from
-  "../../../bench/extraction/cache/extraction-cache-manifest.js";
+  "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../bench/extraction/authority/inspection.js";
+} from "../../../runs/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../bench/extraction/authority/receipt.js";
+} from "../../../runs/extraction/authority/receipt.js";
 import {
   createFreshRetiredSourceRebuildTargetSelectionRoot,
   readExtractionTargetSelectionReceipt,
   type ExtractionTargetSelectionReceipt,
   writeExtractionTargetSelectionReceipt
-} from "../../../bench/extraction/authority/target-selection/receipt.js";
+} from "../../../runs/extraction/authority/target-selection/receipt.js";
 import { digestExtractionTargetSelectionReceipt } from
-  "../../../bench/extraction/authority/target-selection/receipt-shape.js";
+  "../../../runs/extraction/authority/target-selection/receipt-shape.js";
 import { createExtractionCatalogRefillScope } from
-  "../../../bench/extraction/authority/catalog-refill/scope.js";
+  "../../../runs/extraction/authority/catalog-refill/scope.js";
 import { runExtractionFill } from
-  "../../../bench/extraction/extraction-fill.js";
+  "../../../runs/extraction/extraction-fill.js";
 import { inspectTurnContentKeySpace } from
-  "../../../bench/extraction/turn-contents.js";
+  "../../../runs/extraction/turn-contents.js";
 import type { LongMemEvalQuestion } from
-  "../../../longmemeval/ingestion/dataset.js";
+  "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   buildGroundedSignalResponse,
   buildAuthorityQuestion,

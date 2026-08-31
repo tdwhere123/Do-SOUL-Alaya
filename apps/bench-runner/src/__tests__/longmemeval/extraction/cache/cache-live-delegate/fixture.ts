@@ -5,9 +5,9 @@ import {
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import { createGardenHttpExtractor } from
-  "../../../../../bench/compile-seed.js";
+  "../../../../../runs/compile-seed.js";
 import { cacheFilePath, computeSourceTurnCacheKey } from
-  "../../../../../bench/compile-seed/compile-seed-cache.js";
+  "../../../../../runs/compile-seed/compile-seed-cache.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL
 } from "../../extraction-cache-test-fixture.js";

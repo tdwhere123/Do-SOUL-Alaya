@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveWorkspaceSliceSnapshotDigest } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-process/child-snapshot-digest.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-process/child-snapshot-digest.js";
 import { WORKSPACE_A, WORKSPACE_B } from "./workspace-slice-fixture.js";
 
 const DIGEST_A = `sha256:${"a".repeat(64)}`;

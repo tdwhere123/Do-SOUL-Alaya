@@ -26,7 +26,7 @@ import {
 } from
   "../../../../../../packages/core/src/__tests__/recall/fine-assessment-selection-fixtures.js";
 import { forEachSelectionBoundaryGzipRecord } from
-  "../../../bench/selection-replay/selection-boundary-artifact-reader.js";
+  "../../../runs/selection-replay/selection-boundary-artifact-reader.js";
 
 const { replayBoundary } = vi.hoisted(() => ({
   replayBoundary: vi.fn<
@@ -52,7 +52,7 @@ import {
   LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES,
   verifyLongMemEvalSelectionBoundaryArtifact,
   type LongMemEvalSelectionBoundarySpool
-} from "../../../bench/selection-replay/selection-boundary-spool.js";
+} from "../../../runs/selection-replay/selection-boundary-spool.js";
 
 const roots: string[] = [];
 const spools: LongMemEvalSelectionBoundarySpool[] = [];
@@ -133,7 +133,7 @@ describe("LongMemEval selection-boundary spool", () => {
     vi.doUnmock("@do-soul/alaya-core");
     vi.resetModules();
     const realSpoolModule = await import(
-      "../../../bench/selection-replay/selection-boundary-spool.js"
+      "../../../runs/selection-replay/selection-boundary-spool.js"
     );
     const spool = await realSpoolModule.createLongMemEvalSelectionBoundarySpool({
       env: { ALAYA_BENCH_SELECTION_REPLAY: "1" },
@@ -161,7 +161,7 @@ describe("LongMemEval selection-boundary spool", () => {
     vi.doUnmock("@do-soul/alaya-core");
     vi.resetModules();
     const realSpoolModule = await import(
-      "../../../bench/selection-replay/selection-boundary-spool.js"
+      "../../../runs/selection-replay/selection-boundary-spool.js"
     );
     const outputRoot = await temporaryRoot();
     const artifactPath = join(outputRoot, "selection-boundaries-unicode.ndjson.gz");
@@ -192,7 +192,7 @@ describe("LongMemEval selection-boundary spool", () => {
     vi.doUnmock("@do-soul/alaya-core");
     vi.resetModules();
     const realSpoolModule = await import(
-      "../../../bench/selection-replay/selection-boundary-spool.js"
+      "../../../runs/selection-replay/selection-boundary-spool.js"
     );
     const spool = await realSpoolModule.createLongMemEvalSelectionBoundarySpool({
       env: { ALAYA_BENCH_SELECTION_REPLAY: "1" },

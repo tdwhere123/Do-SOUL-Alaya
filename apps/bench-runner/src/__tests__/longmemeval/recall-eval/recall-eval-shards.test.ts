@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { KpiPayload } from "@do-soul/alaya-eval";
-import type { LongMemEvalSnapshotManifest } from "../../../bench/snapshot/materialize.js";
+import type { LongMemEvalSnapshotManifest } from "../../../runs/snapshot/materialize.js";
 import { buildMergedLongMemEvalPayload } from "../../../cli/merge/command/merge-command-shards.js";
 import {
   makeRangeDiagnostics,
@@ -13,22 +13,22 @@ import { writeShardRoot } from "../../cli/merge/cli-merge-validations-fixture.js
 import {
   REQUIRE_SLICE_REUSE_ENV,
   SEALED_SLICE_RESTORE_ENV
-} from "../../../bench/snapshot/recall-eval/workspace-slice/index.js";
+} from "../../../runs/snapshot/recall-eval/workspace-slice/index.js";
 import {
   assertExactRecallEvalShardCoverage,
   buildMergedPerQuestionDelivered,
   resolveRecallEvalShardWindow,
   runRecallEvalSharded,
   validateRecallEvalConcurrency
-} from "../../../bench/lifecycle/recall-eval/recall-eval-shards.js";
+} from "../../../runs/lifecycle/recall-eval/recall-eval-shards.js";
 import { buildLongMemEvalWorkerShardPlans } from
-  "../../../longmemeval/runner/runner-concurrency.js";
+  "../../../datasets/longmemeval/runner/runner-concurrency.js";
 import {
   buildRecallEvalWorkerCliArgs,
   buildRecallEvalWorkerEnv
-} from "../../../bench/lifecycle/recall-eval/recall-eval-shards-worker.js";
+} from "../../../runs/lifecycle/recall-eval/recall-eval-shards-worker.js";
 import type { LongMemEvalWorkerSpawnOptions } from
-  "../../../longmemeval/runner/runner-concurrency-worker.js";
+  "../../../datasets/longmemeval/runner/runner-concurrency-worker.js";
 
 const PLANTED_HITS = [true, false, true, false] as const;
 

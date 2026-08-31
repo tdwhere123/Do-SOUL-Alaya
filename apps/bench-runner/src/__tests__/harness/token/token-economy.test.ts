@@ -361,7 +361,7 @@ describe("assertBenchTokenEconomyContract", () => {
  * persists the redacted EventLog summary. This pins the EventLog-summary
  * contract end to end: fold -> aggregate -> contract -> token_economy +
  * saved ratio.
- * see also: apps/bench-runner/src/locomo/runner.ts runOneConversation
+ * see also: apps/bench-runner/src/datasets/locomo/runner.ts runOneConversation
  */
 describe("LoCoMo proposeMemory seed -> kpi token economy", () => {
   function locomoSeedRow(charCount: number): TokenEconomyEventRow {

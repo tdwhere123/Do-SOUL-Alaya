@@ -1,8 +1,8 @@
-import { createGardenHttpExtractor } from "../../../bench/compile-seed.js";
+import { createGardenHttpExtractor } from "../../../runs/compile-seed.js";
 import type {
   BenchTransportFailureAttempt,
   CompileSeedExtractionConfig
-} from "../../../bench/compile-seed/compile-seed-types.js";
+} from "../../../runs/compile-seed/compile-seed-types.js";
 
 export const HTTP_CONFIG: CompileSeedExtractionConfig = {
   providerUrl: "https://provider.invalid/v1",

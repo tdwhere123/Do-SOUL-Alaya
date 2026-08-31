@@ -1,0 +1,484 @@
+import type {
+  CandidateDiagnostic,
+  DiagnosticAxisContributions,
+  DiagnosticAxisRanks,
+  DiagnosticCandidateAnswerFeatures,
+  DiagnosticDeepHeadTrace,
+  CandidateIdentityObservation,
+  DiagnosticFloodFuelCoverage,
+  DiagnosticFloodPotential,
+  DiagnosticScoreFactors,
+  ReadCandidateDiagnosticsResult
+} from "../diagnostics/schema/diagnostics-types.js";
+import {
+  DiagnosticCandidateAnswerFeaturesSchema,
+  DiagnosticFloodPotentialSchema,
+  DiagnosticEvidenceProjectionMatchesSchema,
+  DiagnosticAdmissionAttemptsSchema,
+  DiagnosticSelectGammaDecisionSchema,
+  DiagnosticQueryProbesSchema
+} from "../diagnostics/schema/diagnostics-schema.js";
+import { RecallDeepHeadTraceSchema } from "../harness/recall/answer-trace-schema.js";
+import { readFineAssessmentPrunedClosure } from "./diagnostics-fine-pruned-reader.js";
+import { isPreferredCandidateManifestation } from "../diagnostics/candidate-manifestation-order.js";
+import {
+  buildObjectIdentityKey,
+  readDiagnosticCandidateIdentity
+} from "../diagnostics/candidate-identity.js";
+import type { DiagnosticCandidateIdentityMode } from "../diagnostics/candidate-identity.js";
+import { readCandidateSelectorObservation } from
+  "./candidate-selector-observation-reader.js";
+import { CandidateActivationReceiptSchema } from "../harness/recall/answer-trace/semantic-activation-schema.js";
+import { readDiagnosticLabelArray } from
+  "./candidate-readers/source-label-reader.js";
+import { canonicalCandidatePoolComplete, isCanonicalCandidateRow } from
+  "./candidate-readers/canonical-candidate-row.js";
+import { readDiagnosticCandidateSource } from
+  "./candidate-readers/candidate-source.js";
+export { buildObjectIdentityKey } from "../diagnostics/candidate-identity.js";
+
+const DELIVERY_STAGE_ACTIONS = new Set(["noop", "kept", "promoted", "displaced"]);
+
+interface FusionBreakdownDiagnostic {
+  readonly candidateKey: string;
+  readonly objectId: string;
+  readonly objectKind: string;
+  readonly perAxisRank: DiagnosticAxisRanks | null;
+  readonly perAxisContribution: DiagnosticAxisContributions | null;
+  readonly floodPotential: DiagnosticFloodPotential | null;
+  readonly floodFuelCoverage: DiagnosticFloodFuelCoverage | null;
+}
+
+export function readCandidates(
+  diagnostics: Readonly<Record<string, unknown>>
+): ReadCandidateDiagnosticsResult {
+  const source = readDiagnosticCandidateSource(diagnostics);
+  const fusionBreakdown = readFusionBreakdownDiagnostics(
+    diagnostics.fusion_breakdown
+  );
+  const byObjectId = new Map<string, CandidateDiagnostic>();
+  const byObjectIdentity = new Map<string, CandidateDiagnostic>();
+  const byCandidateKey = new Map<string, CandidateDiagnostic>();
+  const identityObservations: CandidateIdentityObservation[] = [];
+  let parsedCandidateCount = 0;
+  for (const raw of source?.rows ?? []) {
+    const parsed = readCandidateRow(raw, fusionBreakdown.byCandidateKey, source!.mode);
+    if (parsed === null) continue;
+    parsedCandidateCount += 1;
+    identityObservations.push(parsed.observation);
+    indexCandidateDiagnostic(
+      parsed.candidate,
+      byCandidateKey,
+      byObjectIdentity,
+      byObjectId
+    );
+  }
+  const sourceCandidateKeys = new Set(
+    identityObservations.map((item) => item.sourceCandidateKey)
+  );
+  const scoredComplete = source !== null && parsedCandidateCount === source.rows.length &&
+    byCandidateKey.size === parsedCandidateCount &&
+    sourceCandidateKeys.size === parsedCandidateCount;
+  const pruned = readFineAssessmentPrunedClosure(
+    diagnostics,
+    new Set(byCandidateKey.keys())
+  );
+  const captureComplete = canonicalCandidatePoolComplete({
+    receipt: diagnostics.capture_receipt,
+    rows: source?.rows,
+    candidateKeys: byCandidateKey.keys()
+  });
+  return {
+    candidatePoolComplete: pruned.complete && (captureComplete ?? scoredComplete),
+    candidatePoolCount: pruned.candidatePoolCount,
+    finePrunedCount: pruned.finePrunedCount,
+    fineAssessmentPrunedCandidates: pruned.candidates,
+    fineAssessmentPrunedByObjectIdentity: pruned.byObjectIdentity,
+    fineAssessmentPrunedObjectIds: pruned.objectIds,
+    byObjectId: Object.freeze(byObjectId),
+    byObjectIdentity: Object.freeze(byObjectIdentity),
+    byCandidateKey: Object.freeze(byCandidateKey),
+    identityObservations: Object.freeze(identityObservations)
+  };
+}
+
+function readCandidateRow(
+  raw: unknown,
+  fusionByCandidateKey: ReadonlyMap<string, FusionBreakdownDiagnostic>,
+  mode: DiagnosticCandidateIdentityMode
+): Readonly<{
+  readonly candidate: CandidateDiagnostic;
+  readonly observation: CandidateIdentityObservation;
+}> | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const record = raw as Readonly<Record<string, unknown>>;
+  if (record.ranking_authority === "prefix_sk" && !isCanonicalCandidateRow(record)) {
+    return null;
+  }
+  const identity = readDiagnosticCandidateIdentity(record, mode);
+  if (identity === null) return null;
+  const fusion = matchingFusionBreakdown(
+    fusionByCandidateKey.get(identity.sourceCandidateKey) ??
+      fusionByCandidateKey.get(identity.candidateKey),
+    identity.objectId,
+    identity.objectKind
+  );
+  const answerFeatures = readCandidateAnswerFeatures(record.answer_features);
+  if (record.answer_features != null && answerFeatures === null) return null;
+  const deepHeadTrace = readDeepHeadTrace(record.deep_head_trace);
+  if (record.deep_head_trace != null && deepHeadTrace === null) return null;
+  const coverageMarginalGain = readNumber(record.coverage_marginal_gain);
+  if (record.coverage_marginal_gain != null && (
+    coverageMarginalGain === null || coverageMarginalGain < 0
+  )) return null;
+  const selectorObservation = readCandidateSelectorObservation(record.selector_observation);
+  if (record.selector_observation != null && selectorObservation === null) return null;
+  const pathSuppressionScore = readNumber(record.path_suppression_score);
+  if (record.path_suppression_score != null && pathSuppressionScore === null) return null;
+  const parsedActivation = record.semantic_activation == null
+    ? null
+    : CandidateActivationReceiptSchema.safeParse(record.semantic_activation);
+  if (parsedActivation !== null && !parsedActivation.success) return null;
+  const admissionAttempts = DiagnosticAdmissionAttemptsSchema.safeParse(
+    record.admission_attempts ?? []
+  );
+  if (!admissionAttempts.success) return null;
+  const selectGammaDecision = record.select_gamma_decision == null
+    ? null
+    : DiagnosticSelectGammaDecisionSchema.safeParse(record.select_gamma_decision);
+  if (selectGammaDecision !== null && !selectGammaDecision.success) return null;
+  const projectionMatches = DiagnosticEvidenceProjectionMatchesSchema.safeParse(
+    record.evidence_projection_matches ?? []
+  );
+  if (!projectionMatches.success) return null;
+  const candidate: CandidateDiagnostic = {
+    candidateKey: identity.candidateKey,
+    objectId: identity.objectId,
+    objectKind: identity.objectKind,
+    ...readCandidateBasics(record),
+    originPlane: identity.originPlane,
+    admissionAttempts: admissionAttempts.data,
+    selectGammaDecision: selectGammaDecision?.data,
+    evidenceProjectionMatches: projectionMatches.data,
+    ...readCandidateScoring(record, fusion),
+    ...readCandidateProvenance(record),
+    answerFeatures,
+    deepHeadTrace,
+    coverageMarginalGain,
+    selectorObservation,
+    pathSuppressionScore,
+    semanticActivation: parsedActivation?.data ?? null,
+    ...readCandidateDelivery(record)
+  };
+  return {
+    candidate,
+    observation: {
+      candidate,
+      sourceCandidateKey: identity.sourceCandidateKey,
+      legacy: identity.legacy
+    }
+  };
+}
+
+function readCandidateBasics(record: Readonly<Record<string, unknown>>) {
+  return {
+    createdAt: readString(record.created_at),
+    facetOverlap: readNumber(record.facet_overlap),
+    dimension: readString(record.dimension)
+  };
+}
+
+function readCandidateScoring(
+  record: Readonly<Record<string, unknown>>,
+  fusion: FusionBreakdownDiagnostic | undefined
+) {
+  return {
+    preBudgetRank:
+      readNumber(record.pre_budget_rank) ?? readNumber(record.internal_rank),
+    selectionOrder: readNumber(record.selection_order),
+    finalRank: readNumber(record.final_rank) ?? readNumber(record.rank),
+    fusedRank: readNumber(record.fused_rank),
+    fusedScore: readNumber(record.fused_score),
+    answerRelevanceScore: readNumber(record.answer_relevance_score),
+    answerRelevanceRank: readNumber(record.answer_relevance_rank),
+    perStreamRank: readNullableNumberRecord(record.per_stream_rank),
+    fusedRankContributionPerStream:
+      readNumberRecord(record.fused_rank_contribution_per_stream),
+    perAxisRank:
+      readNullableNumberRecord(record.per_axis_rank) ?? fusion?.perAxisRank ?? null,
+    perAxisContribution:
+      readNumberRecord(record.per_axis_contribution) ?? fusion?.perAxisContribution ?? null,
+    floodPotential:
+      readFloodPotential(record.flood_potential) ?? fusion?.floodPotential ?? null,
+    floodFuelCoverage:
+      readFloodFuelCoverage(record.flood_fuel_coverage) ?? fusion?.floodFuelCoverage ?? null
+  };
+}
+
+function readCandidateProvenance(record: Readonly<Record<string, unknown>>) {
+  return {
+    planeFirstAdmitted: readString(record.plane_first_admitted),
+    planeWinningAdmission:
+      readString(record.plane_winning_admission) ??
+      lastString(readStringArray(record.admission_planes)),
+    sourcePlanes:
+      readDiagnosticLabelArray(record.source_planes) ??
+      readDiagnosticLabelArray(record.planes) ??
+      readDiagnosticLabelArray(record.admission_planes) ??
+      [],
+    lexicalRank: readNumber(record.lexical_rank),
+    structuralScore: readNumber(record.structural_score),
+    scoreFactors: readScoreFactors(record.score_factors),
+    sourceChannels: readDiagnosticLabelArray(record.source_channels) ?? [],
+    budgetDropReason:
+      readString(record.budget_drop_reason) ??
+      readString(record.drop_reason) ??
+      readString(record.dropped_reason)
+  };
+}
+
+function readCandidateDelivery(record: Readonly<Record<string, unknown>>) {
+  return {
+    rankAfterFusion: readNumber(record.rank_after_fusion),
+    rankAfterFeatureRerank: readNumber(record.rank_after_feature_rerank),
+    rankAfterLexicalPriority: readNumber(record.rank_after_lexical_priority),
+    rankAfterSynthesisReserve: readNumber(record.rank_after_synthesis_reserve),
+    rankAfterStructuralReserve: readNumber(record.rank_after_structural_reserve),
+    rankAfterCoverageSelector: readNumber(record.rank_after_coverage_selector),
+    rankAfterSessionCoverage: readNumber(record.rank_after_session_coverage),
+    coverageSelectorAction: readDeliveryStageAction(record.coverage_selector_action),
+    sessionCoverageAction: readDeliveryStageAction(record.session_coverage_action),
+    sessionKey: readString(record.session_key),
+    sourceCohortKey: readString(record.source_cohort_key),
+    reservedBy: readString(record.reserved_by)
+  };
+}
+
+function indexCandidateDiagnostic(
+  candidate: CandidateDiagnostic,
+  byCandidateKey: Map<string, CandidateDiagnostic>,
+  byObjectIdentity: Map<string, CandidateDiagnostic>,
+  byObjectId: Map<string, CandidateDiagnostic>
+): void {
+  const objectIdentityKey = buildObjectIdentityKey(candidate.objectKind, candidate.objectId);
+  const existingByKey = byCandidateKey.get(candidate.candidateKey);
+  if (existingByKey === undefined ||
+      isPreferredCandidateManifestation(candidate, existingByKey)) {
+    byCandidateKey.set(candidate.candidateKey, candidate);
+  }
+  const existingByIdentity = byObjectIdentity.get(objectIdentityKey);
+  if (
+    existingByIdentity === undefined ||
+    isPreferredCandidateManifestation(candidate, existingByIdentity)
+  ) {
+    byObjectIdentity.set(objectIdentityKey, candidate);
+  }
+  const existing = byObjectId.get(candidate.objectId);
+  if (existing === undefined || isPreferredCandidateManifestation(candidate, existing)) {
+    byObjectId.set(candidate.objectId, candidate);
+  }
+}
+
+function matchingFusionBreakdown(
+  fusion: FusionBreakdownDiagnostic | undefined,
+  objectId: string,
+  objectKind: string
+): FusionBreakdownDiagnostic | undefined {
+  if (
+    fusion === undefined ||
+    fusion.objectId !== objectId ||
+    fusion.objectKind !== objectKind
+  ) {
+    return undefined;
+  }
+  return fusion;
+}
+
+function readFusionBreakdownDiagnostics(value: unknown): Readonly<{
+  readonly byCandidateKey: ReadonlyMap<string, FusionBreakdownDiagnostic>;
+}> {
+  const source = readArray(value) ?? [];
+  const byCandidateKey = new Map<string, FusionBreakdownDiagnostic>();
+  for (const raw of source) {
+    const record = readRecord(raw);
+    if (record === null) continue;
+    const candidateKey = readString(record.candidate_key);
+    const objectId = readString(record.object_id);
+    if (candidateKey === null || objectId === null) continue;
+    const objectKind = readString(record.object_kind) ?? "memory_entry";
+    const diagnostic: FusionBreakdownDiagnostic = {
+      candidateKey,
+      objectId,
+      objectKind,
+      perAxisRank: readNullableNumberRecord(record.per_axis_rank),
+      perAxisContribution: readNumberRecord(record.per_axis_contribution),
+      floodPotential: readFloodPotential(record.flood_potential),
+      floodFuelCoverage: readFloodFuelCoverage(record.flood_fuel_coverage)
+    };
+    byCandidateKey.set(candidateKey, diagnostic);
+  }
+  return Object.freeze({
+    byCandidateKey: Object.freeze(byCandidateKey)
+  });
+}
+
+function readFloodPotential(value: unknown): DiagnosticFloodPotential | null {
+  const parsed = DiagnosticFloodPotentialSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readCandidateAnswerFeatures(value: unknown): DiagnosticCandidateAnswerFeatures | null {
+  if (value == null) return null;
+  const parsed = DiagnosticCandidateAnswerFeaturesSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readDeepHeadTrace(value: unknown): DiagnosticDeepHeadTrace | null {
+  if (value == null) return null;
+  const parsed = RecallDeepHeadTraceSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readFloodFuelCoverage(value: unknown): DiagnosticFloodFuelCoverage | null {
+  const record = readRecord(value);
+  if (record === null) return null;
+  const numeric = readRequiredNonNegativeIntegers(record, [
+    "candidates_total",
+    "cold_start_count",
+    "fuel_verified_count",
+    "slice_active_count",
+    "path_active_count",
+    "evidence_active_count"
+  ]);
+  if (numeric === null) return null;
+  return Object.freeze({
+    candidates_total: numeric.candidates_total,
+    cold_start_count: numeric.cold_start_count,
+    fuel_verified_count: numeric.fuel_verified_count,
+    slice_active_count: numeric.slice_active_count,
+    path_active_count: numeric.path_active_count,
+    evidence_active_count: numeric.evidence_active_count
+  });
+}
+
+function readRequiredNonNegativeIntegers<T extends string>(
+  record: Readonly<Record<string, unknown>>,
+  keys: readonly T[]
+): Readonly<Record<T, number>> | null {
+  const result = {} as Record<T, number>;
+  for (const key of keys) {
+    const value = record[key];
+    if (
+      typeof value !== "number" ||
+      !Number.isInteger(value) ||
+      value < 0
+    ) {
+      return null;
+    }
+    result[key] = value;
+  }
+  return Object.freeze(result);
+}
+
+function readRequiredNumbers<T extends string>(
+  record: Readonly<Record<string, unknown>>,
+  keys: readonly T[]
+): Readonly<Record<T, number>> | null {
+  const result = {} as Record<T, number>;
+  for (const key of keys) {
+    const value = readNumber(record[key]);
+    if (value === null) return null;
+    result[key] = value;
+  }
+  return Object.freeze(result);
+}
+
+function readDeliveryStageAction(
+  value: unknown
+): "noop" | "kept" | "promoted" | "displaced" | null {
+  const raw = readString(value);
+  if (raw === null || !DELIVERY_STAGE_ACTIONS.has(raw)) {
+    return null;
+  }
+  return raw as "noop" | "kept" | "promoted" | "displaced";
+}
+
+function readScoreFactors(value: unknown): DiagnosticScoreFactors | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Readonly<Record<string, unknown>>;
+  const result: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      result[key] = raw;
+      continue;
+    }
+    const nested = readNumberRecord(raw);
+    if (nested !== null) {
+      result[key] = nested;
+    }
+  }
+  return Object.keys(result).length === 0 ? null : Object.freeze(result);
+}
+
+export function readNumberRecord(value: unknown): Readonly<Record<string, number>> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Readonly<Record<string, unknown>>;
+  const result: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      result[key] = raw;
+    }
+  }
+  return Object.keys(result).length === 0 ? null : Object.freeze(result);
+}
+
+export function readDiagnosticQueryProbes(value: unknown) {
+  const parsed = DiagnosticQueryProbesSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readNullableNumberRecord(value: unknown): Readonly<Record<string, number | null>> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Readonly<Record<string, unknown>>;
+  const result: Record<string, number | null> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      result[key] = raw;
+    } else if (raw === null) {
+      result[key] = null;
+    }
+  }
+  return Object.keys(result).length === 0 ? null : Object.freeze(result);
+}
+
+export function readRecord(value: unknown): Readonly<Record<string, unknown>> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function readArray(value: unknown): readonly unknown[] | null {
+  return Array.isArray(value) ? value : null;
+}
+
+export function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+export function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export function readStringArray(value: unknown): readonly string[] | null {
+  if (!Array.isArray(value)) return null;
+  const strings = value.filter(
+    (item): item is string => typeof item === "string" && item.length > 0
+  );
+  return strings.length === value.length ? strings : null;
+}
+
+function lastString(values: readonly string[] | null): string | null {
+  if (values === null || values.length === 0) return null;
+  return values[values.length - 1] ?? null;
+}

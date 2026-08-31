@@ -11,8 +11,8 @@ import {
   type KpiPayload
 } from "./locomo-runner.test-support.js";
 import { readFile } from "node:fs/promises";
-import * as compileSeedModule from "../../bench/compile-seed.js";
-import { runLocomo } from "../../locomo/runner.js";
+import * as compileSeedModule from "../../runs/compile-seed.js";
+import { runLocomo } from "../../datasets/locomo/runner.js";
 
 describe("LoCoMo runner", () => {
 

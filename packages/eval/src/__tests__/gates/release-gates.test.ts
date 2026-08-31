@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import type { KpiPayload } from "../../schema/kpi-schema.js";
+import type { KpiPayload } from "../../contracts/kpi-schema.js";
 import {
   collectReleaseHardGates,
   releaseHardGateAllowsLatestPassing,

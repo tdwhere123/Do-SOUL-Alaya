@@ -5,7 +5,7 @@ import {
   type KpiPayload,
   type VerifiedLongMemEvalEvidenceContext
 } from "@do-soul/alaya-eval";
-import { fetchLongMemEval } from "../longmemeval/ingestion/fetch.js";
+import { fetchLongMemEval } from "../datasets/longmemeval/ingestion/fetch.js";
 import {
   isLongMemEvalSnapshotMaterializationResult,
   runLongMemEval,
@@ -13,14 +13,14 @@ import {
   type LongMemEvalRunOptions,
   type LongMemEvalRunResult,
   type LongMemEvalSnapshotMaterializationResult
-} from "../longmemeval/runner.js";
+} from "../datasets/longmemeval/runner.js";
 import {
   createGardenChatFn,
   resolveQaChatConfig,
   resolveQaJudgeChatConfig
-} from "../bench/qa/qa-chat.js";
-import { fetchLocomo } from "../locomo/fetch.js";
-import { runLocomo } from "../locomo/runner.js";
+} from "../runs/qa/qa-chat.js";
+import { fetchLocomo } from "../datasets/locomo/fetch.js";
+import { runLocomo } from "../datasets/locomo/runner.js";
 import { pct } from "./result-format.js";
 import { exitCodeForReleaseHardGates } from "./release-hard-gate-exit.js";
 import type { ParsedFlags } from "./cli-options.js";

@@ -5,17 +5,17 @@ import {
   OFFICIAL_API_SYSTEM_PROMPT,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
-import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
+import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   computeSystemPromptSha256,
   writeExtractionCacheManifest
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   createCachingSignalExtractor,
   type BenchSignalExtractor
-} from "../../../bench/compile-seed.js";
-import { cacheFilePath, computeSourceTurnCacheKey } from "../../../bench/compile-seed/compile-seed-cache.js";
+} from "../../../runs/compile-seed.js";
+import { cacheFilePath, computeSourceTurnCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
 
 import {
   buildExtractionFillQuestion as buildQuestion,

@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGardenHttpExtractor,
   type CompileSeedExtractionConfig
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import {
   resolveAttemptIdleTimeoutMs,
   withAttemptOutputTokenLimit
-} from "../../../bench/compile-seed/http/output-token-retry.js";
+} from "../../../runs/compile-seed/http/output-token-retry.js";
 
 const HTTP_CONFIG: CompileSeedExtractionConfig = {
   providerUrl: "https://example.test/v1",

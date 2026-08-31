@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
-import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
+import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
+import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import {
   buildAuthorityQuestion as question,
   buildExtractionFillQuestion,

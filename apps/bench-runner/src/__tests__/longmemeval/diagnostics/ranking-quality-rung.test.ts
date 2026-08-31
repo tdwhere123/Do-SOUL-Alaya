@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateRecallEvalGzipTailDegeneracy,
   scoreRecallEvalGzipRankingRung
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 import {
   PLANTED_A_ID,
   PLANTED_B_ID,

@@ -6,18 +6,18 @@ import {
   parseShardExtractionAuthorityReference,
   type LoadedGlobalExtractionAuthority,
   type ShardExtractionAuthorityReference
-} from "../../../bench/provenance/contract/extraction-authority-reference.js";
+} from "../../../runs/provenance/contract/extraction-authority-reference.js";
 import {
   isLongMemEvalRunProvenanceGateEligible,
   LongMemEvalRunProvenanceSchema,
   type LongMemEvalRunProvenance
-} from "../../../bench/provenance/run.js";
+} from "../../../runs/provenance/run.js";
 import {
   LongMemEvalSnapshotRunProvenanceSchema,
   type LongMemEvalSnapshotRunProvenance
-} from "../../../bench/snapshot/run-provenance.js";
+} from "../../../runs/snapshot/run-provenance.js";
 import { assertProductDefaultRunProvenancePolicy } from
-  "../../../longmemeval/promotion/verifiers/product-policy-verifier.js";
+  "../../../datasets/longmemeval/promotion/verifiers/product-policy-verifier.js";
 
 export type ShardArchivedRunProvenance =
   | LongMemEvalRunProvenance

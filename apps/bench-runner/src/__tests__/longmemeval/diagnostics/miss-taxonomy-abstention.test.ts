@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readQuestionMissTaxonomy } from
-  "../../../bench/diagnostics/miss/diagnostics-miss-taxonomy.js";
+  "../../../diagnostics/miss/diagnostics-miss-taxonomy.js";
 import {
   assembledQuestion,
   cohortOnlyQuestion,

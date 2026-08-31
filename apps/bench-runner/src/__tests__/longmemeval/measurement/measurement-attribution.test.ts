@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildBenchmarkMeasurementAttribution } from "../../../bench/measurement/attribution.js";
+import { buildBenchmarkMeasurementAttribution } from "../../../runs/measurement/attribution.js";
 
 describe("LongMemEval measurement attribution", () => {
   it("emits scoped eligibility while keeping dataset abstentions uncalibrated", () => {

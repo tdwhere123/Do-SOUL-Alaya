@@ -1,6 +1,6 @@
 import { digestRecallFieldIdentity } from "@do-soul/alaya-core";
 import { sealTreatmentExposureReceipt } from
-  "../../../bench/diagnostics/stage-attribution/exposure/contract.js";
+  "../../../diagnostics/stage-attribution/exposure/contract.js";
 import { notObservedPhaseLedger } from "../diagnostics/phase/not-observed-ledger.js";
 
 export function forgedExposureReceipt() {

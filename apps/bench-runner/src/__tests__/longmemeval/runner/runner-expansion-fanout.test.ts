@@ -4,7 +4,7 @@ import {
   buildCredentiallessLongMemEvalWorkerEnv,
   buildLongMemEvalWorkerCliArgs,
   validateLongMemEvalConcurrency
-} from "../../../longmemeval/runner/runner-concurrency.js";
+} from "../../../datasets/longmemeval/runner/runner-concurrency.js";
 
 describe("LongMemEval expansion fan-out contracts", () => {
   it.each([0, 33])("rejects process concurrency %s", (concurrency) => {

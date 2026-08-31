@@ -1,9 +1,9 @@
-import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics/schema/diagnostics-types.js";
-import { DiagnosticRecallResultSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
-import { buildGoldDiagnostics } from "../../../bench/diagnostics/gold-diagnostics.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../diagnostics/schema/diagnostics-types.js";
+import { DiagnosticRecallResultSchema } from "../../../diagnostics/schema/diagnostics-schema.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../diagnostics/schema/diagnostics-schema.js";
+import { buildGoldDiagnostics } from "../../../diagnostics/gold-diagnostics.js";
 import { buildObjectIdentityKey } from
-  "../../../bench/diagnostics/candidate-identity.js";
+  "../../../diagnostics/candidate-identity.js";
 import { cohort, streamedQuestion } from "../../cli/merge/cli-merge-evidence-fixture.js";
 
 export type MeasurementStatus =

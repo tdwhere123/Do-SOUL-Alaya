@@ -4,15 +4,15 @@ import {
   DIAGNOSTIC_500Q_CLOSED,
   compareF0F2VsCachedF3,
   mapQuestionToDiagnosticStage
-} from "../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
+} from "../../../diagnostics/stage-attribution/diagnostic-100q.js";
 import { CACHED_F3_EXPOSURE_POLICY } from
-  "../../../bench/diagnostics/stage-attribution/exposure/contract.js";
+  "../../../diagnostics/stage-attribution/exposure/contract.js";
 import { DIAGNOSTIC_100Q_KPI_PROMOTION } from
-  "../../../bench/diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
+  "../../../diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
 import { readDiagnostic100QComparisonArtifact } from
-  "../../../bench/diagnostics/stage-attribution/exposure/comparison-artifact.js";
+  "../../../diagnostics/stage-attribution/exposure/comparison-artifact.js";
 import { buildRecallMechanismSplit } from
-  "../../../bench/diagnostics/stage-attribution/mechanism/receipt.js";
+  "../../../diagnostics/stage-attribution/mechanism/receipt.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

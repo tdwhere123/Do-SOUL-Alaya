@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createRecallEvalMemoryProfile,
   withRecallEvalMemoryProfile
-} from "../../../bench/measurement/recall-eval-memory-profile.js";
+} from "../../../runs/measurement/recall-eval-memory-profile.js";
 
 const roots: string[] = [];
 

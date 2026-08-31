@@ -2,12 +2,12 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runExtractionFill } from "../../../bench/extraction/extraction-fill.js";
+import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import {
   readExtractionCacheManifest,
   writeExtractionCacheManifest
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
-import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset

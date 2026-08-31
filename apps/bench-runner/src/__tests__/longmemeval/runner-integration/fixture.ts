@@ -3,9 +3,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, vi } from "vitest";
 import type { KpiPayload } from "@do-soul/alaya-eval";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from
-  "../../../bench/provenance/evidence-manifest.js";
+  "../../../runs/provenance/evidence-manifest.js";
 import { buildMockQuestion } from "../runner/longmemeval-runner-fixture.js";
 
 export interface RunnerIntegrationFixture {

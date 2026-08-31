@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LocomoSampleSchema, extractSessions, type LocomoConversationBody } from "../../locomo/dataset.js";
+import { LocomoSampleSchema, extractSessions, type LocomoConversationBody } from "../../datasets/locomo/dataset.js";
 
 describe("LocomoSampleSchema", () => {
   it("parses a minimal LoCoMo conversation record", () => {

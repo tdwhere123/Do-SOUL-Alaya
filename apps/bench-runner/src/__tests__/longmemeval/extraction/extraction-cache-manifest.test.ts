@@ -15,12 +15,12 @@ import {
   writeExtractionCacheManifest,
   type ExtractionCacheManifest,
   type ExtractionCacheManifestV3
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
-import { hasCompleteExtractionFillAuthority } from "../../../bench/extraction/fill/fill-authority.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import { hasCompleteExtractionFillAuthority } from "../../../runs/extraction/fill/fill-authority.js";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256
-} from "../../../bench/extraction/content-closure.js";
+} from "../../../runs/extraction/content-closure.js";
 
 const BASE_MANIFEST: ExtractionCacheManifest = {
   schema_version: 1,

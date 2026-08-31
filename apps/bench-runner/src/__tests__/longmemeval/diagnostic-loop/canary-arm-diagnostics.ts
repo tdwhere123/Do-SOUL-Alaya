@@ -2,13 +2,13 @@ import { digestRecallFieldIdentity, materializeOpenSemanticFactorFormation } fro
   "@do-soul/alaya-core";
 import { OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID } from "@do-soul/alaya-soul";
 import { buildQuestionDiagnostic } from
-  "../../../bench/diagnostics/diagnostics-question.js";
+  "../../../diagnostics/diagnostics-question.js";
 import {
   CANARY_Q1,
   CANARY_Q2,
   CANARY_Q3,
   CANARY_QUERY_TEXTS
-} from "../../../bench/diagnostics/stage-attribution/exposure/canary-ids.js";
+} from "../../../diagnostics/stage-attribution/exposure/canary-ids.js";
 import { candidateAttribution } from "../diagnostics/phase/exposure-receipt-fixture.js";
 
 export function controlCanaryDiagnostics() {

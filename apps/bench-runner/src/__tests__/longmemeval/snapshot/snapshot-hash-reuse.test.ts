@@ -8,9 +8,9 @@ import {
   BENCH_DAEMON_DB_FILENAME,
   checkpointAndCopyBenchDb,
   restoreSnapshotToDataDir
-} from "../../../bench/snapshot/materialize.js";
-import { sha256File } from "../../../bench/snapshot/integrity.js";
-import { boundFileFullContentReadCount } from "../../../bench/snapshot/bound-file.js";
+} from "../../../runs/snapshot/materialize.js";
+import { sha256File } from "../../../runs/snapshot/integrity.js";
+import { boundFileFullContentReadCount } from "../../../runs/snapshot/bound-file.js";
 
 let tmpDir: string;
 

@@ -16,9 +16,9 @@ import {
   type BenchEdgeFormationMember
 } from "../../../harness/daemon.js";
 import { runAnswersWithEdges } from
-  "../../../longmemeval/runner/question/runner-question.js";
+  "../../../datasets/longmemeval/runner/question/runner-question.js";
 import { assertSnapshotAnswersWithFormation } from
-  "../../../bench/snapshot/current/snapshot-answers-with-formation.js";
+  "../../../runs/snapshot/current/snapshot-answers-with-formation.js";
 
 let daemon: BenchDaemonHandle | undefined;
 let root: string | undefined;

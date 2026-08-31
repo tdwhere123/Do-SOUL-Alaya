@@ -7,7 +7,7 @@ import {
   snapshotQuestionIdDigest,
   type LongMemEvalSnapshotManifest,
   type LongMemEvalSnapshotQuestion
-} from "../../../bench/snapshot/materialize.js";
+} from "../../../runs/snapshot/materialize.js";
 
 interface DigestVector {
   readonly name: string;

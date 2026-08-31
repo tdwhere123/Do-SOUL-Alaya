@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   computeExtractionAuthorityWorktreeRevision,
   inspectExtractionAuthority
-} from "../../../../bench/extraction/authority/inspection.js";
+} from "../../../../runs/extraction/authority/inspection.js";
 import {
   assertExtractionAuthorityReceipt,
   createExtractionAuthorityReceipt
-} from "../../../../bench/extraction/authority/receipt.js";
+} from "../../../../runs/extraction/authority/receipt.js";
 import {
   buildExtractionFillQuestion,
   EXTRACTION_FILL_VARIANT,

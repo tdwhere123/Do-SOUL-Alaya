@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BenchWorkspaceHandle } from "../../../harness/daemon.js";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import type { CompileSeedExtractionStats } from "../../../bench/compile-seed.js";
-import { seedLongMemEvalQuestion } from "../../../longmemeval/runner/question/runner-question-seeding.js";
-import { deriveLongMemEvalGoldMemoryIds } from "../../../longmemeval/runner/runner-scoring.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
+import type { CompileSeedExtractionStats } from "../../../runs/compile-seed.js";
+import { seedLongMemEvalQuestion } from "../../../datasets/longmemeval/runner/question/runner-question-seeding.js";
+import { deriveLongMemEvalGoldMemoryIds } from "../../../datasets/longmemeval/runner/runner-scoring.js";
 
 describe("seedLongMemEvalQuestion formation order", () => {
   it("derives edge order from session, round, and seed ordinals", async () => {

@@ -8,7 +8,7 @@ import {
   createCompileSeedRunner,
   type BenchSignalExtractor,
   type CompileSeedDaemon
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import {
   CREDENTIALLED_CONFIG,

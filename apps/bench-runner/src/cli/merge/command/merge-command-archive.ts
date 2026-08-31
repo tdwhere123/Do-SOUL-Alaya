@@ -20,16 +20,16 @@ import {
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,
   readLatestLongMemEvalOppositeArchive,
   renderLongMemEvalColdWarmComparisonSidecar
-} from "../../../bench/archive/archive-evidence.js";
+} from "../../../runs/archive/archive-evidence.js";
 import {
   type LongMemEvalEmbeddingVectorCacheSummary,
   type LongMemEvalQueryEmbeddingCacheSummary
-} from "../../../bench/diagnostics.js";
-import { resolveBenchDiagnosticsArtifactRoot } from "../../../bench/diagnostics/artifacts/diagnostics-artifacts.js";
+} from "../../../diagnostics/diagnostics.js";
+import { resolveBenchDiagnosticsArtifactRoot } from "../../../artifacts/diagnostics-artifacts.js";
 import {
   LONGMEMEVAL_COHORT_LEDGER_FILENAME,
   renderLongMemEvalCohortLedger
-} from "../../../bench/selection/cohort-ledger.js";
+} from "../../../runs/selection/cohort-ledger.js";
 import {
   buildMergedEvidenceManifest
 } from "../merged/merged-evidence-manifest.js";
@@ -37,16 +37,16 @@ import {
   buildMergedRunProvenanceSidecars,
   resolveMergedRequestedConcurrency,
   type MergedRunProvenanceSidecars
-} from "../../../bench/provenance/shard-aggregate.js";
-import type { LoadedGlobalExtractionAuthority } from "../../../bench/provenance/contract/extraction-authority-reference.js";
-import type { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
-import { buildBenchmarkMeasurementAttribution } from "../../../bench/measurement/attribution.js";
-import { assertMeasurementCohortBinding } from "../../../bench/measurement/cohort-binding.js";
-import { prepareDiagnosticsArtifactStagingPath } from "../../../bench/measurement/artifact-transaction.js";
+} from "../../../runs/provenance/shard-aggregate.js";
+import type { LoadedGlobalExtractionAuthority } from "../../../runs/provenance/contract/extraction-authority-reference.js";
+import type { LongMemEvalDiagnosticsSpool } from "../../../diagnostics/spool.js";
+import { buildBenchmarkMeasurementAttribution } from "../../../runs/measurement/attribution.js";
+import { assertMeasurementCohortBinding } from "../../../runs/measurement/cohort-binding.js";
+import { prepareDiagnosticsArtifactStagingPath } from "../../../runs/measurement/artifact-transaction.js";
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
-} from "../../../bench/extraction/seed-fuel/seed-extraction-release-blocker.js";
+} from "../../../runs/extraction/seed-fuel/seed-extraction-release-blocker.js";
 import {
   aggregateEmbeddingVectorCache,
   aggregateQueryEmbeddingCache,
@@ -61,8 +61,8 @@ import { hasVerifiedShardEvidence } from "../shard/shard-evidence-verifier.js";
 import {
   selectionContractIdentity,
   type LongMemEvalSelectionContract
-} from "../../../bench/selection/contract.js";
-import { createLongMemEvalHistoryLayout } from "../../../longmemeval/history/evidence-context.js";
+} from "../../../runs/selection/contract.js";
+import { createLongMemEvalHistoryLayout } from "../../../datasets/longmemeval/history/evidence-context.js";
 import { publishMergedArchive } from "../archive-publisher.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/authority";
@@ -70,7 +70,7 @@ import {
   composeArchiveHistorySlug,
   resolveArchiveGitState,
   type ArchiveGitIdentityInput
-} from "../../../bench/provenance/identity/archive-git-identity.js";
+} from "../../../runs/provenance/identity/archive-git-identity.js";
 
 type ShardDiagnostics = ShardArchiveRef["diagnostics"];
 type PreviousKpiPayload = Awaited<ReturnType<typeof readLatest>>;

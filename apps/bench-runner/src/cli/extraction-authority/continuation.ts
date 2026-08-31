@@ -2,26 +2,26 @@ import {
   ensureForkedExtractionAttemptLedger,
   readSettledExtractionAttemptLedger,
   type ExtractionAttemptLedgerSnapshot
-} from "../../bench/extraction/authority/attempt-ledger.js";
+} from "../../runs/extraction/authority/attempt-ledger.js";
 import { readExtractionCacheManifestIdentity } from
-  "../../bench/extraction/cache/extraction-cache-manifest.js";
+  "../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   claimExtractionContinuationChild,
   createExtractionContinuationChildClaim
-} from "../../bench/extraction/authority/continuation/child-claim.js";
+} from "../../runs/extraction/authority/continuation/child-claim.js";
 import {
   createSameRootExtractionContinuation
-} from "../../bench/extraction/authority/continuation/continuation.js";
+} from "../../runs/extraction/authority/continuation/continuation.js";
 import type { ExtractionAuthorityInspection } from
-  "../../bench/extraction/authority/inspection.js";
+  "../../runs/extraction/authority/inspection.js";
 import {
   assertExtractionAuthorityReceipt,
   readExtractionAuthorityReceipt,
   writeExtractionAuthorityReceiptExclusive,
   type ExtractionAuthorityReceipt
-} from "../../bench/extraction/authority/receipt.js";
+} from "../../runs/extraction/authority/receipt.js";
 import type { ExtractionTargetSelectionReceipt } from
-  "../../bench/extraction/authority/target-selection/receipt.js";
+  "../../runs/extraction/authority/target-selection/receipt.js";
 
 export interface PreparedAuthorityContinuation {
   readonly predecessor: ExtractionAuthorityReceipt;

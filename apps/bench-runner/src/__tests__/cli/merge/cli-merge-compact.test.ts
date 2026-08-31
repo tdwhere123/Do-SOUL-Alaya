@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runMergeCli } from "./cli-merge-dataset-fixture.js";
 import { loadMergeShards } from "../../../cli/merge/command/merge-command-shards.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../diagnostics/spool.js";
 import { buildQuestionDiagnosticFixture } from "../../longmemeval/diagnostics/gold-diagnostic-fixture.js";
 import {
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,

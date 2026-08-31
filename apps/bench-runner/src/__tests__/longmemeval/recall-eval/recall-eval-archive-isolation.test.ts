@@ -12,15 +12,15 @@ import {
   RECALL_EVAL_ARCHIVE_MARKER,
   isRecallEvalArchive,
   selectFullRunBaseline
-} from "../../../bench/lifecycle/recall-eval/recall-eval-archive-impl.js";
-import { assembleRecallEvalKpi } from "../../../bench/recall-eval-kpi.js";
+} from "../../../runs/lifecycle/recall-eval/recall-eval-archive-impl.js";
+import { assembleRecallEvalKpi } from "../../../runs/kpi/recall-eval-payload.js";
 import { buildPublicPayload } from "./archive-fixture.js";
 
 // @anchor recall-eval-archive-isolation — a fast-loop recall-eval archive
 // shares the public/ bench + (split, policy, simulate, provider) bucket with
 // full runs, but never paid extraction/materialization. It must carry an
 // explicit discriminator and must never be selected as a full-run baseline.
-// cross-file: apps/bench-runner/src/longmemeval/recall-eval-archive.ts
+// cross-file: apps/bench-runner/src/datasets/longmemeval/recall-eval-archive.ts
 
 let historyRoot: string;
 let layout: HistoryLayout;

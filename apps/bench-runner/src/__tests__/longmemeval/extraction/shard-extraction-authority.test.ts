@@ -18,20 +18,20 @@ import {
   buildShardExtractionAuthorityReference,
   loadGlobalExtractionAuthority,
   renderShardExtractionAuthorityReference
-} from "../../../bench/provenance/contract/extraction-authority-reference.js";
+} from "../../../runs/provenance/contract/extraction-authority-reference.js";
 import {
   buildSnapshotExtractionAuthority,
   buildSnapshotExtractionSummary,
   renderSnapshotExtractionAuthority
-} from "../../../bench/snapshot/extraction-authority.js";
-import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
+} from "../../../runs/snapshot/extraction-authority.js";
+import { compactSnapshotRunProvenance } from "../../../runs/snapshot/run-provenance.js";
 import { verifyShardRunProvenance } from
   "../../../cli/merge/shard/shard-provenance-verifier.js";
 import {
   buildEffectiveRecallConfigIdentity,
   readRecallEvalMaxResults
-} from "../../../bench/provenance/effective-recall-config.js";
-import { resolveMergedRequestedConcurrency } from "../../../bench/provenance/shard-aggregate.js";
+} from "../../../runs/provenance/effective-recall-config.js";
+import { resolveMergedRequestedConcurrency } from "../../../runs/provenance/shard-aggregate.js";
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) =>

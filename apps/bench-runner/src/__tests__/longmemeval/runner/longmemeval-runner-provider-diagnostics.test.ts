@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildQuestionDiagnostic } from "../../../bench/diagnostics.js";
-import { resolveBenchEmbeddingProviderLabel } from "../../../longmemeval/runner.js";
+import { buildQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
+import { resolveBenchEmbeddingProviderLabel } from "../../../datasets/longmemeval/runner.js";
 
 describe("LongMemEval runner", () => {
 

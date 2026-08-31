@@ -12,7 +12,7 @@ import {
   buildVerifiedPriorArchivePayload
 } from "../runner/longmemeval-runner-fixture.js";
 import { readDiagnosticsGzipStream } from
-  "../../../bench/diagnostics/artifacts/artifact-gzip-reader.js";
+  "../../../artifacts/artifact-gzip-reader.js";
 import {
   createVerifiedHistoryAuthority,
   writeVerifiedHistoryArchive

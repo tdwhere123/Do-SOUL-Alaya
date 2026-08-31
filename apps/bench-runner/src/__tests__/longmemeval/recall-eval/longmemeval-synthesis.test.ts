@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildSessionSynthesisInput } from "../../../bench/compile-seed.js";
+import { buildSessionSynthesisInput } from "../../../runs/compile-seed.js";
 import {
   buildLongMemEvalSidecarKey,
   scoreLongMemEvalRecallHits,
   type LongMemEvalSidecarEntry
-} from "../../../longmemeval/runner.js";
+} from "../../../datasets/longmemeval/runner.js";
 
 // buildSessionSynthesisInput is the deterministic, LLM-free digest that
 // feeds the session-level potential_synthesis seed.

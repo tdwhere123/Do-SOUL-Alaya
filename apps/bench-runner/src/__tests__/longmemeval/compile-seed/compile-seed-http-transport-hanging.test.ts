@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createGardenHttpExtractor } from "../../../bench/compile-seed.js";
+import { createGardenHttpExtractor } from "../../../runs/compile-seed.js";
 import {
   captureExtractorFailure,
   captureTerminalFailure,

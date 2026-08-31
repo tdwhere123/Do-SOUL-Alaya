@@ -14,7 +14,7 @@ import {
   assertCurrentSnapshotVerifiedAssertionReceiptIntegrity,
   assertSnapshotVerifiedAssertionReceiptIntegrity
 } from
-  "../../../bench/snapshot/current/assertion-receipt-integrity.js";
+  "../../../runs/snapshot/current/assertion-receipt-integrity.js";
 
 const roots: string[] = [];
 const ASSERTION = "I use the cobalt release channel.";

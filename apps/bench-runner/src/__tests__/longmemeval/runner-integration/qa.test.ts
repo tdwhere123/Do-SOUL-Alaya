@@ -4,11 +4,11 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { KpiPayloadSchema } from "@do-soul/alaya-eval";
 import { LONGMEMEVAL_COHORT_LEDGER_FILENAME } from
-  "../../../bench/selection/cohort-ledger.js";
+  "../../../runs/selection/cohort-ledger.js";
 import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from
-  "../../../bench/provenance/evidence-manifest.js";
-import { QaChatError } from "../../../bench/qa/qa-chat.js";
-import { runLongMemEval } from "../../../longmemeval/runner.js";
+  "../../../runs/provenance/evidence-manifest.js";
+import { QaChatError } from "../../../runs/qa/qa-chat.js";
+import { runLongMemEval } from "../../../datasets/longmemeval/runner.js";
 import {
   buildRunnerQuestions,
   createRunnerFixture,

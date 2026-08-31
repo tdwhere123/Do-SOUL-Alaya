@@ -4,17 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runRecordDigest, runRecordPath } from
-  "../../../bench/diagnostic-loop/run-state.js";
+  "../../../runs/diagnostic-loop/run-state.js";
 import { resolvedDiagnosticLoopIdentityDigest, resolveDiagnosticLoopIdentity } from
-  "../../../bench/diagnostic-loop/authority/identity.js";
-import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
+  "../../../runs/diagnostic-loop/authority/identity.js";
+import { checkpointDigest } from "../../../runs/diagnostic-loop/checkpoint.js";
 import {
   assertCanaryDiagnosticUnlock,
   canaryUnlockRequired
-} from "../../../bench/diagnostic-loop/canary-unlock-admission.js";
+} from "../../../runs/diagnostic-loop/canary-unlock-admission.js";
 import { DIAGNOSTIC_100Q_KPI_PROMOTION } from
-  "../../../bench/diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
-import { runDiagnosticLoop } from "../../../bench/diagnostic-loop/run.js";
+  "../../../diagnostics/stage-attribution/exposure/diagnostic-unlock.js";
+import { runDiagnosticLoop } from "../../../runs/diagnostic-loop/run.js";
 import { parseDiagnosticLoopArgs } from "../../../cli/diagnostic-loop/args.js";
 import { digest, loopRequest, trackingAdapters } from "./fixture.js";
 import { writeRebuildableUnlockRoot } from "./canary-unlock-root-fixture.js";

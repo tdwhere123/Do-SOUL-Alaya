@@ -6,17 +6,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { buildExtractionCacheAuditReceipt } from
-  "../../../bench/extraction/cache-audit/receipt.js";
+  "../../../runs/extraction/cache-audit/receipt.js";
 import { createExtractionAuthorityReceipt, type ExtractionAuthorityObservation } from
-  "../../../bench/extraction/authority/receipt.js";
+  "../../../runs/extraction/authority/receipt.js";
 import { createFreshExtractionTargetSelection } from
-  "../../../bench/extraction/authority/target-selection/receipt.js";
+  "../../../runs/extraction/authority/target-selection/receipt.js";
 import { assertExtractionTargetSelectionRootBinding } from
-  "../../../bench/extraction/authority/target-selection/receipt.js";
+  "../../../runs/extraction/authority/target-selection/receipt.js";
 import { acquireExtractionCacheWriteLease } from
-  "../../../bench/extraction/fill/manifest/fill-root-guard.js";
+  "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 import { createExtractionExecutionAuthority } from
-  "../../../bench/extraction/fill/execution-authority.js";
+  "../../../runs/extraction/fill/execution-authority.js";
 
 const roots: string[] = [];
 

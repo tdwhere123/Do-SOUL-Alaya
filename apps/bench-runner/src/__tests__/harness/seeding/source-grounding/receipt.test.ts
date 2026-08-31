@@ -15,9 +15,9 @@ import {
 import { attachCompileSourceGrounding } from
   "../../../../harness/seeding/source-grounding.js";
 import { extractSeedInputs } from
-  "../../../../bench/compile-seed/compile-seed-extract.js";
+  "../../../../runs/compile-seed/compile-seed-extract.js";
 import type { CompileSeedExtractionStats } from
-  "../../../../bench/compile-seed.js";
+  "../../../../runs/compile-seed.js";
 import { withOpenSemanticFactorGraph } from
   "../../../longmemeval/compile-seed/compile-seed-fixture.js";
 

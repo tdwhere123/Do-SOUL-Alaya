@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { LongMemEvalSelectionContractIdentitySchema } from
-  "../schema/longmemeval-selection-contract.js";
+  "../contracts/longmemeval-selection-contract.js";
 import { canonicalJson } from "./canonical-json.js";
 
 export const LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME =

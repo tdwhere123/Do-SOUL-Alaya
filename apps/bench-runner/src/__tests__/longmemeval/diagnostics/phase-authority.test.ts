@@ -3,9 +3,9 @@ import {
   PRODUCT_PHASES,
   assertProductPhaseAuthority,
   readProductPhaseAuthority
-} from "../../../bench/diagnostics/phase/phase-authority.js";
+} from "../../../diagnostics/phase/phase-authority.js";
 import { LongMemEvalQuestionDiagnosticSchema } from
-  "../../../bench/diagnostics/schema/diagnostics-schema.js";
+  "../../../diagnostics/schema/diagnostics-schema.js";
 
 describe("product phase authority", () => {
   it("keeps formation through delivery explicit and does not treat top-5 rank as delivery", () => {

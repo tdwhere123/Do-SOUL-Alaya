@@ -10,11 +10,11 @@ import {
 } from "@do-soul/alaya-soul";
 import { QUERY_SEMANTIC_FACTOR_FILL_IDENTITY_SCHEMA_VERSION,
   queryCachePrefixedSha256
-} from "../../../bench/query-factors/query-semantic-factor-cache-identity.js";
+} from "../../../runs/query-factors/query-semantic-factor-cache-identity.js";
 import { queryCacheSourceSetDigest } from
-  "../../../bench/query-factors/cache/source-set.js";
+  "../../../runs/query-factors/cache/source-set.js";
 import { openQuerySemanticFactorFillStore } from
-  "../../../bench/query-factors/query-semantic-factor-fill-store.js";
+  "../../../runs/query-factors/query-semantic-factor-fill-store.js";
 
 const roots: string[] = [];
 

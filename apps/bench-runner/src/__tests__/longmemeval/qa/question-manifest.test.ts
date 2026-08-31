@@ -1,13 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   applyQuestionManifest,
   computeQuestionIdDigest,
   createStratifiedQuestionManifest,
   parseQuestionManifest
-} from "../../../bench/selection/question-manifest.js";
+} from "../../../runs/selection/question-manifest.js";
 
 const DATASET_SHA = "a".repeat(64);
 

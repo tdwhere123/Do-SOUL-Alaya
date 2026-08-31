@@ -1,17 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
 import { createGardenHttpExtractor } from
-  "../dist/bench/compile-seed/compile-seed-http.js";
+  "../dist/runs/compile-seed/compile-seed-http.js";
 import { resolveCompileSeedExtractionConfig } from
-  "../dist/bench/compile-seed/compile-seed-config.js";
+  "../dist/runs/compile-seed/compile-seed-config.js";
 import { fillQuerySemanticFactorSources } from
-  "../dist/bench/query-factors/query-semantic-factor-cache.js";
+  "../dist/runs/query-factors/query-semantic-factor-cache.js";
 import { currentQueryCacheRequestProfile } from
-  "../dist/bench/query-factors/query-semantic-factor-cache-identity.js";
+  "../dist/runs/query-factors/query-semantic-factor-cache-identity.js";
 import { resolveExtractionTransportRoute } from
-  "../dist/bench/extraction/transport-route.js";
+  "../dist/runs/extraction/transport-route.js";
 import { EXTRACTION_REQUEST_TIMEOUT_MS } from
-  "../dist/bench/compile-seed/http/output-token-retry.js";
+  "../dist/runs/compile-seed/http/output-token-retry.js";
 
 const questionsPath = process.argv[2];
 const outputPath = process.argv[3];

@@ -8,21 +8,21 @@ import { certifyQueryOsfSemanticCompleteness } from "@do-soul/alaya-protocol";
 import { materializeOpenSemanticFactorFormation } from "@do-soul/alaya-core";
 import { OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID } from "@do-soul/alaya-soul";
 import { resolveDiagnosticLoopIdentity } from
-  "../../../bench/diagnostic-loop/authority/identity.js";
+  "../../../runs/diagnostic-loop/authority/identity.js";
 import { runPreflightPhase } from
-  "../../../bench/diagnostic-loop/production-phases.js";
-import { persistRunRecord } from "../../../bench/diagnostic-loop/run-state.js";
+  "../../../runs/diagnostic-loop/production-phases.js";
+import { persistRunRecord } from "../../../runs/diagnostic-loop/run-state.js";
 import { bindRecallEvalQuerySemanticFactorCache } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-run-context.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-run-context.js";
 import { proveProviderZeroCallReplay } from
-  "../../../bench/provider/replay-proof.js";
+  "../../../runs/provider/replay-proof.js";
 import {
   bindQuerySemanticFactorCacheFileToRequest,
   createQuerySemanticFactorCache,
   writeQuerySemanticFactorCache
-} from "../../../bench/query-factors/query-semantic-factor-cache.js";
+} from "../../../runs/query-factors/query-semantic-factor-cache.js";
 import { compileCertifiedQueryCacheValue } from
-  "../../../bench/query-factors/query-semantic-factor-cache-certification.js";
+  "../../../runs/query-factors/query-semantic-factor-cache-certification.js";
 import {
   digest,
   loopIdentity,
@@ -36,7 +36,7 @@ import {
   currentSnapshotExtractionAuthority,
   currentSnapshotManifestFor
 } from "../snapshot/current-snapshot-fixture.js";
-import { redactProvenanceUrl } from "../../../bench/provenance/paired-environment.js";
+import { redactProvenanceUrl } from "../../../runs/provenance/paired-environment.js";
 
 const SOURCE = "What did I buy?";
 const RAW_PROVIDER_ROUTE = "https://provider.invalid/v1";

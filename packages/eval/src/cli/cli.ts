@@ -3,8 +3,8 @@ import process from "node:process";
 import { ZodError } from "zod";
 import { diffKpis } from "../history/diff.js";
 import { listEntries, readEntry, readPrevious, type HistoryLayout } from "../history/history.js";
-import { renderReport } from "../reporting/report.js";
-import { BenchName } from "../schema/kpi-schema.js";
+import { renderReport } from "../reports/report.js";
+import { BenchName } from "../contracts/kpi-schema.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 const SUPPORTED_BENCH_NAMES = BenchName.options.join(" | ");

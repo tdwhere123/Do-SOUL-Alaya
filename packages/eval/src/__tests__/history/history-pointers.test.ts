@@ -12,10 +12,10 @@ import {
   writeEntry,
   type HistoryLayout
 } from "../../history/history.js";
-import { KpiPayloadSchema, type KpiPayload } from "../../schema/kpi-schema.js";
+import { KpiPayloadSchema, type KpiPayload } from "../../contracts/kpi-schema.js";
 import { createLongMemEvalSelectionContractIdentity } from
-  "../../schema/longmemeval-selection-contract.js";
-import { renderFindings } from "../../reporting/report.js";
+  "../../contracts/longmemeval-selection-contract.js";
+import { renderFindings } from "../../reports/report.js";
 import { collectReleaseHardGates, releaseHardGateAllowsLatestPassing } from "../../gates/release-gates.js";
 import { verifiedEvidenceForPayload } from "../gates/verified-evidence-fixture.js";
 import {

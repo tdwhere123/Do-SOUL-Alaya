@@ -5,7 +5,7 @@ import {
   appendSeedExtractionReleaseBlockerToReport,
   hasSeedExtractionReleaseBlocker,
   seedExtractionReleaseBlockerExitCode
-} from "../../../bench/extraction/seed-fuel/seed-extraction-release-blocker.js";
+} from "../../../runs/extraction/seed-fuel/seed-extraction-release-blocker.js";
 
 function makePayload(
   seedExtractionPath?: KpiPayload["kpi"]["seed_extraction_path"],

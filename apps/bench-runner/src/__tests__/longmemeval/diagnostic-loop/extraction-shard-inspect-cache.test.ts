@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { computeSourceTurnCacheKey } from
-  "../../../bench/compile-seed/compile-seed-cache.js";
-import { cacheFilePath } from "../../../bench/compile-seed/cache/cache-shard.js";
+  "../../../runs/compile-seed/compile-seed-cache.js";
+import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { computeSystemPromptSha256 } from
-  "../../../bench/extraction/cache/extraction-cache-manifest.js";
+  "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   extractionShardInspectCounts,
   resolveExtractionCacheIdentity
-} from "../../../bench/diagnostic-loop/authority/identity.js";
+} from "../../../runs/diagnostic-loop/authority/identity.js";
 import { writeCompletedExtractionCacheFixture } from
   "../extraction/completed-extraction-cache-fixture.js";
 import { digest, loopRequest } from "./fixture.js";

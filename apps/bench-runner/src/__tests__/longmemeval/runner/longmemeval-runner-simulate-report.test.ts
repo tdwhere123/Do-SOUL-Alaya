@@ -12,12 +12,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
 import type { FineAssessmentSelectionBoundaryCase } from "@do-soul/alaya-core";
 
-import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../../bench/archive/archive-evidence.js";
+import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../../runs/archive/archive-evidence.js";
 
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 
 import {
   buildLongMemEvalSidecarKey,
@@ -27,7 +27,7 @@ import {
   runLongMemEval,
   runLongMemEvalRecallCycle,
   scoreLongMemEvalRecallHits
-} from "../../../longmemeval/runner.js";
+} from "../../../datasets/longmemeval/runner.js";
 
 import { buildRecallResult } from "./longmemeval-runner-fixture.js";
 
@@ -304,7 +304,7 @@ describe("LongMemEval runner", () => {
 
   // Guards KpiPayloadSchema's latency_ms* nonnegative() invariant: a
   // monotonic recall clock can never report a negative duration even when
-  // recall resolves instantly. see also: packages/eval/src/schema/kpi-schema.ts.
+  // recall resolves instantly. see also: packages/eval/src/contracts/kpi-schema.ts.
   it.each(["none", "mixed"] as const)(
     "reports a non-negative finite scoredRecallLatencyMs for simulate_report=%s",
     async (simulateReport) => {

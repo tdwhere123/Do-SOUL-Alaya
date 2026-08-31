@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { measureGitState } from "../../../bench/provenance/contract/frozen-code-contract.js";
+import { measureGitState } from "../../../runs/provenance/contract/frozen-code-contract.js";
 import {
   SPEC_PLANTED_DIRTY_V3_HEX,
   SPEC_STATE_FRAME_TAG,
@@ -22,7 +22,7 @@ import {
 const { identityRepository } = createFrozenCodeFixtureHarness();
 const SPEC_PATH = new URL("./worktree-identity-independent-spec.ts", import.meta.url);
 const PRODUCTION_PATH = new URL(
-  "../../../bench/provenance/contract/worktree-git-bytes.ts",
+  "../../../runs/provenance/contract/worktree-git-bytes.ts",
   import.meta.url
 );
 const REQUIRED_IDENTITY_PINS = [

@@ -2,19 +2,19 @@ import { createHash } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeCachedExtraction } from "../../../../bench/compile-seed/cache/cache-shard.js";
-import { requireProviderBinding } from "../../../../bench/provider/catalog.js";
+import { writeCachedExtraction } from "../../../../runs/compile-seed/cache/cache-shard.js";
+import { requireProviderBinding } from "../../../../runs/provider/catalog.js";
 import { digest, loopRequest } from "../../diagnostic-loop/fixture.js";
 import {
   readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest
-} from "../../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
   inspectExtractionRawJson
 } from
-  "../../../../bench/extraction/content-closure.js";
+  "../../../../runs/extraction/content-closure.js";
 import {
   canonicalReplayContractDigests,
   rebuildCanonicalReplayKeys

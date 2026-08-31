@@ -2,11 +2,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkpointDigest, loadCompletedCheckpoints, readCheckpoint } from
-  "../../../bench/diagnostic-loop/checkpoint.js";
+  "../../../runs/diagnostic-loop/checkpoint.js";
 import { assertCheckpointAuthorities } from
-  "../../../bench/diagnostic-loop/authority/checkpoint.js";
+  "../../../runs/diagnostic-loop/authority/checkpoint.js";
 import { readRunRecord, runRecordPath } from
-  "../../../bench/diagnostic-loop/run-state.js";
+  "../../../runs/diagnostic-loop/run-state.js";
 import { loopRequest } from "./fixture.js";
 import { createLoopTemp } from "./run-loop-fixture.js";
 
@@ -87,7 +87,7 @@ describe("diagnostic-loop unlock/promotion schema authority", () => {
 
 async function resealReportCheckpoint(workRoot: string, reportPath: string): Promise<void> {
   const { diagnosticAuthorityDigest } = await import(
-    "../../../bench/diagnostic-loop/authority/identity.js"
+    "../../../runs/diagnostic-loop/authority/identity.js"
   );
   const path = join(workRoot, "checkpoints", "report.json");
   const current = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;

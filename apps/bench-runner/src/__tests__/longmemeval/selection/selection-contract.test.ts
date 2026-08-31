@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   assertSelectionCohortBinding,
   createLongMemEvalSelectionContract,
   selectionContractIdentity
-} from "../../../bench/selection/contract.js";
+} from "../../../runs/selection/contract.js";
 
 const DATASET_SHA = "a".repeat(64);
 

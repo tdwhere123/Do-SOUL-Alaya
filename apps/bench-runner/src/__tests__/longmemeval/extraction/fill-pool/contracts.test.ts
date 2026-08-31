@@ -1,12 +1,12 @@
 import { expect, it, vi } from "vitest";
 import type { BenchSignalExtractor } from
-  "../../../../bench/compile-seed.js";
+  "../../../../runs/compile-seed.js";
 import {
   ExtractionFillTaskError,
   runExtractionPool
-} from "../../../../bench/extraction/fill/fill-pool.js";
+} from "../../../../runs/extraction/fill/fill-pool.js";
 import { newFillStats } from
-  "../../../../bench/extraction/fill/fill-stats.js";
+  "../../../../runs/extraction/fill/fill-stats.js";
 
 it("retains the originating task failure for terminal fill diagnostics", () => {
   const cause = new Error("semantic graph validation failed");

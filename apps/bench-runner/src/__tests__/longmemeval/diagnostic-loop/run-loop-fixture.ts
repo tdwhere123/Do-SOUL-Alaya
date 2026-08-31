@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runDiagnosticLoop } from "../../../bench/diagnostic-loop/run.js";
+import { runDiagnosticLoop } from "../../../runs/diagnostic-loop/run.js";
 import { loopRequest, trackingAdapters } from "./fixture.js";
 
 export function createLoopTemp(prefix = "diagnostic-loop-") {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createCandidateActivationCapture } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-candidate-activation.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-candidate-activation.js";
 import { CanonicalSelectionReceiptSchema } from
   "../../../harness/recall/capture/capture-receipt-schema.js";
 

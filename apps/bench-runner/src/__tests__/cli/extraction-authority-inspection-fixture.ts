@@ -1,5 +1,5 @@
 import type { ExtractionAuthorityInspection } from
-  "../../bench/extraction/authority/inspection.js";
+  "../../runs/extraction/authority/inspection.js";
 
 const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 

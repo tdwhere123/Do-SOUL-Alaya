@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { digestRecallFieldIdentity } from "@do-soul/alaya-core";
 import { buildQuestionDiagnostic } from
-  "../../../bench/diagnostics/diagnostics-question.js";
+  "../../../diagnostics/diagnostics-question.js";
 import { LongMemEvalQuestionDiagnosticSchema } from
-  "../../../bench/diagnostics/schema/diagnostics-schema.js";
+  "../../../diagnostics/schema/diagnostics-schema.js";
 
 const captureDigest = `sha256:${"1".repeat(64)}`;
 

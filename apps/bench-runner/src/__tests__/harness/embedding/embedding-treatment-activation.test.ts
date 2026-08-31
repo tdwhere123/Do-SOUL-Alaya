@@ -17,7 +17,7 @@ import {
 import {
   recallEvalEmbeddingMode,
   recallEvalEmbeddingProviderKind
-} from "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+} from "../../../runs/lifecycle/recall-eval/recall-eval-runtime.js";
 
 describe("embedding treatment activation", () => {
   it("accepts an observed finite zero similarity", () => {

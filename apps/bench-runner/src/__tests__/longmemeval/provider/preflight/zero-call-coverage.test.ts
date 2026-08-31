@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { proveProviderZeroCallReplay } from
-  "../../../../bench/provider/replay-proof.js";
+  "../../../../runs/provider/replay-proof.js";
 import { loopRequest } from "../../diagnostic-loop/fixture.js";
 import { MIMO } from "./complete-mimo-cache.js";
 

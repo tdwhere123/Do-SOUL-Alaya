@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { KpiPayload } from "../../schema/kpi-schema.js";
+import type { KpiPayload } from "../../contracts/kpi-schema.js";
 import { createLongMemEvalSelectionContractIdentity } from
-  "../../schema/longmemeval-selection-contract.js";
+  "../../contracts/longmemeval-selection-contract.js";
 import { VERIFIED_TEST_DATASET_SHA256 } from
   "../gates/verified-dataset-fixture.js";
 

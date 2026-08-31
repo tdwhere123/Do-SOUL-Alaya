@@ -8,7 +8,7 @@ import {
   verifyProviderPreflightReplayReceipt,
   verifyProviderPreflightReplayReceiptBinding
 } from
-  "../../../../bench/provider/replay-receipt.js";
+  "../../../../runs/provider/replay-receipt.js";
 import { runProviderPreflightCommand } from
   "../../../../cli/provider-preflight/command.js";
 import {

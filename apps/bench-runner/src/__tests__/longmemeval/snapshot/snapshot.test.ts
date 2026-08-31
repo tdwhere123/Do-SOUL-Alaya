@@ -20,17 +20,17 @@ import {
   writeSnapshotSidecar,
   type LongMemEvalSnapshotManifest,
   type SnapshotExtractionProvenanceV3
-} from "../../../bench/snapshot/materialize.js";
+} from "../../../runs/snapshot/materialize.js";
 import {
   assertSnapshotConsumeIdentity,
   readSchemaMigrationVersion
-} from "../../../bench/snapshot/snapshot-seed-identity.js";
-import { sha256File } from "../../../bench/snapshot/integrity.js";
+} from "../../../runs/snapshot/snapshot-seed-identity.js";
+import { sha256File } from "../../../runs/snapshot/integrity.js";
 import {
   copyRegularFileNoFollow,
   peekCachedFileSha256
-} from "../../../bench/snapshot/bound-file.js";
-import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/snapshot/bound-file.js";
+import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 
 // @anchor recall-eval-snapshot-contract: checkpoint+copy, restore-to-working-
 // copy, version binding, and sidecar/manifest round-trip. Uses a freshly

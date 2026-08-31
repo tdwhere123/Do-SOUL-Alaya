@@ -11,31 +11,31 @@ import {
 } from "@do-soul/alaya-eval";
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/internal";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   buildQuestionDiagnostic,
   renderDiagnosticsSidecar,
   summarizeProviderStates,
   type LongMemEvalDiagnosticsSidecar,
   type LongMemEvalQuestionDiagnostic
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 import {
   buildLongMemEvalEvidenceManifest,
   LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
   renderLongMemEvalEvidenceManifest,
   type LongMemEvalEvidenceArtifactInput
-} from "../../../bench/provenance/evidence-manifest.js";
+} from "../../../runs/provenance/evidence-manifest.js";
 import {
   createTestLongMemEvalDatasetAuthority,
   deriveLongMemEvalReleaseEvidenceAuthority
-} from "../../../longmemeval/ingestion/fetch.js";
-import { createLongMemEvalHistoryLayout } from "../../../longmemeval/history/evidence-context.js";
-import { classifyLongMemEvalDatasetCohort } from "../../../bench/selection/dataset-cohort.js";
+} from "../../../datasets/longmemeval/ingestion/fetch.js";
+import { createLongMemEvalHistoryLayout } from "../../../datasets/longmemeval/history/evidence-context.js";
+import { classifyLongMemEvalDatasetCohort } from "../../../runs/selection/dataset-cohort.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   EXTRACTION_REQUEST_PROFILES
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
 
 const REPORT = "report\n";

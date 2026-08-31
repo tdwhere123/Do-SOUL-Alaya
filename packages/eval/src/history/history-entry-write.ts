@@ -4,7 +4,7 @@ import {
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import path from "node:path";
-import type { BenchName, KpiPayload } from "../schema/kpi-schema.js";
+import type { BenchName, KpiPayload } from "../contracts/kpi-schema.js";
 import {
   FINDINGS_FILENAME,
   KPI_FILENAME,

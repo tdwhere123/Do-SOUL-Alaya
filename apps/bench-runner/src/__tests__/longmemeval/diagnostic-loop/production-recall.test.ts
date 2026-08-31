@@ -6,10 +6,10 @@ import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildEmbeddingCacheOverlayReceipt
-} from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/contract.js";
+} from "../../../runs/snapshot/recall-eval/embedding-cache-overlay/contract.js";
 import { defaultSnapshotOverlayReceiptPath } from
-  "../../../bench/snapshot/recall-eval/embedding-cache-overlay/ensure.js";
-import { snapshotManifestPath } from "../../../bench/snapshot/materialize.js";
+  "../../../runs/snapshot/recall-eval/embedding-cache-overlay/ensure.js";
+import { snapshotManifestPath } from "../../../runs/snapshot/materialize.js";
 
 const { runRecallEval, resolveSnapshotIdentity, capturedOptions } = vi.hoisted(() => {
   const options: {
@@ -49,13 +49,13 @@ const { runRecallEval, resolveSnapshotIdentity, capturedOptions } = vi.hoisted((
   };
 });
 
-vi.mock("../../../bench/lifecycle/recall-eval/recall-eval-impl.js", () => ({
+vi.mock("../../../runs/lifecycle/recall-eval/recall-eval-impl.js", () => ({
   runRecallEval
 }));
-vi.mock("../../../bench/diagnostic-loop/authority/identity.js", () => ({
+vi.mock("../../../runs/diagnostic-loop/authority/identity.js", () => ({
   resolveSnapshotIdentity
 }));
-vi.mock("../../../bench/snapshot/integrity.js", () => ({
+vi.mock("../../../runs/snapshot/integrity.js", () => ({
   sha256File: vi.fn(async (path: string) => {
     try {
       return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -76,7 +76,7 @@ afterEach(async () => {
 describe("diagnostic-loop production recall consume authority", () => {
   it("threads diagnostic consume authority into recall-eval", async () => {
     const { runProductionRecallPhase } = await import(
-      "../../../bench/diagnostic-loop/production-recall.js"
+      "../../../runs/diagnostic-loop/production-recall.js"
     );
     await runProductionRecallPhase({
       request: {
@@ -104,7 +104,7 @@ describe("diagnostic-loop production recall consume authority", () => {
 
   it("revalidates the checkpoint-bound snapshot before recall", async () => {
     const { runProductionRecallPhase } = await import(
-      "../../../bench/diagnostic-loop/production-recall.js"
+      "../../../runs/diagnostic-loop/production-recall.js"
     );
     runRecallEval.mockClear();
 
@@ -129,7 +129,7 @@ describe("diagnostic-loop production recall consume authority", () => {
 
   it("rejects a requested window larger than the checkpoint-bound snapshot", async () => {
     const { runProductionRecallPhase } = await import(
-      "../../../bench/diagnostic-loop/production-recall.js"
+      "../../../runs/diagnostic-loop/production-recall.js"
     );
     runRecallEval.mockClear();
 
@@ -155,7 +155,7 @@ describe("diagnostic-loop production recall consume authority", () => {
 
   it("binds a planted snapshot sidecar overlay on treatment without a CLI flag", async () => {
     const { runProductionRecallPhase } = await import(
-      "../../../bench/diagnostic-loop/production-recall.js"
+      "../../../runs/diagnostic-loop/production-recall.js"
     );
     runRecallEval.mockClear();
     const planted = await plantOverlaySnapshot();
@@ -172,7 +172,7 @@ describe("diagnostic-loop production recall consume authority", () => {
 
   it("lets --embedding-cache-overlay win over the snapshot sidecar", async () => {
     const { runProductionRecallPhase } = await import(
-      "../../../bench/diagnostic-loop/production-recall.js"
+      "../../../runs/diagnostic-loop/production-recall.js"
     );
     runRecallEval.mockClear();
     const planted = await plantOverlaySnapshot();
@@ -193,7 +193,7 @@ describe("diagnostic-loop production recall consume authority", () => {
 
   it("fails closed when treatment has no overlay and cannot emit", async () => {
     const { runProductionRecallPhase } = await import(
-      "../../../bench/diagnostic-loop/production-recall.js"
+      "../../../runs/diagnostic-loop/production-recall.js"
     );
     runRecallEval.mockClear();
     const previous = process.env.ALAYA_RECALL_EVAL_EMBEDDING;
@@ -213,7 +213,7 @@ describe("diagnostic-loop production recall consume authority", () => {
 
   it("rejects a planted receipt whose snapshot sha256 does not match", async () => {
     const { runProductionRecallPhase } = await import(
-      "../../../bench/diagnostic-loop/production-recall.js"
+      "../../../runs/diagnostic-loop/production-recall.js"
     );
     runRecallEval.mockClear();
     const planted = await plantOverlaySnapshot({ snapshotSha256: "d".repeat(64) });
@@ -227,7 +227,7 @@ describe("diagnostic-loop production recall consume authority", () => {
 
   it("keeps a planted overlay out of control recall", async () => {
     const { runProductionRecallPhase } = await import(
-      "../../../bench/diagnostic-loop/production-recall.js"
+      "../../../runs/diagnostic-loop/production-recall.js"
     );
     runRecallEval.mockClear();
     const planted = await plantOverlaySnapshot();

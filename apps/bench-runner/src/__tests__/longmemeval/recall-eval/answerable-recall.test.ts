@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics/schema/diagnostics-types.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../diagnostics/schema/diagnostics-types.js";
 import {
   answerableRecallAt5,
   summarizeAnswerableRecall
-} from "../../../bench/measurement/answerable-recall.js";
+} from "../../../runs/measurement/answerable-recall.js";
 import { cohort, streamedQuestion } from "../../cli/merge/cli-merge-evidence-fixture.js";
 
 describe("answerable recall", () => {

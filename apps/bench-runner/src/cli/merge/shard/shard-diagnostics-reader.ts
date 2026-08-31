@@ -6,19 +6,19 @@ import {
   type KpiPayload
 } from "@do-soul/alaya-eval";
 import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from
-  "../../../bench/archive/archive-evidence.js";
+  "../../../runs/archive/archive-evidence.js";
 import {
   resolveBenchDiagnosticsArtifactRoot
-} from "../../../bench/diagnostics/artifacts/diagnostics-artifacts.js";
+} from "../../../artifacts/diagnostics-artifacts.js";
 import { streamDiagnosticsGzipQuestions } from
-  "../../../bench/diagnostics/artifacts/artifact-gzip-reader.js";
+  "../../../artifacts/artifact-gzip-reader.js";
 import { streamDiagnosticsJsonQuestions } from
-  "../../../bench/diagnostics/artifacts/artifact-json-stream.js";
+  "../../../artifacts/artifact-json-stream.js";
 import type {
   LongMemEvalDiagnosticsSidecar,
   LongMemEvalQuestionDiagnostic
-} from "../../../bench/diagnostics.js";
-import type { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+} from "../../../diagnostics/diagnostics.js";
+import type { LongMemEvalDiagnosticsSpool } from "../../../diagnostics/spool.js";
 import { resolveShardPointerPath } from "../../merge-shared.js";
 import {
   bindVerifiedShardDiagnostics,
@@ -31,7 +31,7 @@ import {
   type ContainedArtifactFile
 } from "../contained-artifact-path.js";
 import type { LoadedGlobalExtractionAuthority } from
-  "../../../bench/provenance/contract/extraction-authority-reference.js";
+  "../../../runs/provenance/contract/extraction-authority-reference.js";
 
 export interface ReadShardPayloadResult {
   readonly payload: KpiPayload;

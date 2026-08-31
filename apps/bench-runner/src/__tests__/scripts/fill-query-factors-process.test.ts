@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { currentQueryCacheRequestProfile } from
-  "../../bench/query-factors/query-semantic-factor-cache-identity.js";
+  "../../runs/query-factors/query-semantic-factor-cache-identity.js";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)),
