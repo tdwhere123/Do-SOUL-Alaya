@@ -2,7 +2,7 @@ import {
   RecallCandidateObjectKindSchema
 } from "@do-soul/alaya-protocol";
 import { compareText } from "../../../shared/compare-text.js";
-import type { ShadowGammaTuple, ShadowObligationKey, ShadowSetUtilityInput } from "./capture.js";
+import type { ShadowObligationKey, ShadowSetUtilityInput } from "./capture.js";
 import { freezeShadow, ShadowContractError } from "../contract-primitives.js";
 import {
   createPsiCycleFailure,
@@ -10,15 +10,21 @@ import {
   type ShadowPsiCycleFailure
 } from "../dominance-contract.js";
 import {
-  acceptCandidate,
-  compareGammaTuple,
-  computeGammaTuple,
-  emptySelectedSet,
-  evaluateOtherwiseUnavailableNovelty,
   obligationUniverseFrom,
-  type ShadowNoveltyAdmit,
-  type ShadowSelectedSet
+  type ShadowNoveltyAdmit
 } from "./gamma-tuple.js";
+import {
+  assertUnmixedWalkTransfer,
+  LIVE_FACILITY_WALK_TRANSFER,
+  type ShadowWalkUtilityTransfer,
+  type WalkGammaScore
+} from "./walk-transfer.js";
+import {
+  applyInfeasibleDrops,
+  validateWalkCandidate
+} from "./walk-constraints.js";
+
+export type { ShadowWalkUtilityTransfer } from "./walk-transfer.js";
 import { SHADOW_CAPTURE_OPERATOR_ID, SHADOW_DETERMINISTIC_TAIL } from "./identity.js";
 import {
   parseCaptureDecisionReceipt,
@@ -42,6 +48,7 @@ export type ShadowCaptureWalkInput = Readonly<{
   readonly per_dimension_limits: Readonly<Record<string, number>> | null;
   readonly unresolved_tradeoff?: (left: string, right: string) => boolean;
   readonly obligation_universe?: readonly ShadowObligationKey[];
+  readonly utility_transfer?: ShadowWalkUtilityTransfer;
 }>;
 
 export type ShadowWalkConstraintReject = Readonly<{
@@ -65,20 +72,21 @@ type WalkState = {
   readonly token_budget: number;
   readonly per_dimension_limits: Readonly<Record<string, number>> | null;
   readonly universe: readonly ShadowObligationKey[];
+  readonly transfer: ShadowWalkUtilityTransfer;
   readonly startEligibleCount: number;
   remaining: Map<string, ShadowCaptureWalkCandidate>;
   selected_keys: string[];
   object_keys: Set<string>;
   used_tokens: number;
   dim_count: Map<string, number>;
-  set: ShadowSelectedSet;
+  set: unknown;
   decisions: ShadowCaptureDecisionReceipt[];
   walk_rejects: ShadowWalkConstraintReject[];
 };
 
 type ScoredCandidate = Readonly<{
   readonly candidate: ShadowCaptureWalkCandidate;
-  readonly G: ShadowGammaTuple;
+  readonly G: WalkGammaScore;
 }>;
 
 const CYCLE: ShadowPsiCycleFailure = createPsiCycleFailure();
@@ -92,6 +100,11 @@ export function walkShadowCapture(
     if (state.remaining.size === 0) break;
     const picked = computePick(state);
     if (isCycleFailure(picked)) return picked;
+    const flagged = state.decisions[state.decisions.length - 1];
+    if (state.transfer.kind === "query_compiled_gamma" &&
+        flagged?.unresolved_pointwise_tradeoff === true) {
+      break;
+    }
     applyPick(state, picked);
   }
   const captured: ShadowCapturedWalk = {
@@ -140,83 +153,32 @@ function createWalkState(input: ShadowCaptureWalkInput): WalkState {
   const remaining = new Map<string, ShadowCaptureWalkCandidate>();
   for (const candidate of input.candidates) {
     if (!candidate.h_eligible) continue;
-    validateCandidate(candidate);
+    validateWalkCandidate(candidate);
     if (remaining.has(candidate.candidate_key)) {
       throw new ShadowContractError("duplicate candidate_key in walk input");
     }
     remaining.set(candidate.candidate_key, candidate);
   }
   const utilities = [...remaining.values()].map((candidate) => candidate.utility);
+  const universe = input.obligation_universe ?? obligationUniverseFrom(utilities);
+  const transfer = input.utility_transfer ?? LIVE_FACILITY_WALK_TRANSFER;
   return {
     psi: input.psi,
     unresolved_tradeoff: input.unresolved_tradeoff,
     token_budget: input.token_budget,
     per_dimension_limits: input.per_dimension_limits,
-    universe: input.obligation_universe ?? obligationUniverseFrom(utilities),
+    universe,
+    transfer,
     remaining,
     selected_keys: [],
     object_keys: new Set(),
     used_tokens: 0,
     dim_count: new Map(),
-    set: emptySelectedSet(),
+    set: transfer.emptySet(universe, [...remaining.values()]),
     decisions: [],
     walk_rejects: [],
     startEligibleCount: remaining.size
   };
-}
-
-function validateCandidate(candidate: ShadowCaptureWalkCandidate): void {
-  if (candidate.candidate_key !== candidate.utility.candidate_key ||
-      candidate.object_key !== candidate.utility.object_key) {
-    throw new ShadowContractError("walk candidate identity must match set-utility");
-  }
-  if (!Number.isFinite(candidate.token_cost) || candidate.token_cost <= 0) {
-    throw new ShadowContractError("token_cost must be finite and positive");
-  }
-  if (candidate.dimension.length === 0) {
-    throw new ShadowContractError("dimension is required");
-  }
-  const index = candidate.static_frontier_index;
-  if (index !== null && (!Number.isInteger(index) || index < 1)) {
-    throw new ShadowContractError("static_frontier_index is structure only");
-  }
-}
-
-function applyInfeasibleDrops(state: WalkState): void {
-  const keys = [...state.remaining.keys()].sort(compareText);
-  for (const key of keys) {
-    const candidate = state.remaining.get(key);
-    if (candidate === undefined) continue;
-    const reason = infeasibleReason(candidate, state);
-    if (reason === null) continue;
-    state.remaining.delete(key);
-    state.walk_rejects.push(freezeShadow({
-      candidate_key: key,
-      walk_reject: reason
-    }));
-  }
-}
-
-function infeasibleReason(
-  candidate: ShadowCaptureWalkCandidate,
-  state: WalkState
-): ShadowWalkConstraintReject["walk_reject"] | null {
-  if (state.object_keys.has(candidate.object_key)) return "duplicate_object";
-  if (state.used_tokens + candidate.token_cost > state.token_budget) {
-    return "max_total_tokens";
-  }
-  if (dimensionExhausted(candidate, state)) return "dimension_limit";
-  return null;
-}
-
-function dimensionExhausted(
-  candidate: ShadowCaptureWalkCandidate,
-  state: WalkState
-): boolean {
-  if (state.per_dimension_limits === null) return false;
-  const limit = state.per_dimension_limits[candidate.dimension];
-  if (limit === undefined) return false;
-  return (state.dim_count.get(candidate.dimension) ?? 0) >= limit;
 }
 
 function computePick(
@@ -228,9 +190,9 @@ function computePick(
   const choice = choiceSet(feasible, core, state);
   const scored = choice.map((candidate) => freezeShadow({
     candidate,
-    G: computeGammaTuple(candidate.utility, state.set, state.universe)
+    G: state.transfer.score(candidate, state.set, state.universe)
   }));
-  const maxG = maxCohort(scored);
+  const maxG = maxCohort(scored, state.transfer);
   const tPsi = undominated(maxG.map((row) => row.candidate), state.psi);
   if (tPsi.length === 0) return CYCLE;
   const winner = smallestCandidate(tPsi);
@@ -261,9 +223,9 @@ function choiceSet(
   const coreKeys = new Set(core.map((candidate) => candidate.candidate_key));
   const extras = feasible.filter((candidate) =>
     !coreKeys.has(candidate.candidate_key) &&
-    evaluateOtherwiseUnavailableNovelty(
-      candidate.utility,
-      core.map((member) => member.utility),
+    state.transfer.admitLowerFrontier(
+      candidate,
+      core,
       state.set,
       state.universe
     ).admitted
@@ -271,13 +233,16 @@ function choiceSet(
   return [...core, ...extras];
 }
 
-function maxCohort(scored: readonly ScoredCandidate[]): readonly ScoredCandidate[] {
+function maxCohort(
+  scored: readonly ScoredCandidate[],
+  transfer: ShadowWalkUtilityTransfer
+): readonly ScoredCandidate[] {
   if (scored.length === 0) return [];
   let max = scored[0]!.G;
   for (const row of scored) {
-    if (compareGammaTuple(row.G, max) > 0) max = row.G;
+    if (transfer.compare(row.G, max) > 0) max = row.G;
   }
-  return scored.filter((row) => compareGammaTuple(row.G, max) === 0);
+  return scored.filter((row) => transfer.compare(row.G, max) === 0);
 }
 
 function undominated<T extends { readonly candidate_key: string }>(
@@ -342,16 +307,17 @@ function buildDecision(
   state: WalkState
 ): ShadowCaptureDecisionReceipt {
   const inCore = core.some((member) => member.candidate_key === winner.candidate_key);
-  const novelty = inCore
-    ? emptyNovelty()
-    : evaluateOtherwiseUnavailableNovelty(
-      winner.utility,
-      core.map((member) => member.utility),
+  const admitted = inCore
+    ? emptyAdmit()
+    : state.transfer.admitLowerFrontier(
+      winner,
+      core,
       state.set,
       state.universe
     );
   const winnerG = maxG.find((row) => row.candidate.candidate_key === winner.candidate_key)?.G
-    ?? computeGammaTuple(winner.utility, state.set, state.universe);
+    ?? state.transfer.score(winner, state.set, state.universe);
+  assertUnmixedWalkTransfer(state.transfer, winnerG, admitted.named_novelty);
   const tPsiKeys = new Set(tPsi.map((member) => member.candidate_key));
   return parseCaptureDecisionReceipt({
     schema_version: 1,
@@ -359,8 +325,8 @@ function buildDecision(
     capture_reason: inCore ? "core_undominated" : "cross_frontier_novelty",
     G: winnerG,
     G_status: winner.utility.availability,
-    named_novelty: namedNovelty(novelty, inCore),
-    novelty_core_known_absence: inCore ? [] : novelty.core_absence.map(toAbsenceReceipt),
+    named_novelty: namedNovelty(admitted, inCore),
+    novelty_core_known_absence: inCore ? [] : admitted.core_absence.map(toAbsenceReceipt),
     max_g_cohort: Object.freeze(
       maxG.map((row) => row.candidate.candidate_key).sort(compareText)
     ),
@@ -429,7 +395,7 @@ function applyPick(state: WalkState, picked: ShadowCaptureWalkCandidate): void {
     picked.dimension,
     (state.dim_count.get(picked.dimension) ?? 0) + 1
   );
-  state.set = acceptCandidate(state.set, picked.utility, state.universe);
+  state.set = state.transfer.accept(state.set, picked, state.universe);
   const duplicates = [...state.remaining.values()]
     .filter((candidate) => candidate.object_key === picked.object_key)
     .map((candidate) => candidate.candidate_key)
@@ -444,7 +410,7 @@ function applyPick(state: WalkState, picked: ShadowCaptureWalkCandidate): void {
 }
 
 function namedNovelty(
-  novelty: ShadowNoveltyAdmit,
+  novelty: { readonly named_novelty: ShadowCaptureDecisionReceipt["named_novelty"] },
   inCore: boolean
 ): ShadowCaptureDecisionReceipt["named_novelty"] {
   if (inCore) {
@@ -454,19 +420,17 @@ function namedNovelty(
       content_ids: Object.freeze([] as string[])
     });
   }
-  return freezeShadow({
-    facility_keys: novelty.facility_keys,
-    value_pairs: novelty.value_pairs,
-    content_ids: novelty.content_ids
-  });
+  return novelty.named_novelty;
 }
 
-function emptyNovelty(): ShadowNoveltyAdmit {
+function emptyAdmit(): ReturnType<ShadowWalkUtilityTransfer["admitLowerFrontier"]> {
   return freezeShadow({
     admitted: false,
-    facility_keys: Object.freeze([] as string[]),
-    value_pairs: Object.freeze([] as string[]),
-    content_ids: Object.freeze([] as string[]),
+    named_novelty: freezeShadow({
+      facility_keys: Object.freeze([] as string[]),
+      value_pairs: Object.freeze([] as string[]),
+      content_ids: Object.freeze([] as string[])
+    }),
     core_absence: Object.freeze([] as ShadowNoveltyAdmit["core_absence"])
   });
 }

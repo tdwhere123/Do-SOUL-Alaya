@@ -1,0 +1,855 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { parseCaptureDecisionReceipt } from
+  "../../../../../recall/decision/prefix-capture/receipts.js";
+import {
+  isCapturedWalk,
+  prefixSK,
+  walkShadowCapture
+} from "../../../../../recall/decision/prefix-capture/walk.js";
+import { enumerateFiniteDecisionOracle } from
+  "../../../../../recall/decision/query-proof/proof/oracle/oracle.js";
+import {
+  compareAbstractProofToOracle,
+  certifyAbstractSingletonWithFiniteOracle
+} from "../../../../../recall/decision/query-proof/proof/abstract/differential.js";
+import {
+  createChannelClosureResult,
+  createScopedCompletenessReference
+} from "../../../../../recall/decision/query-proof/closure/contract.js";
+import { deriveLiveClosureAuthorityBinding } from
+  "../../../../../recall/decision/query-proof/closure/live-authority-binding.js";
+import type { FiniteOracleFixture } from
+  "../../../../../recall/decision/query-proof/proof/oracle/contract.js";
+import { parseDecisionStabilitySeal } from
+  "../../../../../recall/decision/query-proof/seal/contract.js";
+import { checkDecisionStability } from
+  "../../../../../recall/decision/query-proof/seal/checker.js";
+import {
+  createQueryProofAbstractOperator,
+  createQueryProofDecisionOperator,
+  emptyWalkUtility,
+  runQueryProofDecideQ,
+  type QueryProofDecideWorldV1
+} from "../../../../../recall/decision/query-proof/seal/decide.js";
+import { createQueryCompiledWalkTransfer } from
+  "../../../../../recall/decision/query-proof/gamma/walk-binding.js";
+import type { PreparedRecallRequest } from
+  "../../../../../recall/runtime/recall-service-runner-types.js";
+import {
+  authorityFrom,
+  cleanup,
+  preparedAuthority
+} from "../../../integration/shadow/live-receipt-fixtures.js";
+import type { QueryGammaCompileInputV1 } from
+  "../../../../../recall/decision/query-proof/gamma/compile.js";
+import {
+  SHADOW_CAPTURE_OPERATOR_ID
+} from "../../../../../recall/decision/prefix-capture/identity.js";
+import {
+  QUERY_PROOF_FINAL_DECISION_OPERATOR_ID
+} from "../../../../../recall/decision/query-proof/seal/contract.js";
+import {
+  allObservableDistinct,
+  argmaxQuery,
+  argminQuery,
+  binding,
+  candidate,
+  compileGamma,
+  compileInputFor,
+  compilationFor,
+  distinctQuery,
+  extremumWitness,
+  proposition,
+  scalarQuery,
+  sequenceQuery
+} from "../gamma/gamma-fixture.js";
+import type { CanonicalQueryV1 } from
+  "../../../../../recall/query/canonical-query/index.js";
+import type { QueryGammaCandidateEvidenceV1 } from
+  "../../../../../recall/decision/query-proof/gamma/contract.js";
+
+let prepared: PreparedRecallRequest;
+
+beforeAll(async () => {
+  prepared = await preparedAuthority();
+});
+
+afterAll(() => cleanup(prepared));
+
+function worldOf(
+  keys: readonly string[],
+  compiled = compileGamma(scalarQuery(),
+    keys.map((key) => candidate(key, { bindings: [binding(key)] }))),
+  compileInput: QueryGammaCompileInputV1 = compileInputFor(scalarQuery(),
+    keys.map((key) => candidate(key, { bindings: [binding(key)] })))
+): QueryProofDecideWorldV1 {
+  return Object.freeze({
+    compiled,
+    compile_input: compileInput,
+    candidates: keys.map((key) => Object.freeze({
+      candidate_key: key,
+      object_key: key,
+      token_cost: 1,
+      dimension: "mem",
+      h_eligible: true,
+      utility: emptyWalkUtility(key, key),
+      static_frontier_index: null
+    })),
+    psi_edges: Object.freeze([]),
+    token_budget: 10,
+    per_dimension_limits: null,
+    unresolved_tradeoff_pairs: Object.freeze([]),
+    answer_bindings: keys.map((key) => Object.freeze({
+      candidate_key: key,
+      binding_id: `bind:${key}`,
+      value: key
+    }))
+  });
+}
+
+function worldFromQuery(
+  query: CanonicalQueryV1,
+  evidence: readonly QueryGammaCandidateEvidenceV1[],
+  extra: Partial<QueryGammaCompileInputV1> = {},
+  patch: Partial<QueryProofDecideWorldV1> = {}
+): QueryProofDecideWorldV1 {
+  const compileInput = compileInputFor(query, evidence, extra);
+  const compiled = compileGamma(query, evidence, extra);
+  const keys = evidence.map((row) => row.candidate_key);
+  return Object.freeze({
+    ...worldOf(keys, compiled, compileInput),
+    ...patch,
+    compiled,
+    compile_input: compileInput
+  });
+}
+
+function noFalseSingleton(
+  world: QueryProofDecideWorldV1,
+  fixture: FiniteOracleFixture,
+  coordinates: Parameters<typeof checkDecisionStability>[0]["coordinates"]
+): boolean {
+  const input = checkerInput(world, fixture, coordinates);
+  const kernel = {
+    live_authority: input.live_authority,
+    fixture,
+    concrete_operator: input.concrete_operator,
+    k_max: fixture.k_max,
+    closures: input.closures,
+    coordinates,
+    limits: input.limits,
+    operator: input.abstract_operator
+  };
+  const oracle = enumerateFiniteDecisionOracle({
+    authority: input.live_authority,
+    fixture,
+    operator: input.concrete_operator
+  });
+  const proved = certifyAbstractSingletonWithFiniteOracle(kernel, oracle);
+  return compareAbstractProofToOracle(kernel, proved, oracle).false_singleton;
+}
+
+function checkerInput(
+  world: QueryProofDecideWorldV1,
+  fixture: FiniteOracleFixture,
+  coordinates: Parameters<typeof checkDecisionStability>[0]["coordinates"] = []
+) {
+  return {
+    live_authority: authorityFrom(prepared),
+    fixture,
+    compiled: world.compiled,
+    world,
+    concrete_operator: createQueryProofDecisionOperator(world),
+    abstract_operator: createQueryProofAbstractOperator(world),
+    closures: [],
+    coordinates,
+    limits: { max_channels: 8, max_coordinates: 16, max_sensitivities: 16 },
+    k_max: fixture.k_max
+  };
+}
+
+function emptyFixture(kMax: number): FiniteOracleFixture {
+  return {
+    fixture_id: "query-proof-decide-empty",
+    snapshot_digest: prepared.snapshotVector.vector_digest,
+    k_max: kMax,
+    base_state: {},
+    coordinates: []
+  };
+}
+
+describe("final Decide_Q and SealChecker_v1", () => {
+  it("binds prefixSK of one existing walk and shares the decision-contract digest", () => {
+    const world = worldOf(["A", "B"]);
+    const decided = runQueryProofDecideQ(world, 1);
+    expect(isCapturedWalk(decided.walk)).toBe(true);
+    expect(decided.prefix).toEqual(prefixSK(decided.walk.S_infty, 1));
+    expect(decided.trace.pick_reasons).toHaveLength(1);
+    const transfer = createQueryCompiledWalkTransfer(world.compiled);
+    expect(decided.decision_contract_digest).toContain("sha256:");
+    expect(transfer.kind).toBe("query_compiled_gamma");
+  });
+
+  it("enumerates the bound operator without naming a fixture Decide_Q", () => {
+    const world = worldOf(["A"]);
+    const operator = createQueryProofDecisionOperator(world);
+    expect(operator.operator_id).toBe("query_proof_final_decision_v1");
+    expect(operator.operator_id.toLowerCase().includes("decide_q")).toBe(false);
+    const result = enumerateFiniteDecisionOracle({
+      authority: authorityFrom(prepared),
+      fixture: emptyFixture(1),
+      operator
+    });
+    expect(result.outcomes).toHaveLength(1);
+    expect(result.outcomes[0]?.candidate_prefix).toEqual(["A"]);
+  });
+
+  it("certifies only a singleton prefix/binding/reason and mints a non-kernel seal", () => {
+    const world = worldOf(["A"]);
+    const checker = checkDecisionStability({
+      live_authority: authorityFrom(prepared),
+      fixture: emptyFixture(1),
+      compiled: world.compiled,
+      world,
+      concrete_operator: createQueryProofDecisionOperator(world),
+      abstract_operator: createQueryProofAbstractOperator(world),
+      closures: [],
+      coordinates: [],
+      limits: { max_channels: 8, max_coordinates: 16, max_sensitivities: 16 },
+      k_max: 1
+    });
+    expect(checker.status).toBe("CERTIFIED_STABLE");
+    if (checker.status !== "CERTIFIED_STABLE") throw new Error("expected seal");
+    expect(checker.seal.operator_id).toBe("query_proof_decision_stability_seal_v1");
+    expect(checker.decision_contract_digest).toBe(runQueryProofDecideQ(world, 1)
+      .decision_contract_digest);
+    expect(checker.seal.decision_contract_digest).toBe(checker.decision_contract_digest);
+    expect(parseDecisionStabilitySeal(checker.seal).seal_digest).toBe(checker.seal.seal_digest);
+    expect(() => parseDecisionStabilitySeal({
+      operator_id: "operator_parametric_abstract_proof_kernel_v1",
+      status: "PROVED_SINGLETON"
+    })).toThrow(/kernel-only proof/u);
+  });
+
+  it("does not certify when refinements produce distinct bindings or reasons", () => {
+    const world = worldOf(["A"]);
+    const fixture: FiniteOracleFixture = {
+      fixture_id: "binding-split",
+      snapshot_digest: prepared.snapshotVector.vector_digest,
+      k_max: 1,
+      base_state: {},
+      coordinates: [{
+        coordinate_id: "answer",
+        sensitivity_id: "sensitivity:answer",
+        owner_id: "owner:answer",
+        kind: "answer_binding",
+        abstract_kind: "binding",
+        choices: [
+          { choice_id: "alpha", value: "alpha" },
+          { choice_id: "beta", value: "beta" }
+        ]
+      }]
+    };
+    const checker = checkDecisionStability({
+      live_authority: authorityFrom(prepared),
+      fixture,
+      compiled: world.compiled,
+      world,
+      concrete_operator: createQueryProofDecisionOperator(world),
+      abstract_operator: createQueryProofAbstractOperator(world),
+      closures: [],
+      coordinates: [{
+        coordinate_id: "answer",
+        sensitivity_id: "sensitivity:answer",
+        owner_id: "owner:answer",
+        kind: "binding",
+        possible_bindings: ["alpha", "beta"]
+      }],
+      limits: { max_channels: 8, max_coordinates: 16, max_sensitivities: 16 },
+      k_max: 1
+    });
+    expect(checker.status).toBe("UNCERTIFIED_OPEN");
+  });
+
+  it("leaves an open identity tail uncertified", () => {
+    const world = worldOf(["A"]);
+    const fixture: FiniteOracleFixture = {
+      fixture_id: "open-identity",
+      snapshot_digest: prepared.snapshotVector.vector_digest,
+      k_max: 1,
+      base_state: {},
+      coordinates: [{
+        coordinate_id: "identity-tail",
+        sensitivity_id: "sensitivity:identity-tail",
+        owner_id: "owner:identity-tail",
+        kind: "identity_tie",
+        abstract_kind: "identity_tie",
+        choices: [{ choice_id: "open", value: "open" }]
+      }]
+    };
+    const checker = checkDecisionStability({
+      live_authority: authorityFrom(prepared),
+      fixture,
+      compiled: world.compiled,
+      world,
+      concrete_operator: createQueryProofDecisionOperator(world),
+      abstract_operator: createQueryProofAbstractOperator(world),
+      closures: [],
+      coordinates: [{
+        coordinate_id: "identity-tail",
+        sensitivity_id: "sensitivity:identity-tail",
+        owner_id: "owner:identity-tail",
+        kind: "identity_tie",
+        universe: "open",
+        possible_winner_digests: [`sha256:${"1".repeat(64)}`]
+      }],
+      limits: { max_channels: 8, max_coordinates: 16, max_sensitivities: 16 },
+      k_max: 1
+    });
+    expect(checker.status).not.toBe("CERTIFIED_STABLE");
+  });
+
+  it("fails closed on tampered snapshot identity", () => {
+    const world = worldOf(["A"]);
+    const fixture: FiniteOracleFixture = {
+      ...emptyFixture(1),
+      snapshot_digest: `sha256:${"a".repeat(64)}`
+    };
+    const checker = checkDecisionStability({
+      live_authority: authorityFrom(prepared),
+      fixture,
+      compiled: world.compiled,
+      world,
+      concrete_operator: createQueryProofDecisionOperator(world),
+      abstract_operator: createQueryProofAbstractOperator(world),
+      closures: [],
+      coordinates: [],
+      limits: { max_channels: 8, max_coordinates: 16, max_sensitivities: 16 },
+      k_max: 1
+    });
+    expect(checker.status).toBe("UNSUPPORTED");
+  });
+
+  it("keeps compiled walk receipts parseable and free of live facility G fields", () => {
+    const compiled = compileGamma(scalarQuery([{
+      id: "rel1",
+      relation: "bought",
+      arguments: ["x"]
+    }]), [
+      candidate("A", {
+        bindings: [binding("alice")],
+        propositions: [proposition("rel1")]
+      })
+    ]);
+    const walked = walkShadowCapture({
+      candidates: [{
+        candidate_key: "A",
+        object_key: "A",
+        token_cost: 1,
+        dimension: "mem",
+        h_eligible: true,
+        utility: emptyWalkUtility("A", "A"),
+        static_frontier_index: null
+      }],
+      psi: () => false,
+      token_budget: 10,
+      per_dimension_limits: null,
+      utility_transfer: createQueryCompiledWalkTransfer(compiled)
+    });
+    expect(isCapturedWalk(walked)).toBe(true);
+    if (!isCapturedWalk(walked)) throw new Error("expected");
+    expect(parseCaptureDecisionReceipt(walked.decisions[0]!)).toEqual(walked.decisions[0]);
+    expect(walked.decisions[0]?.G).not.toHaveProperty("unscaled_remainder");
+    expect(walked.decisions[0]?.G).toMatchObject({ certified_independent_support: 0 });
+  });
+
+  it("keeps the third coordinate structural zero through walk, oracle, and checker", () => {
+    const world = worldOf(["A"]);
+    const decided = runQueryProofDecideQ(world, 1);
+    expect(decided.walk.decisions[0]?.G).toEqual({
+      answer_binding_position: 1,
+      required_proposition_support: 0,
+      certified_independent_support: 0
+    });
+    const oracle = enumerateFiniteDecisionOracle({
+      authority: authorityFrom(prepared),
+      fixture: emptyFixture(1),
+      operator: createQueryProofDecisionOperator(world)
+    });
+    expect(oracle.outcomes).toHaveLength(1);
+    const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
+    expect(checker.status).toBe("CERTIFIED_STABLE");
+    if (checker.status !== "CERTIFIED_STABLE") throw new Error("expected seal");
+    expect(checker.seal.decision_contract_digest).toBe(decided.decision_contract_digest);
+  });
+
+  it("does not certify unresolved semantic feasibility", () => {
+    const evidence = [
+      candidate("open", { bindings_status: "unknown" }),
+      candidate("ok", { bindings: [binding("alice")] })
+    ];
+    const world = worldFromQuery(scalarQuery(), evidence);
+    const decided = runQueryProofDecideQ(world, 2);
+    expect(decided.prefix).toEqual(["ok"]);
+    expect(decided.walk.S_infty).toEqual(["ok"]);
+    const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
+    expect(checker.status).not.toBe("CERTIFIED_STABLE");
+  });
+
+  it("keeps infeasible candidates out of Decide_Q prefix and certification", () => {
+    const evidence = [
+      candidate("refute", {
+        bindings: [binding("alice")],
+        propositions: [proposition("rel1", "refutes")]
+      }),
+      candidate("ok", {
+        bindings: [binding("alice")],
+        propositions: [proposition("rel1")]
+      })
+    ];
+    const world = worldFromQuery(scalarQuery([{
+      id: "rel1",
+      relation: "bought",
+      arguments: ["x"]
+    }]), evidence);
+    const decided = runQueryProofDecideQ(world, 2);
+    expect(decided.prefix).toEqual(["ok"]);
+    expect(decided.walk.S_infty).not.toContain("refute");
+    const checker = checkDecisionStability(checkerInput(world, emptyFixture(2)));
+    expect(checker.status).toBe("CERTIFIED_STABLE");
+  });
+
+  it("does not certify all_observable without a covering closure", () => {
+    const world = worldFromQuery(allObservableDistinct(), [
+      candidate("A", { bindings: [binding("alice")] })
+    ]);
+    expect(checkDecisionStability(checkerInput(world, emptyFixture(1))).status)
+      .toBe("UNCERTIFIED_OPEN");
+    const live = deriveLiveClosureAuthorityBinding(authorityFrom(prepared));
+    const universe = `sha256:${"7".repeat(64)}` as const;
+    const scope = {
+      ...live,
+      query_digest: world.compiled.compilation_digest,
+      observer_id: "observer:unscoped",
+      channel_id: "channel:unscoped",
+      domain_id: "domain:unscoped",
+      universe_digest: universe
+    };
+    const unscoped = createChannelClosureResult({
+      scope,
+      status: "exact_closed",
+      remaining_effects: [],
+      completeness_refs: [createScopedCompletenessReference({
+        scope,
+        source_receipt_digest: universe,
+        universe_digest: universe,
+        coordinate_id: "membership"
+      })],
+      source_kind: "structural_only",
+      source_receipt_digests: [universe],
+      reason: "unscoped-all-observable"
+    });
+    const unscopedCheck = checkDecisionStability({
+      ...checkerInput(world, emptyFixture(1)),
+      closures: [unscoped]
+    });
+    expect(unscopedCheck.status).toBe("UNCERTIFIED_OPEN");
+    if (unscopedCheck.status !== "UNCERTIFIED_OPEN") throw new Error("expected open");
+    expect(unscopedCheck.reason).toMatch(/seal obligations/u);
+  });
+
+  it("does not certify an unresolved trade-off at a selected boundary", () => {
+    const world = worldFromQuery(scalarQuery(), [
+      candidate("A", { bindings: [binding("alice")] }),
+      candidate("B", { bindings: [binding("bob")] })
+    ], {}, { unresolved_tradeoff_pairs: Object.freeze([["A", "B"]] as const) });
+    const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
+    expect(checker.status).toBe("UNCERTIFIED_OPEN");
+  });
+
+  it("records live compilation identity separately from compiled Gamma query identity", () => {
+    const world = worldOf(["A"]);
+    const liveDigest = authorityFrom(prepared).canonical_query_compilation.digest;
+    expect(world.compiled.compilation_digest).not.toBe(liveDigest);
+    const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
+    expect(checker.status).toBe("CERTIFIED_STABLE");
+    if (checker.status !== "CERTIFIED_STABLE") throw new Error("expected seal");
+    expect(checker.seal.live_compilation_digest).toBe(liveDigest);
+    expect(checker.seal.compilation_digest).toBe(world.compiled.compilation_digest);
+    expect(checker.seal.live_compilation_digest).not.toBe(checker.seal.compilation_digest);
+    expect(() => parseDecisionStabilitySeal({
+      ...checker.seal,
+      live_compilation_digest: `sha256:${"d".repeat(64)}`
+    })).toThrow(/digest mismatch/u);
+  });
+
+  it("fails closed on tampered query, policy, walk, and operator identity", () => {
+    const world = worldOf(["A"]);
+    const queryTamper = checkDecisionStability({
+      ...checkerInput(world, emptyFixture(1)),
+      compiled: { ...world.compiled, query_digest: `sha256:${"b".repeat(64)}` }
+    });
+    expect(queryTamper.status).toBe("UNSUPPORTED");
+
+    const policyWorld = worldFromQuery(scalarQuery(), [
+      candidate("A", { bindings: [binding("alice")] })
+    ], {
+      resource_policy: {
+        schema_version: 1,
+        reject_duplicate_object: true,
+        token_budget: 4,
+        per_dimension_limits: null
+      }
+    }, { token_budget: 10 });
+    const policyTamper = checkDecisionStability(checkerInput(policyWorld, emptyFixture(1)));
+    expect(policyTamper.status).toBe("UNSUPPORTED");
+
+    const operatorTamper = checkDecisionStability({
+      ...checkerInput(world, emptyFixture(1)),
+      concrete_operator: {
+        operator_id: "not_final_decision_v1",
+        decide: createQueryProofDecisionOperator(world).decide
+      }
+    });
+    expect(operatorTamper.status).toBe("UNSUPPORTED");
+
+    const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
+    expect(checker.status).toBe("CERTIFIED_STABLE");
+    if (checker.status !== "CERTIFIED_STABLE") throw new Error("expected seal");
+    expect(() => parseDecisionStabilitySeal({
+      ...checker.seal,
+      walk_operator_id: "not-shadow-walk"
+    })).toThrow(/walk operator identity/u);
+    expect(() => parseDecisionStabilitySeal({
+      ...checker.seal,
+      seal_digest: `sha256:${"c".repeat(64)}`
+    })).toThrow(/digest mismatch/u);
+    expect(SHADOW_CAPTURE_OPERATOR_ID).toBe(checker.seal.walk_operator_id);
+    expect(QUERY_PROOF_FINAL_DECISION_OPERATOR_ID).toBe(
+      createQueryProofDecisionOperator(world).operator_id
+    );
+  });
+
+  it("does not certify finite identity remaining effects that split the prefix", () => {
+    const world = worldOf(["A", "B"]);
+    const fixture: FiniteOracleFixture = {
+      fixture_id: "identity-split",
+      snapshot_digest: prepared.snapshotVector.vector_digest,
+      k_max: 1,
+      base_state: {},
+      coordinates: [{
+        coordinate_id: "identity-tail",
+        sensitivity_id: "sensitivity:identity-tail",
+        owner_id: "owner:identity-tail",
+        kind: "identity_tie",
+        abstract_kind: "identity_tie",
+        choices: [
+          { choice_id: "A", value: "A" },
+          { choice_id: "B", value: "B" }
+        ]
+      }]
+    };
+    const checker = checkDecisionStability(checkerInput(world, fixture, [{
+      coordinate_id: "identity-tail",
+      sensitivity_id: "sensitivity:identity-tail",
+      owner_id: "owner:identity-tail",
+      kind: "identity_tie",
+      universe: "finite",
+      possible_winner_digests: ["A", "B"]
+    }]));
+    expect(checker.status).not.toBe("CERTIFIED_STABLE");
+  });
+
+  it("does not certify proposition or correlation remaining effects that change the trace", () => {
+    const query = scalarQuery([{
+      id: "rel1",
+      relation: "bought",
+      arguments: ["x"]
+    }], [{
+      id: "need-ind",
+      constraint: "independent_support",
+      arguments: ["x"]
+    }]);
+    const world = worldFromQuery(query, [
+      candidate("Z", {
+        bindings: [binding("alice")],
+        propositions: [
+          proposition("rel1"),
+          proposition("need-ind", "supports", "certified_independent")
+        ]
+      }),
+      candidate("A", {
+        bindings: [binding("bob")],
+        propositions: [
+          proposition("rel1"),
+          proposition("need-ind", "supports", "correlated")
+        ]
+      })
+    ]);
+    expect(checkDecisionStability(checkerInput(world, emptyFixture(1))).status)
+      .toBe("CERTIFIED_STABLE");
+    expect(runQueryProofDecideQ(world, 1).prefix).toEqual(["Z"]);
+    const correlation: FiniteOracleFixture = {
+      fixture_id: "correlation-open",
+      snapshot_digest: prepared.snapshotVector.vector_digest,
+      k_max: 1,
+      base_state: {},
+      coordinates: [{
+        coordinate_id: "Z",
+        sensitivity_id: "sensitivity:correlation",
+        owner_id: "owner:correlation",
+        kind: "correlation_state",
+        abstract_kind: "correlation",
+        choices: [
+          { choice_id: "same_group", value: "same_group" },
+          { choice_id: "different_group", value: "different_group" }
+        ]
+      }]
+    };
+    expect(checkDecisionStability(checkerInput(world, correlation, [{
+      coordinate_id: "Z",
+      sensitivity_id: "sensitivity:correlation",
+      owner_id: "owner:correlation",
+      kind: "correlation",
+      possible_relations: ["same_group", "different_group"]
+    }])).status).not.toBe("CERTIFIED_STABLE");
+
+    const conflict: FiniteOracleFixture = {
+      fixture_id: "proposition-open",
+      snapshot_digest: prepared.snapshotVector.vector_digest,
+      k_max: 1,
+      base_state: {},
+      coordinates: [{
+        coordinate_id: "rel1",
+        sensitivity_id: "sensitivity:prop",
+        owner_id: "owner:prop",
+        kind: "proposition_conflict",
+        abstract_kind: "four_valued_proposition",
+        choices: [
+          { choice_id: "supported_only", value: "supported_only" },
+          { choice_id: "refutes", value: "refutes" }
+        ]
+      }]
+    };
+    expect(checkDecisionStability(checkerInput(world, conflict, [{
+      coordinate_id: "rel1",
+      sensitivity_id: "sensitivity:prop",
+      owner_id: "owner:prop",
+      kind: "four_valued_proposition",
+      possible_values: ["supported_only", "refutes"]
+    }])).status).not.toBe("CERTIFIED_STABLE");
+  });
+
+  it("certifies empty-coordinate Decide_Q for every v1 operator fixture", () => {
+    const argmaxCompilation = compilationFor(argmaxQuery());
+    const argminCompilation = compilationFor(argminQuery());
+    const operators: readonly QueryProofDecideWorldV1[] = [
+      worldFromQuery(scalarQuery(), [candidate("A", { bindings: [binding("alice")] })]),
+      worldFromQuery(distinctQuery(), [candidate("A", { bindings: [binding("alice")] })]),
+      worldFromQuery(sequenceQuery(1), [
+        candidate("A", { sequence_slots: [{ position: 0, binding: "alice" }] })
+      ]),
+      worldFromQuery(argmaxQuery(), [
+        candidate("A", { bindings: [binding("alice")], extremal_bindings: ["alice"] })
+      ], {
+        compilation: argmaxCompilation,
+        extremum_witness: extremumWitness(argmaxCompilation, "argmax", ["alice"])
+      }),
+      worldFromQuery(argminQuery(), [
+        candidate("A", { bindings: [binding("alice")], extremal_bindings: ["alice"] })
+      ], {
+        compilation: argminCompilation,
+        extremum_witness: extremumWitness(argminCompilation, "argmin", ["alice"])
+      })
+    ];
+    for (const world of operators) {
+      expect(world.compiled.compile_status).toBe("compiled");
+      const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
+      expect(checker.status).toBe("CERTIFIED_STABLE");
+    }
+  });
+
+  it("lifts same-lineage complementary support through SealChecker", () => {
+    const world = worldFromQuery(scalarQuery([
+      { id: "rel1", relation: "bought", arguments: ["x"] },
+      { id: "rel2", relation: "from", arguments: ["x"] }
+    ]), [
+      candidate("first", {
+        bindings: [binding("alice")],
+        propositions: [proposition("rel1"), proposition("rel2", "absent")]
+      }),
+      candidate("lineage", {
+        bindings: [binding("alice")],
+        propositions: [proposition("rel1", "absent"), proposition("rel2")]
+      })
+    ]);
+    const decided = runQueryProofDecideQ(world, 2);
+    expect(decided.prefix).toEqual(["first", "lineage"]);
+    const checker = checkDecisionStability(checkerInput(world, emptyFixture(2)));
+    expect(checker.status).toBe("CERTIFIED_STABLE");
+  });
+
+  it("records zero false Decide_Q singletons across operators and simultaneous remaining effects", () => {
+    const argmaxCompilation = compilationFor(argmaxQuery());
+    const argminCompilation = compilationFor(argminQuery());
+    const operators: readonly QueryProofDecideWorldV1[] = [
+      worldFromQuery(scalarQuery(), [candidate("A", { bindings: [binding("alice")] })]),
+      worldFromQuery(distinctQuery(), [candidate("A", { bindings: [binding("alice")] })]),
+      worldFromQuery(sequenceQuery(1), [
+        candidate("A", { sequence_slots: [{ position: 0, binding: "alice" }] })
+      ]),
+      worldFromQuery(argmaxQuery(), [
+        candidate("A", { bindings: [binding("alice")], extremal_bindings: ["alice"] })
+      ], {
+        compilation: argmaxCompilation,
+        extremum_witness: extremumWitness(argmaxCompilation, "argmax", ["alice"])
+      }),
+      worldFromQuery(argminQuery(), [
+        candidate("A", { bindings: [binding("alice")], extremal_bindings: ["alice"] })
+      ], {
+        compilation: argminCompilation,
+        extremum_witness: extremumWitness(argminCompilation, "argmin", ["alice"])
+      })
+    ];
+    for (const world of operators) {
+      expect(noFalseSingleton(world, emptyFixture(1), [])).toBe(false);
+    }
+    const split = worldOf(["A", "B"]);
+    const fixture: FiniteOracleFixture = {
+      fixture_id: "simultaneous-novelty-feasibility-tie",
+      snapshot_digest: prepared.snapshotVector.vector_digest,
+      k_max: 1,
+      base_state: {},
+      coordinates: [
+        {
+          coordinate_id: "B",
+          sensitivity_id: "sensitivity:membership",
+          owner_id: "owner:membership",
+          kind: "candidate_membership",
+          abstract_kind: "membership",
+          choices: [
+            { choice_id: "absent", value: false },
+            { choice_id: "present", value: true }
+          ]
+        },
+        {
+          coordinate_id: "A",
+          sensitivity_id: "sensitivity:feasibility",
+          owner_id: "owner:feasibility",
+          kind: "semantic_feasibility",
+          abstract_kind: "semantic_feasibility",
+          choices: [
+            { choice_id: "feasible", value: "feasible" },
+            { choice_id: "infeasible", value: "infeasible" }
+          ]
+        },
+        {
+          coordinate_id: "identity-tail",
+          sensitivity_id: "sensitivity:identity-tail",
+          owner_id: "owner:identity-tail",
+          kind: "identity_tie",
+          abstract_kind: "identity_tie",
+          choices: [
+            { choice_id: "A", value: "A" },
+            { choice_id: "B", value: "B" }
+          ]
+        }
+      ]
+    };
+    const coordinates = [
+      {
+        coordinate_id: "B",
+        sensitivity_id: "sensitivity:membership",
+        owner_id: "owner:membership",
+        kind: "membership" as const,
+        possible_states: ["absent", "present"] as const
+      },
+      {
+        coordinate_id: "A",
+        sensitivity_id: "sensitivity:feasibility",
+        owner_id: "owner:feasibility",
+        kind: "semantic_feasibility" as const,
+        possible_states: ["feasible", "infeasible"] as const
+      },
+      {
+        coordinate_id: "identity-tail",
+        sensitivity_id: "sensitivity:identity-tail",
+        owner_id: "owner:identity-tail",
+        kind: "identity_tie" as const,
+        universe: "finite" as const,
+        possible_winner_digests: ["A", "B"]
+      }
+    ];
+    expect(checkDecisionStability(checkerInput(split, fixture, coordinates)).status)
+      .not.toBe("CERTIFIED_STABLE");
+    expect(noFalseSingleton(split, fixture, coordinates)).toBe(false);
+  });
+
+  it("lifts higher-stratum budget priority through Decide_Q", () => {
+    const base = worldFromQuery(scalarQuery([{
+      id: "rel1",
+      relation: "bought",
+      arguments: ["x"]
+    }]), [
+      candidate("binding", { bindings: [binding("alice")], token_cost: 2 }),
+      candidate("prop-only", {
+        bindings: [],
+        propositions: [proposition("rel1")],
+        token_cost: 1
+      })
+    ], {
+      resource_policy: {
+        schema_version: 1,
+        reject_duplicate_object: true,
+        token_budget: 3,
+        per_dimension_limits: null
+      }
+    }, { token_budget: 3 });
+    const world = Object.freeze({
+      ...base,
+      candidates: base.candidates.map((row) => Object.freeze({
+        ...row,
+        token_cost: row.candidate_key === "binding" ? 2 : 1
+      }))
+    });
+    const decided = runQueryProofDecideQ(world, 2);
+    expect(decided.prefix[0]).toBe("binding");
+    expect(checkDecisionStability(checkerInput(world, emptyFixture(2))).status)
+      .toBe("CERTIFIED_STABLE");
+  });
+
+  it("lifts target-only lower-frontier novelty through SealChecker", () => {
+    const base = worldFromQuery(distinctQuery(), [
+      candidate("core", { bindings: [] }),
+      candidate("lower", { bindings: [binding("bob")] })
+    ]);
+    const world = Object.freeze({
+      ...base,
+      psi_edges: Object.freeze([["core", "lower"]] as const),
+      candidates: base.candidates.map((row) => Object.freeze({
+        ...row,
+        static_frontier_index: row.candidate_key === "core" ? 1 : 2
+      }))
+    });
+    const decided = runQueryProofDecideQ(world, 2);
+    expect(decided.prefix).toContain("lower");
+    expect(checkDecisionStability(checkerInput(world, emptyFixture(2))).status)
+      .toBe("CERTIFIED_STABLE");
+  });
+
+  it("keeps a partial oracle base_state from dropping trade-off pairs", () => {
+    const world = worldFromQuery(scalarQuery(), [
+      candidate("A", { bindings: [binding("alice")] }),
+      candidate("B", { bindings: [binding("bob")] })
+    ], {}, { unresolved_tradeoff_pairs: Object.freeze([["A", "B"]] as const) });
+    const fixture: FiniteOracleFixture = {
+      ...emptyFixture(1),
+      base_state: {
+        compiled: world.compiled as never,
+        candidates: world.candidates as never
+      }
+    };
+    const checker = checkDecisionStability(checkerInput(world, fixture));
+    expect(checker.status).toBe("UNCERTIFIED_OPEN");
+  });
+});
