@@ -17,6 +17,13 @@ import type { KeywordLexicalMergeCapture, KeywordSearchFieldResult } from
   "../../../../../recall/runtime/recall-service-types.js";
 import type { PreparedRecallRequest } from
   "../../../../../recall/runtime/recall-service-runner-types.js";
+import { compileCanonicalQueryCompilation } from
+  "../../../../../recall/query/canonical-query/index.js";
+import {
+  createSnapshotCoherenceReceiptV1,
+  createSnapshotVectorV1,
+  finalizePreparedSnapshotReadLease
+} from "../../../../../recall/runtime/snapshot-coherence/index.js";
 import type { LexicalBoundProducerReceipt } from
   "../../../../../recall/runtime/recall-search-port-types.js";
 import { admitLiveLexicalIntervalSources } from
@@ -27,6 +34,9 @@ import {
   cleanup
 } from "../../../integration/shadow/live-receipt-fixtures.js";
 import { plantProof } from "../adapters/lexical-bound/d1-proof-fixture.js";
+import { evaluateAbstractProofKernel } from
+  "../../../../../recall/decision/query-proof/proof/abstract/kernel.js";
+import { createKernelCase } from "../proof/abstract/proof-fixture.js";
 
 let prepared: PreparedRecallRequest;
 
@@ -51,6 +61,21 @@ describe("live-source lexical closure", () => {
   it("does not promote cap/truncation or list absence", async () => {
     expect((await closeIssued(allLaneProof(1)))?.status).toBe("uncertified");
     expect((await closeIssued(plantProof()))?.status).toBe("uncertified");
+  });
+
+  it("keeps an issued lexical receipt with bounded source lag uncertified and OPEN", async () => {
+    const bounded = boundedLexicalAuthority(prepared);
+    await withIssuedSource(allLaneProof(2), (authority) => {
+      const closure = closeLexicalBoundChannel(authority)!;
+      expect(closure).toMatchObject({
+        status: "uncertified",
+        reason: "lexical_source_bounded_lag_has_no_cq_effect_mapping"
+      });
+      expect(() => verifyChannelClosureResult(closure, authority)).not.toThrow();
+      expect(evaluateAbstractProofKernel(createKernelCase(authority, {
+        closures: [closure]
+      }).input).status).toBe("OPEN");
+    }, bounded);
   });
 
   it("does not consume a planted lexical proof without a live source bundle", () => {
@@ -95,6 +120,24 @@ describe("live-source lexical closure", () => {
       }))).toBeNull();
     });
   });
+
+  it("admits a source from the same one-time authority capture", async () => {
+    await withIssuedSource(allLaneProof(2), (authority) => {
+      let workspaceReads = 0;
+      const switching = new Proxy({ ...authority }, {
+        get(target, property, receiver) {
+          if (property === "workspace_id") {
+            workspaceReads += 1;
+            return workspaceReads === 1 ? authority.workspace_id : "workspace-injected";
+          }
+          return Reflect.get(target, property, receiver);
+        }
+      });
+
+      expect(closeLexicalBoundChannel(switching)?.status).toBe("exact_closed");
+      expect(workspaceReads).toBe(1);
+    });
+  });
 });
 
 async function closeIssued(proof: ReturnType<typeof plantProof>) {
@@ -106,7 +149,8 @@ async function withIssuedSource<T>(
   proof: ReturnType<typeof plantProof>,
   use: (authority: ReturnType<typeof authorityFrom> & Readonly<{
     lexical_source_bundle: ReturnType<typeof createRecallRetrievalFieldBundle>;
-  }>) => T
+  }>) => T,
+  sourcePrepared: PreparedRecallRequest = prepared
 ): Promise<T> {
   if (proof.status !== "captured") throw new Error("captured proof required");
   const receipt = canonicalReceipt(proof.receipt);
@@ -128,7 +172,7 @@ async function withIssuedSource<T>(
     }) }
   });
   return await withActiveRecallReadSnapshot(snapshotPort(), async (capability) => {
-    bindRetrievalFieldBundleReadAuthority(bundle, prepared.snapshotReadLease, capability);
+    bindRetrievalFieldBundleReadAuthority(bundle, sourcePrepared.snapshotReadLease, capability);
     await bundle.searchMemoryKeyword({
       variant: "lexical_relaxed",
       queryText: "stable",
@@ -139,10 +183,10 @@ async function withIssuedSource<T>(
     if (issued === undefined) throw new Error("expected issued lexical source");
     verifyLexicalIntervalSourceReceiptV1(issued, {
       bundle,
-      lease: prepared.snapshotReadLease
+      lease: sourcePrepared.snapshotReadLease
     });
     const authority = Object.freeze({
-      ...authorityFrom(prepared),
+      ...authorityFrom(sourcePrepared),
       lexical_source_bundle: bundle,
       expected_lexical_request_pins: [Object.freeze({
         workspace_id: "workspace-1",
@@ -156,6 +200,44 @@ async function withIssuedSource<T>(
       throw new Error("expected live lexical source admission");
     }
     return use(authority);
+  });
+}
+
+function boundedLexicalAuthority(
+  source: PreparedRecallRequest
+): PreparedRecallRequest {
+  const { schema_version: _schemaVersion, vector_digest: _vectorDigest, ...input } =
+    source.snapshotVector;
+  const snapshotVector = createSnapshotVectorV1({
+    ...input,
+    retrieval_channel_snapshots: Object.freeze(
+      source.snapshotVector.retrieval_channel_snapshots.map((declaration) =>
+        declaration.source_owner === "lexical_relaxed"
+          ? Object.freeze({
+              ...declaration,
+              source_frontier: "lexical-frontier:test-bounded",
+              generation: "lexical-generation:test-bounded",
+              lag_bound: Object.freeze({
+                kind: "bounded" as const,
+                remaining_effect: Object.freeze({
+                  source_owner: "lexical_relaxed",
+                  effect_id: "lexical-lag:test-bounded"
+                })
+              })
+            })
+          : declaration)
+    )
+  });
+  const snapshotCoherenceReceipt = createSnapshotCoherenceReceiptV1(snapshotVector);
+  return Object.freeze({
+    ...source,
+    snapshotVector,
+    snapshotCoherenceReceipt,
+    snapshotReadLease: finalizePreparedSnapshotReadLease(snapshotVector),
+    canonicalQueryCompilation: compileCanonicalQueryCompilation(
+      source.canonicalQueryEvidence,
+      snapshotCoherenceReceipt
+    )
   });
 }
 

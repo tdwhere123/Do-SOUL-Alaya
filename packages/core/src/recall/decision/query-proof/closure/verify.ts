@@ -10,7 +10,10 @@ import {
   type ChannelClosureStatus,
   type ScopedCompletenessReference
 } from "./contract.js";
-import { deriveLiveClosureAuthorityBinding } from "./live-authority-binding.js";
+import {
+  captureVerifiedLiveClosureAuthority,
+  type LiveClosureAuthorityBinding
+} from "./live-authority-binding.js";
 import { closeLexicalBoundChannel } from "./lexical-bound.js";
 import type { LiveQueryProofAuthority } from "../live-query-proof-authority.js";
 
@@ -18,13 +21,14 @@ export function verifyChannelClosureResult(
   result: ChannelClosureResult,
   authority: LiveQueryProofAuthority
 ): void {
+  const captured = captureVerifiedLiveClosureAuthority(authority);
   verifyClosureEnvelope(result);
-  verifyLiveClosureBinding(result, authority);
+  verifyLiveClosureBinding(result, captured.binding);
   verifyClosurePayload(result);
   if (result.source_kind !== "live_lexical_interval") {
     throw new Error("channel closure lacks an admitted live source");
   }
-  const expected = closeLexicalBoundChannel(authority);
+  const expected = closeLexicalBoundChannel(captured.source_authority);
   if (expected === null || expected.result_digest !== result.result_digest) {
     throw new Error("channel closure live source binding mismatch");
   }
@@ -66,10 +70,9 @@ function verifyClosureEnvelope(result: ChannelClosureResult): void {
 
 function verifyLiveClosureBinding(
   result: ChannelClosureResult,
-  authority: LiveQueryProofAuthority
+  live: LiveClosureAuthorityBinding
 ): void {
   const sensitivities = normalizeClosureQuerySensitivities(result.sensitivity_manifest);
-  const live = deriveLiveClosureAuthorityBinding(authority);
   if (result.authority_digest !== live.authority_digest ||
       result.query_digest !== live.query_digest ||
       result.request_digest !== live.request_digest ||

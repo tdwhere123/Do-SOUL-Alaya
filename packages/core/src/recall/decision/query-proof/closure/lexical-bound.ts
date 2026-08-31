@@ -14,8 +14,22 @@ import {
 export function closeLexicalBoundChannel(
   authority: LiveQueryProofAuthority
 ): ChannelClosureResult | null {
-  const source = readLiveLexicalClosureSource(authority);
+  return closeLexicalSource(readLiveLexicalClosureSource(authority));
+}
+
+function closeLexicalSource(
+  source: ReturnType<typeof readLiveLexicalClosureSource>
+): ChannelClosureResult | null {
   if (source === null) return null;
+  if (source.source_lag_kind !== "exact") {
+    return createChannelClosureResult({
+      scope: source.scope,
+      status: "uncertified",
+      source_kind: "live_lexical_interval",
+      source_receipt_digests: source.source_receipt_digests,
+      reason: "lexical_source_bounded_lag_has_no_cq_effect_mapping"
+    });
+  }
   const receipt = source.receipts[0]!;
   const states = receipt.producer_receipt.lanes.map((lane) =>
     classifyLane(lane, source.scope, receipt.receipt_digest));

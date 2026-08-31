@@ -208,6 +208,55 @@ describe("oracle-certified abstract proof kernel", () => {
       reason: "unresolved channel or abstract domain"
     });
   });
+
+  it("records zero false singletons across the declared finite differential corpus", () => {
+    const singleton = createKernelCase(authorityFrom(prepared));
+    const membership = membershipCoordinate(["absent", "present"]);
+    const open = createKernelCase(authorityFrom(prepared), {
+      coordinates: [membership],
+      fixture: membershipFixture(),
+      concrete: membershipConcrete(),
+      operator: Object.freeze({
+        operator_id: "fixture_membership_complete_abstract_v1",
+        evaluate: () => Object.freeze({
+          status: "outcomes" as const,
+          handled_sensitivity_ids: Object.freeze([membership.sensitivity_id]),
+          outcomes: Object.freeze([trace([], "membership"),
+            trace(["candidate-a"], "membership")])
+        })
+      }),
+      k_max: 1
+    });
+    const cases = [singleton, open];
+    const comparisons = cases.map((testCase) => {
+      const oracle = enumerate(testCase.fixture, testCase.concrete);
+      const proof = certifyAbstractSingletonWithFiniteOracle(testCase.input, oracle);
+      return compareAbstractProofToOracle(testCase.input, proof, oracle);
+    });
+
+    expect(comparisons.some(({ false_singleton }) => false_singleton)).toBe(false);
+    expect(comparisons.flatMap(({ missing_concrete_outcome_digests }) =>
+      missing_concrete_outcome_digests)).toEqual([]);
+  });
+
+  it("uses one verified authority capture for the complete proof operation", () => {
+    const valid = authorityFrom(prepared);
+    const baseline = createKernelCase(valid);
+    let workspaceReads = 0;
+    const switching = new Proxy({ ...valid }, {
+      get(target, property, receiver) {
+        if (property === "workspace_id") {
+          workspaceReads += 1;
+          return workspaceReads === 1 ? valid.workspace_id : "workspace-injected";
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    const input = Object.freeze({ ...baseline.input, live_authority: switching });
+
+    expect(evaluateAbstractProofKernel(input).status).toBe("OPEN");
+    expect(workspaceReads).toBe(1);
+  });
 });
 
 function enumerate(fixture: FiniteOracleFixture, operator: FiniteDecisionOperator) {

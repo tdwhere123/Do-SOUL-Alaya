@@ -52,6 +52,108 @@ describe("source-bound finite exhaustive oracle", () => {
     ]);
   });
 
+  it("keeps one prefix with different answer bindings and reasons distinct", () => {
+    const fixture: FiniteOracleFixture = {
+      fixture_id: "binding-reason-distinctness",
+      snapshot_digest: prepared.snapshotVector.vector_digest,
+      k_max: 1,
+      base_state: {},
+      coordinates: [coordinate("binding", "answer_binding", "binding", ["alpha", "beta"])]
+    };
+    const result = enumerate(fixture, {
+      operator_id: "fixture_binding_reason_operator_v1",
+      decide: ({ refinement }) => {
+        const binding = String(valueOf(refinement, "binding"));
+        return {
+          candidate_prefix: ["candidate-a"],
+          answer_bindings: [{ binding_id: "answer", value: binding }],
+          pick_reasons: [{
+            position: 0,
+            candidate_key: "candidate-a",
+            reason_id: `binding:${binding}`
+          }]
+        };
+      }
+    });
+
+    expect(result.outcomes).toHaveLength(2);
+    expect(result.outcomes.map(({ answer_bindings }) => answer_bindings[0]?.value))
+      .toEqual(["alpha", "beta"]);
+    expect(new Set(result.outcomes.map(({ trace_digest }) => trace_digest)).size).toBe(2);
+  });
+
+  it("exposes the legal identity-tail winner in the exact outcome set", () => {
+    const fixture: FiniteOracleFixture = {
+      fixture_id: "legal-identity-tail",
+      snapshot_digest: prepared.snapshotVector.vector_digest,
+      k_max: 1,
+      base_state: {},
+      coordinates: [coordinate("tie", "identity_tie", "identity_tie",
+        ["a-only", "a-and-0"])]
+    };
+    const result = enumerate(fixture, {
+      operator_id: "fixture_identity_tail_operator_v1",
+      decide: ({ refinement }) => trace([
+        valueOf(refinement, "tie") === "a-only" ? "a" : "0"
+      ], "exact-tie-identity")
+    });
+
+    expect(result.outcomes.map(({ candidate_prefix }) => candidate_prefix))
+      .toEqual([["0"], ["a"]]);
+  });
+
+  it("normalizes coordinate and choice permutations to identical oracle bytes", () => {
+    const forward = pairFixture();
+    const reverse: FiniteOracleFixture = {
+      ...forward,
+      coordinates: [...forward.coordinates].reverse().map((row) => ({
+        ...row,
+        choices: [...row.choices].reverse()
+      }))
+    };
+
+    expect(enumerate(reverse, pairOperator())).toEqual(enumerate(forward, pairOperator()));
+  });
+
+  it("enumerates all refinement kinds as one 128-state simultaneous Cartesian product", () => {
+    const specifications = [
+      ["membership", "candidate_membership", "membership", [false, true]],
+      ["witness", "witness_refinement", "numeric_interval", [0, 1]],
+      ["feasibility", "semantic_feasibility", "semantic_feasibility",
+        ["infeasible", "feasible"]],
+      ["binding", "answer_binding", "binding", ["alpha", "beta"]],
+      ["conflict", "proposition_conflict", "four_valued_proposition",
+        ["supported_only", "both"]],
+      ["correlation", "correlation_state", "correlation",
+        ["same_group", "different_group"]],
+      ["tie", "identity_tie", "identity_tie", ["a", "0"]]
+    ] as const;
+    const fixture: FiniteOracleFixture = {
+      fixture_id: "all-refinement-kinds-simultaneous",
+      snapshot_digest: prepared.snapshotVector.vector_digest,
+      k_max: 1,
+      base_state: {},
+      coordinates: specifications.map(([id, kind, abstractKind, values]) =>
+        coordinate(id, kind, abstractKind, values))
+    };
+    const result = enumerate(fixture, {
+      operator_id: "fixture_all_kinds_operator_v1",
+      decide: ({ refinement }) => trace(
+        refinement.assignments.some(({ choice_id }) =>
+          choice_id === "true" || choice_id === "1" || choice_id === "feasible" ||
+          choice_id === "beta" || choice_id === "both" ||
+          choice_id === "different_group" || choice_id === "0")
+          ? ["candidate-a"] : [],
+        "all-kinds"
+      )
+    });
+
+    expect(result.refinement_count).toBe(128);
+    expect(result.choice_coverage).toHaveLength(14);
+    expect(result.choice_coverage.every(({ refinement_count }) =>
+      refinement_count === 64)).toBe(true);
+  });
+
   it("rejects a naked self-digested exclusion instead of deleting a branch", () => {
     const fixture = pairFixture();
     const planted = {
@@ -139,6 +241,27 @@ describe("source-bound finite exhaustive oracle", () => {
       decide: () => trace([], "valid")
     })).not.toThrow();
   });
+
+  it("uses one verified authority capture for the complete oracle operation", () => {
+    const valid = authorityFrom(prepared);
+    let workspaceReads = 0;
+    const switching = new Proxy({ ...valid }, {
+      get(target, property, receiver) {
+        if (property === "workspace_id") {
+          workspaceReads += 1;
+          return workspaceReads === 1 ? valid.workspace_id : "workspace-injected";
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+
+    expect(enumerateFiniteDecisionOracle({
+      authority: switching,
+      fixture: oneCandidateFixture(),
+      operator: membershipOperator()
+    }).authority_digest).toMatch(/^sha256:/u);
+    expect(workspaceReads).toBe(1);
+  });
 });
 
 function enumerate(fixture: FiniteOracleFixture, operator: FiniteDecisionOperator) {
@@ -175,7 +298,7 @@ function coordinate(
   coordinateId: string,
   kind: FiniteRefinementKind,
   abstractKind: TransferAbstractKind,
-  values: readonly (string | boolean)[]
+  values: readonly (string | boolean | number | null)[]
 ) {
   return {
     coordinate_id: coordinateId,

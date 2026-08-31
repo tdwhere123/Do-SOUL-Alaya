@@ -49,6 +49,69 @@ describe("live-authority channel closure admission", () => {
     expect(closeFiniteFieldChannel(valid, finiteSeal())?.status).toBe("uncertified");
   });
 
+  it("captures each top-level live-authority field exactly once before verification", () => {
+    const valid = authorityFrom(prepared);
+    let workspaceReads = 0;
+    const switching = new Proxy({ ...valid }, {
+      get(target, property, receiver) {
+        if (property === "workspace_id") {
+          workspaceReads += 1;
+          return workspaceReads === 1 ? valid.workspace_id : "workspace-injected";
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+
+    expect(deriveLiveClosureAuthorityBinding(switching)).toMatchObject({
+      workspace_id: valid.workspace_id
+    });
+    expect(workspaceReads).toBe(1);
+  });
+
+  it("verifies the same captured nested bytes instead of rereading a getter", () => {
+    const valid = authorityFrom(prepared);
+    let principalReads = 0;
+    const vector = new Proxy({ ...valid.snapshot_vector }, {
+      get(target, property, receiver) {
+        if (property === "principal") {
+          principalReads += 1;
+          return principalReads === 1
+            ? valid.snapshot_vector.principal
+            : "principal-injected";
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    const switching = Object.freeze({ ...valid, snapshot_vector: vector });
+
+    expect(deriveLiveClosureAuthorityBinding(switching).workspace_id)
+      .toBe(valid.workspace_id);
+    expect(principalReads).toBe(1);
+  });
+
+  it("keeps hidden state out of principal authority bytes", () => {
+    const valid = authorityFrom(prepared);
+    const withHidden = (hidden: string) => {
+      const vector = { ...valid.snapshot_vector };
+      Object.defineProperty(vector, "hidden_state", {
+        value: hidden,
+        enumerable: false
+      });
+      return Object.freeze({ ...valid, snapshot_vector: Object.freeze(vector) });
+    };
+
+    const first = deriveLiveClosureAuthorityBinding(withHidden("first"));
+    const second = deriveLiveClosureAuthorityBinding(withHidden("second"));
+    expect(second).toEqual(first);
+    expect(() => deriveLiveClosureAuthorityBinding(Object.freeze({
+      ...valid,
+      snapshot_vector: Object.freeze({
+        ...valid.snapshot_vector,
+        principal: "unauthorized-principal"
+      })
+    }))).toThrow();
+  });
+
   it("does not promote complete, capped, or unavailable structural seals", () => {
     expect(closeFiniteFieldChannel(authorityFrom(prepared), finiteSeal("complete", 0))
       ?.status).toBe("uncertified");

@@ -1,41 +1,49 @@
 import { compareText } from "../../../../../shared/compare-text.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../../../field/field-identity.js";
-import { readMemoryLexicalIntervalSources } from
+import {
+  readMemoryLexicalIntervalSources,
+  verifyLexicalIntervalSourceReceiptV1
+} from
   "../../../../field/retrieval/retrieval-field-source-authority.js";
 import type { LexicalIntervalSourceReceiptCapturedV1 } from
   "../../../../field/retrieval/lexical-interval-source-receipt.js";
-import {
-  admitLiveLexicalIntervalSources,
-  type LiveQueryProofAuthority
-} from "../../live-query-proof-authority.js";
+import type { LiveQueryProofAuthority } from "../../live-query-proof-authority.js";
 import type { ChannelClosureScope } from "../../closure/contract.js";
-import { deriveLiveClosureAuthorityBinding } from
+import { captureVerifiedLiveClosureAuthority } from
   "../../closure/live-authority-binding.js";
 
 export type LiveLexicalClosureSource = Readonly<{
   readonly receipts: readonly Readonly<LexicalIntervalSourceReceiptCapturedV1>[];
   readonly scope: ChannelClosureScope;
   readonly source_receipt_digests: readonly RecallFieldDigest[];
+  readonly source_lag_kind: "exact" | "bounded";
 }>;
 
 export function readLiveLexicalClosureSource(
   authority: LiveQueryProofAuthority
 ): LiveLexicalClosureSource | null {
   try {
-    const binding = deriveLiveClosureAuthorityBinding(authority);
-    const bundle = authority.lexical_source_bundle;
-    if (bundle === undefined) return null;
+    const captured = captureVerifiedLiveClosureAuthority(authority);
+    const bundle = captured.lexical_source_bundle;
+    if (bundle === undefined || !captured.source_identity_is_stable) return null;
     const issued = readMemoryLexicalIntervalSources(bundle);
-    const admitted = admitLiveLexicalIntervalSources(authority, issued);
+    const admitted = admitCapturedLexicalSources(captured, issued);
     if (admitted === undefined || admitted.length !== 1 ||
         admitted[0]?.status !== "captured") return null;
     const receipts = Object.freeze([
       admitted[0] as Readonly<LexicalIntervalSourceReceiptCapturedV1>
     ]);
     const receipt = receipts[0]!;
+    const capability = captured.authority.snapshot_read_lease.capabilities.find(
+      ({ source_owner }) => source_owner === receipt.field_prefix
+    );
+    const lagKind = capability?.declaration.lag_bound.kind;
+    if (capability?.source_owner !== receipt.field_prefix ||
+        capability.declaration.source_owner !== receipt.field_prefix ||
+        (lagKind !== "exact" && lagKind !== "bounded")) return null;
     const scope = Object.freeze({
-      ...binding,
+      ...captured.binding,
       observer_id: receipt.producer_receipt.producer_id,
       channel_id: receipt.field_prefix,
       domain_id: `LexDomain:${receipt.field_prefix}`,
@@ -44,6 +52,7 @@ export function readLiveLexicalClosureSource(
     return Object.freeze({
       receipts,
       scope,
+      source_lag_kind: lagKind,
       source_receipt_digests: Object.freeze(
         receipts.map(({ receipt_digest }) => receipt_digest).sort(compareText)
       )
@@ -51,6 +60,40 @@ export function readLiveLexicalClosureSource(
   } catch {
     return null;
   }
+}
+
+function admitCapturedLexicalSources(
+  captured: ReturnType<typeof captureVerifiedLiveClosureAuthority>,
+  values: readonly ReturnType<typeof readMemoryLexicalIntervalSources>[number][]
+) {
+  const expected = captured.authority.expected_lexical_request_pins;
+  const bundle = captured.lexical_source_bundle;
+  if (bundle === undefined || expected.length === 0 || values.length !== expected.length) {
+    return undefined;
+  }
+  const expectedKeys = new Set(expected.map(sourceKey));
+  const seen = new Set<string>();
+  for (const value of values) {
+    verifyLexicalIntervalSourceReceiptV1(value, {
+      bundle,
+      lease: captured.source_snapshot_read_lease
+    });
+    const key = sourceKey(value);
+    if (seen.has(key) || !expectedKeys.has(key) ||
+        value.snapshot_digest !== captured.binding.snapshot_digest) return undefined;
+    seen.add(key);
+  }
+  return seen.size === expectedKeys.size ? Object.freeze([...values]) : undefined;
+}
+
+function sourceKey(value: Readonly<{
+  readonly workspace_id: string;
+  readonly request_digest: string;
+  readonly field_prefix: string;
+  readonly candidate_key_domain: string;
+}>): string {
+  return [value.workspace_id, value.request_digest, value.field_prefix,
+    value.candidate_key_domain].join("\u0000");
 }
 
 function lexicalUniverseDigest(

@@ -1,8 +1,13 @@
 import { compareText } from "../../../../../shared/compare-text.js";
 import { digestRecallFieldIdentity } from
   "../../../../field/field-identity.js";
+import {
+  captureVerifiedLiveClosureAuthority
+} from "../../closure/live-authority-binding.js";
 import type { FiniteDecisionOracleResult } from "../oracle/contract.js";
-import { assertFiniteOracleExhaustive } from "../oracle/oracle.js";
+import {
+  assertFiniteOracleExhaustive
+} from "../oracle/oracle.js";
 import {
   abstractResultIdentity,
   verifyAbstractProofKernelResult,
@@ -25,8 +30,10 @@ export function compareAbstractProofToOracle(
   proof: AbstractProofKernelResult,
   oracle: FiniteDecisionOracleResult
 ): AbstractOracleComparison {
-  assertExactOracle(input, oracle);
-  verifyAbstractProofKernelResult(proof, input,
+  const captured = captureVerifiedLiveClosureAuthority(input.live_authority);
+  const stableInput = Object.freeze({ ...input, live_authority: captured.authority });
+  assertExactOracle(stableInput, oracle);
+  verifyAbstractProofKernelResult(proof, stableInput,
     proof.status === "PROVED_SINGLETON" ? oracle : undefined);
   const concrete = oracle.outcomes.map(({ trace_digest }) => trace_digest);
   if (proof.status === "PROVED_SINGLETON") {
@@ -53,14 +60,14 @@ export function certifyAbstractSingletonWithFiniteOracle(
   input: AbstractProofKernelInput,
   oracle: FiniteDecisionOracleResult
 ): AbstractProofKernelResult {
-  assertExactOracle(input, oracle);
   const evaluation = evaluateAbstractSingletonCandidate(input);
   if (evaluation.kind === "result") return evaluation.result;
+  assertExactOracle(evaluation.input, oracle);
   if (oracle.outcomes.length !== 1 ||
       oracle.outcomes[0]!.trace_digest !== evaluation.outcome.trace_digest) {
     return evaluateAbstractProofKernel(input);
   }
-  const identity = abstractResultIdentity(evaluation.input);
+  const identity = abstractResultIdentity(evaluation.input, evaluation.live_binding);
   const certificate = sealDifferentialCertificate({
     schema_version: 1,
     operator_id: "finite_oracle_differential_certificate_v1",

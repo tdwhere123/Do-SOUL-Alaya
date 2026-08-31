@@ -1,7 +1,10 @@
 import { compareText, sameTextSet } from "../../../../../shared/compare-text.js";
 import { stableStringify } from "../../../../../shared/stable-stringify.js";
 import { digestRecallFieldIdentity } from "../../../../field/field-identity.js";
-import { deriveLiveClosureAuthorityBinding } from
+import {
+  captureVerifiedLiveClosureAuthority,
+  type LiveClosureAuthorityBinding
+} from
   "../../closure/live-authority-binding.js";
 import type { LiveQueryProofAuthority } from "../../live-query-proof-authority.js";
 import {
@@ -28,17 +31,25 @@ export function enumerateFiniteDecisionOracle(params: Readonly<{
   readonly operator: FiniteDecisionOperator;
 }>): FiniteDecisionOracleResult {
   assertExactKeys(params, ["authority", "fixture", "operator"], "finite oracle input");
-  const live = deriveLiveClosureAuthorityBinding(params.authority);
-  const fixture = normalizeFiniteFixture(params.fixture);
+  const live = captureVerifiedLiveClosureAuthority(params.authority).binding;
+  return enumerateAgainstBinding(live, params.fixture, params.operator);
+}
+
+function enumerateAgainstBinding(
+  live: LiveClosureAuthorityBinding,
+  inputFixture: FiniteOracleFixture,
+  operator: FiniteDecisionOperator
+): FiniteDecisionOracleResult {
+  const fixture = normalizeFiniteFixture(inputFixture);
   if (fixture.snapshot_digest !== live.snapshot_digest) {
     throw new Error("finite oracle fixture snapshot is outside live authority");
   }
-  assertOperator(params.operator);
+  assertOperator(operator);
   const concrete = enumerateLegalRefinements(fixture);
   const traces = new Map<string, FiniteDecisionTrace>();
   const refinements: FiniteOracleRefinementResult[] = [];
   for (const refinement of concrete) {
-    const trace = decideDeterministically(params.operator, fixture, refinement);
+    const trace = decideDeterministically(operator, fixture, refinement);
     traces.set(trace.trace_digest, trace);
     refinements.push(Object.freeze({
       refinement_digest: refinement.refinement_digest,
@@ -58,7 +69,7 @@ export function enumerateFiniteDecisionOracle(params: Readonly<{
     principal_digest: live.principal_digest,
     fixture_digest: digestFiniteFixture(fixture),
     k_max: fixture.k_max,
-    decision_operator_id: params.operator.operator_id,
+    decision_operator_id: operator.operator_id,
     manifest_digest: digestFiniteManifest(fixture),
     refinement_count: concrete.length,
     refinements: Object.freeze(refinements),
@@ -76,6 +87,24 @@ export function assertFiniteOracleExhaustive(params: Readonly<{
 }>): void {
   assertExactKeys(params, ["authority", "fixture", "operator", "result"],
     "finite oracle verification input");
+  const live = captureVerifiedLiveClosureAuthority(params.authority).binding;
+  assertFiniteOracleExhaustiveAgainstBinding({
+    live_binding: live,
+    fixture: params.fixture,
+    operator: params.operator,
+    result: params.result
+  });
+}
+
+function assertFiniteOracleExhaustiveAgainstBinding(params: Readonly<{
+  readonly live_binding: LiveClosureAuthorityBinding;
+  readonly fixture: FiniteOracleFixture;
+  readonly operator: FiniteDecisionOperator;
+  readonly result: FiniteDecisionOracleResult;
+}>): void {
+  assertExactKeys(params, ["live_binding", "fixture", "operator", "result"],
+    "captured finite oracle verification input");
+  const live = params.live_binding;
   const fixture = normalizeFiniteFixture(params.fixture);
   const result = params.result;
   assertExactKeys(result, [
@@ -102,11 +131,7 @@ export function assertFiniteOracleExhaustive(params: Readonly<{
       result.refinement_count !== expectedRefinements.length) {
     throw new Error("finite oracle omitted or duplicated a legal refinement branch");
   }
-  const expected = enumerateFiniteDecisionOracle({
-    authority: params.authority,
-    fixture,
-    operator: params.operator
-  });
+  const expected = enumerateAgainstBinding(live, fixture, params.operator);
   if (stableStringify(expected) !== stableStringify(result)) {
     throw new Error("finite oracle result does not match the exact operator replay");
   }

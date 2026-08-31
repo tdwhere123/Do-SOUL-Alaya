@@ -20,7 +20,10 @@ import {
   type FiniteValue
 } from "../oracle/contract.js";
 import { assertFiniteOracleExhaustive } from "../oracle/oracle.js";
-import { deriveLiveClosureAuthorityBinding } from
+import {
+  captureVerifiedLiveClosureAuthority,
+  type LiveClosureAuthorityBinding
+} from
   "../../closure/live-authority-binding.js";
 import type { LiveQueryProofAuthority } from "../../live-query-proof-authority.js";
 
@@ -182,8 +185,11 @@ export type AbstractProofKernelResult =
       readonly proof_digest: RecallFieldDigest;
     }>);
 
-export function abstractResultIdentity(input: AbstractProofKernelInput) {
-  const transfer = safeProofIdentity(input);
+export function abstractResultIdentity(
+  input: AbstractProofKernelInput,
+  liveBinding?: LiveClosureAuthorityBinding
+) {
+  const transfer = safeProofIdentity(input, liveBinding);
   return Object.freeze({
     schema_version: 1 as const,
     operator_id: "operator_parametric_abstract_proof_kernel_v1" as const,
@@ -197,14 +203,14 @@ export function abstractResultIdentity(input: AbstractProofKernelInput) {
     transfer_digest: transfer.transfer_digest,
     manifest_digest: transfer.manifest_digest,
     k_max: input.k_max,
-    premise_digest: digestAbstractProofPremise(input)
+    premise_digest: digestAbstractProofPremise(input, transfer)
   });
 }
 
 function digestAbstractProofPremise(
-  input: AbstractProofKernelInput
+  input: AbstractProofKernelInput,
+  transfer: ReturnType<typeof safeProofIdentity>
 ): RecallFieldDigest {
-  const transfer = safeProofIdentity(input);
   const closures = input.closures.map(({ channel_id, result_digest }) =>
     Object.freeze({ channel_id, result_digest }))
     .sort((left, right) => compareText(left.channel_id, right.channel_id) ||
@@ -226,9 +232,13 @@ function digestAbstractProofPremise(
   });
 }
 
-function safeProofIdentity(input: AbstractProofKernelInput) {
+function safeProofIdentity(
+  input: AbstractProofKernelInput,
+  liveBinding?: LiveClosureAuthorityBinding
+) {
   try {
-    const live = deriveLiveClosureAuthorityBinding(input.live_authority);
+    const live = liveBinding ??
+      captureVerifiedLiveClosureAuthority(input.live_authority).binding;
     const fixture = normalizeFiniteFixture(input.fixture);
     return Object.freeze({
       authority_digest: live.authority_digest,
@@ -273,6 +283,18 @@ export function verifyAbstractProofKernelResult(
   input: AbstractProofKernelInput,
   oracle?: FiniteDecisionOracleResult
 ): void {
+  const captured = captureVerifiedLiveClosureAuthority(input.live_authority);
+  const stableInput = Object.freeze({ ...input, live_authority: captured.authority });
+  verifyAbstractProofKernelResultAgainstBinding(
+    result, stableInput, captured.binding, oracle);
+}
+
+function verifyAbstractProofKernelResultAgainstBinding(
+  result: AbstractProofKernelResult,
+  input: AbstractProofKernelInput,
+  live: LiveClosureAuthorityBinding,
+  oracle?: FiniteDecisionOracleResult
+): void {
   const variant = ABSTRACT_RESULT_FIELDS[result.status];
   if (variant === undefined) throw new Error("abstract proof status is invalid");
   assertExactObjectKeys(result, [...ABSTRACT_RESULT_IDENTITY_FIELDS, ...variant,
@@ -291,7 +313,7 @@ export function verifyAbstractProofKernelResult(
   assertDigest(result.premise_digest, "abstract result premise");
   if (result.status === "PROVED_SINGLETON") {
     verifyFiniteDecisionTrace(result.outcome, result.k_max);
-    verifyDifferentialCertificate(result.differential_certificate, result, input, oracle);
+    verifyDifferentialCertificate(result.differential_certificate, result, input, live, oracle);
   } else if (result.status === "OPEN") {
     assertIdentity(result.reason, "abstract open reason");
     result.requested_refinements.forEach(verifyRefinementRequest);
@@ -304,7 +326,7 @@ export function verifyAbstractProofKernelResult(
   } else {
     assertIdentity(result.reason, "abstract unsupported reason");
   }
-  const expectedIdentity = abstractResultIdentity(input);
+  const expectedIdentity = abstractResultIdentity(input, live);
   for (const field of ABSTRACT_RESULT_IDENTITY_FIELDS) {
     if (result[field] !== expectedIdentity[field]) {
       throw new Error("abstract proof result does not match the real input");
@@ -316,6 +338,7 @@ function verifyDifferentialCertificate(
   certificate: FiniteOracleDifferentialCertificate,
   result: Extract<AbstractProofKernelResult, { status: "PROVED_SINGLETON" }>,
   input: AbstractProofKernelInput,
+  live: LiveClosureAuthorityBinding,
   oracle: FiniteDecisionOracleResult | undefined
 ): void {
   assertExactObjectKeys(certificate, [
