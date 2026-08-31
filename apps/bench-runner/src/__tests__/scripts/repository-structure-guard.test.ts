@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -110,6 +112,9 @@ describe("repository structure guard", () => {
   it("rejects new generic ownership, runtime evidence, and retired imports", async () => {
     const root = await createFixtureRoot();
     await writeSource(root, "packages/base/src/utils/new-rule.ts", "export const value = 1;");
+    await writeSource(root, "packages/base/src/helpers/new-rule.ts", "export const value = 1;");
+    await writeSource(root, "packages/base/src/misc/new-rule.ts", "export const value = 1;");
+    await writeSource(root, "packages/base/src/common/new-rule.ts", "export const value = 1;");
     await writeSource(root, "packages/base/src/card-13/new-rule.ts", "export const value = 1;");
     await writeSource(root, "packages/base/src/experiments/new-rule.ts", "export const value = 1;");
     await writeSource(root, "packages/base/src/retired/path.ts", "export const value = 1;");
@@ -177,6 +182,15 @@ describe("repository structure guard", () => {
     });
     await expect(runGuard(root, policyPath)).rejects.toMatchObject({
       stderr: expect.stringContaining("path=packages/base/src/__tests__/retired-path.test.ts")
+    });
+    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+      stderr: expect.stringContaining("path=packages/base/src/helpers")
+    });
+    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+      stderr: expect.stringContaining("path=packages/base/src/misc")
+    });
+    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+      stderr: expect.stringContaining("path=packages/base/src/common")
     });
   });
 
@@ -283,7 +297,12 @@ describe("repository structure guard", () => {
     const policyPath = await writePolicy(root, policy({
       existing_index_to_index_edges: [
         "packages/base/src/removed/index.ts -> packages/base/src/also-removed/index.ts"
-      ]
+      ],
+      existing_duplicate_export_authorities: [{
+        path: "packages/base/src/index.ts",
+        binding: "removed",
+        sources: ["packages/base/src/gone-a.ts", "packages/base/src/gone-b.ts"]
+      }]
     }));
 
     await expect(runGuard(root, policyPath)).rejects.toMatchObject({
@@ -295,6 +314,9 @@ describe("repository structure guard", () => {
     });
     await expect(runGuard(root, policyPath)).rejects.toMatchObject({
       stderr: expect.stringContaining("duplicate-export-authority")
+    });
+    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+      stderr: expect.stringContaining("stale-duplicate-export-authority-exception")
     });
   });
 
@@ -414,6 +436,185 @@ describe("repository structure guard", () => {
       code: 1,
       stderr: expect.stringContaining("entry export path is not in the guarded source set")
     });
+
+    const missingExempt = policy();
+    delete (missingExempt as { artifact_scan_exempt_roots?: unknown }).artifact_scan_exempt_roots;
+    await expect(runGuard(root, await writePolicy(root, missingExempt))).rejects.toMatchObject({
+      stderr: expect.stringContaining("artifact_scan_exempt_roots")
+    });
+
+    const missingNonLiteral = policy();
+    delete (missingNonLiteral as { existing_non_literal_module_specifier_exceptions?: unknown })
+      .existing_non_literal_module_specifier_exceptions;
+    await expect(runGuard(root, await writePolicy(root, missingNonLiteral))).rejects.toMatchObject({
+      stderr: expect.stringContaining("existing_non_literal_module_specifier_exceptions")
+    });
+  });
+
+  it("pins the repository-structure CI script without extra flags", () => {
+    const pkg = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts["ci:repository-structure"]).toBe(
+      "node ./scripts/ci/check-repository-structure.mjs"
+    );
+  });
+
+  it("pins production policy thresholds and shrink-only inventories", () => {
+    const productionPolicy = JSON.parse(
+      readFileSync(path.join(repoRoot, "scripts/ci/repository-structure-policy.json"), "utf8")
+    ) as {
+      file_size: { review_at: number; fail_at: number };
+      function_size: { review_at: number; split_review_at: number };
+    };
+    expect(productionPolicy.file_size.review_at).toBe(500);
+    expect(productionPolicy.file_size.fail_at).toBe(800);
+    expect(productionPolicy.function_size.review_at).toBe(80);
+    expect(productionPolicy.function_size.split_review_at).toBe(120);
+    // Pin the whole document so fragment vocabularies, quotas, kinds, and
+    // allow-lists cannot loosen without this expected digest changing.
+    const policyBytes = readFileSync(
+      path.join(repoRoot, "scripts/ci/repository-structure-policy.json")
+    );
+    expect(createHash("sha256").update(policyBytes).digest("hex")).toBe(
+      "530aefde3f70c4be19f64d475acd796a882b3b22e3ab2ebc000da73a19a37a46"
+    );
+  });
+
+  it("rejects production source outside workspace and artifact jurisdiction", async () => {
+    const root = await createFixtureRoot();
+    await writeSource(
+      root,
+      "packages/evil/src/dep.ts",
+      'import { value } from "@fixture/base";\nexport const leaked = value;'
+    );
+    const policyPath = await writePolicy(root, policy());
+    let failure: (Error & { code: number; stderr: string }) | undefined;
+    try {
+      await runGuard(root, policyPath);
+    } catch (error) {
+      failure = error as Error & { code: number; stderr: string };
+    }
+    expect(failure).toMatchObject({ code: 1 });
+    expect(failure?.stderr).toContain("unscoped-workspace-source");
+    expect(failure?.stderr).toContain("path=packages/evil/src/dep.ts");
+    expect(failure?.stderr).toContain("unscoped-artifact-jurisdiction");
+  });
+
+  it("rejects a workspace package.json whose name is missing from policy", async () => {
+    const root = await createFixtureRoot();
+    await writeSource(
+      root,
+      "packages/ghost/package.json",
+      `${JSON.stringify({ name: "@fixture/ghost" }, null, 2)}\n`
+    );
+    const policyPath = await writePolicy(root, policy());
+    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining("workspace-inventory-drift")
+    });
+  });
+
+  it("does not treat a nested package.json as a workspace package", async () => {
+    const root = await createFixtureRoot();
+    await writeSource(
+      root,
+      "packages/base/nested/package.json",
+      `${JSON.stringify({ name: "@fixture/nested" }, null, 2)}\n`
+    );
+    const result = await runGuard(root, await writePolicy(root, policy()));
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("errors=0");
+    expect(result.stdout).not.toContain("workspace-inventory-drift");
+  });
+
+  it("includes git-tracked hidden src files that ripgrep skips", async () => {
+    const root = await createFixtureRoot();
+    await writeSource(root, ".hidden/src/secret.ts", "export const value = 1;");
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    execFileSync("git", ["add", "-A"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    await expect(runGuard(root, await writePolicy(root, policy()))).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining("unscoped-workspace-source")
+    });
+    await expect(runGuard(root, await writePolicy(root, policy()))).rejects.toMatchObject({
+      stderr: expect.stringContaining("path=.hidden/src/secret.ts")
+    });
+  });
+
+  it("rejects non-literal import specifiers and stale exceptions, ignoring comments", async () => {
+    const root = await createFixtureRoot();
+    await writeSource(
+      root,
+      "packages/base/src/dynamic.ts",
+      'export const load = () => import("./retired/" + "path");'
+    );
+    await writeSource(
+      root,
+      "packages/base/src/commented.ts",
+      '// import("./retired/" + "path")\nexport const value = 1;'
+    );
+    const policyPath = await writePolicy(root, policy({
+      existing_non_literal_module_specifier_exceptions: [
+        { path: "packages/base/src/index.ts", reason: "planted stale exception" }
+      ]
+    }));
+    let failure: (Error & { code: number; stderr: string }) | undefined;
+    try {
+      await runGuard(root, policyPath);
+    } catch (error) {
+      failure = error as Error & { code: number; stderr: string };
+    }
+    expect(failure).toMatchObject({ code: 1 });
+    expect(failure?.stderr).toContain("non-literal-module-specifier");
+    expect(failure?.stderr).toContain("path=packages/base/src/dynamic.ts");
+    expect(failure?.stderr).toContain("stale-non-literal-module-specifier-exception");
+    expect(failure?.stderr).not.toContain("commented.ts");
+  });
+
+  it("advises matching non-literal specifier exceptions without failing", async () => {
+    const root = await createFixtureRoot();
+    await writeSource(
+      root,
+      "packages/base/src/dynamic.ts",
+      "export const load = (modulePath: string) => import(modulePath);"
+    );
+    const policyPath = await writePolicy(root, policy({
+      existing_non_literal_module_specifier_exceptions: [
+        { path: "packages/base/src/dynamic.ts", reason: "planted runtime loader" }
+      ]
+    }));
+    const result = await runGuard(root, policyPath);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("non-literal-module-specifier-exception");
+    expect(result.stdout).toContain("errors=0");
+  });
+
+  it("rejects mutual barrel imports without re-export and treats index.tsx as a barrel", async () => {
+    const root = await createFixtureRoot();
+    await writeSource(
+      root,
+      "packages/base/src/index.ts",
+      'import { child } from "./ui/index.js";\nvoid child;'
+    );
+    await writeSource(
+      root,
+      "packages/base/src/ui/index.tsx",
+      'import { parent } from "../index.js";\nexport const child = 1;'
+    );
+    const policyPath = await writePolicy(root, policy());
+    await expect(runGuard(root, policyPath)).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining("barrel-cycle")
+    });
   });
 });
 
@@ -462,6 +663,7 @@ function policy(overrides: Record<string, unknown> = {}) {
       { root: "packages/base", package: "@fixture/base", allowed_workspace_packages: [] }
     ],
     runtime_artifact_roots: ["packages/base/src"],
+    artifact_scan_exempt_roots: [],
     artifact_reference_fragments: [".do-it/bench-runs", "docs/bench-history"],
     existing_artifact_reference_exceptions: {},
     retired_import_paths: ["packages/base/src/retired-never"],
@@ -477,6 +679,7 @@ function policy(overrides: Record<string, unknown> = {}) {
     },
     existing_duplicate_export_authorities: [],
     existing_index_to_index_edges: [],
+    existing_non_literal_module_specifier_exceptions: [],
     ...overrides
   };
 }

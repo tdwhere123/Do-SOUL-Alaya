@@ -13,6 +13,30 @@ export function listGuardFiles(root) {
 }
 
 export function listSourceFiles(root, includeTests) {
+  const fromRipgrep = tryListSourceFiles(() => listSourceFilesWithRipgrep(root, includeTests));
+  const fromGit = tryListSourceFiles(() => listSourceFilesWithGit(root, includeTests));
+  if (fromRipgrep === null && fromGit === null) {
+    throw new Error("repository-structure: ripgrep and git are both unavailable");
+  }
+  return [...new Set([...(fromRipgrep ?? []), ...(fromGit ?? [])])].sort(compareText);
+}
+
+function tryListSourceFiles(list) {
+  try {
+    return list();
+  } catch (error) {
+    if (isListingUnavailable(error)) return null;
+    throw error;
+  }
+}
+
+function isListingUnavailable(error) {
+  if (error?.code === "ENOENT") return true;
+  const detail = `${error?.message ?? ""}\n${error?.stderr ?? ""}`;
+  return /not a git repository/iu.test(detail);
+}
+
+function listSourceFilesWithRipgrep(root, includeTests) {
   const patterns = [
     "--files",
     "-g", "**/src/**/*.ts",
@@ -27,11 +51,42 @@ export function listSourceFiles(root, includeTests) {
       "-g", "!**/*.{test,spec}.tsx"
     );
   }
-  return execFileSync("rg", patterns, { cwd: root, encoding: "utf8" })
+  return execFileSync("rg", patterns, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
     .trim()
     .split("\n")
-    .filter(Boolean)
+    .filter((file) => file.length > 0 && isGuardedSourcePath(file, includeTests))
     .sort(compareText);
+}
+
+function listSourceFilesWithGit(root, includeTests) {
+  return execFileSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+  )
+    .split("\0")
+    .filter((file) => file.length > 0 && isGuardedSourcePath(file, includeTests))
+    .sort(compareText);
+}
+
+function isGuardedSourcePath(relativePath, includeTests) {
+  const file = relativePath.replaceAll("\\", "/");
+  if (
+    file === "dist" ||
+    file.startsWith("dist/") ||
+    file.includes("/dist/") ||
+    file === "node_modules" ||
+    file.startsWith("node_modules/") ||
+    file.includes("/node_modules/")
+  ) {
+    return false;
+  }
+  if (!/(?:^|\/)src\/.+\.tsx?$/u.test(file)) return false;
+  if (!includeTests) {
+    if (file.includes("/__tests__/")) return false;
+    if (/\.(?:test|spec)\.tsx?$/u.test(file)) return false;
+  }
+  return true;
 }
 
 export function parseSource(file, source) {
@@ -51,29 +106,34 @@ export function moduleReferences(sourceFile) {
       if (node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
         references.push({
           specifier: node.moduleSpecifier.text,
+          dynamic: false,
           isExport: ts.isExportDeclaration(node)
         });
       }
     } else if (ts.isImportEqualsDeclaration(node)) {
       const reference = node.moduleReference;
-      if (
-        ts.isExternalModuleReference(reference) &&
-        reference.expression &&
-        ts.isStringLiteralLike(reference.expression)
-      ) {
-        references.push({ specifier: reference.expression.text, isExport: false });
+      if (ts.isExternalModuleReference(reference) && reference.expression) {
+        if (ts.isStringLiteralLike(reference.expression)) {
+          references.push({ specifier: reference.expression.text, dynamic: false, isExport: false });
+        } else {
+          references.push({ specifier: null, dynamic: true, isExport: false });
+        }
       }
     } else if (ts.isCallExpression(node)) {
       const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
       const isRequire = ts.isIdentifier(node.expression) && node.expression.text === "require";
-      const argument = node.arguments[0];
-      if ((isDynamicImport || isRequire) && argument && ts.isStringLiteralLike(argument)) {
-        references.push({ specifier: argument.text, isExport: false });
+      if (isDynamicImport || isRequire) {
+        const argument = node.arguments[0];
+        if (argument && ts.isStringLiteralLike(argument)) {
+          references.push({ specifier: argument.text, dynamic: false, isExport: false });
+        } else {
+          references.push({ specifier: null, dynamic: true, isExport: false });
+        }
       }
     } else if (ts.isImportTypeNode(node)) {
       const argument = node.argument;
       if (ts.isLiteralTypeNode(argument) && ts.isStringLiteralLike(argument.literal)) {
-        references.push({ specifier: argument.literal.text, isExport: false });
+        references.push({ specifier: argument.literal.text, dynamic: false, isExport: false });
       }
     }
     ts.forEachChild(node, visit);
@@ -333,7 +393,7 @@ function addBinding(bindings, name, kind) {
   bindings.set(name, (bindings.get(name) ?? 0) | kind);
 }
 
-function addToSet(map, key, value) {
+export function addToSet(map, key, value) {
   if (!map.has(key)) map.set(key, new Set());
   map.get(key).add(value);
 }

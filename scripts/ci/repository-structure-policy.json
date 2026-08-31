@@ -144,6 +144,10 @@
     "apps/inspector/src",
     "apps/inspector/web/src"
   ],
+  "artifact_scan_exempt_roots": [
+    "packages/eval/src",
+    "apps/bench-runner/src"
+  ],
   "artifact_reference_fragments": [
     ".do-it/bench-runs",
     "docs/bench-history"
@@ -402,5 +406,11 @@
     "packages/storage/src/index.ts -> packages/storage/src/shared/index.ts",
     "packages/storage/src/index.ts -> packages/storage/src/sqlite/index.ts",
     "packages/storage/src/repos/path/index.ts -> packages/storage/src/repos/path/soft-association/index.ts"
+  ],
+  "existing_non_literal_module_specifier_exceptions": [
+    {
+      "path": "apps/core-daemon/src/cli/support/module-loader.ts",
+      "reason": "CLI loaders import dist module URLs resolved at runtime."
+    }
   ]
 }

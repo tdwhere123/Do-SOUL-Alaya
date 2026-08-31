@@ -1,6 +1,13 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
+  duplicateAuthorityKey,
+  validateEntryExportPaths,
+  validateFileClassifications,
+  validatePolicy
+} from "./repository-structure-policy-schema.mjs";
+import {
+  addToSet,
   collectExportedBindings,
   compareText,
   countArtifactReferences,
@@ -40,7 +47,9 @@ export function analyzeRepositoryStructure({ root, policy }) {
     parsedByFile.set(file, sourceFile);
     const references = moduleReferences(sourceFile).map((reference) => ({
       ...reference,
-      target: resolveModule(file, reference.specifier, fileSet, policy.entry_exports)
+      target: reference.specifier === null
+        ? null
+        : resolveModule(file, reference.specifier, fileSet, policy.entry_exports)
     }));
     referencesByFile.set(file, references);
     for (const reference of references) {
@@ -60,8 +69,10 @@ export function analyzeRepositoryStructure({ root, policy }) {
 
   checkFileAndFunctionSize({ files, policy, sourceByFile, parsedByFile, errors, advisories });
   checkDirectories({ files, policy, errors, advisories });
+  checkWorkspaceInventory({ root, policy, errors });
   checkDependencyDirection({ files, policy, referencesByFile, errors });
   checkArtifactReferences({ files, policy, parsedByFile, sourceByFile, errors, advisories });
+  checkNonLiteralModuleSpecifiers({ files, policy, referencesByFile, errors, advisories });
   checkRetiredPaths({ files: allSourceFiles, policy, referencesByFile: retiredReferencesByFile, errors });
   checkEntryExports({ policy, parsedByFile, fileSet, sourceByFile, errors });
   checkBarrels({
@@ -72,6 +83,7 @@ export function analyzeRepositoryStructure({ root, policy }) {
     parsedByFile,
     fileSet,
     sourceByFile,
+    referencesByFile,
     errors,
     advisories
   });
@@ -123,12 +135,13 @@ export function computePrivateBarrelSnapshots({ root, policy }) {
   for (const file of files) {
     const sourceFile = parseSource(file, readFileSync(path.join(root, file), "utf8"));
     for (const reference of moduleReferences(sourceFile)) {
+      if (reference.specifier === null) continue;
       const target = resolveModule(file, reference.specifier, fileSet, policy.entry_exports);
       if (target !== null) addToSet(consumers, target, file);
     }
   }
   const barrels = files
-    .filter((file) => path.posix.basename(file) === "index.ts" && !entryPaths.has(file))
+    .filter((file) => isBarrelFile(file) && !entryPaths.has(file))
     .map((file) => ({
       path: file,
       consumers: [...(consumers.get(file) ?? [])].sort(compareText)
@@ -274,20 +287,26 @@ function checkDependencyDirection({ files, policy, referencesByFile, errors }) {
   const packageNames = workspaces.map((workspace) => workspace.package)
     .sort((left, right) => right.length - left.length || compareText(left, right));
   for (const file of files) {
-    const sourceWorkspace = workspaces.find((workspace) =>
-      file === workspace.root || file.startsWith(`${workspace.root}/`)
-    );
-    if (sourceWorkspace === undefined) continue;
+    const sourceWorkspace = workspaces.find((workspace) => isUnderRoot(file, workspace.root));
+    if (sourceWorkspace === undefined) {
+      errors.push(issue(
+        "error",
+        "unscoped-workspace-source",
+        file,
+        "file is outside every policy.workspaces root",
+        "Add the owning workspace to policy.workspaces or move the file under an owned package."
+      ));
+      continue;
+    }
     const allowed = new Set(sourceWorkspace.allowed_workspace_packages);
     for (const reference of referencesByFile.get(file) ?? []) {
+      if (reference.specifier === null) continue;
       const referencedPackage = packageNames.find((packageName) =>
         reference.specifier === packageName || reference.specifier.startsWith(`${packageName}/`)
       );
       const targetWorkspace = reference.target === null
         ? undefined
-        : workspaces.find((workspace) =>
-          reference.target === workspace.root || reference.target.startsWith(`${workspace.root}/`)
-        );
+        : workspaces.find((workspace) => isUnderRoot(reference.target, workspace.root));
       const targetPackage = referencedPackage ?? targetWorkspace?.package;
       if (targetPackage === undefined || targetPackage === sourceWorkspace.package) continue;
       if (allowed.has(targetPackage)) continue;
@@ -304,8 +323,20 @@ function checkDependencyDirection({ files, policy, referencesByFile, errors }) {
 
 function checkArtifactReferences({ files, policy, parsedByFile, sourceByFile, errors, advisories }) {
   const runtimeRoots = policy.runtime_artifact_roots;
+  const exemptRoots = policy.artifact_scan_exempt_roots;
   for (const file of files) {
-    if (!runtimeRoots.some((root) => file.startsWith(`${root}/`) || file === root)) continue;
+    const inRuntime = runtimeRoots.some((root) => isUnderRoot(file, root));
+    const inExempt = exemptRoots.some((root) => isUnderRoot(file, root));
+    if (!inRuntime && !inExempt) {
+      errors.push(issue(
+        "error",
+        "unscoped-artifact-jurisdiction",
+        file,
+        "file is outside runtime_artifact_roots and artifact_scan_exempt_roots",
+        "Add the owning src root to runtime_artifact_roots or the named exempt list."
+      ));
+    }
+    if (!inRuntime) continue;
     const occurrencesByFragment = countArtifactReferences(
       parsedByFile.get(file),
       policy.artifact_reference_fragments
@@ -380,6 +411,7 @@ function checkRetiredPaths({ files, policy, referencesByFile, errors }) {
       ));
     }
     for (const reference of referencesByFile.get(file) ?? []) {
+      if (reference.specifier === null) continue;
       const normalized = unresolvedModulePath(file, reference.specifier, policy.entry_exports);
       const retired = policy.retired_import_paths.find((retiredPath) =>
         normalized === retiredPath || normalized.startsWith(`${retiredPath}/`)
@@ -419,27 +451,17 @@ function checkEntryExports({ policy, parsedByFile, fileSet, sourceByFile, errors
 }
 
 function checkBarrels(context) {
-  const {
-    files,
-    policy,
-    exportEdges,
-    consumers,
-    parsedByFile,
-    fileSet,
-    sourceByFile,
-    errors,
-    advisories
-  } = context;
-  const barrels = new Set(files.filter((file) => path.posix.basename(file) === "index.ts"));
-  const entryPaths = new Set(policy.entry_exports.map((entry) => entry.path));
-  const privateBarrels = new Set([...barrels].filter((file) => !entryPaths.has(file)));
-  const existingEdges = new Set(policy.existing_index_to_index_edges);
-  const observedEdges = new Set();
-  const graph = new Map(files.map((file) => [file, new Set()]));
-  for (const [source, targets] of exportEdges) {
-    for (const target of targets) graph.get(source)?.add(target);
-  }
-  const privateBarrelRows = [...privateBarrels]
+  const barrels = new Set(context.files.filter(isBarrelFile));
+  const entryPaths = new Set(context.policy.entry_exports.map((entry) => entry.path));
+  checkPrivateBarrelSnapshot(context, barrels, entryPaths);
+  checkBarrelChains(context, barrels);
+  checkBarrelCycles(context, barrels);
+  checkDuplicateExportAuthorities(context, barrels, entryPaths);
+}
+
+function checkPrivateBarrelSnapshot({ policy, consumers, errors }, barrels, entryPaths) {
+  const privateBarrelRows = [...barrels]
+    .filter((file) => !entryPaths.has(file))
     .sort(compareText)
     .map((barrel) => ({
       path: barrel,
@@ -447,18 +469,24 @@ function checkBarrels(context) {
     }));
   const privateBarrelDigest = hashPrivateBarrelRows(privateBarrelRows);
   if (
-    privateBarrelRows.length !== policy.private_barrel_snapshot.expected_count ||
-    privateBarrelDigest !== policy.private_barrel_snapshot.expected_sha256
+    privateBarrelRows.length === policy.private_barrel_snapshot.expected_count &&
+    privateBarrelDigest === policy.private_barrel_snapshot.expected_sha256
   ) {
-    errors.push(issue(
-      "error",
-      "private-barrel-snapshot-drift",
-      "scripts/ci/repository-structure-policy.json",
-      `count=${privateBarrelRows.length}/${policy.private_barrel_snapshot.expected_count}; ` +
-      `sha256=${privateBarrelDigest}/${policy.private_barrel_snapshot.expected_sha256}`,
-      "Review new or removed barrels and exact consumer identities; import real owners or update the accepted snapshot."
-    ));
+    return;
   }
+  errors.push(issue(
+    "error",
+    "private-barrel-snapshot-drift",
+    "scripts/ci/repository-structure-policy.json",
+    `count=${privateBarrelRows.length}/${policy.private_barrel_snapshot.expected_count}; ` +
+    `sha256=${privateBarrelDigest}/${policy.private_barrel_snapshot.expected_sha256}`,
+    "Review new or removed barrels and exact consumer identities; import real owners or update the accepted snapshot."
+  ));
+}
+
+function checkBarrelChains({ policy, exportEdges, consumers, errors }, barrels) {
+  const existingEdges = new Set(policy.existing_index_to_index_edges);
+  const observedEdges = new Set();
   for (const source of barrels) {
     for (const target of exportEdges.get(source) ?? []) {
       if (!barrels.has(target)) continue;
@@ -483,9 +511,17 @@ function checkBarrels(context) {
       "Remove the accepted-edge entry with the same change so the private chain cannot return silently."
     ));
   }
-  for (const component of stronglyConnectedComponents(graph).filter(
-    (entry) => entry.length > 1 && entry.some((file) => barrels.has(file))
-  )) {
+}
+
+function checkBarrelCycles({ referencesByFile, errors }, barrels) {
+  const graph = new Map([...barrels].map((file) => [file, new Set()]));
+  for (const source of barrels) {
+    for (const reference of referencesByFile.get(source) ?? []) {
+      if (reference.target === null || !barrels.has(reference.target)) continue;
+      graph.get(source).add(reference.target);
+    }
+  }
+  for (const component of stronglyConnectedComponents(graph).filter((entry) => entry.length > 1)) {
     errors.push(issue(
       "error",
       "barrel-cycle",
@@ -494,6 +530,10 @@ function checkBarrels(context) {
       "Break the cycle by importing the real owner and preserving one direction of authority."
     ));
   }
+}
+
+function checkDuplicateExportAuthorities(context, barrels, entryPaths) {
+  const { policy, parsedByFile, fileSet, sourceByFile, errors, advisories } = context;
   const duplicateReviewPaths = new Set([...barrels, ...entryPaths]);
   const expectedDuplicates = new Set(
     policy.existing_duplicate_export_authorities.map(duplicateAuthorityKey)
@@ -537,180 +577,100 @@ function checkBarrels(context) {
   }
 }
 
+function checkNonLiteralModuleSpecifiers({ files, policy, referencesByFile, errors, advisories }) {
+  const exceptions = new Map(
+    policy.existing_non_literal_module_specifier_exceptions.map((entry) => [entry.path, entry])
+  );
+  const observed = new Set();
+  for (const file of files) {
+    if (!(referencesByFile.get(file) ?? []).some((reference) => reference.dynamic === true)) continue;
+    observed.add(file);
+    const exception = exceptions.get(file);
+    if (exception === undefined) {
+      errors.push(issue(
+        "error",
+        "non-literal-module-specifier",
+        file,
+        "import() or require() argument is not a string literal",
+        "Use a static specifier or record a shrink-only exact-file exception with a reason."
+      ));
+      continue;
+    }
+    advisories.push(issue(
+      "advisory",
+      "non-literal-module-specifier-exception",
+      file,
+      exception.reason,
+      "This exception is shrink-only; replace the dynamic specifier with a static owner when the loader is next authorized."
+    ));
+  }
+  for (const [file] of exceptions) {
+    if (observed.has(file)) continue;
+    errors.push(issue(
+      "error",
+      "stale-non-literal-module-specifier-exception",
+      file,
+      "exception file has no non-literal import() or require()",
+      "Remove the exception with the same change so a dynamic specifier cannot return."
+    ));
+  }
+}
+
+function checkWorkspaceInventory({ root, policy, errors }) {
+  const allowed = new Set(policy.workspaces.map((workspace) => workspace.package));
+  for (const directory of discoverWorkspaceDirectories(root)) {
+    const packageName = readWorkspacePackageName(directory);
+    if (packageName === undefined) continue;
+    if (packageName.length > 0 && allowed.has(packageName)) continue;
+    errors.push(issue(
+      "error",
+      "workspace-inventory-drift",
+      toPosixRelative(root, directory),
+      packageName.length > 0 ? `package=${packageName}` : "package.json name is missing",
+      "Add the package to policy.workspaces or remove the unexpected workspace."
+    ));
+  }
+}
+
+function discoverWorkspaceDirectories(root) {
+  const directories = [];
+  for (const globRoot of ["packages", "apps", "apps/inspector"]) {
+    const topDirectory = path.join(root, globRoot);
+    if (!existsSync(topDirectory)) continue;
+    directories.push(...listImmediateDirectories(topDirectory));
+  }
+  return directories;
+}
+
+function listImmediateDirectories(directory) {
+  const skipped = new Set(["node_modules", "dist", "data", "var", "coverage"]);
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && !skipped.has(entry.name))
+    .map((entry) => path.join(directory, entry.name));
+}
+
+function readWorkspacePackageName(directory) {
+  const filename = path.join(directory, "package.json");
+  if (!existsSync(filename)) return undefined;
+  const parsed = JSON.parse(readFileSync(filename, "utf8"));
+  return typeof parsed.name === "string" ? parsed.name : "";
+}
+
+function isBarrelFile(file) {
+  const basename = path.posix.basename(file);
+  return basename === "index.ts" || basename === "index.tsx";
+}
+
+function isUnderRoot(file, root) {
+  return file === root || file.startsWith(`${root}/`);
+}
+
+function toPosixRelative(root, absolutePath) {
+  return path.relative(root, absolutePath).split(path.sep).join("/");
+}
+
 function hashPrivateBarrelRows(rows) {
   return hashTextLines(rows.map((row) => `${row.path}\0${row.consumers.join("\0")}`));
-}
-
-function duplicateAuthorityKey(entry) {
-  return `${entry.path}\0${entry.binding}\0${entry.sources.join(",")}`;
-}
-
-function validatePolicy(policy) {
-  if (policy.schema_version !== 1) {
-    throw new Error("repository-structure-policy: schema_version must be 1");
-  }
-  if (
-    !Number.isInteger(policy.file_size?.review_at) ||
-    !Number.isInteger(policy.file_size?.fail_at) ||
-    policy.file_size.review_at < 1 ||
-    policy.file_size.fail_at <= policy.file_size.review_at
-  ) {
-    throw new Error("repository-structure-policy: require 0 < file review_at < fail_at");
-  }
-  if (
-    !Number.isInteger(policy.function_size?.review_at) ||
-    !Number.isInteger(policy.function_size?.split_review_at) ||
-    policy.function_size.review_at < 1 ||
-    policy.function_size.split_review_at <= policy.function_size.review_at
-  ) {
-    throw new Error("repository-structure-policy: require 0 < function review_at < split_review_at");
-  }
-  if (!Number.isInteger(policy.directory_size?.advisory_at) || policy.directory_size.advisory_at < 1) {
-    throw new Error("repository-structure-policy: directory advisory_at must be a positive integer");
-  }
-  for (const field of [
-    "forbidden_ownership_directories",
-    "forbidden_rollout_directory_patterns",
-    "workspaces",
-    "runtime_artifact_roots",
-    "artifact_reference_fragments",
-    "retired_import_paths",
-    "entry_exports"
-  ]) {
-    if (!Array.isArray(policy[field]) || policy[field].length === 0) {
-      throw new Error(`repository-structure-policy: ${field} must be a non-empty array`);
-    }
-  }
-  validateUniqueStrings("forbidden_ownership_directories", policy.forbidden_ownership_directories);
-  validateUniqueStrings("forbidden_rollout_directory_patterns", policy.forbidden_rollout_directory_patterns);
-  validateUniqueStrings("runtime_artifact_roots", policy.runtime_artifact_roots);
-  validateUniqueStrings("artifact_reference_fragments", policy.artifact_reference_fragments);
-  validateUniqueStrings("retired_import_paths", policy.retired_import_paths);
-  for (const pattern of policy.forbidden_rollout_directory_patterns) new RegExp(pattern, "u");
-  validateWorkspaces(policy.workspaces);
-  validateEntryExports(policy.entry_exports);
-  validatePrivateBarrelSnapshot(policy.private_barrel_snapshot);
-  validateDuplicateAuthorities(policy.existing_duplicate_export_authorities);
-  validateUniqueStrings("existing_index_to_index_edges", policy.existing_index_to_index_edges);
-  for (const edge of policy.existing_index_to_index_edges) {
-    if (!/^[^\s].+ -> [^\s].+$/u.test(edge)) {
-      throw new Error(`repository-structure-policy: malformed index edge ${edge}`);
-    }
-  }
-  const classificationKinds = new Set(["handwritten", "generated", "declarative", "test_support"]);
-  for (const [file, classification] of Object.entries(policy.file_size.classifications)) {
-    if (!classificationKinds.has(classification.kind) || classification.reason.trim().length === 0) {
-      throw new Error(
-        `repository-structure-policy: ${file} needs a supported classification and non-empty reason`
-      );
-    }
-  }
-  const fragments = new Set(policy.artifact_reference_fragments);
-  for (const [file, exception] of Object.entries(policy.existing_artifact_reference_exceptions)) {
-    if (exception.reason.trim().length === 0) {
-      throw new Error(`repository-structure-policy: ${file} artifact exception needs a reason`);
-    }
-    const limits = exception.max_occurrences_by_fragment;
-    for (const fragment of fragments) {
-      if (!Number.isInteger(limits[fragment]) || limits[fragment] < 0) {
-        throw new Error(
-          `repository-structure-policy: ${file} needs a non-negative limit for ${fragment}`
-        );
-      }
-    }
-    for (const fragment of Object.keys(limits)) {
-      if (!fragments.has(fragment)) {
-        throw new Error(
-          `repository-structure-policy: ${file} has an unknown artifact fragment ${fragment}`
-        );
-      }
-    }
-  }
-}
-
-function validateUniqueStrings(field, values) {
-  if (!Array.isArray(values) || values.some((value) => typeof value !== "string" || value.length === 0)) {
-    throw new Error(`repository-structure-policy: ${field} must contain non-empty strings`);
-  }
-  if (new Set(values).size !== values.length) {
-    throw new Error(`repository-structure-policy: ${field} must not contain duplicates`);
-  }
-}
-
-function validateWorkspaces(workspaces) {
-  const roots = workspaces.map((workspace) => workspace.root);
-  const packages = workspaces.map((workspace) => workspace.package);
-  validateUniqueStrings("workspace roots", roots);
-  validateUniqueStrings("workspace packages", packages);
-  for (const workspace of workspaces) {
-    validateUniqueStrings(
-      `allowed packages for ${workspace.package}`,
-      workspace.allowed_workspace_packages
-    );
-  }
-}
-
-function validateEntryExports(entries) {
-  validateUniqueStrings("entry export specifiers", entries.map((entry) => entry.specifier));
-  validateUniqueStrings("entry export paths", entries.map((entry) => entry.path));
-  for (const entry of entries) {
-    if (!Number.isInteger(entry.expected_count) || entry.expected_count < 0) {
-      throw new Error(`repository-structure-policy: invalid export count for ${entry.specifier}`);
-    }
-    if (!/^[a-f0-9]{64}$/u.test(entry.expected_sha256)) {
-      throw new Error(`repository-structure-policy: invalid export digest for ${entry.specifier}`);
-    }
-  }
-}
-
-function validatePrivateBarrelSnapshot(snapshot) {
-  if (!Number.isInteger(snapshot?.expected_count) || snapshot.expected_count < 0) {
-    throw new Error("repository-structure-policy: invalid private barrel count");
-  }
-  if (!/^[a-f0-9]{64}$/u.test(snapshot.expected_sha256)) {
-    throw new Error("repository-structure-policy: invalid private barrel digest");
-  }
-}
-
-function validateDuplicateAuthorities(entries) {
-  if (!Array.isArray(entries)) {
-    throw new Error("repository-structure-policy: duplicate authority exceptions must be an array");
-  }
-  const keys = [];
-  for (const entry of entries) {
-    if (typeof entry.path !== "string" || typeof entry.binding !== "string") {
-      throw new Error("repository-structure-policy: duplicate authority exception needs path and binding");
-    }
-    validateUniqueStrings(`duplicate sources for ${entry.binding}`, entry.sources);
-    if (entry.sources.length < 2) {
-      throw new Error(`repository-structure-policy: ${entry.binding} needs at least two sources`);
-    }
-    keys.push(duplicateAuthorityKey(entry));
-  }
-  validateUniqueStrings("duplicate authority exceptions", keys);
-}
-
-function validateFileClassifications(policy, fileSet) {
-  for (const file of Object.keys(policy.file_size.classifications)) {
-    if (fileSet.has(file)) continue;
-    throw new Error(
-      `repository-structure-policy: classified path is not in the guarded source set: ${file}`
-    );
-  }
-}
-
-function validateEntryExportPaths(policy, fileSet) {
-  for (const entry of policy.entry_exports) {
-    if (fileSet.has(entry.path)) continue;
-    throw new Error(
-      `repository-structure-policy: entry export path is not in the guarded source set: ${entry.path}`
-    );
-  }
-}
-
-function addToSet(map, key, value) {
-  if (!map.has(key)) map.set(key, new Set());
-  map.get(key).add(value);
 }
 
 function issue(severity, rule, issuePath, observed, nextAction) {

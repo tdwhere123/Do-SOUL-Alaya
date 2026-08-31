@@ -73,6 +73,9 @@ jobs:
       - name: Guard test as-any
         run: pnpm run ci:test-as-any
 
+      - name: Install ripgrep for hygiene guards
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Guard repository structure
         run: pnpm run ci:repository-structure
 

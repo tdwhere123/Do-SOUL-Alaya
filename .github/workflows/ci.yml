@@ -92,6 +92,10 @@ jobs:
         if: ${{ matrix.run_hygiene }}
         run: pnpm run hygiene:inspector-deps
 
+      - name: Guard repository structure
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run ci:repository-structure
+
       - name: CLI preflight smoke
         if: ${{ matrix.run_smoke }}
         run: node scripts/ci/smoke-built-cli.mjs --preflight-only
