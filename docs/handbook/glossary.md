@@ -207,20 +207,28 @@ algorithm: one continuous governed associative-memory field, not a
 stack of post-processors. In-repo owner: `docs/handbook/recall.md`.
 Hopfield / Lyapunov / attractor wording is a design lens, not a
 proved runtime. Current HEAD connects the principal field, path, Slice,
-activation, and Select_Gamma owners; `recall.md` records the remaining
-algorithm-closure proofs.
+activation, and canonical `prefixSK` owners; `recall.md` records the remaining
+query-proof implementation and closure gates.
 
-**Safe Dominance** — The first shadow architecture's strict query-conditioned
+**Safe Dominance** — The V1 query-proof target's strict query-conditioned
 pointwise partial order over applicable attributed observations. It is not a
 scalar score or general outranking; a cycle is a contract failure.
 
 **Pointwise Frontier** — A deterministic layer of safe-dominance structure.
 Frontier index is not Gamma gain and does not require F1-before-F2 capture when
-a lower frontier supplies otherwise unavailable set-level novelty.
+a lower frontier supplies positive gain on a compiled Gamma atom that every
+eligible higher-frontier candidate is proved not to cover.
 
-**Budgeted Capture Walk** — One deterministic Select_Gamma walk whose prefixes
-define every budget K. K truncates the walk, so each smaller captured set is a
-prefix subset of the next.
+**Gamma_q** — Query-compiled, selected-set-dependent marginal utility with
+three ordered strata: answer binding/position, required-proposition support,
+and compiler-required certified-independent support. The third stratum is
+structural zero unless the compiler requires independent support. Gamma is not
+a pointwise score, frontier priority, facility remainder, or second selector.
+
+**Budgeted Capture Walk** — One deterministic canonical `prefixSK` walk whose
+prefixes define every budget K. K truncates the walk, so each smaller captured
+set is a prefix subset of the next. `selectGammaWalk` is only the optional outer
+legacy delivery implementation.
 
 **Lexical Recall** — BM25 / FTS-based search. Live family-max RRF still moves
 scores (`fusion-delivery-families.ts`), but that scalarization is diagnosed as
@@ -239,8 +247,8 @@ live field, seed \(\Omega\). The bundled local ONNX provider is enabled
 by default after verified startup warmup; operators can explicitly
 disable it. It never decides durable truth (invariant §18). On the
 current path it can inject candidates and rescore an eligible pool. Historical
-discovery rates belong to their frozen benchmark commit. In the shadow target,
-embedding admission monotonically extends the E0 field without eviction or
+discovery rates belong to their frozen benchmark commit. In the query-proof
+target, embedding admission monotonically extends the E0 field without eviction or
 preference reward, and shared candidates add exactly one embedding observation;
 see `recall.md`.
 

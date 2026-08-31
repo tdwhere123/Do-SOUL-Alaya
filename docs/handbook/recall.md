@@ -92,7 +92,8 @@ The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
 physics.
 
-The frozen **shadow direction**, not current production behavior, is:
+The frozen **query-proof target** is accepted only for behavior-neutral
+preview; it is not current production behavior and does not authorize cutover:
 
 ```text
 A(q) -> demand/applicability graph
@@ -106,11 +107,15 @@ Decide_Q(Psi_q, Gamma_q, exact tie, identity) -> one prefixSK walk
 First-version `Psi` is a strict safe-dominance partial order. A cycle is a
 contract failure; general outranking and SCC recovery are deferred. Frontier
 index is pointwise structure, never Gamma gain or mandatory F1-before-F2
-selection. Set-level novelty may select across frontiers. Gamma owns only
-S-dependent answer-binding, required-proposition, and certified-independent
-support novelty. One canonical walk owns every K, so `S_K` is a prefix of
-`S_(K+1)`. V1 has no semantic prior: after exact query-owned equality and no
-unresolved trade-off, the tie
+selection. A lower-frontier candidate may enter only for positive gain on a
+compiled Gamma atom that every eligible higher-frontier candidate is proved not
+to cover. `Gamma_q` owns only S-dependent answer-binding/position,
+required-proposition, and compiler-required certified-independent support
+novelty. Same-lineage or
+possibly correlated evidence may cover a new binding or required proposition
+but cannot mint independence novelty. One canonical walk owns every K, so
+`S_K` is a prefix of `S_(K+1)`. V1 has no semantic prior: after exact
+query-owned equality and no unresolved trade-off, the tie
 policy belongs to the query and deterministic identity is only serialization.
 
 E1 is a monotonic field extension: `H_E0` is a subset of `H_E1`. Its separately
@@ -118,7 +123,7 @@ receipted embedding admission cannot evict E0 candidates and creates no
 preference. Shared candidates use the same preference/capture algebra and E1
 adds one embedding observation. Exact safe-dominance and capture rules remain
 unselected until the active plan's boundary audits and capture algebra contract
-close; shadow proof must precede any delivery cutover.
+close; behavior-neutral query-proof preview must precede any delivery cutover.
 
 ## Contract (UGAF)
 
@@ -151,13 +156,19 @@ delivery order; `selectGammaWalk` names only the optional outer legacy delivery
 implementation, not the future query-proof rollback target.
 
 The target `Gamma_q` objective is defined against the query condition: gain
-measures incremental answer-binding, required-proposition, and
-certified-independence coverage. The field has no intrinsic preference for
-source identity diversity. Pointwise frontier index,
+measures incremental answer-binding/position, required-proposition, and
+compiler-required certified-independence coverage. The first two increments remain legal for
+same-lineage evidence when it covers a new compiled query unit; only the third
+requires certified independence, and that coordinate remains structural zero
+when `CQ_q` carries no independent-support obligation. The field has no
+intrinsic preference for source identity diversity. Pointwise frontier index,
 embedding/facility/temporal evidence, admission source, and prior do not enter
-gain. Lower-frontier candidates may be selected for otherwise unavailable set
-novelty. V1 has no semantic prior; only a query-owned exact tie may precede
-identity. Coverage availability must not switch pointwise preference. Legacy
+gain or cross-frontier admission. Scoring and cross-frontier admission use the
+same compiled Gamma atoms and standings. The `Gamma_q` tuple is lexicographic:
+positive gain in an uncovered higher stratum cannot be preceded by lower-stratum-only or
+zero gain among resource-feasible candidates. V1 has no semantic
+prior; only a query-owned exact tie may precede identity. Coverage availability
+must not switch pointwise preference. Legacy
 implementation state
 (2026-08-24): the
 production walk objective is binding-aware. `runSelectGammaSession` in
@@ -174,11 +185,15 @@ the independent embedding map when present, while zero/unavailable cover
 consumes `fused_score`. That piecewise A-type relevance source is current
 runtime behavior and a diagnosed contract violation, not target semantics.
 
-For a query q, the planned obligation set O_q includes entity, relation, time,
-logical-object, independent-evidence, and answer-shape atoms. Target Gamma gain
-contains only incremental set coverage/novelty and redundancy. Pointwise
-safe-dominance/frontier structure constrains and explains capture but is not
-added as `FrontierPriority`. Source identity is not an admission-diversity key.
+For a query q, the current implementation's facility vocabulary still includes
+entity, relation, time, logical-object, independent-evidence, and answer-shape
+facets. Those live coordinates do not define the target tuple. Target `Gamma_q`
+gain is only the query-compiled lexicographic strata: answer binding/position,
+required-proposition support, and compiler-required certified-independent
+support. Live facility/`Values_v`/content-id remainder is current implementation
+behavior, not target scoring or cross-frontier admission. Pointwise safe-dominance/frontier
+structure constrains and explains capture but is not added as
+`FrontierPriority`. Source identity is not an admission-diversity key.
 Cardinality/enumerative obligations are required for full-gold completeness
 claims even if an initial any@5 experiment can proceed without them.
 
@@ -314,9 +329,9 @@ The principal owners are:
 | Typed path transfer | Live when attributed inflow exists | `resolvePathAxis` consumes `pathInflowByTarget`; unavailable/storage-error/no-inflow states remain explicit and do not count as fuel. |
 | Evidence activation | Live | Evidence support vectors and candidate-linked semantic receipts feed fine assessment. Missing support is an explicit no-op. |
 | Open-semantic candidate attribution | Live | Accepted source-bound F3 identities enter `query_task_factors` and can introduce field members as `proposed_routing_only`. Result bindings are carried into Gamma coverage through binding-coverage receipts, and Garden `kind_projection` drafts feed production kind-constraint alignment (`kind-projection/production.ts`). F3 and kind remain rebuildable routing, not durable truth. |
-| Embedding supplement | Live, relevance role noncompliant | Embedding may inject candidates, cast the semantic family ballot, modulate graph/path contribution, independently rescore the pool, and supply facility relevance. It never authorizes durable truth. The shadow target makes E1 a monotonic field extension: admission cannot evict E0 or create preference, and shared candidates add one embedding observation only. |
+| Embedding supplement | Live, relevance role noncompliant | Embedding may inject candidates, cast the semantic family ballot, modulate graph/path contribution, independently rescore the pool, and supply facility relevance. It never authorizes durable truth. The query-proof target makes E1 a monotonic field extension: admission cannot evict E0 or create preference, and shared candidates add one embedding observation only. |
 | Integrated flood | Live | Flood requires Slice, path, and evidence fuel. The current ranking scalar is family-max `fused_score`; flood and evidence residuals are diagnostic. This preserves one scalar mutation path but does not validate family-max as canonical relevance. Missing slice material is explicit pass-through, not a fabricated match. Evidence residual scale is an in-code identity constant, not the deleted beta knob. |
-| `Select_Gamma` | Live owner on the optional outer legacy path; canonical default is `prefixSK` | Omitted `delivery_path` uses `prefixSK(S_infty, K)`. `delivery_path: "legacy"` keeps `selectGammaWalk` as the sole admission-order owner of that mode. Canonical `relevance_score` is not ranking authority (`ranking_authority: "prefix_sk"`). Legacy positive-cover gain still uses embedding/facility quality plus cover; known-zero and unavailable use `fused_score` minus rho. The shadow target permits only S-dependent novelty/coverage/redundancy, no frontier-index gain, and one prefix-monotonic walk. Production source hard-dedupe is off. |
+| `Select_Gamma` | Live owner on the optional outer legacy path; canonical default is `prefixSK` | Omitted `delivery_path` uses `prefixSK(S_infty, K)`. `delivery_path: "legacy"` keeps `selectGammaWalk` as the sole admission-order owner of that mode. Canonical `relevance_score` is not ranking authority (`ranking_authority: "prefix_sk"`). Legacy positive-cover gain still uses embedding/facility quality plus cover; known-zero and unavailable use `fused_score` minus rho. The query-proof target permits only query-compiled answer-binding/position, required-proposition, and compiler-required certified-independent support strata, with the same atoms governing scoring and cross-frontier admission in one prefix-monotonic walk. Production source hard-dedupe is off. |
 | Selection-boundary replay | Live on `delivery_path: "legacy"`; canonical-absent | Legacy capture/replay remains. Canonical delivery uses `shadowTrace` / capture prefix and does not attach `selectionBoundaryObserver`. |
 | Retrieval-field stop certificate | Live post-Gamma receipt | It binds field captures/refinement receipts to final selection. There is no pre-Gamma visibility stop receipt. |
 | Legal `slice_key` visibility | Live | Ordinary generation exposes every legal `slice_key`. Persisted L2 `opened` and `unseen_frontier_upper_bound` are inert written fields (`true`/`0`) and do not withhold membership. `activation_budget` belongs only to attributed activation. |
