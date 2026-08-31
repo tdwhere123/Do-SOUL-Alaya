@@ -3,25 +3,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeCachedDatabase, initDatabase } from "@do-soul/alaya-storage";
-import { RecallEvalAttributionSchema } from "../../../../../../packages/eval/src/schema/kpi-schema.js";
+import { RecallEvalAttributionSchema } from "../../../../../../packages/eval/src/contracts/kpi-schema.js";
 import {
   RECALL_RANKING_IDENTITY,
   SNAPSHOT_SEED_IDENTITY
 } from "../../../shared/version.js";
 import { buildRecallEvalSnapshotBinding } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-runtime.js";
 import {
   BENCH_DAEMON_DB_FILENAME,
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   checkpointAndCopyBenchDb,
   restoreSnapshotToDataDir,
   type LongMemEvalSnapshotManifest
-} from "../../../bench/snapshot/materialize.js";
+} from "../../../runs/snapshot/materialize.js";
 import {
   assertSnapshotConsumeIdentity,
   readSchemaMigrationVersion
-} from "../../../bench/snapshot/snapshot-seed-identity.js";
-import { hashRegularFileNoFollow } from "../../../bench/snapshot/bound-file.js";
+} from "../../../runs/snapshot/snapshot-seed-identity.js";
+import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 
 let tmpDir: string;
 

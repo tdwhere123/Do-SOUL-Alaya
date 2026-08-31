@@ -11,8 +11,8 @@ import {
   SqliteSignalRepo
 } from "@do-soul/alaya-storage";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
-import { extractSeedInputs } from "../../../bench/compile-seed/compile-seed-extract.js";
-import type { CompileSeedExtractionStats } from "../../../bench/compile-seed.js";
+import { extractSeedInputs } from "../../../runs/compile-seed/compile-seed-extract.js";
+import type { CompileSeedExtractionStats } from "../../../runs/compile-seed.js";
 import { withOpenSemanticFactorGraph } from
   "../../longmemeval/compile-seed/compile-seed-fixture.js";
 

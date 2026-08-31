@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
-import { GovernanceLeasePiercingConditionKindSchema } from "../soul/governance-lease.js";
-import { GreenStateSchema } from "../soul/green-status.js";
+import { GovernanceLeasePiercingConditionKindSchema } from "../governance/governance-lease.js";
+import { GreenStateSchema } from "../governance/green-status.js";
 
 const greenGovernanceEventTypeValues = [
   "soul.session_override.applied",

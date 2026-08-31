@@ -7,18 +7,18 @@ import { afterEach, describe, expect, it } from "vitest";
 import { initDatabase } from "@do-soul/alaya-storage";
 import {
   writeExtractionCacheManifest
-} from "../../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { writeRecallEvalSnapshot } from
-  "../../../../longmemeval/runner/runner-helpers.js";
+  "../../../../datasets/longmemeval/runner/runner-helpers.js";
 import {
   BENCH_DAEMON_DB_FILENAME,
   snapshotExtractionAuthorityPath,
   snapshotManifestPath,
   snapshotSidecarPath
-} from "../../../../bench/snapshot/materialize.js";
+} from "../../../../runs/snapshot/materialize.js";
 import {
   createCurrentPostFillCacheAuthorityProof
-} from "../../../../bench/snapshot/current/current-substrate-authority.js";
+} from "../../../../runs/snapshot/current/current-substrate-authority.js";
 import { writeCompletedExtractionCacheFixture } from
   "../../extraction/completed-extraction-cache-fixture.js";
 import { makeShardProvenance } from "../../runner/runner-concurrency-fixture.js";

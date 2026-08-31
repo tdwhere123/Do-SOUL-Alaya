@@ -3,12 +3,12 @@ import {
   runRecallEval,
   type RecallEvalOptions,
   type RecallEvalResult
-} from "../../bench/lifecycle/recall-eval/recall-eval-impl.js";
+} from "../../runs/lifecycle/recall-eval/recall-eval-impl.js";
 import type { ParsedFlags } from "../cli-options.js";
 import { exitCodeForReleaseHardGates } from "../release-hard-gate-exit.js";
 import { pct } from "../result-format.js";
 import { renderLifecycleFailure } from
-  "../../bench/lifecycle/errors.js";
+  "../../runs/lifecycle/errors.js";
 
 export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
   if (opts.snapshot === undefined) {

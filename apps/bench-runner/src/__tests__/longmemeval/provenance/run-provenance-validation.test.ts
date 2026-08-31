@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveLocalArtifactTreeSha256 } from "../../../bench/provenance/embedding/local-onnx.js";
-import { buildLongMemEvalRunProvenance } from "../../../bench/provenance/run.js";
+import { resolveLocalArtifactTreeSha256 } from "../../../runs/provenance/embedding/local-onnx.js";
+import { buildLongMemEvalRunProvenance } from "../../../runs/provenance/run.js";
 import {
   fakeExecutedDistIdentity,
   registerRunProvenanceRootCleanup

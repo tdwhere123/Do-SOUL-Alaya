@@ -4,18 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildQuestionDiagnostic } from
-  "../../../bench/diagnostics/diagnostics-question.js";
+  "../../../diagnostics/diagnostics-question.js";
 import { readRecallDiagnostics } from
-  "../../../bench/diagnostics/schema/diagnostics-private.js";
+  "../../../diagnostics/schema/diagnostics-private.js";
 import { LongMemEvalQuestionDiagnosticSchema } from
-  "../../../bench/diagnostics/schema/diagnostics-schema.js";
+  "../../../diagnostics/schema/diagnostics-schema.js";
 import type { RecallEvalQuestionResult } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-contract.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-contract.js";
 import {
   normalizeRecallEvalDiagnosticsQuestion
-} from "../../../bench/provenance/recall-eval/recall-eval-diagnostics.js";
+} from "../../../runs/provenance/recall-eval/recall-eval-diagnostics.js";
 import { RecallEvalDiagnosticsSpool } from
-  "../../../bench/provenance/recall-eval/recall-eval-diagnostics-spool.js";
+  "../../../runs/provenance/recall-eval/recall-eval-diagnostics-spool.js";
 import {
   capturedTruncatedProof,
   provenanceMap,

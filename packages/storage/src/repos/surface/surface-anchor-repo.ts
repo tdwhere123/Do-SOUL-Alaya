@@ -6,7 +6,7 @@ import {
   getEventLogWriter,
   insertEventLogEntry,
   type EventLogDraftInput
-} from "../shared/event-log-writer.js";
+} from "../runtime/writes/event-log-writer.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface SurfaceAnchorRepo {

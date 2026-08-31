@@ -5,10 +5,10 @@ import {
   IsoDatetimeStringSchema,
   NonEmptyStringSchema
 } from "../shared/schema-primitives.js";
-import { GovernanceResolutionPolicyClassificationSchema } from "../soul/governance-policy-classification.js";
-import { SoulResolutionKindSchema } from "../soul/resolution.js";
+import { GovernanceResolutionPolicyClassificationSchema } from "../governance/governance-policy-classification.js";
+import { SoulResolutionKindSchema } from "../governance/resolution.js";
 
-// see also: packages/protocol/src/soul/governance-policy-classification.ts
+// see also: packages/protocol/src/governance/governance-policy-classification.ts
 export { GovernanceResolutionPolicyClassificationSchema };
 
 // invariant: one event type per resolution kind so EventLog consumers

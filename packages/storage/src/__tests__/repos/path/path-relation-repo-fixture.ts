@@ -9,7 +9,7 @@ export const trackedDatabases = new Set<StorageDatabase>();
 // always the source of truth for what the CASE must cover.
 // PathAnchorRefSchema is a discriminatedUnion wrapped in .readonly(); unwrap
 // _def.innerType to reach .options.
-// cross-file ref: packages/protocol/src/soul/path-relation.ts PathAnchorRefSchema
+// cross-file ref: packages/protocol/src/relations/path-relation.ts PathAnchorRefSchema
 export function anchorKindsFromSchema(): readonly string[] {
   const wrapped = PathAnchorRefSchema as unknown as {
     readonly _def: {

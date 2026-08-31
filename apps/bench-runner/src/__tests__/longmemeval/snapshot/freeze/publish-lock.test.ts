@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { withSnapshotPublishLock } from
-  "../../../../bench/snapshot/freeze/publish-lock.js";
+  "../../../../runs/snapshot/freeze/publish-lock.js";
 
 const roots: string[] = [];
 

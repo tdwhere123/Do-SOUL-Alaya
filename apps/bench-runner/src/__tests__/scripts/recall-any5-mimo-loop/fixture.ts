@@ -10,7 +10,7 @@ import {
   SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
   SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256
 } from "@do-soul/alaya-soul";
-import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
+import { checkpointDigest } from "../../../runs/diagnostic-loop/checkpoint.js";
 
 export const execFileAsync = promisify(execFile);
 export const script = path.resolve(

@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { buildQuestionDiagnostic } from
-  "../../../bench/diagnostics/diagnostics-question.js";
+  "../../../diagnostics/diagnostics-question.js";
 import type { LongMemEvalQuestionDiagnostic } from
-  "../../../bench/diagnostics/schema/diagnostics-types.js";
+  "../../../diagnostics/schema/diagnostics-types.js";
 
 export function assembledQuestion(input: {
   readonly questionId: string;

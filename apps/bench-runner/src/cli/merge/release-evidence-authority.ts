@@ -3,7 +3,7 @@ import type { LongMemEvalReleaseEvidenceAuthority } from
 import {
   deriveLongMemEvalReleaseEvidenceAuthority,
   type VerifiedLongMemEvalDatasetAuthority
-} from "../../longmemeval/ingestion/fetch.js";
+} from "../../datasets/longmemeval/ingestion/fetch.js";
 import type { ShardArchiveRef } from "./command/merge-command-shards.js";
 
 export function deriveMergedLongMemEvalReleaseAuthority(

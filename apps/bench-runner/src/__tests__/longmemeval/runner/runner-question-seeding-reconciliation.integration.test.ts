@@ -12,12 +12,12 @@ import {
 import type {
   CompileSeedExtractionStats,
   CompileSeedTurnInput
-} from "../../../bench/compile-seed.js";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
-import { seedLongMemEvalQuestion } from "../../../longmemeval/runner/question/runner-question-seeding.js";
-import { buildLongMemEvalSnapshotQuestion } from "../../../longmemeval/runner/question/runner-question-result.js";
-import { deriveLongMemEvalGoldMemoryIds } from "../../../longmemeval/runner/runner-scoring.js";
-import { assertSeedLedgerMaterializationProof } from "../../../bench/snapshot/seed-ledger/seed-ledger-materialization-proof.js";
+} from "../../../runs/compile-seed.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
+import { seedLongMemEvalQuestion } from "../../../datasets/longmemeval/runner/question/runner-question-seeding.js";
+import { buildLongMemEvalSnapshotQuestion } from "../../../datasets/longmemeval/runner/question/runner-question-result.js";
+import { deriveLongMemEvalGoldMemoryIds } from "../../../datasets/longmemeval/runner/runner-scoring.js";
+import { assertSeedLedgerMaterializationProof } from "../../../runs/snapshot/seed-ledger/seed-ledger-materialization-proof.js";
 
 let daemon: BenchDaemonHandle | undefined;
 let root: string | undefined;

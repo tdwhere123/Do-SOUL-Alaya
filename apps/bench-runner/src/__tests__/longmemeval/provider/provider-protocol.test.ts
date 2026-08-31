@@ -4,10 +4,10 @@ import {
   findProviderBinding,
   requireProviderBinding,
   resolveVendorModel
-} from "../../../bench/provider/catalog.js";
-import { probeProviderProtocol } from "../../../bench/provider/protocol-probe.js";
+} from "../../../runs/provider/catalog.js";
+import { probeProviderProtocol } from "../../../runs/provider/protocol-probe.js";
 import { assertRequiredRequestProfile } from
-  "../../../bench/extraction/transport-route.js";
+  "../../../runs/extraction/transport-route.js";
 
 const MIMO = requireProviderBinding("mimo-v2.5");
 

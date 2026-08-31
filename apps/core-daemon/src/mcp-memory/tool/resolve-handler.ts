@@ -49,7 +49,7 @@ export interface SoulResolveHandlerDependencies {
   // its source_object_refs was delivered as a memory_entry, the agent has
   // legitimate context to resolve the claim. Absent reader degrades to
   // direct memory_entry-membership only.
-  // see also: packages/protocol/src/soul/recall-candidate.ts
+  // see also: packages/protocol/src/recall/recall-candidate.ts
   //   (object_kind = "memory_entry")
   readonly claimSourceReader?: {
     findSourceObjectRefs(targetObjectId: string): Promise<readonly string[] | null>;

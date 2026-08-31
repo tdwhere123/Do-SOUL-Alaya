@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildQuestionDiagnostic } from "../../../bench/diagnostics.js";
-import { readRecallDiagnostics } from "../../../bench/diagnostics/schema/diagnostics-private.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
-import { compareCandidateManifestations } from "../../../bench/diagnostics/candidate-manifestation-order.js";
+import { buildQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
+import { readRecallDiagnostics } from "../../../diagnostics/schema/diagnostics-private.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../diagnostics/schema/diagnostics-schema.js";
+import { compareCandidateManifestations } from "../../../diagnostics/candidate-manifestation-order.js";
 
 describe("fine-assessment pruned evidence", () => {
   it("defines a deterministic total manifestation order", () => {

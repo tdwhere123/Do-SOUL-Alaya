@@ -1,0 +1,126 @@
+import {
+  serializePathAnchorRef,
+  timeConcernWindowDigestsMatch,
+  type PathAnchorRef,
+  type PathRelation
+} from "@do-soul/alaya-protocol";
+import { StorageError } from "../../../shared/errors.js";
+import type { RelationAssertionRepo } from "../relation-assertion-repo.js";
+
+const TEMPORAL_PROJECTION_GENERATION_MISSING_ERROR_NAME =
+  "TemporalProjectionGenerationMissingError";
+
+export class TemporalProjectionGenerationMissingError extends StorageError {
+  public constructor(asOf: string) {
+    super(
+      "NOT_FOUND",
+      `No verified temporal projection exists for as-of ${asOf}; rebuild it before recall.`
+    );
+    this.name = TEMPORAL_PROJECTION_GENERATION_MISSING_ERROR_NAME;
+  }
+}
+
+export interface TemporalProjectionReadOptions {
+  readonly asOf?: string;
+}
+
+type TemporalProjectionRepo = Pick<RelationAssertionRepo,
+  "findActiveProjectionByWorkspace" | "findProjectionByWorkspaceAtAsOf">
+  & Partial<Pick<RelationAssertionRepo, "readActiveProjectionGenerationInCurrentTransaction">>;
+
+/**
+ * Read-only adapter for temporal PathRelation projections. It deliberately
+ * has no legacy-table fallback: selection decides which reader the runtime
+ * receives, and this reader only exposes verified projection generations.
+ */
+export class SqliteTemporalPathProjectionReader {
+  // findByAnchors filters in JS; re-parse of the same generation is wasted.
+  private readonly parsedProjections = new Map<
+    string,
+    Promise<readonly Readonly<PathRelation>[]>
+  >();
+
+  public constructor(private readonly relationAssertions: TemporalProjectionRepo) {}
+
+  public async findByWorkspace(
+    workspaceId: string,
+    options: TemporalProjectionReadOptions = {}
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await this.readProjection(workspaceId, options.asOf);
+  }
+
+  public async findByAnchors(
+    workspaceId: string,
+    anchorRefs: readonly PathAnchorRef[],
+    options: TemporalProjectionReadOptions = {}
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    const anchorKeys = new Set(anchorRefs.map(serializePathAnchorRef));
+    if (anchorKeys.size === 0) return Object.freeze([]);
+    const paths = await this.readProjection(workspaceId, options.asOf);
+    return Object.freeze(paths.filter((path) =>
+      anchorKeys.has(serializePathAnchorRef(path.anchors.source_anchor)) ||
+      anchorKeys.has(serializePathAnchorRef(path.anchors.target_anchor))
+    ));
+  }
+
+  public async findByTimeConcernWindowDigests(
+    workspaceId: string,
+    windowDigests: readonly string[],
+    options: TemporalProjectionReadOptions = {}
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    if (windowDigests.length === 0) return Object.freeze([]);
+    const paths = await this.readProjection(workspaceId, options.asOf);
+    return Object.freeze(paths.filter((path) =>
+      [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
+        anchor.kind === "time_concern" && windowDigests.some((digest) =>
+          timeConcernWindowDigestsMatch(anchor.window_digest, digest))
+      )
+    ));
+  }
+
+  private async readProjection(
+    workspaceId: string,
+    asOf: string | undefined
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    const cacheKey = this.projectionCacheKey(workspaceId, asOf);
+    const cached = this.parsedProjections.get(cacheKey);
+    if (cached !== undefined) return cached;
+    const pending = this.loadProjection(workspaceId, asOf).then(
+      (loaded) => loaded,
+      (error: unknown) => {
+        this.parsedProjections.delete(cacheKey);
+        throw error;
+      }
+    );
+    this.parsedProjections.set(cacheKey, pending);
+    return pending;
+  }
+
+  private projectionCacheKey(workspaceId: string, asOf: string | undefined): string {
+    const generation = asOf === undefined ? this.activeGenerationOrEmpty() : "";
+    return `${workspaceId}\0${asOf ?? ""}\0${generation}`;
+  }
+
+  private activeGenerationOrEmpty(): string {
+    // A rebuilt active generation is invisible unless the repo exposes the generation id.
+    return this.relationAssertions.readActiveProjectionGenerationInCurrentTransaction?.() ?? "";
+  }
+
+  private async loadProjection(
+    workspaceId: string,
+    asOf: string | undefined
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    if (asOf === undefined) {
+      return await this.relationAssertions.findActiveProjectionByWorkspace(workspaceId);
+    }
+    if (!Number.isFinite(Date.parse(asOf))) {
+      throw new StorageError("VALIDATION_FAILED", "Temporal projection asOf must be a valid ISO datetime.");
+    }
+    const projection = await this.relationAssertions.findProjectionByWorkspaceAtAsOf(workspaceId, asOf);
+    if (projection === null) {
+      // Exact as_of is the generation key; a later verified cache must not stand in.
+      throw new TemporalProjectionGenerationMissingError(asOf);
+    }
+    return projection;
+  }
+}

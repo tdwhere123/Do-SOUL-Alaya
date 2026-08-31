@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
   acquireExtractionCacheWriteLease
-} from "../../../bench/extraction/fill/manifest/fill-root-guard.js";
+} from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 
 const roots: string[] = [];
 

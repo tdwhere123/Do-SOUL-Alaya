@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from "../../../bench/snapshot/materialize.js";
-import { validateSnapshotManifest } from "../../../bench/snapshot/manifest-validation.js";
+import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from "../../../runs/snapshot/materialize.js";
+import { validateSnapshotManifest } from "../../../runs/snapshot/manifest-validation.js";
 import { currentSnapshotManifestFor } from
   "../snapshot/current-snapshot-fixture.js";
 

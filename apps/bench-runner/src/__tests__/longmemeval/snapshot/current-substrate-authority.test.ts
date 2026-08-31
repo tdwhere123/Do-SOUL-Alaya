@@ -11,17 +11,17 @@ import {
   readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest,
   type ExtractionCacheManifest
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   assertCurrentPostFillCacheAuthority,
   assertCurrentPostFillCacheAuthorityProof,
   assertCurrentPostFillCacheAuthorityProofManifest,
   createCurrentPostFillCacheAuthorityProof,
   assertStoredCurrentSnapshotAttribution
-} from "../../../bench/snapshot/current/current-substrate-authority.js";
+} from "../../../runs/snapshot/current/current-substrate-authority.js";
 import { writeCompletedExtractionCacheFixture } from
   "../extraction/completed-extraction-cache-fixture.js";
-import { withRecallEvalSnapshot } from "../../../bench/snapshot/recall-eval/recall-eval-loader.js";
+import { withRecallEvalSnapshot } from "../../../runs/snapshot/recall-eval/recall-eval-loader.js";
 import {
   currentSnapshotManifestFor,
   currentSnapshotSidecarFor

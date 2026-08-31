@@ -4,10 +4,10 @@ import {
   buildOfficialApiSourceCorpus,
   OfficialApiGardenProvider
 } from "@do-soul/alaya-soul";
-import { extractSeedInputs } from "../../../bench/compile-seed/compile-seed-extract.js";
+import { extractSeedInputs } from "../../../runs/compile-seed/compile-seed-extract.js";
 import type {
   CompileSeedExtractionStats
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import { attachCompileSourceGrounding } from "../../../harness/seeding/source-grounding.js";
 import { withOpenSemanticFactorGraph } from
   "../../longmemeval/compile-seed/compile-seed-fixture.js";

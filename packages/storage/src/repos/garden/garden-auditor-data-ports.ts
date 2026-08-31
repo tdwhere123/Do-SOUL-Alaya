@@ -28,7 +28,7 @@ import {
   preparePointerHealthStatements,
   type BootstrappingStatements,
   type GreenMaintenanceStatements
-} from "./garden-auditor-statements.js";
+} from "./statements/garden-auditor-statements.js";
 
 interface PatternRow {
   readonly pattern_key: string;

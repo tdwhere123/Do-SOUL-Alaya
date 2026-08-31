@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { LocomoSampleSchema, type LocomoSample } from "../../locomo/dataset.js";
-import { resolveLocomoSampleSize } from "../../locomo/runner.js";
+import { LocomoSampleSchema, type LocomoSample } from "../../datasets/locomo/dataset.js";
+import { resolveLocomoSampleSize } from "../../datasets/locomo/runner.js";
 
 function buildConversation(
   sampleId: string,

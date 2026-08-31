@@ -152,7 +152,7 @@ const LOCAL_SUPERSEDES_SEED_PROFILE: PathSeedProfile = Object.freeze({
 // a local-cue contradicts and an agent-asserted contradicts_ref carry the same
 // negative weight.
 // see also: packages/core/src/governance/conflict-detection-service.ts — SYSTEM negatives;
-//   packages/soul/src/garden/materialization-router/signal-ref-seeds.ts SIGNAL_REF_SEED_SPECS.
+//   packages/soul/src/garden/materialization/materialization-router/signal-ref-seeds.ts SIGNAL_REF_SEED_SPECS.
 const LOCAL_CONTRADICTS_SEED_PROFILE: PathSeedProfile = Object.freeze({
   relationKind: "contradicts",
   initialStrength: 0.5,

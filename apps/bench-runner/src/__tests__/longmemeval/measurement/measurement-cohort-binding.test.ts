@@ -1,7 +1,7 @@
 import type { PerScenarioRow } from "@do-soul/alaya-eval";
 import { describe, expect, it } from "vitest";
-import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics.js";
-import { assertMeasurementCohortBinding } from "../../../bench/measurement/cohort-binding.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
+import { assertMeasurementCohortBinding } from "../../../runs/measurement/cohort-binding.js";
 
 describe("measurement cohort binding", () => {
   it.each([

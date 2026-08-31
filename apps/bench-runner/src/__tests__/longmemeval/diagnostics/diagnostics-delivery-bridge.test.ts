@@ -6,12 +6,12 @@ import {
   classifyReplayGoldDeliveryMissTaxonomy,
   resolveCoreDeliveryRank,
   toDeliveryMissCandidateInput
-} from "../../../bench/diagnostics/miss/diagnostics-delivery-bridge.js";
+} from "../../../diagnostics/miss/diagnostics-delivery-bridge.js";
 import type {
   CandidateDiagnostic,
   LongMemEvalGoldDiagnostic,
   LongMemEvalReplayCandidate
-} from "../../../bench/diagnostics/schema/diagnostics-types.js";
+} from "../../../diagnostics/schema/diagnostics-types.js";
 
 function sampleCandidate(
   overrides: Partial<CandidateDiagnostic> = {}
@@ -271,7 +271,7 @@ function sampleReplayCandidate(
 describe("FullGoldDeliveryContributionSchema", () => {
   it("accepts analyze output shape from buildLongMemEvalFullGoldCoverage", async () => {
     const { buildLongMemEvalFullGoldCoverage } = await import(
-      "../../../bench/diagnostics.js"
+      "../../../diagnostics/diagnostics.js"
     );
     const { buildGoldDiagnostic, buildQuestionDiagnosticFixture } = await import(
       "./gold-diagnostic-fixture.js"

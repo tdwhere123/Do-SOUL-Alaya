@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecallEvalQuestionResult } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-contract.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-contract.js";
 
 const mocks = vi.hoisted(() => ({
   append: vi.fn(),
@@ -42,10 +42,10 @@ vi.mock("../../../harness/daemon.js", () => ({
   startBenchDaemon: vi.fn(async () => ({ shutdown: mocks.shutdown }))
 }));
 vi.mock(
-  "../../../bench/lifecycle/recall-eval/recall-eval-process/ipc-client.js",
+  "../../../runs/lifecycle/recall-eval/recall-eval-process/ipc-client.js",
   async (importOriginal) => {
     const actual = await importOriginal<
-      typeof import("../../../bench/lifecycle/recall-eval/recall-eval-process/ipc-client.js")
+      typeof import("../../../runs/lifecycle/recall-eval/recall-eval-process/ipc-client.js")
     >();
     return {
       ...actual,
@@ -58,27 +58,27 @@ vi.mock("../../../harness/recall/recall-weight-overrides.js", () => ({
   formatBenchRecallWeightOverrides: vi.fn(),
   resolveBenchRecallWeightOverrides: vi.fn(() => undefined)
 }));
-vi.mock("../../../bench/recall-eval-kpi.js", () => ({
+vi.mock("../../../runs/kpi/recall-eval-payload.js", () => ({
   assembleRecallEvalKpi: vi.fn(() => ({
     bench_name: "public", split: "fixture", run_at: "2026-08-12T00:00:00.000Z",
     alaya_commit: "1749d78", evaluated_count: 1, dataset: {}
   }))
 }));
-vi.mock("../../../bench/kpi/recall-eval-archive.js", () => ({
+vi.mock("../../../runs/kpi/recall-eval-archive.js", () => ({
   buildPerQuestionDelivered: vi.fn(() => new Map()),
   buildRecallEvalArchiveSlug: vi.fn(() => "fixture-slug")
 }));
 vi.mock(
-  "../../../bench/lifecycle/recall-eval/recall-eval-archive-impl.js",
+  "../../../runs/lifecycle/recall-eval/recall-eval-archive-impl.js",
   () => ({ selectRecallEvalBaseline: vi.fn(async () => null) })
 );
-vi.mock("../../../bench/snapshot/materialize.js", () => ({
+vi.mock("../../../runs/snapshot/materialize.js", () => ({
   snapshotQuestionIdDigest: vi.fn(() => "a".repeat(64))
 }));
-vi.mock("../../../bench/lifecycle/owned-temp-root.js", () => ({
+vi.mock("../../../runs/lifecycle/owned-temp-root.js", () => ({
   finalizeOwnedTempRoot: mocks.finalizeOwnedRoot
 }));
-vi.mock("../../../bench/lifecycle/errors.js", () => ({
+vi.mock("../../../runs/lifecycle/errors.js", () => ({
   boundLifecycleFailure: vi.fn((phase: string, error: unknown) => ({
     phase,
     name: error instanceof Error ? error.name : "UnknownError",
@@ -92,15 +92,15 @@ vi.mock("../../../bench/lifecycle/errors.js", () => ({
   })
 }));
 vi.mock(
-  "../../../bench/lifecycle/recall-eval/recall-eval-progress.js",
+  "../../../runs/lifecycle/recall-eval/recall-eval-progress.js",
   () => ({ writeRecallEvalProgress: vi.fn() })
 );
 vi.mock(
-  "../../../bench/provenance/recall-eval/recall-eval-archive-bundle.js",
+  "../../../runs/provenance/recall-eval/recall-eval-archive-bundle.js",
   () => ({ buildRecallEvalArchiveBundle: mocks.archive })
 );
 vi.mock(
-  "../../../bench/provenance/recall-eval/recall-eval-run.js",
+  "../../../runs/provenance/recall-eval/recall-eval-run.js",
   () => ({
     buildRecallEvalRunProvenance: vi.fn(async () => ({
       code: {
@@ -111,10 +111,10 @@ vi.mock(
     isRecallEvalRunEvidenceEligible: vi.fn(() => false)
   })
 );
-vi.mock("../../../bench/measurement/artifact-transaction.js", () => ({
+vi.mock("../../../runs/measurement/artifact-transaction.js", () => ({
   withPublishedDiagnosticsArtifact: mocks.published
 }));
-vi.mock("../../../bench/measurement/recall-eval-memory-profile.js", () => ({
+vi.mock("../../../runs/measurement/recall-eval-memory-profile.js", () => ({
   withRecallEvalMemoryProfile: vi.fn(async (_options, run) => {
     const profile = mocks.profileEnabled ? {
       sample: mocks.profileSample,
@@ -131,14 +131,14 @@ vi.mock("../../../bench/measurement/recall-eval-memory-profile.js", () => ({
   })
 }));
 vi.mock(
-  "../../../bench/lifecycle/recall-eval/recall-eval-run-context.js",
+  "../../../runs/lifecycle/recall-eval/recall-eval-run-context.js",
   () => ({ prepareRecallEvalRunContext: mocks.prepareContext })
 );
-vi.mock("../../../bench/kpi/recall-eval-report.js", () => ({
+vi.mock("../../../runs/kpi/recall-eval-report.js", () => ({
   renderRecallEvalReport: vi.fn(() => "# report\n")
 }));
 vi.mock(
-  "../../../bench/lifecycle/recall-eval/recall-eval-selection-replay.js",
+  "../../../runs/lifecycle/recall-eval/recall-eval-selection-replay.js",
   () => ({
     RECALL_EVAL_SELECTION_BOUNDARY_FILENAME: "selection.ndjson.gz",
     captureRecallEvalQuestion: vi.fn(async (_spool, _questionId, run) => {
@@ -151,16 +151,16 @@ vi.mock(
   })
 );
 vi.mock(
-  "../../../bench/lifecycle/recall-eval/question/recall-eval-question.js",
+  "../../../runs/lifecycle/recall-eval/question/recall-eval-question.js",
   () => ({ recallEvalOneQuestion: mocks.question })
 );
 vi.mock(
-  "../../../bench/provenance/recall-eval/recall-eval-diagnostics-spool.js",
+  "../../../runs/provenance/recall-eval/recall-eval-diagnostics-spool.js",
   () => ({ RecallEvalDiagnosticsSpool: { create: mocks.createSpool } })
 );
 
 import { runRecallEval } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-impl.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-impl.js";
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) =>

@@ -6,11 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCachingSignalExtractor,
   type BenchSignalExtractor
-} from "../../../../../bench/compile-seed.js";
+} from "../../../../../runs/compile-seed.js";
 import { openExtractionAttemptLedger } from
-  "../../../../../bench/extraction/authority/attempt-ledger.js";
+  "../../../../../runs/extraction/authority/attempt-ledger.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../../../../bench/extraction/authority/receipt-limits.js";
+  "../../../../../runs/extraction/authority/receipt-limits.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest

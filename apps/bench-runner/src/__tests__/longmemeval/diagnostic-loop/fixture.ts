@@ -1,52 +1,52 @@
 // @ts-nocheck
-import { sha256Utf8 } from "../../../bench/diagnostic-loop/identity.js";
-import { sharedSubstrateIdentities } from "../../../bench/diagnostic-loop/run.js";
+import { sha256Utf8 } from "../../../runs/diagnostic-loop/identity.js";
+import { sharedSubstrateIdentities } from "../../../runs/diagnostic-loop/run.js";
 import type {
   DiagnosticLoopAdapters,
   DiagnosticLoopIdentity,
   DiagnosticLoopPhaseResult,
   DiagnosticLoopRequest
-} from "../../../bench/diagnostic-loop/types.js";
-import type { DiagnosticLoopPhase } from "../../../bench/diagnostic-loop/phases.js";
+} from "../../../runs/diagnostic-loop/types.js";
+import type { DiagnosticLoopPhase } from "../../../runs/diagnostic-loop/phases.js";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { compareF0F2VsCachedF3 } from
-  "../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
+  "../../../diagnostics/stage-attribution/diagnostic-100q.js";
 import { initDatabase } from "@do-soul/alaya-storage";
 import { materializeOpenSemanticFactorFormation } from "@do-soul/alaya-core";
 import {
   createQuerySemanticFactorCache,
   writeQuerySemanticFactorCache
-} from "../../../bench/query-factors/query-semantic-factor-cache.js";
+} from "../../../runs/query-factors/query-semantic-factor-cache.js";
 import { renderSnapshotExtractionAuthority } from
-  "../../../bench/snapshot/extraction-authority.js";
+  "../../../runs/snapshot/extraction-authority.js";
 import { writeCachedExtraction } from
-  "../../../bench/compile-seed/cache/cache-shard.js";
+  "../../../runs/compile-seed/cache/cache-shard.js";
 import {
   writeExtractionCacheManifest,
   type ExtractionCacheManifestV3
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   buildExtractionContentClosureIndex,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
   inspectExtractionRawJson
-} from "../../../bench/extraction/content-closure.js";
+} from "../../../runs/extraction/content-closure.js";
 import {
   diagnosticAuthorityDigest,
   resolveExtractionCacheIdentity,
   resolveSnapshotIdentity
-} from "../../../bench/diagnostic-loop/authority/identity.js";
+} from "../../../runs/diagnostic-loop/authority/identity.js";
 import {
   currentSnapshotExtractionAuthority,
   currentSnapshotManifestFor,
   currentSnapshotSidecarFor
 } from "../snapshot/current-snapshot-fixture.js";
-import { sha256File } from "../../../bench/snapshot/integrity.js";
+import { sha256File } from "../../../runs/snapshot/integrity.js";
 import { gzipSync } from "node:zlib";
 import { missLedgerContentIdentity } from
-  "../../../bench/diagnostic-loop/miss-ledger-authority.js";
+  "../../../runs/diagnostic-loop/miss-ledger-authority.js";
 
 export function digest(seed: string): string {
   return sha256Utf8(seed);

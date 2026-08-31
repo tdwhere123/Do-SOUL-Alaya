@@ -7,11 +7,11 @@ import {
 } from "@do-soul/alaya-eval";
 import path from "node:path";
 import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from
-  "../../bench/archive/archive-evidence.js";
+  "../../runs/archive/archive-evidence.js";
 import { withPublishedDiagnosticsArtifact } from
-  "../../bench/measurement/artifact-transaction.js";
+  "../../runs/measurement/artifact-transaction.js";
 import { resolveLongMemEvalEvidenceContext } from
-  "../../longmemeval/history/evidence-context.js";
+  "../../datasets/longmemeval/history/evidence-context.js";
 
 export async function publishMergedArchive(input: {
   readonly layout: HistoryLayout;

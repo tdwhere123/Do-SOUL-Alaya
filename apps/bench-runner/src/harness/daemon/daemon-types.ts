@@ -141,7 +141,7 @@ export interface BenchDaemonHandle {
    *   1. soul.emit_candidate_signal — signal_kind=potential_preference,
    *      confidence=0.9, raw_payload.excerpt=content. The daemon's
    *      MaterializationRouter synchronously routes by object_kind
-   *      (see packages/soul/src/garden/materialization-router/inputs.ts
+   *      (see packages/soul/src/garden/materialization/materialization-router/inputs.ts
    *      routeByObjectKind): claim-capable kinds (preference / decision /
    *      constraint / etc.) land in memory_and_claim_draft and persist
    *      both a memory_entry AND a draft claim_form; non-claim kinds
@@ -189,7 +189,7 @@ export interface BenchDaemonHandle {
    * credentialled compile path uses proposeMemoriesFromCompileSignals
    * instead so its signals carry source = garden_compile.
    *
-   * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+   * see also: apps/bench-runner/src/runs/compile-seed.ts
    */
   proposeMemoryFromSignal(
     input: BenchSignalSeedInput
@@ -233,7 +233,7 @@ export interface BenchDaemonHandle {
    *
    * invariant: seeds.length + dropped.length === inputs.length.
    *
-   * see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+   * see also: apps/bench-runner/src/runs/compile-seed.ts
    * see also: apps/core-daemon/src/garden-runtime.ts processPostTurnExtractTask
    */
   proposeMemoriesFromCompileSignals(
@@ -246,14 +246,14 @@ export interface BenchDaemonHandle {
    * synthesis_capsule layer is exercised on the no-LLM bench path. The
    * MaterializationRouter routes a potential_synthesis signal with
    * evidence_refs.length >= 2 to synthesisService.create (see
-   * packages/soul/src/garden/materialization-router/router.ts route /
+   * packages/soul/src/garden/materialization/materialization-router/router.ts route /
    * materializeSynthesis). raw_payload.distilled_fact becomes the synthesis
    * summary via buildDistilledFact.
    *
    * The synthesis summary is a deterministic, LLM-free digest of the
    * session's seeded turn content — the bench never calls an LLM here.
    *
-   * see also: apps/bench-runner/src/longmemeval/compile-seed.ts seedSynthesis
+   * see also: apps/bench-runner/src/runs/compile-seed.ts seedSynthesis
    */
   proposeSynthesis(input: BenchSynthesisSeedInput): Promise<SeededSynthesisResult>;
   /**

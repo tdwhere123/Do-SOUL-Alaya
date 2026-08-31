@@ -5,9 +5,9 @@
 // bench-runner CLI both call this so a degraded archive cannot reach
 // latest_passing by skipping the bench-runner exit (e.g. programmatic
 // consumer, future automation, Inspector).
-// cross-file: apps/bench-runner/src/longmemeval/seed-extraction-release-blocker.ts
+// cross-file: apps/bench-runner/src/runs/extraction/seed-fuel/seed-extraction-release-blocker.ts
 //   wraps this judgment with bench-runner-specific report/finding rendering.
-import type { KpiPayload, SeedExtractionPath } from "../schema/kpi-schema.js";
+import type { KpiPayload, SeedExtractionPath } from "../contracts/kpi-schema.js";
 
 export interface SeedExtractionReleaseBlocker {
   readonly id: string;

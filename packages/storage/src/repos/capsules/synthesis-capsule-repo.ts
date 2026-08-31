@@ -18,7 +18,7 @@ import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 import {
   prepareSynthesisCapsuleStatements,
   type SynthesisCapsuleStatements
-} from "./synthesis-capsule-statements.js";
+} from "./statements/synthesis-capsule-statements.js";
 import {
   buildSynthesisFieldRefinementLevels,
   buildSynthesisFieldView,
@@ -26,10 +26,10 @@ import {
   normalizeSynthesisRefinementDepths,
   type SynthesisCapsuleKeywordHit,
   type SynthesisKeywordFieldResult
-} from "./synthesis-search/synthesis-keyword-field.js";
+} from "./reads/synthesis-search/synthesis-keyword-field.js";
 
 export type { SynthesisCapsuleKeywordHit } from
-  "./synthesis-search/synthesis-keyword-field.js";
+  "./reads/synthesis-search/synthesis-keyword-field.js";
 
 export interface SynthesisCapsuleRepo {
   create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>>;
@@ -98,7 +98,7 @@ interface SynthesisCapsuleRow {
   readonly synthesis_status: string;
 }
 
-// see also: packages/protocol/src/soul/fts-search-policy.ts — porter/trigram
+// see also: packages/protocol/src/recall/fts-search-policy.ts — porter/trigram
 // split and ordinal-rank merge shared with evidence-capsule-repo.ts.
 export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   private readonly statementHolder: RefreshableStatementHolder<SynthesisCapsuleStatements>;

@@ -5,16 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { readExtractionAuthorityReceipt } from
-  "../../../bench/extraction/authority/receipt.js";
+  "../../../runs/extraction/authority/receipt.js";
 import {
   MAX_EXTRACTION_AUTHORITY_RECEIPT_BYTES,
   readExtractionAuthorityReceiptArtifact,
   writeExtractionAuthorityReceiptArtifact
-} from "../../../bench/extraction/authority/receipt/artifact-io.js";
+} from "../../../runs/extraction/authority/receipt/artifact-io.js";
 import { readExtractionTargetSelectionReceipt } from
-  "../../../bench/extraction/authority/target-selection/receipt.js";
+  "../../../runs/extraction/authority/target-selection/receipt.js";
 import { readExtractionCacheAuditReceipt } from
-  "../../../bench/extraction/cache-audit/receipt.js";
+  "../../../runs/extraction/cache-audit/receipt.js";
 
 const MAX_SMALL_RECEIPT_BYTES = 64 * 1024;
 const roots: string[] = [];

@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 import {
   buildLongMemEvalSidecarKey,
   deriveLongMemEvalGoldMemoryIds,
   scoreLongMemEvalRecallHits
-} from "../../../longmemeval/runner.js";
+} from "../../../datasets/longmemeval/runner.js";
 
 describe("LongMemEval runner", () => {
 

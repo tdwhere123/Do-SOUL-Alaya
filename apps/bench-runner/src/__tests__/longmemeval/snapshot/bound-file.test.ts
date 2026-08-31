@@ -9,7 +9,7 @@ import {
   copyRegularFileNoFollow,
   hashRegularFileNoFollow,
   readRegularFileNoFollow
-} from "../../../bench/snapshot/bound-file.js";
+} from "../../../runs/snapshot/bound-file.js";
 
 const roots: string[] = [];
 

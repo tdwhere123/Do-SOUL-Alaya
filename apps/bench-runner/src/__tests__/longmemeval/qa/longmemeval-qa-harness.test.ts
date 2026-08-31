@@ -5,8 +5,8 @@ import {
   judgeIsCorrect,
   scoreQaQuestion,
   type QaQuestionVerdict
-} from "../../../bench/qa/qa-harness.js";
-import type { QaChatFn } from "../../../bench/qa/qa-chat.js";
+} from "../../../runs/qa/qa-harness.js";
+import type { QaChatFn } from "../../../runs/qa/qa-chat.js";
 import {
   QA_ENV_API_KEY,
   QA_ENV_MODEL,
@@ -14,7 +14,7 @@ import {
   QaChatError,
   createGardenChatFn,
   resolveQaChatConfig
-} from "../../../bench/qa/qa-chat.js";
+} from "../../../runs/qa/qa-chat.js";
 
 afterEach(() => {
   vi.useRealTimers();

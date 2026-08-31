@@ -4,7 +4,7 @@ import {
   computeTokenSavedRatio,
   type TokenEconomyInput
 } from "../../metrics/token-economy.js";
-import { KpiPayloadSchema } from "../../schema/kpi-schema.js";
+import { KpiPayloadSchema } from "../../contracts/kpi-schema.js";
 
 function input(overrides: Partial<TokenEconomyInput> = {}): TokenEconomyInput {
   return {

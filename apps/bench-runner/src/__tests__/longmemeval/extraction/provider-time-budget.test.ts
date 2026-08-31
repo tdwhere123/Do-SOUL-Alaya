@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveExtractionFillProviderTimeBudget
-} from "../../../bench/extraction/fill/policy/provider-time-budget.js";
+} from "../../../runs/extraction/fill/policy/provider-time-budget.js";
 import { EXTRACTION_REQUEST_TIMEOUT_MS } from
-  "../../../bench/compile-seed/compile-seed-http.js";
+  "../../../runs/compile-seed/compile-seed-http.js";
 import { EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD } from
-  "../../../bench/extraction/authority/receipt-limits.js";
+  "../../../runs/extraction/authority/receipt-limits.js";
 
 describe("extraction provider time budget", () => {
   it("keeps the default budget for one output-token quantum", () => {

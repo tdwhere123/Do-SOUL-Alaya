@@ -132,7 +132,7 @@ export class ResolutionService {
   // standard path. memory_entry and already-archived targets emit
   // audit only and return noop — no lifecycle or proof-effect row
   // changes.
-  // see also: packages/protocol/src/soul/claim-form.ts claimTransitions
+  // see also: packages/protocol/src/memory/claim-form.ts claimTransitions
   private async applyReject(input: ResolveInput, effectiveAsOf: string): Promise<ResolveOutcome> {
     const claim = await this.deps.claimRepo.findById(input.targetObjectId);
     if (claim !== null && claim.workspace_id !== input.workspaceId) {

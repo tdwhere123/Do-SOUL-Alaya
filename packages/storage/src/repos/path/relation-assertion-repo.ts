@@ -12,7 +12,7 @@ import {
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { parseOptionalRow, parseRows } from "../shared/parse-row.js";
-import { EventLogEntryRowParser } from "../runtime/event-log-rows.js";
+import { EventLogEntryRowParser } from "../runtime/event-log/mappers/event-log-rows.js";
 import {
   requireUniqueRelationAssertionEvidenceIds,
   wrapRelationAssertionStorageError
@@ -23,12 +23,12 @@ import {
   findProjectionByWorkspaceAtAsOf,
   readActiveProjectionGeneration,
   readCurrentHistoryDigest
-} from "./relation-assertion/projection-reader.js";
+} from "./reads/relation-assertion/projection-reader.js";
 import type { RelationAssertionProjectionGeneration } from "./relation-assertion/projection-types.js";
 import {
   markProjectionRefreshRequired,
   writeProjectionGeneration
-} from "./relation-assertion/projection-writer.js";
+} from "./writes/relation-assertion/projection-writer.js";
 import { digestRelationFormationEventSource } from "./relation-assertion/source-digest.js";
 import {
   AssertionRowParser,
@@ -37,7 +37,7 @@ import {
   ResolutionRowParser,
   matchesHqSourceReceipt,
   verifyEvidenceReceipt
-} from "./relation-assertion/row-mappers.js";
+} from "./mappers/relation-assertion/row-mappers.js";
 
 export type { RelationAssertionProjectionGeneration } from "./relation-assertion/projection-types.js";
 

@@ -13,7 +13,7 @@ import {
   type SurfaceBindingRow
 } from "../shared/sqlite-row-schemas.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
-import { prepareSurfaceBindingStatements, type SqliteStatement } from "./surface-binding-statements.js";
+import { prepareSurfaceBindingStatements, type SqliteStatement } from "./statements/surface-binding-statements.js";
 
 export interface SurfaceBindingRecord {
   readonly binding_id: string;

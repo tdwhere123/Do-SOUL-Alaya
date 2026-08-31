@@ -9,25 +9,25 @@ import {
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
-import { insertEventLogEntry } from "../shared/event-log-writer.js";
+import { insertEventLogEntry } from "../runtime/writes/event-log-writer.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 import {
   acceptPendingMemoryUpdateWithEvents,
   acceptPendingPathRelationGovernanceWithEvents,
   acceptPendingSynthesisCreateWithEvents,
   type SqliteProposalWorkflowContext
-} from "./accept-workflows.js";
+} from "./writes/accept-workflows.js";
 import {
   parseProposalId,
   parseProposalResolutionState,
   parseProposalRow,
   parseUpdatedAt
-} from "./mappers.js";
+} from "./mappers/mappers.js";
 import { ProposalConnectionHost } from "./proposal-connection-host.js";
-import { ProposalCreateWorkflow } from "./proposal-create-workflow.js";
-import { ProposalReadQueries } from "./proposal-read-queries.js";
-import { acceptPendingPrivacyEraseWithEvents } from "./privacy/accept-workflow.js";
-import { type ProposalRow } from "./rows.js";
+import { ProposalCreateWorkflow } from "./writes/proposal-create-workflow.js";
+import { ProposalReadQueries } from "./reads/proposal-read-queries.js";
+import { acceptPendingPrivacyEraseWithEvents } from "./writes/privacy/accept-workflow.js";
+import { type ProposalRow } from "./mappers/rows.js";
 import {
   type AcceptedMemoryUpdateInput,
   type AcceptedPathRelationGovernanceInput,

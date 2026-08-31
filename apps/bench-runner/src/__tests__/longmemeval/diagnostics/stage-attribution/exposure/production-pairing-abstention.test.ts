@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { buildStageAttributionTables } from
-  "../../../../../bench/diagnostics/stage-attribution/build-tables.js";
+  "../../../../../diagnostics/stage-attribution/build-tables.js";
 import { compareF0F2VsCachedF3 } from
-  "../../../../../bench/diagnostics/stage-attribution/diagnostic-100q.js";
+  "../../../../../diagnostics/stage-attribution/diagnostic-100q.js";
 import { buildTreatmentExposureReceipts } from
-  "../../../../../bench/diagnostics/stage-attribution/exposure/build-receipts.js";
+  "../../../../../diagnostics/stage-attribution/exposure/build-receipts.js";
 import { evaluateCanaryPolarityMatrix } from
-  "../../../../../bench/diagnostics/stage-attribution/exposure/canary-polarity-matrix.js";
+  "../../../../../diagnostics/stage-attribution/exposure/canary-polarity-matrix.js";
 import {
   CANARY_Q1,
   CANARY_Q2,
   CANARY_Q3
-} from "../../../../../bench/diagnostics/stage-attribution/exposure/canary-ids.js";
+} from "../../../../../diagnostics/stage-attribution/exposure/canary-ids.js";
 import {
   controlCanaryDiagnostics,
   passingTreatmentCanaryDiagnostics
@@ -22,7 +22,7 @@ import {
   flagOnlyQuestion
 } from "../../abstention-diagnostic-fixture.js";
 import type { LongMemEvalQuestionDiagnostic } from
-  "../../../../../bench/diagnostics/schema/diagnostics-types.js";
+  "../../../../../diagnostics/schema/diagnostics-types.js";
 
 const CANARY_IDS = [CANARY_Q1, CANARY_Q2, CANARY_Q3];
 const ABS_TWIN_ID = "0862e8bf_abs";

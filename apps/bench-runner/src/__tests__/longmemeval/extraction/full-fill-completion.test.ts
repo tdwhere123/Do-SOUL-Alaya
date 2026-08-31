@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { newFillStats } from
-  "../../../bench/extraction/fill/fill-stats.js";
+  "../../../runs/extraction/fill/fill-stats.js";
 import { resolveFullFillStatus } from
-  "../../../bench/extraction/fill/policy/full-fill-completion.js";
+  "../../../runs/extraction/fill/policy/full-fill-completion.js";
 import { countIntentionalSkippedTurns } from
-  "../../../bench/extraction/fill/policy/cache-key-allowlist.js";
+  "../../../runs/extraction/fill/policy/cache-key-allowlist.js";
 import type { PreparedExtractionFill } from
-  "../../../bench/extraction/fill/fill-preparation.js";
+  "../../../runs/extraction/fill/fill-preparation.js";
 import { emptyBenchTerminalRetryClassifications } from
-  "../../../bench/compile-seed/compile-seed-types.js";
+  "../../../runs/compile-seed/compile-seed-types.js";
 
 describe("full fill completion with an intentional allowlist remainder", () => {
   it("accepts the observed 87 missing as 77 skipped plus 10 terminal failures", () => {

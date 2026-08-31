@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { pairSessionIntoRounds } from "../../../longmemeval/ingestion/dataset.js";
-import type { LongMemEvalTurn } from "../../../longmemeval/ingestion/dataset.js";
+import { pairSessionIntoRounds } from "../../../datasets/longmemeval/ingestion/dataset.js";
+import type { LongMemEvalTurn } from "../../../datasets/longmemeval/ingestion/dataset.js";
 
 function turn(
   role: string,

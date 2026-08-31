@@ -27,7 +27,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { readStoredSemanticFactorFormation } from
-  "../../../../../../packages/storage/src/repos/capsules/qualification/semantic-factor-formation-read.js";
+  "../../../../../../packages/storage/src/repos/capsules/reads/qualification/semantic-factor-formation-read.js";
 import { createMemoryEntry } from
   "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import {

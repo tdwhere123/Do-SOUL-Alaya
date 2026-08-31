@@ -1,33 +1,33 @@
 import process from "node:process";
 import { parseFlags } from "../cli-options.js";
-import { resolveEffectiveExtractionCacheRoot } from "../../bench/compile-seed/compile-seed-config.js";
+import { resolveEffectiveExtractionCacheRoot } from "../../runs/compile-seed/compile-seed-config.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision,
   type ExtractionAuthorityInspection
-} from "../../bench/extraction/authority/inspection.js";
+} from "../../runs/extraction/authority/inspection.js";
 import {
   assertExtractionAuthorityReceipt,
   createExtractionAuthorityReceipt,
   computeExtractionAuthorityLineageDigest,
   readExtractionAuthorityReceipt
-} from "../../bench/extraction/authority/receipt.js";
+} from "../../runs/extraction/authority/receipt.js";
 import {
   assertExtractionTargetSelectionReceipt,
   assertExtractionTargetSelectionWindow,
   readExtractionTargetSelectionReceipt,
   requiresExtractionTargetSelection,
   type ExtractionTargetSelectionReceipt
-} from "../../bench/extraction/authority/target-selection/receipt.js";
+} from "../../runs/extraction/authority/target-selection/receipt.js";
 import {
   readExtractionAttemptLedger,
   readSettledExtractionAttemptLedger
 } from
-  "../../bench/extraction/authority/attempt-ledger.js";
+  "../../runs/extraction/authority/attempt-ledger.js";
 import { createExtractionRepairScope } from
-  "../../bench/extraction/authority/repair/repair-scope.js";
+  "../../runs/extraction/authority/repair/repair-scope.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../bench/extraction/authority/receipt-limits.js";
+  "../../runs/extraction/authority/receipt-limits.js";
 import {
   parseAuthorizeExtractionArgs,
   type AuthorizeExtractionArgs
@@ -37,7 +37,7 @@ import {
   type PreparedAuthorityContinuation
 } from "./continuation.js";
 import { continuationPredecessorNewSuccessfulKeys } from
-  "../../bench/extraction/authority/continuation/predecessor-state.js";
+  "../../runs/extraction/authority/continuation/predecessor-state.js";
 import {
   publishAuthorizedExtractionReceipt,
   type AuthorityPublicationDependencies

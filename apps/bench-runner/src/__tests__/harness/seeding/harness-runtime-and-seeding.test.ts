@@ -22,7 +22,7 @@ import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemo
 import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import {
   TEST_PROVIDER_COMPLETION_METADATA,
   writeExtractionCacheTestManifest

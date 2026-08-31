@@ -38,7 +38,7 @@ import {
 import {
   OutputShapingResultSchema,
   OutputShapingRuleSchema
-} from "../../soul/output-shaping.js";
+} from "../../recall/output-shaping.js";
 
 import {
   expectedEventTypes,

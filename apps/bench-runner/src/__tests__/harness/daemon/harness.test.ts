@@ -43,7 +43,7 @@ import {
 import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 
 import { withBenchDaemon } from "./bench-daemon.test-support.js";
 

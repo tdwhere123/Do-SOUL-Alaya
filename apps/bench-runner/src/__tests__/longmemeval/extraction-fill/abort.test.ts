@@ -6,16 +6,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   readExtractionCacheManifest
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   runExtractionFill
-} from "../../../bench/extraction/extraction-fill.js";
+} from "../../../runs/extraction/extraction-fill.js";
 import type {
   BenchSignalExtractor
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import type {
   LongMemEvalQuestion
-} from "../../../longmemeval/ingestion/dataset.js";
+} from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { providerBackedExtractionResult, TEST_EXTRACTION_PROVIDER_URL } from
   "../extraction/extraction-cache-test-fixture.js";
 import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";

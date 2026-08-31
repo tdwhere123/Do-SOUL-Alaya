@@ -2,14 +2,14 @@ import {
   makeShardDiagnostics,
   makeShardKpi
 } from "../../cli/merge/cli-merge-validations-fixture.js";
-import type { LongMemEvalRunProvenance } from "../../../bench/provenance/run.js";
+import type { LongMemEvalRunProvenance } from "../../../runs/provenance/run.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
-import { computeQuestionIdDigest } from "../../../bench/selection/question-manifest.js";
-import { computeCohortAssignmentDigest } from "../../../bench/selection/contract.js";
+import { computeQuestionIdDigest } from "../../../runs/selection/question-manifest.js";
+import { computeCohortAssignmentDigest } from "../../../runs/selection/contract.js";
 import { MERGE_TEST_DATASET_SHA256 } from "../../cli/merge/cli-merge-dataset-fixture.js";
 
 const DATASET_SHA = MERGE_TEST_DATASET_SHA256;

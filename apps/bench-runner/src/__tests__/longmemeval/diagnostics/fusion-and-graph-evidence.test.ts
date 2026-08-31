@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../diagnostics/schema/diagnostics-schema.js";
 import {
   buildQuestionDiagnostic,
   summarizeLongMemEvalRecallEvidence
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 
 describe("LongMemEval recall diagnostics (fusion/graph)", () => {
   it("joins fusion breakdown details into delivered and gold diagnostics", () => {

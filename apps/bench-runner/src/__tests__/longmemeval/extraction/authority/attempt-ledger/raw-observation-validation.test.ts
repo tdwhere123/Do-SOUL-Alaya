@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectCachedExtraction, writeCachedExtraction } from
-  "../../../../../bench/compile-seed/cache/cache-shard.js";
+  "../../../../../runs/compile-seed/cache/cache-shard.js";
 import { readValidLedgerShard } from
-  "../../../../../bench/extraction/authority/attempt-ledger-shards.js";
+  "../../../../../runs/extraction/authority/attempt-ledger-shards.js";
 import { buildExtractionTransportProvenance } from
-  "../../../../../bench/extraction/transport-route.js";
+  "../../../../../runs/extraction/transport-route.js";
 import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from
   "../../extraction-cache-test-fixture.js";
 

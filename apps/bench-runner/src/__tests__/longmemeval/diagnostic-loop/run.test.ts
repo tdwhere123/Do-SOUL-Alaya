@@ -2,10 +2,10 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DiagnosticLoopFailure } from "../../../bench/diagnostic-loop/failures.js";
-import { runDiagnosticLoop } from "../../../bench/diagnostic-loop/run.js";
-import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
-import { runRecordDigest } from "../../../bench/diagnostic-loop/run-state.js";
+import { DiagnosticLoopFailure } from "../../../runs/diagnostic-loop/failures.js";
+import { runDiagnosticLoop } from "../../../runs/diagnostic-loop/run.js";
+import { checkpointDigest } from "../../../runs/diagnostic-loop/checkpoint.js";
+import { runRecordDigest } from "../../../runs/diagnostic-loop/run-state.js";
 import { digest, loopRequest, trackingAdapters, writeDiagnosticSnapshotFixture } from "./fixture.js";
 import { createLoopTemp } from "./run-loop-fixture.js";
 

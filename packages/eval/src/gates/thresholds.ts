@@ -1,4 +1,4 @@
-import type { KpiCore, Verdict } from "../schema/kpi-schema.js";
+import type { KpiCore, Verdict } from "../contracts/kpi-schema.js";
 
 export interface RatioBand {
   readonly warn: number;

@@ -1,9 +1,9 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { ParsedFlags } from "../../../cli/cli-options.js";
 import { ExtractionFillTaskError } from
-  "../../../bench/extraction/fill/fill-pool.js";
+  "../../../runs/extraction/fill/fill-pool.js";
 import { emptyBenchTerminalRetryClassifications } from
-  "../../../bench/compile-seed/compile-seed-types.js";
+  "../../../runs/compile-seed/compile-seed-types.js";
 
 const mocks = vi.hoisted(() => ({
   fallbackRun: vi.fn(async () => {
@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   })
 }));
 
-vi.mock("../../../bench/extraction/extraction-fill.js", () => ({
+vi.mock("../../../runs/extraction/extraction-fill.js", () => ({
   runExtractionFill: mocks.fallbackRun
 }));
 

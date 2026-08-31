@@ -4,7 +4,7 @@ import {
   isLongMemEvalRunProvenanceGateEligible,
   LongMemEvalRunProvenanceSchema,
   LONGMEMEVAL_RUN_PROVENANCE_FILENAME
-} from "../../../bench/provenance/run.js";
+} from "../../../runs/provenance/run.js";
 import {
   buildFixtureRunProvenanceSidecar,
   createRunProvenanceFixture,

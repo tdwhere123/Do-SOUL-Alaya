@@ -9,7 +9,7 @@ import {
   __resetStorageCjkSegmentationStateForTests
 } from "@do-soul/alaya-storage";
 import { collectCjkSegmentationProvenance } from
-  "../../../bench/provenance/cjk-segmentation.js";
+  "../../../runs/provenance/cjk-segmentation.js";
 import { warmCjkSegmentation } from "@do-soul/alaya-core";
 
 afterEach(() => {

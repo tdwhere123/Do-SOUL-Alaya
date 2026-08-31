@@ -1,0 +1,439 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  OfficialApiGardenProvider,
+  type GardenCompileContext
+} from "../../../garden/ingestion/compute-provider.js";
+import { resolveGardenSignalGrounding } from "../../../garden/triage/grounding/signal-source-grounding.js";
+import { buildOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
+import { createSignal } from "../materialization/materialization-router-fixture.js";
+import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
+
+const EMPTY_CONTEXT: GardenCompileContext = {
+  workspace_id: "workspace-locator",
+  run_id: "run-locator",
+  surface_id: null,
+  turn_messages: []
+};
+
+describe("official API assertion catalog locator", () => {
+  it("keeps a cross-sentence assertion owned by one User locator", async () => {
+    const matchedText = "I caught 12 largemouth bass on my last trip there";
+    const sourceAssertion = [
+      "By the way, I've had some experience with fishing in Lake Michigan, and I've found that spinner lures worked better for trout than live bait.",
+      "Also, I caught 12 largemouth bass on my last trip there, so you might want to consider targeting those as well."
+    ].join(" ");
+    const source = `${sourceAssertion} What's the best type of spinner lure to use?`;
+    const provider = providerFor({
+      source_locator: assertionLocator(2),
+      matched_text: matchedText
+    });
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: sourceAssertion
+    });
+    expect(signal?.raw_payload.distilled_fact).toBe(sourceAssertion);
+  });
+
+  it("recovers an exact user quote when a valid catalog assertion is narrower", async () => {
+    const quote = "I just recently changed my last name, and I'm still getting used to it - it's funny, my old name was Johnson, but now it's Winters.";
+    const source = "I need to update my address with my health insurance provider. Can you walk me through the process or give me a phone number to call? By the way, " + quote;
+    const provider = providerFor({
+      source_locator: assertionLocator(2),
+      matched_text: quote
+    });
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: quote
+    });
+    expect(signal?.raw_payload.source_assertion).toBe(quote);
+    expect(resolveGardenSignalGrounding(signal!)).toEqual({
+      status: "grounded",
+      assertion: quote
+    });
+  });
+
+  it("grounds the complete pre-but bronchitis clause selected by assertion_id", async () => {
+    const source = "I actually recently had a bad case of bronchitis that I initially thought was just a cold, but it turned out to be bronchitis.";
+    const provider = providerSelectingAssertion((text) =>
+      text.includes("initially thought") && !text.includes("turned out")
+    );
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_locator).toMatchObject({
+      contract_version: 2,
+      kind: "assertion_catalog"
+    });
+    expect(signal?.raw_payload.distilled_fact).toBe(
+      "I actually recently had a bad case of bronchitis that I initially thought was just a cold"
+    );
+  });
+
+  it.each([
+    "Under How We Met, I'll include the location where I met them. For Sophia, it was a coffee shop in the city.",
+    "I'm thinking of getting Max a new collar. Do you have one that suits a Golden Retriever like Max?"
+  ])("omits unresolved or direct-question assertions from the model catalog: %s", (source) => {
+    const needle = source.includes("Sophia") ? "For Sophia" : "Golden Retriever";
+    const catalog = buildOfficialApiSourceAssertions(source);
+    expect(catalog.some(({ text }) => text.includes(needle))).toBe(false);
+  });
+
+  it.each([
+    [
+      "I was thinking about my flea market find, and I realized that it's actually worth triple what I paid for it, which is amazing!",
+      "worth triple"
+    ]
+  ])("publishes a uniquely closed typed assertion: %s", (source, needle) => {
+    expect(buildOfficialApiSourceAssertions(source).some(({ text }) => text.includes(needle)))
+      .toBe(true);
+  });
+
+  it("publishes the groundable bronchitis clause but not its rejected sentence", () => {
+    const source = "I actually recently had a bad case of bronchitis that I initially thought was just a cold, but it turned out to be a lot more serious.";
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
+      "I actually recently had a bad case of bronchitis that I initially thought was just a cold"
+    ]);
+  });
+
+  it("enumerates exact resolver-grounded atoms beneath conversational wrappers", () => {
+    const coupon = "I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise since I didn't know I had it in my email inbox.";
+    const discoursePreface = "Also, by the way, I've been listening to this one playlist on Spotify that I created, called Summer Vibes, and it's got all these chill tracks that are perfect for relaxing or working out.";
+
+    expect(buildOfficialApiSourceAssertions(coupon).map(({ text }) => text)).toEqual([
+      "I actually redeemed a $5 coupon on coffee creamer last Sunday"
+    ]);
+    expect(buildOfficialApiSourceAssertions(discoursePreface).map(({ text }) => text)).toEqual([
+      "I've been listening to this one playlist on Spotify that I created, called Summer Vibes, and it's got all these chill tracks that are perfect for relaxing or working out."
+    ]);
+  });
+
+  it.each([
+    ["I almost quit, which I didn't.", "I almost quit"],
+    ["I quit my job, which she later said wasn't what happened.", "I quit my job"],
+    ["I quit my job, which was a lie.", "I quit my job"],
+    ["I quit my job, which turned out to be a misunderstanding.", "I quit my job"],
+    ["I quit my job, which I didn't regret.", "I quit my job"],
+    ["I quit my job, which was a nice surprise, but that was a lie.", "I quit my job"],
+    ["I redeemed a coupon, which was a pleasant surprise until I realized I never did.", "I redeemed a coupon"],
+    ["I redeemed a coupon, which was a great surprise because it turned out to be fake.", "I redeemed a coupon"],
+    [
+      "I redeemed a coupon last Sunday, which surprised me because I had forgotten it was fake.",
+      "I redeemed a coupon last Sunday"
+    ]
+  ])("does not turn a retracting or ambiguous relative suffix into a catalog atom: %s", (
+    source,
+    atom
+  ) => {
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).not.toContain(atom);
+  });
+
+  it.each([
+    "Anyway, I'll let you know how the party goes!",
+    "Anyway, I'm looking forward to hearing about your party and how the games and activities turn out.",
+    "Actually, I was wondering if you could help me with something else.",
+    "Actually, I wanted to ask you something, which has been bothering me."
+  ])("does not turn a conversational wrapper into a standalone assertion: %s", (source) => {
+    expect(buildOfficialApiSourceAssertions(source)).toEqual([]);
+  });
+
+  it("requires a local identity for contextual noun phrases in a wrapper atom", () => {
+    expect(buildOfficialApiSourceAssertions("Anyway, I really enjoyed the party.")).toEqual([]);
+    expect(buildOfficialApiSourceAssertions("Anyway, I enjoyed your party called Summer Games.")
+      .map(({ text }) => text)).toEqual([
+      "I enjoyed your party called Summer Games."
+    ]);
+    expect(buildOfficialApiSourceAssertions("Anyway, I joined the recreational volleyball league.")
+      .map(({ text }) => text)).toEqual([
+      "I joined the recreational volleyball league."
+    ]);
+  });
+
+  it("does not append an atom when the legacy catalog already grounds the sentence", () => {
+    const source = "I won the race, which was a nice surprise.";
+
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
+      "I won the race, which was a nice surprise."
+    ]);
+  });
+
+  it("appends a closed wrapper atom after preserving a legacy assertion from the same sentence", () => {
+    const source = "I moved to Berlin, and I redeemed a $5 coupon last Sunday, which was a nice surprise to them.";
+
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
+      "I moved to Berlin",
+      "I moved to Berlin, and I redeemed a $5 coupon last Sunday"
+    ]);
+  });
+
+  it("identifies a direct 600-character preference absent from the historical catalog", () => {
+    const object = "x".repeat(600);
+    const source = `I prefer ${object}.`;
+
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
+      source
+    ]);
+  });
+
+  it("grounds an atom without inheriting an unresolved wrapper tail", async () => {
+    const source = "I moved to Berlin, and I redeemed a $5 coupon last Sunday, which was a nice surprise to them.";
+    const assertion = "I moved to Berlin, and I redeemed a $5 coupon last Sunday";
+    const provider = providerSelectingAssertion((text) => text === assertion);
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: assertion
+    });
+  });
+
+  it("grounds a catalog atom from before a bounded conversational tail question", async () => {
+    const source = "The play I attended was actually a production of The Glass Menagerie, have you heard of it?";
+    const provider = providerSelectingAssertion((text) => text.includes("The Glass Menagerie"));
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: "The play I attended was actually a production of The Glass Menagerie"
+    });
+  });
+
+  it.each([
+    [
+      "a relative-clause shell",
+      "I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise since I didn't know I had it in my email inbox.",
+      "I actually redeemed a $5 coupon on coffee creamer last Sunday"
+    ],
+    [
+      "a discourse-preface shell",
+      "Also, by the way, I've been listening to this one playlist on Spotify that I created, called Summer Vibes, and it's got all these chill tracks that are perfect for relaxing or working out.",
+      "I've been listening to this one playlist on Spotify that I created, called Summer Vibes, and it's got all these chill tracks that are perfect for relaxing or working out."
+    ]
+  ])("grounds a catalog atom from %s", async (_label, source, expectedAssertion) => {
+    const provider = providerSelectingAssertion((text) => text === expectedAssertion);
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: expectedAssertion
+    });
+  });
+
+  it("builds a bounded deterministic User-only catalog and prefers v2 in the prompt", async () => {
+    const extract = vi.fn(async (_input: { readonly userPrompt: string }) =>
+      ({ rawJson: JSON.stringify({ signals: [] }) }));
+    const provider = new OfficialApiGardenProvider({ apiKey: "sk-test", extractor: { extract } });
+    await provider.compile("I moved to Berlin.", {
+      ...EMPTY_CONTEXT,
+      turn_messages: [
+        { message_id: "u1", role: "user", content: "I use TypeScript, but I avoid any." },
+        { message_id: "a1", role: "assistant", content: "You should use JavaScript." }
+      ]
+    });
+
+    const prompt = JSON.parse(extract.mock.calls[0]![0].userPrompt) as {
+      schema_version: number;
+      source_assertions: readonly Record<string, unknown>[];
+    };
+    expect(prompt.schema_version).toBe(2);
+    expect(prompt.source_assertions).toEqual([
+      { assertion_id: 1, text: "User: I use TypeScript, but I avoid any." },
+      { assertion_id: 2, text: "User: I use TypeScript" },
+      { assertion_id: 3, text: "I avoid any." }
+    ]);
+  });
+
+  it("bounds the catalog while retaining a fact beyond the former 2048-char head", async () => {
+    const fillers = Array.from(
+      { length: 80 },
+      (_, index) => `I recorded ordinary placeholder detail number ${index}.`
+    );
+    const tailFact = "I moved to Reykjavik at the very end.";
+    const source = [...fillers, tailFact].join(" ");
+    expect(source.indexOf(tailFact)).toBeGreaterThan(2_048);
+
+    const batches: number[][] = [];
+    const extract = vi.fn(async ({ userPrompt }) => {
+      const prompt = JSON.parse(userPrompt) as {
+        source_assertions: readonly { readonly assertion_id: number; readonly text: string }[];
+      };
+      expect(prompt.source_assertions.length).toBeLessThanOrEqual(8);
+      batches.push(prompt.source_assertions.map(({ assertion_id }) => assertion_id));
+      const selected = prompt.source_assertions.find(({ text }) => text.includes(tailFact));
+      if (selected === undefined) return { rawJson: '{"signals":[]}' };
+      return {
+        rawJson: JSON.stringify({ signals: [withOpenSemanticFactorGraph({
+          ...signalJson(),
+          source_locator: assertionLocator(selected.assertion_id),
+          matched_text: tailFact
+        })] })
+      };
+    });
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: { extract },
+      generateSignalId: () => "signal-tail-catalog"
+    });
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+    expect(batches).toHaveLength(8);
+    expect(batches.flat()).toHaveLength(64);
+    expect(signal?.raw_payload.distilled_fact).toBe(tailFact);
+  });
+
+  it("fails closed for an out-of-range assertion_id", async () => {
+    const provider = providerFor({ source_locator: assertionLocator(99) });
+    await expect(provider.compile(
+      "I moved to Berlin.",
+      contextForUser("I moved to Berlin.")
+    )).rejects.toMatchObject({ kind: "invalid_response" });
+  });
+
+  it("rebuilds the catalog when the persisted assertion matches live full_turn_content", () => {
+    const signal = createSignal({
+      source: "garden_compile",
+      raw_payload: {
+        source_locator: assertionLocator(1),
+        matched_text: "I moved to Berlin.",
+        proposed_matched_text: "I moved to Berlin.",
+        source_assertion: "I moved to Berlin.",
+        distilled_fact: "Alice lives on Mars.",
+        full_turn_content: "User: I moved to Berlin."
+      }
+    });
+    expect(resolveGardenSignalGrounding(signal)).toEqual({
+      status: "grounded",
+      assertion: "I moved to Berlin."
+    });
+  });
+
+  it("rejects a recovered quote from a different User message", () => {
+    const signal = createSignal({
+      source: "garden_compile",
+      raw_payload: {
+        source_locator: assertionLocator(1),
+        matched_text: "I work remotely.",
+        proposed_matched_text: "I work remotely.",
+        source_assertion: "I work remotely.",
+        full_turn_content: "User: I moved to Berlin.\nAssistant: That sounds exciting.\nUser: I work remotely."
+      }
+    });
+
+    expect(resolveGardenSignalGrounding(signal)).toMatchObject({ status: "rejected" });
+  });
+
+  it("rejects a recovered quote from Assistant context", () => {
+    const signal = createSignal({
+      source: "garden_compile",
+      raw_payload: {
+        source_locator: assertionLocator(1),
+        matched_text: "I work remotely.",
+        proposed_matched_text: "I work remotely.",
+        source_assertion: "I work remotely.",
+        full_turn_content: "User: I moved to Berlin.\nAssistant: I work remotely."
+      }
+    });
+
+    expect(resolveGardenSignalGrounding(signal)).toMatchObject({ status: "rejected" });
+  });
+
+  it("rejects a recovered direct question from the selected User message", () => {
+    const signal = createSignal({
+      source: "garden_compile",
+      raw_payload: {
+        source_locator: assertionLocator(1),
+        matched_text: "Can I move to Paris?",
+        proposed_matched_text: "Can I move to Paris?",
+        source_assertion: "Can I move to Paris?",
+        full_turn_content: "User: I moved to Berlin. Can I move to Paris?"
+      }
+    });
+
+    expect(resolveGardenSignalGrounding(signal)).toMatchObject({ status: "rejected" });
+  });
+
+  it("rejects replay when live full_turn_content no longer has the selected assertion", () => {
+    const signal = createSignal({
+      source: "garden_compile",
+      raw_payload: {
+        source_locator: assertionLocator(2),
+        source_assertion: "I work remotely.",
+        full_turn_content: "User: I moved to Berlin."
+      }
+    });
+    expect(resolveGardenSignalGrounding(signal)).toMatchObject({ status: "rejected" });
+  });
+});
+
+function signalJson(): Record<string, unknown> {
+  return {
+    signal_kind: "potential_claim",
+    object_kind: "activity",
+    confidence: 0.9,
+    matched_text: "I moved to Berlin.",
+    evidence_refs: [],
+    source_memory_refs: []
+  };
+}
+
+function assertionLocator(assertionId: number) {
+  return {
+    contract_version: 2 as const,
+    kind: "assertion_catalog" as const,
+    assertion_id: assertionId
+  };
+}
+
+function contextForUser(content: string): GardenCompileContext {
+  return {
+    ...EMPTY_CONTEXT,
+    turn_messages: [{ message_id: "u1", role: "user", content }]
+  };
+}
+
+function providerFor(fields: Record<string, unknown>): OfficialApiGardenProvider {
+  return new OfficialApiGardenProvider({
+    apiKey: "sk-test",
+    extractor: {
+      extract: async () => ({
+        rawJson: JSON.stringify({
+          signals: [withOpenSemanticFactorGraph({ ...signalJson(), ...fields })]
+        })
+      })
+    },
+    generateSignalId: () => "signal-source-locator"
+  });
+}
+
+function providerSelectingAssertion(
+  predicate: (text: string) => boolean
+): OfficialApiGardenProvider {
+  return new OfficialApiGardenProvider({
+    apiKey: "sk-test",
+    extractor: {
+      extract: async ({ userPrompt }) => {
+        const prompt = JSON.parse(userPrompt) as {
+          source_assertions: readonly { readonly assertion_id: number; readonly text: string }[];
+        };
+        const selected = prompt.source_assertions.find((assertion) => predicate(assertion.text));
+        if (selected === undefined) throw new Error("expected assertion missing from catalog");
+        return {
+          rawJson: JSON.stringify({ signals: [withOpenSemanticFactorGraph({
+            ...signalJson(),
+            source_locator: assertionLocator(selected.assertion_id),
+            matched_text: selected.text.replace(/^User:\s*/u, ""),
+            distilled_fact: selected.text.replace(/^User:\s*/u, "")
+          })] })
+        };
+      }
+    },
+    generateSignalId: () => "signal-assertion-catalog"
+  });
+}

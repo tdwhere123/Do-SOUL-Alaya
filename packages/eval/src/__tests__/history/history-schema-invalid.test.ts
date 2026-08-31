@@ -11,7 +11,7 @@ import {
   writeEntry,
   type HistoryLayout
 } from "../../history/history.js";
-import { RecallEvalAttributionSchema } from "../../schema/kpi-schema.js";
+import { RecallEvalAttributionSchema } from "../../contracts/kpi-schema.js";
 import { buildPayload, plantSchemaInvalidArchive } from "./history-fixture.js";
 
 describe("history archive schema-invalid baselines", () => {

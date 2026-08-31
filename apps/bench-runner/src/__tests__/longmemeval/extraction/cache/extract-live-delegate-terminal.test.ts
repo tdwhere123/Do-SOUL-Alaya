@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { emptyBenchTerminalRetryClassifications } from
-  "../../../../bench/compile-seed/compile-seed-types.js";
+  "../../../../runs/compile-seed/compile-seed-types.js";
 import { extractLiveDelegate } from
-  "../../../../bench/extraction/cache/cache-live-delegate.js";
-import { newFillStats } from "../../../../bench/extraction/fill/fill-stats.js";
+  "../../../../runs/extraction/cache/cache-live-delegate.js";
+import { newFillStats } from "../../../../runs/extraction/fill/fill-stats.js";
 
 describe("extractLiveDelegate terminal classification", () => {
   it("counts failure_non_retryable_response on the completed empty map", async () => {

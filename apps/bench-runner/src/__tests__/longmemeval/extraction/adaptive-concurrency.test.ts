@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createAdaptiveConcurrencyController
-} from "../../../bench/extraction/adaptive-concurrency.js";
+} from "../../../runs/extraction/adaptive-concurrency.js";
 
 describe("adaptive extraction concurrency", () => {
   it("starts a higher ceiling at its bounded initial concurrency", async () => {

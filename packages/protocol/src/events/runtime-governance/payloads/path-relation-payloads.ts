@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../../../shared/schema-primitives.js";
-import { DirectionBiasSchema, PathGovernanceClassSchema } from "../../../soul/path-relation.js";
+import { DirectionBiasSchema, PathGovernanceClassSchema } from "../../../relations/path-relation.js";
 
 export const PathRelationCreatedPayloadSchema = z
   .object({
@@ -130,7 +130,7 @@ export const PathRelationRevivedPayloadSchema = z
 // is the recall-neutral topology marker (exception_to). Recorded so a deleted
 // loser's family is reconstructable from the append-only log even though the
 // survivor row keeps only its own effect_vector.
-// see also: packages/protocol/src/soul/path-relation.ts isPathRecallEligible.
+// see also: packages/protocol/src/relations/path-relation.ts isPathRecallEligible.
 export const MergedLoserRecallBiasSignSchema = z.enum(["positive", "negative", "zero"]);
 
 // invariant: a merge DELETES the loser rows; this schema is the ONLY durable

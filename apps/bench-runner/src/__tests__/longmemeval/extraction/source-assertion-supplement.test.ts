@@ -14,11 +14,11 @@ import {
   createSourceAssertionSupplementReader,
   parseSourceAssertionSupplementReceipt,
   sourceAssertionSupplementBinding
-} from "../../../bench/extraction/cache/semantic-supplement/source-assertion-supplement.js";
+} from "../../../runs/extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import { resolveSourceAssertionSupplementOptions } from
-  "../../../bench/extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
+  "../../../runs/extraction/cache/semantic-supplement/source-assertion-supplement-runtime.js";
 import { computeSourceAssertionSupplementReceiptEntrySetSha256 } from
-  "../../../bench/extraction/cache/semantic-supplement/source-assertion-supplement-closure.js";
+  "../../../runs/extraction/cache/semantic-supplement/source-assertion-supplement-closure.js";
 
 const PRIMARY_MANIFEST_SHA = "1".repeat(64);
 const SOURCE_MANIFEST_SHA = "2".repeat(64);

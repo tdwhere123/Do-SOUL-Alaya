@@ -6,7 +6,7 @@ import {
   resolveEmbeddingSupplementRuntimeProvenance,
   resolveLocalArtifactTreeSha256,
   resolveLocalCrossEncoderRuntimeProvenance
-} from "../../../bench/provenance/embedding/local-onnx.js";
+} from "../../../runs/provenance/embedding/local-onnx.js";
 
 const roots: string[] = [];
 

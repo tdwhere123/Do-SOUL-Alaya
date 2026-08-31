@@ -5,21 +5,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { assembleRecallEvalKpi } from
-  "../../../bench/kpi/recall-eval-payload.js";
+  "../../../runs/kpi/recall-eval-payload.js";
 import type { RecallEvalQuestionResult } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-contract.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-contract.js";
 import {
   buildRecallEvalDiagnosticsEvidence,
   writeRecallEvalDiagnosticsGzipStream
 } from
-  "../../../bench/provenance/recall-eval/recall-eval-diagnostics.js";
+  "../../../runs/provenance/recall-eval/recall-eval-diagnostics.js";
 import {
   RecallEvalDiagnosticsSpool,
   withRecallEvalDiagnosticsSpool
 } from
-  "../../../bench/provenance/recall-eval/recall-eval-diagnostics-spool.js";
+  "../../../runs/provenance/recall-eval/recall-eval-diagnostics-spool.js";
 import { renderRecallEvalRankIdentity } from
-  "../../../bench/provenance/recall-eval/recall-eval-rank-identity.js";
+  "../../../runs/provenance/recall-eval/recall-eval-rank-identity.js";
 import {
   emptyTokenMetrics,
   promotionMeasurementDiagnostic

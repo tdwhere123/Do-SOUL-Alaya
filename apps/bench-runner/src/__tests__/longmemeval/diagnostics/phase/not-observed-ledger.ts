@@ -1,5 +1,5 @@
 import type { ProductPhaseLedger } from
-  "../../../../bench/diagnostics/phase/phase-authority.js";
+  "../../../../diagnostics/phase/phase-authority.js";
 
 export function notObservedPhaseLedger(): ProductPhaseLedger {
   return {

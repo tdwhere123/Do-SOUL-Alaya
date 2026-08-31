@@ -30,7 +30,7 @@ import {
 // periodic Librarian pass (bulk-import-complete style: enqueue for all
 // workspaces) AND the accumulated-count threshold (OQ5).
 // see also: apps/core-daemon/src/garden/runtime.ts runBulkEnrichTask
-// see also: packages/storage/src/repos/enrich-pending-repo.ts
+// see also: packages/storage/src/repos/garden/enrich-pending-repo.ts
 const hoisted = vi.hoisted(() => {
   const schedulers: Array<FakeGardenScheduler> = [];
   const tierOrder: Record<GardenTierValue, number> = { tier_0: 0, tier_1: 1, tier_2: 2 };

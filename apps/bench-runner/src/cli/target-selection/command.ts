@@ -3,11 +3,11 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { parseFlags } from "../cli-options.js";
 import { resolveEffectiveExtractionCacheRoot } from
-  "../../bench/compile-seed/compile-seed-config.js";
+  "../../runs/compile-seed/compile-seed-config.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../bench/extraction/authority/inspection.js";
+} from "../../runs/extraction/authority/inspection.js";
 import {
   createExtractionTargetSelectionReceipt,
   createFreshExtractionTargetSelectionRoot,
@@ -21,24 +21,24 @@ import {
   writeExtractionTargetSelectionReceipt,
   type ExtractionTargetRootBinding,
   type ExtractionTargetSelectionReceipt
-} from "../../bench/extraction/authority/target-selection/receipt.js";
+} from "../../runs/extraction/authority/target-selection/receipt.js";
 import {
   materializationReceiptFromCommit,
   readExtractionCacheMaterializationReceipt
-} from "../../bench/extraction/cache-audit/materialization/receipt.js";
+} from "../../runs/extraction/cache-audit/materialization/receipt.js";
 import { verifyCommittedAuditedExtractionCacheSuccessor } from
-  "../../bench/extraction/cache-audit/target-materializer.js";
+  "../../runs/extraction/cache-audit/target-materializer.js";
 import { readExtractionCacheAuditReceipt } from
-  "../../bench/extraction/cache-audit/receipt.js";
+  "../../runs/extraction/cache-audit/receipt.js";
 import { readExtractionAuthorityReceipt } from
-  "../../bench/extraction/authority/receipt.js";
+  "../../runs/extraction/authority/receipt.js";
 import {
   assertExtractionAuthorityHasNoContinuationChild,
   assertImmediateContinuationAdoptionParent,
   claimExtractionContinuationChild,
   prepareExistingContinuationChildAdoption,
   type ExtractionContinuationChildClaim
-} from "../../bench/extraction/authority/continuation/child-claim.js";
+} from "../../runs/extraction/authority/continuation/child-claim.js";
 
 interface TargetSelectionArgs {
   readonly authority: TargetSelectionAuthority;

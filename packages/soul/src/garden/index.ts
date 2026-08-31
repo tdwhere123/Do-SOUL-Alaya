@@ -3,7 +3,7 @@ export {
   Auditor,
   type AuditorDependencies,
   type AuditorHealthIssueGroupPort
-} from "./auditor.js";
+} from "./maintenance/auditor.js";
 export type {
   AuditorBootstrappingPort,
   AuditorEvidenceCheckPort,
@@ -27,11 +27,11 @@ export {
   toModelRef,
   type ComputeRoutingCandidate,
   type ComputeRoutingDependencies
-} from "./compute-routing-service.js";
+} from "./ingestion/compute-routing-service.js";
 export {
   BootstrappingService,
   type BootstrappingDependencies
-} from "./bootstrapping-service.js";
+} from "./scheduling/bootstrapping-service.js";
 export {
   GardenProviderKind,
   GardenProviderError,
@@ -71,7 +71,7 @@ export {
   type OfficialApiSemanticFactorGraphProjectionAudit,
   type OfficialApiSemanticFactorGraphProjectionReason,
   type OfficialApiSignalDraft
-} from "./compute-provider.js";
+} from "./ingestion/compute-provider.js";
 export {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
@@ -80,7 +80,7 @@ export {
   createOpenSemanticFactorQueryCompiler,
   parseOpenSemanticFactorQueryResponse,
   type OpenSemanticFactorQueryCompiler
-} from "./semantic-factors/query-compiler.js";
+} from "./extraction/semantic-factors/query-compiler.js";
 export {
   SELECTED_SOURCE_BOUND_F3_CAPABILITY,
   SOURCE_BOUND_F3_PROMPT_ASKS,
@@ -90,24 +90,24 @@ export {
   SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256,
   assertSourceBoundF3SealCurrent,
   sourceBoundF3Seal
-} from "./semantic-factors/source-bound-seal.js";
+} from "./extraction/semantic-factors/source-bound-seal.js";
 export {
   traceSourceBoundF3Proposal,
   type SourceBoundF3Trace
-} from "./semantic-factors/source-bound-tracer.js";
+} from "./extraction/semantic-factors/source-bound-tracer.js";
 export {
   buildSourceVerificationText,
   resolveSourceAssertion,
   filterSourceAssertionEntities,
   type SourceAssertionResolution
-} from "./grounding/source-assertion.js";
+} from "./triage/grounding/source-assertion.js";
 export {
   groundPreferenceProfileFromSource,
   preferenceProfileGroundingRemovalReason,
   resolvePreferenceAwareSourceGrounding,
   type PreferenceAwareSourceGrounding,
   type PreferenceProfileSourceInput
-} from "./grounding/preference-profile.js";
+} from "./triage/grounding/preference-profile.js";
 export {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
@@ -117,33 +117,33 @@ export {
   rebindOfficialApiSourceLocatorQuote,
   type OfficialApiVerifiedUserAssertionSource,
   resolveOfficialApiSourceLocatorQuote
-} from "./grounding/source-locator.js";
+} from "./triage/grounding/source-locator.js";
 export { verifyOfficialApiSourceLocatorBinding } from
-  "./grounding/source-locator/verified-binding.js";
+  "./triage/grounding/source-locator/verified-binding.js";
 export {
   resolveGardenRawPayloadGrounding,
   resolveGardenSignalGrounding,
   type GardenSignalGrounding
-} from "./grounding/signal-source-grounding.js";
+} from "./triage/grounding/signal-source-grounding.js";
 export {
   GARDEN_FACT_FRAME_PRODUCER_OPERATOR_ID,
   buildFactFrameFormationProposal
-} from "./grounding/fact-frame/search-projections.js";
+} from "./triage/grounding/fact-frame/search-projections.js";
 export {
   GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
   buildOpenSemanticFactorFormationProposal
-} from "./grounding/semantic-factors/formation-proposal.js";
+} from "./triage/grounding/semantic-factors/formation-proposal.js";
 export {
   classifyOpenSemanticFactorFormationEligibility,
   type OpenSemanticFactorFormationEligibility
-} from "./grounding/semantic-factors/formation-eligibility.js";
+} from "./triage/grounding/semantic-factors/formation-eligibility.js";
 export {
   SignalExtractorError,
   createPiMonoExtractor,
   type PiMonoExtractorDependencies,
   type SignalExtractor,
   type SignalExtractorErrorKind
-} from "./pi-mono-extractor.js";
+} from "./extraction/pi-mono-extractor.js";
 export {
   buildGardenTurnEvidenceArtifactRef,
   buildGardenTurnEvidenceFallback,
@@ -151,20 +151,20 @@ export {
   isGardenTurnEvidenceFallback,
   resolveVerifiedGardenTurnEvidenceProjection,
   type VerifiedGardenTurnEvidenceProjection
-} from "./evidence-preservation/turn-evidence-anchor.js";
+} from "./triage/evidence-preservation/turn-evidence-anchor.js";
 export {
   WallClockTimeoutError,
   withWallClockTimeout,
   type WallClockTimeoutDeps,
   type WallClockTimeoutOptions
-} from "./wall-clock-timeout.js";
+} from "./scheduling/wall-clock-timeout.js";
 export {
   DEGRADATION_CONSTANTS,
   DegradationPipeline,
   type DegradationAssessParams,
   type DegradationStepKind
-} from "./degradation-pipeline.js";
-export { InMemoryHandoffGapHandler, type GapOrHandoffRecord, type HandoffGapCreatedObject, type HandoffGapHandler } from "./handoff-gap-handler.js";
+} from "./triage/degradation-pipeline.js";
+export { InMemoryHandoffGapHandler, type GapOrHandoffRecord, type HandoffGapCreatedObject, type HandoffGapHandler } from "./maintenance/handoff-gap-handler.js";
 export {
   JANITOR_CONSTANTS,
   Janitor,
@@ -181,7 +181,7 @@ export {
   type JanitorSchedulerPort,
   type JanitorTombstoneGcPort,
   type TombstonedMemoryRecord
-} from "./janitor.js";
+} from "./maintenance/janitor.js";
 export {
   LIBRARIAN_CONSTANTS,
   Librarian,
@@ -194,23 +194,23 @@ export {
   type LibrarianSynthesisThrottlePort,
   type MergeCandidate,
   type NeighborGroup
-} from "./librarian.js";
+} from "./maintenance/librarian.js";
 export {
   PathGraphSnapshotter,
   reviewPathGraphSnapshotHistory,
   type PathGraphSnapshotHistoryReview,
   type PathGraphSnapshotterDependencies
-} from "./path-graph-snapshotter.js";
+} from "./materialization/path-graph-snapshotter.js";
 export {
   PATH_PLASTICITY_TASK_DEFAULTS,
   resolvePathPlasticitySinceIso,
   type PathPlasticityComputePort,
   type PathPlasticityComputeResult
-} from "./path-plasticity-task.js";
+} from "./materialization/path-plasticity-task.js";
 export {
   TopologyService,
   type TopologyServiceDependencies
-} from "./topology-service.js";
+} from "./materialization/topology-service.js";
 export {
   MaterializationRouter,
   DISTILLED_FACT_MAX_CHARS,
@@ -235,7 +235,7 @@ export {
   type RouteTarget,
   type GraphEdgeCreationPort,
   type SignalRefSeedSpec
-} from "./materialization-router.js";
+} from "./materialization/materialization-router.js";
 export {
   buildSchemaGroundedRawPayload,
   normalizeSchemaGroundedSignal,
@@ -244,8 +244,8 @@ export {
   type SchemaGroundedRawPayloadInput,
   type SchemaGroundingValidationResult,
   type SchemaGroundingValidationStatus
-} from "./schema-grounding.js";
-export { LocalHeuristics } from "./local-heuristics.js";
+} from "./ingestion/schema-grounding.js";
+export { LocalHeuristics } from "./triage/local-heuristics.js";
 export {
   SessionOverrideRemediation,
   type PromotionOutcome,
@@ -255,15 +255,15 @@ export {
   type SessionOverrideRemediationMemoryPort,
   type SessionOverrideRemediationTargetObjectResolverPort,
   type SessionOverrideRemediationWarnPort
-} from "./session-override-remediation.js";
+} from "./maintenance/session-override-remediation.js";
 export {
   evaluateBacklogPressure,
   type BacklogPressureThresholds,
   type BacklogPressureTransition
-} from "./backlog-telemetry.js";
+} from "./scheduling/backlog-telemetry.js";
 export {
   GardenScheduler,
   type GardenBacklogWarningTransitionSignal,
   type GardenSchedulerConfig,
   type GardenSchedulerEventLogPort
-} from "./scheduler.js";
+} from "./scheduling/scheduler.js";

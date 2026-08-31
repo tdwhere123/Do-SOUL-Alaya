@@ -8,13 +8,13 @@ import {
   CANONICAL_CAPTURE_IDENTITY_DIGEST,
   createCanonicalSelectionReceipt
 } from "@do-soul/alaya-protocol";
-import { evaluateRecallEvalGzipD1Counterfactual } from "../../../bench/diagnostics.js";
+import { evaluateRecallEvalGzipD1Counterfactual } from "../../../diagnostics/diagnostics.js";
 import {
   D1_FROZEN_PAIR_AUTHORITY,
   frozenD1PairAuthorityFailure,
   mapD1GoldsToFieldKeys,
   resolveD1GoldAuthority
-} from "../../../bench/diagnostics/ranking/d1-pair-authority.js";
+} from "../../../diagnostics/ranking/d1-pair-authority.js";
 import { capturedTruncatedProof } from "../../harness/recall/capture-proof-diagnostics-fixture.js";
 import { assembledQuestion } from "./abstention-diagnostic-fixture.js";
 import {

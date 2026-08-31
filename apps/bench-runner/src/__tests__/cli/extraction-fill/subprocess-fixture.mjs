@@ -28,16 +28,16 @@ const server = await createServer({
 });
 try {
   const fill = await server.ssrLoadModule(
-    "/apps/bench-runner/src/bench/extraction/extraction-fill.ts"
+    "/apps/bench-runner/src/runs/extraction/extraction-fill.ts"
   );
   const cli = await server.ssrLoadModule(
     "/apps/bench-runner/src/cli/extraction-fill/command-core.ts"
   );
   const authorityInspection = await server.ssrLoadModule(
-    "/apps/bench-runner/src/bench/extraction/authority/inspection.ts"
+    "/apps/bench-runner/src/runs/extraction/authority/inspection.ts"
   );
   const authorityReceipt = await server.ssrLoadModule(
-    "/apps/bench-runner/src/bench/extraction/authority/receipt.ts"
+    "/apps/bench-runner/src/runs/extraction/authority/receipt.ts"
   );
   const inspection = await authorityInspection.inspectExtractionAuthority({
     variant: "longmemeval_oracle",

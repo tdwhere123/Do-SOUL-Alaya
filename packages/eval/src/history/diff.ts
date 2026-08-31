@@ -3,7 +3,7 @@ import type {
   KpiPayload,
   PerScenarioRow,
   Verdict
-} from "../schema/kpi-schema.js";
+} from "../contracts/kpi-schema.js";
 import {
   DEFAULT_THRESHOLDS,
   classifyHotShareDrop,

@@ -5,9 +5,9 @@ import {
   NonEmptyStringSchema,
   NonNegativeFiniteNumberSchema
 } from "../shared/schema-primitives.js";
-import { FieldContractDigestSchema } from "../soul/field-contract/canonical-identity.js";
-import { ProjectionEraseSubjectKindSchema } from "../soul/field-contract/projection-generation.js";
-import { EffectDecisionSchema } from "../soul/field-contract/proof-effect.js";
+import { FieldContractDigestSchema } from "../recall/field-contract/canonical-identity.js";
+import { ProjectionEraseSubjectKindSchema } from "../recall/field-contract/projection-generation.js";
+import { EffectDecisionSchema } from "../recall/field-contract/proof-effect.js";
 
 const fieldGenerationEventTypeValues = [
   "soul.field.source_record.admitted",

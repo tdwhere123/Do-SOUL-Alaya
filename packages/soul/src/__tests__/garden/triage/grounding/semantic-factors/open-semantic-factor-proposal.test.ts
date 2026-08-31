@@ -1,0 +1,219 @@
+import { describe, expect, it } from "vitest";
+import { parseOfficialApiSignals } from
+  "../../../../../garden/ingestion/official-api-signal-parser.js";
+import { groundOfficialApiDraft } from
+  "../../../../../garden/ingestion/official-api/source-grounding.js";
+import {
+  GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
+  buildOpenSemanticFactorFormationProposal
+} from "../../../../../garden/triage/grounding/semantic-factors/formation-proposal.js";
+import { classifyOpenSemanticFactorFormationEligibility } from
+  "../../../../../garden/triage/grounding/semantic-factors/formation-eligibility.js";
+
+const SOURCE = "I used Atlas for research.";
+
+describe("open semantic factor formation proposal", () => {
+  it("preserves source observation while grounding a separate semantic projection", () => {
+    const [draft] = parseOfficialApiSignals(JSON.stringify({
+      signals: [signalJson(semanticGraph())]
+    }));
+    if (draft === undefined) throw new Error("signal fixture must parse");
+
+    const grounded = groundOfficialApiDraft(draft, SOURCE);
+    expect(grounded.status).toBe("grounded");
+    if (grounded.status !== "grounded") return;
+    expect(grounded.draft.semantic_factor_graph).toMatchObject({
+      source_kind: "evidence",
+      factors: expect.arrayContaining([
+        expect.objectContaining({ surface: "used", semantic_identity: "use" })
+      ])
+    });
+
+    expect(buildOpenSemanticFactorFormationProposal({
+      source_assertion: SOURCE,
+      source_grounding: grounded.audit,
+      semantic_factor_graph: grounded.draft.semantic_factor_graph
+    })).toEqual({
+      schema_version: 1,
+      producer_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
+      source_text: SOURCE,
+      graph: grounded.draft.semantic_factor_graph
+    });
+    expect(GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID)
+      .toBe("garden_source_bound_open_semantic_factor_v3");
+  });
+
+  it("leaves fact-frame semantic completeness to Core admission", () => {
+    const frame = {
+      schema_version: 1 as const,
+      slots: [
+        { role: "subject" as const, text: "I" },
+        { role: "relation" as const, text: "used" },
+        { role: "value" as const, text: "Atlas" }
+      ]
+    };
+    const [draft] = parseOfficialApiSignals(JSON.stringify({ signals: [{
+      ...signalJson({
+        ...semanticGraph(),
+        factors: [
+          factor("predicate", "used", 2, 6, "use"),
+          factor("object", "Atlas", 7, 12, "atlas")
+        ],
+        propositions: [{
+          proposition_id: "use-event",
+          predicate_factor_id: "predicate",
+          arguments: [argument(0, "object")]
+        }]
+      }),
+      fact_frame: frame
+    }] }));
+    if (draft === undefined) throw new Error("signal fixture must parse");
+    const grounded = groundOfficialApiDraft(draft, SOURCE);
+    if (grounded.status !== "grounded") throw new Error("signal fixture must ground");
+    const proposal = buildOpenSemanticFactorFormationProposal({
+      source_assertion: SOURCE,
+      source_grounding: grounded.audit,
+      fact_frame: grounded.draft.fact_frame,
+      semantic_factor_graph: grounded.draft.semantic_factor_graph
+    });
+
+    expect(proposal).toMatchObject({
+      producer_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
+      graph: { source_kind: "evidence" }
+    });
+  });
+
+  it("removes a graph whose exact surface is absent from the source", () => {
+    const [draft] = parseOfficialApiSignals(JSON.stringify({
+      signals: [signalJson({
+        ...semanticGraph(),
+        factors: [
+          factor("actor", "I", 0, 1, "speaker"),
+          factor("predicate", "uses", 2, 6, "use"),
+          factor("object", "Atlas", 7, 12, "atlas")
+        ],
+        propositions: [{
+          proposition_id: "use-event",
+          predicate_factor_id: "predicate",
+          arguments: [
+            argument(0, "actor"),
+            argument(1, "object")
+          ]
+        }]
+      })]
+    }));
+    if (draft === undefined) throw new Error("signal fixture must parse");
+
+    const grounded = groundOfficialApiDraft(draft, SOURCE);
+    expect(grounded.status).toBe("grounded");
+    if (grounded.status !== "grounded") return;
+    expect(grounded.draft.semantic_factor_graph).toBeUndefined();
+    expect(grounded.draft.semantic_factor_graph_projection).toEqual({
+      status: "rejected",
+      reason: "semantic_factor_graph_not_source_grounded"
+    });
+    expect(grounded.audit).toMatchObject({
+      reasons: expect.arrayContaining(["proposed_semantic_factor_graph_not_source_grounded"])
+    });
+    expect(buildOpenSemanticFactorFormationProposal({
+      source_assertion: SOURCE,
+      source_grounding: grounded.audit,
+      semantic_factor_graph_projection: grounded.draft.semantic_factor_graph_projection
+    })).toBeUndefined();
+    expect(classifyOpenSemanticFactorFormationEligibility({
+      source_assertion: SOURCE,
+      source_grounding: grounded.audit,
+      semantic_factor_graph_projection: grounded.draft.semantic_factor_graph_projection
+    })).toEqual({
+      kind: "rejected",
+      reason: "semantic_factor_graph_not_source_grounded"
+    });
+  });
+
+  it("rejects overlapping nodes in source evidence", () => {
+    const graph = semanticGraph();
+    const [draft] = parseOfficialApiSignals(JSON.stringify({
+      signals: [signalJson({
+        ...graph,
+        factors: [
+          ...graph.factors,
+          factor("nested-object", "las", 8, 11, "las")
+        ],
+        propositions: [{
+          ...graph.propositions[0],
+          arguments: [
+            ...graph.propositions[0]!.arguments,
+            argument(3, "nested-object")
+          ]
+        }]
+      })]
+    }));
+    if (draft === undefined) throw new Error("signal fixture must parse");
+
+    const grounded = groundOfficialApiDraft(draft, SOURCE);
+    expect(grounded.draft.semantic_factor_graph).toBeUndefined();
+    expect(grounded.draft.semantic_factor_graph_projection).toMatchObject({
+      status: "rejected",
+      reason: "semantic_factor_graph_not_source_grounded"
+    });
+  });
+});
+
+function signalJson(graph: unknown) {
+  return {
+    signal_kind: "potential_claim",
+    object_kind: "activity",
+    confidence: 0.9,
+    matched_text: SOURCE,
+    evidence_refs: [],
+    source_memory_refs: [],
+    semantic_factor_graph: graph
+  };
+}
+
+function semanticGraph() {
+  return {
+    schema_version: 2 as const,
+    source_kind: "evidence" as const,
+    factors: [
+      factor("actor", "I", 0, 1, "speaker"),
+      factor("predicate", "used", 2, 6, "use"),
+      factor("object", "Atlas", 7, 12, "atlas"),
+      factor("purpose", "research", 17, 25, "research")
+    ],
+    variables: [],
+    result_variable_ids: [],
+    propositions: [{
+      proposition_id: "use-event",
+      predicate_factor_id: "predicate",
+      arguments: [
+        argument(0, "actor"),
+        argument(1, "object"),
+        argument(2, "purpose")
+      ]
+    }]
+  };
+}
+
+function factor(
+  factorId: string,
+  surface: string,
+  _start: number,
+  _end: number,
+  semanticIdentity: string
+) {
+  return {
+    factor_id: factorId,
+    surface,
+    semantic_identity: semanticIdentity
+  };
+}
+
+function argument(position: number, referenceId: string) {
+  return {
+    position,
+    binding_identity: position === 0 ? "agent" : position === 1 ? "object" : "purpose",
+    reference_kind: "factor" as const,
+    reference_id: referenceId
+  };
+}

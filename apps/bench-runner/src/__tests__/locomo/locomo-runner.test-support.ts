@@ -27,7 +27,7 @@ vi.mock("../../harness/daemon.js", () => ({
   rotatingSeedObjectKind: () => "fact"
 }));
 
-vi.mock("../../locomo/fetch.js", () => ({
+vi.mock("../../datasets/locomo/fetch.js", () => ({
   loadLocomo: locomoRunnerMocks.loadLocomoMock
 }));
 

@@ -8,7 +8,7 @@ import {
   trackedDatabases,
   withActiveLifecycle
 } from "./path-relation-repo-fixture.js";
-import { capPathRelationList } from "../../../repos/path/path-relation-read-queries.js";
+import { capPathRelationList } from "../../../repos/path/reads/path-relation-read-queries.js";
 
 const databases = trackedDatabases;
 

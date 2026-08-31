@@ -5,13 +5,13 @@ import {
   sourceBoundF3Seal
 } from "@do-soul/alaya-soul";
 import type { DiagnosticLoopRequest } from
-  "../../bench/diagnostic-loop/types.js";
+  "../../runs/diagnostic-loop/types.js";
 import { prepareExtractionFillWindow } from
-  "../../bench/extraction/fill/fill-window.js";
+  "../../runs/extraction/fill/fill-window.js";
 import { requiredExtractionCacheKeys } from
-  "../../bench/compile-seed/preflight/cache-window-key-binding.js";
+  "../../runs/compile-seed/preflight/cache-window-key-binding.js";
 import { isExtractionRequestProfile } from
-  "../../bench/extraction/request-profile.js";
+  "../../runs/extraction/request-profile.js";
 
 export function canonicalReplayContractDigests(): {
   readonly schemaDigest: string;

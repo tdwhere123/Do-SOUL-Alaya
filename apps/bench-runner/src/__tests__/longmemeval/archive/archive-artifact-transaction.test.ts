@@ -7,7 +7,7 @@ import { HistoryEntryCommittedError } from "@do-soul/alaya-eval";
 import {
   prepareDiagnosticsArtifactStagingPath,
   withPublishedDiagnosticsArtifact
-} from "../../../bench/measurement/artifact-transaction.js";
+} from "../../../runs/measurement/artifact-transaction.js";
 
 describe("LongMemEval full diagnostics artifact transaction", () => {
   it("removes the published artifact when archive publication fails", async () => {

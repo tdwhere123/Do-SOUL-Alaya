@@ -2,13 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runDiagnosticLoop } from "../../../bench/diagnostic-loop/run.js";
+import { runDiagnosticLoop } from "../../../runs/diagnostic-loop/run.js";
 import { runProductionSnapshotPhase } from
-  "../../../bench/diagnostic-loop/production-snapshot.js";
+  "../../../runs/diagnostic-loop/production-snapshot.js";
 import { resolveSnapshotIdentity } from
-  "../../../bench/diagnostic-loop/authority/identity.js";
-import { sha256File } from "../../../bench/snapshot/integrity.js";
-import { boundFileFullContentReadCount } from "../../../bench/snapshot/bound-file.js";
+  "../../../runs/diagnostic-loop/authority/identity.js";
+import { sha256File } from "../../../runs/snapshot/integrity.js";
+import { boundFileFullContentReadCount } from "../../../runs/snapshot/bound-file.js";
 import {
   injectedNoProviderReceipt,
   loopRequest,

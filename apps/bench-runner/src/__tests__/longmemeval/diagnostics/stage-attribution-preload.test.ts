@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { writeStageAttributionTables } from
-  "../../../bench/diagnostics/stage-attribution/write-tables.js";
+  "../../../diagnostics/stage-attribution/write-tables.js";
 import { baseQuestion } from "./stage-attribution-fixture.js";
 
 const { loadRecallEvalQuestionDiagnostics } = vi.hoisted(() => ({
@@ -11,7 +11,7 @@ const { loadRecallEvalQuestionDiagnostics } = vi.hoisted(() => ({
 }));
 
 vi.mock(
-  "../../../bench/diagnostics/stage-attribution/load-recall-eval-diagnostics.js",
+  "../../../diagnostics/stage-attribution/load-recall-eval-diagnostics.js",
   () => ({ loadRecallEvalQuestionDiagnostics })
 );
 

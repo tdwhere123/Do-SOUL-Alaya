@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ParsedFlags } from "../../../cli/cli-options.js";
 import { emptyBenchTerminalRetryClassifications } from
-  "../../../bench/compile-seed/compile-seed-types.js";
+  "../../../runs/compile-seed/compile-seed-types.js";
 
 const mocks = vi.hoisted(() => ({ runExtractionFill: vi.fn() }));
 
-vi.mock("../../../bench/extraction/extraction-fill.js", () => ({
+vi.mock("../../../runs/extraction/extraction-fill.js", () => ({
   runExtractionFill: mocks.runExtractionFill
 }));
 

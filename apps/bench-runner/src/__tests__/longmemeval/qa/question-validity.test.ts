@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { LongMemEvalQuestionDiagnostic } from "../../../bench/diagnostics.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
 import {
   classifyQuestionMeasurementCohort,
   classifyQuestionMeasurementStatus
-} from "../../../bench/measurement/question-validity.js";
+} from "../../../runs/measurement/question-validity.js";
 import {
   deriveQuestionMeasurementStatus as deriveTsQuestionMeasurementStatus,
   validateQuestionMeasurementStatus as validateTsQuestionMeasurementStatus,
   type QuestionMeasurementPrimitiveLedger,
   type QuestionMeasurementStatus
-} from "../../../bench/measurement/question-measurement-status.js";
+} from "../../../runs/measurement/question-measurement-status.js";
 import { deriveQuestionMeasurementStatus as deriveReplayQuestionMeasurementStatus, isScorableMeasurementCohort, measurementUnscorableReason, validateQuestionMeasurementStatus as validateReplayQuestionMeasurementStatus } from "../../../../scripts/longmemeval-replay/measurement-status.mjs";
 
 function diagnostic(cohort: Record<string, unknown>): LongMemEvalQuestionDiagnostic {

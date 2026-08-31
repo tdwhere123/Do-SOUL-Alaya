@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   inspectCachedResponseMetadata,
   persistedResponseMetadata
-} from "../../../bench/compile-seed/cache/cached-response-metadata.js";
+} from "../../../runs/compile-seed/cache/cached-response-metadata.js";
 
 describe("cached provider completion authority", () => {
   it("rejects provider-backed writes without a versioned witness", () => {

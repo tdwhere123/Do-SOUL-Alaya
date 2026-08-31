@@ -1,4 +1,4 @@
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   selectionContractForRows
 } from "../../../../../../packages/eval/src/__tests__/history/history-fixture.js";

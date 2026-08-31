@@ -3,14 +3,14 @@ import { createHash } from "node:crypto";
 import {
   assertDiagnosticLoopIdentity,
   isSha256Hex
-} from "../../bench/diagnostic-loop/identity.js";
-import type { DiagnosticLoopRequest } from "../../bench/diagnostic-loop/types.js";
+} from "../../runs/diagnostic-loop/identity.js";
+import type { DiagnosticLoopRequest } from "../../runs/diagnostic-loop/types.js";
 import { computeExtractionKeySetSha256 } from
-  "../../bench/extraction/content-closure.js";
+  "../../runs/extraction/content-closure.js";
 import { readExtractionCacheManifestIdentity } from
-  "../../bench/extraction/cache/extraction-cache-manifest.js";
+  "../../runs/extraction/cache/extraction-cache-manifest.js";
 import { hasCompleteExtractionFillAuthority } from
-  "../../bench/extraction/fill/fill-authority.js";
+  "../../runs/extraction/fill/fill-authority.js";
 import {
   canonicalReplayContractDigests,
   rebuildCanonicalReplayKeys

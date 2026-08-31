@@ -10,7 +10,7 @@ import {
   packedWorkingDbPath,
   SEALED_SLICE_RESTORE_ENV,
   sealedWorkspaceSliceCacheDir
-} from "../../../bench/snapshot/recall-eval/workspace-slice/index.js";
+} from "../../../runs/snapshot/recall-eval/workspace-slice/index.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import {
   createPackedTwoWorkspaceDb,

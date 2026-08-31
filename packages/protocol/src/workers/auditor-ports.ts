@@ -1,13 +1,10 @@
 import { z } from "zod";
-import {
-  EventLogOrphanExpectedTableSchema,
-  type EventLogOrphanExpectedTable
-} from "../events/event-log-orphan.js";
+import { EventLogOrphanExpectedTableSchema } from "../events/event-log-orphan.js";
 import { type EventLogEntry } from "../events/event-log.js";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
-import { type GardenTaskResult } from "../soul/garden-tier.js";
-import { MemoryDimensionSchema } from "../soul/memory-entry.js";
-import { type OrphanRadar } from "../soul/orphan-radar.js";
+import { type GardenTaskResult } from "../garden/garden-tier.js";
+import { MemoryDimensionSchema } from "../memory/memory-entry.js";
+import { type OrphanRadar } from "../lifecycle/orphan-radar.js";
 
 export const StaleMemoryEntrySchema = z
   .object({
@@ -110,7 +107,6 @@ export type HealablePointerRecord = z.infer<typeof HealablePointerRecordSchema>;
 export type OrphanedMemoryRecord = z.infer<typeof OrphanedMemoryRecordSchema>;
 export type EventLogOrphanRecord = z.infer<typeof EventLogOrphanRecordSchema>;
 export type EventLogOrphanRadarRecord = z.infer<typeof EventLogOrphanRadarRecordSchema>;
-export type { EventLogOrphanExpectedTable };
 export type ExpiringGreenStatus = z.infer<typeof ExpiringGreenStatusSchema>;
 export type ColdStartAssessment = z.infer<typeof ColdStartAssessmentSchema>;
 export type DraftCandidate = z.infer<typeof DraftCandidateSchema>;

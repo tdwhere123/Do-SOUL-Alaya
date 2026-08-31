@@ -8,11 +8,11 @@ import { runCli } from "../../../cli/index.js";
 import { runDiagnosticLoopCommand } from "../../../cli/diagnostic-loop/command.js";
 import { parseDiagnosticLoopArgs } from "../../../cli/diagnostic-loop/args.js";
 import { digest, loopRequest, trackingAdapters } from "./fixture.js";
-import { checkpointDigest } from "../../../bench/diagnostic-loop/checkpoint.js";
+import { checkpointDigest } from "../../../runs/diagnostic-loop/checkpoint.js";
 import { readExtractionCacheManifestIdentity } from
-  "../../../bench/extraction/cache/extraction-cache-manifest.js";
+  "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { computeExtractionKeySetSha256 } from
-  "../../../bench/extraction/content-closure.js";
+  "../../../runs/extraction/content-closure.js";
 
 const roots: string[] = [];
 

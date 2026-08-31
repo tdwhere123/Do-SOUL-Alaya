@@ -7,15 +7,15 @@ import {
   OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT
 } from "@do-soul/alaya-soul";
 import { inspectQuerySemanticFactorCacheIdentity } from
-  "../../../bench/query-factors/query-semantic-factor-cache-identity.js";
+  "../../../runs/query-factors/query-semantic-factor-cache-identity.js";
 import { isRecallEvalRunEvidenceEligible } from
-  "../../../bench/provenance/recall-eval/recall-eval-run.js";
+  "../../../runs/provenance/recall-eval/recall-eval-run.js";
 import type { RecallEvalRuntimeAttribution } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-runtime.js";
 import {
   LongMemEvalRunProvenanceSchema,
   type LongMemEvalRunProvenance
-} from "../../../bench/provenance/run.js";
+} from "../../../runs/provenance/run.js";
 import { provenance } from "./recall-eval-provenance-contract-fixture.js";
 
 describe("recall-eval query-cache gate provenance", () => {

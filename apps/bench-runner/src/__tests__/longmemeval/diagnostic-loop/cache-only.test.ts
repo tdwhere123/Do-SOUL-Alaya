@@ -2,15 +2,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeCachedExtraction } from "../../../bench/compile-seed/cache/cache-shard.js";
-import { proveCacheOnlyExtraction } from "../../../bench/diagnostic-loop/cache-only.js";
-import { DiagnosticLoopFailure } from "../../../bench/diagnostic-loop/failures.js";
+import { writeCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
+import { proveCacheOnlyExtraction } from "../../../runs/diagnostic-loop/cache-only.js";
+import { DiagnosticLoopFailure } from "../../../runs/diagnostic-loop/failures.js";
 import { digest, loopRequest } from "./fixture.js";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { computeSourceTurnCacheKey } from
-  "../../../bench/compile-seed/compile-seed-cache.js";
+  "../../../runs/compile-seed/compile-seed-cache.js";
 import { computeSystemPromptSha256 } from
-  "../../../bench/extraction/cache/extraction-cache-manifest.js";
+  "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { writeCompletedExtractionCacheFixture } from
   "../extraction/completed-extraction-cache-fixture.js";
 

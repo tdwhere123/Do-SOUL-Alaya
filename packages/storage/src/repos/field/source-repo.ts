@@ -12,7 +12,7 @@ import {
   fieldSourceSpanParser,
   insertIdempotent,
   persistFieldTransaction
-} from "./mappers.js";
+} from "./mappers/mappers.js";
 import type {
   FieldSourceEvidenceBindingRow,
   FieldSourceRecordRepo,

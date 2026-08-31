@@ -22,7 +22,7 @@ import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig,
   type CompileSeedExtractionStats
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
@@ -37,7 +37,7 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
-import { computeExtractionRawJsonSha256 } from "../../../bench/compile-seed/compile-seed-cache.js";
+import { computeExtractionRawJsonSha256 } from "../../../runs/compile-seed/compile-seed-cache.js";
 
 describe("extraction cache key — load-bearing inputs only", () => {
   let cacheRoot: string;

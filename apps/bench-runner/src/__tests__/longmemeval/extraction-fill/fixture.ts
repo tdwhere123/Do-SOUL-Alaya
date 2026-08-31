@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, expect, vi } from "vitest";
 
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { signalsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 export { providerBackedExtractionResult } from
   "../extraction/extraction-cache-test-fixture.js";

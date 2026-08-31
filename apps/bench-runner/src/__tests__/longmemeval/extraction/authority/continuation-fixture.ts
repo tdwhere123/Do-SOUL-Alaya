@@ -7,35 +7,35 @@ import {
   openExtractionAttemptLedger,
   readExtractionAttemptLedger,
   readSettledExtractionAttemptLedger
-} from "../../../../bench/extraction/authority/attempt-ledger.js";
+} from "../../../../runs/extraction/authority/attempt-ledger.js";
 import { persistContinuationAuthority } from
   "../../../../cli/extraction-authority/continuation.js";
 import { createSameRootExtractionContinuation } from
-  "../../../../bench/extraction/authority/continuation/continuation.js";
+  "../../../../runs/extraction/authority/continuation/continuation.js";
 import {
   createExtractionAuthorityReceipt,
   type ExtractionAuthorityObservation
-} from "../../../../bench/extraction/authority/receipt.js";
+} from "../../../../runs/extraction/authority/receipt.js";
 import { computeExtractionFillAttemptCeiling } from
-  "../../../../bench/extraction/authority/receipt-limits.js";
+  "../../../../runs/extraction/authority/receipt-limits.js";
 import { createExtractionPreservedValidClosure } from
-  "../../../../bench/extraction/authority/repair/preserved-valid-closure.js";
+  "../../../../runs/extraction/authority/repair/preserved-valid-closure.js";
 import {
   createFreshRetiredSourceRebuildTargetSelection,
   createSameRootContinuationTargetSelectionReceipt
-} from "../../../../bench/extraction/authority/target-selection/receipt.js";
+} from "../../../../runs/extraction/authority/target-selection/receipt.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest
-} from "../../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   computeExtractionKeySetSha256,
   computeExtractionRawJsonSha256
-} from "../../../../bench/extraction/content-closure.js";
+} from "../../../../runs/extraction/content-closure.js";
 import { buildExtractionTransportProvenance } from
-  "../../../../bench/extraction/transport-route.js";
+  "../../../../runs/extraction/transport-route.js";
 import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from
   "../extraction-cache-test-fixture.js";
 

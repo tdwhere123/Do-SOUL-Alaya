@@ -5,8 +5,8 @@ import {
   createMemoryEntry,
   createMemoryEntryWithinTransaction,
   type MemoryEntryCreateWorkflowHost
-} from "./create-workflow.js";
-import type { MemoryEntryEvidenceRefIndexHost } from "./evidence-ref-index.js";
+} from "./writes/create-workflow.js";
+import type { MemoryEntryEvidenceRefIndexHost } from "./writes/evidence-ref-index.js";
 import {
   autonomousTombstone,
   archiveMemoryEntry,
@@ -18,22 +18,22 @@ import {
   transitionMemoryEntryLifecycleSync,
   transitionMemoryEntryToDormantIfActive,
   type MemoryEntryLifecycleWorkflowHost
-} from "./lifecycle-workflows.js";
+} from "./writes/lifecycle-workflows.js";
 import {
   searchByAnchorWithinObjectIds,
   searchByKeyword,
   searchByKeywordWithinObjectIds,
   searchByKeywordWithinTier,
   type MemoryEntrySearchWorkflowHost
-} from "./search-workflows.js";
+} from "./writes/search-workflows.js";
 import {
   searchByAnchorField,
   searchByKeywordField
-} from "./search/field-search.js";
-import { searchByAnchorWithinTier } from "./recall/tier-anchor-search-workflow.js";
+} from "./reads/search/field-search.js";
+import { searchByAnchorWithinTier } from "./writes/recall/tier-anchor-search-workflow.js";
 import { toFieldSearchStorageError } from "../shared/field-search-errors.js";
-import { MemoryEntryReadQueries } from "./memory-entry-read-queries.js";
-import { prepareMemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
+import { MemoryEntryReadQueries } from "./reads/memory-entry-read-queries.js";
+import { prepareMemoryEntryStatements } from "./statements/sqlite-memory-entry-statements.js";
 import type {
   SqliteAllStatement,
   SqliteGetStatement,
@@ -47,8 +47,8 @@ import {
   updateMemoryEntryWithinTransaction,
   updateScopedMemoryEntry,
   type MemoryEntryUpdateWorkflowHost
-} from "./update-workflows.js";
-import { findRecallActivationTopK } from "./recall/activation-top-k-query.js";
+} from "./writes/update-workflows.js";
+import { findRecallActivationTopK } from "./reads/recall/activation-top-k-query.js";
 import {
   type AutonomousTombstoneInput,
   type MemoryEntryKeywordSearchResult,

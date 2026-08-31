@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildDiffVsPrevious, diffKpis } from "../../history/diff.js";
-import { KpiPayloadSchema, type KpiPayload } from "../../schema/kpi-schema.js";
+import { KpiPayloadSchema, type KpiPayload } from "../../contracts/kpi-schema.js";
 
 function buildPayload(overrides: Partial<KpiPayload["kpi"]>): KpiPayload {
   return {

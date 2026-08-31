@@ -2,24 +2,24 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import { preflightExtractionCache } from "../../../bench/compile-seed.js";
+import { preflightExtractionCache } from "../../../runs/compile-seed.js";
 import {
   cacheFilePath,
   computeExtractionContentClosureSha256,
   computeExtractionRawJsonSha256,
   computeSourceTurnCacheKey
-} from "../../../bench/compile-seed/compile-seed-cache.js";
+} from "../../../runs/compile-seed/compile-seed-cache.js";
 import {
   readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest
 } from
-  "../../../bench/extraction/cache/extraction-cache-manifest.js";
+  "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { createExtractionCachePreflightProof } from
-  "../../../bench/compile-seed/preflight/cache-preflight-proof.js";
+  "../../../runs/compile-seed/preflight/cache-preflight-proof.js";
 import {
   inspectExtractionCacheContentClosure,
   inspectExtractionCacheRawContentClosure
-} from "../../../bench/extraction/fill/fill-completion.js";
+} from "../../../runs/extraction/fill/fill-completion.js";
 import {
   EXTRACTION_CONFIG as CONFIG,
   manifestFor,

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../bench/diagnostics/schema/diagnostics-schema.js";
+import { LongMemEvalQuestionDiagnosticSchema } from "../../../diagnostics/schema/diagnostics-schema.js";
 import { buildLongMemEvalQualityMetrics } from
-  "../../../bench/diagnostics/quality/diagnostics-quality.js";
-import { aggregateLongMemEvalRunResults } from "../../../longmemeval/runner/archive/runner-archive-aggregate.js";
-import type { LongMemEvalWorkerResult } from "../../../longmemeval/runner/question/runner-question.js";
-import { accumulateRecallEvalRows } from "../../../bench/kpi/recall-eval-accumulator.js";
-import type { RecallEvalQuestionResult } from "../../../bench/lifecycle/recall-eval/recall-eval-impl.js";
+  "../../../diagnostics/quality/diagnostics-quality.js";
+import { aggregateLongMemEvalRunResults } from "../../../datasets/longmemeval/runner/archive/runner-archive-aggregate.js";
+import type { LongMemEvalWorkerResult } from "../../../datasets/longmemeval/runner/question/runner-question.js";
+import { accumulateRecallEvalRows } from "../../../runs/kpi/recall-eval-accumulator.js";
+import type { RecallEvalQuestionResult } from "../../../runs/lifecycle/recall-eval/recall-eval-impl.js";
 
 interface ResultInput {
   id: string;

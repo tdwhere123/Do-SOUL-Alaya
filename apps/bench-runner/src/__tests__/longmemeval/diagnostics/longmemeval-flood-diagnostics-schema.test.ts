@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DiagnosticFloodEdgeTraceV1Schema,
   DiagnosticFloodPotentialSchema
-} from "../../../bench/diagnostics/schema/diagnostics-schema.js";
+} from "../../../diagnostics/schema/diagnostics-schema.js";
 
 const legacyPotential = {
   R_obj: 0.2,

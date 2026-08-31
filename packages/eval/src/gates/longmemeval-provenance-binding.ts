@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { KpiPayload } from "../schema/kpi-schema.js";
+import type { KpiPayload } from "../contracts/kpi-schema.js";
 import {
   createLongMemEvalSelectionContractIdentity,
   type LongMemEvalSelectionAssignment,
   type LongMemEvalSelectionContractIdentity
-} from "../schema/longmemeval-selection-contract.js";
+} from "../contracts/longmemeval-selection-contract.js";
 import { canonicalJson } from "./canonical-json.js";
 import {
   LongMemEvalFanoutAuthoritySchema,

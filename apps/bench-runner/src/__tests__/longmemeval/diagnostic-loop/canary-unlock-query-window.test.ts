@@ -4,27 +4,27 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CACHED_F3_EXPOSURE_POLICY } from
-  "../../../bench/diagnostics/stage-attribution/exposure/contract.js";
+  "../../../diagnostics/stage-attribution/exposure/contract.js";
 import {
   CANARY_Q1,
   CANARY_Q2,
   CANARY_Q3,
   CANARY_QUERY_TEXTS
-} from "../../../bench/diagnostics/stage-attribution/exposure/canary-ids.js";
+} from "../../../diagnostics/stage-attribution/exposure/canary-ids.js";
 import { assertCanaryQueryWindowCompatibility } from
-  "../../../bench/diagnostic-loop/canary-unlock-query-window.js";
+  "../../../runs/diagnostic-loop/canary-unlock-query-window.js";
 import type { ResolvedDiagnosticLoopIdentity } from
-  "../../../bench/diagnostic-loop/authority/identity.js";
+  "../../../runs/diagnostic-loop/authority/identity.js";
 import { loopRequest, writeQueryFactorCacheEntries } from "./fixture.js";
 import {
   QuerySemanticFactorCacheSchema,
   assertQuerySemanticFactorCacheSelfSeal,
   queryCacheStableJson,
   toBinding
-} from "../../../bench/query-factors/cache/document.js";
+} from "../../../runs/query-factors/cache/document.js";
 import { queryCachePrefixedSha256 } from
-  "../../../bench/query-factors/query-semantic-factor-cache-identity.js";
-import { sha256Buffer } from "../../../bench/snapshot/bound-file.js";
+  "../../../runs/query-factors/query-semantic-factor-cache-identity.js";
+import { sha256Buffer } from "../../../runs/snapshot/bound-file.js";
 
 const WINDOW = [
   CANARY_QUERY_TEXTS[CANARY_Q1],

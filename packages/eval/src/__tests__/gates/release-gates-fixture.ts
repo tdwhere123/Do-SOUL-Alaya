@@ -1,9 +1,9 @@
 import {
   KpiPayloadSchema,
   type KpiPayload
-} from "../../schema/kpi-schema.js";
+} from "../../contracts/kpi-schema.js";
 import { createLongMemEvalSelectionContractIdentity } from
-  "../../schema/longmemeval-selection-contract.js";
+  "../../contracts/longmemeval-selection-contract.js";
 import { VERIFIED_TEST_DATASET_SHA256 } from "./verified-dataset-fixture.js";
 
 const FIXTURE_DATASET_SHA = VERIFIED_TEST_DATASET_SHA256;

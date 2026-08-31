@@ -6,26 +6,26 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   collectDistinctTurnContents,
   runExtractionFill
-} from "../../../bench/extraction/extraction-fill.js";
-import { readExtractionCacheManifest } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
-import type { BenchSignalExtractor } from "../../../bench/compile-seed.js";
+} from "../../../runs/extraction/extraction-fill.js";
+import { readExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import { cacheFilePath, computeExtractionTurnCacheKey } from
-  "../../../bench/compile-seed/compile-seed-cache.js";
+  "../../../runs/compile-seed/compile-seed-cache.js";
 import { inspectTurnContentKeySpace } from
-  "../../../bench/extraction/turn-contents.js";
+  "../../../runs/extraction/turn-contents.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../bench/extraction/authority/inspection.js";
+} from "../../../runs/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../bench/extraction/authority/receipt.js";
+} from "../../../runs/extraction/authority/receipt.js";
 import {
   acquireExtractionCacheWriteLease,
   withExtractionCacheWriteLease
-} from "../../../bench/extraction/fill/manifest/fill-root-guard.js";
-import { requireProviderBinding } from "../../../bench/provider/catalog.js";
+} from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
+import { requireProviderBinding } from "../../../runs/provider/catalog.js";
 
 import {
   buildAuthorityQuestion,

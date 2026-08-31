@@ -1,5 +1,5 @@
 import { describe, expect, it } from "./locomo-runner.test-support.js";
-import { resolveLocomoQaQuestionType } from "../../locomo/runner.js";
+import { resolveLocomoQaQuestionType } from "../../datasets/locomo/runner.js";
 
 describe("resolveLocomoQaQuestionType", () => {
   it("maps category 4 to locomo-open-domain and others to their typed prompts", () => {

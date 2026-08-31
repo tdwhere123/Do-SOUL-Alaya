@@ -6,8 +6,8 @@ import {
   buildSnapshotArtifactIntegrity,
   sha256File,
   verifySnapshotArtifactIntegrity
-} from "../../../bench/snapshot/integrity.js";
-import { peekCachedFileSha256 } from "../../../bench/snapshot/bound-file.js";
+} from "../../../runs/snapshot/integrity.js";
+import { peekCachedFileSha256 } from "../../../runs/snapshot/bound-file.js";
 
 const roots: string[] = [];
 

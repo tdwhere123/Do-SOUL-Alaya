@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../shared/schema-primitives.js";
-import { AcceptedBySchema, ProjectMappingStateSchema } from "../soul/project-mapping.js";
+import { AcceptedBySchema, ProjectMappingStateSchema } from "../surfaces/project-mapping.js";
 
 const projectMappingEventTypeValues = [
   "soul.project_mapping.suggested",

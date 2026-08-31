@@ -1,21 +1,21 @@
 import path from "node:path";
 import process from "node:process";
-import { parseLongMemEvalVariant } from "../../longmemeval/comparison/dataset-identity.js";
+import { parseLongMemEvalVariant } from "../../datasets/longmemeval/comparison/dataset-identity.js";
 import {
   isDiagnosticLoopMode,
   isDiagnosticLoopPhase,
   type DiagnosticLoopMode,
   type DiagnosticLoopPhase
-} from "../../bench/diagnostic-loop/phases.js";
-import { isSha256Hex } from "../../bench/diagnostic-loop/identity.js";
-import { isExtractionRequestProfile } from "../../bench/extraction/request-profile.js";
-import type { DiagnosticLoopRequest } from "../../bench/diagnostic-loop/types.js";
+} from "../../runs/diagnostic-loop/phases.js";
+import { isSha256Hex } from "../../runs/diagnostic-loop/identity.js";
+import { isExtractionRequestProfile } from "../../runs/extraction/request-profile.js";
+import type { DiagnosticLoopRequest } from "../../runs/diagnostic-loop/types.js";
 import {
   isObsoleteRequestProfile,
   resolveVendorModel
-} from "../../bench/provider/catalog.js";
-import { assertRequiredRequestProfile } from "../../bench/extraction/transport-route.js";
-import type { LongMemEvalVariant } from "../../longmemeval/ingestion/dataset.js";
+} from "../../runs/provider/catalog.js";
+import { assertRequiredRequestProfile } from "../../runs/extraction/transport-route.js";
+import type { LongMemEvalVariant } from "../../datasets/longmemeval/ingestion/dataset.js";
 import {
   matchFlagToken,
   nextIndex,

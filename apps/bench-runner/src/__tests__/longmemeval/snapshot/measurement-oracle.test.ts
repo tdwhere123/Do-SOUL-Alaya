@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { LongMemEvalQuestion } from
-  "../../../longmemeval/ingestion/dataset.js";
+  "../../../datasets/longmemeval/ingestion/dataset.js";
 import { buildSnapshotMeasurementOracle } from
-  "../../../bench/snapshot/measurement-oracle.js";
+  "../../../runs/snapshot/measurement-oracle.js";
 
 describe("snapshot measurement oracle", () => {
   it("matches live scoring when a canonical question repeats a session id", () => {

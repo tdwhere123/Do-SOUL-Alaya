@@ -9,7 +9,7 @@ import {
   createCompileSeedRunner,
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig
-} from "../../../../bench/compile-seed.js";
+} from "../../../../runs/compile-seed.js";
 import {
   writeExtractionCacheTestManifest
 } from "../../extraction/extraction-cache-test-fixture.js";

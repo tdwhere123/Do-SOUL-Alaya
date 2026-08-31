@@ -4,9 +4,9 @@ import type { KpiPayload } from "@do-soul/alaya-eval";
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   LONGMEMEVAL_DIAGNOSTICS_FILENAME
-} from "../../../bench/archive/archive-evidence.js";
+} from "../../../runs/archive/archive-evidence.js";
 import type { LongMemEvalDiagnosticsSidecar } from
-  "../../../bench/diagnostics.js";
+  "../../../diagnostics/diagnostics.js";
 import { MERGE_TEST_DATASET_SHA256 } from "./cli-merge-dataset-fixture.js";
 
 export {

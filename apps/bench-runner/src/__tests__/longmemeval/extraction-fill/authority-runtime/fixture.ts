@@ -2,15 +2,15 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { LongMemEvalQuestion } from
-  "../../../../longmemeval/ingestion/dataset.js";
+  "../../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
-} from "../../../../bench/extraction/authority/inspection.js";
+} from "../../../../runs/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
-} from "../../../../bench/extraction/authority/receipt.js";
+} from "../../../../runs/extraction/authority/receipt.js";
 import { EXTRACTION_FILL_VARIANT } from "../fixture.js";
 
 interface AuthorityRoots {

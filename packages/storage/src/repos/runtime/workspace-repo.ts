@@ -2,11 +2,11 @@ import { WorkspaceSchema, type Workspace } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
-import { cascadeDeleteWorkspace } from "../path/cascade-delete.js";
+import { cascadeDeleteWorkspace } from "../path/writes/cascade-delete.js";
 import {
   prepareWorkspaceStatements,
   type WorkspaceStatements
-} from "./workspace-statements.js";
+} from "./statements/workspace-statements.js";
 
 // Walk the underlying better-sqlite3 error and any wrapped causes to detect
 // a UNIQUE-constraint collision on a specific qualified column. Driver

@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { measureGitState } from "../../../bench/provenance/contract/frozen-code-contract.js";
-import { assertSafeUntrackedRelativePath } from "../../../bench/provenance/contract/untracked-worktree-frame.js";
+import { measureGitState } from "../../../runs/provenance/contract/frozen-code-contract.js";
+import { assertSafeUntrackedRelativePath } from "../../../runs/provenance/contract/untracked-worktree-frame.js";
 import {
   createFrozenCodeFixtureHarness,
   git,

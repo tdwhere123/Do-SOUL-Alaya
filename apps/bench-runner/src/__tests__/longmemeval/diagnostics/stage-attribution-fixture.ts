@@ -1,6 +1,6 @@
 // @ts-nocheck
 import type { LongMemEvalQuestionDiagnostic } from
-  "../../../bench/diagnostics/schema/diagnostics-types.js";
+  "../../../diagnostics/schema/diagnostics-types.js";
 
 export function baseQuestion(
   overrides: Partial<LongMemEvalQuestionDiagnostic> & {

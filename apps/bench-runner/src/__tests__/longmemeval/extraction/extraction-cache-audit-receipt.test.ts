@@ -6,7 +6,7 @@ import {
   buildExtractionCacheAuditReceipt,
   readExtractionCacheAuditReceipt,
   writeExtractionCacheAuditReceipt
-} from "../../../bench/extraction/cache-audit/receipt.js";
+} from "../../../runs/extraction/cache-audit/receipt.js";
 
 const roots: string[] = [];
 

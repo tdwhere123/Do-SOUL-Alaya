@@ -9,8 +9,8 @@ import {
   cloneCachedSealedSnapshot,
   cloneOrCopyFile,
   type CopyFileFn
-} from "../../../bench/snapshot/freeze/db-copy.js";
-import { hashRegularFileNoFollow, peekCachedFileSha256 } from "../../../bench/snapshot/bound-file.js";
+} from "../../../runs/snapshot/freeze/db-copy.js";
+import { hashRegularFileNoFollow, peekCachedFileSha256 } from "../../../runs/snapshot/bound-file.js";
 
 const roots: string[] = [];
 

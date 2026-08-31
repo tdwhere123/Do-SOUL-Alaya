@@ -3,8 +3,8 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   preflightExtractionCache,
   resolveBenchRequireExtractionCacheManifest
-} from "../../../bench/compile-seed.js";
-import { writeExtractionCacheManifest } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/compile-seed.js";
+import { writeExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import {
   EXTRACTION_CONFIG as CONFIG,
   manifestFor,

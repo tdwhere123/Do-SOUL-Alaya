@@ -13,7 +13,7 @@ import {
   writeEntry,
   type HistoryLayout
 } from "../../history/history.js";
-import { KpiPayloadSchema, type KpiPayload } from "../../schema/kpi-schema.js";
+import { KpiPayloadSchema, type KpiPayload } from "../../contracts/kpi-schema.js";
 import { verifiedEvidenceForPayload } from "../gates/verified-evidence-fixture.js";
 import {
   buildFullLongMemEvalPayload,

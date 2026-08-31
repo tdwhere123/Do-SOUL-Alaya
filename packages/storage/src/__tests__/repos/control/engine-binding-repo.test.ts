@@ -9,7 +9,7 @@ import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 import {
   __setApiKeyCipherKeyMaterialForTests,
   isEncryptedApiKeyAtRest
-} from "../../../repos/shared/api-key-cipher.js";
+} from "../../../repos/control/api-key-cipher.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

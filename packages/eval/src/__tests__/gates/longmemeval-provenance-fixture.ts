@@ -10,8 +10,8 @@ import {
 import { hashLongMemEvalExpansionArtifact } from
   "../../gates/longmemeval-authority-wire.js";
 import { createLongMemEvalSelectionContractIdentity } from
-  "../../schema/longmemeval-selection-contract.js";
-import type { KpiPayload } from "../../schema/kpi-schema.js";
+  "../../contracts/longmemeval-selection-contract.js";
+import type { KpiPayload } from "../../contracts/kpi-schema.js";
 
 const DATASET_SHA = "a".repeat(64);
 const MANIFEST_SHA = "b".repeat(64);

@@ -1,7 +1,7 @@
-import type { KpiPayload, QualityMetrics, Verdict } from "../schema/kpi-schema.js";
-import { measurementContractAllowsEligibility } from "../schema/kpi-measurement-contract.js";
+import type { KpiPayload, QualityMetrics, Verdict } from "../contracts/kpi-schema.js";
+import { measurementContractAllowsEligibility } from "../contracts/kpi-measurement-contract.js";
 import { longMemEvalSelectionContractAllowsEligibility } from
-  "../schema/longmemeval-selection-contract.js";
+  "../contracts/longmemeval-selection-contract.js";
 import { evaluateSeedExtractionReleaseBlocker } from "./seed-extraction-blocker.js";
 import { rollupWorstVerdict } from "./thresholds.js";
 import {

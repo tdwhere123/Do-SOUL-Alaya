@@ -4,17 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { buildExtractionCacheAuditReceipt } from
-  "../../../bench/extraction/cache-audit/receipt.js";
+  "../../../runs/extraction/cache-audit/receipt.js";
 import { runSelectExtractionTargetCommand } from
   "../../../cli/target-selection/command.js";
 import { readExtractionTargetSelectionReceipt } from
-  "../../../bench/extraction/authority/target-selection/receipt.js";
+  "../../../runs/extraction/authority/target-selection/receipt.js";
 import type { ExtractionTargetSelectionReceipt } from
-  "../../../bench/extraction/authority/target-selection/receipt.js";
+  "../../../runs/extraction/authority/target-selection/receipt.js";
 import type { ExtractionAuthorityReceipt } from
-  "../../../bench/extraction/authority/receipt.js";
+  "../../../runs/extraction/authority/receipt.js";
 import type { ExtractionContinuationChildClaim } from
-  "../../../bench/extraction/authority/continuation/child-claim.js";
+  "../../../runs/extraction/authority/continuation/child-claim.js";
 import { emptyExtractionAuthorityShardStatus } from
   "../extraction-authority-inspection-fixture.js";
 

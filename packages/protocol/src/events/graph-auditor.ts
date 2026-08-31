@@ -8,9 +8,9 @@ import {
 import {
   EdgeProposalStatusSchema,
   EdgeProposalTriggerSourceSchema
-} from "../soul/edge-proposal.js";
-import { MemoryGraphEdgeTypeSchema } from "../soul/memory-graph.js";
-import { OrphanRadarSuggestedActionSchema } from "../soul/orphan-radar.js";
+} from "../relations/edge-proposal.js";
+import { MemoryGraphEdgeTypeSchema } from "../memory/memory-graph.js";
+import { OrphanRadarSuggestedActionSchema } from "../lifecycle/orphan-radar.js";
 
 const graphAuditorEventTypeValues = [
   "soul.graph.edge_created",

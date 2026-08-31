@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { retireObsoleteCache } from "../../../../bench/provider/retire-obsolete-cache.js";
+import { retireObsoleteCache } from "../../../../runs/provider/retire-obsolete-cache.js";
 
 const roots: string[] = [];
 

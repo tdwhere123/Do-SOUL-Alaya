@@ -175,7 +175,7 @@ export class MemoryLifecycleManager {
   // invariant: autonomous active -> dormant demotion is race-tolerant and
   // appends its audit inside the guarded UPDATE transaction.
   // see also: apps/core-daemon/src/index.ts:auditedDormantDemotionPort.
-  // see also: packages/soul/src/garden/janitor.ts:executeDormantDemotion.
+  // see also: packages/soul/src/garden/maintenance/janitor.ts:executeDormantDemotion.
   public async demoteActiveToDormantIfActive(
     objectId: string,
     reason: string,

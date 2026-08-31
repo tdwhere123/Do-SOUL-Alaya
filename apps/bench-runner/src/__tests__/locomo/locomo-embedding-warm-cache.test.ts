@@ -10,8 +10,8 @@ import {
   vi
 } from "./locomo-runner.test-support.js";
 import { readFile } from "node:fs/promises";
-import { LocomoSampleSchema } from "../../locomo/dataset.js";
-import { runLocomo } from "../../locomo/runner.js";
+import { LocomoSampleSchema } from "../../datasets/locomo/dataset.js";
+import { runLocomo } from "../../datasets/locomo/runner.js";
 
 describe("LoCoMo runner", () => {
 

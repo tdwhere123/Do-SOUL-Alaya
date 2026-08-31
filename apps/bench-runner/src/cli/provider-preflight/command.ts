@@ -4,20 +4,20 @@ import { join } from "node:path";
 import {
   requireProviderBinding,
   resolveVendorModel
-} from "../../bench/provider/catalog.js";
-import { probeProviderProtocol } from "../../bench/provider/protocol-probe.js";
-import { proveProviderZeroCallReplay } from "../../bench/provider/replay-proof.js";
+} from "../../runs/provider/catalog.js";
+import { probeProviderProtocol } from "../../runs/provider/protocol-probe.js";
+import { proveProviderZeroCallReplay } from "../../runs/provider/replay-proof.js";
 import { resolveDiagnosticLoopIdentity } from
-  "../../bench/diagnostic-loop/authority/identity.js";
+  "../../runs/diagnostic-loop/authority/identity.js";
 import { verifyProviderPreflightReplayReceiptBinding } from
-  "../../bench/provider/replay-receipt.js";
-import { retireObsoleteCache } from "../../bench/provider/retire-obsolete-cache.js";
-import { readCheckpoint } from "../../bench/diagnostic-loop/checkpoint.js";
+  "../../runs/provider/replay-receipt.js";
+import { retireObsoleteCache } from "../../runs/provider/retire-obsolete-cache.js";
+import { readCheckpoint } from "../../runs/diagnostic-loop/checkpoint.js";
 import {
   verifyCanonicalReplayRequestManifest
 } from "./replay-request-manifest.js";
 import { assertCacheOnlyEnvironment } from
-  "../../bench/snapshot/current/current-substrate-authority.js";
+  "../../runs/snapshot/current/current-substrate-authority.js";
 
 export async function runProviderPreflightCommand(
   args: ReadonlyArray<string>

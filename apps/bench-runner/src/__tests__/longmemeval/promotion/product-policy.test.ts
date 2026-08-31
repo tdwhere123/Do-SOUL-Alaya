@@ -1,17 +1,17 @@
 // @ts-nocheck
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
-import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
-import type { LongMemEvalRunProvenance } from "../../../bench/provenance/run.js";
-import { prepareLongMemEvalRun } from "../../../longmemeval/runner/prepare-context.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../diagnostics/spool.js";
+import type { LongMemEvalRunProvenance } from "../../../runs/provenance/run.js";
+import { prepareLongMemEvalRun } from "../../../datasets/longmemeval/runner/prepare-context.js";
 import { assertSnapshotProducerInvocationPolicy } from
-  "../../../longmemeval/runner/policy/snapshot-producer-policy.js";
+  "../../../datasets/longmemeval/runner/policy/snapshot-producer-policy.js";
 import { assertProductFormationEnvironment } from
-  "../../../longmemeval/promotion/product/product-formation-policy.js";
+  "../../../datasets/longmemeval/promotion/product/product-formation-policy.js";
 import {
   assertProductDefaultRunProvenancePolicy,
   canonicalProductRecallProvenanceConfig
-} from "../../../longmemeval/promotion/verifiers/product-policy-verifier.js";
+} from "../../../datasets/longmemeval/promotion/verifiers/product-policy-verifier.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();

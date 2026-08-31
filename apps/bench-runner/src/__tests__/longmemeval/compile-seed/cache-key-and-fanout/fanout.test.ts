@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeNextTurnSeedRefs } from
-  "../../../../bench/compile-seed.js";
+  "../../../../runs/compile-seed.js";
 import { makeSeed } from "../compile-seed-fixture.js";
 
 describe("computeNextTurnSeedRefs — D-1 single-id fan-out invariant", () => {
@@ -8,7 +8,7 @@ describe("computeNextTurnSeedRefs — D-1 single-id fan-out invariant", () => {
   // ceiling described in the helper anchor. A regression that re-introduces
   // the union-of-every-fact behavior must surface here, not in a
   // multi-hour bench.
-  // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+  // see also: apps/bench-runner/src/runs/compile-seed/compile-seed-session.ts
   //   computeNextTurnSeedRefs
 
   it("returns [] when the current turn produced no seeds", () => {

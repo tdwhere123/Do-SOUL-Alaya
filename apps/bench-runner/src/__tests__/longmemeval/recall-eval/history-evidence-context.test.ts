@@ -15,13 +15,13 @@ import { deriveMergedLongMemEvalReleaseAuthority } from "../../../cli/merge/rele
 import {
   createLongMemEvalHistoryLayout,
   resolveLongMemEvalEvidenceContext
-} from "../../../longmemeval/history/evidence-context.js";
-import { LongMemEvalDiagnosticsSpool } from "../../../bench/diagnostics/spool.js";
+} from "../../../datasets/longmemeval/history/evidence-context.js";
+import { LongMemEvalDiagnosticsSpool } from "../../../diagnostics/spool.js";
 import {
   buildLongMemEvalEvidenceManifest,
   type LongMemEvalEvidenceArtifactInput,
   type LongMemEvalEvidenceManifest
-} from "../../../bench/provenance/evidence-manifest.js";
+} from "../../../runs/provenance/evidence-manifest.js";
 import {
   archiveRoot,
   cleanupRoots,
@@ -33,7 +33,7 @@ import { withEligibleMeasurementContract } from "../../cli/merge/cli-merge-valid
 import {
   createTestLongMemEvalDatasetAuthority,
   deriveLongMemEvalReleaseEvidenceAuthority
-} from "../../../longmemeval/ingestion/fetch.js";
+} from "../../../datasets/longmemeval/ingestion/fetch.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/internal";
 

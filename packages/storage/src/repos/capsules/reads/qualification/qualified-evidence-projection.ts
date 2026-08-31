@@ -1,0 +1,386 @@
+import {
+  buildAttributedAssociativeFactKeyProjections,
+  EvidenceSearchProjectionKindSchema,
+  EvidenceSearchProjectionSchema,
+  groundAssociativeFactFrame,
+  isGardenSourceTurnFallbackV2Receipt,
+  projectGardenSourceTurnFallbackV2AssistantObservations,
+  projectGardenSourceTurnFallbackV2UserContent,
+  parseVerifiedUserAssertionSourceHash,
+  type EvidenceCapsule,
+  type EvidenceFactFrameFormationCapture,
+  type EvidenceSearchProjection,
+  type AssociativeFactFrame,
+  type AssociativeFactKeyProjectionForm,
+  type CandidateMemorySignal,
+  type GardenSourceTurnFallbackVerifiedReceipt,
+  type OpenSemanticFactorFormationCapture,
+  KIND_PROJECTION_KIND_VALUE_LIMIT
+} from "@do-soul/alaya-protocol";
+import type {
+  EvidenceSearchMatch,
+  EvidenceSearchProjectionIdentity,
+  RecallQualifiedEvidence
+} from "../../evidence-recall-types.js";
+import {
+  readStoredFactFrameFormation,
+  type StoredFactFrameFormationColumns
+} from "./fact-frame-formation-read.js";
+
+export interface StoredProjectionRow extends StoredFactFrameFormationColumns {
+  readonly evidence_object_id: string;
+  readonly projection_id: number;
+  readonly projection_kind: string;
+  readonly workspace_id: string;
+  readonly source_hash: string;
+  readonly content: string;
+}
+
+interface BoundProjection {
+  readonly evidenceObjectId: string;
+  readonly workspaceId: string;
+  readonly sourceHash: string;
+  readonly projection: Readonly<EvidenceSearchProjection>;
+  readonly factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>;
+}
+
+interface RederivedFactKeyProjection {
+  readonly projection: Readonly<EvidenceSearchProjection>;
+  readonly forms: readonly Readonly<AssociativeFactKeyProjectionForm>[];
+  readonly frame: Readonly<AssociativeFactFrame>;
+}
+
+export type QualifiedProjectionIndex = ReadonlyMap<string, BoundProjection>;
+
+export class EvidenceProjectionIntegrityError extends Error {
+  public constructor(evidenceObjectId: string, reason: string) {
+    super(`Evidence projection integrity failed for ${evidenceObjectId}: ${reason}`);
+    this.name = "EvidenceProjectionIntegrityError";
+  }
+}
+
+export function normalizeEvidenceSearchMatches(
+  requested: readonly EvidenceSearchMatch[]
+): readonly EvidenceSearchMatch[] {
+  const matches = new Map<string, EvidenceSearchMatch>();
+  for (const match of requested) {
+    const objectId = match.object_id.trim();
+    if (objectId.length === 0) continue;
+    const identity = normalizeProjectionIdentity(match.matched_projection);
+    if (match.matched_projection !== undefined && identity === undefined) continue;
+    const normalized = Object.freeze({
+      object_id: objectId,
+      ...(identity === undefined ? {} : { matched_projection: identity })
+    });
+    matches.set(matchKey(normalized), normalized);
+  }
+  return Object.freeze([...matches.values()]);
+}
+
+export function readQualifiedProjectionIndex(
+  rows: readonly StoredProjectionRow[]
+): QualifiedProjectionIndex {
+  const projections = new Map<string, BoundProjection>();
+  for (const row of rows) {
+    let factFrameFormation: Readonly<EvidenceFactFrameFormationCapture> | undefined;
+    try {
+      factFrameFormation = readStoredFactFrameFormation(
+        row,
+        row.workspace_id,
+        row.source_hash
+      );
+    } catch (error) {
+      throw new EvidenceProjectionIntegrityError(
+        row.evidence_object_id,
+        error instanceof Error ? error.message : "invalid fact-frame formation capture"
+      );
+    }
+    const parsed = EvidenceSearchProjectionSchema.safeParse({
+      projection_id: row.projection_id,
+      projection_kind: row.projection_kind,
+      content: row.content
+    });
+    if (!parsed.success) continue;
+    const bound = Object.freeze({
+      evidenceObjectId: row.evidence_object_id,
+      workspaceId: row.workspace_id,
+      sourceHash: row.source_hash,
+      projection: parsed.data,
+      ...(factFrameFormation === undefined ? {} : { factFrameFormation })
+    });
+    projections.set(projectionKey(row.evidence_object_id, parsed.data), bound);
+  }
+  return projections;
+}
+
+export function qualifyEvidenceMatch(
+  match: EvidenceSearchMatch,
+  capsule: Readonly<EvidenceCapsule>,
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null,
+  projections: QualifiedProjectionIndex,
+  signal?: Readonly<CandidateMemorySignal>,
+  semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
+  factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
+): RecallQualifiedEvidence | null {
+  const verifiedUserProjection = hasVerifiedUserProjection(capsule, receipt);
+  const formations = copyStoredFormations(semanticFactorFormation, factFrameFormation);
+  if (match.matched_projection?.projection_kind === "assistant_observation") {
+    const projection = rederiveAssistantProjection(
+      match.matched_projection,
+      capsule,
+      receipt,
+      projections
+    );
+    if (projection === null) {
+      throw new EvidenceProjectionIntegrityError(
+        capsule.object_id,
+        "requested Assistant observation does not match its verified receipt"
+      );
+    }
+    return Object.freeze({
+      capsule,
+      verified_user_projection: verifiedUserProjection,
+      matched_projection: projection,
+      ...formations,
+      ...kindProjectionDraftsFromSignal(signal)
+    });
+  }
+  if (match.matched_projection?.projection_kind === "fact_key") {
+    const attributed = rederiveFactKeyProjection(
+      match.matched_projection,
+      capsule,
+      signal,
+      projections
+    );
+    if (attributed === null) {
+      throw new EvidenceProjectionIntegrityError(
+        capsule.object_id,
+        "requested fact key does not match its canonical formation"
+      );
+    }
+    return Object.freeze({
+      capsule,
+      verified_user_projection: verifiedUserProjection,
+      matched_projection: attributed.projection,
+      matched_fact_key_forms: attributed.forms,
+      matched_fact_frame: attributed.frame,
+      ...formations,
+      ...kindProjectionDraftsFromSignal(signal)
+    });
+  }
+  if (!matchesOwnerProjection(capsule, receipt)) return null;
+  return Object.freeze({
+    capsule,
+    verified_user_projection: verifiedUserProjection,
+    ...formations,
+    ...kindProjectionDraftsFromSignal(signal)
+  });
+}
+
+export function compareQualifiedProjectionIdentity(
+  left: EvidenceSearchProjectionIdentity | undefined,
+  right: EvidenceSearchProjectionIdentity | undefined
+): number {
+  if (left === undefined) return right === undefined ? 0 : -1;
+  if (right === undefined) return 1;
+  return left.projection_kind.localeCompare(right.projection_kind) ||
+    left.projection_id - right.projection_id;
+}
+
+function normalizeProjectionIdentity(
+  value: EvidenceSearchProjectionIdentity | undefined
+): EvidenceSearchProjectionIdentity | undefined {
+  if (value === undefined ||
+      !Number.isInteger(value.projection_id) ||
+      value.projection_id <= 0) {
+    return undefined;
+  }
+  const kind = EvidenceSearchProjectionKindSchema.safeParse(value.projection_kind);
+  return kind.success ? Object.freeze({
+    projection_id: value.projection_id,
+    projection_kind: kind.data
+  }) : undefined;
+}
+
+function hasVerifiedUserProjection(
+  capsule: Readonly<EvidenceCapsule>,
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null
+): boolean {
+  if (!isGardenSourceTurnFallbackV2Receipt(receipt)) return false;
+  const content = projectGardenSourceTurnFallbackV2UserContent(receipt);
+  return content.length > 0 && capsule.excerpt === content;
+}
+
+function matchesOwnerProjection(
+  capsule: Readonly<EvidenceCapsule>,
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null
+): boolean {
+  // Assertion-family stores the distilled fact in excerpt; turn-span equality
+  // would reject the display-atomic arm after its assertion proof already bound it.
+  if (parseVerifiedUserAssertionSourceHash(capsule.source_hash) !== null) {
+    return (capsule.excerpt?.trim() ?? "").length > 0;
+  }
+  if (receipt === null) return false;
+  if (!isGardenSourceTurnFallbackV2Receipt(receipt)) {
+    return capsule.excerpt === receipt.source_corpus;
+  }
+  const userContent = projectGardenSourceTurnFallbackV2UserContent(receipt);
+  return userContent.length > 0 && capsule.excerpt === userContent;
+}
+
+function rederiveAssistantProjection(
+  identity: EvidenceSearchProjectionIdentity,
+  capsule: Readonly<EvidenceCapsule>,
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null,
+  projections: QualifiedProjectionIndex
+): Readonly<EvidenceSearchProjection> | null {
+  if (!isGardenSourceTurnFallbackV2Receipt(receipt)) return null;
+  const content = projectGardenSourceTurnFallbackV2AssistantObservations(receipt)[
+    identity.projection_id - 1
+  ];
+  if (content === undefined) return null;
+  const stored = projections.get(projectionKey(capsule.object_id, identity));
+  if (stored === undefined ||
+      stored.evidenceObjectId !== capsule.object_id ||
+      stored.workspaceId !== receipt.workspace_id ||
+      stored.sourceHash !== capsule.source_hash ||
+      stored.projection.content !== content) {
+    return null;
+  }
+  return Object.freeze({
+    projection_id: identity.projection_id,
+    projection_kind: "assistant_observation",
+    content
+  });
+}
+
+function rederiveFactKeyProjection(
+  identity: EvidenceSearchProjectionIdentity,
+  capsule: Readonly<EvidenceCapsule>,
+  signal: Readonly<CandidateMemorySignal> | undefined,
+  projections: QualifiedProjectionIndex
+): Readonly<RederivedFactKeyProjection> | null {
+  const stored = projections.get(projectionKey(capsule.object_id, identity));
+  if (stored === undefined) return null;
+  const formed = stored.factFrameFormation;
+  if (formed !== undefined) {
+    if (formed.status !== "formed" || formed.fact_frame === null ||
+        formed.source_hash !== capsule.source_hash) return null;
+    return matchRederivedFactKey(identity, capsule, stored, formed.fact_frame);
+  }
+
+  // Historical rows predate formation captures. They remain readable until
+  // offline backfill seals them through the same canonical formation owner.
+  if (!matchesFactKeySignalEnvelope(signal, capsule)) return null;
+  const assertion = readPayloadText(signal.raw_payload.source_assertion);
+  if (assertion === null || assertion !== capsule.excerpt) return null;
+  const frame = groundAssociativeFactFrame(signal.raw_payload.fact_frame, assertion);
+  if (frame === null) return null;
+  return matchRederivedFactKey(identity, capsule, stored, frame);
+}
+
+function matchRederivedFactKey(
+  identity: EvidenceSearchProjectionIdentity,
+  capsule: Readonly<EvidenceCapsule>,
+  stored: BoundProjection,
+  frame: Readonly<AssociativeFactFrame>
+): Readonly<RederivedFactKeyProjection> | null {
+  const attributed = buildAttributedAssociativeFactKeyProjections(frame).find(
+    ({ projection }) => projection.projection_id === identity.projection_id
+  );
+  if (attributed === undefined) return null;
+  const expected = attributed.projection;
+  if (
+      stored.evidenceObjectId !== capsule.object_id ||
+      stored.workspaceId !== capsule.workspace_id ||
+      stored.sourceHash !== capsule.source_hash ||
+      stored.projection.content !== expected.content) return null;
+  return Object.freeze({ ...attributed, frame });
+}
+
+function matchesFactKeySignalEnvelope(
+  signal: Readonly<CandidateMemorySignal> | undefined,
+  capsule: Readonly<EvidenceCapsule>
+): signal is Readonly<CandidateMemorySignal> {
+  if (signal === undefined || signal.source !== "garden_compile" ||
+      signal.signal_state !== "materialized" ||
+      signal.workspace_id !== capsule.workspace_id ||
+      signal.run_id !== capsule.run_id ||
+      signal.surface_id !== capsule.surface_id) return false;
+  const grounding = signal.raw_payload.source_grounding;
+  return typeof grounding === "object" && grounding !== null && !Array.isArray(grounding) &&
+    (grounding as Record<string, unknown>).status === "grounded" &&
+    (grounding as Record<string, unknown>).content_basis === "source_assertion";
+}
+
+function kindProjectionDraftsFromSignal(
+  signal: Readonly<CandidateMemorySignal> | undefined
+): Readonly<{ readonly kind_projection_drafts?: RecallQualifiedEvidence["kind_projection_drafts"] }> {
+  const draft = readKindProjectionDraft(signal?.raw_payload.kind_projection);
+  return draft === undefined ? {} : { kind_projection_drafts: Object.freeze([draft]) };
+}
+
+function copyStoredFormations(
+  semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
+  factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
+): Readonly<{
+  readonly semantic_factor_formation?: Readonly<OpenSemanticFactorFormationCapture>;
+  readonly fact_frame_formation?: Readonly<EvidenceFactFrameFormationCapture>;
+}> {
+  return {
+    ...(semanticFactorFormation === undefined
+      ? {}
+      : { semantic_factor_formation: semanticFactorFormation }),
+    ...(factFrameFormation === undefined ? {} : { fact_frame_formation: factFrameFormation })
+  };
+}
+
+function readKindProjectionDraft(
+  value: unknown
+): NonNullable<RecallQualifiedEvidence["kind_projection_drafts"]>[number] | undefined {
+  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const factorId = typeof record.factor_id === "string" ? record.factor_id.trim() : "";
+  const kindValues = Array.isArray(record.kind_values)
+    ? uniqueLowerKindValues(record.kind_values)
+    : [];
+  return factorId.length === 0 || kindValues.length === 0
+    ? undefined
+    : Object.freeze({ factor_id: factorId, kind_values: Object.freeze(kindValues) });
+}
+
+function uniqueLowerKindValues(values: readonly unknown[]): readonly string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const item of values) {
+    if (typeof item !== "string") continue;
+    const normalized = item.trim().toLowerCase();
+    if (normalized.length === 0 || seen.has(normalized)) continue;
+    seen.add(normalized);
+    unique.push(normalized);
+    if (unique.length >= KIND_PROJECTION_KIND_VALUE_LIMIT) break;
+  }
+  return unique;
+}
+
+function readPayloadText(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function matchKey(match: EvidenceSearchMatch): string {
+  const identity = match.matched_projection;
+  return identity === undefined
+    ? `${match.object_id}\u0000owner`
+    : projectionKey(match.object_id, identity);
+}
+
+function projectionKey(
+  evidenceObjectId: string,
+  identity: EvidenceSearchProjectionIdentity
+): string {
+  return `${evidenceObjectId}\u0000${identity.projection_kind}\u0000${identity.projection_id}`;
+}

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BenchEdgeFormationMember } from "../../../harness/daemon.js";
 import { runAnswersWithEdges } from
-  "../../../longmemeval/runner/question/runner-question.js";
+  "../../../datasets/longmemeval/runner/question/runner-question.js";
 
 afterEach(() => vi.unstubAllEnvs());
 

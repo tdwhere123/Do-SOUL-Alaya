@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { proveProviderZeroCallReplay } from "../../../../bench/provider/replay-proof.js";
+import { proveProviderZeroCallReplay } from "../../../../runs/provider/replay-proof.js";
 import {
   digest,
   loopRequest,
@@ -15,9 +15,9 @@ import {
 import {
   readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest
-} from "../../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { computeExtractionKeySetSha256 } from
-  "../../../../bench/extraction/content-closure.js";
+  "../../../../runs/extraction/content-closure.js";
 import {
   readReplayRequestManifest,
   verifyCanonicalReplayRequestManifest

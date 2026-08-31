@@ -1,11 +1,11 @@
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import { describe, expect, it } from "vitest";
-import type { LongMemEvalRunProvenance } from "../../../bench/provenance/run.js";
-import type { SnapshotExtractionProvenance } from "../../../bench/snapshot/materialize.js";
-import { deriveSnapshotAttribution } from "../../../bench/snapshot/attribution.js";
-import type { ExtractionRequestProfile } from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+import type { LongMemEvalRunProvenance } from "../../../runs/provenance/run.js";
+import type { SnapshotExtractionProvenance } from "../../../runs/snapshot/materialize.js";
+import { deriveSnapshotAttribution } from "../../../runs/snapshot/attribution.js";
+import type { ExtractionRequestProfile } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
-import { compactSnapshotRunProvenance } from "../../../bench/snapshot/run-provenance.js";
+import { compactSnapshotRunProvenance } from "../../../runs/snapshot/run-provenance.js";
 
 const DATASET_SHA = "a".repeat(64);
 type FillStatus = "in_progress" | "complete";

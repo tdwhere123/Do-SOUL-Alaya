@@ -3,8 +3,8 @@ import { chmod, mkdir, rename, symlink, unlink, writeFile } from "node:fs/promis
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { measureGitState } from "../../../bench/provenance/contract/frozen-code-contract.js";
-import { readContainedWorktreeFile } from "../../../bench/provenance/contract/contained-worktree-file.js";
+import { measureGitState } from "../../../runs/provenance/contract/frozen-code-contract.js";
+import { readContainedWorktreeFile } from "../../../runs/provenance/contract/contained-worktree-file.js";
 import {
   assertSafeUntrackedRelativePath,
   encodeUntrackedFrameUint32Be,
@@ -12,16 +12,16 @@ import {
   GIT_EXECUTABLE_FILE_MODE,
   GIT_REGULAR_FILE_MODE,
   hashUntrackedContent
-} from "../../../bench/provenance/contract/untracked-worktree-frame.js";
+} from "../../../runs/provenance/contract/untracked-worktree-frame.js";
 import {
   buildRecordedRunCodeIdentity,
   resolveMeasuredRunGitState
-} from "../../../bench/provenance/identity/run-code-identity.js";
+} from "../../../runs/provenance/identity/run-code-identity.js";
 import {
   composeBenchHistorySlug,
   dirtyWorktreeHistoryToken,
   recordedWorktreeIdentityForSlug
-} from "../../../bench/provenance/identity/history-code-slug.js";
+} from "../../../runs/provenance/identity/history-code-slug.js";
 import {
   createFrozenCodeFixtureHarness,
   encodeLegacyNulUntrackedConcat,

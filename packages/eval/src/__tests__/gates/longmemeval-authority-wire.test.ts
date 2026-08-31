@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createLongMemEvalSelectionContractIdentity } from
-  "../../schema/longmemeval-selection-contract.js";
+  "../../contracts/longmemeval-selection-contract.js";
 import {
   LongMemEvalSupplementalSourceReceiptExtensionWireSchema,
   LongMemEvalExtractionSummarySchema,

@@ -5,7 +5,7 @@ import {
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
 } from "../../../repos/path/path-relation-repo.js";
-import { findByBackingObjectIdsSql } from "../../../repos/path/path-relation-sql.js";
+import { findByBackingObjectIdsSql } from "../../../repos/path/statements/path-relation-sql.js";
 import {
   anchorKindsFromSchema,
   createPathRelationFixture,
@@ -31,7 +31,7 @@ describe("SqlitePathRelationRepo SQL planner and cache behavior", () => {
   it("keeps the anchor-key SQL byte-identical to the path_relations index expression", async () => {
     const repoSource = await readFile(new URL("../../../repos/path/path-relation-repo.ts", import.meta.url), "utf8");
     const readQueriesSource = await readFile(
-      new URL("../../../repos/path/path-relation-read-queries.ts", import.meta.url),
+      new URL("../../../repos/path/reads/path-relation-read-queries.ts", import.meta.url),
       "utf8"
     );
     const indexSource = await readFile(

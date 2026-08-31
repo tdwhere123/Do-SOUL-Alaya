@@ -9,9 +9,9 @@ import {
   buildRecallMechanismSplit,
   type GoldExclusionFirstReason,
   type MechanismQuestionObservation
-} from "../../../bench/diagnostics/stage-attribution/mechanism/receipt.js";
+} from "../../../diagnostics/stage-attribution/mechanism/receipt.js";
 import { readRecallMechanismSplitArtifact } from
-  "../../../bench/diagnostics/stage-attribution/mechanism/artifact.js";
+  "../../../diagnostics/stage-attribution/mechanism/artifact.js";
 
 function question(
   questionId: string,

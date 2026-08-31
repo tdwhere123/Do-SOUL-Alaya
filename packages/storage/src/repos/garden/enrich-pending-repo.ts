@@ -1,10 +1,10 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { prepareEnrichPendingStatements } from "./enrich-pending-statements.js";
+import { prepareEnrichPendingStatements } from "./statements/enrich-pending-statements.js";
 import {
   createClaimBatchTransaction,
   createRecordFailedAttemptTransaction
-} from "./enrich-pending-transactions.js";
+} from "./writes/enrich-pending-transactions.js";
 
 // invariant: durable hand-off queue between the synchronous write-path and the
 // asynchronous Garden BULK_ENRICH worker. Materialization enqueues one row per
@@ -20,7 +20,7 @@ import {
 // see also: migrations/002-ops-and-control.sql — base schema
 // see also: migrations/002-ops-and-control.sql — attempt cap + dead-letter
 // see also: apps/core-daemon/src/garden/runtime.ts — drain worker
-// see also: packages/soul/src/garden/materialization-router/router.ts — enqueue producer
+// see also: packages/soul/src/garden/materialization/materialization-router/router.ts — enqueue producer
 
 export interface EnrichPendingEnqueueInput {
   readonly workspaceId: string;

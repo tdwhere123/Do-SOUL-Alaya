@@ -35,7 +35,7 @@ import {
 import BetterSqlite3 from "better-sqlite3";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createOverlaySchema } from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/overlay-schema.js";
+import { createOverlaySchema } from "../../../runs/snapshot/recall-eval/embedding-cache-overlay/overlay-schema.js";
 
 export const WORKSPACE_A = "workspace-a";
 export const WORKSPACE_B = "workspace-b";

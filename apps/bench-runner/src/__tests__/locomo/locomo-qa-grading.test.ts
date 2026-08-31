@@ -9,7 +9,7 @@ import {
   tmpDir,
   vi
 } from "./locomo-runner.test-support.js";
-import { runLocomo } from "../../locomo/runner.js";
+import { runLocomo } from "../../datasets/locomo/runner.js";
 
 describe("LoCoMo runner", () => {
 

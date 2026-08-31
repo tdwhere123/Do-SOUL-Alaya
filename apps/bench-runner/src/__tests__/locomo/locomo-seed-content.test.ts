@@ -1,5 +1,5 @@
 import { describe, expect, it } from "./locomo-runner.test-support.js";
-import { buildLocomoSeedContent } from "../../locomo/runner.js";
+import { buildLocomoSeedContent } from "../../datasets/locomo/runner.js";
 
 describe("buildLocomoSeedContent", () => {
   const baseTurn = { speaker: "Alice", dia_id: "d1", text: "take a look at this" };

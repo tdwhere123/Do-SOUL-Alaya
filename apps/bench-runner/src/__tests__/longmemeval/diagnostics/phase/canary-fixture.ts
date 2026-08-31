@@ -1,11 +1,11 @@
 // @ts-nocheck
 import { sealTreatmentExposureReceipt } from
-  "../../../../bench/diagnostics/stage-attribution/exposure/contract.js";
+  "../../../../diagnostics/stage-attribution/exposure/contract.js";
 import {
   CANARY_Q1,
   CANARY_Q2,
   CANARY_Q3
-} from "../../../../bench/diagnostics/stage-attribution/exposure/canary-ids.js";
+} from "../../../../diagnostics/stage-attribution/exposure/canary-ids.js";
 import { candidateAttribution, exposure, row } from "./exposure-receipt-fixture.js";
 import { notObservedPhaseLedger } from "./not-observed-ledger.js";
 

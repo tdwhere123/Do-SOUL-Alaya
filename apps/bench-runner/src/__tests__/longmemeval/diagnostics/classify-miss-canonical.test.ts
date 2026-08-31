@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildQuestionDiagnostic } from "../../../bench/diagnostics.js";
+import { buildQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
 import { reclassifyQuestionDiagnostic } from
-  "../../../bench/diagnostics/miss/reclassify-question-diagnostics.js";
+  "../../../diagnostics/miss/reclassify-question-diagnostics.js";
 import {
   PLANTED_GOLD_ID,
   plantedCanonicalQuestion

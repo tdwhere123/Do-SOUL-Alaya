@@ -5,8 +5,8 @@ import {
   runDiagnosticLoop,
   type DiagnosticLoopAdapters,
   type DiagnosticLoopRunResult
-} from "../../bench/diagnostic-loop/index.js";
-import { DiagnosticLoopFailure } from "../../bench/diagnostic-loop/failures.js";
+} from "../../runs/diagnostic-loop/index.js";
+import { DiagnosticLoopFailure } from "../../runs/diagnostic-loop/failures.js";
 import { parseDiagnosticLoopArgs } from "./args.js";
 import { verifyCanonicalReplayRequestManifest } from
   "../provider-preflight/replay-request-manifest.js";

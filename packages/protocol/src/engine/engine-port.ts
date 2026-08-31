@@ -13,7 +13,7 @@ import {
   BoundedString,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
-import { ContextLensSchema } from "../soul/context-lens.js";
+import { ContextLensSchema } from "../recall/context-lens.js";
 
 const enginePortMessageRoleValues = ["user", "assistant", "system"] as const;
 const engineFinishReasonValues = ["stop", "length", "error"] as const;

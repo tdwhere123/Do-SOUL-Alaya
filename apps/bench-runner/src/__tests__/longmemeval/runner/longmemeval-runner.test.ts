@@ -10,12 +10,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
 
-import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../../bench/archive/archive-evidence.js";
+import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../../runs/archive/archive-evidence.js";
 
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 
 import {
   buildLongMemEvalSidecarKey,
@@ -25,7 +25,7 @@ import {
   runLongMemEval,
   runLongMemEvalRecallCycle,
   scoreLongMemEvalRecallHits
-} from "../../../longmemeval/runner.js";
+} from "../../../datasets/longmemeval/runner.js";
 
 import { buildRecallResult } from "./longmemeval-runner-fixture.js";
 

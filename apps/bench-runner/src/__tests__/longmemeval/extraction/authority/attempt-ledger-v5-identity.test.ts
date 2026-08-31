@@ -4,16 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { emptyBenchTerminalRetryClassifications } from
-  "../../../../bench/compile-seed/compile-seed-types.js";
+  "../../../../runs/compile-seed/compile-seed-types.js";
 import {
   ensureForkedExtractionAttemptLedger,
   openExtractionAttemptLedger,
   readSettledExtractionAttemptLedger
-} from "../../../../bench/extraction/authority/attempt-ledger.js";
+} from "../../../../runs/extraction/authority/attempt-ledger.js";
 import { createExtractionContinuationChildClaim } from
-  "../../../../bench/extraction/authority/continuation/child-claim.js";
+  "../../../../runs/extraction/authority/continuation/child-claim.js";
 import type { ExtractionAuthorityReceipt } from
-  "../../../../bench/extraction/authority/receipt.js";
+  "../../../../runs/extraction/authority/receipt.js";
 
 const FOUR_KEY_V5_BYTES = readFileSync(new URL(
   "./fixtures/attempt-ledger-v5-four-terminal.json",

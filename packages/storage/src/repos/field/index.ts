@@ -43,4 +43,4 @@ export {
   jobFromRow,
   sourceRecordFromRow,
   sourceSpanFromRow
-} from "./field-receipts.js";
+} from "./mappers/field-receipts.js";

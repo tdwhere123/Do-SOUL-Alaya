@@ -11,22 +11,22 @@ import {
 import {
   collectDistinctTurnContents,
   runExtractionFill
-} from "../../../bench/extraction/extraction-fill.js";
+} from "../../../runs/extraction/extraction-fill.js";
 import {
   createCachingSignalExtractor,
   preflightExtractionCache,
   type BenchSignalExtractor,
   type CompileSeedExtractionConfig
-} from "../../../bench/compile-seed.js";
+} from "../../../runs/compile-seed.js";
 import {
   computeSystemPromptSha256,
   readExtractionCacheManifest,
   writeExtractionCacheManifest,
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { inspectTurnContentKeySpace } from
-  "../../../bench/extraction/turn-contents.js";
+  "../../../runs/extraction/turn-contents.js";
 import { buildLongMemEvalFixtureQuestion } from "../longmemeval-fixture.js";
 import { providerBackedExtractionResult } from "./extraction-cache-test-fixture.js";
 import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
@@ -36,7 +36,7 @@ import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixtur
 // last extraction-fill recorded. A staged fill writing coverage=1.0 over a
 // small window must NOT let a wider run pass preflight and silently
 // live-extract the unfilled remainder.
-// cross-file: apps/bench-runner/src/longmemeval/compile-seed.ts
+// cross-file: apps/bench-runner/src/runs/compile-seed/compile-seed-preflight.ts
 //   (preflightExtractionCache requiredTurnContents)
 
 const CONFIG: CompileSeedExtractionConfig = {

@@ -11,13 +11,13 @@ import { materializeOpenSemanticFactorCompatibilityTrace } from
 import { materializeOpenSemanticFactorComposition } from
   "../../../../../../../../packages/core/src/recall/field/open-semantic-factors/composition.js";
 import { buildTreatmentExposureReceipts } from
-  "../../../../../bench/diagnostics/stage-attribution/exposure/build-receipts.js";
+  "../../../../../diagnostics/stage-attribution/exposure/build-receipts.js";
 import { assertTreatmentExposureReceipt } from
-  "../../../../../bench/diagnostics/stage-attribution/exposure/contract.js";
+  "../../../../../diagnostics/stage-attribution/exposure/contract.js";
 import type { LongMemEvalQuestionDiagnostic } from
-  "../../../../../bench/diagnostics/schema/diagnostics-types.js";
+  "../../../../../diagnostics/schema/diagnostics-types.js";
 import type { QuestionStageRow } from
-  "../../../../../bench/diagnostics/stage-attribution/types.js";
+  "../../../../../diagnostics/stage-attribution/types.js";
 
 const QUERY = "How long is my daily commute to work?";
 const EXTRA = "daily commute";

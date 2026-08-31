@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { RecallFusionFamilyId } from "@do-soul/alaya-core";
 import { classifyHonestHigherRObj } from
-  "../../../bench/diagnostics/stage-attribution/honest-higher-r-obj.js";
+  "../../../diagnostics/stage-attribution/honest-higher-r-obj.js";
 import { classifyGoldObjectStage } from
-  "../../../bench/diagnostics/stage-attribution/classify-gold.js";
+  "../../../diagnostics/stage-attribution/classify-gold.js";
 import { classifyQuestionStage } from
-  "../../../bench/diagnostics/stage-attribution/classify-question.js";
+  "../../../diagnostics/stage-attribution/classify-question.js";
 import type {
   DiagnosticStreamContributions,
   LongMemEvalQuestionDiagnostic
-} from "../../../bench/diagnostics/schema/diagnostics-types.js";
+} from "../../../diagnostics/schema/diagnostics-types.js";
 import { baseQuestion } from "./stage-attribution-fixture.js";
 
 type ReplayCandidate = LongMemEvalQuestionDiagnostic["candidates"][number];

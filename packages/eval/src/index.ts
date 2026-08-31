@@ -27,7 +27,7 @@ export {
   type TierDistribution,
   type TokenEconomy,
   type RecallTokenEconomy
-} from "./schema/kpi-schema.js";
+} from "./contracts/kpi-schema.js";
 
 export {
   LongMemEvalSelectionCohortSchema,
@@ -43,7 +43,7 @@ export {
   type LongMemEvalSelectionContract,
   type LongMemEvalSelectionContractIdentity,
   type LongMemEvalQuestionIdValidationError
-} from "./schema/longmemeval-selection-contract.js";
+} from "./contracts/longmemeval-selection-contract.js";
 
 export {
   aggregateEdgeProposalAutoAccept,
@@ -128,7 +128,7 @@ export {
   type WorktreeStateAlgorithm
 } from "./gates/worktree-state-algorithm.js";
 
-export { renderFindings, renderReport } from "./reporting/report.js";
+export { renderFindings, renderReport } from "./reports/report.js";
 
 export {
   SAMPLE_SIZE_LABEL_THRESHOLDS,

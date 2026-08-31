@@ -13,14 +13,14 @@ import {
   writeEmbeddingOverlayBind
 } from "@do-soul/alaya-storage";
 import { applyBenchFastPragmaIfRequested } from "../../../harness/daemon.js";
-import { restoreSnapshotToDataDir } from "../../../bench/snapshot/materialize.js";
+import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js";
 import {
   installWorkspaceSlice,
   preservePackedWorkingCopy
-} from "../../../bench/snapshot/recall-eval/workspace-slice/index.js";
+} from "../../../runs/snapshot/recall-eval/workspace-slice/index.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import { createOverlaySchema } from
-  "../../../bench/snapshot/recall-eval/embedding-cache-overlay/overlay-schema.js";
+  "../../../runs/snapshot/recall-eval/embedding-cache-overlay/overlay-schema.js";
 
 // Bench-only SQLite tuning is layered on top of the production storage
 // hardening (see packages/storage/src/sqlite/db.ts). The production pragmas are

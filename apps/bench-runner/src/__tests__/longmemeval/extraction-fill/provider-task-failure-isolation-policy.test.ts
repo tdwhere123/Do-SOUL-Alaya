@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertProviderTaskFailureIsolationScope,
   resolveProviderTaskFailureTolerance
-} from "../../../bench/extraction/fill/policy/provider-task-failure-isolation.js";
+} from "../../../runs/extraction/fill/policy/provider-task-failure-isolation.js";
 
 const DIGEST = "a".repeat(64);
 

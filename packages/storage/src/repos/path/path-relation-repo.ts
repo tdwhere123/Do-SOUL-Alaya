@@ -24,7 +24,7 @@ import {
   findPathRelationsByWorkspace,
   findPathRelationsByWorkspacePage,
   type PathRelationQueryContext
-} from "./path-relation-read-queries.js";
+} from "./reads/path-relation-read-queries.js";
 import {
   PARSED_ROW_CACHE_MAX,
   comparePathRelationOrder,
@@ -32,22 +32,22 @@ import {
   parsePathRelation,
   parsePathRelationRow,
   type PathRelationRow
-} from "./path-relation-rows.js";
-import { findByAnchorsSql } from "./path-relation-sql.js";
+} from "./mappers/path-relation-rows.js";
+import { findByAnchorsSql } from "./statements/path-relation-sql.js";
 import {
   preparePathRelationStatements,
   type PathRelationStatements
-} from "./path-relation-statements.js";
+} from "./statements/path-relation-statements.js";
 import type { PathRelationListResult, PathRelationPageOptions, PathRelationRepo } from "./path-relation-types.js";
 
 export type { PathRelationListResult, PathRelationPageOptions, PathRelationRepo } from "./path-relation-types.js";
-export { PATH_RELATION_ACTIVE_LIST_HARD_CAP } from "./path-relation-rows.js";
+export { PATH_RELATION_ACTIVE_LIST_HARD_CAP } from "./mappers/path-relation-rows.js";
 export {
   PATH_RELATION_SOURCE_ANCHOR_KEY_SQL,
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_ANCHOR_KEY_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
-} from "./path-relation-sql.js";
+} from "./statements/path-relation-sql.js";
 
 export class SqlitePathRelationRepo implements PathRelationRepo {
   // Parsed rows keyed by path_id, validated against updated_at on every hit.

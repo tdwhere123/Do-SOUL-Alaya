@@ -1,4 +1,4 @@
-import { buildQuestionDiagnostic } from "../../../bench/diagnostics.js";
+import { buildQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
 
 export function diagnostic(input: {
   readonly id: string;

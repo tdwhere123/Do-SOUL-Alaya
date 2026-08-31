@@ -4,7 +4,7 @@ import {
   __setApiKeyCipherKeyMaterialForTests,
   isEncryptedApiKeyAtRest,
   migrateEngineBindingApiKeysToCiphertext
-} from "../../repos/shared/api-key-cipher.js";
+} from "../../repos/control/api-key-cipher.js";
 import { initDatabase } from "../../sqlite/db.js";
 import { applyBaselineSql } from "./apply-baseline.js";
 

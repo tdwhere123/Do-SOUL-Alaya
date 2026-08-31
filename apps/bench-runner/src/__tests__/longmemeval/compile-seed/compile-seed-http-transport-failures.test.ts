@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createGardenHttpExtractor } from "../../../bench/compile-seed.js";
-import type { BenchTransportFailureAttempt } from "../../../bench/compile-seed/compile-seed-types.js";
+import { createGardenHttpExtractor } from "../../../runs/compile-seed.js";
+import type { BenchTransportFailureAttempt } from "../../../runs/compile-seed/compile-seed-types.js";
 import {
   captureExtractorFailure,
   captureTerminalFailure,

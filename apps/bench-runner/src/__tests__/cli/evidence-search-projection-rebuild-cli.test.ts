@@ -3,7 +3,7 @@ import { runCli } from "../../cli/index.js";
 import { parseFlags } from "../../cli/cli-options.js";
 import { buildRecallEvalOptions } from "../../cli/recall-eval/command.js";
 import { prepareRecallEvalRunContext } from
-  "../../bench/lifecycle/recall-eval/recall-eval-run-context.js";
+  "../../runs/lifecycle/recall-eval/recall-eval-run-context.js";
 
 describe("recall-eval derived evidence projection rebuild boundary", () => {
   let originalStderrWrite: typeof process.stderr.write;

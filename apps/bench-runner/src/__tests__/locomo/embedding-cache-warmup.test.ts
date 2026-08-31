@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { warmLocomoEmbeddingCaches } from "../../locomo/embedding-cache-warmup.js";
+import { warmLocomoEmbeddingCaches } from "../../datasets/locomo/embedding-cache-warmup.js";
 
 const vectorSummary = {
   status: "ready" as const,

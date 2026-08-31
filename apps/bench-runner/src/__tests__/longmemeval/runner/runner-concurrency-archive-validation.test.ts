@@ -9,7 +9,7 @@ import { createMergeDatasetSource } from "../../cli/merge/cli-merge-dataset-fixt
 import {
   runLongMemEvalConcurrent,
   type LongMemEvalWorkerSpawnOptions
-} from "../../../longmemeval/runner/runner-concurrency.js";
+} from "../../../datasets/longmemeval/runner/runner-concurrency.js";
 import {
   makeRangeDiagnostics,
   makeRangeKpi,

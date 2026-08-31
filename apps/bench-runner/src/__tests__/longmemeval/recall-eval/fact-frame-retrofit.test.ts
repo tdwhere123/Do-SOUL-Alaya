@@ -18,10 +18,10 @@ import { RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID } from
 import { afterEach, describe, expect, it } from "vitest";
 import {
   rebuildEvidenceSearchProjectionsOnWorkingCopy
-} from "../../../bench/snapshot/recall-eval/evidence-search-projection-rebuild.js";
+} from "../../../runs/snapshot/recall-eval/evidence-search-projection-rebuild.js";
 import {
   backfillMissingFactFrameFormations
-} from "../../../bench/snapshot/recall-eval/fact-frame-formation/backfill.js";
+} from "../../../runs/snapshot/recall-eval/fact-frame-formation/backfill.js";
 import {
   cleanupProjectionRebuildFixtures,
   createSourceFixture,

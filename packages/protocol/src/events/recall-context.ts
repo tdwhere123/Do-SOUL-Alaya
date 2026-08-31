@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { CaptureExecutionSchema } from "../soul/selection/capture/capture-execution.js";
+import { CaptureExecutionSchema } from "../recall/selection/capture/capture-execution.js";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
-import { SoulContextUsageTrustModeSchema } from "../soul/mcp-types.js";
+import { SoulContextUsageTrustModeSchema } from "../surfaces/mcp-types.js";
 
 const recallContextEventTypeValues = [
   "soul.task_surface.created",

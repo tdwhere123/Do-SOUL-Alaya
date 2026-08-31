@@ -1,8 +1,8 @@
 import {
   createCachingSignalExtractor,
   type BenchSignalExtractor
-} from "../../../../bench/compile-seed.js";
-import { newFillStats } from "../../../../bench/extraction/fill/fill-stats.js";
+} from "../../../../runs/compile-seed.js";
+import { newFillStats } from "../../../../runs/extraction/fill/fill-stats.js";
 import {
   providerBackedExtractionResult,
   TEST_EXTRACTION_PROVIDER_URL

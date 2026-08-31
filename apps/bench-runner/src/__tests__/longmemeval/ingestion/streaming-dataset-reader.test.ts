@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { streamLongMemEvalDataset } from
-  "../../../longmemeval/ingestion/streaming-dataset-reader.js";
+  "../../../datasets/longmemeval/ingestion/streaming-dataset-reader.js";
 
 const READ_CHUNK_BYTES = 64 * 1024;
 const roots: string[] = [];

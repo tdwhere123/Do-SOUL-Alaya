@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { LongMemEvalDiagnosticsSidecar } from
-  "../../../bench/diagnostics.js";
+  "../../../diagnostics/diagnostics.js";
 import { LongMemEvalQuestionDiagnosticSchema } from
-  "../../../bench/diagnostics/schema/diagnostics-schema.js";
+  "../../../diagnostics/schema/diagnostics-schema.js";
 import {
   classifyQuestionMeasurementCohort,
   classifyQuestionMeasurementStatus
 } from
-  "../../../bench/measurement/question-validity.js";
+  "../../../runs/measurement/question-validity.js";
 import { validateQuestionMeasurementStatus } from
-  "../../../bench/measurement/question-measurement-status.js";
+  "../../../runs/measurement/question-measurement-status.js";
 import { buildMergedLongMemEvalDiagnosticsSidecar } from
   "../../../cli/merge-sidecar.js";
 import { question, streamedQuestion } from "./cli-merge-evidence-fixture.js";

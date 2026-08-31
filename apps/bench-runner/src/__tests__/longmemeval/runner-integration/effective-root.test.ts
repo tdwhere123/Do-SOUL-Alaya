@@ -8,14 +8,14 @@ import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
   writeExtractionCacheManifest
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { LongMemEvalDiagnosticsSpool } from
-  "../../../bench/diagnostics/spool.js";
+  "../../../diagnostics/spool.js";
 import { prepareLongMemEvalRun } from
-  "../../../longmemeval/runner/prepare-context.js";
+  "../../../datasets/longmemeval/runner/prepare-context.js";
 import { buildLongMemEvalRunProvenance } from
-  "../../../bench/provenance/run.js";
-import { selectionContractIdentity } from "../../../bench/selection/contract.js";
+  "../../../runs/provenance/run.js";
+import { selectionContractIdentity } from "../../../runs/selection/contract.js";
 import {
   buildRunnerQuestions,
   createRunnerFixture,

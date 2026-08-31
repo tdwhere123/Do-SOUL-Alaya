@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type {
   LongMemEvalQuestionDiagnostic
-} from "../../../bench/diagnostics/schema/diagnostics-types.js";
+} from "../../../diagnostics/schema/diagnostics-types.js";
 import { pairMechanismQuestions } from
-  "../../../bench/diagnostics/stage-attribution/mechanism/from-question-diagnostics.js";
+  "../../../diagnostics/stage-attribution/mechanism/from-question-diagnostics.js";
 import { buildRecallMechanismSplit } from
-  "../../../bench/diagnostics/stage-attribution/mechanism/receipt.js";
+  "../../../diagnostics/stage-attribution/mechanism/receipt.js";
 
 function arm(
   questionId: string,

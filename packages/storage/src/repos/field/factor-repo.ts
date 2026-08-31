@@ -19,7 +19,7 @@ import {
   fieldFactorIncidenceParser,
   insertIdempotent,
   persistFieldWrite
-} from "./mappers.js";
+} from "./mappers/mappers.js";
 import type {
   FieldDerivationJobRepo,
   FieldDerivationJobRow,

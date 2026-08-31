@@ -4,16 +4,16 @@ import { join } from "node:path";
 import { initDatabase, readSchemaMigrationLedger } from "@do-soul/alaya-storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prepareRecallEvalDataRoot } from
-  "../../../bench/lifecycle/recall-eval/recall-eval-runtime.js";
+  "../../../runs/lifecycle/recall-eval/recall-eval-runtime.js";
 import { openRecallEvalWorkingSqlite, recallEvalWorkingDbPath } from
-  "../../../bench/snapshot/recall-eval/recall-eval-working-sqlite.js";
+  "../../../runs/snapshot/recall-eval/recall-eval-working-sqlite.js";
 import { readWarmDerivedSnapshotReceipt } from
-  "../../../bench/snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
+  "../../../runs/snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 import type { RecallEvalSnapshotBundle } from
-  "../../../bench/snapshot/recall-eval/recall-eval-loader.js";
-import { sha256File } from "../../../bench/snapshot/integrity.js";
+  "../../../runs/snapshot/recall-eval/recall-eval-loader.js";
+import { sha256File } from "../../../runs/snapshot/integrity.js";
 import type { LongMemEvalSnapshotManifest } from
-  "../../../bench/snapshot/materialize.js";
+  "../../../runs/snapshot/materialize.js";
 import { SNAPSHOT_SEED_IDENTITY } from "../../../shared/version.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 

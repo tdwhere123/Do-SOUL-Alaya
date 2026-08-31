@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeCompileSeedSourceTime,
   requireLongMemEvalTimestamp
-} from "../../../longmemeval/ingestion/source-time.js";
+} from "../../../datasets/longmemeval/ingestion/source-time.js";
 
 describe("normalizeCompileSeedSourceTime", () => {
   it("normalizes dataset source dates without host timezone dependence", () => {

@@ -8,11 +8,11 @@ import { collectReleaseHardGates, type KpiPayload } from "@do-soul/alaya-eval";
 import {
   buildLongMemEvalFullGoldCoverage,
   buildLongMemEvalQualityMetrics
-} from "../../../bench/diagnostics.js";
+} from "../../../diagnostics/diagnostics.js";
 import {
   reclassifyDiagnosticsGzipArtifact,
   reclassifyQuestionDiagnostics
-} from "../../../bench/diagnostics/miss/reclassify-question-diagnostics.js";
+} from "../../../diagnostics/miss/reclassify-question-diagnostics.js";
 import {
   PLANTED_A_ID,
   PLANTED_B_ID,

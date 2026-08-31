@@ -6,7 +6,7 @@ import {
   IsoDatetimeStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
-import { GardenBacklogQueueDepthByTierSchema } from "../soul/garden-backlog-snapshot.js";
+import { GardenBacklogQueueDepthByTierSchema } from "../garden/garden-backlog-snapshot.js";
 
 const computeRecallGardenEventTypeValues = [
   "compute.provider.call_started",

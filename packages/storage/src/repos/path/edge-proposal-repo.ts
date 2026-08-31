@@ -16,11 +16,11 @@ import {
   parseCreateInput,
   parseEdgeProposalRow,
   type EdgeProposalRow
-} from "./edge-proposal-rows.js";
+} from "./mappers/edge-proposal-rows.js";
 import {
   prepareEdgeProposalStatements,
   type EdgeProposalStatements
-} from "./edge-proposal-statements.js";
+} from "./statements/edge-proposal-statements.js";
 import {
   type EdgeProposalCreateInput,
   type EdgeProposalMintFailureReconcileInput,

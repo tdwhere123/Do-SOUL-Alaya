@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MemoryDimension, ScopeClass, StorageTier } from "@do-soul/alaya-protocol";
 import { SqliteEnrichPendingRepo } from "../../../repos/garden/enrich-pending-repo.js";
 import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
-import { prepareMemoryEntryStatements } from "../../../repos/memory-entry/sqlite-memory-entry-statements.js";
+import { prepareMemoryEntryStatements } from "../../../repos/memory-entry/statements/sqlite-memory-entry-statements.js";
 import {
   createMemoryCreatedEventInput,
   createMemoryEntry,

@@ -8,9 +8,9 @@ import { exitCodeForMergedLongMemEvalResult } from "../../merge-shared.js";
 import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
-} from "../../../bench/diagnostics/spool.js";
-import { loadDatasetWithIdentity } from "../../../longmemeval/ingestion/fetch.js";
-import type { LongMemEvalVariant } from "../../../longmemeval/ingestion/dataset.js";
+} from "../../../diagnostics/spool.js";
+import { loadDatasetWithIdentity } from "../../../datasets/longmemeval/ingestion/fetch.js";
+import type { LongMemEvalVariant } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { deriveMergedLongMemEvalReleaseAuthority } from "../release-evidence-authority.js";
 
 export interface MergeLongMemEvalCommandOptions {

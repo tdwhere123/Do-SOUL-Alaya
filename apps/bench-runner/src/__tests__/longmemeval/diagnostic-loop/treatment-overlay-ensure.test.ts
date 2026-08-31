@@ -6,13 +6,13 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildEmbeddingCacheOverlayReceipt
-} from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/contract.js";
+} from "../../../runs/snapshot/recall-eval/embedding-cache-overlay/contract.js";
 import {
   defaultSnapshotOverlayReceiptPath,
   ensureTreatmentOverlayReceipt,
   maybeEmitSnapshotEmbeddingOverlay
-} from "../../../bench/snapshot/recall-eval/embedding-cache-overlay/ensure.js";
-import { snapshotManifestPath } from "../../../bench/snapshot/materialize.js";
+} from "../../../runs/snapshot/recall-eval/embedding-cache-overlay/ensure.js";
+import { snapshotManifestPath } from "../../../runs/snapshot/materialize.js";
 
 const VECTOR_SPACE = Object.freeze({
   provider_kind: "local_onnx",

@@ -6,7 +6,7 @@ import {
   NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
-import { StorageTierSchema } from "../soul/memory-entry.js";
+import { StorageTierSchema } from "../memory/memory-entry.js";
 
 const memoryGovernanceEventTypeValues = [
   "soul.evidence.created",

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { recallOptionsForPolicyShape } from "../../../longmemeval/runner/runner-helpers.js";
+import { recallOptionsForPolicyShape } from "../../../datasets/longmemeval/runner/runner-helpers.js";
 import {
   dedupeQaDeliveredCandidates,
   resolveQaDeliveryBudget,
   shouldDedupQaDelivery,
   WIDE_QA_DELIVERY_QUESTION_TYPES
-} from "../../../longmemeval/runner/question/runner-question.js";
+} from "../../../datasets/longmemeval/runner/question/runner-question.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();

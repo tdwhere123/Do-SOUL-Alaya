@@ -27,15 +27,15 @@ import * as SurfaceEvents from "../../events/surface.js";
 import * as ToolWorkerEvents from "../../events/tool-worker.js";
 import * as WorkerRuntimeEvents from "../../events/worker-runtime.js";
 import * as WorkspaceRunEvents from "../../events/workspace-run.js";
-import * as McpTypes from "../../soul/mcp-types.js";
-import * as BudgetSnapshot from "../../soul/budget-snapshot.js";
-import * as EdgeProposal from "../../soul/edge-proposal.js";
-import * as MemoryEntry from "../../soul/memory-entry.js";
-import * as MemoryGraph from "../../soul/memory-graph.js";
-import * as ObjectKind from "../../soul/object-kind.js";
-import * as Proposal from "../../soul/proposal.js";
-import * as RecallCandidate from "../../soul/recall-candidate.js";
-import * as RecallPolicy from "../../soul/recall-policy.js";
+import * as McpTypes from "../../surfaces/mcp-types.js";
+import * as BudgetSnapshot from "../../lifecycle/budget-snapshot.js";
+import * as EdgeProposal from "../../relations/edge-proposal.js";
+import * as MemoryEntry from "../../memory/memory-entry.js";
+import * as MemoryGraph from "../../memory/memory-graph.js";
+import * as ObjectKind from "../../memory/object-kind.js";
+import * as Proposal from "../../governance/proposal.js";
+import * as RecallCandidate from "../../recall/recall-candidate.js";
+import * as RecallPolicy from "../../recall/recall-policy.js";
 
 type ModuleExports = Record<string, unknown>;
 
@@ -55,18 +55,29 @@ interface SchemaDescriptor {
   readonly metadata: string | null;
 }
 
+// mcp-types no longer re-exports these six; keep both snapshot labels so the
+// hashed MCP surface text stays byte-identical.
+const mcpEdgeProposalRootSchemas: ModuleExports = {
+  SoulBatchReviewEdgeProposalsRequestSchema: EdgeProposal.SoulBatchReviewEdgeProposalsRequestSchema,
+  SoulBatchReviewEdgeProposalsResponseSchema: EdgeProposal.SoulBatchReviewEdgeProposalsResponseSchema,
+  SoulListPendingEdgeProposalsRequestSchema: EdgeProposal.SoulListPendingEdgeProposalsRequestSchema,
+  SoulListPendingEdgeProposalsResponseSchema: EdgeProposal.SoulListPendingEdgeProposalsResponseSchema,
+  SoulProposeEdgeRequestSchema: EdgeProposal.SoulProposeEdgeRequestSchema,
+  SoulProposeEdgeResponseSchema: EdgeProposal.SoulProposeEdgeResponseSchema
+};
+
 const mcpSchemaModules: readonly SchemaModule[] = [
-  { module: "packages/protocol/src/soul/mcp-types.ts", exports: McpTypes },
+  { module: "packages/protocol/src/surfaces/mcp-types.ts", exports: { ...McpTypes, ...mcpEdgeProposalRootSchemas } },
   { module: "packages/protocol/src/signals/candidate-memory-signal.ts", exports: CandidateMemorySignal },
   { module: "packages/protocol/src/shared/schema-primitives.ts", exports: SchemaPrimitives },
-  { module: "packages/protocol/src/soul/budget-snapshot.ts", exports: BudgetSnapshot },
-  { module: "packages/protocol/src/soul/edge-proposal.ts", exports: EdgeProposal },
-  { module: "packages/protocol/src/soul/memory-entry.ts", exports: MemoryEntry },
-  { module: "packages/protocol/src/soul/memory-graph.ts", exports: MemoryGraph },
-  { module: "packages/protocol/src/soul/object-kind.ts", exports: ObjectKind },
-  { module: "packages/protocol/src/soul/proposal.ts", exports: Proposal },
-  { module: "packages/protocol/src/soul/recall-candidate.ts", exports: RecallCandidate },
-  { module: "packages/protocol/src/soul/recall-policy.ts", exports: RecallPolicy }
+  { module: "packages/protocol/src/lifecycle/budget-snapshot.ts", exports: BudgetSnapshot },
+  { module: "packages/protocol/src/relations/edge-proposal.ts", exports: EdgeProposal },
+  { module: "packages/protocol/src/memory/memory-entry.ts", exports: MemoryEntry },
+  { module: "packages/protocol/src/memory/memory-graph.ts", exports: MemoryGraph },
+  { module: "packages/protocol/src/memory/object-kind.ts", exports: ObjectKind },
+  { module: "packages/protocol/src/governance/proposal.ts", exports: Proposal },
+  { module: "packages/protocol/src/recall/recall-candidate.ts", exports: RecallCandidate },
+  { module: "packages/protocol/src/recall/recall-policy.ts", exports: RecallPolicy }
 ];
 
 const eventSchemaModules: readonly SchemaModule[] = [
@@ -111,13 +122,13 @@ describe("semver-surface", () => {
       expect.arrayContaining([
         "packages/protocol/src/signals/candidate-memory-signal.ts",
         "packages/protocol/src/shared/schema-primitives.ts",
-        "packages/protocol/src/soul/edge-proposal.ts",
-        "packages/protocol/src/soul/mcp-types.ts",
-        "packages/protocol/src/soul/memory-entry.ts",
-        "packages/protocol/src/soul/memory-graph.ts",
-        "packages/protocol/src/soul/object-kind.ts",
-        "packages/protocol/src/soul/proposal.ts",
-        "packages/protocol/src/soul/recall-candidate.ts"
+        "packages/protocol/src/relations/edge-proposal.ts",
+        "packages/protocol/src/surfaces/mcp-types.ts",
+        "packages/protocol/src/memory/memory-entry.ts",
+        "packages/protocol/src/memory/memory-graph.ts",
+        "packages/protocol/src/memory/object-kind.ts",
+        "packages/protocol/src/governance/proposal.ts",
+        "packages/protocol/src/recall/recall-candidate.ts"
       ])
     );
 
@@ -189,14 +200,16 @@ function collectMcpSurface(
   const reachableSchemas = [...reachable.values()].sort(compareByModuleThenSchema);
 
   return Object.freeze({
-    reachableModules: Object.freeze([...new Set(reachableSchemas.map(({ module }) => module))].sort()),
+    reachableModules: Object.freeze(
+      [...new Set(reachableSchemas.map(({ module }) => module))].sort(compareSnapshotModuleIdentity)
+    ),
     reachableSchemas: Object.freeze(reachableSchemas.map((entry) => Object.freeze(entry)))
   });
 }
 
 function collectMcpRootSchemas(): readonly Readonly<{ readonly name: string; readonly schema: z.ZodTypeAny }>[] {
   return Object.freeze(
-    Object.entries(McpTypes)
+    [...Object.entries(McpTypes), ...Object.entries(mcpEdgeProposalRootSchemas)]
       .filter(([name, value]) => /^(Soul|Garden|MemorySearch).*Schema$/.test(name) && isZodSchema(value))
       // isZodSchema narrows in the filter predicate but the guard does not flow
       // through tuple destructuring into the mapped element type.
@@ -443,11 +456,20 @@ function isZodSchema(value: unknown): value is z.ZodTypeAny {
     typeof (value as { readonly safeParse?: unknown }).safeParse === "function";
 }
 
+function compareSnapshotModuleIdentity(left: string, right: string): number {
+  // Snapshot identity is the short label; filesystem domain folders must not reorder it.
+  const leftId = shortModule(left);
+  const rightId = shortModule(right);
+  if (leftId < rightId) return -1;
+  if (leftId > rightId) return 1;
+  return 0;
+}
+
 function compareByModuleThenSchema(
   left: Readonly<{ readonly module: string; readonly schema: string }>,
   right: Readonly<{ readonly module: string; readonly schema: string }>
 ): number {
-  return left.module.localeCompare(right.module) || left.schema.localeCompare(right.schema);
+  return compareSnapshotModuleIdentity(left.module, right.module) || left.schema.localeCompare(right.schema);
 }
 
 function formatSnapshotLines(surface: Readonly<{
@@ -486,8 +508,26 @@ function sha256(value: string): string {
 }
 
 function shortModule(module: string): string {
+  const srcPrefix = "packages/protocol/src/";
+  if (module.startsWith(srcPrefix)) {
+    const rest = module.slice(srcPrefix.length);
+    const soulDomains = [
+      "memory/",
+      "evidence/",
+      "relations/",
+      "recall/",
+      "governance/",
+      "garden/",
+      "surfaces/",
+      "lifecycle/"
+    ] as const;
+    for (const domain of soulDomains) {
+      if (rest.startsWith(domain)) {
+        return `soul:${rest.slice(domain.length)}`;
+      }
+    }
+  }
   return module
     .replace("packages/protocol/src/events/", "evt:")
-    .replace("packages/protocol/src/soul/", "soul:")
     .replace("packages/protocol/src/", "protocol:");
 }

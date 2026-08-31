@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { runLongMemEval } from "../../../longmemeval/runner.js";
+import { runLongMemEval } from "../../../datasets/longmemeval/runner.js";
 
 const mocks = vi.hoisted(() => ({
   assertAuthority: vi.fn(),
@@ -10,23 +10,23 @@ const mocks = vi.hoisted(() => ({
   withSpool: vi.fn()
 }));
 
-vi.mock("../../../longmemeval/promotion/expansion/authority/expansion-run-authority.js", () => ({
+vi.mock("../../../datasets/longmemeval/promotion/expansion/authority/expansion-run-authority.js", () => ({
   assertExpansionRunAuthority: mocks.assertAuthority
 }));
-vi.mock("../../../longmemeval/runner/runner-concurrency.js", () => ({
+vi.mock("../../../datasets/longmemeval/runner/runner-concurrency.js", () => ({
   shouldFanOutLongMemEvalWorkers: mocks.shouldFanOut,
   runLongMemEvalConcurrent: vi.fn()
 }));
-vi.mock("../../../longmemeval/runner/prepare-context.js", () => ({
+vi.mock("../../../datasets/longmemeval/runner/prepare-context.js", () => ({
   prepareLongMemEvalRun: mocks.prepare
 }));
-vi.mock("../../../longmemeval/runner/runner-execution.js", () => ({
+vi.mock("../../../datasets/longmemeval/runner/runner-execution.js", () => ({
   executeLongMemEvalRun: mocks.execute
 }));
-vi.mock("../../../longmemeval/runner/archive/runner-archive.js", () => ({
+vi.mock("../../../datasets/longmemeval/runner/archive/runner-archive.js", () => ({
   finalizeLongMemEvalRun: mocks.finalize
 }));
-vi.mock("../../../bench/diagnostics/spool.js", () => ({
+vi.mock("../../../diagnostics/spool.js", () => ({
   withLongMemEvalDiagnosticsSpool: mocks.withSpool
 }));
 

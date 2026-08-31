@@ -10,7 +10,7 @@ import {
   type BenchEmbeddingProviderKind
 } from "../harness/daemon/daemon-types.js";
 import type { EffectiveReconciliationBasis } from "@do-soul/alaya";
-import type { LongMemEvalVariant } from "../longmemeval/ingestion/dataset.js";
+import type { LongMemEvalVariant } from "../datasets/longmemeval/ingestion/dataset.js";
 import { consumePromotionEvidencePathFlags } from "./cli-options-promotion.js";
 import {
   matchFlagToken,

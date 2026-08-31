@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   isContainedPath,
   resolveOpenedDescriptorPath
-} from "../../bench/fs/opened-contained-path.js";
+} from "../../runs/fs/opened-contained-path.js";
 
 export interface ContainedArtifactFile {
   readonly handle: FileHandle;

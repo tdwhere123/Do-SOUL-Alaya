@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { answerSystemFor, type QaDeliveredCandidate } from "../../../bench/qa/qa-harness.js";
-import { buildQaSupportPack } from "../../../bench/qa/qa-support-pack.js";
-import { parseFilterSelection, selectRelevantMemories } from "../../../bench/qa/qa-llm-filter.js";
+import { answerSystemFor, type QaDeliveredCandidate } from "../../../runs/qa/qa-harness.js";
+import { buildQaSupportPack } from "../../../runs/qa/qa-support-pack.js";
+import { parseFilterSelection, selectRelevantMemories } from "../../../runs/qa/qa-llm-filter.js";
 
 function cand(objectId: string, sessionId?: string): QaDeliveredCandidate {
   return { objectId, content: `content-${objectId}`, ...(sessionId === undefined ? {} : { sessionId }) };

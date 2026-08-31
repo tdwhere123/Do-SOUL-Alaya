@@ -9,7 +9,7 @@ import {
   bindQuerySemanticFactorCacheFileToRequest,
   createQuerySemanticFactorCache,
   writeQuerySemanticFactorCache
-} from "../../../bench/query-factors/query-semantic-factor-cache.js";
+} from "../../../runs/query-factors/query-semantic-factor-cache.js";
 
 const SOURCE = "What did I buy?";
 const OTHER = "What did I choose?";

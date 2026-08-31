@@ -14,21 +14,21 @@ import {
 import { writeLongMemEvalFixtureDataset, buildLongMemEvalFixtureQuestion } from
   "../../longmemeval/longmemeval-fixture.js";
 import { prepareExtractionFillWindow } from
-  "../../../bench/extraction/fill/fill-window.js";
+  "../../../runs/extraction/fill/fill-window.js";
 import { requiredExtractionCacheKeys } from
-  "../../../bench/compile-seed/preflight/cache-window-key-binding.js";
+  "../../../runs/compile-seed/preflight/cache-window-key-binding.js";
 import { writeCachedExtraction } from
-  "../../../bench/compile-seed/cache/cache-shard.js";
+  "../../../runs/compile-seed/cache/cache-shard.js";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
   inspectExtractionRawJson
-} from "../../../bench/extraction/content-closure.js";
+} from "../../../runs/extraction/content-closure.js";
 import {
   computeSystemPromptSha256,
   readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest
-} from "../../../bench/extraction/cache/extraction-cache-manifest.js";
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { manifestFor } from
   "../../longmemeval/extraction/extraction-cache-preflight-fixture.js";
 import { execFileAsync } from "./fixture.js";
