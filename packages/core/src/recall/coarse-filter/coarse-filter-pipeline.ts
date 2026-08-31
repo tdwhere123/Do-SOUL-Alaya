@@ -369,7 +369,9 @@ async function admitPrefetchedEntityGraphSeeds(
     workspaceId: params.workspaceId,
     tier: params.tier,
     byId: params.byId,
-    objectIds: loaded.hitBatches.flatMap((batch) => batch.map((hit) => hit.object_id))
+    objectIds: loaded.hitBatches.flatMap((batch) => batch.map((hit) => hit.object_id)),
+    warn: params.context.warn,
+    degradationReasons: params.context.degradationReasons
   });
   const entityDerivedSeeds = admitLoadedEntityDerivedSeeds({
     byId: params.byId,

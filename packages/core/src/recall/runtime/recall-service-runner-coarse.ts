@@ -441,5 +441,10 @@ function collectCoarseFilter(
   queryText: string | null,
   options: CoarseFilterOptions = {}
 ): ReturnType<typeof runCoarseFilter> {
-  return runCoarseFilter({ dependencies: context.dependencies, warn: context.warn }, workspaceId, config, queryText, options);
+  return runCoarseFilter({
+    dependencies: context.dependencies,
+    warn: context.warn,
+    // Coarse lookup failures must share this set; omitting it hides them from diagnostics.
+    degradationReasons: context.degradationReasons
+  }, workspaceId, config, queryText, options);
 }

@@ -117,7 +117,10 @@ export function createDependencies(
   readonly append: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
 } {
-  const searchByKeyword = vi.fn(async () => [{ object_id: memories[1]?.object_id ?? "memory-2", normalized_rank: 1 }]);
+  const searchByKeyword = vi.fn(async () => {
+    const objectId = memories[1]?.object_id;
+    return objectId === undefined ? [] : [{ object_id: objectId, normalized_rank: 1 }];
+  });
   const countInboundSupports = vi.fn(async (memoryId: string) => {
     if (supportOptions.graphSupportByMemoryId !== undefined) {
       return supportOptions.graphSupportByMemoryId[memoryId] ?? 0;

@@ -231,6 +231,8 @@ async function hydrateGraphPathNeighbors(
     readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
     readonly memoryRepo?: RecallServiceDependencies["memoryRepo"];
     readonly tier?: MemoryEntry["storage_tier"];
+    readonly warn?: RecallServiceWarnPort;
+    readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
   }>,
   paths: readonly Readonly<PathRelation>[]
 ): Promise<void> {
@@ -241,7 +243,9 @@ async function hydrateGraphPathNeighbors(
     workspaceId: params.workspaceId,
     tier: params.tier,
     byId: params.byId,
-    objectIds: paths.flatMap((path) => [...pathRelationMemoryIds(path)])
+    objectIds: paths.flatMap((path) => [...pathRelationMemoryIds(path)]),
+    warn: params.warn,
+    degradationReasons: params.degradationReasons
   });
 }
 

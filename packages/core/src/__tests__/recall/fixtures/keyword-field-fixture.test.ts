@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createFieldBackedRecallService,
+  keywordSearchMethods,
   withKeywordFieldFixturePorts
 } from "./keyword-field-fixture.js";
 import { createDependencies, createTaskSurface } from "../recall-service-test-fixtures.js";
@@ -25,5 +26,24 @@ describe("keyword field fixture session pin", () => {
       workspaceId: "workspace-1",
       strategy: "build"
     })).rejects.toThrow(/active projection generation is missing/u);
+  });
+
+  it("rebuilds keyword field search from the live scalar after an override", async () => {
+    const planted = vi.fn(async () => [{ object_id: "memory-2", normalized_rank: 1 }]);
+    const { fieldQuerySession: _session, ...unseeded } = createDependencies([]).dependencies;
+    const wrapped = withKeywordFieldFixturePorts({
+      ...unseeded,
+      memoryRepo: {
+        ...unseeded.memoryRepo,
+        ...keywordSearchMethods(planted),
+        searchByKeyword: vi.fn(async () => [])
+      }
+    }, "workspace-1");
+    const field = await wrapped.memoryRepo.searchByKeywordField?.(
+      "workspace-1",
+      "q",
+      8
+    );
+    expect(field?.matches).toEqual([]);
   });
 });

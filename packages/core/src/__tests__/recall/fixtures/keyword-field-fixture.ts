@@ -55,21 +55,19 @@ function withMemoryFieldFixture(
 ): RecallServiceMemoryRepoPort {
   return {
     ...repo,
-    searchByKeywordField: repo.searchByKeywordField ??
-      (hasMemoryKeywordFixture(repo)
-        ? async (workspaceId, queryText, limit, scope = {}) => keywordFieldResult(
-          (await runMemoryKeywordFixture(repo, workspaceId, queryText, limit, scope))
-            .slice(0, limit)
-        )
-        : undefined),
-    searchByAnchorField: repo.searchByAnchorField ??
-      (hasMemoryAnchorFixture(repo)
-        ? async (workspaceId, anchors, optional, limit, scope = {}) => keywordFieldResult(
-          (await runMemoryAnchorFixture(
-            repo, workspaceId, anchors, optional, limit, scope
-          )).slice(0, limit)
-        )
-        : undefined)
+    searchByKeywordField: hasMemoryKeywordFixture(repo)
+      ? async (workspaceId, queryText, limit, scope = {}) => keywordFieldResult(
+        (await runMemoryKeywordFixture(repo, workspaceId, queryText, limit, scope))
+          .slice(0, limit)
+      )
+      : repo.searchByKeywordField,
+    searchByAnchorField: hasMemoryAnchorFixture(repo)
+      ? async (workspaceId, anchors, optional, limit, scope = {}) => keywordFieldResult(
+        (await runMemoryAnchorFixture(
+          repo, workspaceId, anchors, optional, limit, scope
+        )).slice(0, limit)
+      )
+      : repo.searchByAnchorField
   };
 }
 
@@ -128,8 +126,7 @@ function withEvidenceFieldFixture(
 ): RecallServiceEvidenceSearchPort {
   return {
     ...port,
-    searchByKeywordField: port.searchByKeywordField ??
-      fieldSearchFromScalar(port.searchByKeyword.bind(port))
+    searchByKeywordField: fieldSearchFromScalar(port.searchByKeyword.bind(port))
   };
 }
 
@@ -138,8 +135,7 @@ function withSynthesisFieldFixture(
 ): RecallServiceSynthesisSearchPort {
   return {
     ...port,
-    searchByKeywordField: port.searchByKeywordField ??
-      fieldSearchFromScalar(port.searchByKeyword.bind(port))
+    searchByKeywordField: fieldSearchFromScalar(port.searchByKeyword.bind(port))
   };
 }
 

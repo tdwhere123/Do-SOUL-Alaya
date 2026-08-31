@@ -225,14 +225,18 @@ async function loadFieldScopedCoarseFilterInput(
       workspaceId,
       tier,
       byId,
-      objectIds: [...winnerMemoryIds, ...queryProbes.object_ids]
+      objectIds: [...winnerMemoryIds, ...queryProbes.object_ids],
+      warn: context.warn,
+      degradationReasons: context.degradationReasons
     }),
     hydrateQueryEvidenceRefMemories({
       memoryRepo,
       workspaceId,
       tier,
       byId,
-      evidenceObjectIds: queryProbes.evidence_refs
+      evidenceObjectIds: queryProbes.evidence_refs,
+      warn: context.warn,
+      degradationReasons: context.degradationReasons
     })
   ]);
   if (rankedMatches === null) {
