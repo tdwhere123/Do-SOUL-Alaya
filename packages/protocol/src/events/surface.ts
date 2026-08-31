@@ -7,8 +7,8 @@ import {
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
 import { TransitionCausedBySchema } from "./memory-governance.js";
-import { BindingStateSchema, SurfaceAnchorKindSchema, SurfaceStatusSchema } from "../soul/surface.js";
-import { CrossCuttingStateSchema } from "../soul/cross-cutting.js";
+import { BindingStateSchema, SurfaceAnchorKindSchema, SurfaceStatusSchema } from "../surfaces/surface.js";
+import { CrossCuttingStateSchema } from "../lifecycle/cross-cutting.js";
 
 const surfaceEventTypeValues = [
   "soul.surface.created",

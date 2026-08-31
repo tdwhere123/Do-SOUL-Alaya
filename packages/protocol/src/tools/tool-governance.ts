@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { NonEmptyStringSchema } from "../shared/schema-primitives.js";
-import { GovernanceSubjectSchema } from "../soul/governance-subject.js";
+import { GovernanceSubjectSchema } from "../governance/governance-subject.js";
 import { ToolCategorySchema, ToolScopeGuardSchema } from "./tool-spec.js";
 import { NodeTemplateKindSchema } from "../runtime/node-template.js";
 

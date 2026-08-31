@@ -5,8 +5,8 @@ import {
   BankruptcyTriggerKindSchema,
   DossierBankruptcyKindSchema,
   RuntimeModeSchema
-} from "../soul/bankruptcy.js";
-import { ProposalResolutionStateSchema } from "../soul/proposal.js";
+} from "../governance/bankruptcy.js";
+import { ProposalResolutionStateSchema } from "../governance/proposal.js";
 
 const budgetEventTypeValues = [
   "soul.budget.degraded",

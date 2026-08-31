@@ -10,7 +10,7 @@ import {
 import {
   OutputShapingResultSchema,
   OutputShapingRuleSchema
-} from "../../soul/output-shaping.js";
+} from "../../recall/output-shaping.js";
 
 const validTimestamp = "2026-04-17T08:00:00.000Z";
 const workerDispatchFragmentId =

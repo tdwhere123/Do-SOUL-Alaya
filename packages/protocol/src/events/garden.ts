@@ -6,8 +6,8 @@ import {
   NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
-import { GardenRoleSchema, GardenTaskKindSchema, GardenTierSchema } from "../soul/garden-tier.js";
-import { HealthEventKindSchema } from "../soul/health-journal.js";
+import { GardenRoleSchema, GardenTaskKindSchema, GardenTierSchema } from "../garden/garden-tier.js";
+import { HealthEventKindSchema } from "../memory/health-journal.js";
 
 const gardenEventTypeValues = [
   "soul.garden.task_dispatched",

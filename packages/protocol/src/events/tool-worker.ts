@@ -6,7 +6,7 @@ import {
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
 import { WorkerRunStateSchema } from "../runtime/runtime-run.js";
-import { GovernanceSubjectSchema } from "../soul/governance-subject.js";
+import { GovernanceSubjectSchema } from "../governance/governance-subject.js";
 import { ToolAffectedPathsSchema } from "../tools/tool-affected-path.js";
 
 const toolWorkerEventTypeValues = [

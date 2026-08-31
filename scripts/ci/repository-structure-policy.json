@@ -179,7 +179,111 @@
     "apps/inspector/web/src/utils/parse-search-query",
     "packages/core/src/recall/shadow",
     "packages/core/src/recall/decision/prefix-capture/envelope",
-    "packages/core/src/recall/decision/prefix-capture/compare"
+    "packages/core/src/recall/decision/prefix-capture/compare",
+    "packages/protocol/src/soul",
+    "packages/protocol/src/soul/object-kind",
+    "packages/protocol/src/soul/lifecycle",
+    "packages/protocol/src/soul/status-model",
+    "packages/protocol/src/soul/envelope",
+    "packages/protocol/src/soul/base-types",
+    "packages/protocol/src/soul/memory-entry",
+    "packages/protocol/src/soul/memory-object-key",
+    "packages/protocol/src/soul/global-memory-entry",
+    "packages/protocol/src/soul/synthesis-capsule",
+    "packages/protocol/src/soul/claim-form",
+    "packages/protocol/src/soul/memory-constants",
+    "packages/protocol/src/soul/karma-event",
+    "packages/protocol/src/soul/canonical-alias",
+    "packages/protocol/src/soul/memory-graph",
+    "packages/protocol/src/soul/health-journal",
+    "packages/protocol/src/soul/health-issue-group",
+    "packages/protocol/src/soul/evidence-capsule",
+    "packages/protocol/src/soul/associative-fact-frame",
+    "packages/protocol/src/soul/verified-user-assertion-receipt",
+    "packages/protocol/src/soul/source-grounding-defer",
+    "packages/protocol/src/soul/formation/evidence-osf-semantic-completeness",
+    "packages/protocol/src/soul/graph",
+    "packages/protocol/src/soul/path-relation",
+    "packages/protocol/src/soul/relation-assertion",
+    "packages/protocol/src/soul/path-graph-snapshot",
+    "packages/protocol/src/soul/soul-topology",
+    "packages/protocol/src/soul/path-anchor-identity",
+    "packages/protocol/src/soul/time-concern-window-digest",
+    "packages/protocol/src/soul/path-anchor-normalization",
+    "packages/protocol/src/soul/edge-proposal",
+    "packages/protocol/src/soul/open-semantic-factor-graph",
+    "packages/protocol/src/soul/open-semantic-structural-role",
+    "packages/protocol/src/soul/recall-candidate",
+    "packages/protocol/src/soul/recall-policy",
+    "packages/protocol/src/soul/fts-search-policy",
+    "packages/protocol/src/soul/embedding-status",
+    "packages/protocol/src/soul/context-lens",
+    "packages/protocol/src/soul/output-shaping",
+    "packages/protocol/src/soul/activation-candidate",
+    "packages/protocol/src/soul/kind-projection",
+    "packages/protocol/src/soul/query-osf-semantic-completeness",
+    "packages/protocol/src/soul/query-osf-facet-obligation",
+    "packages/protocol/src/soul/open-semantic-factor-activation-state",
+    "packages/protocol/src/soul/manifestation-budget",
+    "packages/protocol/src/soul/compute-routing",
+    "packages/protocol/src/soul/degradation",
+    "packages/protocol/src/soul/field-contract/canonical-identity",
+    "packages/protocol/src/soul/field-contract/causal-usage",
+    "packages/protocol/src/soul/field-contract/factor-incidence",
+    "packages/protocol/src/soul/field-contract/index",
+    "packages/protocol/src/soul/field-contract/operator-manifest",
+    "packages/protocol/src/soul/field-contract/ports",
+    "packages/protocol/src/soul/field-contract/projection-generation",
+    "packages/protocol/src/soul/field-contract/proof-effect",
+    "packages/protocol/src/soul/field-contract/query-condition",
+    "packages/protocol/src/soul/field-contract/source-span",
+    "packages/protocol/src/soul/selection/capture/canonical-json",
+    "packages/protocol/src/soul/selection/capture/canonical-selection-receipt",
+    "packages/protocol/src/soul/selection/capture/capture-execution",
+    "packages/protocol/src/soul/selection/capture/capture-receipt-structures",
+    "packages/protocol/src/soul/governance-subject",
+    "packages/protocol/src/soul/factual-policy-boundary",
+    "packages/protocol/src/soul/verification",
+    "packages/protocol/src/soul/green-status",
+    "packages/protocol/src/soul/security-status",
+    "packages/protocol/src/soul/governance-snapshot",
+    "packages/protocol/src/soul/governance-lease",
+    "packages/protocol/src/soul/bankruptcy",
+    "packages/protocol/src/soul/proposal",
+    "packages/protocol/src/soul/promotion-gate",
+    "packages/protocol/src/soul/resolution",
+    "packages/protocol/src/soul/active-constraints-policy",
+    "packages/protocol/src/soul/constitutional-fragment",
+    "packages/protocol/src/soul/conflict-matrix",
+    "packages/protocol/src/soul/trust-state",
+    "packages/protocol/src/soul/staged-warning",
+    "packages/protocol/src/soul/governance-policy-classification",
+    "packages/protocol/src/soul/garden-backlog-snapshot",
+    "packages/protocol/src/soul/garden-source-turn-fallback-receipt",
+    "packages/protocol/src/soul/garden-source-turn-fallback/role-span-projection",
+    "packages/protocol/src/soul/garden-tier",
+    "packages/protocol/src/soul/garden-extract-constants",
+    "packages/protocol/src/soul/bootstrapping",
+    "packages/protocol/src/soul/surface-drift",
+    "packages/protocol/src/soul/surface",
+    "packages/protocol/src/soul/slot",
+    "packages/protocol/src/soul/task-object-surface",
+    "packages/protocol/src/soul/project-mapping",
+    "packages/protocol/src/soul/mcp-types",
+    "packages/protocol/src/soul/mcp-context-usage-types",
+    "packages/protocol/src/soul/mcp-garden-task-types",
+    "packages/protocol/src/soul/mcp-json-schema",
+    "packages/protocol/src/soul/mcp-memory-search-types",
+    "packages/protocol/src/soul/extension-descriptors",
+    "packages/protocol/src/soul/extension-descriptor-parsers",
+    "packages/protocol/src/soul/session-override",
+    "packages/protocol/src/soul/handoff-gap",
+    "packages/protocol/src/soul/execution-stance",
+    "packages/protocol/src/soul/consolidation-types",
+    "packages/protocol/src/soul/budget-snapshot",
+    "packages/protocol/src/soul/dynamics-constants",
+    "packages/protocol/src/soul/orphan-radar",
+    "packages/protocol/src/soul/cross-cutting"
   ],
   "entry_exports": [
     {
@@ -275,7 +379,7 @@
   ],
   "private_barrel_snapshot": {
     "expected_count": 44,
-    "expected_sha256": "a4118ad5d994188ac659f7df290c2e8a9b91660aab8393d6b465f4ed34e7bdc8"
+    "expected_sha256": "c3910d9be380447cc3b796c8c89deaeebf1afb19aaed9907dd6e111a907a8028"
   },
   "existing_duplicate_export_authorities": [
     {
@@ -330,48 +434,48 @@
       "path": "packages/protocol/src/index.ts",
       "binding": "SoulBatchReviewEdgeProposalsRequestSchema",
       "sources": [
-        "packages/protocol/src/soul/edge-proposal.ts",
-        "packages/protocol/src/soul/mcp-types.ts"
+        "packages/protocol/src/relations/edge-proposal.ts",
+        "packages/protocol/src/surfaces/mcp-types.ts"
       ]
     },
     {
       "path": "packages/protocol/src/index.ts",
       "binding": "SoulBatchReviewEdgeProposalsResponseSchema",
       "sources": [
-        "packages/protocol/src/soul/edge-proposal.ts",
-        "packages/protocol/src/soul/mcp-types.ts"
+        "packages/protocol/src/relations/edge-proposal.ts",
+        "packages/protocol/src/surfaces/mcp-types.ts"
       ]
     },
     {
       "path": "packages/protocol/src/index.ts",
       "binding": "SoulListPendingEdgeProposalsRequestSchema",
       "sources": [
-        "packages/protocol/src/soul/edge-proposal.ts",
-        "packages/protocol/src/soul/mcp-types.ts"
+        "packages/protocol/src/relations/edge-proposal.ts",
+        "packages/protocol/src/surfaces/mcp-types.ts"
       ]
     },
     {
       "path": "packages/protocol/src/index.ts",
       "binding": "SoulListPendingEdgeProposalsResponseSchema",
       "sources": [
-        "packages/protocol/src/soul/edge-proposal.ts",
-        "packages/protocol/src/soul/mcp-types.ts"
+        "packages/protocol/src/relations/edge-proposal.ts",
+        "packages/protocol/src/surfaces/mcp-types.ts"
       ]
     },
     {
       "path": "packages/protocol/src/index.ts",
       "binding": "SoulProposeEdgeRequestSchema",
       "sources": [
-        "packages/protocol/src/soul/edge-proposal.ts",
-        "packages/protocol/src/soul/mcp-types.ts"
+        "packages/protocol/src/relations/edge-proposal.ts",
+        "packages/protocol/src/surfaces/mcp-types.ts"
       ]
     },
     {
       "path": "packages/protocol/src/index.ts",
       "binding": "SoulProposeEdgeResponseSchema",
       "sources": [
-        "packages/protocol/src/soul/edge-proposal.ts",
-        "packages/protocol/src/soul/mcp-types.ts"
+        "packages/protocol/src/relations/edge-proposal.ts",
+        "packages/protocol/src/surfaces/mcp-types.ts"
       ]
     }
   ],
@@ -384,7 +488,7 @@
     "packages/core/src/recall/decision/query-proof/dominance/index.ts -> packages/core/src/recall/decision/query-proof/measurement/index.ts",
     "packages/engine-gateway/src/index.ts -> packages/engine-gateway/src/provider/chat-completion/index.ts",
     "packages/eval/src/index.ts -> packages/eval/src/cli/index.ts",
-    "packages/protocol/src/index.ts -> packages/protocol/src/soul/field-contract/index.ts",
+    "packages/protocol/src/index.ts -> packages/protocol/src/recall/field-contract/index.ts",
     "packages/soul/src/garden/index.ts -> packages/protocol/src/index.ts",
     "packages/soul/src/index.ts -> packages/protocol/src/index.ts",
     "packages/soul/src/index.ts -> packages/soul/src/garden/index.ts",

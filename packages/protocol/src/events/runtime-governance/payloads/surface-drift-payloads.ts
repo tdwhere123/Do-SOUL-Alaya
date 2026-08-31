@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { IsoDatetimeStringSchema, NonEmptyStringSchema } from "../../../shared/schema-primitives.js";
-import { DriftSeveritySchema, DriftTypeSchema, SurfaceDriftOperationTypeSchema } from "../../../soul/surface-drift.js";
+import { DriftSeveritySchema, DriftTypeSchema, SurfaceDriftOperationTypeSchema } from "../../../surfaces/surface-drift.js";
 
 export const SurfaceDriftDetectedPayloadSchema = z
   .object({

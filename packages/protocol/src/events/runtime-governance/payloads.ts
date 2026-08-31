@@ -10,18 +10,18 @@ import {
 import {
   ConstitutionalFragmentCategorySchema,
   ConstitutionalFragmentIdSchema
-} from "../../soul/constitutional-fragment.js";
-import { ComputeProviderPrioritySchema } from "../../soul/compute-routing.js";
+} from "../../governance/constitutional-fragment.js";
+import { ComputeProviderPrioritySchema } from "../../recall/compute-routing.js";
 import {
   ExtensionDescriptorTypeSchema,
   ExtensionSourceSchema
-} from "../../soul/extension-descriptors.js";
+} from "../../surfaces/extension-descriptors.js";
 import {
   ExecutionConservatismSchema,
   ExecutionVerificationAttentionSchema
-} from "../../soul/execution-stance.js";
-import { OutputShapingResultSchema } from "../../soul/output-shaping.js";
-import { SecurityPostureSchema } from "../../soul/security-status.js";
+} from "../../lifecycle/execution-stance.js";
+import { OutputShapingResultSchema } from "../../recall/output-shaping.js";
+import { SecurityPostureSchema } from "../../governance/security-status.js";
 
 import {
   ManifestationBudgetEvaluatedPayloadSchema,

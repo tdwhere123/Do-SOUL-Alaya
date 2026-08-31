@@ -4,7 +4,7 @@ import {
   NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../../../shared/schema-primitives.js";
-import { ManifestationLevelSchema } from "../../../soul/manifestation-budget.js";
+import { ManifestationLevelSchema } from "../../../recall/manifestation-budget.js";
 
 export const ManifestationBudgetEvaluatedPayloadSchema = z
   .object({

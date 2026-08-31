@@ -5,10 +5,10 @@ import {
   IsoDatetimeStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
-import { ClaimKindSchema } from "../soul/claim-form.js";
-import { ConflictEdgeTypeSchema } from "../soul/conflict-matrix.js";
-import { GovernanceSubjectSchema } from "../soul/governance-subject.js";
-import { ScopeClassSchema } from "../soul/object-kind.js";
+import { ClaimKindSchema } from "../memory/claim-form.js";
+import { ConflictEdgeTypeSchema } from "../governance/conflict-matrix.js";
+import { GovernanceSubjectSchema } from "../governance/governance-subject.js";
+import { ScopeClassSchema } from "../memory/object-kind.js";
 import { TransitionCausedBySchema } from "./memory-governance.js";
 
 const slotEventTypeValues = [

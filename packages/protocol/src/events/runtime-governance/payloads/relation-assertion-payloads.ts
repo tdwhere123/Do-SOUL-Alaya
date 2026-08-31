@@ -7,7 +7,7 @@ import {
 import {
   RelationAssertionAdmissionSchema,
   RelationAssertionResolutionKindSchema
-} from "../../../soul/relation-assertion.js";
+} from "../../../relations/relation-assertion.js";
 
 export const RelationAssertionAdmittedPayloadSchema = RelationAssertionAdmissionSchema;
 
