@@ -84,7 +84,8 @@ it("adds FTS supplement candidates and treats direct FTS rank as lexical structu
     });
 
     expect(searchByKeyword).toHaveBeenCalledWith(
-      "workspace-1", "zulu omega", 5, { tier: "hot" }
+      "workspace-1", "zulu omega", 5, { tier: "hot" }, undefined,
+      { variant: "lexical_relaxed" }
     );
     expect(countInboundSupports).toHaveBeenCalledWith(
       "memory-2",

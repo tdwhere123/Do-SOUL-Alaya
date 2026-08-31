@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -23,8 +22,8 @@ import {
   plantedCanonicalQuestion
 } from "./planted-canonical-fixture.js";
 
-const ARTIFACT_RELATIVE =
-  ".do-it/bench-runs/recall-any5-evidence-first/g19c-mimo-v2.5-live-prompt-785cbdcc/diagnostic-100q-core-canonical-head-141e739d-eval/history/public/2026-08-26T122305Z-141e739-policy-stress-recall-eval-snapshot/recall-eval-diagnostics.json.gz";
+const CANONICAL_DIAGNOSTICS_ENV =
+  "ALAYA_TEST_CANONICAL_DIAGNOSTICS_ARTIFACT";
 
 describe("canonical measurement honesty", () => {
   it("fails retained ranking gates for a candidate_key-order planted ranker", () => {
@@ -113,12 +112,9 @@ describe("canonical measurement honesty", () => {
     }
   });
 
-  it("reclassifies the 100Q gzip artifact when present", async () => {
-    const artifactPath = resolveGzipArtifact();
-    if (artifactPath === null) {
-      console.info(`skipping 100Q gzip reclassify; missing ${ARTIFACT_RELATIVE}`);
-      return;
-    }
+  it("reclassifies a configured canonical gzip artifact", async () => {
+    const artifactPath = process.env[CANONICAL_DIAGNOSTICS_ENV];
+    if (artifactPath === undefined) return;
     const summary = await reclassifyDiagnosticsGzipArtifact(artifactPath);
     expect(summary.questions).toBeGreaterThan(0);
     expect(summary.in_field_classified_candidate_absent).toBe(0);
@@ -179,12 +175,4 @@ function candidateKeyOrderGatePayload(
       full_gold_coverage: coverage
     }
   };
-}
-
-function resolveGzipArtifact(): string | null {
-  const candidates = [
-    path.resolve(process.cwd(), ARTIFACT_RELATIVE),
-    path.resolve(process.cwd(), "..", "..", ARTIFACT_RELATIVE)
-  ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }

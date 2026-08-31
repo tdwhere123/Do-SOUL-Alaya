@@ -113,6 +113,22 @@ function createRecallEvidenceSearchPort(
       input.evidenceCapsuleRepo.searchByKeyword === undefined
         ? []
         : await input.evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
+    searchByKeywordField: async (
+      workspaceId: string,
+      queryText: string,
+      limit: number,
+      refinementDepths?: readonly number[]
+    ) => await input.evidenceCapsuleRepo.searchByKeywordField(
+      workspaceId, queryText, limit, refinementDepths
+    ),
+    searchManyByKeywordField: async (
+      workspaceId: string,
+      queries: readonly Readonly<{
+        readonly queryText: string;
+        readonly limit: number;
+        readonly refinement_depths?: readonly number[];
+      }>[]
+    ) => await input.evidenceCapsuleRepo.searchManyByKeywordField(workspaceId, queries),
     findByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) => {
       return await input.evidenceCapsuleRepo.findByIds(workspaceId, evidenceObjectIds);
     },
@@ -141,6 +157,22 @@ function createRecallSynthesisSearchPort(
       input.synthesisCapsuleRepo.searchByKeyword === undefined
         ? []
         : await input.synthesisCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
+    searchByKeywordField: async (
+      workspaceId: string,
+      queryText: string,
+      limit: number,
+      refinementDepths?: readonly number[]
+    ) => await input.synthesisCapsuleRepo.searchByKeywordField(
+      workspaceId, queryText, limit, refinementDepths
+    ),
+    searchManyByKeywordField: async (
+      workspaceId: string,
+      queries: readonly Readonly<{
+        readonly queryText: string;
+        readonly limit: number;
+        readonly refinement_depths?: readonly number[];
+      }>[]
+    ) => await input.synthesisCapsuleRepo.searchManyByKeywordField(workspaceId, queries),
     findByIds: async (workspaceId: string, objectIds: readonly string[]) =>
       await input.synthesisCapsuleRepo.findByIds(workspaceId, objectIds)
   };

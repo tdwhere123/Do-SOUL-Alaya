@@ -31,7 +31,8 @@ const mocks = vi.hoisted(() => ({
 const spool = { append: mocks.append, dispose: mocks.dispose, rootPath: "/tmp/spool" };
 const roots: string[] = [];
 
-vi.mock("@do-soul/alaya-eval", () => ({
+vi.mock("@do-soul/alaya-eval", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@do-soul/alaya-eval")>(),
   buildDiffVsPrevious: vi.fn(() => null),
   diffKpis: vi.fn(() => ({})),
   isHistoryEntryCommittedError: vi.fn(() => false),

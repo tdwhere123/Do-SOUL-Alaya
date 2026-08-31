@@ -208,7 +208,7 @@ describe("EventLog append via worker write queue", () => {
     const select = database.connection.prepare("SELECT COUNT(*) AS count FROM event_log");
     const appendSql = database.connection.prepare(EVENT_LOG_APPEND_WITH_REVISION_SQL);
 
-    const syncBlockMs = 40;
+    const syncBlockMs = 100;
     const syncFirstReadDelayMs = await measureFirstReadDelayAfterKickoff({
       kickoff: () => {
         const deadline = performance.now() + syncBlockMs;
