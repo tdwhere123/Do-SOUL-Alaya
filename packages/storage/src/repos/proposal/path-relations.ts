@@ -12,8 +12,8 @@ import {
   type RowParser
 } from "../shared/parse-row.js";
 import type { PathRelationProposalPayload } from "./types.js";
-import type { ProposalPathRelationRow } from "./rows.js";
-import type { parseAcceptedPathRelationGovernanceInput } from "./acceptance.js";
+import type { ProposalPathRelationRow } from "./mappers/rows.js";
+import type { parseAcceptedPathRelationGovernanceInput } from "./mappers/acceptance.js";
 
 export function serializeProposedPathRelation(
   value: PathRelationProposalPayload | null

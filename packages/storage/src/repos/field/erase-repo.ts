@@ -18,13 +18,13 @@ import {
   fieldEraseBarrierParser,
   insertIdempotent,
   persistFieldTransaction
-} from "./mappers.js";
+} from "./mappers/mappers.js";
 import type {
   FieldEraseBarrierInput,
   FieldEraseBarrierRepo,
   FieldEraseBarrierRow
 } from "./ports.js";
-import { scrubDerivedPrivacyClosure } from "./erase/derived-closure.js";
+import { scrubDerivedPrivacyClosure } from "./writes/erase/derived-closure.js";
 
 type EraseSubject = Readonly<{
   subject_kind: ProjectionEraseSubjectKind;

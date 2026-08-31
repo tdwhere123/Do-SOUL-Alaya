@@ -5,8 +5,8 @@ import { StorageError } from "../../shared/errors.js";
 import {
   appendInCurrentTransaction as appendEventLogInTransaction,
   wrapAppendError
-} from "./event-log-append.js";
-import { appendEventLogViaWriteQueue } from "./event-log/queue-append.js";
+} from "./event-log/writes/event-log-append.js";
+import { appendEventLogViaWriteQueue } from "./event-log/writes/queue-append.js";
 import {
   CONVERSATION_MESSAGE_EVENT_TYPES,
   CreatedAtRowParser,
@@ -17,12 +17,12 @@ import {
   parseEventLogPage,
   queryEventLogRows,
   wrapEventLogQueryError
-} from "./event-log-rows.js";
+} from "./event-log/mappers/event-log-rows.js";
 import { CountRowParser, parseOptionalRow } from "../shared/parse-row.js";
 import {
   prepareEventLogStatements,
   type EventLogStatements
-} from "./event-log-statements.js";
+} from "./event-log/statements/event-log-statements.js";
 import {
   executeCountDistinctAppliedSessionOverrideRuns,
   executeHasNarrativeConsolidationTrigger,
@@ -32,8 +32,8 @@ import {
   executeQueryGovernanceLeaseEventsByRun,
   executeQueryNarrativeDigestPayloadsByRun,
   wrapGovernanceQueryError
-} from "./event-log-governance-queries.js";
-import { queryEventLogScopeAll } from "./event-log-scope-queries.js";
+} from "./event-log/reads/event-log-governance-queries.js";
+import { queryEventLogScopeAll } from "./event-log/reads/event-log-scope-queries.js";
 import type { EventLogAppendInput, EventLogPageOptions, EventLogRepo } from "./event-log-types.js";
 
 export type { EventLogAppendInput, EventLogPageOptions, EventLogRepo } from "./event-log-types.js";

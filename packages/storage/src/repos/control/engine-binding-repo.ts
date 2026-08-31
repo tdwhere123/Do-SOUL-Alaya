@@ -5,7 +5,7 @@ import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-h
 import {
   decryptApiKeyAtRest,
   encryptApiKeyAtRest
-} from "../shared/api-key-cipher.js";
+} from "./api-key-cipher.js";
 
 export type EngineBindingRecordCreateInput = Omit<EngineBindingRecord, "created_at" | "updated_at">;
 

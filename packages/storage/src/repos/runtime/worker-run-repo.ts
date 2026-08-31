@@ -9,7 +9,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString } from "../shared/validators.js";
-import { prepareWorkerRunStatements, type SqliteStatement } from "./worker-run-statements.js";
+import { prepareWorkerRunStatements, type SqliteStatement } from "./statements/worker-run-statements.js";
 
 export interface WorkerRunRepo {
   getById(workerRunId: string): Promise<Readonly<DelegatedWorkerRun> | null>;

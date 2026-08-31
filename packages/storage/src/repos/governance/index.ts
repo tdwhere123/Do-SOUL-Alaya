@@ -6,7 +6,7 @@ export {
   type ActiveConstraintQueryResult,
   type ActiveConstraintRecord,
   type ActiveConstraintSourceChannel
-} from "./active-constraints.js";
+} from "./reads/active-constraints.js";
 export {
   SqliteClaimFormRepo,
   type ClaimFormRepo

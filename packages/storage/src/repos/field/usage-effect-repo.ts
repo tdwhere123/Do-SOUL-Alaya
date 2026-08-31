@@ -19,7 +19,7 @@ import {
   fieldCausalUsageParser,
   fieldProofEffectParser,
   insertIdempotent
-} from "./mappers.js";
+} from "./mappers/mappers.js";
 import type {
   FieldCausalUsageRepo,
   FieldCausalUsageRow,

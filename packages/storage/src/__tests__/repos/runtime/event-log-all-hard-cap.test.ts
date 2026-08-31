@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   enforceEventLogAllHardCap,
   EVENT_LOG_ALL_QUERY_HARD_MAX
-} from "../../../repos/runtime/event-log-rows.js";
+} from "../../../repos/runtime/event-log/mappers/event-log-rows.js";
 
 describe("enforceEventLogAllHardCap", () => {
   it("accepts histories at or below the hard cap", () => {

@@ -18,7 +18,7 @@ import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 import {
   prepareSynthesisCapsuleStatements,
   type SynthesisCapsuleStatements
-} from "./synthesis-capsule-statements.js";
+} from "./statements/synthesis-capsule-statements.js";
 import {
   buildSynthesisFieldRefinementLevels,
   buildSynthesisFieldView,
@@ -26,10 +26,10 @@ import {
   normalizeSynthesisRefinementDepths,
   type SynthesisCapsuleKeywordHit,
   type SynthesisKeywordFieldResult
-} from "./synthesis-search/synthesis-keyword-field.js";
+} from "./reads/synthesis-search/synthesis-keyword-field.js";
 
 export type { SynthesisCapsuleKeywordHit } from
-  "./synthesis-search/synthesis-keyword-field.js";
+  "./reads/synthesis-search/synthesis-keyword-field.js";
 
 export interface SynthesisCapsuleRepo {
   create(capsule: SynthesisCapsule): Promise<Readonly<SynthesisCapsule>>;

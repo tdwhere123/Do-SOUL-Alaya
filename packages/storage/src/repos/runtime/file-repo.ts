@@ -10,7 +10,7 @@ import {
   getEventLogWriter,
   insertEventLogEntry,
   type EventLogDraftInput
-} from "../shared/event-log-writer.js";
+} from "./writes/event-log-writer.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface FileRepo {

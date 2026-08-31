@@ -8,7 +8,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
-import { prepareOrphanRadarStatements, type SqliteStatement } from "./orphan-radar-statements.js";
+import { prepareOrphanRadarStatements, type SqliteStatement } from "./statements/orphan-radar-statements.js";
 
 export interface OrphanRadarRepo {
   create(record: Readonly<OrphanRadar>): Readonly<OrphanRadar>;

@@ -15,7 +15,7 @@ import {
   prepareMergeStatements,
   prepareSynthesisStatements,
   type MergeStatements
-} from "./garden-librarian-statements.js";
+} from "./statements/garden-librarian-statements.js";
 import { assertLegacyPathRelationReadAllowed } from "../../sqlite/temporal-projection-selection.js";
 
 const NEIGHBOR_GROUP_LIMIT = 120;

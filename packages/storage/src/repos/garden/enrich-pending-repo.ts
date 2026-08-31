@@ -1,10 +1,10 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { prepareEnrichPendingStatements } from "./enrich-pending-statements.js";
+import { prepareEnrichPendingStatements } from "./statements/enrich-pending-statements.js";
 import {
   createClaimBatchTransaction,
   createRecordFailedAttemptTransaction
-} from "./enrich-pending-transactions.js";
+} from "./writes/enrich-pending-transactions.js";
 
 // invariant: durable hand-off queue between the synchronous write-path and the
 // asynchronous Garden BULK_ENRICH worker. Materialization enqueues one row per

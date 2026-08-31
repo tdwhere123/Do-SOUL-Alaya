@@ -9,8 +9,8 @@ import {
   parsePathRelation,
   parsePathRelationRow,
   type PathRelationRow
-} from "../path-relation-rows.js";
-import { PATH_RELATION_SELECT_COLUMNS } from "../path-relation-sql.js";
+} from "../mappers/path-relation-rows.js";
+import { PATH_RELATION_SELECT_COLUMNS } from "../statements/path-relation-sql.js";
 
 export type SoftAssociationPathReadOptions = Readonly<{ readonly asOf?: string }>;
 

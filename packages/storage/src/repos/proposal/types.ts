@@ -8,7 +8,7 @@ import type {
   ProposalResolutionState,
   SynthesisCapsule
 } from "@do-soul/alaya-protocol";
-import type { EventLogDraftInput } from "../shared/event-log-writer.js";
+import type { EventLogDraftInput } from "../runtime/writes/event-log-writer.js";
 
 export interface ProposalCreateInput {
   readonly proposal: Proposal;

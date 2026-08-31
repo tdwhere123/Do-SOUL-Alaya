@@ -13,7 +13,7 @@ import { parseOptionalRow, parseRows } from "../shared/parse-row.js";
 import {
   searchEvidenceByKeyword,
   searchEvidenceByKeywordField
-} from "./evidence-search/evidence-keyword-search.js";
+} from "./reads/evidence-search/evidence-keyword-search.js";
 import type {
   EvidenceCapsuleKeywordHit,
   EvidenceSearchMatch,
@@ -24,7 +24,7 @@ import {
   loadEvidenceCapsulesByIds,
   loadEvidenceSourceAnchorsByIds,
   loadRecallQualifiedFactKeysByIds
-} from "./evidence-capsule-bulk-read.js";
+} from "./reads/evidence-capsule-bulk-read.js";
 import {
   DEFAULT_EVIDENCE_PAGE,
   EvidenceCapsuleRowParser,
@@ -33,18 +33,18 @@ import {
   parseEvidenceHealthState,
   parseUpdatedAt,
   wrapEvidenceCapsuleQueryError
-} from "./evidence-capsule-mappers.js";
+} from "./mappers/evidence-capsule-mappers.js";
 import {
   prepareEvidenceCapsuleStatements,
   type EvidenceCapsuleStatements
-} from "./evidence-capsule-statements.js";
-import { RecallQualifiedEvidenceReader } from "./recall-qualified-evidence-reader.js";
+} from "./statements/evidence-capsule-statements.js";
+import { RecallQualifiedEvidenceReader } from "./reads/recall-qualified-evidence-reader.js";
 import { prepareFactFrameFormationInsert } from
-  "./fact-frame-formation/capture-store.js";
+  "./writes/fact-frame-formation/capture-store.js";
 import { prepareSemanticFactorFormationInsert } from
-  "./semantic-factor-formation/capture-store.js";
+  "./writes/semantic-factor-formation/capture-store.js";
 import { EvidenceProjectionIntegrityError } from
-  "./qualification/qualified-evidence-projection.js";
+  "./reads/qualification/qualified-evidence-projection.js";
 import type {
   EvidenceCapsuleListPageOptions,
   EvidenceCapsuleRepo,

@@ -1,4 +1,4 @@
-import { isEnvFlagDisabled } from "../../shared/env-bool.js";
+import { isEnvFlagDisabled } from "../env-bool.js";
 import { configureSqliteWriteQueuePort, getSqliteWriteQueuePort } from "../db.js";
 import type { SqliteWriteQueuePort } from "./port.js";
 import {

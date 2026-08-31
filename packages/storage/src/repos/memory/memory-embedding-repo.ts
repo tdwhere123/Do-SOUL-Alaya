@@ -16,15 +16,15 @@ import {
   parseWorkspaceId,
   runUpsertArgs,
   type MemoryEmbeddingMetadataRow
-} from "./memory-embedding-mappers.js";
+} from "./mappers/memory-embedding-mappers.js";
 import {
   prepareMemoryEmbeddingStatements,
   type SqliteStatement
-} from "./memory-embedding-statements.js";
+} from "./statements/memory-embedding-statements.js";
 import {
   buildWorkspaceEmbeddingQuery,
   rejectUnboundedWorkspaceEmbeddingQuery
-} from "./memory-embedding-workspace-query.js";
+} from "./reads/memory-embedding-workspace-query.js";
 
 export interface MemoryEmbeddingRecord {
   readonly object_id: string;

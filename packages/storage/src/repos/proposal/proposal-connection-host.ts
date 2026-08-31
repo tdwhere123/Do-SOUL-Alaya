@@ -1,7 +1,7 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
-import { getEventLogWriter, insertEventLogEntry } from "../shared/event-log-writer.js";
-import { prepareProposalStatements, type ProposalStatements } from "./sqlite-proposal-statements.js";
+import { getEventLogWriter, insertEventLogEntry } from "../runtime/writes/event-log-writer.js";
+import { prepareProposalStatements, type ProposalStatements } from "./statements/sqlite-proposal-statements.js";
 
 export class ProposalConnectionHost implements ProposalStatements {
   private readonly statementHolder: RefreshableStatementHolder<ProposalStatements>;

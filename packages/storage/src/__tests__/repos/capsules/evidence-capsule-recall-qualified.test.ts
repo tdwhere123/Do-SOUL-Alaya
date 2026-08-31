@@ -29,7 +29,7 @@ import {
 import {
   assertionCapsule,
   persistAssertionProof
-} from "./qualification/verified-assertion-qualification-fixture.js";
+} from "./reads/qualification/verified-assertion-qualification-fixture.js";
 
 afterEach(() => {
   for (const database of evidenceCapsuleDatabases) database.close();

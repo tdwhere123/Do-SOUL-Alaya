@@ -1,0 +1,340 @@
+import type { MemoryEntrySemanticTieRow } from "../semantic-tie-order.js";
+import type { MemoryEntryKeywordSearchResult } from "../types.js";
+import {
+  isCjkSegmentationCandidate,
+  segmentCjkRun
+} from "../../shared/cjk-segmentation.js";
+
+export interface ExactKeywordCandidateRow extends MemoryEntrySemanticTieRow {
+  readonly object_id: string;
+}
+
+export interface ExactKeywordSearchRow {
+  readonly object_id: string;
+  readonly matched_token_count: number;
+}
+
+export interface FtsKeywordSearchRow {
+  readonly object_id: string;
+  readonly raw_rank: number;
+}
+
+type RankedKeywordSearchResult = Readonly<
+  MemoryEntryKeywordSearchResult & { readonly sourcePriority: number; readonly sourceOrder: number }
+>;
+
+export type ObjectIdFilterColumn =
+  | "memory_entries.object_id"
+  | "memory_content_fts.object_id"
+  | "memory_content_fts_porter.object_id"
+  | "memory_object_key_fts.owner_id"
+  | "memory_object_key_fts_trigram.owner_id"
+  | "k.owner_id";
+
+const OBJECT_ID_FILTER_COLUMNS: Readonly<Record<ObjectIdFilterColumn, string>> = Object.freeze({
+  "memory_entries.object_id": "object_id",
+  "memory_content_fts.object_id": "memory_content_fts.object_id",
+  "memory_content_fts_porter.object_id": "memory_content_fts_porter.object_id",
+  "memory_object_key_fts.owner_id": "memory_object_key_fts.owner_id",
+  "memory_object_key_fts_trigram.owner_id": "memory_object_key_fts_trigram.owner_id",
+  "k.owner_id": "k.owner_id"
+});
+
+export function buildObjectIdFilterSql(
+  objectIds: readonly string[] | undefined,
+  column: ObjectIdFilterColumn = "memory_entries.object_id"
+): Readonly<{ sql: string; params: readonly string[] }> {
+  if (objectIds === undefined || objectIds.length === 0) {
+    return Object.freeze({
+      sql: "",
+      params: []
+    });
+  }
+
+  const columnName = OBJECT_ID_FILTER_COLUMNS[column];
+  if (columnName === undefined) {
+    throw new Error(`Invalid object ID filter column: ${column}`);
+  }
+
+  return Object.freeze({
+    sql: `AND ${columnName} IN (${objectIds.map(() => "?").join(", ")})`,
+    params: objectIds
+  });
+}
+
+export function normalizeKeywordSearchObjectIds(objectIds: readonly string[]): readonly string[] {
+  return Object.freeze(
+    [...new Set(objectIds.map((objectId) => objectId.trim()).filter((objectId) => objectId.length > 0))]
+  );
+}
+
+interface ObjectKeySearchLanes {
+  readonly porter?: readonly FtsKeywordSearchRow[];
+  readonly trigram?: readonly FtsKeywordSearchRow[];
+}
+
+export function mergeKeywordSearchRows(
+  exactRows: readonly ExactKeywordSearchRow[],
+  trigramRows: readonly FtsKeywordSearchRow[],
+  limit: number,
+  porterRows: readonly FtsKeywordSearchRow[] = [],
+  objectKeyLanes: Readonly<ObjectKeySearchLanes> = {}
+): readonly Readonly<MemoryEntryKeywordSearchResult>[] {
+  const exactScores = buildGroupedOrdinalScores(exactRows, (row) => row.matched_token_count);
+  const trigramScores = buildGroupedOrdinalScores(trigramRows, (row) => row.raw_rank);
+  const porterScores = buildGroupedOrdinalScores(porterRows, (row) => row.raw_rank);
+  const keyPorter = objectKeyLanes.porter ?? [];
+  const keyTrigram = objectKeyLanes.trigram ?? [];
+  const keyPorterScores = buildGroupedOrdinalScores(keyPorter, (row) => row.raw_rank);
+  const keyTrigramScores = buildGroupedOrdinalScores(keyTrigram, (row) => row.raw_rank);
+  const trigramScoreByObjectId = buildTrigramScoreByObjectId(trigramRows, trigramScores);
+  const objectKeyScoreByObjectId = mergeScoreMaps(
+    buildTrigramScoreByObjectId(keyPorter, keyPorterScores),
+    buildTrigramScoreByObjectId(keyTrigram, keyTrigramScores)
+  );
+  const byObjectId = new Map<string, RankedKeywordSearchResult>();
+
+  exactRows.forEach((row, index) => {
+    considerKeywordRow(byObjectId, row.object_id, exactScores[index] ?? 0, 0, index);
+  });
+  porterRows.forEach((row, index) => {
+    considerKeywordRow(byObjectId, row.object_id, porterScores[index] ?? 0, 1, index);
+  });
+  keyPorter.forEach((row, index) => {
+    considerKeywordRow(byObjectId, row.object_id, keyPorterScores[index] ?? 0, 1, index);
+  });
+  trigramRows.forEach((row, index) => {
+    considerKeywordRow(byObjectId, row.object_id, trigramScores[index] ?? 0, 2, index);
+  });
+  keyTrigram.forEach((row, index) => {
+    considerKeywordRow(byObjectId, row.object_id, keyTrigramScores[index] ?? 0, 2, index);
+  });
+
+  return Object.freeze(
+    [...byObjectId.values()]
+      .sort(compareKeywordRows)
+      .slice(0, limit)
+      .map((row) => toKeywordSearchResult(row, trigramScoreByObjectId, objectKeyScoreByObjectId))
+  );
+}
+
+function buildTrigramScoreByObjectId(
+  trigramRows: readonly FtsKeywordSearchRow[],
+  trigramScores: readonly number[]
+): ReadonlyMap<string, number> {
+  const scoreByObjectId = new Map<string, number>();
+  trigramRows.forEach((row, index) => {
+    const score = trigramScores[index] ?? 0;
+    scoreByObjectId.set(row.object_id, Math.max(scoreByObjectId.get(row.object_id) ?? 0, score));
+  });
+  return scoreByObjectId;
+}
+
+function considerKeywordRow(
+  byObjectId: Map<string, RankedKeywordSearchResult>,
+  objectId: string,
+  normalizedRank: number,
+  sourcePriority: number,
+  sourceOrder: number
+): void {
+  const existing = byObjectId.get(objectId);
+  if (
+    existing !== undefined &&
+    (existing.normalized_rank > normalizedRank ||
+      (existing.normalized_rank === normalizedRank && existing.sourcePriority <= sourcePriority))
+  ) {
+    return;
+  }
+  byObjectId.set(
+    objectId,
+    Object.freeze({ object_id: objectId, normalized_rank: normalizedRank, sourcePriority, sourceOrder })
+  );
+}
+
+function compareKeywordRows(left: RankedKeywordSearchResult, right: RankedKeywordSearchResult): number {
+  return (
+    right.normalized_rank - left.normalized_rank ||
+    left.sourcePriority - right.sourcePriority ||
+    left.sourceOrder - right.sourceOrder ||
+    left.object_id.localeCompare(right.object_id)
+  );
+}
+
+function toKeywordSearchResult(
+  row: RankedKeywordSearchResult,
+  trigramScoreByObjectId: ReadonlyMap<string, number>,
+  objectKeyScoreByObjectId: ReadonlyMap<string, number>
+): Readonly<MemoryEntryKeywordSearchResult> {
+  const trigramRank = trigramScoreByObjectId.get(row.object_id) ?? 0;
+  const objectKeyRank = objectKeyScoreByObjectId.get(row.object_id) ?? 0;
+  return Object.freeze({
+    object_id: row.object_id,
+    normalized_rank: row.normalized_rank,
+    ...(trigramRank > 0 ? { trigram_rank: trigramRank } : {}),
+    ...(objectKeyRank > 0 ? { object_key_rank: objectKeyRank } : {})
+  });
+}
+
+function mergeScoreMaps(
+  left: ReadonlyMap<string, number>,
+  right: ReadonlyMap<string, number>
+): ReadonlyMap<string, number> {
+  const merged = new Map(left);
+  for (const [objectId, score] of right) {
+    merged.set(objectId, Math.max(merged.get(objectId) ?? 0, score));
+  }
+  return merged;
+}
+
+export function mergeExactKeywordSearchRows(
+  left: readonly ExactKeywordSearchRow[],
+  right: readonly ExactKeywordSearchRow[]
+): readonly ExactKeywordSearchRow[] {
+  if (right.length === 0) return left;
+  if (left.length === 0) return right;
+  const counts = new Map<string, number>();
+  for (const row of [...left, ...right]) {
+    counts.set(row.object_id, Math.max(counts.get(row.object_id) ?? 0, row.matched_token_count));
+  }
+  return Object.freeze(
+    [...counts.entries()]
+      .sort((leftRow, rightRow) => rightRow[1] - leftRow[1] || leftRow[0].localeCompare(rightRow[0]))
+      .map(([object_id, matched_token_count]) => Object.freeze({ object_id, matched_token_count }))
+  );
+}
+
+export function buildGroupedOrdinalScores<T>(
+  rows: readonly T[],
+  getGroupValue: (row: T) => number
+): readonly number[] {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const scores = new Array<number>(rows.length);
+  let groupStart = 0;
+
+  while (groupStart < rows.length) {
+    const groupValue = getGroupValue(rows[groupStart]!);
+    let groupEnd = groupStart + 1;
+
+    while (groupEnd < rows.length && getGroupValue(rows[groupEnd]!) === groupValue) {
+      groupEnd += 1;
+    }
+
+    let total = 0;
+    for (let index = groupStart; index < groupEnd; index += 1) {
+      total += (rows.length - index) / rows.length;
+    }
+
+    const score = total / (groupEnd - groupStart);
+    for (let index = groupStart; index < groupEnd; index += 1) {
+      scores[index] = score;
+    }
+
+    groupStart = groupEnd;
+  }
+
+  return Object.freeze(scores);
+}
+
+const MAX_FTS_QUERY_TOKENS = 32;
+
+// invariant: FTS5 has more reserved metacharacters than the original
+// denylist (":, ", *) covered — at minimum `(`, `)`, `+`, `-`, `^`, plus
+// the column-filter `:` and NEAR/0 word forms. Rather than chase the FTS5
+// grammar's full set, this helper strips any codepoint outside the
+// whitelist `\p{L} \p{N} _ space`. Downstream callers MUST also
+// phrase-wrap each emitted token (e.g. `"tok"`) so a future grammar
+// extension cannot reintroduce injection via a token that slipped through.
+const FTS_QUERY_TOKEN_STRIP = /[^\p{L}\p{N}_\s]+/gu;
+
+function sanitizeFtsToken(token: string): string {
+  return token.replace(FTS_QUERY_TOKEN_STRIP, "").trim();
+}
+
+export function tokenizeFtsQuery(queryText: string): readonly string[] {
+  const surfaceTokens = queryText
+    .trim()
+    .split(/\s+/u)
+    .map((token) => sanitizeFtsToken(token))
+    .filter((token) => token.length > 0);
+  const expanded: string[] = [];
+  for (const token of surfaceTokens) {
+    expanded.push(token);
+    // anchor: jieba word-level pieces are appended after the surface
+    // token so the trigram lane still sees the long form (substring
+    // match) AND any FTS5 lane that handles short tokens sees the word
+    // boundaries. see also: shared/cjk-segmentation.ts.
+    if (isCjkSegmentationCandidate(token)) {
+      for (const piece of segmentCjkRun(token)) {
+        const trimmed = sanitizeFtsToken(piece);
+        if (trimmed.length > 0 && trimmed !== token) {
+          expanded.push(trimmed);
+        }
+      }
+    }
+  }
+  const deduped = Array.from(new Set(expanded));
+  return Object.freeze(deduped.slice(0, MAX_FTS_QUERY_TOKENS));
+}
+
+export function countQueryCodepoints(value: string): number {
+  return Array.from(value).length;
+}
+
+// Script routing for the dual-index FTS. The porter+unicode61 table only
+// tokenizes space-delimited / Latin-script words; CJK runs collapse to a
+// single token there. The trigram table is script-agnostic. A token that
+// bears any CJK codepoint must be routed to the trigram table; a word-like
+// Latin/Cyrillic/etc. token is additionally routed to the porter table for
+// word-level stemmed BM25 while still consulting trigram for substrings.
+const CJK_TOKEN_PATTERN =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+export function tokenBearsCjk(token: string): boolean {
+  return CJK_TOKEN_PATTERN.test(token);
+}
+
+export interface KeywordLaneTokens {
+  readonly exact: readonly string[];
+  readonly trigram: readonly string[];
+  readonly porter: readonly string[];
+}
+
+export function partitionKeywordLaneTokens(tokens: readonly string[]): KeywordLaneTokens {
+  const trigram = tokens.filter((token) => countQueryCodepoints(token) >= 3);
+  return {
+    exact: tokens.filter((token) => countQueryCodepoints(token) < 3),
+    trigram,
+    porter: trigram.filter((token) => !tokenBearsCjk(token))
+  };
+}
+
+export function objectKeyExactTokens(tokens: readonly string[]): readonly string[] {
+  // FTS5 trigram cannot MATCH below 3 chars; porter is >=3 codepoints, so ASCII shorts ride content exact.
+  return Object.freeze(tokens.filter((token) =>
+    countQueryCodepoints(token) < 3 && tokenBearsCjk(token)
+  ));
+}
+
+export function createShortKeywordMatcher(token: string): (content: string) => boolean {
+  if (shouldMatchShortWordByTokenBoundary(token)) {
+    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}_])${escapeRegex(token)}($|[^\\p{L}\\p{N}_])`, "iu");
+    return (content) => pattern.test(content);
+  }
+
+  const normalizedToken = token.toLocaleLowerCase();
+  return (content) => content.toLocaleLowerCase().includes(normalizedToken);
+}
+
+function shouldMatchShortWordByTokenBoundary(token: string): boolean {
+  return SHORT_WORD_TOKEN_PATTERN.test(token) && !SHORT_CJK_TOKEN_PATTERN.test(token);
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+const SHORT_CJK_TOKEN_PATTERN = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const SHORT_WORD_TOKEN_PATTERN = /^[\p{L}\p{N}_]+$/u;

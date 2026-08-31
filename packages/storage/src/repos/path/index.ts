@@ -30,7 +30,7 @@ export {
   assertRelationProjectionCurrent,
   isLegacyPathIndexUnbound,
   isRelationProjectionReadable
-} from "./relation-assertion/projection-reader.js";
+} from "./reads/relation-assertion/projection-reader.js";
 export {
   digestRelationFormationEventSource,
   type RelationFormationEventSource
@@ -39,7 +39,7 @@ export {
   SqliteTemporalPathProjectionReader,
   TemporalProjectionGenerationMissingError,
   type TemporalProjectionReadOptions
-} from "./temporal-path-projection-reader.js";
+} from "./reads/temporal-path-projection-reader.js";
 export {
   SqliteSoftAssociationPathRepo,
   type SoftAssociationPathReadOptions

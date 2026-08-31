@@ -6,7 +6,7 @@ import type {
 import { StorageError } from "../../shared/errors.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { parseOptionalRow } from "../shared/parse-row.js";
-import { generationFromRow, generationToRow } from "./field-receipts.js";
+import { generationFromRow, generationToRow } from "./mappers/field-receipts.js";
 import { verifyPersistedGeneration } from "./identity.js";
 import {
   fieldProjectionGenerationParser,
@@ -16,7 +16,7 @@ import {
   insertIdempotent,
   persistFieldTransaction,
   persistFieldWrite
-} from "./mappers.js";
+} from "./mappers/mappers.js";
 import type {
   FieldProjectionGenerationRepo,
   FieldProjectionArtifactsRow,

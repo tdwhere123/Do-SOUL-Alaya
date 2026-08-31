@@ -8,7 +8,7 @@ import {
 import type {
   LexicalLiveMergeCapture,
   LexicalRawRankReceipt
-} from "./search/lexical-raw-rank-capture.js";
+} from "./reads/search/lexical-raw-rank-capture.js";
 
 export type MemoryEntryRepoUpdateFields = ProtocolMemoryEntryRepoUpdateFields & {
   readonly last_used_at?: string;

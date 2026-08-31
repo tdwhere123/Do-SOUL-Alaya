@@ -1,0 +1,285 @@
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  buildObjectIdFilterSql,
+  mergeExactKeywordSearchRows,
+  mergeKeywordSearchRows,
+  objectKeyExactTokens,
+  tokenizeFtsQuery,
+  type ExactKeywordSearchRow,
+  type FtsKeywordSearchRow
+} from "../../../../repos/memory-entry/reads/keyword-search.js";
+import {
+  __resetCjkSegmentationStateForTests,
+  __setCjkSegmentationLoaderForTests,
+  segmentCjkRun,
+  warmCjkSegmentation
+} from "../../../../repos/shared/cjk-segmentation.js";
+
+describe("buildObjectIdFilterSql", () => {
+  it("builds parameterized filters for allowlisted object id columns", () => {
+    expect(buildObjectIdFilterSql(["a", "b"])).toEqual({
+      sql: "AND object_id IN (?, ?)",
+      params: ["a", "b"]
+    });
+    expect(buildObjectIdFilterSql(["x"], "memory_content_fts.object_id")).toEqual({
+      sql: "AND memory_content_fts.object_id IN (?)",
+      params: ["x"]
+    });
+    expect(buildObjectIdFilterSql(["y"], "memory_content_fts_porter.object_id")).toEqual({
+      sql: "AND memory_content_fts_porter.object_id IN (?)",
+      params: ["y"]
+    });
+    expect(buildObjectIdFilterSql(["z"], "memory_object_key_fts.owner_id")).toEqual({
+      sql: "AND memory_object_key_fts.owner_id IN (?)",
+      params: ["z"]
+    });
+  });
+
+  it("does not expose arbitrary SQL identifier fragments", () => {
+    // @ts-expect-error arbitrary SQL fragments are intentionally not accepted.
+    expect(() => buildObjectIdFilterSql(["a"], "object_id); DROP TABLE memory_entries; --")).toThrowError(
+      "Invalid object ID filter column"
+    );
+  });
+
+  it("omits the filter when no object ids are supplied", () => {
+    expect(buildObjectIdFilterSql(undefined, "memory_content_fts.object_id")).toEqual({
+      sql: "",
+      params: []
+    });
+    expect(buildObjectIdFilterSql([], "memory_content_fts.object_id")).toEqual({
+      sql: "",
+      params: []
+    });
+  });
+});
+
+describe("mergeKeywordSearchRows trigram_rank passthrough", () => {
+  it("surfaces a trigram_rank for objects that matched the trigram lane", () => {
+    const exactRows: readonly ExactKeywordSearchRow[] = [];
+    const trigramRows: readonly FtsKeywordSearchRow[] = [
+      { object_id: "obj-trigram", raw_rank: -5 }
+    ];
+    const merged = mergeKeywordSearchRows(exactRows, trigramRows, 10);
+
+    expect(merged).toEqual([
+      { object_id: "obj-trigram", normalized_rank: 1, trigram_rank: 1 }
+    ]);
+  });
+
+  it("omits trigram_rank for objects that only matched exact or porter lanes", () => {
+    const exactRows: readonly ExactKeywordSearchRow[] = [
+      { object_id: "obj-exact", matched_token_count: 2 }
+    ];
+    const porterRows: readonly FtsKeywordSearchRow[] = [
+      { object_id: "obj-porter", raw_rank: -3 }
+    ];
+    const merged = mergeKeywordSearchRows(exactRows, [], 10, porterRows);
+
+    expect(merged).toEqual([
+      { object_id: "obj-exact", normalized_rank: 1 },
+      { object_id: "obj-porter", normalized_rank: 1 }
+    ]);
+    expect(merged.every((row) => row.trigram_rank === undefined)).toBe(true);
+  });
+
+  it("carries the trigram-lane ordinal score even when a higher-priority lane wins the merged rank", () => {
+    const exactRows: readonly ExactKeywordSearchRow[] = [
+      { object_id: "obj-both", matched_token_count: 1 }
+    ];
+    const trigramRows: readonly FtsKeywordSearchRow[] = [
+      { object_id: "obj-both", raw_rank: -9 },
+      { object_id: "obj-trigram-only", raw_rank: -1 }
+    ];
+    const merged = mergeKeywordSearchRows(exactRows, trigramRows, 10);
+    const byId = new Map(merged.map((row) => [row.object_id, row]));
+
+    // The exact lane wins the merged normalized_rank for obj-both, yet its
+    // distinct trigram-lane ordinal score is still surfaced for the
+    // trigram_fts fusion stream to read.
+    expect(byId.get("obj-both")?.trigram_rank).toBeGreaterThan(0);
+    expect(byId.get("obj-trigram-only")?.trigram_rank).toBeGreaterThan(0);
+  });
+
+  it("surfaces object_key_rank for objects admitted by Key FTS", () => {
+    const merged = mergeKeywordSearchRows([], [], 10, [], {
+      porter: [{ object_id: "obj-key", raw_rank: -4 }]
+    });
+    expect(merged).toEqual([
+      { object_id: "obj-key", normalized_rank: 1, object_key_rank: 1 }
+    ]);
+  });
+
+  it("collapses content porter and multiple key hits into one object vote", () => {
+    const merged = mergeKeywordSearchRows(
+      [],
+      [{ object_id: "obj-1", raw_rank: -1 }],
+      10,
+      [{ object_id: "obj-1", raw_rank: -2 }],
+      {
+        porter: [
+          { object_id: "obj-1", raw_rank: -5 },
+          { object_id: "obj-1", raw_rank: -3 }
+        ],
+        trigram: [
+          { object_id: "obj-1", raw_rank: -9 },
+          { object_id: "obj-1", raw_rank: -7 }
+        ]
+      }
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.object_id).toBe("obj-1");
+    expect(merged[0]?.normalized_rank).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("production object_id cutoff stays localeCompare", () => {
+  // "Z" vs "a": localeCompare puts "a" first; UTF-16 code-unit order puts "Z"
+  // first (charCode 90 < 97). Membership of a limit=1 prefix therefore changes
+  // if compareCodeUnits (or any identity sort) is reintroduced at the cutoff.
+  const localeFirst = "a";
+  const codeUnitFirst = "Z";
+
+  it("keeps localeCompare when porter and keyPorter share priority and sourceOrder", () => {
+    expect(localeFirst.localeCompare(codeUnitFirst)).toBeLessThan(0);
+    expect(codeUnitFirst.charCodeAt(0)! - localeFirst.charCodeAt(0)!).toBeLessThan(0);
+
+    // sort key: higher normalized_rank, then lower sourcePriority, then lower
+    // sourceOrder, then object_id. porterRows and objectKeyLanes.porter both
+    // have sourcePriority 1. Index-0 rows from those lanes share sourceOrder 0.
+    // considerKeywordRow inserts porter first then keyPorter; insertion order
+    // only decides the prefix when localeCompare returns 0.
+    const porterThenKey = mergeKeywordSearchRows(
+      [],
+      [],
+      1,
+      [{ object_id: codeUnitFirst, raw_rank: -1 }],
+      { porter: [{ object_id: localeFirst, raw_rank: -1 }] }
+    );
+    const keyThenPorter = mergeKeywordSearchRows(
+      [],
+      [],
+      1,
+      [{ object_id: localeFirst, raw_rank: -1 }],
+      { porter: [{ object_id: codeUnitFirst, raw_rank: -1 }] }
+    );
+
+    expect(porterThenKey.map((row) => row.object_id)).toEqual([localeFirst]);
+    expect(keyThenPorter.map((row) => row.object_id)).toEqual([localeFirst]);
+  });
+
+  it("orders mergeExactKeywordSearchRows ties by localeCompare, not code-units", () => {
+    expect(localeFirst.localeCompare(codeUnitFirst)).toBeLessThan(0);
+    expect(codeUnitFirst.charCodeAt(0)! - localeFirst.charCodeAt(0)!).toBeLessThan(0);
+
+    const merged = mergeExactKeywordSearchRows(
+      [{ object_id: codeUnitFirst, matched_token_count: 1 }],
+      [{ object_id: localeFirst, matched_token_count: 1 }]
+    );
+    const reversed = mergeExactKeywordSearchRows(
+      [{ object_id: localeFirst, matched_token_count: 1 }],
+      [{ object_id: codeUnitFirst, matched_token_count: 1 }]
+    );
+
+    expect(merged.map((row) => row.object_id)).toEqual([localeFirst, codeUnitFirst]);
+    expect(reversed.map((row) => row.object_id)).toEqual([localeFirst, codeUnitFirst]);
+  });
+});
+
+describe("objectKeyExactTokens", () => {
+  it("keeps trigram-infeasible CJK tokens and drops short ASCII", () => {
+    expect(objectKeyExactTokens(["I", "a", "to", "8", "3", "2月"])).toEqual(["2月"]);
+    expect(objectKeyExactTokens(["museum", "Retriever"])).toEqual([]);
+  });
+});
+
+describe("tokenizeFtsQuery multilingual segmentation", () => {
+  beforeAll(async () => {
+    const ready = await warmCjkSegmentation();
+    if (!ready) {
+      throw new Error("jieba unavailable in test env; native binding missing");
+    }
+  });
+
+  it("expands a Chinese-only query into jieba word pieces alongside the surface chunk", () => {
+    const tokens = tokenizeFtsQuery("我喜欢咖啡");
+    expect(tokens).toContain("我喜欢咖啡");
+    expect(tokens).toEqual(expect.arrayContaining(["喜欢", "咖啡"]));
+  });
+
+  it("preserves Latin/ASCII tokens unchanged in a mixed CJK + Latin query", () => {
+    const tokens = tokenizeFtsQuery("我用 ALAYA 记忆");
+    expect(tokens).toContain("ALAYA");
+    expect(tokens).toContain("记忆");
+  });
+
+  it("Korean (Hangul) tokens pass through whole — jieba degenerates so the surface form is the only output", () => {
+    const tokens = tokenizeFtsQuery("안녕 ALAYA");
+    expect(tokens).toContain("안녕");
+    expect(tokens).toContain("ALAYA");
+  });
+
+  it("Arabic tokens flow through the regex split intact", () => {
+    const tokens = tokenizeFtsQuery("مرحبا ALAYA");
+    expect(tokens).toContain("مرحبا");
+    expect(tokens).toContain("ALAYA");
+  });
+
+  it("English-only queries are byte-identical to the pre-segmentation behaviour", () => {
+    expect(tokenizeFtsQuery("hello world")).toEqual(["hello", "world"]);
+  });
+
+  it("strips FTS5 reserved punctuation from jieba pieces just like surface tokens", () => {
+    const tokens = tokenizeFtsQuery('"我喜欢咖啡"');
+    for (const token of tokens) {
+      expect(token).not.toMatch(/["*:]/);
+    }
+  });
+});
+
+describe("tokenizeFtsQuery CJK segmentation fail-soft", () => {
+  afterEach(() => {
+    __resetCjkSegmentationStateForTests();
+    vi.restoreAllMocks();
+  });
+
+  it("emits the surface CJK token when jieba is not yet warm so FTS5 still gets a match expression", () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    __setCjkSegmentationLoaderForTests(() => new Promise(() => undefined));
+    const tokens = tokenizeFtsQuery("我喜欢咖啡");
+    expect(tokens).toContain("我喜欢咖啡");
+    expect(tokens).not.toContain("喜欢");
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[CjkSegmentation] @node-rs/jieba not ready; using surface-token fallback for this call",
+      expect.objectContaining({
+        code: "ALAYA_STORAGE_CJK_SEGMENTATION_COLD_FALLBACK"
+      })
+    );
+
+    tokenizeFtsQuery("我喜欢咖啡");
+    expect(emitWarning).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits a structured warning once when jieba native loading fails", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    __setCjkSegmentationLoaderForTests(async () => {
+      throw new Error("mock jieba load failure");
+    });
+
+    await expect(warmCjkSegmentation()).resolves.toBe(false);
+    expect(segmentCjkRun("我喜欢咖啡")).toEqual(["我喜欢咖啡"]);
+    await expect(warmCjkSegmentation()).resolves.toBe(false);
+
+    expect(emitWarning).toHaveBeenCalledTimes(1);
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[CjkSegmentation] @node-rs/jieba unavailable; using surface-token fallback",
+      expect.objectContaining({
+        code: "ALAYA_STORAGE_CJK_SEGMENTATION_FALLBACK",
+        detail: JSON.stringify({
+          layer: "storage",
+          error: "mock jieba load failure"
+        })
+      })
+    );
+  });
+});

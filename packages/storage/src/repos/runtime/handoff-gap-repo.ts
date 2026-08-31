@@ -8,7 +8,7 @@ import {
   type ExpiredObjectRow,
   type GapRecordRow,
   type HandoffRecordRow
-} from "./handoff-gap-rows.js";
+} from "./mappers/handoff-gap-rows.js";
 
 const INSERT_HANDOFF_RECORD_SQL = `INSERT INTO handoff_records (
             runtime_id,

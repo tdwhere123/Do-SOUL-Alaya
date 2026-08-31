@@ -11,17 +11,17 @@ export {
 export {
   readObjectKeyEvidenceSources,
   type StoredObjectKeyEvidenceSource
-} from "./object-key-source-reader.js";
+} from "./reads/object-key-source-reader.js";
 export {
   scanObjectKeyRetrofitSources,
   type ObjectKeyRetrofitOwnerRow,
   type ObjectKeyRetrofitScan
-} from "./object-key-retrofit-scan.js";
+} from "./reads/object-key-retrofit-scan.js";
 export type {
   VerifiedAssertionLocatorResolutionInput,
   VerifiedAssertionLocatorResolver
 } from "./evidence-recall-types.js";
-export { RecallQualifiedEvidenceReader } from "./recall-qualified-evidence-reader.js";
+export { RecallQualifiedEvidenceReader } from "./reads/recall-qualified-evidence-reader.js";
 export {
   SqliteEvidenceRecallEmbeddingRepo,
   type EvidenceRecallEmbeddingRecord,
