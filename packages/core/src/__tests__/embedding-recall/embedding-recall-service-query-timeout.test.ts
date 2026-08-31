@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
-import { createProvider, mockEmbedTexts, type EmbedTextsMock } from "./embedding-recall-test-helpers.js";
+import { createProvider } from "./embedding-recall-test-helpers.js";
+import type { TestMock } from "../shared/mock-types.js";
 
 describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
-  function buildServiceWithTimeout(options: { timeoutMs?: number; embedTexts: EmbedTextsMock }) {
+  function buildServiceWithTimeout(options: { timeoutMs?: number; embedTexts: TestMock }) {
     return new EmbeddingRecallService({
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [])
@@ -26,7 +27,7 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
   }
 
   it("uses the 2500ms default when queryTimeoutMs is not configured", () => {
-    const embedTexts = mockEmbedTexts(async () => [new Float32Array([0, 1])]);
+    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
     const service = buildServiceWithTimeout({ embedTexts });
     service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
     expect(embedTexts).toHaveBeenCalledWith(
@@ -36,7 +37,7 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
   });
 
   it("respects an explicit queryTimeoutMs override", () => {
-    const embedTexts = mockEmbedTexts(async () => [new Float32Array([0, 1])]);
+    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
     const service = buildServiceWithTimeout({ timeoutMs: 800, embedTexts });
     service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
     expect(embedTexts).toHaveBeenCalledWith(
@@ -46,7 +47,7 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
   });
 
   it("clamps very large queryTimeoutMs to the 5000ms ceiling", () => {
-    const embedTexts = mockEmbedTexts(async () => [new Float32Array([0, 1])]);
+    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
     const service = buildServiceWithTimeout({ timeoutMs: 60_000, embedTexts });
     service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
     expect(embedTexts).toHaveBeenCalledWith(
@@ -56,7 +57,7 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
   });
 
   it("clamps very small queryTimeoutMs to the 50ms floor", () => {
-    const embedTexts = mockEmbedTexts(async () => [new Float32Array([0, 1])]);
+    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
     const service = buildServiceWithTimeout({ timeoutMs: 1, embedTexts });
     service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
     expect(embedTexts).toHaveBeenCalledWith(
@@ -66,7 +67,7 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
   });
 
   it("falls back to default when queryTimeoutMs is non-finite or non-positive", () => {
-    const embedTexts = mockEmbedTexts(async () => [new Float32Array([0, 1])]);
+    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
     const service = buildServiceWithTimeout({ timeoutMs: 0, embedTexts });
     service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
     expect(embedTexts).toHaveBeenCalledWith(

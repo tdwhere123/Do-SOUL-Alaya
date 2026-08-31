@@ -5,9 +5,6 @@ import { aggregateFamilyContributions } from
   "../../recall/delivery/fusion-delivery-families.js";
 import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService", () => {
 it("uses the unified path plane for direct (path_expansion) and multi-hop (graph_expansion) candidate generation", async () => {
@@ -107,11 +104,11 @@ it("uses the unified path plane for direct (path_expansion) and multi-hop (graph
       expect.arrayContaining(["seed-memory", "graph-target", "path-target"])
     );
     // path-target is a direct hop-1 association off the seed -> path_expansion.
-    expect(requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((candidate) => candidate.object_id === "path-target")?.admission_planes)
+    expect(result.diagnostics?.candidates.find((candidate) => candidate.object_id === "path-target")?.admission_planes)
       .toContain("path_expansion");
     // graph-target is reachable only via a second hop -> graph_expansion, and
     // the double-count guard keeps it off path_expansion.
-    const graphTargetDiag = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const graphTargetDiag = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "graph-target"
     );
     expect(graphTargetDiag?.admission_planes).toContain("graph_expansion");
@@ -222,7 +219,7 @@ it("excludes negative-bias paths from path_expansion positive candidates", async
     // path-target must NOT be admitted through path_expansion off the
     // negative path. If it appears at all (e.g. via another plane), its
     // admission_planes must not include path_expansion.
-    const pathTarget = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const pathTarget = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "path-target"
     );
     expect(pathTarget?.admission_planes ?? []).not.toContain("path_expansion");
@@ -327,7 +324,7 @@ it("excludes recall-neutral exception_to paths (recall_bias == 0) from path_expa
       diagnosticCapture: "answer_features"
     });
 
-    const pathTarget = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const pathTarget = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "path-target"
     );
     expect(pathTarget?.admission_planes ?? []).not.toContain("path_expansion");
@@ -394,8 +391,8 @@ it("records governed negative-path suppression without forking R_obj authority",
     const result = await recall();
     const replay = await recall();
 
-    const suppressed = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((c) => c.object_id === "suppressed-target");
-    const control = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((c) => c.object_id === "control-target");
+    const suppressed = result.diagnostics?.candidates.find((c) => c.object_id === "suppressed-target");
+    const control = result.diagnostics?.candidates.find((c) => c.object_id === "control-target");
     expect(suppressed).toBeDefined();
     expect(control).toBeDefined();
     expect(suppressed?.path_suppression_score ?? 0).toBeGreaterThan(0);
@@ -412,7 +409,7 @@ it("records governed negative-path suppression without forking R_obj authority",
     expect(replay.candidates.map((candidate) => candidate.object_id)).toEqual(
       result.candidates.map((candidate) => candidate.object_id)
     );
-    expect(requireLiveCandidateDiagnostics(replay.diagnostics?.candidates ?? []).find(
+    expect(replay.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "suppressed-target"
     )?.path_suppression_score).toBe(suppressed?.path_suppression_score);
   });
@@ -483,7 +480,7 @@ it("does not let an attention_only negative path suppress even at high strength"
         policyOverride: policy,
       diagnosticCapture: "answer_features"
     });
-      const target = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((c) => c.object_id === "victim-target");
+      const target = result.diagnostics?.candidates.find((c) => c.object_id === "victim-target");
       expect(target).toBeDefined();
       return target?.fused_score ?? -1;
     };

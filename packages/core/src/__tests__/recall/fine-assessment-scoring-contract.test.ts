@@ -7,7 +7,6 @@ import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes
 import { buildDefaultPolicy } from "../../recall/runtime/orchestration.js";
 import type {
   CoarseRecallCandidate,
-  PathInflowEdge,
   RecallSupplementaryData
 } from "../../recall/runtime/recall-service-types.js";
 import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
@@ -142,7 +141,7 @@ function supplementaryWithInflow(
 ): RecallSupplementaryData {
   const ftsRanks: Record<string, number> = {};
   const embeddingSimilarityScores: Record<string, number> = {};
-  const pathInflowByTarget: Record<string, PathInflowEdge[]> = {};
+  const pathInflowByTarget: NonNullable<RecallSupplementaryData["pathInflowByTarget"]> = {};
   for (const [index, candidate] of candidates.entries()) {
     const objectId = candidate.entry.object_id;
     ftsRanks[objectId] = Math.max(0, 1 - index * 0.07);

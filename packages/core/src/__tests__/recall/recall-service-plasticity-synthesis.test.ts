@@ -3,9 +3,6 @@ import { DYNAMICS_CONSTANTS, MemoryDimension, RecallContextEventType, ScopeClass
 import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 import { keywordSearchMethods } from "./fixtures/keyword-field-fixture.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService", () => {
 it("emits soul.recall.completed after recall", async () => {
@@ -367,7 +364,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
     expect(synthesisSearchByKeyword).toHaveBeenCalled();
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-1"]);
     expect(result.candidates[0]?.object_kind).toBe("memory_entry");
-    const synthesisDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const synthesisDiagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-1"
     );
     expect(synthesisDiagnostic?.per_stream_rank.synthesis_fts).toBe(1);
@@ -460,7 +457,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
     expect(findByIds).toHaveBeenCalledWith("workspace-1", ["memory-child"]);
     expect(result.candidates.map((candidate) => candidate.object_kind)).not.toContain("synthesis_capsule");
     expect(result.candidates.map((candidate) => candidate.object_id)).toContain("memory-child");
-    const childDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const childDiagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-child"
     );
     expect(childDiagnostic?.admission_planes).toContain("synthesis_child");
@@ -564,7 +561,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
     expect(deliveredIds).toContain("memory-valid-child");
     expect(deliveredIds).not.toContain("memory-cross-workspace-child");
     expect(deliveredIds).not.toContain("memory-dormant-child");
-    const diagnosticIds = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).map((candidate) => candidate.object_id) ?? [];
+    const diagnosticIds = result.diagnostics?.candidates.map((candidate) => candidate.object_id) ?? [];
     expect(diagnosticIds).toContain("memory-valid-child");
     expect(diagnosticIds).not.toContain("memory-cross-workspace-child");
     expect(diagnosticIds).not.toContain("memory-dormant-child");
@@ -644,7 +641,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
     const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
     expect(deliveredIds).toEqual(expect.arrayContaining(childRefs));
     expect(result.candidates.map((candidate) => candidate.object_kind)).not.toContain("synthesis_capsule");
-    const diagnosticIds = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).map((candidate) => candidate.object_id) ?? [];
+    const diagnosticIds = result.diagnostics?.candidates.map((candidate) => candidate.object_id) ?? [];
     expect(diagnosticIds).toEqual(expect.arrayContaining(childRefs));
   });
 

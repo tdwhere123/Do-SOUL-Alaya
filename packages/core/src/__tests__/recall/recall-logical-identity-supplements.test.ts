@@ -12,6 +12,7 @@ import {
 } from "../../recall/runtime/orchestration/coarse.js";
 import type {
   CoarseRecallCandidate,
+  RecallFusionBreakdown,
   RecallSupplementaryData
 } from "../../recall/runtime/recall-service-types.js";
 import { buildRecallPolicy } from "../../shared/recall-policy.js";

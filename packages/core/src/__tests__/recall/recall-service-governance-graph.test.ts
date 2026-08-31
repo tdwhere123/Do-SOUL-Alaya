@@ -3,9 +3,6 @@ import { type PathAnchorRef, type PathRelation, type RecallCandidate } from "@do
 import { RecallService } from "../../recall/recall-service.js";
 import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService", () => {
 describe("governance manifestation HARD CEILING — truth boundary", () => {
@@ -383,12 +380,12 @@ it("expands path-graph candidates across two hops with cycle-safe edge-type deca
     );
     // hop1-derived is a direct association -> path_expansion plane.
     expect(
-      requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((candidate) => candidate.object_id === "hop1-derived")?.admission_planes
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop1-derived")?.admission_planes
     ).toContain("path_expansion");
     // Negative-bias path is never followed, so its target stays out of both
     // associative planes.
     expect(
-      requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((candidate) => candidate.object_id === "superseded-target")
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "superseded-target")
         ?.admission_planes ?? []
     ).not.toContain("graph_expansion");
     // graph_expansion carries only the two hop-2 neighbors now.
@@ -400,10 +397,10 @@ it("expands path-graph candidates across two hops with cycle-safe edge-type deca
     });
     // score magnitude equals the static contribution_weight basis (0.25).
     expect(
-      requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((candidate) => candidate.object_id === "hop2-supported")?.structural_score
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop2-supported")?.structural_score
     ).toBeCloseTo(0.25);
     expect(
-      requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((candidate) => candidate.object_id === "hop2-recalled")?.structural_score
+      result.diagnostics?.candidates.find((candidate) => candidate.object_id === "hop2-recalled")?.structural_score
     ).toBeCloseTo(0.045);
     // The negative path's target is never used as a BFS anchor.
     const anchoredIds = findByAnchors.mock.calls.flatMap((call) =>

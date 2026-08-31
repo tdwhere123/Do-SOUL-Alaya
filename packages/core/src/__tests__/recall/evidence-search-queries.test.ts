@@ -15,9 +15,6 @@ import {
   fieldSearchFromScalar,
   keywordFieldResult
 } from "./fixtures/keyword-field-fixture.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
 
 describe("evidence search query construction", () => {
   it("keeps the shared legacy query list unchanged", () => {
@@ -113,7 +110,7 @@ describe("evidence scalar reference", () => {
     for (let offset = 0; offset < calledQueries.length; offset += expectedQueries.length) {
       expect(calledQueries.slice(offset, offset + expectedQueries.length)).toEqual(expectedQueries);
     }
-    const diagnostics = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []);
+    const diagnostics = result.diagnostics?.candidates ?? [];
     expect(diagnostics.find((candidate) => candidate.object_id === "memory-first")
       ?.per_stream_rank.evidence_fts).toBe(1);
     expect(diagnostics.find((candidate) => candidate.object_id === "memory-second")
@@ -424,7 +421,7 @@ function readEvidenceCandidateRanks(
   recall: Awaited<ReturnType<RecallService["recall"]>>
 ): Readonly<Record<string, number>> {
   return Object.fromEntries(
-    (requireLiveCandidateDiagnostics(recall.diagnostics?.candidates ?? []))
+    (recall.diagnostics?.candidates ?? [])
       .filter((candidate) => typeof candidate.per_stream_rank.evidence_fts === "number")
       .map((candidate) => [candidate.object_id, candidate.per_stream_rank.evidence_fts as number])
   );

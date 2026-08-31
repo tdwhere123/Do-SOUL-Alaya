@@ -25,7 +25,7 @@ describe("snapshot coherence identity rejects", () => {
       base_store_digest: "sha256:not-a-digest"
     }));
     expectCode("malformed_digest", exactVectorInput({
-      decision_contract_digest: "sha256:00"
+      decision_contract_digest: "md5:00"
     }));
     const vector = createSnapshotVectorV1(exactVectorInput());
     expect(() => verifySnapshotVectorV1({

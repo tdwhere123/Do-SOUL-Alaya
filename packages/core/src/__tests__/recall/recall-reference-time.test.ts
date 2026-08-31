@@ -396,7 +396,7 @@ describe("RecallService reference time", () => {
     });
 
     expect(result.candidates[0]?.object_id).toBe(requested.object_id);
-    const requestedDiagnostic = result.diagnostics?.fusion_breakdown.find(
+    const requestedDiagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === requested.object_id
     );
     expect(requestedDiagnostic?.per_axis_contribution?.temporal).toBe(1);

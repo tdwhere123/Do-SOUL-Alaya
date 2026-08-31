@@ -19,9 +19,6 @@ import {
   keywordFieldResult,
   keywordSearchMethods
 } from "../fixtures/keyword-field-fixture.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "../fine-assessment-selection-fixtures.js";
 
 const EVIDENCE_ID = "00000000-0000-4000-8000-000000000101";
 
@@ -95,10 +92,10 @@ describe("Assistant observation direct evidence", () => {
         }
       }
     ]);
-    expect(requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) =>
+    expect(result.diagnostics?.candidates.find((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )?.selector_observation?.evidence.source_role).toBe("assistant");
-    expect(requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) =>
+    expect(result.diagnostics?.candidates.find((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )?.answer_features?.answer_support_observations).toBeUndefined();
   });
@@ -144,7 +141,7 @@ describe("Assistant observation direct evidence", () => {
     const candidate = result.candidates.find((item) => item.object_id === EVIDENCE_ID);
     expect(candidate?.content_preview).toBe(neutralOwnerExcerpt);
     expect(candidate?.content_preview).not.toContain(recommendation);
-    expect(requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) =>
+    expect(result.diagnostics?.candidates.find((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )?.answer_features?.answer_support_observations).toBeUndefined();
   });

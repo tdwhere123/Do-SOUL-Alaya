@@ -1,17 +1,7 @@
-import { describe, expect, it, vi, type Mock } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { StrongRef } from "@do-soul/alaya-protocol";
 import { TargetRevalidateService } from "../../surfaces/target-revalidate-service.js";
-
-type CurrencyResult = {
-  status: "fresh" | "stale" | "missing";
-  stale_since?: string;
-};
-type CurrencyQuery = {
-  targetEntityType: string;
-  targetEntityId: string;
-  sinceTimestamp: string;
-};
-type CurrencyMock = Mock<(query: CurrencyQuery) => Promise<CurrencyResult>>;
+import type { TestMock } from "../shared/mock-types.js";
 
 describe("TargetRevalidateService", () => {
   it("returns fresh when target currency has not changed", async () => {
@@ -150,14 +140,14 @@ describe("TargetRevalidateService", () => {
 
 function createHarness(options: {
   readonly refs?: readonly StrongRef[];
-  readonly checkCurrency?: CurrencyMock;
+  readonly checkCurrency?: TestMock;
 } = {}) {
   const refs = options.refs ?? [createStrongRefFixture()];
   const findByTargets = vi.fn(async () => refs);
-  const checkCurrency: CurrencyMock =
+  const checkCurrency =
     options.checkCurrency ??
-    vi.fn(async (_query: CurrencyQuery): Promise<CurrencyResult> => ({
-      status: "fresh"
+    vi.fn(async () => ({
+      status: "fresh" as const
     }));
 
   return {
@@ -168,11 +158,7 @@ function createHarness(options: {
         findByTargets
       },
       currencyCheckPort: {
-        checkCurrency: async (
-          targetEntityType: string,
-          targetEntityId: string,
-          sinceTimestamp: string
-        ): Promise<CurrencyResult> =>
+        checkCurrency: async (targetEntityType: string, targetEntityId: string, sinceTimestamp: string) =>
           await checkCurrency({ targetEntityType, targetEntityId, sinceTimestamp })
       },
       now: () => "2026-04-15T01:00:00.000Z"

@@ -7,8 +7,7 @@ import {
   createEmbeddingRecord,
   createMemoryEntry,
   createProvider,
-  hashMemoryContent,
-  mockEmbedTexts
+  hashMemoryContent
 } from "./embedding-recall-test-helpers.js";
 
 interface CosineParityCase {
@@ -89,7 +88,7 @@ async function prepareCosineParityCase(testCase: CosineParityCase) {
         embedding: stored
       })])
     },
-    provider: createProvider({ embedTexts: mockEmbedTexts(async () => [query]) }),
+    provider: createProvider({ embedTexts: vi.fn(async () => [query]) }),
     eventLogRepo: { append: createEventAppendSpy(), queryByEntity: vi.fn(async () => []) }
   });
   const snapshot = await service.prepareRecallEmbeddingSnapshot({

@@ -14,13 +14,7 @@ describe("EvidenceService", () => {
     const order: string[] = [];
     const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const store = new Map<string, EvidenceCapsule>();
-    const persistCapsule = vi.fn((
-      capsule: EvidenceCapsule,
-      _searchProjections?: readonly unknown[],
-      _factFrameFormation?: unknown,
-      _semanticFactorFormation?: unknown,
-      _semanticCompleteness?: unknown
-    ) => {
+    const create = vi.fn((capsule: EvidenceCapsule) => {
       order.push("repo_create");
       store.set(capsule.object_id, Object.freeze({ ...capsule }));
       return store.get(capsule.object_id)!;
@@ -43,20 +37,8 @@ describe("EvidenceService", () => {
         transactional: <T>(fn: () => T) => fn()
       },
       evidenceCapsuleRepo: {
-        create: vi.fn(async (
-          capsule,
-          searchProjections,
-          factFrameFormation,
-          semanticFactorFormation,
-          semanticCompleteness
-        ) => persistCapsule(
-          capsule,
-          searchProjections,
-          factFrameFormation,
-          semanticFactorFormation,
-          semanticCompleteness
-        )),
-        createInCurrentTransaction: persistCapsule,
+        create,
+        createInCurrentTransaction: create,
         deleteById: vi.fn(async () => {
           throw new Error("not used");
         }),
@@ -87,7 +69,7 @@ describe("EvidenceService", () => {
 
     expect(order).toEqual(["event_log", "repo_create", "event_log", "notify"]);
     expect(created.object_id).toBe("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9");
-    expect(persistCapsule).toHaveBeenCalledWith(
+    expect(create).toHaveBeenCalledWith(
       expect.any(Object),
       [projection],
       expect.objectContaining({ status: "unavailable" }),
@@ -371,7 +353,7 @@ describe("EvidenceService", () => {
         transactional: <T>(fn: () => T) => fn()
       },
       evidenceCapsuleRepo: {
-        create: vi.fn(async (capsule) => {
+        create: vi.fn((capsule) => {
           const frozen = Object.freeze({ ...capsule });
           store.set(capsule.object_id, frozen);
           return frozen;

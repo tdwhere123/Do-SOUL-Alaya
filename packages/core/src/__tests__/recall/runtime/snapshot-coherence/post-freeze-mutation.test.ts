@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import type { EmbeddingNeighborHit } from "../../../../embedding-recall/embedding-recall-service.js";
 import { captureQueryCondition } from
   "../../../../recall/query/condition/query-condition-capture.js";
 import { prepareRecallRequest } from
@@ -89,7 +88,7 @@ describe("post-freeze mutable source isolation", () => {
   });
 
   it("keeps frozen entries isolated from post-freeze source mutation", async () => {
-    const original = mutableMemory({
+    const original = createMemoryEntry({
       object_id: FROZEN_EVIDENCE_ID,
       evidence_refs: [FROZEN_EVIDENCE_ID],
       content: "frozen pin object",
@@ -100,7 +99,7 @@ describe("post-freeze mutable source isolation", () => {
     const loaded = prepared.fieldProjectionMemories[0];
     expect(loaded?.content).toBe("frozen pin object");
     original.content = "mutated after freeze";
-    original.domain_tags.push("planted-tag");
+    (original.domain_tags as string[]).push("planted-tag");
     const facet = original.facet_tags?.[0];
     if (facet !== undefined) facet.value = "mutated";
     expect(loaded?.content).toBe("frozen pin object");
@@ -369,58 +368,35 @@ function expectFrozenUnavailable(
   }
 }
 
-type MemoryMutationPlant = Omit<MemoryEntry, "content" | "domain_tags" | "facet_tags" | "evidence_refs"> & {
-  content: string;
-  domain_tags: string[];
-  evidence_refs: string[];
-  facet_tags: Array<{ facet: string; value?: string }> | null | undefined;
-};
-
-function mutableMemory(overrides: Partial<MemoryEntry> = {}): MemoryMutationPlant {
-  const entry = createMemoryEntry(overrides);
-  return {
-    ...entry,
-    content: entry.content,
-    domain_tags: [...entry.domain_tags],
-    evidence_refs: [...entry.evidence_refs],
-    facet_tags: entry.facet_tags == null
-      ? entry.facet_tags
-      : entry.facet_tags.map((tag) => ({ facet: tag.facet, value: tag.value }))
-  };
-}
-
-function createLivePortSpies() {
-  return {
-    searchMemory: vi.fn(async () => keywordFieldResult([hit("pre-freeze-memory")])),
-    searchEvidence: vi.fn(async () => [hit("pre-freeze-evidence")]),
-    searchEvidenceField: vi.fn(async () => keywordFieldResult([hit("pre-freeze-evidence")])),
-    searchSynthesisField: vi.fn(async () =>
-      keywordFieldResult([hit("pre-freeze-synthesis")])
-    ),
-    querySupplement: vi.fn(async () => ({
-      supplementaryEntries: Object.freeze([]),
-      similarityHintsByObjectId: Object.freeze({})
-    })),
-    collectWorkspaceNeighbors: vi.fn(
-      async (): Promise<readonly Readonly<EmbeddingNeighborHit>[]> => []
-    ),
-    findByAnchors: vi.fn(async () => []),
-    getStrengthByMemoryId: vi.fn(async () => new Map<string, number>()),
-    findByEventTimeWindow: vi.fn(async () => []),
-    findActiveConstraints: vi.fn(async () => ({ constraints: [], total_count: 0 }))
-  };
-}
-
 function attachLivePortSpies(
   base: ReturnType<typeof createDependencies>["dependencies"]
 ) {
-  const spies = createLivePortSpies();
+  const searchMemory = vi.fn(async () => keywordFieldResult([hit("pre-freeze-memory")]));
+  const searchEvidence = vi.fn(async () => [hit("pre-freeze-evidence")]);
+  const searchEvidenceField = vi.fn(async () => keywordFieldResult([hit("pre-freeze-evidence")]));
+  const searchSynthesisField = vi.fn(async () =>
+    keywordFieldResult([hit("pre-freeze-synthesis")])
+  );
+  const querySupplement = vi.fn(async () => ({
+    supplementaryEntries: Object.freeze([]),
+    similarityHintsByObjectId: Object.freeze({})
+  }));
+  const collectWorkspaceNeighbors = vi.fn(async () => []);
+  const findByAnchors = vi.fn(async () => []);
+  const getStrengthByMemoryId = vi.fn(async () => new Map<string, number>());
+  const findByEventTimeWindow = vi.fn(async () => []);
+  const findActiveConstraints = vi.fn(async () => ({ constraints: [], total_count: 0 }));
+  const spies = {
+    searchMemory, searchEvidence, searchEvidenceField, searchSynthesisField,
+    querySupplement, collectWorkspaceNeighbors, findByAnchors, getStrengthByMemoryId,
+    findByEventTimeWindow, findActiveConstraints
+  };
   return { ...spies, dependencies: withLiveSpyPorts(base, spies) };
 }
 
 function withLiveSpyPorts(
   base: ReturnType<typeof createDependencies>["dependencies"],
-  spies: ReturnType<typeof createLivePortSpies>
+  spies: Omit<ReturnType<typeof attachLivePortSpies>, "dependencies">
 ) {
   return {
     ...base,

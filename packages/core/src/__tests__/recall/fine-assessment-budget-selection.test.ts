@@ -9,9 +9,7 @@ import {
   createRanks,
   createSupplementaryData,
   rankMap,
-  stageRanks,
-  requireLiveCandidateDiagnostic,
-  requireLiveCandidateDiagnostics
+  stageRanks
 } from "./fine-assessment-selection-fixtures.js";
 
 describe("selectFineAssessmentCandidates", () => {
@@ -38,7 +36,7 @@ describe("selectFineAssessmentCandidates", () => {
     });
 
     expect(result.candidates).toHaveLength(1);
-    expect(requireLiveCandidateDiagnostic(result.diagnostics[1])?.dropped_reason).toBe("max_total_tokens");
+    expect(result.diagnostics[1]?.dropped_reason).toBe("max_total_tokens");
     expect(estimate).toHaveBeenCalledTimes(2);
   });
 
@@ -79,7 +77,7 @@ describe("selectFineAssessmentCandidates", () => {
       ]))
     });
 
-    const oversizedDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics).find(
+    const oversizedDiagnostic = result.diagnostics.find(
       (candidate) => candidate.object_id === "oversized"
     );
     expect(oversizedDiagnostic).toMatchObject({

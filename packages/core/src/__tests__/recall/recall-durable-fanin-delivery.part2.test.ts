@@ -29,9 +29,7 @@ import { RecallService, type RecallServiceDependencies } from "../../recall/reca
 import { createFieldBackedRecallService } from
   "./fixtures/keyword-field-fixture.js";
 import { withFineDeliveryPath } from "./recall-service-test-fixtures.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
+
 
 const databases = new Set<StorageDatabase>();
 
@@ -135,7 +133,7 @@ async function inspectSibling(params: {
       diagnosticCapture: "answer_features"
     });
   const delivered = result.candidates.some((row) => row.object_id === SIBLING_ID);
-  const diagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((row) => row.object_id === SIBLING_ID);
+  const diagnostic = result.diagnostics?.candidates.find((row) => row.object_id === SIBLING_ID);
   if (diagnostic === undefined) {
     throw new Error("expected path-admitted sibling diagnostics");
   }

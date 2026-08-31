@@ -9,9 +9,6 @@ import { collectEmbeddingSupplement } from "../../recall/supplements/supplements
 import { buildRecallPolicy } from "../../shared/recall-policy.js";
 import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
 import { createDependencies, createMemoryEntry, createPreparedQueryHandle, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService", () => {
 it("falls back to the legacy embedding supplement when prepared APIs are unavailable", async () => {
@@ -357,10 +354,10 @@ it("uses direct lexical FTS rank as lexical structural evidence", async () => {
       diagnosticCapture: "answer_features"
     });
 
-    const alphaDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const alphaDiagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-alpha"
     );
-    const betaDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const betaDiagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-beta"
     );
     expect(alphaDiagnostic?.lexical_rank).toBe(1);
@@ -408,13 +405,13 @@ it("ranks the trigram_fts fusion stream from keyword-search trigram_rank", async
       diagnosticCapture: "answer_features"
     });
 
-    const strong = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const strong = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-trigram-strong"
     );
-    const weak = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const weak = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-trigram-weak"
     );
-    const absent = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const absent = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-no-trigram"
     );
     // A higher trigram_rank wins a lower (better) trigram_fts ordinal rank.
@@ -467,13 +464,13 @@ it("ranks the trigram_fts fusion stream from keyword-search trigram_rank", async
       "workspace-1", "Implement recall", 5, { tier: "hot" }, undefined,
       { variant: "lexical_relaxed" }
     );
-    const strong = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const strong = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-trigram-strong"
     );
-    const weak = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const weak = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-trigram-weak"
     );
-    const absent = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const absent = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-no-trigram"
     );
     // A higher trigram_rank wins a lower (better) trigram_fts ordinal rank,

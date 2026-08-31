@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
-  certifyQueryOsfSemanticCompleteness,
-  type QueryFactFrameOsfObligation
+  certifyQueryOsfSemanticCompleteness
 } from "@do-soul/alaya-protocol";
 import { RuleBasedQueryFactFrameExtractor } from
   "../../../../shared/query-fact-frame-extraction-rules.js";
@@ -56,11 +55,8 @@ describe("capture-only fact-frame load isolation", () => {
       source_text: BOOKSHELF_ASSERTION,
       proposal: semanticProposal(BOOKSHELF_ASSERTION, binaryUseEvidenceSemanticGraph())
     });
-    const aliceHash = alice.source_hash;
-    const bobHash = bob.source_hash;
-    if (aliceHash === null || bobHash === null) throw new Error("expected source_hash");
-    const aliceFrame = materializeBookshelfFactFrame(aliceHash);
-    const bobFrame = materializeBookshelfFactFrame(bobHash);
+    const aliceFrame = materializeBookshelfFactFrame(alice.source_hash);
+    const bobFrame = materializeBookshelfFactFrame(bob.source_hash);
     const candidate = createMemoryEntry({
       object_id: "memory-shared",
       content: evidenceText,
@@ -69,10 +65,7 @@ describe("capture-only fact-frame load isolation", () => {
     const findByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
       [alice, bob].filter((item) => ids.includes(item.object_id))
     );
-    const findFactKeys = vi.fn(async (
-      _workspaceId: string,
-      _ids: readonly string[]
-    ) => []);
+    const findFactKeys = vi.fn(async () => []);
     const findQualified = vi.fn(async (
       _workspaceId: string,
       refs: readonly Readonly<{ readonly object_id: string }>[]
@@ -104,10 +97,7 @@ describe("capture-only fact-frame load isolation", () => {
       openSemanticFactorExtractionPort: {
         operator_id: "test_open_semantic_factor_v1",
         extract: async () => null,
-        extractCertifiedQuery: async (
-          sourceText: string,
-          obligation: Readonly<QueryFactFrameOsfObligation>
-        ) => {
+        extractCertifiedQuery: async (sourceText: string, obligation) => {
           const graph = binaryUseQuerySemanticGraph();
           const receipt = certifyQueryOsfSemanticCompleteness({
             query_text: sourceText,
@@ -117,7 +107,7 @@ describe("capture-only fact-frame load isolation", () => {
             sha256: (value) => createHash("sha256").update(value, "utf8").digest("hex")
           });
           return receipt === null ? null : {
-            schema_version: 1 as const,
+            schema_version: 1,
             producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
             graph,
             semantic_completeness_receipt: receipt
@@ -170,9 +160,7 @@ describe("capture-only fact-frame load isolation", () => {
 
   it("does not load extras when answer-feature capture is off", async () => {
     const evidence = createVerifiedAssertionEvidence({ objectId: "evidence-capsule-only" });
-    const evidenceHash = evidence.source_hash;
-    if (evidenceHash === null) throw new Error("expected source_hash");
-    const formed = materializeBookshelfFactFrame(evidenceHash);
+    const formed = materializeBookshelfFactFrame(evidence.source_hash);
     const findQualified = vi.fn(async () => [{
       capsule: evidence,
       verified_user_projection: false,
@@ -241,6 +229,8 @@ function rankingAndOsfSlice(data: Awaited<ReturnType<typeof collectWith>>) {
     pathExpansionScores: data.pathExpansionScores,
     pathSuppressionScores: data.pathSuppressionScores,
     semanticFactorFormationsByEvidenceId: data.semanticFactorFormationsByEvidenceId,
+    semanticFactorFormationUnavailableEvidenceIds:
+      data.semanticFactorFormationUnavailableEvidenceIds,
     openSemanticFactorCompatibilityTrace: data.openSemanticFactorCompatibilityTrace,
     openSemanticFactorComposition: data.openSemanticFactorComposition,
     openSemanticFactorActivation: data.openSemanticFactorActivation,
@@ -254,7 +244,6 @@ function serializeSelectionInput(data: Awaited<ReturnType<typeof collectWith>>) 
   const candidates = [createRankedCandidate("candidate-1", 1, 0.9)];
   let boundary: FineAssessmentSelectionBoundaryCase | undefined;
   selectCandidates({
-    workspace_id: "workspace-1",
     orderedCandidates: candidates,
     config: createConfig(),
     supplementaryData: data,

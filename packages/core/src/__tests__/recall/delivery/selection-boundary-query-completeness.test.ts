@@ -34,20 +34,8 @@ type CompletenessMutationTarget = {
   queryFactFrameExtraction: { frames: Array<{ slots: Array<{ text: string }> }> };
 };
 
-type DeepWritable<T> = T extends ReadonlyArray<infer U>
-  ? DeepWritable<U>[]
-  : T extends object
-    ? { -readonly [K in keyof T]: DeepWritable<T[K]> }
-    : T;
-
-type WritableReceipt = Omit<
-  DeepWritable<QueryOsfSemanticCompletenessReceipt>,
-  "operator_id" | "subject"
-> & {
-  operator_id: string;
-  subject: DeepWritable<QueryOsfSemanticCompletenessReceipt["subject"]> & {
-    source_span: [number, number];
-  };
+type WritableReceipt = {
+  -readonly [K in keyof QueryOsfSemanticCompletenessReceipt]: QueryOsfSemanticCompletenessReceipt[K];
 };
 
 describe("selection boundary query completeness authority", () => {
@@ -92,7 +80,7 @@ describe("selection boundary query completeness authority", () => {
     "rejects %s even when the boundary is otherwise current",
     async (_, mutate) => {
       const boundary = cloneBoundary(await certifiedBoundary());
-      mutate(boundary.input.supplementary_data as unknown as CompletenessMutationTarget);
+      mutate(boundary.input.supplementary_data as CompletenessMutationTarget);
       expect(() => replayFineAssessmentSelectionBoundary(boundary))
         .toThrow(/selection boundary fidelity mismatch|schema_version|digest/u);
     }
@@ -146,7 +134,7 @@ function mutateReceipt(
   const { receipt_digest: _digest, ...body } = receipt;
   receipt.receipt_digest = digest(
     queryOsfSemanticCompletenessReceiptPreimage(
-      body as unknown as Omit<QueryOsfSemanticCompletenessReceipt, "receipt_digest">
+      body as Omit<QueryOsfSemanticCompletenessReceipt, "receipt_digest">
     )
   );
 }

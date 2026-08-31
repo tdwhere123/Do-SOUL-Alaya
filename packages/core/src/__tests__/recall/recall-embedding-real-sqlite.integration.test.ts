@@ -32,9 +32,6 @@ import {
   createRecallEmbeddingRealStorage
 } from "../shared/real-sqlite.test-support.js";
 import { createMemoryEntry, overridePolicy } from "./recall-service-test-fixtures.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
 
 const WS = REAL_SQLITE_TEST_WORKSPACE_ID;
 const RUN = REAL_SQLITE_TEST_RUN_ID;
@@ -260,7 +257,7 @@ describe("RecallService embedding integration (real SQLite + stored vectors)", (
       SEMANTIC_ID
     ]);
     expect(live.diagnostics?.provider_degradation_reason).toBeNull();
-    const semanticDiagnostic = requireLiveCandidateDiagnostics(live.diagnostics?.candidates ?? []).find(
+    const semanticDiagnostic = live.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === SEMANTIC_ID
     );
     expect(semanticDiagnostic?.score_factors.embedding_similarity).toBeGreaterThan(0);

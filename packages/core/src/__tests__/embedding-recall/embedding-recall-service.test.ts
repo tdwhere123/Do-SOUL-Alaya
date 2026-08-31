@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ComputeRecallGardenEventType, HealthEventKind, type EventLogEntry, type HealthJournalRecordInput } from "@do-soul/alaya-protocol";
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
-import { createEmbeddingRecord, createMemoryEntry, createProvider, hashMemoryContent, mockEmbedTexts } from "./embedding-recall-test-helpers.js";
+import { createEmbeddingRecord, createMemoryEntry, createProvider, hashMemoryContent } from "./embedding-recall-test-helpers.js";
 
 describe("EmbeddingRecallService", () => {
 it("queries the local vector table, emits telemetry, and returns additive candidates plus similarity hints", async () => {
@@ -30,7 +30,7 @@ it("queries the local vector table, emits telemetry, and returns additive candid
         ])
       },
       provider: createProvider({
-        embedTexts: mockEmbedTexts(async () => [new Float32Array([0, 1])])
+        embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
       }),
       eventLogRepo: {
         append: appendSpy,
@@ -123,7 +123,7 @@ it("keeps valid zero evidence for the base pool without admitting zero or invali
         ))
       },
       provider: createProvider({
-        embedTexts: mockEmbedTexts(async () => [new Float32Array([1, 0])])
+        embedTexts: vi.fn(async () => [new Float32Array([1, 0])])
       }),
       eventLogRepo: { append, queryByEntity: vi.fn(async () => []) }
     });
@@ -171,7 +171,7 @@ it("uses a prepared query embedding when it is ready by merge time", async () =>
         ])
       },
       provider: createProvider({
-        embedTexts: mockEmbedTexts(async () => [new Float32Array([0, 1])])
+        embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
       }),
       eventLogRepo: {
         append: appendSpy,
@@ -216,7 +216,7 @@ it("preserves provider error context on failed prepared query embeddings", async
         listByObjectIds: vi.fn(async () => [])
       },
       provider: createProvider({
-        embedTexts: mockEmbedTexts(async () => {
+        embedTexts: vi.fn(async () => {
           throw new TypeError("network timeout");
         })
       }),
@@ -316,7 +316,7 @@ it("reuses prepared stored vectors instead of reading the vector table twice", a
     const service = new EmbeddingRecallService({
       embeddingRepo: { listByObjectIds },
       provider: createProvider({
-        embedTexts: mockEmbedTexts(async () => [new Float32Array([0, 1])])
+        embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
       }),
       eventLogRepo: {
         append: appendSpy,
@@ -360,7 +360,7 @@ it("uses warmed query embeddings without calling the provider during recall prep
       revision: 0,
       ...entry
     }));
-    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
       texts.map(() => new Float32Array([0, 1]))
     );
     const service = new EmbeddingRecallService({
@@ -426,7 +426,7 @@ it("uses warmed query embeddings without calling the provider during recall prep
 
 it("keeps partial query warmup evidence when one provider batch fails", async () => {
     const queries = Array.from({ length: 33 }, (_, index) => `query-${index}`);
-    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
       if (texts.includes("query-16")) {
         throw new Error("provider temporarily unreachable");
       }
@@ -483,7 +483,7 @@ it("waits briefly for a prepared query embedding before degrading", async () => 
         ])
       },
       provider: createProvider({
-        embedTexts: mockEmbedTexts(async () =>
+        embedTexts: vi.fn(async () =>
           await new Promise<readonly Float32Array[]>((resolve) => {
             setTimeout(() => resolve([new Float32Array([0, 1])]), 10);
           })

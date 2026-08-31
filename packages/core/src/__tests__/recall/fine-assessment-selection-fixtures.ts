@@ -11,27 +11,7 @@ import {
 } from "../../recall/delivery/fine-assessment-selection.js";
 import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
-import { isLegacyCandidateDiagnostic } from "../../recall/runtime/diagnostics.js";
-import type {
-  RecallCandidateDiagnostic,
-  RecallFineAssessmentCandidateDiagnostic,
-  RecallSupplementaryData
-} from "../../recall/runtime/recall-service-types.js";
-
-export function requireLiveCandidateDiagnostic(
-  diagnostic: Readonly<RecallFineAssessmentCandidateDiagnostic> | undefined
-): Readonly<RecallCandidateDiagnostic> {
-  if (diagnostic === undefined || !isLegacyCandidateDiagnostic(diagnostic)) {
-    throw new Error("expected live RecallCandidateDiagnostic");
-  }
-  return diagnostic;
-}
-
-export function requireLiveCandidateDiagnostics(
-  diagnostics: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[]
-): readonly Readonly<RecallCandidateDiagnostic>[] {
-  return diagnostics.map((row) => requireLiveCandidateDiagnostic(row));
-}
+import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 
 export const FIELD_PINS = {
   workspace_id: "workspace-1",
@@ -73,13 +53,11 @@ export function stageRanks(
   result: ReturnType<typeof selectFineAssessmentCandidates>,
   objectId: string
 ) {
-  const diagnostic = requireLiveCandidateDiagnostic(
-    result.diagnostics.find((candidate) => candidate.object_id === objectId)
-  );
+  const diagnostic = result.diagnostics.find((candidate) => candidate.object_id === objectId);
   return [
-    diagnostic.rank_after_feature_rerank,
-    diagnostic.rank_after_coverage_selector,
-    diagnostic.coverage_selector_action
+    diagnostic?.rank_after_feature_rerank,
+    diagnostic?.rank_after_coverage_selector,
+    diagnostic?.coverage_selector_action
   ];
 }
 

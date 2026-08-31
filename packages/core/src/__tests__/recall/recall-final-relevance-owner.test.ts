@@ -1,8 +1,4 @@
-import {
-  FIELD_PINS,
-  requireLiveCandidateDiagnostic,
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
+import { FIELD_PINS } from "./fine-assessment-selection-fixtures.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
@@ -128,18 +124,18 @@ describe("final recall relevance ownership", () => {
       JSON.stringify(assessed.candidates.map((candidate) => ({
         id: candidate.object_id,
         relevance: candidate.relevance_score,
-        fused: requireLiveCandidateDiagnostics(assessed.diagnostics).find((row) => row.object_id === candidate.object_id)?.fused_score,
+        fused: assessed.diagnostics.find((row) => row.object_id === candidate.object_id)?.fused_score,
         embedding: candidate.score_factors?.embedding_similarity
       })))
     ).toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID]);
     expect(assessed.candidates.map((candidate) => candidate.relevance_score))
       .toEqual([
-        requireLiveCandidateDiagnostics(assessed.diagnostics).find((row) => row.object_id === FUSION_WINNER_ID)?.fused_score,
-        requireLiveCandidateDiagnostics(assessed.diagnostics).find((row) => row.object_id === COVERAGE_NOVEL_ID)?.fused_score
+        assessed.diagnostics.find((row) => row.object_id === FUSION_WINNER_ID)?.fused_score,
+        assessed.diagnostics.find((row) => row.object_id === COVERAGE_NOVEL_ID)?.fused_score
       ]);
     expect(assessed.candidates.map((candidate) => candidate.budget_state?.remaining_entries))
       .toEqual([1, 0]);
-    const diagnostics = new Map(requireLiveCandidateDiagnostics(assessed.diagnostics).map((row) => [row.object_id, row]));
+    const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({
       rank_after_coverage_selector: 1,
       final_rank: 1,
@@ -194,8 +190,8 @@ describe("final recall relevance ownership", () => {
 
     expect(assessed.candidates.map((candidate) => candidate.object_id))
       .toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID, ACTIVATION_WINNER_ID]);
-    expect(requireLiveCandidateDiagnostics(assessed.diagnostics).map((candidate) => candidate.final_rank))
-      .toEqual(requireLiveCandidateDiagnostics(assessed.diagnostics).map((candidate) =>
+    expect(assessed.diagnostics.map((candidate) => candidate.final_rank))
+      .toEqual(assessed.diagnostics.map((candidate) =>
         candidate.rank_after_coverage_selector
       ));
   });
@@ -235,8 +231,8 @@ describe("final recall relevance ownership", () => {
     const captured = assess(true);
 
     expect(captured.candidates).toEqual(baseline.candidates);
-    expect(requireLiveCandidateDiagnostic(baseline.diagnostics[0])).not.toHaveProperty("deep_head_trace");
-    expect(requireLiveCandidateDiagnostics(captured.diagnostics).every((row) =>
+    expect(baseline.diagnostics[0]).not.toHaveProperty("deep_head_trace");
+    expect(captured.diagnostics.every((row) =>
       row.deep_head_trace !== undefined &&
       row.coverage_marginal_gain !== undefined
     )).toBe(true);
@@ -273,7 +269,7 @@ describe("final recall relevance ownership", () => {
 
     expect(assessed.candidates.map((candidate) => candidate.object_id))
       .toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID, ACTIVATION_WINNER_ID]);
-    const diagnostics = new Map(requireLiveCandidateDiagnostics(assessed.diagnostics).map((row) => [row.object_id, row]));
+    const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({ final_rank: 1, post_rank: 1 });
     expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({ final_rank: 2, post_rank: 2 });
     expect(diagnostics.get(ACTIVATION_WINNER_ID)).toMatchObject({ final_rank: 3, post_rank: 3 });
@@ -283,7 +279,7 @@ describe("final recall relevance ownership", () => {
     const assessed = buildCoverageReorderedCeAssessment();
 
     expect(assessed.candidates.length).toBeGreaterThan(5);
-    const diagnostics = new Map(requireLiveCandidateDiagnostics(assessed.diagnostics).map((row) => [row.object_id, row]));
+    const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     const highDup = diagnostics.get(CE_HIGH_DUP_ID);
     expect(highDup?.rank_after_coverage_selector).toBe(8);
     expect(highDup?.final_rank).toBe(highDup?.rank_after_coverage_selector);
@@ -357,9 +353,9 @@ function buildCoverageReorderedCeAssessment(): ReturnType<typeof fineAssess> {
 
 function assertFusionOwnedCandidates(assessed: ReturnType<typeof fineAssess>): void {
   const diagnosticsById = new Map(
-    requireLiveCandidateDiagnostics(assessed.diagnostics).map((candidate) => [candidate.object_id, candidate] as const)
+    assessed.diagnostics.map((candidate) => [candidate.object_id, candidate] as const)
   );
-  const expectedOrder = [...requireLiveCandidateDiagnostics(assessed.diagnostics)]
+  const expectedOrder = [...assessed.diagnostics]
     .sort((left, right) => right.fused_score - left.fused_score)
     .map((candidate) => candidate.object_id);
   expect(assessed.candidates.map((candidate) => candidate.object_id)).toEqual(expectedOrder);

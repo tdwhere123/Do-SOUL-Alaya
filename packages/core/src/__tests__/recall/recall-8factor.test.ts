@@ -6,9 +6,6 @@ import { createDependencies, createMemoryEntry, createSlot, createTaskSurface, o
 
 import { FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD } from "./recall-8factor.test-support.js";
 import { requireAt } from "../helpers/defined.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService 8-factor scoring", () => {
 it("maps budget pressure to a graduated monotonic penalty", () => {
@@ -96,7 +93,7 @@ it("adds FTS supplement candidates and treats direct FTS rank as lexical structu
     );
     expect(getSnapshot).toHaveBeenCalledWith("run-1");
     const ftsCandidate = result.candidates.find((candidate) => candidate.object_id === "memory-2");
-    const ftsDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((candidate) => candidate.object_id === "memory-2");
+    const ftsDiagnostic = result.diagnostics?.candidates.find((candidate) => candidate.object_id === "memory-2");
     expect(ftsCandidate).toBeDefined();
     expect(ftsDiagnostic).toMatchObject({
       lexical_rank: 1

@@ -11,9 +11,7 @@ import {
   createConfig,
   createRanks,
   createSupplementaryData,
-  rankMap,
-  requireLiveCandidateDiagnostic,
-  requireLiveCandidateDiagnostics
+  rankMap
 } from "./fine-assessment-selection-fixtures.js";
 
 describe("selectFineAssessmentCandidates", () => {
@@ -63,7 +61,7 @@ describe("selectFineAssessmentCandidates", () => {
       captureAnswerFeatures: true
     });
 
-    expect(requireLiveCandidateDiagnostic(result.diagnostics[0])).toMatchObject({
+    expect(result.diagnostics[0]).toMatchObject({
       path_suppression_score: 0.25,
       evidence_projection_matches: [{
         evidence_ref: "evidence-memory-1",
@@ -118,7 +116,7 @@ describe("selectFineAssessmentCandidates", () => {
       captureAnswerFeatures: true
     });
 
-    expect(requireLiveCandidateDiagnostic(result.diagnostics[0])?.answer_features).toEqual({
+    expect(result.diagnostics[0]?.answer_features).toEqual({
       content: "Recall content for synthesis-1.",
       evidence_gist: null,
       evidence_gist_truncated: false,
@@ -139,7 +137,7 @@ describe("selectFineAssessmentCandidates", () => {
       preference_category: null,
       preference_polarity: null
     });
-    expect(requireLiveCandidateDiagnostic(result.diagnostics[0])?.path_suppression_score).toBe(0);
+    expect(result.diagnostics[0]?.path_suppression_score).toBe(0);
   });
 
   it("captures candidate-local answer support without trusting the evidence gist", () => {
@@ -166,15 +164,15 @@ describe("selectFineAssessmentCandidates", () => {
     const first = select("Assistant: IKEA is probably a good guess.");
     const second = select("Assistant: This unrelated text must not affect support.");
 
-    expect(requireLiveCandidateDiagnostic(first.diagnostics[0])?.answer_features?.answer_support).toMatchObject({
+    expect(first.diagnostics[0]?.answer_features?.answer_support).toMatchObject({
       shape: "place",
       status: "compatible",
       value_supported: true,
       target_supported: true,
       relation_supported: true
     });
-    expect(requireLiveCandidateDiagnostic(second.diagnostics[0])?.answer_features?.answer_support).toEqual(
-      requireLiveCandidateDiagnostic(first.diagnostics[0])?.answer_features?.answer_support
+    expect(second.diagnostics[0]?.answer_features?.answer_support).toEqual(
+      first.diagnostics[0]?.answer_features?.answer_support
     );
   });
 
@@ -226,7 +224,7 @@ describe("selectFineAssessmentCandidates", () => {
       captureAnswerFeatures: true
     });
     const diagnostics = new Map(
-      requireLiveCandidateDiagnostics(result.diagnostics).map((row) => [row.candidate_key, row])
+      result.diagnostics.map((row) => [row.candidate_key, row])
     );
     const memoryObservation = diagnostics.get(memory.fusion.candidate_key)
       ?.answer_features?.answer_support_observations?.[0];
@@ -264,10 +262,10 @@ describe("selectFineAssessmentCandidates", () => {
       rankByCandidateKey: rankMap([memory]),
       captureAnswerFeatures: true
     });
-    expect(requireLiveCandidateDiagnostic(stale.diagnostics[0])?.answer_features?.answer_support).toMatchObject({
+    expect(stale.diagnostics[0]?.answer_features?.answer_support).toMatchObject({
       authority: { provenance_status: "unverified" }
     });
-    expect(requireLiveCandidateDiagnostic(stale.diagnostics[0])?.answer_features)
+    expect(stale.diagnostics[0]?.answer_features)
       .not.toHaveProperty("answer_support_observations");
   });
 
@@ -301,7 +299,7 @@ describe("selectFineAssessmentCandidates", () => {
         captureAnswerFeatures: true
       });
 
-      expect(requireLiveCandidateDiagnostic(result.diagnostics[0])?.answer_features
+      expect(result.diagnostics[0]?.answer_features
         ?.answer_support_observations?.[0]).toMatchObject({
         projection_kind: "atomic_assertion",
         query_status: queryStatus,
@@ -345,7 +343,7 @@ describe("selectFineAssessmentCandidates", () => {
       rankByCandidateKey: rankMap([local, synthesis, global]),
       captureAnswerFeatures: true
     });
-    const diagnostics = new Map(requireLiveCandidateDiagnostics(result.diagnostics).map((row) => [row.candidate_key, row]));
+    const diagnostics = new Map(result.diagnostics.map((row) => [row.candidate_key, row]));
 
     expect(diagnostics.get(local.fusion.candidate_key)).toMatchObject({
       lexical_rank: 0.9,
@@ -386,7 +384,7 @@ describe("selectFineAssessmentCandidates", () => {
       tokenEstimator: { estimate: vi.fn(() => 6) },
       rankByCandidateKey: rankMap([child, ordinary])
     });
-    const diagnostics = new Map(requireLiveCandidateDiagnostics(result.diagnostics).map((row) => [row.object_id, row]));
+    const diagnostics = new Map(result.diagnostics.map((row) => [row.object_id, row]));
 
     expect(diagnostics.get("synthesis-child")?.lexical_rank).toBe(0.8);
     expect(diagnostics.get("ordinary-memory")?.lexical_rank).toBeNull();

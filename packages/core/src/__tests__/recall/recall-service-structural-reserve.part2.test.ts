@@ -5,9 +5,6 @@ import { createFieldBackedRecallService } from
   "./fixtures/keyword-field-fixture.js";
 import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
 
 describe("RecallService", () => {
 describe("fusion-only structural delivery", () => {
@@ -165,7 +162,7 @@ const runStructuralRecall = (service: RecallService, maxEntries: number) => {
 const goldDiag = (
       result: Awaited<ReturnType<RecallService["recall"]>>,
       id: string
-    ) => requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((candidate) => candidate.object_id === id);
+    ) => result.diagnostics?.candidates.find((candidate) => candidate.object_id === id);
 
 // Mirror the production gate from the candidate diagnostics so tests pin the
     // exact contract rather than a hand-guessed admission shape. structural =
@@ -238,7 +235,7 @@ it("respects maxEntries=2 and 3 without post-fusion displacement", async () => {
         const result = await runStructuralRecall(service, maxEntries);
         const delivered = result.candidates;
         const deliveredIds = delivered.map((candidate) => candidate.object_id);
-        const diagnostics = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []);
+        const diagnostics = result.diagnostics?.candidates ?? [];
 
         expect(delivered.length).toBeLessThanOrEqual(maxEntries);
         for (const candidate of diagnostics) {
@@ -280,7 +277,7 @@ it("keeps structural contribution visible without granting tail slots", async ()
       });
       const result = await runStructuralRecall(service, 5);
       const delivered = result.candidates.map((candidate) => candidate.object_id);
-      const diagnostics = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []);
+      const diagnostics = result.diagnostics?.candidates ?? [];
 
       for (const id of ["gold-strong", "gold-mid", "gold-weak-distractor"]) {
         const diagnostic = goldDiag(result, id);

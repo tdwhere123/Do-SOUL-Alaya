@@ -27,9 +27,7 @@ import {
   createConfig,
   createRankedCandidate,
   createSupplementaryData,
-  rankMap,
-  requireLiveCandidateDiagnostic,
-  requireLiveCandidateDiagnostics
+  rankMap
 } from "./fine-assessment-selection-fixtures.js";
 import type { FineAssessmentPreProjectionObservation } from
   "../../recall/delivery/selection-boundary/selection-boundary-types.js";
@@ -120,7 +118,7 @@ describe("fine-assessment selection boundary fidelity", () => {
       .toEqual({ "candidate-1": 0.25 });
     expect(replayed.candidates.map((candidate) => candidate.object_id))
       .toEqual(boundary.expected.candidate_keys.map((key) => key.split(":").at(-1)));
-    expect(requireLiveCandidateDiagnostics(replayed.diagnostics).find((candidate) => candidate.object_id === "candidate-1")
+    expect(replayed.diagnostics.find((candidate) => candidate.object_id === "candidate-1")
       ?.path_suppression_score).toBe(0.25);
   });
 
@@ -227,7 +225,7 @@ describe("fine-assessment selection boundary fidelity", () => {
     });
     if (boundary === undefined) throw new Error("selection boundary was not observed");
     const candidate = visibleResult.candidates[0]!;
-    const diagnostic = requireLiveCandidateDiagnostic(visibleResult.diagnostics[0]);
+    const diagnostic = visibleResult.diagnostics[0]!;
     const {
       coverageSelectionObjective: _coverageSelectionObjective,
       orderSequence: _orderSequence,
@@ -251,7 +249,7 @@ describe("fine-assessment selection boundary fidelity", () => {
             relevance: diagnostic.score_factors.relevance + 0.01
           }
         },
-        ...requireLiveCandidateDiagnostics(visibleResult.diagnostics).slice(1)
+        ...visibleResult.diagnostics.slice(1)
       ]
     };
 

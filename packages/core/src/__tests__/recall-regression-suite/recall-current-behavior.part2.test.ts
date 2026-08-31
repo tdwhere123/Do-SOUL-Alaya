@@ -3,9 +3,6 @@ import { MemoryDimension, StorageTier, type RecallPolicy } from "@do-soul/alaya-
 import { RecallService } from "../../recall/recall-service.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { NOW, WS, activeConstraint, deps, memory, pathRelation, task, withBudgets, withEmbedding } from "./recall-current-behavior-test-fixtures.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "../recall/fine-assessment-selection-fixtures.js";
 
 describe("recall regression suite (in-memory handler fixtures)", () => {
 it("keeps lexical evidence in fusion without overriding fused order", async () => {
@@ -55,7 +52,7 @@ it("keeps lexical evidence in fusion without overriding fused order", async () =
       diagnosticCapture: "answer_features"
     });
 
-    const diagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    const diagnostic = result.diagnostics?.candidates.find(
       (item) => item.object_id === "strong-lexical-gold"
     );
     expect(diagnostic?.per_stream_rank.lexical_fts).not.toBeNull();
@@ -119,7 +116,7 @@ it("preserves fused order across legacy delivery stages", async () => {
     });
 
     const diagnosticsById = new Map(
-      (requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? [])).map((item) => [item.object_id, item] as const)
+      (result.diagnostics?.candidates ?? []).map((item) => [item.object_id, item] as const)
     );
     const gold = diagnosticsById.get("ordering-strong-lexical");
     const peer = diagnosticsById.get("ordering-lexical-peer");
@@ -227,8 +224,8 @@ it("cuts max_entries by fused rank before additive relevance score", async () =>
     });
 
     expect(result.candidates.map((item) => item.object_id)).toEqual(["lexical-gold"]);
-    const goldDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) => item.object_id === "lexical-gold");
-    const droppedDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) => item.object_id === "high-activation");
+    const goldDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "lexical-gold");
+    const droppedDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "high-activation");
     expect(goldDiagnostic?.fused_rank).toBe(1);
     expect(goldDiagnostic?.per_stream_rank.lexical_fts).toBe(1);
     expect(droppedDiagnostic?.dropped_reason).toBe("rank_displaced");
@@ -252,7 +249,7 @@ it("cuts max_entries by fused rank before additive relevance score", async () =>
       policyOverride: legacyWeightedPolicy,
       diagnosticCapture: "answer_features"
     });
-    const legacyWeightedDiagnostic = requireLiveCandidateDiagnostics(legacyWeightedResult.diagnostics?.candidates ?? []).find(
+    const legacyWeightedDiagnostic = legacyWeightedResult.diagnostics?.candidates.find(
       (item) => item.object_id === "high-activation"
     );
     expect(legacyWeightedDiagnostic?.per_stream_rank.existing_score).toBe(1);
@@ -298,7 +295,7 @@ it("promotes memories when evidence FTS and structural evidence agree", async ()
     });
 
     expect(result.candidates.map((item) => item.object_id)).toEqual(["ucla-gold"]);
-    const goldDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) => item.object_id === "ucla-gold");
+    const goldDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "ucla-gold");
     expect(goldDiagnostic?.per_stream_rank.evidence_fts).toBe(1);
     expect(goldDiagnostic?.per_stream_rank.evidence_structural_agreement).toBe(1);
     expect(goldDiagnostic?.fused_rank).toBe(1);
@@ -359,8 +356,8 @@ it("lets embedding-on supplements participate in the fused-rank budget cut", asy
     expect(querySupplementIfReady).toHaveBeenCalled();
     expect(result.candidates.map((item) => item.object_id)).toEqual(["semantic-gold"]);
     expect(result.candidates[0]?.source_channels).toContain("semantic_supplement");
-    const goldDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) => item.object_id === "semantic-gold");
-    const droppedDiagnostic = requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find((item) => item.object_id === "lexical-peer");
+    const goldDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "semantic-gold");
+    const droppedDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "lexical-peer");
     expect(goldDiagnostic?.per_stream_rank.embedding_similarity).toBe(1);
     expect(goldDiagnostic?.fused_rank).toBe(1);
     expect(goldDiagnostic?.source_channels).toContain("semantic_supplement");

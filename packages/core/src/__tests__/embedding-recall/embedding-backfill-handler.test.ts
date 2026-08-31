@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EmbeddingBackfillHandler } from "../../embedding-recall/embedding-backfill-handler.js";
 import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
 
-import { createProvider, mockEmbedTexts } from "./embedding-recall-test-helpers.js";
-import { createEmbeddingMetadata, createMemoryEntry, hashContent } from "./embedding-backfill-handler.test-support.js";
+import { createEmbeddingMetadata, createMemoryEntry, createProvider, hashContent } from "./embedding-backfill-handler.test-support.js";
 
 describe("EmbeddingBackfillHandler", () => {
 beforeEach(() => {
@@ -32,7 +31,7 @@ it("upserts only missing or changed hot-memory embeddings and skips unchanged co
       })
     ]);
     const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
-    const embedTexts = mockEmbedTexts(async () => [new Float32Array([0.1, 0.2, 0.3])]);
+    const embedTexts = vi.fn(async () => [new Float32Array([0.1, 0.2, 0.3])]);
     const handler = new EmbeddingBackfillHandler({
       memoryRepo: {
         findByWorkspaceId: vi.fn(async () => hotMemories)
@@ -79,7 +78,7 @@ it("skips stale writes via the write-time content-hash guard when memory content
     // SqliteMemoryEmbeddingRepo.guardedUpsertTransaction: it is the sole
     // stale-content guard, so the handler does not need to re-fetch the corpus
     // per batch to enforce it.
-    const embedTexts = mockEmbedTexts(async () => [new Float32Array([0.9, 0.1])]);
+    const embedTexts = vi.fn(async () => [new Float32Array([0.9, 0.1])]);
     const findByWorkspaceId = vi.fn(async () => [
       createMemoryEntry({ object_id: "memory-1", content: "Original content." })
     ]);
@@ -131,7 +130,7 @@ it("fetches the hot corpus exactly once regardless of batch count", async () => 
     );
     const findByWorkspaceId = vi.fn(async () => hotMemories);
     const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
-    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
       texts.map(() => new Float32Array([0.4, 0.5, 0.6]))
     );
     const handler = new EmbeddingBackfillHandler({
@@ -171,7 +170,7 @@ it("backfills every configured tier (default HOT+WARM), one fetch per tier", asy
       tier === "warm" ? [warmMemory] : [hotMemory]
     );
     const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
-    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
       texts.map(() => new Float32Array([0.4, 0.5, 0.6]))
     );
     const handler = new EmbeddingBackfillHandler({
@@ -229,7 +228,7 @@ it("treats a repo-level guarded write rejection as stale content instead of over
         upsertIfContentHashMatchesCurrentMemory: guardedUpsert
       },
       provider: createProvider({
-        embedTexts: mockEmbedTexts(async () => [new Float32Array([0.7, 0.2, 0.1])])
+        embedTexts: vi.fn(async () => [new Float32Array([0.7, 0.2, 0.1])])
       }),
       now: () => "2026-04-23T00:00:00.000Z"
     });
@@ -250,9 +249,11 @@ it("retries failed provider batches as smaller batches before moving on", async 
         content: `Semantic recall content ${index}.`
       })
     );
-    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
-      texts.map(() => new Float32Array([0.4, 0.5, 0.6]))
-    ).mockRejectedValueOnce(new Error("provider timeout"));
+    const embedTexts = vi
+      .fn(async (texts: readonly string[]) =>
+        texts.map(() => new Float32Array([0.4, 0.5, 0.6]))
+      )
+      .mockRejectedValueOnce(new Error("provider timeout"));
     const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
     const handler = new EmbeddingBackfillHandler({
       memoryRepo: {
@@ -291,7 +292,7 @@ it("isolates a persistently failing embedding input after split retries", async 
       createMemoryEntry({ object_id: "memory-ok-2", content: "Stable recall content two." }),
       createMemoryEntry({ object_id: "memory-ok-3", content: "Stable recall content three." })
     ];
-    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
       if (texts.some((text) => text.includes("bad input"))) {
         throw new Error("provider rejected input");
       }
@@ -328,7 +329,7 @@ it("recovers a single embedding input after an item-level transport retry", asyn
       createMemoryEntry({ object_id: "memory-flaky", content: "Flaky provider transport input." })
     ];
     let flakySingleAttempts = 0;
-    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
       if (texts.some((text) => text.includes("Flaky"))) {
         if (texts.length === 1) {
           flakySingleAttempts++;
@@ -374,7 +375,7 @@ it("splits large embedding requests by input character budget", async () => {
         content: "B".repeat(20_000)
       })
     ];
-    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) =>
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
       texts.map(() => new Float32Array([0.1, 0.2, 0.3]))
     );
     const handler = new EmbeddingBackfillHandler({
@@ -412,7 +413,7 @@ it("embeds every memory exactly once with stable aggregate counts under bounded 
       })
     );
     const embedCallsByText = new Map<string, number>();
-    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
       for (const text of texts) {
         embedCallsByText.set(text, (embedCallsByText.get(text) ?? 0) + 1);
       }
@@ -458,7 +459,7 @@ it("never exceeds the configured concurrency cap of in-flight embed calls", asyn
     );
     let inFlight = 0;
     let maxObservedInFlight = 0;
-    const embedTexts = mockEmbedTexts(async (texts: readonly string[]) => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) => {
       inFlight += 1;
       maxObservedInFlight = Math.max(maxObservedInFlight, inFlight);
       // Hold the call open across a macrotask so overlap is observable.

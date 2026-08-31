@@ -3,7 +3,6 @@ import * as fineAssessment from "../../../recall/delivery/fine-assessment.js";
 import * as gamma from "../../../recall/delivery/select-gamma/select-gamma.js";
 import { RecallService } from "../../../recall/recall-service.js";
 import { CANONICAL_CAPTURE_IDENTITY } from "../../../recall/delivery/canonical-delivery.js";
-import type { FineAssessmentDiagnosticCapture } from "../../../recall/delivery/fine-assessment.js";
 import {
   createDependencies,
   createMemoryEntry,
@@ -19,9 +18,7 @@ describe("omitted delivery_path executeRecall", () => {
     const prepare = vi.spyOn(fineAssessment, "prepareFineAssessment");
     const assess = vi.spyOn(fineAssessment, "fineAssess");
     const gammaWalk = vi.spyOn(gamma, "selectGammaWalk");
-    const diagnosticObserver = vi.fn((
-      _capture: FineAssessmentDiagnosticCapture
-    ): undefined => undefined);
+    const diagnosticObserver = vi.fn(() => undefined);
     const memory = createMemoryEntry({
       object_id: "memory-canonical",
       content: "I take yoga classes at Serenity Yoga."
@@ -64,15 +61,9 @@ describe("omitted delivery_path executeRecall", () => {
       ...dependencies,
       defaultPolicyDecorator: (policy) => policy,
       readSnapshot: {
-        beginDeferred: () => {
-          events.push("begin");
-        },
-        commit: () => {
-          events.push("commit");
-        },
-        rollback: () => {
-          events.push("rollback");
-        }
+        beginDeferred: () => events.push("begin"),
+        commit: () => events.push("commit"),
+        rollback: () => events.push("rollback")
       },
       eventLogRepo: {
         ...dependencies.eventLogRepo,

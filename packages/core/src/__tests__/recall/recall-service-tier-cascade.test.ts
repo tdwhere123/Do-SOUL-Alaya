@@ -17,17 +17,6 @@ import {
 } from "./coarse-filter/recall-tier-cascade-fixtures.js";
 import { STORAGE_RECALL_TIER_PAGE_SIZE } from
   "../../recall/coarse-filter/pagination/recall-tier-window-pagination.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
-
-type RecallTierWindowFn = NonNullable<
-  Parameters<typeof recallWith>[0]["findRecallTierWindow"]
->;
-type RecallWindowTestCursor = {
-  readonly created_at: string;
-  readonly object_id: string;
-};
 
 describe("RecallService tier cascade", () => {
   it("keeps the HOT-only fast path output identical when HOT reaches threshold", async () => {
@@ -153,50 +142,40 @@ describe("RecallService tier cascade", () => {
   }, 30_000);
 
   it.each([
-    ["oversized", (cursor: RecallWindowTestCursor) => ({
+    ["oversized", (cursor: unknown) => ({
       memories: Array.from({ length: STORAGE_RECALL_TIER_PAGE_SIZE + 1 }, (_, index) =>
         createMemoryEntry({ object_id: `invalid-${index}` })
       ),
       next_cursor: cursor,
       truncated: true
     })],
-    ["missing cursor", (_cursor: RecallWindowTestCursor) => ({
-      memories: [createMemoryEntry({ object_id: "invalid" })],
-      next_cursor: null,
-      truncated: true
-    })],
-    ["stalled cursor", (cursor: RecallWindowTestCursor) => ({
-      memories: [createMemoryEntry({ object_id: "invalid" })],
-      next_cursor: cursor,
-      truncated: true
-    })],
-    ["backward cursor", (_cursor: RecallWindowTestCursor) => ({
+    ["missing cursor", () => ({ memories: [createMemoryEntry({ object_id: "invalid" })], next_cursor: null, truncated: true })],
+    ["stalled cursor", (cursor: unknown) => ({ memories: [createMemoryEntry({ object_id: "invalid" })], next_cursor: cursor, truncated: true })],
+    ["backward cursor", () => ({
       memories: [createMemoryEntry({ object_id: "invalid" })],
       next_cursor: { created_at: "0000-01-01T00:00:00.000Z", object_id: "older" },
       truncated: true
     })]
-  ])("discards a cursor page with %s and stops incomplete", async (_label, invalidPage) => {
+  ] as const)("discards a cursor page with %s and stops incomplete", async (_label, invalidPage) => {
     const first = createMemoryEntry({ object_id: "validated" });
     const cursor = { created_at: first.created_at, object_id: first.object_id };
-    const findRecallTierWindowSpy = vi.fn();
-    const findRecallTierWindow: RecallTierWindowFn = async (
-      query
-    ): ReturnType<RecallTierWindowFn> => {
-      findRecallTierWindowSpy(query);
+    const findRecallTierWindow = vi.fn(async (query: {
+      readonly tier: StorageTier;
+      readonly cursor?: typeof cursor;
+    }) => {
       if (query.tier !== StorageTier.HOT) {
         return { memories: [], next_cursor: null, truncated: false };
       }
-      if (query.cursor === undefined) {
-        return { memories: [first], next_cursor: cursor, truncated: true };
-      }
-      return invalidPage(cursor);
-    };
+      return query.cursor === undefined
+        ? { memories: [first], next_cursor: cursor, truncated: true }
+        : invalidPage(cursor);
+    });
 
     const { result, warnSpy } = await recallWith({ findRecallTierWindow }, 10, "answer_features");
 
-    expect(findRecallTierWindowSpy).toHaveBeenCalledTimes(4);
+    expect(findRecallTierWindow).toHaveBeenCalledTimes(4);
     expect(result.total_scanned).toBeLessThanOrEqual(1);
-    expect(requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).map((candidate) => candidate.object_id))
+    expect(result.diagnostics?.candidates.map((candidate) => candidate.object_id))
       .not.toContain("invalid");
     expect(warnSpy).toHaveBeenCalledTimes(1);
   });
@@ -297,11 +276,11 @@ describe("RecallService tier cascade", () => {
     expect(warm.result.candidates).toHaveLength(3);
     const candidate = warm.result.candidates.find((entry) => entry.object_id === "candidate-0");
     expect(candidate?.source_channels).toContain("warm_cascade");
-    const warmDiagnostic = requireLiveCandidateDiagnostics(warm.result.diagnostics?.candidates ?? []).find(
+    const warmDiagnostic = warm.result.diagnostics?.candidates.find(
       (entry) => entry.object_id === "candidate-0"
     );
     expect(warmDiagnostic?.additive_score).toBeCloseTo(
-      (requireLiveCandidateDiagnostics(baseline.result.diagnostics?.candidates ?? [])[0]?.additive_score ?? 0) * WARM_CASCADE_DECAY
+      (baseline.result.diagnostics?.candidates[0]?.additive_score ?? 0) * WARM_CASCADE_DECAY
     );
     expect(candidate?.relevance_score).toBe(baseline.result.candidates[0]?.relevance_score);
   });
@@ -330,8 +309,8 @@ describe("RecallService tier cascade", () => {
     expect(cold.result.degradation_reason).toBe("cold_cascade_engaged");
     expect(cold.result.candidates).toHaveLength(1);
     expect(cold.result.candidates[0]?.source_channels).toContain("cold_cascade");
-    expect(requireLiveCandidateDiagnostics(cold.result.diagnostics?.candidates ?? [])[0]?.additive_score).toBeCloseTo(
-      (requireLiveCandidateDiagnostics(baseline.result.diagnostics?.candidates ?? [])[0]?.additive_score ?? 0) * COLD_CASCADE_DECAY
+    expect(cold.result.diagnostics?.candidates[0]?.additive_score).toBeCloseTo(
+      (baseline.result.diagnostics?.candidates[0]?.additive_score ?? 0) * COLD_CASCADE_DECAY
     );
     expect(cold.result.candidates[0]?.relevance_score)
       .toBe(baseline.result.candidates[0]?.relevance_score);

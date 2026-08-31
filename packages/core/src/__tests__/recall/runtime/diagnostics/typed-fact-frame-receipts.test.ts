@@ -190,7 +190,7 @@ describe("capture proof typed fact-frame receipts", () => {
       objectKind: "evidence_capsule" as const
     };
     const diagnostics = buildCaptureProofDiagnostics(
-      emptyCaptureProofPrepared(),
+      { retrievalFieldBundle: { memoryLexicalBoundProofs: () => [] } },
       {
         supplementaryData: {
           factFrameFormationsByEvidenceId: {
@@ -265,7 +265,6 @@ describe("capture proof typed fact-frame receipts", () => {
     const candidates = [createRankedCandidate("candidate-1", 1, 0.9)];
     let boundary: FineAssessmentSelectionBoundaryCase | undefined;
     selectCandidates({
-      workspace_id: "workspace-1",
       orderedCandidates: candidates,
       config: createConfig(),
       supplementaryData: createSupplementaryData({
@@ -286,22 +285,12 @@ describe("capture proof typed fact-frame receipts", () => {
   });
 });
 
-function emptyCaptureProofPrepared() {
-  return {
-    snapshotVector: { base_store_digest: `sha256:${"0".repeat(64)}` as const },
-    retrievalFieldBundle: {
-      memoryLexicalBoundProofs: () => [],
-      memoryLexicalBoundProofsForSnapshot: (_digest: `sha256:${string}`) => []
-    }
-  };
-}
-
 function capture(
   candidate: ReturnType<typeof memory>,
   formations: Readonly<Record<string, EvidenceFactFrameFormationCapture>>
 ) {
   return buildCaptureProofDiagnostics(
-    emptyCaptureProofPrepared(),
+    { retrievalFieldBundle: { memoryLexicalBoundProofs: () => [] } },
     { supplementaryData: { factFrameFormationsByEvidenceId: formations } },
     [candidate]
   );

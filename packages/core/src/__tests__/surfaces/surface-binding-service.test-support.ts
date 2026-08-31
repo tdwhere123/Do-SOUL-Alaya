@@ -1,10 +1,6 @@
 import { vi } from "vitest";
 import { BindingState, CrossCuttingState, type CrossCuttingPermission, type EventLogEntry, type GovernanceDriftLease, type SurfaceBinding } from "@do-soul/alaya-protocol";
-import {
-  type SurfaceBindingEventPublisherPort,
-  type SurfaceBindingServiceDependencies
-} from "../../surfaces/surface-binding-service.js";
-import type { EventPublisherInput } from "../../runtime/event-publisher.js";
+import { type SurfaceBindingServiceDependencies } from "../../surfaces/surface-binding-service.js";
 
 export const BINDING_ID_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
@@ -73,7 +69,9 @@ export function createDependencies(seed?: {
     readonly single: unknown[];
     readonly many: unknown[][];
   };
-  readonly eventPublisher: SurfaceBindingEventPublisherPort;
+  readonly eventPublisher: {
+    readonly appendManyWithMutation: ReturnType<typeof vi.fn>;
+  };
   readonly warnSpy: ReturnType<typeof vi.fn>;
   readonly driftService: {
     readonly acquireLease: ReturnType<typeof vi.fn>;
@@ -119,15 +117,14 @@ export function createDependencies(seed?: {
   // Single fake appendManyWithMutation handles both 1-event and N-event
   // call sites: `single`/`many` buckets disambiguate them post-hoc by the
   // batch length so existing assertions keep working.
-  const eventPublisher: SurfaceBindingEventPublisherPort = {
-    appendManyWithMutation: async <T>(
-      events: readonly EventPublisherInput[],
-      mutate: (entries: readonly EventLogEntry[]) => T
-    ): Promise<T> => {
+  const eventPublisher = {
+    appendManyWithMutation: vi.fn(async (
+      events: readonly EventLogEntry[],
+      mutate: (entries: EventLogEntry[]) => unknown
+    ) => {
       if (events.length === 1) {
         order.push("event_publish");
-        const first = events[0];
-        if (first !== undefined) publishedEvents.single.push(first);
+        publishedEvents.single.push(events[0]);
       } else {
         order.push("event_publish_many");
         publishedEvents.many.push([...events]);
@@ -135,8 +132,7 @@ export function createDependencies(seed?: {
       const persisted = events.map((event, idx) => ({
         ...event,
         event_id: `evt_${idx}`,
-        created_at: "2026-03-22T01:00:00.000Z",
-        revision: 0
+        created_at: "2026-03-22T01:00:00.000Z"
       }));
       const result = mutate(persisted);
       if (events.length === 1) {
@@ -145,7 +141,7 @@ export function createDependencies(seed?: {
         order.push("event_propagate_many");
       }
       return result;
-    }
+    })
   };
 
   const dependencies: SurfaceBindingServiceDependencies = {

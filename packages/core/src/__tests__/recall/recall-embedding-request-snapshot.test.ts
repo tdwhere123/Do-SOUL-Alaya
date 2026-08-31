@@ -2,7 +2,6 @@ import { performance } from "node:perf_hooks";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
-import type { EmbeddingProviderPort } from "../../embedding-recall/types.js";
 import type { RecallServiceEmbeddingRecallPort } from "../../recall/runtime/recall-service-types.js";
 import { RecallService } from "../../recall/recall-service.js";
 import {
@@ -17,9 +16,6 @@ import {
   createTaskSurface,
   overridePolicy
 } from "./recall-service-test-fixtures.js";
-import {
-  requireLiveCandidateDiagnostics
-} from "./fine-assessment-selection-fixtures.js";
 
 const completeAssessmentCalls = vi.hoisted(() => vi.fn());
 const deliveryCalls = vi.hoisted(() => vi.fn());
@@ -86,14 +82,10 @@ describe("RecallService embedding request score snapshot", () => {
         embedding: new Float32Array([1, 0])
       })
     ]);
-    const embedTexts = vi.fn(async (texts: readonly string[]) =>
-      texts.map(() => new Float32Array([1, 0]))
-    );
+    const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
     const embeddingRecallService = new EmbeddingRecallService({
       embeddingRepo: { listByObjectIds },
-      provider: createProvider({
-        embedTexts: async (texts) => embedTexts(texts)
-      }),
+      provider: createProvider({ embedTexts }),
       eventLogRepo: dependencies.eventLogRepo,
       generateQueryId: () => "zero-cap-query"
     });
@@ -146,8 +138,6 @@ describe("RecallService embedding request score snapshot", () => {
     });
     const memories = [observed, invalid, degenerate];
     const { dependencies } = createDependencies(memories);
-    const embedObservedTexts: EmbeddingProviderPort["embedTexts"] = async (texts) =>
-      texts.map(() => new Float32Array([1, 0]));
     const embeddingRecallService = new EmbeddingRecallService({
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [
@@ -168,7 +158,9 @@ describe("RecallService embedding request score snapshot", () => {
           })
         ])
       },
-      provider: createProvider({ embedTexts: embedObservedTexts }),
+      provider: createProvider({
+        embedTexts: vi.fn(async () => [new Float32Array([1, 0])])
+      }),
       eventLogRepo: dependencies.eventLogRepo,
       generateQueryId: () => "observed-zero-query"
     });
@@ -184,7 +176,7 @@ describe("RecallService embedding request score snapshot", () => {
     expect(candidates.has(invalid.object_id)).toBe(true);
     expect(candidates.has(degenerate.object_id)).toBe(true);
     expect(candidates.get(observed.object_id)?.score_factors?.embedding_similarity).toBe(0);
-    expect(requireLiveCandidateDiagnostics(result.diagnostics?.candidates ?? []).find(
+    expect(result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === observed.object_id
     )?.score_factors.embedding_similarity).toBe(0);
     expect(candidates.get(invalid.object_id)?.score_factors?.embedding_similarity).toBeUndefined();

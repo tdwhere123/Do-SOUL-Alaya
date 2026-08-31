@@ -10,8 +10,7 @@ import type { QueryEmbeddingEngine } from "../../embedding-recall/query-embeddin
 import { createPreparedEmbeddingQueryHandle } from "../../embedding-recall/helpers.js";
 import {
   createEmbeddingRecord,
-  createProvider,
-  mockEmbedTexts
+  createProvider
 } from "./embedding-recall-test-helpers.js";
 
 describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
@@ -36,7 +35,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
           input.listByWorkspace ?? vi.fn(async () => input.workspaceVectors)
       },
       provider: createProvider({
-        embedTexts: mockEmbedTexts(async () => [input.queryEmbedding])
+        embedTexts: vi.fn(async () => [input.queryEmbedding])
       }),
       eventLogRepo: {
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
@@ -73,7 +72,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
   });
 
   it("surfaces workspace-neighbor query embedding inference accounting and reuses the cache", async () => {
-    const embedTexts = mockEmbedTexts(async () => [new Float32Array([0, 1])]);
+    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
     const service = new EmbeddingRecallService({
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => []),
@@ -136,7 +135,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     const service = new EmbeddingRecallService({
       embeddingRepo: { listByObjectIds, listByWorkspace, listIdsByWorkspace },
       provider: createProvider({
-        embedTexts: mockEmbedTexts(async () => [new Float32Array([0, 1])])
+        embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
       }),
       eventLogRepo: {
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
@@ -244,7 +243,7 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     const service = new EmbeddingRecallService({
       embeddingRepo,
       provider: createProvider({
-        embedTexts: mockEmbedTexts(async () => [new Float32Array([0, 1])])
+        embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
       }),
       eventLogRepo: {
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({

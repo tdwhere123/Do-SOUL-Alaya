@@ -14,7 +14,7 @@ import {
 import { DynamicsService, type DynamicsServiceDependencies } from "../../dynamics/dynamics-service.js";
 import { EvidenceService } from "../../memory/evidence-service.js";
 import { ConflictDetectionService } from "../../governance/reconciliation/conflict-detection-service.js";
-import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
+import type { PathMintOutcome } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
@@ -329,7 +329,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
           findBySharedDomainTags: async () => []
         },
         pathCandidatePort: {
-          submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied")
+          submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied")
         },
         llmPort: { classifyPair: vi.fn(async () => "contradicts" as const) },
         karmaEmitter: { emitKarmaEvent }
@@ -366,7 +366,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
         readonly workspaceId: string;
       };
       const emitKarmaEvent = vi.fn(async (_input: KarmaInput) => {});
-      const submitCandidate = vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied");
+      const submitCandidate = vi.fn(async (): Promise<PathMintOutcome> => "applied");
       // high tag overlap + low token overlap → rule path fires contradicts,
       // but the rule verdict is agent-controllable, so no karma penalty.
       const existing = createMemoryEntry({
