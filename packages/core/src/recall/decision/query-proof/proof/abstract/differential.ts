@@ -2,6 +2,7 @@ import { compareText } from "../../../../../shared/compare-text.js";
 import { digestRecallFieldIdentity } from
   "../../../../field/field-identity.js";
 import {
+  captureData,
   captureVerifiedLiveClosureAuthority
 } from "../../closure/live-authority-binding.js";
 import type { FiniteDecisionOracleResult } from "../oracle/contract.js";
@@ -37,19 +38,23 @@ export function compareAbstractProofToOracle(
   const stableInput = Object.freeze({ ...capturedInput,
     live_authority: captured.authority });
   const stableOracle = assertExactOracle(stableInput, oracle);
-  verifyAbstractProofKernelResult(proof, stableInput,
-    proof.status === "PROVED_SINGLETON" ? stableOracle : undefined);
+  const capturedProof = captureData(proof);
+  const verified = verifyAbstractProofKernelResult(
+    capturedProof,
+    stableInput,
+    capturedProof.status === "PROVED_SINGLETON" ? stableOracle : undefined
+  );
   const concrete = stableOracle.outcomes.map(({ trace_digest }) => trace_digest);
-  if (proof.status === "PROVED_SINGLETON") {
+  if (verified.status === "PROVED_SINGLETON") {
     return Object.freeze({
       false_singleton: concrete.length !== 1 ||
-        concrete[0] !== proof.outcome.trace_digest,
+        concrete[0] !== verified.outcome.trace_digest,
       missing_concrete_outcome_digests: Object.freeze(concrete.filter((digest) =>
-        digest !== proof.outcome.trace_digest).sort(compareText))
+        digest !== verified.outcome.trace_digest).sort(compareText))
     });
   }
-  const possible = new Set(proof.status === "OPEN"
-    ? proof.possible_outcomes.map(({ trace_digest }) => trace_digest)
+  const possible = new Set(verified.status === "OPEN"
+    ? verified.possible_outcomes.map(({ trace_digest }) => trace_digest)
     : []);
   return Object.freeze({
     false_singleton: false,
@@ -95,8 +100,7 @@ export function certifyAbstractSingletonWithFiniteOracle(
     outcome: evaluation.outcome,
     differential_certificate: certificate
   });
-  verifyAbstractProofKernelResult(proved, evaluation.input, oracleSnapshot);
-  return proved;
+  return verifyAbstractProofKernelResult(proved, evaluation.input, oracleSnapshot);
 }
 
 function sealCertifiedResult(body: Omit<Extract<

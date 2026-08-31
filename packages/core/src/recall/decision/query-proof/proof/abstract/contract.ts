@@ -340,7 +340,7 @@ export function verifyAbstractProofKernelResult(
   result: AbstractProofKernelResult,
   input: AbstractProofKernelInput,
   oracle?: FiniteDecisionOracleResult
-): void {
+): AbstractProofKernelResult {
   const stableResult = captureData(result);
   const stableInput = captureAbstractProofKernelInput(input);
   const captured = captureVerifiedLiveClosureAuthority(stableInput.live_authority);
@@ -360,6 +360,7 @@ export function verifyAbstractProofKernelResult(
     captured.binding,
     stableOracle
   );
+  return stableResult;
 }
 
 function verifyAbstractProofKernelResultAgainstBinding(

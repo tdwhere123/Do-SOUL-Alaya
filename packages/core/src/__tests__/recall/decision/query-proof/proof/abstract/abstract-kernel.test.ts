@@ -308,6 +308,66 @@ describe("oracle-certified abstract proof kernel", () => {
     expect(evaluateAbstractProofKernel(input).status).toBe("OPEN");
     expect(workspaceReads).toBe(1);
   });
+
+  it("compares against the captured proof after a later status switch", () => {
+    const testCase = createKernelCase(authorityFrom(prepared));
+    const oracle = enumerate(testCase.fixture, testCase.concrete);
+    const proved = certifyAbstractSingletonWithFiniteOracle(testCase.input, oracle);
+    if (proved.status !== "PROVED_SINGLETON") throw new Error("expected proof");
+    let statusReads = 0;
+    const switching = new Proxy({ ...proved }, {
+      get(target, property, receiver) {
+        if (property === "status") {
+          statusReads += 1;
+          return statusReads === 1 ? target.status : "OPEN";
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+
+    expect(compareAbstractProofToOracle(testCase.input, switching, oracle))
+      .toEqual({ false_singleton: false, missing_concrete_outcome_digests: [] });
+    expect(statusReads).toBe(1);
+  });
+
+  it("captures operator evaluation before a later outcomes switch", () => {
+    let outcomeReads = 0;
+    const injected = Object.freeze([trace(["candidate-injected"], "injected")]);
+    const testCase = createKernelCase(authorityFrom(prepared), {
+      operator: Object.freeze({
+        operator_id: "fixture_singleton_abstract_v1",
+        evaluate: () => {
+          let readsOnThis = 0;
+          const evaluation = {
+            status: "outcomes" as const,
+            handled_sensitivity_ids: Object.freeze([] as const),
+            outcomes: Object.freeze([trace(["candidate-a"], "singleton")])
+          };
+          return new Proxy(evaluation, {
+            get(target, property, receiver) {
+              if (property === "outcomes") {
+                outcomeReads += 1;
+                readsOnThis += 1;
+                return readsOnThis === 1 ? target.outcomes : injected;
+              }
+              return Reflect.get(target, property, receiver);
+            }
+          });
+        }
+      })
+    });
+
+    const result = evaluateAbstractProofKernel(testCase.input);
+
+    expect(result.status).toBe("OPEN");
+    expect(result).toMatchObject({
+      reason: "finite oracle differential certificate required"
+    });
+    if (result.status !== "OPEN") throw new Error("expected open");
+    expect(result.possible_outcomes.map(({ candidate_prefix }) => [...candidate_prefix]))
+      .toEqual([["candidate-a"]]);
+    expect(outcomeReads).toBe(2);
+  });
 });
 
 function enumerate(fixture: FiniteOracleFixture, operator: FiniteDecisionOperator) {

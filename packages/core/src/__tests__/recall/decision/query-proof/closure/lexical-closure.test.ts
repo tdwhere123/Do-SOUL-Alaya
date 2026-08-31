@@ -39,6 +39,8 @@ import {
   stubMemoryRepo
 } from "../../../integration/shadow/live-receipt-fixtures.js";
 import { plantProof } from "../adapters/lexical-bound/d1-proof-fixture.js";
+import { digestRecallFieldIdentity } from
+  "../../../../../recall/field/field-identity.js";
 import { evaluateAbstractProofKernel } from
   "../../../../../recall/decision/query-proof/proof/abstract/kernel.js";
 import { createKernelCase } from "../proof/abstract/proof-fixture.js";
@@ -66,6 +68,23 @@ describe("live-source lexical closure", () => {
   it("does not promote cap/truncation or list absence", async () => {
     expect((await closeIssued(allLaneProof(1)))?.status).toBe("uncertified");
     expect((await closeIssued(plantProof()))?.status).toBe("uncertified");
+  });
+
+  it("does not exact-close when one complete lane has a truncated sibling", async () => {
+    const proof = mixedLaneProof();
+    expect(proof.receipt.lanes.find((lane) => lane.lane_id === "exact")?.status)
+      .toBe("complete");
+    expect(proof.receipt.lanes.find((lane) => lane.lane_id === "porter")?.status)
+      .toBe("truncated");
+    await withIssuedSource(proof, (authority) => {
+      const result = closeLexicalBoundChannel(authority)!;
+      expect(result).toMatchObject({
+        status: "uncertified",
+        reason: "lexical_lane_unbounded_or_unmapped"
+      });
+      expect(result.status).not.toBe("exact_closed");
+      expect(() => verifyChannelClosureResult(result, authority)).not.toThrow();
+    });
   });
 
   it("keeps an issued lexical receipt with bounded source lag uncertified and OPEN", async () => {
@@ -159,6 +178,34 @@ describe("live-source lexical closure", () => {
         universe_digest: `sha256:${"9".repeat(64)}` as `sha256:${string}`
       };
       expect(() => verifyChannelClosureResult(plantedUniverse, authority))
+        .toThrow(/digest mismatch|binding mismatch/u);
+    });
+  });
+
+  it("rejects a verified closure after query_digest mutation", async () => {
+    await withIssuedSource(allLaneProof(2), (authority) => {
+      const result = closeLexicalBoundChannel(authority)!;
+      expect(result.status).toBe("exact_closed");
+      expect(() => verifyChannelClosureResult(result, authority)).not.toThrow();
+      const planted = withRecomputedResultDigest({
+        ...result,
+        query_digest: `sha256:${"1".repeat(64)}` as `sha256:${string}`
+      });
+      expect(() => verifyChannelClosureResult(planted, authority))
+        .toThrow(/digest mismatch|binding mismatch/u);
+    });
+  });
+
+  it("rejects a verified closure after snapshot_digest mutation", async () => {
+    await withIssuedSource(allLaneProof(2), (authority) => {
+      const result = closeLexicalBoundChannel(authority)!;
+      expect(result.status).toBe("exact_closed");
+      expect(() => verifyChannelClosureResult(result, authority)).not.toThrow();
+      const planted = withRecomputedResultDigest({
+        ...result,
+        snapshot_digest: `sha256:${"2".repeat(64)}` as `sha256:${string}`
+      });
+      expect(() => verifyChannelClosureResult(planted, authority))
         .toThrow(/digest mismatch|binding mismatch/u);
     });
   });
@@ -351,6 +398,36 @@ function allLaneProof(limit: number) {
     trigram: lane,
     object_key_trigram: lane
   }});
+}
+
+function mixedLaneProof() {
+  const complete = {
+    rows: [{ key: "candidate-a", ordinal: 1 }],
+    limit: 2,
+    universeKeys: ["candidate-a"]
+  };
+  // Mixed per-lane limits fail live replay; truncated list_n must equal shared merge_limit.
+  return plantProof({ lanes: {
+    exact: complete,
+    porter: {
+      rows: [
+        { key: "candidate-a", ordinal: 1 },
+        { key: "candidate-b", ordinal: 0.5 }
+      ],
+      limit: 2,
+      universeKeys: ["candidate-a", "candidate-b"]
+    },
+    object_key_porter: complete,
+    trigram: complete,
+    object_key_trigram: complete
+  }});
+}
+
+function withRecomputedResultDigest<T extends { readonly result_digest: string }>(
+  result: T
+): T {
+  const { result_digest: _digest, ...body } = result;
+  return { ...body, result_digest: digestRecallFieldIdentity(body) } as T;
 }
 
 function captureFrom(

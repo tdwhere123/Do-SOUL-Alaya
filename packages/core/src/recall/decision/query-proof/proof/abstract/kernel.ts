@@ -4,6 +4,7 @@ import { digestRecallFieldIdentity } from
 import type { ChannelClosureResult } from "../../closure/contract.js";
 import { verifyChannelClosureResult } from "../../closure/verify.js";
 import {
+  captureData,
   captureVerifiedLiveClosureAuthority,
   type LiveClosureAuthorityBinding,
   type VerifiedLiveClosureAuthorityCapture
@@ -309,8 +310,8 @@ function evaluateDeterministically(
     k_max: kMax,
     transfer_digest: transferDigest
   });
-  const first = evaluate(input);
-  const replay = evaluate(input);
+  const first = captureData(evaluate(input));
+  const replay = captureData(evaluate(input));
   if (digestRecallFieldIdentity(first) !== digestRecallFieldIdentity(replay)) {
     return Object.freeze({
       status: "unsupported" as const,
