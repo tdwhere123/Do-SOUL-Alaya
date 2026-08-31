@@ -108,7 +108,7 @@ export interface McpMemoryProposalWorkflowDependencies {
   };
   // invariant: accept-apply uses the same object-anchor existence + ownership
   // gate as the path mint sink before storage writes a proposed_path_relation.
-  // see also: packages/core/src/path-graph/path-relation-proposal-service.ts validateProposedObjectAnchors
+  // see also: packages/core/src/relations/edge-proposals/path-relation-proposal-service.ts validateProposedObjectAnchors
   readonly objectAnchorGate?: {
     validateProposedObjectAnchors(input: {
       readonly workspaceId: string;

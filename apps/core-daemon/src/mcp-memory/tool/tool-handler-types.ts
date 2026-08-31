@@ -298,7 +298,7 @@ export interface McpMemoryToolHandlerDependencies {
   // below-floor verdict refines nothing; the inline heuristic edge always
   // stands. When unwired, an EDGE_CLASSIFY completion that carries an
   // edge_verdict is rejected (the queue should not have been enabled).
-  // see also: packages/core/src/path-graph/edge-auto-producer-service.ts applyVerdict.
+  // see also: packages/core/src/relations/producers/edge-auto-producer-service.ts applyVerdict.
   readonly edgeVerdictApplier?: {
     applyVerdict(input: {
       readonly workspaceId: string;

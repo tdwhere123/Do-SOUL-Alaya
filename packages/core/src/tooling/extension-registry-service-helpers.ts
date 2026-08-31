@@ -1,7 +1,7 @@
 import { ToolSpecSchema, type ToolProvider, type ToolProviderToolSpec, type ToolSpec } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
-import { parseExtensionToolProvider } from "../shared/extension-descriptor-parsers.js";
+import { parseExtensionToolProvider } from "./extension-descriptor-parsers.js";
 import type { ProviderCacheSnapshot } from "./extension-registry-service-types.js";
 
 export function normalizeProvider(

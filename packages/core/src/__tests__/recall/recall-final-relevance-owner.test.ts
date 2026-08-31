@@ -10,7 +10,7 @@ import { ContextLensProjectionBuilder } from "../../conversation/context-lens-pr
 import {
   installCoreConfigFromProcessEnv,
   resetCoreConfigForTests
-} from "../../config/install-core-config.js";
+} from "../../runtime/config/install-core-config.js";
 import { RecallService } from "../../recall/recall-service.js";
 import { fineAssess } from "../../recall/delivery/fine-assessment.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";

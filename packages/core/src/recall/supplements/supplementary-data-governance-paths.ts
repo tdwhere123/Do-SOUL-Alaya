@@ -18,7 +18,7 @@ import {
   GOVERNANCE_CEILING_FAILSAFE_BAND,
   memoryGovernanceCeiling,
   type PathGovernanceContribution
-} from "../../path-graph/path-relations/path-manifestation-policy.js";
+} from "../../relations/path-relations/path-manifestation-policy.js";
 import { anchorMemoryId, buildPathInflowByTarget } from "../expansion/path-relations.js";
 
 // invariant: governance_class is a hard ceiling on recall manifestation; absent path expansion is fail-open, path read failure is fail-closed to the safe hint band.

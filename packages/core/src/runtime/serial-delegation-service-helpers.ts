@@ -4,7 +4,7 @@ import {
   type WorkerBaselineLock
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
-import { type IntegrationGatePublicationError } from "../security/integration-gate.js";
+import { type IntegrationGatePublicationError } from "../governance/security/integration-gate.js";
 import type { PreDispatchFreezeIntent } from "./serial-delegation-recovery.js";
 
 interface DirtyStatePanicServicePort {

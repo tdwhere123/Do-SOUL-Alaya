@@ -7,7 +7,7 @@ import {
 import {
   installCoreConfigFromProcessEnv,
   resetCoreConfigForTests
-} from "../../config/index.js";
+} from "../../runtime/config/index.js";
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
 import {
   createEmbeddingRecord,

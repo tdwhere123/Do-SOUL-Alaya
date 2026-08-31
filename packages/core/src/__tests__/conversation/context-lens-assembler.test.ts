@@ -319,7 +319,7 @@ it("renders a hint-manifestation memory as a bare ref but an excerpt as body con
     // to hint, not excerpt: capping a true-hint ceiling to excerpt over-surfaces a
     // body fragment for a memory whose true ceiling is a bare ref.
     // see also: conversation/context-lens-assembler.ts resolveContentSnapshot,
-    //   path-graph/path-manifestation-policy.ts GOVERNANCE_CEILING_FAILSAFE_BAND.
+    //   relations/path-relations/path-manifestation-policy.ts GOVERNANCE_CEILING_FAILSAFE_BAND.
     const longBody =
       "Sensitive deployment rollback body that a bare hint ref must never expose, ".repeat(4).trim();
     const memory = createMemoryEntry({

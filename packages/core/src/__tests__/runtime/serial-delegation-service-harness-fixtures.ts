@@ -3,7 +3,7 @@ import type { AgentRuntimePort, DelegatedWorkerRun, EventLogEntry, RuntimeEvent,
 import { CoreError } from "../../shared/errors.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
 import { WorkerRunLifecycleService } from "../../runtime/worker-run-lifecycle-service.js";
-import { type IntegrationGateDecision } from "../../security/integration-gate.js";
+import { type IntegrationGateDecision } from "../../governance/security/integration-gate.js";
 import { SerialDelegationService } from "../../runtime/serial-delegation-service.js";
 import { ScriptedRuntimeAdapter } from "../../test-doubles/__tests__/scripted-runtime-adapter.js";
 import type { TestMock } from "../shared/mock-types.js";

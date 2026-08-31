@@ -6,8 +6,8 @@ import {
     type ManifestationDecision,
     type TaskObjectSurface
   } from "@do-soul/alaya-protocol";
-import { loadOrDefaultWithWorkspaceGuard } from "../shared/load-or-default-with-workspace-guard.js";
-import { validateActivationCandidates } from "../shared/validated-activation-candidates.js";
+import { loadOrDefaultWithWorkspaceGuard } from "./load-or-default-with-workspace-guard.js";
+import { validateActivationCandidates } from "./validated-activation-candidates.js";
 import { appendManifestationGovernanceEvents } from "./manifestation-event-writer.js";
 import {
   SYSTEM_NOW,

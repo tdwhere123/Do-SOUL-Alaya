@@ -6,7 +6,7 @@ import {
 
 export type { EventLogEntry, MemoryEntry };
 
-import { KeyedMutex } from "../../shared/keyed-mutex.js";
+import { KeyedMutex } from "../keyed-mutex.js";
 import type { GovernanceRunWorkspaceLookup } from "../policy/run-workspace-guard.js";
 import type { PreWriteRecallPort } from "./pre-write-recall-service.js";
 

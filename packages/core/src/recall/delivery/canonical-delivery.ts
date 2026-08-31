@@ -10,7 +10,7 @@ import {
   type RecallCandidate
 } from "@do-soul/alaya-protocol";
 import { clampManifestationByGovernance } from
-  "../../path-graph/path-relations/path-manifestation-policy.js";
+  "../../relations/path-relations/path-manifestation-policy.js";
 import type {
   FineAssessParams,
   FineAssessResult

@@ -3,7 +3,7 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import {
   installCoreConfigFromProcessEnv,
   resetCoreConfigForTests
-} from "../../config/index.js";
+} from "../../runtime/config/index.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { scorePreferenceProfileAlignment } from "../../recall/scoring/preference-fusion-scoring.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";

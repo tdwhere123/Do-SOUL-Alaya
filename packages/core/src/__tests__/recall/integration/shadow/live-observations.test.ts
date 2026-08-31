@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   installCoreConfigFromProcessEnv,
   resetCoreConfigForTests
-} from "../../../../config/install-core-config.js";
+} from "../../../../runtime/config/install-core-config.js";
 import { compileRecallQueryProbes } from "../../../../recall/query/recall-query-probes.js";
 import { buildDefaultPolicy } from "../../../../recall/runtime/orchestration.js";
 import type {

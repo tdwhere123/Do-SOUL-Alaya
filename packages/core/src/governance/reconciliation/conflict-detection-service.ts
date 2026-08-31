@@ -5,7 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   type PathMintOutcome,
-} from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
+} from "../../relations/edge-proposals/path-relation-proposal-service.js";
 import { CoreError } from "../../shared/errors.js";
 import {
   DEFAULT_LLM_MAX_PAIRS,

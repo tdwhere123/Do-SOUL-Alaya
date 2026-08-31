@@ -32,7 +32,7 @@ import { readGardenLlmJsonCache, writeGardenLlmJsonCache } from "./garden-llm-ca
  *   service then falls back to the local heuristic for that neighbor.
  *
  * see also: apps/core-daemon/src/ai/reconciliation-llm-decision.ts
- * see also: packages/core/src/path-graph/edge-auto-producer-llm-port.ts
+ * see also: packages/core/src/relations/producers/edge-auto-producer-llm-port.ts
  *
  */
 
