@@ -199,7 +199,7 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
   // resolves — the host-suspend hang root cause. The fetch promise never
   // resolves, the SDK's monotonic setTimeout is also paused, and only the
   // outer wall-clock check rescues the call.
-  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  // see also: packages/soul/src/garden/scheduling/wall-clock-timeout.ts
   it("aborts a hanging extractor via the outer wall-clock guard and classifies as network", async () => {
     const hangingExtractor: SignalExtractor = {
       extract: vi.fn<SignalExtractor["extract"]>(

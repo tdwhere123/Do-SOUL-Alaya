@@ -55,8 +55,19 @@ interface SchemaDescriptor {
   readonly metadata: string | null;
 }
 
+// mcp-types no longer re-exports these six; keep both snapshot labels so the
+// hashed MCP surface text stays byte-identical.
+const mcpEdgeProposalRootSchemas: ModuleExports = {
+  SoulBatchReviewEdgeProposalsRequestSchema: EdgeProposal.SoulBatchReviewEdgeProposalsRequestSchema,
+  SoulBatchReviewEdgeProposalsResponseSchema: EdgeProposal.SoulBatchReviewEdgeProposalsResponseSchema,
+  SoulListPendingEdgeProposalsRequestSchema: EdgeProposal.SoulListPendingEdgeProposalsRequestSchema,
+  SoulListPendingEdgeProposalsResponseSchema: EdgeProposal.SoulListPendingEdgeProposalsResponseSchema,
+  SoulProposeEdgeRequestSchema: EdgeProposal.SoulProposeEdgeRequestSchema,
+  SoulProposeEdgeResponseSchema: EdgeProposal.SoulProposeEdgeResponseSchema
+};
+
 const mcpSchemaModules: readonly SchemaModule[] = [
-  { module: "packages/protocol/src/surfaces/mcp-types.ts", exports: McpTypes },
+  { module: "packages/protocol/src/surfaces/mcp-types.ts", exports: { ...McpTypes, ...mcpEdgeProposalRootSchemas } },
   { module: "packages/protocol/src/signals/candidate-memory-signal.ts", exports: CandidateMemorySignal },
   { module: "packages/protocol/src/shared/schema-primitives.ts", exports: SchemaPrimitives },
   { module: "packages/protocol/src/lifecycle/budget-snapshot.ts", exports: BudgetSnapshot },
@@ -198,7 +209,7 @@ function collectMcpSurface(
 
 function collectMcpRootSchemas(): readonly Readonly<{ readonly name: string; readonly schema: z.ZodTypeAny }>[] {
   return Object.freeze(
-    Object.entries(McpTypes)
+    [...Object.entries(McpTypes), ...Object.entries(mcpEdgeProposalRootSchemas)]
       .filter(([name, value]) => /^(Soul|Garden|MemorySearch).*Schema$/.test(name) && isZodSchema(value))
       // isZodSchema narrows in the filter predicate but the guard does not flow
       // through tuple destructuring into the mapped element type.

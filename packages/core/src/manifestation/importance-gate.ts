@@ -6,7 +6,7 @@ import { DYNAMICS_CONSTANTS, type MemoryEntry, type PathRelation } from "@do-sou
  * DYNAMICS_CONSTANTS — the normal->stable promotion threshold is the same
  * "this path has earned trust through repeated use" boundary, so a path past
  * it must never be deleted by consolidation, only cold-stored (left dormant).
- * see also: packages/protocol/src/soul/dynamics-constants.ts path_plasticity.
+ * see also: packages/protocol/src/lifecycle/dynamics-constants.ts path_plasticity.
  */
 const WELL_SUPPORTED_EVENTS_THRESHOLD =
   DYNAMICS_CONSTANTS.path_plasticity.normal_to_stable_support_count;
@@ -164,7 +164,7 @@ function isMemoryStrictlyGoverned(memory: Readonly<MemoryEntry>): boolean {
  * sufficient to forbid autonomous deletion.
  *
  * see also: packages/core/src/memory/memory-service/service.ts:MemoryService.autonomousTombstone,
- * packages/soul/src/garden/janitor.ts executeTombstoneGc.
+ * packages/soul/src/garden/maintenance/janitor.ts executeTombstoneGc.
  */
 export function classifyMemoryImportance(
   memory: Readonly<MemoryEntry>

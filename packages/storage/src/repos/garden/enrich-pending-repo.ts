@@ -20,7 +20,7 @@ import {
 // see also: migrations/002-ops-and-control.sql — base schema
 // see also: migrations/002-ops-and-control.sql — attempt cap + dead-letter
 // see also: apps/core-daemon/src/garden/runtime.ts — drain worker
-// see also: packages/soul/src/garden/materialization-router/router.ts — enqueue producer
+// see also: packages/soul/src/garden/materialization/materialization-router/router.ts — enqueue producer
 
 export interface EnrichPendingEnqueueInput {
   readonly workspaceId: string;

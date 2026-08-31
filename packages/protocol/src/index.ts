@@ -4,8 +4,14 @@
  * shared contracts every other package depends on, with no runtime logic of its
  * own. Schemas are grouped by domain:
  *
- * - `soul` — memory ontology: entries, evidence/synthesis capsules, claims,
- *   recall candidates/policy, governance, karma, lifecycle, status models.
+ * - `memory` — entries, capsules, claims, karma, graph, and status models.
+ * - `evidence` — evidence capsules, fact frames, and formation completeness.
+ * - `relations` — graph, path, edge-proposal, and semantic-factor contracts.
+ * - `recall` — candidates, policy, FTS, field-contract, and manifestation.
+ * - `governance` — proposals, constraints, green/security status, verification.
+ * - `garden` — garden tier, backlog, bootstrapping, and extract constants.
+ * - `surfaces` — MCP types, slots, project mapping, and extension descriptors.
+ * - `lifecycle` — budget, orphan radar, handoff, session override, dynamics.
  * - `workspace` — workspace and workspace-file contracts.
  * - `runtime` — run and hot-state contracts.
  * - `signals` — candidate memory signals proposed by agents/garden.

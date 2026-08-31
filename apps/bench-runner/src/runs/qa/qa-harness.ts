@@ -20,8 +20,8 @@
  * behaviour is to abstain. We route them to the abstention judge template (an
  * LLM-judge, matching the official metric) rather than a string match.
  *
- * see also: apps/bench-runner/src/datasets/longmemeval/qa-chat.ts — chat primitive
- * see also: apps/bench-runner/src/datasets/longmemeval/abstention.ts — `_abs` semantics
+ * see also: apps/bench-runner/src/runs/qa/qa-chat.ts — chat primitive
+ * see also: apps/bench-runner/src/diagnostics/abstention.ts — `_abs` semantics
  */
 import type { QaChatFn } from "./qa-chat.js";
 

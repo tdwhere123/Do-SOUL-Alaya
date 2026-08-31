@@ -68,7 +68,7 @@ function pushLatencyAndPrimaryEconomy(lines: string[], current: KpiPayload): voi
   // honest cross-shard distribution needs the raw per-recall samples
   // (only per-shard archives carry them). Surface that explicitly so a
   // reader of the merged report does not mistake the absence for an
-  // instrumentation bug. see also: apps/bench-runner/src/cli.ts
+  // instrumentation bug. see also: apps/bench-runner/src/cli/cli.ts
   // @anchor merged-recall-token-economy.
   if (
     rte === undefined &&

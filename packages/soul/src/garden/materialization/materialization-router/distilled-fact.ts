@@ -48,7 +48,7 @@ export function buildSignalSummary(signal: CandidateMemorySignal): string {
 // fallback takes the first two sentences capped at DISTILLED_FACT_MAX_CHARS.
 // Single source of truth for the distilled-fact length budget: the
 // official-API garden provider clamps raw_payload.distilled_fact to this
-// same constant. see also: garden/compute-provider.ts.
+// same constant. see also: garden/ingestion/compute-provider.ts.
 // invariant: preference-aware source grounding is the only Garden path above
 // this default cap; its shared 1,200-char bound also governs dropped-content audit.
 export const DISTILLED_FACT_MAX_CHARS = SOURCE_ASSERTION_MAX_CHARS;

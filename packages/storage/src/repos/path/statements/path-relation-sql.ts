@@ -100,7 +100,7 @@ export function findByBackingObjectIdsSql(objectIdCount: number): string {
     `;
 }
 
-export const WAVE_1_ACTIVE_LIFECYCLE_SQL = `CASE
+export const ACTIVE_PATH_LIFECYCLE_SQL = `CASE
       WHEN json_valid(lifecycle_json) = 0 THEN 0
       WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL
         OR json_type(lifecycle_json, '$.retirement_rule') != 'text' THEN 0
@@ -119,7 +119,7 @@ export const WAVE_1_ACTIVE_LIFECYCLE_SQL = `CASE
       ELSE 1
     END`;
 
-export const WAVE_1_DORMANT_LIFECYCLE_SQL = `CASE
+export const DORMANT_PATH_LIFECYCLE_SQL = `CASE
       WHEN json_valid(lifecycle_json) = 0 THEN 0
       WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL
         OR json_type(lifecycle_json, '$.retirement_rule') != 'text' THEN 0

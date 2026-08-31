@@ -307,7 +307,7 @@ export interface SignalRefSeedSpec {
 // Librarian task drains the markers and runs the governed enrichment
 // services off-path. enqueue is an idempotent upsert downstream, so a
 // re-materialize of the same memory never duplicates enrichment.
-// see also: packages/storage/src/repos/enrich-pending-repo.ts
+// see also: packages/storage/src/repos/garden/enrich-pending-repo.ts
 // see also: apps/core-daemon/src/garden-runtime.ts — BULK_ENRICH drain worker.
 export interface EnrichPendingPort {
   enqueue(params: {

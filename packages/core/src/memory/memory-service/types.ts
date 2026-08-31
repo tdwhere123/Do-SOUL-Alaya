@@ -33,8 +33,8 @@ export type MemoryEntryInput = Omit<
   readonly storage_tier?: MemoryEntry["storage_tier"];
   // invariant: enqueueEnrichment means memory row + enrich_pending marker
   // commit atomically, or create throws instead of silently dropping the marker.
-  // see also: packages/soul/src/garden/materialization-router/router.ts:enqueueEnrichment.
-  // see also: packages/storage/src/repos/enrich-pending-repo.ts:enqueue.
+  // see also: packages/soul/src/garden/materialization/materialization-router/router.ts:enqueueEnrichment.
+  // see also: packages/storage/src/repos/garden/enrich-pending-repo.ts:enqueue.
   readonly enqueueEnrichment?: {
     readonly runId: string | null;
     readonly sourceSignalId: string | null;
@@ -244,7 +244,7 @@ export interface MemoryServiceDynamicsPort {
 
 // invariant: enrich_pending enqueue runs inside the memory-row create
 // transaction and must be synchronous.
-// see also: packages/storage/src/repos/enrich-pending-repo.ts:enqueue.
+// see also: packages/storage/src/repos/garden/enrich-pending-repo.ts:enqueue.
 export interface MemoryServiceEnrichPendingWriterPort {
   enqueue(params: {
     readonly workspaceId: string;

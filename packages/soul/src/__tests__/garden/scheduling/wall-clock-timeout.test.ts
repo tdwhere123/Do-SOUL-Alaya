@@ -7,8 +7,8 @@ import {
 // invariant: covers the bench-runner / production garden hang root cause —
 // a fetch that never resolves because the host suspended during the in-flight
 // HTTP call leaves the monotonic setTimeout paused and the socket stale.
-// see also: packages/soul/src/garden/compute-provider.ts requestSignals
-// see also: apps/bench-runner/src/longmemeval/compile-seed.ts createGardenHttpExtractor
+// see also: packages/soul/src/garden/ingestion/compute-provider.ts requestSignals
+// see also: apps/bench-runner/src/runs/compile-seed/compile-seed-http.ts createGardenHttpExtractor
 
 describe("withWallClockTimeout", () => {
   it("resolves the inner promise when it completes within budget", async () => {

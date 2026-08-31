@@ -12,7 +12,7 @@
  * score = clamp(m / ABSTENTION_FUSED_MARGIN_SCALE, 0, 1). Missing fused
  * scores or fewer than two finite fused values → null (scorer auto-passes).
  *
- * see also: apps/bench-runner/src/datasets/longmemeval/abstention.ts
+ * see also: apps/bench-runner/src/diagnostics/abstention.ts
  */
 
 /** RRF default k=60; maps realistic fused margins onto [0, 1] confidence. */

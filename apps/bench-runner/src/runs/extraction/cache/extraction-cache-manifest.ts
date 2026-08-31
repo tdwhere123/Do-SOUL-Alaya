@@ -56,11 +56,11 @@ export {
  * is absent — replacing the old "fall back to the compile-time production
  * constant" path with "fall back to the cache's own self-description".
  *
- * cross-file: apps/bench-runner/src/datasets/longmemeval/compile-seed.ts
+ * cross-file: apps/bench-runner/src/runs/compile-seed.ts
  *   (resolveCompileSeedExtractionConfig, preflightExtractionCache,
  *   computeCacheKey — the cache-key model component MUST equal
  *   extraction_model)
- * cross-file: packages/soul/src/garden/compute-provider.ts
+ * cross-file: packages/soul/src/garden/ingestion/compute-provider.ts
  *   OFFICIAL_API_SYSTEM_PROMPT (the prompt whose sha256 is pinned here)
  */
 

@@ -124,7 +124,7 @@ const MEMORY_MANIFESTATION_ORDER: readonly ManifestationStateValue[] = [
 //   recall_allowed    -> full_eligible
 //   strictly_governed -> full_eligible (highest trust; never throttles content)
 // The PathGovernanceClass enum has exactly these four members
-// (packages/protocol/src/soul/path-relation.ts pathGovernanceClassValues);
+// (packages/protocol/src/relations/path-relation.ts pathGovernanceClassValues);
 // no additional bands exist, so no conservative fallback is needed.
 const GOVERNANCE_MANIFESTATION_CEILING: Readonly<
   Record<PathGovernanceClassValue, ManifestationStateValue>

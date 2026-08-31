@@ -133,7 +133,7 @@ interface OfficialApiGardenProviderDependencies {
   readonly requestTimeoutMs?: number;
   // invariant: outer wall-clock budget. Defaults to readTimeoutMs + 30s.
   // Test seam.
-  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  // see also: packages/soul/src/garden/scheduling/wall-clock-timeout.ts
   readonly wallClockBudgetMs?: number;
   readonly extractor?: SignalExtractor;
   /** Allows a credentialless provider only for an explicitly injected cache reader. */
@@ -171,7 +171,7 @@ const DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS = 10_000;
 // invariant: outer wall-clock budget = read timeout + grace. Read timeout
 // drives the inner SDK abort; wall-clock catches stale sockets the monotonic
 // timer cannot detect after host suspend.
-// see also: packages/soul/src/garden/wall-clock-timeout.ts
+// see also: packages/soul/src/garden/scheduling/wall-clock-timeout.ts
 const WALL_CLOCK_OUTER_GRACE_MS = 30_000;
 function wallClockBudgetFor(readTimeoutMs: number): number {
   return readTimeoutMs + WALL_CLOCK_OUTER_GRACE_MS;

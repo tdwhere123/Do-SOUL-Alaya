@@ -65,7 +65,7 @@
     },
     "apps/bench-runner": {
       "entry": [
-        "src/cli.ts",
+        "src/cli/index.ts",
         "src/__tests__/**/*.test.ts",
         "bin/*.mjs",
         "scripts/*.mjs",

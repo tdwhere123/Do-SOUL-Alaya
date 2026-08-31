@@ -36,7 +36,7 @@ import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixtur
 // last extraction-fill recorded. A staged fill writing coverage=1.0 over a
 // small window must NOT let a wider run pass preflight and silently
 // live-extract the unfilled remainder.
-// cross-file: apps/bench-runner/src/datasets/longmemeval/compile-seed.ts
+// cross-file: apps/bench-runner/src/runs/compile-seed/compile-seed-preflight.ts
 //   (preflightExtractionCache requiredTurnContents)
 
 const CONFIG: CompileSeedExtractionConfig = {

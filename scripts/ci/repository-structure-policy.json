@@ -1207,62 +1207,6 @@
         "packages/core/src/dynamics/dynamics-constants-runtime.ts",
         "packages/core/src/shared/clamp.ts"
       ]
-    },
-    {
-      "path": "packages/protocol/src/index.ts",
-      "binding": "EventLogOrphanExpectedTable",
-      "sources": [
-        "packages/protocol/src/events/event-log-orphan.ts",
-        "packages/protocol/src/workers/auditor-ports.ts"
-      ]
-    },
-    {
-      "path": "packages/protocol/src/index.ts",
-      "binding": "SoulBatchReviewEdgeProposalsRequestSchema",
-      "sources": [
-        "packages/protocol/src/relations/edge-proposal.ts",
-        "packages/protocol/src/surfaces/mcp-types.ts"
-      ]
-    },
-    {
-      "path": "packages/protocol/src/index.ts",
-      "binding": "SoulBatchReviewEdgeProposalsResponseSchema",
-      "sources": [
-        "packages/protocol/src/relations/edge-proposal.ts",
-        "packages/protocol/src/surfaces/mcp-types.ts"
-      ]
-    },
-    {
-      "path": "packages/protocol/src/index.ts",
-      "binding": "SoulListPendingEdgeProposalsRequestSchema",
-      "sources": [
-        "packages/protocol/src/relations/edge-proposal.ts",
-        "packages/protocol/src/surfaces/mcp-types.ts"
-      ]
-    },
-    {
-      "path": "packages/protocol/src/index.ts",
-      "binding": "SoulListPendingEdgeProposalsResponseSchema",
-      "sources": [
-        "packages/protocol/src/relations/edge-proposal.ts",
-        "packages/protocol/src/surfaces/mcp-types.ts"
-      ]
-    },
-    {
-      "path": "packages/protocol/src/index.ts",
-      "binding": "SoulProposeEdgeRequestSchema",
-      "sources": [
-        "packages/protocol/src/relations/edge-proposal.ts",
-        "packages/protocol/src/surfaces/mcp-types.ts"
-      ]
-    },
-    {
-      "path": "packages/protocol/src/index.ts",
-      "binding": "SoulProposeEdgeResponseSchema",
-      "sources": [
-        "packages/protocol/src/relations/edge-proposal.ts",
-        "packages/protocol/src/surfaces/mcp-types.ts"
-      ]
     }
   ],
   "existing_index_to_index_edges": [

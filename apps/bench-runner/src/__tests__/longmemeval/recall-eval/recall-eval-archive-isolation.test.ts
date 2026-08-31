@@ -20,7 +20,7 @@ import { buildPublicPayload } from "./archive-fixture.js";
 // shares the public/ bench + (split, policy, simulate, provider) bucket with
 // full runs, but never paid extraction/materialization. It must carry an
 // explicit discriminator and must never be selected as a full-run baseline.
-// cross-file: apps/bench-runner/src/datasets/longmemeval/recall-eval-archive.ts
+// cross-file: apps/bench-runner/src/runs/kpi/recall-eval-archive.ts
 
 let historyRoot: string;
 let layout: HistoryLayout;

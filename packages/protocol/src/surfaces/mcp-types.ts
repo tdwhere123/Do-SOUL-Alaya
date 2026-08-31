@@ -19,21 +19,9 @@ import {
 } from "../memory/memory-graph.js";
 import {
   SoulBatchReviewEdgeProposalsRequestSchema,
-  SoulBatchReviewEdgeProposalsResponseSchema,
   SoulListPendingEdgeProposalsRequestSchema,
-  SoulListPendingEdgeProposalsResponseSchema,
-  SoulProposeEdgeRequestSchema,
-  SoulProposeEdgeResponseSchema
+  SoulProposeEdgeRequestSchema
 } from "../relations/edge-proposal.js";
-
-export {
-  SoulBatchReviewEdgeProposalsRequestSchema,
-  SoulBatchReviewEdgeProposalsResponseSchema,
-  SoulListPendingEdgeProposalsRequestSchema,
-  SoulListPendingEdgeProposalsResponseSchema,
-  SoulProposeEdgeRequestSchema,
-  SoulProposeEdgeResponseSchema
-};
 import { PublicMemoryEntryMutableFieldsSchema } from "../memory/memory-entry.js";
 import {
   MemoryProposalOperationSchema,

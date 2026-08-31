@@ -396,7 +396,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   // drains every BULK_ENRICH queued in a ~60s GardenScheduler pass (up to a
   // bounded per-pass cap), so the upper bound is ~1 min per workspace up to the
   // cap, and O(workspaces / cap) * ~1 min beyond it.
-  // see also: packages/storage/src/repos/enrich-pending-repo.ts
+  // see also: packages/storage/src/repos/garden/enrich-pending-repo.ts
   // see also: apps/core-daemon/src/garden-runtime.ts runBulkEnrichTask.
   protected enrichmentIntent(
     signal: CandidateMemorySignal

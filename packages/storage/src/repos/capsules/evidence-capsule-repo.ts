@@ -64,7 +64,7 @@ export type {
   RecallQualifiedEvidence
 } from "./evidence-recall-types.js";
 
-// see also: packages/protocol/src/soul/fts-search-policy.ts — porter/trigram
+// see also: packages/protocol/src/recall/fts-search-policy.ts — porter/trigram
 // split and ordinal-rank merge shared with synthesis-capsule-repo.ts.
 export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private readonly statementHolder: RefreshableStatementHolder<EvidenceCapsuleStatements>;

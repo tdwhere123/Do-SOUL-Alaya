@@ -242,7 +242,7 @@ type OfficialApiSignalEntryInspection = Readonly<
 // Exported so the LongMemEval bench seed path can drive its ingestion
 // through this exact production parse instead of a divergent bench-only
 // copy.
-// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
+// see also: apps/bench-runner/src/runs/compile-seed.ts
 export function parseOfficialApiSignals(
   content: string,
   options: OfficialApiSignalParseOptions = {}

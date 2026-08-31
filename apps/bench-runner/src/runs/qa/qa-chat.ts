@@ -7,7 +7,7 @@
  * by default (--qa flag); when off this module is never constructed, so a
  * normal recall bench makes zero LLM calls.
  *
- * see also: apps/bench-runner/src/datasets/longmemeval/qa-harness.ts — answer/judge flow
+ * see also: apps/bench-runner/src/runs/qa/qa-harness.ts — answer/judge flow
  */
 
 import {

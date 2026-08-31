@@ -123,7 +123,7 @@ export type PerScenarioRow = z.infer<typeof PerScenarioRowSchema>;
 // @anchor latency-source: "exact" when latencies are union percentiles
 // of a single run or merged from per-scenario latency rows;
 // "worst_shard_bound" when merged from legacy shards as max(shard_p)
-// (upper-bound only). see also: apps/bench-runner/src/cli.ts
+// (upper-bound only). see also: apps/bench-runner/src/cli/cli.ts
 // @merge-longmemeval.
 const LatencySourceSchema = z
   .enum(["exact", "worst_shard_bound"])
@@ -175,7 +175,7 @@ const SeedTruncationSchema = z
 //   + signals_dropped_by_reason.materialization_drop.
 // Any defensive whole-batch backstop must therefore be attributed to
 // materialization_drop. see also:
-// apps/bench-runner/src/datasets/longmemeval/compile-seed.ts CompileSeedExtractionStats.
+// apps/bench-runner/src/runs/compile-seed/compile-seed-types.ts CompileSeedExtractionStats.
 
 function normalizeSeedDropReasons(value: unknown): {
   candidate_absent: number;
@@ -244,7 +244,7 @@ export const SeedExtractionPathSchema = z
     // Optional with a zero default so archives written before this field shipped
     // still parse; new runs always populate it.
     // see also:
-    // apps/bench-runner/src/datasets/longmemeval/compile-seed.ts CompileSeedExtractionStats
+    // apps/bench-runner/src/runs/compile-seed/compile-seed-types.ts CompileSeedExtractionStats
     signals_dropped_by_reason: SeedDropReasonsSchema
   })
   .strict();

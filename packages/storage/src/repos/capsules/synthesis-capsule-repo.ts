@@ -98,7 +98,7 @@ interface SynthesisCapsuleRow {
   readonly synthesis_status: string;
 }
 
-// see also: packages/protocol/src/soul/fts-search-policy.ts — porter/trigram
+// see also: packages/protocol/src/recall/fts-search-policy.ts — porter/trigram
 // split and ordinal-rank merge shared with evidence-capsule-repo.ts.
 export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   private readonly statementHolder: RefreshableStatementHolder<SynthesisCapsuleStatements>;

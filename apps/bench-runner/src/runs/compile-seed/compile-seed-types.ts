@@ -153,7 +153,7 @@ export function completeBenchTerminalRetryClassifications(
 // JSON recovery happens inside parseOrRecoverJson, which only the pi-mono
 // loop reaches; the bench transport returns whatever content the gateway
 // emitted.
-// cross-file: packages/soul/src/garden/pi-mono-extractor.ts SignalExtractorMeta
+// cross-file: packages/soul/src/garden/extraction/pi-mono-extractor.ts SignalExtractorMeta
 export interface BenchSignalExtractorMeta {
   readonly recoveryKind: "none" | "markdown_strip" | "trailing_strip" | "balanced_close";
   readonly retryCount: number;

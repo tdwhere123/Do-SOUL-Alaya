@@ -327,7 +327,7 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
   // backstop must settle the attempt as failure_timeout within budget rather
   // than hanging until the vitest timeout. Mirrors the never-settling-fetch
   // regression but for the body read. WITHOUT the body-read race this hangs.
-  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  // see also: packages/soul/src/garden/scheduling/wall-clock-timeout.ts
   it("settles a never-resolving body read via the timeout backstop (not a hang)", async () => {
     // A real 200 OK response whose `.text()` never resolves and ignores abort.
     const stalledBodyResponse = {

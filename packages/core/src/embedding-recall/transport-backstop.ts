@@ -1,6 +1,6 @@
 // Thin local stall backstop: core cannot import soul's withWallClockTimeout.
 // Timeout + no leaked timers. The caller owns the AbortController.
-// see also: packages/soul/src/garden/wall-clock-timeout.ts withWallClockTimeout
+// see also: packages/soul/src/garden/scheduling/wall-clock-timeout.ts withWallClockTimeout
 
 export async function raceAgainstTransportBackstop<T>(
   work: Promise<T>,

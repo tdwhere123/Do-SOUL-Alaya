@@ -16,7 +16,7 @@
  * boundary is intentional and does not define diagnostic exclusion.
  *
  * see also: apps/bench-runner/src/datasets/longmemeval/runner.ts — scoring call site
- * see also: apps/bench-runner/src/datasets/longmemeval/diagnostics.ts
+ * see also: apps/bench-runner/src/diagnostics/diagnostics.ts
  */
 
 /** True iff the question id marks a LongMemEval abstention question. */

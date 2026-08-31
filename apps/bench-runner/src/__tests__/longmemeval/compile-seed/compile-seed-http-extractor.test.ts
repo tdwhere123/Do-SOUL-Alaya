@@ -545,7 +545,7 @@ describe("createGardenHttpExtractor retry policy", () => {
   // Models the bench-runner host-suspend hang: fetch never resolves and the
   // operator-supplied timeoutMs is large enough that without the wall-clock
   // tick the test would time out.
-  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  // see also: packages/soul/src/garden/scheduling/wall-clock-timeout.ts
   it("does not abort a compile-seed fetch at the 10s provider default", async () => {
     vi.useFakeTimers();
     try {
@@ -631,7 +631,7 @@ describe("createGardenHttpExtractor retry policy", () => {
   // timer even though this fetch ignores its signal. WITHOUT the fix this
   // test hangs until the vitest timeout; WITH the fix it surfaces
   // failure_timeout within budget.
-  // see also: packages/soul/src/garden/wall-clock-timeout.ts
+  // see also: packages/soul/src/garden/scheduling/wall-clock-timeout.ts
   it("settles a never-resolving fetch that ignores its abort signal via the timeout backstop", async () => {
     vi.useFakeTimers();
     try {
@@ -666,7 +666,7 @@ describe("createGardenHttpExtractor retry policy", () => {
   // ignores its abort signal and never settles. abort() alone does not settle
   // for that stalled-socket shape, so without the settlement reject the attempt
   // would wait the full budget and then misclassify as failure_timeout.
-  // see also: packages/soul/src/garden/wall-clock-timeout.ts settleOperatorAbort.
+  // see also: packages/soul/src/garden/scheduling/wall-clock-timeout.ts settleOperatorAbort.
   it("settles failure_aborted (no retry) on operator abort even when the fetch ignores its signal", async () => {
     const operator = new AbortController();
     const fetchMock = vi

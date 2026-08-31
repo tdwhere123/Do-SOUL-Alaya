@@ -235,7 +235,7 @@ function readBenchRetryFromError(error: unknown): BenchRetrySnapshot | null {
  * caught and surfaced as a single warn so the seed loop continues.
  *
  * Co-located with the provider-side dump in
- * packages/soul/src/garden/compute-provider.ts:dumpInvalidResponseDiagnostic
+ * packages/soul/src/garden/ingestion/compute-provider.ts:dumpInvalidResponseDiagnostic
  * so a single readdir + JSON pass surfaces every signal of the failure.
  */
 async function dumpSeedExtractionFailureDiagnostic(

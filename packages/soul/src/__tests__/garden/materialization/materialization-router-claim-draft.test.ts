@@ -15,7 +15,7 @@ type ClaimCreate = MaterializationRouterDeps["claimService"]["create"];
 // every potential_claim / potential_preference into memory_and_claim,
 // locks claim_status=draft at the wire boundary, and routes
 // potential_conflict to ConflictDetectionPort.evaluate.
-// see also: packages/soul/src/garden/materialization-router/router.ts route()
+// see also: packages/soul/src/garden/materialization/materialization-router/router.ts route()
 // see also: packages/core/src/governance/claim-service.ts create() (DRAFT default)
 function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
   const { source_observation = null, ...signalOverrides } = overrides;

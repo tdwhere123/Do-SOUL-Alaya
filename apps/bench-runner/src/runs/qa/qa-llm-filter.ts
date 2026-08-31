@@ -15,8 +15,8 @@
  * benchmark fitting). Off by default; a parse failure falls back to the natural
  * delivery so a flaky filter call never zeroes a question.
  *
- * see also: apps/bench-runner/src/datasets/longmemeval/qa-harness.ts — answer/judge flow
- * see also: apps/bench-runner/src/datasets/longmemeval/runner-question.ts — wiring
+ * see also: apps/bench-runner/src/runs/qa/qa-harness.ts — answer/judge flow
+ * see also: apps/bench-runner/src/datasets/longmemeval/runner/question/runner-question.ts — wiring
  */
 import type { QaChatFn } from "./qa-chat.js";
 import type { QaDeliveredCandidate } from "./qa-harness.js";

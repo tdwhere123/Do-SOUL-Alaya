@@ -3,8 +3,8 @@ import {
   PATH_RELATION_SELECT_COLUMNS,
   SOURCE_ANCHOR_KEY_SQL,
   TARGET_ANCHOR_KEY_SQL,
-  WAVE_1_ACTIVE_LIFECYCLE_SQL,
-  WAVE_1_DORMANT_LIFECYCLE_SQL,
+  ACTIVE_PATH_LIFECYCLE_SQL,
+  DORMANT_PATH_LIFECYCLE_SQL,
   findByBackingObjectIdSql
 } from "./path-relation-sql.js";
 
@@ -99,14 +99,14 @@ const PATH_RELATION_SQL: PathRelationSqlMap = {
       SELECT${PATH_RELATION_SELECT_COLUMNS}
       FROM path_relations
       WHERE workspace_id = ?
-        AND ${WAVE_1_ACTIVE_LIFECYCLE_SQL} = 1
+        AND ${ACTIVE_PATH_LIFECYCLE_SQL} = 1
       ORDER BY created_at ASC, path_id ASC
     `,
   findActivePagedStatement: `
       SELECT${PATH_RELATION_SELECT_COLUMNS}
       FROM path_relations
       WHERE workspace_id = ?
-        AND ${WAVE_1_ACTIVE_LIFECYCLE_SQL} = 1
+        AND ${ACTIVE_PATH_LIFECYCLE_SQL} = 1
       ORDER BY created_at ASC, path_id ASC
       LIMIT ? OFFSET ?
     `,
@@ -114,7 +114,7 @@ const PATH_RELATION_SQL: PathRelationSqlMap = {
       SELECT${PATH_RELATION_SELECT_COLUMNS}
       FROM path_relations
       WHERE workspace_id = ?
-        AND ${WAVE_1_DORMANT_LIFECYCLE_SQL} = 1
+        AND ${DORMANT_PATH_LIFECYCLE_SQL} = 1
         AND updated_at < ?
       ORDER BY created_at ASC, path_id ASC
     `,
@@ -122,7 +122,7 @@ const PATH_RELATION_SQL: PathRelationSqlMap = {
       SELECT${PATH_RELATION_SELECT_COLUMNS}
       FROM path_relations
       WHERE workspace_id = ?
-        AND ${WAVE_1_DORMANT_LIFECYCLE_SQL} = 1
+        AND ${DORMANT_PATH_LIFECYCLE_SQL} = 1
         AND updated_at < ?
       ORDER BY created_at ASC, path_id ASC
       LIMIT ? OFFSET ?

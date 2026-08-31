@@ -5,8 +5,8 @@
   "description": "Daemon-attached bench runner for LongMemEval-S and LoCoMo. Owns the harness; eval package stays a zod-only leaf.",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/cli/index.js",
+  "types": "dist/cli/index.d.ts",
   "bin": {
     "alaya-bench-runner": "bin/alaya-bench-runner.mjs"
   },

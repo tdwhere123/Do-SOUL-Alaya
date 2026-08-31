@@ -91,7 +91,7 @@ export interface LongMemEvalRunOptions {
   // WAL-checkpoint + copy the DB to this path with sidecar + version-binding
   // manifest. No producer-side recall pass — scores come from recall-eval /
   // matrix cells against the sealed snapshot.
-  // see also: apps/bench-runner/src/datasets/longmemeval/snapshot.ts
+  // see also: apps/bench-runner/src/runs/snapshot/writer.ts
   readonly snapshotOut?: string;
   // Override the extraction-cache root the run-start preflight validates and
   // the snapshot sidecar records provenance from (test-only). Production

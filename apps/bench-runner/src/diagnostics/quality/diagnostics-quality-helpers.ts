@@ -153,7 +153,7 @@ export function hasPathStreamContribution(delivered: DiagnosticRecallResult): bo
 // Path fan-in diagnostic: a gold candidate bears the path_expansion stream when
 // it was admitted on the path plane or fired the path_expansion fusion stream.
 // The diagnostic does not prove a specific relation_kind.
-// see also: apps/bench-runner/src/datasets/longmemeval/diagnostics.ts buildLongMemEvalQualityMetrics
+// see also: apps/bench-runner/src/diagnostics/quality/diagnostics-quality.ts buildLongMemEvalQualityMetrics
 export function hasGoldPathExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
   return (
     gold.source_planes.includes("path_expansion") ||
@@ -179,7 +179,7 @@ export function hasGoldPathExpansionStream(gold: LongMemEvalGoldDiagnostic): boo
 // graph_gold_*. We rely on the admission plane (true multi-hop) instead; the
 // path-primary partition (hasGoldPathExpansionStream) still credits the direct
 // hop-1 term, and graph_only_hit_at_5_count remains the clean multi-hop metric.
-// see also: apps/bench-runner/src/datasets/longmemeval/diagnostics.ts buildLongMemEvalQualityMetrics
+// see also: apps/bench-runner/src/diagnostics/quality/diagnostics-quality.ts buildLongMemEvalQualityMetrics
 // see also: packages/core/src/recall/fusion-delivery.ts:scoreRecallFusionStream
 export function hasGoldGraphExpansionStream(gold: LongMemEvalGoldDiagnostic): boolean {
   return (

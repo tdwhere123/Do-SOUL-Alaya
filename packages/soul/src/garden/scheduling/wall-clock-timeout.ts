@@ -131,8 +131,8 @@ interface WallClockTimeoutState {
  * Cleanup is guaranteed by a try/finally that clears BOTH timers before the
  * promise resolves or rejects — no timer leak even on synchronous throw.
  *
- * see also: packages/soul/src/garden/compute-provider.ts requestSignals
- * see also: apps/bench-runner/src/bench/compile-seed/compile-seed-http.ts runGardenHttpAttempt
+ * see also: packages/soul/src/garden/ingestion/compute-provider.ts requestSignals
+ * see also: apps/bench-runner/src/runs/compile-seed/compile-seed-http.ts runGardenHttpAttempt
  */
 export async function withWallClockTimeout<T>(
   fn: (signal: AbortSignal) => Promise<T>,
