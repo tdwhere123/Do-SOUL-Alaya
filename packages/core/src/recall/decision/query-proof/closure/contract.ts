@@ -20,7 +20,8 @@ export type ClosureSensitivityEffect =
   | "answer_position"
   | "extremum_interval"
   | "correlation_group"
-  | "tie_winner_membership";
+  | "tie_winner_membership"
+  | "completion_scope";
 
 export type ClosureQuerySensitivity = Readonly<{
   readonly sensitivity_id: string;
@@ -29,6 +30,7 @@ export type ClosureQuerySensitivity = Readonly<{
 }>;
 
 export type ChannelClosureScope = Readonly<{
+  readonly authority_digest: RecallFieldDigest;
   readonly query_digest: RecallFieldDigest;
   readonly request_digest: RecallFieldDigest;
   readonly snapshot_digest: RecallFieldDigest;
@@ -89,9 +91,12 @@ export type ChannelClosureResult = Readonly<{
   readonly operator_id: typeof CHANNEL_CLOSURE_OPERATOR_ID;
   readonly status: ChannelClosureStatus;
   readonly scope_digest: RecallFieldDigest;
+  readonly authority_digest: RecallFieldDigest;
   readonly query_digest: RecallFieldDigest;
+  readonly request_digest: RecallFieldDigest;
   readonly snapshot_digest: RecallFieldDigest;
   readonly principal_digest: RecallFieldDigest;
+  readonly workspace_id: string;
   readonly observer_id: string;
   readonly channel_id: string;
   readonly domain_id: string;
@@ -99,11 +104,15 @@ export type ChannelClosureResult = Readonly<{
   readonly sensitivity_manifest: readonly ClosureQuerySensitivity[];
   readonly remaining_effects: readonly ChannelRemainingEffect[];
   readonly completeness_refs: readonly ScopedCompletenessReference[];
+  readonly source_kind:
+    | "live_lexical_interval"
+    | "unverified_finite_field"
+    | "legacy_refinement_stop"
+    | "structural_only";
+  readonly source_receipt_digests: readonly RecallFieldDigest[];
   readonly reason: string;
   readonly result_digest: RecallFieldDigest;
 }>;
-
-const issuedChannelClosureResults = new WeakSet<object>();
 
 export function createScopedCompletenessReference(params: Readonly<{
   readonly scope: ChannelClosureScope;
@@ -140,14 +149,20 @@ export function createChannelClosureResult(params: Readonly<{
   readonly status: ChannelClosureStatus;
   readonly remaining_effects?: readonly ChannelRemainingEffect[];
   readonly completeness_refs?: readonly ScopedCompletenessReference[];
+  readonly source_kind?: ChannelClosureResult["source_kind"];
+  readonly source_receipt_digests?: readonly RecallFieldDigest[];
   readonly reason: string;
 }>): ChannelClosureResult {
   assertAllowedKeys(params, [
-    "scope", "status", "remaining_effects", "completeness_refs", "reason"
+    "scope", "status", "remaining_effects", "completeness_refs", "source_kind",
+    "source_receipt_digests", "reason"
   ], ["scope", "status", "reason"], "channel closure input");
   const scope = freezeClosureScope(params.scope);
   const effects = freezeEffects(params.remaining_effects ?? [], scope.sensitivities);
   const refs = freezeCompletenessReferences(params.completeness_refs ?? [], scope);
+  const sourceReceiptDigests = freezeDigests(
+    params.source_receipt_digests ?? [], "closure source receipt"
+  );
   assertClosureStatusPayload(params.status, effects, refs);
   assertIdentity(params.reason, "closure reason");
   const body = Object.freeze({
@@ -155,9 +170,12 @@ export function createChannelClosureResult(params: Readonly<{
     operator_id: CHANNEL_CLOSURE_OPERATOR_ID,
     status: params.status,
     scope_digest: digestClosureScope(scope),
+    authority_digest: scope.authority_digest,
     query_digest: scope.query_digest,
+    request_digest: scope.request_digest,
     snapshot_digest: scope.snapshot_digest,
     principal_digest: scope.principal_digest,
+    workspace_id: scope.workspace_id,
     observer_id: scope.observer_id,
     channel_id: scope.channel_id,
     domain_id: scope.domain_id,
@@ -165,18 +183,15 @@ export function createChannelClosureResult(params: Readonly<{
     sensitivity_manifest: scope.sensitivities,
     remaining_effects: effects,
     completeness_refs: refs,
+    source_kind: params.source_kind ?? "structural_only",
+    source_receipt_digests: sourceReceiptDigests,
     reason: params.reason
   });
   const result = Object.freeze({
     ...body,
     result_digest: digestRecallFieldIdentity(body)
   });
-  issuedChannelClosureResults.add(result);
   return result;
-}
-
-export function isIssuedChannelClosureResult(result: ChannelClosureResult): boolean {
-  return issuedChannelClosureResults.has(result);
 }
 
 export function uncertifiedClosure(
@@ -192,11 +207,12 @@ export function digestClosureScope(scope: ChannelClosureScope): RecallFieldDiges
 
 function freezeClosureScope(scope: ChannelClosureScope): ChannelClosureScope {
   assertExactKeys(scope, [
-    "query_digest", "request_digest", "snapshot_digest", "principal_digest",
+    "authority_digest", "query_digest", "request_digest", "snapshot_digest", "principal_digest",
     "workspace_id", "observer_id", "channel_id", "domain_id",
     "universe_digest", "sensitivities"
   ], "closure scope");
   for (const [value, name] of [
+    [scope.authority_digest, "authority"],
     [scope.query_digest, "query"],
     [scope.request_digest, "request"],
     [scope.snapshot_digest, "snapshot"],
@@ -221,7 +237,7 @@ export function normalizeClosureQuerySensitivities(
       "closure sensitivity");
     assertIdentity(sensitivity.sensitivity_id, "closure sensitivity id");
     assertIdentity(sensitivity.target, "closure sensitivity target");
-    if (!SENSITIVITY_EFFECTS.has(sensitivity.effect)) {
+    if (!CLOSURE_SENSITIVITY_EFFECTS.has(sensitivity.effect)) {
       throw new Error("closure sensitivity effect is invalid");
     }
     return Object.freeze({ ...sensitivity });
@@ -424,12 +440,14 @@ const CORRELATION_RELATIONS: ReadonlySet<string> = new Set([
   "same_group", "different_group"
 ]);
 
-const SENSITIVITY_EFFECTS: ReadonlySet<string> = new Set([
-  "proposition_bound",
-  "feasibility_change",
-  "answer_binding",
-  "answer_position",
-  "extremum_interval",
-  "correlation_group",
-  "tie_winner_membership"
+export const CLOSURE_SENSITIVITY_EFFECTS: ReadonlySet<string> = new Set([
+  "proposition_bound", "feasibility_change", "answer_binding", "answer_position",
+  "extremum_interval", "correlation_group", "tie_winner_membership", "completion_scope"
 ]);
+
+function freezeDigests(values: readonly RecallFieldDigest[], field: string) {
+  values.forEach((value) => assertDigest(value, field));
+  const output = [...new Set(values)].sort(compareText);
+  if (output.length !== values.length) throw new Error(`${field} must be unique`);
+  return Object.freeze(output);
+}

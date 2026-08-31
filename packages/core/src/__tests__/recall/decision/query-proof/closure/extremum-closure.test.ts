@@ -1,99 +1,90 @@
-import { describe, expect, it } from "vitest";
-
-import { closeFiniteFieldChannel } from
-  "../../../../../recall/decision/query-proof/closure/finite-field.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createExtremumClosureWitness } from
   "../../../../../recall/decision/query-proof/closure/extremum.js";
+import { closeFiniteFieldChannel } from
+  "../../../../../recall/decision/query-proof/closure/finite-field.js";
+import { createRecallFiniteFieldSeal } from
+  "../../../../../recall/field/finite-field-seal.js";
+import type { PreparedRecallRequest } from
+  "../../../../../recall/runtime/recall-service-runner-types.js";
 import {
-  createRecallFiniteFieldSeal,
-  issueRecallFiniteFieldClosureAuthority
-} from "../../../../../recall/field/finite-field-seal.js";
+  authorityFrom,
+  cleanup,
+  preparedAuthority
+} from "../../../integration/shadow/live-receipt-fixtures.js";
 
-const SNAPSHOT = `sha256:${"3".repeat(64)}` as const;
+let prepared: PreparedRecallRequest;
+
+beforeAll(async () => {
+  prepared = await preparedAuthority();
+});
+
+afterAll(() => cleanup(prepared));
 
 describe("source-authenticated local extremum closure", () => {
-  it("proves only a named finite argmax obligation", () => {
-    const { authority, closure } = exactClosure([
-      { binding_id: "older", lower: 1, upper: 2 },
-      { binding_id: "newer", lower: 3, upper: 3 }
-    ]);
-    const witness = createExtremumClosureWitness({
+  it("does not mint an extremum witness from an unverified finite field", () => {
+    const authority = authorityFrom(prepared);
+    const closure = closeFiniteFieldChannel(authority, finiteSeal())!;
+
+    expect(closure.status).toBe("uncertified");
+    expect(createExtremumClosureWitness({
       authority,
       closure,
       operator: "argmax",
       sensitivity_id: "extremum:time"
-    });
-
-    expect(witness).toMatchObject({
-      operator: "argmax",
-      extremal_binding_ids: ["newer"]
-    });
-    expect(witness).not.toHaveProperty("decision_stability_seal");
-  });
-
-  it("refuses overlapping source intervals and undeclared sensitivities", () => {
-    const overlapping = exactClosure([
-      { binding_id: "older", lower: 1, upper: 3 },
-      { binding_id: "newer", lower: 2, upper: 4 }
-    ]);
-    expect(createExtremumClosureWitness({
-      ...overlapping,
-      operator: "argmax",
-      sensitivity_id: "extremum:time"
-    })).toBeNull();
-    expect(createExtremumClosureWitness({
-      ...exactClosure([
-        { binding_id: "older", lower: 1, upper: 2 },
-        { binding_id: "newer", lower: 3, upper: 3 }
-      ]),
-      operator: "argmax",
-      sensitivity_id: "extremum:other"
     })).toBeNull();
   });
 
-  it("requires source intervals to cover the exact eligible universe", () => {
-    expect(() => exactClosure([
-      { binding_id: "newer", lower: 3, upper: 3 }
-    ])).toThrow(/exactly cover/u);
-    expect(() => exactClosure([
-      { binding_id: "older", lower: 1, upper: 2 },
-      { binding_id: "newer", lower: 3, upper: 3 },
-      { binding_id: "invented", lower: 4, upper: 4 }
-    ])).toThrow(/exactly cover/u);
-  });
+  it("does not let a caller declare sensitivity or tie completeness", () => {
+    const authority = authorityFrom(prepared);
+    const closure = closeFiniteFieldChannel(authority, finiteSeal())!;
 
-  it("refuses closure relabeling and malformed operator shapes", () => {
-    const pair = exactClosure([
-      { binding_id: "older", lower: 1, upper: 2 },
-      { binding_id: "newer", lower: 3, upper: 3 }
-    ]);
     expect(createExtremumClosureWitness({
-      ...pair,
-      closure: { ...pair.closure, principal_digest: SNAPSHOT },
+      authority,
+      closure,
       operator: "argmax",
-      sensitivity_id: "extremum:time"
-    })).toBeNull();
-    expect(createExtremumClosureWitness({
-      ...pair,
-      operator: "ARGMAX" as never,
-      sensitivity_id: "extremum:time"
-    })).toBeNull();
-    expect(createExtremumClosureWitness({
-      ...pair,
-      operator: "argmax",
-      sensitivity_id: "extremum:time",
+      sensitivity_id: "extremum:invented",
       tie_set_complete: true
     } as never)).toBeNull();
   });
+
+  it("rejects a mutated live principal before considering the closure", () => {
+    const authority = authorityFrom(prepared);
+    const closure = closeFiniteFieldChannel(authority, finiteSeal())!;
+    const wrong = Object.freeze({
+      ...authority,
+      snapshot_vector: Object.freeze({
+        ...authority.snapshot_vector,
+        principal: "principal-wrong"
+      })
+    });
+
+    expect(createExtremumClosureWitness({
+      authority: wrong,
+      closure,
+      operator: "argmax",
+      sensitivity_id: "extremum:time"
+    })).toBeNull();
+  });
+
+  it("never exposes a global DecisionStabilitySeal shape", () => {
+    const authority = authorityFrom(prepared);
+    const closure = closeFiniteFieldChannel(authority, finiteSeal())!;
+    const result = createExtremumClosureWitness({
+      authority,
+      closure,
+      operator: "argmin",
+      sensitivity_id: "extremum:time"
+    });
+
+    expect(result).toBeNull();
+    expect(JSON.stringify(closure)).not.toContain("decision_stability_seal");
+  });
 });
 
-function exactClosure(intervals: readonly Readonly<{
-  readonly binding_id: string;
-  readonly lower: number;
-  readonly upper: number;
-}>[]) {
-  const seal = createRecallFiniteFieldSeal({
-    upstream_snapshot_digest: SNAPSHOT,
+function finiteSeal() {
+  return createRecallFiniteFieldSeal({
+    upstream_snapshot_digest: prepared.snapshotVector.vector_digest,
     channel_catalog: ["finite-extremum"],
     channels: [{
       channel_id: "finite-extremum",
@@ -106,23 +97,4 @@ function exactClosure(intervals: readonly Readonly<{
       unseen_upper_bound: 0
     }]
   });
-  const authority = issueRecallFiniteFieldClosureAuthority({
-    seal,
-    channel_id: "finite-extremum",
-    query_digest: `sha256:${"1".repeat(64)}`,
-    request_digest: `sha256:${"2".repeat(64)}`,
-    principal_digest: `sha256:${"4".repeat(64)}`,
-    workspace_id: "workspace-1",
-    observer_id: "finite-extremum-observer",
-    domain_id: "typed-time",
-    candidate_key_domain: "answer_binding_id",
-    eligible_candidate_keys: ["older", "newer"],
-    sensitivity: {
-      sensitivity_id: "extremum:time",
-      effect: "extremum_interval",
-      target: "event-time"
-    },
-    extremum_intervals: intervals
-  });
-  return Object.freeze({ authority, closure: closeFiniteFieldChannel(authority)! });
 }

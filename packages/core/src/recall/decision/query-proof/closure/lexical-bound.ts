@@ -1,104 +1,86 @@
-import type {
-  LexicalBoundLaneCapture,
-  LexicalBoundLaneId
-} from "../../../runtime/diagnostics/lexical-bound-proof.js";
-import type { RecallFieldDigest } from "../../../field/field-identity.js";
+import type { LexicalBoundLaneCapture } from
+  "../../../runtime/diagnostics/lexical-bound-proof.js";
 import { parseLexDomain } from "../observations.js";
-import {
-  readLexicalClosureAuthority,
-  type LexicalClosureAuthority
-} from "../adapters/lexical-bound/source-authority.js";
+import { readLiveLexicalClosureSource } from
+  "../adapters/lexical-bound/source-authority.js";
+import type { LiveQueryProofAuthority } from "../live-query-proof-authority.js";
 import {
   createChannelClosureResult,
   createScopedCompletenessReference,
-  uncertifiedClosure,
   type ChannelClosureResult,
-  type ChannelClosureScope,
   type ScopedCompletenessReference
 } from "./contract.js";
 
 export function closeLexicalBoundChannel(
-  authority: LexicalClosureAuthority
+  authority: LiveQueryProofAuthority
 ): ChannelClosureResult | null {
-  let source: ReturnType<typeof readLexicalClosureAuthority>;
-  try {
-    source = readLexicalClosureAuthority(authority);
-  } catch {
-    return null;
-  }
-  const { proof, scope } = source;
-  const states = proof.receipt.lanes.map((lane) =>
-    classifyLane(lane, scope, proof.proof_digest));
+  const source = readLiveLexicalClosureSource(authority);
+  if (source === null) return null;
+  const receipt = source.receipts[0]!;
+  const states = receipt.producer_receipt.lanes.map((lane) =>
+    classifyLane(lane, source.scope, receipt.receipt_digest));
   if (states.some(({ status }) => status === "uncertified")) {
-    return uncertifiedClosure(scope, "lexical_lane_unbounded");
+    return createChannelClosureResult({
+      scope: source.scope,
+      status: "uncertified",
+      source_kind: "live_lexical_interval",
+      source_receipt_digests: source.source_receipt_digests,
+      reason: "lexical_lane_unbounded_or_unmapped"
+    });
   }
   const applicable = states.filter(({ status }) => status !== "not_applicable");
   if (applicable.length === 0) {
     return createChannelClosureResult({
-      scope,
+      scope: source.scope,
       status: "not_applicable",
+      source_kind: "live_lexical_interval",
+      source_receipt_digests: source.source_receipt_digests,
       reason: "all_lexical_lanes_not_applicable"
     });
   }
-  const bounded = applicable.filter(({ status }) => status === "bounded_open");
-  if (bounded.length === 0) {
-    return createChannelClosureResult({
-      scope,
-      status: "exact_closed",
-      completeness_refs: applicable.flatMap(({ completeness }) => completeness),
-      reason: "all_applicable_lexical_lanes_exact"
-    });
-  }
-  const effects = bounded.flatMap(({ lane_id }) =>
-    source.effects_by_lane[lane_id] ?? []);
-  if (effects.length === 0 || bounded.some(({ lane_id }) =>
-    (source.effects_by_lane[lane_id]?.length ?? 0) === 0)) {
-    return uncertifiedClosure(scope, "truncated_without_source_bound");
-  }
   return createChannelClosureResult({
-    scope,
-    status: "bounded_open",
-    remaining_effects: effects,
-    reason: "source_authenticated_lexical_frontier"
+    scope: source.scope,
+    status: "exact_closed",
+    completeness_refs: applicable.flatMap(({ completeness }) => completeness),
+    source_kind: "live_lexical_interval",
+    source_receipt_digests: source.source_receipt_digests,
+    reason: "live_source_finite_lexical_universe"
   });
 }
 
 type LaneClosure = Readonly<{
-  readonly lane_id: LexicalBoundLaneId;
-  readonly status: "not_applicable" | "exact_closed" | "bounded_open" | "uncertified";
+  readonly status: "not_applicable" | "exact_closed" | "uncertified";
   readonly completeness: readonly ScopedCompletenessReference[];
 }>;
 
 function classifyLane(
   lane: LexicalBoundLaneCapture,
-  scope: ChannelClosureScope,
-  sourceReceiptDigest: RecallFieldDigest
+  scope: Parameters<typeof createScopedCompletenessReference>[0]["scope"],
+  sourceReceiptDigest: Parameters<typeof createScopedCompletenessReference>[0][
+    "source_receipt_digest"
+  ]
 ): LaneClosure {
   const empty = Object.freeze([]);
   if (!laneDomainValid(lane) || lane.evaluated_universe === undefined ||
       lane.evaluated_universe.scope.workspace_id !== scope.workspace_id) {
-    return Object.freeze({ lane_id: lane.lane_id, status: "uncertified", completeness: empty });
+    return Object.freeze({ status: "uncertified", completeness: empty });
   }
   if (!lane.evaluated_universe.applicability.applicable) {
-    return Object.freeze({ lane_id: lane.lane_id, status: "not_applicable", completeness: empty });
+    return Object.freeze({ status: "not_applicable", completeness: empty });
   }
-  if (lane.status === "complete" && lane.unseen_upper_bound === 0) {
-    return Object.freeze({
-      lane_id: lane.lane_id,
-      status: "exact_closed",
-      completeness: Object.freeze([createScopedCompletenessReference({
-        scope,
-        source_receipt_digest: sourceReceiptDigest,
-        universe_digest: scope.universe_digest,
-        coordinate_id: `lexical:${lane.lane_id}`
-      })])
-    });
+  if (lane.status !== "complete" || lane.unseen_upper_bound !== 0 ||
+      lane.evaluated_universe.count !== lane.evaluated_universe.candidate_keys.length) {
+    return Object.freeze({ status: "uncertified", completeness: empty });
   }
-  if (lane.status === "truncated" && typeof lane.unseen_upper_bound === "number" &&
-      Number.isFinite(lane.unseen_upper_bound) && lane.unseen_upper_bound >= 0) {
-    return Object.freeze({ lane_id: lane.lane_id, status: "bounded_open", completeness: empty });
-  }
-  return Object.freeze({ lane_id: lane.lane_id, status: "uncertified", completeness: empty });
+  return Object.freeze({
+    status: "exact_closed",
+    completeness: Object.freeze([createScopedCompletenessReference({
+      scope,
+      source_receipt_digest: sourceReceiptDigest,
+      universe_digest: scope.universe_digest,
+      coordinate_id: `lexical:${lane.lane_id}`
+    })])
+  });
 }
 
 function laneDomainValid(lane: LexicalBoundLaneCapture): boolean {
@@ -110,7 +92,10 @@ function laneDomainValid(lane: LexicalBoundLaneCapture): boolean {
       raw_key_kind: lane.raw_key_kind
     });
     const candidateKeys = lane.rows.map(({ candidate_key }) => candidate_key);
-    return new Set(candidateKeys).size === candidateKeys.length;
+    const universeKeys = lane.evaluated_universe?.candidate_keys ?? [];
+    return new Set(candidateKeys).size === candidateKeys.length &&
+      new Set(universeKeys).size === universeKeys.length &&
+      candidateKeys.every((key) => universeKeys.includes(key));
   } catch {
     return false;
   }

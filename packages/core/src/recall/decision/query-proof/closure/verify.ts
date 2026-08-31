@@ -3,43 +3,99 @@ import { compareText } from "../../../../shared/compare-text.js";
 import {
   assertClosureStatusPayload,
   CHANNEL_CLOSURE_OPERATOR_ID,
-  isIssuedChannelClosureResult,
+  digestClosureScope,
   normalizeClosureQuerySensitivities,
   normalizeChannelRemainingEffect,
   type ChannelClosureResult,
   type ChannelClosureStatus,
   type ScopedCompletenessReference
 } from "./contract.js";
+import { deriveLiveClosureAuthorityBinding } from "./live-authority-binding.js";
+import { closeLexicalBoundChannel } from "./lexical-bound.js";
+import type { LiveQueryProofAuthority } from "../live-query-proof-authority.js";
 
-export function verifyChannelClosureResult(result: ChannelClosureResult): void {
+export function verifyChannelClosureResult(
+  result: ChannelClosureResult,
+  authority: LiveQueryProofAuthority
+): void {
+  verifyClosureEnvelope(result);
+  verifyLiveClosureBinding(result, authority);
+  verifyClosurePayload(result);
+  if (result.source_kind !== "live_lexical_interval") {
+    throw new Error("channel closure lacks an admitted live source");
+  }
+  const expected = closeLexicalBoundChannel(authority);
+  if (expected === null || expected.result_digest !== result.result_digest) {
+    throw new Error("channel closure live source binding mismatch");
+  }
+}
+
+function verifyClosureEnvelope(result: ChannelClosureResult): void {
   assertExactKeys(result, [
-    "schema_version", "operator_id", "status", "scope_digest", "query_digest",
-    "snapshot_digest", "principal_digest", "observer_id", "channel_id",
+    "schema_version", "operator_id", "status", "scope_digest", "authority_digest",
+    "query_digest", "request_digest", "snapshot_digest", "principal_digest",
+    "workspace_id", "observer_id", "channel_id",
     "domain_id", "universe_digest", "sensitivity_manifest", "remaining_effects",
-    "completeness_refs", "reason", "result_digest"
+    "completeness_refs", "source_kind", "source_receipt_digests", "reason",
+    "result_digest"
   ], "channel closure result");
   const { result_digest: _digest, ...body } = result;
   if (result.schema_version !== 1 ||
       result.operator_id !== CHANNEL_CLOSURE_OPERATOR_ID ||
-      result.result_digest !== digestRecallFieldIdentity(body) ||
-      !isIssuedChannelClosureResult(result)) {
+      result.result_digest !== digestRecallFieldIdentity(body)) {
     throw new Error("channel closure result digest mismatch");
   }
   assertStatus(result.status);
   for (const [value, field] of [
     [result.scope_digest, "scope"],
+    [result.authority_digest, "authority"],
     [result.query_digest, "query"],
+    [result.request_digest, "request"],
     [result.snapshot_digest, "snapshot"],
     [result.principal_digest, "principal"],
     [result.universe_digest, "universe"]
   ] as const) assertDigest(value, `channel closure ${field}`);
   for (const [value, field] of [
+    [result.workspace_id, "workspace"],
     [result.observer_id, "observer"],
     [result.channel_id, "channel"],
     [result.domain_id, "domain"],
     [result.reason, "reason"]
   ] as const) assertIdentity(value, `channel closure ${field}`);
+}
 
+function verifyLiveClosureBinding(
+  result: ChannelClosureResult,
+  authority: LiveQueryProofAuthority
+): void {
+  const sensitivities = normalizeClosureQuerySensitivities(result.sensitivity_manifest);
+  const live = deriveLiveClosureAuthorityBinding(authority);
+  if (result.authority_digest !== live.authority_digest ||
+      result.query_digest !== live.query_digest ||
+      result.request_digest !== live.request_digest ||
+      result.snapshot_digest !== live.snapshot_digest ||
+      result.principal_digest !== live.principal_digest ||
+      result.workspace_id !== live.workspace_id ||
+      digestRecallFieldIdentity(sensitivities) !==
+        digestRecallFieldIdentity(live.sensitivities) ||
+      result.scope_digest !== digestClosureScope({
+        authority_digest: result.authority_digest,
+        query_digest: result.query_digest,
+        request_digest: result.request_digest,
+        snapshot_digest: result.snapshot_digest,
+        principal_digest: result.principal_digest,
+        workspace_id: result.workspace_id,
+        observer_id: result.observer_id,
+        channel_id: result.channel_id,
+        domain_id: result.domain_id,
+        universe_digest: result.universe_digest,
+        sensitivities
+      })) {
+    throw new Error("channel closure live authority binding mismatch");
+  }
+}
+
+function verifyClosurePayload(result: ChannelClosureResult): void {
   const sensitivities = normalizeClosureQuerySensitivities(result.sensitivity_manifest);
   const sensitivityById = new Map(sensitivities.map((row) => [row.sensitivity_id, row]));
   const effects = result.remaining_effects.map(normalizeChannelRemainingEffect);
@@ -52,6 +108,12 @@ export function verifyChannelClosureResult(result: ChannelClosureResult): void {
   assertUnique(references.map(({ reference_digest }) => reference_digest),
     "channel closure completeness references");
   assertClosureStatusPayload(result.status, effects, references);
+  result.source_receipt_digests.forEach((digest) =>
+    assertDigest(digest, "channel closure source receipt"));
+  if (new Set(result.source_receipt_digests).size !==
+      result.source_receipt_digests.length) {
+    throw new Error("channel closure source receipts must be unique");
+  }
 }
 
 function verifyCompletenessReference(

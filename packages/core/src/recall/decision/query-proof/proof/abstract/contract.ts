@@ -8,16 +8,21 @@ import type {
   ChannelRemainingEffect
 } from "../../closure/contract.js";
 import {
-  freezeFiniteValue,
+  digestFiniteFixture,
+  digestFiniteManifest,
+  normalizeFiniteFixture,
   verifyFiniteDecisionTrace,
+  type FiniteDecisionOperator,
+  type FiniteDecisionOracleResult,
   type FiniteDecisionTrace,
   type FiniteDecisionTraceInput,
+  type FiniteOracleFixture,
   type FiniteValue
 } from "../oracle/contract.js";
-import {
-  readFiniteTransferAuthority,
-  type FiniteTransferAuthority
-} from "../oracle/transfer-authority.js";
+import { assertFiniteOracleExhaustive } from "../oracle/oracle.js";
+import { deriveLiveClosureAuthorityBinding } from
+  "../../closure/live-authority-binding.js";
+import type { LiveQueryProofAuthority } from "../../live-query-proof-authority.js";
 
 type CoordinateIdentity = Readonly<{
   readonly coordinate_id: string;
@@ -97,15 +102,34 @@ export type AbstractKernelLimits = Readonly<{
 }>;
 
 export type AbstractProofKernelInput = Readonly<{
-  readonly query_digest: RecallFieldDigest;
-  readonly snapshot_digest: RecallFieldDigest;
-  readonly principal_digest: RecallFieldDigest;
+  readonly live_authority: LiveQueryProofAuthority;
+  readonly fixture: FiniteOracleFixture;
+  readonly concrete_operator: FiniteDecisionOperator;
   readonly k_max: number;
   readonly closures: readonly ChannelClosureResult[];
   readonly coordinates: readonly AbstractCoordinate[];
   readonly limits: AbstractKernelLimits;
   readonly operator: AbstractDecisionOperator;
-  readonly transfer_authority: FiniteTransferAuthority;
+}>;
+
+export type FiniteOracleDifferentialCertificate = Readonly<{
+  readonly schema_version: 1;
+  readonly operator_id: "finite_oracle_differential_certificate_v1";
+  readonly authority_digest: RecallFieldDigest;
+  readonly query_digest: RecallFieldDigest;
+  readonly snapshot_digest: RecallFieldDigest;
+  readonly principal_digest: RecallFieldDigest;
+  readonly fixture_digest: RecallFieldDigest;
+  readonly manifest_digest: RecallFieldDigest;
+  readonly k_max: number;
+  readonly concrete_operator_id: string;
+  readonly abstract_operator_id: string;
+  readonly oracle_result_digest: RecallFieldDigest;
+  readonly abstract_premise_digest: RecallFieldDigest;
+  readonly outcome_trace_digest: RecallFieldDigest;
+  readonly false_singleton: false;
+  readonly missing_concrete_outcome_digests: readonly [];
+  readonly certificate_digest: RecallFieldDigest;
 }>;
 
 export type AbstractRefinementRequest = Readonly<{
@@ -119,6 +143,7 @@ export type AbstractRefinementRequest = Readonly<{
 type AbstractProofResultIdentity = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: "operator_parametric_abstract_proof_kernel_v1";
+  readonly authority_digest: RecallFieldDigest;
   readonly query_digest: RecallFieldDigest;
   readonly snapshot_digest: RecallFieldDigest;
   readonly principal_digest: RecallFieldDigest;
@@ -127,6 +152,7 @@ type AbstractProofResultIdentity = Readonly<{
   readonly fixture_digest: RecallFieldDigest;
   readonly transfer_digest: RecallFieldDigest;
   readonly manifest_digest: RecallFieldDigest;
+  readonly k_max: number;
   readonly premise_digest: RecallFieldDigest;
 }>;
 
@@ -134,6 +160,7 @@ export type AbstractProofKernelResult =
   | (AbstractProofResultIdentity & Readonly<{
       readonly status: "PROVED_SINGLETON";
       readonly outcome: FiniteDecisionTrace;
+      readonly differential_certificate: FiniteOracleDifferentialCertificate;
       readonly proof_digest: RecallFieldDigest;
     }>)
   | (AbstractProofResultIdentity & Readonly<{
@@ -155,31 +182,21 @@ export type AbstractProofKernelResult =
       readonly proof_digest: RecallFieldDigest;
     }>);
 
-const issuedAbstractResults = new WeakSet<object>();
-
-export function normalizeAbstractCoordinates(
-  coordinates: readonly AbstractCoordinate[]
-): readonly AbstractCoordinate[] {
-  const normalized = coordinates.map(normalizeCoordinate)
-    .sort((left, right) => compareText(left.coordinate_id, right.coordinate_id));
-  if (new Set(normalized.map(({ coordinate_id }) => coordinate_id)).size !==
-      normalized.length) throw new Error("abstract coordinate ids must be unique");
-  return Object.freeze(normalized);
-}
-
 export function abstractResultIdentity(input: AbstractProofKernelInput) {
-  const transfer = safeTransferIdentity(input);
+  const transfer = safeProofIdentity(input);
   return Object.freeze({
     schema_version: 1 as const,
     operator_id: "operator_parametric_abstract_proof_kernel_v1" as const,
-    query_digest: input.query_digest,
-    snapshot_digest: input.snapshot_digest,
-    principal_digest: input.principal_digest,
+    authority_digest: transfer.authority_digest,
+    query_digest: transfer.query_digest,
+    snapshot_digest: transfer.snapshot_digest,
+    principal_digest: transfer.principal_digest,
     decision_operator_id: input.operator.operator_id,
     concrete_operator_id: transfer.concrete_operator_id,
     fixture_digest: transfer.fixture_digest,
     transfer_digest: transfer.transfer_digest,
     manifest_digest: transfer.manifest_digest,
+    k_max: input.k_max,
     premise_digest: digestAbstractProofPremise(input)
   });
 }
@@ -187,7 +204,7 @@ export function abstractResultIdentity(input: AbstractProofKernelInput) {
 function digestAbstractProofPremise(
   input: AbstractProofKernelInput
 ): RecallFieldDigest {
-  const transfer = safeTransferIdentity(input);
+  const transfer = safeProofIdentity(input);
   const closures = input.closures.map(({ channel_id, result_digest }) =>
     Object.freeze({ channel_id, result_digest }))
     .sort((left, right) => compareText(left.channel_id, right.channel_id) ||
@@ -195,9 +212,10 @@ function digestAbstractProofPremise(
   const coordinates = [...input.coordinates].sort((left, right) =>
     compareText(left.coordinate_id, right.coordinate_id));
   return digestRecallFieldIdentity({
-    query_digest: input.query_digest,
-    snapshot_digest: input.snapshot_digest,
-    principal_digest: input.principal_digest,
+    authority_digest: transfer.authority_digest,
+    query_digest: transfer.query_digest,
+    snapshot_digest: transfer.snapshot_digest,
+    principal_digest: transfer.principal_digest,
     k_max: input.k_max,
     closures,
     coordinates,
@@ -208,24 +226,35 @@ function digestAbstractProofPremise(
   });
 }
 
-function safeTransferIdentity(input: AbstractProofKernelInput) {
+function safeProofIdentity(input: AbstractProofKernelInput) {
   try {
-    const state = readFiniteTransferAuthority(input.transfer_authority);
+    const live = deriveLiveClosureAuthorityBinding(input.live_authority);
+    const fixture = normalizeFiniteFixture(input.fixture);
     return Object.freeze({
-      concrete_operator_id: state.concrete_operator.operator_id,
-      fixture_digest: state.fixture_digest,
-      transfer_digest: state.transfer_digest,
-      manifest_digest: state.manifest_digest
+      authority_digest: live.authority_digest,
+      query_digest: live.query_digest,
+      snapshot_digest: live.snapshot_digest,
+      principal_digest: live.principal_digest,
+      concrete_operator_id: input.concrete_operator.operator_id,
+      fixture_digest: digestFiniteFixture(fixture),
+      transfer_digest: digestRecallFieldIdentity({
+        authority_digest: live.authority_digest,
+        fixture_digest: digestFiniteFixture(fixture),
+        concrete_operator_id: input.concrete_operator.operator_id,
+        abstract_operator_id: input.operator.operator_id
+      }),
+      manifest_digest: digestFiniteManifest(fixture)
     });
   } catch {
     const invalid = digestRecallFieldIdentity({
       operator_id: "invalid_finite_transfer_authority",
-      query_digest: input.query_digest,
-      snapshot_digest: input.snapshot_digest,
-      principal_digest: input.principal_digest,
       abstract_operator_id: input.operator?.operator_id ?? "unavailable"
     });
     return Object.freeze({
+      authority_digest: invalid,
+      query_digest: invalid,
+      snapshot_digest: invalid,
+      principal_digest: invalid,
       concrete_operator_id: "unverified_concrete_operator",
       fixture_digest: invalid,
       transfer_digest: invalid,
@@ -234,19 +263,16 @@ function safeTransferIdentity(input: AbstractProofKernelInput) {
   }
 }
 
-export function sealAbstractResult<T extends object>(body: T): Readonly<T> &
+export function sealAbstractRefusalResult<T extends object>(body: T): Readonly<T> &
 Readonly<{ readonly proof_digest: RecallFieldDigest }> {
-  const result = Object.freeze({ ...body, proof_digest: digestRecallFieldIdentity(body) });
-  issuedAbstractResults.add(result);
-  return result;
+  return Object.freeze({ ...body, proof_digest: digestRecallFieldIdentity(body) });
 }
 
 export function verifyAbstractProofKernelResult(
-  result: AbstractProofKernelResult
+  result: AbstractProofKernelResult,
+  input: AbstractProofKernelInput,
+  oracle?: FiniteDecisionOracleResult
 ): void {
-  if (!issuedAbstractResults.has(result)) {
-    throw new Error("abstract proof result is not source issued");
-  }
   const variant = ABSTRACT_RESULT_FIELDS[result.status];
   if (variant === undefined) throw new Error("abstract proof status is invalid");
   assertExactObjectKeys(result, [...ABSTRACT_RESULT_IDENTITY_FIELDS, ...variant,
@@ -256,6 +282,7 @@ export function verifyAbstractProofKernelResult(
     throw new Error("abstract proof result digest mismatch");
   }
   assertDigest(result.query_digest, "abstract result query");
+  assertDigest(result.authority_digest, "abstract result authority");
   assertDigest(result.snapshot_digest, "abstract result snapshot");
   assertDigest(result.principal_digest, "abstract result principal");
   assertDigest(result.fixture_digest, "abstract result fixture");
@@ -263,12 +290,13 @@ export function verifyAbstractProofKernelResult(
   assertDigest(result.manifest_digest, "abstract result manifest");
   assertDigest(result.premise_digest, "abstract result premise");
   if (result.status === "PROVED_SINGLETON") {
-    verifyFiniteDecisionTrace(result.outcome, result.outcome.candidate_prefix.length);
+    verifyFiniteDecisionTrace(result.outcome, result.k_max);
+    verifyDifferentialCertificate(result.differential_certificate, result, input, oracle);
   } else if (result.status === "OPEN") {
     assertIdentity(result.reason, "abstract open reason");
     result.requested_refinements.forEach(verifyRefinementRequest);
     result.possible_outcomes.forEach((outcome) =>
-      verifyFiniteDecisionTrace(outcome, outcome.candidate_prefix.length));
+      verifyFiniteDecisionTrace(outcome, result.k_max));
   } else if (result.status === "CONFLICT") {
     assertIdentity(result.reason, "abstract conflict reason");
     result.conflict_coordinate_ids.forEach((id) => assertIdentity(id,
@@ -276,6 +304,63 @@ export function verifyAbstractProofKernelResult(
   } else {
     assertIdentity(result.reason, "abstract unsupported reason");
   }
+  const expectedIdentity = abstractResultIdentity(input);
+  for (const field of ABSTRACT_RESULT_IDENTITY_FIELDS) {
+    if (result[field] !== expectedIdentity[field]) {
+      throw new Error("abstract proof result does not match the real input");
+    }
+  }
+}
+
+function verifyDifferentialCertificate(
+  certificate: FiniteOracleDifferentialCertificate,
+  result: Extract<AbstractProofKernelResult, { status: "PROVED_SINGLETON" }>,
+  input: AbstractProofKernelInput,
+  oracle: FiniteDecisionOracleResult | undefined
+): void {
+  assertExactObjectKeys(certificate, [
+    "schema_version", "operator_id", "authority_digest", "query_digest",
+    "snapshot_digest", "principal_digest", "fixture_digest", "manifest_digest",
+    "k_max", "concrete_operator_id", "abstract_operator_id", "oracle_result_digest",
+    "abstract_premise_digest", "outcome_trace_digest", "false_singleton",
+    "missing_concrete_outcome_digests", "certificate_digest"
+  ], "finite oracle differential certificate");
+  const { certificate_digest: _digest, ...body } = certificate;
+  if (oracle === undefined || certificate.schema_version !== 1 ||
+      certificate.operator_id !== "finite_oracle_differential_certificate_v1" ||
+      certificate.false_singleton !== false ||
+      !Array.isArray(certificate.missing_concrete_outcome_digests) ||
+      certificate.missing_concrete_outcome_digests.length !== 0 ||
+      certificate.certificate_digest !== digestRecallFieldIdentity(body) ||
+      certificate.oracle_result_digest !== oracle.result_digest ||
+      certificate.abstract_premise_digest !== result.premise_digest ||
+      certificate.outcome_trace_digest !== result.outcome.trace_digest ||
+      certificate.authority_digest !== result.authority_digest ||
+      certificate.query_digest !== result.query_digest ||
+      certificate.snapshot_digest !== result.snapshot_digest ||
+      certificate.principal_digest !== result.principal_digest ||
+      certificate.fixture_digest !== result.fixture_digest ||
+      certificate.manifest_digest !== result.manifest_digest ||
+      certificate.concrete_operator_id !== result.concrete_operator_id ||
+      certificate.abstract_operator_id !== result.decision_operator_id ||
+      certificate.k_max !== result.k_max || oracle.authority_digest !== result.authority_digest ||
+      oracle.query_digest !== result.query_digest ||
+      oracle.snapshot_digest !== result.snapshot_digest ||
+      oracle.principal_digest !== result.principal_digest ||
+      oracle.fixture_digest !== result.fixture_digest ||
+      oracle.manifest_digest !== result.manifest_digest ||
+      oracle.k_max !== result.k_max ||
+      oracle.decision_operator_id !== result.concrete_operator_id ||
+      oracle.outcomes.length !== 1 ||
+      oracle.outcomes[0]!.trace_digest !== result.outcome.trace_digest) {
+    throw new Error("finite oracle differential certificate mismatch");
+  }
+  assertFiniteOracleExhaustive({
+    authority: input.live_authority,
+    fixture: input.fixture,
+    operator: input.concrete_operator,
+    result: oracle
+  });
 }
 
 function verifyRefinementRequest(request: AbstractRefinementRequest): void {
@@ -291,91 +376,6 @@ function verifyRefinementRequest(request: AbstractRefinementRequest): void {
   }
 }
 
-function normalizeCoordinate(coordinate: AbstractCoordinate): AbstractCoordinate {
-  assertIdentity(coordinate.coordinate_id, "abstract coordinate id");
-  assertIdentity(coordinate.sensitivity_id, "abstract sensitivity id");
-  assertIdentity(coordinate.owner_id, "abstract coordinate owner");
-  switch (coordinate.kind) {
-    case "membership":
-      assertCoordinateKeys(coordinate, ["possible_states"]);
-      assertEnumValues(coordinate.possible_states, MEMBERSHIP_STATES,
-        "abstract membership state");
-      return Object.freeze({ ...coordinate,
-        possible_states: freezeStringSet(coordinate.possible_states) });
-    case "semantic_feasibility":
-      assertCoordinateKeys(coordinate, ["possible_states"]);
-      assertEnumValues(coordinate.possible_states, FEASIBILITY_STATES,
-        "abstract feasibility state");
-      return Object.freeze({ ...coordinate,
-        possible_states: freezeStringSet(coordinate.possible_states) });
-    case "numeric_interval":
-      assertCoordinateKeys(coordinate, [
-        "role", "lower", "upper", "overlaps_decision_boundary"
-      ]);
-      if (!NUMERIC_ROLES.has(coordinate.role) ||
-          typeof coordinate.overlaps_decision_boundary !== "boolean") {
-        throw new Error("abstract numeric interval metadata is invalid");
-      }
-      assertInterval(coordinate.lower, coordinate.upper, "abstract numeric interval");
-      return Object.freeze({ ...coordinate });
-    case "finite_values": {
-      assertCoordinateKeys(coordinate, ["possible_values"]);
-      const values = coordinate.possible_values.map(freezeFiniteValue)
-        .sort((left, right) => compareText(
-          digestRecallFieldIdentity(left), digestRecallFieldIdentity(right)));
-      if (values.length === 0) throw new Error("abstract finite values cannot be empty");
-      return Object.freeze({ ...coordinate, possible_values: Object.freeze(values) });
-    }
-    case "binding":
-      assertCoordinateKeys(coordinate, ["possible_bindings"]);
-      return Object.freeze({ ...coordinate,
-        possible_bindings: freezeStringSet(coordinate.possible_bindings) });
-    case "temporal_interval":
-      assertCoordinateKeys(coordinate, ["minimum_epoch_ms", "maximum_epoch_ms"]);
-      assertInterval(coordinate.minimum_epoch_ms, coordinate.maximum_epoch_ms,
-        "abstract temporal interval");
-      return Object.freeze({ ...coordinate });
-    case "four_valued_proposition":
-      assertCoordinateKeys(coordinate, ["possible_values"]);
-      assertEnumValues(coordinate.possible_values, PROPOSITION_VALUES,
-        "abstract proposition value");
-      return Object.freeze({ ...coordinate,
-        possible_values: freezeStringSet(coordinate.possible_values) });
-    case "correlation":
-      assertCoordinateKeys(coordinate, ["possible_relations"]);
-      assertEnumValues(coordinate.possible_relations, CORRELATION_RELATIONS,
-        "abstract correlation relation");
-      return Object.freeze({ ...coordinate,
-        possible_relations: freezeStringSet(coordinate.possible_relations) });
-    case "identity_tie":
-      assertCoordinateKeys(coordinate, ["universe", "possible_winner_digests"]);
-      if (!IDENTITY_UNIVERSES.has(coordinate.universe)) {
-        throw new Error("abstract identity universe is invalid");
-      }
-      coordinate.possible_winner_digests.forEach((value) =>
-        assertDigest(value, "abstract tie winner"));
-      return Object.freeze({ ...coordinate,
-        possible_winner_digests: Object.freeze([
-          ...new Set(coordinate.possible_winner_digests)
-        ].sort(compareText)) });
-    default:
-      throw new Error("abstract coordinate domain is unsupported");
-  }
-}
-
-function freezeStringSet<T extends string>(values: readonly T[]): readonly T[] {
-  if (values.length === 0 || new Set(values).size !== values.length) {
-    throw new Error("abstract finite domain must be nonempty and unique");
-  }
-  return Object.freeze([...values].sort(compareText));
-}
-
-function assertInterval(lower: number, upper: number, field: string): void {
-  if (![lower, upper].every(Number.isFinite) || upper < lower) {
-    throw new Error(`${field} is invalid`);
-  }
-}
-
 export function assertIdentity(value: string, field: string): void {
   if (typeof value !== "string" || value.length === 0 || value.trim() !== value) {
     throw new Error(`${field} must be a non-empty canonical identity`);
@@ -384,18 +384,6 @@ export function assertIdentity(value: string, field: string): void {
 
 export function assertDigest(value: string, field: string): asserts value is RecallFieldDigest {
   if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new Error(`${field} must be sha256`);
-}
-
-function assertCoordinateKeys(
-  coordinate: AbstractCoordinate,
-  domainKeys: readonly string[]
-): void {
-  const expected = ["coordinate_id", "sensitivity_id", "owner_id", "kind",
-    ...domainKeys].sort(compareText);
-  const keys = Object.keys(coordinate).sort(compareText);
-  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
-    throw new Error("abstract coordinate has unknown or missing fields");
-  }
 }
 
 function assertExactObjectKeys(
@@ -410,35 +398,13 @@ function assertExactObjectKeys(
   }
 }
 
-function assertEnumValues(
-  values: readonly string[],
-  allowed: ReadonlySet<string>,
-  field: string
-): void {
-  if (values.some((value) => !allowed.has(value))) throw new Error(`${field} is invalid`);
-}
-
-const MEMBERSHIP_STATES: ReadonlySet<string> = new Set(["absent", "present"]);
-const FEASIBILITY_STATES: ReadonlySet<string> = new Set([
-  "feasible", "infeasible", "unresolved"
-]);
-const NUMERIC_ROLES: ReadonlySet<string> = new Set([
-  "proposition_bound", "extremum", "answer_position"
-]);
-const PROPOSITION_VALUES: ReadonlySet<string> = new Set([
-  "supported_only", "refuted_only", "both", "unknown"
-]);
-const CORRELATION_RELATIONS: ReadonlySet<string> = new Set([
-  "same_group", "different_group", "unknown"
-]);
-const IDENTITY_UNIVERSES: ReadonlySet<string> = new Set(["finite", "open"]);
 const ABSTRACT_RESULT_IDENTITY_FIELDS = [
-  "schema_version", "operator_id", "query_digest", "snapshot_digest",
+  "schema_version", "operator_id", "authority_digest", "query_digest", "snapshot_digest",
   "principal_digest", "decision_operator_id", "concrete_operator_id",
-  "fixture_digest", "transfer_digest", "manifest_digest", "premise_digest"
+  "fixture_digest", "transfer_digest", "manifest_digest", "k_max", "premise_digest"
 ] as const;
 const ABSTRACT_RESULT_FIELDS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  PROVED_SINGLETON: Object.freeze(["status", "outcome"]),
+  PROVED_SINGLETON: Object.freeze(["status", "outcome", "differential_certificate"]),
   OPEN: Object.freeze(["status", "reason", "requested_refinements", "possible_outcomes"]),
   CONFLICT: Object.freeze(["status", "reason", "conflict_coordinate_ids"]),
   UNSUPPORTED: Object.freeze(["status", "reason"])

@@ -1,74 +1,48 @@
 import {
-  readRecallFiniteFieldClosureAuthority,
-  type RecallFiniteFieldClosureAuthority
+  verifyRecallFiniteFieldSeal,
+  type RecallFiniteFieldSeal
 } from "../../../field/finite-field-seal.js";
+import { digestRecallFieldIdentity } from "../../../field/field-identity.js";
+import type { LiveQueryProofAuthority } from "../live-query-proof-authority.js";
 import {
   createChannelClosureResult,
-  createScopedCompletenessReference,
-  uncertifiedClosure,
-  type ChannelClosureResult,
-  type ChannelClosureScope,
-  type ChannelRemainingEffect
+  type ChannelClosureResult
 } from "./contract.js";
+import { deriveLiveClosureAuthorityBinding } from "./live-authority-binding.js";
 
 export function closeFiniteFieldChannel(
-  authority: RecallFiniteFieldClosureAuthority
+  authority: LiveQueryProofAuthority,
+  seal: RecallFiniteFieldSeal,
+  channelId?: string
 ): ChannelClosureResult | null {
-  let source: ReturnType<typeof readRecallFiniteFieldClosureAuthority>;
   try {
-    source = readRecallFiniteFieldClosureAuthority(authority);
+    const binding = deriveLiveClosureAuthorityBinding(authority);
+    verifyRecallFiniteFieldSeal(seal);
+    const channel = channelId === undefined && seal.channels.length === 1
+      ? seal.channels[0]
+      : seal.channels.find(({ channel_id }) => channel_id === channelId);
+    if (channel === undefined) return null;
+    const scope = Object.freeze({
+      ...binding,
+      observer_id: seal.operator_id,
+      channel_id: channel.channel_id,
+      domain_id: `unverified-finite-field:${channel.channel_id}`,
+      universe_digest: digestRecallFieldIdentity({
+        operator_id: "unverified_finite_field_universe_v1",
+        seal_digest: seal.seal_digest,
+        channel_digest: channel.channel_digest
+      })
+    });
+    return createChannelClosureResult({
+      scope,
+      status: "uncertified",
+      source_kind: "unverified_finite_field",
+      source_receipt_digests: [channel.channel_digest],
+      reason: seal.upstream_snapshot_digest === binding.snapshot_digest
+        ? "finite_field_source_not_bound_to_live_authority"
+        : "finite_field_snapshot_not_bound_to_live_authority"
+    });
   } catch {
     return null;
   }
-  const scope = sourceScope(source);
-  const channel = source.source_channel;
-  if (channel.status === "ineligible") {
-    return createChannelClosureResult({
-      scope,
-      status: "not_applicable",
-      reason: "source_not_applicable"
-    });
-  }
-  if (channel.status === "unavailable") {
-    return uncertifiedClosure(scope, "source_unavailable");
-  }
-  if (channel.status === "complete") {
-    return createChannelClosureResult({
-      scope,
-      status: "exact_closed",
-      completeness_refs: [createScopedCompletenessReference({
-        scope,
-        source_receipt_digest: channel.channel_digest,
-        universe_digest: source.universe_digest,
-        coordinate_id: `${channel.channel_id}:eligible-membership`
-      })],
-      reason: "source_authenticated_finite_universe"
-    });
-  }
-  if (source.remaining_numeric_effect === null) {
-    return uncertifiedClosure(scope, "truncated_without_source_bound");
-  }
-  return createChannelClosureResult({
-    scope,
-    status: "bounded_open",
-    remaining_effects: [source.remaining_numeric_effect as ChannelRemainingEffect],
-    reason: "source_authenticated_finite_bound"
-  });
-}
-
-function sourceScope(
-  source: ReturnType<typeof readRecallFiniteFieldClosureAuthority>
-): ChannelClosureScope {
-  return Object.freeze({
-    query_digest: source.query_digest,
-    request_digest: source.request_digest,
-    snapshot_digest: source.snapshot_digest,
-    principal_digest: source.principal_digest,
-    workspace_id: source.workspace_id,
-    observer_id: source.observer_id,
-    channel_id: source.channel_id,
-    domain_id: source.domain_id,
-    universe_digest: source.universe_digest,
-    sensitivities: source.sensitivities
-  });
 }

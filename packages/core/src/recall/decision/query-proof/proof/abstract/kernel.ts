@@ -2,23 +2,22 @@ import { compareText } from "../../../../../shared/compare-text.js";
 import { digestRecallFieldIdentity } from
   "../../../../field/field-identity.js";
 import { verifyChannelClosureResult } from "../../closure/verify.js";
+import { deriveLiveClosureAuthorityBinding } from
+  "../../closure/live-authority-binding.js";
 import {
   decisionTraceSortKey,
+  digestFiniteFixture,
+  digestFiniteManifest,
+  normalizeFiniteFixture,
   normalizeDecisionTrace,
-  type FiniteDecisionTrace
+  type FiniteDecisionTrace,
+  type FiniteOracleFixture
 } from "../oracle/contract.js";
-import {
-  readFiniteTransferAuthority,
-  validateFiniteTransferAbstractCoverage,
-  verifyFiniteTransferParticipants,
-  type FiniteTransferAuthorityState
-} from "../oracle/transfer-authority.js";
 import {
   abstractResultIdentity,
   assertDigest,
   assertIdentity,
-  normalizeAbstractCoordinates,
-  sealAbstractResult,
+  sealAbstractRefusalResult,
   type AbstractCoordinate,
   type AbstractDecisionOperator,
   type AbstractOperatorEvaluation,
@@ -26,6 +25,13 @@ import {
   type AbstractProofKernelResult,
   type AbstractRefinementRequest
 } from "./contract.js";
+import { normalizeAbstractCoordinates } from "./coordinate-schema.js";
+import {
+  isConflictCoordinate,
+  isDecisionOpenCoordinate,
+  isStrictlyOpenCoordinate,
+  strictOpenReason
+} from "./domain-state.js";
 import {
   joinChannelRemainingEffects,
   type ScopedRemainingEffect
@@ -34,9 +40,20 @@ import {
 export function evaluateAbstractProofKernel(
   input: AbstractProofKernelInput
 ): AbstractProofKernelResult {
+  const evaluation = evaluateAbstractSingletonCandidate(input);
+  if (evaluation.kind === "result") return evaluation.result;
+  const requests = mergeRequests(evaluation.coordinates.filter(isDecisionOpenCoordinate)
+    .map((coordinate) => requestFor(coordinate, "finite oracle certificate required")));
+  return open(evaluation.input, "finite oracle differential certificate required",
+    requests, [evaluation.outcome]);
+}
+
+export function evaluateAbstractSingletonCandidate(
+  input: AbstractProofKernelInput
+): KernelEvaluation {
   const preparation = prepareAbstractDomain(input);
   return preparation.kind === "result"
-    ? preparation.result
+    ? Object.freeze({ kind: "result" as const, result: preparation.result })
     : evaluatePreparedKernel(preparation);
 }
 
@@ -46,7 +63,18 @@ type PreparedKernel = Readonly<{
   readonly coordinates: readonly AbstractCoordinate[];
   readonly remaining_effects:
     AbstractProofKernelInput["closures"][number]["remaining_effects"];
-  readonly transfer: FiniteTransferAuthorityState;
+  readonly fixture: FiniteOracleFixture;
+  readonly transfer_digest: ReturnType<typeof digestRecallFieldIdentity>;
+}>;
+
+export type KernelEvaluation = Readonly<{
+  readonly kind: "singleton_candidate";
+  readonly input: AbstractProofKernelInput;
+  readonly coordinates: readonly AbstractCoordinate[];
+  readonly outcome: FiniteDecisionTrace;
+}> | Readonly<{
+  readonly kind: "result";
+  readonly result: AbstractProofKernelResult;
 }>;
 
 type KernelPreparation = PreparedKernel | Readonly<{
@@ -57,8 +85,8 @@ type KernelPreparation = PreparedKernel | Readonly<{
 function prepareAbstractDomain(input: AbstractProofKernelInput): KernelPreparation {
   const invalid = validateKernelInput(input);
   if (invalid !== null) return preparedResult(unsupported(input, invalid));
-  const transfer = readFiniteTransferAuthority(input.transfer_authority);
-  const sensitivityCount = new Set(transfer.manifest.map(({ sensitivity_id }) =>
+  const fixture = normalizeFiniteFixture(input.fixture);
+  const sensitivityCount = new Set(fixture.coordinates.map(({ sensitivity_id }) =>
     sensitivity_id)).size;
   if (input.closures.length > input.limits.max_channels ||
       input.coordinates.length > input.limits.max_coordinates ||
@@ -71,7 +99,7 @@ function prepareAbstractDomain(input: AbstractProofKernelInput): KernelPreparati
   } catch (error) {
     return preparedResult(unsupported(input, messageOf(error)));
   }
-  const normalizedInput = Object.freeze({ ...input, coordinates });
+  const normalizedInput = Object.freeze({ ...input, fixture, coordinates });
   const conflicts = coordinates.filter(isConflictCoordinate);
   if (conflicts.length > 0) {
     return preparedResult(conflict(normalizedInput,
@@ -83,18 +111,14 @@ function prepareAbstractDomain(input: AbstractProofKernelInput): KernelPreparati
     return preparedResult(open(normalizedInput,
       "unresolved or invalid channel closure", closureRequests, []));
   }
-  const transferMismatch = validateFiniteTransferAbstractCoverage({
-    state: transfer,
-    coordinates,
-    closure_sensitivities: input.closures.flatMap((closure) =>
-      closure.sensitivity_manifest)
-  });
+  const transferMismatch = validateFixtureAbstractCoverage(fixture, coordinates);
   if (transferMismatch !== null) {
     return preparedResult(unsupported(normalizedInput, transferMismatch));
   }
   const scopedEffects = collectScopedEffects(input);
   const joined = joinChannelRemainingEffects(coordinates, scopedEffects);
-  const effectiveInput = Object.freeze({ ...input, coordinates: joined.coordinates });
+  const effectiveInput = Object.freeze({ ...normalizedInput,
+    coordinates: joined.coordinates });
   const strictRequests = joined.coordinates.filter(isStrictlyOpenCoordinate)
     .map((coordinate) => requestFor(coordinate, strictOpenReason(coordinate)));
   const preOperatorRequests = mergeRequests([
@@ -111,67 +135,87 @@ function prepareAbstractDomain(input: AbstractProofKernelInput): KernelPreparati
     input: effectiveInput,
     coordinates: joined.coordinates,
     remaining_effects: remainingEffects,
-    transfer
+    fixture,
+    transfer_digest: digestRecallFieldIdentity({
+      authority_digest: abstractResultIdentity(effectiveInput).authority_digest,
+      fixture_digest: digestFiniteFixture(fixture),
+      concrete_operator_id: input.concrete_operator.operator_id,
+      abstract_operator_id: input.operator.operator_id,
+      manifest_digest: digestFiniteManifest(fixture)
+    })
   });
 }
 
-function evaluatePreparedKernel(prepared: PreparedKernel): AbstractProofKernelResult {
-  const { input, coordinates, remaining_effects: remainingEffects, transfer } = prepared;
+function evaluatePreparedKernel(prepared: PreparedKernel): KernelEvaluation {
+  const { input, coordinates, remaining_effects: remainingEffects } = prepared;
   let evaluation: AbstractOperatorEvaluation;
   try {
     evaluation = evaluateDeterministically(input.operator, coordinates,
-      remainingEffects, input.k_max, transfer.transfer_digest);
+      remainingEffects, input.k_max, prepared.transfer_digest);
     validateOperatorEvaluation(evaluation);
   } catch (error) {
-    return unsupported(input, messageOf(error));
+    return resultEvaluation(unsupported(input, messageOf(error)));
   }
   if (evaluation.status === "conflict") {
-    return conflict(input, [], evaluation.reason);
+    return resultEvaluation(conflict(input, [], evaluation.reason));
   }
   if (evaluation.status === "unsupported") {
-    return unsupported(input, evaluation.reason);
+    return resultEvaluation(unsupported(input, evaluation.reason));
   }
   const handled = new Set(evaluation.handled_sensitivity_ids);
-  const missingManifest = transfer.manifest.filter(({ sensitivity_id }) =>
+  const manifest = new Set(prepared.fixture.coordinates.map(({ sensitivity_id }) =>
+    sensitivity_id));
+  if ([...handled].some((sensitivityId) => !manifest.has(sensitivityId))) {
+    return resultEvaluation(unsupported(input,
+      "abstract operator handled sensitivities outside the finite manifest"));
+  }
+  const missingManifest = prepared.fixture.coordinates.filter(({ sensitivity_id }) =>
     !handled.has(sensitivity_id));
   if (missingManifest.length > 0) {
-    return open(input, "abstract operator did not handle complete sensitivity manifest",
-      requestsForManifest(missingManifest, coordinates), []);
+    return resultEvaluation(open(input,
+      "abstract operator did not handle complete sensitivity manifest",
+      requestsForManifest(missingManifest, coordinates), []));
   }
   let outcomes: readonly FiniteDecisionTrace[];
   try {
     outcomes = normalizeOutcomes(evaluation.outcomes, input.k_max);
   } catch (error) {
-    return unsupported(input, messageOf(error));
+    return resultEvaluation(unsupported(input, messageOf(error)));
   }
   if (outcomes.length === 0) {
-    return unsupported(input, "abstract operator returned no outcome");
+    return resultEvaluation(unsupported(input, "abstract operator returned no outcome"));
   }
   if (outcomes.length === 1) {
-    return sealAbstractResult({
-      ...abstractResultIdentity(input),
-      status: "PROVED_SINGLETON" as const,
+    return Object.freeze({
+      kind: "singleton_candidate" as const,
+      input,
+      coordinates,
       outcome: outcomes[0]!
     });
   }
   const requests = mergeRequests(coordinates.filter(isDecisionOpenCoordinate)
     .map((coordinate) => requestFor(coordinate, "multiple abstract outcomes")));
   if (requests.length === 0) {
-    return unsupported(input,
-      "multiple outcomes lack a decision-changing coordinate");
+    return resultEvaluation(unsupported(input,
+      "multiple outcomes lack a decision-changing coordinate"));
   }
-  return open(input, "multiple abstract outcomes", requests, outcomes);
+  return Object.freeze({ kind: "result" as const,
+    result: open(input, "multiple abstract outcomes", requests, outcomes) });
 }
 
 function preparedResult(result: AbstractProofKernelResult): KernelPreparation {
   return Object.freeze({ kind: "result", result });
 }
 
+function resultEvaluation(result: AbstractProofKernelResult): KernelEvaluation {
+  return Object.freeze({ kind: "result", result });
+}
+
 function validateKernelInput(input: AbstractProofKernelInput): string | null {
   try {
     assertExactKeys(input, [
-      "query_digest", "snapshot_digest", "principal_digest", "k_max", "closures",
-      "coordinates", "limits", "operator", "transfer_authority"
+      "live_authority", "fixture", "concrete_operator", "k_max", "closures",
+      "coordinates", "limits", "operator"
     ], "abstract kernel input");
     assertExactKeys(input.limits, [
       "max_channels", "max_coordinates", "max_sensitivities"
@@ -179,23 +223,22 @@ function validateKernelInput(input: AbstractProofKernelInput): string | null {
     if (!Array.isArray(input.closures) || !Array.isArray(input.coordinates)) {
       return "abstract kernel closures and coordinates must be arrays";
     }
-    assertDigest(input.query_digest, "abstract query");
-    assertDigest(input.snapshot_digest, "abstract snapshot");
-    assertDigest(input.principal_digest, "abstract principal");
+    const live = deriveLiveClosureAuthorityBinding(input.live_authority);
+    const fixture = normalizeFiniteFixture(input.fixture);
+    if (fixture.snapshot_digest !== live.snapshot_digest) {
+      return "abstract fixture snapshot is outside live authority";
+    }
+    if (input.k_max !== fixture.k_max) {
+      return "abstract K_max does not match finite fixture";
+    }
+    assertExactKeys(input.concrete_operator, ["operator_id", "decide"],
+      "abstract concrete operator");
+    assertIdentity(input.concrete_operator.operator_id, "abstract concrete operator id");
     assertIdentity(input.operator.operator_id, "abstract operator id");
     if (!/^[a-z0-9][a-z0-9._:-]*$/u.test(input.operator.operator_id) ||
         input.operator.operator_id.includes("decide_q") ||
         input.operator.operator_id.includes("sealchecker_v1")) {
       return "abstract fixture operator uses a reserved final operator name";
-    }
-    const transfer = verifyFiniteTransferParticipants({
-      authority: input.transfer_authority,
-      abstract_operator: input.operator
-    });
-    if (transfer.query_digest !== input.query_digest ||
-        transfer.fixture.snapshot_digest !== input.snapshot_digest ||
-        transfer.principal_digest !== input.principal_digest) {
-      return "abstract transfer authority binding mismatch";
     }
     if (!Number.isSafeInteger(input.k_max) || input.k_max < 0 ||
         !Number.isSafeInteger(input.limits.max_channels) ||
@@ -217,16 +260,10 @@ function validateClosures(
   const requests: AbstractRefinementRequest[] = [];
   for (const closure of input.closures) {
     try {
-      verifyChannelClosureResult(closure);
+      verifyChannelClosureResult(closure, input.live_authority);
     } catch {
       requests.push(channelRequest(safeChannelId(closure),
         "closure receipt digest mismatch"));
-      continue;
-    }
-    if (closure.query_digest !== input.query_digest ||
-        closure.snapshot_digest !== input.snapshot_digest ||
-        closure.principal_digest !== input.principal_digest) {
-      requests.push(channelRequest(closure.channel_id, "closure authority binding mismatch"));
       continue;
     }
     if (closure.status === "uncertified") {
@@ -234,6 +271,26 @@ function validateClosures(
     }
   }
   return mergeRequests(requests);
+}
+
+function validateFixtureAbstractCoverage(
+  fixture: FiniteOracleFixture,
+  coordinates: readonly AbstractCoordinate[]
+): string | null {
+  if (fixture.coordinates.length !== coordinates.length) {
+    return "abstract coordinates do not exactly cover finite fixture manifest";
+  }
+  for (let index = 0; index < coordinates.length; index += 1) {
+    const coordinate = coordinates[index]!;
+    const row = fixture.coordinates[index]!;
+    if (coordinate.coordinate_id !== row.coordinate_id ||
+        coordinate.sensitivity_id !== row.sensitivity_id ||
+        coordinate.owner_id !== row.owner_id ||
+        coordinate.kind !== row.abstract_kind) {
+      return "abstract coordinate does not match finite fixture manifest";
+    }
+  }
+  return null;
 }
 
 function safeChannelId(value: unknown): string {
@@ -262,7 +319,7 @@ function evaluateDeterministically(
   coordinates: readonly AbstractCoordinate[],
   remainingEffects: AbstractProofKernelInput["closures"][number]["remaining_effects"],
   kMax: number,
-  transferDigest: FiniteTransferAuthorityState["transfer_digest"]
+  transferDigest: ReturnType<typeof digestRecallFieldIdentity>
 ): AbstractOperatorEvaluation {
   const input = Object.freeze({
     coordinates,
@@ -314,57 +371,6 @@ function normalizeOutcomes(
   }
   return Object.freeze([...unique.values()].sort((left, right) =>
     compareText(decisionTraceSortKey(left), decisionTraceSortKey(right))));
-}
-
-function isConflictCoordinate(coordinate: AbstractCoordinate): boolean {
-  return coordinate.kind === "four_valued_proposition" &&
-    coordinate.possible_values.includes("both");
-}
-
-function isStrictlyOpenCoordinate(coordinate: AbstractCoordinate): boolean {
-  return (
-    (coordinate.kind === "identity_tie" && coordinate.universe === "open") ||
-    (coordinate.kind === "correlation" &&
-      coordinate.possible_relations.includes("unknown")) ||
-    (coordinate.kind === "semantic_feasibility" &&
-      coordinate.possible_states.includes("unresolved")) ||
-    (coordinate.kind === "numeric_interval" && coordinate.role === "extremum" &&
-      coordinate.overlaps_decision_boundary) ||
-    (coordinate.kind === "four_valued_proposition" &&
-      coordinate.possible_values.includes("unknown"))
-  );
-}
-
-function isDecisionOpenCoordinate(coordinate: AbstractCoordinate): boolean {
-  switch (coordinate.kind) {
-    case "membership":
-    case "semantic_feasibility":
-      return coordinate.possible_states.length > 1;
-    case "numeric_interval":
-      return coordinate.lower < coordinate.upper;
-    case "finite_values":
-    case "four_valued_proposition":
-      return coordinate.possible_values.length > 1;
-    case "binding":
-      return coordinate.possible_bindings.length > 1;
-    case "temporal_interval":
-      return coordinate.minimum_epoch_ms < coordinate.maximum_epoch_ms;
-    case "correlation":
-      return coordinate.possible_relations.length > 1;
-    case "identity_tie":
-      return coordinate.universe === "open" ||
-        coordinate.possible_winner_digests.length > 1;
-  }
-}
-
-function strictOpenReason(coordinate: AbstractCoordinate): string {
-  switch (coordinate.kind) {
-    case "identity_tie": return "open identity tail";
-    case "correlation": return "unknown correlation";
-    case "semantic_feasibility": return "unresolved semantic feasibility";
-    case "numeric_interval": return "overlapping extremum interval";
-    default: return "unknown proposition state";
-  }
 }
 
 function requestsForManifest(
@@ -439,7 +445,7 @@ function open(
   requests: readonly AbstractRefinementRequest[],
   outcomes: readonly FiniteDecisionTrace[]
 ): Extract<AbstractProofKernelResult, { status: "OPEN" }> {
-  return sealAbstractResult({
+  return sealAbstractRefusalResult({
     ...abstractResultIdentity(input),
     status: "OPEN" as const,
     reason,
@@ -453,7 +459,7 @@ function conflict(
   coordinateIds: readonly string[],
   reason: string
 ): Extract<AbstractProofKernelResult, { status: "CONFLICT" }> {
-  return sealAbstractResult({
+  return sealAbstractRefusalResult({
     ...abstractResultIdentity(input),
     status: "CONFLICT" as const,
     reason,
@@ -465,7 +471,7 @@ function unsupported(
   input: AbstractProofKernelInput,
   reason: string
 ): Extract<AbstractProofKernelResult, { status: "UNSUPPORTED" }> {
-  return sealAbstractResult({
+  return sealAbstractRefusalResult({
     ...abstractResultIdentity(input),
     status: "UNSUPPORTED" as const,
     reason

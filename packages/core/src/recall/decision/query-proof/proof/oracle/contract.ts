@@ -22,6 +22,17 @@ export type FiniteRefinementKind =
   | "correlation_state"
   | "identity_tie";
 
+export type TransferAbstractKind =
+  | "membership"
+  | "numeric_interval"
+  | "finite_values"
+  | "binding"
+  | "temporal_interval"
+  | "four_valued_proposition"
+  | "correlation"
+  | "semantic_feasibility"
+  | "identity_tie";
+
 export type FiniteRefinementChoice = Readonly<{
   readonly choice_id: string;
   readonly value: FiniteValue;
@@ -29,26 +40,11 @@ export type FiniteRefinementChoice = Readonly<{
 
 export type FiniteRefinementCoordinate = Readonly<{
   readonly coordinate_id: string;
+  readonly sensitivity_id: string;
+  readonly owner_id: string;
   readonly kind: FiniteRefinementKind;
+  readonly abstract_kind: TransferAbstractKind;
   readonly choices: readonly FiniteRefinementChoice[];
-}>;
-
-export type FiniteMutualExclusionAssignment = Readonly<{
-  readonly coordinate_id: string;
-  readonly choice_id: string;
-}>;
-
-export type FiniteMutualExclusionReceipt = Readonly<{
-  readonly schema_version: 1;
-  readonly operator_id: "finite_fixture_mutual_exclusion_v1";
-  readonly fixture_id: string;
-  readonly snapshot_digest: RecallFieldDigest;
-  readonly fixture_premise_digest: RecallFieldDigest;
-  readonly proposition_digest: RecallFieldDigest;
-  readonly evidence_digest: RecallFieldDigest;
-  readonly forbidden_combinations:
-    readonly (readonly FiniteMutualExclusionAssignment[])[];
-  readonly receipt_digest: RecallFieldDigest;
 }>;
 
 export type FiniteOracleFixture = Readonly<{
@@ -57,7 +53,6 @@ export type FiniteOracleFixture = Readonly<{
   readonly k_max: number;
   readonly base_state: FiniteValue;
   readonly coordinates: readonly FiniteRefinementCoordinate[];
-  readonly mutual_exclusion_receipts?: readonly FiniteMutualExclusionReceipt[];
 }>;
 
 export type FiniteRefinementAssignment = Readonly<{
@@ -112,10 +107,13 @@ export type FiniteOracleChoiceCoverage = Readonly<{
 export type FiniteDecisionOracleResult = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: "finite_exhaustive_decision_oracle_v1";
+  readonly authority_digest: RecallFieldDigest;
+  readonly query_digest: RecallFieldDigest;
+  readonly snapshot_digest: RecallFieldDigest;
+  readonly principal_digest: RecallFieldDigest;
   readonly fixture_digest: RecallFieldDigest;
+  readonly k_max: number;
   readonly decision_operator_id: string;
-  readonly abstract_operator_id: string;
-  readonly transfer_digest: RecallFieldDigest;
   readonly manifest_digest: RecallFieldDigest;
   readonly refinement_count: number;
   readonly refinements: readonly FiniteOracleRefinementResult[];
@@ -128,8 +126,7 @@ export function normalizeFiniteFixture(
   fixture: FiniteOracleFixture
 ): FiniteOracleFixture {
   assertAllowedKeys(fixture, [
-    "fixture_id", "snapshot_digest", "k_max", "base_state", "coordinates",
-    "mutual_exclusion_receipts"
+    "fixture_id", "snapshot_digest", "k_max", "base_state", "coordinates"
   ], ["fixture_id", "snapshot_digest", "k_max", "base_state", "coordinates"],
   "finite fixture");
   assertIdentity(fixture.fixture_id, "finite fixture id");
@@ -141,23 +138,28 @@ export function normalizeFiniteFixture(
     .sort((left, right) => compareText(left.coordinate_id, right.coordinate_id));
   assertUnique(coordinates.map(({ coordinate_id }) => coordinate_id),
     "finite fixture coordinate ids");
-  const receipts = (fixture.mutual_exclusion_receipts ?? [])
-    .map(normalizeMutualExclusionReceipt)
-    .sort((left, right) => compareText(left.receipt_digest, right.receipt_digest));
   return Object.freeze({
     fixture_id: fixture.fixture_id,
     snapshot_digest: fixture.snapshot_digest,
     k_max: fixture.k_max,
     base_state: freezeFiniteValue(fixture.base_state),
-    coordinates: Object.freeze(coordinates),
-    ...(receipts.length === 0
-      ? {}
-      : { mutual_exclusion_receipts: Object.freeze(receipts) })
+    coordinates: Object.freeze(coordinates)
   });
 }
 
 export function digestFiniteFixture(fixture: FiniteOracleFixture): RecallFieldDigest {
   return digestRecallFieldIdentity(normalizeFiniteFixture(fixture));
+}
+
+export function digestFiniteManifest(fixture: FiniteOracleFixture): RecallFieldDigest {
+  return digestRecallFieldIdentity(normalizeFiniteFixture(fixture).coordinates.map((row) =>
+    Object.freeze({
+      coordinate_id: row.coordinate_id,
+      sensitivity_id: row.sensitivity_id,
+      owner_id: row.owner_id,
+      concrete_kind: row.kind,
+      abstract_kind: row.abstract_kind
+    })));
 }
 
 export function normalizeDecisionTrace(
@@ -232,7 +234,13 @@ export function freezeFiniteValue(value: FiniteValue): FiniteValue {
     return value;
   }
   if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      if (!(index in value)) throw new Error("finite fixture array must be dense");
+    }
     return Object.freeze(value.map((item) => freezeFiniteValue(item)));
+  }
+  if (typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new Error("finite fixture value must be a plain finite record");
   }
   const record = value as Readonly<Record<string, FiniteValue>>;
   return Object.freeze(Object.fromEntries(Object.entries(record)
@@ -243,10 +251,15 @@ export function freezeFiniteValue(value: FiniteValue): FiniteValue {
 function normalizeCoordinate(
   coordinate: FiniteRefinementCoordinate
 ): FiniteRefinementCoordinate {
-  assertExactKeys(coordinate, ["coordinate_id", "kind", "choices"],
+  assertExactKeys(coordinate, [
+    "coordinate_id", "sensitivity_id", "owner_id", "kind", "abstract_kind", "choices"
+  ],
     "finite coordinate");
   assertIdentity(coordinate.coordinate_id, "finite coordinate id");
-  if (!REFINEMENT_KINDS.has(coordinate.kind)) {
+  assertIdentity(coordinate.sensitivity_id, "finite coordinate sensitivity");
+  assertIdentity(coordinate.owner_id, "finite coordinate owner");
+  if (!REFINEMENT_KINDS.has(coordinate.kind) ||
+      !compatibleKinds(coordinate.kind, coordinate.abstract_kind)) {
     throw new Error("finite coordinate kind is unsupported");
   }
   if (coordinate.choices.length === 0) {
@@ -262,34 +275,6 @@ function normalizeCoordinate(
   }).sort((left, right) => compareText(left.choice_id, right.choice_id));
   assertUnique(choices.map(({ choice_id }) => choice_id), "finite coordinate choice ids");
   return Object.freeze({ ...coordinate, choices: Object.freeze(choices) });
-}
-
-function normalizeMutualExclusionReceipt(
-  receipt: FiniteMutualExclusionReceipt
-): FiniteMutualExclusionReceipt {
-  assertExactKeys(receipt, [
-    "schema_version", "operator_id", "fixture_id", "snapshot_digest",
-    "fixture_premise_digest", "proposition_digest", "evidence_digest",
-    "forbidden_combinations", "receipt_digest"
-  ], "finite mutual exclusion receipt");
-  const { receipt_digest: _digest, ...body } = receipt;
-  if (receipt.schema_version !== 1 ||
-      receipt.operator_id !== "finite_fixture_mutual_exclusion_v1" ||
-      receipt.receipt_digest !== digestRecallFieldIdentity(body)) {
-    throw new Error("finite mutual exclusion receipt digest mismatch");
-  }
-  [receipt.snapshot_digest, receipt.fixture_premise_digest,
-    receipt.proposition_digest, receipt.evidence_digest]
-    .forEach((value) => assertDigest(value, "finite mutual exclusion identity"));
-  return Object.freeze({
-    ...receipt,
-    forbidden_combinations: Object.freeze(receipt.forbidden_combinations.map((rows) =>
-      Object.freeze(rows.map((row) => {
-        assertExactKeys(row, ["coordinate_id", "choice_id"],
-          "finite mutual exclusion assignment");
-        return Object.freeze({ ...row });
-      }))))
-  });
 }
 
 function assertUnique(values: readonly string[], field: string): void {
@@ -332,3 +317,17 @@ const REFINEMENT_KINDS: ReadonlySet<string> = new Set([
   "correlation_state",
   "identity_tie"
 ]);
+
+function compatibleKinds(concrete: FiniteRefinementKind, abstract: TransferAbstractKind) {
+  switch (concrete) {
+    case "candidate_membership": return abstract === "membership";
+    case "witness_refinement":
+      return abstract === "numeric_interval" || abstract === "finite_values" ||
+        abstract === "temporal_interval";
+    case "semantic_feasibility": return abstract === "semantic_feasibility";
+    case "answer_binding": return abstract === "binding";
+    case "proposition_conflict": return abstract === "four_valued_proposition";
+    case "correlation_state": return abstract === "correlation";
+    case "identity_tie": return abstract === "identity_tie";
+  }
+}
