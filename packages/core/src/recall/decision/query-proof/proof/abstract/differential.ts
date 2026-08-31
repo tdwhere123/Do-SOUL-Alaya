@@ -10,14 +10,16 @@ import {
 } from "../oracle/oracle.js";
 import {
   abstractResultIdentity,
+  captureAbstractProofKernelInput,
+  sealAbstractRefusalResult,
   verifyAbstractProofKernelResult,
   type AbstractProofKernelInput,
   type AbstractProofKernelResult,
   type FiniteOracleDifferentialCertificate
 } from "./contract.js";
 import {
-  evaluateAbstractProofKernel,
-  evaluateAbstractSingletonCandidate
+  evaluateAbstractSingletonCandidate,
+  type KernelEvaluation
 } from "./kernel.js";
 
 export type AbstractOracleComparison = Readonly<{
@@ -30,12 +32,14 @@ export function compareAbstractProofToOracle(
   proof: AbstractProofKernelResult,
   oracle: FiniteDecisionOracleResult
 ): AbstractOracleComparison {
-  const captured = captureVerifiedLiveClosureAuthority(input.live_authority);
-  const stableInput = Object.freeze({ ...input, live_authority: captured.authority });
-  assertExactOracle(stableInput, oracle);
+  const capturedInput = captureAbstractProofKernelInput(input);
+  const captured = captureVerifiedLiveClosureAuthority(capturedInput.live_authority);
+  const stableInput = Object.freeze({ ...capturedInput,
+    live_authority: captured.authority });
+  const stableOracle = assertExactOracle(stableInput, oracle);
   verifyAbstractProofKernelResult(proof, stableInput,
-    proof.status === "PROVED_SINGLETON" ? oracle : undefined);
-  const concrete = oracle.outcomes.map(({ trace_digest }) => trace_digest);
+    proof.status === "PROVED_SINGLETON" ? stableOracle : undefined);
+  const concrete = stableOracle.outcomes.map(({ trace_digest }) => trace_digest);
   if (proof.status === "PROVED_SINGLETON") {
     return Object.freeze({
       false_singleton: concrete.length !== 1 ||
@@ -44,11 +48,9 @@ export function compareAbstractProofToOracle(
         digest !== proof.outcome.trace_digest).sort(compareText))
     });
   }
-  if (proof.status !== "OPEN" || proof.possible_outcomes.length === 0) {
-    return emptyComparison();
-  }
-  const possible = new Set(proof.possible_outcomes.map(({ trace_digest }) =>
-    trace_digest));
+  const possible = new Set(proof.status === "OPEN"
+    ? proof.possible_outcomes.map(({ trace_digest }) => trace_digest)
+    : []);
   return Object.freeze({
     false_singleton: false,
     missing_concrete_outcome_digests: Object.freeze(concrete.filter((digest) =>
@@ -62,10 +64,11 @@ export function certifyAbstractSingletonWithFiniteOracle(
 ): AbstractProofKernelResult {
   const evaluation = evaluateAbstractSingletonCandidate(input);
   if (evaluation.kind === "result") return evaluation.result;
-  assertExactOracle(evaluation.input, oracle);
-  if (oracle.outcomes.length !== 1 ||
-      oracle.outcomes[0]!.trace_digest !== evaluation.outcome.trace_digest) {
-    return evaluateAbstractProofKernel(input);
+  const oracleSnapshot = assertExactOracle(evaluation.input, oracle);
+  if (oracleSnapshot.outcomes.length !== 1 ||
+      oracleSnapshot.outcomes[0]!.trace_digest !== evaluation.outcome.trace_digest) {
+    return unsupportedEvaluation(evaluation,
+      "abstract operator under-approximates finite oracle outcomes");
   }
   const identity = abstractResultIdentity(evaluation.input, evaluation.live_binding);
   const certificate = sealDifferentialCertificate({
@@ -80,7 +83,7 @@ export function certifyAbstractSingletonWithFiniteOracle(
     k_max: identity.k_max,
     concrete_operator_id: identity.concrete_operator_id,
     abstract_operator_id: identity.decision_operator_id,
-    oracle_result_digest: oracle.result_digest,
+    oracle_result_digest: oracleSnapshot.result_digest,
     abstract_premise_digest: identity.premise_digest,
     outcome_trace_digest: evaluation.outcome.trace_digest,
     false_singleton: false,
@@ -92,7 +95,7 @@ export function certifyAbstractSingletonWithFiniteOracle(
     outcome: evaluation.outcome,
     differential_certificate: certificate
   });
-  verifyAbstractProofKernelResult(proved, evaluation.input, oracle);
+  verifyAbstractProofKernelResult(proved, evaluation.input, oracleSnapshot);
   return proved;
 }
 
@@ -103,11 +106,22 @@ function sealCertifiedResult(body: Omit<Extract<
   return Object.freeze({ ...body, proof_digest: digestRecallFieldIdentity(body) });
 }
 
+function unsupportedEvaluation(
+  evaluation: Extract<KernelEvaluation, { kind: "singleton_candidate" }>,
+  reason: string
+): AbstractProofKernelResult {
+  return sealAbstractRefusalResult({
+    ...abstractResultIdentity(evaluation.input, evaluation.live_binding),
+    status: "UNSUPPORTED" as const,
+    reason
+  });
+}
+
 function assertExactOracle(
   input: AbstractProofKernelInput,
   oracle: FiniteDecisionOracleResult
-): void {
-  assertFiniteOracleExhaustive({
+): FiniteDecisionOracleResult {
+  return assertFiniteOracleExhaustive({
     authority: input.live_authority,
     fixture: input.fixture,
     operator: input.concrete_operator,
@@ -122,12 +136,5 @@ function sealDifferentialCertificate(body: Omit<
   return Object.freeze({
     ...body,
     certificate_digest: digestRecallFieldIdentity(body)
-  });
-}
-
-function emptyComparison(): AbstractOracleComparison {
-  return Object.freeze({
-    false_singleton: false,
-    missing_concrete_outcome_digests: Object.freeze([])
   });
 }

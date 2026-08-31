@@ -37,6 +37,10 @@ export function validateAbstractKernelInput(
       "abstract operator");
     assertIdentity(input.concrete_operator.operator_id, "abstract concrete operator id");
     assertIdentity(input.operator.operator_id, "abstract operator id");
+    if (typeof input.concrete_operator.decide !== "function" ||
+        typeof input.operator.evaluate !== "function") {
+      return "abstract operators must provide callable functions";
+    }
     if (!/^[a-z0-9][a-z0-9._:-]*$/u.test(input.operator.operator_id) ||
         input.operator.operator_id.includes("decide_q") ||
         input.operator.operator_id.includes("sealchecker_v1")) {

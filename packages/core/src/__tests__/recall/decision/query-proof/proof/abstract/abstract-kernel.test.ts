@@ -80,7 +80,10 @@ describe("oracle-certified abstract proof kernel", () => {
     const result = certifyAbstractSingletonWithFiniteOracle(testCase.input, oracle);
 
     expect(oracle.outcomes).toHaveLength(2);
-    expect(result.status).toBe("OPEN");
+    expect(result.status).toBe("UNSUPPORTED");
+    expect(result).toMatchObject({
+      reason: expect.stringMatching(/under-approximates/u)
+    });
     expect(compareAbstractProofToOracle(testCase.input, result, oracle)
       .missing_concrete_outcome_digests).toHaveLength(2);
   });
@@ -239,6 +242,54 @@ describe("oracle-certified abstract proof kernel", () => {
       missing_concrete_outcome_digests)).toEqual([]);
   });
 
+  it("captures the abstract input before a caller-owned fixture switch", () => {
+    const testCase = createKernelCase(authorityFrom(prepared));
+    let fixtureReads = 0;
+    const switching = new Proxy({ ...testCase.input }, {
+      get(target, property, receiver) {
+        if (property === "fixture") {
+          fixtureReads += 1;
+          return fixtureReads === 1
+            ? testCase.input.fixture
+            : { ...testCase.input.fixture, k_max: 0 };
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+
+    const result = evaluateAbstractProofKernel(switching);
+
+    expect(result.status).toBe("OPEN");
+    expect(fixtureReads).toBe(1);
+  });
+
+  it("captures an injected abstract operator id and callback once", () => {
+    const testCase = createKernelCase(authorityFrom(prepared));
+    let idReads = 0;
+    let callbackReads = 0;
+    const switching = new Proxy({ ...testCase.operator }, {
+      get(target, property, receiver) {
+        if (property === "operator_id") {
+          idReads += 1;
+          return idReads === 1 ? testCase.operator.operator_id : "decide_q";
+        }
+        if (property === "evaluate") {
+          callbackReads += 1;
+          return callbackReads === 1
+            ? testCase.operator.evaluate
+            : () => ({ status: "unsupported", reason: "injected" });
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    const input = Object.freeze({ ...testCase.input, operator: switching });
+
+    const result = evaluateAbstractProofKernel(input);
+
+    expect(result.status).toBe("OPEN");
+    expect(idReads).toBe(1);
+    expect(callbackReads).toBe(1);
+  });
   it("uses one verified authority capture for the complete proof operation", () => {
     const valid = authorityFrom(prepared);
     const baseline = createKernelCase(valid);

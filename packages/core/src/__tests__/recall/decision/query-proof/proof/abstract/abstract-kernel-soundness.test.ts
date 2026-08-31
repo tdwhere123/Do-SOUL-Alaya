@@ -135,7 +135,7 @@ describe("conservative abstract domain parsing", () => {
 
     expect(evaluateAbstractProofKernel(testCase.input)).toMatchObject({
       status: "UNSUPPORTED",
-      reason: expect.stringMatching(/abstract operator.*unknown or missing fields/u)
+      reason: expect.stringMatching(/abstract (?:decision )?operator.*unknown or missing fields/u)
     });
   });
 

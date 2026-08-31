@@ -78,6 +78,39 @@ describe("live-source lexical closure", () => {
     }, bounded);
   });
 
+  it("captures a closure receipt before a caller-owned status switch", async () => {
+    const bounded = boundedLexicalAuthority(prepared);
+    await withIssuedSource(allLaneProof(2), (authority) => {
+      const closure = closeLexicalBoundChannel(authority)!;
+      let statusReads = 0;
+      const switching = new Proxy(closure, {
+        get(target, property, receiver) {
+          if (property === "status") {
+            statusReads += 1;
+            return statusReads === 1 ? closure.status : "exact_closed";
+          }
+          return Reflect.get(target, property, receiver);
+        }
+      });
+
+      const captured = verifyChannelClosureResult(switching, authority);
+
+      expect(captured.status).toBe("uncertified");
+      expect(statusReads).toBe(1);
+    }, bounded);
+  });
+
+  it("rejects an unfrozen lexical source bundle instead of using its live methods", async () => {
+    await withIssuedSource(allLaneProof(2), (authority) => {
+      const mutableBundle = { ...authority.lexical_source_bundle! };
+      const switched = Object.freeze({
+        ...authority,
+        lexical_source_bundle: mutableBundle
+      });
+
+      expect(closeLexicalBoundChannel(switched)).toBeNull();
+    });
+  });
   it("does not consume a planted lexical proof without a live source bundle", () => {
     expect(closeLexicalBoundChannel(authorityFrom(prepared))).toBeNull();
   });

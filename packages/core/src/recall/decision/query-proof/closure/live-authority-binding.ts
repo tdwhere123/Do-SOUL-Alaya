@@ -40,6 +40,12 @@ export function captureVerifiedLiveClosureAuthority(
   assertAuthorityFields(authority);
   const sourceLease = authority.snapshot_read_lease;
   const sourceBundle = authority.lexical_source_bundle;
+  if (!isDeeplyFrozenData(sourceLease)) {
+    throw new Error("live source snapshot read lease must be deeply frozen");
+  }
+  if (sourceBundle !== undefined && !isDeeplyFrozenData(sourceBundle)) {
+    throw new Error("live lexical source bundle must be deeply frozen");
+  }
   const captured = Object.freeze({
     workspace_id: captureData(authority.workspace_id),
     query_condition: captureData(authority.query_condition),
@@ -102,7 +108,7 @@ function deriveCapturedBinding(
   });
 }
 
-function captureData<T>(value: T, ancestors: WeakSet<object> = new WeakSet()): T {
+export function captureData<T>(value: T, ancestors: WeakSet<object> = new WeakSet()): T {
   if (value === undefined || value === null || typeof value === "string" ||
       typeof value === "boolean") {
     return value;

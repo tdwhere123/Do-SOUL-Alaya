@@ -21,6 +21,7 @@ import {
 } from "../oracle/contract.js";
 import { assertFiniteOracleExhaustive } from "../oracle/oracle.js";
 import {
+  captureData,
   captureVerifiedLiveClosureAuthority,
   type LiveClosureAuthorityBinding
 } from
@@ -115,6 +116,48 @@ export type AbstractProofKernelInput = Readonly<{
   readonly operator: AbstractDecisionOperator;
 }>;
 
+export function captureAbstractProofKernelInput(
+  input: AbstractProofKernelInput
+): AbstractProofKernelInput {
+  assertExactObjectKeys(input, [
+    "live_authority", "fixture", "concrete_operator", "k_max", "closures",
+    "coordinates", "limits", "operator"
+  ], "abstract kernel input");
+  const liveAuthority = input.live_authority;
+  const fixture = captureData(input.fixture);
+  const concreteOperator = captureCallableOperator(input.concrete_operator, "decide");
+  const kMax = input.k_max;
+  const closures = captureData(input.closures);
+  const coordinates = captureData(input.coordinates);
+  const limits = captureData(input.limits);
+  const operator = captureCallableOperator(input.operator, "evaluate");
+  return Object.freeze({
+    live_authority: liveAuthority,
+    fixture,
+    concrete_operator: concreteOperator,
+    k_max: kMax,
+    closures,
+    coordinates,
+    limits,
+    operator
+  });
+}
+
+function captureCallableOperator<T extends object>(
+  operator: T,
+  callbackField: "decide" | "evaluate"
+): T {
+  assertExactObjectKeys(operator, ["operator_id", callbackField],
+    "abstract decision operator");
+  const record = operator as Readonly<Record<string, unknown>>;
+  const operatorId = record.operator_id;
+  const callback = record[callbackField];
+  return Object.freeze({
+    operator_id: operatorId,
+    [callbackField]: callback
+  }) as T;
+}
+
 export type FiniteOracleDifferentialCertificate = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: "finite_oracle_differential_certificate_v1";
@@ -190,6 +233,7 @@ export function abstractResultIdentity(
   liveBinding?: LiveClosureAuthorityBinding
 ) {
   const transfer = safeProofIdentity(input, liveBinding);
+  const premise_digest = safePremiseDigest(input, transfer);
   return Object.freeze({
     schema_version: 1 as const,
     operator_id: "operator_parametric_abstract_proof_kernel_v1" as const,
@@ -203,8 +247,22 @@ export function abstractResultIdentity(
     transfer_digest: transfer.transfer_digest,
     manifest_digest: transfer.manifest_digest,
     k_max: input.k_max,
-    premise_digest: digestAbstractProofPremise(input, transfer)
+    premise_digest
   });
+}
+
+function safePremiseDigest(
+  input: AbstractProofKernelInput,
+  transfer: ReturnType<typeof safeProofIdentity>
+): RecallFieldDigest {
+  try {
+    return digestAbstractProofPremise(input, transfer);
+  } catch {
+    return digestRecallFieldIdentity({
+      operator_id: "invalid_abstract_proof_premise",
+      transfer_digest: transfer.transfer_digest
+    });
+  }
 }
 
 function digestAbstractProofPremise(
@@ -258,7 +316,7 @@ function safeProofIdentity(
   } catch {
     const invalid = digestRecallFieldIdentity({
       operator_id: "invalid_finite_transfer_authority",
-      abstract_operator_id: input.operator?.operator_id ?? "unavailable"
+      abstract_operator_id: "unavailable"
     });
     return Object.freeze({
       authority_digest: invalid,
@@ -283,10 +341,25 @@ export function verifyAbstractProofKernelResult(
   input: AbstractProofKernelInput,
   oracle?: FiniteDecisionOracleResult
 ): void {
-  const captured = captureVerifiedLiveClosureAuthority(input.live_authority);
-  const stableInput = Object.freeze({ ...input, live_authority: captured.authority });
+  const stableResult = captureData(result);
+  const stableInput = captureAbstractProofKernelInput(input);
+  const captured = captureVerifiedLiveClosureAuthority(stableInput.live_authority);
+  const verifiedInput = Object.freeze({
+    ...stableInput,
+    live_authority: captured.authority
+  });
+  const stableOracle = oracle === undefined ? undefined : assertFiniteOracleExhaustive({
+    authority: captured.authority,
+    fixture: verifiedInput.fixture,
+    operator: verifiedInput.concrete_operator,
+    result: oracle
+  });
   verifyAbstractProofKernelResultAgainstBinding(
-    result, stableInput, captured.binding, oracle);
+    stableResult,
+    verifiedInput,
+    captured.binding,
+    stableOracle
+  );
 }
 
 function verifyAbstractProofKernelResultAgainstBinding(
@@ -313,7 +386,7 @@ function verifyAbstractProofKernelResultAgainstBinding(
   assertDigest(result.premise_digest, "abstract result premise");
   if (result.status === "PROVED_SINGLETON") {
     verifyFiniteDecisionTrace(result.outcome, result.k_max);
-    verifyDifferentialCertificate(result.differential_certificate, result, input, live, oracle);
+    verifyDifferentialCertificate(result.differential_certificate, result, oracle);
   } else if (result.status === "OPEN") {
     assertIdentity(result.reason, "abstract open reason");
     result.requested_refinements.forEach(verifyRefinementRequest);
@@ -337,8 +410,6 @@ function verifyAbstractProofKernelResultAgainstBinding(
 function verifyDifferentialCertificate(
   certificate: FiniteOracleDifferentialCertificate,
   result: Extract<AbstractProofKernelResult, { status: "PROVED_SINGLETON" }>,
-  input: AbstractProofKernelInput,
-  live: LiveClosureAuthorityBinding,
   oracle: FiniteDecisionOracleResult | undefined
 ): void {
   assertExactObjectKeys(certificate, [
@@ -378,12 +449,6 @@ function verifyDifferentialCertificate(
       oracle.outcomes[0]!.trace_digest !== result.outcome.trace_digest) {
     throw new Error("finite oracle differential certificate mismatch");
   }
-  assertFiniteOracleExhaustive({
-    authority: input.live_authority,
-    fixture: input.fixture,
-    operator: input.concrete_operator,
-    result: oracle
-  });
 }
 
 function verifyRefinementRequest(request: AbstractRefinementRequest): void {

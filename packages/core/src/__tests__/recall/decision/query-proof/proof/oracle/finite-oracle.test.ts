@@ -10,6 +10,9 @@ import {
   type FiniteRefinementKind,
   type TransferAbstractKind
 } from "../../../../../../recall/decision/query-proof/proof/oracle/contract.js";
+import {
+  certifyAbstractSingletonWithFiniteOracle
+} from "../../../../../../recall/decision/query-proof/proof/abstract/differential.js";
 import type { PreparedRecallRequest } from
   "../../../../../../recall/runtime/recall-service-runner-types.js";
 import {
@@ -17,6 +20,11 @@ import {
   cleanup,
   preparedAuthority
 } from "../../../../integration/shadow/live-receipt-fixtures.js";
+import {
+  createKernelCase,
+  membershipCoordinate,
+  singletonOperator
+} from "../abstract/proof-fixture.js";
 
 let prepared: PreparedRecallRequest;
 
@@ -199,6 +207,33 @@ describe("source-bound finite exhaustive oracle", () => {
     })).toThrow(/exact operator replay/u);
   });
 
+  it("captures the concrete operator id and callback once", () => {
+    const fixture = oneCandidateFixture();
+    const valid = membershipOperator();
+    let idReads = 0;
+    let decideReads = 0;
+    const switching = new Proxy(valid, {
+      get(target, property, receiver) {
+        if (property === "operator_id") {
+          idReads += 1;
+          return idReads === 1 ? valid.operator_id : "decide_q";
+        }
+        if (property === "decide") {
+          decideReads += 1;
+          return decideReads === 1
+            ? valid.decide
+            : () => trace(["injected"], "injected");
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+
+    const result = enumerate(fixture, switching);
+
+    expect(result.outcomes).toHaveLength(2);
+    expect(idReads).toBe(1);
+    expect(decideReads).toBe(1);
+  });
   it("normalizes and deeply freezes caller-owned fixture state", () => {
     const base = { nested: { values: ["original"] } };
     const choices = [{ choice_id: "false", value: false },
@@ -242,6 +277,63 @@ describe("source-bound finite exhaustive oracle", () => {
     })).not.toThrow();
   });
 
+  it("captures the oracle result before an outcomes-array switch", () => {
+    const fixture = pairFixture();
+    const operator = pairOperator();
+    const exact = enumerate(fixture, operator);
+    let outcomesReads = 0;
+    const switching = new Proxy(exact, {
+      get(target, property, receiver) {
+        if (property === "outcomes") {
+          outcomesReads += 1;
+          return outcomesReads === 1
+            ? exact.outcomes
+            : Object.freeze([exact.outcomes[0]!]);
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+
+    const captured = assertFiniteOracleExhaustive({
+      authority: authorityFrom(prepared), fixture, operator, result: switching
+    });
+
+    expect(captured.outcomes).toHaveLength(4);
+    expect(outcomesReads).toBe(1);
+  });
+
+  it("rejects an oracle result whose caller-owned outcomes later switch to singleton", () => {
+    const fixture = pairFixture();
+    const operator = pairOperator();
+    const exact = enumerate(fixture, operator);
+    const testCase = createKernelCase(authorityFrom(prepared), {
+      fixture,
+      concrete: operator,
+      coordinates: [
+        membershipCoordinate(["absent", "present"], "left", "sensitivity:left"),
+        membershipCoordinate(["absent", "present"], "right", "sensitivity:right")
+      ],
+      operator: singletonOperator(["sensitivity:left", "sensitivity:right"]),
+      k_max: fixture.k_max
+    });
+    let outcomesReads = 0;
+    const switching = new Proxy(exact, {
+      get(target, property, receiver) {
+        if (property === "outcomes") {
+          outcomesReads += 1;
+          return outcomesReads <= 1
+            ? exact.outcomes
+            : Object.freeze([exact.outcomes[0]!]);
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+
+    const result = certifyAbstractSingletonWithFiniteOracle(testCase.input, switching);
+
+    expect(result.status).toBe("UNSUPPORTED");
+    expect(outcomesReads).toBe(1);
+  });
   it("uses one verified authority capture for the complete oracle operation", () => {
     const valid = authorityFrom(prepared);
     let workspaceReads = 0;

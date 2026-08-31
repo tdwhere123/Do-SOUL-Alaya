@@ -1,5 +1,7 @@
 import { compareText, sameTextSet } from "../../../../../shared/compare-text.js";
 import { stableStringify } from "../../../../../shared/stable-stringify.js";
+import { captureData } from
+  "../../closure/live-authority-binding.js";
 import { digestRecallFieldIdentity } from "../../../../field/field-identity.js";
 import {
   captureVerifiedLiveClosureAuthority,
@@ -8,7 +10,6 @@ import {
   "../../closure/live-authority-binding.js";
 import type { LiveQueryProofAuthority } from "../../live-query-proof-authority.js";
 import {
-  assertIdentity,
   decisionTraceSortKey,
   digestFiniteFixture,
   digestFiniteManifest,
@@ -32,7 +33,9 @@ export function enumerateFiniteDecisionOracle(params: Readonly<{
 }>): FiniteDecisionOracleResult {
   assertExactKeys(params, ["authority", "fixture", "operator"], "finite oracle input");
   const live = captureVerifiedLiveClosureAuthority(params.authority).binding;
-  return enumerateAgainstBinding(live, params.fixture, params.operator);
+  const fixture = normalizeFiniteFixture(params.fixture);
+  const operator = captureFiniteDecisionOperator(params.operator);
+  return enumerateAgainstBinding(live, fixture, operator);
 }
 
 function enumerateAgainstBinding(
@@ -44,7 +47,6 @@ function enumerateAgainstBinding(
   if (fixture.snapshot_digest !== live.snapshot_digest) {
     throw new Error("finite oracle fixture snapshot is outside live authority");
   }
-  assertOperator(operator);
   const concrete = enumerateLegalRefinements(fixture);
   const traces = new Map<string, FiniteDecisionTrace>();
   const refinements: FiniteOracleRefinementResult[] = [];
@@ -84,15 +86,18 @@ export function assertFiniteOracleExhaustive(params: Readonly<{
   readonly fixture: FiniteOracleFixture;
   readonly operator: FiniteDecisionOperator;
   readonly result: FiniteDecisionOracleResult;
-}>): void {
+}>): FiniteDecisionOracleResult {
   assertExactKeys(params, ["authority", "fixture", "operator", "result"],
     "finite oracle verification input");
   const live = captureVerifiedLiveClosureAuthority(params.authority).binding;
-  assertFiniteOracleExhaustiveAgainstBinding({
+  const fixture = normalizeFiniteFixture(params.fixture);
+  const operator = captureFiniteDecisionOperator(params.operator);
+  const result = captureData(params.result);
+  return assertFiniteOracleExhaustiveAgainstBinding({
     live_binding: live,
-    fixture: params.fixture,
-    operator: params.operator,
-    result: params.result
+    fixture,
+    operator,
+    result
   });
 }
 
@@ -101,7 +106,7 @@ function assertFiniteOracleExhaustiveAgainstBinding(params: Readonly<{
   readonly fixture: FiniteOracleFixture;
   readonly operator: FiniteDecisionOperator;
   readonly result: FiniteDecisionOracleResult;
-}>): void {
+}>): FiniteDecisionOracleResult {
   assertExactKeys(params, ["live_binding", "fixture", "operator", "result"],
     "captured finite oracle verification input");
   const live = params.live_binding;
@@ -135,6 +140,7 @@ function assertFiniteOracleExhaustiveAgainstBinding(params: Readonly<{
   if (stableStringify(expected) !== stableStringify(result)) {
     throw new Error("finite oracle result does not match the exact operator replay");
   }
+  return result;
 }
 
 function enumerateLegalRefinements(
@@ -190,13 +196,24 @@ function choiceCoverage(
     }))));
 }
 
-function assertOperator(operator: FiniteDecisionOperator): void {
+function captureFiniteDecisionOperator(
+  operator: FiniteDecisionOperator
+): FiniteDecisionOperator {
   assertExactKeys(operator, ["operator_id", "decide"], "finite decision operator");
-  assertIdentity(operator.operator_id, "finite decision operator id");
-  if (!/^[a-z0-9][a-z0-9._:-]*$/u.test(operator.operator_id) ||
-      operator.operator_id.includes("decide_q")) {
+  const record = operator as Readonly<Record<string, unknown>>;
+  const operatorId = record.operator_id;
+  const decide = record.decide;
+  if (typeof operatorId !== "string" || typeof decide !== "function") {
+    throw new Error("finite decision operator is invalid");
+  }
+  if (!/^[a-z0-9][a-z0-9._:-]*$/u.test(operatorId) ||
+      operatorId.includes("decide_q")) {
     throw new Error("finite fixture operator must not be named Decide_Q");
   }
+  return Object.freeze({
+    operator_id: operatorId,
+    decide: decide as FiniteDecisionOperator["decide"]
+  });
 }
 
 function assertExactKeys(value: object, expectedFields: readonly string[], field: string): void {

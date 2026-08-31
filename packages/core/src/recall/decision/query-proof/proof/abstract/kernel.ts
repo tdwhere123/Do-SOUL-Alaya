@@ -1,6 +1,7 @@
 import { compareText } from "../../../../../shared/compare-text.js";
 import { digestRecallFieldIdentity } from
   "../../../../field/field-identity.js";
+import type { ChannelClosureResult } from "../../closure/contract.js";
 import { verifyChannelClosureResult } from "../../closure/verify.js";
 import {
   captureVerifiedLiveClosureAuthority,
@@ -19,8 +20,8 @@ import {
 } from "../oracle/contract.js";
 import {
   abstractResultIdentity,
-  assertDigest,
   assertIdentity,
+  captureAbstractProofKernelInput,
   sealAbstractRefusalResult,
   type AbstractCoordinate,
   type AbstractDecisionOperator,
@@ -60,13 +61,19 @@ export function evaluateAbstractProofKernel(
 export function evaluateAbstractSingletonCandidate(
   input: AbstractProofKernelInput
 ): KernelEvaluation {
+  let stableInput: AbstractProofKernelInput;
+  try {
+    stableInput = captureAbstractProofKernelInput(input);
+  } catch (error) {
+    return resultEvaluation(invalidInputUnsupported(messageOf(error)));
+  }
   let captured: VerifiedLiveClosureAuthorityCapture;
   try {
-    captured = captureVerifiedLiveClosureAuthority(input.live_authority);
+    captured = captureVerifiedLiveClosureAuthority(stableInput.live_authority);
   } catch (error) {
-    return resultEvaluation(unsupported(input, messageOf(error)));
+    return resultEvaluation(unsupported(stableInput, messageOf(error)));
   }
-  const preparation = prepareAbstractDomain(input, captured);
+  const preparation = prepareAbstractDomain(stableInput, captured);
   return preparation.kind === "result"
     ? Object.freeze({ kind: "result" as const, result: preparation.result })
     : evaluatePreparedKernel(preparation);
@@ -129,16 +136,16 @@ function prepareAbstractDomain(
       conflicts.map(({ coordinate_id }) => coordinate_id),
       "abstract proposition conflict", binding));
   }
-  const closureRequests = validateClosures(input, captured);
-  if (closureRequests.length > 0) {
+  const closureValidation = validateClosures(input, captured);
+  if (closureValidation.requests.length > 0) {
     return preparedResult(open(normalizedInput,
-      "unresolved or invalid channel closure", closureRequests, [], binding));
+      "unresolved or invalid channel closure", closureValidation.requests, [], binding));
   }
   const transferMismatch = validateFixtureAbstractCoverage(fixture, coordinates);
   if (transferMismatch !== null) {
     return preparedResult(unsupported(normalizedInput, transferMismatch, binding));
   }
-  const scopedEffects = collectScopedEffects(input);
+  const scopedEffects = collectScopedEffects(closureValidation.closures);
   const joined = joinChannelRemainingEffects(coordinates, scopedEffects);
   const effectiveInput = Object.freeze({ ...normalizedInput,
     coordinates: joined.coordinates });
@@ -175,7 +182,7 @@ function evaluatePreparedKernel(prepared: PreparedKernel): KernelEvaluation {
     live_binding: binding } = prepared;
   let evaluation: AbstractOperatorEvaluation;
   try {
-    evaluation = evaluateDeterministically(input.operator, coordinates,
+    evaluation = evaluateDeterministically(input.operator.evaluate, coordinates,
       remainingEffects, input.k_max, prepared.transfer_digest);
     validateOperatorEvaluation(evaluation);
   } catch (error) {
@@ -238,24 +245,34 @@ function resultEvaluation(result: AbstractProofKernelResult): KernelEvaluation {
   return Object.freeze({ kind: "result", result });
 }
 
+type ClosureValidation = Readonly<{
+  readonly closures: readonly ChannelClosureResult[];
+  readonly requests: readonly AbstractRefinementRequest[];
+}>;
+
 function validateClosures(
   input: AbstractProofKernelInput,
   captured: VerifiedLiveClosureAuthorityCapture
-): readonly AbstractRefinementRequest[] {
+): ClosureValidation {
   const requests: AbstractRefinementRequest[] = [];
+  const closures: ChannelClosureResult[] = [];
   for (const closure of input.closures) {
     try {
-      verifyChannelClosureResult(closure, captured.source_authority);
+      const verified = verifyChannelClosureResult(closure,
+        captured.source_authority);
+      closures.push(verified);
+      if (verified.status === "uncertified") {
+        requests.push(channelRequest(verified.channel_id, verified.reason));
+      }
     } catch {
       requests.push(channelRequest(safeChannelId(closure),
         "closure receipt digest mismatch"));
-      continue;
-    }
-    if (closure.status === "uncertified") {
-      requests.push(channelRequest(closure.channel_id, closure.reason));
     }
   }
-  return mergeRequests(requests);
+  return Object.freeze({
+    closures: Object.freeze(closures),
+    requests: mergeRequests(requests)
+  });
 }
 
 function safeChannelId(value: unknown): string {
@@ -267,9 +284,9 @@ function safeChannelId(value: unknown): string {
 }
 
 function collectScopedEffects(
-  input: AbstractProofKernelInput
+  closures: readonly ChannelClosureResult[]
 ): readonly ScopedRemainingEffect[] {
-  return Object.freeze(input.closures.flatMap((closure) =>
+  return Object.freeze(closures.flatMap((closure) =>
     closure.remaining_effects.map((effect) => Object.freeze({
       owner_id: closure.channel_id,
       effect
@@ -280,7 +297,7 @@ function collectScopedEffects(
 }
 
 function evaluateDeterministically(
-  operator: AbstractDecisionOperator,
+  evaluate: AbstractDecisionOperator["evaluate"],
   coordinates: readonly AbstractCoordinate[],
   remainingEffects: AbstractProofKernelInput["closures"][number]["remaining_effects"],
   kMax: number,
@@ -292,8 +309,8 @@ function evaluateDeterministically(
     k_max: kMax,
     transfer_digest: transferDigest
   });
-  const first = operator.evaluate(input);
-  const replay = operator.evaluate(input);
+  const first = evaluate(input);
+  const replay = evaluate(input);
   if (digestRecallFieldIdentity(first) !== digestRecallFieldIdentity(replay)) {
     return Object.freeze({
       status: "unsupported" as const,
@@ -438,6 +455,33 @@ function unsupported(
     reason
   });
 }
+
+function invalidInputUnsupported(
+  reason: string
+): Extract<AbstractProofKernelResult, { status: "UNSUPPORTED" }> {
+  const invalid = digestRecallFieldIdentity({
+    operator_id: "invalid_abstract_kernel_input",
+    reason
+  });
+  return sealAbstractRefusalResult({
+    schema_version: 1 as const,
+    operator_id: "operator_parametric_abstract_proof_kernel_v1" as const,
+    authority_digest: invalid,
+    query_digest: invalid,
+    snapshot_digest: invalid,
+    principal_digest: invalid,
+    decision_operator_id: "unverified_abstract_operator",
+    concrete_operator_id: "unverified_concrete_operator",
+    fixture_digest: invalid,
+    transfer_digest: invalid,
+    manifest_digest: invalid,
+    k_max: 0,
+    premise_digest: invalid,
+    status: "UNSUPPORTED" as const,
+    reason
+  });
+}
+
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : "abstract kernel input is invalid";
