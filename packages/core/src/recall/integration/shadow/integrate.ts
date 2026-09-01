@@ -67,6 +67,10 @@ import {
 import type { PsiQuery } from "../../decision/dominance-contract.js";
 import type { LiveQueryProofAuthority } from
   "../../decision/query-proof/live-query-proof-authority.js";
+import type { DeliveryPackV1 } from
+  "../../decision/query-proof/delivery/contract.js";
+import { buildShadowDeliveryPack } from
+  "../../decision/query-proof/delivery/pack.js";
 
 export type { PsiQuery } from "../../decision/dominance-contract.js";
 export type { ShadowPsiObservationField } from "../../decision/query-proof/psi.js";
@@ -161,6 +165,7 @@ export type ShadowCapturedTrace = Readonly<{
   readonly core_known_no_witness: readonly ShadowCoreKnownNoWitness[];
   readonly psi_v2_shadow: PsiV2ShadowSidecar;
   readonly query_proof_preview?: QueryProofPreviewSidecar;
+  readonly delivery_pack: DeliveryPackV1;
 }>;
 
 export type PsiV2ShadowSidecar = PsiV2ShadowDiagnosticsV1;
@@ -381,6 +386,13 @@ function assembleCaptured(
 ): ShadowCapturedTrace {
   const k = input.policy.fine_assessment.budgets.max_entries;
   const first = walked.decisions[0];
+  const prefix = prefixSK(walked.S_infty, k);
+  const preview = previewSidecar(
+    input.query_proof_preview,
+    k,
+    previewRuntimeCapture(walked),
+    queryProofPreviewSource(input)
+  );
   return freezeShadow({
     kind: "captured" as const,
     algorithm_id: SHADOW_ALGORITHM_ID,
@@ -408,7 +420,7 @@ function assembleCaptured(
     })),
     frontiers,
     S_infty: walked.S_infty,
-    prefix_proposal: prefixSK(walked.S_infty, k),
+    prefix_proposal: prefix,
     K: k,
     decisions: walked.decisions,
     walk_rejects: walked.walk_rejects,
@@ -422,12 +434,8 @@ function assembleCaptured(
       walked.decisions.flatMap((decision) => [...decision.novelty_core_known_absence])
     ),
     psi_v2_shadow: observePsiV2Shadow(input),
-    ...previewSidecar(
-      input.query_proof_preview,
-      k,
-      previewRuntimeCapture(walked),
-      queryProofPreviewSource(input)
-    )
+    ...preview,
+    delivery_pack: observeDeliveryPack(prefix, preview, input.snapshot_digest)
   });
 }
 
@@ -446,6 +454,28 @@ function previewRuntimeCapture(
   walked: ShadowCapturedWalk
 ): QueryProofPreviewRuntimeCapture {
   return Object.freeze({ walk: walked });
+}
+
+function observeDeliveryPack(
+  prefix: readonly string[],
+  preview: { readonly query_proof_preview?: QueryProofPreviewSidecar },
+  snapshotDigest: string | undefined
+): DeliveryPackV1 {
+  try {
+    return buildShadowDeliveryPack({
+      selected_candidates: prefix,
+      capture_identity_digest: CAPTURE_IDENTITY_DIGEST,
+      preview_status: preview.query_proof_preview?.status,
+      preview_bindings: preview.query_proof_preview?.answer_bindings,
+      preview_contract_digest: preview.query_proof_preview?.contract_digest,
+      snapshot_digest: snapshotDigest
+    });
+  } catch {
+    return buildShadowDeliveryPack({
+      selected_candidates: prefix,
+      capture_identity_digest: CAPTURE_IDENTITY_DIGEST
+    });
+  }
 }
 
 function observePsiV2Shadow(input: ShadowIntegrateInput): PsiV2ShadowSidecar {

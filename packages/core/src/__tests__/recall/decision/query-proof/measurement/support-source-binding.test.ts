@@ -46,6 +46,10 @@ import {
   params
 } from "../../../integration/shadow/live-receipt-fixtures.js";
 import { evidenceCandidate } from "../../../delivery/canonical-delivery-fixtures.js";
+import { SEAL_UNBOUND_HOLE } from
+  "../../../../../recall/decision/query-proof/delivery/contract.js";
+import { parseCertifiedDeliveryPack } from
+  "../../../../../recall/decision/query-proof/delivery/pack.js";
 
 describe("support measurement source binding", () => {
   it("rejects self-reported hashes and unissued graphs", async () => {
@@ -324,6 +328,10 @@ describe("support measurement source binding", () => {
     expect(trace.query_proof_preview?.contract_digest).toMatch(/^sha256:/u);
     expect(trace.query_proof_preview?.prefix).toEqual(
       trace.query_proof_preview?.candidate_prefix);
+    expect(trace.delivery_pack.mode).toBe("best_effort_uncertified");
+    expect(trace.delivery_pack.mode).not.toBe("certified");
+    expect(trace.delivery_pack.holes).toEqual([SEAL_UNBOUND_HOLE]);
+    expect(() => parseCertifiedDeliveryPack(trace.delivery_pack)).toThrow(/certified/u);
     expect(observed.candidates).toEqual(base.candidates);
     expect(observed.capture_receipt).toEqual(base.capture_receipt);
     expect(measurementAuthority.query_id).toBe(

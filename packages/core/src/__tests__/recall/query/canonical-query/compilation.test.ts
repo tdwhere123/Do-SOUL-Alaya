@@ -17,6 +17,8 @@ import {
   type CanonicalQueryCompilationV1,
   type CanonicalQueryEvidenceV1
 } from "../../../../recall/query/canonical-query/index.js";
+import { observeCompileDisposition } from
+  "../../../../recall/query/canonical-query/compile-disposition.js";
 
 const BOOKSHELF = "Where did I buy my new bookshelf from?";
 const CJK_PLACE = "我在哪里兑换了咖啡奶精优惠券？";
@@ -307,9 +309,8 @@ describe("canonical query compilation holes", () => {
       "What is the latest password?",
       CJK_PLACE
     ];
-    let silentFallback = 0;
-    for (const query of corpus) {
-      const compiled = compileCanonicalQueryCompilation({
+    const observation = observeCompileDisposition(corpus.map((query) =>
+      compileCanonicalQueryCompilation({
         probes: compileRecallQueryProbes(query),
         demand: EMPTY_DEMAND,
         shape: query === CJK_PLACE
@@ -321,12 +322,12 @@ describe("canonical query compilation holes", () => {
               relation_terms: ["兑换"]
             }
           : undefined
-      }, SNAPSHOT);
-      silentFallback += compiled.hypotheses.filter((queryAst) =>
-        queryAst.predicates.length === 0 && compiled.holes.length === 0
-      ).length;
-    }
-    expect(silentFallback).toBe(0);
+      }, SNAPSHOT)
+    ));
+    expect(observation.silent_fallback_instrument).toBe("absent");
+    expect(observation.silent_empty_demand_fallbacks).toBe(0);
+    expect(observation.counts.unsupported).toBeGreaterThan(0);
+    expect(JSON.stringify(observation)).not.toMatch(/silent_fallback_count/u);
   });
 });
 

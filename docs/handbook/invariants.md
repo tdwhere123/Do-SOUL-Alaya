@@ -144,6 +144,10 @@ These rules always win over lower-level docs and task-card convenience.
     implementation, not a query-proof decision-contract rollback target.
     Later consensus does not reorder the delivered set. Missing generation or
     condition pins fail closed.
+20c. **Mechanism and measurement stay separate.** Planted query-proof proofs
+    cannot be closed by minting zeros for missing live provider/cache,
+    production Clock-A, dataset KPI, or prepare-time unavailable snapshot
+    sources. Those absences are `NOT_REPLAYABLE`.
 
 ### Temporal Relation Contract
 

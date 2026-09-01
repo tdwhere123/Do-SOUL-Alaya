@@ -64,6 +64,7 @@ describe("shadow integration at fineAssess", () => {
     expect("shadowTrace" in off).toBe(false);
     expect(on.shadowTrace).toBeDefined();
     expect(productionSlice(on)).toEqual(productionSlice(off));
+    expect(JSON.stringify(productionSlice(on))).not.toContain("delivery_pack");
     expect(on.candidates.map((candidate) => candidate.object_id))
       .toEqual(off.candidates.map((candidate) => candidate.object_id));
     expect(on.diagnostics).toEqual(off.diagnostics);

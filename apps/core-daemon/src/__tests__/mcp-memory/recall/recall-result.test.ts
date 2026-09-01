@@ -102,6 +102,31 @@ describe("buildMemorySearchResult", () => {
     expect(typeof parsed.score_factors.activation).toBe("number");
     expect(typeof parsed.score_factors.relevance).toBe("number");
   });
+
+  it("keeps MCP soul.recall JSON free of query-proof delivery packs", () => {
+    const candidate: RecallCandidate = {
+      object_id: GOLDEN_MCP_RECALL_RESULT.object_id,
+      object_kind: "memory_entry",
+      activation_score: GOLDEN_MCP_RECALL_RESULT.score_factors.activation,
+      relevance_score: GOLDEN_MCP_RECALL_RESULT.relevance_score,
+      content_preview: GOLDEN_MCP_RECALL_RESULT.content_preview,
+      token_estimate: GOLDEN_MCP_RECALL_RESULT.budget_state.token_estimate,
+      manifestation: "full_eligible",
+      dimension: MemoryDimension.PROCEDURE,
+      scope_class: ScopeClass.PROJECT,
+      origin_plane: "workspace_local",
+      selection_reason: GOLDEN_MCP_RECALL_RESULT.selection_reason,
+      source_channels: GOLDEN_MCP_RECALL_RESULT.source_channels,
+      score_factors: { ...GOLDEN_MCP_RECALL_RESULT.score_factors }
+    };
+    const parsed = MemorySearchResultSchema.parse(
+      buildMemorySearchResult(candidate, createPolicy(), 0, 0)
+    );
+    const json = JSON.stringify(parsed);
+    expect(json).not.toContain("delivery_pack");
+    expect(json).not.toContain("query_proof_delivery_pack_v1");
+    expect(json).not.toContain("best_effort_uncertified");
+  });
 });
 
 describe("buildRecallStrategyMix", () => {

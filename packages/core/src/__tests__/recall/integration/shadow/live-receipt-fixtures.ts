@@ -426,7 +426,7 @@ export function captured(
 }
 
 export function withoutPsi(trace: ShadowCapturedTrace) {
-  const { psi_v2_shadow: _psi, ...rest } = trace;
+  const { psi_v2_shadow: _psi, delivery_pack: _pack, ...rest } = trace;
   return rest;
 }
 
