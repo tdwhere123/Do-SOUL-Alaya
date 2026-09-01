@@ -14,6 +14,8 @@ import { type ExtremumClosureWitness } from "../closure/extremum.js";
 import { extremaRequirement } from "./extrema-witness.js";
 import {
   assertExactGammaKeys,
+  assertUniqueGammaAtomIds,
+  createGammaAtom,
   DEFAULT_RESOURCE_FEASIBILITY_POLICY,
   digestQueryGammaBody,
   isIndependentSupportToken,
@@ -21,6 +23,7 @@ import {
   rejectForbiddenGammaKeys,
   sortGammaAtoms,
   type QueryCompiledGammaV1,
+  type QueryGammaAtomJurisdictionV1,
   type QueryGammaAtomV1,
   type QueryGammaCandidateEvidenceV1,
   type QueryGammaCandidateFeasibilityV1,
@@ -28,6 +31,7 @@ import {
   type QueryGammaStandingV1,
   type ResourceFeasibilityPolicyV1
 } from "./contract.js";
+import { compiledGammaUniverseMismatch, firstDuplicate } from "./candidate-universe.js";
 import {
   evaluateSemanticFeasibility,
   standingForAtom
@@ -95,12 +99,13 @@ export function compileQueryGamma(
     ...propositionAtoms(query),
     ...independentAtoms(query, compilation, obligation)
   ]);
+  assertUniqueGammaAtomIds(atoms);
   const standings = compileStandings(atoms, candidates);
   const feasibility = candidates.map((candidate) => Object.freeze({
     candidate_key: candidate.candidate_key,
     semantic: evaluateSemanticFeasibility(atoms, candidate)
   }));
-  return sealCompiledGamma({
+  const compiled = sealCompiledGamma({
     compilation,
     query,
     resourcePolicy,
@@ -110,6 +115,14 @@ export function compileQueryGamma(
     feasibility,
     seal_obligations: sealObligations(query.answer)
   });
+  const universe = compiledGammaUniverseMismatch(
+    candidates.map((candidate) => candidate.candidate_key),
+    compiled
+  );
+  if (universe !== null) {
+    throw new ShadowContractError(universe);
+  }
+  return compiled;
 }
 
 function assertCompileInput(input: QueryGammaCompileInputV1): void {
@@ -122,6 +135,9 @@ function assertCompileInput(input: QueryGammaCompileInputV1): void {
     );
   }
   input.candidates.forEach(assertCandidateEvidence);
+  if (firstDuplicate(input.candidates.map((candidate) => candidate.candidate_key)) !== null) {
+    throw new ShadowContractError("duplicate compile-input candidate_key");
+  }
   if (input.resource_policy !== undefined) {
     assertExactGammaKeys(input.resource_policy, [
       "schema_version", "reject_duplicate_object", "token_budget", "per_dimension_limits"
@@ -138,7 +154,7 @@ function assertCandidateEvidence(candidate: QueryGammaCandidateEvidenceV1): void
     "variable", "semantic_identity", "distinctness"
   ], "query gamma binding evidence"));
   candidate.propositions.forEach((proposition) => assertExactGammaKeys(proposition, [
-    "proposition_id", "support", "independence"
+    "proposition_id", "jurisdiction", "support", "independence"
   ], "query gamma proposition evidence"));
   candidate.sequence_slots.forEach((slot) => assertExactGammaKeys(slot, [
     "position", "binding"
@@ -189,8 +205,12 @@ function answerAtoms(
   extremalBindings: readonly string[]
 ): QueryGammaAtomV1[] {
   if (answer.kind === "scalar") {
-    return [atom(`binding:scalar:${answer.variable}`, "answer_binding_position",
-      "scalar_binding", answer.variable)];
+    return [createGammaAtom({
+      stratum: "answer_binding_position",
+      kind: "scalar_binding",
+      target: answer.variable,
+      variable: answer.variable
+    })];
   }
   if (answer.kind === "distinct") {
     return distinctAtoms(answer.variable, candidates);
@@ -199,8 +219,12 @@ function answerAtoms(
     return sequenceAtoms(candidates);
   }
   return [
-    ...extremalBindings.map((binding) => atom(`binding:extremum:${binding}`,
-      "answer_binding_position", "extremum_binding", binding)),
+    ...extremalBindings.map((binding) => createGammaAtom({
+      stratum: "answer_binding_position",
+      kind: "extremum_binding",
+      target: binding,
+      semantic_identity: binding
+    })),
     ...answerAtoms(answer.inner, candidates, extremalBindings)
   ];
 }
@@ -217,8 +241,13 @@ function distinctAtoms(
     }
   }
   return [...identities].sort(compareText).map((identity) =>
-    atom(`binding:distinct:${variable}:${identity}`, "answer_binding_position",
-      "distinct_binding", `${variable}:${identity}`));
+    createGammaAtom({
+      stratum: "answer_binding_position",
+      kind: "distinct_binding",
+      target: identity,
+      variable,
+      semantic_identity: identity
+    }));
 }
 
 function sequenceAtoms(
@@ -227,9 +256,13 @@ function sequenceAtoms(
   const slots = new Map<string, QueryGammaAtomV1>();
   for (const candidate of candidates) {
     for (const slot of candidate.sequence_slots) {
-      const atomId = `binding:sequence:${String(slot.position)}:${slot.binding}`;
-      slots.set(atomId, atom(atomId, "answer_binding_position", "sequence_slot",
-        `${String(slot.position)}:${slot.binding}`));
+      const gammaAtom = createGammaAtom({
+        stratum: "answer_binding_position",
+        kind: "sequence_slot",
+        target: slot.binding,
+        position: slot.position
+      });
+      slots.set(gammaAtom.atom_id, gammaAtom);
     }
   }
   return [...slots.values()];
@@ -257,8 +290,12 @@ function illegalSequenceReason(
 function propositionAtoms(query: CanonicalQueryV1): QueryGammaAtomV1[] {
   return phiAtoms(query)
     .filter((row) => !isIndependentSupportToken(row.token))
-    .map((row) => atom(`proposition:${row.id}`, "required_proposition_support",
-      "required_proposition", row.id));
+    .map((row) => createGammaAtom({
+      stratum: "required_proposition_support",
+      kind: "required_proposition",
+      target: row.id,
+      jurisdiction: row.jurisdiction
+    }));
 }
 
 function independentAtoms(
@@ -271,18 +308,28 @@ function independentAtoms(
   const rows: QueryGammaAtomV1[] = [];
   for (const row of phiAtoms(query)) {
     if (!isIndependentSupportToken(row.token)) continue;
-    if (seen.has(row.id)) continue;
-    seen.add(row.id);
-    rows.push(atom(`independent:${row.id}`, "certified_independent_support",
-      "certified_independent_support", row.id));
+    const gammaAtom = createGammaAtom({
+      stratum: "certified_independent_support",
+      kind: "certified_independent_support",
+      target: row.id,
+      jurisdiction: row.jurisdiction
+    });
+    if (seen.has(gammaAtom.atom_id)) continue;
+    seen.add(gammaAtom.atom_id);
+    rows.push(gammaAtom);
   }
   for (const row of compilation.sensitivities) {
     if (!isIndependentSupportToken(row.target)) continue;
-    const id = `sensitivity:${row.effect}:${row.target}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    rows.push(atom(`independent:${id}`, "certified_independent_support",
-      "certified_independent_support", row.target));
+    const gammaAtom = createGammaAtom({
+      stratum: "certified_independent_support",
+      kind: "certified_independent_support",
+      target: row.target,
+      jurisdiction: "sensitivity",
+      semantic_identity: row.effect
+    });
+    if (seen.has(gammaAtom.atom_id)) continue;
+    seen.add(gammaAtom.atom_id);
+    rows.push(gammaAtom);
   }
   return rows;
 }
@@ -291,17 +338,20 @@ function phiAtoms(query: CanonicalQueryV1): readonly Readonly<{
   readonly id: string;
   readonly token: string;
   readonly arguments: readonly string[];
+  readonly jurisdiction: QueryGammaAtomJurisdictionV1;
 }>[] {
   return [
     ...query.predicates.map((predicate) => ({
       id: predicate.id,
       token: predicate.relation,
-      arguments: predicate.arguments
+      arguments: predicate.arguments,
+      jurisdiction: "predicate" as const
     })),
     ...query.constraints.map((constraint) => ({
       id: constraint.id,
       token: constraint.constraint,
-      arguments: constraint.arguments
+      arguments: constraint.arguments,
+      jurisdiction: "constraint" as const
     }))
   ];
 }
@@ -347,15 +397,6 @@ function compileStandings(
     }
   }
   return Object.freeze(rows);
-}
-
-function atom(
-  atomId: string,
-  stratum: QueryGammaAtomV1["stratum"],
-  kind: QueryGammaAtomV1["kind"],
-  target: string
-): QueryGammaAtomV1 {
-  return Object.freeze({ atom_id: atomId, stratum, kind, target });
 }
 
 function sealCompiledGamma(params: Readonly<{

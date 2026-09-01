@@ -24,6 +24,9 @@ import {
   type QueryGammaCompileInputV1
 } from "../../../../../recall/decision/query-proof/gamma/compile.js";
 import type {
+  QueryCompiledGammaV1,
+  QueryGammaAtomJurisdictionV1,
+  QueryGammaAtomV1,
   QueryGammaCandidateEvidenceV1,
   QueryGammaPropositionEvidenceV1
 } from "../../../../../recall/decision/query-proof/gamma/contract.js";
@@ -131,9 +134,32 @@ export function binding(
 export function proposition(
   id: string,
   support: QueryGammaPropositionEvidenceV1["support"] = "supports",
-  independence: QueryGammaPropositionEvidenceV1["independence"] = "not_applicable"
+  independence: QueryGammaPropositionEvidenceV1["independence"] = "not_applicable",
+  jurisdiction: QueryGammaAtomJurisdictionV1 = "predicate"
 ): QueryGammaPropositionEvidenceV1 {
-  return Object.freeze({ proposition_id: id, support, independence });
+  return Object.freeze({ proposition_id: id, jurisdiction, support, independence });
+}
+
+export function findGammaAtom(
+  compiled: QueryCompiledGammaV1,
+  match: Readonly<{
+    readonly kind: QueryGammaAtomV1["kind"];
+    readonly target?: string;
+    readonly variable?: string;
+    readonly semantic_identity?: string;
+    readonly jurisdiction?: QueryGammaAtomJurisdictionV1;
+  }>
+): QueryGammaAtomV1 {
+  const found = compiled.atoms.find((atom) =>
+    atom.kind === match.kind &&
+    (match.target === undefined || atom.target === match.target) &&
+    (match.variable === undefined || atom.variable === match.variable) &&
+    (match.semantic_identity === undefined || atom.semantic_identity === match.semantic_identity) &&
+    (match.jurisdiction === undefined || atom.jurisdiction === match.jurisdiction));
+  if (found === undefined) {
+    throw new Error(`missing gamma atom ${match.kind}`);
+  }
+  return found;
 }
 
 export function scalarQuery(

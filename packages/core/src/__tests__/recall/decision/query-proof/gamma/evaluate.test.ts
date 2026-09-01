@@ -11,6 +11,7 @@ import {
   candidate,
   compileGamma,
   distinctQuery,
+  findGammaAtom,
   proposition,
   scalarQuery
 } from "./gamma-fixture.js";
@@ -30,14 +31,14 @@ describe("query-compiled Gamma standings and marginals", () => {
         bindings: [binding("alice")],
         propositions: [
           proposition("rel1"),
-          proposition("need-ind", "supports", "certified_independent")
+          proposition("need-ind", "supports", "certified_independent", "constraint")
         ]
       }),
       candidate("B", {
         bindings: [binding("alice")],
         propositions: [
           proposition("rel1"),
-          proposition("need-ind", "supports", "certified_independent")
+          proposition("need-ind", "supports", "certified_independent", "constraint")
         ]
       })
     ]);
@@ -99,7 +100,8 @@ describe("query-compiled Gamma standings and marginals", () => {
       candidate("A", { bindings: [binding("alice", "proved_distinct")] }),
       candidate("B", { bindings: [binding("alice-alias", "may_equal")] })
     ]);
-    expect(compiled.atoms.map((atom) => atom.target)).toEqual(["x:alice"]);
+    expect(compiled.atoms.map((atom) =>
+      `${atom.variable}:${atom.semantic_identity}`)).toEqual(["x:alice"]);
     expect(evaluateQueryGammaTuple(compiled, emptyQueryGammaSelectedSet(), "B"))
       .toEqual({
         answer_binding_position: 0,
@@ -122,7 +124,7 @@ describe("query-compiled Gamma standings and marginals", () => {
         bindings: [binding("alice")],
         propositions: [
           proposition("rel1", "supports", "unknown"),
-          proposition("need-ind", "supports", "unknown")
+          proposition("need-ind", "supports", "unknown", "constraint")
         ]
       })
     ]);
@@ -184,7 +186,9 @@ describe("query-compiled Gamma standings and marginals", () => {
       compiled, emptyQueryGammaSelectedSet(), "lower", ["core"]
     );
     expect(admitted.admitted).toBe(true);
-    expect(admitted.compiled_atom_ids).toContain("proposition:rel2");
+    expect(admitted.compiled_atom_ids).toContain(
+      findGammaAtom(compiled, { kind: "required_proposition", target: "rel2" }).atom_id
+    );
     expect(admitCompiledLowerFrontier(
       compiled, emptyQueryGammaSelectedSet(), "lower", ["unknown-core"]
     ).admitted).toBe(false);
@@ -232,11 +236,11 @@ describe("query-compiled Gamma standings and marginals", () => {
     }]), [
       candidate("f1", {
         bindings: [binding("alice")],
-        propositions: [proposition("need-ind", "supports", "unknown")]
+        propositions: [proposition("need-ind", "supports", "unknown", "constraint")]
       }),
       candidate("f3", {
         bindings: [binding("bob")],
-        propositions: [proposition("need-ind", "supports", "certified_independent")]
+        propositions: [proposition("need-ind", "supports", "certified_independent", "constraint")]
       })
     ]);
     expect(compiled.semantic_feasibility.find((row) => row.candidate_key === "f1")?.semantic)

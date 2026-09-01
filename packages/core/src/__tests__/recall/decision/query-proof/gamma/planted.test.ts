@@ -15,8 +15,12 @@ import {
   candidate,
   compilationFor,
   compileGamma,
+  distinctQuery,
+  findGammaAtom,
   proposition,
-  scalarQuery
+  scalarQuery,
+  sequenceQuery,
+  supportedQuery
 } from "./gamma-fixture.js";
 
 describe("query-compiled Gamma planted leakage", () => {
@@ -93,7 +97,7 @@ describe("query-compiled Gamma planted leakage", () => {
         bindings: [binding("alice")],
         propositions: [
           proposition("rel1", "supports", "unknown"),
-          proposition("need-ind", "supports", "unknown")
+          proposition("need-ind", "supports", "unknown", "constraint")
         ]
       })
     ]);
@@ -112,15 +116,16 @@ describe("query-compiled Gamma planted leakage", () => {
         propositions: [proposition("x", "refutes")]
       })
     ]);
+    const scalar = findGammaAtom(compiled, { kind: "scalar_binding", target: "x" });
     expect(compiled.atoms).toEqual([
       expect.objectContaining({
-        atom_id: "binding:scalar:x",
+        atom_id: scalar.atom_id,
         kind: "scalar_binding",
         target: "x"
       })
     ]);
     expect(compiled.standings.find((row) =>
-      row.candidate_key === "A" && row.atom_id === "binding:scalar:x")?.coverage)
+      row.candidate_key === "A" && row.atom_id === scalar.atom_id)?.coverage)
       .toBe("covers");
     expect(compiled.semantic_feasibility).toEqual([
       { candidate_key: "A", semantic: "feasible" }
@@ -150,7 +155,8 @@ describe("query-compiled Gamma planted leakage", () => {
       { candidate_key: "A", semantic: "feasible" }
     ]);
     expect(compiled.standings.find((row) =>
-      row.atom_id === "binding:scalar:x")?.coverage).toBe("covers");
+      row.atom_id === findGammaAtom(compiled, { kind: "scalar_binding", target: "x" }).atom_id)
+      ?.coverage).toBe("covers");
   });
 
   it("ignores a later candidate array swap and nested mutation after compile capture", () => {
@@ -172,7 +178,8 @@ describe("query-compiled Gamma planted leakage", () => {
       { candidate_key: "A", semantic: "feasible" }
     ]);
     expect(compiled.standings.find((row) =>
-      row.atom_id === "binding:scalar:x")?.coverage).toBe("covers");
+      row.atom_id === findGammaAtom(compiled, { kind: "scalar_binding", target: "x" }).atom_id)
+      ?.coverage).toBe("covers");
   });
 
   it("does not let weights or live novelty change compiled strata", () => {
@@ -192,5 +199,98 @@ describe("query-compiled Gamma planted leakage", () => {
       certified_independent_support: 0
     });
     expect(compiled.atoms.map((atom) => atom.atom_id).join(" ")).not.toMatch(/facility|Values_v|cid/u);
+  });
+
+  it("does not split distinct variable and identity on the first colon", () => {
+    const query = supportedQuery({
+      variables: [{ name: "x:y", sort: "entity" }],
+      answer: { kind: "distinct", variable: "x:y", completion: { kind: "at_most", n: 5 } }
+    });
+    const compiled = compileGamma(query, [
+      candidate("A", { bindings: [binding("z", "proved_distinct", "x:y")] }),
+      candidate("B", { bindings: [binding("y:z", "proved_distinct", "x")] })
+    ]);
+    const atom = findGammaAtom(compiled, {
+      kind: "distinct_binding",
+      variable: "x:y",
+      semantic_identity: "z"
+    });
+    expect(compiled.atoms).toHaveLength(1);
+    expect(compiled.standings.find((row) =>
+      row.candidate_key === "A" && row.atom_id === atom.atom_id)?.coverage).toBe("covers");
+    expect(compiled.standings.find((row) =>
+      row.candidate_key === "B" && row.atom_id === atom.atom_id)?.coverage)
+      .toBe("does_not_cover");
+  });
+
+  it("keeps predicate and constraint atoms with the same id distinct", () => {
+    const compiled = compileGamma(scalarQuery([{
+      id: "p",
+      relation: "bought",
+      arguments: ["x"]
+    }], [{
+      id: "p",
+      constraint: "after",
+      arguments: ["x"]
+    }]), [
+      candidate("A", {
+        bindings: [binding("alice")],
+        propositions: [proposition("p")]
+      })
+    ]);
+    const predicate = findGammaAtom(compiled, {
+      kind: "required_proposition",
+      target: "p",
+      jurisdiction: "predicate"
+    });
+    const constraint = findGammaAtom(compiled, {
+      kind: "required_proposition",
+      target: "p",
+      jurisdiction: "constraint"
+    });
+    expect(predicate.atom_id).not.toBe(constraint.atom_id);
+    expect(new Set(compiled.atoms.map((atom) => atom.atom_id)).size)
+      .toBe(compiled.atoms.length);
+    expect(compiled.standings.find((row) =>
+      row.atom_id === predicate.atom_id)?.coverage).toBe("covers");
+    expect(compiled.standings.find((row) =>
+      row.atom_id === constraint.atom_id)?.coverage).toBe("does_not_cover");
+    expect(evaluateQueryGammaTuple(compiled, emptyQueryGammaSelectedSet(), "A")).toEqual({
+      answer_binding_position: 1,
+      required_proposition_support: 1,
+      certified_independent_support: 0
+    });
+  });
+
+  it("rejects duplicate compile-input candidate keys", () => {
+    expect(() => compileQueryGamma({
+      compilation: compilationFor(scalarQuery()),
+      candidates: [
+        candidate("A", { bindings: [binding("alice")] }),
+        candidate("A", { bindings: [binding("bob")] })
+      ]
+    })).toThrow(/duplicate compile-input candidate_key/u);
+  });
+
+  it("does not treat all-unknown distinct as vacuously feasible", () => {
+    const compiled = compileGamma(distinctQuery(), [
+      candidate("also-open", { bindings_status: "unknown" }),
+      candidate("open", { bindings_status: "unknown" })
+    ]);
+    expect(compiled.atoms).toEqual([]);
+    expect(compiled.semantic_feasibility).toEqual([
+      { candidate_key: "also-open", semantic: "unresolved" },
+      { candidate_key: "open", semantic: "unresolved" }
+    ]);
+  });
+
+  it("does not treat all-unknown sequence as vacuously feasible", () => {
+    const compiled = compileGamma(sequenceQuery(2), [
+      candidate("open", { bindings_status: "unknown" })
+    ]);
+    expect(compiled.atoms).toEqual([]);
+    expect(compiled.semantic_feasibility).toEqual([
+      { candidate_key: "open", semantic: "unresolved" }
+    ]);
   });
 });

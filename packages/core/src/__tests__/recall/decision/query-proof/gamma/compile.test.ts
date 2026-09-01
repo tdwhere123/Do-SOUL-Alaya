@@ -38,7 +38,8 @@ describe("query-compiled Gamma_q", () => {
     const distinct = compileGamma(distinctQuery(), [
       candidate("A", { bindings: [binding("alice"), binding("bob")] })
     ]);
-    expect(distinct.atoms.map((atom) => atom.target).sort()).toEqual(["x:alice", "x:bob"]);
+    expect(distinct.atoms.map((atom) =>
+      `${atom.variable}:${atom.semantic_identity}`).sort()).toEqual(["x:alice", "x:bob"]);
 
     const compilation = compilationFor(argmaxQuery());
     const extrema = compileGamma(argmaxQuery(), [
@@ -51,7 +52,13 @@ describe("query-compiled Gamma_q", () => {
       candidate("A", { sequence_slots: [{ position: 0, binding: "alice" }] }),
       candidate("B", { sequence_slots: [{ position: 1, binding: "bob" }] })
     ]);
-    expect(sequence.atoms.map((atom) => atom.target)).toEqual(["0:alice", "1:bob"]);
+    expect(sequence.atoms.map((atom) => ({
+      position: atom.position,
+      target: atom.target
+    }))).toEqual([
+      { position: 0, target: "alice" },
+      { position: 1, target: "bob" }
+    ]);
 
     const argminCompilation = compilationFor(argminQuery());
     const argmin = compileGamma(argminQuery(), [
@@ -137,7 +144,7 @@ describe("query-compiled Gamma_q", () => {
         bindings: [binding("alice")],
         propositions: [
           proposition("rel1"),
-          proposition("need-ind", "supports", "certified_independent")
+          proposition("need-ind", "supports", "certified_independent", "constraint")
         ]
       })
     ]);
@@ -168,7 +175,7 @@ describe("query-compiled Gamma_q", () => {
           bindings: [binding("alice")],
           propositions: [
             proposition("rel1"),
-            proposition("independent_support", "supports", "certified_independent")
+            proposition("independent_support", "supports", "certified_independent", "sensitivity")
           ]
         })
       ]
@@ -207,19 +214,21 @@ describe("query-compiled Gamma_q", () => {
       candidate("A", { bindings: [binding("alice")] }),
       candidate("wrong", { bindings: [binding("alice", "proved_distinct", "y")] })
     ]);
-    expect(compiled.atoms.map((atom) => atom.target)).toEqual(["x:alice"]);
+    expect(compiled.atoms.map((atom) =>
+      `${atom.variable}:${atom.semantic_identity}`)).toEqual(["x:alice"]);
     expect(compiled.standings.find((row) =>
-      row.candidate_key === "wrong" && row.atom_id.includes("alice"))?.coverage)
+      row.candidate_key === "wrong" && row.atom_id === compiled.atoms[0]?.atom_id)?.coverage)
       .toBe("does_not_cover");
     expect(compiled.standings.find((row) =>
-      row.candidate_key === "A" && row.atom_id.includes("alice"))?.coverage)
+      row.candidate_key === "A" && row.atom_id === compiled.atoms[0]?.atom_id)?.coverage)
       .toBe("covers");
     const identity = compileGamma(distinctQuery(), [
       candidate("A", { bindings: [binding("alice")] }),
       candidate("other", { bindings: [binding("bob")] })
     ]);
     expect(identity.standings.find((row) =>
-      row.candidate_key === "other" && row.atom_id.includes("alice"))?.coverage)
+      row.candidate_key === "other" && row.atom_id === identity.atoms.find((atom) =>
+        atom.semantic_identity === "alice")?.atom_id)?.coverage)
       .toBe("does_not_cover");
   });
 

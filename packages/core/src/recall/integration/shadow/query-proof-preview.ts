@@ -39,9 +39,19 @@ export function previewSidecar(
 ): { readonly query_proof_preview?: QueryProofPreviewSidecar } {
   if (preview === undefined) return {};
   const capturedKMax = preview.k_max ?? kMax;
-  let capturedWorld: QueryProofDecideWorldV1 | undefined;
+  let rawWorld: QueryProofDecideWorldV1;
   try {
-    capturedWorld = freezeDecideWorld(preview.world);
+    rawWorld = preview.world;
+  } catch (error) {
+    return failedSidecar("sha256:preview_unavailable", error);
+  }
+  let capturedWorld: QueryProofDecideWorldV1;
+  try {
+    capturedWorld = freezeDecideWorld(rawWorld);
+  } catch (error) {
+    return failedSidecar("sha256:preview_unavailable", error);
+  }
+  try {
     const decided = runQueryProofDecideQ(capturedWorld, capturedKMax);
     return {
       query_proof_preview: Object.freeze({
@@ -58,7 +68,7 @@ export function previewSidecar(
     };
   } catch (error) {
     try {
-      return failedSidecar(previewContractDigest(capturedWorld ?? preview.world), error);
+      return failedSidecar(previewContractDigest(capturedWorld), error);
     } catch {
       return failedSidecar("sha256:preview_unavailable", error);
     }
