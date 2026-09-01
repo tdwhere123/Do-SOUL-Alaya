@@ -2,7 +2,8 @@ import {
   digestRecallFieldIdentity,
   type RecallFieldDigest
 } from "../../../field/field-identity.js";
-import { compareText } from "../../../../shared/compare-text.js";
+import { captureData } from "../../capture-data.js";
+export { captureData } from "../../capture-data.js";
 import {
   verifyLiveQueryProofAuthority,
   type LiveQueryProofAuthority,
@@ -119,44 +120,6 @@ function deriveCapturedBinding(
       snapshot_read_lease_id: authority.snapshot_read_lease.lease_id
     })
   });
-}
-
-export function captureData<T>(value: T, ancestors: WeakSet<object> = new WeakSet()): T {
-  if (value === undefined || value === null || typeof value === "string" ||
-      typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new Error("live authority data must be finite");
-    return value;
-  }
-  if (typeof value !== "object") {
-    throw new Error("live authority data must be plain immutable data");
-  }
-  if (ancestors.has(value)) throw new Error("live authority data must be acyclic");
-  ancestors.add(value);
-  try {
-    if (Array.isArray(value)) {
-      const keys = Object.keys(value);
-      if (keys.length !== value.length || keys.some((key, index) => key !== String(index))) {
-        throw new Error("live authority arrays must be dense without extra fields");
-      }
-      return Object.freeze(value.map((item) => captureData(item, ancestors))) as T;
-    }
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
-      throw new Error("live authority data must be a plain record");
-    }
-    if (Object.getOwnPropertySymbols(value).length > 0) {
-      throw new Error("live authority data must not contain symbol fields");
-    }
-    const record = value as Readonly<Record<string, unknown>>;
-    return Object.freeze(Object.fromEntries(Object.keys(record)
-      .sort(compareText)
-      .map((key) => [key, captureData(record[key], ancestors)]))) as T;
-  } finally {
-    ancestors.delete(value);
-  }
 }
 
 function isDeeplyFrozenData(value: unknown, seen: WeakSet<object> = new WeakSet()): boolean {

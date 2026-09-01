@@ -82,7 +82,8 @@ function classifyLane(
   if (!lane.evaluated_universe.applicability.applicable) {
     return Object.freeze({ status: "not_applicable", completeness: empty });
   }
-  if (lane.status !== "complete" || lane.unseen_upper_bound !== 0 ||
+  if ((lane.status !== "complete" && lane.status !== "empty") ||
+      lane.unseen_upper_bound !== 0 ||
       lane.evaluated_universe.count !== lane.evaluated_universe.candidate_keys.length) {
     return Object.freeze({ status: "uncertified", completeness: empty });
   }

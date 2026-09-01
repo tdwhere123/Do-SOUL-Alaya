@@ -1,8 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  buildRecallCandidateDedupeKey,
-  buildRecallLogicalObjectKey
-} from
+import { buildRecallCandidateDedupeKey } from
   "../../../../../recall/runtime/recall-service-helpers.js";
 import { captureShadowIntegration } from
   "../../../../../recall/integration/shadow/integrate.js";
@@ -79,61 +76,26 @@ function previewWorld(
   });
 }
 
-function capturedPreviewWorld(
-  candidates: ReturnType<typeof fieldCandidates>,
-  base: ReturnType<typeof params>
-): QueryProofDecideWorldV1 {
+function capturedPreviewWorld(base: ReturnType<typeof params>): QueryProofDecideWorldV1 {
   const authority = certifiedScalarAuthority(prepared);
-  const propositionId = authority.canonical_query_compilation.hypotheses[0]?.predicates[0]?.id;
-  if (propositionId === undefined) throw new Error("certified scalar fixture missing predicate");
-  const evidence = candidates.map((coarse) => {
-    const key = buildRecallCandidateDedupeKey(coarse);
-    return candidate(key, {
-      object_key: buildRecallLogicalObjectKey(coarse),
-      token_cost: 4,
-      dimension: coarse.entry.dimension,
-      bindings: [binding(key, "proved_distinct", "x0")],
-      propositions: [{
-        proposition_id: propositionId,
-        jurisdiction: "predicate" as const,
-        support: "supports" as const,
-        independence: "not_applicable" as const
-      }]
-    });
-  });
   return captureQueryProofDecideWorld({
     live_authority: authority,
     premises: {
-      gamma: Object.freeze({ candidates: Object.freeze(evidence) }),
-      candidates: Object.freeze(evidence.map((row) => Object.freeze({
-        candidate_key: row.candidate_key,
-        object_key: row.object_key,
-        token_cost: row.token_cost,
-        dimension: row.dimension,
-        h_eligible: true,
-        utility: emptyWalkUtility(row.candidate_key, row.object_key),
-        static_frontier_index: 1
-      }))),
+      candidates: Object.freeze([]),
       psi_edges: Object.freeze([]),
       token_budget: base.policy.fine_assessment.budgets.max_total_tokens,
       per_dimension_limits: base.policy.fine_assessment.budgets.per_dimension_limits,
       unresolved_tradeoff_pairs: Object.freeze([]),
-      answer_bindings: Object.freeze(evidence.map((row) => Object.freeze({
-        candidate_key: row.candidate_key,
-        binding_id: `bind:${row.candidate_key}`,
-        variable: "x0",
-        semantic_identity: row.candidate_key,
-        value: row.candidate_key
-      })))
+      answer_bindings: Object.freeze([])
     }
   });
 }
 
 describe("query-proof preview neutrality", () => {
-  it("emits the full Decide_Q trace only for a captured preview world", () => {
-    const candidates = fieldCandidates(["cand-a"]);
+  it("emits the full empty Decide_Q trace only for a captured preview world", () => {
+    const candidates = fieldCandidates([]);
     const base = params(candidates);
-    const world = capturedPreviewWorld(candidates, base);
+    const world = capturedPreviewWorld(base);
     const captured = captureShadowIntegration({
       ...toShadowInput(base),
       query_proof_preview: { world }
@@ -142,11 +104,11 @@ describe("query-proof preview neutrality", () => {
     if (captured.kind !== "captured") throw new Error("expected captured trace");
     expect(captured.query_proof_preview).toMatchObject({
       status: "captured",
-      S_infty: [buildRecallCandidateDedupeKey(candidates[0]!)],
-      prefix: [buildRecallCandidateDedupeKey(candidates[0]!)],
-      candidate_prefix: [buildRecallCandidateDedupeKey(candidates[0]!)]
+      S_infty: [],
+      prefix: [],
+      candidate_prefix: []
     });
-    expect(captured.query_proof_preview?.pick_reasons).toHaveLength(1);
+    expect(captured.query_proof_preview?.pick_reasons).toHaveLength(0);
   });
 
   it("fails closed when a caller injects an unverified raw Decide_Q world", () => {
@@ -159,10 +121,7 @@ describe("query-proof preview neutrality", () => {
   it("refuses a captured world that omits a live runtime candidate", () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
     const base = params(candidates);
-    const incomplete = capturedPreviewWorld(
-      Object.freeze([candidates[0]!]),
-      base
-    );
+    const incomplete = capturedPreviewWorld(base);
     const captured = captureShadowIntegration({
       ...toShadowInput(base),
       query_proof_preview: { world: incomplete }

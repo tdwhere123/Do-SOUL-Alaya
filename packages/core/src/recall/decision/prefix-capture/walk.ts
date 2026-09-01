@@ -1,6 +1,3 @@
-import {
-  RecallCandidateObjectKindSchema
-} from "@do-soul/alaya-protocol";
 import { compareText } from "../../../shared/compare-text.js";
 import type { ShadowObligationKey, ShadowSetUtilityInput } from "./capture.js";
 import { freezeShadow, ShadowContractError } from "../contract-primitives.js";
@@ -23,6 +20,11 @@ import {
   applyInfeasibleDrops,
   validateWalkCandidate
 } from "./walk-constraints.js";
+import { smallestDeterministicTailCandidate } from "./tail-identity.js";
+import {
+  captureWalkRuntimeInput,
+  type ShadowWalkRuntimeManifestV1
+} from "./walk-runtime-capture.js";
 
 export type { ShadowWalkUtilityTransfer } from "./walk-transfer.js";
 import { SHADOW_CAPTURE_OPERATOR_ID, SHADOW_DETERMINISTIC_TAIL } from "./identity.js";
@@ -90,11 +92,13 @@ type ScoredCandidate = Readonly<{
 }>;
 
 const CYCLE: ShadowPsiCycleFailure = createPsiCycleFailure();
+const runtimeManifestByWalk = new WeakMap<object, ShadowWalkRuntimeManifestV1>();
 
 export function walkShadowCapture(
   input: ShadowCaptureWalkInput
 ): ShadowCaptureWalkResult {
-  const state = createWalkState(input);
+  const runtime = captureWalkRuntimeInput(input);
+  const state = createWalkState(runtime.input);
   while (state.remaining.size > 0) {
     applyInfeasibleDrops(state);
     if (state.remaining.size === 0) break;
@@ -114,7 +118,9 @@ export function walkShadowCapture(
     decisions: Object.freeze([...state.decisions]),
     walk_rejects: Object.freeze([...state.walk_rejects])
   };
-  return freezeShadow(captured);
+  const frozen = freezeShadow(captured);
+  runtimeManifestByWalk.set(frozen, runtime.manifest);
+  return frozen;
 }
 
 function isCycleFailure(
@@ -134,7 +140,13 @@ export function prefixSK(
 export function isCapturedWalk(
   result: ShadowCaptureWalkResult
 ): result is ShadowCapturedWalk {
-  return result.kind === "captured";
+  return result.kind === "captured" && readCapturedWalkRuntimeManifest(result) !== null;
+}
+
+export function readCapturedWalkRuntimeManifest(
+  walk: ShadowCapturedWalk
+): ShadowWalkRuntimeManifestV1 | null {
+  return runtimeManifestByWalk.get(walk) ?? null;
 }
 
 export type DeterministicTailPickEvidence = Pick<
@@ -198,7 +210,7 @@ function computePick(
   );
   const tPsi = undominated(maxG.map((row) => row.candidate), state.psi);
   if (tPsi.length === 0) return CYCLE;
-  const winner = smallestCandidate(tPsi);
+  const winner = smallestDeterministicTailCandidate(tPsi);
   state.decisions.push(buildDecision(
     winner, core, feasible, maxG, tPsi, state, unresolvedAdmission
   ));
@@ -298,48 +310,6 @@ function undominated<T extends { readonly candidate_key: string }>(
       psi(other.candidate_key, member.candidate_key)
     )
   );
-}
-
-function smallestCandidate(
-  members: readonly ShadowCaptureWalkCandidate[]
-): ShadowCaptureWalkCandidate {
-  assertUniqueEqualGTailKeys(members);
-  let best = members[0]!;
-  for (const member of members) {
-    if (compareText(
-      equalGTailKey(member.candidate_key),
-      equalGTailKey(best.candidate_key)
-    ) < 0) best = member;
-  }
-  return best;
-}
-
-function assertUniqueEqualGTailKeys(
-  members: readonly ShadowCaptureWalkCandidate[]
-): void {
-  // Distinct membership keys can share origin+object_id; input order is not a tail.
-  const owners = new Map<string, string>();
-  for (const member of members) {
-    const tail = equalGTailKey(member.candidate_key);
-    const owner = owners.get(tail);
-    if (owner !== undefined && owner !== member.candidate_key) {
-      throw new ShadowContractError("equal-G tail key collision");
-    }
-    owners.set(tail, member.candidate_key);
-  }
-}
-
-// Kind in origin:kind:id ranks evidence_capsule before memory_entry.
-function equalGTailKey(candidateKey: string): string {
-  const first = candidateKey.indexOf(":");
-  if (first <= 0) return candidateKey;
-  const second = candidateKey.indexOf(":", first + 1);
-  if (second < 0 || second === candidateKey.length - 1) return candidateKey;
-  const kind = candidateKey.slice(first + 1, second);
-  if (RecallCandidateObjectKindSchema.safeParse(kind).success === false) {
-    return candidateKey;
-  }
-  return `${candidateKey.slice(0, first)}:${candidateKey.slice(second + 1)}`;
 }
 
 function buildDecision(

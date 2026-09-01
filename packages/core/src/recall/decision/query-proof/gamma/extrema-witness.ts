@@ -31,7 +31,7 @@ Readonly<{ readonly status: "unsupported"; readonly reason: string }> {
   }
   const reason = invalidExtremumWitness(answer, witness, compilation, query, candidates);
   if (reason !== null) return { status: "unsupported", reason };
-  return { status: "ok", binding_ids: witness.extremal_binding_ids };
+  return { status: "unsupported", reason: "extremum_source_authority_unavailable" };
 }
 
 function invalidExtremumWitness(

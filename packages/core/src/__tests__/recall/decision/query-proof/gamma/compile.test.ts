@@ -28,7 +28,7 @@ import {
 } from "./gamma-fixture.js";
 
 describe("query-compiled Gamma_q", () => {
-  it("compiles scalar, distinct, extrema, and sequence into one three-stratum atom vocabulary", () => {
+  it("compiles scalar, distinct, and sequence into one three-stratum atom vocabulary", () => {
     const scalar = compileGamma(scalarQuery(), [candidate("A", { bindings: [binding("alice")] })]);
     expect(scalar.compile_status).toBe("compiled");
     expect(scalar.operator_id).toBe(QUERY_PROOF_GAMMA_OPERATOR_ID);
@@ -40,13 +40,6 @@ describe("query-compiled Gamma_q", () => {
     ]);
     expect(distinct.atoms.map((atom) =>
       `${atom.variable}:${atom.semantic_identity}`).sort()).toEqual(["x:alice", "x:bob"]);
-
-    const compilation = compilationFor(argmaxQuery());
-    const extrema = compileGamma(argmaxQuery(), [
-      candidate("A", { bindings: [binding("alice")], extremal_bindings: ["alice"] })
-    ], { compilation, extremum_witness: extremumWitness(compilation, "argmax", ["alice"]) });
-    expect(extrema.atoms.some((atom) => atom.kind === "extremum_binding")).toBe(true);
-    expect(extrema.atoms.some((atom) => atom.kind === "scalar_binding")).toBe(true);
 
     const sequence = compileGamma(sequenceQuery(2), [
       candidate("A", { sequence_slots: [{ position: 0, binding: "alice" }] }),
@@ -60,15 +53,6 @@ describe("query-compiled Gamma_q", () => {
       { position: 1, target: "bob" }
     ]);
 
-    const argminCompilation = compilationFor(argminQuery());
-    const argmin = compileGamma(argminQuery(), [
-      candidate("A", { bindings: [binding("alice")], extremal_bindings: ["alice"] })
-    ], {
-      compilation: argminCompilation,
-      extremum_witness: extremumWitness(argminCompilation, "argmin", ["alice"])
-    });
-    expect(argmin.compile_status).toBe("compiled");
-    expect(argmin.atoms.some((atom) => atom.kind === "extremum_binding")).toBe(true);
   });
 
   it("keeps resource feasibility a separate selected-set policy from semantic feasibility", () => {
@@ -197,6 +181,11 @@ describe("query-compiled Gamma_q", () => {
   it("returns explicit unsupported for missing extrema witness and blocked programs", () => {
     expect(compileGamma(argmaxQuery(), [candidate("A")]).unsupported_reason)
       .toBe("missing_extremum_closure_witness");
+    const compilation = compilationFor(argmaxQuery());
+    expect(compileGamma(argmaxQuery(), [candidate("A")], {
+      compilation,
+      extremum_witness: extremumWitness(compilation, "argmax", ["alice"])
+    }).unsupported_reason).toBe("extremum_source_authority_unavailable");
     const blocked = compilationFor(scalarQuery(), [hole("count_sum_unsupported")]);
     expect(compileQueryGamma({
       compilation: blocked,

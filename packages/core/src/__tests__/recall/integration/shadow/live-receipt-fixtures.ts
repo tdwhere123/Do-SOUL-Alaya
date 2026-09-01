@@ -117,7 +117,37 @@ export function certifiedScalarAuthority(
     )
   });
   const snapshotCoherenceReceipt = createSnapshotCoherenceReceiptV1(snapshotVector);
-  const canonicalQueryEvidence = Object.freeze({
+  const canonicalQueryEvidence = scalarCanonicalQueryEvidence(prepared);
+  const canonicalQueryCompilation = compileCanonicalQueryCompilation(
+    canonicalQueryEvidence,
+    snapshotCoherenceReceipt
+  );
+  return Object.freeze({
+    ...authorityFrom(prepared),
+    canonical_query_evidence: canonicalQueryEvidence,
+    canonical_query_compilation: canonicalQueryCompilation,
+    snapshot_vector: snapshotVector,
+    snapshot_coherence_receipt: snapshotCoherenceReceipt,
+    snapshot_read_lease: finalizePreparedSnapshotReadLease(snapshotVector)
+  });
+}
+
+export function scalarQueryAuthority(
+  prepared: PreparedRecallRequest
+): LiveQueryProofAuthority {
+  const canonicalQueryEvidence = scalarCanonicalQueryEvidence(prepared);
+  return Object.freeze({
+    ...authorityFrom(prepared),
+    canonical_query_evidence: canonicalQueryEvidence,
+    canonical_query_compilation: compileCanonicalQueryCompilation(
+      canonicalQueryEvidence,
+      prepared.snapshotCoherenceReceipt
+    )
+  });
+}
+
+function scalarCanonicalQueryEvidence(prepared: PreparedRecallRequest) {
+  return Object.freeze({
     probes: prepared.canonicalQueryEvidence.probes,
     demand: Object.freeze({ schema_version: 1 as const, atoms: Object.freeze([]) }),
     shape: Object.freeze({
@@ -133,18 +163,6 @@ export function certifiedScalarAuthority(
     ...(prepared.canonicalQueryEvidence.query_identity === undefined
       ? {}
       : { query_identity: prepared.canonicalQueryEvidence.query_identity })
-  });
-  const canonicalQueryCompilation = compileCanonicalQueryCompilation(
-    canonicalQueryEvidence,
-    snapshotCoherenceReceipt
-  );
-  return Object.freeze({
-    ...authorityFrom(prepared),
-    canonical_query_evidence: canonicalQueryEvidence,
-    canonical_query_compilation: canonicalQueryCompilation,
-    snapshot_vector: snapshotVector,
-    snapshot_coherence_receipt: snapshotCoherenceReceipt,
-    snapshot_read_lease: finalizePreparedSnapshotReadLease(snapshotVector)
   });
 }
 
@@ -233,6 +251,55 @@ export async function capturedLexicalPreparedAuthority(): Promise<PreparedRecall
             })
           : declaration)
     )
+  });
+  const snapshotCoherenceReceipt = createSnapshotCoherenceReceiptV1(snapshotVector);
+  return Object.freeze({
+    ...prepared,
+    snapshotVector,
+    snapshotCoherenceReceipt,
+    snapshotReadLease: finalizePreparedSnapshotReadLease(snapshotVector),
+    canonicalQueryCompilation: compileCanonicalQueryCompilation(
+      prepared.canonicalQueryEvidence,
+      snapshotCoherenceReceipt
+    )
+  });
+}
+
+export async function finiteLexicalPreparedAuthority(): Promise<PreparedRecallRequest> {
+  const prepared = await preparedAuthority();
+  const notApplicable = <T extends { readonly lag_bound: unknown }>(declaration: T) =>
+    Object.freeze({
+      ...declaration,
+      lag_bound: Object.freeze({ kind: "not_applicable" as const })
+    });
+  const exactLexical = prepared.snapshotVector.retrieval_channel_snapshots.map((declaration) =>
+    declaration.source_owner === "lexical_relaxed"
+      ? Object.freeze({
+          ...declaration,
+          source_frontier: prepared.snapshotVector.transaction_frontier,
+          generation: "lexical-generation:test-finite",
+          lag_bound: Object.freeze({ kind: "exact" as const })
+        })
+      : notApplicable(declaration));
+  const { schema_version: _schemaVersion, vector_digest: _vectorDigest, ...input } =
+    prepared.snapshotVector;
+  const snapshotVector = createSnapshotVectorV1({
+    ...input,
+    base_store_digest: digestRecallFieldIdentity("query-proof-finite-base"),
+    decision_contract_digest: digestRecallFieldIdentity("query-proof-finite-decision"),
+    formation_operator_versions: prepared.snapshotVector.formation_operator_versions.length > 0
+      ? prepared.snapshotVector.formation_operator_versions
+      : Object.freeze([["query-proof-test", "1"]] as const),
+    projection_generation: notApplicable(prepared.snapshotVector.projection_generation),
+    embedding_generation_and_model: notApplicable(
+      prepared.snapshotVector.embedding_generation_and_model
+    ),
+    path_graph_generation: notApplicable(prepared.snapshotVector.path_graph_generation),
+    temporal_index_generation: notApplicable(
+      prepared.snapshotVector.temporal_index_generation
+    ),
+    governance_frontier: notApplicable(prepared.snapshotVector.governance_frontier),
+    retrieval_channel_snapshots: Object.freeze(exactLexical)
   });
   const snapshotCoherenceReceipt = createSnapshotCoherenceReceiptV1(snapshotVector);
   return Object.freeze({

@@ -28,7 +28,8 @@ export function finalizePreparedSnapshotReadLease(
 }
 
 function viewKindFor(source: SourceFrontierDeclarationV1): SnapshotReadLeaseViewKind {
-  if (source.lag_bound.kind === "unavailable") return "unavailable";
+  if (source.lag_bound.kind === "unavailable" ||
+      source.lag_bound.kind === "not_applicable") return "unavailable";
   if (source.source_owner === "projection_generation") return "pinned";
   return "captured";
 }

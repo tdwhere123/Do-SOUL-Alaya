@@ -3,6 +3,7 @@ import {
   SnapshotReadLeaseError,
   bindSnapshotReadLease,
   createSnapshotVectorV1,
+  finalizePreparedSnapshotReadLease,
   finalizeSnapshotReadLease,
   openSnapshotReadLease,
   readSnapshotLeaseCapability,
@@ -185,6 +186,22 @@ describe("SnapshotReadLeaseV1", () => {
     expect(capability.view_kind).toBe("unavailable");
     expect(capability.view_kind).not.toBe("pinned");
     expect(capability.view_kind).not.toBe("captured");
+  });
+
+  it("records a not-applicable prepared source as an unavailable read view", () => {
+    const vector = createSnapshotVectorV1(exactVectorInput({
+      embedding_generation_and_model: declaration({
+        source_owner: "embedding_generation_and_model",
+        lag_bound: { kind: "not_applicable" }
+      })
+    }));
+    const finalized = finalizePreparedSnapshotReadLease(vector);
+    const capability = readSnapshotLeaseCapability(
+      finalized,
+      "embedding_generation_and_model"
+    );
+    expect(capability.declaration.lag_bound.kind).toBe("not_applicable");
+    expect(capability.view_kind).toBe("unavailable");
   });
 
   it("fails bind on principal, scope, or source_owner mismatch", () => {

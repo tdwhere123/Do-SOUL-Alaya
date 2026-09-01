@@ -4,7 +4,8 @@ import { parseCaptureDecisionReceipt } from
 import {
   isCapturedWalk,
   prefixSK,
-  walkShadowCapture
+  walkShadowCapture,
+  type ShadowCapturedWalk
 } from "../../../../../recall/decision/prefix-capture/walk.js";
 import { enumerateFiniteDecisionOracle } from
   "../../../../../recall/decision/query-proof/proof/oracle/oracle.js";
@@ -18,6 +19,8 @@ import {
 } from "../../../../../recall/decision/query-proof/closure/contract.js";
 import { deriveLiveClosureAuthorityBinding } from
   "../../../../../recall/decision/query-proof/closure/live-authority-binding.js";
+import { closeLexicalBoundChannel } from
+  "../../../../../recall/decision/query-proof/closure/lexical-bound.js";
 import type { FiniteOracleFixture } from
   "../../../../../recall/decision/query-proof/proof/oracle/contract.js";
 import { digestRecallFieldIdentity } from
@@ -55,7 +58,9 @@ import {
   authorityFrom,
   certifiedScalarAuthority,
   cleanup,
-  preparedAuthority
+  finiteLexicalPreparedAuthority,
+  preparedAuthority,
+  scalarQueryAuthority
 } from "../../../integration/shadow/live-receipt-fixtures.js";
 import {
   compiledGammaBodyDigest,
@@ -69,31 +74,39 @@ import { previewSidecar } from
 
 import {
   allObservableDistinct,
-  argmaxQuery,
-  argminQuery,
   binding,
   candidate,
   compileGamma,
   compileInputFor,
   compilationFor,
   distinctQuery,
-  extremumWitness,
   proposition,
   scalarQuery,
   sequenceQuery
 } from "../gamma/gamma-fixture.js";
+import {
+  emptyCompleteLexicalProof,
+  withIssuedSource
+} from "../closure/live-lexical-source-fixture.js";
 import type { CanonicalQueryV1 } from
   "../../../../../recall/query/canonical-query/index.js";
 import type { QueryGammaCandidateEvidenceV1 } from
   "../../../../../recall/decision/query-proof/gamma/contract.js";
 
 let prepared: PreparedRecallRequest;
+let lexicalPrepared: PreparedRecallRequest;
 
 beforeAll(async () => {
-  prepared = await preparedAuthority();
+  [prepared, lexicalPrepared] = await Promise.all([
+    preparedAuthority(),
+    finiteLexicalPreparedAuthority()
+  ]);
 });
 
-afterAll(() => cleanup(prepared));
+afterAll(() => {
+  cleanup(prepared);
+  cleanup(lexicalPrepared);
+});
 
 function worldOf(
   keys: readonly string[],
@@ -149,57 +162,58 @@ function candidateIdentityDigest(key: string) {
   return digestRecallFieldIdentity({ candidate_key: key, object_key: key });
 }
 
-function capturedWorldOf(
-  keys: readonly string[],
-  bindingValue: (candidateKey: string) => string = (candidateKey) => candidateKey
-): Readonly<{
-  readonly authority: ReturnType<typeof certifiedScalarAuthority>;
-  readonly world: QueryProofDecideWorldV1;
-}> {
-  const authority = certifiedScalarAuthority(prepared);
-  const propositionId = authority.canonical_query_compilation.hypotheses[0]?.predicates[0]?.id;
-  if (propositionId === undefined) throw new Error("certified scalar fixture missing predicate");
-  const evidence = keys.map((key) => candidate(key, {
-    bindings: [binding(key, "proved_distinct", "x0")],
-    propositions: [proposition(propositionId)]
-  }));
+function captureEmptyWorld(
+  authority: ReturnType<typeof scalarQueryAuthority>,
+  bindRuntime = true
+): QueryProofDecideWorldV1 {
   const world = captureQueryProofDecideWorld({
     live_authority: authority,
     premises: {
-      gamma: Object.freeze({ candidates: Object.freeze(evidence) }),
-      candidates: Object.freeze(evidence.map((row) => Object.freeze({
-        candidate_key: row.candidate_key,
-        object_key: row.object_key,
-        token_cost: row.token_cost,
-        dimension: row.dimension,
-        h_eligible: true,
-        utility: emptyWalkUtility(row.candidate_key, row.object_key),
-        static_frontier_index: null
-      }))),
+      candidates: Object.freeze([]),
       psi_edges: Object.freeze([]),
       token_budget: 10,
       per_dimension_limits: null,
       unresolved_tradeoff_pairs: Object.freeze([]),
-      answer_bindings: Object.freeze(evidence.map((row) => Object.freeze({
-        candidate_key: row.candidate_key,
-        binding_id: `bind:${row.candidate_key}`,
-        variable: "x0",
-        semantic_identity: row.candidate_key,
-        value: bindingValue(row.candidate_key)
-      })))
+      answer_bindings: Object.freeze([])
     }
   });
-  const preview = previewSidecar({ world }, 1, {
-    candidates: world.candidates,
-    psi_edges: world.psi_edges,
-    token_budget: world.token_budget,
-    per_dimension_limits: world.per_dimension_limits,
-    unresolved_tradeoff_pairs: world.unresolved_tradeoff_pairs
-  });
-  if (preview.query_proof_preview?.status !== "captured") {
-    throw new Error("captured world did not bind to its runtime manifest");
+  if (bindRuntime) {
+    const preview = previewSidecar({ world }, 1, { walk: runQueryProofDecideQ(world, 1).walk });
+    if (preview.query_proof_preview?.status !== "captured") {
+      throw new Error("captured world did not bind to its runtime manifest");
+    }
   }
-  return Object.freeze({ authority, world });
+  return world;
+}
+
+async function withCapturedEmptyCase<T>(
+  use: (value: Readonly<{
+    readonly authority: ReturnType<typeof scalarQueryAuthority>;
+    readonly world: QueryProofDecideWorldV1;
+    readonly closure: NonNullable<ReturnType<typeof closeLexicalBoundChannel>>;
+  }>) => T
+): Promise<T> {
+  return await withIssuedSource(
+    lexicalPrepared,
+    emptyCompleteLexicalProof(),
+    (sourceAuthority) => {
+      const scalar = scalarQueryAuthority(lexicalPrepared);
+      const authority = Object.freeze({
+        ...sourceAuthority,
+        canonical_query_evidence: scalar.canonical_query_evidence,
+        canonical_query_compilation: scalar.canonical_query_compilation
+      });
+      const closure = closeLexicalBoundChannel(authority);
+      if (closure === null || closure.status !== "exact_closed") {
+        throw new Error("expected exact empty lexical closure");
+      }
+      return use(Object.freeze({
+        authority,
+        world: captureEmptyWorld(authority),
+        closure
+      }));
+    }
+  );
 }
 
 function noFalseSingleton(
@@ -276,47 +290,106 @@ function emptyFixture(kMax: number, world?: QueryProofDecideWorldV1): FiniteOrac
 }
 
 describe("final Decide_Q and SealChecker_v1", () => {
-  it("rejects an answer value that is relabelled away from its semantic identity", () => {
-    expect(() => capturedWorldOf(["A"], () => "semantic:B"))
-      .toThrow(/value is not its semantic identity/u);
+  it("rejects caller-authored Gamma evidence for a non-empty captured world", () => {
+    const authority = certifiedScalarAuthority(prepared);
+    expect(() => captureQueryProofDecideWorld({
+      live_authority: authority,
+      premises: {
+        candidates: [Object.freeze({
+          candidate_key: "A",
+          object_key: "A",
+          token_cost: 1,
+          dimension: "mem",
+          h_eligible: true,
+          utility: emptyWalkUtility("A", "A"),
+          static_frontier_index: null
+        })],
+        psi_edges: [],
+        token_budget: 10,
+        per_dimension_limits: null,
+        unresolved_tradeoff_pairs: [],
+        answer_bindings: []
+      }
+    })).toThrow(/requires source-bound Gamma evidence/u);
   });
 
-  it("certifies a singleton only from one live-authority captured world", () => {
-    const { authority, world } = capturedWorldOf(["A"]);
-    const fixture = emptyFixture(1, world);
-    const checker = checkDecisionStability(checkerInput(world, fixture, [], authority));
-    if (checker.status !== "CERTIFIED_STABLE") throw new Error(JSON.stringify(checker));
-    expect(checker.status).toBe("CERTIFIED_STABLE");
-    expect(parseDecisionStabilitySeal(checker.seal)).toEqual(checker.seal);
-    expect(checker.seal.authority_digest)
-      .toBe(deriveLiveClosureAuthorityBinding(authority).authority_digest);
+  it("certifies one empty trace only from its complete source-owned manifest", async () => {
+    await withCapturedEmptyCase(({ authority, world, closure }) => {
+      const fixture = emptyFixture(1, world);
+      const omitted = checkDecisionStability(checkerInput(world, fixture, [], authority));
+      expect(omitted.status).toBe("UNCERTIFIED_OPEN");
+      if (omitted.status !== "UNCERTIFIED_OPEN") throw new Error("expected open manifest");
+      expect(omitted.reason).toMatch(/complete source-owned closure manifest/u);
+      const checker = checkDecisionStability({
+        ...checkerInput(world, fixture, [], authority),
+        closures: [closure]
+      });
+      if (checker.status !== "CERTIFIED_STABLE") throw new Error(JSON.stringify(checker));
+      expect(parseDecisionStabilitySeal(checker.seal)).toEqual(checker.seal);
+      expect(checker.seal.candidate_prefix).toEqual([]);
+      expect(checker.seal.authority_digest)
+        .toBe(deriveLiveClosureAuthorityBinding(authority).authority_digest);
+    });
   });
 
-  it("rejects runtime-bound worlds under a different authority, base state, or K", () => {
-    const { authority, world } = capturedWorldOf(["A"]);
-    const fixture = emptyFixture(1, world);
-    const foreign = checkDecisionStability(checkerInput(
-      world,
-      fixture,
-      [],
-      authorityFrom(prepared)
-    ));
-    expect(foreign.status).toBe("UNSUPPORTED");
-    if (foreign.status !== "UNSUPPORTED") throw new Error("expected authority refusal");
-    expect(foreign.reason).toMatch(/outside the supplied live authority/u);
+  it("cannot bind runtime authority from an unissued or mismatched walk", () => {
+    const world = captureEmptyWorld(certifiedScalarAuthority(prepared), false);
+    const forged = Object.freeze({
+      kind: "captured" as const,
+      operator_id: SHADOW_CAPTURE_OPERATOR_ID,
+      S_infty: Object.freeze([] as string[]),
+      decisions: Object.freeze([]),
+      walk_rejects: Object.freeze([])
+    }) as ShadowCapturedWalk;
+    expect(previewSidecar({ world }, 1, { walk: forged }).query_proof_preview?.status)
+      .toBe("failed");
 
-    const wrongBase = checkDecisionStability(checkerInput(world, {
-      ...fixture,
-      base_state: Object.freeze({})
-    }, [], authority));
-    expect(wrongBase.status).toBe("UNSUPPORTED");
-    if (wrongBase.status !== "UNSUPPORTED") throw new Error("expected base refusal");
-    expect(wrongBase.reason).toMatch(/base_state/u);
+    const mismatched = walkShadowCapture({
+      candidates: [Object.freeze({
+        candidate_key: "other",
+        object_key: "other",
+        token_cost: 1,
+        dimension: "mem",
+        h_eligible: true,
+        utility: emptyWalkUtility("other", "other"),
+        static_frontier_index: null
+      })],
+      psi: () => false,
+      token_budget: 10,
+      per_dimension_limits: null
+    });
+    if (!isCapturedWalk(mismatched)) throw new Error("expected issued mismatched walk");
+    expect(previewSidecar({ world }, 1, { walk: mismatched }).query_proof_preview?.status)
+      .toBe("failed");
+  });
 
-    expect(checkDecisionStability({
-      ...checkerInput(world, fixture, [], authority),
-      k_max: 2
-    }).status).toBe("UNSUPPORTED");
+  it("rejects runtime-bound worlds under a different authority, base state, or K", async () => {
+    await withCapturedEmptyCase(({ authority, world, closure }) => {
+      const fixture = emptyFixture(1, world);
+      const foreign = checkDecisionStability(checkerInput(
+        world,
+        fixture,
+        [],
+        authorityFrom(prepared)
+      ));
+      expect(foreign.status).toBe("UNSUPPORTED");
+      if (foreign.status !== "UNSUPPORTED") throw new Error("expected authority refusal");
+      expect(foreign.reason).toMatch(/outside the supplied live authority/u);
+
+      const wrongBase = checkDecisionStability({
+        ...checkerInput(world, { ...fixture, base_state: Object.freeze({}) }, [], authority),
+        closures: [closure]
+      });
+      expect(wrongBase.status).toBe("UNSUPPORTED");
+      if (wrongBase.status !== "UNSUPPORTED") throw new Error("expected base refusal");
+      expect(wrongBase.reason).toMatch(/base_state/u);
+
+      expect(checkDecisionStability({
+        ...checkerInput(world, fixture, [], authority),
+        closures: [closure],
+        k_max: 2
+      }).status).toBe("UNSUPPORTED");
+    });
   });
 
   it("binds prefixSK of one existing walk and shares the decision-contract digest", () => {
@@ -780,26 +853,12 @@ describe("final Decide_Q and SealChecker_v1", () => {
   });
 
   it("certifies empty-coordinate Decide_Q for every v1 operator fixture", () => {
-    const argmaxCompilation = compilationFor(argmaxQuery());
-    const argminCompilation = compilationFor(argminQuery());
     const operators: readonly QueryProofDecideWorldV1[] = [
       worldFromQuery(scalarQuery(), [candidate("A", { bindings: [binding("alice")] })]),
       worldFromQuery(distinctQuery(), [candidate("A", { bindings: [binding("alice")] })]),
       worldFromQuery(sequenceQuery(1), [
         candidate("A", { sequence_slots: [{ position: 0, binding: "alice" }] })
-      ]),
-      worldFromQuery(argmaxQuery(), [
-        candidate("A", { bindings: [binding("alice")], extremal_bindings: ["alice"] })
-      ], {
-        compilation: argmaxCompilation,
-        extremum_witness: extremumWitness(argmaxCompilation, "argmax", ["alice"])
-      }),
-      worldFromQuery(argminQuery(), [
-        candidate("A", { bindings: [binding("alice")], extremal_bindings: ["alice"] })
-      ], {
-        compilation: argminCompilation,
-        extremum_witness: extremumWitness(argminCompilation, "argmin", ["alice"])
-      })
+      ])
     ];
     for (const world of operators) {
       expect(world.compiled.compile_status).toBe("compiled");
@@ -838,26 +897,12 @@ describe("final Decide_Q and SealChecker_v1", () => {
   });
 
   it("records zero false Decide_Q singletons across operators and simultaneous remaining effects", () => {
-    const argmaxCompilation = compilationFor(argmaxQuery());
-    const argminCompilation = compilationFor(argminQuery());
     const operators: readonly QueryProofDecideWorldV1[] = [
       worldFromQuery(scalarQuery(), [candidate("A", { bindings: [binding("alice")] })]),
       worldFromQuery(distinctQuery(), [candidate("A", { bindings: [binding("alice")] })]),
       worldFromQuery(sequenceQuery(1), [
         candidate("A", { sequence_slots: [{ position: 0, binding: "alice" }] })
-      ]),
-      worldFromQuery(argmaxQuery(), [
-        candidate("A", { bindings: [binding("alice")], extremal_bindings: ["alice"] })
-      ], {
-        compilation: argmaxCompilation,
-        extremum_witness: extremumWitness(argmaxCompilation, "argmax", ["alice"])
-      }),
-      worldFromQuery(argminQuery(), [
-        candidate("A", { bindings: [binding("alice")], extremal_bindings: ["alice"] })
-      ], {
-        compilation: argminCompilation,
-        extremum_witness: extremumWitness(argminCompilation, "argmin", ["alice"])
-      })
+      ])
     ];
     for (const world of operators) {
       expect(noFalseSingleton(world, emptyFixture(1), [])).toBe(false);

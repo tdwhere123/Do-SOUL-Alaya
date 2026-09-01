@@ -1,18 +1,22 @@
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../../field/field-identity.js";
+import { compareText } from "../../../../shared/compare-text.js";
+import {
+  isCapturedWalk,
+  readCapturedWalkRuntimeManifest,
+  type ShadowCapturedWalk
+} from "../../prefix-capture/walk.js";
 import {
   captureData,
   captureVerifiedLiveClosureAuthority
 } from "../closure/live-authority-binding.js";
-import { compileQueryGamma, type QueryGammaCompileInputV1 } from
-  "../gamma/compile.js";
+import { compileQueryGamma } from "../gamma/compile.js";
 import type { QueryGammaCandidateEvidenceV1 } from "../gamma/contract.js";
 import type { LiveQueryProofAuthority } from "../live-query-proof-authority.js";
 import type { FiniteValue } from "../proof/oracle/contract.js";
 import type { QueryProofDecideWorldV1 } from "./decide.js";
 
 export type QueryProofDecidePremisesV1 = Readonly<{
-  readonly gamma: Readonly<Omit<QueryGammaCompileInputV1, "compilation">>;
   readonly candidates: QueryProofDecideWorldV1["candidates"];
   readonly psi_edges: QueryProofDecideWorldV1["psi_edges"];
   readonly token_budget: number;
@@ -40,6 +44,10 @@ export type QueryProofDecideRuntimeCaptureV1 = Readonly<{
   readonly manifest_digest: RecallFieldDigest;
 }>;
 
+export type QueryProofDecideRuntimeManifestV1 = Readonly<{
+  readonly walk: ShadowCapturedWalk;
+}>;
+
 const capturedDecideWorlds = new WeakMap<object, QueryProofDecideWorldCaptureV1>();
 const runtimeCapturedDecideWorlds =
   new WeakMap<object, QueryProofDecideRuntimeCaptureV1>();
@@ -50,9 +58,16 @@ export function captureQueryProofDecideWorld(params: Readonly<{
 }>): QueryProofDecideWorldV1 {
   const live = captureVerifiedLiveClosureAuthority(params.live_authority);
   const premises = captureData(params.premises);
+  assertSourceBoundEmptyFinitePremises(premises);
   const compileInput = Object.freeze({
-    ...premises.gamma,
-    compilation: live.authority.canonical_query_compilation
+    compilation: live.authority.canonical_query_compilation,
+    candidates: Object.freeze([] as QueryGammaCandidateEvidenceV1[]),
+    resource_policy: Object.freeze({
+      schema_version: 1 as const,
+      reject_duplicate_object: true as const,
+      token_budget: premises.token_budget,
+      per_dimension_limits: premises.per_dimension_limits
+    })
   });
   const compiled = compileQueryGamma(compileInput);
   if (compiled.compile_status !== "compiled") {
@@ -104,19 +119,34 @@ export function captureQueryProofDecideWorld(params: Readonly<{
   }));
 }
 
+function assertSourceBoundEmptyFinitePremises(
+  premises: QueryProofDecidePremisesV1
+): void {
+  if (premises.candidates.length !== 0 || premises.answer_bindings.length !== 0 ||
+      premises.psi_edges.length !== 0 || premises.unresolved_tradeoff_pairs.length !== 0) {
+    throw new Error(
+      "verified Decide_Q capture requires source-bound Gamma evidence for a non-empty world"
+    );
+  }
+}
+
 export function decideWorldCapture(
   world: QueryProofDecideWorldV1
 ): QueryProofDecideWorldCaptureV1 | null {
   return capturedDecideWorlds.get(world) ?? null;
 }
 
-export function bindQueryProofDecideWorldToRuntimeCapture(
+export function captureQueryProofDecideRuntime(
   world: QueryProofDecideWorldV1,
-  manifestDigest: RecallFieldDigest
+  runtime: QueryProofDecideRuntimeManifestV1
 ): QueryProofDecideWorldV1 {
   if (decideWorldCapture(world) === null) {
     throw new Error("runtime capture cannot bind an unverified Decide_Q world");
   }
+  if (!isCapturedWalk(runtime.walk)) {
+    throw new Error("Decide_Q runtime capture requires the issued live walk");
+  }
+  const manifestDigest = verifyRuntimeManifest(world, runtime);
   const current = runtimeCapturedDecideWorlds.get(world);
   if (current !== undefined && current.manifest_digest !== manifestDigest) {
     throw new Error("Decide_Q world is already bound to another runtime capture");
@@ -280,4 +310,61 @@ function assertAnswerBindingPremises(
       throw new Error("Decide_Q answer binding is outside Gamma evidence authority");
     }
   }
+}
+
+function verifyRuntimeManifest(
+  world: QueryProofDecideWorldV1,
+  runtime: QueryProofDecideRuntimeManifestV1
+): RecallFieldDigest {
+  const issued = readCapturedWalkRuntimeManifest(runtime.walk);
+  if (issued === null) throw new Error("Decide_Q runtime capture requires the issued live walk");
+  const worldCandidates = candidateManifest(world.candidates);
+  const runtimeCandidates = candidateManifest(issued.candidates);
+  const evidenceKeys = [...world.compile_input.candidates.map((row) => row.candidate_key)]
+    .sort(compareText);
+  const runtimeKeys = [...issued.candidates.map((row) => row.candidate_key)]
+    .sort(compareText);
+  if (digestRecallFieldIdentity(worldCandidates) !== digestRecallFieldIdentity(runtimeCandidates) ||
+      digestRecallFieldIdentity(evidenceKeys) !== digestRecallFieldIdentity(runtimeKeys) ||
+      world.token_budget !== issued.token_budget ||
+      digestRecallFieldIdentity(world.per_dimension_limits) !==
+        digestRecallFieldIdentity(issued.per_dimension_limits) ||
+      digestRecallFieldIdentity(normalizedPairs(world.psi_edges, true)) !==
+        digestRecallFieldIdentity(normalizedPairs(issued.psi_edges, true)) ||
+      digestRecallFieldIdentity(normalizedPairs(world.unresolved_tradeoff_pairs, false)) !==
+        digestRecallFieldIdentity(normalizedPairs(issued.unresolved_tradeoff_pairs, false))) {
+    throw new Error("Decide_Q world does not match the exact live runtime capture");
+  }
+  return digestRecallFieldIdentity({
+    kind: "query_proof_runtime_capture_v1",
+    candidates: runtimeCandidates,
+    psi_edges: normalizedPairs(issued.psi_edges, true),
+    token_budget: issued.token_budget,
+    per_dimension_limits: issued.per_dimension_limits,
+    unresolved_tradeoff_pairs: normalizedPairs(issued.unresolved_tradeoff_pairs, false),
+    live_walk_digest: digestRecallFieldIdentity(runtime.walk)
+  });
+}
+
+function candidateManifest(
+  candidates: readonly Omit<QueryProofDecideWorldV1["candidates"][number], "utility">[]
+): readonly object[] {
+  return Object.freeze(candidates.map((row) => Object.freeze({
+    candidate_key: row.candidate_key,
+    object_key: row.object_key,
+    token_cost: row.token_cost,
+    dimension: row.dimension,
+    h_eligible: row.h_eligible,
+    static_frontier_index: row.static_frontier_index
+  })).sort((left, right) => compareText(left.candidate_key, right.candidate_key)));
+}
+
+function normalizedPairs(
+  pairs: readonly (readonly [string, string])[],
+  directed: boolean
+): readonly (readonly [string, string])[] {
+  return Object.freeze(pairs.map(([left, right]) => {
+    if (directed || compareText(left, right) <= 0) return Object.freeze([left, right] as const);
+    return Object.freeze([right, left] as const);
+  }).sort((left, right) => compareText(`${left[0]}\0${left[1]}`, `${right[0]}\0${right[1]}`)));
 }

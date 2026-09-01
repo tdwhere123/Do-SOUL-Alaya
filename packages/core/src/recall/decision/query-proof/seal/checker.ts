@@ -51,6 +51,13 @@ import {
   freezeDecideWorld,
   queryProofDecideBaseState
 } from "./world-capture.js";
+import {
+  hasUnknownGammaStanding,
+  hasUnresolvedSemantic,
+  prefixAllFeasible,
+  sealObligationsCovered
+} from "./admission.js";
+import { decisionClosureManifest } from "./closure-manifest.js";
 
 export type SealCheckerInputV1 = Readonly<{
   readonly live_authority: LiveQueryProofAuthority;
@@ -294,6 +301,10 @@ function certifyStableOutcome(
       "final seal requires one live-authority world bound to its exact runtime capture"
     );
   }
+  const closureManifest = decisionClosureManifest(input, authority);
+  if (closureManifest === null) {
+    return open(digest, "final seal lacks a complete source-owned closure manifest");
+  }
   if (certifiedDeliveryBlocked(input)) {
     return unsupported(digest, "blocks_certified_delivery hole remains");
   }
@@ -396,6 +407,10 @@ export function digestQueryProofState(input: SealCheckerInputV1): RecallFieldDig
     resource_policy_digest: capture?.resource_policy_digest ??
       digestRecallFieldIdentity(input.world.compiled.resource_policy),
     runtime_capture_digest: runtimeCapture?.manifest_digest ?? null,
+    closure_manifest_digest: decisionClosureManifest(
+      input,
+      input.live_authority
+    )?.manifest_digest ?? null,
     fixture: input.fixture,
     k_max: input.k_max,
     coordinates: input.coordinates,
@@ -407,66 +422,6 @@ export function digestQueryProofState(input: SealCheckerInputV1): RecallFieldDig
 function contractDigest(world: QueryProofDecideWorldV1): RecallFieldDigest {
   const transfer = createQueryCompiledWalkTransfer(world.compiled);
   return digestDecisionContract(world.compiled, transfer.contract_digest);
-}
-
-function hasUnresolvedSemantic(world: QueryProofDecideWorldV1): boolean {
-  const semantic = uniqueSemanticByCandidate(world);
-  if (semantic === null) return true;
-  return world.candidates.some((row) => semantic.get(row.candidate_key) === "unresolved");
-}
-
-function hasUnknownGammaStanding(compiled: QueryCompiledGammaV1): boolean {
-  return compiled.standings.some((standing) =>
-    standing.coverage === "unknown" || standing.independence === "unknown");
-}
-
-function prefixAllFeasible(
-  world: QueryProofDecideWorldV1,
-  prefix: readonly string[]
-): boolean {
-  const semantic = uniqueSemanticByCandidate(world);
-  if (semantic === null) return false;
-  return prefix.every((key) => semantic.get(key) === "feasible");
-}
-
-function uniqueSemanticByCandidate(
-  world: QueryProofDecideWorldV1
-): Map<string, QueryCompiledGammaV1["semantic_feasibility"][number]["semantic"]> | null {
-  const semantic = new Map<string, QueryCompiledGammaV1["semantic_feasibility"][number]["semantic"]>();
-  for (const row of world.compiled.semantic_feasibility) {
-    if (semantic.has(row.candidate_key)) return null;
-    semantic.set(row.candidate_key, row.semantic);
-  }
-  return semantic;
-}
-
-function sealObligationsCovered(
-  compiled: QueryCompiledGammaV1,
-  closures: readonly ChannelClosureResult[],
-  authority: LiveQueryProofAuthority
-): boolean {
-  if (compiled.seal_obligations.length === 0) return true;
-  const snapshot = authority.snapshot_vector.vector_digest;
-  return compiled.seal_obligations.every((obligation) =>
-    closures.some((closure) => coversSealObligation(
-      obligation.target, closure, compiled, snapshot)));
-}
-
-function coversSealObligation(
-  target: string,
-  closure: ChannelClosureResult,
-  compiled: QueryCompiledGammaV1,
-  snapshot: string
-): boolean {
-  if (closure.status !== "exact_closed") return false;
-  if (closure.remaining_effects.length !== 0) return false;
-  if (closure.snapshot_digest !== snapshot) return false;
-  if (closure.query_digest !== compiled.compilation_digest &&
-      closure.query_digest !== compiled.query_digest) {
-    return false;
-  }
-  return closure.completeness_refs.some((ref) =>
-    ref.coordinate_id === target || ref.domain_id === target);
 }
 
 function mintSeal(

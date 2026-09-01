@@ -17,6 +17,7 @@ import { captureVerifiedLiveClosureAuthority } from
 
 export type LiveLexicalClosureSource = Readonly<{
   readonly receipts: readonly Readonly<LexicalIntervalSourceReceiptCapturedV1>[];
+  readonly candidate_keys: readonly string[];
   readonly scope: ChannelClosureScope;
   readonly source_receipt_digests: readonly RecallFieldDigest[];
   readonly source_lag_kind: "exact" | "bounded";
@@ -52,6 +53,7 @@ export function readLiveLexicalClosureSource(
     });
     return Object.freeze({
       receipts,
+      candidate_keys: lexicalCandidateKeys(receipts),
       scope,
       source_lag_kind: lagKind,
       source_receipt_digests: Object.freeze(
@@ -61,6 +63,14 @@ export function readLiveLexicalClosureSource(
   } catch {
     return null;
   }
+}
+
+function lexicalCandidateKeys(
+  receipts: readonly Readonly<LexicalIntervalSourceReceiptCapturedV1>[]
+): readonly string[] {
+  return Object.freeze([...new Set(receipts.flatMap((receipt) =>
+    receipt.producer_receipt.lanes.flatMap((lane) =>
+      lane.evaluated_universe?.candidate_keys ?? [])))].sort(compareText));
 }
 
 function admitCapturedLexicalSources(
