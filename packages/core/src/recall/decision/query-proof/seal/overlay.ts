@@ -1,3 +1,5 @@
+import { digestRecallFieldIdentity, type RecallFieldDigest } from
+  "../../../field/field-identity.js";
 import { compileQueryGamma } from "../gamma/compile.js";
 import type { QueryGammaCandidateEvidenceV1 } from "../gamma/contract.js";
 import type {
@@ -63,6 +65,32 @@ export function freezeDecideWorld(world: QueryProofDecideWorldV1): QueryProofDec
         Object.freeze([pair[0], pair[1]] as [string, string]))
     ),
     answer_bindings: Object.freeze([...world.answer_bindings])
+  });
+}
+
+export function digestDecideWorld(world: QueryProofDecideWorldV1): RecallFieldDigest {
+  const frozen = freezeDecideWorld(world);
+  return digestRecallFieldIdentity({
+    kind: "query_proof_decide_world_v1",
+    gamma_digest: frozen.compiled.gamma_digest,
+    compilation_digest: frozen.compiled.compilation_digest,
+    query_digest: frozen.compiled.query_digest,
+    candidates: frozen.candidates.map((row) => Object.freeze({
+      candidate_key: row.candidate_key,
+      object_key: row.object_key,
+      token_cost: row.token_cost,
+      dimension: row.dimension,
+      h_eligible: row.h_eligible,
+      static_frontier_index: row.static_frontier_index
+    })),
+    psi_edges: frozen.psi_edges,
+    token_budget: frozen.token_budget,
+    per_dimension_limits: frozen.per_dimension_limits,
+    unresolved_tradeoff_pairs: frozen.unresolved_tradeoff_pairs,
+    answer_bindings: frozen.answer_bindings,
+    standings_digest: digestRecallFieldIdentity(frozen.compiled.standings),
+    feasibility_digest: digestRecallFieldIdentity(frozen.compiled.semantic_feasibility),
+    compile_input_digest: frozen.compile_input.compilation.digest
   });
 }
 

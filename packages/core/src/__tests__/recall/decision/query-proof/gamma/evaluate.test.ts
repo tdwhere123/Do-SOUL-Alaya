@@ -99,7 +99,7 @@ describe("query-compiled Gamma standings and marginals", () => {
       candidate("A", { bindings: [binding("alice", "proved_distinct")] }),
       candidate("B", { bindings: [binding("alice-alias", "may_equal")] })
     ]);
-    expect(compiled.atoms.map((atom) => atom.target)).toEqual(["alice"]);
+    expect(compiled.atoms.map((atom) => atom.target)).toEqual(["x:alice"]);
     expect(evaluateQueryGammaTuple(compiled, emptyQueryGammaSelectedSet(), "B"))
       .toEqual({
         answer_binding_position: 0,
@@ -131,6 +131,8 @@ describe("query-compiled Gamma standings and marginals", () => {
       required_proposition_support: 1,
       certified_independent_support: 0
     });
+    expect(compiled.semantic_feasibility.find((row) => row.candidate_key === "A")?.semantic)
+      .toBe("feasible");
   });
 
   it("gives no third-stratum gain to a certified-independent extra without a matching CQ_q obligation", () => {
@@ -185,6 +187,62 @@ describe("query-compiled Gamma standings and marginals", () => {
     expect(admitted.compiled_atom_ids).toContain("proposition:rel2");
     expect(admitCompiledLowerFrontier(
       compiled, emptyQueryGammaSelectedSet(), "lower", ["unknown-core"]
+    ).admitted).toBe(false);
+    expect(admitCompiledLowerFrontier(
+      compiled, emptyQueryGammaSelectedSet(), "lower", ["core", "unknown-core"]
+    ).admitted).toBe(false);
+  });
+
+  it("refuses lower-frontier admission when a higher eligible frontier still covers the atom", () => {
+    const compiled = compileGamma(scalarQuery([{
+      id: "rel1",
+      relation: "bought",
+      arguments: ["x"]
+    }, {
+      id: "rel2",
+      relation: "from",
+      arguments: ["x"]
+    }]), [
+      candidate("f1", {
+        bindings: [binding("alice")],
+        propositions: [proposition("rel1"), proposition("rel2", "absent")]
+      }),
+      candidate("f2", {
+        bindings: [binding("carol")],
+        propositions: [proposition("rel1", "absent"), proposition("rel2")]
+      }),
+      candidate("f3", {
+        bindings: [binding("bob")],
+        propositions: [proposition("rel1", "absent"), proposition("rel2")]
+      })
+    ]);
+    expect(admitCompiledLowerFrontier(
+      compiled, emptyQueryGammaSelectedSet(), "f3", ["f1"]
+    ).admitted).toBe(true);
+    expect(admitCompiledLowerFrontier(
+      compiled, emptyQueryGammaSelectedSet(), "f3", ["f1", "f2"]
+    ).admitted).toBe(false);
+  });
+
+  it("does not treat unknown independence as proved non-coverage for admission", () => {
+    const compiled = compileGamma(scalarQuery([], [{
+      id: "need-ind",
+      constraint: "independent_support",
+      arguments: ["x"]
+    }]), [
+      candidate("f1", {
+        bindings: [binding("alice")],
+        propositions: [proposition("need-ind", "supports", "unknown")]
+      }),
+      candidate("f3", {
+        bindings: [binding("bob")],
+        propositions: [proposition("need-ind", "supports", "certified_independent")]
+      })
+    ]);
+    expect(compiled.semantic_feasibility.find((row) => row.candidate_key === "f1")?.semantic)
+      .toBe("feasible");
+    expect(admitCompiledLowerFrontier(
+      compiled, emptyQueryGammaSelectedSet(), "f3", ["f1"]
     ).admitted).toBe(false);
   });
 

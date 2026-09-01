@@ -94,7 +94,7 @@ function isCanonicalContractError(error: unknown): boolean {
     (error instanceof Error && error.name === "ZodError");
 }
 
-function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
+export function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
   return {
     candidates: params.candidates,
     policy: params.policy,
@@ -112,7 +112,10 @@ function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
       candidates: params.candidates,
       supplementaryData: params.supplementaryData
     }),
-    nowIso: params.now()
+    nowIso: params.now(),
+    ...(params.query_proof_preview === undefined
+      ? {}
+      : { query_proof_preview: params.query_proof_preview })
   };
 }
 

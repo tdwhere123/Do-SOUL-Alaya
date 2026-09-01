@@ -245,7 +245,10 @@ export function buildFineAssessParams(
     ...(membership === undefined ? {} : captureFineAssessmentMembership(
       membership.e0Keys,
       candidates
-    ))
+    )),
+    ...(params.queryProofPreview === undefined
+      ? {}
+      : { query_proof_preview: params.queryProofPreview })
   };
 }
 

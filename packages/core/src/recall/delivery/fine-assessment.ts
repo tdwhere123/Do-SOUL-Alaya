@@ -47,6 +47,7 @@ import {
   captureShadowIntegration,
   type FineAssessmentShadowTrace,
   type PsiQuery,
+  type QueryProofPreviewRequest,
   type ShadowPsiObservationField
 } from "../integration/shadow/integrate.js";
 import {
@@ -92,6 +93,7 @@ export interface FineAssessParams {
   readonly lexicalIntervalSources?: readonly Readonly<LexicalIntervalSourceReceiptV1>[];
   readonly supportCandidateReceipts?: readonly Readonly<SupportCandidateReceiptV1>[];
   readonly queryProofAuthority?: Readonly<LiveQueryProofAuthority>;
+  readonly query_proof_preview?: QueryProofPreviewRequest;
   readonly e0Keys?: readonly string[];
   readonly e1Keys?: readonly string[];
 }

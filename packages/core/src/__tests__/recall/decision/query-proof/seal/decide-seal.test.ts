@@ -20,10 +20,19 @@ import { deriveLiveClosureAuthorityBinding } from
   "../../../../../recall/decision/query-proof/closure/live-authority-binding.js";
 import type { FiniteOracleFixture } from
   "../../../../../recall/decision/query-proof/proof/oracle/contract.js";
-import { parseDecisionStabilitySeal } from
-  "../../../../../recall/decision/query-proof/seal/contract.js";
-import { checkDecisionStability } from
-  "../../../../../recall/decision/query-proof/seal/checker.js";
+import { digestRecallFieldIdentity } from
+  "../../../../../recall/field/field-identity.js";
+import {
+  DECISION_STABILITY_SEAL_OPERATOR_ID,
+  QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
+  parseDecisionStabilitySeal
+} from "../../../../../recall/decision/query-proof/seal/contract.js";
+import { digestDecideWorld } from
+  "../../../../../recall/decision/query-proof/seal/overlay.js";
+import {
+  checkDecisionStability,
+  digestQueryProofState
+} from "../../../../../recall/decision/query-proof/seal/checker.js";
 import {
   createQueryProofAbstractOperator,
   createQueryProofDecisionOperator,
@@ -40,14 +49,14 @@ import {
   cleanup,
   preparedAuthority
 } from "../../../integration/shadow/live-receipt-fixtures.js";
-import type { QueryGammaCompileInputV1 } from
-  "../../../../../recall/decision/query-proof/gamma/compile.js";
+import {
+  compiledGammaBodyDigest,
+  type QueryGammaCompileInputV1
+} from "../../../../../recall/decision/query-proof/gamma/compile.js";
 import {
   SHADOW_CAPTURE_OPERATOR_ID
 } from "../../../../../recall/decision/prefix-capture/identity.js";
-import {
-  QUERY_PROOF_FINAL_DECISION_OPERATOR_ID
-} from "../../../../../recall/decision/query-proof/seal/contract.js";
+
 import {
   allObservableDistinct,
   argmaxQuery,
@@ -168,6 +177,20 @@ function checkerInput(
   };
 }
 
+function withCompilationDigest(
+  compiled: QueryProofDecideWorldV1["compiled"],
+  compilationDigest: QueryProofDecideWorldV1["compiled"]["compilation_digest"]
+): QueryProofDecideWorldV1["compiled"] {
+  const patched = Object.freeze({
+    ...compiled,
+    compilation_digest: compilationDigest
+  });
+  return Object.freeze({
+    ...patched,
+    gamma_digest: compiledGammaBodyDigest(patched)
+  });
+}
+
 function emptyFixture(kMax: number): FiniteOracleFixture {
   return {
     fixture_id: "query-proof-decide-empty",
@@ -218,13 +241,14 @@ describe("final Decide_Q and SealChecker_v1", () => {
       limits: { max_channels: 8, max_coordinates: 16, max_sensitivities: 16 },
       k_max: 1
     });
-    expect(checker.status).toBe("CERTIFIED_STABLE");
-    if (checker.status !== "CERTIFIED_STABLE") throw new Error("expected seal");
-    expect(checker.seal.operator_id).toBe("query_proof_decision_stability_seal_v1");
-    expect(checker.decision_contract_digest).toBe(runQueryProofDecideQ(world, 1)
-      .decision_contract_digest);
-    expect(checker.seal.decision_contract_digest).toBe(checker.decision_contract_digest);
-    expect(parseDecisionStabilitySeal(checker.seal).seal_digest).toBe(checker.seal.seal_digest);
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe(
+      "compiled compilation digest does not match live canonical query"
+    );
+    const decided = runQueryProofDecideQ(world, 1);
+    expect(decided.decision_contract_digest).toContain("sha256:");
+    expect(decided.prefix).toEqual(["A"]);
     expect(() => parseDecisionStabilitySeal({
       operator_id: "operator_parametric_abstract_proof_kernel_v1",
       status: "PROVED_SINGLETON"
@@ -378,9 +402,12 @@ describe("final Decide_Q and SealChecker_v1", () => {
     });
     expect(oracle.outcomes).toHaveLength(1);
     const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
-    expect(checker.status).toBe("CERTIFIED_STABLE");
-    if (checker.status !== "CERTIFIED_STABLE") throw new Error("expected seal");
-    expect(checker.seal.decision_contract_digest).toBe(decided.decision_contract_digest);
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe(
+      "compiled compilation digest does not match live canonical query"
+    );
+    expect(decided.decision_contract_digest).toContain("sha256:");
   });
 
   it("does not certify unresolved semantic feasibility", () => {
@@ -416,7 +443,11 @@ describe("final Decide_Q and SealChecker_v1", () => {
     expect(decided.prefix).toEqual(["ok"]);
     expect(decided.walk.S_infty).not.toContain("refute");
     const checker = checkDecisionStability(checkerInput(world, emptyFixture(2)));
-    expect(checker.status).toBe("CERTIFIED_STABLE");
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe(
+      "compiled compilation digest does not match live canonical query"
+    );
   });
 
   it("does not certify all_observable without a covering closure", () => {
@@ -467,20 +498,16 @@ describe("final Decide_Q and SealChecker_v1", () => {
     expect(checker.status).toBe("UNCERTIFIED_OPEN");
   });
 
-  it("records live compilation identity separately from compiled Gamma query identity", () => {
+  it("refuses to mint when compiled CQ is not the live canonical query", () => {
     const world = worldOf(["A"]);
     const liveDigest = authorityFrom(prepared).canonical_query_compilation.digest;
     expect(world.compiled.compilation_digest).not.toBe(liveDigest);
     const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
-    expect(checker.status).toBe("CERTIFIED_STABLE");
-    if (checker.status !== "CERTIFIED_STABLE") throw new Error("expected seal");
-    expect(checker.seal.live_compilation_digest).toBe(liveDigest);
-    expect(checker.seal.compilation_digest).toBe(world.compiled.compilation_digest);
-    expect(checker.seal.live_compilation_digest).not.toBe(checker.seal.compilation_digest);
-    expect(() => parseDecisionStabilitySeal({
-      ...checker.seal,
-      live_compilation_digest: `sha256:${"d".repeat(64)}`
-    })).toThrow(/digest mismatch/u);
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe(
+      "compiled compilation digest does not match live canonical query"
+    );
   });
 
   it("fails closed on tampered query, policy, walk, and operator identity", () => {
@@ -514,17 +541,12 @@ describe("final Decide_Q and SealChecker_v1", () => {
     expect(operatorTamper.status).toBe("UNSUPPORTED");
 
     const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
-    expect(checker.status).toBe("CERTIFIED_STABLE");
-    if (checker.status !== "CERTIFIED_STABLE") throw new Error("expected seal");
-    expect(() => parseDecisionStabilitySeal({
-      ...checker.seal,
-      walk_operator_id: "not-shadow-walk"
-    })).toThrow(/walk operator identity/u);
-    expect(() => parseDecisionStabilitySeal({
-      ...checker.seal,
-      seal_digest: `sha256:${"c".repeat(64)}`
-    })).toThrow(/digest mismatch/u);
-    expect(SHADOW_CAPTURE_OPERATOR_ID).toBe(checker.seal.walk_operator_id);
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe(
+      "compiled compilation digest does not match live canonical query"
+    );
+    expect(SHADOW_CAPTURE_OPERATOR_ID).toBeDefined();
     expect(QUERY_PROOF_FINAL_DECISION_OPERATOR_ID).toBe(
       createQueryProofDecisionOperator(world).operator_id
     );
@@ -587,7 +609,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
       })
     ]);
     expect(checkDecisionStability(checkerInput(world, emptyFixture(1))).status)
-      .toBe("CERTIFIED_STABLE");
+      .toBe("UNSUPPORTED");
     expect(runQueryProofDecideQ(world, 1).prefix).toEqual(["Z"]);
     const correlation: FiniteOracleFixture = {
       fixture_id: "correlation-open",
@@ -664,8 +686,13 @@ describe("final Decide_Q and SealChecker_v1", () => {
     ];
     for (const world of operators) {
       expect(world.compiled.compile_status).toBe("compiled");
+      expect(runQueryProofDecideQ(world, 1).prefix.length).toBeGreaterThan(0);
       const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
-      expect(checker.status).toBe("CERTIFIED_STABLE");
+      expect(checker.status).toBe("UNSUPPORTED");
+      if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+      expect(checker.reason).toBe(
+      "compiled compilation digest does not match live canonical query"
+    );
     }
   });
 
@@ -686,7 +713,11 @@ describe("final Decide_Q and SealChecker_v1", () => {
     const decided = runQueryProofDecideQ(world, 2);
     expect(decided.prefix).toEqual(["first", "lineage"]);
     const checker = checkDecisionStability(checkerInput(world, emptyFixture(2)));
-    expect(checker.status).toBe("CERTIFIED_STABLE");
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe(
+      "compiled compilation digest does not match live canonical query"
+    );
   });
 
   it("records zero false Decide_Q singletons across operators and simultaneous remaining effects", () => {
@@ -815,7 +846,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
     const decided = runQueryProofDecideQ(world, 2);
     expect(decided.prefix[0]).toBe("binding");
     expect(checkDecisionStability(checkerInput(world, emptyFixture(2))).status)
-      .toBe("CERTIFIED_STABLE");
+      .toBe("UNSUPPORTED");
   });
 
   it("lifts target-only lower-frontier novelty through SealChecker", () => {
@@ -834,7 +865,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
     const decided = runQueryProofDecideQ(world, 2);
     expect(decided.prefix).toContain("lower");
     expect(checkDecisionStability(checkerInput(world, emptyFixture(2))).status)
-      .toBe("CERTIFIED_STABLE");
+      .toBe("UNSUPPORTED");
   });
 
   it("keeps a partial oracle base_state from dropping trade-off pairs", () => {
@@ -851,5 +882,234 @@ describe("final Decide_Q and SealChecker_v1", () => {
     };
     const checker = checkDecisionStability(checkerInput(world, fixture));
     expect(checker.status).toBe("UNCERTIFIED_OPEN");
+  });
+
+  it("fails closed when same-id substitute operators try to mint a singleton", () => {
+    const world = worldOf(["A", "B"]);
+    const fakeTrace = Object.freeze({
+      candidate_prefix: Object.freeze(["A"]),
+      answer_bindings: Object.freeze([]),
+      pick_reasons: Object.freeze([{
+        position: 0,
+        candidate_key: "A",
+        reason_id: "planted-substitute"
+      }])
+    });
+    const checker = checkDecisionStability({
+      ...checkerInput(world, emptyFixture(1)),
+      concrete_operator: {
+        operator_id: QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
+        decide: () => fakeTrace
+      },
+      abstract_operator: {
+        operator_id: QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
+        evaluate: () => Object.freeze({
+          status: "outcomes" as const,
+          handled_sensitivity_ids: Object.freeze([] as string[]),
+          outcomes: Object.freeze([fakeTrace])
+        })
+      }
+    });
+    expect(checker.status).not.toBe("CERTIFIED_STABLE");
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toMatch(/substitute Decide_Q/u);
+  });
+
+  it("fails closed when a live-trace wrapper is not the branded live operator", () => {
+    const world = worldOf(["A"]);
+    const live = createQueryProofDecisionOperator(world);
+    const liveAbstract = createQueryProofAbstractOperator(world);
+    const wrapper = {
+      operator_id: QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
+      decide: (input: Parameters<typeof live.decide>[0]) => live.decide(input)
+    };
+    expect(checkDecisionStability({
+      ...checkerInput(world, emptyFixture(1)),
+      concrete_operator: wrapper,
+      abstract_operator: liveAbstract
+    }).status).toBe("UNSUPPORTED");
+    expect(checkDecisionStability({
+      ...checkerInput(world, emptyFixture(1)),
+      concrete_operator: live,
+      abstract_operator: {
+        operator_id: QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
+        evaluate: liveAbstract.evaluate
+      }
+    }).reason).toMatch(/substitute Decide_Q/u);
+  });
+
+  it("refuses a compiled-looking semantic-feasibility forgery", () => {
+    const honest = worldFromQuery(scalarQuery(), [
+      candidate("open", { bindings_status: "unknown" }),
+      candidate("ok", { bindings: [binding("alice")] })
+    ]);
+    const forgedCompiled = Object.freeze({
+      ...honest.compiled,
+      semantic_feasibility: Object.freeze(honest.compiled.semantic_feasibility.map((row) =>
+        Object.freeze({ ...row, semantic: "feasible" as const })))
+    });
+    const forged = Object.freeze({ ...honest, compiled: forgedCompiled });
+    const checker = checkDecisionStability({
+      ...checkerInput(forged, emptyFixture(1)),
+      compiled: forgedCompiled
+    });
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe("compiled Gamma does not match Decide_Q compile input");
+  });
+
+  it("refuses a compiled-looking standings forgery", () => {
+    const honest = worldFromQuery(scalarQuery(), [
+      candidate("open", { bindings_status: "unknown" }),
+      candidate("ok", { bindings: [binding("alice")] })
+    ]);
+    const forgedCompiled = Object.freeze({
+      ...honest.compiled,
+      standings: Object.freeze(honest.compiled.standings.map((row) =>
+        Object.freeze({ ...row, coverage: "covers" as const })))
+    });
+    const forged = Object.freeze({ ...honest, compiled: forgedCompiled });
+    const checker = checkDecisionStability({
+      ...checkerInput(forged, emptyFixture(1)),
+      compiled: forgedCompiled
+    });
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe("compiled Gamma does not match Decide_Q compile input");
+    expect(digestDecideWorld(forged)).not.toBe(digestDecideWorld(honest));
+  });
+
+  it("refuses a world Gamma that diverges from the checker compiled witness", () => {
+    const honest = worldFromQuery(scalarQuery(), [
+      candidate("open", { bindings_status: "unknown" }),
+      candidate("ok", { bindings: [binding("alice")] })
+    ]);
+    const forgedCompiled = Object.freeze({
+      ...honest.compiled,
+      semantic_feasibility: Object.freeze(honest.compiled.semantic_feasibility.map((row) =>
+        Object.freeze({ ...row, semantic: "feasible" as const })))
+    });
+    const forgedWorld = Object.freeze({ ...honest, compiled: forgedCompiled });
+    const checker = checkDecisionStability({
+      ...checkerInput(forgedWorld, emptyFixture(1)),
+      compiled: honest.compiled,
+      world: forgedWorld,
+      concrete_operator: createQueryProofDecisionOperator(forgedWorld),
+      abstract_operator: createQueryProofAbstractOperator(forgedWorld)
+    });
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe("compiled Gamma does not match Decide_Q world");
+  });
+
+  it("refuses a world Gamma whose stored digest does not match the owned body", () => {
+    const honest = worldFromQuery(scalarQuery(), [
+      candidate("A", { bindings: [binding("alice")] })
+    ]);
+    const forgedCompiled = Object.freeze({
+      ...honest.compiled,
+      independent_support_obligation: !honest.compiled.independent_support_obligation
+    });
+    const forgedWorld = Object.freeze({ ...honest, compiled: forgedCompiled });
+    const checker = checkDecisionStability({
+      ...checkerInput(forgedWorld, emptyFixture(1)),
+      compiled: honest.compiled,
+      world: forgedWorld,
+      concrete_operator: createQueryProofDecisionOperator(forgedWorld),
+      abstract_operator: createQueryProofAbstractOperator(forgedWorld)
+    });
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe("compiled Gamma digest does not match Gamma body");
+  });
+
+  it("parses world and proof-state digests as seal identity", () => {
+    const world = worldOf(["A"]);
+    const input = checkerInput(world, emptyFixture(1));
+    const worldDigest = digestDecideWorld(world);
+    const proofState = digestQueryProofState(input);
+    expect(proofState).not.toBe(digestQueryProofState(checkerInput(world, emptyFixture(2))));
+    const body = Object.freeze({
+      schema_version: 1 as const,
+      operator_id: DECISION_STABILITY_SEAL_OPERATOR_ID,
+      decision_contract_digest: runQueryProofDecideQ(world, 1).decision_contract_digest,
+      query_digest: world.compiled.query_digest,
+      compilation_digest: world.compiled.compilation_digest,
+      live_compilation_digest: world.compiled.compilation_digest,
+      world_digest: worldDigest,
+      proof_state_digest: proofState,
+      snapshot_digest: authorityFrom(prepared).snapshot_vector.vector_digest,
+      gamma_digest: world.compiled.gamma_digest,
+      walk_operator_id: SHADOW_CAPTURE_OPERATOR_ID,
+      k_max: 1,
+      candidate_prefix: Object.freeze(["A"]),
+      answer_bindings: Object.freeze([]),
+      pick_reasons: Object.freeze([{
+        position: 0,
+        candidate_key: "A",
+        reason_id: "core_undominated:A"
+      }]),
+      outcome_digest: `sha256:${"a".repeat(64)}`
+    });
+    const parsed = parseDecisionStabilitySeal({
+      ...body,
+      seal_digest: digestRecallFieldIdentity(body)
+    });
+    expect(parsed.world_digest).toBe(worldDigest);
+    expect(parsed.proof_state_digest).toBe(proofState);
+    expect(() => parseDecisionStabilitySeal({
+      ...parsed,
+      world_digest: `sha256:${"e".repeat(64)}`
+    })).toThrow(/digest mismatch/u);
+  });
+
+  it("fails closed on a blocks_certified_delivery hole even if Gamma looks compiled", () => {
+    const live = authorityFrom(prepared).canonical_query_compilation;
+    expect(live.holes.some((row) => row.impacts.includes("blocks_certified_delivery"))).toBe(true);
+    const world = worldOf(["A"]);
+    expect(world.compiled.compile_status).toBe("compiled");
+    const mixedCompiled = withCompilationDigest(world.compiled, live.digest);
+    const mixed = Object.freeze({
+      ...world,
+      compiled: mixedCompiled,
+      compile_input: Object.freeze({
+        ...world.compile_input,
+        compilation: live
+      })
+    });
+    const checker = checkDecisionStability({
+      ...checkerInput(mixed, emptyFixture(1)),
+      compiled: mixedCompiled
+    });
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe("compiled Gamma does not match Decide_Q compile input");
+  });
+
+  it("refuses a live compilation digest copied onto a different compilation body", () => {
+    const live = authorityFrom(prepared).canonical_query_compilation;
+    const world = worldOf(["A"]);
+    expect(world.compile_input.compilation.digest).not.toBe(live.digest);
+    const liedCompilation = Object.freeze({
+      ...world.compile_input.compilation,
+      digest: live.digest
+    });
+    const liedCompiled = withCompilationDigest(world.compiled, live.digest);
+    const liedWorld = Object.freeze({
+      ...world,
+      compiled: liedCompiled,
+      compile_input: Object.freeze({
+        ...world.compile_input,
+        compilation: liedCompilation
+      })
+    });
+    const checker = checkDecisionStability({
+      ...checkerInput(liedWorld, emptyFixture(1)),
+      compiled: liedCompiled
+    });
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe("canonical query compilation digest mismatch");
   });
 });

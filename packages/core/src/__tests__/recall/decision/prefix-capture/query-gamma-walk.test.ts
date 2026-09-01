@@ -15,8 +15,10 @@ import {
 } from "../../../../recall/decision/prefix-capture/walk-transfer.js";
 import { createQueryCompiledWalkTransfer } from
   "../../../../recall/decision/query-proof/gamma/walk-binding.js";
-import { emptyWalkUtility } from
-  "../../../../recall/decision/query-proof/seal/decide.js";
+import {
+  emptyWalkUtility,
+  type QueryProofDecideWorldV1
+} from "../../../../recall/decision/query-proof/seal/decide.js";
 import { parseCaptureDecisionReceipt } from
   "../../../../recall/decision/prefix-capture/receipts.js";
 import { ShadowContractError } from
@@ -27,6 +29,7 @@ import {
   binding,
   candidate,
   compileGamma,
+  compileInputFor,
   distinctQuery,
   proposition,
   scalarQuery,
@@ -36,6 +39,29 @@ import {
 function psiFrom(edges: readonly (readonly [string, string])[]) {
   const set = new Set(edges.map(([dom, sub]) => `${dom}\0${sub}`));
   return (dom: string, sub: string) => set.has(`${dom}\0${sub}`);
+}
+
+function lowerFrontierCoverWorld() {
+  return {
+    compiled: compileGamma(scalarQuery([
+      { id: "rel1", relation: "bought", arguments: ["x"] },
+      { id: "rel2", relation: "from", arguments: ["x"] }
+    ]), [
+      candidate("f1", {
+        bindings: [],
+        propositions: [proposition("rel1"), proposition("rel2", "absent")]
+      }),
+      candidate("g2", {
+        bindings: [binding("bob")],
+        propositions: [proposition("rel1", "absent"), proposition("rel2")]
+      }),
+      candidate("f3", {
+        bindings: [binding("bob")],
+        propositions: [proposition("rel1", "absent"), proposition("rel2")]
+      })
+    ]),
+    psi: psiFrom([["f1", "g2"], ["f1", "f3"]])
+  };
 }
 
 function row(
@@ -197,6 +223,42 @@ describe("query-compiled Gamma walk binding", () => {
     expect(walked.decisions[0]?.G).not.toHaveProperty("Values_v");
   });
 
+  it("does not admit a lower frontier when a higher eligible frontier still covers the atom", () => {
+    const { compiled, psi } = lowerFrontierCoverWorld();
+    const walked = walkShadowCapture({
+      candidates: [row("f1", 1), row("g2", 2), row("f3", 3)],
+      psi,
+      token_budget: 10,
+      per_dimension_limits: null,
+      utility_transfer: createQueryCompiledWalkTransfer(compiled)
+    });
+    expect(isCapturedWalk(walked)).toBe(true);
+    if (!isCapturedWalk(walked)) throw new Error("expected captured");
+    expect("f3" < "g2").toBe(true);
+    expect(walked.S_infty[0]).toBe("g2");
+    expect(walked.S_infty[0]).not.toBe("f3");
+    expect(walked.decisions[0]?.capture_reason).toBe("cross_frontier_novelty");
+    expect(walked.decisions[0]?.candidate_key).not.toBe("f3");
+  });
+
+  it("does not admit a null-index extra while another remaining candidate still covers the atom", () => {
+    const { compiled, psi } = lowerFrontierCoverWorld();
+    const walked = walkShadowCapture({
+      candidates: [row("f1"), row("g2"), row("f3")],
+      psi,
+      token_budget: 10,
+      per_dimension_limits: null,
+      utility_transfer: createQueryCompiledWalkTransfer(compiled)
+    });
+    expect(isCapturedWalk(walked)).toBe(true);
+    if (!isCapturedWalk(walked)) throw new Error("expected captured");
+    expect(walked.S_infty[0]).toBe("f1");
+    expect(walked.S_infty[0]).not.toBe("f3");
+    expect(walked.decisions[0]?.capture_reason).toBe("core_undominated");
+    expect(walked.decisions.filter((row) => row.capture_reason === "cross_frontier_novelty")
+      .map((row) => row.candidate_key)).not.toContain("f3");
+  });
+
   it("does not let live-only novelty admit a lower-frontier candidate under compiled transfer", () => {
     const compiled = compileGamma(scalarQuery(), [
       candidate("core", { bindings: [binding("alice")] }),
@@ -348,23 +410,33 @@ describe("query-compiled Gamma walk binding", () => {
     })).toThrow(/live novelty admission/u);
   });
 
-  it("records a failed preview sidecar when compiled walk hits a Psi cycle", () => {
-    const compiled = compileGamma(scalarQuery(), [
+  it("records a failed Decide_Q preview sidecar when the walk hits a Psi cycle", () => {
+    const evidence = [
       candidate("A", { bindings: [binding("alice")] }),
       candidate("B", { bindings: [binding("bob")] })
-    ]);
-    const walkInput = {
+    ];
+    const compileInput = compileInputFor(scalarQuery(), evidence);
+    const compiled = compileGamma(scalarQuery(), evidence);
+    const world: QueryProofDecideWorldV1 = Object.freeze({
+      compiled,
+      compile_input: compileInput,
+      candidates: [row("A"), row("B")],
+      psi_edges: Object.freeze([["A", "B"], ["B", "A"]] as const),
+      token_budget: 10,
+      per_dimension_limits: null,
+      unresolved_tradeoff_pairs: Object.freeze([]),
+      answer_bindings: Object.freeze([])
+    });
+    const live = walkShadowCapture({
       candidates: [facilityRow("A", { a1: 1 }, 1), row("B", 1)],
       psi: (left: string, right: string) => left !== right,
       token_budget: 10,
       per_dimension_limits: null
-    };
-    const live = walkShadowCapture(walkInput);
+    });
     expect(isCapturedWalk(live)).toBe(true);
-    const preview = previewSidecar({
-      utility_transfer: createQueryCompiledWalkTransfer(compiled)
-    }, walkInput);
+    const preview = previewSidecar({ world }, 1);
     expect(preview.query_proof_preview?.status).toBe("failed");
+    expect(preview.query_proof_preview?.contract_digest).toMatch(/^sha256:/u);
   });
 
   it("does not let unresolved trade-off fall through as a certified exact tie", () => {

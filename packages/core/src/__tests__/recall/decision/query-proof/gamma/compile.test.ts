@@ -38,7 +38,7 @@ describe("query-compiled Gamma_q", () => {
     const distinct = compileGamma(distinctQuery(), [
       candidate("A", { bindings: [binding("alice"), binding("bob")] })
     ]);
-    expect(distinct.atoms.map((atom) => atom.target).sort()).toEqual(["alice", "bob"]);
+    expect(distinct.atoms.map((atom) => atom.target).sort()).toEqual(["x:alice", "x:bob"]);
 
     const compilation = compilationFor(argmaxQuery());
     const extrema = compileGamma(argmaxQuery(), [
@@ -195,6 +195,97 @@ describe("query-compiled Gamma_q", () => {
       compilation: blocked,
       candidates: [candidate("A")]
     }).unsupported_reason).toBe("operator_resolution_blocked");
+    const certifiedHole = compilationFor(scalarQuery(), [hole("unknown_correlation")]);
+    expect(compileQueryGamma({
+      compilation: certifiedHole,
+      candidates: [candidate("A")]
+    }).unsupported_reason).toBe("blocks_certified_delivery");
+  });
+
+  it("does not let a wrong typed variable cover a distinct atom", () => {
+    const compiled = compileGamma(distinctQuery(), [
+      candidate("A", { bindings: [binding("alice")] }),
+      candidate("wrong", { bindings: [binding("alice", "proved_distinct", "y")] })
+    ]);
+    expect(compiled.atoms.map((atom) => atom.target)).toEqual(["x:alice"]);
+    expect(compiled.standings.find((row) =>
+      row.candidate_key === "wrong" && row.atom_id.includes("alice"))?.coverage)
+      .toBe("does_not_cover");
+    expect(compiled.standings.find((row) =>
+      row.candidate_key === "A" && row.atom_id.includes("alice"))?.coverage)
+      .toBe("covers");
+    const identity = compileGamma(distinctQuery(), [
+      candidate("A", { bindings: [binding("alice")] }),
+      candidate("other", { bindings: [binding("bob")] })
+    ]);
+    expect(identity.standings.find((row) =>
+      row.candidate_key === "other" && row.atom_id.includes("alice"))?.coverage)
+      .toBe("does_not_cover");
+  });
+
+  it("rejects an extremum witness with a mismatched query or principal binding", () => {
+    const query = argmaxQuery();
+    const compilation = compilationFor(query);
+    const witness = extremumWitness(compilation, "argmax", ["alice"], query);
+    expect(compileGamma(query, [candidate("A")], {
+      compilation,
+      extremum_witness: { ...witness, query_digest: compilation.digest,
+        witness_digest: digestRecallFieldIdentity({ tampered: "query" }) }
+    }).unsupported_reason).toBe("invalid_extremum_closure_witness");
+    const queryTamper = { ...witness, query_digest: compilation.digest };
+    const queryBody = (({ witness_digest: _digest, ...body }) => body)(queryTamper);
+    expect(compileGamma(query, [candidate("A")], {
+      compilation,
+      extremum_witness: {
+        ...queryTamper,
+        witness_digest: digestRecallFieldIdentity(queryBody)
+      }
+    }).unsupported_reason).toBe("extremum_witness_query_mismatch");
+    const honest = extremumWitness(compilation, "argmax", ["alice"], query, ["A"]);
+    const principalBody = (({ witness_digest: _p, ...body }) => body)({
+      ...honest,
+      principal_digest: digestRecallFieldIdentity({ principal: "wrong" })
+    });
+    expect(compileGamma(query, [candidate("A")], {
+      compilation,
+      extremum_witness: {
+        ...principalBody,
+        witness_digest: digestRecallFieldIdentity(principalBody)
+      }
+    }).unsupported_reason).toBe("extremum_witness_principal_mismatch");
+    const universeBody = (({ witness_digest: _u, ...body }) => body)({
+      ...honest,
+      universe_digest: compilation.snapshot_receipt_digest
+    });
+    expect(compileGamma(query, [candidate("A")], {
+      compilation,
+      extremum_witness: {
+        ...universeBody,
+        witness_digest: digestRecallFieldIdentity(universeBody)
+      }
+    }).unsupported_reason).toBe("extremum_witness_universe_mismatch");
+    const sensitivityBody = (({ witness_digest: _s, ...body }) => body)({
+      ...honest,
+      sensitivity_id: "extremum:wrong"
+    });
+    expect(compileGamma(query, [candidate("A")], {
+      compilation,
+      extremum_witness: {
+        ...sensitivityBody,
+        witness_digest: digestRecallFieldIdentity(sensitivityBody)
+      }
+    }).unsupported_reason).toBe("extremum_witness_sensitivity_mismatch");
+    const closureBody = (({ witness_digest: _c, ...body }) => body)({
+      ...honest,
+      closure_result_digest: digestRecallFieldIdentity({ closure: "wrong" })
+    });
+    expect(compileGamma(query, [candidate("A")], {
+      compilation,
+      extremum_witness: {
+        ...closureBody,
+        witness_digest: digestRecallFieldIdentity(closureBody)
+      }
+    }).unsupported_reason).toBe("extremum_witness_closure_mismatch");
   });
 
   it("digests compiled atoms and standings independently of candidate permutation", () => {

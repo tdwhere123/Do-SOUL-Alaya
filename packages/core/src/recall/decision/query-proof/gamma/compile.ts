@@ -9,10 +9,8 @@ import {
   type CanonicalQueryV1
 } from "../../../query/canonical-query/index.js";
 import { ShadowContractError } from "../../contract-primitives.js";
-import {
-  EXTREMUM_CLOSURE_WITNESS_OPERATOR_ID,
-  type ExtremumClosureWitness
-} from "../closure/extremum.js";
+import { type ExtremumClosureWitness } from "../closure/extremum.js";
+import { extremaRequirement } from "./extrema-witness.js";
 import {
   assertExactGammaKeys,
   DEFAULT_RESOURCE_FEASIBILITY_POLICY,
@@ -82,7 +80,9 @@ export function compileQueryGamma(
     return unsupportedGamma(compilation, resourcePolicy, illegalSlots);
   }
   const witness = input.extremum_witness ?? null;
-  const extrema = extremaRequirement(query.answer, witness, compilation);
+  const extrema = extremaRequirement(
+    query.answer, witness, compilation, query, input.candidates
+  );
   if (extrema.status === "unsupported") {
     return unsupportedGamma(compilation, resourcePolicy, extrema.reason);
   }
@@ -160,6 +160,9 @@ function blockedOperatorReason(compilation: CanonicalQueryCompilationV1): string
     hole.impacts.includes("blocks_all_delivery"))) {
     return "operator_resolution_blocked";
   }
+  if (compilation.holes.some((hole) => hole.impacts.includes("blocks_certified_delivery"))) {
+    return "blocks_certified_delivery";
+  }
   return null;
 }
 
@@ -212,7 +215,7 @@ function distinctAtoms(
   }
   return [...identities].sort(compareText).map((identity) =>
     atom(`binding:distinct:${variable}:${identity}`, "answer_binding_position",
-      "distinct_binding", identity));
+      "distinct_binding", `${variable}:${identity}`));
 }
 
 function sequenceAtoms(
@@ -343,40 +346,6 @@ function compileStandings(
   return Object.freeze(rows);
 }
 
-function extremaRequirement(
-  answer: CanonicalAnswerProgramV1,
-  witness: ExtremumClosureWitness | null,
-  compilation: CanonicalQueryCompilationV1
-): Readonly<{ readonly status: "ok"; readonly binding_ids: readonly string[] }> |
-Readonly<{ readonly status: "unsupported"; readonly reason: string }> {
-  if (answer.kind !== "argmax" && answer.kind !== "argmin") {
-    return { status: "ok", binding_ids: [] };
-  }
-  if (witness === null) {
-    return { status: "unsupported", reason: "missing_extremum_closure_witness" };
-  }
-  const reason = invalidExtremumWitness(answer.kind, witness, compilation);
-  if (reason !== null) return { status: "unsupported", reason };
-  return { status: "ok", binding_ids: witness.extremal_binding_ids };
-}
-
-function invalidExtremumWitness(
-  operator: "argmax" | "argmin",
-  witness: ExtremumClosureWitness,
-  compilation: CanonicalQueryCompilationV1
-): string | null {
-  if (witness.operator_id !== EXTREMUM_CLOSURE_WITNESS_OPERATOR_ID) {
-    return "invalid_extremum_closure_witness";
-  }
-  if (witness.operator !== operator) return "extremum_operator_mismatch";
-  const { witness_digest: digest, ...body } = witness;
-  if (digest !== digestRecallFieldIdentity(body)) return "invalid_extremum_closure_witness";
-  if (witness.snapshot_digest !== compilation.snapshot_receipt_digest) {
-    return "extremum_witness_snapshot_mismatch";
-  }
-  return null;
-}
-
 function atom(
   atomId: string,
   stratum: QueryGammaAtomV1["stratum"],
@@ -447,6 +416,13 @@ function unsupportedGamma(
   });
 }
 
+export function compiledGammaBodyDigest(
+  compiled: QueryCompiledGammaV1
+): RecallFieldDigest {
+  const { gamma_digest: _digest, ...body } = compiled;
+  return digestQueryGammaBody(queryOwnedGamma(body));
+}
+
 function queryOwnedGamma(
   body: Omit<QueryCompiledGammaV1, "gamma_digest">
 ): Omit<QueryCompiledGammaV1, "gamma_digest" | "standings" | "semantic_feasibility"> {
@@ -459,3 +435,8 @@ function queryOwnedGamma(
 }
 
 export type { QueryGammaCandidateEvidenceV1 };
+export {
+  extremumClosureDigest,
+  extremumPrincipalDigest,
+  extremumUniverseDigest
+} from "./extrema-witness.js";
