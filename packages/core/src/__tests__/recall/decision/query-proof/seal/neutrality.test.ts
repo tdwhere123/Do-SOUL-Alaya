@@ -219,6 +219,54 @@ describe("query-proof preview neutrality", () => {
     expect(compiledReads).toBe(1);
   });
 
+  it("does not reread the raw preview world after the world getter fails", () => {
+    let reads = 0;
+    const switching = {
+      get world() {
+        reads += 1;
+        if (reads === 1) throw new Error("capture-fail");
+        return previewWorld(["forged"]);
+      }
+    };
+    const sidecar = previewSidecar(switching as never, 1);
+    expect(reads).toBe(1);
+    expect(sidecar.query_proof_preview?.status).toBe("failed");
+    expect(sidecar.query_proof_preview?.contract_digest).toBe("sha256:preview_unavailable");
+  });
+
+  it("does not reread the raw preview world after freeze fails", () => {
+    const cyclic: { self?: unknown } = {};
+    cyclic.self = cyclic;
+    let reads = 0;
+    const switching = {
+      get world() {
+        reads += 1;
+        return reads === 1 ? cyclic as never : previewWorld(["forged"]);
+      }
+    };
+    const sidecar = previewSidecar(switching as never, 1);
+    expect(reads).toBe(1);
+    expect(sidecar.query_proof_preview?.status).toBe("failed");
+    expect(sidecar.query_proof_preview?.contract_digest).toBe("sha256:preview_unavailable");
+  });
+
+  it("does not reread the raw preview world after Decide_Q fails", () => {
+    const cyclic = previewWorld(["cand-a", "cand-b"], true);
+    let reads = 0;
+    const switching = {
+      get world() {
+        reads += 1;
+        return reads === 1 ? cyclic : previewWorld(["forged"]);
+      }
+    };
+    const sidecar = previewSidecar(switching as never, 1);
+    expect(reads).toBe(1);
+    expect(sidecar.query_proof_preview?.status).toBe("failed");
+    const transfer = createQueryCompiledWalkTransfer(cyclic.compiled);
+    expect(sidecar.query_proof_preview?.contract_digest)
+      .toBe(digestDecisionContract(cyclic.compiled, transfer.contract_digest));
+  });
+
   it("production fine-assessment preview does not change selected keys or public result", () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
     const keys = candidates.map(buildRecallCandidateDedupeKey);

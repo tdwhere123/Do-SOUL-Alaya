@@ -31,6 +31,7 @@ import {
   compileGamma,
   compileInputFor,
   distinctQuery,
+  findGammaAtom,
   proposition,
   scalarQuery,
   sequenceQuery
@@ -215,7 +216,7 @@ describe("query-compiled Gamma walk binding", () => {
     expect(walked.S_infty[0]).toBe("lower");
     expect(walked.decisions[0]?.capture_reason).toBe("cross_frontier_novelty");
     expect(walked.decisions[0]?.named_novelty.compiled_atom_ids)
-      .toContain("proposition:rel2");
+      .toContain(findGammaAtom(compiled, { kind: "required_proposition", target: "rel2" }).atom_id);
     expect(walked.decisions[0]?.named_novelty.facility_keys).toEqual([]);
     expect(walked.decisions[0]?.G).toMatchObject({
       required_proposition_support: 1
@@ -291,7 +292,7 @@ describe("query-compiled Gamma walk binding", () => {
         propositions: [
           proposition("rel1"),
           proposition("rel2", "absent"),
-          proposition("need-ind", "absent")
+          proposition("need-ind", "absent", "not_applicable", "constraint")
         ]
       }),
       candidate("lineage", {
@@ -299,7 +300,7 @@ describe("query-compiled Gamma walk binding", () => {
         propositions: [
           proposition("rel1", "absent"),
           proposition("rel2", "supports", "correlated"),
-          proposition("need-ind", "absent")
+          proposition("need-ind", "absent", "not_applicable", "constraint")
         ]
       }),
       candidate("extra", {
@@ -307,7 +308,7 @@ describe("query-compiled Gamma walk binding", () => {
         propositions: [
           proposition("rel1"),
           proposition("rel2", "absent"),
-          proposition("need-ind", "supports", "certified_independent")
+          proposition("need-ind", "supports", "certified_independent", "constraint")
         ]
       })
     ]);

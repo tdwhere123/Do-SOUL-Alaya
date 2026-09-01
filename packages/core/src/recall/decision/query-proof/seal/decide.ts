@@ -9,6 +9,7 @@ import {
 import { emptySetUtilityInput } from "../../prefix-capture/capture.js";
 import type { PsiQuery } from "../../dominance-contract.js";
 import type { QueryGammaCompileInputV1 } from "../gamma/compile.js";
+import { decideWorldUniverseMismatch } from "../gamma/candidate-universe.js";
 import { certifiedSemanticSet } from "../gamma/evaluate.js";
 import { createQueryCompiledWalkTransfer } from "../gamma/walk-binding.js";
 import type { QueryCompiledGammaV1 } from "../gamma/contract.js";
@@ -63,6 +64,14 @@ export function runQueryProofDecideQ(
   kMax: number
 ): QueryProofDecideResultV1 {
   const captured = freezeDecideWorld(world);
+  const universe = decideWorldUniverseMismatch(
+    captured.compile_input.candidates.map((candidate) => candidate.candidate_key),
+    captured.candidates.map((candidate) => candidate.candidate_key),
+    captured.compiled
+  );
+  if (universe !== null) {
+    throw new Error(universe);
+  }
   const transfer = createQueryCompiledWalkTransfer(captured.compiled);
   const certified = certifiedSemanticSet(captured.compiled);
   const candidates = captured.candidates.map((candidate) => Object.freeze({
@@ -331,4 +340,3 @@ function worldAsFinite(world: QueryProofDecideWorldV1): FiniteValue {
     token_budget: world.token_budget
   });
 }
-

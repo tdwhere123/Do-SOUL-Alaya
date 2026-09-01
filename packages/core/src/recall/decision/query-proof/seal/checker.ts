@@ -29,6 +29,7 @@ import type { ChannelClosureResult } from "../closure/contract.js";
 import { assertCanonicalQueryCompilationDigest } from
   "../../../query/canonical-query/compilation.js";
 import { compiledGammaBodyDigest, compileQueryGamma } from "../gamma/compile.js";
+import { decideWorldUniverseMismatch } from "../gamma/candidate-universe.js";
 import {
   DECISION_STABILITY_SEAL_OPERATOR_ID,
   digestDecisionContract,
@@ -287,6 +288,12 @@ function compiledIdentityMismatch(input: SealCheckerInputV1): string | null {
   if (input.world.compile_input.compilation.digest !== world.compilation_digest) {
     return "Decide_Q world compilation digest does not match compiled contract";
   }
+  const universe = decideWorldUniverseMismatch(
+    input.world.compile_input.candidates.map((candidate) => candidate.candidate_key),
+    input.world.candidates.map((candidate) => candidate.candidate_key),
+    world
+  );
+  if (universe !== null) return universe;
   try {
     assertCanonicalQueryCompilationDigest(input.world.compile_input.compilation);
   } catch (error) {
@@ -352,19 +359,29 @@ function contractDigest(world: QueryProofDecideWorldV1): RecallFieldDigest {
 }
 
 function hasUnresolvedSemantic(world: QueryProofDecideWorldV1): boolean {
-  const present = new Set(world.candidates.map((row) => row.candidate_key));
-  return world.compiled.semantic_feasibility.some((row) =>
-    row.semantic === "unresolved" && present.has(row.candidate_key));
+  const semantic = uniqueSemanticByCandidate(world);
+  if (semantic === null) return true;
+  return world.candidates.some((row) => semantic.get(row.candidate_key) === "unresolved");
 }
 
 function prefixAllFeasible(
   world: QueryProofDecideWorldV1,
   prefix: readonly string[]
 ): boolean {
-  const feasible = new Set(world.compiled.semantic_feasibility
-    .filter((row) => row.semantic === "feasible")
-    .map((row) => row.candidate_key));
-  return prefix.every((key) => feasible.has(key));
+  const semantic = uniqueSemanticByCandidate(world);
+  if (semantic === null) return false;
+  return prefix.every((key) => semantic.get(key) === "feasible");
+}
+
+function uniqueSemanticByCandidate(
+  world: QueryProofDecideWorldV1
+): Map<string, QueryCompiledGammaV1["semantic_feasibility"][number]["semantic"]> | null {
+  const semantic = new Map<string, QueryCompiledGammaV1["semantic_feasibility"][number]["semantic"]>();
+  for (const row of world.compiled.semantic_feasibility) {
+    if (semantic.has(row.candidate_key)) return null;
+    semantic.set(row.candidate_key, row.semantic);
+  }
+  return semantic;
 }
 
 function sealObligationsCovered(

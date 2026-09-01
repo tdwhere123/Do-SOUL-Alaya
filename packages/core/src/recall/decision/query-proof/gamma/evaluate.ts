@@ -1,5 +1,6 @@
 import { compareText } from "../../../../shared/compare-text.js";
 import { ShadowContractError } from "../../contract-primitives.js";
+import { firstDuplicate } from "./candidate-universe.js";
 import {
   type QueryCompiledGammaTupleV1,
   type QueryCompiledGammaV1,
@@ -7,6 +8,7 @@ import {
   type QueryGammaCandidateEvidenceV1,
   type QueryGammaCoverageV1,
   type QueryGammaIndependenceV1,
+  type QueryGammaPropositionEvidenceV1,
   type QueryGammaStandingV1,
   type SemanticFeasibilityV1
 } from "./contract.js";
@@ -52,6 +54,7 @@ export function evaluateSemanticFeasibility(
   if (atoms.some((gammaAtom) => propositionAtomRefuted(gammaAtom, candidate))) {
     return "infeasible";
   }
+  if (candidate.bindings_status === "unknown") return "unresolved";
   const unresolved = atoms.some((gammaAtom, index) =>
     standings[index]?.coverage === "unknown" &&
     gammaAtom.kind !== "certified_independent_support");
@@ -130,6 +133,9 @@ export function acceptQueryGammaCandidate(
 export function certifiedSemanticSet(
   compiled: QueryCompiledGammaV1
 ): ReadonlySet<string> {
+  if (firstDuplicate(compiled.semantic_feasibility.map((row) => row.candidate_key)) !== null) {
+    throw new ShadowContractError("duplicate compiled feasibility candidate_key");
+  }
   return new Set(compiled.semantic_feasibility
     .filter((row) => row.semantic === "feasible")
     .map((row) => row.candidate_key));
@@ -146,13 +152,15 @@ function coverageFor(
       : "does_not_cover";
   }
   if (gammaAtom.kind === "distinct_binding") {
-    return bindingCoverage(candidate, gammaAtom.target);
+    return bindingCoverage(candidate, gammaAtom);
   }
   if (gammaAtom.kind === "sequence_slot") {
-    const [position, binding] = splitSlot(gammaAtom.target);
+    if (gammaAtom.position === undefined) {
+      throw new ShadowContractError("sequence atom missing position");
+    }
     if (candidate.bindings_status === "unknown") return "unknown";
     return candidate.sequence_slots.some((slot) =>
-      slot.position === position && slot.binding === binding)
+      slot.position === gammaAtom.position && slot.binding === gammaAtom.target)
       ? "covers"
       : "does_not_cover";
   }
@@ -175,7 +183,7 @@ function propositionAtomRefuted(
     return false;
   }
   return candidate.propositions.some((proposition) =>
-    proposition.proposition_id === gammaAtom.target &&
+    matchesProposition(gammaAtom, proposition) &&
     proposition.support === "refutes");
 }
 
@@ -185,7 +193,7 @@ function propositionCoverage(
 ): QueryGammaCoverageV1 {
   if (candidate.propositions_status === "unknown") return "unknown";
   const match = candidate.propositions.find((proposition) =>
-    proposition.proposition_id === gammaAtom.target);
+    matchesProposition(gammaAtom, proposition));
   if (match === undefined) return "does_not_cover";
   if (match.support === "unknown") return "unknown";
   if (match.support === "refutes") return "does_not_cover";
@@ -200,14 +208,15 @@ function propositionCoverage(
 
 function bindingCoverage(
   candidate: QueryGammaCandidateEvidenceV1,
-  target: string
+  gammaAtom: QueryGammaAtomV1
 ): QueryGammaCoverageV1 {
   if (candidate.bindings_status === "unknown") return "unknown";
-  const split = target.indexOf(":");
-  const variable = split < 0 ? "" : target.slice(0, split);
-  const identity = split < 0 ? target : target.slice(split + 1);
+  if (gammaAtom.variable === undefined || gammaAtom.semantic_identity === undefined) {
+    throw new ShadowContractError("distinct atom missing variable or semantic identity");
+  }
   const hits = candidate.bindings.filter((binding) =>
-    binding.semantic_identity === identity && binding.variable === variable);
+    binding.semantic_identity === gammaAtom.semantic_identity &&
+    binding.variable === gammaAtom.variable);
   if (hits.some((binding) => binding.distinctness === "unknown")) return "unknown";
   return hits.some((binding) => binding.distinctness === "proved_distinct")
     ? "covers"
@@ -221,8 +230,16 @@ function independenceFor(
   if (gammaAtom.kind !== "certified_independent_support") return "not_applicable";
   if (candidate.propositions_status === "unknown") return "unknown";
   const match = candidate.propositions.find((proposition) =>
-    proposition.proposition_id === gammaAtom.target);
+    matchesProposition(gammaAtom, proposition));
   return match?.independence ?? "unknown";
+}
+
+function matchesProposition(
+  gammaAtom: QueryGammaAtomV1,
+  proposition: QueryGammaPropositionEvidenceV1
+): boolean {
+  return proposition.proposition_id === gammaAtom.target &&
+    proposition.jurisdiction === gammaAtom.jurisdiction;
 }
 
 function novelCoveredAtoms(
@@ -269,9 +286,4 @@ function stratumOf(
     throw new ShadowContractError("compiled gamma standing references an unknown atom");
   }
   return gammaAtom.stratum;
-}
-
-function splitSlot(target: string): readonly [number, string] {
-  const split = target.indexOf(":");
-  return [Number(target.slice(0, split)), target.slice(split + 1)];
 }

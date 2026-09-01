@@ -2,6 +2,7 @@ import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../../field/field-identity.js";
 import { captureData } from "../closure/live-authority-binding.js";
 import { compileQueryGamma } from "../gamma/compile.js";
+import { projectCompiledToCandidateKeys } from "../gamma/candidate-universe.js";
 import type { QueryGammaCandidateEvidenceV1 } from "../gamma/contract.js";
 import type {
   FiniteConcreteRefinement,
@@ -40,7 +41,10 @@ export function overlayWorld(
   }
   return freezeDecideWorld({
     ...baseline,
-    compiled,
+    compiled: projectCompiledToCandidateKeys(
+      compiled,
+      compileInput.candidates.map((candidate) => candidate.candidate_key)
+    ),
     compile_input: compileInput,
     candidates: Object.freeze(candidates),
     answer_bindings: Object.freeze(bindings)

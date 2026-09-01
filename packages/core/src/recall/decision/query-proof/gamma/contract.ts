@@ -27,6 +27,8 @@ export type QueryGammaAtomKindV1 =
   | "required_proposition"
   | "certified_independent_support";
 
+export type QueryGammaAtomJurisdictionV1 = "predicate" | "constraint" | "sensitivity";
+
 export type QueryGammaCoverageV1 = "covers" | "does_not_cover" | "unknown";
 
 export type QueryGammaIndependenceV1 =
@@ -40,6 +42,10 @@ export type QueryGammaAtomV1 = Readonly<{
   readonly stratum: QueryGammaStratumV1;
   readonly kind: QueryGammaAtomKindV1;
   readonly target: string;
+  readonly variable?: string;
+  readonly semantic_identity?: string;
+  readonly position?: number;
+  readonly jurisdiction?: QueryGammaAtomJurisdictionV1;
 }>;
 
 export type QueryGammaStandingV1 = Readonly<{
@@ -71,6 +77,7 @@ export type QueryGammaBindingEvidenceV1 = Readonly<{
 
 export type QueryGammaPropositionEvidenceV1 = Readonly<{
   readonly proposition_id: string;
+  readonly jurisdiction: QueryGammaAtomJurisdictionV1;
   readonly support: "supports" | "absent" | "unknown" | "refutes";
   readonly independence: QueryGammaIndependenceV1;
 }>;
@@ -200,6 +207,49 @@ export function assertExactGammaKeys(
   }
 }
 
+export function encodeGammaAtomId(parts: readonly string[]): string {
+  return parts.map((part) => `${part.length}:${part}`).join("/");
+}
+
+export function createGammaAtom(fields: Readonly<{
+  readonly stratum: QueryGammaStratumV1;
+  readonly kind: QueryGammaAtomKindV1;
+  readonly target: string;
+  readonly variable?: string;
+  readonly semantic_identity?: string;
+  readonly position?: number;
+  readonly jurisdiction?: QueryGammaAtomJurisdictionV1;
+}>): QueryGammaAtomV1 {
+  return Object.freeze({
+    atom_id: encodeGammaAtomId([
+      fields.kind,
+      fields.jurisdiction ?? "",
+      fields.variable ?? "",
+      fields.semantic_identity ?? "",
+      fields.position === undefined ? "" : String(fields.position),
+      fields.target
+    ]),
+    stratum: fields.stratum,
+    kind: fields.kind,
+    target: fields.target,
+    ...(fields.variable !== undefined ? { variable: fields.variable } : {}),
+    ...(fields.semantic_identity !== undefined
+      ? { semantic_identity: fields.semantic_identity } : {}),
+    ...(fields.position !== undefined ? { position: fields.position } : {}),
+    ...(fields.jurisdiction !== undefined ? { jurisdiction: fields.jurisdiction } : {})
+  });
+}
+
+export function assertUniqueGammaAtomIds(atoms: readonly QueryGammaAtomV1[]): void {
+  const seen = new Set<string>();
+  for (const atom of atoms) {
+    if (seen.has(atom.atom_id)) {
+      throw new ShadowContractError(`duplicate gamma atom identity ${atom.atom_id}`);
+    }
+    seen.add(atom.atom_id);
+  }
+}
+
 export function sortGammaAtoms(
   atoms: readonly QueryGammaAtomV1[]
 ): readonly QueryGammaAtomV1[] {
@@ -217,5 +267,3 @@ export function digestQueryGammaBody(
 ): RecallFieldDigest {
   return digestRecallFieldIdentity(body);
 }
-
-

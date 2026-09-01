@@ -27,7 +27,7 @@ import {
   QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
   parseDecisionStabilitySeal
 } from "../../../../../recall/decision/query-proof/seal/contract.js";
-import { digestDecideWorld, freezeDecideWorld } from
+import { digestDecideWorld, freezeDecideWorld, overlayWorld } from
   "../../../../../recall/decision/query-proof/seal/overlay.js";
 import {
   checkDecisionStability,
@@ -597,14 +597,14 @@ describe("final Decide_Q and SealChecker_v1", () => {
         bindings: [binding("alice")],
         propositions: [
           proposition("rel1"),
-          proposition("need-ind", "supports", "certified_independent")
+          proposition("need-ind", "supports", "certified_independent", "constraint")
         ]
       }),
       candidate("A", {
         bindings: [binding("bob")],
         propositions: [
           proposition("rel1"),
-          proposition("need-ind", "supports", "correlated")
+          proposition("need-ind", "supports", "correlated", "constraint")
         ]
       })
     ]);
@@ -1241,5 +1241,157 @@ describe("final Decide_Q and SealChecker_v1", () => {
     expect(checker.reason).toBe(
       "compiled compilation digest does not match live canonical query"
     );
+  });
+
+  it("fails closed when compile-input and world candidate universes differ", () => {
+    const honest = worldOf(["A", "B"]);
+    const compileOnly = Object.freeze({
+      ...honest,
+      candidates: honest.candidates.filter((row) => row.candidate_key === "A"),
+      answer_bindings: honest.answer_bindings.filter((row) => row.candidate_key === "A")
+    });
+    expect(() => runQueryProofDecideQ(compileOnly, 1)).toThrow(/universes differ/u);
+    const compileChecker = checkDecisionStability(checkerInput(compileOnly, emptyFixture(1)));
+    expect(compileChecker.status).toBe("UNSUPPORTED");
+    if (compileChecker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(compileChecker.reason).toMatch(/universes differ/u);
+    expect(compileChecker.status).not.toBe("CERTIFIED_STABLE");
+
+    const present = worldOf(["A"]);
+    const worldOnly = Object.freeze({
+      ...present,
+      candidates: Object.freeze([
+        ...present.candidates,
+        Object.freeze({
+          candidate_key: "ghost",
+          object_key: "ghost",
+          token_cost: 1,
+          dimension: "mem",
+          h_eligible: true,
+          utility: emptyWalkUtility("ghost", "ghost"),
+          static_frontier_index: null
+        })
+      ])
+    });
+    expect(() => runQueryProofDecideQ(worldOnly, 1)).toThrow(/universes differ/u);
+    const worldChecker = checkDecisionStability(checkerInput(worldOnly, emptyFixture(1)));
+    expect(worldChecker.status).toBe("UNSUPPORTED");
+    if (worldChecker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(worldChecker.reason).toMatch(/universes differ/u);
+  });
+
+  it("fails closed on duplicate feasible and infeasible rows for one candidate", () => {
+    const honest = worldOf(["A"]);
+    const both = Object.freeze({
+      ...honest,
+      compiled: Object.freeze({
+        ...honest.compiled,
+        semantic_feasibility: Object.freeze([
+          { candidate_key: "A", semantic: "feasible" as const },
+          { candidate_key: "A", semantic: "infeasible" as const }
+        ])
+      })
+    });
+    expect(() => runQueryProofDecideQ(both, 1)).toThrow(/duplicate compiled feasibility/u);
+    const checker = checkDecisionStability(checkerInput(both, emptyFixture(1)));
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toMatch(/duplicate compiled feasibility/u);
+    expect(checker.status).not.toBe("CERTIFIED_STABLE");
+  });
+
+  it("fails closed on missing or duplicate compiled standing rows", () => {
+    const honest = worldOf(["A"]);
+    const missing = Object.freeze({
+      ...honest,
+      compiled: Object.freeze({
+        ...honest.compiled,
+        standings: Object.freeze(honest.compiled.standings.slice(1))
+      })
+    });
+    expect(() => runQueryProofDecideQ(missing, 1)).toThrow(/standings are not one row/u);
+    const missingChecker = checkDecisionStability(checkerInput(missing, emptyFixture(1)));
+    expect(missingChecker.status).toBe("UNSUPPORTED");
+    if (missingChecker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(missingChecker.reason).toMatch(/standings are not one row/u);
+
+    const duplicated = Object.freeze({
+      ...honest,
+      compiled: Object.freeze({
+        ...honest.compiled,
+        standings: Object.freeze([
+          ...honest.compiled.standings,
+          honest.compiled.standings[0]!
+        ])
+      })
+    });
+    expect(() => runQueryProofDecideQ(duplicated, 1)).toThrow(/duplicate compiled standing/u);
+    const duplicateChecker = checkDecisionStability(checkerInput(duplicated, emptyFixture(1)));
+    expect(duplicateChecker.status).toBe("UNSUPPORTED");
+    if (duplicateChecker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(duplicateChecker.reason).toMatch(/duplicate compiled standing/u);
+  });
+
+  it("fails closed on duplicate compile-input candidate keys in a Decide_Q world", () => {
+    const honest = worldOf(["A"]);
+    const duplicated = Object.freeze({
+      ...honest,
+      compile_input: Object.freeze({
+        ...honest.compile_input,
+        candidates: Object.freeze([
+          ...honest.compile_input.candidates,
+          honest.compile_input.candidates[0]!
+        ])
+      })
+    });
+    expect(() => runQueryProofDecideQ(duplicated, 1))
+      .toThrow(/duplicate compile-input candidate_key/u);
+    const checker = checkDecisionStability(checkerInput(duplicated, emptyFixture(1)));
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toMatch(/duplicate compile-input candidate_key/u);
+  });
+
+  it("fails closed when compiled feasibility has extra keys beyond the world universe", () => {
+    const honest = worldOf(["A"]);
+    const extra = Object.freeze({
+      ...honest,
+      compiled: Object.freeze({
+        ...honest.compiled,
+        semantic_feasibility: Object.freeze([
+          ...honest.compiled.semantic_feasibility,
+          { candidate_key: "ghost", semantic: "feasible" as const }
+        ])
+      })
+    });
+    expect(() => runQueryProofDecideQ(extra, 1))
+      .toThrow(/feasibility is not one row/u);
+    const checker = checkDecisionStability(checkerInput(extra, emptyFixture(1)));
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toMatch(/feasibility is not one row/u);
+    expect(checker.status).not.toBe("CERTIFIED_STABLE");
+  });
+
+  it("membership overlay keeps one unique key universe and the query-owned Gamma digest", () => {
+    const world = worldOf(["A", "B"]);
+    const overlay = overlayWorld(world, {}, {
+      assignments: Object.freeze([
+        Object.freeze({
+          coordinate_id: "B",
+          kind: "candidate_membership" as const,
+          choice_id: "absent",
+          value: false
+        })
+      ]),
+      refinement_digest: digestRecallFieldIdentity({ overlay: "drop-B" })
+    });
+    expect(overlay.compile_input.candidates.map((row) => row.candidate_key)).toEqual(["A"]);
+    expect(overlay.candidates.map((row) => row.candidate_key)).toEqual(["A"]);
+    expect(overlay.compiled.semantic_feasibility.map((row) => row.candidate_key))
+      .toEqual(["A"]);
+    expect(overlay.compiled.standings.every((row) => row.candidate_key === "A")).toBe(true);
+    expect(overlay.compiled.gamma_digest).toBe(world.compiled.gamma_digest);
+    expect(runQueryProofDecideQ(overlay, 1).prefix).toEqual(["A"]);
   });
 });
