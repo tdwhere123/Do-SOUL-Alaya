@@ -105,6 +105,76 @@ describe("query-compiled Gamma planted leakage", () => {
       .certified_independent_support).toBe(0);
   });
 
+  it("does not treat a scalar binding-target collision as a proposition refute", () => {
+    const compiled = compileGamma(scalarQuery(), [
+      candidate("A", {
+        bindings: [binding("alice")],
+        propositions: [proposition("x", "refutes")]
+      })
+    ]);
+    expect(compiled.atoms).toEqual([
+      expect.objectContaining({
+        atom_id: "binding:scalar:x",
+        kind: "scalar_binding",
+        target: "x"
+      })
+    ]);
+    expect(compiled.standings.find((row) =>
+      row.candidate_key === "A" && row.atom_id === "binding:scalar:x")?.coverage)
+      .toBe("covers");
+    expect(compiled.semantic_feasibility).toEqual([
+      { candidate_key: "A", semantic: "feasible" }
+    ]);
+  });
+
+  it("compiles standings and semantic feasibility from one captured candidate snapshot", () => {
+    const covering = candidate("A", { bindings: [binding("alice")] });
+    const unresolved = candidate("B", { bindings_status: "unknown" });
+    let reads = 0;
+    const switching = new Proxy({
+      compilation: compilationFor(scalarQuery()),
+      candidates: [covering]
+    }, {
+      get(target, property, receiver) {
+        if (property === "candidates") {
+          reads += 1;
+          return reads === 1 ? [covering] : [unresolved];
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    const compiled = compileQueryGamma(switching);
+    expect(reads).toBe(1);
+    expect(compiled.standings.every((row) => row.candidate_key === "A")).toBe(true);
+    expect(compiled.semantic_feasibility).toEqual([
+      { candidate_key: "A", semantic: "feasible" }
+    ]);
+    expect(compiled.standings.find((row) =>
+      row.atom_id === "binding:scalar:x")?.coverage).toBe("covers");
+  });
+
+  it("ignores a later candidate array swap and nested mutation after compile capture", () => {
+    const bindingRow = {
+      variable: "x",
+      semantic_identity: "alice",
+      distinctness: "proved_distinct" as const
+    };
+    const bag = [
+      candidate("A", { bindings: [bindingRow] })
+    ];
+    const compiled = compileQueryGamma({
+      compilation: compilationFor(scalarQuery()),
+      candidates: bag
+    });
+    bag.splice(0, 1, candidate("B", { bindings_status: "unknown" }));
+    bindingRow.variable = "y";
+    expect(compiled.semantic_feasibility).toEqual([
+      { candidate_key: "A", semantic: "feasible" }
+    ]);
+    expect(compiled.standings.find((row) =>
+      row.atom_id === "binding:scalar:x")?.coverage).toBe("covers");
+  });
+
   it("does not let weights or live novelty change compiled strata", () => {
     const compiled = compileGamma(scalarQuery([{
       id: "rel1",

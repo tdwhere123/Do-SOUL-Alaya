@@ -9,6 +9,8 @@ import {
 } from "../../../../../recall/delivery/canonical-delivery.js";
 import { digestDecisionContract } from
   "../../../../../recall/decision/query-proof/seal/contract.js";
+import { previewSidecar } from
+  "../../../../../recall/integration/shadow/query-proof-preview.js";
 import { createQueryCompiledWalkTransfer } from
   "../../../../../recall/decision/query-proof/gamma/walk-binding.js";
 import {
@@ -167,6 +169,54 @@ describe("query-proof preview neutrality", () => {
     expect(captured.query_proof_preview?.status).toBe("failed");
     expect(captured.query_proof_preview?.semantic_feasibility).toEqual([]);
     expect(captured.S_infty.length).toBeGreaterThan(0);
+  });
+
+  it("keeps preview sidecar feasibility and policy on the captured world", () => {
+    const keys = ["cand-a"];
+    const world = previewWorld(keys);
+    const feasibility = [{
+      candidate_key: "cand-a",
+      semantic: "feasible" as const
+    }];
+    const policy = {
+      ...world.compiled.resource_policy
+    };
+    const compiled = {
+      ...world.compiled,
+      semantic_feasibility: feasibility,
+      resource_policy: policy
+    };
+    let compiledReads = 0;
+    const switching = new Proxy({ ...world, compiled }, {
+      get(target, property, receiver) {
+        if (property === "compiled") {
+          compiledReads += 1;
+          return compiledReads === 1
+            ? target.compiled
+            : Object.freeze({
+                ...target.compiled,
+                semantic_feasibility: Object.freeze([{
+                  candidate_key: "forged",
+                  semantic: "infeasible" as const
+                }]),
+                resource_policy: Object.freeze({
+                  ...policy,
+                  token_budget: 99
+                })
+              });
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    const sidecar = previewSidecar({ world: switching }, 1);
+    feasibility[0] = { candidate_key: "mutated", semantic: "infeasible" };
+    policy.token_budget = 99;
+    expect(sidecar.query_proof_preview?.status).toBe("captured");
+    expect(sidecar.query_proof_preview?.semantic_feasibility).toEqual([
+      { candidate_key: "cand-a", semantic: "feasible" }
+    ]);
+    expect(sidecar.query_proof_preview?.resource_policy.token_budget).toBe(null);
+    expect(compiledReads).toBe(1);
   });
 
   it("production fine-assessment preview does not change selected keys or public result", () => {

@@ -1,8 +1,10 @@
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../../field/field-identity.js";
 import { SHADOW_CAPTURE_OPERATOR_ID } from "../../prefix-capture/identity.js";
-import { captureVerifiedLiveClosureAuthority } from
-  "../closure/live-authority-binding.js";
+import {
+  captureData,
+  captureVerifiedLiveClosureAuthority
+} from "../closure/live-authority-binding.js";
 import type { LiveQueryProofAuthority } from "../live-query-proof-authority.js";
 import type { QueryCompiledGammaV1 } from "../gamma/contract.js";
 import { createQueryCompiledWalkTransfer } from "../gamma/walk-binding.js";
@@ -41,7 +43,7 @@ import {
   runQueryProofDecideQ,
   type QueryProofDecideWorldV1
 } from "./decide.js";
-import { digestDecideWorld } from "./overlay.js";
+import { digestDecideWorld, freezeDecideWorld } from "./overlay.js";
 
 export type SealCheckerInputV1 = Readonly<{
   readonly live_authority: LiveQueryProofAuthority;
@@ -59,24 +61,33 @@ export type SealCheckerInputV1 = Readonly<{
 export function checkDecisionStability(
   input: SealCheckerInputV1
 ): SealCheckerResultV1 {
-  let digest: RecallFieldDigest;
+  let captured: SealCheckerInputV1;
   try {
-    digest = contractDigest(input.world);
+    captured = captureSealCheckerPremises(input);
   } catch (error) {
     return unsupported(
-      input.world.compiled.compilation_digest,
+      digestRecallFieldIdentity({ kind: "seal_checker_premise_capture" }),
       messageOf(error)
     );
   }
-  if (input.concrete_operator.operator_id !== QUERY_PROOF_FINAL_DECISION_OPERATOR_ID ||
-      input.abstract_operator.operator_id !== QUERY_PROOF_FINAL_DECISION_OPERATOR_ID) {
+  let digest: RecallFieldDigest;
+  try {
+    digest = contractDigest(captured.world);
+  } catch (error) {
+    return unsupported(
+      captured.world.compiled.compilation_digest,
+      messageOf(error)
+    );
+  }
+  if (captured.concrete_operator.operator_id !== QUERY_PROOF_FINAL_DECISION_OPERATOR_ID ||
+      captured.abstract_operator.operator_id !== QUERY_PROOF_FINAL_DECISION_OPERATOR_ID) {
     return unsupported(digest, "final Decide_Q operator identity mismatch");
   }
-  const identityReason = compiledIdentityMismatch(input);
+  const identityReason = compiledIdentityMismatch(captured);
   if (identityReason !== null) return unsupported(digest, identityReason);
-  const bound = bindLiveDecideOracle(input, digest);
+  const bound = bindLiveDecideOracle(captured, digest);
   if ("status" in bound) return bound;
-  const { boundInput, captured, oracle } = bound;
+  const { boundInput, captured: live, oracle } = bound;
   let decided;
   try {
     decided = runQueryProofDecideQ(boundInput.world, boundInput.k_max);
@@ -98,13 +109,55 @@ export function checkDecisionStability(
   if (!prefixAllFeasible(boundInput.world, decided.prefix)) {
     return open(digest, "selected prefix is not compiled-feasible");
   }
-  if (!sealObligationsCovered(boundInput.world.compiled, boundInput.closures, captured.authority)) {
+  if (!sealObligationsCovered(boundInput.world.compiled, boundInput.closures, live.authority)) {
     return open(digest, "seal obligations are not covered by certified closures");
   }
   if (oracle.outcomes.length !== 1) {
     return open(digest, "represented refinements do not preserve one prefix/binding/reason");
   }
-  return certifyStableOutcome(boundInput, captured.authority, digest, oracle, decided);
+  return certifyStableOutcome(boundInput, live.authority, digest, oracle, decided);
+}
+
+function captureSealCheckerPremises(input: SealCheckerInputV1): SealCheckerInputV1 {
+  const world = freezeDecideWorld(input.world);
+  const compiled = captureData(input.compiled);
+  const fixture = captureData(input.fixture);
+  const closures = captureData(input.closures);
+  const coordinates = captureData(input.coordinates);
+  const limits = captureData(input.limits);
+  const kMax = captureData(input.k_max);
+  const liveAuthority = captureVerifiedLiveClosureAuthority(input.live_authority).authority;
+  return Object.freeze({
+    live_authority: liveAuthority,
+    fixture,
+    compiled,
+    world,
+    concrete_operator: captureBrandedOperator(input.concrete_operator, "decide"),
+    abstract_operator: captureBrandedOperator(input.abstract_operator, "evaluate"),
+    closures,
+    coordinates,
+    limits,
+    k_max: kMax
+  });
+}
+
+function captureBrandedOperator<T extends object>(
+  operator: T,
+  callbackField: "decide" | "evaluate"
+): T {
+  const record = operator as Readonly<Record<string, unknown>>;
+  const captured = {
+    operator_id: record.operator_id,
+    [callbackField]: record[callbackField]
+  } as T;
+  const brand = (operator as Record<symbol, unknown>)[LIVE_DECIDE_OPERATOR_BRAND];
+  if (brand !== undefined) {
+    Object.defineProperty(captured, LIVE_DECIDE_OPERATOR_BRAND, {
+      value: brand,
+      enumerable: false
+    });
+  }
+  return Object.freeze(captured);
 }
 
 function bindLiveDecideOracle(

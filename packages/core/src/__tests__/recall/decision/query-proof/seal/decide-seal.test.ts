@@ -27,7 +27,7 @@ import {
   QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
   parseDecisionStabilitySeal
 } from "../../../../../recall/decision/query-proof/seal/contract.js";
-import { digestDecideWorld } from
+import { digestDecideWorld, freezeDecideWorld } from
   "../../../../../recall/decision/query-proof/seal/overlay.js";
 import {
   checkDecisionStability,
@@ -1111,5 +1111,135 @@ describe("final Decide_Q and SealChecker_v1", () => {
     expect(checker.status).toBe("UNSUPPORTED");
     if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
     expect(checker.reason).toBe("canonical query compilation digest mismatch");
+  });
+
+  it("deep-freezes nested decide-world bindings so later mutation cannot change the digest", () => {
+    const bindingRow = {
+      candidate_key: "A",
+      binding_id: "bind:A",
+      value: "A" as const
+    };
+    const feasibilityRow = {
+      candidate_key: "A",
+      semantic: "feasible" as const
+    };
+    const world = Object.freeze({
+      ...worldOf(["A"]),
+      compiled: Object.freeze({
+        ...worldOf(["A"]).compiled,
+        semantic_feasibility: [feasibilityRow]
+      }),
+      answer_bindings: [bindingRow]
+    });
+    const frozen = freezeDecideWorld(world);
+    expect(Object.isFrozen(frozen)).toBe(true);
+    expect(Object.isFrozen(frozen.answer_bindings[0])).toBe(true);
+    expect(Object.isFrozen(frozen.compiled.semantic_feasibility[0])).toBe(true);
+    const digest = digestDecideWorld(frozen);
+    bindingRow.value = "mutated";
+    feasibilityRow.semantic = "infeasible";
+    expect(digestDecideWorld(frozen)).toBe(digest);
+    expect(frozen.answer_bindings[0]?.value).toBe("A");
+    expect(frozen.compiled.semantic_feasibility[0]?.semantic).toBe("feasible");
+  });
+
+  it("does not rebind checker digest after a later raw-world getter or array swap", () => {
+    const world = worldOf(["A"]);
+    const expectedDigest = runQueryProofDecideQ(world, 1).decision_contract_digest;
+    let compiledReads = 0;
+    const switching = new Proxy(world, {
+      get(target, property, receiver) {
+        if (property === "compiled") {
+          compiledReads += 1;
+          return compiledReads === 1
+            ? target.compiled
+            : Object.freeze({
+                ...target.compiled,
+                gamma_digest: `sha256:${"f".repeat(64)}`
+              });
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    let bindingReads = 0;
+    const swapping = new Proxy(world, {
+      get(target, property, receiver) {
+        if (property === "answer_bindings") {
+          bindingReads += 1;
+          return bindingReads === 1
+            ? target.answer_bindings
+            : Object.freeze([{
+                candidate_key: "A",
+                binding_id: "bind:A",
+                value: "swapped"
+              }]);
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    const checker = checkDecisionStability({
+      ...checkerInput(world, emptyFixture(1)),
+      world: switching,
+      compiled: world.compiled
+    });
+    expect(checker.decision_contract_digest).toBe(expectedDigest);
+    expect(compiledReads).toBe(1);
+    const swapped = checkDecisionStability({
+      ...checkerInput(world, emptyFixture(1)),
+      world: swapping,
+      compiled: world.compiled
+    });
+    expect(swapped.decision_contract_digest).toBe(expectedDigest);
+    expect(bindingReads).toBe(1);
+  });
+
+  it("binds concrete and abstract operator callbacks once before proof", () => {
+    const world = worldOf(["A"]);
+    const liveConcrete = createQueryProofDecisionOperator(world);
+    const liveAbstract = createQueryProofAbstractOperator(world);
+    let decideReads = 0;
+    let evaluateReads = 0;
+    const switchingConcrete = new Proxy(liveConcrete, {
+      get(target, property, receiver) {
+        if (property === "decide") {
+          decideReads += 1;
+          return decideReads === 1
+            ? target.decide
+            : () => Object.freeze({
+                candidate_prefix: Object.freeze(["injected"]),
+                answer_bindings: Object.freeze([]),
+                pick_reasons: Object.freeze([])
+              });
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    const switchingAbstract = new Proxy(liveAbstract, {
+      get(target, property, receiver) {
+        if (property === "evaluate") {
+          evaluateReads += 1;
+          return evaluateReads === 1
+            ? target.evaluate
+            : () => Object.freeze({
+                status: "outcomes" as const,
+                handled_sensitivity_ids: Object.freeze([] as string[]),
+                outcomes: Object.freeze([])
+              });
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    const checker = checkDecisionStability({
+      ...checkerInput(world, emptyFixture(1)),
+      concrete_operator: switchingConcrete,
+      abstract_operator: switchingAbstract
+    });
+    expect(decideReads).toBe(1);
+    expect(evaluateReads).toBe(1);
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe(
+      "compiled compilation digest does not match live canonical query"
+    );
   });
 });

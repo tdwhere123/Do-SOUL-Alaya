@@ -49,12 +49,9 @@ export function evaluateSemanticFeasibility(
   candidate: QueryGammaCandidateEvidenceV1
 ): SemanticFeasibilityV1 {
   const standings = atoms.map((gammaAtom) => standingForAtom(gammaAtom, candidate));
-  const refuted = atoms.some((gammaAtom) => {
-    const match = candidate.propositions.find((proposition) =>
-      proposition.proposition_id === gammaAtom.target);
-    return match?.support === "refutes";
-  });
-  if (refuted) return "infeasible";
+  if (atoms.some((gammaAtom) => propositionAtomRefuted(gammaAtom, candidate))) {
+    return "infeasible";
+  }
   const unresolved = atoms.some((gammaAtom, index) =>
     standings[index]?.coverage === "unknown" &&
     gammaAtom.kind !== "certified_independent_support");
@@ -167,6 +164,19 @@ function coverageFor(
       : "does_not_cover";
   }
   return propositionCoverage(gammaAtom, candidate);
+}
+
+function propositionAtomRefuted(
+  gammaAtom: QueryGammaAtomV1,
+  candidate: QueryGammaCandidateEvidenceV1
+): boolean {
+  if (gammaAtom.kind !== "required_proposition" &&
+      gammaAtom.kind !== "certified_independent_support") {
+    return false;
+  }
+  return candidate.propositions.some((proposition) =>
+    proposition.proposition_id === gammaAtom.target &&
+    proposition.support === "refutes");
 }
 
 function propositionCoverage(

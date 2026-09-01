@@ -6,6 +6,7 @@ import {
   runQueryProofDecideQ,
   type QueryProofDecideWorldV1
 } from "../../decision/query-proof/seal/decide.js";
+import { freezeDecideWorld } from "../../decision/query-proof/seal/overlay.js";
 import type { FiniteDecisionTraceInput } from
   "../../decision/query-proof/proof/oracle/contract.js";
 import {
@@ -37,8 +38,11 @@ export function previewSidecar(
   kMax: number
 ): { readonly query_proof_preview?: QueryProofPreviewSidecar } {
   if (preview === undefined) return {};
+  const capturedKMax = preview.k_max ?? kMax;
+  let capturedWorld: QueryProofDecideWorldV1 | undefined;
   try {
-    const decided = runQueryProofDecideQ(preview.world, preview.k_max ?? kMax);
+    capturedWorld = freezeDecideWorld(preview.world);
+    const decided = runQueryProofDecideQ(capturedWorld, capturedKMax);
     return {
       query_proof_preview: Object.freeze({
         status: "captured" as const,
@@ -48,13 +52,13 @@ export function previewSidecar(
         answer_bindings: decided.trace.answer_bindings,
         pick_reasons: decided.trace.pick_reasons,
         contract_digest: decided.decision_contract_digest,
-        semantic_feasibility: preview.world.compiled.semantic_feasibility,
-        resource_policy: preview.world.compiled.resource_policy
+        semantic_feasibility: capturedWorld.compiled.semantic_feasibility,
+        resource_policy: capturedWorld.compiled.resource_policy
       })
     };
   } catch (error) {
     try {
-      return failedSidecar(previewContractDigest(preview.world), error);
+      return failedSidecar(previewContractDigest(capturedWorld ?? preview.world), error);
     } catch {
       return failedSidecar("sha256:preview_unavailable", error);
     }
