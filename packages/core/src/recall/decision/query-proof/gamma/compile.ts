@@ -9,6 +9,7 @@ import {
   type CanonicalQueryV1
 } from "../../../query/canonical-query/index.js";
 import { ShadowContractError } from "../../contract-primitives.js";
+import { captureData } from "../closure/live-authority-binding.js";
 import { type ExtremumClosureWitness } from "../closure/extremum.js";
 import { extremaRequirement } from "./extrema-witness.js";
 import {
@@ -64,10 +65,11 @@ export type QueryGammaCompileInputV1 = Readonly<{
 export function compileQueryGamma(
   input: QueryGammaCompileInputV1
 ): QueryCompiledGammaV1 {
-  assertCompileInput(input);
-  const compilation = input.compilation;
-  const query = selectHypothesis(compilation, input.hypothesis_digest);
-  const resourcePolicy = input.resource_policy ?? DEFAULT_RESOURCE_FEASIBILITY_POLICY;
+  const captured = captureData(input);
+  assertCompileInput(captured);
+  const compilation = captured.compilation;
+  const query = selectHypothesis(compilation, captured.hypothesis_digest);
+  const resourcePolicy = captured.resource_policy ?? DEFAULT_RESOURCE_FEASIBILITY_POLICY;
   if (query === null) {
     return unsupportedGamma(compilation, resourcePolicy, "no_accepted_answer_program");
   }
@@ -75,25 +77,26 @@ export function compileQueryGamma(
   if (blocked !== null) {
     return unsupportedGamma(compilation, resourcePolicy, blocked);
   }
-  const illegalSlots = illegalSequenceReason(query.answer, input.candidates);
+  const candidates = captured.candidates;
+  const illegalSlots = illegalSequenceReason(query.answer, candidates);
   if (illegalSlots !== null) {
     return unsupportedGamma(compilation, resourcePolicy, illegalSlots);
   }
-  const witness = input.extremum_witness ?? null;
+  const witness = captured.extremum_witness ?? null;
   const extrema = extremaRequirement(
-    query.answer, witness, compilation, query, input.candidates
+    query.answer, witness, compilation, query, candidates
   );
   if (extrema.status === "unsupported") {
     return unsupportedGamma(compilation, resourcePolicy, extrema.reason);
   }
   const obligation = hasIndependentSupportObligation(query, compilation);
   const atoms = sortGammaAtoms([
-    ...answerAtoms(query.answer, input.candidates, extrema.binding_ids),
+    ...answerAtoms(query.answer, candidates, extrema.binding_ids),
     ...propositionAtoms(query),
     ...independentAtoms(query, compilation, obligation)
   ]);
-  const standings = compileStandings(atoms, input.candidates);
-  const feasibility = input.candidates.map((candidate) => Object.freeze({
+  const standings = compileStandings(atoms, candidates);
+  const feasibility = candidates.map((candidate) => Object.freeze({
     candidate_key: candidate.candidate_key,
     semantic: evaluateSemanticFeasibility(atoms, candidate)
   }));

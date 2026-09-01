@@ -1,5 +1,6 @@
 import { digestRecallFieldIdentity, type RecallFieldDigest } from
   "../../../field/field-identity.js";
+import { captureData } from "../closure/live-authority-binding.js";
 import { compileQueryGamma } from "../gamma/compile.js";
 import type { QueryGammaCandidateEvidenceV1 } from "../gamma/contract.js";
 import type {
@@ -47,25 +48,7 @@ export function overlayWorld(
 }
 
 export function freezeDecideWorld(world: QueryProofDecideWorldV1): QueryProofDecideWorldV1 {
-  return Object.freeze({
-    compiled: world.compiled,
-    compile_input: Object.freeze({
-      ...world.compile_input,
-      candidates: Object.freeze([...world.compile_input.candidates])
-    }),
-    candidates: Object.freeze(world.candidates.map((row) => Object.freeze({ ...row }))),
-    psi_edges: Object.freeze(world.psi_edges.map((edge) =>
-      Object.freeze([edge[0], edge[1]] as [string, string]))),
-    token_budget: world.token_budget,
-    per_dimension_limits: world.per_dimension_limits === null
-      ? null
-      : Object.freeze({ ...world.per_dimension_limits }),
-    unresolved_tradeoff_pairs: Object.freeze(
-      world.unresolved_tradeoff_pairs.map((pair) =>
-        Object.freeze([pair[0], pair[1]] as [string, string]))
-    ),
-    answer_bindings: Object.freeze([...world.answer_bindings])
-  });
+  return captureData(world);
 }
 
 export function digestDecideWorld(world: QueryProofDecideWorldV1): RecallFieldDigest {

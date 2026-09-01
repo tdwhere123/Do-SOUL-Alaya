@@ -62,28 +62,29 @@ export function runQueryProofDecideQ(
   world: QueryProofDecideWorldV1,
   kMax: number
 ): QueryProofDecideResultV1 {
-  const transfer = createQueryCompiledWalkTransfer(world.compiled);
-  const certified = certifiedSemanticSet(world.compiled);
-  const candidates = world.candidates.map((candidate) => Object.freeze({
+  const captured = freezeDecideWorld(world);
+  const transfer = createQueryCompiledWalkTransfer(captured.compiled);
+  const certified = certifiedSemanticSet(captured.compiled);
+  const candidates = captured.candidates.map((candidate) => Object.freeze({
     ...candidate,
     h_eligible: candidate.h_eligible && certified.has(candidate.candidate_key)
   }));
-  const budgets = boundResourcePolicy(world);
+  const budgets = boundResourcePolicy(captured);
   const walked = walkShadowCapture({
     candidates,
-    psi: psiFrom(world.psi_edges),
+    psi: psiFrom(captured.psi_edges),
     token_budget: budgets.token_budget,
     per_dimension_limits: budgets.per_dimension_limits,
-    unresolved_tradeoff: tradeoffFrom(world.unresolved_tradeoff_pairs),
+    unresolved_tradeoff: tradeoffFrom(captured.unresolved_tradeoff_pairs),
     utility_transfer: transfer
   });
   if (!isCapturedWalk(walked)) {
     throw new Error("query-proof Decide_Q hit a Psi cycle");
   }
   const prefix = prefixSK(walked.S_infty, kMax);
-  const trace = traceOf(walked, prefix, world.answer_bindings);
+  const trace = traceOf(walked, prefix, captured.answer_bindings);
   return Object.freeze({
-    decision_contract_digest: digestDecisionContract(world.compiled, transfer.contract_digest),
+    decision_contract_digest: digestDecisionContract(captured.compiled, transfer.contract_digest),
     walk: walked,
     prefix,
     trace,
