@@ -46,6 +46,7 @@ export type QueryProofDecideWorldV1 = Readonly<{
   readonly token_budget: number;
   readonly per_dimension_limits: Readonly<Record<string, number>> | null;
   readonly unresolved_tradeoff_pairs: readonly (readonly [string, string])[];
+  readonly identity_tie_winner?: string;
   readonly answer_bindings: readonly Readonly<{
     readonly candidate_key: string;
     readonly binding_id: string;
@@ -83,7 +84,10 @@ export function runQueryProofDecideQ(
   if (universe !== null) {
     throw new Error(universe);
   }
-  const transfer = createQueryCompiledWalkTransfer(captured.compiled);
+  const transfer = createQueryCompiledWalkTransfer(
+    captured.compiled,
+    captured.identity_tie_winner
+  );
   const certified = certifiedSemanticSet(captured.compiled);
   const candidates = captured.candidates.map((candidate) => Object.freeze({
     ...candidate,

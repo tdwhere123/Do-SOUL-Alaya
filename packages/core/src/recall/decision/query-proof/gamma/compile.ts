@@ -77,7 +77,10 @@ export function compileQueryGamma(
   if (query === null) {
     return unsupportedGamma(compilation, resourcePolicy, "no_accepted_answer_program");
   }
-  const blocked = blockedOperatorReason(compilation);
+  const blocked = blockedOperatorReason(
+    compilation,
+    captured.hypothesis_digest
+  );
   if (blocked !== null) {
     return unsupportedGamma(compilation, resourcePolicy, blocked);
   }
@@ -171,15 +174,23 @@ function selectHypothesis(
     ?? null;
 }
 
-function blockedOperatorReason(compilation: CanonicalQueryCompilationV1): string | null {
+function blockedOperatorReason(
+  compilation: CanonicalQueryCompilationV1,
+  selectedHypothesisDigest: RecallFieldDigest | undefined
+): string | null {
   if (compilation.compile_status === "unsupported") return "canonical_query_unsupported";
   if (compilation.hypotheses.length === 0) return "no_accepted_answer_program";
-  if (compilation.hypotheses.length > 1) return "multiple_hypotheses";
-  if (compilation.holes.some((hole) => hole.impacts.includes("blocks_operator_resolution") ||
+  if (compilation.hypotheses.length > 1 && selectedHypothesisDigest === undefined) {
+    return "multiple_hypotheses";
+  }
+  const relevantHoles = compilation.holes.filter((hole) =>
+    hole.hypothesis_digest === undefined ||
+    hole.hypothesis_digest === selectedHypothesisDigest);
+  if (relevantHoles.some((hole) => hole.impacts.includes("blocks_operator_resolution") ||
     hole.impacts.includes("blocks_all_delivery"))) {
     return "operator_resolution_blocked";
   }
-  if (compilation.holes.some((hole) => hole.impacts.includes("blocks_certified_delivery"))) {
+  if (relevantHoles.some((hole) => hole.impacts.includes("blocks_certified_delivery"))) {
     return "blocks_certified_delivery";
   }
   return null;

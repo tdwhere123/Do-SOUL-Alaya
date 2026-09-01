@@ -76,6 +76,7 @@ type WalkState = {
   readonly universe: readonly ShadowObligationKey[];
   readonly transfer: ShadowWalkUtilityTransfer;
   readonly startEligibleCount: number;
+  readonly identity_tie_winner: string | undefined;
   remaining: Map<string, ShadowCaptureWalkCandidate>;
   selected_keys: string[];
   object_keys: Set<string>;
@@ -174,6 +175,11 @@ function createWalkState(input: ShadowCaptureWalkInput): WalkState {
   const utilities = [...remaining.values()].map((candidate) => candidate.utility);
   const universe = input.obligation_universe ?? obligationUniverseFrom(utilities);
   const transfer = input.utility_transfer ?? LIVE_FACILITY_WALK_TRANSFER;
+  if (transfer.identity_tie_winner !== undefined &&
+      !input.candidates.some(({ candidate_key }) =>
+        candidate_key === transfer.identity_tie_winner)) {
+    throw new ShadowContractError("identity-tie winner is outside the walk universe");
+  }
   return {
     psi: input.psi,
     unresolved_tradeoff: input.unresolved_tradeoff,
@@ -181,6 +187,7 @@ function createWalkState(input: ShadowCaptureWalkInput): WalkState {
     per_dimension_limits: input.per_dimension_limits,
     universe,
     transfer,
+    identity_tie_winner: transfer.identity_tie_winner,
     remaining,
     selected_keys: [],
     object_keys: new Set(),
@@ -210,7 +217,7 @@ function computePick(
   );
   const tPsi = undominated(maxG.map((row) => row.candidate), state.psi);
   if (tPsi.length === 0) return CYCLE;
-  const winner = smallestDeterministicTailCandidate(tPsi);
+  const winner = smallestDeterministicTailCandidate(tPsi, state.identity_tie_winner);
   state.decisions.push(buildDecision(
     winner, core, feasible, maxG, tPsi, state, unresolvedAdmission
   ));

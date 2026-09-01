@@ -11,6 +11,7 @@ import { verifiedCurrentQueryOsfCapture } from
   "../../../query/canonical-query/adapters/osf.js";
 import type { SnapshotReadLeaseCapabilityV1, SnapshotReadLeaseV1 } from
   "../../../runtime/snapshot-coherence/index.js";
+import { captureData } from "../../capture-data.js";
 import { freezeShadow, ShadowContractError } from "../../contract-primitives.js";
 import { createFourValuedWitness, type FourValuedWitness, type WitnessIdentityPins } from
   "../witness/index.js";
@@ -60,6 +61,23 @@ export type VerifiedSupportSourceBinding = Readonly<{
   readonly digest: RecallFieldDigest;
 }>;
 
+export type VerifiedSupportSourceSnapshotV1 = Readonly<{
+  readonly query_id: string;
+  readonly workspace_id: string;
+  readonly snapshot_digest: string;
+  readonly lease_digest: RecallFieldDigest;
+  readonly source_digest: RecallFieldDigest;
+}>;
+
+type VerifiedSupportSourceSnapshotDataV1 = Readonly<{
+  readonly graph: SupportHypergraphReceiptV1;
+  readonly receipts: readonly SupportCandidateReceiptV1[];
+  readonly observations: readonly SupportPropositionObservationV1[];
+}>;
+
+const verifiedSupportSourceSnapshots =
+  new WeakMap<object, VerifiedSupportSourceSnapshotDataV1>();
+
 export function supportPropositionComparisonId(
   observation: SupportPropositionObservationV1
 ): string {
@@ -107,13 +125,65 @@ export function bindSupportMeasurementAuthoritySource(
       issued.graph.snapshot_digest !== authority.snapshot_digest) {
     throw new ShadowContractError("support graph is not bound to the verified query snapshot");
   }
-  sources.set(authority, Object.freeze({
+  const capabilityIndex = evidence.snapshot_read_lease.capabilities.findIndex((capability) =>
+    capability === evidence.support_source_capability);
+  if (capabilityIndex < 0) {
+    throw new ShadowContractError("support graph capability is not owned by its read lease");
+  }
+  const captured = captureData({
     lease: evidence.snapshot_read_lease,
-    capability: evidence.support_source_capability,
     graph: issued.graph,
     receipts: issued.receipts,
     observations: issued.observations
+  });
+  sources.set(authority, Object.freeze({
+    ...captured,
+    capability: captured.lease.capabilities[capabilityIndex]!
   }));
+}
+
+export function captureVerifiedSupportSourceSnapshot(
+  authority: VerifiedMeasurementAuthorityV1
+): VerifiedSupportSourceSnapshotV1 {
+  const source = sources.get(authority);
+  if (source === undefined ||
+      source.graph.query_id !== authority.query_id ||
+      source.graph.snapshot_digest !== authority.snapshot_digest ||
+      !leaseOwnsCapability(source.lease, source.capability) ||
+      !isSupportSourceCapability(source.capability)) {
+    throw new ShadowContractError("support source snapshot authority is unavailable");
+  }
+  const leaseDigest = digestRecallFieldIdentity(source.lease);
+  const sourceDigest = digestRecallFieldIdentity({
+    kind: "verified_support_source_snapshot_v1",
+    authority_digest: authority.authority_digest,
+    graph_digest: source.graph.digest,
+    receipt_digest: digestRecallFieldIdentity(source.receipts),
+    observation_digest: digestRecallFieldIdentity(source.observations),
+    lease_id: source.lease.lease_id,
+    lease_digest: leaseDigest,
+    source_owner: source.capability.source_owner,
+    view_kind: source.capability.view_kind
+  });
+  const snapshot = freezeShadow({
+    query_id: authority.query_id,
+    workspace_id: authority.workspace_id,
+    snapshot_digest: authority.snapshot_digest,
+    lease_digest: leaseDigest,
+    source_digest: sourceDigest
+  });
+  verifiedSupportSourceSnapshots.set(snapshot, captureData({
+    graph: source.graph,
+    receipts: source.receipts,
+    observations: source.observations
+  }));
+  return snapshot;
+}
+
+export function readVerifiedSupportSourceSnapshot(
+  snapshot: VerifiedSupportSourceSnapshotV1
+): VerifiedSupportSourceSnapshotDataV1 | null {
+  return verifiedSupportSourceSnapshots.get(snapshot) ?? null;
 }
 
 export function assertSupportMeasurementSourceObservation(

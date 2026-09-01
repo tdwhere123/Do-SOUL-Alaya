@@ -772,6 +772,67 @@ describe("final Decide_Q and SealChecker_v1", () => {
     expect(checker.status).not.toBe("CERTIFIED_STABLE");
   });
 
+  it.each([
+    [["C", "A", "B"], 2, ["A", "B"]],
+    [["B", "C", "A"], 3, ["A", "B", "C"]]
+  ] as const)(
+    "keeps losing exact-tie candidates in the requested prefix across permutation",
+    (keys, kMax, expectedPrefix) => {
+      const world = worldOf(keys);
+      const refinement = Object.freeze({
+        assignments: Object.freeze([Object.freeze({
+          coordinate_id: "identity-tail",
+          owner_id: "owner:identity-tail",
+          kind: "identity_tie" as const,
+          choice_id: "A",
+          value: candidateIdentityDigest("A")
+        })]),
+        refinement_digest: digestRecallFieldIdentity({ winner: "A" })
+      });
+      const overlaid = overlayWorld(world, {}, refinement);
+      const decided = runQueryProofDecideQ(overlaid, kMax);
+
+      expect(overlaid.candidates.map((candidate) => candidate.candidate_key))
+        .toEqual(keys);
+      expect(overlaid.compile_input.candidates.map((candidate) => candidate.candidate_key))
+        .toEqual(keys);
+      expect(decided.prefix).toEqual(expectedPrefix);
+      expect(decided.trace.answer_bindings.map((bindingRow) => bindingRow.value))
+        .toEqual(expectedPrefix);
+      expect(decided.trace.pick_reasons.map((reason) => reason.candidate_key))
+        .toEqual(expectedPrefix);
+      expect(decided.trace.pick_reasons.every((reason) => reason.reason_id.length > 0))
+        .toBe(true);
+    }
+  );
+
+  it("clears an exact-tie winner removed by a later membership refinement", () => {
+    const world = worldOf(["A", "B"]);
+    const tied = overlayWorld(world, {}, Object.freeze({
+      assignments: Object.freeze([Object.freeze({
+        coordinate_id: "identity-tail",
+        owner_id: "owner:identity-tail",
+        kind: "identity_tie" as const,
+        choice_id: "A",
+        value: candidateIdentityDigest("A")
+      })]),
+      refinement_digest: digestRecallFieldIdentity({ winner: "A" })
+    }));
+    const dropped = overlayWorld(tied, {}, Object.freeze({
+      assignments: Object.freeze([Object.freeze({
+        coordinate_id: "A",
+        owner_id: "A",
+        kind: "candidate_membership" as const,
+        choice_id: "absent",
+        value: false
+      })]),
+      refinement_digest: digestRecallFieldIdentity({ membership: "drop-A" })
+    }));
+
+    expect(dropped.identity_tie_winner).toBeUndefined();
+    expect(runQueryProofDecideQ(dropped, 1).prefix).toEqual(["B"]);
+  });
+
   it("does not certify proposition or correlation remaining effects that change the trace", () => {
     const query = scalarQuery([{
       id: "rel1",

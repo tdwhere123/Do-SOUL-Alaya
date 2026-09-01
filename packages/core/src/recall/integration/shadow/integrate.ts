@@ -20,6 +20,7 @@ import {
   previewSidecar,
   type QueryProofPreviewRequest,
   type QueryProofPreviewRuntimeCapture,
+  type QueryProofPreviewSource,
   type QueryProofPreviewSidecar
 } from "./query-proof-preview.js";
 import { shadowLineageApplicability } from "../../decision/query-proof/demand.js";
@@ -64,6 +65,8 @@ import {
   type ShadowCaptureWalkCandidate
 } from "../../decision/prefix-capture/walk.js";
 import type { PsiQuery } from "../../decision/dominance-contract.js";
+import type { LiveQueryProofAuthority } from
+  "../../decision/query-proof/live-query-proof-authority.js";
 
 export type { PsiQuery } from "../../decision/dominance-contract.js";
 export type { ShadowPsiObservationField } from "../../decision/query-proof/psi.js";
@@ -113,6 +116,7 @@ export type ShadowIntegrateInput = Readonly<{
   readonly supportMaterialization?: PsiV2ShadowInputV1["support"];
   readonly support_measurement_authority?:
     PsiV2ShadowInputV1["support_measurement_authority"];
+  readonly query_proof_authority?: LiveQueryProofAuthority;
   readonly psi_v2_producer_outcomes?: PsiV2ShadowInputV1["producer_outcomes"];
   readonly query_id?: string;
   readonly snapshot_digest?: string;
@@ -421,8 +425,20 @@ function assembleCaptured(
     ...previewSidecar(
       input.query_proof_preview,
       k,
-      previewRuntimeCapture(walked)
+      previewRuntimeCapture(walked),
+      queryProofPreviewSource(input)
     )
+  });
+}
+
+function queryProofPreviewSource(
+  input: ShadowIntegrateInput
+): QueryProofPreviewSource | undefined {
+  if (input.query_proof_authority === undefined ||
+      input.support_measurement_authority === undefined) return undefined;
+  return Object.freeze({
+    live_authority: input.query_proof_authority,
+    support_measurement_authority: input.support_measurement_authority
   });
 }
 

@@ -404,6 +404,7 @@ export function digestQueryProofState(input: SealCheckerInputV1): RecallFieldDig
     decision_identity_digest: capture?.decision_identity_digest ?? null,
     world_digest: capture?.world_digest ?? digestDecideWorld(input.world),
     candidate_universe_digest: capture?.candidate_universe_digest ?? null,
+    source_evidence_digest: capture?.source_evidence_digest ?? null,
     resource_policy_digest: capture?.resource_policy_digest ??
       digestRecallFieldIdentity(input.world.compiled.resource_policy),
     runtime_capture_digest: runtimeCapture?.manifest_digest ?? null,

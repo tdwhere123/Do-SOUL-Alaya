@@ -20,7 +20,8 @@ import {
 } from "./evaluate.js";
 
 export function createQueryCompiledWalkTransfer(
-  compiled: QueryCompiledGammaV1
+  compiled: QueryCompiledGammaV1,
+  identityTieWinner?: string
 ): ShadowWalkUtilityTransfer {
   if (compiled.compile_status !== "compiled") {
     throw new ShadowContractError("query-compiled Gamma transfer requires a compiled contract");
@@ -33,6 +34,7 @@ export function createQueryCompiledWalkTransfer(
   return Object.freeze({
     kind: "query_compiled_gamma" as const,
     contract_digest: contractDigest,
+    ...(identityTieWinner === undefined ? {} : { identity_tie_winner: identityTieWinner }),
     emptySet: () => emptyQueryGammaSelectedSet(),
     score: (candidate, selected) =>
       evaluateQueryGammaTuple(compiled, asCompiledSet(selected), candidate.candidate_key),

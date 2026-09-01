@@ -6,13 +6,16 @@ import {
   readCapturedWalkRuntimeManifest,
   type ShadowCapturedWalk
 } from "../../prefix-capture/walk.js";
+import { emptySetUtilityInput } from "../../prefix-capture/capture.js";
 import {
   captureData,
   captureVerifiedLiveClosureAuthority
 } from "../closure/live-authority-binding.js";
 import { compileQueryGamma } from "../gamma/compile.js";
+import { captureSourceOwnedQueryGammaEvidence } from "../gamma/source-evidence.js";
 import type { QueryGammaCandidateEvidenceV1 } from "../gamma/contract.js";
 import type { LiveQueryProofAuthority } from "../live-query-proof-authority.js";
+import type { VerifiedMeasurementAuthorityV1 } from "../measurement/admission.js";
 import type { FiniteValue } from "../proof/oracle/contract.js";
 import type { QueryProofDecideWorldV1 } from "./decide.js";
 
@@ -38,6 +41,7 @@ export type QueryProofDecideWorldCaptureV1 = Readonly<{
   readonly resource_policy_digest: RecallFieldDigest;
   readonly world_digest: RecallFieldDigest;
   readonly decision_identity_digest: RecallFieldDigest;
+  readonly source_evidence_digest: RecallFieldDigest | null;
 }>;
 
 export type QueryProofDecideRuntimeCaptureV1 = Readonly<{
@@ -85,6 +89,68 @@ export function captureQueryProofDecideWorld(params: Readonly<{
     unresolved_tradeoff_pairs: premises.unresolved_tradeoff_pairs,
     answer_bindings: premises.answer_bindings
   }) as QueryProofDecideWorldV1;
+  return issueLiveCapturedWorld(live, world, null);
+}
+
+export function captureSourceOwnedQueryProofDecideWorld(params: Readonly<{
+  readonly live_authority: LiveQueryProofAuthority;
+  readonly support_measurement_authority: VerifiedMeasurementAuthorityV1;
+  readonly walk: ShadowCapturedWalk;
+}>): QueryProofDecideWorldV1 {
+  if (!isCapturedWalk(params.walk)) {
+    throw new Error("source-owned Decide_Q requires the issued live walk");
+  }
+  const runtime = readCapturedWalkRuntimeManifest(params.walk);
+  if (runtime === null) {
+    throw new Error("source-owned Decide_Q requires the issued live walk manifest");
+  }
+  const live = captureVerifiedLiveClosureAuthority(params.live_authority);
+  const evidence = captureSourceOwnedQueryGammaEvidence({
+    live_authority: live.authority,
+    measurement_authority: params.support_measurement_authority,
+    runtime
+  });
+  const compileInput = captureData({
+    compilation: live.authority.canonical_query_compilation,
+    candidates: evidence.candidates,
+    resource_policy: {
+      schema_version: 1 as const,
+      reject_duplicate_object: true as const,
+      token_budget: runtime.token_budget,
+      per_dimension_limits: runtime.per_dimension_limits
+    },
+    hypothesis_digest: evidence.hypothesis_digest
+  });
+  const compiled = compileQueryGamma(compileInput);
+  if (compiled.compile_status !== "compiled") {
+    throw new Error(`source-owned Decide_Q cannot compile Gamma: ${compiled.unsupported_reason}`);
+  }
+  const candidates = captureData(runtime.candidates.map((candidate) => ({
+    ...candidate,
+    utility: emptySetUtilityInput(candidate.candidate_key, candidate.object_key)
+  })));
+  assertCandidatePremises(candidates, compileInput.candidates);
+  assertAnswerBindingPremises(evidence.answer_bindings, compileInput.candidates);
+  const world = captureData({
+    compiled,
+    compile_input: compileInput,
+    candidates,
+    psi_edges: runtime.psi_edges,
+    token_budget: runtime.token_budget,
+    per_dimension_limits: runtime.per_dimension_limits,
+    unresolved_tradeoff_pairs: runtime.unresolved_tradeoff_pairs,
+    answer_bindings: evidence.answer_bindings
+  }) as QueryProofDecideWorldV1;
+  const issued = issueLiveCapturedWorld(live, world, evidence.source_digest);
+  return captureQueryProofDecideRuntime(issued, { walk: params.walk });
+}
+
+function issueLiveCapturedWorld(
+  live: ReturnType<typeof captureVerifiedLiveClosureAuthority>,
+  world: QueryProofDecideWorldV1,
+  sourceEvidenceDigest: RecallFieldDigest | null
+): QueryProofDecideWorldV1 {
+  const compiled = world.compiled;
   const candidateIdentityByDigest = candidateIdentityMapForWorld(world);
   const candidateUniverseDigest = digestRecallFieldIdentity(candidateIdentityByDigest);
   const resourcePolicyDigest = digestRecallFieldIdentity(compiled.resource_policy);
@@ -114,8 +180,10 @@ export function captureQueryProofDecideWorld(params: Readonly<{
       gamma_digest: compiled.gamma_digest,
       standings_digest: digestRecallFieldIdentity(compiled.standings),
       semantic_feasibility_digest:
-        digestRecallFieldIdentity(compiled.semantic_feasibility)
-    }))
+        digestRecallFieldIdentity(compiled.semantic_feasibility),
+      source_evidence_digest: sourceEvidenceDigest
+    })),
+    source_evidence_digest: sourceEvidenceDigest
   }));
 }
 
@@ -183,6 +251,7 @@ export function queryProofDecideBaseState(world: QueryProofDecideWorldV1): Finit
     resource_policy_digest: capture.resource_policy_digest,
     world_digest: capture.world_digest,
     decision_identity_digest: capture.decision_identity_digest,
+    source_evidence_digest: capture.source_evidence_digest,
     runtime_capture_digest: runtime.manifest_digest
   });
 }
@@ -213,6 +282,7 @@ export function digestDecideWorld(world: QueryProofDecideWorldV1): RecallFieldDi
     token_budget: frozen.token_budget,
     per_dimension_limits: frozen.per_dimension_limits,
     unresolved_tradeoff_pairs: frozen.unresolved_tradeoff_pairs,
+    identity_tie_winner: frozen.identity_tie_winner ?? null,
     answer_bindings: frozen.answer_bindings,
     standings_digest: digestRecallFieldIdentity(frozen.compiled.standings),
     feasibility_digest: digestRecallFieldIdentity(frozen.compiled.semantic_feasibility),

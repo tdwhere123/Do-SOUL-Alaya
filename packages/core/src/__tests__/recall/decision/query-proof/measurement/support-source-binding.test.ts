@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { fineAssess } from "../../../../../recall/delivery/fine-assessment.js";
+import { digestRecallFieldIdentity } from
+  "../../../../../recall/field/field-identity.js";
 import { materializeOpenSemanticFactorFormation } from
   "../../../../../semantic/open-semantic-factor-formation.js";
 import { materializeOpenSemanticFactorCompatibilityTrace } from
@@ -11,7 +14,9 @@ import {
   verifySupportMeasurementPreparedAuthorityV1
 } from "../../../../../recall/decision/query-proof/measurement/index.js";
 import {
-  PATH_GRAPH_GENERATION_SOURCE_OWNER
+  captureVerifiedSupportSourceSnapshot,
+  PATH_GRAPH_GENERATION_SOURCE_OWNER,
+  readVerifiedSupportSourceSnapshot
 } from "../../../../../recall/decision/query-proof/measurement/support-source-admission.js";
 import {
   projectLiveSupportOsf
@@ -24,6 +29,8 @@ import {
 import { createFourValuedWitness } from "../../../../../recall/decision/query-proof/witness/index.js";
 import { compileCanonicalQueryCompilation } from
   "../../../../../recall/query/canonical-query/index.js";
+import { digestCanonicalQueryV1 } from
+  "../../../../../recall/query/canonical-query/index.js";
 import { compileRecallAnswerShapePlan } from
   "../../../../../recall/query/recall-answer-shape-plan.js";
 import { compileRecallQueryDemand } from
@@ -31,9 +38,14 @@ import { compileRecallQueryDemand } from
 import { compileRecallQueryProbes } from
   "../../../../../recall/query/recall-query-probes.js";
 import {
+  authorityFrom,
+  captured,
+  certifiedScalarAuthority,
   capturedPathGraphPreparedAuthority,
-  cleanup
+  cleanup,
+  params
 } from "../../../integration/shadow/live-receipt-fixtures.js";
+import { evidenceCandidate } from "../../../delivery/canonical-delivery-fixtures.js";
 
 describe("support measurement source binding", () => {
   it("rejects self-reported hashes and unissued graphs", async () => {
@@ -224,6 +236,101 @@ describe("support measurement source binding", () => {
     cleanup(prepared);
   });
 
+  it("keeps the verified support snapshot unforgeable", async () => {
+    const prepared = await capturedPathGraphPreparedAuthority();
+    const capability = pathGraphCapability(prepared);
+    const bound = bindPreparedQueryCapture(prepared);
+    const source = currentQueryComposition(bound, "I implemented recall with a BA degree.");
+    const receipts = [projectedReceipt(source.composition)];
+    const payload = materializeSupportFromReceipts({
+      query_id: bound.canonicalQueryCompilation.query_identity.condition_identity,
+      snapshot_digest: bound.snapshotVector.vector_digest,
+      candidates: receipts
+    });
+    const authority = verifySupportMeasurementPreparedAuthorityV1({
+      evidence: supportEvidence(bound, capability, {
+        graph: payload.graph,
+        receipts,
+        observations: payload.proposition_observations
+      }, source)
+    });
+    const snapshot = captureVerifiedSupportSourceSnapshot(authority);
+
+    expect(snapshot.lease_digest).toBe(
+      digestRecallFieldIdentity(prepared.snapshotReadLease));
+    expect(readVerifiedSupportSourceSnapshot(snapshot)).not.toBeNull();
+    expect(readVerifiedSupportSourceSnapshot(Object.freeze({ ...snapshot }))).toBeNull();
+    expect(() => captureVerifiedSupportSourceSnapshot(Object.freeze({
+      ...authority
+    }) as typeof authority)).toThrow(/authority is unavailable/u);
+    cleanup(prepared);
+  });
+
+  it("builds a non-empty query-proof preview from the actual walk and support authority", async () => {
+    const prepared = await capturedPathGraphPreparedAuthority();
+    const bound = bindScalarPreparedQueryCapture(prepared);
+    const capability = pathGraphCapability(bound);
+    const source = scalarCurrentQueryComposition(bound);
+    const query = bound.canonicalQueryCompilation.hypotheses[0];
+    if (query === undefined) throw new Error("expected one canonical query hypothesis");
+    const receipt = Object.freeze({
+      ...projectedReceipt(source.composition),
+      hypothesis_digest: digestCanonicalQueryV1(query)
+    });
+    const payload = materializeSupportFromReceipts({
+      query_id: bound.canonicalQueryCompilation.query_identity.condition_identity,
+      snapshot_digest: bound.snapshotVector.vector_digest,
+      candidates: [receipt]
+    });
+    const measurementAuthority = verifySupportMeasurementPreparedAuthorityV1({
+      evidence: supportEvidence(bound, capability, {
+        graph: payload.graph,
+        receipts: [receipt],
+        observations: payload.proposition_observations
+      }, source)
+    });
+    const candidates = [evidenceCandidate("cand-1", "gold")];
+    const input = params(candidates);
+    const supplementaryData = Object.freeze({
+      ...input.supplementaryData,
+      openSemanticFactorComposition: source.composition,
+      openSemanticFactorCompatibilityTrace: source.trace,
+      queryOpenSemanticFactorFormation: source.query_capture,
+      semanticFactorFormationsByEvidenceId: source.evidence_formations
+    });
+    const base = fineAssess({ ...input, supplementaryData });
+    const observed = fineAssess({
+      ...input,
+      supplementaryData,
+      queryProofAuthority: authorityFrom(bound),
+      supportCandidateReceipts: [receipt]
+    });
+    const trace = captured(observed.shadowTrace);
+
+    if (trace.query_proof_preview?.status !== "captured") {
+      throw new Error(JSON.stringify({
+        preview: trace.query_proof_preview,
+        psi: trace.psi_v2_shadow
+      }));
+    }
+    expect(trace.query_proof_preview).toMatchObject({
+      status: "captured",
+      semantic_feasibility: [{
+        candidate_key: "workspace_local:memory_entry:cand-1",
+        semantic: "unresolved"
+      }]
+    });
+    expect(trace.query_proof_preview?.S_infty).toEqual([]);
+    expect(trace.query_proof_preview?.contract_digest).toMatch(/^sha256:/u);
+    expect(trace.query_proof_preview?.prefix).toEqual(
+      trace.query_proof_preview?.candidate_prefix);
+    expect(observed.candidates).toEqual(base.candidates);
+    expect(observed.capture_receipt).toEqual(base.capture_receipt);
+    expect(measurementAuthority.query_id).toBe(
+      bound.canonicalQueryCompilation.query_identity.condition_identity);
+    cleanup(prepared);
+  });
+
   it("refuses a collapse that is not the bound support observations", async () => {
     const prepared = await capturedPathGraphPreparedAuthority();
     const capability = pathGraphCapability(prepared);
@@ -325,6 +432,65 @@ function bindPreparedQueryCapture(
   });
 }
 
+function bindScalarPreparedQueryCapture(
+  prepared: Awaited<ReturnType<typeof capturedPathGraphPreparedAuthority>>
+) {
+  const scalar = certifiedScalarAuthority(prepared);
+  const queryText = scalar.canonical_query_evidence.probes.normalized_query;
+  if (queryText === null || queryText.length === 0) {
+    throw new Error("prepared authority has no query text");
+  }
+  const predicateSurface = queryText.slice(0, 1);
+  const variableSurface = queryText.slice(1);
+  if (variableSurface.length === 0) throw new Error("query text is too short for OSF capture");
+  const queryCapture = materializeOpenSemanticFactorFormation({
+    source_kind: "query",
+    source_text: queryText,
+    proposal: {
+      schema_version: 1,
+      producer_operator_id: "query-proof-source-test-v1",
+      source_text: queryText,
+      graph: {
+        schema_version: 2,
+        source_kind: "query",
+        factors: [{
+          factor_id: "predicate",
+          surface: predicateSurface,
+          semantic_identity: "buy",
+          source_occurrence: 0
+        }],
+        variables: [{
+          variable_id: "x0",
+          surface: variableSurface,
+          source_occurrence: 0
+        }],
+        result_variable_ids: ["x0"],
+        propositions: [{
+          proposition_id: "shape_rel_0",
+          predicate_factor_id: "predicate",
+          arguments: [argument(0, "location", "variable", "x0")]
+        }]
+      }
+    }
+  });
+  const canonicalQueryEvidence = Object.freeze({
+    ...scalar.canonical_query_evidence,
+    osfCapture: queryCapture
+  });
+  const snapshotCoherenceReceipt = scalar.snapshot_coherence_receipt;
+  return Object.freeze({
+    ...prepared,
+    canonicalQueryEvidence,
+    canonicalQueryCompilation: compileCanonicalQueryCompilation(
+      canonicalQueryEvidence,
+      snapshotCoherenceReceipt
+    ),
+    snapshotVector: scalar.snapshot_vector,
+    snapshotCoherenceReceipt,
+    snapshotReadLease: scalar.snapshot_read_lease
+  });
+}
+
 function currentQueryComposition(
   prepared: Awaited<ReturnType<typeof capturedPathGraphPreparedAuthority>>,
   evidenceText: string
@@ -338,6 +504,63 @@ function currentQueryComposition(
     query_capture as ReturnType<typeof formation>,
     evidenceText
   );
+}
+
+function scalarCurrentQueryComposition(
+  prepared: ReturnType<typeof bindScalarPreparedQueryCapture>
+) {
+  const queryCapture = prepared.canonicalQueryEvidence.osfCapture;
+  if (queryCapture == null || !("capture_digest" in queryCapture) ||
+      !("operator_id" in queryCapture)) {
+    throw new Error("prepared authority has no OSF query capture");
+  }
+  const evidenceText = "I bought it in Paris.";
+  const evidence = materializeOpenSemanticFactorFormation({
+    source_kind: "evidence",
+    source_text: evidenceText,
+    proposal: {
+      schema_version: 1,
+      producer_operator_id: "query-proof-source-test-v1",
+      source_text: evidenceText,
+      graph: {
+        schema_version: 2,
+        source_kind: "evidence",
+        factors: [{
+          factor_id: "predicate",
+          surface: "bought",
+          semantic_identity: "buy",
+          source_occurrence: 0
+        }, {
+          factor_id: "place",
+          surface: "Paris",
+          semantic_identity: "x0",
+          source_occurrence: 0
+        }],
+        variables: [],
+        result_variable_ids: [],
+        propositions: [{
+          proposition_id: "buy-evidence",
+          predicate_factor_id: "predicate",
+          arguments: [argument(0, "location", "factor", "place")]
+        }]
+      }
+    }
+  });
+  const trace = materializeOpenSemanticFactorCompatibilityTrace({
+    query_capture: queryCapture,
+    evidence_formations: { gold: evidence }
+  });
+  const composition = materializeOpenSemanticFactorComposition({
+    trace,
+    query_capture: queryCapture,
+    evidence_formations: { gold: evidence }
+  });
+  return {
+    composition,
+    trace,
+    query_capture: queryCapture,
+    evidence_formations: Object.freeze({ gold: evidence })
+  };
 }
 
 function graduationComposition(degree: "BA degree" | "MA degree") {

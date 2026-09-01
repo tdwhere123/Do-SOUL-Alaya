@@ -39,6 +39,7 @@ export type ShadowWalkAdmit = Readonly<{
 export type ShadowWalkUtilityTransfer = Readonly<{
   readonly kind: "live_facility" | "query_compiled_gamma";
   readonly contract_digest: RecallFieldDigest;
+  readonly identity_tie_winner?: string;
   readonly emptySet: (
     universe: readonly ShadowObligationKey[],
     candidates: readonly ShadowWalkTransferCandidate[]

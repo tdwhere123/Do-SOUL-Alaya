@@ -41,14 +41,18 @@ export function materializePsiV2ShadowInput(
 ): Pick<ShadowIntegrateInput,
   "lexicalIntervalEnvelopesByKey" | "supportMaterialization" |
   "lexical_measurement_authority" | "support_measurement_authority" |
-  "psi_v2_producer_outcomes" | "query_id" | "snapshot_digest"> {
+  "psi_v2_producer_outcomes" | "query_id" | "snapshot_digest" |
+  "query_proof_authority"> {
   const authority = params.queryProofAuthority;
   const authorityState = verifyAuthority(params, authority);
   const lexical = materializeLexicalIntervals(params, authorityState);
   const support = materializeSupport(params, authorityState);
   return {
     psi_v2_producer_outcomes: Object.freeze([lexical.outcome, support.outcome]),
-    ...(authorityState.status === "verified" ? authorityState.pins : {}),
+    ...(authorityState.status === "verified" ? {
+      ...authorityState.pins,
+      query_proof_authority: authorityState.authority
+    } : {}),
     ...(lexical.payload === undefined ? {} : {
       lexicalIntervalEnvelopesByKey: lexical.payload,
       lexical_measurement_authority: lexical.measurementAuthority

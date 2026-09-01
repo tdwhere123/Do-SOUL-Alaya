@@ -3,6 +3,8 @@ import { digestRecallFieldIdentity } from
   "../../../../../recall/field/field-identity.js";
 import { compileQueryGamma } from
   "../../../../../recall/decision/query-proof/gamma/compile.js";
+import { digestCanonicalQueryV1 } from
+  "../../../../../recall/query/canonical-query/validate.js";
 import {
   QUERY_GAMMA_STRATA,
   QUERY_PROOF_GAMMA_OPERATOR_ID
@@ -196,6 +198,37 @@ describe("query-compiled Gamma_q", () => {
       compilation: certifiedHole,
       candidates: [candidate("A")]
     }).unsupported_reason).toBe("blocks_certified_delivery");
+  });
+
+  it("uses the receipt-selected hypothesis without inheriting a sibling hypothesis hole", () => {
+    const selected = scalarQuery();
+    const sibling = distinctQuery();
+    const selectedDigest = digestCanonicalQueryV1(selected);
+    const siblingHole = Object.freeze({
+      ...hole("unknown_correlation"),
+      hypothesis_digest: digestCanonicalQueryV1(sibling)
+    });
+    const base = compilationFor(selected);
+    const { digest: _digest, ...baseBody } = base;
+    const body = Object.freeze({
+      ...baseBody,
+      hypotheses: Object.freeze([selected, sibling]),
+      holes: Object.freeze([siblingHole])
+    });
+    const compilation = Object.freeze({
+      ...body,
+      digest: digestRecallFieldIdentity(body)
+    });
+
+    expect(compileQueryGamma({
+      compilation,
+      candidates: [candidate("A", { bindings: [binding("alice")] })],
+      hypothesis_digest: selectedDigest
+    }).compile_status).toBe("compiled");
+    expect(compileQueryGamma({
+      compilation,
+      candidates: [candidate("A")]
+    }).unsupported_reason).toBe("no_accepted_answer_program");
   });
 
   it("does not let a wrong typed variable cover a distinct atom", () => {

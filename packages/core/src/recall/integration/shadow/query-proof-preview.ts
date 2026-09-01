@@ -8,10 +8,15 @@ import {
 } from "../../decision/query-proof/seal/decide.js";
 import {
   captureQueryProofDecideRuntime,
+  captureSourceOwnedQueryProofDecideWorld,
   decideWorldCapture,
   freezeDecideWorld,
   type QueryProofDecideRuntimeManifestV1
 } from "../../decision/query-proof/seal/world-capture.js";
+import type { LiveQueryProofAuthority } from
+  "../../decision/query-proof/live-query-proof-authority.js";
+import type { VerifiedMeasurementAuthorityV1 } from
+  "../../decision/query-proof/measurement/admission.js";
 import type { FiniteDecisionTraceInput } from
   "../../decision/query-proof/proof/oracle/contract.js";
 import {
@@ -26,6 +31,11 @@ export type QueryProofPreviewRequest = Readonly<{
 }>;
 
 export type QueryProofPreviewRuntimeCapture = QueryProofDecideRuntimeManifestV1;
+
+export type QueryProofPreviewSource = Readonly<{
+  readonly live_authority: LiveQueryProofAuthority;
+  readonly support_measurement_authority: VerifiedMeasurementAuthorityV1;
+}>;
 
 export type QueryProofPreviewSidecar = Readonly<{
   readonly status: "captured" | "failed";
@@ -43,13 +53,25 @@ export type QueryProofPreviewSidecar = Readonly<{
 export function previewSidecar(
   preview: QueryProofPreviewRequest | undefined,
   kMax: number,
-  runtimeCapture?: QueryProofPreviewRuntimeCapture
+  runtimeCapture?: QueryProofPreviewRuntimeCapture,
+  source?: QueryProofPreviewSource
 ): { readonly query_proof_preview?: QueryProofPreviewSidecar } {
-  if (preview === undefined) return {};
-  const capturedKMax = preview.k_max ?? kMax;
+  if (preview === undefined && source === undefined) return {};
+  const capturedKMax = source === undefined ? preview?.k_max ?? kMax : kMax;
   let rawWorld: QueryProofDecideWorldV1;
   try {
-    rawWorld = preview.world;
+    if (source !== undefined) {
+      if (runtimeCapture === undefined) {
+        throw new Error("source-owned query-proof preview requires the exact live walk");
+      }
+      rawWorld = captureSourceOwnedQueryProofDecideWorld({
+        live_authority: source.live_authority,
+        support_measurement_authority: source.support_measurement_authority,
+        walk: runtimeCapture.walk
+      });
+    } else {
+      rawWorld = preview!.world;
+    }
   } catch (error) {
     return failedSidecar("sha256:preview_unavailable", error);
   }

@@ -4,9 +4,14 @@ import { ShadowContractError } from "../contract-primitives.js";
 import type { ShadowCaptureWalkCandidate } from "./walk.js";
 
 export function smallestDeterministicTailCandidate(
-  members: readonly ShadowCaptureWalkCandidate[]
+  members: readonly ShadowCaptureWalkCandidate[],
+  exactTieWinner?: string
 ): ShadowCaptureWalkCandidate {
   assertUniqueTailKeys(members);
+  const refined = exactTieWinner === undefined
+    ? undefined
+    : members.find(({ candidate_key }) => candidate_key === exactTieWinner);
+  if (refined !== undefined) return refined;
   let best = members[0]!;
   for (const member of members) {
     if (compareText(tailKey(member.candidate_key), tailKey(best.candidate_key)) < 0) {

@@ -24,12 +24,25 @@ export function overlayWorld(
   assertOverlayBaseState(world, baseState);
   const baseline = freezeDecideWorld(world);
   const capture = decideWorldCapture(baseline);
+  const {
+    identity_tie_winner: _baselineIdentityTieWinner,
+    ...baselineWithoutIdentityTie
+  } = baseline;
   let candidates: ShadowCaptureWalkCandidate[] = [...baseline.candidates];
   let evidence: QueryGammaCandidateEvidenceV1[] = [...baseline.compile_input.candidates];
   const bindings = [...baseline.answer_bindings];
+  let identityTieWinner = baseline.identity_tie_winner;
   let recompile = false;
   const semanticOverrides = new Map<string, "feasible" | "infeasible">();
   for (const assignment of refinement.assignments) {
+    if (assignment.kind === "identity_tie") {
+      identityTieWinner = applyIdentityTieAssignment(
+        assignment,
+        capture?.candidate_identity_by_digest ?? candidateIdentityMapForWorld(baseline),
+        identityTieWinner
+      );
+      continue;
+    }
     if (assignment.kind === "answer_binding" ||
         assignment.kind === "correlation_state" ||
         assignment.kind === "proposition_conflict") {
@@ -49,8 +62,7 @@ export function overlayWorld(
       assignment,
       candidates,
       evidence,
-      bindings,
-      capture?.candidate_identity_by_digest ?? candidateIdentityMapForWorld(baseline)
+      bindings
     );
     candidates = [...applied.candidates];
     evidence = [...applied.evidence];
@@ -70,14 +82,33 @@ export function overlayWorld(
     compileInput.candidates.map((candidate) => candidate.candidate_key)
   );
   const overlaid = captureData({
-    ...baseline,
+    ...baselineWithoutIdentityTie,
     compiled: applySemanticOverrides(projected, semanticOverrides),
     compile_input: compileInput,
     candidates: Object.freeze(candidates),
+    ...(identityTieWinner === undefined ||
+      !candidates.some(({ candidate_key }) => candidate_key === identityTieWinner)
+      ? {}
+      : { identity_tie_winner: identityTieWinner }),
     answer_bindings: Object.freeze(bindings)
   }) as QueryProofDecideWorldV1;
   if (capture === null) return overlaid;
   return issueDerivedQueryProofDecideWorld(overlaid, baseline, capture);
+}
+
+function applyIdentityTieAssignment(
+  assignment: FiniteConcreteRefinement["assignments"][number],
+  candidateIdentityByDigest: Readonly<Record<string, string>>,
+  currentWinner: string | undefined
+): string {
+  const winner = candidateIdentityByDigest[String(assignment.value)];
+  if (winner === undefined) {
+    throw new Error("Decide_Q identity-tie winner is outside the captured universe");
+  }
+  if (currentWinner !== undefined && currentWinner !== winner) {
+    throw new Error("Decide_Q identity-tie refinements conflict");
+  }
+  return winner;
 }
 
 function assertOverlayBaseState(
@@ -110,8 +141,7 @@ function applyAssignment(
   assignment: FiniteConcreteRefinement["assignments"][number],
   candidates: readonly ShadowCaptureWalkCandidate[],
   evidence: readonly QueryGammaCandidateEvidenceV1[],
-  bindings: Array<QueryProofDecideWorldV1["answer_bindings"][number]>,
-  candidateIdentityByDigest: Readonly<Record<string, string>>
+  bindings: Array<QueryProofDecideWorldV1["answer_bindings"][number]>
 ): {
   readonly candidates: readonly ShadowCaptureWalkCandidate[];
   readonly evidence: readonly QueryGammaCandidateEvidenceV1[];
@@ -149,16 +179,6 @@ function applyAssignment(
     return {
       candidates,
       evidence: overlayBinding(evidence, owner, current, assignment.value)
-    };
-  }
-  if (assignment.kind === "identity_tie") {
-    const winner = candidateIdentityByDigest[String(assignment.value)];
-    if (winner === undefined) {
-      throw new Error("Decide_Q identity-tie winner is outside the captured universe");
-    }
-    return {
-      candidates: candidates.filter((row) => row.candidate_key === winner),
-      evidence: evidence.filter((row) => row.candidate_key === winner)
     };
   }
   if (assignment.kind === "correlation_state") {
