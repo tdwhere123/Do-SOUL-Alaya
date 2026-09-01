@@ -44,7 +44,13 @@ import {
   runQueryProofDecideQ,
   type QueryProofDecideWorldV1
 } from "./decide.js";
-import { digestDecideWorld, freezeDecideWorld } from "./overlay.js";
+import {
+  decideWorldCapture,
+  decideWorldRuntimeCapture,
+  digestDecideWorld,
+  freezeDecideWorld,
+  queryProofDecideBaseState
+} from "./world-capture.js";
 
 export type SealCheckerInputV1 = Readonly<{
   readonly live_authority: LiveQueryProofAuthority;
@@ -62,6 +68,13 @@ export type SealCheckerInputV1 = Readonly<{
 export function checkDecisionStability(
   input: SealCheckerInputV1
 ): SealCheckerResultV1 {
+  if (!Number.isSafeInteger(input.k_max) || input.k_max <= 0 ||
+      input.fixture.k_max !== input.k_max) {
+    return unsupported(
+      digestRecallFieldIdentity({ kind: "seal_checker_invalid_k" }),
+      "seal checker and finite fixture must share one positive K_max"
+    );
+  }
   let captured: SealCheckerInputV1;
   try {
     captured = captureSealCheckerPremises(input);
@@ -107,6 +120,9 @@ export function checkDecisionStability(
   if (hasUnresolvedSemantic(boundInput.world)) {
     return open(digest, "unresolved semantic feasibility remains");
   }
+  if (hasUnknownGammaStanding(boundInput.world.compiled)) {
+    return open(digest, "unknown Gamma standing remains decision-relevant");
+  }
   if (!prefixAllFeasible(boundInput.world, decided.prefix)) {
     return open(digest, "selected prefix is not compiled-feasible");
   }
@@ -121,13 +137,28 @@ export function checkDecisionStability(
 
 function captureSealCheckerPremises(input: SealCheckerInputV1): SealCheckerInputV1 {
   const world = freezeDecideWorld(input.world);
+  const worldCapture = decideWorldCapture(world);
   const compiled = captureData(input.compiled);
   const fixture = captureData(input.fixture);
   const closures = captureData(input.closures);
   const coordinates = captureData(input.coordinates);
   const limits = captureData(input.limits);
   const kMax = captureData(input.k_max);
-  const liveAuthority = captureVerifiedLiveClosureAuthority(input.live_authority).authority;
+  const live = captureVerifiedLiveClosureAuthority(input.live_authority);
+  if (worldCapture !== null &&
+      (worldCapture.authority_digest !== live.binding.authority_digest ||
+      worldCapture.query_digest !== live.binding.query_digest ||
+      worldCapture.request_digest !== live.binding.request_digest ||
+      worldCapture.snapshot_digest !== live.binding.snapshot_digest ||
+      worldCapture.principal_digest !== live.binding.principal_digest ||
+      worldCapture.workspace_id !== live.binding.workspace_id)) {
+    throw new Error("Decide_Q world is outside the supplied live authority");
+  }
+  if (worldCapture !== null && digestRecallFieldIdentity(fixture.base_state) !==
+      digestRecallFieldIdentity(queryProofDecideBaseState(world))) {
+    throw new Error("finite fixture base_state is outside the captured Decide_Q world");
+  }
+  const liveAuthority = live.authority;
   return Object.freeze({
     live_authority: liveAuthority,
     fixture,
@@ -256,6 +287,13 @@ function certifyStableOutcome(
   if (authority.canonical_query_compilation.digest !== input.world.compiled.compilation_digest) {
     return unsupported(digest, "compiled compilation digest does not match live canonical query");
   }
+  if (decideWorldCapture(input.world) === null ||
+      decideWorldRuntimeCapture(input.world) === null) {
+    return unsupported(
+      digest,
+      "final seal requires one live-authority world bound to its exact runtime capture"
+    );
+  }
   if (certifiedDeliveryBlocked(input)) {
     return unsupported(digest, "blocks_certified_delivery hole remains");
   }
@@ -287,6 +325,10 @@ function compiledIdentityMismatch(input: SealCheckerInputV1): string | null {
   }
   if (input.world.compile_input.compilation.digest !== world.compilation_digest) {
     return "Decide_Q world compilation digest does not match compiled contract";
+  }
+  const capture = decideWorldCapture(input.world);
+  if (capture !== null && capture.world_digest !== digestDecideWorld(input.world)) {
+    return "Decide_Q world capture identity mismatch";
   }
   const universe = decideWorldUniverseMismatch(
     input.world.compile_input.candidates.map((candidate) => candidate.candidate_key),
@@ -343,8 +385,17 @@ function hasCertifiedDeliveryHole(
 }
 
 export function digestQueryProofState(input: SealCheckerInputV1): RecallFieldDigest {
+  const capture = decideWorldCapture(input.world);
+  const runtimeCapture = decideWorldRuntimeCapture(input.world);
   return digestRecallFieldIdentity({
     kind: "query_proof_proof_state_v1",
+    authority_digest: capture?.authority_digest ?? null,
+    decision_identity_digest: capture?.decision_identity_digest ?? null,
+    world_digest: capture?.world_digest ?? digestDecideWorld(input.world),
+    candidate_universe_digest: capture?.candidate_universe_digest ?? null,
+    resource_policy_digest: capture?.resource_policy_digest ??
+      digestRecallFieldIdentity(input.world.compiled.resource_policy),
+    runtime_capture_digest: runtimeCapture?.manifest_digest ?? null,
     fixture: input.fixture,
     k_max: input.k_max,
     coordinates: input.coordinates,
@@ -362,6 +413,11 @@ function hasUnresolvedSemantic(world: QueryProofDecideWorldV1): boolean {
   const semantic = uniqueSemanticByCandidate(world);
   if (semantic === null) return true;
   return world.candidates.some((row) => semantic.get(row.candidate_key) === "unresolved");
+}
+
+function hasUnknownGammaStanding(compiled: QueryCompiledGammaV1): boolean {
+  return compiled.standings.some((standing) =>
+    standing.coverage === "unknown" || standing.independence === "unknown");
 }
 
 function prefixAllFeasible(
@@ -429,6 +485,7 @@ function mintSeal(
     schema_version: 1 as const,
     operator_id: DECISION_STABILITY_SEAL_OPERATOR_ID,
     decision_contract_digest: digest,
+    authority_digest: captureVerifiedLiveClosureAuthority(authority).binding.authority_digest,
     query_digest: compiled.query_digest,
     compilation_digest: compiled.compilation_digest,
     live_compilation_digest: liveCompilationDigest,

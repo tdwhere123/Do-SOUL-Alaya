@@ -101,7 +101,12 @@ describe("query-compiled Gamma standings and marginals", () => {
       candidate("B", { bindings: [binding("alice-alias", "may_equal")] })
     ]);
     expect(compiled.atoms.map((atom) =>
-      `${atom.variable}:${atom.semantic_identity}`)).toEqual(["x:alice"]);
+      `${atom.variable}:${atom.semantic_identity}`)).toEqual([
+        "x:alice-alias",
+        "x:alice"
+      ]);
+    expect(compiled.semantic_feasibility.find((row) => row.candidate_key === "B")?.semantic)
+      .toBe("unresolved");
     expect(evaluateQueryGammaTuple(compiled, emptyQueryGammaSelectedSet(), "B"))
       .toEqual({
         answer_binding_position: 0,

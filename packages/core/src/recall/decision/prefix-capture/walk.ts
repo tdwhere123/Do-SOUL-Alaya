@@ -193,11 +193,39 @@ function computePick(
     G: state.transfer.score(candidate, state.set, state.universe)
   }));
   const maxG = maxCohort(scored, state.transfer);
+  const unresolvedAdmission = hasUnresolvedExcludedHigher(
+    feasible, choice, core, maxG[0]?.G, state
+  );
   const tPsi = undominated(maxG.map((row) => row.candidate), state.psi);
   if (tPsi.length === 0) return CYCLE;
   const winner = smallestCandidate(tPsi);
-  state.decisions.push(buildDecision(winner, core, feasible, maxG, tPsi, state));
+  state.decisions.push(buildDecision(
+    winner, core, feasible, maxG, tPsi, state, unresolvedAdmission
+  ));
   return winner;
+}
+
+function hasUnresolvedExcludedHigher(
+  feasible: readonly ShadowCaptureWalkCandidate[],
+  choice: readonly ShadowCaptureWalkCandidate[],
+  core: readonly ShadowCaptureWalkCandidate[],
+  choiceMax: WalkGammaScore | undefined,
+  state: WalkState
+): boolean {
+  if (state.transfer.kind !== "query_compiled_gamma" || choiceMax === undefined) return false;
+  const chosen = new Set(choice.map((candidate) => candidate.candidate_key));
+  return feasible.some((candidate) => {
+    if (chosen.has(candidate.candidate_key)) return false;
+    const admission = state.transfer.admitLowerFrontier(
+      candidate,
+      admissionRivals(candidate, core, feasible, state.transfer),
+      state.set,
+      state.universe
+    );
+    if (admission.status !== "unresolved") return false;
+    const score = state.transfer.score(candidate, state.set, state.universe);
+    return state.transfer.compare(score, choiceMax) >= 0;
+  });
 }
 
 function admissionRivals(
@@ -320,7 +348,8 @@ function buildDecision(
   feasible: readonly ShadowCaptureWalkCandidate[],
   maxG: readonly ScoredCandidate[],
   tPsi: readonly ShadowCaptureWalkCandidate[],
-  state: WalkState
+  state: WalkState,
+  forcedUnresolved: boolean
 ): ShadowCaptureDecisionReceipt {
   const inCore = core.some((member) => member.candidate_key === winner.candidate_key);
   const admitted = inCore
@@ -341,14 +370,21 @@ function buildDecision(
     capture_reason: inCore ? "core_undominated" : "cross_frontier_novelty",
     G: winnerG,
     G_status: winner.utility.availability,
-    named_novelty: namedNovelty(admitted, inCore),
+    named_novelty: namedNovelty(
+      admitted,
+      inCore,
+      state.transfer.kind === "query_compiled_gamma"
+        ? state.transfer.gainAtomIds(winner, state.set)
+        : Object.freeze([])
+    ),
     novelty_core_known_absence: inCore ? [] : admitted.core_absence.map(toAbsenceReceipt),
     max_g_cohort: Object.freeze(
       maxG.map((row) => row.candidate.candidate_key).sort(compareText)
     ),
     equal_g_dominance_rejects: equalGRejects(maxG, tPsiKeys, state.psi),
     deterministic_tail: SHADOW_DETERMINISTIC_TAIL,
-    unresolved_pointwise_tradeoff: unresolvedTradeoff(tPsi, state.unresolved_tradeoff),
+    unresolved_pointwise_tradeoff: forcedUnresolved ||
+      unresolvedTradeoff(tPsi, state.unresolved_tradeoff),
     h_gate: "none",
     walk_reject: "none",
     static_frontier_index: winner.static_frontier_index
@@ -427,13 +463,17 @@ function applyPick(state: WalkState, picked: ShadowCaptureWalkCandidate): void {
 
 function namedNovelty(
   novelty: { readonly named_novelty: ShadowCaptureDecisionReceipt["named_novelty"] },
-  inCore: boolean
+  inCore: boolean,
+  compiledAtomIds: readonly string[]
 ): ShadowCaptureDecisionReceipt["named_novelty"] {
   if (inCore) {
     return freezeShadow({
       facility_keys: Object.freeze([] as string[]),
       value_pairs: Object.freeze([] as string[]),
-      content_ids: Object.freeze([] as string[])
+      content_ids: Object.freeze([] as string[]),
+      ...(compiledAtomIds.length > 0
+        ? { compiled_atom_ids: Object.freeze([...compiledAtomIds]) }
+        : {})
     });
   }
   return novelty.named_novelty;
@@ -442,6 +482,7 @@ function namedNovelty(
 function emptyAdmit(): ReturnType<ShadowWalkUtilityTransfer["admitLowerFrontier"]> {
   return freezeShadow({
     admitted: false,
+    status: "denied" as const,
     named_novelty: freezeShadow({
       facility_keys: Object.freeze([] as string[]),
       value_pairs: Object.freeze([] as string[]),

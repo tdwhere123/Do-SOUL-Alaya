@@ -27,7 +27,14 @@ import {
   QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
   parseDecisionStabilitySeal
 } from "../../../../../recall/decision/query-proof/seal/contract.js";
-import { digestDecideWorld, freezeDecideWorld, overlayWorld } from
+import {
+  captureQueryProofDecideWorld,
+  digestDecideWorld,
+  freezeDecideWorld,
+  queryProofDecideBaseState
+} from
+  "../../../../../recall/decision/query-proof/seal/world-capture.js";
+import { overlayWorld } from
   "../../../../../recall/decision/query-proof/seal/overlay.js";
 import {
   checkDecisionStability,
@@ -46,6 +53,7 @@ import type { PreparedRecallRequest } from
   "../../../../../recall/runtime/recall-service-runner-types.js";
 import {
   authorityFrom,
+  certifiedScalarAuthority,
   cleanup,
   preparedAuthority
 } from "../../../integration/shadow/live-receipt-fixtures.js";
@@ -56,6 +64,8 @@ import {
 import {
   SHADOW_CAPTURE_OPERATOR_ID
 } from "../../../../../recall/decision/prefix-capture/identity.js";
+import { previewSidecar } from
+  "../../../../../recall/integration/shadow/query-proof-preview.js";
 
 import {
   allObservableDistinct,
@@ -111,6 +121,8 @@ function worldOf(
     answer_bindings: keys.map((key) => Object.freeze({
       candidate_key: key,
       binding_id: `bind:${key}`,
+      variable: "x",
+      semantic_identity: key,
       value: key
     }))
   });
@@ -131,6 +143,63 @@ function worldFromQuery(
     compiled,
     compile_input: compileInput
   });
+}
+
+function candidateIdentityDigest(key: string) {
+  return digestRecallFieldIdentity({ candidate_key: key, object_key: key });
+}
+
+function capturedWorldOf(
+  keys: readonly string[],
+  bindingValue: (candidateKey: string) => string = (candidateKey) => candidateKey
+): Readonly<{
+  readonly authority: ReturnType<typeof certifiedScalarAuthority>;
+  readonly world: QueryProofDecideWorldV1;
+}> {
+  const authority = certifiedScalarAuthority(prepared);
+  const propositionId = authority.canonical_query_compilation.hypotheses[0]?.predicates[0]?.id;
+  if (propositionId === undefined) throw new Error("certified scalar fixture missing predicate");
+  const evidence = keys.map((key) => candidate(key, {
+    bindings: [binding(key, "proved_distinct", "x0")],
+    propositions: [proposition(propositionId)]
+  }));
+  const world = captureQueryProofDecideWorld({
+    live_authority: authority,
+    premises: {
+      gamma: Object.freeze({ candidates: Object.freeze(evidence) }),
+      candidates: Object.freeze(evidence.map((row) => Object.freeze({
+        candidate_key: row.candidate_key,
+        object_key: row.object_key,
+        token_cost: row.token_cost,
+        dimension: row.dimension,
+        h_eligible: true,
+        utility: emptyWalkUtility(row.candidate_key, row.object_key),
+        static_frontier_index: null
+      }))),
+      psi_edges: Object.freeze([]),
+      token_budget: 10,
+      per_dimension_limits: null,
+      unresolved_tradeoff_pairs: Object.freeze([]),
+      answer_bindings: Object.freeze(evidence.map((row) => Object.freeze({
+        candidate_key: row.candidate_key,
+        binding_id: `bind:${row.candidate_key}`,
+        variable: "x0",
+        semantic_identity: row.candidate_key,
+        value: bindingValue(row.candidate_key)
+      })))
+    }
+  });
+  const preview = previewSidecar({ world }, 1, {
+    candidates: world.candidates,
+    psi_edges: world.psi_edges,
+    token_budget: world.token_budget,
+    per_dimension_limits: world.per_dimension_limits,
+    unresolved_tradeoff_pairs: world.unresolved_tradeoff_pairs
+  });
+  if (preview.query_proof_preview?.status !== "captured") {
+    throw new Error("captured world did not bind to its runtime manifest");
+  }
+  return Object.freeze({ authority, world });
 }
 
 function noFalseSingleton(
@@ -161,10 +230,11 @@ function noFalseSingleton(
 function checkerInput(
   world: QueryProofDecideWorldV1,
   fixture: FiniteOracleFixture,
-  coordinates: Parameters<typeof checkDecisionStability>[0]["coordinates"] = []
+  coordinates: Parameters<typeof checkDecisionStability>[0]["coordinates"] = [],
+  authority = authorityFrom(prepared)
 ) {
   return {
-    live_authority: authorityFrom(prepared),
+    live_authority: authority,
     fixture,
     compiled: world.compiled,
     world,
@@ -191,17 +261,64 @@ function withCompilationDigest(
   });
 }
 
-function emptyFixture(kMax: number): FiniteOracleFixture {
+function emptyFixture(kMax: number, world?: QueryProofDecideWorldV1): FiniteOracleFixture {
+  const baseState = world === undefined ? {} : queryProofDecideBaseState(world);
   return {
     fixture_id: "query-proof-decide-empty",
-    snapshot_digest: prepared.snapshotVector.vector_digest,
+    snapshot_digest: world === undefined
+      ? prepared.snapshotVector.vector_digest
+      : (baseState as { readonly snapshot_digest: ReturnType<typeof digestRecallFieldIdentity> })
+        .snapshot_digest,
     k_max: kMax,
-    base_state: {},
+    base_state: baseState,
     coordinates: []
   };
 }
 
 describe("final Decide_Q and SealChecker_v1", () => {
+  it("rejects an answer value that is relabelled away from its semantic identity", () => {
+    expect(() => capturedWorldOf(["A"], () => "semantic:B"))
+      .toThrow(/value is not its semantic identity/u);
+  });
+
+  it("certifies a singleton only from one live-authority captured world", () => {
+    const { authority, world } = capturedWorldOf(["A"]);
+    const fixture = emptyFixture(1, world);
+    const checker = checkDecisionStability(checkerInput(world, fixture, [], authority));
+    if (checker.status !== "CERTIFIED_STABLE") throw new Error(JSON.stringify(checker));
+    expect(checker.status).toBe("CERTIFIED_STABLE");
+    expect(parseDecisionStabilitySeal(checker.seal)).toEqual(checker.seal);
+    expect(checker.seal.authority_digest)
+      .toBe(deriveLiveClosureAuthorityBinding(authority).authority_digest);
+  });
+
+  it("rejects runtime-bound worlds under a different authority, base state, or K", () => {
+    const { authority, world } = capturedWorldOf(["A"]);
+    const fixture = emptyFixture(1, world);
+    const foreign = checkDecisionStability(checkerInput(
+      world,
+      fixture,
+      [],
+      authorityFrom(prepared)
+    ));
+    expect(foreign.status).toBe("UNSUPPORTED");
+    if (foreign.status !== "UNSUPPORTED") throw new Error("expected authority refusal");
+    expect(foreign.reason).toMatch(/outside the supplied live authority/u);
+
+    const wrongBase = checkDecisionStability(checkerInput(world, {
+      ...fixture,
+      base_state: Object.freeze({})
+    }, [], authority));
+    expect(wrongBase.status).toBe("UNSUPPORTED");
+    if (wrongBase.status !== "UNSUPPORTED") throw new Error("expected base refusal");
+    expect(wrongBase.reason).toMatch(/base_state/u);
+
+    expect(checkDecisionStability({
+      ...checkerInput(world, fixture, [], authority),
+      k_max: 2
+    }).status).toBe("UNSUPPORTED");
+  });
+
   it("binds prefixSK of one existing walk and shares the decision-contract digest", () => {
     const world = worldOf(["A", "B"]);
     const decided = runQueryProofDecideQ(world, 1);
@@ -263,9 +380,9 @@ describe("final Decide_Q and SealChecker_v1", () => {
       k_max: 1,
       base_state: {},
       coordinates: [{
-        coordinate_id: "answer",
+        coordinate_id: "bind:A",
         sensitivity_id: "sensitivity:answer",
-        owner_id: "owner:answer",
+        owner_id: "A",
         kind: "answer_binding",
         abstract_kind: "binding",
         choices: [
@@ -283,9 +400,9 @@ describe("final Decide_Q and SealChecker_v1", () => {
       abstract_operator: createQueryProofAbstractOperator(world),
       closures: [],
       coordinates: [{
-        coordinate_id: "answer",
+        coordinate_id: "bind:A",
         sensitivity_id: "sensitivity:answer",
-        owner_id: "owner:answer",
+        owner_id: "A",
         kind: "binding",
         possible_bindings: ["alpha", "beta"]
       }],
@@ -566,8 +683,8 @@ describe("final Decide_Q and SealChecker_v1", () => {
         kind: "identity_tie",
         abstract_kind: "identity_tie",
         choices: [
-          { choice_id: "A", value: "A" },
-          { choice_id: "B", value: "B" }
+          { choice_id: "A", value: candidateIdentityDigest("A") },
+          { choice_id: "B", value: candidateIdentityDigest("B") }
         ]
       }]
     };
@@ -577,7 +694,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
       owner_id: "owner:identity-tail",
       kind: "identity_tie",
       universe: "finite",
-      possible_winner_digests: ["A", "B"]
+      possible_winner_digests: [candidateIdentityDigest("A"), candidateIdentityDigest("B")]
     }]));
     expect(checker.status).not.toBe("CERTIFIED_STABLE");
   });
@@ -755,7 +872,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
         {
           coordinate_id: "B",
           sensitivity_id: "sensitivity:membership",
-          owner_id: "owner:membership",
+          owner_id: "B",
           kind: "candidate_membership",
           abstract_kind: "membership",
           choices: [
@@ -766,7 +883,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
         {
           coordinate_id: "A",
           sensitivity_id: "sensitivity:feasibility",
-          owner_id: "owner:feasibility",
+          owner_id: "A",
           kind: "semantic_feasibility",
           abstract_kind: "semantic_feasibility",
           choices: [
@@ -781,8 +898,8 @@ describe("final Decide_Q and SealChecker_v1", () => {
           kind: "identity_tie",
           abstract_kind: "identity_tie",
           choices: [
-            { choice_id: "A", value: "A" },
-            { choice_id: "B", value: "B" }
+            { choice_id: "A", value: candidateIdentityDigest("A") },
+            { choice_id: "B", value: candidateIdentityDigest("B") }
           ]
         }
       ]
@@ -791,14 +908,14 @@ describe("final Decide_Q and SealChecker_v1", () => {
       {
         coordinate_id: "B",
         sensitivity_id: "sensitivity:membership",
-        owner_id: "owner:membership",
+        owner_id: "B",
         kind: "membership" as const,
         possible_states: ["absent", "present"] as const
       },
       {
         coordinate_id: "A",
         sensitivity_id: "sensitivity:feasibility",
-        owner_id: "owner:feasibility",
+        owner_id: "A",
         kind: "semantic_feasibility" as const,
         possible_states: ["feasible", "infeasible"] as const
       },
@@ -808,7 +925,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
         owner_id: "owner:identity-tail",
         kind: "identity_tie" as const,
         universe: "finite" as const,
-        possible_winner_digests: ["A", "B"]
+        possible_winner_digests: [candidateIdentityDigest("A"), candidateIdentityDigest("B")]
       }
     ];
     expect(checkDecisionStability(checkerInput(split, fixture, coordinates)).status)
@@ -1034,6 +1151,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
       schema_version: 1 as const,
       operator_id: DECISION_STABILITY_SEAL_OPERATOR_ID,
       decision_contract_digest: runQueryProofDecideQ(world, 1).decision_contract_digest,
+      authority_digest: deriveLiveClosureAuthorityBinding(authorityFrom(prepared)).authority_digest,
       query_digest: world.compiled.query_digest,
       compilation_digest: world.compiled.compilation_digest,
       live_compilation_digest: world.compiled.compilation_digest,
@@ -1050,7 +1168,15 @@ describe("final Decide_Q and SealChecker_v1", () => {
         candidate_key: "A",
         reason_id: "core_undominated:A"
       }]),
-      outcome_digest: `sha256:${"a".repeat(64)}`
+      outcome_digest: digestRecallFieldIdentity({
+        candidate_prefix: Object.freeze(["A"]),
+        answer_bindings: Object.freeze([]),
+        pick_reasons: Object.freeze([{
+          position: 0,
+          candidate_key: "A",
+          reason_id: "core_undominated:A"
+        }])
+      })
     });
     const parsed = parseDecisionStabilitySeal({
       ...body,
@@ -1379,6 +1505,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
       assignments: Object.freeze([
         Object.freeze({
           coordinate_id: "B",
+          owner_id: "B",
           kind: "candidate_membership" as const,
           choice_id: "absent",
           value: false

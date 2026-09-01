@@ -5,7 +5,10 @@ import {
 } from "../../../field/field-identity.js";
 import { SHADOW_CAPTURE_OPERATOR_ID } from "../../prefix-capture/identity.js";
 import type { AbstractRefinementRequest } from "../proof/abstract/contract.js";
-import type { FiniteDecisionTrace } from "../proof/oracle/contract.js";
+import {
+  normalizeDecisionTrace,
+  type FiniteDecisionTrace
+} from "../proof/oracle/contract.js";
 import type { QueryCompiledGammaV1 } from "../gamma/contract.js";
 
 export const QUERY_PROOF_FINAL_DECISION_OPERATOR_ID =
@@ -28,12 +31,17 @@ export type DecisionContractIdentityV1 = Readonly<{
   readonly tie_policy: typeof QUERY_PROOF_TIE_POLICY;
   readonly query_digest: RecallFieldDigest;
   readonly compilation_digest: RecallFieldDigest;
+  readonly candidate_universe_digest: RecallFieldDigest;
+  readonly standings_digest: RecallFieldDigest;
+  readonly semantic_feasibility_digest: RecallFieldDigest;
+  readonly resource_policy_digest: RecallFieldDigest;
 }>;
 
 export type DecisionStabilitySealV1 = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof DECISION_STABILITY_SEAL_OPERATOR_ID;
   readonly decision_contract_digest: RecallFieldDigest;
+  readonly authority_digest: RecallFieldDigest;
   readonly query_digest: RecallFieldDigest;
   readonly compilation_digest: RecallFieldDigest;
   readonly live_compilation_digest: RecallFieldDigest;
@@ -92,7 +100,13 @@ export function digestDecisionContract(
     prefix_sk: true as const,
     tie_policy: QUERY_PROOF_TIE_POLICY,
     query_digest: compiled.query_digest,
-    compilation_digest: compiled.compilation_digest
+    compilation_digest: compiled.compilation_digest,
+    candidate_universe_digest: digestRecallFieldIdentity(
+      [...compiled.semantic_feasibility.map((row) => row.candidate_key)].sort(compareText)
+    ),
+    standings_digest: digestRecallFieldIdentity(compiled.standings),
+    semantic_feasibility_digest: digestRecallFieldIdentity(compiled.semantic_feasibility),
+    resource_policy_digest: digestRecallFieldIdentity(compiled.resource_policy)
   });
   return digestRecallFieldIdentity(body);
 }
@@ -107,19 +121,45 @@ export function parseDecisionStabilitySeal(
   if (record.operator_id !== DECISION_STABILITY_SEAL_OPERATOR_ID) {
     throw new Error("kernel-only proof cannot parse as a final decision seal");
   }
+  const keys = Object.keys(value).sort(compareText);
+  const expected = [
+    "schema_version", "operator_id", "decision_contract_digest", "authority_digest",
+    "query_digest", "compilation_digest", "live_compilation_digest", "world_digest",
+    "proof_state_digest", "snapshot_digest", "gamma_digest", "walk_operator_id",
+    "k_max", "candidate_prefix", "answer_bindings", "pick_reasons", "outcome_digest",
+    "seal_digest"
+  ].sort(compareText);
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+    throw new Error("decision stability seal has unknown or missing fields");
+  }
   if (record.schema_version !== 1 || record.seal_digest === undefined) {
     throw new Error("decision stability seal is incomplete");
   }
   if (record.walk_operator_id !== SHADOW_CAPTURE_OPERATOR_ID) {
     throw new Error("decision stability seal walk operator identity mismatch");
   }
-  if (typeof record.k_max !== "number" || !Number.isInteger(record.k_max) || record.k_max <= 0) {
+  if (typeof record.k_max !== "number" || !Number.isSafeInteger(record.k_max) ||
+      record.k_max <= 0) {
     throw new Error("decision stability seal is incomplete");
+  }
+  if (!Array.isArray(record.candidate_prefix) || !Array.isArray(record.answer_bindings) ||
+      !Array.isArray(record.pick_reasons)) {
+    throw new Error("decision stability seal is incomplete");
+  }
+  const normalized = normalizeDecisionTrace({
+    candidate_prefix: Object.freeze([...(record.candidate_prefix ?? [])]),
+    answer_bindings: Object.freeze([...(record.answer_bindings ?? [])]),
+    pick_reasons: Object.freeze([...(record.pick_reasons ?? [])])
+  }, record.k_max);
+  const outcomeDigest = requireDigest(record.outcome_digest);
+  if (outcomeDigest !== normalized.trace_digest) {
+    throw new Error("decision stability seal outcome trace mismatch");
   }
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: DECISION_STABILITY_SEAL_OPERATOR_ID,
     decision_contract_digest: requireDigest(record.decision_contract_digest),
+    authority_digest: requireDigest(record.authority_digest),
     query_digest: requireDigest(record.query_digest),
     compilation_digest: requireDigest(record.compilation_digest),
     live_compilation_digest: requireDigest(record.live_compilation_digest),
@@ -129,10 +169,10 @@ export function parseDecisionStabilitySeal(
     gamma_digest: requireDigest(record.gamma_digest),
     walk_operator_id: SHADOW_CAPTURE_OPERATOR_ID,
     k_max: record.k_max,
-    candidate_prefix: Object.freeze([...(record.candidate_prefix ?? [])]),
-    answer_bindings: Object.freeze([...(record.answer_bindings ?? [])]),
-    pick_reasons: Object.freeze([...(record.pick_reasons ?? [])]),
-    outcome_digest: requireDigest(record.outcome_digest)
+    candidate_prefix: normalized.candidate_prefix,
+    answer_bindings: normalized.answer_bindings,
+    pick_reasons: normalized.pick_reasons,
+    outcome_digest: outcomeDigest
   });
   if (record.seal_digest !== digestRecallFieldIdentity(body)) {
     throw new Error("decision stability seal digest mismatch");
@@ -141,7 +181,7 @@ export function parseDecisionStabilitySeal(
 }
 
 function requireDigest(value: unknown): RecallFieldDigest {
-  if (typeof value !== "string" || !value.startsWith("sha256:")) {
+  if (typeof value !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(value)) {
     throw new Error("decision stability seal is incomplete");
   }
   return value as RecallFieldDigest;

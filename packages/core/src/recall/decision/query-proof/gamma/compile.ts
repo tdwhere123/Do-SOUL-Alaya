@@ -236,7 +236,7 @@ function distinctAtoms(
   const identities = new Set<string>();
   for (const candidate of candidates) {
     for (const binding of candidate.bindings) {
-      if (binding.variable !== variable || binding.distinctness !== "proved_distinct") continue;
+      if (binding.variable !== variable) continue;
       identities.add(binding.semantic_identity);
     }
   }

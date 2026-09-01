@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { buildRecallCandidateDedupeKey } from
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  buildRecallCandidateDedupeKey,
+  buildRecallLogicalObjectKey
+} from
   "../../../../../recall/runtime/recall-service-helpers.js";
 import { captureShadowIntegration } from
   "../../../../../recall/integration/shadow/integrate.js";
@@ -7,18 +10,24 @@ import {
   deliverCanonicalFineAssessment,
   toShadowInput
 } from "../../../../../recall/delivery/canonical-delivery.js";
-import { digestDecisionContract } from
-  "../../../../../recall/decision/query-proof/seal/contract.js";
 import { previewSidecar } from
   "../../../../../recall/integration/shadow/query-proof-preview.js";
-import { createQueryCompiledWalkTransfer } from
-  "../../../../../recall/decision/query-proof/gamma/walk-binding.js";
+import {
+  captureQueryProofDecideWorld
+} from "../../../../../recall/decision/query-proof/seal/world-capture.js";
 import {
   emptyWalkUtility,
   type QueryProofDecideWorldV1
 } from "../../../../../recall/decision/query-proof/seal/decide.js";
 import { fieldCandidates } from "../../../delivery/canonical-delivery-fixtures.js";
-import { params } from "../../../integration/shadow/live-receipt-fixtures.js";
+import type { PreparedRecallRequest } from
+  "../../../../../recall/runtime/recall-service-runner-types.js";
+import {
+  certifiedScalarAuthority,
+  cleanup,
+  params,
+  preparedAuthority
+} from "../../../integration/shadow/live-receipt-fixtures.js";
 import {
   binding,
   candidate,
@@ -26,6 +35,14 @@ import {
   compileInputFor,
   scalarQuery
 } from "../gamma/gamma-fixture.js";
+
+let prepared: PreparedRecallRequest;
+
+beforeAll(async () => {
+  prepared = await preparedAuthority();
+});
+
+afterAll(() => cleanup(prepared));
 
 function previewWorld(
   keys: readonly string[],
@@ -55,18 +72,114 @@ function previewWorld(
     answer_bindings: keys.map((key) => Object.freeze({
       candidate_key: key,
       binding_id: `bind:${key}`,
+      variable: "x",
+      semantic_identity: key,
       value: key
     }))
   });
 }
 
+function capturedPreviewWorld(
+  candidates: ReturnType<typeof fieldCandidates>,
+  base: ReturnType<typeof params>
+): QueryProofDecideWorldV1 {
+  const authority = certifiedScalarAuthority(prepared);
+  const propositionId = authority.canonical_query_compilation.hypotheses[0]?.predicates[0]?.id;
+  if (propositionId === undefined) throw new Error("certified scalar fixture missing predicate");
+  const evidence = candidates.map((coarse) => {
+    const key = buildRecallCandidateDedupeKey(coarse);
+    return candidate(key, {
+      object_key: buildRecallLogicalObjectKey(coarse),
+      token_cost: 4,
+      dimension: coarse.entry.dimension,
+      bindings: [binding(key, "proved_distinct", "x0")],
+      propositions: [{
+        proposition_id: propositionId,
+        jurisdiction: "predicate" as const,
+        support: "supports" as const,
+        independence: "not_applicable" as const
+      }]
+    });
+  });
+  return captureQueryProofDecideWorld({
+    live_authority: authority,
+    premises: {
+      gamma: Object.freeze({ candidates: Object.freeze(evidence) }),
+      candidates: Object.freeze(evidence.map((row) => Object.freeze({
+        candidate_key: row.candidate_key,
+        object_key: row.object_key,
+        token_cost: row.token_cost,
+        dimension: row.dimension,
+        h_eligible: true,
+        utility: emptyWalkUtility(row.candidate_key, row.object_key),
+        static_frontier_index: 1
+      }))),
+      psi_edges: Object.freeze([]),
+      token_budget: base.policy.fine_assessment.budgets.max_total_tokens,
+      per_dimension_limits: base.policy.fine_assessment.budgets.per_dimension_limits,
+      unresolved_tradeoff_pairs: Object.freeze([]),
+      answer_bindings: Object.freeze(evidence.map((row) => Object.freeze({
+        candidate_key: row.candidate_key,
+        binding_id: `bind:${row.candidate_key}`,
+        variable: "x0",
+        semantic_identity: row.candidate_key,
+        value: row.candidate_key
+      })))
+    }
+  });
+}
+
 describe("query-proof preview neutrality", () => {
+  it("emits the full Decide_Q trace only for a captured preview world", () => {
+    const candidates = fieldCandidates(["cand-a"]);
+    const base = params(candidates);
+    const world = capturedPreviewWorld(candidates, base);
+    const captured = captureShadowIntegration({
+      ...toShadowInput(base),
+      query_proof_preview: { world }
+    });
+    expect(captured.kind).toBe("captured");
+    if (captured.kind !== "captured") throw new Error("expected captured trace");
+    expect(captured.query_proof_preview).toMatchObject({
+      status: "captured",
+      S_infty: [buildRecallCandidateDedupeKey(candidates[0]!)],
+      prefix: [buildRecallCandidateDedupeKey(candidates[0]!)],
+      candidate_prefix: [buildRecallCandidateDedupeKey(candidates[0]!)]
+    });
+    expect(captured.query_proof_preview?.pick_reasons).toHaveLength(1);
+  });
+
+  it("fails closed when a caller injects an unverified raw Decide_Q world", () => {
+    const sidecar = previewSidecar({ world: previewWorld(["forged"]) }, 1);
+
+    expect(sidecar.query_proof_preview?.status).toBe("failed");
+    expect(sidecar.query_proof_preview?.candidate_prefix).toEqual([]);
+  });
+
+  it("refuses a captured world that omits a live runtime candidate", () => {
+    const candidates = fieldCandidates(["cand-a", "cand-b"]);
+    const base = params(candidates);
+    const incomplete = capturedPreviewWorld(
+      Object.freeze([candidates[0]!]),
+      base
+    );
+    const captured = captureShadowIntegration({
+      ...toShadowInput(base),
+      query_proof_preview: { world: incomplete }
+    });
+    expect(captured.kind).toBe("captured");
+    if (captured.kind !== "captured") throw new Error("expected captured trace");
+    expect(captured.query_proof_preview).toMatchObject({
+      status: "failed",
+      candidate_prefix: []
+    });
+    expect(captured.query_proof_preview?.reason).toMatch(/exact live runtime capture/u);
+  });
+
   it("preview-on/off leaves selected keys and prefix order unchanged", () => {
     const candidates = fieldCandidates(["cand-a", "cand-b"]);
     const keys = candidates.map(buildRecallCandidateDedupeKey);
     const world = previewWorld(keys);
-    const transfer = createQueryCompiledWalkTransfer(world.compiled);
-    const expectedDigest = digestDecisionContract(world.compiled, transfer.contract_digest);
     const base = params(candidates);
     const offCounts = { estimate: 0, cache: 0 };
     const onCounts = { estimate: 0, cache: 0 };
@@ -105,11 +218,9 @@ describe("query-proof preview neutrality", () => {
     expect(on.prefix_proposal).toEqual(off.prefix_proposal);
     expect(on.eligible_keys).toEqual(off.eligible_keys);
     expect("query_proof_preview" in off).toBe(false);
-    expect(on.query_proof_preview?.status).toBe("captured");
-    expect(on.query_proof_preview?.contract_digest).toBe(expectedDigest);
-    expect(on.query_proof_preview?.prefix).toEqual(on.query_proof_preview?.candidate_prefix);
-    expect(on.query_proof_preview?.pick_reasons.length).toBeGreaterThan(0);
-    expect(on.query_proof_preview?.semantic_feasibility.length).toBe(keys.length);
+    expect(on.query_proof_preview?.status).toBe("failed");
+    expect(on.query_proof_preview?.candidate_prefix).toEqual([]);
+    expect(on.query_proof_preview?.semantic_feasibility).toEqual([]);
     expect(onCounts.estimate).toBe(offCounts.estimate);
     expect(onCounts.cache).toBe(offCounts.cache);
   });
@@ -171,7 +282,7 @@ describe("query-proof preview neutrality", () => {
     expect(captured.S_infty.length).toBeGreaterThan(0);
   });
 
-  it("keeps preview sidecar feasibility and policy on the captured world", () => {
+  it("does not surface raw preview feasibility or policy as captured authority", () => {
     const keys = ["cand-a"];
     const world = previewWorld(keys);
     const feasibility = [{
@@ -211,10 +322,8 @@ describe("query-proof preview neutrality", () => {
     const sidecar = previewSidecar({ world: switching }, 1);
     feasibility[0] = { candidate_key: "mutated", semantic: "infeasible" };
     policy.token_budget = 99;
-    expect(sidecar.query_proof_preview?.status).toBe("captured");
-    expect(sidecar.query_proof_preview?.semantic_feasibility).toEqual([
-      { candidate_key: "cand-a", semantic: "feasible" }
-    ]);
+    expect(sidecar.query_proof_preview?.status).toBe("failed");
+    expect(sidecar.query_proof_preview?.semantic_feasibility).toEqual([]);
     expect(sidecar.query_proof_preview?.resource_policy.token_budget).toBe(null);
     expect(compiledReads).toBe(1);
   });
@@ -262,9 +371,8 @@ describe("query-proof preview neutrality", () => {
     const sidecar = previewSidecar(switching as never, 1);
     expect(reads).toBe(1);
     expect(sidecar.query_proof_preview?.status).toBe("failed");
-    const transfer = createQueryCompiledWalkTransfer(cyclic.compiled);
     expect(sidecar.query_proof_preview?.contract_digest)
-      .toBe(digestDecisionContract(cyclic.compiled, transfer.contract_digest));
+      .toBe("sha256:preview_unavailable");
   });
 
   it("production fine-assessment preview does not change selected keys or public result", () => {

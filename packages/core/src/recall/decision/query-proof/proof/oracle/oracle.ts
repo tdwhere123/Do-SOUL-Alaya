@@ -151,6 +151,7 @@ function enumerateLegalRefinements(
     assignments = assignments.flatMap((prefix) => coordinate.choices.map((choice) =>
       Object.freeze([...prefix, Object.freeze({
         coordinate_id: coordinate.coordinate_id,
+        owner_id: coordinate.owner_id,
         kind: coordinate.kind,
         choice_id: choice.choice_id,
         value: choice.value

@@ -27,7 +27,10 @@ import type { LiveQueryProofAuthority } from
   "../../../../recall/decision/query-proof/live-query-proof-authority.js";
 import type { LexicalRequestPin } from
   "../../../../recall/field/retrieval/retrieval-field-bundle.js";
-import type { RecallFieldDigest } from "../../../../recall/field/field-identity.js";
+import {
+  digestRecallFieldIdentity,
+  type RecallFieldDigest
+} from "../../../../recall/field/field-identity.js";
 import { isFailClosedShadowTrace, type ShadowCapturedTrace } from
   "../../../../recall/integration/shadow/integrate.js";
 import type { SupportCandidateReceiptV1 } from
@@ -81,6 +84,68 @@ export function authorityFrom(prepared: PreparedRecallRequest): LiveQueryProofAu
     snapshot_read_lease: prepared.snapshotReadLease,
     expected_lexical_request_pins: [lexicalPin()]
   }) satisfies LiveQueryProofAuthority;
+}
+
+export function certifiedScalarAuthority(
+  prepared: PreparedRecallRequest
+): LiveQueryProofAuthority {
+  const exact = <T extends { readonly lag_bound: unknown; readonly source_frontier: string }>(
+    declaration: T
+  ) => Object.freeze({
+    ...declaration,
+    source_frontier: prepared.snapshotVector.transaction_frontier,
+    lag_bound: Object.freeze({ kind: "exact" as const })
+  });
+  const { schema_version: _schemaVersion, vector_digest: _vectorDigest, ...snapshotInput } =
+    prepared.snapshotVector;
+  const snapshotVector = createSnapshotVectorV1({
+    ...snapshotInput,
+    base_store_digest: digestRecallFieldIdentity("query-proof-certified-base"),
+    decision_contract_digest: digestRecallFieldIdentity("query-proof-certified-decision"),
+    formation_operator_versions: prepared.snapshotVector.formation_operator_versions.length > 0
+      ? prepared.snapshotVector.formation_operator_versions
+      : Object.freeze([["query-proof-test", "1"]] as const),
+    projection_generation: exact(prepared.snapshotVector.projection_generation),
+    embedding_generation_and_model: exact(
+      prepared.snapshotVector.embedding_generation_and_model
+    ),
+    path_graph_generation: exact(prepared.snapshotVector.path_graph_generation),
+    temporal_index_generation: exact(prepared.snapshotVector.temporal_index_generation),
+    governance_frontier: exact(prepared.snapshotVector.governance_frontier),
+    retrieval_channel_snapshots: Object.freeze(
+      prepared.snapshotVector.retrieval_channel_snapshots.map(exact)
+    )
+  });
+  const snapshotCoherenceReceipt = createSnapshotCoherenceReceiptV1(snapshotVector);
+  const canonicalQueryEvidence = Object.freeze({
+    probes: prepared.canonicalQueryEvidence.probes,
+    demand: Object.freeze({ schema_version: 1 as const, atoms: Object.freeze([]) }),
+    shape: Object.freeze({
+      schema_version: 1 as const,
+      status: "high_confidence" as const,
+      shape: "place" as const,
+      target_terms: Object.freeze(["x0"]),
+      relation_terms: Object.freeze(["buy"])
+    }),
+    ...(prepared.canonicalQueryEvidence.observer === undefined
+      ? {}
+      : { observer: prepared.canonicalQueryEvidence.observer }),
+    ...(prepared.canonicalQueryEvidence.query_identity === undefined
+      ? {}
+      : { query_identity: prepared.canonicalQueryEvidence.query_identity })
+  });
+  const canonicalQueryCompilation = compileCanonicalQueryCompilation(
+    canonicalQueryEvidence,
+    snapshotCoherenceReceipt
+  );
+  return Object.freeze({
+    ...authorityFrom(prepared),
+    canonical_query_evidence: canonicalQueryEvidence,
+    canonical_query_compilation: canonicalQueryCompilation,
+    snapshot_vector: snapshotVector,
+    snapshot_coherence_receipt: snapshotCoherenceReceipt,
+    snapshot_read_lease: finalizePreparedSnapshotReadLease(snapshotVector)
+  });
 }
 
 export function stubMemoryRepo(

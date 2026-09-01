@@ -105,6 +105,8 @@ export type QueryGammaCandidateFeasibilityV1 = Readonly<{
   readonly semantic: SemanticFeasibilityV1;
 }>;
 
+export type QueryGammaAdmissionStatusV1 = "admitted" | "denied" | "unresolved";
+
 export type QueryCompiledGammaV1 = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof QUERY_PROOF_GAMMA_OPERATOR_ID;

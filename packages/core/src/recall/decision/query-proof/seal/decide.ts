@@ -30,7 +30,13 @@ import {
   QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
   sortDecisionBindings
 } from "./contract.js";
-import { digestDecideWorld, freezeDecideWorld, overlayWorld } from "./overlay.js";
+import {
+  decideWorldCapture,
+  digestDecideWorld,
+  freezeDecideWorld,
+  queryProofDecideBaseState
+} from "./world-capture.js";
+import { overlayWorld } from "./overlay.js";
 
 export type QueryProofDecideWorldV1 = Readonly<{
   readonly compiled: QueryCompiledGammaV1;
@@ -43,6 +49,8 @@ export type QueryProofDecideWorldV1 = Readonly<{
   readonly answer_bindings: readonly Readonly<{
     readonly candidate_key: string;
     readonly binding_id: string;
+    readonly variable: string;
+    readonly semantic_identity: string;
     readonly value: FiniteValue;
   }>[];
 }>;
@@ -63,6 +71,9 @@ export function runQueryProofDecideQ(
   world: QueryProofDecideWorldV1,
   kMax: number
 ): QueryProofDecideResultV1 {
+  if (!Number.isSafeInteger(kMax) || kMax <= 0) {
+    throw new Error("Decide_Q K_max must be a positive safe integer");
+  }
   const captured = freezeDecideWorld(world);
   const universe = decideWorldUniverseMismatch(
     captured.compile_input.candidates.map((candidate) => candidate.candidate_key),
@@ -106,16 +117,11 @@ export function createQueryProofDecisionOperator(
   world: QueryProofDecideWorldV1
 ): FiniteDecisionOperator {
   const frozen = freezeDecideWorld(world);
-  const transfer = createQueryCompiledWalkTransfer(frozen.compiled);
-  const digest = digestDecisionContract(frozen.compiled, transfer.contract_digest);
   const operator: FiniteDecisionOperator = {
     operator_id: QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
     decide: ({ base_state, refinement, k_max }) => {
       const overlay = overlayWorld(frozen, base_state, refinement);
       const decided = runQueryProofDecideQ(overlay, k_max);
-      if (decided.decision_contract_digest !== digest) {
-        throw new Error("Decide_Q decision-contract digest drifted");
-      }
       return decided.trace;
     }
   };
@@ -157,6 +163,12 @@ function evaluateAbstractDecide(
     return Object.freeze({
       status: "unsupported" as const,
       reason: "open identity tail remains uncertified"
+    });
+  }
+  if (input.coordinates.some(isUnrepresentableCoordinate)) {
+    return Object.freeze({
+      status: "unsupported" as const,
+      reason: "abstract Decide_Q contains an unresolved or unrepresentable domain"
     });
   }
   const assignments = abstractAssignments(input.coordinates);
@@ -218,6 +230,7 @@ function abstractAssignments(
     rows = rows.flatMap((prefix) => choices.map((choice) =>
       Object.freeze([...prefix, Object.freeze({
         coordinate_id: coordinate.coordinate_id,
+        owner_id: coordinate.owner_id,
         kind: concreteKind(coordinate),
         choice_id: choice.choice_id,
         value: choice.value
@@ -227,6 +240,20 @@ function abstractAssignments(
     assignments,
     refinement_digest: digestRecallFieldIdentity(assignments)
   })));
+}
+
+function isUnrepresentableCoordinate(coordinate: AbstractCoordinate): boolean {
+  if (coordinate.kind === "semantic_feasibility") {
+    return coordinate.possible_states.includes("unresolved");
+  }
+  if (coordinate.kind === "correlation") {
+    return coordinate.possible_relations.includes("unknown");
+  }
+  if (coordinate.kind === "four_valued_proposition") {
+    return coordinate.possible_values.includes("both") ||
+      coordinate.possible_values.includes("unknown");
+  }
+  return false;
 }
 
 function choicesOf(
@@ -310,11 +337,19 @@ function reasonId(
 ): string {
   const decision = walked.decisions[position];
   if (decision === undefined || decision.candidate_key !== candidateKey) {
-    return `identity:${candidateKey}`;
+    return `decision:${digestRecallFieldIdentity({ candidate_key: candidateKey, position })}`;
   }
-  const atoms = decision.named_novelty.compiled_atom_ids ?? [];
-  if (atoms.length > 0) return `${decision.capture_reason}:${atoms.join(",")}`;
-  return `${decision.capture_reason}:${candidateKey}`;
+  return `decision:${digestRecallFieldIdentity({
+    candidate_key: candidateKey,
+    position,
+    capture_reason: decision.capture_reason,
+    G: decision.G,
+    compiled_atom_ids: decision.named_novelty.compiled_atom_ids ?? [],
+    max_g_cohort: decision.max_g_cohort,
+    equal_g_dominance_rejects: decision.equal_g_dominance_rejects,
+    deterministic_tail: decision.deterministic_tail,
+    static_frontier_index: decision.static_frontier_index
+  })}`;
 }
 
 function psiFrom(edges: QueryProofDecideWorldV1["psi_edges"]): PsiQuery {
@@ -334,6 +369,7 @@ function tradeoffFrom(
 }
 
 function worldAsFinite(world: QueryProofDecideWorldV1): FiniteValue {
+  if (decideWorldCapture(world) !== null) return queryProofDecideBaseState(world);
   return Object.freeze({
     gamma_digest: world.compiled.gamma_digest,
     candidate_keys: Object.freeze(world.candidates.map((row) => row.candidate_key)),

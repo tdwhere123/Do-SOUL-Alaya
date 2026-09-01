@@ -6,7 +6,14 @@ import {
   runQueryProofDecideQ,
   type QueryProofDecideWorldV1
 } from "../../decision/query-proof/seal/decide.js";
-import { freezeDecideWorld } from "../../decision/query-proof/seal/overlay.js";
+import {
+  bindQueryProofDecideWorldToRuntimeCapture,
+  decideWorldCapture,
+  freezeDecideWorld
+} from "../../decision/query-proof/seal/world-capture.js";
+import { digestRecallFieldIdentity } from
+  "../../field/field-identity.js";
+import { compareText } from "../../../shared/compare-text.js";
 import type { FiniteDecisionTraceInput } from
   "../../decision/query-proof/proof/oracle/contract.js";
 import {
@@ -18,6 +25,15 @@ import {
 export type QueryProofPreviewRequest = Readonly<{
   readonly world: QueryProofDecideWorldV1;
   readonly k_max?: number;
+}>;
+
+export type QueryProofPreviewRuntimeCapture = Readonly<{
+  readonly candidates: QueryProofDecideWorldV1["candidates"];
+  readonly psi_edges: QueryProofDecideWorldV1["psi_edges"];
+  readonly token_budget: number;
+  readonly per_dimension_limits: QueryProofDecideWorldV1["per_dimension_limits"];
+  readonly unresolved_tradeoff_pairs:
+    QueryProofDecideWorldV1["unresolved_tradeoff_pairs"];
 }>;
 
 export type QueryProofPreviewSidecar = Readonly<{
@@ -35,7 +51,8 @@ export type QueryProofPreviewSidecar = Readonly<{
 
 export function previewSidecar(
   preview: QueryProofPreviewRequest | undefined,
-  kMax: number
+  kMax: number,
+  runtimeCapture?: QueryProofPreviewRuntimeCapture
 ): { readonly query_proof_preview?: QueryProofPreviewSidecar } {
   if (preview === undefined) return {};
   const capturedKMax = preview.k_max ?? kMax;
@@ -48,6 +65,14 @@ export function previewSidecar(
   let capturedWorld: QueryProofDecideWorldV1;
   try {
     capturedWorld = freezeDecideWorld(rawWorld);
+    if (decideWorldCapture(capturedWorld) === null) {
+      throw new Error("query-proof preview requires a verified captured Decide_Q world");
+    }
+    if (runtimeCapture === undefined) {
+      throw new Error("query-proof preview requires the exact live runtime capture");
+    }
+    const manifestDigest = assertRuntimeCaptureMatches(capturedWorld, runtimeCapture);
+    bindQueryProofDecideWorldToRuntimeCapture(capturedWorld, manifestDigest);
   } catch (error) {
     return failedSidecar("sha256:preview_unavailable", error);
   }
@@ -73,6 +98,60 @@ export function previewSidecar(
       return failedSidecar("sha256:preview_unavailable", error);
     }
   }
+}
+
+function assertRuntimeCaptureMatches(
+  world: QueryProofDecideWorldV1,
+  runtime: QueryProofPreviewRuntimeCapture
+): ReturnType<typeof digestRecallFieldIdentity> {
+  const worldCandidates = candidateManifest(world.candidates);
+  const runtimeCandidates = candidateManifest(runtime.candidates);
+  const evidenceKeys = [...world.compile_input.candidates.map((row) => row.candidate_key)]
+    .sort(compareText);
+  const runtimeKeys = [...runtime.candidates.map((row) => row.candidate_key)]
+    .sort(compareText);
+  if (digestRecallFieldIdentity(worldCandidates) !== digestRecallFieldIdentity(runtimeCandidates) ||
+      digestRecallFieldIdentity(evidenceKeys) !== digestRecallFieldIdentity(runtimeKeys) ||
+      world.token_budget !== runtime.token_budget ||
+      digestRecallFieldIdentity(world.per_dimension_limits) !==
+        digestRecallFieldIdentity(runtime.per_dimension_limits) ||
+      digestRecallFieldIdentity(normalizedPairs(world.psi_edges, true)) !==
+        digestRecallFieldIdentity(normalizedPairs(runtime.psi_edges, true)) ||
+      digestRecallFieldIdentity(normalizedPairs(world.unresolved_tradeoff_pairs, false)) !==
+        digestRecallFieldIdentity(normalizedPairs(runtime.unresolved_tradeoff_pairs, false))) {
+    throw new Error("Decide_Q world does not match the exact live runtime capture");
+  }
+  return digestRecallFieldIdentity({
+    kind: "query_proof_runtime_capture_v1",
+    candidates: runtimeCandidates,
+    psi_edges: normalizedPairs(runtime.psi_edges, true),
+    token_budget: runtime.token_budget,
+    per_dimension_limits: runtime.per_dimension_limits,
+    unresolved_tradeoff_pairs: normalizedPairs(runtime.unresolved_tradeoff_pairs, false)
+  });
+}
+
+function candidateManifest(
+  candidates: QueryProofDecideWorldV1["candidates"]
+): readonly object[] {
+  return Object.freeze(candidates.map((row) => Object.freeze({
+    candidate_key: row.candidate_key,
+    object_key: row.object_key,
+    token_cost: row.token_cost,
+    dimension: row.dimension,
+    h_eligible: row.h_eligible,
+    static_frontier_index: row.static_frontier_index
+  })).sort((left, right) => compareText(left.candidate_key, right.candidate_key)));
+}
+
+function normalizedPairs(
+  pairs: readonly (readonly [string, string])[],
+  directed: boolean
+): readonly (readonly [string, string])[] {
+  return Object.freeze(pairs.map(([left, right]) => {
+    if (directed || compareText(left, right) <= 0) return Object.freeze([left, right] as const);
+    return Object.freeze([right, left] as const);
+  }).sort((left, right) => compareText(`${left[0]}\0${left[1]}`, `${right[0]}\0${right[1]}`)));
 }
 
 function failedSidecar(

@@ -31,6 +31,7 @@ export type WalkGammaScore = ShadowGammaTuple | QueryCompiledWalkGamma;
 
 export type ShadowWalkAdmit = Readonly<{
   readonly admitted: boolean;
+  readonly status: "admitted" | "denied" | "unresolved";
   readonly named_novelty: ShadowNamedNovelty;
   readonly core_absence: ShadowNoveltyAdmit["core_absence"];
 }>;
@@ -48,6 +49,10 @@ export type ShadowWalkUtilityTransfer = Readonly<{
     universe: readonly ShadowObligationKey[]
   ) => WalkGammaScore;
   readonly compare: (left: WalkGammaScore, right: WalkGammaScore) => number;
+  readonly gainAtomIds: (
+    candidate: ShadowWalkTransferCandidate,
+    selected: unknown
+  ) => readonly string[];
   readonly admitLowerFrontier: (
     candidate: ShadowWalkTransferCandidate,
     core: readonly ShadowWalkTransferCandidate[],
@@ -73,6 +78,7 @@ export const LIVE_FACILITY_WALK_TRANSFER: ShadowWalkUtilityTransfer = Object.fre
   score: (candidate, selected, universe) =>
     computeGammaTuple(candidate.utility, asLiveSet(selected), universe),
   compare: (left, right) => compareGammaTuple(asLiveTuple(left), asLiveTuple(right)),
+  gainAtomIds: () => Object.freeze([]),
   admitLowerFrontier: (candidate, core, selected, universe) => {
     const novelty = evaluateOtherwiseUnavailableNovelty(
       candidate.utility,
@@ -82,6 +88,7 @@ export const LIVE_FACILITY_WALK_TRANSFER: ShadowWalkUtilityTransfer = Object.fre
     );
     return freezeShadow({
       admitted: novelty.admitted,
+      status: novelty.admitted ? "admitted" as const : "denied" as const,
       named_novelty: freezeShadow({
         facility_keys: novelty.facility_keys,
         value_pairs: novelty.value_pairs,

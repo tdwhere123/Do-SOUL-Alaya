@@ -15,6 +15,7 @@ import {
   admitCompiledLowerFrontier,
   emptyQueryGammaSelectedSet,
   evaluateQueryGammaTuple,
+  novelQueryGammaAtomIds,
   type QueryGammaSelectedSetV1
 } from "./evaluate.js";
 
@@ -39,6 +40,11 @@ export function createQueryCompiledWalkTransfer(
       asCompiledTuple(left),
       asCompiledTuple(right)
     ),
+    gainAtomIds: (candidate, selected) => novelQueryGammaAtomIds(
+      compiled,
+      asCompiledSet(selected),
+      candidate.candidate_key
+    ),
     admitLowerFrontier: (candidate, core, selected) => {
       const admission = admitCompiledLowerFrontier(
         compiled,
@@ -48,6 +54,7 @@ export function createQueryCompiledWalkTransfer(
       );
       return freezeShadow({
         admitted: admission.admitted,
+        status: admission.status,
         named_novelty: freezeShadow({
           facility_keys: Object.freeze([] as string[]),
           value_pairs: Object.freeze([] as string[]),

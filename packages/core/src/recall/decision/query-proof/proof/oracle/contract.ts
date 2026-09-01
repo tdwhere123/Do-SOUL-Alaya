@@ -57,6 +57,7 @@ export type FiniteOracleFixture = Readonly<{
 
 export type FiniteRefinementAssignment = Readonly<{
   readonly coordinate_id: string;
+  readonly owner_id: string;
   readonly kind: FiniteRefinementKind;
   readonly choice_id: string;
   readonly value: FiniteValue;

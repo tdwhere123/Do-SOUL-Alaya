@@ -253,8 +253,8 @@ function parseNamedNovelty(
   if (reason === "cross_frontier_novelty" && named === 0) {
     throw new ShadowContractError("cross-frontier capture must name novelty");
   }
-  if (reason === "core_undominated" && named !== 0) {
-    throw new ShadowContractError("core capture must not name novelty");
+  if (reason === "core_undominated" && liveNamed !== 0) {
+    throw new ShadowContractError("core capture must not name live novelty");
   }
   return novelty;
 }

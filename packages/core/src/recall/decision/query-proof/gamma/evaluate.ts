@@ -5,6 +5,7 @@ import {
   type QueryCompiledGammaTupleV1,
   type QueryCompiledGammaV1,
   type QueryGammaAtomV1,
+  type QueryGammaAdmissionStatusV1,
   type QueryGammaCandidateEvidenceV1,
   type QueryGammaCoverageV1,
   type QueryGammaIndependenceV1,
@@ -22,6 +23,7 @@ export type QueryGammaSelectedSetV1 = Readonly<{
 
 export type QueryGammaAdmissionV1 = Readonly<{
   readonly admitted: boolean;
+  readonly status: QueryGammaAdmissionStatusV1;
   readonly compiled_atom_ids: readonly string[];
 }>;
 
@@ -95,12 +97,30 @@ export function admitCompiledLowerFrontier(
   higherEligibleKeys: readonly string[]
 ): QueryGammaAdmissionV1 {
   const novel = novelCoveredAtoms(compiled, selected, candidateKey);
-  const admitted = novel.filter((atomId) =>
-    higherEligibleKeys.every((higherKey) => provedNotToCover(compiled, higherKey, atomId)));
+  const admitted = novel.filter((atomId) => higherEligibleKeys.every((higherKey) =>
+    standingCoverage(compiled, higherKey, atomId) === "does_not_cover"));
+  const unresolved = novel.some((atomId) =>
+    higherEligibleKeys.some((higherKey) =>
+      standingCoverage(compiled, higherKey, atomId) === "unknown"));
+  const status: QueryGammaAdmissionStatusV1 = admitted.length > 0
+    ? "admitted"
+    : unresolved
+      ? "unresolved"
+      : "denied";
   return Object.freeze({
-    admitted: admitted.length > 0,
+    admitted: status === "admitted",
+    status,
     compiled_atom_ids: Object.freeze([...admitted].sort(compareText))
   });
+}
+
+export function novelQueryGammaAtomIds(
+  compiled: QueryCompiledGammaV1,
+  selected: QueryGammaSelectedSetV1,
+  candidateKey: string
+): readonly string[] {
+  return Object.freeze([...novelCoveredAtoms(compiled, selected, candidateKey)]
+    .sort(compareText));
 }
 
 export function acceptQueryGammaCandidate(
@@ -217,7 +237,7 @@ function bindingCoverage(
   const hits = candidate.bindings.filter((binding) =>
     binding.semantic_identity === gammaAtom.semantic_identity &&
     binding.variable === gammaAtom.variable);
-  if (hits.some((binding) => binding.distinctness === "unknown")) return "unknown";
+  if (hits.some((binding) => binding.distinctness !== "proved_distinct")) return "unknown";
   return hits.some((binding) => binding.distinctness === "proved_distinct")
     ? "covers"
     : "does_not_cover";
@@ -260,14 +280,14 @@ function independentAtom(compiled: QueryCompiledGammaV1, atomId: string): boolea
     "certified_independent_support";
 }
 
-function provedNotToCover(
+function standingCoverage(
   compiled: QueryCompiledGammaV1,
   candidateKey: string,
   atomId: string
-): boolean {
+): QueryGammaCoverageV1 {
   const standing = standingsOf(compiled, candidateKey)
     .find((row) => row.atom_id === atomId);
-  return standing?.coverage === "does_not_cover";
+  return standing?.coverage ?? "unknown";
 }
 
 function standingsOf(

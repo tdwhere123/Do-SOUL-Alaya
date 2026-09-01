@@ -19,6 +19,7 @@ import {
 import {
   previewSidecar,
   type QueryProofPreviewRequest,
+  type QueryProofPreviewRuntimeCapture,
   type QueryProofPreviewSidecar
 } from "./query-proof-preview.js";
 import { shadowLineageApplicability } from "../../decision/query-proof/demand.js";
@@ -197,7 +198,7 @@ function runShadowIntegration(
   const walked = walkShadowCapture(walkInput);
   if (!isCapturedWalk(walked)) return failClosed("psi_cycle_contract_failure", activation);
   if (!prefixMonotone(walked.S_infty)) return failClosed("prefix_violation", activation);
-  return assembleCaptured(input, eligible, peeled, walked, observations);
+  return assembleCaptured(input, eligible, peeled, walked, observations, walkInput, psi);
 }
 
 export function memoizeRequestPsi(psi: PsiQuery): PsiQuery {
@@ -370,7 +371,9 @@ function assembleCaptured(
   eligible: readonly string[],
   frontiers: ShadowFrontierReceipt,
   walked: ShadowCapturedWalk,
-  observations: ShadowPsiObservationField
+  observations: ShadowPsiObservationField,
+  walkInput: Parameters<typeof walkShadowCapture>[0],
+  psi: PsiQuery
 ): ShadowCapturedTrace {
   const k = input.policy.fine_assessment.budgets.max_entries;
   const first = walked.decisions[0];
@@ -415,7 +418,32 @@ function assembleCaptured(
       walked.decisions.flatMap((decision) => [...decision.novelty_core_known_absence])
     ),
     psi_v2_shadow: observePsiV2Shadow(input),
-    ...previewSidecar(input.query_proof_preview, k)
+    ...previewSidecar(input.query_proof_preview, k, previewRuntimeCapture(walkInput, psi))
+  });
+}
+
+function previewRuntimeCapture(
+  walkInput: Parameters<typeof walkShadowCapture>[0],
+  psi: PsiQuery
+): QueryProofPreviewRuntimeCapture {
+  const candidates = walkInput.candidates;
+  const psiEdges = candidates.flatMap((left) => candidates.flatMap((right) =>
+    left.candidate_key !== right.candidate_key &&
+    psi(left.candidate_key, right.candidate_key)
+      ? [Object.freeze([left.candidate_key, right.candidate_key] as const)]
+      : []));
+  const unresolvedTradeoffPairs = candidates.flatMap((left, leftIndex) =>
+    candidates.slice(leftIndex + 1).flatMap((right) =>
+      walkInput.unresolved_tradeoff?.(left.candidate_key, right.candidate_key) === true ||
+      walkInput.unresolved_tradeoff?.(right.candidate_key, left.candidate_key) === true
+        ? [Object.freeze([left.candidate_key, right.candidate_key] as const)]
+        : []));
+  return Object.freeze({
+    candidates,
+    psi_edges: Object.freeze(psiEdges),
+    token_budget: walkInput.token_budget,
+    per_dimension_limits: walkInput.per_dimension_limits,
+    unresolved_tradeoff_pairs: Object.freeze(unresolvedTradeoffPairs)
   });
 }
 
