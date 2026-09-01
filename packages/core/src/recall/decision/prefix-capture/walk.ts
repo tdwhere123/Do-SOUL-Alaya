@@ -196,8 +196,23 @@ function computePick(
   const tPsi = undominated(maxG.map((row) => row.candidate), state.psi);
   if (tPsi.length === 0) return CYCLE;
   const winner = smallestCandidate(tPsi);
-  state.decisions.push(buildDecision(winner, core, maxG, tPsi, state));
+  state.decisions.push(buildDecision(winner, core, feasible, maxG, tPsi, state));
   return winner;
+}
+
+function admissionRivals(
+  candidate: ShadowCaptureWalkCandidate,
+  core: readonly ShadowCaptureWalkCandidate[],
+  feasible: readonly ShadowCaptureWalkCandidate[],
+  transfer: ShadowWalkUtilityTransfer
+): readonly ShadowCaptureWalkCandidate[] {
+  if (transfer.kind !== "query_compiled_gamma") return core;
+  const rank = candidate.static_frontier_index;
+  return feasible.filter((other) => {
+    if (other.candidate_key === candidate.candidate_key) return false;
+    if (rank === null) return true;
+    return other.static_frontier_index === null || other.static_frontier_index < rank;
+  });
 }
 
 function firstLayerOrUndominated(
@@ -225,7 +240,7 @@ function choiceSet(
     !coreKeys.has(candidate.candidate_key) &&
     state.transfer.admitLowerFrontier(
       candidate,
-      core,
+      admissionRivals(candidate, core, feasible, state.transfer),
       state.set,
       state.universe
     ).admitted
@@ -302,6 +317,7 @@ function equalGTailKey(candidateKey: string): string {
 function buildDecision(
   winner: ShadowCaptureWalkCandidate,
   core: readonly ShadowCaptureWalkCandidate[],
+  feasible: readonly ShadowCaptureWalkCandidate[],
   maxG: readonly ScoredCandidate[],
   tPsi: readonly ShadowCaptureWalkCandidate[],
   state: WalkState
@@ -311,7 +327,7 @@ function buildDecision(
     ? emptyAdmit()
     : state.transfer.admitLowerFrontier(
       winner,
-      core,
+      admissionRivals(winner, core, feasible, state.transfer),
       state.set,
       state.universe
     );

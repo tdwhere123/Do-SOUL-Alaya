@@ -79,6 +79,32 @@ describe("query-compiled Gamma planted leakage", () => {
       .toBe("unresolved");
   });
 
+  it("keeps unknown correlation in the certified semantic set", () => {
+    const compiled = compileGamma(scalarQuery([{
+      id: "rel1",
+      relation: "bought",
+      arguments: ["x"]
+    }], [{
+      id: "need-ind",
+      constraint: "independent_support",
+      arguments: ["x"]
+    }]), [
+      candidate("A", {
+        bindings: [binding("alice")],
+        propositions: [
+          proposition("rel1", "supports", "unknown"),
+          proposition("need-ind", "supports", "unknown")
+        ]
+      })
+    ]);
+    const certified = compiled.semantic_feasibility
+      .filter((row) => row.semantic === "feasible")
+      .map((row) => row.candidate_key);
+    expect(certified).toEqual(["A"]);
+    expect(evaluateQueryGammaTuple(compiled, emptyQueryGammaSelectedSet(), "A")
+      .certified_independent_support).toBe(0);
+  });
+
   it("does not let weights or live novelty change compiled strata", () => {
     const compiled = compileGamma(scalarQuery([{
       id: "rel1",

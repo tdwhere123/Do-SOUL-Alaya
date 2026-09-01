@@ -18,6 +18,7 @@ import {
 } from "../../decision/prefix-capture/capture.js";
 import {
   previewSidecar,
+  type QueryProofPreviewRequest,
   type QueryProofPreviewSidecar
 } from "./query-proof-preview.js";
 import { shadowLineageApplicability } from "../../decision/query-proof/demand.js";
@@ -59,14 +60,15 @@ import {
   prefixSK,
   walkShadowCapture,
   type ShadowCapturedWalk,
-  type ShadowCaptureWalkCandidate,
-  type ShadowWalkUtilityTransfer
+  type ShadowCaptureWalkCandidate
 } from "../../decision/prefix-capture/walk.js";
 import type { PsiQuery } from "../../decision/dominance-contract.js";
 
 export type { PsiQuery } from "../../decision/dominance-contract.js";
 export type { ShadowPsiObservationField } from "../../decision/query-proof/psi.js";
 export { prefixSK } from "../../decision/prefix-capture/walk.js";
+export type { QueryProofPreviewRequest, QueryProofPreviewSidecar } from
+  "./query-proof-preview.js";
 
 export type ShadowCutoverSeam = Readonly<{
   readonly owner: "fineAssess";
@@ -113,9 +115,7 @@ export type ShadowIntegrateInput = Readonly<{
   readonly psi_v2_producer_outcomes?: PsiV2ShadowInputV1["producer_outcomes"];
   readonly query_id?: string;
   readonly snapshot_digest?: string;
-  readonly query_proof_preview?: Readonly<{
-    readonly utility_transfer: ShadowWalkUtilityTransfer;
-  }>;
+  readonly query_proof_preview?: QueryProofPreviewRequest;
 }>;
 
 export type ShadowFailClosedTrace = Readonly<{
@@ -197,7 +197,7 @@ function runShadowIntegration(
   const walked = walkShadowCapture(walkInput);
   if (!isCapturedWalk(walked)) return failClosed("psi_cycle_contract_failure", activation);
   if (!prefixMonotone(walked.S_infty)) return failClosed("prefix_violation", activation);
-  return assembleCaptured(input, eligible, peeled, walked, observations, walkInput);
+  return assembleCaptured(input, eligible, peeled, walked, observations);
 }
 
 export function memoizeRequestPsi(psi: PsiQuery): PsiQuery {
@@ -370,8 +370,7 @@ function assembleCaptured(
   eligible: readonly string[],
   frontiers: ShadowFrontierReceipt,
   walked: ShadowCapturedWalk,
-  observations: ShadowPsiObservationField,
-  walkInput: Parameters<typeof walkShadowCapture>[0]
+  observations: ShadowPsiObservationField
 ): ShadowCapturedTrace {
   const k = input.policy.fine_assessment.budgets.max_entries;
   const first = walked.decisions[0];
@@ -416,7 +415,7 @@ function assembleCaptured(
       walked.decisions.flatMap((decision) => [...decision.novelty_core_known_absence])
     ),
     psi_v2_shadow: observePsiV2Shadow(input),
-    ...previewSidecar(input.query_proof_preview, walkInput)
+    ...previewSidecar(input.query_proof_preview, k)
   });
 }
 

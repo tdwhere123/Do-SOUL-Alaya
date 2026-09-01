@@ -18,6 +18,9 @@ import {
 } from "../../../../../recall/decision/query-proof/closure/extremum.js";
 import {
   compileQueryGamma,
+  extremumClosureDigest,
+  extremumPrincipalDigest,
+  extremumUniverseDigest,
   type QueryGammaCompileInputV1
 } from "../../../../../recall/decision/query-proof/gamma/compile.js";
 import type {
@@ -199,20 +202,33 @@ export function argminQuery(): CanonicalQueryV1 {
 export function extremumWitness(
   compilation: CanonicalQueryCompilationV1,
   operator: "argmax" | "argmin",
-  bindings: readonly string[]
+  bindings: readonly string[],
+  query: CanonicalQueryV1 = operator === "argmax" ? argmaxQuery() : argminQuery(),
+  candidateKeys: readonly string[] = ["A"]
 ): ExtremumClosureWitness {
+  const interval_digest = digestRecallFieldIdentity({ interval: "test" });
+  const query_digest = digestCanonicalQueryV1(query);
+  const snapshot_digest = compilation.snapshot_receipt_digest;
+  const extremal_binding_ids = Object.freeze([...bindings]);
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: EXTREMUM_CLOSURE_WITNESS_OPERATOR_ID,
     operator,
-    closure_result_digest: digestRecallFieldIdentity({ closure: "test" }),
-    query_digest: compilation.digest,
-    snapshot_digest: compilation.snapshot_receipt_digest,
-    principal_digest: digestRecallFieldIdentity({ principal: "principal-1" }),
-    universe_digest: digestRecallFieldIdentity({ universe: "test" }),
+    query_digest,
+    snapshot_digest,
+    principal_digest: extremumPrincipalDigest(compilation),
+    universe_digest: extremumUniverseDigest(compilation, candidateKeys.map((key) =>
+      candidate(key))),
     sensitivity_id: "extremum:t",
-    extremal_binding_ids: Object.freeze([...bindings]),
-    interval_digest: digestRecallFieldIdentity({ interval: "test" })
+    extremal_binding_ids,
+    interval_digest,
+    closure_result_digest: extremumClosureDigest({
+      operator,
+      query_digest,
+      snapshot_digest,
+      interval_digest,
+      extremal_binding_ids
+    })
   });
   return Object.freeze({
     ...body,

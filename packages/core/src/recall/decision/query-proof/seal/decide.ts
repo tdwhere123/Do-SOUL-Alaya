@@ -25,10 +25,11 @@ import type {
 } from "../proof/oracle/contract.js";
 import {
   digestDecisionContract,
+  LIVE_DECIDE_OPERATOR_BRAND,
   QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
   sortDecisionBindings
 } from "./contract.js";
-import { freezeDecideWorld, overlayWorld } from "./overlay.js";
+import { digestDecideWorld, freezeDecideWorld, overlayWorld } from "./overlay.js";
 
 export type QueryProofDecideWorldV1 = Readonly<{
   readonly compiled: QueryCompiledGammaV1;
@@ -97,7 +98,7 @@ export function createQueryProofDecisionOperator(
   const frozen = freezeDecideWorld(world);
   const transfer = createQueryCompiledWalkTransfer(frozen.compiled);
   const digest = digestDecisionContract(frozen.compiled, transfer.contract_digest);
-  return Object.freeze({
+  const operator: FiniteDecisionOperator = {
     operator_id: QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
     decide: ({ base_state, refinement, k_max }) => {
       const overlay = overlayWorld(frozen, base_state, refinement);
@@ -107,7 +108,8 @@ export function createQueryProofDecisionOperator(
       }
       return decided.trace;
     }
-  });
+  };
+  return Object.freeze(brandLiveOperator(operator, digestDecideWorld(frozen)));
 }
 
 export function createQueryProofAbstractOperator(
@@ -115,10 +117,19 @@ export function createQueryProofAbstractOperator(
 ): AbstractDecisionOperator {
   const frozen = freezeDecideWorld(world);
   const concrete = createQueryProofDecisionOperator(frozen);
-  return Object.freeze({
+  const operator: AbstractDecisionOperator = {
     operator_id: QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
     evaluate: (input) => evaluateAbstractDecide(frozen, concrete, input)
+  };
+  return Object.freeze(brandLiveOperator(operator, digestDecideWorld(frozen)));
+}
+
+function brandLiveOperator<T extends object>(operator: T, worldDigest: ReturnType<typeof digestDecideWorld>): T {
+  Object.defineProperty(operator, LIVE_DECIDE_OPERATOR_BRAND, {
+    value: worldDigest,
+    enumerable: false
   });
+  return operator;
 }
 
 function evaluateAbstractDecide(

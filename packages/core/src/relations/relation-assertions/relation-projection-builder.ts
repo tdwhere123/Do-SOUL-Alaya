@@ -5,7 +5,8 @@ import {
   type RelationAssertionResolution
 } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../../shared/stable-stringify.js";
-import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from "./legacy-empty-history-digest.js";
+import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from
+  "../../path-graph/relation-assertions/legacy-empty-history-digest.js";
 import {
   buildTemporalPathProjection,
   TEMPORAL_RELATION_PROJECTION_POLICY_ID,

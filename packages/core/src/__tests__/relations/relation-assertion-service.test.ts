@@ -21,7 +21,7 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from "../../relations/relation-assertions/legacy-empty-history-digest.js";
+import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from "../../path-graph/relation-assertions/legacy-empty-history-digest.js";
 import { RelationAssertionService } from "../../relations/relation-assertions/relation-assertion-service.js";
 import type { RelationAssertionAtomicRepoPort } from "../../relations/relation-assertions/relation-assertion-service-types.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";

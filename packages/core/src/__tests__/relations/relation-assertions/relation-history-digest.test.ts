@@ -3,7 +3,7 @@ import {
   EMPTY_RELATION_HISTORY_DIGEST,
   type RelationAssertion
 } from "@do-soul/alaya-protocol";
-import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from "../../../relations/relation-assertions/legacy-empty-history-digest.js";
+import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from "../../../path-graph/relation-assertions/legacy-empty-history-digest.js";
 import { buildRelationProjection } from "../../../relations/relation-assertions/relation-projection-builder.js";
 
 const asOf = "2026-07-17T01:30:00.000Z";

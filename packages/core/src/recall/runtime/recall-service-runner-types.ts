@@ -14,6 +14,7 @@ import type {
 } from "../../embedding-recall/embedding-recall-service.js";
 import type {
   FineAssessmentDiagnosticCapture,
+  FineAssessParams,
   fineAssess,
   prepareFineAssessment
 } from "../delivery/fine-assessment.js";
@@ -84,6 +85,7 @@ export interface RecallExecutionParams {
     import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
   >;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
+  readonly queryProofPreview?: FineAssessParams["query_proof_preview"];
   readonly snapshotDigest?: string;
   // Observer attachment is observation-only; answer features follow diagnosticCapture.
   readonly selectionBoundaryObserver?: (

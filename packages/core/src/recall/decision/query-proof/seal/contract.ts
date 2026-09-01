@@ -16,6 +16,8 @@ export const DECISION_STABILITY_SEAL_OPERATOR_ID =
 
 export const QUERY_PROOF_TIE_POLICY = "identity_after_equal_gamma" as const;
 
+export const LIVE_DECIDE_OPERATOR_BRAND = Symbol.for("alaya.query_proof.live_decide_q");
+
 export type DecisionContractIdentityV1 = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof QUERY_PROOF_FINAL_DECISION_OPERATOR_ID;
@@ -35,6 +37,8 @@ export type DecisionStabilitySealV1 = Readonly<{
   readonly query_digest: RecallFieldDigest;
   readonly compilation_digest: RecallFieldDigest;
   readonly live_compilation_digest: RecallFieldDigest;
+  readonly world_digest: RecallFieldDigest;
+  readonly proof_state_digest: RecallFieldDigest;
   readonly snapshot_digest: RecallFieldDigest;
   readonly gamma_digest: RecallFieldDigest;
   readonly walk_operator_id: typeof SHADOW_CAPTURE_OPERATOR_ID;
@@ -119,6 +123,8 @@ export function parseDecisionStabilitySeal(
     query_digest: requireDigest(record.query_digest),
     compilation_digest: requireDigest(record.compilation_digest),
     live_compilation_digest: requireDigest(record.live_compilation_digest),
+    world_digest: requireDigest(record.world_digest),
+    proof_state_digest: requireDigest(record.proof_state_digest),
     snapshot_digest: requireDigest(record.snapshot_digest),
     gamma_digest: requireDigest(record.gamma_digest),
     walk_operator_id: SHADOW_CAPTURE_OPERATOR_ID,

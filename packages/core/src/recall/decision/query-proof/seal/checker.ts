@@ -24,17 +24,24 @@ import {
   type FiniteOracleFixture
 } from "../proof/oracle/contract.js";
 import type { ChannelClosureResult } from "../closure/contract.js";
+import { assertCanonicalQueryCompilationDigest } from
+  "../../../query/canonical-query/compilation.js";
+import { compiledGammaBodyDigest, compileQueryGamma } from "../gamma/compile.js";
 import {
   DECISION_STABILITY_SEAL_OPERATOR_ID,
   digestDecisionContract,
+  LIVE_DECIDE_OPERATOR_BRAND,
   QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
   type DecisionStabilitySealV1,
   type SealCheckerResultV1
 } from "./contract.js";
 import {
+  createQueryProofAbstractOperator,
+  createQueryProofDecisionOperator,
   runQueryProofDecideQ,
   type QueryProofDecideWorldV1
 } from "./decide.js";
+import { digestDecideWorld } from "./overlay.js";
 
 export type SealCheckerInputV1 = Readonly<{
   readonly live_authority: LiveQueryProofAuthority;
@@ -52,35 +59,27 @@ export type SealCheckerInputV1 = Readonly<{
 export function checkDecisionStability(
   input: SealCheckerInputV1
 ): SealCheckerResultV1 {
-  const digest = contractDigest(input.world);
+  let digest: RecallFieldDigest;
+  try {
+    digest = contractDigest(input.world);
+  } catch (error) {
+    return unsupported(
+      input.world.compiled.compilation_digest,
+      messageOf(error)
+    );
+  }
   if (input.concrete_operator.operator_id !== QUERY_PROOF_FINAL_DECISION_OPERATOR_ID ||
       input.abstract_operator.operator_id !== QUERY_PROOF_FINAL_DECISION_OPERATOR_ID) {
     return unsupported(digest, "final Decide_Q operator identity mismatch");
   }
   const identityReason = compiledIdentityMismatch(input);
   if (identityReason !== null) return unsupported(digest, identityReason);
-  let captured;
-  try {
-    captured = captureVerifiedLiveClosureAuthority(input.live_authority);
-  } catch (error) {
-    return unsupported(digest, messageOf(error));
-  }
-  let oracle: FiniteDecisionOracleResult;
-  try {
-    oracle = enumerateFiniteDecisionOracle({
-      authority: captured.authority,
-      fixture: input.fixture,
-      operator: input.concrete_operator
-    });
-  } catch (error) {
-    return unsupported(digest, messageOf(error));
-  }
-  if (oracle.decision_operator_id !== QUERY_PROOF_FINAL_DECISION_OPERATOR_ID) {
-    return unsupported(digest, "oracle operator is not the bound final decision operator");
-  }
+  const bound = bindLiveDecideOracle(input, digest);
+  if ("status" in bound) return bound;
+  const { boundInput, captured, oracle } = bound;
   let decided;
   try {
-    decided = runQueryProofDecideQ(input.world, input.k_max);
+    decided = runQueryProofDecideQ(boundInput.world, boundInput.k_max);
   } catch (error) {
     return unsupported(digest, messageOf(error));
   }
@@ -93,19 +92,69 @@ export function checkDecisionStability(
   if (decided.unresolved_boundary_tradeoff) {
     return open(digest, "unresolved trade-off at a selected boundary");
   }
-  if (hasUnresolvedSemantic(input.world)) {
+  if (hasUnresolvedSemantic(boundInput.world)) {
     return open(digest, "unresolved semantic feasibility remains");
   }
-  if (!prefixAllFeasible(input.world, decided.prefix)) {
+  if (!prefixAllFeasible(boundInput.world, decided.prefix)) {
     return open(digest, "selected prefix is not compiled-feasible");
   }
-  if (!sealObligationsCovered(input.world.compiled, input.closures, captured.authority)) {
+  if (!sealObligationsCovered(boundInput.world.compiled, boundInput.closures, captured.authority)) {
     return open(digest, "seal obligations are not covered by certified closures");
   }
   if (oracle.outcomes.length !== 1) {
     return open(digest, "represented refinements do not preserve one prefix/binding/reason");
   }
-  return certifyStableOutcome(input, captured.authority, digest, oracle, decided);
+  return certifyStableOutcome(boundInput, captured.authority, digest, oracle, decided);
+}
+
+function bindLiveDecideOracle(
+  input: SealCheckerInputV1,
+  digest: RecallFieldDigest
+): SealCheckerResultV1 | Readonly<{
+  readonly boundInput: SealCheckerInputV1;
+  readonly captured: ReturnType<typeof captureVerifiedLiveClosureAuthority>;
+  readonly oracle: FiniteDecisionOracleResult;
+}> {
+  let liveConcrete;
+  let liveAbstract;
+  try {
+    liveConcrete = createQueryProofDecisionOperator(input.world);
+    liveAbstract = createQueryProofAbstractOperator(input.world);
+  } catch (error) {
+    return unsupported(digest, messageOf(error));
+  }
+  if (!isLiveBoundOperator(input.concrete_operator, input.world) ||
+      !isLiveBoundOperator(input.abstract_operator, input.world)) {
+    return unsupported(digest, "substitute Decide_Q operator is not the bound live implementation");
+  }
+  let captured;
+  try {
+    captured = captureVerifiedLiveClosureAuthority(input.live_authority);
+  } catch (error) {
+    return unsupported(digest, messageOf(error));
+  }
+  let oracle: FiniteDecisionOracleResult;
+  try {
+    oracle = enumerateFiniteDecisionOracle({
+      authority: captured.authority,
+      fixture: input.fixture,
+      operator: liveConcrete
+    });
+  } catch (error) {
+    return unsupported(digest, messageOf(error));
+  }
+  if (oracle.decision_operator_id !== QUERY_PROOF_FINAL_DECISION_OPERATOR_ID) {
+    return unsupported(digest, "oracle operator is not the bound final decision operator");
+  }
+  return Object.freeze({
+    boundInput: Object.freeze({
+      ...input,
+      concrete_operator: liveConcrete,
+      abstract_operator: liveAbstract
+    }),
+    captured,
+    oracle
+  });
 }
 
 function certifyStableOutcome(
@@ -150,6 +199,12 @@ function certifyStableOutcome(
       outcome.trace_digest !== walkedTrace.trace_digest) {
     return open(digest, "oracle, abstract proof, and walk traces are not the same singleton");
   }
+  if (authority.canonical_query_compilation.digest !== input.world.compiled.compilation_digest) {
+    return unsupported(digest, "compiled compilation digest does not match live canonical query");
+  }
+  if (certifiedDeliveryBlocked(input)) {
+    return unsupported(digest, "blocks_certified_delivery hole remains");
+  }
   return Object.freeze({
     status: "CERTIFIED_STABLE" as const,
     decision_contract_digest: digest,
@@ -169,7 +224,73 @@ function compiledIdentityMismatch(input: SealCheckerInputV1): string | null {
   if (compiled.compilation_digest !== world.compilation_digest) {
     return "compiled compilation digest does not match Decide_Q world";
   }
+  if (compiledGammaBodyDigest(compiled) !== compiled.gamma_digest ||
+      compiledGammaBodyDigest(world) !== world.gamma_digest) {
+    return "compiled Gamma digest does not match Gamma body";
+  }
+  if (!sameWalkedGamma(compiled, world)) {
+    return "compiled Gamma does not match Decide_Q world";
+  }
+  if (input.world.compile_input.compilation.digest !== world.compilation_digest) {
+    return "Decide_Q world compilation digest does not match compiled contract";
+  }
+  try {
+    assertCanonicalQueryCompilationDigest(input.world.compile_input.compilation);
+  } catch (error) {
+    return messageOf(error);
+  }
+  let recomputed: QueryCompiledGammaV1;
+  try {
+    recomputed = compileQueryGamma(input.world.compile_input);
+  } catch (error) {
+    return messageOf(error);
+  }
+  if (!sameWalkedGamma(recomputed, world)) {
+    return "compiled Gamma does not match Decide_Q compile input";
+  }
   return null;
+}
+
+function sameWalkedGamma(
+  left: QueryCompiledGammaV1,
+  right: QueryCompiledGammaV1
+): boolean {
+  return left.compile_status === right.compile_status &&
+    left.gamma_digest === right.gamma_digest &&
+    digestRecallFieldIdentity(left.standings) ===
+      digestRecallFieldIdentity(right.standings) &&
+    digestRecallFieldIdentity(left.semantic_feasibility) ===
+      digestRecallFieldIdentity(right.semantic_feasibility);
+}
+
+function isLiveBoundOperator(
+  operator: object,
+  world: QueryProofDecideWorldV1
+): boolean {
+  const branded = (operator as Record<symbol, unknown>)[LIVE_DECIDE_OPERATOR_BRAND];
+  return branded === digestDecideWorld(world);
+}
+
+function certifiedDeliveryBlocked(input: SealCheckerInputV1): boolean {
+  return hasCertifiedDeliveryHole(input.live_authority.canonical_query_compilation.holes) ||
+    hasCertifiedDeliveryHole(input.world.compile_input.compilation.holes);
+}
+
+function hasCertifiedDeliveryHole(
+  holes: readonly { readonly impacts: readonly string[] }[]
+): boolean {
+  return holes.some((hole) => hole.impacts.includes("blocks_certified_delivery"));
+}
+
+export function digestQueryProofState(input: SealCheckerInputV1): RecallFieldDigest {
+  return digestRecallFieldIdentity({
+    kind: "query_proof_proof_state_v1",
+    fixture: input.fixture,
+    k_max: input.k_max,
+    coordinates: input.coordinates,
+    limits: input.limits,
+    closures: input.closures.map((closure) => closure.result_digest)
+  });
 }
 
 function contractDigest(world: QueryProofDecideWorldV1): RecallFieldDigest {
@@ -230,13 +351,19 @@ function mintSeal(
   walkOperatorId: DecisionStabilitySealV1["walk_operator_id"]
 ): DecisionStabilitySealV1 {
   const compiled = input.world.compiled;
+  const liveCompilationDigest = authority.canonical_query_compilation.digest;
+  if (liveCompilationDigest !== compiled.compilation_digest) {
+    throw new Error("seal live canonical query is not the compiled contract");
+  }
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: DECISION_STABILITY_SEAL_OPERATOR_ID,
     decision_contract_digest: digest,
     query_digest: compiled.query_digest,
     compilation_digest: compiled.compilation_digest,
-    live_compilation_digest: authority.canonical_query_compilation.digest,
+    live_compilation_digest: liveCompilationDigest,
+    world_digest: digestDecideWorld(input.world),
+    proof_state_digest: digestQueryProofState(input),
     snapshot_digest: authority.snapshot_vector.vector_digest,
     gamma_digest: compiled.gamma_digest,
     walk_operator_id: walkOperatorId,

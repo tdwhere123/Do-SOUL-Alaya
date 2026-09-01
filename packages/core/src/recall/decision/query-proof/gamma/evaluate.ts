@@ -55,7 +55,10 @@ export function evaluateSemanticFeasibility(
     return match?.support === "refutes";
   });
   if (refuted) return "infeasible";
-  if (standings.some((row) => row.coverage === "unknown")) return "unresolved";
+  const unresolved = atoms.some((gammaAtom, index) =>
+    standings[index]?.coverage === "unknown" &&
+    gammaAtom.kind !== "certified_independent_support");
+  if (unresolved) return "unresolved";
   return "feasible";
 }
 
@@ -89,11 +92,11 @@ export function admitCompiledLowerFrontier(
   compiled: QueryCompiledGammaV1,
   selected: QueryGammaSelectedSetV1,
   candidateKey: string,
-  coreKeys: readonly string[]
+  higherEligibleKeys: readonly string[]
 ): QueryGammaAdmissionV1 {
   const novel = novelCoveredAtoms(compiled, selected, candidateKey);
   const admitted = novel.filter((atomId) =>
-    coreKeys.every((coreKey) => provedNotToCover(compiled, coreKey, atomId)));
+    higherEligibleKeys.every((higherKey) => provedNotToCover(compiled, higherKey, atomId)));
   return Object.freeze({
     admitted: admitted.length > 0,
     compiled_atom_ids: Object.freeze([...admitted].sort(compareText))
@@ -187,10 +190,14 @@ function propositionCoverage(
 
 function bindingCoverage(
   candidate: QueryGammaCandidateEvidenceV1,
-  identity: string
+  target: string
 ): QueryGammaCoverageV1 {
   if (candidate.bindings_status === "unknown") return "unknown";
-  const hits = candidate.bindings.filter((binding) => binding.semantic_identity === identity);
+  const split = target.indexOf(":");
+  const variable = split < 0 ? "" : target.slice(0, split);
+  const identity = split < 0 ? target : target.slice(split + 1);
+  const hits = candidate.bindings.filter((binding) =>
+    binding.semantic_identity === identity && binding.variable === variable);
   if (hits.some((binding) => binding.distinctness === "unknown")) return "unknown";
   return hits.some((binding) => binding.distinctness === "proved_distinct")
     ? "covers"

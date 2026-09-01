@@ -131,12 +131,18 @@ export function verifyCanonicalQueryCompilationV1(
   verifyHoleBindings(compilation.holes, compilation.hypotheses);
   verifyCompileDisposition(compilation);
   verifySensitivities(compilation);
-  if (digestRecallFieldIdentity(compilationBody(compilation)) !== compilation.digest) {
-    throw new Error("canonical query compilation digest mismatch");
-  }
+  assertCanonicalQueryCompilationDigest(compilation);
   const expected = compileCanonicalQueryCompilation(evidence, snapshot);
   if (expected.digest !== compilation.digest) {
     throw new Error("canonical query compilation evidence mismatch");
+  }
+}
+
+export function assertCanonicalQueryCompilationDigest(
+  compilation: CanonicalQueryCompilationV1
+): void {
+  if (digestRecallFieldIdentity(compilationBody(compilation)) !== compilation.digest) {
+    throw new Error("canonical query compilation digest mismatch");
   }
 }
 
