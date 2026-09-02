@@ -11,6 +11,7 @@ export interface PackableAssertion {
 
 export type TransportPackPolicy =
   | { readonly kind: "reference_batch_8" }
+  | { readonly kind: "reference_batch"; readonly assertionsPerPack: 8 | 16 | 24 | 32 }
   | {
       readonly kind: "token_aware";
       readonly maxAssertions: number;
@@ -114,6 +115,9 @@ function nextPackSlice(
 ): number {
   if (policy.kind === "reference_batch_8") {
     return Math.min(OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH, ordered.length - offset);
+  }
+  if (policy.kind === "reference_batch") {
+    return Math.min(policy.assertionsPerPack, ordered.length - offset);
   }
   let packed = 0;
   let packedChars = 0;

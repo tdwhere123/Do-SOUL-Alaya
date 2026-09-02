@@ -98,6 +98,18 @@ export {
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest
 } from "./official-api/extraction-request.js";
+export {
+  OFFICIAL_API_SEMANTIC_WORKSET_CONTRACT_VERSION,
+  officialApiSemanticWorksetFromUnits,
+  planOfficialApiSemanticWorkset,
+  planOfficialApiTransport,
+  materializeOfficialApiTransportResponse,
+  type OfficialApiSemanticWorkset,
+  type OfficialApiSemanticWorkUnit,
+  type OfficialApiTransportBatchSize,
+  type TransportPack,
+  type TransportPackPlan
+} from "./official-api/semantic-workset.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;

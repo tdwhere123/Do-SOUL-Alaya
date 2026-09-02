@@ -44,7 +44,9 @@ export { collectPairedEnvironment, redactProvenanceUrl } from "./paired-environm
 export { computeExecutedDistIdentityFresh } from "./identity/executed-dist-identity.js";
 export { assertRecordedRunCodeIdentity } from "./identity/run-code-identity.js";
 export {
+  LongMemEvalRunProvenanceObjectSchema,
   LongMemEvalRunProvenanceSchema,
+  refineRunProvenanceIngestionMode,
   type LongMemEvalRunProvenance
 } from "./run-provenance-schema.js";
 export {

@@ -7,12 +7,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
   parseOfficialApiSignals,
+  planOfficialApiSemanticWorkset,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
-import {
-  ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
-  mintOfficialApiAssertionBindings
-} from "../../../../../../packages/soul/src/garden/ingestion/official-api/extraction-request.js";
 import { promptSha256 } from "../../../runs/extraction/cache/semantic-artifact/admit.js";
 import { convertLegacyExtractionShard } from "../../../runs/extraction/cache/semantic-artifact/legacy-convert.js";
 import {
@@ -33,6 +30,7 @@ import type { ExtractionCacheManifestV3 } from "../../../runs/extraction/cache/e
 const FIXTURES = dirname(fileURLToPath(import.meta.url)) + "/fixtures";
 const DATASET_REVISION =
   "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442";
+const CONTRACT = "alaya.assertion_semantic_identity.v1";
 const SINGLE_KEY = "0c297b4cd1547986994b6f4acd44b7bfa1e40d5eba9c803e2c53cba93bafc295";
 const MULTI_KEY = "0cf56b73a55320505f980064c64b0d51afe2143754bd6340199703d9f4e5e673";
 
@@ -56,13 +54,13 @@ describe("sealed MiMo shard conversion", () => {
   it("converts a locator-bearing shard with minted identity and replays raw bytes", async () => {
     const fixture = loadTurn(SINGLE_KEY);
     const entry = JSON.parse(await readFile(join(FIXTURES, `${SINGLE_KEY}.shard.json`), "utf8")) as CachedExtractionEntry;
-    const bindings = mintOfficialApiAssertionBindings(
+    const bindings = planOfficialApiSemanticWorkset(
       fixture.turn.turnContent,
       fixture.turn.turnMessages,
       DATASET_REVISION
-    ).filter((binding) => fixture.request.source_assertions.some(
-      (assertion) => assertion.assertion_id === binding.locator.assertion_id
-    ));
+    ).units.filter((unit) => fixture.request.source_assertions.some(
+      (assertion) => assertion.assertion_id === unit.assertionId
+    )).map((unit) => unit.binding);
     expect(bindings[0]?.semanticKey).toMatch(/^[a-f0-9]{64}$/u);
     const drafts = parseOfficialApiSignals(entry.raw_json);
     expect(drafts.length).toBeGreaterThan(0);
@@ -70,7 +68,7 @@ describe("sealed MiMo shard conversion", () => {
       entry,
       request: fixture.request,
       sourceBindings: bindings,
-      semanticContract: ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
+      semanticContract: CONTRACT,
       modelFamily: "mimo-v2.5",
       expectedPromptSha256: promptSha256(OFFICIAL_API_SYSTEM_PROMPT)
     });
@@ -92,16 +90,16 @@ describe("sealed MiMo shard conversion", () => {
   it("does not mint a duplicate assertion_id from a sealed multi-signal shard", async () => {
     const fixture = loadTurn(MULTI_KEY);
     const entry = JSON.parse(await readFile(join(FIXTURES, `${MULTI_KEY}.shard.json`), "utf8")) as CachedExtractionEntry;
-    const bindings = mintOfficialApiAssertionBindings(
+    const bindings = planOfficialApiSemanticWorkset(
       fixture.turn.turnContent,
       fixture.turn.turnMessages,
       DATASET_REVISION
-    );
+    ).units.map((unit) => unit.binding);
     const report = convertLegacyExtractionShard({
       entry,
       request: fixture.request,
       sourceBindings: bindings,
-      semanticContract: ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
+      semanticContract: CONTRACT,
       modelFamily: "mimo-v2.5",
       expectedPromptSha256: promptSha256(OFFICIAL_API_SYSTEM_PROMPT)
     });
@@ -112,16 +110,16 @@ describe("sealed MiMo shard conversion", () => {
   it("admits the same sealed raw through fill and warms Lazy F3 to zero calls", async () => {
     const fixture = loadTurn(SINGLE_KEY);
     const entry = JSON.parse(await readFile(join(FIXTURES, `${SINGLE_KEY}.shard.json`), "utf8")) as CachedExtractionEntry;
-    const binding = mintOfficialApiAssertionBindings(
+    const binding = planOfficialApiSemanticWorkset(
       fixture.turn.turnContent,
       fixture.turn.turnMessages,
       DATASET_REVISION
-    ).find((item) => item.locator.assertion_id === fixture.request.source_assertions[0]!.assertion_id);
+    ).units.find((item) => item.assertionId === fixture.request.source_assertions[0]!.assertion_id)?.binding;
     if (binding === undefined) throw new Error("missing minted binding");
     const task: SemanticFillTask = {
       semanticKey: binding.semanticKey,
       capability: "official_api_signals:v1",
-      semanticContract: ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
+      semanticContract: CONTRACT,
       modelFamily: "mimo-v2.5",
       modelId: "mimo-v2.5",
       requestProfile: "mimo-v2.5-nonthinking-v1",

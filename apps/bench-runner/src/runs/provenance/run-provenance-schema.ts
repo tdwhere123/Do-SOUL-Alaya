@@ -54,8 +54,8 @@ const EmbeddingCacheOverlayBindingSchema = z.object({
   }).strict()
 }).strict();
 
-export const LongMemEvalRunProvenanceSchema = z.object({
-  schema_version: z.literal(1),
+export const LongMemEvalRunProvenanceObjectSchema = z.object({
+  schema_version: z.union([z.literal(1), z.literal(2)]),
   dataset_sha256: runProvenanceSha256Schema.optional(),
   selection: SelectionContractIdentitySchema.optional(),
   code: z.object({
@@ -119,7 +119,33 @@ export const LongMemEvalRunProvenanceSchema = z.object({
     target_count: z.number().int().positive(),
     selected_id_digest: runProvenanceSha256Schema,
     file_sha256: runProvenanceSha256Schema
-  }).strict().nullable()
+  }).strict().nullable(),
+  ingestion_mode: z.enum(["precomputed_full", "lazy_field"]).optional(),
+  semantic_overlay_identity: runProvenanceSha256Schema.optional()
 }).strict();
+
+export function refineRunProvenanceIngestionMode(
+  value: { readonly schema_version: 1 | 2; readonly ingestion_mode?: "precomputed_full" | "lazy_field"; readonly semantic_overlay_identity?: string },
+  ctx: z.RefinementCtx
+): void {
+  if (value.schema_version === 2 && value.ingestion_mode === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "schema_version 2 requires ingestion_mode",
+      path: ["ingestion_mode"]
+    });
+  }
+  if (value.schema_version === 1 && (value.ingestion_mode !== undefined ||
+      value.semantic_overlay_identity !== undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "schema_version 1 cannot carry ingestion_mode",
+      path: ["ingestion_mode"]
+    });
+  }
+}
+
+export const LongMemEvalRunProvenanceSchema =
+  LongMemEvalRunProvenanceObjectSchema.superRefine(refineRunProvenanceIngestionMode);
 
 export type LongMemEvalRunProvenance = z.infer<typeof LongMemEvalRunProvenanceSchema>;

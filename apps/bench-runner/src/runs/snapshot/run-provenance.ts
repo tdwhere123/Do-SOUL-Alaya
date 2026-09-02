@@ -6,7 +6,9 @@ import {
 import { EXTRACTION_FILL_IDENTITY_SCHEMA_FIELDS } from
   "../extraction/fill/fill-authority.js";
 import {
+  LongMemEvalRunProvenanceObjectSchema,
   LongMemEvalRunProvenanceSchema,
+  refineRunProvenanceIngestionMode,
   isLongMemEvalRunProvenanceSummaryGateEligible,
   type LongMemEvalRunProvenance
 } from "../provenance/run.js";
@@ -53,9 +55,9 @@ const SnapshotExtractionCacheIdentitySchema = z.discriminatedUnion(
 );
 
 export const LongMemEvalSnapshotRunProvenanceSchema =
-  LongMemEvalRunProvenanceSchema.extend({
+  LongMemEvalRunProvenanceObjectSchema.extend({
     extraction_cache: SnapshotExtractionCacheIdentitySchema.nullable()
-  }).strict();
+  }).strict().superRefine(refineRunProvenanceIngestionMode);
 
 export type LongMemEvalSnapshotRunProvenance = z.infer<
   typeof LongMemEvalSnapshotRunProvenanceSchema

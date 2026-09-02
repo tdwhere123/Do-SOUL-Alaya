@@ -91,6 +91,11 @@ export interface ExtractionFillOptions {
   readonly tolerateProviderTaskFailures?: boolean;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly r3SpendApproval?: R3SpendApproval;
+  readonly ingestionMode?: "precomputed_full" | "lazy_field";
+  readonly semanticArtifactRoot?: string;
+  readonly semanticTransport?: import("./fill/semantic-fill-executor.js").SemanticFillTransport;
+  readonly semanticMaxCalls?: number;
+  readonly semanticMaxFailures?: number;
 }
 export interface ExtractionFillResult extends FillRetryTelemetry {
   readonly requestedTurns: number;

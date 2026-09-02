@@ -15,7 +15,6 @@ import {
   resolveAssertionSemanticContext,
   type AssertionSourceBinding
 } from "../../triage/grounding/source-locator/assertion-semantic-identity.js";
-import { planTurnTransportPacks } from "./transport-pack.js";
 
 export const OFFICIAL_API_EXTRACTION_REQUEST_SCHEMA_VERSION = 2;
 export const OFFICIAL_API_EXTRACTION_BATCH_CONTRACT_VERSION = 1;
@@ -61,34 +60,24 @@ export function buildOfficialApiExtractionRequests(
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
   const assertions = buildOfficialApiSourceAssertions(sourceCorpus);
   const sourceCorpusIdentity = computeOfficialApiSourceCorpusIdentity(sourceCorpus);
-  const bindings = mintOfficialApiAssertionBindings(turnContent, messages);
-  const byId = new Map(assertions.map((assertion) => [assertion.assertion_id, assertion]));
-  const plan = planTurnTransportPacks(
-    bindings.map((binding) => {
-      const assertion = byId.get(binding.locator.assertion_id);
-      if (assertion === undefined) {
-        throw new TypeError("minted binding is missing from the catalog");
-      }
-      return {
-        semanticKey: binding.semanticKey,
-        assertionId: binding.locator.assertion_id,
-        text: assertion.text
-      };
-    }),
-    { kind: "reference_batch_8" }
+  const batchCount = Math.max(
+    1,
+    Math.ceil(assertions.length / OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH)
   );
-  return Object.freeze(plan.packs.map((pack, batchIndex) => buildRequest(
-    pack.assertion_ids.map((assertionId) => {
-      const assertion = byId.get(assertionId);
-      if (assertion === undefined) {
-        throw new TypeError("transport pack referenced a missing assertion");
-      }
-      return assertion;
-    }),
-    sourceCorpusIdentity,
-    batchIndex,
-    plan.packs.length
-  )));
+  if (assertions.length === 0) {
+    return Object.freeze([buildRequest([], sourceCorpusIdentity, 0, batchCount)]);
+  }
+  const requests: OfficialApiExtractionRequest[] = [];
+  for (let offset = 0; offset < assertions.length;
+    offset += OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH) {
+    requests.push(buildRequest(
+      assertions.slice(offset, offset + OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH),
+      sourceCorpusIdentity,
+      requests.length,
+      batchCount
+    ));
+  }
+  return Object.freeze(requests);
 }
 
 export function mintOfficialApiAssertionBindings(

@@ -19,6 +19,8 @@ import {
 import type { ExtractionFillStatus } from "./manifest/fill-manifest-contract.js";
 import { buildFillManifest } from "./manifest/fill-manifest.js";
 import { runExtractionPool } from "./fill-pool.js";
+import { runSemanticFill } from "./semantic-fill-executor.js";
+import { collectSemanticFillTasks } from "./semantic-workset-tasks.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 import {
   countTerminalProviderFailures,
@@ -89,6 +91,26 @@ export async function executeExtractionFill(
   if (resolved.executionCacheKeys !== undefined) {
     log(`[extraction-fill] sparse execution keys=${resolved.executionCacheKeys.size} ` +
       `turns=${resolved.turns.length} skipped_cache_replays=${resolved.skippedCacheHits}`);
+  }
+  if (options.semanticArtifactRoot !== undefined) {
+    writeLease.assertOwned();
+    const receipt = runSemanticFill({
+      root: options.semanticArtifactRoot,
+      tasks: collectSemanticFillTasks(resolved.turns, prepared),
+      envelope: {
+        mode: "offline-only",
+        maxCalls: options.semanticMaxCalls ?? Number.MAX_SAFE_INTEGER,
+        maxFailures: options.semanticMaxFailures ?? Number.MAX_SAFE_INTEGER
+      },
+      transport: options.semanticTransport ?? {
+        complete: () => ({ kind: "failure", reason: "semantic transport required" })
+      }
+    });
+    stats.llmCalls += receipt.calls;
+    stats.extractionAttempts = (stats.extractionAttempts ?? 0) + receipt.calls;
+  }
+  if (options.ingestionMode === "lazy_field") {
+    return;
   }
   const extractor = createFillCachingExtractor(
     options, prepared, cacheRoot, stats, writeLease, authority, markProgress,

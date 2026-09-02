@@ -1,6 +1,10 @@
 import {
+  materializeOfficialApiTransportResponse,
+  officialApiSemanticWorksetFromUnits,
   parseOfficialApiSignals,
-  parseOfficialApiSourceLocator
+  parseOfficialApiSourceLocator,
+  planOfficialApiTransport,
+  type TransportPack
 } from "@do-soul/alaya-soul";
 import {
   admitProviderRaw,
@@ -14,11 +18,7 @@ import {
   releaseSemanticArtifactReservation,
   reserveSemanticArtifact
 } from "../cache/semantic-artifact/store.js";
-import {
-  demultiplexTransportPack,
-  planTurnTransportPacks,
-  type TransportPack
-} from "../../../../../../packages/soul/src/garden/ingestion/official-api/transport-pack.js";
+
 import type { SemanticArtifactSourceBinding } from "../cache/semantic-artifact/contract.js";
 
 export interface SemanticFillTask {
@@ -134,13 +134,14 @@ export function runSemanticFill(input: {
     byCorpus.set(corpus, group);
   }
   for (const group of byCorpus.values()) {
-    const planned = planTurnTransportPacks(
-      group.map((task) => ({
+    const planned = planOfficialApiTransport(
+      officialApiSemanticWorksetFromUnits(group.map((task) => ({
         semanticKey: task.semanticKey,
         assertionId: task.assertionId,
-        text: task.text
-      })),
-      { kind: "reference_batch_8" }
+        text: task.text,
+        binding: task.binding
+      }))),
+      { kind: "reference_batch", assertionsPerPack: 8 }
     );
     const byKey = new Map(group.map((task) => [task.semanticKey, task]));
     for (const pack of planned.packs) {
@@ -281,7 +282,7 @@ function demuxMatchesPack(
         assertionId: locator?.assertion_id
       };
     });
-    return demultiplexTransportPack(pack, mapped).rejections.length === 0;
+    return materializeOfficialApiTransportResponse(pack, mapped).rejections.length === 0;
   } catch {
     return false;
   }

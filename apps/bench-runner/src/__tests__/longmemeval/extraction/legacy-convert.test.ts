@@ -1,15 +1,14 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { buildOfficialApiExtractionRequests } from "@do-soul/alaya-soul";
 import {
-  ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
-  mintOfficialApiAssertionBindings
-} from "../../../../../../packages/soul/src/garden/ingestion/official-api/extraction-request.js";
+  buildOfficialApiExtractionRequests,
+  planOfficialApiSemanticWorkset
+} from "@do-soul/alaya-soul";
 import { convertLegacyExtractionShard } from "../../../runs/extraction/cache/semantic-artifact/legacy-convert.js";
 import type { CachedExtractionEntry } from "../../../runs/compile-seed/cache/cache-shard.js";
 import type { SemanticArtifactSourceBinding } from "../../../runs/extraction/cache/semantic-artifact/contract.js";
 
-const CONTRACT = ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID;
+const CONTRACT = "alaya.assertion_semantic_identity.v1";
 const PROMPT_SHA = "aa".repeat(32);
 
 function entry(rawJson: string): CachedExtractionEntry {
@@ -26,12 +25,12 @@ function bindingFor(
   turnContent: string,
   request: ReturnType<typeof buildOfficialApiExtractionRequests>[number]
 ): SemanticArtifactSourceBinding {
-  const minted = mintOfficialApiAssertionBindings(turnContent, [
+  const minted = planOfficialApiSemanticWorkset(turnContent, [
     { role: "user", content: turnContent }
-  ]);
+  ]).units;
   const binding = minted.find((item) =>
-    request.source_assertions.some((assertion) => assertion.assertion_id === item.locator.assertion_id)
-  );
+    request.source_assertions.some((assertion) => assertion.assertion_id === item.assertionId)
+  )?.binding;
   if (binding === undefined) throw new Error("no minted binding");
   return binding;
 }
