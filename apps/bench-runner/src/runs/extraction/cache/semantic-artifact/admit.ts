@@ -81,6 +81,13 @@ export function admitProviderRaw(input: {
     if (count > 1) accepted.delete(byAssertion.get(assertionId)?.semanticKey ?? "");
   }
   return input.tasks.map((task) => {
+    if (task.capability !== "official_api_signals:v1") {
+      return {
+        kind: "unresolved",
+        reason: "parser does not produce this capability",
+        semanticKey: task.semanticKey
+      };
+    }
     if (!accepted.has(task.semanticKey) || (claimed.get(task.assertionId) ?? 0) !== 1) {
       return {
         kind: "unresolved",

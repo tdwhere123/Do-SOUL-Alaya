@@ -1,4 +1,7 @@
-import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "@do-soul/alaya-soul";
+import {
+  parseOfficialApiSignals,
+  parseOfficialApiSourceLocator
+} from "@do-soul/alaya-soul";
 import {
   admitProviderRaw,
   type AdmissionTask
@@ -6,11 +9,15 @@ import {
 import {
   admitSemanticArtifact,
   inspectSemanticArtifact,
-  reclaimAbandonedReservation,
   recordSourceBinding,
   releaseSemanticArtifactReservation,
   reserveSemanticArtifact
 } from "../cache/semantic-artifact/store.js";
+import {
+  demultiplexTransportPack,
+  planTurnTransportPacks,
+  type TransportPack
+} from "../../../../../../packages/soul/src/garden/ingestion/official-api/transport-pack.js";
 import type { SemanticArtifactSourceBinding } from "../cache/semantic-artifact/contract.js";
 
 export interface SemanticFillTask {
@@ -80,16 +87,34 @@ export function runSemanticFill(input: {
       continue;
     }
     if (existing.status === "reserved") {
-      reclaimAbandonedReservation(input.root, task.semanticKey, task.capability);
+      attempts.push({
+        semanticKey: task.semanticKey,
+        capability: task.capability,
+        outcome: "unresolved",
+        reason: "reservation held"
+      });
+      unresolved += 1;
+      continue;
     }
     pending.push(task);
   }
-  const ordered = [...pending].sort((left, right) => left.assertionId - right.assertionId);
-  const packs: SemanticFillTask[][] = [];
-  for (let offset = 0; offset < ordered.length; offset += OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH) {
-    packs.push(ordered.slice(offset, offset + OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH));
-  }
-  for (const members of packs) {
+  const planned = planTurnTransportPacks(
+    pending.map((task) => ({
+      semanticKey: task.semanticKey,
+      assertionId: task.assertionId,
+      text: task.text
+    })),
+    { kind: "reference_batch_8" }
+  );
+  const byKey = new Map(pending.map((task) => [task.semanticKey, task]));
+  const packs: SemanticFillTask[][] = planned.packs.map((pack) =>
+    pack.semantic_keys.map((key) => {
+      const task = byKey.get(key);
+      if (task === undefined) throw new Error("transport pack referenced a missing fill task");
+      return task;
+    })
+  );
+  for (const [packIndex, members] of packs.entries()) {
     if (members.length === 0) continue;
     if (stopLoss || calls >= input.envelope.maxCalls || failures >= input.envelope.maxFailures) {
       stopLoss = true;
@@ -114,6 +139,22 @@ export function runSemanticFill(input: {
       }
       calls += 1;
       const result = input.transport.complete(members);
+      if (result.kind === "raw") {
+        const pack = planned.packs[packIndex];
+        if (pack === undefined || !demuxMatchesPack(pack, result.rawJson, members)) {
+          for (const held of reserved) {
+            releaseSemanticArtifactReservation(input.root, held.task.semanticKey, held.task.capability, held.token);
+            attempts.push({
+              semanticKey: held.task.semanticKey,
+              capability: held.task.capability,
+              outcome: "unresolved",
+              reason: "mismatched pack identity"
+            });
+            unresolved += 1;
+          }
+          continue;
+        }
+      }
       if (result.kind === "failure") {
         failures += 1;
         for (const held of reserved) {
@@ -169,6 +210,29 @@ export function runSemanticFill(input: {
     }
   }
   return { admitted, unresolved, calls, failures, stopLoss, attempts };
+}
+
+function demuxMatchesPack(
+  pack: TransportPack,
+  rawJson: string,
+  members: readonly SemanticFillTask[]
+): boolean {
+  try {
+    const drafts = parseOfficialApiSignals(rawJson);
+    const mapped = drafts.map((draft) => {
+      const locator = parseOfficialApiSourceLocator(draft.source_locator);
+      const task = locator === null
+        ? undefined
+        : members.find((member) => member.assertionId === locator.assertion_id);
+      return {
+        semanticKey: task?.semanticKey,
+        assertionId: locator?.assertion_id
+      };
+    });
+    return demultiplexTransportPack(pack, mapped).rejections.length === 0;
+  } catch {
+    return false;
+  }
 }
 
 function toAdmissionTask(task: SemanticFillTask): AdmissionTask {

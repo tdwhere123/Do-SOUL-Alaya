@@ -267,6 +267,8 @@ function sameBinding(
   right: SemanticArtifactSourceBinding
 ): boolean {
   return left.sourceCorpusIdentity === right.sourceCorpusIdentity &&
+    left.sourceTextDigest === right.sourceTextDigest &&
+    left.datasetRevision === right.datasetRevision &&
     left.locator.assertion_id === right.locator.assertion_id &&
     left.locator.start === right.locator.start &&
     left.locator.end === right.locator.end;

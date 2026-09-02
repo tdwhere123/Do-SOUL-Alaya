@@ -103,26 +103,35 @@ export function convertLegacyExtractionShard(input: {
     return report(input.entry.cache_key, rawJsonSha256, converted, unresolved);
   }
 
-  const usedAssertions = new Set<number>();
+  const claimed = new Map<number, number>();
+  const located: { assertionId: number }[] = [];
   for (const draft of drafts) {
     const locator = parseOfficialApiSourceLocator(draft.source_locator);
     if (locator === null) {
       unresolved.push({ reason: "ambiguous locator" });
       continue;
     }
-    if (usedAssertions.has(locator.assertion_id)) {
-      unresolved.push({ assertion_id: locator.assertion_id, reason: "duplicate mapping" });
-      continue;
-    }
+    claimed.set(locator.assertion_id, (claimed.get(locator.assertion_id) ?? 0) + 1);
+    located.push({ assertionId: locator.assertion_id });
+  }
+  const duplicates = new Set(
+    [...claimed.entries()].filter(([, count]) => count !== 1).map(([assertionId]) => assertionId)
+  );
+  for (const assertionId of duplicates) {
+    unresolved.push({ assertion_id: assertionId, reason: "duplicate mapping" });
+  }
+  const usedAssertions = new Set<number>();
+  for (const { assertionId } of located) {
+    if (duplicates.has(assertionId) || usedAssertions.has(assertionId)) continue;
     const member = input.request.source_assertions.find(
-      (assertion) => assertion.assertion_id === locator.assertion_id
+      (assertion) => assertion.assertion_id === assertionId
     );
-    const binding = bindingsByAssertion.get(locator.assertion_id);
+    const binding = bindingsByAssertion.get(assertionId);
     if (member === undefined || binding === undefined) {
-      unresolved.push({ assertion_id: locator.assertion_id, reason: "foreign or unbound assertion" });
+      unresolved.push({ assertion_id: assertionId, reason: "foreign or unbound assertion" });
       continue;
     }
-    usedAssertions.add(locator.assertion_id);
+    usedAssertions.add(assertionId);
     converted.push(sealSemanticArtifact({
       schema_version: 1,
       kind: "assertion_semantic_artifact_v1",
@@ -167,9 +176,16 @@ function provesExhaustive(
 function indexBindings(
   bindings: readonly SemanticArtifactSourceBinding[]
 ): Map<number, SemanticArtifactSourceBinding> {
+  const counts = new Map<number, number>();
+  for (const binding of bindings) {
+    const assertionId = binding.locator.assertion_id;
+    counts.set(assertionId, (counts.get(assertionId) ?? 0) + 1);
+  }
   const indexed = new Map<number, SemanticArtifactSourceBinding>();
   for (const binding of bindings) {
-    indexed.set(binding.locator.assertion_id, binding);
+    if (counts.get(binding.locator.assertion_id) === 1) {
+      indexed.set(binding.locator.assertion_id, binding);
+    }
   }
   return indexed;
 }

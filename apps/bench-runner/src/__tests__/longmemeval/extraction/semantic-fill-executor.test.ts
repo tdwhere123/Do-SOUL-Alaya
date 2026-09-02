@@ -2,7 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { inspectSemanticArtifact } from "../../../runs/extraction/cache/semantic-artifact/store.js";
+import {
+  inspectSemanticArtifact,
+  reserveSemanticArtifact
+} from "../../../runs/extraction/cache/semantic-artifact/store.js";
 import {
   runSemanticFill,
   type SemanticFillTask
@@ -73,6 +76,19 @@ describe("semantic fill executor", () => {
     expect(report.attempts.filter((attempt) => attempt.outcome === "failed")).toHaveLength(8);
     expect(report.attempts.filter((attempt) => attempt.outcome === "unresolved")).toHaveLength(1);
     expect(inspectSemanticArtifact(root, tasks[0]!.semanticKey, CAP).status).toBe("missing");
+  });
+
+  it("does not steal a live reservation or pay a second worker", () => {
+    reserveSemanticArtifact(root, KEY, CAP);
+    const report = runSemanticFill({
+      root,
+      tasks: [task(KEY)],
+      envelope: { mode: "offline-only", maxCalls: 2, maxFailures: 2 },
+      transport: { complete: () => ({ kind: "raw", rawJson: '{"signals":[]}' }) }
+    });
+    expect(report.calls).toBe(0);
+    expect(report.attempts[0]?.reason).toMatch(/held/u);
+    expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("reserved");
   });
 
   it("retries unresolved empty work instead of treating it as complete", () => {

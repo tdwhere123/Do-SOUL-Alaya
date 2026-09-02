@@ -34,6 +34,7 @@ const FIXTURES = dirname(fileURLToPath(import.meta.url)) + "/fixtures";
 const DATASET_REVISION =
   "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442";
 const SINGLE_KEY = "0c297b4cd1547986994b6f4acd44b7bfa1e40d5eba9c803e2c53cba93bafc295";
+const MULTI_KEY = "0cf56b73a55320505f980064c64b0d51afe2143754bd6340199703d9f4e5e673";
 
 function loadTurn(cacheKey: string) {
   const turns = JSON.parse(readFileSync(join(FIXTURES, "mimo-legacy-turns.json"), "utf8")) as
@@ -88,6 +89,26 @@ describe("sealed MiMo shard conversion", () => {
     expect(parseOfficialApiSignals(readPersistedRawArtifact(root, digest)).length).toBe(drafts.length);
   });
 
+  it("does not mint a duplicate assertion_id from a sealed multi-signal shard", async () => {
+    const fixture = loadTurn(MULTI_KEY);
+    const entry = JSON.parse(await readFile(join(FIXTURES, `${MULTI_KEY}.shard.json`), "utf8")) as CachedExtractionEntry;
+    const bindings = mintOfficialApiAssertionBindings(
+      fixture.turn.turnContent,
+      fixture.turn.turnMessages,
+      DATASET_REVISION
+    );
+    const report = convertLegacyExtractionShard({
+      entry,
+      request: fixture.request,
+      sourceBindings: bindings,
+      semanticContract: ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
+      modelFamily: "mimo-v2.5",
+      expectedPromptSha256: promptSha256(OFFICIAL_API_SYSTEM_PROMPT)
+    });
+    expect(report.unresolved.some((item) => item.assertion_id === 6 && /duplicate/u.test(item.reason))).toBe(true);
+    expect(report.converted.some((artifact) => artifact.source_bindings[0]?.locator.assertion_id === 6)).toBe(false);
+  });
+
   it("admits the same sealed raw through fill and warms Lazy F3 to zero calls", async () => {
     const fixture = loadTurn(SINGLE_KEY);
     const entry = JSON.parse(await readFile(join(FIXTURES, `${SINGLE_KEY}.shard.json`), "utf8")) as CachedExtractionEntry;
@@ -130,7 +151,7 @@ describe("sealed MiMo shard conversion", () => {
 });
 
 describe("snapshot bench mode binding", () => {
-  it("omits mode by default and attaches lazy_field without mixing identities", () => {
+  it("keeps complete snapshot compact free of bench-mode identity", () => {
     const manifest = {
       schema_version: 3,
       extraction_model: "mimo-v2.5",
@@ -154,18 +175,7 @@ describe("snapshot bench mode binding", () => {
       built_at: "2026-08-23T00:00:00Z",
       builder: "test"
     } as ExtractionCacheManifestV3;
-    const withoutMode = buildSnapshotExtractionSummary(manifest, "44".repeat(32));
-    expect(withoutMode.extraction_bench_mode).toBeUndefined();
-    const withMode = buildSnapshotExtractionSummary(manifest, "44".repeat(32), {
-      mode: "lazy_field",
-      f0f2SubstrateIdentity: "f0f2",
-      startingCacheIdentity: "cache",
-      capabilityPolicy: ["official_api_signals:v1"],
-      maxCalls: 0
-    });
-    expect(withMode.extraction_bench_mode?.mode).toBe("lazy_field");
-    expect(() => buildSnapshotExtractionSummary(manifest, "44".repeat(32), {
-      mode: "precomputed_full"
-    } as never)).toThrow(/complete extraction authority/u);
+    const compact = buildSnapshotExtractionSummary(manifest, "44".repeat(32));
+    expect("extraction_bench_mode" in compact).toBe(false);
   });
 });

@@ -61,20 +61,22 @@ export function buildOfficialApiExtractionRequests(
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
   const assertions = buildOfficialApiSourceAssertions(sourceCorpus);
   const sourceCorpusIdentity = computeOfficialApiSourceCorpusIdentity(sourceCorpus);
+  const bindings = mintOfficialApiAssertionBindings(turnContent, messages);
+  const byId = new Map(assertions.map((assertion) => [assertion.assertion_id, assertion]));
   const plan = planTurnTransportPacks(
-    assertions.map((assertion) => ({
-      semanticKey: computeAssertionSemanticKey({
-        formationContractVersion: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
-        exactText: assertion.text,
-        trustedRole: "user",
-        semanticContext: ""
-      }),
-      assertionId: assertion.assertion_id,
-      text: assertion.text
-    })),
+    bindings.map((binding) => {
+      const assertion = byId.get(binding.locator.assertion_id);
+      if (assertion === undefined) {
+        throw new TypeError("minted binding is missing from the catalog");
+      }
+      return {
+        semanticKey: binding.semanticKey,
+        assertionId: binding.locator.assertion_id,
+        text: assertion.text
+      };
+    }),
     { kind: "reference_batch_8" }
   );
-  const byId = new Map(assertions.map((assertion) => [assertion.assertion_id, assertion]));
   return Object.freeze(plan.packs.map((pack, batchIndex) => buildRequest(
     pack.assertion_ids.map((assertionId) => {
       const assertion = byId.get(assertionId);

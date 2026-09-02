@@ -24,8 +24,7 @@ export function shadowLazyF3Fulfillment(input: {
   const warm = input.demand.map((task) => fulfillAssertionCapability({
     root: input.root,
     task,
-    envelope: input.envelope,
-    transport: input.transport
+    envelope: input.envelope
   }));
   return {
     revealed,

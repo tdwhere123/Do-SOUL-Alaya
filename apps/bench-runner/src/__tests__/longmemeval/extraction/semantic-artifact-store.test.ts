@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -82,9 +82,10 @@ describe("semantic artifact store", () => {
     const token = reserveSemanticArtifact(root, KEY, CAP);
     expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("reserved");
     const path = semanticArtifactPath(root, KEY, CAP);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(`${path}.${token}.tmp`, "{", "utf8");
+    mkdirSync(join(root, ".tmp"), { recursive: true });
+    writeFileSync(join(root, ".tmp", ".alaya-exclusive-publication-crash.tmp"), "{", "utf8");
     expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("reserved");
+    expect(existsSync(path)).toBe(false);
     releaseSemanticArtifactReservation(root, KEY, CAP, token);
 
     writeFileSync(path, "{not json\n", "utf8");

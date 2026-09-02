@@ -11,6 +11,7 @@ import {
   stringifyOfficialApiExtractionRequest,
   mintOfficialApiAssertionBindings
 } from "../../../garden/ingestion/official-api/extraction-request.js";
+import { planTurnTransportPacks } from "../../../garden/ingestion/official-api/transport-pack.js";
 
 describe("official API extraction request", () => {
   it("carries only canonical User assertions", () => {
@@ -102,6 +103,27 @@ describe("official API extraction request", () => {
     expect(bindings).toHaveLength(1);
     expect(bindings[0]?.semanticKey).toMatch(/^[a-f0-9]{64}$/u);
     expect(stringifyOfficialApiExtractionRequest(request)).not.toContain(bindings[0]!.semanticKey);
+  });
+
+  it("uses minted keys for open-reference pack members", () => {
+    const turn = "My sister visited yesterday. She moved to Berlin.";
+    const messages = [{ role: "user" as const, content: turn }];
+    const bindings = mintOfficialApiAssertionBindings(turn, messages);
+    const requests = buildOfficialApiExtractionRequests(turn, messages);
+    expect(bindings.length).toBeGreaterThan(0);
+    expect(stringifyOfficialApiExtractionRequest(requests[0]!)).not.toContain(bindings[0]!.semanticKey);
+    const again = mintOfficialApiAssertionBindings(turn, messages);
+    expect(again.map((item) => item.semanticKey)).toEqual(bindings.map((item) => item.semanticKey));
+    const packed = planTurnTransportPacks(
+      bindings.map((binding) => ({
+        semanticKey: binding.semanticKey,
+        assertionId: binding.locator.assertion_id,
+        text: requests[0]!.source_assertions.find((assertion) =>
+          assertion.assertion_id === binding.locator.assertion_id)!.text
+      })),
+      { kind: "reference_batch_8" }
+    );
+    expect(packed.packs[0]?.semantic_keys).toEqual(bindings.map((item) => item.semanticKey));
   });
 });
 
