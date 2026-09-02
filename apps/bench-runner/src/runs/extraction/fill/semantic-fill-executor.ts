@@ -141,7 +141,7 @@ export function runSemanticFill(input: {
         text: task.text,
         binding: task.binding
       }))),
-      { kind: "reference_batch", assertionsPerPack: 8 }
+      { kind: "reference_batch_8" }
     );
     const byKey = new Map(group.map((task) => [task.semanticKey, task]));
     for (const pack of planned.packs) {

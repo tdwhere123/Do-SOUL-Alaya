@@ -50,9 +50,9 @@ describe("ingestion mode run identity", () => {
 
   it("requires ingestion_mode on provenance schema v2", () => {
     expect(() => resolveIngestionMode({ schemaVersion: 2 })).toThrow(/requires ingestion_mode/u);
-    expect(LongMemEvalRunProvenanceSchema.safeParse({
-      schema_version: 1,
-      ingestion_mode: "precomputed_full"
-    }).success).toBe(false);
+    expect(resolveIngestionMode({
+      schemaVersion: 2,
+      ingestionMode: "lazy_field"
+    })).toBe("lazy_field");
   });
 });

@@ -82,7 +82,46 @@ export async function prepareExtractionFill(
   expansion: PreparedExpansionFillAuthority | undefined
 ): Promise<PreparedExtractionFill> {
   const inspected = await inspectExtractionFillPreparation(options, cacheRoot, expansion);
+  if (options.ingestionMode === "lazy_field") {
+    return adoptInspectedExtractionFill(inspected, concurrency, log);
+  }
   return pinInspectedExtractionFill(inspected, cacheRoot, concurrency, log);
+}
+
+function adoptInspectedExtractionFill(
+  inspected: InspectedExtractionFill,
+  concurrency: number,
+  log: (message: string) => void
+): PreparedExtractionFill {
+  const identity = inspected.manifestSnapshot.identity;
+  if (identity === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "lazy_field requires existing complete extraction authority"
+    );
+  }
+  log(`[extraction-fill] overlay=lazy_field variant=${inspected.variant} ` +
+    `questions=${inspected.windowLimit} distinct_turns=${inspected.distinctExtractionTurns.length} ` +
+    `unique_cache_keys=${inspected.requestedTurns} model=${inspected.config.model} ` +
+    `concurrency=${concurrency}`);
+  return {
+    config: inspected.config,
+    existingManifest: identity.manifest,
+    pinnedManifestSha256: identity.manifestSha256,
+    distinctTurns: inspected.distinctTurns,
+    executionTurns: inspected.executionTurns,
+    distinctExtractionTurns: inspected.distinctExtractionTurns,
+    executionExtractionTurns: inspected.executionExtractionTurns,
+    requestedTurns: inspected.requestedTurns,
+    executionRequestedTurns: inspected.executionRequestedTurns,
+    datasetRevision: inspected.datasetRevision,
+    variant: inspected.variant,
+    windowOffset: inspected.windowOffset,
+    windowLimit: inspected.windowLimit,
+    ...(inspected.questionBatchLimit === undefined ? {} : {
+      questionBatchLimit: inspected.questionBatchLimit
+    }),
+    ...(inspected.expansion === undefined ? {} : { expansion: inspected.expansion })
+  };
 }
 
 export async function inspectExtractionFillPreparation(

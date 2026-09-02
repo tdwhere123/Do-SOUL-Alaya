@@ -33,7 +33,7 @@ import {
   refreshIncompleteFill,
 } from "./fill/fill-execution.js";
 import {
-  newFillStats, type FillRetryTelemetry
+  newFillStats, readFillRetryTelemetry, type FillRetryTelemetry
 } from "./fill/fill-stats.js";
 import { createExtractionExecutionAuthority } from "./fill/execution-authority.js";
 import {
@@ -265,12 +265,17 @@ async function executeLockedExtractionFill(input: {
     await executePreparedExtractionFill({ ...input,
       signal: input.watchdog?.signal ?? input.options.signal,
       markProgress: input.watchdog?.markProgress });
+    if (input.options.ingestionMode === "lazy_field") {
+      return overlayFillResult(input.prepared, input.stats);
+    }
     return finishPreparedExtractionFill(
       input.prepared, input.cacheRoot, input.stats, input.log, input.writeLease,
       input.executionAuthority, input.tolerateProviderTaskFailures
     );
   } catch (cause) {
-    refreshFailedExtractionFill(input, cause);
+    if (input.options.ingestionMode !== "lazy_field") {
+      refreshFailedExtractionFill(input, cause);
+    }
     throw cause;
   } finally {
     input.watchdog?.dispose();
@@ -357,4 +362,24 @@ async function prepareReceiptBoundExtractionFill(
     throw cause;
   }
   return prepared;
+}
+
+function overlayFillResult(
+  prepared: Awaited<ReturnType<typeof prepareExtractionFill>>,
+  stats: ReturnType<typeof newFillStats>
+): ExtractionFillResult {
+  const manifest = prepared.existingManifest;
+  if (manifest === undefined || typeof manifest.coverage !== "number") {
+    throw new ExtractionCacheInvariantError(
+      "lazy_field requires existing extraction authority"
+    );
+  }
+  return {
+    requestedTurns: prepared.requestedTurns,
+    cacheHits: stats.cacheHits,
+    newlyExtracted: 0,
+    coverage: manifest.coverage,
+    ...readFillRetryTelemetry(stats),
+    manifest
+  };
 }

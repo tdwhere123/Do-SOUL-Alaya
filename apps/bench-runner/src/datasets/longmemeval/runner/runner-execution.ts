@@ -435,7 +435,13 @@ async function writeLongMemEvalSnapshotIfRequested(
     ...(context.seedRunner.semanticSupplementBinding === undefined
       ? {}
       : { semanticSupplement: context.seedRunner.semanticSupplementBinding }),
-    ...(reconciliationBasis === undefined ? {} : { reconciliationBasis })
+    ...(reconciliationBasis === undefined ? {} : { reconciliationBasis }),
+    ...(context.opts.ingestionMode === undefined ? {} : {
+      ingestionMode: context.opts.ingestionMode,
+      ...(context.opts.semanticOverlayIdentity === undefined
+        ? {}
+        : { semanticOverlayIdentity: context.opts.semanticOverlayIdentity })
+    })
   });
   await writeRecallEvalSnapshot({
     snapshotOut: context.opts.snapshotOut,

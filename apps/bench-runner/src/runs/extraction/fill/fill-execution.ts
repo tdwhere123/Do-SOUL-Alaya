@@ -94,7 +94,7 @@ export async function executeExtractionFill(
   }
   if (options.semanticArtifactRoot !== undefined) {
     writeLease.assertOwned();
-    const receipt = runSemanticFill({
+    runSemanticFill({
       root: options.semanticArtifactRoot,
       tasks: collectSemanticFillTasks(resolved.turns, prepared),
       envelope: {
@@ -106,8 +106,6 @@ export async function executeExtractionFill(
         complete: () => ({ kind: "failure", reason: "semantic transport required" })
       }
     });
-    stats.llmCalls += receipt.calls;
-    stats.extractionAttempts = (stats.extractionAttempts ?? 0) + receipt.calls;
   }
   if (options.ingestionMode === "lazy_field") {
     return;

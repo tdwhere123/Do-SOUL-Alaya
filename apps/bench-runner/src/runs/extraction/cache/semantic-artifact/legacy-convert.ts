@@ -137,6 +137,11 @@ export function convertLegacyExtractionShard(input: {
       unresolved.push({ assertion_id: assertionId, reason: "foreign or unbound assertion" });
       continue;
     }
+    const provenance = provenanceFrom(input.entry);
+    if (provenance === undefined) {
+      unresolved.push({ assertion_id: assertionId, reason: "missing provider provenance" });
+      continue;
+    }
     usedAssertions.add(assertionId);
     converted.push(sealSemanticArtifact({
       schema_version: 1,
@@ -150,9 +155,7 @@ export function convertLegacyExtractionShard(input: {
       admission_state: "provider_backed",
       source_bindings: [binding],
       raw_response_digest: rawJsonSha256,
-      ...(provenanceFrom(input.entry) === undefined ? {} : {
-        provider_provenance: provenanceFrom(input.entry)
-      })
+      provider_provenance: provenance
     }));
   }
   for (const assertion of input.request.source_assertions) {

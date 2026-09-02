@@ -123,7 +123,22 @@ export function reclaimAbandonedReservation(
   if (boundedArtifactEntryExists(finalPath)) return;
   const reservePath = reservePathFor(finalPath);
   const owner = readReserveOwner(reservePath);
-  if (owner !== undefined && processAlive(owner.pid)) return;
+  if (owner !== undefined) {
+    if (processAlive(owner.pid)) return;
+    rmSync(reservePath, { force: true });
+    return;
+  }
+  if (!boundedArtifactEntryExists(reservePath)) return;
+  try {
+    const text = readBoundedCanonicalUtf8Artifact({
+      path: reservePath,
+      maxBytes: 128,
+      label: "semantic artifact reservation"
+    });
+    if (text.length > 0) return;
+  } catch {
+    return;
+  }
   rmSync(reservePath, { force: true });
 }
 
@@ -330,7 +345,8 @@ function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (cause) {
+    return typeof cause === "object" && cause !== null && "code" in cause &&
+      cause.code === "EPERM";
   }
 }

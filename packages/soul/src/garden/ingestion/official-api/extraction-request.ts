@@ -7,6 +7,7 @@ import {
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
 } from "../../triage/grounding/source-locator.js";
 import { indexSourceAssertions } from "../../triage/grounding/source-locator/assertion-catalog.js";
+import { planTurnTransportPacks } from "./transport-pack.js";
 import {
   ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
   bindAssertionSource,
@@ -60,24 +61,38 @@ export function buildOfficialApiExtractionRequests(
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
   const assertions = buildOfficialApiSourceAssertions(sourceCorpus);
   const sourceCorpusIdentity = computeOfficialApiSourceCorpusIdentity(sourceCorpus);
-  const batchCount = Math.max(
-    1,
-    Math.ceil(assertions.length / OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH)
+  const byId = new Map(assertions.map((assertion) => [assertion.assertion_id, assertion]));
+  const workset = mintOfficialApiAssertionBindings(turnContent, messages);
+  const plan = planTurnTransportPacks(
+    workset.map((binding) => {
+      const assertion = byId.get(binding.locator.assertion_id);
+      if (assertion === undefined) {
+        throw new TypeError("legacy request wrapper lost a catalog assertion");
+      }
+      return {
+        semanticKey: binding.semanticKey,
+        assertionId: binding.locator.assertion_id,
+        text: assertion.text
+      };
+    }),
+    { kind: "reference_batch_8" }
   );
-  if (assertions.length === 0) {
-    return Object.freeze([buildRequest([], sourceCorpusIdentity, 0, batchCount)]);
+  const packs = plan.packs.filter((pack) => pack.assertion_ids.length > 0);
+  if (packs.length === 0) {
+    return Object.freeze([buildRequest([], sourceCorpusIdentity, 0, 1)]);
   }
-  const requests: OfficialApiExtractionRequest[] = [];
-  for (let offset = 0; offset < assertions.length;
-    offset += OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH) {
-    requests.push(buildRequest(
-      assertions.slice(offset, offset + OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH),
-      sourceCorpusIdentity,
-      requests.length,
-      batchCount
-    ));
-  }
-  return Object.freeze(requests);
+  return Object.freeze(packs.map((pack, batchIndex) => buildRequest(
+    pack.assertion_ids.map((assertionId) => {
+      const assertion = byId.get(assertionId);
+      if (assertion === undefined) {
+        throw new TypeError("transport pack referenced a missing assertion");
+      }
+      return assertion;
+    }),
+    sourceCorpusIdentity,
+    batchIndex,
+    packs.length
+  )));
 }
 
 export function mintOfficialApiAssertionBindings(

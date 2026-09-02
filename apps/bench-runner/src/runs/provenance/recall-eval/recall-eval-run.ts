@@ -73,6 +73,12 @@ function buildCurrentRecallRunProvenance(
     commitSha7: input.commitSha7,
     embeddingProviderLabel: input.runtimeAttribution.embedding_provider_label,
     env: withoutExtractionCacheRoot(input.env),
+    ...(input.manifest.run_provenance?.ingestion_mode === undefined ? {} : {
+      ingestionMode: input.manifest.run_provenance.ingestion_mode,
+      ...(input.manifest.run_provenance.semantic_overlay_identity === undefined
+        ? {}
+        : { semanticOverlayIdentity: input.manifest.run_provenance.semantic_overlay_identity })
+    }),
     recallOptions: {
       maxResults: input.runtimeAttribution.recall_config.max_results,
       conflictAwareness: input.runtimeAttribution.recall_config.conflict_awareness

@@ -111,6 +111,8 @@ export interface LongMemEvalRunOptions {
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly promotionContractPath?: string;
   readonly snapshotWriteAuthority?: "diagnostic" | "promotion";
+  readonly ingestionMode?: "precomputed_full" | "lazy_field";
+  readonly semanticOverlayIdentity?: string;
 }
 
 export interface LongMemEvalRunResult {

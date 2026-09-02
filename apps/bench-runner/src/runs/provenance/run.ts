@@ -75,6 +75,8 @@ export async function buildLongMemEvalRunProvenance(input: {
   readonly semanticSupplement?: SourceAssertionSupplementBinding;
   readonly recordedGitState?: MeasuredGitState;
   readonly measureGitState?: (checkoutRoot: string) => Promise<MeasuredGitState>;
+  readonly ingestionMode?: "precomputed_full" | "lazy_field";
+  readonly semanticOverlayIdentity?: string;
 }): Promise<LongMemEvalRunProvenance> {
   const checkoutRoot = resolveBenchCheckoutRoot();
   const [executedDist, frozenCode] = await Promise.all([
@@ -96,7 +98,13 @@ export async function buildLongMemEvalRunProvenance(input: {
     readManifestIdentity(input.opts.questionManifest)
   ]);
   return LongMemEvalRunProvenanceSchema.parse({
-    schema_version: 1,
+    schema_version: input.ingestionMode === undefined ? 1 : 2,
+    ...(input.ingestionMode === undefined ? {} : {
+      ingestion_mode: input.ingestionMode,
+      ...(input.semanticOverlayIdentity === undefined
+        ? {}
+        : { semantic_overlay_identity: input.semanticOverlayIdentity })
+    }),
     ...(input.datasetSha256 === undefined
       ? {}
       : { dataset_sha256: input.datasetSha256 }),
