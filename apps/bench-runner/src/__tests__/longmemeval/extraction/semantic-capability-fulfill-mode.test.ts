@@ -24,6 +24,10 @@ function task(): SemanticFillTask {
     semanticContract: "alaya.assertion_semantic_identity.v1",
     modelFamily: "mimo-v2.5",
     modelId: "mimo-v2.5",
+    requestProfile: "mimo-v2.5-nonthinking-v1",
+    providerUrlSha256: "44".repeat(32),
+    assertionId: 1,
+    text: "I moved to Berlin.",
     binding: {
       semanticKey: KEY,
       sourceCorpusIdentity: "11".repeat(32),
@@ -58,22 +62,21 @@ describe("lazy F3 fulfillment shadow", () => {
     const coldMiss = fulfillAssertionCapability({ root, task: task(), envelope });
     expect(coldMiss.state).toBe("unavailable");
     expect(coldMiss.calls).toBe(0);
-    const materialized = fulfillAssertionCapability({
+    const empty = fulfillAssertionCapability({
       root,
       task: task(),
       envelope,
       transport: { complete: () => ({ kind: "raw", rawJson: '{"signals":[]}' }) }
     });
-    expect(materialized.state).toBe("materialized-now");
-    expect(materialized.calls).toBe(1);
-    const warm = fulfillAssertionCapability({
+    expect(empty.state).toBe("unavailable");
+    expect(empty.calls).toBe(1);
+    const again = fulfillAssertionCapability({
       root,
       task: task(),
       envelope,
       transport: { complete: () => ({ kind: "raw", rawJson: '{"signals":[]}' }) }
     });
-    expect(warm.state).toBe("cache-hit");
-    expect(warm.calls).toBe(0);
+    expect(again.state).toBe("unavailable");
   });
 
   it("does not mint availability from provider failure", () => {

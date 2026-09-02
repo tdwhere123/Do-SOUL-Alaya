@@ -43,6 +43,12 @@ describe("turn-local transport pack", () => {
       "foreign or out-of-pack",
       "missing identity"
     ]);
+    const mismatched = demultiplexTransportPack(pack, [{
+      semanticKey: pack.semantic_keys[0],
+      assertionId: pack.assertion_ids[1]
+    }]);
+    expect(mismatched.admittedKeys).toEqual([]);
+    expect(mismatched.rejections[0]?.reason).toBe("mismatched identity");
   });
 
   it("splits a pathological oversize assertion instead of retrying the whole turn", () => {
@@ -65,6 +71,19 @@ describe("turn-local transport pack", () => {
     expect(plan.packs).toHaveLength(2);
     expect(plan.packs[0]?.semantic_keys).toEqual([huge[0]?.semanticKey]);
     expect(plan.packs[1]?.semantic_keys).toEqual([huge[1]?.semanticKey]);
+  });
+
+  it("reduces physical packs versus reference batch=8 on a pinned census slice", () => {
+    const members = assertions(17);
+    const reference = planTurnTransportPacks(members, { kind: "reference_batch_8" });
+    const packed = planTurnTransportPacks(members, {
+      kind: "token_aware",
+      maxAssertions: 32,
+      maxInputTokens: 100_000,
+      expectedOutputCap: 8_000,
+      systemPromptChars: 100
+    });
+    expect(packed.packs.length).toBeLessThan(reference.packs.length);
   });
 
   it("does not put pack shape into semantic keys", () => {

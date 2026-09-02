@@ -14,13 +14,14 @@ import type { SemanticFillTask } from "../../../runs/extraction/fill/semantic-fi
 
 const KEY = "ab".repeat(32);
 const CAP = "official_api_signals:v1";
+const PROMPT_SHA = "aa".repeat(32);
 
 describe("E10 semantic substrate integration", () => {
   let root: string;
   beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "e10-substrate-")); });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
-  it("converts fail-closed then fulfills missing-only without live extraction", () => {
+  it("keeps unproved empty conversion and fill unresolved", () => {
     const request = buildOfficialApiExtractionRequests("I moved to Berlin.", [
       { role: "user", content: "I moved to Berlin." }
     ])[0]!;
@@ -46,7 +47,8 @@ describe("E10 semantic substrate integration", () => {
         }
       }],
       semanticContract: "alaya.assertion_semantic_identity.v1",
-      modelFamily: "mimo-v2.5"
+      modelFamily: "mimo-v2.5",
+      expectedPromptSha256: PROMPT_SHA
     });
     expect(conversion.converted).toEqual([]);
     expect(conversion.unresolved[0]?.reason).toMatch(/not assertion-empty/u);
@@ -57,6 +59,10 @@ describe("E10 semantic substrate integration", () => {
       semanticContract: "alaya.assertion_semantic_identity.v1",
       modelFamily: "mimo-v2.5",
       modelId: "mimo-v2.5",
+      requestProfile: "mimo-v2.5-nonthinking-v1",
+      providerUrlSha256: "44".repeat(32),
+      assertionId: request.source_assertions[0]!.assertion_id,
+      text: request.source_assertions[0]!.text,
       binding: {
         semanticKey: KEY,
         sourceCorpusIdentity: request.source_corpus_identity,
@@ -64,21 +70,20 @@ describe("E10 semantic substrate integration", () => {
         locator: {
           contract_version: 2,
           kind: "assertion_catalog",
-          assertion_id: 1,
+          assertion_id: request.source_assertions[0]!.assertion_id,
           start: 0,
-          end: 8
+          end: request.source_assertions[0]!.text.length
         }
       }
     };
-    const envelope = { mode: "offline-only" as const, maxCalls: 1, maxFailures: 1 };
     const fulfilled = fulfillAssertionCapability({
       root,
       task: fillTask,
-      envelope,
+      envelope: { mode: "offline-only", maxCalls: 1, maxFailures: 1 },
       transport: { complete: () => ({ kind: "raw", rawJson: '{"signals":[]}' }) }
     });
-    expect(fulfilled.state).toBe("materialized-now");
-    expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("provider_backed");
+    expect(fulfilled.state).toBe("unavailable");
+    expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("missing");
     expect(parseExtractionBenchMode({
       mode: "lazy_field",
       f0f2SubstrateIdentity: "f0f2",
@@ -90,5 +95,9 @@ describe("E10 semantic substrate integration", () => {
       providerExecutorEntries: 0,
       extractionWrites: 0
     })).not.toThrow();
+    expect(() => assertRecallZeroLiveExtraction({
+      providerExecutorEntries: fulfilled.calls,
+      extractionWrites: 0
+    })).toThrow(/live extraction/u);
   });
 });

@@ -7,6 +7,7 @@ import type { SemanticArtifactSourceBinding } from "../../../runs/extraction/cac
 
 const KEY = "ab".repeat(32);
 const CONTRACT = "alaya.assertion_semantic_identity.v1";
+const PROMPT_SHA = "aa".repeat(32);
 
 function entry(rawJson: string): CachedExtractionEntry {
   return {
@@ -45,7 +46,8 @@ describe("legacy shard conversion", () => {
       request,
       sourceBindings: [bindingFor(request)],
       semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5"
+      modelFamily: "mimo-v2.5",
+      expectedPromptSha256: PROMPT_SHA
     });
     expect(report.converted).toEqual([]);
     expect(report.unresolved[0]?.reason).toMatch(/not assertion-empty/u);
@@ -58,7 +60,8 @@ describe("legacy shard conversion", () => {
       request,
       sourceBindings: [],
       semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5"
+      modelFamily: "mimo-v2.5",
+      expectedPromptSha256: PROMPT_SHA
     });
     expect(request.source_assertions).toEqual([]);
     expect(report.converted).toEqual([]);
@@ -75,7 +78,8 @@ describe("legacy shard conversion", () => {
       request,
       sourceBindings: [bindingFor(request)],
       semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5"
+      modelFamily: "mimo-v2.5",
+      expectedPromptSha256: PROMPT_SHA
     });
     expect(truncated.converted).toEqual([]);
     expect(truncated.unresolved.length).toBeGreaterThan(0);
@@ -94,8 +98,9 @@ describe("legacy shard conversion", () => {
       sourceBindings: [bindingFor(request)],
       semanticContract: CONTRACT,
       modelFamily: "mimo-v2.5",
+      expectedPromptSha256: PROMPT_SHA,
       exhaustiveProof: {
-        prompt_sha256: "11".repeat(32),
+        prompt_sha256: PROMPT_SHA,
         raw_json_sha256: rawSha,
         parser_status: "ok",
         completion_status: "complete",
@@ -117,14 +122,16 @@ describe("legacy shard conversion", () => {
       request,
       sourceBindings: [bindingFor(request)],
       semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5"
+      modelFamily: "mimo-v2.5",
+      expectedPromptSha256: PROMPT_SHA
     });
     const second = convertLegacyExtractionShard({
       entry: entry('{"signals":[]}'),
       request,
       sourceBindings: [bindingFor(request)],
       semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5"
+      modelFamily: "mimo-v2.5",
+      expectedPromptSha256: PROMPT_SHA
     });
     expect(second).toEqual(first);
   });

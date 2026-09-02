@@ -41,6 +41,7 @@ export function convertLegacyExtractionShard(input: {
   readonly semanticContract: string;
   readonly modelFamily: string;
   readonly exhaustiveProof?: LegacyExhaustiveInspectionProof;
+  readonly expectedPromptSha256: string;
 }): LegacyConversionReport {
   const unresolved: LegacyConversionUnresolved[] = [];
   const converted: SemanticArtifact[] = [];
@@ -70,7 +71,7 @@ export function convertLegacyExtractionShard(input: {
   }
 
   if (drafts.length === 0) {
-    if (!provesExhaustive(input.exhaustiveProof, input.request, rawJsonSha256)) {
+    if (!provesExhaustive(input.exhaustiveProof, input.request, rawJsonSha256, input.expectedPromptSha256)) {
       return report(input.entry.cache_key, rawJsonSha256, [], [{
         reason: "batch-empty is not assertion-empty without exhaustive inspection proof"
       }]);
@@ -150,13 +151,15 @@ export function convertLegacyExtractionShard(input: {
 function provesExhaustive(
   proof: LegacyExhaustiveInspectionProof | undefined,
   request: OfficialApiExtractionRequest,
-  rawJsonSha256: string
+  rawJsonSha256: string,
+  expectedPromptSha256: string
 ): boolean {
   if (proof === undefined) return false;
   const ids = request.source_assertions.map((assertion) => assertion.assertion_id);
   return proof.parser_status === "ok" &&
     proof.completion_status === "complete" &&
     proof.raw_json_sha256 === rawJsonSha256 &&
+    proof.prompt_sha256 === expectedPromptSha256 &&
     proof.catalog_assertion_ids.length === ids.length &&
     ids.every((id, index) => proof.catalog_assertion_ids[index] === id);
 }

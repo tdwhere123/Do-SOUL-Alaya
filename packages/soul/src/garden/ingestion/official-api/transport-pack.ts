@@ -82,9 +82,16 @@ export function demultiplexTransportPack(
       rejections.push({ reason: "foreign or out-of-pack", assertionId });
       continue;
     }
+    if (key !== undefined && assertionId !== undefined) {
+      const paired = pack.semantic_keys[pack.assertion_ids.indexOf(assertionId)];
+      if (paired !== key) {
+        rejections.push({ reason: "mismatched identity", semanticKey: key, assertionId });
+        continue;
+      }
+    }
     const resolved = key ?? pack.semantic_keys[pack.assertion_ids.indexOf(assertionId!)];
-    if (resolved === undefined) {
-      rejections.push({ reason: "ambiguous", assertionId });
+    if (resolved === undefined || pack.assertion_ids.filter((id) => id === assertionId).length > 1) {
+      rejections.push({ reason: "ambiguous", assertionId, semanticKey: key });
       continue;
     }
     if (seen.has(resolved)) {
@@ -114,7 +121,7 @@ function nextPackSlice(
     const next = ordered[offset + packed]!;
     const nextChars = packedChars + next.text.length + 24;
     const inputTokens = estimateTokens(policy.systemPromptChars + 180 + nextChars);
-    const expectedOut = Math.min(policy.expectedOutputCap, 64 * (packed + 1));
+    const expectedOut = 64 * (packed + 1);
     if (packed > 0 && (inputTokens > policy.maxInputTokens || expectedOut > policy.expectedOutputCap)) {
       break;
     }

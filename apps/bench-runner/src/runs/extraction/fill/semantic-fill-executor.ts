@@ -1,15 +1,17 @@
+import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "@do-soul/alaya-soul";
+import {
+  admitProviderRaw,
+  type AdmissionTask
+} from "../cache/semantic-artifact/admit.js";
 import {
   admitSemanticArtifact,
   inspectSemanticArtifact,
+  reclaimAbandonedReservation,
+  recordSourceBinding,
   releaseSemanticArtifactReservation,
   reserveSemanticArtifact
 } from "../cache/semantic-artifact/store.js";
-import {
-  sealSemanticArtifact,
-  type SemanticArtifact,
-  type SemanticArtifactSourceBinding
-} from "../cache/semantic-artifact/contract.js";
-import { createHash } from "node:crypto";
+import type { SemanticArtifactSourceBinding } from "../cache/semantic-artifact/contract.js";
 
 export interface SemanticFillTask {
   readonly semanticKey: string;
@@ -17,7 +19,11 @@ export interface SemanticFillTask {
   readonly semanticContract: string;
   readonly modelFamily: string;
   readonly modelId: string;
+  readonly requestProfile: string;
+  readonly providerUrlSha256: string;
   readonly binding: SemanticArtifactSourceBinding;
+  readonly assertionId: number;
+  readonly text: string;
 }
 
 export interface SemanticFillEnvelope {
@@ -31,7 +37,14 @@ export type SemanticFillTransportResult =
   | { readonly kind: "failure"; readonly reason: string };
 
 export interface SemanticFillTransport {
-  readonly complete: (task: SemanticFillTask) => SemanticFillTransportResult;
+  readonly complete: (pack: readonly SemanticFillTask[]) => SemanticFillTransportResult;
+}
+
+export interface SemanticFillAttempt {
+  readonly semanticKey: string;
+  readonly capability: string;
+  readonly outcome: "admitted" | "unresolved" | "skipped" | "failed";
+  readonly reason?: string;
 }
 
 export interface SemanticFillReport {
@@ -41,13 +54,6 @@ export interface SemanticFillReport {
   readonly failures: number;
   readonly stopLoss: boolean;
   readonly attempts: readonly SemanticFillAttempt[];
-}
-
-export interface SemanticFillAttempt {
-  readonly semanticKey: string;
-  readonly capability: string;
-  readonly outcome: "admitted" | "unresolved" | "skipped" | "failed";
-  readonly reason?: string;
 }
 
 export function runSemanticFill(input: {
@@ -65,70 +71,116 @@ export function runSemanticFill(input: {
   let admitted = 0;
   let unresolved = 0;
   let stopLoss = false;
+  const pending: SemanticFillTask[] = [];
   for (const task of input.tasks) {
-    if (stopLoss || calls >= input.envelope.maxCalls || failures >= input.envelope.maxFailures) {
-      stopLoss = true;
-      attempts.push({ semanticKey: task.semanticKey, capability: task.capability, outcome: "unresolved", reason: "stop-loss" });
-      unresolved += 1;
-      continue;
-    }
     const existing = inspectSemanticArtifact(input.root, task.semanticKey, task.capability);
     if (existing.status === "provider_backed" || existing.status === "deterministic_empty") {
+      recordSourceBinding(input.root, task.semanticKey, task.capability, task.binding);
       attempts.push({ semanticKey: task.semanticKey, capability: task.capability, outcome: "skipped" });
       continue;
     }
-    let token: string;
+    if (existing.status === "reserved") {
+      reclaimAbandonedReservation(input.root, task.semanticKey, task.capability);
+    }
+    pending.push(task);
+  }
+  const ordered = [...pending].sort((left, right) => left.assertionId - right.assertionId);
+  const packs: SemanticFillTask[][] = [];
+  for (let offset = 0; offset < ordered.length; offset += OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH) {
+    packs.push(ordered.slice(offset, offset + OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH));
+  }
+  for (const members of packs) {
+    if (members.length === 0) continue;
+    if (stopLoss || calls >= input.envelope.maxCalls || failures >= input.envelope.maxFailures) {
+      stopLoss = true;
+      for (const task of members) {
+        attempts.push({
+          semanticKey: task.semanticKey,
+          capability: task.capability,
+          outcome: "unresolved",
+          reason: "stop-loss"
+        });
+        unresolved += 1;
+      }
+      continue;
+    }
+    const reserved: { task: SemanticFillTask; token: string }[] = [];
     try {
-      token = reserveSemanticArtifact(input.root, task.semanticKey, task.capability);
-    } catch (cause) {
-      const inspected = inspectSemanticArtifact(input.root, task.semanticKey, task.capability);
-      if (inspected.status === "provider_backed" || inspected.status === "deterministic_empty") {
-        attempts.push({ semanticKey: task.semanticKey, capability: task.capability, outcome: "skipped" });
+      for (const task of members) {
+        reserved.push({
+          task,
+          token: reserveSemanticArtifact(input.root, task.semanticKey, task.capability)
+        });
+      }
+      calls += 1;
+      const result = input.transport.complete(members);
+      if (result.kind === "failure") {
+        failures += 1;
+        for (const held of reserved) {
+          releaseSemanticArtifactReservation(input.root, held.task.semanticKey, held.task.capability, held.token);
+          attempts.push({
+            semanticKey: held.task.semanticKey,
+            capability: held.task.capability,
+            outcome: "failed",
+            reason: result.reason
+          });
+          unresolved += 1;
+        }
         continue;
       }
-      attempts.push({
-        semanticKey: task.semanticKey,
-        capability: task.capability,
-        outcome: "unresolved",
-        reason: cause instanceof Error ? cause.message : String(cause)
+      const admissions = admitProviderRaw({
+        root: input.root,
+        rawJson: result.rawJson,
+        tasks: members.map(toAdmissionTask)
       });
-      unresolved += 1;
-      continue;
+      for (const held of reserved) {
+        const admission = admissions.find((item) => item.semanticKey === held.task.semanticKey)
+          ?? admissions.find((item) => item.kind === "unresolved");
+        if (admission === undefined || admission.kind === "unresolved") {
+          releaseSemanticArtifactReservation(input.root, held.task.semanticKey, held.task.capability, held.token);
+          attempts.push({
+            semanticKey: held.task.semanticKey,
+            capability: held.task.capability,
+            outcome: "unresolved",
+            reason: admission?.kind === "unresolved" ? admission.reason : "unresolved"
+          });
+          unresolved += 1;
+          continue;
+        }
+        admitSemanticArtifact({
+          root: input.root,
+          artifact: admission.artifact,
+          reservationToken: held.token
+        });
+        admitted += 1;
+        attempts.push({
+          semanticKey: held.task.semanticKey,
+          capability: held.task.capability,
+          outcome: "admitted"
+        });
+      }
+    } catch (cause) {
+      for (const held of reserved) {
+        try {
+          releaseSemanticArtifactReservation(input.root, held.task.semanticKey, held.task.capability, held.token);
+        } catch { /* reservation may already be released or admitted */ }
+      }
+      throw cause;
     }
-    calls += 1;
-    const result = input.transport.complete(task);
-    if (result.kind === "failure") {
-      failures += 1;
-      releaseSemanticArtifactReservation(input.root, task.semanticKey, task.capability, token);
-      attempts.push({
-        semanticKey: task.semanticKey,
-        capability: task.capability,
-        outcome: "failed",
-        reason: result.reason
-      });
-      unresolved += 1;
-      continue;
-    }
-    const artifact = artifactFromRaw(task, result.rawJson);
-    admitSemanticArtifact({ root: input.root, artifact, reservationToken: token });
-    admitted += 1;
-    attempts.push({ semanticKey: task.semanticKey, capability: task.capability, outcome: "admitted" });
   }
   return { admitted, unresolved, calls, failures, stopLoss, attempts };
 }
 
-function artifactFromRaw(task: SemanticFillTask, rawJson: string): SemanticArtifact {
-  return sealSemanticArtifact({
-    schema_version: 1,
-    kind: "assertion_semantic_artifact_v1",
-    semantic_key: task.semanticKey,
-    semantic_contract: task.semanticContract,
+function toAdmissionTask(task: SemanticFillTask): AdmissionTask {
+  return {
+    semanticKey: task.semanticKey,
     capability: task.capability,
-    capability_set: [task.capability],
-    model_family: task.modelFamily,
-    model_id: task.modelId,
-    admission_state: "provider_backed",
-    source_bindings: [task.binding],
-    raw_response_digest: createHash("sha256").update(rawJson, "utf8").digest("hex")
-  });
+    semanticContract: task.semanticContract,
+    modelFamily: task.modelFamily,
+    modelId: task.modelId,
+    requestProfile: task.requestProfile,
+    providerUrlSha256: task.providerUrlSha256,
+    binding: task.binding,
+    assertionId: task.assertionId
+  };
 }

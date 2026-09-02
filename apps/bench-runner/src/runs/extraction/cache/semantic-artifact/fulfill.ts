@@ -1,5 +1,8 @@
-import { inspectSemanticArtifact } from "./store.js";
-import { resolveExtractionCapability } from "./capability.js";
+import {
+  capabilitiesAreCompatible,
+  resolveExtractionCapability
+} from "./capability.js";
+import { inspectSemanticArtifact, recordSourceBinding } from "./store.js";
 import {
   runSemanticFill,
   type SemanticFillEnvelope,
@@ -27,9 +30,23 @@ export function fulfillAssertionCapability(input: {
   readonly envelope: SemanticFillEnvelope;
   readonly transport?: SemanticFillTransport;
 }): CapabilityFulfillment {
-  resolveExtractionCapability(input.task.capability);
+  const contract = resolveExtractionCapability(input.task.capability);
+  const available = contract.requirements.filter((capability) => {
+    const inspected = inspectSemanticArtifact(input.root, input.task.semanticKey, capability);
+    return inspected.status === "provider_backed" || inspected.status === "deterministic_empty";
+  });
+  if (!capabilitiesAreCompatible(contract.requirements, available)) {
+    return {
+      state: "unavailable",
+      semanticKey: input.task.semanticKey,
+      capability: input.task.capability,
+      reason: "capability requirements unavailable",
+      calls: 0
+    };
+  }
   const existing = inspectSemanticArtifact(input.root, input.task.semanticKey, input.task.capability);
   if (existing.status === "provider_backed" || existing.status === "deterministic_empty") {
+    recordSourceBinding(input.root, input.task.semanticKey, input.task.capability, input.task.binding);
     return {
       state: "cache-hit",
       semanticKey: input.task.semanticKey,

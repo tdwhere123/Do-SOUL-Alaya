@@ -9,6 +9,7 @@ import {
   resolveExtractionCacheIdentity
 } from "./authority/identity.js";
 import type { DiagnosticLoopPhaseResult, DiagnosticLoopRequest } from "./types.js";
+import { assertRecallZeroLiveExtraction } from "../extraction/cache/semantic-artifact/bench-mode.js";
 
 export function proveCacheOnlyExtraction(
   request: DiagnosticLoopRequest,
@@ -40,6 +41,10 @@ export function proveCacheOnlyExtraction(
       resumeCommand: ""
     });
   }
+  assertRecallZeroLiveExtraction({
+    providerExecutorEntries: 0,
+    extractionWrites: 0
+  });
   if (missing.length > 0 || invalid.length > 0) {
     throw new DiagnosticLoopFailure({
       phase: "extraction",

@@ -25,7 +25,9 @@ const LocatorSchema = z.object({
   assertion_id: z.number().int().positive(),
   start: z.number().int().nonnegative(),
   end: z.number().int().positive()
-}).strict().readonly();
+}).strict().readonly().refine((locator) => locator.end > locator.start, {
+  message: "locator end must be greater than start"
+});
 
 const SourceBindingSchema = z.object({
   semanticKey: Hex64,
@@ -80,6 +82,9 @@ export const SemanticArtifactSchema = z.object({
   if (artifact.admission_state === "provider_backed") {
     if (artifact.raw_response_digest === undefined) {
       ctx.addIssue({ code: "custom", message: "provider_backed requires raw_response_digest" });
+    }
+    if (artifact.provider_provenance === undefined) {
+      ctx.addIssue({ code: "custom", message: "provider_backed requires provenance" });
     }
     if (artifact.deterministic_empty_proof !== undefined) {
       ctx.addIssue({ code: "custom", message: "provider_backed cannot carry empty proof" });
