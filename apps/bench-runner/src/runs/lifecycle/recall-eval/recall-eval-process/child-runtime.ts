@@ -1,3 +1,5 @@
+import { rmSync } from "node:fs";
+import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import {
   startBenchDaemon,
   type BenchDaemonHandle
@@ -8,6 +10,7 @@ import {
   explodeRecallEvalWorkingCopyIfNeeded,
   installRecallEvalWorkspaceSlice,
   isSealedSliceRestore,
+  workingAlayaDbPath,
   type ExplodedWorkspaceSlices,
   type WorkspaceSliceProgress
 } from "../../../snapshot/recall-eval/workspace-slice/index.js";
@@ -39,10 +42,11 @@ import type { LongMemEvalSelectionBoundarySpool } from
   "../../../selection-replay/selection-boundary-spool.js";
 
 interface PagerRuntime {
-  readonly daemon: BenchDaemonHandle;
+  daemon: BenchDaemonHandle | null;
   readonly spool: LongMemEvalSelectionBoundarySpool | null;
   readonly open: RecallEvalPagerOpenPayload;
   readonly slices: ExplodedWorkspaceSlices | null;
+  installedWorkspaceId: string | null;
 }
 
 let runtime: PagerRuntime | null = null;
@@ -54,20 +58,13 @@ export async function openRecallEvalPagerChild(
   if (runtime !== null) throw new Error("recall-eval pager child is already open");
   seedParentOpenedFileProofs(payload);
   const working = await openRecallEvalPagerWorkingCopy(payload, onProgress);
-  const daemon = await startBenchDaemon({
-    dataDirRoot: payload.dataDirRoot,
-    embeddingMode: payload.daemonLaunch.embeddingMode,
-    embeddingProviderKind: payload.daemonLaunch.embeddingProviderKind,
-    recallWeightOverrides: payload.recallWeightOverrides
-  }, payload.daemonLaunch);
-  // Restore and first-slice install may replace alaya.db after an empty open.
-  daemon.reloadWorkingDatabase();
   const spool = await createRecallEvalSelectionBoundarySpool(process.env);
   runtime = {
-    daemon,
+    daemon: null,
     spool,
     open: payload,
-    slices: working.slices
+    slices: working.slices,
+    installedWorkspaceId: working.slices?.workspaceIds[0] ?? null
   };
   return { ...working.sqlite, selectionSpoolRootPath: spool?.rootPath ?? null };
 }
@@ -76,15 +73,10 @@ export async function recallRecallEvalPagerChild(
   payload: RecallEvalPagerRecallPayload
 ): Promise<RecallEvalQuestionResult> {
   const current = requireRuntime();
-  if (current.slices !== null) {
-    installRecallEvalWorkspaceSlice({
-      dataDirRoot: current.open.dataDirRoot,
-      workspaceId: payload.question.workspaceId,
-      slices: current.slices
-    });
-    // In-place install retunes the cached handle only; reload rebinds the
-    // daemon connection after table replace.
-    current.daemon.reloadWorkingDatabase();
+  await ensurePagerDaemonForQuestion(current, payload.question.workspaceId);
+  const daemon = current.daemon;
+  if (daemon === null) {
+    throw new Error("recall-eval pager daemon is not running");
   }
   const activation = createCandidateActivationCapture(
     current.open.captureOpenSemanticFactorCandidateActivations
@@ -97,7 +89,7 @@ export async function recallRecallEvalPagerChild(
     current.spool,
     payload.question.questionId,
     (observer) => recallEvalOneQuestion({
-      daemon: current.daemon,
+      daemon,
       question: payload.question,
       turnIndex: payload.turnIndex,
       embeddingMode: current.open.embeddingMode,
@@ -113,6 +105,39 @@ export async function recallRecallEvalPagerChild(
   return activation.attach(result);
 }
 
+async function ensurePagerDaemonForQuestion(
+  current: PagerRuntime,
+  workspaceId: string
+): Promise<void> {
+  if (current.daemon !== null && current.installedWorkspaceId === workspaceId) {
+    return;
+  }
+  if (current.daemon !== null) {
+    await current.daemon.shutdown();
+    current.daemon = null;
+  }
+  if (current.slices !== null && current.installedWorkspaceId !== workspaceId) {
+    const working = workingAlayaDbPath(current.open.dataDirRoot);
+    closeCachedDatabase(working);
+    for (const suffix of ["", "-wal", "-shm"]) {
+      rmSync(`${working}${suffix}`, { force: true });
+    }
+    installRecallEvalWorkspaceSlice({
+      dataDirRoot: current.open.dataDirRoot,
+      workspaceId,
+      slices: current.slices
+    });
+    current.installedWorkspaceId = workspaceId;
+  }
+  current.daemon = await startBenchDaemon({
+    dataDirRoot: current.open.dataDirRoot,
+    embeddingMode: current.open.daemonLaunch.embeddingMode,
+    embeddingProviderKind: current.open.daemonLaunch.embeddingProviderKind,
+    recallWeightOverrides: current.open.recallWeightOverrides
+  }, current.open.daemonLaunch);
+  current.daemon.reloadWorkingDatabase();
+}
+
 export async function closeRecallEvalPagerChild(): Promise<RecallEvalPagerCloseResult> {
   const current = runtime;
   runtime = null;
@@ -124,10 +149,12 @@ export async function closeRecallEvalPagerChild(): Promise<RecallEvalPagerCloseR
   } catch (error) {
     primaryError = error;
   }
-  try {
-    await current.daemon.shutdown();
-  } catch (error) {
-    primaryError ??= error;
+  if (current.daemon !== null) {
+    try {
+      await current.daemon.shutdown();
+    } catch (error) {
+      primaryError ??= error;
+    }
   }
   if (primaryError !== undefined) {
     try {
