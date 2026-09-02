@@ -17,4 +17,11 @@ describe("lazy_field fill isolation", () => {
       ingestionMode: "lazy_field"
     })).rejects.toThrow(/semantic artifact root/u);
   });
+
+  it("rejects a semantic overlay on the v3 fill path", async () => {
+    await expect(runExtractionFill({
+      variant: "longmemeval_s",
+      semanticArtifactRoot: "/tmp/semantic-overlay"
+    })).rejects.toThrow(/semantic overlay requires lazy_field/u);
+  });
 });

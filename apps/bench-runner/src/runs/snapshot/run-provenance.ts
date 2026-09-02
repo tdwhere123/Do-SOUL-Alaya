@@ -57,7 +57,8 @@ const SnapshotExtractionCacheIdentitySchema = z.discriminatedUnion(
 
 export const LongMemEvalSnapshotRunProvenanceSchema =
   LongMemEvalRunProvenanceObjectSchema.extend({
-    extraction_cache: SnapshotExtractionCacheIdentitySchema.nullable()
+    extraction_cache: SnapshotExtractionCacheIdentitySchema.nullable(),
+    compact_run_identity: z.string().regex(/^[a-f0-9]{64}$/u).optional()
   }).strict().superRefine(refineRunProvenanceIngestionMode);
 
 export type LongMemEvalSnapshotRunProvenance = z.infer<
@@ -72,32 +73,37 @@ export function compactSnapshotRunProvenance(
     throw new Error("current snapshot requires current extraction run provenance");
   }
   const { content_closure_index: _contentClosureIndex, ...summary } = cache;
-  if (provenance.schema_version === 2) {
-    const substrate = cache.content_closure_sha256 ?? cache.expected_key_set_sha256;
-    if (typeof substrate !== "string" || provenance.ingestion_mode === undefined) {
-      throw new Error("compact run provenance v2 requires substrate and ingestion_mode");
-    }
-    if (provenance.ingestion_mode === "lazy_field" &&
-        provenance.semantic_overlay_identity === undefined) {
-      throw new Error("lazy_field compact provenance requires semantic_overlay_identity");
-    }
-    compactRunIdentity({
-      substrateIdentity: substrate,
-      ingestionMode: provenance.ingestion_mode,
-      overlayIdentity: provenance.semantic_overlay_identity ?? substrate
+  const extractionCache = {
+    ...summary,
+    ...(summary.supplemental_source_receipt === undefined ? {} : {
+      supplemental_source_receipt: redactSupplementalSourceBinding(
+        summary.supplemental_source_receipt,
+        redactProvenanceUrl
+      )
+    })
+  };
+  if (provenance.schema_version !== 2) {
+    return LongMemEvalSnapshotRunProvenanceSchema.parse({
+      ...provenance,
+      extraction_cache: extractionCache
     });
+  }
+  const substrate = cache.content_closure_sha256 ?? cache.expected_key_set_sha256;
+  if (typeof substrate !== "string" || provenance.ingestion_mode === undefined) {
+    throw new Error("compact run provenance v2 requires substrate and ingestion_mode");
+  }
+  if (provenance.ingestion_mode === "lazy_field" &&
+      provenance.semantic_overlay_identity === undefined) {
+    throw new Error("lazy_field compact provenance requires semantic_overlay_identity");
   }
   return LongMemEvalSnapshotRunProvenanceSchema.parse({
     ...provenance,
-    extraction_cache: {
-      ...summary,
-      ...(summary.supplemental_source_receipt === undefined ? {} : {
-        supplemental_source_receipt: redactSupplementalSourceBinding(
-          summary.supplemental_source_receipt,
-          redactProvenanceUrl
-        )
-      })
-    }
+    compact_run_identity: compactRunIdentity({
+      substrateIdentity: substrate,
+      ingestionMode: provenance.ingestion_mode,
+      overlayIdentity: provenance.semantic_overlay_identity ?? substrate
+    }),
+    extraction_cache: extractionCache
   });
 }
 

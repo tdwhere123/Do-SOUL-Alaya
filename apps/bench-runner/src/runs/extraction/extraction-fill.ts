@@ -145,7 +145,13 @@ export async function runExtractionFill(
       "extraction cache manifest changed during authority preparation"
     );
   }
-  const lease = acquireExtractionCacheWriteLease(cacheRoot);
+  const leaseRoot = options.ingestionMode === "lazy_field"
+    ? options.semanticArtifactRoot
+    : cacheRoot;
+  if (leaseRoot === undefined) {
+    throw new ExtractionCacheInvariantError("lazy_field requires a semantic artifact root");
+  }
+  const lease = acquireExtractionCacheWriteLease(leaseRoot);
   return withExtractionCacheWriteLease(
     lease,
     () => runLockedExtractionFill(
@@ -367,6 +373,9 @@ async function prepareReceiptBoundExtractionFill(
 }
 
 function assertLazyFieldIsolation(options: ExtractionFillOptions): void {
+  if (options.semanticArtifactRoot !== undefined && options.ingestionMode !== "lazy_field") {
+    throw new ExtractionCacheInvariantError("semantic overlay requires lazy_field");
+  }
   if (options.ingestionMode !== "lazy_field") return;
   if (options.semanticArtifactRoot === undefined) {
     throw new ExtractionCacheInvariantError(

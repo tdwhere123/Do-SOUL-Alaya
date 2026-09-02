@@ -92,7 +92,10 @@ export async function executeExtractionFill(
     log(`[extraction-fill] sparse execution keys=${resolved.executionCacheKeys.size} ` +
       `turns=${resolved.turns.length} skipped_cache_replays=${resolved.skippedCacheHits}`);
   }
-  if (options.semanticArtifactRoot !== undefined) {
+  if (options.ingestionMode === "lazy_field") {
+    if (options.semanticArtifactRoot === undefined) {
+      throw new ExtractionCacheInvariantError("lazy_field requires a semantic artifact root");
+    }
     writeLease.assertOwned();
     const receipt = runSemanticFill({
       root: options.semanticArtifactRoot,
@@ -106,14 +109,15 @@ export async function executeExtractionFill(
         complete: () => ({ kind: "failure", reason: "semantic transport required" })
       }
     });
-    if (receipt.failures > 0 || receipt.stopLoss) {
+    if (receipt.failures > 0 || receipt.stopLoss || receipt.unresolved > 0) {
       throw new ExtractionCacheInvariantError(
-        `semantic fill failed closed: failures=${receipt.failures} stopLoss=${receipt.stopLoss}`
+        `semantic fill failed closed: failures=${receipt.failures} stopLoss=${receipt.stopLoss} unresolved=${receipt.unresolved}`
       );
     }
-  }
-  if (options.ingestionMode === "lazy_field") {
     return;
+  }
+  if (options.semanticArtifactRoot !== undefined) {
+    throw new ExtractionCacheInvariantError("semantic overlay requires lazy_field");
   }
   const extractor = createFillCachingExtractor(
     options, prepared, cacheRoot, stats, writeLease, authority, markProgress,
