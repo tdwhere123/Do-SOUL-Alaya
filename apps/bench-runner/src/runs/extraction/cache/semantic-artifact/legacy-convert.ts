@@ -103,6 +103,12 @@ export function convertLegacyExtractionShard(input: {
     return report(input.entry.cache_key, rawJsonSha256, converted, unresolved);
   }
 
+  if (!isCompleteInspection(input.entry)) {
+    return report(input.entry.cache_key, rawJsonSha256, [], [{
+      reason: "incomplete inspection witness"
+    }]);
+  }
+
   const claimed = new Map<number, number>();
   const located: { assertionId: number }[] = [];
   for (const draft of drafts) {
@@ -154,7 +160,31 @@ export function convertLegacyExtractionShard(input: {
       unresolved.push({ assertion_id: assertion.assertion_id, reason: "no convertible signal" });
     }
   }
-  return report(input.entry.cache_key, rawJsonSha256, converted, unresolved);
+  return report(input.entry.cache_key, rawJsonSha256, mergeSameKey(converted), unresolved);
+}
+
+function isCompleteInspection(entry: CachedExtractionEntry): boolean {
+  const metadata = entry.response_metadata as
+    | { readonly completion_witness?: string; readonly finish_reason?: string }
+    | undefined;
+  return metadata?.completion_witness === "done_sentinel" && metadata.finish_reason === "stop";
+}
+
+function mergeSameKey(converted: readonly SemanticArtifact[]): readonly SemanticArtifact[] {
+  const merged = new Map<string, SemanticArtifact>();
+  for (const artifact of converted) {
+    const existing = merged.get(artifact.semantic_key);
+    if (existing === undefined) {
+      merged.set(artifact.semantic_key, artifact);
+      continue;
+    }
+    const { artifact_digest: _digest, ...unsigned } = existing;
+    merged.set(artifact.semantic_key, sealSemanticArtifact({
+      ...unsigned,
+      source_bindings: [...existing.source_bindings, ...artifact.source_bindings]
+    }));
+  }
+  return [...merged.values()];
 }
 
 function provesExhaustive(

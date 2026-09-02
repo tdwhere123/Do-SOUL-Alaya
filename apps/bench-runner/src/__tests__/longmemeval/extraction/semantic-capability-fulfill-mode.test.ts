@@ -77,6 +77,7 @@ describe("lazy F3 fulfillment shadow", () => {
       transport: { complete: () => ({ kind: "raw", rawJson: '{"signals":[]}' }) }
     });
     expect(again.state).toBe("unavailable");
+    expect(again.calls).toBe(0);
   });
 
   it("does not mint availability from provider failure", () => {

@@ -9,6 +9,7 @@ import {
 import {
   admitSemanticArtifact,
   inspectSemanticArtifact,
+  reclaimAbandonedReservation,
   recordSourceBinding,
   releaseSemanticArtifactReservation,
   reserveSemanticArtifact
@@ -86,34 +87,71 @@ export function runSemanticFill(input: {
       attempts.push({ semanticKey: task.semanticKey, capability: task.capability, outcome: "skipped" });
       continue;
     }
-    if (existing.status === "reserved") {
+    if (existing.status === "invalid" || existing.status === "quarantined") {
       attempts.push({
         semanticKey: task.semanticKey,
         capability: task.capability,
         outcome: "unresolved",
-        reason: "reservation held"
+        reason: existing.reason ?? existing.status
       });
       unresolved += 1;
       continue;
     }
+    if (existing.status === "reserved") {
+      reclaimAbandonedReservation(input.root, task.semanticKey, task.capability);
+      if (inspectSemanticArtifact(input.root, task.semanticKey, task.capability).status === "reserved") {
+        attempts.push({
+          semanticKey: task.semanticKey,
+          capability: task.capability,
+          outcome: "unresolved",
+          reason: "reservation held"
+        });
+        unresolved += 1;
+        continue;
+      }
+    }
     pending.push(task);
   }
-  const planned = planTurnTransportPacks(
-    pending.map((task) => ({
-      semanticKey: task.semanticKey,
-      assertionId: task.assertionId,
-      text: task.text
-    })),
-    { kind: "reference_batch_8" }
-  );
-  const byKey = new Map(pending.map((task) => [task.semanticKey, task]));
-  const packs: SemanticFillTask[][] = planned.packs.map((pack) =>
-    pack.semantic_keys.map((key) => {
-      const task = byKey.get(key);
-      if (task === undefined) throw new Error("transport pack referenced a missing fill task");
-      return task;
-    })
-  );
+  const extraBindings = new Map<string, SemanticArtifactSourceBinding[]>();
+  const uniquePending: SemanticFillTask[] = [];
+  for (const task of pending) {
+    const id = `${task.semanticKey}:${task.capability}`;
+    const extras = extraBindings.get(id);
+    if (extras !== undefined) {
+      extras.push(task.binding);
+      continue;
+    }
+    extraBindings.set(id, []);
+    uniquePending.push(task);
+  }
+  const packs: SemanticFillTask[][] = [];
+  const packObjects: TransportPack[] = [];
+  const byCorpus = new Map<string, SemanticFillTask[]>();
+  for (const task of uniquePending) {
+    const corpus = task.binding.sourceCorpusIdentity;
+    const group = byCorpus.get(corpus) ?? [];
+    group.push(task);
+    byCorpus.set(corpus, group);
+  }
+  for (const group of byCorpus.values()) {
+    const planned = planTurnTransportPacks(
+      group.map((task) => ({
+        semanticKey: task.semanticKey,
+        assertionId: task.assertionId,
+        text: task.text
+      })),
+      { kind: "reference_batch_8" }
+    );
+    const byKey = new Map(group.map((task) => [task.semanticKey, task]));
+    for (const pack of planned.packs) {
+      packObjects.push(pack);
+      packs.push(pack.semantic_keys.map((key) => {
+        const task = byKey.get(key);
+        if (task === undefined) throw new Error("transport pack referenced a missing fill task");
+        return task;
+      }));
+    }
+  }
   for (const [packIndex, members] of packs.entries()) {
     if (members.length === 0) continue;
     if (stopLoss || calls >= input.envelope.maxCalls || failures >= input.envelope.maxFailures) {
@@ -140,7 +178,7 @@ export function runSemanticFill(input: {
       calls += 1;
       const result = input.transport.complete(members);
       if (result.kind === "raw") {
-        const pack = planned.packs[packIndex];
+        const pack = packObjects[packIndex];
         if (pack === undefined || !demuxMatchesPack(pack, result.rawJson, members)) {
           for (const held of reserved) {
             releaseSemanticArtifactReservation(input.root, held.task.semanticKey, held.task.capability, held.token);
@@ -193,6 +231,20 @@ export function runSemanticFill(input: {
           artifact: admission.artifact,
           reservationToken: held.token
         });
+        const extras = extraBindings.get(`${held.task.semanticKey}:${held.task.capability}`) ?? [];
+        for (const binding of extras) {
+          recordSourceBinding(input.root, held.task.semanticKey, held.task.capability, binding);
+        }
+        if (admission.artifact.admission_state === "quarantined") {
+          unresolved += 1;
+          attempts.push({
+            semanticKey: held.task.semanticKey,
+            capability: held.task.capability,
+            outcome: "unresolved",
+            reason: admission.artifact.quarantine_reason ?? "quarantined"
+          });
+          continue;
+        }
         admitted += 1;
         attempts.push({
           semanticKey: held.task.semanticKey,

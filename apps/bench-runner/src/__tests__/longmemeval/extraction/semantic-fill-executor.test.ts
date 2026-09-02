@@ -56,7 +56,7 @@ describe("semantic fill executor", () => {
     expect(report.admitted).toBe(0);
     expect(report.calls).toBe(1);
     expect(report.attempts[0]?.outcome).toBe("unresolved");
-    expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("missing");
+    expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("quarantined");
   });
 
   it("does not mark failed transport work complete and honors stop-loss", () => {
@@ -106,7 +106,7 @@ describe("semantic fill executor", () => {
       transport
     });
     expect(first.admitted).toBe(0);
-    expect(second.calls).toBe(1);
-    expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("missing");
+    expect(second.calls).toBe(0);
+    expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("quarantined");
   });
 });

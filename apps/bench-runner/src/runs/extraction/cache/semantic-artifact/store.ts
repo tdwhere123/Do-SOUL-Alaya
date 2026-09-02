@@ -107,7 +107,7 @@ export function reserveSemanticArtifact(
     throw new Error("semantic artifact reservation is held", { cause });
   }
   try {
-    writeSync(descriptor, `${token}\n`);
+    writeSync(descriptor, `${token}\n${process.pid}\n`);
   } finally {
     closeSync(descriptor);
   }
@@ -121,7 +121,10 @@ export function reclaimAbandonedReservation(
 ): void {
   const finalPath = semanticArtifactPath(root, semanticKey, capability);
   if (boundedArtifactEntryExists(finalPath)) return;
-  rmSync(reservePathFor(finalPath), { force: true });
+  const reservePath = reservePathFor(finalPath);
+  const owner = readReserveOwner(reservePath);
+  if (owner !== undefined && processAlive(owner.pid)) return;
+  rmSync(reservePath, { force: true });
 }
 
 export function releaseSemanticArtifactReservation(
@@ -302,14 +305,32 @@ function bindingsPath(root: string, semanticKey: string, capability: string): st
 }
 
 function readReserveToken(reservePath: string): string | undefined {
+  return readReserveOwner(reservePath)?.token;
+}
+
+function readReserveOwner(reservePath: string): { readonly token: string; readonly pid: number } | undefined {
   if (!boundedArtifactEntryExists(reservePath)) return undefined;
   try {
-    return readBoundedCanonicalUtf8Artifact({
+    const [token, pidText] = readBoundedCanonicalUtf8Artifact({
       path: reservePath,
       maxBytes: 128,
       label: "semantic artifact reservation"
-    }).trim();
+    }).trim().split("\n");
+    const pid = Number(pidText);
+    if (token === undefined || token.length === 0 || !Number.isInteger(pid) || pid <= 0) {
+      return undefined;
+    }
+    return { token, pid };
   } catch {
     return undefined;
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
 }

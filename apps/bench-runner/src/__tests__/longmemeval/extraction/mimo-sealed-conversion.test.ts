@@ -105,8 +105,8 @@ describe("sealed MiMo shard conversion", () => {
       modelFamily: "mimo-v2.5",
       expectedPromptSha256: promptSha256(OFFICIAL_API_SYSTEM_PROMPT)
     });
-    expect(report.unresolved.some((item) => item.assertion_id === 6 && /duplicate/u.test(item.reason))).toBe(true);
-    expect(report.converted.some((artifact) => artifact.source_bindings[0]?.locator.assertion_id === 6)).toBe(false);
+    expect(report.converted).toEqual([]);
+    expect(report.unresolved[0]?.reason).toMatch(/incomplete inspection/u);
   });
 
   it("admits the same sealed raw through fill and warms Lazy F3 to zero calls", async () => {

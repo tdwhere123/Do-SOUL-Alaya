@@ -28,6 +28,7 @@ export interface AdmissionTask {
 
 export type RawAdmission =
   | { readonly kind: "provider_backed"; readonly artifact: SemanticArtifact; readonly semanticKey: string }
+  | { readonly kind: "quarantined"; readonly artifact: SemanticArtifact; readonly semanticKey: string }
   | { readonly kind: "unresolved"; readonly reason: string; readonly semanticKey: string };
 
 export function admitProviderRaw(input: {
@@ -57,9 +58,22 @@ export function admitProviderRaw(input: {
   }
   if (drafts.length === 0) {
     return input.tasks.map((task) => ({
-      kind: "unresolved",
-      reason: "batch-empty is not assertion-empty without exhaustive inspection proof",
-      semanticKey: task.semanticKey
+      kind: "quarantined",
+      semanticKey: task.semanticKey,
+      artifact: sealSemanticArtifact({
+        schema_version: 1,
+        kind: "assertion_semantic_artifact_v1",
+        semantic_key: task.semanticKey,
+        semantic_contract: task.semanticContract,
+        capability: task.capability,
+        capability_set: [task.capability],
+        model_family: task.modelFamily,
+        model_id: task.modelId,
+        admission_state: "quarantined",
+        source_bindings: [task.binding],
+        raw_response_digest: digest.sha256,
+        quarantine_reason: "batch-empty is not assertion-empty without exhaustive inspection proof"
+      })
     }));
   }
   const claimed = new Map<number, number>();

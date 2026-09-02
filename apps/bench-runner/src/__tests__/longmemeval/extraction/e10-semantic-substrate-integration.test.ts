@@ -83,7 +83,7 @@ describe("E10 semantic substrate integration", () => {
       transport: { complete: () => ({ kind: "raw", rawJson: '{"signals":[]}' }) }
     });
     expect(fulfilled.state).toBe("unavailable");
-    expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("missing");
+    expect(inspectSemanticArtifact(root, KEY, CAP).status).toBe("quarantined");
     expect(parseExtractionBenchMode({
       mode: "lazy_field",
       f0f2SubstrateIdentity: "f0f2",
