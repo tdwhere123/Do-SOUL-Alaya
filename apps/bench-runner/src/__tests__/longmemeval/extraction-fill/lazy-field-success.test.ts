@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { writeExtractionCacheManifest } from
+  "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { describe, expect, it } from "vitest";
 import { planOfficialApiSemanticWorkset } from "@do-soul/alaya-soul";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
@@ -99,5 +101,44 @@ describe("runExtractionFill lazy_field success", () => {
       unit.semanticKey,
       "official_api_signals:v1"
     ).status).toBe("provider_backed");
+  });
+
+  it("fails closed if complete v3 identity changes during overlay", async () => {
+    await writeFixtureDataset([
+      buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
+    ]);
+    await runExtractionFill({
+      variant: VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      extractorFactory: (): BenchSignalExtractor => ({
+        extract: async (input) => providerBackedExtractionResult(
+          buildGroundedSignalResponse(input.userPrompt)
+        )
+      }),
+      log: () => undefined
+    });
+    const overlayRoot = join(cacheRoot, "..", "semantic-overlay-stale");
+    await expect(runExtractionFill({
+      variant: VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      ingestionMode: "lazy_field",
+      semanticArtifactRoot: overlayRoot,
+      semanticTransport: {
+        complete: (members) => {
+          const identity = readExtractionCacheManifestIdentity(cacheRoot);
+          if (identity === undefined) throw new Error("expected complete v3");
+          writeExtractionCacheManifest(cacheRoot, {
+            ...identity.manifest,
+            built_at: "2099-01-01T00:00:00.000Z"
+          });
+          return { kind: "raw", rawJson: overlayRawJson(members) };
+        }
+      },
+      log: () => undefined
+    })).rejects.toThrow(/lost complete extraction authority/u);
   });
 });

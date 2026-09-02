@@ -277,7 +277,10 @@ async function executeLockedExtractionFill(input: {
       markProgress: input.watchdog?.markProgress });
     if (input.options.ingestionMode === "lazy_field") {
       return overlayFillResult(
-        input.prepared, input.stats, input.options.semanticArtifactRoot
+        input.prepared,
+        input.stats,
+        input.cacheRoot,
+        input.options.semanticArtifactRoot
       );
     }
     return finishPreparedExtractionFill(
@@ -399,23 +402,30 @@ function assertLazyFieldIsolation(options: ExtractionFillOptions): void {
 function overlayFillResult(
   prepared: Awaited<ReturnType<typeof prepareExtractionFill>>,
   stats: ReturnType<typeof newFillStats>,
+  cacheRoot: string,
   semanticArtifactRoot: string | undefined
 ): ExtractionFillResult {
-  const manifest = prepared.existingManifest;
-  if (manifest === undefined || typeof manifest.coverage !== "number" ||
-      !hasCompleteExtractionFillAuthority(manifest) ||
-      semanticArtifactRoot === undefined) {
+  if (semanticArtifactRoot === undefined) {
     throw new ExtractionCacheInvariantError(
       "lazy_field requires existing complete extraction authority"
+    );
+  }
+  const identity = readExtractionCacheManifestIdentity(cacheRoot);
+  if (identity === undefined ||
+      identity.manifestSha256 !== prepared.pinnedManifestSha256 ||
+      !hasCompleteExtractionFillAuthority(identity.manifest) ||
+      typeof identity.manifest.coverage !== "number") {
+    throw new ExtractionCacheInvariantError(
+      "lazy_field lost complete extraction authority"
     );
   }
   return {
     requestedTurns: prepared.requestedTurns,
     cacheHits: stats.cacheHits,
     newlyExtracted: 0,
-    coverage: manifest.coverage,
+    coverage: identity.manifest.coverage,
     ...readFillRetryTelemetry(stats),
-    manifest,
+    manifest: identity.manifest,
     semanticOverlayIdentity: digestSemanticOverlay(semanticArtifactRoot)
   };
 }

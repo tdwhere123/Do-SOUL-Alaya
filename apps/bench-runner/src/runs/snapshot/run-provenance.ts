@@ -116,7 +116,24 @@ export function bindSnapshotRunProvenanceAuthority(
     throw new Error("snapshot run provenance has no current extraction summary");
   }
   assertSnapshotExtractionAuthorityBinding(authority, cache);
-  const { compact_run_identity: _compactRunIdentity, ...rest } = provenance;
+  const { compact_run_identity, ...rest } = provenance;
+  if (provenance.schema_version === 1 && compact_run_identity !== undefined) {
+    throw new Error("schema_version 1 cannot carry compact_run_identity");
+  }
+  if (provenance.schema_version === 2) {
+    const substrate = cache.content_closure_sha256 ?? cache.expected_key_set_sha256;
+    if (typeof substrate !== "string" || provenance.ingestion_mode === undefined) {
+      throw new Error("compact run provenance v2 requires substrate and ingestion_mode");
+    }
+    const expected = compactRunIdentity({
+      substrateIdentity: substrate,
+      ingestionMode: provenance.ingestion_mode,
+      overlayIdentity: provenance.semantic_overlay_identity ?? substrate
+    });
+    if (compact_run_identity !== expected) {
+      throw new Error("compact_run_identity does not match substrate and ingestion_mode");
+    }
+  }
   return LongMemEvalRunProvenanceSchema.parse({
     ...rest,
     extraction_cache: {

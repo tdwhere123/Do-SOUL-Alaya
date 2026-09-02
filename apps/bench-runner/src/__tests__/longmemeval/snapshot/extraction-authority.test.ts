@@ -131,6 +131,26 @@ describe("snapshot extraction authority", () => {
     }, authority)).toThrow(/compact summary differs/u);
   });
 
+  it("rejects a tampered compact_run_identity on bind", () => {
+    const manifest = extractionManifest(2, "run-binding");
+    const authority = buildSnapshotExtractionAuthority(manifest, SOURCE_SHA);
+    const compactV2 = compactSnapshotRunProvenance({
+      ...runProvenance(manifest),
+      schema_version: 2,
+      ingestion_mode: "precomputed_full"
+    });
+    expect(compactV2.compact_run_identity).toMatch(/^[a-f0-9]{64}$/u);
+    expect(() => bindSnapshotRunProvenanceAuthority(compactV2, authority)).not.toThrow();
+    expect(() => bindSnapshotRunProvenanceAuthority({
+      ...compactV2,
+      compact_run_identity: "00".repeat(32)
+    }, authority)).toThrow(/compact_run_identity/u);
+    expect(() => bindSnapshotRunProvenanceAuthority({
+      ...compactSnapshotRunProvenance(runProvenance(manifest)),
+      compact_run_identity: "11".repeat(32)
+    }, authority)).toThrow(/schema_version 1 cannot carry compact_run_identity/u);
+  });
+
   it("keeps 100Q and 500Q snapshot manifests near-constant in size", () => {
     const sizes = [23_807, 96_084].map((count) => sizeEvidence(count));
 
