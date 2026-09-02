@@ -116,8 +116,9 @@ export function bindSnapshotRunProvenanceAuthority(
     throw new Error("snapshot run provenance has no current extraction summary");
   }
   assertSnapshotExtractionAuthorityBinding(authority, cache);
+  const { compact_run_identity: _compactRunIdentity, ...rest } = provenance;
   return LongMemEvalRunProvenanceSchema.parse({
-    ...provenance,
+    ...rest,
     extraction_cache: {
       ...cache,
       content_closure_index: authority.content_closure_index

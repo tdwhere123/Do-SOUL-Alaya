@@ -143,6 +143,14 @@ export function refineRunProvenanceIngestionMode(
       path: ["ingestion_mode"]
     });
   }
+  if (value.schema_version === 2 && value.ingestion_mode === "lazy_field" &&
+      value.semantic_overlay_identity === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "lazy_field requires semantic_overlay_identity",
+      path: ["semantic_overlay_identity"]
+    });
+  }
 }
 
 export const LongMemEvalRunProvenanceSchema =

@@ -384,7 +384,8 @@ function assertLazyFieldIsolation(options: ExtractionFillOptions): void {
   }
   if (options.authorityReceiptPath !== undefined ||
       options.expansionCapability !== undefined ||
-      options.cacheKeyAllowlist !== undefined) {
+      options.cacheKeyAllowlist !== undefined ||
+      options.questionBatchLimit !== undefined) {
     throw new ExtractionCacheInvariantError(
       "lazy_field cannot mix v3 fill authority"
     );
