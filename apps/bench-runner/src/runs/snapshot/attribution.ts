@@ -65,6 +65,9 @@ function hasGateEligibleExtractionCache(
 ): boolean {
   const cache = provenance.extraction_cache;
   const provenanceDatasetSha = resolveProvenanceDatasetSha(provenance);
+  if (provenance.schema_version !== 1 || provenance.ingestion_mode !== undefined) {
+    return false;
+  }
   return (
     cache !== null && snapshotCache != null &&
     cache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&

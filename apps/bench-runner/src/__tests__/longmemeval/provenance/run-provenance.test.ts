@@ -212,6 +212,17 @@ describe("LongMemEval run provenance", () => {
       }
     });
     expect(isLongMemEvalRunProvenanceGateEligible(currentProvenance)).toBe(true);
+    expect(isLongMemEvalRunProvenanceGateEligible({
+      ...currentProvenance,
+      schema_version: 2,
+      ingestion_mode: "precomputed_full"
+    })).toBe(false);
+    expect(isLongMemEvalRunProvenanceGateEligible({
+      ...currentProvenance,
+      schema_version: 2,
+      ingestion_mode: "lazy_field",
+      semantic_overlay_identity: "ab".repeat(32)
+    })).toBe(false);
     const { worktree_state_algorithm: _algorithm, ...legacyCode } = currentProvenance.code;
     const legacyWithoutAlgorithm = LongMemEvalRunProvenanceSchema.parse({
       ...currentProvenance,

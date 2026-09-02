@@ -220,6 +220,18 @@ export function listSemanticArtifactInventory(root: string): readonly SemanticAr
   return artifacts;
 }
 
+export function digestSemanticOverlay(root: string): string {
+  const artifacts = listSemanticArtifactInventory(root);
+  if (artifacts.length === 0) {
+    throw new Error("semantic overlay has no available artifacts");
+  }
+  return createHash("sha256")
+    .update(artifacts.map((artifact) =>
+      `${artifact.semantic_key}:${artifact.artifact_digest}`
+    ).sort().join("\n"), "utf8")
+    .digest("hex");
+}
+
 export function recordedSourceBindings(
   root: string,
   semanticKey: string,

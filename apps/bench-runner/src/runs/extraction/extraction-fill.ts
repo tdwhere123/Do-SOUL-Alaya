@@ -13,6 +13,7 @@ import {
 } from "./fill/manifest/fill-root-guard.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
 import { hasCompleteExtractionFillAuthority } from "./fill/fill-authority.js";
+import { digestSemanticOverlay } from "./cache/semantic-artifact/store.js";
 import {
   prepareExpansionFillAuthority,
   type PreparedExpansionFillAuthority
@@ -105,6 +106,7 @@ export interface ExtractionFillResult extends FillRetryTelemetry {
   readonly coverage: number;
   readonly manifest: ExtractionCacheManifest;
   readonly authorityTelemetry?: import("./authority/attempt-ledger.js").ExtractionAttemptLedgerSnapshot;
+  readonly semanticOverlayIdentity?: string;
 }
 export async function runExtractionFill(
   options: ExtractionFillOptions
@@ -274,7 +276,9 @@ async function executeLockedExtractionFill(input: {
       signal: input.watchdog?.signal ?? input.options.signal,
       markProgress: input.watchdog?.markProgress });
     if (input.options.ingestionMode === "lazy_field") {
-      return overlayFillResult(input.prepared, input.stats);
+      return overlayFillResult(
+        input.prepared, input.stats, input.options.semanticArtifactRoot
+      );
     }
     return finishPreparedExtractionFill(
       input.prepared, input.cacheRoot, input.stats, input.log, input.writeLease,
@@ -394,11 +398,13 @@ function assertLazyFieldIsolation(options: ExtractionFillOptions): void {
 
 function overlayFillResult(
   prepared: Awaited<ReturnType<typeof prepareExtractionFill>>,
-  stats: ReturnType<typeof newFillStats>
+  stats: ReturnType<typeof newFillStats>,
+  semanticArtifactRoot: string | undefined
 ): ExtractionFillResult {
   const manifest = prepared.existingManifest;
   if (manifest === undefined || typeof manifest.coverage !== "number" ||
-      !hasCompleteExtractionFillAuthority(manifest)) {
+      !hasCompleteExtractionFillAuthority(manifest) ||
+      semanticArtifactRoot === undefined) {
     throw new ExtractionCacheInvariantError(
       "lazy_field requires existing complete extraction authority"
     );
@@ -409,6 +415,7 @@ function overlayFillResult(
     newlyExtracted: 0,
     coverage: manifest.coverage,
     ...readFillRetryTelemetry(stats),
-    manifest
+    manifest,
+    semanticOverlayIdentity: digestSemanticOverlay(semanticArtifactRoot)
   };
 }
