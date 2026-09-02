@@ -1,3 +1,4 @@
+import { basename, join } from "node:path";
 import type { LongMemEvalVariant } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import {
   buildCredentiallessLongMemEvalWorkerEnv,
@@ -14,6 +15,15 @@ import {
   REQUIRE_SLICE_REUSE_ENV,
   SEALED_SLICE_RESTORE_ENV
 } from "../../snapshot/recall-eval/workspace-slice/names.js";
+
+export const RECALL_EVAL_SHARD_OVERLAY_DIRNAME = "embedding-cache-overlay";
+
+export function recallEvalShardOverlayReceiptPath(
+  historyRoot: string,
+  sourceReceiptPath: string
+): string {
+  return join(historyRoot, RECALL_EVAL_SHARD_OVERLAY_DIRNAME, basename(sourceReceiptPath));
+}
 
 export type { LongMemEvalWorkerShardPlan, LongMemEvalWorkerSpawner };
 export { runSupervisedWorkerGroup, spawnLongMemEvalWorkerProcess, shardHasMergeableKpi };
@@ -43,7 +53,13 @@ export function buildRecallEvalWorkerCliArgs(
     opts.backfillMissingFactFrameFormations
   );
   pushOptionalArg(args, "--warm-derived-snapshot-receipt", opts.warmDerivedSnapshotReceiptPath);
-  pushOptionalArg(args, "--embedding-cache-overlay", opts.embeddingCacheOverlayReceiptPath);
+  pushOptionalArg(
+    args,
+    "--embedding-cache-overlay",
+    opts.embeddingCacheOverlayReceiptPath === undefined
+      ? undefined
+      : recallEvalShardOverlayReceiptPath(plan.historyRoot, opts.embeddingCacheOverlayReceiptPath)
+  );
   pushOptionalArg(args, "--query-semantic-factor-cache", opts.querySemanticFactorCachePath);
   pushOptionalArg(args, "--seed-extraction-system-prompt", opts.seedExtractionSystemPromptPath);
   pushOptionalArg(args, "--fact-frame-retrofit-ledger", opts.factFrameRetrofitLedgerPath);

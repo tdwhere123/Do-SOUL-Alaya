@@ -16,6 +16,7 @@ import {
   type EmbeddingCacheOverlayBinding,
   type EmbeddingCacheOverlayExpectedSourceBinding
 } from "./contract.js";
+import { assertIsolatedOverlayFile } from "../workspace-slice/overlay-replicate.js";
 
 const OVERLAY_ALIAS = "embedding_overlay";
 
@@ -38,6 +39,7 @@ export async function applyEmbeddingCacheOverlay(input: {
   }
   if (reuseExistingOverlayBind(input.restoredDbPath, boundPath, loaded.binding.overlay_sha256)) {
     // Pager recycle re-opens this working copy; Q1 may have written query rows into main.
+    assertIsolatedOverlayFile(loaded.overlayPath, boundPath);
     return loaded.binding;
   }
   copyRegularFileNoFollow({
@@ -45,6 +47,7 @@ export async function applyEmbeddingCacheOverlay(input: {
     targetPath: boundPath,
     expectedSha256: loaded.binding.overlay_sha256
   });
+  assertIsolatedOverlayFile(loaded.overlayPath, boundPath);
   // Do not chmod the overlay 444: attaching a read-only file makes SQLite
   // reject writes on the live working copy (EventLog / WAL).
   try {

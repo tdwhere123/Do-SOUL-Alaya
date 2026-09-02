@@ -1,4 +1,6 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstatSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -23,9 +25,12 @@ import {
 } from "../../../runs/lifecycle/recall-eval/recall-eval-shards.js";
 import { buildLongMemEvalWorkerShardPlans } from
   "../../../datasets/longmemeval/runner/runner-concurrency.js";
+import { buildEmbeddingCacheOverlayReceipt } from
+  "../../../runs/snapshot/recall-eval/embedding-cache-overlay/contract.js";
 import {
   buildRecallEvalWorkerCliArgs,
-  buildRecallEvalWorkerEnv
+  buildRecallEvalWorkerEnv,
+  recallEvalShardOverlayReceiptPath
 } from "../../../runs/lifecycle/recall-eval/recall-eval-shards-worker.js";
 import type { LongMemEvalWorkerSpawnOptions } from
   "../../../datasets/longmemeval/runner/runner-concurrency-worker.js";
@@ -45,8 +50,7 @@ describe("validateRecallEvalConcurrency", () => {
 
   it.each([
     ["warm derived snapshot", { warmDerivedSnapshotReceiptPath: "/tmp/warm.json" }],
-    ["derived projection rebuild", { derivedEvidenceProjectionRebuild: true }],
-    ["embedding cache overlay", { embeddingCacheOverlayReceiptPath: "/tmp/overlay.json" }]
+    ["derived projection rebuild", { derivedEvidenceProjectionRebuild: true }]
   ])("fails closed when sealed slices cannot represent %s", (_name, incompatible) => {
     expect(() => validateRecallEvalConcurrency({
       snapshotDbPath: "/tmp/snapshot.db",
@@ -55,6 +59,16 @@ describe("validateRecallEvalConcurrency", () => {
       concurrency: 2,
       ...incompatible
     })).toThrow(/sealed slices cannot represent/u);
+  });
+
+  it("allows embedding cache overlay once each worker has an isolated bind", () => {
+    expect(() => validateRecallEvalConcurrency({
+      snapshotDbPath: "/tmp/snapshot.db",
+      variant: "longmemeval_s",
+      historyRoot: "/tmp/history",
+      concurrency: 2,
+      embeddingCacheOverlayReceiptPath: "/tmp/overlay.json"
+    })).not.toThrow();
   });
 
   it("fails closed instead of sharing one memory profile across workers", () => {
@@ -105,6 +119,26 @@ describe("buildRecallEvalWorkerCliArgs", () => {
     expect(args[args.indexOf("--limit") + 1]).toBe("2");
     expect(args[args.indexOf("--history-root") + 1]).toBe("/tmp/shards/shard-1");
   });
+
+  it("points each worker at an isolated overlay receipt under its history root", () => {
+    const sourceReceipt = "/tmp/shared-overlay.json";
+    const args = buildRecallEvalWorkerCliArgs({
+      snapshotDbPath: "/tmp/snapshot.db",
+      variant: "longmemeval_s",
+      historyRoot: "/tmp/parent-history",
+      concurrency: 2,
+      embeddingCacheOverlayReceiptPath: sourceReceipt
+    }, {
+      shardIndex: 0,
+      offset: 0,
+      limit: 2,
+      historyRoot: "/tmp/shards/shard-0"
+    });
+    expect(args[args.indexOf("--embedding-cache-overlay") + 1]).toBe(
+      recallEvalShardOverlayReceiptPath("/tmp/shards/shard-0", sourceReceipt)
+    );
+    expect(args).not.toContain(sourceReceipt);
+  });
 });
 
 describe("buildRecallEvalWorkerEnv", () => {
@@ -117,6 +151,19 @@ describe("buildRecallEvalWorkerEnv", () => {
     });
     expect(env[SEALED_SLICE_RESTORE_ENV]).toBe("1");
     expect(env[REQUIRE_SLICE_REUSE_ENV]).toBe("1");
+  });
+
+  it("keeps the ONNX host single-flight lock for concurrency>1 and embeddingMode=env", () => {
+    const env = buildRecallEvalWorkerEnv({
+      concurrency: 2,
+      embeddingMode: "env",
+      shardRoot: "/tmp/shards",
+      historyRoot: "/tmp/shards/shard-0"
+    });
+    expect(env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT).toBe("1");
+    expect(env.ALAYA_LOCAL_ONNX_LOCK_PATH).toBe(
+      join("/tmp/shards", "local-onnx-inference.lock")
+    );
   });
 
   it.each([
@@ -258,6 +305,52 @@ describe("runRecallEvalSharded", () => {
     expect(result.payload.evaluated_count).toBe(4);
   });
 
+  it("materializes isolated overlay binds that do not share an inode", async () => {
+    const overlay = await plantOverlayReceipt(tmpRoot);
+    const historyRoot = join(tmpRoot, "history");
+    await mkdir(historyRoot, { recursive: true });
+    const spawnCalls: LongMemEvalWorkerSpawnOptions[] = [];
+    const overlayInodes: string[] = [];
+    await runRecallEvalSharded({
+      snapshotDbPath: join(tmpRoot, "snapshot.db"),
+      variant: "longmemeval_s",
+      historyRoot,
+      concurrency: 2,
+      limit: 4,
+      embeddingCacheOverlayReceiptPath: overlay.receiptPath
+    }, {
+      resolveWindow: async () => ({ baseOffset: 0, windowLength: 4 }),
+      loadSnapshotManifest: async () => stubManifest(4),
+      spawnWorker: async (options) => {
+        spawnCalls.push(options);
+        const offset = Number(options.args[options.args.indexOf("--offset") + 1]);
+        const limit = Number(options.args[options.args.indexOf("--limit") + 1]);
+        const shardRoot = options.args[options.args.indexOf("--history-root") + 1];
+        const overlayReceipt = options.args[options.args.indexOf("--embedding-cache-overlay") + 1];
+        if (shardRoot === undefined) throw new Error("missing --history-root");
+        if (overlayReceipt === undefined) throw new Error("missing --embedding-cache-overlay");
+        const overlayFile = overlayReceipt.replace(/\.json$/u, ".sqlite");
+        const metadata = lstatSync(overlayFile);
+        expect(metadata.isFile()).toBe(true);
+        overlayInodes.push(`${metadata.dev}:${metadata.ino}`);
+        await writeShardRoot(
+          shardRoot,
+          plantedKpi(offset, limit, PLANTED_HITS.slice(offset, offset + limit)),
+          makeRangeDiagnostics(offset, limit)
+        );
+        return 0;
+      }
+    });
+    expect(spawnCalls).toHaveLength(2);
+    const overlayArgs = spawnCalls.map((call) =>
+      call.args[call.args.indexOf("--embedding-cache-overlay") + 1]);
+    expect(new Set(overlayArgs).size).toBe(2);
+    expect(overlayArgs.every((path) => path !== overlay.receiptPath)).toBe(true);
+    expect(new Set(overlayInodes).size).toBe(2);
+    const sourceIno = lstatSync(overlay.overlayPath);
+    expect(overlayInodes).not.toContain(`${sourceIno.dev}:${sourceIno.ino}`);
+  });
+
   it("aborts and joins a sibling when another shard spawn rejects", async () => {
     let siblingAborted = false;
     const run = runRecallEvalSharded({
@@ -316,4 +409,36 @@ function questionHits(payload: KpiPayload): readonly {
 
 function stubManifest(questionCount: number): LongMemEvalSnapshotManifest {
   return { question_count: questionCount } as LongMemEvalSnapshotManifest;
+}
+
+async function plantOverlayReceipt(root: string): Promise<{
+  readonly receiptPath: string;
+  readonly overlayPath: string;
+}> {
+  const receiptPath = join(root, "overlay-receipt.json");
+  const overlayPath = join(root, "overlay-receipt.sqlite");
+  const bytes = "overlay-sidecar\n";
+  await writeFile(overlayPath, bytes, "utf8");
+  const receipt = buildEmbeddingCacheOverlayReceipt({
+    source: {
+      source_snapshot_db_sha256: "a".repeat(64),
+      source_snapshot_manifest_sha256: "b".repeat(64),
+      source_schema_version: 1,
+      recall_pipeline_version: "fusion-evidence-first-v3",
+      vector_space: {
+        provider_kind: "local_onnx",
+        model_id: "fixture-model",
+        schema_version: 1,
+        dimensions: 2,
+        d2q_input: "raw_content",
+        model_artifact_sha256: "c".repeat(64)
+      }
+    },
+    relativeOverlayPath: "overlay-receipt.sqlite",
+    overlaySha256: createHash("sha256").update(bytes).digest("hex"),
+    memoryEmbeddingCount: 1,
+    evidenceEmbeddingCount: 0
+  });
+  await writeFile(receiptPath, `${JSON.stringify(receipt)}\n`, "utf8");
+  return { receiptPath, overlayPath };
 }

@@ -146,13 +146,19 @@ describe("packed workspace slice explode", () => {
         overlay_sha256: OVERLAY_SHA
       });
       expect(existsSync(copiedOverlay)).toBe(true);
-      const stat = lstatSync(copiedOverlay);
-      if (stat.isSymbolicLink()) {
-        expect(readFileSync(copiedOverlay, "utf8")).toBe(readFileSync(overlayPath, "utf8"));
-      } else {
-        expect(readFileSync(copiedOverlay, "utf8")).toBe("overlay-sidecar\n");
-      }
+      const copied = lstatSync(copiedOverlay);
+      const source = lstatSync(overlayPath);
+      expect(copied.isFile()).toBe(true);
+      expect(copied.isSymbolicLink()).toBe(false);
+      expect(`${copied.dev}:${copied.ino}`).not.toBe(`${source.dev}:${source.ino}`);
+      expect(readFileSync(copiedOverlay, "utf8")).toBe("overlay-sidecar\n");
     }
+    const sliceOverlays = [WORKSPACE_A, WORKSPACE_B].map((workspaceId) => {
+      const sliceDir = dirname(exploded.sliceDbPaths[workspaceId]!);
+      return lstatSync(join(sliceDir, `.embedding-cache-overlay-${OVERLAY_SHA}.sqlite`));
+    });
+    expect(`${sliceOverlays[0]!.dev}:${sliceOverlays[0]!.ino}`)
+      .not.toBe(`${sliceOverlays[1]!.dev}:${sliceOverlays[1]!.ino}`);
   });
 
   it("fails when a product table is neither workspace-scoped nor handled", async () => {

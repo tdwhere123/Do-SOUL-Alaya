@@ -28,8 +28,13 @@ import { validateSnapshotManifest } from "../../snapshot/manifest-validation.js"
 import { MAX_SNAPSHOT_MANIFEST_BYTES } from "../../snapshot/artifact-limits.js";
 import { readRegularFileNoFollow } from "../../snapshot/bound-file.js";
 import {
+  assertDistinctOverlayInodes,
+  isolateEmbeddingCacheOverlayReceipt
+} from "../../snapshot/recall-eval/workspace-slice/overlay-replicate.js";
+import {
   buildRecallEvalWorkerCliArgs,
   buildRecallEvalWorkerEnv,
+  RECALL_EVAL_SHARD_OVERLAY_DIRNAME,
   runSupervisedWorkerGroup,
   shardHasMergeableKpi,
   spawnLongMemEvalWorkerProcess,
@@ -93,8 +98,7 @@ export function validateRecallEvalConcurrency(
   }
   const unsupportedSubstrate = [
     opts.warmDerivedSnapshotReceiptPath === undefined ? null : "warm derived snapshot",
-    opts.derivedEvidenceProjectionRebuild === true ? "derived projection rebuild" : null,
-    opts.embeddingCacheOverlayReceiptPath === undefined ? null : "embedding cache overlay"
+    opts.derivedEvidenceProjectionRebuild === true ? "derived projection rebuild" : null
   ].filter((value): value is string => value !== null);
   if (unsupportedSubstrate.length > 0) {
     throw new Error(
@@ -211,6 +215,7 @@ async function prepareRecallEvalShardedRun(
     shardRoot
   });
   assertExactRecallEvalShardCoverage(plans, window.baseOffset, window.windowLength);
+  isolateRecallEvalShardOverlays(opts, plans);
   const logDir = join(shardRoot, "logs");
   await mkdir(logDir, { recursive: true });
   const cliPath = deps.resolveCliPath?.() ?? resolveDefaultBenchRunnerCliPath();
@@ -330,6 +335,19 @@ async function mergeRecallEvalShardedRunWithSpool(
     completion: { status: "complete", failures: [] },
     memoryProfile: { status: "disabled", failures: [] }
   };
+}
+
+function isolateRecallEvalShardOverlays(
+  opts: RecallEvalOptions,
+  plans: readonly LongMemEvalWorkerShardPlan[]
+): void {
+  const receiptPath = opts.embeddingCacheOverlayReceiptPath;
+  if (receiptPath === undefined) return;
+  const isolated = plans.map((plan) => isolateEmbeddingCacheOverlayReceipt({
+    receiptPath,
+    destDir: join(plan.historyRoot, RECALL_EVAL_SHARD_OVERLAY_DIRNAME)
+  }));
+  assertDistinctOverlayInodes(isolated.map((row) => row.overlayPath));
 }
 
 function defaultLoadSnapshotManifest(
