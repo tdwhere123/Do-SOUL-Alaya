@@ -21,6 +21,22 @@ export function formatRecallEvalPagerMapsHint(
   );
 }
 
+export function formatPagerExit(input: {
+  readonly code: number | null;
+  readonly exitSignal: NodeJS.Signals | null;
+  readonly childPid?: number | null;
+  readonly mapsHint?: RecallEvalPagerMapsHint | null;
+}): string {
+  const pid = input.childPid ?? input.mapsHint?.pid ?? "unknown";
+  const maps = input.mapsHint === undefined || input.mapsHint === null
+    ? "maps=unsampled"
+    : formatRecallEvalPagerMapsHint(input.mapsHint);
+  return (
+    `recall-eval pager child exited (pid=${pid}, code=${input.code}, ` +
+    `signal=${input.exitSignal}, ${maps}).`
+  );
+}
+
 function countMapLines(pid: number, pattern: RegExp): number {
   try {
     return readProcMaps(pid).split("\n").filter((line) => pattern.test(line)).length;

@@ -10,7 +10,7 @@ import {
   type RecallEvalPagerIpcSuccess,
   type RecallEvalPagerMapsHint
 } from "./protocol.js";
-import { formatRecallEvalPagerMapsHint } from "./maps-hint.js";
+import { formatPagerExit, formatRecallEvalPagerMapsHint } from "./maps-hint.js";
 import { RecallEvalSelectionArtifactCollector } from
   "./selection-artifact-collector.js";
 import { proveParentOpenedFileProofs } from "./parent-opened-file-proofs.js";
@@ -138,14 +138,32 @@ export class RecallEvalPagerIpcSession {
     payload: unknown,
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<unknown> {
+    const startedAt = performance.now();
+    const openStartedAt = startedAt;
     await this.ensureOpened(timeoutMs);
+    const openDurationMs = performance.now() - openStartedAt;
+
+    const recallStartedAt = performance.now();
     const response = await this.request("recall", { recall: payload }, timeoutMs);
+    const recallDurationMs = performance.now() - recallStartedAt;
+    const totalWallMs = performance.now() - startedAt;
+
     this.recordIdentity(response);
     if (response.pack === undefined || !hasRecallPack(response.pack)) {
       throw new Error("recall-eval pager child returned an empty pack.");
     }
     this.selectionArtifacts.recordQuestion(payload);
-    return response.pack;
+    const pack = response.pack as Record<string, unknown>;
+    const clockAMs = typeof pack.latencyMs === "number" ? pack.latencyMs : 0;
+    const harnessOverheadMs = Math.max(0, totalWallMs - clockAMs);
+    pack.harnessTimers = Object.freeze({
+      openDurationMs,
+      recallDurationMs,
+      totalWallMs,
+      clockAMs,
+      harnessOverheadMs
+    });
+    return pack;
   }
 
   public async close(
@@ -462,22 +480,6 @@ function hasRecallPack(pack: unknown): boolean {
     record.questionId.length > 0 &&
     record.diagnostics !== undefined &&
     record.diagnostics !== null;
-}
-
-function formatPagerExit(input: {
-  readonly code: number | null;
-  readonly exitSignal: NodeJS.Signals | null;
-  readonly childPid?: number | null;
-  readonly mapsHint?: RecallEvalPagerMapsHint | null;
-}): string {
-  const pid = input.childPid ?? input.mapsHint?.pid ?? "unknown";
-  const maps = input.mapsHint === undefined || input.mapsHint === null
-    ? "maps=unsampled"
-    : formatRecallEvalPagerMapsHint(input.mapsHint);
-  return (
-    `recall-eval pager child exited (pid=${pid}, code=${input.code}, ` +
-    `signal=${input.exitSignal}, ${maps}).`
-  );
 }
 
 function toPagerExitError(
