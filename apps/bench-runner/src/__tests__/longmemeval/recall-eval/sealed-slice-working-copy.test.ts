@@ -92,6 +92,7 @@ function buildOpenPayload(dataDirRoot: string): RecallEvalPagerOpenPayload {
     recallWeightOverrides: undefined,
     options: {
       snapshotDbPath,
+      historyRoot: join(dataDirRoot, "history"),
       variant: "longmemeval_s" as const
     },
     manifest: {
