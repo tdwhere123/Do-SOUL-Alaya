@@ -8,7 +8,8 @@ import {
   buildOfficialApiExtractionRequests,
   parseOfficialApiExtractionRequest,
   officialApiExtractionRequestTemplatePreimage,
-  stringifyOfficialApiExtractionRequest
+  stringifyOfficialApiExtractionRequest,
+  mintOfficialApiAssertionBindings
 } from "../../../garden/ingestion/official-api/extraction-request.js";
 
 describe("official API extraction request", () => {
@@ -92,6 +93,15 @@ describe("official API extraction request", () => {
       ...preimage,
       serialized_request: preimage.serialized_request.replace("assertion_id", "id")
     }));
+  });
+
+  it("mints semantic keys outside the request JSON", () => {
+    const messages = [{ role: "user" as const, content: "I moved to Berlin." }];
+    const request = buildOfficialApiExtractionRequest("I moved to Berlin.", messages);
+    const bindings = mintOfficialApiAssertionBindings("I moved to Berlin.", messages);
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0]?.semanticKey).toMatch(/^[a-f0-9]{64}$/u);
+    expect(stringifyOfficialApiExtractionRequest(request)).not.toContain(bindings[0]!.semanticKey);
   });
 });
 

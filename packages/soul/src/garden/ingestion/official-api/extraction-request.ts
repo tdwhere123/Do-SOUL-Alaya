@@ -6,6 +6,16 @@ import {
   buildOfficialApiSourceCorpus,
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
 } from "../../triage/grounding/source-locator.js";
+import { indexSourceAssertions } from "../../triage/grounding/source-locator/assertion-catalog.js";
+import {
+  ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
+  bindAssertionSource,
+  computeAssertionSemanticKey,
+  digestSourceText,
+  resolveAssertionSemanticContext,
+  type AssertionSourceBinding
+} from "../../triage/grounding/source-locator/assertion-semantic-identity.js";
+import { planTurnTransportPacks } from "./transport-pack.js";
 
 export const OFFICIAL_API_EXTRACTION_REQUEST_SCHEMA_VERSION = 2;
 export const OFFICIAL_API_EXTRACTION_BATCH_CONTRACT_VERSION = 1;
@@ -51,23 +61,80 @@ export function buildOfficialApiExtractionRequests(
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
   const assertions = buildOfficialApiSourceAssertions(sourceCorpus);
   const sourceCorpusIdentity = computeOfficialApiSourceCorpusIdentity(sourceCorpus);
-  const batchCount = Math.max(
-    1,
-    Math.ceil(assertions.length / OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH)
+  const plan = planTurnTransportPacks(
+    assertions.map((assertion) => ({
+      semanticKey: computeAssertionSemanticKey({
+        formationContractVersion: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+        exactText: assertion.text,
+        trustedRole: "user",
+        semanticContext: ""
+      }),
+      assertionId: assertion.assertion_id,
+      text: assertion.text
+    })),
+    { kind: "reference_batch_8" }
   );
-  if (assertions.length === 0) {
-    return Object.freeze([buildRequest([], sourceCorpusIdentity, 0, batchCount)]);
-  }
-  const requests: OfficialApiExtractionRequest[] = [];
-  for (let offset = 0; offset < assertions.length;
-    offset += OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH) {
-    requests.push(buildRequest(assertions.slice(
-      offset,
-      offset + OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH
-    ), sourceCorpusIdentity, requests.length, batchCount));
-  }
-  return Object.freeze(requests);
+  const byId = new Map(assertions.map((assertion) => [assertion.assertion_id, assertion]));
+  return Object.freeze(plan.packs.map((pack, batchIndex) => buildRequest(
+    pack.assertion_ids.map((assertionId) => {
+      const assertion = byId.get(assertionId);
+      if (assertion === undefined) {
+        throw new TypeError("transport pack referenced a missing assertion");
+      }
+      return assertion;
+    }),
+    sourceCorpusIdentity,
+    batchIndex,
+    plan.packs.length
+  )));
 }
+
+export function mintOfficialApiAssertionBindings(
+  turnContent: string,
+  messages: readonly Pick<ConversationMessage, "role" | "content">[],
+  datasetRevision?: string
+): readonly AssertionSourceBinding[] {
+  const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
+  const catalog = buildOfficialApiSourceAssertions(sourceCorpus);
+  const indexed = new Map(
+    indexSourceAssertions(sourceCorpus).map((assertion) => [assertion.assertion_id, assertion])
+  );
+  const sourceCorpusIdentity = computeOfficialApiSourceCorpusIdentity(sourceCorpus);
+  const sourceTextDigest = digestSourceText(sourceCorpus);
+  return Object.freeze(catalog.map((member) => {
+    const indexedAssertion = indexed.get(member.assertion_id);
+    if (indexedAssertion === undefined) {
+      throw new TypeError("catalog assertion missing from the indexed source catalog");
+    }
+    const sentenceText = sourceCorpus.slice(
+      indexedAssertion.sentence.start,
+      indexedAssertion.sentence.end
+    );
+    const enclosing = sentenceText.includes(indexedAssertion.text)
+      ? sentenceText
+      : indexedAssertion.text;
+    const semanticKey = computeAssertionSemanticKey({
+      formationContractVersion: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+      exactText: indexedAssertion.text,
+      trustedRole: "user",
+      semanticContext: resolveAssertionSemanticContext(indexedAssertion.text, enclosing)
+    });
+    return bindAssertionSource({
+      semanticKey,
+      sourceCorpusIdentity,
+      sourceTextDigest,
+      locator: {
+        assertion_id: indexedAssertion.assertion_id,
+        start: indexedAssertion.start,
+        end: indexedAssertion.end
+      },
+      datasetRevision
+    });
+  }));
+}
+
+export { ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID };
+export type { AssertionSourceBinding };
 
 function buildRequest(
   sourceAssertions: ReturnType<typeof buildOfficialApiSourceAssertions>,

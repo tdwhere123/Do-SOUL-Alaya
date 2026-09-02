@@ -1,12 +1,15 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { buildOfficialApiExtractionRequests } from "@do-soul/alaya-soul";
+import {
+  ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
+  mintOfficialApiAssertionBindings
+} from "../../../../../../packages/soul/src/garden/ingestion/official-api/extraction-request.js";
 import { convertLegacyExtractionShard } from "../../../runs/extraction/cache/semantic-artifact/legacy-convert.js";
 import type { CachedExtractionEntry } from "../../../runs/compile-seed/cache/cache-shard.js";
 import type { SemanticArtifactSourceBinding } from "../../../runs/extraction/cache/semantic-artifact/contract.js";
 
-const KEY = "ab".repeat(32);
-const CONTRACT = "alaya.assertion_semantic_identity.v1";
+const CONTRACT = ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID;
 const PROMPT_SHA = "aa".repeat(32);
 
 function entry(rawJson: string): CachedExtractionEntry {
@@ -19,20 +22,18 @@ function entry(rawJson: string): CachedExtractionEntry {
   };
 }
 
-function bindingFor(request: ReturnType<typeof buildOfficialApiExtractionRequests>[number]): SemanticArtifactSourceBinding {
-  const assertion = request.source_assertions[0]!;
-  return {
-    semanticKey: KEY,
-    sourceCorpusIdentity: request.source_corpus_identity,
-    sourceTextDigest: createHash("sha256").update(assertion.text, "utf8").digest("hex"),
-    locator: {
-      contract_version: 2,
-      kind: "assertion_catalog",
-      assertion_id: assertion.assertion_id,
-      start: 0,
-      end: assertion.text.length
-    }
-  };
+function bindingFor(
+  turnContent: string,
+  request: ReturnType<typeof buildOfficialApiExtractionRequests>[number]
+): SemanticArtifactSourceBinding {
+  const minted = mintOfficialApiAssertionBindings(turnContent, [
+    { role: "user", content: turnContent }
+  ]);
+  const binding = minted.find((item) =>
+    request.source_assertions.some((assertion) => assertion.assertion_id === item.locator.assertion_id)
+  );
+  if (binding === undefined) throw new Error("no minted binding");
+  return binding;
 }
 
 describe("legacy shard conversion", () => {
@@ -44,7 +45,7 @@ describe("legacy shard conversion", () => {
     const report = convertLegacyExtractionShard({
       entry: entry('{"signals":[]}'),
       request,
-      sourceBindings: [bindingFor(request)],
+      sourceBindings: [bindingFor("I moved to Berlin.", request)],
       semanticContract: CONTRACT,
       modelFamily: "mimo-v2.5",
       expectedPromptSha256: PROMPT_SHA
@@ -76,7 +77,7 @@ describe("legacy shard conversion", () => {
     const truncated = convertLegacyExtractionShard({
       entry: entry('{"signals":['),
       request,
-      sourceBindings: [bindingFor(request)],
+      sourceBindings: [bindingFor("I moved to Berlin.", request)],
       semanticContract: CONTRACT,
       modelFamily: "mimo-v2.5",
       expectedPromptSha256: PROMPT_SHA
@@ -95,7 +96,7 @@ describe("legacy shard conversion", () => {
     const report = convertLegacyExtractionShard({
       entry: entry(raw),
       request,
-      sourceBindings: [bindingFor(request)],
+      sourceBindings: [bindingFor("I moved to Berlin.", request)],
       semanticContract: CONTRACT,
       modelFamily: "mimo-v2.5",
       expectedPromptSha256: PROMPT_SHA,
@@ -120,7 +121,7 @@ describe("legacy shard conversion", () => {
     const first = convertLegacyExtractionShard({
       entry: entry('{"signals":[]}'),
       request,
-      sourceBindings: [bindingFor(request)],
+      sourceBindings: [bindingFor("I moved to Berlin.", request)],
       semanticContract: CONTRACT,
       modelFamily: "mimo-v2.5",
       expectedPromptSha256: PROMPT_SHA
@@ -128,7 +129,7 @@ describe("legacy shard conversion", () => {
     const second = convertLegacyExtractionShard({
       entry: entry('{"signals":[]}'),
       request,
-      sourceBindings: [bindingFor(request)],
+      sourceBindings: [bindingFor("I moved to Berlin.", request)],
       semanticContract: CONTRACT,
       modelFamily: "mimo-v2.5",
       expectedPromptSha256: PROMPT_SHA

@@ -22,6 +22,10 @@ import { redactProvenanceUrl } from "../provenance/paired-environment.js";
 import { readRegularFileNoFollow, sha256Buffer } from "./bound-file.js";
 import { redactSupplementalSourceBinding } from
   "../extraction/cache/supplemental-source-receipt.js";
+import {
+  parseExtractionBenchMode,
+  type ExtractionBenchModeConfig
+} from "../extraction/cache/semantic-artifact/bench-mode.js";
 
 export const MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES =
   MAX_LONGMEMEVAL_EXTRACTION_AUTHORITY_BYTES;
@@ -34,7 +38,8 @@ export interface CapturedSnapshotExtractionAuthority {
 }
 
 export function captureSnapshotExtractionAuthority(
-  cacheRoot: string
+  cacheRoot: string,
+  options?: { readonly benchMode?: ExtractionBenchModeConfig }
 ): CapturedSnapshotExtractionAuthority {
   const filePath = extractionCacheManifestPath(cacheRoot);
   const sourceBytes = readRegularFileNoFollow(
@@ -44,7 +49,7 @@ export function captureSnapshotExtractionAuthority(
   assertAuthoritySize(sourceBytes, filePath);
   const sourceSha256 = sha256Buffer(sourceBytes);
   const manifest = parseCompleteSourceManifest(sourceBytes, filePath);
-  const compact = buildSnapshotExtractionSummary(manifest, sourceSha256);
+  const compact = buildSnapshotExtractionSummary(manifest, sourceSha256, options?.benchMode);
   const authority = buildSnapshotExtractionAuthority(manifest, sourceSha256, compact);
   const bytes = renderSnapshotExtractionAuthority(authority);
   assertAuthoritySize(bytes, filePath);
@@ -53,7 +58,8 @@ export function captureSnapshotExtractionAuthority(
 
 export function buildSnapshotExtractionSummary(
   manifest: ExtractionCacheManifestV3,
-  sourceManifestSha256: string
+  sourceManifestSha256: string,
+  benchMode?: ExtractionBenchModeConfig
 ): SnapshotExtractionProvenanceV3 {
   const expansion = sanitizedExpansionArtifacts(manifest);
   return {
@@ -82,7 +88,10 @@ export function buildSnapshotExtractionSummary(
         redactProvenanceUrl
       )
     }),
-    ...expansion
+    ...expansion,
+    ...(benchMode === undefined ? {} : {
+      extraction_bench_mode: parseExtractionBenchMode(benchMode)
+    })
   };
 }
 

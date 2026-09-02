@@ -253,6 +253,7 @@ export interface SnapshotExtractionProvenanceV3
   readonly expansion_source_anchor?: LongMemEvalExpansionSourceAnchor;
   readonly expansion_lineage?: LongMemEvalExpansionLineage;
   readonly supplemental_source_receipt?: SupplementalSourceProvenanceBinding;
+  readonly extraction_bench_mode?: import("../extraction/cache/semantic-artifact/bench-mode.js").ExtractionBenchModeConfig;
 }
 
 export type SnapshotExtractionProvenance =
