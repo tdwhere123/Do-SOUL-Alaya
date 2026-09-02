@@ -21,6 +21,7 @@ import {
   openRecallEvalPagerChild,
   recallRecallEvalPagerChild
 } from "../../../runs/lifecycle/recall-eval/recall-eval-process/child-runtime.js";
+import { readRecallEvalPagerMapsHint } from "../../../runs/lifecycle/recall-eval/recall-eval-process/maps-hint.js";
 import { createBenchDaemonLaunchConfig } from "../../../harness/daemon/daemon-environment.js";
 import {
   hashRegularFileNoFollow
@@ -175,6 +176,38 @@ describe("H02 — sealed slice private working copy", () => {
 
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+
+    await closeRecallEvalPagerChild();
+  });
+
+  it("serves sequential questions across workspaces without accumulating alaya.db mappings", async () => {
+    const destDir = join(root, "slices-seq");
+    const dataDirRoot = join(root, "data-seq");
+    await explodePackedWorkingCopy({
+      packedDbPath: packedPath,
+      destDir,
+      workspaceIds: [WORKSPACE_A, WORKSPACE_B]
+    });
+
+    await openRecallEvalPagerChild(buildOpenPayload(dataDirRoot));
+
+    await recallRecallEvalPagerChild(
+      buildRecallPayload("q1", WORKSPACE_A, TOKEN_A)
+    );
+    const hint1 = readRecallEvalPagerMapsHint(process.pid);
+
+    await recallRecallEvalPagerChild(
+      buildRecallPayload("q2", WORKSPACE_B, TOKEN_B)
+    );
+    const hint2 = readRecallEvalPagerMapsHint(process.pid);
+
+    await recallRecallEvalPagerChild(
+      buildRecallPayload("q3", WORKSPACE_A, TOKEN_A)
+    );
+    const hint3 = readRecallEvalPagerMapsHint(process.pid);
+
+    expect(hint2.alaya_db_mappings).toBeLessThanOrEqual(hint1.alaya_db_mappings);
+    expect(hint3.alaya_db_mappings).toBeLessThanOrEqual(hint1.alaya_db_mappings);
 
     await closeRecallEvalPagerChild();
   });

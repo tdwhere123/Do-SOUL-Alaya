@@ -60,10 +60,9 @@ async function openPager(
   const opened = await session.open(buildPagerOpenPayload(context));
   const childHint = opened.mapsHint ?? session.lastMapsHint;
   process.stdout.write(
-    `[recall-eval pager] child ${
-      childHint === null || childHint === undefined
-        ? `pid=${session.pid ?? "unknown"}`
-        : formatRecallEvalPagerMapsHint(childHint)
+    `[recall-eval pager] child ${childHint === null || childHint === undefined
+      ? `pid=${session.pid ?? "unknown"}`
+      : formatRecallEvalPagerMapsHint(childHint)
     }\n`
   );
   process.stdout.write(
@@ -108,7 +107,7 @@ async function executeRecallEvalQuestions(
     if (question === undefined) continue;
     const result = await diagnosticsSpool.append(
       await session.recall(buildPagerRecallPayload(context, question, i + 1)) as
-        RecallEvalQuestionResult
+      RecallEvalQuestionResult
     );
     collected.push(result);
     if (!warmupProfiled && (result.embeddingWarmup?.pass_count ?? 0) > 0) {
@@ -121,9 +120,22 @@ async function executeRecallEvalQuestions(
       questionIndex: i
     });
     writeRecallEvalProgress(i, context.window.length, question.questionId, result);
-    await session.recycle();
+    if (shouldRecycleSession(context)) {
+      await session.recycle();
+    }
   }
   return collected;
+}
+
+function shouldRecycleSession(context: RecallEvalRunContext): boolean {
+  if (context.options.skipRecycle === true) return false;
+  if (
+    process.env.ALAYA_RECALL_EVAL_SKIP_RECYCLE === "1" ||
+    process.env.ALAYA_RECALL_EVAL_SKIP_RECYCLE === "true"
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function buildPagerOpenPayload(context: RecallEvalRunContext): RecallEvalPagerOpenPayload {

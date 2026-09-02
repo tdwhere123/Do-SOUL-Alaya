@@ -112,13 +112,14 @@ async function ensurePagerDaemonForQuestion(
   if (current.daemon !== null && current.installedWorkspaceId === workspaceId) {
     return;
   }
+  const working = workingAlayaDbPath(current.open.dataDirRoot);
   if (current.daemon !== null) {
     await current.daemon.shutdown();
     current.daemon = null;
   }
+  closeCachedDatabase(working);
+
   if (current.slices !== null && current.installedWorkspaceId !== workspaceId) {
-    const working = workingAlayaDbPath(current.open.dataDirRoot);
-    closeCachedDatabase(working);
     for (const suffix of ["", "-wal", "-shm"]) {
       rmSync(`${working}${suffix}`, { force: true });
     }
@@ -129,6 +130,7 @@ async function ensurePagerDaemonForQuestion(
     });
     current.installedWorkspaceId = workspaceId;
   }
+
   current.daemon = await startBenchDaemon({
     dataDirRoot: current.open.dataDirRoot,
     embeddingMode: current.open.daemonLaunch.embeddingMode,
@@ -156,6 +158,7 @@ export async function closeRecallEvalPagerChild(): Promise<RecallEvalPagerCloseR
       primaryError ??= error;
     }
   }
+  closeCachedDatabase(workingAlayaDbPath(current.open.dataDirRoot));
   if (primaryError !== undefined) {
     try {
       await current.spool?.dispose();

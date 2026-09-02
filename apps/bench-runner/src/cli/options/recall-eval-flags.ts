@@ -39,6 +39,17 @@ export function consumeRecallEvalPathFlag(
     );
     return nextIndex(index, token);
   }
+  if (matchFlagToken(token, "--snapshot-consume-authority")) {
+    const raw = readRequiredFlagValue(
+      args, index, token, "--snapshot-consume-authority",
+      "--snapshot-consume-authority requires promotion or diagnostic"
+    );
+    if (raw !== "promotion" && raw !== "diagnostic") {
+      throw new Error("--snapshot-consume-authority must be promotion or diagnostic");
+    }
+    state.snapshotConsumeAuthority = raw;
+    return nextIndex(index, token);
+  }
   if (!matchFlagToken(token, "--seed-extraction-system-prompt")) {
     return undefined;
   }

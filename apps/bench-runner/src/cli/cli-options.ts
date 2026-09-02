@@ -71,6 +71,8 @@ export interface ParsedFlags {
   // modes only). Default off keeps embedding ON/OFF corpora comparable.
   readonly edgePlane: boolean;
   readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
+  readonly skipRecycle?: boolean;
+  readonly snapshotConsumeAuthority?: "promotion" | "diagnostic";
 }
 
 export interface ParsedFlagsState {
@@ -112,6 +114,8 @@ export interface ParsedFlagsState {
   qa: boolean;
   edgePlane: boolean;
   expectedReconciliationBasis?: EffectiveReconciliationBasis;
+  skipRecycle?: boolean;
+  snapshotConsumeAuthority?: "promotion" | "diagnostic";
   shards: string[];
   collectingShards: boolean;
 }
