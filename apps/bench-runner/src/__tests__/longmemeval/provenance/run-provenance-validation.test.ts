@@ -77,4 +77,24 @@ describe("LongMemEval run provenance", () => {
       .rejects.toThrow(/artifact tree/u);
   });
 
+  it("writes schema v2 when ingestionMode is set", async () => {
+    const provenance = await buildLongMemEvalRunProvenance({
+      opts: {
+        variant: "longmemeval_s",
+        historyRoot: "/tmp",
+        embeddingMode: "disabled"
+      },
+      evaluatedCount: 0,
+      commitSha7: currentCommitSha7,
+      embeddingProviderLabel: "disabled",
+      env: {},
+      computeExecutedDistIdentity: fakeExecutedDistIdentity,
+      ingestionMode: "lazy_field",
+      semanticOverlayIdentity: "ab".repeat(32)
+    });
+    expect(provenance.schema_version).toBe(2);
+    expect(provenance.ingestion_mode).toBe("lazy_field");
+    expect(provenance.semantic_overlay_identity).toBe("ab".repeat(32));
+  });
+
 });

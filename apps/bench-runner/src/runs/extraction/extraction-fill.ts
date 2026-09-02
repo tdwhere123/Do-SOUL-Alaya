@@ -12,6 +12,7 @@ import {
   type ExtractionCacheWriteLease
 } from "./fill/manifest/fill-root-guard.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
+import { hasCompleteExtractionFillAuthority } from "./fill/fill-authority.js";
 import {
   prepareExpansionFillAuthority,
   type PreparedExpansionFillAuthority
@@ -108,6 +109,7 @@ export interface ExtractionFillResult extends FillRetryTelemetry {
 export async function runExtractionFill(
   options: ExtractionFillOptions
 ): Promise<ExtractionFillResult> {
+  assertLazyFieldIsolation(options);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(options.cacheRoot);
   const authority = options.authorityReceiptPath === undefined
     ? undefined
@@ -364,14 +366,31 @@ async function prepareReceiptBoundExtractionFill(
   return prepared;
 }
 
+function assertLazyFieldIsolation(options: ExtractionFillOptions): void {
+  if (options.ingestionMode !== "lazy_field") return;
+  if (options.semanticArtifactRoot === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "lazy_field requires a semantic artifact root"
+    );
+  }
+  if (options.authorityReceiptPath !== undefined ||
+      options.expansionCapability !== undefined ||
+      options.cacheKeyAllowlist !== undefined) {
+    throw new ExtractionCacheInvariantError(
+      "lazy_field cannot mix v3 fill authority"
+    );
+  }
+}
+
 function overlayFillResult(
   prepared: Awaited<ReturnType<typeof prepareExtractionFill>>,
   stats: ReturnType<typeof newFillStats>
 ): ExtractionFillResult {
   const manifest = prepared.existingManifest;
-  if (manifest === undefined || typeof manifest.coverage !== "number") {
+  if (manifest === undefined || typeof manifest.coverage !== "number" ||
+      !hasCompleteExtractionFillAuthority(manifest)) {
     throw new ExtractionCacheInvariantError(
-      "lazy_field requires existing extraction authority"
+      "lazy_field requires existing complete extraction authority"
     );
   }
   return {

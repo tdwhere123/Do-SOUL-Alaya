@@ -28,6 +28,7 @@ import {
   assertSnapshotExtractionAuthorityBinding,
   type SnapshotExtractionAuthority
 } from "./extraction-authority.js";
+import { compactRunIdentity } from "./ingestion-mode.js";
 
 const SnapshotExtractionCacheIdentitySchema = z.discriminatedUnion(
   "schema_version",
@@ -71,6 +72,21 @@ export function compactSnapshotRunProvenance(
     throw new Error("current snapshot requires current extraction run provenance");
   }
   const { content_closure_index: _contentClosureIndex, ...summary } = cache;
+  if (provenance.schema_version === 2) {
+    const substrate = cache.content_closure_sha256 ?? cache.expected_key_set_sha256;
+    if (typeof substrate !== "string" || provenance.ingestion_mode === undefined) {
+      throw new Error("compact run provenance v2 requires substrate and ingestion_mode");
+    }
+    if (provenance.ingestion_mode === "lazy_field" &&
+        provenance.semantic_overlay_identity === undefined) {
+      throw new Error("lazy_field compact provenance requires semantic_overlay_identity");
+    }
+    compactRunIdentity({
+      substrateIdentity: substrate,
+      ingestionMode: provenance.ingestion_mode,
+      overlayIdentity: provenance.semantic_overlay_identity ?? substrate
+    });
+  }
   return LongMemEvalSnapshotRunProvenanceSchema.parse({
     ...provenance,
     extraction_cache: {

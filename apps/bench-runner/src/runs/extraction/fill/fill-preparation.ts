@@ -9,6 +9,7 @@ import {
   type ExtractionCacheManifest
 } from "../cache/extraction-cache-manifest.js";
 import type { ExtractionFillOptions } from "../extraction-fill.js";
+import { hasCompleteExtractionFillAuthority } from "./fill-authority.js";
 import type { LongMemEvalVariant } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import {
@@ -94,7 +95,7 @@ function adoptInspectedExtractionFill(
   log: (message: string) => void
 ): PreparedExtractionFill {
   const identity = inspected.manifestSnapshot.identity;
-  if (identity === undefined) {
+  if (identity === undefined || !hasCompleteExtractionFillAuthority(identity.manifest)) {
     throw new ExtractionCacheInvariantError(
       "lazy_field requires existing complete extraction authority"
     );

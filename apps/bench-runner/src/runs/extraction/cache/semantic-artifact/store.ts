@@ -1,12 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync,
-  constants,
   mkdirSync,
-  openSync,
   readdirSync,
   rmSync,
-  writeSync
+  writeFileSync
 } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -100,16 +97,10 @@ export function reserveSemanticArtifact(
   mkdirSync(dirname(finalPath), { recursive: true });
   const token = randomUUID();
   const reservePath = reservePathFor(finalPath);
-  let descriptor: number;
   try {
-    descriptor = openSync(reservePath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+    writeFileSync(reservePath, `${token}\n${process.pid}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
   } catch (cause) {
     throw new Error("semantic artifact reservation is held", { cause });
-  }
-  try {
-    writeSync(descriptor, `${token}\n${process.pid}\n`);
-  } finally {
-    closeSync(descriptor);
   }
   return token;
 }
