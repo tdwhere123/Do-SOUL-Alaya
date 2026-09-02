@@ -13,6 +13,7 @@ import {
 import { formatRecallEvalPagerMapsHint } from "./maps-hint.js";
 import { RecallEvalSelectionArtifactCollector } from
   "./selection-artifact-collector.js";
+import { proveParentOpenedFileProofs } from "./parent-opened-file-proofs.js";
 
 export const DEFAULT_RECALL_EVAL_PAGER_TIMEOUT_MS = 600_000;
 
@@ -126,8 +127,9 @@ export class RecallEvalPagerIpcSession {
     payload: unknown,
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<RecallEvalPagerIpcSuccess> {
-    this.openPayload = payload;
-    const response = await this.request("open", { open: payload }, timeoutMs);
+    this.openPayload = proveParentOpenedFileProofs(payload);
+    const response = await this.request("open", { open: this.openPayload }, timeoutMs);
+    this.openPayload = proveParentOpenedFileProofs(this.openPayload);
     this.recordIdentity(response);
     return response;
   }

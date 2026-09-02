@@ -22,6 +22,7 @@ import {
   hashRegularFileNoFollow,
   peekCachedFileSha256,
   rememberOpenedFileSha256,
+  sealedDigestIdentityDrifted,
   withCachedRegularFileNoFollow,
   withRegularFileNoFollow,
   type OpenedFileIdentity
@@ -148,6 +149,9 @@ export function cloneCachedSealedSnapshot(input: {
 }): void {
   // Pager recycle starts a new process; the in-memory digest cache does not
   // survive. Re-hash on a miss instead of treating absence as drift.
+  if (sealedDigestIdentityDrifted(input.sourcePath)) {
+    throw new Error("recall-eval snapshot DB SHA-256 mismatch");
+  }
   const cached = peekCachedFileSha256(input.sourcePath)
     ?? hashRegularFileNoFollow(input.sourcePath);
   if (cached !== input.expectedSha256) {

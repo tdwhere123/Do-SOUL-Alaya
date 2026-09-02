@@ -27,6 +27,7 @@ import {
 } from "../recall-eval-candidate-activation.js";
 import { resolveWorkspaceSliceSnapshotDigest } from "./child-snapshot-digest.js";
 import { readRecallEvalPagerMapsHint } from "./maps-hint.js";
+import { seedParentOpenedFileProofs } from "./parent-opened-file-proofs.js";
 import type {
   RecallEvalPagerCloseResult,
   RecallEvalPagerOpenPayload,
@@ -51,6 +52,7 @@ export async function openRecallEvalPagerChild(
   onProgress?: (progress: WorkspaceSliceProgress) => void
 ): Promise<RecallEvalPagerOpenResult> {
   if (runtime !== null) throw new Error("recall-eval pager child is already open");
+  seedParentOpenedFileProofs(payload);
   const working = await openRecallEvalPagerWorkingCopy(payload, onProgress);
   const daemon = await startBenchDaemon({
     dataDirRoot: payload.dataDirRoot,
