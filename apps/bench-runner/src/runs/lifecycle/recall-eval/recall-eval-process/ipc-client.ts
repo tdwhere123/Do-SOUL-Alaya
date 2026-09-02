@@ -106,6 +106,7 @@ export class RecallEvalPagerIpcSession {
   private mapsHint: RecallEvalPagerMapsHint | null = null;
   private childPid: number | null = null;
   private readonly defaultTimeoutMs: number;
+  private initialOpenDurationMs: number | undefined;
 
   public constructor(input: {
     readonly host?: RecallEvalPagerIpcHost;
@@ -127,10 +128,12 @@ export class RecallEvalPagerIpcSession {
     payload: unknown,
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<RecallEvalPagerIpcSuccess> {
+    const openStartedAt = performance.now();
     this.openPayload = proveParentOpenedFileProofs(payload);
     const response = await this.request("open", { open: this.openPayload }, timeoutMs);
     this.openPayload = proveParentOpenedFileProofs(this.openPayload);
     this.recordIdentity(response);
+    this.initialOpenDurationMs = performance.now() - openStartedAt;
     return response;
   }
 
@@ -139,14 +142,14 @@ export class RecallEvalPagerIpcSession {
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<unknown> {
     const startedAt = performance.now();
-    const openStartedAt = startedAt;
+    const initialOpen = this.child !== null ? (this.initialOpenDurationMs ?? 0) : undefined;
+    if (initialOpen !== undefined) this.initialOpenDurationMs = undefined;
     await this.ensureOpened(timeoutMs);
-    const openDurationMs = performance.now() - openStartedAt;
-
+    const openDurationMs = initialOpen ?? (performance.now() - startedAt);
     const recallStartedAt = performance.now();
     const response = await this.request("recall", { recall: payload }, timeoutMs);
     const recallDurationMs = performance.now() - recallStartedAt;
-    const totalWallMs = performance.now() - startedAt;
+    const totalWallMs = openDurationMs + recallDurationMs;
 
     this.recordIdentity(response);
     if (response.pack === undefined || !hasRecallPack(response.pack)) {
@@ -155,13 +158,9 @@ export class RecallEvalPagerIpcSession {
     this.selectionArtifacts.recordQuestion(payload);
     const pack = response.pack as Record<string, unknown>;
     const clockAMs = typeof pack.latencyMs === "number" ? pack.latencyMs : 0;
-    const harnessOverheadMs = Math.max(0, totalWallMs - clockAMs);
     pack.harnessTimers = Object.freeze({
-      openDurationMs,
-      recallDurationMs,
-      totalWallMs,
-      clockAMs,
-      harnessOverheadMs
+      openDurationMs, recallDurationMs, totalWallMs, clockAMs,
+      harnessOverheadMs: Math.max(0, totalWallMs - clockAMs)
     });
     return pack;
   }

@@ -109,9 +109,6 @@ async function ensurePagerDaemonForQuestion(
   current: PagerRuntime,
   workspaceId: string
 ): Promise<void> {
-  if (current.daemon !== null && current.installedWorkspaceId === workspaceId) {
-    return;
-  }
   const working = workingAlayaDbPath(current.open.dataDirRoot);
   if (current.daemon !== null) {
     await current.daemon.shutdown();
@@ -119,7 +116,7 @@ async function ensurePagerDaemonForQuestion(
   }
   closeCachedDatabase(working);
 
-  if (current.slices !== null && current.installedWorkspaceId !== workspaceId) {
+  if (current.slices !== null) {
     for (const suffix of ["", "-wal", "-shm"]) {
       rmSync(`${working}${suffix}`, { force: true });
     }
@@ -212,6 +209,11 @@ async function openSealedSlicePagerWorkingCopy(
       "[recall-eval] sealed workspace-slice reuse is required and the cache is missing or drifted"
     );
   }
+  const working = workingAlayaDbPath(payload.dataDirRoot);
+  closeCachedDatabase(working);
+  for (const suffix of ["", "-wal", "-shm"]) {
+    rmSync(`${working}${suffix}`, { force: true });
+  }
   installRecallEvalWorkspaceSlice({
     dataDirRoot: payload.dataDirRoot,
     workspaceId: slices.workspaceIds[0],
@@ -238,6 +240,11 @@ async function openPackedPagerWorkingCopy(
     onProgress
   });
   if (slices !== null && slices.workspaceIds[0] !== undefined) {
+    const working = workingAlayaDbPath(payload.dataDirRoot);
+    closeCachedDatabase(working);
+    for (const suffix of ["", "-wal", "-shm"]) {
+      rmSync(`${working}${suffix}`, { force: true });
+    }
     installRecallEvalWorkspaceSlice({
       dataDirRoot: payload.dataDirRoot,
       workspaceId: slices.workspaceIds[0],

@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { copyFileSync, readFileSync, statSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,8 +12,11 @@ import {
   WORKSPACE_B
 } from "./workspace-slice-fixture.js";
 import {
-  explodePackedWorkingCopy,
-  workingAlayaDbPath
+  explodeRecallEvalWorkingCopyIfNeeded,
+  installWorkspaceSlice,
+  SEALED_SLICE_RESTORE_ENV,
+  workingAlayaDbPath,
+  type ExplodedWorkspaceSlices
 } from "../../../runs/snapshot/recall-eval/workspace-slice/index.js";
 import * as loadOpenModule from "../../../runs/snapshot/recall-eval/workspace-slice/load-open.js";
 import {
@@ -42,17 +45,33 @@ const previousWriteQueue = process.env.ALAYA_SQLITE_WRITE_QUEUE;
 
 let root: string;
 let packedPath: string;
+let snapshotDbPath: string;
+let sealedSlices: ExplodedWorkspaceSlices;
 
 beforeEach(async () => {
   process.env.ALAYA_SQLITE_WRITE_QUEUE = "0";
+  process.env[SEALED_SLICE_RESTORE_ENV] = "1";
   root = await mkdtemp(join(tmpdir(), "sealed-slice-working-copy-"));
   packedPath = join(root, "packed.alaya.db");
   await createPackedTwoWorkspaceDb(packedPath);
+  snapshotDbPath = join(root, "snapshot.db");
+  copyFileSync(packedPath, snapshotDbPath);
+  const initDir = join(root, "init-explode");
+  installWorkspaceSlice({ dataDir: initDir, sliceDbPath: snapshotDbPath });
+  const first = await explodeRecallEvalWorkingCopyIfNeeded({
+    dataDirRoot: initDir,
+    snapshotDbPath,
+    env: { [SEALED_SLICE_RESTORE_ENV]: "0" }
+  });
+  if (first === null) throw new Error("failed to explode test slices");
+  sealedSlices = first;
 });
 
 afterEach(async () => {
+  delete process.env[SEALED_SLICE_RESTORE_ENV];
   await closeRecallEvalPagerChild().catch(() => undefined);
   closeCachedDatabase(packedPath);
+  closeCachedDatabase(snapshotDbPath);
   if (previousWriteQueue === undefined) {
     delete process.env.ALAYA_SQLITE_WRITE_QUEUE;
   } else {
@@ -62,7 +81,7 @@ afterEach(async () => {
 });
 
 function buildOpenPayload(dataDirRoot: string): RecallEvalPagerOpenPayload {
-  const packedSha = hashRegularFileNoFollow(packedPath);
+  const packedSha = hashRegularFileNoFollow(snapshotDbPath);
   return {
     dataDirRoot,
     daemonLaunch: createBenchDaemonLaunchConfig({
@@ -72,12 +91,12 @@ function buildOpenPayload(dataDirRoot: string): RecallEvalPagerOpenPayload {
     }),
     recallWeightOverrides: undefined,
     options: {
-      snapshotDbPath: packedPath,
+      snapshotDbPath,
       variant: "longmemeval_s" as const
     },
     manifest: {
       recall_pipeline_version: SNAPSHOT_SEED_IDENTITY,
-      schema_migration_version: readSchemaMigrationVersion(packedPath),
+      schema_migration_version: readSchemaMigrationVersion(snapshotDbPath),
       artifact_integrity: {
         db_sha256: packedSha,
         manifest_sha256: "manifest-stub-sha"
@@ -114,15 +133,8 @@ function buildRecallPayload(
 
 describe("H02 — sealed slice private working copy", () => {
   it("sealed source inode and bytes are unchanged after a recall that appends EventLog on the working copy", async () => {
-    const destDir = join(root, "slices");
     const dataDirRoot = join(root, "data-child");
-    const exploded = await explodePackedWorkingCopy({
-      packedDbPath: packedPath,
-      destDir,
-      workspaceIds: [WORKSPACE_A, WORKSPACE_B]
-    });
-
-    const slicePathA = exploded.sliceDbPaths[WORKSPACE_A]!;
+    const slicePathA = sealedSlices.sliceDbPaths[WORKSPACE_A]!;
     const statBefore = statSync(slicePathA);
     const shaBefore = hashRegularFileNoFollow(slicePathA);
     const bytesBefore = readFileSync(slicePathA);
@@ -156,14 +168,7 @@ describe("H02 — sealed slice private working copy", () => {
   });
 
   it("load-open ATTACH/DELETE sequence is never called on the pager question path", async () => {
-    const destDir = join(root, "slices-load-open");
     const dataDirRoot = join(root, "data-no-load-open");
-    await explodePackedWorkingCopy({
-      packedDbPath: packedPath,
-      destDir,
-      workspaceIds: [WORKSPACE_A, WORKSPACE_B]
-    });
-
     const spy = vi.spyOn(loadOpenModule, "loadSliceIntoOpenDatabase");
 
     await openRecallEvalPagerChild(buildOpenPayload(dataDirRoot));
@@ -181,13 +186,7 @@ describe("H02 — sealed slice private working copy", () => {
   });
 
   it("serves sequential questions across workspaces without accumulating alaya.db mappings", async () => {
-    const destDir = join(root, "slices-seq");
     const dataDirRoot = join(root, "data-seq");
-    await explodePackedWorkingCopy({
-      packedDbPath: packedPath,
-      destDir,
-      workspaceIds: [WORKSPACE_A, WORKSPACE_B]
-    });
 
     await openRecallEvalPagerChild(buildOpenPayload(dataDirRoot));
 
@@ -208,6 +207,57 @@ describe("H02 — sealed slice private working copy", () => {
 
     expect(hint2.alaya_db_mappings).toBeLessThanOrEqual(hint1.alaya_db_mappings);
     expect(hint3.alaya_db_mappings).toBeLessThanOrEqual(hint1.alaya_db_mappings);
+
+    await closeRecallEvalPagerChild();
+  });
+
+  it("recycled child respawn against existing dataDirRoot never calls loadSliceIntoOpenDatabase", async () => {
+    const dataDirRoot = join(root, "data-respawn");
+    const spy = vi.spyOn(loadOpenModule, "loadSliceIntoOpenDatabase");
+
+    // Question 1 in first child process
+    await openRecallEvalPagerChild(buildOpenPayload(dataDirRoot));
+    await recallRecallEvalPagerChild(
+      buildRecallPayload("q1", WORKSPACE_A, TOKEN_A)
+    );
+    await closeRecallEvalPagerChild();
+
+    // Question 2 in recycled child process against the SAME dataDirRoot
+    await openRecallEvalPagerChild(buildOpenPayload(dataDirRoot));
+    await recallRecallEvalPagerChild(
+      buildRecallPayload("q2", WORKSPACE_B, TOKEN_B)
+    );
+    await closeRecallEvalPagerChild();
+
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("sequential questions targeting the same workspace reset working copy cleanly without dirty state leak", async () => {
+    const dataDirRoot = join(root, "data-same-ws");
+
+    await openRecallEvalPagerChild(buildOpenPayload(dataDirRoot));
+
+    // Question 1 in WORKSPACE_A
+    await recallRecallEvalPagerChild(
+      buildRecallPayload("q1", WORKSPACE_A, TOKEN_A)
+    );
+
+    // Question 2 in SAME WORKSPACE_A without process recycle
+    await recallRecallEvalPagerChild(
+      buildRecallPayload("q2", WORKSPACE_A, TOKEN_A)
+    );
+
+    // Working database must have fresh state with exactly 1 recall completion event, not 2
+    const workingDb = initDatabase({ filename: workingAlayaDbPath(dataDirRoot) });
+    try {
+      const row = workingDb.connection.prepare(
+        "SELECT COUNT(*) AS count FROM event_log WHERE event_type = 'soul.recall.completed'"
+      ).get() as { count: number };
+      expect(row.count).toBe(1);
+    } finally {
+      workingDb.close();
+    }
 
     await closeRecallEvalPagerChild();
   });
