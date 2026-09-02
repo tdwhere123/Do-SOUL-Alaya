@@ -19,6 +19,7 @@ import {
   assertOpenedFilePath,
   openedFileDescriptorPath,
   openedRegularFileIdentity,
+  hashRegularFileNoFollow,
   peekCachedFileSha256,
   rememberOpenedFileSha256,
   withCachedRegularFileNoFollow,
@@ -145,8 +146,11 @@ export function cloneCachedSealedSnapshot(input: {
   readonly expectedSha256: string;
   readonly copyFile?: CopyFileFn;
 }): void {
-  const cached = peekCachedFileSha256(input.sourcePath);
-  if (cached === undefined || cached !== input.expectedSha256) {
+  // Pager recycle starts a new process; the in-memory digest cache does not
+  // survive. Re-hash on a miss instead of treating absence as drift.
+  const cached = peekCachedFileSha256(input.sourcePath)
+    ?? hashRegularFileNoFollow(input.sourcePath);
+  if (cached !== input.expectedSha256) {
     throw new Error("recall-eval snapshot DB SHA-256 mismatch");
   }
   copyOpenedSourceAtomically(

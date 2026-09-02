@@ -93,6 +93,20 @@ describe("clone-or-copy snapshot restore", () => {
     expect(() => atomicCopy(linked, join(input.root, "from-link.db"))).toThrow();
   });
 
+  it("rehashes a sealed digest when the process cache is cold", async () => {
+    const input = await fixture();
+    const digest = hashRegularFileNoFollow(input.source);
+    const cold = join(input.root, "cold.db");
+    await writeFile(cold, input.bytes);
+    const target = join(input.root, "restore-cold", "alaya.db");
+    cloneCachedSealedSnapshot({
+      sourcePath: cold,
+      targetPath: target,
+      expectedSha256: digest
+    });
+    expect(await readFile(target)).toEqual(input.bytes);
+  });
+
   it("clones from a cached sealed digest without rewriting the source", async () => {
     const input = await fixture();
     const digest = hashRegularFileNoFollow(input.source);

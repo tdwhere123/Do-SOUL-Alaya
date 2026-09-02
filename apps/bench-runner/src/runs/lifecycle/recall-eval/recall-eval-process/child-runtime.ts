@@ -196,7 +196,10 @@ async function openPackedPagerWorkingCopy(
   readonly sqlite: Awaited<ReturnType<typeof openRecallEvalWorkingSqlite>>;
   readonly slices: ExplodedWorkspaceSlices | null;
 }> {
-  const sqlite = await openPagerSqlite(payload);
+  // Recycle respawns this child against the same dataDir. Q1 explode replaces
+  // alaya.db with a workspace slice; integrity must keep hashing the sealed
+  // snapshot, not the working copy.
+  const sqlite = await openPagerSqlite(payload, payload.options.snapshotDbPath);
   const slices = await explodeRecallEvalWorkingCopyIfNeeded({
     dataDirRoot: payload.dataDirRoot,
     snapshotDbPath: payload.options.snapshotDbPath,

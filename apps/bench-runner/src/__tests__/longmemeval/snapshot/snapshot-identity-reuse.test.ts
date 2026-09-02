@@ -72,6 +72,31 @@ describe("snapshot seed vs ranking consume", () => {
     })).toThrow(/snapshot DB SHA-256/u);
   });
 
+  it("hashes the sealed snapshot, not a recycled workspace-slice working copy", () => {
+    const sealed = restoreFreshSnapshot();
+    const slicePath = join(tmpDir, "slice.db");
+    const slice = initDatabase({ filename: slicePath });
+    slice.connection.exec("CREATE TABLE IF NOT EXISTS snapshot_probe (k TEXT PRIMARY KEY)");
+    slice.connection.exec("CREATE TABLE IF NOT EXISTS slice_only (k TEXT PRIMARY KEY)");
+    closeCachedDatabase(slicePath);
+    expect(hashRegularFileNoFollow(slicePath)).not.toBe(hashRegularFileNoFollow(sealed));
+    expect(() => assertSnapshotConsumeIdentity({
+      manifest: manifestFor(sealed, {
+        recall_pipeline_version: SNAPSHOT_SEED_IDENTITY
+      }),
+      restoredDbPath: slicePath,
+      snapshotBytePath: sealed,
+      runningSeedIdentity: SNAPSHOT_SEED_IDENTITY
+    })).not.toThrow();
+    expect(() => assertSnapshotConsumeIdentity({
+      manifest: manifestFor(sealed, {
+        recall_pipeline_version: SNAPSHOT_SEED_IDENTITY
+      }),
+      restoredDbPath: slicePath,
+      runningSeedIdentity: SNAPSHOT_SEED_IDENTITY
+    })).toThrow(/snapshot DB SHA-256/u);
+  });
+
   it("omits unknown snapshot_binding keys so strict KPI attribution still parses", () => {
     const restoredDbPath = restoreFreshSnapshot();
     const binding = buildRecallEvalSnapshotBinding(
