@@ -271,5 +271,3 @@ function mergedReport(concurrency: number, questions: number): string {
     ""
   ].join("\n");
 }
-
-
