@@ -281,12 +281,9 @@ function createProviderWarmup(
   if (embeddingProvider === null) {
     return Promise.resolve("not_requested");
   }
-  return Promise.resolve()
-    .then(async () => {
-      const embeddings = await embeddingProvider.embedTexts(
-        ["alaya-init-probe"],
-        { timeoutMs: 60_000 }
-      );
+  return embeddingProvider
+    .embedTexts(["alaya-init-probe"], { timeoutMs: 60_000 })
+    .then((embeddings) => {
       assertValidEmbeddingBatch(embeddings, 1);
       return "ready" as const;
     })
@@ -326,14 +323,11 @@ function resolveEmbeddingProvider(input: {
   }
 
   if (input.providerKind === "local_onnx") {
-    const client = new LocalOnnxEmbeddingClient({
+    return new LocalOnnxEmbeddingClient({
       cacheDir: input.localCacheDir ?? defaultLocalOnnxCacheDir(),
       ...(input.localModel === null ? {} : { modelId: input.localModel }),
       ...(input.localSchemaVersion === null ? {} : { schemaVersion: input.localSchemaVersion })
     });
-    // Extractor load is the cold-start cost; do not await (listen must not block on model I/O).
-    void client.warmup().catch(() => undefined);
-    return client;
   }
 
   if (input.apiKey === null) {

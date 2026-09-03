@@ -57,7 +57,7 @@ export function observeEmbeddingProviderReadiness(
       readiness.markReady(responseDimensions);
       return embeddings;
     },
-    // Isolated ONNX children outlive JS GC; dropping close leaks them across daemon restarts.
+    // Wrapper must not drop close; the port documents why the isolate needs it.
     ...(typeof provider.close === "function" ? { close: () => provider.close!() } : {})
   };
 }

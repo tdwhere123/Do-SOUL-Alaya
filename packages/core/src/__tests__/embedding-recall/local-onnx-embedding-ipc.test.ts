@@ -32,23 +32,47 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
   });
 
   it("reaps the isolated child on close", async () => {
-    let live = 0;
+    const tracking = liveChildHost();
+    const client = openClient(tracking.host);
+    await client.warmup();
+    expect(tracking.live).toBe(1);
+    await client.close();
+    expect(tracking.live).toBe(0);
+  });
+
+  it("reaps a child that races with close", async () => {
+    const tracking = liveChildHost();
+    const client = openClient(tracking.host);
+    const warmup = client.warmup();
+    await client.close();
+    await warmup.catch(() => undefined);
+    expect(tracking.live).toBe(0);
+  });
+
+  it("does not charge isolate load against the embed timeout", async () => {
     const inner = createForkLocalOnnxEmbeddingHost(stubChildPath);
     const host: LocalOnnxEmbeddingIpcHost = {
       spawn() {
-        live += 1;
         const child = inner.spawn();
-        child.on("exit", () => {
-          live -= 1;
+        return new Proxy(child, {
+          get(target, property, receiver) {
+            if (property === "send") {
+              return (message: unknown, callback?: (error: Error | null) => void) => {
+                const op = (message as { readonly op?: unknown }).op;
+                if (op === "warmup") {
+                  setTimeout(() => target.send(message, callback), 80);
+                  return true;
+                }
+                return target.send(message, callback);
+              };
+            }
+            return Reflect.get(target, property, receiver);
+          }
         });
-        return child;
       }
     };
     const client = openClient(host);
-    await client.warmup();
-    expect(live).toBe(1);
-    await client.close();
-    expect(live).toBe(0);
+    await expect(client.embedTexts(["ok"], { timeoutMs: 40 })).resolves.toHaveLength(1);
   });
 
   it("keeps the isolated child referenced while an IPC request is pending", async () => {
@@ -79,10 +103,26 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
   });
 
   it("recycles a timed-out child before serving the next request", async () => {
-    const client = openClient();
+    const tracking = liveChildHost();
+    const client = openClient(tracking.host);
     await expect(client.embedTexts(["__hang__"], { timeoutMs: 40 })).rejects.toThrow(/timed out/);
     const vectors = await client.embedTexts(["ok"], { timeoutMs: 5_000 });
     expect(vectors).toHaveLength(1);
+    expect(tracking.live).toBe(1);
+    await client.close();
+    expect(tracking.live).toBe(0);
+  });
+
+  it("does not kill an isolate while an older request is still in flight", async () => {
+    const tracking = liveChildHost();
+    const client = openClient(tracking.host);
+    const older = client.embedTexts(["__hang__"], { timeoutMs: 250 });
+    const later = client.embedTexts(["__hang__"], { timeoutMs: 40 });
+    await expect(later).rejects.toThrow(/timed out/);
+    expect(tracking.live).toBe(1);
+    await expect(older).rejects.toThrow(/timed out/);
+    await expect(client.embedTexts(["ok"], { timeoutMs: 5_000 })).resolves.toHaveLength(1);
+    expect(tracking.live).toBe(1);
   });
 
   it("waits for the send callback when IPC reports backpressure", async () => {
@@ -103,6 +143,24 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
       /row 0 was empty/
     );
   });
+
+  function liveChildHost(): { host: LocalOnnxEmbeddingIpcHost; live: number } {
+    const inner = createForkLocalOnnxEmbeddingHost(stubChildPath);
+    const tracking: { host: LocalOnnxEmbeddingIpcHost; live: number } = {
+      live: 0,
+      host: {
+        spawn() {
+          tracking.live += 1;
+          const child = inner.spawn();
+          child.on("exit", () => {
+            tracking.live -= 1;
+          });
+          return child;
+        }
+      }
+    };
+    return tracking;
+  }
 
   function openClient(host?: LocalOnnxEmbeddingIpcHost): LocalOnnxEmbeddingClient {
     const client = new LocalOnnxEmbeddingClient({

@@ -171,7 +171,8 @@ export class RecallEvalPagerIpcSession {
     return this.selectionArtifacts.finalize();
   }
 
-  // invariant: pager child does not outlive a question (long-lived mmap SIGBUS).
+  // Recycle kills the pager process. Live recall-eval keep-alives it; SIGBUS
+  // mitigation is mmap_size=0 plus in-pager path-switch, not this method.
   public async recycle(
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<void> {

@@ -135,6 +135,9 @@ async function ensurePagerDaemonForQuestion(
   current: PagerRuntime,
   workspaceId: string
 ): Promise<void> {
+  // New working-copy inode each question: WSL2 SIGBUS'd a long-lived mmap of
+  // the multi-GB snapshot. mmap_size=0 is the pragma; path-switch drops the
+  // mapping. Restarting the daemon is what reloads MiniLM.
   current.switchIndex += 1;
   const nextDir = pagerSwitchWorkingDataDir(
     current.open.dataDirRoot, current.switchIndex, workspaceId

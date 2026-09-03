@@ -532,8 +532,6 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
   it("starts local ONNX extractor warmup without blocking runtime construction", async () => {
     saveEnv();
     const fixture = buildFixture();
-    const warmup = vi.spyOn(LocalOnnxEmbeddingClient.prototype, "warmup")
-      .mockResolvedValue(undefined);
     const close = vi.spyOn(LocalOnnxEmbeddingClient.prototype, "close")
       .mockResolvedValue(undefined);
     const embed = vi.spyOn(LocalOnnxEmbeddingClient.prototype, "embedTexts")
@@ -550,13 +548,12 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         memoryEntryRepo: fixture.memoryEntryRepo,
         warn: fixture.warn as unknown as WarnFn
       });
-      expect(warmup).toHaveBeenCalledTimes(1);
+      expect(embed).toHaveBeenCalledTimes(1);
       expect(runtime.embeddingRecallService).toBeDefined();
       await expect(runtime.providerWarmup).resolves.toBe("ready");
       await runtime.closeProvider();
       expect(close).toHaveBeenCalledTimes(1);
     } finally {
-      warmup.mockRestore();
       close.mockRestore();
       embed.mockRestore();
       teardown(fixture);

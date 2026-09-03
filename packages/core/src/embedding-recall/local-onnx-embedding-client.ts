@@ -88,6 +88,8 @@ export const LOCAL_ONNX_UNAVAILABLE_FAILURE_THRESHOLD = 3;
 // recall path consults isAvailable cheaply; we do not want a tight retry loop
 // to hammer transformers.pipeline() at every call.
 export const LOCAL_ONNX_UNAVAILABLE_RETRY_BACKOFF_MS = 30_000;
+// Embed timeouts are inference budgets; MiniLM load is a one-time isolate cost.
+const LOCAL_ONNX_LOAD_TIMEOUT_MS = 60_000;
 
 /**
  * On-device embedding provider backed by a quantized ONNX sentence model run
@@ -123,6 +125,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   private readonly now: () => number;
   private readonly isolated: LocalOnnxEmbeddingIpcSession | null;
   private extractorPromise: Promise<LocalOnnxFeatureExtractor> | null = null;
+  private isolatedReady: Promise<void> | null = null;
   private closed = false;
   // Starts `true` (configured) and only flips `false` after sustained load
   // failures, so the daemon's startup-time embedding-policy decorator is not
@@ -154,10 +157,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   public warmup(): Promise<void> {
     if (this.closed) return Promise.resolve();
     if (this.isolated !== null) {
-      return this.isolated.warmup(new AbortController().signal).catch((error: unknown) => {
-        this.noteIsolatedFailure(error);
-        throw error;
-      });
+      return this.ensureIsolatedReady();
     }
     return this.loadExtractor().then(() => undefined);
   }
@@ -186,6 +186,9 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   ): Promise<readonly Float32Array[]> {
     if (texts.length === 0) {
       return Object.freeze([]);
+    }
+    if (this.isolated !== null) {
+      await this.ensureIsolatedReady(options.signal);
     }
     const deadline = createEmbeddingDeadline(options.timeoutMs, options.signal);
     const occupancy = withLocalOnnxHostSingleFlight(
@@ -217,6 +220,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
         this.consecutiveLoadFailures = 0;
         return vectors;
       } catch (error) {
+        this.isolatedReady = null;
         this.noteIsolatedFailure(error);
         throw error;
       }
@@ -227,6 +231,22 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
       extractor([...texts], { pooling: "mean", normalize: true })
     );
     return this.readVectors(output, texts.length);
+  }
+
+  private ensureIsolatedReady(parent?: AbortSignal): Promise<void> {
+    if (this.closed || this.isolated === null) return Promise.resolve();
+    if (this.isolatedReady !== null) return this.isolatedReady;
+    const isolated = this.isolated;
+    const loadDeadline = createEmbeddingDeadline(LOCAL_ONNX_LOAD_TIMEOUT_MS, parent);
+    this.isolatedReady = isolated.warmup(loadDeadline.signal).then(
+      () => undefined,
+      (error: unknown) => {
+        this.isolatedReady = null;
+        this.noteIsolatedFailure(error);
+        throw error;
+      }
+    ).finally(() => loadDeadline.close());
+    return this.isolatedReady;
   }
 
   private noteIsolatedFailure(error: unknown): void {

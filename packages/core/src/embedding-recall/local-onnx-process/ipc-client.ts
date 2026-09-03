@@ -97,6 +97,9 @@ export class LocalOnnxEmbeddingIpcSession {
   private readonly pending = new Map<number, PendingIpcRequest>();
   private exitError: LocalOnnxEmbeddingChildExitedError | null = null;
   private closed = false;
+  private inflightEnsure = 0;
+  private readonly reaps = new Set<Promise<void>>();
+  private readonly drainResolvers: Array<() => void> = [];
 
   public constructor(input: LocalOnnxEmbeddingIpcSessionInput) {
     this.modelId = input.modelId;
@@ -125,13 +128,15 @@ export class LocalOnnxEmbeddingIpcSession {
     this.exitError ??= new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
     this.child = null;
     rejectPendingIpc(this.pending, this.exitError);
-    if (child === null) return;
-    try {
-      child.send(this.buildRequest(++this.nextId, "close"));
-    } catch {
-      // Child may already be gone; kill still reaps the handle.
+    if (child !== null) {
+      try {
+        child.send(this.buildRequest(++this.nextId, "close"));
+      } catch {
+        // Child may already be gone; kill still reaps the handle.
+      }
+      this.trackReap(child);
     }
-    await waitForLocalOnnxChildExit(child);
+    await this.waitForIdle();
   }
 
   private async request(
@@ -140,6 +145,10 @@ export class LocalOnnxEmbeddingIpcSession {
     signal: AbortSignal,
     timeoutMs?: number
   ): Promise<LocalOnnxEmbeddingIpcSuccess> {
+    await this.waitForReaps();
+    if (this.closed || this.exitError !== null) {
+      throw this.exitError ?? new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
+    }
     const child = this.ensureChild();
     const id = ++this.nextId;
     const message = this.buildRequest(id, op, texts, timeoutMs);
@@ -160,25 +169,30 @@ export class LocalOnnxEmbeddingIpcSession {
   }
 
   private ensureChild(): LocalOnnxEmbeddingIpcProcess {
-    if (this.closed || this.exitError !== null) {
-      throw this.exitError ?? new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
+    this.beginEnsure();
+    try {
+      if (this.closed || this.exitError !== null) {
+        throw this.exitError ?? new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
+      }
+      if (this.child !== null) return this.child;
+      const host = this.host ?? createForkLocalOnnxEmbeddingHost();
+      this.host = host;
+      const child = host.spawn();
+      if (this.closed) {
+        this.trackReap(child);
+        throw this.exitError ?? new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
+      }
+      this.child = child;
+      const epoch = this.childEpoch;
+      child.on("message", (message) => this.onMessage(message));
+      child.on("exit", (code, exitSignal) => this.onExit(epoch, code, exitSignal));
+      child.on("error", (error) => this.onSpawnError(epoch, error));
+      // IPC must not pin the pager/daemon event loop after recall finishes.
+      unrefLocalOnnxEmbeddingChild(child);
+      return child;
+    } finally {
+      this.endEnsure();
     }
-    if (this.child !== null) return this.child;
-    const host = this.host ?? createForkLocalOnnxEmbeddingHost();
-    this.host = host;
-    const child = host.spawn();
-    if (this.closed) {
-      void waitForLocalOnnxChildExit(child);
-      throw this.exitError ?? new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
-    }
-    this.child = child;
-    const epoch = this.childEpoch;
-    child.on("message", (message) => this.onMessage(message));
-    child.on("exit", (code, exitSignal) => this.onExit(epoch, code, exitSignal));
-    child.on("error", (error) => this.onSpawnError(epoch, error));
-    // IPC must not pin the pager/daemon event loop after recall finishes.
-    unrefLocalOnnxEmbeddingChild(child);
-    return child;
   }
 
   private onMessage(message: unknown): void {
@@ -220,16 +234,49 @@ export class LocalOnnxEmbeddingIpcSession {
   ): void {
     failPending(this.pending, id, error);
     if (this.child !== child) return;
+    // A later timeout is queueing, not a hung isolate; killing it aborts warmup/load.
+    if ([...this.pending.keys()].some((pendingId) => pendingId < id)) return;
     this.childEpoch += 1;
     this.child = null;
     rejectPendingIpc(
       this.pending,
       new LocalOnnxEmbeddingChildExitedError(null, "SIGTERM")
     );
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // Child may already be gone; the epoch invalidates late events.
+    this.trackReap(child);
+  }
+
+  private beginEnsure(): void {
+    this.inflightEnsure += 1;
+  }
+
+  private endEnsure(): void {
+    this.inflightEnsure -= 1;
+    this.notifyDrain();
+  }
+
+  private trackReap(child: LocalOnnxEmbeddingIpcProcess): void {
+    const reap = waitForLocalOnnxChildExit(child).finally(() => {
+      this.reaps.delete(reap);
+      this.notifyDrain();
+    });
+    this.reaps.add(reap);
+  }
+
+  private notifyDrain(): void {
+    if (this.inflightEnsure > 0 || this.reaps.size > 0) return;
+    for (const resolve of this.drainResolvers.splice(0)) resolve();
+  }
+
+  private waitForIdle(): Promise<void> {
+    return new Promise((resolve) => {
+      this.drainResolvers.push(resolve);
+      this.notifyDrain();
+    });
+  }
+
+  private async waitForReaps(): Promise<void> {
+    while (this.reaps.size > 0) {
+      await Promise.all([...this.reaps]);
     }
   }
 
@@ -252,29 +299,33 @@ export class LocalOnnxEmbeddingIpcSession {
 }
 
 const LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS = 5_000;
+const LOCAL_ONNX_CHILD_KILL_GRACE_MS = 1_000;
 
 function waitForLocalOnnxChildExit(child: LocalOnnxEmbeddingIpcProcess): Promise<void> {
   return new Promise((resolve) => {
     let settled = false;
+    let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
+    let hardTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = () => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (sigkillTimer !== undefined) clearTimeout(sigkillTimer);
+      if (hardTimer !== undefined) clearTimeout(hardTimer);
       resolve();
     };
-    const timer = setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // Child may already be gone.
-      }
-      finish();
-    }, LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS);
     child.on("exit", () => finish());
     if (child.exitCode !== null && child.exitCode !== undefined) {
       finish();
       return;
     }
+    sigkillTimer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // Child may already be gone.
+      }
+    }, LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS);
+    hardTimer = setTimeout(finish, LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS + LOCAL_ONNX_CHILD_KILL_GRACE_MS);
     try {
       child.kill("SIGTERM");
     } catch {
