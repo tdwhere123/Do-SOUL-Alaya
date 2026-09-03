@@ -307,6 +307,14 @@ describe("field-scoped coarse hydrate", () => {
 
     expect(findRecallActivationTopK).toHaveBeenCalled();
     expect(findRecallTierWindow).toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "field-scoped activation top-k failed; falling back to paged coarse filter",
+      expect.objectContaining({
+        workspace_id: "workspace-1",
+        operation: "field_scoped_activation_top_k",
+        error: "sql top-K failed"
+      })
+    );
     expect(result.candidates.map((candidate) => candidate.entry.object_id)).toContain(
       activation.object_id
     );

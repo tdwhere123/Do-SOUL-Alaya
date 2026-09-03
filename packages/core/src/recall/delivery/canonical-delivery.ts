@@ -21,9 +21,11 @@ import {
   assignManifestation,
   buildRecallCandidateDedupeKey,
   createContentPreview,
+  errorNameOf,
   estimateTokens,
   isWorkspaceMemoryCandidate,
-  normalizeActivationScore
+  normalizeActivationScore,
+  toErrorMessage
 } from "../runtime/recall-service-helpers.js";
 import type { CoarseRecallCandidate } from "../runtime/recall-service-types.js";
 import type { CoverageSelectionObjectiveReceipt } from
@@ -82,6 +84,12 @@ export function deliverCanonicalFineAssessment(
     return capturedCanonicalResult(params, shadowTrace, candidates);
   } catch (error) {
     if (isCanonicalContractError(error)) {
+      params.warn("canonical delivery contract error", {
+        workspace_id: params.workspace_id,
+        operation: "canonical_delivery_contract_error",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      });
       return failClosedCanonicalResult(params, mappingFailClosed());
     }
     throw error;
@@ -113,6 +121,7 @@ export function toShadowInput(params: FineAssessParams): ShadowIntegrateInput {
       supplementaryData: params.supplementaryData
     }),
     nowIso: params.now(),
+    warn: params.warn,
     ...(params.query_proof_preview === undefined
       ? {}
       : { query_proof_preview: params.query_proof_preview })

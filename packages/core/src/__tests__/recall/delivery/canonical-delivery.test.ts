@@ -337,6 +337,27 @@ describe("reversible delivery cutover", () => {
     expect(result.candidates).toEqual([]);
     expect(result.capture_execution).toEqual({ status: "fail_closed", reason: "membership_shrink" });
   });
+
+  it("fail-closes duplicate candidate keys and warns with the contract error", () => {
+    const candidates = fieldCandidates();
+    const params = assessParams([candidates[0]!, candidates[0]!], "canonical");
+    const result = fineAssess(params);
+    expect(result.candidates).toEqual([]);
+    expect(result.delivery_path).toBe("canonical");
+    expect(result.capture_execution).toEqual({
+      status: "fail_closed",
+      reason: "invalid_state"
+    });
+    expect(params.warn).toHaveBeenCalledWith(
+      "canonical delivery contract error",
+      {
+        workspace_id: params.workspace_id,
+        operation: "canonical_delivery_contract_error",
+        errorName: "DuplicateRecallCandidateFieldError",
+        error: `duplicate recall candidate field key: ${keyOf(candidates[0]!.entry.object_id)}`
+      }
+    );
+  });
 });
 
 function asCaptured(trace: ReturnType<typeof fineAssess>["shadowTrace"]): ShadowCapturedTrace {

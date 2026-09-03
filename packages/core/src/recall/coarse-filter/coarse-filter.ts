@@ -6,6 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { compileRecallQueryProbes, type RecallQueryProbes } from "../query/recall-query-probes.js";
 import {
+  errorNameOf,
   filterMemoriesByTimeWindow,
   matchesDeterministicFilter,
   toErrorMessage,
@@ -218,7 +219,8 @@ async function loadFieldScopedCoarseFilterInput(
       workspaceId,
       tier,
       config,
-      excludeObjectIds: winnerMemoryIds
+      excludeObjectIds: winnerMemoryIds,
+      warn: context.warn
     }),
     hydrateMemoriesById({
       memoryRepo,
@@ -275,6 +277,7 @@ async function loadFieldScopedActivationTopK(params: Readonly<{
   readonly tier: StorageTier;
   readonly config: Readonly<RecallPolicy>["coarse_filter"];
   readonly excludeObjectIds: ReadonlySet<string>;
+  readonly warn: RecallServiceWarnPort;
 }>): Promise<readonly Readonly<MemoryEntry>[] | null> {
   try {
     return await loadActivationAdmissionTopK({
@@ -287,7 +290,13 @@ async function loadFieldScopedActivationTopK(params: Readonly<{
       allowSql: true,
       fallbackOnSqlFailure: false
     });
-  } catch {
+  } catch (error) {
+    params.warn("field-scoped activation top-k failed; falling back to paged coarse filter", {
+      workspace_id: params.workspaceId,
+      operation: "field_scoped_activation_top_k",
+      errorName: errorNameOf(error),
+      error: toErrorMessage(error)
+    });
     return null;
   }
 }

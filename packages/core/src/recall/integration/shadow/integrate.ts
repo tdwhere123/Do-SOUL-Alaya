@@ -2,12 +2,15 @@ import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import { compileRecallQueryDemand } from "../../query/recall-query-demand.js";
 import {
   buildRecallCandidateDedupeKey,
-  buildRecallLogicalObjectKey
+  buildRecallLogicalObjectKey,
+  errorNameOf,
+  toErrorMessage
 } from "../../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   KeywordLexicalMergeCapture,
   KeywordSearchLaneReceipt,
+  RecallServiceWarnPort,
   RecallSupplementaryData,
   TokenEstimator
 } from "../../runtime/recall-service-types.js";
@@ -105,6 +108,7 @@ export type ShadowIntegrateInput = Readonly<{
   readonly policy: Readonly<RecallPolicy>;
   readonly supplementaryData: RecallSupplementaryData;
   readonly tokenEstimator: TokenEstimator;
+  readonly warn?: RecallServiceWarnPort;
   readonly observationField?: ShadowPsiObservationField;
   readonly psi?: PsiQuery;
   readonly e0Keys?: readonly string[];
@@ -435,7 +439,7 @@ function assembleCaptured(
     ),
     psi_v2_shadow: observePsiV2Shadow(input),
     ...preview,
-    delivery_pack: observeDeliveryPack(prefix, preview, input.snapshot_digest)
+    delivery_pack: observeDeliveryPack(prefix, preview, input.snapshot_digest, input.warn)
   });
 }
 
@@ -459,7 +463,8 @@ function previewRuntimeCapture(
 function observeDeliveryPack(
   prefix: readonly string[],
   preview: { readonly query_proof_preview?: QueryProofPreviewSidecar },
-  snapshotDigest: string | undefined
+  snapshotDigest: string | undefined,
+  warn?: RecallServiceWarnPort
 ): DeliveryPackV1 {
   try {
     return buildShadowDeliveryPack({
@@ -470,7 +475,12 @@ function observeDeliveryPack(
       preview_contract_digest: preview.query_proof_preview?.contract_digest,
       snapshot_digest: snapshotDigest
     });
-  } catch {
+  } catch (error) {
+    warn?.("shadow delivery pack observation failed; using unbound pack", {
+      operation: "shadow_delivery_pack_observation",
+      errorName: errorNameOf(error),
+      error: toErrorMessage(error)
+    });
     return buildShadowDeliveryPack({
       selected_candidates: prefix,
       capture_identity_digest: CAPTURE_IDENTITY_DIGEST
