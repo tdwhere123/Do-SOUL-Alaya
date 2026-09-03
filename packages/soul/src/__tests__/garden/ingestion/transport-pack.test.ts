@@ -3,6 +3,7 @@ import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "../../../garden/in
 import {
   demultiplexTransportPack,
   planTurnTransportPacks,
+  transportPackIdentity,
   unresolvedRetryMembers,
   type PackableAssertion
 } from "../../../garden/ingestion/official-api/transport-pack.js";
@@ -126,5 +127,10 @@ describe("turn-local transport pack", () => {
     expect(retry.map((member) => member.semanticKey)).toEqual([
       members[1]!.semanticKey, members[2]!.semanticKey
     ]);
+  });
+
+  it("hashes pack identity through one helper", () => {
+    const pack = planTurnTransportPacks(assertions(2), { kind: "reference_batch_8" }).packs[0]!;
+    expect(pack.pack_id).toBe(transportPackIdentity(pack.policy_kind, pack.semantic_keys));
   });
 });

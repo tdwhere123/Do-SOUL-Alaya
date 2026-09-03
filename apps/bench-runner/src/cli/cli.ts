@@ -7,6 +7,7 @@ import { runDiagnosticLoopCommand } from "./diagnostic-loop/command.js";
 import { runEmitEmbeddingCacheOverlayCommand } from
   "./emit-embedding-cache-overlay/command.js";
 import { runProviderPreflightCommand } from "./provider-preflight/command.js";
+import { peelExtractionFillLazyFlags } from "./extraction-fill/lazy-field-flags.js";
 import {
   runExtractionFillCommand,
   runFetchLocomoCommand,
@@ -81,6 +82,9 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   if (command === "provider-preflight") {
     return runProviderPreflightCommand(rest);
   }
+  if (command === "extraction-fill") {
+    return dispatchExtractionFill(rest);
+  }
   const opts = parseCommandFlags(rest);
   if (opts === null) return 2;
   const compatibilityError = commandFlagCompatibilityError(command, opts);
@@ -130,6 +134,26 @@ function commandFlagCompatibilityError(
   return null;
 }
 
+function dispatchExtractionFill(rest: ReadonlyArray<string>): number | Promise<number> {
+  let peeled;
+  try {
+    peeled = peelExtractionFillLazyFlags(rest);
+  } catch (err) {
+    process.stderr.write(
+      `alaya-bench-runner: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 2;
+  }
+  const opts = parseCommandFlags(peeled.rest);
+  if (opts === null) return 2;
+  const compatibilityError = commandFlagCompatibilityError("extraction-fill", opts);
+  if (compatibilityError !== null) {
+    process.stderr.write(`alaya-bench-runner: ${compatibilityError}\n`);
+    return 2;
+  }
+  return runExtractionFillCommand(opts, undefined, peeled.lazy);
+}
+
 function parseCommandFlags(rest: ReadonlyArray<string>): ParsedFlags | null {
   try {
     return parseFlags(rest);
@@ -156,8 +180,6 @@ function dispatchParsedCommand(
       return runLocomoCommand(opts);
     case "merge-longmemeval":
       return runMergeLongMemEvalCommand(opts);
-    case "extraction-fill":
-      return runExtractionFillCommand(opts);
     case "recall-eval":
       return runRecallEvalCommand(opts);
     default:

@@ -22,6 +22,13 @@ export const SEMANTIC_ARTIFACT_STATES = [
   "quarantined"
 ] as const;
 
+/** Writer-owned persisted states. exhaustive-empty has no minter on this substrate. */
+export const MINTED_SEMANTIC_ADMISSION_STATES = [
+  "provider_backed",
+  "invalid",
+  "quarantined"
+] as const;
+
 export type SemanticArtifactState = (typeof SEMANTIC_ARTIFACT_STATES)[number];
 
 const LocatorSchema = z.object({
@@ -203,6 +210,11 @@ export function parseSemanticArtifact(value: unknown): SemanticArtifact {
 }
 
 export function isAvailableSemanticArtifact(artifact: SemanticArtifact): boolean {
-  return artifact.admission_state === "provider_backed" ||
-    artifact.admission_state === "deterministic_empty";
+  return artifact.admission_state === "provider_backed";
+}
+
+export function isMintedSemanticAdmissionState(
+  state: SemanticArtifact["admission_state"]
+): boolean {
+  return (MINTED_SEMANTIC_ADMISSION_STATES as readonly string[]).includes(state);
 }

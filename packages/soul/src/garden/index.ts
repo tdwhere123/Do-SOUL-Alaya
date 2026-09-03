@@ -82,6 +82,7 @@ export {
   type OfficialApiSemanticFactorGraphProjectionReason,
   type OfficialApiSignalDraft
 } from "./ingestion/compute-provider.js";
+export { transportPackIdentity } from "./ingestion/official-api/transport-pack.js";
 export {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,

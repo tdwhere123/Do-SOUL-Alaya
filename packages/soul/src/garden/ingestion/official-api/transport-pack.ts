@@ -149,21 +149,27 @@ function nextPackSlice(
   return packed;
 }
 
-function makePack(
-  members: readonly PackableAssertion[],
-  policyKind: TransportPackPolicy["kind"]
-): TransportPack {
-  const assertionIds = members.map((member) => member.assertionId);
-  const semanticKeys = members.map((member) => member.semanticKey);
-  const packId = createHash("sha256")
+export function transportPackIdentity(
+  policyKind: TransportPackPolicy["kind"],
+  semanticKeys: readonly string[]
+): string {
+  return createHash("sha256")
     .update(String(TRANSPORT_PACK_CONTRACT_VERSION), "utf8")
     .update("\u0000", "utf8")
     .update(policyKind, "utf8")
     .update("\u0000", "utf8")
     .update(semanticKeys.join("\n"), "utf8")
     .digest("hex");
+}
+
+function makePack(
+  members: readonly PackableAssertion[],
+  policyKind: TransportPackPolicy["kind"]
+): TransportPack {
+  const assertionIds = members.map((member) => member.assertionId);
+  const semanticKeys = members.map((member) => member.semanticKey);
   return Object.freeze({
-    pack_id: packId,
+    pack_id: transportPackIdentity(policyKind, semanticKeys),
     policy_kind: policyKind,
     assertion_ids: Object.freeze(assertionIds),
     semantic_keys: Object.freeze(semanticKeys)

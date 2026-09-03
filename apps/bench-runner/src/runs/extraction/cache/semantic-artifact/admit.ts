@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { parseOfficialApiSignals } from "@do-soul/alaya-soul";
+import { parseOfficialApiSignals, transportPackIdentity } from "@do-soul/alaya-soul";
 import {
   capabilitiesAreCompatible,
   resolveExtractionCapability
@@ -393,10 +393,10 @@ function validateAdmissionTasks(
     return "semantic admission request mixes source corpus identities";
   }
   const semanticKeys = tasks.map((task) => task.semanticKey);
-  const expectedPackIdentity = createHash("sha256")
-    .update("1", "utf8").update("\u0000", "utf8")
-    .update(rawBinding.policyKind, "utf8").update("\u0000", "utf8")
-    .update(semanticKeys.join("\n"), "utf8").digest("hex");
+  const expectedPackIdentity = transportPackIdentity(
+    rawBinding.policyKind,
+    semanticKeys
+  );
   const expectedRequestSha256 = createHash("sha256").update(JSON.stringify({
     pack_id: expectedPackIdentity,
     source_corpus_identity: rawBinding.sourceCorpusIdentity,
@@ -420,7 +420,7 @@ function missingCapabilityRequirements(root: string, task: AdmissionTask): strin
   const contract = resolveExtractionCapability(task.capability);
   const available = contract.requirements.filter((capability) => {
     const inspected = inspectSemanticArtifact(root, task.semanticKey, capability);
-    if ((inspected.status !== "provider_backed" && inspected.status !== "deterministic_empty") ||
+    if ((inspected.status !== "provider_backed") ||
         inspected.artifact === undefined) return false;
     try {
       assertSemanticArtifactCompatibility({ ...task, capability }, inspected.artifact, false);

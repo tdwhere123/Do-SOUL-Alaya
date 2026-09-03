@@ -11,6 +11,22 @@
       "apps/inspector/web/src/vite-env.d.ts": {
         "kind": "generated",
         "reason": "Vite owns this generated ambient declaration."
+      },
+      "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/store.ts": {
+        "kind": "handwritten",
+        "reason": "Single exclusive semantic-artifact publication owner (reserve, admit, inspect, overlay digest)."
+      },
+      "apps/bench-runner/src/runs/extraction/fill/semantic-fill-pack-execution.ts": {
+        "kind": "handwritten",
+        "reason": "One pack attempt's reserve-transport-demultiplex-admit cycle; splitting would fork crash/resume."
+      },
+      "apps/bench-runner/src/runs/extraction/fill/semantic-fill-attempt-ledger.ts": {
+        "kind": "handwritten",
+        "reason": "Durable attempt rows, ledger scope, and sealed-raw resume are one recovery owner."
+      },
+      "apps/bench-runner/src/runs/extraction/fill/fill-execution.ts": {
+        "kind": "handwritten",
+        "reason": "Historical v3 pool vs lazy overlay dispatch plus fill-manifest persist stay one execution owner."
       }
     }
   },
@@ -1166,8 +1182,8 @@
     {
       "specifier": "@do-soul/alaya-soul",
       "path": "packages/soul/src/index.ts",
-      "expected_count": 226,
-      "expected_sha256": "ac751573c0d993ae5a69e17992dfb32bf7eeb4922d3d2761f2f2933ad2940cf4"
+      "expected_count": 227,
+      "expected_sha256": "253a064ff452f26951c45cde4ae3e7c2a60dee467d23ecdd89a430bf9ce2f158"
     },
     {
       "specifier": "@do-soul/alaya-storage",

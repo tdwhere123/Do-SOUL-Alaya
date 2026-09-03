@@ -25,7 +25,7 @@ vi.mock("../../../runs/extraction/cache/semantic-artifact/reservation-fd.js", as
 
 import { withRootBoundDirectory } from
   "../../../runs/extraction/cache-audit/bounded-artifact-reader.js";
-import { sealSemanticArtifact, SEMANTIC_ARTIFACT_MAX_BYTES } from
+import { sealSemanticArtifact, SEMANTIC_ARTIFACT_MAX_BYTES, isAvailableSemanticArtifact, isMintedSemanticAdmissionState } from
   "../../../runs/extraction/cache/semantic-artifact/contract.js";
 import {
   admitSemanticArtifact,
@@ -330,5 +330,32 @@ describe("semantic artifact store", () => {
     expect(() => digestSemanticCacheState(root)).toThrow(/JSON|semantic artifact/u);
     writeFileSync(path, "{x", "utf8");
     expect(() => digestSemanticCacheState(root)).toThrow(/JSON|semantic artifact/u);
+  });
+
+  it("does not treat reserved deterministic_empty as live available admission", () => {
+    const hex = "11".repeat(32);
+    const unsigned = semanticArtifactUnsigned(semanticTask());
+    const {
+      raw_response_digest: _raw,
+      raw_evidence_binding: _binding,
+      provider_provenance: _prov,
+      ...rest
+    } = unsigned;
+    const artifact = sealSemanticArtifact({
+      ...rest,
+      admission_state: "deterministic_empty",
+      deterministic_empty_proof: {
+        kind: "exhaustive_member_inspection",
+        formation_contract_version: 1,
+        assertion_id: 1,
+        legacy_cache_key_sha256: hex,
+        request_sha256: hex,
+        prompt_sha256: hex,
+        completion_witness_sha256: hex,
+        sealed_entry_sha256: hex
+      }
+    });
+    expect(isAvailableSemanticArtifact(artifact)).toBe(false);
+    expect(isMintedSemanticAdmissionState(artifact.admission_state)).toBe(false);
   });
 });

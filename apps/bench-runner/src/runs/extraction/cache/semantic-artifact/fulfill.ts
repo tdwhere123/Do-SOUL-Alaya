@@ -68,7 +68,7 @@ export async function fulfillAssertionCapability(
     return unavailable(captured, "capability requirements unavailable");
   }
   const existing = inspectCurrentOrReplayDerived(captured.root, captured.task);
-  if ((existing.status === "provider_backed" || existing.status === "deterministic_empty") &&
+  if ((existing.status === "provider_backed") &&
       existing.artifact !== undefined) {
     try {
       assertSemanticArtifactCompatibility(captured.task, existing.artifact, false);
@@ -196,7 +196,7 @@ function requirementsAreAvailable(
 ): boolean {
   const available = requirements.filter((capability) => {
     const inspected = inspectSemanticArtifact(root, task.semanticKey, capability);
-    if ((inspected.status !== "provider_backed" && inspected.status !== "deterministic_empty") ||
+    if ((inspected.status !== "provider_backed") ||
         inspected.artifact === undefined) return false;
     try {
       assertSemanticArtifactCompatibility({ ...task, capability }, inspected.artifact, false);

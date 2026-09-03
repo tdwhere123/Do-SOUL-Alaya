@@ -98,6 +98,7 @@ export {
   planOfficialApiSemanticWorkset,
   planOfficialApiTransport,
   materializeOfficialApiTransportResponse,
+  transportPackIdentity,
   OFFICIAL_API_SEMANTIC_WORKSET_CONTRACT_VERSION,
   salvageRawSignalElements,
   buildGardenTurnEvidenceArtifactRef,

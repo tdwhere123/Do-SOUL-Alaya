@@ -89,7 +89,7 @@ function classifyTask(
       }
     }
   }
-  if ((existing.status === "provider_backed" || existing.status === "deterministic_empty") &&
+  if ((existing.status === "provider_backed") &&
       existing.artifact !== undefined) {
     try {
       assertSemanticArtifactCompatibility(task, existing.artifact, false);

@@ -366,7 +366,7 @@ function reconcileDurableAdmissions(
           outcome.capability === reservation.capability)) continue;
       const artifact = inspectSemanticArtifact(root, reservation.semanticKey, reservation.capability);
       let recovered: SemanticFillAttempt | undefined;
-      if (artifact.status === "provider_backed" || artifact.status === "deterministic_empty") {
+      if (artifact.status === "provider_backed") {
         recovered = {
           semanticKey: reservation.semanticKey,
           capability: reservation.capability,

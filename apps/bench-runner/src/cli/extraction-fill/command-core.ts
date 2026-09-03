@@ -2,6 +2,7 @@ import process from "node:process";
 import { ExtractionFillTaskError } from "../../runs/extraction/fill/fill-pool.js";
 import type { runExtractionFill } from "../../runs/extraction/extraction-fill.js";
 import type { ParsedFlags } from "../cli-options.js";
+import type { ExtractionFillLazyFlags } from "./lazy-field-flags.js";
 import type { readR3SpendApproval } from "../../datasets/longmemeval/promotion/r3-spend-approval.js";
 import { pct } from "../result-format.js";
 import { countTerminalProviderFailures } from "../../runs/extraction/fill/fill-stats.js";
@@ -20,7 +21,8 @@ export interface ExtractionFillCommandDependencies {
 
 export async function runExtractionFillCommand(
   opts: ParsedFlags,
-  deps: ExtractionFillCommandDependencies
+  deps: ExtractionFillCommandDependencies,
+  lazy: ExtractionFillLazyFlags = {}
 ): Promise<number> {
   try {
     if (opts.extractionPredecessorAuthority !== undefined &&
@@ -34,7 +36,7 @@ export async function runExtractionFillCommand(
       : deps.readR3SpendApproval === undefined
         ? (() => { throw new Error("R3 spend approval reader is unavailable"); })()
         : deps.readR3SpendApproval(opts.r3SpendApproval);
-    process.stdout.write(renderStart(opts));
+    process.stdout.write(renderStart(opts, lazy));
     const result = await withExtractionFillSignalScope(
       deps.signalSource,
       (signal) => deps.runExtractionFill({
@@ -68,13 +70,13 @@ export async function runExtractionFillCommand(
           pinnedMetaRoot: opts.pinnedMetaRoot
         }),
         ...(r3SpendApproval === undefined ? {} : { r3SpendApproval }),
-        ...(opts.ingestionMode === undefined ? {} : { ingestionMode: opts.ingestionMode }),
-        ...(opts.semanticArtifactRoot === undefined ? {} : {
-          semanticArtifactRoot: opts.semanticArtifactRoot
+        ...(lazy.ingestionMode === undefined ? {} : { ingestionMode: lazy.ingestionMode }),
+        ...(lazy.semanticArtifactRoot === undefined ? {} : {
+          semanticArtifactRoot: lazy.semanticArtifactRoot
         }),
-        ...(opts.semanticMaxCalls === undefined ? {} : { semanticMaxCalls: opts.semanticMaxCalls }),
-        ...(opts.semanticMaxFailures === undefined ? {} : {
-          semanticMaxFailures: opts.semanticMaxFailures
+        ...(lazy.semanticMaxCalls === undefined ? {} : { semanticMaxCalls: lazy.semanticMaxCalls }),
+        ...(lazy.semanticMaxFailures === undefined ? {} : {
+          semanticMaxFailures: lazy.semanticMaxFailures
         }),
         signal
       })
@@ -86,7 +88,7 @@ export async function runExtractionFillCommand(
   }
 }
 
-function renderStart(opts: ParsedFlags): string {
+function renderStart(opts: ParsedFlags, lazy: ExtractionFillLazyFlags): string {
   return `Filling extraction cache for ${opts.variant}` +
     (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
     (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
@@ -97,14 +99,14 @@ function renderStart(opts: ParsedFlags): string {
       ? ` question_batch_limit=${opts.questionBatchLimit}` : "") +
     (opts.tolerateProviderTaskFailures
       ? " provider_failure_isolation=on" : "") +
-    (opts.ingestionMode === undefined ? "" : ` ingestion_mode=${opts.ingestionMode}`) +
-    (opts.semanticArtifactRoot === undefined
+    (lazy.ingestionMode === undefined ? "" : ` ingestion_mode=${lazy.ingestionMode}`) +
+    (lazy.semanticArtifactRoot === undefined
       ? ""
-      : ` semantic_artifact_root=${opts.semanticArtifactRoot}`) +
-    (opts.semanticMaxCalls === undefined ? "" : ` semantic_max_calls=${opts.semanticMaxCalls}`) +
-    (opts.semanticMaxFailures === undefined
+      : ` semantic_artifact_root=${lazy.semanticArtifactRoot}`) +
+    (lazy.semanticMaxCalls === undefined ? "" : ` semantic_max_calls=${lazy.semanticMaxCalls}`) +
+    (lazy.semanticMaxFailures === undefined
       ? ""
-      : ` semantic_max_failures=${opts.semanticMaxFailures}`) +
+      : ` semantic_max_failures=${lazy.semanticMaxFailures}`) +
     "...\n";
 }
 

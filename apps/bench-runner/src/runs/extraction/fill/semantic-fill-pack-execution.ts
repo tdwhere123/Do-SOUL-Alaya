@@ -475,7 +475,7 @@ function unresolvedRetryMembers(
 ): readonly SemanticFillTask[] {
   return members.filter((task) => {
     const status = inspectSemanticArtifact(root, task.semanticKey, task.capability).status;
-    return status !== "provider_backed" && status !== "deterministic_empty";
+    return status !== "provider_backed";
   });
 }
 

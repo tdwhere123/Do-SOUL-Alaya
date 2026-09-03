@@ -362,7 +362,7 @@ function assertReceiptArtifactsAvailable(root: string, receipt: LazySemanticRunR
   for (const attempt of receipt.attempts) {
     if (attempt.outcome !== "admitted" && attempt.outcome !== "skipped") continue;
     const inspected = inspectSemanticArtifact(root, attempt.semanticKey, attempt.capability);
-    if (inspected.status !== "provider_backed" && inspected.status !== "deterministic_empty") {
+    if (inspected.status !== "provider_backed") {
       throw new Error("lazy semantic receipt claims warm or admitted work without an artifact");
     }
     const demanded = receipt.demandUnits.filter((unit) =>
