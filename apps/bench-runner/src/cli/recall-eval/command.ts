@@ -21,7 +21,7 @@ export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
     const result = await runRecallEval(buildRecallEvalOptions(opts, opts.snapshot));
     process.stdout.write(renderResult(result));
     if (result.completion.status !== "complete" ||
-      result.memoryProfile.status === "incomplete") return 2;
+        result.memoryProfile.status === "incomplete") return 2;
     return exitCodeForReleaseHardGates(result.payload);
   } catch (error) {
     process.stderr.write(
@@ -42,10 +42,6 @@ export function buildRecallEvalOptions(
     ...(opts.limit === undefined ? {} : { limit: opts.limit }),
     ...(opts.offset === undefined ? {} : { offset: opts.offset }),
     ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
-    ...(opts.skipRecycle === true ? { skipRecycle: true } : {}),
-    ...(opts.snapshotConsumeAuthority === undefined
-      ? {}
-      : { snapshotConsumeAuthority: opts.snapshotConsumeAuthority }),
     ...(opts.weightOverridesJson === undefined ? {} : { weightOverridesJson: opts.weightOverridesJson }),
     ...(opts.dataDir === undefined ? {} : { dataDir: opts.dataDir }),
     ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
@@ -80,7 +76,7 @@ function assertExperimentFlags(opts: ParsedFlags): void {
     throw new Error("--warm-derived-snapshot-receipt requires --experiment");
   }
   if (opts.warmDerivedSnapshotReceipt !== undefined &&
-    opts.rebuildEvidenceSearchProjections === true) {
+      opts.rebuildEvidenceSearchProjections === true) {
     throw new Error(
       "--warm-derived-snapshot-receipt cannot be combined with projection rebuild"
     );
@@ -91,20 +87,20 @@ function assertExperimentFlags(opts: ParsedFlags): void {
     );
   }
   if (opts.factFrameRetrofitLedger !== undefined &&
-    opts.rebuildEvidenceSearchProjections !== true) {
+      opts.rebuildEvidenceSearchProjections !== true) {
     throw new Error(
       "--fact-frame-retrofit-ledger requires --rebuild-evidence-search-projections"
     );
   }
   if (opts.backfillMissingFactFrameFormations === true &&
-    opts.rebuildEvidenceSearchProjections !== true) {
+      opts.rebuildEvidenceSearchProjections !== true) {
     throw new Error(
       "--backfill-missing-fact-frame-formations requires " +
       "--rebuild-evidence-search-projections"
     );
   }
   if (opts.backfillMissingFactFrameFormations === true &&
-    opts.factFrameRetrofitLedger !== undefined) {
+      opts.factFrameRetrofitLedger !== undefined) {
     throw new Error(
       "--backfill-missing-fact-frame-formations cannot be combined with " +
       "--fact-frame-retrofit-ledger"

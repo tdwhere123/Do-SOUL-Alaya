@@ -20,6 +20,5 @@ export function consumeBooleanFlags(
   if (token === "--backfill-missing-fact-frame-formations") {
     state.backfillMissingFactFrameFormations = true;
   }
-  if (token === "--skip-recycle") state.skipRecycle = true;
   return index;
 }

@@ -157,11 +157,18 @@ export class RecallEvalPagerIpcSession {
     }
     this.selectionArtifacts.recordQuestion(payload);
     const pack = response.pack as Record<string, unknown>;
-    const clockAMs = typeof pack.latencyMs === "number" ? pack.latencyMs : 0;
-    pack.harnessTimers = Object.freeze({
-      openDurationMs, recallDurationMs, totalWallMs, clockAMs,
-      harnessOverheadMs: Math.max(0, totalWallMs - clockAMs)
-    });
+    const clockAMs = finiteMs(pack.latencyMs);
+    pack.harnessTimers = Object.freeze(
+      clockAMs === undefined
+        ? { openDurationMs, recallDurationMs, totalWallMs }
+        : {
+          openDurationMs,
+          recallDurationMs,
+          totalWallMs,
+          clockAMs,
+          harnessOverheadMs: Math.max(0, totalWallMs - clockAMs)
+        }
+    );
     return pack;
   }
 
@@ -479,6 +486,10 @@ function hasRecallPack(pack: unknown): boolean {
     record.questionId.length > 0 &&
     record.diagnostics !== undefined &&
     record.diagnostics !== null;
+}
+
+function finiteMs(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function toPagerExitError(

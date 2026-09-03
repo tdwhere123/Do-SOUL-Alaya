@@ -96,6 +96,6 @@ export interface RecallEvalHarnessTimers {
   readonly openDurationMs: number;
   readonly recallDurationMs: number;
   readonly totalWallMs: number;
-  readonly clockAMs: number;
-  readonly harnessOverheadMs: number;
+  readonly clockAMs?: number;
+  readonly harnessOverheadMs?: number;
 }

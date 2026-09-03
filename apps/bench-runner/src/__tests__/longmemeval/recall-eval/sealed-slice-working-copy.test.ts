@@ -206,8 +206,17 @@ describe("H02 — sealed slice private working copy", () => {
     );
     const hint3 = readRecallEvalPagerMapsHint(process.pid);
 
-    expect(hint2.alaya_db_mappings).toBeLessThanOrEqual(hint1.alaya_db_mappings);
-    expect(hint3.alaya_db_mappings).toBeLessThanOrEqual(hint1.alaya_db_mappings);
+    if (hint1 === null || hint2 === null || hint3 === null) {
+      expect(hint1).toBeNull();
+      expect(hint2).toBeNull();
+      expect(hint3).toBeNull();
+    } else {
+      expect(hint1.alaya_db_mappings).toBeGreaterThanOrEqual(1);
+      expect(hint2.alaya_db_mappings).toBeGreaterThanOrEqual(1);
+      expect(hint3.alaya_db_mappings).toBeGreaterThanOrEqual(1);
+      expect(hint2.alaya_db_mappings).toBeLessThanOrEqual(hint1.alaya_db_mappings);
+      expect(hint3.alaya_db_mappings).toBeLessThanOrEqual(hint1.alaya_db_mappings);
+    }
 
     await closeRecallEvalPagerChild();
   });

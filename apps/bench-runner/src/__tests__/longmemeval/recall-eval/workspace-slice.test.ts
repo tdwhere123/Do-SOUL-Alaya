@@ -7,7 +7,7 @@ import {
   EMBEDDING_OVERLAY_BIND_FILENAME,
   initDatabase
 } from "@do-soul/alaya-storage";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
 import {
   explodePackedWorkingCopy,
@@ -18,6 +18,7 @@ import {
   packedWorkingDbPath,
   workingAlayaDbPath
 } from "../../../runs/snapshot/recall-eval/workspace-slice/index.js";
+import * as loadOpenModule from "../../../runs/snapshot/recall-eval/workspace-slice/load-open.js";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import {
   createPackedTwoWorkspaceDb,
@@ -249,6 +250,37 @@ describe("workspace slice install and daemon reopen", () => {
     afterB.close();
   });
 
+  it("installing a second slice over an existing working file does not call loadSliceIntoOpenDatabase", async () => {
+    const destDir = join(root, "slices-no-load-open");
+    const dataDir = join(root, "data-no-load-open");
+    const exploded = await explodePackedWorkingCopy({
+      packedDbPath: packedPath,
+      destDir,
+      workspaceIds: [WORKSPACE_A, WORKSPACE_B]
+    });
+    const spy = vi.spyOn(loadOpenModule, "loadSliceIntoOpenDatabase");
+    try {
+      installWorkspaceSlice({
+        dataDir,
+        sliceDbPath: exploded.sliceDbPaths[WORKSPACE_A]!
+      });
+      installWorkspaceSlice({
+        dataDir,
+        sliceDbPath: exploded.sliceDbPaths[WORKSPACE_B]!
+      });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+    const afterB = initDatabase({ filename: join(dataDir, "alaya.db") });
+    try {
+      expect(matchObjectIds(afterB, "memory_content_fts_porter", TOKEN_B)).toEqual([MEMORY_B]);
+      expect(matchObjectIds(afterB, "memory_content_fts_porter", TOKEN_A)).toEqual([]);
+    } finally {
+      afterB.close();
+    }
+  });
+
   it("reopening the daemon working db does not read stale packed pages", async () => {
     const destDir = join(root, "slices-daemon");
     const dataDir = join(root, "daemon-data");
@@ -275,13 +307,20 @@ describe("workspace slice install and daemon reopen", () => {
     const recallA = await attachedA.recall(TOKEN_A, { maxResults: 10 });
     expect(recallA.results.map((row) => row.object_id)).toContain(MEMORY_A);
     await attachedA.detach();
+    await daemon.shutdown();
 
     installWorkspaceSlice({
       dataDir,
       sliceDbPath: exploded.sliceDbPaths[WORKSPACE_B]!
     });
-    daemon.reloadWorkingDatabase();
-    const attachedB = await daemon.attachWorkspace({
+    const daemonB = await startBenchDaemon({
+      dataDirRoot: dataDir,
+      workspaceId: WORKSPACE_B,
+      runId: "run-b",
+      embeddingMode: "disabled"
+    });
+    daemons.push(daemonB);
+    const attachedB = await daemonB.attachWorkspace({
       workspaceId: WORKSPACE_B,
       runId: "run-b"
     });
@@ -384,13 +423,20 @@ describe("workspace slice install and daemon reopen", () => {
     const recallA = await attachedA.recall(TOKEN_A, { maxResults: 10 });
     expect(recallA.results.map((row) => row.object_id)).toContain(MEMORY_A);
     await attachedA.detach();
+    await daemon.shutdown();
     installRecallEvalWorkspaceSlice({
       dataDirRoot: dataDir,
       workspaceId: WORKSPACE_B,
       slices: slices!
     });
-    daemon.reloadWorkingDatabase();
-    const attachedB = await daemon.attachWorkspace({
+    const daemonB = await startBenchDaemon({
+      dataDirRoot: dataDir,
+      workspaceId: WORKSPACE_B,
+      runId: "run-b",
+      embeddingMode: "disabled"
+    });
+    daemons.push(daemonB);
+    const attachedB = await daemonB.attachWorkspace({
       workspaceId: WORKSPACE_B,
       runId: "run-b"
     });
@@ -401,7 +447,7 @@ describe("workspace slice install and daemon reopen", () => {
     await attachedB.detach();
   }, 120_000);
 
-  it("loads slice B on a live overlay-attached connection without losing the projection", async () => {
+  it("keeps the overlay projection after installing a second slice over the working file", async () => {
     const dataDir = join(root, "overlay-live-slice");
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
     writeRealMemoryOverlayBeside(workingAlayaDbPath(dataDir), MEMORY_A, WORKSPACE_A);
@@ -412,19 +458,19 @@ describe("workspace slice install and daemon reopen", () => {
       workspaceId: WORKSPACE_A,
       slices: slices!
     });
-    const live = initDatabase({ filename: workingAlayaDbPath(dataDir) });
+    installRecallEvalWorkspaceSlice({
+      dataDirRoot: dataDir,
+      workspaceId: WORKSPACE_B,
+      slices: slices!
+    });
+    const working = initDatabase({ filename: workingAlayaDbPath(dataDir) });
     try {
-      expect(() => installRecallEvalWorkspaceSlice({
-        dataDirRoot: dataDir,
-        workspaceId: WORKSPACE_B,
-        slices: slices!
-      })).not.toThrow();
-      expect(matchObjectIds(live, "memory_content_fts_porter", TOKEN_B)).toEqual([MEMORY_B]);
-      expect(matchObjectIds(live, "memory_content_fts_porter", TOKEN_A)).toEqual([]);
-      expect(countTable(live, "memory_embeddings")).toBe(1);
-      expect(countTable(live, "main.memory_embeddings")).toBe(0);
+      expect(matchObjectIds(working, "memory_content_fts_porter", TOKEN_B)).toEqual([MEMORY_B]);
+      expect(matchObjectIds(working, "memory_content_fts_porter", TOKEN_A)).toEqual([]);
+      expect(countTable(working, "memory_embeddings")).toBe(1);
+      expect(countTable(working, "main.memory_embeddings")).toBe(0);
     } finally {
-      live.close();
+      working.close();
     }
   });
 

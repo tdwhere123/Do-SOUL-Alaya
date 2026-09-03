@@ -48,8 +48,6 @@ export function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     querySemanticFactorCache: state.querySemanticFactorCache,
     qa: state.qa,
     edgePlane: state.edgePlane,
-    expectedReconciliationBasis: state.expectedReconciliationBasis,
-    skipRecycle: state.skipRecycle,
-    snapshotConsumeAuthority: state.snapshotConsumeAuthority
+    expectedReconciliationBasis: state.expectedReconciliationBasis
   };
 }

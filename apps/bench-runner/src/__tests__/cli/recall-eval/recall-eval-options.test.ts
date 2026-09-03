@@ -49,4 +49,23 @@ describe("recall-eval CLI options", () => {
       concurrency: 2
     });
   });
+
+  it("fail-closes --skip-recycle because recycle remains required", () => {
+    expect(() => parseFlags(["--skip-recycle"])).toThrow(
+      /path-switch smoke is NOT_VERIFIED; recycle remains required/
+    );
+    expect(() => parseFlags(["--skip-recycle=true"])).toThrow(
+      /path-switch smoke is NOT_VERIFIED; recycle remains required/
+    );
+  });
+
+  it("does not parse --snapshot-consume-authority", () => {
+    const flags = parseFlags([
+      "--snapshot", "/tmp/source.db",
+      "--snapshot-consume-authority", "diagnostic"
+    ]);
+    expect(flags).not.toHaveProperty("snapshotConsumeAuthority");
+    expect(buildRecallEvalOptions(flags, flags.snapshot!))
+      .not.toHaveProperty("snapshotConsumeAuthority");
+  });
 });

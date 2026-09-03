@@ -34,6 +34,7 @@ export async function executeRecallEvalRun(
   selectionArtifact: RecallEvalSelectionBoundaryArtifact | null;
   evidenceProjectionRebuild: unknown;
 }>> {
+  assertRecallEvalRecycleRequired(context.options);
   const session = createRecallEvalPagerSession();
   let collected: readonly RecallEvalQuestionResult[] = [];
   let selectionArtifact: RecallEvalSelectionBoundaryArtifact | null = null;
@@ -53,6 +54,25 @@ export async function executeRecallEvalRun(
   return { collected, selectionArtifact, evidenceProjectionRebuild };
 }
 
+const RECALL_EVAL_RECYCLE_REQUIRED_MESSAGE =
+  "path-switch smoke is NOT_VERIFIED; recycle remains required";
+
+export function assertRecallEvalRecycleRequired(
+  options: { readonly skipRecycle?: boolean } = {}
+): void {
+  if (options.skipRecycle === true) {
+    throw new Error(
+      `skipRecycle is not allowed: ${RECALL_EVAL_RECYCLE_REQUIRED_MESSAGE}`
+    );
+  }
+  const raw = process.env.ALAYA_RECALL_EVAL_SKIP_RECYCLE;
+  if (raw === "1" || raw === "true") {
+    throw new Error(
+      `ALAYA_RECALL_EVAL_SKIP_RECYCLE is not allowed: ${RECALL_EVAL_RECYCLE_REQUIRED_MESSAGE}`
+    );
+  }
+}
+
 async function openPager(
   session: RecallEvalPagerIpcSession,
   context: RecallEvalRunContext
@@ -60,9 +80,10 @@ async function openPager(
   const opened = await session.open(buildPagerOpenPayload(context));
   const childHint = opened.mapsHint ?? session.lastMapsHint;
   process.stdout.write(
-    `[recall-eval pager] child ${childHint === null || childHint === undefined
-      ? `pid=${session.pid ?? "unknown"}`
-      : formatRecallEvalPagerMapsHint(childHint)
+    `[recall-eval pager] child ${
+      childHint === null || childHint === undefined
+        ? `pid=${session.pid ?? "unknown"}`
+        : formatRecallEvalPagerMapsHint(childHint)
     }\n`
   );
   process.stdout.write(
@@ -107,7 +128,7 @@ async function executeRecallEvalQuestions(
     if (question === undefined) continue;
     const result = await diagnosticsSpool.append(
       await session.recall(buildPagerRecallPayload(context, question, i + 1)) as
-      RecallEvalQuestionResult
+        RecallEvalQuestionResult
     );
     collected.push(result);
     if (!warmupProfiled && (result.embeddingWarmup?.pass_count ?? 0) > 0) {
@@ -120,22 +141,9 @@ async function executeRecallEvalQuestions(
       questionIndex: i
     });
     writeRecallEvalProgress(i, context.window.length, question.questionId, result);
-    if (shouldRecycleSession(context)) {
-      await session.recycle();
-    }
+    await session.recycle();
   }
   return collected;
-}
-
-function shouldRecycleSession(context: RecallEvalRunContext): boolean {
-  if (context.options.skipRecycle === true) return false;
-  if (
-    process.env.ALAYA_RECALL_EVAL_SKIP_RECYCLE === "1" ||
-    process.env.ALAYA_RECALL_EVAL_SKIP_RECYCLE === "true"
-  ) {
-    return false;
-  }
-  return true;
 }
 
 function buildPagerOpenPayload(context: RecallEvalRunContext): RecallEvalPagerOpenPayload {
