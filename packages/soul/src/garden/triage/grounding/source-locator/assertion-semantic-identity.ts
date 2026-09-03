@@ -7,8 +7,9 @@ import { OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION } from "./assertion-catalo
 import type { SourceConversationRole } from "../source-role/marker.js";
 
 export const ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID =
-  "alaya.assertion_semantic_identity.v1";
-export const ASSERTION_SEMANTIC_IDENTITY_CONTRACT_VERSION = 1;
+  "alaya.assertion_semantic_identity.v2";
+export const ASSERTION_SEMANTIC_IDENTITY_CONTRACT_VERSION = 2;
+export const ASSERTION_ANTECEDENT_WINDOW_CODE_UNITS = 512;
 
 export type AssertionTrustedRole = SourceConversationRole;
 
@@ -17,6 +18,11 @@ export interface AssertionSemanticIdentityInput {
   readonly exactText: string;
   readonly trustedRole: AssertionTrustedRole;
   readonly semanticContext: string;
+}
+
+export interface AssertionSemanticIdentityWitness extends AssertionSemanticIdentityInput {
+  readonly contractId: typeof ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID;
+  readonly contractVersion: typeof ASSERTION_SEMANTIC_IDENTITY_CONTRACT_VERSION;
 }
 
 export interface AssertionCatalogLocatorBinding {
@@ -31,13 +37,16 @@ export interface AssertionSourceBinding {
   readonly semanticKey: string;
   readonly sourceCorpusIdentity: string;
   readonly sourceTextDigest: string;
+  readonly assertionTextDigest: string;
+  readonly occurrenceIdentity: string;
   readonly locator: AssertionCatalogLocatorBinding;
   readonly datasetRevision?: string;
 }
 
 export function resolveAssertionSemanticContext(
   exactText: string,
-  enclosingSentence: string
+  enclosingSentence: string,
+  antecedentWindow = ""
 ): string {
   if (exactText.length === 0) {
     throw new TypeError("assertion semantic identity requires exact text");
@@ -50,7 +59,18 @@ export function resolveAssertionSemanticContext(
   if (isLocallyClosedAtomicAssertion(exactText) && !hasUnresolvedReference(exactText)) {
     return "";
   }
-  return enclosingSentence;
+  const boundedAntecedent = antecedentWindow.slice(-ASSERTION_ANTECEDENT_WINDOW_CODE_UNITS);
+  return JSON.stringify({ version: 1, antecedent: boundedAntecedent, sentence: enclosingSentence });
+}
+
+export function createAssertionSemanticIdentityWitness(
+  input: AssertionSemanticIdentityInput
+): AssertionSemanticIdentityWitness {
+  return Object.freeze({
+    contractId: ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
+    contractVersion: ASSERTION_SEMANTIC_IDENTITY_CONTRACT_VERSION,
+    ...input
+  });
 }
 
 export function computeAssertionSemanticKey(
@@ -85,13 +105,17 @@ export function bindAssertionSource(input: {
   readonly semanticKey: string;
   readonly sourceCorpusIdentity: string;
   readonly sourceTextDigest: string;
+  readonly assertionTextDigest: string;
+  readonly occurrenceIdentity: string;
   readonly locator: Omit<AssertionCatalogLocatorBinding, "kind" | "contract_version"> &
     Partial<Pick<AssertionCatalogLocatorBinding, "kind" | "contract_version">>;
   readonly datasetRevision?: string;
 }): AssertionSourceBinding {
   if (!/^[a-f0-9]{64}$/u.test(input.semanticKey) ||
       !/^[a-f0-9]{64}$/u.test(input.sourceCorpusIdentity) ||
-      !/^[a-f0-9]{64}$/u.test(input.sourceTextDigest)) {
+      !/^[a-f0-9]{64}$/u.test(input.sourceTextDigest) ||
+      !/^[a-f0-9]{64}$/u.test(input.assertionTextDigest) ||
+      !/^[a-f0-9]{64}$/u.test(input.occurrenceIdentity)) {
     throw new TypeError("assertion source binding digests must be sha256 hex");
   }
   if (!Number.isInteger(input.locator.assertion_id) || input.locator.assertion_id < 1) {
@@ -105,6 +129,8 @@ export function bindAssertionSource(input: {
     semanticKey: input.semanticKey,
     sourceCorpusIdentity: input.sourceCorpusIdentity,
     sourceTextDigest: input.sourceTextDigest,
+    assertionTextDigest: input.assertionTextDigest,
+    occurrenceIdentity: input.occurrenceIdentity,
     locator: {
       contract_version: input.locator.contract_version ??
         OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
@@ -116,6 +142,42 @@ export function bindAssertionSource(input: {
     ...(input.datasetRevision === undefined ? {} : { datasetRevision: input.datasetRevision })
   };
   return Object.freeze(binding);
+}
+
+export function computeAssertionOccurrenceIdentity(input: {
+  readonly sourceCorpusIdentity: string;
+  readonly assertionId: number;
+  readonly start: number;
+  readonly end: number;
+  readonly messageIds?: readonly (string | null | undefined)[];
+}): string {
+  if (!/^[a-f0-9]{64}$/u.test(input.sourceCorpusIdentity)) {
+    throw new TypeError("assertion source binding digests must be sha256 hex");
+  }
+  if (!Number.isInteger(input.assertionId) || input.assertionId < 1) {
+    throw new TypeError("assertion_id must be a positive integer");
+  }
+  if (!Number.isInteger(input.start) || !Number.isInteger(input.end) ||
+      input.start < 0 || input.end <= input.start) {
+    throw new TypeError("assertion span must be a half-open [start, end) range");
+  }
+  const messageIds = (input.messageIds ?? []).map((id) => typeof id === "string" ? id : "");
+  const hash = createHash("sha256")
+    .update("alaya.assertion_occurrence.v1", "utf8")
+    .update("\u0000", "utf8")
+    .update(input.sourceCorpusIdentity, "utf8")
+    .update("\u0000", "utf8")
+    .update(String(input.assertionId), "utf8")
+    .update("\u0000", "utf8")
+    .update(String(input.start), "utf8")
+    .update("\u0000", "utf8")
+    .update(String(input.end), "utf8")
+    .update("\u0000", "utf8")
+    .update(String(messageIds.length), "utf8");
+  for (const id of messageIds) {
+    hash.update("\u0000", "utf8").update(id, "utf8");
+  }
+  return hash.digest("hex");
 }
 
 export function digestSourceText(sourceText: string): string {

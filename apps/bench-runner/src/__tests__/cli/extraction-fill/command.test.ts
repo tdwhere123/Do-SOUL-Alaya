@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import type { ParsedFlags } from "../../../cli/cli-options.js";
+import { parseFlags, type ParsedFlags } from "../../../cli/cli-options.js";
 import { ExtractionFillTaskError } from
   "../../../runs/extraction/fill/fill-pool.js";
 import { emptyBenchTerminalRetryClassifications } from
@@ -181,6 +181,51 @@ it("passes an explicit extraction initial concurrency to the fill runtime", asyn
     concurrency: 32,
     initialConcurrency: 8
   }));
+});
+
+it("parses lazy_field flags and hands overlay receipt fields back from fill", async () => {
+  const parsed = parseFlags([
+    "--variant", "s",
+    "--ingestion-mode", "lazy_field",
+    "--semantic-artifact-root", "/tmp/semantic-overlay",
+    "--semantic-max-calls", "4",
+    "--semantic-max-failures", "1"
+  ]);
+  expect(parsed).toMatchObject({
+    variant: "longmemeval_s",
+    ingestionMode: "lazy_field",
+    semanticArtifactRoot: "/tmp/semantic-overlay",
+    semanticMaxCalls: 4,
+    semanticMaxFailures: 1
+  });
+
+  const signalSource = new FakeSignalSource();
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const run = vi.fn(async () => ({
+    ...completedFillResult(),
+    semanticOverlayIdentity: "aa".repeat(32),
+    semanticNewlyExtracted: 2,
+    semanticCacheHits: 1,
+    semanticUnavailable: 0,
+    lazySemanticRunReceipt: { runIdentity: "bb".repeat(32) }
+  }));
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
+  ) => Promise<number>;
+
+  const exitCode = await command(parsed, { runExtractionFill: run, signalSource });
+
+  expect(exitCode).toBe(0);
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({
+    ingestionMode: "lazy_field",
+    semanticArtifactRoot: "/tmp/semantic-overlay",
+    semanticMaxCalls: 4,
+    semanticMaxFailures: 1
+  }));
+  expect(stdout).toHaveBeenCalledWith(expect.stringContaining("semantic_overlay="));
+  expect(stdout).toHaveBeenCalledWith(expect.stringContaining("lazy_run="));
+  expect(stdout).toHaveBeenCalledWith(expect.stringContaining("semantic_newly_extracted=2"));
 });
 
 it("passes explicit provider task failure isolation to the fill runtime", async () => {

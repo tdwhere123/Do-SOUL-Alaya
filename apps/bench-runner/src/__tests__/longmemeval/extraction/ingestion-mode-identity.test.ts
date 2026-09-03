@@ -9,6 +9,7 @@ import { LongMemEvalRunProvenanceSchema } from
 const SUBSTRATE = "11".repeat(32);
 const OVERLAY_A = "22".repeat(32);
 const OVERLAY_B = "33".repeat(32);
+const LAZY_RUN = "44".repeat(32);
 
 describe("ingestion mode run identity", () => {
   it("does not silently default legacy provenance without complete-v3 authority", () => {
@@ -33,18 +34,21 @@ describe("ingestion mode run identity", () => {
     const lazy = compactRunIdentity({
       substrateIdentity: SUBSTRATE,
       ingestionMode: "lazy_field",
-      overlayIdentity: OVERLAY_A
+      overlayIdentity: OVERLAY_A,
+      lazyRunIdentity: LAZY_RUN
     });
     expect(full).not.toBe(lazy);
     expect(compactRunIdentity({
       substrateIdentity: SUBSTRATE,
       ingestionMode: "lazy_field",
-      overlayIdentity: OVERLAY_A
+      overlayIdentity: OVERLAY_A,
+      lazyRunIdentity: LAZY_RUN
     })).toBe(lazy);
     expect(compactRunIdentity({
       substrateIdentity: SUBSTRATE,
       ingestionMode: "lazy_field",
-      overlayIdentity: OVERLAY_B
+      overlayIdentity: OVERLAY_B,
+      lazyRunIdentity: LAZY_RUN
     })).not.toBe(lazy);
   });
 

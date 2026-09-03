@@ -19,7 +19,9 @@ import {
 import type { ExtractionFillStatus } from "./manifest/fill-manifest-contract.js";
 import { buildFillManifest } from "./manifest/fill-manifest.js";
 import { runExtractionPool } from "./fill-pool.js";
-import { runSemanticFill } from "./semantic-fill-executor.js";
+import { runSemanticFillUnderLease } from "./semantic-fill-executor.js";
+import { createOfflineSemanticEnvelope, createOfflineSemanticReplay } from
+  "./semantic-fill-envelope.js";
 import { collectSemanticFillTasks } from "./semantic-workset-tasks.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 import {
@@ -83,7 +85,7 @@ export async function executeExtractionFill(
   authority: ExecutionExtractionAuthority | undefined,
   signal: AbortSignal | undefined,
   markProgress: (() => void) | undefined
-): Promise<void> {
+): Promise<import("./semantic-fill-executor.js").SemanticFillReport | undefined> {
   const resolved = resolveFillTurns(
     options.cacheKeyAllowlist, prepared, cacheRoot, authority, writeLease
   );
@@ -93,32 +95,35 @@ export async function executeExtractionFill(
       `turns=${resolved.turns.length} skipped_cache_replays=${resolved.skippedCacheHits}`);
   }
   if (options.ingestionMode === "lazy_field") {
-    if (options.semanticArtifactRoot === undefined) {
+    if (options.semanticArtifactRoot === undefined)
       throw new ExtractionCacheInvariantError("lazy_field requires a semantic artifact root");
-    }
     writeLease.assertOwned();
-    const receipt = runSemanticFill({
+    const receipt = await runSemanticFillUnderLease({
       root: options.semanticArtifactRoot,
+      lease: writeLease,
       tasks: collectSemanticFillTasks(resolved.turns, prepared),
-      envelope: {
-        mode: "offline-only",
+      envelope: createOfflineSemanticEnvelope({
         maxCalls: options.semanticMaxCalls ?? Number.MAX_SAFE_INTEGER,
-        maxFailures: options.semanticMaxFailures ?? Number.MAX_SAFE_INTEGER
-      },
-      transport: options.semanticTransport ?? {
-        complete: () => ({ kind: "failure", reason: "semantic transport required" })
-      }
+        maxFailures: options.semanticMaxFailures ?? Number.MAX_SAFE_INTEGER,
+        transportPolicy: options.semanticTransportPolicy
+      }),
+      transport: options.semanticTransport ?? createOfflineSemanticReplay({ defaultResult: {
+        kind: "failure", reason: "semantic replay required"
+      } }),
+      ...(signal === undefined ? {} : { signal })
     });
     if (receipt.failures > 0 || receipt.stopLoss || receipt.unresolved > 0) {
+      const attempts = receipt.attempts
+        .map((attempt) => `${attempt.outcome}:${attempt.reason ?? "none"}`)
+        .join(",");
       throw new ExtractionCacheInvariantError(
-        `semantic fill failed closed: failures=${receipt.failures} stopLoss=${receipt.stopLoss} unresolved=${receipt.unresolved}`
+        `semantic fill failed closed: failures=${receipt.failures} stopLoss=${receipt.stopLoss} unresolved=${receipt.unresolved} attempts=${attempts}`
       );
     }
-    return;
+    return receipt;
   }
-  if (options.semanticArtifactRoot !== undefined) {
+  if (options.semanticArtifactRoot !== undefined)
     throw new ExtractionCacheInvariantError("semantic overlay requires lazy_field");
-  }
   const extractor = createFillCachingExtractor(
     options, prepared, cacheRoot, stats, writeLease, authority, markProgress,
     resolved.executionCacheKeys
@@ -142,6 +147,7 @@ export async function executeExtractionFill(
     } }),
     ...(tolerateProviderTaskFailures ? { tolerateProviderTaskFailures: true } : {})
   });
+  return undefined;
 }
 
 function createFillCachingExtractor(

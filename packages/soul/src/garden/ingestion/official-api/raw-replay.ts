@@ -70,13 +70,23 @@ export function computeDerivedReplayIdentity(input: DerivedReplayIdentityInput):
 
 export function replayOfficialApiSignalsFromRaw(
   rawJson: string,
-  expectedRawSha256: string
-): ReturnType<typeof parseOfficialApiSignals> {
+  expectedRawSha256: string,
+  derivedVersions: Omit<DerivedReplayIdentityInput, "rawJsonSha256">
+): Readonly<{
+  readonly signals: ReturnType<typeof parseOfficialApiSignals>;
+  readonly derivedIdentity: string;
+}> {
   const inspected = inspectImmutableRawJson(rawJson);
   if (inspected.raw_json_sha256 !== expectedRawSha256) {
     throw new TypeError("raw artifact digest mismatch");
   }
-  return parseOfficialApiSignals(rawJson);
+  return Object.freeze({
+    signals: parseOfficialApiSignals(rawJson),
+    derivedIdentity: computeDerivedReplayIdentity({
+      rawJsonSha256: inspected.raw_json_sha256,
+      ...derivedVersions
+    })
+  });
 }
 
 export function currentOfficialApiParserSemanticsVersion(): string {

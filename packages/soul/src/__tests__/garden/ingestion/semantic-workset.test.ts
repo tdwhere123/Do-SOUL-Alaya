@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  officialApiSemanticWorksetFromUnits,
   planOfficialApiSemanticWorkset,
   planOfficialApiTransport
 } from "../../../garden/ingestion/official-api/semantic-workset.js";
@@ -42,5 +43,18 @@ describe("official API semantic workset", () => {
     expect(workset.units.map((unit) => unit.semanticKey).sort().join()).toBe(
       [...new Set(workset.units.map((unit) => unit.semanticKey))].sort().join()
     );
+  });
+
+  it("refuses to pack units that omitted the v2 identity witness", () => {
+    const workset = planOfficialApiSemanticWorkset("I moved to Berlin.", [
+      { role: "user", content: "I moved to Berlin." }
+    ]);
+    const unit = workset.units[0]!;
+    expect(() => officialApiSemanticWorksetFromUnits([{
+      semanticKey: unit.semanticKey,
+      assertionId: unit.assertionId,
+      text: unit.text,
+      binding: unit.binding
+    }])).toThrow(/missing its v2 identity witness/u);
   });
 });

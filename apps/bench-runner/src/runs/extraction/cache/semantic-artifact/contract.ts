@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import {
+  parseSemanticReplayIdentity,
+  semanticReplayIdentityDigest,
+  type SemanticReplayIdentity
+} from "./replay-authority.js";
 
 export const SEMANTIC_ARTIFACT_SCHEMA_VERSION = 1;
 export const SEMANTIC_ARTIFACT_KIND = "assertion_semantic_artifact_v1";
@@ -33,27 +38,57 @@ const SourceBindingSchema = z.object({
   semanticKey: Hex64,
   sourceCorpusIdentity: Hex64,
   sourceTextDigest: Hex64,
+  assertionTextDigest: Hex64,
+  occurrenceIdentity: Hex64,
   locator: LocatorSchema,
   datasetRevision: NonEmpty.optional()
 }).strict().readonly();
 
-const DeterministicEmptyProofSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("zero_assertion_catalog"),
-    formation_contract_version: z.number().int().positive(),
-    catalog_assertion_count: z.literal(0)
-  }).strict(),
-  z.object({
-    kind: z.literal("exhaustive_member_inspection"),
-    formation_contract_version: z.number().int().positive(),
-    assertion_id: z.number().int().positive()
-  }).strict()
-]);
+const DeterministicEmptyProofSchema = z.object({
+  kind: z.literal("exhaustive_member_inspection"),
+  formation_contract_version: z.number().int().positive(),
+  assertion_id: z.number().int().positive(),
+  legacy_cache_key_sha256: Hex64,
+  request_sha256: Hex64,
+  prompt_sha256: Hex64,
+  completion_witness_sha256: Hex64,
+  sealed_entry_sha256: Hex64
+}).strict();
 
 const ProviderProvenanceSchema = z.object({
   provider_url_sha256: Hex64,
   request_profile: NonEmpty,
-  model_id: NonEmpty
+  model_id: NonEmpty,
+  transport_model_id: NonEmpty
+}).strict().readonly();
+
+const RawEvidenceBindingSchema = z.object({
+  pack_identity: Hex64,
+  request_sha256: Hex64,
+  source_corpus_identity: Hex64,
+  replay_identity_digest: Hex64
+}).strict().readonly();
+
+const ReplayIdentitySchema = z.custom<SemanticReplayIdentity>((value) => {
+  try {
+    parseSemanticReplayIdentity(value);
+    return true;
+  } catch {
+    return false;
+  }
+}, "semantic replay identity is invalid").transform(parseSemanticReplayIdentity);
+
+const LegacyConversionWitnessSchema = z.object({
+  cache_key: Hex64,
+  request_sha256: Hex64,
+  prompt_sha256: Hex64,
+  completion_witness_sha256: Hex64,
+  sealed_entry_sha256: Hex64,
+  source_authority_sha256: Hex64,
+  source_manifest_sha256: Hex64,
+  raw_json_sha256: Hex64,
+  response_metadata_sha256: Hex64,
+  transport_provenance_sha256: Hex64
 }).strict().readonly();
 
 export const SemanticArtifactSchema = z.object({
@@ -68,6 +103,10 @@ export const SemanticArtifactSchema = z.object({
   admission_state: z.enum(["provider_backed", "deterministic_empty", "invalid", "quarantined"]),
   source_bindings: z.array(SourceBindingSchema).min(1).readonly(),
   provider_provenance: ProviderProvenanceSchema.optional(),
+  replay_identity: ReplayIdentitySchema,
+  replay_identity_digest: Hex64,
+  legacy_conversion_witness: LegacyConversionWitnessSchema.optional(),
+  raw_evidence_binding: RawEvidenceBindingSchema.optional(),
   raw_response_digest: Hex64.optional(),
   deterministic_empty_proof: DeterministicEmptyProofSchema.optional(),
   quarantine_reason: NonEmpty.optional(),
@@ -79,12 +118,23 @@ export const SemanticArtifactSchema = z.object({
   if (artifact.source_bindings.some((binding) => binding.semanticKey !== artifact.semantic_key)) {
     ctx.addIssue({ code: "custom", message: "source binding semantic key mismatch" });
   }
+  if (semanticReplayIdentityDigest(artifact.replay_identity) !== artifact.replay_identity_digest) {
+    ctx.addIssue({ code: "custom", message: "replay_identity_digest mismatch" });
+  }
+  if (artifact.raw_evidence_binding !== undefined &&
+      artifact.raw_evidence_binding.replay_identity_digest !== artifact.replay_identity_digest) {
+    ctx.addIssue({ code: "custom", message: "raw evidence replay identity mismatch" });
+  }
   if (artifact.admission_state === "provider_backed") {
     if (artifact.raw_response_digest === undefined) {
       ctx.addIssue({ code: "custom", message: "provider_backed requires raw_response_digest" });
     }
     if (artifact.provider_provenance === undefined) {
       ctx.addIssue({ code: "custom", message: "provider_backed requires provenance" });
+    }
+    if (artifact.raw_evidence_binding === undefined &&
+        artifact.legacy_conversion_witness === undefined) {
+      ctx.addIssue({ code: "custom", message: "provider_backed requires raw evidence binding" });
     }
     if (artifact.deterministic_empty_proof !== undefined) {
       ctx.addIssue({ code: "custom", message: "provider_backed cannot carry empty proof" });
@@ -108,6 +158,10 @@ export type SemanticArtifact = z.infer<typeof SemanticArtifactSchema>;
 export type SemanticArtifactSourceBinding = z.infer<typeof SourceBindingSchema>;
 export type SemanticArtifactUnsigned = Omit<SemanticArtifact, "artifact_digest">;
 
+export function parseSemanticArtifactSourceBinding(value: unknown): SemanticArtifactSourceBinding {
+  return SourceBindingSchema.parse(value);
+}
+
 export function computeSemanticArtifactDigest(
   unsigned: SemanticArtifactUnsigned
 ): string {
@@ -123,6 +177,10 @@ export function computeSemanticArtifactDigest(
     admission_state: unsigned.admission_state,
     source_bindings: unsigned.source_bindings,
     provider_provenance: unsigned.provider_provenance ?? null,
+    replay_identity: unsigned.replay_identity,
+    replay_identity_digest: unsigned.replay_identity_digest,
+    legacy_conversion_witness: unsigned.legacy_conversion_witness ?? null,
+    raw_evidence_binding: unsigned.raw_evidence_binding ?? null,
     raw_response_digest: unsigned.raw_response_digest ?? null,
     deterministic_empty_proof: unsigned.deterministic_empty_proof ?? null,
     quarantine_reason: unsigned.quarantine_reason ?? null

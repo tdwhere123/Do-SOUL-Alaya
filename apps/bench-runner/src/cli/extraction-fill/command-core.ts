@@ -68,6 +68,14 @@ export async function runExtractionFillCommand(
           pinnedMetaRoot: opts.pinnedMetaRoot
         }),
         ...(r3SpendApproval === undefined ? {} : { r3SpendApproval }),
+        ...(opts.ingestionMode === undefined ? {} : { ingestionMode: opts.ingestionMode }),
+        ...(opts.semanticArtifactRoot === undefined ? {} : {
+          semanticArtifactRoot: opts.semanticArtifactRoot
+        }),
+        ...(opts.semanticMaxCalls === undefined ? {} : { semanticMaxCalls: opts.semanticMaxCalls }),
+        ...(opts.semanticMaxFailures === undefined ? {} : {
+          semanticMaxFailures: opts.semanticMaxFailures
+        }),
         signal
       })
     );
@@ -89,6 +97,14 @@ function renderStart(opts: ParsedFlags): string {
       ? ` question_batch_limit=${opts.questionBatchLimit}` : "") +
     (opts.tolerateProviderTaskFailures
       ? " provider_failure_isolation=on" : "") +
+    (opts.ingestionMode === undefined ? "" : ` ingestion_mode=${opts.ingestionMode}`) +
+    (opts.semanticArtifactRoot === undefined
+      ? ""
+      : ` semantic_artifact_root=${opts.semanticArtifactRoot}`) +
+    (opts.semanticMaxCalls === undefined ? "" : ` semantic_max_calls=${opts.semanticMaxCalls}`) +
+    (opts.semanticMaxFailures === undefined
+      ? ""
+      : ` semantic_max_failures=${opts.semanticMaxFailures}`) +
     "...\n";
 }
 
@@ -111,7 +127,9 @@ function renderResult(result: ExtractionFillResult): string {
     `terminal_nonretryable_4xx=${result.terminalRetryClassifications.failure_non_retryable_4xx} ` +
     `terminal_nonretryable_response=${result.terminalRetryClassifications.failure_non_retryable_response} ` +
     `terminal_timeouts=${result.terminalRetryClassifications.failure_timeout} ` +
-    `${coverage}\n`;
+    `${coverage}` +
+    renderLazyOverlay(result) +
+    `\n`;
 }
 
 function renderAuthorityTelemetry(
@@ -126,6 +144,15 @@ function renderAuthorityTelemetry(
     `usage_unavailable=${telemetry.telemetry.usageUnavailableRequests} ` +
     `usage_unresolved=${telemetry.telemetry.unresolvedTransportAttempts} ` +
     `usage_unknown=${telemetry.telemetry.usageUnknownAttempts} `;
+}
+
+function renderLazyOverlay(result: ExtractionFillResult): string {
+  if (result.lazySemanticRunReceipt === undefined) return "";
+  return ` semantic_overlay=${result.semanticOverlayIdentity ?? "unknown"}` +
+    ` semantic_newly_extracted=${result.semanticNewlyExtracted ?? 0}` +
+    ` semantic_cache_hits=${result.semanticCacheHits ?? 0}` +
+    ` semantic_unavailable=${result.semanticUnavailable ?? 0}` +
+    ` lazy_run=${result.lazySemanticRunReceipt.runIdentity}`;
 }
 
 function handleExtractionFillError(error: unknown): number {

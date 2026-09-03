@@ -4,18 +4,21 @@ export interface ExtractionCapabilityContract {
   readonly id: string;
   readonly version: string;
   readonly requirements: readonly string[];
+  readonly materializer: "official_api_signals" | null;
 }
 
 export const OFFICIAL_API_SIGNALS_CAPABILITY: ExtractionCapabilityContract = Object.freeze({
   id: "official_api_signals",
   version: "v1",
-  requirements: Object.freeze([])
+  requirements: Object.freeze([]),
+  materializer: "official_api_signals"
 });
 
 export const TEMPORAL_VALIDITY_CAPABILITY: ExtractionCapabilityContract = Object.freeze({
   id: "temporal_validity",
   version: "v1",
-  requirements: Object.freeze(["official_api_signals:v1"])
+  requirements: Object.freeze(["official_api_signals:v1"]),
+  materializer: null
 });
 
 const CATALOG: Readonly<Record<string, ExtractionCapabilityContract>> = Object.freeze({
@@ -27,8 +30,14 @@ export function capabilityIdentity(contract: ExtractionCapabilityContract): stri
   return `${contract.id}:${contract.version}`;
 }
 
+export function lookupExtractionCapability(
+  capability: string
+): ExtractionCapabilityContract | undefined {
+  return CATALOG[capability];
+}
+
 export function resolveExtractionCapability(capability: string): ExtractionCapabilityContract {
-  const resolved = CATALOG[capability];
+  const resolved = lookupExtractionCapability(capability);
   if (resolved === undefined) {
     throw new Error(`unknown extraction capability: ${capability}`);
   }

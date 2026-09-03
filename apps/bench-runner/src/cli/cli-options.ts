@@ -57,6 +57,10 @@ export interface ParsedFlags {
   readonly extractionInitialConcurrency?: number;
   readonly questionBatchLimit?: number;
   readonly tolerateProviderTaskFailures: boolean;
+  readonly ingestionMode?: "precomputed_full" | "lazy_field";
+  readonly semanticArtifactRoot?: string;
+  readonly semanticMaxCalls?: number;
+  readonly semanticMaxFailures?: number;
   readonly experiment?: boolean;
   readonly rebuildEvidenceSearchProjections?: boolean;
   readonly backfillMissingFactFrameFormations?: boolean;
@@ -101,6 +105,10 @@ export interface ParsedFlagsState {
   extractionInitialConcurrency?: number;
   questionBatchLimit?: number;
   tolerateProviderTaskFailures: boolean;
+  ingestionMode?: "precomputed_full" | "lazy_field";
+  semanticArtifactRoot?: string;
+  semanticMaxCalls?: number;
+  semanticMaxFailures?: number;
   experiment: boolean;
   rebuildEvidenceSearchProjections: boolean;
   backfillMissingFactFrameFormations: boolean;
@@ -123,6 +131,10 @@ export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   assertFlagAtMostOnce(args, "--warm-derived-snapshot-receipt");
   assertFlagAtMostOnce(args, "--embedding-cache-overlay");
   assertFlagAtMostOnce(args, "--query-semantic-factor-cache");
+  assertFlagAtMostOnce(args, "--ingestion-mode");
+  assertFlagAtMostOnce(args, "--semantic-artifact-root");
+  assertFlagAtMostOnce(args, "--semantic-max-calls");
+  assertFlagAtMostOnce(args, "--semantic-max-failures");
   const state = createParsedFlagsState();
   for (let i = 0; i < args.length; i += 1) {
     i = consumeFlagToken(args, i, state);
@@ -407,12 +419,56 @@ function consumeConcurrencyPathFlags(
     );
     return nextIndex(index, token);
   }
+  return consumeLazyFieldFlags(args, index, token, state);
+}
+
+function consumeLazyFieldFlags(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
+  if (matchFlagToken(token, "--ingestion-mode")) {
+    state.ingestionMode = parseIngestionMode(
+      readRequiredFlagValue(
+        args, index, token, "--ingestion-mode", "--ingestion-mode requires a value"
+      )
+    );
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--semantic-artifact-root")) {
+    state.semanticArtifactRoot = readRequiredFlagValue(
+      args, index, token, "--semantic-artifact-root",
+      "--semantic-artifact-root requires a path"
+    );
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--semantic-max-calls")) {
+    state.semanticMaxCalls = parseNonNegativeInt(
+      readFlagValue(args, index, token, "--semantic-max-calls"), "--semantic-max-calls"
+    );
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--semantic-max-failures")) {
+    state.semanticMaxFailures = parseNonNegativeInt(
+      readFlagValue(args, index, token, "--semantic-max-failures"),
+      "--semantic-max-failures"
+    );
+    return nextIndex(index, token);
+  }
   return undefined;
 }
 
 function parseEmbeddingMode(raw: string): BenchEmbeddingMode {
   if (raw !== "disabled" && raw !== "env") {
     throw new Error("--embedding must be one of: disabled, env");
+  }
+  return raw;
+}
+
+function parseIngestionMode(raw: string): "precomputed_full" | "lazy_field" {
+  if (raw !== "precomputed_full" && raw !== "lazy_field") {
+    throw new Error("--ingestion-mode must be one of: precomputed_full, lazy_field");
   }
   return raw;
 }

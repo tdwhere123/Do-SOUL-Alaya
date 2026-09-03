@@ -3,6 +3,7 @@ import {
   OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH,
   buildOfficialApiExtractionRequests,
   computeOfficialApiSourceCorpusIdentity,
+  mintOfficialApiAssertionWork,
   stringifyOfficialApiExtractionRequest
 } from "../../../../garden/ingestion/official-api/extraction-request.js";
 import {
@@ -13,6 +14,7 @@ import { buildOfficialApiSourceCorpus } from "../../../../garden/triage/groundin
 import {
   ASSERTION_SEMANTIC_IDENTITY_CONTRACT_VERSION,
   bindAssertionSource,
+  computeAssertionOccurrenceIdentity,
   computeAssertionSemanticKey,
   digestSourceText,
   resolveAssertionSemanticContext
@@ -57,7 +59,7 @@ describe("assertion semantic identity", () => {
     })).not.toBe(base);
     const sentence = "I met Alice. User: She moved to Berlin.";
     const context = resolveAssertionSemanticContext("User: She moved to Berlin.", sentence);
-    expect(context).toBe(sentence);
+    expect(context).toContain(sentence);
     expect(key({ exactText: "User: She moved to Berlin.", semanticContext: context })).not.toBe(base);
   });
 
@@ -70,6 +72,8 @@ describe("assertion semantic identity", () => {
       semanticKey,
       sourceCorpusIdentity: computeOfficialApiSourceCorpusIdentity(corpusA),
       sourceTextDigest: digestSourceText(corpusA),
+      assertionTextDigest: digestSourceText(exactText),
+      occurrenceIdentity: "11".repeat(32),
       locator: { assertion_id: 1, start: 0, end: exactText.length },
       datasetRevision: "rev-a"
     });
@@ -77,6 +81,8 @@ describe("assertion semantic identity", () => {
       semanticKey,
       sourceCorpusIdentity: computeOfficialApiSourceCorpusIdentity(corpusB),
       sourceTextDigest: digestSourceText(corpusB),
+      assertionTextDigest: digestSourceText(exactText),
+      occurrenceIdentity: "22".repeat(32),
       locator: { assertion_id: 2, start: 14, end: 14 + exactText.length },
       datasetRevision: "rev-b"
     });
@@ -111,7 +117,12 @@ describe("assertion semantic identity", () => {
     expect(resolveAssertionSemanticContext(closed, closed)).toBe("");
     const open = "She moved to Berlin.";
     const sentence = "I met Alice yesterday. She moved to Berlin.";
-    expect(resolveAssertionSemanticContext(open, sentence)).toBe(sentence);
+    expect(resolveAssertionSemanticContext(open, sentence)).toContain(sentence);
+    const alice = resolveAssertionSemanticContext(open, sentence, "I met Alice yesterday. ");
+    const bob = resolveAssertionSemanticContext(open, sentence, "I met Bob yesterday. ");
+    expect(key({ exactText: open, semanticContext: alice })).not.toBe(
+      key({ exactText: open, semanticContext: bob })
+    );
     expect(() => resolveAssertionSemanticContext(open, "unrelated sentence.")).toThrow(
       /must contain the exact assertion text/u
     );
@@ -121,7 +132,56 @@ describe("assertion semantic identity", () => {
     expect(() => key({ exactText: "" })).toThrow(/exact text/u);
     const identityFn: typeof computeAssertionSemanticKey = computeAssertionSemanticKey;
     expect(identityFn.length).toBe(1);
-    expect(ASSERTION_SEMANTIC_IDENTITY_CONTRACT_VERSION).toBe(1);
+    expect(ASSERTION_SEMANTIC_IDENTITY_CONTRACT_VERSION).toBe(2);
+  });
+
+  it("canonicalizes occurrence identity and keeps the first locator sticky", () => {
+    const corpus = "11".repeat(32);
+    const reordered = computeAssertionOccurrenceIdentity({
+      messageIds: ["m1"],
+      end: 10,
+      start: 0,
+      assertionId: 1,
+      sourceCorpusIdentity: corpus
+    });
+    const canonical = computeAssertionOccurrenceIdentity({
+      sourceCorpusIdentity: corpus,
+      assertionId: 1,
+      start: 0,
+      end: 10,
+      messageIds: ["m1"]
+    });
+    expect(reordered).toBe(canonical);
+    const text = "I moved to Berlin.";
+    const first = mintOfficialApiAssertionWork(text, [
+      { role: "user", content: text, message_id: "msg-1" }
+    ])[0]!;
+    const again = mintOfficialApiAssertionWork(text, [
+      { message_id: "msg-1", content: text, role: "user" }
+    ])[0]!;
+    expect(again.binding.occurrenceIdentity).toBe(first.binding.occurrenceIdentity);
+    expect(again.binding.locator).toEqual(first.binding.locator);
+    const later = bindAssertionSource({
+      semanticKey: first.binding.semanticKey,
+      sourceCorpusIdentity: first.binding.sourceCorpusIdentity,
+      sourceTextDigest: first.binding.sourceTextDigest,
+      assertionTextDigest: first.binding.assertionTextDigest,
+      occurrenceIdentity: computeAssertionOccurrenceIdentity({
+        sourceCorpusIdentity: first.binding.sourceCorpusIdentity,
+        assertionId: 2,
+        start: first.binding.locator.end,
+        end: first.binding.locator.end + text.length,
+        messageIds: ["msg-2"]
+      }),
+      locator: {
+        assertion_id: 2,
+        start: first.binding.locator.end,
+        end: first.binding.locator.end + text.length
+      }
+    });
+    expect(later.occurrenceIdentity).not.toBe(first.binding.occurrenceIdentity);
+    expect(first.binding.locator.assertion_id).toBe(1);
+    expect(later.locator.assertion_id).toBe(2);
   });
 });
 

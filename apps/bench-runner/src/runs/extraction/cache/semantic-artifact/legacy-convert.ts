@@ -8,19 +8,26 @@ import { inspectExtractionRawEnvelope } from "../../content-closure.js";
 import type { CachedExtractionEntry } from "../../../compile-seed/cache/cache-shard.js";
 import {
   sealSemanticArtifact,
-  type SemanticArtifact,
-  type SemanticArtifactSourceBinding
+  type SemanticArtifact
 } from "./contract.js";
+import type { VerifiedSemanticArtifactAdmission } from "./admit.js";
+import { verifyLegacyShardIdentity } from "./legacy-convert-validation.js";
+import {
+  parseCapturedLegacyExtractionEntry,
+  type VerifiedLegacyExtractionEntry
+} from "./legacy-sealed-entry.js";
+import {
+  resolveExactSourceGrounding,
+  type ExactSourceGroundingTask
+} from "./exact-source-grounding.js";
+import { sealLegacySemanticArtifactAdmission } from "./legacy-admission-authority.js";
+import {
+  currentReplayAuthorityForLegacyPrompt,
+  semanticReplayIdentityDigest,
+  unwrapSemanticReplayAuthority
+} from "./replay-authority.js";
 
 export const LEGACY_CONVERSION_CAPABILITY = "official_api_signals:v1";
-
-export interface LegacyExhaustiveInspectionProof {
-  readonly prompt_sha256: string;
-  readonly raw_json_sha256: string;
-  readonly parser_status: "ok";
-  readonly completion_status: "complete";
-  readonly catalog_assertion_ids: readonly number[];
-}
 
 export interface LegacyConversionUnresolved {
   readonly reason: string;
@@ -30,95 +37,129 @@ export interface LegacyConversionUnresolved {
 export interface LegacyConversionReport {
   readonly cache_key: string;
   readonly raw_json_sha256: string;
-  readonly converted: readonly SemanticArtifact[];
+  readonly converted: readonly VerifiedSemanticArtifactAdmission[];
   readonly unresolved: readonly LegacyConversionUnresolved[];
 }
 
 export function convertLegacyExtractionShard(input: {
-  readonly entry: CachedExtractionEntry;
+  readonly sealedEntry: VerifiedLegacyExtractionEntry;
   readonly request: OfficialApiExtractionRequest;
-  readonly sourceBindings: readonly SemanticArtifactSourceBinding[];
+  readonly sourceUnits: readonly ExactSourceGroundingTask[];
   readonly semanticContract: string;
-  readonly modelFamily: string;
-  readonly exhaustiveProof?: LegacyExhaustiveInspectionProof;
-  readonly expectedPromptSha256: string;
+  readonly expectedSystemPrompt: string;
 }): LegacyConversionReport {
-  const unresolved: LegacyConversionUnresolved[] = [];
-  const converted: SemanticArtifact[] = [];
+  let entry: ReturnType<typeof parseCapturedLegacyExtractionEntry>;
+  try {
+    entry = parseCapturedLegacyExtractionEntry(input.sealedEntry);
+  } catch (cause) {
+    return report(input.sealedEntry.cacheKey, input.sealedEntry.rawJsonSha256, [], [{
+      reason: errorMessage(cause)
+    }]);
+  }
+  let witness: ReturnType<typeof verifyLegacyShardIdentity>;
+  let replayIdentity: ReturnType<typeof unwrapSemanticReplayAuthority>;
+  try {
+    witness = verifyLegacyShardIdentity({
+      entry,
+      request: input.request,
+      expectedSystemPrompt: input.expectedSystemPrompt,
+      authority: input.sealedEntry
+    });
+    const replayAuthority = currentReplayAuthorityForLegacyPrompt({
+      expectedSystemPrompt: input.expectedSystemPrompt,
+      authoritySystemPromptSha256: input.sealedEntry.systemPromptSha256
+    });
+    replayIdentity = unwrapSemanticReplayAuthority(replayAuthority);
+  } catch (cause) {
+    return unresolvedInputReport(entry, cause);
+  }
   let rawJsonSha256: string;
   try {
-    rawJsonSha256 = inspectExtractionRawEnvelope(input.entry.raw_json).rawJsonSha256;
+    rawJsonSha256 = inspectExtractionRawEnvelope(entry.raw_json).rawJsonSha256;
   } catch (cause) {
-    const reason = cause instanceof Error ? cause.message : String(cause);
-    return report(input.entry.cache_key, createHash("sha256").update(input.entry.raw_json, "utf8").digest("hex"), [], [
-      { reason: `invalid raw envelope: ${reason}` }
-    ]);
+    return report(entry.cache_key, digest(entry.raw_json), [], [{
+      reason: `invalid raw envelope: ${errorMessage(cause)}`
+    }]);
   }
-
-  const bindingsByAssertion = indexBindings(input.sourceBindings);
   if (input.request.source_assertions.length === 0) {
-    return report(input.entry.cache_key, rawJsonSha256, [], [{
+    return report(entry.cache_key, rawJsonSha256, [], [{
       reason: "empty-turn shard has no assertion members to convert"
     }]);
   }
-
   let drafts: ReturnType<typeof parseOfficialApiSignals>;
   try {
-    drafts = parseOfficialApiSignals(input.entry.raw_json);
+    drafts = parseOfficialApiSignals(entry.raw_json);
   } catch (cause) {
-    const reason = cause instanceof Error ? cause.message : String(cause);
-    return report(input.entry.cache_key, rawJsonSha256, [], [{ reason: `parser drop: ${reason}` }]);
-  }
-
-  if (drafts.length === 0) {
-    if (!provesExhaustive(input.exhaustiveProof, input.request, rawJsonSha256, input.expectedPromptSha256)) {
-      return report(input.entry.cache_key, rawJsonSha256, [], [{
-        reason: "batch-empty is not assertion-empty without exhaustive inspection proof"
-      }]);
-    }
-    for (const assertion of input.request.source_assertions) {
-      const binding = bindingsByAssertion.get(assertion.assertion_id);
-      if (binding === undefined) {
-        unresolved.push({ assertion_id: assertion.assertion_id, reason: "missing source binding" });
-        continue;
-      }
-      converted.push(sealSemanticArtifact({
-        schema_version: 1,
-        kind: "assertion_semantic_artifact_v1",
-        semantic_key: binding.semanticKey,
-        semantic_contract: input.semanticContract,
-        capability: LEGACY_CONVERSION_CAPABILITY,
-        capability_set: [LEGACY_CONVERSION_CAPABILITY],
-        model_family: input.modelFamily,
-        model_id: input.entry.model,
-        admission_state: "deterministic_empty",
-        source_bindings: [binding],
-        deterministic_empty_proof: {
-          kind: "exhaustive_member_inspection",
-          formation_contract_version: input.request.source_locator_contract_version,
-          assertion_id: assertion.assertion_id
-        }
-      }));
-    }
-    return report(input.entry.cache_key, rawJsonSha256, converted, unresolved);
-  }
-
-  if (!isCompleteInspection(input.entry)) {
-    return report(input.entry.cache_key, rawJsonSha256, [], [{
-      reason: "incomplete inspection witness"
+    return report(entry.cache_key, rawJsonSha256, [], [{
+      reason: `parser drop: ${errorMessage(cause)}`
     }]);
   }
+  if (drafts.length === 0) {
+    return report(entry.cache_key, rawJsonSha256, [], [{
+      reason: "sealed legacy metadata has no independent assertion-level completion witness"
+    }]);
+  }
+  return convertParsedDrafts({
+    entry,
+    request: input.request,
+    sourceUnits: input.sourceUnits,
+    semanticContract: input.semanticContract,
+    sealedEntry: input.sealedEntry,
+    rawJsonSha256,
+    drafts,
+    witness,
+    replayIdentity
+  });
+}
 
+function convertParsedDrafts(input: {
+  readonly entry: CachedExtractionEntry;
+  readonly request: OfficialApiExtractionRequest;
+  readonly sourceUnits: readonly ExactSourceGroundingTask[];
+  readonly semanticContract: string;
+  readonly sealedEntry: VerifiedLegacyExtractionEntry;
+  readonly rawJsonSha256: string;
+  readonly drafts: ReturnType<typeof parseOfficialApiSignals>;
+  readonly witness: ReturnType<typeof verifyLegacyShardIdentity>;
+  readonly replayIdentity: ReturnType<typeof unwrapSemanticReplayAuthority>;
+}): LegacyConversionReport {
+  const unresolved: LegacyConversionUnresolved[] = [];
+  const converted: SemanticArtifact[] = [];
+  const unitsByAssertion = indexUnits(input.sourceUnits);
   const claimed = new Map<number, number>();
-  const located: { assertionId: number }[] = [];
-  for (const draft of drafts) {
+  const grounded: { readonly assertionId: number; readonly unit: ExactSourceGroundingTask }[] = [];
+  for (const draft of input.drafts) {
     const locator = parseOfficialApiSourceLocator(draft.source_locator);
     if (locator === null) {
-      unresolved.push({ reason: "ambiguous locator" });
+      unresolved.push({ reason: "malformed source locator" });
       continue;
     }
-    claimed.set(locator.assertion_id, (claimed.get(locator.assertion_id) ?? 0) + 1);
-    located.push({ assertionId: locator.assertion_id });
+    const assertionId = locator.assertion_id;
+    claimed.set(assertionId, (claimed.get(assertionId) ?? 0) + 1);
+    const member = input.request.source_assertions.find((item) =>
+      item.assertion_id === assertionId);
+    const unit = unitsByAssertion.get(assertionId);
+    if (member === undefined || unit === undefined) {
+      unresolved.push({ assertion_id: assertionId, reason: "foreign or unbound assertion" });
+      continue;
+    }
+    const grounding = resolveExactSourceGrounding({
+      task: unit,
+      sourceLocator: draft.source_locator,
+      matchedText: draft.matched_text
+    });
+    if (grounding.status !== "grounded") {
+      unresolved.push({ assertion_id: assertionId, reason: `grounding rejected: ${grounding.reason}` });
+      continue;
+    }
+    if (member.text !== unit.text ||
+        input.request.source_corpus_identity !== unit.binding.sourceCorpusIdentity ||
+        input.request.source_locator_contract_version !== locator.contract_version ||
+        input.semanticContract !== unit.semanticIdentity.contractId) {
+      unresolved.push({ assertion_id: assertionId, reason: "foreign or unbound assertion" });
+      continue;
+    }
+    grounded.push({ assertionId, unit });
   }
   const duplicates = new Set(
     [...claimed.entries()].filter(([, count]) => count !== 1).map(([assertionId]) => assertionId)
@@ -127,35 +168,31 @@ export function convertLegacyExtractionShard(input: {
     unresolved.push({ assertion_id: assertionId, reason: "duplicate mapping" });
   }
   const usedAssertions = new Set<number>();
-  for (const { assertionId } of located) {
+  const replayIdentityDigest = semanticReplayIdentityDigest(input.replayIdentity);
+  for (const { assertionId, unit } of grounded) {
     if (duplicates.has(assertionId) || usedAssertions.has(assertionId)) continue;
-    const member = input.request.source_assertions.find(
-      (assertion) => assertion.assertion_id === assertionId
-    );
-    const binding = bindingsByAssertion.get(assertionId);
-    if (member === undefined || binding === undefined) {
-      unresolved.push({ assertion_id: assertionId, reason: "foreign or unbound assertion" });
-      continue;
-    }
-    const provenance = provenanceFrom(input.entry);
-    if (provenance === undefined) {
-      unresolved.push({ assertion_id: assertionId, reason: "missing provider provenance" });
-      continue;
-    }
     usedAssertions.add(assertionId);
     converted.push(sealSemanticArtifact({
       schema_version: 1,
       kind: "assertion_semantic_artifact_v1",
-      semantic_key: binding.semanticKey,
+      semantic_key: unit.semanticKey,
       semantic_contract: input.semanticContract,
       capability: LEGACY_CONVERSION_CAPABILITY,
       capability_set: [LEGACY_CONVERSION_CAPABILITY],
-      model_family: input.modelFamily,
-      model_id: input.entry.model,
+      model_family: input.sealedEntry.modelFamily,
+      model_id: input.sealedEntry.model,
       admission_state: "provider_backed",
-      source_bindings: [binding],
-      raw_response_digest: rawJsonSha256,
-      provider_provenance: provenance
+      source_bindings: [unit.binding],
+      replay_identity: input.replayIdentity,
+      replay_identity_digest: replayIdentityDigest,
+      raw_response_digest: input.rawJsonSha256,
+      provider_provenance: {
+        provider_url_sha256: input.sealedEntry.providerUrlSha256,
+        request_profile: input.sealedEntry.requestProfile,
+        model_id: input.sealedEntry.model,
+        transport_model_id: input.sealedEntry.transportModel
+      },
+      legacy_conversion_witness: input.witness
     }));
   }
   for (const assertion of input.request.source_assertions) {
@@ -163,14 +200,42 @@ export function convertLegacyExtractionShard(input: {
       unresolved.push({ assertion_id: assertion.assertion_id, reason: "no convertible signal" });
     }
   }
-  return report(input.entry.cache_key, rawJsonSha256, mergeSameKey(converted), unresolved);
+  return report(
+    input.entry.cache_key,
+    input.rawJsonSha256,
+    mergeSameKey(converted).map(captureLegacyAdmission),
+    unresolved
+  );
 }
 
-function isCompleteInspection(entry: CachedExtractionEntry): boolean {
-  const metadata = entry.response_metadata as
-    | { readonly completion_witness?: string; readonly finish_reason?: string }
-    | undefined;
-  return metadata?.completion_witness === "done_sentinel" && metadata.finish_reason === "stop";
+function captureLegacyAdmission(artifact: SemanticArtifact): VerifiedSemanticArtifactAdmission {
+  if (artifact.admission_state !== "provider_backed") {
+    throw new Error("legacy conversion cannot issue this semantic admission state");
+  }
+  const handle: VerifiedSemanticArtifactAdmission = Object.freeze({
+    semanticKey: artifact.semantic_key,
+    state: artifact.admission_state
+  });
+  sealLegacySemanticArtifactAdmission(handle, artifact);
+  return handle;
+}
+
+function indexUnits(
+  units: readonly ExactSourceGroundingTask[]
+): ReadonlyMap<number, ExactSourceGroundingTask> {
+  const counts = new Map<number, number>();
+  for (const unit of units) {
+    counts.set(unit.assertionId, (counts.get(unit.assertionId) ?? 0) + 1);
+  }
+  return new Map(units.flatMap((unit) =>
+    counts.get(unit.assertionId) === 1 ? [[unit.assertionId, unit] as const] : []));
+}
+
+function unresolvedInputReport(
+  entry: CachedExtractionEntry,
+  cause: unknown
+): LegacyConversionReport {
+  return report(entry.cache_key, digest(entry.raw_json), [], [{ reason: errorMessage(cause) }]);
 }
 
 function mergeSameKey(converted: readonly SemanticArtifact[]): readonly SemanticArtifact[] {
@@ -190,56 +255,24 @@ function mergeSameKey(converted: readonly SemanticArtifact[]): readonly Semantic
   return [...merged.values()];
 }
 
-function provesExhaustive(
-  proof: LegacyExhaustiveInspectionProof | undefined,
-  request: OfficialApiExtractionRequest,
-  rawJsonSha256: string,
-  expectedPromptSha256: string
-): boolean {
-  if (proof === undefined) return false;
-  const ids = request.source_assertions.map((assertion) => assertion.assertion_id);
-  return proof.parser_status === "ok" &&
-    proof.completion_status === "complete" &&
-    proof.raw_json_sha256 === rawJsonSha256 &&
-    proof.prompt_sha256 === expectedPromptSha256 &&
-    proof.catalog_assertion_ids.length === ids.length &&
-    ids.every((id, index) => proof.catalog_assertion_ids[index] === id);
-}
-
-function indexBindings(
-  bindings: readonly SemanticArtifactSourceBinding[]
-): Map<number, SemanticArtifactSourceBinding> {
-  const counts = new Map<number, number>();
-  for (const binding of bindings) {
-    const assertionId = binding.locator.assertion_id;
-    counts.set(assertionId, (counts.get(assertionId) ?? 0) + 1);
-  }
-  const indexed = new Map<number, SemanticArtifactSourceBinding>();
-  for (const binding of bindings) {
-    if (counts.get(binding.locator.assertion_id) === 1) {
-      indexed.set(binding.locator.assertion_id, binding);
-    }
-  }
-  return indexed;
-}
-
 function report(
   cacheKey: string,
   rawJsonSha256: string,
-  converted: readonly SemanticArtifact[],
+  converted: readonly VerifiedSemanticArtifactAdmission[],
   unresolved: readonly LegacyConversionUnresolved[]
 ): LegacyConversionReport {
-  return { cache_key: cacheKey, raw_json_sha256: rawJsonSha256, converted, unresolved };
+  return Object.freeze({
+    cache_key: cacheKey,
+    raw_json_sha256: rawJsonSha256,
+    converted: Object.freeze([...converted]),
+    unresolved: Object.freeze([...unresolved])
+  });
 }
 
-function provenanceFrom(entry: CachedExtractionEntry) {
-  const raw = entry.transport_provenance?.provider_url_sha256;
-  if (raw === undefined) return undefined;
-  const digest = raw.startsWith("sha256:") ? raw.slice("sha256:".length) : raw;
-  if (!/^[a-f0-9]{64}$/u.test(digest)) return undefined;
-  return {
-    provider_url_sha256: digest,
-    request_profile: entry.request_profile,
-    model_id: entry.model
-  };
+function digest(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function errorMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }

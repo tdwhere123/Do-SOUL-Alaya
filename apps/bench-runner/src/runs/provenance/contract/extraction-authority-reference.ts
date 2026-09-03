@@ -48,6 +48,58 @@ export interface LoadedGlobalExtractionAuthority {
   readonly fanout: LoadedGlobalFanoutAuthority | null;
 }
 
+export interface LoadedExtractionAuthorityEntry {
+  readonly authoritySha256: string;
+  readonly sourceManifestSha256: string;
+  readonly extractionModel: string;
+  readonly modelFamily: string;
+  readonly requestProfile: string;
+  readonly systemPromptSha256: string;
+  readonly rawJsonSha256: string;
+  readonly rawSignalCount: number;
+  readonly parsedDraftCount: number;
+  readonly fillStatus: "complete";
+  readonly coverage: 1;
+}
+
+const loadedExtractionAuthorityCaptures = new WeakMap<object, Readonly<{
+  bytes: Buffer;
+  authoritySha256: string;
+}>>();
+
+export function inspectLoadedExtractionAuthorityEntry(
+  loaded: LoadedGlobalExtractionAuthority,
+  cacheKey: string
+): LoadedExtractionAuthorityEntry {
+  const capture = loadedExtractionAuthorityCaptures.get(loaded);
+  if (capture === undefined) {
+    throw new Error("legacy conversion requires a loaded extraction authority");
+  }
+  if (!/^[a-f0-9]{64}$/u.test(cacheKey)) {
+    throw new Error("legacy conversion cache identity is invalid");
+  }
+  const authority = parseSnapshotExtractionAuthorityBytes(
+    capture.bytes, "loaded legacy conversion extraction authority"
+  );
+  const closure = authority.content_closure_index[cacheKey];
+  if (closure === undefined) {
+    throw new Error("legacy shard is absent from extraction authority");
+  }
+  return Object.freeze({
+    authoritySha256: capture.authoritySha256,
+    sourceManifestSha256: authority.source_manifest_sha256,
+    extractionModel: authority.extraction_model,
+    modelFamily: authority.model_family,
+    requestProfile: authority.request_profile,
+    systemPromptSha256: authority.system_prompt_sha256,
+    rawJsonSha256: closure[0],
+    rawSignalCount: closure[1],
+    parsedDraftCount: closure[2],
+    fillStatus: authority.fill_status,
+    coverage: authority.coverage
+  });
+}
+
 export function buildShardExtractionAuthorityReference(input: {
   readonly compact: LongMemEvalSnapshotRunProvenance;
   readonly captured: CapturedSnapshotExtractionAuthority;
@@ -103,27 +155,35 @@ export async function loadGlobalExtractionAuthority(
   root: string,
   hooks: { readonly afterSnapshot?: () => void | Promise<void> } = {}
 ): Promise<LoadedGlobalExtractionAuthority | null> {
+  const capturedRoot = root;
+  const capturedAfterSnapshot = hooks.afterSnapshot;
   const file = await openContainedArtifact(
-    root,
+    capturedRoot,
     LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME
   );
   if (file === null) return null;
   try {
-    const bytes = await file.readBytes(MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES);
-    await hooks.afterSnapshot?.();
+    const bytes = Buffer.from(await file.readBytes(MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES));
+    const fanout = await loadGlobalFanoutAuthority(capturedRoot);
+    await capturedAfterSnapshot?.();
     const authority = parseSnapshotExtractionAuthorityBytes(
       bytes,
       LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME
     );
-    return Object.freeze({
+    const loaded = Object.freeze({
       descriptor: longMemEvalArtifactDescriptor(
         LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME,
         bytes
       ),
       authority,
       contents: Buffer.from(bytes).toString("utf8"),
-      fanout: await loadGlobalFanoutAuthority(root)
+      fanout
     });
+    loadedExtractionAuthorityCaptures.set(loaded, Object.freeze({
+      bytes,
+      authoritySha256: loaded.descriptor.sha256
+    }));
+    return loaded;
   } finally {
     await file.close();
   }
@@ -135,27 +195,29 @@ export function bindShardRunProvenanceAuthority(input: {
   readonly global: LoadedGlobalExtractionAuthority;
 }): LongMemEvalRunProvenance {
   const compact = LongMemEvalSnapshotRunProvenanceSchema.parse(input.compact);
+  const capturedGlobal = input.global;
+  const capturedReference = input.reference;
   const cache = requireCurrentCompactCache(compact);
-  const fanout = input.global.fanout;
+  const fanout = capturedGlobal.fanout;
   if (fanout === null) {
     throw new Error("compact shard provenance requires parent fanout authority");
   }
   assertLongMemEvalFanoutAuthorityBinding({
     fanout: fanout.authority,
-    authority: input.global.authority,
+    authority: capturedGlobal.authority,
     compact: cache,
-    extractionDescriptor: input.global.descriptor
+    extractionDescriptor: capturedGlobal.descriptor
   });
   assertLongMemEvalFanoutReferenceBinding({
-    reference: input.reference,
+    reference: capturedReference,
     fanout: fanout.authority,
     fanoutDescriptor: fanout.descriptor,
-    extractionDescriptor: input.global.descriptor,
-    sourceManifestSha256: input.global.authority.source_manifest_sha256
+    extractionDescriptor: capturedGlobal.descriptor,
+    sourceManifestSha256: capturedGlobal.authority.source_manifest_sha256
   });
-  assertShardInvocationBinding(compact, input.reference, fanout.authority);
-  assertSnapshotExtractionAuthorityBinding(input.global.authority, cache);
-  return bindSnapshotRunProvenanceAuthority(compact, input.global.authority);
+  assertShardInvocationBinding(compact, capturedReference, fanout.authority);
+  assertSnapshotExtractionAuthorityBinding(capturedGlobal.authority, cache);
+  return bindSnapshotRunProvenanceAuthority(compact, capturedGlobal.authority);
 }
 
 function assertShardInvocationBinding(

@@ -9,7 +9,9 @@ import {
   LongMemEvalRunProvenanceObjectSchema,
   LongMemEvalRunProvenanceSchema,
   refineRunProvenanceIngestionMode,
+  bindVerifiedLazyReceiptToRunProvenance,
   isLongMemEvalRunProvenanceSummaryGateEligible,
+  unwrapVerifiedLazyReceiptForRunProvenance,
   type LongMemEvalRunProvenance
 } from "../provenance/run.js";
 import { ExtractionCacheIdentityBaseSchema } from
@@ -29,6 +31,10 @@ import {
   type SnapshotExtractionAuthority
 } from "./extraction-authority.js";
 import { compactRunIdentity } from "./ingestion-mode.js";
+import { assertLazySemanticAuthorityMatchesExtraction } from
+  "../extraction/fill/semantic-fill-authority.js";
+import type { VerifiedLazySemanticRunReceipt } from
+  "../extraction/fill/semantic-fill-receipt.js";
 
 const SnapshotExtractionCacheIdentitySchema = z.discriminatedUnion(
   "schema_version",
@@ -68,6 +74,10 @@ export type LongMemEvalSnapshotRunProvenance = z.infer<
 export function compactSnapshotRunProvenance(
   provenance: LongMemEvalRunProvenance
 ): LongMemEvalSnapshotRunProvenance {
+  const captured = freezeSnapshotProvenancePremises(provenance);
+  if (captured.lazySemanticRun !== undefined) {
+    unwrapVerifiedLazyReceiptForRunProvenance(provenance);
+  }
   const cache = provenance.extraction_cache;
   if (cache?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION) {
     throw new Error("current snapshot requires current extraction run provenance");
@@ -82,26 +92,31 @@ export function compactSnapshotRunProvenance(
       )
     })
   };
-  if (provenance.schema_version !== 2) {
+  if (captured.schemaVersion !== 2) {
     return LongMemEvalSnapshotRunProvenanceSchema.parse({
       ...provenance,
+      ...capturedIngestionFields(captured),
       extraction_cache: extractionCache
     });
   }
   const substrate = cache.content_closure_sha256 ?? cache.expected_key_set_sha256;
-  if (typeof substrate !== "string" || provenance.ingestion_mode === undefined) {
+  if (typeof substrate !== "string" || captured.ingestionMode === undefined) {
     throw new Error("compact run provenance v2 requires substrate and ingestion_mode");
   }
-  if (provenance.ingestion_mode === "lazy_field" &&
-      provenance.semantic_overlay_identity === undefined) {
+  if (captured.ingestionMode === "lazy_field" &&
+      captured.overlayIdentity === undefined) {
     throw new Error("lazy_field compact provenance requires semantic_overlay_identity");
   }
   return LongMemEvalSnapshotRunProvenanceSchema.parse({
     ...provenance,
+    ...capturedIngestionFields(captured),
     compact_run_identity: compactRunIdentity({
       substrateIdentity: substrate,
-      ingestionMode: provenance.ingestion_mode,
-      overlayIdentity: provenance.semantic_overlay_identity ?? substrate
+      ingestionMode: captured.ingestionMode,
+      overlayIdentity: captured.overlayIdentity ?? substrate,
+      ...(captured.lazyRunIdentity === undefined
+        ? {}
+        : { lazyRunIdentity: captured.lazyRunIdentity })
     }),
     extraction_cache: extractionCache
   });
@@ -109,38 +124,116 @@ export function compactSnapshotRunProvenance(
 
 export function bindSnapshotRunProvenanceAuthority(
   provenance: LongMemEvalSnapshotRunProvenance,
-  authority: SnapshotExtractionAuthority
+  authority: SnapshotExtractionAuthority,
+  lazyReceiptHandle?: VerifiedLazySemanticRunReceipt
 ): LongMemEvalRunProvenance {
-  const cache = provenance.extraction_cache;
+  const captured = freezeSnapshotProvenancePremises(provenance);
+  const capturedHandle = lazyReceiptHandle;
+  if (captured.lazySemanticRun !== undefined && capturedHandle === undefined) {
+    throw new Error("persisted lazy snapshot provenance requires a verified receipt loader handle");
+  }
+  if (captured.lazySemanticRun === undefined && capturedHandle !== undefined) {
+    throw new Error("snapshot provenance cannot attach a lazy receipt handle without a receipt");
+  }
+  const cache = captured.extractionCache;
   if (cache?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION) {
     throw new Error("snapshot run provenance has no current extraction summary");
   }
   assertSnapshotExtractionAuthorityBinding(authority, cache);
   const { compact_run_identity, ...rest } = provenance;
-  if (provenance.schema_version === 1 && compact_run_identity !== undefined) {
+  if (captured.schemaVersion === 1 && compact_run_identity !== undefined) {
     throw new Error("schema_version 1 cannot carry compact_run_identity");
   }
-  if (provenance.schema_version === 2) {
+  if (captured.schemaVersion === 2) {
     const substrate = cache.content_closure_sha256 ?? cache.expected_key_set_sha256;
-    if (typeof substrate !== "string" || provenance.ingestion_mode === undefined) {
+    if (typeof substrate !== "string" || captured.ingestionMode === undefined) {
       throw new Error("compact run provenance v2 requires substrate and ingestion_mode");
     }
     const expected = compactRunIdentity({
       substrateIdentity: substrate,
-      ingestionMode: provenance.ingestion_mode,
-      overlayIdentity: provenance.semantic_overlay_identity ?? substrate
+      ingestionMode: captured.ingestionMode,
+      overlayIdentity: captured.overlayIdentity ?? substrate,
+      ...(captured.lazyRunIdentity === undefined
+        ? {}
+        : { lazyRunIdentity: captured.lazyRunIdentity })
     });
     if (compact_run_identity !== expected) {
       throw new Error("compact_run_identity does not match substrate and ingestion_mode");
     }
   }
-  return LongMemEvalRunProvenanceSchema.parse({
+  const full = LongMemEvalRunProvenanceSchema.parse({
     ...rest,
+    ...capturedIngestionFields(captured),
     extraction_cache: {
       ...cache,
       content_closure_index: authority.content_closure_index
     }
   });
+  if (capturedHandle === undefined) return full;
+  const receipt = bindVerifiedLazyReceiptToRunProvenance(full, capturedHandle)
+    .lazy_semantic_run!;
+  assertLazySemanticAuthorityMatchesExtraction({
+    receipt,
+    extraction: {
+      schema_version: authority.source_manifest_schema_version,
+      manifest_sha256: authority.source_manifest_sha256,
+      dataset: authority.dataset,
+      dataset_revision: authority.dataset_revision,
+      extraction_model: authority.extraction_model,
+      model_family: authority.model_family,
+      request_profile: authority.request_profile,
+      system_prompt_sha256: authority.system_prompt_sha256,
+      cache_key_algo: authority.cache_key_algo,
+      expected_turns: authority.expected_turns,
+      expected_key_set_sha256: authority.expected_key_set_sha256,
+      content_closure_sha256: authority.content_closure_sha256,
+      content_closure_index: authority.content_closure_index,
+      window_offset: authority.window_offset,
+      window_limit: authority.window_limit
+    },
+    ...(full.dataset_sha256 === undefined ? {} : { datasetSha256: full.dataset_sha256 })
+  });
+  return full;
+}
+
+function freezeSnapshotProvenancePremises(
+  provenance: Pick<LongMemEvalSnapshotRunProvenance,
+    "schema_version" | "ingestion_mode" | "semantic_overlay_identity" | "lazy_semantic_run" |
+    "extraction_cache">
+) {
+  const lazySemanticRun = provenance.lazy_semantic_run === undefined
+    ? undefined
+    : structuredClone(provenance.lazy_semantic_run);
+  const extractionCache = provenance.extraction_cache === undefined ||
+    provenance.extraction_cache === null
+    ? provenance.extraction_cache
+    : structuredClone(provenance.extraction_cache);
+  return Object.freeze({
+    schemaVersion: provenance.schema_version,
+    ingestionMode: provenance.ingestion_mode,
+    overlayIdentity: provenance.semantic_overlay_identity,
+    lazySemanticRun,
+    lazyRunIdentity: lazySemanticRun?.runIdentity,
+    extractionCache
+  });
+}
+
+function capturedIngestionFields(
+  captured: ReturnType<typeof freezeSnapshotProvenancePremises>
+) {
+  if (captured.schemaVersion === 1) {
+    return { schema_version: 1 as const };
+  }
+  return {
+    schema_version: 2 as const,
+    ingestion_mode: captured.ingestionMode,
+    ...(captured.overlayIdentity === undefined
+      ? {}
+      : { semantic_overlay_identity: captured.overlayIdentity }),
+    ...(captured.lazySemanticRun === undefined
+      ? {}
+      : { lazy_semantic_run: captured.lazySemanticRun })
+  };
 }
 
 export function isSnapshotRunProvenanceSummaryGateEligible(

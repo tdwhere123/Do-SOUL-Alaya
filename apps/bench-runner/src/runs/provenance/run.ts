@@ -35,6 +35,13 @@ import type { SourceAssertionSupplementBinding } from
 import { collectCjkSegmentationProvenance } from "./cjk-segmentation.js";
 import { resolveBenchCheckoutRoot } from "./identity/checkout-root.js";
 import {
+  unwrapVerifiedLazySemanticRunReceipt,
+  type LazySemanticRunReceipt,
+  type VerifiedLazySemanticRunReceipt
+} from "../extraction/fill/semantic-fill-receipt.js";
+import { assertLazySemanticAuthorityMatchesExtraction } from
+  "../extraction/fill/semantic-fill-authority.js";
+import {
   ExecutedDistIdentitySchema,
   LongMemEvalRunProvenanceSchema,
   type LongMemEvalRunProvenance
@@ -55,6 +62,8 @@ export {
 } from "./run-provenance-gate.js";
 
 export const LONGMEMEVAL_RUN_PROVENANCE_FILENAME = "longmemeval-run-provenance.json";
+
+const verifiedLazyRunProvenance = new WeakMap<object, VerifiedLazySemanticRunReceipt>();
 
 export async function buildLongMemEvalRunProvenance(input: {
   readonly opts: LongMemEvalRunOptions;
@@ -77,7 +86,9 @@ export async function buildLongMemEvalRunProvenance(input: {
   readonly measureGitState?: (checkoutRoot: string) => Promise<MeasuredGitState>;
   readonly ingestionMode?: "precomputed_full" | "lazy_field";
   readonly semanticOverlayIdentity?: string;
+  readonly lazySemanticRun?: VerifiedLazySemanticRunReceipt;
 }): Promise<LongMemEvalRunProvenance> {
+  const premises = freezeRunProvenancePremises(input);
   const checkoutRoot = resolveBenchCheckoutRoot();
   const [executedDist, frozenCode] = await Promise.all([
     resolveExecutedDistIdentity(input),
@@ -94,20 +105,32 @@ export async function buildLongMemEvalRunProvenance(input: {
     measureGitState: input.measureGitState
   });
   const [extractionCache, questionManifest] = await Promise.all([
-    readExtractionCacheIdentity(input.opts, input.env),
-    readManifestIdentity(input.opts.questionManifest)
+    readExtractionCacheIdentity(premises.opts, input.env),
+    readManifestIdentity(premises.opts.questionManifest)
   ]);
-  return LongMemEvalRunProvenanceSchema.parse({
-    schema_version: input.ingestionMode === undefined ? 1 : 2,
-    ...(input.ingestionMode === undefined ? {} : {
-      ingestion_mode: input.ingestionMode,
-      ...(input.semanticOverlayIdentity === undefined
+  if (premises.lazyReceipt !== undefined) {
+    assertLazySemanticRunProvenanceInput({
+      ingestionMode: premises.ingestionMode,
+      semanticOverlayIdentity: premises.semanticOverlayIdentity,
+      datasetSha256: premises.datasetSha256,
+      extractionCache,
+      receipt: premises.lazyReceipt
+    });
+  }
+  const provenance = LongMemEvalRunProvenanceSchema.parse({
+    schema_version: premises.ingestionMode === undefined ? 1 : 2,
+    ...(premises.ingestionMode === undefined ? {} : {
+      ingestion_mode: premises.ingestionMode,
+      ...(premises.semanticOverlayIdentity === undefined
         ? {}
-        : { semantic_overlay_identity: input.semanticOverlayIdentity })
+        : { semantic_overlay_identity: premises.semanticOverlayIdentity }),
+      ...(premises.lazyReceipt === undefined
+        ? {}
+        : { lazy_semantic_run: premises.lazyReceipt })
     }),
-    ...(input.datasetSha256 === undefined
+    ...(premises.datasetSha256 === undefined
       ? {}
-      : { dataset_sha256: input.datasetSha256 }),
+      : { dataset_sha256: premises.datasetSha256 }),
     ...(input.selection === undefined ? {} : { selection: input.selection }),
     code: buildRecordedRunCodeIdentity({
       commitSha7: input.commitSha7,
@@ -123,6 +146,82 @@ export async function buildLongMemEvalRunProvenance(input: {
     execution: buildExecutionIdentity(input),
     recall_config: buildRunRecallConfig(input),
     question_manifest: questionManifest
+  });
+  if (premises.lazyReceiptHandle !== undefined) {
+    verifiedLazyRunProvenance.set(provenance, premises.lazyReceiptHandle);
+  }
+  return provenance;
+}
+
+function freezeRunProvenancePremises(
+  input: Parameters<typeof buildLongMemEvalRunProvenance>[0]
+) {
+  const lazyReceiptHandle = input.lazySemanticRun;
+  const lazyReceipt = lazyReceiptHandle === undefined
+    ? undefined
+    : freezeLazyReceiptSnapshot(unwrapVerifiedLazySemanticRunReceipt(lazyReceiptHandle));
+  return Object.freeze({
+    ingestionMode: input.ingestionMode,
+    semanticOverlayIdentity: input.semanticOverlayIdentity,
+    lazyReceiptHandle,
+    lazyReceipt,
+    datasetSha256: input.datasetSha256,
+    opts: Object.freeze({ ...input.opts })
+  });
+}
+
+function freezeLazyReceiptSnapshot(receipt: LazySemanticRunReceipt): LazySemanticRunReceipt {
+  return Object.freeze(structuredClone(receipt));
+}
+
+export function bindVerifiedLazyReceiptToRunProvenance(
+  provenance: LongMemEvalRunProvenance,
+  handle: VerifiedLazySemanticRunReceipt
+): LongMemEvalRunProvenance {
+  const receipt = unwrapVerifiedLazySemanticRunReceipt(handle);
+  if (JSON.stringify(receipt) !== JSON.stringify(provenance.lazy_semantic_run)) {
+    throw new Error("verified lazy receipt differs from persisted run provenance");
+  }
+  verifiedLazyRunProvenance.set(provenance, handle);
+  return provenance;
+}
+
+export function unwrapVerifiedLazyReceiptForRunProvenance(
+  provenance: LongMemEvalRunProvenance
+): LazySemanticRunReceipt | undefined {
+  if (provenance.lazy_semantic_run === undefined) return undefined;
+  const handle = verifiedLazyRunProvenance.get(provenance);
+  if (handle === undefined) {
+    throw new Error("persisted lazy run provenance requires a verified receipt handle");
+  }
+  const receipt = unwrapVerifiedLazySemanticRunReceipt(handle);
+  if (JSON.stringify(receipt) !== JSON.stringify(provenance.lazy_semantic_run)) {
+    throw new Error("verified lazy receipt differs from run provenance");
+  }
+  return receipt;
+}
+
+function assertLazySemanticRunProvenanceInput(input: {
+  readonly ingestionMode: "precomputed_full" | "lazy_field" | undefined;
+  readonly semanticOverlayIdentity: string | undefined;
+  readonly datasetSha256: string | undefined;
+  readonly extractionCache: Awaited<ReturnType<typeof readExtractionCacheIdentity>>;
+  readonly receipt: LazySemanticRunReceipt;
+}): void {
+  if (input.ingestionMode !== "lazy_field") {
+    throw new Error("verified lazy semantic receipt requires lazy_field ingestion mode");
+  }
+  if (input.semanticOverlayIdentity !== input.receipt.endingOverlayIdentity) {
+    throw new Error("lazy semantic overlay must equal the receipt ending overlay");
+  }
+  if (input.receipt.failures !== 0 || input.receipt.unavailable !== 0 ||
+      input.receipt.cold + input.receipt.warm !== input.receipt.uniqueUnits) {
+    throw new Error("lazy semantic run provenance requires a complete artifact closure");
+  }
+  assertLazySemanticAuthorityMatchesExtraction({
+    receipt: input.receipt,
+    extraction: input.extractionCache,
+    ...(input.datasetSha256 === undefined ? {} : { datasetSha256: input.datasetSha256 })
   });
 }
 

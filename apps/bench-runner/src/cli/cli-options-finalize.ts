@@ -48,6 +48,10 @@ export function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     querySemanticFactorCache: state.querySemanticFactorCache,
     qa: state.qa,
     edgePlane: state.edgePlane,
-    expectedReconciliationBasis: state.expectedReconciliationBasis
+    expectedReconciliationBasis: state.expectedReconciliationBasis,
+    ingestionMode: state.ingestionMode,
+    semanticArtifactRoot: state.semanticArtifactRoot,
+    semanticMaxCalls: state.semanticMaxCalls,
+    semanticMaxFailures: state.semanticMaxFailures
   };
 }

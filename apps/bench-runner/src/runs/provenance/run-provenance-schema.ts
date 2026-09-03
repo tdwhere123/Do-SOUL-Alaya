@@ -7,6 +7,8 @@ import { SourceAssertionSupplementBindingSchema } from
   "../extraction/cache/semantic-supplement/source-assertion-supplement.js";
 import { QuerySemanticFactorCacheProvenanceIdentitySchema } from
   "../query-factors/query-semantic-factor-cache-identity.js";
+import { LazySemanticRunReceiptSchema } from
+  "../extraction/fill/semantic-fill-receipt.js";
 
 export const runProvenanceSha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 export const ExecutedDistIdentitySchema = z.object({
@@ -121,11 +123,12 @@ export const LongMemEvalRunProvenanceObjectSchema = z.object({
     file_sha256: runProvenanceSha256Schema
   }).strict().nullable(),
   ingestion_mode: z.enum(["precomputed_full", "lazy_field"]).optional(),
-  semantic_overlay_identity: runProvenanceSha256Schema.optional()
+  semantic_overlay_identity: runProvenanceSha256Schema.optional(),
+  lazy_semantic_run: LazySemanticRunReceiptSchema.optional()
 }).strict();
 
 export function refineRunProvenanceIngestionMode(
-  value: { readonly schema_version: 1 | 2; readonly ingestion_mode?: "precomputed_full" | "lazy_field"; readonly semantic_overlay_identity?: string },
+  value: { readonly schema_version: 1 | 2; readonly ingestion_mode?: "precomputed_full" | "lazy_field"; readonly semantic_overlay_identity?: string; readonly lazy_semantic_run?: unknown },
   ctx: z.RefinementCtx
 ): void {
   if (value.schema_version === 2 && value.ingestion_mode === undefined) {
@@ -144,12 +147,20 @@ export function refineRunProvenanceIngestionMode(
     });
   }
   if (value.schema_version === 2 && value.ingestion_mode === "lazy_field" &&
-      value.semantic_overlay_identity === undefined) {
+      (value.semantic_overlay_identity === undefined || value.lazy_semantic_run === undefined)) {
     ctx.addIssue({
       code: "custom",
-      message: "lazy_field requires semantic_overlay_identity",
-      path: ["semantic_overlay_identity"]
+      message: "lazy_field requires semantic overlay and run receipt identity",
+      path: ["lazy_semantic_run"]
     });
+  }
+  if (value.ingestion_mode === "lazy_field" && value.lazy_semantic_run !== undefined &&
+      value.semantic_overlay_identity !== (value.lazy_semantic_run as { endingOverlayIdentity?: unknown }).endingOverlayIdentity) {
+    ctx.addIssue({ code: "custom", message: "lazy semantic overlay must equal the receipt ending overlay" });
+  }
+  if (value.ingestion_mode !== "lazy_field" &&
+      (value.lazy_semantic_run !== undefined || value.semantic_overlay_identity !== undefined)) {
+    ctx.addIssue({ code: "custom", message: "precomputed_full cannot carry semantic overlay state" });
   }
 }
 

@@ -1,138 +1,50 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { convertLegacyExtractionShard } from
+  "../../../runs/extraction/cache/semantic-artifact/legacy-convert.js";
 import {
-  buildOfficialApiExtractionRequests,
-  planOfficialApiSemanticWorkset
-} from "@do-soul/alaya-soul";
-import { convertLegacyExtractionShard } from "../../../runs/extraction/cache/semantic-artifact/legacy-convert.js";
-import type { CachedExtractionEntry } from "../../../runs/compile-seed/cache/cache-shard.js";
-import type { SemanticArtifactSourceBinding } from "../../../runs/extraction/cache/semantic-artifact/contract.js";
+  readVerifiedLegacyExtractionEntry,
+  type VerifiedLegacyExtractionEntry
+} from "../../../runs/extraction/cache/semantic-artifact/legacy-sealed-entry.js";
+import { semanticTask } from "./semantic-artifact-fixture.js";
 
-const CONTRACT = "alaya.assertion_semantic_identity.v1";
-const PROMPT_SHA = "aa".repeat(32);
-
-function entry(rawJson: string): CachedExtractionEntry {
-  return {
-    model: "mimo-v2.5",
-    request_profile: "mimo-v2.5-nonthinking-v1",
-    cache_key: "ef".repeat(32),
-    raw_json: rawJson,
-    extracted_at: "2026-08-23T10:07:08.564Z"
-  };
-}
-
-function bindingFor(
-  turnContent: string,
-  request: ReturnType<typeof buildOfficialApiExtractionRequests>[number]
-): SemanticArtifactSourceBinding {
-  const minted = planOfficialApiSemanticWorkset(turnContent, [
-    { role: "user", content: turnContent }
-  ]).units;
-  const binding = minted.find((item) =>
-    request.source_assertions.some((assertion) => assertion.assertion_id === item.assertionId)
-  )?.binding;
-  if (binding === undefined) throw new Error("no minted binding");
-  return binding;
-}
+const DIGEST = "11".repeat(32);
 
 describe("legacy shard conversion", () => {
-  it("does not mint assertion-empty from batch-empty without exhaustive proof", () => {
-    const requests = buildOfficialApiExtractionRequests("I moved to Berlin.", [
-      { role: "user", content: "I moved to Berlin." }
-    ]);
-    const request = requests[0]!;
-    const report = convertLegacyExtractionShard({
-      entry: entry('{"signals":[]}'),
-      request,
-      sourceBindings: [bindingFor("I moved to Berlin.", request)],
-      semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5",
-      expectedPromptSha256: PROMPT_SHA
-    });
-    expect(report.converted).toEqual([]);
-    expect(report.unresolved[0]?.reason).toMatch(/not assertion-empty/u);
-  });
-
-  it("records empty-turn shards as unresolved rather than known-empty artifacts", () => {
-    const request = buildOfficialApiExtractionRequests("?", [{ role: "user", content: "?" }])[0]!;
-    const report = convertLegacyExtractionShard({
-      entry: entry('{"signals":[]}'),
-      request,
-      sourceBindings: [],
-      semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5",
-      expectedPromptSha256: PROMPT_SHA
-    });
-    expect(request.source_assertions).toEqual([]);
-    expect(report.converted).toEqual([]);
-    expect(report.unresolved[0]?.reason).toMatch(/no assertion members/u);
-  });
-
-  it("keeps truncated and non-JSON shards unresolved", () => {
-    const requests = buildOfficialApiExtractionRequests("I moved to Berlin.", [
-      { role: "user", content: "I moved to Berlin." }
-    ]);
-    const request = requests[0]!;
-    const truncated = convertLegacyExtractionShard({
-      entry: entry('{"signals":['),
-      request,
-      sourceBindings: [bindingFor("I moved to Berlin.", request)],
-      semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5",
-      expectedPromptSha256: PROMPT_SHA
-    });
-    expect(truncated.converted).toEqual([]);
-    expect(truncated.unresolved.length).toBeGreaterThan(0);
-  });
-
-  it("mints deterministic-empty members only with exhaustive inspection proof", () => {
-    const requests = buildOfficialApiExtractionRequests("I moved to Berlin.", [
-      { role: "user", content: "I moved to Berlin." }
-    ]);
-    const request = requests[0]!;
-    const raw = '{"signals":[]}';
-    const rawSha = createHash("sha256").update(raw, "utf8").digest("hex");
-    const report = convertLegacyExtractionShard({
-      entry: entry(raw),
-      request,
-      sourceBindings: [bindingFor("I moved to Berlin.", request)],
-      semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5",
-      expectedPromptSha256: PROMPT_SHA,
-      exhaustiveProof: {
-        prompt_sha256: PROMPT_SHA,
-        raw_json_sha256: rawSha,
-        parser_status: "ok",
-        completion_status: "complete",
-        catalog_assertion_ids: request.source_assertions.map((assertion) => assertion.assertion_id)
+  it("rejects caller self-signed pins without opaque external authority", () => {
+    expect(() => readVerifiedLegacyExtractionEntry({
+      root: "/tmp/caller-selected-legacy-root",
+      cacheKey: DIGEST,
+      inventory: {
+        manifestSha256: DIGEST,
+        entries: {
+          [DIGEST]: { fileSha256: DIGEST, completionWitnessSha256: DIGEST }
+        }
       }
-    });
-    expect(report.converted).toHaveLength(1);
-    expect(report.converted[0]?.admission_state).toBe("deterministic_empty");
-    expect(report.converted[0]?.deterministic_empty_proof?.kind).toBe("exhaustive_member_inspection");
+    } as never)).toThrow(/loaded extraction authority/u);
   });
 
-  it("is deterministic for the same shard and request", () => {
-    const requests = buildOfficialApiExtractionRequests("I moved to Berlin.", [
-      { role: "user", content: "I moved to Berlin." }
-    ]);
-    const request = requests[0]!;
-    const first = convertLegacyExtractionShard({
-      entry: entry('{"signals":[]}'),
-      request,
-      sourceBindings: [bindingFor("I moved to Berlin.", request)],
-      semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5",
-      expectedPromptSha256: PROMPT_SHA
+  it("rejects structurally forged legacy reader handles", () => {
+    const task = semanticTask();
+    const report = convertLegacyExtractionShard({
+      sealedEntry: {
+        cacheKey: DIGEST,
+        fileSha256: DIGEST,
+        completionWitnessSha256: DIGEST
+      } as VerifiedLegacyExtractionEntry,
+      request: {
+        schema_version: 2,
+        source_locator_contract_version: 2,
+        batch_contract_version: 1,
+        source_corpus_identity: task.binding.sourceCorpusIdentity,
+        batch_index: 0,
+        batch_count: 1,
+        source_assertions: [{ assertion_id: task.assertionId, text: task.text }]
+      },
+      sourceUnits: [task],
+      semanticContract: task.semanticContract,
+      expectedSystemPrompt: "sealed prompt"
     });
-    const second = convertLegacyExtractionShard({
-      entry: entry('{"signals":[]}'),
-      request,
-      sourceBindings: [bindingFor("I moved to Berlin.", request)],
-      semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5",
-      expectedPromptSha256: PROMPT_SHA
-    });
-    expect(second).toEqual(first);
+    expect(report.converted).toEqual([]);
+    expect(report.unresolved[0]?.reason).toMatch(/authority-bound reader handle/u);
   });
 });

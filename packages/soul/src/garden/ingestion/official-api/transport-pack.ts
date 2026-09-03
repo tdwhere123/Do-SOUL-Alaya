@@ -30,6 +30,11 @@ export interface TransportPack {
 export interface TransportPackPlan {
   readonly inventory_digest: string;
   readonly packs: readonly TransportPack[];
+  readonly unpackable: readonly Readonly<{
+    semanticKey: string;
+    assertionId: number;
+    reason: "hard_cap_exceeded";
+  }>[];
 }
 
 export type DemultiplexRejection = Readonly<{
@@ -42,18 +47,26 @@ export function planTurnTransportPacks(
   assertions: readonly PackableAssertion[],
   policy: TransportPackPolicy
 ): TransportPackPlan {
+  assertTransportPackPolicy(policy);
   const ordered = [...assertions].sort((left, right) => left.assertionId - right.assertionId);
   const packs: TransportPack[] = [];
+  const unpackable: { semanticKey: string; assertionId: number; reason: "hard_cap_exceeded" }[] = [];
   if (ordered.length === 0) {
-    return freezePlan([emptyPack(policy.kind)]);
+    return freezePlan([emptyPack(policy.kind)], unpackable);
   }
   let offset = 0;
   while (offset < ordered.length) {
     const packed = nextPackSlice(ordered, offset, policy);
+    if (packed === 0) {
+      const member = ordered[offset]!;
+      unpackable.push({ semanticKey: member.semanticKey, assertionId: member.assertionId, reason: "hard_cap_exceeded" });
+      offset += 1;
+      continue;
+    }
     packs.push(makePack(ordered.slice(offset, offset + packed), policy.kind));
     offset += packed;
   }
-  return freezePlan(packs);
+  return freezePlan(packs, unpackable);
 }
 
 export function demultiplexTransportPack(
@@ -65,9 +78,10 @@ export function demultiplexTransportPack(
 }> {
   const allowedKeys = new Set(pack.semantic_keys);
   const allowedIds = new Set(pack.assertion_ids);
-  const admittedKeys: string[] = [];
+  const admittedKeys = new Set<string>();
   const rejections: DemultiplexRejection[] = [];
   const seen = new Set<string>();
+  const rejectedMembers = new Set<string>();
   for (const entry of entries) {
     const key = entry.semanticKey;
     const assertionId = entry.assertionId;
@@ -96,14 +110,16 @@ export function demultiplexTransportPack(
       continue;
     }
     if (seen.has(resolved)) {
+      admittedKeys.delete(resolved);
+      rejectedMembers.add(resolved);
       rejections.push({ reason: "duplicate", semanticKey: resolved });
       continue;
     }
     seen.add(resolved);
-    admittedKeys.push(resolved);
+    if (!rejectedMembers.has(resolved)) admittedKeys.add(resolved);
   }
   return Object.freeze({
-    admittedKeys: Object.freeze(admittedKeys),
+    admittedKeys: Object.freeze([...admittedKeys]),
     rejections: Object.freeze(rejections)
   });
 }
@@ -126,13 +142,11 @@ function nextPackSlice(
     const nextChars = packedChars + next.text.length + 24;
     const inputTokens = estimateTokens(policy.systemPromptChars + 180 + nextChars);
     const expectedOut = 64 * (packed + 1);
-    if (packed > 0 && (inputTokens > policy.maxInputTokens || expectedOut > policy.expectedOutputCap)) {
-      break;
-    }
+    if (inputTokens > policy.maxInputTokens || expectedOut > policy.expectedOutputCap) break;
     packedChars = nextChars;
     packed += 1;
   }
-  return Math.max(1, packed);
+  return packed;
 }
 
 function makePack(
@@ -160,14 +174,45 @@ function emptyPack(policyKind: TransportPackPolicy["kind"]): TransportPack {
   return makePack([], policyKind);
 }
 
-function freezePlan(packs: readonly TransportPack[]): TransportPackPlan {
+export function unresolvedRetryMembers<T extends { readonly semanticKey: string }>(
+  members: readonly T[],
+  admittedKeys: ReadonlySet<string>
+): readonly T[] {
+  return Object.freeze(members.filter((member) => !admittedKeys.has(member.semanticKey)));
+}
+
+function freezePlan(
+  packs: readonly TransportPack[],
+  unpackable: readonly Readonly<{ semanticKey: string; assertionId: number; reason: "hard_cap_exceeded" }>[]
+): TransportPackPlan {
   const inventoryDigest = createHash("sha256")
+    .update(String(TRANSPORT_PACK_CONTRACT_VERSION), "utf8")
+    .update("\u0000", "utf8")
     .update(packs.map((pack) => pack.pack_id).join("\n"), "utf8")
+    .update("\u0000", "utf8")
+    .update(unpackable.map((item) =>
+      `${item.semanticKey}\u0000${item.assertionId}\u0000${item.reason}`
+    ).join("\n"), "utf8")
     .digest("hex");
   return Object.freeze({
     inventory_digest: inventoryDigest,
-    packs: Object.freeze([...packs])
+    packs: Object.freeze([...packs]),
+    unpackable: Object.freeze([...unpackable])
   });
+}
+
+function assertTransportPackPolicy(policy: TransportPackPolicy): void {
+  if (policy.kind !== "token_aware") return;
+  for (const [label, value] of Object.entries({
+    maxAssertions: policy.maxAssertions,
+    maxInputTokens: policy.maxInputTokens,
+    expectedOutputCap: policy.expectedOutputCap,
+    systemPromptChars: policy.systemPromptChars
+  })) {
+    if (!Number.isSafeInteger(value) || value < (label === "systemPromptChars" ? 0 : 1)) {
+      throw new TypeError(`${label} must be a finite safe integer within its hard-cap domain`);
+    }
+  }
 }
 
 function estimateTokens(chars: number): number {

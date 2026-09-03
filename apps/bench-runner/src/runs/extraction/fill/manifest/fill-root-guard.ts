@@ -1,17 +1,16 @@
 import {
   closeSync,
   constants,
-  fstatSync,
   lstatSync,
   mkdirSync,
   openSync,
+  readFileSync,
   readdirSync,
-  realpathSync,
-  rmSync,
+  renameSync,
   writeFileSync
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
 import { readBoundedCanonicalUtf8Artifact } from
   "../../cache-audit/bounded-artifact-reader.js";
@@ -20,27 +19,38 @@ import {
   isKernelWriteLeaseActive,
   type KernelWriteLease
 } from "./kernel-write-lease.js";
+import {
+  assertBoundDirectoryIdentity,
+  assertDirectoryIdentity,
+  openExistingCacheRoot,
+  openOrCreateCacheRoot,
+  readDirectoryIdentity,
+  unlinkBoundChildDirectory,
+  type BoundCacheRoot,
+  type DirectoryIdentity
+} from "./root-directory-binding.js";
+export type { DirectoryIdentity };
 
 const EXTRACTION_FILL_LOCK_DIR = ".extraction-fill.lock";
 const MAX_EXTRACTION_FILL_OWNER_BYTES = 16 * 1024;
-const EXTRACTION_FILL_OWNER_SCHEMA_VERSION = 2;
+const EXTRACTION_FILL_OWNER_SCHEMA_VERSION = 3;
 
-interface DirectoryIdentity {
-  readonly device: string;
-  readonly inode: string;
-}
-
-interface BoundCacheRoot {
-  readonly path: string;
-  readonly descriptor: number;
-  readonly identity: DirectoryIdentity;
+interface CurrentWriterLockOwner {
+  readonly schema_version: typeof EXTRACTION_FILL_OWNER_SCHEMA_VERSION;
+  readonly pid: number;
+  readonly process_start_identity: string;
+  readonly token: string;
 }
 
 export interface ExtractionCacheWriteLease {
   readonly cacheRoot: string;
+  /** A unique writer generation; reservations from older generations are recoverable. */
+  readonly generation: string;
   /** Path through the retained directory descriptor; it remains bound if the name is renamed. */
   readonly stableRootPath: string;
+  readonly rootIdentity: DirectoryIdentity;
   assertOwned(): void;
+  assertRoot(candidate: string): void;
   release(): void;
 }
 
@@ -57,34 +67,33 @@ export function inspectExtractionCacheWriterLock(
   } catch {
     return "present";
   }
-  const lockPath = join(boundRoot.path, EXTRACTION_FILL_LOCK_DIR);
-  let stat;
+  const stableLockPath = join(
+    `/proc/self/fd/${boundRoot.descriptor}`, EXTRACTION_FILL_LOCK_DIR
+  );
+  let result: "absent" | "present" = "present";
   try {
-    stat = lstatSync(lockPath);
+    const stat = lstatSync(stableLockPath);
+    if (stat.isDirectory() && !stat.isSymbolicLink()) {
+      parseCurrentWriterLockOwner(readWriterLockOwner(stableLockPath));
+      result = isKernelWriteLeaseActive({
+        ...boundRoot.identity,
+        displayPath: boundRoot.path
+      }) ? "present" : "absent";
+    }
   } catch (cause) {
-    closeSync(boundRoot.descriptor);
-    return hasErrorCode(cause, "ENOENT") ? "absent" : "present";
-  }
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    closeSync(boundRoot.descriptor);
-    return "present";
+    result = hasErrorCode(cause, "ENOENT") ? "absent" : "present";
   }
   try {
-    const owner = JSON.parse(readBoundedCanonicalUtf8Artifact({
-      path: join(lockPath, "owner.json"),
-      maxBytes: MAX_EXTRACTION_FILL_OWNER_BYTES,
-      label: "extraction cache writer lock owner"
-    })) as { readonly schema_version?: unknown };
-    if (owner.schema_version !== EXTRACTION_FILL_OWNER_SCHEMA_VERSION) return "present";
-    return isKernelWriteLeaseActive({
-      ...boundRoot.identity,
-      displayPath: boundRoot.path
-    }) ? "present" : "absent";
+    assertDirectoryIdentity(boundRoot.path, boundRoot.identity, "extraction cache root");
   } catch {
-    return "present";
-  } finally {
-    closeSync(boundRoot.descriptor);
+    result = "present";
   }
+  try {
+    closeSync(boundRoot.descriptor);
+  } catch {
+    result = "present";
+  }
+  return result;
 }
 
 export interface ExtractionCacheWriteLeaseSet {
@@ -101,27 +110,34 @@ export function acquireExtractionCacheWriteLease(
   const absoluteRoot = boundRoot.path;
   const rootFd = boundRoot.descriptor;
   const stableRootPath = `/proc/self/fd/${rootFd}`;
-  const lockPath = join(absoluteRoot, EXTRACTION_FILL_LOCK_DIR);
-  const token = randomUUID();
+  const stableLockPath = join(stableRootPath, EXTRACTION_FILL_LOCK_DIR);
   const rootIdentity = boundRoot.identity;
   let kernelLease: KernelWriteLease | undefined;
-  let metadataCreated = false;
+  let publishedBinding: HeldLeaseOwnerBinding | undefined;
   try {
+    const token = randomUUID();
+    const processStartIdentity = readProcessStartIdentity(process.pid);
     kernelLease = acquireKernelWriteLease({ ...rootIdentity, displayPath: absoluteRoot });
-    prepareWriterLockDirectory(lockPath);
-    publishWriterLock(lockPath, token);
-    metadataCreated = true;
-    const lockIdentity = readDirectoryIdentity(lockPath, "extraction cache writer lock");
-    return createWriteLease({
-      cacheRoot: absoluteRoot, stableRootPath, rootFd, lockPath, token,
-      rootIdentity, lockIdentity, kernelLease
+    prepareWriterLockDirectory(stableLockPath, rootFd);
+    const lockIdentity = publishWriterLock({
+      stableLockPath, rootFd, token, processStartIdentity
     });
+    publishedBinding = {
+      rootFd, stableLockPath, token, rootIdentity, lockIdentity,
+      kernelLease, processStartIdentity
+    };
+    const binding: LeaseOwnerBinding = {
+      ...publishedBinding, cacheRoot: absoluteRoot, stableRootPath
+    };
+    assertExtractionCacheWriteLeaseOwner(binding);
+    return createWriteLease(binding);
   } catch (cause) {
     const acquiredKernelLease = kernelLease;
+    const acquiredPublishedBinding = publishedBinding;
     const cleanupFailures = runCleanupActions([
-      ...(metadataCreated
-        ? [() => rmSync(lockPath, { recursive: true, force: true })]
-        : []),
+      ...(acquiredPublishedBinding === undefined
+        ? []
+        : [() => removeOwnedWriterLockDirectory(acquiredPublishedBinding)]),
       () => closeSync(rootFd),
       ...(acquiredKernelLease === undefined ? [] : [() => acquiredKernelLease.release()])
     ]);
@@ -136,8 +152,11 @@ function createWriteLease(binding: LeaseOwnerBinding): ExtractionCacheWriteLease
   let released = false;
   return {
     cacheRoot: binding.cacheRoot,
+    generation: binding.token,
     stableRootPath: binding.stableRootPath,
+    rootIdentity: binding.rootIdentity,
     assertOwned: () => assertExtractionCacheWriteLeaseOwner(binding),
+    assertRoot: (candidate) => assertLeaseRootAlias(binding, candidate),
     release: () => {
       if (released) throw new Error("extraction cache writer lease was already released");
       released = true;
@@ -283,18 +302,34 @@ interface LeaseOwnerBinding {
   readonly cacheRoot: string;
   readonly stableRootPath: string;
   readonly rootFd: number;
-  readonly lockPath: string;
+  readonly stableLockPath: string;
   readonly token: string;
   readonly rootIdentity: DirectoryIdentity;
   readonly lockIdentity: DirectoryIdentity;
   readonly kernelLease: KernelWriteLease;
+  readonly processStartIdentity: string;
 }
+
+type HeldLeaseOwnerBinding = Omit<LeaseOwnerBinding, "cacheRoot" | "stableRootPath">;
 
 function releaseExtractionCacheWriteLease(binding: LeaseOwnerBinding): void {
   const failures: Error[] = [];
+  let heldOwnershipVerified = false;
   try {
-    assertExtractionCacheWriteLeaseOwner(binding);
-    rmSync(binding.lockPath, { recursive: true, force: true });
+    assertHeldWriterLockOwner(binding);
+    heldOwnershipVerified = true;
+  } catch (cause) {
+    failures.push(asError(cause));
+  }
+  if (heldOwnershipVerified) {
+    try {
+      removeOwnedWriterLockDirectory(binding);
+    } catch (cause) {
+      failures.push(asError(cause));
+    }
+  }
+  try {
+    assertNamedLeaseRootIdentity(binding);
   } catch (cause) {
     failures.push(asError(cause));
   }
@@ -308,41 +343,91 @@ function releaseExtractionCacheWriteLease(binding: LeaseOwnerBinding): void {
   }
 }
 
+function assertLeaseRootAlias(binding: LeaseOwnerBinding, candidate: string): void {
+  const opened = openExistingCacheRoot(candidate);
+  try {
+    if (opened.identity.device !== binding.rootIdentity.device ||
+        opened.identity.inode !== binding.rootIdentity.inode) {
+      throw new ExtractionCacheInvariantError("semantic fill root is not bound to its write lease");
+    }
+  } finally {
+    closeSync(opened.descriptor);
+  }
+}
+
 function assertExtractionCacheWriteLeaseOwner(binding: LeaseOwnerBinding): void {
-  binding.kernelLease.assertOwned();
-  let currentToken: unknown;
-  let schemaVersion: unknown;
+  assertHeldWriterLockOwner(binding);
+  assertNamedLeaseRootIdentity(binding);
+}
+
+function assertHeldWriterLockOwner(binding: HeldLeaseOwnerBinding): void {
+  let owner: CurrentWriterLockOwner;
   try {
     assertBoundDirectoryIdentity(binding.rootFd, binding.rootIdentity, "extraction cache root");
-    assertDirectoryIdentity(binding.cacheRoot, binding.rootIdentity, "extraction cache root");
-    assertDirectoryIdentity(binding.lockPath, binding.lockIdentity, "extraction cache writer lock");
-    const owner = JSON.parse(readBoundedCanonicalUtf8Artifact({
-      path: join(binding.lockPath, "owner.json"),
-      maxBytes: MAX_EXTRACTION_FILL_OWNER_BYTES,
-      label: "extraction cache writer lock owner"
-    })) as {
-      readonly schema_version?: unknown;
-      readonly token?: unknown;
-    };
-    schemaVersion = owner.schema_version;
-    currentToken = owner.token;
+    binding.kernelLease.assertOwned();
+    owner = readHeldWriterLockOwner(binding.stableLockPath, binding.lockIdentity);
   } catch (cause) {
     throw new ExtractionCacheInvariantError(
-      `cannot verify extraction cache writer lock owner: ${String(cause)}`
+      `cannot verify extraction cache writer lock owner; ownership changed or is unreadable: ${String(cause)}`,
+      { cause }
     );
   }
-  if (schemaVersion !== EXTRACTION_FILL_OWNER_SCHEMA_VERSION ||
-      currentToken !== binding.token) {
+  if (owner.token !== binding.token) {
     throw new ExtractionCacheInvariantError(
       "extraction cache writer lock ownership changed before release"
     );
   }
+  if (owner.pid !== process.pid || owner.process_start_identity !== binding.processStartIdentity ||
+      readProcessStartIdentity(process.pid) !== binding.processStartIdentity) {
+    throw new ExtractionCacheInvariantError(
+      "extraction cache writer lock process ownership changed before release"
+    );
+  }
 }
 
-function prepareWriterLockDirectory(lockPath: string): void {
+function readHeldWriterLockOwner(
+  stableLockPath: string,
+  lockIdentity: DirectoryIdentity
+): CurrentWriterLockOwner {
+  const lockFd = openSync(
+    stableLockPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+  );
+  try {
+    assertBoundDirectoryIdentity(lockFd, lockIdentity, "extraction cache writer lock");
+    return parseCurrentWriterLockOwner(readWriterLockOwner(`/proc/self/fd/${lockFd}`));
+  } finally {
+    closeSync(lockFd);
+  }
+}
+
+function assertNamedLeaseRootIdentity(binding: LeaseOwnerBinding): void {
+  try {
+    assertDirectoryIdentity(binding.cacheRoot, binding.rootIdentity, "extraction cache root");
+  } catch (cause) {
+    throw new ExtractionCacheInvariantError(
+      `cannot verify extraction cache root final identity: ${String(cause)}`,
+      { cause }
+    );
+  }
+}
+
+function removeOwnedWriterLockDirectory(binding: HeldLeaseOwnerBinding): void {
+  assertHeldWriterLockOwner(binding);
+  unlinkBoundWriterLockDirectory({
+    rootFd: binding.rootFd,
+    lockIdentity: binding.lockIdentity,
+    tombstoneToken: binding.token,
+    expectedToken: binding.token
+  });
+}
+
+function prepareWriterLockDirectory(
+  stableLockPath: string,
+  rootFd: number
+): void {
   let stat;
   try {
-    stat = lstatSync(lockPath);
+    stat = lstatSync(stableLockPath);
   } catch (cause) {
     if (hasErrorCode(cause, "ENOENT")) return;
     throw cause;
@@ -350,117 +435,227 @@ function prepareWriterLockDirectory(lockPath: string): void {
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new ExtractionCacheInvariantError("extraction cache writer lock is not a real directory");
   }
-  let schemaVersion: unknown;
+  const lockIdentity = readDirectoryIdentity(
+    stableLockPath, "extraction cache writer lock"
+  );
+  let serializedOwner: string;
+  let owner: unknown;
   try {
-    schemaVersion = (JSON.parse(readBoundedCanonicalUtf8Artifact({
-      path: join(lockPath, "owner.json"),
-      maxBytes: MAX_EXTRACTION_FILL_OWNER_BYTES,
-      label: "extraction cache writer lock owner"
-    })) as { readonly schema_version?: unknown }).schema_version;
+    serializedOwner = readWriterLockOwnerText(stableLockPath);
+    owner = JSON.parse(serializedOwner) as unknown;
   } catch (cause) {
     throw new ExtractionCacheInvariantError(
-      `extraction cache writer lock ${lockPath} metadata is unreadable; ` +
-        "manual removal requires independent proof that the prior writer stopped",
+      `extraction cache writer lock metadata is unreadable: ${String(cause)}`,
       { cause }
     );
   }
-  if (schemaVersion !== EXTRACTION_FILL_OWNER_SCHEMA_VERSION) {
+  if (isCurrentWriterLockSchema(owner)) {
+    const currentOwner = parseCurrentWriterLockOwner(owner);
+    let currentStartIdentity: string;
+    try {
+      currentStartIdentity = readProcessStartIdentity(currentOwner.pid);
+    } catch (cause) {
+      if (hasErrorCode(cause, "ENOENT")) {
+        removeStaleWriterLockDirectory(rootFd, lockIdentity, serializedOwner);
+        return;
+      }
+      throw new ExtractionCacheInvariantError(
+        `extraction cache writer lock liveness is unknown: ${String(cause)}`,
+        { cause }
+      );
+    }
+    if (currentStartIdentity === currentOwner.process_start_identity) {
+      throw new ExtractionCacheInvariantError("extraction cache already has an active writer");
+    }
+    removeStaleWriterLockDirectory(rootFd, lockIdentity, serializedOwner);
+    return;
+  }
+  const legacyPid = readLegacyWriterPid(owner);
+  if (legacyPid === undefined) {
     throw new ExtractionCacheInvariantError(
-      `extraction cache has an unverifiable legacy writer lock at ${lockPath}; ` +
+      "extraction cache has an unverifiable legacy writer lock; " +
         "manual removal requires independent proof that the prior writer stopped"
     );
   }
-  rmSync(lockPath, { recursive: true, force: true });
+  try {
+    readProcessStartIdentity(legacyPid);
+  } catch (cause) {
+    if (hasErrorCode(cause, "ENOENT")) {
+      removeStaleWriterLockDirectory(rootFd, lockIdentity, serializedOwner);
+      return;
+    }
+    throw new ExtractionCacheInvariantError(
+      `extraction cache legacy writer lock liveness is unknown: ${String(cause)}`,
+      { cause }
+    );
+  }
+  throw new ExtractionCacheInvariantError(
+    "extraction cache has a possibly live legacy writer lock; " +
+      "manual removal requires independent proof that the prior writer stopped"
+  );
 }
 
-function publishWriterLock(lockPath: string, token: string): void {
+function publishWriterLock(input: {
+  readonly stableLockPath: string;
+  readonly rootFd: number;
+  readonly token: string;
+  readonly processStartIdentity: string;
+}): DirectoryIdentity {
+  let lockIdentity: DirectoryIdentity | undefined;
+  let ownerPublished = false;
   try {
-    mkdirSync(lockPath);
-    writeFileSync(join(lockPath, "owner.json"), `${JSON.stringify({
-      schema_version: EXTRACTION_FILL_OWNER_SCHEMA_VERSION,
-      pid: process.pid,
-      token,
-      started_at: new Date().toISOString()
-    })}\n`, "utf8");
+    mkdirSync(input.stableLockPath, { mode: 0o700 });
+    lockIdentity = readDirectoryIdentity(
+      input.stableLockPath, "extraction cache writer lock"
+    );
+    const temporary = join(input.stableLockPath, `.owner.${input.token}.tmp`);
+    writeFileSync(temporary, `${JSON.stringify(writerLockOwnerFor(input))}\n`, {
+      encoding: "utf8", flag: "wx", mode: 0o600
+    });
+    renameSync(temporary, join(input.stableLockPath, "owner.json"));
+    ownerPublished = true;
+    assertDirectoryIdentity(
+      input.stableLockPath, lockIdentity, "extraction cache writer lock"
+    );
+    assertPublishedWriterLockOwner(input);
+    return lockIdentity;
   } catch (cause) {
+    const createdLockIdentity = lockIdentity;
     throwWithCleanupFailures(cause, runCleanupActions([
-      () => rmSync(lockPath, { recursive: true, force: true })
+      ...(createdLockIdentity === undefined
+        ? []
+        : [() => {
+            unlinkBoundWriterLockDirectory({
+              rootFd: input.rootFd,
+              lockIdentity: createdLockIdentity,
+              tombstoneToken: input.token,
+              ...(ownerPublished
+                ? { expectedToken: input.token }
+                : {})
+            });
+          }])
     ]), "writer lock publication");
   }
 }
 
-function openOrCreateCacheRoot(cacheRoot: string): BoundCacheRoot {
-  mkdirSync(resolve(cacheRoot), { recursive: true });
-  return openExistingCacheRoot(cacheRoot);
+function writerLockOwnerFor(input: {
+  readonly token: string;
+  readonly processStartIdentity: string;
+}): CurrentWriterLockOwner {
+  return {
+    schema_version: EXTRACTION_FILL_OWNER_SCHEMA_VERSION,
+    pid: process.pid,
+    process_start_identity: input.processStartIdentity,
+    token: input.token
+  };
 }
 
-function openExistingCacheRoot(cacheRoot: string): BoundCacheRoot {
-  const path = realpathSync(resolve(cacheRoot));
-  const descriptor = openBoundDirectory(path);
-  try {
-    const identity = readBoundDirectoryIdentity(descriptor, "extraction cache root");
-    assertDirectoryIdentity(path, identity, "extraction cache root");
-    return Object.freeze({ path, descriptor, identity });
-  } catch (cause) {
-    closeSync(descriptor);
-    throw cause;
+function assertPublishedWriterLockOwner(input: {
+  readonly stableLockPath: string;
+  readonly token: string;
+  readonly processStartIdentity: string;
+}): void {
+  const owner = parseCurrentWriterLockOwner(readWriterLockOwner(input.stableLockPath));
+  if (owner.token !== input.token || owner.pid !== process.pid ||
+      owner.process_start_identity !== input.processStartIdentity) {
+    throw new ExtractionCacheInvariantError("extraction cache writer lock publication was replaced");
   }
 }
 
-function openBoundDirectory(path: string): number {
-  const directoryFlag = constants.O_DIRECTORY;
-  const noFollowFlag = constants.O_NOFOLLOW;
-  if (typeof directoryFlag !== "number" || typeof noFollowFlag !== "number") {
-    throw new ExtractionCacheInvariantError(
-      "extraction cache writer leases require directory descriptor support"
-    );
-  }
-  const descriptor = openSync(path, constants.O_RDONLY | directoryFlag | noFollowFlag);
-  const stat = fstatSync(descriptor);
-  if (!stat.isDirectory()) {
-    closeSync(descriptor);
-    throw new ExtractionCacheInvariantError("extraction cache root is not a directory");
-  }
-  return descriptor;
-}
-
-function readDirectoryIdentity(path: string, label: string): DirectoryIdentity {
-  const stat = lstatSync(path, { bigint: true });
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new ExtractionCacheInvariantError(`${label} is not a real directory`);
-  }
-  return Object.freeze({ device: stat.dev.toString(), inode: stat.ino.toString() });
-}
-
-function readBoundDirectoryIdentity(descriptor: number, label: string): DirectoryIdentity {
-  const stat = fstatSync(descriptor, { bigint: true });
-  if (!stat.isDirectory()) {
-    throw new ExtractionCacheInvariantError(`${label} descriptor is not a directory`);
-  }
-  return Object.freeze({ device: stat.dev.toString(), inode: stat.ino.toString() });
-}
-
-function assertDirectoryIdentity(
-  path: string,
-  expected: DirectoryIdentity,
-  label: string
+function removeStaleWriterLockDirectory(
+  rootFd: number,
+  lockIdentity: DirectoryIdentity,
+  expectedSerializedOwner: string
 ): void {
-  const current = readDirectoryIdentity(path, label);
-  if (current.device !== expected.device || current.inode !== expected.inode) {
-    throw new ExtractionCacheInvariantError(`${label} identity changed while leased`);
-  }
+  unlinkBoundWriterLockDirectory({
+    rootFd,
+    lockIdentity,
+    tombstoneToken: randomUUID(),
+    expectedOwnerText: expectedSerializedOwner
+  });
 }
 
-function assertBoundDirectoryIdentity(
-  descriptor: number,
-  expected: DirectoryIdentity,
-  label: string
-): void {
-  const current = fstatSync(descriptor, { bigint: true });
-  if (!current.isDirectory() || current.dev.toString() !== expected.device ||
-      current.ino.toString() !== expected.inode) {
-    throw new ExtractionCacheInvariantError(`${label} descriptor identity changed while leased`);
+function unlinkBoundWriterLockDirectory(
+  binding: Pick<HeldLeaseOwnerBinding, "rootFd" | "lockIdentity"> & {
+    readonly tombstoneToken: string;
+    readonly expectedToken?: string;
+    readonly expectedOwnerText?: string;
   }
+): void {
+  unlinkBoundChildDirectory({
+    parentFd: binding.rootFd,
+    childName: EXTRACTION_FILL_LOCK_DIR,
+    identity: binding.lockIdentity,
+    tombstoneName: `.extraction-fill.lock.dead.${binding.tombstoneToken}`,
+    assertOpened(stableChildPath) {
+      if (binding.expectedToken !== undefined) {
+        const owner = parseCurrentWriterLockOwner(readWriterLockOwner(stableChildPath));
+        if (owner.token !== binding.expectedToken) {
+          throw new ExtractionCacheInvariantError(
+            "extraction cache writer lock ownership changed before release"
+          );
+        }
+      }
+      if (binding.expectedOwnerText !== undefined &&
+          readWriterLockOwnerText(stableChildPath) !== binding.expectedOwnerText) {
+        throw new ExtractionCacheInvariantError(
+          "extraction cache writer lock ownership changed during stale recovery"
+        );
+      }
+    }
+  });
+}
+
+function readWriterLockOwner(stableLockPath: string): unknown {
+  return JSON.parse(readWriterLockOwnerText(stableLockPath)) as unknown;
+}
+
+function readWriterLockOwnerText(stableLockPath: string): string {
+  return readBoundedCanonicalUtf8Artifact({
+    path: join(stableLockPath, "owner.json"),
+    maxBytes: MAX_EXTRACTION_FILL_OWNER_BYTES,
+    label: "extraction cache writer lock owner"
+  });
+}
+
+function isCurrentWriterLockSchema(value: unknown): boolean {
+  return isRecord(value) && value.schema_version === EXTRACTION_FILL_OWNER_SCHEMA_VERSION;
+}
+
+function parseCurrentWriterLockOwner(value: unknown): CurrentWriterLockOwner {
+  if (!isRecord(value) || value.schema_version !== EXTRACTION_FILL_OWNER_SCHEMA_VERSION ||
+      !Number.isSafeInteger(value.pid) || (value.pid as number) <= 0 ||
+      typeof value.process_start_identity !== "string" ||
+      !/^\d+$/u.test(value.process_start_identity) ||
+      typeof value.token !== "string" || value.token.length === 0) {
+    throw new ExtractionCacheInvariantError("extraction cache writer lock metadata is invalid");
+  }
+  return value as unknown as CurrentWriterLockOwner;
+}
+
+function readLegacyWriterPid(value: unknown): number | undefined {
+  if (!isRecord(value) || !Number.isSafeInteger(value.pid) || (value.pid as number) <= 0) {
+    return undefined;
+  }
+  return value.pid as number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readProcessStartIdentity(pid: number): string {
+  const bytes = readFileSync(`/proc/${pid}/stat`);
+  if (bytes.byteLength > MAX_EXTRACTION_FILL_OWNER_BYTES) {
+    throw new ExtractionCacheInvariantError("writer process identity exceeds its size limit");
+  }
+  const stat = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  const closing = stat.lastIndexOf(")");
+  const startTime = stat.slice(closing + 2).trim().split(/\s+/u)[19];
+  if (closing < 0 || startTime === undefined || !/^\d+$/u.test(startTime)) {
+    throw new ExtractionCacheInvariantError("writer process start identity is unavailable");
+  }
+  return startTime;
 }
 
 function hasErrorCode(cause: unknown, code: string): boolean {

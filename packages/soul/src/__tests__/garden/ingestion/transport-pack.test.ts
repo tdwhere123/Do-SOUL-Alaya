@@ -3,6 +3,7 @@ import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "../../../garden/in
 import {
   demultiplexTransportPack,
   planTurnTransportPacks,
+  unresolvedRetryMembers,
   type PackableAssertion
 } from "../../../garden/ingestion/official-api/transport-pack.js";
 
@@ -37,7 +38,7 @@ describe("turn-local transport pack", () => {
       { semanticKey: "ff".repeat(32) },
       {}
     ]);
-    expect(result.admittedKeys).toEqual([pack.semantic_keys[0]]);
+    expect(result.admittedKeys).toEqual([]);
     expect(result.rejections.map((rejection) => rejection.reason)).toEqual([
       "duplicate",
       "foreign or out-of-pack",
@@ -49,6 +50,20 @@ describe("turn-local transport pack", () => {
     }]);
     expect(mismatched.admittedKeys).toEqual([]);
     expect(mismatched.rejections[0]?.reason).toBe("mismatched identity");
+  });
+
+  it("keeps legal A when B is duplicate or a foreign member is present", () => {
+    const pack = planTurnTransportPacks(assertions(2), { kind: "reference_batch_8" }).packs[0]!;
+    const result = demultiplexTransportPack(pack, [
+      { semanticKey: pack.semantic_keys[0], assertionId: pack.assertion_ids[0] },
+      { semanticKey: pack.semantic_keys[1], assertionId: pack.assertion_ids[1] },
+      { semanticKey: pack.semantic_keys[1], assertionId: pack.assertion_ids[1] },
+      { assertionId: 999 }
+    ]);
+    expect(result.admittedKeys).toEqual([pack.semantic_keys[0]]);
+    expect(result.rejections.map((rejection) => rejection.reason)).toEqual([
+      "duplicate", "foreign or out-of-pack"
+    ]);
   });
 
   it("splits a pathological oversize assertion instead of retrying the whole turn", () => {
@@ -66,11 +81,15 @@ describe("turn-local transport pack", () => {
       maxAssertions: 32,
       maxInputTokens: 100,
       expectedOutputCap: 1500,
-      systemPromptChars: 8516
+      systemPromptChars: 100
     });
-    expect(plan.packs).toHaveLength(2);
-    expect(plan.packs[0]?.semantic_keys).toEqual([huge[0]?.semanticKey]);
-    expect(plan.packs[1]?.semantic_keys).toEqual([huge[1]?.semanticKey]);
+    expect(plan.packs).toHaveLength(1);
+    expect(plan.packs[0]?.semantic_keys).toEqual([huge[1]?.semanticKey]);
+    expect(plan.unpackable).toEqual([{
+      semanticKey: huge[0]?.semanticKey,
+      assertionId: 1,
+      reason: "hard_cap_exceeded"
+    }]);
   });
 
   it("reduces physical packs versus reference batch=8 on a pinned census slice", () => {
@@ -99,5 +118,13 @@ describe("turn-local transport pack", () => {
     expect(new Set(eight.packs.flatMap((pack) => pack.semantic_keys))).toEqual(
       new Set(tokenAware.packs.flatMap((pack) => pack.semantic_keys))
     );
+  });
+
+  it("retries only unresolved members after a size split", () => {
+    const members = assertions(3);
+    const retry = unresolvedRetryMembers(members, new Set([members[0]!.semanticKey]));
+    expect(retry.map((member) => member.semanticKey)).toEqual([
+      members[1]!.semanticKey, members[2]!.semanticKey
+    ]);
   });
 });

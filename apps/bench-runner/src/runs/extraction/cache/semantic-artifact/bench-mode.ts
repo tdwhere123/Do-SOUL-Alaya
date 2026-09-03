@@ -32,15 +32,16 @@ export function parseExtractionBenchMode(value: unknown): ExtractionBenchModeCon
     if (typeof record.f0f2SubstrateIdentity !== "string" ||
         typeof record.startingCacheIdentity !== "string" ||
         !Array.isArray(record.capabilityPolicy) ||
-        typeof record.maxCalls !== "number") {
+        !record.capabilityPolicy.every((item) => typeof item === "string" && item.trim().length > 0) ||
+        !Number.isSafeInteger(record.maxCalls) || (record.maxCalls as number) < 0) {
       throw new Error("lazy_field mode identity is incomplete");
     }
     return {
       mode: "lazy_field",
       f0f2SubstrateIdentity: record.f0f2SubstrateIdentity,
       startingCacheIdentity: record.startingCacheIdentity,
-      capabilityPolicy: record.capabilityPolicy.map(String),
-      maxCalls: record.maxCalls
+      capabilityPolicy: Object.freeze([...new Set(record.capabilityPolicy as string[])]),
+      maxCalls: record.maxCalls as number
     };
   }
   throw new Error("unknown extraction bench mode");

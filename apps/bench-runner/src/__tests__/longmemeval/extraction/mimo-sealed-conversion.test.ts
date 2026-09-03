@@ -1,28 +1,49 @@
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
-  parseOfficialApiSignals,
   planOfficialApiSemanticWorkset,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
-import { promptSha256 } from "../../../runs/extraction/cache/semantic-artifact/admit.js";
-import { convertLegacyExtractionShard } from "../../../runs/extraction/cache/semantic-artifact/legacy-convert.js";
-import {
-  admitSemanticArtifact,
-  inspectSemanticArtifact,
-  persistRawArtifact,
-  readPersistedRawArtifact,
-  recordedSourceBindings,
-  reserveSemanticArtifact
-} from "../../../runs/extraction/cache/semantic-artifact/store.js";
+import { convertLegacyExtractionShard } from
+  "../../../runs/extraction/cache/semantic-artifact/legacy-convert.js";
+import { readVerifiedLegacyExtractionEntry } from
+  "../../../runs/extraction/cache/semantic-artifact/legacy-sealed-entry.js";
 import { fulfillAssertionCapability } from "../../../runs/extraction/cache/semantic-artifact/fulfill.js";
 import { shadowLazyF3Fulfillment } from "../../../runs/extraction/cache/semantic-artifact/lazy-f3-shadow.js";
-import { buildSnapshotExtractionSummary } from "../../../runs/snapshot/extraction-authority.js";
+import {
+  createOfflineSemanticEnvelope,
+  createOfflineSemanticReplayForTasks
+} from "../../../runs/extraction/fill/semantic-fill-envelope.js";
+import {
+  TOKEN_AWARE_POLICY,
+  semanticFixtureSourceAuthority
+} from "./semantic-artifact-fixture.js";
+import {
+  captureSnapshotExtractionAuthority,
+  renderSnapshotExtractionAuthority,
+  buildSnapshotExtractionSummary
+} from "../../../runs/snapshot/extraction-authority.js";
+import {
+  EXTRACTION_CACHE_KEY_ALGO,
+  computeSystemPromptSha256,
+  writeExtractionCacheManifest
+} from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import {
+  buildExtractionContentClosureIndex,
+  computeExtractionContentClosureSha256,
+  computeExtractionKeySetSha256,
+  inspectExtractionRawJson
+} from "../../../runs/extraction/content-closure.js";
+import {
+  LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME,
+  loadGlobalExtractionAuthority
+} from "../../../runs/provenance/contract/extraction-authority-reference.js";
 import type { CachedExtractionEntry } from "../../../runs/compile-seed/cache/cache-shard.js";
 import type { SemanticFillTask } from "../../../runs/extraction/fill/semantic-fill-executor.js";
 import type { ExtractionCacheManifestV3 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
@@ -30,7 +51,6 @@ import type { ExtractionCacheManifestV3 } from "../../../runs/extraction/cache/e
 const FIXTURES = dirname(fileURLToPath(import.meta.url)) + "/fixtures";
 const DATASET_REVISION =
   "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442";
-const CONTRACT = "alaya.assertion_semantic_identity.v1";
 const SINGLE_KEY = "0c297b4cd1547986994b6f4acd44b7bfa1e40d5eba9c803e2c53cba93bafc295";
 const MULTI_KEY = "0cf56b73a55320505f980064c64b0d51afe2143754bd6340199703d9f4e5e673";
 
@@ -46,100 +66,162 @@ function loadTurn(cacheKey: string) {
   return found;
 }
 
+async function installSealedMimoShard(
+  cacheKey: string,
+  roots: string[]
+) {
+  const cacheRoot = await mkdtemp(join(tmpdir(), "mimo-legacy-cache-"));
+  const authorityRoot = await mkdtemp(join(tmpdir(), "mimo-legacy-pin-"));
+  roots.push(cacheRoot, authorityRoot);
+  const providerUrl = "https://provider.invalid/v1";
+  const entry = JSON.parse(await readFile(join(FIXTURES, `${cacheKey}.shard.json`), "utf8")) as
+    CachedExtractionEntry;
+  const bound: CachedExtractionEntry = {
+    ...entry,
+    transport_provenance: {
+      provider_url_sha256: `sha256:${createHash("sha256").update(providerUrl, "utf8").digest("hex")}`,
+      model: entry.transport_provenance?.model ?? entry.model
+    }
+  };
+  const shardPath = join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
+  await mkdir(dirname(shardPath), { recursive: true });
+  await writeFile(shardPath, JSON.stringify(bound), "utf8");
+  const closure = {
+    cacheKey,
+    model: bound.model,
+    requestProfile: bound.request_profile,
+    ...inspectExtractionRawJson(entry.raw_json)
+  };
+  writeExtractionCacheManifest(cacheRoot, {
+    schema_version: 3,
+    extraction_model: entry.model,
+    model_family: "mimo-v2.5",
+    request_profile: entry.request_profile,
+    provider_url: providerUrl,
+    system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
+    cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
+    dataset: "sealed-mimo-fixture",
+    dataset_revision: DATASET_REVISION,
+    requested_turns: 1,
+    cached_turns: 1,
+    coverage: 1,
+    storage: "git-tracked",
+    built_at: entry.extracted_at,
+    builder: "fixture",
+    fill_status: "complete",
+    window_offset: 0,
+    window_limit: 1,
+    expected_turns: 1,
+    expected_key_set_sha256: computeExtractionKeySetSha256([cacheKey]),
+    content_closure_sha256: computeExtractionContentClosureSha256([closure]),
+    content_closure_index: buildExtractionContentClosureIndex([closure])
+  });
+  const captured = captureSnapshotExtractionAuthority(cacheRoot);
+  await writeFile(
+    join(authorityRoot, LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME),
+    renderSnapshotExtractionAuthority(captured.authority)
+  );
+  const authority = await loadGlobalExtractionAuthority(authorityRoot);
+  if (authority === null) throw new Error("fixture authority did not load");
+  return { cacheRoot, authority };
+}
+
 describe("sealed MiMo shard conversion", () => {
   let root: string;
+  const roots: string[] = [];
   beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "mimo-convert-")); });
-  afterEach(async () => { await rm(root, { recursive: true, force: true }); });
-
-  it("converts a locator-bearing shard with minted identity and replays raw bytes", async () => {
-    const fixture = loadTurn(SINGLE_KEY);
-    const entry = JSON.parse(await readFile(join(FIXTURES, `${SINGLE_KEY}.shard.json`), "utf8")) as CachedExtractionEntry;
-    const bindings = planOfficialApiSemanticWorkset(
-      fixture.turn.turnContent,
-      fixture.turn.turnMessages,
-      DATASET_REVISION
-    ).units.filter((unit) => fixture.request.source_assertions.some(
-      (assertion) => assertion.assertion_id === unit.assertionId
-    )).map((unit) => unit.binding);
-    expect(bindings[0]?.semanticKey).toMatch(/^[a-f0-9]{64}$/u);
-    const drafts = parseOfficialApiSignals(entry.raw_json);
-    expect(drafts.length).toBeGreaterThan(0);
-    const report = convertLegacyExtractionShard({
-      entry,
-      request: fixture.request,
-      sourceBindings: bindings,
-      semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5",
-      expectedPromptSha256: promptSha256(OFFICIAL_API_SYSTEM_PROMPT)
-    });
-    expect(report.converted.length).toBeGreaterThan(0);
-    expect(report.converted[0]?.admission_state).toBe("provider_backed");
-    expect(report.converted[0]?.semantic_key).toBe(bindings[0]?.semanticKey);
-    const digest = persistRawArtifact(root, entry.raw_json);
-    expect(readPersistedRawArtifact(root, digest)).toBe(entry.raw_json);
-    const artifact = report.converted[0]!;
-    const token = reserveSemanticArtifact(root, artifact.semantic_key, artifact.capability);
-    admitSemanticArtifact({ root, artifact, reservationToken: token });
-    expect(inspectSemanticArtifact(root, artifact.semantic_key, artifact.capability).status)
-      .toBe("provider_backed");
-    expect(recordedSourceBindings(root, artifact.semantic_key, artifact.capability).length)
-      .toBeGreaterThan(0);
-    expect(parseOfficialApiSignals(readPersistedRawArtifact(root, digest)).length).toBe(drafts.length);
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+    await Promise.all(roots.splice(0).map((item) => rm(item, { recursive: true, force: true })));
   });
 
-  it("does not mint a duplicate assertion_id from a sealed multi-signal shard", async () => {
-    const fixture = loadTurn(MULTI_KEY);
-    const entry = JSON.parse(await readFile(join(FIXTURES, `${MULTI_KEY}.shard.json`), "utf8")) as CachedExtractionEntry;
-    const bindings = planOfficialApiSemanticWorkset(
+  it("rejects locator-bearing legacy conversion without opaque external authority", () => {
+    expect(() => readVerifiedLegacyExtractionEntry({
+      root, cacheKey: SINGLE_KEY
+    } as never)).toThrow(/loaded extraction authority/u);
+  });
+
+  it("rejects incomplete legacy entries without opaque external authority", () => {
+    expect(() => readVerifiedLegacyExtractionEntry({
+      root, cacheKey: MULTI_KEY
+    } as never)).toThrow(/loaded extraction authority/u);
+  });
+
+  it("converts a sealed MiMo fixture when shard completion and transport metadata are complete", async () => {
+    const fixture = loadTurn(SINGLE_KEY);
+    const installed = await installSealedMimoShard(SINGLE_KEY, roots);
+    const unit = planOfficialApiSemanticWorkset(
       fixture.turn.turnContent,
       fixture.turn.turnMessages,
       DATASET_REVISION
-    ).units.map((unit) => unit.binding);
+    ).units.find((item) => item.assertionId === fixture.request.source_assertions[0]!.assertion_id);
+    if (unit === undefined) throw new Error("missing minted binding");
     const report = convertLegacyExtractionShard({
-      entry,
+      sealedEntry: readVerifiedLegacyExtractionEntry({
+        root: installed.cacheRoot,
+        cacheKey: SINGLE_KEY,
+        authority: installed.authority
+      }),
       request: fixture.request,
-      sourceBindings: bindings,
-      semanticContract: CONTRACT,
-      modelFamily: "mimo-v2.5",
-      expectedPromptSha256: promptSha256(OFFICIAL_API_SYSTEM_PROMPT)
+      sourceUnits: [unit],
+      semanticContract: unit.semanticIdentity.contractId,
+      expectedSystemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
-    expect(report.converted).toEqual([]);
-    expect(report.unresolved[0]?.reason).toMatch(/incomplete inspection/u);
+    expect(report.converted).toHaveLength(1);
+    expect(report.converted[0]?.state).toBe("provider_backed");
+    expect(report.unresolved).toEqual([]);
   });
 
   it("admits the same sealed raw through fill and warms Lazy F3 to zero calls", async () => {
     const fixture = loadTurn(SINGLE_KEY);
     const entry = JSON.parse(await readFile(join(FIXTURES, `${SINGLE_KEY}.shard.json`), "utf8")) as CachedExtractionEntry;
-    const binding = planOfficialApiSemanticWorkset(
+    const unit = planOfficialApiSemanticWorkset(
       fixture.turn.turnContent,
       fixture.turn.turnMessages,
       DATASET_REVISION
-    ).units.find((item) => item.assertionId === fixture.request.source_assertions[0]!.assertion_id)?.binding;
-    if (binding === undefined) throw new Error("missing minted binding");
+    ).units.find((item) => item.assertionId === fixture.request.source_assertions[0]!.assertion_id);
+    if (unit === undefined) throw new Error("missing minted binding");
+    const fixtureAuthority = semanticFixtureSourceAuthority(unit.sourceCorpus);
     const task: SemanticFillTask = {
-      semanticKey: binding.semanticKey,
+      ...unit,
       capability: "official_api_signals:v1",
-      semanticContract: CONTRACT,
+      semanticContract: unit.semanticIdentity.contractId,
       modelFamily: "mimo-v2.5",
       modelId: "mimo-v2.5",
+      transportModelId: "mimo-v2.5",
       requestProfile: "mimo-v2.5-nonthinking-v1",
       providerUrlSha256: "1d0c8dae4013f0dd0883ac7692d61535aa7cdbad5eab0302c57fa1d0f07fe77a",
-      assertionId: binding.locator.assertion_id,
-      text: fixture.request.source_assertions[0]!.text,
-      binding
+      sourceAuthority: {
+        ...fixtureAuthority,
+        datasetRevision: DATASET_REVISION,
+        substrateManifest: {
+          ...fixtureAuthority.substrateManifest,
+          datasetRevision: DATASET_REVISION
+        }
+      }
     };
-    const envelope = { mode: "offline-only" as const, maxCalls: 2, maxFailures: 2 };
-    const shadow = shadowLazyF3Fulfillment({
+    const envelope = createOfflineSemanticEnvelope({
+      maxCalls: 2, maxFailures: 2, transportPolicy: TOKEN_AWARE_POLICY
+    });
+    const shadow = await shadowLazyF3Fulfillment({
       root,
       demand: [task],
       envelope,
-      transport: { complete: () => ({ kind: "raw", rawJson: entry.raw_json }) }
+      transport: createOfflineSemanticReplayForTasks({
+        tasks: [task], transportPolicy: TOKEN_AWARE_POLICY,
+        result: { kind: "raw", rawJson: entry.raw_json }
+      })
     });
     expect(shadow.revealed[0]?.state).toBe("materialized-now");
     expect(shadow.warm[0]?.state).toBe("cache-hit");
     expect(shadow.warmCalls).toBe(0);
     expect(shadow.coldCalls).toBe(1);
-    const temporal = fulfillAssertionCapability({
+    expect((await fulfillAssertionCapability({
+      root,
+      task: { ...task, providerUrlSha256: "ff".repeat(32) },
+      envelope
+    })).state).toBe("cache-hit");
+    const temporal = await fulfillAssertionCapability({
       root,
       task: { ...task, capability: "temporal_validity:v1" },
       envelope
