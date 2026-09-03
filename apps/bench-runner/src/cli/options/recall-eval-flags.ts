@@ -51,8 +51,9 @@ export function consumeRecallEvalPathFlag(
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--skip-recycle")) {
-    state.skipRecycle = true;
-    return index;
+    throw new Error(
+      "--skip-recycle is removed; pager path-switch is the only question serving mode"
+    );
   }
   if (!matchFlagToken(token, "--seed-extraction-system-prompt")) {
     return undefined;

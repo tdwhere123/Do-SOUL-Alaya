@@ -50,14 +50,11 @@ describe("recall-eval CLI options", () => {
     });
   });
 
-  it("forwards --skip-recycle as a recall-eval opt-in", () => {
-    const flags = parseFlags([
+  it("rejects retired --skip-recycle; path-switch is the only serving mode", () => {
+    expect(() => parseFlags([
       "--snapshot", "/tmp/source.db",
       "--skip-recycle"
-    ]);
-    expect(buildRecallEvalOptions(flags, flags.snapshot!)).toMatchObject({
-      skipRecycle: true
-    });
+    ])).toThrow(/path-switch is the only question serving mode/);
   });
 
   it("defaults snapshot consume to promotion by omitting the option", () => {

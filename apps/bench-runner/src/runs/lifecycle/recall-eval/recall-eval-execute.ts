@@ -53,12 +53,6 @@ export async function executeRecallEvalRun(
   return { collected, selectionArtifact, evidenceProjectionRebuild };
 }
 
-function shouldRecycleSession(context: RecallEvalRunContext): boolean {
-  if (context.options.skipRecycle === true) return false;
-  const raw = process.env.ALAYA_RECALL_EVAL_SKIP_RECYCLE;
-  return raw !== "1" && raw !== "true";
-}
-
 async function openPager(
   session: RecallEvalPagerIpcSession,
   context: RecallEvalRunContext
@@ -127,9 +121,6 @@ async function executeRecallEvalQuestions(
       questionIndex: i
     });
     writeRecallEvalProgress(i, context.window.length, question.questionId, result);
-    if (shouldRecycleSession(context)) {
-      await session.recycle();
-    }
   }
   return collected;
 }
