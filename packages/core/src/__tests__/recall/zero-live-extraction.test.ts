@@ -1,9 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   assertRecallZeroLiveExtraction,
   refuseRecallCampaignLiveExtraction,
+  RECALL_ZERO_LIVE_ATTEMPTED_ENV,
+  RECALL_ZERO_LIVE_CAMPAIGN_ENV,
   withRecallZeroLiveCampaign
 } from "../../recall/runtime/zero-live-extraction.js";
+
+afterEach(() => {
+  delete process.env[RECALL_ZERO_LIVE_CAMPAIGN_ENV];
+  delete process.env[RECALL_ZERO_LIVE_ATTEMPTED_ENV];
+});
 
 describe("recall zero-live extraction", () => {
   it("allows a campaign that never enters fill or a provider executor", async () => {
@@ -33,5 +40,24 @@ describe("recall zero-live extraction", () => {
     expect(() => assertRecallZeroLiveExtraction({
       providerExecutorEntries: 1, extractionWrites: 0
     })).toThrow(/live extraction/u);
+  });
+
+  it("refuses in a child process that inherited the campaign cookie without ALS", () => {
+    process.env[RECALL_ZERO_LIVE_CAMPAIGN_ENV] = "1";
+    expect(() => assertRecallZeroLiveExtraction()).not.toThrow();
+    expect(() => refuseRecallCampaignLiveExtraction("extraction_write"))
+      .toThrow(/live extraction/u);
+    expect(() => assertRecallZeroLiveExtraction()).toThrow(/live extraction/u);
+  });
+
+  it("fails the campaign after catch-and-continue of refuse", async () => {
+    await expect(withRecallZeroLiveCampaign(async () => {
+      try {
+        refuseRecallCampaignLiveExtraction("provider_executor");
+      } catch {
+        // swallowed on purpose
+      }
+      assertRecallZeroLiveExtraction();
+    })).rejects.toThrow(/live extraction/u);
   });
 });

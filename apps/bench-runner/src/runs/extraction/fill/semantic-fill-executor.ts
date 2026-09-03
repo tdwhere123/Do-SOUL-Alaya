@@ -36,6 +36,7 @@ import {
   type SemanticFillExecutionState
 } from "./semantic-fill-pack-execution.js";
 import { openSemanticFillAttemptLedger } from "./semantic-fill-attempt-ledger.js";
+import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 
 export interface SemanticFillTask {
   readonly semanticKey: string;
@@ -123,6 +124,7 @@ async function runSemanticFillWithLease(
   input: SemanticFillInvocation,
   lease: ExtractionCacheWriteLease
 ): Promise<SemanticFillReport> {
+  refuseRecallCampaignLiveExtraction("extraction_write");
   assertOfflineSemanticExecution(input.envelope, input.transport);
   input.signal?.throwIfAborted();
   lease.assertOwned();

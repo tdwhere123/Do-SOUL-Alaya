@@ -188,6 +188,17 @@ describe("lazy F3 fulfillment shadow", () => {
       })
     }))).rejects.toThrow(/live extraction/u);
   });
+
+  it("fails closed when shadow fill runs during a Recall campaign", async () => {
+    await expect(withRecallZeroLiveCampaign(() => shadowLazyF3Fulfillment({
+      root,
+      demand: [semanticTask()],
+      envelope: ENVELOPE,
+      transport: createOfflineSemanticReplay({
+        defaultResult: { kind: "failure", reason: "offline" }
+      })
+    }))).rejects.toThrow(/live extraction/u);
+  });
 });
 
 describe("benchmark modes", () => {
