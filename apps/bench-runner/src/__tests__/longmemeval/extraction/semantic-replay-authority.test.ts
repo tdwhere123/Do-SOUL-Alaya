@@ -41,8 +41,10 @@ import {
 import {
   SEMANTIC_CAPABILITY,
   TOKEN_AWARE_POLICY,
-  semanticTask
+  semanticTask,
+  semanticTasks
 } from "./semantic-artifact-fixture.js";
+import { transportPackIdentity } from "@do-soul/alaya-soul";
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) =>
@@ -259,6 +261,99 @@ describe("offline semantic replay execution identity", () => {
       expect(await readFile(rawPath, "utf8")).toBe(rawBefore);
       expect(listSemanticArtifactInventory(root).map((item) => item.replay_identity_digest)
         .sort()).toEqual([driftedDigest, admitted.replay_identity_digest].sort());
+    } finally {
+      lease.release();
+    }
+  });
+
+  it("rematerializes packed reference_batch_8 members after parser drift without provider calls", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semantic-replay-packed-drift-"));
+    roots.push(root);
+    const tasks = semanticTasks(["I moved to Berlin.", "I moved to Paris."]);
+    const firstTask = tasks[0];
+    const secondTask = tasks[1];
+    if (firstTask === undefined || secondTask === undefined) {
+      throw new Error("packed drift fixture expected two semantic tasks");
+    }
+    const policy = { kind: "reference_batch_8" as const };
+    const rawJson = JSON.stringify({
+      signals: tasks.map((task) => ({
+        object_kind: "fact",
+        confidence: 0.9,
+        matched_text: task.text.replace(/^(?:User|Assistant): /u, ""),
+        source_locator: {
+          contract_version: 2,
+          kind: "assertion_catalog",
+          assertion_id: task.assertionId
+        }
+      }))
+    });
+    const cold = await runSemanticFill({
+      root,
+      tasks,
+      envelope: createOfflineSemanticEnvelope({
+        maxCalls: 1, maxFailures: 1, transportPolicy: policy
+      }),
+      transport: createOfflineSemanticReplayForTasks({
+        tasks, transportPolicy: policy, result: { kind: "raw", rawJson }
+      })
+    });
+    expect(cold.admitted).toBe(2);
+    expect(cold.calls).toBe(1);
+    const first = inspectSemanticArtifact(root, firstTask.semanticKey, SEMANTIC_CAPABILITY).artifact!;
+    const second = inspectSemanticArtifact(root, secondTask.semanticKey, SEMANTIC_CAPABILITY).artifact!;
+    expect(first.raw_evidence_binding?.policy_kind).toBe("reference_batch_8");
+    expect(first.raw_evidence_binding?.member_semantic_keys).toEqual(
+      second.raw_evidence_binding?.member_semantic_keys
+    );
+    expect(first.raw_evidence_binding?.member_semantic_keys).toHaveLength(2);
+    expect(first.raw_evidence_binding?.pack_identity).toBe(second.raw_evidence_binding?.pack_identity);
+    expect(first.raw_evidence_binding?.pack_identity).not.toBe(
+      transportPackIdentity("token_aware", [firstTask.semanticKey])
+    );
+    expect(first.raw_evidence_binding?.pack_identity).not.toBe(
+      transportPackIdentity("reference_batch_8", [firstTask.semanticKey])
+    );
+
+    const ownerIdentity = unwrapSemanticReplayAuthority(currentSemanticReplayAuthority());
+    const driftedIdentity = {
+      ...ownerIdentity,
+      parserSemanticsVersion: `${ownerIdentity.parserSemanticsVersion}-previous`,
+      materializerSemanticsVersion: `${ownerIdentity.materializerSemanticsVersion}-previous`
+    };
+    const driftedDigest = semanticReplayIdentityDigest(driftedIdentity);
+    for (const admitted of [first, second]) {
+      const { artifact_digest: _digest, ...unsigned } = admitted;
+      const drifted = sealSemanticArtifact({
+        ...unsigned,
+        replay_identity: driftedIdentity,
+        replay_identity_digest: driftedDigest,
+        raw_evidence_binding: {
+          ...admitted.raw_evidence_binding!,
+          replay_identity_digest: driftedDigest
+        }
+      });
+      const driftedPath = semanticArtifactPath(
+        root, admitted.semantic_key, SEMANTIC_CAPABILITY, driftedDigest
+      );
+      mkdirSync(dirname(driftedPath), { recursive: true });
+      writeFileSync(driftedPath, `${JSON.stringify(drifted, null, 2)}\n`, "utf8");
+      rmSync(semanticArtifactPath(root, admitted.semantic_key, SEMANTIC_CAPABILITY));
+    }
+
+    const lease = acquireExtractionCacheWriteLease(root);
+    try {
+      const replayedFirst = materializeDerivedReplayFromRaw({ root, task: firstTask, lease });
+      const replayedSecond = materializeDerivedReplayFromRaw({ root, task: secondTask, lease });
+      expect(replayedFirst.replay_identity_digest).toBe(semanticReplayIdentityDigest(ownerIdentity));
+      expect(replayedSecond.replay_identity_digest).toBe(replayedFirst.replay_identity_digest);
+      expect(replayedFirst.raw_evidence_binding?.policy_kind).toBe("reference_batch_8");
+      expect(replayedFirst.raw_evidence_binding?.pack_identity)
+        .toBe(first.raw_evidence_binding?.pack_identity);
+      expect(replayedFirst.raw_evidence_binding?.member_semantic_keys)
+        .toEqual(first.raw_evidence_binding?.member_semantic_keys);
+      expect(replayedFirst.raw_response_digest).toBe(first.raw_response_digest);
+      expect(replayedSecond.raw_response_digest).toBe(second.raw_response_digest);
     } finally {
       lease.release();
     }

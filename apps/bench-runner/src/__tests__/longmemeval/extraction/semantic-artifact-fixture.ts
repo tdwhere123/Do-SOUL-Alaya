@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
-  planOfficialApiSemanticWorkset
+  planOfficialApiSemanticWorkset,
+  transportPackIdentity
 } from "@do-soul/alaya-soul";
 import { computeExtractionKeySetSha256 } from
   "../../../runs/extraction/content-closure.js";
@@ -125,10 +126,12 @@ export function semanticArtifactUnsigned(
     replay_identity_digest: replayIdentityDigest,
     raw_response_digest: SEMANTIC_RAW_SHA256,
     raw_evidence_binding: {
-      pack_identity: "77".repeat(32),
+      pack_identity: transportPackIdentity("token_aware", [task.semanticKey]),
       request_sha256: "88".repeat(32),
       source_corpus_identity: task.binding.sourceCorpusIdentity,
-      replay_identity_digest: replayIdentityDigest
+      replay_identity_digest: replayIdentityDigest,
+      policy_kind: "token_aware",
+      member_semantic_keys: [task.semanticKey]
     },
     provider_provenance: {
       provider_url_sha256: task.providerUrlSha256,

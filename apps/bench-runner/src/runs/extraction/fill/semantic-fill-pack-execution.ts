@@ -227,7 +227,8 @@ function admitPack(
       packIdentity: pending.pack.pack_id,
       requestSha256: attempt.requestSha256,
       sourceCorpusIdentity,
-      policyKind: pending.pack.policy_kind
+      policyKind: pending.pack.policy_kind,
+      memberSemanticKeys: pending.requestMembers.map((task) => task.semanticKey)
     },
     replayAuthority: input.replayAuthority
   });

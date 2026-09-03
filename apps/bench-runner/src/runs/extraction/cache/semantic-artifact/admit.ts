@@ -29,6 +29,14 @@ export interface AdmissionTask extends SemanticAdmissionIdentity {
   readonly sourceAuthority: SemanticTaskSourceAuthority;
 }
 
+type RawEvidenceAdmissionBinding = Readonly<{
+  packIdentity: string;
+  requestSha256: string;
+  sourceCorpusIdentity: string;
+  policyKind: "reference_batch" | "reference_batch_8" | "token_aware";
+  memberSemanticKeys: readonly string[];
+}>;
+
 export interface VerifiedSemanticArtifactAdmission {
   readonly semanticKey: string;
   readonly state: "provider_backed" | "quarantined";
@@ -70,12 +78,7 @@ export function admitProviderRaw(input: {
   readonly rawJson: string;
   readonly tasks: readonly AdmissionTask[];
   readonly replayAuthority: VerifiedSemanticReplayAuthority;
-  readonly rawBinding: Readonly<{
-    packIdentity: string;
-    requestSha256: string;
-    sourceCorpusIdentity: string;
-    policyKind: "reference_batch" | "reference_batch_8" | "token_aware";
-  }>;
+  readonly rawBinding: RawEvidenceAdmissionBinding;
 }): readonly RawAdmission[] {
   const replayIdentity = unwrapSemanticReplayAuthority(input.replayAuthority);
   const replayIdentityDigest = semanticReplayIdentityDigest(replayIdentity);
@@ -179,6 +182,13 @@ export function admitDerivedReplayFromRaw(input: {
       semanticKey: input.task.semanticKey
     };
   }
+  if (!rawBinding.member_semantic_keys.includes(input.task.semanticKey)) {
+    return {
+      kind: "unresolved",
+      reason: "derived replay task is not a member of the stored pack",
+      semanticKey: input.task.semanticKey
+    };
+  }
   const [admission] = admitParsedProviderDrafts({
     root: input.root,
     tasks: [input.task],
@@ -189,7 +199,8 @@ export function admitDerivedReplayFromRaw(input: {
       packIdentity: rawBinding.pack_identity,
       requestSha256: rawBinding.request_sha256,
       sourceCorpusIdentity: rawBinding.source_corpus_identity,
-      policyKind: "token_aware"
+      policyKind: rawBinding.policy_kind,
+      memberSemanticKeys: rawBinding.member_semantic_keys
     }
   });
   if (admission === undefined) {
@@ -240,12 +251,7 @@ function admitParsedProviderDrafts(input: {
   readonly drafts: ReturnType<typeof parseOfficialApiSignals>;
   readonly rawDigest: string;
   readonly replayAuthority: VerifiedSemanticReplayAuthority;
-  readonly rawBinding: Readonly<{
-    packIdentity: string;
-    requestSha256: string;
-    sourceCorpusIdentity: string;
-    policyKind: "reference_batch" | "reference_batch_8" | "token_aware";
-  }>;
+  readonly rawBinding: RawEvidenceAdmissionBinding;
 }): readonly RawAdmission[] {
   const claimed = new Map<number, number>();
   const byAssertion = new Map(input.tasks.map((task) => [task.assertionId, task]));
@@ -285,12 +291,7 @@ function admitParsedTask(input: {
   readonly task: AdmissionTask;
   readonly rawDigest: string;
   readonly replayAuthority: VerifiedSemanticReplayAuthority;
-  readonly rawBinding: Readonly<{
-    packIdentity: string;
-    requestSha256: string;
-    sourceCorpusIdentity: string;
-    policyKind: "reference_batch" | "reference_batch_8" | "token_aware";
-  }>;
+  readonly rawBinding: RawEvidenceAdmissionBinding;
   readonly claimed: ReadonlyMap<number, number>;
   readonly accepted: ReadonlySet<string>;
   readonly groundingFailures: ReadonlyMap<number, string>;
@@ -333,7 +334,9 @@ function admitParsedTask(input: {
         pack_identity: input.rawBinding.packIdentity,
         request_sha256: input.rawBinding.requestSha256,
         source_corpus_identity: input.rawBinding.sourceCorpusIdentity,
-        replay_identity_digest: replayIdentityDigest
+        replay_identity_digest: replayIdentityDigest,
+        policy_kind: input.rawBinding.policyKind,
+        member_semantic_keys: input.rawBinding.memberSemanticKeys
       },
       provider_provenance: {
         provider_url_sha256: task.providerUrlSha256,
@@ -373,12 +376,7 @@ function digestCanonicalRaw(
 
 function validateAdmissionTasks(
   tasks: readonly AdmissionTask[],
-  rawBinding: Readonly<{
-    packIdentity: string;
-    requestSha256: string;
-    sourceCorpusIdentity: string;
-    policyKind: "reference_batch" | "reference_batch_8" | "token_aware";
-  }>
+  rawBinding: RawEvidenceAdmissionBinding
 ): string | undefined {
   try {
     for (const task of tasks) assertSemanticAdmissionIdentity(task);
@@ -394,9 +392,13 @@ function validateAdmissionTasks(
     return "semantic admission request mixes source corpus identities";
   }
   const semanticKeys = tasks.map((task) => task.semanticKey);
+  if (rawBinding.memberSemanticKeys.length !== semanticKeys.length ||
+      rawBinding.memberSemanticKeys.some((key, index) => key !== semanticKeys[index])) {
+    return "raw evidence binding does not match pack request and corpus identity";
+  }
   const expectedPackIdentity = transportPackIdentity(
     rawBinding.policyKind,
-    semanticKeys
+    rawBinding.memberSemanticKeys
   );
   const expectedRequestSha256 = createHash("sha256").update(JSON.stringify({
     pack_id: expectedPackIdentity,

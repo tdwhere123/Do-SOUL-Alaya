@@ -1,10 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import {
-  parseSemanticReplayIdentity,
-  semanticReplayIdentityDigest,
-  type SemanticReplayIdentity
-} from "./replay-authority.js";
+import { transportPackIdentity } from "@do-soul/alaya-soul";
+import { parseSemanticReplayIdentity, semanticReplayIdentityDigest, type SemanticReplayIdentity } from "./replay-authority.js";
 
 export const SEMANTIC_ARTIFACT_SCHEMA_VERSION = 1;
 export const SEMANTIC_ARTIFACT_KIND = "assertion_semantic_artifact_v1";
@@ -73,8 +70,18 @@ const RawEvidenceBindingSchema = z.object({
   pack_identity: Hex64,
   request_sha256: Hex64,
   source_corpus_identity: Hex64,
-  replay_identity_digest: Hex64
-}).strict().readonly();
+  replay_identity_digest: Hex64,
+  policy_kind: z.enum(["reference_batch", "reference_batch_8", "token_aware"]),
+  member_semantic_keys: z.array(Hex64).min(1).readonly()
+}).strict().readonly().superRefine((binding, ctx) => {
+  if (transportPackIdentity(binding.policy_kind, binding.member_semantic_keys) !==
+      binding.pack_identity) {
+    ctx.addIssue({
+      code: "custom",
+      message: "raw evidence pack identity does not match policy and members"
+    });
+  }
+});
 
 const ReplayIdentitySchema = z.custom<SemanticReplayIdentity>((value) => {
   try {
