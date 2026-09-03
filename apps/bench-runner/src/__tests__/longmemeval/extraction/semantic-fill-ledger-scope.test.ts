@@ -1,3 +1,4 @@
+import { closeSync, constants, openSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,6 +112,33 @@ describe("semantic fill durable ledger scope", () => {
     expect(inspectSemanticArtifact(root, second!.semanticKey, CAP).status).toBe("missing");
   });
 
+  it("shares stop-loss when extra directory fds occupy later descriptors", async () => {
+    const [first, second] = semanticTasks(["I moved to Berlin.", "I moved to Paris."]);
+    const shared = envelope({ maxCalls: 1, maxFailures: 8 });
+    const consumed = await runSemanticFill({
+      root, tasks: [first!], envelope: shared,
+      transport: createOfflineSemanticReplay({
+        defaultResult: { kind: "failure", reason: "sealed failure" }
+      })
+    });
+    expect(consumed.calls).toBe(1);
+    const held = holdExtraDirectoryFds(root, 32);
+    try {
+      let laterPhysicalCalls = 0;
+      await expectRejection(runSemanticFill({
+        root, tasks: [second!], envelope: shared,
+        transport: createOfflineSemanticReplay({
+          defaultResult: { kind: "failure", reason: "must not start a new pack" },
+          faultHooks: { afterPack: () => { laterPhysicalCalls += 1; } }
+        })
+      }), /stop-loss budget is exhausted/u);
+      expect(laterPhysicalCalls).toBe(0);
+    } finally {
+      releaseDirectoryFds(held);
+    }
+    expect(consumed.lazyRunReceipt.ledgerScopeIdentity).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
   it("keeps the same scope identity when task and policy keys are reordered", async () => {
     const task = semanticTask();
     const policy = TOKEN_AWARE_POLICY;
@@ -186,6 +214,50 @@ describe("semantic fill durable ledger scope", () => {
       .toBe("provider_backed");
     expect(inspectSemanticArtifact(root, tasks[1]!.semanticKey, CAP).status)
       .toBe("provider_backed");
+  });
+
+  it("resumes sealed raw across extra directory fds without a second paid call", async () => {
+    const tasks = semanticTasks(["I moved to Berlin.", "I moved to Paris."]);
+    const transportPolicy = TOKEN_AWARE_POLICY;
+    const plan = planOfficialApiTransport(
+      officialApiSemanticWorksetFromUnits(tasks.map(toWorkUnit)), transportPolicy
+    );
+    expect(plan.packs).toHaveLength(1);
+    const controller = new AbortController();
+    await expectRejection(runSemanticFill({
+      root,
+      tasks,
+      envelope: envelope({ transportPolicy }),
+      transport: createOfflineSemanticReplay({
+        results: [{
+          packId: plan.packs[0]!.pack_id,
+          tasks,
+          result: { kind: "raw", rawJson: rawForPack(tasks) }
+        }],
+        faultHooks: {
+          afterPack: () => controller.abort(new Error("crash-after-seal"))
+        }
+      }),
+      signal: controller.signal
+    }), /crash-after-seal/u);
+    const held = holdExtraDirectoryFds(root, 32);
+    try {
+      let resumedPhysicalCalls = 0;
+      const resumed = await runSemanticFill({
+        root,
+        tasks,
+        envelope: envelope({ transportPolicy }),
+        transport: createOfflineSemanticReplay({
+          defaultResult: { kind: "failure", reason: "must use sealed raw" },
+          faultHooks: { afterPack: () => { resumedPhysicalCalls += 1; } }
+        })
+      });
+      expect(resumedPhysicalCalls).toBe(0);
+      expect(resumed.calls).toBe(1);
+      expect(resumed.admitted).toBe(2);
+    } finally {
+      releaseDirectoryFds(held);
+    }
   });
 
   it("size-split retries only unresolved members while admitted stay admitted", async () => {
@@ -293,3 +365,21 @@ describe("semantic fill durable ledger scope", () => {
       binding.occurrenceIdentity === second.binding.occurrenceIdentity)).toBe(true);
   });
 });
+
+function holdExtraDirectoryFds(path: string, count: number): readonly number[] {
+  const held: number[] = [];
+  try {
+    const directoryFlag = constants.O_RDONLY | constants.O_DIRECTORY;
+    for (let index = 0; index < count; index += 1) {
+      held.push(openSync(path, directoryFlag));
+    }
+    return held;
+  } catch (cause) {
+    releaseDirectoryFds(held);
+    throw cause;
+  }
+}
+
+function releaseDirectoryFds(held: readonly number[]): void {
+  for (const descriptor of held) closeSync(descriptor);
+}

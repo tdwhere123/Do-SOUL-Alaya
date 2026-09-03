@@ -279,9 +279,10 @@ function expectedMeta(
   const sourceAuthorityIdentity = substrateAuthorityIdentity(
     captureSemanticRunSourceAuthority(input.tasks).substrateManifest
   );
+  // Procfd paths change per acquisition; durable scope is the leased directory.
   const scopeIdentity = digest([
     "alaya.semantic_fill_ledger_scope.v1",
-    digest(input.root),
+    digest(`${input.lease.rootIdentity.device}:${input.lease.rootIdentity.inode}`),
     replayDigest,
     policyDigest,
     sourceAuthorityIdentity,
