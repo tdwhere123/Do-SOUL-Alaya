@@ -9,6 +9,8 @@ import {
   type ExtractionCacheManifest
 } from "../cache/extraction-cache-manifest.js";
 import type { ExtractionFillOptions } from "../extraction-fill.js";
+import { hasCompleteExtractionFillAuthority } from "./fill-authority.js";
+import { assertClaimedHistoricalKeyRawClosure } from "./manifest/substrate-key-raw-closure.js";
 import type { LongMemEvalVariant } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import {
@@ -82,7 +84,47 @@ export async function prepareExtractionFill(
   expansion: PreparedExpansionFillAuthority | undefined
 ): Promise<PreparedExtractionFill> {
   const inspected = await inspectExtractionFillPreparation(options, cacheRoot, expansion);
+  if (options.ingestionMode === "lazy_field") {
+    assertClaimedHistoricalKeyRawClosure(cacheRoot);
+    return adoptInspectedExtractionFill(inspected, concurrency, log);
+  }
   return pinInspectedExtractionFill(inspected, cacheRoot, concurrency, log);
+}
+
+function adoptInspectedExtractionFill(
+  inspected: InspectedExtractionFill,
+  concurrency: number,
+  log: (message: string) => void
+): PreparedExtractionFill {
+  const identity = inspected.manifestSnapshot.identity;
+  if (identity === undefined || !hasCompleteExtractionFillAuthority(identity.manifest)) {
+    throw new ExtractionCacheInvariantError(
+      "lazy_field requires existing complete extraction authority"
+    );
+  }
+  log(`[extraction-fill] overlay=lazy_field variant=${inspected.variant} ` +
+    `questions=${inspected.windowLimit} distinct_turns=${inspected.distinctExtractionTurns.length} ` +
+    `unique_cache_keys=${inspected.requestedTurns} model=${inspected.config.model} ` +
+    `concurrency=${concurrency}`);
+  return {
+    config: inspected.config,
+    existingManifest: identity.manifest,
+    pinnedManifestSha256: identity.manifestSha256,
+    distinctTurns: inspected.distinctTurns,
+    executionTurns: inspected.executionTurns,
+    distinctExtractionTurns: inspected.distinctExtractionTurns,
+    executionExtractionTurns: inspected.executionExtractionTurns,
+    requestedTurns: inspected.requestedTurns,
+    executionRequestedTurns: inspected.executionRequestedTurns,
+    datasetRevision: inspected.datasetRevision,
+    variant: inspected.variant,
+    windowOffset: inspected.windowOffset,
+    windowLimit: inspected.windowLimit,
+    ...(inspected.questionBatchLimit === undefined ? {} : {
+      questionBatchLimit: inspected.questionBatchLimit
+    }),
+    ...(inspected.expansion === undefined ? {} : { expansion: inspected.expansion })
+  };
 }
 
 export async function inspectExtractionFillPreparation(
@@ -220,7 +262,7 @@ async function inspectPreparedFillWindow(input: {
     input.cacheRoot, input.config, window.distinctExtractionTurns
   );
   if (input.expansion !== undefined) revalidateExpansionFillAuthority(input.expansion);
-  assertNoOrphanFillSubstrate(completion);
+  assertDemandWindowMatchesSubstrate(input.options.ingestionMode, completion);
   return { window, completion };
 }
 
@@ -298,6 +340,23 @@ function assertPreparationIdentityUnchanged(
   throw new ExtractionCacheInvariantError(
     "extraction cache manifest changed during dataset preparation"
   );
+}
+
+function assertDemandWindowMatchesSubstrate(
+  ingestionMode: ExtractionFillOptions["ingestionMode"],
+  completion: ExtractionFillCompletion
+): void {
+  if (ingestionMode === "lazy_field") {
+    // Demand is a subset of a complete F0-F2 root; extra shards are the rest of
+    // that substrate, not a competing window fill.
+    if (completion.missingTurns !== 0 || completion.invalidTurns !== 0) {
+      throw new ExtractionCacheInvariantError(
+        "lazy_field demand window is missing from the complete F0-F2 substrate"
+      );
+    }
+    return;
+  }
+  assertNoOrphanFillSubstrate(completion);
 }
 
 function assertNoOrphanFillSubstrate(completion: ExtractionFillCompletion): void {

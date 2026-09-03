@@ -25,7 +25,8 @@ import { persistSnapshotExtractionAuthority } from
 import {
   LongMemEvalSnapshotRunProvenanceSchema,
   bindSnapshotRunProvenanceAuthority,
-  compactSnapshotRunProvenance
+  compactSnapshotRunProvenance,
+  isSnapshotRunProvenanceSummaryGateEligible
 } from "../../../runs/snapshot/run-provenance.js";
 import { makeShardProvenance } from "../runner/runner-concurrency-fixture.js";
 
@@ -129,6 +130,35 @@ describe("snapshot extraction authority", () => {
       ...compactRun,
       extraction_cache: { ...cache, expected_turns: cache.expected_turns! + 1 }
     }, authority)).toThrow(/compact summary differs/u);
+  });
+
+  it("rejects a tampered compact_run_identity on bind", () => {
+    const manifest = extractionManifest(2, "run-binding");
+    const authority = buildSnapshotExtractionAuthority(manifest, SOURCE_SHA);
+    const compactV2 = compactSnapshotRunProvenance({
+      ...runProvenance(manifest),
+      schema_version: 2,
+      ingestion_mode: "precomputed_full"
+    });
+    expect(compactV2.compact_run_identity).toMatch(/^[a-f0-9]{64}$/u);
+    expect(() => bindSnapshotRunProvenanceAuthority(compactV2, authority)).not.toThrow();
+    expect(() => bindSnapshotRunProvenanceAuthority({
+      ...compactV2,
+      compact_run_identity: "00".repeat(32)
+    }, authority)).toThrow(/compact_run_identity/u);
+    expect(() => bindSnapshotRunProvenanceAuthority({
+      ...compactSnapshotRunProvenance(runProvenance(manifest)),
+      compact_run_identity: "11".repeat(32)
+    }, authority)).toThrow(/schema_version 1 cannot carry compact_run_identity/u);
+    expect(isSnapshotRunProvenanceSummaryGateEligible(compactV2)).toBe(false);
+    expect(isSnapshotRunProvenanceSummaryGateEligible({
+      ...compactV2,
+      compact_run_identity: "00".repeat(32)
+    })).toBe(false);
+    expect(isSnapshotRunProvenanceSummaryGateEligible({
+      ...compactSnapshotRunProvenance(runProvenance(manifest)),
+      compact_run_identity: "11".repeat(32)
+    })).toBe(false);
   });
 
   it("keeps 100Q and 500Q snapshot manifests near-constant in size", () => {

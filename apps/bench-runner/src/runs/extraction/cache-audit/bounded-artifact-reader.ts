@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import {
-  closeSync, constants, fstatSync, lstatSync, openSync, readSync,
+  closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync,
   type BigIntStats
 } from "node:fs";
+import { isAbsolute, resolve, sep } from "node:path";
 
 export interface BoundedStableRegularFile {
   readonly bytes: Buffer;
@@ -138,4 +139,119 @@ function sameIdentity(left: BigIntStats, right: BigIntStats): boolean {
 function sameStableFile(left: BigIntStats, right: BigIntStats): boolean {
   return sameIdentity(left, right) && left.mode === right.mode && left.size === right.size &&
     left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
+}
+
+interface BoundDirectory {
+  readonly descriptor: number;
+  readonly identity: BigIntStats;
+}
+
+export function withRootBoundDirectory<T>(input: {
+  readonly root: string;
+  readonly segments?: readonly string[];
+  readonly createRoot?: boolean;
+  readonly createSegments?: boolean;
+  readonly label: string;
+}, operation: (stableDirectoryPath: string, stableRootPath: string) => T): T {
+  const held = openRootChain(input.root, input.createRoot === true, input.label);
+  try {
+    const stableRootPath = `/proc/self/fd/${held.at(-1)!.descriptor}`;
+    for (const segment of input.segments ?? []) {
+      assertPathSegment(segment, input.label);
+      held.push(openChildDirectory(
+        held.at(-1)!.descriptor, segment, input.createSegments === true, input.label
+      ));
+    }
+    const result = operation(`/proc/self/fd/${held.at(-1)!.descriptor}`, stableRootPath);
+    for (const directory of held) {
+      if (!sameIdentity(directory.identity, fstatSync(directory.descriptor, { bigint: true }))) {
+        throw new Error(`${input.label} directory identity changed during operation`);
+      }
+    }
+    return result;
+  } finally {
+    for (const directory of [...held].reverse()) closeSync(directory.descriptor);
+  }
+}
+
+export function readRootBoundCanonicalUtf8Artifact(input: {
+  readonly root: string;
+  readonly directorySegments?: readonly string[];
+  readonly filename: string;
+  readonly maxBytes: number;
+  readonly label: string;
+}): string {
+  assertPathSegment(input.filename, input.label);
+  return withRootBoundDirectory({
+    root: input.root,
+    segments: input.directorySegments,
+    label: input.label
+  }, (directory) => readBoundedCanonicalUtf8Artifact({
+    path: `${directory}/${input.filename}`,
+    maxBytes: input.maxBytes,
+    label: input.label
+  }));
+}
+
+function openRootChain(root: string, create: boolean, label: string): BoundDirectory[] {
+  const absolute = resolve(root);
+  if (!isAbsolute(absolute)) throw new Error(`${label} root must be absolute`);
+  if (/^\/proc\/self\/fd\/\d+$/u.test(absolute)) {
+    return [openDirectory(absolute, false, label)];
+  }
+  const segments = absolute.split(sep).filter(Boolean);
+  const held = [openDirectory(sep, false, label)];
+  try {
+    for (const segment of segments) {
+      held.push(openChildDirectory(held.at(-1)!.descriptor, segment, create, label));
+    }
+    return held;
+  } catch (cause) {
+    for (const directory of [...held].reverse()) closeSync(directory.descriptor);
+    throw cause;
+  }
+}
+
+function openChildDirectory(
+  parentDescriptor: number,
+  segment: string,
+  create: boolean,
+  label: string
+): BoundDirectory {
+  const anchored = `/proc/self/fd/${parentDescriptor}/${segment}`;
+  if (create) {
+    try {
+      mkdirSync(anchored, { mode: 0o700 });
+    } catch (cause) {
+      if (!(cause instanceof Error && "code" in cause && cause.code === "EEXIST")) throw cause;
+    }
+  }
+  return openDirectory(anchored, true, label);
+}
+
+function openDirectory(path: string, noFollow: boolean, label: string): BoundDirectory {
+  if (typeof constants.O_DIRECTORY !== "number" || typeof constants.O_NOFOLLOW !== "number") {
+    throw new Error(`${label} requires directory descriptor and no-follow support`);
+  }
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY |
+    (noFollow ? constants.O_NOFOLLOW : 0));
+  try {
+    const identity = fstatSync(descriptor, { bigint: true });
+    const named = lstatSync(path, { bigint: true });
+    if (!identity.isDirectory() || (noFollow && named.isSymbolicLink()) ||
+        (!named.isSymbolicLink() && !sameIdentity(identity, named))) {
+      throw new Error(`${label} directory is not a stable real directory`);
+    }
+    return { descriptor, identity };
+  } catch (cause) {
+    closeSync(descriptor);
+    throw cause;
+  }
+}
+
+function assertPathSegment(segment: string, label: string): void {
+  if (segment.length === 0 || segment === "." || segment === ".." ||
+      segment.includes("/") || segment.includes("\\")) {
+    throw new Error(`${label} contains an unsafe path segment`);
+  }
 }

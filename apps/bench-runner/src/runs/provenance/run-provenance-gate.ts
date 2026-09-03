@@ -17,6 +17,7 @@ import {
 export function isLongMemEvalRunProvenanceGateEligible(
   provenance: LongMemEvalRunProvenance
 ): boolean {
+  if (!isLegacyGateSchema(provenance)) return false;
   const cache = provenance.extraction_cache;
   return cache !== null &&
     cache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
@@ -27,6 +28,7 @@ export function isLongMemEvalRunProvenanceGateEligible(
 export function isLongMemEvalRunProvenanceSummaryGateEligible(
   provenance: LongMemEvalRunProvenance
 ): boolean {
+  if (!isLegacyGateSchema(provenance)) return false;
   const cache = provenance.extraction_cache;
   return provenance.code.commit_sha !== undefined &&
     provenance.code.commit_sha.startsWith(provenance.code.commit_sha7) &&
@@ -44,6 +46,12 @@ export function isLongMemEvalRunProvenanceSummaryGateEligible(
     hasRequiredEmbeddingArtifact(provenance.runtime) &&
     hasConsistentEmbeddingSupplementProvenance(provenance.runtime) &&
     hasConsistentAnswerRerankProvenance(provenance.runtime);
+}
+
+function isLegacyGateSchema(
+  provenance: Pick<LongMemEvalRunProvenance, "schema_version" | "ingestion_mode">
+): boolean {
+  return provenance.schema_version === 1 && provenance.ingestion_mode === undefined;
 }
 
 function hasCurrentDatasetBinding(

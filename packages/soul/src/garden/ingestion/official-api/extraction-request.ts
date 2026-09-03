@@ -6,6 +6,21 @@ import {
   buildOfficialApiSourceCorpus,
   OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
 } from "../../triage/grounding/source-locator.js";
+import { indexSourceAssertions } from "../../triage/grounding/source-locator/assertion-catalog.js";
+import { collectSourceRoleMarkers } from
+  "../../triage/grounding/source-role/marker.js";
+import { planTurnTransportPacks } from "./transport-pack.js";
+import {
+  ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
+  bindAssertionSource,
+  computeAssertionOccurrenceIdentity,
+  computeAssertionSemanticKey,
+  createAssertionSemanticIdentityWitness,
+  digestSourceText,
+  resolveAssertionSemanticContext,
+  type AssertionSemanticIdentityWitness,
+  type AssertionSourceBinding
+} from "../../triage/grounding/source-locator/assertion-semantic-identity.js";
 
 export const OFFICIAL_API_EXTRACTION_REQUEST_SCHEMA_VERSION = 2;
 export const OFFICIAL_API_EXTRACTION_BATCH_CONTRACT_VERSION = 1;
@@ -51,23 +66,124 @@ export function buildOfficialApiExtractionRequests(
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
   const assertions = buildOfficialApiSourceAssertions(sourceCorpus);
   const sourceCorpusIdentity = computeOfficialApiSourceCorpusIdentity(sourceCorpus);
-  const batchCount = Math.max(
-    1,
-    Math.ceil(assertions.length / OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH)
+  const byId = new Map(assertions.map((assertion) => [assertion.assertion_id, assertion]));
+  const workset = mintOfficialApiAssertionBindings(turnContent, messages);
+  const plan = planTurnTransportPacks(
+    workset.map((binding) => {
+      const assertion = byId.get(binding.locator.assertion_id);
+      if (assertion === undefined) {
+        throw new TypeError("legacy request wrapper lost a catalog assertion");
+      }
+      return {
+        semanticKey: binding.semanticKey,
+        assertionId: binding.locator.assertion_id,
+        text: assertion.text
+      };
+    }),
+    { kind: "reference_batch_8" }
   );
-  if (assertions.length === 0) {
-    return Object.freeze([buildRequest([], sourceCorpusIdentity, 0, batchCount)]);
+  const packs = plan.packs.filter((pack) => pack.assertion_ids.length > 0);
+  if (packs.length === 0) {
+    return Object.freeze([buildRequest([], sourceCorpusIdentity, 0, 1)]);
   }
-  const requests: OfficialApiExtractionRequest[] = [];
-  for (let offset = 0; offset < assertions.length;
-    offset += OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH) {
-    requests.push(buildRequest(assertions.slice(
-      offset,
-      offset + OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH
-    ), sourceCorpusIdentity, requests.length, batchCount));
-  }
-  return Object.freeze(requests);
+  return Object.freeze(packs.map((pack, batchIndex) => buildRequest(
+    pack.assertion_ids.map((assertionId) => {
+      const assertion = byId.get(assertionId);
+      if (assertion === undefined) {
+        throw new TypeError("transport pack referenced a missing assertion");
+      }
+      return assertion;
+    }),
+    sourceCorpusIdentity,
+    batchIndex,
+    packs.length
+  )));
 }
+
+export interface MintedOfficialApiAssertionBinding {
+  readonly binding: AssertionSourceBinding;
+  readonly semanticIdentity: AssertionSemanticIdentityWitness;
+}
+
+export function mintOfficialApiAssertionWork(
+  turnContent: string,
+  messages: readonly (Pick<ConversationMessage, "role" | "content"> &
+    Partial<Pick<ConversationMessage, "message_id">>)[],
+  datasetRevision?: string
+): readonly MintedOfficialApiAssertionBinding[] {
+  const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
+  const catalog = buildOfficialApiSourceAssertions(sourceCorpus);
+  const indexed = new Map(
+    indexSourceAssertions(sourceCorpus).map((assertion) => [assertion.assertion_id, assertion])
+  );
+  const sourceCorpusIdentity = computeOfficialApiSourceCorpusIdentity(sourceCorpus);
+  const sourceTextDigest = digestSourceText(sourceCorpus);
+  const roleMarkers = collectSourceRoleMarkers(sourceCorpus);
+  return Object.freeze(catalog.map((member) => {
+    const indexedAssertion = indexed.get(member.assertion_id);
+    if (indexedAssertion === undefined) {
+      throw new TypeError("catalog assertion missing from the indexed source catalog");
+    }
+    const sentenceText = sourceCorpus.slice(
+      indexedAssertion.sentence.start,
+      indexedAssertion.sentence.end
+    );
+    const enclosing = sentenceText.includes(indexedAssertion.text)
+      ? sentenceText
+      : indexedAssertion.text;
+    const semanticIdentity = createAssertionSemanticIdentityWitness({
+      formationContractVersion: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+      exactText: indexedAssertion.text,
+      trustedRole: resolveTrustedRole(roleMarkers, indexedAssertion.start),
+      semanticContext: resolveAssertionSemanticContext(
+        indexedAssertion.text,
+        enclosing,
+        sourceCorpus.slice(
+          Math.max(0, indexedAssertion.sentence.start - 512),
+          indexedAssertion.sentence.start
+        )
+      )
+    });
+    const semanticKey = computeAssertionSemanticKey(semanticIdentity);
+    const occurrenceIdentity = computeAssertionOccurrenceIdentity({
+      sourceCorpusIdentity,
+      assertionId: indexedAssertion.assertion_id,
+      start: indexedAssertion.start,
+      end: indexedAssertion.end,
+      messageIds: messages.map((message) => message.message_id ?? null)
+    });
+    return Object.freeze({
+      semanticIdentity,
+      binding: bindAssertionSource({
+        semanticKey,
+        sourceCorpusIdentity,
+        sourceTextDigest,
+        assertionTextDigest: digestSourceText(indexedAssertion.text),
+        occurrenceIdentity,
+        locator: {
+          assertion_id: indexedAssertion.assertion_id,
+          start: indexedAssertion.start,
+          end: indexedAssertion.end
+        },
+        datasetRevision
+      })
+    });
+  }));
+}
+
+export function mintOfficialApiAssertionBindings(
+  turnContent: string,
+  messages: readonly (Pick<ConversationMessage, "role" | "content"> &
+    Partial<Pick<ConversationMessage, "message_id">>)[],
+  datasetRevision?: string
+): readonly AssertionSourceBinding[] {
+  return Object.freeze(mintOfficialApiAssertionWork(
+    turnContent, messages, datasetRevision
+  ).map((item) => item.binding));
+}
+
+export { ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID };
+export type { AssertionSourceBinding };
 
 function buildRequest(
   sourceAssertions: ReturnType<typeof buildOfficialApiSourceAssertions>,
@@ -91,6 +207,15 @@ export function computeOfficialApiSourceCorpusIdentity(sourceCorpus: string): st
     contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
     source_corpus: sourceCorpus
   }), "utf8").digest("hex");
+}
+
+function resolveTrustedRole(
+  markers: readonly { readonly start: number; readonly role: "user" | "assistant" }[],
+  assertionStart: number
+): "user" | "assistant" {
+  const role = markers.filter((marker) => marker.start <= assertionStart).at(-1)?.role;
+  if (role === undefined) throw new TypeError("assertion source role is unavailable");
+  return role;
 }
 
 export function parseOfficialApiExtractionRequest(value: unknown): OfficialApiExtractionRequest {

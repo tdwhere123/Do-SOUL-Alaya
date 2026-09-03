@@ -22,6 +22,7 @@ import {
   renderLifecycleFailure,
   throwLifecycleErrors
 } from "../errors.js";
+import { withRecallZeroLiveCampaign } from "@do-soul/alaya-core";
 import { buildRecallEvalArchiveBundle } from "../../provenance/recall-eval/recall-eval-archive-bundle.js";
 import {
   RecallEvalDiagnosticsSpool
@@ -60,6 +61,13 @@ export type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } fr
 export async function runRecallEval(
   options: RecallEvalOptions,
   deps: RecallEvalShardDeps = {}
+): Promise<RecallEvalResult> {
+  return withRecallZeroLiveCampaign(() => runRecallEvalCampaign(options, deps));
+}
+
+async function runRecallEvalCampaign(
+  options: RecallEvalOptions,
+  deps: RecallEvalShardDeps
 ): Promise<RecallEvalResult> {
   const recallWeightOverrides = resolveBenchRecallWeightOverrides({
     cliJson: options.weightOverridesJson,

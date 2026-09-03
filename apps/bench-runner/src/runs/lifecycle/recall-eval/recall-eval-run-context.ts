@@ -2,7 +2,10 @@ import type {
   BenchPolicyShape,
   BenchSimulateReportMode
 } from "@do-soul/alaya-eval";
-import { parseRecallRuntimeConfigFromEnv } from "@do-soul/alaya-core";
+import {
+  assertRecallZeroLiveExtraction,
+  parseRecallRuntimeConfigFromEnv
+} from "@do-soul/alaya-core";
 import {
   resolveBenchCommitSha7,
   resolveBenchRunnerVersion
@@ -120,6 +123,7 @@ export async function prepareRecallEvalRunContext(
     "recall-eval invocation"
   );
   assertCacheOnlyEnvironment(ambientEnv);
+  assertRecallZeroLiveExtraction();
   const embeddingMode = options.embeddingMode ?? recallEvalEmbeddingMode(ambientEnv);
   if (embeddingMode === "env") {
     assertProductDefaultBiEncoderEnvironment(

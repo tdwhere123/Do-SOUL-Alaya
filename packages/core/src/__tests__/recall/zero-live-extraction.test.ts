@@ -1,0 +1,63 @@
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  assertRecallZeroLiveExtraction,
+  refuseRecallCampaignLiveExtraction,
+  RECALL_ZERO_LIVE_ATTEMPTED_ENV,
+  RECALL_ZERO_LIVE_CAMPAIGN_ENV,
+  withRecallZeroLiveCampaign
+} from "../../recall/runtime/zero-live-extraction.js";
+
+afterEach(() => {
+  delete process.env[RECALL_ZERO_LIVE_CAMPAIGN_ENV];
+  delete process.env[RECALL_ZERO_LIVE_ATTEMPTED_ENV];
+});
+
+describe("recall zero-live extraction", () => {
+  it("allows a campaign that never enters fill or a provider executor", async () => {
+    await expect(withRecallZeroLiveCampaign(async () => {
+      assertRecallZeroLiveExtraction();
+      return "ok";
+    })).resolves.toBe("ok");
+    expect(() => assertRecallZeroLiveExtraction({
+      providerExecutorEntries: 0, extractionWrites: 0
+    })).not.toThrow();
+  });
+
+  it("fails closed when a campaign enters the fill path", async () => {
+    await expect(withRecallZeroLiveCampaign(async () => {
+      refuseRecallCampaignLiveExtraction("extraction_write");
+    })).rejects.toThrow(/live extraction/u);
+  });
+
+  it("fails closed when a campaign enters a provider executor", async () => {
+    await expect(withRecallZeroLiveCampaign(async () => {
+      refuseRecallCampaignLiveExtraction("provider_executor");
+    })).rejects.toThrow(/live extraction/u);
+  });
+
+  it("does not refuse fill outside a recall campaign", () => {
+    expect(() => refuseRecallCampaignLiveExtraction("extraction_write")).not.toThrow();
+    expect(() => assertRecallZeroLiveExtraction({
+      providerExecutorEntries: 1, extractionWrites: 0
+    })).toThrow(/live extraction/u);
+  });
+
+  it("refuses in a child process that inherited the campaign cookie without ALS", () => {
+    process.env[RECALL_ZERO_LIVE_CAMPAIGN_ENV] = "1";
+    expect(() => assertRecallZeroLiveExtraction()).not.toThrow();
+    expect(() => refuseRecallCampaignLiveExtraction("extraction_write"))
+      .toThrow(/live extraction/u);
+    expect(() => assertRecallZeroLiveExtraction()).toThrow(/live extraction/u);
+  });
+
+  it("fails the campaign after catch-and-continue of refuse", async () => {
+    await expect(withRecallZeroLiveCampaign(async () => {
+      try {
+        refuseRecallCampaignLiveExtraction("provider_executor");
+      } catch {
+        // swallowed on purpose
+      }
+      assertRecallZeroLiveExtraction();
+    })).rejects.toThrow(/live extraction/u);
+  });
+});

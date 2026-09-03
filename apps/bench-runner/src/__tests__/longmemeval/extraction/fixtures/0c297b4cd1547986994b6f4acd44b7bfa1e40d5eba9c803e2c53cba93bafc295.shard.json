@@ -1,0 +1,22 @@
+{
+  "model": "mimo-v2.5",
+  "request_profile": "mimo-v2.5-nonthinking-v1",
+  "cache_key": "0c297b4cd1547986994b6f4acd44b7bfa1e40d5eba9c803e2c53cba93bafc295",
+  "raw_json": "{\"signals\":[{\"object_kind\":\"activity\",\"confidence\":0.85,\"matched_text\":\"I'm also planning to book a private session with Rachel soon.\",\"source_locator\":{\"contract_version\":2,\"kind\":\"assertion_catalog\",\"assertion_id\":1},\"semantic_factor_graph\":{\"schema_version\":2,\"source_kind\":\"evidence\",\"factors\":[{\"factor_id\":\"planning\",\"surface\":\"planning to book\",\"semantic_identity\":\"plan\"},{\"factor_id\":\"session\",\"surface\":\"private session\",\"semantic_identity\":\"private session\"},{\"factor_id\":\"rachel\",\"surface\":\"Rachel\",\"semantic_identity\":\"rachel\"}],\"variables\":[],\"result_variable_ids\":[],\"propositions\":[{\"proposition_id\":\"plan_booking\",\"predicate_factor_id\":\"planning\",\"arguments\":[{\"position\":0,\"binding_identity\":\"activity\",\"reference_kind\":\"factor\",\"reference_id\":\"session\"},{\"position\":1,\"binding_identity\":\"person\",\"reference_kind\":\"factor\",\"reference_id\":\"rachel\"}]}]},\"canonical_entities\":[\"private session\",\"rachel\"],\"temporal_projection\":{\"projection_schema_version\":1,\"time_precision\":\"soon\",\"time_source\":\"explicit\"}}]}",
+  "extracted_at": "2026-08-23T10:36:20.513Z",
+  "transport_provenance": {
+    "provider_url_sha256": "sha256:1d0c8dae4013f0dd0883ac7692d61535aa7cdbad5eab0302c57fa1d0f07fe77a",
+    "model": "mimo-v2.5"
+  },
+  "response_metadata": {
+    "finish_reason": "stop",
+    "max_output_tokens": 512,
+    "completion_contract_version": 1,
+    "completion_witness": "done_sentinel",
+    "usage": {
+      "input_tokens": 1806,
+      "output_tokens": 220,
+      "total_tokens": 2026
+    }
+  }
+}

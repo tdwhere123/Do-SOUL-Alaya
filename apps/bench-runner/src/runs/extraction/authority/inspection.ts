@@ -33,7 +33,7 @@ import {
 import type { ExtractionContentClosureEntry } from "../content-closure.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
 import { inspectExtractionCacheWriterLock } from
-  "../fill/manifest/fill-root-guard.js";
+  "../fill/manifest/writer-lock.js";
 
 const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
 

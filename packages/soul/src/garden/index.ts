@@ -59,6 +59,11 @@ export {
   salvageRawSignalElements,
   stringifyOfficialApiExtractionRequest,
   officialApiExtractionRequestTemplatePreimage,
+  OFFICIAL_API_SEMANTIC_WORKSET_CONTRACT_VERSION,
+  officialApiSemanticWorksetFromUnits,
+  planOfficialApiSemanticWorkset,
+  planOfficialApiTransport,
+  materializeOfficialApiTransportResponse,
   type GardenCompileContext,
   type GardenComputeProvider,
   type OfficialApiSignalAuditDisposition,
@@ -67,11 +72,17 @@ export {
   type OfficialApiSignalFormationAuditInput,
   type OfficialApiSignalFormationAuditResult,
   type OfficialApiExtractionRequest,
+  type OfficialApiSemanticWorkset,
+  type OfficialApiSemanticWorkUnit,
+  type OfficialApiTransportBatchSize,
+  type TransportPack,
+  type TransportPackPlan,
   type OfficialApiSemanticFactorGraphFields,
   type OfficialApiSemanticFactorGraphProjectionAudit,
   type OfficialApiSemanticFactorGraphProjectionReason,
   type OfficialApiSignalDraft
 } from "./ingestion/compute-provider.js";
+export { transportPackIdentity } from "./ingestion/official-api/transport-pack.js";
 export {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
