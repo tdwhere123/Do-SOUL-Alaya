@@ -139,6 +139,22 @@ describe("buildRecallEvalWorkerCliArgs", () => {
     );
     expect(args).not.toContain(sourceReceipt);
   });
+
+  it("forwards diagnostic snapshot consume so workers can replay ineligible snapshots", () => {
+    const args = buildRecallEvalWorkerCliArgs({
+      snapshotDbPath: "/tmp/snapshot.db",
+      variant: "longmemeval_s",
+      historyRoot: "/tmp/parent-history",
+      concurrency: 2,
+      snapshotConsumeAuthority: "diagnostic"
+    }, {
+      shardIndex: 0,
+      offset: 0,
+      limit: 5,
+      historyRoot: "/tmp/shards/shard-0"
+    });
+    expect(args[args.indexOf("--snapshot-consume-authority") + 1]).toBe("diagnostic");
+  });
 });
 
 describe("buildRecallEvalWorkerEnv", () => {

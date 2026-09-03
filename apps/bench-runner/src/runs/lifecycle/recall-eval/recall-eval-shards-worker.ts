@@ -61,6 +61,7 @@ export function buildRecallEvalWorkerCliArgs(
       : recallEvalShardOverlayReceiptPath(plan.historyRoot, opts.embeddingCacheOverlayReceiptPath)
   );
   pushOptionalArg(args, "--query-semantic-factor-cache", opts.querySemanticFactorCachePath);
+  pushOptionalArg(args, "--snapshot-consume-authority", opts.snapshotConsumeAuthority);
   pushOptionalArg(args, "--seed-extraction-system-prompt", opts.seedExtractionSystemPromptPath);
   pushOptionalArg(args, "--fact-frame-retrofit-ledger", opts.factFrameRetrofitLedgerPath);
   return args;
