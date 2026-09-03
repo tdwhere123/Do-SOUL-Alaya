@@ -50,13 +50,14 @@ describe("recall-eval CLI options", () => {
     });
   });
 
-  it("fail-closes --skip-recycle because recycle remains required", () => {
-    expect(() => parseFlags(["--skip-recycle"])).toThrow(
-      /path-switch smoke is NOT_VERIFIED; recycle remains required/
-    );
-    expect(() => parseFlags(["--skip-recycle=true"])).toThrow(
-      /path-switch smoke is NOT_VERIFIED; recycle remains required/
-    );
+  it("forwards --skip-recycle as a recall-eval opt-in", () => {
+    const flags = parseFlags([
+      "--snapshot", "/tmp/source.db",
+      "--skip-recycle"
+    ]);
+    expect(buildRecallEvalOptions(flags, flags.snapshot!)).toMatchObject({
+      skipRecycle: true
+    });
   });
 
   it("defaults snapshot consume to promotion by omitting the option", () => {

@@ -49,6 +49,7 @@ export function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     qa: state.qa,
     edgePlane: state.edgePlane,
     expectedReconciliationBasis: state.expectedReconciliationBasis,
-    snapshotConsumeAuthority: state.snapshotConsumeAuthority
+    snapshotConsumeAuthority: state.snapshotConsumeAuthority,
+    skipRecycle: state.skipRecycle
   };
 }

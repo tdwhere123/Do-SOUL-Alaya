@@ -1,4 +1,5 @@
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import {
   startBenchDaemon,
@@ -47,6 +48,28 @@ interface PagerRuntime {
   readonly open: RecallEvalPagerOpenPayload;
   readonly slices: ExplodedWorkspaceSlices | null;
   installedWorkspaceId: string | null;
+  workingDbPath: string | null;
+  switchIndex: number;
+}
+
+export function pagerSwitchWorkingDataDir(
+  dataDirRoot: string,
+  switchIndex: number,
+  workspaceId: string
+): string {
+  return resolve(dataDirRoot, "pager-working", `${switchIndex}-${workspaceId}`);
+}
+
+function removeClosedPagerWorkingDir(
+  dataDirRoot: string,
+  workingDbPath: string | null
+): void {
+  if (workingDbPath === null) return;
+  const workingDir = resolve(workingDbPath, "..");
+  const switchRoot = resolve(dataDirRoot, "pager-working");
+  const rel = relative(switchRoot, workingDir);
+  if (rel === "" || rel.startsWith("..")) return;
+  rmSync(workingDir, { recursive: true, force: true });
 }
 
 let runtime: PagerRuntime | null = null;
@@ -64,7 +87,9 @@ export async function openRecallEvalPagerChild(
     spool,
     open: payload,
     slices: working.slices,
-    installedWorkspaceId: working.slices?.workspaceIds[0] ?? null
+    installedWorkspaceId: working.slices?.workspaceIds[0] ?? null,
+    workingDbPath: workingAlayaDbPath(payload.dataDirRoot),
+    switchIndex: 0
   };
   return { ...working.sqlite, selectionSpoolRootPath: spool?.rootPath ?? null };
 }
@@ -109,32 +134,40 @@ async function ensurePagerDaemonForQuestion(
   current: PagerRuntime,
   workspaceId: string
 ): Promise<void> {
-  const working = workingAlayaDbPath(current.open.dataDirRoot);
+  current.switchIndex += 1;
+  const nextDir = pagerSwitchWorkingDataDir(
+    current.open.dataDirRoot, current.switchIndex, workspaceId
+  );
+  mkdirSync(nextDir, { recursive: true });
+
   if (current.daemon !== null) {
     await current.daemon.shutdown();
     current.daemon = null;
   }
-  closeCachedDatabase(working);
+  const previousWorking = current.workingDbPath;
+  if (previousWorking !== null) {
+    closeCachedDatabase(previousWorking);
+  }
 
   if (current.slices !== null) {
-    for (const suffix of ["", "-wal", "-shm"]) {
-      rmSync(`${working}${suffix}`, { force: true });
-    }
     installRecallEvalWorkspaceSlice({
-      dataDirRoot: current.open.dataDirRoot,
+      dataDirRoot: nextDir,
       workspaceId,
       slices: current.slices
     });
-    current.installedWorkspaceId = workspaceId;
   }
+  current.installedWorkspaceId = workspaceId;
+  current.workingDbPath = workingAlayaDbPath(nextDir);
 
   current.daemon = await startBenchDaemon({
-    dataDirRoot: current.open.dataDirRoot,
+    dataDirRoot: nextDir,
     embeddingMode: current.open.daemonLaunch.embeddingMode,
     embeddingProviderKind: current.open.daemonLaunch.embeddingProviderKind,
     recallWeightOverrides: current.open.recallWeightOverrides
-  }, current.open.daemonLaunch);
+  });
   current.daemon.reloadWorkingDatabase();
+
+  removeClosedPagerWorkingDir(current.open.dataDirRoot, previousWorking);
 }
 
 export async function closeRecallEvalPagerChild(): Promise<RecallEvalPagerCloseResult> {
@@ -155,7 +188,9 @@ export async function closeRecallEvalPagerChild(): Promise<RecallEvalPagerCloseR
       primaryError ??= error;
     }
   }
-  closeCachedDatabase(workingAlayaDbPath(current.open.dataDirRoot));
+  closeCachedDatabase(
+    current.workingDbPath ?? workingAlayaDbPath(current.open.dataDirRoot)
+  );
   if (primaryError !== undefined) {
     try {
       await current.spool?.dispose();

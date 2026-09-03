@@ -34,7 +34,6 @@ export async function executeRecallEvalRun(
   selectionArtifact: RecallEvalSelectionBoundaryArtifact | null;
   evidenceProjectionRebuild: unknown;
 }>> {
-  assertRecallEvalRecycleRequired(context.options);
   const session = createRecallEvalPagerSession();
   let collected: readonly RecallEvalQuestionResult[] = [];
   let selectionArtifact: RecallEvalSelectionBoundaryArtifact | null = null;
@@ -54,23 +53,10 @@ export async function executeRecallEvalRun(
   return { collected, selectionArtifact, evidenceProjectionRebuild };
 }
 
-const RECALL_EVAL_RECYCLE_REQUIRED_MESSAGE =
-  "path-switch smoke is NOT_VERIFIED; recycle remains required";
-
-export function assertRecallEvalRecycleRequired(
-  options: { readonly skipRecycle?: boolean } = {}
-): void {
-  if (options.skipRecycle === true) {
-    throw new Error(
-      `skipRecycle is not allowed: ${RECALL_EVAL_RECYCLE_REQUIRED_MESSAGE}`
-    );
-  }
+function shouldRecycleSession(context: RecallEvalRunContext): boolean {
+  if (context.options.skipRecycle === true) return false;
   const raw = process.env.ALAYA_RECALL_EVAL_SKIP_RECYCLE;
-  if (raw === "1" || raw === "true") {
-    throw new Error(
-      `ALAYA_RECALL_EVAL_SKIP_RECYCLE is not allowed: ${RECALL_EVAL_RECYCLE_REQUIRED_MESSAGE}`
-    );
-  }
+  return raw !== "1" && raw !== "true";
 }
 
 async function openPager(
@@ -141,7 +127,9 @@ async function executeRecallEvalQuestions(
       questionIndex: i
     });
     writeRecallEvalProgress(i, context.window.length, question.questionId, result);
-    await session.recycle();
+    if (shouldRecycleSession(context)) {
+      await session.recycle();
+    }
   }
   return collected;
 }

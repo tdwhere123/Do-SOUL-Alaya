@@ -70,7 +70,8 @@ export function buildRecallEvalOptions(
       : { querySemanticFactorCachePath: opts.querySemanticFactorCache }),
     ...(opts.snapshotConsumeAuthority === undefined
       ? {}
-      : { snapshotConsumeAuthority: opts.snapshotConsumeAuthority })
+      : { snapshotConsumeAuthority: opts.snapshotConsumeAuthority }),
+    ...(opts.skipRecycle === true ? { skipRecycle: true } : {})
   };
 }
 

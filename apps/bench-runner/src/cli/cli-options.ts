@@ -72,6 +72,7 @@ export interface ParsedFlags {
   readonly edgePlane: boolean;
   readonly expectedReconciliationBasis?: EffectiveReconciliationBasis;
   readonly snapshotConsumeAuthority?: "promotion" | "diagnostic";
+  readonly skipRecycle?: boolean;
 }
 
 export interface ParsedFlagsState {
@@ -114,6 +115,7 @@ export interface ParsedFlagsState {
   edgePlane: boolean;
   expectedReconciliationBasis?: EffectiveReconciliationBasis;
   snapshotConsumeAuthority?: "promotion" | "diagnostic";
+  skipRecycle?: boolean;
   shards: string[];
   collectingShards: boolean;
 }

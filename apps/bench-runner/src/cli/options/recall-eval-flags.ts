@@ -51,9 +51,8 @@ export function consumeRecallEvalPathFlag(
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--skip-recycle")) {
-    throw new Error(
-      "--skip-recycle is not allowed: path-switch smoke is NOT_VERIFIED; recycle remains required"
-    );
+    state.skipRecycle = true;
+    return index;
   }
   if (!matchFlagToken(token, "--seed-extraction-system-prompt")) {
     return undefined;

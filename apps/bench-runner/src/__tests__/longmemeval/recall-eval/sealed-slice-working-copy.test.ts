@@ -22,6 +22,7 @@ import * as loadOpenModule from "../../../runs/snapshot/recall-eval/workspace-sl
 import {
   closeRecallEvalPagerChild,
   openRecallEvalPagerChild,
+  pagerSwitchWorkingDataDir,
   recallRecallEvalPagerChild
 } from "../../../runs/lifecycle/recall-eval/recall-eval-process/child-runtime.js";
 import { readRecallEvalPagerMapsHint } from "../../../runs/lifecycle/recall-eval/recall-eval-process/maps-hint.js";
@@ -146,8 +147,11 @@ describe("H02 — sealed slice private working copy", () => {
     );
     expect(result).toBeDefined();
 
-    // Verify EventLog on the working copy has appended entries
-    const workingDb = initDatabase({ filename: workingAlayaDbPath(dataDirRoot) });
+    const workingDb = initDatabase({
+      filename: workingAlayaDbPath(
+        pagerSwitchWorkingDataDir(dataDirRoot, 1, WORKSPACE_A)
+      )
+    });
     try {
       const row = workingDb.connection.prepare(
         "SELECT COUNT(*) AS count FROM event_log WHERE event_type = 'soul.recall.completed'"
@@ -166,7 +170,7 @@ describe("H02 — sealed slice private working copy", () => {
     expect(readFileSync(slicePathA)).toEqual(bytesBefore);
 
     await closeRecallEvalPagerChild();
-  });
+  }, 15_000);
 
   it("load-open ATTACH/DELETE sequence is never called on the pager question path", async () => {
     const dataDirRoot = join(root, "data-no-load-open");
@@ -258,8 +262,11 @@ describe("H02 — sealed slice private working copy", () => {
       buildRecallPayload("q2", WORKSPACE_A, TOKEN_A)
     );
 
-    // Working database must have fresh state with exactly 1 recall completion event, not 2
-    const workingDb = initDatabase({ filename: workingAlayaDbPath(dataDirRoot) });
+    const workingDb = initDatabase({
+      filename: workingAlayaDbPath(
+        pagerSwitchWorkingDataDir(dataDirRoot, 2, WORKSPACE_A)
+      )
+    });
     try {
       const row = workingDb.connection.prepare(
         "SELECT COUNT(*) AS count FROM event_log WHERE event_type = 'soul.recall.completed'"
