@@ -56,6 +56,8 @@ export function observeEmbeddingProviderReadiness(
       const responseDimensions = embeddings[0]!.length;
       readiness.markReady(responseDimensions);
       return embeddings;
-    }
+    },
+    // Isolated ONNX children outlive JS GC; dropping close leaks them across daemon restarts.
+    ...(typeof provider.close === "function" ? { close: () => provider.close!() } : {})
   };
 }

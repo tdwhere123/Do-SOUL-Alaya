@@ -67,7 +67,8 @@ export function createDaemonEmbeddingRuntime(input: {
     defaultPolicyDecorator: services.defaultPolicyDecorator,
     providerWarmup: services.providerWarmup,
     getProviderDimensions: () => providerState.readiness.dimensions,
-    getWarmupHoldReason: () => resolveEmbeddingWarmupHoldReason(providerState.readiness.status)
+    getWarmupHoldReason: () => resolveEmbeddingWarmupHoldReason(providerState.readiness.status),
+    closeProvider: () => closeEmbeddingProvider(providerState.embeddingProvider)
   };
 }
 
@@ -348,4 +349,9 @@ function resolveEmbeddingProvider(input: {
     model: input.openAiModel ?? undefined,
     baseUrl: input.openAiBaseUrl ?? undefined
   });
+}
+
+async function closeEmbeddingProvider(provider: EmbeddingProviderPort | null): Promise<void> {
+  if (provider?.close === undefined) return;
+  await provider.close();
 }

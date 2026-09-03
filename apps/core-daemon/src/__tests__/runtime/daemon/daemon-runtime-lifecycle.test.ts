@@ -34,6 +34,7 @@ function createControls(
       mode?: "production" | "cache_only"
     ) => Promise<void>;
     recallReadWorkerClient: { close(): Promise<void> };
+    closeEmbeddingProvider: () => Promise<void>;
     database: { close(): void };
     temporalRuntimeLease: { release(): Promise<void> };
     backgroundManagerStop: () => Promise<void>;
@@ -83,6 +84,7 @@ function createControls(
     daemonMcpRuntimeRegistry: { close: vi.fn(async () => undefined) },
     globalMemoryRecallInvalidationSubscription: null,
     recallReadWorkerClient: overrides.recallReadWorkerClient,
+    closeEmbeddingProvider: overrides.closeEmbeddingProvider,
     database: overrides.database ?? { close: vi.fn() },
     temporalRuntimeLease: overrides.temporalRuntimeLease,
     requestProtection: {
@@ -220,6 +222,35 @@ describe("createDaemonLifecycleControls", () => {
       expect.objectContaining({ inFlight: 1, forced_drain: true })
     );
     expect(database.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the embedding provider before the recall worker and database", async () => {
+    const order: string[] = [];
+    const closeEmbeddingProvider = vi.fn(async () => {
+      order.push("embedding");
+    });
+    const recallReadWorkerClient = {
+      close: vi.fn(async () => {
+        order.push("worker");
+      })
+    };
+    const database = {
+      close: vi.fn(() => {
+        order.push("database");
+      })
+    };
+    const { controls } = createControls("env", {
+      closeEmbeddingProvider,
+      recallReadWorkerClient,
+      database
+    });
+
+    await controls.shutdown();
+
+    expect(closeEmbeddingProvider).toHaveBeenCalledTimes(1);
+    expect(recallReadWorkerClient.close).toHaveBeenCalledTimes(1);
+    expect(database.close).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["embedding", "worker", "database"]);
   });
 
   it("closes the recall read worker before closing the database", async () => {

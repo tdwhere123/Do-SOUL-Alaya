@@ -31,6 +31,26 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
     expect(parentMapsOnnxRuntime()).toBe(false);
   });
 
+  it("reaps the isolated child on close", async () => {
+    let live = 0;
+    const inner = createForkLocalOnnxEmbeddingHost(stubChildPath);
+    const host: LocalOnnxEmbeddingIpcHost = {
+      spawn() {
+        live += 1;
+        const child = inner.spawn();
+        child.on("exit", () => {
+          live -= 1;
+        });
+        return child;
+      }
+    };
+    const client = openClient(host);
+    await client.warmup();
+    expect(live).toBe(1);
+    await client.close();
+    expect(live).toBe(0);
+  });
+
   it("keeps the isolated child referenced while an IPC request is pending", async () => {
     const tracking = trackingHost();
     const client = openClient(tracking.host);

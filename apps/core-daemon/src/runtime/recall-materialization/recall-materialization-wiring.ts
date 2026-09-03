@@ -222,6 +222,7 @@ function buildRecallMaterializationWiringResult(
     embeddingStatusService: recallReadRuntime.embeddingRuntime.embeddingStatusService,
     embeddingProviderWarmup: recallReadRuntime.embeddingRuntime.providerWarmup,
     getEmbeddingProviderDimensions: recallReadRuntime.embeddingRuntime.getProviderDimensions,
+    closeEmbeddingProvider: recallReadRuntime.embeddingRuntime.closeProvider,
     embeddingRecallService: recallReadRuntime.embeddingRuntime.embeddingRecallService,
     embeddingBackfillHandler: recallReadRuntime.embeddingRuntime.embeddingBackfillHandler,
     embeddingDefaultPolicyDecorator: recallReadRuntime.embeddingRuntime.defaultPolicyDecorator,

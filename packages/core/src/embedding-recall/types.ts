@@ -33,6 +33,8 @@ export interface EmbeddingProviderPort {
       readonly signal?: AbortSignal;
     }
   ): Promise<readonly Float32Array[]>;
+  // Isolated ONNX children outlive JS GC; daemon shutdown must reap them.
+  close?(): Promise<void>;
 }
 
 export interface EmbeddingRecallRepoPort {

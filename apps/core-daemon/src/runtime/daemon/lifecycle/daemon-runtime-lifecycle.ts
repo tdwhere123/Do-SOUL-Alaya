@@ -50,6 +50,7 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   daemonMcpRuntimeRegistry: Readonly<{ close(): Promise<void> }>;
   globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
   recallReadWorkerClient?: Readonly<{ close(): Promise<void> }> | null;
+  closeEmbeddingProvider?: () => Promise<void>;
   database: Readonly<{ close(): void }>;
   temporalRuntimeLease?: Readonly<{ release(): Promise<void> }>;
   requestProtection: RequestProtectionConfig;
@@ -398,6 +399,7 @@ async function closeRuntimeResources(
     state.server = null;
   }
 
+  await closeEmbeddingProvider(input);
   await closeRecallReadWorkerClient(input);
 }
 
@@ -420,6 +422,17 @@ function clearLifecycleIntervals(
   for (const timer of intervalsToClear ?? []) {
     clearInterval(timer);
   }
+}
+
+async function closeEmbeddingProvider(
+  input: CreateDaemonLifecycleControlsInput
+): Promise<void> {
+  if (input.closeEmbeddingProvider === undefined) return;
+  await closeRuntimeResourceStepAsync(
+    input,
+    "embedding provider shutdown failed",
+    input.closeEmbeddingProvider
+  );
 }
 
 async function closeRecallReadWorkerClient(

@@ -39,6 +39,16 @@ describe("embedding provider dimensional readiness", () => {
     expect(readiness.dimensions).toBe(2);
   });
 
+  it("forwards close so daemon shutdown can reap the inner isolate", async () => {
+    const close = vi.fn(async () => undefined);
+    const provider = { ...createProvider(async () => []), close };
+    const readiness = createEmbeddingProviderReadiness(provider);
+    const observed = observeEmbeddingProviderReadiness(provider, readiness)!;
+
+    await observed.close?.();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("prevents a concurrent backfill batch from persisting a second dimension", async () => {
     const memories = Array.from({ length: 17 }, (_, index) => createMemory(index));
     const provider = createProvider(async (texts) =>

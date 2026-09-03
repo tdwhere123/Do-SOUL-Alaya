@@ -11,6 +11,7 @@ import { decodeLocalOnnxIpcVectors } from "./vectors.js";
 
 export interface LocalOnnxEmbeddingIpcProcess {
   readonly pid?: number;
+  readonly exitCode?: number | null;
   readonly channel?: Readonly<{ ref?(): void; unref?(): void }> | null;
   send(message: unknown, callback?: (error: Error | null) => void): boolean;
   on(event: "message", listener: (message: unknown) => void): unknown;
@@ -95,6 +96,7 @@ export class LocalOnnxEmbeddingIpcSession {
   private childEpoch = 0;
   private readonly pending = new Map<number, PendingIpcRequest>();
   private exitError: LocalOnnxEmbeddingChildExitedError | null = null;
+  private closed = false;
 
   public constructor(input: LocalOnnxEmbeddingIpcSessionInput) {
     this.modelId = input.modelId;
@@ -117,6 +119,7 @@ export class LocalOnnxEmbeddingIpcSession {
   }
 
   public async close(): Promise<void> {
+    this.closed = true;
     const child = this.child;
     this.childEpoch += 1;
     this.exitError ??= new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
@@ -128,7 +131,7 @@ export class LocalOnnxEmbeddingIpcSession {
     } catch {
       // Child may already be gone; kill still reaps the handle.
     }
-    child.kill("SIGTERM");
+    await waitForLocalOnnxChildExit(child);
   }
 
   private async request(
@@ -157,11 +160,17 @@ export class LocalOnnxEmbeddingIpcSession {
   }
 
   private ensureChild(): LocalOnnxEmbeddingIpcProcess {
-    if (this.exitError !== null) throw this.exitError;
+    if (this.closed || this.exitError !== null) {
+      throw this.exitError ?? new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
+    }
     if (this.child !== null) return this.child;
     const host = this.host ?? createForkLocalOnnxEmbeddingHost();
     this.host = host;
     const child = host.spawn();
+    if (this.closed) {
+      void waitForLocalOnnxChildExit(child);
+      throw this.exitError ?? new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
+    }
     this.child = child;
     const epoch = this.childEpoch;
     child.on("message", (message) => this.onMessage(message));
@@ -240,6 +249,38 @@ export class LocalOnnxEmbeddingIpcSession {
       ...(timeoutMs === undefined ? {} : { timeoutMs })
     };
   }
+}
+
+const LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS = 5_000;
+
+function waitForLocalOnnxChildExit(child: LocalOnnxEmbeddingIpcProcess): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // Child may already be gone.
+      }
+      finish();
+    }, LOCAL_ONNX_CHILD_CLOSE_TIMEOUT_MS);
+    child.on("exit", () => finish());
+    if (child.exitCode !== null && child.exitCode !== undefined) {
+      finish();
+      return;
+    }
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      finish();
+    }
+  });
 }
 
 function spawnLocalOnnxEmbeddingChild(scriptPath: string): ChildProcess {

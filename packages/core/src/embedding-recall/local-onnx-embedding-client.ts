@@ -123,6 +123,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   private readonly now: () => number;
   private readonly isolated: LocalOnnxEmbeddingIpcSession | null;
   private extractorPromise: Promise<LocalOnnxFeatureExtractor> | null = null;
+  private closed = false;
   // Starts `true` (configured) and only flips `false` after sustained load
   // failures, so the daemon's startup-time embedding-policy decorator is not
   // permanently disabled before any embed call has had a chance to run.
@@ -151,6 +152,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   }
 
   public warmup(): Promise<void> {
+    if (this.closed) return Promise.resolve();
     if (this.isolated !== null) {
       return this.isolated.warmup(new AbortController().signal).catch((error: unknown) => {
         this.noteIsolatedFailure(error);
@@ -161,6 +163,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   }
 
   public async close(): Promise<void> {
+    this.closed = true;
     await this.isolated?.close();
   }
 
