@@ -85,6 +85,7 @@ export function materializeDerivedReplayFromRaw(input: {
     input.root, input.task.semanticKey, input.task.capability, input.lease
   );
   try {
+    input.lease.assertOwned();
     admitSemanticArtifact({
       root: input.root,
       admission: admission.admission,
@@ -96,8 +97,11 @@ export function materializeDerivedReplayFromRaw(input: {
       releaseSemanticArtifactReservation(
         input.root, input.task.semanticKey, input.task.capability, token
       );
-    } catch {
-      throw cause;
+    } catch (releaseFailure) {
+      throw new AggregateError(
+        [asError(cause), asError(releaseFailure)],
+        "derived rematerialization and reservation release both failed"
+      );
     }
     throw cause;
   }
@@ -108,4 +112,8 @@ export function materializeDerivedReplayFromRaw(input: {
     throw new Error("derived replay did not admit a readable artifact");
   }
   return materialized.artifact;
+}
+
+function asError(cause: unknown): Error {
+  return cause instanceof Error ? cause : new Error(String(cause));
 }

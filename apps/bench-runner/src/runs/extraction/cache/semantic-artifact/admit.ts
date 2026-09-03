@@ -21,8 +21,17 @@ import {
   type VerifiedSemanticReplayAuthority
 } from "./replay-authority.js";
 import { resolveExactSourceGrounding } from "./exact-source-grounding.js";
-import { unwrapLegacySemanticArtifactAdmission } from "./legacy/legacy-admission-authority.js";
-import type { SemanticTaskSourceAuthority } from "./source-authority.js";
+import {
+  canonicalSemanticSourceAuthority,
+  type SemanticTaskSourceAuthority
+} from "./source-authority.js";
+import {
+  sealVerifiedSemanticArtifactAdmission,
+  type VerifiedSemanticArtifactAdmission
+} from "./verified-admission.js";
+
+export type { VerifiedSemanticArtifactAdmission };
+export { unwrapVerifiedSemanticArtifactAdmission } from "./verified-admission.js";
 
 export interface AdmissionTask extends SemanticAdmissionIdentity {
   readonly binding: SemanticArtifactSourceBinding;
@@ -37,40 +46,33 @@ type RawEvidenceAdmissionBinding = Readonly<{
   memberSemanticKeys: readonly string[];
 }>;
 
-export interface VerifiedSemanticArtifactAdmission {
-  readonly semanticKey: string;
-  readonly state: "provider_backed" | "quarantined";
-}
-
-const verifiedAdmissions = new WeakMap<object, SemanticArtifact>();
-
 export type RawAdmission =
   | { readonly kind: "provider_backed"; readonly admission: VerifiedSemanticArtifactAdmission; readonly semanticKey: string }
   | { readonly kind: "quarantined"; readonly admission: VerifiedSemanticArtifactAdmission; readonly semanticKey: string }
   | { readonly kind: "unresolved"; readonly reason: string; readonly semanticKey: string };
 
-export function unwrapVerifiedSemanticArtifactAdmission(
-  handle: VerifiedSemanticArtifactAdmission
-): SemanticArtifact {
-  const artifact = verifiedAdmissions.get(handle) ??
-    unwrapLegacySemanticArtifactAdmission(handle);
-  if (artifact === undefined || artifact.semantic_key !== handle.semanticKey ||
-      artifact.admission_state !== handle.state) {
-    throw new Error("semantic artifact publication requires a verified admission handle");
-  }
-  return artifact;
-}
-
-function captureAdmission(artifact: SemanticArtifact): VerifiedSemanticArtifactAdmission {
-  if (artifact.admission_state !== "provider_backed" && artifact.admission_state !== "quarantined") {
-    throw new Error("raw admission cannot verify this artifact state");
-  }
-  const handle = Object.freeze({
-    semanticKey: artifact.semantic_key,
-    state: artifact.admission_state
-  });
-  verifiedAdmissions.set(handle, artifact);
-  return handle;
+export function semanticPackRequestSha256(input: {
+  readonly packIdentity: string;
+  readonly sourceCorpusIdentity: string | undefined;
+  readonly sourceAuthority: SemanticTaskSourceAuthority | undefined;
+  readonly members: readonly Readonly<{
+    semanticKey: string;
+    assertionId: number;
+    text: string;
+  }>[];
+}): string {
+  return createHash("sha256").update(JSON.stringify({
+    pack_id: input.packIdentity,
+    source_corpus_identity: input.sourceCorpusIdentity,
+    source_authority: input.sourceAuthority === undefined
+      ? undefined
+      : canonicalSemanticSourceAuthority(input.sourceAuthority),
+    members: input.members.map((member) => ({
+      semantic_key: member.semanticKey,
+      assertion_id: member.assertionId,
+      exact_text: member.text
+    }))
+  }), "utf8").digest("hex");
 }
 
 export function admitProviderRaw(input: {
@@ -222,7 +224,7 @@ function emptyBatchQuarantine(
   return {
     kind: "quarantined",
     semanticKey: task.semanticKey,
-    admission: captureAdmission(sealSemanticArtifact({
+    admission: sealVerifiedSemanticArtifactAdmission(sealSemanticArtifact({
       schema_version: 1,
       kind: "assertion_semantic_artifact_v1",
       semantic_key: task.semanticKey,
@@ -316,7 +318,7 @@ function admitParsedTask(input: {
   return {
     kind: "provider_backed",
     semanticKey: task.semanticKey,
-    admission: captureAdmission(sealSemanticArtifact({
+    admission: sealVerifiedSemanticArtifactAdmission(sealSemanticArtifact({
       schema_version: 1,
       kind: "assertion_semantic_artifact_v1",
       semantic_key: task.semanticKey,
@@ -400,16 +402,12 @@ function validateAdmissionTasks(
     rawBinding.policyKind,
     rawBinding.memberSemanticKeys
   );
-  const expectedRequestSha256 = createHash("sha256").update(JSON.stringify({
-    pack_id: expectedPackIdentity,
-    source_corpus_identity: rawBinding.sourceCorpusIdentity,
-    source_authority: tasks[0]?.sourceAuthority,
-    members: tasks.map((task) => ({
-      semantic_key: task.semanticKey,
-      assertion_id: task.assertionId,
-      exact_text: task.text
-    }))
-  }), "utf8").digest("hex");
+  const expectedRequestSha256 = semanticPackRequestSha256({
+    packIdentity: expectedPackIdentity,
+    sourceCorpusIdentity: rawBinding.sourceCorpusIdentity,
+    sourceAuthority: tasks[0]?.sourceAuthority,
+    members: tasks
+  });
   if (rawBinding.packIdentity !== expectedPackIdentity ||
       rawBinding.requestSha256 !== expectedRequestSha256 ||
       !/^[a-f0-9]{64}$/u.test(rawBinding.sourceCorpusIdentity) ||

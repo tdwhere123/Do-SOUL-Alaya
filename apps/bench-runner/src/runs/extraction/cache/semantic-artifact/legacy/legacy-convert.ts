@@ -10,7 +10,10 @@ import {
   sealSemanticArtifact,
   type SemanticArtifact
 } from "../contract.js";
-import type { VerifiedSemanticArtifactAdmission } from "../admit.js";
+import {
+  sealVerifiedSemanticArtifactAdmission,
+  type VerifiedSemanticArtifactAdmission
+} from "../verified-admission.js";
 import { verifyLegacyShardIdentity } from "./legacy-convert-validation.js";
 import {
   parseCapturedLegacyExtractionEntry,
@@ -20,7 +23,6 @@ import {
   resolveExactSourceGrounding,
   type ExactSourceGroundingTask
 } from "../exact-source-grounding.js";
-import { sealLegacySemanticArtifactAdmission } from "./legacy-admission-authority.js";
 import {
   currentReplayAuthorityForLegacyPrompt,
   semanticReplayIdentityDigest,
@@ -212,12 +214,7 @@ function captureLegacyAdmission(artifact: SemanticArtifact): VerifiedSemanticArt
   if (artifact.admission_state !== "provider_backed") {
     throw new Error("legacy conversion cannot issue this semantic admission state");
   }
-  const handle: VerifiedSemanticArtifactAdmission = Object.freeze({
-    semanticKey: artifact.semantic_key,
-    state: artifact.admission_state
-  });
-  sealLegacySemanticArtifactAdmission(handle, artifact);
-  return handle;
+  return sealVerifiedSemanticArtifactAdmission(artifact);
 }
 
 function indexUnits(

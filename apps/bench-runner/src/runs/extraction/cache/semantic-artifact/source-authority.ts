@@ -40,6 +40,33 @@ export const SemanticTaskSourceAuthoritySchema = z.object({
 
 export type SemanticTaskSourceAuthority = z.infer<typeof SemanticTaskSourceAuthoritySchema>;
 
+export function canonicalSemanticSourceAuthority(
+  authority: SemanticTaskSourceAuthority
+): SemanticTaskSourceAuthority {
+  const manifest = authority.substrateManifest;
+  return {
+    datasetRevision: authority.datasetRevision,
+    substrateManifest: {
+      schemaVersion: manifest.schemaVersion,
+      manifestSha256: manifest.manifestSha256,
+      dataset: manifest.dataset,
+      datasetRevision: manifest.datasetRevision,
+      extractionModel: manifest.extractionModel,
+      modelFamily: manifest.modelFamily,
+      requestProfile: manifest.requestProfile,
+      systemPromptSha256: manifest.systemPromptSha256,
+      cacheKeyAlgorithm: manifest.cacheKeyAlgorithm,
+      expectedTurns: manifest.expectedTurns,
+      expectedKeySetSha256: manifest.expectedKeySetSha256,
+      contentClosureSha256: manifest.contentClosureSha256,
+      contentClosureIndexSha256: manifest.contentClosureIndexSha256,
+      windowOffset: manifest.windowOffset,
+      windowLimit: manifest.windowLimit
+    },
+    substrateCacheKeys: [...authority.substrateCacheKeys]
+  };
+}
+
 function canonicalStrings(values: readonly string[]): readonly string[] {
   return [...new Set(values)].sort();
 }

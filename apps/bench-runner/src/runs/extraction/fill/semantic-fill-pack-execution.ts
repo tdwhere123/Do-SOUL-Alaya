@@ -1,12 +1,15 @@
-import { createHash } from "node:crypto";
 import {
   officialApiSemanticWorksetFromUnits,
   parseOfficialApiSignals,
   planOfficialApiTransport,
   type TransportPack
 } from "@do-soul/alaya-soul";
-import { admitProviderRaw, unwrapVerifiedSemanticArtifactAdmission, type AdmissionTask } from
-  "../cache/semantic-artifact/admit.js";
+import {
+  admitProviderRaw,
+  semanticPackRequestSha256,
+  unwrapVerifiedSemanticArtifactAdmission,
+  type AdmissionTask
+} from "../cache/semantic-artifact/admit.js";
 import { semanticTaskIdentity } from
   "../cache/semantic-artifact/admission-identity.js";
 import {
@@ -144,7 +147,12 @@ function executeOnePack(
   let attempt: SemanticFillDurableAttemptEvidence | undefined;
   try {
     input.signal?.throwIfAborted();
-    const requestSha256 = requestIdentity(pending.pack, pending.requestMembers);
+    const requestSha256 = semanticPackRequestSha256({
+      packIdentity: pending.pack.pack_id,
+      sourceCorpusIdentity: pending.requestMembers[0]?.binding.sourceCorpusIdentity,
+      sourceAuthority: pending.requestMembers[0]?.sourceAuthority,
+      members: pending.requestMembers
+    });
     attempt = input.attemptLedger.attemptFor(pending.pack);
     if (attempt === undefined) {
       attempt = input.attemptLedger.beginAttempt({
@@ -478,19 +486,6 @@ function unresolvedRetryMembers(
     const status = inspectSemanticArtifact(root, task.semanticKey, task.capability).status;
     return status !== "provider_backed";
   });
-}
-
-function requestIdentity(pack: TransportPack, members: readonly SemanticFillTask[]): string {
-  return createHash("sha256").update(JSON.stringify({
-    pack_id: pack.pack_id,
-    source_corpus_identity: members[0]?.binding.sourceCorpusIdentity,
-    source_authority: members[0]?.sourceAuthority,
-    members: members.map((task) => ({
-      semantic_key: task.semanticKey,
-      assertion_id: task.assertionId,
-      exact_text: task.text
-    }))
-  }), "utf8").digest("hex");
 }
 
 function toAdmissionTask(task: SemanticFillTask): AdmissionTask {

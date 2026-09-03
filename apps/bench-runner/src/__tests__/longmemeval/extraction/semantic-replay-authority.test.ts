@@ -4,8 +4,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { acquireExtractionCacheWriteLease } from
-  "../../../runs/extraction/fill/manifest/fill-root-guard.js";
+import {
+  acquireExtractionCacheWriteLease,
+  type ExtractionCacheWriteLease
+} from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
+import { semanticPackRequestSha256 } from
+  "../../../runs/extraction/cache/semantic-artifact/admit.js";
 import { runSemanticFill } from
   "../../../runs/extraction/fill/semantic-fill-executor.js";
 import {
@@ -137,6 +141,40 @@ describe("lazy semantic receipt authority", () => {
     expect(LazySemanticRunReceiptSchema.safeParse(overBudget).success).toBe(false);
   });
 });
+
+function errorMessages(cause: unknown): readonly string[] {
+  if (!(cause instanceof Error)) return [String(cause)];
+  return cause instanceof AggregateError
+    ? [cause.message, ...cause.errors.flatMap(errorMessages)]
+    : [cause.message];
+}
+
+function permutedSourceAuthority(
+  authority: ReturnType<typeof semanticTask>["sourceAuthority"]
+): ReturnType<typeof semanticTask>["sourceAuthority"] {
+  const manifest = authority.substrateManifest;
+  return {
+    substrateCacheKeys: [...authority.substrateCacheKeys],
+    substrateManifest: {
+      windowLimit: manifest.windowLimit,
+      windowOffset: manifest.windowOffset,
+      contentClosureIndexSha256: manifest.contentClosureIndexSha256,
+      contentClosureSha256: manifest.contentClosureSha256,
+      expectedKeySetSha256: manifest.expectedKeySetSha256,
+      expectedTurns: manifest.expectedTurns,
+      cacheKeyAlgorithm: manifest.cacheKeyAlgorithm,
+      systemPromptSha256: manifest.systemPromptSha256,
+      requestProfile: manifest.requestProfile,
+      modelFamily: manifest.modelFamily,
+      extractionModel: manifest.extractionModel,
+      datasetRevision: manifest.datasetRevision,
+      dataset: manifest.dataset,
+      manifestSha256: manifest.manifestSha256,
+      schemaVersion: manifest.schemaVersion
+    },
+    datasetRevision: authority.datasetRevision
+  };
+}
 
 function rawResult(text: string, assertionId: number) {
   return {
@@ -377,5 +415,119 @@ describe("offline semantic replay execution identity", () => {
     const shifted = { ...task, providerUrlSha256: "ff".repeat(32) };
     expect(semanticTaskIdentity(shifted)).toBe(semanticTaskIdentity(task));
     expect(() => assertSemanticArtifactCompatibility(shifted, artifact, false)).not.toThrow();
+  });
+
+  it("binds pack request identity to canonical source-authority field order", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semantic-replay-request-order-"));
+    roots.push(root);
+    const base = semanticTask();
+    const permuted = permutedSourceAuthority(base.sourceAuthority);
+    expect(JSON.stringify(permuted)).not.toBe(JSON.stringify(base.sourceAuthority));
+    const task = { ...base, sourceAuthority: permuted };
+    const packIdentity = transportPackIdentity("token_aware", [task.semanticKey]);
+    const expected = semanticPackRequestSha256({
+      packIdentity,
+      sourceCorpusIdentity: task.binding.sourceCorpusIdentity,
+      sourceAuthority: base.sourceAuthority,
+      members: [task]
+    });
+    expect(semanticPackRequestSha256({
+      packIdentity,
+      sourceCorpusIdentity: task.binding.sourceCorpusIdentity,
+      sourceAuthority: permuted,
+      members: [task]
+    })).toBe(expected);
+
+    await runSemanticFill({
+      root, tasks: [task],
+      envelope: createOfflineSemanticEnvelope({
+        maxCalls: 1, maxFailures: 1, transportPolicy: TOKEN_AWARE_POLICY
+      }),
+      transport: createOfflineSemanticReplayForTasks({
+        tasks: [task], transportPolicy: TOKEN_AWARE_POLICY,
+        result: rawResult(task.text, task.assertionId)
+      })
+    });
+    expect(inspectSemanticArtifact(root, task.semanticKey, SEMANTIC_CAPABILITY)
+      .artifact?.raw_evidence_binding?.request_sha256).toBe(expected);
+  });
+
+  it("surfaces derived rematerialization and reservation-release failures together", async () => {
+    const root = await mkdtemp(join(tmpdir(), "semantic-replay-release-aggregate-"));
+    roots.push(root);
+    const task = semanticTask();
+    await runSemanticFill({
+      root, tasks: [task],
+      envelope: createOfflineSemanticEnvelope({
+        maxCalls: 1, maxFailures: 1, transportPolicy: TOKEN_AWARE_POLICY
+      }),
+      transport: createOfflineSemanticReplayForTasks({
+        tasks: [task], transportPolicy: TOKEN_AWARE_POLICY,
+        result: rawResult(task.text, task.assertionId)
+      })
+    });
+    const admitted = inspectSemanticArtifact(root, task.semanticKey, SEMANTIC_CAPABILITY).artifact!;
+    const ownerIdentity = unwrapSemanticReplayAuthority(currentSemanticReplayAuthority());
+    const driftedIdentity = {
+      ...ownerIdentity,
+      parserSemanticsVersion: `${ownerIdentity.parserSemanticsVersion}-previous`,
+      materializerSemanticsVersion: `${ownerIdentity.materializerSemanticsVersion}-previous`
+    };
+    const driftedDigest = semanticReplayIdentityDigest(driftedIdentity);
+    const { artifact_digest: _digest, ...unsigned } = admitted;
+    const drifted = sealSemanticArtifact({
+      ...unsigned,
+      replay_identity: driftedIdentity,
+      replay_identity_digest: driftedDigest,
+      raw_evidence_binding: {
+        ...admitted.raw_evidence_binding!,
+        replay_identity_digest: driftedDigest
+      }
+    });
+    const driftedPath = semanticArtifactPath(
+      root, task.semanticKey, SEMANTIC_CAPABILITY, driftedDigest
+    );
+    mkdirSync(dirname(driftedPath), { recursive: true });
+    writeFileSync(driftedPath, `${JSON.stringify(drifted, null, 2)}\n`, "utf8");
+    rmSync(semanticArtifactPath(root, task.semanticKey, SEMANTIC_CAPABILITY));
+
+    const inner = acquireExtractionCacheWriteLease(root);
+    let asserts = 0;
+    const lease: ExtractionCacheWriteLease = {
+      cacheRoot: inner.cacheRoot,
+      generation: inner.generation,
+      stableRootPath: inner.stableRootPath,
+      rootIdentity: inner.rootIdentity,
+      assertOwned() {
+        inner.assertOwned();
+        asserts += 1;
+        if (asserts === 3) {
+          writeFileSync(
+            `${semanticArtifactPath(root, task.semanticKey, SEMANTIC_CAPABILITY)}.reserve`,
+            "corrupt reservation\n",
+            "utf8"
+          );
+        }
+      },
+      assertRoot: (candidate) => inner.assertRoot(candidate),
+      release: () => inner.release()
+    };
+    try {
+      let failure: unknown;
+      try {
+        materializeDerivedReplayFromRaw({ root, task, lease });
+      } catch (cause) {
+        failure = cause;
+      }
+      expect(failure).toBeInstanceOf(AggregateError);
+      const messages = errorMessages(failure).join("\n");
+      expect(messages).toMatch(/derived rematerialization and reservation release both failed/u);
+      expect(messages).toMatch(/reservation token mismatch/u);
+      expect(existsSync(
+        `${semanticArtifactPath(root, task.semanticKey, SEMANTIC_CAPABILITY)}.reserve`
+      )).toBe(true);
+    } finally {
+      lease.release();
+    }
   });
 });

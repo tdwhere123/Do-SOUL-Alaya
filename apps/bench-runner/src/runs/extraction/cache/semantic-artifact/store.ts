@@ -15,7 +15,7 @@ import type { ExtractionCacheWriteLease } from
 import {
   unwrapVerifiedSemanticArtifactAdmission,
   type VerifiedSemanticArtifactAdmission
-} from "./admit.js";
+} from "./verified-admission.js";
 import {
   assertSemanticArtifactCompatibility,
   type SemanticAdmissionIdentity
