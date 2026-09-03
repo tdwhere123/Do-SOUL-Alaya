@@ -1,16 +1,17 @@
 import { fulfillAssertionCapability, type CapabilityFulfillment } from "./fulfill.js";
-import { semanticTaskIdentity } from "./admission-identity.js";
-import { captureOfflineSemanticEnvelope } from "../../fill/semantic-fill-envelope.js";
+import { semanticTaskIdentity } from
+  "../../cache/semantic-artifact/admission-identity.js";
+import { captureOfflineSemanticEnvelope } from "../semantic-fill-envelope.js";
 import {
   runSemanticFill,
   type SemanticFillEnvelope,
   type SemanticFillTask,
   type SemanticFillTransport
-} from "../../fill/semantic-fill-executor.js";
+} from "../semantic-fill-executor.js";
 import {
   assertHistoricalSubstratePublish,
   captureHistoricalSubstrateBinding
-} from "../../fill/manifest/substrate-key-raw-closure.js";
+} from "../manifest/substrate-key-raw-closure.js";
 
 export interface LazyF3ShadowReport {
   readonly revealed: readonly CapabilityFulfillment[];

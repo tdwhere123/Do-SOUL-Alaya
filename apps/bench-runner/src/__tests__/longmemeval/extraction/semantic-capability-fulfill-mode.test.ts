@@ -8,11 +8,11 @@ import {
   supplementKey
 } from "../../../runs/extraction/cache/semantic-artifact/capability.js";
 import { fulfillAssertionCapability } from
-  "../../../runs/extraction/cache/semantic-artifact/fulfill.js";
+  "../../../runs/extraction/fill/fulfillment/fulfill.js";
 import { inspectSemanticArtifact } from
   "../../../runs/extraction/cache/semantic-artifact/store.js";
 import { shadowLazyF3Fulfillment } from
-  "../../../runs/extraction/cache/semantic-artifact/lazy-f3-shadow.js";
+  "../../../runs/extraction/fill/fulfillment/lazy-f3-shadow.js";
 import {
   assertRecallZeroLiveExtraction,
   parseExtractionBenchMode

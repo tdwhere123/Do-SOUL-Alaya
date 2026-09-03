@@ -1,24 +1,24 @@
 import {
   capabilitiesAreCompatible,
   lookupExtractionCapability
-} from "./capability.js";
-import { inspectSemanticArtifact, recordSourceBinding } from "./store.js";
-import { inspectCurrentOrReplayDerived } from "./derived-replay.js";
+} from "../../cache/semantic-artifact/capability.js";
+import { inspectSemanticArtifact, recordSourceBinding } from
+  "../../cache/semantic-artifact/store.js";
+import { inspectCurrentOrReplayDerived } from
+  "../../cache/semantic-artifact/derived-replay.js";
 import {
   assertSemanticAdmissionIdentity,
   assertSemanticArtifactCompatibility
-} from "./admission-identity.js";
-import { captureOfflineSemanticEnvelope } from
-  "../../fill/semantic-fill-envelope.js";
-import { readSemanticFillAttemptEvidence } from
-  "../../fill/semantic-fill-attempt-ledger.js";
+} from "../../cache/semantic-artifact/admission-identity.js";
+import { captureOfflineSemanticEnvelope } from "../semantic-fill-envelope.js";
+import { readSemanticFillAttemptEvidence } from "../semantic-fill-attempt-ledger.js";
 import {
   runSemanticFill,
   type SemanticFillEnvelope,
   type SemanticFillReport,
   type SemanticFillTask,
   type SemanticFillTransport
-} from "../../fill/semantic-fill-executor.js";
+} from "../semantic-fill-executor.js";
 
 export type CapabilityFulfillmentState =
   | "cache-hit"
@@ -39,7 +39,7 @@ export interface CapabilityFulfillment {
     endingCacheIdentity: string;
     startingOverlayIdentity: string;
     endingOverlayIdentity: string;
-    receiptHandle: import("../../fill/semantic-fill-receipt.js").VerifiedLazySemanticRunReceipt;
+    receiptHandle: import("../semantic-fill-receipt.js").VerifiedLazySemanticRunReceipt;
   }>;
 }
 

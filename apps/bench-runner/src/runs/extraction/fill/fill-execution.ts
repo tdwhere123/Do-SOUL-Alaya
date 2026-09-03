@@ -112,12 +112,14 @@ export async function executeExtractionFill(
       } }),
       ...(signal === undefined ? {} : { signal })
     });
-    if (receipt.failures > 0 || receipt.stopLoss || receipt.unresolved > 0) {
+    const unavailable = receipt.lazyRunReceipt.unavailable;
+    if (receipt.failures > 0 || receipt.stopLoss || receipt.unresolved > 0 ||
+        unavailable > 0) {
       const attempts = receipt.attempts
         .map((attempt) => `${attempt.outcome}:${attempt.reason ?? "none"}`)
         .join(",");
       throw new ExtractionCacheInvariantError(
-        `semantic fill failed closed: failures=${receipt.failures} stopLoss=${receipt.stopLoss} unresolved=${receipt.unresolved} attempts=${attempts}`
+        `semantic fill failed closed: failures=${receipt.failures} stopLoss=${receipt.stopLoss} unresolved=${receipt.unresolved} unavailable=${unavailable} attempts=${attempts}`
       );
     }
     return receipt;

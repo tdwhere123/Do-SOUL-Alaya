@@ -1,23 +1,23 @@
 import { createHash } from "node:crypto";
-import type { CachedExtractionEntry } from "../../../compile-seed/cache/cache-shard.js";
+import type { CachedExtractionEntry } from "../../../../compile-seed/cache/cache-shard.js";
 import {
   inspectCachedResponseMetadata,
   type CachedExtractionResponseMetadata
-} from "../../../compile-seed/cache/cached-response-metadata.js";
-import { inspectExtractionRawJson } from "../../content-closure.js";
+} from "../../../../compile-seed/cache/cached-response-metadata.js";
+import { inspectExtractionRawJson } from "../../../content-closure.js";
 import {
   readExtractionCacheManifestIdentity
-} from "../extraction-cache-manifest.js";
+} from "../../extraction-cache-manifest.js";
 import {
   isExtractionTransportProvenance,
   type ExtractionTransportProvenance
-} from "../../transport-route.js";
+} from "../../../transport-route.js";
 import {
   inspectLoadedExtractionAuthorityEntry,
   type LoadedGlobalExtractionAuthority
-} from "../../../provenance/contract/extraction-authority-reference.js";
+} from "../../../../provenance/contract/extraction-authority-reference.js";
 import { readRootBoundCanonicalUtf8Artifact } from
-  "../../cache-audit/bounded-artifact-reader.js";
+  "../../../cache-audit/bounded-artifact-reader.js";
 
 export interface VerifiedLegacyExtractionEntry {
   readonly cacheKey: string;

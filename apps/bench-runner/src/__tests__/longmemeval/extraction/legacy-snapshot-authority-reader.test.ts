@@ -28,11 +28,11 @@ import {
   inspectExtractionRawJson
 } from "../../../runs/extraction/content-closure.js";
 import { convertLegacyExtractionShard } from
-  "../../../runs/extraction/cache/semantic-artifact/legacy-convert.js";
+  "../../../runs/extraction/cache/semantic-artifact/legacy/legacy-convert.js";
 import {
   parseCapturedLegacyExtractionEntry,
   readVerifiedLegacyExtractionEntry
-} from "../../../runs/extraction/cache/semantic-artifact/legacy-sealed-entry.js";
+} from "../../../runs/extraction/cache/semantic-artifact/legacy/legacy-sealed-entry.js";
 import {
   admitSemanticArtifact,
   inspectSemanticArtifact,

@@ -12,46 +12,21 @@ import {
 } from "@do-soul/alaya-soul";
 import { computeCacheKey } from "../../compile-seed/cache/cache-key.js";
 import type { SemanticFillTask } from "./semantic-fill-executor.js";
+import {
+  SemanticSubstrateManifestAuthoritySchema,
+  SemanticTaskSourceAuthoritySchema,
+  type SemanticSubstrateManifestAuthority,
+  type SemanticTaskSourceAuthority
+} from "../cache/semantic-artifact/source-authority.js";
+
+export {
+  SemanticSubstrateManifestAuthoritySchema,
+  SemanticTaskSourceAuthoritySchema,
+  type SemanticSubstrateManifestAuthority,
+  type SemanticTaskSourceAuthority
+};
 
 const Hex64 = z.string().regex(/^[a-f0-9]{64}$/u);
-const NonEmpty = z.string().trim().min(1).max(512);
-
-export const SemanticSubstrateManifestAuthoritySchema = z.object({
-  schemaVersion: z.literal(3),
-  manifestSha256: Hex64,
-  dataset: NonEmpty,
-  datasetRevision: Hex64,
-  extractionModel: NonEmpty,
-  modelFamily: NonEmpty,
-  requestProfile: NonEmpty,
-  systemPromptSha256: Hex64,
-  cacheKeyAlgorithm: NonEmpty,
-  expectedTurns: z.number().int().nonnegative(),
-  expectedKeySetSha256: Hex64,
-  contentClosureSha256: Hex64,
-  contentClosureIndexSha256: Hex64,
-  windowOffset: z.number().int().nonnegative(),
-  windowLimit: z.number().int().nonnegative()
-}).strict().readonly();
-
-export type SemanticSubstrateManifestAuthority = z.infer<
-  typeof SemanticSubstrateManifestAuthoritySchema
->;
-
-export const SemanticTaskSourceAuthoritySchema = z.object({
-  datasetRevision: Hex64,
-  substrateManifest: SemanticSubstrateManifestAuthoritySchema,
-  substrateCacheKeys: z.array(Hex64).min(1).readonly()
-}).strict().readonly().superRefine((authority, ctx) => {
-  if (authority.datasetRevision !== authority.substrateManifest.datasetRevision) {
-    ctx.addIssue({ code: "custom", message: "semantic task dataset authority mismatch" });
-  }
-  if (!sameStrings(authority.substrateCacheKeys, normalized(authority.substrateCacheKeys))) {
-    ctx.addIssue({ code: "custom", message: "semantic task substrate cache keys are not canonical" });
-  }
-});
-
-export type SemanticTaskSourceAuthority = z.infer<typeof SemanticTaskSourceAuthoritySchema>;
 
 export const SemanticRunSourceAuthoritySchema = z.object({
   datasetRevision: Hex64,

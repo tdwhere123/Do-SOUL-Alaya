@@ -3,8 +3,8 @@ import {
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
-import type { CachedExtractionEntry } from "../../../compile-seed/cache/cache-shard.js";
-import { computeCacheKey } from "../../../compile-seed/cache/cache-key.js";
+import type { CachedExtractionEntry } from "../../../../compile-seed/cache/cache-shard.js";
+import { computeCacheKey } from "../../../../compile-seed/cache/cache-key.js";
 import type { VerifiedLegacyExtractionEntry } from "./legacy-sealed-entry.js";
 
 export interface VerifiedLegacyWitness {

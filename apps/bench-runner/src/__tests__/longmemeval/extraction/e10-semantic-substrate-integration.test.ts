@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fulfillAssertionCapability } from
-  "../../../runs/extraction/cache/semantic-artifact/fulfill.js";
+  "../../../runs/extraction/fill/fulfillment/fulfill.js";
 import {
   assertRecallZeroLiveExtraction,
   parseExtractionBenchMode

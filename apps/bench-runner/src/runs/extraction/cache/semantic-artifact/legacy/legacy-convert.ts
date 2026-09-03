@@ -4,13 +4,13 @@ import {
   parseOfficialApiSourceLocator,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
-import { inspectExtractionRawEnvelope } from "../../content-closure.js";
-import type { CachedExtractionEntry } from "../../../compile-seed/cache/cache-shard.js";
+import { inspectExtractionRawEnvelope } from "../../../content-closure.js";
+import type { CachedExtractionEntry } from "../../../../compile-seed/cache/cache-shard.js";
 import {
   sealSemanticArtifact,
   type SemanticArtifact
-} from "./contract.js";
-import type { VerifiedSemanticArtifactAdmission } from "./admit.js";
+} from "../contract.js";
+import type { VerifiedSemanticArtifactAdmission } from "../admit.js";
 import { verifyLegacyShardIdentity } from "./legacy-convert-validation.js";
 import {
   parseCapturedLegacyExtractionEntry,
@@ -19,13 +19,13 @@ import {
 import {
   resolveExactSourceGrounding,
   type ExactSourceGroundingTask
-} from "./exact-source-grounding.js";
+} from "../exact-source-grounding.js";
 import { sealLegacySemanticArtifactAdmission } from "./legacy-admission-authority.js";
 import {
   currentReplayAuthorityForLegacyPrompt,
   semanticReplayIdentityDigest,
   unwrapSemanticReplayAuthority
-} from "./replay-authority.js";
+} from "../replay-authority.js";
 
 export const LEGACY_CONVERSION_CAPABILITY = "official_api_signals:v1";
 

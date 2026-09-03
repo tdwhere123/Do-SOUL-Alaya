@@ -3,7 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { planOfficialApiSemanticWorkset } from "@do-soul/alaya-soul";
+import {
+  officialApiSemanticWorksetFromUnits,
+  planOfficialApiSemanticWorkset,
+  planOfficialApiTransport
+} from "@do-soul/alaya-soul";
 import {
   inspectSemanticArtifact,
   reserveSemanticArtifact,
@@ -20,6 +24,7 @@ import { readSemanticFillAttemptEvidence } from
   "../../../runs/extraction/fill/semantic-fill-attempt-ledger.js";
 import { reserveSemanticPack } from
   "../../../runs/extraction/fill/semantic-fill-pack-execution.js";
+import { toWorkUnit } from "../../../runs/extraction/fill/semantic-fill-plan.js";
 import { acquireExtractionCacheWriteLease } from
   "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 import {
@@ -65,6 +70,27 @@ function rawForText(text: string, assertionId = 1): string {
     matched_text: text,
     source_locator: { contract_version: 2, kind: "assertion_catalog", assertion_id: assertionId }
   }] });
+}
+
+function replayForTaskResults(
+  entries: readonly Readonly<{
+    task: ReturnType<typeof semanticTask>;
+    result: { readonly kind: "raw"; readonly rawJson: string };
+  }>[]
+) {
+  return createOfflineSemanticReplay({
+    results: entries.map(({ task, result }) => {
+      const plan = planOfficialApiTransport(
+        officialApiSemanticWorksetFromUnits([toWorkUnit(task)]),
+        TOKEN_AWARE_POLICY
+      );
+      const pack = plan.packs[0];
+      if (plan.unpackable.length > 0 || pack === undefined || plan.packs.length !== 1) {
+        throw new Error("fixture expected one pack per task");
+      }
+      return { packId: pack.pack_id, tasks: [task], result };
+    })
+  });
 }
 
 function signalFor(task: ReturnType<typeof semanticTask>) {
@@ -223,6 +249,46 @@ describe("semantic fill executor", () => {
     expect(report.calls).toBe(1);
     expect(report.attempts[0]?.outcome).toBe("unresolved");
     expect(inspectSemanticArtifact(root, task.semanticKey, CAP).status).toBe("quarantined");
+  });
+
+  it("does not succeed a retry that still carries quarantined demand", async () => {
+    const admitted = semanticTask("I moved to Berlin.");
+    const paris = semanticTask("I moved to Paris.");
+    const quarantined = {
+      ...paris,
+      sourceAuthority: {
+        ...paris.sourceAuthority,
+        substrateManifest: admitted.sourceAuthority.substrateManifest
+      }
+    };
+    const demand = [admitted, quarantined];
+    const first = await runSemanticFill({
+      root,
+      tasks: demand,
+      envelope: envelope(),
+      transport: replayForTaskResults([
+        { task: admitted, result: { kind: "raw", rawJson: JSON.stringify({ signals: [signalFor(admitted)] }) } },
+        { task: quarantined, result: { kind: "raw", rawJson: '{"signals":[]}' } }
+      ])
+    });
+    expect(first.unresolved).toBeGreaterThan(0);
+    expect(inspectSemanticArtifact(root, admitted.semanticKey, CAP).status).toBe("provider_backed");
+    expect(inspectSemanticArtifact(root, quarantined.semanticKey, CAP).status).toBe("quarantined");
+    let repaid = 0;
+    const retry = await runSemanticFill({
+      root,
+      tasks: demand,
+      envelope: envelope(),
+      transport: createOfflineSemanticReplay({
+        defaultResult: { kind: "failure", reason: "must not repay quarantined demand" },
+        faultHooks: { afterPack: () => { repaid += 1; } }
+      })
+    });
+    expect(repaid).toBe(0);
+    expect(retry.unresolved).toBeGreaterThan(0);
+    expect(retry.lazyRunReceipt.unavailable).toBeGreaterThan(0);
+    expect(inspectSemanticArtifact(root, admitted.semanticKey, CAP).status).toBe("provider_backed");
+    expect(inspectSemanticArtifact(root, quarantined.semanticKey, CAP).status).toBe("quarantined");
   });
 
   it("uses the envelope token-aware policy and never calls unpackable work", async () => {

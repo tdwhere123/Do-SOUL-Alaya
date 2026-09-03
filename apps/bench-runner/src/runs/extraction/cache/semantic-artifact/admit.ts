@@ -21,11 +21,12 @@ import {
   type VerifiedSemanticReplayAuthority
 } from "./replay-authority.js";
 import { resolveExactSourceGrounding } from "./exact-source-grounding.js";
-import { unwrapLegacySemanticArtifactAdmission } from "./legacy-admission-authority.js";
+import { unwrapLegacySemanticArtifactAdmission } from "./legacy/legacy-admission-authority.js";
+import type { SemanticTaskSourceAuthority } from "./source-authority.js";
 
 export interface AdmissionTask extends SemanticAdmissionIdentity {
   readonly binding: SemanticArtifactSourceBinding;
-  readonly sourceAuthority: import("../../fill/semantic-fill-authority.js").SemanticTaskSourceAuthority;
+  readonly sourceAuthority: SemanticTaskSourceAuthority;
 }
 
 export interface VerifiedSemanticArtifactAdmission {

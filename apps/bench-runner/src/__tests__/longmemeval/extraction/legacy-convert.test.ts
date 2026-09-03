@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { convertLegacyExtractionShard } from
-  "../../../runs/extraction/cache/semantic-artifact/legacy-convert.js";
+  "../../../runs/extraction/cache/semantic-artifact/legacy/legacy-convert.js";
 import {
   readVerifiedLegacyExtractionEntry,
   type VerifiedLegacyExtractionEntry
-} from "../../../runs/extraction/cache/semantic-artifact/legacy-sealed-entry.js";
+} from "../../../runs/extraction/cache/semantic-artifact/legacy/legacy-sealed-entry.js";
 import { semanticTask } from "./semantic-artifact-fixture.js";
 
 const DIGEST = "11".repeat(32);

@@ -46,7 +46,8 @@ const TOKEN_AWARE_POLICY = {
 };
 
 async function sealedReplayForLazyWindow(
-  window: Pick<ExtractionFillOptions, "limit" | "offset">
+  window: Pick<ExtractionFillOptions, "limit" | "offset">,
+  emptyMemberTexts: readonly string[] = []
 ) {
   const prepared = await prepareExtractionFill({
     variant: VARIANT,
@@ -87,14 +88,20 @@ async function sealedReplayForLazyWindow(
       results.push({
         packId: pack.pack_id,
         tasks: members,
-        result: { kind: "raw", rawJson: overlayRawJson(members) }
+        result: { kind: "raw", rawJson: overlayRawJson(members, emptyMemberTexts) }
       });
     }
   }
   return createOfflineSemanticReplay({ results });
 }
 
-function overlayRawJson(members: readonly SemanticFillTask[]): string {
+function overlayRawJson(
+  members: readonly SemanticFillTask[],
+  emptyMemberTexts: readonly string[] = []
+): string {
+  if (members.some((member) => emptyMemberTexts.some((text) => member.text.includes(text)))) {
+    return '{"signals":[]}';
+  }
   return JSON.stringify({
     signals: members.map((member) => ({
       object_kind: "fact",
@@ -276,5 +283,63 @@ describe("runExtractionFill lazy_field success", () => {
       }),
       log: () => undefined
     })).rejects.toThrow(/semantic fill failed closed/u);
+  });
+
+  it("does not succeed a lazy_field retry that still carries quarantined demand", async () => {
+    const first = buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.");
+    const second = buildQuestion("q002", "I moved to Paris.", "I prefer Rust.");
+    await writeFixtureDataset([first, second]);
+    await runExtractionFill({
+      variant: VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      extractorFactory: (): BenchSignalExtractor => ({
+        extract: async (input) => providerBackedExtractionResult(
+          buildGroundedSignalResponse(input.userPrompt)
+        )
+      }),
+      log: () => undefined
+    });
+    const overlayRoot = join(cacheRoot, "..", "semantic-overlay-quarantine-retry");
+    const mixed = await sealedReplayForLazyWindow({}, ["I moved to Paris."]);
+    await expect(runExtractionFill({
+      variant: VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      ingestionMode: "lazy_field",
+      semanticArtifactRoot: overlayRoot,
+      semanticTransport: mixed,
+      log: () => undefined
+    })).rejects.toThrow(/semantic fill failed closed/u);
+    const berlin = planOfficialApiSemanticWorkset("I moved to Berlin.", [
+      { role: "user", content: "I moved to Berlin." }
+    ]).units[0];
+    const paris = planOfficialApiSemanticWorkset("I moved to Paris.", [
+      { role: "user", content: "I moved to Paris." }
+    ]).units[0];
+    if (berlin === undefined || paris === undefined) {
+      throw new Error("expected minted workset units");
+    }
+    expect(inspectSemanticArtifact(
+      overlayRoot, berlin.semanticKey, "official_api_signals:v1"
+    ).status).toBe("provider_backed");
+    expect(inspectSemanticArtifact(
+      overlayRoot, paris.semanticKey, "official_api_signals:v1"
+    ).status).toBe("quarantined");
+    await expect(runExtractionFill({
+      variant: VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      ingestionMode: "lazy_field",
+      semanticArtifactRoot: overlayRoot,
+      semanticTransport: await sealedReplayForLazyWindow({}),
+      log: () => undefined
+    })).rejects.toThrow(/unavailable=/u);
+    expect(inspectSemanticArtifact(
+      overlayRoot, paris.semanticKey, "official_api_signals:v1"
+    ).status).toBe("quarantined");
   });
 });

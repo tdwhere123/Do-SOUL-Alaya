@@ -129,7 +129,7 @@ function classifyTask(
       outcome: "unresolved",
       reason: existing.reason ?? "quarantined provider result"
     });
-    return "handled";
+    return "unresolved";
   }
   attempts.push({
     semanticKey: task.semanticKey,

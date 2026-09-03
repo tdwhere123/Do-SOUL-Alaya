@@ -11,11 +11,13 @@ import {
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import { convertLegacyExtractionShard } from
-  "../../../runs/extraction/cache/semantic-artifact/legacy-convert.js";
+  "../../../runs/extraction/cache/semantic-artifact/legacy/legacy-convert.js";
 import { readVerifiedLegacyExtractionEntry } from
-  "../../../runs/extraction/cache/semantic-artifact/legacy-sealed-entry.js";
-import { fulfillAssertionCapability } from "../../../runs/extraction/cache/semantic-artifact/fulfill.js";
-import { shadowLazyF3Fulfillment } from "../../../runs/extraction/cache/semantic-artifact/lazy-f3-shadow.js";
+  "../../../runs/extraction/cache/semantic-artifact/legacy/legacy-sealed-entry.js";
+import { fulfillAssertionCapability } from
+  "../../../runs/extraction/fill/fulfillment/fulfill.js";
+import { shadowLazyF3Fulfillment } from
+  "../../../runs/extraction/fill/fulfillment/lazy-f3-shadow.js";
 import {
   createOfflineSemanticEnvelope,
   createOfflineSemanticReplayForTasks

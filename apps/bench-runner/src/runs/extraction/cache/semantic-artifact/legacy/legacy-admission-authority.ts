@@ -1,5 +1,5 @@
-import type { SemanticArtifact } from "./contract.js";
-import type { VerifiedSemanticArtifactAdmission } from "./admit.js";
+import type { SemanticArtifact } from "../contract.js";
+import type { VerifiedSemanticArtifactAdmission } from "../admit.js";
 
 const legacyAdmissions = new WeakMap<object, SemanticArtifact>();
 
