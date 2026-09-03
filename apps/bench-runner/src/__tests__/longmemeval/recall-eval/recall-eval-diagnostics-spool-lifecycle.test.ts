@@ -202,7 +202,7 @@ describe("recall-eval diagnostics spool lifecycle", () => {
     expect(mocks.archive).not.toHaveBeenCalled();
   });
 
-  it("recycles the pager after every evaluated question", async () => {
+  it("does not recycle the pager after each evaluated question", async () => {
     const recycle = vi.fn(async () => undefined);
     mocks.prepareContext.mockResolvedValueOnce({
       ...runContext(),
@@ -224,7 +224,7 @@ describe("recall-eval diagnostics spool lifecycle", () => {
     }));
 
     await expect(runRecallEval(options())).resolves.toMatchObject({ slug: "fixture-slug" });
-    expect(recycle).toHaveBeenCalledTimes(2);
+    expect(recycle).toHaveBeenCalledTimes(0);
     expect(mocks.append).toHaveBeenCalledTimes(2);
   });
 

@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import {
@@ -10,6 +10,7 @@ import { openRecallEvalWorkingSqlite, recallEvalWorkingDbPath } from
 import {
   explodeRecallEvalWorkingCopyIfNeeded,
   installRecallEvalWorkspaceSlice,
+  installWorkspaceSlice,
   isSealedSliceRestore,
   workingAlayaDbPath,
   type ExplodedWorkspaceSlices,
@@ -154,6 +155,17 @@ async function ensurePagerDaemonForQuestion(
       dataDirRoot: nextDir,
       workspaceId,
       slices: current.slices
+    });
+  } else {
+    // Skip-slice/single-workspace has no sealed slice cache; path-switch
+    // still cannot start the pager on an empty directory.
+    const source = workingAlayaDbPath(current.open.dataDirRoot);
+    if (!existsSync(source)) {
+      throw new Error(`recall-eval pager working copy is missing at ${source}`);
+    }
+    installWorkspaceSlice({
+      dataDir: nextDir,
+      sliceDbPath: source
     });
   }
   current.installedWorkspaceId = workspaceId;

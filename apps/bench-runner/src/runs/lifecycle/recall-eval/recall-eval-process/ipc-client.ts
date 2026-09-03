@@ -14,6 +14,7 @@ import { formatPagerExit, formatRecallEvalPagerMapsHint } from "./maps-hint.js";
 import { RecallEvalSelectionArtifactCollector } from
   "./selection-artifact-collector.js";
 import { proveParentOpenedFileProofs } from "./parent-opened-file-proofs.js";
+import { attachRecallEvalHarnessTimers } from "./harness-timers.js";
 
 export const DEFAULT_RECALL_EVAL_PAGER_TIMEOUT_MS = 600_000;
 
@@ -152,23 +153,12 @@ export class RecallEvalPagerIpcSession {
     const totalWallMs = openDurationMs + recallDurationMs;
 
     this.recordIdentity(response);
-    if (response.pack === undefined || !hasRecallPack(response.pack)) {
-      throw new Error("recall-eval pager child returned an empty pack.");
-    }
+    const pack = attachRecallEvalHarnessTimers(response.pack, {
+      openDurationMs,
+      recallDurationMs,
+      totalWallMs
+    });
     this.selectionArtifacts.recordQuestion(payload);
-    const pack = response.pack as Record<string, unknown>;
-    const clockAMs = finiteMs(pack.latencyMs);
-    pack.harnessTimers = Object.freeze(
-      clockAMs === undefined
-        ? { openDurationMs, recallDurationMs, totalWallMs }
-        : {
-          openDurationMs,
-          recallDurationMs,
-          totalWallMs,
-          clockAMs,
-          harnessOverheadMs: Math.max(0, totalWallMs - clockAMs)
-        }
-    );
     return pack;
   }
 
@@ -477,19 +467,6 @@ function isCleanPagerExit(
 
 function isPagerTimeoutError(error: unknown): boolean {
   return error instanceof Error && /timed out after \d+ms/u.test(error.message);
-}
-
-function hasRecallPack(pack: unknown): boolean {
-  if (typeof pack !== "object" || pack === null) return false;
-  const record = pack as { readonly questionId?: unknown; readonly diagnostics?: unknown };
-  return typeof record.questionId === "string" &&
-    record.questionId.length > 0 &&
-    record.diagnostics !== undefined &&
-    record.diagnostics !== null;
-}
-
-function finiteMs(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function toPagerExitError(

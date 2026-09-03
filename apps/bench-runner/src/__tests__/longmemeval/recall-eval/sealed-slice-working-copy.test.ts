@@ -1,4 +1,4 @@
-import { copyFileSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import {
   explodeRecallEvalWorkingCopyIfNeeded,
   installWorkspaceSlice,
   SEALED_SLICE_RESTORE_ENV,
+  SKIP_WORKSPACE_SLICE_ENV,
   workingAlayaDbPath,
   type ExplodedWorkspaceSlices
 } from "../../../runs/snapshot/recall-eval/workspace-slice/index.js";
@@ -70,6 +71,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   delete process.env[SEALED_SLICE_RESTORE_ENV];
+  delete process.env[SKIP_WORKSPACE_SLICE_ENV];
   await closeRecallEvalPagerChild().catch(() => undefined);
   closeCachedDatabase(packedPath);
   closeCachedDatabase(snapshotDbPath);
@@ -275,6 +277,50 @@ describe("H02 — sealed slice private working copy", () => {
     } finally {
       workingDb.close();
     }
+
+    await closeRecallEvalPagerChild();
+  });
+
+  it("path-switch with slices=null still produces a working alaya.db", async () => {
+    delete process.env[SEALED_SLICE_RESTORE_ENV];
+    process.env[SKIP_WORKSPACE_SLICE_ENV] = "1";
+    const dataDirRoot = join(root, "data-null-slices");
+    mkdirSync(dataDirRoot, { recursive: true });
+    copyFileSync(snapshotDbPath, workingAlayaDbPath(dataDirRoot));
+    const spy = vi.spyOn(loadOpenModule, "loadSliceIntoOpenDatabase");
+
+    await openRecallEvalPagerChild(buildOpenPayload(dataDirRoot));
+    const result = await recallRecallEvalPagerChild(
+      buildRecallPayload("q1", WORKSPACE_A, TOKEN_A)
+    );
+    expect(result).toBeDefined();
+    expect(existsSync(workingAlayaDbPath(
+      pagerSwitchWorkingDataDir(dataDirRoot, 1, WORKSPACE_A)
+    ))).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+
+    await closeRecallEvalPagerChild();
+  }, 15_000);
+
+  it("path-switch with slices=null fails closed when the working copy is missing", async () => {
+    delete process.env[SEALED_SLICE_RESTORE_ENV];
+    process.env[SKIP_WORKSPACE_SLICE_ENV] = "1";
+    const dataDirRoot = join(root, "data-null-slices-missing");
+    mkdirSync(dataDirRoot, { recursive: true });
+    copyFileSync(snapshotDbPath, workingAlayaDbPath(dataDirRoot));
+
+    await openRecallEvalPagerChild(buildOpenPayload(dataDirRoot));
+    const source = workingAlayaDbPath(dataDirRoot);
+    closeCachedDatabase(source);
+    rmSync(source, { force: true });
+
+    await expect(recallRecallEvalPagerChild(
+      buildRecallPayload("q1", WORKSPACE_A, TOKEN_A)
+    )).rejects.toThrow(/pager working copy is missing/);
+    expect(existsSync(workingAlayaDbPath(
+      pagerSwitchWorkingDataDir(dataDirRoot, 1, WORKSPACE_A)
+    ))).toBe(false);
 
     await closeRecallEvalPagerChild();
   });
