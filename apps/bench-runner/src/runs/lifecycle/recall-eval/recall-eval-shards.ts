@@ -1,20 +1,10 @@
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { writeMergedLongMemEvalArchive } from "../../../cli/merge/command/merge-command-archive.js";
-import {
-  buildMergedLongMemEvalPayload,
-  loadMergeShards
-} from "../../../cli/merge/command/merge-command-shards.js";
-import { deriveMergedLongMemEvalReleaseAuthority } from
-  "../../../cli/merge/release-evidence-authority.js";
+import { join } from "node:path";
 import {
   buildLongMemEvalWorkerShardPlans,
   resolveDefaultBenchRunnerCliPath
 } from "../../../datasets/longmemeval/runner/runner-concurrency.js";
-import { validateShardRunProvenancePlans } from "../../provenance/shard-aggregate.js";
-import { withLongMemEvalDiagnosticsSpool, type LongMemEvalDiagnosticsSpool } from
-  "../../../diagnostics/spool.js";
 import { finalizeOwnedTempRoot } from "../owned-temp-root.js";
 import { throwLifecycleErrors } from "../errors.js";
 import { recallEvalEmbeddingMode } from "./recall-eval-runtime.js";
@@ -31,6 +21,7 @@ import {
   assertDistinctOverlayInodes,
   isolateEmbeddingCacheOverlayReceipt
 } from "../../snapshot/recall-eval/workspace-slice/overlay-replicate.js";
+import { mergeRecallEvalShardArchives } from "./recall-eval-shards-merge.js";
 import {
   buildRecallEvalWorkerCliArgs,
   buildRecallEvalWorkerEnv,
@@ -284,57 +275,15 @@ async function runRecallEvalShardWorker(
 async function mergeRecallEvalShardedRun(
   context: RecallEvalShardedContext
 ): Promise<RecallEvalResult> {
-  return withLongMemEvalDiagnosticsSpool((diagnosticsSpool) =>
-    mergeRecallEvalShardedRunWithSpool(context, diagnosticsSpool)
-  );
-}
-
-async function mergeRecallEvalShardedRunWithSpool(
-  context: RecallEvalShardedContext,
-  diagnosticsSpool: LongMemEvalDiagnosticsSpool
-): Promise<RecallEvalResult> {
-  const shardRoots = context.plans.map((plan) => plan.historyRoot);
   process.stdout.write(
-    `[recall-eval concurrency] merging ${shardRoots.length} shard(s) -> ${context.opts.historyRoot}\n`
+    `[recall-eval concurrency] merging ${context.plans.length} shard(s) -> ${context.opts.historyRoot}\n`
   );
-  const loaded = await loadMergeShards(shardRoots, diagnosticsSpool);
-  const build = buildMergedLongMemEvalPayload(loaded);
-  await validateShardRunProvenancePlans({
-    shardArchiveRefs: loaded.archiveRefs,
+  return mergeRecallEvalShardArchives({
     plans: context.plans,
-    requestedConcurrency: context.concurrency,
-    selectionContract: build.selectionContract,
-    globalExtractionAuthority: loaded.globalExtractionAuthority
-  });
-  const archive = await writeMergedLongMemEvalArchive({
     historyRoot: context.opts.historyRoot,
-    releaseEvidenceAuthority: deriveMergedLongMemEvalReleaseAuthority(
-      null,
-      loaded.archiveRefs
-    ),
-    build,
-    shardArchiveRefs: loaded.archiveRefs,
-    requestedConcurrency: context.concurrency,
-    globalExtractionAuthority: loaded.globalExtractionAuthority,
-    diagnosticsSpool,
-    ...(context.recordedGitState === undefined
-      ? {}
-      : { recordedGitState: context.recordedGitState })
-  });
-  return {
-    slug: archive.slug,
-    kpiPath: archive.kpiPath,
-    reportPath: join(dirname(archive.kpiPath), "report.md"),
-    findingsPath: join(dirname(archive.kpiPath), "findings.md"),
-    payload: archive.merged,
     snapshotManifest: context.snapshotManifest,
-    perQuestionDelivered: buildMergedPerQuestionDelivered(
-      loaded.questionDiagnostics,
-      archive.merged.kpi.per_scenario
-    ),
-    completion: { status: "complete", failures: [] },
-    memoryProfile: { status: "disabled", failures: [] }
-  };
+    concurrency: context.concurrency
+  });
 }
 
 function isolateRecallEvalShardOverlays(
