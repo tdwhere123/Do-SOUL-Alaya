@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -21,6 +22,8 @@ import {
   assertDistinctOverlayInodes,
   isolateEmbeddingCacheOverlayReceipt
 } from "../../snapshot/recall-eval/workspace-slice/overlay-replicate.js";
+import { proveParentOpenedFileProofs } from
+  "./recall-eval-process/parent-opened-file-proofs.js";
 import { mergeRecallEvalShardArchives } from "./recall-eval-shards-merge.js";
 import {
   buildRecallEvalWorkerCliArgs,
@@ -55,6 +58,7 @@ interface RecallEvalShardedContext {
   readonly spawnWorker: LongMemEvalWorkerSpawner;
   readonly logDir: string;
   readonly snapshotManifest: LongMemEvalSnapshotManifest;
+  readonly parentOpenedFileProofsPath?: string;
   readonly recordedGitState?: MeasuredGitState;
 }
 
@@ -209,6 +213,11 @@ async function prepareRecallEvalShardedRun(
   isolateRecallEvalShardOverlays(opts, plans);
   const logDir = join(shardRoot, "logs");
   await mkdir(logDir, { recursive: true });
+  const parentOpenedFileProofsPath = await writeSupervisorOpenedFileProofs(
+    opts.snapshotDbPath,
+    snapshotManifest,
+    shardRoot
+  );
   const cliPath = deps.resolveCliPath?.() ?? resolveDefaultBenchRunnerCliPath();
   process.stdout.write(
     `[recall-eval concurrency] process-backed workers=${plans.length} ` +
@@ -223,8 +232,29 @@ async function prepareRecallEvalShardedRun(
     spawnWorker: deps.spawnWorker ?? spawnLongMemEvalWorkerProcess,
     logDir,
     snapshotManifest,
+    ...(parentOpenedFileProofsPath === undefined
+      ? {}
+      : { parentOpenedFileProofsPath }),
     ...(deps.recordedGitState === undefined ? {} : { recordedGitState: deps.recordedGitState })
   };
+}
+
+async function writeSupervisorOpenedFileProofs(
+  snapshotDbPath: string,
+  manifest: LongMemEvalSnapshotManifest,
+  shardRoot: string
+): Promise<string | undefined> {
+  if (!existsSync(snapshotDbPath)) return undefined;
+  const proved = proveParentOpenedFileProofs({
+    options: { snapshotDbPath },
+    manifest
+  }) as { readonly parentOpenedFileProofs?: unknown };
+  if (proved.parentOpenedFileProofs === undefined) {
+    throw new Error("recall-eval parent opened-file proofs are missing");
+  }
+  const proofPath = join(shardRoot, "parent-opened-file-proofs.json");
+  await writeFile(proofPath, `${JSON.stringify(proved.parentOpenedFileProofs)}\n`);
+  return proofPath;
 }
 
 async function runRecallEvalShardWorkers(
@@ -258,7 +288,10 @@ async function runRecallEvalShardWorker(
       concurrency: context.concurrency,
       embeddingMode: context.opts.embeddingMode ?? recallEvalEmbeddingMode(),
       shardRoot: context.shardRoot,
-      historyRoot: plan.historyRoot
+      historyRoot: plan.historyRoot,
+      ...(context.parentOpenedFileProofsPath === undefined
+        ? {}
+        : { parentOpenedFileProofsPath: context.parentOpenedFileProofsPath })
     }),
     logPath,
     signal

@@ -1,6 +1,7 @@
 import {
   getCurrentSchemaSummary,
-  initDatabase
+  initDatabase,
+  readSchemaMigrationLedger
 } from "@do-soul/alaya-storage";
 import { hashRegularFileNoFollow } from "./bound-file.js";
 import type { LongMemEvalSnapshotManifest } from "./materialize.js";
@@ -45,7 +46,7 @@ function assertMatchingSchemaIdentity(
   manifest: LongMemEvalSnapshotManifest,
   restoredDbPath: string
 ): void {
-  const restoredSchemaVersion = readSchemaMigrationVersion(restoredDbPath);
+  const restoredSchemaVersion = readSchemaMigrationLedger(restoredDbPath).at(-1);
   if (restoredSchemaVersion !== manifest.schema_migration_version) {
     throw new Error(
       "[recall-eval] snapshot schema_migration_version " +

@@ -19,7 +19,8 @@ import {
 } from "../../../runs/lifecycle/recall-eval/recall-eval-process/ipc-client.js";
 import {
   proveParentOpenedFileProofs,
-  seedParentOpenedFileProofs
+  seedParentOpenedFileProofs,
+  seedParentOpenedFileProofsFromEnv
 } from "../../../runs/lifecycle/recall-eval/recall-eval-process/parent-opened-file-proofs.js";
 import {
   digestWorkspaceSliceSnapshotIdentity,
@@ -65,6 +66,12 @@ describe("parent-opened snapshot identity", () => {
     expect(first.sha256s).toEqual([snapshot.sha256]);
     expect(recycled.sha256s).toEqual([snapshot.sha256]);
     expect(boundFileFullContentReadCount() - before).toBe(1);
+  });
+
+  it("fails closed when the supervisor proof file is unreadable", () => {
+    expect(() => seedParentOpenedFileProofsFromEnv({
+      ALAYA_RECALL_EVAL_PARENT_OPENED_FILE_PROOFS: "/no/such/parent-proofs.json"
+    }, "/tmp/snapshot.db")).toThrow(/unreadable/);
   });
 
   it("fails closed in a new process when inode or size drift after proof", async () => {

@@ -158,6 +158,19 @@ describe("buildRecallEvalWorkerCliArgs", () => {
 });
 
 describe("buildRecallEvalWorkerEnv", () => {
+  it("forwards supervisor opened-file proofs so workers seed instead of rehashing", () => {
+    const env = buildRecallEvalWorkerEnv({
+      concurrency: 2,
+      embeddingMode: "disabled",
+      shardRoot: "/tmp/shards",
+      historyRoot: "/tmp/shards/shard-0",
+      parentOpenedFileProofsPath: "/tmp/shards/parent-opened-file-proofs.json"
+    });
+    expect(env.ALAYA_RECALL_EVAL_PARENT_OPENED_FILE_PROOFS).toBe(
+      "/tmp/shards/parent-opened-file-proofs.json"
+    );
+  });
+
   it("requires sealed-slice restore so workers do not copy packed snapshots", () => {
     const env = buildRecallEvalWorkerEnv({
       concurrency: 2,

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   captureRegularFileSha256,
@@ -9,6 +9,27 @@ import { packedWorkingDbPath } from
   "../../../snapshot/recall-eval/workspace-slice/install.js";
 import { captureSealedSliceMainFileProofs } from
   "../../../snapshot/recall-eval/workspace-slice/sealed-cache.js";
+
+export const PARENT_OPENED_FILE_PROOFS_ENV =
+  "ALAYA_RECALL_EVAL_PARENT_OPENED_FILE_PROOFS";
+
+export function seedParentOpenedFileProofsFromEnv(
+  env: Readonly<Record<string, string | undefined>>,
+  snapshotDbPath: string
+): void {
+  const proofPath = env[PARENT_OPENED_FILE_PROOFS_ENV]?.trim();
+  if (proofPath === undefined || proofPath.length === 0) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(proofPath, "utf8")) as unknown;
+  } catch {
+    throw new Error("recall-eval parent opened-file proofs are unreadable");
+  }
+  seedParentOpenedFileProofs({
+    options: { snapshotDbPath },
+    parentOpenedFileProofs: parsed
+  });
+}
 
 export function proveParentOpenedFileProofs(payload: unknown): unknown {
   const snapshotDbPath = snapshotDbPathOf(payload);

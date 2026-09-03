@@ -24,6 +24,8 @@ import {
   type RecallEvalSnapshotBundle
 } from "../../snapshot/recall-eval/recall-eval-loader.js";
 import type { RecallEvalOptions } from "./recall-eval-contract.js";
+import { seedParentOpenedFileProofsFromEnv } from
+  "./recall-eval-process/parent-opened-file-proofs.js";
 import {
   buildRecallEvalRuntimeAttribution,
   assertDistinctSnapshotRestorePaths,
@@ -119,6 +121,7 @@ export async function prepareRecallEvalRunContext(
     undefined,
     "recall-eval invocation"
   );
+  seedParentOpenedFileProofsFromEnv(ambientEnv, options.snapshotDbPath);
   assertCacheOnlyEnvironment(ambientEnv);
   const embeddingMode = options.embeddingMode ?? recallEvalEmbeddingMode(ambientEnv);
   if (embeddingMode === "env") {

@@ -11,6 +11,8 @@ import {
   type LongMemEvalWorkerSpawner
 } from "../../../datasets/longmemeval/runner/runner-concurrency-worker.js";
 import type { RecallEvalOptions } from "./recall-eval-contract.js";
+import { PARENT_OPENED_FILE_PROOFS_ENV } from
+  "./recall-eval-process/parent-opened-file-proofs.js";
 import {
   REQUIRE_SLICE_REUSE_ENV,
   SEALED_SLICE_RESTORE_ENV
@@ -72,6 +74,7 @@ export function buildRecallEvalWorkerEnv(input: {
   readonly embeddingMode: NonNullable<RecallEvalOptions["embeddingMode"]>;
   readonly shardRoot: string;
   readonly historyRoot: string;
+  readonly parentOpenedFileProofsPath?: string;
 }): NodeJS.ProcessEnv {
   return freezeProcessEnvForWorkers(
     buildCredentiallessLongMemEvalWorkerEnv(process.env, {
@@ -83,7 +86,10 @@ export function buildRecallEvalWorkerEnv(input: {
       }),
       ALAYA_RECALL_EVAL_EMBEDDING: input.embeddingMode,
       [SEALED_SLICE_RESTORE_ENV]: "1",
-      [REQUIRE_SLICE_REUSE_ENV]: "1"
+      [REQUIRE_SLICE_REUSE_ENV]: "1",
+      ...(input.parentOpenedFileProofsPath === undefined
+        ? {}
+        : { [PARENT_OPENED_FILE_PROOFS_ENV]: input.parentOpenedFileProofsPath })
     })
   );
 }
