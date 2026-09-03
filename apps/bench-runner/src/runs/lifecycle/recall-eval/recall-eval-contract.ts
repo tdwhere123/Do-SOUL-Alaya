@@ -88,4 +88,13 @@ export interface RecallEvalQuestionResult {
   readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
   readonly documentEmbeddingWarmupLatencyMs: number | null;
   readonly deliveredObjectIds: readonly string[];
+  readonly harnessTimers?: RecallEvalHarnessTimers;
+}
+
+export interface RecallEvalHarnessTimers {
+  readonly openDurationMs: number;
+  readonly recallDurationMs: number;
+  readonly totalWallMs: number;
+  readonly clockAMs?: number;
+  readonly harnessOverheadMs?: number;
 }

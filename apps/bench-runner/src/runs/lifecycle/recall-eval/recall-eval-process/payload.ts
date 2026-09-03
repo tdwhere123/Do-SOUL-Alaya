@@ -24,6 +24,7 @@ import type { RecallEvalSelectionBoundaryArtifact } from
   "../recall-eval-selection-replay.js";
 import type { EvidenceSearchProjectionRebuildReport } from
   "../../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
+import type { OpenedFileSha256 } from "../../../snapshot/bound-file.js";
 
 export type RecallEvalPagerRecallOptions = Omit<
   BenchRecallOptions,
@@ -41,6 +42,7 @@ export interface RecallEvalPagerOpenPayload {
   readonly embeddingMode: BenchEmbeddingMode;
   readonly simulateReport: BenchSimulateReportMode;
   readonly captureOpenSemanticFactorCandidateActivations: boolean;
+  readonly parentOpenedFileProofs?: Readonly<Record<string, OpenedFileSha256>>;
 }
 
 export interface RecallEvalPagerRecallPayload {

@@ -56,14 +56,14 @@ export type OpenedFileIdentity = Readonly<{
   readonly mtimeMs: number;
 }>;
 
-type CachedFileSha256 = OpenedFileIdentity & Readonly<{
+export type OpenedFileSha256 = OpenedFileIdentity & Readonly<{
   readonly sha256: string;
 }>;
 
-const fileSha256Cache = new Map<string, CachedFileSha256>();
+const fileSha256Cache = new Map<string, OpenedFileSha256>();
 let fullFileContentReads = 0;
 
-function cachedFileSha256(filePath: string): CachedFileSha256 | undefined {
+function cachedFileSha256(filePath: string): OpenedFileSha256 | undefined {
   try {
     const metadata = lstatSync(filePath);
     if (!metadata.isFile()) return undefined;
@@ -169,7 +169,7 @@ export function assertRegularFileNoFollow(filePath: string): void {
 
 function withOpenedRegularFile<T>(
   filePath: string,
-  expected: CachedFileSha256 | undefined,
+  expected: OpenedFileSha256 | undefined,
   operation: (openedPath: string) => T
 ): T {
   const descriptor = openSync(filePath, constants.O_RDONLY | NO_FOLLOW);
@@ -206,9 +206,16 @@ export function hashRegularFileNoFollow(
   filePath: string,
   hooks: Readonly<{ readonly beforeCacheRegistration?: () => void }> = {}
 ): string {
+  return captureRegularFileSha256(filePath, hooks).sha256;
+}
+
+export function captureRegularFileSha256(
+  filePath: string,
+  hooks: Readonly<{ readonly beforeCacheRegistration?: () => void }> = {}
+): OpenedFileSha256 {
   const cached = cachedFileSha256(filePath);
   if (cached !== undefined) {
-    return withOpenedRegularFile(filePath, cached, () => cached.sha256);
+    return withOpenedRegularFile(filePath, cached, () => cached);
   }
   const source = openSync(filePath, constants.O_RDONLY | NO_FOLLOW);
   try {
@@ -223,7 +230,39 @@ export function hashRegularFileNoFollow(
       expectedIdentity: after,
       sha256
     });
-    return sha256;
+    return Object.freeze({ ...after, sha256 });
+  } finally {
+    closeSync(source);
+  }
+}
+
+export function seedRegularFileSha256(input: {
+  readonly filePath: string;
+  readonly expectedIdentity: OpenedFileIdentity;
+  readonly sha256: string;
+}): void {
+  if (!/^[0-9a-f]{64}$/u.test(input.sha256)) {
+    throw new Error(`${input.filePath} parent digest is invalid`);
+  }
+  const source = openSync(input.filePath, constants.O_RDONLY | NO_FOLLOW);
+  try {
+    assertOpenedFileIdentity({
+      filePath: input.filePath,
+      descriptor: source,
+      expectedIdentity: input.expectedIdentity
+    });
+    const existing = fileSha256Cache.get(resolve(input.filePath));
+    if (existing !== undefined &&
+        (existing.sha256 !== input.sha256 ||
+          !sameFileIdentity(existing, input.expectedIdentity))) {
+      throw new Error(`${input.filePath} changed after parent digest`);
+    }
+    rememberOpenedFileSha256({
+      filePath: input.filePath,
+      descriptor: source,
+      expectedIdentity: input.expectedIdentity,
+      sha256: input.sha256
+    });
   } finally {
     closeSync(source);
   }

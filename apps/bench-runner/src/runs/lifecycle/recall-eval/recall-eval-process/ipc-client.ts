@@ -10,9 +10,11 @@ import {
   type RecallEvalPagerIpcSuccess,
   type RecallEvalPagerMapsHint
 } from "./protocol.js";
-import { formatRecallEvalPagerMapsHint } from "./maps-hint.js";
+import { formatPagerExit, formatRecallEvalPagerMapsHint } from "./maps-hint.js";
 import { RecallEvalSelectionArtifactCollector } from
   "./selection-artifact-collector.js";
+import { proveParentOpenedFileProofs } from "./parent-opened-file-proofs.js";
+import { attachRecallEvalHarnessTimers } from "./harness-timers.js";
 
 export const DEFAULT_RECALL_EVAL_PAGER_TIMEOUT_MS = 600_000;
 
@@ -105,6 +107,7 @@ export class RecallEvalPagerIpcSession {
   private mapsHint: RecallEvalPagerMapsHint | null = null;
   private childPid: number | null = null;
   private readonly defaultTimeoutMs: number;
+  private initialOpenDurationMs: number | undefined;
 
   public constructor(input: {
     readonly host?: RecallEvalPagerIpcHost;
@@ -126,9 +129,12 @@ export class RecallEvalPagerIpcSession {
     payload: unknown,
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<RecallEvalPagerIpcSuccess> {
-    this.openPayload = payload;
-    const response = await this.request("open", { open: payload }, timeoutMs);
+    const openStartedAt = performance.now();
+    this.openPayload = proveParentOpenedFileProofs(payload);
+    const response = await this.request("open", { open: this.openPayload }, timeoutMs);
+    this.openPayload = proveParentOpenedFileProofs(this.openPayload);
     this.recordIdentity(response);
+    this.initialOpenDurationMs = performance.now() - openStartedAt;
     return response;
   }
 
@@ -136,14 +142,24 @@ export class RecallEvalPagerIpcSession {
     payload: unknown,
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<unknown> {
+    const startedAt = performance.now();
+    const initialOpen = this.child !== null ? (this.initialOpenDurationMs ?? 0) : undefined;
+    if (initialOpen !== undefined) this.initialOpenDurationMs = undefined;
     await this.ensureOpened(timeoutMs);
+    const openDurationMs = initialOpen ?? (performance.now() - startedAt);
+    const recallStartedAt = performance.now();
     const response = await this.request("recall", { recall: payload }, timeoutMs);
+    const recallDurationMs = performance.now() - recallStartedAt;
+    const totalWallMs = openDurationMs + recallDurationMs;
+
     this.recordIdentity(response);
-    if (response.pack === undefined || !hasRecallPack(response.pack)) {
-      throw new Error("recall-eval pager child returned an empty pack.");
-    }
+    const pack = attachRecallEvalHarnessTimers(response.pack, {
+      openDurationMs,
+      recallDurationMs,
+      totalWallMs
+    });
     this.selectionArtifacts.recordQuestion(payload);
-    return response.pack;
+    return pack;
   }
 
   public async close(
@@ -451,31 +467,6 @@ function isCleanPagerExit(
 
 function isPagerTimeoutError(error: unknown): boolean {
   return error instanceof Error && /timed out after \d+ms/u.test(error.message);
-}
-
-function hasRecallPack(pack: unknown): boolean {
-  if (typeof pack !== "object" || pack === null) return false;
-  const record = pack as { readonly questionId?: unknown; readonly diagnostics?: unknown };
-  return typeof record.questionId === "string" &&
-    record.questionId.length > 0 &&
-    record.diagnostics !== undefined &&
-    record.diagnostics !== null;
-}
-
-function formatPagerExit(input: {
-  readonly code: number | null;
-  readonly exitSignal: NodeJS.Signals | null;
-  readonly childPid?: number | null;
-  readonly mapsHint?: RecallEvalPagerMapsHint | null;
-}): string {
-  const pid = input.childPid ?? input.mapsHint?.pid ?? "unknown";
-  const maps = input.mapsHint === undefined || input.mapsHint === null
-    ? "maps=unsampled"
-    : formatRecallEvalPagerMapsHint(input.mapsHint);
-  return (
-    `recall-eval pager child exited (pid=${pid}, code=${input.code}, ` +
-    `signal=${input.exitSignal}, ${maps}).`
-  );
 }
 
 function toPagerExitError(

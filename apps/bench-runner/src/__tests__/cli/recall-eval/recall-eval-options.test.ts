@@ -49,4 +49,35 @@ describe("recall-eval CLI options", () => {
       concurrency: 2
     });
   });
+
+  it("rejects retired --skip-recycle; path-switch is the only serving mode", () => {
+    expect(() => parseFlags([
+      "--snapshot", "/tmp/source.db",
+      "--skip-recycle"
+    ])).toThrow(/path-switch is the only question serving mode/);
+  });
+
+  it("defaults snapshot consume to promotion by omitting the option", () => {
+    const flags = parseFlags(["--snapshot", "/tmp/source.db"]);
+    expect(flags.snapshotConsumeAuthority).toBeUndefined();
+    expect(buildRecallEvalOptions(flags, flags.snapshot!))
+      .not.toHaveProperty("snapshotConsumeAuthority");
+  });
+
+  it("forwards diagnostic snapshot consume for ineligible replay", () => {
+    const flags = parseFlags([
+      "--snapshot", "/tmp/source.db",
+      "--snapshot-consume-authority", "diagnostic"
+    ]);
+    expect(buildRecallEvalOptions(flags, flags.snapshot!)).toMatchObject({
+      snapshotConsumeAuthority: "diagnostic"
+    });
+  });
+
+  it("fail-closes unknown snapshot consume authority", () => {
+    expect(() => parseFlags([
+      "--snapshot", "/tmp/source.db",
+      "--snapshot-consume-authority", "release"
+    ])).toThrow(/must be promotion or diagnostic/);
+  });
 });

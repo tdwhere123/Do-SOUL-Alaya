@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { renameSync, writeFileSync } from "node:fs";
+import { lstatSync, renameSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,9 @@ import {
   boundFileFullContentReadCount,
   copyRegularFileNoFollow,
   hashRegularFileNoFollow,
-  readRegularFileNoFollow
+  readRegularFileNoFollow,
+  seedRegularFileSha256,
+  type OpenedFileIdentity
 } from "../../../runs/snapshot/bound-file.js";
 
 const roots: string[] = [];
@@ -94,6 +96,56 @@ describe("descriptor-bound file IO", () => {
     );
   });
 
+  it("seeds a parent proof without hashing packed bytes", async () => {
+    const input = await fixture();
+    const before = boundFileFullContentReadCount();
+    seedRegularFileSha256({
+      filePath: input.source,
+      expectedIdentity: openedIdentity(input.source),
+      sha256: input.sha256
+    });
+    expect(hashRegularFileNoFollow(input.source)).toBe(input.sha256);
+    expect(boundFileFullContentReadCount() - before).toBe(0);
+  });
+
+  it("fails closed when inode or size drift after the parent proof", async () => {
+    const input = await fixture();
+    const proof = {
+      expectedIdentity: openedIdentity(input.source),
+      sha256: input.sha256
+    };
+    const before = boundFileFullContentReadCount();
+
+    const replaced = join(input.root, "replaced.db");
+    await writeFile(replaced, "replacement inode");
+    renameSync(input.source, `${input.source}.original`);
+    renameSync(replaced, input.source);
+    expect(() => seedRegularFileSha256({
+      filePath: input.source,
+      ...proof
+    })).toThrow(/changed/u);
+    expect(boundFileFullContentReadCount() - before).toBe(0);
+
+    await writeFile(input.source, Buffer.concat([
+      Buffer.from("trusted snapshot bytes", "utf8"),
+      Buffer.from("!")
+    ]));
+    expect(() => seedRegularFileSha256({
+      filePath: input.source,
+      expectedIdentity: proof.expectedIdentity,
+      sha256: input.sha256
+    })).toThrow(/changed/u);
+    expect(boundFileFullContentReadCount() - before).toBe(0);
+  });
+
+  it("hashes once when parent proof is absent", async () => {
+    const input = await fixture();
+    const before = boundFileFullContentReadCount();
+    expect(hashRegularFileNoFollow(input.source)).toBe(input.sha256);
+    expect(hashRegularFileNoFollow(input.source)).toBe(input.sha256);
+    expect(boundFileFullContentReadCount() - before).toBe(1);
+  });
+
   it("refuses copy cache registration when source or target paths drift", async () => {
     const sourceInput = await fixture();
     const sourceTarget = join(sourceInput.root, "source-drift.db");
@@ -123,3 +175,14 @@ describe("descriptor-bound file IO", () => {
     expect(await readFile(`${target}.original`)).toEqual(await readFile(targetInput.source));
   });
 });
+
+function openedIdentity(filePath: string): OpenedFileIdentity {
+  const metadata = lstatSync(filePath);
+  return {
+    dev: metadata.dev,
+    ino: metadata.ino,
+    ctimeMs: metadata.ctimeMs,
+    size: metadata.size,
+    mtimeMs: metadata.mtimeMs
+  };
+}

@@ -1,5 +1,6 @@
 // @ts-nocheck
-import { access, copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstatSync } from "node:fs";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -108,6 +109,41 @@ describe("source-bound embedding cache overlay", () => {
     await expect(access(join(root, `.embedding-cache-overlay-${written.overlay_sha256}.sqlite`)))
       .resolves.toBeUndefined();
     target.close();
+  });
+
+  it("binds two restored copies to overlay files that do not share an inode", async () => {
+    const written = await writeFixtureOverlay();
+    const firstDb = join(root, "worker-a", "alaya.db");
+    const secondDb = join(root, "worker-b", "alaya.db");
+    await mkdir(join(root, "worker-a"), { recursive: true });
+    await mkdir(join(root, "worker-b"), { recursive: true });
+    await copyFile(targetDbPath, firstDb);
+    await copyFile(targetDbPath, secondDb);
+    await applyEmbeddingCacheOverlay({
+      receiptPath,
+      restoredDbPath: firstDb,
+      expected: expectedBinding()
+    });
+    await applyEmbeddingCacheOverlay({
+      receiptPath,
+      restoredDbPath: secondDb,
+      expected: expectedBinding()
+    });
+    const firstOverlay = join(
+      root,
+      "worker-a",
+      `.embedding-cache-overlay-${written.overlay_sha256}.sqlite`
+    );
+    const secondOverlay = join(
+      root,
+      "worker-b",
+      `.embedding-cache-overlay-${written.overlay_sha256}.sqlite`
+    );
+    const first = lstatSync(firstOverlay);
+    const second = lstatSync(secondOverlay);
+    expect(first.isFile()).toBe(true);
+    expect(second.isFile()).toBe(true);
+    expect(`${first.dev}:${first.ino}`).not.toBe(`${second.dev}:${second.ino}`);
   });
 
   it("applies the overlay after snapshot restore and exposes its receipt", async () => {

@@ -1,11 +1,9 @@
 import { existsSync, renameSync, rmSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { initDatabase } from "@do-soul/alaya-storage";
+import { closeCachedDatabase, initDatabase } from "@do-soul/alaya-storage";
 import { atomicCopy, cloneCachedSealedSnapshot } from "../../freeze/db-copy.js";
 import { BENCH_DAEMON_DB_FILENAME } from "../../materialize.js";
 import { reloadBenchWorkingDatabase } from "../../../../harness/daemon/runtime/daemon-db-pragmas.js";
-import { loadSliceIntoOpenDatabase } from "./load-open.js";
 import { PACKED_WORKING_DB_FILENAME } from "./names.js";
 
 export function packedWorkingDbPath(dataDir: string): string {
@@ -40,23 +38,12 @@ export function installWorkspaceSlice(input: {
   readonly expectedSha256?: string;
 }): void {
   const working = workingAlayaDbPath(input.dataDir);
-  if (!existsSync(working)) {
-    copySlice(input, working);
-    reloadBenchWorkingDatabase(input.dataDir);
-    return;
+  closeCachedDatabase(working);
+  for (const suffix of ["", "-wal", "-shm"]) {
+    rmSync(`${working}${suffix}`, { force: true });
   }
-  // Replacing the inode would leave the long-lived pager's prepared statements
-  // bound to the previous file.
-  const staged = `${working}.${randomUUID()}.slice`;
-  try {
-    copySlice(input, staged);
-    const live = initDatabase({ filename: working });
-    loadSliceIntoOpenDatabase(live, staged);
-    // Load-open already ANALYZE main; skip a second planner pass.
-    reloadBenchWorkingDatabase(input.dataDir, { analyze: false });
-  } finally {
-    for (const suffix of ["", "-wal", "-shm"]) rmSync(`${staged}${suffix}`, { force: true });
-  }
+  copySlice(input, working);
+  reloadBenchWorkingDatabase(input.dataDir);
 }
 
 function copySlice(

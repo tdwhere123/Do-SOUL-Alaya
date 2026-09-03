@@ -123,7 +123,6 @@ async function executeRecallEvalQuestions(
       questionIndex: i
     });
     writeRecallEvalProgress(i, context.window.length, question.questionId, result);
-    await session.recycle();
   }
   return collected;
 }

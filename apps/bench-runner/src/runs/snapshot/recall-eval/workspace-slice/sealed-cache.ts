@@ -1,10 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { SNAPSHOT_SEED_IDENTITY } from "../../../../shared/version.js";
-import { hashRegularFileNoFollow } from "../../bound-file.js";
+import {
+  captureRegularFileSha256,
+  hashRegularFileNoFollow,
+  type OpenedFileSha256
+} from "../../bound-file.js";
 import {
   explodePackedWorkingCopy,
+  workspaceSliceDbPath,
   type ExplodedWorkspaceSlices
 } from "./explode.js";
 import { completeSlicesOrNull } from "./complete-slices.js";
@@ -13,6 +18,7 @@ import {
   preservePackedWorkingCopy
 } from "./install.js";
 import {
+  readValidWorkspaceSliceSnapshotReceipt,
   WORKSPACE_SLICE_EXPLODE_RECIPE_ID,
   WORKSPACE_SLICE_EXPLODE_RECIPE_VERSION
 } from "./slice-snapshot.js";
@@ -22,6 +28,29 @@ export const SEALED_SLICE_CACHE_IDENTITY_FILENAME = "identity.json";
 
 export function sealedWorkspaceSliceCacheDir(snapshotDbPath: string): string {
   return `${snapshotDbPath}.workspace-slices`;
+}
+
+export function captureSealedSliceMainFileProofs(
+  snapshotDbPath: string
+): Readonly<Record<string, OpenedFileSha256>> {
+  const destDir = sealedWorkspaceSliceCacheDir(snapshotDbPath);
+  const identity = readSealedSliceIdentity(destDir);
+  if (identity === null) return Object.freeze({});
+  const proofs: Record<string, OpenedFileSha256> = {};
+  for (const workspaceId of identity.workspace_ids) {
+    const dbPath = workspaceSliceDbPath(destDir, workspaceId);
+    if (!existsSync(dbPath)) continue;
+    const captured = captureRegularFileSha256(dbPath);
+    const receipt = readValidWorkspaceSliceSnapshotReceipt({
+      workspaceId,
+      dbPath
+    });
+    if (receipt === null || receipt.sqlite_main_file_sha256 !== captured.sha256) {
+      throw new Error(`workspace slice changed after verification for ${workspaceId}`);
+    }
+    proofs[resolve(dbPath)] = captured;
+  }
+  return Object.freeze(proofs);
 }
 
 export async function reuseOrExplodeSealedSlices(input: {

@@ -1,20 +1,11 @@
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { writeMergedLongMemEvalArchive } from "../../../cli/merge/command/merge-command-archive.js";
-import {
-  buildMergedLongMemEvalPayload,
-  loadMergeShards
-} from "../../../cli/merge/command/merge-command-shards.js";
-import { deriveMergedLongMemEvalReleaseAuthority } from
-  "../../../cli/merge/release-evidence-authority.js";
+import { join } from "node:path";
 import {
   buildLongMemEvalWorkerShardPlans,
   resolveDefaultBenchRunnerCliPath
 } from "../../../datasets/longmemeval/runner/runner-concurrency.js";
-import { validateShardRunProvenancePlans } from "../../provenance/shard-aggregate.js";
-import { withLongMemEvalDiagnosticsSpool, type LongMemEvalDiagnosticsSpool } from
-  "../../../diagnostics/spool.js";
 import { finalizeOwnedTempRoot } from "../owned-temp-root.js";
 import { throwLifecycleErrors } from "../errors.js";
 import { recallEvalEmbeddingMode } from "./recall-eval-runtime.js";
@@ -28,8 +19,16 @@ import { validateSnapshotManifest } from "../../snapshot/manifest-validation.js"
 import { MAX_SNAPSHOT_MANIFEST_BYTES } from "../../snapshot/artifact-limits.js";
 import { readRegularFileNoFollow } from "../../snapshot/bound-file.js";
 import {
+  assertDistinctOverlayInodes,
+  isolateEmbeddingCacheOverlayReceipt
+} from "../../snapshot/recall-eval/workspace-slice/overlay-replicate.js";
+import { proveParentOpenedFileProofs } from
+  "./recall-eval-process/parent-opened-file-proofs.js";
+import { mergeRecallEvalShardArchives } from "./recall-eval-shards-merge.js";
+import {
   buildRecallEvalWorkerCliArgs,
   buildRecallEvalWorkerEnv,
+  RECALL_EVAL_SHARD_OVERLAY_DIRNAME,
   runSupervisedWorkerGroup,
   shardHasMergeableKpi,
   spawnLongMemEvalWorkerProcess,
@@ -59,6 +58,7 @@ interface RecallEvalShardedContext {
   readonly spawnWorker: LongMemEvalWorkerSpawner;
   readonly logDir: string;
   readonly snapshotManifest: LongMemEvalSnapshotManifest;
+  readonly parentOpenedFileProofsPath?: string;
   readonly recordedGitState?: MeasuredGitState;
 }
 
@@ -93,8 +93,7 @@ export function validateRecallEvalConcurrency(
   }
   const unsupportedSubstrate = [
     opts.warmDerivedSnapshotReceiptPath === undefined ? null : "warm derived snapshot",
-    opts.derivedEvidenceProjectionRebuild === true ? "derived projection rebuild" : null,
-    opts.embeddingCacheOverlayReceiptPath === undefined ? null : "embedding cache overlay"
+    opts.derivedEvidenceProjectionRebuild === true ? "derived projection rebuild" : null
   ].filter((value): value is string => value !== null);
   if (unsupportedSubstrate.length > 0) {
     throw new Error(
@@ -211,8 +210,14 @@ async function prepareRecallEvalShardedRun(
     shardRoot
   });
   assertExactRecallEvalShardCoverage(plans, window.baseOffset, window.windowLength);
+  isolateRecallEvalShardOverlays(opts, plans);
   const logDir = join(shardRoot, "logs");
   await mkdir(logDir, { recursive: true });
+  const parentOpenedFileProofsPath = await writeSupervisorOpenedFileProofs(
+    opts.snapshotDbPath,
+    snapshotManifest,
+    shardRoot
+  );
   const cliPath = deps.resolveCliPath?.() ?? resolveDefaultBenchRunnerCliPath();
   process.stdout.write(
     `[recall-eval concurrency] process-backed workers=${plans.length} ` +
@@ -227,8 +232,29 @@ async function prepareRecallEvalShardedRun(
     spawnWorker: deps.spawnWorker ?? spawnLongMemEvalWorkerProcess,
     logDir,
     snapshotManifest,
+    ...(parentOpenedFileProofsPath === undefined
+      ? {}
+      : { parentOpenedFileProofsPath }),
     ...(deps.recordedGitState === undefined ? {} : { recordedGitState: deps.recordedGitState })
   };
+}
+
+async function writeSupervisorOpenedFileProofs(
+  snapshotDbPath: string,
+  manifest: LongMemEvalSnapshotManifest,
+  shardRoot: string
+): Promise<string | undefined> {
+  if (!existsSync(snapshotDbPath)) return undefined;
+  const proved = proveParentOpenedFileProofs({
+    options: { snapshotDbPath },
+    manifest
+  }) as { readonly parentOpenedFileProofs?: unknown };
+  if (proved.parentOpenedFileProofs === undefined) {
+    throw new Error("recall-eval parent opened-file proofs are missing");
+  }
+  const proofPath = join(shardRoot, "parent-opened-file-proofs.json");
+  await writeFile(proofPath, `${JSON.stringify(proved.parentOpenedFileProofs)}\n`);
+  return proofPath;
 }
 
 async function runRecallEvalShardWorkers(
@@ -262,7 +288,10 @@ async function runRecallEvalShardWorker(
       concurrency: context.concurrency,
       embeddingMode: context.opts.embeddingMode ?? recallEvalEmbeddingMode(),
       shardRoot: context.shardRoot,
-      historyRoot: plan.historyRoot
+      historyRoot: plan.historyRoot,
+      ...(context.parentOpenedFileProofsPath === undefined
+        ? {}
+        : { parentOpenedFileProofsPath: context.parentOpenedFileProofsPath })
     }),
     logPath,
     signal
@@ -279,57 +308,28 @@ async function runRecallEvalShardWorker(
 async function mergeRecallEvalShardedRun(
   context: RecallEvalShardedContext
 ): Promise<RecallEvalResult> {
-  return withLongMemEvalDiagnosticsSpool((diagnosticsSpool) =>
-    mergeRecallEvalShardedRunWithSpool(context, diagnosticsSpool)
+  process.stdout.write(
+    `[recall-eval concurrency] merging ${context.plans.length} shard(s) -> ${context.opts.historyRoot}\n`
   );
+  return mergeRecallEvalShardArchives({
+    plans: context.plans,
+    historyRoot: context.opts.historyRoot,
+    snapshotManifest: context.snapshotManifest,
+    concurrency: context.concurrency
+  });
 }
 
-async function mergeRecallEvalShardedRunWithSpool(
-  context: RecallEvalShardedContext,
-  diagnosticsSpool: LongMemEvalDiagnosticsSpool
-): Promise<RecallEvalResult> {
-  const shardRoots = context.plans.map((plan) => plan.historyRoot);
-  process.stdout.write(
-    `[recall-eval concurrency] merging ${shardRoots.length} shard(s) -> ${context.opts.historyRoot}\n`
-  );
-  const loaded = await loadMergeShards(shardRoots, diagnosticsSpool);
-  const build = buildMergedLongMemEvalPayload(loaded);
-  await validateShardRunProvenancePlans({
-    shardArchiveRefs: loaded.archiveRefs,
-    plans: context.plans,
-    requestedConcurrency: context.concurrency,
-    selectionContract: build.selectionContract,
-    globalExtractionAuthority: loaded.globalExtractionAuthority
-  });
-  const archive = await writeMergedLongMemEvalArchive({
-    historyRoot: context.opts.historyRoot,
-    releaseEvidenceAuthority: deriveMergedLongMemEvalReleaseAuthority(
-      null,
-      loaded.archiveRefs
-    ),
-    build,
-    shardArchiveRefs: loaded.archiveRefs,
-    requestedConcurrency: context.concurrency,
-    globalExtractionAuthority: loaded.globalExtractionAuthority,
-    diagnosticsSpool,
-    ...(context.recordedGitState === undefined
-      ? {}
-      : { recordedGitState: context.recordedGitState })
-  });
-  return {
-    slug: archive.slug,
-    kpiPath: archive.kpiPath,
-    reportPath: join(dirname(archive.kpiPath), "report.md"),
-    findingsPath: join(dirname(archive.kpiPath), "findings.md"),
-    payload: archive.merged,
-    snapshotManifest: context.snapshotManifest,
-    perQuestionDelivered: buildMergedPerQuestionDelivered(
-      loaded.questionDiagnostics,
-      archive.merged.kpi.per_scenario
-    ),
-    completion: { status: "complete", failures: [] },
-    memoryProfile: { status: "disabled", failures: [] }
-  };
+function isolateRecallEvalShardOverlays(
+  opts: RecallEvalOptions,
+  plans: readonly LongMemEvalWorkerShardPlan[]
+): void {
+  const receiptPath = opts.embeddingCacheOverlayReceiptPath;
+  if (receiptPath === undefined) return;
+  const isolated = plans.map((plan) => isolateEmbeddingCacheOverlayReceipt({
+    receiptPath,
+    destDir: join(plan.historyRoot, RECALL_EVAL_SHARD_OVERLAY_DIRNAME)
+  }));
+  assertDistinctOverlayInodes(isolated.map((row) => row.overlayPath));
 }
 
 function defaultLoadSnapshotManifest(
