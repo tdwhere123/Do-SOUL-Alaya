@@ -67,7 +67,10 @@ export function buildRecallEvalOptions(
       : { seedExtractionSystemPromptPath: opts.seedExtractionSystemPrompt }),
     ...(opts.querySemanticFactorCache === undefined
       ? {}
-      : { querySemanticFactorCachePath: opts.querySemanticFactorCache })
+      : { querySemanticFactorCachePath: opts.querySemanticFactorCache }),
+    ...(opts.snapshotConsumeAuthority === undefined
+      ? {}
+      : { snapshotConsumeAuthority: opts.snapshotConsumeAuthority })
   };
 }
 

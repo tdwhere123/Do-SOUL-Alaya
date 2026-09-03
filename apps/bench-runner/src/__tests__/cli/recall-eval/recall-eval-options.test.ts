@@ -59,13 +59,27 @@ describe("recall-eval CLI options", () => {
     );
   });
 
-  it("does not parse --snapshot-consume-authority", () => {
+  it("defaults snapshot consume to promotion by omitting the option", () => {
+    const flags = parseFlags(["--snapshot", "/tmp/source.db"]);
+    expect(flags.snapshotConsumeAuthority).toBeUndefined();
+    expect(buildRecallEvalOptions(flags, flags.snapshot!))
+      .not.toHaveProperty("snapshotConsumeAuthority");
+  });
+
+  it("forwards diagnostic snapshot consume for ineligible replay", () => {
     const flags = parseFlags([
       "--snapshot", "/tmp/source.db",
       "--snapshot-consume-authority", "diagnostic"
     ]);
-    expect(flags).not.toHaveProperty("snapshotConsumeAuthority");
-    expect(buildRecallEvalOptions(flags, flags.snapshot!))
-      .not.toHaveProperty("snapshotConsumeAuthority");
+    expect(buildRecallEvalOptions(flags, flags.snapshot!)).toMatchObject({
+      snapshotConsumeAuthority: "diagnostic"
+    });
+  });
+
+  it("fail-closes unknown snapshot consume authority", () => {
+    expect(() => parseFlags([
+      "--snapshot", "/tmp/source.db",
+      "--snapshot-consume-authority", "release"
+    ])).toThrow(/must be promotion or diagnostic/);
   });
 });
