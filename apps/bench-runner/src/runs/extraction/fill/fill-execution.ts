@@ -53,6 +53,7 @@ import {
 } from "./policy/cache-key-allowlist.js";
 import type { SupplementalSourceManifestBinding } from
   "../cache/supplemental-source-receipt.js";
+import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 
 export interface CompleteFillManifestSupplement {
   readonly builtAt: string;
@@ -86,6 +87,7 @@ export async function executeExtractionFill(
   signal: AbortSignal | undefined,
   markProgress: (() => void) | undefined
 ): Promise<import("./semantic-fill-executor.js").SemanticFillReport | undefined> {
+  refuseRecallCampaignLiveExtraction("extraction_write");
   const resolved = resolveFillTurns(
     options.cacheKeyAllowlist, prepared, cacheRoot, authority, writeLease
   );

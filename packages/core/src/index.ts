@@ -259,6 +259,11 @@ export * from "./shared/cjk-segmentation.js";
 export * from "./shared/entity-extraction-port.js";
 export * from "./shared/entity-extraction-rules.js";
 export * from "./recall/runtime/recall-evidence-pack.js";
+export {
+  assertRecallZeroLiveExtraction,
+  refuseRecallCampaignLiveExtraction,
+  withRecallZeroLiveCampaign
+} from "./recall/runtime/zero-live-extraction.js";
 export * from "./runtime/runs/run-hot-state-service.js";
 export * from "./runtime/runs/run-service.js";
 export * from "./runtime/runtime-event-normalizer-state.js";

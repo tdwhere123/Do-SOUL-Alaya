@@ -19,6 +19,7 @@ import {
   type SemanticFillTask,
   type SemanticFillTransport
 } from "../semantic-fill-executor.js";
+import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 
 export type CapabilityFulfillmentState =
   | "cache-hit"
@@ -85,6 +86,7 @@ export async function fulfillAssertionCapability(
     return unavailable(captured, existing.reason ?? "quarantined provider result");
   }
   if (captured.transport === undefined) return unavailable(captured, existing.status);
+  refuseRecallCampaignLiveExtraction("provider_executor");
   const durableCallsBefore = readSemanticFillAttemptEvidence(captured.root).length;
   const report = await runSemanticFill({
     root: captured.root,

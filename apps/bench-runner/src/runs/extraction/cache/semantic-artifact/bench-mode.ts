@@ -47,11 +47,6 @@ export function parseExtractionBenchMode(value: unknown): ExtractionBenchModeCon
   throw new Error("unknown extraction bench mode");
 }
 
-export function assertRecallZeroLiveExtraction(input: {
-  readonly providerExecutorEntries: number;
-  readonly extractionWrites: number;
-}): void {
-  if (input.providerExecutorEntries !== 0 || input.extractionWrites !== 0) {
-    throw new Error("recall campaign attempted live extraction");
-  }
-}
+export {
+  assertRecallZeroLiveExtraction
+} from "@do-soul/alaya-core";

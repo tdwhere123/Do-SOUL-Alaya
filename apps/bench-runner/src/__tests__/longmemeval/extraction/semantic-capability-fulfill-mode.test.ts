@@ -17,6 +17,7 @@ import {
   assertRecallZeroLiveExtraction,
   parseExtractionBenchMode
 } from "../../../runs/extraction/cache/semantic-artifact/bench-mode.js";
+import { withRecallZeroLiveCampaign } from "@do-soul/alaya-core";
 import {
   createOfflineSemanticEnvelope,
   createOfflineSemanticReplay,
@@ -175,6 +176,17 @@ describe("lazy F3 fulfillment shadow", () => {
       }),
       signal: controller.signal
     })).rejects.toThrow(/aborted/u);
+  });
+
+  it("fails closed when fulfillment would enter a provider during a Recall campaign", async () => {
+    await expect(withRecallZeroLiveCampaign(() => fulfillAssertionCapability({
+      root,
+      task: semanticTask(),
+      envelope: ENVELOPE,
+      transport: createOfflineSemanticReplay({
+        defaultResult: { kind: "failure", reason: "offline" }
+      })
+    }))).rejects.toThrow(/live extraction/u);
   });
 });
 

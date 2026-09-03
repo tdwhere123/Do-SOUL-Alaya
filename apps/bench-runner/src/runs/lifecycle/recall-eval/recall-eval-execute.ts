@@ -1,4 +1,5 @@
 import { throwLifecycleErrors } from "../errors.js";
+import { assertRecallZeroLiveExtraction } from "@do-soul/alaya-core";
 import { writeRecallEvalProgress } from "./recall-eval-progress.js";
 import {
   RecallEvalDiagnosticsSpool
@@ -34,6 +35,7 @@ export async function executeRecallEvalRun(
   selectionArtifact: RecallEvalSelectionBoundaryArtifact | null;
   evidenceProjectionRebuild: unknown;
 }>> {
+  assertRecallZeroLiveExtraction();
   const session = createRecallEvalPagerSession();
   let collected: readonly RecallEvalQuestionResult[] = [];
   let selectionArtifact: RecallEvalSelectionBoundaryArtifact | null = null;

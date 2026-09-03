@@ -140,27 +140,8 @@ export function bindSnapshotRunProvenanceAuthority(
     throw new Error("snapshot run provenance has no current extraction summary");
   }
   assertSnapshotExtractionAuthorityBinding(authority, cache);
-  const { compact_run_identity, ...rest } = provenance;
-  if (captured.schemaVersion === 1 && compact_run_identity !== undefined) {
-    throw new Error("schema_version 1 cannot carry compact_run_identity");
-  }
-  if (captured.schemaVersion === 2) {
-    const substrate = cache.content_closure_sha256 ?? cache.expected_key_set_sha256;
-    if (typeof substrate !== "string" || captured.ingestionMode === undefined) {
-      throw new Error("compact run provenance v2 requires substrate and ingestion_mode");
-    }
-    const expected = compactRunIdentity({
-      substrateIdentity: substrate,
-      ingestionMode: captured.ingestionMode,
-      overlayIdentity: captured.overlayIdentity ?? substrate,
-      ...(captured.lazyRunIdentity === undefined
-        ? {}
-        : { lazyRunIdentity: captured.lazyRunIdentity })
-    });
-    if (compact_run_identity !== expected) {
-      throw new Error("compact_run_identity does not match substrate and ingestion_mode");
-    }
-  }
+  const { compact_run_identity: _compactRunIdentity, ...rest } = provenance;
+  assertCompactRunIdentityBinding(provenance);
   const full = LongMemEvalRunProvenanceSchema.parse({
     ...rest,
     ...capturedIngestionFields(captured),
@@ -239,5 +220,59 @@ function capturedIngestionFields(
 export function isSnapshotRunProvenanceSummaryGateEligible(
   provenance: LongMemEvalSnapshotRunProvenance
 ): boolean {
+  if (!matchesCompactRunIdentityBinding(provenance)) return false;
   return isLongMemEvalRunProvenanceSummaryGateEligible(provenance);
+}
+
+function matchesCompactRunIdentityBinding(
+  provenance: LongMemEvalSnapshotRunProvenance
+): boolean {
+  const captured = freezeSnapshotProvenancePremises(provenance);
+  const compactRunIdentityValue = provenance.compact_run_identity;
+  if (captured.schemaVersion === 1) return compactRunIdentityValue === undefined;
+  const expected = expectedCompactRunIdentity(captured);
+  return expected !== undefined && compactRunIdentityValue === expected;
+}
+
+function expectedCompactRunIdentity(
+  captured: ReturnType<typeof freezeSnapshotProvenancePremises>
+): string | undefined {
+  const cache = captured.extractionCache;
+  if (cache?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION) return undefined;
+  const substrate = cache.content_closure_sha256 ?? cache.expected_key_set_sha256;
+  if (typeof substrate !== "string" || captured.ingestionMode === undefined) {
+    return undefined;
+  }
+  return compactRunIdentity({
+    substrateIdentity: substrate,
+    ingestionMode: captured.ingestionMode,
+    overlayIdentity: captured.overlayIdentity ?? substrate,
+    ...(captured.lazyRunIdentity === undefined
+      ? {}
+      : { lazyRunIdentity: captured.lazyRunIdentity })
+  });
+}
+
+function assertCompactRunIdentityBinding(
+  provenance: LongMemEvalSnapshotRunProvenance
+): void {
+  const captured = freezeSnapshotProvenancePremises(provenance);
+  const compactRunIdentityValue = provenance.compact_run_identity;
+  if (captured.schemaVersion === 1) {
+    if (compactRunIdentityValue !== undefined) {
+      throw new Error("schema_version 1 cannot carry compact_run_identity");
+    }
+    return;
+  }
+  const expected = expectedCompactRunIdentity(captured);
+  if (expected === undefined) {
+    throw new Error(
+      captured.extractionCache?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION
+        ? "snapshot run provenance has no current extraction summary"
+        : "compact run provenance v2 requires substrate and ingestion_mode"
+    );
+  }
+  if (compactRunIdentityValue !== expected) {
+    throw new Error("compact_run_identity does not match substrate and ingestion_mode");
+  }
 }

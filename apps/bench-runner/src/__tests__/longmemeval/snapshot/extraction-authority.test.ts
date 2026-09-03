@@ -25,7 +25,8 @@ import { persistSnapshotExtractionAuthority } from
 import {
   LongMemEvalSnapshotRunProvenanceSchema,
   bindSnapshotRunProvenanceAuthority,
-  compactSnapshotRunProvenance
+  compactSnapshotRunProvenance,
+  isSnapshotRunProvenanceSummaryGateEligible
 } from "../../../runs/snapshot/run-provenance.js";
 import { makeShardProvenance } from "../runner/runner-concurrency-fixture.js";
 
@@ -149,6 +150,15 @@ describe("snapshot extraction authority", () => {
       ...compactSnapshotRunProvenance(runProvenance(manifest)),
       compact_run_identity: "11".repeat(32)
     }, authority)).toThrow(/schema_version 1 cannot carry compact_run_identity/u);
+    expect(isSnapshotRunProvenanceSummaryGateEligible(compactV2)).toBe(false);
+    expect(isSnapshotRunProvenanceSummaryGateEligible({
+      ...compactV2,
+      compact_run_identity: "00".repeat(32)
+    })).toBe(false);
+    expect(isSnapshotRunProvenanceSummaryGateEligible({
+      ...compactSnapshotRunProvenance(runProvenance(manifest)),
+      compact_run_identity: "11".repeat(32)
+    })).toBe(false);
   });
 
   it("keeps 100Q and 500Q snapshot manifests near-constant in size", () => {

@@ -64,6 +64,7 @@ import {
   type RecallExecutionParams,
   type RecallManifestedResult
 } from "./recall-service-runner-types.js";
+import { assertRecallZeroLiveExtraction } from "./zero-live-extraction.js";
 
 export type { RecallExecutionContext, RecallExecutionParams, PreparedRecallRequest } from "./recall-service-runner-types.js";
 type AssessmentStageResult = RecallAssessmentStageResult;
@@ -86,6 +87,7 @@ export async function executeRecall(
   context: RecallExecutionContext,
   params: RecallExecutionParams
 ): Promise<RecallResult> {
+  assertRecallZeroLiveExtraction();
   const executionStartedAt = performance.now();
   const preparation = await prepareRecallExecution(context, params);
   const { degradationReasons, executionContext, time, prepared } = preparation.value;
