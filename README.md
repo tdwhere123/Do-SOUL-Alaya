@@ -671,8 +671,7 @@ durable memory database and audit log).
 
 ### Option B — build from source
 
-You need `git`, Node 24+, and pnpm 9+. The `rtk` references in `AGENTS.md`
-and `RTK.md` are a Codex CLI optimisation; bare `pnpm` works the same.
+You need `git`, Node 24+, and pnpm 9+.
 
 ```bash
 # 1) Clone

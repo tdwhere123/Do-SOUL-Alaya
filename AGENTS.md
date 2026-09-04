@@ -93,10 +93,6 @@ pnpm exec alaya tools call --json
 `pnpm alaya` wraps the root script. Use `pnpm link --global` for PATH
 outside the monorepo.
 
-`rtk` is a local Codex CLI wrapper and is not installed everywhere (Cursor
-Cloud included). When `rtk` is not on PATH, drop the prefix — bare `pnpm ...`
-is equivalent.
-
 ## Cursor Cloud
 
 Cloud agents do code review and landing only; benchmark runs stay on local
@@ -105,7 +101,6 @@ hosts (see `docs/bench-history/README.md`).
 - **Node 24:** `.cursor/environment.json` installs Node 24 via nvm before
   `pnpm install` and `pnpm build`. Do not lower repo `engines` to match a
   stale pod.
-- **`rtk`:** use bare `pnpm` commands (see Commands above).
 - **CodeGraph:** if `.codegraph/` is missing, skip CodeGraph and use normal
   search/read.
 

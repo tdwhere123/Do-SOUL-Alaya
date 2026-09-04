@@ -537,8 +537,7 @@ GitHub Release / 源码构建分发路径下只显示升级指引；它不会调
 
 ### 方式 B —— 从源码构建
 
-需要 `git`、Node 24+、pnpm 9+。`AGENTS.md` 和 `RTK.md` 里的 `rtk` 引用是
-Codex CLI 的 token 优化，纯 `pnpm` 同样能跑。
+需要 `git`、Node 24+、pnpm 9+。
 
 ```bash
 # 1) clone

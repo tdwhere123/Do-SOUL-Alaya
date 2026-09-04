@@ -55,8 +55,9 @@ code — either default them with proof or delete; "wired" ≠ "default-on".
   acceptance checklist.
 - If asked to list workers, put actual subagent/lane list at the top.
 - Optimize for minimal prompt ceremony and high execution quality.
-- Prefer `rtk`-prefixed commands; if the wrapper blocks inspection, use a
-  wrapper-safe variant rather than inventing raw flags.
+- Prefer `rtk`-prefixed commands only as a local shell wrapper; repository
+  scripts, tests, and docs must call `pnpm` / `node` directly. If the wrapper
+  blocks inspection, use a wrapper-safe variant rather than inventing raw flags.
 
 ## 5. Source hygiene
 
