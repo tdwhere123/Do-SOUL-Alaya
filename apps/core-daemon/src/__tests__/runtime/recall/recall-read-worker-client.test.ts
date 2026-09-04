@@ -140,7 +140,7 @@ describe("RecallReadWorkerClient", () => {
       databaseFilename: databasePath,
       workerUrl: pathToFileURL(workerPath),
       workerCount: 1,
-      requestTimeoutMs: 100
+      requestTimeoutMs: 1000
     });
 
     try {
@@ -154,7 +154,7 @@ describe("RecallReadWorkerClient", () => {
           limit: 1,
           offset: 0
         })
-      ).rejects.toThrow("timed out after 100ms");
+      ).rejects.toThrow("timed out after 1000ms");
       await expect(client.memoryRepo.findByWorkspaceId("workspace-1")).resolves.toEqual([]);
     } finally {
       await client?.close();

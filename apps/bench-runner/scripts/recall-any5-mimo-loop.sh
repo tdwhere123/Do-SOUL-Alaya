@@ -18,17 +18,27 @@ DEFAULT_ENV="$WT/.do-it/bench-env/mimo-v2.5-opencode-go.env"
 NODE_BIN="${BENCH_NODE_BIN:-node}"
 # Tests inject an intercept argv; a PATH `node` shim is skipped on Darwin.
 run_node() {
-  # Intercept spawnSync cannot inherit a bash heredoc stdin on Darwin.
-  if [[ "${1:-}" == "-" || "${1:-}" == "-e" || -z "${BENCH_NODE_INTERCEPT:-}" ]]; then
-    "$NODE_BIN" "$@"
-  else
+  if [[ -n "${BENCH_NODE_INTERCEPT:-}" ]]; then
     "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
+  else
+    "$NODE_BIN" "$@"
   fi
+}
+# Darwin `node -` does not read a bash heredoc; write a .cjs and exec it.
+run_node_stdin() {
+  local tmp js st=0
+  tmp="$(native_temp_file)"
+  js="${tmp}.cjs"
+  rm -f -- "$tmp"
+  cat > "$js"
+  "$NODE_BIN" "$js" "$@" || st=$?
+  rm -f -- "$js"
+  return "$st"
 }
 write_captured_loop_argv() {
   local nul="${BENCH_NODE_ARGV_CAPTURE}.nul"
   printf '%s\0' "$@" > "$nul"
-  run_node - "$BENCH_NODE_ARGV_CAPTURE" "$nul" "${BENCH_NODE_ENV_CAPTURE:-}" <<'JS'
+  run_node_stdin "$BENCH_NODE_ARGV_CAPTURE" "$nul" "${BENCH_NODE_ENV_CAPTURE:-}" <<'JS'
 const fs = require("fs");
 const args = fs.readFileSync(process.argv[3], "utf8").split("\0").filter(Boolean);
 fs.writeFileSync(process.argv[2], JSON.stringify(args) + "\n");
@@ -171,7 +181,7 @@ MANIFEST="$CACHE_ROOT/manifest.json"
 
 load_identity() {
   [[ -f "$MANIFEST" ]] || die "cache manifest missing: $MANIFEST"
-  run_node - "$MANIFEST" <<'JS'
+  run_node_stdin "$MANIFEST" <<'JS'
 const fs = require("fs");
 const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const required = [
