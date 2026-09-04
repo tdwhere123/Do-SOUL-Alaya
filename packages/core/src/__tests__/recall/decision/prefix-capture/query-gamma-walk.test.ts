@@ -149,17 +149,13 @@ describe("query-compiled Gamma walk binding", () => {
       candidate("A", { sequence_slots: [{ position: 0, binding: "alice" }] }),
       candidate("B", { sequence_slots: [{ position: 1, binding: "bob" }] })
     ]);
-    const walked = walkShadowCapture({
+    expect(() => walkShadowCapture({
       candidates: [row("A"), row("B")],
       psi: psiFrom([]),
       token_budget: 10,
       per_dimension_limits: null,
       utility_transfer: createQueryCompiledWalkTransfer(compiled)
-    });
-    expect(isCapturedWalk(walked)).toBe(true);
-    if (!isCapturedWalk(walked)) throw new Error("expected captured");
-    expect(prefixSK(walked.S_infty, 1)).toEqual([walked.S_infty[0]]);
-    expect(prefixSK(walked.S_infty, 2)).toEqual(walked.S_infty.slice(0, 2));
+    })).toThrow(/unsupported Gamma cannot be scored as a zero tuple/);
   });
 
   it("keeps prefixSK monotone for compiled operator fixtures", () => {
@@ -463,20 +459,13 @@ describe("query-compiled Gamma walk binding", () => {
       candidate("core", { bindings: [] }),
       candidate("lower", { bindings: [binding("bob")] })
     ]);
-    const walked = walkShadowCapture({
+    expect(() => walkShadowCapture({
       candidates: [row("core", 1), row("lower", 2)],
       psi: psiFrom([["core", "lower"]]),
       token_budget: 10,
       per_dimension_limits: null,
       utility_transfer: createQueryCompiledWalkTransfer(compiled)
-    });
-    expect(isCapturedWalk(walked)).toBe(true);
-    if (!isCapturedWalk(walked)) throw new Error("expected captured");
-    expect(walked.S_infty).toContain("lower");
-    const lower = walked.decisions.find((decision) => decision.candidate_key === "lower");
-    expect(lower?.named_novelty.compiled_atom_ids?.some((atomId) =>
-      atomId.includes("bob"))).toBe(true);
-    expect(lower?.named_novelty.facility_keys).toEqual([]);
+    })).toThrow(/unsupported Gamma cannot be scored as a zero tuple/);
   });
 
   it("does not let live facility novelty substitute for a unique compiled atom", () => {

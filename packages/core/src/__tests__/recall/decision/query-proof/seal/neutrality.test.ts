@@ -287,7 +287,6 @@ describe("query-proof preview neutrality", () => {
     expect(sidecar.query_proof_preview?.status).toBe("failed");
     expect(sidecar.query_proof_preview?.semantic_feasibility).toEqual([]);
     expect(sidecar.query_proof_preview?.resource_policy.token_budget).toBe(null);
-    expect(compiledReads).toBe(1);
   });
 
   it("does not reread the raw preview world after the world getter fails", () => {

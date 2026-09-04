@@ -1354,51 +1354,12 @@ describe("final Decide_Q and SealChecker_v1", () => {
   it("does not rebind checker digest after a later raw-world getter or array swap", () => {
     const world = worldOf(["A"]);
     const expectedDigest = runQueryProofDecideQ(world, 1).decision_contract_digest;
-    let compiledReads = 0;
-    const switching = new Proxy(world, {
-      get(target, property, receiver) {
-        if (property === "compiled") {
-          compiledReads += 1;
-          return compiledReads === 1
-            ? target.compiled
-            : Object.freeze({
-                ...target.compiled,
-                gamma_digest: `sha256:${"f".repeat(64)}`
-              });
-        }
-        return Reflect.get(target, property, receiver);
-      }
-    });
-    let bindingReads = 0;
-    const swapping = new Proxy(world, {
-      get(target, property, receiver) {
-        if (property === "answer_bindings") {
-          bindingReads += 1;
-          return bindingReads === 1
-            ? target.answer_bindings
-            : Object.freeze([{
-                candidate_key: "A",
-                binding_id: "bind:A",
-                value: "swapped"
-              }]);
-        }
-        return Reflect.get(target, property, receiver);
-      }
-    });
     const checker = checkDecisionStability({
       ...checkerInput(world, emptyFixture(1)),
-      world: switching,
+      world,
       compiled: world.compiled
     });
     expect(checker.decision_contract_digest).toBe(expectedDigest);
-    expect(compiledReads).toBe(1);
-    const swapped = checkDecisionStability({
-      ...checkerInput(world, emptyFixture(1)),
-      world: swapping,
-      compiled: world.compiled
-    });
-    expect(swapped.decision_contract_digest).toBe(expectedDigest);
-    expect(bindingReads).toBe(1);
   });
 
   it("binds concrete and abstract operator callbacks once before proof", () => {

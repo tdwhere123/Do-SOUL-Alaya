@@ -142,7 +142,7 @@ describe("RecallService embedding-on coarse injection", () => {
     });
 
     const result = await service.recall({
-      taskSurface: { ...createTaskSurface(), display_name: "orchid anchor" },
+      taskSurface: createTaskSurface(),
       workspaceId: "workspace-1", strategy: "analyze",
       policyOverride: buildPolicy(service, true)
     });
@@ -213,13 +213,13 @@ describe("RecallService embedding-on coarse injection", () => {
     });
 
     const control = await service.recall({
-      taskSurface: { ...createTaskSurface(), display_name: "orchid anchor" },
+      taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
       policyOverride: buildPolicy(service, false)
     });
     const result = await service.recall({
-      taskSurface: { ...createTaskSurface(), display_name: "orchid anchor" },
+      taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
       policyOverride: buildPolicy(service, true)

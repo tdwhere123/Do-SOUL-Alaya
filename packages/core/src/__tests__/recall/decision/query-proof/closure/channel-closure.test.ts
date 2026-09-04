@@ -84,9 +84,8 @@ describe("live-authority channel closure admission", () => {
     });
     const switching = Object.freeze({ ...valid, snapshot_vector: vector });
 
-    expect(deriveLiveClosureAuthorityBinding(switching).workspace_id)
-      .toBe(valid.workspace_id);
-    expect(principalReads).toBe(1);
+    expect(() => deriveLiveClosureAuthorityBinding(switching))
+      .toThrow(/captured data cannot use proxies/);
   });
 
   it("keeps hidden state out of principal authority bytes", () => {

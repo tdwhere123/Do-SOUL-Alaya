@@ -302,12 +302,9 @@ describe("source-bound finite exhaustive oracle", () => {
       }
     });
 
-    const captured = assertFiniteOracleExhaustive({
+    expect(() => assertFiniteOracleExhaustive({
       authority: authorityFrom(prepared), fixture, operator, result: switching
-    });
-
-    expect(captured.outcomes).toHaveLength(4);
-    expect(outcomesReads).toBe(1);
+    })).toThrow(/captured data cannot use proxies/);
   });
 
   it("rejects an oracle result whose caller-owned outcomes later switch to singleton", () => {
@@ -337,10 +334,8 @@ describe("source-bound finite exhaustive oracle", () => {
       }
     });
 
-    const result = certifyAbstractSingletonWithFiniteOracle(testCase.input, switching);
-
-    expect(result.status).toBe("UNSUPPORTED");
-    expect(outcomesReads).toBe(1);
+    expect(() => certifyAbstractSingletonWithFiniteOracle(testCase.input, switching))
+      .toThrow(/captured data cannot use proxies/);
   });
   it("uses one verified authority capture for the complete oracle operation", () => {
     const valid = authorityFrom(prepared);

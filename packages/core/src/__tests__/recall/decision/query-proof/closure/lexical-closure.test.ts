@@ -101,10 +101,8 @@ describe("live-source lexical closure", () => {
         }
       });
 
-      const captured = verifyChannelClosureResult(switching, authority);
-
-      expect(captured.status).toBe("uncertified");
-      expect(statusReads).toBe(1);
+      expect(() => verifyChannelClosureResult(switching, authority))
+        .toThrow(/captured data cannot use proxies/);
     });
   });
 
