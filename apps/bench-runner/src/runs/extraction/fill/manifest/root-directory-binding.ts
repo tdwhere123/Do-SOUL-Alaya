@@ -81,7 +81,7 @@ function openCacheRootChain(cacheRoot: string, create: boolean): BoundCacheRoot 
   }
   const segments = absolute.split(sep).filter(Boolean);
   let descriptor = openBoundDirectory(sep, false);
-  let namedPath = sep;
+  let namedPath: string = sep;
   try {
     for (const segment of segments) {
       const anchored = boundDirectoryChildPath(descriptor, namedPath, segment);
