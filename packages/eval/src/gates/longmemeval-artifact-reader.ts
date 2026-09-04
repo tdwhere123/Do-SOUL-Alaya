@@ -1,5 +1,5 @@
 import { constants as bufferConstants } from "node:buffer";
-import { constants, type BigIntStats } from "node:fs";
+import { constants, realpathSync, type BigIntStats } from "node:fs";
 import {
   lstat,
   open,
@@ -102,7 +102,7 @@ async function readArtifactBytes(
     if (!opened.isFile()) throw rejected("not_regular_file");
     await assertPathStillBinds(candidate, opened);
     const openedPath = await resolveOpenedPath(handle, candidate, opened);
-    if (!isStrictlyContained(realRoot, openedPath)) {
+    if (!isStrictlyContained(realRoot, canonicalizeContainedPath(openedPath))) {
       throw rejected("outside_root");
     }
     return await readStableBytes(handle, opened, maxBytes);
@@ -249,6 +249,15 @@ function isStrictlyContained(root: string, candidate: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   return relative.length > 0 && relative !== ".." &&
     !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function canonicalizeContainedPath(value: string): string {
+  const resolved = path.resolve(value);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
 }
 
 async function closeHandle(handle: FileHandle): Promise<void> {

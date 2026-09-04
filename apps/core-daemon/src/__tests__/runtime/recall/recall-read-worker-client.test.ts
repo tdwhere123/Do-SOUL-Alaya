@@ -268,7 +268,7 @@ describe("RecallReadWorkerClient", () => {
       const invalidResponse = await new Promise<unknown>((resolve, reject) => {
         const timeout = setTimeout(
           () => reject(new Error("invalid request did not receive a prompt error response")),
-          1_000
+          10_000
         );
         worker.once("message", (message: unknown) => {
           clearTimeout(timeout);

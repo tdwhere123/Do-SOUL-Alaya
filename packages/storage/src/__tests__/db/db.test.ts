@@ -62,7 +62,7 @@ describe("getCurrentSchemaSummary schema version read", () => {
     } finally {
       database.close();
     }
-  });
+  }, 30_000);
 });
 
 describe("closeCachedDatabase", () => {

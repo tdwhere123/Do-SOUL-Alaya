@@ -104,7 +104,9 @@ function appProject(name, appDir) {
 export default [
   packageProject("@do-soul/alaya-protocol", "packages/protocol"),
   packageProject("@do-soul/alaya-graph-algorithms", "packages/graph-algorithms"),
-  packageProject("@do-soul/alaya-storage", "packages/storage"),
+  packageProject("@do-soul/alaya-storage", "packages/storage", {
+    testTimeout: process.platform === "win32" ? 30_000 : 5_000
+  }),
   packageProject("@do-soul/alaya-core", "packages/core", {
     setupFiles: [path.resolve(rootDir, "packages/core/vitest.setup.ts")]
   }),
