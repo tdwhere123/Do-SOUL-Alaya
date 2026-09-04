@@ -58,7 +58,7 @@ export function compositionForValues(): RecallSupplementaryData[
         { semantic_identity: "value-c", surfaces: ["C"], evidence_ids: ["evidence-c"] }
       ]
     }]
-  } as RecallSupplementaryData["openSemanticFactorComposition"];
+  } as unknown as RecallSupplementaryData["openSemanticFactorComposition"];
 }
 
 export function rawRankCaptures(
@@ -81,5 +81,5 @@ export function rawRankCaptures(
       chosen_normalized_rank: observation.normalized_rank,
       admitted: true
     })))
-  })]);
+  })]) as readonly Readonly<KeywordLexicalMergeCapture>[];
 }

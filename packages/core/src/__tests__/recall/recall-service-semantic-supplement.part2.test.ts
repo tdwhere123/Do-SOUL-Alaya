@@ -415,10 +415,10 @@ it("ranks the trigram_fts fusion stream from keyword-search trigram_rank", async
       (candidate) => candidate.object_id === "memory-no-trigram"
     );
     // A higher trigram_rank wins a lower (better) trigram_fts ordinal rank.
-    expect(strong?.per_stream_rank.trigram_fts).toBe(1);
-    expect(weak?.per_stream_rank.trigram_fts).toBe(2);
+    expect(strong?.per_stream_rank!.trigram_fts).toBe(1);
+    expect(weak?.per_stream_rank!.trigram_fts).toBe(2);
     // No trigram_rank on the hit means the trigram_fts stream stays unranked.
-    expect(absent?.per_stream_rank.trigram_fts).toBeNull();
+    expect(absent?.per_stream_rank!.trigram_fts).toBeNull();
   });
 
   it("ranks trigram_fts through the canonical tier-scoped field path", async () => {
@@ -476,10 +476,10 @@ it("ranks the trigram_fts fusion stream from keyword-search trigram_rank", async
     // A higher trigram_rank wins a lower (better) trigram_fts ordinal rank,
     // proving the production supplement path feeds trigramFtsRanks all the way
     // through to the per_stream_rank.trigram_fts diagnostic.
-    expect(strong?.per_stream_rank.trigram_fts).toBe(1);
-    expect(weak?.per_stream_rank.trigram_fts).toBe(2);
+    expect(strong?.per_stream_rank!.trigram_fts).toBe(1);
+    expect(weak?.per_stream_rank!.trigram_fts).toBe(2);
     // No trigram_rank on the hit means the trigram_fts stream stays unranked.
-    expect(absent?.per_stream_rank.trigram_fts).toBeNull();
+    expect(absent?.per_stream_rank!.trigram_fts).toBeNull();
   });
 
 });

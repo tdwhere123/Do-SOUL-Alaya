@@ -474,13 +474,7 @@ function normalizedPairs(
 function snapshotIssuedPsiV2(
   artifact: PsiV2AuthorityArtifactV1
 ): PsiV2AuthorityArtifactV1 {
-  return Object.freeze({
-    ...artifact,
-    psi_edges: captureData(artifact.psi_edges),
-    unresolved_tradeoff_pairs: captureData(artifact.unresolved_tradeoff_pairs),
-    candidate_universe: captureData(artifact.candidate_universe),
-    structural_digest: artifact.structural_digest
-  });
+  return captureData(artifact);
 }
 
 function assertIssuedUniverseMatchesRuntime(

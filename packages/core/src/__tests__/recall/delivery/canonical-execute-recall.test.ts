@@ -18,7 +18,9 @@ describe("omitted delivery_path executeRecall", () => {
     const prepare = vi.spyOn(fineAssessment, "prepareFineAssessment");
     const assess = vi.spyOn(fineAssessment, "fineAssess");
     const gammaWalk = vi.spyOn(gamma, "selectGammaWalk");
-    const diagnosticObserver = vi.fn(() => undefined);
+    const diagnosticObserver = vi.fn((_payload: {
+      readonly result: { readonly ranking_authority?: string };
+    }) => undefined);
     const memory = createMemoryEntry({
       object_id: "memory-canonical",
       content: "I take yoga classes at Serenity Yoga."
@@ -46,8 +48,9 @@ describe("omitted delivery_path executeRecall", () => {
     expect(prepare).not.toHaveBeenCalled();
     expect(gammaWalk).not.toHaveBeenCalled();
     expect(diagnosticObserver).toHaveBeenCalledOnce();
-    expect(diagnosticObserver.mock.calls[0]?.[0].result.ranking_authority)
-      .toBe("prefix_sk");
+    const firstCall = diagnosticObserver.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    expect(firstCall![0].result.ranking_authority).toBe("prefix_sk");
   });
 
   it("commits an injectable read snapshot before recall side effects", async () => {
@@ -61,9 +64,9 @@ describe("omitted delivery_path executeRecall", () => {
       ...dependencies,
       defaultPolicyDecorator: (policy) => policy,
       readSnapshot: {
-        beginDeferred: () => events.push("begin"),
-        commit: () => events.push("commit"),
-        rollback: () => events.push("rollback")
+        beginDeferred: () => { events.push("begin"); },
+        commit: () => { events.push("commit"); },
+        rollback: () => { events.push("rollback"); }
       },
       eventLogRepo: {
         ...dependencies.eventLogRepo,

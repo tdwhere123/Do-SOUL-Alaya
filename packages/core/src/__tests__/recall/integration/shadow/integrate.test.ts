@@ -11,7 +11,6 @@ import { ShadowContractError } from "../../../../recall/decision/contract-primit
 import { isPsiCycleFailure, peelUndominated } from "../../../../recall/decision/query-proof/frontier-peel.js";
 import * as psiV2 from "../../../../recall/decision/query-proof/dominance/index.js";
 import * as deliveryPack from "../../../../recall/decision/query-proof/delivery/pack.js";
-import { SEAL_UNBOUND_HOLE } from "../../../../recall/decision/query-proof/delivery/contract.js";
 import type { ShadowFrontierReceipt } from "../../../../recall/decision/query-proof/frontiers.js";
 import {
   CAPTURE_IDENTITY_DIGEST,

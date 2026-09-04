@@ -62,6 +62,8 @@ import {
   compiledGammaBodyDigest,
   type QueryGammaCompileInputV1
 } from "../../../../../recall/decision/query-proof/gamma/compile.js";
+import type { SemanticFeasibilityV1 } from
+  "../../../../../recall/decision/query-proof/gamma/contract.js";
 import {
   SHADOW_CAPTURE_OPERATOR_ID
 } from "../../../../../recall/decision/prefix-capture/identity.js";
@@ -877,7 +879,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
       sensitivity_id: "sensitivity:prop",
       owner_id: "owner:prop",
       kind: "four_valued_proposition",
-      possible_values: ["supported_only", "refutes"]
+      possible_values: ["supported_only", "refuted_only"]
     }])).status).not.toBe("CERTIFIED_STABLE");
   });
 
@@ -1123,14 +1125,17 @@ describe("final Decide_Q and SealChecker_v1", () => {
       concrete_operator: wrapper,
       abstract_operator: liveAbstract
     }).status).toBe("UNSUPPORTED");
-    expect(checkDecisionStability({
+    const substituted = checkDecisionStability({
       ...checkerInput(world, emptyFixture(1)),
       concrete_operator: live,
       abstract_operator: {
         operator_id: QUERY_PROOF_FINAL_DECISION_OPERATOR_ID,
         evaluate: liveAbstract.evaluate
       }
-    }).reason).toMatch(/substitute Decide_Q/u);
+    });
+    expect(substituted.status).toBe("UNSUPPORTED");
+    if (substituted.status !== "UNSUPPORTED") throw new Error("expected unsupported");
+    expect(substituted.reason).toMatch(/substitute Decide_Q/u);
   });
 
   it("refuses a compiled-looking semantic-feasibility forgery", () => {
@@ -1317,14 +1322,14 @@ describe("final Decide_Q and SealChecker_v1", () => {
   });
 
   it("deep-freezes nested decide-world bindings so later mutation cannot change the digest", () => {
-    const bindingRow = {
+    const bindingRow: { candidate_key: string; binding_id: string; value: string } = {
       candidate_key: "A",
       binding_id: "bind:A",
-      value: "A" as const
+      value: "A"
     };
-    const feasibilityRow = {
+    const feasibilityRow: { candidate_key: string; semantic: SemanticFeasibilityV1 } = {
       candidate_key: "A",
-      semantic: "feasible" as const
+      semantic: "feasible"
     };
     const world = Object.freeze({
       ...worldOf(["A"]),
@@ -1334,7 +1339,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
       }),
       answer_bindings: [bindingRow]
     });
-    const frozen = freezeDecideWorld(world);
+    const frozen = freezeDecideWorld(world as unknown as Parameters<typeof freezeDecideWorld>[0]);
     expect(Object.isFrozen(frozen)).toBe(true);
     expect(Object.isFrozen(frozen.answer_bindings[0])).toBe(true);
     expect(Object.isFrozen(frozen.compiled.semantic_feasibility[0])).toBe(true);

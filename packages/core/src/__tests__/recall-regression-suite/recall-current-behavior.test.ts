@@ -108,13 +108,13 @@ it("uses source proximity as an independent fusion stream for neighboring eviden
     const diag = result.diagnostics?.candidates.find((item) => item.object_id === "neighbor");
     expect(diag?.admission_planes).toContain("source_proximity");
     expect(diag?.source_channels).toContain("source_proximity");
-    expect(diag?.per_stream_rank.source_proximity).not.toBeNull();
-    expect(diag?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
+    expect(diag?.per_stream_rank!.source_proximity).not.toBeNull();
+    expect(diag?.fused_rank_contribution_per_stream!.source_proximity).toBeGreaterThan(0);
     expect(diag?.structural_score).toBeGreaterThan(0);
     expect(diag?.structural_score).toBeLessThanOrEqual(0.25);
-    expect(diag?.per_stream_rank.structural).not.toBeNull();
-    expect(diag?.per_stream_rank.evidence_structural_agreement).toBeNull();
-    expect(diag?.per_stream_rank.source_evidence_agreement).toBeNull();
+    expect(diag?.per_stream_rank!.structural).not.toBeNull();
+    expect(diag?.per_stream_rank!.evidence_structural_agreement).toBeNull();
+    expect(diag?.per_stream_rank!.source_evidence_agreement).toBeNull();
   });
 
 it("promotes answerable source-window neighbors without lifting source-only neighbors", async () => {
@@ -143,17 +143,17 @@ it("promotes answerable source-window neighbors without lifting source-only neig
     const sourceOnlyDiagnostic = result.diagnostics?.candidates.find(
       (item) => item.object_id === sourceOnlyNeighbor.object_id
     );
-    expect(answerDiagnostic?.per_stream_rank.evidence_fts).not.toBeNull();
-    expect(answerDiagnostic?.per_stream_rank.source_proximity).not.toBeNull();
-    expect(answerDiagnostic?.per_stream_rank.source_evidence_agreement).not.toBeNull();
-    expect(answerDiagnostic?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
+    expect(answerDiagnostic?.per_stream_rank!.evidence_fts).not.toBeNull();
+    expect(answerDiagnostic?.per_stream_rank!.source_proximity).not.toBeNull();
+    expect(answerDiagnostic?.per_stream_rank!.source_evidence_agreement).not.toBeNull();
+    expect(answerDiagnostic?.fused_rank_contribution_per_stream!.source_proximity).toBeGreaterThan(0);
     expect(
-      (answerDiagnostic?.fused_rank_contribution_per_stream.evidence_fts ?? 0) +
-      (answerDiagnostic?.fused_rank_contribution_per_stream.evidence_structural_agreement ?? 0) +
-      (answerDiagnostic?.fused_rank_contribution_per_stream.source_evidence_agreement ?? 0)
+      (answerDiagnostic?.fused_rank_contribution_per_stream!.evidence_fts ?? 0) +
+      (answerDiagnostic?.fused_rank_contribution_per_stream!.evidence_structural_agreement ?? 0) +
+      (answerDiagnostic?.fused_rank_contribution_per_stream!.source_evidence_agreement ?? 0)
     ).toBeGreaterThan(0);
-    expect(sourceOnlyDiagnostic?.per_stream_rank.source_proximity).not.toBeNull();
-    expect(sourceOnlyDiagnostic?.per_stream_rank.source_evidence_agreement).toBeNull();
+    expect(sourceOnlyDiagnostic?.per_stream_rank!.source_proximity).not.toBeNull();
+    expect(sourceOnlyDiagnostic?.per_stream_rank!.source_evidence_agreement).toBeNull();
   });
 
 it("uses subject alignment only for self-referential personal-memory queries", async () => {
@@ -190,8 +190,8 @@ it("uses subject alignment only for self-referential personal-memory queries", a
     expect(personalResult.candidates.map((item) => item.object_id)).toEqual(["personal-fact"]);
     const personalDiagnostic = personalResult.diagnostics?.candidates.find((item) => item.object_id === "personal-fact");
     const adviceDiagnostic = personalResult.diagnostics?.candidates.find((item) => item.object_id === "generic-advice");
-    expect(personalDiagnostic?.per_stream_rank.subject_alignment).toBe(1);
-    expect(adviceDiagnostic?.per_stream_rank.subject_alignment).toBeNull();
+    expect(personalDiagnostic?.per_stream_rank!.subject_alignment).toBe(1);
+    expect(adviceDiagnostic?.per_stream_rank!.subject_alignment).toBeNull();
 
     const thirdPersonResult = await service.recall({
       taskSurface: task("Where did Alex buy the new bookshelf?"),
@@ -203,7 +203,7 @@ it("uses subject alignment only for self-referential personal-memory queries", a
     const thirdPersonPersonalDiagnostic = thirdPersonResult.diagnostics?.candidates.find(
       (item) => item.object_id === "personal-fact"
     );
-    expect(thirdPersonPersonalDiagnostic?.per_stream_rank.subject_alignment).toBeNull();
+    expect(thirdPersonPersonalDiagnostic?.per_stream_rank!.subject_alignment).toBeNull();
   });
 
 it("uses evidence capsule artifact refs for source proximity when memory refs are capsule ids", async () => {
@@ -246,8 +246,8 @@ it("uses evidence capsule artifact refs for source proximity when memory refs ar
     expect(findByIds).toHaveBeenCalled();
     const diag = result.diagnostics?.candidates.find((item) => item.object_id === "neighbor");
     expect(diag?.admission_planes).toContain("source_proximity");
-    expect(diag?.per_stream_rank.source_proximity).not.toBeNull();
-    expect(diag?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
+    expect(diag?.per_stream_rank!.source_proximity).not.toBeNull();
+    expect(diag?.fused_rank_contribution_per_stream!.source_proximity).toBeGreaterThan(0);
   });
 
 it("loads every evidence ref needed to fail closed on receipt authority", async () => {
@@ -287,7 +287,7 @@ it("keeps final delivery budget filled after source proximity admission", async 
       (item) => item.object_id === siblingId
     );
     expect(siblingDiagnostic?.admission_planes).toEqual(["source_proximity"]);
-    expect(siblingDiagnostic?.per_stream_rank.source_proximity).not.toBeNull();
+    expect(siblingDiagnostic?.per_stream_rank!.source_proximity).not.toBeNull();
     const diagnostics = result.diagnostics?.candidates ?? [];
     const deliveredDiagnostics = diagnostics.filter((item) => item.final_rank !== null);
     expect(deliveredDiagnostics).toHaveLength(10);

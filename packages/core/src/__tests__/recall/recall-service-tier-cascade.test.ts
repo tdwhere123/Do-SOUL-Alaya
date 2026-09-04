@@ -160,7 +160,9 @@ describe("RecallService tier cascade", () => {
     const first = createMemoryEntry({ object_id: "validated" });
     const cursor = { created_at: first.created_at, object_id: first.object_id };
     const findRecallTierWindow = vi.fn(async (query: {
+      readonly workspaceId: string;
       readonly tier: StorageTier;
+      readonly limit: number;
       readonly cursor?: typeof cursor;
     }) => {
       if (query.tier !== StorageTier.HOT) {
@@ -171,7 +173,9 @@ describe("RecallService tier cascade", () => {
         : invalidPage(cursor);
     });
 
-    const { result, warnSpy } = await recallWith({ findRecallTierWindow }, 10, "answer_features");
+    const { result, warnSpy } = await recallWith({
+      findRecallTierWindow: findRecallTierWindow as never
+    }, 10, "answer_features");
 
     expect(findRecallTierWindow).toHaveBeenCalledTimes(4);
     expect(result.total_scanned).toBeLessThanOrEqual(1);

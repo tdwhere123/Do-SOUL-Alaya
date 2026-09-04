@@ -66,17 +66,32 @@ describe("path findByAnchors request cache", () => {
 function changedAnchorIdentities(
   anchors: readonly PathAnchorRef[]
 ): readonly (readonly PathAnchorRef[])[] {
+  const copy = [...anchors];
   return [
-    anchors.with(0, { kind: "object", object_id: "object-z" }),
-    anchors.with(1, { kind: "object_facet", object_id: "object-b", facet_key: "facet-z" }),
-    anchors.with(2, {
-      kind: "obligation", source_object_id: "object-c", obligation_digest: "obligation-z"
+    Object.assign([...copy], { 0: { kind: "object" as const, object_id: "object-z" } }),
+    Object.assign([...copy], {
+      1: { kind: "object_facet" as const, object_id: "object-b", facet_key: "facet-z" }
     }),
-    anchors.with(3, {
-      kind: "risk_concern", source_object_id: "object-d", concern_digest: "risk-z"
+    Object.assign([...copy], {
+      2: {
+        kind: "obligation" as const,
+        source_object_id: "object-c",
+        obligation_digest: "obligation-z"
+      }
     }),
-    anchors.with(4, {
-      kind: "time_concern", source_object_id: "object-e", window_digest: "time-z"
+    Object.assign([...copy], {
+      3: {
+        kind: "risk_concern" as const,
+        source_object_id: "object-d",
+        concern_digest: "risk-z"
+      }
+    }),
+    Object.assign([...copy], {
+      4: {
+        kind: "time_concern" as const,
+        source_object_id: "object-e",
+        window_digest: "time-z"
+      }
     })
   ];
 }

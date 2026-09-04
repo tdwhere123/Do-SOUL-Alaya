@@ -14,8 +14,7 @@ import type {
 } from "../../../../recall/runtime/recall-service-types.js";
 import {
   buildLiveObservationField,
-  liveLexicalMapping,
-  type LiveObservationSource
+  liveLexicalMapping
 } from "../../../../recall/integration/shadow/live-observations.js";
 import { captureShadowIntegration, isFailClosedShadowTrace } from
   "../../../../recall/integration/shadow/integrate.js";
@@ -266,7 +265,7 @@ describe("live shadow observations", () => {
     resetCoreConfigForTests();
     const untrusted = buildLiveObservationField(liveInput({
       query: "what do I prefer?",
-      entryOverrides: { source_kind: "assistant", preference_object: "tea" }
+      entryOverrides: { source_kind: "assistant" as MemoryEntry["source_kind"], preference_object: "tea" }
     }));
     expect(untrusted[keyOf("cand-a")]?.lineages.subject_preference?.envelope)
       .toEqual({ state: "not_observed", reason: "not_run" });

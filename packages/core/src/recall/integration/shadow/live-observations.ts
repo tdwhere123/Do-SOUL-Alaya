@@ -364,7 +364,7 @@ function subjectComponent(
   applicable: boolean,
   score: () => number,
   entry: Readonly<MemoryEntry>,
-  context: LiveContext
+  _context: LiveContext
 ) {
   if (!applicable) return freezeShadow({
     component_id, operator_id, authority_state: "not_applicable" as const,

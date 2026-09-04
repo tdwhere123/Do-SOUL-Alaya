@@ -30,7 +30,11 @@ describe("evidence-semantic observation diagnostics contract", () => {
   it("parses live contentHash stamps through bench recall diagnostics", async () => {
     const receipt = await scoreAttributedReceipt();
     const parsed = parseBenchRecallDiagnosticsForRun(diagnosticsWithReceipt(receipt));
-    const observations = parsed.candidates[0]?.deep_head_trace
+    const live = parsed.candidates[0];
+    if (live === undefined || !("deep_head_trace" in live)) {
+      throw new Error("expected live candidate diagnostic");
+    }
+    const observations = live.deep_head_trace
       ?.evidence_semantic_activation?.observations;
 
     expect(observations).toHaveLength(2);
@@ -44,8 +48,11 @@ describe("evidence-semantic observation diagnostics contract", () => {
     const receipt = stripContentHash(await scoreAttributedReceipt());
 
     expect(receipt.winner).not.toHaveProperty("contentHash");
-    expect(parseBenchRecallDiagnosticsForRun(diagnosticsWithReceipt(receipt))
-      .candidates[0]?.deep_head_trace?.evidence_semantic_activation?.observations
+    const live = parseBenchRecallDiagnosticsForRun(diagnosticsWithReceipt(receipt)).candidates[0];
+    if (live === undefined || !("deep_head_trace" in live)) {
+      throw new Error("expected live candidate diagnostic");
+    }
+    expect(live.deep_head_trace?.evidence_semantic_activation?.observations
       .every((row) => row.contentHash === undefined)).toBe(true);
   });
 });

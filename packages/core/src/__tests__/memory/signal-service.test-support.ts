@@ -38,8 +38,12 @@ export function atomicUpdateState(
     state: CandidateMemorySignal["signal_state"]
   ) => CandidateMemorySignal = (signalId, state) => createSignal({ signal_id: signalId, signal_state: state })
 ) {
-  const updateState = vi.fn(impl);
-  return { updateState, updateStateInCurrentTransaction: updateState };
+  const updateStateInCurrentTransaction = vi.fn(impl);
+  const updateState = vi.fn(async (
+    signalId: string,
+    state: CandidateMemorySignal["signal_state"]
+  ) => impl(signalId, state));
+  return { updateState, updateStateInCurrentTransaction };
 }
 
 export function signalServiceDependencies(

@@ -32,6 +32,8 @@ import {
   compileInputFor,
   scalarQuery
 } from "../gamma/gamma-fixture.js";
+import type { SemanticFeasibilityV1 } from
+  "../../../../../recall/decision/query-proof/gamma/contract.js";
 
 let prepared: PreparedRecallRequest;
 
@@ -245,9 +247,9 @@ describe("query-proof preview neutrality", () => {
   it("does not surface raw preview feasibility or policy as captured authority", () => {
     const keys = ["cand-a"];
     const world = previewWorld(keys);
-    const feasibility = [{
+    const feasibility: Array<{ candidate_key: string; semantic: SemanticFeasibilityV1 }> = [{
       candidate_key: "cand-a",
-      semantic: "feasible" as const
+      semantic: "feasible"
     }];
     const policy = {
       ...world.compiled.resource_policy

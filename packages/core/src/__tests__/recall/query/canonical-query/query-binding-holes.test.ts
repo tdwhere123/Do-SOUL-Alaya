@@ -12,6 +12,8 @@ import {
 } from "../../../../recall/query/canonical-query/index.js";
 import { compileRecallQueryProbes } from
   "../../../../recall/query/recall-query-probes.js";
+import type { CanonicalQueryIdentityV1 } from
+  "../../../../recall/query/canonical-query/compilation.js";
 
 const CJK_PLACE = "咖啡奶精优惠券在哪里兑换？";
 const BOOKSHELF = "Where did I buy my new bookshelf from?";
@@ -91,7 +93,7 @@ describe("canonical query binding holes", () => {
   });
 });
 
-function compileCjk(queryIdentity: typeof QUERY_IDENTITY | undefined) {
+function compileCjk(queryIdentity: CanonicalQueryIdentityV1 | undefined) {
   return compileCanonicalQueryCompilation({
     probes: compileRecallQueryProbes(CJK_PLACE),
     demand: EMPTY_DEMAND,

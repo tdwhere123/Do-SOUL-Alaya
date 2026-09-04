@@ -184,7 +184,9 @@ describe("recall diagnostics", () => {
         embedding_inference_calls: 0
       }
     };
-    const diagnostics = buildRecallDiagnostics(params);
+    const diagnostics = buildRecallDiagnostics(
+      params as unknown as Parameters<typeof buildRecallDiagnostics>[0]
+    );
 
     expect(diagnostics.fusion_breakdown[0]).toMatchObject({
       per_axis_rank: { object: 1, path: 2, evidence: null, temporal: null, control: null },
@@ -216,7 +218,7 @@ describe("recall diagnostics", () => {
     const omitted = buildRecallDiagnostics({
       ...params,
       includeCandidateEvidence: false
-    });
+    } as unknown as Parameters<typeof buildRecallDiagnostics>[0]);
     expect(omitted.candidates).toEqual([]);
     expect(omitted.fusion_breakdown).toEqual([]);
     expect(omitted.fine_assessment_pruned_candidates).toEqual([]);

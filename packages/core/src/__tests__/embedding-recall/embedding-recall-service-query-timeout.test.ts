@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
 import { createProvider } from "./embedding-recall-test-helpers.js";
-import type { TestMock } from "../shared/mock-types.js";
+import type { EmbeddingProviderPort } from "../../embedding-recall/types.js";
 
 describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
-  function buildServiceWithTimeout(options: { timeoutMs?: number; embedTexts: TestMock }) {
+  function buildServiceWithTimeout(options: {
+    timeoutMs?: number;
+    embedTexts: EmbeddingProviderPort["embedTexts"];
+  }) {
     return new EmbeddingRecallService({
       embeddingRepo: {
         listByObjectIds: vi.fn(async () => [])

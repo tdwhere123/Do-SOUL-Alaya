@@ -4,7 +4,8 @@ import { vi, type Mock } from "vitest";
 import {
   EvidenceService,
   type EvidenceCapsuleInput,
-  type EvidenceServiceDependencies
+  type EvidenceServiceDependencies,
+  type EvidenceServiceEvidenceCapsuleRepoPort
 } from "../../memory/evidence-service.js";
 
 export function createEvidenceInput(
@@ -76,7 +77,7 @@ export function createCreationHarness(
   } = {}
 ) {
   const store = new Map<string, EvidenceCapsule>();
-  const create = vi.fn((capsule: EvidenceCapsule) => {
+  const create = vi.fn<NonNullable<EvidenceServiceEvidenceCapsuleRepoPort["createInCurrentTransaction"]>>((capsule) => {
     const frozen = Object.freeze({ ...capsule });
     store.set(capsule.object_id, frozen);
     return frozen;
@@ -96,7 +97,7 @@ export function createCreationHarness(
     eventLogRepo: { append, transactional: <T>(fn: () => T) => fn() },
     ...serviceDependencies,
     evidenceCapsuleRepo: {
-      create,
+      create: create as unknown as EvidenceServiceEvidenceCapsuleRepoPort["create"],
       createInCurrentTransaction: create,
       deleteById: deleteById ?? vi.fn(),
       findById: vi.fn(async (objectId: string) => store.get(objectId) ?? null),

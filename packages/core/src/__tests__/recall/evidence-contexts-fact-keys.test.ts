@@ -98,7 +98,7 @@ describe("recall evidence contexts for associative fact keys", () => {
       evidence_refs: ["evidence-1"]
     });
     const evidence = createVerifiedAssertionEvidence();
-    const formed = materializeBookshelfFactFrame(evidence.source_hash);
+    const formed = materializeBookshelfFactFrame(evidence.source_hash ?? "");
     const contexts = await collectRecallEvidenceContexts({
       dependencies: {
         evidenceSearchPort: {

@@ -394,9 +394,10 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
         runId: "run-1"
       });
 
-      const ruleContradicts = submitCandidate.mock.calls.filter(
-        (call: readonly [{ readonly relationKind: string }]) => call[0].relationKind === "contradicts"
-      );
+      const ruleContradicts = submitCandidate.mock.calls.filter((call) => {
+        const [input] = call as unknown as readonly [{ readonly relationKind?: string }];
+        return input.relationKind === "contradicts";
+      });
       expect(ruleContradicts.length).toBeGreaterThan(0);
       expect(emitKarmaEvent).not.toHaveBeenCalled();
     });

@@ -356,7 +356,7 @@ function assertFusionOwnedCandidates(assessed: ReturnType<typeof fineAssess>): v
     assessed.diagnostics.map((candidate) => [candidate.object_id, candidate] as const)
   );
   const expectedOrder = [...assessed.diagnostics]
-    .sort((left, right) => right.fused_score - left.fused_score)
+    .sort((left, right) => right.fused_score! - left.fused_score!)
     .map((candidate) => candidate.object_id);
   expect(assessed.candidates.map((candidate) => candidate.object_id)).toEqual(expectedOrder);
   for (const candidate of assessed.candidates) {

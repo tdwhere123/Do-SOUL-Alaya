@@ -22,7 +22,6 @@ import {
   lexicalPin,
   lexicalProof,
   params,
-  policyOf,
   preparedAuthority,
   supplementary,
   supportReceipts,

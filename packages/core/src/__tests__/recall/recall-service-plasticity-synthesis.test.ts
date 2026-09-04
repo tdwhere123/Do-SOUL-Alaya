@@ -367,7 +367,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
     const synthesisDiagnostic = result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === "memory-1"
     );
-    expect(synthesisDiagnostic?.per_stream_rank.synthesis_fts).toBe(1);
+    expect(synthesisDiagnostic?.per_stream_rank!.synthesis_fts).toBe(1);
     expect(synthesisDiagnostic?.object_kind).toBe("memory_entry");
     expect(synthesisDiagnostic?.admission_planes).toContain("synthesis_child");
     expect(synthesisDiagnostic?.final_rank).toBe(1);
@@ -461,7 +461,7 @@ it("lets an L2 synthesis hit route through its child memory before the delivery 
       (candidate) => candidate.object_id === "memory-child"
     );
     expect(childDiagnostic?.admission_planes).toContain("synthesis_child");
-    expect(childDiagnostic?.per_stream_rank.synthesis_fts).toBe(1);
+    expect(childDiagnostic?.per_stream_rank!.synthesis_fts).toBe(1);
     expect(childDiagnostic?.source_channels).toContain("synthesis_child");
   });
 

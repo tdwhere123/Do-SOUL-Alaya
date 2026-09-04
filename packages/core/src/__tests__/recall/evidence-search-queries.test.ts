@@ -112,9 +112,9 @@ describe("evidence scalar reference", () => {
     }
     const diagnostics = result.diagnostics?.candidates ?? [];
     expect(diagnostics.find((candidate) => candidate.object_id === "memory-first")
-      ?.per_stream_rank.evidence_fts).toBe(1);
+      ?.per_stream_rank?.evidence_fts).toBe(1);
     expect(diagnostics.find((candidate) => candidate.object_id === "memory-second")
-      ?.per_stream_rank.evidence_fts).toBe(2);
+      ?.per_stream_rank?.evidence_fts).toBe(2);
   });
 });
 
@@ -422,7 +422,7 @@ function readEvidenceCandidateRanks(
 ): Readonly<Record<string, number>> {
   return Object.fromEntries(
     (recall.diagnostics?.candidates ?? [])
-      .filter((candidate) => typeof candidate.per_stream_rank.evidence_fts === "number")
-      .map((candidate) => [candidate.object_id, candidate.per_stream_rank.evidence_fts as number])
+      .filter((candidate) => typeof candidate.per_stream_rank!.evidence_fts === "number")
+      .map((candidate) => [candidate.object_id, candidate.per_stream_rank!.evidence_fts as number])
   );
 }

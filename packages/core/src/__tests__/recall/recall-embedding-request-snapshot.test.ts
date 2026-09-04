@@ -178,7 +178,7 @@ describe("RecallService embedding request score snapshot", () => {
     expect(candidates.get(observed.object_id)?.score_factors?.embedding_similarity).toBe(0);
     expect(result.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === observed.object_id
-    )?.score_factors.embedding_similarity).toBe(0);
+    )?.score_factors?.embedding_similarity).toBe(0);
     expect(candidates.get(invalid.object_id)?.score_factors?.embedding_similarity).toBeUndefined();
     expect(candidates.get(degenerate.object_id)?.score_factors?.embedding_similarity)
       .toBeUndefined();

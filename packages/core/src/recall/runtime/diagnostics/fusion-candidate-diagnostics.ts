@@ -135,14 +135,21 @@ export interface RecallCandidateDiagnostic {
   readonly source_cohort_key?: string | null;
 }
 
-export type CanonicalCandidateDiagnostic = Readonly<Pick<
+type CanonicalCandidateDiagnosticCore = Pick<
   RecallCandidateDiagnostic,
   "candidate_key" | "object_id" | "object_kind" | "created_at" | "dimension" |
   "origin_plane" | "admission_planes" | "plane_first_admitted" |
   "plane_winning_admission" | "admission_attempts" | "final_rank" | "post_rank" |
   "in_final_packet" | "eviction_reason" | "dropped_reason" | "within_budget" |
   "source_channels"
-> & {
+>;
+
+type CanonicalLiveOnlyKey = Exclude<
+  keyof RecallCandidateDiagnostic,
+  keyof CanonicalCandidateDiagnosticCore
+>;
+
+export type CanonicalCandidateDiagnostic = Readonly<CanonicalCandidateDiagnosticCore & {
   readonly schema_version: 1;
   readonly ranking_authority: "prefix_sk";
   readonly capture_receipt_digest: string;
@@ -152,6 +159,8 @@ export type CanonicalCandidateDiagnostic = Readonly<Pick<
     readonly deep_head: "not_applicable";
     readonly coverage: "not_applicable";
   }>;
+} & {
+  readonly [K in CanonicalLiveOnlyKey]?: undefined;
 }>;
 
 export type RecallFineAssessmentCandidateDiagnostic =

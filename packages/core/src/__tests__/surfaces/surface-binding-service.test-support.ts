@@ -1,6 +1,9 @@
 import { vi } from "vitest";
 import { BindingState, CrossCuttingState, type CrossCuttingPermission, type EventLogEntry, type GovernanceDriftLease, type SurfaceBinding } from "@do-soul/alaya-protocol";
-import { type SurfaceBindingServiceDependencies } from "../../surfaces/surface-binding-service.js";
+import {
+  type SurfaceBindingEventPublisherPort,
+  type SurfaceBindingServiceDependencies
+} from "../../surfaces/surface-binding-service.js";
 
 export const BINDING_ID_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
@@ -251,7 +254,7 @@ export function createDependencies(seed?: {
         ) ?? null
       )
     },
-    eventPublisher,
+    eventPublisher: eventPublisher as SurfaceBindingEventPublisherPort,
     surfaceDriftService: driftService,
     warn: warnSpy
   };

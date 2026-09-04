@@ -142,8 +142,9 @@ describe("RecallService embedding-on coarse injection", () => {
     });
 
     const result = await service.recall({
-      taskSurface: createTaskSurface(), workspaceId: "workspace-1", strategy: "analyze",
-      queryText: "orchid anchor", policyOverride: buildPolicy(service, true)
+      taskSurface: { ...createTaskSurface(), display_name: "orchid anchor" },
+      workspaceId: "workspace-1", strategy: "analyze",
+      policyOverride: buildPolicy(service, true)
     });
 
     expect(result.candidates).toEqual([]);
@@ -212,17 +213,15 @@ describe("RecallService embedding-on coarse injection", () => {
     });
 
     const control = await service.recall({
-      taskSurface: createTaskSurface(),
+      taskSurface: { ...createTaskSurface(), display_name: "orchid anchor" },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      queryText: "orchid anchor",
       policyOverride: buildPolicy(service, false)
     });
     const result = await service.recall({
-      taskSurface: createTaskSurface(),
+      taskSurface: { ...createTaskSurface(), display_name: "orchid anchor" },
       workspaceId: "workspace-1",
       strategy: "analyze",
-      queryText: "orchid anchor",
       policyOverride: buildPolicy(service, true)
     });
 
@@ -232,7 +231,7 @@ describe("RecallService embedding-on coarse injection", () => {
       `workspace_local:memory_entry:${lexicalMemory.object_id}`
     ]);
     expect(field?.e1_keys).toHaveLength(2);
-    expect(field?.e1_keys).toEqual(expect.arrayContaining(field?.e0_keys ?? []));
+    expect(field?.e1_keys).toEqual(expect.arrayContaining([...(field?.e0_keys ?? [])]));
     expect(result.candidates.some(({ object_id }) =>
       object_id === lexicallyAbsentMemory.object_id)).toBe(true);
     const shared = result.diagnostics?.capture_receipt?.observations_by_candidate_key?.[
