@@ -98,7 +98,7 @@ describe("streamLongMemEvalDataset", () => {
     expect(identity.parseError?.message).toMatch(/JSON nesting limit/u);
   });
 
-  it("does not follow a dataset symlink", async () => {
+  it.skipIf(process.platform === "win32")("does not follow a dataset symlink", async () => {
     const raw = Buffer.from(JSON.stringify([questionFixture("fixture")]), "utf8");
     const targetPath = await writeFixture(raw);
     const linkPath = `${targetPath}.link`;

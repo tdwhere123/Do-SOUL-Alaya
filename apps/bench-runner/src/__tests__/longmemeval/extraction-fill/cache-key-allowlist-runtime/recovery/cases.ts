@@ -92,7 +92,7 @@ export function registerCatalogRefillRecoveryCases(fixture: RecoveryFixture): vo
     expect(fixture.controlArtifacts(".catalog-refill-resume.")).toEqual([]);
   });
 
-  it.each([
+  it.skipIf(process.platform === "win32").each([
     ["in-progress-result-manifest-published", "partial-result", 2],
     ["failure-manifest-published", "provider-failure", 1]
   ] as const)("recovers after SIGKILL at %s", async (phase, mode, expectedCalls) => {

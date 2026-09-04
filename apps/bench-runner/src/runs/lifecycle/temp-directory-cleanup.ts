@@ -1,7 +1,10 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { closeCachedDatabase as closeStorageCachedDatabase } from "@do-soul/alaya-storage";
+import {
+  closeCachedDatabase as closeStorageCachedDatabase,
+  closeCachedDatabasesUnder
+} from "@do-soul/alaya-storage";
 
 const TRANSIENT_FS_CODES = new Set(["EBUSY", "EPERM", "ENOTEMPTY"]);
 
@@ -20,6 +23,7 @@ export async function removeTempDirectory(
   directory: string,
   dbFilenames: readonly string[] = ["alaya.db"]
 ): Promise<void> {
+  closeCachedDatabasesUnder(directory);
   for (const dbFilename of dbFilenames) {
     closeCachedDatabase(join(directory, dbFilename));
   }

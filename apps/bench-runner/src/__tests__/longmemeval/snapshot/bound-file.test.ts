@@ -44,7 +44,7 @@ describe("descriptor-bound file IO", () => {
     expect(await readFile(target)).toEqual(await readFile(input.source));
   });
 
-  it("rejects symlinks for both buffered reads and DB copies", async () => {
+  it.skipIf(process.platform === "win32")("rejects symlinks for both buffered reads and DB copies", async () => {
     const input = await fixture();
     const link = join(input.root, "linked.db");
     await symlink(input.source, link);

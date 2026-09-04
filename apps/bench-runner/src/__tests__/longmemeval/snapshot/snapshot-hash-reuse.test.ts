@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import {
 } from "../../../runs/snapshot/materialize.js";
 import { sha256File } from "../../../runs/snapshot/integrity.js";
 import { boundFileFullContentReadCount } from "../../../runs/snapshot/bound-file.js";
+import { removeTempDirectory } from "../../support/temp-cleanup.js";
 
 let tmpDir: string;
 
@@ -19,7 +20,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(tmpDir, { recursive: true, force: true });
+  await removeTempDirectory(tmpDir);
 });
 
 describe("sealed snapshot digest reuse", () => {

@@ -170,6 +170,22 @@ export function closeCachedDatabase(filename: string): void {
   cached.close();
 }
 
+/** Close cached handles whose files sit under directory. Never opens a path. */
+export function closeCachedDatabasesUnder(directory: string): void {
+  if (directory === "" || directory === ":memory:") {
+    return;
+  }
+  const root = path.resolve(directory);
+  for (const filename of databaseCache.keys()) {
+    if (filename === ":memory:") continue;
+    const resolved = path.resolve(filename);
+    const relative = path.relative(root, resolved);
+    if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+      closeCachedDatabase(filename);
+    }
+  }
+}
+
 export function readSchemaMigrationLedger(
   filename: string
 ): readonly number[] {

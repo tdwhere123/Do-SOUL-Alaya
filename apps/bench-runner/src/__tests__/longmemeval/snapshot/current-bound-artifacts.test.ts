@@ -64,7 +64,7 @@ describe("current snapshot immutable artifact binding", () => {
     })).toThrow(/SHA-256 mismatch/u);
   }, 20_000);
 
-  it("rejects a symlinked current snapshot DB instead of following it", async () => {
+  it.skipIf(process.platform === "win32")("rejects a symlinked current snapshot DB instead of following it", async () => {
     const fixture = await snapshotFixture();
     const referent = join(fixture.root, "referent.db");
     await writeFile(referent, await readFile(fixture.snapshotDbPath));
@@ -86,19 +86,30 @@ describe("current snapshot immutable artifact binding", () => {
     })).toThrow(/current snapshot requires a v2 assertion receipt/u);
   });
 
-  it.each(["missing", "replacement", "symlink"] as const)(
+  it.each(["missing", "replacement"] as const)(
     "rejects a %s extraction authority artifact",
     async (kind) => {
       const fixture = await snapshotFixture();
       const authorityPath = `${fixture.snapshotDbPath}.extraction-authority.json`;
       if (kind === "missing") await rm(authorityPath);
       if (kind === "replacement") await writeFile(authorityPath, "{}", "utf8");
-      if (kind === "symlink") {
-        const referent = join(fixture.root, "authority-referent.json");
-        await writeFile(referent, await readFile(authorityPath));
-        await rm(authorityPath);
-        await symlink(referent, authorityPath);
-      }
+
+      expect(() => bindCurrentSnapshotArtifacts({
+        sourceDbPath: fixture.snapshotDbPath,
+        targetRoot: fixture.targetRoot
+      })).toThrow();
+    }
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a symlink extraction authority artifact",
+    async () => {
+      const fixture = await snapshotFixture();
+      const authorityPath = `${fixture.snapshotDbPath}.extraction-authority.json`;
+      const referent = join(fixture.root, "authority-referent.json");
+      await writeFile(referent, await readFile(authorityPath));
+      await rm(authorityPath);
+      await symlink(referent, authorityPath);
 
       expect(() => bindCurrentSnapshotArtifacts({
         sourceDbPath: fixture.snapshotDbPath,

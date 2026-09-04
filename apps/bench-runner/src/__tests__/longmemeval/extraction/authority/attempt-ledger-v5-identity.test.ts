@@ -15,10 +15,12 @@ import { createExtractionContinuationChildClaim } from
 import type { ExtractionAuthorityReceipt } from
   "../../../../runs/extraction/authority/receipt.js";
 
-const FOUR_KEY_V5_BYTES = readFileSync(new URL(
-  "./fixtures/attempt-ledger-v5-four-terminal.json",
-  import.meta.url
-));
+const FOUR_KEY_V5_BYTES = Buffer.from(
+  readFileSync(new URL(
+    "./fixtures/attempt-ledger-v5-four-terminal.json",
+    import.meta.url
+  ), "utf8").replaceAll("\r\n", "\n")
+);
 const LINEAGE = "f1".repeat(32);
 const SUCCESSOR_LINEAGE = "a2".repeat(32);
 const CACHE_IDENTITY = {

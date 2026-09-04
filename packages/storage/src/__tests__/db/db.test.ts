@@ -6,6 +6,7 @@ import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeCachedDatabase,
+  closeCachedDatabasesUnder,
   getCurrentSchemaSummary,
   initDatabase
 } from "../../sqlite/db.js";
@@ -85,6 +86,20 @@ describe("closeCachedDatabase", () => {
       closeCachedDatabase(context.filename);
       expect(database.isClosed()).toBe(true);
       expect(() => closeCachedDatabase(context.filename)).not.toThrow();
+    } finally {
+      cleanupTempDirectory(context.directory);
+    }
+  });
+
+  it("closes nested cached handles under a directory", () => {
+    const context = createTempDatabasePath();
+    const nested = path.join(context.directory, "nested", "alaya.db");
+    fs.mkdirSync(path.dirname(nested), { recursive: true });
+    try {
+      const database = initDatabase({ filename: nested });
+      expect(database.isClosed()).toBe(false);
+      closeCachedDatabasesUnder(context.directory);
+      expect(database.isClosed()).toBe(true);
     } finally {
       cleanupTempDirectory(context.directory);
     }

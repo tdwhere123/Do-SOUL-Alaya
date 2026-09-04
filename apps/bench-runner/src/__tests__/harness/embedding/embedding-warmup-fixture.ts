@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -22,6 +21,7 @@ import {
 import { afterEach, vi } from "vitest";
 
 import type { BenchEmbeddingWarmupSummary } from "../../../harness/embedding/embedding-warmup.js";
+import { removeTempDirectory } from "../../support/temp-cleanup.js";
 
 export const READY_MEMORY_ID = "11111111-1111-4111-8111-111111111111";
 export const MISSING_MEMORY_ID = "22222222-2222-4222-8222-222222222222";
@@ -31,9 +31,7 @@ const tmpDirs = new Set<string>();
 export function registerEmbeddingWarmupCleanup(): void {
   afterEach(async () => {
     vi.restoreAllMocks();
-    await Promise.all([...tmpDirs].map(
-      async (dir) => await rm(dir, { recursive: true, force: true })
-    ));
+    await Promise.all([...tmpDirs].map((dir) => removeTempDirectory(dir)));
     tmpDirs.clear();
   });
 }
@@ -70,23 +68,27 @@ export async function createReadinessFixture(
 ): Promise<string> {
   const dataDir = await createEmbeddingWarmupTempDir("embedding-readiness-fixture-");
   const database = initDatabase({ filename: join(dataDir, "alaya.db") });
-  const workspaceRepo = new SqliteWorkspaceRepo(database);
-  const runRepo = new SqliteRunRepo(database);
-  const memoryRepo = new SqliteMemoryEntryRepo(database);
-  await createEmbeddingWorkspace(workspaceRepo, runRepo);
-  await memoryRepo.create(createMemoryEntry(READY_MEMORY_ID));
-  database.connection.prepare(
-    `INSERT INTO memory_embeddings (
+  try {
+    const workspaceRepo = new SqliteWorkspaceRepo(database);
+    const runRepo = new SqliteRunRepo(database);
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+    await createEmbeddingWorkspace(workspaceRepo, runRepo);
+    await memoryRepo.create(createMemoryEntry(READY_MEMORY_ID));
+    database.connection.prepare(
+      `INSERT INTO memory_embeddings (
       object_id, workspace_id, content_hash, provider_kind, model_id,
       schema_version, dimensions, embedding_blob, vector_valid, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-  ).run(
-    READY_MEMORY_ID, "workspace-1", contentHash, "openai", "text-embedding-3-small",
-    1, 1, blobBytes === Float32Array.BYTES_PER_ELEMENT
-      ? validEmbeddingBlob(1)
-      : Buffer.alloc(blobBytes),
-    "2026-06-01T00:00:00.000Z", "2026-06-01T00:00:00.000Z"
-  );
+    ).run(
+      READY_MEMORY_ID, "workspace-1", contentHash, "openai", "text-embedding-3-small",
+      1, 1, blobBytes === Float32Array.BYTES_PER_ELEMENT
+        ? validEmbeddingBlob(1)
+        : Buffer.alloc(blobBytes),
+      "2026-06-01T00:00:00.000Z", "2026-06-01T00:00:00.000Z"
+    );
+  } finally {
+    database.close();
+  }
   return dataDir;
 }
 

@@ -3,6 +3,7 @@ export { StorageError, isDuplicateKeyError, type StorageErrorCode } from "./shar
 export {
   initDatabase,
   closeCachedDatabase,
+  closeCachedDatabasesUnder,
   StorageDatabase,
   getCurrentSchemaSummary,
   configureSqliteWriteQueuePort,

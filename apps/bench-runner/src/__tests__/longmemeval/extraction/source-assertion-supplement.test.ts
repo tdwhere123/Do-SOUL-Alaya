@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
@@ -310,8 +311,8 @@ describe("source assertion semantic supplement", () => {
       ALAYA_BENCH_SOURCE_ASSERTION_SUPPLEMENT_RECEIPT: "receipt.json",
       ALAYA_BENCH_SOURCE_ASSERTION_SUPPLEMENT_CACHE_ROOT: "old-cache"
     }, "/repo")).toEqual({
-      receiptPath: "/repo/receipt.json",
-      sourceCacheRoot: "/repo/old-cache"
+      receiptPath: resolve("/repo", "receipt.json"),
+      sourceCacheRoot: resolve("/repo", "old-cache")
     });
     expect(() => resolveSourceAssertionSupplementOptions({
       ALAYA_BENCH_SOURCE_ASSERTION_SUPPLEMENT_RECEIPT: "receipt.json"

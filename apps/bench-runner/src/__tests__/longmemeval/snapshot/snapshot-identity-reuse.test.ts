@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -22,6 +22,7 @@ import {
   readSchemaMigrationVersion
 } from "../../../runs/snapshot/snapshot-seed-identity.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
+import { removeTempDirectory } from "../../support/temp-cleanup.js";
 
 let tmpDir: string;
 
@@ -30,7 +31,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(tmpDir, { recursive: true, force: true });
+  await removeTempDirectory(tmpDir);
 });
 
 describe("snapshot seed vs ranking consume", () => {

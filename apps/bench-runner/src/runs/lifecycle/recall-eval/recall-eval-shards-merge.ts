@@ -64,7 +64,7 @@ async function writeDiagnosticMerge(args: {
   readonly rankQuestions: readonly RankQuestion[];
   readonly hits: ScorableHits;
 }): Promise<RecallEvalResult> {
-  const slug = `${args.first.payload.run_at}-${args.first.payload.alaya_commit}-c${args.input.concurrency}-merged`;
+  const slug = `${args.first.payload.run_at.replaceAll(":", "-")}-${args.first.payload.alaya_commit}-c${args.input.concurrency}-merged`;
   const entryRoot = join(args.input.historyRoot, "public", slug);
   await mkdir(entryRoot, { recursive: true });
   const kpiPath = join(entryRoot, "kpi.json");

@@ -312,7 +312,7 @@ describe("frozen code worktree identity", () => {
     expect(withDriver.worktreeStateSha256).toBe(await independentDirtyWorktreeHash(fixture.root));
   });
 
-  it("binds executable mode separately from content", async () => {
+  it.skipIf(process.platform === "win32")("binds executable mode separately from content", async () => {
     const fixture = await identityRepository();
     const planted = join(fixture.root, "tool.sh");
     await writeFile(planted, "#!/bin/sh\n");

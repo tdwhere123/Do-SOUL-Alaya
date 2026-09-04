@@ -82,7 +82,7 @@ describe("frozen code contract", () => {
     await expect(resolve(staged)).rejects.toThrow(/not clean/iu);
   });
 
-  it("rejects a symlinked contract and unsupported contract versions", async () => {
+  it.skipIf(process.platform === "win32")("rejects a symlinked contract and unsupported contract versions", async () => {
     const fixture = await cleanRepository();
     const link = join(fixture.root, "contract-link.json");
     await symlink(fixture.contractPath, link);

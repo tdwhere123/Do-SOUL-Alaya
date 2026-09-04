@@ -211,11 +211,7 @@ function cliScriptEnv(): NodeJS.ProcessEnv {
     }
   }
   delete env.NODE_OPTIONS;
-  return {
-    ...env,
-    MSYS_NO_PATHCONV: "1",
-    MSYS2_ARG_CONV_EXCL: "*"
-  };
+  return env;
 }
 
 async function execFileRejects(

@@ -4,8 +4,15 @@
 # the only supported way to replay, fill query factors, or run diagnostic-loop.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+abs_pwd() { (cd "$1" && { pwd -W 2>/dev/null || pwd; }); }
+native_temp_file() {
+  local created dir
+  created="$(mktemp)"
+  dir="$(cd "$(dirname "$created")" && { pwd -W 2>/dev/null || pwd; })"
+  printf '%s/%s\n' "${dir//\\//}" "$(basename "$created")"
+}
+SCRIPT_DIR="$(abs_pwd "$(dirname "${BASH_SOURCE[0]}")")"
+WT="$(abs_pwd "$SCRIPT_DIR/../../..")"
 BIN="$WT/apps/bench-runner/bin/alaya-bench-runner.mjs"
 DEFAULT_ENV="$WT/.do-it/bench-env/mimo-v2.5-opencode-go.env"
 NODE_BIN="${BENCH_NODE_BIN:-node}"
@@ -16,6 +23,29 @@ run_node() {
   else
     "$NODE_BIN" "$@"
   fi
+}
+write_captured_loop_argv() {
+  local nul="${BENCH_NODE_ARGV_CAPTURE}.nul"
+  printf '%s\0' "$@" > "$nul"
+  run_node - "$BENCH_NODE_ARGV_CAPTURE" "$nul" "${BENCH_NODE_ENV_CAPTURE:-}" <<'JS'
+const fs = require("fs");
+const args = fs.readFileSync(process.argv[3], "utf8").split("\0").filter(Boolean);
+fs.writeFileSync(process.argv[2], JSON.stringify(args) + "\n");
+const envCapture = process.argv[4];
+if (envCapture) {
+  const credentialKeys = [
+    "ALAYA_OFFICIAL_GARDEN_SECRET_REF", "ALAYA_OFFICIAL_GARDEN_API_KEY",
+    "OFFICIAL_API_GARDEN_API_KEY", "ALAYA_QA_API_KEY",
+    "ALAYA_GARDEN_OPENAI_SECRET_REF",
+    "ALAYA_CONFLICT_LLM_PROVIDER_URL", "ALAYA_CONFLICT_LLM_API_KEY"
+  ];
+  fs.writeFileSync(envCapture, JSON.stringify({
+    credentials: Object.fromEntries(credentialKeys.map((key) => [key, Boolean(process.env[key])])),
+    ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: process.env.ALAYA_BENCH_ALLOW_LIVE_EXTRACTION ?? null,
+    ALAYA_GARDEN_PROVIDER_KIND: process.env.ALAYA_GARDEN_PROVIDER_KIND ?? null
+  }) + "\n");
+}
+JS
 }
 SMALL_WINDOW_CEILING=3
 
@@ -171,8 +201,8 @@ run_replay() {
   } < <(load_identity)
   echo "replay identity model=$model profile=$profile limit=$LIMIT offset=$OFFSET"
   local request_file receipt_file rc=0
-  request_file="$(mktemp)"
-  receipt_file="$(mktemp)"
+  request_file="$(native_temp_file)"
+  receipt_file="$(native_temp_file)"
   TEMP_REQUEST_FILE="$request_file"
   TEMP_RECEIPT_FILE="$receipt_file"
   clear_provider_credentials
@@ -254,6 +284,13 @@ invoke_cache_only_diagnostic() {
     extra+=(--embedding-cache-overlay "$EMBEDDING_CACHE_OVERLAY")
   fi
   echo "diagnostic cache-only credentialless limit=$LIMIT work=$work"
+  if [[ -n "${BENCH_NODE_ARGV_CAPTURE:-}" ]]; then
+    write_captured_loop_argv "$BIN" diagnostic-loop \
+      --work-root "$work" --request-manifest "$request_file" \
+      --mode cache-only "${SNAPSHOT_ARGS[@]}" \
+      --history-root "$work/history" "${extra[@]}"
+    return 0
+  fi
   run_node "$BIN" diagnostic-loop \
     --work-root "$work" --request-manifest "$request_file" \
     --mode cache-only "${SNAPSHOT_ARGS[@]}" \
@@ -274,7 +311,7 @@ run_diagnostic() {
   prepare_snapshot_args "$work"
   reject_completed_recall_checkpoints "$work"
   local request_file rc=0
-  request_file="$(mktemp)"
+  request_file="$(native_temp_file)"
   TEMP_REQUEST_FILE="$request_file"
   build_canonical_request_manifest \
     "$request_file" "$dataset" "$prompt" "$provider" "$model" "$profile" || rc=$?

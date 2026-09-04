@@ -407,8 +407,6 @@ function isolatedChildEnv(
   delete env.NODE_OPTIONS;
   return {
     ...env,
-    MSYS_NO_PATHCONV: "1",
-    MSYS2_ARG_CONV_EXCL: "*",
     BENCH_NODE_BIN: posixPath(process.execPath),
     BENCH_NODE_INTERCEPT: posixPath(interceptPath),
     BENCH_NODE_ARGV_CAPTURE: posixPath(argvCapture),

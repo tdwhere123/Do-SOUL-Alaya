@@ -1,6 +1,7 @@
 export {
   initDatabase,
   closeCachedDatabase,
+  closeCachedDatabasesUnder,
   StorageDatabase,
   getCurrentSchemaSummary,
   configureSqliteWriteQueuePort,

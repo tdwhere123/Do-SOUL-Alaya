@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && { pwd -W 2>/dev/null || pwd; })"
 cd "$REPO_ROOT"
 
 LIMIT="${BENCH_DAILY_LIMIT:-100}"

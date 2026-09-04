@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import {
   assertRelationProjectionCurrent,
+  closeCachedDatabase,
   initDatabase
 } from "@do-soul/alaya-storage";
 import { NO_FOLLOW_OPEN_FLAG } from "../../fs/open-flags.js";
@@ -50,20 +51,24 @@ export function checkpointAndCopyBenchDb(
   snapshotDbPath: string
 ): void {
   const db = initDatabase({ filename: liveDbPath });
-  assertRelationProjectionCurrent(db);
-  const [checkpoint] = db.connection.pragma(
-    "wal_checkpoint(TRUNCATE)"
-  ) as Array<{
-    readonly busy: number;
-    readonly log: number;
-    readonly checkpointed: number;
-  }>;
-  if (checkpoint === undefined || checkpoint.busy !== 0 ||
-      checkpoint.log !== checkpoint.checkpointed) {
-    const detail = checkpoint === undefined
-      ? "missing checkpoint status"
-      : `busy=${checkpoint.busy} log=${checkpoint.log} checkpointed=${checkpoint.checkpointed}`;
-    throw new Error(`cannot freeze live bench DB: incomplete WAL checkpoint (${detail})`);
+  try {
+    assertRelationProjectionCurrent(db);
+    const [checkpoint] = db.connection.pragma(
+      "wal_checkpoint(TRUNCATE)"
+    ) as Array<{
+      readonly busy: number;
+      readonly log: number;
+      readonly checkpointed: number;
+    }>;
+    if (checkpoint === undefined || checkpoint.busy !== 0 ||
+        checkpoint.log !== checkpoint.checkpointed) {
+      const detail = checkpoint === undefined
+        ? "missing checkpoint status"
+        : `busy=${checkpoint.busy} log=${checkpoint.log} checkpointed=${checkpoint.checkpointed}`;
+      throw new Error(`cannot freeze live bench DB: incomplete WAL checkpoint (${detail})`);
+    }
+  } finally {
+    closeCachedDatabase(liveDbPath);
   }
   atomicCopy(liveDbPath, snapshotDbPath);
 }
