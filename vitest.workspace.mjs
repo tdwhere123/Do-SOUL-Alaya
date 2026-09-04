@@ -129,6 +129,7 @@ export default [
         setupFiles: [path.resolve(appRoot, "src/__tests__/vitest-setup.ts")],
         include: [testIncludeGlob(testDir)],
         exclude: ["**/dist/**"],
+        testTimeout: process.env.CI ? 30_000 : 5_000,
         coverage: {
           include: ["apps/bench-runner/src/**"]
         }

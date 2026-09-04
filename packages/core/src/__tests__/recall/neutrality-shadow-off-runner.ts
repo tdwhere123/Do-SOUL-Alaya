@@ -202,7 +202,7 @@ function linkDir(source: string, dest: string): void {
 
 function runShadowOffVitest(root: string, outFile: string): void {
   execFileSync(
-    "pnpm",
+    process.platform === "win32" ? "pnpm.cmd" : "pnpm",
     [
       "exec",
       "vitest",
