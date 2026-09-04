@@ -18,10 +18,11 @@ DEFAULT_ENV="$WT/.do-it/bench-env/mimo-v2.5-opencode-go.env"
 NODE_BIN="${BENCH_NODE_BIN:-node}"
 # Tests inject an intercept argv; a PATH `node` shim is skipped on Darwin.
 run_node() {
-  if [[ -n "${BENCH_NODE_INTERCEPT:-}" ]]; then
-    "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
-  else
+  # Intercept spawnSync cannot inherit a bash heredoc stdin on Darwin.
+  if [[ "${1:-}" == "-" || "${1:-}" == "-e" || -z "${BENCH_NODE_INTERCEPT:-}" ]]; then
     "$NODE_BIN" "$@"
+  else
+    "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
   fi
 }
 write_captured_loop_argv() {
