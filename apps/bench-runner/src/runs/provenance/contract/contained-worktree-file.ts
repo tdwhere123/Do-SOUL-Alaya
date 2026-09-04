@@ -21,7 +21,11 @@ export async function readContainedWorktreeFile(
   await assertNoSymlinkPathComponents(checkoutRoot, relativePath);
   const handle = await openWorktreeFile(checkoutRoot, relativePath);
   try {
-    await assertOpenedPathInsideWorktree(handle, checkoutRoot);
+    await assertOpenedPathInsideWorktree(
+      handle,
+      checkoutRoot,
+      resolve(checkoutRoot, relativePath)
+    );
     const stat = await handle.stat();
     if (!stat.isFile()) {
       throw new Error("untracked provenance path must be a regular non-symlink file");
@@ -53,12 +57,13 @@ async function openWorktreeFile(
 
 async function assertOpenedPathInsideWorktree(
   handle: FileHandle,
-  checkoutRoot: string
+  checkoutRoot: string,
+  fallbackPath: string
 ): Promise<void> {
   const realRoot = await realpath(checkoutRoot);
   let openedPath: string;
   try {
-    openedPath = await resolveOpenedDescriptorPath(handle);
+    openedPath = await resolveOpenedDescriptorPath(handle, fallbackPath);
   } catch {
     // Descriptor realpath is unavailable; component lstat already ran.
     // Concurrent parent replacement after that walk is out of threat model.

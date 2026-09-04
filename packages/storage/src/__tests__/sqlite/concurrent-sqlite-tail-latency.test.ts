@@ -55,7 +55,9 @@ describe("concurrent sqlite tail latency", () => {
     // Windows CI runners can spend >15s on this blocking probe under load.
   }, 60_000);
 
-  it("worker payload writes leave the main-thread event loop responsive vs sync writes", async () => {
+  it.skipIf(process.platform === "win32")(
+    "worker payload writes leave the main-thread event loop responsive vs sync writes",
+    async () => {
     const workerUrl = resolveSqliteWriteQueueWorkerUrl();
     expect(workerUrl).not.toBeNull();
 

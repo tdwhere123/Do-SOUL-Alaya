@@ -50,7 +50,7 @@ export async function openContainedArtifact(
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw new Error(`merge refused: artifact is not a file '${reference}'`);
-    const openedPath = await resolveOpenedArtifactPath(handle);
+    const openedPath = await resolveOpenedArtifactPath(handle, candidate);
     if (!isContainedPath(realRoot, openedPath)) {
       throw new Error(`merge refused: artifact resolves outside declared root '${reference}'`);
     }
@@ -93,9 +93,12 @@ function containedFile(
   };
 }
 
-async function resolveOpenedArtifactPath(handle: FileHandle): Promise<string> {
+async function resolveOpenedArtifactPath(
+  handle: FileHandle,
+  fallbackPath: string
+): Promise<string> {
   try {
-    return await resolveOpenedDescriptorPath(handle);
+    return await resolveOpenedDescriptorPath(handle, fallbackPath);
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     throw new Error(`merge refused: cannot validate opened artifact descriptor: ${message}`);

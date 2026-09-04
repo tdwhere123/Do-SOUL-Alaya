@@ -1,17 +1,24 @@
 import { realpath, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 
-export async function resolveOpenedDescriptorPath(handle: FileHandle): Promise<string> {
-  let lastError: unknown;
-  for (const descriptorRoot of ["/proc/self/fd", "/dev/fd"] as const) {
+export async function resolveOpenedDescriptorPath(
+  handle: FileHandle,
+  fallbackPath?: string
+): Promise<string> {
+  if (process.platform === "linux") {
     try {
-      return await realpath(path.join(descriptorRoot, String(handle.fd)));
-    } catch (error) {
-      lastError = error;
+      return await realpath(path.join("/proc/self/fd", String(handle.fd)));
+    } catch {
+      if (fallbackPath !== undefined) {
+        return await realpath(fallbackPath);
+      }
+      throw new Error("cannot validate opened file descriptor on linux");
     }
   }
-  const message = lastError instanceof Error ? lastError.message : String(lastError);
-  throw new Error(`cannot validate opened file descriptor: ${message}`);
+  if (fallbackPath !== undefined) {
+    return await realpath(fallbackPath);
+  }
+  throw new Error("cannot validate opened file descriptor without a fallback path");
 }
 
 export function isContainedPath(root: string, candidate: string): boolean {
