@@ -31,6 +31,7 @@ import {
   type LongMemEvalSelectionContract
 } from "../../../runs/selection/contract.js";
 import { buildMergedRates, type MergedRates } from "../merged/merged-rates.js";
+import { computeScorableHits } from "../../../runs/lifecycle/recall-eval/recall-eval-shards-merge-payload.js";
 
 export interface MergedLongMemEvalBuild {
   readonly payload: KpiPayload;
@@ -77,7 +78,7 @@ export function buildMergedLongMemEvalPayload(
   assertCompatibleShardIdentities(loaded.payloads, loaded.first);
   assertNoDuplicateQuestions(loaded.payloads);
   assertMergeMeasurementContracts(loaded.payloads);
-  const aggregate = aggregateMergeShards(loaded.payloads);
+  const aggregate = aggregateMergeShards(loaded.payloads, loaded.questionDiagnostics);
   if (aggregate.evaluatedTotal > loaded.first.sample_size) {
     throw new Error(
       `merge refused: evaluated_total=${aggregate.evaluatedTotal} > sample_size=${loaded.first.sample_size} (shards collectively over-evaluated; check --offset/--limit ranges)`
@@ -222,7 +223,10 @@ function createMergeShardAggregate(): MergeShardAggregate {
   };
 }
 
-function aggregateMergeShards(payloads: readonly KpiPayload[]): MergeShardAggregate {
+function aggregateMergeShards(
+  payloads: readonly KpiPayload[],
+  questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[]
+): MergeShardAggregate {
   const aggregate = createMergeShardAggregate();
   for (const shard of payloads) {
     addShardTotals(aggregate, shard);
@@ -231,6 +235,13 @@ function aggregateMergeShards(payloads: readonly KpiPayload[]): MergeShardAggreg
     aggregate.latencyP50Max = Math.max(aggregate.latencyP50Max, shard.kpi.latency_ms_p50);
     aggregate.latencyP95Max = Math.max(aggregate.latencyP95Max, shard.kpi.latency_ms_p95);
   }
+  const hits = computeScorableHits(
+    bindLegacyUnboundRows(aggregate.perScenario),
+    indexCliHitDiagnostics(questionDiagnostics)
+  );
+  aggregate.totalHitAt1 = hits.hitsAt1;
+  aggregate.totalHitAt5 = hits.hitsAt5;
+  aggregate.totalHitAt10 = hits.hitsAt10;
   return aggregate;
 }
 
@@ -241,11 +252,6 @@ function addShardTotals(aggregate: MergeShardAggregate, shard: KpiPayload): void
   aggregate.perScenario.push(...shard.kpi.per_scenario);
   const denominator = shard.answerable_evaluated_count ?? shard.evaluated_count;
   aggregate.answerableTotal += denominator;
-  aggregate.totalHitAt1 += Math.round(shard.kpi.r_at_1 * denominator);
-  aggregate.totalHitAt5 += shard.kpi.per_scenario.filter(
-    (row) => row.scorable !== false && row.hit_at_5
-  ).length;
-  aggregate.totalHitAt10 += Math.round(shard.kpi.r_at_10 * denominator);
   aggregate.tierHot += shard.kpi.tier_distribution.hot;
   aggregate.tierWarm += shard.kpi.tier_distribution.warm;
   aggregate.tierCold += shard.kpi.tier_distribution.cold;
@@ -256,6 +262,35 @@ function addShardTotals(aggregate: MergeShardAggregate, shard: KpiPayload): void
   aggregate.truncSeedTotal += shard.kpi.seed_truncation.seed_turns_truncated;
   aggregate.truncAnswerTotal += shard.kpi.seed_truncation.answer_turns_truncated;
   aggregate.truncCharsTotal += shard.kpi.seed_truncation.seed_chars_clipped;
+}
+
+function bindLegacyUnboundRows(
+  rows: readonly PerScenarioRow[]
+): readonly PerScenarioRow[] {
+  return rows.map((row) => {
+    if (row.scorable !== undefined && row.measurement_cohort !== undefined) return row;
+    if (row.scorable !== undefined || row.measurement_cohort !== undefined) return row;
+    return {
+      ...row,
+      scorable: true,
+      measurement_cohort: "answerable" as const
+    };
+  });
+}
+
+function indexCliHitDiagnostics(
+  questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[]
+): ReadonlyMap<string, Record<string, unknown>> {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const diagnostic of questionDiagnostics) {
+    if (byId.has(diagnostic.question_id)) {
+      throw new Error(
+        `merge refused: duplicate diagnostic question_id '${diagnostic.question_id}'`
+      );
+    }
+    byId.set(diagnostic.question_id, diagnostic as unknown as Record<string, unknown>);
+  }
+  return byId;
 }
 
 function addShardProviderTotals(

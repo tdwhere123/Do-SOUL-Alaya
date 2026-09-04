@@ -80,6 +80,7 @@ function capturedPreviewWorld(base: ReturnType<typeof params>): QueryProofDecide
   const authority = certifiedScalarAuthority(prepared);
   return captureQueryProofDecideWorld({
     live_authority: authority,
+    class_source: { owner: "osf", available: true },
     premises: {
       candidates: Object.freeze([]),
       psi_edges: Object.freeze([]),

@@ -1,4 +1,5 @@
-import { digestRecallFieldIdentity } from "../../../field/field-identity.js";
+import { digestRecallFieldIdentity, type RecallFieldDigest } from
+  "../../../field/field-identity.js";
 import {
   isCapturedWalk,
   prefixSK,
@@ -10,9 +11,17 @@ import { emptySetUtilityInput } from "../../prefix-capture/capture.js";
 import type { PsiQuery } from "../../dominance-contract.js";
 import type { QueryGammaCompileInputV1 } from "../gamma/compile.js";
 import { decideWorldUniverseMismatch } from "../gamma/candidate-universe.js";
-import { certifiedSemanticSet } from "../gamma/evaluate.js";
+import {
+  provedInfeasibleCandidateKeys,
+  semanticFeasibilityMap
+} from "../gamma/evaluate.js";
 import { createQueryCompiledWalkTransfer } from "../gamma/walk-binding.js";
-import type { QueryCompiledGammaV1 } from "../gamma/contract.js";
+import {
+  captureGammaPremises,
+  holeBlocksCertifiedDelivery,
+  isExecutableCompiledGamma,
+  type QueryCompiledGammaV1
+} from "../gamma/contract.js";
 import type {
   AbstractCoordinate,
   AbstractDecisionOperator,
@@ -31,10 +40,12 @@ import {
   sortDecisionBindings
 } from "./contract.js";
 import {
+  candidateIdentityMapForWorld,
   decideWorldCapture,
   digestDecideWorld,
   freezeDecideWorld,
-  queryProofDecideBaseState
+  queryProofDecideBaseState,
+  type QueryProofDecideWorldCaptureV1
 } from "./world-capture.js";
 import { overlayWorld } from "./overlay.js";
 
@@ -47,6 +58,8 @@ export type QueryProofDecideWorldV1 = Readonly<{
   readonly per_dimension_limits: Readonly<Record<string, number>> | null;
   readonly unresolved_tradeoff_pairs: readonly (readonly [string, string])[];
   readonly identity_tie_winner?: string;
+  readonly source_evidence_digest?: RecallFieldDigest | null;
+  readonly psi_identity?: RecallFieldDigest | null;
   readonly answer_bindings: readonly Readonly<{
     readonly candidate_key: string;
     readonly binding_id: string;
@@ -56,12 +69,30 @@ export type QueryProofDecideWorldV1 = Readonly<{
   }>[];
 }>;
 
+export type QueryProofExecutionDispositionV1 =
+  | "captured"
+  | "best_effort"
+  | "abstained"
+  | "unsupported"
+  | "conflict"
+  | "failed";
+
+export type QueryProofPackModeV1 =
+  | "certified"
+  | "best_effort_uncertified"
+  | "abstained"
+  | "unsupported"
+  | "conflict";
+
 export type QueryProofDecideResultV1 = Readonly<{
   readonly decision_contract_digest: ReturnType<typeof digestDecisionContract>;
+  readonly decision_identity_digest: RecallFieldDigest;
   readonly walk: ShadowCapturedWalk;
   readonly prefix: readonly string[];
   readonly trace: FiniteDecisionTraceInput;
   readonly unresolved_boundary_tradeoff: boolean;
+  readonly disposition: QueryProofExecutionDispositionV1;
+  readonly pack_mode: QueryProofPackModeV1;
 }>;
 
 export function emptyWalkUtility(candidateKey: string, objectKey: string) {
@@ -75,7 +106,11 @@ export function runQueryProofDecideQ(
   if (!Number.isSafeInteger(kMax) || kMax <= 0) {
     throw new Error("Decide_Q K_max must be a positive safe integer");
   }
-  const captured = freezeDecideWorld(world);
+  const issued = decideWorldCapture(world);
+  const captured = freezeDecideWorld(captureGammaPremises(world));
+  if (issued !== null && digestDecideWorld(captured) !== issued.world_digest) {
+    throw new Error("Decide_Q captured premises do not match issued world identity");
+  }
   const universe = decideWorldUniverseMismatch(
     captured.compile_input.candidates.map((candidate) => candidate.candidate_key),
     captured.candidates.map((candidate) => candidate.candidate_key),
@@ -84,15 +119,21 @@ export function runQueryProofDecideQ(
   if (universe !== null) {
     throw new Error(universe);
   }
-  const transfer = createQueryCompiledWalkTransfer(
-    captured.compiled,
-    captured.identity_tie_winner
-  );
-  const certified = certifiedSemanticSet(captured.compiled);
-  const candidates = captured.candidates.map((candidate) => Object.freeze({
-    ...candidate,
-    h_eligible: candidate.h_eligible && certified.has(candidate.candidate_key)
-  }));
+  const executable = isExecutableCompiledGamma(captured.compiled);
+  const infeasible = executable
+    ? provedInfeasibleCandidateKeys(captured.compiled)
+    : new Set<string>();
+  const candidates = executable
+    ? captured.candidates.map((candidate) => Object.freeze({
+      ...candidate,
+      // Unresolved stays in remaining; dropping it here would recertify by omission.
+      h_eligible: candidate.h_eligible && !infeasible.has(candidate.candidate_key)
+    }))
+    : Object.freeze([] as typeof captured.candidates);
+  const identityTieWinner = !executable || captured.unresolved_tradeoff_pairs.length > 0
+    ? undefined
+    : captured.identity_tie_winner;
+  const transfer = createQueryCompiledWalkTransfer(captured.compiled, identityTieWinner);
   const budgets = boundResourcePolicy(captured);
   const walked = walkShadowCapture({
     candidates,
@@ -107,13 +148,32 @@ export function runQueryProofDecideQ(
   }
   const prefix = prefixSK(walked.S_infty, kMax);
   const trace = traceOf(walked, prefix, captured.answer_bindings);
+  const feasibility = semanticFeasibilityMap(captured.compiled);
+  const hasConflict = walked.decisions.some((decision) => decision.unresolved_pointwise_tradeoff);
+  const hasUnresolvedInPrefix = prefix.some((key) => feasibility.get(key) === "unresolved");
+  const modes = decideModes({
+    compiled: captured.compiled,
+    prefix,
+    hasConflict,
+    hasUnresolvedInPrefix
+  });
+  const decisionContractDigest = digestDecisionContract(
+    captured.compiled, transfer.contract_digest);
   return Object.freeze({
-    decision_contract_digest: digestDecisionContract(captured.compiled, transfer.contract_digest),
+    decision_contract_digest: decisionContractDigest,
+    decision_identity_digest: digestDecideConsumedIdentity({
+      world: captured,
+      issued,
+      prefix,
+      walk_transfer_digest: transfer.contract_digest,
+      decision_contract_digest: decisionContractDigest
+    }),
     walk: walked,
     prefix,
     trace,
-    unresolved_boundary_tradeoff: walked.decisions
-      .some((decision) => decision.unresolved_pointwise_tradeoff)
+    unresolved_boundary_tradeoff: hasConflict,
+    disposition: modes.disposition,
+    pack_mode: modes.pack_mode
   });
 }
 
@@ -197,6 +257,74 @@ function evaluateAbstractDecide(
   });
 }
 
+function decideModes(params: Readonly<{
+  readonly compiled: QueryCompiledGammaV1;
+  readonly prefix: readonly string[];
+  readonly hasConflict: boolean;
+  readonly hasUnresolvedInPrefix: boolean;
+}>): Readonly<{
+  readonly disposition: QueryProofExecutionDispositionV1;
+  readonly pack_mode: QueryProofPackModeV1;
+}> {
+  if (!isExecutableCompiledGamma(params.compiled)) {
+    return { disposition: "unsupported", pack_mode: "unsupported" };
+  }
+  if (params.hasConflict) {
+    return { disposition: "conflict", pack_mode: "conflict" };
+  }
+  const certBlocked = params.compiled.compile_disposition === "partial" ||
+    holeBlocksCertifiedDelivery(params.compiled.classified_holes);
+  if (params.hasUnresolvedInPrefix || certBlocked) {
+    return { disposition: "best_effort", pack_mode: "best_effort_uncertified" };
+  }
+  if (params.prefix.length === 0) {
+    return { disposition: "abstained", pack_mode: "abstained" };
+  }
+  return { disposition: "captured", pack_mode: "certified" };
+}
+
+export function digestDecideConsumedIdentity(params: Readonly<{
+  readonly world: QueryProofDecideWorldV1;
+  readonly prefix: readonly string[];
+  readonly walk_transfer_digest: RecallFieldDigest;
+  readonly decision_contract_digest: RecallFieldDigest;
+  readonly issued?: QueryProofDecideWorldCaptureV1 | null;
+}>): RecallFieldDigest {
+  const world = params.world;
+  const issued = params.issued ?? decideWorldCapture(world);
+  const sourceEvidence = issued?.source_evidence_digest ??
+    world.source_evidence_digest ??
+    world.compiled.source_evidence_digest;
+  const psiIdentity = issued?.psi_v2_structural_digest ?? world.psi_identity;
+  return digestRecallFieldIdentity({
+    kind: "query_proof_decide_q_consumed_identity_v1",
+    decision_contract_digest: params.decision_contract_digest,
+    walk_transfer_digest: params.walk_transfer_digest,
+    compilation_digest: world.compiled.compilation_digest,
+    query_digest: world.compiled.query_digest,
+    compile_disposition: world.compiled.compile_disposition,
+    classified_holes: world.compiled.classified_holes,
+    gamma_digest: world.compiled.gamma_digest,
+    atoms: world.compiled.atoms,
+    standings: world.compiled.standings,
+    semantic_feasibility: world.compiled.semantic_feasibility,
+    candidate_universe_digest: issued?.candidate_universe_digest ??
+      digestRecallFieldIdentity(candidateIdentityMapForWorld(world)),
+    resource_policy: world.compiled.resource_policy,
+    ...(sourceEvidence === undefined || sourceEvidence === null ? {} : {
+      source_evidence_digest: sourceEvidence
+    }),
+    ...(psiIdentity === undefined || psiIdentity === null ? {} : {
+      psi_identity: psiIdentity
+    }),
+    unresolved_tradeoff_pairs: world.unresolved_tradeoff_pairs,
+    ...(world.identity_tie_winner === undefined ? {} : {
+      identity_tie_winner: world.identity_tie_winner
+    }),
+    target_prefix: params.prefix
+  });
+}
+
 function boundResourcePolicy(world: QueryProofDecideWorldV1): {
   readonly token_budget: number;
   readonly per_dimension_limits: Readonly<Record<string, number>> | null;
@@ -206,7 +334,7 @@ function boundResourcePolicy(world: QueryProofDecideWorldV1): {
     throw new Error("compiled resource policy does not match Decide_Q world budget");
   }
   if (policy.per_dimension_limits !== null &&
-      !sameDimensionLimits(policy.per_dimension_limits, world.per_dimension_limits)) {
+    !sameDimensionLimits(policy.per_dimension_limits, world.per_dimension_limits)) {
     throw new Error("compiled resource policy does not match Decide_Q dimension limits");
   }
   return {
@@ -323,9 +451,9 @@ function traceOf(
     candidate_prefix: Object.freeze([...prefix]),
     answer_bindings: sortDecisionBindings(bindings.filter((row) =>
       selected.has(row.candidate_key)).map((row) => Object.freeze({
-      binding_id: row.binding_id,
-      value: row.value
-    }))),
+        binding_id: row.binding_id,
+        value: row.value
+      }))),
     pick_reasons: Object.freeze(prefix.map((candidateKey, position) => Object.freeze({
       position,
       candidate_key: candidateKey,

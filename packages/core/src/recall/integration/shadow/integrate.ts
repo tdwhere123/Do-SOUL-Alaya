@@ -2,9 +2,7 @@ import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import { compileRecallQueryDemand } from "../../query/recall-query-demand.js";
 import {
   buildRecallCandidateDedupeKey,
-  buildRecallLogicalObjectKey,
-  errorNameOf,
-  toErrorMessage
+  buildRecallLogicalObjectKey
 } from "../../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
@@ -20,6 +18,8 @@ import {
   type ShadowSetUtilityInput
 } from "../../decision/prefix-capture/capture.js";
 import {
+  issueObservationBackedPsiV2,
+  observeTargetDeliveryPack,
   previewSidecar,
   type QueryProofPreviewRequest,
   type QueryProofPreviewRuntimeCapture,
@@ -72,8 +72,6 @@ import type { LiveQueryProofAuthority } from
   "../../decision/query-proof/live-query-proof-authority.js";
 import type { DeliveryPackV1 } from
   "../../decision/query-proof/delivery/contract.js";
-import { buildShadowDeliveryPack } from
-  "../../decision/query-proof/delivery/pack.js";
 
 export type { PsiQuery } from "../../decision/dominance-contract.js";
 export type { ShadowPsiObservationField } from "../../decision/query-proof/psi.js";
@@ -120,10 +118,10 @@ export type ShadowIntegrateInput = Readonly<{
   readonly nowIso?: string;
   readonly lexicalIntervalEnvelopesByKey?: PsiV2ShadowInputV1["lexical_interval_by_key"];
   readonly lexical_measurement_authority?:
-    PsiV2ShadowInputV1["lexical_measurement_authority"];
+  PsiV2ShadowInputV1["lexical_measurement_authority"];
   readonly supportMaterialization?: PsiV2ShadowInputV1["support"];
   readonly support_measurement_authority?:
-    PsiV2ShadowInputV1["support_measurement_authority"];
+  PsiV2ShadowInputV1["support_measurement_authority"];
   readonly query_proof_authority?: LiveQueryProofAuthority;
   readonly psi_v2_producer_outcomes?: PsiV2ShadowInputV1["producer_outcomes"];
   readonly query_id?: string;
@@ -391,11 +389,16 @@ function assembleCaptured(
   const k = input.policy.fine_assessment.budgets.max_entries;
   const first = walked.decisions[0];
   const prefix = prefixSK(walked.S_infty, k);
+  const source = queryProofPreviewSource(input, walkInput.candidates);
   const preview = previewSidecar(
     input.query_proof_preview,
     k,
     previewRuntimeCapture(walked),
-    queryProofPreviewSource(input)
+    source
+  );
+  const issuedPsi = source?.psi_v2_authority ?? issueDiagnosticPsiV2(
+    input,
+    walkInput.candidates
   );
   return freezeShadow({
     kind: "captured" as const,
@@ -437,20 +440,50 @@ function assembleCaptured(
     core_known_no_witness: Object.freeze(
       walked.decisions.flatMap((decision) => [...decision.novelty_core_known_absence])
     ),
-    psi_v2_shadow: observePsiV2Shadow(input),
+    psi_v2_shadow: observePsiV2Shadow(input, issuedPsi),
     ...preview,
-    delivery_pack: observeDeliveryPack(prefix, preview, input.snapshot_digest, input.warn)
+    delivery_pack: observeTargetDeliveryPack({
+      preview,
+      snapshot_digest: input.snapshot_digest,
+      capture_identity_digest: CAPTURE_IDENTITY_DIGEST
+    })
   });
 }
 
 function queryProofPreviewSource(
-  input: ShadowIntegrateInput
+  input: ShadowIntegrateInput,
+  walkCandidates: readonly ShadowCaptureWalkCandidate[]
 ): QueryProofPreviewSource | undefined {
-  if (input.query_proof_authority === undefined ||
-      input.support_measurement_authority === undefined) return undefined;
+  if (input.query_proof_authority === undefined) return undefined;
+  const support = input.support_measurement_authority;
+  if (support === undefined) {
+    return Object.freeze({
+      live_authority: input.query_proof_authority,
+      unsupported_reason: "support_osf_source_unavailable"
+    });
+  }
+  const psiV2Authority = issueObservationBackedPsiV2({
+    live_authority: input.query_proof_authority,
+    walk_candidates: walkCandidates,
+    snapshot_digest: input.snapshot_digest,
+    query_id: input.query_id,
+    lexical_interval_by_key: input.lexicalIntervalEnvelopesByKey,
+    lexical_measurement_authority: input.lexical_measurement_authority,
+    support: input.supportMaterialization,
+    support_measurement_authority: support,
+    producer_outcomes: input.psi_v2_producer_outcomes
+  });
+  if (psiV2Authority === undefined) {
+    return Object.freeze({
+      live_authority: input.query_proof_authority,
+      support_measurement_authority: support,
+      unsupported_reason: "observation_backed_psi_v2_unavailable"
+    });
+  }
   return Object.freeze({
     live_authority: input.query_proof_authority,
-    support_measurement_authority: input.support_measurement_authority
+    support_measurement_authority: support,
+    psi_v2_authority: psiV2Authority
   });
 }
 
@@ -460,35 +493,28 @@ function previewRuntimeCapture(
   return Object.freeze({ walk: walked });
 }
 
-function observeDeliveryPack(
-  prefix: readonly string[],
-  preview: { readonly query_proof_preview?: QueryProofPreviewSidecar },
-  snapshotDigest: string | undefined,
-  warn?: RecallServiceWarnPort
-): DeliveryPackV1 {
-  try {
-    return buildShadowDeliveryPack({
-      selected_candidates: prefix,
-      capture_identity_digest: CAPTURE_IDENTITY_DIGEST,
-      preview_status: preview.query_proof_preview?.status,
-      preview_bindings: preview.query_proof_preview?.answer_bindings,
-      preview_contract_digest: preview.query_proof_preview?.contract_digest,
-      snapshot_digest: snapshotDigest
-    });
-  } catch (error) {
-    warn?.("shadow delivery pack observation failed; using unbound pack", {
-      operation: "shadow_delivery_pack_observation",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
-    return buildShadowDeliveryPack({
-      selected_candidates: prefix,
-      capture_identity_digest: CAPTURE_IDENTITY_DIGEST
-    });
-  }
+function issueDiagnosticPsiV2(
+  input: ShadowIntegrateInput,
+  walkCandidates: readonly ShadowCaptureWalkCandidate[]
+) {
+  if (input.query_proof_authority === undefined) return undefined;
+  return issueObservationBackedPsiV2({
+    live_authority: input.query_proof_authority,
+    walk_candidates: walkCandidates,
+    snapshot_digest: input.snapshot_digest,
+    query_id: input.query_id,
+    lexical_interval_by_key: input.lexicalIntervalEnvelopesByKey,
+    lexical_measurement_authority: input.lexical_measurement_authority,
+    support: input.supportMaterialization,
+    support_measurement_authority: input.support_measurement_authority,
+    producer_outcomes: input.psi_v2_producer_outcomes
+  });
 }
 
-function observePsiV2Shadow(input: ShadowIntegrateInput): PsiV2ShadowSidecar {
+function observePsiV2Shadow(
+  input: ShadowIntegrateInput,
+  issuedArtifact: QueryProofPreviewSource["psi_v2_authority"]
+): PsiV2ShadowSidecar {
   try {
     return buildPsiV2ShadowDiagnostics({
       query_id: input.query_id,
@@ -498,7 +524,8 @@ function observePsiV2Shadow(input: ShadowIntegrateInput): PsiV2ShadowSidecar {
       lexical_measurement_authority: input.lexical_measurement_authority,
       support: input.supportMaterialization,
       support_measurement_authority: input.support_measurement_authority,
-      producer_outcomes: input.psi_v2_producer_outcomes
+      producer_outcomes: input.psi_v2_producer_outcomes,
+      ...(issuedArtifact === undefined ? {} : { issued_artifact: issuedArtifact })
     });
   } catch {
     return malformedPsiV2ShadowDiagnostics();

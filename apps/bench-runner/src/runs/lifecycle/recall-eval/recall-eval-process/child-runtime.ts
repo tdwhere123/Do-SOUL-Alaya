@@ -104,9 +104,7 @@ export async function recallRecallEvalPagerChild(
   if (daemon === null) {
     throw new Error("recall-eval pager daemon is not running");
   }
-  const activation = createCandidateActivationCapture(
-    current.open.captureOpenSemanticFactorCandidateActivations
-  );
+  const activation = createCandidateActivationCapture(true);
   const snapshotDigest = resolveWorkspaceSliceSnapshotDigest(
     current.slices,
     payload.question.workspaceId

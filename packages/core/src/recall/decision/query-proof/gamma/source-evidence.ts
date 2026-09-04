@@ -24,6 +24,10 @@ import {
   verifyLiveQueryProofAuthority,
   type LiveQueryProofAuthority
 } from "../live-query-proof-authority.js";
+import {
+  answerProgramCapabilityId,
+  queryClassCapabilityStatus
+} from "./capability-matrix.js";
 import type {
   QueryGammaAtomJurisdictionV1,
   QueryGammaCandidateEvidenceV1,
@@ -51,9 +55,9 @@ export function captureSourceOwnedQueryGammaEvidence(params: Readonly<{
   const live = verifyLiveQueryProofAuthority(params.live_authority);
   const source = captureVerifiedSupportSourceSnapshot(params.measurement_authority);
   if (source.query_id !== live.query_id || source.workspace_id !== live.workspace_id ||
-      source.snapshot_digest !== live.snapshot_digest ||
-      source.lease_digest !==
-        digestRecallFieldIdentity(params.live_authority.snapshot_read_lease)) {
+    source.snapshot_digest !== live.snapshot_digest ||
+    source.lease_digest !==
+    digestRecallFieldIdentity(params.live_authority.snapshot_read_lease)) {
     throw new Error("Gamma support source is not bound to the live query snapshot");
   }
   const sourceData = readVerifiedSupportSourceSnapshot(source);
@@ -62,15 +66,19 @@ export function captureSourceOwnedQueryGammaEvidence(params: Readonly<{
   }
   const compilation = params.live_authority.canonical_query_compilation;
   const query = receiptBoundHypothesis(compilation, sourceData.receipts);
+  const status = queryClassCapabilityStatus(answerProgramCapabilityId(query.answer.kind));
+  if (!status.supported_in_shadow) {
+    throw new Error(`source-owned Gamma unsupported query class: ${status.unsupported_reason}`);
+  }
   const queryDigest = digestCanonicalQueryV1(query);
   const candidateKeys = new Set(params.runtime.candidates.map(({ candidate_key }) => candidate_key));
   const receiptsByKey = new Map(sourceData.receipts.map((receipt) =>
     [receipt.candidate_key, receipt] as const));
   if (receiptsByKey.size !== sourceData.receipts.length ||
-      sourceData.receipts.some((receipt) =>
-        !candidateKeys.has(receipt.candidate_key) ||
-        receipt.hypothesis_digest !== queryDigest ||
-        !supportReceiptBindsCurrentQuery(receipt, compilation))) {
+    sourceData.receipts.some((receipt) =>
+      !candidateKeys.has(receipt.candidate_key) ||
+      receipt.hypothesis_digest !== queryDigest ||
+      !supportReceiptBindsCurrentQuery(receipt, compilation))) {
     throw new Error("Gamma support receipts are outside the runtime query universe");
   }
   const jurisdiction = propositionJurisdiction(query);

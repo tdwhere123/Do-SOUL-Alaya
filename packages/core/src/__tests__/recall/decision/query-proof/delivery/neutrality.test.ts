@@ -41,9 +41,11 @@ describe("delivery pack public neutrality", () => {
 
   it("explains prefix_sk order without changing membership", () => {
     const captured = captureLive();
-    expect(captured.delivery_pack.selected_candidates).toEqual(captured.prefix_proposal);
+    expect(captured.prefix_proposal.length).toBe(2);
+    expect(captured.delivery_pack.selected_candidates).not.toEqual(captured.prefix_proposal);
+    expect(captured.delivery_pack.selected_candidates).toEqual([]);
     expect(captured.delivery_pack.prefix_authority).toBe("prefix_sk");
-    expect(captured.delivery_pack.mode).toBe("abstained");
+    expect(captured.delivery_pack.mode).toBe("unsupported");
     expect(captured.delivery_pack.mode).not.toBe("certified");
     expect(captured.delivery_pack.capture_identity_digest).toBe(CAPTURE_IDENTITY_DIGEST);
     expect(captured.delivery_pack.query_digest).toBe(unavailableDeliveryDigest("query_digest"));

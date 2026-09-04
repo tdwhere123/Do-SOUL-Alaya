@@ -1,6 +1,5 @@
-import { createCorrelationWitness, type CorrelationWitness, type FourValuedWitness } from
-  "../../witness/index.js";
-import { compareText } from "../../../../../shared/compare-text.js";
+import type { FourValuedWitness } from "../../witness/index.js";
+import { captureData } from "../../../capture-data.js";
 import { createSupportHypergraph } from "../graph.js";
 import type { SupportHypergraphReceiptV1 } from "../receipt.js";
 import { createDraft, type SupportDraft } from "./draft.js";
@@ -18,7 +17,8 @@ import type {
   SupportMaterializationOutcomeV1,
   SupportMaterializationInputV1,
   SupportObservabilityGapV1,
-  SupportPropositionObservationV1
+  SupportPropositionObservationV1,
+  SupportRelationalSourceVerifierV1
 } from "./types.js";
 
 export type SupportMaterializationV1 = Readonly<{
@@ -32,30 +32,72 @@ export type SupportMaterializationV1 = Readonly<{
 export function materializeSupportFromReceipts(
   input: SupportMaterializationInputV1
 ): SupportMaterializationV1 {
+  const captured = captureMaterializationInput(input);
   const draft = createDraft();
-  for (const candidate of input.candidates ?? []) {
-    adaptCandidate(draft, candidate, input);
+  for (const candidate of captured.candidates ?? []) {
+    adaptCandidate(draft, candidate, captured);
   }
   const graph = createSupportHypergraph({
-    query_id: input.query_id,
-    snapshot_digest: input.snapshot_digest,
+    query_id: captured.query_id,
+    snapshot_digest: captured.snapshot_digest,
     nodes: [...draft.nodes.values()],
-    edges: [...draft.edges.values(), ...lineageCorrelationEdges(draft)],
-    correlations: lineageCorrelationWitnesses(draft, input.query_id, input.snapshot_digest)
+    edges: [...draft.edges.values()]
   });
+  const lease = captured.authority_context?.read_lease;
   const proposition_observations = candidatePropositionObservationsFromDraft(
     draft,
-    input.query_id,
-    input.snapshot_digest
+    captured.query_id,
+    captured.snapshot_digest,
+    Object.freeze({
+      workspace_id: null,
+      principal: lease?.principal ?? null
+    })
   );
-  registerIssuedSupportSource(graph, input.candidates ?? [], proposition_observations);
+  registerIssuedSupportSource(graph, captured.candidates ?? [], proposition_observations);
   return Object.freeze({
     graph,
-    polarities: polaritiesFromDraft(draft, input.query_id, input.snapshot_digest),
+    polarities: polaritiesFromDraft(draft, captured.query_id, captured.snapshot_digest),
     proposition_observations,
     gaps: Object.freeze([...draft.gaps]),
     outcomes: Object.freeze([...draft.outcomes])
   });
+}
+
+function captureMaterializationInput(
+  input: SupportMaterializationInputV1
+): SupportMaterializationInputV1 {
+  const candidates = captureData(input.candidates ?? []);
+  const authority = input.authority_context;
+  if (authority === undefined) {
+    return Object.freeze({
+      query_id: input.query_id,
+      snapshot_digest: input.snapshot_digest,
+      candidates
+    });
+  }
+  const verifiers = bindVerifierRefs(authority.relational_source_verifiers);
+  return Object.freeze({
+    query_id: input.query_id,
+    snapshot_digest: input.snapshot_digest,
+    candidates,
+    authority_context: Object.freeze({
+      snapshot_vector: captureData(authority.snapshot_vector),
+      snapshot_receipt: captureData(authority.snapshot_receipt),
+      read_lease: captureData(authority.read_lease),
+      ...(verifiers === undefined ? {} : { relational_source_verifiers: verifiers })
+    })
+  });
+}
+
+function bindVerifierRefs(
+  verifiers: readonly SupportRelationalSourceVerifierV1[] | undefined
+): readonly SupportRelationalSourceVerifierV1[] | undefined {
+  if (verifiers === undefined) return undefined;
+  return Object.freeze(verifiers.map((verifier) => Object.freeze({
+    source_owner: verifier.source_owner,
+    allowed_subject_kinds: captureData(verifier.allowed_subject_kinds),
+    verifySourceObservation: verifier.verifySourceObservation
+  })));
 }
 
 // Issued-graph identity cache only; OSF composition receipt is source authority.
@@ -95,57 +137,4 @@ function adaptCandidate(
   adaptPathProjection(draft, candidate, input);
   adaptTemporal(draft, candidate);
   adaptEvidenceAndF3(draft, candidate);
-}
-
-function lineageCorrelationEdges(draft: SupportDraft): readonly {
-  readonly kind: "correlated";
-  readonly from: { readonly kind: "evidence_unit"; readonly id: string };
-  readonly to: { readonly kind: "evidence_unit"; readonly id: string };
-}[] {
-  const pairs = lineagePairs(draft);
-  return pairs.map(([left, right]) => ({
-    kind: "correlated" as const,
-    from: { kind: "evidence_unit" as const, id: left },
-    to: { kind: "evidence_unit" as const, id: right }
-  }));
-}
-
-function lineageCorrelationWitnesses(
-  draft: SupportDraft,
-  queryId: string,
-  snapshot: string
-): readonly CorrelationWitness[] {
-  return lineagePairs(draft).map(([left, right]) => createCorrelationWitness({
-    identity: {
-      coordinate_id: `support.corr:${left}:${right}`,
-      query_id: queryId,
-      snapshot_digest: snapshot
-    },
-    provenance: [{ source_id: "support.adapter", producer: "support.correlation.v1" }],
-    epistemic: { kind: "exact" },
-    payload: { left_id: left, right_id: right, state: "same_source_lineage" }
-  }));
-}
-
-function lineagePairs(draft: SupportDraft): readonly [string, string][] {
-  const byLineage = new Map<string, string[]>();
-  for (const [evidenceId, lineageIds] of draft.evidenceLineages) {
-    for (const lineageId of lineageIds) {
-      const group = byLineage.get(lineageId) ?? [];
-      group.push(evidenceId);
-      byLineage.set(lineageId, group);
-    }
-  }
-  const pairs = new Map<string, [string, string]>();
-  for (const group of byLineage.values()) {
-    const unique = [...new Set(group)].sort();
-    for (let i = 0; i < unique.length; i += 1) {
-      for (let j = i + 1; j < unique.length; j += 1) {
-        const pair: [string, string] = [unique[i]!, unique[j]!];
-        pairs.set(pair.join("\0"), pair);
-      }
-    }
-  }
-  return [...pairs.values()].sort(([leftA, rightA], [leftB, rightB]) =>
-    compareText(leftA, leftB) || compareText(rightA, rightB));
 }

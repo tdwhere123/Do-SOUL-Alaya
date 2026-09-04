@@ -1,21 +1,30 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { gunzipSync } from "node:zlib";
-import type { KpiPayload } from "@do-soul/alaya-eval";
+import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
 import type { LongMemEvalSnapshotManifest } from "../../snapshot/materialize.js";
 import type { RecallEvalResult } from "./recall-eval-contract.js";
 import type { LongMemEvalWorkerShardPlan } from "./recall-eval-shards-worker.js";
+import {
+  loadRecallEvalShardArchive,
+  shardSourceRef,
+  type LoadedShardArchive,
+  type RankQuestion
+} from "./recall-eval-shards-merge-load.js";
+import {
+  computeScorableHits,
+  mergeShardPayloads,
+  type ScorableHits
+} from "./recall-eval-shards-merge-payload.js";
 
-interface LoadedShardArchive {
-  readonly payload: KpiPayload;
-  readonly diagnostics: readonly Record<string, unknown>[];
-  readonly rankQuestions: readonly RankQuestion[];
-}
-
-interface RankQuestion {
-  readonly question_id: string;
-  readonly delivered_objects: readonly unknown[];
-}
+const IDENTITY_FIELDS = [
+  "split",
+  "alaya_commit",
+  "embedding_provider",
+  "chat_provider",
+  "policy_shape",
+  "harness_mode",
+  "sample_size"
+] as const;
 
 export async function mergeRecallEvalShardArchives(input: {
   readonly plans: readonly LongMemEvalWorkerShardPlan[];
@@ -24,168 +33,211 @@ export async function mergeRecallEvalShardArchives(input: {
   readonly concurrency: number;
 }): Promise<RecallEvalResult> {
   const shards: LoadedShardArchive[] = [];
-  for (const plan of input.plans) {
-    shards.push(await loadRecallEvalShardArchive(plan));
-  }
-  const perScenario = shards.flatMap((shard) => shard.payload.kpi.per_scenario);
+  for (const plan of input.plans) shards.push(await loadRecallEvalShardArchive(plan));
+  const first = shards[0];
+  if (first === undefined) throw new Error("recall-eval shard merge has no shards");
+  assertShardCompatibility(shards);
+  const perScenario = collectUniquePerScenario(shards);
   if (perScenario.length === 0) {
     throw new Error("recall-eval shard merge found no per_scenario rows");
   }
-  const first = shards[0];
-  if (first === undefined) {
-    throw new Error("recall-eval shard merge has no shards");
-  }
-  const payload = mergeShardPayloads(first.payload, shards, perScenario);
   const diagnostics = shards.flatMap((shard) => shard.diagnostics);
-  const rankQuestions = shards.flatMap((shard) => shard.rankQuestions);
-  const slug = mergedArchiveSlug(first.payload, input.concurrency);
-  const entryRoot = join(input.historyRoot, "public", slug);
+  const rankQuestions = collectRankQuestions(shards);
+  const hits = computeScorableHits(perScenario, indexDiagnostics(diagnostics, perScenario));
+  const payload = mergeShardPayloads(first.payload, shards, perScenario, hits);
+  return writeDiagnosticMerge({
+    input, first, shards, payload, perScenario, diagnostics, rankQuestions, hits
+  });
+}
+
+async function writeDiagnosticMerge(args: {
+  readonly input: {
+    readonly historyRoot: string;
+    readonly snapshotManifest: LongMemEvalSnapshotManifest;
+    readonly concurrency: number;
+  };
+  readonly first: LoadedShardArchive;
+  readonly shards: readonly LoadedShardArchive[];
+  readonly payload: KpiPayload;
+  readonly perScenario: readonly PerScenarioRow[];
+  readonly diagnostics: readonly Record<string, unknown>[];
+  readonly rankQuestions: readonly RankQuestion[];
+  readonly hits: ScorableHits;
+}): Promise<RecallEvalResult> {
+  const slug = `${args.first.payload.run_at}-${args.first.payload.alaya_commit}-c${args.input.concurrency}-merged`;
+  const entryRoot = join(args.input.historyRoot, "public", slug);
   await mkdir(entryRoot, { recursive: true });
   const kpiPath = join(entryRoot, "kpi.json");
   const reportPath = join(entryRoot, "report.md");
   const findingsPath = join(entryRoot, "findings.md");
-  await writeFile(kpiPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  await writeFile(reportPath, mergedReport(input.concurrency, perScenario.length), "utf8");
+  await writeFile(kpiPath, `${JSON.stringify(args.payload, null, 2)}\n`, "utf8");
+  await writeFile(reportPath, mergedReport(args.input.concurrency, args.hits), "utf8");
   await writeFile(findingsPath, "", "utf8");
-  if (rankQuestions.length > 0) {
+  await writeFile(
+    join(entryRoot, "recall-eval-shard-sources.json"),
+    `${JSON.stringify({ schema_version: 1, shards: args.shards.map(shardSourceRef) }, null, 2)}\n`,
+    "utf8"
+  );
+  if (args.rankQuestions.length > 0) {
     await writeFile(
       join(entryRoot, "recall-eval-rank-identity.json"),
-      `${JSON.stringify({ schema_version: 2, questions: rankQuestions }, null, 2)}\n`,
+      `${JSON.stringify({ schema_version: 2, questions: args.rankQuestions }, null, 2)}\n`,
       "utf8"
     );
   }
-  await writeFile(
-    join(input.historyRoot, "public", "latest-run.json"),
-    `${JSON.stringify({ slug, kpi_path: `${slug}/kpi.json` }, null, 2)}\n`,
-    "utf8"
-  );
   return {
     slug,
     kpiPath,
     reportPath,
     findingsPath,
-    payload,
-    snapshotManifest: input.snapshotManifest,
+    payload: args.payload,
+    snapshotManifest: args.input.snapshotManifest,
     perQuestionDelivered: buildMergedDeliveredMap(
-      diagnostics, rankQuestions, payload.kpi.per_scenario
+      args.diagnostics, args.rankQuestions, args.payload.kpi.per_scenario
     ),
     completion: { status: "complete", failures: [] },
     memoryProfile: { status: "disabled", failures: [] }
   };
 }
 
-async function loadRecallEvalShardArchive(
-  plan: LongMemEvalWorkerShardPlan
-): Promise<LoadedShardArchive> {
-  const publicRoot = join(plan.historyRoot, "public");
-  const entries = await readdir(publicRoot, { withFileTypes: true });
-  const dirs = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-  const matches: string[] = [];
-  for (const name of dirs) {
-    try {
-      await readFile(join(publicRoot, name, "kpi.json"));
-      matches.push(name);
-    } catch {
-      // Skip directories without kpi.json.
-    }
+function assertShardCompatibility(shards: readonly LoadedShardArchive[]): void {
+  const first = shards[0];
+  if (first === undefined) return;
+  for (let i = 1; i < shards.length; i++) {
+    assertIdentityMatch(first, shards[i]!, i);
+    assertContiguousPartition(shards[i - 1]!.plan, shards[i]!.plan, i);
   }
-  if (matches.length !== 1) {
-    throw new Error(
-      `recall-eval shard ${plan.shardIndex} must contain exactly one kpi archive, found ${matches.length}`
-    );
-  }
-  const dir = join(publicRoot, matches[0] ?? "");
-  const payload = JSON.parse(await readFile(join(dir, "kpi.json"), "utf8")) as KpiPayload;
-  const rows = payload.kpi.per_scenario;
-  if (!Array.isArray(rows) || rows.length !== plan.limit) {
-    throw new Error(
-      `recall-eval shard ${plan.shardIndex} per_scenario length ${rows?.length ?? 0} != limit ${plan.limit}`
-    );
-  }
-  return {
-    payload,
-    diagnostics: await readShardDiagnostics(dir),
-    rankQuestions: await readRankQuestions(dir)
-  };
 }
 
-function mergeShardPayloads(
-  first: KpiPayload,
-  shards: readonly LoadedShardArchive[],
-  perScenario: KpiPayload["kpi"]["per_scenario"]
-): KpiPayload {
-  const evaluated = perScenario.length;
-  const latencies = perScenario
-    .map((row) => row.latency_ms)
-    .filter((value): value is number => typeof value === "number")
-    .sort((left, right) => left - right);
-  return {
-    ...first,
-    evaluated_count: evaluated,
-    answerable_evaluated_count: evaluated,
-    kpi: {
-      ...first.kpi,
-      per_scenario: perScenario,
-      r_at_1: weightedRate(shards, "r_at_1"),
-      r_at_5: weightedRate(shards, "r_at_5"),
-      r_at_10: weightedRate(shards, "r_at_10"),
-      ...(latencies.length === 0 ? {} : {
-        latency_ms_p50: percentile(latencies, 0.5),
-        latency_ms_p95: percentile(latencies, 0.95)
-      })
-    }
-  };
+function assertIdentityMatch(
+  first: LoadedShardArchive,
+  shard: LoadedShardArchive,
+  index: number
+): void {
+  if (
+    shard.payload.dataset.name !== first.payload.dataset.name ||
+    shard.payload.dataset.checksum_sha256 !== first.payload.dataset.checksum_sha256
+  ) {
+    throw new Error(
+      `recall-eval shard merge dataset mismatch: shard[${index}] ${shard.payload.dataset.name} != shard[0] ${first.payload.dataset.name}`
+    );
+  }
+  for (const field of IDENTITY_FIELDS) {
+    if (shard.payload[field] === first.payload[field]) continue;
+    throw new Error(
+      `recall-eval shard merge ${field} mismatch: shard[${index}] ${String(shard.payload[field])} != shard[0] ${String(first.payload[field])}`
+    );
+  }
 }
 
-function weightedRate(
-  shards: readonly LoadedShardArchive[],
-  key: "r_at_1" | "r_at_5" | "r_at_10"
-): number {
-  let hits = 0;
-  let count = 0;
+function assertContiguousPartition(
+  prev: LongMemEvalWorkerShardPlan,
+  next: LongMemEvalWorkerShardPlan,
+  index: number
+): void {
+  const prevEnd = prev.offset + prev.limit;
+  if (next.offset < prevEnd) {
+    throw new Error(
+      `recall-eval shard merge partition overlap between shard ${index - 1} and shard ${index}`
+    );
+  }
+  if (next.offset > prevEnd) {
+    throw new Error(
+      `recall-eval shard merge partition gap between shard ${index - 1} and shard ${index}`
+    );
+  }
+}
+
+function collectUniquePerScenario(
+  shards: readonly LoadedShardArchive[]
+): PerScenarioRow[] {
+  const seenIds = new Set<string>();
+  const rows: PerScenarioRow[] = [];
   for (const shard of shards) {
-    const n = shard.payload.evaluated_count;
-    const rate = shard.payload.kpi[key];
-    if (typeof n !== "number" || typeof rate !== "number") {
-      throw new Error(`recall-eval shard merge missing ${key}`);
+    for (const row of shard.payload.kpi.per_scenario) {
+      if (row.id.length === 0 || seenIds.has(row.id)) {
+        throw new Error(
+          `recall-eval shard merge duplicate question_id '${row.id}' across shards`
+        );
+      }
+      seenIds.add(row.id);
+      rows.push(row);
     }
-    hits += rate * n;
-    count += n;
   }
-  return count === 0 ? 0 : hits / count;
+  return rows;
 }
 
-function percentile(sorted: readonly number[], p: number): number {
-  if (sorted.length === 0) {
-    throw new Error("recall-eval shard merge has no latencies");
+function collectRankQuestions(
+  shards: readonly LoadedShardArchive[]
+): readonly RankQuestion[] {
+  const unavailable = shards.filter((shard) => shard.rankQuestions === "unavailable");
+  if (unavailable.length === shards.length) {
+    // No rank identity present. Callers must not treat this as observed-empty
+    // delivery: the rank sidecar is omitted and delivery falls back to diagnostics.
+    return [];
   }
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1));
-  return sorted[index] ?? sorted[0]!;
+  if (unavailable.length > 0) {
+    throw new Error("recall-eval shard merge rank identity sidecar missing from some shards");
+  }
+  const questions = shards.flatMap((shard) => shard.rankQuestions as readonly RankQuestion[]);
+  if (questions.length === 0) {
+    throw new Error("recall-eval shard merge rank identity present but empty");
+  }
+  return questions;
 }
 
-function buildMergedDeliveredMap(
+function indexDiagnostics(
+  diagnostics: readonly Record<string, unknown>[],
+  perScenario: readonly PerScenarioRow[]
+): ReadonlyMap<string, Record<string, unknown>> {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const diagnostic of diagnostics) {
+    const id = diagnostic.question_id;
+    if (typeof id !== "string" || id.length === 0 || byId.has(id)) {
+      throw new Error(
+        `recall-eval shard merge duplicate or missing diagnostic question_id '${String(id)}'`
+      );
+    }
+    byId.set(id, diagnostic);
+  }
+  for (const row of perScenario) {
+    if (!byId.has(row.id)) {
+      throw new Error(`recall-eval shard merge missing diagnostic for question_id '${row.id}'`);
+    }
+  }
+  if (byId.size !== perScenario.length) {
+    throw new Error("recall-eval shard merge extra diagnostic question_id not present in per_scenario");
+  }
+  return byId;
+}
+
+export function buildMergedDeliveredMap(
   diagnostics: readonly Record<string, unknown>[],
   rankQuestions: readonly RankQuestion[],
   perScenario: readonly Readonly<{ readonly id: string }>[]
 ): ReadonlyMap<string, readonly string[]> {
   const rows = mergeDeliveredDiagnostics(diagnostics, rankQuestions);
-  if (rows.length === 0) return new Map();
   const expected = new Set(perScenario.map((row) => row.id));
   const byQuestion = new Map(rows.map((question) => [question.question_id, question]));
-  if (expected.size !== perScenario.length || byQuestion.size !== rows.length ||
-      rows.length !== perScenario.length ||
-      rows.some((question) => !expected.has(question.question_id))) {
+  if (
+    expected.size !== perScenario.length ||
+    byQuestion.size !== rows.length ||
+    rows.length !== perScenario.length ||
+    rows.some((question) => !expected.has(question.question_id))
+  ) {
     throw new Error("recall-eval shard delivery coverage mismatch");
   }
-  return new Map(perScenario.map((row) => {
-    const question = byQuestion.get(row.id);
-    if (question === undefined) {
-      throw new Error("recall-eval shard delivery coverage mismatch");
-    }
-    const objectIds = question.delivered_results?.map((result) => result.object_id) ??
-      question.delivered_memory_ids ?? [];
-    return [row.id, Object.freeze([...objectIds])];
-  }));
+  return new Map(
+    perScenario.map((row) => {
+      const question = byQuestion.get(row.id);
+      if (question === undefined) {
+        throw new Error("recall-eval shard delivery coverage mismatch");
+      }
+      const objectIds = question.delivered_results?.map((result) => result.object_id) ??
+        question.delivered_memory_ids ?? [];
+      return [row.id, Object.freeze([...objectIds])];
+    })
+  );
 }
 
 function mergeDeliveredDiagnostics(
@@ -217,57 +269,19 @@ function deliveredObjectRows(
   return objects.flatMap((row) => {
     if (typeof row === "string") return [{ object_id: row }];
     if (row !== null && typeof row === "object" && "object_id" in row) {
-      const objectId = (row as { object_id: unknown }).object_id;
+      const objectId = row.object_id;
       return typeof objectId === "string" ? [{ object_id: objectId }] : [];
     }
     return [];
   });
 }
 
-async function readShardDiagnostics(
-  dir: string
-): Promise<readonly Record<string, unknown>[]> {
-  const gzipPath = join(dir, "recall-eval-diagnostics.json.gz");
-  const jsonPath = join(dir, "longmemeval-diagnostics.json");
-  try {
-    const parsed = JSON.parse(gunzipSync(await readFile(gzipPath)).toString("utf8")) as {
-      readonly questions?: readonly Record<string, unknown>[];
-    };
-    return parsed.questions ?? [];
-  } catch {
-    try {
-      const parsed = JSON.parse(await readFile(jsonPath, "utf8")) as {
-        readonly questions?: readonly Record<string, unknown>[];
-      };
-      return parsed.questions ?? [];
-    } catch {
-      return [];
-    }
-  }
-}
-
-async function readRankQuestions(dir: string): Promise<readonly RankQuestion[]> {
-  try {
-    const parsed = JSON.parse(
-      await readFile(join(dir, "recall-eval-rank-identity.json"), "utf8")
-    ) as { readonly questions?: readonly RankQuestion[] };
-    return parsed.questions ?? [];
-  } catch {
-    return [];
-  }
-}
-
-function mergedArchiveSlug(payload: KpiPayload, concurrency: number): string {
-  const runAt = payload.run_at.replaceAll(":", "").replaceAll("-", "").slice(0, 15);
-  return `${payload.run_at}-${payload.alaya_commit}-c${concurrency}-merged`;
-}
-
-function mergedReport(concurrency: number, questions: number): string {
+function mergedReport(concurrency: number, hits: ScorableHits): string {
   return [
     "# Merged recall-eval shards",
     "",
-    `Diagnostic merge of ${concurrency} process shards (${questions} questions).`,
-    "Not release evidence. gate_eligible stays whatever the shards stored.",
+    `Diagnostic merge of ${concurrency} process shards (${hits.evaluatedCount} questions, ${hits.answerableCount} answerable).`,
+    "Strictly non-promotable diagnostic evidence: gate_eligible=false.",
     ""
   ].join("\n");
 }

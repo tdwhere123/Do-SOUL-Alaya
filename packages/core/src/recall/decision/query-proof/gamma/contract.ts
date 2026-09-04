@@ -1,3 +1,4 @@
+import { types as nodeTypes } from "node:util";
 import { compareText } from "../../../../shared/compare-text.js";
 import {
   digestRecallFieldIdentity,
@@ -16,6 +17,15 @@ export const QUERY_GAMMA_STRATA = COMPILED_GAMMA_KEYS;
 export type QueryGammaStratumV1 = (typeof QUERY_GAMMA_STRATA)[number];
 
 export type QueryGammaCompileStatusV1 = "compiled" | "unsupported";
+
+export type QueryGammaCompileDispositionV1 = "complete" | "partial" | "unsupported";
+
+export type QueryGammaClassifiedHoleV1 = Readonly<{
+  readonly provenance: string;
+  readonly code: string;
+  readonly impacts: readonly string[];
+  readonly hypothesis_digest?: string;
+}>;
 
 export type SemanticFeasibilityV1 = "feasible" | "infeasible" | "unresolved";
 
@@ -111,6 +121,8 @@ export type QueryCompiledGammaV1 = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: typeof QUERY_PROOF_GAMMA_OPERATOR_ID;
   readonly compile_status: QueryGammaCompileStatusV1;
+  readonly compile_disposition: QueryGammaCompileDispositionV1;
+  readonly classified_holes: readonly QueryGammaClassifiedHoleV1[];
   readonly unsupported_reason: string | null;
   readonly query_digest: RecallFieldDigest;
   readonly compilation_digest: RecallFieldDigest;
@@ -120,6 +132,7 @@ export type QueryCompiledGammaV1 = Readonly<{
   readonly atoms: readonly QueryGammaAtomV1[];
   readonly standings: readonly QueryGammaStandingV1[];
   readonly semantic_feasibility: readonly QueryGammaCandidateFeasibilityV1[];
+  readonly source_evidence_digest: RecallFieldDigest | null;
   readonly gamma_digest: RecallFieldDigest;
 }>;
 
@@ -268,4 +281,81 @@ export function digestQueryGammaBody(
   body: Omit<QueryCompiledGammaV1, "gamma_digest" | "standings" | "semantic_feasibility">
 ): RecallFieldDigest {
   return digestRecallFieldIdentity(body);
+}
+
+export function isExecutableCompiledGamma(compiled: QueryCompiledGammaV1): boolean {
+  return compiled.compile_status === "compiled" &&
+    compiled.unsupported_reason === null &&
+    compiled.atoms.length > 0;
+}
+
+export function holeBlocksCertifiedDelivery(
+  holes: readonly QueryGammaClassifiedHoleV1[]
+): boolean {
+  return holes.some((hole) => hole.impacts.includes("blocks_certified_delivery"));
+}
+
+export function captureGammaPremises<T>(value: T): T {
+  return copyPlain(value) as T;
+}
+
+function copyPlain(value: unknown, ancestors: WeakSet<object> = new WeakSet()): unknown {
+  if (value === undefined || value === null || typeof value === "string"
+    || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new ShadowContractError("gamma premises must be finite");
+    }
+    return value;
+  }
+  if (typeof value !== "object") {
+    throw new ShadowContractError("gamma premises must be plain immutable data");
+  }
+  if (nodeTypes.isProxy(value)) {
+    throw new ShadowContractError("gamma premises cannot use proxies");
+  }
+  if (ancestors.has(value)) {
+    throw new ShadowContractError("gamma premises must be acyclic");
+  }
+  ancestors.add(value);
+  try {
+    return Array.isArray(value) ? copyArray(value, ancestors) : copyRecord(value, ancestors);
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function copyArray(
+  value: readonly unknown[],
+  ancestors: WeakSet<object>
+): readonly unknown[] {
+  const keys = Object.keys(value);
+  if (keys.length !== value.length || keys.some((key, index) => key !== String(index))) {
+    throw new ShadowContractError("gamma arrays must be dense without extra fields");
+  }
+  const copied: unknown[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    copied.push(copyPlain(dataValue(value, index), ancestors));
+  }
+  return Object.freeze(copied);
+}
+
+function copyRecord(value: object, ancestors: WeakSet<object>): object {
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new ShadowContractError("gamma premises must be a plain record");
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    throw new ShadowContractError("gamma premises must not contain symbol fields");
+  }
+  return Object.freeze(Object.fromEntries(Object.keys(value).sort(compareText).map((key) =>
+    [key, copyPlain(dataValue(value, key), ancestors)])));
+}
+
+function dataValue(value: object, key: PropertyKey): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined || descriptor.get !== undefined || descriptor.set !== undefined) {
+    throw new ShadowContractError("gamma premises cannot use getters");
+  }
+  return descriptor.value;
 }

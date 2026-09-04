@@ -129,10 +129,9 @@ describe("support adapter ordering", () => {
 
     expect(forward.graph.digest).toBe(reverse.graph.digest);
     expect(forward.graph.correlations).toEqual(reverse.graph.correlations);
-    expect(forward.graph.correlations).toEqual([
-      { left_id: "evidence-a", right_id: "evidence-shared", state: "same_source_lineage" },
-      { left_id: "evidence-b", right_id: "evidence-shared", state: "same_source_lineage" }
-    ]);
+    expect(forward.graph.correlations).toEqual([]);
+    expect(forward.graph.correlations.some((row) => row.state === "same_source_lineage"))
+      .toBe(false);
   });
 
   it("preserves every conflicting lineage assertion for one evidence unit", () => {
@@ -145,10 +144,9 @@ describe("support adapter ordering", () => {
       expect.objectContaining({ to: { kind: "source_lineage", id: "lineage-b" } })
     ]));
     expect(lineageEdges).toHaveLength(2);
-    expect(result.graph.correlations).toEqual(expect.arrayContaining([
-      expect.objectContaining({ left_id: "evidence-a", right_id: "evidence-shared" }),
-      expect.objectContaining({ left_id: "evidence-b", right_id: "evidence-shared" })
-    ]));
+    expect(result.graph.correlations).toEqual([]);
+    expect(result.graph.correlations.some((row) => row.state === "same_source_lineage"))
+      .toBe(false);
   });
 });
 

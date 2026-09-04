@@ -1,5 +1,6 @@
 import { createFourValuedWitness, type FourValuedPolarity, type FourValuedWitness } from
   "../../witness/index.js";
+import { digestRecallFieldIdentity } from "../../../../field/field-identity.js";
 import { compareText } from "../../../../../shared/compare-text.js";
 import type { CandidatePolarityVotes, PolarityVotes, SupportDraft } from "./draft.js";
 import { addEdge, addGap, addNode, supersedeLineage, vote } from "./draft.js";
@@ -48,7 +49,8 @@ export function polaritiesFromDraft(
 export function candidatePropositionObservationsFromDraft(
   draft: SupportDraft,
   queryId: string,
-  snapshot: string
+  snapshot: string,
+  pins: Readonly<{ readonly workspace_id: string | null; readonly principal: string | null }>
 ): readonly SupportPropositionObservationV1[] {
   return Object.freeze([...draft.candidateVotes.values()].map((row) => {
     const polarity = polarityOf(
@@ -56,10 +58,18 @@ export function candidatePropositionObservationsFromDraft(
       row.votes.refute,
       row.votes.superseded
     );
+    const provenance = observationProvenance(row);
     return Object.freeze({
       candidate_id: row.candidateId,
       local_proposition_id: row.propositionId,
       hypothesis_digest: row.hypothesisDigest,
+      query_id: queryId,
+      snapshot_digest: snapshot,
+      workspace_id: pins.workspace_id,
+      principal: pins.principal,
+      source_digest: digestRecallFieldIdentity(provenance),
+      jurisdiction: row.jurisdiction,
+      producer_outcome: row.producer_outcome,
       witness: createFourValuedWitness({
         identity: {
           coordinate_id: `support.polarity:${row.candidateId}:${row.propositionId}`,
@@ -68,7 +78,7 @@ export function candidatePropositionObservationsFromDraft(
           candidate_id: row.candidateId,
           proposition_id: row.propositionId
         },
-        provenance: observationProvenance(row),
+        provenance,
         epistemic: polarity === "both" ? { kind: "conflict" } : { kind: "exact" },
         payload: { polarity }
       })
@@ -76,7 +86,8 @@ export function candidatePropositionObservationsFromDraft(
   }).sort((left, right) =>
     compareText(left.candidate_id, right.candidate_id) ||
     compareText(left.hypothesis_digest ?? "", right.hypothesis_digest ?? "") ||
-    compareText(left.local_proposition_id, right.local_proposition_id)));
+    compareText(left.local_proposition_id, right.local_proposition_id) ||
+    compareText(left.jurisdiction ?? "", right.jurisdiction ?? "")));
 }
 
 function adaptPolarity(
@@ -103,7 +114,14 @@ function adaptPolarity(
     return;
   }
   const side = polarity.value.polarity === "positive" ? "support" : "refute";
-  voteOnProposition(draft, candidate, propositionId, polarity.value.lineage_id, side);
+  voteOnProposition(
+    draft,
+    candidate,
+    propositionId,
+    polarity.value.lineage_id,
+    side,
+    polarity.value.receipt?.source_owner ?? "relation_assertions"
+  );
 }
 
 function adaptContradiction(
@@ -129,7 +147,14 @@ function adaptContradiction(
       lineage_id: contradiction.value.lineage_id
     }
   )) return;
-  voteOnProposition(draft, candidate, propositionId, contradiction.value.lineage_id, "refute");
+  voteOnProposition(
+    draft,
+    candidate,
+    propositionId,
+    contradiction.value.lineage_id,
+    "refute",
+    contradiction.value.receipt?.source_owner ?? "relation_assertions"
+  );
 }
 
 function adaptSupersession(
@@ -166,7 +191,8 @@ function voteOnProposition(
   candidate: SupportCandidateReceiptV1,
   propositionId: string,
   lineageId: string,
-  side: "support" | "refute"
+  side: "support" | "refute",
+  jurisdiction: string
 ): void {
   addNode(draft, "proposition", propositionId);
   vote(
@@ -175,7 +201,8 @@ function voteOnProposition(
     candidate.hypothesis_digest,
     propositionId,
     lineageId,
-    side
+    side,
+    jurisdiction
   );
   const kind = side === "support" ? "supports" : "refutes";
   for (const evidenceId of candidate.evidence_ids ?? []) {

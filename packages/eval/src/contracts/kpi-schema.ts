@@ -107,7 +107,9 @@ export type DegradationReasons = z.infer<typeof DegradationReasonsSchema>;
 const PerScenarioRowSchema = z.object({
   id: z.string().min(1),
   version: z.number().int().positive(),
+  hit_at_1: z.boolean().optional(),
   hit_at_5: z.boolean(),
+  hit_at_10: z.boolean().optional(),
   // Additive migration field. Missing means legacy denominator semantics;
   // consumers must never infer scorable from hit_at_5.
   scorable: z.boolean().optional(),

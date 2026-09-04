@@ -40,6 +40,11 @@ export type ShadowDeliveryPackBindV1 = Readonly<{
   readonly preview_bindings?: readonly DeliveryPackBindingV1[];
   readonly preview_contract_digest?: string;
   readonly snapshot_digest?: string;
+  readonly query_digest?: string;
+  readonly mode?: DeliveryPackModeV1;
+  readonly holes?: readonly DeliveryPackHoleV1[];
+  readonly conflicts?: readonly DeliveryPackConflictV1[];
+  readonly decision_identity_digest?: string;
 }>;
 
 export function buildDeliveryPack(input: DeliveryPackInputV1): DeliveryPackV1 {
@@ -86,25 +91,67 @@ function finishParse(record: Partial<DeliveryPackV1>): DeliveryPackV1 {
 }
 
 function shadowInputFrom(bind: ShadowDeliveryPackBindV1): DeliveryPackInputV1 {
-  const abstained = bind.preview_status !== "captured";
+  const mode = bind.mode ?? "abstained";
+  verifyDecisionIdentity(bind);
+  if (mode === "certified") {
+    requireCertifiedShadowDigests(bind);
+  }
+  const queryDigest = boundDigestOrUnavailable(bind.query_digest, "query_digest");
+  const snapshotDigest = boundDigestOrUnavailable(bind.snapshot_digest, "snapshot_digest");
+  const decisionContractDigest = boundDigestOrUnavailable(
+    bind.preview_contract_digest, "decision_contract_digest"
+  );
+  const holes = bind.holes ?? (mode === "certified"
+    ? Object.freeze([])
+    : Object.freeze([SEAL_UNBOUND_HOLE]));
+  const conflicts = bind.conflicts ?? (mode === "conflict"
+    ? Object.freeze([{
+      conflict_id: "unresolved_pointwise_tradeoff",
+      kind: "unresolved_tradeoff",
+      coordinate_ids: Object.freeze([] as string[])
+    }])
+    : Object.freeze([]));
   return {
-    mode: abstained ? "abstained" : "best_effort_uncertified",
-    query_digest: unavailableDeliveryDigest("query_digest"),
-    snapshot_digest: boundDigestOrUnavailable(bind.snapshot_digest, "snapshot_digest"),
-    decision_contract_digest: boundDigestOrUnavailable(
-      bind.preview_contract_digest, "decision_contract_digest"
-    ),
+    mode,
+    query_digest: queryDigest,
+    snapshot_digest: snapshotDigest,
+    decision_contract_digest: decisionContractDigest,
     capture_identity_digest: bind.capture_identity_digest,
     selected_candidates: bind.selected_candidates,
     answer_kind: "none",
     answer_bindings: bind.preview_bindings ?? [],
     propositions: [],
     evidence_groups: [],
-    holes: [SEAL_UNBOUND_HOLE],
-    conflicts: [],
+    holes,
+    conflicts,
     completeness_scope: null,
     principal_scope: NON_INTERFERING_PRINCIPAL_SCOPE
   };
+}
+
+function requireCertifiedShadowDigests(bind: ShadowDeliveryPackBindV1): void {
+  for (const [value, field] of [
+    [bind.query_digest, "query_digest"],
+    [bind.snapshot_digest, "snapshot_digest"],
+    [bind.preview_contract_digest, "decision_contract_digest"],
+    [bind.decision_identity_digest, "decision_identity_digest"]
+  ] as const) {
+    if (value === undefined || !SHA256.test(value)) {
+      throw new ShadowContractError(`certified pack cannot use unavailable ${field}`);
+    }
+  }
+}
+
+function verifyDecisionIdentity(bind: ShadowDeliveryPackBindV1): void {
+  if (bind.decision_identity_digest === undefined) return;
+  if (!SHA256.test(bind.decision_identity_digest)) {
+    throw new ShadowContractError("delivery pack decision identity is unavailable");
+  }
+  if (bind.capture_identity_digest !== bind.decision_identity_digest) {
+    throw new ShadowContractError(
+      "delivery pack capture identity does not match decision identity"
+    );
+  }
 }
 
 function sealPack(input: DeliveryPackInputV1): DeliveryPackV1 {

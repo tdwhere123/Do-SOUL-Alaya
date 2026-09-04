@@ -3,7 +3,6 @@ import { digestRecallFieldIdentity, type RecallFieldDigest } from
 import { compareText } from "../../../../shared/compare-text.js";
 import type { D1CandidateEnvelopeMap } from "../adapters/lexical-bound/legal-envelope.js";
 import { freezeShadow } from "../../contract-primitives.js";
-import { isPsiCycleFailure } from "../frontier-peel.js";
 import type { VerifiedMeasurementAuthorityV1 } from "../measurement/index.js";
 import type { SupportMaterializationV1 } from "../support/index.js";
 import type {
@@ -12,7 +11,10 @@ import type {
 } from "../support/types.js";
 import type { SupportObservabilityGapV1 } from "../support/adapters/types.js";
 import { comparePsiV2 } from "./compare.js";
-import { peelPsiV2Frontiers, psiV2CycleCount } from "./frontier.js";
+import type {
+  PsiV2AuthorityArtifactV1,
+  PsiV2PairOutcomeV1
+} from "./authority.js";
 import {
   psiV2CandidateFromLexicalEnvelope,
   rawMissingFamilyFragment
@@ -77,13 +79,16 @@ export type PsiV2ShadowDiagnosticsV1 = Readonly<{
   readonly schema_version: 1;
   readonly operator_id: "recall_psi_v2_shadow_v1";
   readonly observation_status: PsiV2ShadowObservationStatusV1;
-  readonly frontier_width: number;
-  readonly undominated_share: number;
-  readonly blocked_share: number;
-  readonly incomparable_share: number;
-  readonly tradeoff_share: number;
-  readonly equal_share: number;
-  readonly cycle_count: number;
+  readonly frontier_width: number | null;
+  readonly undominated_share: number | null;
+  readonly blocked_share: number | null;
+  readonly incomparable_share: number | null;
+  readonly tradeoff_share: number | null;
+  readonly equal_share: number | null;
+  readonly cycle_count: number | null;
+  readonly first_frontier_size: number | null;
+  readonly frontier_depth: number | null;
+  readonly pair_state_counts: Readonly<Record<PsiV2PairOutcomeV1, number>> | null;
   readonly raw_fragment_veto: boolean;
   readonly support_graph_digest: string | null;
   readonly support_outcome_digest: RecallFieldDigest | null;
@@ -106,6 +111,7 @@ export type PsiV2ShadowInputV1 = Readonly<{
   readonly correlations?: readonly SupportCorrelationRecordV1[];
   readonly conflicts?: readonly Readonly<{ readonly kind: string }>[];
   readonly unsupported?: readonly SupportObservabilityGapV1[];
+  readonly issued_artifact?: PsiV2AuthorityArtifactV1;
 }>;
 
 export function buildPsiV2ShadowDiagnostics(
@@ -115,26 +121,20 @@ export function buildPsiV2ShadowDiagnostics(
   if (!producersRan(input, producerOutcomes)) {
     return finish(unobservedBody(input, producerOutcomes));
   }
+  const status = observationStatus(input, producerOutcomes);
   const candidates = candidatesFrom(input, producerOutcomes);
-  const currentAuthorities = measurementAuthorities(input);
-  const peeled = peelPsiV2Frontiers(candidates, currentAuthorities);
-  const pairShares = pairSharesOf(candidates, currentAuthorities);
-  const cycleCount = psiV2CycleCount(peeled);
-  const frontierWidth = isPsiCycleFailure(peeled) ? 0 : peeled.layers.length;
-  const undominated = isPsiCycleFailure(peeled)
-    ? 0
-    : (peeled.layers[0]?.member_keys.length ?? 0);
+  if (status !== "observed") {
+    return finish(inactiveBody(input, producerOutcomes, status));
+  }
+  const artifact = input.issued_artifact;
+  const projected = artifact === undefined
+    ? unavailablePsiSummaries()
+    : projectIssuedArtifact(artifact);
   return finish({
     schema_version: 1 as const,
     operator_id: "recall_psi_v2_shadow_v1" as const,
-    observation_status: observationStatus(input, producerOutcomes),
-    frontier_width: frontierWidth,
-    undominated_share: share(undominated, candidates.length),
-    blocked_share: pairShares.blocked,
-    incomparable_share: pairShares.incomparable,
-    tradeoff_share: pairShares.tradeoff,
-    equal_share: pairShares.equal,
-    cycle_count: cycleCount,
+    observation_status: status,
+    ...projected,
     raw_fragment_veto: rawFragmentVeto(input, candidates),
     support_graph_digest: input.support?.graph.digest ?? null,
     support_outcome_digest: supportOutcomeDigest(input.support),
@@ -161,17 +161,28 @@ function unobservedBody(
   input: PsiV2ShadowInputV1,
   producerOutcomes: readonly PsiV2ProducerOutcomeV1[]
 ) {
+  return inactiveBody(input, producerOutcomes, "not_observed");
+}
+
+function inactiveBody(
+  input: PsiV2ShadowInputV1,
+  producerOutcomes: readonly PsiV2ProducerOutcomeV1[],
+  observationStatus: PsiV2ShadowObservationStatusV1
+) {
   return {
     schema_version: 1 as const,
     operator_id: "recall_psi_v2_shadow_v1" as const,
-    observation_status: "not_observed" as const,
-    frontier_width: 0,
-    undominated_share: 0,
-    blocked_share: 0,
-    incomparable_share: 0,
-    tradeoff_share: 0,
-    equal_share: 0,
-    cycle_count: 0,
+    observation_status: observationStatus,
+    frontier_width: null,
+    undominated_share: null,
+    blocked_share: null,
+    incomparable_share: null,
+    tradeoff_share: null,
+    equal_share: null,
+    cycle_count: null,
+    first_frontier_size: null,
+    frontier_depth: null,
+    pair_state_counts: null,
     raw_fragment_veto: false,
     support_graph_digest: input.support?.graph.digest ?? null,
     support_outcome_digest: null,
@@ -179,6 +190,84 @@ function unobservedBody(
     reasons: producerReasons(producerOutcomes),
     visibility: null
   };
+}
+
+function unavailablePsiSummaries() {
+  return {
+    frontier_width: null,
+    undominated_share: null,
+    blocked_share: null,
+    incomparable_share: null,
+    tradeoff_share: null,
+    equal_share: null,
+    cycle_count: null,
+    first_frontier_size: null,
+    frontier_depth: null,
+    pair_state_counts: null
+  };
+}
+
+function projectIssuedArtifact(artifact: PsiV2AuthorityArtifactV1) {
+  const pairShares = pairSharesFromArtifact(artifact);
+  const universe = artifact.candidate_universe.length;
+  return {
+    frontier_width: artifact.frontier_depth,
+    undominated_share: artifact.first_frontier_size === null || universe === 0
+      ? null
+      : share(artifact.first_frontier_size, universe),
+    blocked_share: pairShares.blocked,
+    incomparable_share: pairShares.incomparable,
+    tradeoff_share: pairShares.tradeoff,
+    equal_share: pairShares.equal,
+    cycle_count: artifact.cycle_status === "cycle" ? 1 : 0,
+    first_frontier_size: artifact.first_frontier_size,
+    frontier_depth: artifact.frontier_depth,
+    pair_state_counts: pairCountsFromArtifact(artifact)
+  };
+}
+
+function pairSharesFromArtifact(artifact: PsiV2AuthorityArtifactV1): {
+  blocked: number;
+  incomparable: number;
+  tradeoff: number;
+  equal: number;
+} {
+  let blocked = 0;
+  let incomparable = 0;
+  let tradeoff = 0;
+  let equal = 0;
+  let pairs = 0;
+  for (const row of artifact.pair_outcomes) {
+    if (row.left_candidate_key >= row.right_candidate_key) continue;
+    pairs += 1;
+    const kind = row.outcome;
+    if (kind === "uncertain" || kind === "unsupported") blocked += 1;
+    if (kind === "incomparable") incomparable += 1;
+    if (kind === "tradeoff") tradeoff += 1;
+    if (kind === "equal") equal += 1;
+  }
+  return {
+    blocked: share(blocked, pairs),
+    incomparable: share(incomparable, pairs),
+    tradeoff: share(tradeoff, pairs),
+    equal: share(equal, pairs)
+  };
+}
+
+function pairCountsFromArtifact(
+  artifact: PsiV2AuthorityArtifactV1
+): Readonly<Record<PsiV2PairOutcomeV1, number>> {
+  const counts: Record<PsiV2PairOutcomeV1, number> = {
+    strict_edge: 0,
+    reverse_edge: 0,
+    equal: 0,
+    incomparable: 0,
+    tradeoff: 0,
+    uncertain: 0,
+    unsupported: 0
+  };
+  for (const row of artifact.pair_outcomes) counts[row.outcome] += 1;
+  return freezeShadow(counts);
 }
 
 function candidatesFrom(
@@ -414,38 +503,6 @@ function pairRawFragmentVeto(
   }
   if (!rawMissingFamilyFragment(leftMap, rightMap)) return false;
   return comparePsiV2(left, right, currentAuthorities).kind === "blocked";
-}
-
-function pairSharesOf(
-  candidates: readonly PsiV2CandidateV1[],
-  currentAuthorities: readonly VerifiedMeasurementAuthorityV1[]
-): {
-  blocked: number;
-  incomparable: number;
-  tradeoff: number;
-  equal: number;
-} {
-  let blocked = 0;
-  let incomparable = 0;
-  let tradeoff = 0;
-  let equal = 0;
-  let pairs = 0;
-  for (let i = 0; i < candidates.length; i += 1) {
-    for (let j = i + 1; j < candidates.length; j += 1) {
-      pairs += 1;
-      const kind = comparePsiV2(candidates[i]!, candidates[j]!, currentAuthorities).kind;
-      if (kind === "blocked") blocked += 1;
-      if (kind === "incomparable") incomparable += 1;
-      if (kind === "tradeoff") tradeoff += 1;
-      if (kind === "equal") equal += 1;
-    }
-  }
-  return {
-    blocked: share(blocked, pairs),
-    incomparable: share(incomparable, pairs),
-    tradeoff: share(tradeoff, pairs),
-    equal: share(equal, pairs)
-  };
 }
 
 function measurementAuthorities(

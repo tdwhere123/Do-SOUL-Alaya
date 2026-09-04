@@ -5,14 +5,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { D1CandidateEnvelopeMap, D1EnvelopeIdentity } from
   "../../../../../recall/decision/query-proof/adapters/lexical-bound/legal-envelope.js";
 import * as frontierPeel from "../../../../../recall/decision/query-proof/frontier-peel.js";
+import * as authority from "../../../../../recall/decision/query-proof/dominance/authority.js";
 import type { LexDomain } from "../../../../../recall/decision/query-proof/observations.js";
 import {
   adaptLexicalIntervalEnvelopeToCollapse,
   buildPsiV2ShadowDiagnostics,
+  malformedPsiV2ShadowDiagnostics,
   LEXICAL_INTERVAL_MEASUREMENT_CONTRACT,
   psiV2CandidateFromLexicalEnvelope,
   comparePsiV2
 } from "../../../../../recall/decision/query-proof/dominance/index.js";
+import { issuePsiV2AuthorityArtifact } from
+  "../../../../../recall/decision/query-proof/dominance/authority.js";
 import type { VerifiedMeasurementAuthorityV1 } from
   "../../../../../recall/decision/query-proof/measurement/index.js";
 import { PINS, PROV } from "../witness/fixtures.js";
@@ -151,7 +155,8 @@ describe("psi v2 shadow diagnostics", () => {
       .toBe("lex.interval");
   });
 
-  it("emits deterministic mechanism metrics without a raw-fragment veto after collapse", () => {
+  it("emits deterministic producer diagnostics without inventing Psi summaries", () => {
+    const issue = vi.spyOn(authority, "issuePsiV2AuthorityArtifact");
     const first = buildPsiV2ShadowDiagnostics({
       query_id: "q",
       snapshot_digest: SNAPSHOT,
@@ -171,10 +176,64 @@ describe("psi v2 shadow diagnostics", () => {
       }
     });
     expect(first.digest).toBe(second.digest);
-    expect(first.cycle_count).toBe(0);
     expect(first.raw_fragment_veto).toBe(false);
     expect(first.observation_status).toBe("observed");
-    expect(first.frontier_width).toBeGreaterThan(0);
+    expect(first.cycle_count).toBeNull();
+    expect(first.first_frontier_size).toBeNull();
+    expect(first.frontier_depth).toBeNull();
+    expect(first.pair_state_counts).toBeNull();
+    expect(first.frontier_width).toBeNull();
+    expect(issue).not.toHaveBeenCalled();
+  });
+
+  it("projects pair counts, cycle, and frontiers only from the issued artifact", () => {
+    const issue = vi.spyOn(authority, "issuePsiV2AuthorityArtifact");
+    const candidates = [
+      psiV2CandidateFromLexicalEnvelope(
+        "workspace_local:memory_entry:a",
+        lexicalIntervalMap(9, 9),
+        "q",
+        SNAPSHOT
+      ),
+      psiV2CandidateFromLexicalEnvelope(
+        "workspace_local:memory_entry:b",
+        lexicalIntervalMap(1, 1),
+        "q",
+        SNAPSHOT
+      )
+    ];
+    const artifact = issuePsiV2AuthorityArtifact({
+      query_digest: "q",
+      snapshot_digest: SNAPSHOT,
+      candidates,
+      current_authorities: []
+    });
+    issue.mockClear();
+    const diagnostics = buildPsiV2ShadowDiagnostics({
+      query_id: "q",
+      snapshot_digest: SNAPSHOT,
+      candidate_keys: ["workspace_local:memory_entry:a", "workspace_local:memory_entry:b"],
+      lexical_interval_by_key: {
+        "workspace_local:memory_entry:a": lexicalIntervalMap(9, 9),
+        "workspace_local:memory_entry:b": lexicalIntervalMap(1, 1)
+      },
+      issued_artifact: artifact
+    });
+    expect(issue).not.toHaveBeenCalled();
+    expect(diagnostics.first_frontier_size).toBe(artifact.first_frontier_size);
+    expect(diagnostics.frontier_depth).toBe(artifact.frontier_depth);
+    expect(diagnostics.frontier_width).toBe(artifact.frontier_depth);
+    expect(diagnostics.cycle_count).toBe(artifact.cycle_status === "cycle" ? 1 : 0);
+    expect(diagnostics.pair_state_counts).toEqual({
+      strict_edge: artifact.pair_outcomes.filter((row) => row.outcome === "strict_edge").length,
+      reverse_edge: artifact.pair_outcomes.filter((row) => row.outcome === "reverse_edge").length,
+      equal: artifact.pair_outcomes.filter((row) => row.outcome === "equal").length,
+      incomparable: artifact.pair_outcomes.filter((row) => row.outcome === "incomparable").length,
+      tradeoff: artifact.pair_outcomes.filter((row) => row.outcome === "tradeoff").length,
+      uncertain: artifact.pair_outcomes.filter((row) => row.outcome === "uncertain").length,
+      unsupported: artifact.pair_outcomes.filter((row) => row.outcome === "unsupported").length
+    });
+    expect(diagnostics.first_frontier_size).not.toBe(diagnostics.frontier_depth);
   });
 
   it("records a raw-fragment veto when prepared measurement identity is absent", () => {
@@ -232,7 +291,19 @@ describe("psi v2 shadow diagnostics", () => {
     );
     expect(comparePsiV2(left, right, []).kind).toBe("blocked");
     expect(diagnostics.raw_fragment_veto).toBe(true);
-    expect(diagnostics.blocked_share).toBeGreaterThan(0);
+    expect(diagnostics.blocked_share).toBeNull();
+    expect(diagnostics.pair_state_counts).toBeNull();
+  });
+
+  it("does not treat malformed diagnostics as numeric-zero success", () => {
+    const diagnostics = malformedPsiV2ShadowDiagnostics();
+    expect(diagnostics.observation_status).toBe("malformed");
+    expect(diagnostics.frontier_width).toBeNull();
+    expect(diagnostics.first_frontier_size).toBeNull();
+    expect(diagnostics.frontier_depth).toBeNull();
+    expect(diagnostics.cycle_count).toBeNull();
+    expect(diagnostics.pair_state_counts).toBeNull();
+    expect(diagnostics.undominated_share).toBeNull();
   });
 
   it("marks empty input not_observed instead of a finished frontier", () => {
@@ -242,9 +313,13 @@ describe("psi v2 shadow diagnostics", () => {
       candidate_keys: ["workspace_local:memory_entry:a", "workspace_local:memory_entry:b"]
     });
     expect(empty.observation_status).toBe("not_observed");
-    expect(empty.undominated_share).toBe(0);
-    expect(empty.frontier_width).toBe(0);
-    expect(empty.blocked_share).toBe(0);
+    expect(empty.undominated_share).toBeNull();
+    expect(empty.frontier_width).toBeNull();
+    expect(empty.blocked_share).toBeNull();
+    expect(empty.first_frontier_size).toBeNull();
+    expect(empty.frontier_depth).toBeNull();
+    expect(empty.cycle_count).toBeNull();
+    expect(empty.pair_state_counts).toBeNull();
     expect(empty.visibility).toBeNull();
   });
 

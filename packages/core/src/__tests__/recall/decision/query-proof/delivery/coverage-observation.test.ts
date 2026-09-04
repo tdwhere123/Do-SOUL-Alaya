@@ -45,9 +45,9 @@ describe("delivery pack mode coverage observation", () => {
     expect(JSON.stringify(histogram)).not.toMatch(/coverage_closed|coverage-closed/u);
   });
 
-  it("observes live shadow packs as abstained and does not close coverage", () => {
+  it("observes live shadow packs as unsupported when the target chain cannot issue and does not close coverage", () => {
     const histogram = observeDeliveryPackModeCoverage([captureLive().delivery_pack]);
-    expect(histogram.counts.abstained).toBe(1);
+    expect(histogram.counts.unsupported).toBe(1);
     expect(histogram.counts.certified).toBe(0);
     expect(histogram.coverage_claim).toBe("not_claimed");
   });

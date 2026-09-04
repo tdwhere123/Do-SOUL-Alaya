@@ -66,15 +66,25 @@ describe("support receipt adapters", () => {
     expect(result.graph.edges.some((edge) => edge.kind === "supports")).toBe(true);
     expect(result.graph.edges.some((edge) => edge.kind === "sourced_from")).toBe(true);
     expect(result.polarities[0]?.payload?.polarity).toBe("supported_only");
-    expect(result.proposition_observations[0]).toMatchObject({
-      candidate_id: CAND,
-      local_proposition_id: "prop.works-at",
-      hypothesis_digest: `sha256:${"1".repeat(64)}`,
-      witness: {
-        identity: { candidate_id: CAND, proposition_id: "prop.works-at" },
-        payload: { polarity: "supported_only" }
-      }
-    });
+    expect(result.proposition_observations.map(({ jurisdiction }) => jurisdiction).sort())
+      .toEqual(["osf", "relation_assertions"]);
+    expect(result.proposition_observations.find((row) => row.jurisdiction === "relation_assertions"))
+      .toMatchObject({
+        candidate_id: CAND,
+        local_proposition_id: "prop.works-at",
+        hypothesis_digest: `sha256:${"1".repeat(64)}`,
+        witness: {
+          identity: { candidate_id: CAND, proposition_id: "prop.works-at" },
+          payload: { polarity: "supported_only" }
+        }
+      });
+    expect(result.proposition_observations.find((row) => row.jurisdiction === "osf"))
+      .toMatchObject({
+        candidate_id: CAND,
+        local_proposition_id: "prop.works-at",
+        producer_outcome: "observed",
+        witness: { payload: { polarity: "unknown" } }
+      });
   });
 
   it("does not substitute a binding role for an absent semantic identity", () => {
