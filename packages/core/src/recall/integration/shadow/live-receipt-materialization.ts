@@ -28,6 +28,7 @@ import {
   supportReceiptIsPropositionLegal
 } from "../../decision/query-proof/support/live-support-receipts.js";
 import type { PsiV2ProducerOutcomeV1 } from "../../decision/query-proof/dominance/index.js";
+import { captureData } from "../../decision/capture-data.js";
 
 type LiveAuthority = NonNullable<FineAssessParams["queryProofAuthority"]>;
 type ProducerResult<T> = Readonly<{
@@ -238,15 +239,21 @@ function materializeSupport(
       ? notObserved("support", "applicable_receipt_absent")
       : absent("support");
   }
-  const rejected = rejectInvalidSupportReceipts(receipts, params, authorityState);
+  let capturedReceipts: typeof receipts;
+  try {
+    capturedReceipts = captureData(receipts);
+  } catch {
+    return malformed("support", "producer_contract_invalid");
+  }
+  const rejected = rejectInvalidSupportReceipts(capturedReceipts, params, authorityState);
   if (rejected !== null) return rejected;
-  if (!receipts.every(supportReceiptIsPropositionLegal)) {
+  if (!capturedReceipts.every(supportReceiptIsPropositionLegal)) {
     return malformed("support", "producer_contract_invalid");
   }
   if (authorityState.status !== "verified") {
     return malformed("support", "diagnostic_contract_failure");
   }
-  return observeVerifiedSupport(params, authorityState, receipts);
+  return observeVerifiedSupport(params, authorityState, capturedReceipts);
 }
 
 function rejectInvalidSupportReceipts(

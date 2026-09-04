@@ -59,6 +59,8 @@ export type SupportMeasurementAuthorityEvidenceV1 =
 
 export type VerifiedSupportSourceBinding = Readonly<{
   readonly digest: RecallFieldDigest;
+  readonly hypothesis_digest: string | null;
+  readonly jurisdiction: string;
 }>;
 
 export type VerifiedSupportSourceSnapshotV1 = Readonly<{
@@ -213,6 +215,15 @@ export function assertSupportMeasurementSourceObservation(
         digestRecallFieldIdentity(collapse.witness)) {
     throw new ShadowContractError("collapse is not bound to issued support observations");
   }
+  const identity = collapse.witness.identity;
+  const hypothesisDigests = [...new Set(source.observations
+    .filter((observation) => observation.candidate_id === identity.candidate_id &&
+      (observation.local_proposition_id === identity.proposition_id ||
+        supportPropositionComparisonId(observation) === identity.proposition_id))
+    .map((observation) => observation.hypothesis_digest ?? null))];
+  if (hypothesisDigests.length !== 1) {
+    throw new ShadowContractError("support collapse is not bound to one hypothesis");
+  }
   return freezeShadow({
     digest: digestRecallFieldIdentity({
       graph_digest: source.graph.digest,
@@ -221,7 +232,9 @@ export function assertSupportMeasurementSourceObservation(
       lease_id: source.lease.lease_id,
       source_owner: source.capability.source_owner,
       view_kind: source.capability.view_kind
-    })
+    }),
+    hypothesis_digest: hypothesisDigests[0] ?? null,
+    jurisdiction: "support"
   });
 }
 

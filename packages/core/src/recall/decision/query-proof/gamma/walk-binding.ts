@@ -24,7 +24,7 @@ export function createQueryCompiledWalkTransfer(
   identityTieWinner?: string
 ): ShadowWalkUtilityTransfer {
   if (compiled.compile_status !== "compiled") {
-    throw new ShadowContractError("query-compiled Gamma transfer requires a compiled contract");
+    return refuseUnsupportedTransfer(compiled, identityTieWinner);
   }
   const contractDigest = digestRecallFieldIdentity({
     kind: "query_compiled_gamma",
@@ -74,6 +74,31 @@ export function createQueryCompiledWalkTransfer(
       candidate.token_cost,
       candidate.dimension
     )
+  });
+}
+
+function refuseUnsupportedTransfer(
+  compiled: QueryCompiledGammaV1,
+  identityTieWinner?: string
+): ShadowWalkUtilityTransfer {
+  const contractDigest = digestRecallFieldIdentity({
+    kind: "query_compiled_gamma_unsupported",
+    walk_operator_id: SHADOW_CAPTURE_OPERATOR_ID,
+    gamma_digest: compiled.gamma_digest
+  });
+  const refuse = (): never => {
+    throw new ShadowContractError("unsupported Gamma cannot be scored as a zero tuple");
+  };
+  return Object.freeze({
+    kind: "query_compiled_gamma" as const,
+    contract_digest: contractDigest,
+    ...(identityTieWinner === undefined ? {} : { identity_tie_winner: identityTieWinner }),
+    emptySet: () => emptyQueryGammaSelectedSet(),
+    score: refuse,
+    compare: refuse,
+    gainAtomIds: refuse,
+    admitLowerFrontier: refuse,
+    accept: refuse
   });
 }
 

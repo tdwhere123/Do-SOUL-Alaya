@@ -81,38 +81,24 @@ describe("query-compiled Gamma standings and marginals", () => {
     });
   });
 
-  it("treats unknown distinctness as unresolved coverage rather than proved non-coverage", () => {
+  it("does not compile unknown distinctness as an executable Gamma", () => {
     const compiled = compileGamma(distinctQuery(), [
       candidate("A", { bindings: [binding("alice", "proved_distinct")] }),
       candidate("B", { bindings: [binding("alice", "unknown")] })
     ]);
-    expect(compiled.semantic_feasibility.find((row) => row.candidate_key === "B")?.semantic)
-      .toBe("unresolved");
-    expect(evaluateQueryGammaTuple(compiled, emptyQueryGammaSelectedSet(), "B")).toEqual({
-      answer_binding_position: 0,
-      required_proposition_support: 0,
-      certified_independent_support: 0
-    });
+    expect(compiled.compile_status).toBe("unsupported");
+    expect(compiled.unsupported_reason).toBe("distinctness_source_unsupported");
+    expect(() => evaluateQueryGammaTuple(compiled, emptyQueryGammaSelectedSet(), "B"))
+      .toThrow(/unsupported Gamma/u);
   });
 
-  it("does not count alias may-equal as proved distinct", () => {
+  it("does not compile may-equal distinctness as an executable Gamma", () => {
     const compiled = compileGamma(distinctQuery(), [
       candidate("A", { bindings: [binding("alice", "proved_distinct")] }),
       candidate("B", { bindings: [binding("alice-alias", "may_equal")] })
     ]);
-    expect(compiled.atoms.map((atom) =>
-      `${atom.variable}:${atom.semantic_identity}`)).toEqual([
-        "x:alice-alias",
-        "x:alice"
-      ]);
-    expect(compiled.semantic_feasibility.find((row) => row.candidate_key === "B")?.semantic)
-      .toBe("unresolved");
-    expect(evaluateQueryGammaTuple(compiled, emptyQueryGammaSelectedSet(), "B"))
-      .toEqual({
-        answer_binding_position: 0,
-        required_proposition_support: 0,
-        certified_independent_support: 0
-      });
+    expect(compiled.compile_status).toBe("unsupported");
+    expect(compiled.atoms).toEqual([]);
   });
 
   it("lets unknown correlation contribute support but not independence novelty", () => {
@@ -258,8 +244,15 @@ describe("query-compiled Gamma standings and marginals", () => {
   it("refuses to score unsupported Gamma as a zero tuple", () => {
     const compiled = compileGamma(argmaxQuery(), [candidate("A")]);
     expect(compiled.compile_status).toBe("unsupported");
+    expect(compiled.atoms).toEqual([]);
     expect(() => evaluateQueryGammaTuple(compiled, emptyQueryGammaSelectedSet(), "A"))
       .toThrow(/unsupported Gamma/u);
+    expect(() => admitCompiledLowerFrontier(
+      compiled, emptyQueryGammaSelectedSet(), "A", []
+    )).toThrow(/unsupported Gamma/u);
+    expect(() => acceptQueryGammaCandidate(
+      emptyQueryGammaSelectedSet(), compiled, "A", "A", 1, "mem"
+    )).toThrow(/unsupported Gamma/u);
   });
 
   it("keeps resource infeasibility from changing semantic standings", () => {

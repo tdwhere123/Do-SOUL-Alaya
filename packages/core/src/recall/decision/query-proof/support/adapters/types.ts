@@ -188,11 +188,24 @@ export type SupportCandidateReceiptV1 = Readonly<{
   readonly f3_present?: boolean;
 }>;
 
+export type SupportObservationProducerOutcomeV1 =
+  | "observed"
+  | "not_observed"
+  | "producer_unavailable"
+  | "truncated";
+
 export type SupportPropositionObservationV1 = Readonly<{
   readonly candidate_id: string;
   readonly local_proposition_id: string;
   readonly hypothesis_digest: string | null;
   readonly witness: FourValuedWitness;
+  readonly query_id?: string;
+  readonly snapshot_digest?: string;
+  readonly workspace_id?: string | null;
+  readonly principal?: string | null;
+  readonly source_digest?: string | null;
+  readonly jurisdiction?: string;
+  readonly producer_outcome?: SupportObservationProducerOutcomeV1;
 }>;
 
 export type SupportMaterializationInputV1 = Readonly<{

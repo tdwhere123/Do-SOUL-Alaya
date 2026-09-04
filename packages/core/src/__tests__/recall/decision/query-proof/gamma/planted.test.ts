@@ -15,6 +15,7 @@ import {
   candidate,
   compilationFor,
   compileGamma,
+  PLANTED_OSF_SOURCE,
   distinctQuery,
   findGammaAtom,
   proposition,
@@ -132,31 +133,17 @@ describe("query-compiled Gamma planted leakage", () => {
     ]);
   });
 
-  it("compiles standings and semantic feasibility from one captured candidate snapshot", () => {
+  it("fails closed on Proxy compile premises instead of a second live read", () => {
     const covering = candidate("A", { bindings: [binding("alice")] });
-    const unresolved = candidate("B", { bindings_status: "unknown" });
-    let reads = 0;
     const switching = new Proxy({
       compilation: compilationFor(scalarQuery()),
       candidates: [covering]
     }, {
       get(target, property, receiver) {
-        if (property === "candidates") {
-          reads += 1;
-          return reads === 1 ? [covering] : [unresolved];
-        }
         return Reflect.get(target, property, receiver);
       }
     });
-    const compiled = compileQueryGamma(switching);
-    expect(reads).toBe(1);
-    expect(compiled.standings.every((row) => row.candidate_key === "A")).toBe(true);
-    expect(compiled.semantic_feasibility).toEqual([
-      { candidate_key: "A", semantic: "feasible" }
-    ]);
-    expect(compiled.standings.find((row) =>
-      row.atom_id === findGammaAtom(compiled, { kind: "scalar_binding", target: "x" }).atom_id)
-      ?.coverage).toBe("covers");
+    expect(() => compileQueryGamma(switching)).toThrow(/proxies/u);
   });
 
   it("ignores a later candidate array swap and nested mutation after compile capture", () => {
@@ -170,6 +157,7 @@ describe("query-compiled Gamma planted leakage", () => {
     ];
     const compiled = compileQueryGamma({
       compilation: compilationFor(scalarQuery()),
+      class_source: PLANTED_OSF_SOURCE,
       candidates: bag
     });
     bag.splice(0, 1, candidate("B", { bindings_status: "unknown" }));
@@ -210,17 +198,8 @@ describe("query-compiled Gamma planted leakage", () => {
       candidate("A", { bindings: [binding("z", "proved_distinct", "x:y")] }),
       candidate("B", { bindings: [binding("y:z", "proved_distinct", "x")] })
     ]);
-    const atom = findGammaAtom(compiled, {
-      kind: "distinct_binding",
-      variable: "x:y",
-      semantic_identity: "z"
-    });
-    expect(compiled.atoms).toHaveLength(1);
-    expect(compiled.standings.find((row) =>
-      row.candidate_key === "A" && row.atom_id === atom.atom_id)?.coverage).toBe("covers");
-    expect(compiled.standings.find((row) =>
-      row.candidate_key === "B" && row.atom_id === atom.atom_id)?.coverage)
-      .toBe("does_not_cover");
+    expect(compiled.compile_status).toBe("unsupported");
+    expect(compiled.unsupported_reason).toBe("distinctness_source_unsupported");
   });
 
   it("keeps predicate and constraint atoms with the same id distinct", () => {
@@ -277,20 +256,17 @@ describe("query-compiled Gamma planted leakage", () => {
       candidate("also-open", { bindings_status: "unknown" }),
       candidate("open", { bindings_status: "unknown" })
     ]);
+    expect(compiled.compile_status).toBe("unsupported");
     expect(compiled.atoms).toEqual([]);
-    expect(compiled.semantic_feasibility).toEqual([
-      { candidate_key: "also-open", semantic: "unresolved" },
-      { candidate_key: "open", semantic: "unresolved" }
-    ]);
+    expect(compiled.semantic_feasibility).toEqual([]);
   });
 
   it("does not treat all-unknown sequence as vacuously feasible", () => {
     const compiled = compileGamma(sequenceQuery(2), [
       candidate("open", { bindings_status: "unknown" })
     ]);
+    expect(compiled.compile_status).toBe("unsupported");
     expect(compiled.atoms).toEqual([]);
-    expect(compiled.semantic_feasibility).toEqual([
-      { candidate_key: "open", semantic: "unresolved" }
-    ]);
+    expect(compiled.semantic_feasibility).toEqual([]);
   });
 });

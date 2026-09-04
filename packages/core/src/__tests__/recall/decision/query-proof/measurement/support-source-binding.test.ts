@@ -45,7 +45,10 @@ import {
   cleanup,
   params
 } from "../../../integration/shadow/live-receipt-fixtures.js";
-import { evidenceCandidate } from "../../../delivery/canonical-delivery-fixtures.js";
+import { evidenceCandidate, extraCandidate } from "../../../delivery/canonical-delivery-fixtures.js";
+import { toShadowInput } from "../../../../../recall/delivery/canonical-delivery.js";
+import { captureShadowIntegration } from
+  "../../../../../recall/integration/shadow/integrate.js";
 import { SEAL_UNBOUND_HOLE } from
   "../../../../../recall/decision/query-proof/delivery/contract.js";
 import { parseCertifiedDeliveryPack } from
@@ -311,24 +314,13 @@ describe("support measurement source binding", () => {
     });
     const trace = captured(observed.shadowTrace);
 
-    if (trace.query_proof_preview?.status !== "captured") {
-      throw new Error(JSON.stringify({
-        preview: trace.query_proof_preview,
-        psi: trace.psi_v2_shadow
-      }));
-    }
-    expect(trace.query_proof_preview).toMatchObject({
-      status: "captured",
-      semantic_feasibility: [{
-        candidate_key: "workspace_local:memory_entry:cand-1",
-        semantic: "unresolved"
-      }]
-    });
+    expect(trace.query_proof_preview?.status).toBe("failed");
+    expect(trace.query_proof_preview?.reason).toMatch(/scalar_simple_source_unproved/u);
+    expect(trace.query_proof_preview?.pack_mode).toBe("unsupported");
     expect(trace.query_proof_preview?.S_infty).toEqual([]);
-    expect(trace.query_proof_preview?.contract_digest).toMatch(/^sha256:/u);
-    expect(trace.query_proof_preview?.prefix).toEqual(
-      trace.query_proof_preview?.candidate_prefix);
-    expect(trace.delivery_pack.mode).toBe("best_effort_uncertified");
+    expect(trace.query_proof_preview?.prefix).toEqual([]);
+    expect(trace.delivery_pack.selected_candidates).toEqual([]);
+    expect(trace.delivery_pack.mode).toBe("unsupported");
     expect(trace.delivery_pack.mode).not.toBe("certified");
     expect(trace.delivery_pack.holes).toEqual([SEAL_UNBOUND_HOLE]);
     expect(() => parseCertifiedDeliveryPack(trace.delivery_pack)).toThrow(/certified/u);
@@ -336,6 +328,118 @@ describe("support measurement source binding", () => {
     expect(observed.capture_receipt).toEqual(base.capture_receipt);
     expect(measurementAuthority.query_id).toBe(
       bound.canonicalQueryCompilation.query_identity.condition_identity);
+    cleanup(prepared);
+  });
+
+  it("binds pack to Decide_Q prefix when issued Psi differs from live Psi", async () => {
+    const prepared = await capturedPathGraphPreparedAuthority();
+    const bound = bindScalarPreparedQueryCapture(prepared);
+    const source = scalarCurrentQueryComposition(bound);
+    const query = bound.canonicalQueryCompilation.hypotheses[0];
+    if (query === undefined) throw new Error("expected one canonical query hypothesis");
+    const receipt = Object.freeze({
+      ...projectedReceipt(source.composition),
+      hypothesis_digest: digestCanonicalQueryV1(query)
+    });
+    const liveKey1 = "workspace_local:memory_entry:cand-1";
+    const liveKey2 = "workspace_local:memory_entry:cand-2";
+    const candidates = [evidenceCandidate("cand-1", "gold"), extraCandidate("cand-2", 1)];
+    const input = params(candidates);
+    const supplementaryData = Object.freeze({
+      ...input.supplementaryData,
+      openSemanticFactorComposition: source.composition,
+      openSemanticFactorCompatibilityTrace: source.trace,
+      queryOpenSemanticFactorFormation: source.query_capture,
+      semanticFactorFormationsByEvidenceId: source.evidence_formations
+    });
+    const observed = fineAssess({
+      ...input,
+      supplementaryData,
+      queryProofAuthority: authorityFrom(bound),
+      supportCandidateReceipts: [receipt],
+      shadowPsi: (left, right) => left === liveKey2 && right === liveKey1
+    });
+    const trace = captured(observed.shadowTrace);
+    expect(trace.prefix_proposal[0]).toBe(liveKey2);
+    expect(trace.query_proof_preview?.status).toBe("failed");
+    expect(trace.query_proof_preview?.reason).toMatch(/scalar_simple_source_unproved/u);
+    expect(trace.delivery_pack.mode).toBe("unsupported");
+    expect(trace.delivery_pack.selected_candidates).toEqual([]);
+    expect(trace.delivery_pack.selected_candidates).not.toEqual(trace.prefix_proposal);
+    cleanup(prepared);
+  });
+
+  it("keeps production candidates when support/OSF is unavailable on the lease", async () => {
+    const prepared = await capturedPathGraphPreparedAuthority();
+    const bound = bindScalarPreparedQueryCapture(prepared);
+    const candidates = [evidenceCandidate("cand-1", "gold")];
+    const input = params(candidates);
+    const base = fineAssess(input);
+    const observed = fineAssess({
+      ...input,
+      queryProofAuthority: authorityFrom(bound)
+    });
+    const trace = captured(observed.shadowTrace);
+    expect(trace.query_proof_preview?.status).toBe("failed");
+    expect(trace.query_proof_preview?.pack_mode).toBe("unsupported");
+    expect(trace.delivery_pack.mode).toBe("unsupported");
+    expect(trace.delivery_pack.selected_candidates).toEqual([]);
+    expect(observed.candidates).toEqual(base.candidates);
+    expect(observed.capture_receipt).toEqual(base.capture_receipt);
+    cleanup(prepared);
+  });
+
+  it("keeps production walk when target Psi issuance hits a getter", async () => {
+    const prepared = await capturedPathGraphPreparedAuthority();
+    const bound = bindScalarPreparedQueryCapture(prepared);
+    const source = scalarCurrentQueryComposition(bound);
+    const query = bound.canonicalQueryCompilation.hypotheses[0];
+    if (query === undefined) throw new Error("expected one canonical query hypothesis");
+    const receipt = Object.freeze({
+      ...projectedReceipt(source.composition),
+      hypothesis_digest: digestCanonicalQueryV1(query)
+    });
+    const candidates = [evidenceCandidate("cand-1", "gold")];
+    const input = params(candidates);
+    const supplementaryData = Object.freeze({
+      ...input.supplementaryData,
+      openSemanticFactorComposition: source.composition,
+      openSemanticFactorCompatibilityTrace: source.trace,
+      queryOpenSemanticFactorFormation: source.query_capture,
+      semanticFactorFormationsByEvidenceId: source.evidence_formations
+    });
+    const shadowInput = toShadowInput({
+      ...input,
+      supplementaryData,
+      queryProofAuthority: authorityFrom(bound),
+      supportCandidateReceipts: [receipt]
+    });
+    const support = shadowInput.supportMaterialization;
+    if (support === undefined) {
+      cleanup(prepared);
+      throw new Error("expected support materialization");
+    }
+    const poisoned = Object.defineProperty({ ...support }, "proposition_observations", {
+      enumerable: true,
+      get: () => {
+        throw new Error("planted getter");
+      }
+    });
+    const base = captureShadowIntegration(shadowInput);
+    const observed = captureShadowIntegration({
+      ...shadowInput,
+      supportMaterialization: poisoned as typeof support
+    });
+    expect(observed.kind).toBe("captured");
+    expect(base.kind).toBe("captured");
+    if (observed.kind !== "captured" || base.kind !== "captured") {
+      cleanup(prepared);
+      throw new Error("expected captured traces");
+    }
+    expect(observed.prefix_proposal).toEqual(base.prefix_proposal);
+    expect(observed.S_infty).toEqual(base.S_infty);
+    expect(observed.query_proof_preview?.status).toBe("failed");
+    expect(observed.delivery_pack.mode).toBe("unsupported");
     cleanup(prepared);
   });
 

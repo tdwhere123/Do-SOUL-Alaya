@@ -318,7 +318,7 @@ describe("runRecallEvalSharded", () => {
         await writeShardRoot(
           shardRoot,
           plantedKpi(offset, limit, hits),
-          makeRangeDiagnostics(offset, limit)
+          makeRangeDiagnostics(offset, limit, hits)
         );
         return 0;
       }
@@ -362,10 +362,11 @@ describe("runRecallEvalSharded", () => {
         const metadata = lstatSync(overlayFile);
         expect(metadata.isFile()).toBe(true);
         overlayInodes.push(`${metadata.dev}:${metadata.ino}`);
+        const hits = PLANTED_HITS.slice(offset, offset + limit);
         await writeShardRoot(
           shardRoot,
-          plantedKpi(offset, limit, PLANTED_HITS.slice(offset, offset + limit)),
-          makeRangeDiagnostics(offset, limit)
+          plantedKpi(offset, limit, hits),
+          makeRangeDiagnostics(offset, limit, hits)
         );
         return 0;
       }
@@ -421,7 +422,8 @@ function plantedKpi(
       per_scenario: base.kpi.per_scenario.map((row, index) => ({
         ...row,
         hit_at_5: hits[index] === true,
-        hit_at_1: hits[index] === true
+        hit_at_1: hits[index] === true,
+        hit_at_10: hits[index] === true
       }))
     }
   };

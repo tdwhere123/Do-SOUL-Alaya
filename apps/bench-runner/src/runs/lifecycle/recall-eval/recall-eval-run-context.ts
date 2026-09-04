@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import type {
   BenchPolicyShape,
   BenchSimulateReportMode
@@ -18,6 +19,7 @@ import {
 import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
 import { readRecallEvalMaxResults } from
   "../../provenance/effective-recall-config.js";
+import { parseQuestionManifest } from "../../selection/question-manifest.js";
 import type {
   LongMemEvalSnapshotManifest,
   LongMemEvalSnapshotQuestion
@@ -246,7 +248,7 @@ async function prepareRecallEvalAttribution(
   recallOptions: ReturnType<typeof resolveRecallEvalLaunch>["recallOptions"],
   recallWeightOverrides: BenchRecallWeightOverrides | undefined
 ) {
-  const window = selectWindow(bundle.sidecar.questions, options);
+  const window = await selectWindow(bundle.sidecar.questions, options, bundle);
   const querySemanticFactorCache = options.querySemanticFactorCachePath === undefined
     ? null
     : await bindRecallEvalQuerySemanticFactorCache(options, bundle);
@@ -365,13 +367,33 @@ function resolveRecallEvalLaunch(
   return { policyShape, recallOptions, plannedDataDir, daemonLaunch };
 }
 
-function selectWindow(
+async function selectWindow(
   questions: readonly LongMemEvalSnapshotQuestion[],
-  options: RecallEvalOptions
-): readonly LongMemEvalSnapshotQuestion[] {
+  options: RecallEvalOptions,
+  bundle: RecallEvalSnapshotBundle
+): Promise<readonly LongMemEvalSnapshotQuestion[]> {
+  let sourceQuestions = questions;
+  if (options.questionManifest !== undefined) {
+    const raw = JSON.parse(await readFile(options.questionManifest, "utf8"));
+    const manifest = parseQuestionManifest(raw);
+    const expectedDatasetSha = resolveDatasetSha(bundle);
+    if (expectedDatasetSha !== null && manifest.dataset_sha256 !== expectedDatasetSha) {
+      throw new Error(
+        `question manifest dataset SHA-256 mismatch: expected ${expectedDatasetSha}, got ${manifest.dataset_sha256}`
+      );
+    }
+    const manifestIdSet = new Set(manifest.question_ids);
+    const selected = questions.filter((q) => manifestIdSet.has(q.questionId));
+    if (selected.length !== manifest.target_count) {
+      throw new Error(
+        `question manifest target_count ${manifest.target_count} != selected snapshot questions ${selected.length}`
+      );
+    }
+    sourceQuestions = selected;
+  }
   const offset = Math.max(0, options.offset ?? 0);
-  const end = options.limit === undefined ? questions.length : offset + options.limit;
-  return questions.slice(offset, end);
+  const end = options.limit === undefined ? sourceQuestions.length : offset + options.limit;
+  return sourceQuestions.slice(offset, end);
 }
 
 function resolveDatasetSha(

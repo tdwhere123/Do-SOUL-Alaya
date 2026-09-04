@@ -2,6 +2,8 @@ import { compareText } from "../../../../shared/compare-text.js";
 import { ShadowContractError } from "../../contract-primitives.js";
 import { firstDuplicate } from "./candidate-universe.js";
 import {
+  isExecutableCompiledGamma,
+  stratumIndex,
   type QueryCompiledGammaTupleV1,
   type QueryCompiledGammaV1,
   type QueryGammaAtomV1,
@@ -69,9 +71,7 @@ export function evaluateQueryGammaTuple(
   selected: QueryGammaSelectedSetV1,
   candidateKey: string
 ): QueryCompiledGammaTupleV1 {
-  if (compiled.compile_status !== "compiled") {
-    throw new ShadowContractError("unsupported Gamma cannot be scored as a zero tuple");
-  }
+  refuseUnsupportedGamma(compiled);
   const counts = {
     answer_binding_position: 0,
     required_proposition_support: 0,
@@ -81,7 +81,7 @@ export function evaluateQueryGammaTuple(
     if (standing.coverage !== "covers") continue;
     if (selected.covered_atom_ids.has(standing.atom_id)) continue;
     if (independentAtom(compiled, standing.atom_id) &&
-        standing.independence !== "certified_independent") continue;
+      standing.independence !== "certified_independent") continue;
     counts[stratumOf(compiled, standing.atom_id)] += 1;
   }
   if (!compiled.independent_support_obligation) {
@@ -96,21 +96,36 @@ export function admitCompiledLowerFrontier(
   candidateKey: string,
   higherEligibleKeys: readonly string[]
 ): QueryGammaAdmissionV1 {
+  refuseUnsupportedGamma(compiled);
   const novel = novelCoveredAtoms(compiled, selected, candidateKey);
-  const admitted = novel.filter((atomId) => higherEligibleKeys.every((higherKey) =>
-    standingCoverage(compiled, higherKey, atomId) === "does_not_cover"));
-  const unresolved = novel.some((atomId) =>
-    higherEligibleKeys.some((higherKey) =>
-      standingCoverage(compiled, higherKey, atomId) === "unknown"));
-  const status: QueryGammaAdmissionStatusV1 = admitted.length > 0
-    ? "admitted"
-    : unresolved
-      ? "unresolved"
-      : "denied";
+  const admitted: string[] = [];
+  let unresolvedVsHigher = false;
+  for (const atomId of novel) {
+    const coverages = higherEligibleKeys.map((higherKey) =>
+      standingCoverage(compiled, higherKey, atomId));
+    if (coverages.some((coverage) => coverage === "unknown")) {
+      unresolvedVsHigher = true;
+      continue;
+    }
+    if (coverages.every((coverage) => coverage === "does_not_cover")) {
+      admitted.push(atomId);
+    }
+  }
+  const higherStratum = admitted.filter((atomId) =>
+    stratumIndex(stratumOf(compiled, atomId)) <
+    stratumIndex("certified_independent_support"));
+  const unknownAboveGain = hasUnknownStrictlyHigherStanding(
+    compiled, candidateKey, higherStratum);
+  const status: QueryGammaAdmissionStatusV1 =
+    higherStratum.length > 0 && !unknownAboveGain
+      ? "admitted"
+      : unresolvedVsHigher || unknownAboveGain
+        ? "unresolved"
+        : "denied";
   return Object.freeze({
     admitted: status === "admitted",
     status,
-    compiled_atom_ids: Object.freeze([...admitted].sort(compareText))
+    compiled_atom_ids: Object.freeze([...higherStratum].sort(compareText))
   });
 }
 
@@ -119,6 +134,7 @@ export function novelQueryGammaAtomIds(
   selected: QueryGammaSelectedSetV1,
   candidateKey: string
 ): readonly string[] {
+  refuseUnsupportedGamma(compiled);
   return Object.freeze([...novelCoveredAtoms(compiled, selected, candidateKey)]
     .sort(compareText));
 }
@@ -131,11 +147,12 @@ export function acceptQueryGammaCandidate(
   tokenCost: number,
   dimension: string
 ): QueryGammaSelectedSetV1 {
+  refuseUnsupportedGamma(compiled);
   const covered = new Set(selected.covered_atom_ids);
   for (const standing of standingsOf(compiled, candidateKey)) {
     if (standing.coverage !== "covers") continue;
     if (independentAtom(compiled, standing.atom_id) &&
-        standing.independence !== "certified_independent") continue;
+      standing.independence !== "certified_independent") continue;
     covered.add(standing.atom_id);
   }
   const objectKeys = new Set(selected.object_keys);
@@ -150,7 +167,27 @@ export function acceptQueryGammaCandidate(
   };
 }
 
-export function certifiedSemanticSet(
+export function semanticFeasibilityMap(
+  compiled: QueryCompiledGammaV1
+): ReadonlyMap<string, SemanticFeasibilityV1> {
+  if (firstDuplicate(compiled.semantic_feasibility.map((row) => row.candidate_key)) !== null) {
+    throw new ShadowContractError("duplicate compiled feasibility candidate_key");
+  }
+  return new Map(compiled.semantic_feasibility.map((row) => [row.candidate_key, row.semantic]));
+}
+
+export function provedInfeasibleCandidateKeys(
+  compiled: QueryCompiledGammaV1
+): ReadonlySet<string> {
+  if (firstDuplicate(compiled.semantic_feasibility.map((row) => row.candidate_key)) !== null) {
+    throw new ShadowContractError("duplicate compiled feasibility candidate_key");
+  }
+  return new Set(compiled.semantic_feasibility
+    .filter((row) => row.semantic === "infeasible")
+    .map((row) => row.candidate_key));
+}
+
+export function provedFeasibleCandidateKeys(
   compiled: QueryCompiledGammaV1
 ): ReadonlySet<string> {
   if (firstDuplicate(compiled.semantic_feasibility.map((row) => row.candidate_key)) !== null) {
@@ -159,6 +196,12 @@ export function certifiedSemanticSet(
   return new Set(compiled.semantic_feasibility
     .filter((row) => row.semantic === "feasible")
     .map((row) => row.candidate_key));
+}
+
+function refuseUnsupportedGamma(compiled: QueryCompiledGammaV1): void {
+  if (!isExecutableCompiledGamma(compiled)) {
+    throw new ShadowContractError("unsupported Gamma cannot be scored as a zero tuple");
+  }
 }
 
 function coverageFor(
@@ -199,7 +242,7 @@ function propositionAtomRefuted(
   candidate: QueryGammaCandidateEvidenceV1
 ): boolean {
   if (gammaAtom.kind !== "required_proposition" &&
-      gammaAtom.kind !== "certified_independent_support") {
+    gammaAtom.kind !== "certified_independent_support") {
     return false;
   }
   return candidate.propositions.some((proposition) =>
@@ -295,6 +338,19 @@ function standingsOf(
   candidateKey: string
 ): readonly QueryGammaStandingV1[] {
   return compiled.standings.filter((row) => row.candidate_key === candidateKey);
+}
+
+function hasUnknownStrictlyHigherStanding(
+  compiled: QueryCompiledGammaV1,
+  candidateKey: string,
+  gainAtomIds: readonly string[]
+): boolean {
+  if (gainAtomIds.length === 0) return false;
+  const gainRank = Math.min(...gainAtomIds.map((atomId) =>
+    stratumIndex(stratumOf(compiled, atomId))));
+  return standingsOf(compiled, candidateKey).some((standing) =>
+    standing.coverage === "unknown" &&
+    stratumIndex(stratumOf(compiled, standing.atom_id)) < gainRank);
 }
 
 function stratumOf(

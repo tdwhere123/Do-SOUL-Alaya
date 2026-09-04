@@ -66,6 +66,8 @@ export function buildRecallEvalWorkerCliArgs(
   pushOptionalArg(args, "--snapshot-consume-authority", opts.snapshotConsumeAuthority);
   pushOptionalArg(args, "--seed-extraction-system-prompt", opts.seedExtractionSystemPromptPath);
   pushOptionalArg(args, "--fact-frame-retrofit-ledger", opts.factFrameRetrofitLedgerPath);
+  pushOptionalArg(args, "--question-manifest", opts.questionManifest);
+  pushOptionalArg(args, "--embedding", opts.embeddingMode);
   return args;
 }
 

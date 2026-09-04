@@ -11,7 +11,11 @@ import {
   captureData,
   captureVerifiedLiveClosureAuthority
 } from "../closure/live-authority-binding.js";
+import {
+  type PsiV2AuthorityArtifactV1
+} from "../dominance/authority.js";
 import { compileQueryGamma } from "../gamma/compile.js";
+import type { QueryClassSourceEvidenceV1 } from "../gamma/capability-matrix.js";
 import { captureSourceOwnedQueryGammaEvidence } from "../gamma/source-evidence.js";
 import type { QueryGammaCandidateEvidenceV1 } from "../gamma/contract.js";
 import type { LiveQueryProofAuthority } from "../live-query-proof-authority.js";
@@ -25,7 +29,7 @@ export type QueryProofDecidePremisesV1 = Readonly<{
   readonly token_budget: number;
   readonly per_dimension_limits: QueryProofDecideWorldV1["per_dimension_limits"];
   readonly unresolved_tradeoff_pairs:
-    QueryProofDecideWorldV1["unresolved_tradeoff_pairs"];
+  QueryProofDecideWorldV1["unresolved_tradeoff_pairs"];
   readonly answer_bindings: QueryProofDecideWorldV1["answer_bindings"];
 }>;
 
@@ -42,6 +46,7 @@ export type QueryProofDecideWorldCaptureV1 = Readonly<{
   readonly world_digest: RecallFieldDigest;
   readonly decision_identity_digest: RecallFieldDigest;
   readonly source_evidence_digest: RecallFieldDigest | null;
+  readonly psi_v2_structural_digest?: RecallFieldDigest;
 }>;
 
 export type QueryProofDecideRuntimeCaptureV1 = Readonly<{
@@ -59,6 +64,7 @@ const runtimeCapturedDecideWorlds =
 export function captureQueryProofDecideWorld(params: Readonly<{
   readonly live_authority: LiveQueryProofAuthority;
   readonly premises: QueryProofDecidePremisesV1;
+  readonly class_source?: QueryClassSourceEvidenceV1;
 }>): QueryProofDecideWorldV1 {
   const live = captureVerifiedLiveClosureAuthority(params.live_authority);
   const premises = captureData(params.premises);
@@ -71,7 +77,8 @@ export function captureQueryProofDecideWorld(params: Readonly<{
       reject_duplicate_object: true as const,
       token_budget: premises.token_budget,
       per_dimension_limits: premises.per_dimension_limits
-    })
+    }),
+    ...(params.class_source === undefined ? {} : { class_source: params.class_source })
   });
   const compiled = compileQueryGamma(compileInput);
   if (compiled.compile_status !== "compiled") {
@@ -96,6 +103,7 @@ export function captureSourceOwnedQueryProofDecideWorld(params: Readonly<{
   readonly live_authority: LiveQueryProofAuthority;
   readonly support_measurement_authority: VerifiedMeasurementAuthorityV1;
   readonly walk: ShadowCapturedWalk;
+  readonly psi_v2_authority?: PsiV2AuthorityArtifactV1;
 }>): QueryProofDecideWorldV1 {
   if (!isCapturedWalk(params.walk)) {
     throw new Error("source-owned Decide_Q requires the issued live walk");
@@ -131,24 +139,38 @@ export function captureSourceOwnedQueryProofDecideWorld(params: Readonly<{
   })));
   assertCandidatePremises(candidates, compileInput.candidates);
   assertAnswerBindingPremises(evidence.answer_bindings, compileInput.candidates);
+
+  const candidateKeys = runtime.candidates.map((row) => row.candidate_key);
+  if (params.psi_v2_authority === undefined) {
+    throw new Error("source-owned Decide_Q requires issued Psi-v2");
+  }
+  const psiV2 = snapshotIssuedPsiV2(params.psi_v2_authority);
+  assertIssuedUniverseMatchesRuntime(psiV2, candidateKeys);
+
   const world = captureData({
     compiled,
     compile_input: compileInput,
     candidates,
-    psi_edges: runtime.psi_edges,
+    psi_edges: psiV2.psi_edges,
     token_budget: runtime.token_budget,
     per_dimension_limits: runtime.per_dimension_limits,
-    unresolved_tradeoff_pairs: runtime.unresolved_tradeoff_pairs,
+    unresolved_tradeoff_pairs: psiV2.unresolved_tradeoff_pairs,
     answer_bindings: evidence.answer_bindings
   }) as QueryProofDecideWorldV1;
-  const issued = issueLiveCapturedWorld(live, world, evidence.source_digest);
+  const issued = issueLiveCapturedWorld(
+    live,
+    world,
+    evidence.source_digest,
+    psiV2.structural_digest
+  );
   return captureQueryProofDecideRuntime(issued, { walk: params.walk });
 }
 
 function issueLiveCapturedWorld(
   live: ReturnType<typeof captureVerifiedLiveClosureAuthority>,
   world: QueryProofDecideWorldV1,
-  sourceEvidenceDigest: RecallFieldDigest | null
+  sourceEvidenceDigest: RecallFieldDigest | null,
+  psiV2StructuralDigest?: RecallFieldDigest
 ): QueryProofDecideWorldV1 {
   const compiled = world.compiled;
   const candidateIdentityByDigest = candidateIdentityMapForWorld(world);
@@ -181,9 +203,17 @@ function issueLiveCapturedWorld(
       standings_digest: digestRecallFieldIdentity(compiled.standings),
       semantic_feasibility_digest:
         digestRecallFieldIdentity(compiled.semantic_feasibility),
-      source_evidence_digest: sourceEvidenceDigest
+      ...(sourceEvidenceDigest === null ? {} : {
+        source_evidence_digest: sourceEvidenceDigest
+      }),
+      ...(psiV2StructuralDigest === undefined ? {} : {
+        psi_v2_structural_digest: psiV2StructuralDigest
+      })
     })),
-    source_evidence_digest: sourceEvidenceDigest
+    source_evidence_digest: sourceEvidenceDigest,
+    ...(psiV2StructuralDigest === undefined ? {} : {
+      psi_v2_structural_digest: psiV2StructuralDigest
+    })
   }));
 }
 
@@ -191,7 +221,7 @@ function assertSourceBoundEmptyFinitePremises(
   premises: QueryProofDecidePremisesV1
 ): void {
   if (premises.candidates.length !== 0 || premises.answer_bindings.length !== 0 ||
-      premises.psi_edges.length !== 0 || premises.unresolved_tradeoff_pairs.length !== 0) {
+    premises.psi_edges.length !== 0 || premises.unresolved_tradeoff_pairs.length !== 0) {
     throw new Error(
       "verified Decide_Q capture requires source-bound Gamma evidence for a non-empty world"
     );
@@ -282,7 +312,9 @@ export function digestDecideWorld(world: QueryProofDecideWorldV1): RecallFieldDi
     token_budget: frozen.token_budget,
     per_dimension_limits: frozen.per_dimension_limits,
     unresolved_tradeoff_pairs: frozen.unresolved_tradeoff_pairs,
-    identity_tie_winner: frozen.identity_tie_winner ?? null,
+    ...(frozen.identity_tie_winner === undefined ? {} : {
+      identity_tie_winner: frozen.identity_tie_winner
+    }),
     answer_bindings: frozen.answer_bindings,
     standings_digest: digestRecallFieldIdentity(frozen.compiled.standings),
     feasibility_digest: digestRecallFieldIdentity(frozen.compiled.semantic_feasibility),
@@ -327,7 +359,7 @@ export function candidateIdentityMapForWorld(
     candidate.candidate_key
   ] as const);
   if (new Set(entries.map(([digest]) => digest)).size !== entries.length ||
-      new Set(entries.map(([, key]) => key)).size !== entries.length) {
+    new Set(entries.map(([, key]) => key)).size !== entries.length) {
     throw new Error("Decide_Q candidate identity digest is not injective");
   }
   return Object.freeze(Object.fromEntries(entries));
@@ -352,7 +384,7 @@ function assertCandidatePremises(
   for (const candidate of walk) {
     const row = evidenceByKey.get(candidate.candidate_key);
     if (row === undefined || row.object_key !== candidate.object_key ||
-        row.token_cost !== candidate.token_cost || row.dimension !== candidate.dimension) {
+      row.token_cost !== candidate.token_cost || row.dimension !== candidate.dimension) {
       throw new Error("Decide_Q walk candidate is outside Gamma evidence authority");
     }
   }
@@ -395,24 +427,24 @@ function verifyRuntimeManifest(
   const runtimeKeys = [...issued.candidates.map((row) => row.candidate_key)]
     .sort(compareText);
   if (digestRecallFieldIdentity(worldCandidates) !== digestRecallFieldIdentity(runtimeCandidates) ||
-      digestRecallFieldIdentity(evidenceKeys) !== digestRecallFieldIdentity(runtimeKeys) ||
-      world.token_budget !== issued.token_budget ||
-      digestRecallFieldIdentity(world.per_dimension_limits) !==
-        digestRecallFieldIdentity(issued.per_dimension_limits) ||
-      digestRecallFieldIdentity(normalizedPairs(world.psi_edges, true)) !==
-        digestRecallFieldIdentity(normalizedPairs(issued.psi_edges, true)) ||
-      digestRecallFieldIdentity(normalizedPairs(world.unresolved_tradeoff_pairs, false)) !==
-        digestRecallFieldIdentity(normalizedPairs(issued.unresolved_tradeoff_pairs, false))) {
+    digestRecallFieldIdentity(evidenceKeys) !== digestRecallFieldIdentity(runtimeKeys) ||
+    world.token_budget !== issued.token_budget ||
+    digestRecallFieldIdentity(world.per_dimension_limits) !==
+    digestRecallFieldIdentity(issued.per_dimension_limits)) {
     throw new Error("Decide_Q world does not match the exact live runtime capture");
   }
+  const capture = decideWorldCapture(world);
   return digestRecallFieldIdentity({
     kind: "query_proof_runtime_capture_v1",
     candidates: runtimeCandidates,
-    psi_edges: normalizedPairs(issued.psi_edges, true),
+    psi_edges: normalizedPairs(world.psi_edges, true),
     token_budget: issued.token_budget,
     per_dimension_limits: issued.per_dimension_limits,
-    unresolved_tradeoff_pairs: normalizedPairs(issued.unresolved_tradeoff_pairs, false),
-    live_walk_digest: digestRecallFieldIdentity(runtime.walk)
+    unresolved_tradeoff_pairs: normalizedPairs(world.unresolved_tradeoff_pairs, false),
+    live_walk_digest: digestRecallFieldIdentity(runtime.walk),
+    ...(capture?.psi_v2_structural_digest === undefined ? {} : {
+      psi_v2_structural_digest: capture.psi_v2_structural_digest
+    })
   });
 }
 
@@ -437,4 +469,29 @@ function normalizedPairs(
     if (directed || compareText(left, right) <= 0) return Object.freeze([left, right] as const);
     return Object.freeze([right, left] as const);
   }).sort((left, right) => compareText(`${left[0]}\0${left[1]}`, `${right[0]}\0${right[1]}`)));
+}
+
+function snapshotIssuedPsiV2(
+  artifact: PsiV2AuthorityArtifactV1
+): PsiV2AuthorityArtifactV1 {
+  return Object.freeze({
+    ...artifact,
+    psi_edges: captureData(artifact.psi_edges),
+    unresolved_tradeoff_pairs: captureData(artifact.unresolved_tradeoff_pairs),
+    candidate_universe: captureData(artifact.candidate_universe),
+    structural_digest: artifact.structural_digest
+  });
+}
+
+function assertIssuedUniverseMatchesRuntime(
+  artifact: PsiV2AuthorityArtifactV1,
+  runtimeKeys: readonly string[]
+): void {
+  const issued = [...artifact.candidate_universe].sort(compareText);
+  const runtime = [...runtimeKeys].sort(compareText);
+  if (digestRecallFieldIdentity(issued) !== digestRecallFieldIdentity(runtime)) {
+    throw new Error(
+      "issued Psi-v2 candidate universe does not match the live runtime capture"
+    );
+  }
 }

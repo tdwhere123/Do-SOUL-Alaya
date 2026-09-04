@@ -36,7 +36,11 @@ describe("merge-longmemeval full-gold KPI", () => {
           ...makeShardKpi().kpi,
           r_at_5: 1,
           per_scenario: [
-            { id: "q-full-gold-a", version: 1, hit_at_5: true, tier: "warm" }
+            {
+              id: "q-full-gold-a", version: 1,
+              hit_at_1: true, hit_at_5: true, hit_at_10: true,
+              scorable: true, measurement_cohort: "answerable", tier: "warm"
+            }
           ],
           quality_metrics: {
             ...makeShardKpi().kpi.quality_metrics!,
@@ -77,7 +81,11 @@ describe("merge-longmemeval full-gold KPI", () => {
           ...makeShardKpi().kpi,
           r_at_5: 0,
           per_scenario: [
-            { id: "q-full-gold-b", version: 1, hit_at_5: false, tier: "warm" }
+            {
+              id: "q-full-gold-b", version: 1,
+              hit_at_1: false, hit_at_5: false, hit_at_10: false,
+              scorable: true, measurement_cohort: "answerable", tier: "warm"
+            }
           ],
           quality_metrics: {
             ...makeShardKpi().kpi.quality_metrics!,
@@ -92,18 +100,23 @@ describe("merge-longmemeval full-gold KPI", () => {
       }),
       makeShardDiagnostics({
         questions: [
-          buildQuestionDiagnosticFixture({
-            questionId: "q-full-gold-b",
-            gold: [
-              buildGoldDiagnostic({ object_id: "gold-b-1", final_rank: 7 }),
-              buildGoldDiagnostic({
-                object_id: "gold-b-2",
-                object_kind: "evidence_capsule",
-                final_rank: null,
-                pre_budget_rank: 80
-              })
-            ]
-          })
+          {
+            ...buildQuestionDiagnosticFixture({
+              questionId: "q-full-gold-b",
+              gold: [
+                buildGoldDiagnostic({ object_id: "gold-b-1", final_rank: 7 }),
+                buildGoldDiagnostic({
+                  object_id: "gold-b-2",
+                  object_kind: "evidence_capsule",
+                  final_rank: null,
+                  pre_budget_rank: 80
+                })
+              ]
+            }),
+            hit_at_1: false,
+            hit_at_5: false,
+            hit_at_10: false
+          }
         ]
       })
     );
@@ -162,7 +175,11 @@ describe("merge-longmemeval full-gold KPI", () => {
           ...makeShardKpi().kpi,
           r_at_5: 1,
           per_scenario: [
-            { id: "q-full-gold-expected", version: 1, hit_at_5: true, tier: "warm" }
+            {
+              id: "q-full-gold-expected", version: 1,
+              hit_at_1: true, hit_at_5: true, hit_at_10: true,
+              scorable: true, measurement_cohort: "answerable", tier: "warm"
+            }
           ]
         }
       }),

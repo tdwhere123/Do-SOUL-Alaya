@@ -82,17 +82,26 @@ export function hole(code: string): CanonicalQueryHoleV1 {
   });
 }
 
+export const PLANTED_OSF_SOURCE = Object.freeze({
+  owner: "osf",
+  available: true
+});
+
 export function compileInputFor(
   query: CanonicalQueryV1,
   candidates: readonly QueryGammaCandidateEvidenceV1[],
   extra: Partial<QueryGammaCompileInputV1> = {}
 ): QueryGammaCompileInputV1 {
+  const class_source = extra.class_source ?? (query.answer.kind === "scalar"
+    ? PLANTED_OSF_SOURCE
+    : extra.class_source);
   return Object.freeze({
     compilation: extra.compilation ?? compilationFor(query),
     candidates,
     hypothesis_digest: extra.hypothesis_digest ?? digestCanonicalQueryV1(query),
     ...(extra.extremum_witness !== undefined ? { extremum_witness: extra.extremum_witness } : {}),
-    ...(extra.resource_policy !== undefined ? { resource_policy: extra.resource_policy } : {})
+    ...(extra.resource_policy !== undefined ? { resource_policy: extra.resource_policy } : {}),
+    ...(class_source !== undefined ? { class_source } : {})
   });
 }
 

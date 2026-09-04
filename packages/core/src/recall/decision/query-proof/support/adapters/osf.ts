@@ -1,4 +1,4 @@
-import type { SupportDraft } from "./draft.js";
+import type { SupportDraft, SupportDraftProducerOutcomeV1 } from "./draft.js";
 import { addEdge, addGap, addNode, noteApplicableProposition, recordEvidenceLineage } from "./draft.js";
 import type {
   SupportCandidateReceiptV1,
@@ -47,7 +47,9 @@ function noteUnknownOsfPropositions(
       candidate.candidate_key,
       candidate.hypothesis_digest ?? null,
       propositionId,
-      { source_id: binding.evidence_id, producer }
+      { source_id: binding.evidence_id, producer },
+      "osf",
+      osfProducerOutcome(osf)
     );
   }
 }
@@ -57,6 +59,14 @@ function osfUnknownProducer(status: SupportOsfStatusV1): string {
   if (status === "ineligible") return "support.osf.ineligible.v1";
   if (status === "rejected") return "support.osf.rejected.v1";
   return "support.osf.unavailable.v1";
+}
+
+function osfProducerOutcome(
+  osf: NonNullable<SupportCandidateReceiptV1["osf"]>
+): SupportDraftProducerOutcomeV1 {
+  if (osf.truncated) return "truncated";
+  if (osf.composition_status === "composed") return "observed";
+  return "producer_unavailable";
 }
 
 function addOsfStatusGap(
@@ -127,7 +137,9 @@ function adaptOsfBinding(
     candidateKey,
     candidate.hypothesis_digest ?? null,
     propositionId,
-    { source_id: binding.evidence_id, producer: "support.osf.grounds.v1" }
+    { source_id: binding.evidence_id, producer: "support.osf.grounds.v1" },
+    "osf",
+    "observed"
   );
   if (binding.source_lineage_id !== undefined) {
     noteApplicableProposition(
@@ -135,7 +147,9 @@ function adaptOsfBinding(
       candidateKey,
       candidate.hypothesis_digest ?? null,
       propositionId,
-      { source_id: binding.source_lineage_id, producer: "support.osf.lineage.v1" }
+      { source_id: binding.source_lineage_id, producer: "support.osf.lineage.v1" },
+      "osf",
+      "observed"
     );
   }
   if (bindingId !== undefined) {

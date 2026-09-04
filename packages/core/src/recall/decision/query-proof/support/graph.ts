@@ -118,14 +118,12 @@ function uniqueCorrelations(
       previous === undefined ? canonical : meetCorrelation(previous, canonical)
     );
   }
-  return Object.freeze(correlatedRecords(edges, fromWitnesses, queryId, snapshot).sort(comparePairs));
+  return Object.freeze(correlatedRecords(edges, fromWitnesses).sort(comparePairs));
 }
 
 function correlatedRecords(
   edges: readonly SupportEdgeV1[],
-  witnesses: ReadonlyMap<string, CorrelationWitness>,
-  queryId: string,
-  snapshot: string
+  witnesses: ReadonlyMap<string, CorrelationWitness>
 ): SupportCorrelationRecordV1[] {
   const records: SupportCorrelationRecordV1[] = [];
   const seen = new Set<string>();
@@ -134,7 +132,9 @@ function correlatedRecords(
     const key = pairKey(edge.from.id, edge.to.id);
     if (seen.has(key)) continue;
     seen.add(key);
-    const witness = witnesses.get(key) ?? defaultCorrelation(edge, queryId, snapshot);
+    const witness = witnesses.get(key);
+    // Missing snapshot-lease producer stays unknown; never mint exact.
+    if (witness === undefined) continue;
     records.push(correlationRecord(witness));
   }
   for (const key of witnesses.keys()) {
@@ -154,27 +154,6 @@ function canonicalizeCorrelation(witness: CorrelationWitness): CorrelationWitnes
       left_id: record.left_id,
       right_id: record.right_id,
       state: record.state
-    }
-  });
-}
-
-function defaultCorrelation(
-  edge: SupportEdgeV1,
-  queryId: string,
-  snapshot: string
-): CorrelationWitness {
-  return createCorrelationWitness({
-    identity: {
-      coordinate_id: "support.correlation.default",
-      query_id: queryId,
-      snapshot_digest: snapshot
-    },
-    provenance: [{ source_id: "support.graph", producer: "support.hypergraph.v1" }],
-    epistemic: { kind: "exact" },
-    payload: {
-      left_id: edge.from.id,
-      right_id: edge.to.id,
-      state: "possibly_correlated"
     }
   });
 }

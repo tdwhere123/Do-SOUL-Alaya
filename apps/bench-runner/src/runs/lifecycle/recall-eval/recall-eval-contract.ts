@@ -54,6 +54,7 @@ export interface RecallEvalOptions {
   readonly snapshotConsumeAuthority?: SnapshotConsumeAuthority;
   readonly captureOpenSemanticFactorCandidateActivations?: boolean;
   readonly embeddingMode?: BenchEmbeddingMode;
+  readonly questionManifest?: string;
 }
 
 export interface RecallEvalResult {

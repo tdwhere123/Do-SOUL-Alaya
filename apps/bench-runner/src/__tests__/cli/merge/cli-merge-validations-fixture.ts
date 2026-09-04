@@ -14,6 +14,22 @@ export {
   LONGMEMEVAL_DIAGNOSTICS_FILENAME
 };
 
+export function scenarioRow(
+  id: string,
+  hit = true
+): KpiPayload["kpi"]["per_scenario"][number] {
+  return {
+    id,
+    version: 1,
+    hit_at_1: hit,
+    hit_at_5: hit,
+    hit_at_10: hit,
+    scorable: true,
+    measurement_cohort: "answerable",
+    tier: "warm"
+  };
+}
+
 export function makeShardKpi(overrides: Partial<KpiPayload> = {}): KpiPayload {
   return {
     bench_name: "public",
@@ -63,7 +79,16 @@ export function makeShardKpi(overrides: Partial<KpiPayload> = {}): KpiPayload {
       quality_metrics: makeQualityMetrics(),
       seed_extraction_path: makeSeedExtractionPath(),
       per_scenario: [
-        { id: "q-shard-default-1", version: 1, hit_at_5: true, tier: "warm" }
+        {
+          id: "q-shard-default-1",
+          version: 1,
+          hit_at_1: true,
+          hit_at_5: true,
+          hit_at_10: true,
+          scorable: true,
+          measurement_cohort: "answerable",
+          tier: "warm"
+        }
       ]
     },
     ...overrides
@@ -102,6 +127,8 @@ export function withEligibleMeasurementContract(payload: KpiPayload): KpiPayload
         id: `question-${index + 1}`,
         version: 1,
         hit_at_5: index < hitCount,
+        hit_at_1: index < hitCount,
+        hit_at_10: index < hitCount,
         scorable: true,
         measurement_cohort: "answerable" as const,
         tier: "warm" as const
@@ -358,6 +385,14 @@ export async function writeShardRoot(
   }
 }
 
+function rowHitAt(
+  row: KpiPayload["kpi"]["per_scenario"][number],
+  key: "hit_at_1" | "hit_at_10"
+): boolean {
+  const value = (row as Record<string, unknown>)[key];
+  return typeof value === "boolean" ? value : row.hit_at_5;
+}
+
 function bindEmptyDiagnosticsQuestions(diagnostics: unknown, kpi: KpiPayload): unknown {
   if (diagnostics === null || typeof diagnostics !== "object") return diagnostics;
   const record = diagnostics as Record<string, unknown>;
@@ -370,7 +405,9 @@ function bindEmptyDiagnosticsQuestions(diagnostics: unknown, kpi: KpiPayload): u
       gold_memory_ids: [],
       delivered_memory_ids: [],
       delivered_gold_ids: [],
+      hit_at_1: rowHitAt(row, "hit_at_1"),
       hit_at_5: row.hit_at_5,
+      hit_at_10: rowHitAt(row, "hit_at_10"),
       miss_reasons: [],
       provider_state: "provider_not_requested",
       candidate_pool_complete: row.measurement_cohort !== undefined,

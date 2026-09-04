@@ -69,6 +69,7 @@ export type VerifiedMeasurementAuthorityV1 = Readonly<{
   readonly snapshot_digest: string;
   readonly request_digest: string;
   readonly workspace_id: string;
+  readonly principal: string;
   readonly field_prefix: LexicalRequestPin["field_prefix"] | null;
   readonly candidate_key_domain: LexicalRequestPin["candidate_key_domain"] | null;
   readonly contract_digest: RecallFieldDigest;
@@ -106,8 +107,12 @@ export type MeasurementAdmissionV1 = Readonly<{
   readonly snapshot_digest: string;
   readonly request_digest: string;
   readonly workspace_id: string;
+  readonly principal: string;
   readonly candidate_id: string;
   readonly proposition_id: string;
+  readonly hypothesis_digest: string | null;
+  readonly jurisdiction: string;
+  readonly producer_outcome: "observed";
   readonly measurement_digest: RecallFieldDigest;
   readonly source_binding_digest: RecallFieldDigest | null;
   readonly digest: RecallFieldDigest;
@@ -180,6 +185,7 @@ function verifyPreparedAuthority(
     snapshot_digest: livePins.snapshot_digest,
     request_digest: source.request_digest,
     workspace_id: livePins.workspace_id,
+    principal: livePins.principal,
     field_prefix: source.field_prefix,
     candidate_key_domain: source.candidate_key_domain,
     contract_digest: contract.digest,
@@ -235,7 +241,7 @@ export function issueMeasurementGroupAdmission(input: Readonly<{
     propositionSchema,
     identity,
     collapse,
-    sourceBinding?.digest ?? null
+    sourceBinding
   );
   const admission = freezeShadow({
     ...body,
@@ -304,7 +310,7 @@ export function measurementAdmissionsShareAuthority(
 function verifyPreparedEvidence(
   evidence: PreparedMeasurementAuthorityEvidenceV1
 ): Readonly<{ readonly query_id: string; readonly workspace_id: string;
-  readonly snapshot_digest: string }> {
+  readonly principal: string; readonly snapshot_digest: string }> {
   const condition = evidence.query_condition;
   const canonicalEvidence = evidence.canonical_query_evidence;
   const compilation = evidence.canonical_query_compilation;
@@ -334,6 +340,7 @@ function verifyPreparedEvidence(
   return freezeShadow({
     query_id: compilation.query_identity.condition_identity,
     workspace_id: condition.condition.workspace_id,
+    principal: vector.principal,
     snapshot_digest: vector.vector_digest
   });
 }
@@ -443,7 +450,11 @@ function admissionBody(
   propositionSchema: string,
   identity: ReturnType<typeof requiredIdentity>,
   collapse: AdmissibleMeasurementCollapseV1,
-  sourceBindingDigest: RecallFieldDigest | null
+  sourceBinding: Readonly<{
+    readonly digest: RecallFieldDigest;
+    readonly hypothesis_digest?: string | null;
+    readonly jurisdiction?: string;
+  }> | null
 ) {
   return freezeShadow({
     schema_version: 1 as const,
@@ -456,8 +467,12 @@ function admissionBody(
     ...identity,
     request_digest: authority.request_digest,
     workspace_id: authority.workspace_id,
+    principal: authority.principal,
+    hypothesis_digest: sourceBinding?.hypothesis_digest ?? null,
+    jurisdiction: sourceBinding?.jurisdiction ?? authority.field_prefix ?? "support",
+    producer_outcome: "observed" as const,
     measurement_digest: measurementDigest(contract, collapse),
-    source_binding_digest: sourceBindingDigest
+    source_binding_digest: sourceBinding?.digest ?? null
   });
 }
 
@@ -478,6 +493,10 @@ function admissionMatches(
     ...identity,
     request_digest: admission.request_digest,
     workspace_id: admission.workspace_id,
+    principal: admission.principal,
+    hypothesis_digest: admission.hypothesis_digest,
+    jurisdiction: admission.jurisdiction,
+    producer_outcome: admission.producer_outcome,
     measurement_digest: measurementDigest(contract, collapse),
     source_binding_digest: admission.source_binding_digest
   };

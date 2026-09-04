@@ -131,6 +131,8 @@ export function makeRangeKpi(offset: number, limit: number) {
         id,
         version: 1,
         hit_at_5: true,
+        hit_at_1: true,
+        hit_at_10: true,
         scorable: true,
         measurement_cohort: "answerable" as const,
         tier: "warm" as const
@@ -139,17 +141,27 @@ export function makeRangeKpi(offset: number, limit: number) {
   });
 }
 
-export function makeRangeDiagnostics(offset: number, limit: number) {
+export function makeRangeDiagnostics(
+  offset: number,
+  limit: number,
+  hits?: readonly boolean[]
+) {
   return makeShardDiagnostics({
-    questions: Array.from({ length: limit }, (_, index) => ({
-      question_id: `q-${offset + index + 1}`,
-      gold_memory_ids: ["gold"],
-      gold_evidence_ids: [],
-      gold_object_ids: ["gold"],
-      candidate_pool_complete: true,
-      cohort_ledger: answerableCohortLedger(),
-      candidates: []
-    }))
+    questions: Array.from({ length: limit }, (_, index) => {
+      const hit = hits?.[index] ?? true;
+      return {
+        question_id: `q-${offset + index + 1}`,
+        gold_memory_ids: ["gold"],
+        gold_evidence_ids: [],
+        gold_object_ids: ["gold"],
+        hit_at_1: hit,
+        hit_at_5: hit,
+        hit_at_10: hit,
+        candidate_pool_complete: true,
+        cohort_ledger: answerableCohortLedger(),
+        candidates: []
+      };
+    })
   });
 }
 

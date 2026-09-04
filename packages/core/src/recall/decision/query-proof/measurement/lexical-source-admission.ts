@@ -51,6 +51,8 @@ export type LexicalMeasurementCoordinateContextV1 = Readonly<{
 
 export type VerifiedLexicalSourceBinding = Readonly<{
   readonly digest: RecallFieldDigest;
+  readonly hypothesis_digest: null;
+  readonly jurisdiction: string;
   readonly lex_domain: LexDomain;
   readonly envelope_identity: D1EnvelopeIdentity;
   readonly source_context: LexicalMeasurementSourceContextV1;
@@ -116,6 +118,8 @@ export function assertLexicalMeasurementSourceObservation(
       witness: collapse.witness,
       contract_digest: contract.digest
     }),
+    hypothesis_digest: null,
+    jurisdiction: source.receipt.field_prefix,
     lex_domain: primary.domain,
     envelope_identity: identity,
     source_context: context

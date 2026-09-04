@@ -13,6 +13,7 @@ import {
   makeShardDiagnostics,
   makeShardKpi,
   makeValidShardDiagnostics,
+  scenarioRow,
   withEligibleMeasurementContract,
   writeShardRoot
 } from "./cli-merge-validations-fixture.js";
@@ -39,7 +40,7 @@ describe("merge-longmemeval evidence bundle", () => {
       evaluated_count: 1,
       kpi: {
         ...makeShardKpi().kpi,
-        per_scenario: [{ id: "q-stream", version: 1, hit_at_5: true, tier: "warm" }]
+        per_scenario: [scenarioRow("q-stream", true)]
       }
     }), makeShardDiagnostics({ questions: [question("q-stream", [candidate()])] }));
     await writeProvenance(shard, provenance(0, 1));
@@ -107,7 +108,7 @@ describe("merge-longmemeval evidence bundle", () => {
       evaluated_count: 2,
       kpi: {
         ...makeShardKpi().kpi,
-        per_scenario: [{ id: "q-one", version: 1, hit_at_5: true, tier: "warm" }]
+        per_scenario: [scenarioRow("q-one", true)]
       }
     }), makeShardDiagnostics({
       compact_schema_version: 1,
@@ -162,7 +163,7 @@ describe("merge-longmemeval evidence bundle", () => {
       evaluated_count: 1,
       kpi: {
         ...makeShardKpi().kpi,
-        per_scenario: [{ id: "q-ok", version: 1, hit_at_5: true, tier: "warm" }]
+        per_scenario: [scenarioRow("q-ok", true)]
       }
     }), makeShardDiagnostics({
       questions: [question("q-ok")],
@@ -213,7 +214,7 @@ describe("merge-longmemeval evidence bundle", () => {
       kpi: {
         ...makeShardKpi().kpi,
         r_at_5: 1,
-        per_scenario: [{ id: "q-unverified", version: 1, hit_at_5: true, tier: "warm" }]
+        per_scenario: [scenarioRow("q-unverified", true)]
       }
     })), makeShardDiagnostics({ questions: [question("question-1")] }));
     await writeProvenance(shard, provenance(0, 1));
@@ -249,7 +250,7 @@ describe("merge-longmemeval evidence bundle", () => {
           r_at_1: 1,
           r_at_5: 1,
           r_at_10: 1,
-          per_scenario: [{ id: "q-unverified", version: 1, hit_at_5: true, tier: "warm" }]
+          per_scenario: [scenarioRow("q-unverified", true)]
         }
       })),
       makeShardDiagnostics()
@@ -287,7 +288,7 @@ describe("merge-longmemeval evidence bundle", () => {
           r_at_1: 1,
           r_at_5: 1,
           r_at_10: 1,
-          per_scenario: [{ id: "q-unverified", version: 1, hit_at_5: true, tier: "warm" }]
+          per_scenario: [scenarioRow("q-unverified", true)]
         }
       })),
       makeShardDiagnostics()

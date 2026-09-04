@@ -9,7 +9,8 @@ import { buildMergedLongMemEvalPayload } from "../../../cli/merge/command/merge-
 import { mergeQualityMetrics } from "../../../cli/merge/quality/merge-quality.js";
 import {
   makeQualityMetrics,
-  makeShardKpi
+  makeShardKpi,
+  withEligibleMeasurementContract
 } from "./cli-merge-validations-fixture.js";
 
 describe("merge LongMemEval measurement contract", () => {
@@ -146,14 +147,23 @@ describe("merge LongMemEval measurement contract", () => {
     })).toThrow(/answerable_evaluated_count.*scorable/u);
   });
 
-  it("counts merged R@5 hits from scenario rows instead of rounded shard rates", () => {
+  it("counts merged R@K hits from scenario row booleans instead of rounded shard rates", () => {
     const legacy = makeShardKpi({
       evaluated_count: 5,
       kpi: {
         ...makeShardKpi().kpi,
+        r_at_1: 0,
         r_at_5: 0,
+        r_at_10: 0,
         per_scenario: [
-          { id: "legacy-hit", version: 1, hit_at_5: true, tier: "warm" }
+          {
+            id: "legacy-hit",
+            version: 1,
+            hit_at_5: true,
+            hit_at_1: true,
+            hit_at_10: true,
+            tier: "warm"
+          }
         ]
       }
     });
@@ -164,7 +174,53 @@ describe("merge LongMemEval measurement contract", () => {
       questionDiagnostics: [],
       first: legacy
     });
+    expect(build.payload.kpi.r_at_1).toBe(0.2);
     expect(build.payload.kpi.r_at_5).toBe(0.2);
+    expect(build.payload.kpi.r_at_10).toBe(0.2);
+  });
+
+  it("fails closed when R@1/R@10 cannot be recomputed from row or diagnostic booleans", () => {
+    const bound = withEligibleMeasurementContract(makeShardKpi({
+      evaluated_count: 1,
+      kpi: {
+        ...makeShardKpi().kpi,
+        r_at_1: 1,
+        r_at_5: 1,
+        r_at_10: 1,
+        per_scenario: [
+          {
+            id: "question-1",
+            version: 1,
+            hit_at_5: true,
+            scorable: true,
+            measurement_cohort: "answerable",
+            tier: "warm"
+          }
+        ]
+      }
+    }));
+    const missingHits = {
+      ...bound,
+      kpi: {
+        ...bound.kpi,
+        per_scenario: [
+          {
+            id: "question-1",
+            version: 1,
+            hit_at_5: true,
+            scorable: true,
+            measurement_cohort: "answerable" as const,
+            tier: "warm" as const
+          }
+        ]
+      }
+    };
+    expect(() => buildMergedLongMemEvalPayload({
+      payloads: [missingHits],
+      archiveRefs: [],
+      questionDiagnostics: [],
+      first: missingHits
+    })).toThrow(/missing hit_at_1 boolean/u);
   });
 });
 
@@ -211,6 +267,8 @@ function shard(prefix: string, answerable: number, abstention: number): KpiPaylo
         id: `${prefix}-${index}`,
         version: 1,
         hit_at_5: index < answerable,
+        hit_at_1: index < answerable,
+        hit_at_10: index < answerable,
         scorable: index < answerable,
         measurement_cohort: index < answerable
           ? "answerable" as const

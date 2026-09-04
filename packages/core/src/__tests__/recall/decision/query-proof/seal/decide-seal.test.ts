@@ -13,10 +13,6 @@ import {
   compareAbstractProofToOracle,
   certifyAbstractSingletonWithFiniteOracle
 } from "../../../../../recall/decision/query-proof/proof/abstract/differential.js";
-import {
-  createChannelClosureResult,
-  createScopedCompletenessReference
-} from "../../../../../recall/decision/query-proof/closure/contract.js";
 import { deriveLiveClosureAuthorityBinding } from
   "../../../../../recall/decision/query-proof/closure/live-authority-binding.js";
 import { closeLexicalBoundChannel } from
@@ -78,7 +74,6 @@ import {
   candidate,
   compileGamma,
   compileInputFor,
-  compilationFor,
   distinctQuery,
   proposition,
   scalarQuery,
@@ -168,6 +163,7 @@ function captureEmptyWorld(
 ): QueryProofDecideWorldV1 {
   const world = captureQueryProofDecideWorld({
     live_authority: authority,
+    class_source: { owner: "osf", available: true },
     premises: {
       candidates: Object.freeze([]),
       psi_edges: Object.freeze([]),
@@ -607,8 +603,9 @@ describe("final Decide_Q and SealChecker_v1", () => {
     ];
     const world = worldFromQuery(scalarQuery(), evidence);
     const decided = runQueryProofDecideQ(world, 2);
-    expect(decided.prefix).toEqual(["ok"]);
-    expect(decided.walk.S_infty).toEqual(["ok"]);
+    expect(decided.walk.S_infty).toContain("open");
+    expect(decided.walk.S_infty).toContain("ok");
+    expect(decided.pack_mode).not.toBe("certified");
     const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
     expect(checker.status).not.toBe("CERTIFIED_STABLE");
   });
@@ -644,39 +641,10 @@ describe("final Decide_Q and SealChecker_v1", () => {
     const world = worldFromQuery(allObservableDistinct(), [
       candidate("A", { bindings: [binding("alice")] })
     ]);
+    expect(world.compiled.compile_status).toBe("unsupported");
+    expect(runQueryProofDecideQ(world, 1).pack_mode).toBe("unsupported");
     expect(checkDecisionStability(checkerInput(world, emptyFixture(1))).status)
-      .toBe("UNCERTIFIED_OPEN");
-    const live = deriveLiveClosureAuthorityBinding(authorityFrom(prepared));
-    const universe = `sha256:${"7".repeat(64)}` as const;
-    const scope = {
-      ...live,
-      query_digest: world.compiled.compilation_digest,
-      observer_id: "observer:unscoped",
-      channel_id: "channel:unscoped",
-      domain_id: "domain:unscoped",
-      universe_digest: universe
-    };
-    const unscoped = createChannelClosureResult({
-      scope,
-      status: "exact_closed",
-      remaining_effects: [],
-      completeness_refs: [createScopedCompletenessReference({
-        scope,
-        source_receipt_digest: universe,
-        universe_digest: universe,
-        coordinate_id: "membership"
-      })],
-      source_kind: "structural_only",
-      source_receipt_digests: [universe],
-      reason: "unscoped-all-observable"
-    });
-    const unscopedCheck = checkDecisionStability({
-      ...checkerInput(world, emptyFixture(1)),
-      closures: [unscoped]
-    });
-    expect(unscopedCheck.status).toBe("UNCERTIFIED_OPEN");
-    if (unscopedCheck.status !== "UNCERTIFIED_OPEN") throw new Error("expected open");
-    expect(unscopedCheck.reason).toMatch(/seal obligations/u);
+      .not.toBe("CERTIFIED_STABLE");
   });
 
   it("does not certify an unresolved trade-off at a selected boundary", () => {
@@ -914,23 +882,21 @@ describe("final Decide_Q and SealChecker_v1", () => {
   });
 
   it("certifies empty-coordinate Decide_Q for every v1 operator fixture", () => {
-    const operators: readonly QueryProofDecideWorldV1[] = [
-      worldFromQuery(scalarQuery(), [candidate("A", { bindings: [binding("alice")] })]),
-      worldFromQuery(distinctQuery(), [candidate("A", { bindings: [binding("alice")] })]),
-      worldFromQuery(sequenceQuery(1), [
-        candidate("A", { sequence_slots: [{ position: 0, binding: "alice" }] })
-      ])
-    ];
-    for (const world of operators) {
-      expect(world.compiled.compile_status).toBe("compiled");
-      expect(runQueryProofDecideQ(world, 1).prefix.length).toBeGreaterThan(0);
-      const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
-      expect(checker.status).toBe("UNSUPPORTED");
-      if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
-      expect(checker.reason).toBe(
+    const world = worldFromQuery(scalarQuery(), [candidate("A", { bindings: [binding("alice")] })]);
+    expect(world.compiled.compile_status).toBe("compiled");
+    expect(runQueryProofDecideQ(world, 1).prefix.length).toBeGreaterThan(0);
+    const checker = checkDecisionStability(checkerInput(world, emptyFixture(1)));
+    expect(checker.status).toBe("UNSUPPORTED");
+    if (checker.status !== "UNSUPPORTED") throw new Error("expected refuse");
+    expect(checker.reason).toBe(
       "compiled compilation digest does not match live canonical query"
     );
-    }
+    expect(worldFromQuery(distinctQuery(), [
+      candidate("A", { bindings: [binding("alice")] })
+    ]).compiled.compile_status).toBe("unsupported");
+    expect(worldFromQuery(sequenceQuery(1), [
+      candidate("A", { sequence_slots: [{ position: 0, binding: "alice" }] })
+    ]).compiled.compile_status).toBe("unsupported");
   });
 
   it("lifts same-lineage complementary support through SealChecker", () => {
@@ -959,11 +925,7 @@ describe("final Decide_Q and SealChecker_v1", () => {
 
   it("records zero false Decide_Q singletons across operators and simultaneous remaining effects", () => {
     const operators: readonly QueryProofDecideWorldV1[] = [
-      worldFromQuery(scalarQuery(), [candidate("A", { bindings: [binding("alice")] })]),
-      worldFromQuery(distinctQuery(), [candidate("A", { bindings: [binding("alice")] })]),
-      worldFromQuery(sequenceQuery(1), [
-        candidate("A", { sequence_slots: [{ position: 0, binding: "alice" }] })
-      ])
+      worldFromQuery(scalarQuery(), [candidate("A", { bindings: [binding("alice")] })])
     ];
     for (const world of operators) {
       expect(noFalseSingleton(world, emptyFixture(1), [])).toBe(false);
@@ -1073,9 +1035,18 @@ describe("final Decide_Q and SealChecker_v1", () => {
   });
 
   it("lifts target-only lower-frontier novelty through SealChecker", () => {
-    const base = worldFromQuery(distinctQuery(), [
-      candidate("core", { bindings: [] }),
-      candidate("lower", { bindings: [binding("bob")] })
+    const base = worldFromQuery(scalarQuery([
+      { id: "rel1", relation: "bought", arguments: ["x"] },
+      { id: "rel2", relation: "from", arguments: ["x"] }
+    ]), [
+      candidate("core", {
+        bindings: [binding("alice")],
+        propositions: [proposition("rel1"), proposition("rel2", "absent")]
+      }),
+      candidate("lower", {
+        bindings: [binding("bob")],
+        propositions: [proposition("rel1", "absent"), proposition("rel2")]
+      })
     ]);
     const world = Object.freeze({
       ...base,

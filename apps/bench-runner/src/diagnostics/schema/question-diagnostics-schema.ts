@@ -247,6 +247,65 @@ export const DiagnosticActiveConstraintResultSchema = z
   })
   .readonly();
 
+export const TargetCandidateDispositionSchema = z
+  .object({
+    candidate_key: z.string(),
+    disposition: z.string().optional(),
+    field_status: z.enum(["in_field", "not_in_field", "unavailable", "unsupported"]).optional(),
+    psi_status: z.enum(["undominated", "dominated", "incomparable", "uncertain", "cycle"]).optional(),
+    gamma_status: z.enum(["feasible", "infeasible", "unresolved", "zero", "positive"]).optional(),
+    prefix_sk_selected: z.boolean().optional(),
+    prefix_rank: z.number().int().nonnegative().nullable().optional()
+  })
+  .strict()
+  .readonly();
+
+const OptionalStageStatusSchema = z.enum([
+  "captured",
+  "unavailable",
+  "unsupported",
+  "failed",
+  "not_checked"
+]);
+
+export const TargetDecisionTraceDiagnosticSchema = z
+  .object({
+    status: OptionalStageStatusSchema,
+    fail_reason: z.string().nullable().optional(),
+    psi_v2_status: OptionalStageStatusSchema.optional(),
+    psi_v2_observation_status: z.string().optional(),
+    psi_v2_pair_states_status: OptionalStageStatusSchema.optional(),
+    psi_v2_pair_states: z.record(z.string(), z.number()).optional(),
+    psi_v2_producer_outcomes: z.array(z.object({
+      producer_id: z.string(),
+      status: z.string(),
+      reason: z.string().optional(),
+      contract_code: z.string().optional()
+    }).strict().readonly()).readonly().optional(),
+    first_frontier_size: z.number().int().nonnegative().nullable().optional(),
+    frontier_depth: z.number().int().nonnegative().nullable().optional(),
+    cycle_status: z.string().optional(),
+    uncertainty_status: z.string().optional(),
+    gamma_compile_status: OptionalStageStatusSchema.optional(),
+    gamma_compile_disposition: z.string().optional(),
+    gamma_feasibility: z.record(z.string(), z.string()).optional(),
+    gamma_digest: z.string().nullable().optional(),
+    pick_reasons: z.array(z.unknown()).readonly().optional(),
+    resource_disposition: z.record(z.string(), z.unknown()).optional(),
+    target_prefix: z.array(z.string()).readonly().optional(),
+    target_s_infty: z.array(z.string()).readonly().optional(),
+    current_delivered_prefix: z.array(z.string()).readonly().optional(),
+    delivery_pack_mode: z.string().optional(),
+    delivery_pack_digest: z.string().optional(),
+    allowed_claims: z.array(z.string()).readonly().optional(),
+    candidate_universe_digest: z.string().optional(),
+    field_membership_digest: z.string().optional(),
+    candidate_dispositions_status: OptionalStageStatusSchema.optional(),
+    candidate_dispositions: z.array(TargetCandidateDispositionSchema).readonly().optional()
+  })
+  .strict()
+  .readonly();
+
 // invariant: source_planes is the load-bearing field for per-plane recall
 // coverage and for classifyMiss's lexical_gap / structural_gap verdicts; it
 // is an explicit string array here, never an optional or loosely-typed slot.
@@ -386,6 +445,7 @@ export const LongMemEvalQuestionDiagnosticSchema = z.preprocess(
     }).strict().readonly().nullable().optional(),
     open_semantic_factor_candidate_activations:
       OpenSemanticFactorCandidateActivationsSchema.optional(),
+    target_decision_trace: TargetDecisionTraceDiagnosticSchema.nullable().optional(),
     answer_shape_plan: RecallAnswerShapePlanSchema.nullable().default(null),
     query_sought_facets: z.array(z.string()).readonly().nullable().default(null),
     candidates: z.array(LongMemEvalReplayCandidateSchema).readonly().default([]),
@@ -403,8 +463,8 @@ export const LongMemEvalQuestionDiagnosticSchema = z.preprocess(
     cohort_ledger: LongMemEvalQuestionCohortLedgerSchema.optional(),
     gold: z.array(LongMemEvalGoldDiagnosticSchema).readonly()
   })
-  .superRefine((diagnostic, context) => {
-    validatePersistedQuestionMeasurement(diagnostic, context);
-  })
-  .readonly()
+    .superRefine((diagnostic, context) => {
+      validatePersistedQuestionMeasurement(diagnostic, context);
+    })
+    .readonly()
 );

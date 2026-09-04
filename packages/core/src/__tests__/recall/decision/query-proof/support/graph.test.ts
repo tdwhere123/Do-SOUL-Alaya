@@ -113,7 +113,7 @@ describe("support hypergraph contract", () => {
     expect(edgeKinds(receipt, "grounds")).toBe(1);
   });
 
-  it("defaults correlated edges to possibly_correlated and rejects independent/same-unit clash", () => {
+  it("keeps correlation without a snapshot-lease producer unknown instead of exact", () => {
     const receipt = createSupportHypergraph({
       query_id: QUERY,
       snapshot_digest: SNAPSHOT,
@@ -123,9 +123,22 @@ describe("support hypergraph contract", () => {
       ],
       edges: [{ kind: "correlated", from: eu("eu-2"), to: eu("eu-1") }]
     });
-    expect(receipt.correlations).toEqual([
-      { left_id: "eu-1", right_id: "eu-2", state: "possibly_correlated" }
-    ]);
+    expect(receipt.correlations).toEqual([]);
+    expect(receipt.correlations.some((row) => row.state === "possibly_correlated")).toBe(false);
+  });
+
+  it("does not mint exact correlation without a producer witness and rejects independent/same-unit clash", () => {
+    const receipt = createSupportHypergraph({
+      query_id: QUERY,
+      snapshot_digest: SNAPSHOT,
+      nodes: [
+        { kind: "evidence_unit", id: "eu-1" },
+        { kind: "evidence_unit", id: "eu-2" }
+      ],
+      edges: [{ kind: "correlated", from: eu("eu-2"), to: eu("eu-1") }]
+    });
+    expect(receipt.correlations).toEqual([]);
+    expect(receipt.edges.filter((edge) => edge.kind === "correlated")).toHaveLength(1);
     expect(() => createSupportHypergraph({
       query_id: QUERY,
       snapshot_digest: SNAPSHOT,

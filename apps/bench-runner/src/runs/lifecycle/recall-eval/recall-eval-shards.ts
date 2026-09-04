@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -24,7 +24,10 @@ import {
 } from "../../snapshot/recall-eval/workspace-slice/overlay-replicate.js";
 import { proveParentOpenedFileProofs } from
   "./recall-eval-process/parent-opened-file-proofs.js";
-import { mergeRecallEvalShardArchives } from "./recall-eval-shards-merge.js";
+import {
+  mergeRecallEvalShardArchives,
+  buildMergedDeliveredMap
+} from "./recall-eval-shards-merge.js";
 import {
   buildRecallEvalWorkerCliArgs,
   buildRecallEvalWorkerEnv,
@@ -82,13 +85,13 @@ export function validateRecallEvalConcurrency(
   if (opts.dataDirRoot !== undefined) {
     throw new Error(
       "recall-eval --concurrency > 1 is incompatible with --data-dir-root; " +
-        "each worker needs an isolated daemon DB."
+      "each worker needs an isolated daemon DB."
     );
   }
   if ((env.ALAYA_RECALL_EVAL_MEMORY_PROFILE_PATH?.trim().length ?? 0) > 0) {
     throw new Error(
       "recall-eval --concurrency > 1 is incompatible with memory profiling; " +
-        "a single profile cannot represent multiple worker processes"
+      "a single profile cannot represent multiple worker processes"
     );
   }
   const unsupportedSubstrate = [
@@ -98,7 +101,7 @@ export function validateRecallEvalConcurrency(
   if (unsupportedSubstrate.length > 0) {
     throw new Error(
       "recall-eval --concurrency > 1 sealed slices cannot represent: " +
-        unsupportedSubstrate.join(", ")
+      unsupportedSubstrate.join(", ")
     );
   }
 }
@@ -111,20 +114,7 @@ export function buildMergedPerQuestionDelivered(
   }>[],
   perScenario: readonly Readonly<{ readonly id: string }>[]
 ): ReadonlyMap<string, readonly string[]> {
-  const expected = new Set(perScenario.map((row) => row.id));
-  const byQuestion = new Map(diagnostics.map((question) => [question.question_id, question]));
-  if (expected.size !== perScenario.length || byQuestion.size !== diagnostics.length ||
-      diagnostics.length !== perScenario.length ||
-      diagnostics.some((question) => !expected.has(question.question_id))) {
-    throw new Error("recall-eval shard delivery coverage mismatch");
-  }
-  return new Map(perScenario.map((row) => {
-    const question = byQuestion.get(row.id);
-    if (question === undefined) throw new Error("recall-eval shard delivery coverage mismatch");
-    const objectIds = question.delivered_results?.map((result) => result.object_id) ??
-      question.delivered_memory_ids ?? [];
-    return [row.id, Object.freeze([...objectIds])];
-  }));
+  return buildMergedDeliveredMap(diagnostics, [], perScenario);
 }
 
 export function resolveRecallEvalShardWindow(
@@ -199,8 +189,21 @@ async function prepareRecallEvalShardedRun(
   const concurrency = resolveRecallEvalConcurrency(opts);
   const loadSnapshotManifest = deps.loadSnapshotManifest ?? defaultLoadSnapshotManifest;
   const snapshotManifest = await loadSnapshotManifest(opts.snapshotDbPath);
+  let totalQuestionCount = snapshotManifest.question_count;
+  if (opts.questionManifest !== undefined) {
+    try {
+      const raw = JSON.parse(await readFile(opts.questionManifest, "utf8")) as {
+        target_count?: number;
+      };
+      if (typeof raw.target_count === "number") {
+        totalQuestionCount = raw.target_count;
+      }
+    } catch {
+      // Fall back to snapshot count if manifest unreadable
+    }
+  }
   const window = deps.resolveWindow === undefined
-    ? resolveRecallEvalShardWindow(opts, snapshotManifest.question_count)
+    ? resolveRecallEvalShardWindow(opts, totalQuestionCount)
     : await deps.resolveWindow(opts);
   const shardRoot = await mkdtemp(join(tmpdir(), "alaya-recall-eval-shards-"));
   const plans = buildLongMemEvalWorkerShardPlans({
@@ -221,7 +224,7 @@ async function prepareRecallEvalShardedRun(
   const cliPath = deps.resolveCliPath?.() ?? resolveDefaultBenchRunnerCliPath();
   process.stdout.write(
     `[recall-eval concurrency] process-backed workers=${plans.length} ` +
-      `window=${window.windowLength} cli=${cliPath}\n`
+    `window=${window.windowLength} cli=${cliPath}\n`
   );
   return {
     opts,
@@ -268,8 +271,7 @@ async function runRecallEvalShardWorkers(
   });
   if (results.some((result) => result.fatal)) {
     throw new Error(
-      `recall-eval --concurrency: one or more worker processes failed (${
-        results.map((result) => result.status).join(",")
+      `recall-eval --concurrency: one or more worker processes failed (${results.map((result) => result.status).join(",")
       })`
     );
   }

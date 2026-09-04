@@ -12,10 +12,18 @@ export type PolarityVotes = Readonly<{
   readonly superseded: Set<string>;
 }>;
 
+export type SupportDraftProducerOutcomeV1 =
+  | "observed"
+  | "not_observed"
+  | "producer_unavailable"
+  | "truncated";
+
 export type CandidatePolarityVotes = Readonly<{
   readonly candidateId: string;
   readonly propositionId: string;
   readonly hypothesisDigest: string | null;
+  readonly jurisdiction: string;
+  readonly producer_outcome: SupportDraftProducerOutcomeV1;
   readonly votes: PolarityVotes;
   readonly provenance: { source_id: string; producer: string }[];
 }>;
@@ -95,9 +103,12 @@ export function noteApplicableProposition(
   candidateId: string,
   hypothesisDigest: string | null,
   propositionId: string,
-  provenance: Readonly<{ readonly source_id: string; readonly producer: string }>
+  provenance: Readonly<{ readonly source_id: string; readonly producer: string }>,
+  jurisdiction: string,
+  producer_outcome: SupportDraftProducerOutcomeV1
 ): CandidatePolarityVotes {
-  const row = candidateVotesFor(draft, candidateId, hypothesisDigest, propositionId);
+  const row = candidateVotesFor(
+    draft, candidateId, hypothesisDigest, propositionId, jurisdiction, producer_outcome);
   if (!row.provenance.some((entry) =>
     entry.source_id === provenance.source_id && entry.producer === provenance.producer)) {
     row.provenance.push({ source_id: provenance.source_id, producer: provenance.producer });
@@ -111,7 +122,8 @@ export function vote(
   hypothesisDigest: string | undefined,
   propositionId: string,
   lineageId: string,
-  side: "support" | "refute"
+  side: "support" | "refute",
+  jurisdiction: string
 ): void {
   const row = votesFor(draft, propositionId);
   row[side].add(lineageId);
@@ -120,7 +132,9 @@ export function vote(
     candidateId,
     hypothesisDigest ?? null,
     propositionId,
-    { source_id: lineageId, producer: "support.polarity.receipt.v1" }
+    { source_id: lineageId, producer: "support.polarity.receipt.v1" },
+    jurisdiction,
+    "observed"
   ).votes;
   candidateVotes[side].add(lineageId);
   if (row.superseded.has(lineageId)) candidateVotes.superseded.add(lineageId);
@@ -143,15 +157,20 @@ function candidateVotesFor(
   draft: SupportDraft,
   candidateId: string,
   hypothesisDigest: string | null,
-  propositionId: string
+  propositionId: string,
+  jurisdiction: string,
+  producer_outcome: SupportDraftProducerOutcomeV1
 ): CandidatePolarityVotes {
-  const key = [candidateId, hypothesisDigest ?? "unbound", propositionId].join("\0");
+  const key = [candidateId, hypothesisDigest ?? "unbound", propositionId, jurisdiction]
+    .join("\0");
   const existing = draft.candidateVotes.get(key);
   if (existing !== undefined) return existing;
   const created = {
     candidateId,
     propositionId,
     hypothesisDigest,
+    jurisdiction,
+    producer_outcome,
     votes: emptyVotes(),
     provenance: []
   };

@@ -294,27 +294,23 @@ describe("shadow integration at fineAssess", () => {
     expect(trace.psi_v2_shadow).toMatchObject({ observation_status: "not_observed" });
   });
 
-  it("warns when delivery pack observation fails and still binds the unbound pack", () => {
+  it("keeps a failed target pack unsupported without warning production or binding the live prefix", () => {
     const warn = vi.fn();
     const spy = vi.spyOn(deliveryPack, "buildShadowDeliveryPack")
       .mockImplementationOnce(() => {
         throw new ShadowContractError("planted pack failure");
       });
     const trace = asCaptured(captureShadowIntegration({ ...shadowInput(), warn }));
-    expect(warn).toHaveBeenCalledWith(
-      "shadow delivery pack observation failed; using unbound pack",
-      {
-        operation: "shadow_delivery_pack_observation",
-        errorName: "ShadowContractError",
-        error: "planted pack failure"
-      }
-    );
+    expect(warn).not.toHaveBeenCalled();
     expect(spy).toHaveBeenCalledTimes(2);
-    expect(spy.mock.calls[1]?.[0]).toEqual({
-      selected_candidates: trace.prefix_proposal,
-      capture_identity_digest: CAPTURE_IDENTITY_DIGEST
+    expect(spy.mock.calls[1]?.[0]).toMatchObject({
+      selected_candidates: [],
+      preview_status: "failed",
+      mode: "unsupported"
     });
-    expect(trace.delivery_pack.holes).toEqual([SEAL_UNBOUND_HOLE]);
+    expect(trace.delivery_pack.mode).toBe("unsupported");
+    expect(trace.delivery_pack.selected_candidates).toEqual([]);
+    expect(trace.delivery_pack.selected_candidates).not.toEqual(trace.prefix_proposal);
   });
 });
 

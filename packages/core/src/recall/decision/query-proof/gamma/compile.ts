@@ -9,12 +9,17 @@ import {
   type CanonicalQueryV1
 } from "../../../query/canonical-query/index.js";
 import { ShadowContractError } from "../../contract-primitives.js";
-import { captureData } from "../closure/live-authority-binding.js";
 import { type ExtremumClosureWitness } from "../closure/extremum.js";
 import { extremaRequirement } from "./extrema-witness.js";
 import {
+  answerProgramCapabilityId,
+  queryClassCapabilityStatus,
+  type QueryClassSourceEvidenceV1
+} from "./capability-matrix.js";
+import {
   assertExactGammaKeys,
   assertUniqueGammaAtomIds,
+  captureGammaPremises,
   createGammaAtom,
   DEFAULT_RESOURCE_FEASIBILITY_POLICY,
   digestQueryGammaBody,
@@ -27,6 +32,8 @@ import {
   type QueryGammaAtomV1,
   type QueryGammaCandidateEvidenceV1,
   type QueryGammaCandidateFeasibilityV1,
+  type QueryGammaClassifiedHoleV1,
+  type QueryGammaCompileDispositionV1,
   type QueryGammaSealObligationV1,
   type QueryGammaStandingV1,
   type ResourceFeasibilityPolicyV1
@@ -42,7 +49,8 @@ const COMPILE_INPUT_KEYS = [
   "candidates",
   "extremum_witness",
   "resource_policy",
-  "hypothesis_digest"
+  "hypothesis_digest",
+  "class_source"
 ] as const;
 
 const CANDIDATE_EVIDENCE_KEYS = [
@@ -64,37 +72,43 @@ export type QueryGammaCompileInputV1 = Readonly<{
   readonly extremum_witness?: ExtremumClosureWitness | null;
   readonly resource_policy?: ResourceFeasibilityPolicyV1;
   readonly hypothesis_digest?: RecallFieldDigest;
+  readonly class_source?: QueryClassSourceEvidenceV1;
 }>;
 
 export function compileQueryGamma(
   input: QueryGammaCompileInputV1
 ): QueryCompiledGammaV1 {
-  const captured = captureData(input);
+  const captured = captureGammaPremises(input);
   assertCompileInput(captured);
   const compilation = captured.compilation;
   const query = selectHypothesis(compilation, captured.hypothesis_digest);
   const resourcePolicy = captured.resource_policy ?? DEFAULT_RESOURCE_FEASIBILITY_POLICY;
+  const holes = classifiedHoles(compilation, captured.hypothesis_digest);
   if (query === null) {
-    return unsupportedGamma(compilation, resourcePolicy, "no_accepted_answer_program");
+    const missing = compilation.hypotheses.length > 1 && captured.hypothesis_digest === undefined
+      ? "multiple_hypotheses"
+      : "no_accepted_answer_program";
+    return unsupportedGamma(compilation, resourcePolicy, missing, holes);
   }
-  const blocked = blockedOperatorReason(
-    compilation,
-    captured.hypothesis_digest
-  );
+  const blocked = blockedOperatorReason(compilation, holes);
   if (blocked !== null) {
-    return unsupportedGamma(compilation, resourcePolicy, blocked);
+    return unsupportedGamma(compilation, resourcePolicy, blocked, holes);
   }
   const candidates = captured.candidates;
+  const classReason = unsupportedAnswerClassReason(query.answer, captured.class_source);
+  if (classReason !== null) {
+    return unsupportedGamma(compilation, resourcePolicy, classReason, holes);
+  }
   const illegalSlots = illegalSequenceReason(query.answer, candidates);
   if (illegalSlots !== null) {
-    return unsupportedGamma(compilation, resourcePolicy, illegalSlots);
+    return unsupportedGamma(compilation, resourcePolicy, illegalSlots, holes);
   }
   const witness = captured.extremum_witness ?? null;
   const extrema = extremaRequirement(
     query.answer, witness, compilation, query, candidates
   );
   if (extrema.status === "unsupported") {
-    return unsupportedGamma(compilation, resourcePolicy, extrema.reason);
+    return unsupportedGamma(compilation, resourcePolicy, extrema.reason, holes);
   }
   const obligation = hasIndependentSupportObligation(query, compilation);
   const atoms = sortGammaAtoms([
@@ -116,7 +130,20 @@ export function compileQueryGamma(
     atoms,
     standings,
     feasibility,
-    seal_obligations: sealObligations(query.answer)
+    seal_obligations: sealObligations(query.answer),
+    compile_disposition: holes.some((hole) => hole.impacts.includes("blocks_certified_delivery"))
+      ? "partial"
+      : "complete",
+    classified_holes: holes,
+    source_evidence_digest: digestRecallFieldIdentity({
+      kind: "query_gamma_source_evidence_v1",
+      candidates: [...candidates].sort((left, right) =>
+        compareText(left.candidate_key, right.candidate_key)).map((candidate) => Object.freeze({
+        candidate_key: candidate.candidate_key,
+        bindings_status: candidate.bindings_status,
+        propositions_status: candidate.propositions_status
+      }))
+    })
   });
   const universe = compiledGammaUniverseMismatch(
     candidates.map((candidate) => candidate.candidate_key),
@@ -174,26 +201,42 @@ function selectHypothesis(
     ?? null;
 }
 
-function blockedOperatorReason(
+function classifiedHoles(
   compilation: CanonicalQueryCompilationV1,
   selectedHypothesisDigest: RecallFieldDigest | undefined
+): readonly QueryGammaClassifiedHoleV1[] {
+  return Object.freeze(compilation.holes
+    .filter((hole) => hole.hypothesis_digest === undefined ||
+      hole.hypothesis_digest === selectedHypothesisDigest)
+    .map((hole) => Object.freeze({
+      provenance: hole.provenance,
+      code: hole.code,
+      impacts: Object.freeze([...hole.impacts]),
+      ...(hole.hypothesis_digest === undefined ? {} : { hypothesis_digest: hole.hypothesis_digest })
+    })));
+}
+
+function blockedOperatorReason(
+  compilation: CanonicalQueryCompilationV1,
+  holes: readonly QueryGammaClassifiedHoleV1[]
 ): string | null {
   if (compilation.compile_status === "unsupported") return "canonical_query_unsupported";
   if (compilation.hypotheses.length === 0) return "no_accepted_answer_program";
-  if (compilation.hypotheses.length > 1 && selectedHypothesisDigest === undefined) {
-    return "multiple_hypotheses";
-  }
-  const relevantHoles = compilation.holes.filter((hole) =>
-    hole.hypothesis_digest === undefined ||
-    hole.hypothesis_digest === selectedHypothesisDigest);
-  if (relevantHoles.some((hole) => hole.impacts.includes("blocks_operator_resolution") ||
+  if (holes.some((hole) => hole.impacts.includes("blocks_operator_resolution") ||
     hole.impacts.includes("blocks_all_delivery"))) {
     return "operator_resolution_blocked";
   }
-  if (relevantHoles.some((hole) => hole.impacts.includes("blocks_certified_delivery"))) {
-    return "blocks_certified_delivery";
-  }
   return null;
+}
+
+function unsupportedAnswerClassReason(
+  answer: CanonicalAnswerProgramV1,
+  source: QueryClassSourceEvidenceV1 | undefined
+): string | null {
+  const capability = answerProgramCapabilityId(answer.kind);
+  const status = queryClassCapabilityStatus(capability, source);
+  if (status.supported_in_shadow) return null;
+  return status.unsupported_reason ?? `${capability}_unsupported`;
 }
 
 function hasIndependentSupportObligation(
@@ -419,11 +462,16 @@ function sealCompiledGamma(params: Readonly<{
   readonly standings: readonly QueryGammaStandingV1[];
   readonly feasibility: readonly QueryGammaCandidateFeasibilityV1[];
   readonly seal_obligations: readonly QueryGammaSealObligationV1[];
+  readonly compile_disposition: QueryGammaCompileDispositionV1;
+  readonly classified_holes: readonly QueryGammaClassifiedHoleV1[];
+  readonly source_evidence_digest: RecallFieldDigest;
 }>): QueryCompiledGammaV1 {
   const body = Object.freeze({
     schema_version: 1 as const,
     operator_id: QUERY_PROOF_GAMMA_OPERATOR_ID,
     compile_status: "compiled" as const,
+    compile_disposition: params.compile_disposition,
+    classified_holes: params.classified_holes,
     unsupported_reason: null,
     query_digest: digestCanonicalQueryV1(params.query),
     compilation_digest: params.compilation.digest,
@@ -435,7 +483,8 @@ function sealCompiledGamma(params: Readonly<{
     semantic_feasibility: Object.freeze(
       [...params.feasibility].sort((left, right) =>
         compareText(left.candidate_key, right.candidate_key))
-    )
+    ),
+    source_evidence_digest: params.source_evidence_digest
   });
   return Object.freeze({
     ...body,
@@ -446,7 +495,8 @@ function sealCompiledGamma(params: Readonly<{
 function unsupportedGamma(
   compilation: CanonicalQueryCompilationV1,
   resourcePolicy: ResourceFeasibilityPolicyV1,
-  reason: string
+  reason: string,
+  holes: readonly QueryGammaClassifiedHoleV1[] = Object.freeze([])
 ): QueryCompiledGammaV1 {
   const queryDigest = compilation.hypotheses[0] === undefined
     ? digestRecallFieldIdentity({ operator_id: "unsupported_query_gamma" })
@@ -455,6 +505,8 @@ function unsupportedGamma(
     schema_version: 1 as const,
     operator_id: QUERY_PROOF_GAMMA_OPERATOR_ID,
     compile_status: "unsupported" as const,
+    compile_disposition: "unsupported" as const,
+    classified_holes: holes,
     unsupported_reason: reason,
     query_digest: queryDigest,
     compilation_digest: compilation.digest,
@@ -463,7 +515,8 @@ function unsupportedGamma(
     seal_obligations: Object.freeze([] as QueryGammaSealObligationV1[]),
     atoms: Object.freeze([] as QueryGammaAtomV1[]),
     standings: Object.freeze([] as QueryGammaStandingV1[]),
-    semantic_feasibility: Object.freeze([] as QueryGammaCandidateFeasibilityV1[])
+    semantic_feasibility: Object.freeze([] as QueryGammaCandidateFeasibilityV1[]),
+    source_evidence_digest: null
   });
   return Object.freeze({
     ...body,
