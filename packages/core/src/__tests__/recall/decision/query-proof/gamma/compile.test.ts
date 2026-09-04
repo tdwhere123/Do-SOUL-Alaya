@@ -20,7 +20,6 @@ import {
   candidate,
   compilationFor,
   compileGamma,
-  compileInputFor,
   distinctQuery,
   extremumWitness,
   hole,

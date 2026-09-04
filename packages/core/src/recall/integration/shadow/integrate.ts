@@ -209,7 +209,7 @@ function runShadowIntegration(
   const walked = walkShadowCapture(walkInput);
   if (!isCapturedWalk(walked)) return failClosed("psi_cycle_contract_failure", activation);
   if (!prefixMonotone(walked.S_infty)) return failClosed("prefix_violation", activation);
-  return assembleCaptured(input, eligible, peeled, walked, observations, walkInput, psi);
+  return assembleCaptured(input, eligible, peeled, walked, observations, walkInput);
 }
 
 export function memoizeRequestPsi(psi: PsiQuery): PsiQuery {
@@ -383,8 +383,7 @@ function assembleCaptured(
   frontiers: ShadowFrontierReceipt,
   walked: ShadowCapturedWalk,
   observations: ShadowPsiObservationField,
-  walkInput: Parameters<typeof walkShadowCapture>[0],
-  psi: PsiQuery
+  walkInput: Parameters<typeof walkShadowCapture>[0]
 ): ShadowCapturedTrace {
   const k = input.policy.fine_assessment.budgets.max_entries;
   const first = walked.decisions[0];

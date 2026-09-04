@@ -142,8 +142,7 @@ describe("support source jurisdiction", () => {
       snapshot_digest: SNAPSHOT,
       candidates: [candidate]
     });
-    osf.truncated = true;
-    osf.bindings = [];
+    Object.assign(osf as object, { truncated: true, bindings: [] });
     expect(captured.proposition_observations[0]).toMatchObject({
       jurisdiction: "osf",
       producer_outcome: "observed",
@@ -210,7 +209,7 @@ describe("support source jurisdiction", () => {
     });
     expect(materialized.graph.correlations).toEqual([]);
     expect(materialized.graph.correlations.some((row) =>
-      row.state === "same_source_lineage" || row.state === "exact")).toBe(false);
+      row.state === "same_source_lineage")).toBe(false);
   });
 
   it("binds admitted observations to query, candidate, snapshot, and principal", () => {
@@ -247,7 +246,7 @@ describe("support source jurisdiction", () => {
     expect(() => materializePath({
       ...context,
       relational_source_verifiers: [
-        poisoned as (typeof lawful)[number],
+        poisoned as unknown as (typeof lawful)[number],
         lawful.find((row) => row.source_owner === "relation_assertions")!
       ]
     }, receipt)).toThrow(/planted verifier getter/u);

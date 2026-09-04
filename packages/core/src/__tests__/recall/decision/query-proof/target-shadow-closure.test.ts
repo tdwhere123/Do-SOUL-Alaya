@@ -198,18 +198,18 @@ describe("target-shadow-chain", () => {
         capture_identity_digest: "sha256:cap-ident",
         selected_candidates: targetPrefix,
         answer_kind: "scalar",
-        answer_bindings: [{
-          candidate_key: "c-1",
-          variable: "x",
-          semantic_identity: "alice",
-          binding_id: "b-1"
-        }],
+        answer_bindings: [{ binding_id: "b-1", value: "alice" }],
         propositions: [],
         evidence_groups: [],
         holes: [],
         conflicts: [],
         completeness_scope: null,
-        principal_scope: { delivery_interference: false }
+        principal_scope: {
+          principal: null,
+          effective_as_of: null,
+          governance_frontier: null,
+          delivery_interference: false
+        }
       });
 
       expect(pack.mode).toBe("certified");
@@ -639,6 +639,6 @@ function captureLive(warn: ReturnType<typeof vi.fn> = vi.fn()) {
       governanceCeilingByMemoryId: {}
     },
     tokenEstimator: { estimate: () => 4 },
-    warn
+    warn: warn as import("../../../../recall/runtime/recall-service-port-types.js").RecallServiceWarnPort
   });
 }

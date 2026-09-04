@@ -74,7 +74,6 @@ import {
   candidate,
   compileGamma,
   compileInputFor,
-  compilationFor,
   distinctQuery,
   proposition,
   scalarQuery,
