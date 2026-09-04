@@ -61,7 +61,7 @@ describe("PathRelation end-to-end (submitCandidate -> recall path_expansion)", (
 
     await memoryEntryRepo.create(createMemoryEntry({
       object_id: MEM_QUERY_HIT,
-      content: "rtk pnpm command anchor",
+      content: "pnpm command anchor",
       domain_tags: ["repo"]
     }));
     await memoryEntryRepo.create(createMemoryEntry({
@@ -138,7 +138,7 @@ describe("PathRelation end-to-end (submitCandidate -> recall path_expansion)", (
         findByScopeClass: vi.fn(async () => memories),
         searchByKeyword: vi.fn(async () =>
           memories
-            .filter((m) => m.content.toLowerCase().includes("rtk"))
+            .filter((m) => m.content.toLowerCase().includes("pnpm"))
             .map((m) => ({ object_id: m.object_id, normalized_rank: 1 }))
         )
       } as RecallServiceDependencies["memoryRepo"],
@@ -156,7 +156,7 @@ describe("PathRelation end-to-end (submitCandidate -> recall path_expansion)", (
 
     const recallService = new RecallService(deps);
     const result = await recallService.recall({
-      taskSurface: createTaskSurface("rtk pnpm command"),
+      taskSurface: createTaskSurface("pnpm command"),
       workspaceId: WS,
       runId: "run-1",
       strategy: "build"

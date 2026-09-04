@@ -11,8 +11,8 @@ it("B-2 proposes supports for strong same-dimension local neighbors", async () =
       object_id: "memory-existing",
       created_at: "2026-05-24T10:00:00.000Z",
       updated_at: "2026-05-24T10:00:00.000Z",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const service = new EdgeAutoProducerService(deps);
@@ -52,8 +52,8 @@ it("B-2 proposes supports for strong same-dimension local neighbors", async () =
       object_id: "memory-existing",
       created_at: "2026-05-24T10:00:00.000Z",
       updated_at: "2026-05-24T10:00:00.000Z",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "failed");
@@ -78,8 +78,8 @@ it("B-2 proposes supports for strong same-dimension local neighbors", async () =
       object_id: "memory-existing",
       created_at: "2026-05-24T10:00:00.000Z",
       updated_at: "2026-05-24T10:00:00.000Z",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     pathCandidatePort.submitCandidate.mockImplementation(async (): Promise<PathMintOutcome> => "rejected");
@@ -99,13 +99,13 @@ it("B-2 proposes supports for strong same-dimension local neighbors", async () =
 it("B-2 proposes derives_from for deterministic derivation cues", async () => {
     const newMemory = createMemoryEntry({
       formation_kind: "derived",
-      content: "Based on the repository RTK workflow, all shell commands should use rtk.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Based on the repository pnpm workflow, all package scripts should use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const neighbor = createMemoryEntry({
       object_id: "memory-source",
-      content: "The repository workflow requires rtk for shell commands.",
-      domain_tags: ["rtk", "workflow"]
+      content: "The repository workflow requires pnpm for package scripts.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const service = new EdgeAutoProducerService(deps);
@@ -129,13 +129,13 @@ it("B-2 proposes derives_from for deterministic derivation cues", async () => {
 
 it("B-3 proposes supersedes for newer replacement memories in the same topic", async () => {
     const newMemory = createMemoryEntry({
-      content: "The repo now uses pnpm commands through rtk instead of npm commands.",
+      content: "The repo now uses pnpm commands for package scripts instead of npm commands.",
       domain_tags: ["package-manager", "workflow"],
       created_at: "2026-05-24T12:00:00.000Z"
     });
     const oldMemory = createMemoryEntry({
       object_id: "memory-old",
-      content: "The repo uses npm commands through rtk for package scripts.",
+      content: "The repo uses npm commands for package scripts.",
       domain_tags: ["package-manager", "workflow"],
       created_at: "2026-05-23T12:00:00.000Z"
     });
@@ -171,13 +171,13 @@ it("B-3 proposes supersedes for newer replacement memories in the same topic", a
   it("B7 proposes contradicts for a high-overlap neighbor carrying a contradiction cue", async () => {
     const newMemory = createMemoryEntry({
       content:
-        "The claim that the repo uses npm commands through rtk for package scripts is not true.",
+        "The claim that the repo uses npm commands for package scripts is not true.",
       domain_tags: ["package-manager", "workflow"],
       created_at: "2026-05-24T12:00:00.000Z"
     });
     const neighbor = createMemoryEntry({
       object_id: "memory-claim",
-      content: "The repo uses npm commands through rtk for package scripts.",
+      content: "The repo uses npm commands for package scripts.",
       domain_tags: ["package-manager", "workflow"],
       created_at: "2026-05-23T12:00:00.000Z"
     });
@@ -205,13 +205,13 @@ it("B-3 proposes supersedes for newer replacement memories in the same topic", a
 
 it("does not propose contradicts when the high-overlap neighbor carries no contradiction cue", async () => {
     const newMemory = createMemoryEntry({
-      content: "The repo uses npm commands through rtk for package scripts in detail.",
+      content: "The repo uses npm commands for package scripts in detail.",
       domain_tags: ["package-manager", "workflow"],
       created_at: "2026-05-24T12:00:00.000Z"
     });
     const neighbor = createMemoryEntry({
       object_id: "memory-claim",
-      content: "The repo uses npm commands through rtk for package scripts.",
+      content: "The repo uses npm commands for package scripts.",
       domain_tags: ["package-manager", "workflow"],
       created_at: "2026-05-23T12:00:00.000Z"
     });
@@ -269,15 +269,15 @@ it("B-2 LLM supports verdict above floor folds into the SUPPORTS path profile", 
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const llmPort = {
       classifyPair: vi.fn(async () => ({
         edgeType: "supports" as const,
         confidence: 0.92,
-        rationale: "both rows assert the same RTK rule"
+        rationale: "both rows assert the same pnpm rule"
       }))
     };
     const service = new EdgeAutoProducerService({ ...deps, llmPort });
@@ -308,8 +308,8 @@ it("B-2 LLM derives_from verdict folds into the DERIVES_FROM path profile", asyn
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-source",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const llmPort = {
@@ -340,8 +340,8 @@ it("B-2 LLM below 0.85 floor falls back to the local supports profile", async ()
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const llmPort = {
@@ -374,8 +374,8 @@ it("B-2 LLM null verdict falls back to the local supports profile", async () => 
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const llmPort = {
@@ -407,8 +407,8 @@ it("B-2 LLM null verdict falls back to the local supports profile", async () => 
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const llmPort = {
@@ -449,13 +449,13 @@ it("B-2 LLM throwing port is non-fatal: falls back, warns, never aborts other ne
     const newMemory = createMemoryEntry();
     const neighborA = createMemoryEntry({
       object_id: "memory-A",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const neighborB = createMemoryEntry({
       object_id: "memory-B",
-      content: "RTK is required for shell commands in repository scripts.",
-      domain_tags: ["rtk", "workflow"]
+      content: "pnpm is required for package scripts in repository workflows.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighborA, neighborB]);
     const llmPort = {

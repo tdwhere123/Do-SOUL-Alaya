@@ -76,7 +76,7 @@ describe("edge auto producer daemon wiring", () => {
         createMemoryEntry({
           object_id: OLD_MEMORY_ID,
           content: "Production deployment requires signed artifact promotion.",
-          domain_tags: ["rtk", "workflow"],
+          domain_tags: ["pnpm", "workflow"],
           created_at: "2026-05-24T00:00:00.000Z",
           updated_at: "2026-05-24T00:00:00.000Z"
         })
@@ -84,8 +84,8 @@ describe("edge auto producer daemon wiring", () => {
       await memoryRepo.create(
         createMemoryEntry({
           object_id: CONFLICT_MEMORY_ID,
-          content: "Repository shell commands must use the RTK wrapper.",
-          domain_tags: ["rtk", "workflow"],
+          content: "Repository package scripts must use pnpm.",
+          domain_tags: ["pnpm", "workflow"],
           created_at: "2026-05-24T00:00:00.000Z",
           updated_at: "2026-05-24T00:00:00.000Z"
         })
@@ -260,12 +260,12 @@ describe("edge auto producer daemon wiring", () => {
       };
 
       await seedWorkspaceRun(workspaceRepo, runRepo);
-      const duplicateContent = "RTK wrapper is required for shell commands in this repository.";
+      const duplicateContent = "pnpm is required for package scripts in this repository.";
       await memoryRepo.create(
         createMemoryEntry({
           object_id: OLD_MEMORY_ID,
           content: duplicateContent,
-          domain_tags: ["rtk", "workflow"],
+          domain_tags: ["pnpm", "workflow"],
           evidence_refs: [],
           created_at: "2026-05-24T00:00:00.000Z",
           updated_at: "2026-05-24T00:00:00.000Z"
@@ -400,8 +400,8 @@ async function seedWorkspaceRun(
 
 function createFactSignal(
   rawPayload: Readonly<{ readonly excerpt: string; readonly distilled_fact: string }> = {
-    excerpt: "RTK wrapper is required for shell commands in this repository.",
-    distilled_fact: "RTK wrapper is required for shell commands in this repository."
+    excerpt: "pnpm is required for package scripts in this repository.",
+    distilled_fact: "pnpm is required for package scripts in this repository."
   }
 ): CandidateMemorySignal {
   return CandidateMemorySignalSchema.parse({
@@ -414,7 +414,7 @@ function createFactSignal(
     signal_state: "triaged",
     object_kind: "fact",
     scope_hint: ScopeClass.PROJECT,
-    domain_tags: ["rtk", "workflow"],
+    domain_tags: ["pnpm", "workflow"],
     confidence: 0.8,
     evidence_refs: [],
     raw_payload: rawPayload,
@@ -435,8 +435,8 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     source_kind: "compiler",
     formation_kind: "extracted",
     scope_class: ScopeClass.PROJECT,
-    content: "Repository shell commands must use the RTK wrapper.",
-    domain_tags: ["rtk", "workflow"],
+    content: "Repository package scripts must use pnpm.",
+    domain_tags: ["pnpm", "workflow"],
     evidence_refs: [],
     workspace_id: "workspace-1",
     run_id: "run-1",

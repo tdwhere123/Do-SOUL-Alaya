@@ -24,7 +24,7 @@ It must not depend on core, soul, or daemon packages.
 ## Commands
 
 ```bash
-rtk pnpm --filter @do-soul/alaya-storage run typecheck
-rtk pnpm --filter @do-soul/alaya-storage run test
-rtk pnpm --filter @do-soul/alaya-storage run build
+pnpm --filter @do-soul/alaya-storage run typecheck
+pnpm --filter @do-soul/alaya-storage run test
+pnpm --filter @do-soul/alaya-storage run build
 ```

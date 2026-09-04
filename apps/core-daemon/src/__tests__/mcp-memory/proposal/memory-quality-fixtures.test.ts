@@ -334,10 +334,10 @@ function createIntegrationFixtures(): readonly IntegrationFixture[] {
     },
     {
       fixture_id: "chinese_preference_constraint",
-      query: "中文 rtk 约束",
+      query: "中文 pnpm 约束",
       baseline_memories: [],
-      signals: [createSignal("signal-zh", "constraint", "必须用 rtk 包裹仓库命令。", ["中文", "rtk"])],
-      expected_after_content: ["必须用 rtk 包裹仓库命令。"]
+      signals: [createSignal("signal-zh", "constraint", "必须用 pnpm 运行仓库命令。", ["中文", "pnpm"])],
+      expected_after_content: ["必须用 pnpm 运行仓库命令。"]
     }
   ];
 }

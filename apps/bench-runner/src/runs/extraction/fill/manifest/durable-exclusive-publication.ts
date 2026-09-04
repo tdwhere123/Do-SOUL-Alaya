@@ -22,14 +22,9 @@ export function publishBytesExclusiveDurable(input: {
   let owned: FileIdentity | undefined;
   let failure: unknown;
   try {
-    try {
-      writeBytesExclusiveTracked(temporary, input.bytes, (identity) => {
-        owned = identity;
-      });
-    } catch (cause) {
-      if (!isAlreadyExists(cause)) throw cause;
-      owned = assertExactOwnedTemporary(temporary, input.bytes);
-    }
+    writeOrAdoptExclusiveTemporary(temporary, input.bytes, (identity) => {
+      owned = identity;
+    });
     try {
       linkFileExclusiveDurable(temporary, input.destination);
     } catch (cause) {
@@ -61,14 +56,9 @@ export function replaceBytesDurable(input: {
   let owned: FileIdentity | undefined;
   let failure: unknown;
   try {
-    try {
-      writeBytesExclusiveTracked(temporary, input.bytes, (identity) => {
-        owned = identity;
-      });
-    } catch (cause) {
-      if (!isAlreadyExists(cause)) throw cause;
-      owned = assertExactOwnedTemporary(temporary, input.bytes);
-    }
+    writeOrAdoptExclusiveTemporary(temporary, input.bytes, (identity) => {
+      owned = identity;
+    });
     renameSync(temporary, input.destination);
     owned = undefined;
     fsyncRegularFile(input.destination);
@@ -77,6 +67,32 @@ export function replaceBytesDurable(input: {
     failure = cause;
   }
   finishOwnedTemporaryCleanup(temporary, owned, failure);
+}
+
+function writeOrAdoptExclusiveTemporary(
+  path: string,
+  bytes: Uint8Array,
+  onOwned: (identity: FileIdentity) => void
+): void {
+  try {
+    writeBytesExclusiveTracked(path, bytes, onOwned);
+  } catch (cause) {
+    if (!isAlreadyExists(cause)) throw cause;
+    try {
+      onOwned(assertExactOwnedTemporary(path, bytes));
+    } catch {
+      unlinkCrashDebris(path);
+      writeBytesExclusiveTracked(path, bytes, onOwned);
+    }
+  }
+}
+
+function unlinkCrashDebris(path: string): void {
+  const current = lstatSync(path, { bigint: true });
+  if (current.isSymbolicLink()) {
+    throw new Error("deterministic publication temporary is a symlink");
+  }
+  unlinkSync(path);
 }
 
 function writeBytesExclusiveTracked(

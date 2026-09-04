@@ -181,7 +181,7 @@ export function buildMemory(
     dimension: "fact",
     scope_class: "project",
     content: `content-for-${memoryId}`,
-    domain_tags: ["rtk"],
+    domain_tags: ["pnpm"],
     evidence_refs: [`evidence-for-${memoryId}`],
     workspace_id: workspaceId,
     run_id: "run-1"
@@ -198,7 +198,7 @@ export function buildSignal(signalId: string): CandidateMemorySignal {
     signal_kind: "potential_claim",
     object_kind: "fact",
     scope_hint: "project",
-    domain_tags: ["rtk"],
+    domain_tags: ["pnpm"],
     confidence: 0.9,
     evidence_refs: [],
     source_memory_refs: ["memory-source"],

@@ -145,14 +145,14 @@ export async function writeOperatorLoopHarness(
     ""
   ].join("\n"));
   await writeFile(snapshot, "fixture-snapshot\n");
-  await writeFakeNode(binDir, argvCapture, envCapture);
+  const nodeBin = await writeFakeNode(binDir, argvCapture, envCapture);
   return {
     snapshot,
     workRoot,
     argvCapture,
     envCapture,
     binDir,
-    env: isolatedChildEnv(envFile, binDir)
+    env: isolatedChildEnv(envFile, nodeBin)
   };
 }
 
@@ -319,25 +319,21 @@ async function writeFakeNode(
   binDir: string,
   argvCapture: string,
   envCapture: string
-): Promise<void> {
-  await writeExecutableNode(binDir, fakeNodeScript(argvCapture, envCapture));
+): Promise<string> {
+  return writeExecutableNode(binDir, fakeNodeScript(argvCapture, envCapture));
 }
 
-async function writeExecutableNode(binDir: string, source: string): Promise<void> {
+async function writeExecutableNode(binDir: string, source: string): Promise<string> {
   const interceptPath = path.join(binDir, "node-intercept.cjs");
-  const nodePath = path.join(binDir, "node");
+  const nodeBin = path.join(binDir, "alaya-node");
   await writeFile(interceptPath, source, "utf8");
-  await writeFile(nodePath, [
+  await writeFile(nodeBin, [
     "#!/usr/bin/env bash",
     `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(interceptPath)} "$@"`,
     ""
   ].join("\n"), "utf8");
-  await chmod(nodePath, 0o755);
-  await writeFile(
-    path.join(binDir, "node.cmd"),
-    `@echo off\r\n"${process.execPath}" "${interceptPath}" %*\r\n`,
-    "utf8"
-  );
+  await chmod(nodeBin, 0o755);
+  return nodeBin;
 }
 
 function fakeNodeScript(argvCapture: string, envCapture: string): string {
@@ -378,7 +374,7 @@ function fakeNodeScript(argvCapture: string, envCapture: string): string {
     "  }) + \"\\n\");",
     "  process.exit(0);",
     "}",
-    "if (runner.includes(\"alaya-bench-runner.mjs\") && args[1] === \"diagnostic-loop\") {",
+    "if (runner.includes(\"alaya-bench-runner.mjs\") && args.includes(\"diagnostic-loop\")) {",
     "  writeFileSync(argvCapture, JSON.stringify(args) + \"\\n\");",
     "  writeFileSync(envCapture, JSON.stringify({",
     "    credentials: Object.fromEntries(credentialKeys.map((key) => [key, Boolean(process.env[key])])),",
@@ -392,7 +388,7 @@ function fakeNodeScript(argvCapture: string, envCapture: string): string {
   ].join("\n");
 }
 
-function isolatedChildEnv(envFile: string, binDir: string): NodeJS.ProcessEnv {
+function isolatedChildEnv(envFile: string, nodeBin: string): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (
@@ -405,12 +401,9 @@ function isolatedChildEnv(envFile: string, binDir: string): NodeJS.ProcessEnv {
     }
   }
   delete env.NODE_OPTIONS;
-  const pathEntries = process.platform === "win32"
-    ? [binDir, binDir.replaceAll("\\", "/")]
-    : [binDir];
   return {
     ...env,
-    PATH: `${pathEntries.join(path.delimiter)}${path.delimiter}${process.env.PATH ?? ""}`,
+    BENCH_NODE_BIN: nodeBin,
     ALAYA_RECALL_ANY5_ENV: envFile
   };
 }

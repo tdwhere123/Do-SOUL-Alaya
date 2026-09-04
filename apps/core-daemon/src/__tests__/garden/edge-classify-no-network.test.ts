@@ -58,8 +58,8 @@ describe("B-2 edge classification (K4.5 no-network, default config)", () => {
       object_id: "memory-existing",
       created_at: "2026-05-24T10:00:00.000Z",
       updated_at: "2026-05-24T10:00:00.000Z",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
 
     const byId = new Map([newMemory, neighbor].map((memory) => [memory.object_id, memory]));
@@ -114,8 +114,8 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     source_kind: "compiler",
     formation_kind: "extracted",
     scope_class: ScopeClass.PROJECT,
-    content: "RTK wrapper is required for shell commands in this repository.",
-    domain_tags: ["rtk", "workflow"],
+    content: "pnpm is required for package scripts in this repository.",
+    domain_tags: ["pnpm", "workflow"],
     evidence_refs: ["evidence-1"],
     workspace_id: "workspace-1",
     run_id: "run-1",

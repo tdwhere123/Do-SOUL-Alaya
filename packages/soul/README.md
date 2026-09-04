@@ -22,7 +22,7 @@ ports from the daemon. It should not create daemon runtime dependencies.
 ## Commands
 
 ```bash
-rtk pnpm --filter @do-soul/alaya-soul run typecheck
-rtk pnpm --filter @do-soul/alaya-soul run test
-rtk pnpm --filter @do-soul/alaya-soul run build
+pnpm --filter @do-soul/alaya-soul run typecheck
+pnpm --filter @do-soul/alaya-soul run test
+pnpm --filter @do-soul/alaya-soul run build
 ```

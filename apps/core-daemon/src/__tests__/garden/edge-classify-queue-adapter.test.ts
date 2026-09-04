@@ -18,13 +18,13 @@ function makeInput(overrides: Record<string, unknown> = {}) {
     scopeClass: "project",
     source: {
       object_id: "memory-new",
-      content: "RTK wrapper is required for shell commands.",
-      domainTags: ["rtk", "workflow"]
+      content: "pnpm is required for package scripts.",
+      domainTags: ["pnpm", "workflow"]
     },
     neighbor: {
       object_id: "memory-existing",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domainTags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domainTags: ["pnpm", "workflow"]
     },
     ...overrides
   };

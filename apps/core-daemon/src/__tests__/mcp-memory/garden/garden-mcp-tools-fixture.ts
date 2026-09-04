@@ -376,13 +376,13 @@ export function createEdgeClassifyPayload(overrides: {
     scope_class: "project",
     source_memory: {
       object_id: overrides.sourceObjectId ?? "memory-source",
-      content: "RTK wrapper is required for shell commands.",
-      domain_tags: ["rtk", "workflow"]
+      content: "pnpm is required for package scripts.",
+      domain_tags: ["pnpm", "workflow"]
     },
     neighbor_memory: {
       object_id: overrides.neighborObjectId ?? "memory-neighbor",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     },
     source_signal_id: overrides.sourceSignalId === undefined ? "signal-1" : overrides.sourceSignalId
   });

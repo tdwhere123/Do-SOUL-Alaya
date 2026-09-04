@@ -18,6 +18,6 @@ schema export helpers. It must not depend on other workspace packages.
 ## Commands
 
 ```bash
-rtk pnpm --filter @do-soul/alaya-protocol run typecheck
-rtk pnpm --filter @do-soul/alaya-protocol run build
+pnpm --filter @do-soul/alaya-protocol run typecheck
+pnpm --filter @do-soul/alaya-protocol run build
 ```

@@ -23,7 +23,7 @@ runtime wiring.
 ## Commands
 
 ```bash
-rtk pnpm --filter @do-soul/alaya-engine-gateway run typecheck
-rtk pnpm --filter @do-soul/alaya-engine-gateway run test
-rtk pnpm --filter @do-soul/alaya-engine-gateway run build
+pnpm --filter @do-soul/alaya-engine-gateway run typecheck
+pnpm --filter @do-soul/alaya-engine-gateway run test
+pnpm --filter @do-soul/alaya-engine-gateway run build
 ```

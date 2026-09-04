@@ -135,11 +135,11 @@ describe("bench maintenance scripts", () => {
       repoRoot,
       "apps/bench-runner/scripts/run-daily-public-bench.sh"
     );
-    const fakeBin = await writeFakeNodeBin(2, markerPath);
+    const nodeBin = await writeFakeNodeBin(2, markerPath);
 
     const result = await execFileRejects("bash", [scriptPath], {
       ...cliScriptEnv(),
-      PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+      BENCH_NODE_BIN: nodeBin,
       BENCH_DAILY_EMBEDDINGS: "disabled",
       BENCH_DAILY_POLICY_SHAPES: "stress",
       BENCH_DAILY_LIMIT: "1",
@@ -157,11 +157,11 @@ describe("bench maintenance scripts", () => {
       repoRoot,
       "apps/bench-runner/scripts/run-daily-public-bench.sh"
     );
-    const fakeBin = await writeFakeNodeBin(1, markerPath);
+    const nodeBin = await writeFakeNodeBin(1, markerPath);
 
     const result = await execFileRejects("bash", [scriptPath], {
       ...cliScriptEnv(),
-      PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+      BENCH_NODE_BIN: nodeBin,
       BENCH_DAILY_EMBEDDINGS: "disabled",
       BENCH_DAILY_POLICY_SHAPES: "stress",
       BENCH_DAILY_LIMIT: "1",
@@ -180,9 +180,9 @@ async function writeFakeNodeBin(
 ): Promise<string> {
   const binDir = path.join(tmpDir, "fake-bin");
   await mkdir(binDir, { recursive: true });
-  const fakeNodePath = path.join(binDir, "node");
+  const nodeBin = path.join(binDir, "alaya-node");
   await writeFile(
-    fakeNodePath,
+    nodeBin,
     [
       "#!/usr/bin/env bash",
       "set -euo pipefail",
@@ -203,8 +203,8 @@ async function writeFakeNodeBin(
     ].join("\n"),
     "utf8"
   );
-  await chmod(fakeNodePath, 0o755);
-  return binDir;
+  await chmod(nodeBin, 0o755);
+  return nodeBin;
 }
 
 function cliScriptEnv(): NodeJS.ProcessEnv {

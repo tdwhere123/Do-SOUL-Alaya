@@ -9,8 +9,8 @@ it("uses bounded local search only and has no external provider dependency", asy
     const neighbors = Array.from({ length: 20 }, (_, index) =>
       createMemoryEntry({
         object_id: `memory-neighbor-${index}`,
-        content: `RTK shell command workflow neighbor ${index}`,
-        domain_tags: ["rtk", "workflow"]
+        content: `pnpm package script workflow neighbor ${index}`,
+        domain_tags: ["pnpm", "workflow"]
       })
     );
     const { deps, searchByKeyword, findByIds } = createDeps([newMemory, ...neighbors]);
