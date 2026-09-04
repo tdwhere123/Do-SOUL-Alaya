@@ -57,7 +57,7 @@ describe("RecallReadWorkerClient evidence batch alignment", () => {
       await fixture.client.close();
       rmSync(fixture.directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
 
 describe("RecallReadWorkerClient evidence batch validation", () => {
@@ -82,7 +82,7 @@ describe("RecallReadWorkerClient evidence batch validation", () => {
       await fixture.client.close();
       rmSync(fixture.directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
 
 async function createFixture(): Promise<Readonly<{

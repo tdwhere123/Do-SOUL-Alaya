@@ -323,8 +323,9 @@ function selectFixtureCandidate(fixture: Fixture, selectionId: string): void {
 
 function readPointer(tomlFilename: string): string | null {
   const text = fs.readFileSync(tomlFilename, "utf8");
-  const match = /^db_path\s*=\s*"(.+)"$/mu.exec(text);
-  return match?.[1] ?? null;
+  const match = /^db_path\s*=\s*(".*")$/mu.exec(text);
+  if (match === undefined || match === null) return null;
+  return JSON.parse(match[1]!) as string;
 }
 
 function seedLegacySource(filename: string): void {
