@@ -67,10 +67,21 @@ export function samePhysicalLocation(left: string, right: string): boolean {
 }
 
 function comparableWin32Path(input: string): string {
-  return path.toNamespacedPath(canonicalPath(input))
+  const native = input.replaceAll("/", "\\");
+  let resolved = native;
+  try {
+    resolved = realpathSync.native(native);
+  } catch {
+    resolved = canonicalPath(native);
+  }
+  return stripWin32NamespacePrefix(path.win32.toNamespacedPath(resolved))
     .replaceAll("\\", "/")
     .replace(/\/+$/u, "")
     .toLowerCase();
+}
+
+function stripWin32NamespacePrefix(input: string): string {
+  return input.replace(/^\\\\\?\\UNC\\/iu, "\\\\").replace(/^\\\\\?\\/u, "");
 }
 
 function bindContainedPath(

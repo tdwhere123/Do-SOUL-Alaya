@@ -36,6 +36,7 @@ export interface OperatorLoopHarness {
   readonly workRoot: string;
   readonly argvCapture: string;
   readonly envCapture: string;
+  readonly envFile: string;
   readonly binDir: string;
   readonly env: NodeJS.ProcessEnv;
 }
@@ -137,22 +138,27 @@ export async function writeOperatorLoopHarness(
     operator_digest: DIGEST,
     requested_key: "cd".repeat(32)
   })}\n`);
+  await writeFile(snapshot, "fixture-snapshot\n");
+  const interceptPath = await writeFakeNode(binDir, argvCapture, envCapture);
   await writeFile(envFile, [
-    `ALAYA_BENCH_EXTRACTION_CACHE_ROOT=${cacheRoot}`,
+    bashAssignment("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", cacheRoot),
     "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=1",
     "ALAYA_GARDEN_PROVIDER_KIND=official_api",
     ...CREDENTIAL_ENV_KEYS.map((key) => `${key}=fixture-${key}`),
+    bashAssignment("BENCH_NODE_BIN", process.execPath),
+    bashAssignment("BENCH_NODE_INTERCEPT", interceptPath),
+    bashAssignment("BENCH_NODE_ARGV_CAPTURE", argvCapture),
+    bashAssignment("BENCH_NODE_ENV_CAPTURE", envCapture),
     ""
   ].join("\n"));
-  await writeFile(snapshot, "fixture-snapshot\n");
-  const interceptPath = await writeFakeNode(binDir, argvCapture, envCapture);
   return {
     snapshot,
     workRoot,
     argvCapture,
     envCapture,
+    envFile,
     binDir,
-    env: isolatedChildEnv(envFile, interceptPath)
+    env: isolatedChildEnv(envFile, interceptPath, argvCapture, envCapture)
   };
 }
 
@@ -336,8 +342,8 @@ function fakeNodeScript(argvCapture: string, envCapture: string): string {
     "const { spawnSync } = require(\"child_process\");",
     "const { createHash } = require(\"crypto\");",
     "const args = process.argv.slice(2);",
-    `const argvCapture = ${JSON.stringify(argvCapture)};`,
-    `const envCapture = ${JSON.stringify(envCapture)};`,
+    `const argvCapture = process.env.BENCH_NODE_ARGV_CAPTURE || ${JSON.stringify(argvCapture)};`,
+    `const envCapture = process.env.BENCH_NODE_ENV_CAPTURE || ${JSON.stringify(envCapture)};`,
     `const digest = ${JSON.stringify(DIGEST)};`,
     `const credentialKeys = ${JSON.stringify(CREDENTIAL_ENV_KEYS)};`,
     "function hasFlag(name, value) {",
@@ -352,6 +358,15 @@ function fakeNodeScript(argvCapture: string, envCapture: string): string {
     "}",
     "const runner = args[0] ?? \"\";",
     "if (runner === \"-\" || runner === \"-e\") passthrough();",
+    "if (args.includes(\"diagnostic-loop\")) {",
+    "  writeFileSync(argvCapture, JSON.stringify(args) + \"\\n\");",
+    "  writeFileSync(envCapture, JSON.stringify({",
+    "    credentials: Object.fromEntries(credentialKeys.map((key) => [key, Boolean(process.env[key])])),",
+    "    ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: process.env.ALAYA_BENCH_ALLOW_LIVE_EXTRACTION ?? null,",
+    "    ALAYA_GARDEN_PROVIDER_KIND: process.env.ALAYA_GARDEN_PROVIDER_KIND ?? null",
+    "  }) + \"\\n\");",
+    "  process.exit(0);",
+    "}",
     "if (runner.includes(\"alaya-bench-runner.mjs\") && hasFlag(\"--mode\", \"validate-recall-checkpoints\")) {",
     "  passthrough();",
     "}",
@@ -367,21 +382,17 @@ function fakeNodeScript(argvCapture: string, envCapture: string): string {
     "  }) + \"\\n\");",
     "  process.exit(0);",
     "}",
-    "if (runner.includes(\"alaya-bench-runner.mjs\") && args.includes(\"diagnostic-loop\")) {",
-    "  writeFileSync(argvCapture, JSON.stringify(args) + \"\\n\");",
-    "  writeFileSync(envCapture, JSON.stringify({",
-    "    credentials: Object.fromEntries(credentialKeys.map((key) => [key, Boolean(process.env[key])])),",
-    "    ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: process.env.ALAYA_BENCH_ALLOW_LIVE_EXTRACTION ?? null,",
-    "    ALAYA_GARDEN_PROVIDER_KIND: process.env.ALAYA_GARDEN_PROVIDER_KIND ?? null",
-    "  }) + \"\\n\");",
-    "  process.exit(0);",
-    "}",
     "passthrough();",
     ""
   ].join("\n");
 }
 
-function isolatedChildEnv(envFile: string, interceptPath: string): NodeJS.ProcessEnv {
+function isolatedChildEnv(
+  envFile: string,
+  interceptPath: string,
+  argvCapture: string,
+  envCapture: string
+): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (
@@ -396,8 +407,21 @@ function isolatedChildEnv(envFile: string, interceptPath: string): NodeJS.Proces
   delete env.NODE_OPTIONS;
   return {
     ...env,
-    BENCH_NODE_BIN: process.execPath,
-    BENCH_NODE_INTERCEPT: interceptPath,
-    ALAYA_RECALL_ANY5_ENV: envFile
+    MSYS_NO_PATHCONV: "1",
+    MSYS2_ARG_CONV_EXCL: "*",
+    BENCH_NODE_BIN: posixPath(process.execPath),
+    BENCH_NODE_INTERCEPT: posixPath(interceptPath),
+    BENCH_NODE_ARGV_CAPTURE: posixPath(argvCapture),
+    BENCH_NODE_ENV_CAPTURE: posixPath(envCapture),
+    ALAYA_RECALL_ANY5_ENV: posixPath(envFile)
   };
+}
+
+function posixPath(value: string): string {
+  return value.replaceAll("\\", "/");
+}
+
+function bashAssignment(name: string, value: string): string {
+  const posix = posixPath(value);
+  return `${name}='${posix.replaceAll("'", "'\\''")}'`;
 }

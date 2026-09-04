@@ -22,7 +22,9 @@ describe("isContainedPath", () => {
     expect(isContainedPath(root, `${root}${path.sep}..${path.sep}x`)).toBe(false);
     expect(isContainedPath(root, "/tmp/outside")).toBe(false);
     expect(isContainedPath(root, `${root}/\0escape`)).toBe(false);
-    expect(isContainedPath(root, path.join(root, "foo\\bar"))).toBe(false);
+    expect(isContainedPath(root, path.join(root, "foo\\bar"))).toBe(
+      process.platform === "win32"
+    );
     expect(isContainedPath(root, path.join(nested, "file"))).toBe(true);
     expect(isContainedPath(root, path.join(nested, "dup", "dup"))).toBe(true);
     expect(isContainedPath(root, root)).toBe(false);

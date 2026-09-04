@@ -395,6 +395,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function readProcessStartIdentity(pid: number): string {
+  if (pid === process.pid) {
+    selfProcessStartIdentity ??= readPlatformProcessStartIdentity(pid);
+    return selfProcessStartIdentity;
+  }
+  return readPlatformProcessStartIdentity(pid);
+}
+
+let selfProcessStartIdentity: string | undefined;
+
+function readPlatformProcessStartIdentity(pid: number): string {
   if (process.platform === "linux") return readLinuxProcessStartIdentity(pid);
   if (process.platform === "win32") return readWindowsProcessStartIdentity(pid);
   return readPosixProcessStartIdentity(pid);
@@ -430,7 +440,8 @@ function readWindowsProcessStartIdentity(pid: number): string {
       `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`
     ], {
       encoding: "utf8",
-      timeout: 5_000,
+      timeout: 20_000,
+      windowsHide: true,
       stdio: ["ignore", "pipe", "ignore"]
     }).replace(/^\uFEFF/u, "").trim();
   } catch (cause) {

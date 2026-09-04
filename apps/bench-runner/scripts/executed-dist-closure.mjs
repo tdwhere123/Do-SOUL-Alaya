@@ -40,12 +40,18 @@ async function collectReachableArtifacts(root, entrypoint) {
 }
 
 function extractImportSpecifiers(source) {
-  const pattern = /(?:\b(?:import|export)\s+(?:[^'";]*?\s+from\s+)?|\bimport\s*\(\s*)["']([^"']+)["']/gu;
+  const pattern = new RegExp(
+    String.raw`(?:\b(?:import|export)\s+(?:[^'"\n;]*?\s+from\s+)?|\bimport\s*\(\s*)["']([^"']+)["']`,
+    "gu"
+  );
   return [...source.matchAll(pattern)].map((match) => match[1]);
 }
 
 function extractRuntimeUrlSpecifiers(source) {
-  const pattern = /\bnew\s+URL\s*\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)/gu;
+  const pattern = new RegExp(
+    String.raw`\bnew\s+URL\s*\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)`,
+    "gu"
+  );
   return [...source.matchAll(pattern)].map((match) => match[1]);
 }
 

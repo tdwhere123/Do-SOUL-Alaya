@@ -123,12 +123,12 @@ export function fsyncDirectory(path: string): void {
       fsyncSync(descriptor);
     } catch (cause) {
       // Windows directory handles reject fsync; POSIX still requires it for durability.
-      if (!isIgnorableDirectoryFsync(cause)) throw cause;
+      if (!isIgnorableWindowsFsync(cause)) throw cause;
     }
   });
 }
 
-function isIgnorableDirectoryFsync(cause: unknown): boolean {
+function isIgnorableWindowsFsync(cause: unknown): boolean {
   if (process.platform !== "win32") return false;
   return typeof cause === "object" && cause !== null && "code" in cause &&
     (cause.code === "EPERM" || cause.code === "ENOTSUP" || cause.code === "EACCES");
@@ -218,8 +218,23 @@ function cleanupOwnedTemporary(path: string, expected: FileIdentity): void {
 }
 
 function fsyncRegularFile(path: string): void {
-  const descriptor = openSync(path, constants.O_RDONLY | requireNoFollow());
-  runAndClose(descriptor, "published file fsync", () => fsyncSync(descriptor));
+  // FlushFileBuffers requires GENERIC_WRITE; O_RDONLY is EPERM on Windows.
+  const flags = (process.platform === "win32" ? constants.O_RDWR : constants.O_RDONLY) |
+    requireNoFollow();
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, flags);
+  } catch (cause) {
+    if (isIgnorableWindowsFsync(cause)) return;
+    throw cause;
+  }
+  runAndClose(descriptor, "published file fsync", () => {
+    try {
+      fsyncSync(descriptor);
+    } catch (cause) {
+      if (!isIgnorableWindowsFsync(cause)) throw cause;
+    }
+  });
 }
 
 function writeAll(descriptor: number, bytes: Uint8Array): void {

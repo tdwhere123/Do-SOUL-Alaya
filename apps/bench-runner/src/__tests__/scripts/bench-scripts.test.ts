@@ -139,13 +139,13 @@ describe("bench maintenance scripts", () => {
 
     const result = await execFileRejects("bash", [scriptPath], {
       ...cliScriptEnv(),
-      BENCH_NODE_BIN: process.execPath,
-      BENCH_NODE_INTERCEPT: interceptPath,
+      BENCH_NODE_BIN: process.execPath.replaceAll("\\", "/"),
+      BENCH_NODE_INTERCEPT: interceptPath.replaceAll("\\", "/"),
       BENCH_DAILY_EMBEDDINGS: "disabled",
       BENCH_DAILY_POLICY_SHAPES: "stress",
       BENCH_DAILY_LIMIT: "1",
-      BENCH_DAILY_HISTORY_ROOT: path.join(tmpDir, "history"),
-      BENCH_LOG_DIR: path.join(tmpDir, "logs")
+      BENCH_DAILY_HISTORY_ROOT: path.join(tmpDir, "history").replaceAll("\\", "/"),
+      BENCH_LOG_DIR: path.join(tmpDir, "logs").replaceAll("\\", "/")
     });
 
     expect(result.code).toBe(2);
@@ -162,13 +162,13 @@ describe("bench maintenance scripts", () => {
 
     const result = await execFileRejects("bash", [scriptPath], {
       ...cliScriptEnv(),
-      BENCH_NODE_BIN: process.execPath,
-      BENCH_NODE_INTERCEPT: interceptPath,
+      BENCH_NODE_BIN: process.execPath.replaceAll("\\", "/"),
+      BENCH_NODE_INTERCEPT: interceptPath.replaceAll("\\", "/"),
       BENCH_DAILY_EMBEDDINGS: "disabled",
       BENCH_DAILY_POLICY_SHAPES: "stress",
       BENCH_DAILY_LIMIT: "1",
-      BENCH_DAILY_HISTORY_ROOT: path.join(tmpDir, "history"),
-      BENCH_LOG_DIR: path.join(tmpDir, "logs")
+      BENCH_DAILY_HISTORY_ROOT: path.join(tmpDir, "history").replaceAll("\\", "/"),
+      BENCH_LOG_DIR: path.join(tmpDir, "logs").replaceAll("\\", "/")
     });
 
     expect(result.code).toBe(1);
@@ -189,8 +189,8 @@ async function writeFakeNodeBin(
       "\"use strict\";",
       "const { writeFileSync } = require(\"fs\");",
       "const target = process.argv[2] ?? \"\";",
-      `if (target === "apps/bench-runner/bin/alaya-bench-runner.mjs") process.exit(${benchExitCode});`,
-      "if (target === \"scripts/append-bench-degradation-backlog.mjs\") {",
+      `if (target.includes("alaya-bench-runner.mjs")) process.exit(${benchExitCode});`,
+      "if (target.includes(\"append-bench-degradation-backlog.mjs\")) {",
       `  writeFileSync(${JSON.stringify(appendMarkerPath)}, "called\\n");`,
       "  process.exit(0);",
       "}",
@@ -211,7 +211,11 @@ function cliScriptEnv(): NodeJS.ProcessEnv {
     }
   }
   delete env.NODE_OPTIONS;
-  return env;
+  return {
+    ...env,
+    MSYS_NO_PATHCONV: "1",
+    MSYS2_ARG_CONV_EXCL: "*"
+  };
 }
 
 async function execFileRejects(

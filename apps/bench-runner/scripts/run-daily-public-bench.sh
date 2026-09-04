@@ -12,9 +12,9 @@ LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
 NODE_BIN="${BENCH_NODE_BIN:-node}"
 run_node() {
   if [[ -n "${BENCH_NODE_INTERCEPT:-}" ]]; then
-    command "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
+    "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
   else
-    command "$NODE_BIN" "$@"
+    "$NODE_BIN" "$@"
   fi
 }
 mkdir -p "$LOG_DIR"

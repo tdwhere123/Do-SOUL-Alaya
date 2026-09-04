@@ -12,9 +12,9 @@ NODE_BIN="${BENCH_NODE_BIN:-node}"
 # Tests inject an intercept argv; a PATH `node` shim is skipped on Darwin.
 run_node() {
   if [[ -n "${BENCH_NODE_INTERCEPT:-}" ]]; then
-    command "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
+    "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
   else
-    command "$NODE_BIN" "$@"
+    "$NODE_BIN" "$@"
   fi
 }
 SMALL_WINDOW_CEILING=3
@@ -127,6 +127,7 @@ set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 set +a
+NODE_BIN="${BENCH_NODE_BIN:-node}"
 
 if [[ "${ALAYA_BENCH_RECALL_PACKET_TRACE:-0}" == "1" ]]; then
   die "ALAYA_BENCH_RECALL_PACKET_TRACE=1 is forbidden for the pinned recall-only operator"

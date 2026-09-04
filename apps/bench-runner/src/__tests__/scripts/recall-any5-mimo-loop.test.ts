@@ -65,6 +65,18 @@ describe("recall-any5-mimo-loop", () => {
       await expectCacheOnlyLoopEnv(harness, argv);
     });
 
+    it("keeps a sourced extraction cache root that would lose backslashes unquoted", async () => {
+      const harness = await writeOperatorLoopHarness(tmpDir);
+      const { stdout } = await execFileAsync("bash", [
+        "-c",
+        "set -a; source \"$1\"; set +a; printf '%s' \"$ALAYA_BENCH_EXTRACTION_CACHE_ROOT\"",
+        "bash",
+        harness.envFile
+      ], { timeout: 5_000 });
+      expect(stdout.replaceAll("\\", "/")).toContain("cache-100q");
+      expect(stdout).not.toMatch(/C:Users/u);
+    });
+
     it("forwards --embedding-cache-overlay to diagnostic-loop", async () => {
       const harness = await writeOperatorLoopHarness(tmpDir);
       const overlay = path.join(tmpDir, "overlay-receipt.json");

@@ -107,7 +107,9 @@ export function registerCatalogRefillRecoveryCases(fixture: RecoveryFixture): vo
       targetSelectionReceiptPath: authority.selection
     }, phase);
 
-    expect(crashed).toMatchObject({ code: null, signal: "SIGKILL" });
+    expect(crashed).toMatchObject(process.platform === "win32"
+      ? { code: 1, signal: null }
+      : { code: null, signal: "SIGKILL" });
     expect(fixture.controlArtifacts(".catalog-refill-resume.")).toEqual([]);
     const staleLock = join(roots.cacheRoot, ".extraction-fill.lock");
     expect(existsSync(staleLock)).toBe(true);
