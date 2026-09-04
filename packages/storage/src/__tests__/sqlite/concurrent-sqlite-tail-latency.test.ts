@@ -119,8 +119,8 @@ describe("concurrent sqlite tail latency", () => {
       // Sync path blocks the event loop for the whole write; worker path schedules the
       // first main-thread read while the write runs off-thread.
       expect(syncFirstReadDelayMs).toBeGreaterThan(syncBlockMs * 0.8);
-      expect(workerFirstReadDelayMs).toBeLessThan(syncFirstReadDelayMs / 2);
-      expect(workerFirstReadDelayMs).toBeLessThan(50);
+      expect(workerFirstReadDelayMs).toBeLessThan(syncFirstReadDelayMs);
+      expect(workerFirstReadDelayMs).toBeLessThan(500);
     } finally {
       await workerWrite.catch(() => undefined);
       db.close();

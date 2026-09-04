@@ -189,11 +189,11 @@ async function resolveOpenedPath(
   candidate: string,
   opened: BigIntStats
 ): Promise<string> {
-  for (const descriptorRoot of ["/proc/self/fd", "/dev/fd"]) {
+  if (process.platform === "linux") {
     try {
-      return await realpath(path.join(descriptorRoot, String(handle.fd)));
+      return await realpath(path.join("/proc/self/fd", String(handle.fd)));
     } catch {
-      // Descriptor pseudo-files are not available on every supported platform.
+      // Fall through to the opened candidate path.
     }
   }
   try {
