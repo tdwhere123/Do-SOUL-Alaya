@@ -4,6 +4,11 @@ import {
   type BigIntStats
 } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
+import {
+  boundDirectoryAnchor,
+  boundDirectoryChildNoFollow,
+  boundDirectoryChildPath
+} from "../fill/manifest/root-directory-binding.js";
 
 export interface BoundedStableRegularFile {
   readonly bytes: Buffer;
@@ -144,6 +149,7 @@ function sameStableFile(left: BigIntStats, right: BigIntStats): boolean {
 interface BoundDirectory {
   readonly descriptor: number;
   readonly identity: BigIntStats;
+  readonly namedPath: string;
 }
 
 export function withRootBoundDirectory<T>(input: {
@@ -155,14 +161,18 @@ export function withRootBoundDirectory<T>(input: {
 }, operation: (stableDirectoryPath: string, stableRootPath: string) => T): T {
   const held = openRootChain(input.root, input.createRoot === true, input.label);
   try {
-    const stableRootPath = `/proc/self/fd/${held.at(-1)!.descriptor}`;
+    const rootDirectory = held.at(-1)!;
+    const stableRootPath = boundDirectoryAnchor(rootDirectory.descriptor, rootDirectory.namedPath);
     for (const segment of input.segments ?? []) {
       assertPathSegment(segment, input.label);
       held.push(openChildDirectory(
-        held.at(-1)!.descriptor, segment, input.createSegments === true, input.label
+        held.at(-1)!, segment, input.createSegments === true, input.label
       ));
     }
-    const result = operation(`/proc/self/fd/${held.at(-1)!.descriptor}`, stableRootPath);
+    const directory = held.at(-1)!;
+    const result = operation(
+      boundDirectoryAnchor(directory.descriptor, directory.namedPath), stableRootPath
+    );
     for (const directory of held) {
       if (!sameIdentity(directory.identity, fstatSync(directory.descriptor, { bigint: true }))) {
         throw new Error(`${input.label} directory identity changed during operation`);
@@ -203,7 +213,7 @@ function openRootChain(root: string, create: boolean, label: string): BoundDirec
   const held = [openDirectory(sep, false, label)];
   try {
     for (const segment of segments) {
-      held.push(openChildDirectory(held.at(-1)!.descriptor, segment, create, label));
+      held.push(openChildDirectory(held.at(-1)!, segment, create, label));
     }
     return held;
   } catch (cause) {
@@ -213,12 +223,12 @@ function openRootChain(root: string, create: boolean, label: string): BoundDirec
 }
 
 function openChildDirectory(
-  parentDescriptor: number,
+  parent: BoundDirectory,
   segment: string,
   create: boolean,
   label: string
 ): BoundDirectory {
-  const anchored = `/proc/self/fd/${parentDescriptor}/${segment}`;
+  const anchored = boundDirectoryChildPath(parent.descriptor, parent.namedPath, segment);
   if (create) {
     try {
       mkdirSync(anchored, { mode: 0o700 });
@@ -226,7 +236,12 @@ function openChildDirectory(
       if (!(cause instanceof Error && "code" in cause && cause.code === "EEXIST")) throw cause;
     }
   }
-  return openDirectory(anchored, true, label);
+  const child = openDirectory(anchored, boundDirectoryChildNoFollow(anchored), label);
+  if (!sameIdentity(parent.identity, fstatSync(parent.descriptor, { bigint: true }))) {
+    closeSync(child.descriptor);
+    throw new Error(`${label} parent directory identity changed while opening a child`);
+  }
+  return child;
 }
 
 function openDirectory(path: string, noFollow: boolean, label: string): BoundDirectory {
@@ -242,7 +257,7 @@ function openDirectory(path: string, noFollow: boolean, label: string): BoundDir
         (!named.isSymbolicLink() && !sameIdentity(identity, named))) {
       throw new Error(`${label} directory is not a stable real directory`);
     }
-    return { descriptor, identity };
+    return { descriptor, identity, namedPath: path };
   } catch (cause) {
     closeSync(descriptor);
     throw cause;

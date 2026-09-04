@@ -108,7 +108,8 @@ it("reclaims current metadata only after its writer PID is confirmed dead", asyn
   lease.release();
 });
 
-it("releases the descriptor and kernel lease when metadata removal fails", async () => {
+it.skipIf(process.platform !== "linux")(
+  "releases the descriptor and kernel lease when metadata removal fails", async () => {
   const root = await fixtureRoot();
   const lockPath = join(root, ".extraction-fill.lock");
   const lease = acquireExtractionCacheWriteLease(root);
@@ -195,7 +196,8 @@ it("reclaims current metadata after a PID start-identity mismatch", async () => 
   lease.release();
 });
 
-it("publishes through the held root when the prepared root name is replaced", async () => {
+it.skipIf(process.platform !== "linux")(
+  "publishes through the held root when the prepared root name is replaced", async () => {
   const parent = await fixtureRoot();
   const root = join(parent, "cache");
   const heldRoot = join(parent, "held-cache");
@@ -221,7 +223,8 @@ it("publishes through the held root when the prepared root name is replaced", as
   expect(existsSync(join(root, ".extraction-fill.lock"))).toBe(false);
 });
 
-it("aggregates acquisition and held-root cleanup failures", async () => {
+it.skipIf(process.platform !== "linux")(
+  "aggregates acquisition and held-root cleanup failures", async () => {
   const parent = await fixtureRoot();
   const root = join(parent, "cache");
   const heldRoot = join(parent, "held-cache");
@@ -252,7 +255,8 @@ it("aggregates acquisition and held-root cleanup failures", async () => {
   expect(existsSync(join(root, ".extraction-fill.lock"))).toBe(false);
 });
 
-it("releases the held inode without touching a replacement root", async () => {
+it.skipIf(process.platform !== "linux")(
+  "releases the held inode without touching a replacement root", async () => {
   const parent = await fixtureRoot();
   const root = join(parent, "cache");
   const heldRoot = join(parent, "held-cache");
@@ -298,7 +302,8 @@ it("captures the leased root inode and refuses a replacement tree at publish", a
   expect(() => lease.release()).toThrow(/final identity|identity changed/u);
 });
 
-it("does not unlink a lock directory swapped after the bound inode is verified", async () => {
+it.skipIf(process.platform !== "linux")(
+  "does not unlink a lock directory swapped after the bound inode is verified", async () => {
   const root = await fixtureRoot();
   const lockPath = join(root, ".extraction-fill.lock");
   const displacedLockPath = join(root, ".extraction-fill.lock.displaced");

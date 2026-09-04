@@ -7,6 +7,7 @@ import { readExtractionCacheManifestIdentity } from
 import { hasCompleteExtractionFillSummary } from "../fill-authority.js";
 import {
   assertDirectoryIdentity,
+  boundDirectoryAnchor,
   openExistingCacheRoot,
   type DirectoryIdentity
 } from "./root-directory-binding.js";
@@ -99,7 +100,7 @@ export function inspectHistoricalKeyRawClosure(
 function inspectBoundHistoricalKeyRawClosure(
   bound: ReturnType<typeof openExistingCacheRoot>
 ): HistoricalKeyRawClosure {
-  const stableRoot = `/proc/self/fd/${bound.descriptor}`;
+  const stableRoot = boundDirectoryAnchor(bound.descriptor, bound.path);
   const identity = readExtractionCacheManifestIdentity(stableRoot);
   if (identity === undefined) return unclaimedClosure();
   const manifest = identity.manifest;

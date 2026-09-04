@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 
 const STARTING = 0;
@@ -39,9 +42,10 @@ export interface KernelWriteLeaseTarget {
 
 export function acquireKernelWriteLease(target: KernelWriteLeaseTarget): KernelWriteLease {
   const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  const address = abstractSocketAddress(target);
   const worker = new Worker(WORKER_SOURCE, {
     eval: true,
-    workerData: { address: abstractSocketAddress(target), state: state.buffer }
+    workerData: { address, state: state.buffer }
   });
   Atomics.wait(state, 0, STARTING, HANDSHAKE_TIMEOUT_MS);
   const acquisition = Atomics.load(state, 0);
@@ -70,6 +74,9 @@ export function acquireKernelWriteLease(target: KernelWriteLeaseTarget): KernelW
       Atomics.wait(state, 0, ACTIVE, HANDSHAKE_TIMEOUT_MS);
       const releaseState = Atomics.load(state, 0);
       void worker.terminate();
+      if (!address.startsWith("\0")) {
+        try { unlinkSync(address); } catch { /* leftover socket after close */ }
+      }
       if (releaseState !== RELEASED) {
         throw new Error("extraction cache kernel writer lease did not release cleanly");
       }
@@ -94,5 +101,8 @@ function abstractSocketAddress(target: KernelWriteLeaseTarget): string {
   const digest = createHash("sha256")
     .update(`${target.device}:${target.inode}`, "utf8")
     .digest("hex");
-  return `\0alaya-extraction-cache-write-${digest}`;
+  if (process.platform === "linux") {
+    return `\0alaya-extraction-cache-write-${digest}`;
+  }
+  return join(tmpdir(), `alaya-extraction-cache-write-${digest}.sock`);
 }
