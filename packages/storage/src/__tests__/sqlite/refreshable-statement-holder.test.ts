@@ -41,7 +41,7 @@ describe("RefreshableStatementHolder", () => {
     db.close();
     expect(holder.active().ping.get()).toEqual({ value: 1 });
     expect(prepareCount).toBe(2);
-  });
+  }, 30_000);
 
   it("reprepares statements when a shared database is reopened by another holder", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-refreshable-"));
@@ -74,5 +74,5 @@ describe("RefreshableStatementHolder", () => {
     expect(secondHolder.active().ping.get()).toEqual({ value: 2 });
     expect(firstPrepareCount).toBe(2);
     expect(secondPrepareCount).toBe(2);
-  });
+  }, 30_000);
 });

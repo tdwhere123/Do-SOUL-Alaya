@@ -45,6 +45,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fetch shadow-off neutrality pin
+        run: git fetch --depth 1 origin f29002ba9480b267106e38128a91eec1ebe5917d
+
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}

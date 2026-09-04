@@ -102,7 +102,9 @@ describe("initDatabase PRAGMA hardening", () => {
     cleanupTempDirectory(context.directory);
   });
 
-  it("restricts the database directory to 0700 and sqlite files to 0600", () => {
+  it.skipIf(process.platform === "win32")(
+    "restricts the database directory to 0700 and sqlite files to 0600",
+    () => {
     fs.chmodSync(context.directory, 0o755);
     const database = initDatabase({ filename: context.filename });
     try {

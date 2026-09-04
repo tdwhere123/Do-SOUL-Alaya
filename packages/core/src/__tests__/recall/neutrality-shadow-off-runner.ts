@@ -224,6 +224,15 @@ function runShadowOffVitest(root: string, outFile: string): void {
 }
 
 function assertShadowOffShaResolves(from: string): void {
+  try {
+    assertResolvedShadowOffSha(from);
+  } catch {
+    git(["fetch", "--depth", "1", "origin", SHADOW_OFF_SHA], from);
+    assertResolvedShadowOffSha(from);
+  }
+}
+
+function assertResolvedShadowOffSha(from: string): void {
   const resolved = git(
     ["rev-parse", "--verify", `${SHADOW_OFF_SHA}^{commit}`],
     from
