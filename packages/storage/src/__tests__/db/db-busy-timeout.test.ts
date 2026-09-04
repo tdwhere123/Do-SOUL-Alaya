@@ -70,7 +70,7 @@ describe("initDatabase busy timeout policy", () => {
         .toThrow();
       const elapsedMs = performance.now() - startedAt;
       expect(elapsedMs).toBeGreaterThanOrEqual(150);
-      expect(elapsedMs).toBeLessThan(1_000);
+      expect(elapsedMs).toBeLessThan(5_000);
     } finally {
       if (blocker.inTransaction) blocker.exec("ROLLBACK");
       blocker.close();

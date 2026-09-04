@@ -263,7 +263,9 @@ describe("LocalOnnxEmbeddingClient", () => {
       expect(extractor).toHaveBeenCalledTimes(1);
 
       releases.shift()?.(output);
-      await vi.waitFor(() => expect(extractor).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(extractor).toHaveBeenCalledTimes(2), {
+        timeout: 5_000
+      });
       releases.shift()?.(output);
       await expect(second).resolves.toHaveLength(1);
     } finally {

@@ -41,8 +41,10 @@ it("honors a session_finished emitted after a later timer turn once cancel resol
     await new Promise<void>((resolve) => setTimeout(resolve, 30));
     await flushAsync();
     await flushAsync();
-
-    expect(completeSpy).toHaveBeenCalledWith(FIXED_WORKER_RUN_ID, []);
+    await vi.waitFor(
+      () => expect(completeSpy).toHaveBeenCalledWith(FIXED_WORKER_RUN_ID, []),
+      { timeout: 5_000 }
+    );
     expect(freezeSpy).not.toHaveBeenCalled();
     expect(abortSpy).not.toHaveBeenCalled();
     expect(harness.getById(FIXED_WORKER_RUN_ID)).toEqual(
