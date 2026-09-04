@@ -38,10 +38,6 @@ export class LruCache<K, V> {
     return this.entries.delete(key);
   }
 
-  public keys(): readonly K[] {
-    return [...this.entries.keys()];
-  }
-
   public oldestKey(): K | undefined {
     return this.entries.keys().next().value;
   }

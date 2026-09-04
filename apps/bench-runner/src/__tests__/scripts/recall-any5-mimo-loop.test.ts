@@ -122,8 +122,8 @@ describe("recall-any5-mimo-loop", () => {
         harness.workRoot
       ]);
       expect(argv).not.toContain("--snapshot");
-      expect(flagValue(argv, "--snapshot-out")).toBe(
-        path.join(harness.workRoot, "snapshot.db")
+      expect(path.normalize(flagValue(argv, "--snapshot-out") ?? "")).toBe(
+        path.normalize(path.join(harness.workRoot, "snapshot.db"))
       );
       await expectCacheOnlyLoopEnv(harness, argv);
     });
@@ -312,8 +312,8 @@ describe("recall-any5-mimo-loop", () => {
         expect(argv).not.toContain("--snapshot-out");
       } else {
         expect(argv).not.toContain("--snapshot");
-        expect(flagValue(argv, "--snapshot-out")).toBe(
-          path.join(harness.workRoot, "snapshot.db")
+        expect(path.normalize(flagValue(argv, "--snapshot-out") ?? "")).toBe(
+          path.normalize(path.join(harness.workRoot, "snapshot.db"))
         );
       }
     });

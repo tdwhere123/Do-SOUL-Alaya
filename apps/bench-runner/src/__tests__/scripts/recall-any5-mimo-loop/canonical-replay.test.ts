@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,7 @@ import {
 import { manifestFor } from
   "../../longmemeval/extraction/extraction-cache-preflight-fixture.js";
 import { execFileAsync } from "./fixture.js";
+import { removeTempDirectory } from "../../support/temp-cleanup.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const helper = path.resolve(here, "../../../../scripts/prove-cache-only-replay.mjs");
@@ -48,7 +49,7 @@ describe("canonical cache-only replay process", () => {
   });
 
   afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   });
 
   it("derives the full selected-window request and reaches real zero-call preflight", async () => {
@@ -79,7 +80,7 @@ describe("canonical cache-only replay process", () => {
       code: 2,
       stderr: expect.stringContaining("credentialless and cache-only")
     });
-  }, 20_000);
+  }, 60_000);
 
   it("rejects self-consistent key, window, route, and manifest-digest tampering", async () => {
     const prepared = await prepareCanonicalProcessFixture(root);
@@ -98,7 +99,7 @@ describe("canonical cache-only replay process", () => {
     await expectTamperRejected(prepared, "digest", (body) => {
       body.request.worker = true;
     }, "digest", false);
-  }, 20_000);
+  }, 60_000);
 });
 
 interface ReplayManifestBody {

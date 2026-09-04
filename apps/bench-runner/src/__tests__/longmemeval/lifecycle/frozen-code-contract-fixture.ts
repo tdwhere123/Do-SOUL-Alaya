@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -13,6 +13,7 @@ import {
   specTrackedDiffArgs,
   specUint32Be
 } from "./worktree-identity-independent-spec.js";
+import { removeTempDirectory } from "../../support/temp-cleanup.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,9 +37,7 @@ export type UntrackedFileBytes = {
 export function createFrozenCodeFixtureHarness() {
   const roots: string[] = [];
   afterEach(async () => {
-    await Promise.all(roots.splice(0).map((root) =>
-      rm(root, { recursive: true, force: true })
-    ));
+    await Promise.all(roots.splice(0).map((root) => removeTempDirectory(root)));
   });
   return {
     cleanRepository: () => cleanRepository(roots),
