@@ -145,7 +145,7 @@ export async function writeOperatorLoopHarness(
     ""
   ].join("\n"));
   await writeFile(snapshot, "fixture-snapshot\n");
-  await writeFakeRtk(binDir, argvCapture, envCapture);
+  await writeFakeNode(binDir, argvCapture, envCapture);
   return {
     snapshot,
     workRoot,
@@ -156,47 +156,66 @@ export async function writeOperatorLoopHarness(
   };
 }
 
-export async function writeReplayAwareRtk(
+export async function writeReplayAwareNode(
   binDir: string,
   receipt: Readonly<Record<string, unknown>> = replayReceiptFixture()
 ): Promise<void> {
-  const rtkPath = path.join(binDir, "rtk");
-  await writeFile(rtkPath, [
-    "#!/usr/bin/env bash",
-    "set -euo pipefail",
-    "shift",
-    "if [[ \"${1:-}\" == *prove-cache-only-replay.mjs ]]; then",
-    "  out=${2:?request manifest output}",
-    "  printf '%s\\n' '{\"schema_version\":1,\"kind\":\"provider_preflight_replay_request\"}' > \"$out\"",
-    "  exit 0",
-    "fi",
-    "if [[ \"${1:-}\" == *alaya-bench-runner.mjs && \"${2:-}\" == provider-preflight ]]; then",
-    "  [[ \" $* \" == *' --request-manifest '* ]] || { echo 'missing complete request manifest' >&2; exit 2; }",
-    "  if [[ \" $* \" == *' --mode validate-replay-receipt '* ]]; then",
-    "    receipt='' request=''",
-    "    while [[ $# -gt 0 ]]; do",
-    "      case \"$1\" in --receipt) receipt=$2; shift 2 ;; --request-manifest) request=$2; shift 2 ;; *) shift ;; esac",
-    "    done",
-    "    python3 - \"$receipt\" \"$request\" <<'PY'",
-    "import json, sys",
-    `expected = ${JSON.stringify(JSON.stringify(replayReceiptFixture()))}`,
-    "receipt = json.loads(open(sys.argv[1], encoding='utf-8').read())",
-    "request = json.loads(open(sys.argv[2], encoding='utf-8').read())",
-    "assert receipt == json.loads(expected)",
-    "assert request == {'schema_version': 1, 'kind': 'provider_preflight_replay_request'}",
-    "PY",
-    "    exit 0",
-    "  fi",
-    "  [[ -z \"${ALAYA_OFFICIAL_GARDEN_SECRET_REF:-}${ALAYA_OFFICIAL_GARDEN_API_KEY:-}${OFFICIAL_API_GARDEN_API_KEY:-}${ALAYA_QA_API_KEY:-}${ALAYA_GARDEN_OPENAI_SECRET_REF:-}${ALAYA_CONFLICT_LLM_PROVIDER_URL:-}${ALAYA_CONFLICT_LLM_API_KEY:-}\" ]] || { echo 'provider credentials reached replay' >&2; exit 2; }",
-    "  [[ \"${ALAYA_BENCH_ALLOW_LIVE_EXTRACTION:-}\" == 0 ]] || { echo 'live extraction reached replay' >&2; exit 2; }",
-    `  echo '${JSON.stringify(receipt)}'`,
-    "  exit 0",
-    "fi",
-    "echo 'unexpected rtk invocation' >&2",
-    "exit 2",
+  await writeExecutableNode(binDir, [
+    "#!/usr/bin/env node",
+    "\"use strict\";",
+    "const { readFileSync, writeFileSync } = require(\"fs\");",
+    "const { spawnSync } = require(\"child_process\");",
+    "const args = process.argv.slice(2);",
+    `const expectedReceipt = ${JSON.stringify(replayReceiptFixture())};`,
+    `const receipt = ${JSON.stringify(receipt)};`,
+    `const credentialKeys = ${JSON.stringify(CREDENTIAL_ENV_KEYS)};`,
+    "const runner = args[0] ?? \"\";",
+    "function flagValue(name) {",
+    "  const index = args.indexOf(name);",
+    "  return index >= 0 ? args[index + 1] : undefined;",
+    "}",
+    "function passthrough() {",
+    "  const result = spawnSync(process.execPath, args, { stdio: \"inherit\", env: process.env });",
+    "  process.exit(result.status === null ? 1 : result.status);",
+    "}",
+    "if (runner === \"-\" || runner === \"-e\") passthrough();",
+    "if (runner.includes(\"prove-cache-only-replay.mjs\")) {",
+    "  const output = args[1];",
+    "  if (!output) { process.stderr.write(\"request manifest output\\n\"); process.exit(1); }",
+    "  writeFileSync(output, JSON.stringify({",
+    "    schema_version: 1, kind: \"provider_preflight_replay_request\"",
+    "  }) + \"\\n\");",
+    "  process.exit(0);",
+    "}",
+    "if (runner.includes(\"alaya-bench-runner.mjs\") && args[1] === \"provider-preflight\") {",
+    "  if (!args.includes(\"--request-manifest\")) {",
+    "    process.stderr.write(\"missing complete request manifest\\n\");",
+    "    process.exit(2);",
+    "  }",
+    "  if (flagValue(\"--mode\") === \"validate-replay-receipt\") {",
+    "    const actualReceipt = JSON.parse(readFileSync(flagValue(\"--receipt\"), \"utf8\"));",
+    "    const actualRequest = JSON.parse(readFileSync(flagValue(\"--request-manifest\"), \"utf8\"));",
+    "    if (JSON.stringify(actualReceipt) !== JSON.stringify(expectedReceipt)) process.exit(1);",
+    "    if (JSON.stringify(actualRequest) !== JSON.stringify({",
+    "      schema_version: 1, kind: \"provider_preflight_replay_request\"",
+    "    })) process.exit(1);",
+    "    process.exit(0);",
+    "  }",
+    "  if (credentialKeys.some((key) => process.env[key])) {",
+    "    process.stderr.write(\"provider credentials reached replay\\n\");",
+    "    process.exit(2);",
+    "  }",
+    "  if (process.env.ALAYA_BENCH_ALLOW_LIVE_EXTRACTION !== \"0\") {",
+    "    process.stderr.write(\"live extraction reached replay\\n\");",
+    "    process.exit(2);",
+    "  }",
+    "  process.stdout.write(JSON.stringify(receipt) + \"\\n\");",
+    "  process.exit(0);",
+    "}",
+    "process.stderr.write(\"unexpected node invocation\\n\");",
+    "process.exit(2);",
     ""
-  ].join("\n"), "utf8");
-  await chmod(rtkPath, 0o755);
+  ].join("\n"));
 }
 
 export function replayReceiptFixture(): Readonly<Record<string, unknown>> {
@@ -296,56 +315,80 @@ export function flagValue(argv: readonly string[], flag: string): string | undef
   return index < 0 ? undefined : argv[index + 1];
 }
 
-async function writeFakeRtk(
+async function writeFakeNode(
   binDir: string,
   argvCapture: string,
   envCapture: string
 ): Promise<void> {
-  const rtkPath = path.join(binDir, "rtk");
-  await writeFile(rtkPath, fakeRtkScript(argvCapture, envCapture), "utf8");
-  await chmod(rtkPath, 0o755);
+  await writeExecutableNode(binDir, fakeNodeScript(argvCapture, envCapture));
 }
 
-function fakeRtkScript(argvCapture: string, envCapture: string): string {
+async function writeExecutableNode(binDir: string, source: string): Promise<void> {
+  const interceptPath = path.join(binDir, "node-intercept.cjs");
+  const nodePath = path.join(binDir, "node");
+  await writeFile(interceptPath, source, "utf8");
+  await writeFile(nodePath, [
+    "#!/usr/bin/env bash",
+    `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(interceptPath)} "$@"`,
+    ""
+  ].join("\n"), "utf8");
+  await chmod(nodePath, 0o755);
+  await writeFile(
+    path.join(binDir, "node.cmd"),
+    `@echo off\r\n"${process.execPath}" "${interceptPath}" %*\r\n`,
+    "utf8"
+  );
+}
+
+function fakeNodeScript(argvCapture: string, envCapture: string): string {
   return [
-      "#!/usr/bin/env bash",
-      "set -euo pipefail",
-      "if [[ \"${2:-}\" == *alaya-bench-runner.mjs && \" $* \" == *' --mode validate-recall-checkpoints '* ]]; then",
-      "  exec \"$1\" \"${@:2}\"",
-      "fi",
-      "if [[ \"${2:-}\" == *prove-cache-only-replay.mjs ]]; then",
-      "  python3 - \"${3}\" " + JSON.stringify(DIGEST) + " <<'PY'",
-      "import hashlib, json, sys",
-      "key = sys.argv[2]",
-      "payload = {",
-      "    'schema_version': 1,",
-      "    'kind': 'provider_preflight_replay_request',",
-      "    'request': {",
-      "        'requestedKeys': [key],",
-      "        'schemaDigest': key,",
-      "        'operatorDigest': key,",
-      "    },",
-      "    'canonical_keys': {",
-      "        'count': 1,",
-      "        'key_set_sha256': hashlib.sha256(key.encode('utf-8')).hexdigest(),",
-      "    },",
-      "}",
-      "open(sys.argv[1], 'w', encoding='utf-8').write(json.dumps(payload) + '\\n')",
-      "PY",
-      "  exit 0",
-      "fi",
-      `python3 - ${JSON.stringify(argvCapture)} ${JSON.stringify(envCapture)} "$@" <<'PY'`,
-      "import json, os, sys",
-      "open(sys.argv[1], 'w', encoding='utf-8').write(json.dumps(sys.argv[3:]) + '\\n')",
-      `keys = ${JSON.stringify(CREDENTIAL_ENV_KEYS)}`,
-      "payload = {",
-      "    'credentials': {key: bool(os.environ.get(key)) for key in keys},",
-      "    'ALAYA_BENCH_ALLOW_LIVE_EXTRACTION': os.environ.get('ALAYA_BENCH_ALLOW_LIVE_EXTRACTION'),",
-      "    'ALAYA_GARDEN_PROVIDER_KIND': os.environ.get('ALAYA_GARDEN_PROVIDER_KIND'),",
-      "}",
-      "open(sys.argv[2], 'w', encoding='utf-8').write(json.dumps(payload) + '\\n')",
-      "PY",
-      ""
+    "\"use strict\";",
+    "const { writeFileSync } = require(\"fs\");",
+    "const { spawnSync } = require(\"child_process\");",
+    "const { createHash } = require(\"crypto\");",
+    "const args = process.argv.slice(2);",
+    `const argvCapture = ${JSON.stringify(argvCapture)};`,
+    `const envCapture = ${JSON.stringify(envCapture)};`,
+    `const digest = ${JSON.stringify(DIGEST)};`,
+    `const credentialKeys = ${JSON.stringify(CREDENTIAL_ENV_KEYS)};`,
+    "function hasFlag(name, value) {",
+    "  for (let i = 0; i < args.length - 1; i++) {",
+    "    if (args[i] === name && args[i + 1] === value) return true;",
+    "  }",
+    "  return false;",
+    "}",
+    "function passthrough() {",
+    "  const result = spawnSync(process.execPath, args, { stdio: \"inherit\", env: process.env });",
+    "  process.exit(result.status === null ? 1 : result.status);",
+    "}",
+    "const runner = args[0] ?? \"\";",
+    "if (runner === \"-\" || runner === \"-e\") passthrough();",
+    "if (runner.includes(\"alaya-bench-runner.mjs\") && hasFlag(\"--mode\", \"validate-recall-checkpoints\")) {",
+    "  passthrough();",
+    "}",
+    "if (runner.includes(\"prove-cache-only-replay.mjs\")) {",
+    "  writeFileSync(args[1], JSON.stringify({",
+    "    schema_version: 1,",
+    "    kind: \"provider_preflight_replay_request\",",
+    "    request: { requestedKeys: [digest], schemaDigest: digest, operatorDigest: digest },",
+    "    canonical_keys: {",
+    "      count: 1,",
+    "      key_set_sha256: createHash(\"sha256\").update(digest, \"utf8\").digest(\"hex\")",
+    "    }",
+    "  }) + \"\\n\");",
+    "  process.exit(0);",
+    "}",
+    "if (runner.includes(\"alaya-bench-runner.mjs\") && args[1] === \"diagnostic-loop\") {",
+    "  writeFileSync(argvCapture, JSON.stringify(args) + \"\\n\");",
+    "  writeFileSync(envCapture, JSON.stringify({",
+    "    credentials: Object.fromEntries(credentialKeys.map((key) => [key, Boolean(process.env[key])])),",
+    "    ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: process.env.ALAYA_BENCH_ALLOW_LIVE_EXTRACTION ?? null,",
+    "    ALAYA_GARDEN_PROVIDER_KIND: process.env.ALAYA_GARDEN_PROVIDER_KIND ?? null",
+    "  }) + \"\\n\");",
+    "  process.exit(0);",
+    "}",
+    "passthrough();",
+    ""
   ].join("\n");
 }
 
@@ -362,9 +405,12 @@ function isolatedChildEnv(envFile: string, binDir: string): NodeJS.ProcessEnv {
     }
   }
   delete env.NODE_OPTIONS;
+  const pathEntries = process.platform === "win32"
+    ? [binDir, binDir.replaceAll("\\", "/")]
+    : [binDir];
   return {
     ...env,
-    PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    PATH: `${pathEntries.join(path.delimiter)}${path.delimiter}${process.env.PATH ?? ""}`,
     ALAYA_RECALL_ANY5_ENV: envFile
   };
 }

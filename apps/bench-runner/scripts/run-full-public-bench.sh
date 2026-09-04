@@ -84,7 +84,7 @@ runtime_dist_for_src() {
 ensure_bench_runner_build_fresh() {
   if [[ ! -f "$BENCH_RUNNER_CLI" ]]; then
     echo "bench runner dist is missing: $BENCH_RUNNER_CLI" >&2
-    echo "Run: rtk pnpm build" >&2
+    echo "Run: pnpm build" >&2
     exit 2
   fi
 
@@ -120,7 +120,7 @@ ensure_bench_runner_build_fresh() {
 
   if [[ -n "$stale_src" ]]; then
     echo "bench runner dist appears stale: $stale_src is newer than ${stale_dist:-its dist output}" >&2
-    echo "Run: rtk pnpm build" >&2
+    echo "Run: pnpm build" >&2
     exit 2
   fi
 }
@@ -222,8 +222,8 @@ case "$VARIANT" in
   *) echo "unknown variant: $VARIANT" >&2; exit 2;;
 esac
 
-printf -v warmup_command 'rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant %q --data-dir %q' "$VARIANT" "$DATA_DIR"
-printf -v refresh_command 'rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant %q --data-dir %q --force' "$VARIANT" "$DATA_DIR"
+printf -v warmup_command '%q apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant %q --data-dir %q' "$NODE_BIN" "$VARIANT" "$DATA_DIR"
+printf -v refresh_command '%q apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant %q --data-dir %q --force' "$NODE_BIN" "$VARIANT" "$DATA_DIR"
 if [[ ! -r "$META" ]]; then
   echo "pinned dataset meta missing or unreadable: $META" >&2
   exit 2

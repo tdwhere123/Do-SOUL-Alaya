@@ -1,0 +1,1 @@
+Always use pnpm, not npm, when running package scripts in this repository.

@@ -101,10 +101,10 @@ describe("Global memory storage repos", () => {
     const first = createGlobalMemoryEntry();
     const second = createGlobalMemoryEntry({
       global_object_id: "global-memory-2",
-      canonical_identity: "docs::workflow::use-rtk-wrapper",
+      canonical_identity: "docs::workflow::use-pnpm-scripts",
       dimension: MemoryDimension.CONSTRAINT,
       scope_class: ScopeClass.GLOBAL_DOMAIN,
-      content: "Prefix repo shell commands with rtk.",
+      content: "Use pnpm, not npm, for package scripts.",
       domain_tags: ["workflow", "tooling"],
       activation_score: 0.61
     });
@@ -400,10 +400,10 @@ async function createRepos(): Promise<{
   await globalMemoryRepo.upsert(
     createGlobalMemoryEntry({
       global_object_id: "global-memory-2",
-      canonical_identity: "docs::workflow::use-rtk-wrapper",
+      canonical_identity: "docs::workflow::use-pnpm-scripts",
       dimension: MemoryDimension.CONSTRAINT,
       scope_class: ScopeClass.GLOBAL_DOMAIN,
-      content: "Prefix repo shell commands with rtk.",
+      content: "Use pnpm, not npm, for package scripts.",
       domain_tags: ["workflow", "tooling"],
       activation_score: 0.61
     })

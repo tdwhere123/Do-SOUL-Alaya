@@ -44,13 +44,13 @@ export async function loadAlayaCliModules(
   ]) as [Record<string, unknown>, Record<string, unknown>, Record<string, unknown>];
 
   if (typeof bridgeModule.createAlayaCliBridge !== "function") {
-    throw new Error(`Cannot find module "${bridgeDistPath}". Run \`rtk pnpm build\` first.`);
+    throw new Error(`Cannot find module "${bridgeDistPath}". Run \`pnpm build\` first.`);
   }
   if (typeof daemonModule.createAlayaDaemonRuntime !== "function") {
-    throw new Error(`Cannot find module "${daemonDistPath}". Run \`rtk pnpm build\` first.`);
+    throw new Error(`Cannot find module "${daemonDistPath}". Run \`pnpm build\` first.`);
   }
   if (typeof registerModule.registerAlayaCliCommands !== "function") {
-    throw new Error(`Cannot find module "${registerDistPath}". Run \`rtk pnpm build\` first.`);
+    throw new Error(`Cannot find module "${registerDistPath}". Run \`pnpm build\` first.`);
   }
 
   const softwareExit = toExitCode(

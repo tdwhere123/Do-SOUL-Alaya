@@ -10,7 +10,7 @@ const builtWorkerUrl = new URL("../../../../dist/runtime/recall/recall-read-work
 
 function assertBuiltWorker(): void {
   if (!existsSync(fileURLToPath(builtWorkerUrl))) {
-    throw new Error("Built recall-read-worker dist missing. Run `rtk pnpm build` before this test.");
+    throw new Error("Built recall-read-worker dist missing. Run `pnpm build` before this test.");
   }
 }
 

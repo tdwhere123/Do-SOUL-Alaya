@@ -185,7 +185,7 @@ function resolveDatabasePath(receiptPath: string, databasePath: string): string 
   const physicalRoot = realpathSync(receiptRoot);
   const physicalPath = realpathSync(resolvedPath);
   assertPathWithinReceipt(physicalRoot, physicalPath);
-  return physicalPath;
+  return resolvedPath;
 }
 
 function assertPathWithinReceipt(receiptRoot: string, databasePath: string): void {

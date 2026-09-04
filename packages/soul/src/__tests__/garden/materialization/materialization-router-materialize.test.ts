@@ -96,8 +96,8 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
           field_candidates: [
             {
               field_name: "constraint",
-              value: "Always use rtk for repo commands.",
-              evidence: "Always use rtk for repo commands.",
+              value: "Always use pnpm, not npm, for package scripts.",
+              evidence: "Always use pnpm, not npm, for package scripts.",
               confidence: 0.8
             }
           ],
@@ -110,7 +110,7 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
     const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
       readonly content: string;
     };
-    expect(memoryInput.content).toBe("Always use rtk for repo commands.");
+    expect(memoryInput.content).toBe("Always use pnpm, not npm, for package scripts.");
   });
 
   it("rebuilds official durable content from the complete source assertion", async () => {

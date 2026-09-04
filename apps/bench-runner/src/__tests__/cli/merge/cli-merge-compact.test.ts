@@ -88,7 +88,7 @@ describe("merge-longmemeval compact diagnostics", () => {
     const spool = await LongMemEvalDiagnosticsSpool.create();
     try {
       await expect(loadMergeShards([shard], spool)).rejects.toThrow(
-        /resolves outside declared root/u
+        /escapes declared root|resolves outside declared root/u
       );
     } finally {
       await spool.dispose();

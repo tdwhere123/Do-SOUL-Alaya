@@ -10,7 +10,7 @@ import {
   replayReceiptFixture,
   script,
   writeOperatorLoopHarness,
-  writeReplayAwareRtk
+  writeReplayAwareNode
 } from "./fixture.js";
 
 describe("recall-any5-mimo-loop replay guards", () => {
@@ -50,7 +50,7 @@ describe("recall-any5-mimo-loop replay guards", () => {
 
   it("forwards the canonical request manifest to provider-preflight", async () => {
     const harness = await writeOperatorLoopHarness(tmpDir, "replay");
-    await writeReplayAwareRtk(harness.binDir);
+    await writeReplayAwareNode(harness.binDir);
     const result = await execFileAsync(
       "bash",
       [script, "replay", "--limit", "1"],
@@ -84,7 +84,7 @@ describe("recall-any5-mimo-loop replay guards", () => {
     }]
   ])("rejects a %s provider replay receipt", async (_label, receipt) => {
     const harness = await writeOperatorLoopHarness(tmpDir, "replay-invalid-receipt");
-    await writeReplayAwareRtk(harness.binDir, receipt);
+    await writeReplayAwareNode(harness.binDir, receipt);
 
     await expect(execFileAsync(
       "bash",

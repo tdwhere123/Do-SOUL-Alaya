@@ -60,7 +60,7 @@ export const en: Record<keyof typeof zh, string> = {
   "overview:bench.self.label": "Self-bench",
   "overview:bench.self.hint": "Historical self-bench archive. The runner is retired.",
   "overview:bench.public.label": "LongMemEval-S",
-  "overview:bench.public.hint": "Public benchmark. Run: rtk pnpm exec alaya-bench-runner longmemeval --variant s",
+  "overview:bench.public.hint": "Public benchmark. Run: pnpm exec alaya-bench-runner longmemeval --variant s",
   "overview:bench.publicMultiturn.label": "LongMemEval multi-turn",
   "overview:bench.publicMultiturn.hint": "Historical archive. Current public benches are LongMemEval-S and LoCoMo.",
   "overview:bench.live.label": "Live strict-real",

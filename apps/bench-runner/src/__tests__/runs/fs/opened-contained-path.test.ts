@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { isContainedPath } from "../../../runs/fs/opened-contained-path.js";
+import { isContainedPath, isPhysicalNamedPath, samePhysicalLocation } from "../../../runs/fs/opened-contained-path.js";
 
 describe("isContainedPath", () => {
   it("accepts a legal ..foo basename and rejects escape segments", async () => {
@@ -30,7 +30,7 @@ describe("isContainedPath", () => {
     const outside = await mkdtemp(path.join(tmpdir(), "contained-outside-"));
     await writeFile(path.join(outside, "leaked"), "no", "utf8");
     await symlink(outside, path.join(root, "link"));
-    expect(isContainedPath(root, path.join(root, "link", "leaked"))).toBe(true);
+    expect(isContainedPath(root, path.join(root, "link", "leaked"))).toBe(false);
     expect(isContainedPath(root, await realpath(path.join(root, "link", "leaked")))).toBe(false);
   });
 
@@ -40,5 +40,15 @@ describe("isContainedPath", () => {
     expect(isContainedPath(root, "C:\\work\\alaya\\..foo")).toBe(true);
     expect(isContainedPath(root, "C:\\work\\outside\\index.ts")).toBe(false);
     expect(isContainedPath(root, "D:\\work\\alaya\\src\\index.ts")).toBe(false);
+  });
+
+  it("accepts prefix-aliased directories and rejects symlink leaves", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "physical-named-"));
+    expect(isPhysicalNamedPath(root)).toBe(true);
+    const outside = await mkdtemp(path.join(tmpdir(), "physical-outside-"));
+    const link = path.join(root, "link");
+    await symlink(outside, link);
+    expect(isPhysicalNamedPath(link)).toBe(false);
+    expect(samePhysicalLocation(root, await realpath(root))).toBe(true);
   });
 });

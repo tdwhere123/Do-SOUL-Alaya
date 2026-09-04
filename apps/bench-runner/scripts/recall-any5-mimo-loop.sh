@@ -130,27 +130,25 @@ MANIFEST="$CACHE_ROOT/manifest.json"
 
 load_identity() {
   [[ -f "$MANIFEST" ]] || die "cache manifest missing: $MANIFEST"
-  python3 - "$MANIFEST" <<'PY'
-import json, sys
-manifest = json.loads(open(sys.argv[1], encoding="utf-8").read())
-required = (
-    "dataset_revision", "extraction_model", "request_profile",
-    "system_prompt_sha256", "provider_url"
-)
-missing = [key for key in required if not manifest.get(key)]
-if missing:
-    raise SystemExit(f"manifest missing {missing}")
-print(manifest["dataset_revision"])
-print(manifest["extraction_model"])
-print(manifest["request_profile"])
-print(manifest["system_prompt_sha256"])
-print(manifest["provider_url"])
-PY
+  node - "$MANIFEST" <<'JS'
+const fs = require("fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const required = [
+  "dataset_revision", "extraction_model", "request_profile",
+  "system_prompt_sha256", "provider_url"
+];
+const missing = required.filter((key) => !manifest[key]);
+if (missing.length > 0) {
+  process.stderr.write(`manifest missing ${JSON.stringify(missing)}\n`);
+  process.exit(1);
+}
+for (const key of required) console.log(manifest[key]);
+JS
 }
 
 build_canonical_request_manifest() {
   local output="$1" dataset="$2" prompt="$3" provider="$4" model="$5" profile="$6"
-  rtk node "$SCRIPT_DIR/prove-cache-only-replay.mjs" \
+  node "$SCRIPT_DIR/prove-cache-only-replay.mjs" \
     "$output" \
     "$dataset" "$prompt" "$CACHE_ROOT" \
     "$LIMIT" "$OFFSET" "$provider" "$model" "$profile"
@@ -171,11 +169,11 @@ run_replay() {
   build_canonical_request_manifest \
     "$request_file" "$dataset" "$prompt" "$provider" "$model" "$profile" || rc=$?
   if [[ $rc -eq 0 ]]; then
-    rtk node "$BIN" provider-preflight --mode replay \
+    node "$BIN" provider-preflight --mode replay \
       --request-manifest "$request_file" > "$receipt_file" || rc=$?
   fi
   if [[ $rc -eq 0 ]]; then
-    rtk node "$BIN" provider-preflight --mode validate-replay-receipt \
+    node "$BIN" provider-preflight --mode validate-replay-receipt \
       --receipt "$receipt_file" --request-manifest "$request_file" || rc=$?
   fi
   if [[ $rc -eq 0 ]]; then
@@ -190,7 +188,7 @@ run_replay() {
 
 reject_completed_recall_checkpoints() {
   local work="$1"
-  rtk node "$BIN" provider-preflight \
+  node "$BIN" provider-preflight \
     --mode validate-recall-checkpoints --work-root "$work"
 }
 
@@ -210,7 +208,7 @@ print(f"wrote {len(rows)} questions -> {dest}")
 PY
   export ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=1
   cd "$WT"
-  rtk node "$SCRIPT_DIR/fill-query-factors.mjs" "$questions" "$out"
+  node "$SCRIPT_DIR/fill-query-factors.mjs" "$questions" "$out"
 }
 
 prepare_snapshot_args() {
@@ -246,7 +244,7 @@ invoke_cache_only_diagnostic() {
     extra+=(--embedding-cache-overlay "$EMBEDDING_CACHE_OVERLAY")
   fi
   echo "diagnostic cache-only credentialless limit=$LIMIT work=$work"
-  rtk node "$BIN" diagnostic-loop \
+  node "$BIN" diagnostic-loop \
     --work-root "$work" --request-manifest "$request_file" \
     --mode cache-only "${SNAPSHOT_ARGS[@]}" \
     --history-root "$work/history" "${extra[@]}"

@@ -102,7 +102,20 @@ export function linkFileExclusiveDurable(source: string, destination: string): v
 
 export function fsyncDirectory(path: string): void {
   const descriptor = openSync(path, constants.O_RDONLY);
-  runAndClose(descriptor, "directory fsync", () => fsyncSync(descriptor));
+  runAndClose(descriptor, "directory fsync", () => {
+    try {
+      fsyncSync(descriptor);
+    } catch (cause) {
+      // Windows directory handles reject fsync; POSIX still requires it for durability.
+      if (!isIgnorableDirectoryFsync(cause)) throw cause;
+    }
+  });
+}
+
+function isIgnorableDirectoryFsync(cause: unknown): boolean {
+  if (process.platform !== "win32") return false;
+  return typeof cause === "object" && cause !== null && "code" in cause &&
+    (cause.code === "EPERM" || cause.code === "ENOTSUP" || cause.code === "EACCES");
 }
 
 function deterministicTemporaryPath(input: {

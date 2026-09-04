@@ -57,7 +57,7 @@ describe("ProposalsPage", () => {
     await screen.findByText("proposal-1");
 
     expect(screen.getByText("Proposed changes")).toBeTruthy();
-    expect(screen.getByText(/\"content\": \"Use rtk for every repo command.\"/)).toBeTruthy();
+    expect(screen.getByText(/\"content\": \"Use pnpm for every repo command.\"/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Accept" })).toHaveProperty("disabled", false);
   });
 
@@ -173,7 +173,7 @@ function pendingProposal(): PendingProposalFixture {
     target_object_kind: "memory_entry",
     created_at: "2026-05-05T00:00:00.000Z",
     proposed_change_summary: "Rewrite memory",
-    proposed_changes: { content: "Use rtk for every repo command." }
+    proposed_changes: { content: "Use pnpm for every repo command." }
   };
 }
 

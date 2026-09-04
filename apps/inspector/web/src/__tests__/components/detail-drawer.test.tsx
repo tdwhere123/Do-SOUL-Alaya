@@ -8,8 +8,8 @@ import type { GraphNode } from "../../types/graph";
 const NODE: GraphNode = {
   id: "memory-1",
   kind: "memory",
-  label: "Prefer rtk commands",
-  summary: "Use rtk for repository shell commands.",
+  label: "Prefer pnpm scripts",
+  summary: "Use pnpm for repository package scripts.",
   origin_kind: "user_memory",
   evidence_refs: ["MEMORY.md:445"],
   rationale: "Explicit user or reviewer-governed memory.",
@@ -81,14 +81,14 @@ describe("DetailDrawer", () => {
     renderDrawer({ onCreateProposal });
 
     await userEvent.clear(screen.getByLabelText("Rewrite content"));
-    await userEvent.type(screen.getByLabelText("Rewrite content"), "Use rtk for every repo shell command.");
+    await userEvent.type(screen.getByLabelText("Rewrite content"), "Use pnpm for every repository package script.");
     await userEvent.click(screen.getByRole("button", { name: /rewrite/i }));
 
     await waitFor(() => {
       expect(onCreateProposal).toHaveBeenCalledWith(
         "rewrite",
         "memory-1",
-        "Use rtk for every repo shell command."
+        "Use pnpm for every repository package script."
       );
     });
   });
@@ -124,8 +124,8 @@ describe("DetailDrawer", () => {
         id: serializedAnchor,
         object_id: "mem-1",
         kind: "memory",
-        label: "Prefer rtk commands",
-        summary: "Use rtk for repository shell commands.",
+        label: "Prefer pnpm scripts",
+        summary: "Use pnpm for repository package scripts.",
         degree: 1
       },
       onCreateProposal,

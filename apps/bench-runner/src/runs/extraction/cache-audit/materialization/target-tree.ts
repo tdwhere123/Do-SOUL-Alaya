@@ -1,5 +1,5 @@
 import {
-  existsSync, lstatSync, readdirSync, realpathSync, rmdirSync
+  existsSync, lstatSync, readdirSync, rmdirSync
 } from "node:fs";
 import { join, relative } from "node:path";
 import { cacheFilePath } from "../../../compile-seed/compile-seed-cache.js";
@@ -13,6 +13,7 @@ import {
   readStableRegularFileNoFollow, type StableFileIdentity
 } from "./descriptor-io.js";
 import { isStableLeasePath } from "../../fill/manifest/fill-root-guard.js";
+import { isPhysicalNamedPath } from "../../../fs/opened-contained-path.js";
 
 const TARGET_MARKER = ".alaya-extraction-target-root.json";
 const WRITE_LOCK = ".extraction-fill.lock";
@@ -141,7 +142,7 @@ export function assertFileMatches(
   descriptor: MaterializationShardDescriptor,
   maxShardBytes: number
 ): void {
-  if (!isStableLeasePath(path) && realpathSync(path) !== path) {
+  if (!isStableLeasePath(path) && !isPhysicalNamedPath(path)) {
     throw new Error("materialized shard path is not canonical");
   }
   const read = readStableRegularFileNoFollow(path, maxShardBytes);
@@ -158,7 +159,7 @@ export function readRecoverableStageFile(
   path: string,
   maxShardBytes: number
 ): ReturnType<typeof readStableRegularFileNoFollow> {
-  if (!isStableLeasePath(path) && realpathSync(path) !== path) {
+  if (!isStableLeasePath(path) && !isPhysicalNamedPath(path)) {
     throw new Error("materialization stage path is not canonical");
   }
   return readStableRegularFileNoFollow(path, maxShardBytes);
@@ -184,7 +185,7 @@ export function removeEmptyStage(targetRoot: string): void {
 export function assertRealDirectory(path: string, label: string): void {
   const stat = lstatSync(path);
   if (!stat.isDirectory() || stat.isSymbolicLink() ||
-      (!isStableLeasePath(path) && realpathSync(path) !== path)) {
+      (!isStableLeasePath(path) && !isPhysicalNamedPath(path))) {
     throw new Error(`${label} must be a canonical non-symlink directory`);
   }
 }

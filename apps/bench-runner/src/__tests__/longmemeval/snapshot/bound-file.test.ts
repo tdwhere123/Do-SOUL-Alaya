@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstatSync, renameSync, writeFileSync } from "node:fs";
+import { lstatSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -78,6 +78,14 @@ describe("descriptor-bound file IO", () => {
     await writeFile(input.source, "mutated after digest");
     expect(hashRegularFileNoFollow(input.source)).not.toBe(first);
     expect(boundFileFullContentReadCount() - before).toBe(2);
+  });
+
+  it("reuses a digest when realpath aliases the same inode", async () => {
+    const input = await fixture();
+    const before = boundFileFullContentReadCount();
+    const first = hashRegularFileNoFollow(input.source);
+    expect(hashRegularFileNoFollow(realpathSync(input.source))).toBe(first);
+    expect(boundFileFullContentReadCount() - before).toBe(1);
   });
 
   it("refuses to register a digest against a replacement path", async () => {

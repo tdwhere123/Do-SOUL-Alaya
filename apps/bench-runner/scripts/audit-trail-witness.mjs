@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// must run after: rtk pnpm --filter @do-soul/alaya-bench-runner build
+// must run after: pnpm --filter @do-soul/alaya-bench-runner build
 // @anchor audit-trail-witness — one-off audit-trail witness script.
 // Stands up the bench daemon harness, seeds one memory through the real
 // MCP propose+review chain, then dumps the full event_log audit trail

@@ -29,7 +29,7 @@ files: `docs/handbook/README.md`.
 ## Code quality
 
 - State assumptions when scope is ambiguous; keep diffs surgical.
-- **Build + test** must pass (`rtk pnpm build` + targeted vitest) before claiming done.
+- **Build + test** must pass (`pnpm build` + targeted vitest) before claiming done.
 - **Comments:** why-not-what only; no ticket, wave, or experiment labels in source.
 - **One reason to change** per module, class, and function.
 - **Deep modules, not micro-files:** split only at a domain, phase, side-effect,
@@ -76,21 +76,21 @@ projection of that path. Do not implement from flood / SliceKey /
 CLI quickstart: `README.md`.
 
 ```bash
-rtk pnpm install
-rtk pnpm build
-rtk pnpm test
-rtk pnpm exec vitest run --project @do-soul/alaya-<package>
+pnpm install
+pnpm build
+pnpm test
+pnpm exec vitest run --project @do-soul/alaya-<package>
 
-rtk pnpm --dir apps/core-daemon dev
-rtk pnpm exec alaya doctor
-rtk pnpm exec alaya install
-rtk pnpm exec alaya attach codex
-rtk pnpm exec alaya status
-rtk pnpm exec alaya tools list
-rtk pnpm exec alaya tools call --json
+pnpm --dir apps/core-daemon dev
+pnpm exec alaya doctor
+pnpm exec alaya install
+pnpm exec alaya attach codex
+pnpm exec alaya status
+pnpm exec alaya tools list
+pnpm exec alaya tools call --json
 ```
 
-`rtk pnpm alaya` wraps the root script. Use `pnpm link --global` for PATH
+`pnpm alaya` wraps the root script. Use `pnpm link --global` for PATH
 outside the monorepo.
 
 `rtk` is a local Codex CLI wrapper and is not installed everywhere (Cursor

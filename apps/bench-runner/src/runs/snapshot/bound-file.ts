@@ -9,13 +9,14 @@ import {
   openSync,
   readFileSync,
   readSync,
+  realpathSync,
   rmSync,
   writeSync
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { NO_FOLLOW_OPEN_FLAG } from "../fs/open-flags.js";
 
-const NO_FOLLOW = NO_FOLLOW_OPEN_FLAG;
+// Child proof process strip-types-loads this file; a .js specifier cannot see sibling .ts.
+const NO_FOLLOW = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
 
 export function readRegularFileNoFollow(filePath: string, maxBytes?: number): Buffer {
   const descriptor = openSync(filePath, constants.O_RDONLY | NO_FOLLOW);
@@ -64,11 +65,25 @@ export type OpenedFileSha256 = OpenedFileIdentity & Readonly<{
 const fileSha256Cache = new Map<string, OpenedFileSha256>();
 let fullFileContentReads = 0;
 
+function digestCacheKeys(filePath: string): readonly string[] {
+  const absolute = resolve(filePath);
+  try {
+    const physical = realpathSync(absolute);
+    return physical === absolute ? [absolute] : [absolute, physical];
+  } catch {
+    return [absolute];
+  }
+}
+
 function cachedFileSha256(filePath: string): OpenedFileSha256 | undefined {
   try {
     const metadata = lstatSync(filePath);
     if (!metadata.isFile()) return undefined;
-    const cached = fileSha256Cache.get(resolve(filePath));
+    let cached: OpenedFileSha256 | undefined;
+    for (const key of digestCacheKeys(filePath)) {
+      cached = fileSha256Cache.get(key);
+      if (cached !== undefined) break;
+    }
     if (cached === undefined) return undefined;
     if (cached.dev !== metadata.dev || cached.ino !== metadata.ino ||
         cached.ctimeMs !== metadata.ctimeMs ||
@@ -84,7 +99,8 @@ export function peekCachedFileSha256(filePath: string): string | undefined {
 }
 
 export function sealedDigestIdentityDrifted(filePath: string): boolean {
-  return fileSha256Cache.has(resolve(filePath)) && peekCachedFileSha256(filePath) === undefined;
+  const sealed = digestCacheKeys(filePath).some((key) => fileSha256Cache.has(key));
+  return sealed && peekCachedFileSha256(filePath) === undefined;
 }
 
 export function withRegularFileNoFollow<T>(
@@ -127,10 +143,13 @@ export function rememberOpenedFileSha256(input: {
     throw new Error(`${input.filePath} changed before digest registration`);
   }
   assertOpenedFilePath(input.filePath, input.descriptor);
-  fileSha256Cache.set(resolve(input.filePath), Object.freeze({
+  const entry = Object.freeze({
     ...opened,
     sha256: input.sha256
-  }));
+  });
+  for (const key of digestCacheKeys(input.filePath)) {
+    fileSha256Cache.set(key, entry);
+  }
 }
 
 export function assertOpenedFileIdentity(input: {
@@ -256,7 +275,7 @@ export function seedRegularFileSha256(input: {
       descriptor: source,
       expectedIdentity: input.expectedIdentity
     });
-    const existing = fileSha256Cache.get(resolve(input.filePath));
+    const existing = cachedFileSha256(input.filePath);
     if (existing !== undefined &&
         (existing.sha256 !== input.sha256 ||
           !sameFileIdentity(existing, input.expectedIdentity))) {

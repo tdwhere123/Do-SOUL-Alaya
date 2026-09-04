@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { cacheFilePath } from "../../../compile-seed/compile-seed-cache.js";
@@ -19,6 +19,7 @@ import { decodeCanonicalUtf8Artifact } from "../bounded-artifact-reader.js";
 import type { ExtractionCacheWriteLease } from
   "../../fill/manifest/fill-root-guard.js";
 import { isStableLeasePath } from "../../fill/manifest/fill-root-guard.js";
+import { isPhysicalNamedPath } from "../../../fs/opened-contained-path.js";
 import { assertExtractionTargetSelectionRootBinding } from
   "../../authority/target-selection/receipt.js";
 import { readSettledExtractionAttemptLedger } from
@@ -139,7 +140,7 @@ function readSuccessorManifest(targetRoot: string): {
   const path = extractionCacheManifestPath(targetRoot);
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink() ||
-      (!isStableLeasePath(path) && realpathSync(path) !== path)) {
+      (!isStableLeasePath(path) && !isPhysicalNamedPath(path))) {
     throw new Error("materialized successor manifest is unsafe");
   }
   const identity = readExtractionCacheManifestIdentity(targetRoot);
@@ -177,7 +178,7 @@ function readRemainingShardProvenance(
 ): readonly RemainingShardProvenance[] {
   return commit.remaining_keys.map((key) => {
     const path = cacheFilePath(targetRoot, key);
-    if (!isStableLeasePath(path) && realpathSync(path) !== path) {
+    if (!isStableLeasePath(path) && !isPhysicalNamedPath(path)) {
       throw new Error("successor shard path is not canonical");
     }
     const read = readStableRegularFileNoFollow(path, commit.max_shard_bytes);

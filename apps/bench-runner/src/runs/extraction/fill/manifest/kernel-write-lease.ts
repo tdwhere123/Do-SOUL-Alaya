@@ -41,6 +41,13 @@ export interface KernelWriteLeaseTarget {
 }
 
 export function acquireKernelWriteLease(target: KernelWriteLeaseTarget): KernelWriteLease {
+  return acquireLease(target, false);
+}
+
+function acquireLease(
+  target: KernelWriteLeaseTarget,
+  retriedStaleSocket: boolean
+): KernelWriteLease {
   const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
   const address = abstractSocketAddress(target);
   const worker = new Worker(WORKER_SOURCE, {
@@ -52,6 +59,9 @@ export function acquireKernelWriteLease(target: KernelWriteLeaseTarget): KernelW
   if (acquisition !== ACTIVE) {
     void worker.terminate();
     if (acquisition === OCCUPIED) {
+      if (!retriedStaleSocket && reclaimStaleFileSocket(address)) {
+        return acquireLease(target, true);
+      }
       throw new Error(
         `extraction cache root ${target.displayPath} already has an active writer lock`
       );
@@ -95,6 +105,42 @@ export function isKernelWriteLeaseActive(target: KernelWriteLeaseTarget): boolea
     }
     throw cause;
   }
+}
+
+const STALE_LISTENER = 2;
+const PROBE_SOURCE = `
+const net = require("node:net");
+const { workerData } = require("node:worker_threads");
+const state = new Int32Array(workerData.state);
+const publish = (value) => {
+  Atomics.store(state, 0, value);
+  Atomics.notify(state, 0);
+};
+const socket = net.createConnection({ path: workerData.address });
+socket.setTimeout(250);
+socket.once("connect", () => { publish(1); socket.end(); });
+socket.once("timeout", () => { publish(1); socket.destroy(); });
+socket.once("error", (error) => {
+  publish(error && (error.code === "ECONNREFUSED" || error.code === "ENOENT") ? 2 : 3);
+});
+`;
+
+function reclaimStaleFileSocket(address: string): boolean {
+  if (address.startsWith("\0") || process.platform === "win32") return false;
+  const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  const worker = new Worker(PROBE_SOURCE, {
+    eval: true,
+    workerData: { address, state: state.buffer }
+  });
+  Atomics.wait(state, 0, STARTING, HANDSHAKE_TIMEOUT_MS);
+  void worker.terminate();
+  if (Atomics.load(state, 0) !== STALE_LISTENER) return false;
+  try {
+    unlinkSync(address);
+  } catch {
+    /* retry listen even if the leftover name is already gone */
+  }
+  return true;
 }
 
 function abstractSocketAddress(target: KernelWriteLeaseTarget): string {
