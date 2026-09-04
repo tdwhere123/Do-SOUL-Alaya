@@ -14,6 +14,7 @@ import {
   assertRelationProjectionCurrent,
   initDatabase
 } from "@do-soul/alaya-storage";
+import { NO_FOLLOW_OPEN_FLAG } from "../../fs/open-flags.js";
 import {
   assertOpenedFileIdentity,
   assertOpenedFilePath,
@@ -105,11 +106,11 @@ function copyOpenedSourceAtomically(
   let target: number | undefined;
   try {
     target = openSync(tmpPath,
-      constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | NO_FOLLOW_OPEN_FLAG,
       0o600);
     withSource((openedPath) => cloneOrCopyFile(
       openedPath,
-      openedFileDescriptorPath(target!),
+      openedFileDescriptorPath(target!, tmpPath),
       copyFile
     ));
     fsyncSync(target);

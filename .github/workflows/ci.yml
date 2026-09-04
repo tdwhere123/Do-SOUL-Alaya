@@ -89,7 +89,12 @@ jobs:
 
       - name: Dependency audit high severity
         if: ${{ matrix.run_hygiene }}
-        run: pnpm run ci:audit-high
+        run: |
+          for attempt in 1 2 3; do
+            pnpm run ci:audit-high && exit 0
+            sleep 20
+          done
+          exit 1
 
       - name: Guard inspector dependency isolation
         if: ${{ matrix.run_hygiene }}

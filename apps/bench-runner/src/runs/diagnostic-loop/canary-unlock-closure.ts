@@ -1,6 +1,7 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
+import { canonicalPath } from "../fs/opened-contained-path.js";
 import { parseCheckpoint } from "./checkpoint.js";
 import type { DiagnosticLoopCheckpoint } from "./types.js";
 
@@ -16,8 +17,8 @@ export function resolveContainedPath(workRoot: string, candidate: string): strin
   if (candidate.trim().length === 0) {
     throw new Error("canary unlock artifact path is empty");
   }
-  const root = realpathSync(workRoot);
-  const resolved = existsSync(candidate) ? realpathSync(resolve(candidate)) : resolve(candidate);
+  const root = canonicalPath(workRoot);
+  const resolved = canonicalPath(resolve(root, candidate));
   const rel = relative(root, resolved);
   if (rel.startsWith("..") || rel.includes(`..${sep}`) || resolved === dirname(root)) {
     throw new Error(`canary unlock artifact escapes the unlock work-root: ${candidate}`);

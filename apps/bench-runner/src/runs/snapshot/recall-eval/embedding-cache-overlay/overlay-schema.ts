@@ -7,6 +7,7 @@ import {
   unlinkSync
 } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
+import { NO_FOLLOW_OPEN_FLAG } from "../../../fs/open-flags.js";
 import BetterSqlite3 from "better-sqlite3";
 
 type SqliteDatabase = InstanceType<typeof BetterSqlite3>;
@@ -52,7 +53,7 @@ export function resolveOverlayOutputPaths(receiptPath: string): {
 export function reserveStagingFile(path: string): void {
   const descriptor = openSync(
     path,
-    constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | NO_FOLLOW_OPEN_FLAG,
     0o600
   );
   closeSync(descriptor);

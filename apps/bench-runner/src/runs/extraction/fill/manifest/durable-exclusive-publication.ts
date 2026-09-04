@@ -4,6 +4,7 @@ import {
   readSync, renameSync, unlinkSync, writeSync, type BigIntStats
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { NO_FOLLOW_OPEN_FLAG } from "../../../fs/open-flags.js";
 
 interface FileIdentity {
   readonly device: bigint;
@@ -234,10 +235,7 @@ function sameIdentity(stat: BigIntStats, identity: FileIdentity): boolean {
 }
 
 function requireNoFollow(): number {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("O_NOFOLLOW is required for durable exclusive publication");
-  }
-  return constants.O_NOFOLLOW;
+  return NO_FOLLOW_OPEN_FLAG;
 }
 
 function isAlreadyExists(cause: unknown): cause is NodeJS.ErrnoException {

@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { NO_FOLLOW_OPEN_FLAG } from "../../fs/open-flags.js";
 import {
   isContainedPath,
   resolveOpenedDescriptorPath
@@ -14,9 +15,6 @@ export async function readContainedWorktreeFile(
   checkoutRoot: string,
   rawPath: string
 ): Promise<{ readonly bytes: Buffer; readonly mode: number }> {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("untracked provenance no-follow validation is unavailable");
-  }
   const relativePath = assertSafeUntrackedRelativePath(rawPath, checkoutRoot);
   await assertNoSymlinkPathComponents(checkoutRoot, relativePath);
   const handle = await openWorktreeFile(checkoutRoot, relativePath);
@@ -46,7 +44,7 @@ async function openWorktreeFile(
   try {
     return await open(
       resolve(checkoutRoot, relativePath),
-      constants.O_RDONLY | constants.O_NOFOLLOW
+      constants.O_RDONLY | NO_FOLLOW_OPEN_FLAG
     );
   } catch (cause) {
     throw new Error("untracked provenance path must be a regular non-symlink file", {

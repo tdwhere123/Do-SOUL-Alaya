@@ -13,8 +13,9 @@ import {
   writeSync
 } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { NO_FOLLOW_OPEN_FLAG } from "../fs/open-flags.js";
 
-const NO_FOLLOW = constants.O_NOFOLLOW;
+const NO_FOLLOW = NO_FOLLOW_OPEN_FLAG;
 
 export function readRegularFileNoFollow(filePath: string, maxBytes?: number): Buffer {
   const descriptor = openSync(filePath, constants.O_RDONLY | NO_FOLLOW);
@@ -178,7 +179,7 @@ function withOpenedRegularFile<T>(
     if (expected !== undefined && !sameFileIdentity(before, expected)) {
       throw new Error(`${filePath} changed after cached digest`);
     }
-    const result = operation(openedFileDescriptorPath(descriptor));
+    const result = operation(openedFileDescriptorPath(descriptor, filePath));
     if (!sameFileIdentity(openedRegularFileIdentity(descriptor), before)) {
       throw new Error(`${filePath} changed while copying`);
     }
@@ -188,11 +189,15 @@ function withOpenedRegularFile<T>(
   }
 }
 
-export function openedFileDescriptorPath(descriptor: number): string {
+export function openedFileDescriptorPath(
+  descriptor: number,
+  fallbackPath?: string
+): string {
   if (process.platform === "linux") return `/proc/self/fd/${descriptor}`;
   if (process.platform === "darwin" || process.platform === "freebsd") {
     return `/dev/fd/${descriptor}`;
   }
+  if (fallbackPath !== undefined) return fallbackPath;
   throw new Error(`descriptor-bound file copy is unsupported on ${process.platform}`);
 }
 

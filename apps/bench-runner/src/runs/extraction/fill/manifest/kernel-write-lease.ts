@@ -74,7 +74,7 @@ export function acquireKernelWriteLease(target: KernelWriteLeaseTarget): KernelW
       Atomics.wait(state, 0, ACTIVE, HANDSHAKE_TIMEOUT_MS);
       const releaseState = Atomics.load(state, 0);
       void worker.terminate();
-      if (!address.startsWith("\0")) {
+      if (process.platform !== "win32" && !address.startsWith("\0")) {
         try { unlinkSync(address); } catch { /* leftover socket after close */ }
       }
       if (releaseState !== RELEASED) {
@@ -103,6 +103,10 @@ function abstractSocketAddress(target: KernelWriteLeaseTarget): string {
     .digest("hex");
   if (process.platform === "linux") {
     return `\0alaya-extraction-cache-write-${digest}`;
+  }
+  if (process.platform === "win32") {
+    const sep = String.fromCharCode(92);
+    return [sep + sep + "." + sep + "pipe", `alaya-w-${digest.slice(0, 16)}`].join(sep);
   }
   const dir = process.platform === "darwin" ? "/tmp" : tmpdir();
   return join(dir, `alaya-w-${digest.slice(0, 16)}.sock`);

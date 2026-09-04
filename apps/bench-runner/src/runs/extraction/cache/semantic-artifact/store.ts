@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { closeSync, constants, openSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { NO_FOLLOW_OPEN_FLAG } from "../../../fs/open-flags.js";
 import {
   boundedArtifactEntryExists,
   readBoundedCanonicalUtf8Artifact,
@@ -410,11 +411,8 @@ function collectArtifactInventory(stableRoot: string, rows: string[]): void {
 }
 
 function assertValidReserveInventory(directory: string, filename: string): void {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("O_NOFOLLOW is required for semantic cache inventory");
-  }
   const descriptor = openSync(
-    `${directory}/${filename}`, constants.O_RDONLY | constants.O_NOFOLLOW
+    `${directory}/${filename}`, constants.O_RDONLY | NO_FOLLOW_OPEN_FLAG
   );
   try {
     if (readReserveOwnerFromFd(descriptor) === undefined) {

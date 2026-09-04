@@ -7,7 +7,8 @@ const execFileAsync = promisify(execFile);
 // Identity must not inherit user git config or ambient diff/index env.
 // Repo .gitignore, .git/info/exclude, and tracked .gitattributes remain authority.
 // Local autocrlf is unpinned because checked-out worktree bytes are hashed.
-const EMPTY_GIT_IDENTITY_SOURCE = devNull;
+export const EMPTY_GIT_IDENTITY_SOURCE =
+  process.platform === "win32" ? "NUL" : devNull;
 
 const GIT_IDENTITY_CONFIG = [
   "-c", "core.quotepath=false",

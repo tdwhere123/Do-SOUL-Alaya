@@ -19,6 +19,10 @@ import {
   type KernelWriteLease
 } from "./kernel-write-lease.js";
 import {
+  DIRECTORY_OPEN_FLAG,
+  NO_FOLLOW_OPEN_FLAG
+} from "../../../fs/open-flags.js";
+import {
   assertBoundDirectoryIdentity,
   assertDirectoryIdentity,
   boundDirectoryAnchor,
@@ -123,7 +127,7 @@ function readHeldWriterLockOwner(
   lockIdentity: DirectoryIdentity
 ): CurrentWriterLockOwner {
   const lockFd = openSync(
-    stableLockPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+    stableLockPath, constants.O_RDONLY | DIRECTORY_OPEN_FLAG | NO_FOLLOW_OPEN_FLAG
   );
   try {
     assertBoundDirectoryIdentity(lockFd, lockIdentity, "extraction cache writer lock");
@@ -392,6 +396,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function readProcessStartIdentity(pid: number): string {
   if (process.platform === "linux") return readLinuxProcessStartIdentity(pid);
+  if (process.platform === "win32") return readWindowsProcessStartIdentity(pid);
   return readPosixProcessStartIdentity(pid);
 }
 
@@ -407,6 +412,40 @@ function readLinuxProcessStartIdentity(pid: number): string {
     throw new ExtractionCacheInvariantError("writer process start identity is unavailable");
   }
   return startTime;
+}
+
+function readWindowsProcessStartIdentity(pid: number): string {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw Object.assign(
+      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
+      { code: "ENOENT" }
+    );
+  }
+  let output: string;
+  try {
+    output = execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`
+    ], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "ignore"]
+    }).replace(/^\uFEFF/u, "").trim();
+  } catch (cause) {
+    throw Object.assign(
+      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
+      { code: "ENOENT", cause }
+    );
+  }
+  if (!/^\d+$/u.test(output) || output.length > MAX_EXTRACTION_FILL_OWNER_BYTES) {
+    throw Object.assign(
+      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
+      { code: "ENOENT" }
+    );
+  }
+  return output;
 }
 
 function readPosixProcessStartIdentity(pid: number): string {

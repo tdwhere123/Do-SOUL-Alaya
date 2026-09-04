@@ -3,7 +3,12 @@ import {
   closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync,
   type BigIntStats
 } from "node:fs";
-import { isAbsolute, resolve, sep } from "node:path";
+import { isAbsolute, resolve } from "node:path";
+import {
+  DIRECTORY_OPEN_FLAG,
+  NO_FOLLOW_OPEN_FLAG,
+  splitAbsolutePath
+} from "../../fs/open-flags.js";
 import {
   boundDirectoryAnchor,
   boundDirectoryChildNoFollow,
@@ -86,12 +91,9 @@ export function withBoundedStableRegularFile<T>(
   input: { readonly path: string; readonly maxBytes: number; readonly label: string },
   read: (descriptor: number, opened: BigIntStats) => T
 ): T {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error(`O_NOFOLLOW is required to read ${input.label}`);
-  }
   let descriptor: number;
   try {
-    descriptor = openSync(input.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    descriptor = openSync(input.path, constants.O_RDONLY | NO_FOLLOW_OPEN_FLAG);
   } catch (cause) {
     const code = cause instanceof Error && "code" in cause ? ` (${String(cause.code)})` : "";
     throw new Error(`cannot open bounded regular ${input.label}: ${input.path}${code}`, { cause });
@@ -209,10 +211,10 @@ function openRootChain(root: string, create: boolean, label: string): BoundDirec
   if (/^\/proc\/self\/fd\/\d+$/u.test(absolute)) {
     return [openDirectory(absolute, false, label)];
   }
-  const segments = absolute.split(sep).filter(Boolean);
-  const held = [openDirectory(sep, false, label)];
+  const walk = splitAbsolutePath(absolute);
+  const held = [openDirectory(walk.root, false, label)];
   try {
-    for (const segment of segments) {
+    for (const segment of walk.segments) {
       held.push(openChildDirectory(held.at(-1)!, segment, create, label));
     }
     return held;
@@ -245,11 +247,8 @@ function openChildDirectory(
 }
 
 function openDirectory(path: string, noFollow: boolean, label: string): BoundDirectory {
-  if (typeof constants.O_DIRECTORY !== "number" || typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error(`${label} requires directory descriptor and no-follow support`);
-  }
-  const descriptor = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY |
-    (noFollow ? constants.O_NOFOLLOW : 0));
+  const descriptor = openSync(path, constants.O_RDONLY | DIRECTORY_OPEN_FLAG |
+    (noFollow ? NO_FOLLOW_OPEN_FLAG : 0));
   try {
     const identity = fstatSync(descriptor, { bigint: true });
     const named = lstatSync(path, { bigint: true });

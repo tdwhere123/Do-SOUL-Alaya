@@ -25,6 +25,7 @@ import {
   artifactPrefix,
   parseArtifactFilename
 } from "./derived-path.js";
+import { NO_FOLLOW_OPEN_FLAG } from "../../../fs/open-flags.js";
 import { openHeldReserveDescriptor } from "./reservation-fd.js";
 
 interface ReserveOwner {
@@ -181,13 +182,12 @@ function writeExclusiveReserveFile(
   filename: string,
   owner: Record<string, unknown>
 ): void {
-  requireNoFollow();
   const boundPath = `${directory}/${filename}`;
   let descriptor: number;
   try {
     descriptor = openSync(
       boundPath,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NO_FOLLOW_OPEN_FLAG,
       0o600
     );
   } catch (cause) {
@@ -319,12 +319,6 @@ function processAlive(pid: number, expectedStartIdentity: string): boolean {
     return readProcessStartIdentity(pid) === expectedStartIdentity;
   } catch (cause) {
     return typeof cause === "object" && cause !== null && "code" in cause && cause.code === "EPERM";
-  }
-}
-
-function requireNoFollow(): void {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("O_NOFOLLOW is required for semantic artifact reservations");
   }
 }
 

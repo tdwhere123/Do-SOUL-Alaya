@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { link, open, realpath, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
+import { NO_FOLLOW_OPEN_FLAG } from "../../runs/fs/open-flags.js";
 
 export async function publishExclusiveOutput(
   outputPath: string,
@@ -35,8 +36,5 @@ export async function publishExclusiveOutput(
 }
 
 function exclusiveWriteFlags(): number {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("descriptor-safe output is unavailable");
-  }
-  return constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+  return constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NO_FOLLOW_OPEN_FLAG;
 }

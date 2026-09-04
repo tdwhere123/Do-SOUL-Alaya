@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const EMPTY_SOURCE = devNull;
+const EMPTY_SOURCE = process.platform === "win32" ? "NUL" : devNull;
 const SPEC_GIT_CONFIG = [
   "-c", "core.quotepath=false",
   "-c", "core.abbrev=40",

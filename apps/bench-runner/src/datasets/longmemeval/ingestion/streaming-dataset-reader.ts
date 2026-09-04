@@ -3,6 +3,10 @@ import { constants } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { TextDecoder } from "node:util";
 import {
+  NO_FOLLOW_OPEN_FLAG,
+  NONBLOCK_OPEN_FLAG
+} from "../../../runs/fs/open-flags.js";
+import {
   LongMemEvalQuestionSchema,
   type LongMemEvalQuestion
 } from "./dataset.js";
@@ -28,10 +32,9 @@ export async function streamLongMemEvalDataset(
   limits: StreamLongMemEvalDatasetLimits,
   onQuestion: (question: LongMemEvalQuestion, index: number) => void
 ): Promise<StreamedLongMemEvalDatasetIdentity> {
-  const noFollow = constants.O_NOFOLLOW ?? 0;
   const handle = await open(
     sourcePath,
-    constants.O_RDONLY | constants.O_NONBLOCK | noFollow
+    constants.O_RDONLY | NONBLOCK_OPEN_FLAG | NO_FOLLOW_OPEN_FLAG
   );
   try {
     const fileStat = await handle.stat();

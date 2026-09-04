@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { open, realpath, type FileHandle } from "node:fs/promises";
 import path from "node:path";
+import { NO_FOLLOW_OPEN_FLAG } from "../../runs/fs/open-flags.js";
 import {
   isContainedPath,
   resolveOpenedDescriptorPath
@@ -30,9 +31,6 @@ export async function openContainedArtifact(
   if (!isContainedPath(root, candidate)) {
     throw new Error(`merge refused: artifact escapes declared root '${reference}'`);
   }
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("merge refused: descriptor-bound artifact validation is unavailable");
-  }
   let realRoot: string;
   try {
     realRoot = await realpath(root);
@@ -42,7 +40,7 @@ export async function openContainedArtifact(
   }
   let handle: FileHandle;
   try {
-    handle = await open(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(candidate, constants.O_RDONLY | NO_FOLLOW_OPEN_FLAG);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;

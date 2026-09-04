@@ -12,6 +12,11 @@ import {
 } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
+import {
+  DIRECTORY_OPEN_FLAG,
+  NO_FOLLOW_OPEN_FLAG,
+  splitAbsolutePath
+} from "../../../fs/open-flags.js";
 
 export interface DirectoryIdentity {
   readonly device: string;
@@ -35,7 +40,8 @@ export function boundDirectoryAnchor(descriptor: number, namedPath: string): str
 export function isBoundDirectoryAnchor(path: string): boolean {
   if (/^\/proc\/self\/fd\/\d+(?:\/|$)/u.test(path)) return true;
   for (const root of namedDirectoryAnchors) {
-    if (path === root || path.startsWith(`${root}/`)) return true;
+    if (path === root || path.startsWith(`${root}${sep}`) ||
+        path.startsWith(`${root}/`)) return true;
   }
   return false;
 }
@@ -79,11 +85,16 @@ function openCacheRootChain(cacheRoot: string, create: boolean): BoundCacheRoot 
   if (!isAbsolute(absolute)) {
     throw new ExtractionCacheInvariantError("extraction cache root must be absolute");
   }
-  const segments = absolute.split(sep).filter(Boolean);
-  let descriptor = openBoundDirectory(sep, false);
-  let namedPath: string = sep;
+  let walk;
   try {
-    for (const segment of segments) {
+    walk = splitAbsolutePath(absolute);
+  } catch {
+    throw new ExtractionCacheInvariantError("extraction cache root must be absolute");
+  }
+  let descriptor = openBoundDirectory(walk.root, false);
+  let namedPath = walk.root;
+  try {
+    for (const segment of walk.segments) {
       const anchored = boundDirectoryChildPath(descriptor, namedPath, segment);
       if (create) {
         try {
@@ -116,15 +127,8 @@ function openCacheRootChain(cacheRoot: string, create: boolean): BoundCacheRoot 
 }
 
 function openBoundDirectory(path: string, noFollow: boolean): number {
-  const directoryFlag = constants.O_DIRECTORY;
-  const noFollowFlag = constants.O_NOFOLLOW;
-  if (typeof directoryFlag !== "number" || typeof noFollowFlag !== "number") {
-    throw new ExtractionCacheInvariantError(
-      "extraction cache writer leases require directory descriptor support"
-    );
-  }
-  const descriptor = openSync(path, constants.O_RDONLY | directoryFlag |
-    (noFollow ? noFollowFlag : 0));
+  const descriptor = openSync(path, constants.O_RDONLY | DIRECTORY_OPEN_FLAG |
+    (noFollow ? NO_FOLLOW_OPEN_FLAG : 0));
   try {
     const opened = fstatSync(descriptor, { bigint: true });
     const named = lstatSync(path, { bigint: true });
