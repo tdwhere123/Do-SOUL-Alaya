@@ -104,5 +104,6 @@ function abstractSocketAddress(target: KernelWriteLeaseTarget): string {
   if (process.platform === "linux") {
     return `\0alaya-extraction-cache-write-${digest}`;
   }
-  return join(tmpdir(), `alaya-extraction-cache-write-${digest}.sock`);
+  const dir = process.platform === "darwin" ? "/tmp" : tmpdir();
+  return join(dir, `alaya-w-${digest.slice(0, 16)}.sock`);
 }
