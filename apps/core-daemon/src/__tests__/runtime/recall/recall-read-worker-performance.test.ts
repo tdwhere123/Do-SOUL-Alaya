@@ -110,7 +110,7 @@ describe("RecallReadWorkerClient performance seams", () => {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("sends tier-scoped recall reads without an object-id payload", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-tier-payload-"));

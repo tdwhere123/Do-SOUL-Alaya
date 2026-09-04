@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   EventPublisher,
@@ -71,26 +73,27 @@ async function createHarness() {
     runHotStateService: { apply: vi.fn() },
     runtimeNotifier
   });
+  const configPaths = testConfigPaths();
   const foundation = createKnowledgeFoundation({
     ...repositories,
     database,
-    filesDirectory: "/tmp/alaya-daemon-knowledge-foundation-test",
+    filesDirectory: configPaths.configDir,
     runtimeNotifier,
-    configPaths: testConfigPaths(),
+    configPaths,
     warnLogger: testWarnLogger(warn) as never
   }, eventPublisher);
   return { database, foundation, repositories };
 }
 
 function testConfigPaths() {
-  const root = "/tmp/alaya-daemon-knowledge-foundation-test";
+  const root = join(tmpdir(), "alaya-daemon-knowledge-foundation-test");
   return {
     configDir: root,
-    tomlPath: `${root}/config.toml`,
-    envPath: `${root}/.env`,
-    auditDir: `${root}/audit`,
-    secretsDir: `${root}/secrets`,
-    operationsDir: `${root}/operations`
+    tomlPath: join(root, "config.toml"),
+    envPath: join(root, ".env"),
+    auditDir: join(root, "audit"),
+    secretsDir: join(root, "secrets"),
+    operationsDir: join(root, "operations")
   };
 }
 

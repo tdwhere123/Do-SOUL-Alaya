@@ -442,7 +442,11 @@ function readPosixProcessStartIdentity(pid: number): string {
       { code: "ENOENT" }
     );
   }
-  return output;
+  const parsed = Date.parse(output);
+  if (!Number.isFinite(parsed)) {
+    throw new ExtractionCacheInvariantError("writer process start identity is unavailable");
+  }
+  return String(parsed);
 }
 
 function hasErrorCode(cause: unknown, code: string): boolean {

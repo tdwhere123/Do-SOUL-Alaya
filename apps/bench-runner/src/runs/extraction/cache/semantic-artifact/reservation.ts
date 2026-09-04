@@ -6,7 +6,6 @@ import {
   fsyncSync,
   lstatSync,
   openSync,
-  readFileSync,
   readSync,
   readdirSync,
   renameSync,
@@ -19,6 +18,8 @@ import {
 } from "../../cache-audit/bounded-artifact-reader.js";
 import type { ExtractionCacheWriteLease } from
   "../../fill/manifest/fill-root-guard.js";
+import { readProcessStartIdentity } from
+  "../../fill/manifest/writer-lock.js";
 import {
   artifactFilename,
   artifactPrefix,
@@ -319,19 +320,6 @@ function processAlive(pid: number, expectedStartIdentity: string): boolean {
   } catch (cause) {
     return typeof cause === "object" && cause !== null && "code" in cause && cause.code === "EPERM";
   }
-}
-
-function readProcessStartIdentity(pid: number): string {
-  const bytes = readFileSync(`/proc/${pid}/stat`);
-  if (bytes.byteLength > 16 * 1024) throw new Error("process start identity exceeds its size limit");
-  const stat = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  const closing = stat.lastIndexOf(")");
-  const fields = stat.slice(closing + 2).trim().split(/\s+/u);
-  const startTime = fields[19];
-  if (closing < 0 || startTime === undefined || !/^\d+$/u.test(startTime)) {
-    throw new Error("process start identity is unavailable");
-  }
-  return startTime;
 }
 
 function requireNoFollow(): void {

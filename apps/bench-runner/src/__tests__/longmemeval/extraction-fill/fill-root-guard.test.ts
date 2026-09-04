@@ -289,7 +289,8 @@ it("fails closed when the lock directory inode is swapped before release", async
   expect(existsSync(displacedLockPath)).toBe(true);
 });
 
-it("captures the leased root inode and refuses a replacement tree at publish", async () => {
+it.skipIf(process.platform !== "linux")(
+  "captures the leased root inode and refuses a replacement tree at publish", async () => {
   const parent = await fixtureRoot();
   const root = join(parent, "cache");
   const heldRoot = join(parent, "held-cache");

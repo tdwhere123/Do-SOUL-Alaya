@@ -637,7 +637,24 @@ async function writePolicy(root: string, value: object): Promise<string> {
   return filename;
 }
 
+function stageFixtureInventory(root: string): void {
+  // Fixtures are not git checkouts and Windows/macOS CI do not ship rg, so the
+  // guard would throw "ripgrep and git are both unavailable" and tests would
+  // compare file:// stack traces against path=packages/... diagnostics.
+  execFileSync("git", ["-c", "init.defaultBranch=main", "init"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  execFileSync("git", ["add", "-A"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+
 async function runGuard(root: string, policyPath: string) {
+  stageFixtureInventory(root);
   return await execFileWithFileCapture(
     process.execPath,
     [scriptPath, "--root", root, "--policy", policyPath],

@@ -60,7 +60,11 @@
       "project": ["src/**/*.ts", "tsconfig.json"]
     },
     "apps/core-daemon": {
-      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
+      "entry": [
+        "src/index.ts",
+        "src/runtime/recall/recall-read-worker.ts",
+        "src/__tests__/**/*.test.ts"
+      ],
       "project": ["src/**/*.ts", "tsconfig.json"],
       "ignoreDependencies": ["pino-pretty"]
     },

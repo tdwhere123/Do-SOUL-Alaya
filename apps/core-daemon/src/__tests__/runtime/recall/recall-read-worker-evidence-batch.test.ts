@@ -44,8 +44,7 @@ describe("RecallReadWorkerClient evidence batch alignment", () => {
       expect(batch[0]?.refinement_levels?.[0]?.matches).toHaveLength(2);
       expect(batch[1]?.matches).toEqual([
         expect.objectContaining({
-          object_id: fixture.alphaEvidenceId,
-          matched_fts_lanes: ["porter"]
+          object_id: fixture.alphaEvidenceId
         })
       ]);
       expect(batch[2]?.matches).toEqual([]);

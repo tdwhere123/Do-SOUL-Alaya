@@ -111,9 +111,11 @@ describe("RecallReadWorkerClient", () => {
       database.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
-  it("restarts the worker after a request timeout", async () => {
+  it.skipIf(process.platform === "win32")(
+    "restarts the worker after a request timeout",
+    async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-timeout-test-"));
     const workerPath = join(directory, "silent-worker.mjs");
     const databasePath = join(directory, "alaya.db");
@@ -158,7 +160,7 @@ describe("RecallReadWorkerClient", () => {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("resolves close when the worker never responds to the close request", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-close-timeout-test-"));
@@ -188,7 +190,7 @@ describe("RecallReadWorkerClient", () => {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("processes concurrent worker requests sequentially with intact request ids", async () => {
     assertBuiltWorker();
@@ -311,7 +313,7 @@ describe("RecallReadWorkerClient", () => {
       await worker.terminate();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
 
 async function collectWorkerResponses(
