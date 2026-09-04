@@ -9,6 +9,14 @@ WT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 BIN="$WT/apps/bench-runner/bin/alaya-bench-runner.mjs"
 DEFAULT_ENV="$WT/.do-it/bench-env/mimo-v2.5-opencode-go.env"
 NODE_BIN="${BENCH_NODE_BIN:-node}"
+# Tests inject an intercept argv; a PATH `node` shim is skipped on Darwin.
+run_node() {
+  if [[ -n "${BENCH_NODE_INTERCEPT:-}" ]]; then
+    command "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
+  else
+    command "$NODE_BIN" "$@"
+  fi
+}
 SMALL_WINDOW_CEILING=3
 
 usage() {
@@ -131,7 +139,7 @@ MANIFEST="$CACHE_ROOT/manifest.json"
 
 load_identity() {
   [[ -f "$MANIFEST" ]] || die "cache manifest missing: $MANIFEST"
-  "$NODE_BIN" - "$MANIFEST" <<'JS'
+  run_node - "$MANIFEST" <<'JS'
 const fs = require("fs");
 const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const required = [
@@ -149,7 +157,7 @@ JS
 
 build_canonical_request_manifest() {
   local output="$1" dataset="$2" prompt="$3" provider="$4" model="$5" profile="$6"
-  "$NODE_BIN" "$SCRIPT_DIR/prove-cache-only-replay.mjs" \
+  run_node "$SCRIPT_DIR/prove-cache-only-replay.mjs" \
     "$output" \
     "$dataset" "$prompt" "$CACHE_ROOT" \
     "$LIMIT" "$OFFSET" "$provider" "$model" "$profile"
@@ -170,11 +178,11 @@ run_replay() {
   build_canonical_request_manifest \
     "$request_file" "$dataset" "$prompt" "$provider" "$model" "$profile" || rc=$?
   if [[ $rc -eq 0 ]]; then
-    "$NODE_BIN" "$BIN" provider-preflight --mode replay \
+    run_node "$BIN" provider-preflight --mode replay \
       --request-manifest "$request_file" > "$receipt_file" || rc=$?
   fi
   if [[ $rc -eq 0 ]]; then
-    "$NODE_BIN" "$BIN" provider-preflight --mode validate-replay-receipt \
+    run_node "$BIN" provider-preflight --mode validate-replay-receipt \
       --receipt "$receipt_file" --request-manifest "$request_file" || rc=$?
   fi
   if [[ $rc -eq 0 ]]; then
@@ -189,7 +197,7 @@ run_replay() {
 
 reject_completed_recall_checkpoints() {
   local work="$1"
-  "$NODE_BIN" "$BIN" provider-preflight \
+  run_node "$BIN" provider-preflight \
     --mode validate-recall-checkpoints --work-root "$work"
 }
 
@@ -209,7 +217,7 @@ print(f"wrote {len(rows)} questions -> {dest}")
 PY
   export ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=1
   cd "$WT"
-  "$NODE_BIN" "$SCRIPT_DIR/fill-query-factors.mjs" "$questions" "$out"
+  run_node "$SCRIPT_DIR/fill-query-factors.mjs" "$questions" "$out"
 }
 
 prepare_snapshot_args() {
@@ -245,7 +253,7 @@ invoke_cache_only_diagnostic() {
     extra+=(--embedding-cache-overlay "$EMBEDDING_CACHE_OVERLAY")
   fi
   echo "diagnostic cache-only credentialless limit=$LIMIT work=$work"
-  "$NODE_BIN" "$BIN" diagnostic-loop \
+  run_node "$BIN" diagnostic-loop \
     --work-root "$work" --request-manifest "$request_file" \
     --mode cache-only "${SNAPSHOT_ARGS[@]}" \
     --history-root "$work/history" "${extra[@]}"

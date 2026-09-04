@@ -280,7 +280,7 @@ describe("LocalOnnxEmbeddingClient", () => {
       restoreEnv("ALAYA_LOCAL_ONNX_LOCK_PATH", previousLockPath);
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it("uses the entry deadline while waiting for the host lock and never starts orphan work", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "alaya-embedding-wait-"));

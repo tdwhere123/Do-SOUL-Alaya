@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -145,14 +145,14 @@ export async function writeOperatorLoopHarness(
     ""
   ].join("\n"));
   await writeFile(snapshot, "fixture-snapshot\n");
-  const nodeBin = await writeFakeNode(binDir, argvCapture, envCapture);
+  const interceptPath = await writeFakeNode(binDir, argvCapture, envCapture);
   return {
     snapshot,
     workRoot,
     argvCapture,
     envCapture,
     binDir,
-    env: isolatedChildEnv(envFile, nodeBin)
+    env: isolatedChildEnv(envFile, interceptPath)
   };
 }
 
@@ -325,15 +325,8 @@ async function writeFakeNode(
 
 async function writeExecutableNode(binDir: string, source: string): Promise<string> {
   const interceptPath = path.join(binDir, "node-intercept.cjs");
-  const nodeBin = path.join(binDir, "alaya-node");
   await writeFile(interceptPath, source, "utf8");
-  await writeFile(nodeBin, [
-    "#!/usr/bin/env bash",
-    `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(interceptPath)} "$@"`,
-    ""
-  ].join("\n"), "utf8");
-  await chmod(nodeBin, 0o755);
-  return nodeBin;
+  return interceptPath;
 }
 
 function fakeNodeScript(argvCapture: string, envCapture: string): string {
@@ -388,7 +381,7 @@ function fakeNodeScript(argvCapture: string, envCapture: string): string {
   ].join("\n");
 }
 
-function isolatedChildEnv(envFile: string, nodeBin: string): NodeJS.ProcessEnv {
+function isolatedChildEnv(envFile: string, interceptPath: string): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (
@@ -403,7 +396,8 @@ function isolatedChildEnv(envFile: string, nodeBin: string): NodeJS.ProcessEnv {
   delete env.NODE_OPTIONS;
   return {
     ...env,
-    BENCH_NODE_BIN: nodeBin,
+    BENCH_NODE_BIN: process.execPath,
+    BENCH_NODE_INTERCEPT: interceptPath,
     ALAYA_RECALL_ANY5_ENV: envFile
   };
 }
