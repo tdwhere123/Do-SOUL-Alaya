@@ -202,39 +202,41 @@ before the trigger is called consumable.
 
 ## Recall
 
-**UGAF** — Unified Governed Associative Field. The intended recall
-algorithm: one continuous governed associative-memory field, not a
-stack of post-processors. In-repo owner: `docs/handbook/recall.md`.
-Hopfield / Lyapunov / attractor wording is a design lens, not a
-proved runtime. Current HEAD connects the principal field, path, Slice,
-activation, and canonical `prefixSK` owners; `recall.md` records the remaining
-query-proof implementation and closure gates.
+**UGAF** — Unified Governed Associative Field. One continuous governed
+associative-memory field, not a stack of post-processors. In-repo owner:
+`docs/handbook/recall.md`. Hopfield / Lyapunov / attractor wording is a
+design lens, not a proved runtime. **LIVE** HEAD connects the principal
+field, path, Slice, activation, and canonical `prefixSK` owners.
+**TARGET** (C01) is the budget-aware evidence-set selector in
+`recall.md` § Target algorithm (candidate); query-proof `prefixSK` is
+not the implementation target.
 
-**Safe Dominance** — The V1 query-proof target's strict query-conditioned
-pointwise partial order over applicable attributed observations. It is not a
-scalar score or general outranking; a cycle is a contract failure.
+**Safe Dominance** — LIVE/historical query-proof vocabulary: a strict
+query-conditioned pointwise partial order over applicable attributed
+observations. It is not a scalar score or general outranking; a cycle is a
+contract failure. TARGET relevance is rank fusion `R(v)`, not this order.
 
 **Pointwise Frontier** — A deterministic layer of safe-dominance structure.
 Frontier index is not Gamma gain and does not require F1-before-F2 capture when
 a lower frontier supplies positive gain on a compiled Gamma atom that every
 eligible higher-frontier candidate is proved not to cover.
 
-**Gamma_q** — Query-compiled, selected-set-dependent marginal utility with
-three ordered strata: answer binding/position, required-proposition support,
-and compiler-required certified-independent support. The third stratum is
-structural zero unless the compiler requires independent support. Gamma is not
-a pointwise score, frontier priority, facility remainder, or second selector.
+**Gamma_q** — LIVE/historical query-proof vocabulary: query-compiled,
+selected-set-dependent marginal strata (answer binding/position,
+required-proposition, compiler-required certified-independent support).
+**TARGET** does not use compiled Gamma as the live selector; `Q(S)` is the
+lexicographic evidence-set objective.
 
-**Budgeted Capture Walk** — One deterministic canonical `prefixSK` walk whose
-prefixes define every budget K. K truncates the walk, so each smaller captured
-set is a prefix subset of the next. `selectGammaWalk` is only the optional outer
-legacy delivery implementation.
+**Budgeted Capture Walk** — **LIVE:** one deterministic canonical `prefixSK`
+walk whose prefixes define every budget K. K truncates the walk, so each
+smaller captured set is a prefix subset of the next. `selectGammaWalk` is
+only the optional outer legacy delivery implementation. **TARGET:** no
+all-K prefix promise; changing K or token budget may change membership.
 
-**Lexical Recall** — BM25 / FTS-based search. Live family-max RRF still moves
-scores (`fusion-delivery-families.ts`), but that scalarization is diagnosed as
-noncompliant and is not the target relevance contract. FTS admission and
-structural scoring also currently duplicate one upstream receipt across
-families; see `recall.md`.
+**Lexical Recall** — BM25 / FTS-based search. **LIVE** family-max RRF still
+moves scores (`fusion-delivery-families.ts`); that scalarization is diagnosed
+as noncompliant. **TARGET** uses lexical probe rank as one family in
+`R(v) = sum_f 1/r_f(v)` and does not multiply lexical votes. See `recall.md`.
 
 **Path-Aware Recall** — Intended runtime manifestation of
 `PathRelation` via typed transfer \(G_L\). Active recall-eligible paths can
@@ -247,10 +249,9 @@ live field, seed \(\Omega\). The bundled local ONNX provider is enabled
 by default after verified startup warmup; operators can explicitly
 disable it. It never decides durable truth (invariant §18). On the
 current path it can inject candidates and rescore an eligible pool. Historical
-discovery rates belong to their frozen benchmark commit. In the query-proof
-target, embedding admission monotonically extends the E0 field without eviction or
-preference reward, and shared candidates add exactly one embedding observation;
-see `recall.md`.
+discovery rates belong to their frozen benchmark commit. **TARGET:**
+embedding is the extension family only; unused extension capacity is not
+lent to baseline; E1 cannot evict E0 identities. See `recall.md`.
 
 **API Embedding Provider** — A network-backed embedding supplement. API use is
 always explicit opt-in through `ALAYA_EMBEDDING_PROVIDER=openai` and requires

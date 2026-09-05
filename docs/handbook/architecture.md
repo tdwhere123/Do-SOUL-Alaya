@@ -111,28 +111,36 @@ operate a compatibility mixture.
 ## Recall algorithm
 
 Do not implement recall from flood / SliceKey / fused-score prose.
-The algorithm is the UGAF read path. The live runtime now connects pinned
-field-generation candidate admission, graph/PathRelation expansion, Slice
-compatibility, attributed path/evidence flood, canonical
-`prefixSK(S_infty,K)`, and an explicit optional outer legacy
-`selectGammaWalk` path chosen once per request. The legacy path uses the
-binding-aware coverage objective (query-conditioned facility plus distinct OSF
-`Values_v`); source hard-dedupe is off and duplicate rejection is
-object-identity only. Those closures, and the remaining any@5 diagnostic work,
+
+**LIVE (this HEAD):** The runtime connects pinned field-generation candidate
+admission, graph/PathRelation expansion, Slice compatibility, attributed
+path/evidence flood, canonical `prefixSK(S_infty,K)`, and an explicit optional
+outer legacy `selectGammaWalk` path chosen once per request. The legacy path
+uses the binding-aware coverage objective (query-conditioned facility plus
+distinct OSF `Values_v`); source hard-dedupe is off and duplicate rejection is
+object-identity only. Those closures, and remaining any@5 diagnostic work,
 live under the recall authority — not as additional architecture axes.
 Kind/category projections remain independent rebuildable routing projections
 and must not be schema-coupled to strict base graph acceptance.
 
 Connectedness does not certify relevance algebra. The current `effectiveScore`,
 family-max scalarization, and downstream independent-embedding relevance path
-are diagnosed as noncanonical in [`recall.md`](recall.md). Route B rebuilds the
-decision path from attributed observations. The shadow target uses one strict
-safe-dominance relation plus one prefix-monotonic budgeted-capture walk; it does
-not add a second field or selector. The architectural invariants remain one
-monotonically extended field, one pointwise preference authority, and one
-destructive canonical `prefixSK` walk with query-compiled `Gamma_q`. V1 has no
-semantic prior; `selectGammaWalk` is only the optional outer legacy delivery
-implementation, not the future query-proof decision-contract rollback target.
+are diagnosed as noncanonical in [`recall.md`](recall.md). The LIVE shadow
+preview still uses one strict safe-dominance relation plus one
+prefix-monotonic `prefixSK` walk; it is not a second production selector.
+
+**TARGET (C01 candidate, not live):** Replace mandatory all-K prefix,
+proof-only Psi/Gamma ranking, singleton-CQ gating of ordinary retrieval, and
+runtime self-replay. One indexed candidate field (lexical, local embedding,
+query-applicable typed relation) feeds one budget-aware evidence-set
+selector: `R(v)=sum_f 1/r_f(v)`, packets from actual typed edges only,
+lexicographic `Q`, greedy gain/cost, one best-single refill, UTF-8
+byte-ceiling tokens, once-capture, no runtime oracle. Ordinary Recall does
+not require CQ/F3/OSF. Recall does not enqueue extraction. Public
+`ranking_authority` becomes `"budget_aware_q"` under a §25 major; omitted
+delivery mode selects the sole algorithm; an explicit legacy request is
+rejected. C08 switches the normal entry atomically; dual LIVE/TARGET runtime
+modes are not a compatibility path. Detail: [`recall.md`](recall.md).
 
 Owner and current closure boundary:
 
@@ -319,9 +327,10 @@ review finding:
    - RecallService (needs Memory + Embedding repos; fusion, delivery,
      graph-expansion, path-relation, field-generation, and diagnostics helpers
      live under `packages/core/src/recall/`). Helper presence is not
-     connectedness. Current HEAD has live field/path/Slice/flood wiring,
-     canonical `prefixSK`, and explicit legacy `selectGammaWalk`, including
-     live F3-only membership; see [`recall.md`](recall.md).
+     connectedness. **LIVE** HEAD has field/path/Slice/flood wiring, canonical
+     `prefixSK`, and explicit legacy `selectGammaWalk`, including live F3-only
+     membership. **TARGET** replaces that selector at C08; see
+     [`recall.md`](recall.md).
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService
    - ConversationService (memory-orchestration only; chat-specific orchestration was removed during the v0.1 port — see invariant §20)
@@ -349,8 +358,13 @@ Signal ingestion is dual-track:
 
 - **A-track**: explicit candidate emission through the `soul.emit_*`
   MCP tools (the consuming agent reports a candidate).
-- **B-track**: post-turn Garden heuristic extraction (Garden runs
-  fire-and-forget after the agent's turn completes).
+- **B-track**: post-turn Garden heuristic extraction. **LIVE:** MCP
+  `soul.recall` may enqueue `POST_TURN_EXTRACT` from `recent_turn` /
+  query text, and `soul.report_context_usage` may enqueue from
+  `turn_digest`. **TARGET:** Recall is not an ingestion path. Explicit
+  post-turn events and A-track emission remain; delivered context and
+  usage diagnostics must not automatically become source truth. Garden
+  stays fire-and-forget relative to the consumer-agent path.
 
 Both produce candidates that flow through the Promotion Gate before
 becoming durable.

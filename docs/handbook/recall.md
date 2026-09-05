@@ -4,6 +4,30 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
+### Live versus target (C01 candidate)
+
+Do not keep both targets in force as selectable runtime modes. LIVE is this
+HEAD. TARGET is the candidate implementation frozen by C01; it is not
+production and is not activated.
+
+- **LIVE:** Canonical delivery is `prefixSK(S_infty, K)` via
+  `deliverCanonicalFineAssessment` / `walkShadowCapture`. Optional
+  `delivery_path: "legacy"` keeps `selectGammaWalk` behind
+  `ALAYA_RECALL_ALLOW_LEGACY_DELIVERY`. A shadow Decide_Q / DeliveryPack
+  sidecar always runs on canonical. Public `ranking_authority` is
+  `"prefix_sk"` or `"select_gamma"`. MCP `soul.recall` may enqueue
+  `POST_TURN_EXTRACT`. Prepare may compile official OSF when credentials
+  exist; MCP is not wrapped in `withRecallZeroLiveCampaign`.
+- **TARGET:** One budget-aware evidence-set selector. Relevance is the
+  unweighted rank fusion `R(v) = sum_f 1/r_f(v)`. Packets come from actual
+  typed support edges only. Quality is lexicographic `Q`. Selection is greedy
+  marginal `Q` / charged-token-ceiling with one best-single refill. Tokens
+  use a UTF-8 byte ceiling. Capture caller-owned input once. No runtime
+  oracle, self-replay, or query-result cache. Ordinary Recall works without
+  CQ/F3/OSF. Recall does not enqueue extraction. New public
+  `ranking_authority` is `"budget_aware_q"`. There is no all-K prefix
+  promise. Activation requires C08/C10, STOP-02, and explicit user scope.
+
 Current documentation identity: package `0.3.11`, the 2026-08-25
 relevance-authority and budgeted-capture shadow adjudications plus the sharded
 execution plan over G21/S11-S19 evidence. Earlier pins —
@@ -92,8 +116,11 @@ The mathematics is the Unified Governed Associative Field (UGAF) read path.
 Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
 physics.
 
-The frozen **query-proof target** is accepted only for behavior-neutral
-preview; it is not current production behavior and does not authorize cutover:
+The historical **query-proof preview** (Psi / compiled Gamma / `prefixSK`)
+remains LIVE sidecar and test/offline vocabulary. It is **not** the C01
+implementation target. C01 TARGET replaces mandatory all-K prefix,
+proof-only Psi/Gamma ranking, singleton-CQ gating of ordinary retrieval,
+and runtime self-replay. Preview algebra does not authorize cutover:
 
 ```text
 A(q) -> demand/applicability graph
@@ -126,6 +153,10 @@ unselected until the active plan's boundary audits and capture algebra contract
 close; behavior-neutral query-proof preview must precede any delivery cutover.
 
 ## Contract (UGAF)
+
+**LIVE / historical query-proof vocabulary.** TARGET selection is in
+`## Target algorithm (candidate)` below. This section describes the live
+field and the superseded prefix/proof preview.
 
 Recall is one governed associative field, not a stack of independent rankers:
 
@@ -238,6 +269,51 @@ graph, and it never becomes durable truth.
 
 Do not add another fusion stream, promoter, duplicate reranker, consensus
 reorder, or head-drop rule to repair benchmark coverage.
+
+## Target algorithm (candidate)
+
+C01 freezes one deterministic heuristic. It is not a global exact solver and
+does not preserve an all-K prefix. Missing optional CQ/F3/OSF changes
+supported claims, not whether ordinary retrieval may run.
+
+```text
+source/turn ingress
+  -> one SQLite txn: source + EventLog + raw/lexical projection + work intent
+  -> durable ack (no provider wait)
+  -> bounded async enrichment
+  -> admitted artifact + changed projection
+Recall
+  -> capture QuerySpec and ready snapshot once
+  -> lexical / local embedding / typed-relation families -> one field
+  -> singleton evidence units + packets from actual typed edges
+  -> one budget-aware selector -> one DecisionResult
+  -> claim safety and one serialization
+```
+
+Relevance (each family at most once; ranks start at 1):
+
+```text
+R(v) = sum_f 1 / r_f(v)
+```
+
+Sort by descending `R`, then stable evidence identity. `Q(S)` is lexicographic:
+fully satisfied explicit grounded obligations; distinct grounded answer
+bindings when enumeration is requested; sum of `1/r(v)` over unique selected
+units. Greedy step maximizes marginal `Q` / incremental charged-token
+ceiling. Exact ties: fewer incremental tokens, then canonical identity.
+Track the best feasible single packet during the same scan; compare once;
+refill from that seed at most once. Stop when no positive-gain addition
+fits or the work limit is reached. Order inside the selected set uses acyclic
+evidence dependency, else frozen relevance/identity.
+
+Resource policy: independent `N_base`/`N_extension` and `R_base`/`R_extension`.
+Baseline probes are lexical plus query-applicable typed relation. Extension
+probes are embedding and discovery seeded by those results. Unused extension
+capacity is not lent to baseline. Packet cap `M`, width `W`. Charge one UTF-8
+byte as one token plus a fixed nonempty-result envelope. K counts coalesced
+public memory/evidence objects. Numeric constants: C01 worklog
+`v2-c01-target-contract.md`. C08 deletes LIVE `prefixSK` / `selectGammaWalk`
+together with the normal-entry switch.
 
 ## Current live path
 
@@ -362,16 +438,15 @@ production consumer and selection receipts. It is an implementation
 claim, not a KPI promotion.
 
 It does **not** close Recall decision algebra. Neither live `effectiveScore` nor
-family-max `fused_score` is target authority, and deep-head/facility embedding
-is another pointwise path. The active query-proof plan owns the source-bound
-read lease; staged demand/observation/safe-dominance/Gamma audits; exact
-capture-algebra freeze;
-behavior-neutral shadow trace; explicit cutover authorization; reversible
-delivery; measurement; and only then legacy deletion. Do not describe
-connectedness or shadow presence as algorithmic correctness, and do not lower
-the fixed E0 >=85/94 and E1 >=90/94 gates.
+family-max `fused_score` is TARGET authority, and deep-head/facility embedding
+is another LIVE pointwise path. The C01 TARGET in `## Target algorithm (candidate)`
+owns the replacement selector. Do not describe connectedness or shadow presence
+as algorithmic correctness, and do not lower the fixed E0 >=85/94 and E1 >=90/94
+gates.
 
-Do not add a second field, selector, query condition, or recall path.
+**LIVE:** do not add a second field, selector, query condition, or recall path
+while `prefixSK` remains the production owner. **TARGET:** C08 replaces that
+owner atomically; dual LIVE/TARGET runtime modes are forbidden.
 
 ## S11 near-top audit (closed)
 

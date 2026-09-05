@@ -115,8 +115,11 @@ These rules always win over lower-level docs and task-card convenience.
     promotion requires explicit evidence, governance, and audit.
     Turn text an agent forwards for passive extraction (`recent_turn`
     on `soul.recall`, `turn_digest` on `soul.report_context_usage`) is
-    *input*, not an agent claim of truth: it feeds Garden's extractor,
-    whose candidates still pass the same deterministic triage, evidence
+    *input*, not an agent claim of truth. **LIVE:** `soul.recall` may
+    enqueue `POST_TURN_EXTRACT` from that text; `soul.report_context_usage`
+    may enqueue from `turn_digest`. **TARGET:** Recall does not enqueue
+    ingestion; explicit post-turn events and A-track emission remain.
+    Garden candidates still pass deterministic triage, evidence
     synthesis, and EventLog audit before any durable write — that
     triage step is the "Alaya decides". When an attached MCP session has
     no `ALAYA_RUN_ID`, the attach boundary first creates a canonical
@@ -139,11 +142,14 @@ These rules always win over lower-level docs and task-card convenience.
     a later memory-create failure by deleting the evidence.
 20b. **One query as-of and one pinned generation.** `prepareRecallRequest`
     captures `effective_as_of` once and pins exactly one projection
-    generation. Canonical `prefixSK` is the admission-order and delivery owner;
-    `selectGammaWalk` is only the explicit outer legacy delivery
-    implementation, not a query-proof decision-contract rollback target.
-    Later consensus does not reorder the delivered set. Missing generation or
-    condition pins fail closed.
+    generation. **LIVE:** Canonical `prefixSK` is the admission-order and
+    delivery owner; `selectGammaWalk` is only the explicit outer legacy
+    delivery implementation. **TARGET:** One captured QuerySpec, one indexed
+    field, and one budget-aware evidence-set selector own admission and
+    delivery (`ranking_authority = "budget_aware_q"`). There is no all-K
+    prefix promise and no runtime self-replay. Later consensus does not
+    reorder the delivered set. Missing generation or condition pins fail
+    closed.
 20c. **Mechanism and measurement stay separate.** Planted query-proof proofs
     cannot be closed by minting zeros for missing live provider/cache,
     production Clock-A, dataset KPI, or prepare-time unavailable snapshot
@@ -265,6 +271,15 @@ These rules always win over lower-level docs and task-card convenience.
     for an old, unknown, or mixed combination. Any compatibility reader
     belongs to an offline migration and must not make mixed-schema
     formation or recall operational.
+
+    The recall unified-algorithm candidate (C01 TARGET) is also a
+    **major** under this section even when some Zod shapes stay
+    additive: it redefines ranking/delivery semantics, rejects explicit
+    legacy `delivery_path` / `ranking_authority` values, and stops
+    treating `soul.recall` as a passive-extraction enqueue path.
+    Publication is not authorized in this isolated tree. Historical
+    EventLog/`ranking_authority` readers may remain for old rows; they
+    must not execute an alternate algorithm.
 
     Removing a public symbol requires `@deprecated` JSDoc on the
     schema at least one minor release before removal, a
