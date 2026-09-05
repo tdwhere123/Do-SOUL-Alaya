@@ -18,6 +18,7 @@ import {
   selectTemporalProjection
 } from "../../sqlite/temporal-projection-selection.js";
 import { SqlitePathRelationRepo } from "../../repos/path/path-relation-repo.js";
+import { removeTempDirectorySync } from "../temp-directory.js";
 
 interface CandidateFixture {
   readonly directory: string;
@@ -26,7 +27,7 @@ interface CandidateFixture {
   readonly receiptFilename: string;
 }
 
-const TEMPORAL_CANDIDATE_TIMEOUT_MS = 15_000;
+const TEMPORAL_CANDIDATE_TIMEOUT_MS = process.platform === "win32" ? 60_000 : 15_000;
 
 describe("prepareTemporalCandidate", () => {
   let fixture: CandidateFixture;
@@ -44,7 +45,7 @@ describe("prepareTemporalCandidate", () => {
   afterEach(() => {
     closeCachedDatabase(fixture.sourceFilename);
     closeCachedDatabase(fixture.candidateFilename);
-    fs.rmSync(fixture.directory, { recursive: true, force: true });
+    removeTempDirectorySync(fixture.directory);
   });
 
   it("copies a legacy source, quarantines every untyped path, and retains the original", async () => {

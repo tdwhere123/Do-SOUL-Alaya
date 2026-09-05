@@ -6,7 +6,6 @@ import {
   normalizeActivationScore,
   normalizeGraphSupport
 } from "../runtime/recall-service-helpers.js";
-import { normalizeEvidenceText } from "../scoring/query-evidence-scoring.js";
 import { resolveRecallCandidateSemanticActivation } from
   "../scoring/activation/candidate-semantic-activation-context.js";
 import {

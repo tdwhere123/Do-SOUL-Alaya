@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceRunEventType, GreenGovernanceEventType, RunMessageAppendedPayloadSchema, type EventLogEntry } from "@do-soul/alaya-protocol";
-import { SessionOverrideService } from "../../governance/proposals/session-override-service.js";
-import type { TestMock } from "../shared/mock-types.js";
+import {
+  SessionOverrideService,
+  type SessionOverrideServiceEventLogPort
+} from "../../governance/proposals/session-override-service.js";
 import { requireAt } from "../helpers/defined.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
@@ -201,7 +203,7 @@ describe("SessionOverrideService", () => {
         appendedEvents.push(entry);
         return entry;
       }),
-      queryByEntity: vi.fn(async () => []),
+      queryByEntity: vi.fn(async (_entityType: string, _entityId: string): Promise<readonly EventLogEntry[]> => []),
       queryByRunAndEntityType,
       getLatestUserRunMessageByRun: vi.fn(async () => null)
     };
@@ -437,10 +439,10 @@ describe("SessionOverrideService", () => {
 });
 
 function createEventLogRepo(overrides: Partial<{
-  append: TestMock;
-  queryByRunAndEntityType: TestMock;
-  getLatestUserRunMessageByRun: TestMock;
-}> = {}) {
+  append: SessionOverrideServiceEventLogPort["append"];
+  queryByRunAndEntityType: SessionOverrideServiceEventLogPort["queryByRunAndEntityType"];
+  getLatestUserRunMessageByRun: SessionOverrideServiceEventLogPort["getLatestUserRunMessageByRun"];
+}> = {}): SessionOverrideServiceEventLogPort {
   const appendedEvents: EventLogEntry[] = [];
   const queryByRunAndEntityType =
     overrides.queryByRunAndEntityType ??
@@ -456,7 +458,7 @@ function createEventLogRepo(overrides: Partial<{
         appendedEvents.push(entry);
         return entry;
       }),
-    queryByEntity: vi.fn(async () => []),
+    queryByEntity: vi.fn(async (_entityType: string, _entityId: string): Promise<readonly EventLogEntry[]> => []),
     queryByRunAndEntityType,
     getLatestUserRunMessageByRun:
       overrides.getLatestUserRunMessageByRun ??

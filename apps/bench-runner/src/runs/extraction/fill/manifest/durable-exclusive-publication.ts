@@ -4,6 +4,7 @@ import {
   readSync, renameSync, unlinkSync, writeSync, type BigIntStats
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { NO_FOLLOW_OPEN_FLAG } from "../../../fs/open-flags.js";
 
 interface FileIdentity {
   readonly device: bigint;
@@ -21,14 +22,9 @@ export function publishBytesExclusiveDurable(input: {
   let owned: FileIdentity | undefined;
   let failure: unknown;
   try {
-    try {
-      writeBytesExclusiveTracked(temporary, input.bytes, (identity) => {
-        owned = identity;
-      });
-    } catch (cause) {
-      if (!isAlreadyExists(cause)) throw cause;
-      owned = assertExactOwnedTemporary(temporary, input.bytes);
-    }
+    writeOrAdoptExclusiveTemporary(temporary, input.bytes, (identity) => {
+      owned = identity;
+    });
     try {
       linkFileExclusiveDurable(temporary, input.destination);
     } catch (cause) {
@@ -60,14 +56,9 @@ export function replaceBytesDurable(input: {
   let owned: FileIdentity | undefined;
   let failure: unknown;
   try {
-    try {
-      writeBytesExclusiveTracked(temporary, input.bytes, (identity) => {
-        owned = identity;
-      });
-    } catch (cause) {
-      if (!isAlreadyExists(cause)) throw cause;
-      owned = assertExactOwnedTemporary(temporary, input.bytes);
-    }
+    writeOrAdoptExclusiveTemporary(temporary, input.bytes, (identity) => {
+      owned = identity;
+    });
     renameSync(temporary, input.destination);
     owned = undefined;
     fsyncRegularFile(input.destination);
@@ -76,6 +67,32 @@ export function replaceBytesDurable(input: {
     failure = cause;
   }
   finishOwnedTemporaryCleanup(temporary, owned, failure);
+}
+
+function writeOrAdoptExclusiveTemporary(
+  path: string,
+  bytes: Uint8Array,
+  onOwned: (identity: FileIdentity) => void
+): void {
+  try {
+    writeBytesExclusiveTracked(path, bytes, onOwned);
+  } catch (cause) {
+    if (!isAlreadyExists(cause)) throw cause;
+    try {
+      onOwned(assertExactOwnedTemporary(path, bytes));
+    } catch {
+      unlinkCrashDebris(path);
+      writeBytesExclusiveTracked(path, bytes, onOwned);
+    }
+  }
+}
+
+function unlinkCrashDebris(path: string): void {
+  const current = lstatSync(path, { bigint: true });
+  if (current.isSymbolicLink()) {
+    throw new Error("deterministic publication temporary is a symlink");
+  }
+  unlinkSync(path);
 }
 
 function writeBytesExclusiveTracked(
@@ -101,7 +118,20 @@ export function linkFileExclusiveDurable(source: string, destination: string): v
 
 export function fsyncDirectory(path: string): void {
   const descriptor = openSync(path, constants.O_RDONLY);
-  runAndClose(descriptor, "directory fsync", () => fsyncSync(descriptor));
+  runAndClose(descriptor, "directory fsync", () => {
+    try {
+      fsyncSync(descriptor);
+    } catch (cause) {
+      // Windows directory handles reject fsync; POSIX still requires it for durability.
+      if (!isIgnorableWindowsFsync(cause)) throw cause;
+    }
+  });
+}
+
+function isIgnorableWindowsFsync(cause: unknown): boolean {
+  if (process.platform !== "win32") return false;
+  return typeof cause === "object" && cause !== null && "code" in cause &&
+    (cause.code === "EPERM" || cause.code === "ENOTSUP" || cause.code === "EACCES");
 }
 
 function deterministicTemporaryPath(input: {
@@ -188,8 +218,23 @@ function cleanupOwnedTemporary(path: string, expected: FileIdentity): void {
 }
 
 function fsyncRegularFile(path: string): void {
-  const descriptor = openSync(path, constants.O_RDONLY | requireNoFollow());
-  runAndClose(descriptor, "published file fsync", () => fsyncSync(descriptor));
+  // FlushFileBuffers requires GENERIC_WRITE; O_RDONLY is EPERM on Windows.
+  const flags = (process.platform === "win32" ? constants.O_RDWR : constants.O_RDONLY) |
+    requireNoFollow();
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, flags);
+  } catch (cause) {
+    if (isIgnorableWindowsFsync(cause)) return;
+    throw cause;
+  }
+  runAndClose(descriptor, "published file fsync", () => {
+    try {
+      fsyncSync(descriptor);
+    } catch (cause) {
+      if (!isIgnorableWindowsFsync(cause)) throw cause;
+    }
+  });
 }
 
 function writeAll(descriptor: number, bytes: Uint8Array): void {
@@ -234,10 +279,7 @@ function sameIdentity(stat: BigIntStats, identity: FileIdentity): boolean {
 }
 
 function requireNoFollow(): number {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("O_NOFOLLOW is required for durable exclusive publication");
-  }
-  return constants.O_NOFOLLOW;
+  return NO_FOLLOW_OPEN_FLAG;
 }
 
 function isAlreadyExists(cause: unknown): cause is NodeJS.ErrnoException {

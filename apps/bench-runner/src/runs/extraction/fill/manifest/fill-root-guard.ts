@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
 import { acquireKernelWriteLease, type KernelWriteLease } from "./kernel-write-lease.js";
 import {
+  boundDirectoryAnchor,
+  isBoundDirectoryAnchor,
   openExistingCacheRoot,
   openOrCreateCacheRoot,
   type DirectoryIdentity
@@ -28,7 +30,7 @@ export interface ExtractionCacheWriteLease {
   readonly cacheRoot: string;
   /** A unique writer generation; reservations from older generations are recoverable. */
   readonly generation: string;
-  /** Path through the retained directory descriptor; it remains bound if the name is renamed. */
+  /** Bound root path for child operations. Linux stays on the directory fd if the name is renamed. */
   readonly stableRootPath: string;
   readonly rootIdentity: DirectoryIdentity;
   assertOwned(): void;
@@ -37,7 +39,7 @@ export interface ExtractionCacheWriteLease {
 }
 
 export function isStableLeasePath(path: string): boolean {
-  return /^\/proc\/self\/fd\/\d+(?:\/|$)/u.test(path);
+  return isBoundDirectoryAnchor(path);
 }
 
 export interface ExtractionCacheWriteLeaseSet {
@@ -53,7 +55,7 @@ export function acquireExtractionCacheWriteLease(
   const boundRoot = openOrCreateCacheRoot(cacheRoot);
   const absoluteRoot = boundRoot.path;
   const rootFd = boundRoot.descriptor;
-  const stableRootPath = `/proc/self/fd/${rootFd}`;
+  const stableRootPath = boundDirectoryAnchor(rootFd, absoluteRoot);
   const stableLockPath = join(stableRootPath, EXTRACTION_FILL_LOCK_DIR);
   const rootIdentity = boundRoot.identity;
   let kernelLease: KernelWriteLease | undefined;

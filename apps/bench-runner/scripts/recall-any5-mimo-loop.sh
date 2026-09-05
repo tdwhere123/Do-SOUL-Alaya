@@ -4,10 +4,27 @@
 # the only supported way to replay, fill query factors, or run diagnostic-loop.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+abs_pwd() { (cd "$1" && { pwd -W 2>/dev/null || pwd; }); }
+native_temp_file() {
+  local created dir
+  created="$(mktemp)"
+  dir="$(cd "$(dirname "$created")" && { pwd -W 2>/dev/null || pwd; })"
+  printf '%s/%s\n' "${dir//\\//}" "$(basename "$created")"
+}
+SCRIPT_DIR="$(abs_pwd "$(dirname "${BASH_SOURCE[0]}")")"
+WT="$(abs_pwd "$SCRIPT_DIR/../../..")"
 BIN="$WT/apps/bench-runner/bin/alaya-bench-runner.mjs"
 DEFAULT_ENV="$WT/.do-it/bench-env/mimo-v2.5-opencode-go.env"
+NODE_BIN="${BENCH_NODE_BIN:-node}"
+# Tests may wrap node with an intercept script. Do not short-circuit the
+# diagnostic-loop invocation itself; the intercept records argv.
+run_node() {
+  if [[ -n "${BENCH_NODE_INTERCEPT:-}" ]]; then
+    "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
+  else
+    "$NODE_BIN" "$@"
+  fi
+}
 SMALL_WINDOW_CEILING=3
 
 usage() {
@@ -118,6 +135,7 @@ set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 set +a
+NODE_BIN="${BENCH_NODE_BIN:-node}"
 
 if [[ "${ALAYA_BENCH_RECALL_PACKET_TRACE:-0}" == "1" ]]; then
   die "ALAYA_BENCH_RECALL_PACKET_TRACE=1 is forbidden for the pinned recall-only operator"
@@ -130,27 +148,26 @@ MANIFEST="$CACHE_ROOT/manifest.json"
 
 load_identity() {
   [[ -f "$MANIFEST" ]] || die "cache manifest missing: $MANIFEST"
-  python3 - "$MANIFEST" <<'PY'
-import json, sys
-manifest = json.loads(open(sys.argv[1], encoding="utf-8").read())
-required = (
-    "dataset_revision", "extraction_model", "request_profile",
-    "system_prompt_sha256", "provider_url"
-)
-missing = [key for key in required if not manifest.get(key)]
-if missing:
-    raise SystemExit(f"manifest missing {missing}")
-print(manifest["dataset_revision"])
-print(manifest["extraction_model"])
-print(manifest["request_profile"])
-print(manifest["system_prompt_sha256"])
-print(manifest["provider_url"])
-PY
+  ALAYA_BENCH_CACHE_MANIFEST="$MANIFEST" "$NODE_BIN" --input-type=commonjs -e "$(cat <<'JS'
+const fs = require("fs");
+const manifest = JSON.parse(fs.readFileSync(process.env.ALAYA_BENCH_CACHE_MANIFEST, "utf8"));
+const required = [
+  "dataset_revision", "extraction_model", "request_profile",
+  "system_prompt_sha256", "provider_url"
+];
+const missing = required.filter((key) => !manifest[key]);
+if (missing.length > 0) {
+  process.stderr.write("manifest missing " + JSON.stringify(missing) + "\n");
+  process.exit(1);
+}
+for (const key of required) console.log(manifest[key]);
+JS
+)"
 }
 
 build_canonical_request_manifest() {
   local output="$1" dataset="$2" prompt="$3" provider="$4" model="$5" profile="$6"
-  rtk node "$SCRIPT_DIR/prove-cache-only-replay.mjs" \
+  run_node "$SCRIPT_DIR/prove-cache-only-replay.mjs" \
     "$output" \
     "$dataset" "$prompt" "$CACHE_ROOT" \
     "$LIMIT" "$OFFSET" "$provider" "$model" "$profile"
@@ -163,19 +180,19 @@ run_replay() {
   } < <(load_identity)
   echo "replay identity model=$model profile=$profile limit=$LIMIT offset=$OFFSET"
   local request_file receipt_file rc=0
-  request_file="$(mktemp)"
-  receipt_file="$(mktemp)"
+  request_file="$(native_temp_file)"
+  receipt_file="$(native_temp_file)"
   TEMP_REQUEST_FILE="$request_file"
   TEMP_RECEIPT_FILE="$receipt_file"
   clear_provider_credentials
   build_canonical_request_manifest \
     "$request_file" "$dataset" "$prompt" "$provider" "$model" "$profile" || rc=$?
   if [[ $rc -eq 0 ]]; then
-    rtk node "$BIN" provider-preflight --mode replay \
+    run_node "$BIN" provider-preflight --mode replay \
       --request-manifest "$request_file" > "$receipt_file" || rc=$?
   fi
   if [[ $rc -eq 0 ]]; then
-    rtk node "$BIN" provider-preflight --mode validate-replay-receipt \
+    run_node "$BIN" provider-preflight --mode validate-replay-receipt \
       --receipt "$receipt_file" --request-manifest "$request_file" || rc=$?
   fi
   if [[ $rc -eq 0 ]]; then
@@ -190,7 +207,7 @@ run_replay() {
 
 reject_completed_recall_checkpoints() {
   local work="$1"
-  rtk node "$BIN" provider-preflight \
+  run_node "$BIN" provider-preflight \
     --mode validate-recall-checkpoints --work-root "$work"
 }
 
@@ -210,7 +227,7 @@ print(f"wrote {len(rows)} questions -> {dest}")
 PY
   export ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=1
   cd "$WT"
-  rtk node "$SCRIPT_DIR/fill-query-factors.mjs" "$questions" "$out"
+  run_node "$SCRIPT_DIR/fill-query-factors.mjs" "$questions" "$out"
 }
 
 prepare_snapshot_args() {
@@ -246,10 +263,13 @@ invoke_cache_only_diagnostic() {
     extra+=(--embedding-cache-overlay "$EMBEDDING_CACHE_OVERLAY")
   fi
   echo "diagnostic cache-only credentialless limit=$LIMIT work=$work"
-  rtk node "$BIN" diagnostic-loop \
+  # bash 3.2 `set -u` drops the entire command when extra[@] is empty.
+  run_node "$BIN" diagnostic-loop \
     --work-root "$work" --request-manifest "$request_file" \
-    --mode cache-only "${SNAPSHOT_ARGS[@]}" \
-    --history-root "$work/history" "${extra[@]}"
+    --mode cache-only \
+    "${SNAPSHOT_ARGS[@]}" \
+    --history-root "$work/history" \
+    ${extra[@]+"${extra[@]}"}
 }
 
 run_diagnostic() {
@@ -266,7 +286,7 @@ run_diagnostic() {
   prepare_snapshot_args "$work"
   reject_completed_recall_checkpoints "$work"
   local request_file rc=0
-  request_file="$(mktemp)"
+  request_file="$(native_temp_file)"
   TEMP_REQUEST_FILE="$request_file"
   build_canonical_request_manifest \
     "$request_file" "$dataset" "$prompt" "$provider" "$model" "$profile" || rc=$?

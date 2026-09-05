@@ -52,8 +52,8 @@ describe("PathRelationProposalService", () => {
     const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.workspace_id).toBe("workspace-1");
     const anchorIds = [
-      written.anchors.source_anchor.object_id,
-      written.anchors.target_anchor.object_id
+      objectAnchorId(written.anchors.source_anchor),
+      objectAnchorId(written.anchors.target_anchor)
     ].sort();
     expect(anchorIds).toEqual(["mem-A", "mem-B"]);
     expect(() => PathRelationSchema.parse(written)).not.toThrow();
@@ -280,3 +280,12 @@ describe("PathRelationProposalService", () => {
     expect(written.effect_vector.recall_bias).toBeGreaterThan(0);
   });
 });
+
+function objectAnchorId(
+  anchor: PathRelation["anchors"]["source_anchor"]
+): string {
+  if (anchor.kind === "object" || anchor.kind === "object_facet") {
+    return anchor.object_id;
+  }
+  throw new Error(`expected object anchor, got ${anchor.kind}`);
+}

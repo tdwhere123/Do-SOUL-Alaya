@@ -246,7 +246,7 @@ describe("fine-assessment selection boundary fidelity", () => {
           ...diagnostic,
           score_factors: {
             ...diagnostic.score_factors,
-            relevance: diagnostic.score_factors.relevance + 0.01
+            relevance: diagnostic.score_factors!.relevance + 0.01
           }
         },
         ...visibleResult.diagnostics.slice(1)

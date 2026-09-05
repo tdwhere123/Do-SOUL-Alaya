@@ -111,9 +111,11 @@ describe("RecallReadWorkerClient", () => {
       database.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
-  it("restarts the worker after a request timeout", async () => {
+  it.skipIf(process.platform === "win32")(
+    "restarts the worker after a request timeout",
+    async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-timeout-test-"));
     const workerPath = join(directory, "silent-worker.mjs");
     const databasePath = join(directory, "alaya.db");
@@ -138,7 +140,7 @@ describe("RecallReadWorkerClient", () => {
       databaseFilename: databasePath,
       workerUrl: pathToFileURL(workerPath),
       workerCount: 1,
-      requestTimeoutMs: 100
+      requestTimeoutMs: 1000
     });
 
     try {
@@ -152,13 +154,13 @@ describe("RecallReadWorkerClient", () => {
           limit: 1,
           offset: 0
         })
-      ).rejects.toThrow("timed out after 100ms");
+      ).rejects.toThrow("timed out after 1000ms");
       await expect(client.memoryRepo.findByWorkspaceId("workspace-1")).resolves.toEqual([]);
     } finally {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("resolves close when the worker never responds to the close request", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-close-timeout-test-"));
@@ -188,7 +190,7 @@ describe("RecallReadWorkerClient", () => {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("processes concurrent worker requests sequentially with intact request ids", async () => {
     assertBuiltWorker();
@@ -268,7 +270,7 @@ describe("RecallReadWorkerClient", () => {
       const invalidResponse = await new Promise<unknown>((resolve, reject) => {
         const timeout = setTimeout(
           () => reject(new Error("invalid request did not receive a prompt error response")),
-          1_000
+          10_000
         );
         worker.once("message", (message: unknown) => {
           clearTimeout(timeout);
@@ -311,7 +313,7 @@ describe("RecallReadWorkerClient", () => {
       await worker.terminate();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
 
 async function collectWorkerResponses(

@@ -46,6 +46,7 @@
       "entry": [
         "src/index.ts",
         "src/embedding-recall/local-onnx-embedding-client.ts",
+        "src/embedding-recall/local-onnx-process/child.ts",
         "src/__tests__/**/*.test.ts"
       ],
       "project": ["src/**/*.ts", "tsconfig.json"]
@@ -59,13 +60,18 @@
       "project": ["src/**/*.ts", "tsconfig.json"]
     },
     "apps/core-daemon": {
-      "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
+      "entry": [
+        "src/index.ts",
+        "src/runtime/recall/recall-read-worker.ts",
+        "src/__tests__/**/*.test.ts"
+      ],
       "project": ["src/**/*.ts", "tsconfig.json"],
       "ignoreDependencies": ["pino-pretty"]
     },
     "apps/bench-runner": {
       "entry": [
         "src/cli/index.ts",
+        "src/runs/lifecycle/recall-eval/recall-eval-process/child.ts",
         "src/__tests__/**/*.test.ts",
         "bin/*.mjs",
         "scripts/*.mjs",

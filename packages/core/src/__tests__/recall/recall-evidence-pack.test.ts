@@ -74,7 +74,7 @@ describe("recall evidence pack", () => {
       coverage: 1
     });
     expect(packs.find((pack) => pack.fixture_id === "chinese_preference_constraint")?.selected_object_ids).toContain(
-      "zh-rtk-constraint"
+      "zh-pnpm-constraint"
     );
   });
 });
@@ -223,7 +223,7 @@ function createRecallFixtures(): readonly RecallFixture[] {
         createMemoryEntry({
           object_id: "unrelated-procedure",
           dimension: MemoryDimension.PROCEDURE,
-          content: "Use rtk pnpm build for build verification."
+          content: "Use pnpm build for build verification."
         })
       ],
       expected_object_ids: []
@@ -260,16 +260,16 @@ function createRecallFixtures(): readonly RecallFixture[] {
     },
     {
       fixture_id: "chinese_preference_constraint",
-      query: "中文 rtk 约束",
+      query: "中文 pnpm 约束",
       memories: [
         createMemoryEntry({
-          object_id: "zh-rtk-constraint",
+          object_id: "zh-pnpm-constraint",
           dimension: MemoryDimension.CONSTRAINT,
-          content: "中文偏好/约束：必须用 rtk 包裹仓库命令。",
-          domain_tags: ["中文", "rtk"]
+          content: "中文偏好/约束：必须用 pnpm 运行仓库命令。",
+          domain_tags: ["中文", "pnpm"]
         })
       ],
-      expected_object_ids: ["zh-rtk-constraint"]
+      expected_object_ids: ["zh-pnpm-constraint"]
     }
   ];
 }

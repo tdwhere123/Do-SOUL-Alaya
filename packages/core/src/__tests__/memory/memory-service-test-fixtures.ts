@@ -107,7 +107,9 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
     revision: 0,
     ...event
   }));
-  const queryByEntitySpy = vi.fn(async () => [] as readonly EventLogEntry[]);
+  const queryByEntitySpy = vi.fn(
+    async (_entityType: string, _entityId: string): Promise<readonly EventLogEntry[]> => []
+  );
   const evidenceFindByIdSpy = vi.fn(async () => ({ object_id: "evidence", workspace_id: "workspace-1" }));
   const notifySpy = vi.fn(async () => {});
   const applyUpdateFields = (
@@ -138,11 +140,11 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
         preference_polarity: fields.preference_polarity ?? null
       })
     );
-  const repoUpdateSpy = vi.fn((_objectId: string, fields: MemoryEntryRepoUpdateFields) =>
+  const repoUpdateSpy = vi.fn(async (_objectId: string, fields: MemoryEntryRepoUpdateFields) =>
     applyUpdateFields(fields)
   );
   const repoUpdateScopedSpy = vi.fn(
-    (_objectId: string, workspaceId: string, fields: MemoryEntryRepoUpdateFields) =>
+    async (_objectId: string, workspaceId: string, fields: MemoryEntryRepoUpdateFields) =>
       applyUpdateFields(fields, workspaceId)
   );
   const repoUpdateWithinTransactionSpy = vi.fn(
@@ -157,8 +159,13 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
       callbacks.beforeUpdate?.();
       const updated =
         workspaceId === undefined
-          ? repoUpdateSpy(objectId, fields)
-          : repoUpdateScopedSpy(objectId, workspaceId, fields);
+          ? applyUpdateFields(fields)
+          : applyUpdateFields(fields, workspaceId);
+      if (workspaceId === undefined) {
+        void repoUpdateSpy(objectId, fields);
+      } else {
+        void repoUpdateScopedSpy(objectId, workspaceId, fields);
+      }
       callbacks.afterUpdate?.();
       return updated;
     }

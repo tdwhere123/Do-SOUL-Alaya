@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { NO_FOLLOW_OPEN_FLAG } from "../../fs/open-flags.js";
 import {
   isContainedPath,
   resolveOpenedDescriptorPath
@@ -14,14 +15,15 @@ export async function readContainedWorktreeFile(
   checkoutRoot: string,
   rawPath: string
 ): Promise<{ readonly bytes: Buffer; readonly mode: number }> {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("untracked provenance no-follow validation is unavailable");
-  }
   const relativePath = assertSafeUntrackedRelativePath(rawPath, checkoutRoot);
   await assertNoSymlinkPathComponents(checkoutRoot, relativePath);
   const handle = await openWorktreeFile(checkoutRoot, relativePath);
   try {
-    await assertOpenedPathInsideWorktree(handle, checkoutRoot);
+    await assertOpenedPathInsideWorktree(
+      handle,
+      checkoutRoot,
+      resolve(checkoutRoot, relativePath)
+    );
     const stat = await handle.stat();
     if (!stat.isFile()) {
       throw new Error("untracked provenance path must be a regular non-symlink file");
@@ -42,7 +44,7 @@ async function openWorktreeFile(
   try {
     return await open(
       resolve(checkoutRoot, relativePath),
-      constants.O_RDONLY | constants.O_NOFOLLOW
+      constants.O_RDONLY | NO_FOLLOW_OPEN_FLAG
     );
   } catch (cause) {
     throw new Error("untracked provenance path must be a regular non-symlink file", {
@@ -53,12 +55,13 @@ async function openWorktreeFile(
 
 async function assertOpenedPathInsideWorktree(
   handle: FileHandle,
-  checkoutRoot: string
+  checkoutRoot: string,
+  fallbackPath: string
 ): Promise<void> {
   const realRoot = await realpath(checkoutRoot);
   let openedPath: string;
   try {
-    openedPath = await resolveOpenedDescriptorPath(handle);
+    openedPath = await resolveOpenedDescriptorPath(handle, fallbackPath);
   } catch {
     // Descriptor realpath is unavailable; component lstat already ran.
     // Concurrent parent replacement after that walk is out of threat model.

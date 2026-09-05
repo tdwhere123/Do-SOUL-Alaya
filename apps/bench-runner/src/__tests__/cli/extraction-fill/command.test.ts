@@ -216,7 +216,7 @@ it("parses lazy_field flags and hands overlay receipt fields back from fill", as
 
   const exitCode = await runExtractionFillCommand(
     parsed,
-    { runExtractionFill: run, signalSource },
+    { runExtractionFill: run as never, signalSource },
     peeled.lazy
   );
 

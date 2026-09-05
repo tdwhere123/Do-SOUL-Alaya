@@ -80,7 +80,7 @@ describe("clone-or-copy snapshot restore", () => {
     await expect(readFile(target)).rejects.toThrow();
   });
 
-  it("atomicCopy restores a private working copy without following a symlink source", async () => {
+  it.skipIf(process.platform === "win32")("atomicCopy restores a private working copy without following a symlink source", async () => {
     const input = await fixture();
     const working = join(input.root, "restore", "alaya.db");
     atomicCopy(input.source, working);

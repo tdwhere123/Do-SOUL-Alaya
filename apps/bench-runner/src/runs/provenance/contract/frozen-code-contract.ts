@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
+import { NO_FOLLOW_OPEN_FLAG } from "../../fs/open-flags.js";
 import {
   measureGitState,
   type MeasuredGitState
@@ -115,9 +116,6 @@ export async function readFrozenSnapshotReuseBinding(
 }
 
 async function readContractFile(path: string): Promise<Buffer> {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("frozen gate contract no-follow validation is unavailable");
-  }
   const handle = await openContractHandle(path);
   try {
     const stat = await handle.stat();
@@ -132,7 +130,7 @@ async function readContractFile(path: string): Promise<Buffer> {
 
 async function openContractHandle(path: string): Promise<FileHandle> {
   try {
-    return await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    return await open(path, constants.O_RDONLY | NO_FOLLOW_OPEN_FLAG);
   } catch (cause) {
     throw new Error(
       "frozen gate contract path must be a regular non-symlink file",

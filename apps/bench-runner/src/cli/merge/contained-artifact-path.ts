@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { open, realpath, type FileHandle } from "node:fs/promises";
 import path from "node:path";
+import { NO_FOLLOW_OPEN_FLAG } from "../../runs/fs/open-flags.js";
 import {
   isContainedPath,
   resolveOpenedDescriptorPath
@@ -30,9 +31,6 @@ export async function openContainedArtifact(
   if (!isContainedPath(root, candidate)) {
     throw new Error(`merge refused: artifact escapes declared root '${reference}'`);
   }
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("merge refused: descriptor-bound artifact validation is unavailable");
-  }
   let realRoot: string;
   try {
     realRoot = await realpath(root);
@@ -42,7 +40,7 @@ export async function openContainedArtifact(
   }
   let handle: FileHandle;
   try {
-    handle = await open(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(candidate, constants.O_RDONLY | NO_FOLLOW_OPEN_FLAG);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
@@ -50,7 +48,7 @@ export async function openContainedArtifact(
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw new Error(`merge refused: artifact is not a file '${reference}'`);
-    const openedPath = await resolveOpenedArtifactPath(handle);
+    const openedPath = await resolveOpenedArtifactPath(handle, candidate);
     if (!isContainedPath(realRoot, openedPath)) {
       throw new Error(`merge refused: artifact resolves outside declared root '${reference}'`);
     }
@@ -93,9 +91,12 @@ function containedFile(
   };
 }
 
-async function resolveOpenedArtifactPath(handle: FileHandle): Promise<string> {
+async function resolveOpenedArtifactPath(
+  handle: FileHandle,
+  fallbackPath: string
+): Promise<string> {
   try {
-    return await resolveOpenedDescriptorPath(handle);
+    return await resolveOpenedDescriptorPath(handle, fallbackPath);
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     throw new Error(`merge refused: cannot validate opened artifact descriptor: ${message}`);

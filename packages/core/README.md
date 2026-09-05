@@ -24,7 +24,7 @@ runtime collaborators. It must not depend on daemon applications.
 ## Commands
 
 ```bash
-rtk pnpm --filter @do-soul/alaya-core run typecheck
-rtk pnpm --filter @do-soul/alaya-core run test
-rtk pnpm --filter @do-soul/alaya-core run build
+pnpm --filter @do-soul/alaya-core run typecheck
+pnpm --filter @do-soul/alaya-core run test
+pnpm --filter @do-soul/alaya-core run build
 ```

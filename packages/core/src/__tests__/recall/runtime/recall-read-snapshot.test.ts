@@ -66,9 +66,9 @@ describe("withRecallReadSnapshot", () => {
         events.push("isolate");
         return await work();
       },
-      beginDeferred: () => events.push("begin"),
-      commit: () => events.push("commit"),
-      rollback: () => events.push("rollback")
+      beginDeferred: () => { events.push("begin"); },
+      commit: () => { events.push("commit"); },
+      rollback: () => { events.push("rollback"); }
     };
 
     await expect(withRecallReadSnapshot(snapshot, async () => {
@@ -81,8 +81,8 @@ describe("withRecallReadSnapshot", () => {
 
 function createRecordingSnapshot(events: string[]): RecallReadSnapshotPort {
   return {
-    beginDeferred: () => events.push("begin"),
-    commit: () => events.push("commit"),
-    rollback: () => events.push("rollback")
+    beginDeferred: () => { events.push("begin"); },
+    commit: () => { events.push("commit"); },
+    rollback: () => { events.push("rollback"); }
   };
 }

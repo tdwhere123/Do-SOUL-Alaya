@@ -22,6 +22,6 @@ independent of daemon runtime wiring and storage implementation details.
 ## Commands
 
 ```bash
-rtk pnpm --filter @do-soul/alaya-eval run typecheck
-rtk pnpm --filter @do-soul/alaya-eval run build
+pnpm --filter @do-soul/alaya-eval run typecheck
+pnpm --filter @do-soul/alaya-eval run build
 ```

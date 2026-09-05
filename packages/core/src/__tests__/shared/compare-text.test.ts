@@ -22,8 +22,8 @@ describe("compareText", () => {
 
 describe("sameTextSet", () => {
   it("treats composed and decomposed members as distinct and order independent", () => {
-    const composed = "\u00e9";
-    const decomposed = "e\u0301";
+    const composed = String.fromCharCode(0x00e9);
+    const decomposed = `e${String.fromCharCode(0x0301)}`;
     expect(composed === decomposed).toBe(false);
     expect(composed.localeCompare(decomposed)).toBe(0);
 

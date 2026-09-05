@@ -11,7 +11,7 @@ import {
 describe("lexical lane universe diagnostics schema", () => {
   it("parses older artifacts without a universe witness and captured per-lane witnesses", () => {
     expect(LexicalBoundProofDiagnosticsSchema.parse(capturedTruncatedProof())
-      .receipt.lanes[0]).not.toHaveProperty("evaluated_universe");
+      .receipt?.lanes[0]).not.toHaveProperty("evaluated_universe");
     const proof = capturedProofWithUniverse();
     expect(LexicalBoundProofDiagnosticsSchema.parse(proof)).toEqual(proof);
     expect(proof.evaluated_universe).toEqual({
@@ -116,7 +116,7 @@ describe("lexical lane universe diagnostics schema", () => {
     expect(LexicalBoundProofDiagnosticsSchema.parse(sealLexicalProof({
       ...body,
       receipt: {
-        ...body.receipt,
+        ...body.receipt!,
         lanes: [
           {
             ...porter,
@@ -133,7 +133,7 @@ describe("lexical lane universe diagnostics schema", () => {
           }
         ]
       }
-    })).receipt.lanes[0]?.evaluated_universe?.scope.tier).toBeNull();
+    })).receipt?.lanes[0]?.evaluated_universe?.scope?.tier).toBeNull();
   });
 
   it("rejects content-fts universes that stamp tier when objectIds are applied", () => {

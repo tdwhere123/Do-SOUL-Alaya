@@ -101,7 +101,6 @@ async function emitOpenProgress(id, open) {
     return;
   }
   for (let completed = 1; completed <= count; completed += 1) {
-    await new Promise((resolve) => setTimeout(resolve, everyMs));
     process.send({
       id,
       progress: true,
@@ -110,6 +109,9 @@ async function emitOpenProgress(id, open) {
       completed,
       total: count
     });
+    if (completed < count) {
+      await new Promise((resolve) => setTimeout(resolve, everyMs));
+    }
   }
 }
 

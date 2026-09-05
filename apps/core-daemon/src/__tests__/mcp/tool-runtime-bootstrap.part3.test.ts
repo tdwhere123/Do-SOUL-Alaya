@@ -340,6 +340,9 @@ describe("daemon tool runtime bootstrap", () => {
       });
       expect(process.exitCode).toBe(1);
       process.exitCode = originalExitCode;
+      for (const runtime of activeRuntimes.splice(0)) {
+        await runtime.shutdown().catch(() => undefined);
+      }
 
       await bootStartedDaemonRuntime();
       expect(process.listeners("unhandledRejection")).toHaveLength(

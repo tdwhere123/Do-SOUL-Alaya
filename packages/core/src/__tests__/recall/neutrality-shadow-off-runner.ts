@@ -202,7 +202,7 @@ function linkDir(source: string, dest: string): void {
 
 function runShadowOffVitest(root: string, outFile: string): void {
   execFileSync(
-    "pnpm",
+    process.platform === "win32" ? "pnpm.cmd" : "pnpm",
     [
       "exec",
       "vitest",
@@ -224,6 +224,15 @@ function runShadowOffVitest(root: string, outFile: string): void {
 }
 
 function assertShadowOffShaResolves(from: string): void {
+  try {
+    assertResolvedShadowOffSha(from);
+  } catch {
+    git(["fetch", "--depth", "1", "origin", SHADOW_OFF_SHA], from);
+    assertResolvedShadowOffSha(from);
+  }
+}
+
+function assertResolvedShadowOffSha(from: string): void {
   const resolved = git(
     ["rev-parse", "--verify", `${SHADOW_OFF_SHA}^{commit}`],
     from

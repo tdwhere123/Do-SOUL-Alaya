@@ -172,8 +172,10 @@ describe("missing pack data rejects the matching action", () => {
       completeness_scope: null
     }));
     expect(pack.allowed_claims).not.toContain("scoped_all_observable");
-    expect(validateConsumerAction(pack, "claim_scoped_all_observable").reason)
-      .toMatch(/allow|scope/u);
+    const verdict = validateConsumerAction(pack, "claim_scoped_all_observable");
+    expect(verdict.status).toBe("rejected");
+    if (verdict.status !== "rejected") throw new Error("expected rejected");
+    expect(verdict.reason).toMatch(/allow|scope/u);
   });
 
   it("licenses scoped extremum only when certified with that answer kind", () => {
@@ -220,7 +222,12 @@ describe("missing pack data rejects the matching action", () => {
   });
 
   it("rejects conflict mode without conflict records", () => {
-    expect(() => buildDeliveryPack(uncertifiedInput("conflict"))).toThrow(/conflict records/u);
+    expect(() => buildDeliveryPack(certifiedInput({
+      mode: "conflict",
+      answer_kind: "none",
+      holes: [SEAL_UNBOUND_HOLE],
+      conflicts: []
+    }))).toThrow(/conflict records/u);
   });
 
   it("rejects parse when holes are omitted", () => {

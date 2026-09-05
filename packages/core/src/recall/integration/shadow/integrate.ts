@@ -395,10 +395,7 @@ function assembleCaptured(
     previewRuntimeCapture(walked),
     source
   );
-  const issuedPsi = source?.psi_v2_authority ?? issueDiagnosticPsiV2(
-    input,
-    walkInput.candidates
-  );
+  const issuedPsi = source?.psi_v2_authority;
   return freezeShadow({
     kind: "captured" as const,
     algorithm_id: SHADOW_ALGORITHM_ID,
@@ -490,24 +487,6 @@ function previewRuntimeCapture(
   walked: ShadowCapturedWalk
 ): QueryProofPreviewRuntimeCapture {
   return Object.freeze({ walk: walked });
-}
-
-function issueDiagnosticPsiV2(
-  input: ShadowIntegrateInput,
-  walkCandidates: readonly ShadowCaptureWalkCandidate[]
-) {
-  if (input.query_proof_authority === undefined) return undefined;
-  return issueObservationBackedPsiV2({
-    live_authority: input.query_proof_authority,
-    walk_candidates: walkCandidates,
-    snapshot_digest: input.snapshot_digest,
-    query_id: input.query_id,
-    lexical_interval_by_key: input.lexicalIntervalEnvelopesByKey,
-    lexical_measurement_authority: input.lexical_measurement_authority,
-    support: input.supportMaterialization,
-    support_measurement_authority: input.support_measurement_authority,
-    producer_outcomes: input.psi_v2_producer_outcomes
-  });
 }
 
 function observePsiV2Shadow(

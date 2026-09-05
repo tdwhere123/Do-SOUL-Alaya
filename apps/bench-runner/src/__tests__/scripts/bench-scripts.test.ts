@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,16 +135,17 @@ describe("bench maintenance scripts", () => {
       repoRoot,
       "apps/bench-runner/scripts/run-daily-public-bench.sh"
     );
-    const fakeBin = await writeFakeNodeBin(2, markerPath);
+    const interceptPath = await writeFakeNodeBin(2, markerPath);
 
     const result = await execFileRejects("bash", [scriptPath], {
       ...cliScriptEnv(),
-      PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+      BENCH_NODE_BIN: process.execPath.replaceAll("\\", "/"),
+      BENCH_NODE_INTERCEPT: interceptPath.replaceAll("\\", "/"),
       BENCH_DAILY_EMBEDDINGS: "disabled",
       BENCH_DAILY_POLICY_SHAPES: "stress",
       BENCH_DAILY_LIMIT: "1",
-      BENCH_DAILY_HISTORY_ROOT: path.join(tmpDir, "history"),
-      BENCH_LOG_DIR: path.join(tmpDir, "logs")
+      BENCH_DAILY_HISTORY_ROOT: path.join(tmpDir, "history").replaceAll("\\", "/"),
+      BENCH_LOG_DIR: path.join(tmpDir, "logs").replaceAll("\\", "/")
     });
 
     expect(result.code).toBe(2);
@@ -157,16 +158,17 @@ describe("bench maintenance scripts", () => {
       repoRoot,
       "apps/bench-runner/scripts/run-daily-public-bench.sh"
     );
-    const fakeBin = await writeFakeNodeBin(1, markerPath);
+    const interceptPath = await writeFakeNodeBin(1, markerPath);
 
     const result = await execFileRejects("bash", [scriptPath], {
       ...cliScriptEnv(),
-      PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+      BENCH_NODE_BIN: process.execPath.replaceAll("\\", "/"),
+      BENCH_NODE_INTERCEPT: interceptPath.replaceAll("\\", "/"),
       BENCH_DAILY_EMBEDDINGS: "disabled",
       BENCH_DAILY_POLICY_SHAPES: "stress",
       BENCH_DAILY_LIMIT: "1",
-      BENCH_DAILY_HISTORY_ROOT: path.join(tmpDir, "history"),
-      BENCH_LOG_DIR: path.join(tmpDir, "logs")
+      BENCH_DAILY_HISTORY_ROOT: path.join(tmpDir, "history").replaceAll("\\", "/"),
+      BENCH_LOG_DIR: path.join(tmpDir, "logs").replaceAll("\\", "/")
     });
 
     expect(result.code).toBe(1);
@@ -180,31 +182,25 @@ async function writeFakeNodeBin(
 ): Promise<string> {
   const binDir = path.join(tmpDir, "fake-bin");
   await mkdir(binDir, { recursive: true });
-  const fakeNodePath = path.join(binDir, "node");
+  const interceptPath = path.join(binDir, "node-intercept.cjs");
   await writeFile(
-    fakeNodePath,
+    interceptPath,
     [
-      "#!/usr/bin/env bash",
-      "set -euo pipefail",
-      "case \"$1\" in",
-      "  apps/bench-runner/bin/alaya-bench-runner.mjs)",
-      `    exit ${benchExitCode}`,
-      "    ;;",
-      "  scripts/append-bench-degradation-backlog.mjs)",
-      `    printf 'called\\n' > ${JSON.stringify(appendMarkerPath)}`,
-      "    exit 0",
-      "    ;;",
-      "  *)",
-      "    echo \"unexpected node target: $1\" >&2",
-      "    exit 99",
-      "    ;;",
-      "esac",
+      "\"use strict\";",
+      "const { writeFileSync } = require(\"fs\");",
+      "const target = process.argv[2] ?? \"\";",
+      `if (target.includes("alaya-bench-runner.mjs")) process.exit(${benchExitCode});`,
+      "if (target.includes(\"append-bench-degradation-backlog.mjs\")) {",
+      `  writeFileSync(${JSON.stringify(appendMarkerPath)}, "called\\n");`,
+      "  process.exit(0);",
+      "}",
+      "process.stderr.write(`unexpected node target: ${target}\\n`);",
+      "process.exit(99);",
       ""
     ].join("\n"),
     "utf8"
   );
-  await chmod(fakeNodePath, 0o755);
-  return binDir;
+  return interceptPath;
 }
 
 function cliScriptEnv(): NodeJS.ProcessEnv {

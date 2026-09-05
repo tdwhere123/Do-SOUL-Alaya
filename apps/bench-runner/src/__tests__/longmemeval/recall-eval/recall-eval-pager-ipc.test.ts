@@ -114,10 +114,10 @@ describe("recall-eval pager IPC isolation", () => {
   });
 
   it("treats advancing child work as activity instead of an absolute timeout", async () => {
-    const session = openSession(200);
+    const session = openSession(400);
     await expect(session.open({
-      progressEveryMs: 100,
-      progressCount: 3
+      progressEveryMs: 120,
+      progressCount: 5
     })).resolves.toMatchObject({ ok: true });
   });
 

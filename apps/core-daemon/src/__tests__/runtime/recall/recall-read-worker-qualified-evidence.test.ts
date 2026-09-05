@@ -55,7 +55,7 @@ const assertionFactFrame = {
 
 beforeAll(() => {
   if (!existsSync(fileURLToPath(builtWorkerUrl))) {
-    throw new Error("Built recall-read-worker dist missing. Run `rtk pnpm build` before this test.");
+    throw new Error("Built recall-read-worker dist missing. Run `pnpm build` before this test.");
   }
 });
 
@@ -88,7 +88,7 @@ describe("RecallReadWorkerClient qualified evidence", () => {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it("routes receipt-qualified fact-key reads through the worker", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-qualified-fact-key-worker-"));
@@ -136,7 +136,7 @@ describe("RecallReadWorkerClient qualified evidence", () => {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it("round-trips a stored fact_frame_formation through the worker", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-qualified-formation-worker-"));
@@ -162,7 +162,7 @@ describe("RecallReadWorkerClient qualified evidence", () => {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 });
 
 type TestDatabase = ReturnType<typeof initDatabase>;

@@ -2,13 +2,21 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && { pwd -W 2>/dev/null || pwd; })"
 cd "$REPO_ROOT"
 
 LIMIT="${BENCH_DAILY_LIMIT:-100}"
 HISTORY_ROOT="${BENCH_DAILY_HISTORY_ROOT:-docs/bench-history}"
 THRESHOLD_PP="${BENCH_DAILY_DEGRADATION_THRESHOLD_PP:-5}"
 LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
+NODE_BIN="${BENCH_NODE_BIN:-node}"
+run_node() {
+  if [[ -n "${BENCH_NODE_INTERCEPT:-}" ]]; then
+    "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
+  else
+    "$NODE_BIN" "$@"
+  fi
+}
 mkdir -p "$LOG_DIR"
 
 declare -a EMBEDDINGS=("disabled" "env")
@@ -31,7 +39,7 @@ run_one() {
 
   echo "[$(date -u -Iseconds)] daily bench embedding=$embedding policy_shape=$policy_shape limit=$LIMIT" | tee "$log"
   set +e
-  node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval \
+  run_node apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval \
     --variant s \
     --limit "$LIMIT" \
     --embedding "$embedding" \
@@ -46,7 +54,7 @@ run_one() {
   fi
 
   if [[ "$bench_status" -eq 1 ]]; then
-    node scripts/append-bench-degradation-backlog.mjs \
+    run_node scripts/append-bench-degradation-backlog.mjs \
       --history-root "$HISTORY_ROOT" \
       --bench public \
       --threshold-pp "$THRESHOLD_PP" \

@@ -11,8 +11,26 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error The replay reader is a runtime JavaScript module.
 import { DiagnosticsJsonStreamReader, readDiagnosticsJsonStream } from "../../../../scripts/longmemeval-replay/diagnostics-json-stream-reader.mjs";
 
+function isCoverageEnabled(): boolean {
+  const envOn = (value: string | undefined): boolean =>
+    value !== undefined && value !== "" && value !== "0" && value !== "false";
+  if (
+    envOn(process.env.COVERAGE) ||
+    envOn(process.env.VITEST_COVERAGE) ||
+    envOn(process.env.NODE_V8_COVERAGE)
+  ) {
+    return true;
+  }
+  const worker = (
+    globalThis as {
+      __vitest_worker__?: { config?: { coverage?: { enabled?: boolean } } };
+    }
+  ).__vitest_worker__;
+  return worker?.config?.coverage?.enabled === true;
+}
+
 describe("streaming diagnostics JSON reader", () => {
-  it("parses gzip JSON whose logical size exceeds the V8 string limit", async () => {
+  it.skipIf(isCoverageEnabled())("parses gzip JSON whose logical size exceeds the V8 string limit", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "alaya-replay-stream-"));
     const artifactPath = path.join(root, "diagnostics.json.gz");
     const payload = "a".repeat(1024 * 1024);
@@ -30,7 +48,7 @@ describe("streaming diagnostics JSON reader", () => {
     expect(logicalBytes).toBeGreaterThan(bufferConstants.MAX_STRING_LENGTH);
     expect(parsed).toBe(count);
     expect(diagnostics).toMatchObject({ schema_version: 1, questions: [] });
-  }, 120_000);
+  }, 180_000);
 
   it("preserves escaped unicode and nested question values across chunks", () => {
     const reader = new DiagnosticsJsonStreamReader();

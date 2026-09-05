@@ -172,7 +172,7 @@ describe("H02 — sealed slice private working copy", () => {
     expect(readFileSync(slicePathA)).toEqual(bytesBefore);
 
     await closeRecallEvalPagerChild();
-  }, 15_000);
+  }, 60_000);
 
   it("load-open ATTACH/DELETE sequence is never called on the pager question path", async () => {
     const dataDirRoot = join(root, "data-no-load-open");

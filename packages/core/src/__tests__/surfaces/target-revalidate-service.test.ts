@@ -138,13 +138,21 @@ describe("TargetRevalidateService", () => {
   });
 });
 
+type CurrencyCheckMock = TestMock<(
+  args: {
+    readonly targetEntityType: string;
+    readonly targetEntityId: string;
+    readonly sinceTimestamp: string;
+  }
+) => Promise<{ status: "stale" | "fresh" | "missing"; stale_since?: string }>>;
+
 function createHarness(options: {
   readonly refs?: readonly StrongRef[];
-  readonly checkCurrency?: TestMock;
+  readonly checkCurrency?: CurrencyCheckMock;
 } = {}) {
   const refs = options.refs ?? [createStrongRefFixture()];
   const findByTargets = vi.fn(async () => refs);
-  const checkCurrency =
+  const checkCurrency: CurrencyCheckMock =
     options.checkCurrency ??
     vi.fn(async () => ({
       status: "fresh" as const

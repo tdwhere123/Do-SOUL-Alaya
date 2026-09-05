@@ -199,7 +199,7 @@ describe("capture proof diagnostics schema", () => {
     const localeOrder = [...keys].sort((left, right) => left.localeCompare(right, "zh"));
     if (localeOrder.join("\0") !== codeUnitOrder.join("\0")) {
       expect(LexicalBoundProofDiagnosticsSchema.safeParse(
-        withLaneKeys(proof, keys, localeOrder)
+        withLaneKeys(proof as never, keys, localeOrder)
       ).success).toBe(false);
     }
   });
@@ -211,7 +211,7 @@ describe("capture proof diagnostics schema", () => {
       ...baseDiagnostics(),
       lexical_bound_proofs,
       candidate_proposition_provenance
-    }, {});
+    } as never, {});
 
     expect(parsed.lexical_bound_proofs).toEqual(lexical_bound_proofs);
     expect(parsed.candidate_proposition_provenance).toEqual(candidate_proposition_provenance);

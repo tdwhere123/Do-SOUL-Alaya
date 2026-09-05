@@ -30,16 +30,16 @@ defaults to port `5174` (see CLI launcher for collision logic).
 
 ```bash
 # from repo root
-rtk pnpm install
-rtk pnpm --dir apps/inspector/web dev      # SPA dev server (Vite)
-rtk pnpm --dir apps/core-daemon dev        # daemon, required by the inspector
+pnpm install
+pnpm --dir apps/inspector/web dev      # SPA dev server (Vite)
+pnpm --dir apps/core-daemon dev        # daemon, required by the inspector
 alaya inspect                              # end-to-end launch via CLI
 ```
 
 ## Build
 
 ```bash
-rtk pnpm --filter @do-soul/alaya-inspector build
+pnpm --filter @do-soul/alaya-inspector build
 ```
 
 This runs `tsc -b` for the backend and then `pnpm --dir web build` for
@@ -49,6 +49,6 @@ included in the published `files` field.
 ## Tests
 
 ```bash
-rtk pnpm exec vitest run --project @do-soul/alaya-inspector       # backend
-rtk pnpm exec vitest run --project @do-soul/alaya-inspector-web   # frontend
+pnpm exec vitest run --project @do-soul/alaya-inspector       # backend
+pnpm exec vitest run --project @do-soul/alaya-inspector-web   # frontend
 ```

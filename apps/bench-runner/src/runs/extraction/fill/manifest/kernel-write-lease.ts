@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 
 const STARTING = 0;
@@ -38,16 +41,27 @@ export interface KernelWriteLeaseTarget {
 }
 
 export function acquireKernelWriteLease(target: KernelWriteLeaseTarget): KernelWriteLease {
+  return acquireLease(target, false);
+}
+
+function acquireLease(
+  target: KernelWriteLeaseTarget,
+  retriedStaleSocket: boolean
+): KernelWriteLease {
   const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  const address = abstractSocketAddress(target);
   const worker = new Worker(WORKER_SOURCE, {
     eval: true,
-    workerData: { address: abstractSocketAddress(target), state: state.buffer }
+    workerData: { address, state: state.buffer }
   });
   Atomics.wait(state, 0, STARTING, HANDSHAKE_TIMEOUT_MS);
   const acquisition = Atomics.load(state, 0);
   if (acquisition !== ACTIVE) {
     void worker.terminate();
     if (acquisition === OCCUPIED) {
+      if (!retriedStaleSocket && reclaimStaleFileSocket(address)) {
+        return acquireLease(target, true);
+      }
       throw new Error(
         `extraction cache root ${target.displayPath} already has an active writer lock`
       );
@@ -70,6 +84,9 @@ export function acquireKernelWriteLease(target: KernelWriteLeaseTarget): KernelW
       Atomics.wait(state, 0, ACTIVE, HANDSHAKE_TIMEOUT_MS);
       const releaseState = Atomics.load(state, 0);
       void worker.terminate();
+      if (process.platform !== "win32" && !address.startsWith("\0")) {
+        try { unlinkSync(address); } catch { /* leftover socket after close */ }
+      }
       if (releaseState !== RELEASED) {
         throw new Error("extraction cache kernel writer lease did not release cleanly");
       }
@@ -90,9 +107,53 @@ export function isKernelWriteLeaseActive(target: KernelWriteLeaseTarget): boolea
   }
 }
 
+const STALE_LISTENER = 2;
+const PROBE_SOURCE = `
+const net = require("node:net");
+const { workerData } = require("node:worker_threads");
+const state = new Int32Array(workerData.state);
+const publish = (value) => {
+  Atomics.store(state, 0, value);
+  Atomics.notify(state, 0);
+};
+const socket = net.createConnection({ path: workerData.address });
+socket.setTimeout(250);
+socket.once("connect", () => { publish(1); socket.end(); });
+socket.once("timeout", () => { publish(1); socket.destroy(); });
+socket.once("error", (error) => {
+  publish(error && (error.code === "ECONNREFUSED" || error.code === "ENOENT") ? 2 : 3);
+});
+`;
+
+function reclaimStaleFileSocket(address: string): boolean {
+  if (address.startsWith("\0") || process.platform === "win32") return false;
+  const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  const worker = new Worker(PROBE_SOURCE, {
+    eval: true,
+    workerData: { address, state: state.buffer }
+  });
+  Atomics.wait(state, 0, STARTING, HANDSHAKE_TIMEOUT_MS);
+  void worker.terminate();
+  if (Atomics.load(state, 0) !== STALE_LISTENER) return false;
+  try {
+    unlinkSync(address);
+  } catch {
+    /* retry listen even if the leftover name is already gone */
+  }
+  return true;
+}
+
 function abstractSocketAddress(target: KernelWriteLeaseTarget): string {
   const digest = createHash("sha256")
     .update(`${target.device}:${target.inode}`, "utf8")
     .digest("hex");
-  return `\0alaya-extraction-cache-write-${digest}`;
+  if (process.platform === "linux") {
+    return `\0alaya-extraction-cache-write-${digest}`;
+  }
+  if (process.platform === "win32") {
+    const sep = String.fromCharCode(92);
+    return [sep + sep + "." + sep + "pipe", `alaya-w-${digest.slice(0, 16)}`].join(sep);
+  }
+  const dir = process.platform === "darwin" ? "/tmp" : tmpdir();
+  return join(dir, `alaya-w-${digest.slice(0, 16)}.sock`);
 }

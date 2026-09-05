@@ -10,7 +10,7 @@ const builtWorkerUrl = new URL("../../../../dist/runtime/recall/recall-read-work
 
 function assertBuiltWorker(): void {
   if (!existsSync(fileURLToPath(builtWorkerUrl))) {
-    throw new Error("Built recall-read-worker dist missing. Run `rtk pnpm build` before this test.");
+    throw new Error("Built recall-read-worker dist missing. Run `pnpm build` before this test.");
   }
 }
 
@@ -110,7 +110,7 @@ describe("RecallReadWorkerClient performance seams", () => {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("sends tier-scoped recall reads without an object-id payload", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-tier-payload-"));

@@ -66,7 +66,7 @@ function fakeAppendManyWithMutation(
       event_id: `evt_${idx}`,
       created_at: FIXED_NOW
     }));
-    return mutate(persisted);
+    return mutate(persisted as EventLogEntry[]);
   });
 }
 

@@ -162,7 +162,8 @@ describe("semantic artifact store", () => {
     expect(task.semanticKey).toMatch(/^[a-f0-9]{64}$/u);
   });
 
-  it("keeps writes on the held root inode across a real-path name swap", () => {
+  it.skipIf(process.platform !== "linux")(
+    "keeps writes on the held root inode across a real-path name swap", () => {
     const original = `${root}-held`;
     withRootBoundDirectory({ root, label: "swap falsifier" }, (stableRoot) => {
       renameSync(root, original);

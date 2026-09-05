@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StorageTier, type MemoryEntry, type RecallPolicy } from "@do-soul/alaya-protocol";
+import { type MemoryEntry, type RecallPolicy } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { runCoarseFilter } from "../../../recall/coarse-filter/coarse-filter.js";
+import type {
+  RecallServiceDependencies,
+  RecallServiceWarnPort
+} from "../../../recall/runtime/recall-service-types.js";
 import {
   queryHasObjectProbeSignal,
   scoreObjectProbeMatch
@@ -76,6 +80,16 @@ function defaultCoarseFilter(): Readonly<RecallPolicy>["coarse_filter"] {
   ).coarse_filter;
 }
 
+function asWarn(spy: ReturnType<typeof vi.fn>): RecallServiceWarnPort {
+  return spy as RecallServiceWarnPort;
+}
+
+function asTierWindow(
+  spy: ReturnType<typeof vi.fn>
+): NonNullable<RecallServiceDependencies["memoryRepo"]["findRecallTierWindow"]> {
+  return spy as NonNullable<RecallServiceDependencies["memoryRepo"]["findRecallTierWindow"]>;
+}
+
 function catalogFindByIds(entries: readonly Readonly<MemoryEntry>[]) {
   const catalog = new Map(entries.map((entry) => [entry.object_id, entry]));
   return vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
@@ -113,12 +127,12 @@ describe("field-scoped coarse hydrate", () => {
         memoryRepo: {
           ...dependencies.memoryRepo,
           findByWorkspaceId,
-          findRecallTierWindow,
+          findRecallTierWindow: asTierWindow(findRecallTierWindow),
           findByIds,
           findRecallActivationTopK
         }
       },
-      warn: warnSpy
+      warn: asWarn(warnSpy)
     }, "workspace-1", activationOnlyConfig(defaultCoarseFilter()), null);
 
     expect(findByWorkspaceId).not.toHaveBeenCalled();
@@ -167,7 +181,7 @@ describe("field-scoped coarse hydrate", () => {
         memoryRepo: {
           ...dependencies.memoryRepo,
           findByWorkspaceId,
-          findRecallTierWindow,
+          findRecallTierWindow: asTierWindow(findRecallTierWindow),
           findByIds: catalogFindByIds([activation, hotOnly]),
           findRecallActivationTopK: vi.fn(async () => [activation]),
           searchByKeyword: vi.fn(async () => []),
@@ -175,7 +189,7 @@ describe("field-scoped coarse hydrate", () => {
           searchByKeywordWithinObjectIds: vi.fn(async () => [])
         }
       }),
-      warn: warnSpy
+      warn: asWarn(warnSpy)
     }, "workspace-1", semanticConfig(defaultCoarseFilter()), "uniquejsscantoken inside surface-target during run-target", {
       queryProbes
     });
@@ -210,7 +224,7 @@ describe("field-scoped coarse hydrate", () => {
     const { dependencies, warnSpy } = createDependencies([activation, hotOnly]);
     const result = await runCoarseFilter({
       dependencies,
-      warn: warnSpy
+      warn: asWarn(warnSpy)
     }, "workspace-1", semanticConfig(defaultCoarseFilter()), "uniquejsscantoken inside surface-target during run-target", {
       queryProbes
     });
@@ -249,7 +263,7 @@ describe("field-scoped coarse hydrate", () => {
         memoryRepo: {
           ...dependencies.memoryRepo,
           findByWorkspaceId,
-          findRecallTierWindow,
+          findRecallTierWindow: asTierWindow(findRecallTierWindow),
           findByIds,
           findRecallActivationTopK: vi.fn(async () => [activation]),
           searchByKeyword: vi.fn(async () => []),
@@ -257,7 +271,7 @@ describe("field-scoped coarse hydrate", () => {
           searchByKeywordWithinObjectIds: vi.fn(async () => [])
         }
       }),
-      warn: warnSpy
+      warn: asWarn(warnSpy)
     }, "workspace-1", semanticConfig(defaultCoarseFilter()), "point at a known memory", {
       queryProbes
     });
@@ -297,12 +311,12 @@ describe("field-scoped coarse hydrate", () => {
         memoryRepo: {
           ...dependencies.memoryRepo,
           findByWorkspaceId,
-          findRecallTierWindow,
+          findRecallTierWindow: asTierWindow(findRecallTierWindow),
           findByIds: catalogFindByIds([activation, hotNoise]),
           findRecallActivationTopK
         }
       },
-      warn: warnSpy
+      warn: asWarn(warnSpy)
     }, "workspace-1", activationOnlyConfig(defaultCoarseFilter()), null);
 
     expect(findRecallActivationTopK).toHaveBeenCalled();
@@ -347,12 +361,12 @@ describe("field-scoped coarse hydrate", () => {
         memoryRepo: {
           ...dependencies.memoryRepo,
           findByWorkspaceId,
-          findRecallTierWindow,
+          findRecallTierWindow: asTierWindow(findRecallTierWindow),
           findByIds: catalogFindByIds([tombstoned, dormant]),
           findRecallActivationTopK: vi.fn(async () => [tombstoned, dormant])
         }
       },
-      warn: warnSpy
+      warn: asWarn(warnSpy)
     }, "workspace-1", activationOnlyConfig(defaultCoarseFilter()), null);
 
     expect(findByWorkspaceId).not.toHaveBeenCalled();
@@ -407,7 +421,7 @@ describe("field-scoped coarse hydrate real sqlite", () => {
           searchByKeywordField: memoryEntryRepo.searchByKeywordField.bind(memoryEntryRepo)
         }
       },
-      warn: warnSpy
+      warn: asWarn(warnSpy)
     }, REAL_SQLITE_TEST_WORKSPACE_ID, semanticConfig(defaultCoarseFilter()), "uniqueftshydratetoken");
 
     expect(findByWorkspaceId).not.toHaveBeenCalled();

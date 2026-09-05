@@ -58,12 +58,14 @@ describe("formation eligibility live producer to consumer path", () => {
     const [signal] = await provider.compile(ASSERTION, {
       workspace_id: "workspace-1", run_id: "run-1", surface_id: null,
       turn_messages: [{ role: "user", content: ASSERTION,
-        message_id: "message-provider", created_at: "2026-08-26T00:00:00.000Z" }]
+        message_id: "message-provider" }]
     });
     if (signal === undefined) throw new Error("provider fixture must compile one signal");
     const runtime = await openEligibilityRuntime();
     const received = await runtime.signalService.receiveSignal(signal);
-    const capture = await readQualifiedCapture(runtime.evidenceRepo, createdEvidenceId(received));
+    const evidenceId = createdEvidenceId(received);
+    if (evidenceId === undefined) throw new Error("provider fixture must create evidence");
+    const capture = await readQualifiedCapture(runtime.evidenceRepo, evidenceId);
     expect(capture).toMatchObject({ status: "formed",
       producer_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID });
   });

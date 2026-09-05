@@ -63,10 +63,10 @@ describe("RecallService end-to-end with path-plane graph_support", () => {
     const { database, memoryEntryRepo, pathRelationRepo } = await createRealStorage();
 
     await memoryEntryRepo.create(
-      createMemoryEntry({ object_id: MEM_TARGET, content: "Use rtk pnpm for repo commands.", domain_tags: ["repo"] })
+      createMemoryEntry({ object_id: MEM_TARGET, content: "Use pnpm for repo commands.", domain_tags: ["repo"] })
     );
     await memoryEntryRepo.create(
-      createMemoryEntry({ object_id: MEM_ISOLATED, content: "Use rtk pnpm for repo commands.", domain_tags: ["repo"] })
+      createMemoryEntry({ object_id: MEM_ISOLATED, content: "Use pnpm for repo commands.", domain_tags: ["repo"] })
     );
 
     // Two inbound recall-eligible recalls paths into MEM_TARGET: weighted sum
@@ -85,7 +85,7 @@ describe("RecallService end-to-end with path-plane graph_support", () => {
     });
 
     const result = await service.recall({
-      taskSurface: createTaskSurface("rtk pnpm commands"),
+      taskSurface: createTaskSurface("pnpm commands"),
       workspaceId: "workspace-1",
       runId: "run-1",
       strategy: "build"

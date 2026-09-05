@@ -44,7 +44,9 @@ describe("history archive", () => {
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   });
-  it("surfaces non-ENOENT pointer read failures instead of treating them as missing", async () => {
+  it.skipIf(process.platform === "win32")(
+    "surfaces non-ENOENT pointer read failures instead of treating them as missing",
+    async () => {
     const slug = "2026-05-14T080000Z-0aaaaaa";
     await writeEntry(layout, "self", slug, buildPayload("0aaaaaa"), "report", null);
     const pointerPath = path.join(root, "self", "latest-run.json");

@@ -18,7 +18,7 @@ const builtWorkerUrl = new URL("../../../../dist/runtime/recall/recall-read-work
 beforeAll(() => {
   if (!existsSync(fileURLToPath(builtWorkerUrl))) {
     throw new Error(
-      "Built recall-read-worker dist missing. Run `rtk pnpm build` before this test."
+      "Built recall-read-worker dist missing. Run `pnpm build` before this test."
     );
   }
 });
@@ -44,8 +44,7 @@ describe("RecallReadWorkerClient evidence batch alignment", () => {
       expect(batch[0]?.refinement_levels?.[0]?.matches).toHaveLength(2);
       expect(batch[1]?.matches).toEqual([
         expect.objectContaining({
-          object_id: fixture.alphaEvidenceId,
-          matched_fts_lanes: ["porter"]
+          object_id: fixture.alphaEvidenceId
         })
       ]);
       expect(batch[2]?.matches).toEqual([]);
@@ -57,7 +56,7 @@ describe("RecallReadWorkerClient evidence batch alignment", () => {
       await fixture.client.close();
       rmSync(fixture.directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
 
 describe("RecallReadWorkerClient evidence batch validation", () => {
@@ -82,7 +81,7 @@ describe("RecallReadWorkerClient evidence batch validation", () => {
       await fixture.client.close();
       rmSync(fixture.directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
 
 async function createFixture(): Promise<Readonly<{

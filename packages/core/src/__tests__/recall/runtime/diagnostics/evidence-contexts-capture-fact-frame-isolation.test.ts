@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
-  certifyQueryOsfSemanticCompleteness
+  certifyQueryOsfSemanticCompleteness,
+  type QueryFactFrameOsfObligation
 } from "@do-soul/alaya-protocol";
 import { RuleBasedQueryFactFrameExtractor } from
   "../../../../shared/query-fact-frame-extraction-rules.js";
@@ -55,8 +56,8 @@ describe("capture-only fact-frame load isolation", () => {
       source_text: BOOKSHELF_ASSERTION,
       proposal: semanticProposal(BOOKSHELF_ASSERTION, binaryUseEvidenceSemanticGraph())
     });
-    const aliceFrame = materializeBookshelfFactFrame(alice.source_hash);
-    const bobFrame = materializeBookshelfFactFrame(bob.source_hash);
+    const aliceFrame = materializeBookshelfFactFrame(alice.source_hash ?? "");
+    const bobFrame = materializeBookshelfFactFrame(bob.source_hash ?? "");
     const candidate = createMemoryEntry({
       object_id: "memory-shared",
       content: evidenceText,
@@ -97,7 +98,10 @@ describe("capture-only fact-frame load isolation", () => {
       openSemanticFactorExtractionPort: {
         operator_id: "test_open_semantic_factor_v1",
         extract: async () => null,
-        extractCertifiedQuery: async (sourceText: string, obligation) => {
+        extractCertifiedQuery: async (
+          sourceText: string,
+          obligation: Readonly<QueryFactFrameOsfObligation>
+        ) => {
           const graph = binaryUseQuerySemanticGraph();
           const receipt = certifyQueryOsfSemanticCompleteness({
             query_text: sourceText,
@@ -115,32 +119,30 @@ describe("capture-only fact-frame load isolation", () => {
         }
       }
     };
-    const off = await collectWith({
+    const isolationPorts = {
       candidates: [candidate],
       graphSupportPort: emptyGraphSupportPort(),
       queryText: "What did I use?",
       captureFactFrameObjectIds: [bob.object_id],
       evidenceSearchPort: port,
       ...queryPorts
-    });
+    } as unknown as Parameters<typeof collectWith>[0];
+    const off = await collectWith(isolationPorts);
     const on = await collectWith({
-      candidates: [candidate],
-      graphSupportPort: emptyGraphSupportPort(),
-      queryText: "What did I use?",
-      captureAnswerFeatures: true,
-      captureFactFrameObjectIds: [bob.object_id],
-      evidenceSearchPort: port,
-      ...queryPorts
-    });
-    expect(findByIds.mock.calls.map((call) => call[1])).toEqual([
+      ...isolationPorts,
+      captureAnswerFeatures: true
+    } as unknown as Parameters<typeof collectWith>[0]);
+    expect((findByIds.mock.calls as unknown as readonly [unknown, readonly string[]][])
+      .map((call) => call[1])).toEqual([
       [alice.object_id],
       [alice.object_id]
     ]);
-    expect(findFactKeys.mock.calls.map((call) => call[1])).toEqual([
+    expect((findFactKeys.mock.calls as unknown as readonly [unknown, readonly string[]][])
+      .map((call) => call[1])).toEqual([
       [alice.object_id],
       [alice.object_id]
     ]);
-    expect(findQualified.mock.calls.map((call) => call[1])).toEqual([
+    expect(findQualified.mock.calls.map((call) => call[1] as unknown)).toEqual([
       [{ object_id: alice.object_id }],
       [{ object_id: alice.object_id }],
       [{ object_id: bob.object_id }]
@@ -160,7 +162,7 @@ describe("capture-only fact-frame load isolation", () => {
 
   it("does not load extras when answer-feature capture is off", async () => {
     const evidence = createVerifiedAssertionEvidence({ objectId: "evidence-capsule-only" });
-    const formed = materializeBookshelfFactFrame(evidence.source_hash);
+    const formed = materializeBookshelfFactFrame(evidence.source_hash ?? "");
     const findQualified = vi.fn(async () => [{
       capsule: evidence,
       verified_user_projection: false,
@@ -229,8 +231,6 @@ function rankingAndOsfSlice(data: Awaited<ReturnType<typeof collectWith>>) {
     pathExpansionScores: data.pathExpansionScores,
     pathSuppressionScores: data.pathSuppressionScores,
     semanticFactorFormationsByEvidenceId: data.semanticFactorFormationsByEvidenceId,
-    semanticFactorFormationUnavailableEvidenceIds:
-      data.semanticFactorFormationUnavailableEvidenceIds,
     openSemanticFactorCompatibilityTrace: data.openSemanticFactorCompatibilityTrace,
     openSemanticFactorComposition: data.openSemanticFactorComposition,
     openSemanticFactorActivation: data.openSemanticFactorActivation,
@@ -244,6 +244,7 @@ function serializeSelectionInput(data: Awaited<ReturnType<typeof collectWith>>) 
   const candidates = [createRankedCandidate("candidate-1", 1, 0.9)];
   let boundary: FineAssessmentSelectionBoundaryCase | undefined;
   selectCandidates({
+    workspace_id: "workspace-1",
     orderedCandidates: candidates,
     config: createConfig(),
     supplementaryData: data,

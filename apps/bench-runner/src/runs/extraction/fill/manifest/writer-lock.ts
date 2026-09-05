@@ -9,7 +9,8 @@ import {
   writeFileSync
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
 import { readBoundedCanonicalUtf8Artifact } from
   "../../cache-audit/bounded-artifact-reader.js";
@@ -18,8 +19,13 @@ import {
   type KernelWriteLease
 } from "./kernel-write-lease.js";
 import {
+  DIRECTORY_OPEN_FLAG,
+  NO_FOLLOW_OPEN_FLAG
+} from "../../../fs/open-flags.js";
+import {
   assertBoundDirectoryIdentity,
   assertDirectoryIdentity,
+  boundDirectoryAnchor,
   openExistingCacheRoot,
   readDirectoryIdentity,
   unlinkBoundChildDirectory,
@@ -63,7 +69,7 @@ export function inspectExtractionCacheWriterLock(
     return "present";
   }
   const stableLockPath = join(
-    `/proc/self/fd/${boundRoot.descriptor}`, EXTRACTION_FILL_LOCK_DIR
+    boundDirectoryAnchor(boundRoot.descriptor, boundRoot.path), EXTRACTION_FILL_LOCK_DIR
   );
   let result: "absent" | "present" = "present";
   try {
@@ -121,11 +127,13 @@ function readHeldWriterLockOwner(
   lockIdentity: DirectoryIdentity
 ): CurrentWriterLockOwner {
   const lockFd = openSync(
-    stableLockPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+    stableLockPath, constants.O_RDONLY | DIRECTORY_OPEN_FLAG | NO_FOLLOW_OPEN_FLAG
   );
   try {
     assertBoundDirectoryIdentity(lockFd, lockIdentity, "extraction cache writer lock");
-    return parseCurrentWriterLockOwner(readWriterLockOwner(`/proc/self/fd/${lockFd}`));
+    return parseCurrentWriterLockOwner(
+      readWriterLockOwner(boundDirectoryAnchor(lockFd, stableLockPath))
+    );
   } finally {
     closeSync(lockFd);
   }
@@ -146,6 +154,7 @@ export function removeOwnedWriterLockDirectory(binding: WriterLockHold): void {
   assertHeldWriterLockOwner(binding);
   unlinkBoundWriterLockDirectory({
     rootFd: binding.rootFd,
+    parentPath: capturedLockParentPath(binding.stableLockPath),
     lockIdentity: binding.lockIdentity,
     tombstoneToken: binding.token,
     expectedToken: binding.token
@@ -187,7 +196,7 @@ export function prepareWriterLockDirectory(
       currentStartIdentity = readProcessStartIdentity(currentOwner.pid);
     } catch (cause) {
       if (hasErrorCode(cause, "ENOENT")) {
-        removeStaleWriterLockDirectory(rootFd, lockIdentity, serializedOwner);
+        removeStaleWriterLockDirectory(rootFd, lockIdentity, serializedOwner, stableLockPath);
         return;
       }
       throw new ExtractionCacheInvariantError(
@@ -198,7 +207,7 @@ export function prepareWriterLockDirectory(
     if (currentStartIdentity === currentOwner.process_start_identity) {
       throw new ExtractionCacheInvariantError("extraction cache already has an active writer");
     }
-    removeStaleWriterLockDirectory(rootFd, lockIdentity, serializedOwner);
+    removeStaleWriterLockDirectory(rootFd, lockIdentity, serializedOwner, stableLockPath);
     return;
   }
   const legacyPid = readLegacyWriterPid(owner);
@@ -212,7 +221,7 @@ export function prepareWriterLockDirectory(
     readProcessStartIdentity(legacyPid);
   } catch (cause) {
     if (hasErrorCode(cause, "ENOENT")) {
-      removeStaleWriterLockDirectory(rootFd, lockIdentity, serializedOwner);
+      removeStaleWriterLockDirectory(rootFd, lockIdentity, serializedOwner, stableLockPath);
       return;
     }
     throw new ExtractionCacheInvariantError(
@@ -258,6 +267,7 @@ export function publishWriterLock(input: {
         : [() => {
             unlinkBoundWriterLockDirectory({
               rootFd: input.rootFd,
+              parentPath: capturedLockParentPath(input.stableLockPath),
               lockIdentity: createdLockIdentity,
               tombstoneToken: input.token,
               ...(ownerPublished
@@ -293,13 +303,20 @@ function assertPublishedWriterLockOwner(input: {
   }
 }
 
+function capturedLockParentPath(stableLockPath: string): string | undefined {
+  if (process.platform === "linux") return undefined;
+  return dirname(stableLockPath);
+}
+
 function removeStaleWriterLockDirectory(
   rootFd: number,
   lockIdentity: DirectoryIdentity,
-  expectedSerializedOwner: string
+  expectedSerializedOwner: string,
+  stableLockPath: string
 ): void {
   unlinkBoundWriterLockDirectory({
     rootFd,
+    parentPath: capturedLockParentPath(stableLockPath),
     lockIdentity,
     tombstoneToken: randomUUID(),
     expectedOwnerText: expectedSerializedOwner
@@ -308,6 +325,7 @@ function removeStaleWriterLockDirectory(
 
 function unlinkBoundWriterLockDirectory(
   binding: Pick<WriterLockHold, "rootFd" | "lockIdentity"> & {
+    readonly parentPath?: string;
     readonly tombstoneToken: string;
     readonly expectedToken?: string;
     readonly expectedOwnerText?: string;
@@ -315,6 +333,7 @@ function unlinkBoundWriterLockDirectory(
 ): void {
   unlinkBoundChildDirectory({
     parentFd: binding.rootFd,
+    parentPath: binding.parentPath,
     childName: EXTRACTION_FILL_LOCK_DIR,
     identity: binding.lockIdentity,
     tombstoneName: `.extraction-fill.lock.dead.${binding.tombstoneToken}`,
@@ -376,6 +395,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function readProcessStartIdentity(pid: number): string {
+  if (pid === process.pid) {
+    selfProcessStartIdentity ??= readPlatformProcessStartIdentity(pid);
+    return selfProcessStartIdentity;
+  }
+  return readPlatformProcessStartIdentity(pid);
+}
+
+let selfProcessStartIdentity: string | undefined;
+
+function readPlatformProcessStartIdentity(pid: number): string {
+  if (process.platform === "linux") return readLinuxProcessStartIdentity(pid);
+  if (process.platform === "win32") return readWindowsProcessStartIdentity(pid);
+  return readPosixProcessStartIdentity(pid);
+}
+
+function readLinuxProcessStartIdentity(pid: number): string {
   const bytes = readFileSync(`/proc/${pid}/stat`);
   if (bytes.byteLength > MAX_EXTRACTION_FILL_OWNER_BYTES) {
     throw new ExtractionCacheInvariantError("writer process identity exceeds its size limit");
@@ -387,6 +422,81 @@ export function readProcessStartIdentity(pid: number): string {
     throw new ExtractionCacheInvariantError("writer process start identity is unavailable");
   }
   return startTime;
+}
+
+function readWindowsProcessStartIdentity(pid: number): string {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw Object.assign(
+      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
+      { code: "ENOENT" }
+    );
+  }
+  let output: string;
+  try {
+    output = execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`
+    ], {
+      encoding: "utf8",
+      timeout: 20_000,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"]
+    }).replace(/^\uFEFF/u, "").trim();
+  } catch (cause) {
+    throw Object.assign(
+      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
+      { code: "ENOENT", cause }
+    );
+  }
+  if (!/^\d+$/u.test(output) || output.length > MAX_EXTRACTION_FILL_OWNER_BYTES) {
+    throw Object.assign(
+      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
+      { code: "ENOENT" }
+    );
+  }
+  return output;
+}
+
+function readPosixProcessStartIdentity(pid: number): string {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw Object.assign(
+      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
+      { code: "ENOENT" }
+    );
+  }
+  let output: string;
+  try {
+    output = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
+      encoding: "utf8",
+      timeout: 2_000,
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+  } catch (cause) {
+    if (typeof cause === "object" && cause !== null && "status" in cause &&
+        (cause as { status?: number }).status === 1) {
+      throw Object.assign(
+        new ExtractionCacheInvariantError("writer process start identity is unavailable"),
+        { code: "ENOENT", cause }
+      );
+    }
+    throw new ExtractionCacheInvariantError(
+      `writer process start identity is unavailable: ${String(cause)}`,
+      { cause }
+    );
+  }
+  if (output.length === 0 || output.length > MAX_EXTRACTION_FILL_OWNER_BYTES) {
+    throw Object.assign(
+      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
+      { code: "ENOENT" }
+    );
+  }
+  const parsed = Date.parse(output);
+  if (!Number.isFinite(parsed)) {
+    throw new ExtractionCacheInvariantError("writer process start identity is unavailable");
+  }
+  return String(parsed);
 }
 
 function hasErrorCode(cause: unknown, code: string): boolean {

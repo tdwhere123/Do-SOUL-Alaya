@@ -15,7 +15,7 @@ import {
   worktreeStateAlgorithmFor,
   type WorktreeStateAlgorithm
 } from "./worktree-state-frame.js";
-import { resolve } from "node:path";
+import { samePhysicalLocation } from "../../fs/opened-contained-path.js";
 
 export interface MeasuredGitState {
   readonly commitSha: string;
@@ -36,7 +36,7 @@ export async function measureGitState(
       "status", "--porcelain=v1", "-z", "--untracked-files=normal"
     ])
   ]);
-  if (resolve(rootResult.toString("utf8").trim()) !== resolve(checkoutRoot)) {
+  if (!samePhysicalLocation(rootResult.toString("utf8").trim(), checkoutRoot)) {
     throw new Error("provenance checkout root is not the current git worktree root");
   }
   const commitSha = head.toString("utf8").trim();

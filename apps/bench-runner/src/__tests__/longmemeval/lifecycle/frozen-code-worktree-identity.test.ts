@@ -206,7 +206,7 @@ describe("frozen code worktree identity", () => {
     expect(renamed.worktreeStateSha256).not.toBe(present.worktreeStateSha256);
   });
 
-  it("fails closed when an untracked provenance path is a symlink", async () => {
+  it.skipIf(process.platform === "win32")("fails closed when an untracked provenance path is a symlink", async () => {
     const fixture = await identityRepository();
     await symlink("/tmp/outside-alaya-provenance", join(fixture.root, "escape.ts"));
     await expect(measureGitState(fixture.root, { allowDirty: true }))
@@ -312,7 +312,7 @@ describe("frozen code worktree identity", () => {
     expect(withDriver.worktreeStateSha256).toBe(await independentDirtyWorktreeHash(fixture.root));
   });
 
-  it("binds executable mode separately from content", async () => {
+  it.skipIf(process.platform === "win32")("binds executable mode separately from content", async () => {
     const fixture = await identityRepository();
     const planted = join(fixture.root, "tool.sh");
     await writeFile(planted, "#!/bin/sh\n");

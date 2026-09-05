@@ -221,7 +221,7 @@ describe("direct evidence transient embedding assessment", () => {
       candidate.candidate_key === `global:memory_entry:${evidence[0]!.object_id}`
     );
     expect(evidenceDiagnostic?.deep_head_trace?.embedding_signal).toBeCloseTo(0.91);
-    expect(globalDiagnostic?.score_factors.embedding_similarity).toBeUndefined();
+    expect(globalDiagnostic?.score_factors!.embedding_similarity).toBeUndefined();
   });
 
   it("reuses a snapshot-warmed query cache instead of embedding the query a second time", async () => {

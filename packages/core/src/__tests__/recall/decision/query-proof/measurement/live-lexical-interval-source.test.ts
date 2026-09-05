@@ -94,7 +94,7 @@ describe("live normal lexical interval source", () => {
 
     expect(trace.psi_v2_shadow).toMatchObject({
       observation_status: "observed",
-      undominated_share: 0.5,
+      undominated_share: null,
       producer_outcomes: [
         { producer_id: "lex.interval", status: "observed" },
         { producer_id: "support", status: "not_observed" }

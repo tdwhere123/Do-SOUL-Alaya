@@ -26,7 +26,7 @@ afterEach(async () => {
 });
 
 describe("query cache no-follow bind", () => {
-  it("binds one regular-file buffer and refuses symlink or post-bind replace", async () => {
+  it.skipIf(process.platform === "win32")("binds one regular-file buffer and refuses symlink or post-bind replace", async () => {
     const root = await tempRoot();
     const path = join(root, "query-cache.json");
     await writeQuerySemanticFactorCache(path, cacheFor(SOURCE));

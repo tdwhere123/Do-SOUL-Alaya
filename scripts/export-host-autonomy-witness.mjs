@@ -47,7 +47,7 @@ function resolveBetterSqlite3() {
   } catch {
     /* fall through to the error below */
   }
-  fail("Cannot resolve better-sqlite3. Run `rtk pnpm install` from the repo root first.");
+  fail("Cannot resolve better-sqlite3. Run `pnpm install` from the repo root first.");
 }
 
 function resolveDbPath(arg) {

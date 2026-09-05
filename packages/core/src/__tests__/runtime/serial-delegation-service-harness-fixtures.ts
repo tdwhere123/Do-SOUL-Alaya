@@ -4,7 +4,15 @@ import { CoreError } from "../../shared/errors.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
 import { WorkerRunLifecycleService } from "../../runtime/worker-run-lifecycle-service.js";
 import { type IntegrationGateDecision } from "../../governance/security/integration-gate.js";
-import { SerialDelegationService } from "../../runtime/serial-delegation-service.js";
+import {
+  SerialDelegationService,
+  type ConstraintProxyPort,
+  type DirtyStatePanicServicePort,
+  type IntegrationGatePort,
+  type StrongRefServicePort,
+  type WorkerSafetyGatePort,
+  type ZeroDaySecurityLayerPort
+} from "../../runtime/serial-delegation-service.js";
 import { ScriptedRuntimeAdapter } from "../../test-doubles/__tests__/scripted-runtime-adapter.js";
 import type { TestMock } from "../shared/mock-types.js";
 
@@ -64,10 +72,20 @@ export function createHarness(
   options: HarnessOptions = {}
 ): {
   readonly repo: {
-    readonly getById: TestMock;
-    readonly deleteIfState: TestMock;
-    readonly updateState: TestMock;
-    readonly insertIfNoActiveForPrincipal: TestMock;
+    readonly getById: TestMock<(workerRunId: string) => Promise<DelegatedWorkerRun | null>>;
+    readonly deleteIfState: TestMock<
+      (workerRunId: string, expectedState: DelegatedWorkerRun["state"]) => Promise<void>
+    >;
+    readonly updateState: TestMock<(
+      workerRunId: string,
+      expectedState: DelegatedWorkerRun["state"],
+      nextState: DelegatedWorkerRun["state"],
+      updatedAt: string
+    ) => DelegatedWorkerRun>;
+    readonly insertIfNoActiveForPrincipal: TestMock<(
+      principalRunId: string,
+      run: DelegatedWorkerRun
+    ) => Promise<DelegatedWorkerRun>>;
   };
   readonly publishedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>;
   readonly runtimeAdapter: AgentRuntimePort;
@@ -75,16 +93,9 @@ export function createHarness(
     readonly normalize: RuntimeNormalizeMock;
     readonly clearSessionState: ClearSessionStateMock;
   };
-  readonly constraintProxy: {
-    readonly assertNoViolation: TestMock;
-  };
-  readonly dirtyStatePanicService: {
-    readonly triggerPanic: TestMock;
-  };
-  readonly strongRefService: {
-    readonly protect: TestMock;
-    readonly releaseBySource: TestMock;
-  };
+  readonly constraintProxy: ConstraintProxyPort;
+  readonly dirtyStatePanicService: DirtyStatePanicServicePort;
+  readonly strongRefService: StrongRefServicePort;
   readonly workerRunLifecycle: WorkerRunLifecycleService;
   readonly service: SerialDelegationService;
   getById(workerRunId: string): Readonly<DelegatedWorkerRun> | null;
@@ -215,27 +226,27 @@ export function createHarness(
     clearSessionState: vi.fn()
   };
   const workerSafetyGate =
-    options.workerSafetyGate ??
+    (options.workerSafetyGate ??
     ({
       enforceBeforeDispatch: vi.fn(async () => createWorkerBaselineLock())
-    } as const);
+    } as const)) as WorkerSafetyGatePort;
   const zeroDaySecurityLayer =
-    options.zeroDaySecurityLayer ??
+    (options.zeroDaySecurityLayer ??
     ({
       augmentLock: vi.fn(async (lock: WorkerBaselineLock) => lock)
-    } as const);
+    } as const)) as ZeroDaySecurityLayerPort;
   const integrationGate =
-    options.integrationGate ??
+    (options.integrationGate ??
     ({
       check: vi.fn(async () => createIntegrationDecision("ignore_drift"))
-    } as const);
+    } as const)) as IntegrationGatePort;
   const constraintProxy =
-    options.constraintProxy ??
+    (options.constraintProxy ??
     ({
       assertNoViolation: vi.fn(async () => undefined)
-    } as const);
+    } as const)) as ConstraintProxyPort;
   const dirtyStatePanicService =
-    options.dirtyStatePanicService ??
+    (options.dirtyStatePanicService ??
     ({
       triggerPanic: vi.fn(
         async (params: {
@@ -251,13 +262,13 @@ export function createHarness(
             params.summary
           )
       )
-    } as const);
+    } as const)) as DirtyStatePanicServicePort;
   const strongRefService =
-    options.strongRefService ??
+    (options.strongRefService ??
     ({
       protect: vi.fn(async () => undefined),
       releaseBySource: vi.fn(async () => undefined)
-    } as const);
+    } as const)) as StrongRefServicePort;
   const service = new SerialDelegationService({
     workerRunLifecycle,
     workerRunRepo: repo,
@@ -288,10 +299,10 @@ export function createHarness(
     runtimeAdapter,
     eventNormalizer: {
       get normalize() {
-        return serviceRecovery.recovery.deps.eventNormalizer.normalize;
+        return serviceRecovery.recovery.deps.eventNormalizer.normalize as RuntimeNormalizeMock;
       },
       get clearSessionState() {
-        return serviceRecovery.recovery.deps.eventNormalizer.clearSessionState;
+        return serviceRecovery.recovery.deps.eventNormalizer.clearSessionState as ClearSessionStateMock;
       }
     },
     constraintProxy,

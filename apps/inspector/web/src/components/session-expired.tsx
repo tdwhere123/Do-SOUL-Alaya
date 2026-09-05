@@ -17,7 +17,7 @@ export default function SessionExpired({ reason }: SessionExpiredProps) {
         {message}
       </p>
       <pre className="bg-beige-150 text-ink-600 px-4 py-2 rounded text-xs font-mono">
-        rtk pnpm exec alaya inspect --open
+        pnpm exec alaya inspect --open
       </pre>
       <div className="mt-8 pt-8 border-t border-beige-300 w-full max-w-xs">
         <code className="text-xs text-ink-500">ERROR_CODE: AUTH_TOKEN_REJECTED</code>

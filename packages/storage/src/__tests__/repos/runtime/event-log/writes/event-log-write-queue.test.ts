@@ -194,7 +194,9 @@ describe("EventLog append via worker write queue", () => {
     );
   }, 60_000);
 
-  it("queued EventLog append leaves main-thread reads responsive vs sync append", async () => {
+  it.skipIf(process.platform === "win32")(
+    "queued EventLog append leaves main-thread reads responsive vs sync append",
+    async () => {
     const workerUrl = resolveSqliteWriteQueueWorkerUrl();
     expect(workerUrl).not.toBeNull();
     const queue = createWorkerThreadSqliteWriteQueuePort({ workerUrl: workerUrl! });

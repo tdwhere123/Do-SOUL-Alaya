@@ -22,7 +22,9 @@ it("writes soul.memory.created before persistence and runtime notification with 
         }),
         queryByEntity: vi.fn(async (...args: Parameters<MemoryServiceDependencies["eventLogRepo"]["queryByEntity"]>) => {
           order.push("event_query");
-          return queryByEntitySpy(...args);
+          return (queryByEntitySpy as MemoryServiceDependencies["eventLogRepo"]["queryByEntity"])(
+            ...args
+          );
         })
       },
       memoryEntryRepo: {

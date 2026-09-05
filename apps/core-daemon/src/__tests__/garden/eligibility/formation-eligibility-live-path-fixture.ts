@@ -230,7 +230,8 @@ export function readDurableFormation(
     : readStoredSemanticFactorFormation(
       row as Parameters<typeof readStoredSemanticFactorFormation>[0],
       WORKSPACE_ID,
-      evidence?.excerpt ?? null
+      evidence?.excerpt ?? null,
+      undefined
     );
 }
 

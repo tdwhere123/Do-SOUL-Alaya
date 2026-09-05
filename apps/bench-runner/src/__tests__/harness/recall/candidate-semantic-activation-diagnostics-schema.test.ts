@@ -46,7 +46,11 @@ describe("candidate semantic activation diagnostic schema", () => {
   it("keeps older candidate dumps valid without semantic_activation", () => {
     const parsed = parseBenchRecallDiagnosticsForRun(diagnosticsWithCandidate({}));
     expect(parsed.candidates[0]).not.toHaveProperty("semantic_activation");
-    expect(parsed.candidates[0]?.per_stream_rank.embedding_similarity).toBe(1);
+    const older = parsed.candidates[0];
+    if (older === undefined || !("per_stream_rank" in older) || older.per_stream_rank === undefined) {
+      throw new Error("expected live candidate diagnostic");
+    }
+    expect(older.per_stream_rank.embedding_similarity).toBe(1);
   });
 
   it("accepts an OSF winner on embedding_similarity without renaming the stream", () => {
@@ -54,13 +58,15 @@ describe("candidate semantic activation diagnostic schema", () => {
       semantic_activation: osfWinnerReceipt
     }));
     const candidate = parsed.candidates[0];
-
-    expect(candidate?.semantic_activation?.winner?.channel).toBe(
+    if (candidate === undefined || !("per_stream_rank" in candidate) || candidate.per_stream_rank === undefined) {
+      throw new Error("expected live candidate diagnostic");
+    }
+    expect(candidate.semantic_activation?.winner?.channel).toBe(
       "open_semantic_solution"
     );
-    expect(candidate?.per_stream_rank.embedding_similarity).toBe(1);
-    expect(candidate?.fused_rank).toBe(1);
-    expect(candidate?.fused_score).toBe(0.81);
+    expect(candidate.per_stream_rank.embedding_similarity).toBe(1);
+    expect(candidate.fused_rank).toBe(1);
+    expect(candidate.fused_score).toBe(0.81);
   });
 
   it("archives that OSF winner on the question-diagnostic candidate mirror", () => {

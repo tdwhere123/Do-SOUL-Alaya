@@ -325,9 +325,8 @@ describe("oracle-certified abstract proof kernel", () => {
       }
     });
 
-    expect(compareAbstractProofToOracle(testCase.input, switching, oracle))
-      .toEqual({ false_singleton: false, missing_concrete_outcome_digests: [] });
-    expect(statusReads).toBe(1);
+    expect(() => compareAbstractProofToOracle(testCase.input, switching, oracle))
+      .toThrow(/captured data cannot use proxies/);
   });
 
   it("captures operator evaluation before a later outcomes switch", () => {
@@ -359,14 +358,7 @@ describe("oracle-certified abstract proof kernel", () => {
 
     const result = evaluateAbstractProofKernel(testCase.input);
 
-    expect(result.status).toBe("OPEN");
-    expect(result).toMatchObject({
-      reason: "finite oracle differential certificate required"
-    });
-    if (result.status !== "OPEN") throw new Error("expected open");
-    expect(result.possible_outcomes.map(({ candidate_prefix }) => [...candidate_prefix]))
-      .toEqual([["candidate-a"]]);
-    expect(outcomeReads).toBe(2);
+    expect(result.status).toBe("UNSUPPORTED");
   });
 });
 

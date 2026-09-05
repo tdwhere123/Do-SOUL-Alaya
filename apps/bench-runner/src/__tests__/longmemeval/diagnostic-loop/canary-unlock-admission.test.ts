@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { copyFile, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runRecordDigest, runRecordPath } from
   "../../../runs/diagnostic-loop/run-state.js";
@@ -236,7 +236,7 @@ describe("Canary diagnostic unlock admission", () => {
       "--limit", "100",
       "--canary-unlock", "/tmp/canary-3q"
     ]);
-    expect(parsed.canaryUnlockPath).toBe("/tmp/canary-3q");
+    expect(parsed.canaryUnlockPath).toBe(resolve("/tmp/canary-3q"));
     expect(parsed.request.limit).toBe(100);
   });
 });

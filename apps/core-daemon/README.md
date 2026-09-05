@@ -24,8 +24,8 @@ but lower packages must not depend on the daemon.
 ## Commands
 
 ```bash
-rtk pnpm --filter @do-soul/alaya run typecheck
-rtk pnpm --filter @do-soul/alaya run test
-rtk pnpm --filter @do-soul/alaya run build
-rtk pnpm --dir apps/core-daemon dev
+pnpm --filter @do-soul/alaya run typecheck
+pnpm --filter @do-soul/alaya run test
+pnpm --filter @do-soul/alaya run build
+pnpm --dir apps/core-daemon dev
 ```

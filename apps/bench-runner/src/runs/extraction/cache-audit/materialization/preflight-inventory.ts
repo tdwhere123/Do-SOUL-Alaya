@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { cacheFilePath } from "../../../compile-seed/compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from
   "../../../compile-seed/compile-seed-types.js";
@@ -18,6 +18,7 @@ import { readStableRegularFileNoFollow } from "./descriptor-io.js";
 import type { MaterializationShardDescriptor } from "./contract.js";
 import { decodeCanonicalUtf8Artifact } from "../bounded-artifact-reader.js";
 import { isStableLeasePath } from "../../fill/manifest/fill-root-guard.js";
+import { isPhysicalNamedPath } from "../../../fs/opened-contained-path.js";
 import { SEMANTIC_QUARANTINE_REASON } from
   "../quarantine/semantic-quarantine.js";
 
@@ -74,7 +75,7 @@ function inspectShard(
   const cacheKey = audited.cacheKey;
   const path = cacheFilePath(input.sourceRoot, cacheKey);
   if (!existsNoFollow(path)) return { shard: Object.freeze({ cacheKey, status: "missing" }) };
-  if (!isStableLeasePath(path) && realpathSync(path) !== path) {
+  if (!isStableLeasePath(path) && !isPhysicalNamedPath(path)) {
     throw new Error("existing audited cache shard path is not canonical");
   }
   const read = readStableRegularFileNoFollow(path, input.maxShardBytes);

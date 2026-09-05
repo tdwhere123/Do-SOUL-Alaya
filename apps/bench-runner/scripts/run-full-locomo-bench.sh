@@ -63,7 +63,7 @@ runtime_dist_for_src() {
 ensure_bench_runner_build_fresh() {
   if [[ ! -f "$BENCH_RUNNER_CLI" ]]; then
     echo "bench runner dist is missing: $BENCH_RUNNER_CLI" >&2
-    echo "Run: rtk pnpm build" >&2
+    echo "Run: pnpm build" >&2
     exit 2
   fi
 
@@ -99,7 +99,7 @@ ensure_bench_runner_build_fresh() {
 
   if [[ -n "$stale_src" ]]; then
     echo "bench runner dist appears stale: $stale_src is newer than ${stale_dist:-its dist output}" >&2
-    echo "Run: rtk pnpm build" >&2
+    echo "Run: pnpm build" >&2
     exit 2
   fi
 }
@@ -172,8 +172,8 @@ mkdir -p "$LOG_DIR"
 META="docs/bench-history/datasets/locomo10.meta.json"
 DATASET_JSON="$DATA_DIR/locomo10.json"
 SCRATCH_META="$DATA_DIR/locomo10.meta.json"
-printf -v warmup_command 'rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-locomo --data-dir %q' "$DATA_DIR"
-printf -v refresh_command 'rtk node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-locomo --data-dir %q --force' "$DATA_DIR"
+printf -v warmup_command '%q apps/bench-runner/bin/alaya-bench-runner.mjs fetch-locomo --data-dir %q' "$NODE_BIN" "$DATA_DIR"
+printf -v refresh_command '%q apps/bench-runner/bin/alaya-bench-runner.mjs fetch-locomo --data-dir %q --force' "$NODE_BIN" "$DATA_DIR"
 if [[ ! -r "$META" ]]; then
   echo "pinned dataset meta missing or unreadable: $META" >&2
   exit 2

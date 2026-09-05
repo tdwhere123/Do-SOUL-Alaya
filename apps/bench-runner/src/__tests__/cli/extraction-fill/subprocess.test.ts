@@ -41,7 +41,8 @@ it("self-stops on a terminal task failure with a safe exit and no stale lease", 
   expect(existsSync(join(root, "cache", ".extraction-fill.lock"))).toBe(false);
 }, 90_000);
 
-it("settles a real SIGINT as exit 130 after releasing the lease", async () => {
+it.skipIf(process.platform === "win32")(
+  "settles a real SIGINT as exit 130 after releasing the lease", async () => {
   const result = await runFixture("signal", (child) => child.kill("SIGINT"));
 
   expect(result).toMatchObject({ exitCode: 130, signal: null, leaseSeenAtReady: true });

@@ -15,8 +15,8 @@ describe("EdgeAutoProducerService", () => {
     const neighbors = Array.from({ length: 7 }, (_unused, index) =>
       createMemoryEntry({
         object_id: `memory-${index}`,
-        content: "Repository shell commands must use the RTK wrapper for scripts.",
-        domain_tags: ["rtk", "workflow"]
+        content: "Repository package scripts must use pnpm for scripts.",
+        domain_tags: ["pnpm", "workflow"]
       })
     );
     const { deps, pathCandidatePort } = createDeps([newMemory, ...neighbors]);
@@ -45,8 +45,8 @@ describe("EdgeAutoProducerService", () => {
     const neighbors = Array.from({ length: 7 }, (_unused, index) =>
       createMemoryEntry({
         object_id: `memory-${index}`,
-        content: "Repository shell commands must use the RTK wrapper for scripts.",
-        domain_tags: ["rtk", "workflow"]
+        content: "Repository package scripts must use pnpm for scripts.",
+        domain_tags: ["pnpm", "workflow"]
       })
     );
     const { deps, pathCandidatePort } = createDeps([newMemory, ...neighbors]);
@@ -71,8 +71,8 @@ it("B-2 pregate skips the LLM port for structurally eligible but unrelated pairs
     // tokens and zero shared tags. This is the "obvious non-pair" the
     // LLM cost pregate is designed to drop.
     const newMemory = createMemoryEntry({
-      content: "RTK wrapper is required for shell commands in this repository.",
-      domain_tags: ["rtk", "workflow"]
+      content: "pnpm is required for package scripts in this repository.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const unrelatedNeighbor = createMemoryEntry({
       object_id: "memory-unrelated",
@@ -109,20 +109,20 @@ it("B-2 pregate skips the LLM port for structurally eligible but unrelated pairs
 it("B-2 pregate routes related pairs to the LLM port as before", async () => {
     // High token-Jaccard pair — pregate passes, LLM verdict propagates.
     const newMemory = createMemoryEntry({
-      content: "RTK wrapper is required for shell commands in this repository.",
-      domain_tags: ["rtk", "workflow"]
+      content: "pnpm is required for package scripts in this repository.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const relatedNeighbor = createMemoryEntry({
       object_id: "memory-related",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, relatedNeighbor]);
     const llmPort = {
       classifyPair: vi.fn(async () => ({
         edgeType: "supports" as const,
         confidence: 0.92,
-        rationale: "shared RTK rule"
+        rationale: "shared pnpm rule"
       }))
     };
     const service = new EdgeAutoProducerService({ ...deps, llmPort });
@@ -146,12 +146,12 @@ it("B-2 pregate still allows tag-overlap-only pairs through to the LLM", async (
     // tag overlap is an independent relatedness signal.
     const newMemory = createMemoryEntry({
       content: "Database connection pool is sized at thirty-two slots.",
-      domain_tags: ["rtk", "platform"]
+      domain_tags: ["pnpm", "platform"]
     });
     const tagOverlapNeighbor = createMemoryEntry({
       object_id: "memory-tag-overlap",
       content: "Shell logging follows a structured json line format.",
-      domain_tags: ["rtk", "platform"]
+      domain_tags: ["pnpm", "platform"]
     });
     const { deps } = createDeps([newMemory, tagOverlapNeighbor]);
     const llmPort = {
@@ -179,8 +179,8 @@ it("B-2 pregate still allows tag-overlap-only pairs through to the LLM", async (
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const edgeClassifyQueue = {
@@ -220,8 +220,8 @@ it("host-worker defer: a queue enqueue failure is non-fatal — the heuristic ed
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps, pathCandidatePort } = createDeps([newMemory, neighbor]);
     const edgeClassifyQueue = {
@@ -250,8 +250,8 @@ it("host-worker defer: bypasses the synchronous llmPort entirely", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
-      content: "Repository shell commands must use the RTK wrapper.",
-      domain_tags: ["rtk", "workflow"]
+      content: "Repository package scripts must use pnpm.",
+      domain_tags: ["pnpm", "workflow"]
     });
     const { deps } = createDeps([newMemory, neighbor]);
     const llmPort = {

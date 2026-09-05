@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { BankruptcyAction, BankruptcyKind, BankruptcyTriggerKind, BudgetEventType, ProposalResolutionState, RuntimeMode, type Proposal } from "@do-soul/alaya-protocol";
 import { BudgetBankruptcyService } from "../../governance/bankruptcy/budget-bankruptcy-service.js";
+import type {
+  BudgetBankruptcyServiceDependencies,
+  BudgetBankruptcyServiceProposalPort
+} from "../../governance/bankruptcy/budget-bankruptcy-service-types.js";
 
 import { createDeclareParams, createDeferred, createDependencies, createEventLogEntry, createEventLogRepo, createProposalOption, createProposalPort, createStoredProposal } from "./budget-bankruptcy-service.test-support.js";
 
 describe("BudgetBankruptcyService", () => {
   it("declares a soft bankruptcy, persists the proposal, updates current mode, and broadcasts both budget events", async () => {
     const dependencies = createDependencies();
-    const service = new BudgetBankruptcyService(dependencies);
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
 
     const result = await service.declare(createDeclareParams());
 
@@ -34,7 +38,7 @@ describe("BudgetBankruptcyService", () => {
 
   it("keeps hard bankruptcies pending when no auto-applicable option exists", async () => {
     const dependencies = createDependencies();
-    const service = new BudgetBankruptcyService(dependencies);
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
 
     const result = await service.declare(
       createDeclareParams({
@@ -61,7 +65,7 @@ describe("BudgetBankruptcyService", () => {
         )
       })
     });
-    const service = new BudgetBankruptcyService(dependencies);
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
 
     await expect(service.declare(createDeclareParams())).rejects.toMatchObject({
       code: "CONFLICT"
@@ -72,7 +76,7 @@ describe("BudgetBankruptcyService", () => {
     const createGate = createDeferred<Proposal>();
     const dependencies = createDependencies({
       proposalPort: createProposalPort({
-        create: vi.fn(async (params) => {
+        create: vi.fn(async (params: Parameters<BudgetBankruptcyServiceProposalPort["create"]>[0]) => {
           await createGate.promise;
           return createStoredProposal({
             runtime_id: "proposal-race",
@@ -87,7 +91,7 @@ describe("BudgetBankruptcyService", () => {
         })
       })
     });
-    const service = new BudgetBankruptcyService(dependencies);
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
     const declareParams = createDeclareParams({
       triggerKind: BankruptcyTriggerKind.SAFETY_GUARD,
       requiredActions: [BankruptcyAction.STOP]
@@ -121,7 +125,7 @@ describe("BudgetBankruptcyService", () => {
   it("bounds process-local stateStore entries by least-recently-used run", async () => {
     const dependencies = createDependencies();
     const service = new BudgetBankruptcyService({
-      ...dependencies,
+      ...asBudgetDeps(dependencies),
       stateStoreMaxEntries: 2
     });
 
@@ -138,7 +142,7 @@ describe("BudgetBankruptcyService", () => {
     let now = "2026-03-26T00:00:00.000Z";
     const dependencies = createDependencies();
     const service = new BudgetBankruptcyService({
-      ...dependencies,
+      ...asBudgetDeps(dependencies),
       now: () => now,
       stateStoreTtlMs: 1
     });
@@ -157,7 +161,7 @@ describe("BudgetBankruptcyService", () => {
 
   it("resolves a pending bankruptcy with an accepted option and keeps the chosen mode sticky in snapshots", async () => {
     const dependencies = createDependencies();
-    const service = new BudgetBankruptcyService(dependencies);
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
     const declared = await service.declare(
       createDeclareParams({
         triggerKind: BankruptcyTriggerKind.SAFETY_GUARD,
@@ -184,7 +188,7 @@ describe("BudgetBankruptcyService", () => {
 
   it("rejects option ids that are not present on the active pending proposal", async () => {
     const dependencies = createDependencies();
-    const service = new BudgetBankruptcyService(dependencies);
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
     await service.declare(
       createDeclareParams({
         triggerKind: BankruptcyTriggerKind.SAFETY_GUARD,
@@ -220,7 +224,7 @@ describe("BudgetBankruptcyService", () => {
         findById: vi.fn(async (proposalId: string) =>
           proposalId === pendingProposal.proposal_id ? pendingProposal : null
         ),
-        update: vi.fn(async (proposalId, patch) => ({
+        update: vi.fn(async (proposalId: string, patch: Parameters<BudgetBankruptcyServiceProposalPort["update"]>[1]) => ({
           ...pendingProposal,
           proposal_id: proposalId,
           resolution_state: patch.resolution_state,
@@ -261,7 +265,7 @@ describe("BudgetBankruptcyService", () => {
         )
       })
     });
-    const service = new BudgetBankruptcyService(dependencies);
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
 
     const updated = await service.resolve({
       runId: "run-1",
@@ -328,7 +332,7 @@ describe("BudgetBankruptcyService", () => {
         )
       })
     });
-    const service = new BudgetBankruptcyService(dependencies);
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
 
     const snapshot = await service.getSnapshot("run-1", "2026-03-26T00:10:00.000Z");
 
@@ -353,7 +357,7 @@ describe("BudgetBankruptcyService", () => {
 
   it("rejects required actions that are not already valid bankruptcy action values", async () => {
     const dependencies = createDependencies();
-    const service = new BudgetBankruptcyService(dependencies);
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
 
     await expect(
       service.declare(
@@ -368,7 +372,7 @@ describe("BudgetBankruptcyService", () => {
 
   it("returns the default snapshot when no bankruptcy is active and clears run state on teardown", async () => {
     const dependencies = createDependencies();
-    const service = new BudgetBankruptcyService(dependencies);
+    const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
 
     expect(await service.getSnapshot("run-404", "2026-03-26T00:00:00.000Z")).toMatchObject({
       run_id: "run-404",
@@ -390,3 +394,9 @@ describe("BudgetBankruptcyService", () => {
     });
   });
 });
+
+function asBudgetDeps(
+  dependencies: ReturnType<typeof createDependencies>
+): BudgetBankruptcyServiceDependencies {
+  return dependencies as unknown as BudgetBankruptcyServiceDependencies;
+}

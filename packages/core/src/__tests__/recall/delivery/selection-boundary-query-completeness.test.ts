@@ -34,6 +34,11 @@ type CompletenessMutationTarget = {
   queryFactFrameExtraction: { frames: Array<{ slots: Array<{ text: string }> }> };
 };
 
+type MutableSpanReceipt = Omit<WritableReceipt, "operator_id"> & {
+  subject: WritableReceipt["subject"] & { source_span: [number, number] };
+  operator_id: string;
+};
+
 type WritableReceipt = {
   -readonly [K in keyof QueryOsfSemanticCompletenessReceipt]: QueryOsfSemanticCompletenessReceipt[K];
 };
@@ -68,19 +73,22 @@ describe("selection boundary query completeness authority", () => {
       slot.text = "foreign";
     }],
     ["changed span", (data: CompletenessMutationTarget) => mutateReceipt(data, (receipt) => {
-      receipt.subject.source_span = [0, 1];
+      (receipt as MutableSpanReceipt).subject = {
+        ...receipt.subject,
+        source_span: [0, 1]
+      };
     })],
     ["changed arity", (data: CompletenessMutationTarget) => mutateReceipt(data, (receipt) => {
       receipt.arity = 3;
     })],
     ["old receipt", (data: CompletenessMutationTarget) => mutateReceipt(data, (receipt) => {
-      receipt.operator_id = "query_osf_semantic_completeness_v0";
+      (receipt as MutableSpanReceipt).operator_id = "query_osf_semantic_completeness_v0";
     })]
   ] satisfies ReadonlyArray<readonly [string, (data: CompletenessMutationTarget) => void]>)(
     "rejects %s even when the boundary is otherwise current",
     async (_, mutate) => {
       const boundary = cloneBoundary(await certifiedBoundary());
-      mutate(boundary.input.supplementary_data as CompletenessMutationTarget);
+      mutate(boundary.input.supplementary_data as unknown as CompletenessMutationTarget);
       expect(() => replayFineAssessmentSelectionBoundary(boundary))
         .toThrow(/selection boundary fidelity mismatch|schema_version|digest/u);
     }

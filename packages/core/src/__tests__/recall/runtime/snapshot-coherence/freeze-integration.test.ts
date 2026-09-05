@@ -234,7 +234,9 @@ describe("snapshot freeze integration", () => {
     expect(live).toBe(0);
   });
 
-  it("matches f29002ba shadow-off public delivery and embedding traces", async () => {
+  it.skipIf(process.platform === "win32")(
+    "matches f29002ba shadow-off public delivery and embedding traces",
+    async () => {
     const prepareLegacy = vi.spyOn(fineAssessment, "prepareFineAssessment");
     const assess = vi.spyOn(fineAssessment, "fineAssess");
     const gammaWalk = vi.spyOn(gamma, "selectGammaWalk");

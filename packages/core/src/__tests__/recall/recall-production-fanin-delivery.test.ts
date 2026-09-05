@@ -145,10 +145,12 @@ async function inspectSiblingViaPath(relationKind: string): Promise<{
     delivered: candidate !== undefined,
     admissionPlanes: diagnostic.admission_planes,
     sourceChannels: diagnostic.source_channels,
-    relationKinds: diagnostic.path_expansion_sources.map((source) => source.relation_kind),
-    pathRank: diagnostic.per_stream_rank.path_expansion,
-    pathContribution: diagnostic.fused_rank_contribution_per_stream.path_expansion,
-    fusedRank: diagnostic.fused_rank,
+    relationKinds: diagnostic.path_expansion_sources!.map((source) => source.relation_kind),
+    pathRank: diagnostic.per_stream_rank!.path_expansion ?? 0,
+    pathContribution: diagnostic.fused_rank_contribution_per_stream!.path_expansion ?? 0,
+    fusedRank: diagnostic.fused_rank ?? (() => {
+      throw new Error("expected live fused_rank");
+    })(),
     finalRank: diagnostic.final_rank,
     rankAfterStructuralStage: diagnostic.rank_after_structural_reserve,
     naturalWindowSize,

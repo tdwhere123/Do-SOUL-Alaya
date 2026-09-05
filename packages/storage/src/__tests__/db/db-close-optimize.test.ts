@@ -28,7 +28,7 @@ describe("StorageDatabase close optimize seam", () => {
     optedOut.close({ optimize: false });
     expect(optedOut.isClosed()).toBe(true);
     expect(skipped).not.toContain("optimize");
-  });
+  }, 30_000);
 
   it("does not change checkpointed main-file bytes when optimize is skipped", () => {
     const filename = tempDbPath();

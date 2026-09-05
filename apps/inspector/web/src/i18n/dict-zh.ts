@@ -69,7 +69,7 @@ export const zh = {
   "overview:bench.self.label": "Self-bench",
   "overview:bench.self.hint": "历史 self-bench 档案。该 runner 已退役。",
   "overview:bench.public.label": "LongMemEval-S",
-  "overview:bench.public.hint": "公开 benchmark；运行：rtk pnpm exec alaya-bench-runner longmemeval --variant s",
+  "overview:bench.public.hint": "公开 benchmark；运行：pnpm exec alaya-bench-runner longmemeval --variant s",
   "overview:bench.publicMultiturn.label": "LongMemEval 多轮",
   "overview:bench.publicMultiturn.hint": "历史档案。当前公开 bench 只有 LongMemEval-S 和 LoCoMo。",
   "overview:bench.live.label": "Live strict-real",

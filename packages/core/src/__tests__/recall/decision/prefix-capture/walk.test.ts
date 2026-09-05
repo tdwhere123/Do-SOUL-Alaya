@@ -80,21 +80,24 @@ function facUtility(
       evaluated: availability === "available" || availability === "known_zero"
     };
   });
-  const matches = entries.flatMap(([value, strength]) => {
-    const availability = opts.obligationAvailability?.[value] ?? "available";
-    if (availability !== "available" && availability !== "known_zero") return [];
-    return [{
-      obligation: { kind: "entity" as const, value },
-      raw_atom_id: `typed:${value}`,
+  const matches = [
+    ...entries.flatMap(([value, strength]) => {
+      const availability = opts.obligationAvailability?.[value] ?? "available";
+      if (availability !== "available" && availability !== "known_zero") return [];
+      return [{
+        obligation: { kind: "entity" as const, value },
+        raw_atom_id: `typed:${value}`,
+        attribution_kind: "typed_query_atom" as const,
+        match_strength: strength
+      }];
+    }),
+    ...(opts.extraMatches ?? []).map((extra) => ({
+      obligation: { kind: "entity" as const, value: extra.value },
+      raw_atom_id: extra.raw,
       attribution_kind: "typed_query_atom" as const,
-      match_strength: strength
-    }];
-  }).concat((opts.extraMatches ?? []).map((extra) => ({
-    obligation: { kind: "entity" as const, value: extra.value },
-    raw_atom_id: extra.raw,
-    attribution_kind: extra.kind,
-    match_strength: extra.strength
-  })));
+      match_strength: extra.strength
+    }))
+  ];
   const osf = opts.values !== undefined ? "composed" : (opts.osf ?? "no_match");
   const cid = opts.cid === undefined
     ? { status: "unavailable" as const }
@@ -212,9 +215,11 @@ describe("shadow lexicographic capture walk", () => {
       plant("B", { a1: 1 }, { cid: "gist:B" })
     ], psiFrom([]));
     expect(result.S_infty).toEqual(["A", "B"]);
-    expect(result.decisions[0]?.G.unscaled_remainder).toBe(1);
-    expect(result.decisions[1]?.G.unscaled_remainder).toBe(0);
-    expect(result.decisions[1]?.G.evidence_novelty_redundancy).toBe(1);
+    const g0 = result.decisions[0]?.G;
+    const g1 = result.decisions[1]?.G;
+    expect(g0 && "unscaled_remainder" in g0 ? g0.unscaled_remainder : undefined).toBe(1);
+    expect(g1 && "unscaled_remainder" in g1 ? g1.unscaled_remainder : undefined).toBe(0);
+    expect(g1 && "evidence_novelty_redundancy" in g1 ? g1.evidence_novelty_redundancy : undefined).toBe(1);
   });
 
   it("truncates one walk prefix through and beyond exhaustion", () => {
@@ -370,7 +375,8 @@ describe("shadow lexicographic capture walk", () => {
       }),
       plant("B", { bob: 0.3 }, { cid: "gist:B" })
     ], psiFrom([]));
-    expect(result.decisions[0]?.G.unscaled_remainder).toBe(0.4);
+    const g = result.decisions[0]?.G;
+    expect(g && "unscaled_remainder" in g ? g.unscaled_remainder : undefined).toBe(0.4);
     expect(result.S_infty[0]).toBe("A");
   });
 

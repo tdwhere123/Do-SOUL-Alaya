@@ -2,17 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 import { hashMemoryContent } from "../../../embedding-recall/helpers.js";
 import { EmbeddingRecallService } from
   "../../../embedding-recall/embedding-recall-service.js";
-import type { EvidenceCandidateScoringSelectionReceipt } from
-  "../../../embedding-recall/types.js";
+import type {
+  EmbeddingProviderPort,
+  EvidenceCandidateScoringSelectionReceipt
+} from "../../../embedding-recall/types.js";
 import { createProvider } from "../embedding-recall-test-helpers.js";
-import type { TestMock } from "../../shared/mock-types.js";
 
 describe("evidence scoring selection receipt", () => {
   it("reuses identical content vectors while retaining distinct identities", async () => {
     const embedTexts = vi.fn(async (texts: readonly string[]) =>
       texts.map(() => new Float32Array([1, 0]))
-    ) as TestMock;
-    const result = await createService(embedTexts).scoreEvidenceCandidates(request([{
+    );
+    const result = await createService(
+      embedTexts as EmbeddingProviderPort["embedTexts"]
+    ).scoreEvidenceCandidates(request([{
       candidateKey: "memory:1", evidenceObjectId: "evidence-1",
       documentIdentity: "owner_gist_600", content: "shared evidence"
     }, {
@@ -50,7 +53,7 @@ describe("evidence scoring selection receipt", () => {
   });
 });
 
-function createService(embedTexts: TestMock): EmbeddingRecallService {
+function createService(embedTexts: EmbeddingProviderPort["embedTexts"]): EmbeddingRecallService {
   return new EmbeddingRecallService({
     embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
     provider: createProvider({ embedTexts }),

@@ -88,12 +88,16 @@ describe("post-freeze mutable source isolation", () => {
   });
 
   it("keeps frozen entries isolated from post-freeze source mutation", async () => {
-    const original = createMemoryEntry({
-      object_id: FROZEN_EVIDENCE_ID,
-      evidence_refs: [FROZEN_EVIDENCE_ID],
-      content: "frozen pin object",
+    const original = {
+      ...createMemoryEntry({
+        object_id: FROZEN_EVIDENCE_ID,
+        evidence_refs: [FROZEN_EVIDENCE_ID],
+        content: "frozen pin object",
+        facet_tags: [{ facet: "location_place", value: "seattle" }]
+      }),
+      domain_tags: [...createMemoryEntry().domain_tags],
       facet_tags: [{ facet: "location_place", value: "seattle" }]
-    });
+    };
     const findByEvidenceRefs = vi.fn(async () => [original]);
     const prepared = await preparePinnedMemories([original], findByEvidenceRefs);
     const loaded = prepared.fieldProjectionMemories[0];
@@ -187,7 +191,7 @@ describe("post-freeze mutable source isolation", () => {
       [original],
       findByEvidenceRefs,
       undefined,
-      spies.dependencies
+      spies.dependencies as Parameters<typeof preparePinnedMemories>[3]
     );
     expect(spies.searchMemory).not.toHaveBeenCalled();
     expect(spies.searchEvidence).not.toHaveBeenCalled();
@@ -368,9 +372,22 @@ function expectFrozenUnavailable(
   }
 }
 
+type LivePortSpies = {
+  searchMemory: ReturnType<typeof vi.fn>;
+  searchEvidence: ReturnType<typeof vi.fn>;
+  searchEvidenceField: ReturnType<typeof vi.fn>;
+  searchSynthesisField: ReturnType<typeof vi.fn>;
+  querySupplement: ReturnType<typeof vi.fn>;
+  collectWorkspaceNeighbors: ReturnType<typeof vi.fn>;
+  findByAnchors: ReturnType<typeof vi.fn>;
+  getStrengthByMemoryId: ReturnType<typeof vi.fn>;
+  findByEventTimeWindow: ReturnType<typeof vi.fn>;
+  findActiveConstraints: ReturnType<typeof vi.fn>;
+};
+
 function attachLivePortSpies(
   base: ReturnType<typeof createDependencies>["dependencies"]
-) {
+): LivePortSpies & { dependencies: ReturnType<typeof withLiveSpyPorts> } {
   const searchMemory = vi.fn(async () => keywordFieldResult([hit("pre-freeze-memory")]));
   const searchEvidence = vi.fn(async () => [hit("pre-freeze-evidence")]);
   const searchEvidenceField = vi.fn(async () => keywordFieldResult([hit("pre-freeze-evidence")]));
@@ -396,7 +413,7 @@ function attachLivePortSpies(
 
 function withLiveSpyPorts(
   base: ReturnType<typeof createDependencies>["dependencies"],
-  spies: Omit<ReturnType<typeof attachLivePortSpies>, "dependencies">
+  spies: LivePortSpies
 ) {
   return {
     ...base,

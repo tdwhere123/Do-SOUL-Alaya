@@ -476,7 +476,7 @@ describe("repository structure guard", () => {
     const policyBytes = readFileSync(
       path.join(repoRoot, "scripts/ci/repository-structure-policy.json")
     );
-    expect(createHash("sha256").update(policyBytes).digest("hex")).toBe(
+    expect(createHash("sha256").update(canonicalizeLf(policyBytes)).digest("hex")).toBe(
       "2ca4eb5c4d2fc760660bf2bd8f9cb2a258f87b0ead07f80cce5eb78f16150fa0"
     );
   });
@@ -637,7 +637,24 @@ async function writePolicy(root: string, value: object): Promise<string> {
   return filename;
 }
 
+function stageFixtureInventory(root: string): void {
+  // Fixtures are not git checkouts and Windows/macOS CI do not ship rg, so the
+  // guard would throw "ripgrep and git are both unavailable" and tests would
+  // compare file:// stack traces against path=packages/... diagnostics.
+  execFileSync("git", ["-c", "init.defaultBranch=main", "init"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  execFileSync("git", ["add", "-A"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+
 async function runGuard(root: string, policyPath: string) {
+  stageFixtureInventory(root);
   return await execFileWithFileCapture(
     process.execPath,
     [scriptPath, "--root", root, "--policy", policyPath],
@@ -682,6 +699,10 @@ function policy(overrides: Record<string, unknown> = {}) {
     existing_non_literal_module_specifier_exceptions: [],
     ...overrides
   };
+}
+
+function canonicalizeLf(bytes: Buffer): string {
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes).replaceAll("\r\n", "\n");
 }
 
 function digestLines(lines: readonly string[]): string {

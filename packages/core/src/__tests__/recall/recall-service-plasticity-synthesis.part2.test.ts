@@ -81,9 +81,9 @@ it("merges synthesis-child metadata into a memory_entry when object ids collide"
       (candidate) => candidate.candidate_key === `workspace_local:memory_entry:${sharedObjectId}`
     );
 
-    expect(memoryDiagnostic?.per_stream_rank.lexical_fts).toBe(1);
+    expect(memoryDiagnostic?.per_stream_rank!.lexical_fts).toBe(1);
     expect(memoryDiagnostic?.object_kind).toBe("memory_entry");
-    expect(memoryDiagnostic?.per_stream_rank.synthesis_fts).toBe(1);
+    expect(memoryDiagnostic?.per_stream_rank!.synthesis_fts).toBe(1);
     expect(memoryDiagnostic?.admission_planes).toContain("synthesis_child");
   });
 

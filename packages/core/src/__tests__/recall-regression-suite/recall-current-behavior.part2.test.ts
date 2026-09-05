@@ -55,8 +55,8 @@ it("keeps lexical evidence in fusion without overriding fused order", async () =
     const diagnostic = result.diagnostics?.candidates.find(
       (item) => item.object_id === "strong-lexical-gold"
     );
-    expect(diagnostic?.per_stream_rank.lexical_fts).not.toBeNull();
-    expect(diagnostic?.fused_rank_contribution_per_stream.lexical_fts).toBeGreaterThan(0);
+    expect(diagnostic?.per_stream_rank!.lexical_fts).not.toBeNull();
+    expect(diagnostic?.fused_rank_contribution_per_stream!.lexical_fts).toBeGreaterThan(0);
     // Legacy lexical-priority stage is retired — not aliased to fused rank.
     expect(diagnostic?.rank_after_lexical_priority).toBeUndefined();
     // Delivery order follows fused_rank unless observed embedding rescores the pool.
@@ -121,8 +121,8 @@ it("preserves fused order across legacy delivery stages", async () => {
     const gold = diagnosticsById.get("ordering-strong-lexical");
     const peer = diagnosticsById.get("ordering-lexical-peer");
     const sourceOnly = diagnosticsById.get("ordering-source-neighbor");
-    expect(sourceOnly?.per_stream_rank.source_proximity).not.toBeNull();
-    expect(sourceOnly?.per_stream_rank.lexical_fts).toBeNull();
+    expect(sourceOnly?.per_stream_rank!.source_proximity).not.toBeNull();
+    expect(sourceOnly?.per_stream_rank!.lexical_fts).toBeNull();
     expect(sourceOnly?.fused_rank).toBeLessThan(gold?.fused_rank ?? Number.MAX_SAFE_INTEGER);
     expect(gold?.fused_rank).toBeLessThan(peer?.fused_rank ?? Number.MAX_SAFE_INTEGER);
     expect(sourceOnly?.fused_rank).toBeDefined();
@@ -227,12 +227,12 @@ it("cuts max_entries by fused rank before additive relevance score", async () =>
     const goldDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "lexical-gold");
     const droppedDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "high-activation");
     expect(goldDiagnostic?.fused_rank).toBe(1);
-    expect(goldDiagnostic?.per_stream_rank.lexical_fts).toBe(1);
+    expect(goldDiagnostic?.per_stream_rank!.lexical_fts).toBe(1);
     expect(droppedDiagnostic?.dropped_reason).toBe("rank_displaced");
     expect(droppedDiagnostic?.fused_rank).toBeGreaterThan(1);
-    expect(droppedDiagnostic?.per_stream_rank.existing_score).toBe(1);
-    expect(droppedDiagnostic?.fused_rank_contribution_per_stream.existing_score).toBeGreaterThan(0);
-    expect(goldDiagnostic?.per_stream_rank.lexical_fts).toBe(1);
+    expect(droppedDiagnostic?.per_stream_rank!.existing_score).toBe(1);
+    expect(droppedDiagnostic?.fused_rank_contribution_per_stream!.existing_score).toBeGreaterThan(0);
+    expect(goldDiagnostic?.per_stream_rank!.lexical_fts).toBe(1);
 
     const legacyWeightedPolicy = {
       ...policy,
@@ -252,8 +252,8 @@ it("cuts max_entries by fused rank before additive relevance score", async () =>
     const legacyWeightedDiagnostic = legacyWeightedResult.diagnostics?.candidates.find(
       (item) => item.object_id === "high-activation"
     );
-    expect(legacyWeightedDiagnostic?.per_stream_rank.existing_score).toBe(1);
-    expect(legacyWeightedDiagnostic?.fused_rank_contribution_per_stream.existing_score).toBeGreaterThan(0);
+    expect(legacyWeightedDiagnostic?.per_stream_rank!.existing_score).toBe(1);
+    expect(legacyWeightedDiagnostic?.fused_rank_contribution_per_stream!.existing_score).toBeGreaterThan(0);
   });
 
 it("promotes memories when evidence FTS and structural evidence agree", async () => {
@@ -296,8 +296,8 @@ it("promotes memories when evidence FTS and structural evidence agree", async ()
 
     expect(result.candidates.map((item) => item.object_id)).toEqual(["ucla-gold"]);
     const goldDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "ucla-gold");
-    expect(goldDiagnostic?.per_stream_rank.evidence_fts).toBe(1);
-    expect(goldDiagnostic?.per_stream_rank.evidence_structural_agreement).toBe(1);
+    expect(goldDiagnostic?.per_stream_rank!.evidence_fts).toBe(1);
+    expect(goldDiagnostic?.per_stream_rank!.evidence_structural_agreement).toBe(1);
     expect(goldDiagnostic?.fused_rank).toBe(1);
   });
 
@@ -358,7 +358,7 @@ it("lets embedding-on supplements participate in the fused-rank budget cut", asy
     expect(result.candidates[0]?.source_channels).toContain("semantic_supplement");
     const goldDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "semantic-gold");
     const droppedDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "lexical-peer");
-    expect(goldDiagnostic?.per_stream_rank.embedding_similarity).toBe(1);
+    expect(goldDiagnostic?.per_stream_rank!.embedding_similarity).toBe(1);
     expect(goldDiagnostic?.fused_rank).toBe(1);
     expect(goldDiagnostic?.source_channels).toContain("semantic_supplement");
     expect(droppedDiagnostic?.dropped_reason).toBe("rank_displaced");

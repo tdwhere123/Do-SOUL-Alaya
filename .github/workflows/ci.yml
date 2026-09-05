@@ -45,6 +45,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fetch shadow-off neutrality pin
+        run: git fetch --depth 1 origin f29002ba9480b267106e38128a91eec1ebe5917d
+
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -86,7 +89,12 @@ jobs:
 
       - name: Dependency audit high severity
         if: ${{ matrix.run_hygiene }}
-        run: pnpm run ci:audit-high
+        run: |
+          for attempt in 1 2 3; do
+            pnpm run ci:audit-high && exit 0
+            sleep 20
+          done
+          exit 1
 
       - name: Guard inspector dependency isolation
         if: ${{ matrix.run_hygiene }}

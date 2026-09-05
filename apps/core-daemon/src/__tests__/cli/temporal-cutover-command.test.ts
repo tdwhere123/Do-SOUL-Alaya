@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
@@ -16,6 +17,8 @@ function createTextSink(): { readonly stream: PassThrough; readonly readText: ()
   return { stream, readText: () => text };
 }
 
+const CLI_CONFIG_DIR = path.join(tmpdir(), "alaya-temporal-cli");
+
 function createHarness(options: {
   readonly shutdown: () => Promise<void>;
   readonly cutOver?: TemporalCutoverCommandDependencies["cutOver"];
@@ -27,7 +30,7 @@ function createHarness(options: {
   const bridge = createAlayaCliBridge(
     { startupSteps: [{ step: "http-app", completedAt: "2026-07-17T00:00:00.000Z" }] },
     {
-      env: { ALAYA_CONFIG_DIR: "/tmp/alaya-temporal-cli" },
+      env: { ALAYA_CONFIG_DIR: CLI_CONFIG_DIR },
       stdin: new PassThrough(),
       stdout: stdout.stream,
       stderr: stderr.stream,
@@ -69,7 +72,7 @@ describe("temporal cutover CLI", () => {
     const cutOver = vi.fn(async (input: Parameters<NonNullable<TemporalCutoverCommandDependencies["cutOver"]>>[0]) => {
       order.push("cutover");
       expect(input).toMatchObject({
-        configPaths: { tomlPath: path.join("/tmp/alaya-temporal-cli", "alaya.toml") },
+        configPaths: { tomlPath: path.join(CLI_CONFIG_DIR, "alaya.toml") },
         candidateFilename: "candidate.db",
         candidateReceiptFilename: "receipt.json",
         journalFilename: "journal.json",

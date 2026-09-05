@@ -24,7 +24,7 @@ packages must not depend on the bench runner.
 ## Commands
 
 ```bash
-rtk pnpm --filter @do-soul/alaya-bench-runner run typecheck
-rtk pnpm --filter @do-soul/alaya-bench-runner run test
-rtk pnpm --filter @do-soul/alaya-bench-runner run build
+pnpm --filter @do-soul/alaya-bench-runner run typecheck
+pnpm --filter @do-soul/alaya-bench-runner run test
+pnpm --filter @do-soul/alaya-bench-runner run build
 ```

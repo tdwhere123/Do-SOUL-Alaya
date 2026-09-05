@@ -12,6 +12,11 @@ import {
 } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
+import {
+  DIRECTORY_OPEN_FLAG,
+  NO_FOLLOW_OPEN_FLAG,
+  splitAbsolutePath
+} from "../../../fs/open-flags.js";
 
 export interface DirectoryIdentity {
   readonly device: string;
@@ -22,6 +27,41 @@ export interface BoundCacheRoot {
   readonly path: string;
   readonly descriptor: number;
   readonly identity: DirectoryIdentity;
+}
+
+const namedDirectoryAnchors = new Set<string>();
+
+export function boundDirectoryAnchor(descriptor: number, namedPath: string): string {
+  if (process.platform === "linux") return `/proc/self/fd/${descriptor}`;
+  if (namedPath.length > 0) namedDirectoryAnchors.add(namedPath);
+  return namedPath;
+}
+
+export function isBoundDirectoryAnchor(path: string): boolean {
+  if (/^\/proc\/self\/fd\/\d+(?:\/|$)/u.test(path)) return true;
+  for (const root of namedDirectoryAnchors) {
+    if (path === root || path.startsWith(`${root}${sep}`) ||
+        path.startsWith(`${root}/`)) return true;
+  }
+  return false;
+}
+
+export function boundDirectoryChildPath(
+  parentFd: number,
+  parentNamedPath: string,
+  segment: string
+): string {
+  if (process.platform === "linux") return `/proc/self/fd/${parentFd}/${segment}`;
+  return parentNamedPath.endsWith(sep)
+    ? `${parentNamedPath}${segment}`
+    : `${parentNamedPath}${sep}${segment}`;
+}
+
+export function boundDirectoryChildNoFollow(path: string): boolean {
+  // Darwin /var /tmp /etc are OS prefix symlinks; O_NOFOLLOW on those
+  // components would reject every tmpdir path.
+  return process.platform !== "darwin" ||
+    (path !== "/var" && path !== "/tmp" && path !== "/etc");
 }
 
 export function openOrCreateCacheRoot(cacheRoot: string): BoundCacheRoot {
@@ -45,11 +85,17 @@ function openCacheRootChain(cacheRoot: string, create: boolean): BoundCacheRoot 
   if (!isAbsolute(absolute)) {
     throw new ExtractionCacheInvariantError("extraction cache root must be absolute");
   }
-  const segments = absolute.split(sep).filter(Boolean);
-  let descriptor = openBoundDirectory(sep, false);
+  let walk;
   try {
-    for (const segment of segments) {
-      const anchored = `/proc/self/fd/${descriptor}/${segment}`;
+    walk = splitAbsolutePath(absolute);
+  } catch {
+    throw new ExtractionCacheInvariantError("extraction cache root must be absolute");
+  }
+  let descriptor = openBoundDirectory(walk.root, false);
+  let namedPath = walk.root;
+  try {
+    for (const segment of walk.segments) {
+      const anchored = boundDirectoryChildPath(descriptor, namedPath, segment);
       if (create) {
         try {
           mkdirSync(anchored, { mode: 0o700 });
@@ -57,9 +103,19 @@ function openCacheRootChain(cacheRoot: string, create: boolean): BoundCacheRoot 
           if (!hasErrorCode(cause, "EEXIST")) throw cause;
         }
       }
-      const child = openBoundDirectory(anchored, true);
+      const parentIdentity = readBoundDirectoryIdentity(descriptor, "extraction cache root");
+      const child = openBoundDirectory(anchored, boundDirectoryChildNoFollow(anchored));
+      try {
+        assertBoundDirectoryIdentity(descriptor, parentIdentity, "extraction cache root");
+      } catch (cause) {
+        closeSync(child);
+        throw cause;
+      }
       closeSync(descriptor);
       descriptor = child;
+      namedPath = namedPath.endsWith(sep)
+        ? `${namedPath}${segment}`
+        : `${namedPath}${sep}${segment}`;
     }
     const identity = readBoundDirectoryIdentity(descriptor, "extraction cache root");
     assertDirectoryIdentity(absolute, identity, "extraction cache root");
@@ -71,15 +127,8 @@ function openCacheRootChain(cacheRoot: string, create: boolean): BoundCacheRoot 
 }
 
 function openBoundDirectory(path: string, noFollow: boolean): number {
-  const directoryFlag = constants.O_DIRECTORY;
-  const noFollowFlag = constants.O_NOFOLLOW;
-  if (typeof directoryFlag !== "number" || typeof noFollowFlag !== "number") {
-    throw new ExtractionCacheInvariantError(
-      "extraction cache writer leases require directory descriptor support"
-    );
-  }
-  const descriptor = openSync(path, constants.O_RDONLY | directoryFlag |
-    (noFollow ? noFollowFlag : 0));
+  const descriptor = openSync(path, constants.O_RDONLY | DIRECTORY_OPEN_FLAG |
+    (noFollow ? NO_FOLLOW_OPEN_FLAG : 0));
   try {
     const opened = fstatSync(descriptor, { bigint: true });
     const named = lstatSync(path, { bigint: true });
@@ -136,21 +185,30 @@ export function assertBoundDirectoryIdentity(
 
 export function unlinkBoundChildDirectory(input: {
   readonly parentFd: number;
+  readonly parentPath?: string;
   readonly childName: string;
   readonly identity: DirectoryIdentity;
   readonly tombstoneName: string;
   readonly assertOpened?: (stableChildPath: string) => void;
 }): void {
-  const childPath = `/proc/self/fd/${input.parentFd}/${input.childName}`;
+  const parentNamedPath = input.parentPath ?? "";
+  if (process.platform !== "linux" && parentNamedPath.length === 0) {
+    throw new ExtractionCacheInvariantError(
+      "bound child directory unlink requires a captured parent path"
+    );
+  }
+  const childPath = boundDirectoryChildPath(input.parentFd, parentNamedPath, input.childName);
   const childFd = openBoundDirectory(childPath, true);
   try {
     assertBoundDirectoryIdentity(childFd, input.identity, "bound child directory");
-    input.assertOpened?.(`/proc/self/fd/${childFd}`);
+    input.assertOpened?.(boundDirectoryAnchor(childFd, childPath));
     const named = readDirectoryIdentity(childPath, "bound child directory");
     if (named.device !== input.identity.device || named.inode !== input.identity.inode) {
       throw new ExtractionCacheInvariantError("bound child directory identity changed while leased");
     }
-    const tombstonePath = `/proc/self/fd/${input.parentFd}/${input.tombstoneName}`;
+    const tombstonePath = boundDirectoryChildPath(
+      input.parentFd, parentNamedPath, input.tombstoneName
+    );
     renameSync(childPath, tombstonePath);
     const relocated = readDirectoryIdentity(tombstonePath, "bound child directory");
     if (relocated.device !== input.identity.device || relocated.inode !== input.identity.inode) {
@@ -161,9 +219,11 @@ export function unlinkBoundChildDirectory(input: {
       }
       throw new ExtractionCacheInvariantError("bound child directory identity changed while leased");
     }
-    const stableChild = `/proc/self/fd/${childFd}`;
-    for (const child of readdirSync(stableChild)) {
-      rmSync(`${stableChild}/${child}`, { recursive: true, force: true });
+    const contentsPath = process.platform === "linux"
+      ? `/proc/self/fd/${childFd}`
+      : tombstonePath;
+    for (const child of readdirSync(contentsPath)) {
+      rmSync(`${contentsPath}/${child}`, { recursive: true, force: true });
     }
     rmdirSync(tombstonePath);
   } finally {

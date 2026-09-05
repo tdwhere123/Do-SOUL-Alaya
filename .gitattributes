@@ -1,1 +1,4 @@
 docs/bench-history/ export-ignore
+*.mjs text eol=lf
+*.sh text eol=lf
+apps/bench-runner/src/__tests__/longmemeval/extraction/authority/fixtures/*.json text eol=lf

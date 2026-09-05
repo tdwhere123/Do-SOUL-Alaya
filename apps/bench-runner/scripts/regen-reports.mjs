@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// must run after: rtk pnpm --filter @do-soul/alaya-eval build
+// must run after: pnpm --filter @do-soul/alaya-eval build
 // @anchor regen-reports — one-shot rewrite of report.md for every history
 // entry under docs/bench-history/{self,public}/. The bench harness
 // already produced honest kpi.json artifacts; this script only re-renders

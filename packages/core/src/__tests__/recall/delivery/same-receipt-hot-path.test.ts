@@ -86,7 +86,7 @@ describe("same-result observation and receipt reuse", () => {
     expect(() => assertCanonicalSelectionReceipt({
       ...receipt,
       ranking_authority: "shape-invalid-but-closed"
-    } as CanonicalSelectionReceipt)).toThrow();
+    } as unknown as CanonicalSelectionReceipt)).toThrow();
   });
 
   it("builds the live field once and peels frontiers once", () => {

@@ -6,7 +6,10 @@ import {
   type EvidenceCapsule,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { EvidenceService } from "../../memory/evidence-service.js";
+import {
+  EvidenceService,
+  type EvidenceServiceEvidenceCapsuleRepoPort
+} from "../../memory/evidence-service.js";
 import { createEvidenceInput, createStoredEvidence } from "./evidence-service-fixture.js";
 
 describe("EvidenceService", () => {
@@ -14,7 +17,7 @@ describe("EvidenceService", () => {
     const order: string[] = [];
     const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const store = new Map<string, EvidenceCapsule>();
-    const create = vi.fn((capsule: EvidenceCapsule) => {
+    const create = vi.fn<NonNullable<EvidenceServiceEvidenceCapsuleRepoPort["createInCurrentTransaction"]>>((capsule) => {
       order.push("repo_create");
       store.set(capsule.object_id, Object.freeze({ ...capsule }));
       return store.get(capsule.object_id)!;
@@ -37,7 +40,7 @@ describe("EvidenceService", () => {
         transactional: <T>(fn: () => T) => fn()
       },
       evidenceCapsuleRepo: {
-        create,
+        create: create as unknown as EvidenceServiceEvidenceCapsuleRepoPort["create"],
         createInCurrentTransaction: create,
         deleteById: vi.fn(async () => {
           throw new Error("not used");

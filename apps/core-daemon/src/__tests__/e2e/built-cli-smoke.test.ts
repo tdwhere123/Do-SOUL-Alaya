@@ -93,7 +93,7 @@ async function assertBuiltCliAvailable(): Promise<void> {
   try {
     await access(BRIDGE_DIST_PATH, fsConstants.R_OK);
   } catch {
-    throw new Error("Built CLI dist missing. Run `rtk pnpm build` before built-cli smoke tests.");
+    throw new Error("Built CLI dist missing. Run `pnpm build` before built-cli smoke tests.");
   }
 }
 

@@ -70,7 +70,7 @@ describe("sqlite embedding overlay bind", () => {
     expect(count(database.connection, "SELECT COUNT(*) FROM main.memory_embeddings")).toBe(0);
     expect(count(database.connection, "SELECT COUNT(*) FROM memory_embeddings")).toBe(1);
     database.close();
-  });
+  }, 30_000);
 
   it("rejects a cached connection whose bind document points at another overlay", async () => {
     const root = await mkdtemp(join(tmpdir(), "alaya-overlay-bind-mismatch-"));

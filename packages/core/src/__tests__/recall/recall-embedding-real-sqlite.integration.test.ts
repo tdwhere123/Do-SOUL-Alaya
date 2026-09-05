@@ -260,9 +260,9 @@ describe("RecallService embedding integration (real SQLite + stored vectors)", (
     const semanticDiagnostic = live.diagnostics?.candidates.find(
       (candidate) => candidate.object_id === SEMANTIC_ID
     );
-    expect(semanticDiagnostic?.score_factors.embedding_similarity).toBeGreaterThan(0);
-    expect(semanticDiagnostic?.per_stream_rank.embedding_similarity).toBe(1);
-    expect(semanticDiagnostic?.fused_rank_contribution_per_stream.embedding_similarity)
+    expect(semanticDiagnostic?.score_factors!.embedding_similarity).toBeGreaterThan(0);
+    expect(semanticDiagnostic?.per_stream_rank!.embedding_similarity).toBe(1);
+    expect(semanticDiagnostic?.fused_rank_contribution_per_stream!.embedding_similarity)
       .toBeGreaterThan(0);
     expect(semanticDiagnostic?.fused_score).toBeCloseTo(
       semanticDiagnostic?.flood_potential?.R_obj ?? -1,

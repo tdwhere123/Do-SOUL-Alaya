@@ -263,7 +263,9 @@ describe("LocalOnnxEmbeddingClient", () => {
       expect(extractor).toHaveBeenCalledTimes(1);
 
       releases.shift()?.(output);
-      await vi.waitFor(() => expect(extractor).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(extractor).toHaveBeenCalledTimes(2), {
+        timeout: 5_000
+      });
       releases.shift()?.(output);
       await expect(second).resolves.toHaveLength(1);
     } finally {
@@ -278,7 +280,7 @@ describe("LocalOnnxEmbeddingClient", () => {
       restoreEnv("ALAYA_LOCAL_ONNX_LOCK_PATH", previousLockPath);
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it("uses the entry deadline while waiting for the host lock and never starts orphan work", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "alaya-embedding-wait-"));

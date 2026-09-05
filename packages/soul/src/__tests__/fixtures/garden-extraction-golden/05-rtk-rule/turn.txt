@@ -1,1 +1,0 @@
-Always use rtk when running shell commands in this repository.

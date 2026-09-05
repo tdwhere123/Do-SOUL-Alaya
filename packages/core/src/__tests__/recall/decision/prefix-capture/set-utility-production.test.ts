@@ -56,7 +56,7 @@ describe("production capture set utility states", () => {
     const a = candidate("candidate-a", ["evidence-a"], "Equivalent evidence");
     const b = candidate("candidate-b", ["evidence-b"], "Equivalent evidence");
     const data = supplementary({
-      status: "composed",
+      status: "composed" as const,
       truncated: false,
       variable_collections: [{
         variable_id: "answer",
@@ -68,7 +68,7 @@ describe("production capture set utility states", () => {
           evidence_ids: ["evidence-other"]
         }]
       }]
-    });
+    } as unknown as RecallSupplementaryData["openSemanticFactorComposition"]);
     const utilities = buildProductionSetUtilities({ candidates: [a, b], supplementaryData: data });
     const rows = [...utilities.values()];
 
@@ -108,7 +108,7 @@ describe("production capture set utility states", () => {
   it("keeps truncated Values unknown and neutral", () => {
     const utility = onlyUtility(candidate("candidate-a", ["evidence-a"]), supplementary({
       status: "composed", truncated: true, variable_collections: []
-    }));
+    } as unknown as RecallSupplementaryData["openSemanticFactorComposition"]));
     expect(utility.values).toEqual({ status: "truncated", values: [] });
   });
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import {
   inspectCachedExtraction,
   type CachedExtractionInspection
@@ -160,7 +160,7 @@ function walkCacheRoot(
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
     if (entry.isSymbolicLink()) {
-      throw new Error(`extraction cache contains a symlink: ${relative(root, path)}`);
+      throw new Error(`extraction cache contains a symlink: ${posixRelative(root, path)}`);
     }
     if (entry.isDirectory()) {
       if (directory === root && entry.name === MATERIALIZATION_STAGE_NAME) {
@@ -192,13 +192,17 @@ function walkCacheRoot(
     if (entry.isFile() && match?.[1] !== undefined && isCanonicalShardPath(root, path, match[1])) {
       keys.push(match[1]);
     } else {
-      unexpectedPaths.push(relative(root, path));
+      unexpectedPaths.push(posixRelative(root, path));
     }
   }
 }
 
 function isCanonicalShardPath(root: string, path: string, cacheKey: string): boolean {
-  return relative(root, path) === `${cacheKey.slice(0, 2)}/${cacheKey}.json`;
+  return posixRelative(root, path) === `${cacheKey.slice(0, 2)}/${cacheKey}.json`;
+}
+
+function posixRelative(root: string, target: string): string {
+  return relative(root, target).split(sep).join("/");
 }
 
 function countsFor(shards: readonly ExtractionCacheShard[], orphanKeys: readonly string[]) {

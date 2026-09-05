@@ -41,8 +41,8 @@ describe("lexical lane universe wire parity", () => {
     const receipt = field.lexical_raw_rank_receipt;
     if (receipt === undefined) throw new Error("expected captured receipt");
     const frozen = freezeLexicalBoundProducerReceipt(receipt);
-    const porter = frozen.lanes.find((lane) => lane.lane_id === "porter")?.evaluated_universe;
-    const exact = frozen.lanes.find((lane) => lane.lane_id === "exact")?.evaluated_universe;
+    const porter = frozen!.lanes.find((lane) => lane.lane_id === "porter")?.evaluated_universe;
+    const exact = frozen!.lanes.find((lane) => lane.lane_id === "exact")?.evaluated_universe;
     expect(porter?.producer_id).toBe(LEXICAL_LANE_UNIVERSE_PRODUCER_ID);
     expect(porter?.index_kind).toBe("memory_content_fts_porter");
     expect(exact?.index_kind).toBe("memory_entries");

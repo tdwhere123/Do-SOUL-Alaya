@@ -163,7 +163,7 @@ describe("support source jurisdiction", () => {
       query_id: QUERY,
       snapshot_digest: SNAPSHOT,
       candidates: [poisoned as SupportCandidateReceiptV1]
-    })).toThrow("planted getter");
+    })).toThrow(/getter/i);
   });
 
   it("maps many receipts to one semantic identity without dropping provenance", () => {

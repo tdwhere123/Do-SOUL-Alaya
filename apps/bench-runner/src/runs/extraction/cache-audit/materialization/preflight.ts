@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { computeExtractionKeySetSha256 } from
@@ -25,6 +25,7 @@ import {
 import { matchStableRegularFileNoFollow } from "./descriptor-io.js";
 import { inspectBoundedMaterializationInventory } from "./preflight-inventory.js";
 import { isStableLeasePath } from "../../fill/manifest/fill-root-guard.js";
+import { isPhysicalNamedPath } from "../../../fs/opened-contained-path.js";
 
 export const DEFAULT_MAX_SHARD_BYTES = MAX_MATERIALIZATION_SHARD_BYTES;
 export const MAX_SOURCE_MANIFEST_BYTES = 32 * 1024 * 1024;
@@ -223,7 +224,7 @@ function assertIdentityBindings(
 function assertCanonicalRoots(sourceRoot: string, targetRoot: string): void {
   for (const root of [sourceRoot, targetRoot]) {
     const stat = lstatSync(root);
-    if (resolve(root) !== root || realpathSync(root) !== root ||
+    if (resolve(root) !== root || !isPhysicalNamedPath(root) ||
         !stat.isDirectory() || stat.isSymbolicLink()) {
       throw new Error("materialization roots must be canonical non-symlink directories");
     }

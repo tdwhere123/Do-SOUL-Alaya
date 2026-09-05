@@ -1,9 +1,11 @@
+import { readdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { closeCachedDatabase as closeStorageCachedDatabase } from "@do-soul/alaya-storage";
 
 const TRANSIENT_FS_CODES = new Set(["EBUSY", "EPERM", "ENOTEMPTY"]);
+const SQLITE_FILE = /\.(?:db|sqlite)$/u;
 
 export function closeCachedDatabase(filename: string): void {
   closeStorageCachedDatabase(filename);
@@ -20,6 +22,7 @@ export async function removeTempDirectory(
   directory: string,
   dbFilenames: readonly string[] = ["alaya.db"]
 ): Promise<void> {
+  closeSqliteFilesUnder(directory);
   for (const dbFilename of dbFilenames) {
     closeCachedDatabase(join(directory, dbFilename));
   }
@@ -38,5 +41,23 @@ export async function removeTempDirectory(
       }
       await sleep(retryDelayMs);
     }
+  }
+}
+
+function closeSqliteFilesUnder(directory: string): void {
+  try {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const next = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        closeSqliteFilesUnder(next);
+        continue;
+      }
+      if (SQLITE_FILE.test(entry.name)) closeCachedDatabase(next);
+    }
+  } catch (error) {
+    const code = error instanceof Error && "code" in error
+      ? String((error as NodeJS.ErrnoException).code)
+      : undefined;
+    if (code !== "ENOENT") throw error;
   }
 }

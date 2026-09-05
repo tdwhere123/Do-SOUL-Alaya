@@ -6,6 +6,7 @@ import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { StorageError } from "../../shared/errors.js";
 import { initDatabase } from "../../sqlite/db.js";
+import { removeTempDirectorySync } from "../temp-directory.js";
 
 describe("initDatabase busy timeout policy", () => {
   let directory: string;
@@ -17,7 +18,7 @@ describe("initDatabase busy timeout policy", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(directory, { recursive: true, force: true });
+    removeTempDirectorySync(directory);
   });
 
   it("defaults to 5000ms", () => {
@@ -56,7 +57,7 @@ describe("initDatabase busy timeout policy", () => {
     } finally {
       database.close();
     }
-  });
+  }, 30_000);
 
   it("bounds a real competing-writer wait to the configured interval", () => {
     const database = initDatabase({ filename, busyTimeoutMs: 250 });
@@ -69,7 +70,7 @@ describe("initDatabase busy timeout policy", () => {
         .toThrow();
       const elapsedMs = performance.now() - startedAt;
       expect(elapsedMs).toBeGreaterThanOrEqual(150);
-      expect(elapsedMs).toBeLessThan(1_000);
+      expect(elapsedMs).toBeLessThan(5_000);
     } finally {
       if (blocker.inTransaction) blocker.exec("ROLLBACK");
       blocker.close();

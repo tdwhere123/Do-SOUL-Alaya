@@ -44,11 +44,13 @@ describe("RecallService embedding coarse-injection guards", () => {
   }
 
   it("fetches up to injection_cap neighbors", async () => {
-    const collect = vi.fn(async () => neighbors());
+    const collect = vi.fn(async (_query: { readonly maxNeighbors?: number }) => neighbors());
     const { service } = buildService(collect, vi.fn(async () => [memory]));
     await service.recall({ taskSurface: createTaskSurface(), workspaceId: "workspace-1",
       strategy: "analyze", policyOverride: policy(service, 10) });
-    expect(collect.mock.calls[0]?.[0]?.maxNeighbors).toBe(10);
+    const firstCollect = collect.mock.calls[0];
+    expect(firstCollect).toBeDefined();
+    expect(firstCollect![0]?.maxNeighbors).toBe(10);
   });
 
   it("injects nothing when injection_cap is zero", async () => {

@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import { openContainedArtifact } from "../../../cli/merge/contained-artifact-path.js";
 
 describe("contained artifact descriptors", () => {
-  it("keeps reading the validated inode after its path is swapped", async () => {
+  it.skipIf(process.platform === "win32")(
+    "keeps reading the validated inode after its path is swapped", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "contained-artifact-"));
     const artifactPath = path.join(root, "artifact.json");
     const outsidePath = path.join(root, "outside.json");

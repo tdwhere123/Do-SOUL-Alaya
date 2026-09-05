@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
-import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -22,6 +21,7 @@ import {
 import { writeCompletedExtractionCacheFixture } from
   "../../extraction/completed-extraction-cache-fixture.js";
 import { makeShardProvenance } from "../../runner/runner-concurrency-fixture.js";
+import { removeTempDirectory } from "../../../support/temp-cleanup.js";
 
 const DATASET_SHA = "d".repeat(64);
 const MODEL = "test-extraction-model";
@@ -32,9 +32,7 @@ const ENV = {
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) =>
-    rm(root, { recursive: true, force: true })
-  ));
+  await Promise.all(roots.splice(0).map((root) => removeTempDirectory(root)));
 });
 
 describe("snapshot writer preflight proof atomicity", () => {
