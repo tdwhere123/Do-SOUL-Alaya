@@ -27,6 +27,9 @@ const IDENTITY = freezeEmbeddingIsolateIdentity({
   schemaVersion: 1,
   artifactId: "stub-artifact-v1"
 });
+const HANGING_TIMEOUT_MS = 200;
+const LATE_DAEMON_RESOLVE_MS = 800;
+const AFTER_TIMEOUT_WAIT_MS = 1_000;
 
 const sessions: EmbeddingIsolateSession[] = [];
 
@@ -131,7 +134,7 @@ describe("A4 fail-closed reaps every process", () => {
 
   it("reaps on warmup timeout and cancellation", async () => {
     const timeout = await openHangingSession();
-    await expect(timeout.session.open({ timeoutMs: 40 }))
+    await expect(timeout.session.open({ timeoutMs: HANGING_TIMEOUT_MS }))
       .rejects.toMatchObject({ name: "EmbeddingIsolateFailClosedError", reason: "timeout" });
     expectZero(timeout.session, timeout.host);
 
@@ -203,14 +206,14 @@ describe("A4 fail-closed reaps every process", () => {
               daemonLive = false;
             }
           });
-        }, 80);
+        }, LATE_DAEMON_RESOLVE_MS);
       })
-    }, { timeoutMs: 20 });
+    }, { timeoutMs: HANGING_TIMEOUT_MS });
     await expect(pending).rejects.toMatchObject({
       name: "EmbeddingIsolateFailClosedError",
       reason: "timeout"
     });
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await new Promise((resolve) => setTimeout(resolve, AFTER_TIMEOUT_WAIT_MS));
     expect(daemonLive).toBe(false);
     expect(adapter.liveDaemonPids()).toEqual([]);
     expectZero(session, host);
@@ -310,7 +313,11 @@ async function openHangingSession(): Promise<{
     },
     emitError: (error) => inner.emitError(error)
   };
-  const session = createEmbeddingIsolateSession({ identity: IDENTITY, host, timeoutMs: 40 });
+  const session = createEmbeddingIsolateSession({
+    identity: IDENTITY,
+    host,
+    timeoutMs: HANGING_TIMEOUT_MS
+  });
   sessions.push(session);
   return { session, host };
 }

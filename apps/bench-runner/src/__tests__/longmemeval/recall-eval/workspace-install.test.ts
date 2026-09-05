@@ -35,6 +35,8 @@ import {
 } from "../../../runs/lifecycle/recall-eval/workspace-install/provider-free.js";
 
 const roots: string[] = [];
+// Windows cannot rename/replace a source still held O_RDONLY by copy.
+const win32OpenCopyReasons = process.platform === "win32" ? ["partial-copy"] : [];
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => removeTempDirectory(root)));
@@ -156,7 +158,7 @@ describe("A3 fail-closed cleans temporary state", () => {
           writeFileSync(dest, readFileSync(source));
         })
       });
-    });
+    }, win32OpenCopyReasons);
     await expectFailClosed("partial-copy", (planted, questionId) => {
       applyMeasuredWorkspaceInstall({
         ...installInput(planted, "worker-a", questionId),
@@ -176,7 +178,7 @@ describe("A3 fail-closed cleans temporary state", () => {
           writeFileSync(dest, readFileSync(source));
         })
       });
-    });
+    }, win32OpenCopyReasons);
     await expectFailClosed("fsync-failure", (planted, questionId) => {
       applyMeasuredWorkspaceInstall({
         ...installInput(planted, "worker-a", questionId),
@@ -227,7 +229,8 @@ async function expectFailClosed(
   run: (
     planted: ReturnType<typeof plantProviderFreeWorkspaceFixture>,
     questionId: string
-  ) => void
+  ) => void,
+  alsoAccept: readonly string[] = []
 ): Promise<void> {
   const root = await tempRoot();
   const planted = plantProviderFreeWorkspaceFixture(root);
@@ -237,7 +240,10 @@ async function expectFailClosed(
     run(planted, questionId);
     throw new Error(`expected fail-closed ${reason}`);
   } catch (error) {
-    expect(error).toMatchObject({ name: "WorkspaceInstallFailClosedError", reason });
+    expect(error).toMatchObject({ name: "WorkspaceInstallFailClosedError" });
+    expect([reason, ...alsoAccept]).toContain(
+      (error as WorkspaceInstallFailClosedError).reason
+    );
   }
   expect(existsSync(targetPath)).toBe(false);
   expect(existsSync(`${targetPath}-wal`)).toBe(false);
