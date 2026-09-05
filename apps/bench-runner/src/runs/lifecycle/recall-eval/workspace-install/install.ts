@@ -17,7 +17,7 @@ import {
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { DatabaseSync } from "node:sqlite";
-import { NO_FOLLOW_OPEN_FLAG } from "../../../fs/open-flags.js";
+import { FSYNC_FILE_OPEN_FLAG } from "../../../fs/open-flags.js";
 import {
   hashRegularFileNoFollow,
   withRegularFileNoFollow
@@ -427,7 +427,7 @@ function readWorkspaceReceipt(receiptPath: string): ReceiptContents {
 }
 
 function fsyncPath(path: string): void {
-  const fd = openSync(path, constants.O_RDONLY | NO_FOLLOW_OPEN_FLAG);
+  const fd = openSync(path, FSYNC_FILE_OPEN_FLAG);
   try {
     fsyncSync(fd);
   } finally {

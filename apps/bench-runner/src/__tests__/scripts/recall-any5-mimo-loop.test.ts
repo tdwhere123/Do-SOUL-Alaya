@@ -1,13 +1,14 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { removeTempDirectory } from "../support/temp-cleanup.js";
 import {
   diagnosticArgs,
   execFileAsync,
   expectCacheOnlyLoopEnv,
   expectRejectedBeforeLoop,
-  flagValue,
+  expectFlagPath,
   invokeDiagnosticLoop,
   script,
   writeCompletedRecallCheckpoint,
@@ -47,7 +48,7 @@ describe("recall-any5-mimo-loop", () => {
     });
 
     afterEach(async () => {
-      await rm(tmpDir, { recursive: true, force: true });
+      await removeTempDirectory(tmpDir);
     });
 
     it("passes --snapshot to diagnostic-loop and omits --snapshot-out", async () => {
@@ -60,7 +61,7 @@ describe("recall-any5-mimo-loop", () => {
         "--work-root",
         harness.workRoot
       ]);
-      expect(flagValue(argv, "--snapshot")).toBe(harness.snapshot);
+      expectFlagPath(argv, "--snapshot", harness.snapshot);
       expect(argv).not.toContain("--snapshot-out");
       await expectCacheOnlyLoopEnv(harness, argv);
     });
@@ -91,7 +92,7 @@ describe("recall-any5-mimo-loop", () => {
         "--work-root",
         harness.workRoot
       ]);
-      expect(flagValue(argv, "--embedding-cache-overlay")).toBe(overlay);
+      expectFlagPath(argv, "--embedding-cache-overlay", overlay);
       await expectCacheOnlyLoopEnv(harness, argv);
     });
 
@@ -109,7 +110,7 @@ describe("recall-any5-mimo-loop", () => {
         "--work-root",
         harness.workRoot
       ]);
-      expect(flagValue(argv, "--canary-unlock")).toBe(unlock);
+      expectFlagPath(argv, "--canary-unlock", unlock);
       await expectCacheOnlyLoopEnv(harness, argv);
     });
 
@@ -122,9 +123,7 @@ describe("recall-any5-mimo-loop", () => {
         harness.workRoot
       ]);
       expect(argv).not.toContain("--snapshot");
-      expect(path.normalize(flagValue(argv, "--snapshot-out") ?? "")).toBe(
-        path.normalize(path.join(harness.workRoot, "snapshot.db"))
-      );
+      expectFlagPath(argv, "--snapshot-out", path.join(harness.workRoot, "snapshot.db"));
       await expectCacheOnlyLoopEnv(harness, argv);
     });
 
@@ -288,7 +287,7 @@ describe("recall-any5-mimo-loop", () => {
         "--work-root",
         harness.workRoot
       ]);
-      expect(flagValue(argv, "--snapshot")).toBe(harness.snapshot);
+      expectFlagPath(argv, "--snapshot", harness.snapshot);
       expect(argv).not.toContain("--snapshot-out");
     });
 
@@ -308,13 +307,11 @@ describe("recall-any5-mimo-loop", () => {
           : ["--limit", "1", "--work-root", harness.workRoot]
       );
       if (reuse) {
-        expect(flagValue(argv, "--snapshot")).toBe(harness.snapshot);
+        expectFlagPath(argv, "--snapshot", harness.snapshot);
         expect(argv).not.toContain("--snapshot-out");
       } else {
         expect(argv).not.toContain("--snapshot");
-        expect(path.normalize(flagValue(argv, "--snapshot-out") ?? "")).toBe(
-          path.normalize(path.join(harness.workRoot, "snapshot.db"))
-        );
+        expectFlagPath(argv, "--snapshot-out", path.join(harness.workRoot, "snapshot.db"));
       }
     });
   });

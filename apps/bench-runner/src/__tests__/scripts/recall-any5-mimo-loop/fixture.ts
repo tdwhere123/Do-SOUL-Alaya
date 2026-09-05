@@ -326,6 +326,14 @@ export function flagValue(argv: readonly string[], flag: string): string | undef
   return index < 0 ? undefined : argv[index + 1];
 }
 
+export function expectFlagPath(
+  argv: readonly string[],
+  flag: string,
+  expected: string
+): void {
+  expect(path.normalize(flagValue(argv, flag) ?? "")).toBe(path.normalize(expected));
+}
+
 async function writeFakeNode(
   binDir: string,
   argvCapture: string,

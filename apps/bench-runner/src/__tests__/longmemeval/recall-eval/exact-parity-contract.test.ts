@@ -280,22 +280,20 @@ function resultFields(
 }
 
 function attributionFields(
-  overrides: DeepPartial<Omit<PerformanceAttributionReceipt, "schema" | "role">> = {}
+  overrides: Overlay<Omit<PerformanceAttributionReceipt, "schema" | "role">> = {}
 ): PerformanceAttributionReceipt {
   return freezePerformanceAttributionReceipt({
     clocks: clockFields(overrides.clocks),
-    pager: {
+    pager: overlay({
       childSpawnCount: observedNumber(1),
       modelChildSpawnCount: observedNumber(1),
-      modelReadinessCount: observedNumber(1),
-      ...overrides.pager
-    },
-    workspace: {
+      modelReadinessCount: observedNumber(1)
+    }, overrides.pager),
+    workspace: overlay({
       receiptVerificationCount: observedNumber(1),
-      receiptVerification: observedVerification("pass"),
-      ...overrides.workspace
-    },
-    disk: {
+      receiptVerification: observedVerification("pass")
+    }, overrides.workspace),
+    disk: overlay<PerformanceAttributionReceipt["disk"]>({
       clone: {
         status: "observed",
         mode: "copy_fallback",
@@ -305,37 +303,35 @@ function attributionFields(
       fsyncCount: observedNumber(1),
       sqliteReopenCount: observedNumber(1),
       daemonRestartCount: observedNumber(1),
-      questionExecutionCount: observedNumber(2),
-      ...overrides.disk
-    },
-    rss: {
+      questionExecutionCount: observedNumber(2)
+    }, overrides.disk),
+    rss: overlay({
       parentPeakBytes: observedNumber(1),
       childPeakBytes: notObserved("pager/model child RSS was not sampled"),
-      aggregatePeakBytes: notObserved("pager/model child RSS was not sampled"),
-      ...overrides.rss
-    },
-    retained: {
+      aggregatePeakBytes: notObserved("pager/model child RSS was not sampled")
+    }, overrides.rss),
+    retained: overlay({
       compactRowCount: observedNumber(3),
-      shardPayloadBytes: observedNumber(20),
-      ...overrides.retained
-    }
+      shardPayloadBytes: observedNumber(20)
+    }, overrides.retained)
   });
 }
 
 function clockFields(
-  overrides: DeepPartial<PerformanceAttributionReceipt["clocks"]> = {}
+  overrides: Overlay<PerformanceAttributionReceipt["clocks"]> = {}
 ): PerformanceAttributionReceipt["clocks"] {
-  return {
+  return overlay({
     clockAMs: notObserved("daemon.recall was not executed"),
     harnessOpenMs: observedNumber(1),
     harnessRecallMs: observedNumber(2),
     harnessTotalWallMs: observedNumber(3),
     modelReadinessMs: observedNumber(4),
-    diskPhaseMs: observedNumber(5),
-    ...overrides
-  };
+    diskPhaseMs: observedNumber(5)
+  }, overrides);
 }
 
-type DeepPartial<T> = {
-  readonly [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
-};
+type Overlay<T> = { readonly [K in keyof T]?: T[K] };
+
+function overlay<T extends object>(base: T, patch: Overlay<T> = {}): T {
+  return { ...base, ...patch } as T;
+}

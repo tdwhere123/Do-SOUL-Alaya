@@ -307,7 +307,8 @@ async function openHangingSession(): Promise<{
     },
     get livePids() {
       return inner.livePids;
-    }
+    },
+    emitError: (error) => inner.emitError(error)
   };
   const session = createEmbeddingIsolateSession({ identity: IDENTITY, host, timeoutMs: 40 });
   sessions.push(session);

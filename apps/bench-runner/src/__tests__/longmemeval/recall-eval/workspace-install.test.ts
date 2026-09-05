@@ -84,6 +84,9 @@ describe("A1 forced reflink and copy-fallback phase attribution", () => {
       cloneReuseProved: false,
       copyFsyncDominant: "not_verified"
     });
+    if (measured.decision.status !== "NO_OPTIMIZATION_JUSTIFIED") {
+      throw new Error("workspace install must remain unoptimized until clone reuse is proved");
+    }
     expect(measured.decision.reason).toMatch(/clone reuse is not independently proved/u);
     expect(measured.decision.reason).toMatch(/NOT_VERIFIED/u);
     expect(measured.reflink.io.clockAMs).toEqual({

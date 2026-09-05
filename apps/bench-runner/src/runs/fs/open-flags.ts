@@ -10,6 +10,10 @@ export const DIRECTORY_OPEN_FLAG = typeof constants.O_DIRECTORY === "number"
 export const NONBLOCK_OPEN_FLAG = typeof constants.O_NONBLOCK === "number"
   ? constants.O_NONBLOCK
   : 0;
+// FlushFileBuffers requires GENERIC_WRITE; O_RDONLY is EPERM on Windows.
+export const FSYNC_FILE_OPEN_FLAG = (
+  process.platform === "win32" ? constants.O_RDWR : constants.O_RDONLY
+) | NO_FOLLOW_OPEN_FLAG;
 
 export function splitAbsolutePath(absolute: string): {
   readonly root: string;

@@ -1,7 +1,8 @@
-import { access, chmod, mkdtemp, rm } from "node:fs/promises";
+import { access, chmod, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import {
   diagnosticArgs,
   expectCacheOnlyLoopEnv,
@@ -22,7 +23,7 @@ describe("recall-any5-mimo-loop replay guards", () => {
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await removeTempDirectory(tmpDir);
   });
 
   it("fails closed on inherited packet trace before history or loop mutation", async () => {

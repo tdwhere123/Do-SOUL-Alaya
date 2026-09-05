@@ -12,6 +12,7 @@ import {
   statSync,
   writeFileSync
 } from "node:fs";
+import { FSYNC_FILE_OPEN_FLAG } from "../../../fs/open-flags.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -393,7 +394,7 @@ function verifyWorkspaceReceipt(
 }
 
 function fsyncPath(path: string): void {
-  const fd = openSync(path, constants.O_RDONLY);
+  const fd = openSync(path, FSYNC_FILE_OPEN_FLAG);
   try {
     fsyncSync(fd);
   } finally {
