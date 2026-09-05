@@ -263,10 +263,13 @@ invoke_cache_only_diagnostic() {
     extra+=(--embedding-cache-overlay "$EMBEDDING_CACHE_OVERLAY")
   fi
   echo "diagnostic cache-only credentialless limit=$LIMIT work=$work"
+  # bash 3.2 `set -u` drops the entire command when extra[@] is empty.
   run_node "$BIN" diagnostic-loop \
     --work-root "$work" --request-manifest "$request_file" \
-    --mode cache-only "${SNAPSHOT_ARGS[@]}" \
-    --history-root "$work/history" "${extra[@]}"
+    --mode cache-only \
+    "${SNAPSHOT_ARGS[@]}" \
+    --history-root "$work/history" \
+    ${extra[@]+"${extra[@]}"}
 }
 
 run_diagnostic() {

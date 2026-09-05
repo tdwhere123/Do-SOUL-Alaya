@@ -83,11 +83,15 @@ export async function invokeDiagnosticLoop(
   harness: OperatorLoopHarness,
   args: readonly string[]
 ): Promise<string[]> {
+  let stdout = "";
+  let stderr = "";
   try {
-    await execFileAsync("bash", [script, "diagnostic", ...args], {
+    const result = await execFileAsync("bash", [script, "diagnostic", ...args], {
       env: harness.env,
       timeout: 10_000
     });
+    stdout = result.stdout;
+    stderr = result.stderr;
   } catch (error) {
     const failed = error as { code?: number; stderr?: string; stdout?: string };
     throw new Error(
@@ -98,7 +102,9 @@ export async function invokeDiagnosticLoop(
     return JSON.parse(await readFile(harness.argvCapture, "utf8")) as string[];
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`argv capture missing at ${harness.argvCapture}: ${reason}`);
+    throw new Error(
+      `argv capture missing at ${harness.argvCapture}: ${reason}\nstdout: ${stdout}\nstderr: ${stderr}`
+    );
   }
 }
 
