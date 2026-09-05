@@ -16,43 +16,14 @@ WT="$(abs_pwd "$SCRIPT_DIR/../../..")"
 BIN="$WT/apps/bench-runner/bin/alaya-bench-runner.mjs"
 DEFAULT_ENV="$WT/.do-it/bench-env/mimo-v2.5-opencode-go.env"
 NODE_BIN="${BENCH_NODE_BIN:-node}"
-# Tests inject an intercept argv; a PATH `node` shim is skipped on Darwin.
+# Tests may wrap node with an intercept script. Do not short-circuit the
+# diagnostic-loop invocation itself; the intercept records argv.
 run_node() {
   if [[ -n "${BENCH_NODE_INTERCEPT:-}" ]]; then
     "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"
   else
     "$NODE_BIN" "$@"
   fi
-}
-# Darwin bash 3.2 lets $(mktemp) steal a function heredoc; pass source via -e.
-write_captured_loop_argv() {
-  local nul="${BENCH_NODE_ARGV_CAPTURE}.nul"
-  [[ -n "${BENCH_NODE_ARGV_CAPTURE:-}" ]] || die "BENCH_NODE_ARGV_CAPTURE is empty"
-  printf '%s\0' "$@" > "$nul"
-  BENCH_NODE_ARGV_NUL="$nul" "$NODE_BIN" --input-type=commonjs -e "$(cat <<'JS'
-const fs = require("fs");
-const capture = process.env.BENCH_NODE_ARGV_CAPTURE;
-const nul = process.env.BENCH_NODE_ARGV_NUL;
-if (!capture || !nul) process.exit(2);
-const args = fs.readFileSync(nul, "utf8").split("\0").filter(Boolean);
-fs.writeFileSync(capture, JSON.stringify(args) + "\n");
-const envCapture = process.env.BENCH_NODE_ENV_CAPTURE;
-if (envCapture) {
-  const credentialKeys = [
-    "ALAYA_OFFICIAL_GARDEN_SECRET_REF", "ALAYA_OFFICIAL_GARDEN_API_KEY",
-    "OFFICIAL_API_GARDEN_API_KEY", "ALAYA_QA_API_KEY",
-    "ALAYA_GARDEN_OPENAI_SECRET_REF",
-    "ALAYA_CONFLICT_LLM_PROVIDER_URL", "ALAYA_CONFLICT_LLM_API_KEY"
-  ];
-  fs.writeFileSync(envCapture, JSON.stringify({
-    credentials: Object.fromEntries(credentialKeys.map((key) => [key, Boolean(process.env[key])])),
-    ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: process.env.ALAYA_BENCH_ALLOW_LIVE_EXTRACTION ?? null,
-    ALAYA_GARDEN_PROVIDER_KIND: process.env.ALAYA_GARDEN_PROVIDER_KIND ?? null
-  }) + "\n");
-}
-JS
-)"
-  [[ -f "$BENCH_NODE_ARGV_CAPTURE" ]] || die "argv capture was not written: $BENCH_NODE_ARGV_CAPTURE"
 }
 SMALL_WINDOW_CEILING=3
 
@@ -292,13 +263,6 @@ invoke_cache_only_diagnostic() {
     extra+=(--embedding-cache-overlay "$EMBEDDING_CACHE_OVERLAY")
   fi
   echo "diagnostic cache-only credentialless limit=$LIMIT work=$work"
-  if [[ -n "${BENCH_NODE_ARGV_CAPTURE:-}" ]]; then
-    write_captured_loop_argv "$BIN" diagnostic-loop \
-      --work-root "$work" --request-manifest "$request_file" \
-      --mode cache-only "${SNAPSHOT_ARGS[@]}" \
-      --history-root "$work/history" "${extra[@]}"
-    return 0
-  fi
   run_node "$BIN" diagnostic-loop \
     --work-root "$work" --request-manifest "$request_file" \
     --mode cache-only "${SNAPSHOT_ARGS[@]}" \
