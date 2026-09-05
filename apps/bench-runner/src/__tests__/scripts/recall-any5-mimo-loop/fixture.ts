@@ -89,12 +89,17 @@ export async function invokeDiagnosticLoop(
       timeout: 10_000
     });
   } catch (error) {
-    const failed = error as { code?: number; stderr?: string };
+    const failed = error as { code?: number; stderr?: string; stdout?: string };
     throw new Error(
-      `expected diagnostic-loop invocation, got exit ${String(failed.code)}: ${failed.stderr ?? ""}`
+      `expected diagnostic-loop invocation, got exit ${String(failed.code)}: ${failed.stderr ?? ""} ${failed.stdout ?? ""}`
     );
   }
-  return JSON.parse(await readFile(harness.argvCapture, "utf8")) as string[];
+  try {
+    return JSON.parse(await readFile(harness.argvCapture, "utf8")) as string[];
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`argv capture missing at ${harness.argvCapture}: ${reason}`);
+  }
 }
 
 export async function expectCacheOnlyLoopEnv(

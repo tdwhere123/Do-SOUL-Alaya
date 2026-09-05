@@ -24,25 +24,19 @@ run_node() {
     "$NODE_BIN" "$@"
   fi
 }
-# Darwin `node -` does not read a bash heredoc; write a .cjs and exec it.
-run_node_stdin() {
-  local tmp js st=0
-  tmp="$(native_temp_file)"
-  js="${tmp}.cjs"
-  rm -f -- "$tmp"
-  cat > "$js"
-  "$NODE_BIN" "$js" "$@" || st=$?
-  rm -f -- "$js"
-  return "$st"
-}
+# Darwin bash 3.2 lets $(mktemp) steal a function heredoc; pass source via -e.
 write_captured_loop_argv() {
   local nul="${BENCH_NODE_ARGV_CAPTURE}.nul"
+  [[ -n "${BENCH_NODE_ARGV_CAPTURE:-}" ]] || die "BENCH_NODE_ARGV_CAPTURE is empty"
   printf '%s\0' "$@" > "$nul"
-  run_node_stdin "$BENCH_NODE_ARGV_CAPTURE" "$nul" "${BENCH_NODE_ENV_CAPTURE:-}" <<'JS'
+  BENCH_NODE_ARGV_NUL="$nul" "$NODE_BIN" --input-type=commonjs -e "$(cat <<'JS'
 const fs = require("fs");
-const args = fs.readFileSync(process.argv[3], "utf8").split("\0").filter(Boolean);
-fs.writeFileSync(process.argv[2], JSON.stringify(args) + "\n");
-const envCapture = process.argv[4];
+const capture = process.env.BENCH_NODE_ARGV_CAPTURE;
+const nul = process.env.BENCH_NODE_ARGV_NUL;
+if (!capture || !nul) process.exit(2);
+const args = fs.readFileSync(nul, "utf8").split("\0").filter(Boolean);
+fs.writeFileSync(capture, JSON.stringify(args) + "\n");
+const envCapture = process.env.BENCH_NODE_ENV_CAPTURE;
 if (envCapture) {
   const credentialKeys = [
     "ALAYA_OFFICIAL_GARDEN_SECRET_REF", "ALAYA_OFFICIAL_GARDEN_API_KEY",
@@ -57,6 +51,8 @@ if (envCapture) {
   }) + "\n");
 }
 JS
+)"
+  [[ -f "$BENCH_NODE_ARGV_CAPTURE" ]] || die "argv capture was not written: $BENCH_NODE_ARGV_CAPTURE"
 }
 SMALL_WINDOW_CEILING=3
 
@@ -181,20 +177,21 @@ MANIFEST="$CACHE_ROOT/manifest.json"
 
 load_identity() {
   [[ -f "$MANIFEST" ]] || die "cache manifest missing: $MANIFEST"
-  run_node_stdin "$MANIFEST" <<'JS'
+  ALAYA_BENCH_CACHE_MANIFEST="$MANIFEST" "$NODE_BIN" --input-type=commonjs -e "$(cat <<'JS'
 const fs = require("fs");
-const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const manifest = JSON.parse(fs.readFileSync(process.env.ALAYA_BENCH_CACHE_MANIFEST, "utf8"));
 const required = [
   "dataset_revision", "extraction_model", "request_profile",
   "system_prompt_sha256", "provider_url"
 ];
 const missing = required.filter((key) => !manifest[key]);
 if (missing.length > 0) {
-  process.stderr.write(`manifest missing ${JSON.stringify(missing)}\n`);
+  process.stderr.write("manifest missing " + JSON.stringify(missing) + "\n");
   process.exit(1);
 }
 for (const key of required) console.log(manifest[key]);
 JS
+)"
 }
 
 build_canonical_request_manifest() {
