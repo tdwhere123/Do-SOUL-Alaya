@@ -8,6 +8,13 @@ interface TarjanState {
 }
 
 export {
+  solveMaxMinField,
+  type MaxMinInput,
+  type MaxMinResult,
+  type MaxMinTransition
+} from "./max-min-field.js";
+
+export {
   parseAbsoluteTemporalWindow
 } from "./absolute-temporal-window.js";
 

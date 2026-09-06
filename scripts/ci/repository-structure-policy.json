@@ -1140,14 +1140,14 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2122,
-      "expected_sha256": "9e6362f75ce036a6aec33abaa13772ac1c0053bcfe88c2ad17038614a20973e5"
+      "expected_count": 2213,
+      "expected_sha256": "730893551e920790fc281cd21a5987dddaa66d75ac3badc88b637cfd0a335c7d"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
       "path": "packages/graph-algorithms/src/index.ts",
-      "expected_count": 8,
-      "expected_sha256": "28050ed72655594ef7d3c95cca9f57950350a1f26186fbdc60baf54d8402fcf1"
+      "expected_count": 12,
+      "expected_sha256": "eccf63603f2395b105922a40883eebd488a8542bdcffecc7d6994bf1a4488496"
     },
     {
       "specifier": "@do-soul/alaya-core",
@@ -1182,8 +1182,8 @@
     {
       "specifier": "@do-soul/alaya-soul",
       "path": "packages/soul/src/index.ts",
-      "expected_count": 243,
-      "expected_sha256": "bd57d77107ed742b6d9ac7ef33c716b8af95d310ae8a938d75fd12766f256edc"
+      "expected_count": 242,
+      "expected_sha256": "02251d20e8ae1729fb18c326068dd616c874640732cbab19d1e6d5adeca046fb"
     },
     {
       "specifier": "@do-soul/alaya-storage",
@@ -1229,8 +1229,8 @@
     }
   ],
   "private_barrel_snapshot": {
-    "expected_count": 44,
-    "expected_sha256": "ab6476e95343281e4d827eb57002e2fffb9d6ece64d333377722cd0f56051956"
+    "expected_count": 45,
+    "expected_sha256": "4c463a62811cd33b873ce5c39f6024bdd1a7088de7e762d17d4b861804ece682"
   },
   "existing_duplicate_export_authorities": [],
   "existing_index_to_index_edges": [
@@ -1242,6 +1242,7 @@
     "packages/core/src/recall/decision/query-proof/dominance/index.ts -> packages/core/src/recall/decision/query-proof/measurement/index.ts",
     "packages/engine-gateway/src/index.ts -> packages/engine-gateway/src/provider/chat-completion/index.ts",
     "packages/eval/src/index.ts -> packages/eval/src/cli/index.ts",
+    "packages/protocol/src/index.ts -> packages/protocol/src/recall/conditional-field/index.ts",
     "packages/protocol/src/index.ts -> packages/protocol/src/recall/field-contract/index.ts",
     "packages/soul/src/garden/index.ts -> packages/protocol/src/index.ts",
     "packages/soul/src/index.ts -> packages/protocol/src/index.ts",

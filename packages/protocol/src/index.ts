@@ -44,6 +44,7 @@ export * from "./evidence/formation/evidence-osf-semantic-completeness.js";
 export * from "./recall/kind-projection.js";
 export * from "./recall/query-osf-facet-obligation.js";
 export * from "./recall/field-contract/index.js";
+export * from "./recall/conditional-field/index.js";
 export * from "./evidence/verified-user-assertion-receipt.js";
 export * from "./garden/garden-source-turn-fallback-receipt.js";
 export * from "./memory/memory-entry.js";
