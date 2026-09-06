@@ -37,7 +37,7 @@ export async function retrieveIndexedFamilies(input: {
   return {
     probes, edges: ctx.edges, inactiveResults: ctx.inactiveResults,
     contradictions: ctx.contradictions, query: input.captured.spec.relationQuery!,
-    sourceCache: ctx.sourceCache, rawTruncated: ctx.rawTruncated
+    sourceCache: ctx.sourceCache, rawTruncated: ctx.rawTruncated, usedTierScan: false
   };
 }
 
@@ -102,13 +102,15 @@ function readLexicalFamily(ctx: FamilyReadContext, probes: FamilyProbeResult[]):
 async function readTypedRelationFamily(ctx: FamilyReadContext, probes: FamilyProbeResult[]): Promise<void> {
   const query = ctx.captured.spec.relationQuery!;
   if (!isTypedReady(ctx.captured)) return;
-  const observed = ctx.recallReader.read(ctx.workspaceId, query.subject, "owns",
+  const predicates = [...new Set(ctx.captured.spec.obligations.flatMap((obligation) => obligation.requiredPredicates))];
+  if (predicates.length === 0) return;
+  const observed = ctx.recallReader.read(ctx.workspaceId, query.subject, predicates[0]!,
     (ctx.rawLimit ?? 0) - (ctx.lexicalNativeVisits ?? 0));
   accountAssertionPage(ctx, observed);
   await applyObservations(ctx, observed.observations);
-  if (query.wantsChannel) {
+  for (const predicate of predicates.slice(1)) {
     for (const endpoint of new Set(ctx.edges.map((edge) => edge.targetObjectId))) {
-      const page = ctx.recallReader.read(ctx.workspaceId, endpoint, "escalation_channel",
+      const page = ctx.recallReader.read(ctx.workspaceId, endpoint, predicate,
         Math.min(512, Math.floor(ctx.remaining / 3)));
       accountAssertionPage(ctx, page);
       await applyObservations(ctx, page.observations);

@@ -1,5 +1,5 @@
 import { compileRecallQueryProbes, type RecallQueryProbes } from "../../query/recall-query-probes.js";
-import { compileRelationQuery } from "../../query/recall-relation-query.js";
+import { compileRelationQuery, type RelationQuery } from "../../query/recall-relation-query.js";
 import { detachInput } from "./capture-data.js";
 import { hashConditionDigest, type FieldContractSha256 } from "@do-soul/alaya-protocol";
 import {
@@ -46,6 +46,20 @@ function copyObligations(draft: QuerySpecDraft): QuerySpec["obligations"] {
     if (!previous) unique.set(identity, copy);
   }
   return Object.freeze([...unique.values()]);
+}
+
+function relationObligations(query: RelationQuery, text: string): QuerySpecDraft["obligations"] {
+  if (!query.supported) return [];
+  const typed = query.subject !== null || query.wantsChannel ||
+    /\bown|\bowner|\bowned|\bescalation|\bchannel\b/iu.test(text);
+  if (!typed) return [];
+  return [{
+    kind: query.wantsChannel ? "conjunction" : "relation",
+    ...(query.wantsChannel ? { supportForm: "endpoint_path" as const } : {}),
+    bindingSlot: query.wantsChannel ? "owner_and_channel" : "owner",
+    assignmentKey: query.subject === null ? "owner" : `owner:${query.subject}`,
+    requiredPredicates: query.wantsChannel ? ["owns", "escalation_channel"] : ["owns"]
+  }];
 }
 
 function typedRelationDefault(draft: QuerySpecDraft): CapabilityState {
@@ -110,9 +124,7 @@ export function captureQuerySpec(
     exactAggregate: draft.exactAggregate ?? recognizeExactAggregate(text),
     diagnostics: draft.diagnostics === true,
     deliveryPath: draft.deliveryPath ?? null,
-    obligations: copyObligations({ ...draft, obligations: draft.obligations ?? (relationQuery.wantsChannel && relationQuery.subject !== null
-      ? [{ supportForm: "endpoint_path", kind: "conjunction", bindingSlot: "owner_and_channel",
-        assignmentKey: `owner:${relationQuery.subject}`, requiredPredicates: ["owns", "escalation_channel"] }] : []) }),
+    obligations: copyObligations({ ...draft, obligations: draft.obligations ?? relationObligations(relationQuery, text) }),
     familyCaps: Object.freeze({ ...copyFamilyCaps(draft),
       ...(draft.familyCaps?.embedding === "ready" && availability.embedding === false ? { embedding: "unavailable" as const } : {}),
       ...(unsupportedTemporalOperator || !relationQuery.supported ? { typed_relation: "unavailable" as const } : {}) })

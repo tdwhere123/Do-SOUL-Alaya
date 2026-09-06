@@ -1,7 +1,8 @@
-const SOURCE_EVENT_REVISION_SQL = `(SELECT revision FROM event_log
+const SOURCE_EVENT_REVISION_SQL = `COALESCE((SELECT revision FROM event_log
   INDEXED BY garden_semantic_source_event_revision
   WHERE workspace_id=new.workspace_id AND entity_type='memory_entry' AND entity_id=new.object_id
-    AND event_type IN ('soul.memory.created','soul.memory.updated') ORDER BY revision DESC LIMIT 1)`;
+    AND event_type IN ('soul.memory.created','soul.memory.updated') ORDER BY revision DESC LIMIT 1),
+  RAISE(ABORT, 'missing source event revision'))`;
 
 const CURSOR_EVENT_REVISION_SQL = `COALESCE((SELECT MAX(revision) FROM event_log WHERE workspace_id=new.workspace_id), 0)`;
 
@@ -36,7 +37,7 @@ CREATE TRIGGER garden_index_memory_ai AFTER INSERT ON memory_entries BEGIN
     workspace_id, object_id, source_event_revision, source_content, source_evidence_refs,
     source_updated_at, semantic_publication_key, embedding_content_hash, tombstoned, applied_at
   ) VALUES (
-    new.workspace_id, new.object_id, COALESCE(${SOURCE_EVENT_REVISION_SQL}, 0),
+    new.workspace_id, new.object_id, ${SOURCE_EVENT_REVISION_SQL},
     new.content, new.evidence_refs, new.updated_at, NULL, NULL,
     CASE WHEN ${TOMBSTONE_PREDICATE} THEN 1 ELSE 0 END, new.updated_at
   );
@@ -51,7 +52,7 @@ END;
 CREATE TRIGGER garden_index_memory_au AFTER UPDATE OF content, evidence_refs, updated_at,
     lifecycle_state, retention_state ON memory_entries BEGIN
   UPDATE garden_index_revisions SET
-    source_event_revision = COALESCE(${SOURCE_EVENT_REVISION_SQL}, source_event_revision),
+    source_event_revision = ${SOURCE_EVENT_REVISION_SQL},
     source_content = new.content, source_evidence_refs = new.evidence_refs,
     source_updated_at = new.updated_at,
     semantic_publication_key = CASE WHEN ${TOMBSTONE_PREDICATE}
@@ -107,15 +108,20 @@ INSERT OR IGNORE INTO garden_index_revisions (
   source_updated_at, semantic_publication_key, embedding_content_hash, tombstoned, applied_at
 )
 SELECT m.workspace_id, m.object_id,
-  COALESCE((SELECT revision FROM event_log INDEXED BY garden_semantic_source_event_revision
+  (SELECT revision FROM event_log INDEXED BY garden_semantic_source_event_revision
     WHERE workspace_id=m.workspace_id AND entity_type='memory_entry' AND entity_id=m.object_id
-      AND event_type IN ('soul.memory.created','soul.memory.updated') ORDER BY revision DESC LIMIT 1), 0),
+      AND event_type IN ('soul.memory.created','soul.memory.updated') ORDER BY revision DESC LIMIT 1),
   m.content, m.evidence_refs, m.updated_at, p.publication_key, e.content_hash,
   CASE WHEN m.lifecycle_state IN ('tombstone', 'deleted') OR m.retention_state = 'tombstoned' THEN 1 ELSE 0 END,
   m.updated_at
 FROM memory_entries m
 LEFT JOIN garden_semantic_projections p ON p.workspace_id=m.workspace_id AND p.object_id=m.object_id
-LEFT JOIN memory_embeddings e ON e.workspace_id=m.workspace_id AND e.object_id=m.object_id;
+LEFT JOIN memory_embeddings e ON e.workspace_id=m.workspace_id AND e.object_id=m.object_id
+WHERE EXISTS (
+  SELECT 1 FROM event_log INDEXED BY garden_semantic_source_event_revision
+  WHERE workspace_id=m.workspace_id AND entity_type='memory_entry' AND entity_id=m.object_id
+    AND event_type IN ('soul.memory.created','soul.memory.updated')
+);
 INSERT OR IGNORE INTO garden_projection_cursor(workspace_id, applied_event_revision, applied_at)
 SELECT workspace_id, MAX(source_event_revision), MAX(applied_at)
 FROM garden_index_revisions GROUP BY workspace_id;

@@ -145,6 +145,7 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
   const sourceIds: string[] = [];
   const memoryIds: string[] = [];
   const evidenceIds: string[] = [];
+  let inRecall = false;
   const memory = new MemoryService({
     now: () => NOW,
     generateObjectId: () => {
@@ -197,6 +198,7 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
       ...(enrich ? { enqueueEnrichment: { runId: RUN, sourceSignalId: null } } : {})
     });
     counters.write_ack_ms = performance.now() - started;
+    if (inRecall) counters.recall_source_writes += 1;
     if (enrich) {
       counters.garden_enqueue = garden.peekPending(GardenRole.LIBRARIAN, REAL_SQLITE_TEST_WORKSPACE_ID, 128)
         .length;
@@ -379,6 +381,7 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
     const revision = () => storage.database.connection.prepare("SELECT MAX(rowid) AS revision FROM event_log").get() as { revision: number | null };
     const pinnedRevision = revision().revision;
     counters.query_embed_count = 0; counters.selection_count = 0;
+    counters.recall_source_writes = 0; counters.recall_provider_calls = 0; counters.full_tier_scan = 0;
     counters.artifact_validation_utf8_bytes = 0; counters.embedding_id_json_bytes = 0; counters.embedding_vector_payload_bytes = 0;
     counters.embedding_id_metadata_utf8_bytes = 0;
     counters.native_artifact_visits = 0; counters.native_artifact_bytes = 0;
@@ -395,9 +398,18 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
       throw new Error("query authority does not match trusted session");
     }
     phase("capture_and_lease");
-    const { probes, edges, inactiveResults, contradictions, sourceCache, rawTruncated } = await retrieveIndexedFamilies({
-      captured, memoryReader, recallReader, embeddingProvider, embeddingRepo: storage.memoryEmbeddingRepo,
-      artifactReader, counters, runId: RUN });
+    inRecall = true;
+    let retrieved: Awaited<ReturnType<typeof retrieveIndexedFamilies>>;
+    try {
+      retrieved = await retrieveIndexedFamilies({
+        captured, memoryReader, recallReader, embeddingProvider, embeddingRepo: storage.memoryEmbeddingRepo,
+        artifactReader, counters, runId: RUN });
+    } finally {
+      inRecall = false;
+    }
+    const { probes, edges, inactiveResults, contradictions, sourceCache, rawTruncated, usedTierScan } = retrieved;
+    counters.full_tier_scan = usedTierScan ? 1 : 0;
+    counters.recall_provider_calls = counters.query_embed_count;
     phase("retrieval");
     const field = admitField(captured.spec, probes);
     const activeResults = new Set(edges.map((edge) => edge.resultObjectId));
