@@ -134,6 +134,39 @@ describe("W00 durable write garden intent", () => {
     expect(created.object_id).toBe(IDS.mutate);
   });
 
+  it("does not also write enrich_pending when the Garden intent port is wired", async () => {
+    const enrichPending: Array<{ readonly memoryId: string }> = [];
+    const storage = await createRecallEmbeddingRealStorage((database) => databases.add(database));
+    const notify = { notify: async () => {}, notifyEntry: async () => {} };
+    const eventPublisher = new EventPublisher({
+      eventLogRepo: storage.eventLogRepo,
+      runHotStateService: { apply: () => {} },
+      runtimeNotifier: notify
+    });
+    const garden = new SqliteGardenTaskRepo(storage.database.connection, eventPublisher);
+    const memory = new MemoryService({
+      now: () => NOW,
+      generateObjectId: () => IDS.checklist,
+      evidenceService: {
+        findById: async (id) => storage.evidenceCapsuleRepo.findById(id),
+        findByIds: async (workspaceId, objectIds) =>
+          storage.evidenceCapsuleRepo.findByIds?.(workspaceId, objectIds) ?? []
+      },
+      eventLogRepo: storage.eventLogRepo,
+      memoryEntryRepo: storage.memoryEntryRepo,
+      gardenIntentPort: garden,
+      enrichPendingWriter: {
+        enqueue: (input) => {
+          enrichPending.push({ memoryId: input.memoryId });
+        }
+      },
+      runtimeNotifier: notify
+    });
+    await memory.create(memoryInput("deployment checklist lives in docs/runbook.md"));
+    expect(garden.peekPending(GardenRole.LIBRARIAN, WS, 8)).toHaveLength(1);
+    expect(enrichPending).toEqual([]);
+  });
+
   it("evidence create enqueues recoverable intent on the same connection", async () => {
     const harness = await openHarness();
     harness.queueEvidenceId(IDS.evidence);

@@ -3,12 +3,13 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
+  SOURCE_ENRICHMENT_CONTRACT,
   type GardenRoleValue,
   type GardenTaskKindValue
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
 
-export const SOURCE_ENRICHMENT_CONTRACT = "source_enrichment.v1";
+export { SOURCE_ENRICHMENT_CONTRACT };
 export const SOURCE_ENRICHMENT_QUEUE_HARD_CAP = 128;
 
 export interface SourceWriteGardenIntentPort {
@@ -86,22 +87,6 @@ export function buildSourceEnrichmentTaskPayload(input: SourceEnrichmentIntentIn
   });
 }
 
-export function sourceEnrichmentIdentitiesEqual(
-  left: unknown,
-  right: SourceEnrichmentIntentInput
-): boolean {
-  const existing = readSourceEnrichmentIdentity(left);
-  if (existing === null) {
-    return false;
-  }
-  return (
-    existing.workspace_id === right.workspaceId &&
-    existing.source_object_id === right.sourceObjectId &&
-    existing.source_revision === String(right.sourceRevision) &&
-    existing.enrichment_contract === right.enrichmentContract
-  );
-}
-
 export function admitSourceEnrichmentIntent(
   port: SourceWriteGardenIntentPort,
   input: SourceEnrichmentIntentInput
@@ -113,11 +98,8 @@ export function admitSourceEnrichmentIntent(
     input.enrichmentContract
   );
   const existing = port.findById(taskId);
-  if (existing !== null) {
-    assertMatchingIdentity(taskId, existing.payload, input);
-    return { task_id: taskId, coalesced: true };
-  }
   if (
+    existing === null &&
     port.peekPending(GardenRole.LIBRARIAN, input.workspaceId, SOURCE_ENRICHMENT_QUEUE_HARD_CAP)
       .length >= SOURCE_ENRICHMENT_QUEUE_HARD_CAP
   ) {
@@ -137,66 +119,30 @@ export function admitSourceEnrichmentIntent(
       payload,
       created_at: input.createdAt
     });
+    return { task_id: taskId, coalesced: existing !== null };
   } catch (error) {
-    if (!isDuplicateGardenTaskKey(error)) {
+    if (errorHasCode(error, "CONFLICT")) {
+      throw new CoreError(
+        "CONFLICT",
+        `Garden task ${taskId} exists with a different enrichment identity.`,
+        { cause: error }
+      );
+    }
+    if (!errorHasCode(error, "DUPLICATE_KEY")) {
       throw error;
     }
     const raced = port.findById(taskId);
     if (raced === null) {
       throw error;
     }
-    assertMatchingIdentity(taskId, raced.payload, input);
     return { task_id: taskId, coalesced: true };
   }
-  return { task_id: taskId, coalesced: false };
 }
 
-function assertMatchingIdentity(
-  taskId: string,
-  existingPayload: unknown,
-  input: SourceEnrichmentIntentInput
-): void {
-  if (sourceEnrichmentIdentitiesEqual(existingPayload, input)) {
-    return;
-  }
-  throw new CoreError(
-    "CONFLICT",
-    `Garden task ${taskId} exists with a different enrichment identity.`
-  );
-}
-
-function readSourceEnrichmentIdentity(payload: unknown): {
-  readonly workspace_id: string;
-  readonly source_object_id: string;
-  readonly source_revision: string;
-  readonly enrichment_contract: string;
-} | null {
-  if (payload === null || typeof payload !== "object") {
-    return null;
-  }
-  const record = payload as Record<string, unknown>;
-  if (
-    typeof record.workspace_id !== "string" ||
-    typeof record.source_object_id !== "string" ||
-    record.source_revision === undefined ||
-    record.source_revision === null ||
-    typeof record.enrichment_contract !== "string"
-  ) {
-    return null;
-  }
-  return {
-    workspace_id: record.workspace_id,
-    source_object_id: record.source_object_id,
-    source_revision: String(record.source_revision),
-    enrichment_contract: record.enrichment_contract
-  };
-}
-
-function isDuplicateGardenTaskKey(error: unknown): boolean {
+function errorHasCode(error: unknown, code: string): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
-    const code = (current as { readonly code?: unknown }).code;
-    if (code === "DUPLICATE_KEY") {
+    if ((current as { readonly code?: unknown }).code === code) {
       return true;
     }
     current = (current as { readonly cause?: unknown }).cause;

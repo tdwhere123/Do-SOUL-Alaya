@@ -449,6 +449,7 @@ export class MemoryWriteService {
         runId: enqueueEnrichment.runId,
         createdAt
       });
+      return;
     }
     this.dependencies.enrichPendingWriter?.enqueue({
       workspaceId,

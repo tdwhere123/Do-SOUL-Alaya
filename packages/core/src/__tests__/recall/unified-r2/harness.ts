@@ -197,7 +197,10 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
       ...(enrich ? { enqueueEnrichment: { runId: RUN, sourceSignalId: null } } : {})
     });
     counters.write_ack_ms = performance.now() - started;
-    if (enrich) counters.garden_enqueue += 1;
+    if (enrich) {
+      counters.garden_enqueue = garden.peekPending(GardenRole.LIBRARIAN, REAL_SQLITE_TEST_WORKSPACE_ID, 128)
+        .length;
+    }
     sourceIds.push(created.object_id);
     return created;
   }
