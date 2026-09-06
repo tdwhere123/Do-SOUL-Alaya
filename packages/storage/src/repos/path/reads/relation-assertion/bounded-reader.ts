@@ -64,7 +64,14 @@ export class SqliteRelationRecallReader {
     return this.db.connection.prepare(`EXPLAIN QUERY PLAN ${READ_SQL}`).all(workspaceId, subject.toLowerCase(), predicate, "", "", "", 1);
   }
 
-  public read(workspaceId: string, subject: string | null, predicate: string, limit: number, nativeLimit = limit): Readonly<{
+  public read(
+    workspaceId: string,
+    subject: string | null,
+    predicate: string,
+    limit: number,
+    nativeLimit = limit,
+    afterAssertionId: string | null = null
+  ): Readonly<{
     nativeVisits: number; nativeBytes: number; rawRows: readonly Record<string, unknown>[]; observations: readonly RecallAssertionObservation[]; rowsRead: number; bytesRead: number; truncated: boolean;
   }> {
     if (!Number.isSafeInteger(limit) || limit < 0 || limit > 512 || !Number.isSafeInteger(nativeLimit) || nativeLimit < 0 || nativeLimit > 512) throw new Error("invalid assertion row limit");
@@ -74,12 +81,18 @@ export class SqliteRelationRecallReader {
     const callId = ++this.nextVisitCall;
     const state = { visits: 0, bytes: 0, limit: nativeLimit };
     this.visitState.set(callId, state);
-    const tail = ["", "", "", callId, limit];
+    const cursor = relationResumeParams(afterAssertionId);
+    const boundedSql = sql
+      .replace(
+        "AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)",
+        cursor.sql
+      )
+      .replace("ORDER BY a.assertion_id", `AND ${this.visitFunction}(a.assertion_id, e.evidence_id, ?) ORDER BY a.assertion_id`);
+    const tail = [...cursor.params, callId, limit];
     const parameters = subject === null ? [workspaceId, predicate, ...tail] : [workspaceId, subject.toLowerCase(), predicate, ...tail];
     let rows: readonly Record<string, unknown>[] = [];
     let exhausted = false;
     try {
-      const boundedSql = sql.replace("ORDER BY a.assertion_id", `AND ${this.visitFunction}(a.assertion_id, e.evidence_id, ?) ORDER BY a.assertion_id`);
       rows = this.db.connection.prepare(boundedSql).all(...parameters) as readonly Record<string, unknown>[];
     } catch (error) {
       if (error !== this.exhausted) throw error;
@@ -109,4 +122,18 @@ export class SqliteRelationRecallReader {
     }
     return Object.freeze([...grouped.values()]);
   }
+}
+
+function relationResumeParams(afterAssertionId: string | null): Readonly<{
+  readonly sql: string;
+  readonly params: readonly string[];
+}> {
+  if (afterAssertionId === null || afterAssertionId.length === 0) {
+    return {
+      sql: "AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)",
+      params: ["", "", ""]
+    };
+  }
+  // Evidence of an incomplete trailing assertion is re-read; only observed ids commit.
+  return { sql: "AND a.assertion_id > ?", params: [afterAssertionId] };
 }
