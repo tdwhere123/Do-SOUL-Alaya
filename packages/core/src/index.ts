@@ -105,6 +105,14 @@ export {
   SemanticEnrichmentWorker,
   type SemanticEnrichmentWorkerDependencies
 } from "./conversation/semantic-enrichment-worker.js";
+export {
+  retrieveIndexedFamilies,
+  type IndexedEmbeddingReadPort,
+  type IndexedMemoryReadPort,
+  type IndexedRelationReadPort,
+  type ReadyArtifactReader,
+  type RetrievalCounters
+} from "./recall/retrieval/indexed-family-read.js";
 export * from "./conversation/message-history.js";
 export * from "./conversation/narrative-budget-service.js";
 export * from "./tooling/node-template-resolver.js";

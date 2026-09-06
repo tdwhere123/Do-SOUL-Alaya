@@ -42,6 +42,7 @@ import {
   SqliteTrustStateRepo,
   SqliteWorkerRunRepo,
   SqliteWorkspaceRepo,
+  prepareIndexedRecallProjection,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
@@ -59,6 +60,7 @@ export function createDaemonRepositories(input: {
   readonly warn: WarnLogger["warn"];
   readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
 }) {
+  prepareIndexedRecallProjection(input.database);
   const coreRepos = createCoreDaemonRepos(input.database);
   const memoryRepos = createDaemonMemoryRepos(input);
   const surfaceRepos = createDaemonSurfaceRepos(input.database);

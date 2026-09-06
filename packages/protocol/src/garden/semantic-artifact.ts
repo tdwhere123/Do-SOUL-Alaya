@@ -66,6 +66,23 @@ export interface ReadySemanticProjection {
   readonly projectionText: string;
 }
 
+export type IndexedLexicalReadiness = "ready" | "missing" | "tombstoned";
+export type IndexedDerivedReadiness = "ready" | "pending" | "unavailable" | "tombstoned";
+
+export interface IndexedRecallFreshness {
+  readonly objectId: string;
+  readonly sourceEventRevision: number | null;
+  readonly lexical: IndexedLexicalReadiness;
+  readonly semantic: IndexedDerivedReadiness;
+  readonly embedding: IndexedDerivedReadiness;
+}
+
+export interface IndexedRecallCursor {
+  readonly workspaceId: string;
+  readonly appliedEventRevision: number;
+  readonly appliedAt: string;
+}
+
 export interface SemanticArtifactRepositoryPort {
   source(workspaceId: string, objectId: string): SemanticSourceSnapshot | null;
   isCurrent(task: SemanticEnrichmentTask): boolean;

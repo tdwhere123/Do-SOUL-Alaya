@@ -533,6 +533,18 @@ describe('durable semantic artifact lifecycle', () => {
     expect(f.repo.searchReady(WS, 'decision', 10)).toEqual([]);
   });
 
+  it('upgrades additive candidate schema 4 to the current indexed-projection revision', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'semantic-schema-upgrade-'));
+    directories.push(directory);
+    const f = await fixture(join(directory, 'source.sqlite'));
+    const db = f.slice.database;
+    db.connection.prepare('UPDATE garden_semantic_schema SET revision=4').run();
+    db.close();
+    db.reopenIfClosed();
+    initializeSemanticArtifactCandidateSchema(db.connection);
+    expect(db.connection.prepare('SELECT revision FROM garden_semantic_schema').all()).toEqual([{ revision: 5 }]);
+  });
+
   it.each([1, 2, 3])('rejects old candidate schema %i after file reopen without silently reusing its FTS layout', async (revision) => {
     const directory = mkdtempSync(join(tmpdir(), 'semantic-schema-'));
     directories.push(directory);

@@ -13,7 +13,9 @@ import {
 import { auditOfficialApiSignalFormation } from "@do-soul/alaya-soul";
 import {
   digestRelationFormationEventSource,
+  initializeSemanticArtifactCandidateSchema,
   SqliteGardenTaskRepo,
+  SqliteIndexedRecallProjection,
   SqliteRelationAssertionRepo,
   SqliteRelationRecallReader,
   SqliteMemoryRecallReader,
@@ -45,7 +47,7 @@ import {
   REAL_SQLITE_TEST_WORKSPACE_ID,
   createRecallEmbeddingRealStorage
 } from "../../shared/real-sqlite.test-support.js";
-import { retrieveSources, type ReadyArtifactReader } from "./bounded-retrieval.js";
+import { retrieveIndexedFamilies, type ReadyArtifactReader } from "./bounded-retrieval.js";
 import { CONTENT, EV, MEM, NOW, RUN, WS } from "./ids.js";
 
 export interface SliceCounters {
@@ -96,6 +98,8 @@ function sha256(value: unknown): string {
 export async function createSliceHarness(register: (database: StorageDatabase) => void, filename = ":memory:", embeddingProvider?: EmbeddingProviderPort) {
   const storage = await createRecallEmbeddingRealStorage(register, filename);
   storage.memoryEmbeddingRepo.prepareBoundedRecallIndex();
+  initializeSemanticArtifactCandidateSchema(storage.database.connection);
+  const indexProjection = new SqliteIndexedRecallProjection(storage.database.connection);
   const eventLogRepo = storage.eventLogRepo;
   const notify = { notify: async () => {}, notifyEntry: async () => {} };
   const eventPublisher = new EventPublisher({
@@ -388,8 +392,9 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
       throw new Error("query authority does not match trusted session");
     }
     phase("capture_and_lease");
-    const { probes, edges, inactiveResults, contradictions, sourceCache, rawTruncated } = await retrieveSources({
-      captured, storage, memoryReader, recallReader, embeddingProvider, artifactReader, counters });
+    const { probes, edges, inactiveResults, contradictions, sourceCache, rawTruncated } = await retrieveIndexedFamilies({
+      captured, memoryReader, recallReader, embeddingProvider, embeddingRepo: storage.memoryEmbeddingRepo,
+      artifactReader, counters, runId: RUN });
     phase("retrieval");
     const field = admitField(captured.spec, probes);
     const activeResults = new Set(edges.map((edge) => edge.resultObjectId));
@@ -508,6 +513,7 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
 
   return {
     bindReadyArtifactReader: (reader: NonNullable<typeof artifactReader>) => { artifactReader = reader; },
+    indexProjection,
     recallReader,
     plantLocalVectors,
     memoryService: memory,

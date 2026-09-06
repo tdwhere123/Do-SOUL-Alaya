@@ -31,9 +31,8 @@ interface SemanticProjectionReadRow {
 export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPort {
   private readonly visitFunction = `semantic_visit_${randomUUID().replaceAll('-', '')}`;
   private readonly exhausted = new Error("semantic native candidate budget exhausted");
-  private nativeVisits = 0;
-  private nativeBytes = 0;
-  private nativeLimit = 0;
+  private readonly visitState = new Map<number, { visits: number; bytes: number; limit: number }>();
+  private nextVisitCall = 0;
 
   public constructor(
     private readonly db: SqliteConnection,
@@ -42,10 +41,12 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     private readonly enrichmentContract = "source_enrichment.v1"
   ) {
     assertSemanticArtifactCandidateSchema(db);
-    db.function(this.visitFunction, (id: string) => {
-      this.nativeVisits++;
-      this.nativeBytes += Buffer.byteLength(id, 'utf8');
-      if (this.nativeVisits >= this.nativeLimit) throw this.exhausted;
+    db.function(this.visitFunction, (id: string, callId: number) => {
+      const state = this.visitState.get(callId);
+      if (state === undefined) throw new Error("semantic visit call is missing");
+      state.visits++;
+      state.bytes += Buffer.byteLength(id, 'utf8');
+      if (state.visits >= state.limit) throw this.exhausted;
       return 1;
     });
   }
@@ -300,18 +301,22 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       byteAccounting: "utf8_candidate_and_validation_columns" as const };
     if (terms.length === 0) return { ...observation, rows: [] };
     const match = `${buildWorkspaceFtsScopeMatch(workspaceId)} AND search_text:(${buildFtsMatchExpression(terms.slice(0, 32))})`;
-    this.nativeVisits = 0; this.nativeBytes = 0; this.nativeLimit = limit;
+    const callId = ++this.nextVisitCall;
+    const state = { visits: 0, bytes: 0, limit };
+    this.visitState.set(callId, state);
     let read: SemanticProjectionReadRow[];
     try {
-      read = this.readReadyRows(workspaceId, match, limit);
+      read = this.readReadyRows(workspaceId, match, limit, callId);
     } catch (error) {
       if (error !== this.exhausted) throw error;
-      return { ...observation, rows: [], rowsRead: this.nativeVisits, candidateRowsRead: this.nativeVisits,
-        nativeVisits: this.nativeVisits, nativeBytes: this.nativeBytes, bytesRead: 0, truncated: true };
+      return { ...observation, rows: [], rowsRead: state.visits, candidateRowsRead: state.visits,
+        nativeVisits: state.visits, nativeBytes: state.bytes, bytesRead: 0, truncated: true };
+    } finally {
+      this.visitState.delete(callId);
     }
     const rows: { objectId: string; sourceRevision: string; projectionText: string }[] = [];
-    observation.nativeVisits = observation.candidateRowsRead = this.nativeVisits;
-    observation.nativeBytes = this.nativeBytes;
+    observation.nativeVisits = observation.candidateRowsRead = state.visits;
+    observation.nativeBytes = state.bytes;
     observation.candidateRowsReturned = read.length;
     for (const row of read) {
       observation.projectionRowsRead += Number(row.projectionId !== null);
@@ -329,12 +334,12 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     return { ...observation, rows };
   }
 
-  private readReadyRows(workspaceId: string, match: string, limit: number): SemanticProjectionReadRow[] {
+  private readReadyRows(workspaceId: string, match: string, limit: number, callId: number): SemanticProjectionReadRow[] {
     // Complete canonical ordering or no winners: a native budget abort never exposes an arrival-order prefix.
     return this.db.prepare(`WITH candidate AS MATERIALIZED (
       SELECT workspace_id, object_id
       FROM garden_semantic_fts WHERE garden_semantic_fts MATCH ? AND workspace_id=?
-        AND ${this.visitFunction}(object_id)
+        AND ${this.visitFunction}(object_id, ?)
       ORDER BY object_id LIMIT ?
     ), validated AS MATERIALIZED (
       SELECT c.workspace_id, c.object_id,
@@ -355,7 +360,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       LEFT JOIN garden_semantic_intents i ON i.workspace_id=p.workspace_id AND i.object_id=p.object_id
     ) SELECT *, CASE WHEN sourceEligible=1 AND observedSourceRevision=expectedSourceRevision
         THEN 1 ELSE 0 END AS eligible FROM validated ORDER BY object_id`)
-      .all(match, workspaceId, limit) as SemanticProjectionReadRow[];
+      .all(match, workspaceId, callId, limit) as SemanticProjectionReadRow[];
   }
 
   private assertAttemptOwnership(task: SemanticEnrichmentTask, attemptId: string): void {

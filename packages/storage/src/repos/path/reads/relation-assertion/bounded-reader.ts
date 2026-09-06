@@ -14,6 +14,13 @@ export interface RecallAssertionObservation {
   readonly resolutionKind: string | null;
 }
 
+export const RELATION_RECALL_INDEX_SQL = `
+CREATE INDEX IF NOT EXISTS idx_relation_recall_predicate
+  ON relation_assertions(workspace_id, relation_kind, assertion_id);
+CREATE INDEX IF NOT EXISTS idx_relation_recall_subject
+  ON relation_assertions(workspace_id, lower(json_extract(anchors_json, '$.source_anchor.object_id')), relation_kind, assertion_id);
+`;
+
 const READ_SQL = `
 SELECT a.assertion_id, a.workspace_id, a.relation_kind,
        json_extract(a.anchors_json, '$.source_anchor.object_id') AS source_id,
@@ -36,22 +43,21 @@ let nextReaderId = 0;
 export class SqliteRelationRecallReader {
   private readonly visitFunction = `recall_assertion_visit_${++nextReaderId}`;
   private readonly exhausted = new Error("assertion native visit limit exhausted");
-  private nativeVisits = 0;
-  private nativeBytes = 0;
-  private nativeLimit = 0;
+  private readonly visitState = new Map<number, { visits: number; bytes: number; limit: number }>();
+  private nextVisitCall = 0;
 
   public constructor(private readonly db: StorageDatabase) {
-    db.connection.function(this.visitFunction, (assertionId: string, evidenceId: string) => {
-      this.nativeVisits += 1; this.nativeBytes += Buffer.byteLength(assertionId + evidenceId, "utf8");
-      if (this.nativeVisits >= this.nativeLimit) throw this.exhausted;
+    db.connection.function(this.visitFunction, (assertionId: string, evidenceId: string, callId: number) => {
+      const state = this.visitState.get(callId);
+      if (state === undefined) throw new Error("assertion visit call is missing");
+      state.visits += 1; state.bytes += Buffer.byteLength(assertionId + evidenceId, "utf8");
+      if (state.visits >= state.limit) throw this.exhausted;
       return 1;
     });
   }
 
   public prepareIndex(): void {
-    this.db.connection.exec(`CREATE INDEX IF NOT EXISTS idx_relation_recall_predicate ON relation_assertions(workspace_id, relation_kind, assertion_id)`);
-    this.db.connection.exec(`CREATE INDEX IF NOT EXISTS idx_relation_recall_subject
-      ON relation_assertions(workspace_id, lower(json_extract(anchors_json, '$.source_anchor.object_id')), relation_kind, assertion_id)`);
+    this.db.connection.exec(RELATION_RECALL_INDEX_SQL);
   }
 
   public explain(workspaceId: string, subject: string, predicate: string) {
@@ -65,20 +71,24 @@ export class SqliteRelationRecallReader {
     if (!limit || !nativeLimit) return { nativeVisits: 0, nativeBytes: 0, rawRows: [], observations: [], rowsRead: 0, bytesRead: 0, truncated: true };
     const sql = subject === null ? READ_SQL.replace("idx_relation_recall_subject", "idx_relation_recall_predicate")
       .replace(" AND lower(json_extract(a.anchors_json, '$.source_anchor.object_id')) = ?", "") : READ_SQL;
-    const tail = ["", "", "", limit];
+    const callId = ++this.nextVisitCall;
+    const state = { visits: 0, bytes: 0, limit: nativeLimit };
+    this.visitState.set(callId, state);
+    const tail = ["", "", "", callId, limit];
     const parameters = subject === null ? [workspaceId, predicate, ...tail] : [workspaceId, subject.toLowerCase(), predicate, ...tail];
-    this.nativeVisits = 0; this.nativeBytes = 0; this.nativeLimit = nativeLimit;
     let rows: readonly Record<string, unknown>[] = [];
     let exhausted = false;
     try {
-      const boundedSql = sql.replace("ORDER BY a.assertion_id", `AND ${this.visitFunction}(a.assertion_id, e.evidence_id) ORDER BY a.assertion_id`);
+      const boundedSql = sql.replace("ORDER BY a.assertion_id", `AND ${this.visitFunction}(a.assertion_id, e.evidence_id, ?) ORDER BY a.assertion_id`);
       rows = this.db.connection.prepare(boundedSql).all(...parameters) as readonly Record<string, unknown>[];
     } catch (error) {
       if (error !== this.exhausted) throw error;
       exhausted = true;
+    } finally {
+      this.visitState.delete(callId);
     }
     const truncated = exhausted || rows.length === limit;
-    return Object.freeze({ nativeVisits: this.nativeVisits, nativeBytes: this.nativeBytes, rawRows: rows,
+    return Object.freeze({ nativeVisits: state.visits, nativeBytes: state.bytes, rawRows: rows,
       observations: this.decode(rows, truncated), rowsRead: rows.length,
       bytesRead: exhausted ? 0 : Buffer.byteLength(JSON.stringify(rows), "utf8"), truncated });
   }
