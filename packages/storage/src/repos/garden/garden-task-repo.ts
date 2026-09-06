@@ -462,12 +462,17 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     claimedBy: string
   ): void {
     const update = this.completeStatement.run(status, completedAt, lastErrorText, taskId, claimedBy);
-    if (update.changes !== 1) {
-      throw new StorageError(
-        "CONFLICT",
-        `Garden task ${taskId} is not claimed by the expected worker and cannot be completed.`
-      );
+    if (update.changes === 1) {
+      return;
     }
+    const row = this.findById(taskId);
+    if (row !== null && row.status === status && row.claimed_by === claimedBy) {
+      return;
+    }
+    throw new StorageError(
+      "CONFLICT",
+      `Garden task ${taskId} is not claimed by the expected worker and cannot be completed.`
+    );
   }
 
 }

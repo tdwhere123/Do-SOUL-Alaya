@@ -241,3 +241,22 @@ export {
 } from "./garden/scheduling/bootstrapping-ids.js";
 
 export { OfficialApiSemanticArtifactCodec } from "./garden/ingestion/official-api/semantic-artifact.js";
+export {
+  EXTRACTION_CAPABILITY_CATALOG_VERSION,
+  OFFICIAL_API_SIGNALS_CAPABILITY,
+  TEMPORAL_VALIDITY_CAPABILITY,
+  capabilitiesAreCompatible,
+  capabilityIdentity,
+  lookupExtractionCapability,
+  resolveExtractionCapability,
+  supplementKey,
+  type ExtractionCapabilityContract
+} from "./garden/ingestion/official-api/extraction-capability.js";
+export {
+  SOURCE_ENRICHMENT_CONTRACT,
+  canonicalizeSemanticExtractionProfile,
+  computeSemanticArtifactKey,
+  defaultSourceEnrichmentProfile,
+  semanticExtractionProfilesEqual,
+  tenantArtifactReuseAllowed
+} from "./garden/ingestion/official-api/semantic-artifact-identity.js";

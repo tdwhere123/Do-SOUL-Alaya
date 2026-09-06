@@ -6,12 +6,14 @@ import type {
   HealthIssueGroup,
   RuntimeGardenComputeConfig,
   CandidateMemorySignal,
+  SemanticExtractionProfile,
   SoulConfig
 } from "@do-soul/alaya-protocol";
 import type {
   DynamicsService,
   EmbeddingBackfillHandler,
   EventPublisher,
+  SemanticEnrichmentWorkerDependencies,
   StrongRefService
 } from "@do-soul/alaya-core";
 import type {
@@ -201,6 +203,8 @@ export type CreateGardenRuntimeInput = {
     getSoulConfig?(workspaceId: string): Promise<SoulConfig>;
   };
   readonly officialApiGardenProvider?: GardenComputeProvider | null;
+  readonly semanticTransport?: SemanticEnrichmentWorkerDependencies["transport"];
+  readonly semanticExtractionProfile?: SemanticExtractionProfile;
   readonly localHeuristicsProvider?: GardenComputeProvider;
   readonly signalReceiver?: PostTurnSignalReceiver;
   readonly strongRefService: StrongRefService;

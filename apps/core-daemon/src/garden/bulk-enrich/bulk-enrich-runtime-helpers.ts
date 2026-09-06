@@ -4,7 +4,8 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
-  type CandidateMemorySignal
+  type CandidateMemorySignal,
+  type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
 import type { EventPublisher } from "@do-soul/alaya-core";
 import type { SqliteGardenTaskRepo, SqliteWorkspaceRepo } from "@do-soul/alaya-storage";
@@ -111,7 +112,17 @@ export type CreateBulkEnrichRuntimeSupportInput = Readonly<{
   readonly onTaskEnqueued: (reason: string) => void;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
   readonly workspaceRepo: SqliteWorkspaceRepo;
+  readonly sourceEnrichment?: {
+    run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
+  };
 }>;
+
+export function isPerSourceEnrichmentTask(
+  task: Readonly<{ readonly source_object_id?: string; readonly enrichment_contract?: string }>
+): boolean {
+  return typeof task.source_object_id === "string" && task.source_object_id.length > 0 &&
+    typeof task.enrichment_contract === "string" && task.enrichment_contract.length > 0;
+}
 
 export type BulkEnrichReadyPorts = Readonly<{
   readonly enrichPendingRepo: NonNullable<CreateBulkEnrichRuntimeSupportInput["enrichPendingRepo"]>;

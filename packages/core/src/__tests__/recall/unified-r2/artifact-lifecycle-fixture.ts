@@ -1,4 +1,4 @@
-import { FormationKind, SoulGardenSemanticEnrichmentPayloadSchema, MemoryDimension, ScopeClass, SourceKind,
+import { FormationKind, GardenRole, SoulGardenSemanticEnrichmentPayloadSchema, MemoryDimension, ScopeClass, SourceKind,
   type SemanticEnrichmentTask,
   type SemanticExtractionProfile } from "@do-soul/alaya-protocol";
 import { OfficialApiSemanticArtifactCodec } from "@do-soul/alaya-soul";
@@ -27,7 +27,7 @@ export function wireArtifacts(database: StorageDatabase) {
   const publisher = new EventPublisher({ eventLogRepo: events,
     runHotStateService: { apply: () => {} }, runtimeNotifier: { notify: async () => {}, notifyEntry: async () => {} } });
   const garden = new SqliteGardenTaskRepo(database.connection, publisher);
-  const repo = new SqliteSemanticArtifactRepo(database.connection, garden);
+  const repo = new SqliteSemanticArtifactRepo(database.connection, garden, PROFILE);
   const codec = new OfficialApiSemanticArtifactCodec();
   let now = NOW;
   const audit = <T>(action: string, task: SemanticEnrichmentTask, mutate: () => T) =>
@@ -49,17 +49,23 @@ export async function artifactFixture(register: (database: StorageDatabase) => v
   const wired = wireArtifacts(slice.database);
   const evidence = new SqliteEvidenceCapsuleRepo(slice.database);
   let nextId = '';
-  let taskId = '';
   let rejectEnqueue = false;
   const writeDurations: number[] = [];
   const memory = new MemoryService({ now: () => NOW, generateObjectId: () => nextId,
     eventLogRepo: wired.events, memoryEntryRepo: slice.memoryEntryRepo,
     evidenceService: { findById: async (id) => evidence.findById(id),
       findByIds: async (workspaceId, ids) => evidence.findByIds?.(workspaceId, ids) ?? [] },
-    enrichPendingWriter: { enqueue: ({ workspaceId, memoryId }) => {
-      if (rejectEnqueue) throw new Error('retryable semantic enrichment backpressure');
-      taskId = wired.repo.enqueue(workspaceId, memoryId, PROFILE, NOW);
-    } }, runtimeNotifier: { notifyEntry: async () => {} } });
+    gardenIntentPort: rejectableGarden(wired.garden, () => rejectEnqueue),
+    runtimeNotifier: { notifyEntry: async () => {} } });
+  function latestIntent(objectId: string): string {
+    const pending = wired.garden.peekPending(GardenRole.LIBRARIAN, WS, 128);
+    const match = [...pending].reverse().find((row) => {
+      const payload = row.payload as { source_object_id?: string };
+      return payload.source_object_id === objectId;
+    });
+    if (match === undefined) throw new Error(`missing source enrichment intent for ${objectId}`);
+    return match.id;
+  }
   async function write(id: string, content: string) {
     nextId = id;
     const started = performance.now();
@@ -69,15 +75,32 @@ export async function artifactFixture(register: (database: StorageDatabase) => v
       workspace_id: WS, run_id: RUN, surface_id: null,
       enqueueEnrichment: { runId: RUN, sourceSignalId: null } });
     writeDurations.push(performance.now() - started);
-    return taskId;
+    return latestIntent(id);
   }
   async function change(id: string, content: string) {
     const started = performance.now();
     await memory.updateScoped(id, WS, { content }, 'source revision', { runId: RUN, sourceSignalId: null });
     writeDurations.push(performance.now() - started);
-    return taskId;
+    return latestIntent(id);
   }
   return { slice, ...wired, memory, write, change, writeDurations,
     rejectEnqueue: () => { rejectEnqueue = true; }, enqueue: (id: string, profile = PROFILE) =>
     slice.database.connection.transaction(() => wired.repo.enqueue(WS, id, profile, NOW))() };
+}
+
+function rejectableGarden(
+  garden: SqliteGardenTaskRepo,
+  rejected: () => boolean
+): SqliteGardenTaskRepo {
+  return new Proxy(garden, {
+    get(target, property, receiver) {
+      if (property === 'enqueue' && rejected()) {
+        return () => {
+          throw new Error('retryable semantic enrichment backpressure');
+        };
+      }
+      const value = Reflect.get(target, property, receiver) as unknown;
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
 }

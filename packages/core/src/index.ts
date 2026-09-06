@@ -101,6 +101,10 @@ export * from "./relations/producers/path-activation-candidate-producer.js";
 export * from "./relations/path-relations/path-manifestation-policy.js";
 export * from "./tooling/mcp-tool-discovery-service.js";
 export * from "./memory/memory-service.js";
+export {
+  SemanticEnrichmentWorker,
+  type SemanticEnrichmentWorkerDependencies
+} from "./conversation/semantic-enrichment-worker.js";
 export * from "./conversation/message-history.js";
 export * from "./conversation/narrative-budget-service.js";
 export * from "./tooling/node-template-resolver.js";

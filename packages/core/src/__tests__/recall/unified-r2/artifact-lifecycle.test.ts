@@ -32,6 +32,9 @@ describe('durable semantic artifact lifecycle', () => {
     const f = await fixture();
     const t = transport();
     const first = await f.write(MEM.orion, 'Alice owns Orion');
+    expect(first.startsWith('source_enrich_')).toBe(true);
+    expect((f.garden.findById(first)?.payload as { enrichment_contract?: string }).enrichment_contract)
+      .toBe('source_enrichment.v1');
     expect(t.calls).toHaveLength(0);
     const worker = f.worker(t);
     expect(await worker.run(WS, first)).toBe('completed');

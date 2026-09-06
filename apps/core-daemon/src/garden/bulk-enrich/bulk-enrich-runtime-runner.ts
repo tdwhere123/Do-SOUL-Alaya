@@ -7,10 +7,11 @@ import {
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
 import type { EventPublisher } from "@do-soul/alaya-core";
-import type {
-  BulkEnrichAvailability,
-  BulkEnrichPendingClaim,
-  BulkEnrichReadyPorts
+import {
+  isPerSourceEnrichmentTask,
+  type BulkEnrichAvailability,
+  type BulkEnrichPendingClaim,
+  type BulkEnrichReadyPorts
 } from "./bulk-enrich-runtime-helpers.js";
 
 type BulkEnrichReporter = Readonly<{
@@ -91,8 +92,15 @@ export async function runBulkEnrichTask(input: Readonly<{
   readonly task: Readonly<GardenTaskDescriptor>;
   readonly availability: BulkEnrichAvailability;
   readonly reporter: BulkEnrichReporter;
+  readonly sourceEnrichment?: {
+    run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
+  };
 }>): Promise<void> {
   const completedAt = input.now();
+  if (isPerSourceEnrichmentTask(input.task)) {
+    await runPerSourceEnrichmentTask(input, completedAt);
+    return;
+  }
   if (input.availability.kind === "missing_repo") {
     await input.reporter.reportCompletion(input.task, completedAt, true, [
       "bulk_enrich_skipped:no_enrich_pending_table"
@@ -123,6 +131,45 @@ export async function runBulkEnrichTask(input: Readonly<{
     await input.reporter.reportCompletion(input.task, completedAt, false, [], error);
     input.reporter.warn("bulk enrich task failed; continuing Garden background pass", {
       workspace_id: input.task.workspace_id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+async function runPerSourceEnrichmentTask(
+  input: Readonly<{
+    readonly task: Readonly<GardenTaskDescriptor>;
+    readonly reporter: BulkEnrichReporter;
+    readonly sourceEnrichment?: {
+      run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
+    };
+  }>,
+  completedAt: string
+): Promise<void> {
+  if (input.sourceEnrichment === undefined) {
+    await input.reporter.reportCompletion(input.task, completedAt, false, [
+      "source_enrich_unwired"
+    ], new Error("per-source enrichment worker is not composed"));
+    return;
+  }
+  try {
+    const outcome = await input.sourceEnrichment.run(input.task);
+    if (outcome === "uncertain" || outcome === "busy" || outcome === "work_busy") {
+      return;
+    }
+    const success = outcome === "completed";
+    await input.reporter.reportCompletion(
+      input.task,
+      completedAt,
+      success,
+      [`source_enrich:${outcome}`],
+      success ? undefined : new Error(outcome)
+    );
+  } catch (error) {
+    await input.reporter.reportCompletion(input.task, completedAt, false, [], error);
+    input.reporter.warn("per-source enrichment failed; continuing Garden background pass", {
+      workspace_id: input.task.workspace_id,
+      task_id: input.task.task_id,
       error: error instanceof Error ? error.message : String(error)
     });
   }

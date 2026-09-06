@@ -1,38 +1,25 @@
-import { createHash } from "node:crypto";
 import type { AdmittedSemanticArtifact, SemanticArtifactCodec, SemanticArtifactWork,
   SemanticExtractionProfile, SemanticSourceSnapshot } from "@do-soul/alaya-protocol";
 import { planOfficialApiSemanticWorkset, assertOfficialApiSemanticWorkUnit,
   type OfficialApiSemanticWorkUnit } from "./semantic-workset.js";
-import { auditOfficialApiSignalFormation, OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION } from "./formation-audit.js";
-import { OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION } from "../official-api-signal-parser.js";
-
+import { auditOfficialApiSignalFormation } from "./formation-audit.js";
+import { canonicalizeSemanticExtractionProfile, computeSemanticArtifactKey } from
+  "./semantic-artifact-identity.js";
 import { buildOfficialApiSourceCorpus } from "../../triage/grounding/source-locator.js";
-
-function hash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
-}
-
-function artifactKey(semanticKey: string, profile: SemanticExtractionProfile): string {
-  return hash([semanticKey, profile.capability, profile.model, profile.requestProfile,
-    profile.promptRevision, profile.outputSchema, OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
-    OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION]);
-}
 
 /** Shares the source work-unit and formation owners; artifacts contain proposals, never admitted truth. */
 export class OfficialApiSemanticArtifactCodec implements SemanticArtifactCodec {
   public plan(source: SemanticSourceSnapshot, profile: SemanticExtractionProfile): readonly SemanticArtifactWork[] {
-    if (Object.values(profile).some((value) => typeof value !== 'string' || value.trim().length === 0)) {
-      throw new Error("incomplete semantic extraction profile");
-    }
+    const canonical = canonicalizeSemanticExtractionProfile(profile);
     const units = planOfficialApiSemanticWorkset(source.content, [
       { role: source.trustedRole, content: source.content }
     ]).units;
     return units.map((unit) => ({
-      key: artifactKey(unit.semanticKey, profile),
+      key: computeSemanticArtifactKey(unit.semanticKey, canonical),
       semanticKey: unit.semanticKey,
       requestJson: JSON.stringify({ semanticKey: unit.semanticKey, text: unit.text,
         semanticContext: unit.semanticIdentity.semanticContext,
-        trustedRole: unit.semanticIdentity.trustedRole, profile }),
+        trustedRole: unit.semanticIdentity.trustedRole, profile: canonical }),
       admissionJson: JSON.stringify(unit),
       bindingJson: JSON.stringify(unit.binding)
     }));
@@ -42,7 +29,12 @@ export class OfficialApiSemanticArtifactCodec implements SemanticArtifactCodec {
     const unit = JSON.parse(work.admissionJson) as OfficialApiSemanticWorkUnit;
     const { profile } = JSON.parse(work.requestJson) as { profile: SemanticExtractionProfile };
     assertOfficialApiSemanticWorkUnit(unit);
-    if (artifactKey(unit.semanticKey, profile) !== work.key || unit.semanticKey !== work.semanticKey || unit.sourceCorpus !== buildOfficialApiSourceCorpus(source.content, [{ role: source.trustedRole, content: source.content }])) {
+    const canonical = canonicalizeSemanticExtractionProfile(profile);
+    if (computeSemanticArtifactKey(unit.semanticKey, canonical) !== work.key ||
+      unit.semanticKey !== work.semanticKey ||
+      unit.sourceCorpus !== buildOfficialApiSourceCorpus(source.content, [
+        { role: source.trustedRole, content: source.content }
+      ])) {
       throw new Error("semantic artifact source mismatch");
     }
     const raw = JSON.parse(rawJson) as { signals?: unknown[] };
@@ -71,6 +63,7 @@ export class OfficialApiSemanticArtifactCodec implements SemanticArtifactCodec {
         semantic_factor_graph: rawPayload.semantic_factor_graph,
         kind_projection: rawPayload.kind_projection };
     });
-    return Object.freeze({ key: work.key, rawJson, payloadJson: JSON.stringify(payload), searchText: [unit.text, ...payload.map((draft) => draft.object_kind)].join("\n") });
+    return Object.freeze({ key: work.key, rawJson, payloadJson: JSON.stringify(payload),
+      searchText: [unit.text, ...payload.map((draft) => draft.object_kind)].join("\n") });
   }
 }

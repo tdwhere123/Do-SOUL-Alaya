@@ -217,6 +217,34 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
   });
 
+  it("does not drain enrich_pending for a per-source source_enrich bulk_enrich task", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
+    const detectAndLinkConflicts = vi.fn<DetectFn>(async () => undefined);
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        produceForNewMemory,
+        detectAndLinkConflicts
+      })
+    );
+    currentScheduler().enqueue({
+      ...bulkEnrichTask(),
+      task_id: "source_enrich_fixture",
+      source_object_id: "memory-1",
+      source_revision: 0,
+      enrichment_contract: "source_enrichment.v1"
+    });
+    await getService(runtime, "GardenScheduler").task();
+    expect(produceForNewMemory).not.toHaveBeenCalled();
+    expect(detectAndLinkConflicts).not.toHaveBeenCalled();
+    expect(currentScheduler().completions[0]).toMatchObject({
+      success: false,
+      audit_entries: ["source_enrich_unwired"]
+    });
+  });
+
   it("deletes a stale row whose memory no longer exists without invoking enrichment", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-gone");

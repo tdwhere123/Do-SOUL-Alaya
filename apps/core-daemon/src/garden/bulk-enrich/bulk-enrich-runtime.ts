@@ -65,7 +65,8 @@ export function createBulkEnrichRuntimeSupport(
         now: input.now,
         task,
         availability,
-        reporter
+        reporter,
+        sourceEnrichment: input.sourceEnrichment
       })
   };
 }

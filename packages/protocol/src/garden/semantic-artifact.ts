@@ -1,4 +1,4 @@
-/** Internal candidate contracts; these do not activate a worker or a public API. */
+/** Internal candidate contracts. Daemon composition may run the worker; this is not a public API. */
 export interface SemanticExtractionProfile {
   readonly capability: string;
   readonly model: string;

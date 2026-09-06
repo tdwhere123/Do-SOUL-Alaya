@@ -5,6 +5,7 @@ import {
   type GardenTierValue
 } from "@do-soul/alaya-protocol";
 import { createBulkEnrichRuntimeSupport } from "../bulk-enrich/bulk-enrich-runtime.js";
+import { createSourceEnrichmentRuntime } from "../bulk-enrich/source-enrichment-runtime.js";
 import {
   createGardenBackgroundPassTracker,
   createBacklogTelemetryController,
@@ -334,6 +335,14 @@ function createGardenBulkEnrichRuntime(
     gardenTaskRepo: core.gardenTaskRepo,
     onTaskEnqueued: telemetry.requestBacklogTelemetryCapture,
     warn,
-    workspaceRepo: input.workspaceRepo
+    workspaceRepo: input.workspaceRepo,
+    sourceEnrichment: createSourceEnrichmentRuntime({
+      connection: input.databaseConnection,
+      gardenTaskRepo: core.gardenTaskRepo,
+      eventPublisher: input.eventPublisher,
+      now: input.now,
+      transport: input.semanticTransport,
+      profile: input.semanticExtractionProfile
+    })
   });
 }

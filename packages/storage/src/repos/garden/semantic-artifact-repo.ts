@@ -35,7 +35,12 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
   private nativeBytes = 0;
   private nativeLimit = 0;
 
-  public constructor(private readonly db: SqliteConnection, private readonly garden: SqliteGardenTaskRepo) {
+  public constructor(
+    private readonly db: SqliteConnection,
+    private readonly garden: SqliteGardenTaskRepo,
+    private readonly defaultProfile: SemanticExtractionProfile | null = null,
+    private readonly enrichmentContract = "source_enrichment.v1"
+  ) {
     assertSemanticArtifactCandidateSchema(db);
     db.function(this.visitFunction, (id: string) => {
       this.nativeVisits++;
@@ -69,6 +74,13 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     };
     if (Object.values(canonicalProfile).some((value) => typeof value !== 'string' || value.trim().length === 0)) {
       throw new Error("invalid semantic extraction profile");
+    }
+    if (this.defaultProfile !== null && profilesEqual(canonicalProfile, this.defaultProfile)) {
+      const existingId = this.findSourceEnrichmentTaskId(workspaceId, objectId, source.sourceEventRevision);
+      if (existingId !== null) {
+        this.upsertIntent(workspaceId, objectId, existingId, capacity);
+        return existingId;
+      }
     }
     const payload = { source_object_id: objectId, source_revision: source.revision, profile: canonicalProfile };
     const id = `semantic:${digest(JSON.stringify([workspaceId, objectId, source.revision, canonicalProfile]))}`;
@@ -107,19 +119,20 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
   }
 
   public isCurrent(task: SemanticEnrichmentTask): boolean {
-    return this.db.prepare(`SELECT 1 FROM garden_semantic_intents
-      WHERE workspace_id=? AND object_id=? AND task_id=?`)
-      .get(task.workspaceId, task.objectId, task.id) !== undefined;
+    if (!this.sourceMatchesTask(task)) return false;
+    const intent = this.db.prepare(`SELECT task_id FROM garden_semantic_intents
+      WHERE workspace_id=? AND object_id=?`)
+      .get(task.workspaceId, task.objectId) as { task_id: string } | undefined;
+    if (intent === undefined || intent.task_id === task.id) return true;
+    const incumbent = this.garden.findById(intent.task_id);
+    return incumbent === null || this.outranksIntent(task, incumbent);
   }
 
   public task(workspaceId: string, taskId: string): SemanticEnrichmentTask | null {
     const row = this.garden.findById(taskId);
-    if (!row || row.workspace_id !== workspaceId || !row.id.startsWith("semantic:")) return null;
-    const payload = row.payload as { source_object_id: string; source_revision: string;
-      profile: SemanticExtractionProfile };
-    return { id: row.id, workspaceId, objectId: payload.source_object_id,
-      revision: payload.source_revision, profile: payload.profile, status: row.status,
-      claim: row.claimed_by, claimedAt: row.claimed_at, attempts: row.attempt_count };
+    if (!row || row.workspace_id !== workspaceId) return null;
+    const mapped = this.mapTask(row);
+    return mapped?.workspaceId === workspaceId ? mapped : null;
   }
 
   public claim(task: SemanticEnrichmentTask, token: string, now: string): boolean {
@@ -363,7 +376,119 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     if (!live || live.status !== 'claimed' || live.claim !== task.claim || live.attempts !== task.attempts) {
       throw new Error("stale worker claim");
     }
+    if (this.isCurrent(task)) {
+      this.db.prepare(`INSERT INTO garden_semantic_intents VALUES (?, ?, ?)
+        ON CONFLICT(workspace_id,object_id) DO UPDATE SET task_id=excluded.task_id`)
+        .run(task.workspaceId, task.objectId, task.id);
+    }
   }
+
+  private mapTask(row: { readonly id: string; readonly workspace_id: string; readonly payload: unknown;
+    readonly status: SemanticEnrichmentTask["status"]; readonly claimed_by: string | null;
+    readonly claimed_at: string | null; readonly attempt_count: number }): SemanticEnrichmentTask | null {
+    const payload = asRecord(row.payload);
+    if (payload === null) return null;
+    const objectId = readNonEmptyString(payload.source_object_id);
+    if (objectId === null) return null;
+    const profile = this.readProfile(payload);
+    if (profile === null) return null;
+    const source = this.source(row.workspace_id, objectId);
+    const revision = source?.revision ?? readNonEmptyString(payload.source_revision) ??
+      (payload.source_revision === undefined ? null : String(payload.source_revision));
+    if (revision === null) return null;
+    return { id: row.id, workspaceId: row.workspace_id, objectId, revision, profile,
+      status: row.status, claim: row.claimed_by, claimedAt: row.claimed_at, attempts: row.attempt_count };
+  }
+
+  private readProfile(payload: Record<string, unknown>): SemanticExtractionProfile | null {
+    const nested = payload.profile;
+    if (isProfile(nested)) return nested;
+    if (readNonEmptyString(payload.enrichment_contract) === this.enrichmentContract && this.defaultProfile !== null) {
+      return this.defaultProfile;
+    }
+    return null;
+  }
+
+  private outranksIntent(
+    task: SemanticEnrichmentTask,
+    incumbent: { readonly id: string; readonly payload: unknown }
+  ): boolean {
+    const candidate = this.garden.findById(task.id);
+    const next = asRecord(candidate?.payload);
+    const current = asRecord(incumbent.payload);
+    if (next === null || current === null) return false;
+    if (readNonEmptyString(next.enrichment_contract) !== this.enrichmentContract) return false;
+    if (readNonEmptyString(current.enrichment_contract) !== this.enrichmentContract) return false;
+    const nextRevision = Number(next.source_revision);
+    const currentRevision = Number(current.source_revision);
+    return Number.isInteger(nextRevision) && Number.isInteger(currentRevision) &&
+      nextRevision > currentRevision;
+  }
+
+  private sourceMatchesTask(task: SemanticEnrichmentTask): boolean {
+    const source = this.source(task.workspaceId, task.objectId);
+    const row = this.garden.findById(task.id);
+    if (source === null || row === null) return false;
+    const payload = asRecord(row.payload);
+    if (payload === null) return false;
+    if (readNonEmptyString(payload.enrichment_contract) === this.enrichmentContract) {
+      return Number(payload.source_revision) === source.sourceEventRevision;
+    }
+    return source.revision === task.revision;
+  }
+
+  private findSourceEnrichmentTaskId(workspaceId: string, objectId: string, sourceEventRevision: number): string | null {
+    const row = this.db.prepare(`SELECT id FROM garden_tasks WHERE workspace_id=? AND kind='bulk_enrich'
+      AND json_extract(payload_json,'$.source_object_id')=?
+      AND CAST(json_extract(payload_json,'$.source_revision') AS INTEGER)=?
+      AND json_extract(payload_json,'$.enrichment_contract')=?`).get(
+      workspaceId, objectId, sourceEventRevision, this.enrichmentContract) as { id: string } | undefined;
+    return row?.id ?? null;
+  }
+
+  private upsertIntent(workspaceId: string, objectId: string, taskId: string, capacity: number): void {
+    const existing = this.garden.findById(taskId);
+    if (existing === null || existing.workspace_id !== workspaceId) {
+      throw new Error("semantic task identity conflict");
+    }
+    const current = this.db.prepare(`SELECT task_id FROM garden_semantic_intents
+      WHERE workspace_id=? AND object_id=?`).get(workspaceId, objectId) as { task_id: string } | undefined;
+    if (current?.task_id === taskId) return;
+    if (existing.status === 'completed' || existing.status === 'failed') {
+      const backlog = this.garden.countBacklog(workspaceId).reduce((sum, row) => sum + row.count, 0);
+      if (!Number.isSafeInteger(capacity) || capacity < 1 || backlog >= capacity) {
+        throw new Error("retryable semantic enrichment backpressure");
+      }
+      this.db.prepare(`UPDATE garden_tasks SET status='pending', claimed_by=NULL, claimed_at=NULL,
+        completed_at=NULL, last_error_text=NULL, completion_envelope_json=NULL
+        WHERE id=? AND workspace_id=? AND status IN ('completed','failed')`).run(taskId, workspaceId);
+    }
+    this.db.prepare(`INSERT INTO garden_semantic_intents VALUES (?, ?, ?)
+      ON CONFLICT(workspace_id,object_id) DO UPDATE SET task_id=excluded.task_id`)
+      .run(workspaceId, objectId, taskId);
+  }
+}
+
+function profilesEqual(left: SemanticExtractionProfile, right: SemanticExtractionProfile): boolean {
+  return left.capability === right.capability && left.model === right.model &&
+    left.requestProfile === right.requestProfile && left.promptRevision === right.promptRevision &&
+    left.outputSchema === right.outputSchema;
+}
+
+function isProfile(value: unknown): value is SemanticExtractionProfile {
+  if (value === null || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return ['capability', 'model', 'requestProfile', 'promptRevision', 'outputSchema']
+    .every((key) => typeof record[key] === 'string' && (record[key] as string).trim().length > 0);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown> : null;
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
 // Counts the exact UTF-8 fields inspected by validation, not SQLite page or index IO.

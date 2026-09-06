@@ -18,18 +18,25 @@ export interface SemanticEnrichmentWorkerDependencies {
   readonly maxUnits: number;
   readonly maxLocalRecoveries: number;
   readonly transportTimeoutMs: number;
+  readonly maxDispatchCalls?: number;
 }
 
 /** Explicitly invoked worker; daemon scheduling remains the Garden composition owner's responsibility. */
 export class SemanticEnrichmentWorker {
+  private readonly maxDispatchCalls: number;
+  private dispatchCalls = 0;
+
   public constructor(private readonly deps: SemanticEnrichmentWorkerDependencies) {
-    for (const bound of [deps.leaseMs, deps.maxAttempts, deps.maxUnits, deps.transportTimeoutMs, deps.maxLocalRecoveries]) {
+    this.maxDispatchCalls = deps.maxDispatchCalls ?? deps.maxAttempts * deps.maxUnits;
+    for (const bound of [deps.leaseMs, deps.maxAttempts, deps.maxUnits, deps.transportTimeoutMs,
+      deps.maxLocalRecoveries, this.maxDispatchCalls]) {
       if (!Number.isSafeInteger(bound) || bound < 1) throw new Error("invalid enrichment bound");
     }
   }
 
-  public async run(workspaceId: string, taskId: string): Promise<string> {
-    const task = await this.acquire(workspaceId, taskId);
+  public async run(workspaceId: string, taskId: string, options: { readonly adoptClaim?: boolean } = {}): Promise<string> {
+    this.dispatchCalls = 0;
+    const task = await this.acquire(workspaceId, taskId, options.adoptClaim === true);
     if (typeof task === 'string') return task;
     const source = this.deps.repo.source(workspaceId, task.objectId);
     if (!source || source.revision !== task.revision || !this.deps.repo.isCurrent(task)) return this.fail(task, 'superseded_source');
@@ -50,11 +57,15 @@ export class SemanticEnrichmentWorker {
     return 'completed';
   }
 
-  private async acquire(workspaceId: string, taskId: string): Promise<SemanticEnrichmentTask | string> {
+  private async acquire(workspaceId: string, taskId: string, adoptClaim: boolean): Promise<SemanticEnrichmentTask | string> {
     let task = this.deps.repo.task(workspaceId, taskId);
     if (!task) return 'missing';
     if (task.status === 'completed' || task.status === 'failed') return task.status;
     if (task.status === 'claimed') {
+      if (adoptClaim && task.claim !== null) {
+        if (task.attempts > this.deps.maxLocalRecoveries) return this.fail(task, 'local_recovery_bound');
+        return task;
+      }
       if (task.claimedAt === null || Date.parse(this.deps.now()) - Date.parse(task.claimedAt) < this.deps.leaseMs) {
         return 'busy';
       }
@@ -95,12 +106,15 @@ export class SemanticEnrichmentWorker {
       attempt = this.deps.repo.attempt(task.id, work.key);
     }
     if (!attempt || attempt.state === 'not_sent') {
-      if ((attempt?.ordinal ?? 0) >= this.deps.maxAttempts) return this.fail(task, 'dispatch_bound');
+      if ((attempt?.ordinal ?? 0) >= this.deps.maxAttempts || this.dispatchCalls >= this.maxDispatchCalls) {
+        return this.fail(task, 'dispatch_bound');
+      }
       const id = randomUUID();
       const reserved = await this.deps.audit('dispatched', task, () => this.deps.repo.dispatch(task, work.key, id));
       if (!reserved) return 'work_busy';
       let raw: string;
       try {
+        this.dispatchCalls += 1;
         raw = await this.bounded((signal) => this.deps.transport.execute(work.requestJson, id, signal));
       } catch {
         await this.deps.audit('uncertain', task, () => this.deps.repo.uncertain(task, id));

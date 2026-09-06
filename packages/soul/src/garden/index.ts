@@ -84,6 +84,26 @@ export {
 } from "./ingestion/compute-provider.js";
 export { transportPackIdentity } from "./ingestion/official-api/transport-pack.js";
 export {
+  EXTRACTION_CAPABILITY_CATALOG_VERSION,
+  OFFICIAL_API_SIGNALS_CAPABILITY,
+  TEMPORAL_VALIDITY_CAPABILITY,
+  capabilitiesAreCompatible,
+  capabilityIdentity,
+  lookupExtractionCapability,
+  resolveExtractionCapability,
+  supplementKey,
+  type ExtractionCapabilityContract
+} from "./ingestion/official-api/extraction-capability.js";
+export {
+  SOURCE_ENRICHMENT_CONTRACT,
+  canonicalizeSemanticExtractionProfile,
+  computeSemanticArtifactKey,
+  defaultSourceEnrichmentProfile,
+  semanticExtractionProfilesEqual,
+  tenantArtifactReuseAllowed
+} from "./ingestion/official-api/semantic-artifact-identity.js";
+export { OfficialApiSemanticArtifactCodec } from "./ingestion/official-api/semantic-artifact.js";
+export {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
   OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
