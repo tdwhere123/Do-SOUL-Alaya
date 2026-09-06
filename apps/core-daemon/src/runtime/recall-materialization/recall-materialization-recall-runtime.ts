@@ -16,6 +16,7 @@ import {
   SqliteRecallRoutingKeyProjectionRepo,
   type EvidenceSearchMatch
 } from "@do-soul/alaya-storage";
+import { createConditionalFieldObserverReaders } from "../recall-read-worker/observer-operations.js";
 import { DegradationPipeline } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 import { DAEMON_ONLY_CONFIG_ENV_KEYS } from "../config/daemon-config-environment.js";
@@ -100,7 +101,8 @@ export function createRecallSearchRuntime(
     recallSynthesisSearchPort: createRecallSynthesisSearchPort(input, recallReadWorkerClient),
     recallActiveConstraintsPort:
       recallReadWorkerClient?.activeConstraintsPort
-      ?? createRecallActiveConstraintsPort(input, directPathReadPorts)
+      ?? createRecallActiveConstraintsPort(input, directPathReadPorts),
+    conditionalFieldPort: recallReadWorkerClient?.conditionalFieldPort
   };
 }
 
@@ -312,7 +314,11 @@ function createRecallService(input: {
     recallFailureHealthInbox: input.input.recallFailureHealthInboxPort,
     warn: input.input.warn,
     fieldQuerySession: input.input.fieldQuerySession,
-    readSnapshot: input.readSnapshot
+    readSnapshot: input.readSnapshot,
+    observerReaders: createConditionalFieldObserverReaders(input.input.database),
+    ...(input.recallSearchRuntime.conditionalFieldPort === undefined
+      ? {}
+      : { conditionalFieldPort: input.recallSearchRuntime.conditionalFieldPort })
   });
   return withEmbeddingWarmupHoldAnnotation(service, input.embeddingRuntime.getWarmupHoldReason);
 }

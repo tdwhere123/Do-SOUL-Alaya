@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
 import {
   DYNAMICS_CONSTANTS,
+  type Continuation,
   type FieldContractSha256,
-  type RecallPolicy
+  type RecallPolicy,
+  type RequestBudget
 } from "@do-soul/alaya-protocol";
 import { type NodeStrategy } from "../conversation/task-surface-builder.js";
 import { fieldContractSha256 } from "../shared/field-hash.js";
 import { assertActivationWeightsSumToOne } from "./runtime/recall-service-helpers.js";
 import type {
-  RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "./runtime/recall-service-types.js";
@@ -18,7 +19,13 @@ import {
 } from "./runtime/query/field-query-session.js";
 import type { ProjectionPinHeartbeatScheduler } from "./runtime/query/projection-pin-lease.js";
 import { buildDefaultPolicy } from "./runtime/orchestration.js";
-import { executeRecall, type RecallExecutionParams } from "./runtime/recall-service-runner.js";
+import {
+  executeRecall,
+  type ConditionalFieldRecallPort,
+  type ConditionalFieldRecallResult,
+  type RecallExecutionParams
+} from "./runtime/recall-service-runner.js";
+import type { ObserverReaders } from "./conditional-field/observers/observe.js";
 import { wrapRecallFaultWarn } from "./runtime/recall-failure-health-inbox.js";
 import type { SelectGammaSynthesisDependencies } from
   "./delivery/select-gamma/synthesis-adapter.js";
@@ -28,10 +35,32 @@ export type RecallServiceFieldDeps = Readonly<{
   readonly sha256?: FieldContractSha256;
   readonly testOnlyAllowInMemoryFieldQuerySession?: true;
   readonly projectionPinHeartbeatScheduler?: ProjectionPinHeartbeatScheduler;
+  readonly observerReaders?: ObserverReaders;
+  readonly conditionalFieldPort?: ConditionalFieldRecallPort;
+}>;
+
+export type ConditionalFieldRecallParams = RecallExecutionParams & Readonly<{
+  readonly pageBudget?: number;
+  readonly queryText?: string;
+  readonly interpretationClock?: string;
+  readonly since?: string;
+  readonly until?: string;
+  readonly continuation?: Continuation | null;
+  readonly cancelled?: boolean;
+  readonly budget?: RequestBudget;
 }>;
 
 export type RecallServiceSynthesisDeps = SelectGammaSynthesisDependencies;
 
+export type { ObserverReaders };
+export {
+  encodeRecallResult,
+  runConditionalFieldRecall,
+  RELATION_MILLIGRADES,
+  type ConditionalFieldRecallPort,
+  type ConditionalFieldRecallRequest,
+  type ConditionalFieldRecallResult
+} from "./runtime/recall-service-runner.js";
 export { classifyGlobalCandidate } from "./runtime/recall-service-helpers.js";
 export type {
   KeywordSearchBatchQuery,
@@ -96,7 +125,7 @@ export class RecallService {
     this.fieldQuerySession = resolveFieldQuerySession(dependencies, this.sha256);
   }
 
-  public async recall(params: RecallExecutionParams): Promise<RecallResult> {
+  public async recall(params: ConditionalFieldRecallParams): Promise<ConditionalFieldRecallResult> {
     return executeRecall({
       dependencies: this.dependencies,
       warn: wrapRecallFaultWarn(

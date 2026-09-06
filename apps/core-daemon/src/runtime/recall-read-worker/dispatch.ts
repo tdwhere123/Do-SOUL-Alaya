@@ -8,6 +8,7 @@ import { runMemoryOperation } from "./memory-operations.js";
 import { runEvidenceOperation } from "./evidence-operations.js";
 import { runSynthesisOperation } from "./synthesis-operations.js";
 import { runPathOperation } from "./path-operations.js";
+import { runConditionalFieldWorkerRecall } from "./observer-operations.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 
 export async function runOperation(
@@ -78,6 +79,8 @@ export async function runOperation(
         runtime.database.connection.exec("ROLLBACK");
       }
       return null;
+    case "conditionalField.recall":
+      return runConditionalFieldWorkerRecall(runtime, payload);
     case "close":
       runtime.database.close();
       runtime.closed = true;

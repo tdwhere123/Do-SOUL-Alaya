@@ -34,6 +34,7 @@ export const RECALL_READ_WORKER_OPERATIONS = [
   "snapshot.beginDeferred",
   "snapshot.commit",
   "snapshot.rollback",
+  "conditionalField.recall",
   "close"
 ] as const;
 

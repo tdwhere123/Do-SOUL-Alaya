@@ -2,9 +2,11 @@ import { PassThrough } from "node:stream";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
+import { soulToolJsonSchemas } from "@do-soul/alaya-protocol";
 import { createToolsCommand } from "../../cli/tools.js";
 import type { AlayaCliContext } from "../../cli/bridge.js";
 import { ALAYA_SYSEXITS } from "../../cli/bridge.js";
+import { listAlayaMemoryTools } from "../../mcp-memory/tool/tool-catalog.js";
 import { createMcpMemoryToolHandler } from "../../mcp-memory/tool/tool-handler.js";
 import type { McpMemoryToolHandler } from "../../mcp-memory/tool/tool-handler.js";
 import { callAlayaMcpMemoryTool } from "../../mcp/server/mcp-server.js";
@@ -59,6 +61,99 @@ describe("alaya tools real-handler CLI/MCP parity", () => {
       callViaCli("soul.recall", args)
     ]);
     expect(cliOutput).toEqual(mcpOutput);
+  });
+
+  it("exposes continuation on soul.recall catalog and encodes index without ranking_authority", async () => {
+    const recallSchema = soulToolJsonSchemas["soul.recall"] as {
+      readonly properties?: Readonly<Record<string, unknown>>;
+    };
+    expect(recallSchema.properties?.["continuation"]).toBeDefined();
+    expect(listAlayaMemoryTools().find((tool) => tool.name === "soul.recall")?.description)
+      .toMatch(/continuation/);
+    const snapshotId = `sha256:${"c".repeat(64)}`;
+    const index = {
+      schema_version: 1,
+      query_id: "failed-deployment",
+      snapshot_id: snapshotId,
+      result_version: "v1",
+      entries: [
+        {
+          schema_version: 1,
+          object_id: "c",
+          hypothesis_id: "h0",
+          output_binding: "default",
+          role: "associated",
+          association_milligrades: 850,
+          claim: "unknown",
+          explanation_ids: []
+        },
+        {
+          schema_version: 1,
+          object_id: "h",
+          hypothesis_id: "h0",
+          output_binding: "default",
+          role: "associated",
+          association_milligrades: 550,
+          claim: "unknown",
+          explanation_ids: []
+        }
+      ],
+      completeness: {
+        schema_version: 1,
+        logical_index: "complete",
+        observed_coverage: "complete",
+        transport: "complete",
+        payload: "complete",
+        representation: "complete"
+      },
+      continuation: {
+        schema_version: 1,
+        continuation_id: "page-2",
+        query_id: "failed-deployment",
+        snapshot_id: snapshotId,
+        result_version: "v1",
+        expires_at: "2099-01-01T00:00:00.000Z",
+        cursor: "offset-2"
+      },
+      representation: {
+        schema_version: 1,
+        policy: "construct_index_then_page_then_payload",
+        page_budget: 2,
+        identity_tie_break: "serialization"
+      }
+    } as const;
+    const deps = createDeps();
+    deps.recallService.recall = vi.fn(async () => ({
+      candidates: [],
+      active_constraints: [],
+      active_constraints_count: 0,
+      total_scanned: 2,
+      coarse_filter_count: 2,
+      fine_assessment_count: 2,
+      index
+    })) as typeof deps.recallService.recall;
+    const args = {
+      query: "yesterday failed deployment",
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
+      max_results: 2,
+      continuation: index.continuation
+    };
+    const mcpResult = await callAlayaMcpMemoryTool(
+      {
+        memoryToolHandler: createMcpMemoryToolHandler(deps),
+        contextProvider: () => realHandlerContext
+      },
+      "soul.recall",
+      args
+    );
+    const output = (mcpResult.structuredContent as { readonly output: Record<string, unknown> }).output;
+    expect(output["index"]).toEqual(index);
+    expect(output["ranking_authority"]).toBeUndefined();
+    expect(output["delivery_path"]).toBeUndefined();
+    expect((output["results"] as readonly { readonly object_id: string }[]).map((row) => row.object_id))
+      .toEqual(["c", "h"]);
   });
 
   it("returns the same soul.open_pointer output through MCP and CLI", async () => {

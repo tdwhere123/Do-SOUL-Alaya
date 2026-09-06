@@ -27,6 +27,10 @@
       "apps/bench-runner/src/runs/extraction/fill/fill-execution.ts": {
         "kind": "handwritten",
         "reason": "Historical v3 pool vs lazy overlay dispatch plus fill-manifest persist stay one execution owner."
+      },
+      "packages/core/src/recall/runtime/recall-service-runner.ts": {
+        "kind": "handwritten",
+        "reason": "Single normal-entry owner: admit budget, compile, observe, field, support, index, encode."
       }
     }
   },
@@ -1152,8 +1156,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 1196,
-      "expected_sha256": "6f8de0187be9bfa1ddca6a407d09b8224531f129f38ed323ceb1e9207e65027d"
+      "expected_count": 1204,
+      "expected_sha256": "3db5e7a14f5b0ae1761f46e39f38428ca7ddc50f654c4eb7e2ccbb3e8041fe67"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",

@@ -12,7 +12,6 @@ import {
   SoulMemorySearchResponseSchema,
   SoulReportContextUsageResponseSchema,
   TaskObjectSurfaceSchema,
-  type CaptureExecution,
   type ContextDeliveryRecord,
   type MemoryEntry,
   type RecallCandidate,
@@ -30,6 +29,7 @@ import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-que
 import {
   buildMemorySearchResult,
   buildRecallStrategyMix,
+  encodeIndexResults,
   resolveMcpDegradationReason,
   selectRecallMcpHonestyDiagnostics,
   type RecallMcpHonestyDiagnostics
@@ -72,6 +72,12 @@ export interface RecallUsageHandlerDependencies {
       }>;
       readonly hostContext?: Readonly<SoulRecallHostContext>;
       readonly activeConstraintsCap?: number | null;
+      readonly pageBudget?: number;
+      readonly queryText?: string;
+      readonly interpretationClock?: string;
+      readonly since?: string;
+      readonly until?: string;
+      readonly continuation?: import("@do-soul/alaya-protocol").Continuation | null;
     }): Promise<Readonly<{
       readonly candidates: readonly Readonly<RecallCandidate>[];
       readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
@@ -81,14 +87,9 @@ export interface RecallUsageHandlerDependencies {
       readonly fine_assessment_count: number;
       readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
       readonly diagnostics?: RecallMcpHonestyDiagnostics | null;
-      readonly delivery_path?: "legacy" | "canonical";
-      readonly ranking_authority?: "prefix_sk" | "select_gamma";
-      readonly capture_identity?: Readonly<{
-        readonly algorithm_id: string;
-        readonly version: string;
-        readonly digest: string;
-      }>;
-      readonly capture_execution?: Readonly<CaptureExecution>;
+      readonly index?: import("@do-soul/alaya-protocol").InformationIndex;
+      readonly provider_calls?: 0;
+      readonly garden_enqueue?: 0;
     }>>;
   };
   readonly trustStateRecorder: {
@@ -175,8 +176,7 @@ async function executeRecall(
     taskSurface,
     policyOverride
   });
-  const resultCandidates = selectRecallCandidates(recallResult, request.max_results);
-  const { results, explainabilityPartial } = buildRecallResults(resultCandidates, policyOverride);
+  const { results, explainabilityPartial } = encodeRecallHandlerResults(recallResult, policyOverride);
   const delivery = buildRecallDelivery(params, context, results, recallResult);
   await params.deps.trustStateRecorder.recordDelivery(delivery.record);
   await emitRecallDeliveredTelemetry(params, {
@@ -186,7 +186,7 @@ async function executeRecall(
     latencyMs: Date.now() - recallStartedAt,
     context
   });
-  return buildRecallResponse(delivery.deliveryId, results, resultCandidates.length, recallResult, policyOverride, explainabilityPartial);
+  return buildRecallResponse(delivery.deliveryId, results, results.length, recallResult, policyOverride, explainabilityPartial);
 }
 
 function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => string) {
@@ -203,11 +203,17 @@ function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => st
   });
 }
 
-function selectRecallCandidates(recallResult: RecallServiceResult, maxResults: number) {
-  if (recallResult.candidates.length > maxResults) {
-    throw new Error("Core recall returned more candidates than the requested result budget");
+function encodeRecallHandlerResults(
+  recallResult: RecallServiceResult,
+  policyOverride: RecallPolicy
+) {
+  if (recallResult.index !== undefined) {
+    return {
+      results: encodeIndexResults(recallResult.index),
+      explainabilityPartial: false
+    };
   }
-  return recallResult.candidates;
+  return buildRecallResults(recallResult.candidates, policyOverride);
 }
 
 function buildRecallDelivery(
@@ -253,6 +259,16 @@ function buildRecallResponse(
   explainabilityPartial: boolean
 ): SoulMemorySearchResponse {
   const honestyDiagnostics = selectRecallMcpHonestyDiagnostics(recallResult.diagnostics);
+  const strategyMix = recallResult.index === undefined
+    ? buildRecallStrategyMix(policyOverride, results, honestyDiagnostics)
+    : {
+      deterministic_match: true,
+      precomputed_rank: false,
+      semantic_supplement: false,
+      graph_support: false,
+      path_plasticity: false,
+      global_recall: false
+    };
   return SoulMemorySearchResponseSchema.parse({
     delivery_id: deliveryId,
     protocol_version: 1,
@@ -260,7 +276,7 @@ function buildRecallResponse(
     active_constraints: recallResult.active_constraints,
     active_constraints_count: recallResult.active_constraints_count,
     total_count: totalCount,
-    strategy_mix: buildRecallStrategyMix(policyOverride, results, honestyDiagnostics),
+    strategy_mix: strategyMix,
     degradation_reason: resolveMcpDegradationReason(
       {
         degradation_reason: recallResult.degradation_reason,
@@ -268,18 +284,7 @@ function buildRecallResponse(
       },
       explainabilityPartial
     ),
-    ...(recallResult.delivery_path === undefined
-      ? {}
-      : { delivery_path: recallResult.delivery_path }),
-    ...(recallResult.ranking_authority === undefined
-      ? {}
-      : { ranking_authority: recallResult.ranking_authority }),
-    ...(recallResult.capture_identity === undefined
-      ? {}
-      : { capture_identity: recallResult.capture_identity }),
-    ...(recallResult.capture_execution === undefined
-      ? {}
-      : { capture_execution: recallResult.capture_execution })
+    ...(recallResult.index === undefined ? {} : { index: recallResult.index })
   });
 }
 

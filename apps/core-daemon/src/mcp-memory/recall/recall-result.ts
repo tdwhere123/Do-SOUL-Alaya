@@ -1,11 +1,13 @@
-import type {
-  MemorySearchResult,
-  RecallBudgetState,
-  RecallCandidate,
-  RecallPolicy,
-  RecallScoreFactors,
-  SoulMemorySearchDegradationReason,
-  SoulRecallStrategyMix
+import {
+  MILLIGRADE_TOP,
+  type InformationIndex,
+  type MemorySearchResult,
+  type RecallBudgetState,
+  type RecallCandidate,
+  type RecallPolicy,
+  type RecallScoreFactors,
+  type SoulMemorySearchDegradationReason,
+  type SoulRecallStrategyMix
 } from "@do-soul/alaya-protocol";
 import { mapEmbeddingProviderDiagnosticToMcpReason } from "@do-soul/alaya-core";
 
@@ -15,6 +17,30 @@ export type RecallMcpHonestyDiagnostics = Readonly<{
   readonly embedding_provider_status?: string;
   readonly provider_degradation_reason?: string | null;
 }>;
+
+export function encodeIndexResults(index: InformationIndex): readonly MemorySearchResult[] {
+  return index.entries.map((entry, offset) => {
+    const score = entry.association_milligrades / MILLIGRADE_TOP;
+    return {
+      object_id: entry.object_id,
+      object_kind: "memory_entry",
+      relevance_score: score,
+      content_preview: `${entry.role} ${entry.claim} ${entry.association_milligrades}`,
+      evidence_pointers: entry.explanation_ids.length > 0 ? entry.explanation_ids : [entry.object_id],
+      selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
+      source_channels: ["conditional_field"],
+      score_factors: { activation: score, relevance: score },
+      budget_state: {
+        token_estimate: 1,
+        max_entries: index.representation.page_budget,
+        max_total_tokens: 2_000,
+        remaining_entries: Math.max(0, index.representation.page_budget - offset - 1),
+        remaining_tokens: 2_000,
+        within_budget: true
+      }
+    };
+  });
+}
 
 export function buildMemorySearchResult(
   candidate: Readonly<RecallCandidate>,

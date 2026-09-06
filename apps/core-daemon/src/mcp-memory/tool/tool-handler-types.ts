@@ -92,6 +92,12 @@ export interface McpMemoryToolHandlerDependencies {
       }>;
       readonly hostContext?: Readonly<SoulRecallHostContext>;
       readonly activeConstraintsCap?: number | null;
+      readonly pageBudget?: number;
+      readonly queryText?: string;
+      readonly interpretationClock?: string;
+      readonly since?: string;
+      readonly until?: string;
+      readonly continuation?: import("@do-soul/alaya-protocol").Continuation | null;
     }): Promise<Readonly<{
       readonly candidates: readonly Readonly<RecallCandidate>[];
       readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
@@ -100,6 +106,7 @@ export interface McpMemoryToolHandlerDependencies {
       readonly coarse_filter_count: number;
       readonly fine_assessment_count: number;
       readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
+      readonly index?: import("@do-soul/alaya-protocol").InformationIndex;
     }>>;
   };
   readonly memoryService: {

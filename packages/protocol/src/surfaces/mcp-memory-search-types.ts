@@ -18,6 +18,10 @@ import {
   RecallScoreFactorsSchema
 } from "../recall/recall-candidate.js";
 import { StagedWarningArraySchema } from "../governance/staged-warning.js";
+import {
+  ContinuationSchema,
+  InformationIndexSchema
+} from "../recall/conditional-field/index-view.js";
 
 export const SoulRecallStrategyMixSchema = z
   .object({
@@ -113,23 +117,20 @@ export const SoulMemorySearchRequestSchema = z
     scope_class: ScopeClassSchema.nullable(),
     dimension: MemoryDimensionSchema.nullable(),
     domain_tags: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable(),
+    // Page budget for the information index, not a ranking tau.
     max_results: NonNegativeIntSchema.max(1000),
-    // Optional time-window filter applied during coarse filter, before ranking.
-    // Lets agents answer queries like "what did I say on May 20" without breaking
-    // the score function. `time_field` selects which timestamp the bounds apply to.
+    // Compiler hints for the ordinary-language query; not global associated-item predicates.
     since: IsoDatetimeStringSchema.nullable().optional(),
     until: IsoDatetimeStringSchema.nullable().optional(),
     time_field: RecallTimeFieldSchema.optional(),
     host_context: SoulRecallHostContextSchema.optional(),
-    // The host's latest verbatim user message. Carried so the memory plane
-    // can passively extract durable candidates from the turn the host is
-    // already recalling for, without depending on the host echoing a
-    // turn_digest on report_context_usage. Falls back to `query` when absent.
+    // Ignored for extraction on the target path. Ordinary recall does not enqueue.
     recent_turn: BoundedQuerySchema.optional(),
-    // Host wall-clock for the turn being recalled. When present, Garden
-    // auto-extract uses it as source_observed_at; otherwise enqueue clock.
+    // Maps to the query interpretation clock.
     source_observed_at: IsoDatetimeStringSchema.optional(),
-    active_constraints_cap: NonNegativeIntSchema.max(50).optional()
+    active_constraints_cap: NonNegativeIntSchema.max(50).optional(),
+    // Resume a previously issued index page. Identity must match query/snapshot/result.
+    continuation: ContinuationSchema.optional()
   })
   .strict()
   .superRefine((value, context) => {
@@ -166,7 +167,8 @@ export const SoulMemorySearchResponseSchema = z
       version: NonEmptyStringSchema,
       digest: NonEmptyStringSchema
     }).strict().readonly().optional(),
-    capture_execution: CaptureExecutionSchema.optional()
+    capture_execution: CaptureExecutionSchema.optional(),
+    index: InformationIndexSchema.optional()
   })
   .strict()
   .readonly();

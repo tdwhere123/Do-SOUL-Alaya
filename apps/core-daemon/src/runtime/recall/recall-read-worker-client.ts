@@ -1,6 +1,7 @@
 import { Worker } from "node:worker_threads";
 import type { PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
+  ConditionalFieldRecallPort,
   RecallReadSnapshotPort,
   RecallServiceActiveConstraintsPort,
   RecallServiceEvidenceSearchPort,
@@ -40,6 +41,7 @@ export interface RecallReadWorkerClient {
   readonly pathPlasticityPort: RecallServicePathPlasticityPort;
   readonly activeConstraintsPort: RecallServiceActiveConstraintsPort;
   readonly readSnapshot: RecallReadSnapshotPort;
+  readonly conditionalFieldPort: ConditionalFieldRecallPort;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -188,6 +190,10 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   public readonly activeConstraintsPort: RecallServiceActiveConstraintsPort = {
     findActiveConstraints: async ({ workspaceId, cap, asOf }) =>
       await this.request("constraints.findActive", { workspaceId, cap, asOf })
+  };
+
+  public readonly conditionalFieldPort: ConditionalFieldRecallPort = {
+    recall: async (input) => await this.request("conditionalField.recall", input)
   };
 
   public constructor(input: {
