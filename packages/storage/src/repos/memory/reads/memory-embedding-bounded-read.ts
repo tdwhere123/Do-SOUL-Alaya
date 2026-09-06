@@ -40,7 +40,12 @@ function validateProfile(workspaceId: string, profile: BoundedEmbeddingProfile):
   }
 }
 
-export function readBoundedEmbeddingIds(db: StorageDatabase, workspaceId: string, profile: BoundedEmbeddingProfile):
+export function readBoundedEmbeddingIds(
+  db: StorageDatabase,
+  workspaceId: string,
+  profile: BoundedEmbeddingProfile,
+  afterObjectId: string | null = null
+):
   BoundedEmbeddingReadReceipt & { readonly objectIds: readonly string[] } {
   validateProfile(workspaceId, profile);
   if (profile.maxRows === 0) return Object.freeze({ objectIds: Object.freeze([]), rowVisits: 0, metadataUtf8Bytes: 0, filteredRows: 0, truncated: true });
@@ -48,11 +53,12 @@ export function readBoundedEmbeddingIds(db: StorageDatabase, workspaceId: string
   const rows = db.connection.prepare(`WITH candidates AS MATERIALIZED (
     SELECT e.object_id AS object_id FROM memory_embeddings e INDEXED BY idx_memory_embeddings_recall_profile_identity
     WHERE e.workspace_id = ? AND e.provider_kind = ? AND e.model_id = ? AND e.schema_version = ? AND e.vector_valid = 1
+      AND e.object_id > ?
     ORDER BY e.object_id ASC LIMIT ?
   ) SELECT CASE WHEN octet_length(object_id) <= ? THEN object_id ELSE NULL END AS object_id,
     CASE WHEN octet_length(object_id) <= ? THEN octet_length(object_id) ELSE 0 END AS metadata_bytes
     FROM candidates ORDER BY object_id`).all(workspaceId, profile.providerKind, profile.modelId,
-    profile.schemaVersion, profile.maxRows, profile.maxMetadataUtf8Bytes, profile.maxMetadataUtf8Bytes) as
+    profile.schemaVersion, afterObjectId ?? "", profile.maxRows, profile.maxMetadataUtf8Bytes, profile.maxMetadataUtf8Bytes) as
     { object_id: string | null; metadata_bytes: number }[];
   const objectIds = rows.flatMap((row) => row.object_id === null ? [] : [row.object_id]);
   const filteredRows = rows.length - objectIds.length;

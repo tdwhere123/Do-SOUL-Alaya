@@ -48,7 +48,13 @@ export class SqliteMemoryRecallReader {
     })();
   }
 
-  public lexical(workspaceId: string, query: string, limit: number, nativeLimit = 512) {
+  public lexical(
+    workspaceId: string,
+    query: string,
+    limit: number,
+    nativeLimit = 512,
+    afterObjectId: string | null = null
+  ) {
     if (!Number.isSafeInteger(limit) || limit < 0 || limit > 512 ||
         !Number.isSafeInteger(nativeLimit) || nativeLimit < 0 || nativeLimit > 512) throw new Error("invalid lexical row/work limit");
     const tokens = tokenizeFtsQuery(query);
@@ -63,10 +69,17 @@ export class SqliteMemoryRecallReader {
         try {
           // Native visits stop the sort's input before an unbounded matching set can
           // be consumed. An interrupted ordering has no canonical winner to emit.
+          // Resume is object_id > committed_through so an unobserved probe is retried.
           rows = this.db.connection.prepare(`SELECT object_id
             FROM memory_content_fts_porter WHERE workspace_id = ? AND memory_content_fts_porter MATCH ?
-            AND ${this.visitFunction}(object_id, ?) ORDER BY object_id LIMIT ?`)
-            .all(workspaceId, buildWorkspaceScopedFtsMatch(workspaceId, tokens), callId, limit) as typeof rows;
+            AND ${this.visitFunction}(object_id, ?) AND object_id > ? ORDER BY object_id LIMIT ?`)
+            .all(
+              workspaceId,
+              buildWorkspaceScopedFtsMatch(workspaceId, tokens),
+              callId,
+              afterObjectId ?? "",
+              limit
+            ) as typeof rows;
           completed = true;
         } catch (error) {
           if (error !== this.exhausted) throw error;
