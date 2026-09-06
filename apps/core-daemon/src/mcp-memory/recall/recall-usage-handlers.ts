@@ -212,9 +212,12 @@ function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => st
 
 function encodeRecallHandlerResults(recallResult: RecallServiceResult) {
   const index = recallResult.index ?? unavailableIndex();
+  const previews = new Map(
+    recallResult.candidates.map((candidate) => [candidate.object_id, candidate.content_preview] as const)
+  );
   return {
     index,
-    results: encodeIndexResults(index),
+    results: encodeIndexResults(index, previews),
     explainabilityPartial: false
   };
 }

@@ -44,14 +44,17 @@ export function unavailableIndex(): InformationIndex {
   };
 }
 
-export function encodeIndexResults(index: InformationIndex): readonly MemorySearchResult[] {
+export function encodeIndexResults(
+  index: InformationIndex,
+  previews: ReadonlyMap<string, string> = new Map()
+): readonly MemorySearchResult[] {
   return index.entries.map((entry, offset) => {
     const score = entry.association_milligrades / MILLIGRADE_TOP;
     return {
       object_id: entry.object_id,
       object_kind: "memory_entry",
       relevance_score: score,
-      content_preview: `${entry.role} ${entry.claim} ${entry.association_milligrades}`,
+      content_preview: previews.get(entry.object_id) ?? "[payload omitted]",
       evidence_pointers: entry.explanation_ids.length > 0 ? entry.explanation_ids : [entry.object_id],
       selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
       source_channels: ["conditional_field"],

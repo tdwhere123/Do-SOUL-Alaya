@@ -71,7 +71,8 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase)
           : {
             object_id: page.row.object_id,
             sourceRevision: page.row.sourceRevision,
-            observed_at: page.row.created_at
+            observed_at: page.row.created_at,
+            content: page.row.content
           },
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,

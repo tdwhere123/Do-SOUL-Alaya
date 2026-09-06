@@ -115,6 +115,8 @@ describe("conditional-field query compiler", () => {
         .toEqual(["stored_relation"]);
       expect(interpretation.query_id).not.toBe("unsupported");
     }
+    expect(compileOrdinary("deployment rules").query_id)
+      .not.toBe(compileOrdinary("pnpm workspace commands").query_id);
   });
 
   it("A03 keeps epsilon distinct from empty and does not rewrite grammar", () => {

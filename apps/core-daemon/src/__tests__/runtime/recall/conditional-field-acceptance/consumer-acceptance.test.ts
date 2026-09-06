@@ -1,3 +1,4 @@
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
@@ -11,7 +12,11 @@ import {
   type ObserverReaders
 } from "@do-soul/alaya-core";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
+import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../../../cli/bridge.js";
+import { createToolsCommand } from "../../../../cli/tools.js";
 import { createRecallHandler } from "../../../../mcp-memory/recall/recall-usage-handlers.js";
+import { createMcpMemoryToolHandler } from "../../../../mcp-memory/tool/tool-handler.js";
+import { createDeps } from "../../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { createDependencies } from
   "../../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import {
@@ -60,6 +65,9 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     expect(mcp.results.map((result) => result.object_id)).toEqual(
       mcp.index.entries.map((entry) => entry.object_id)
     );
+    const configPreview = mcp.results.find((result) => result.object_id === MEM.c)?.content_preview ?? "";
+    expect(configPreview).toMatch(/config|last week|configuration/i);
+    expect(configPreview).not.toMatch(/associated unknown 850/);
     expect("ranking_authority" in mcp).toBe(false);
     expect("delivery_path" in mcp).toBe(false);
   });
@@ -142,14 +150,67 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
 
   it("ordinary deployment rules and pnpm workspace commands are not unavailable empty indexes", async () => {
     const slice = await openPlantedSlice();
-    const rules = await recallThroughHandler(slice, { query: "deployment rules", max_results: 800 });
+    const rules = await recallThroughHandler(slice, { query: "deployment rules", max_results: 1 });
     expect(rules.index.completeness.logical_index).not.toBe("unavailable");
     expect(rules.index.entries.length).toBeGreaterThan(0);
+    expect(rules.index.continuation).not.toBeNull();
     const commands = await recallThroughHandler(slice, {
       query: "pnpm workspace commands",
       max_results: 800
     });
     expect(commands.index.completeness.observed_coverage).not.toBe("unavailable");
+    expect(commands.index.query_id).not.toBe(rules.index.query_id);
+    const mixed = await recallThroughHandler(slice, {
+      query: "pnpm workspace commands",
+      max_results: 2,
+      continuation: rules.index.continuation
+    });
+    expect(mixed.index.completeness.observed_coverage).toBe("invalidated");
+  });
+
+  it("CLI tools call soul.recall on the planted slice matches handler index identity", async () => {
+    const slice = await openPlantedSlice();
+    const mcp = await recallThroughHandler(slice, {
+      query: "yesterday failed deployment",
+      max_results: 800
+    });
+    const { dependencies } = createDependencies([]);
+    const service = new RecallService({
+      testOnlyAllowInMemoryFieldQuerySession: true,
+      ...dependencies,
+      now: () => INTERPRETATION_CLOCK,
+      observerReaders: readersFor(slice)
+    });
+    const command = createToolsCommand({
+      handler: createMcpMemoryToolHandler({
+        ...createDeps(),
+        recallService: service
+      }),
+      defaultWorkspaceId: WS,
+      defaultAgentTarget: "codex"
+    });
+    const parsed = command.argsSchema.safeParse([
+      "call",
+      "soul.recall",
+      JSON.stringify({
+        query: "yesterday failed deployment",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 800
+      }),
+      "--workspace",
+      WS
+    ]);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) throw new Error("CLI args parse failed");
+    const result = await command.handler(cliContext(), parsed.data);
+    expect(result.exitCode).toBe(ALAYA_SYSEXITS.OK);
+    const output = result.json as { readonly index?: InformationIndex };
+    expect(output.index?.query_id).toBe(mcp.index.query_id);
+    expect(output.index?.snapshot_id).toBe(mcp.index.snapshot_id);
+    expect(output.index?.entries.map((entry) => entry.object_id))
+      .toEqual(mcp.index.entries.map((entry) => entry.object_id));
   });
 });
 
@@ -270,7 +331,8 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
           : {
             object_id: page.row.object_id,
             sourceRevision: page.row.sourceRevision,
-            observed_at: page.row.created_at
+            observed_at: page.row.created_at,
+            content: page.row.content
           },
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
@@ -302,6 +364,21 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
 
 function snapshotFor(_slice: Awaited<ReturnType<typeof openSourceSlice>>): string {
   return SNAPSHOT_ID;
+}
+
+function cliContext(overrides: Partial<AlayaCliContext> = {}): AlayaCliContext {
+  return {
+    cwd: "/tmp",
+    env: {},
+    argv: [],
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    isTTY: false,
+    jsonRequested: true,
+    daemon: { startupSteps: [] },
+    ...overrides
+  };
 }
 
 async function plantDeployment(slice: Awaited<ReturnType<typeof openSourceSlice>>) {

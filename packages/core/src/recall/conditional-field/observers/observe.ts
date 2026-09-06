@@ -31,6 +31,7 @@ export type SourceObserverPage = Readonly<{
     readonly object_id: string;
     readonly sourceRevision: string;
     readonly observed_at?: string;
+    readonly content?: string;
   }> | null;
   readonly rowsRead: number;
   readonly bytesRead: number;

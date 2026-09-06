@@ -253,7 +253,7 @@ function compileLexicalRequest(
   const program = lexicalStoredRelationProgram();
   consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
   return interpretationOf({
-    query_id: identityFor(queryId, program),
+    query_id: identityFor(queryId, program, lexicalIdentity(input.text)),
     status: "resolved",
     snapshot_id: snapshotId,
     program,
@@ -261,6 +261,12 @@ function compileLexicalRequest(
     interpretation_clock: input.interpretation_clock,
     time_window: hints
   });
+}
+
+function lexicalIdentity(text: string): string {
+  return formatConditionalFieldDigest(
+    createHash("sha256").update(`lexical\0${text}`, "utf8").digest("hex")
+  );
 }
 
 function compileOpenRelations(

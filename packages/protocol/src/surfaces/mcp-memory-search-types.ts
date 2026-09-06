@@ -160,7 +160,9 @@ export const SoulMemorySearchResponseSchema = z
     total_count: NonNegativeIntSchema,
     strategy_mix: SoulRecallStrategyMixSchema,
     degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional(),
+    // Ignored on the target path; D01 retires after a named consumer census.
     delivery_path: z.enum(["legacy", "canonical"]).optional(),
+    // Ignored on the target path; D01 retires after a named consumer census.
     ranking_authority: z.enum(["prefix_sk", "select_gamma"]).optional(),
     capture_identity: z.object({
       algorithm_id: NonEmptyStringSchema,

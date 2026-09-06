@@ -331,10 +331,9 @@ function adjacencyPredicates(
   workspaceId: string,
   subjects: ReadonlySet<string>
 ): readonly string[] {
-  const kinds = new Set([
-    ...collectRelations(interpretation.program).map((relation) => relation.relation_kind),
-    ...Object.keys(RELATION_MILLIGRADES)
-  ]);
+  const kinds = new Set(
+    collectRelations(interpretation.program).map((relation) => relation.relation_kind)
+  );
   const listed = readers.relationKinds;
   if (listed !== undefined) {
     for (const kind of listed({ workspaceId, subject: null })) kinds.add(kind);

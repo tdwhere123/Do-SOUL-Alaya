@@ -14,7 +14,7 @@ import { compileConditionalFieldQuery } from "../conditional-field/query/compile
 import { type ObserverReaders } from "../conditional-field/observers/observe.js";
 import { projectFieldDelta } from "../conditional-field/engine/field-engine.js";
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
-import { normalizeQueryText } from "./recall-service-helpers.js";
+import { createContentPreview, normalizeQueryText } from "./recall-service-helpers.js";
 import type { RecallResult } from "./recall-service-types.js";
 import type { RecallExecutionContext, RecallExecutionParams } from "./recall-service-runner-types.js";
 import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
@@ -74,7 +74,7 @@ export async function executeRecall(
     if (port !== undefined) return await port.recall(withoutReaders(request));
     return runConditionalFieldRecall(request);
   });
-  return encodeRecallResult(index);
+  return encodeRecallResult(index, request.readers, request.workspace_id);
 }
 
 export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest): InformationIndex {
@@ -136,15 +136,34 @@ function projectFromField(
   }));
 }
 
-export function encodeRecallResult(index: InformationIndex): ConditionalFieldRecallResult {
-  const candidates = index.entries.map((entry) => {
+export function encodeRecallResult(
+  index: InformationIndex,
+  readers: ObserverReaders = {},
+  workspaceId = ""
+): ConditionalFieldRecallResult {
+  const excerpts = index.entries.map((entry) => sourceExcerpt(readers, workspaceId, entry.object_id));
+  const hydrated = excerpts.filter((excerpt) => excerpt !== undefined).length;
+  const payload = index.entries.length === 0
+    ? index.completeness.payload
+    : hydrated === 0
+      ? "omitted"
+      : hydrated < index.entries.length
+        ? "partial"
+        : index.completeness.payload;
+  const encodedIndex: InformationIndex = payload === index.completeness.payload
+    ? index
+    : {
+      ...index,
+      completeness: { ...index.completeness, payload }
+    };
+  const candidates = encodedIndex.entries.map((entry, offset) => {
     const score = entry.association_milligrades / MILLIGRADE_TOP;
     return {
       object_id: entry.object_id,
       object_kind: "memory_entry" as const,
       activation_score: score,
       relevance_score: score,
-      content_preview: `${entry.role} ${entry.claim} ${entry.association_milligrades}`,
+      content_preview: excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW,
       token_estimate: 1,
       manifestation: "excerpt" as const,
       dimension: MemoryDimension.FACT,
@@ -158,15 +177,28 @@ export function encodeRecallResult(index: InformationIndex): ConditionalFieldRec
     synthesis: { status: "absent" },
     active_constraints: [],
     active_constraints_count: 0,
-    total_scanned: index.entries.length,
-    coarse_filter_count: index.entries.length,
-    fine_assessment_count: index.entries.length,
+    total_scanned: encodedIndex.entries.length,
+    coarse_filter_count: encodedIndex.entries.length,
+    fine_assessment_count: encodedIndex.entries.length,
     degradation_reason: null,
     working_projection: null,
-    index,
+    index: encodedIndex,
     provider_calls: 0,
     garden_enqueue: 0
   };
+}
+
+const PAYLOAD_OMITTED_PREVIEW = "[payload omitted]";
+
+function sourceExcerpt(
+  readers: ObserverReaders,
+  workspaceId: string,
+  objectId: string
+): string | undefined {
+  if (readers.source === undefined || workspaceId === "") return undefined;
+  const content = readers.source({ workspaceId, objectId }).row?.content;
+  if (content === undefined || content.length === 0) return undefined;
+  return createContentPreview(content, "excerpt");
 }
 
 function buildRecallRequest(

@@ -214,6 +214,32 @@ describe("conditional-field executeRecall assembly", () => {
     const full = runRecall(slice, { page_budget: 800 });
     expect(concatenated).toEqual(full.entries.map(entryId).slice(0, concatenated.length));
   });
+
+  it("worker-port recall preserves query and snapshot identity of the local producer", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const { dependencies } = createDependencies([]);
+    const service = new RecallService({
+      testOnlyAllowInMemoryFieldQuerySession: true,
+      ...dependencies,
+      observerReaders: readersFor(slice),
+      conditionalFieldPort: {
+        recall: async (input) => runConditionalFieldRecall({ ...input, readers: readersFor(slice) })
+      }
+    });
+    const local = runRecall(slice, { page_budget: 800 });
+    const viaPort = await service.recall({
+      taskSurface: { ...createTaskSurface(), display_name: "yesterday failed deployment" },
+      workspaceId: WS,
+      strategy: "chat",
+      queryText: "yesterday failed deployment",
+      pageBudget: 800,
+      interpretationClock: INTERPRETATION_CLOCK
+    });
+    expect(viaPort.index.query_id).toBe(local.query_id);
+    expect(viaPort.index.entries.map(entryId)).toEqual(local.entries.map(entryId));
+    expect(viaPort.candidates[0]?.content_preview).not.toMatch(/associated unknown /);
+  });
 });
 
 function runRecall(
@@ -260,7 +286,8 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
           : {
             object_id: page.row.object_id,
             sourceRevision: page.row.sourceRevision,
-            observed_at: page.row.created_at
+            observed_at: page.row.created_at,
+            content: page.row.content
           },
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
