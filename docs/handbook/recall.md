@@ -648,3 +648,66 @@ root before the credentialless 1Q -> 3Q -> 100Q diagnostic ladder can begin.
 | Current dated readiness posture | [`runtime-snapshot.md`](runtime-snapshot.md) |
 | Open engineering issues outside recall closure | [`backlog.md`](backlog.md) |
 | Dated full-dataset KPI archives | [`../bench-history/README.md`](../bench-history/README.md) |
+
+
+### Candidate repair clarifications (not activated)
+
+The candidate remains subject to STOP-01. Historical C01/C02 local receipts are
+not acceptance evidence for the repaired source. The target arithmetic compares
+exact rational family fusion and marginal gain divided by incremental cost once;
+an exact density tie chooses fewer tokens, then ascending unit identity sequence.
+Unused baseline new-identity capacity is not lent to the extension stage.
+
+The existing MCP request `since`, `until`, and `time_field` keep their explicit
+storage-time filtering meaning. Assertion valid-time is a separate typed
+operator evaluated at the captured as-of; ingestion or storage timestamps never
+substitute for source validity. No new MCP request fields are introduced here.
+`delivery_path` and `ranking_authority` in the existing MCP search schema are
+response metadata. The internal explicit `RecallPolicy.fine_assessment.delivery_path`
+values `legacy` and `canonical` are both unsupported by the target candidate;
+omitted mode selects the sole target algorithm after authorized cutover.
+
+`GlobalMemoryRecallService` is reachable through daemon global-memory runtime
+wiring and the core global-memory port. Its query-result LRU must be removed
+from that runtime route at C08, with source reads routed through the sole target
+selector; retaining it as an optional runtime route is not a disposition.
+Historical readers may decode old authority values but must never dispatch a
+selector. The candidate compatibility/deletion handoff and retained historical
+reader versions are recorded in
+[the C01 amendment 07](../../.do-it/worklog/recall-unified-algorithm-hard-cutover-2026-09-04/v2-c01-compatibility-amendment-07.md)
+and its companion census. This is an unreviewed candidate handoff; C10 still
+must materialize and verify the exact binary/config/schema/data rollback tuple.
+
+The candidate's 64-byte envelope is a framing allowance, not rendered content.
+Actual rendered bytes are the concatenation of identity, newline, source text,
+and newline for each immutable selected entry. The repaired W7 fixtures exercise
+actual `cl100k_base` and `o200k_base` ordinary encoding with an identified local
+tokenizer implementation and asset manifest, including coalesced spans, headers,
+both dependency orders and concatenation merges. Host tokenizer hints remain
+requests, not profile admission evidence; the character estimator and MiniLM
+tokenizer do not establish that host boundary.
+Existing per-dimension limits in `RecallBudgetsSchema` count distinct delivered
+entries per dimension; the candidate enforces these counts on each incremental
+union, including overlapping proposals. The bounded local measurements and
+their acceptance envelopes are recorded in
+[the measured C02 amendment 06](../../.do-it/worklog/recall-unified-algorithm-hard-cutover-2026-09-04/v2-c02-measured-contract-amendment-06.md).
+They distinguish returned rows, native predicate visits, payload/driver bytes,
+phase work, preparation time, elapsed time and RSS; the selector counter is not
+a measurement of all physical work or a deployment latency guarantee.
+
+
+The repaired candidate bounds typed support to 512 admitted edges, 64 obligations,
+and four predicate steps; overflow fails explicitly. The selector indexes units
+and assignment buckets once. Its inspection allowance is
+`5 * (selected_count + packet_width + support_work + 1) + packet_width + 1`,
+where `support_work = 12 * sum(bucket_rows * (predicate_count + 3)) + obligation_count`.
+This is a conservative decision inspection allowance, not measured CPU instructions.
+The default shared decision allowance is `2 * K * M * (W + 1)`; an incomplete
+scan returns the preceding complete feasible state with truncation. This fixes
+the previous mismatch between the abstract `2*K*M` budget and charged member
+visits. Formation has its own finite edge/obligation limits and reports its
+bounded construction work separately. The measured amendment binds local
+latency/RSS fixtures and raw observations independently of these integer bounds.
+These repaired candidate proofs do not install a runtime, certify full-dataset
+performance, or approve STOP-01. W01/W02 reuse the shared owners; C08 replaces
+the actual entry; C10/STOP-02 retain their compatibility and activation gates.

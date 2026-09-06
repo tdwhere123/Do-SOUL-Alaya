@@ -18,7 +18,7 @@ async function harness() {
 }
 
 describe("C02 lifecycle probes", () => {
-  it("X1 write acks with blocked transport and zero provider calls", async () => {
+  it("X1 local source transaction acks with no transport wired", async () => {
     const slice = await harness();
     await slice.writeMemory(MEM.checklist, CONTENT.checklist, MemoryDimension.PROCEDURE, true);
     expect(typeof slice.counters.write_ack_ms === "number" || slice.counters.write_ack_ms === "not_observed").toBe(true);
@@ -58,7 +58,7 @@ describe("C02 lifecycle probes", () => {
     expect(slice.pendingGarden()).toHaveLength(1);
   });
 
-  it("optional fake-transport enrichment uses official-api admission", async () => {
+  it("official-api parser smoke does not establish artifact admission or worker lifecycle", async () => {
     const slice = await harness();
     const audit = slice.fakeTransportAdmit("Alex works from Lisbon weekdays");
     expect(audit.envelope.disposition).toBe("admitted");

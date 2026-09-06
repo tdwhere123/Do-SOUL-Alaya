@@ -10,6 +10,7 @@ import { GardenRoleSchema, GardenTaskKindSchema, GardenTierSchema } from "../gar
 import { HealthEventKindSchema } from "../memory/health-journal.js";
 
 const gardenEventTypeValues = [
+  "soul.garden.semantic_enrichment",
   "soul.garden.task_dispatched",
   "soul.garden.task_completed",
   "soul.garden.task_claim_reclaimed",
@@ -20,6 +21,7 @@ const gardenEventTypeValues = [
 ] as const;
 
 export const GardenEventType = {
+  SOUL_GARDEN_SEMANTIC_ENRICHMENT: "soul.garden.semantic_enrichment",
   SOUL_GARDEN_TASK_DISPATCHED: "soul.garden.task_dispatched",
   SOUL_GARDEN_TASK_COMPLETED: "soul.garden.task_completed",
   SOUL_GARDEN_TASK_CLAIM_RECLAIMED: "soul.garden.task_claim_reclaimed",
@@ -170,7 +172,15 @@ export const SoulHealthJournalRecordedPayloadSchema = z
   })
   .readonly();
 
+export const SoulGardenSemanticEnrichmentPayloadSchema = z.object({
+  task_id: NonEmptyStringSchema,
+  source_revision: NonEmptyStringSchema,
+  action: z.enum(['claimed', 'recovered', 'dispatched', 'received', 'uncertain',
+    'reconciled', 'admitted', 'published', 'failed'])
+}).readonly();
+
 const gardenPayloadSchemas = {
+  [GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT]: SoulGardenSemanticEnrichmentPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_DISPATCHED]: SoulGardenTaskDispatchedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_COMPLETED]: SoulGardenTaskCompletedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED]: SoulGardenTaskClaimReclaimedPayloadSchema,
@@ -186,6 +196,10 @@ export function createGardenEventObjectSchema<T extends keyof typeof gardenPaylo
 ) {
   return z.object({ type: z.literal(type), payload: payloadSchema });
 }
+
+const SoulGardenSemanticEnrichmentEventObjectSchema = createGardenEventObjectSchema(
+  GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT, SoulGardenSemanticEnrichmentPayloadSchema
+);
 
 const SoulGardenTaskDispatchedEventObjectSchema = createGardenEventObjectSchema(
   GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
@@ -226,6 +240,7 @@ export const SoulHealthJournalRecordedEventSchema = SoulHealthJournalRecordedEve
 
 export const GardenEventUnionSchema = z
   .discriminatedUnion("type", [
+    SoulGardenSemanticEnrichmentEventObjectSchema,
     SoulGardenTaskDispatchedEventObjectSchema,
     SoulGardenTaskCompletedEventObjectSchema,
     SoulGardenTaskClaimReclaimedEventObjectSchema,

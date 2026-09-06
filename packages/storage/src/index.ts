@@ -413,3 +413,10 @@ export {
   type GardenTaskRow,
   type GardenTaskStatus
 } from "./repos/garden/index.js";
+
+export { SqliteSemanticArtifactRepo } from "./repos/garden/semantic-artifact-repo.js";
+export { initializeSemanticArtifactCandidateSchema, SEMANTIC_ARTIFACT_CANDIDATE_SCHEMA_REVISION } from "./repos/garden/semantic-artifact-schema.js";
+
+export { SqliteRelationRecallReader, type RecallAssertionObservation } from "./repos/path/reads/relation-assertion/bounded-reader.js";
+
+export { SqliteMemoryRecallReader } from "./repos/memory-entry/reads/bounded-recall-reader.js";

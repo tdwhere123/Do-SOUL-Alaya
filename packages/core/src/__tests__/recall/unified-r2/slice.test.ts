@@ -4,7 +4,7 @@ import { referenceSelect } from "../offline/reference.js";
 import { emitPackets } from "../../../recall/decision/budget-aware-q/field.js";
 import type { QuerySpecDraft } from "../../../recall/decision/budget-aware-q/types.js";
 import { createSliceHarness, JOIN_OBLIGATION } from "./harness.js";
-import { CONTENT, MEM, NOW } from "./ids.js";
+import { CONTENT, MEM } from "./ids.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -18,6 +18,18 @@ async function harness() {
 }
 
 describe("C02 real local vertical slice", () => {
+  it("L5 text boundary overrides request as-of against real dated sources", async () => {
+    const slice = await harness();
+    await slice.plantLaunchCorpus({ includeTemporalOwners: true, includeChannel: false });
+    const before = await slice.runRecall({ text: "Before June 1, who owned Orion?", asOf: "2026-06-15T00:00:00.000Z" });
+    expect(before.membership).toEqual([MEM.orion]);
+    expect(before.membership).not.toContain(MEM.bob);
+    expect(before.pack.claims).toContainEqual(expect.objectContaining({ kind: "valid_time" }));
+    const early = await slice.runRecall({ text: "Before January 1, 2020, who owned Orion?", asOf: "2026-06-15T00:00:00.000Z" });
+    expect(early.membership).not.toContain(MEM.orion);
+    expect(early.membership).not.toContain(MEM.bob);
+    expect(early.pack.claims).not.toContainEqual(expect.objectContaining({ kind: "valid_time" }));
+  });
   it("Q1 lexical checklist is useful with zero remote extract", async () => {
     const slice = await harness();
     await slice.plantLaunchCorpus();
@@ -33,17 +45,15 @@ describe("C02 real local vertical slice", () => {
     expect(result.pack.claims.some((claim) => claim.kind === "heuristic_evidence")).toBe(true);
   });
 
-  it("Q1b planted vectors retrieve the paraphrase target without a provider", async () => {
+  // The required model positive is exercised separately by local-model.test.ts.
+
+  it("requested embedding readiness cannot certify a planted constant vector", async () => {
     const slice = await harness();
     await slice.plantLaunchCorpus({ plantVectors: true });
-    const result = await slice.runRecall({
-      text: "Who is working remotely?",
-      familyCaps: { embedding: "ready" }
-    });
-    expect(result.membership).toContain(MEM.remote);
-    expect(result.counters.query_embed_count).toBeLessThanOrEqual(1);
-    expect(result.counters.query_embed_count).toBeGreaterThan(0);
-    expect(result.counters.recall_provider_calls).toBe(0);
+    const result = await slice.runRecall({ text: "volcano eruption calendar", familyCaps: { embedding: "ready" } });
+    expect(result.counters.query_embed_count).toBe(0);
+    expect(result.membership).not.toContain(MEM.remote);
+    expect(result.pack.claims).toContainEqual({ kind: "capability_unavailable", capability: "embedding" });
   });
 
   it("Q1c embedding-unavailable stays on the same algorithm and does not hang", async () => {
@@ -62,7 +72,7 @@ describe("C02 real local vertical slice", () => {
 
   it("Q3 grounded two-object packet when both edges exist", async () => {
     const slice = await harness();
-    await slice.plantLaunchCorpus({ includeChannel: true });
+    await slice.plantLaunchCorpus({ includeChannel: true, joinOwner: true });
     const result = await slice.runRecall({
       text: "Orion owner and their escalation channel",
       obligations: [JOIN_OBLIGATION],
@@ -73,7 +83,7 @@ describe("C02 real local vertical slice", () => {
     const packets = emitPackets(
       { packetM: 64, widthW: 4, obligations: [JOIN_OBLIGATION] },
       result.membership,
-      slice.typedEdges(NOW)
+      result.referenceInput.edges
     );
     expect(packets.some((packet) => packet.unitIds.length === 2)).toBe(true);
   });
@@ -90,16 +100,16 @@ describe("C02 real local vertical slice", () => {
     const packets = emitPackets(
       { packetM: 64, widthW: 4, obligations: [JOIN_OBLIGATION] },
       [MEM.orion, MEM.channel],
-      slice.typedEdges(NOW)
+      result.referenceInput.edges
     );
     expect(packets.some((packet) => packet.unitIds.length === 2)).toBe(false);
   });
 
-  it("L5 valid-time returns Alice not Bob", async () => {
+  it("explicit as-of returns Alice not Bob without claiming to parse temporal text", async () => {
     const slice = await harness();
     await slice.plantLaunchCorpus({ includeTemporalOwners: true, includeChannel: false });
     const result = await slice.runRecall({
-      text: "Before June 1, who owned Orion?",
+      text: "Who owned Orion?",
       asOf: "2026-05-31T12:00:00.000Z",
       familyCaps: { embedding: "unavailable" }
     });
@@ -131,6 +141,7 @@ describe("C02 real local vertical slice", () => {
     });
     expect(result.membership).toEqual(expect.arrayContaining([MEM.orion, MEM.charlie]));
     expect(result.pack.claims.some((claim) => claim.kind === "enumeration_observed_not_all")).toBe(true);
+    expect(result.pack.claims).not.toContainEqual({ kind: "conflict_distinct_lineages" });
   });
 
   it("L7 unsupported exact aggregate returns evidence and no fabricated count", async () => {
@@ -181,43 +192,7 @@ describe("C02 real local vertical slice", () => {
       text: "Where is the deployment checklist?",
       familyCaps: { embedding: "unavailable" }
     });
-    const units = result.pack.results.map((row, index) => ({
-      id: row.object_id,
-      content: row.content,
-      framedBytes: Buffer.byteLength(`${row.object_id}\n${row.content}\n`, "utf8"),
-      chargedTokens: Buffer.byteLength(`${row.object_id}\n${row.content}\n`, "utf8"),
-      familyRanks: { lexical: index + 1 },
-      answerBindings: [],
-      assignmentKey: null
-    }));
-    const reference = referenceSelect({
-      spec: {
-        text: "Where is the deployment checklist?",
-        principal: "agent",
-        workspaceId: "workspace-1",
-        authorizedScopes: ["workspace-1"],
-        asOf: NOW,
-        k: 5,
-        tokenBudget: 2000,
-        nBase: 64,
-        nExtension: 64,
-        rBase: 512,
-        rExtension: 512,
-        packetM: 64,
-        widthW: 4,
-        workLimit: 2 * 5 * 64,
-        envelopeBytes: 64,
-        enumeration: false,
-        exactAggregate: false,
-        diagnostics: false,
-        deliveryPath: null,
-        obligations: [],
-        familyCaps: { lexical: "ready", typed_relation: "ready", embedding: "unavailable" }
-      },
-      units,
-      edges: [],
-      packets: units.map((unit) => ({ id: `singleton:${unit.id}`, unitIds: [unit.id] }))
-    });
+    const reference = referenceSelect(result.referenceInput);
     expect(reference.membership).toEqual(result.membership);
   });
 });

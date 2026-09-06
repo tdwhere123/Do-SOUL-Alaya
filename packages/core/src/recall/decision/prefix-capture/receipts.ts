@@ -183,7 +183,7 @@ function parseGammaTuple(input: unknown): ShadowGammaTuple | QueryCompiledWalkGa
   return freezeShadow({
     unscaled_remainder: remainder,
     Values_v: values,
-    evidence_novelty_redundancy: input.evidence_novelty_redundancy
+    evidence_novelty_redundancy: input.evidence_novelty_redundancy as 0 | 1
   });
 }
 

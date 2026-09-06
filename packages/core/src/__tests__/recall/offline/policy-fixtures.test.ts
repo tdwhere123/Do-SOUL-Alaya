@@ -22,12 +22,12 @@ import { referenceSelect } from "./reference.js";
 
 const NOW = "2026-05-31T12:00:00.000Z";
 
-function spec(overrides: QuerySpecDraft = {}): QuerySpec {
+function spec(overrides: Partial<QuerySpecDraft> = {}): QuerySpec {
   return captureQuerySpec({
-    text: overrides.text ?? "fixture",
     asOf: NOW,
-    envelopeBytes: overrides.envelopeBytes ?? 0,
-    ...overrides
+    envelopeBytes: 0,
+    ...overrides,
+    text: overrides.text ?? "fixture"
   }, fieldContractSha256, () => NOW).spec;
 }
 
@@ -156,7 +156,7 @@ describe("C02 independent reference and tiny oracle", () => {
   it("P1 long relevant object may win via best-single against cheap snippets", () => {
     const longTokens = 1897;
     const units = [
-      unit("long", 1, longTokens),
+      { ...unit("long", 1, longTokens), content: "deployment runbook: ".repeat(100).slice(0, longTokens - 6) },
       unit("cheap_a", 2, 20),
       unit("cheap_b", 3, 20)
     ];
@@ -194,6 +194,7 @@ describe("C02 independent reference and tiny oracle", () => {
       envelopeBytes: 0,
       obligations: [{
         kind: "conjunction",
+        supportForm: "endpoint_path",
         bindingSlot: "pair",
         assignmentKey: "join-a",
         requiredPredicates: ["left", "right"]
@@ -229,7 +230,7 @@ describe("C02 independent reference and tiny oracle", () => {
     expect(e0.e1).toEqual(["A", "D"]);
     expect(e1.e0).toEqual(["A", "D"]);
     expect(e1.e1).toEqual(["A", "B", "C", "D"]);
-    expect(new Set(e0.e0).isSubsetOf(new Set(e1.e1))).toBe(true);
+    expect(e0.e0.every((id) => e1.e1.includes(id))).toBe(true);
     expect(e1.ranks.get("A")?.lexical).toBe(1);
     expect(e1.ranks.get("A")?.embedding).toBe(3);
   });

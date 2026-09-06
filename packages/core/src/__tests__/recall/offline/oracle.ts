@@ -1,4 +1,5 @@
-// Tiny exhaustive set oracle. Tests/offline only; never a production selector.
+// Historical coverage illustration: packet costs and packet ranks are not unit-set Q.
+// The independent unit-set oracle below models union charges explicitly.
 
 export interface OraclePacket {
   readonly id: string;
@@ -107,4 +108,49 @@ export function reportGap(targetIds: readonly string[], optimum: OracleSet): {
     optimum: opt,
     equal: target.length === opt.length && target.every((id, index) => id === opt[index])
   };
+}
+
+
+export interface OracleUnit {
+  readonly id: string;
+  readonly rank: number;
+  readonly charge: number;
+  readonly bindings: readonly string[];
+}
+
+export function enumerateUnitSets(input: {
+  readonly units: readonly OracleUnit[];
+  readonly k: number;
+  readonly budget: number;
+  readonly envelope: number;
+  readonly enumeration: boolean;
+  readonly witnesses: readonly (readonly string[])[];
+}) {
+  if (input.units.length > 12) throw new Error("unit oracle domain too large");
+  if (new Set(input.units.map((unit) => unit.id)).size !== input.units.length) throw new Error("duplicate oracle identity");
+  const results: { ids: string[]; charge: number; obligations: number; bindings: number; reciprocal: readonly [bigint, bigint] }[] = [];
+  for (let mask = 0; mask < 2 ** input.units.length; mask += 1) {
+    const chosen = input.units.filter((_, index) => (mask & 2 ** index) !== 0);
+    const charge = chosen.reduce((sum, unit) => sum + unit.charge, chosen.length ? input.envelope : 0);
+    if (chosen.length > input.k || charge > input.budget) continue;
+    const ids = chosen.map((unit) => unit.id).sort();
+    let numerator = 0n;
+    let denominator = 1n;
+    for (const unit of chosen) {
+      if (!Number.isSafeInteger(unit.rank) || unit.rank < 1 || unit.charge <= 0) throw new Error("invalid oracle unit");
+      numerator = numerator * BigInt(unit.rank) + denominator;
+      denominator *= BigInt(unit.rank);
+    }
+    results.push({ ids, charge,
+      obligations: input.witnesses.filter((witness) => witness.length > 0 && witness.every((id) => ids.includes(id))).length,
+      bindings: input.enumeration ? new Set(chosen.flatMap((unit) => unit.bindings)).size : 0,
+      reciprocal: [numerator, denominator] });
+  }
+  return results.sort((a, b) => {
+    if (a.obligations !== b.obligations) return b.obligations - a.obligations;
+    if (a.bindings !== b.bindings) return b.bindings - a.bindings;
+    const delta = b.reciprocal[0] * a.reciprocal[1] - a.reciprocal[0] * b.reciprocal[1];
+    if (delta) return delta < 0n ? -1 : 1;
+    return a.charge - b.charge || (a.ids.join("\0") < b.ids.join("\0") ? -1 : 1);
+  });
 }

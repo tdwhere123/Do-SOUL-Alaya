@@ -239,3 +239,5 @@ export {
   buildBootstrappingPathId,
   buildBootstrappingRecordId
 } from "./garden/scheduling/bootstrapping-ids.js";
+
+export { OfficialApiSemanticArtifactCodec } from "./garden/ingestion/official-api/semantic-artifact.js";

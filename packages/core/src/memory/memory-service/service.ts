@@ -71,9 +71,10 @@ export class MemoryService {
     objectId: string,
     workspaceId: string,
     fields: MemoryEntryUpdateFields,
-    reason: string
+    reason: string,
+    enqueueEnrichment?: MemoryEntryInput["enqueueEnrichment"]
   ): Promise<Readonly<MemoryEntry>> {
-    return this.write.updateScoped(objectId, workspaceId, fields, reason);
+    return this.write.updateScoped(objectId, workspaceId, fields, reason, enqueueEnrichment);
   }
 
   public validateUpdate(objectId: string, fields: MemoryEntryUpdateFields): Promise<void> {

@@ -50,20 +50,20 @@ function cmp(a: Fr, b: Fr): number {
   return d < 0n ? -1 : d > 0n ? 1 : 0;
 }
 
-function familyR(unit: EvidenceUnit): number {
-  let total = 0;
+function familyR(unit: EvidenceUnit): Fr {
+  let total = fr(0);
   const lexical = unit.familyRanks.lexical;
   const typed = unit.familyRanks.typed_relation;
   const embedding = unit.familyRanks.embedding;
-  if (lexical !== undefined && lexical >= 1) total += 1 / lexical;
-  if (typed !== undefined && typed >= 1) total += 1 / typed;
-  if (embedding !== undefined && embedding >= 1) total += 1 / embedding;
+  if (lexical !== undefined && lexical >= 1) total = add(total, fr(1, lexical));
+  if (typed !== undefined && typed >= 1) total = add(total, fr(1, typed));
+  if (embedding !== undefined && embedding >= 1) total = add(total, fr(1, embedding));
   return total;
 }
 
 export function referenceGlobalRank(units: readonly EvidenceUnit[]): ReadonlyMap<string, number> {
   const sorted = [...units].sort((a, b) => {
-    const delta = familyR(b) - familyR(a);
+    const delta = cmp(familyR(b), familyR(a));
     return delta !== 0 ? delta : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
   return new Map(sorted.map((unit, index) => [unit.id, index + 1]));
@@ -87,12 +87,14 @@ function qCoords(
   }
   let c1 = 0;
   for (const obligation of spec.obligations) {
-    const present = new Set(
-      edges.filter((edge) =>
-        edge.assignmentKey === obligation.assignmentKey && selected.has(edge.resultObjectId)
-      ).map((edge) => edge.predicate)
-    );
-    if (obligation.requiredPredicates.every((predicate) => present.has(predicate))) c1 += 1;
+    if (obligation.supportForm !== "endpoint_path" || !obligation.requiredPredicates.length) continue;
+    let endpoints: Set<string> | null = null;
+    for (const predicate of obligation.requiredPredicates) {
+      endpoints = new Set(edges.filter((edge) => edge.assignmentKey === obligation.assignmentKey &&
+        selected.has(edge.resultObjectId) && edge.predicate === predicate &&
+        (endpoints === null || endpoints.has(edge.sourceObjectId))).map((edge) => edge.targetObjectId));
+    }
+    if (endpoints && endpoints.size > 0) c1 += 1;
   }
   return { c1, c2: spec.enumeration ? bindings.size : 0, c3 };
 }
@@ -113,6 +115,12 @@ function addedCost(
   added: readonly string[]
 ): number | null {
   if (added.length === 0 || selected.size + added.length > spec.k) return null;
+  if (spec.perDimensionLimits) {
+    for (const [dimension, limit] of Object.entries(spec.perDimensionLimits)) {
+      if (units.filter((unit) => unit.dimension === dimension &&
+          (selected.has(unit.id) || added.includes(unit.id))).length > limit) return null;
+    }
+  }
   let tokens = 0;
   for (const id of added) {
     const unit = units.find((item) => item.id === id);
@@ -135,8 +143,8 @@ function densityBetter(
   if (c1 !== 0) return c1 > 0;
   const c2 = leftGain.c2 * rightCost - rightGain.c2 * leftCost;
   if (c2 !== 0) return c2 > 0;
-  const left = fr(leftGain.c3[0] * BigInt(rightCost), leftGain.c3[1] * BigInt(leftCost));
-  const right = fr(rightGain.c3[0] * BigInt(leftCost), rightGain.c3[1] * BigInt(rightCost));
+  const left = fr(leftGain.c3[0], leftGain.c3[1] * BigInt(leftCost));
+  const right = fr(rightGain.c3[0], rightGain.c3[1] * BigInt(rightCost));
   const c3 = cmp(left, right);
   if (c3 !== 0) return c3 > 0;
   if (leftCost !== rightCost) return leftCost < rightCost;
@@ -167,9 +175,13 @@ function inspectAll(
   const current = qCoords(spec, units, ranks, selected, edges);
   let best: Pick | null = null;
   let bestGain: { readonly c1: number; readonly c2: number; readonly c3: Fr } | null = null;
-  const ordered = [...packets].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const ordered = [...packets].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).slice(0, spec.packetM);
   for (const packet of ordered) {
-    const visit = Math.min(packet.unitIds.length, spec.widthW) + 1;
+    const width = Math.min(packet.unitIds.length, spec.widthW);
+    const edgeWork = spec.obligations.reduce((total, obligation) => total +
+      edges.filter((edge) => edge.assignmentKey === obligation.assignmentKey).length *
+      (obligation.requiredPredicates.length + 3), 0) * 12 + spec.obligations.length;
+    const visit = 5 * (selected.size + width + edgeWork + 1) + width + 1;
     if (work.value + visit > spec.workLimit) return "truncated";
     work.value += visit;
     const added = packet.unitIds.filter((id) => !selected.has(id));
@@ -240,7 +252,7 @@ export function referenceSelect(input: {
   readonly edges: readonly TypedSupportEdge[];
   readonly packets: readonly PacketProposal[];
 }): ReferenceDecision {
-  if (input.spec.deliveryPath === "legacy") {
+  if (input.spec.deliveryPath !== null) {
     return {
       membership: [],
       order: [],
@@ -285,12 +297,23 @@ export function referenceSelect(input: {
     const rb = ranks.get(b) ?? 1e9;
     return ra !== rb ? ra - rb : a < b ? -1 : a > b ? 1 : 0;
   });
+  const fallback = [...order];
+  const pending = new Set(order);
+  const dependencyOrder: string[] = [];
+  while (pending.size) {
+    const ready = fallback.find((id) => pending.has(id) && !input.edges.some((edge) =>
+      edge.resultObjectId === id && edge.sourceObjectId !== id && pending.has(edge.sourceObjectId)));
+    if (!ready) break;
+    dependencyOrder.push(ready);
+    pending.delete(ready);
+  }
+  if (!pending.size) order.splice(0, order.length, ...dependencyOrder);
   const q = qCoords(input.spec, input.units, ranks, selected, input.edges);
   return {
     membership,
     order,
     chargedTokens: selected.size === 0 ? 0 : tokens,
-    truncated,
+    truncated: truncated || input.packets.length > input.spec.packetM,
     usedPacketIds: used,
     satisfiedObligations: q.c1,
     bindingCount: q.c2

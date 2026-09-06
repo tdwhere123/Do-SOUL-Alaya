@@ -236,7 +236,7 @@ These rules always win over lower-level docs and task-card convenience.
     - **MCP tool surface:** tool names and descriptions in
       `packages/engine-gateway/src/provider/soul-tool-specs.ts`, and
       every Zod schema transitively reachable from an MCP request or
-      response type in `packages/protocol/src/soul/mcp-types.ts`.
+      response type in `packages/protocol/src/surfaces/mcp-types.ts`.
       The authoritative definition is transitive reachability, not a
       hand-maintained file list. `semver-tool-surface.test.ts` pins
       the tool names/descriptions; `semver-surface.test.ts` computes

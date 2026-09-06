@@ -229,9 +229,10 @@ export class MemoryWriteService {
     objectId: string,
     workspaceId: string,
     fields: MemoryEntryUpdateFields,
-    reason: string
+    reason: string,
+    enqueueEnrichment?: MemoryEntryInput["enqueueEnrichment"]
   ): Promise<Readonly<MemoryEntry>> {
-    return await this.updateInternal({ objectId, workspaceId, fields, reason });
+    return await this.updateInternal({ objectId, workspaceId, fields, reason, enqueueEnrichment });
   }
 
   public async validateUpdate(objectId: string, fields: MemoryEntryUpdateFields): Promise<void> {
@@ -257,6 +258,7 @@ export class MemoryWriteService {
     readonly workspaceId?: string;
     readonly fields: MemoryEntryUpdateFields;
     readonly reason: string;
+    readonly enqueueEnrichment?: MemoryEntryInput["enqueueEnrichment"];
   }): Promise<Readonly<MemoryEntry>> {
     const parsedObjectId = parseObjectId(input.objectId);
     const parsedWorkspaceId =
@@ -300,7 +302,8 @@ export class MemoryWriteService {
       parsedObjectId,
       { ...parsedFields, updated_at: occurredAt },
       eventInput,
-      parsedWorkspaceId
+      parsedWorkspaceId,
+      input.enqueueEnrichment
     );
 
     await this.dependencies.runtimeNotifier.notifyEntry(event);
@@ -324,7 +327,8 @@ export class MemoryWriteService {
     objectId: string,
     repoFields: MemoryEntryRepoUpdateFields,
     eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
-    workspaceId: string | undefined
+    workspaceId: string | undefined,
+    enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"]
   ): {
     readonly updated: Readonly<MemoryEntry>;
     readonly event: EventLogEntry;
@@ -336,6 +340,10 @@ export class MemoryWriteService {
       });
     }
 
+    const writer = this.dependencies.enrichPendingWriter;
+    if (enqueueEnrichment !== undefined && writer === undefined) {
+      throw new CoreError("CONFLICT", "Atomic enrichment enqueue writer is not wired.");
+    }
     let event: EventLogEntry | undefined;
     const updated = updateWithinTransaction.call(
       this.dependencies.memoryEntryRepo,
@@ -344,6 +352,12 @@ export class MemoryWriteService {
       {
         beforeUpdate: () => {
           event = this.appendUpdatedEventSynchronously(eventInput);
+        },
+        afterUpdate: () => {
+          if (enqueueEnrichment !== undefined) {
+            writer!.enqueue({ workspaceId: eventInput.workspace_id!, memoryId: objectId,
+              runId: enqueueEnrichment.runId, sourceSignalId: enqueueEnrichment.sourceSignalId });
+          }
         }
       },
       workspaceId

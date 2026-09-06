@@ -1,10 +1,12 @@
+import { detachInput } from "./capture-data.js";
+import { supportWitness } from "./support.js";
 import {
   BASELINE_FAMILIES,
-  C02_POLICY,
   compareIdentity,
   EXTENSION_FAMILIES,
   FAMILY_ORDER,
   type AdmittedField,
+  type DecisionPhaseCounters,
   type EvidenceUnit,
   type FamilyProbeResult,
   type PacketProposal,
@@ -25,14 +27,32 @@ export function relevanceR(
 }
 
 export function globalRanks(
-  units: readonly Pick<EvidenceUnit, "id" | "familyRanks">[]
+  units: readonly Pick<EvidenceUnit, "id" | "familyRanks">[],
+  work?: DecisionPhaseCounters
 ): ReadonlyMap<string, number> {
   const ordered = [...units].sort((left, right) => {
-    const delta = relevanceR(right.familyRanks) - relevanceR(left.familyRanks);
+    if (work) work.comparisons += 1;
+    const sum = (ranks: typeof left.familyRanks): readonly [bigint, bigint] => {
+      let n = 0n;
+      let d = 1n;
+      for (const family of FAMILY_ORDER) {
+        if (work) work.rowVisits += 1;
+        const rank = ranks[family];
+        if (rank === undefined) continue;
+        if (!Number.isSafeInteger(rank) || rank < 1) throw new Error("invalid family rank");
+        n = n * BigInt(rank) + d;
+        d *= BigInt(rank);
+      }
+      return [n, d];
+    };
+    const [ln, ld] = sum(left.familyRanks);
+    const [rn, rd] = sum(right.familyRanks);
+    const difference = rn * ld - ln * rd;
+    const delta = difference < 0n ? -1 : difference > 0n ? 1 : 0;
     return delta !== 0 ? delta : compareIdentity(left.id, right.id);
   });
   const ranks = new Map<string, number>();
-  ordered.forEach((unit, index) => ranks.set(unit.id, index + 1));
+  ordered.forEach((unit, index) => { if (work) work.rowVisits += 1; ranks.set(unit.id, index + 1); });
   return ranks;
 }
 
@@ -50,7 +70,13 @@ function probeOrderKey(probe: FamilyProbeResult): string {
 }
 
 function freezeHits(hits: readonly FamilyProbeResult["hits"][number][]): FamilyProbeResult["hits"] {
-  return Object.freeze([...hits].sort((left, right) => {
+  const unique = new Map<string, { readonly id: string; readonly rank: number }>();
+  for (const hit of hits) {
+    const { id, rank } = hit;
+    if (!id || !Number.isSafeInteger(rank) || rank < 1) throw new Error("invalid probe hit");
+    if (rank < (unique.get(id)?.rank ?? Infinity)) unique.set(id, Object.freeze({ id, rank }));
+  }
+  return Object.freeze([...unique.values()].sort((left, right) => {
     if (left.rank !== right.rank) return left.rank - right.rank;
     return compareIdentity(left.id, right.id);
   }));
@@ -59,6 +85,7 @@ function freezeHits(hits: readonly FamilyProbeResult["hits"][number][]): FamilyP
 export function canonicalizeProbes(
   probes: readonly FamilyProbeResult[]
 ): readonly FamilyProbeResult[] {
+  probes = detachInput(probes);
   const byKey = new Map<string, FamilyProbeResult>();
   for (const probe of probes) {
     const key = `${probe.family}\u0000${probe.probeId}`;
@@ -100,7 +127,7 @@ function admitStage(
       progressed = true;
       const existing = admitted.get(hit.id);
       if (existing === undefined) {
-        if (admitted.size >= identityCap) continue;
+        if (admitted.size >= identityCap) { truncated = true; continue; }
         admitted.set(hit.id, { [probe.family]: hit.rank });
         continue;
       }
@@ -126,7 +153,7 @@ export function admitField(
   const extension = embeddingReady
     ? ordered.filter((probe) => isExtension(probe.family))
     : [];
-  const extensionCap = spec.nBase + spec.nExtension;
+  const extensionCap = admitted.size + spec.nExtension;
   const extensionStage = admitStage(
     extension,
     admitted,
@@ -149,39 +176,27 @@ export function admitField(
 export function emitPackets(
   spec: Pick<QuerySpec, "packetM" | "widthW" | "obligations">,
   unitIds: readonly string[],
-  edges: readonly TypedSupportEdge[]
+  edges: readonly TypedSupportEdge[],
+  work?: DecisionPhaseCounters
 ): readonly PacketProposal[] {
   const proposals: PacketProposal[] = [];
-  const identities = [...unitIds].sort(compareIdentity);
+  const identities = [...unitIds].sort((a, b) => { if (work) work.comparisons += 1; return compareIdentity(a, b); });
   for (const id of identities) {
+    if (work) work.rowVisits += 1;
     if (proposals.length >= spec.packetM) break;
     proposals.push(Object.freeze({ id: `singleton:${id}`, unitIds: Object.freeze([id]) }));
   }
-  const joinWidth = Math.min(spec.widthW, C02_POLICY.joinWidth);
-  const grouped = new Map<string, TypedSupportEdge[]>();
-  for (const edge of edges) {
-    const key = `${edge.assignmentKey}\u0000${edge.predicate}`;
-    const bucket = grouped.get(key) ?? [];
-    bucket.push(edge);
-    grouped.set(key, bucket);
-  }
-  for (const obligation of spec.obligations) {
+  const joinWidth = spec.widthW;
+  for (const obligation of [...spec.obligations].sort((a, b) => {
+    if (work) work.comparisons += 1; return compareIdentity(JSON.stringify(a), JSON.stringify(b));
+  })) {
+    if (work) work.rowVisits += 1;
     if (proposals.length >= spec.packetM) break;
-    const members: string[] = [];
-    for (const predicate of obligation.requiredPredicates) {
-      const bucket = grouped.get(`${obligation.assignmentKey}\u0000${predicate}`) ?? [];
-      const edge = [...bucket].sort((left, right) =>
-        compareIdentity(left.resultObjectId, right.resultObjectId)
-      )[0];
-      if (edge === undefined) {
-        members.length = 0;
-        break;
-      }
-      if (!members.includes(edge.resultObjectId)) members.push(edge.resultObjectId);
-    }
+    const witness = supportWitness(obligation, edges, new Set(unitIds), work);
+    const members = [...new Set(witness?.map((edge) => { if (work) work.rowVisits += 1; return edge.resultObjectId; }) ?? [])];
     if (members.length < 2 || members.length > joinWidth) continue;
-    const unitIdsSorted = Object.freeze([...members].sort(compareIdentity));
-    if (unitIdsSorted.some((id) => !unitIds.includes(id))) continue;
+    const unitIdsSorted = Object.freeze([...members].sort((a, b) => { if (work) work.comparisons += 1; return compareIdentity(a, b); }));
+    if (unitIdsSorted.some((id) => !unitIds.some((candidate) => { if (work) work.rowVisits += 1; return candidate === id; }))) continue;
     proposals.push(Object.freeze({
       id: `packet:${obligation.kind}:${obligation.bindingSlot}:${obligation.assignmentKey}:${unitIdsSorted.join(",")}`,
       unitIds: unitIdsSorted

@@ -1,5 +1,6 @@
-// C02 prototype types. C05 may reuse this module; C08 deletes it if unused.
-// Not wired to executeRecall / deliverCanonicalFineAssessment.
+import type { RenderEntry } from "./render.js";
+import type { RelationQuery } from "../../query/recall-relation-query.js";
+// Internal candidate policy; no production entry consumes this module.
 
 export const BUDGET_AWARE_Q_AUTHORITY = "budget_aware_q" as const;
 
@@ -18,7 +19,7 @@ export const C02_POLICY = Object.freeze({
 });
 
 export function decisionWorkLimit(k: number, packetM: number): number {
-  return 2 * k * packetM;
+  return 2 * k * packetM * (C02_POLICY.widthW + 1);
 }
 
 export type RetrievalFamily = "lexical" | "typed_relation" | "embedding";
@@ -50,7 +51,17 @@ export interface FamilyProbeResult {
   readonly hits: readonly FamilyHit[];
 }
 
+export interface SourceBinding {
+  readonly workspaceId: string;
+  readonly sourceObjectId: string;
+  readonly sourceRevision: string;
+  readonly evidenceRefs: readonly string[];
+}
+
 export interface EvidenceUnit {
+  readonly sourceSpans?: RenderEntry["sourceSpans"];
+  readonly dimension?: string;
+  readonly source?: SourceBinding;
   readonly id: string;
   readonly content: string;
   readonly framedBytes: number;
@@ -61,6 +72,9 @@ export interface EvidenceUnit {
 }
 
 export interface TypedSupportEdge {
+  readonly evidenceRefs?: readonly string[];
+  readonly assertionId?: string;
+  readonly workspaceId?: string;
   readonly predicate: string;
   readonly assignmentKey: string;
   readonly sourceObjectId: string;
@@ -74,6 +88,7 @@ export interface PacketProposal {
 }
 
 export interface GroundedObligation {
+  readonly supportForm?: "endpoint_path";
   readonly kind: string;
   readonly bindingSlot: string;
   readonly assignmentKey: string;
@@ -81,6 +96,10 @@ export interface GroundedObligation {
 }
 
 export interface QuerySpec {
+  readonly unsupportedTemporalOperator?: boolean;
+  readonly unsupportedRelationOperator?: boolean;
+  readonly relationQuery?: RelationQuery;
+  readonly perDimensionLimits?: Readonly<Record<string, number>> | null;
   readonly text: string;
   readonly principal: string;
   readonly workspaceId: string;
@@ -105,6 +124,7 @@ export interface QuerySpec {
 }
 
 export interface QuerySpecDraft {
+  readonly perDimensionLimits?: Readonly<Record<string, number>> | null;
   readonly text: string;
   readonly principal?: string;
   readonly workspaceId?: string;
@@ -128,17 +148,26 @@ export interface QuerySpecDraft {
   readonly familyCaps?: Readonly<Partial<Record<RetrievalFamily, CapabilityState>>>;
 }
 
+export interface GovernedContradiction {
+  readonly assertionId: string;
+  readonly sourceObjectId: string;
+  readonly evidenceRefs: readonly string[];
+  readonly resolvedAt: string;
+}
+
 export type ClaimDisposition =
   | { readonly kind: "heuristic_evidence" }
-  | { readonly kind: "observed_scoped_relation" }
+  | { readonly kind: "observed_scoped_relation"; readonly sourceObjectIds: readonly string[]; readonly evidenceRefs: readonly string[] }
   | { readonly kind: "joint_support" }
-  | { readonly kind: "valid_time" }
+  | { readonly kind: "valid_time"; readonly sourceObjectIds: readonly string[]; readonly evidenceRefs: readonly string[] }
+  | { readonly kind: "unsupported_temporal_operator" }
+  | { readonly kind: "unsupported_relation_operator" }
   | { readonly kind: "enumeration_observed_not_all" }
   | { readonly kind: "unsupported_exact_aggregate" }
   | { readonly kind: "capability_unavailable"; readonly capability: string }
   | { readonly kind: "obligation_unsatisfied" }
   | { readonly kind: "truncated" }
-  | { readonly kind: "conflict_distinct_lineages" }
+  | { readonly kind: "conflict_distinct_lineages"; readonly contradicted: readonly GovernedContradiction[]; readonly activeSourceObjectIds: readonly string[] }
   | { readonly kind: "unsupported_mode"; readonly mode: string };
 
 export interface AdmittedField {
@@ -149,7 +178,31 @@ export interface AdmittedField {
   readonly truncated: boolean;
 }
 
+export interface DecisionPhaseCounters {
+  rowVisits: number;
+  comparisons: number;
+  qualityCalls: number;
+  packetInspections: number;
+  utf8Bytes: number;
+}
+
+export type DecisionWorkPhase = "setup" | "packetFormation" | "scanBaseline" | "decision" |
+  "replacement" | "ordering" | "finalQuality" | "render";
+
+export interface DecisionPhaseWork {
+  readonly unit: "instrumented_logical_operations";
+  readonly phases: Readonly<Record<DecisionWorkPhase, Readonly<DecisionPhaseCounters>>>;
+  readonly bounds: Readonly<{ captureNodes: number; supportEdges: number; obligations: number;
+    supportWidth: number; selectedUnits: number; inspectedPackets: number; qualityCalls: number;
+    maxSortEntries: number; supportRowVisitsPerQuality: number }>;
+}
+
 export interface DecisionResult {
+  readonly phaseWork?: DecisionPhaseWork;
+  readonly workUsed?: number;
+  readonly formationWork?: number;
+  readonly renderedEntries: readonly RenderEntry[];
+  readonly envelopeAllowance: number;
   readonly ranking_authority: typeof BUDGET_AWARE_Q_AUTHORITY;
   readonly membership: readonly string[];
   readonly order: readonly string[];
@@ -165,8 +218,10 @@ export interface DecisionResult {
 }
 
 export interface PackedRecall {
+  readonly context: string;
+  readonly accounting: Readonly<{ actualBytes: number; chargedTokens: number; actualTokens: number | null; tokenizerProfile: string | null }>;
   readonly ranking_authority: typeof BUDGET_AWARE_Q_AUTHORITY;
-  readonly results: readonly Readonly<{ readonly object_id: string; readonly content: string }>[];
+  readonly results: readonly Readonly<{ readonly object_id: string; readonly content: string; readonly source?: SourceBinding }>[];
   readonly claims: readonly ClaimDisposition[];
   readonly truncated: boolean;
 }

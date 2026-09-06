@@ -184,3 +184,4 @@ export {
   unwrapStandardResponseData
 } from "./shared/standard-response.js";
 export { ManifestationBudgetConfigRouteDataSchema } from "./recall/manifestation-budget.js";
+export * from "./garden/semantic-artifact.js";

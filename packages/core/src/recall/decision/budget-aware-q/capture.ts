@@ -1,3 +1,6 @@
+import { compileRecallQueryProbes, type RecallQueryProbes } from "../../query/recall-query-probes.js";
+import { compileRelationQuery } from "../../query/recall-relation-query.js";
+import { detachInput } from "./capture-data.js";
 import { hashConditionDigest, type FieldContractSha256 } from "@do-soul/alaya-protocol";
 import {
   C02_POLICY,
@@ -15,6 +18,7 @@ const DEFAULT_CAPS: Readonly<Record<RetrievalFamily, CapabilityState>> = Object.
 });
 
 export interface CapturedQuery {
+  readonly probes: Readonly<RecallQueryProbes>;
   readonly spec: QuerySpec;
   readonly digest: string;
 }
@@ -24,12 +28,24 @@ function copyStrings(values: readonly string[] | undefined, fallback: readonly s
 }
 
 function copyObligations(draft: QuerySpecDraft): QuerySpec["obligations"] {
-  return Object.freeze((draft.obligations ?? []).map((obligation) => Object.freeze({
-    kind: String(obligation.kind),
-    bindingSlot: String(obligation.bindingSlot),
-    assignmentKey: String(obligation.assignmentKey),
-    requiredPredicates: Object.freeze(Array.from(obligation.requiredPredicates, (item) => String(item)))
-  })));
+  const unique = new Map<string, QuerySpec["obligations"][number]>();
+  for (const obligation of draft.obligations ?? []) {
+    if (obligation.supportForm !== undefined && obligation.supportForm !== "endpoint_path") throw new Error("unsupported obligation support form");
+    const copy = Object.freeze({
+      kind: String(obligation.kind),
+      ...(obligation.supportForm === "endpoint_path" ? { supportForm: "endpoint_path" as const } : {}),
+      bindingSlot: String(obligation.bindingSlot), assignmentKey: String(obligation.assignmentKey),
+      requiredPredicates: Object.freeze(Array.from(obligation.requiredPredicates, (item) => String(item)))
+    });
+    const identity = JSON.stringify([copy.kind, copy.bindingSlot, copy.assignmentKey]);
+    const previous = unique.get(identity);
+    if (previous && (previous.supportForm !== copy.supportForm ||
+      JSON.stringify(previous.requiredPredicates) !== JSON.stringify(copy.requiredPredicates))) {
+      throw new Error("conflicting obligation identity definition");
+    }
+    if (!previous) unique.set(identity, copy);
+  }
+  return Object.freeze([...unique.values()]);
 }
 
 function typedRelationDefault(draft: QuerySpecDraft): CapabilityState {
@@ -58,17 +74,28 @@ function recognizeEnumeration(text: string): boolean {
 export function captureQuerySpec(
   draft: QuerySpecDraft,
   sha256: FieldContractSha256,
-  now: () => string
+  now: () => string,
+  availability: Readonly<{ embedding?: boolean }> = {}
 ): CapturedQuery {
+  draft = detachInput(draft);
   const text = String(draft.text);
+  if (Buffer.byteLength(text, "utf8") > 8192) throw new Error("query text exceeds bounded capture profile");
+  const probes = detachInput(compileRecallQueryProbes(text));
+  const asOf = String(draft.asOf ?? now());
+  const relationQuery = compileRelationQuery(probes, asOf);
+  const unsupportedTemporalOperator = relationQuery.temporal.kind === "unsupported";
   const k = draft.k ?? C02_POLICY.kDefault;
   const packetM = draft.packetM ?? C02_POLICY.packetM;
   const spec: QuerySpec = Object.freeze({
     text,
+    unsupportedTemporalOperator,
+    unsupportedRelationOperator: !relationQuery.supported,
+    relationQuery,
+    perDimensionLimits: draft.perDimensionLimits ?? null,
     principal: String(draft.principal ?? "agent"),
     workspaceId: String(draft.workspaceId ?? "workspace-1"),
     authorizedScopes: copyStrings(draft.authorizedScopes, [draft.workspaceId ?? "workspace-1"]),
-    asOf: String(draft.asOf ?? now()),
+    asOf,
     k,
     tokenBudget: draft.tokenBudget ?? C02_POLICY.requestBudget,
     nBase: draft.nBase ?? C02_POLICY.nBase,
@@ -83,9 +110,28 @@ export function captureQuerySpec(
     exactAggregate: draft.exactAggregate ?? recognizeExactAggregate(text),
     diagnostics: draft.diagnostics === true,
     deliveryPath: draft.deliveryPath ?? null,
-    obligations: copyObligations(draft),
-    familyCaps: copyFamilyCaps(draft)
+    obligations: copyObligations({ ...draft, obligations: draft.obligations ?? (relationQuery.wantsChannel && relationQuery.subject !== null
+      ? [{ supportForm: "endpoint_path", kind: "conjunction", bindingSlot: "owner_and_channel",
+        assignmentKey: `owner:${relationQuery.subject}`, requiredPredicates: ["owns", "escalation_channel"] }] : []) }),
+    familyCaps: Object.freeze({ ...copyFamilyCaps(draft),
+      ...(draft.familyCaps?.embedding === "ready" && availability.embedding === false ? { embedding: "unavailable" as const } : {}),
+      ...(unsupportedTemporalOperator || !relationQuery.supported ? { typed_relation: "unavailable" as const } : {}) })
   });
+  for (const key of ["k", "tokenBudget", "nBase", "nExtension", "rBase", "rExtension",
+    "packetM", "widthW", "workLimit", "envelopeBytes"] as const) {
+    if (!Number.isSafeInteger(spec[key]) || spec[key] < 0) throw new Error(`invalid ${key}`);
+  }
+  if (!spec.principal || !spec.workspaceId || !spec.authorizedScopes.length ||
+      !spec.authorizedScopes.includes(spec.workspaceId)) throw new Error("invalid query jurisdiction");
+  if (!Number.isFinite(Date.parse(spec.asOf))) throw new Error("invalid query as-of");
+  for (const capability of Object.values(spec.familyCaps)) {
+    if (!["ready", "unavailable", "pending", "not_requested"].includes(capability)) {
+      throw new Error("invalid family capability");
+    }
+  }
+  for (const limit of Object.values(spec.perDimensionLimits ?? {})) {
+    if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("invalid dimension limit");
+  }
   const digest = hashConditionDigest({
     principal: spec.principal,
     authorized_scopes: spec.authorizedScopes,
@@ -97,5 +143,5 @@ export function captureQuerySpec(
     activation_budget: spec.k,
     token_budget: spec.tokenBudget
   }, sha256);
-  return Object.freeze({ spec, digest });
+  return Object.freeze({ spec, digest, probes });
 }

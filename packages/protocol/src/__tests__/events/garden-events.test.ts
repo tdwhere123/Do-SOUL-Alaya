@@ -263,6 +263,7 @@ describe("Phase 4A protocol schemas", () => {
 
   it("keeps GardenEventTypeSchema aligned with the exported event constants", () => {
     expect(GardenEventTypeSchema.options).toEqual([
+      GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT,
       GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
       GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
@@ -271,6 +272,14 @@ describe("Phase 4A protocol schemas", () => {
       GardenEventType.SOUL_ENRICH_ABANDONED,
       GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED
     ]);
+  });
+
+  it("validates semantic enrichment actions through the shared Garden payload and event union", () => {
+    const type = GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT;
+    const payload = { task_id: "task-1", source_revision: "source-revision", action: "published" };
+    expect(parseGardenEventPayload(type, payload)).toEqual(payload);
+    expect(GardenEventUnionSchema.parse({ type, payload })).toEqual({ type, payload });
+    expect(() => parseGardenEventPayload(type, { ...payload, action: "invented_success" })).toThrow();
   });
 
   it("rejects unknown garden event types", () => {

@@ -1,3 +1,4 @@
+import type { EmbeddingProviderPort } from "../../../embedding-recall/types.js";
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import {
@@ -8,7 +9,6 @@ import {
   ScopeClass,
   SignalEventType,
   SourceKind,
-  isRelationValidityActiveAt,
   type RelationValidity
 } from "@do-soul/alaya-protocol";
 import { auditOfficialApiSignalFormation } from "@do-soul/alaya-soul";
@@ -16,6 +16,8 @@ import {
   digestRelationFormationEventSource,
   SqliteGardenTaskRepo,
   SqliteRelationAssertionRepo,
+  SqliteRelationRecallReader,
+  SqliteMemoryRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { EvidenceService } from "../../../memory/evidence-service.js";
@@ -23,8 +25,8 @@ import { MemoryService } from "../../../memory/memory-service.js";
 import { RelationAssertionService } from "../../../relations/relation-assertions/relation-assertion-service.js";
 import { EventPublisher } from "../../../runtime/event-publisher.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
-import { compileRecallQueryProbes } from "../../../recall/query/recall-query-probes.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
+import { detachInput } from "../../../recall/decision/budget-aware-q/capture-data.js";
 import { captureQuerySpec } from "../../../recall/decision/budget-aware-q/capture.js";
 import { finalizeClaims, packDecision, withClaims } from "../../../recall/decision/budget-aware-q/claims.js";
 import { admitField, emitPackets } from "../../../recall/decision/budget-aware-q/field.js";
@@ -32,8 +34,10 @@ import { selectBudgetAwareQ } from "../../../recall/decision/budget-aware-q/sele
 import {
   framedByteLength,
   type EvidenceUnit,
-  type FamilyProbeResult,
+  type DecisionResult,
   type PackedRecall,
+  type QuerySpec,
+  type PacketProposal,
   type QuerySpecDraft,
   type TypedSupportEdge
 } from "../../../recall/decision/budget-aware-q/types.js";
@@ -42,6 +46,7 @@ import {
   REAL_SQLITE_TEST_WORKSPACE_ID,
   createRecallEmbeddingRealStorage
 } from "../../shared/real-sqlite.test-support.js";
+import { retrieveSources, type ReadyArtifactReader } from "./bounded-retrieval.js";
 import { CONTENT, EV, MEM, NOW, RUN, WS } from "./ids.js";
 
 export interface SliceCounters {
@@ -54,46 +59,44 @@ export interface SliceCounters {
   query_embed_count: number;
   selection_count: number;
   row_visits: number;
+  source_reads: number;
+  source_revision_rows: number;
+  raw_bytes: number;
+  assertion_rows: number;
+  native_lexical_visits: number;
+  native_lexical_bytes: number;
+  native_assertion_visits: number;
+  native_assertion_bytes: number;
+  native_artifact_visits: number;
+  native_artifact_bytes: number;
+  artifact_validation_utf8_bytes: number;
+  embedding_id_json_bytes: number;
+  embedding_id_metadata_utf8_bytes: number;
+  embedding_vector_payload_bytes: number;
   full_tier_scan: number;
-  rss: "not_observed";
+  rss: number | "not_observed";
+  phase_ms: Readonly<Record<string, number>>;
   db_bytes: number | "not_observed";
 }
 
 export interface SliceRecallResult {
+  readonly referenceInput: { readonly spec: QuerySpec; readonly units: readonly EvidenceUnit[];
+    readonly edges: readonly TypedSupportEdge[]; readonly packets: readonly PacketProposal[] };
   readonly pack: PackedRecall;
   readonly membership: readonly string[];
   readonly querySpecDigest: string;
   readonly selectionCount: number;
   readonly counters: SliceCounters;
+  readonly decisionDiagnostics: Pick<DecisionResult, "phaseWork" | "workUsed" | "formationWork">;
 }
-
-const REMOTE_VECTOR = new Float32Array([1, 0]);
 
 function sha256(value: unknown): string {
   return createHash("sha256").update(stableStringify(value), "utf8").digest("hex");
 }
 
-function contentHash(content: string): string {
-  return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
-}
-
-function cosine(left: Float32Array, right: Float32Array): number {
-  let dot = 0;
-  let leftNorm = 0;
-  let rightNorm = 0;
-  for (let i = 0; i < left.length; i += 1) {
-    const a = left[i] ?? 0;
-    const b = right[i] ?? 0;
-    dot += a * b;
-    leftNorm += a * a;
-    rightNorm += b * b;
-  }
-  const denom = Math.sqrt(leftNorm) * Math.sqrt(rightNorm);
-  return denom === 0 ? 0 : dot / denom;
-}
-
-export async function createSliceHarness(register: (database: StorageDatabase) => void) {
-  const storage = await createRecallEmbeddingRealStorage(register);
+export async function createSliceHarness(register: (database: StorageDatabase) => void, filename = ":memory:", embeddingProvider?: EmbeddingProviderPort) {
+  const storage = await createRecallEmbeddingRealStorage(register, filename);
+  storage.memoryEmbeddingRepo.prepareBoundedRecallIndex();
   const eventLogRepo = storage.eventLogRepo;
   const notify = { notify: async () => {}, notifyEntry: async () => {} };
   const eventPublisher = new EventPublisher({
@@ -102,9 +105,12 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
     runtimeNotifier: notify
   });
   const relationRepo = new SqliteRelationAssertionRepo(storage.database);
-  const garden = new SqliteGardenTaskRepo(storage.database.connection, {
-    appendManyWithMutation: async (_events, mutate) => mutate([])
-  });
+  const recallReader = new SqliteRelationRecallReader(storage.database);
+  recallReader.prepareIndex();
+  const memoryReader = new SqliteMemoryRecallReader(storage.database);
+  memoryReader.prepareIndex();
+  let artifactReader: ReadyArtifactReader | undefined;
+  const garden = new SqliteGardenTaskRepo(storage.database.connection, eventPublisher);
   const counters: SliceCounters = {
     write_ack_ms: "not_observed",
     write_provider_calls: 0,
@@ -115,10 +121,25 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
     query_embed_count: 0,
     selection_count: 0,
     row_visits: 0,
+    source_reads: 0, source_revision_rows: 0,
+    raw_bytes: 0,
+    assertion_rows: 0,
+    native_lexical_visits: 0,
+    native_lexical_bytes: 0,
+    native_assertion_visits: 0,
+    native_assertion_bytes: 0,
+    native_artifact_visits: 0,
+    native_artifact_bytes: 0,
+    artifact_validation_utf8_bytes: 0,
+    embedding_id_json_bytes: 0,
+    embedding_id_metadata_utf8_bytes: 0,
+    embedding_vector_payload_bytes: 0,
     full_tier_scan: 0,
     rss: "not_observed",
+    phase_ms: {},
     db_bytes: "not_observed"
   };
+  const sourceIds: string[] = [];
   const memoryIds: string[] = [];
   const evidenceIds: string[] = [];
   const memory = new MemoryService({
@@ -134,6 +155,19 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
     },
     eventLogRepo,
     memoryEntryRepo: storage.memoryEntryRepo,
+    enrichPendingWriter: {
+      enqueue: ({ workspaceId, memoryId }) => {
+        if (!storage.database.connection.inTransaction) throw new Error("enqueue outside source transaction");
+        if (garden.peekPending(GardenRole.LIBRARIAN, workspaceId, 128).length >= 128) {
+          throw new Error("enrichment queue full");
+        }
+        garden.enqueue({
+          id: `enrich:${workspaceId}:${memoryId}:v1`, workspace_id: workspaceId,
+          role: GardenRole.LIBRARIAN, kind: GardenTaskKind.BULK_ENRICH,
+          payload: { source_object_id: memoryId, source_revision: 1 }, created_at: NOW
+        });
+      }
+    },
     runtimeNotifier: notify
   });
   const evidence = new EvidenceService({
@@ -168,20 +202,12 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
       evidence_refs: [],
       workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
       run_id: REAL_SQLITE_TEST_RUN_ID,
-      surface_id: null
+      surface_id: null,
+      ...(enrich ? { enqueueEnrichment: { runId: RUN, sourceSignalId: null } } : {})
     });
     counters.write_ack_ms = performance.now() - started;
-    if (enrich) {
-      garden.enqueue({
-        id: `enrich:${WS}:${id}:v1`,
-        workspace_id: WS,
-        role: GardenRole.LIBRARIAN,
-        kind: GardenTaskKind.BULK_ENRICH,
-        payload: { source_object_id: id, source_revision: 1 },
-        created_at: NOW
-      });
-      counters.garden_enqueue += 1;
-    }
+    if (enrich) counters.garden_enqueue += 1;
+    sourceIds.push(created.object_id);
     return created;
   }
 
@@ -224,6 +250,11 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
       workspace_id: WS,
       surface_id: null
     });
+    const boundSource = await storage.memoryEntryRepo.findById(input.resultObjectId);
+    if (!boundSource || boundSource.workspace_id !== WS) throw new Error("relation source belongs to another workspace or is missing");
+    await memory.updateScoped(boundSource.object_id, WS,
+      { evidence_refs: [...new Set([...boundSource.evidence_refs, input.evidenceId])] },
+      "Attach admitted relation evidence to its public source");
     const parameters = {
       relation_kind: input.relationKind,
       assignment_key: input.assignmentKey,
@@ -272,27 +303,14 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
     readonly includeCharlie?: boolean;
     readonly includeTemporalOwners?: boolean;
     readonly enrich?: boolean;
+    readonly joinOwner?: boolean;
   } = {}) {
     await writeMemory(MEM.checklist, CONTENT.checklist, MemoryDimension.PROCEDURE, options.enrich === true);
     await writeMemory(MEM.remote, CONTENT.remote, MemoryDimension.EPISODE, options.enrich === true);
-    await writeMemory(MEM.orion, CONTENT.orion, MemoryDimension.FACT, false);
+    await writeMemory(MEM.orion, options.joinOwner ? "Platform owns Orion" : CONTENT.orion, MemoryDimension.FACT, false);
     await writeMemory(MEM.channel, CONTENT.channel, MemoryDimension.FACT, false);
-    await writeMemory(MEM.charlie, CONTENT.charlie, MemoryDimension.FACT, false);
+    if (options.includeCharlie === true) await writeMemory(MEM.charlie, CONTENT.charlie, MemoryDimension.FACT, false);
     await writeMemory(MEM.bob, CONTENT.bob, MemoryDimension.FACT, false);
-    if (options.plantVectors === true) {
-      await storage.memoryEmbeddingRepo.upsert({
-        object_id: MEM.remote,
-        workspace_id: WS,
-        content_hash: contentHash(CONTENT.remote),
-        provider_kind: "local_c02",
-        model_id: "planted",
-        schema_version: 1,
-        dimensions: 2,
-        embedding: REMOTE_VECTOR,
-        created_at: NOW,
-        updated_at: NOW
-      });
-    }
     if (options.includeTemporalOwners === true) {
       await admitRelation({
         evidenceId: EV.orionOwnerOld,
@@ -321,12 +339,12 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
         evidenceId: EV.orionOwner,
         assertionId: "assert-orion-alice",
         sourceId: "orion",
-        targetId: "alice",
+        targetId: options.joinOwner ? "platform" : "alice",
         resultObjectId: MEM.orion,
         relationKind: "owns",
         assignmentKey: "Platform",
         validity: { kind: "open", valid_from: "2025-01-01T00:00:00.000Z" },
-        gist: "Alice owns Orion"
+        gist: options.joinOwner ? "Platform owns Orion" : "Alice owns Orion"
       });
     }
     if (options.includeChannel !== false) {
@@ -357,114 +375,92 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
     }
   }
 
-  function typedEdges(asOf: string): TypedSupportEdge[] {
-    return relationRepo.listAssertionsInCurrentTransaction()
-      .filter((assertion) => isRelationValidityActiveAt(assertion.validity, asOf, new Set()))
-      .map((assertion) => {
-        const parameters = assertion.formation_receipt.parameters as Readonly<Record<string, unknown>>;
-        const source = assertion.anchors.source_anchor;
-        const target = assertion.anchors.target_anchor;
-        return {
-          predicate: assertion.relation_kind,
-          assignmentKey: String(parameters.assignment_key ?? "default"),
-          sourceObjectId: source.kind === "object" ? source.object_id : "",
-          targetObjectId: target.kind === "object" ? target.object_id : "",
-          resultObjectId: String(parameters.result_object_id ?? "")
-        };
-      })
-      .filter((edge) => edge.resultObjectId.length > 0);
-  }
+  let revoked = false;
 
-  async function runRecall(draft: QuerySpecDraft): Promise<SliceRecallResult> {
-    const captured = captureQuerySpec({ workspaceId: WS, asOf: NOW, ...draft }, fieldContractSha256, () => NOW);
-    const probes: FamilyProbeResult[] = [];
-    const compiled = compileRecallQueryProbes(captured.spec.text);
-    const lexicalQuery = compiled.lexical_terms.length > 0
-      ? compiled.lexical_terms.join(" ")
-      : captured.spec.text;
-    const lexical = await storage.memoryEntryRepo.searchByKeyword(
-      WS, lexicalQuery, captured.spec.nBase
-    );
-    counters.row_visits += lexical.length;
-    probes.push({
-      family: "lexical",
-      probeId: "fts",
-      hits: lexical.map((hit, index) => ({ id: hit.object_id, rank: index + 1 }))
-    });
-    const edges = captured.spec.familyCaps.typed_relation === "ready"
-      ? typedEdges(captured.spec.asOf)
-      : [];
-    if (captured.spec.familyCaps.typed_relation === "ready") {
-      const typedIds = [...new Set(edges.map((edge) => edge.resultObjectId))].sort();
-      probes.push({
-        family: "typed_relation",
-        probeId: "assertions",
-        hits: typedIds.map((id, index) => ({ id, rank: index + 1 }))
-      });
+  async function runRecall(draft: QuerySpecDraft, signal?: AbortSignal): Promise<SliceRecallResult> {
+    const started = performance.now();
+    let phaseStarted = started;
+    const phaseMs: Record<string, number> = {};
+    const phase = (name: string) => { const now = performance.now(); phaseMs[name] = now - phaseStarted; phaseStarted = now; };
+    const revision = () => storage.database.connection.prepare("SELECT MAX(rowid) AS revision FROM event_log").get() as { revision: number | null };
+    const pinnedRevision = revision().revision;
+    counters.query_embed_count = 0; counters.selection_count = 0;
+    counters.artifact_validation_utf8_bytes = 0; counters.embedding_id_json_bytes = 0; counters.embedding_vector_payload_bytes = 0;
+    counters.embedding_id_metadata_utf8_bytes = 0;
+    counters.native_artifact_visits = 0; counters.native_artifact_bytes = 0;
+    counters.native_assertion_visits = 0; counters.native_assertion_bytes = 0;
+    counters.native_lexical_visits = 0; counters.native_lexical_bytes = 0;
+    counters.row_visits = 0; counters.raw_bytes = 0; counters.source_reads = 0; counters.source_revision_rows = 0; counters.assertion_rows = 0;
+    const assertLease = () => {
+      if (revoked || signal?.aborted || revision().revision !== pinnedRevision) throw new Error("query snapshot revoked, cancelled or stale");
+    };
+    assertLease();
+    const captured = captureQuerySpec(draft, fieldContractSha256, () => NOW, { embedding: embeddingProvider !== undefined });
+    if (captured.spec.workspaceId !== WS || captured.spec.principal !== "agent" ||
+        captured.spec.authorizedScopes.some((scope) => scope !== WS)) {
+      throw new Error("query authority does not match trusted session");
     }
-    if (captured.spec.familyCaps.embedding === "ready") {
-      counters.query_embed_count += 1;
-      const queryVector = REMOTE_VECTOR;
-      const records = await storage.memoryEmbeddingRepo.listByObjectIds(WS, [MEM.remote, MEM.checklist, MEM.orion]);
-      const ranked = [...records].sort((left, right) =>
-        cosine(right.embedding, queryVector) - cosine(left.embedding, queryVector)
-      );
-      counters.row_visits += ranked.length;
-      probes.push({
-        family: "embedding",
-        probeId: "planted",
-        hits: ranked.map((record, index) => ({ id: record.object_id, rank: index + 1 }))
-      });
-    }
+    phase("capture_and_lease");
+    const { probes, edges, inactiveResults, contradictions, sourceCache, rawTruncated } = await retrieveSources({
+      captured, storage, memoryReader, recallReader, embeddingProvider, artifactReader, counters });
+    phase("retrieval");
     const field = admitField(captured.spec, probes);
-    counters.row_visits = Math.max(counters.row_visits, field.rowVisits);
     const activeResults = new Set(edges.map((edge) => edge.resultObjectId));
-    const inactiveResults = new Set(
-      relationRepo.listAssertionsInCurrentTransaction()
-        .filter((assertion) => !isRelationValidityActiveAt(assertion.validity, captured.spec.asOf, new Set()))
-        .map((assertion) => {
-          const parameters = assertion.formation_receipt.parameters as Readonly<Record<string, unknown>>;
-          return String(parameters.result_object_id ?? "");
-        })
-        .filter((id) => id.length > 0 && !activeResults.has(id))
-    );
-    const admittedIds = field.e1.filter((id) => !inactiveResults.has(id));
+    const admittedIds = field.e1.filter((id) => !inactiveResults.has(id) || activeResults.has(id));
     const units: EvidenceUnit[] = [];
     for (const id of admittedIds) {
-      const row = await storage.memoryEntryRepo.findById(id);
-      if (row === null) continue;
+      const row = sourceCache.get(id) ?? null;
+      if (row === null || row.workspace_id !== captured.spec.workspaceId || row.lifecycle_state !== "active" || row.retention_state === "tombstoned") continue;
       const framed = framedByteLength(id, row.content);
       units.push({
         id,
+        dimension: row.dimension,
+        source: { workspaceId: row.workspace_id, sourceObjectId: id,
+          sourceRevision: row.sourceRevision,
+          evidenceRefs: [...row.evidence_refs] },
         content: row.content,
         framedBytes: framed,
         chargedTokens: framed,
         familyRanks: field.ranks.get(id) ?? {},
-        answerBindings: captured.spec.enumeration ? [id] : [],
+        answerBindings: captured.spec.enumeration ? edges.filter((edge) => edge.resultObjectId === id)
+          .map((edge) => `${captured.spec.workspaceId}:${edge.sourceObjectId}:${edge.predicate}:${edge.targetObjectId}`) : [],
         assignmentKey: edges.find((edge) => edge.resultObjectId === id)?.assignmentKey ?? null
       });
     }
-    const packets = emitPackets(captured.spec, units.map((unit) => unit.id), edges);
+    const packets = emitPackets({ ...captured.spec, packetM: units.length + captured.spec.obligations.length }, units.map((unit) => unit.id), edges);
+    phase("field_and_source_binding");
     const decision = selectBudgetAwareQ({
       spec: captured.spec,
       digest: captured.digest,
       units,
-      edges,
-      packets
+      edges
     });
+    phase("decision_including_setup_order_and_prerender");
     counters.selection_count += decision.selectionCount;
-    const withClaim = withClaims(decision, finalizeClaims({
+    const deliveredDecision = { ...decision, truncated: decision.truncated || field.truncated || rawTruncated };
+    const withClaim = withClaims(deliveredDecision, finalizeClaims({
       spec: captured.spec,
-      decision,
+      decision: deliveredDecision,
       edges,
-      fieldTruncated: field.truncated
+      contradictions,
+      fieldTruncated: field.truncated || rawTruncated
     }));
+    assertLease();
+    const pack = packDecision(withClaim, units);
+    phase("claims_and_delivery");
+    const referenceInput = detachInput({ spec: captured.spec, units, edges, packets });
+    phase("fixture_reference_capture");
+    phaseMs.total = performance.now() - started;
+    counters.phase_ms = Object.freeze(phaseMs);
+    counters.rss = process.memoryUsage().rss;
     return {
-      pack: packDecision(withClaim, units),
+      referenceInput,
+      pack,
       membership: withClaim.membership,
       querySpecDigest: captured.digest,
       selectionCount: decision.selectionCount,
-      counters: { ...counters }
+      counters: { ...counters },
+      decisionDiagnostics: { phaseWork: decision.phaseWork, workUsed: decision.workUsed, formationWork: decision.formationWork }
     };
   }
 
@@ -509,15 +505,34 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
     return result;
   }
 
+  async function plantLocalVectors() {
+    if (!embeddingProvider) throw new Error("local embedding provider unavailable");
+    const rows = await Promise.all(sourceIds.map((id) => storage.memoryEntryRepo.findById(id)));
+    const admitted = rows.filter((row) => row !== null);
+    const vectors = await embeddingProvider.embedTexts(admitted.map((row) => row.content), { timeoutMs: 30000 });
+    for (const [index, row] of admitted.entries()) {
+      await storage.memoryEmbeddingRepo.upsert({ object_id: row.object_id, workspace_id: WS,
+        content_hash: `sha256:${createHash("sha256").update(row.content).digest("hex")}`,
+        provider_kind: embeddingProvider.providerKind, model_id: embeddingProvider.modelId,
+        schema_version: embeddingProvider.schemaVersion, dimensions: vectors[index]!.length,
+        embedding: vectors[index]!, created_at: NOW, updated_at: NOW });
+    }
+  }
+
   return {
+    bindReadyArtifactReader: (reader: NonNullable<typeof artifactReader>) => { artifactReader = reader; },
+    recallReader,
+    plantLocalVectors,
+    memoryService: memory,
     database: storage.database,
+    revokeSession: () => { revoked = true; },
     memoryEntryRepo: storage.memoryEntryRepo,
     garden,
     counters,
     writeMemory,
     plantLaunchCorpus,
     admitRelation,
-    typedEdges,
+    relationService: relations,
     runRecall,
     fakeTransportAdmit,
     pendingGarden: () => garden.peekPending(GardenRole.LIBRARIAN, WS, 32)
@@ -525,9 +540,10 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
 }
 
 export const JOIN_OBLIGATION = Object.freeze({
+  supportForm: "endpoint_path" as const,
   kind: "conjunction",
   bindingSlot: "owner_and_channel",
-  assignmentKey: "Platform",
+  assignmentKey: "owner:orion",
   requiredPredicates: Object.freeze(["owns", "escalation_channel"])
 });
 

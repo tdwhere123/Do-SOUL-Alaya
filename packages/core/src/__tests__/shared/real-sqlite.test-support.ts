@@ -25,11 +25,11 @@ type RealSqliteFixture = {
 
 type RegisterDatabase = (database: StorageDatabase) => void;
 
-async function createBaseRealSqliteDatabase(registerDatabase: RegisterDatabase): Promise<StorageDatabase> {
-  const database = initDatabase({ filename: ":memory:" });
+async function createBaseRealSqliteDatabase(registerDatabase: RegisterDatabase, filename = ":memory:"): Promise<StorageDatabase> {
+  const database = initDatabase({ filename });
   registerDatabase(database);
   const workspaceRepo = new SqliteWorkspaceRepo(database);
-  await workspaceRepo.create({
+  if (await workspaceRepo.getById(REAL_SQLITE_TEST_WORKSPACE_ID) === null) await workspaceRepo.create({
     workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
     name: "workspace one",
     root_path: "/tmp/ws1",
@@ -55,17 +55,18 @@ export async function createResolutionServiceRealStorage(
 }
 
 export async function createRecallRealStorage(
-  registerDatabase: RegisterDatabase
+  registerDatabase: RegisterDatabase,
+  filename = ":memory:"
 ): Promise<
   RealSqliteFixture & {
     readonly memoryEntryRepo: SqliteMemoryEntryRepo;
     readonly evidenceCapsuleRepo: SqliteEvidenceCapsuleRepo;
   }
 > {
-  const database = await createBaseRealSqliteDatabase(registerDatabase);
+  const database = await createBaseRealSqliteDatabase(registerDatabase, filename);
   const runRepo = new SqliteRunRepo(database);
 
-  await runRepo.create({
+  if (await runRepo.getById(REAL_SQLITE_TEST_RUN_ID) === null) await runRepo.create({
     run_id: REAL_SQLITE_TEST_RUN_ID,
     workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
     title: "run one",
@@ -85,7 +86,8 @@ export async function createRecallRealStorage(
 }
 
 export async function createRecallEmbeddingRealStorage(
-  registerDatabase: RegisterDatabase
+  registerDatabase: RegisterDatabase,
+  filename = ":memory:"
 ): Promise<
   RealSqliteFixture & {
     readonly memoryEntryRepo: SqliteMemoryEntryRepo;
@@ -94,7 +96,7 @@ export async function createRecallEmbeddingRealStorage(
     readonly eventLogRepo: SqliteEventLogRepo;
   }
 > {
-  const recallStorage = await createRecallRealStorage(registerDatabase);
+  const recallStorage = await createRecallRealStorage(registerDatabase, filename);
   return {
     ...recallStorage,
     memoryEmbeddingRepo: new SqliteMemoryEmbeddingRepo(recallStorage.database),
