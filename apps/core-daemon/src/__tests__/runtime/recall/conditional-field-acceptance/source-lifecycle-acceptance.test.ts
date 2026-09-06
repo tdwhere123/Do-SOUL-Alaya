@@ -1,66 +1,123 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { type StorageDatabase } from "@do-soul/alaya-storage";
 import { assertTargetConsumer } from "./consumer-contract.js";
 import {
-  coverageIndex,
-  sqliteCancelledWorker,
-  sqliteInterruptedZero,
-  sqliteMixedGeneration,
-  sqliteNormalEntryCounters,
-  sqliteTombstoneRestart,
-  stubCliRecall,
-  stubMcpRecall
-} from "./frozen-entry.js";
+  MEM,
+  WS,
+  defaultBudget,
+  openBoundSlice,
+  plantDeployment,
+  plantNeedles,
+  readersFor,
+  recallThroughHandler,
+  runRecall,
+  toConsumer,
+  tombstone
+} from "./planted-handler.js";
 
-describe("conditional-field source and worker acceptance fixtures", () => {
-  it("A09 interrupted zero rows stay open and resumable, not known-empty", () => {
-    const fixture = sqliteInterruptedZero();
-    expect(fixture.reader.ids).toEqual([]);
-    expect(fixture.reader.truncated).toBe(true);
-    expect(fixture.reader.available).toBe(true);
-    const index = coverageIndex("interrupted", "open");
+const databases = new Set<StorageDatabase>();
+
+afterEach(() => {
+  for (const database of databases) database.close();
+  databases.clear();
+});
+
+describe("conditional-field source and worker acceptance", () => {
+  it("A09 interrupted zero rows stay open and resumable, not known-empty", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const inner = readersFor(slice);
+    const interrupted = {
+      ...inner,
+      lexical: (input: Parameters<NonNullable<typeof inner.lexical>>[0]) =>
+        inner.lexical!({ ...input, limit: 0, nativeLimit: 0 })
+    };
+    const first = runRecall(slice, { readers: interrupted });
+    const resumed = runRecall(slice, { readers: interrupted, continuation: first.continuation });
+    expect(first.entries).toEqual([]);
+    expect(first.completeness.logical_index).not.toBe("complete");
+    expect(first.completeness.observed_coverage).not.toBe("exhausted_empty");
+    expect(resumed.completeness.observed_coverage).not.toBe("exhausted_empty");
+  });
+
+  it("A18 hides tombstones and keeps the current source after restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "conditional-field-accept-a18-"));
+    const filename = join(directory, "source.sqlite");
+    const first = await openBoundSlice((database) => databases.add(database), filename);
+    await plantDeployment(first);
+    tombstone(first, MEM.u);
+    const hidden = await recallThroughHandler(first, {
+      query: "yesterday failed deployment",
+      max_results: 800
+    });
+    expect(hidden.index.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
+    expect(first.memoryReader.source(WS, MEM.r).unavailable).toBe(false);
+    expect(first.indexProjection.freshness(WS, MEM.u).lexical).toBe("tombstoned");
+    first.database.close();
+    databases.delete(first.database);
+    const reopened = await openBoundSlice((database) => databases.add(database), filename);
+    const restarted = await recallThroughHandler(reopened, {
+      query: "yesterday failed deployment",
+      max_results: 800
+    });
+    expect(restarted.index.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
+    expect(reopened.memoryReader.source(WS, MEM.r).unavailable).toBe(false);
+    reopened.database.close();
+    databases.delete(reopened.database);
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("A18 mixed generations cannot resume an old complete page", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantNeedles(slice, 8, 911);
+    const first = await recallThroughHandler(slice, {
+      query: "needle",
+      max_results: 1
+    });
+    expect(first.index.continuation).not.toBeNull();
+    const mixed = runRecall(slice, {
+      query_text: "needle",
+      budget: defaultBudget({ page_budget: 1 }),
+      continuation: first.index.continuation,
+      snapshot_id: `sha256:${"e".repeat(64)}`
+    });
+    expect(mixed.completeness.logical_index).not.toBe("complete");
+    expect(mixed.completeness.observed_coverage).toBe("invalidated");
+    expect(mixed.continuation).toBeNull();
+  });
+
+  it("maps worker cancellation off the complete-empty path", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const index = runRecall(slice, { cancelled: true });
+    expect(index.completeness.observed_coverage).toBe("cancelled");
     expect(index.completeness.logical_index).not.toBe("complete");
-    expect(index.completeness.observed_coverage).not.toBe("exhausted_empty");
-    const resumed = coverageIndex("interrupted", "open");
-    expect(resumed.completeness.observed_coverage).toBe(index.completeness.observed_coverage);
+    expect(assertTargetConsumer({
+      schema_version: 1,
+      surface: "mcp",
+      bound: true,
+      note: "real producer",
+      query_id: index.query_id,
+      snapshot_id: index.snapshot_id,
+      result_version: index.result_version,
+      provider_calls: 0,
+      garden_enqueue: 0,
+      index
+    })).toEqual([]);
   });
 
-  it("A18 hides tombstones and keeps the current source after restart", () => {
-    const fixture = sqliteTombstoneRestart();
-    const live = fixture.rows.filter((row) => row.retention === "live").map((row) => row.object_id);
-    expect(live).not.toContain("u");
-    expect(live).toContain("r");
-    const restarted = { ...fixture, rows: fixture.rows.map((row) => ({ ...row })) };
-    expect(restarted.rows.find((row) => row.object_id === "u")?.retention).toBe("tombstoned");
-    expect(restarted.rows.find((row) => row.object_id === "r")?.source_revision).toBe("src-r");
-  });
-
-  it("A18 mixed generations cannot resume an old complete page", () => {
-    const fixture = sqliteMixedGeneration();
-    expect(new Set(fixture.rows.map((row) => row.generation_id)).size).toBeGreaterThan(1);
-    const index = coverageIndex("invalidated", "invalidated");
-    expect(index.completeness.logical_index).not.toBe("complete");
-    expect(index.continuation).toBeNull();
-  });
-
-  it("maps worker cancellation off the complete-empty path", () => {
-    const fixture = sqliteCancelledWorker();
-    expect(fixture.worker).toBe("cancelled");
-    const index = coverageIndex("cancelled", "open");
-    const mcp = stubMcpRecall(index);
-    expect(assertTargetConsumer(mcp)).toEqual([]);
-    expect(mcp.index.completeness.observed_coverage).toBe("cancelled");
-    expect(mcp.index.completeness.logical_index).not.toBe("complete");
-  });
-
-  it("normal-entry provider and garden counters stay at zero", () => {
-    const fixture = sqliteNormalEntryCounters();
-    const mcp = stubMcpRecall(coverageIndex("complete", "complete"));
-    const cli = stubCliRecall(mcp.index);
-    expect(fixture.provider_calls).toBe(0);
-    expect(fixture.garden_enqueue).toBe(0);
-    expect(mcp.provider_calls).toBe(0);
-    expect(cli.garden_enqueue).toBe(0);
-    expect(assertTargetConsumer(mcp)).toEqual([]);
-    expect(assertTargetConsumer(cli)).toEqual([]);
+  it("normal-entry provider and garden counters stay at zero", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const before = slice.pendingGarden().length;
+    const mcp = await recallThroughHandler(slice, {
+      query: "yesterday failed deployment",
+      max_results: 800
+    });
+    expect(slice.pendingGarden()).toHaveLength(before);
+    expect(assertTargetConsumer(toConsumer(mcp, "mcp"))).toEqual([]);
   });
 });

@@ -46,7 +46,7 @@ describe("conditional-field executeRecall assembly", () => {
   it("A14/A15 pages without a second selector and keeps continuation identity", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
-    const first = runRecall(slice, { page_budget: 2 });
+    const first = runRecall(slice, { page_budget: 1 });
     expect(first.continuation).not.toBeNull();
     expect(first.completeness.transport).toBe("partial");
     const second = runRecall(slice, {
@@ -196,7 +196,7 @@ describe("conditional-field executeRecall assembly", () => {
       workspaceId: WS,
       strategy: "chat",
       queryText: "yesterday failed deployment",
-      pageBudget: 2,
+      pageBudget: 1,
       interpretationClock: INTERPRETATION_CLOCK
     });
     const second = await service.recall({
@@ -204,7 +204,7 @@ describe("conditional-field executeRecall assembly", () => {
       workspaceId: WS,
       strategy: "chat",
       queryText: "yesterday failed deployment",
-      pageBudget: 2,
+      pageBudget: 1,
       interpretationClock: INTERPRETATION_CLOCK,
       continuation: first.index.continuation
     });
@@ -286,8 +286,14 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
           : {
             object_id: page.row.object_id,
             sourceRevision: page.row.sourceRevision,
-            observed_at: page.row.created_at,
-            content: page.row.content
+            observed_at: page.row.event_time_start ?? undefined,
+            content: page.row.content,
+            lifecycle_state: page.row.lifecycle_state,
+            retention_state: page.row.retention_state,
+            scope_class: page.row.scope_class,
+            evidence_refs: page.row.evidence_refs,
+            valid_from: page.row.valid_from,
+            valid_to: page.row.valid_to
           },
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
@@ -341,7 +347,14 @@ async function plantDeployment(slice: Awaited<ReturnType<typeof openSourceSlice>
     ["assert-r-c", MEM.r, MEM.c, "config_direct"],
     ["assert-r-s", MEM.r, MEM.s, "uses_service"],
     ["assert-s-h", MEM.s, MEM.h, "service_history"],
-    ["assert-r-u", MEM.r, MEM.u, INAPPLICABLE_KIND]
+    ["assert-r-u", MEM.r, MEM.u, INAPPLICABLE_KIND],
+    ["assert-fd-rl", MEM.r, MEM.l, "failed_deployment"],
+    ["assert-fd-rs", MEM.r, MEM.s, "failed_deployment"],
+    ["assert-ac-lc", MEM.l, MEM.c, "associated_config"],
+    ["assert-ac-rc", MEM.r, MEM.c, "associated_config"],
+    ["assert-ah-sh", MEM.s, MEM.h, "associated_history"],
+    ["assert-ah-lh", MEM.l, MEM.h, "associated_history"],
+    ["assert-fd-ls", MEM.l, MEM.s, "failed_deployment"]
   ] as const;
   for (const [index, [assertionId, sourceId, targetId, relationKind]] of edges.entries()) {
     await slice.admitRelation({

@@ -60,12 +60,18 @@ export function bindEngineState(state: BindableState): FieldEngineState {
   let exploration = charged.remaining_exploration;
   if (exploration < 1) remainingWork.push({ kind: "relaxation", units: 1 });
   else exploration -= 1;
+  const spooled = new Set(charged.identity_spool.map((identity) => productStateNodeId(identity)));
+  const liveSeeds = charged.seeds.filter((seed) => !spooled.has(productStateNodeId(seed.state)));
+  const liveTransitions = charged.transitions.filter((transition) =>
+    !spooled.has(productStateNodeId(transition.from))
+    && !spooled.has(productStateNodeId(transition.to))
+  );
   const binding = annotateBounds(
     bindMaxMinField({
       query_id: charged.query_id,
       snapshot_id: charged.snapshot_id,
-      seeds: charged.seeds,
-      transitions: charged.transitions,
+      seeds: liveSeeds,
+      transitions: liveTransitions,
       budget: charged.budget,
       facets: charged.facets
     }),
@@ -95,7 +101,17 @@ export function absorbObservations(
   const facets = [...state.facets];
   let remainingExploration = state.remaining_exploration;
   const remainingWork: RemainingWork[] = [...state.remaining_work];
-  absorbPageObservations(consumption.page.observations, priorIds, observations, seeds, guaranteedSeeds);
+  const effectSeedIds = new Set(
+    (consumption.effects ?? []).flatMap((effect) => effect.seed === undefined ? [] : [effect.observation_id])
+  );
+  absorbPageObservations(
+    consumption.page.observations,
+    priorIds,
+    observations,
+    seeds,
+    guaranteedSeeds,
+    effectSeedIds
+  );
   remainingExploration = absorbEffects(
     consumption,
     priorIds,
@@ -107,8 +123,11 @@ export function absorbObservations(
     remainingExploration,
     remainingWork
   );
-  const mergedSeeds = mergeSeeds(seeds);
+  const workUnits = consumption.work?.work_units ?? 0;
+  if (workUnits > remainingExploration) remainingWork.push({ kind: "state_create", units: workUnits - remainingExploration });
+  remainingExploration = Math.max(0, remainingExploration - workUnits);
   const mergedTransitions = mergeTransitions(transitions);
+  const mergedSeeds = pruneAssociatedSeeds(mergeSeeds(seeds), mergedTransitions);
   const { binding: _binding, closure: _closure, ...rest } = state;
   return {
     ...rest,
@@ -116,13 +135,14 @@ export function absorbObservations(
     remaining_work: remainingWork,
     observations: Object.freeze(observations),
     seeds: mergedSeeds,
-    guaranteed_seeds: mergeSeeds(guaranteedSeeds),
+    guaranteed_seeds: pruneAssociatedSeeds(mergeSeeds(guaranteedSeeds), mergedTransitions),
     transitions: mergedTransitions,
     guaranteed_transitions: mergeTransitions(guaranteedTransitions),
     facets: retainSamePathVectors(facets),
     seen_identities: collectIdentities(mergedSeeds, mergedTransitions, state.seen_identities),
     residuals: mergeResiduals(state.residuals, consumption.page),
-    last_observer_status: consumption.page.outcome.status
+    last_observer_status: consumption.page.outcome.status,
+    resume_cursors: consumption.resume_cursors ?? state.resume_cursors
   };
 }
 
@@ -151,11 +171,14 @@ function absorbPageObservations(
   priorIds: ReadonlySet<string>,
   observations: TypedObservation[],
   seeds: SeedActivation[],
-  guaranteedSeeds: SeedActivation[]
+  guaranteedSeeds: SeedActivation[],
+  effectSeedIds: ReadonlySet<string> = new Set()
 ): void {
   for (const observation of pageObservations) {
     if (priorIds.has(observation.observation_id)) continue;
     observations.push(observation);
+    if (effectSeedIds.has(observation.observation_id)) continue;
+    if (observation.association_milligrades === undefined) continue;
     const seed = seedFromObservation(observation, productStateFromObservation(observation));
     if (seed === undefined) continue;
     seeds.push(seed);
@@ -304,6 +327,19 @@ function residualUpper(residuals: readonly CoverageRegion[]): number {
     if (bound > upper) upper = bound;
   }
   return upper;
+}
+
+function pruneAssociatedSeeds(
+  seeds: readonly SeedActivation[],
+  transitions: readonly Transition[]
+): readonly SeedActivation[] {
+  // Lexical TOP on a path target would outrank the stored bottleneck.
+  const associated = new Set(
+    transitions
+      .filter((transition) => transition.applicable && transition.from.object_id !== transition.to.object_id)
+      .map((transition) => transition.to.object_id)
+  );
+  return Object.freeze(seeds.filter((seed) => !associated.has(seed.state.object_id)));
 }
 
 function mergeResiduals(

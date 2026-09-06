@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   QueryProgramSchema,
   type QueryProgram
 } from "@do-soul/alaya-protocol";
+import { type StorageDatabase } from "@do-soul/alaya-storage";
 import {
   cheapestCompleteWitness,
   enumerateSimplePaths,
@@ -36,13 +37,21 @@ import {
 import {
   compareObjectMilligrades,
   compareProducerField,
-  unboundPorts
+  plantBoundSlice
 } from "./frozen-ports.js";
+import { openBoundSlice } from "./bound-producer.js";
 import {
   admitRequestBudget,
   milligradeOf,
   projectOracleIndex
 } from "./oracle-index.js";
+
+const databases = new Set<StorageDatabase>();
+
+afterEach(() => {
+  for (const database of databases) database.close();
+  databases.clear();
+});
 
 describe("conditional-field independent field oracle", () => {
   it("A01 keeps yesterday on the failed deployment and last-week config at 850", () => {
@@ -120,7 +129,7 @@ describe("conditional-field independent field oracle", () => {
     expect(milligradeOf(field, "n20")).not.toBeLessThan(900);
   });
 
-  it("A05 agrees with the freeze milligrades and does not amplify cycles", () => {
+  it("A05 agrees with the freeze milligrades and does not amplify cycles", async () => {
     const world = deploymentWorld();
     const field = enumerateSimplePaths(world.seeds, world.edges);
     const counts = compareObjectMilligrades(field, DEPLOYMENT_MILLIGRADES);
@@ -132,8 +141,11 @@ describe("conditional-field independent field oracle", () => {
     expect(milligradeOf(cyclic, "a")).toBe(1000);
     expect(milligradeOf(cyclic, "b")).toBe(900);
     expect(milligradeOf(cyclic, "c")).toBe(800);
-    expect(compareProducerField(unboundPorts(), world, defaultBudget(), DEPLOYMENT_MILLIGRADES))
-      .toMatchObject({ skipped_environments: 1, mismatches: 0 });
+    const slice = await openBoundSlice((database) => databases.add(database));
+    const ports = await plantBoundSlice(slice);
+    const producer = compareProducerField(ports, world, defaultBudget(), DEPLOYMENT_MILLIGRADES);
+    expect(producer.skipped_environments).toBe(0);
+    expect(producer.mismatches).toBe(0);
   });
 
   it("A06 rejects coordinate-wise max under same_path", () => {

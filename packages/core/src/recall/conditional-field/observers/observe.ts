@@ -1,5 +1,6 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  isRelationValidityActiveAt,
   type CoverageRegion,
   type CoverageRegionKind,
   type Guard,
@@ -9,6 +10,7 @@ import {
   type ObserverStatus,
   type QueryInterpretation,
   type QueryProgram,
+  type RelationValidity,
   type SnapshotReadLease,
   type TypedObservation
 } from "@do-soul/alaya-protocol";
@@ -26,13 +28,21 @@ export type LexicalObserverPage = Readonly<{
   readonly truncated: boolean;
 }>;
 
+export type SourceObserverRow = Readonly<{
+  readonly object_id: string;
+  readonly sourceRevision: string;
+  readonly observed_at?: string;
+  readonly content?: string;
+  readonly lifecycle_state?: string;
+  readonly retention_state?: string | null;
+  readonly scope_class?: string;
+  readonly evidence_refs?: readonly string[];
+  readonly valid_from?: string | null;
+  readonly valid_to?: string | null;
+}>;
+
 export type SourceObserverPage = Readonly<{
-  readonly row: Readonly<{
-    readonly object_id: string;
-    readonly sourceRevision: string;
-    readonly observed_at?: string;
-    readonly content?: string;
-  }> | null;
+  readonly row: SourceObserverRow | null;
   readonly rowsRead: number;
   readonly bytesRead: number;
   readonly unavailable: boolean;
@@ -44,6 +54,10 @@ export type RelationObserverRow = Readonly<{
   readonly targetObjectId: string;
   readonly resultObjectId: string;
   readonly predicate: string;
+  readonly validity?: RelationValidity;
+  readonly evidenceRefs?: readonly string[];
+  readonly resolutionKind?: string | null;
+  readonly resolvedAt?: string | null;
 }>;
 
 export type RelationObserverPage = Readonly<{
@@ -118,6 +132,7 @@ export type ObserveConditionalFieldInput = Readonly<{
   readonly anchor_object_ids?: readonly string[];
   readonly object_observed_at?: Readonly<Record<string, string>>;
   readonly page_limit?: number;
+  readonly as_of?: string;
 }>;
 
 export type ObserverActionResult = Readonly<{
@@ -219,13 +234,14 @@ function observeRelation(input: ObserveConditionalFieldInput): ObserverActionRes
     nativeLimit: input.action.work_limit,
     afterAssertionId: input.cursor.committed_through
   });
+  const rows = page.observations.filter((row) => relationRowEligible(input, row));
   return collectObserved(input, {
-    identities: page.observations.map((row) => row.assertionId),
+    identities: rows.map((row) => row.assertionId),
     truncated: page.truncated,
     nativeVisits: page.nativeVisits,
     bytesRead: page.bytesRead,
     identityKind: "assertion",
-    rows: page.observations
+    rows
   });
 }
 
@@ -297,10 +313,26 @@ function prepareObservation(
   if (native.identityKind === "assertion") {
     const row = native.rows?.[index];
     if (row === undefined) return { observation: null, extraWork: 0, extraBytes: 0 };
+    const source = input.readers.source;
+    if (source === undefined) {
+      return {
+        observation: maybeObservation(input, row.targetObjectId, row.assertionId, identity),
+        extraWork: 0,
+        extraBytes: 0
+      };
+    }
+    const page = source({ workspaceId: input.workspace_id, objectId: row.targetObjectId });
     return {
-      observation: maybeObservation(input, row.targetObjectId, row.assertionId, identity),
-      extraWork: 0,
-      extraBytes: 0
+      observation: maybeObservation(
+        input,
+        row.targetObjectId,
+        row.assertionId,
+        identity,
+        page.row?.observed_at,
+        page.row ?? undefined
+      ),
+      extraWork: Math.max(1, page.rowsRead),
+      extraBytes: page.bytesRead
     };
   }
   if (native.identityKind === "embedding") {
@@ -330,9 +362,21 @@ function hydrateSeedObservation(
     };
   }
   const page = source({ workspaceId: input.workspace_id, objectId });
-  const revision = page.row?.sourceRevision ?? objectId;
+  if (page.row !== null && !sourceRowEligible(input, page.row)) {
+    return { observation: null, extraWork: Math.max(1, page.rowsRead), extraBytes: page.bytesRead };
+  }
+  if (page.row === null && (input.authorized_scopes ?? []).length > 0) {
+    return { observation: null, extraWork: Math.max(1, page.rowsRead), extraBytes: page.bytesRead };
+  }
   return {
-    observation: maybeObservation(input, objectId, revision, objectId, page.row?.observed_at),
+    observation: maybeObservation(
+      input,
+      objectId,
+      page.row?.sourceRevision ?? objectId,
+      objectId,
+      page.row?.observed_at,
+      page.row ?? undefined
+    ),
     extraWork: Math.max(1, page.rowsRead),
     extraBytes: page.bytesRead
   };
@@ -343,9 +387,11 @@ function maybeObservation(
   objectId: string,
   sourceRevision: string,
   observationKey: string,
-  observedAt?: string
+  observedAt?: string,
+  sourceRow?: SourceObserverRow
 ): TypedObservation | null {
-  const applicability = applicabilityFor(input, objectId, observedAt);
+  if (!sourceRowEligible(input, sourceRow)) return null;
+  const applicability = applicabilityFor(input, objectId, observedAt, sourceRow);
   if (applicability.verdict === "false") return null;
   return {
     schema_version: SCHEMA,
@@ -359,15 +405,21 @@ function maybeObservation(
 function applicabilityFor(
   input: ObserveConditionalFieldInput,
   objectId: string,
-  observedAt?: string
+  observedAt?: string,
+  sourceRow?: SourceObserverRow
 ): Guard {
   const guards = collectGuards(input.query.program);
   const authorization = guards.find((guard) => guard.kind === "authorization");
+  const scopes = input.authorized_scopes ?? [];
   if (authorization !== undefined) {
     const scope = authorization.authorization_scope;
-    const allowed = scope === undefined
-      || (input.authorized_scopes ?? []).includes(scope);
+    const allowed = scope === undefined || scopes.includes(scope);
     if (!allowed) return { ...authorization, verdict: "false" };
+  } else if (scopes.length > 0) {
+    const scopeClass = sourceRow?.scope_class;
+    if (scopeClass === undefined || !scopes.includes(scopeClass)) {
+      return { schema_version: SCHEMA, kind: "authorization", verdict: "false" };
+    }
   }
   const timed = guards.find((guard) => guard.kind === "interval_relation");
   if (timed === undefined || !appliesTimeGuard(input, timed, objectId)) {
@@ -508,4 +560,33 @@ function emptyWork(nativeVisits: number): ObserverWorkReceipt {
 
 function pageLimit(input: ObserveConditionalFieldInput): number {
   return Math.min(input.page_limit ?? input.action.work_limit, input.action.work_limit);
+}
+
+function sourceRowEligible(
+  input: ObserveConditionalFieldInput,
+  row: SourceObserverRow | undefined
+): boolean {
+  if (row === undefined) {
+    return (input.authorized_scopes ?? []).length === 0;
+  }
+  if (row.lifecycle_state !== undefined && row.lifecycle_state !== "active") return false;
+  if (row.retention_state === "tombstoned") return false;
+  const scopes = input.authorized_scopes ?? [];
+  if (scopes.length > 0 && (row.scope_class === undefined || !scopes.includes(row.scope_class))) {
+    return false;
+  }
+  return true;
+}
+
+function relationRowEligible(
+  input: ObserveConditionalFieldInput,
+  row: RelationObserverRow
+): boolean {
+  if (row.resolutionKind === "retracted" || row.resolutionKind === "expired" || row.resolutionKind === "contradicted") {
+    return false;
+  }
+  if (row.validity === undefined) return false;
+  const asOf = input.as_of ?? input.query.interpretation_clock;
+  if (asOf === undefined) return true;
+  return isRelationValidityActiveAt(row.validity, asOf, new Set());
 }

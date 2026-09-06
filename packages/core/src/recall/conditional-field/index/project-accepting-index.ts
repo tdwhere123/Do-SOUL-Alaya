@@ -18,6 +18,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { compareText } from "../../../shared/compare-text.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
+import { facetPathId } from "../engine/path-composition.js";
 import {
   admitIndexBudget,
   completenessForInterpretationStatus,
@@ -48,9 +49,11 @@ export type AcceptingProjectionInput = Readonly<{
   readonly interpretation_status?: QueryInterpretationStatus;
   readonly relation_facet_modes?: ReadonlyMap<string, FacetMode>;
   readonly expand_payload?: boolean;
+  readonly resume_cursors?: Readonly<Record<string, string | null>>;
 }>;
 
 const OFFSET_CURSOR = /^offset-(\d+)$/u;
+const RESUME_CURSOR = /^o(\d+)(?:\|(.*))?$/u;
 const REPRESENTATION_POLICY = "construct_index_then_page_then_payload" as const;
 
 export function evaluateSamePathPredicate(
@@ -140,10 +143,9 @@ function pageAcceptingIndex(
 }
 
 function acceptingEntries(input: AcceptingProjectionInput): IndexEntry[] {
-  const explanationIds = explanationIdsForSupport(input.support, input.budget.page_budget, input.expand_payload !== false);
   const entries: IndexEntry[] = [];
   for (const value of input.snapshot.values) {
-    const entry = indexEntryForValue(value, input, explanationIds);
+    const entry = indexEntryForValue(value, input);
     if (entry !== null) entries.push(entry);
   }
   return entries;
@@ -151,8 +153,7 @@ function acceptingEntries(input: AcceptingProjectionInput): IndexEntry[] {
 
 function indexEntryForValue(
   value: FieldValue,
-  input: AcceptingProjectionInput,
-  explanationIds: readonly string[]
+  input: AcceptingProjectionInput
 ): IndexEntry | null {
   if (!value.accepting) return null;
   if (value.milligrades <= input.view.threshold_milligrades) return null;
@@ -168,17 +169,29 @@ function indexEntryForValue(
     role,
     association_milligrades: value.milligrades,
     claim: input.claims?.get(value.state.object_id) ?? "unknown",
-    explanation_ids: explanationIds
+    explanation_ids: explanationIdsForEntry(value, input)
   };
 }
 
 function facetsAccept(value: FieldValue, input: AcceptingProjectionInput): boolean {
   if (input.snapshot.facets.length === 0) return true;
+  const vectors = facetsForCandidate(value, input);
+  if (vectors.length === 0) return false;
   return evaluateFacetPredicate(
     facetModeForValue(value, input),
-    input.snapshot.facets,
+    vectors,
     input.view.threshold_milligrades
   );
+}
+
+function facetsForCandidate(
+  value: FieldValue,
+  input: AcceptingProjectionInput
+): readonly FacetVector[] {
+  const facets = input.snapshot.facets;
+  if (facets.length === 0) return [];
+  const identity = facetPathId(value.state);
+  return facets.filter((vector) => vector.path_id === identity);
 }
 
 function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): FacetMode {
@@ -190,19 +203,27 @@ function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): 
   return input.view.facet_mode;
 }
 
-function explanationIdsForSupport(
-  support: readonly SupportRecord[] | undefined,
-  pageBudget: number,
-  expandPayload: boolean
+function explanationIdsForEntry(
+  value: FieldValue,
+  input: AcceptingProjectionInput
 ): readonly string[] {
-  if (!expandPayload || support === undefined) return [];
+  if (input.expand_payload === false || input.support === undefined) return [];
   const ids: string[] = [];
-  for (const record of support) {
-    for (const witness of selectFeasibleWitnesses(record.witnesses, pageBudget)) {
+  for (const record of input.support) {
+    if (!supportBelongsTo(record, value)) continue;
+    for (const witness of selectFeasibleWitnesses(record.witnesses, input.budget.page_budget)) {
       ids.push(witness.witness_id);
     }
   }
   return ids;
+}
+
+function supportBelongsTo(
+  record: SupportRecord,
+  value: FieldValue
+): boolean {
+  const named = [record.proposition_id, ...record.witnesses.flatMap((witness) => [...witness.premises])];
+  return named.includes(value.state.object_id) || named.includes(value.state.hypothesis_id);
 }
 
 function omittedPayload(
@@ -239,6 +260,8 @@ function resolvePageOffset(input: AcceptingProjectionInput, total: number): numb
   if (input.page_offset !== undefined) return Math.max(0, input.page_offset);
   const cursor = input.prior_continuation?.cursor;
   if (cursor === undefined) return 0;
+  const resume = RESUME_CURSOR.exec(cursor);
+  if (resume !== null) return Number(resume[1]);
   const matched = OFFSET_CURSOR.exec(cursor);
   if (matched === null) return total;
   return Number(matched[1]);
@@ -248,7 +271,7 @@ function continuationCursorInvalid(input: AcceptingProjectionInput): boolean {
   if (input.page_offset !== undefined) return false;
   const cursor = input.prior_continuation?.cursor;
   if (cursor === undefined) return false;
-  return !OFFSET_CURSOR.test(cursor);
+  return !OFFSET_CURSOR.test(cursor) && !RESUME_CURSOR.test(cursor);
 }
 
 function nextContinuation(
@@ -256,7 +279,12 @@ function nextContinuation(
   remaining: number,
   nextOffset: number
 ): Continuation | null {
-  if (remaining <= 0 || input.expires_at === undefined) return null;
+  if (input.expires_at === undefined) return null;
+  const observerOpen = input.observer?.outcome.status === "open"
+    || input.observer?.outcome.status === "interrupted";
+  if (remaining <= 0 && !observerOpen) return null;
+  const cursor = encodeResumeCursor(nextOffset, input.resume_cursors);
+  if (cursor === null) return null;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     continuation_id: `page-${nextOffset}`,
@@ -264,8 +292,23 @@ function nextContinuation(
     snapshot_id: input.snapshot_id,
     result_version: input.result_version,
     expires_at: input.expires_at,
-    cursor: `offset-${nextOffset}`
+    cursor
   };
+}
+
+function encodeResumeCursor(
+  offset: number,
+  resume: Readonly<Record<string, string | null>> | undefined
+): string | null {
+  const parts = [`o${String(offset)}`];
+  if (resume !== undefined) {
+    for (const [key, value] of Object.entries(resume)) {
+      if (value === null) continue;
+      parts.push(`${key}:${value}`);
+    }
+  }
+  const cursor = parts.join("|");
+  return cursor.length >= 1 && cursor.length <= 256 ? cursor : null;
 }
 
 function representationDecision(pageBudget: number): InformationIndex["representation"] {

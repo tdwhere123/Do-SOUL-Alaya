@@ -36,25 +36,8 @@ WHERE a.workspace_id = ? AND lower(json_extract(a.anchors_json, '$.source_anchor
 ORDER BY a.assertion_id, e.evidence_id
 LIMIT ?`;
 
-// Candidate read access is explicitly prepared at composition, never as a side
-// effect of Recall. The index uses the same expression as the scoped predicate.
-let nextReaderId = 0;
-
 export class SqliteRelationRecallReader {
-  private readonly visitFunction = `recall_assertion_visit_${++nextReaderId}`;
-  private readonly exhausted = new Error("assertion native visit limit exhausted");
-  private readonly visitState = new Map<number, { visits: number; bytes: number; limit: number }>();
-  private nextVisitCall = 0;
-
-  public constructor(private readonly db: StorageDatabase) {
-    db.connection.function(this.visitFunction, (assertionId: string, evidenceId: string, callId: number) => {
-      const state = this.visitState.get(callId);
-      if (state === undefined) throw new Error("assertion visit call is missing");
-      state.visits += 1; state.bytes += Buffer.byteLength(assertionId + evidenceId, "utf8");
-      if (state.visits >= state.limit) throw this.exhausted;
-      return 1;
-    });
-  }
+  public constructor(private readonly db: StorageDatabase) {}
 
   public prepareIndex(): void {
     this.db.connection.exec(RELATION_RECALL_INDEX_SQL);
@@ -75,42 +58,53 @@ export class SqliteRelationRecallReader {
     nativeVisits: number; nativeBytes: number; rawRows: readonly Record<string, unknown>[]; observations: readonly RecallAssertionObservation[]; rowsRead: number; bytesRead: number; truncated: boolean;
   }> {
     if (!Number.isSafeInteger(limit) || limit < 0 || limit > 512 || !Number.isSafeInteger(nativeLimit) || nativeLimit < 0 || nativeLimit > 512) throw new Error("invalid assertion row limit");
-    if (!limit || !nativeLimit) return { nativeVisits: 0, nativeBytes: 0, rawRows: [], observations: [], rowsRead: 0, bytesRead: 0, truncated: true };
+    const fetchLimit = Math.min(limit, nativeLimit);
+    if (!fetchLimit) {
+      return Object.freeze({
+        nativeVisits: 0, nativeBytes: 0, rawRows: [], observations: [], rowsRead: 0, bytesRead: 0, truncated: true
+      });
+    }
     const sql = subject === null ? READ_SQL.replace("idx_relation_recall_subject", "idx_relation_recall_predicate")
       .replace(" AND lower(json_extract(a.anchors_json, '$.source_anchor.object_id')) = ?", "") : READ_SQL;
-    const callId = ++this.nextVisitCall;
-    const state = { visits: 0, bytes: 0, limit: nativeLimit };
-    this.visitState.set(callId, state);
     const cursor = relationResumeParams(afterAssertionId);
-    const boundedSql = sql
-      .replace(
-        "AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)",
-        cursor.sql
-      )
-      .replace("ORDER BY a.assertion_id", `AND ${this.visitFunction}(a.assertion_id, e.evidence_id, ?) ORDER BY a.assertion_id`);
-    const tail = [...cursor.params, callId, limit];
+    const boundedSql = sql.replace(
+      "AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)",
+      cursor.sql
+    );
+    const tail = [...cursor.params, fetchLimit + 1];
     const parameters = subject === null ? [workspaceId, predicate, ...tail] : [workspaceId, subject.toLowerCase(), predicate, ...tail];
-    let rows: readonly Record<string, unknown>[] = [];
-    let exhausted = false;
-    try {
-      rows = this.db.connection.prepare(boundedSql).all(...parameters) as readonly Record<string, unknown>[];
-    } catch (error) {
-      if (error !== this.exhausted) throw error;
-      exhausted = true;
-    } finally {
-      this.visitState.delete(callId);
-    }
-    const truncated = exhausted || rows.length === limit;
-    return Object.freeze({ nativeVisits: state.visits, nativeBytes: state.bytes, rawRows: rows,
-      observations: this.decode(rows, truncated), rowsRead: rows.length,
-      bytesRead: exhausted ? 0 : Buffer.byteLength(JSON.stringify(rows), "utf8"), truncated });
+    const fetched = this.db.connection.prepare(boundedSql).all(...parameters) as readonly Record<string, unknown>[];
+    const truncated = fetched.length > fetchLimit;
+    const pageRows = truncated ? fetched.slice(0, fetchLimit) : fetched;
+    const peek = truncated ? fetched[fetchLimit] : undefined;
+    const trailingId = pageRows.at(-1)?.assertion_id;
+    const incompleteId = peek !== undefined && trailingId !== undefined && peek.assertion_id === trailingId
+      ? String(trailingId)
+      : null;
+    const bytesRead = Buffer.byteLength(JSON.stringify(pageRows), "utf8");
+    return Object.freeze({
+      nativeVisits: fetched.length,
+      nativeBytes: bytesRead,
+      rawRows: pageRows,
+      observations: this.decode(pageRows, incompleteId),
+      rowsRead: pageRows.length,
+      bytesRead,
+      truncated
+    });
   }
 
-  public decode(rows: readonly Record<string, unknown>[], truncated: boolean): readonly RecallAssertionObservation[] {
-    const incompleteId = truncated ? rows.at(-1)?.assertion_id : null;
+  public decode(
+    rows: readonly Record<string, unknown>[],
+    incompleteId: string | boolean | null
+  ): readonly RecallAssertionObservation[] {
+    const skipId = incompleteId === true
+      ? rows.at(-1)?.assertion_id ?? null
+      : incompleteId === false || incompleteId === null
+        ? null
+        : incompleteId;
     const grouped = new Map<string, RecallAssertionObservation>();
     for (const row of rows) {
-      if (row.assertion_id === incompleteId) continue;
+      if (row.assertion_id === skipId) continue;
       const id = String(row.assertion_id);
       const prior = grouped.get(id);
       const evidenceRefs = [...(prior?.evidenceRefs ?? []), String(row.evidence_id)];

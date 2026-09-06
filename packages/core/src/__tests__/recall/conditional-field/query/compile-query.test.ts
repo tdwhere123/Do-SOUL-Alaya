@@ -46,7 +46,8 @@ describe("conditional-field query compiler", () => {
   it("A01 keeps yesterday on the anchor and admits last-week associated config", () => {
     const interpretation = compileOrdinary("yesterday's failed deployment");
     expect(interpretation.status).toBe("resolved");
-    expect(interpretation.query_id).toBe(SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID);
+    expect(interpretation.query_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(interpretation.query_id).not.toBe(SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID);
     expect(interpretation.time_window).toEqual({ start: YESTERDAY_START, end: YESTERDAY_END });
     const relations = collectRelations(interpretation.program);
     const anchor = relations.find((relation) => relation.relation_kind === "failed_deployment");
@@ -99,24 +100,53 @@ describe("conditional-field query compiler", () => {
   it("does not compile owner or channel phrasing as a relation catalog", () => {
     const owns = compileOrdinary("who owns this channel");
     expect(owns.status).toBe("resolved");
-    expect(collectRelations(owns.program).map((relation) => relation.relation_kind))
-      .toEqual(["stored_relation"]);
+    expect(collectRelations(owns.program)).toEqual([]);
     const wrapped = compileOrdinary("who owns yesterday's failed deployment");
     expect(wrapped.status).toBe("resolved");
     expect(collectRelations(wrapped.program).map((relation) => relation.relation_kind).sort())
-      .toEqual(["associated_config", "associated_history", "failed_deployment"]);
+      .toEqual(["associated_config", "associated_history", "failed_deployment", "uses_service"]);
   });
 
   it("compiles ordinary recall outside failed-deployment as lexical seed plus stored-relation adjacency", () => {
     for (const text of ["deployment rules", "pnpm workspace commands", "xyzzy unrelated request"]) {
       const interpretation = compileOrdinary(text);
       expect(interpretation.status).toBe("resolved");
-      expect(collectRelations(interpretation.program).map((relation) => relation.relation_kind))
-        .toEqual(["stored_relation"]);
+      expect(interpretation.program.kind).toBe("epsilon");
+      expect(collectRelations(interpretation.program)).toEqual([]);
       expect(interpretation.query_id).not.toBe("unsupported");
     }
     expect(compileOrdinary("deployment rules").query_id)
       .not.toBe(compileOrdinary("pnpm workspace commands").query_id);
+  });
+
+  it("binds query_id to interpretation clock so midnight cannot reuse an identity", () => {
+    const evening = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "yesterday failed deployment",
+      interpretation_clock: "2026-09-06T23:59:59.000Z"
+    });
+    const morning = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "yesterday failed deployment",
+      interpretation_clock: "2026-09-07T00:00:01.000Z"
+    });
+    expect(evening.query_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(morning.query_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(evening.query_id).not.toBe(morning.query_id);
+    expect(evening.time_window).not.toEqual(morning.time_window);
+    const explicit = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "yesterday failed deployment",
+      interpretation_clock: "2026-09-07T00:00:01.000Z",
+      query_id: "caller-query"
+    });
+    expect(explicit.query_id).toBe("caller-query");
   });
 
   it("A03 keeps epsilon distinct from empty and does not rewrite grammar", () => {

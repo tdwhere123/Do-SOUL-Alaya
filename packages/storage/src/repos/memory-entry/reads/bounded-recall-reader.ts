@@ -7,23 +7,8 @@ import { MEMORY_ENTRY_SELECT_COLUMNS, parseMemoryEntryRow, type MemoryEntryRow }
 const SOURCE_BYTES_SQL = MEMORY_ENTRY_SELECT_COLUMNS.split(",").map((column) =>
   `COALESCE(length(CAST(${column.trim()} AS BLOB)), 0)`).join(" + ");
 
-let nextReaderId = 0;
-
 export class SqliteMemoryRecallReader {
-  private readonly visitFunction = `recall_lexical_visit_${++nextReaderId}`;
-  private readonly visitState = new Map<number, { visits: number; bytes: number; limit: number }>();
-  private nextVisitCall = 0;
-  private readonly exhausted = new Error("lexical native visit limit exhausted");
-
-  public constructor(private readonly db: StorageDatabase) {
-    db.connection.function(this.visitFunction, (id: string, callId: number) => {
-      const state = this.visitState.get(callId);
-      if (state === undefined) throw new Error("lexical visit call is missing");
-      state.visits += 1; state.bytes += Buffer.byteLength(id, "utf8");
-      if (state.visits >= state.limit) throw this.exhausted;
-      return 1;
-    });
-  }
+  public constructor(private readonly db: StorageDatabase) {}
 
   public prepareIndex(): void { this.db.connection.exec(MEMORY_SOURCE_REVISION_INDEX_SQL); }
 
@@ -58,39 +43,36 @@ export class SqliteMemoryRecallReader {
     if (!Number.isSafeInteger(limit) || limit < 0 || limit > 512 ||
         !Number.isSafeInteger(nativeLimit) || nativeLimit < 0 || nativeLimit > 512) throw new Error("invalid lexical row/work limit");
     const tokens = tokenizeFtsQuery(query);
-    const callId = ++this.nextVisitCall;
-    const state = { visits: 0, bytes: 0, limit: nativeLimit };
-    this.visitState.set(callId, state);
-    let rows: { object_id: string }[] = [];
-    let exhausted = !limit || !nativeLimit;
-    let completed = false;
-    try {
-      if (!exhausted && tokens.length) {
-        try {
-          // Native visits stop the sort's input before an unbounded matching set can
-          // be consumed. An interrupted ordering has no canonical winner to emit.
-          // Resume is object_id > committed_through so an unobserved probe is retried.
-          rows = this.db.connection.prepare(`SELECT object_id
-            FROM memory_content_fts_porter WHERE workspace_id = ? AND memory_content_fts_porter MATCH ?
-            AND ${this.visitFunction}(object_id, ?) AND object_id > ? ORDER BY object_id LIMIT ?`)
-            .all(
-              workspaceId,
-              buildWorkspaceScopedFtsMatch(workspaceId, tokens),
-              callId,
-              afterObjectId ?? "",
-              limit
-            ) as typeof rows;
-          completed = true;
-        } catch (error) {
-          if (error !== this.exhausted) throw error;
-          exhausted = true;
-        }
-      }
-    } finally {
-      this.visitState.delete(callId);
+    const fetchLimit = Math.min(limit, nativeLimit);
+    if (!fetchLimit || tokens.length === 0) {
+      return {
+        ids: [],
+        rows: [],
+        rowsRead: 0,
+        bytesRead: 0,
+        nativeVisits: 0,
+        nativeBytes: 0,
+        truncated: fetchLimit === 0
+      };
     }
-    return { ids: rows.map((row) => row.object_id), rows, rowsRead: rows.length,
-      bytesRead: completed ? Buffer.byteLength(JSON.stringify(rows), "utf8") : 0, nativeVisits: state.visits,
-      nativeBytes: state.bytes, truncated: exhausted || rows.length === limit };
+    const rows = this.db.connection.prepare(`SELECT object_id
+      FROM memory_content_fts_porter WHERE workspace_id = ? AND memory_content_fts_porter MATCH ?
+      AND object_id > ? ORDER BY object_id LIMIT ?`)
+      .all(
+        workspaceId,
+        buildWorkspaceScopedFtsMatch(workspaceId, tokens),
+        afterObjectId ?? "",
+        fetchLimit
+      ) as { object_id: string }[];
+    const bytesRead = Buffer.byteLength(JSON.stringify(rows), "utf8");
+    return {
+      ids: rows.map((row) => row.object_id),
+      rows,
+      rowsRead: rows.length,
+      bytesRead,
+      nativeVisits: rows.length,
+      nativeBytes: bytesRead,
+      truncated: rows.length === fetchLimit
+    };
   }
 }

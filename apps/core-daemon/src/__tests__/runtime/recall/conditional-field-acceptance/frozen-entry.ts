@@ -53,23 +53,12 @@ export type AcceptanceFixture = Readonly<{
   readonly garden_enqueue: number;
 }>;
 
-export function stubMcpRecall(index: InformationIndex): TargetConsumerPayload {
-  return {
-    schema_version: 1,
-    surface: "mcp",
-    bound: false,
-    note: CONTRACT_ONLY_UNTIL_C07,
-    query_id: index.query_id,
-    snapshot_id: index.snapshot_id,
-    result_version: index.result_version,
-    provider_calls: 0,
-    garden_enqueue: 0,
-    index
-  };
+export function stubMcpRecall(_index: InformationIndex): TargetConsumerPayload {
+  throw new Error("stubMcpRecall cannot close production rows");
 }
 
-export function stubCliRecall(index: InformationIndex): TargetConsumerPayload {
-  return { ...stubMcpRecall(index), surface: "cli" };
+export function stubCliRecall(_index: InformationIndex): TargetConsumerPayload {
+  throw new Error("stubCliRecall cannot close production rows");
 }
 
 export function deploymentEntries(): readonly IndexEntry[] {

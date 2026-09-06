@@ -185,8 +185,8 @@ describe("conditional-field production information index", () => {
 
   it("A06 rejects coordinate-wise max under same_path and honors a relation facet override", () => {
     const vectors: FacetVector[] = [
-      { schema_version: 1, path_id: "p1", coordinates: [900, 200] },
-      { schema_version: 1, path_id: "p2", coordinates: [200, 900] }
+      { schema_version: 1, path_id: "c:h0:default", coordinates: [900, 200] },
+      { schema_version: 1, path_id: "c", coordinates: [200, 900] }
     ];
     expect(evaluateFacetPredicate("same_path", vectors, 800)).toBe(false);
     expect(evaluateFacetPredicate("independent", vectors, 800)).toBe(true);
@@ -201,10 +201,10 @@ describe("conditional-field production information index", () => {
       view: defaultView({ facet_mode: "independent", threshold_milligrades: 800 }),
       roles: new Map([["c", "associated"]])
     }));
-    expect(independent.entries).toHaveLength(1);
+    expect(independent.entries).toEqual([]);
     const overridden = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([fieldValue("r", 900), fieldValue("c", 900)], {
-        facets: vectors,
+        facets: [{ schema_version: 1, path_id: "c:h0:default", coordinates: [900] }],
         retained_transitions: [transition("r", "c", "associated_config", 900)]
       }),
       view: defaultView({ facet_mode: "same_path", threshold_milligrades: 800 }),
@@ -214,22 +214,53 @@ describe("conditional-field production information index", () => {
     expect(overridden.entries.some((entry) => entry.object_id === "c")).toBe(true);
   });
 
+  it("A06 evaluates same_path facets per candidate, not the global bag", () => {
+    const weak = { schema_version: 1, path_id: "a:h0:default", coordinates: [900, 200] } as const;
+    const strong = { schema_version: 1, path_id: "b:h0:default", coordinates: [900, 900] } as const;
+    const index = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([
+        fieldValue("a", 900),
+        fieldValue("b", 900)
+      ], { facets: [weak, strong] }),
+      view: defaultView({ facet_mode: "same_path", threshold_milligrades: 800 }),
+      roles: new Map([["a", "associated"], ["b", "associated"]])
+    }));
+    expect(index.entries.map((entry) => entry.object_id)).toEqual(["b"]);
+    const dumped = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([
+        fieldValue("a", 900, { hypothesis_id: "h1" }),
+        fieldValue("b", 900, { hypothesis_id: "h2" })
+      ]),
+      support: [
+        supportRecord([
+          { schema_version: 1, witness_id: "for-a", premises: ["a"], cost: 1, complete: true }
+        ])
+      ],
+      roles: new Map([["a", "associated"], ["b", "associated"]])
+    }));
+    expect(dumped.entries.find((entry) => entry.object_id === "a")?.explanation_ids).toEqual(["for-a"]);
+    expect(dumped.entries.find((entry) => entry.object_id === "b")?.explanation_ids).toEqual([]);
+  });
+
   it("keeps a cheaper complete witness and reports omitted payload without claiming transport failure", () => {
     const witnesses: Witness[] = [
-      { schema_version: 1, witness_id: "expensive", premises: ["a"], cost: 1200, complete: true },
-      { schema_version: 1, witness_id: "cheap", premises: ["b"], cost: 400, complete: true }
+      { schema_version: 1, witness_id: "expensive", premises: ["r"], cost: 1200, complete: true },
+      { schema_version: 1, witness_id: "cheap", premises: ["r"], cost: 400, complete: true }
     ];
     expect(selectFeasibleWitnesses(witnesses, 800).map((witness) => witness.witness_id))
       .toEqual(["cheap"]);
     const withCheap = projectAcceptingIndex(deploymentInput({
       support: [supportRecord(witnesses)]
     }));
-    expect(withCheap.entries[0]?.explanation_ids).toEqual(["cheap"]);
+    expect(withCheap.entries.find((entry) => entry.object_id === "r")?.explanation_ids)
+      .toEqual(["cheap"]);
+    expect(withCheap.entries.find((entry) => entry.object_id === "c")?.explanation_ids)
+      .toEqual([]);
     expect(withCheap.completeness.payload).toBe("complete");
     const omitted = projectAcceptingIndex(deploymentInput({
       budget: defaultBudget({ page_budget: 100 }),
       support: [supportRecord([
-        { schema_version: 1, witness_id: "too-big", premises: ["a"], cost: 400, complete: true }
+        { schema_version: 1, witness_id: "too-big", premises: ["r"], cost: 400, complete: true }
       ])]
     }));
     expect(omitted.completeness.logical_index).toBe("complete");

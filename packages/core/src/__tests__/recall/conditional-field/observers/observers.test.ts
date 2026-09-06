@@ -74,11 +74,11 @@ describe("conditional-field resumable observers", () => {
       action: action("seed", 1),
       seed_query: "needle"
     }));
-    expect(during.page.observations).toEqual([]);
-    expect(during.page.outcome.status).toBe("interrupted");
+    expect(during.page.observations).toHaveLength(1);
+    expect(during.page.outcome.status).toBe("open");
     expect(during.work.native_visits).toBe(1);
     expect(during.work.work_units).toBeGreaterThan(0);
-    expect(during.page.cursor.committed_through).toBeNull();
+    expect(during.page.cursor.committed_through).toBe(during.page.observations[0]?.object_id);
   });
 
   it("exhausts an empty authorized seed domain and keeps unopened channels", async () => {
@@ -337,7 +337,18 @@ function readersFor(
       return {
         row: page.row === null
           ? null
-          : { object_id: page.row.object_id, sourceRevision: page.row.sourceRevision },
+          : {
+            object_id: page.row.object_id,
+            sourceRevision: page.row.sourceRevision,
+            observed_at: page.row.event_time_start ?? undefined,
+            content: page.row.content,
+            lifecycle_state: page.row.lifecycle_state,
+            retention_state: page.row.retention_state,
+            scope_class: page.row.scope_class,
+            evidence_refs: page.row.evidence_refs,
+            valid_from: page.row.valid_from,
+            valid_to: page.row.valid_to
+          },
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
         unavailable: page.unavailable

@@ -1,17 +1,14 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  MILLIGRADE_TOP,
+  isPathActiveForRecall,
   type CoverageRegion,
   type IndexRole,
   type ObserverCursor,
   type ObserverStatus,
   type QueryInterpretation,
-  type SeedActivation,
   type SnapshotReadLease,
-  type Transition,
   type TypedObservation
 } from "@do-soul/alaya-protocol";
-import { collectRelations } from "../conditional-field/query/compile-query.js";
 import {
   observeConditionalField,
   startObserverCursor,
@@ -27,9 +24,13 @@ import {
   type FieldObservationEffect
 } from "../conditional-field/engine/field-engine.js";
 import {
-  COMMON_CAUSE_PROPOSITION_KIND,
+  adjacencyEffectsForRows,
+  adjacencyKindsFor,
+  seedActivationsForObservation
+} from "../conditional-field/engine/path-composition.js";
+import {
   assessEvidence,
-  type EvidenceObservation
+  observationsFromOwners
 } from "../conditional-field/evidence/assess-support.js";
 export type ObserveFieldInput = Readonly<{
   readonly workspace_id: string;
@@ -39,11 +40,10 @@ export type ObserveFieldInput = Readonly<{
   readonly readers: ObserverReaders;
   readonly authorized_scopes?: readonly string[];
   readonly cancelled?: boolean;
+  readonly resume_cursors?: Readonly<Record<string, string | null>>;
 }>;
 
 const MAX_OBSERVE_ROUNDS = 4_096;
-const NATIVE_PAGE = 32;
-const OPEN_VALIDITY = { kind: "open" as const, valid_from: "1970-01-01T00:00:00.000Z" };
 const INCOMPLETE_OBSERVER: ReadonlySet<ObserverStatus> = new Set([
   "cancelled",
   "unavailable",
@@ -76,7 +76,21 @@ export function observeField(
   const lease = activeLease(interpretation);
   const cursors = new Map<string, ObserverCursor>();
   const pairProgress = new Map<string, string | null>();
+  for (const [regionId, position] of Object.entries(input.resume_cursors ?? {})) {
+    const created = startObserverCursor({
+      cursor_id: regionId,
+      snapshot_id: interpretation.snapshot_id,
+      query_id: interpretation.query_id,
+      region_id: regionId
+    });
+    cursors.set(regionId, {
+      ...created,
+      position,
+      committed_through: position
+    });
+  }
   const subjects = new Set<string>();
+  const relationRows: RelationObserverRow[] = [];
   const observedAt: Record<string, string> = {};
   let pairIndex = 0;
   for (let round = 0; round < MAX_OBSERVE_ROUNDS; round += 1) {
@@ -86,12 +100,15 @@ export function observeField(
     for (const action of proposal.actions) {
       if (action.action === "seed") {
         const observed = observeSeed(input, interpretation, lease, action, cursors, observedAt);
+        cursors.set(action.region_id, observed.page.cursor);
         const seedIds = observed.page.observations.map((row) => row.object_id);
         addSubjects(subjects, seedIds);
         recordObservedAt(input, seedIds, observedAt);
         state = applyObserverPage(state, {
           page: observed.page,
-          effects: seedEffects(observed.page.observations)
+          effects: seedEffects(observed.page.observations, interpretation, input.as_of),
+          work: observed.work,
+          resume_cursors: resumeCursors(cursors, pairProgress)
         });
         continue;
       }
@@ -101,7 +118,13 @@ export function observeField(
           continue;
         }
         const observed = observeMeasurement(input, interpretation, lease, action, cursors);
-        state = applyObserverPage(state, { page: observed.page, effects: [] });
+        cursors.set(action.region_id, observed.page.cursor);
+        state = applyObserverPage(state, {
+          page: observed.page,
+          effects: [],
+          work: observed.work,
+          resume_cursors: resumeCursors(cursors, pairProgress)
+        });
         continue;
       }
       if (action.action === "relation") {
@@ -111,7 +134,9 @@ export function observeField(
       if (incompleteObserver(state.last_observer_status)) {
         break;
       }
-      const predicates = adjacencyPredicates(interpretation, input.readers, input.workspace_id, subjects);
+      const predicates = adjacencyPredicates(
+        interpretation, input.readers, input.workspace_id, subjects
+      );
       const pair = nextAdjacencyPair(subjects, predicates, pairProgress, pairIndex);
       pairIndex += 1;
       if (pair === undefined) {
@@ -122,10 +147,14 @@ export function observeField(
       const observed = observeAdjacency(
         input, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt
       );
+      cursors.set(action.region_id, observed.page.cursor);
+      relationRows.push(...captured);
       addSubjects(subjects, captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]));
       state = applyObserverPage(state, {
         page: maskAdjacencyExhaustion(observed.page, hasOpenPairs(subjects, predicates, pairProgress)),
-        effects: transitionEffects(captured)
+        effects: transitionEffects(relationRows, interpretation, state.seen_identities, input.as_of),
+        work: observed.work,
+        resume_cursors: resumeCursors(cursors, pairProgress)
       });
     }
   }
@@ -136,29 +165,51 @@ export function assessUnknownCause(
   state: FieldEngineState,
   input: ObserveFieldInput
 ): FieldEngineState {
-  const assessed = assessEvidence({
+  const assertions = assertionReadsFrom(state, input);
+  const hypothesisId = state.interpretation.hypotheses[0]?.hypothesis_id ?? "h0";
+  const timeState = state.interpretation.time_window?.end ?? input.as_of;
+  const context = {
     query_id: state.query_id,
     snapshot_id: state.snapshot_id,
     source_revision: state.snapshot_id,
-    hypothesis_id: "h0",
+    hypothesis_id: hypothesisId,
     binding_context: "default",
-    time_state: "as_of",
+    time_state: timeState,
     jurisdiction: "workspace",
     as_of: input.as_of,
-    permitted_timeless_policy_ids: new Set(),
-    observations: evidenceObservationsFrom(state, input),
-    propositions: [{
-      proposition: {
-        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-        proposition_id: "common-cause",
-        kind: COMMON_CAUSE_PROPOSITION_KIND,
-        arguments: ["r", "h"]
-      },
-      templates: [{ witness_id: "shared-root", premises: ["shared_root_cause"], cost: 100 }]
-    }],
+    permitted_timeless_policy_ids: new Set<string>(),
+    assertions,
+    claims: [] as const,
+    access: new Map()
+  };
+  const observations = observationsFromOwners(context).filter((row) =>
+    isPathActiveForRecall(row.path_lifecycle)
+  );
+  const propositions = assertions.map((assertion) => ({
+    proposition: {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      proposition_id: assertion.anchors.target_anchor.object_id,
+      kind: assertion.relation_kind,
+      arguments: [assertion.assertion_id]
+    },
+    templates: assertion.evidence_receipts.map((receipt) => ({
+      witness_id: receipt.evidence_id,
+      premises: [
+        assertion.anchors.source_anchor.object_id,
+        assertion.anchors.target_anchor.object_id
+      ],
+      cost: 1
+    }))
+  }));
+  const assessed = assessEvidence({
+    ...context,
+    observations,
+    propositions,
     work_limit: Math.max(1, state.remaining_reserve)
   });
-  return applyEvidenceEffect(state, { support: assessed.records });
+  const claims = new Map<string, (typeof assessed.records)[number]["claim"]>();
+  for (const record of assessed.records) claims.set(record.proposition_id, record.claim);
+  return applyEvidenceEffect(state, { support: assessed.records, claims });
 }
 
 export function rolesFrom(state: FieldEngineState): ReadonlyMap<string, IndexRole> {
@@ -215,7 +266,7 @@ function observeSeed(
 ) {
   return observeConditionalField({
     lease,
-    action: nativeAction(action),
+    action,
     cursor: cursorOf(cursors, interpretation, action.region_id),
     query: interpretation,
     workspace_id: input.workspace_id,
@@ -223,7 +274,7 @@ function observeSeed(
     seed_query: input.query_text,
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,
-    page_limit: NATIVE_PAGE
+    as_of: input.as_of
   });
 }
 
@@ -236,12 +287,12 @@ function observeMeasurement(
 ) {
   return observeConditionalField({
     lease,
-    action: nativeAction(action),
+    action,
     cursor: cursorOf(cursors, interpretation, action.region_id),
     query: interpretation,
     workspace_id: input.workspace_id,
     readers: input.readers,
-    page_limit: NATIVE_PAGE
+    as_of: input.as_of
   });
 }
 
@@ -263,7 +314,7 @@ function observeAdjacency(
   };
   const observed = observeConditionalField({
     lease,
-    action: nativeAction(action),
+    action,
     cursor,
     query: interpretation,
     workspace_id: input.workspace_id,
@@ -272,10 +323,14 @@ function observeAdjacency(
     relation_kind: pair.predicate,
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,
-    page_limit: NATIVE_PAGE
+    as_of: input.as_of
   });
   pairProgress.set(key, observed.page.cursor.committed_through);
   if (observed.page.outcome.status === "exhausted") pairProgress.set(`${key}:done`, "1");
+  const kept = new Set(observed.page.observations.map((row) => row.observation_id));
+  const eligible = captured.filter((row) => kept.has(`${action.region_id}:${row.assertionId}`));
+  captured.length = 0;
+  captured.push(...eligible);
   recordObservedAt(
     input,
     captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]),
@@ -331,17 +386,14 @@ function adjacencyPredicates(
   workspaceId: string,
   subjects: ReadonlySet<string>
 ): readonly string[] {
-  const kinds = new Set(
-    collectRelations(interpretation.program).map((relation) => relation.relation_kind)
-  );
   const listed = readers.relationKinds;
-  if (listed !== undefined) {
-    for (const kind of listed({ workspaceId, subject: null })) kinds.add(kind);
-    for (const subject of subjects) {
-      for (const kind of listed({ workspaceId, subject })) kinds.add(kind);
-    }
-  }
-  return [...kinds];
+  const stored = listed === undefined
+    ? []
+    : [
+      ...listed({ workspaceId, subject: null }),
+      ...[...subjects].flatMap((subject) => [...listed({ workspaceId, subject })])
+    ];
+  return adjacencyKindsFor(interpretation.program, stored);
 }
 
 function recordObservedAt(
@@ -360,73 +412,74 @@ function recordObservedAt(
 }
 
 function seedEffects(
-  observations: readonly TypedObservation[]
+  observations: readonly TypedObservation[],
+  interpretation: QueryInterpretation,
+  asOf: string
 ): readonly FieldObservationEffect[] {
-  return observations.flatMap((observation) => {
-    if (observation.applicability.verdict === "false") return [];
-    const seed: SeedActivation = {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      state: productKey(observation.object_id),
-      milligrades: MILLIGRADE_TOP
-    };
-    return [{ observation_id: observation.observation_id, seed }];
+  return observations.flatMap((observation) =>
+    seedActivationsForObservation(observation, interpretation, asOf).map((seed) => ({
+      observation_id: `${observation.observation_id}:${seed.state.hypothesis_id}:${seed.state.program_state}`,
+      seed
+    }))
+  );
+}
+
+function transitionEffects(
+  rows: readonly RelationObserverRow[],
+  interpretation: QueryInterpretation,
+  liveStates: FieldEngineState["seen_identities"],
+  asOf: string
+): readonly FieldObservationEffect[] {
+  return adjacencyEffectsForRows(rows, {
+    interpretation,
+    asOf,
+    liveStates,
+    overlay: RELATION_MILLIGRADES
   });
 }
 
-function transitionEffects(rows: readonly RelationObserverRow[]): readonly FieldObservationEffect[] {
-  return rows.map((row) => {
-    const assigned = RELATION_MILLIGRADES[row.predicate] ?? {
-      milligrades: 500,
-      applicable: true,
-      role: "associated" as const
-    };
-    const transition: Transition = {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      from: productKey(row.sourceObjectId),
-      to: productKey(row.targetObjectId),
-      relation_kind: row.predicate,
-      strength_milligrades: assigned.milligrades,
-      validity: OPEN_VALIDITY,
-      applicable: assigned.applicable
-    };
-    return {
-      observation_id: `adjacency:${row.assertionId}`,
-      transition,
-      facet: {
-        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-        path_id: row.assertionId,
-        coordinates: [assigned.milligrades]
-      }
-    };
-  });
-}
-
-function evidenceObservationsFrom(
+function assertionReadsFrom(
   state: FieldEngineState,
   input: ObserveFieldInput
-): readonly EvidenceObservation[] {
-  return state.observations.map((observation) => ({
-    observation_id: observation.observation_id,
-    evidence_id: observation.observation_id,
-    source_id: observation.object_id,
-    source_revision: state.snapshot_id,
-    query_id: state.query_id,
-    snapshot_id: state.snapshot_id,
-    hypothesis_id: "h0",
-    binding_context: "default",
-    time_state: "as_of",
-    jurisdiction: "workspace",
-    premise_id: observation.object_id,
-    proposition_id: COMMON_CAUSE_PROPOSITION_KIND,
-    polarity: "supports",
-    access: "eligible",
-    validity: OPEN_VALIDITY,
-    as_of: input.as_of,
-    lineage_id: observation.source_revision,
-    independence_key: observation.observation_id,
-    association_milligrades: observation.association_milligrades ?? MILLIGRADE_TOP,
-    cost: 1
-  }));
+) {
+  const relation = input.readers.relation;
+  if (relation === undefined) return [];
+  const kinds = adjacencyKindsFor(state.interpretation.program);
+  const subjects = new Set(state.seen_identities.map((identity) => identity.object_id));
+  const assertions = [];
+  for (const subject of subjects) {
+    for (const predicate of kinds) {
+      const page = relation({
+        workspaceId: input.workspace_id,
+        subject,
+        predicate,
+        limit: Math.min(512, Math.max(1, input.budget.page_budget)),
+        nativeLimit: Math.min(512, Math.max(1, input.budget.page_budget)),
+        afterAssertionId: null
+      });
+      for (const row of page.observations) {
+        if (row.validity === undefined) continue;
+        assertions.push({
+          assertion_id: row.assertionId,
+          relation_kind: row.predicate,
+          evidence_receipts: (row.evidenceRefs ?? []).map((evidenceId) => ({
+            evidence_id: evidenceId,
+            source_event_anchor: {
+              event_id: evidenceId,
+              event_type: "relation.evidence",
+              occurred_at: input.as_of
+            }
+          })),
+          anchors: {
+            source_anchor: { kind: "object" as const, object_id: row.sourceObjectId },
+            target_anchor: { kind: "object" as const, object_id: row.targetObjectId }
+          },
+          validity: row.validity
+        });
+      }
+    }
+  }
+  return assertions;
 }
 
 function capturingReaders(
@@ -511,10 +564,13 @@ function pairKey(subject: string, predicate: string): string {
   return `${subject}\0${predicate}`;
 }
 
-function nativeAction(
-  action: ReturnType<typeof proposeFieldWork>["actions"][number]
-): ReturnType<typeof proposeFieldWork>["actions"][number] {
-  return { ...action, work_limit: Math.min(512, Math.max(action.work_limit, NATIVE_PAGE)) };
+function resumeCursors(
+  cursors: Map<string, ObserverCursor>,
+  _pairProgress: Map<string, string | null>
+): Readonly<Record<string, string | null>> {
+  const resume: Record<string, string | null> = {};
+  for (const [regionId, cursor] of cursors) resume[regionId] = cursor.committed_through;
+  return resume;
 }
 
 function openResiduals(includeBinding: boolean): readonly CoverageRegion[] {
@@ -542,17 +598,6 @@ function activeLease(interpretation: QueryInterpretation): SnapshotReadLease {
     snapshot_id: interpretation.snapshot_id,
     query_id: interpretation.query_id,
     status: "active"
-  };
-}
-
-function productKey(objectId: string) {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    object_id: objectId,
-    program_state: "accepting",
-    hypothesis_id: "h0",
-    binding_context: "default",
-    time_state: "as_of"
   };
 }
 

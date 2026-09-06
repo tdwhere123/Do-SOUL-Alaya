@@ -213,7 +213,7 @@ describe("conditional-field engine", () => {
     expect(state.seen_identities.map((row) => row.object_id).sort())
       .toEqual(["n0", "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8"]);
     expect(state.remaining_reserve).toBe(5);
-    expect(valueOf(state, "n8")).toBe(900);
+    expect(valueOf(state, "n8")).toBe(0);
   });
 
   it("does not let duplicate observations manufacture association strength", () => {

@@ -55,9 +55,15 @@ export type FieldObservationEffect = Readonly<{
   readonly hyperedge?: HyperedgeCompletion;
 }>;
 
+export type ObserverWorkUnits = Readonly<{
+  readonly work_units: number;
+}>;
+
 export type ObserverConsumption = Readonly<{
   readonly page: ObserverPage;
   readonly effects?: readonly FieldObservationEffect[];
+  readonly work?: ObserverWorkUnits;
+  readonly resume_cursors?: Readonly<Record<string, string | null>>;
 }>;
 
 export type EvidenceEffect = Readonly<{
@@ -116,6 +122,7 @@ export type FieldEngineState = Readonly<{
   readonly roles: ReadonlyMap<string, IndexRole>;
   readonly remaining_work: readonly RemainingWork[];
   readonly last_observer_status: ObserverStatus | undefined;
+  readonly resume_cursors: Readonly<Record<string, string | null>>;
   readonly closure: FieldClosureFacts;
 }>;
 
@@ -168,7 +175,8 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     claims: input.claims ?? new Map(),
     roles: input.roles ?? new Map(),
     remaining_work: [],
-    last_observer_status: undefined
+    last_observer_status: undefined,
+    resume_cursors: {}
   });
 }
 
@@ -294,6 +302,7 @@ function rejectedField(
     roles: input.roles ?? new Map(),
     remaining_work: [],
     last_observer_status: undefined,
+    resume_cursors: {},
     closure: {
       propagation: "open",
       observation: "open",

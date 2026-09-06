@@ -18,6 +18,12 @@ import {
   type IndexOracleInput,
   type OracleCounts
 } from "./oracle-index.js";
+import {
+  enumeratedFromField,
+  plantDeployment,
+  produceField,
+  type SourceSlice
+} from "./bound-producer.js";
 
 export { CONTRACT_ONLY_UNTIL_C07 };
 
@@ -50,6 +56,44 @@ export type FrozenPorts = Readonly<{
 
 export function unboundPorts(): FrozenPorts {
   return { bound: false };
+}
+
+export function boundPorts(slice: SourceSlice): FrozenPorts {
+  return {
+    bound: true,
+    bindField: (_world, budget) => {
+      if (admitRequestBudget(budget) === "resource_rejected") return "resource_rejected";
+      return enumeratedFromField(produceField(slice, { budget }).field);
+    },
+    projectIndex: (input) => projectOracleIndex(input),
+    mcpRecall: (index) => ({
+      schema_version: 1,
+      surface: "mcp",
+      bound: true,
+      note: "runConditionalFieldRecall",
+      provider_calls: 0,
+      garden_enqueue: 0,
+      index: InformationIndexSchema.parse(index)
+    }),
+    cliRecall: (index) => ({
+      schema_version: 1,
+      surface: "cli",
+      bound: true,
+      note: "runConditionalFieldRecall",
+      provider_calls: 0,
+      garden_enqueue: 0,
+      index: InformationIndexSchema.parse(index)
+    }),
+    providerCalls: () => 0,
+    gardenEnqueue: () => 0
+  };
+}
+
+export async function plantBoundSlice(
+  slice: SourceSlice
+): Promise<FrozenPorts> {
+  await plantDeployment(slice);
+  return boundPorts(slice);
 }
 
 export function contractOnlyPorts(): FrozenPorts {
@@ -116,8 +160,9 @@ export function compareProducerField(
   budget: RequestBudget,
   expected: Readonly<Record<string, number>>
 ): OracleCounts {
+  // Production-closure rows cannot pass by skipping the producer.
   if (ports.bindField === undefined || !ports.bound) {
-    return tally(emptyCounts(), "skipped_environments");
+    throw new Error("compareProducerField requires bound production ports");
   }
   const produced = ports.bindField(world, budget);
   if (produced === "resource_rejected") return tally(emptyCounts(), "mismatches");

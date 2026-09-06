@@ -136,7 +136,7 @@ describe("conditional-field adversarial falsifiers", () => {
     const world = deploymentWorld();
     const field = enumerateSimplePaths(world.seeds, world.edges);
     const expected = compareObjectMilligrades(field, DEPLOYMENT_MILLIGRADES);
-    const producer = compareProducerField(unboundPorts(), world, defaultBudget(), DEPLOYMENT_MILLIGRADES);
+    const skipped = tally(emptyCounts(), "skipped_environments");
     const unsupported = enumerateSimplePaths(
       world.seeds,
       Array.from({ length: 49 }, (_, index) => ({
@@ -151,7 +151,7 @@ describe("conditional-field adversarial falsifiers", () => {
     const holes = tally(emptyCounts(), "observation_holes");
     const total = sumsCounts([
       expected,
-      producer,
+      skipped,
       unsupported.kind === "unsupported" ? tally(emptyCounts(), "unsupported") : emptyCounts(),
       holes
     ]);
@@ -161,6 +161,9 @@ describe("conditional-field adversarial falsifiers", () => {
     expect(total.observation_holes).toBe(1);
     expect(total.skipped_environments).toBe(1);
     expect(total.matches).toBeGreaterThan(0);
+    expect(unboundPorts().bound).toBe(false);
+    expect(() => compareProducerField(unboundPorts(), world, defaultBudget(), DEPLOYMENT_MILLIGRADES))
+      .toThrow(/bound production ports/);
   });
 });
 

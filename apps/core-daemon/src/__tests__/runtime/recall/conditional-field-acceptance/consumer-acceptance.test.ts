@@ -84,12 +84,12 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     const slice = await openPlantedSlice();
     const first = await recallThroughHandler(slice, {
       query: "yesterday failed deployment",
-      max_results: 2
+      max_results: 1
     });
     expect(assertPartialTransport(first.index)).toEqual([]);
     const second = await recallThroughHandler(slice, {
       query: "yesterday failed deployment",
-      max_results: 2,
+      max_results: 1,
       continuation: first.index.continuation
     });
     const full = await recallThroughHandler(slice, {
@@ -331,8 +331,14 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
           : {
             object_id: page.row.object_id,
             sourceRevision: page.row.sourceRevision,
-            observed_at: page.row.created_at,
-            content: page.row.content
+            observed_at: page.row.event_time_start ?? undefined,
+            content: page.row.content,
+            lifecycle_state: page.row.lifecycle_state,
+            retention_state: page.row.retention_state,
+            scope_class: page.row.scope_class,
+            evidence_refs: page.row.evidence_refs,
+            valid_from: page.row.valid_from,
+            valid_to: page.row.valid_to
           },
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,

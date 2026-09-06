@@ -54,6 +54,7 @@ type CompileCommon = Readonly<{
   readonly view?: QueryView;
   readonly query_id?: string;
   readonly memory?: QueryMemoryPort;
+  readonly authorized_scopes?: readonly string[];
 }>;
 
 export type TypedQueryCompileInput = CompileCommon & Readonly<{
@@ -147,7 +148,14 @@ function compileTyped(
   }
   consumeMemoryIfNeeded(program.data, snapshotId, budget, input.memory);
   return interpretationOf({
-    query_id: identityFor(queryId, program.data),
+    query_id: identityFor(queryId, {
+      program: program.data,
+      view,
+      hypotheses,
+      interpretation_clock: input.interpretation_clock,
+      time_window: timeWindow,
+      authorized_scopes: input.authorized_scopes
+    }),
     status: admissionStatus(program.data, holes, hypotheses),
     snapshot_id: snapshotId,
     program: program.data,
@@ -213,14 +221,22 @@ function compileSupportedRequest(
   }
   if (classified.kind === "hypotheses") {
     const program = supportedFailedDeploymentProgram(yesterdayAnchorGuard(yesterday));
+    const hypotheses = ambiguousEventHypotheses();
     consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
     return interpretationOf({
-      query_id: fallbackQueryId(queryId, SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID),
+      query_id: identityFor(queryId, {
+        program,
+        view,
+        hypotheses,
+        interpretation_clock: input.interpretation_clock,
+        time_window: yesterday,
+        authorized_scopes: input.authorized_scopes
+      }),
       status: "hypotheses",
       snapshot_id: snapshotId,
       program,
       view,
-      hypotheses: ambiguousEventHypotheses(),
+      hypotheses,
       interpretation_clock: input.interpretation_clock,
       time_window: yesterday
     });
@@ -231,7 +247,13 @@ function compileSupportedRequest(
   consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
   const holes = window === undefined ? [openTimeHole()] : [];
   return interpretationOf({
-    query_id: fallbackQueryId(queryId, SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID),
+    query_id: identityFor(queryId, {
+      program,
+      view,
+      interpretation_clock: input.interpretation_clock,
+      time_window: window,
+      authorized_scopes: input.authorized_scopes
+    }),
     status: holes.length > 0 ? "partial" : "resolved",
     snapshot_id: snapshotId,
     program,
@@ -253,7 +275,14 @@ function compileLexicalRequest(
   const program = lexicalStoredRelationProgram();
   consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
   return interpretationOf({
-    query_id: identityFor(queryId, program, lexicalIdentity(input.text)),
+    query_id: identityFor(queryId, {
+      program,
+      view,
+      interpretation_clock: input.interpretation_clock,
+      time_window: hints,
+      authorized_scopes: input.authorized_scopes,
+      lexical_text: input.text
+    }),
     status: "resolved",
     snapshot_id: snapshotId,
     program,
@@ -261,12 +290,6 @@ function compileLexicalRequest(
     interpretation_clock: input.interpretation_clock,
     time_window: hints
   });
-}
-
-function lexicalIdentity(text: string): string {
-  return formatConditionalFieldDigest(
-    createHash("sha256").update(`lexical\0${text}`, "utf8").digest("hex")
-  );
 }
 
 function compileOpenRelations(
@@ -292,7 +315,13 @@ function compileOpenRelations(
   }
   consumeMemoryIfNeeded(parsed.data, snapshotId, budget, input.memory);
   return interpretationOf({
-    query_id: identityFor(queryId, parsed.data, SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID),
+    query_id: identityFor(queryId, {
+      program: parsed.data,
+      view,
+      interpretation_clock: input.interpretation_clock,
+      time_window: window,
+      authorized_scopes: input.authorized_scopes
+    }),
     status: "resolved",
     snapshot_id: snapshotId,
     program: parsed.data,
@@ -426,13 +455,26 @@ function fallbackQueryId(value: string | undefined, fallback: string): string {
 
 function identityFor(
   queryId: string | undefined,
-  program: QueryProgram,
-  fallback?: string
+  parts: Readonly<{
+    readonly program: QueryProgram;
+    readonly view?: QueryView;
+    readonly hypotheses?: readonly QueryHypothesis[];
+    readonly interpretation_clock?: string;
+    readonly time_window?: QueryTimeWindow;
+    readonly authorized_scopes?: readonly string[];
+    readonly lexical_text?: string;
+  }>
 ): string {
   if (queryId !== undefined) return queryId;
-  if (fallback !== undefined) return fallback;
   return formatConditionalFieldDigest(
-    createHash("sha256").update(stableStringify(program), "utf8").digest("hex")
+    createHash("sha256").update(stableStringify({
+      program: parts.program,
+      view: parts.view ?? null,
+      hypotheses: parts.hypotheses ?? [],
+      time_window: parts.time_window ?? null,
+      authorized_scopes: [...(parts.authorized_scopes ?? [])].sort(),
+      lexical_text: parts.lexical_text ?? ""
+    }), "utf8").digest("hex")
   );
 }
 

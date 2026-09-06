@@ -84,13 +84,15 @@ export function openAnchorTimeGuard(variable = "r"): Guard {
 
 export const STORED_RELATION_KIND = "stored_relation";
 
+// Supported ordinary steps name query roles; planted freeze edges keep stored predicates.
+export const SUPPORTED_RELATION_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  failed_deployment: Object.freeze(["observed_log"]),
+  associated_config: Object.freeze(["config_via_log", "config_direct"]),
+  associated_history: Object.freeze(["service_history"])
+});
+
 export function lexicalStoredRelationProgram(): QueryProgram {
-  return relationProgram(
-    STORED_RELATION_KIND,
-    "seed",
-    "associated",
-    associatedItemGuard("associated")
-  );
+  return { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "epsilon" };
 }
 
 export function associatedItemGuard(variable: string): Guard {
@@ -108,7 +110,14 @@ export function supportedFailedDeploymentProgram(anchorGuard: Guard): QueryProgr
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     kind: "sequence",
     steps: [
-      relationProgram("failed_deployment", "anchor", "r", anchorGuard),
+      {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        kind: "alternative",
+        options: [
+          relationProgram("failed_deployment", "anchor", "r", anchorGuard),
+          relationProgram("uses_service", "r", "s", associatedItemGuard("s"))
+        ]
+      },
       {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
         kind: "alternative",

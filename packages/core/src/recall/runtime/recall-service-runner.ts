@@ -68,13 +68,20 @@ export async function executeRecall(
   params: RecallExecutionParams
 ): Promise<ConditionalFieldRecallResult> {
   assertRecallZeroLiveExtraction();
-  const request = buildRecallRequest(context, params);
+  let previews = new Map<string, string>();
   const index = await withRecallReadSnapshot(context.readSnapshot, async () => {
+    const request = buildRecallRequest(context, params);
     const port = fieldDeps(context).conditionalFieldPort;
-    if (port !== undefined) return await port.recall(withoutReaders(request));
-    return runConditionalFieldRecall(request);
+    const recalled = port !== undefined
+      ? await port.recall(withoutReaders(request))
+      : runConditionalFieldRecall(request);
+    // Worker RPC returns the index only; do not hydrate from a second live connection.
+    previews = port !== undefined
+      ? new Map()
+      : capturePreviews(recalled, request.readers, request.workspace_id);
+    return recalled;
   });
-  return encodeRecallResult(index, request.readers, request.workspace_id);
+  return encodeRecallResult(index, previews);
 }
 
 export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest): InformationIndex {
@@ -85,14 +92,41 @@ export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest):
     budget: input.budget,
     interpretation_clock: input.interpretation_clock,
     ...(input.since === undefined ? {} : { since: input.since }),
-    ...(input.until === undefined ? {} : { until: input.until })
+    ...(input.until === undefined ? {} : { until: input.until }),
+    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes })
   });
   if (interpretation.status === "resource_rejected" || interpretation.status === "malformed"
     || interpretation.status === "unsupported") {
     return projectFromField(emptyField(interpretation, input), input, interpretation);
   }
-  const field = observeField(interpretation, input);
+  const resumeCursors = decodeResumeCursors(input.continuation);
+  const field = observeField(interpretation, {
+    workspace_id: input.workspace_id,
+    query_text: input.query_text,
+    budget: input.budget,
+    as_of: input.as_of,
+    readers: input.readers,
+    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),
+    ...(resumeCursors === undefined ? {} : { resume_cursors: resumeCursors })
+  });
   return projectFromField(assessUnknownCause(field, input), input, interpretation);
+}
+
+function decodeResumeCursors(
+  continuation: ConditionalFieldRecallRequest["continuation"]
+): Readonly<Record<string, string | null>> | undefined {
+  if (continuation === undefined || continuation === null) return undefined;
+  const matched = /^o\d+(?:\|(.*))?$/u.exec(continuation.cursor);
+  const payload = matched?.[1];
+  if (payload === undefined || payload.length === 0) return undefined;
+  const resume: Record<string, string | null> = {};
+  for (const part of payload.split("|")) {
+    const sep = part.indexOf(":");
+    if (sep <= 0) continue;
+    resume[part.slice(0, sep)] = part.slice(sep + 1);
+  }
+  return resume;
 }
 
 function projectFromField(
@@ -129,6 +163,7 @@ function projectFromField(
       outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: state.closure.observation },
       open_regions: state.residuals
     },
+    resume_cursors: state.resume_cursors,
     interpretation_status: interpretation.status === "resolved" || interpretation.status === "partial"
       || interpretation.status === "hypotheses"
       ? undefined
@@ -138,10 +173,9 @@ function projectFromField(
 
 export function encodeRecallResult(
   index: InformationIndex,
-  readers: ObserverReaders = {},
-  workspaceId = ""
+  previews: ReadonlyMap<string, string> = new Map()
 ): ConditionalFieldRecallResult {
-  const excerpts = index.entries.map((entry) => sourceExcerpt(readers, workspaceId, entry.object_id));
+  const excerpts = index.entries.map((entry) => previews.get(entry.object_id));
   const hydrated = excerpts.filter((excerpt) => excerpt !== undefined).length;
   const payload = index.entries.length === 0
     ? index.completeness.payload
@@ -164,7 +198,7 @@ export function encodeRecallResult(
       activation_score: score,
       relevance_score: score,
       content_preview: excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW,
-      token_estimate: 1,
+      token_estimate: previewTokenEstimate(excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW),
       manifestation: "excerpt" as const,
       dimension: MemoryDimension.FACT,
       scope_class: ScopeClass.PROJECT,
@@ -190,15 +224,23 @@ export function encodeRecallResult(
 
 const PAYLOAD_OMITTED_PREVIEW = "[payload omitted]";
 
-function sourceExcerpt(
+function capturePreviews(
+  index: InformationIndex,
   readers: ObserverReaders,
-  workspaceId: string,
-  objectId: string
-): string | undefined {
-  if (readers.source === undefined || workspaceId === "") return undefined;
-  const content = readers.source({ workspaceId, objectId }).row?.content;
-  if (content === undefined || content.length === 0) return undefined;
-  return createContentPreview(content, "excerpt");
+  workspaceId: string
+): Map<string, string> {
+  const previews = new Map<string, string>();
+  if (readers.source === undefined || workspaceId === "") return previews;
+  for (const entry of index.entries) {
+    const content = readers.source({ workspaceId, objectId: entry.object_id }).row?.content;
+    if (content === undefined || content.length === 0) continue;
+    previews.set(entry.object_id, createContentPreview(content, "excerpt"));
+  }
+  return previews;
+}
+
+function previewTokenEstimate(preview: string): number {
+  return Math.max(1, Buffer.byteLength(preview, "utf8"));
 }
 
 function buildRecallRequest(

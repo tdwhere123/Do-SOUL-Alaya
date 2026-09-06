@@ -1,120 +1,102 @@
-import { describe, expect, it } from "vitest";
-import { enumerateSimplePaths } from "./enumerate-simple-paths.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { type StorageDatabase } from "@do-soul/alaya-storage";
+import { MEM, WS } from "../conditional-field/vertical/source-slice.js";
 import {
-  QUERY_ID,
-  RESULT_VERSION,
-  SNAPSHOT_ID,
-  defaultBudget,
-  defaultView,
-  deploymentWorld,
-  sqliteCancelledWorker,
-  sqliteInterruptedZero,
-  sqliteMixedGeneration,
-  sqliteNormalEntryCounters,
-  sqliteTombstoneRestart,
-  type SqliteSourceFixture
-} from "./finite-worlds.js";
-import { contractOnlyPorts, unboundPorts } from "./frozen-ports.js";
-import {
-  mapNativeReaderPage,
-  milligradeOf,
-  projectOracleIndex
-} from "./oracle-index.js";
+  openBoundSlice,
+  plantDeployment,
+  plantNeedles,
+  readersFor,
+  runRecall,
+  tombstone
+} from "./bound-producer.js";
+import { defaultBudget } from "./finite-worlds.js";
+import { unboundPorts } from "./frozen-ports.js";
+
+const databases = new Set<StorageDatabase>();
+
+afterEach(() => {
+  for (const database of databases) database.close();
+  databases.clear();
+});
 
 describe("conditional-field source lifecycle oracle", () => {
-  it("A18 hides tombstones and keeps the current source after a restart snapshot", () => {
-    const fixture = sqliteTombstoneRestart();
-    const visible = liveObjectIds(fixture);
-    expect(visible).not.toContain("u");
-    expect(visible).toEqual(["r", "l", "c", "s", "h"]);
-    const restarted = replayFixture(fixture);
-    expect(restarted.rows.find((row) => row.object_id === "u")?.retention).toBe("tombstoned");
-    expect(restarted.rows.find((row) => row.object_id === "r")?.retention).toBe("live");
-    expect(restarted.rows.find((row) => row.object_id === "r")?.source_revision).toBe("src-r");
-    const world = deploymentWorld();
-    const field = enumerateSimplePaths(
-      world.seeds,
-      world.edges.filter((edge) => visible.includes(edge.to.object_id) || edge.to.object_id === "r")
-    );
-    expect(milligradeOf(field, "u")).toBe(0);
-    expect(milligradeOf(field, "c")).toBe(850);
+  it("A18 hides tombstones and keeps the current source after a restart snapshot", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "conditional-field-oracle-a18-"));
+    const filename = join(directory, "source.sqlite");
+    const first = await openBoundSlice((database) => databases.add(database), filename);
+    await plantDeployment(first);
+    tombstone(first, MEM.u);
+    const hidden = runRecall(first);
+    expect(hidden.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
+    expect(first.memoryReader.source(WS, MEM.r).unavailable).toBe(false);
+    expect(first.indexProjection.freshness(WS, MEM.u).lexical).toBe("tombstoned");
+    first.database.close();
+    databases.delete(first.database);
+    const reopened = await openBoundSlice((database) => databases.add(database), filename);
+    const restarted = runRecall(reopened);
+    expect(restarted.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
+    const live = reopened.memoryReader.source(WS, MEM.r);
+    expect(live.unavailable).toBe(false);
+    expect(live.row?.object_id).toBe(MEM.r);
+    expect(reopened.indexProjection.freshness(WS, MEM.u).lexical).toBe("tombstoned");
+    reopened.database.close();
+    databases.delete(reopened.database);
+    rmSync(directory, { recursive: true, force: true });
   });
 
-  it("A18 invalidates mixed-generation coverage instead of minting a complete index", () => {
-    const fixture = sqliteMixedGeneration();
-    const generations = new Set(fixture.rows.map((row) => row.generation_id));
-    expect(generations.size).toBeGreaterThan(1);
-    const index = projectOracleIndex({
-      field: enumerateSimplePaths([], []),
-      view: defaultView(),
-      query_id: QUERY_ID,
-      snapshot_id: SNAPSHOT_ID,
-      result_version: RESULT_VERSION,
-      budget: defaultBudget(),
-      roles: new Map(),
-      prior_continuation: {
-        schema_version: 1,
-        continuation_id: "page-1",
-        query_id: QUERY_ID,
-        snapshot_id: `sha256:${"d".repeat(64)}`,
-        result_version: RESULT_VERSION,
-        expires_at: "2099-01-01T00:00:00.000Z",
-        cursor: "offset-1"
-      }
+  it("A18 invalidates mixed-generation coverage instead of minting a complete index", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantNeedles(slice, 8, 901);
+    const first = runRecall(slice, {
+      query_text: "needle",
+      budget: defaultBudget({ page_budget: 1 })
     });
-    expect(index.completeness.logical_index).not.toBe("complete");
-    expect(index.completeness.observed_coverage).toBe("invalidated");
+    expect(first.continuation).not.toBeNull();
+    const mixed = runRecall(slice, {
+      query_text: "needle",
+      budget: defaultBudget({ page_budget: 1 }),
+      continuation: first.continuation,
+      snapshot_id: `sha256:${"d".repeat(64)}`
+    });
+    expect(mixed.completeness.logical_index).not.toBe("complete");
+    expect(mixed.completeness.observed_coverage).toBe("invalidated");
   });
 
-  it("maps worker cancellation to cancelled coverage, not complete empty", () => {
-    const fixture = sqliteCancelledWorker();
-    expect(fixture.worker).toBe("cancelled");
-    const observer = mapNativeReaderPage(fixture.reader);
-    const index = projectOracleIndex({
-      field: enumerateSimplePaths([], []),
-      view: defaultView(),
-      query_id: QUERY_ID,
-      snapshot_id: SNAPSHOT_ID,
-      result_version: RESULT_VERSION,
-      budget: defaultBudget(),
-      roles: new Map(),
-      observer: {
-        outcome: { schema_version: 1, status: "cancelled" },
-        open_regions: observer.open_regions
-      }
-    });
+  it("maps worker cancellation to cancelled coverage, not complete empty", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const index = runRecall(slice, { cancelled: true });
     expect(index.completeness.logical_index).not.toBe("complete");
     expect(index.completeness.observed_coverage).toBe("cancelled");
     expect(index.completeness.observed_coverage).not.toBe("exhausted_empty");
   });
 
-  it("keeps interrupted resumable coverage open across a pinned snapshot", () => {
-    const fixture = sqliteInterruptedZero();
-    const first = mapNativeReaderPage(fixture.reader);
-    const resumed = mapNativeReaderPage(fixture.reader);
-    expect(first.outcome.status).toBe("interrupted");
-    expect(resumed.outcome.status).toBe("interrupted");
-    expect(first.open_regions.map((region) => region.kind)).toEqual(resumed.open_regions.map((region) => region.kind));
+  it("keeps interrupted resumable coverage open across a pinned snapshot", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const inner = readersFor(slice);
+    const interrupted = {
+      ...inner,
+      lexical: (input: Parameters<NonNullable<typeof inner.lexical>>[0]) =>
+        inner.lexical!({ ...input, limit: 0, nativeLimit: 0 })
+    };
+    const first = runRecall(slice, { readers: interrupted });
+    const resumed = runRecall(slice, { readers: interrupted, continuation: first.continuation });
+    expect(first.entries).toEqual([]);
+    expect(first.completeness.observed_coverage).not.toBe("exhausted_empty");
+    expect(first.completeness.logical_index).not.toBe("complete");
+    expect(resumed.completeness.observed_coverage).not.toBe("exhausted_empty");
   });
 
-  it("A17-shaped normal-entry counters stay at zero while optional semantics are missing", () => {
-    const fixture = sqliteNormalEntryCounters();
-    const ports = contractOnlyPorts();
-    expect(fixture.provider_calls).toBe(0);
-    expect(fixture.garden_enqueue).toBe(0);
-    expect(ports.providerCalls?.()).toBe(0);
-    expect(ports.gardenEnqueue?.()).toBe(0);
+  it("A17-shaped normal-entry counters stay at zero while unbound production rows fail", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const before = slice.pendingGarden().length;
+    runRecall(slice);
+    expect(slice.pendingGarden()).toHaveLength(before);
     expect(unboundPorts().bound).toBe(false);
   });
 });
-
-function liveObjectIds(fixture: SqliteSourceFixture): readonly string[] {
-  return fixture.rows.filter((row) => row.retention === "live").map((row) => row.object_id);
-}
-
-function replayFixture(fixture: SqliteSourceFixture): SqliteSourceFixture {
-  return {
-    ...fixture,
-    rows: fixture.rows.map((row) => ({ ...row }))
-  };
-}

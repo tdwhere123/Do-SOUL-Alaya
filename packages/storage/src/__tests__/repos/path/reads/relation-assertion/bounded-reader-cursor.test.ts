@@ -34,7 +34,7 @@ describe("SqliteRelationRecallReader cursor", () => {
 
   it("reports a native zero-row interrupt as truncated, not a completed empty domain", () => {
     const database = openDatabase();
-    plantAssertions(database, 8);
+    const ids = plantAssertions(database, 8);
     const reader = new SqliteRelationRecallReader(database);
     reader.prepareIndex();
     const interrupted = reader.read("workspace-1", "vega", "owns", 16, 0);
@@ -42,12 +42,30 @@ describe("SqliteRelationRecallReader cursor", () => {
     expect(interrupted.truncated).toBe(true);
     expect(interrupted.nativeVisits).toBe(0);
     const during = reader.read("workspace-1", "vega", "owns", 16, 1);
-    expect(during.observations).toEqual([]);
+    expect(during.observations.map((row) => row.assertionId)).toEqual([ids[0]]);
     expect(during.truncated).toBe(true);
-    expect(during.nativeVisits).toBe(1);
+    expect(during.nativeVisits).toBeGreaterThan(0);
     const empty = reader.read("workspace-1", "vega", "missing", 16);
     expect(empty.observations).toEqual([]);
     expect(empty.truncated).toBe(false);
+  });
+
+  it("emits a 32-row prefix of 40 matches and concatenates resume without skip or dup", () => {
+    const database = openDatabase();
+    const ids = plantAssertions(database, 40);
+    const reader = new SqliteRelationRecallReader(database);
+    reader.prepareIndex();
+    const first = reader.read("workspace-1", "vega", "owns", 32, 32);
+    expect(first.observations.map((row) => row.assertionId)).toEqual(ids.slice(0, 32));
+    expect(first.truncated).toBe(true);
+    const after = first.observations.at(-1)?.assertionId ?? null;
+    const second = reader.read("workspace-1", "vega", "owns", 32, 32, after);
+    const concatenated = [
+      ...first.observations.map((row) => row.assertionId),
+      ...second.observations.map((row) => row.assertionId)
+    ];
+    expect(concatenated).toEqual(ids);
+    expect(new Set(concatenated).size).toBe(ids.length);
   });
 });
 

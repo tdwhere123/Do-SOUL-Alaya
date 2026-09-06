@@ -48,24 +48,30 @@ export function encodeIndexResults(
   index: InformationIndex,
   previews: ReadonlyMap<string, string> = new Map()
 ): readonly MemorySearchResult[] {
+  const maxTotalTokens = 2_000;
+  let usedTokens = 0;
   return index.entries.map((entry, offset) => {
     const score = entry.association_milligrades / MILLIGRADE_TOP;
+    const preview = previews.get(entry.object_id) ?? "[payload omitted]";
+    const tokenEstimate = Math.max(1, Buffer.byteLength(preview, "utf8"));
+    const usedThrough = usedTokens + tokenEstimate;
+    usedTokens = usedThrough;
     return {
       object_id: entry.object_id,
       object_kind: "memory_entry",
       relevance_score: score,
-      content_preview: previews.get(entry.object_id) ?? "[payload omitted]",
+      content_preview: preview,
       evidence_pointers: entry.explanation_ids.length > 0 ? entry.explanation_ids : [entry.object_id],
       selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
       source_channels: ["conditional_field"],
       score_factors: { activation: score, relevance: score },
       budget_state: {
-        token_estimate: 1,
+        token_estimate: tokenEstimate,
         max_entries: index.representation.page_budget,
-        max_total_tokens: 2_000,
+        max_total_tokens: maxTotalTokens,
         remaining_entries: Math.max(0, index.representation.page_budget - offset - 1),
-        remaining_tokens: 2_000,
-        within_budget: true
+        remaining_tokens: Math.max(0, maxTotalTokens - usedThrough),
+        within_budget: offset < index.representation.page_budget && usedThrough <= maxTotalTokens
       }
     };
   });
