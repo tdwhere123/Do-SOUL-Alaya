@@ -1,5 +1,6 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  type Guard,
   type IndexRole,
   type ProductStateKey,
   type QueryProgram,
@@ -12,6 +13,16 @@ import {
 export const SNAPSHOT_ID = `sha256:${"c".repeat(64)}`;
 export const QUERY_ID = "failed-deployment";
 export const RESULT_VERSION = "v1";
+export const YESTERDAY_START = "2026-09-05T00:00:00.000Z";
+export const YESTERDAY_END = "2026-09-06T00:00:00.000Z";
+export const YESTERDAY_INSTANT = "2026-09-05T12:00:00.000Z";
+export const LAST_WEEK_INSTANT = "2026-08-30T12:00:00.000Z";
+export const INTERPRETATION_CLOCK = "2026-09-06T00:00:00.000Z";
+export const FAR_FUTURE_EXPIRY = "2099-01-01T00:00:00.000Z";
+export const OBJECT_OBSERVED_AT: Readonly<Record<string, string>> = {
+  r: YESTERDAY_INSTANT,
+  c: LAST_WEEK_INSTANT
+};
 
 export const DEPLOYMENT_OBJECTS = ["r", "l", "c", "s", "h", "u"] as const;
 
@@ -26,15 +37,32 @@ export const DEPLOYMENT_ROLES: ReadonlyMap<string, IndexRole> = new Map([
 
 export function productKey(
   objectId: string,
-  hypothesisId = "h0"
+  hypothesisId = "h0",
+  bindingContext = "default",
+  programState = "accepting"
 ): ProductStateKey {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     object_id: objectId,
-    program_state: "accepting",
+    program_state: programState,
     hypothesis_id: hypothesisId,
-    binding_context: "default",
+    binding_context: bindingContext,
     time_state: "as_of"
+  };
+}
+
+export function yesterdayAnchorGuard(): Guard {
+  return {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    kind: "interval_relation",
+    verdict: "unresolved",
+    variable: "r",
+    time_scope: "anchor",
+    interval: {
+      start: YESTERDAY_START,
+      end: YESTERDAY_END,
+      time_domain: "calendar_day"
+    }
   };
 }
 
@@ -92,12 +120,7 @@ export function deploymentProgram(): QueryProgram {
         relation_kind: "failed_deployment",
         source_variable: "anchor",
         target_variable: "r",
-        guard: {
-          schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-          verdict: "true",
-          variable: "r",
-          time_scope: "anchor"
-        },
+        guard: yesterdayAnchorGuard(),
         facet_mode: "same_path",
         threshold_milligrades: 0
       },
@@ -113,6 +136,7 @@ export function deploymentProgram(): QueryProgram {
             target_variable: "c",
             guard: {
               schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+              kind: "interval_relation",
               verdict: "true",
               variable: "c",
               time_scope: "none"
@@ -128,6 +152,7 @@ export function deploymentProgram(): QueryProgram {
             target_variable: "h",
             guard: {
               schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+              kind: "query_predicate",
               verdict: "unresolved",
               variable: "h",
               time_scope: "none"

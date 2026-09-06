@@ -50,7 +50,9 @@ export const FieldValueSchema = z
     schema_version: SchemaVersionSchema,
     state: ProductStateKeySchema,
     milligrades: MilligradeSchema,
-    accepting: z.boolean()
+    accepting: z.boolean(),
+    low_milligrades: MilligradeSchema.optional(),
+    high_milligrades: MilligradeSchema.optional()
   })
   .strict()
   .readonly();

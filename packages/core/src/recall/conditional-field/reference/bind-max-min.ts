@@ -45,7 +45,6 @@ export function admitRequestBudget(budget: RequestBudget): "admit" | "resource_r
   if (budget.finalization_reserve > budget.work_units) return "resource_rejected";
   const exploration = budget.work_units - budget.finalization_reserve;
   if (budget.min_envelope > exploration) return "resource_rejected";
-  if (budget.min_envelope > budget.page_budget) return "resource_rejected";
   if (budget.min_envelope > budget.memory_bytes) return "resource_rejected";
   return "admit";
 }
@@ -126,7 +125,7 @@ function fieldValues(
       schema_version: 1,
       state,
       milligrades,
-      accepting: milligrades > MILLIGRADE_BOTTOM
+      accepting: state.program_state === "accepting"
     });
   }
   return fields;

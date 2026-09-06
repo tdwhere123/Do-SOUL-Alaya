@@ -4,24 +4,33 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   CompletenessReportSchema,
   FacetModeSchema,
+  CompletenessStatusSchema,
+  ConditionalFieldSha256DigestSchema,
+  GuardKindSchema,
   GuardSchema,
   InformationIndexSchema,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
   MilligradeSchema,
+  ObserverStatusSchema,
   ProductStateKeySchema,
+  QueryInterpretationSchema,
   QueryProgramSchema,
   QueryViewSchema,
   RepresentationDecisionSchema,
   RequestBudgetSchema,
-  Sha256DigestSchema,
   Sha256HexSchema,
+  SnapshotReadLeaseSchema,
   formatConditionalFieldDigest
 } from "../../../recall/conditional-field/index.js";
 import {
   COMPATIBILITY_DISPOSITIONS,
   COMPATIBILITY_LEDGER
 } from "./compatibility-ledger.fixture.js";
+import {
+  ORDINARY_LANGUAGE_ADMISSION_STATUSES,
+  OWNERSHIP_LEDGER
+} from "./ownership-ledger.fixture.js";
 
 describe("conditional-field schemas", () => {
   it("keeps epsilon and empty as distinct parseable kinds", () => {
@@ -58,7 +67,13 @@ describe("conditional-field schemas", () => {
       relation_kind: "associated_config",
       source_variable: "r",
       target_variable: "c",
-      guard: { schema_version: 1, verdict: "true", variable: "r", time_scope: "anchor" }
+      guard: {
+        schema_version: 1,
+        kind: "interval_relation",
+        verdict: "true",
+        variable: "r",
+        time_scope: "anchor"
+      }
     });
     expect(relation).toMatchObject({
       kind: "relation",
@@ -119,7 +134,14 @@ describe("conditional-field schemas", () => {
       ]
     });
     expect(program.kind).toBe("sequence");
-    expect(GuardSchema.parse({ schema_version: 1, verdict: "unresolved" }).verdict).toBe("unresolved");
+    expect(GuardSchema.parse({ schema_version: 1, kind: "equality" }).verdict).toBe("unresolved");
+    expect(GuardKindSchema.options).toEqual([
+      "equality",
+      "source_bound_entity",
+      "interval_relation",
+      "authorization",
+      "query_predicate"
+    ]);
     expect(RequestBudgetSchema.parse({
       schema_version: 1,
       work_units: 100,
@@ -130,7 +152,8 @@ describe("conditional-field schemas", () => {
     }).min_envelope).toBe(10);
     const hex = "a".repeat(64);
     expect(Sha256HexSchema.parse(hex)).toBe(hex);
-    expect(Sha256DigestSchema.parse(formatConditionalFieldDigest(hex))).toBe(`sha256:${hex}`);
+    expect(ConditionalFieldSha256DigestSchema.parse(formatConditionalFieldDigest(hex)))
+      .toBe(`sha256:${hex}`);
     expect(() => formatConditionalFieldDigest("zz")).toThrow();
   });
 
@@ -202,5 +225,71 @@ describe("conditional-field schemas", () => {
       .toBe("forbidden-second-selector");
     expect(COMPATIBILITY_LEDGER.find((row) => row.field === "persisted_old_receipts")?.disposition)
       .toBe("freeze-live");
+  });
+
+  it("requires interpretation status and a snapshot pin", () => {
+    const interpretation = QueryInterpretationSchema.parse({
+      schema_version: 1,
+      query_id: "q1",
+      status: "resolved",
+      snapshot_id: `sha256:${"b".repeat(64)}`,
+      program: { schema_version: 1, kind: "epsilon" },
+      view: { schema_version: 1, requested_roles: ["requested"] },
+      holes: [],
+      hypotheses: [],
+      interpretation_clock: "2026-09-06T00:00:00.000Z",
+      time_window: {
+        start: "2026-09-05T00:00:00.000Z",
+        end: "2026-09-06T00:00:00.000Z"
+      }
+    });
+    expect(interpretation.status).toBe("resolved");
+    expect(interpretation.snapshot_id.startsWith("sha256:")).toBe(true);
+    expect(() => QueryInterpretationSchema.parse({
+      schema_version: 1,
+      query_id: "q1",
+      program: { schema_version: 1, kind: "epsilon" },
+      view: { schema_version: 1, requested_roles: ["requested"] },
+      holes: [],
+      hypotheses: []
+    })).toThrow();
+  });
+
+  it("freezes snapshot leases, invalidated completeness, and extra observer statuses", () => {
+    expect(SnapshotReadLeaseSchema.parse({
+      schema_version: 1,
+      lease_id: "lease-1",
+      snapshot_id: `sha256:${"b".repeat(64)}`,
+      query_id: "q1",
+      status: "active"
+    }).status).toBe("active");
+    expect(CompletenessStatusSchema.parse("invalidated")).toBe("invalidated");
+    expect(ObserverStatusSchema.parse("cancelled")).toBe("cancelled");
+    expect(ObserverStatusSchema.parse("unknown")).toBe("unknown");
+  });
+
+  it("keeps an exclusive ownership ledger and ordinary-language admission statuses", () => {
+    expect(OWNERSHIP_LEDGER.length).toBeGreaterThan(0);
+    const seen = new Set<string>();
+    for (const row of OWNERSHIP_LEDGER) {
+      for (const path of row.paths) {
+        expect(seen.has(path), path).toBe(false);
+        seen.add(path);
+      }
+    }
+    expect(ORDINARY_LANGUAGE_ADMISSION_STATUSES).toEqual([
+      "resolved",
+      "hypotheses",
+      "partial",
+      "unsupported",
+      "malformed",
+      "resource_rejected"
+    ]);
+    const c00 = OWNERSHIP_LEDGER.find((row) => row.card === "C00");
+    const c01 = OWNERSHIP_LEDGER.find((row) => row.card === "C01");
+    expect(c00?.classification).toBe("already-written");
+    expect(c01?.paths).toContain("packages/core/src/recall/conditional-field/query/");
+    expect(OWNERSHIP_LEDGER.find((row) => row.card === "live-unowned")?.paths)
+      .toContain("packages/core/src/recall/decision/budget-aware-q/");
   });
 });

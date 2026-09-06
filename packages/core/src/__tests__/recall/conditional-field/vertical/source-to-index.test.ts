@@ -70,7 +70,6 @@ describe("conditional-field SQLite source-to-index slice", () => {
     slice.relationReader.read(WS, MEM.r, "observed_log", 16);
     expect(slice.pendingGarden()).toHaveLength(before);
     expect(slice.pendingGarden()).toHaveLength(0);
-    expect(slice.providerCalls()).toBe(0);
   });
 
   it("A18 hides a tombstone and keeps the current source after close/reopen", async () => {
@@ -123,19 +122,46 @@ describe("conditional-field SQLite source-to-index slice", () => {
     const page = empty.memoryReader.lexical(WS, "failed deployment", 16);
     expect(page.ids).toEqual([]);
     expect(page.truncated).toBe(false);
+    const bound = bindMaxMinField({
+      query_id: "failed-deployment",
+      snapshot_id: snapshotId(),
+      budget: defaultBudget(),
+      seeds: [],
+      transitions: []
+    });
+    if (bound.kind !== "bound") throw new Error("expected bound field");
     const exhausted = mapNativeReaderPage({
       ids: page.ids,
       truncated: page.truncated,
       readerAvailable: true
     });
-    expect(exhausted.outcome.status).toBe("exhausted");
+    const emptyIndex = projectAcceptingIndex({
+      snapshot: bound.snapshot,
+      view: defaultView(),
+      query_id: "failed-deployment",
+      snapshot_id: snapshotId(),
+      result_version: "v1",
+      budget: defaultBudget(),
+      observer: exhausted
+    });
+    expect(emptyIndex.completeness.logical_index).toBe("complete");
+    expect(emptyIndex.completeness.observed_coverage).toBe("exhausted_empty");
     const unavailable = mapNativeReaderPage({
       ids: [],
       truncated: false,
       readerAvailable: false
     });
-    expect(unavailable.outcome.status).toBe("unavailable");
-    expect(unavailable.outcome.status).not.toBe("exhausted");
+    const unavailableIndex = projectAcceptingIndex({
+      snapshot: bound.snapshot,
+      view: defaultView(),
+      query_id: "failed-deployment",
+      snapshot_id: snapshotId(),
+      result_version: "v1",
+      budget: defaultBudget(),
+      observer: unavailable
+    });
+    expect(unavailableIndex.completeness.observed_coverage).toBe("unavailable");
+    expect(unavailableIndex.completeness.logical_index).not.toBe("complete");
   });
 });
 

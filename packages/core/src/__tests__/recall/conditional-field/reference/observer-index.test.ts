@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  type CoverageRegion
+  type CoverageRegion,
+  type ObserverCursor
 } from "@do-soul/alaya-protocol";
 import {
+  advanceObserverCursor,
   mapNativeReaderPage,
-  projectAcceptingIndex
+  projectAcceptingIndex,
+  resumeIdsAfterCursor
 } from "../../../../recall/conditional-field/reference/accepting-projection.js";
 import { bindMaxMinField } from "../../../../recall/conditional-field/reference/bind-max-min.js";
+import { scheduleFairWork } from "../../../../recall/conditional-field/reference/schedule-fair-work.js";
 import {
+  FAR_FUTURE_EXPIRY,
   QUERY_ID,
   RESULT_VERSION,
   SNAPSHOT_ID,
@@ -65,9 +70,6 @@ describe("conditional-field observer and index contracts", () => {
   });
 
   it("A12 distinguishes empty exhausted from unavailable coverage", () => {
-    const empty = mapNativeReaderPage({ ids: [], truncated: false, readerAvailable: true });
-    expect(empty.outcome.status).toBe("exhausted");
-    expect(empty.open_regions).toEqual([]);
     const bound = bindMaxMinField({
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
@@ -76,24 +78,48 @@ describe("conditional-field observer and index contracts", () => {
       transitions: []
     });
     if (bound.kind !== "bound") throw new Error("expected bound field");
-    const index = projectAcceptingIndex({
+    const exhausted = mapNativeReaderPage({ ids: [], truncated: false, readerAvailable: true });
+    const emptyIndex = projectAcceptingIndex({
       snapshot: bound.snapshot,
       view: defaultView(),
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
-      budget: defaultBudget()
+      budget: defaultBudget(),
+      observer: exhausted
     });
-    expect(index.entries).toEqual([]);
-    expect(index.completeness.logical_index).toBe("complete");
-    expect(index.completeness.observed_coverage).toBe("exhausted_empty");
+    expect(emptyIndex.entries).toEqual([]);
+    expect(emptyIndex.completeness.logical_index).toBe("complete");
+    expect(emptyIndex.completeness.observed_coverage).toBe("exhausted_empty");
     const unavailable = mapNativeReaderPage({
       ids: [],
       truncated: false,
       readerAvailable: false
     });
-    expect(unavailable.outcome.status).toBe("unavailable");
-    expect(unavailable.outcome.status).not.toBe("exhausted");
+    const unavailableIndex = projectAcceptingIndex({
+      snapshot: bound.snapshot,
+      view: defaultView(),
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      result_version: RESULT_VERSION,
+      budget: defaultBudget(),
+      observer: unavailable
+    });
+    expect(unavailableIndex.completeness.observed_coverage).toBe("unavailable");
+    expect(unavailableIndex.completeness.logical_index).not.toBe("complete");
+    const interrupted = mapNativeReaderPage({ ids: [], truncated: true, readerAvailable: true });
+    const interruptedIndex = projectAcceptingIndex({
+      snapshot: bound.snapshot,
+      view: defaultView(),
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      result_version: RESULT_VERSION,
+      budget: defaultBudget(),
+      observer: interrupted
+    });
+    expect(interruptedIndex.completeness.logical_index).not.toBe("complete");
+    expect(interruptedIndex.completeness.observed_coverage).not.toBe("exhausted_empty");
+    expect(interruptedIndex.completeness.observed_coverage).not.toBe("complete");
   });
 
   it("A13 can complete the logical index with unknown common cause", () => {
@@ -140,6 +166,7 @@ describe("conditional-field observer and index contracts", () => {
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
       budget: defaultBudget({ page_budget: 2 }),
+      expires_at: FAR_FUTURE_EXPIRY,
       roles: new Map([
         ["r", "requested"],
         ["l", "associated"],
@@ -207,6 +234,7 @@ describe("conditional-field observer and index contracts", () => {
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
       budget: defaultBudget({ page_budget: 1 }),
+      expires_at: FAR_FUTURE_EXPIRY,
       roles: new Map([
         ["r", "requested"],
         ["l", "associated"],
@@ -216,6 +244,70 @@ describe("conditional-field observer and index contracts", () => {
     expect(first.completeness.transport).toBe("partial");
     expect(first.continuation).not.toBeNull();
     expect(JSON.stringify(first.completeness)).not.toContain("complete_inline");
+  });
+
+  it("commits cursor progress only after observed identities", () => {
+    const start: ObserverCursor = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      cursor_id: "seed-cursor",
+      snapshot_id: SNAPSHOT_ID,
+      query_id: QUERY_ID,
+      region_id: "seed",
+      position: null,
+      committed_through: null
+    };
+    const ids = ["a", "b", "c"];
+    expect(resumeIdsAfterCursor(ids, start)).toEqual(ids);
+    const afterA = advanceObserverCursor(start, "a");
+    expect(afterA.position).toBe("a");
+    expect(afterA.committed_through).toBe("a");
+    expect(resumeIdsAfterCursor(ids, afterA)).toEqual(["b", "c"]);
+    expect(resumeIdsAfterCursor(ids, afterA)).not.toContain("a");
+  });
+
+  it("invalidates an expired or revised continuation instead of an old complete index", () => {
+    const bound = bindMaxMinField({
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      seeds: deploymentSeeds(),
+      transitions: deploymentTransitions()
+    });
+    if (bound.kind !== "bound") throw new Error("expected bound field");
+    const expired = projectAcceptingIndex({
+      snapshot: bound.snapshot,
+      view: defaultView(),
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      result_version: RESULT_VERSION,
+      budget: defaultBudget({ page_budget: 2 }),
+      expires_at: "2026-01-01T00:00:00.000Z",
+      as_of: "2026-09-06T00:00:00.000Z",
+      roles: new Map([["r", "requested"], ["c", "associated"]])
+    });
+    expect(expired.completeness.observed_coverage).toBe("invalidated");
+    expect(expired.completeness.logical_index).not.toBe("complete");
+    expect(expired.continuation).toBeNull();
+    const revised = projectAcceptingIndex({
+      snapshot: bound.snapshot,
+      view: defaultView(),
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      result_version: RESULT_VERSION,
+      budget: defaultBudget(),
+      prior_continuation: {
+        schema_version: 1,
+        continuation_id: "page-2",
+        query_id: QUERY_ID,
+        snapshot_id: `sha256:${"e".repeat(64)}`,
+        result_version: RESULT_VERSION,
+        expires_at: FAR_FUTURE_EXPIRY,
+        cursor: "offset-2"
+      },
+      roles: new Map([["r", "requested"], ["c", "associated"]])
+    });
+    expect(revised.completeness.observed_coverage).toBe("invalidated");
+    expect(revised.completeness.logical_index).not.toBe("complete");
   });
 });
 
@@ -228,48 +320,10 @@ function openRegion(id: string, kind: CoverageRegion["kind"]): CoverageRegion {
   };
 }
 
-function entryKey(entry: { readonly object_id: string; readonly hypothesis_id: string }): string {
-  return `${entry.hypothesis_id}:${entry.object_id}`;
-}
-
-function scheduleFairWork(input: Readonly<{
-  readonly regions: readonly Readonly<{
-    readonly id: string;
-    readonly priority: number;
-    readonly finite: boolean;
-    readonly work: number;
-  }>[];
-  readonly explorationBudget: number;
-  readonly finalizationReserve: number;
-  readonly totalWork: number;
-}>): Readonly<{
-  readonly served: readonly string[];
-  readonly remainingReserve: number;
-  readonly starvedFinite: boolean;
-}> {
-  const exploration = Math.min(
-    input.explorationBudget,
-    Math.max(0, input.totalWork - input.finalizationReserve)
-  );
-  const served: string[] = [];
-  let remaining = exploration;
-  const finite = input.regions.filter((region) => region.finite)
-    .sort((left, right) => left.priority - right.priority);
-  const infinite = input.regions.filter((region) => !region.finite)
-    .sort((left, right) => right.priority - left.priority);
-  for (const region of finite) {
-    if (remaining < region.work) continue;
-    remaining -= region.work;
-    served.push(region.id);
-  }
-  for (const region of infinite) {
-    if (remaining <= 0) break;
-    remaining -= Math.min(remaining, region.work);
-    served.push(region.id);
-  }
-  return {
-    served,
-    remainingReserve: input.finalizationReserve,
-    starvedFinite: finite.some((region) => !served.includes(region.id))
-  };
+function entryKey(entry: {
+  readonly object_id: string;
+  readonly hypothesis_id: string;
+  readonly output_binding: string;
+}): string {
+  return `${entry.hypothesis_id}:${entry.output_binding}:${entry.object_id}`;
 }

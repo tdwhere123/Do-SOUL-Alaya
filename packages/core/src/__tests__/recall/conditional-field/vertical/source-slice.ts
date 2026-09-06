@@ -73,7 +73,6 @@ export async function openSourceSlice(
   memoryReader.prepareIndex();
   const memoryIds: string[] = [];
   const evidenceIds: string[] = [];
-  let providerCalls = 0;
   const memory = new MemoryService({
     now: () => NOW,
     generateObjectId: () => {
@@ -222,8 +221,7 @@ export async function openSourceSlice(
     relationReader,
     writeMemory,
     admitRelation,
-    pendingGarden: () => garden.peekPending(GardenRole.LIBRARIAN, WS, 128),
-    providerCalls: () => providerCalls
+    pendingGarden: () => garden.peekPending(GardenRole.LIBRARIAN, WS, 128)
   };
 }
 

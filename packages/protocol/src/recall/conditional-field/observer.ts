@@ -17,7 +17,9 @@ export const ObserverStatusSchema = z.enum([
   "unavailable",
   "interrupted",
   "invalidated",
-  "not_applicable"
+  "not_applicable",
+  "cancelled",
+  "unknown"
 ]);
 
 export const ObserverOutcomeSchema = z
@@ -35,7 +37,20 @@ export const ObserverCursorSchema = z
     snapshot_id: Sha256DigestSchema,
     query_id: ConditionalFieldIdSchema,
     region_id: ConditionalFieldIdSchema,
-    position: ConditionalFieldIdSchema.nullable()
+    position: ConditionalFieldIdSchema.nullable(),
+    // Progress commits only after identities are observed; retry resumes here.
+    committed_through: ConditionalFieldIdSchema.nullable()
+  })
+  .strict()
+  .readonly();
+
+export const SnapshotReadLeaseSchema = z
+  .object({
+    schema_version: SchemaVersionSchema,
+    lease_id: ConditionalFieldIdSchema,
+    snapshot_id: Sha256DigestSchema,
+    query_id: ConditionalFieldIdSchema,
+    status: z.enum(["active", "expired", "invalidated"])
   })
   .strict()
   .readonly();
@@ -48,7 +63,9 @@ export const CoverageRegionSchema = z
     region_id: ConditionalFieldIdSchema,
     kind: CoverageRegionKindSchema,
     status: ObserverStatusSchema,
-    conservative_bound_milligrades: MilligradeSchema.optional()
+    conservative_bound_milligrades: MilligradeSchema.optional(),
+    low_milligrades: MilligradeSchema.optional(),
+    high_milligrades: MilligradeSchema.optional()
   })
   .strict()
   .readonly();
@@ -70,7 +87,9 @@ export const TypedObservationSchema = z
     object_id: ConditionalFieldIdSchema,
     source_revision: ConditionalFieldIdSchema,
     applicability: GuardSchema,
-    association_milligrades: MilligradeSchema.optional()
+    association_milligrades: MilligradeSchema.optional(),
+    low_milligrades: MilligradeSchema.optional(),
+    high_milligrades: MilligradeSchema.optional()
   })
   .strict()
   .readonly();
@@ -91,6 +110,7 @@ export const ObserverPageSchema = z
 export type ObserverStatus = z.infer<typeof ObserverStatusSchema>;
 export type ObserverOutcome = z.infer<typeof ObserverOutcomeSchema>;
 export type ObserverCursor = z.infer<typeof ObserverCursorSchema>;
+export type SnapshotReadLease = z.infer<typeof SnapshotReadLeaseSchema>;
 export type CoverageRegionKind = z.infer<typeof CoverageRegionKindSchema>;
 export type CoverageRegion = z.infer<typeof CoverageRegionSchema>;
 export type ObserverAction = z.infer<typeof ObserverActionSchema>;

@@ -19,6 +19,7 @@ export const IndexEntrySchema = z
     schema_version: SchemaVersionSchema,
     object_id: ConditionalFieldIdSchema,
     hypothesis_id: ConditionalFieldIdSchema,
+    output_binding: ConditionalFieldIdSchema,
     role: IndexRoleSchema,
     association_milligrades: MilligradeSchema,
     claim: ClaimStateSchema,
@@ -34,7 +35,8 @@ export const CompletenessStatusSchema = z.enum([
   "unavailable",
   "resource_rejected",
   "interrupted",
-  "exhausted_empty"
+  "exhausted_empty",
+  "invalidated"
 ]);
 
 export const CompletenessReportSchema = z

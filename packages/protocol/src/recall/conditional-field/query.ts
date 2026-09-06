@@ -9,18 +9,41 @@ import {
   ConditionalFieldIdSchema,
   FacetModeSchema,
   MilligradeSchema,
-  SchemaVersionSchema
+  SchemaVersionSchema,
+  Sha256DigestSchema
 } from "./common.js";
 
 export const GuardVerdictSchema = z.enum(["true", "false", "unresolved"]);
 export const GuardTimeScopeSchema = z.enum(["anchor", "associated", "none"]);
+export const GuardKindSchema = z.enum([
+  "equality",
+  "source_bound_entity",
+  "interval_relation",
+  "authorization",
+  "query_predicate"
+]);
+
+export const GuardIntervalSchema = z
+  .object({
+    start: IsoDatetimeStringSchema,
+    end: IsoDatetimeStringSchema,
+    time_domain: BoundedLabelSchema
+  })
+  .strict()
+  .readonly();
 
 export const GuardSchema = z
   .object({
     schema_version: SchemaVersionSchema,
-    verdict: GuardVerdictSchema,
+    kind: GuardKindSchema,
+    verdict: GuardVerdictSchema.default("unresolved"),
     variable: ConditionalFieldIdSchema.optional(),
-    time_scope: GuardTimeScopeSchema.optional()
+    time_scope: GuardTimeScopeSchema.optional(),
+    equals_variable: ConditionalFieldIdSchema.optional(),
+    entity_id: ConditionalFieldIdSchema.optional(),
+    interval: GuardIntervalSchema.optional(),
+    predicate_name: BoundedLabelSchema.optional(),
+    authorization_scope: BoundedLabelSchema.optional()
   })
   .strict()
   .readonly();
@@ -193,25 +216,49 @@ export const QueryProgramSchema: z.ZodType<QueryProgram> = z.lazy(() =>
   ])
 );
 
+export const QueryInterpretationStatusSchema = z.enum([
+  "resolved",
+  "hypotheses",
+  "partial",
+  "unsupported",
+  "malformed",
+  "resource_rejected"
+]);
+
+export const QueryTimeWindowSchema = z
+  .object({
+    start: IsoDatetimeStringSchema,
+    end: IsoDatetimeStringSchema
+  })
+  .strict()
+  .readonly();
+
 export const QueryInterpretationSchema = z
   .object({
     schema_version: SchemaVersionSchema,
     query_id: ConditionalFieldIdSchema,
+    status: QueryInterpretationStatusSchema,
+    snapshot_id: Sha256DigestSchema,
     program: QueryProgramSchema,
     view: QueryViewSchema,
     holes: z.array(QueryHoleSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     hypotheses: z.array(QueryHypothesisSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
-    interpretation_clock: IsoDatetimeStringSchema.optional()
+    interpretation_clock: IsoDatetimeStringSchema.optional(),
+    time_window: QueryTimeWindowSchema.optional()
   })
   .strict()
   .readonly();
 
 export type GuardVerdict = z.infer<typeof GuardVerdictSchema>;
 export type GuardTimeScope = z.infer<typeof GuardTimeScopeSchema>;
+export type GuardKind = z.infer<typeof GuardKindSchema>;
+export type GuardInterval = z.infer<typeof GuardIntervalSchema>;
 export type Guard = z.infer<typeof GuardSchema>;
 export type QueryView = z.infer<typeof QueryViewSchema>;
 export type QueryHole = z.infer<typeof QueryHoleSchema>;
 export type QueryBinding = z.infer<typeof QueryBindingSchema>;
 export type QueryHypothesis = z.infer<typeof QueryHypothesisSchema>;
 export type RequestBudget = z.infer<typeof RequestBudgetSchema>;
+export type QueryInterpretationStatus = z.infer<typeof QueryInterpretationStatusSchema>;
+export type QueryTimeWindow = z.infer<typeof QueryTimeWindowSchema>;
 export type QueryInterpretation = z.infer<typeof QueryInterpretationSchema>;
