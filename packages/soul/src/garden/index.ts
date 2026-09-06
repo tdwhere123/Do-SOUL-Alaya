@@ -99,8 +99,7 @@ export {
   canonicalizeSemanticExtractionProfile,
   computeSemanticArtifactKey,
   defaultSourceEnrichmentProfile,
-  semanticExtractionProfilesEqual,
-  tenantArtifactReuseAllowed
+  semanticExtractionProfilesEqual
 } from "./ingestion/official-api/semantic-artifact-identity.js";
 export { OfficialApiSemanticArtifactCodec } from "./ingestion/official-api/semantic-artifact.js";
 export {

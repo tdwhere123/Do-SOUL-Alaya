@@ -139,6 +139,14 @@ describe('durable semantic artifact lifecycle', () => {
     expect(count(f.slice.database, 'garden_semantic_artifacts')).toBe(0);
   });
 
+  it('fails closed when the reserved request-byte envelope is exhausted', async () => {
+    const f = await fixture();
+    const t = transport();
+    const task = await f.write(MEM.orion, 'Alice owns Orion');
+    expect(await f.worker(t, f.audit, 3, 1).run(WS, task)).toBe('token_envelope_exhausted');
+    expect(t.calls).toHaveLength(0);
+  });
+
   it('publishes a reconciled successful response without retransmitting an uncertain attempt', async () => {
     const f = await fixture();
     const task = await f.write(MEM.orion, 'Alice owns Orion');

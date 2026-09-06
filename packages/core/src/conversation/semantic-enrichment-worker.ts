@@ -19,23 +19,28 @@ export interface SemanticEnrichmentWorkerDependencies {
   readonly maxLocalRecoveries: number;
   readonly transportTimeoutMs: number;
   readonly maxDispatchCalls?: number;
+  readonly maxReservedUtf8Bytes?: number;
 }
 
 /** Explicitly invoked worker; daemon scheduling remains the Garden composition owner's responsibility. */
 export class SemanticEnrichmentWorker {
   private readonly maxDispatchCalls: number;
+  private readonly maxReservedUtf8Bytes: number;
   private dispatchCalls = 0;
+  private reservedUtf8Bytes = 0;
 
   public constructor(private readonly deps: SemanticEnrichmentWorkerDependencies) {
     this.maxDispatchCalls = deps.maxDispatchCalls ?? deps.maxAttempts * deps.maxUnits;
+    this.maxReservedUtf8Bytes = deps.maxReservedUtf8Bytes ?? deps.maxUnits * 16_384;
     for (const bound of [deps.leaseMs, deps.maxAttempts, deps.maxUnits, deps.transportTimeoutMs,
-      deps.maxLocalRecoveries, this.maxDispatchCalls]) {
+      deps.maxLocalRecoveries, this.maxDispatchCalls, this.maxReservedUtf8Bytes]) {
       if (!Number.isSafeInteger(bound) || bound < 1) throw new Error("invalid enrichment bound");
     }
   }
 
   public async run(workspaceId: string, taskId: string, options: { readonly adoptClaim?: boolean } = {}): Promise<string> {
     this.dispatchCalls = 0;
+    this.reservedUtf8Bytes = 0;
     const task = await this.acquire(workspaceId, taskId, options.adoptClaim === true);
     if (typeof task === 'string') return task;
     const source = this.deps.repo.source(workspaceId, task.objectId);
@@ -106,8 +111,12 @@ export class SemanticEnrichmentWorker {
       attempt = this.deps.repo.attempt(task.id, work.key);
     }
     if (!attempt || attempt.state === 'not_sent') {
+      const charge = Buffer.byteLength(work.requestJson, "utf8");
       if ((attempt?.ordinal ?? 0) >= this.deps.maxAttempts || this.dispatchCalls >= this.maxDispatchCalls) {
         return this.fail(task, 'dispatch_bound');
+      }
+      if (this.reservedUtf8Bytes + charge > this.maxReservedUtf8Bytes) {
+        return this.fail(task, 'token_envelope_exhausted');
       }
       const id = randomUUID();
       const reserved = await this.deps.audit('dispatched', task, () => this.deps.repo.dispatch(task, work.key, id));
@@ -115,6 +124,7 @@ export class SemanticEnrichmentWorker {
       let raw: string;
       try {
         this.dispatchCalls += 1;
+        this.reservedUtf8Bytes += charge;
         raw = await this.bounded((signal) => this.deps.transport.execute(work.requestJson, id, signal));
       } catch {
         await this.deps.audit('uncertain', task, () => this.deps.repo.uncertain(task, id));

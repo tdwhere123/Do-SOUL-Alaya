@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
-import type { SemanticExtractionProfile } from "@do-soul/alaya-protocol";
+import {
+  SOURCE_ENRICHMENT_CONTRACT,
+  type SemanticExtractionProfile
+} from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION } from "./formation-audit.js";
 import { OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION } from "../official-api-signal-parser.js";
-import { capabilityIdentity, OFFICIAL_API_SIGNALS_CAPABILITY } from "./extraction-capability.js";
+import { capabilityIdentity, OFFICIAL_API_SIGNALS_CAPABILITY, resolveExtractionCapability } from "./extraction-capability.js";
+import { officialApiExtractionRequestTemplatePreimage } from "./extraction-request.js";
+import { OFFICIAL_API_SYSTEM_PROMPT } from "./system-prompt.js";
 
-export const SOURCE_ENRICHMENT_CONTRACT = "source_enrichment.v1";
+export { SOURCE_ENRICHMENT_CONTRACT };
 
 export function canonicalizeSemanticExtractionProfile(
   profile: SemanticExtractionProfile
@@ -38,6 +43,7 @@ export function computeSemanticArtifactKey(
   profile: SemanticExtractionProfile
 ): string {
   const canonical = canonicalizeSemanticExtractionProfile(profile);
+  resolveExtractionCapability(canonical.capability);
   if (!/^[a-f0-9]{64}$/u.test(semanticKey)) {
     throw new Error("semantic artifact key requires an assertion semantic key");
   }
@@ -49,7 +55,9 @@ export function computeSemanticArtifactKey(
     canonical.promptRevision,
     canonical.outputSchema,
     OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
-    OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION
+    OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION,
+    createHash("sha256").update(OFFICIAL_API_SYSTEM_PROMPT, "utf8").digest("hex"),
+    createHash("sha256").update(officialApiExtractionRequestTemplatePreimage(), "utf8").digest("hex")
   ]), "utf8").digest("hex");
 }
 
@@ -66,9 +74,4 @@ export function defaultSourceEnrichmentProfile(input: {
   });
 }
 
-export function tenantArtifactReuseAllowed(
-  artifactWorkspaceId: string,
-  requestWorkspaceId: string
-): boolean {
-  return artifactWorkspaceId === requestWorkspaceId;
-}
+

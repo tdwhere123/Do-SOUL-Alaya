@@ -56,7 +56,8 @@ export function createSourceEnrichmentRuntime(input: Readonly<{
     maxAttempts: 3,
     maxUnits: 32,
     transportTimeoutMs: 20_000,
-    maxLocalRecoveries: 8
+    maxLocalRecoveries: 8,
+    maxReservedUtf8Bytes: 262_144
   });
   return {
     run: async (task) => await worker.run(task.workspace_id, task.task_id, { adoptClaim: true })

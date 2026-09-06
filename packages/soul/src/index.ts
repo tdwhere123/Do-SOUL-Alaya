@@ -257,6 +257,5 @@ export {
   canonicalizeSemanticExtractionProfile,
   computeSemanticArtifactKey,
   defaultSourceEnrichmentProfile,
-  semanticExtractionProfilesEqual,
-  tenantArtifactReuseAllowed
+  semanticExtractionProfilesEqual
 } from "./garden/ingestion/official-api/semantic-artifact-identity.js";

@@ -1,6 +1,6 @@
 import { memorySourceRevision } from "../memory-entry/source-revision.js";
 import { createHash, randomUUID } from "node:crypto";
-import { GardenRole, GardenTaskKind, type AdmittedSemanticArtifact,
+import { GardenRole, GardenTaskKind, SOURCE_ENRICHMENT_CONTRACT, type AdmittedSemanticArtifact,
   type SemanticArtifactRepositoryPort, type SemanticArtifactWork,
   type SemanticEnrichmentTask, type SemanticExtractionProfile,
   type SemanticSourceSnapshot, type SemanticTransportAttempt } from "@do-soul/alaya-protocol";
@@ -38,7 +38,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     private readonly db: SqliteConnection,
     private readonly garden: SqliteGardenTaskRepo,
     private readonly defaultProfile: SemanticExtractionProfile | null = null,
-    private readonly enrichmentContract = "source_enrichment.v1"
+    private readonly enrichmentContract = SOURCE_ENRICHMENT_CONTRACT
   ) {
     assertSemanticArtifactCandidateSchema(db);
     db.function(this.visitFunction, (id: string, callId: number) => {

@@ -5,12 +5,16 @@ import { planOfficialApiSemanticWorkset, assertOfficialApiSemanticWorkUnit,
 import { auditOfficialApiSignalFormation } from "./formation-audit.js";
 import { canonicalizeSemanticExtractionProfile, computeSemanticArtifactKey } from
   "./semantic-artifact-identity.js";
+import { resolveExtractionCapability } from "./extraction-capability.js";
 import { buildOfficialApiSourceCorpus } from "../../triage/grounding/source-locator.js";
 
 /** Shares the source work-unit and formation owners; artifacts contain proposals, never admitted truth. */
 export class OfficialApiSemanticArtifactCodec implements SemanticArtifactCodec {
   public plan(source: SemanticSourceSnapshot, profile: SemanticExtractionProfile): readonly SemanticArtifactWork[] {
     const canonical = canonicalizeSemanticExtractionProfile(profile);
+    if (resolveExtractionCapability(canonical.capability).materializer !== "official_api_signals") {
+      throw new Error(`extraction capability ${canonical.capability} is not official-api materializable`);
+    }
     const units = planOfficialApiSemanticWorkset(source.content, [
       { role: source.trustedRole, content: source.content }
     ]).units;

@@ -12,7 +12,7 @@ import { EventPublisher } from "../../../runtime/event-publisher.js";
 import { createSliceHarness } from "./harness.js";
 import { NOW, WS, RUN } from "./ids.js";
 
-export const PROFILE: SemanticExtractionProfile = Object.freeze({ capability: 'source_grounded_proposal',
+export const PROFILE: SemanticExtractionProfile = Object.freeze({ capability: 'official_api_signals:v1',
   model: 'external-transport-fixture', requestProfile: 'logical-request-v1',
   promptRevision: 'fixture-prompt-v1', outputSchema: 'official-api-signals-v1' });
 
@@ -35,9 +35,10 @@ export function wireArtifacts(database: StorageDatabase) {
       entity_type: 'garden_task', entity_id: task.id, workspace_id: task.workspaceId,
       run_id: RUN, caused_by: 'garden', payload_json: SoulGardenSemanticEnrichmentPayloadSchema.parse({ task_id: task.id, source_revision: task.revision, action }) }], mutate);
   function worker(transport: SemanticEnrichmentWorkerDependencies['transport'],
-    auditOverride = audit, maxAttempts = 3) {
+    auditOverride = audit, maxAttempts = 3, maxReservedUtf8Bytes = 32 * 16_384) {
     return new SemanticEnrichmentWorker({ repo, codec, transport, audit: auditOverride,
-      now: () => now, leaseMs: 1000, maxAttempts, maxUnits: 32, transportTimeoutMs: 100, maxLocalRecoveries: 8 });
+      now: () => now, leaseMs: 1000, maxAttempts, maxUnits: 32, transportTimeoutMs: 100, maxLocalRecoveries: 8,
+      maxReservedUtf8Bytes });
   }
   return { events, garden, repo, codec, audit, worker,
     advance: () => { now = new Date(Date.parse(now) + 2000).toISOString(); } };

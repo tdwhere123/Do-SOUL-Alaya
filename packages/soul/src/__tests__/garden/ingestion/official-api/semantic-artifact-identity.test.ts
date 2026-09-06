@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeSemanticArtifactKey,
   defaultSourceEnrichmentProfile,
-  semanticExtractionProfilesEqual,
-  tenantArtifactReuseAllowed
+  semanticExtractionProfilesEqual
 } from "../../../../garden/ingestion/official-api/semantic-artifact-identity.js";
 import { OfficialApiSemanticArtifactCodec } from
   "../../../../garden/ingestion/official-api/semantic-artifact.js";
@@ -30,9 +29,7 @@ describe("official API semantic artifact identity", () => {
     expect(otherContext[0]!.semanticKey).not.toBe(work[0]!.semanticKey);
   });
 
-  it("keeps tenant reuse workspace-scoped and names official-api capability identity", () => {
-    expect(tenantArtifactReuseAllowed("ws-a", "ws-a")).toBe(true);
-    expect(tenantArtifactReuseAllowed("ws-a", "ws-b")).toBe(false);
+  it("names official-api capability identity and rejects unknown capabilities", () => {
     expect(capabilityIdentity(OFFICIAL_API_SIGNALS_CAPABILITY)).toBe("official_api_signals:v1");
     expect(resolveExtractionCapability("official_api_signals:v1").materializer).toBe("official_api_signals");
     expect(semanticExtractionProfilesEqual(profile, { ...profile })).toBe(true);
