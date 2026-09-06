@@ -35,6 +35,24 @@ describe("Phase 4A protocol schemas", () => {
     expect(GardenTaskDescriptorSchema.parse(descriptor)).toEqual(descriptor);
   });
 
+  it("parses additive source-enrichment identity fields on a descriptor", () => {
+    const descriptor = {
+      task_id: "source_enrich_1",
+      task_kind: GardenTaskKind.BULK_ENRICH,
+      required_tier: GardenTier.TIER_2,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_refs: ["memory-1"],
+      priority: 20,
+      created_at: validTimestamp,
+      source_object_id: "memory-1",
+      source_revision: 3,
+      enrichment_contract: "source_enrichment.v1"
+    } as const;
+
+    expect(GardenTaskDescriptorSchema.parse(descriptor)).toEqual(descriptor);
+  });
+
   it("rejects invalid descriptor tiers and out-of-range priorities", () => {
     expect(() =>
       GardenTaskDescriptorSchema.parse({

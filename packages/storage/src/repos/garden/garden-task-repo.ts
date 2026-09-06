@@ -21,6 +21,7 @@ import {
   parseLimit,
   roleRank,
   stringifyPayload,
+  resolveDuplicateGardenEnqueue,
   type GardenTaskBacklogCountDbRow,
   type GardenTaskDbRow
 } from "./mappers/garden-task-rows.js";
@@ -83,17 +84,8 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       this.enqueueStatement.run(id, workspaceId, role, kind, payloadJson, createdAt);
       return { task_id: id };
     } catch (error) {
-      // Surface PK collisions as the structured DUPLICATE_KEY error code,
-      // matching the convention the workspace repo uses. Callers (notably the
-      // POST_TURN_EXTRACT dedupe path) use `error.code === "DUPLICATE_KEY"`
-      // instead of walking the SQLite error message string, which couples the
-      // dedupe contract to better-sqlite3's internal text format.
       if (isUniqueConstraintError(error, "garden_tasks.id")) {
-        throw new StorageError(
-          "DUPLICATE_KEY",
-          `Garden task ${id} already exists.`,
-          error
-        );
+        return resolveDuplicateGardenEnqueue(this.findById(id), id, input.payload, payloadJson, error);
       }
       throw new StorageError("QUERY_FAILED", `Failed to enqueue Garden task ${id}.`, error);
     }
@@ -477,4 +469,5 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
       );
     }
   }
+
 }

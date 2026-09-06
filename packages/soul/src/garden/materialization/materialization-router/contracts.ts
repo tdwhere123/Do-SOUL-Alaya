@@ -113,12 +113,12 @@ export type MemoryMaterializationInput = Omit<
   | "superseded_by"
 > & {
   readonly storage_tier?: MemoryEntry["storage_tier"];
-  // invariant: atomic create + enrich_pending no-drop marker. When set, the
-  // memory-create port commits the row + the enrich_pending marker in ONE
-  // transaction (or neither, so the originating signal can replay). The router
-  // sets this ONLY on memory-creating branches that owe enrichment; the port
-  // reports back via MaterializationCreatedObject.enrichmentEnqueued. When the
-  // port does not honor the atomic seam the router falls back to a loud (not
+  // invariant: atomic create + recoverable Garden intent. When set, the
+  // memory-create port commits the row + work intent in ONE transaction
+  // (or neither, so the originating signal can replay). The router sets this
+  // ONLY on memory-creating branches that owe enrichment; the port reports
+  // back via MaterializationCreatedObject.enrichmentEnqueued. When the port
+  // does not honor the atomic seam the router falls back to a loud (not
   // swallowed) separate enqueue. workspace_id + memory_id are filled by the
   // truth boundary from the created row.
   // see also: packages/core/src/memory/memory-service/service.ts:MemoryService.create.

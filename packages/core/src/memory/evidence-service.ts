@@ -36,6 +36,7 @@ import {
 import { createSourceAdmissionPort } from "./evidence-create/source-admission.js";
 import type { EvidenceFactFrameProposalNormalizer } from
   "./fact-frame-formation/declarative-normalizer.js";
+import type { SourceWriteGardenIntentPort } from "./source-write-garden-intent.js";
 
 const evidenceHealthTransitions: Readonly<Record<EvidenceHealthState, readonly EvidenceHealthState[]>> = {
   verified: ["questionable", "degraded", "broken"],
@@ -153,6 +154,7 @@ export interface EvidenceServiceDependencies {
     requestRebuild(workspaceId: string, requestedAt: string): void;
     drainPending(): void;
   }>;
+  readonly gardenIntentPort?: SourceWriteGardenIntentPort;
 }
 
 export class EvidenceService {
@@ -182,7 +184,11 @@ export class EvidenceService {
     input: EvidenceCapsuleInput,
     searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
     factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>,
-    semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>
+    semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>,
+    enqueueEnrichment?: {
+      readonly runId: string | null;
+      readonly sourceSignalId: string | null;
+    }
   ): Promise<Readonly<EvidenceCapsule>> {
     return await createEvidenceCapsule({
       capsuleInput: input,
@@ -200,7 +206,11 @@ export class EvidenceService {
       sourceAdmission: this.sourceAdmission,
       factorIncidence: this.factorIncidence,
       fieldStores: this.fieldStores,
-      semanticExtractor: this.dependencies.semanticExtractor
+      semanticExtractor: this.dependencies.semanticExtractor,
+      ...(this.dependencies.gardenIntentPort === undefined
+        ? {}
+        : { gardenIntentPort: this.dependencies.gardenIntentPort }),
+      ...(enqueueEnrichment === undefined ? {} : { enqueueEnrichment })
     });
   }
 

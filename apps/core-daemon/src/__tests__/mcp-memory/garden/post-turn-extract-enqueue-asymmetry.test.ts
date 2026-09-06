@@ -1,22 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
   ContextDeliveryRecord,
-  SoulMemorySearchRequest,
   SoulReportContextUsageRequest
 } from "@do-soul/alaya-protocol";
-import {
-  enqueuePostTurnExtractTask,
-  enqueueRecallExtractTask
-} from "../../../mcp-memory/garden-task/post-turn-extract-queue.js";
+import { enqueuePostTurnExtractTask } from "../../../mcp-memory/garden-task/post-turn-extract-queue.js";
 import type {
   RecallUsageHandlerDependencies,
   RecallUsageToolCallContext
 } from "../../../mcp-memory/recall/recall-usage-handlers.js";
-
-// invariant: the two enqueue paths are DELIBERATELY asymmetric on failure —
-// the recall path is best-effort passive ingestion (§17) so it WARNS and
-// returns; the report path is caller-driven so a real enqueue failure THROWS.
-// see also: apps/core-daemon/src/mcp-memory/post-turn-extract-queue.ts
+import * as postTurnExtractQueue from "../../../mcp-memory/garden-task/post-turn-extract-queue.js";
 
 const context: RecallUsageToolCallContext = {
   workspaceId: "ws-1",
@@ -34,11 +26,6 @@ function failingGardenTaskRepo(): NonNullable<RecallUsageHandlerDependencies["ga
     peekPending: () => []
   };
 }
-
-const recallRequest = {
-  query: "where did the user say they live this past year",
-  max_results: 5
-} as unknown as SoulMemorySearchRequest;
 
 const linkedDelivery = {
   delivery_id: "delivery-1",
@@ -61,24 +48,10 @@ const reportRequest = {
   }
 } as unknown as SoulReportContextUsageRequest;
 
-describe("post-turn extract enqueue failure asymmetry", () => {
-  it("recall enqueue WARNS (does not throw) on a non-duplicate enqueue failure", () => {
-    const warn = vi.fn();
-    const deps = { gardenTaskRepo: failingGardenTaskRepo() } as unknown as RecallUsageHandlerDependencies;
-
-    expect(() =>
-      enqueueRecallExtractTask(
-        { deps, now: () => "2026-06-23T00:00:00.000Z", warn },
-        recallRequest,
-        context,
-        []
-      )
-    ).not.toThrow();
-
-    expect(warn).toHaveBeenCalledWith(
-      "recall-driven extract task enqueue failed; skipping.",
-      expect.objectContaining({ workspace_id: "ws-1", run_id: "run-1" })
-    );
+describe("post-turn extract enqueue", () => {
+  it("does not export recall-query extract enqueue", () => {
+    expect("enqueueRecallExtractTask" in postTurnExtractQueue).toBe(false);
+    expect("buildRecallExtractTaskId" in postTurnExtractQueue).toBe(false);
   });
 
   it("report enqueue THROWS on a non-duplicate enqueue failure", () => {

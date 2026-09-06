@@ -331,9 +331,9 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     expect(events[0]?.payload_json).toMatchObject({ success: false });
   });
 
-  // invariant: duplicate task ids surface as StorageError code
-  // "DUPLICATE_KEY"; callers must not parse better-sqlite3 message text.
-  it("surfaces DUPLICATE_KEY when an explicit task_id is reused", () => {
+  // invariant: equal identity/payload reuses the unique key; a mismatched
+  // payload on the same id is conflict, not a silent overwrite.
+  it("coalesces equal duplicate enqueue and conflicts on mismatched payload", () => {
     const { repo } = createHarness();
     const baseInput = {
       id: "task-duplicate",
@@ -351,15 +351,20 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
         created_at: "2026-05-07T00:00:00.000Z"
       } as GardenTaskDescriptor
     };
-    repo.enqueue(baseInput);
+    expect(repo.enqueue(baseInput).task_id).toBe("task-duplicate");
+    expect(repo.enqueue(baseInput).task_id).toBe("task-duplicate");
+    expect(repo.peekPending(GardenRole.JANITOR, "workspace-a", 8)).toHaveLength(1);
 
     let captured: unknown;
     try {
-      repo.enqueue(baseInput);
+      repo.enqueue({
+        ...baseInput,
+        payload: { ...baseInput.payload, target_object_refs: ["memory-other"] }
+      });
     } catch (error) {
       captured = error;
     }
     expect(captured).toBeDefined();
-    expect((captured as { readonly code?: unknown }).code).toBe("DUPLICATE_KEY");
+    expect((captured as { readonly code?: unknown }).code).toBe("CONFLICT");
   });
 });

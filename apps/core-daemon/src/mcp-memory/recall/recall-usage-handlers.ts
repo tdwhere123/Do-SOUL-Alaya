@@ -26,7 +26,7 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import type { GardenTaskEnqueueInput, GardenTaskRow } from "@do-soul/alaya-storage";
-import { enqueuePostTurnExtractTask, enqueueRecallExtractTask } from "../garden-task/post-turn-extract-queue.js";
+import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-queue.js";
 import {
   buildMemorySearchResult,
   buildRecallStrategyMix,
@@ -179,7 +179,6 @@ async function executeRecall(
   const { results, explainabilityPartial } = buildRecallResults(resultCandidates, policyOverride);
   const delivery = buildRecallDelivery(params, context, results, recallResult);
   await params.deps.trustStateRecorder.recordDelivery(delivery.record);
-  runRecallAsyncSideEffects(params, request, context, delivery);
   await emitRecallDeliveredTelemetry(params, {
     deliveryId: delivery.deliveryId,
     query: request.query,
@@ -243,15 +242,6 @@ function buildRecallDelivery(
       delivered_at: params.now()
     }
   };
-}
-
-function runRecallAsyncSideEffects(
-  params: RecallHandlerParams,
-  request: SoulMemorySearchRequest,
-  context: RecallUsageToolCallContext,
-  delivery: ReturnType<typeof buildRecallDelivery>
-): void {
-  enqueueRecallExtractTask(params, request, context, delivery.deliveredMemoryObjectIds);
 }
 
 function buildRecallResponse(

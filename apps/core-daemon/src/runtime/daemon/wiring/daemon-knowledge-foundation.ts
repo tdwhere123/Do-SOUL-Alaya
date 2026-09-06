@@ -14,6 +14,7 @@ import {
   createMemoryObjectKeyWriter
 } from "@do-soul/alaya-core";
 import {
+  SqliteGardenTaskRepo,
   SqliteHealthIssueGroupRepo,
   SqliteMemoryObjectKeyRepo,
   readObjectKeyEvidenceSources
@@ -38,7 +39,8 @@ export function createKnowledgeFoundation(
   eventPublisher: FoundationEventPublisher
 ) {
   const dynamicsServiceRef = createDynamicsServiceRef();
-  const evidenceService = createEvidenceService(input, dynamicsServiceRef);
+  const gardenIntentPort = new SqliteGardenTaskRepo(input.database.connection, eventPublisher);
+  const evidenceService = createEvidenceService(input, dynamicsServiceRef, gardenIntentPort);
   const governanceLeaseService = new GovernanceLeaseService({
     eventLogRepo: input.eventLogRepo,
     runLookup: input.runRepo
@@ -47,7 +49,13 @@ export function createKnowledgeFoundation(
   const greenService = createGreenService(input, governanceLeaseService);
   const dynamicsService = createDynamicsService(input, greenService, eventPublisher);
   dynamicsServiceRef.current = dynamicsService;
-  const memoryService = createMemoryService(input, evidenceService, dynamicsService, greenService);
+  const memoryService = createMemoryService(
+    input,
+    evidenceService,
+    dynamicsService,
+    greenService,
+    gardenIntentPort
+  );
   const interactionRuntime = createKnowledgeInteractionRuntime(input, eventPublisher);
   const graphRuntime = createKnowledgeGraphRuntime(input);
   const synthesisService = new SynthesisService({
@@ -93,13 +101,15 @@ function createDynamicsServiceRef(): {
 
 function createEvidenceService(
   input: DaemonServiceFoundationInput,
-  dynamicsServiceRef: ReturnType<typeof createDynamicsServiceRef>
+  dynamicsServiceRef: ReturnType<typeof createDynamicsServiceRef>,
+  gardenIntentPort: SqliteGardenTaskRepo
 ) {
   return new EvidenceService({
     evidenceCapsuleRepo: input.evidenceCapsuleRepo,
     eventLogRepo: input.eventLogRepo,
     fieldStores: input.fieldComposition.stores,
     projectionLifecycle: input.fieldComposition.projectionLifecycle,
+    gardenIntentPort,
     runtimeNotifier: input.runtimeNotifier,
     factFrameProposalNormalizer:
       RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
@@ -169,7 +179,8 @@ function createMemoryService(
   input: DaemonServiceFoundationInput,
   evidenceService: EvidenceService,
   dynamicsService: DynamicsService,
-  greenService: GreenService
+  greenService: GreenService,
+  gardenIntentPort: SqliteGardenTaskRepo
 ) {
   const objectKeyRepo = new SqliteMemoryObjectKeyRepo(input.database);
   return new MemoryService({
@@ -183,6 +194,7 @@ function createMemoryService(
       findById: (objectId: string) => input.synthesisCapsuleRepo.findById(objectId)
     },
     enrichPendingWriter: { enqueue: input.enqueueEnrichPending },
+    gardenIntentPort,
     objectKeyWriter: createMemoryObjectKeyWriter({
       readEvidenceSources: (workspaceId, evidenceIds) =>
         readObjectKeyEvidenceSources(input.database, workspaceId, evidenceIds),

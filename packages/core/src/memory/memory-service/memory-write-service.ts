@@ -27,6 +27,11 @@ import type {
 } from "./types.js";
 import type { MemoryObjectKeyWriter } from "../object-keys/write-service.js";
 import {
+  SOURCE_ENRICHMENT_CONTRACT,
+  admitSourceEnrichmentIntent,
+  type SourceWriteGardenIntentPort
+} from "../source-write-garden-intent.js";
+import {
   parseMemoryEntry,
   parseReason,
   parseStorageTier,
@@ -43,6 +48,7 @@ export interface MemoryWriteServiceDependencies {
   readonly dynamicsService?: MemoryServiceDynamicsPort;
   readonly greenService?: MemoryServiceGreenPort;
   readonly enrichPendingWriter?: MemoryServiceEnrichPendingWriterPort;
+  readonly gardenIntentPort?: SourceWriteGardenIntentPort;
   readonly objectKeyWriter?: MemoryObjectKeyWriter;
   readonly generateObjectId: () => string;
   readonly now: () => string;
@@ -63,7 +69,8 @@ export class MemoryWriteService {
   }
 
   public async create(input: MemoryEntryInput): Promise<Readonly<MemoryEntry>> {
-    const { enqueueEnrichment, ...memoryEntryInput } = input;
+    const { enqueueEnrichment: enrichmentIntent, ...memoryEntryInput } = input;
+    const enqueueEnrichment = freezeEnrichmentIntent(enrichmentIntent);
     const timestamp = this.now();
     const dynamics =
       this.dependencies.dynamicsService?.assignInitialDynamics({
@@ -157,9 +164,8 @@ export class MemoryWriteService {
   }
 
   // invariant: production create commits audit + memory row + optional
-  // enrich_pending marker in one transaction, EventLog-first.
-  // see also: packages/soul/src/garden/materialization/materialization-router/router.ts:enqueueEnrichment.
-  // see also: packages/core/src/memory/signal-service.ts:SignalService.
+  // Garden intent (and enrich_pending marker when still wired) in one
+  // transaction, EventLog-first. Acknowledgment is durable source, not enriched.
   private async createRowMaybeAtomicallyEnqueued(
     memoryEntry: Readonly<MemoryEntry>,
     enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"],
@@ -175,13 +181,7 @@ export class MemoryWriteService {
       });
     }
 
-    const enrichPendingWriter = this.dependencies.enrichPendingWriter;
-    if (enqueueEnrichment !== undefined && enrichPendingWriter === undefined) {
-      throw new CoreError(
-        "CONFLICT",
-        "Atomic enrich_pending enqueue requested but the enrich-pending writer is not wired."
-      );
-    }
+    this.requireEnrichmentPorts(enqueueEnrichment);
 
     let event: EventLogEntry | undefined;
     const created = createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, {
@@ -189,14 +189,10 @@ export class MemoryWriteService {
         event = this.appendCreatedEventSynchronously(createdEventInput);
       },
       afterCreate: () => {
-        if (enqueueEnrichment !== undefined) {
-          enrichPendingWriter?.enqueue({
-            workspaceId: memoryEntry.workspace_id,
-            memoryId: memoryEntry.object_id,
-            runId: enqueueEnrichment.runId,
-            sourceSignalId: enqueueEnrichment.sourceSignalId
-          });
+        if (event === undefined) {
+          throw new CoreError("CONFLICT", "Memory create transaction did not append its audit event.");
         }
+        this.persistEnrichmentIntent(memoryEntry.workspace_id, memoryEntry.object_id, event.revision, enqueueEnrichment, memoryEntry.created_at);
       }
     });
 
@@ -265,6 +261,7 @@ export class MemoryWriteService {
       input.workspaceId === undefined ? undefined : parseNonEmptyString(input.workspaceId, "workspaceId");
     const parsedReason = parseReason(input.reason);
     const parsedFields = parseUpdateFields(input.fields);
+    const enqueueEnrichment = freezeEnrichmentIntent(input.enqueueEnrichment);
 
     const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
 
@@ -303,7 +300,7 @@ export class MemoryWriteService {
       { ...parsedFields, updated_at: occurredAt },
       eventInput,
       parsedWorkspaceId,
-      input.enqueueEnrichment
+      enqueueEnrichment
     );
 
     await this.dependencies.runtimeNotifier.notifyEntry(event);
@@ -340,10 +337,7 @@ export class MemoryWriteService {
       });
     }
 
-    const writer = this.dependencies.enrichPendingWriter;
-    if (enqueueEnrichment !== undefined && writer === undefined) {
-      throw new CoreError("CONFLICT", "Atomic enrichment enqueue writer is not wired.");
-    }
+    this.requireEnrichmentPorts(enqueueEnrichment);
     let event: EventLogEntry | undefined;
     const updated = updateWithinTransaction.call(
       this.dependencies.memoryEntryRepo,
@@ -354,10 +348,16 @@ export class MemoryWriteService {
           event = this.appendUpdatedEventSynchronously(eventInput);
         },
         afterUpdate: () => {
-          if (enqueueEnrichment !== undefined) {
-            writer!.enqueue({ workspaceId: eventInput.workspace_id!, memoryId: objectId,
-              runId: enqueueEnrichment.runId, sourceSignalId: enqueueEnrichment.sourceSignalId });
+          if (event === undefined) {
+            throw new CoreError("CONFLICT", "Memory update transaction did not append its audit event.");
           }
+          this.persistEnrichmentIntent(
+            eventInput.workspace_id!,
+            objectId,
+            event.revision,
+            enqueueEnrichment,
+            repoFields.updated_at ?? event.created_at
+          );
         }
       },
       workspaceId
@@ -416,4 +416,57 @@ export class MemoryWriteService {
   ): void {
     this.dependencies.objectKeyWriter?.materializeForMemory(memory);
   }
+
+  private requireEnrichmentPorts(enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"]): void {
+    if (
+      enqueueEnrichment !== undefined &&
+      this.dependencies.gardenIntentPort === undefined &&
+      this.dependencies.enrichPendingWriter === undefined
+    ) {
+      throw new CoreError(
+        "CONFLICT",
+        "Atomic enrichment enqueue requested but no Garden intent or enrich-pending writer is wired."
+      );
+    }
+  }
+
+  private persistEnrichmentIntent(
+    workspaceId: string,
+    sourceObjectId: string,
+    sourceRevision: number,
+    enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"],
+    createdAt: string
+  ): void {
+    if (enqueueEnrichment === undefined) {
+      return;
+    }
+    if (this.dependencies.gardenIntentPort !== undefined) {
+      admitSourceEnrichmentIntent(this.dependencies.gardenIntentPort, {
+        workspaceId,
+        sourceObjectId,
+        sourceRevision,
+        enrichmentContract: SOURCE_ENRICHMENT_CONTRACT,
+        runId: enqueueEnrichment.runId,
+        createdAt
+      });
+    }
+    this.dependencies.enrichPendingWriter?.enqueue({
+      workspaceId,
+      memoryId: sourceObjectId,
+      runId: enqueueEnrichment.runId,
+      sourceSignalId: enqueueEnrichment.sourceSignalId
+    });
+  }
+}
+
+function freezeEnrichmentIntent(
+  intent: MemoryEntryInput["enqueueEnrichment"]
+): MemoryEntryInput["enqueueEnrichment"] {
+  if (intent === undefined) {
+    return undefined;
+  }
+  return Object.freeze({
+    runId: intent.runId,
+    sourceSignalId: intent.sourceSignalId
+  });
 }

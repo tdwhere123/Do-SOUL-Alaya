@@ -5,7 +5,6 @@ import {
   GardenTier,
   POST_TURN_EXTRACT_EXCERPT_MAX_CHARS,
   type ContextDeliveryRecord,
-  type SoulMemorySearchRequest,
   type SoulReportContextUsageRequest
 } from "@do-soul/alaya-protocol";
 import { isDuplicateKeyError } from "@do-soul/alaya-storage";
@@ -17,86 +16,6 @@ import type {
   RecallUsageHandlerDependencies,
   RecallUsageToolCallContext
 } from "../recall/recall-usage-handlers.js";
-
-// Auto-extract from a recall turn only when there is enough text for the
-// Garden compute provider to find a durable signal in; a bare keyword query
-// is below this floor and not worth a Garden task.
-const MIN_AUTO_EXTRACT_TURN_CHARS = 24;
-// Stop enqueuing recall-driven extract tasks once the pending Garden queue
-// visible to peekPending(LIBRARIAN, ...) — librarian rows plus the
-// higher-priority janitor/auditor rows — for a workspace is this deep: Garden
-// is not draining (e.g. host_worker mode with no worker, or a stalled
-// background pass) and piling on cannot help. Coarse backpressure —
-// over-counting only makes Alaya more conservative.
-const RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD = 128;
-
-type WarnPort = (message: string, meta: Record<string, unknown>) => void;
-
-export function enqueueRecallExtractTask(
-  params: Readonly<{ readonly deps: RecallUsageHandlerDependencies; readonly now: () => string; readonly warn: WarnPort }>,
-  request: SoulMemorySearchRequest,
-  context: RecallUsageToolCallContext,
-  deliveredObjectIds: readonly string[]
-): void {
-  const gardenTaskRepo = params.deps.gardenTaskRepo;
-  if (gardenTaskRepo === undefined || context.runId === null) {
-    return;
-  }
-  const turnText = (request.recent_turn ?? request.query).trim();
-  if (turnText.length < MIN_AUTO_EXTRACT_TURN_CHARS) {
-    return;
-  }
-  const workspaceId = context.workspaceId;
-  const runId = context.runId;
-  const dedupedDeliveredIds = Object.freeze([...new Set(deliveredObjectIds)]);
-  const taskId = buildRecallExtractTaskId(workspaceId, runId, turnText);
-  const createdAt = params.now();
-  try {
-    if (
-      gardenTaskRepo.peekPending(
-        GardenRole.LIBRARIAN,
-        workspaceId,
-        RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD
-      ).length >= RECALL_EXTRACT_BACKLOG_SKIP_THRESHOLD
-    ) {
-      return;
-    }
-    gardenTaskRepo.enqueue({
-      id: taskId,
-      workspace_id: workspaceId,
-      role: GardenRole.LIBRARIAN,
-      kind: GardenTaskKind.POST_TURN_EXTRACT,
-      payload: buildPostTurnExtractPayload({
-        taskId,
-        workspaceId,
-        runId,
-        deliveredObjectIds: dedupedDeliveredIds,
-        createdAt,
-        sourceObservation: null,
-        turnIndex: 0,
-        lastMessages: [
-          {
-            role: "user",
-            content_excerpt: turnText.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
-          }
-        ]
-      }),
-      created_at: createdAt
-    });
-  } catch (error) {
-    if (isDuplicateKeyError(error)) {
-      return;
-    }
-    // recall enqueue is best-effort passive ingestion (§17): warn, never throw —
-    // throwing would regress the recall MCP response. (Contrast the report path
-    // below, which is caller-driven and rethrows.)
-    params.warn("recall-driven extract task enqueue failed; skipping.", {
-      workspace_id: workspaceId,
-      run_id: runId,
-      error: error instanceof Error ? error.message : String(error)
-    });
-  }
-}
 
 export function enqueuePostTurnExtractTask(
   params: Readonly<{ readonly deps: RecallUsageHandlerDependencies; readonly now: () => string }>,
@@ -120,9 +39,6 @@ export function enqueuePostTurnExtractTask(
   const turnIndex = request.turn_index;
   const deliveredObjectIds = resolveDeliveredObjectIds(request);
   const lastMessages = normalizeTurnDigestMessages(request.turn_digest?.last_messages ?? []);
-  if (hasRecallExtractTaskForTurnDigest(params.deps.gardenTaskRepo, workspaceId, runId, lastMessages)) {
-    return;
-  }
   const taskId = buildPostTurnExtractTaskId(workspaceId, runId, turnIndex);
   const createdAt = params.now();
 
@@ -150,9 +66,8 @@ export function enqueuePostTurnExtractTask(
     if (isDuplicateKeyError(error)) {
       return;
     }
-    // report path is caller-driven (report_context_usage), so a real enqueue
-    // failure rethrows to the caller — deliberately asymmetric with the
-    // best-effort recall path above.
+    // report_context_usage is caller-driven; enqueue failure must surface
+    // rather than drop an explicit post-turn signal.
     throw error;
   }
 }
@@ -199,27 +114,6 @@ function normalizeTurnDigestMessages(
   );
 }
 
-function hasRecallExtractTaskForTurnDigest(
-  gardenTaskRepo: NonNullable<RecallUsageHandlerDependencies["gardenTaskRepo"]>,
-  workspaceId: string,
-  runId: string,
-  messages: readonly { readonly role: string; readonly content_excerpt: string }[]
-): boolean {
-  for (const message of messages) {
-    if (message.role !== "user") {
-      continue;
-    }
-    const turnText = message.content_excerpt.trim();
-    if (turnText.length < MIN_AUTO_EXTRACT_TURN_CHARS) {
-      continue;
-    }
-    if (gardenTaskRepo.findById(buildRecallExtractTaskId(workspaceId, runId, turnText)) !== null) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function buildPostTurnExtractPayload(input: {
   readonly taskId: string;
   readonly workspaceId: string;
@@ -264,16 +158,4 @@ function buildPostTurnExtractTaskId(
     .digest("hex")
     .slice(0, 32);
   return `post_turn_extract_${digest}`;
-}
-
-function buildRecallExtractTaskId(workspaceId: string, runId: string, turnText: string): string {
-  const digest = createHash("sha256")
-    .update(workspaceId)
-    .update("\0")
-    .update(runId)
-    .update("\0")
-    .update(turnText)
-    .digest("hex")
-    .slice(0, 32);
-  return `recall_extract_${digest}`;
 }

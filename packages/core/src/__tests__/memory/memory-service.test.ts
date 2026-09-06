@@ -320,6 +320,83 @@ it("rolls back the whole create (no marker-less memory) when the enrich_pending 
     expect(notifySpy).not.toHaveBeenCalled();
   });
 
+it("commits a Garden work intent atomically when only the garden intent port is wired", async () => {
+    const order: string[] = [];
+    const gardenEnqueue = vi.fn(() => {
+      order.push("garden");
+      return { task_id: "source_enrich_test" };
+    });
+    const { dependencies } = createDependencies({
+      eventLogRepo: {
+        append: vi.fn((event) => {
+          order.push("event_log");
+          return {
+            event_id: "event-1",
+            created_at: "2026-03-21T01:00:00.000Z",
+            revision: 4,
+            ...event
+          };
+        }),
+        queryByEntity: vi.fn(async () => [])
+      },
+      memoryEntryRepo: {
+        create: vi.fn(async (entry) => Object.freeze({ ...entry })),
+        createWithinTransaction: vi.fn(
+          (
+            entry: MemoryEntry,
+            callbacks: Parameters<NonNullable<MemoryServiceDependencies["memoryEntryRepo"]["createWithinTransaction"]>>[1]
+          ): Readonly<MemoryEntry> => {
+            callbacks.beforeCreate?.();
+            order.push("repo_create");
+            callbacks.afterCreate?.();
+            return Object.freeze({ ...entry });
+          }
+        ),
+        findById: vi.fn(async () => null),
+        findByWorkspaceId: vi.fn(async () => []),
+        findByRunId: vi.fn(async () => []),
+        findByDimension: vi.fn(async () => []),
+        findByScopeClass: vi.fn(async () => []),
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        archive: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      },
+      gardenIntentPort: {
+        enqueue: gardenEnqueue,
+        findById: () => null,
+        peekPending: () => []
+      },
+      runtimeNotifier: {
+        notifyEntry: vi.fn(async () => {
+          order.push("notify");
+        })
+      }
+    });
+
+    const service = new MemoryService(dependencies);
+    await service.create(
+      createMemoryInput({
+        evidence_refs: ["evidence"],
+        enqueueEnrichment: { runId: "run-7", sourceSignalId: "signal-7" }
+      })
+    );
+    expect(order).toEqual(["event_log", "repo_create", "garden", "notify"]);
+    expect(gardenEnqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace_id: "workspace-1",
+        payload: expect.objectContaining({
+          source_object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+          source_revision: 4,
+          enrichment_contract: "source_enrichment.v1",
+          run_id: "run-7"
+        })
+      })
+    );
+  });
+
 it("throws rather than silently dropping the marker when the atomic enqueue seam is not wired", async () => {
     // invariant pinned: an enqueueEnrichment intent without the
     // createWithinTransaction capability / enrichPendingWriter must fail loud,

@@ -29,6 +29,11 @@ import {
 } from "./formation-plan.js";
 import type { FieldFormationStores } from "./field-stores.js";
 import { appendSourceRecordAdmitted } from "./source-admission-audit.js";
+import {
+  SOURCE_ENRICHMENT_CONTRACT,
+  admitSourceEnrichmentIntent,
+  type SourceWriteGardenIntentPort
+} from "../source-write-garden-intent.js";
 
 export async function createEvidenceCapsule(input: Readonly<{
   readonly capsuleInput: Omit<
@@ -71,11 +76,23 @@ export async function createEvidenceCapsule(input: Readonly<{
   readonly factorIncidence?: FactorIncidencePort;
   readonly fieldStores?: FieldFormationStores;
   readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
+  readonly gardenIntentPort?: SourceWriteGardenIntentPort;
+  readonly enqueueEnrichment?: {
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  };
 }>): Promise<Readonly<EvidenceCapsule>> {
   const timestamp = input.now();
   const evidence = parseCreatedCapsule(input, timestamp);
   const formation = planOptionalFormation(input, evidence);
-  const { event, created } = persistCreatedEvidence(input, evidence, formation);
+  const enqueueEnrichment = freezeEvidenceEnrichmentIntent(input.enqueueEnrichment);
+  if (enqueueEnrichment !== undefined && input.gardenIntentPort === undefined) {
+    throw new CoreError(
+      "CONFLICT",
+      "Atomic enrichment enqueue requested but no Garden intent port is wired."
+    );
+  }
+  const { event, created } = persistCreatedEvidence(input, evidence, formation, enqueueEnrichment);
   await admitOptionalFieldFormation(input, created, formation);
   await input.runtimeNotifier.notifyEntry(event);
   return created;
@@ -194,9 +211,14 @@ function persistCreatedEvidence(
         EventLogEntry | Promise<EventLogEntry>;
       transactional?<T>(fn: () => T): T;
     };
+    readonly gardenIntentPort?: SourceWriteGardenIntentPort;
   }>,
   evidence: EvidenceCapsule,
-  formation: EvidenceFormationPlan
+  formation: EvidenceFormationPlan,
+  enqueueEnrichment: {
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  } | undefined
 ): { readonly event: EventLogEntry; readonly created: Readonly<EvidenceCapsule> } {
   const createInCurrentTransaction = input.evidenceCapsuleRepo.createInCurrentTransaction;
   if (createInCurrentTransaction === undefined) {
@@ -216,6 +238,16 @@ function persistCreatedEvidence(
         formation.semanticFormation,
         formation.semanticCompleteness
       );
+      if (enqueueEnrichment !== undefined && input.gardenIntentPort !== undefined) {
+        admitSourceEnrichmentIntent(input.gardenIntentPort, {
+          workspaceId: created.workspace_id,
+          sourceObjectId: created.object_id,
+          sourceRevision: event.revision,
+          enrichmentContract: SOURCE_ENRICHMENT_CONTRACT,
+          runId: enqueueEnrichment.runId,
+          createdAt: created.created_at
+        });
+      }
       return { event, created };
     },
     "Evidence create requires a transactional EventLog port"
@@ -258,4 +290,16 @@ function appendCreatedSynchronously(
 
 function idleExtractor(extractor?: OpenSemanticFactorExtractionPort): void {
   if (extractor === undefined) return;
+}
+
+function freezeEvidenceEnrichmentIntent(
+  intent: { readonly runId: string | null; readonly sourceSignalId: string | null } | undefined
+): { readonly runId: string | null; readonly sourceSignalId: string | null } | undefined {
+  if (intent === undefined) {
+    return undefined;
+  }
+  return Object.freeze({
+    runId: intent.runId,
+    sourceSignalId: intent.sourceSignalId
+  });
 }

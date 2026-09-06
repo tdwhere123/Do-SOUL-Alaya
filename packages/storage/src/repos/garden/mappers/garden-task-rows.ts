@@ -92,6 +92,83 @@ export function stringifyPayload(payload: unknown): string {
   return payloadJson;
 }
 
+export function resolveDuplicateGardenEnqueue(
+  existing: GardenTaskRow | null,
+  taskId: string,
+  incomingPayload: unknown,
+  incomingPayloadJson: string,
+  error: unknown
+): { readonly task_id: string } {
+  if (
+    existing !== null &&
+    duplicateGardenEnqueueDisposition(
+      existing.payload,
+      existing.payload_json,
+      incomingPayload,
+      incomingPayloadJson
+    ) === "coalesce"
+  ) {
+    return { task_id: taskId };
+  }
+  if (existing !== null) {
+    throw new StorageError(
+      "CONFLICT",
+      `Garden task ${taskId} exists with a different payload.`,
+      error
+    );
+  }
+  throw new StorageError("DUPLICATE_KEY", `Garden task ${taskId} already exists.`, error);
+}
+
+export function duplicateGardenEnqueueDisposition(
+  existingPayload: unknown,
+  existingPayloadJson: string,
+  incomingPayload: unknown,
+  incomingPayloadJson: string
+): "coalesce" | "conflict" {
+  if (existingPayloadJson === incomingPayloadJson) {
+    return "coalesce";
+  }
+  const existingIdentity = readSourceEnrichmentIdentity(existingPayload);
+  const incomingIdentity = readSourceEnrichmentIdentity(incomingPayload);
+  if (existingIdentity !== null && incomingIdentity !== null) {
+    return existingIdentity.workspace_id === incomingIdentity.workspace_id &&
+      existingIdentity.source_object_id === incomingIdentity.source_object_id &&
+      existingIdentity.source_revision === incomingIdentity.source_revision &&
+      existingIdentity.enrichment_contract === incomingIdentity.enrichment_contract
+      ? "coalesce"
+      : "conflict";
+  }
+  return "conflict";
+}
+
+function readSourceEnrichmentIdentity(payload: unknown): {
+  readonly workspace_id: string;
+  readonly source_object_id: string;
+  readonly source_revision: string;
+  readonly enrichment_contract: string;
+} | null {
+  if (payload === null || typeof payload !== "object") {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  if (
+    typeof record.workspace_id !== "string" ||
+    typeof record.source_object_id !== "string" ||
+    record.source_revision === undefined ||
+    record.source_revision === null ||
+    typeof record.enrichment_contract !== "string"
+  ) {
+    return null;
+  }
+  return {
+    workspace_id: record.workspace_id,
+    source_object_id: record.source_object_id,
+    source_revision: String(record.source_revision),
+    enrichment_contract: record.enrichment_contract
+  };
+}
+
 export function parseLimit(limit: number): number {
   if (!Number.isInteger(limit) || limit < 1) {
     throw new StorageError("VALIDATION_FAILED", "Garden task limit must be a positive integer.");

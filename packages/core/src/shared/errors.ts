@@ -11,7 +11,10 @@ export type CoreErrorCode =
 // `code`-based handling is unaffected, while callers that need to recover
 // differently can branch on it. PORT_UNAVAILABLE = an optional capability is not
 // wired (degrade); CONCURRENT_MODIFICATION = lost a race (safe to retry).
-export type CoreErrorSubCode = "PORT_UNAVAILABLE" | "CONCURRENT_MODIFICATION";
+export type CoreErrorSubCode =
+  | "PORT_UNAVAILABLE"
+  | "CONCURRENT_MODIFICATION"
+  | "RETRYABLE_BACKPRESSURE";
 
 export interface CoreErrorOptions extends AlayaErrorOptions {
   readonly subCode?: CoreErrorSubCode;

@@ -4,7 +4,6 @@ import { performance } from "node:perf_hooks";
 import {
   FormationKind,
   GardenRole,
-  GardenTaskKind,
   MemoryDimension,
   ScopeClass,
   SignalEventType,
@@ -155,19 +154,7 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
     },
     eventLogRepo,
     memoryEntryRepo: storage.memoryEntryRepo,
-    enrichPendingWriter: {
-      enqueue: ({ workspaceId, memoryId }) => {
-        if (!storage.database.connection.inTransaction) throw new Error("enqueue outside source transaction");
-        if (garden.peekPending(GardenRole.LIBRARIAN, workspaceId, 128).length >= 128) {
-          throw new Error("enrichment queue full");
-        }
-        garden.enqueue({
-          id: `enrich:${workspaceId}:${memoryId}:v1`, workspace_id: workspaceId,
-          role: GardenRole.LIBRARIAN, kind: GardenTaskKind.BULK_ENRICH,
-          payload: { source_object_id: memoryId, source_revision: 1 }, created_at: NOW
-        });
-      }
-    },
+    gardenIntentPort: garden,
     runtimeNotifier: notify
   });
   const evidence = new EvidenceService({

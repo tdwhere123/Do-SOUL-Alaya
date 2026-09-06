@@ -8,6 +8,7 @@ import {
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import type { MemoryObjectKeyWriter } from "../object-keys/write-service.js";
+import type { SourceWriteGardenIntentPort } from "../source-write-garden-intent.js";
 
 export type MemoryEntryInput = Omit<
   MemoryEntry,
@@ -31,10 +32,11 @@ export type MemoryEntryInput = Omit<
   | "superseded_by"
 > & {
   readonly storage_tier?: MemoryEntry["storage_tier"];
-  // invariant: enqueueEnrichment means memory row + enrich_pending marker
-  // commit atomically, or create throws instead of silently dropping the marker.
+  // invariant: enqueueEnrichment means source + EventLog + raw/lexical +
+  // recoverable Garden intent commit atomically, or create throws instead of
+  // acknowledging and dropping work. enrich_pending remains an optional
+  // compatibility write when that writer is still wired.
   // see also: packages/soul/src/garden/materialization/materialization-router/router.ts:enqueueEnrichment.
-  // see also: packages/storage/src/repos/garden/enrich-pending-repo.ts:enqueue.
   readonly enqueueEnrichment?: {
     readonly runId: string | null;
     readonly sourceSignalId: string | null;
@@ -279,6 +281,7 @@ export interface MemoryServiceDependencies {
   readonly synthesisCapsuleLookup?: MemoryServiceSynthesisCapsuleLookupPort;
   // invariant: enqueueEnrichment requires atomic createWithinTransaction wiring.
   readonly enrichPendingWriter?: MemoryServiceEnrichPendingWriterPort;
+  readonly gardenIntentPort?: SourceWriteGardenIntentPort;
   readonly objectKeyWriter?: MemoryObjectKeyWriter;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
