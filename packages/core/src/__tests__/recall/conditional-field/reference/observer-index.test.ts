@@ -120,6 +120,23 @@ describe("conditional-field observer and index contracts", () => {
     expect(interruptedIndex.completeness.logical_index).not.toBe("complete");
     expect(interruptedIndex.completeness.observed_coverage).not.toBe("exhausted_empty");
     expect(interruptedIndex.completeness.observed_coverage).not.toBe("complete");
+    for (const status of ["cancelled", "unknown", "not_applicable"] as const) {
+      const index = projectAcceptingIndex({
+        snapshot: bound.snapshot,
+        view: defaultView(),
+        query_id: QUERY_ID,
+        snapshot_id: SNAPSHOT_ID,
+        result_version: RESULT_VERSION,
+        budget: defaultBudget(),
+        observer: {
+          outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status },
+          open_regions: []
+        }
+      });
+      expect(index.completeness.logical_index).not.toBe("complete");
+      expect(index.completeness.observed_coverage).toBe(status);
+      expect(index.completeness.observed_coverage).not.toBe("exhausted_empty");
+    }
   });
 
   it("A13 can complete the logical index with unknown common cause", () => {

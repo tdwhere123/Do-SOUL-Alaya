@@ -36,7 +36,10 @@ export const CompletenessStatusSchema = z.enum([
   "resource_rejected",
   "interrupted",
   "exhausted_empty",
-  "invalidated"
+  "invalidated",
+  "cancelled",
+  "unknown",
+  "not_applicable"
 ]);
 
 export const CompletenessReportSchema = z

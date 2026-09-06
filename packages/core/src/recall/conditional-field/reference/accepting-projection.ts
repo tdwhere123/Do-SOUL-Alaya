@@ -327,6 +327,9 @@ function composeCompleteness(
   const open = (observer?.open_regions ?? []).some((region) => region.status === "open")
     || observerStatus === "open";
   if (observerStatus === "unavailable") return coverageReport("unavailable", remaining);
+  if (observerStatus === "cancelled" || observerStatus === "unknown" || observerStatus === "not_applicable" || observerStatus === "invalidated") {
+    return incompleteObserverCoverage(observerStatus, remaining);
+  }
   if (observerStatus === "interrupted" || open) {
     return {
       schema_version: 1,
@@ -359,6 +362,20 @@ function emptyCompleteness(input: AcceptingProjectionInput): CompletenessReport 
     observed_coverage: "exhausted_empty",
     transport: "complete",
     payload: "complete",
+    representation: "complete"
+  };
+}
+
+function incompleteObserverCoverage(
+  observed: "cancelled" | "unknown" | "not_applicable" | "invalidated",
+  remaining: number
+): CompletenessReport {
+  return {
+    schema_version: 1,
+    logical_index: "open",
+    observed_coverage: observed,
+    transport: remaining > 0 ? "partial" : "open",
+    payload: remaining > 0 ? "partial" : "open",
     representation: "complete"
   };
 }
