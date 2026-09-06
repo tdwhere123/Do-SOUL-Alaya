@@ -94,6 +94,13 @@ export async function runBulkEnrichTask(input: Readonly<{
   readonly reporter: BulkEnrichReporter;
   readonly sourceEnrichment?: {
     run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
+    readonly capability?: {
+      readonly configured: boolean;
+      readonly observationFamily: "official_api_signals" | "none";
+      readonly requestBytes: "reserved";
+      readonly completionTokens: "unsupported" | "enforced";
+      readonly spend: "unsupported";
+    };
   };
 }>): Promise<void> {
   const completedAt = input.now();
@@ -142,13 +149,27 @@ async function runPerSourceEnrichmentTask(
     readonly reporter: BulkEnrichReporter;
     readonly sourceEnrichment?: {
       run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
+      readonly capability?: {
+        readonly configured: boolean;
+        readonly observationFamily: "official_api_signals" | "none";
+        readonly requestBytes: "reserved";
+        readonly completionTokens: "unsupported" | "enforced";
+        readonly spend: "unsupported";
+      };
     };
   }>,
   completedAt: string
 ): Promise<void> {
   if (input.sourceEnrichment === undefined) {
     await input.reporter.reportCompletion(input.task, completedAt, false, [
-      "source_enrich_unwired"
+      "source_enrich_unwired",
+      ...sourceEnrichCapabilityEntries({
+        configured: false,
+        observationFamily: "none",
+        requestBytes: "reserved",
+        completionTokens: "unsupported",
+        spend: "unsupported"
+      })
     ], new Error("per-source enrichment worker is not composed"));
     return;
   }
@@ -162,7 +183,7 @@ async function runPerSourceEnrichmentTask(
       input.task,
       completedAt,
       success,
-      [`source_enrich:${outcome}`],
+      [`source_enrich:${outcome}`, ...sourceEnrichCapabilityEntries(input.sourceEnrichment.capability)],
       success ? undefined : new Error(outcome)
     );
   } catch (error) {
@@ -173,6 +194,22 @@ async function runPerSourceEnrichmentTask(
       error: error instanceof Error ? error.message : String(error)
     });
   }
+}
+
+function sourceEnrichCapabilityEntries(capability: Readonly<{
+  readonly configured: boolean;
+  readonly observationFamily: "official_api_signals" | "none";
+  readonly requestBytes: "reserved";
+  readonly completionTokens: "unsupported" | "enforced";
+  readonly spend: "unsupported";
+}> | undefined): readonly string[] {
+  if (capability === undefined) return [];
+  return [
+    `source_enrich_capability:${capability.configured ? "configured" : "unconfigured"}`,
+    `source_enrich_spend:${capability.spend}`,
+    `source_enrich_completion_tokens:${capability.completionTokens}`,
+    `source_enrich_family:${capability.observationFamily}`
+  ];
 }
 
 export async function runClaimableBulkEnrichWorkspacePass(input: Readonly<{

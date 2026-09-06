@@ -2,6 +2,34 @@ import { randomUUID } from "node:crypto";
 import type { SemanticArtifactCodec, SemanticArtifactRepositoryPort, SemanticArtifactWork,
   SemanticEnrichmentTask, SemanticSourceSnapshot, SemanticTransportAttempt } from "@do-soul/alaya-protocol";
 
+export type SemanticTransportSpendCapability = "unsupported";
+export type SemanticTransportCompletionTokenCapability = "unsupported" | "enforced";
+
+export type SemanticTransportCapabilities = Readonly<{
+  readonly configured: boolean;
+  readonly requestBytes: "accounted";
+  readonly completionTokens: SemanticTransportCompletionTokenCapability;
+  readonly spend: SemanticTransportSpendCapability;
+}>;
+
+export type SemanticProviderExtractPort = Readonly<{
+  extract(input: {
+    readonly systemPrompt: string;
+    readonly userPrompt: string;
+    readonly abortSignal?: AbortSignal;
+    readonly timeoutMs?: number;
+  }): Promise<{ readonly rawJson: string }>;
+  reconcile?(attempt: SemanticTransportAttempt, signal: AbortSignal): Promise<
+    { readonly kind: "received"; readonly rawJson: string } |
+    { readonly kind: "not_sent" } | { readonly kind: "unknown" }>;
+}>;
+
+export type SemanticResourceAccounting = Readonly<{
+  readonly reservedRequestUtf8Bytes: number;
+  readonly completionTokens: "unsupported";
+  readonly spend: "unsupported";
+}>;
+
 export interface SemanticEnrichmentWorkerDependencies {
   readonly repo: SemanticArtifactRepositoryPort;
   readonly codec: SemanticArtifactCodec;
@@ -10,6 +38,7 @@ export interface SemanticEnrichmentWorkerDependencies {
     reconcile(attempt: SemanticTransportAttempt, signal: AbortSignal): Promise<
       { readonly kind: "received"; readonly rawJson: string } |
       { readonly kind: "not_sent" } | { readonly kind: "unknown" }>;
+    readonly capabilities?: SemanticTransportCapabilities;
   };
   readonly audit: <T>(action: string, task: SemanticEnrichmentTask, mutate: () => T) => Promise<T>;
   readonly now: () => string;
@@ -20,22 +49,96 @@ export interface SemanticEnrichmentWorkerDependencies {
   readonly transportTimeoutMs: number;
   readonly maxDispatchCalls?: number;
   readonly maxReservedUtf8Bytes?: number;
+  readonly maxCompletionUtf8Bytes?: number;
 }
+
+const RESOURCE_LIMIT_ERROR = "SemanticResourceLimitError";
+const DEFAULT_COMPLETION_UTF8_BYTES = 262_144;
 
 /** Explicitly invoked worker; daemon scheduling remains the Garden composition owner's responsibility. */
 export class SemanticEnrichmentWorker {
   private readonly maxDispatchCalls: number;
   private readonly maxReservedUtf8Bytes: number;
+  private readonly maxCompletionUtf8Bytes: number | undefined;
   private dispatchCalls = 0;
   private reservedUtf8Bytes = 0;
 
   public constructor(private readonly deps: SemanticEnrichmentWorkerDependencies) {
     this.maxDispatchCalls = deps.maxDispatchCalls ?? deps.maxAttempts * deps.maxUnits;
     this.maxReservedUtf8Bytes = deps.maxReservedUtf8Bytes ?? deps.maxUnits * 16_384;
+    this.maxCompletionUtf8Bytes = deps.maxCompletionUtf8Bytes;
     for (const bound of [deps.leaseMs, deps.maxAttempts, deps.maxUnits, deps.transportTimeoutMs,
       deps.maxLocalRecoveries, this.maxDispatchCalls, this.maxReservedUtf8Bytes]) {
       if (!Number.isSafeInteger(bound) || bound < 1) throw new Error("invalid enrichment bound");
     }
+    if (this.maxCompletionUtf8Bytes !== undefined &&
+      (!Number.isSafeInteger(this.maxCompletionUtf8Bytes) || this.maxCompletionUtf8Bytes < 1)) {
+      throw new Error("invalid enrichment bound");
+    }
+  }
+
+  /** Compose the Garden provider extract seam; spend is never inferred from request bytes. */
+  public static composeProviderTransport(
+    provider: SemanticProviderExtractPort | null | undefined,
+    options: {
+      readonly systemPrompt?: string;
+      readonly timeoutMs?: number;
+      readonly maxCompletionUtf8Bytes?: number;
+    } = {}
+  ): SemanticEnrichmentWorkerDependencies["transport"] {
+    if (provider == null) {
+      return {
+        execute: async () => {
+          throw new Error("semantic transport is unconfigured");
+        },
+        reconcile: async () => ({ kind: "not_sent" }),
+        capabilities: {
+          configured: false,
+          requestBytes: "accounted",
+          completionTokens: "unsupported",
+          spend: "unsupported"
+        }
+      };
+    }
+    const maxCompletionUtf8Bytes = options.maxCompletionUtf8Bytes ?? DEFAULT_COMPLETION_UTF8_BYTES;
+    if (!Number.isSafeInteger(maxCompletionUtf8Bytes) || maxCompletionUtf8Bytes < 1) {
+      throw new Error("invalid enrichment bound");
+    }
+    const systemPrompt = options.systemPrompt ?? "";
+    return {
+      execute: async (logicalRequestJson, _attemptId, signal) => {
+        if (signal.aborted) throw new Error("semantic transport cancelled");
+        const result = await provider.extract({
+          systemPrompt,
+          userPrompt: logicalRequestJson,
+          abortSignal: signal,
+          ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs })
+        });
+        if (typeof result?.rawJson !== "string") throw new Error("semantic provider returned no raw json");
+        if (Buffer.byteLength(result.rawJson, "utf8") > maxCompletionUtf8Bytes) {
+          throw resourceLimitError("completion_limit_exceeded");
+        }
+        return result.rawJson;
+      },
+      reconcile: async (attempt, signal) => {
+        if (provider.reconcile === undefined) return { kind: "unknown" };
+        return await provider.reconcile(attempt, signal);
+      },
+      capabilities: {
+        configured: true,
+        requestBytes: "accounted",
+        completionTokens: "unsupported",
+        spend: "unsupported"
+      }
+    };
+  }
+
+  public resourceAccounting(): SemanticResourceAccounting {
+    return {
+      reservedRequestUtf8Bytes: this.reservedUtf8Bytes,
+      completionTokens: "unsupported",
+      spend: "unsupported"
+    };
   }
 
   public async run(workspaceId: string, taskId: string, options: { readonly adoptClaim?: boolean } = {}): Promise<string> {
@@ -111,12 +214,15 @@ export class SemanticEnrichmentWorker {
       attempt = this.deps.repo.attempt(task.id, work.key);
     }
     if (!attempt || attempt.state === 'not_sent') {
+      if (this.deps.transport.capabilities?.configured === false) {
+        return this.fail(task, 'transport_unconfigured');
+      }
       const charge = Buffer.byteLength(work.requestJson, "utf8");
       if ((attempt?.ordinal ?? 0) >= this.deps.maxAttempts || this.dispatchCalls >= this.maxDispatchCalls) {
         return this.fail(task, 'dispatch_bound');
       }
       if (this.reservedUtf8Bytes + charge > this.maxReservedUtf8Bytes) {
-        return this.fail(task, 'token_envelope_exhausted');
+        return this.fail(task, 'request_byte_envelope_exhausted');
       }
       const id = randomUUID();
       const reserved = await this.deps.audit('dispatched', task, () => this.deps.repo.dispatch(task, work.key, id));
@@ -126,9 +232,14 @@ export class SemanticEnrichmentWorker {
         this.dispatchCalls += 1;
         this.reservedUtf8Bytes += charge;
         raw = await this.bounded((signal) => this.deps.transport.execute(work.requestJson, id, signal));
-      } catch {
+      } catch (error) {
+        if (isResourceLimitError(error)) return this.fail(task, error.message);
         await this.deps.audit('uncertain', task, () => this.deps.repo.uncertain(task, id));
         return 'uncertain';
+      }
+      if (this.maxCompletionUtf8Bytes !== undefined &&
+        Buffer.byteLength(raw, "utf8") > this.maxCompletionUtf8Bytes) {
+        return this.fail(task, 'completion_limit_exceeded');
       }
       await this.deps.audit('received', task, () => this.deps.repo.receive(task, id, raw));
       attempt = this.deps.repo.attempt(task.id, work.key);
@@ -167,4 +278,14 @@ export class SemanticEnrichmentWorker {
     await this.deps.audit('failed', task, () => this.deps.repo.finish(task, 'failed', reason, this.deps.now()));
     return reason;
   }
+}
+
+function resourceLimitError(reason: string): Error {
+  const error = new Error(reason);
+  error.name = RESOURCE_LIMIT_ERROR;
+  return error;
+}
+
+function isResourceLimitError(error: unknown): error is Error {
+  return error instanceof Error && error.name === RESOURCE_LIMIT_ERROR;
 }
