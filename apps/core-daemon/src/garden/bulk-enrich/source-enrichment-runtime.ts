@@ -11,6 +11,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   OfficialApiSemanticArtifactCodec,
+  OFFICIAL_API_SYSTEM_PROMPT,
   defaultSourceEnrichmentProfile
 } from "@do-soul/alaya-soul";
 import {
@@ -19,14 +20,40 @@ import {
   type SqliteGardenTaskRepo
 } from "@do-soul/alaya-storage";
 
+export type SemanticProviderExtractPort = Readonly<{
+  extract(input: {
+    readonly systemPrompt: string;
+    readonly userPrompt: string;
+    readonly abortSignal?: AbortSignal;
+    readonly timeoutMs?: number;
+  }): Promise<{ readonly rawJson: string }>;
+}>;
+
+export type SourceEnrichmentCapability = Readonly<{
+  readonly configured: boolean;
+  readonly observationFamily: "official_api_signals" | "none";
+  readonly requestBytes: "reserved";
+  readonly completionTokens: "unsupported";
+  readonly spend: "unsupported";
+}>;
+
+export type SourceEnrichmentRuntime = Readonly<{
+  run(task: Readonly<GardenTaskDescriptor>): Promise<string>;
+  readonly capability: SourceEnrichmentCapability;
+}>;
+
 export function createSourceEnrichmentRuntime(input: Readonly<{
   readonly connection: unknown;
   readonly gardenTaskRepo?: SqliteGardenTaskRepo;
   readonly eventPublisher: EventPublisher;
   readonly now: () => string;
   readonly transport?: SemanticEnrichmentWorkerDependencies["transport"];
+  readonly provider?: SemanticProviderExtractPort;
   readonly profile?: SemanticExtractionProfile;
-}>): { run(task: Readonly<GardenTaskDescriptor>): Promise<string> } | undefined {
+  readonly transportTimeoutMs?: number;
+  readonly maxReservedUtf8Bytes?: number;
+  readonly maxCompletionUtf8Bytes?: number;
+}>): SourceEnrichmentRuntime | undefined {
   if (input.gardenTaskRepo === undefined || !canHostSemanticArtifacts(input.connection)) {
     return undefined;
   }
@@ -35,7 +62,11 @@ export function createSourceEnrichmentRuntime(input: Readonly<{
   const profile = input.profile ?? defaultSourceEnrichmentProfile();
   const repo = new SqliteSemanticArtifactRepo(connection, input.gardenTaskRepo, profile);
   const codec = new OfficialApiSemanticArtifactCodec();
-  const transport = input.transport ?? failClosedTransport();
+  const transportTimeoutMs = input.transportTimeoutMs ?? 20_000;
+  const maxReservedUtf8Bytes = input.maxReservedUtf8Bytes ?? 262_144;
+  const maxCompletionUtf8Bytes = input.maxCompletionUtf8Bytes ?? 262_144;
+  const transport = composeRuntimeTransport(input, { transportTimeoutMs, maxCompletionUtf8Bytes });
+  const capability = describeCapability(input, transport);
   const worker = new SemanticEnrichmentWorker({
     repo,
     codec,
@@ -55,12 +86,47 @@ export function createSourceEnrichmentRuntime(input: Readonly<{
     leaseMs: 30_000,
     maxAttempts: 3,
     maxUnits: 32,
-    transportTimeoutMs: 20_000,
+    transportTimeoutMs,
     maxLocalRecoveries: 8,
-    maxReservedUtf8Bytes: 262_144
+    maxReservedUtf8Bytes,
+    maxCompletionUtf8Bytes
   });
   return {
+    capability,
     run: async (task) => await worker.run(task.workspace_id, task.task_id, { adoptClaim: true })
+  };
+}
+
+function composeRuntimeTransport(input: Readonly<{
+  readonly transport?: SemanticEnrichmentWorkerDependencies["transport"];
+  readonly provider?: SemanticProviderExtractPort;
+}>, limits: {
+  readonly transportTimeoutMs: number;
+  readonly maxCompletionUtf8Bytes: number;
+}): SemanticEnrichmentWorkerDependencies["transport"] {
+  if (input.provider !== undefined) {
+    return SemanticEnrichmentWorker.composeProviderTransport(input.provider, {
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      timeoutMs: limits.transportTimeoutMs,
+      maxCompletionUtf8Bytes: limits.maxCompletionUtf8Bytes
+    });
+  }
+  if (input.transport !== undefined) return input.transport;
+  return SemanticEnrichmentWorker.composeProviderTransport(undefined);
+}
+
+function describeCapability(input: Readonly<{
+  readonly transport?: SemanticEnrichmentWorkerDependencies["transport"];
+  readonly provider?: SemanticProviderExtractPort;
+}>, transport: SemanticEnrichmentWorkerDependencies["transport"]): SourceEnrichmentCapability {
+  const configured = input.provider !== undefined ||
+    (input.transport !== undefined && transport.capabilities?.configured !== false);
+  return {
+    configured,
+    observationFamily: configured ? "official_api_signals" : "none",
+    requestBytes: "reserved",
+    completionTokens: "unsupported",
+    spend: "unsupported"
   };
 }
 
@@ -72,13 +138,4 @@ function canHostSemanticArtifacts(connection: unknown): boolean {
     readonly prepare?: unknown;
   };
   return [db.exec, db.transaction, db.function, db.prepare].every((value) => typeof value === "function");
-}
-
-function failClosedTransport(): SemanticEnrichmentWorkerDependencies["transport"] {
-  return {
-    execute: async () => {
-      throw new Error("semantic logical transport is not composed");
-    },
-    reconcile: async () => ({ kind: "unknown" })
-  };
 }

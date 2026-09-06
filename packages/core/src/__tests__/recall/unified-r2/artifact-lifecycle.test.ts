@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initializeSemanticArtifactCandidateSchema, SqliteMemoryRecallReader, type StorageDatabase } from "@do-soul/alaya-storage";
+import { SemanticEnrichmentWorker } from "../../../conversation/semantic-enrichment-worker.js";
 import { artifactFixture, PROFILE, response, wireArtifacts } from "./artifact-lifecycle-fixture.js";
 import { MEM, WS } from "./ids.js";
 
@@ -143,8 +144,12 @@ describe('durable semantic artifact lifecycle', () => {
     const f = await fixture();
     const t = transport();
     const task = await f.write(MEM.orion, 'Alice owns Orion');
-    expect(await f.worker(t, f.audit, 3, 1).run(WS, task)).toBe('token_envelope_exhausted');
+    const worker = f.worker(t, f.audit, 3, 1);
+    expect(await worker.run(WS, task)).toBe('request_byte_envelope_exhausted');
     expect(t.calls).toHaveLength(0);
+    expect(worker.resourceAccounting()).toEqual({
+      reservedRequestUtf8Bytes: 0, completionTokens: 'unsupported', spend: 'unsupported'
+    });
   });
 
   it('publishes a reconciled successful response without retransmitting an uncertain attempt', async () => {
@@ -564,6 +569,121 @@ describe('durable semantic artifact lifecycle', () => {
     expect(() => wireArtifacts(db)).toThrow(/incompatible semantic artifact candidate schema/);
     expect(() => initializeSemanticArtifactCandidateSchema(db.connection)).toThrow(/incompatible semantic artifact candidate schema/);
     expect(db.connection.prepare('SELECT revision FROM garden_semantic_schema').all()).toEqual([{ revision }]);
+  });
+
+  it('composes a fake provider extract port and does not advertise spend from request bytes', async () => {
+    const f = await fixture();
+    const task = await f.write(MEM.orion, 'Alice owns Orion');
+    let extracts = 0;
+    const worker = f.worker(SemanticEnrichmentWorker.composeProviderTransport({
+      extract: async ({ userPrompt }) => {
+        extracts += 1;
+        return { rawJson: response(userPrompt) };
+      }
+    }));
+    expect(await worker.run(WS, task)).toBe('completed');
+    expect(extracts).toBe(1);
+    expect(worker.resourceAccounting().reservedRequestUtf8Bytes).toBeGreaterThan(0);
+    expect(worker.resourceAccounting()).toMatchObject({
+      completionTokens: 'unsupported', spend: 'unsupported'
+    });
+    expect(f.repo.searchReady(WS, 'Orion', 10)).toHaveLength(1);
+  });
+
+  it('rejects an oversized composed completion without persisting raw bytes or claiming spend', async () => {
+    const f = await fixture();
+    const task = await f.write(MEM.orion, 'Alice owns Orion');
+    const huge = JSON.stringify({
+      signals: [{ object_kind: 'decision', confidence: 0.8, matched_text: 'x'.repeat(8_000), distilled_fact: 'x' }]
+    });
+    const worker = f.worker(SemanticEnrichmentWorker.composeProviderTransport({
+      extract: async () => ({ rawJson: huge })
+    }, { maxCompletionUtf8Bytes: 256 }));
+    expect(await worker.run(WS, task)).toBe('completion_limit_exceeded');
+    expect(count(f.slice.database, 'garden_semantic_artifacts')).toBe(0);
+    expect(worker.resourceAccounting().spend).toBe('unsupported');
+  });
+
+  it('does not publish when a composed provider ignores cancellation past the deadline', async () => {
+    const f = await fixture();
+    const task = await f.write(MEM.orion, 'Alice owns Orion');
+    let signal: AbortSignal | undefined;
+    const worker = f.worker(SemanticEnrichmentWorker.composeProviderTransport({
+      extract: async (input) => {
+        signal = input.abortSignal;
+        return new Promise(() => {});
+      }
+    }));
+    expect(await worker.run(WS, task)).toBe('uncertain');
+    expect(signal?.aborted).toBe(true);
+    expect(count(f.slice.database, 'garden_semantic_artifacts')).toBe(0);
+  });
+
+  it('keeps an unconfigured composed transport unavailable unless artifacts already exist', async () => {
+    const f = await fixture();
+    const missing = await f.write(MEM.orion, 'Alice owns Orion');
+    const unconfigured = SemanticEnrichmentWorker.composeProviderTransport(undefined);
+    expect(await f.worker(unconfigured).run(WS, missing)).toBe('transport_unconfigured');
+    expect(count(f.slice.database, 'garden_semantic_artifacts')).toBe(0);
+    let extracts = 0;
+    const first = await f.write(MEM.channel, 'Alice owns Orion');
+    expect(await f.worker(SemanticEnrichmentWorker.composeProviderTransport({
+      extract: async ({ userPrompt }) => {
+        extracts += 1;
+        return { rawJson: response(userPrompt) };
+      }
+    })).run(WS, first)).toBe('completed');
+    expect(extracts).toBe(1);
+    const reuse = await f.write(MEM.charlie, 'Alice owns Orion');
+    const worker = f.worker(unconfigured);
+    expect(await worker.run(WS, reuse)).toBe('completed');
+    expect(extracts).toBe(1);
+    expect(worker.resourceAccounting()).toEqual({
+      reservedRequestUtf8Bytes: 0, completionTokens: 'unsupported', spend: 'unsupported'
+    });
+    expect(count(f.slice.database, 'garden_semantic_bindings')).toBe(2);
+  });
+
+  it('reconciles a lost composed extract without a second provider call', async () => {
+    const f = await fixture();
+    const task = await f.write(MEM.orion, 'Alice owns Orion');
+    let raw = '';
+    let extracts = 0;
+    const worker = f.worker(SemanticEnrichmentWorker.composeProviderTransport({
+      extract: async ({ userPrompt }) => {
+        extracts += 1;
+        raw = response(userPrompt);
+        throw new Error('lost extract');
+      },
+      reconcile: async () => ({ kind: 'received', rawJson: raw })
+    }));
+    expect(await worker.run(WS, task)).toBe('uncertain');
+    f.advance();
+    expect(await worker.run(WS, task)).toBe('completed');
+    expect(extracts).toBe(1);
+    expect(worker.resourceAccounting().spend).toBe('unsupported');
+  });
+
+  it('does not call a composed provider from Recall when optional enrichment is missing', async () => {
+    const f = await fixture();
+    const task = await f.write(MEM.orion, 'Alice owns Orion');
+    let extracts = 0;
+    const transport = SemanticEnrichmentWorker.composeProviderTransport({
+      extract: async ({ userPrompt }) => {
+        extracts += 1;
+        return { rawJson: response(userPrompt) };
+      }
+    });
+    const before = await f.slice.runRecall({ text: 'Alice owns Orion', familyCaps: { embedding: 'unavailable' as const } });
+    expect(before.membership).toContain(MEM.orion);
+    expect(extracts).toBe(0);
+    expect(before.counters.recall_provider_calls).toBe(0);
+    expect(f.repo.task(WS, task)?.status).toBe('pending');
+    expect(await f.worker(transport).run(WS, task)).toBe('completed');
+    expect(extracts).toBe(1);
+    const after = await f.slice.runRecall({ text: 'Alice owns Orion', familyCaps: { embedding: 'unavailable' as const } });
+    expect(after.membership).toContain(MEM.orion);
+    expect(extracts).toBe(1);
   });
 
 });
