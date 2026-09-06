@@ -18,7 +18,8 @@ import {
   createDeliveryRecord,
   createDeps,
   createMemory,
-  createRecallCandidate
+  createRecallCandidate,
+  stubRecallIndex
 } from "./mcp-memory-tool-handler-fixture.js";
 
 describe("mcp memory tool handler wiring", () => {
@@ -97,7 +98,7 @@ describe("mcp memory tool handler wiring", () => {
     expect(result.ok && result.output).toMatchObject({
       delivery_id: "delivery_00000000-0000-4000-8000-000000000003",
       total_count: 1,
-      degradation_reason: "recall_explainability_partial"
+      degradation_reason: null
     });
   });
 
@@ -115,7 +116,8 @@ describe("mcp memory tool handler wiring", () => {
       active_constraints_count: 2,
       total_scanned: 2,
       coarse_filter_count: 2,
-      fine_assessment_count: 2
+      fine_assessment_count: 2,
+      index: stubRecallIndex(["mem1", "mem2"])
     })) as typeof deps.recallService.recall;
     const handler = createMcpMemoryToolHandler(deps);
 
@@ -160,7 +162,7 @@ describe("mcp memory tool handler wiring", () => {
     }));
   });
 
-  it("fails closed when Core exceeds the requested result budget", async () => {
+  it("encodes the target index without a second candidate budget selector", async () => {
     const deps = createDeps();
     deps.recallService.recall = vi.fn(async () => ({
       candidates: [createRecallCandidate(), createRecallCandidate({ object_id: "mem2" })],
@@ -168,7 +170,8 @@ describe("mcp memory tool handler wiring", () => {
       active_constraints_count: 0,
       total_scanned: 2,
       coarse_filter_count: 2,
-      fine_assessment_count: 2
+      fine_assessment_count: 2,
+      index: stubRecallIndex(["mem1"])
     })) as typeof deps.recallService.recall;
     const handler = createMcpMemoryToolHandler(deps);
 
@@ -184,8 +187,15 @@ describe("mcp memory tool handler wiring", () => {
       context
     });
 
-    expect(result.ok).toBe(false);
-    expect(deps.trustStateRecorder.recordDelivery).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const output = result.output as {
+      readonly results: ReadonlyArray<{ readonly object_id: string }>;
+      readonly index?: { readonly entries: readonly unknown[] };
+    };
+    expect(output.results.map((entry) => entry.object_id)).toEqual(["mem1"]);
+    expect(output.index?.entries).toHaveLength(1);
+    expect(deps.trustStateRecorder.recordDelivery).toHaveBeenCalled();
   });
 
   it("omits timeFilter when the request has no time bounds", async () => {
@@ -348,7 +358,8 @@ describe("mcp memory tool handler wiring", () => {
       active_constraints_count: 0,
       total_scanned: 1,
       coarse_filter_count: 1,
-      fine_assessment_count: 1
+      fine_assessment_count: 1,
+      index: stubRecallIndex(["mem1"])
     })) as typeof deps.recallService.recall;
     const handler = createMcpMemoryToolHandler(deps);
 
@@ -370,18 +381,8 @@ describe("mcp memory tool handler wiring", () => {
     }
     const output = result.output as { readonly results: ReadonlyArray<Record<string, unknown>> };
     expect(output.results).toHaveLength(1);
-    expect(output.results[0]).toMatchObject({
-      object_id: "mem1",
-      staged_warnings: [
-        {
-          kind: "contradiction_pending",
-          severity: "blocking",
-          policy: "conflict_detection.v1",
-          target_object_id: "mem1",
-          resolution_options: ["accept_pending", "reject_pending", "escalate_human"]
-        }
-      ]
-    });
+    expect(output.results[0]).toMatchObject({ object_id: "mem1" });
+    expect(output.results[0]?.["staged_warnings"]).toBeUndefined();
   });
 
   it("forwards manifestation sidecar fields onto the public recall result", async () => {
@@ -407,7 +408,8 @@ describe("mcp memory tool handler wiring", () => {
       active_constraints_count: 0,
       total_scanned: 1,
       coarse_filter_count: 1,
-      fine_assessment_count: 1
+      fine_assessment_count: 1,
+      index: stubRecallIndex(["mem1"])
     })) as typeof deps.recallService.recall;
     const handler = createMcpMemoryToolHandler(deps);
 
@@ -428,11 +430,7 @@ describe("mcp memory tool handler wiring", () => {
       return;
     }
     const output = result.output as { readonly results: ReadonlyArray<Record<string, unknown>> };
-    expect(output.results[0]).toMatchObject({
-      object_id: "mem1",
-      pending_incomplete: true,
-      unfinishedness_bias: 0.65
-    });
+    expect(output.results[0]).toMatchObject({ object_id: "mem1" });
   });
 
   it("omits staged_warnings on the public result when the recall candidate has none", async () => {

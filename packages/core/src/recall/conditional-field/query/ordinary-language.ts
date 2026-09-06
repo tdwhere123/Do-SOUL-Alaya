@@ -21,6 +21,7 @@ export type OrdinaryRequestClass =
   | { readonly kind: "supported" }
   | { readonly kind: "partial"; readonly missing: "time" }
   | { readonly kind: "hypotheses" }
+  | { readonly kind: "lexical" }
   | { readonly kind: "unsupported" }
   | { readonly kind: "malformed" };
 
@@ -52,7 +53,7 @@ export function classifyOrdinaryRequest(text: string): OrdinaryRequestClass {
     return hasYesterday ? { kind: "supported" } : { kind: "partial", missing: "time" };
   }
   if (hasYesterday && hasFailed) return { kind: "hypotheses" };
-  return { kind: "unsupported" };
+  return { kind: "lexical" };
 }
 
 // Yesterday is an event-variable interval. Applying it to associated items drops last-week config.
@@ -79,6 +80,17 @@ export function openAnchorTimeGuard(variable = "r"): Guard {
     variable,
     time_scope: "anchor"
   };
+}
+
+export const STORED_RELATION_KIND = "stored_relation";
+
+export function lexicalStoredRelationProgram(): QueryProgram {
+  return relationProgram(
+    STORED_RELATION_KIND,
+    "seed",
+    "associated",
+    associatedItemGuard("associated")
+  );
 }
 
 export function associatedItemGuard(variable: string): Guard {

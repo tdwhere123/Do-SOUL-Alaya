@@ -97,11 +97,24 @@ describe("conditional-field query compiler", () => {
   });
 
   it("does not compile owner or channel phrasing as a relation catalog", () => {
-    expect(compileOrdinary("who owns this channel").status).toBe("unsupported");
+    const owns = compileOrdinary("who owns this channel");
+    expect(owns.status).toBe("resolved");
+    expect(collectRelations(owns.program).map((relation) => relation.relation_kind))
+      .toEqual(["stored_relation"]);
     const wrapped = compileOrdinary("who owns yesterday's failed deployment");
     expect(wrapped.status).toBe("resolved");
     expect(collectRelations(wrapped.program).map((relation) => relation.relation_kind).sort())
       .toEqual(["associated_config", "associated_history", "failed_deployment"]);
+  });
+
+  it("compiles ordinary recall outside failed-deployment as lexical seed plus stored-relation adjacency", () => {
+    for (const text of ["deployment rules", "pnpm workspace commands", "xyzzy unrelated request"]) {
+      const interpretation = compileOrdinary(text);
+      expect(interpretation.status).toBe("resolved");
+      expect(collectRelations(interpretation.program).map((relation) => relation.relation_kind))
+        .toEqual(["stored_relation"]);
+      expect(interpretation.query_id).not.toBe("unsupported");
+    }
   });
 
   it("A03 keeps epsilon distinct from empty and does not rewrite grammar", () => {
@@ -254,7 +267,7 @@ describe("conditional-field query compiler", () => {
 
   it("distinguishes malformed, unsupported, partial, and resource-rejected from empty", () => {
     expect(compileOrdinary("").status).toBe("malformed");
-    expect(compileOrdinary("xyzzy unrelated request").status).toBe("unsupported");
+    expect(compileOrdinary("xyzzy unrelated request").status).toBe("resolved");
     const partial = compileOrdinary("failed deployment of checkout");
     expect(partial.status).toBe("partial");
     expect(partial.holes).toEqual([{

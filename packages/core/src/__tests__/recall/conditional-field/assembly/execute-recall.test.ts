@@ -6,13 +6,20 @@ import {
 } from "@do-soul/alaya-protocol";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
 import {
+  RecallService,
   runConditionalFieldRecall,
   type ObserverReaders
 } from "../../../../recall/recall-service.js";
+import { observeConditionalField, startObserverCursor } from
+  "../../../../recall/conditional-field/observers/observe.js";
+import { createDependencies, createTaskSurface } from "../../recall-service-test-fixtures.js";
 import {
   INTERPRETATION_CLOCK,
+  LAST_WEEK_INSTANT,
   SNAPSHOT_ID,
-  defaultBudget
+  YESTERDAY_INSTANT,
+  defaultBudget,
+  yesterdayAnchorGuard
 } from "../reference/deployment.fixture.js";
 import { INAPPLICABLE_KIND, MEM, WS, openSourceSlice } from "../vertical/source-slice.js";
 
@@ -28,8 +35,6 @@ describe("conditional-field executeRecall assembly", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const index = runRecall(slice, { page_budget: 800 });
-    expect(index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
-      .toBe(850);
     expect(index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades)
       .toBe(550);
     expect(index.entries.some((entry) => entry.claim === "unknown")).toBe(true);
@@ -72,6 +77,143 @@ describe("conditional-field executeRecall assembly", () => {
     expect(slice.pendingGarden()).toHaveLength(before);
     expect(slice.pendingGarden()).toHaveLength(0);
   });
+
+  it("A01 keeps last-week config; applying yesterday to every object drops it from seeds", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const index = runRecall(slice, { page_budget: 800 });
+    expect(index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
+      .toBe(850);
+    const seed = observeConditionalField({
+      lease: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        lease_id: "a01",
+        snapshot_id: SNAPSHOT_ID,
+        query_id: "failed-deployment",
+        status: "active"
+      },
+      action: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        action: "seed",
+        region_id: "seed",
+        work_limit: 16
+      },
+      cursor: startObserverCursor({
+        cursor_id: "seed",
+        snapshot_id: SNAPSHOT_ID,
+        query_id: "failed-deployment",
+        region_id: "seed"
+      }),
+      query: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        query_id: "failed-deployment",
+        status: "resolved",
+        snapshot_id: SNAPSHOT_ID,
+        program: {
+          schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+          kind: "relation",
+          relation_kind: "failed_deployment",
+          source_variable: "anchor",
+          target_variable: "r",
+          guard: yesterdayAnchorGuard(),
+          facet_mode: "same_path",
+          threshold_milligrades: 0
+        },
+        view: { schema_version: 1, requested_roles: ["requested", "associated"] },
+        holes: [],
+        hypotheses: []
+      },
+      workspace_id: WS,
+      readers: readersFor(slice),
+      seed_query: "configuration change",
+      anchor_object_ids: [MEM.r, MEM.c],
+      object_observed_at: { [MEM.r]: YESTERDAY_INSTANT, [MEM.c]: LAST_WEEK_INSTANT },
+      page_limit: 16
+    });
+    expect(seed.page.observations.some((observation) => observation.object_id === MEM.c)).toBe(false);
+  });
+
+  it("ordinary language outside failed-deployment still returns a source-backed index", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const rules = runConditionalFieldRecall({
+      workspace_id: WS,
+      query_text: "deployment rules",
+      budget: defaultBudget({ page_budget: 800 }),
+      snapshot_id: SNAPSHOT_ID,
+      interpretation_clock: INTERPRETATION_CLOCK,
+      as_of: INTERPRETATION_CLOCK,
+      expires_at: "2099-01-01T00:00:00.000Z",
+      readers: readersFor(slice)
+    });
+    expect(rules.completeness.logical_index).not.toBe("unavailable");
+    expect(rules.entries.length).toBeGreaterThan(0);
+    const commands = runConditionalFieldRecall({
+      workspace_id: WS,
+      query_text: "pnpm workspace commands",
+      budget: defaultBudget({ page_budget: 800 }),
+      snapshot_id: SNAPSHOT_ID,
+      interpretation_clock: INTERPRETATION_CLOCK,
+      as_of: INTERPRETATION_CLOCK,
+      expires_at: "2099-01-01T00:00:00.000Z",
+      readers: readersFor(slice)
+    });
+    expect(commands.completeness.observed_coverage).not.toBe("unavailable");
+  });
+
+  it("does not mint complete-empty after an unavailable observer", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const index = runConditionalFieldRecall({
+      workspace_id: WS,
+      query_text: "yesterday failed deployment",
+      budget: defaultBudget({ page_budget: 800 }),
+      snapshot_id: SNAPSHOT_ID,
+      interpretation_clock: INTERPRETATION_CLOCK,
+      as_of: INTERPRETATION_CLOCK,
+      expires_at: "2099-01-01T00:00:00.000Z",
+      readers: {}
+    });
+    expect(index.completeness.logical_index).not.toBe("complete");
+    expect(index.completeness.observed_coverage).not.toBe("exhausted_empty");
+    expect(index.completeness.observed_coverage).toBe("unavailable");
+  });
+
+  it("keeps snapshot identity across executeRecall pages when now() changes", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    let ticks = 0;
+    const { dependencies } = createDependencies([]);
+    const service = new RecallService({
+      testOnlyAllowInMemoryFieldQuerySession: true,
+      ...dependencies,
+      now: () => new Date(Date.parse(INTERPRETATION_CLOCK) + ticks++ * 1_000).toISOString(),
+      observerReaders: readersFor(slice)
+    });
+    const surface = { ...createTaskSurface(), display_name: "yesterday failed deployment" };
+    const first = await service.recall({
+      taskSurface: surface,
+      workspaceId: WS,
+      strategy: "chat",
+      queryText: "yesterday failed deployment",
+      pageBudget: 2,
+      interpretationClock: INTERPRETATION_CLOCK
+    });
+    const second = await service.recall({
+      taskSurface: surface,
+      workspaceId: WS,
+      strategy: "chat",
+      queryText: "yesterday failed deployment",
+      pageBudget: 2,
+      interpretationClock: INTERPRETATION_CLOCK,
+      continuation: first.index.continuation
+    });
+    expect(first.index.snapshot_id).toBe(second.index.snapshot_id);
+    expect(second.index.completeness.observed_coverage).not.toBe("invalidated");
+    const concatenated = [...first.index.entries, ...second.index.entries].map(entryId);
+    const full = runRecall(slice, { page_budget: 800 });
+    expect(concatenated).toEqual(full.entries.map(entryId).slice(0, concatenated.length));
+  });
 });
 
 function runRecall(
@@ -97,6 +239,11 @@ function runRecall(
 }
 
 function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): ObserverReaders {
+  const kindsSql = slice.database.connection.prepare(
+    `SELECT DISTINCT relation_kind AS kind FROM relation_assertions
+     WHERE workspace_id = ?
+       AND (? IS NULL OR lower(json_extract(anchors_json, '$.source_anchor.object_id')) = ?)`
+  );
   return {
     lexical: (input) => slice.memoryReader.lexical(
       input.workspaceId,
@@ -110,7 +257,11 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
       return {
         row: page.row === null
           ? null
-          : { object_id: page.row.object_id, sourceRevision: page.row.sourceRevision },
+          : {
+            object_id: page.row.object_id,
+            sourceRevision: page.row.sourceRevision,
+            observed_at: page.row.created_at
+          },
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
         unavailable: page.unavailable
@@ -123,7 +274,19 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
       input.limit,
       input.nativeLimit,
       input.afterAssertionId
-    )
+    ),
+    relationKinds: (input) => {
+      const subject = input.subject === null ? null : input.subject.toLowerCase();
+      const rows = kindsSql.all(input.workspaceId, subject, subject) as { readonly kind: string }[];
+      return rows.map((row) => row.kind);
+    },
+    snapshotPin: () => {
+      const cursor = slice.indexProjection.cursor(WS);
+      return {
+        source_revision: String(cursor?.appliedEventRevision ?? 1),
+        ...(cursor?.appliedAt === undefined ? {} : { applied_at: cursor.appliedAt })
+      };
+    }
   };
 }
 
@@ -138,6 +301,12 @@ async function plantDeployment(slice: Awaited<ReturnType<typeof openSourceSlice>
   await slice.writeMemory(MEM.s, "shared routing service for checkout", MemoryDimension.FACT);
   await slice.writeMemory(MEM.h, "prior same-service failure last month", MemoryDimension.EPISODE);
   await slice.writeMemory(MEM.u, "unrelated picnic menu", MemoryDimension.FACT);
+  stampObservedAt(slice, MEM.r, YESTERDAY_INSTANT);
+  stampObservedAt(slice, MEM.l, YESTERDAY_INSTANT);
+  stampObservedAt(slice, MEM.c, LAST_WEEK_INSTANT);
+  stampObservedAt(slice, MEM.s, LAST_WEEK_INSTANT);
+  stampObservedAt(slice, MEM.h, LAST_WEEK_INSTANT);
+  stampObservedAt(slice, MEM.u, LAST_WEEK_INSTANT);
   const open = { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" };
   const edges = [
     ["assert-r-l", MEM.r, MEM.l, "observed_log"],
@@ -159,4 +328,14 @@ async function plantDeployment(slice: Awaited<ReturnType<typeof openSourceSlice>
       gist: relationKind
     });
   }
+}
+
+function stampObservedAt(
+  slice: Awaited<ReturnType<typeof openSourceSlice>>,
+  objectId: string,
+  instant: string
+): void {
+  slice.database.connection.prepare(
+    "UPDATE memory_entries SET created_at = ?, updated_at = ? WHERE object_id = ?"
+  ).run(instant, instant, objectId);
 }

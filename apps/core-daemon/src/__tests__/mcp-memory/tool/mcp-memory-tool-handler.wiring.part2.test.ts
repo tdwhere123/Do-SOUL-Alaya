@@ -16,7 +16,8 @@ import {
   createDeliveryRecord,
   createDeps,
   createMemory,
-  createRecallCandidate
+  createRecallCandidate,
+  stubRecallIndex
 } from "./mcp-memory-tool-handler-fixture.js";
 
 describe("mcp memory tool handler wiring", () => {
@@ -43,7 +44,8 @@ describe("mcp memory tool handler wiring", () => {
       total_scanned: 1,
       coarse_filter_count: 1,
       fine_assessment_count: 1,
-      degradation_reason: "cold_cascade_engaged"
+      degradation_reason: "cold_cascade_engaged",
+      index: stubRecallIndex(["mem1"])
     })) as typeof deps.recallService.recall;
     const handler = createMcpMemoryToolHandler(deps);
 

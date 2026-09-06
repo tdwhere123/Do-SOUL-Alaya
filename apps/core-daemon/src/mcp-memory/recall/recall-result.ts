@@ -1,4 +1,5 @@
 import {
+  CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_TOP,
   type InformationIndex,
   type MemorySearchResult,
@@ -17,6 +18,31 @@ export type RecallMcpHonestyDiagnostics = Readonly<{
   readonly embedding_provider_status?: string;
   readonly provider_degradation_reason?: string | null;
 }>;
+
+export function unavailableIndex(): InformationIndex {
+  return {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    query_id: "unavailable",
+    snapshot_id: `sha256:${"0".repeat(64)}`,
+    result_version: "v1",
+    entries: [],
+    completeness: {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      logical_index: "unavailable",
+      observed_coverage: "unavailable",
+      transport: "unavailable",
+      payload: "unavailable",
+      representation: "unavailable"
+    },
+    continuation: null,
+    representation: {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      policy: "construct_index_then_page_then_payload",
+      page_budget: 0,
+      identity_tie_break: "serialization"
+    }
+  };
+}
 
 export function encodeIndexResults(index: InformationIndex): readonly MemorySearchResult[] {
   return index.entries.map((entry, offset) => {

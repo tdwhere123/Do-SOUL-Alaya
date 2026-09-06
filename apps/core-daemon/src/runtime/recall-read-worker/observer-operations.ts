@@ -7,6 +7,7 @@ import {
   type ObserverReaders
 } from "@do-soul/alaya-core";
 import {
+  SqliteIndexedRecallProjection,
   SqliteMemoryRecallReader,
   SqliteRelationRecallReader,
   type StorageDatabase
@@ -43,8 +44,17 @@ export function runConditionalFieldWorkerRecall(
 export function createConditionalFieldObserverReaders(database: StorageDatabase): ObserverReaders {
   const memory = new SqliteMemoryRecallReader(database);
   const relation = new SqliteRelationRecallReader(database);
+  const projection = new SqliteIndexedRecallProjection(database.connection);
   memory.prepareIndex();
   relation.prepareIndex();
+  const kindsSql = database.connection.prepare(
+    `SELECT DISTINCT relation_kind AS kind FROM relation_assertions
+     WHERE workspace_id = ?
+       AND (? IS NULL OR lower(json_extract(anchors_json, '$.source_anchor.object_id')) = ?)`
+  );
+  const maxRevisionSql = database.connection.prepare(
+    `SELECT COALESCE(MAX(revision), 0) AS revision FROM event_log WHERE workspace_id = ?`
+  );
   return {
     lexical: (input) => memory.lexical(
       input.workspaceId,
@@ -58,7 +68,11 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase)
       return {
         row: page.row === null
           ? null
-          : { object_id: page.row.object_id, sourceRevision: page.row.sourceRevision },
+          : {
+            object_id: page.row.object_id,
+            sourceRevision: page.row.sourceRevision,
+            observed_at: page.row.created_at
+          },
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
         unavailable: page.unavailable
@@ -71,7 +85,23 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase)
       input.limit,
       input.nativeLimit,
       input.afterAssertionId
-    )
+    ),
+    relationKinds: (input) => {
+      const subject = input.subject === null ? null : input.subject.toLowerCase();
+      const rows = kindsSql.all(input.workspaceId, subject, subject) as { readonly kind: string }[];
+      return rows.map((row) => row.kind);
+    },
+    snapshotPin: (workspaceId) => {
+      const cursor = projection.cursor(workspaceId);
+      if (cursor !== null) {
+        return {
+          source_revision: String(cursor.appliedEventRevision),
+          applied_at: cursor.appliedAt
+        };
+      }
+      const row = maxRevisionSql.get(workspaceId) as { readonly revision: number };
+      return { source_revision: String(row.revision) };
+    }
   };
 }
 

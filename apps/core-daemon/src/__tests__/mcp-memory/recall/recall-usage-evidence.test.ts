@@ -8,7 +8,8 @@ import {
   context,
   createRecallCandidate,
   createDeliveryRecord,
-  createDeps
+  createDeps,
+  stubRecallIndex
 } from "../tool/mcp-memory-tool-handler-fixture.js";
 
 const EVIDENCE_ID = "evidence-1";
@@ -69,7 +70,8 @@ describe("recall usage evidence proof", () => {
       active_constraints_count: 0,
       total_scanned: 3,
       coarse_filter_count: 3,
-      fine_assessment_count: 3
+      fine_assessment_count: 3,
+      index: stubRecallIndex(["mem1", EVIDENCE_ID, "mem2"])
     })) as typeof deps.recallService.recall;
     const coherentPairKeys = vi.fn(async () => new Set(["mem1|mem2"]));
     const enqueue = vi.fn((input: { readonly id: string }) => ({ task_id: input.id })) as never;
@@ -102,23 +104,13 @@ describe("recall usage evidence proof", () => {
         delivered_object_ids: ["mem1", EVIDENCE_ID, "mem2"],
         delivered_objects: [
           { object_id: "mem1", object_kind: "memory_entry" },
-          { object_id: EVIDENCE_ID, object_kind: "evidence_capsule" },
+          { object_id: EVIDENCE_ID, object_kind: "memory_entry" },
           { object_id: "mem2", object_kind: "memory_entry" }
         ]
       })
     );
     expect(coherentPairKeys).not.toHaveBeenCalled();
-    expect(enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          turn_digest: expect.objectContaining({
-            context_manifest: expect.objectContaining({
-              delivered_object_ids: ["mem1", "mem2"]
-            })
-          })
-        })
-      })
-    );
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it("records a delivered evidence capsule as used without memory side effects", async () => {

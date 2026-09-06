@@ -30,6 +30,7 @@ export type SourceObserverPage = Readonly<{
   readonly row: Readonly<{
     readonly object_id: string;
     readonly sourceRevision: string;
+    readonly observed_at?: string;
   }> | null;
   readonly rowsRead: number;
   readonly bytesRead: number;
@@ -80,6 +81,14 @@ export type ObserverReaders = Readonly<{
     readonly nativeLimit: number;
     readonly afterAssertionId: string | null;
   }>) => RelationObserverPage;
+  readonly relationKinds?: (input: Readonly<{
+    readonly workspaceId: string;
+    readonly subject: string | null;
+  }>) => readonly string[];
+  readonly snapshotPin?: (workspaceId: string) => Readonly<{
+    readonly source_revision: string;
+    readonly applied_at?: string;
+  }>;
   readonly embeddingIds?: (input: Readonly<{
     readonly workspaceId: string;
     readonly afterObjectId: string | null;
@@ -322,7 +331,7 @@ function hydrateSeedObservation(
   const page = source({ workspaceId: input.workspace_id, objectId });
   const revision = page.row?.sourceRevision ?? objectId;
   return {
-    observation: maybeObservation(input, objectId, revision, objectId),
+    observation: maybeObservation(input, objectId, revision, objectId, page.row?.observed_at),
     extraWork: Math.max(1, page.rowsRead),
     extraBytes: page.bytesRead
   };
@@ -332,9 +341,10 @@ function maybeObservation(
   input: ObserveConditionalFieldInput,
   objectId: string,
   sourceRevision: string,
-  observationKey: string
+  observationKey: string,
+  observedAt?: string
 ): TypedObservation | null {
-  const applicability = applicabilityFor(input, objectId);
+  const applicability = applicabilityFor(input, objectId, observedAt);
   if (applicability.verdict === "false") return null;
   return {
     schema_version: SCHEMA,
@@ -345,7 +355,11 @@ function maybeObservation(
   };
 }
 
-function applicabilityFor(input: ObserveConditionalFieldInput, objectId: string): Guard {
+function applicabilityFor(
+  input: ObserveConditionalFieldInput,
+  objectId: string,
+  observedAt?: string
+): Guard {
   const guards = collectGuards(input.query.program);
   const authorization = guards.find((guard) => guard.kind === "authorization");
   if (authorization !== undefined) {
@@ -360,7 +374,7 @@ function applicabilityFor(input: ObserveConditionalFieldInput, objectId: string)
       ? { schema_version: SCHEMA, kind: "query_predicate", verdict: "true" }
       : { ...authorization, verdict: "true" };
   }
-  return evaluateInterval(timed, input.object_observed_at?.[objectId]);
+  return evaluateInterval(timed, input.object_observed_at?.[objectId] ?? observedAt);
 }
 
 function appliesTimeGuard(
@@ -372,7 +386,9 @@ function appliesTimeGuard(
   if (input.action.action !== "seed") return false;
   if (guard.time_scope === "none") return false;
   if (guard.time_scope === "anchor") {
-    return (input.anchor_object_ids ?? []).includes(objectId);
+    const anchors = input.anchor_object_ids;
+    if (anchors === undefined || anchors.length === 0) return true;
+    return anchors.includes(objectId);
   }
   return true;
 }

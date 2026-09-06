@@ -27,6 +27,7 @@ import {
   SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
   calendarYesterdayWindow,
   classifyOrdinaryRequest,
+  lexicalStoredRelationProgram,
   openAnchorTimeGuard,
   programFromOpenRelations,
   supportedFailedDeploymentProgram,
@@ -178,6 +179,9 @@ function compileOrdinary(
   if (relations.length > 0) {
     return compileOpenRelations(input, snapshotId, budget, view, queryId, classified, yesterday, hints);
   }
+  if (classified.kind === "lexical") {
+    return compileLexicalRequest(input, snapshotId, budget, view, queryId, hints);
+  }
   return compileSupportedRequest(input, snapshotId, budget, view, queryId, classified, yesterday, hints);
 }
 
@@ -203,6 +207,9 @@ function compileSupportedRequest(
       view,
       interpretation_clock: input.interpretation_clock
     });
+  }
+  if (classified.kind === "lexical") {
+    return compileLexicalRequest(input, snapshotId, budget, view, queryId, hints);
   }
   if (classified.kind === "hypotheses") {
     const program = supportedFailedDeploymentProgram(yesterdayAnchorGuard(yesterday));
@@ -232,6 +239,27 @@ function compileSupportedRequest(
     holes,
     interpretation_clock: input.interpretation_clock,
     time_window: window
+  });
+}
+
+function compileLexicalRequest(
+  input: OrdinaryLanguageCompileInput,
+  snapshotId: string,
+  budget: RequestBudget,
+  view: QueryView,
+  queryId: string | undefined,
+  hints: QueryTimeWindow | undefined
+): QueryInterpretation {
+  const program = lexicalStoredRelationProgram();
+  consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
+  return interpretationOf({
+    query_id: identityFor(queryId, program),
+    status: "resolved",
+    snapshot_id: snapshotId,
+    program,
+    view,
+    interpretation_clock: input.interpretation_clock,
+    time_window: hints
   });
 }
 

@@ -5,6 +5,7 @@ import {
   ScopeClass,
   type CandidateMemorySignal,
   type ContextDeliveryRecord,
+  type InformationIndex,
   type MemoryEntry,
   type RecallCandidate,
   type SoulActiveConstraint,
@@ -19,8 +20,43 @@ export const context = {
   sessionId: "mcp-memory-tool-handler-session"
 };
 
+export function stubRecallIndex(objectIds: readonly string[] = ["mem1"]): InformationIndex {
+  return {
+    schema_version: 1,
+    query_id: "ordinary-lexical",
+    snapshot_id: `sha256:${"c".repeat(64)}`,
+    result_version: "v1",
+    entries: objectIds.map((objectId) => ({
+      schema_version: 1,
+      object_id: objectId,
+      hypothesis_id: "h0",
+      output_binding: "default",
+      role: "associated",
+      association_milligrades: 800,
+      claim: "unknown",
+      explanation_ids: []
+    })),
+    completeness: {
+      schema_version: 1,
+      logical_index: "complete",
+      observed_coverage: "complete",
+      transport: "complete",
+      payload: "complete",
+      representation: "complete"
+    },
+    continuation: null,
+    representation: {
+      schema_version: 1,
+      policy: "construct_index_then_page_then_payload",
+      page_budget: Math.max(1, objectIds.length),
+      identity_tie_break: "serialization"
+    }
+  };
+}
+
 export function createDeps(): McpMemoryToolHandlerDependencies {
   let idCounter = 0;
+  const index = stubRecallIndex(["mem1"]);
   return {
     now: () => "2026-04-30T00:00:00.000Z",
     generateId: () => `00000000-0000-4000-8000-${String(++idCounter).padStart(12, "0")}`,
@@ -44,7 +80,8 @@ export function createDeps(): McpMemoryToolHandlerDependencies {
         active_constraints_count: 0,
         total_scanned: 1,
         coarse_filter_count: 1,
-        fine_assessment_count: 1
+        fine_assessment_count: 1,
+        index
       })) as McpMemoryToolHandlerDependencies["recallService"]["recall"]
     },
     memoryService: {

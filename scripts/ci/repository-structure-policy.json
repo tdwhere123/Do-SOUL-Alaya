@@ -30,7 +30,15 @@
       },
       "packages/core/src/recall/runtime/recall-service-runner.ts": {
         "kind": "handwritten",
-        "reason": "Single normal-entry owner: admit budget, compile, observe, field, support, index, encode."
+        "reason": "Single normal-entry owner: admit budget, compile, snapshot pin, C01-C05 dispatch, encode."
+      },
+      "packages/core/src/recall/runtime/conditional-field-observe.ts": {
+        "kind": "handwritten",
+        "reason": "Production observation agenda: seed/adjacency scheduling, milligrade conversion, incomplete-observer closure."
+      },
+      "packages/core/src/recall/conditional-field/observers/observe.ts": {
+        "kind": "handwritten",
+        "reason": "C02 native observer: seed/relation/measurement pages plus anchor time-guard evaluation."
       }
     }
   },

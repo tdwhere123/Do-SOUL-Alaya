@@ -27,11 +27,11 @@ import {
 import type { GardenTaskEnqueueInput, GardenTaskRow } from "@do-soul/alaya-storage";
 import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-queue.js";
 import {
-  buildMemorySearchResult,
   buildRecallStrategyMix,
   encodeIndexResults,
   resolveMcpDegradationReason,
   selectRecallMcpHonestyDiagnostics,
+  unavailableIndex,
   type RecallMcpHonestyDiagnostics
 } from "./recall-result.js";
 import { buildRecallPolicy, dedupeDeliveredObjectIdentities, uniqueObjectIds } from "./recall-usage-recall-support.js";
@@ -159,7 +159,7 @@ export function createRecallHandler(params: Readonly<{
 
 type RecallHandlerParams = Parameters<typeof createRecallHandler>[0];
 type RecallServiceResult = Awaited<ReturnType<RecallUsageHandlerDependencies["recallService"]["recall"]>>;
-type RecallSearchResult = ReturnType<typeof buildMemorySearchResult>;
+type RecallSearchResult = SoulMemorySearchResponse["results"][number];
 
 async function executeRecall(
   params: RecallHandlerParams,
@@ -176,8 +176,8 @@ async function executeRecall(
     taskSurface,
     policyOverride
   });
-  const { results, explainabilityPartial } = encodeRecallHandlerResults(recallResult, policyOverride);
-  const delivery = buildRecallDelivery(params, context, results, recallResult);
+  const encoded = encodeRecallHandlerResults(recallResult);
+  const delivery = buildRecallDelivery(params, context, encoded.results, recallResult);
   await params.deps.trustStateRecorder.recordDelivery(delivery.record);
   await emitRecallDeliveredTelemetry(params, {
     deliveryId: delivery.deliveryId,
@@ -186,7 +186,14 @@ async function executeRecall(
     latencyMs: Date.now() - recallStartedAt,
     context
   });
-  return buildRecallResponse(delivery.deliveryId, results, results.length, recallResult, policyOverride, explainabilityPartial);
+  return buildRecallResponse(
+    delivery.deliveryId,
+    encoded.results,
+    encoded.results.length,
+    { ...recallResult, index: encoded.index },
+    policyOverride,
+    encoded.explainabilityPartial
+  );
 }
 
 function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => string) {
@@ -203,17 +210,13 @@ function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => st
   });
 }
 
-function encodeRecallHandlerResults(
-  recallResult: RecallServiceResult,
-  policyOverride: RecallPolicy
-) {
-  if (recallResult.index !== undefined) {
-    return {
-      results: encodeIndexResults(recallResult.index),
-      explainabilityPartial: false
-    };
-  }
-  return buildRecallResults(recallResult.candidates, policyOverride);
+function encodeRecallHandlerResults(recallResult: RecallServiceResult) {
+  const index = recallResult.index ?? unavailableIndex();
+  return {
+    index,
+    results: encodeIndexResults(index),
+    explainabilityPartial: false
+  };
 }
 
 function buildRecallDelivery(
@@ -340,32 +343,6 @@ export function createReportContextUsageHandler(params: Readonly<{
       status: "recorded"
     });
   };
-}
-
-function buildRecallResults(
-  resultCandidates: readonly Readonly<RecallCandidate>[],
-  policyOverride: RecallPolicy
-) {
-  let usedTokens = 0;
-  let explainabilityPartial = false;
-  const results = resultCandidates.map((candidate, index) => {
-    if (candidateHasPartialExplainability(candidate)) {
-      explainabilityPartial = true;
-    }
-    const result = buildMemorySearchResult(candidate, policyOverride, index, usedTokens);
-    usedTokens += candidate.token_estimate;
-    return result;
-  });
-  return { results, explainabilityPartial };
-}
-
-function candidateHasPartialExplainability(candidate: Readonly<RecallCandidate>): boolean {
-  return (
-    candidate.selection_reason === undefined ||
-    candidate.source_channels === undefined ||
-    candidate.score_factors === undefined ||
-    candidate.budget_state === undefined
-  );
 }
 
 export function createGardenTaskPayloadFingerprint(
