@@ -1,306 +1,135 @@
-import { performance } from "node:perf_hooks";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { RecallServiceEmbeddingRecallPort } from "../../../recall/runtime/recall-service-types.js";
 import { RecallService } from "../../../recall/recall-service.js";
-import { createFieldBackedRecallService } from
-  "../fixtures/keyword-field-fixture.js";
 import {
   createDependencies,
   createMemoryEntry,
   createPreparedQueryHandle,
-  createTaskSurface,
-  overridePolicy
+  createTaskSurface
 } from "../recall-service-test-fixtures.js";
 
-const clock = vi.hoisted(() => ({
-  value: 0,
-  preparationCost: 0,
-  selectionSynthesisCost: 0,
-  resultBuildCost: 0,
-  sideEffectsCost: 0,
-  assessmentCost: 0,
-  deliveryCost: 0,
-  assessmentCalls: vi.fn(),
-  deliveryCalls: vi.fn()
-}));
-
-vi.mock("../../../recall/runtime/query/prepare-recall-request.js", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("../../../recall/runtime/query/prepare-recall-request.js")
-  >();
-  return {
-    ...actual,
-    prepareRecallRequest: async (...args: Parameters<typeof actual.prepareRecallRequest>) => {
-      clock.value += clock.preparationCost;
-      return actual.prepareRecallRequest(...args);
-    }
-  };
-});
-
-vi.mock("../../../recall/delivery/select-gamma/synthesis-adapter.js", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("../../../recall/delivery/select-gamma/synthesis-adapter.js")
-  >();
-  return {
-    ...actual,
-    applySelectGammaSynthesis: async (
-      ...args: Parameters<typeof actual.applySelectGammaSynthesis>
-    ) => {
-      clock.value += clock.selectionSynthesisCost;
-      return actual.applySelectGammaSynthesis(...args);
-    }
-  };
-});
-
-vi.mock("../../../recall/runtime/recall-result-builder.js", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("../../../recall/runtime/recall-result-builder.js")
-  >();
-  return {
-    ...actual,
-    buildRecallResult: (...args: Parameters<typeof actual.buildRecallResult>) => {
-      clock.value += clock.resultBuildCost;
-      return actual.buildRecallResult(...args);
-    }
-  };
-});
-
-vi.mock("../../../recall/runtime/orchestration.js", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("../../../recall/runtime/orchestration.js")
-  >();
-  return {
-    ...actual,
-    appendWeightTransferTelemetry: async (
-      ...args: Parameters<typeof actual.appendWeightTransferTelemetry>
-    ) => {
-      clock.value += clock.sideEffectsCost;
-      return actual.appendWeightTransferTelemetry(...args);
-    }
-  };
-});
-
-vi.mock("../../../recall/delivery/fine-assessment.js", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("../../../recall/delivery/fine-assessment.js")
-  >();
-  const prepare = (...args: Parameters<typeof actual.prepareFineAssessment>) => {
-    clock.assessmentCalls();
-    clock.value += clock.assessmentCost;
-    return actual.prepareFineAssessment(...args);
-  };
-  const deliver = (...args: Parameters<typeof actual.deliverFineAssessment>) => {
-    clock.deliveryCalls();
-    clock.value += clock.deliveryCost;
-    return actual.deliverFineAssessment(...args);
-  };
-  return {
-    ...actual,
-    prepareFineAssessment: prepare,
-    deliverFineAssessment: deliver,
-    fineAssess: (...args: Parameters<typeof actual.fineAssess>) =>
-      deliver(args[0], prepare(args[0]))
-  };
-});
-
 describe("recall phase attribution", () => {
-  beforeEach(() => {
-    clock.value = 0;
-    clock.preparationCost = 3;
-    clock.selectionSynthesisCost = 7;
-    clock.resultBuildCost = 17;
-    clock.sideEffectsCost = 19;
-    clock.assessmentCost = 5;
-    clock.deliveryCost = 11;
-    clock.assessmentCalls.mockClear();
-    clock.deliveryCalls.mockClear();
-    vi.spyOn(performance, "now").mockImplementation(() => clock.value);
+  it("does not attribute snapshot materialization, assessment, or delivery on live recall", async () => {
+    const memory = createMemoryEntry({ content: "Snapshot phase procedure" });
+    const { dependencies } = createDependencies([memory]);
+    const embeddingRecallService = createSnapshotPort(memory.object_id);
+    const manifestationSidecarPort = createManifestationSidecar();
+    const service = new RecallService({
+      ...dependencies,
+      embeddingRecallService,
+      manifestationSidecarPort
+    });
+    const result = await liveRecall(service, "Snapshot phase procedure");
+
+    expect(embeddingRecallService.prepareRecallEmbeddingSnapshot).not.toHaveBeenCalled();
+    expect(manifestationSidecarPort.buildBiasSidecar).not.toHaveBeenCalled();
+    expect(result.diagnostics?.phase_latency_ms).toBeUndefined();
+    expect(result.ranking_authority).not.toBe("prefix_sk");
+    expect(result.capture_execution).toBeUndefined();
+    expect(result.provider_calls).toBe(0);
+    expect(result.garden_enqueue).toBe(0);
+    expect(result.index).toBeDefined();
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
+  it("does not run custom embedding fallback work on live recall", async () => {
+    const memory = createMemoryEntry({ content: "Custom fallback procedure" });
+    const { dependencies } = createDependencies([memory]);
+    const embeddingRecallService = createCustomPort(memory.object_id);
+    const service = new RecallService({ ...dependencies, embeddingRecallService });
+    const result = await liveRecall(service, "Custom fallback procedure");
+
+    expect(embeddingRecallService.prepareQuerySupplement).not.toHaveBeenCalled();
+    expect(embeddingRecallService.scorePoolCandidates).not.toHaveBeenCalled();
+    expect(result.diagnostics?.phase_latency_ms).toBeUndefined();
+    expect(result.provider_calls).toBe(0);
+    expect(result.ranking_authority).not.toBe("prefix_sk");
   });
 
-  it("attributes snapshot materialization, assessment, cross, and delivery once", verifySnapshotAttribution);
-  it("keeps custom fallback work in exclusive phase durations", verifyCustomAttribution);
-  it("deduplicates legacy preparation overlap without cross reranking", verifyLegacyAttribution);
-  it("assigns concurrent synthesis work to the earlier coarse owner", verifyCoarseOwnership);
+  it("does not run legacy embedding preparation on live recall", async () => {
+    const memory = createMemoryEntry({ content: "Legacy adapter procedure" });
+    const { dependencies } = createDependencies([memory]);
+    const embeddingRecallService = createLegacyPort(memory.object_id);
+    const service = new RecallService({ ...dependencies, embeddingRecallService });
+    const result = await liveRecall(service, "Legacy adapter procedure");
+
+    expect(embeddingRecallService.hasStoredVectors).not.toHaveBeenCalled();
+    expect(embeddingRecallService.prepareQueryEmbedding).not.toHaveBeenCalled();
+    expect(result.diagnostics?.phase_latency_ms).toBeUndefined();
+    expect(result.provider_calls).toBe(0);
+  });
+
+  it("does not assign synthesis search work on live recall", async () => {
+    const memory = createMemoryEntry({ content: "Concurrent synthesis procedure" });
+    const { dependencies } = createDependencies([memory]);
+    const synthesisSearch = vi.fn(async () => []);
+    const service = new RecallService({
+      ...dependencies,
+      synthesisSearchPort: {
+        searchByKeyword: synthesisSearch,
+        findByIds: vi.fn(async () => [])
+      }
+    });
+    const result = await liveRecall(service, "Concurrent synthesis procedure");
+
+    expect(synthesisSearch).not.toHaveBeenCalled();
+    expect(result.diagnostics?.phase_latency_ms).toBeUndefined();
+    expect(result.ranking_authority).not.toBe("prefix_sk");
+    expect(result.provider_calls).toBe(0);
+    expect(result.index.completeness.logical_index === "complete"
+      || result.index.completeness.logical_index === "open"
+      || result.index.completeness.logical_index === "unavailable").toBe(true);
+  });
 });
-
-async function verifySnapshotAttribution() {
-  const memory = createMemoryEntry({ content: "Snapshot phase procedure" });
-  const { dependencies } = createDependencies([memory]);
-  const service = createFieldBackedRecallService({
-    ...dependencies,
-    embeddingRecallService: createSnapshotPort(memory.object_id),
-    manifestationSidecarPort: createManifestationSidecar(13)
-  });
-  const result = await runEmbeddingRecall(service, "Snapshot phase procedure", "phase-run");
-
-  expect(result.diagnostics?.phase_latency_ms).toEqual({
-    coarse: 0, synthesis: 0, embedding: 5, assessment: 5,
-    cross_rerank: 0, delivery: 11, manifestation: 13,
-    preparation: 3, select_gamma_synthesis: 7, result_build: 17,
-    side_effects: 19, unattributed_residual: 0, accounting_overage: 0
-  });
-  expect(reconcilePhaseLatency(result)).toBe(clock.value);
-  expect(clock.assessmentCalls).toHaveBeenCalledOnce();
-  expect(clock.deliveryCalls).toHaveBeenCalledOnce();
-}
-
-async function verifyCustomAttribution() {
-  const memory = createMemoryEntry({ content: "Custom fallback procedure" });
-  const { dependencies } = createDependencies([memory]);
-  const service = createFieldBackedRecallService({
-    ...dependencies,
-    embeddingRecallService: createCustomPort(memory.object_id)
-  });
-  const result = await runEmbeddingRecall(service, "Custom fallback procedure");
-
-  expect(result.diagnostics?.phase_latency_ms).toEqual({
-    coarse: 0, synthesis: 0, embedding: 10, assessment: 5,
-    cross_rerank: 0, delivery: 11, manifestation: 0,
-    preparation: 3, select_gamma_synthesis: 7, result_build: 17,
-    side_effects: 19, unattributed_residual: 0, accounting_overage: 0
-  });
-  expect(reconcilePhaseLatency(result)).toBe(clock.value);
-  expect(clock.assessmentCalls).toHaveBeenCalledOnce();
-  expect(clock.deliveryCalls).toHaveBeenCalledOnce();
-}
-
-async function verifyLegacyAttribution() {
-  const memory = createMemoryEntry({ content: "Legacy adapter procedure" });
-  const { dependencies } = createDependencies([memory]);
-  const service = createFieldBackedRecallService({
-    ...dependencies,
-    embeddingRecallService: createLegacyPort(memory.object_id)
-  });
-  const result = await runEmbeddingRecall(service, "Legacy adapter procedure");
-
-  expect(result.diagnostics?.phase_latency_ms).toEqual({
-    coarse: 0, synthesis: 0, embedding: 17, assessment: 8,
-    cross_rerank: 0, delivery: 11, manifestation: 0,
-    preparation: 3, select_gamma_synthesis: 7, result_build: 17,
-    side_effects: 19, unattributed_residual: 0, accounting_overage: 3
-  });
-  expect(reconcilePhaseLatency(result)).toBe(clock.value);
-  expect(clock.assessmentCalls).toHaveBeenCalledOnce();
-  expect(clock.deliveryCalls).toHaveBeenCalledOnce();
-}
-
-async function verifyCoarseOwnership() {
-  const memory = createMemoryEntry({ content: "Concurrent synthesis procedure" });
-  const { dependencies } = createDependencies([memory]);
-  const synthesisSearch = vi.fn(async () => {
-    if (synthesisSearch.mock.calls.length === 1) clock.value += 13;
-    return [];
-  });
-  const service = createFieldBackedRecallService({
-    ...dependencies,
-    synthesisSearchPort: {
-      searchByKeyword: synthesisSearch,
-      findByIds: vi.fn(async () => [])
-    }
-  });
-  const result = await runRecall(service, "Concurrent synthesis procedure");
-
-  expect(synthesisSearch).toHaveBeenCalled();
-  expect(result.diagnostics?.phase_latency_ms).toEqual({
-    coarse: 13, synthesis: 0, embedding: 0, assessment: 5,
-    cross_rerank: 0, delivery: 11, manifestation: 0,
-    preparation: 3, select_gamma_synthesis: 7, result_build: 17,
-    side_effects: 19, unattributed_residual: 0, accounting_overage: 0
-  });
-  expect(reconcilePhaseLatency(result)).toBe(clock.value);
-}
-
-function reconcilePhaseLatency(result: Awaited<ReturnType<typeof runEmbeddingRecall>>): number {
-  const phases = result.diagnostics?.phase_latency_ms ?? {};
-  return Object.entries(phases).reduce(
-    (sum, [name, value]) => sum + (name === "accounting_overage" ? -value : value),
-    0
-  );
-}
 
 function createSnapshotPort(memoryId: string): RecallServiceEmbeddingRecallPort {
   return {
-    prepareRecallEmbeddingSnapshot: vi.fn(async () => {
-      clock.value += 2;
-      return Object.freeze({
-        workspaceId: "workspace-1",
-        runId: null,
-        queryId: "snapshot-phase-query",
-        poolScoresByObjectId: Object.freeze({ [memoryId]: 0.8 }),
-        scoringLatencyMs: 2,
-        workspaceNeighbors: Object.freeze({
-          hits: Object.freeze([]),
-          embedding_inference_calls: 1,
-          query_embedding_cache_hit: false,
-          query_embedding_status: "provider_returned" as const,
-          query_embedding_degradation_reason: null
-        }),
-        degradedReason: null
-      });
-    }),
-    materializeEmbeddingSupplementFromSnapshot: vi.fn(async () => {
-      clock.value += 3;
-      return embeddingSupplement(memoryId, 0.8);
-    }),
+    prepareRecallEmbeddingSnapshot: vi.fn(async () => Object.freeze({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryId: "snapshot-phase-query",
+      poolScoresByObjectId: Object.freeze({ [memoryId]: 0.8 }),
+      scoringLatencyMs: 2,
+      workspaceNeighbors: Object.freeze({
+        hits: Object.freeze([]),
+        embedding_inference_calls: 1,
+        query_embedding_cache_hit: false,
+        query_embedding_status: "provider_returned" as const,
+        query_embedding_degradation_reason: null
+      }),
+      degradedReason: null
+    })),
+    materializeEmbeddingSupplementFromSnapshot: vi.fn(async () => embeddingSupplement(memoryId, 0.8)),
     querySupplement: vi.fn(async () => embeddingSupplement(memoryId, 0))
   };
 }
 
 function createCustomPort(memoryId: string): RecallServiceEmbeddingRecallPort {
   return {
-    prepareQuerySupplement: vi.fn(async () => {
-      clock.value += 2;
-      return Object.freeze({
-        preparedQuery: createPreparedQueryHandle("custom-phase-query"),
-        storedVectors: Object.freeze([]),
-        degradedReason: null
-      });
-    }),
-    querySupplementIfReady: vi.fn(async () => {
-      clock.value += 3;
-      return embeddingSupplement(memoryId, 0.7);
-    }),
-    scorePoolCandidates: vi.fn(async () => {
-      clock.value += 5;
-      return new Map([[memoryId, 0.8]]);
-    }),
+    prepareQuerySupplement: vi.fn(async () => Object.freeze({
+      preparedQuery: createPreparedQueryHandle("custom-phase-query"),
+      storedVectors: Object.freeze([]),
+      degradedReason: null
+    })),
+    querySupplementIfReady: vi.fn(async () => embeddingSupplement(memoryId, 0.7)),
+    scorePoolCandidates: vi.fn(async () => new Map([[memoryId, 0.8]])),
     querySupplement: vi.fn(async () => embeddingSupplement(memoryId, 0))
   };
 }
 
 function createLegacyPort(memoryId: string): RecallServiceEmbeddingRecallPort {
   return {
-    hasStoredVectors: vi.fn(async () => {
-      clock.value += 2;
-      return true;
-    }),
-    prepareQueryEmbedding: vi.fn(() => {
-      clock.value += 3;
-      return createPreparedQueryHandle("legacy-phase-query");
-    }),
-    querySupplementIfReady: vi.fn(async () => {
-      clock.value += 5;
-      return embeddingSupplement(memoryId, 0.7);
-    }),
-    scorePoolCandidates: vi.fn(async () => {
-      clock.value += 7;
-      return new Map([[memoryId, 0.8]]);
-    }),
+    hasStoredVectors: vi.fn(async () => true),
+    prepareQueryEmbedding: vi.fn(() => createPreparedQueryHandle("legacy-phase-query")),
+    querySupplementIfReady: vi.fn(async () => embeddingSupplement(memoryId, 0.7)),
+    scorePoolCandidates: vi.fn(async () => new Map([[memoryId, 0.8]])),
     querySupplement: vi.fn(async () => embeddingSupplement(memoryId, 0))
   };
 }
 
-function createManifestationSidecar(cost: number) {
+function createManifestationSidecar() {
   return {
-    buildBiasSidecar: vi.fn(async () => {
-      clock.value += cost;
-      return [];
-    })
+    buildBiasSidecar: vi.fn(async () => [])
   };
 }
 
@@ -315,33 +144,7 @@ function embeddingSupplement(memoryId: string, score: number) {
   };
 }
 
-async function runEmbeddingRecall(
-  service: RecallService,
-  displayName: string,
-  runId?: string
-) {
-  const taskSurface = { ...createTaskSurface(), display_name: displayName };
-  const basePolicy = service.buildDefaultPolicy("analyze", taskSurface.runtime_id);
-  const policyOverride = overridePolicy(basePolicy, {
-    coarse_filter: {
-      ...basePolicy.coarse_filter,
-      semantic_supplement: {
-        ...basePolicy.coarse_filter.semantic_supplement,
-        embedding_enabled: true,
-        max_supplement: 5
-      }
-    }
-  });
-  return service.recall({
-    taskSurface,
-    workspaceId: "workspace-1",
-    strategy: "analyze",
-    policyOverride,
-    ...(runId === undefined ? {} : { runId })
-  });
-}
-
-function runRecall(service: RecallService, displayName: string) {
+function liveRecall(service: RecallService, displayName: string) {
   return service.recall({
     taskSurface: { ...createTaskSurface(), display_name: displayName },
     workspaceId: "workspace-1",

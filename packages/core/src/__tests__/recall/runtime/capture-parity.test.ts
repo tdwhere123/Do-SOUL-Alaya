@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { RecallService } from "../../../recall/recall-service.js";
 import {
   CAPTURE_PARITY_GEOMETRY_BASIS,
@@ -16,8 +16,9 @@ import {
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 
 describe("capture parity comparer", () => {
-  it("reports parity when capture-off and capture-on views match", async () => {
-    const { off, on } = await recallCapturePair();
+  it("reports parity when capture-off and capture-on views match", () => {
+    const off = syntheticView();
+    const on = syntheticView();
 
     const report = compareCaptureParity([off], [on], 1);
 
@@ -39,8 +40,8 @@ describe("capture parity comparer", () => {
     );
   });
 
-  it("fails closed on an injected membership difference", async () => {
-    const { off } = await recallCapturePair();
+  it("fails closed on an injected membership difference", () => {
+    const off = syntheticView();
     const mutated = createCaptureParityView({
       ...off,
       membership: [
@@ -61,8 +62,8 @@ describe("capture parity comparer", () => {
     );
   });
 
-  it("does not fail when the only difference is embedding absence", async () => {
-    const { off } = await recallCapturePair();
+  it("does not fail when the only difference is embedding absence", () => {
+    const off = syntheticView();
     const withEmbedding = withEmbeddingChannel(off);
     const withoutEmbedding = createCaptureParityView({
       ...withEmbedding,
@@ -79,8 +80,8 @@ describe("capture parity comparer", () => {
     expect(report.questions[0]?.exercised_masks).toContain("embedding_observation");
   });
 
-  it("does not fail when the only difference is hydrate versus compute", async () => {
-    const { off } = await recallCapturePair();
+  it("does not fail when the only difference is hydrate versus compute", () => {
+    const off = syntheticView();
     const hydrated = createCaptureParityView({
       ...off,
       assessment_path: "snapshot"
@@ -97,8 +98,8 @@ describe("capture parity comparer", () => {
     expect(report.questions[0]?.exercised_masks).toContain("hydrate_vs_compute");
   });
 
-  it("does not excuse a lexical channel mismatch when embedding observation is masked", async () => {
-    const { off } = await recallCapturePair();
+  it("does not excuse a lexical channel mismatch when embedding observation is masked", () => {
+    const off = syntheticView();
     const observed = withLexical(
       withEmbeddingChannel(off),
       ["lexical-original"]
@@ -130,8 +131,9 @@ describe("capture parity comparer", () => {
     expect(() => compareCaptureParity([], [], 1)).toThrow(/window is empty/);
   });
 
-  it("throws when the window does not match sidecar question count", async () => {
-    const { off, on } = await recallCapturePair();
+  it("throws when the window does not match sidecar question count", () => {
+    const off = syntheticView();
+    const on = syntheticView();
 
     expect(() => compareCaptureParity([off], [on], 2)).toThrow(
       /window_length=1 does not match sidecar_question_count=2/
@@ -173,49 +175,46 @@ describe("capture parity comparer", () => {
     expect(() => extractCaptureParityView("yoga-place", {
       ...result,
       diagnostics: {
-        ...result.diagnostics!,
+        retrieval_field_captures: [{
+          channel: {
+            channel_id: "lexical_relaxed_exact",
+            status: "complete",
+            observations: []
+          }
+        }],
         query_probes: null as never
       }
     })).toThrow(/query probes missing/);
     expect(() => extractCaptureParityView("yoga-place", {
       ...result,
       diagnostics: {
-        ...result.diagnostics!,
+        retrieval_field_captures: [{
+          channel: {
+            channel_id: "lexical_relaxed_exact",
+            status: "complete",
+            observations: []
+          }
+        }],
         query_probes: undefined as never
       }
     })).toThrow(/query probes missing/);
   });
-});
 
-async function recallCapturePair(): Promise<{
-  readonly off: CaptureParityView;
-  readonly on: CaptureParityView;
-}> {
-  const memory = createMemoryEntry({
-    content: "I take yoga classes at Serenity Yoga."
+  it("live recall does not emit capture-parity diagnostics or prefix_sk ranking", async () => {
+    const result = await recallYoga();
+    expect(result.ranking_authority).not.toBe("prefix_sk");
+    expect(result.capture_execution).toBeUndefined();
+    expect(result.provider_calls).toBe(0);
+    expect(result.garden_enqueue).toBe(0);
+    expect(result.index).toBeDefined();
+    expect(result.index.completeness.logical_index === "complete"
+      || result.index.completeness.logical_index === "open"
+      || result.index.completeness.logical_index === "unavailable").toBe(true);
+    expect(() => extractCaptureParityView("yoga-place", result)).toThrow(
+      /diagnostics missing|retrieval_field_captures missing/
+    );
   });
-  const { dependencies } = createDependencies([memory]);
-  const service = new RecallService(dependencies);
-  const taskSurface = {
-    ...createTaskSurface(),
-    display_name: "Where do I take yoga classes?"
-  };
-  const ordinary = await service.recall({
-    taskSurface,
-    workspaceId: "workspace-1",
-    strategy: "analyze"
-  });
-  const captured = await service.recall({
-    taskSurface,
-    workspaceId: "workspace-1",
-    strategy: "analyze",
-    selectionBoundaryObserver: vi.fn(() => undefined)
-  });
-  return {
-    off: extractCaptureParityView("yoga-place", ordinary),
-    on: extractCaptureParityView("yoga-place", captured)
-  };
-}
+});
 
 async function recallYoga() {
   const memory = createMemoryEntry({
@@ -230,6 +229,23 @@ async function recallYoga() {
     },
     workspaceId: "workspace-1",
     strategy: "analyze"
+  });
+}
+
+function syntheticView(): CaptureParityView {
+  return createCaptureParityView({
+    question_id: "yoga-place",
+    channels: [{
+      channel_id: "lexical_relaxed_exact",
+      status: "complete",
+      observation_keys: ["lexical-original"]
+    }],
+    geometry: {
+      answer_shape_plan: { status: "high_confidence", shape: "place" },
+      probes: { lexical_terms: ["yoga"] }
+    },
+    membership: [{ object_kind: "memory_entry", object_id: "memory-canonical" }],
+    assessment_path: null
   });
 }
 

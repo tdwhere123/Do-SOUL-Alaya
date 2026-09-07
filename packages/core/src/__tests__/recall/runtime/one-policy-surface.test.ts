@@ -76,7 +76,7 @@ describe("one policy surface", () => {
     expect(support?.shape).toBe("place");
   });
 
-  it("keeps capture-off and capture-on query geometry identical", async () => {
+  it("does not emit capture-on query geometry or prefix_sk ranking on live recall", async () => {
     const memory = createMemoryEntry({
       content: "I take yoga classes at Serenity Yoga."
     });
@@ -102,14 +102,14 @@ describe("one policy surface", () => {
       diagnosticCapture: "answer_features"
     });
 
-    expect(ordinary.diagnostics?.answer_shape_plan).toEqual(
-      captured.diagnostics?.answer_shape_plan
-    );
-    expect(captured.diagnostics?.answer_shape_plan).toMatchObject({
-      status: "high_confidence",
-      shape: "distinct_entities"
-    });
-    expect(selectionBoundaryObserver).toHaveBeenCalledOnce();
+    expect(ordinary.diagnostics?.answer_shape_plan).toBeUndefined();
+    expect(captured.diagnostics?.answer_shape_plan).toBeUndefined();
+    expect(ordinary.ranking_authority).not.toBe("prefix_sk");
+    expect(captured.capture_execution).toBeUndefined();
+    expect(ordinary.index).toEqual(captured.index);
+    expect(ordinary.provider_calls).toBe(0);
+    expect(ordinary.garden_enqueue).toBe(0);
+    expect(selectionBoundaryObserver).not.toHaveBeenCalled();
   });
 
   it("does not let a dormant cross-encoder map replace lightweight scores", () => {

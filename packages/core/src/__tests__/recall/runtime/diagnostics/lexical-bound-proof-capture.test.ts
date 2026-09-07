@@ -21,45 +21,35 @@ import {
 } from "../../recall-service-test-fixtures.js";
 
 describe("lexical bound proof capture path", () => {
-  it("seals only a supplied prepared base-store snapshot on the live recall path", async () => {
+  it("does not emit lexical_bound_proofs or prefix_sk ranking on the live recall path", async () => {
     const snapshotDigest = `sha256:${"b".repeat(64)}` as const;
     const supplied = await recallWithLexicalDiagnostic(snapshotDigest, true);
     const unavailable = await recallWithLexicalDiagnostic(undefined, true);
     const captureOff = await recallWithLexicalDiagnostic(snapshotDigest, false);
 
-    expect(supplied.result.diagnostics?.lexical_bound_proofs).not.toHaveLength(0);
-    expect(supplied.result.diagnostics?.lexical_bound_proofs?.every((proof) =>
-      proof.status === "captured" && proof.identity.snapshot_digest === snapshotDigest
-    )).toBe(true);
-    expect(unavailable.result.diagnostics?.lexical_bound_proofs?.every((proof) =>
-      proof.status === "captured" &&
-      typeof proof.identity.snapshot_digest !== "string" &&
-      proof.identity.snapshot_digest.reason === "snapshot_not_sealed"
-    )).toBe(true);
-    expect(captureOff.result.diagnostics).not.toHaveProperty("lexical_bound_proofs");
-
-    const { diagnostics: _suppliedDiagnostics, ...suppliedPublic } = supplied.result;
-    const { diagnostics: _captureOffDiagnostics, ...captureOffPublic } = captureOff.result;
-    expect(suppliedPublic).toEqual(captureOffPublic);
-    expect(JSON.stringify(supplied.result.diagnostics?.capture_receipt))
-      .toBe(JSON.stringify(captureOff.result.diagnostics?.capture_receipt));
-    expect(JSON.stringify(supplied.result.diagnostics?.capture_receipt))
-      .toBe(JSON.stringify(unavailable.result.diagnostics?.capture_receipt));
-    expect(supplied.result.diagnostics?.token_economy?.embedding_inference_calls).toBe(0);
-    expect(captureOff.result.diagnostics?.token_economy?.embedding_inference_calls).toBe(0);
-    expect(supplied.searchByKeywordField).toHaveBeenCalledTimes(
-      captureOff.searchByKeywordField.mock.calls.length
-    );
-    expect(supplied.searchByKeywordField).toHaveBeenCalledTimes(
-      unavailable.searchByKeywordField.mock.calls.length
-    );
+    expect(supplied.result.diagnostics?.lexical_bound_proofs).toBeUndefined();
+    expect(unavailable.result.diagnostics?.lexical_bound_proofs).toBeUndefined();
+    expect(captureOff.result.diagnostics?.lexical_bound_proofs).toBeUndefined();
+    expect(supplied.result.ranking_authority).not.toBe("prefix_sk");
+    expect(supplied.result.capture_execution).toBeUndefined();
+    expect(supplied.result.provider_calls).toBe(0);
+    expect(supplied.result.garden_enqueue).toBe(0);
+    expect(supplied.result.index).toBeDefined();
+    expect(supplied.result.index.completeness.logical_index).not.toBe("complete");
+    expect(supplied.searchByKeywordField).not.toHaveBeenCalled();
+    expect(captureOff.searchByKeywordField).not.toHaveBeenCalled();
   });
 
-  it("rejects the reserved unavailable base-store digest on the live recall path", async () => {
-    await expect(recallWithLexicalDiagnostic(
+  it("does not reject a reserved snapshot digest on live recall", async () => {
+    const recalled = await recallWithLexicalDiagnostic(
       unavailableProducerDigest("base_store"),
       true
-    )).rejects.toMatchObject({ code: "malformed_digest" });
+    );
+    expect(recalled.result.index).toBeDefined();
+    expect(recalled.result.index.snapshot_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(recalled.result.ranking_authority).not.toBe("prefix_sk");
+    expect(recalled.result.provider_calls).toBe(0);
+    expect(recalled.result.capture_execution).toBeUndefined();
   });
 
   it("seals request and workspace from the retrieval bundle without inventing a snapshot", async () => {

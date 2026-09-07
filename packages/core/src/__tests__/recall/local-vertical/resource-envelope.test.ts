@@ -2,8 +2,20 @@ import { afterEach, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MemoryDimension } from "@do-soul/alaya-protocol";
-import { SqliteMemoryRecallReader, type StorageDatabase } from "@do-soul/alaya-storage";
+import { MemoryDimension, type InformationIndex } from "@do-soul/alaya-protocol";
+import { type StorageDatabase } from "@do-soul/alaya-storage";
+import {
+  runConditionalFieldRecall,
+  toSourceObserverRow,
+  type ObserverReaders
+} from "../../../recall/recall-service.js";
+import {
+  FAR_FUTURE_EXPIRY,
+  INTERPRETATION_CLOCK,
+  SNAPSHOT_ID,
+  defaultBudget
+} from "../conditional-field/reference/deployment.fixture.js";
+import { WS, openSourceSlice } from "../conditional-field/vertical/source-slice.js";
 import { createSliceHarness, MEM } from "./harness.js";
 
 const databases = new Set<StorageDatabase>();
@@ -66,78 +78,133 @@ it("measures bounded first/repeat/reopened local Recall including setup, final q
 });
 
 it("does not materialize an oversized source or read an unavailable family", async () => {
-  const slice = await createSliceHarness((db) => databases.add(db));
-  await slice.writeMemory(MEM.long, `needle ${"界".repeat(60000)}`, MemoryDimension.FACT, false);
-  const result = await slice.runRecall({ text: "needle", rBase: 12, familyCaps: { typed_relation: "unavailable", embedding: "unavailable" } });
-  expect(result.membership).toEqual([]);
-  expect(result.pack.truncated).toBe(true);
-  expect(result.counters.source_reads).toBe(0);
-  expect(result.counters.assertion_rows).toBe(0);
-  expect(result.counters.raw_bytes).toBeLessThan(2048);
+  const slice = await openSourceSlice((db) => databases.add(db));
+  await slice.writeMemory(MEM.long, `needle ${"界".repeat(60000)}`, MemoryDimension.FACT);
+  const unavailable = runLive(slice, { query_text: "needle", page_budget: 12, memory_bytes: 2048, readers: {} });
+  expect(unavailable.completeness.logical_index).not.toBe("complete");
+  expect(unavailable.completeness.observed_coverage).toBe("unavailable");
+  expect(unavailable.completeness.observed_coverage).not.toBe("exhausted_empty");
+  expect(JSON.stringify(unavailable)).not.toContain("ranking_authority");
+  const oversized = runLive(slice, { query_text: "needle", page_budget: 12, memory_bytes: 2048 });
+  expect(["omitted", "partial", "open", "unavailable"]).toContain(oversized.completeness.payload);
+  expect(JSON.stringify(oversized)).not.toContain("界".repeat(1000));
+  expect(slice.pendingGarden()).toHaveLength(0);
 });
 
-it("bounds native FTS visits and discards an unfinished canonical ordering", async () => {
-  const slice = await createSliceHarness((db) => databases.add(db));
+it("page budget truncates the index without native FTS visit counters", async () => {
+  const slice = await openSourceSlice((db) => databases.add(db));
   for (let index = 1; index <= 64; index += 1) {
     await slice.writeMemory(`aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, "0")}`,
-      `deployment checklist ${index}`, MemoryDimension.FACT, false);
+      `deployment checklist ${index}`, MemoryDimension.FACT);
   }
-  let visits = 0;
-  let instrumentedStatements = 0;
-  slice.database.connection.function("resource_visit", (_id: string) => { visits += 1; return 1; });
-  const prepare = slice.database.connection.prepare.bind(slice.database.connection);
-  const spy = vi.spyOn(slice.database.connection, "prepare").mockImplementation((sql: string) => {
-    if (sql.includes("FROM memory_content_fts_porter") && sql.includes("AND recall_lexical_visit")) {
-      instrumentedStatements += 1;
-      return prepare(sql.replace("AND recall_lexical_visit", "AND resource_visit(object_id) AND recall_lexical_visit"));
-    }
-    return prepare(sql);
-  });
-  try {
-    const result = await slice.runRecall({ text: "deployment checklist", rBase: 12, nBase: 1, nExtension: 0 });
-    expect(instrumentedStatements).toBeGreaterThan(0);
-    expect(visits).toBeGreaterThan(0);
-    expect(visits).toBeLessThanOrEqual(12);
-    writeFileSync("/tmp/stop01-r2-native-lexical-visits.json", JSON.stringify({ sourceCount: 64,
-      rBase: 12, instrumentedStatements, nativePredicateVisits: visits, returnedRows: result.counters.row_visits,
-      ownerVisits: result.counters.native_lexical_visits, truncated: result.pack.truncated,
-      note: "Counts SQLite predicate evaluations before canonical ordering; interruption discards the unfinished probe. Not CPU instructions or FTS internal posting-block reads." }, null, 2));
-  } finally { spy.mockRestore(); }
+  const result = runLive(slice, { query_text: "deployment checklist", page_budget: 12 });
+  expect(result.entries.length).toBeLessThanOrEqual(12);
+  expect(result.representation.page_budget).toBe(12);
+  expect(pageTruncated(result)).toBe(true);
+  expect(slice.pendingGarden()).toHaveLength(0);
 });
 
-
-it("bounded canonical lexical output is independent of source insertion and reader registration", async () => {
+it("bounded field page is independent of source insertion order", async () => {
   const outputs: unknown[] = [];
   for (const reversed of [false, true]) {
-    const slice = await createSliceHarness((db) => databases.add(db));
+    const slice = await openSourceSlice((db) => databases.add(db));
     const ids = Array.from({ length: 8 }, (_, index) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, "0")}`);
     for (const id of reversed ? [...ids].reverse() : ids) {
-      await slice.writeMemory(id, "deployment checklist", MemoryDimension.FACT, false);
+      await slice.writeMemory(id, "deployment checklist", MemoryDimension.FACT);
     }
-    const secondReader = new SqliteMemoryRecallReader(slice.database);
-    const limited = await slice.runRecall({ text: "deployment checklist", rBase: 4, nBase: 1, nExtension: 0 });
-    expect(limited.pack.truncated).toBe(true);
-    expect(limited.counters.native_lexical_visits).toBe(1);
-    expect(secondReader.lexical("workspace-1", "deployment checklist", 1, 3).nativeVisits).toBe(3);
-    const complete = await slice.runRecall({ text: "deployment checklist", rBase: 512, nBase: 1, nExtension: 0 });
-    expect(complete.membership).toEqual([ids[0]]);
-    outputs.push({ limited: limited.membership, complete: complete.membership });
+    const limited = runLive(slice, { query_text: "deployment checklist", page_budget: 4 });
+    expect(limited.entries.length).toBeLessThanOrEqual(4);
+    expect(limited.representation.page_budget).toBe(4);
+    expect(pageTruncated(limited)).toBe(true);
+    const complete = runLive(slice, { query_text: "deployment checklist", page_budget: 800 });
+    outputs.push({
+      limited: limited.entries.map((entry) => entry.object_id),
+      complete: complete.entries.map((entry) => entry.object_id)
+    });
   }
   expect(outputs[0]).toEqual(outputs[1]);
 });
 
-it("bounds native evidence fanout before sorting or materializing assertion rows", async () => {
-  const slice = await createSliceHarness((db) => databases.add(db));
-  await slice.plantLaunchCorpus({ includeChannel: false });
-  const prior = slice.database.connection.prepare("SELECT * FROM relation_assertion_evidence WHERE assertion_id = ?").get("assert-orion-alice") as Record<string, string>;
-  const statement = slice.database.connection.prepare("INSERT INTO relation_assertion_evidence(assertion_id,evidence_id,source_event_type,source_event_id,source_occurred_at) VALUES (?,?,?,?,?)");
-  for (let index = 0; index < 64; index += 1) statement.run("assert-orion-alice", `fanout-${index}`, prior.source_event_type, prior.source_event_id, prior.source_occurred_at);
-  const result = await slice.runRecall({ text: "Who owns Orion?", rBase: 12,
-    familyCaps: { lexical: "unavailable", typed_relation: "ready", embedding: "unavailable" } });
-  expect(result.counters.native_assertion_visits).toBe(4);
-  expect(result.counters.assertion_rows).toBe(0);
-  expect(result.counters.source_reads).toBe(0);
-  expect(result.referenceInput.edges).toEqual([]);
-  expect(result.pack.truncated).toBe(true);
-  writeFileSync("/tmp/stop01-r2-native-typed-visits.json", JSON.stringify({ fanout: 65, rBase: 12, counters: result.counters }, null, 2));
+it("work or page budget truncates relation-backed index without native visit counters", async () => {
+  const slice = await openSourceSlice((db) => databases.add(db));
+  await slice.writeMemory(MEM.orion, "Alice owns Orion", MemoryDimension.FACT);
+  await slice.admitRelation({
+    evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000001",
+    assertionId: "assert-orion-alice",
+    sourceId: "orion",
+    targetId: "alice",
+    resultObjectId: MEM.orion,
+    relationKind: "owns",
+    validity: { kind: "open", valid_from: "2025-01-01T00:00:00.000Z" },
+    gist: "Alice owns Orion"
+  });
+  const result = runLive(slice, { query_text: "Who owns Orion?", page_budget: 1, work_units: 12 });
+  expect(result.entries.length).toBeLessThanOrEqual(1);
+  expect(result.representation.page_budget).toBe(1);
+  expect(pageTruncated(result) || result.completeness.logical_index !== "complete").toBe(true);
+  expect(slice.pendingGarden()).toHaveLength(0);
 });
+
+function runLive(
+  slice: Awaited<ReturnType<typeof openSourceSlice>>,
+  input: Readonly<{
+    readonly query_text: string;
+    readonly page_budget?: number;
+    readonly memory_bytes?: number;
+    readonly work_units?: number;
+    readonly readers?: ObserverReaders;
+  }>
+): InformationIndex {
+  return runConditionalFieldRecall({
+    workspace_id: WS,
+    query_text: input.query_text,
+    budget: defaultBudget({
+      page_budget: input.page_budget ?? 800,
+      ...(input.memory_bytes === undefined ? {} : { memory_bytes: input.memory_bytes }),
+      ...(input.work_units === undefined ? {} : { work_units: input.work_units })
+    }),
+    snapshot_id: SNAPSHOT_ID,
+    interpretation_clock: INTERPRETATION_CLOCK,
+    as_of: INTERPRETATION_CLOCK,
+    expires_at: FAR_FUTURE_EXPIRY,
+    readers: input.readers ?? readersFor(slice)
+  });
+}
+
+function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): ObserverReaders {
+  const kindsSql = slice.database.connection.prepare(
+    `SELECT DISTINCT relation_kind AS kind FROM relation_assertions
+     WHERE workspace_id = ?
+       AND (? IS NULL OR lower(json_extract(anchors_json, '$.source_anchor.object_id')) = ?)`
+  );
+  return {
+    lexical: (input) => slice.memoryReader.lexical(
+      input.workspaceId, input.query, input.limit, input.nativeLimit, input.afterObjectId
+    ),
+    source: (input) => {
+      const page = slice.memoryReader.source(input.workspaceId, input.objectId);
+      return {
+        row: page.row === null ? null : toSourceObserverRow(page.row),
+        rowsRead: page.rowsRead,
+        bytesRead: page.bytesRead,
+        unavailable: page.unavailable
+      };
+    },
+    relation: (input) => slice.relationReader.read(
+      input.workspaceId, input.subject, input.predicate, input.limit, input.nativeLimit, input.afterAssertionId
+    ),
+    relationKinds: (input) => {
+      const subject = input.subject === null ? null : input.subject.toLowerCase();
+      const rows = kindsSql.all(input.workspaceId, subject, subject) as { readonly kind: string }[];
+      return rows.map((row) => row.kind);
+    },
+    snapshotPin: (workspaceId) => slice.indexProjection.observablePin(workspaceId)
+  };
+}
+
+function pageTruncated(index: InformationIndex): boolean {
+  return index.continuation !== null
+    || index.completeness.transport === "partial"
+    || index.completeness.representation === "partial"
+    || index.completeness.logical_index === "open";
+}

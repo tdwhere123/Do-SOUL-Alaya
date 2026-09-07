@@ -1,48 +1,46 @@
 import { describe, expect, it } from "vitest";
 import { RecallService } from "../../../recall/recall-service.js";
 import {
-  materializeFineAssessmentSelectionBoundary,
-  type FineAssessmentSelectionBoundaryPendingCapture
-} from
-  "../../../recall/delivery/selection-boundary/selection-boundary-capture.js";
-import {
   createDependencies,
   createMemoryEntry,
   createTaskSurface
 } from "../recall-service-test-fixtures.js";
 
 describe("recall answer-shape selection capture", () => {
-  it("uses the selection-boundary capture decision for request diagnostics", async () => {
-    const { ordinary, captured, pendingCaptures } = await recallYogaCapturePair();
+  it("does not attach prefix_sk ranking or capture_execution on live recall", async () => {
+    const { ordinary, captured } = await recallYogaPair();
 
-    expect(ordinary.diagnostics?.answer_shape_plan).toEqual(
-      captured.diagnostics?.answer_shape_plan
-    );
-    expect(pendingCaptures).toHaveLength(1);
-    expect(captured.diagnostics?.answer_shape_plan).toMatchObject({
-      status: "high_confidence",
-      shape: "place"
-    });
+    expect(ordinary.ranking_authority).not.toBe("prefix_sk");
+    expect(captured.ranking_authority).not.toBe("prefix_sk");
+    expect(ordinary.capture_execution).toBeUndefined();
+    expect(captured.capture_execution).toBeUndefined();
+    expect(ordinary.diagnostics?.answer_shape_plan).toBeUndefined();
+    expect(captured.diagnostics?.answer_shape_plan).toBeUndefined();
+    expect(ordinary.provider_calls).toBe(0);
+    expect(ordinary.garden_enqueue).toBe(0);
+    expect(ordinary.index).toBeDefined();
+    expect(captured.index).toEqual(ordinary.index);
+    expect(ordinary.index.completeness.logical_index === "complete"
+      || ordinary.index.completeness.logical_index === "open"
+      || ordinary.index.completeness.logical_index === "unavailable").toBe(true);
   });
 
-  it("keeps selected keys identical without enabling answer-feature capture", async () => {
-    const { ordinary, captured, pendingCaptures } = await recallYogaCapturePair();
+  it("delivers the information index without answer-feature capture", async () => {
+    const { ordinary, captured } = await recallYogaPair();
 
     expect(captured.candidates.map((candidate) => candidate.object_id)).toEqual(
       ordinary.candidates.map((candidate) => candidate.object_id)
     );
-    expect(ordinary.diagnostics?.candidates).toEqual([]);
-    expect(captured.diagnostics?.candidates).toEqual([]);
-    expect(pendingCaptures).toHaveLength(1);
-    expect(pendingCaptures[0]?.params.captureAnswerFeatures).toBe(false);
-    const boundary = materializeFineAssessmentSelectionBoundary(pendingCaptures[0]!);
-    expect(boundary.schema_version).toBe(5);
-    expect(boundary.expected.pre_projection?.admission_actions.length)
-      .toBeGreaterThan(0);
+    expect(ordinary.diagnostics).toBeUndefined();
+    expect(captured.diagnostics).toBeUndefined();
+    expect(ordinary.index.entries.map((entry) => entry.object_id)).toEqual(
+      captured.index.entries.map((entry) => entry.object_id)
+    );
+    expect(JSON.stringify(ordinary)).not.toContain("prefix_sk");
   });
 });
 
-async function recallYogaCapturePair() {
+async function recallYogaPair() {
   const memory = createMemoryEntry({
     content: "I take yoga classes at Serenity Yoga."
   });
@@ -57,15 +55,11 @@ async function recallYogaCapturePair() {
     workspaceId: "workspace-1",
     strategy: "analyze"
   });
-  const pendingCaptures: FineAssessmentSelectionBoundaryPendingCapture[] = [];
   const captured = await service.recall({
     taskSurface,
     workspaceId: "workspace-1",
     strategy: "analyze",
-    selectionBoundaryObserver: (pending) => {
-      pendingCaptures.push(pending);
-      return undefined;
-    }
+    selectionBoundaryObserver: () => undefined
   });
-  return { ordinary, captured, pendingCaptures };
+  return { ordinary, captured };
 }

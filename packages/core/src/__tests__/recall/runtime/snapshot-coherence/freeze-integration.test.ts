@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import * as fineAssessment from "../../../../recall/delivery/fine-assessment.js";
-import * as gamma from "../../../../recall/delivery/select-gamma/select-gamma.js";
 import { captureQueryCondition } from
   "../../../../recall/query/condition/query-condition-capture.js";
+import { RecallService } from "../../../../recall/recall-service.js";
 import { prepareRecallRequest } from
   "../../../../recall/runtime/query/prepare-recall-request.js";
 import { captureRecallRequestTime } from
@@ -27,7 +26,6 @@ import {
   readSnapshotLeaseCapability,
   unavailableProducerDigest
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
-import { stableStringify } from "../../../../shared/stable-stringify.js";
 import { buildRecallPolicy } from "../../../../shared/recall-policy.js";
 import { fieldContractSha256 } from "../../../../shared/field-hash.js";
 import {
@@ -38,12 +36,8 @@ import {
   testSha256
 } from "../../query/query-condition-test-fixtures.js";
 import {
-  runYogaNeutralityBundle,
-  stringifyNeutralityRun
-} from "../../neutrality-shadow-fixture.js";
-import { captureShadowOffBundle } from "../../neutrality-shadow-off-runner.js";
-import {
   createDependencies,
+  createMemoryEntry,
   createTaskSurface
 } from "../../recall-service-test-fixtures.js";
 
@@ -234,40 +228,34 @@ describe("snapshot freeze integration", () => {
     expect(live).toBe(0);
   });
 
-  it.skipIf(process.platform === "win32")(
-    "matches f29002ba shadow-off public delivery and embedding traces",
-    async () => {
-    const prepareLegacy = vi.spyOn(fineAssessment, "prepareFineAssessment");
-    const assess = vi.spyOn(fineAssessment, "fineAssess");
-    const gammaWalk = vi.spyOn(gamma, "selectGammaWalk");
-    const head = await runYogaNeutralityBundle();
-    const shadowOff = captureShadowOffBundle();
-    expect(stringifyNeutralityRun(head.miss)).toBe(stringifyNeutralityRun(shadowOff.miss));
-    expect(stringifyNeutralityRun(head.hit)).toBe(stringifyNeutralityRun(shadowOff.hit));
-    expect(stableStringify(head.miss.public_delivery))
-      .toBe(stableStringify(shadowOff.miss.public_delivery));
-    expect(stableStringify(head.hit.public_delivery))
-      .toBe(stableStringify(shadowOff.hit.public_delivery));
-    expect(head.miss.membership).toEqual(shadowOff.miss.membership);
-    expect(head.hit.membership).toEqual(shadowOff.hit.membership);
-    expect(head.miss.order).toEqual(shadowOff.miss.order);
-    expect(head.hit.order).toEqual(shadowOff.hit.order);
-    expect(stableStringify(head.miss.receipt))
-      .toBe(stableStringify(shadowOff.miss.receipt));
-    expect(stableStringify(head.hit.receipt))
-      .toBe(stableStringify(shadowOff.hit.receipt));
-    expect(head.miss.trace.provider_embed_texts)
-      .toEqual(shadowOff.miss.trace.provider_embed_texts);
-    expect(head.hit.trace.provider_embed_texts)
-      .toEqual(shadowOff.hit.trace.provider_embed_texts);
-    expect(head.miss.trace.repo_reads).toEqual(shadowOff.miss.trace.repo_reads);
-    expect(head.hit.trace.repo_reads).toEqual(shadowOff.hit.trace.repo_reads);
-    expect(head.miss.trace.repo_writes).toEqual(shadowOff.miss.trace.repo_writes);
-    expect(head.hit.trace.repo_writes).toEqual(shadowOff.hit.trace.repo_writes);
-    expect(prepareLegacy).not.toHaveBeenCalled();
-    expect(assess).toHaveBeenCalled();
-    expect(gammaWalk).not.toHaveBeenCalled();
-  }, 120_000);
+  it("live delivery has no prefix_sk ranking_authority and is not the retired f29002ba trace", async () => {
+    const { dependencies } = createDependencies([
+      createMemoryEntry({
+        object_id: "memory-canonical",
+        content: "I take yoga classes at Serenity Yoga."
+      })
+    ]);
+    const service = new RecallService(dependencies);
+    const result = await service.recall({
+      taskSurface: {
+        ...createTaskSurface(),
+        display_name: "Where do I take yoga classes?"
+      },
+      workspaceId: "workspace-1",
+      strategy: "analyze"
+    });
+    expect(result.ranking_authority).not.toBe("prefix_sk");
+    expect(result.capture_execution).toBeUndefined();
+    expect(result.delivery_path).not.toBe("canonical");
+    expect(JSON.stringify(result)).not.toContain("prefix_sk");
+    expect(JSON.stringify(result)).not.toContain("safe-dominance-capture");
+    expect(result.provider_calls).toBe(0);
+    expect(result.garden_enqueue).toBe(0);
+    expect(result.index).toBeDefined();
+    expect(result.index.completeness.logical_index === "complete"
+      || result.index.completeness.logical_index === "open"
+      || result.index.completeness.logical_index === "unavailable").toBe(true);
+  });
 });
 
 async function prepareSample() {

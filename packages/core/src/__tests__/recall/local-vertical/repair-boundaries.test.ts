@@ -2,10 +2,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MemoryDimension } from "@do-soul/alaya-protocol";
+import { MemoryDimension, type InformationIndex } from "@do-soul/alaya-protocol";
 import { initDatabase, SqliteMemoryEntryRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { captureQuerySpec } from "../../../recall/decision/budget-aware-q/capture.js";
+import {
+  runConditionalFieldRecall,
+  toSourceObserverRow,
+  type ObserverReaders
+} from "../../../recall/recall-service.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
+import {
+  FAR_FUTURE_EXPIRY,
+  INTERPRETATION_CLOCK,
+  SNAPSHOT_ID,
+  defaultBudget
+} from "../conditional-field/reference/deployment.fixture.js";
+import { WS, openSourceSlice } from "../conditional-field/vertical/source-slice.js";
 import { createSliceHarness, MEM, CONTENT, NOW } from "./harness.js";
 
 const databases = new Set<StorageDatabase>();
@@ -171,25 +183,26 @@ describe("repair boundary falsifiers", () => {
     expect(state).toEqual({ resolution_kind: "retracted" });
   });
 
-  it("bounds raw assertion/source reads before materializing twelve matching sources", async () => {
-    const slice = await harness();
+  it("bounds field page and work before materializing twelve matching sources", async () => {
+    const slice = await openSourceSlice((db) => databases.add(db));
     for (let index = 1; index <= 12; index += 1) {
       const tail = String(index).padStart(12, "0");
       const id = `aaaaaaaa-aaaa-4aaa-8aaa-${tail}`;
-      await slice.writeMemory(id, `Person${index} owns Vega`, MemoryDimension.FACT, false);
-      await slice.admitRelation({ evidenceId: `bbbbbbbb-bbbb-4bbb-8bbb-${tail}`, assertionId: `assert-vega-${index}`,
-        sourceId: "vega", targetId: `person${index}`, resultObjectId: id, relationKind: "owns", assignmentKey: "unused",
-        validity: { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" }, gist: `Person${index} owns Vega` });
+      await slice.writeMemory(id, `Person${index} owns Vega`, MemoryDimension.FACT);
+      await slice.admitRelation({
+        evidenceId: `bbbbbbbb-bbbb-4bbb-8bbb-${tail}`, assertionId: `assert-vega-${index}`,
+        sourceId: "vega", targetId: `person${index}`, resultObjectId: id, relationKind: "owns",
+        validity: { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" }, gist: `Person${index} owns Vega`
+      });
     }
     const byId = vi.spyOn(slice.memoryEntryRepo, "findById");
-    for (const rBase of [1, 12]) {
-      const result = await slice.runRecall({ text: "Who owns Vega?", rBase, nBase: 1, nExtension: 0 });
-      expect(result.counters.row_visits).toBeLessThanOrEqual(rBase);
-      expect(result.counters.source_reads).toBeLessThanOrEqual(rBase);
-      expect(result.pack.truncated).toBe(true);
+    for (const page_budget of [1, 12] as const) {
+      const result = runLive(slice, { query_text: "Who owns Vega?", page_budget });
+      expect(result.entries.length).toBeLessThanOrEqual(page_budget);
+      expect(result.representation.page_budget).toBe(page_budget);
+      expect(pageTruncated(result) || result.completeness.logical_index !== "complete").toBe(true);
     }
     expect(byId).not.toHaveBeenCalled();
-    expect(JSON.stringify(slice.recallReader.explain("workspace-1", "vega", "owns"))).toContain("idx_relation_recall_subject");
   });
 
   it("failed transactional enqueue rolls source, lexical projection and audit back before ack", async () => {
@@ -253,3 +266,57 @@ it("common source admission excludes active lifecycle rows retained as tombstone
   expect(result.membership).not.toContain(MEM.orion);
   expect(result.referenceInput.edges).toEqual([]);
 });
+
+function runLive(
+  slice: Awaited<ReturnType<typeof openSourceSlice>>,
+  input: Readonly<{ readonly query_text: string; readonly page_budget: number }>
+): InformationIndex {
+  return runConditionalFieldRecall({
+    workspace_id: WS,
+    query_text: input.query_text,
+    budget: defaultBudget({ page_budget: input.page_budget }),
+    snapshot_id: SNAPSHOT_ID,
+    interpretation_clock: INTERPRETATION_CLOCK,
+    as_of: INTERPRETATION_CLOCK,
+    expires_at: FAR_FUTURE_EXPIRY,
+    readers: readersFor(slice)
+  });
+}
+
+function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): ObserverReaders {
+  const kindsSql = slice.database.connection.prepare(
+    `SELECT DISTINCT relation_kind AS kind FROM relation_assertions
+     WHERE workspace_id = ?
+       AND (? IS NULL OR lower(json_extract(anchors_json, '$.source_anchor.object_id')) = ?)`
+  );
+  return {
+    lexical: (input) => slice.memoryReader.lexical(
+      input.workspaceId, input.query, input.limit, input.nativeLimit, input.afterObjectId
+    ),
+    source: (input) => {
+      const page = slice.memoryReader.source(input.workspaceId, input.objectId);
+      return {
+        row: page.row === null ? null : toSourceObserverRow(page.row),
+        rowsRead: page.rowsRead,
+        bytesRead: page.bytesRead,
+        unavailable: page.unavailable
+      };
+    },
+    relation: (input) => slice.relationReader.read(
+      input.workspaceId, input.subject, input.predicate, input.limit, input.nativeLimit, input.afterAssertionId
+    ),
+    relationKinds: (input) => {
+      const subject = input.subject === null ? null : input.subject.toLowerCase();
+      const rows = kindsSql.all(input.workspaceId, subject, subject) as { readonly kind: string }[];
+      return rows.map((row) => row.kind);
+    },
+    snapshotPin: (workspaceId) => slice.indexProjection.observablePin(workspaceId)
+  };
+}
+
+function pageTruncated(index: InformationIndex): boolean {
+  return index.continuation !== null
+    || index.completeness.transport === "partial"
+    || index.completeness.representation === "partial"
+    || index.completeness.logical_index === "open";
+}

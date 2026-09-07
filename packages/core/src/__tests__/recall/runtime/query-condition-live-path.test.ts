@@ -27,10 +27,8 @@ import {
 } from "../recall-service-test-fixtures.js";
 
 describe("live query condition capture", () => {
-  it("captures default as-of once and pins a real generation", async () => {
-    const operationalAt = "2026-08-16T00:00:01.000Z";
-    const now = entranceThenOperationalClock(CLOCK_AS_OF, operationalAt);
-    const { dependencies, appendSpy } = createDependencies([]);
+  it("stamps field snapshot and as-of without pinning a query-session generation", async () => {
+    const { dependencies } = createDependencies([]);
     const baseSession = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const session = {
       pinActiveGeneration: vi.fn(baseSession.pinActiveGeneration),
@@ -41,7 +39,7 @@ describe("live query condition capture", () => {
     const service = new RecallService({
       testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
-      now,
+      now: frozenClock(),
       fieldQuerySession: session,
       sha256: fieldContractSha256
     });
@@ -51,63 +49,18 @@ describe("live query condition capture", () => {
       strategy: "analyze",
       taskSurface: createTaskSurface()
     });
-    const view = result.diagnostics?.query_condition;
 
-    expect(view?.effective_as_of).toBe(CLOCK_AS_OF);
-    expect(view?.generation_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(view?.condition_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(view?.query_cache_key).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(view?.generation_id).not.toBe(`sha256:${"a".repeat(64)}`);
-    expect(view?.condition_digest).not.toBe(`sha256:${"b".repeat(64)}`);
-    expect(session.pinActiveGeneration).toHaveBeenCalledWith("workspace-1", operationalAt);
-    expect(session.selectCandidates).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      operationalAt
-    );
-    expect(new Set(session.renew.mock.calls.map(([, renewedAt]) => renewedAt))).toEqual(
-      new Set([operationalAt])
-    );
-    expect(session.release).toHaveBeenCalledWith(expect.anything(), operationalAt);
-    expect(appendSpy).toHaveBeenCalledWith(expect.objectContaining({
-      payload_json: expect.objectContaining({ occurred_at: operationalAt })
-    }));
+    expect(result.index.snapshot_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(result.index.as_of).toBe(CLOCK_AS_OF);
+    expect(session.pinActiveGeneration).not.toHaveBeenCalled();
+    expect(result.ranking_authority).not.toBe("prefix_sk");
+    expect(result.capture_execution).toBeUndefined();
+    expect(result.provider_calls).toBe(0);
+    expect(result.garden_enqueue).toBe(0);
   });
 
-  it("passes captured as-of into path reads when the caller omits referenceTime", async () => {
-    const findByAnchors = vi.fn(async (
-      _workspaceId: string,
-      _anchors: readonly unknown[],
-      _options?: Readonly<{ asOf?: string }>
-    ) => []);
-    const { dependencies } = createDependencies([
-      createMemoryEntry({ object_id: "memory-1", content: "Implement recall" })
-    ]);
-    const service = new RecallService({
-      testOnlyAllowInMemoryFieldQuerySession: true,
-      ...dependencies,
-      now: frozenClock(),
-      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1"),
-      sha256: fieldContractSha256,
-      pathExpansionPort: { findByAnchors }
-    });
-
-    await service.recall({
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      taskSurface: createTaskSurface()
-    });
-
-    expect(findByAnchors).toHaveBeenCalled();
-    expect(findByAnchors.mock.calls[0]?.[2]).toEqual({ asOf: CLOCK_AS_OF });
-  });
-
-  it("canonicalizes receipts while preserving the path calendar offset", async () => {
-    const findByAnchors = vi.fn(async (
-      _workspaceId: string,
-      _anchors: readonly unknown[],
-      _options?: Readonly<{ asOf?: string }>
-    ) => []);
+  it("does not require path expansion for ordinary live recall", async () => {
+    const findByAnchors = vi.fn(async () => []);
     const { dependencies } = createDependencies([
       createMemoryEntry({ object_id: "memory-1", content: "Implement recall" })
     ]);
@@ -123,16 +76,37 @@ describe("live query condition capture", () => {
     const result = await service.recall({
       workspaceId: "workspace-1",
       strategy: "analyze",
-      taskSurface: createTaskSurface(),
-      referenceTime: "2026-08-16T01:00:00.000+01:00"
+      taskSurface: createTaskSurface()
     });
 
-    expect(result.diagnostics?.query_condition?.effective_as_of).toBe(
-      "2026-08-16T00:00:00.000Z"
-    );
-    expect(findByAnchors.mock.calls[0]?.[2]).toEqual({
-      asOf: "2026-08-16T01:00:00.000+01:00"
+    expect(findByAnchors).not.toHaveBeenCalled();
+    expect(result.index.snapshot_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(result.index.as_of).toBe(CLOCK_AS_OF);
+    expect(result.provider_calls).toBe(0);
+  });
+
+  it("stamps Zulu as-of on the field snapshot", async () => {
+    const { dependencies } = createDependencies([
+      createMemoryEntry({ object_id: "memory-1", content: "Implement recall" })
+    ]);
+    const service = new RecallService({
+      testOnlyAllowInMemoryFieldQuerySession: true,
+      ...dependencies,
+      now: frozenClock(),
+      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1"),
+      sha256: fieldContractSha256
     });
+
+    const result = await service.recall({
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      taskSurface: createTaskSurface(),
+      referenceTime: CLOCK_AS_OF
+    });
+
+    expect(result.index.as_of).toBe(CLOCK_AS_OF);
+    expect(result.index.snapshot_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(result.ranking_authority).not.toBe("prefix_sk");
   });
 
   it("separates explicit semantic as-of from operational capture time", () => {
@@ -177,15 +151,3 @@ describe("live query condition capture", () => {
     expect(queryConditionParityView(direct)).toEqual(queryConditionParityView(worker));
   });
 });
-
-function entranceThenOperationalClock(
-  entranceAt: string,
-  operationalAt: string
-): () => string {
-  let entrancePending = true;
-  return () => {
-    if (!entrancePending) return operationalAt;
-    entrancePending = false;
-    return entranceAt;
-  };
-}
