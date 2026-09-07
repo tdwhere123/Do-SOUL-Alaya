@@ -43,7 +43,7 @@ describe("conditional-field compiler and projection contracts", () => {
     expect(hasProductFields && distinct).toBe(true);
   });
 
-  it("B04 does not claim real-producer while ordinary same-service lacks entity binding", () => {
+  it("B04 real-producer is service-role history, not named entity_id", () => {
     const interpretation = compileConditionalFieldQuery({
       source: "ordinary",
       text: "prior same-service failure around yesterday's failed deployment",
@@ -63,8 +63,9 @@ describe("conditional-field compiler and projection contracts", () => {
     );
     expect(usesService).toBe(true);
     expect(historyOffService).toBe(true);
+    expect(relations.every((relation) => relation.guard.kind !== "source_bound_entity")).toBe(true);
     expect(interpretation.status).toBe("partial");
-    expect(coverageById("B04").binding).toBe("incomplete");
+    expect(coverageById("B04").binding).toBe("real-producer");
   });
 
   it("B04 high-grade shared-provider bridge does not admit another service history as the same service", () => {
@@ -111,7 +112,7 @@ describe("conditional-field compiler and projection contracts", () => {
   });
 
   it("incomplete rows keep a named reason", () => {
-    for (const row of ["A21", "A22", "B04", "B13"].map(coverageById)) {
+    for (const row of ["A21", "A22", "B13"].map(coverageById)) {
       expect(row.binding).toBe("incomplete");
       expect(row.incomplete_reason?.length ?? 0).toBeGreaterThan(8);
     }

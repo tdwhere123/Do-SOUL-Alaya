@@ -193,11 +193,10 @@ governance to write durable.
 
 **What happens.** A *candidate signal* — *"I think this matters"* —
 enters one of two ways. The agent can emit one explicitly via
-`soul.emit_candidate_signal`. But it doesn't have to: the daemon also
-extracts signals server-side from the turn text the agent already
-forwards on `soul.recall` (`recent_turn`) and
-`soul.report_context_usage` (`turn_digest`), so a fresh install starts
-learning from the first conversation without the agent filing anything.
+`soul.emit_candidate_signal`. Ordinary `soul.recall` ignores `recent_turn`
+and does not auto-extract. Extraction is `soul.report_context_usage`
+(`turn_digest`) / Garden `POST_TURN_EXTRACT`, so a fresh install starts
+learning from reported usage without the agent filing a candidate.
 Either way the signal is persisted (so it survives the turn) but does
 **not** mutate ontology truth. A triage step decides: low confidence +
 no evidence → deferred; otherwise → may flow into the proposal pipeline.
@@ -753,9 +752,10 @@ Code MCP sessions autonomously run `soul.recall` →
 `soul.report_context_usage` during normal conversations, with a
 live-usage EventLog witness committed under `docs/archive/v0.3-historical/v0.3.0/`
 (18 chains across both hosts after the v0.3.4 refresh).
-`POST_TURN_EXTRACT` auto-captures from the `recent_turn` text the
-host already forwards, so an empty store learns from the first
-conversation without explicit `soul.emit_candidate_signal` calls.
+That v0.3 note treated `POST_TURN_EXTRACT` as auto-capture from
+`recent_turn` forwarded on recall; it is historical, not current operator
+instruction. Ordinary recall ignores `recent_turn`. Extract is
+`soul.report_context_usage` / Garden `POST_TURN_EXTRACT`.
 v0.3.3 persists bounded `RECALLS` cross-link edges and later recall
 reads them as weighted `graph_support`. v0.3.6 ships the bench
 feedback loop and the Memory Inspector overview + recall pages.

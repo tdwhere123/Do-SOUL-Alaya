@@ -74,6 +74,22 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     for (const result of results) expect(result.index.completeness.interpretation_coverage).toBe("open");
   });
 
+  it("B04 keeps same-service history and rejects provider-bridged other-service history", async () => {
+    const slice = await openPlantedSlice();
+    await plantSharedProviderBridge(slice);
+    const checkout = `s=${MEM.s}`;
+    const mcp = await recallAllThroughHandler(slice, "yesterday failed deployment");
+    expect(mcp.entries.some((entry) => entry.object_id === MEM.h)).toBe(true);
+    expect(mcp.entries.some((entry) =>
+      entry.object_id === MEM.hb && entry.output_binding.includes(checkout)
+    )).toBe(false);
+    const assembled = collectAssembled(slice);
+    expect(assembled.some((entry) => entry.object_id === MEM.h)).toBe(true);
+    expect(assembled.some((entry) =>
+      entry.object_id === MEM.hb && entry.output_binding.includes(checkout)
+    )).toBe(false);
+  });
+
   it("A01/A02 expose last-week config and unknown-cause history through MCP encoding", async () => {
     const slice = await openPlantedSlice();
     const mcp = await recallThroughHandler(slice, {
@@ -435,6 +451,61 @@ function cliContext(overrides: Partial<AlayaCliContext> = {}): AlayaCliContext {
     daemon: { startupSteps: [] },
     ...overrides
   };
+}
+
+async function plantSharedProviderBridge(slice: Awaited<ReturnType<typeof openSourceSlice>>) {
+  await slice.writeMemory(MEM.p, "shared infrastructure provider used by checkout and payments", MemoryDimension.FACT);
+  await slice.writeMemory(MEM.sb, "payments routing service", MemoryDimension.FACT);
+  await slice.writeMemory(MEM.hb, "prior payments-service failure last month", MemoryDimension.EPISODE);
+  stamp(slice, MEM.p, LAST_WEEK_INSTANT);
+  stamp(slice, MEM.sb, LAST_WEEK_INSTANT);
+  stamp(slice, MEM.hb, LAST_WEEK_INSTANT);
+  const open = { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" };
+  const edges = [
+    ["assert-r-p", MEM.r, MEM.p, "uses_service"],
+    ["assert-p-hb", MEM.p, MEM.hb, "service_history"],
+    ["assert-sb-hb", MEM.sb, MEM.hb, "service_history"]
+  ] as const;
+  for (const [index, [assertionId, sourceId, targetId, relationKind]] of edges.entries()) {
+    await slice.admitRelation({
+      evidenceId: `bbbbbbbb-bbbb-4bbb-8bbb-${String(index + 207).padStart(12, "0")}`,
+      assertionId,
+      sourceId,
+      targetId,
+      resultObjectId: targetId,
+      relationKind,
+      validity: open,
+      gist: relationKind
+    });
+  }
+}
+
+async function recallAllThroughHandler(
+  slice: Awaited<ReturnType<typeof openSourceSlice>>,
+  query: string
+) {
+  const session = createTickingHandlerSession(slice);
+  const entries: InformationIndex["entries"][number][] = [];
+  let continuation = null as InformationIndex["continuation"];
+  for (let step = 0; step < 32; step += 1) {
+    const page = await session.recall({ query, max_results: 800, continuation });
+    entries.push(...page.index.entries);
+    continuation = page.index.continuation;
+    if (continuation === null) break;
+  }
+  return { entries };
+}
+
+function collectAssembled(slice: Awaited<ReturnType<typeof openSourceSlice>>) {
+  const entries: InformationIndex["entries"][number][] = [];
+  let continuation = null as InformationIndex["continuation"];
+  for (let step = 0; step < 32; step += 1) {
+    const page = runProducer(slice, { page_budget: 800, continuation });
+    entries.push(...page.entries);
+    continuation = page.continuation;
+    if (continuation === null) break;
+  }
+  return entries;
 }
 
 async function plantDeployment(slice: Awaited<ReturnType<typeof openSourceSlice>>) {

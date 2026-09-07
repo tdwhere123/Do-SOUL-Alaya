@@ -39,7 +39,10 @@ export const MEM = Object.freeze({
   c: "aaaaaaaa-aaaa-4aaa-8aaa-000000000203",
   s: "aaaaaaaa-aaaa-4aaa-8aaa-000000000204",
   h: "aaaaaaaa-aaaa-4aaa-8aaa-000000000205",
-  u: "aaaaaaaa-aaaa-4aaa-8aaa-000000000206"
+  u: "aaaaaaaa-aaaa-4aaa-8aaa-000000000206",
+  p: "aaaaaaaa-aaaa-4aaa-8aaa-000000000207",
+  sb: "aaaaaaaa-aaaa-4aaa-8aaa-000000000208",
+  hb: "aaaaaaaa-aaaa-4aaa-8aaa-000000000209"
 });
 
 export const STRENGTH_BY_KIND: Readonly<Record<string, number>> = Object.freeze({

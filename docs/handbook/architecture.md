@@ -139,8 +139,12 @@ Owner and current closure boundary:
 immutable `RelationAssertion` history (invariant §12). That ontology
 constraint does not by itself prove any query-time path. Connectedness is
 established only by the live producer-to-consumer evidence recorded in
-`recall.md`, including live F3-only membership and full legal `slice_key`
-visibility. The pre-UGAF wording is archived at
+`recall.md`: the conditional-field chain
+`compileConditionalFieldQuery` → `observeField` → `projectAcceptingIndex`,
+entered from `RecallService.recall` / worker `conditionalField.recall` /
+MCP `soul.recall`. Historical F3-only membership and full legal
+`slice_key` visibility are not the live connectedness proof.
+The pre-UGAF wording is archived at
 `docs/archive/handbook-historical/recall-routing-projections-pre-ugaf.md`.
 
 ## Package Shape
