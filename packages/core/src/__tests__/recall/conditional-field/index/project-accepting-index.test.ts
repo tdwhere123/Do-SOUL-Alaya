@@ -96,6 +96,8 @@ describe("conditional-field production information index", () => {
     expect(index.entries.find((entry) => entry.object_id === "h")?.claim).toBe("unknown");
     expect(index.entries.find((entry) => entry.object_id === "c")?.association_milligrades)
       .toBe(850);
+    expect(index.entries.find((entry) => entry.object_id === "c")?.program_state).toBe("accepting");
+    expect(index.entries.find((entry) => entry.object_id === "c")?.time_state).toBe("as_of");
     expect(index.entries.find((entry) => entry.object_id === "s")).toBeUndefined();
   });
 
@@ -169,6 +171,8 @@ describe("conditional-field production information index", () => {
     expect(index.entries.map((entry) => entry.hypothesis_id).sort()).toEqual(["h1", "h1", "h2"]);
     expect(index.entries.map((entry) => entry.output_binding).sort())
       .toEqual(["bind-b", "default", "default"]);
+    expect(index.entries.every((entry) => entry.program_state === "accepting")).toBe(true);
+    expect(index.entries.every((entry) => entry.time_state === "as_of")).toBe(true);
   });
 
   it("rejects a high activation in a nonaccepting state and hides unrequested routing-only objects", () => {
@@ -405,7 +409,7 @@ describe("conditional-field production information index", () => {
     expect(report.observed_coverage).toBe("open");
     expect(report.transport).toBe("open");
     expect(report.payload).toBe("partial");
-    expect(report.representation).toBe("complete");
+    expect(report.representation).toBe("open");
   });
 });
 
@@ -578,5 +582,11 @@ function supportRecord(witnesses: readonly Witness[]): SupportRecord {
 }
 
 function entryKey(entry: IndexEntry): string {
-  return `${entry.hypothesis_id}:${entry.output_binding}:${entry.object_id}`;
+  return [
+    entry.hypothesis_id,
+    entry.output_binding,
+    entry.object_id,
+    entry.program_state ?? "",
+    entry.time_state ?? ""
+  ].join(":");
 }

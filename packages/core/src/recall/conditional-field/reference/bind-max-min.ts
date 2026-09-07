@@ -6,6 +6,7 @@ import {
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
   type CompletenessReport,
+  type DerivationKind,
   type FieldSnapshot,
   type FieldValue,
   type ProductStateKey,
@@ -39,6 +40,26 @@ export type BindMaxMinInput = Readonly<{
 
 export function productStateNodeId(key: ProductStateKey): string {
   return stableStringify(key);
+}
+
+export function projectLegalDerivationStep(
+  kind: DerivationKind,
+  childGrades: readonly number[]
+): number {
+  if (childGrades.length === 0) return MILLIGRADE_BOTTOM;
+  if (kind === "leaf") return childGrades[0] ?? MILLIGRADE_BOTTOM;
+  if (kind === "or") {
+    let grade = MILLIGRADE_BOTTOM;
+    for (const value of childGrades) {
+      if (value > grade) grade = value;
+    }
+    return grade;
+  }
+  let grade = MILLIGRADE_TOP;
+  for (const value of childGrades) {
+    if (value < grade) grade = value;
+  }
+  return grade;
 }
 
 export function admitRequestBudget(budget: RequestBudget): "admit" | "resource_rejected" {

@@ -212,19 +212,26 @@ describe("conditional-field schemas", () => {
       "host_context",
       "scope_class/dimension/domain_tags",
       "persisted_old_receipts",
+      "rebuildable_projections",
+      "operational_feedback",
+      "continuation",
       "second_production_selector"
     ]);
     for (const row of COMPATIBILITY_LEDGER) {
       expect(COMPATIBILITY_DISPOSITIONS).toContain(row.disposition);
     }
     expect(COMPATIBILITY_LEDGER.find((row) => row.field === "query")?.disposition)
-      .toBe("migrate-at-C07");
+      .toBe("already-migrated");
     expect(COMPATIBILITY_LEDGER.find((row) => row.field === "recent_turn")?.disposition)
       .toBe("ignore-on-target");
     expect(COMPATIBILITY_LEDGER.find((row) => row.field === "second_production_selector")?.disposition)
       .toBe("forbidden-second-selector");
     expect(COMPATIBILITY_LEDGER.find((row) => row.field === "persisted_old_receipts")?.disposition)
       .toBe("freeze-live");
+    expect(COMPATIBILITY_LEDGER.find((row) => row.field === "operational_feedback")?.disposition)
+      .toBe("unreachable-on-target");
+    expect(COMPATIBILITY_LEDGER.find((row) => row.field === "ranking_authority")?.disposition)
+      .toBe("deferred-D01");
   });
 
   it("requires interpretation status and a snapshot pin", () => {
@@ -286,9 +293,9 @@ describe("conditional-field schemas", () => {
       "resource_rejected"
     ]);
     const c00 = OWNERSHIP_LEDGER.find((row) => row.card === "C00");
-    const c01 = OWNERSHIP_LEDGER.find((row) => row.card === "C01");
+    const u01 = OWNERSHIP_LEDGER.find((row) => row.card === "U01");
     expect(c00?.classification).toBe("already-written");
-    expect(c01?.paths).toContain("packages/core/src/recall/conditional-field/query/");
+    expect(u01?.paths).toContain("packages/core/src/recall/conditional-field/query/");
     expect(OWNERSHIP_LEDGER.find((row) => row.card === "live-unowned")?.paths)
       .toContain("packages/core/src/recall/decision/budget-aware-q/");
   });

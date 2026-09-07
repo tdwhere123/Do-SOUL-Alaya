@@ -55,13 +55,14 @@ export class SqliteRelationRecallReader {
     nativeLimit = limit,
     afterAssertionId: string | null = null
   ): Readonly<{
-    nativeVisits: number; nativeBytes: number; rawRows: readonly Record<string, unknown>[]; observations: readonly RecallAssertionObservation[]; rowsRead: number; bytesRead: number; truncated: boolean;
+    nativeVisits: number; nativeBytes: number; rawRows: readonly Record<string, unknown>[]; observations: readonly RecallAssertionObservation[]; rowsRead: number; bytesRead: number; truncated: boolean; committedThrough: string | null;
   }> {
     if (!Number.isSafeInteger(limit) || limit < 0 || limit > 512 || !Number.isSafeInteger(nativeLimit) || nativeLimit < 0 || nativeLimit > 512) throw new Error("invalid assertion row limit");
     const fetchLimit = Math.min(limit, nativeLimit);
     if (!fetchLimit) {
       return Object.freeze({
-        nativeVisits: 0, nativeBytes: 0, rawRows: [], observations: [], rowsRead: 0, bytesRead: 0, truncated: true
+        nativeVisits: 0, nativeBytes: 0, rawRows: [], observations: [], rowsRead: 0, bytesRead: 0, truncated: true,
+        committedThrough: afterAssertionId
       });
     }
     const sql = subject === null ? READ_SQL.replace("idx_relation_recall_subject", "idx_relation_recall_predicate")
@@ -81,15 +82,20 @@ export class SqliteRelationRecallReader {
     const incompleteId = peek !== undefined && trailingId !== undefined && peek.assertion_id === trailingId
       ? String(trailingId)
       : null;
+    const lastRow = pageRows.at(-1);
+    const committedThrough = lastRow === undefined
+      ? afterAssertionId
+      : encodeRelationCursor(String(lastRow.assertion_id), String(lastRow.evidence_id));
     const bytesRead = Buffer.byteLength(JSON.stringify(pageRows), "utf8");
     return Object.freeze({
       nativeVisits: fetched.length,
       nativeBytes: bytesRead,
       rawRows: pageRows,
-      observations: this.decode(pageRows, incompleteId),
+      observations: this.fillEvidence(this.decode(pageRows, incompleteId)),
       rowsRead: pageRows.length,
       bytesRead,
-      truncated
+      truncated,
+      committedThrough
     });
   }
 
@@ -116,6 +122,34 @@ export class SqliteRelationRecallReader {
     }
     return Object.freeze([...grouped.values()]);
   }
+
+  private fillEvidence(
+    observations: readonly RecallAssertionObservation[]
+  ): readonly RecallAssertionObservation[] {
+    if (observations.length === 0) return observations;
+    const ids = observations.map((observation) => observation.assertionId);
+    const rows = this.db.connection.prepare(
+      `SELECT assertion_id, evidence_id FROM relation_assertion_evidence
+       WHERE assertion_id IN (${ids.map(() => "?").join(",")})
+       ORDER BY assertion_id, evidence_id`
+    ).all(...ids) as readonly { readonly assertion_id: string; readonly evidence_id: string }[];
+    const grouped = new Map<string, string[]>();
+    for (const row of rows) {
+      const prior = grouped.get(row.assertion_id) ?? [];
+      prior.push(row.evidence_id);
+      grouped.set(row.assertion_id, prior);
+    }
+    return Object.freeze(observations.map((observation) => Object.freeze({
+      ...observation,
+      evidenceRefs: Object.freeze(grouped.get(observation.assertionId) ?? [...observation.evidenceRefs])
+    })));
+  }
+}
+
+const RELATION_CURSOR_SEP = "\u001f";
+
+function encodeRelationCursor(assertionId: string, evidenceId: string): string {
+  return `${assertionId}${RELATION_CURSOR_SEP}${evidenceId}`;
 }
 
 function relationResumeParams(afterAssertionId: string | null): Readonly<{
@@ -128,6 +162,14 @@ function relationResumeParams(afterAssertionId: string | null): Readonly<{
       params: ["", "", ""]
     };
   }
-  // Evidence of an incomplete trailing assertion is re-read; only observed ids commit.
-  return { sql: "AND a.assertion_id > ?", params: [afterAssertionId] };
+  const separator = afterAssertionId.indexOf(RELATION_CURSOR_SEP);
+  if (separator <= 0) {
+    return { sql: "AND a.assertion_id > ?", params: [afterAssertionId] };
+  }
+  const assertionId = afterAssertionId.slice(0, separator);
+  const evidenceId = afterAssertionId.slice(separator + 1);
+  return {
+    sql: "AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)",
+    params: [assertionId, assertionId, evidenceId]
+  };
 }

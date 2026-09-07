@@ -4,7 +4,9 @@ import {
   MILLIGRADE_TOP,
   type CompletenessStatus,
   type CoverageRegion,
+  type Derivation,
   type FacetVector,
+  type FieldSnapshot,
   type ObserverPage,
   type ObserverStatus,
   type ProductStateKey,
@@ -19,6 +21,8 @@ import {
   type BindMaxMinResult
 } from "../reference/bind-max-min.js";
 import type { FairWorkRegion } from "../reference/schedule-fair-work.js";
+import { recoveredBindingSnapshot } from "./binding-environment.js";
+import { mergeDerivations } from "./path-derivation.js";
 import {
   collectIdentities,
   mergeSeeds,
@@ -27,6 +31,7 @@ import {
   productStateFromObservation,
   retainSamePathVectors,
   seedFromObservation,
+  transitionKey,
   tryCompleteHyperedge
 } from "./path-composition.js";
 import type {
@@ -37,8 +42,6 @@ import type {
   ObserverConsumption,
   RemainingWork
 } from "./field-engine.js";
-
-export const IDENTITY_BYTES = 256;
 
 export const KIND_PRIORITY: Readonly<Record<CoverageRegion["kind"], number>> = {
   seed: 0,
@@ -58,32 +61,35 @@ export function bindEngineState(state: BindableState): FieldEngineState {
   const charged = chargeIdentities(state);
   const remainingWork = [...charged.remaining_work];
   let exploration = charged.remaining_exploration;
-  if (exploration < 1) remainingWork.push({ kind: "relaxation", units: 1 });
-  else exploration -= 1;
-  const spooled = new Set(charged.identity_spool.map((identity) => productStateNodeId(identity)));
-  const liveSeeds = charged.seeds.filter((seed) => !spooled.has(productStateNodeId(seed.state)));
-  const liveTransitions = charged.transitions.filter((transition) =>
-    !spooled.has(productStateNodeId(transition.from))
-    && !spooled.has(productStateNodeId(transition.to))
-  );
-  const binding = annotateBounds(
-    bindMaxMinField({
-      query_id: charged.query_id,
-      snapshot_id: charged.snapshot_id,
-      seeds: liveSeeds,
-      transitions: liveTransitions,
-      budget: charged.budget,
-      facets: charged.facets
-    }),
-    guaranteedValues(charged),
-    charged.residuals
-  );
+  let reserve = charged.remaining_reserve;
+  const paid = paySolver(exploration, reserve, remainingWork);
+  exploration = paid.exploration;
+  reserve = paid.reserve;
+  const binding = paid.ok
+    ? annotateBounds(
+      bindMaxMinField({
+        query_id: charged.query_id,
+        snapshot_id: charged.snapshot_id,
+        seeds: charged.seeds,
+        transitions: charged.transitions,
+        budget: charged.budget,
+        facets: charged.facets
+      }),
+      guaranteedValues(charged),
+      charged.residuals
+    )
+    : emptyBoundSnapshot(charged);
   const next: FieldEngineState = {
     ...charged,
     remaining_exploration: exploration,
+    remaining_reserve: reserve,
     remaining_work: Object.freeze(remainingWork),
+    identity_spool: Object.freeze([]),
+    recovered_bindings: recoveredBindingSnapshot(
+      charged.seen_identities.map((identity) => identity.binding_context)
+    ),
     binding,
-    closure: closureFacts(charged, binding.kind === "bound" ? "fixed_point" : "open")
+    closure: closureFacts(charged, paid.ok ? "fixed_point" : "open")
   };
   return Object.freeze(next);
 }
@@ -99,8 +105,17 @@ export function absorbObservations(
   const transitions = [...state.transitions];
   const guaranteedTransitions = [...state.guaranteed_transitions];
   const facets = [...state.facets];
+  const derivations = [...state.derivations];
+  const transitionDerivations = { ...state.transition_derivations };
   let remainingExploration = state.remaining_exploration;
+  let remainingMemory = state.remaining_memory_bytes;
+  let memoryExhausted = state.memory_exhausted;
   const remainingWork: RemainingWork[] = [...state.remaining_work];
+  const quota = {
+    remaining: remainingMemory,
+    exhausted: memoryExhausted,
+    remainingWork
+  };
   const effectSeedIds = new Set(
     (consumption.effects ?? []).flatMap((effect) => effect.seed === undefined ? [] : [effect.observation_id])
   );
@@ -110,7 +125,8 @@ export function absorbObservations(
     observations,
     seeds,
     guaranteedSeeds,
-    effectSeedIds
+    effectSeedIds,
+    quota
   );
   remainingExploration = absorbEffects(
     consumption,
@@ -120,9 +136,14 @@ export function absorbObservations(
     transitions,
     guaranteedTransitions,
     facets,
+    derivations,
+    transitionDerivations,
     remainingExploration,
-    remainingWork
+    remainingWork,
+    quota
   );
+  remainingMemory = quota.remaining;
+  memoryExhausted = quota.exhausted;
   const workUnits = consumption.work?.work_units ?? 0;
   if (workUnits > remainingExploration) remainingWork.push({ kind: "state_create", units: workUnits - remainingExploration });
   remainingExploration = Math.max(0, remainingExploration - workUnits);
@@ -132,6 +153,8 @@ export function absorbObservations(
   return {
     ...rest,
     remaining_exploration: remainingExploration,
+    remaining_memory_bytes: remainingMemory,
+    memory_exhausted: memoryExhausted,
     remaining_work: remainingWork,
     observations: Object.freeze(observations),
     seeds: mergedSeeds,
@@ -139,9 +162,13 @@ export function absorbObservations(
     transitions: mergedTransitions,
     guaranteed_transitions: mergeTransitions(guaranteedTransitions),
     facets: retainSamePathVectors(facets),
+    derivations: mergeDerivations(derivations),
+    transition_derivations: Object.freeze(transitionDerivations),
     seen_identities: collectIdentities(mergedSeeds, mergedTransitions, state.seen_identities),
-    residuals: mergeResiduals(state.residuals, consumption.page),
-    last_observer_status: consumption.page.outcome.status,
+    residuals: memoryExhausted
+      ? interruptOpenResiduals(mergeResiduals(state.residuals, consumption.page))
+      : mergeResiduals(state.residuals, consumption.page),
+    last_observer_status: memoryExhausted ? "interrupted" : consumption.page.outcome.status,
     resume_cursors: consumption.resume_cursors ?? state.resume_cursors
   };
 }
@@ -166,21 +193,38 @@ export function residualWorkRegions(residuals: readonly CoverageRegion[]): FairW
     }));
 }
 
+type MemoryQuota = {
+  remaining: number;
+  exhausted: boolean;
+  remainingWork: RemainingWork[];
+};
+
 function absorbPageObservations(
   pageObservations: readonly TypedObservation[],
   priorIds: ReadonlySet<string>,
   observations: TypedObservation[],
   seeds: SeedActivation[],
   guaranteedSeeds: SeedActivation[],
-  effectSeedIds: ReadonlySet<string> = new Set()
+  effectSeedIds: ReadonlySet<string>,
+  quota: MemoryQuota
 ): void {
+  let pinnedModel = observations.find((row) => row.model_id !== undefined)?.model_id;
   for (const observation of pageObservations) {
     if (priorIds.has(observation.observation_id)) continue;
+    if (pinnedModel !== undefined
+      && observation.model_id !== undefined
+      && observation.model_id !== pinnedModel) {
+      quota.remainingWork.push({ kind: "provenance", units: 1 });
+      continue;
+    }
+    if (!retainPayload(observation, quota)) continue;
     observations.push(observation);
+    if (pinnedModel === undefined) pinnedModel = observation.model_id;
     if (effectSeedIds.has(observation.observation_id)) continue;
     if (observation.association_milligrades === undefined) continue;
     const seed = seedFromObservation(observation, productStateFromObservation(observation));
     if (seed === undefined) continue;
+    if (!retainPayload(seed, quota)) continue;
     seeds.push(seed);
     if (observationIsGuaranteed(observation)) guaranteedSeeds.push(seed);
   }
@@ -194,22 +238,37 @@ function absorbEffects(
   transitions: Transition[],
   guaranteedTransitions: Transition[],
   facets: FacetVector[],
+  derivations: Derivation[],
+  transitionDerivations: Record<string, string>,
   remainingExploration: number,
-  remainingWork: RemainingWork[]
+  remainingWork: RemainingWork[],
+  quota: MemoryQuota
 ): number {
   let exploration = remainingExploration;
   for (const effect of consumption.effects ?? []) {
     if (priorIds.has(effect.observation_id)) continue;
-    if (effect.seed !== undefined) {
+    if (effect.seed !== undefined && retainPayload(effect.seed, quota)) {
       seeds.push(effect.seed);
       guaranteedSeeds.push(effect.seed);
     }
-    if (effect.transition !== undefined) {
+    if (effect.transition !== undefined && retainPayload(effect.transition, quota)) {
       transitions.push(effect.transition);
       if (effect.transition.applicable) guaranteedTransitions.push(effect.transition);
+      rememberTransitionDerivation(effect, effect.transition, derivations, transitionDerivations);
     }
-    if (effect.facet !== undefined) facets.push(effect.facet);
-    exploration = absorbHyperedge(effect, transitions, guaranteedTransitions, exploration, remainingWork);
+    if (effect.facet !== undefined && retainPayload(effect.facet, quota)) facets.push(effect.facet);
+    for (const derivation of effect.derivations ?? (effect.derivation === undefined ? [] : [effect.derivation])) {
+      if (retainPayload(derivation, quota)) derivations.push(derivation);
+    }
+    exploration = absorbHyperedge(
+      effect,
+      transitions,
+      guaranteedTransitions,
+      derivations,
+      transitionDerivations,
+      exploration,
+      remainingWork
+    );
   }
   return exploration;
 }
@@ -218,6 +277,8 @@ function absorbHyperedge(
   effect: FieldObservationEffect,
   transitions: Transition[],
   guaranteedTransitions: Transition[],
+  derivations: Derivation[],
+  transitionDerivations: Record<string, string>,
   exploration: number,
   remainingWork: RemainingWork[]
 ): number {
@@ -228,58 +289,116 @@ function absorbHyperedge(
   if (completed !== undefined) {
     transitions.push(completed);
     guaranteedTransitions.push(completed);
+    rememberTransitionDerivation(effect, completed, derivations, transitionDerivations);
   }
   return exploration;
 }
 
+function rememberTransitionDerivation(
+  effect: FieldObservationEffect,
+  transition: Transition,
+  derivations: Derivation[],
+  transitionDerivations: Record<string, string>
+): void {
+  if (effect.derivation === undefined) return;
+  derivations.push(effect.derivation);
+  transitionDerivations[transitionKey(transition)] = effect.derivation.derivation_id;
+}
+
 function chargeIdentities(state: BindableState): BindableState {
   const charged = new Set(state.charged_identity_ids);
-  const spool = [...state.identity_spool];
   let memory = state.remaining_memory_bytes;
   let exploration = state.remaining_exploration;
   const remainingWork = [...state.remaining_work];
   let exhausted = state.memory_exhausted;
+  const keptIdentities: ProductStateKey[] = [];
   for (const identity of state.seen_identities) {
-    const chargedState = chargeOneIdentity(
-      identity, charged, spool, memory, exploration, remainingWork, exhausted
-    );
-    memory = chargedState.memory;
-    exploration = chargedState.exploration;
-    exhausted = chargedState.exhausted;
+    const nodeId = productStateNodeId(identity);
+    if (charged.has(nodeId)) {
+      keptIdentities.push(identity);
+      continue;
+    }
+    const cost = payloadBytes(identity);
+    if (exploration >= 1) exploration -= 1;
+    else remainingWork.push({ kind: "state_create", units: 1 });
+    if (memory < cost) {
+      exhausted = true;
+      remainingWork.push({ kind: "state_create", units: 1 });
+      continue;
+    }
+    memory -= cost;
+    charged.add(nodeId);
+    keptIdentities.push(identity);
   }
+  const keptIds = new Set(keptIdentities.map((identity) => productStateNodeId(identity)));
   return {
     ...state,
     remaining_exploration: exploration,
     remaining_memory_bytes: memory,
     memory_exhausted: exhausted,
-    identity_spool: Object.freeze(spool),
+    identity_spool: Object.freeze([]),
     charged_identity_ids: Object.freeze([...charged]),
+    seen_identities: Object.freeze(keptIdentities),
+    seeds: Object.freeze(state.seeds.filter((seed) => keptIds.has(productStateNodeId(seed.state)))),
+    guaranteed_seeds: Object.freeze(
+      state.guaranteed_seeds.filter((seed) => keptIds.has(productStateNodeId(seed.state)))
+    ),
+    transitions: Object.freeze(state.transitions.filter((transition) =>
+      keptIds.has(productStateNodeId(transition.from))
+      && keptIds.has(productStateNodeId(transition.to))
+    )),
+    guaranteed_transitions: Object.freeze(state.guaranteed_transitions.filter((transition) =>
+      keptIds.has(productStateNodeId(transition.from))
+      && keptIds.has(productStateNodeId(transition.to))
+    )),
     remaining_work: remainingWork
   };
 }
 
-function chargeOneIdentity(
-  identity: ProductStateKey,
-  charged: Set<string>,
-  spool: ProductStateKey[],
-  memory: number,
+function retainPayload(value: unknown, quota: MemoryQuota): boolean {
+  const cost = payloadBytes(value);
+  if (quota.remaining < cost) {
+    quota.exhausted = true;
+    quota.remainingWork.push({ kind: "state_create", units: 1 });
+    return false;
+  }
+  quota.remaining -= cost;
+  return true;
+}
+
+function payloadBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+function paySolver(
   exploration: number,
-  remainingWork: RemainingWork[],
-  exhausted: boolean
-): { memory: number; exploration: number; exhausted: boolean } {
-  const nodeId = productStateNodeId(identity);
-  if (charged.has(nodeId)) {
-    return { memory, exploration, exhausted };
-  }
-  charged.add(nodeId);
-  let nextExploration = exploration;
-  if (nextExploration < 1) remainingWork.push({ kind: "state_create", units: 1 });
-  else nextExploration -= 1;
-  if (memory < IDENTITY_BYTES) {
-    spool.push(identity);
-    return { memory, exploration: nextExploration, exhausted: true };
-  }
-  return { memory: memory - IDENTITY_BYTES, exploration: nextExploration, exhausted };
+  reserve: number,
+  remainingWork: RemainingWork[]
+): { exploration: number; reserve: number; ok: boolean } {
+  if (exploration >= 1) return { exploration: exploration - 1, reserve, ok: true };
+  if (reserve >= 1) return { exploration, reserve: reserve - 1, ok: true };
+  remainingWork.push({ kind: "relaxation", units: 1 });
+  return { exploration, reserve, ok: false };
+}
+
+function emptyBoundSnapshot(state: BindableState): BindMaxMinResult {
+  const snapshot: FieldSnapshot = {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    snapshot_id: state.snapshot_id,
+    query_id: state.query_id,
+    seeds: state.seeds,
+    values: [],
+    retained_transitions: state.transitions,
+    facets: state.facets
+  };
+  return { kind: "bound", values: new Map(), snapshot };
+}
+
+function interruptOpenResiduals(residuals: readonly CoverageRegion[]): readonly CoverageRegion[] {
+  return Object.freeze(residuals.map((region) => {
+    if (region.status !== "open" && region.status !== "interrupted") return region;
+    return { ...region, status: "interrupted" as const };
+  }));
 }
 
 function guaranteedValues(state: BindableState): ReadonlyMap<string, number> {
@@ -385,7 +504,7 @@ function observationClosure(state: BindableState): ObserverStatus {
   if (state.last_observer_status === "unknown") return "unknown";
   if (state.last_observer_status === "not_applicable") return "not_applicable";
   if (state.last_observer_status === "invalidated") return "invalidated";
-  if (state.last_observer_status === "interrupted") return "interrupted";
+  if (state.memory_exhausted || state.last_observer_status === "interrupted") return "interrupted";
   if (state.residuals.some((region) => region.status === "open" || region.status === "interrupted")) {
     return "open";
   }
@@ -404,7 +523,13 @@ function requestedIndexClosure(
     return "open";
   }
   if (observation === "invalidated") return "invalidated";
-  if (observation === "exhausted") return "complete";
+  if (observation === "exhausted") {
+    if (state.support_work_status === "open") return "open";
+    if (state.remaining_work.some((item) => item.kind === "provenance" || item.kind === "join")) {
+      return "open";
+    }
+    return "complete";
+  }
   return "open";
 }
 

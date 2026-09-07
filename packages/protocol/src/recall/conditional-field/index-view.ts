@@ -23,7 +23,9 @@ export const IndexEntrySchema = z
     role: IndexRoleSchema,
     association_milligrades: MilligradeSchema,
     claim: ClaimStateSchema,
-    explanation_ids: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly()
+    explanation_ids: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    program_state: ConditionalFieldIdSchema.optional(),
+    time_state: ConditionalFieldIdSchema.optional()
   })
   .strict()
   .readonly();
@@ -48,6 +50,7 @@ export const CompletenessReportSchema = z
     schema_version: SchemaVersionSchema,
     logical_index: CompletenessStatusSchema,
     observed_coverage: CompletenessStatusSchema,
+    interpretation_coverage: CompletenessStatusSchema.optional(),
     transport: CompletenessStatusSchema,
     payload: CompletenessStatusSchema,
     representation: CompletenessStatusSchema
@@ -63,7 +66,9 @@ export const ContinuationSchema = z
     snapshot_id: Sha256DigestSchema,
     result_version: ConditionalFieldIdSchema,
     expires_at: IsoDatetimeStringSchema,
-    cursor: ConditionalFieldIdSchema
+    cursor: ConditionalFieldIdSchema,
+    interpretation_id: ConditionalFieldIdSchema.optional(),
+    interpretation_clock: IsoDatetimeStringSchema.optional()
   })
   .strict()
   .readonly();

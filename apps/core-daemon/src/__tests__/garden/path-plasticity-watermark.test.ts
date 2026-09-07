@@ -4,6 +4,7 @@ import {
   SqlitePathPlasticityWatermarkRepo
 } from "@do-soul/alaya-storage";
 import {
+  PATH_PLASTICITY_UPDATE_OWNERSHIP,
   createPathPlasticityLookupTelemetry,
   createPathPlasticityWatermarkRegistry
 } from "../../garden/path-plasticity/path-plasticity-runtime.js";
@@ -28,6 +29,14 @@ function seedWorkspace(database: ReturnType<typeof initDatabase>): void {
 }
 
 describe("path-plasticity watermark registry", () => {
+  it("retains historical receipts through watermarks without a strength-mutation owner", () => {
+    expect(PATH_PLASTICITY_UPDATE_OWNERSHIP).toEqual({
+      strength_mutation: "unreachable-on-target",
+      historical_receipts: "retain",
+      watermark: "replay-window-only"
+    });
+  });
+
   it("starts from the default 24-hour lookback without advancing", () => {
     const registry = createPathPlasticityWatermarkRegistry();
 

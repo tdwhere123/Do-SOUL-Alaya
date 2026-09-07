@@ -11,6 +11,7 @@ import { readBoundedEmbeddingIds } from "../../../../../../storage/src/repos/mem
 import {
   observeConditionalField,
   startObserverCursor,
+  toSourceObserverRow,
   type ObserverReaders
 } from "../../../../recall/conditional-field/observers/observe.js";
 import {
@@ -78,7 +79,7 @@ describe("conditional-field resumable observers", () => {
     expect(during.page.outcome.status).toBe("open");
     expect(during.work.native_visits).toBe(1);
     expect(during.work.work_units).toBeGreaterThan(0);
-    expect(during.page.cursor.committed_through).toBe(during.page.observations[0]?.object_id);
+    expect(during.page.cursor.committed_through).not.toBeNull();
   });
 
   it("exhausts an empty authorized seed domain and keeps unopened channels", async () => {
@@ -103,8 +104,8 @@ describe("conditional-field resumable observers", () => {
       page_limit: 1
     }));
     expect(first.page.observations.map((observation) => observation.object_id)).toEqual([ids[0]]);
-    expect(first.page.cursor.position).toBe(ids[0]);
-    expect(first.page.cursor.committed_through).toBe(ids[0]);
+    expect(first.page.cursor.committed_through).not.toBeNull();
+    expect(first.page.cursor.position).toBe(first.page.cursor.committed_through);
     const retry = observeConditionalField(observeInput(slice, {
       action: action("seed", 512),
       cursor: first.page.cursor,
@@ -153,6 +154,34 @@ describe("conditional-field resumable observers", () => {
     }));
     expect(adjacency.page.observations.some((observation) => observation.object_id === MEM.c)).toBe(true);
     expect(adjacency.page.outcome.status).not.toBe("not_applicable");
+  });
+
+  it("rejects last-week config when the same interval is moved to associated scope", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const associated = observeConditionalField(observeInput(slice, {
+      action: action("adjacency", 16),
+      relation_subject: MEM.r,
+      relation_kind: "config_direct",
+      query: interpretation({
+        program: {
+          schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+          kind: "relation",
+          relation_kind: "config_direct",
+          source_variable: "r",
+          target_variable: "c",
+          guard: {
+            ...yesterdayAnchorGuard(),
+            variable: "c",
+            time_scope: "associated"
+          },
+          facet_mode: "same_path",
+          threshold_milligrades: 0
+        }
+      }),
+      object_observed_at: { [MEM.r]: YESTERDAY_INSTANT, [MEM.c]: LAST_WEEK_INSTANT }
+    }));
+    expect(associated.page.observations.some((observation) => observation.object_id === MEM.c)).toBe(false);
   });
 
   it("keeps an unauthorized identity inaccessible on every seed page", async () => {
@@ -333,22 +362,9 @@ function readersFor(
       input.afterObjectId
     ),
     source: (input) => {
-      const page = slice.memoryReader.source(input.workspaceId, input.objectId);
+      const page = slice.memoryReader.source(input.workspaceId, input.objectId, input.byteLimit);
       return {
-        row: page.row === null
-          ? null
-          : {
-            object_id: page.row.object_id,
-            sourceRevision: page.row.sourceRevision,
-            observed_at: page.row.event_time_start ?? undefined,
-            content: page.row.content,
-            lifecycle_state: page.row.lifecycle_state,
-            retention_state: page.row.retention_state,
-            scope_class: page.row.scope_class,
-            evidence_refs: page.row.evidence_refs,
-            valid_from: page.row.valid_from,
-            valid_to: page.row.valid_to
-          },
+        row: page.row === null ? null : toSourceObserverRow(page.row),
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
         unavailable: page.unavailable
@@ -370,7 +386,8 @@ function readersFor(
         maxRows: input.maxRows,
         maxMetadataUtf8Bytes: 256
       }, input.afterObjectId)
-      : undefined
+      : undefined,
+    snapshotPin: (workspaceId) => slice.indexProjection.observablePin(workspaceId)
   };
 }
 

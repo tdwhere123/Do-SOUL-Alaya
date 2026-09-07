@@ -7,7 +7,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import { Librarian } from "../../../garden/maintenance/librarian.js";
 import {
+  PATH_PLASTICITY_NO_MUTATION_RESULT,
   PATH_PLASTICITY_TASK_DEFAULTS,
+  createAttributionOnlyPathPlasticityPort,
   resolvePathPlasticitySinceIso,
   resolvePathPlasticityUntilIso,
   runPathPlasticityWithinBudget,
@@ -244,6 +246,29 @@ describe("Librarian.path_plasticity_update", () => {
     });
     expect(clearPendingWorkspace).toHaveBeenCalledWith("workspace-1");
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
+});
+
+describe("createAttributionOnlyPathPlasticityPort", () => {
+  it("computes without entering a PathRelation mutation boundary or reporting deltas", async () => {
+    const markProcessed = vi.fn(async () => undefined);
+    const onMutationBoundaryEntered = vi.fn();
+    const port = createAttributionOnlyPathPlasticityPort({ markProcessed });
+
+    const result = await port.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T12:00:00.000Z",
+      untilIso: NOW_ISO,
+      onMutationBoundaryEntered
+    });
+
+    expect(result).toEqual(PATH_PLASTICITY_NO_MUTATION_RESULT);
+    expect(result.reinforced).toBe(0);
+    expect(result.weakened).toBe(0);
+    expect(result.retired).toBe(0);
+    expect(result.affectedPathIds).toEqual([]);
+    expect(onMutationBoundaryEntered).not.toHaveBeenCalled();
+    expect(markProcessed).not.toHaveBeenCalled();
   });
 });
 

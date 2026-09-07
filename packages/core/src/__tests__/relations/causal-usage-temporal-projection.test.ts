@@ -3,16 +3,22 @@ import {
   CAUSAL_USAGE_OPERATOR_ID,
   CausalUsageReceiptSchema,
   hashCausalUsageId,
+  UsageReportSchema,
   type CausalUsageReceipt,
-  type PathRelation
+  type PathRelation,
+  type UsageReport
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
-import { projectCausalUsageOntoPaths } from "../../relations/path-plasticity/causal-usage-projection.js";
+import {
+  attributeCausalUsageOntoPaths,
+  attributeUsageReports,
+  projectCausalUsageOntoPaths
+} from "../../relations/path-plasticity/causal-usage-projection.js";
 
 const AS_OF = "2026-08-17T00:00:00.000Z";
 
 describe("causal usage temporal path projection", () => {
-  it("projects canonical unique usage without mutating the stored temporal row", () => {
+  it("keeps stored PathRelation.strength while unique receipts stay attributable", () => {
     const stored = path("path-1", 0.2);
     const used = receipt("outcome-1", "memory-2", "2026-08-16T00:00:00.000Z");
 
@@ -22,17 +28,21 @@ describe("causal usage temporal path projection", () => {
       AS_OF,
       0
     );
+    const attributed = attributeCausalUsageOntoPaths([stored], [used, used], AS_OF);
 
-    const usageStrength = 1 - Math.exp(-1);
-    expect(projected?.plasticity_state.strength).toBeCloseTo(
-      1 - (1 - 0.2) * (1 - usageStrength),
-      10
-    );
-    expect(projected?.plasticity_state.support_events_count).toBe(1);
+    expect(projected?.plasticity_state.strength).toBe(0.2);
+    expect(projected?.plasticity_state.support_events_count).toBe(0);
     expect(stored.plasticity_state.strength).toBe(0.2);
+    expect(attributed).toEqual([
+      {
+        path_id: "path-1",
+        receipt_identities: [used.identity],
+        writes_path_relation: false
+      }
+    ]);
   });
 
-  it("preserves existing support history while composing bounded usage strength", () => {
+  it("preserves existing support history instead of composing usage into strength", () => {
     const stored = {
       ...path("path-1", 0.75),
       plasticity_state: {
@@ -49,15 +59,15 @@ describe("causal usage temporal path projection", () => {
       0
     );
 
-    expect(projected?.plasticity_state.strength).toBeGreaterThan(0.75);
-    expect(projected?.plasticity_state.strength).toBeLessThanOrEqual(1);
-    expect(projected?.plasticity_state.support_events_count).toBe(5);
-    expect(projected?.plasticity_state.last_reinforced_at).toBe("2026-08-16T00:00:00.000Z");
+    expect(projected?.plasticity_state.strength).toBe(0.75);
+    expect(projected?.plasticity_state.support_events_count).toBe(4);
+    expect(projected?.plasticity_state.last_reinforced_at).toBe("2026-08-10T00:00:00.000Z");
   });
 
   it("does not credit unrelated or future causal usage", () => {
+    const stored = path("path-1", 0.2);
     const projected = projectCausalUsageOntoPaths(
-      [path("path-1", 0.2)],
+      [stored],
       [
         receipt("unrelated", "memory-3", "2026-08-16T00:00:00.000Z"),
         receipt("future", "memory-2", "2026-08-18T00:00:00.000Z")
@@ -68,8 +78,100 @@ describe("causal usage temporal path projection", () => {
 
     expect(projected[0]?.plasticity_state.strength).toBe(0.2);
     expect(projected[0]?.plasticity_state.support_events_count).toBe(0);
+    expect(attributeCausalUsageOntoPaths(
+      [stored],
+      [
+        receipt("unrelated", "memory-3", "2026-08-16T00:00:00.000Z"),
+        receipt("future", "memory-2", "2026-08-18T00:00:00.000Z")
+      ],
+      AS_OF
+    )).toEqual([]);
+  });
+
+  it("keeps output-only reports at output grain and does not credit paths or edges", () => {
+    const outputUsed = usageReport({
+      grain: "output",
+      exposure: "exposed",
+      reported_use: "used",
+      output_id: "idx-1"
+    });
+    const duplicate = usageReport({
+      grain: "output",
+      exposure: "exposed",
+      reported_use: "used",
+      output_id: "idx-1"
+    });
+    const [attributed] = attributeUsageReports([outputUsed, duplicate]);
+
+    expect(attributed?.grain).toBe("output");
+    expect(attributed?.output_id).toBe("idx-1");
+    expect(attributed?.witness_id).toBeUndefined();
+    expect(attributed?.path_credit).toBe("none");
+    expect(attributed?.witness_credit).toBe("none");
+    expect(attributeUsageReports([outputUsed, duplicate])).toHaveLength(1);
+  });
+
+  it("retains witness identity and leaves unknown, missing, and nonexposure distinct", () => {
+    const claimed = usageReport({
+      grain: "witness",
+      exposure: "exposed",
+      reported_use: "used",
+      witness_id: "w1",
+      object_id: "cfg"
+    });
+    const unknown = usageReport({
+      grain: "witness",
+      exposure: "unknown",
+      reported_use: "unknown",
+      witness_id: "w-unknown"
+    });
+    const missing = usageReport({
+      grain: "witness",
+      exposure: "exposed",
+      reported_use: "missing",
+      witness_id: "w-missing"
+    });
+    const nonexposure = usageReport({
+      grain: "witness",
+      exposure: "nonexposure",
+      reported_use: "unused",
+      witness_id: "w-hidden"
+    });
+
+    const attributed = attributeUsageReports([claimed, unknown, missing, nonexposure]);
+    expect(attributed.map((row) => row.witness_credit)).toEqual([
+      "claimed",
+      "unknown",
+      "none",
+      "none"
+    ]);
+    expect(attributed[0]).toMatchObject({
+      grain: "witness",
+      witness_id: "w1",
+      object_id: "cfg",
+      query_id: "q1",
+      snapshot_id: SNAPSHOT,
+      path_credit: "none"
+    });
+    expect(new Set(attributed.map((row) => `${row.exposure}:${row.reported_use}`))).toEqual(
+      new Set(["exposed:used", "unknown:unknown", "exposed:missing", "nonexposure:unused"])
+    );
   });
 });
+
+const SNAPSHOT = `sha256:${"b".repeat(64)}`;
+
+function usageReport(overrides: Partial<UsageReport> & Pick<
+  UsageReport,
+  "grain" | "exposure" | "reported_use"
+>): UsageReport {
+  return UsageReportSchema.parse({
+    schema_version: 1,
+    query_id: "q1",
+    snapshot_id: SNAPSHOT,
+    ...overrides
+  });
+}
 
 function receipt(causalKey: string, downstreamRef: string, occurredAt: string): CausalUsageReceipt {
   return CausalUsageReceiptSchema.parse({

@@ -1,5 +1,6 @@
 import type {
   ClaimLifecycleState,
+  Derivation,
   PathAnchorRef,
   PathGovernanceClass,
   PathLifecycleStatus,
@@ -123,6 +124,7 @@ export type EvidenceAssessment = Readonly<{
   readonly explanation_ids: readonly string[];
   readonly work_status: SupportWorkStatus;
   readonly correlations: readonly EvidenceCorrelationRecord[];
+  readonly derivations: readonly Derivation[];
 }>;
 
 export type RelationAssertionRead = Readonly<{

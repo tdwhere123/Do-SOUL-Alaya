@@ -2,9 +2,14 @@ import type { PathPlasticityWatermarkRepo } from "@do-soul/alaya-storage";
 
 /**
  * Compatibility state for residual path-plasticity Garden tasks and lookup
- * telemetry. Causal usage affects recall only through temporal receipt
- * projection; this module has no path mutation owner.
+ * telemetry. Causal usage remains a historical receipt stream; this module
+ * has no PathRelation.strength owner on the upgraded target.
  */
+export const PATH_PLASTICITY_UPDATE_OWNERSHIP = Object.freeze({
+  strength_mutation: "unreachable-on-target",
+  historical_receipts: "retain",
+  watermark: "replay-window-only"
+} as const);
 
 /**
  * In-process per-workspace high-water mark for the path-plasticity

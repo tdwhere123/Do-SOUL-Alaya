@@ -7,6 +7,10 @@ import { MEMORY_ENTRY_SELECT_COLUMNS, parseMemoryEntryRow, type MemoryEntryRow }
 const SOURCE_BYTES_SQL = MEMORY_ENTRY_SELECT_COLUMNS.split(",").map((column) =>
   `COALESCE(length(CAST(${column.trim()} AS BLOB)), 0)`).join(" + ");
 
+export const LEXICAL_RECALL_SQL = `SELECT object_id, rowid AS rowid
+      FROM memory_content_fts_porter WHERE workspace_id = ? AND memory_content_fts_porter MATCH ?
+      AND rowid > ? ORDER BY rowid LIMIT ?`;
+
 export class SqliteMemoryRecallReader {
   public constructor(private readonly db: StorageDatabase) {}
 
@@ -15,10 +19,27 @@ export class SqliteMemoryRecallReader {
   public source(workspaceId: string, objectId: string, byteLimit = 65536) {
     if (!Number.isSafeInteger(byteLimit) || byteLimit < 1 || byteLimit > 65536) throw new Error("invalid source byte limit");
     return this.db.connection.transaction(() => {
+      const lengthRow = this.db.connection.prepare(
+        `SELECT ${SOURCE_BYTES_SQL} AS byte_length FROM memory_entries WHERE workspace_id = ? AND object_id = ? LIMIT 1`
+      ).get(workspaceId, objectId) as { readonly byte_length: number } | undefined;
+      if (lengthRow === undefined) {
+        return {
+          row: null, rowsRead: 0, sourceRowsRead: 0, revisionRowsRead: 0, bytesRead: 0, unavailable: false
+        };
+      }
+      if (lengthRow.byte_length > byteLimit) {
+        return {
+          row: null,
+          rowsRead: 1,
+          sourceRowsRead: 1,
+          revisionRowsRead: 0,
+          bytesRead: lengthRow.byte_length,
+          unavailable: true
+        };
+      }
       const rows = this.db.connection.prepare(`SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
-        FROM memory_entries WHERE workspace_id = ? AND object_id = ?
-        AND ${SOURCE_BYTES_SQL} <= ? LIMIT 1`)
-        .all(workspaceId, objectId, byteLimit) as MemoryEntryRow[];
+        FROM memory_entries WHERE workspace_id = ? AND object_id = ? LIMIT 1`)
+        .all(workspaceId, objectId) as MemoryEntryRow[];
       const revisions = rows.length ? this.db.connection.prepare(`SELECT revision FROM event_log
         INDEXED BY garden_semantic_source_event_revision WHERE workspace_id=? AND entity_type='memory_entry'
         AND entity_id=? AND event_type IN ('soul.memory.created','soul.memory.updated')
@@ -55,16 +76,16 @@ export class SqliteMemoryRecallReader {
         truncated: fetchLimit === 0
       };
     }
-    const rows = this.db.connection.prepare(`SELECT object_id
-      FROM memory_content_fts_porter WHERE workspace_id = ? AND memory_content_fts_porter MATCH ?
-      AND object_id > ? ORDER BY object_id LIMIT ?`)
+    const afterRowId = lexicalAfterRowId(this.db, afterObjectId);
+    const rows = this.db.connection.prepare(LEXICAL_RECALL_SQL)
       .all(
         workspaceId,
         buildWorkspaceScopedFtsMatch(workspaceId, tokens),
-        afterObjectId ?? "",
+        afterRowId,
         fetchLimit
-      ) as { object_id: string }[];
+      ) as { object_id: string; rowid: number }[];
     const bytesRead = Buffer.byteLength(JSON.stringify(rows), "utf8");
+    const last = rows.at(-1);
     return {
       ids: rows.map((row) => row.object_id),
       rows,
@@ -72,7 +93,20 @@ export class SqliteMemoryRecallReader {
       bytesRead,
       nativeVisits: rows.length,
       nativeBytes: bytesRead,
-      truncated: rows.length === fetchLimit
+      truncated: rows.length === fetchLimit,
+      committedThrough: last === undefined ? afterObjectId : String(last.rowid)
     };
   }
+}
+
+function lexicalAfterRowId(
+  db: StorageDatabase,
+  afterObjectId: string | null
+): number {
+  if (afterObjectId === null || afterObjectId === "") return 0;
+  if (/^[0-9]+$/u.test(afterObjectId)) return Number(afterObjectId);
+  const row = db.connection.prepare(
+    `SELECT rowid AS rowid FROM memory_content_fts_porter WHERE object_id = ? LIMIT 1`
+  ).get(afterObjectId) as { rowid: number } | undefined;
+  return row?.rowid ?? 0;
 }

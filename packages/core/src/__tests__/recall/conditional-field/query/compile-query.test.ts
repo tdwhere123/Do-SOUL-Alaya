@@ -10,12 +10,14 @@ import {
 import {
   collectRelations,
   compileConditionalFieldQuery,
+  interpretationIdentity,
   SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
   type QueryMemoryPort
 } from "../../../../recall/conditional-field/query/compile-query.js";
 import {
   completenessForInterpretationStatus,
   guardAppliesToVariable,
+  interpretationCoverageFor,
   interpretationMayEmitCompleteEmpty
 } from "../../../../recall/conditional-field/reference/interpret-query.js";
 import {
@@ -99,20 +101,22 @@ describe("conditional-field query compiler", () => {
 
   it("does not compile owner or channel phrasing as a relation catalog", () => {
     const owns = compileOrdinary("who owns this channel");
-    expect(owns.status).toBe("resolved");
-    expect(collectRelations(owns.program)).toEqual([]);
+    expect(owns.status).toBe("partial");
+    expect(owns.program.kind).not.toBe("epsilon");
+    expect(collectRelations(owns.program).every((relation) => relation.relation_kind === "lexical_observation"))
+      .toBe(true);
     const wrapped = compileOrdinary("who owns yesterday's failed deployment");
     expect(wrapped.status).toBe("resolved");
     expect(collectRelations(wrapped.program).map((relation) => relation.relation_kind).sort())
       .toEqual(["associated_config", "associated_history", "failed_deployment", "uses_service"]);
   });
 
-  it("compiles ordinary recall outside failed-deployment as lexical seed plus stored-relation adjacency", () => {
+  it("keeps unseen ordinary language partial instead of false-resolved epsilon", () => {
     for (const text of ["deployment rules", "pnpm workspace commands", "xyzzy unrelated request"]) {
       const interpretation = compileOrdinary(text);
-      expect(interpretation.status).toBe("resolved");
-      expect(interpretation.program.kind).toBe("epsilon");
-      expect(collectRelations(interpretation.program)).toEqual([]);
+      expect(interpretation.status).toBe("partial");
+      expect(interpretation.program.kind).not.toBe("epsilon");
+      expect(interpretation.holes.some((hole) => hole.status !== "bound")).toBe(true);
       expect(interpretation.query_id).not.toBe("unsupported");
     }
     expect(compileOrdinary("deployment rules").query_id)
@@ -147,6 +151,31 @@ describe("conditional-field query compiler", () => {
       query_id: "caller-query"
     });
     expect(explicit.query_id).toBe("caller-query");
+    const noon = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "yesterday failed deployment",
+      interpretation_clock: "2026-09-06T12:00:00.000Z"
+    });
+    const dusk = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "yesterday failed deployment",
+      interpretation_clock: "2026-09-06T18:00:00.000Z"
+    });
+    expect(noon.time_window).toEqual(dusk.time_window);
+    expect(noon.query_id).not.toBe(dusk.query_id);
+    expect(interpretationIdentity({ interpretation_clock: noon.interpretation_clock }))
+      .not.toBe(interpretationIdentity({ interpretation_clock: dusk.interpretation_clock }));
+    expect(interpretationIdentity({
+      interpretation_clock: noon.interpretation_clock,
+      model_id: "model-a"
+    })).not.toBe(interpretationIdentity({
+      interpretation_clock: noon.interpretation_clock,
+      model_id: "model-b"
+    }));
   });
 
   it("A03 keeps epsilon distinct from empty and does not rewrite grammar", () => {
@@ -299,7 +328,7 @@ describe("conditional-field query compiler", () => {
 
   it("distinguishes malformed, unsupported, partial, and resource-rejected from empty", () => {
     expect(compileOrdinary("").status).toBe("malformed");
-    expect(compileOrdinary("xyzzy unrelated request").status).toBe("resolved");
+    expect(compileOrdinary("xyzzy unrelated request").status).toBe("partial");
     const partial = compileOrdinary("failed deployment of checkout");
     expect(partial.status).toBe("partial");
     expect(partial.holes).toEqual([{
@@ -336,6 +365,62 @@ describe("conditional-field query compiler", () => {
     expect(typed.status).toBe("resolved");
     expect(QueryInterpretationSchema.parse(typed).query_id.length).toBeGreaterThan(0);
     expect(typed.view).toEqual(defaultView());
+  });
+
+  it("does not treat Chinese ordinary text as malformed via ASCII stripping", () => {
+    const interpretation = compileOrdinary("昨天失败的部署相关配置");
+    expect(interpretation.status).not.toBe("malformed");
+    expect(interpretation.program.kind).not.toBe("empty");
+  });
+
+  it("keeps unseen relational language partial rather than resolved epsilon", () => {
+    const interpretation = compileOrdinary("Which database migration caused the outage last Tuesday?");
+    expect(interpretation.status).toBe("partial");
+    expect(interpretation.program.kind).not.toBe("epsilon");
+  });
+
+  it("maps one-sided since to partial with an open hole instead of malformed", () => {
+    const interpretation = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "deployment rules",
+      interpretation_clock: INTERPRETATION_CLOCK,
+      since: YESTERDAY_START
+    });
+    expect(interpretation.status).toBe("partial");
+    expect(interpretation.status).not.toBe("malformed");
+    expect(interpretation.holes.some((hole) => hole.hole_id === "hole.time.until")).toBe(true);
+    expect(interpretation.time_window).toBeUndefined();
+  });
+
+  it("hashes public dimension, domain_tags, and time_field into query identity", () => {
+    const base = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "deployment rules",
+      interpretation_clock: INTERPRETATION_CLOCK
+    });
+    const filtered = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "deployment rules",
+      interpretation_clock: INTERPRETATION_CLOCK,
+      dimension_filter: ["episode"],
+      domain_tag_filter: ["absent-tag"],
+      time_field: "created_at"
+    });
+    expect(filtered.query_id).not.toBe(base.query_id);
+    expect(filtered.status).toBe("partial");
+    expect(collectRelations(filtered.program).some((relation) => (
+      relation.guard.predicate_name?.includes("dimension=episode") === true
+      && relation.guard.predicate_name.includes("tag=absent-tag")
+      && relation.guard.predicate_name.includes("time_field=created_at")
+    ))).toBe(true);
+    expect(interpretationCoverageFor(filtered.status, filtered)).toBe("open");
+    expect(interpretationCoverageFor(filtered.status, filtered)).not.toBe("complete");
   });
 });
 

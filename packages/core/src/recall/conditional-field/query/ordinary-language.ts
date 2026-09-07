@@ -2,6 +2,7 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   type FacetMode,
   type Guard,
+  type QueryHole,
   type QueryProgram,
   type QueryTimeWindow
 } from "@do-soul/alaya-protocol";
@@ -30,7 +31,7 @@ const FAILED_PATTERN = /\b(?:failed|failure|unsuccessful)\b/u;
 const DEPLOY_PATTERN = /\bdeploy(?:ed|ment|s)?\b/u;
 
 export function normalizeOrdinaryText(text: string): string {
-  return text.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]+/gu, " ").trim();
+  return text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
 export function calendarYesterdayWindow(clockIso: string): QueryTimeWindow | undefined {
@@ -57,7 +58,7 @@ export function classifyOrdinaryRequest(text: string): OrdinaryRequestClass {
 }
 
 // Yesterday is an event-variable interval. Applying it to associated items drops last-week config.
-export function yesterdayAnchorGuard(window: QueryTimeWindow, variable = "r"): Guard {
+export function yesterdayAnchorGuard(window: QueryTimeWindow, variable = ANCHOR_EVENT_VARIABLE): Guard {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     kind: "interval_relation",
@@ -72,7 +73,7 @@ export function yesterdayAnchorGuard(window: QueryTimeWindow, variable = "r"): G
   };
 }
 
-export function openAnchorTimeGuard(variable = "r"): Guard {
+export function openAnchorTimeGuard(variable = ANCHOR_EVENT_VARIABLE): Guard {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     kind: "interval_relation",
@@ -83,6 +84,20 @@ export function openAnchorTimeGuard(variable = "r"): Guard {
 }
 
 export const STORED_RELATION_KIND = "stored_relation";
+export const SOURCE_FILTER_PREDICATE = "source.filters";
+export const UNINTERPRETED_HOLE_ID = "hole.query.uninterpreted";
+export const ANCHOR_EVENT_VARIABLE = "r";
+export const SERVICE_VARIABLE = "s";
+export const USES_SERVICE_RELATION = "uses_service";
+export const UNBOUND_BINDING_CONTEXT = "unbound";
+
+export type OrdinarySourceFilters = Readonly<{
+  readonly dimension_filter?: readonly string[];
+  readonly domain_tag_filter?: readonly string[];
+  readonly time_field?: "created_at" | "last_used_at";
+  readonly since?: string;
+  readonly until?: string;
+}>;
 
 // Supported ordinary steps name query roles; planted freeze edges keep stored predicates.
 export const SUPPORTED_RELATION_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
@@ -91,8 +106,138 @@ export const SUPPORTED_RELATION_ALIASES: Readonly<Record<string, readonly string
   associated_history: Object.freeze(["service_history"])
 });
 
-export function lexicalStoredRelationProgram(): QueryProgram {
-  return { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "epsilon" };
+export function lexicalStoredRelationProgram(guard?: Guard): QueryProgram {
+  return {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    kind: "alternative",
+    options: [
+      { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "epsilon" },
+      relationProgram(
+        "lexical_observation",
+        "q",
+        "hit",
+        guard ?? associatedItemGuard("hit")
+      )
+    ]
+  };
+}
+
+export function uninterpretedQueryHole(): QueryHole {
+  return {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    hole_id: UNINTERPRETED_HOLE_ID,
+    variable: "q",
+    status: "unresolved"
+  };
+}
+
+export function encodeSourceFilters(filters: OrdinarySourceFilters): string | undefined {
+  const parts = [SOURCE_FILTER_PREDICATE];
+  for (const dimension of filters.dimension_filter ?? []) parts.push(`dimension=${dimension}`);
+  for (const tag of filters.domain_tag_filter ?? []) parts.push(`tag=${tag}`);
+  if (filters.time_field !== undefined) parts.push(`time_field=${filters.time_field}`);
+  if (filters.since !== undefined) parts.push(`since=${filters.since}`);
+  if (filters.until !== undefined) parts.push(`until=${filters.until}`);
+  if (parts.length === 1) return undefined;
+  const packed = parts.join("|");
+  return packed.length <= 1024 ? packed : packed.slice(0, 1024);
+}
+
+export function decodeSourceFilters(predicateName: string | undefined): OrdinarySourceFilters | undefined {
+  if (predicateName === undefined || !predicateName.startsWith(SOURCE_FILTER_PREDICATE)) {
+    return undefined;
+  }
+  const dimension_filter: string[] = [];
+  const domain_tag_filter: string[] = [];
+  let time_field: OrdinarySourceFilters["time_field"];
+  let since: string | undefined;
+  let until: string | undefined;
+  for (const part of predicateName.split("|").slice(1)) {
+    const sep = part.indexOf("=");
+    if (sep <= 0) continue;
+    const key = part.slice(0, sep);
+    const value = part.slice(sep + 1);
+    if (key === "dimension") dimension_filter.push(value);
+    else if (key === "tag") domain_tag_filter.push(value);
+    else if (key === "time_field" && (value === "created_at" || value === "last_used_at")) time_field = value;
+    else if (key === "since") since = value;
+    else if (key === "until") until = value;
+  }
+  return {
+    ...(dimension_filter.length === 0 ? {} : { dimension_filter }),
+    ...(domain_tag_filter.length === 0 ? {} : { domain_tag_filter }),
+    ...(time_field === undefined ? {} : { time_field }),
+    ...(since === undefined ? {} : { since }),
+    ...(until === undefined ? {} : { until })
+  };
+}
+
+export function attachSourceFilters(program: QueryProgram, filters: OrdinarySourceFilters): QueryProgram {
+  const encoded = encodeSourceFilters(filters);
+  if (encoded === undefined) return program;
+  return mapProgramGuards(program, (guard) => (
+    guard.predicate_name === undefined || guard.predicate_name.startsWith(SOURCE_FILTER_PREDICATE)
+      ? { ...guard, predicate_name: encoded }
+      : guard
+  ));
+}
+
+export function sourceFactsSatisfyFilters(
+  filters: OrdinarySourceFilters,
+  facts: Readonly<{
+    readonly dimension?: string;
+    readonly domain_tags?: readonly string[];
+    readonly created_at?: string;
+    readonly last_used_at?: string | null;
+    readonly observed_at?: string;
+  }> | undefined
+): "true" | "false" | "unresolved" {
+  if (facts === undefined) return "unresolved";
+  if (filters.dimension_filter !== undefined && filters.dimension_filter.length > 0) {
+    if (facts.dimension === undefined) return "unresolved";
+    if (!filters.dimension_filter.includes(facts.dimension)) return "false";
+  }
+  if (filters.domain_tag_filter !== undefined && filters.domain_tag_filter.length > 0) {
+    const tags = facts.domain_tags ?? [];
+    if (!filters.domain_tag_filter.some((tag) => tags.includes(tag))) return "false";
+  }
+  const stamp = timestampForSourceFilters(facts, filters);
+  if (filters.since !== undefined || filters.until !== undefined) {
+    if (stamp === undefined) return "unresolved";
+    if (filters.since !== undefined && stamp < filters.since) return "false";
+    if (filters.until !== undefined && stamp > filters.until) return "false";
+  }
+  return "true";
+}
+
+function timestampForSourceFilters(
+  facts: Readonly<{
+    readonly created_at?: string;
+    readonly last_used_at?: string | null;
+    readonly observed_at?: string;
+  }>,
+  filters: OrdinarySourceFilters
+): string | undefined {
+  if (filters.time_field === "last_used_at") return facts.last_used_at ?? undefined;
+  if (filters.time_field === "created_at") return facts.created_at;
+  return facts.observed_at ?? facts.created_at;
+}
+
+function mapProgramGuards(program: QueryProgram, map: (guard: Guard) => Guard): QueryProgram {
+  if (program.kind === "relation") return { ...program, guard: map(program.guard) };
+  if (program.kind === "sequence") {
+    return { ...program, steps: program.steps.map((step) => mapProgramGuards(step, map)) };
+  }
+  if (program.kind === "alternative") {
+    return { ...program, options: program.options.map((option) => mapProgramGuards(option, map)) };
+  }
+  if (program.kind === "repeat" || program.kind === "closure") {
+    return { ...program, body: mapProgramGuards(program.body, map) };
+  }
+  if (program.kind === "hyperedge") {
+    return { ...program, premises: program.premises.map((premise) => mapProgramGuards(premise, map)) };
+  }
+  return program;
 }
 
 export function associatedItemGuard(variable: string): Guard {
@@ -105,7 +250,19 @@ export function associatedItemGuard(variable: string): Guard {
   };
 }
 
+export function sourceBoundEntityGuard(variable: string, entityId?: string): Guard {
+  return {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    kind: "source_bound_entity",
+    verdict: "unresolved",
+    variable,
+    time_scope: "none",
+    ...(entityId === undefined ? {} : { entity_id: entityId })
+  };
+}
+
 export function supportedFailedDeploymentProgram(anchorGuard: Guard): QueryProgram {
+  // History hangs off the service variable so a shared-provider object cannot unify another service.
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     kind: "sequence",
@@ -114,16 +271,21 @@ export function supportedFailedDeploymentProgram(anchorGuard: Guard): QueryProgr
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
         kind: "alternative",
         options: [
-          relationProgram("failed_deployment", "anchor", "r", anchorGuard),
-          relationProgram("uses_service", "r", "s", associatedItemGuard("s"))
+          relationProgram("failed_deployment", "anchor", ANCHOR_EVENT_VARIABLE, anchorGuard),
+          relationProgram(
+            USES_SERVICE_RELATION,
+            ANCHOR_EVENT_VARIABLE,
+            SERVICE_VARIABLE,
+            sourceBoundEntityGuard(SERVICE_VARIABLE)
+          )
         ]
       },
       {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
         kind: "alternative",
         options: [
-          relationProgram("associated_config", "r", "c", associatedItemGuard("c")),
-          relationProgram("associated_history", "s", "h", associatedItemGuard("h"))
+          relationProgram("associated_config", ANCHOR_EVENT_VARIABLE, "c", associatedItemGuard("c")),
+          relationProgram("associated_history", SERVICE_VARIABLE, "h", associatedItemGuard("h"))
         ]
       }
     ]

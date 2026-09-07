@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { interpretQuery } from "../../../../recall/conditional-field/reference/interpret-query.js";
-import type { QueryProgram } from "@do-soul/alaya-protocol";
+import {
+  completenessForInterpretationStatus,
+  interpretationCoverageFor,
+  interpretQuery
+} from "../../../../recall/conditional-field/reference/interpret-query.js";
+import type { QueryHypothesis, QueryProgram } from "@do-soul/alaya-protocol";
 
 const epsilon: QueryProgram = { schema_version: 1, kind: "epsilon" };
 const empty: QueryProgram = { schema_version: 1, kind: "empty" };
@@ -71,5 +75,72 @@ describe("conditional-field reference program interpreter", () => {
     expect(interpretQuery(closure)).toEqual({ kind: "program", program: closure });
     expect(interpretQuery(closure, { productKeySufficient: true }))
       .toEqual({ kind: "program", program: relation });
+  });
+
+  it("A04 refuses unbounded repeat instead of compiling a hidden flood", () => {
+    expect(interpretQuery({
+      schema_version: 1,
+      kind: "repeat",
+      count: 9,
+      body: relation
+    }).kind).toBe("unsupported");
+    expect(interpretQuery({
+      schema_version: 1,
+      kind: "repeat",
+      count: 0,
+      body: relation
+    }).kind).toBe("unsupported");
+  });
+
+  it("A07 keeps hyperedge AND distinct from alternative OR and from a planted join rewrite", () => {
+    const andJoin: QueryProgram = {
+      schema_version: 1,
+      kind: "hyperedge",
+      join: "and",
+      premises: [relation, relation]
+    };
+    const orJoin: QueryProgram = {
+      schema_version: 1,
+      kind: "hyperedge",
+      join: "or",
+      premises: [relation, relation]
+    };
+    expect(interpretQuery(andJoin)).toEqual({ kind: "program", program: andJoin });
+    expect(interpretQuery(orJoin)).toEqual({ kind: "program", program: orJoin });
+    expect(interpretQuery(andJoin)).not.toEqual(interpretQuery(orJoin));
+    const nested: QueryProgram = {
+      schema_version: 1,
+      kind: "sequence",
+      steps: [relation, andJoin]
+    };
+    expect(interpretQuery(nested)).toEqual({
+      kind: "program",
+      program: { schema_version: 1, kind: "sequence", steps: [relation, andJoin] }
+    });
+    const plantedOr: QueryProgram = { ...andJoin, join: "or" };
+    expect(interpretQuery(plantedOr)).not.toEqual(interpretQuery(andJoin));
+  });
+
+  it("B05 keeps hypothesis coverage open and does not treat it as envelope rejection", () => {
+    const hypotheses: readonly QueryHypothesis[] = [{
+      schema_version: 1,
+      hypothesis_id: "h1",
+      bindings: [{ schema_version: 1, variable: "event", value: "failed_deployment" }]
+    }, {
+      schema_version: 1,
+      hypothesis_id: "h2",
+      bindings: [{ schema_version: 1, variable: "event", value: "unresolved" }]
+    }];
+    expect(interpretationCoverageFor("hypotheses", { hypotheses })).toBe("open");
+    expect(interpretationCoverageFor("hypotheses", { hypotheses })).not.toBe("complete");
+    expect(completenessForInterpretationStatus("hypotheses")).toBeUndefined();
+    expect(completenessForInterpretationStatus("partial")).toBeUndefined();
+    expect(completenessForInterpretationStatus("unsupported")?.interpretation_coverage)
+      .toBe("unavailable");
+    expect(completenessForInterpretationStatus("resource_rejected")?.interpretation_coverage)
+      .toBe("resource_rejected");
+    expect(interpretationCoverageFor("resolved")).toBe("complete");
+    const plantedComplete = interpretationCoverageFor("resolved");
+    expect(plantedComplete).not.toBe(interpretationCoverageFor("hypotheses", { hypotheses }));
   });
 });

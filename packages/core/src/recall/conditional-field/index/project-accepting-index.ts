@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_BOTTOM,
   type ClaimState,
   type Continuation,
+  type Derivation,
   type FacetMode,
   type FacetVector,
   type FieldSnapshot,
@@ -13,12 +15,11 @@ import {
   type QueryInterpretationStatus,
   type QueryView,
   type RequestBudget,
-  type SupportRecord,
-  type Witness
+  type SupportRecord
 } from "@do-soul/alaya-protocol";
 import { compareText } from "../../../shared/compare-text.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
-import { facetPathId } from "../engine/path-composition.js";
+import { facetBelongsToOutput } from "../engine/path-composition.js";
 import {
   admitIndexBudget,
   completenessForInterpretationStatus,
@@ -28,8 +29,18 @@ import {
   resourceRejectedCompleteness,
   type ObserverCoverage
 } from "./completeness.js";
+import {
+  explanationIdsForEntry,
+  mixedPayloadGeneration,
+  omittedStructuredPayload
+} from "./explanation.js";
 
 export type { ObserverCoverage } from "./completeness.js";
+export {
+  outputAttributionHandle,
+  selectFeasibleWitnesses,
+  witnessAttributionHandle
+} from "./explanation.js";
 
 export type AcceptingProjectionInput = Readonly<{
   readonly snapshot: FieldSnapshot;
@@ -47,9 +58,17 @@ export type AcceptingProjectionInput = Readonly<{
   readonly prior_continuation?: Continuation | null;
   readonly observer?: ObserverCoverage;
   readonly interpretation_status?: QueryInterpretationStatus;
+  readonly interpretation_id?: string;
+  readonly interpretation_clock?: string;
+  readonly model_id?: string;
+  readonly derivations?: readonly Derivation[];
+  readonly payload_generation?: string;
   readonly relation_facet_modes?: ReadonlyMap<string, FacetMode>;
   readonly expand_payload?: boolean;
   readonly resume_cursors?: Readonly<Record<string, string | null>>;
+  readonly support_work_status?: "complete" | "open";
+  readonly remaining_reserve?: number;
+  readonly resource_work?: "complete" | "open";
 }>;
 
 const OFFSET_CURSOR = /^offset-(\d+)$/u;
@@ -72,26 +91,21 @@ export function evaluateFacetPredicate(
   return independentFacetPredicate(vectors, threshold);
 }
 
-export function selectFeasibleWitnesses(
-  witnesses: readonly Witness[],
-  pageBudget: number
-): readonly Witness[] {
-  return witnesses.filter((witness) => witness.complete && witness.cost <= pageBudget);
-}
-
 export function projectAcceptingIndex(input: AcceptingProjectionInput): InformationIndex {
   const representation = representationDecision(input.budget.page_budget);
-  if (continuationInvalidated(input) || continuationCursorInvalid(input)) {
-    return closedIndex(input, representation, invalidatedCompleteness());
+  const interpretationId = resolveInterpretationId(input);
+  const epochInput = { ...input, interpretation_id: interpretationId };
+  if (continuationInvalidated(epochInput) || continuationCursorInvalid(input)) {
+    return closedIndex(epochInput, representation, invalidatedCompleteness());
   }
   const admission = input.interpretation_status === undefined
     ? undefined
     : completenessForInterpretationStatus(input.interpretation_status);
-  if (admission !== undefined) return closedIndex(input, representation, admission);
+  if (admission !== undefined) return closedIndex(epochInput, representation, admission);
   if (admitIndexBudget(input.budget) === "resource_rejected") {
-    return closedIndex(input, representation, resourceRejectedCompleteness());
+    return closedIndex(epochInput, representation, resourceRejectedCompleteness());
   }
-  return pageAcceptingIndex(input, representation);
+  return pageAcceptingIndex(epochInput, representation);
 }
 
 export function continueAcceptingIndex(
@@ -110,7 +124,8 @@ export function continueAcceptingIndex(
     query_id: previous.query_id,
     snapshot_id: previous.snapshot_id,
     result_version: previous.result_version,
-    prior_continuation: previous.continuation
+    prior_continuation: previous.continuation,
+    interpretation_id: input.interpretation_id ?? previous.continuation.interpretation_id
   });
 }
 
@@ -118,11 +133,23 @@ function pageAcceptingIndex(
   input: AcceptingProjectionInput,
   representation: InformationIndex["representation"]
 ): InformationIndex {
-  const entries = sortEntries(acceptingEntries(input));
+  const projected = acceptingEntries(input);
+  const entries = sortEntries(projected.entries);
+  if (continuationSetMismatch(input, entries)) {
+    return closedIndex(input, representation, invalidatedCompleteness());
+  }
   const offset = resolvePageOffset(input, entries.length);
   const page = entries.slice(offset, offset + input.budget.page_budget);
   const remaining = Math.max(0, entries.length - offset - page.length);
-  const expandPayload = input.expand_payload !== false;
+  const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
+  const expandPayload = input.expand_payload !== false && !mixedPayload;
+  const omittedPayload = mixedPayload
+    || (expandPayload && omittedStructuredPayload(
+      input.support,
+      input.derivations,
+      input.budget.page_budget
+    ));
+  const resourceOpen = projected.truncated || input.resource_work === "open";
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     query_id: input.query_id,
@@ -134,21 +161,35 @@ function pageAcceptingIndex(
       interpretation_status: input.interpretation_status,
       total: entries.length,
       remaining,
-      omitted_payload: expandPayload && omittedPayload(input.support, input.budget.page_budget),
-      expand_payload: expandPayload
+      omitted_payload: omittedPayload,
+      expand_payload: expandPayload,
+      ...(mixedPayload ? { mixed_generation: true } : {}),
+      ...(input.support_work_status === undefined ? {} : { explanation_work: input.support_work_status }),
+      ...(resourceOpen ? { resource_work: "open" as const } : {})
     }),
-    continuation: nextContinuation(input, remaining, offset + page.length),
+    continuation: nextContinuation(input, remaining, offset + page.length, entries),
     representation
   };
 }
 
-function acceptingEntries(input: AcceptingProjectionInput): IndexEntry[] {
+function acceptingEntries(
+  input: AcceptingProjectionInput
+): { readonly entries: IndexEntry[]; readonly truncated: boolean } {
   const entries: IndexEntry[] = [];
+  let allowance = input.remaining_reserve;
+  let truncated = false;
   for (const value of input.snapshot.values) {
+    if (allowance !== undefined) {
+      if (allowance < 1) {
+        truncated = true;
+        break;
+      }
+      allowance -= 1;
+    }
     const entry = indexEntryForValue(value, input);
     if (entry !== null) entries.push(entry);
   }
-  return entries;
+  return { entries, truncated };
 }
 
 function indexEntryForValue(
@@ -161,15 +202,25 @@ function indexEntryForValue(
   const role = input.roles?.get(value.state.object_id) ?? "associated";
   if (role === "routing_only" && !input.view.include_routing_only) return null;
   if (!input.view.requested_roles.includes(role)) return null;
+  const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
+  const expandPayload = input.expand_payload !== false && !mixedPayload;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     object_id: value.state.object_id,
     hypothesis_id: value.state.hypothesis_id,
     output_binding: value.state.binding_context,
+    program_state: value.state.program_state,
+    time_state: value.state.time_state,
     role,
     association_milligrades: value.milligrades,
     claim: input.claims?.get(value.state.object_id) ?? "unknown",
-    explanation_ids: explanationIdsForEntry(value, input)
+    explanation_ids: explanationIdsForEntry({
+      value,
+      support: input.support,
+      derivations: input.derivations,
+      page_budget: input.budget.page_budget,
+      expand_payload: expandPayload
+    })
   };
 }
 
@@ -190,8 +241,7 @@ function facetsForCandidate(
 ): readonly FacetVector[] {
   const facets = input.snapshot.facets;
   if (facets.length === 0) return [];
-  const identity = facetPathId(value.state);
-  return facets.filter((vector) => vector.path_id === identity);
+  return facets.filter((vector) => facetBelongsToOutput(vector.path_id, value.state));
 }
 
 function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): FacetMode {
@@ -203,46 +253,6 @@ function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): 
   return input.view.facet_mode;
 }
 
-function explanationIdsForEntry(
-  value: FieldValue,
-  input: AcceptingProjectionInput
-): readonly string[] {
-  if (input.expand_payload === false || input.support === undefined) return [];
-  const ids: string[] = [];
-  for (const record of input.support) {
-    if (!supportBelongsTo(record, value)) continue;
-    for (const witness of selectFeasibleWitnesses(record.witnesses, input.budget.page_budget)) {
-      ids.push(witness.witness_id);
-    }
-  }
-  return ids;
-}
-
-function supportBelongsTo(
-  record: SupportRecord,
-  value: FieldValue
-): boolean {
-  const named = [record.proposition_id, ...record.witnesses.flatMap((witness) => [...witness.premises])];
-  return named.includes(value.state.object_id) || named.includes(value.state.hypothesis_id);
-}
-
-function omittedPayload(
-  support: readonly SupportRecord[] | undefined,
-  pageBudget: number
-): boolean {
-  if (support === undefined) return false;
-  let complete = 0;
-  let feasible = 0;
-  for (const record of support) {
-    for (const witness of record.witnesses) {
-      if (!witness.complete) continue;
-      complete += 1;
-      if (witness.cost <= pageBudget) feasible += 1;
-    }
-  }
-  return complete > 0 && feasible === 0;
-}
-
 function sortEntries(entries: readonly IndexEntry[]): IndexEntry[] {
   // Identity serialization is presentation only; milligrades and fusion ranks are not keys.
   return [...entries].sort((left, right) => compareText(entrySortKey(left), entrySortKey(right)));
@@ -252,7 +262,9 @@ function entrySortKey(entry: IndexEntry): string {
   return stableStringify({
     object_id: entry.object_id,
     hypothesis_id: entry.hypothesis_id,
-    output_binding: entry.output_binding
+    output_binding: entry.output_binding,
+    program_state: entry.program_state ?? "",
+    time_state: entry.time_state ?? ""
   });
 }
 
@@ -274,16 +286,32 @@ function continuationCursorInvalid(input: AcceptingProjectionInput): boolean {
   return !OFFSET_CURSOR.test(cursor) && !RESUME_CURSOR.test(cursor);
 }
 
+function continuationSetMismatch(
+  input: AcceptingProjectionInput,
+  entries: readonly IndexEntry[]
+): boolean {
+  if (input.page_offset !== undefined) return false;
+  const cursor = input.prior_continuation?.cursor;
+  if (cursor === undefined) return false;
+  const offset = resolvePageOffset(input, entries.length);
+  if (offset === 0) return false;
+  if (entries.length < offset) return true;
+  const digest = resumeDigest(cursor);
+  if (digest === undefined) return false;
+  return digest !== identityDigest(entries.slice(0, offset).map(entrySortKey));
+}
+
 function nextContinuation(
   input: AcceptingProjectionInput,
   remaining: number,
-  nextOffset: number
+  nextOffset: number,
+  entries: readonly IndexEntry[]
 ): Continuation | null {
   if (input.expires_at === undefined) return null;
   const observerOpen = input.observer?.outcome.status === "open"
     || input.observer?.outcome.status === "interrupted";
   if (remaining <= 0 && !observerOpen) return null;
-  const cursor = encodeResumeCursor(nextOffset, input.resume_cursors);
+  const cursor = encodeResumeCursor(nextOffset, entries.slice(0, nextOffset).map(entrySortKey));
   if (cursor === null) return null;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -292,23 +320,35 @@ function nextContinuation(
     snapshot_id: input.snapshot_id,
     result_version: input.result_version,
     expires_at: input.expires_at,
-    cursor
+    cursor,
+    ...(input.interpretation_id === undefined ? {} : { interpretation_id: input.interpretation_id })
   };
 }
 
-function encodeResumeCursor(
-  offset: number,
-  resume: Readonly<Record<string, string | null>> | undefined
-): string | null {
-  const parts = [`o${String(offset)}`];
-  if (resume !== undefined) {
-    for (const [key, value] of Object.entries(resume)) {
-      if (value === null) continue;
-      parts.push(`${key}:${value}`);
-    }
-  }
-  const cursor = parts.join("|");
+function encodeResumeCursor(offset: number, prefixKeys: readonly string[]): string | null {
+  const cursor = `o${String(offset)}|${identityDigest(prefixKeys)}`;
   return cursor.length >= 1 && cursor.length <= 256 ? cursor : null;
+}
+
+function resumeDigest(cursor: string): string | undefined {
+  const resume = RESUME_CURSOR.exec(cursor);
+  const suffix = resume?.[2];
+  return suffix === undefined || suffix.length === 0 ? undefined : suffix;
+}
+
+function identityDigest(keys: readonly string[]): string {
+  return createHash("sha256").update(keys.join("\n")).digest("hex");
+}
+
+function resolveInterpretationId(input: AcceptingProjectionInput): string | undefined {
+  if (input.interpretation_id !== undefined) return input.interpretation_id;
+  const clock = input.interpretation_clock;
+  const model = input.model_id;
+  if (clock !== undefined && model !== undefined) {
+    const joined = `${clock}+${model}`;
+    return joined.length <= 256 ? joined : identityDigest([clock, model]);
+  }
+  return clock ?? model;
 }
 
 function representationDecision(pageBudget: number): InformationIndex["representation"] {

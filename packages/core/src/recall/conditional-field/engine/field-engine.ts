@@ -3,6 +3,7 @@ import {
   type ClaimState,
   type CompletenessStatus,
   type CoverageRegion,
+  type Derivation,
   type FacetVector,
   type FieldValue,
   type IndexRole,
@@ -35,9 +36,11 @@ import {
   mergeSeeds,
   mergeTransitions,
   retainSamePathVectors,
+  transitionKey,
   type HyperedgeCompletion,
   type HyperedgePremise
 } from "./path-composition.js";
+import { derivationsAfterWithdraw } from "./path-derivation.js";
 import {
   ACTION_BY_KIND,
   absorbObservations,
@@ -48,11 +51,15 @@ import {
 
 export type FieldObservationEffect = Readonly<{
   readonly observation_id: string;
+  readonly missing_measurement?: boolean;
+  readonly unresolved_guard?: boolean;
   readonly seed?: SeedActivation;
   readonly transition?: Transition;
   readonly facet?: FacetVector;
   readonly hyperedge_premises?: readonly HyperedgePremise[];
   readonly hyperedge?: HyperedgeCompletion;
+  readonly derivation?: Derivation;
+  readonly derivations?: readonly Derivation[];
 }>;
 
 export type ObserverWorkUnits = Readonly<{
@@ -69,6 +76,7 @@ export type ObserverConsumption = Readonly<{
 export type EvidenceEffect = Readonly<{
   readonly support: readonly SupportRecord[];
   readonly claims?: ReadonlyMap<string, ClaimState>;
+  readonly work_status?: "complete" | "open";
 }>;
 
 export type FieldClosureFacts = Readonly<{
@@ -90,6 +98,7 @@ export type CreateFieldInput = Readonly<{
   readonly seeds?: readonly SeedActivation[];
   readonly transitions?: readonly Transition[];
   readonly facets?: readonly FacetVector[];
+  readonly derivations?: readonly Derivation[];
   readonly support?: readonly SupportRecord[];
   readonly residuals?: readonly CoverageRegion[];
   readonly extra_work_regions?: readonly FairWorkRegion[];
@@ -114,6 +123,9 @@ export type FieldEngineState = Readonly<{
   readonly transitions: readonly Transition[];
   readonly guaranteed_transitions: readonly Transition[];
   readonly facets: readonly FacetVector[];
+  readonly derivations: readonly Derivation[];
+  readonly transition_derivations: Readonly<Record<string, string>>;
+  readonly recovered_bindings: Readonly<Record<string, string>>;
   readonly support: readonly SupportRecord[];
   readonly residuals: readonly CoverageRegion[];
   readonly extra_work_regions: readonly FairWorkRegion[];
@@ -123,6 +135,9 @@ export type FieldEngineState = Readonly<{
   readonly remaining_work: readonly RemainingWork[];
   readonly last_observer_status: ObserverStatus | undefined;
   readonly resume_cursors: Readonly<Record<string, string | null>>;
+  readonly pair_progress: Readonly<Record<string, string | null>>;
+  readonly resume_subjects: readonly string[];
+  readonly support_work_status?: "complete" | "open";
   readonly closure: FieldClosureFacts;
 }>;
 
@@ -169,6 +184,9 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     transitions,
     guaranteed_transitions: transitions.filter((transition) => transition.applicable),
     facets: retainSamePathVectors(input.facets ?? []),
+    derivations: input.derivations ?? [],
+    transition_derivations: {},
+    recovered_bindings: {},
     support: input.support ?? [],
     residuals,
     extra_work_regions: input.extra_work_regions ?? [],
@@ -176,7 +194,9 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     roles: input.roles ?? new Map(),
     remaining_work: [],
     last_observer_status: undefined,
-    resume_cursors: {}
+    resume_cursors: {},
+    pair_progress: {},
+    resume_subjects: []
   });
 }
 
@@ -189,6 +209,37 @@ export function applyObserverPage(
     return reviseEpoch(state, consumption);
   }
   return bindEngineState(absorbObservations(state, consumption));
+}
+
+export function withdrawDerivationLeaves(
+  state: FieldEngineState,
+  withdrawnLeafId: string
+): FieldEngineState {
+  const derivations = derivationsAfterWithdraw(state.derivations, withdrawnLeafId);
+  const keptIds = new Set(derivations.map((row) => row.derivation_id));
+  const transitions = state.transitions.filter((transition) => {
+    const derivationId = state.transition_derivations[transitionKey(transition)];
+    if (derivationId === undefined) {
+      return !leafTouchesTransition(transition, withdrawnLeafId);
+    }
+    return keptIds.has(derivationId);
+  });
+  const { binding: _binding, closure: _closure, ...rest } = state;
+  return bindEngineState({
+    ...rest,
+    derivations,
+    transitions: mergeTransitions(transitions),
+    guaranteed_transitions: mergeTransitions(transitions.filter((transition) => transition.applicable)),
+    transition_derivations: Object.fromEntries(
+      Object.entries(state.transition_derivations).filter(([, derivationId]) => keptIds.has(derivationId))
+    )
+  });
+}
+
+function leafTouchesTransition(transition: Transition, withdrawnLeafId: string): boolean {
+  return transition.relation_kind === withdrawnLeafId
+    || transition.from.object_id === withdrawnLeafId
+    || transition.to.object_id === withdrawnLeafId;
 }
 
 export function applyEvidenceEffect(
@@ -205,14 +256,20 @@ export function applyEvidenceEffect(
   return bindEngineState({
     ...rest,
     support: Object.freeze([...supportById.values()]),
-    claims
+    claims,
+    ...(effect.work_status === undefined ? {} : { support_work_status: effect.work_status })
   });
 }
 
 export function proposeFieldWork(state: FieldEngineState): WorkProposal {
-  const extra = state.memory_exhausted
-    ? state.extra_work_regions.filter((region) => region.finite)
-    : state.extra_work_regions;
+  if (state.memory_exhausted || state.remaining_memory_bytes < 1) {
+    return {
+      actions: Object.freeze([]),
+      remainingReserve: state.remaining_reserve,
+      starvedFinite: true
+    };
+  }
+  const extra = state.extra_work_regions;
   const scheduled = scheduleFairWork({
     regions: [...residualWorkRegions(state.residuals), ...extra],
     explorationBudget: state.remaining_exploration,
@@ -294,6 +351,9 @@ function rejectedField(
     transitions: mergeTransitions(input.transitions ?? []),
     guaranteed_transitions: mergeTransitions(input.transitions ?? []),
     facets: retainSamePathVectors(input.facets ?? []),
+    derivations: input.derivations ?? [],
+    transition_derivations: {},
+    recovered_bindings: {},
     support: input.support ?? [],
     residuals,
     extra_work_regions: input.extra_work_regions ?? [],
@@ -303,6 +363,8 @@ function rejectedField(
     remaining_work: [],
     last_observer_status: undefined,
     resume_cursors: {},
+    pair_progress: {},
+    resume_subjects: [],
     closure: {
       propagation: "open",
       observation: "open",

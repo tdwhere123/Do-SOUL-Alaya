@@ -1,15 +1,12 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  isRelationValidityActiveAt,
   type CoverageRegion,
   type CoverageRegionKind,
-  type Guard,
   type ObserverAction,
   type ObserverCursor,
   type ObserverPage,
   type ObserverStatus,
   type QueryInterpretation,
-  type QueryProgram,
   type RelationValidity,
   type SnapshotReadLease,
   type TypedObservation
@@ -18,6 +15,11 @@ import {
   advanceObserverCursor,
   mapNativeReaderPage
 } from "../reference/accepting-projection.js";
+import {
+  buildTypedObservation,
+  relationRowEligible,
+  sourceRowEligible
+} from "./observation-admission.js";
 
 export type LexicalObserverPage = Readonly<{
   readonly ids: readonly string[];
@@ -26,6 +28,7 @@ export type LexicalObserverPage = Readonly<{
   readonly rowsRead: number;
   readonly bytesRead: number;
   readonly truncated: boolean;
+  readonly committedThrough?: string | null;
 }>;
 
 export type SourceObserverRow = Readonly<{
@@ -39,6 +42,10 @@ export type SourceObserverRow = Readonly<{
   readonly evidence_refs?: readonly string[];
   readonly valid_from?: string | null;
   readonly valid_to?: string | null;
+  readonly dimension?: string;
+  readonly domain_tags?: readonly string[];
+  readonly created_at?: string;
+  readonly last_used_at?: string | null;
 }>;
 
 export type SourceObserverPage = Readonly<{
@@ -58,6 +65,8 @@ export type RelationObserverRow = Readonly<{
   readonly evidenceRefs?: readonly string[];
   readonly resolutionKind?: string | null;
   readonly resolvedAt?: string | null;
+  readonly source_event_id?: string;
+  readonly occurred_at?: string;
 }>;
 
 export type RelationObserverPage = Readonly<{
@@ -67,6 +76,7 @@ export type RelationObserverPage = Readonly<{
   readonly rowsRead: number;
   readonly bytesRead: number;
   readonly truncated: boolean;
+  readonly committedThrough?: string | null;
 }>;
 
 export type EmbeddingObserverPage = Readonly<{
@@ -74,6 +84,7 @@ export type EmbeddingObserverPage = Readonly<{
   readonly rowVisits: number;
   readonly metadataUtf8Bytes: number;
   readonly truncated: boolean;
+  readonly committedThrough?: string | null;
 }>;
 
 export type ObserverReaders = Readonly<{
@@ -87,6 +98,7 @@ export type ObserverReaders = Readonly<{
   readonly source?: (input: Readonly<{
     readonly workspaceId: string;
     readonly objectId: string;
+    readonly byteLimit?: number;
   }>) => SourceObserverPage;
   readonly relation?: (input: Readonly<{
     readonly workspaceId: string;
@@ -133,7 +145,14 @@ export type ObserveConditionalFieldInput = Readonly<{
   readonly object_observed_at?: Readonly<Record<string, string>>;
   readonly page_limit?: number;
   readonly as_of?: string;
+  readonly model_id?: string;
+  readonly measurement_id?: string;
+  readonly expected_model_id?: string;
+  readonly expected_source_revision?: string;
+  readonly source_byte_limit?: number;
 }>;
+
+export const DEFAULT_SOURCE_BYTE_LIMIT = 65_536;
 
 export type ObserverActionResult = Readonly<{
   readonly page: ObserverPage;
@@ -141,6 +160,41 @@ export type ObserverActionResult = Readonly<{
 }>;
 
 const SCHEMA = CONDITIONAL_FIELD_SCHEMA_VERSION;
+
+export function toSourceObserverRow(row: Readonly<{
+  readonly object_id: string;
+  readonly sourceRevision: string;
+  readonly event_time_start?: string | null;
+  readonly observed_at?: string;
+  readonly content?: string;
+  readonly lifecycle_state?: string;
+  readonly retention_state?: string | null;
+  readonly scope_class?: string;
+  readonly evidence_refs?: readonly string[];
+  readonly valid_from?: string | null;
+  readonly valid_to?: string | null;
+  readonly dimension?: string;
+  readonly domain_tags?: readonly string[];
+  readonly created_at?: string;
+  readonly last_used_at?: string | null;
+}>): SourceObserverRow {
+  return {
+    object_id: row.object_id,
+    sourceRevision: row.sourceRevision,
+    observed_at: row.observed_at ?? row.event_time_start ?? undefined,
+    ...(row.content === undefined ? {} : { content: row.content }),
+    ...(row.lifecycle_state === undefined ? {} : { lifecycle_state: row.lifecycle_state }),
+    ...(row.retention_state === undefined ? {} : { retention_state: row.retention_state }),
+    ...(row.scope_class === undefined ? {} : { scope_class: row.scope_class }),
+    ...(row.evidence_refs === undefined ? {} : { evidence_refs: row.evidence_refs }),
+    ...(row.valid_from === undefined ? {} : { valid_from: row.valid_from }),
+    ...(row.valid_to === undefined ? {} : { valid_to: row.valid_to }),
+    ...(row.dimension === undefined ? {} : { dimension: row.dimension }),
+    ...(row.domain_tags === undefined ? {} : { domain_tags: row.domain_tags }),
+    ...(row.created_at === undefined ? {} : { created_at: row.created_at }),
+    ...(row.last_used_at === undefined ? {} : { last_used_at: row.last_used_at })
+  };
+}
 
 export function startObserverCursor(input: Readonly<{
   readonly cursor_id: string;
@@ -175,12 +229,21 @@ export function observeConditionalField(input: ObserveConditionalFieldInput): Ob
 
 function invalidSnapshotPage(input: ObserveConditionalFieldInput): ObserverActionResult | null {
   const { lease, cursor, query, action } = input;
+  const pin = input.readers.snapshotPin?.(input.workspace_id);
+  const pinChanged = input.expected_source_revision !== undefined
+    && pin !== undefined
+    && pin.source_revision !== input.expected_source_revision;
+  const modelChanged = input.model_id !== undefined
+    && input.expected_model_id !== undefined
+    && input.model_id !== input.expected_model_id;
   if (lease.status !== "active"
     || lease.snapshot_id !== cursor.snapshot_id
     || lease.query_id !== cursor.query_id
     || query.snapshot_id !== lease.snapshot_id
     || query.query_id !== lease.query_id
-    || cursor.region_id !== action.region_id) {
+    || cursor.region_id !== action.region_id
+    || pinChanged
+    || modelChanged) {
     return finish({
       input,
       cursor,
@@ -213,7 +276,8 @@ function observeSeed(input: ObserveConditionalFieldInput): ObserverActionResult 
     truncated: page.truncated,
     nativeVisits: page.nativeVisits,
     bytesRead: page.bytesRead,
-    identityKind: "object"
+    identityKind: "object",
+    commitThrough: page.committedThrough ?? page.ids.at(-1) ?? input.cursor.committed_through
   });
 }
 
@@ -241,7 +305,8 @@ function observeRelation(input: ObserveConditionalFieldInput): ObserverActionRes
     nativeVisits: page.nativeVisits,
     bytesRead: page.bytesRead,
     identityKind: "assertion",
-    rows
+    rows,
+    commitThrough: page.committedThrough ?? input.cursor.committed_through
   });
 }
 
@@ -260,7 +325,8 @@ function observeMeasurement(input: ObserveConditionalFieldInput): ObserverAction
     truncated: page.truncated,
     nativeVisits: page.rowVisits,
     bytesRead: page.metadataUtf8Bytes,
-    identityKind: "embedding"
+    identityKind: "embedding",
+    commitThrough: page.committedThrough ?? page.objectIds.at(-1) ?? input.cursor.committed_through
   });
 }
 
@@ -273,18 +339,38 @@ function collectObserved(
     readonly bytesRead: number;
     readonly identityKind: "object" | "assertion" | "embedding";
     readonly rows?: readonly RelationObserverRow[];
+    readonly commitThrough?: string | null;
   }>
 ): ObserverActionResult {
   const observations: TypedObservation[] = [];
   let cursor = input.cursor;
   let workUnits = native.nativeVisits;
   let bytes = native.bytesRead;
+  let hydrationUnavailable = false;
+  let processed = 0;
   for (const [index, identity] of native.identities.entries()) {
     const prepared = prepareObservation(input, native, identity, index);
     workUnits += prepared.extraWork;
     bytes += prepared.extraBytes;
+    if (prepared.unavailable === true) {
+      hydrationUnavailable = true;
+      break;
+    }
     if (prepared.observation !== null) observations.push(prepared.observation);
-    cursor = advanceObserverCursor(cursor, identity);
+    processed += 1;
+  }
+  if (hydrationUnavailable) {
+    if (processed > 0) {
+      cursor = advanceObserverCursor(cursor, native.identities[processed - 1]!);
+    }
+  } else if (native.commitThrough !== undefined && native.commitThrough !== null) {
+    cursor = {
+      ...cursor,
+      position: native.commitThrough,
+      committed_through: native.commitThrough
+    };
+  } else if (processed > 0) {
+    cursor = advanceObserverCursor(cursor, native.identities[processed - 1]!);
   }
   return finish({
     input,
@@ -293,7 +379,13 @@ function collectObserved(
     ids: native.identities,
     truncated: native.truncated,
     readerAvailable: true,
-    work: workReceipt(workUnits, native.nativeVisits, bytes, native.truncated)
+    ...(hydrationUnavailable ? { status: "unavailable" as const } : {}),
+    work: workReceipt(
+      workUnits,
+      native.nativeVisits,
+      bytes,
+      native.truncated || hydrationUnavailable
+    )
   });
 }
 
@@ -309,6 +401,7 @@ function prepareObservation(
   readonly observation: TypedObservation | null;
   readonly extraWork: number;
   readonly extraBytes: number;
+  readonly unavailable?: boolean;
 }> {
   if (native.identityKind === "assertion") {
     const row = native.rows?.[index];
@@ -316,28 +409,55 @@ function prepareObservation(
     const source = input.readers.source;
     if (source === undefined) {
       return {
-        observation: maybeObservation(input, row.targetObjectId, row.assertionId, identity),
+        observation: buildTypedObservation(input, {
+          objectId: row.targetObjectId,
+          sourceRevision: row.assertionId,
+          observationKey: identity,
+          relation: row,
+          identityKind: "assertion"
+        }),
         extraWork: 0,
         extraBytes: 0
       };
     }
-    const page = source({ workspaceId: input.workspace_id, objectId: row.targetObjectId });
+    const page = readSource(input, source, row.targetObjectId);
+    if (page.unavailable) {
+      return {
+        observation: null,
+        extraWork: Math.max(1, page.rowsRead),
+        extraBytes: page.bytesRead,
+        unavailable: true
+      };
+    }
+    if (page.row === null) {
+      return {
+        observation: null,
+        extraWork: Math.max(1, page.rowsRead),
+        extraBytes: page.bytesRead
+      };
+    }
     return {
-      observation: maybeObservation(
-        input,
-        row.targetObjectId,
-        row.assertionId,
-        identity,
-        page.row?.observed_at,
-        page.row ?? undefined
-      ),
+      observation: buildTypedObservation(input, {
+        objectId: row.targetObjectId,
+        sourceRevision: row.assertionId,
+        observationKey: identity,
+        observedAt: page.row.observed_at,
+        sourceRow: page.row,
+        relation: row,
+        identityKind: "assertion"
+      }),
       extraWork: Math.max(1, page.rowsRead),
       extraBytes: page.bytesRead
     };
   }
   if (native.identityKind === "embedding") {
     return {
-      observation: maybeObservation(input, identity, identity, identity),
+      observation: buildTypedObservation(input, {
+        objectId: identity,
+        sourceRevision: identity,
+        observationKey: identity,
+        identityKind: "embedding"
+      }),
       extraWork: 0,
       extraBytes: 0
     };
@@ -352,125 +472,61 @@ function hydrateSeedObservation(
   readonly observation: TypedObservation | null;
   readonly extraWork: number;
   readonly extraBytes: number;
+  readonly unavailable?: boolean;
 }> {
   const source = input.readers.source;
   if (source === undefined) {
     return {
-      observation: maybeObservation(input, objectId, objectId, objectId),
+      observation: buildTypedObservation(input, {
+        objectId,
+        sourceRevision: objectId,
+        observationKey: objectId,
+        identityKind: "object"
+      }),
       extraWork: 0,
       extraBytes: 0
     };
   }
-  const page = source({ workspaceId: input.workspace_id, objectId });
-  if (page.row !== null && !sourceRowEligible(input, page.row)) {
-    return { observation: null, extraWork: Math.max(1, page.rowsRead), extraBytes: page.bytesRead };
+  const page = readSource(input, source, objectId);
+  const extraWork = Math.max(1, page.rowsRead);
+  const extraBytes = page.bytesRead;
+  if (page.unavailable) {
+    return { observation: null, extraWork, extraBytes, unavailable: true };
   }
-  if (page.row === null && (input.authorized_scopes ?? []).length > 0) {
-    return { observation: null, extraWork: Math.max(1, page.rowsRead), extraBytes: page.bytesRead };
+  if (page.row === null) {
+    return { observation: null, extraWork, extraBytes };
+  }
+  if (!sourceRowEligible(input, page.row)) {
+    return { observation: null, extraWork, extraBytes };
   }
   return {
-    observation: maybeObservation(
-      input,
+    observation: buildTypedObservation(input, {
       objectId,
-      page.row?.sourceRevision ?? objectId,
-      objectId,
-      page.row?.observed_at,
-      page.row ?? undefined
-    ),
-    extraWork: Math.max(1, page.rowsRead),
-    extraBytes: page.bytesRead
+      sourceRevision: page.row.sourceRevision,
+      observationKey: objectId,
+      observedAt: page.row.observed_at,
+      sourceRow: page.row,
+      identityKind: "object"
+    }),
+    extraWork,
+    extraBytes
   };
 }
 
-function maybeObservation(
+function readSource(
   input: ObserveConditionalFieldInput,
-  objectId: string,
-  sourceRevision: string,
-  observationKey: string,
-  observedAt?: string,
-  sourceRow?: SourceObserverRow
-): TypedObservation | null {
-  if (!sourceRowEligible(input, sourceRow)) return null;
-  const applicability = applicabilityFor(input, objectId, observedAt, sourceRow);
-  if (applicability.verdict === "false") return null;
-  return {
-    schema_version: SCHEMA,
-    observation_id: `${input.action.region_id}:${observationKey}`,
-    object_id: objectId,
-    source_revision: sourceRevision,
-    applicability
-  };
-}
-
-function applicabilityFor(
-  input: ObserveConditionalFieldInput,
-  objectId: string,
-  observedAt?: string,
-  sourceRow?: SourceObserverRow
-): Guard {
-  const guards = collectGuards(input.query.program);
-  const authorization = guards.find((guard) => guard.kind === "authorization");
-  const scopes = input.authorized_scopes ?? [];
-  if (authorization !== undefined) {
-    const scope = authorization.authorization_scope;
-    const allowed = scope === undefined || scopes.includes(scope);
-    if (!allowed) return { ...authorization, verdict: "false" };
-  } else if (scopes.length > 0) {
-    const scopeClass = sourceRow?.scope_class;
-    if (scopeClass === undefined || !scopes.includes(scopeClass)) {
-      return { schema_version: SCHEMA, kind: "authorization", verdict: "false" };
-    }
-  }
-  const timed = guards.find((guard) => guard.kind === "interval_relation");
-  if (timed === undefined || !appliesTimeGuard(input, timed, objectId)) {
-    return authorization === undefined
-      ? { schema_version: SCHEMA, kind: "query_predicate", verdict: "true" }
-      : { ...authorization, verdict: "true" };
-  }
-  return evaluateInterval(timed, input.object_observed_at?.[objectId] ?? observedAt);
-}
-
-function appliesTimeGuard(
-  input: ObserveConditionalFieldInput,
-  guard: Guard,
+  source: NonNullable<ObserverReaders["source"]>,
   objectId: string
-): boolean {
-  // Anchor-only intervals stay on seed identities; adjacency must not inherit them.
-  if (input.action.action !== "seed") return false;
-  if (guard.time_scope === "none") return false;
-  if (guard.time_scope === "anchor") {
-    const anchors = input.anchor_object_ids;
-    if (anchors === undefined || anchors.length === 0) return true;
-    return anchors.includes(objectId);
+): SourceObserverPage {
+  const byteLimit = input.source_byte_limit ?? DEFAULT_SOURCE_BYTE_LIMIT;
+  if (!Number.isSafeInteger(byteLimit) || byteLimit < 1) {
+    return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
   }
-  return true;
-}
-
-function evaluateInterval(guard: Guard, observedAt: string | undefined): Guard {
-  const interval = guard.interval;
-  if (observedAt === undefined || interval === undefined) {
-    return { ...guard, verdict: "unresolved" };
-  }
-  const inside = observedAt >= interval.start && observedAt < interval.end;
-  return { ...guard, verdict: inside ? "true" : "false" };
-}
-
-function collectGuards(program: QueryProgram): readonly Guard[] {
-  switch (program.kind) {
-    case "relation":
-      return [program.guard];
-    case "sequence":
-      return program.steps.flatMap(collectGuards);
-    case "alternative":
-      return program.options.flatMap(collectGuards);
-    case "repeat":
-    case "closure":
-      return collectGuards(program.body);
-    case "hyperedge":
-      return program.premises.flatMap(collectGuards);
-    default:
-      return [];
-  }
+  return source({
+    workspaceId: input.workspace_id,
+    objectId,
+    byteLimit
+  });
 }
 
 function unavailableOrNotApplicable(
@@ -560,33 +616,4 @@ function emptyWork(nativeVisits: number): ObserverWorkReceipt {
 
 function pageLimit(input: ObserveConditionalFieldInput): number {
   return Math.min(input.page_limit ?? input.action.work_limit, input.action.work_limit);
-}
-
-function sourceRowEligible(
-  input: ObserveConditionalFieldInput,
-  row: SourceObserverRow | undefined
-): boolean {
-  if (row === undefined) {
-    return (input.authorized_scopes ?? []).length === 0;
-  }
-  if (row.lifecycle_state !== undefined && row.lifecycle_state !== "active") return false;
-  if (row.retention_state === "tombstoned") return false;
-  const scopes = input.authorized_scopes ?? [];
-  if (scopes.length > 0 && (row.scope_class === undefined || !scopes.includes(row.scope_class))) {
-    return false;
-  }
-  return true;
-}
-
-function relationRowEligible(
-  input: ObserveConditionalFieldInput,
-  row: RelationObserverRow
-): boolean {
-  if (row.resolutionKind === "retracted" || row.resolutionKind === "expired" || row.resolutionKind === "contradicted") {
-    return false;
-  }
-  if (row.validity === undefined) return false;
-  const asOf = input.as_of ?? input.query.interpretation_clock;
-  if (asOf === undefined) return true;
-  return isRelationValidityActiveAt(row.validity, asOf, new Set());
 }

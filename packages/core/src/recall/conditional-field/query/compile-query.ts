@@ -3,6 +3,7 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   ConditionalFieldIdSchema,
   ConditionalFieldSha256DigestSchema,
+  IsoDatetimeStringSchema,
   QueryHoleSchema,
   QueryHypothesisSchema,
   QueryInterpretationSchema,
@@ -11,6 +12,7 @@ import {
   QueryViewSchema,
   RequestBudgetSchema,
   formatConditionalFieldDigest,
+  type QueryBinding,
   type QueryHole,
   type QueryHypothesis,
   type QueryInterpretation,
@@ -25,18 +27,29 @@ import { admitRequestBudget } from "../reference/bind-max-min.js";
 import { interpretQuery } from "../reference/interpret-query.js";
 import {
   SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
+  attachSourceFilters,
   calendarYesterdayWindow,
   classifyOrdinaryRequest,
   lexicalStoredRelationProgram,
   openAnchorTimeGuard,
   programFromOpenRelations,
   supportedFailedDeploymentProgram,
+  UNBOUND_BINDING_CONTEXT,
+  uninterpretedQueryHole,
   yesterdayAnchorGuard,
-  type OpenRelationCapture
+  type OpenRelationCapture,
+  type OrdinarySourceFilters
 } from "./ordinary-language.js";
 
 export { SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID };
 export type { OpenRelationCapture };
+export {
+  ANCHOR_EVENT_VARIABLE,
+  SERVICE_VARIABLE,
+  UNBOUND_BINDING_CONTEXT,
+  USES_SERVICE_RELATION,
+  sourceBoundEntityGuard
+} from "./ordinary-language.js";
 
 const EPSILON: QueryProgram = { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "epsilon" };
 const MAX_ORDINARY_TEXT = 4096;
@@ -72,6 +85,9 @@ export type OrdinaryLanguageCompileInput = CompileCommon & Readonly<{
   readonly interpretation_clock: string;
   readonly since?: string;
   readonly until?: string;
+  readonly time_field?: "created_at" | "last_used_at";
+  readonly dimension_filter?: readonly string[];
+  readonly domain_tag_filter?: readonly string[];
   readonly relations?: readonly OpenRelationCapture[];
 }>;
 
@@ -116,6 +132,43 @@ export function collectRelations(program: QueryProgram): readonly QueryRelation[
     if (node.kind === "relation") relations.push(node);
   });
   return relations;
+}
+
+export function collectRecoverableBindings(program: QueryProgram): readonly QueryBinding[] {
+  const bindings: QueryBinding[] = [];
+  visitQueryProgram(program, (node) => {
+    if (node.kind !== "relation") return;
+    if (node.guard.kind !== "source_bound_entity") return;
+    if (node.guard.variable === undefined || node.guard.entity_id === undefined) return;
+    bindings.push({
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      variable: node.guard.variable,
+      value: node.guard.entity_id
+    });
+  });
+  return bindings;
+}
+
+export function recoverableBindingContext(bindings: readonly QueryBinding[]): string {
+  if (bindings.length === 0) return UNBOUND_BINDING_CONTEXT;
+  return [...bindings]
+    .sort((left, right) => left.variable === right.variable
+      ? left.value.localeCompare(right.value)
+      : left.variable.localeCompare(right.variable))
+    .map((binding) => `${binding.variable}=${binding.value}`)
+    .join(";");
+}
+
+export function interpretationIdentity(input: Readonly<{
+  readonly interpretation_clock?: string;
+  readonly model_id?: string;
+}>): string {
+  return formatConditionalFieldDigest(
+    createHash("sha256").update(stableStringify({
+      interpretation_clock: input.interpretation_clock ?? null,
+      model_id: input.model_id ?? null
+    }), "utf8").digest("hex")
+  );
 }
 
 function compileTyped(
@@ -179,7 +232,7 @@ function compileOrdinary(
   }
   const yesterday = calendarYesterdayWindow(input.interpretation_clock);
   const hints = compileTimeHints(input.since, input.until);
-  if (yesterday === undefined || hints === "invalid") {
+  if (yesterday === undefined || hints.kind === "invalid") {
     return ordinaryMalformed(input, snapshotId, view);
   }
   const classified = classifyOrdinaryRequest(input.text);
@@ -201,7 +254,7 @@ function compileSupportedRequest(
   queryId: string | undefined,
   classified: ReturnType<typeof classifyOrdinaryRequest>,
   yesterday: QueryTimeWindow,
-  hints: QueryTimeWindow | undefined
+  hints: TimeHints
 ): QueryInterpretation {
   if (classified.kind === "malformed") {
     return ordinaryMalformed(input, snapshotId, view);
@@ -220,7 +273,11 @@ function compileSupportedRequest(
     return compileLexicalRequest(input, snapshotId, budget, view, queryId, hints);
   }
   if (classified.kind === "hypotheses") {
-    const program = supportedFailedDeploymentProgram(yesterdayAnchorGuard(yesterday));
+    const program = admitOrdinaryProgram(
+      supportedFailedDeploymentProgram(yesterdayAnchorGuard(yesterday)),
+      input,
+      hints
+    );
     const hypotheses = ambiguousEventHypotheses();
     consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
     return interpretationOf({
@@ -241,11 +298,14 @@ function compileSupportedRequest(
       time_window: yesterday
     });
   }
-  const window = classified.kind === "supported" ? yesterday : hints;
+  const window = classified.kind === "supported" ? yesterday : closedHintWindow(hints);
   const guard = window === undefined ? openAnchorTimeGuard() : yesterdayAnchorGuard(window);
-  const program = supportedFailedDeploymentProgram(guard);
+  const program = admitOrdinaryProgram(supportedFailedDeploymentProgram(guard), input, hints);
   consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
-  const holes = window === undefined ? [openTimeHole()] : [];
+  const holes = [
+    ...(window === undefined ? [openTimeHole()] : []),
+    ...openEndpointHoles(hints)
+  ];
   return interpretationOf({
     query_id: identityFor(queryId, {
       program,
@@ -254,13 +314,13 @@ function compileSupportedRequest(
       time_window: window,
       authorized_scopes: input.authorized_scopes
     }),
-    status: holes.length > 0 ? "partial" : "resolved",
+    status: admissionStatus(program, holes, []),
     snapshot_id: snapshotId,
     program,
     view,
     holes,
     interpretation_clock: input.interpretation_clock,
-    time_window: window
+    ...(window === undefined ? {} : { time_window: window })
   });
 }
 
@@ -270,25 +330,28 @@ function compileLexicalRequest(
   budget: RequestBudget,
   view: QueryView,
   queryId: string | undefined,
-  hints: QueryTimeWindow | undefined
+  hints: TimeHints
 ): QueryInterpretation {
-  const program = lexicalStoredRelationProgram();
+  const program = admitOrdinaryProgram(lexicalStoredRelationProgram(), input, hints);
   consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
+  const holes = [uninterpretedQueryHole(), ...openEndpointHoles(hints)];
+  const window = closedHintWindow(hints);
   return interpretationOf({
     query_id: identityFor(queryId, {
       program,
       view,
       interpretation_clock: input.interpretation_clock,
-      time_window: hints,
+      time_window: window,
       authorized_scopes: input.authorized_scopes,
       lexical_text: input.text
     }),
-    status: "resolved",
+    status: admissionStatus(program, holes, []),
     snapshot_id: snapshotId,
     program,
     view,
+    holes,
     interpretation_clock: input.interpretation_clock,
-    time_window: hints
+    ...(window === undefined ? {} : { time_window: window })
   });
 }
 
@@ -300,34 +363,40 @@ function compileOpenRelations(
   queryId: string | undefined,
   classified: ReturnType<typeof classifyOrdinaryRequest>,
   yesterday: QueryTimeWindow,
-  hints: QueryTimeWindow | undefined
+  hints: TimeHints
 ): QueryInterpretation {
   const window = classified.kind === "supported" || classified.kind === "hypotheses"
     ? yesterday
-    : hints;
-  const program = programFromOpenRelations(
+    : closedHintWindow(hints);
+  const compiled = programFromOpenRelations(
     input.relations ?? [],
     window === undefined ? undefined : yesterdayAnchorGuard(window)
   );
-  const parsed = program === undefined ? undefined : QueryProgramSchema.safeParse(program);
+  const parsed = compiled === undefined ? undefined : QueryProgramSchema.safeParse(compiled);
   if (parsed === undefined || !parsed.success) {
     return ordinaryMalformed(input, snapshotId, view);
   }
-  consumeMemoryIfNeeded(parsed.data, snapshotId, budget, input.memory);
+  const program = admitOrdinaryProgram(parsed.data, input, hints);
+  consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
+  const holes = [
+    ...(classified.kind === "partial" && window === undefined ? [openTimeHole()] : []),
+    ...openEndpointHoles(hints)
+  ];
   return interpretationOf({
     query_id: identityFor(queryId, {
-      program: parsed.data,
+      program,
       view,
       interpretation_clock: input.interpretation_clock,
       time_window: window,
       authorized_scopes: input.authorized_scopes
     }),
-    status: "resolved",
+    status: admissionStatus(program, holes, []),
     snapshot_id: snapshotId,
-    program: parsed.data,
+    program,
     view,
+    holes,
     interpretation_clock: input.interpretation_clock,
-    time_window: window
+    ...(window === undefined ? {} : { time_window: window })
   });
 }
 
@@ -339,7 +408,9 @@ function consumeMemoryIfNeeded(
 ): void {
   // Pure parse may run earlier; entity reads still require the admitted snapshot pin.
   if (memory === undefined) return;
-  if (!collectRelations(program).some((relation) => relation.guard.kind === "source_bound_entity")) {
+  if (!collectRelations(program).some((relation) =>
+    relation.guard.kind === "source_bound_entity" && relation.guard.entity_id !== undefined
+  )) {
     return;
   }
   memory.readAuthorizedSnapshot({ snapshot_id: snapshotId, budget });
@@ -433,13 +504,74 @@ function optionalWindow(
   return parsed.success ? parsed.data : "invalid";
 }
 
+type TimeHints =
+  | { readonly kind: "none" }
+  | { readonly kind: "window"; readonly window: QueryTimeWindow }
+  | { readonly kind: "partial"; readonly since?: string; readonly until?: string }
+  | { readonly kind: "invalid" };
+
 function compileTimeHints(
   since: string | undefined,
   until: string | undefined
-): QueryTimeWindow | undefined | "invalid" {
-  if (since === undefined && until === undefined) return undefined;
-  if (since === undefined || until === undefined) return "invalid";
-  return optionalWindow({ start: since, end: until });
+): TimeHints {
+  if (since === undefined && until === undefined) return { kind: "none" };
+  if (since !== undefined && until !== undefined) {
+    const parsed = optionalWindow({ start: since, end: until });
+    return parsed === "invalid" || parsed === undefined
+      ? { kind: "invalid" }
+      : { kind: "window", window: parsed };
+  }
+  const present = since ?? until;
+  if (present === undefined || !IsoDatetimeStringSchema.safeParse(present).success) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "partial",
+    ...(since === undefined ? {} : { since }),
+    ...(until === undefined ? {} : { until })
+  };
+}
+
+function closedHintWindow(hints: TimeHints): QueryTimeWindow | undefined {
+  return hints.kind === "window" ? hints.window : undefined;
+}
+
+function openEndpointHoles(hints: TimeHints): readonly QueryHole[] {
+  if (hints.kind !== "partial") return [];
+  if (hints.since !== undefined && hints.until === undefined) {
+    return [{ schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, hole_id: "hole.time.until", variable: "r", status: "open" }];
+  }
+  if (hints.until !== undefined && hints.since === undefined) {
+    return [{ schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, hole_id: "hole.time.since", variable: "r", status: "open" }];
+  }
+  return [];
+}
+
+function admitOrdinaryProgram(
+  program: QueryProgram,
+  input: OrdinaryLanguageCompileInput,
+  hints: TimeHints
+): QueryProgram {
+  return attachSourceFilters(program, sourceFiltersFrom(input, hints));
+}
+
+function sourceFiltersFrom(
+  input: OrdinaryLanguageCompileInput,
+  hints: TimeHints
+): OrdinarySourceFilters {
+  const since = hints.kind === "window" ? hints.window.start : hints.kind === "partial" ? hints.since : input.since;
+  const until = hints.kind === "window" ? hints.window.end : hints.kind === "partial" ? hints.until : input.until;
+  return {
+    ...(input.dimension_filter === undefined || input.dimension_filter.length === 0
+      ? {}
+      : { dimension_filter: input.dimension_filter }),
+    ...(input.domain_tag_filter === undefined || input.domain_tag_filter.length === 0
+      ? {}
+      : { domain_tag_filter: input.domain_tag_filter }),
+    ...(input.time_field === undefined ? {} : { time_field: input.time_field }),
+    ...(since === undefined ? {} : { since }),
+    ...(until === undefined ? {} : { until })
+  };
 }
 
 function explicitQueryId(value: string | undefined): string | undefined | "invalid" {
@@ -471,6 +603,7 @@ function identityFor(
       program: parts.program,
       view: parts.view ?? null,
       hypotheses: parts.hypotheses ?? [],
+      interpretation_clock: parts.interpretation_clock ?? null,
       time_window: parts.time_window ?? null,
       authorized_scopes: [...(parts.authorized_scopes ?? [])].sort(),
       lexical_text: parts.lexical_text ?? ""

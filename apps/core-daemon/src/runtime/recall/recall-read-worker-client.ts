@@ -2,6 +2,7 @@ import { Worker } from "node:worker_threads";
 import type { PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldRecallPort,
+  ConditionalFieldRecallPortResult,
   RecallReadSnapshotPort,
   RecallServiceActiveConstraintsPort,
   RecallServiceEvidenceSearchPort,
@@ -10,6 +11,7 @@ import type {
   RecallServicePathPlasticityPort,
   RecallServiceSynthesisSearchPort
 } from "@do-soul/alaya-core";
+import type { InformationIndex } from "@do-soul/alaya-protocol";
 import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
 import type { RecallTemporalProjectionEnsurer } from "./recall-path-readers.js";
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
@@ -193,7 +195,12 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   };
 
   public readonly conditionalFieldPort: ConditionalFieldRecallPort = {
-    recall: async (input) => await this.request("conditionalField.recall", input)
+    recall: async (input) => asConditionalFieldPortResult(
+      await this.request<InformationIndex | ConditionalFieldRecallPortResult>(
+        "conditionalField.recall",
+        input
+      )
+    )
   };
 
   public constructor(input: {
@@ -382,7 +389,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     }
     const pinned = this.snapshotSession.pinnedWorker();
     if (pinned !== undefined) return pinned;
-    const index = isPathAffinityOperation(operation)
+    const index = isPathAffinityOperation(operation) || operation === "conditionalField.recall"
       ? 0
       : this.nextWorkerIndex++ % this.workers.length;
     return this.workerAt(index);
@@ -451,6 +458,15 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       this.pending.delete(id);
     }
   }
+}
+
+function asConditionalFieldPortResult(
+  value: InformationIndex | ConditionalFieldRecallPortResult
+): ConditionalFieldRecallPortResult {
+  if (typeof value === "object" && value !== null && "index" in value && "previews" in value) {
+    return value;
+  }
+  return { index: value, previews: {} };
 }
 
 function isSourceRuntimeUrl(url: string): boolean {

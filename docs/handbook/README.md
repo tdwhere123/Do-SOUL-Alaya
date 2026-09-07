@@ -15,7 +15,7 @@
 |---|---|
 | An invariant or dependency rule | `invariants.md` |
 | A surface, package boundary, or governance route | `architecture.md` |
-| Recall ranking, fusion, flood, embedding, or path transfer | `recall.md` |
+| Recall conditional-field entry, historical ranking/fusion receipts, embedding, or path transfer | `recall.md` |
 | A release gate, version, or readiness witness | `runtime-snapshot.md` |
 | An issue opened, deferred, or closed | `backlog.md` |
 | A stable term | `glossary.md` |

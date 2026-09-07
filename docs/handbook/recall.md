@@ -4,29 +4,28 @@ This page is the in-repo authority for the recall contract and the current live
 implementation state (invariant §32). It is not a benchmark-promotion gate and
 does not turn a local plan or historical score into product truth.
 
-### Live versus target (C01 candidate)
+### Live versus historical receipts
 
 Do not keep both targets in force as selectable runtime modes. LIVE is this
-HEAD. TARGET is the candidate implementation frozen by C01; it is not
-production and is not activated.
+HEAD: ordinary Recall is the conditional field. Historical `prefixSK` /
+`selectGammaWalk` / budget-aware-q text below is a receipt, not a live
+selector.
 
-- **LIVE:** Canonical delivery is `prefixSK(S_infty, K)` via
-  `deliverCanonicalFineAssessment` / `walkShadowCapture`. Optional
-  `delivery_path: "legacy"` keeps `selectGammaWalk` behind
-  `ALAYA_RECALL_ALLOW_LEGACY_DELIVERY`. A shadow Decide_Q / DeliveryPack
-  sidecar always runs on canonical. Public `ranking_authority` is
-  `"prefix_sk"` or `"select_gamma"`. MCP `soul.recall` may enqueue
-  `POST_TURN_EXTRACT`. Prepare may compile official OSF when credentials
-  exist; MCP is not wrapped in `withRecallZeroLiveCampaign`.
-- **TARGET:** One budget-aware evidence-set selector. Relevance is the
-  unweighted rank fusion `R(v) = sum_f 1/r_f(v)`. Packets come from actual
-  typed support edges only. Quality is lexicographic `Q`. Selection is greedy
-  marginal `Q` / charged-token-ceiling with one best-single refill. Tokens
-  use a UTF-8 byte ceiling. Capture caller-owned input once. No runtime
-  oracle, self-replay, or query-result cache. Ordinary Recall works without
-  CQ/F3/OSF. Recall does not enqueue extraction. New public
-  `ranking_authority` is `"budget_aware_q"`. There is no all-K prefix
-  promise. Activation requires C08/C10, STOP-02, and explicit user scope.
+- **LIVE:** `soul.recall` / CLI `alaya tools call soul.recall` →
+  `RecallService.recall` → `executeRecall` → `runConditionalFieldRecall`
+  (or worker `conditionalField.recall`) → `compileConditionalFieldQuery`
+  → `observeField` → `projectAcceptingIndex` → MCP `index` plus same-order
+  `results`. Association domain `assoc.bottleneck.milligrade.v1`. Public
+  completeness includes `interpretation_coverage` separately from
+  `observed_coverage`. Ordinary Recall does not enqueue Garden extract and
+  does not call a missing embedding provider. `report_context_usage` may
+  enqueue post-turn extract (dual-track). `ranking_authority` /
+  `delivery_path` are ignored-on-target (D01). Retired prefix/fusion modules
+  remain on disk until D00; they are not reachable from `executeRecall`.
+- **Historical (not live):** `prefixSK(S_infty, K)`, optional
+  `selectGammaWalk`, and the C01 budget-aware-q / RRF candidate. Those
+  sections below stay as immutable receipts. Do not implement from flood /
+  SliceKey / "four strategies" prose.
 
 Current documentation identity: package `0.3.11`, the 2026-08-25
 relevance-authority and budgeted-capture shadow adjudications plus the sharded
@@ -117,8 +116,8 @@ Hopfield, Lyapunov, and attractor language is a design lens, not proved runtime
 physics.
 
 The historical **query-proof preview** (Psi / compiled Gamma / `prefixSK`)
-remains LIVE sidecar and test/offline vocabulary. It is **not** the C01
-implementation target. C01 TARGET replaces mandatory all-K prefix,
+is a receipt and test/offline vocabulary. It is **not** live and is **not**
+the C01 implementation target. C01 TARGET replaces mandatory all-K prefix,
 proof-only Psi/Gamma ranking, singleton-CQ gating of ordinary retrieval,
 and runtime self-replay. Preview algebra does not authorize cutover:
 
@@ -317,23 +316,30 @@ together with the normal-entry switch.
 
 ## Current live path
 
-Admission and order have two owners, chosen once at `fineAssess` by optional
-`fine_assessment.delivery_path` (omitted means canonical; `"legacy"` is
-rollback). Mixed stages are impossible.
+Ordinary production Recall has one owner: the conditional field. There is no
+`fineAssess` delivery switch and no live `prefixSK` / `selectGammaWalk`
+selector.
 
-- **Canonical (default):** `prefixSK(S_infty, K)` via
-  `deliverCanonicalFineAssessment` / `walkShadowCapture`. Live Psi consumes
-  pre-collapse memory keyword lane receipts (`LexDomain`), embedding scores
-  when the object_id is present (including finite zero), and temporal
-  evaluation when the query has temporal demand and `event_time_start`
-  exists. Canonical `relevance_score` is non-authority and stays `0`; public
-  `RecallResult.ranking_authority` is `"prefix_sk"` with `delivery_path` and
-  `capture_identity`.
-- **Legacy rollback:** binding-aware `Select_Gamma` via
-  `deliverFineAssessment` / `selectGammaWalk`. `ranking_authority` is
-  `"select_gamma"`.
+```text
+accepted EventLog / SQLite
+  → pin + bounded readers
+  → compileConditionalFieldQuery
+  → observeField (observers + field engine + evidence)
+  → projectAcceptingIndex
+  → executeRecall / worker RPC conditionalField.recall
+  → MCP soul.recall encodes index.entries (same order as results)
+```
 
-The integrated legacy path now present on HEAD is:
+Continuation identity is `query_id`, `snapshot_id`, `interpretation_id`
+(clock), `as_of`, `continuation_id`. `FIELD_RESUME` is worker-lifetime, not
+SQLite. Worker RPC returns index plus payload previews; the parent does not
+hydrate from a second live connection.
+
+The following prefixSK / Select_Gamma composition is historical and is **not**
+the live entry. Mixed stages remain impossible because those owners are not
+on `executeRecall`.
+
+The historical prefixSK composition (not live, not on `executeRecall`) was:
 
 ```text
 prepare
@@ -396,6 +402,10 @@ The principal owners are:
 
 ## Connectedness matrix
 
+This matrix is a **historical receipt** of the retired prefixSK / flood /
+Select_Gamma stack. It is **not LIVE**. LIVE recall is the conditional-field
+chain in the box at the top of this page.
+
 | UGAF mechanism | Current state | Boundary |
 | --- | --- | --- |
 | One query time and generation | Live | Preparation captures one `effective_as_of`, pins one active generation, and fails closed when the pin or generation is unavailable. |
@@ -445,8 +455,9 @@ as algorithmic correctness, and do not lower the fixed E0 >=85/94 and E1 >=90/94
 gates.
 
 **LIVE:** do not add a second field, selector, query condition, or recall path
-while `prefixSK` remains the production owner. **TARGET:** C08 replaces that
-owner atomically; dual LIVE/TARGET runtime modes are forbidden.
+while the conditional field remains the production owner. Historical
+`prefixSK` / `selectGammaWalk` stay unreachable from `executeRecall` until
+D00 deletes them. Dual LIVE/TARGET runtime modes are forbidden.
 
 ## S11 near-top audit (closed)
 

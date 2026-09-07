@@ -39,7 +39,25 @@ export const PropositionSchema = z
   .strict()
   .readonly();
 
+export const DerivationKindSchema = z.enum(["serial", "and", "or", "leaf"]);
+
+export const DerivationSchema = z
+  .object({
+    schema_version: SchemaVersionSchema,
+    derivation_id: ConditionalFieldIdSchema,
+    kind: DerivationKindSchema,
+    children: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    observation_ids: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    leaf_ids: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    witness_id: ConditionalFieldIdSchema.optional(),
+    source_revisions: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly()
+  })
+  .strict()
+  .readonly();
+
 export type ClaimState = z.infer<typeof ClaimStateSchema>;
 export type Witness = z.infer<typeof WitnessSchema>;
 export type SupportRecord = z.infer<typeof SupportRecordSchema>;
 export type Proposition = z.infer<typeof PropositionSchema>;
+export type DerivationKind = z.infer<typeof DerivationKindSchema>;
+export type Derivation = z.infer<typeof DerivationSchema>;

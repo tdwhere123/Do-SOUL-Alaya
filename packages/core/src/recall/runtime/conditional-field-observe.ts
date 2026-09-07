@@ -13,7 +13,8 @@ import {
   observeConditionalField,
   startObserverCursor,
   type ObserverReaders,
-  type RelationObserverRow
+  type RelationObserverRow,
+  type SourceObserverPage
 } from "../conditional-field/observers/observe.js";
 import {
   applyEvidenceEffect,
@@ -26,8 +27,15 @@ import {
 import {
   adjacencyEffectsForRows,
   adjacencyKindsFor,
+  programRelationKinds,
   seedActivationsForObservation
 } from "../conditional-field/engine/path-composition.js";
+import { STORED_RELATION_KIND } from "../conditional-field/query/ordinary-language.js";
+import {
+  UNBOUND_BINDING,
+  type BoundSourceFacts
+} from "../conditional-field/engine/binding-environment.js";
+import { collectRelations } from "../conditional-field/query/compile-query.js";
 import {
   assessEvidence,
   observationsFromOwners
@@ -41,6 +49,10 @@ export type ObserveFieldInput = Readonly<{
   readonly authorized_scopes?: readonly string[];
   readonly cancelled?: boolean;
   readonly resume_cursors?: Readonly<Record<string, string | null>>;
+  readonly resume_field?: FieldEngineState;
+  readonly expected_source_revision?: string;
+  readonly model_id?: string;
+  readonly expected_model_id?: string;
 }>;
 
 const MAX_OBSERVE_ROUNDS = 4_096;
@@ -70,13 +82,20 @@ export function observeField(
   interpretation: QueryInterpretation,
   input: ObserveFieldInput
 ): FieldEngineState {
-  const residuals = openResiduals(input.readers.embeddingIds !== undefined);
-  let state = createConditionalField({ interpretation, budget: input.budget, residuals });
+  const residuals = openResiduals(
+    input.readers.embeddingIds !== undefined,
+    programNeedsGuardWork(interpretation.program)
+  );
+  let state = startObservedField(interpretation, input, residuals);
   if (input.cancelled === true) return cancelledField(state);
   const lease = activeLease(interpretation);
   const cursors = new Map<string, ObserverCursor>();
-  const pairProgress = new Map<string, string | null>();
-  for (const [regionId, position] of Object.entries(input.resume_cursors ?? {})) {
+  const pairProgress = new Map<string, string | null>(Object.entries(state.pair_progress));
+  const restoredCursors = {
+    ...state.resume_cursors,
+    ...(input.resume_cursors ?? {})
+  };
+  for (const [regionId, position] of Object.entries(restoredCursors)) {
     const created = startObserverCursor({
       cursor_id: regionId,
       snapshot_id: interpretation.snapshot_id,
@@ -89,21 +108,43 @@ export function observeField(
       committed_through: position
     });
   }
-  const subjects = new Set<string>();
+  const subjects = new Set<string>(state.resume_subjects);
   const relationRows: RelationObserverRow[] = [];
   const observedAt: Record<string, string> = {};
+  const sourceFacts = new Map<string, BoundSourceFacts>();
+  const memoryBox = { remaining: state.remaining_memory_bytes };
+  const sourceCache = new Map<string, SourceObserverPage>();
+  const observedInput: ObserveFieldInput = {
+    ...input,
+    readers: meterReaders(input.readers, memoryBox, sourceCache)
+  };
   let pairIndex = 0;
+  let unresolvedGuard = false;
+  let missingMeasurement = false;
+  const storedKinds = loadStoredRelationKinds(
+    interpretation.program,
+    observedInput.readers,
+    observedInput.workspace_id,
+    state.remaining_exploration
+  );
+  if (storedKinds.charged > 0) {
+    state = Object.freeze({
+      ...state,
+      remaining_exploration: Math.max(0, state.remaining_exploration - storedKinds.charged)
+    });
+  }
   for (let round = 0; round < MAX_OBSERVE_ROUNDS; round += 1) {
+    memoryBox.remaining = state.remaining_memory_bytes;
     if (terminalObserver(state.last_observer_status)) break;
     const proposal = proposeFieldWork(state);
     if (proposal.actions.length === 0) break;
     for (const action of proposal.actions) {
       if (action.action === "seed") {
-        const observed = observeSeed(input, interpretation, lease, action, cursors, observedAt);
+        const observed = observeSeed(observedInput, interpretation, lease, action, cursors, observedAt);
         cursors.set(action.region_id, observed.page.cursor);
         const seedIds = observed.page.observations.map((row) => row.object_id);
         addSubjects(subjects, seedIds);
-        recordObservedAt(input, seedIds, observedAt);
+        recordObservedAt(observedInput, seedIds, observedAt, sourceFacts);
         state = applyObserverPage(state, {
           page: observed.page,
           effects: seedEffects(observed.page.observations, interpretation, input.as_of),
@@ -113,11 +154,17 @@ export function observeField(
         continue;
       }
       if (action.action === "measurement") {
-        if (input.readers.embeddingIds === undefined) {
-          state = closeRegion(state, interpretation, action, cursors, "exhausted");
+        if (observedInput.readers.embeddingIds === undefined) {
+          state = closeRegion(
+            state,
+            interpretation,
+            action,
+            cursors,
+            missingMeasurement ? "unknown" : "exhausted"
+          );
           continue;
         }
-        const observed = observeMeasurement(input, interpretation, lease, action, cursors);
+        const observed = observeMeasurement(observedInput, interpretation, lease, action, cursors);
         cursors.set(action.region_id, observed.page.cursor);
         state = applyObserverPage(state, {
           page: observed.page,
@@ -128,43 +175,97 @@ export function observeField(
         continue;
       }
       if (action.action === "relation") {
-        state = closeRegion(state, interpretation, action, cursors, "exhausted");
+        state = closeRegion(
+          state,
+          interpretation,
+          action,
+          cursors,
+          unresolvedGuard || missingMeasurement ? "unknown" : "exhausted"
+        );
         continue;
       }
       if (incompleteObserver(state.last_observer_status)) {
         break;
       }
-      const predicates = adjacencyPredicates(
-        interpretation, input.readers, input.workspace_id, subjects
-      );
+      const predicates = adjacencyKindsFor(interpretation.program, storedKinds.kinds);
       const pair = nextAdjacencyPair(subjects, predicates, pairProgress, pairIndex);
       pairIndex += 1;
       if (pair === undefined) {
-        state = closeAdjacency(state, interpretation, action, cursors);
+        state = closeAdjacency(state, interpretation, action, cursors, storedKinds.open);
         continue;
       }
       const captured: RelationObserverRow[] = [];
       const observed = observeAdjacency(
-        input, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt
+        observedInput, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt, sourceFacts
       );
       cursors.set(action.region_id, observed.page.cursor);
       relationRows.push(...captured);
       addSubjects(subjects, captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]));
+      recordObservedAt(
+        observedInput,
+        captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]),
+        observedAt,
+        sourceFacts
+      );
       state = applyObserverPage(state, {
         page: maskAdjacencyExhaustion(observed.page, hasOpenPairs(subjects, predicates, pairProgress)),
-        effects: transitionEffects(relationRows, interpretation, state.seen_identities, input.as_of),
+        effects: (() => {
+          const effects = transitionEffects(
+            relationRows,
+            interpretation,
+            state.seen_identities,
+            input.as_of,
+            sourceFacts,
+            state.facets
+          );
+          if (effects.some((effect) => effect.unresolved_guard === true)) unresolvedGuard = true;
+          if (effects.some((effect) => effect.missing_measurement === true)) missingMeasurement = true;
+          return effects;
+        })(),
         work: observed.work,
         resume_cursors: resumeCursors(cursors, pairProgress)
       });
     }
   }
-  return state;
+  return Object.freeze({
+    ...state,
+    pair_progress: Object.freeze(Object.fromEntries(pairProgress)),
+    resume_subjects: Object.freeze([...subjects])
+  });
+}
+
+function startObservedField(
+  interpretation: QueryInterpretation,
+  input: ObserveFieldInput,
+  residuals: readonly CoverageRegion[]
+): FieldEngineState {
+  const resumed = input.resume_field;
+  if (resumed !== undefined
+    && resumed.query_id === interpretation.query_id
+    && resumed.snapshot_id === interpretation.snapshot_id
+    && (resumed.interpretation.interpretation_clock ?? "")
+      === (interpretation.interpretation_clock ?? "")) {
+    const exploration = Math.max(0, input.budget.work_units - input.budget.finalization_reserve);
+    return {
+      ...resumed,
+      interpretation,
+      budget: input.budget,
+      remaining_exploration: resumed.remaining_exploration + exploration,
+      remaining_reserve: input.budget.finalization_reserve,
+      remaining_memory_bytes: Math.max(resumed.remaining_memory_bytes, input.budget.memory_bytes),
+      memory_exhausted: false
+    };
+  }
+  return createConditionalField({ interpretation, budget: input.budget, residuals });
 }
 
 export function assessUnknownCause(
   state: FieldEngineState,
   input: ObserveFieldInput
 ): FieldEngineState {
+  if (state.remaining_reserve < 1) {
+    return applyEvidenceEffect(state, { support: state.support, work_status: "open" });
+  }
   const assertions = assertionReadsFrom(state, input);
   const hypothesisId = state.interpretation.hypotheses[0]?.hypothesis_id ?? "h0";
   const timeState = state.interpretation.time_window?.end ?? input.as_of;
@@ -173,7 +274,7 @@ export function assessUnknownCause(
     snapshot_id: state.snapshot_id,
     source_revision: state.snapshot_id,
     hypothesis_id: hypothesisId,
-    binding_context: "default",
+    binding_context: UNBOUND_BINDING,
     time_state: timeState,
     jurisdiction: "workspace",
     as_of: input.as_of,
@@ -188,7 +289,7 @@ export function assessUnknownCause(
   const propositions = assertions.map((assertion) => ({
     proposition: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      proposition_id: assertion.anchors.target_anchor.object_id,
+      proposition_id: assertion.assertion_id,
       kind: assertion.relation_kind,
       arguments: [assertion.assertion_id]
     },
@@ -205,11 +306,19 @@ export function assessUnknownCause(
     ...context,
     observations,
     propositions,
-    work_limit: Math.max(1, state.remaining_reserve)
+    work_limit: state.remaining_reserve
   });
   const claims = new Map<string, (typeof assessed.records)[number]["claim"]>();
-  for (const record of assessed.records) claims.set(record.proposition_id, record.claim);
-  return applyEvidenceEffect(state, { support: assessed.records, claims });
+  for (const [index, record] of assessed.records.entries()) {
+    const targetId = assertions[index]?.anchors.target_anchor.object_id;
+    if (targetId !== undefined) claims.set(targetId, record.claim);
+    claims.set(record.proposition_id, record.claim);
+  }
+  return applyEvidenceEffect(state, {
+    support: assessed.records,
+    claims,
+    work_status: assessed.work_status
+  });
 }
 
 export function rolesFrom(state: FieldEngineState): ReadonlyMap<string, IndexRole> {
@@ -252,7 +361,7 @@ export function emptyField(
   return createConditionalField({
     interpretation,
     budget: input.budget,
-    residuals: openResiduals(false)
+    residuals: openResiduals(false, false)
   });
 }
 
@@ -274,7 +383,8 @@ function observeSeed(
     seed_query: input.query_text,
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,
-    as_of: input.as_of
+    as_of: input.as_of,
+    ...pinExpectation(input)
   });
 }
 
@@ -292,7 +402,8 @@ function observeMeasurement(
     query: interpretation,
     workspace_id: input.workspace_id,
     readers: input.readers,
-    as_of: input.as_of
+    as_of: input.as_of,
+    ...pinExpectation(input)
   });
 }
 
@@ -305,7 +416,8 @@ function observeAdjacency(
   pair: Readonly<{ readonly subject: string; readonly predicate: string }>,
   captured: RelationObserverRow[],
   pairProgress: Map<string, string | null>,
-  observedAt: Record<string, string>
+  observedAt: Record<string, string>,
+  sourceFacts: Map<string, BoundSourceFacts>
 ) {
   const key = pairKey(pair.subject, pair.predicate);
   const cursor = {
@@ -323,7 +435,8 @@ function observeAdjacency(
     relation_kind: pair.predicate,
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,
-    as_of: input.as_of
+    as_of: input.as_of,
+    ...pinExpectation(input)
   });
   pairProgress.set(key, observed.page.cursor.committed_through);
   if (observed.page.outcome.status === "exhausted") pairProgress.set(`${key}:done`, "1");
@@ -334,7 +447,8 @@ function observeAdjacency(
   recordObservedAt(
     input,
     captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]),
-    observedAt
+    observedAt,
+    sourceFacts
   );
   return observed;
 }
@@ -343,10 +457,11 @@ function closeAdjacency(
   state: FieldEngineState,
   interpretation: QueryInterpretation,
   action: ReturnType<typeof proposeFieldWork>["actions"][number],
-  cursors: Map<string, ObserverCursor>
+  cursors: Map<string, ObserverCursor>,
+  kindsOpen: boolean
 ): FieldEngineState {
   if (incompleteObserver(state.last_observer_status)) return state;
-  return closeRegion(state, interpretation, action, cursors, "exhausted");
+  return closeRegion(state, interpretation, action, cursors, kindsOpen ? "open" : "exhausted");
 }
 
 function closeRegion(
@@ -380,33 +495,48 @@ function closeRegion(
   });
 }
 
-function adjacencyPredicates(
-  interpretation: QueryInterpretation,
+function loadStoredRelationKinds(
+  program: QueryInterpretation["program"],
   readers: ObserverReaders,
   workspaceId: string,
-  subjects: ReadonlySet<string>
-): readonly string[] {
+  remainingExploration: number
+): Readonly<{ readonly kinds: readonly string[]; readonly charged: number; readonly open: boolean }> {
+  if (!programRelationKinds(program).includes(STORED_RELATION_KIND)) {
+    return { kinds: [], charged: 0, open: false };
+  }
   const listed = readers.relationKinds;
-  const stored = listed === undefined
-    ? []
-    : [
-      ...listed({ workspaceId, subject: null }),
-      ...[...subjects].flatMap((subject) => [...listed({ workspaceId, subject })])
-    ];
-  return adjacencyKindsFor(interpretation.program, stored);
+  if (listed === undefined) return { kinds: [], charged: 0, open: true };
+  if (remainingExploration < 1) return { kinds: [], charged: 0, open: true };
+  return {
+    kinds: listed({ workspaceId, subject: null }),
+    charged: 1,
+    open: false
+  };
 }
 
 function recordObservedAt(
   input: ObserveFieldInput,
   objectIds: readonly string[],
-  observedAt: Record<string, string>
+  observedAt: Record<string, string>,
+  sourceFacts: Map<string, BoundSourceFacts>
 ): void {
   const source = input.readers.source;
   if (source === undefined) return;
   for (const objectId of objectIds) {
-    if (observedAt[objectId] !== undefined) continue;
+    if (sourceFacts.has(objectId)) continue;
     const page = source({ workspaceId: input.workspace_id, objectId });
-    const instant = page.row?.observed_at;
+    const row = page.row;
+    if (row === null) continue;
+    sourceFacts.set(objectId, {
+      object_id: row.object_id,
+      ...((row.observed_at ?? row.created_at) === undefined ? {} : { observed_at: row.observed_at ?? row.created_at }),
+      ...(row.created_at === undefined ? {} : { created_at: row.created_at }),
+      ...(row.last_used_at === undefined ? {} : { last_used_at: row.last_used_at }),
+      ...(row.dimension === undefined ? {} : { dimension: row.dimension }),
+      ...(row.domain_tags === undefined ? {} : { domain_tags: row.domain_tags }),
+      ...(row.scope_class === undefined ? {} : { scope_class: row.scope_class })
+    });
+    const instant = row.observed_at ?? row.created_at;
     if (instant !== undefined) observedAt[objectId] = instant;
   }
 }
@@ -428,13 +558,17 @@ function transitionEffects(
   rows: readonly RelationObserverRow[],
   interpretation: QueryInterpretation,
   liveStates: FieldEngineState["seen_identities"],
-  asOf: string
+  asOf: string,
+  sourceFacts: ReadonlyMap<string, BoundSourceFacts>,
+  facets: FieldEngineState["facets"]
 ): readonly FieldObservationEffect[] {
   return adjacencyEffectsForRows(rows, {
     interpretation,
     asOf,
     liveStates,
-    overlay: RELATION_MILLIGRADES
+    overlay: RELATION_MILLIGRADES,
+    sourceFacts,
+    facets
   });
 }
 
@@ -443,43 +577,70 @@ function assertionReadsFrom(
   input: ObserveFieldInput
 ) {
   const relation = input.readers.relation;
-  if (relation === undefined) return [];
+  if (relation === undefined || state.remaining_reserve < 1) return [];
   const kinds = adjacencyKindsFor(state.interpretation.program);
   const subjects = new Set(state.seen_identities.map((identity) => identity.object_id));
   const assertions = [];
+  let allowance = state.remaining_reserve;
+  const cap = Math.min(512, Math.max(1, Math.min(input.budget.page_budget, allowance)));
   for (const subject of subjects) {
     for (const predicate of kinds) {
+      if (allowance < 1) return assertions;
+      allowance -= 1;
       const page = relation({
         workspaceId: input.workspace_id,
         subject,
         predicate,
-        limit: Math.min(512, Math.max(1, input.budget.page_budget)),
-        nativeLimit: Math.min(512, Math.max(1, input.budget.page_budget)),
+        limit: cap,
+        nativeLimit: cap,
         afterAssertionId: null
       });
       for (const row of page.observations) {
-        if (row.validity === undefined) continue;
+        const validity = row.validity;
+        if (validity === undefined) continue;
+        const occurredAt = row.occurred_at
+          ?? (validity.kind === "timeless" ? input.as_of : validity.valid_from);
         assertions.push({
           assertion_id: row.assertionId,
           relation_kind: row.predicate,
           evidence_receipts: (row.evidenceRefs ?? []).map((evidenceId) => ({
             evidence_id: evidenceId,
             source_event_anchor: {
-              event_id: evidenceId,
+              event_id: row.source_event_id ?? row.assertionId,
               event_type: "relation.evidence",
-              occurred_at: input.as_of
+              occurred_at: occurredAt
             }
           })),
           anchors: {
             source_anchor: { kind: "object" as const, object_id: row.sourceObjectId },
             target_anchor: { kind: "object" as const, object_id: row.targetObjectId }
           },
-          validity: row.validity
+          validity
         });
       }
     }
   }
   return assertions;
+}
+
+function meterReaders(
+  readers: ObserverReaders,
+  memory: { remaining: number },
+  cache: Map<string, SourceObserverPage>
+): ObserverReaders {
+  const source = readers.source;
+  if (source === undefined) return readers;
+  return {
+    ...readers,
+    source: (args) => {
+      const hit = cache.get(args.objectId);
+      if (hit !== undefined) return hit;
+      const byteLimit = Math.max(1, Math.min(65536, memory.remaining));
+      const page = source({ ...args, byteLimit });
+      cache.set(args.objectId, page);
+      return page;
+    }
+  };
 }
 
 function capturingReaders(
@@ -564,6 +725,20 @@ function pairKey(subject: string, predicate: string): string {
   return `${subject}\0${predicate}`;
 }
 
+function pinExpectation(input: ObserveFieldInput): Readonly<{
+  readonly expected_source_revision?: string;
+  readonly model_id?: string;
+  readonly expected_model_id?: string;
+}> {
+  const revision = input.expected_source_revision
+    ?? input.readers.snapshotPin?.(input.workspace_id)?.source_revision;
+  return {
+    ...(revision === undefined ? {} : { expected_source_revision: revision }),
+    ...(input.model_id === undefined ? {} : { model_id: input.model_id }),
+    ...(input.expected_model_id === undefined ? {} : { expected_model_id: input.expected_model_id })
+  };
+}
+
 function resumeCursors(
   cursors: Map<string, ObserverCursor>,
   _pairProgress: Map<string, string | null>
@@ -573,13 +748,22 @@ function resumeCursors(
   return resume;
 }
 
-function openResiduals(includeBinding: boolean): readonly CoverageRegion[] {
+function openResiduals(includeBinding: boolean, includeGuard: boolean): readonly CoverageRegion[] {
   const residuals: CoverageRegion[] = [
     residual("seed", "seed"),
     residual("adjacency", "adjacency")
   ];
+  if (includeGuard) residuals.push(residual("guard", "guard"));
   if (includeBinding) residuals.push(residual("binding", "binding"));
   return residuals;
+}
+
+function programNeedsGuardWork(program: QueryInterpretation["program"]): boolean {
+  return collectRelations(program).some((relation) =>
+    relation.guard.kind === "equality"
+    || relation.guard.kind === "source_bound_entity"
+    || (relation.guard.kind === "interval_relation" && relation.guard.time_scope === "associated")
+  );
 }
 
 function residual(id: string, kind: CoverageRegion["kind"]): CoverageRegion {

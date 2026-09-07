@@ -17,7 +17,8 @@ import {
   selectFeasibleWitnesses
 } from "../../../../recall/conditional-field/reference/accepting-projection.js";
 import {
-  bindMaxMinField
+  bindMaxMinField,
+  projectLegalDerivationStep
 } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import {
   completenessForInterpretationStatus,
@@ -165,6 +166,33 @@ describe("conditional-field reference binder", () => {
     for (let index = 0; index < 8; index += 1) {
       expect(valueOf(bound.snapshot.values, `h${index}`)).toBe(550);
     }
+  });
+
+  it("B02 evaluates a legal derivation step as one max-min projection", () => {
+    expect(projectLegalDerivationStep("serial", [900, 800])).toBe(800);
+    expect(projectLegalDerivationStep("and", [900, 800])).toBe(800);
+    expect(projectLegalDerivationStep("or", [400, 800])).toBe(800);
+    const serial = bindMaxMinField({
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      seeds: [seed(productKey("a"), 900)],
+      transitions: [edge(productKey("a"), productKey("b"), "step", 800, true)]
+    });
+    if (serial.kind !== "bound") throw new Error("expected bound field");
+    expect(valueOf(serial.snapshot.values, "b")).toBe(projectLegalDerivationStep("serial", [900, 800]));
+    const cyclic = bindMaxMinField({
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      seeds: [seed(productKey("a"), 900)],
+      transitions: [
+        edge(productKey("a"), productKey("b"), "fwd", 800, true),
+        edge(productKey("b"), productKey("a"), "back", 800, true)
+      ]
+    });
+    if (cyclic.kind !== "bound") throw new Error("expected bound field");
+    expect(valueOf(cyclic.snapshot.values, "b")).toBe(800);
   });
 
   it("A05 agrees with an independent enumerator on the deployment graph", () => {

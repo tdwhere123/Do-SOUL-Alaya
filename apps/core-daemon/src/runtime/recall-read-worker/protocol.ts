@@ -1,3 +1,6 @@
+// Target recall uses "conditionalField.recall" only. The memory/evidence/
+// synthesis/path/plasticity operations remain for leftover RecallService
+// ports and are not a second selector.
 export const RECALL_READ_WORKER_OPERATIONS = [
   "ready",
   "memory.findByWorkspaceId",

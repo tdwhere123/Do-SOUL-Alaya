@@ -86,14 +86,28 @@ export {
 } from "./field.js";
 export {
   ClaimStateSchema,
+  DerivationKindSchema,
+  DerivationSchema,
   PropositionSchema,
   SupportRecordSchema,
   WitnessSchema,
   type ClaimState,
+  type Derivation,
+  type DerivationKind,
   type Proposition,
   type SupportRecord,
   type Witness
 } from "./support.js";
+export {
+  UsageExposureSchema,
+  UsageReportGrainSchema,
+  UsageReportSchema,
+  UsageReportedUseSchema,
+  type UsageExposure,
+  type UsageReport,
+  type UsageReportGrain,
+  type UsageReportedUse
+} from "./feedback.js";
 export {
   CompletenessReportSchema,
   CompletenessStatusSchema,

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
+import { CONDITIONAL_FIELD_SCHEMA_VERSION, MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
-import { encodeIndexResults } from "../../../../mcp-memory/recall/recall-result.js";
+import { encodeIndexResults, frameEncodedIndex } from "../../../../mcp-memory/recall/recall-result.js";
 import {
   MEM,
   WS,
@@ -46,6 +46,24 @@ describe("conditional-field MCP/CLI F1-F7 producer-consumer counterexamples", ()
     expect(collapsed).toBe(false);
   });
 
+
+  it("F1 public dimension and absent domain tags do not return every fact", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const dimension = await recallThroughHandler(slice, {
+      query: "checkout",
+      max_results: 800,
+      dimension: MemoryDimension.EPISODE
+    });
+    expect(dimension.results.every((row) => row.object_id !== MEM.u)).toBe(true);
+    const tagged = await recallThroughHandler(slice, {
+      query: "checkout",
+      max_results: 800,
+      domain_tags: ["absent-tag"]
+    });
+    expect(tagged.results).toEqual([]);
+  });
+
   it("F2 tombstone, scope, and expired relation are excluded through the handler", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantGovernedExtras(slice);
@@ -85,26 +103,22 @@ describe("conditional-field MCP/CLI F1-F7 producer-consumer counterexamples", ()
   it("F4 paged 32-cap observation concatenates without skip or duplicate", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 40, 701);
-    const inner = readersFor(slice);
-    const capped = {
-      ...inner,
-      lexical: (input: Parameters<NonNullable<typeof inner.lexical>>[0]) =>
-        inner.lexical!({ ...input, nativeLimit: Math.min(32, input.nativeLimit) })
-    };
-    const full = runRecall(slice, {
-      query_text: "needle",
-      budget: defaultBudget({ page_budget: 800 }),
-      readers: capped
-    });
-    const first = await recallThroughHandler(slice, { query: "needle", max_results: 8 });
-    const second = await recallThroughHandler(slice, {
-      query: "needle",
-      max_results: 8,
-      continuation: first.index.continuation
-    });
-    const concatenated = [...first.index.entries, ...second.index.entries].map(entryId);
+    const full = await recallThroughHandler(slice, { query: "needle", max_results: 800 });
+    const pages: string[][] = [];
+    let continuation = null as typeof full.index.continuation;
+    for (let step = 0; step < 16; step += 1) {
+      const page = await recallThroughHandler(slice, {
+        query: "needle",
+        max_results: 8,
+        continuation
+      });
+      pages.push(page.index.entries.map(entryId));
+      continuation = page.index.continuation;
+      if (continuation === null) break;
+    }
+    const concatenated = pages.flat();
     expect(new Set(concatenated).size).toBe(concatenated.length);
-    expect(concatenated).toEqual(full.entries.map(entryId).slice(0, concatenated.length));
+    expect(concatenated).toEqual(full.index.entries.map(entryId));
   });
 
   it("F5 handler encoding does not freeze token_estimate at 1 for long previews", async () => {
@@ -138,6 +152,55 @@ describe("conditional-field MCP/CLI F1-F7 producer-consumer counterexamples", ()
       expect(encoded.every((row) => row.budget_state.token_estimate === 1)).toBe(false);
       expect(Math.max(...encoded.map((row) => row.budget_state.token_estimate))).toBeGreaterThan(1);
     }
+  });
+
+  it("F5 encoding stops before the advertised token cap", () => {
+    const entries = Array.from({ length: 30 }, (_, index) => ({
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      object_id: `obj-${String(index).padStart(2, "0")}`,
+      hypothesis_id: "h0",
+      output_binding: "hit",
+      role: "associated" as const,
+      association_milligrades: 800,
+      claim: "unknown" as const,
+      explanation_ids: []
+    }));
+    const index = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      query_id: "probe",
+      snapshot_id: `sha256:${"a".repeat(64)}`,
+      result_version: "v1",
+      entries,
+      completeness: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        logical_index: "complete" as const,
+        observed_coverage: "complete" as const,
+        transport: "complete" as const,
+        payload: "complete" as const,
+        representation: "complete" as const
+      },
+      continuation: null,
+      representation: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        policy: "construct_index_then_page_then_payload" as const,
+        page_budget: 800,
+        identity_tie_break: "serialization" as const
+      }
+    };
+    const preview = "x".repeat(160);
+    const encoded = encodeIndexResults(
+      index,
+      new Map(entries.map((entry) => [entry.object_id, preview])),
+      2_000
+    );
+    const framed = frameEncodedIndex(index, encoded);
+    const previewBytes = encoded.reduce((sum, row) => sum + Buffer.byteLength(row.content_preview, "utf8"), 0);
+    expect(encoded.length).toBeLessThan(30);
+    expect(previewBytes).toBeLessThanOrEqual(2_000);
+    expect(encoded.every((row) => row.budget_state.within_budget)).toBe(true);
+    expect(framed.completeness.payload).toBe("omitted");
+    expect(framed.completeness.transport).toBe("partial");
+    expect(framed.completeness.logical_index).toBe("complete");
   });
 
   it("F6 handler previews are not mixed with a later source generation", async () => {

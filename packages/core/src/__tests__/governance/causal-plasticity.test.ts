@@ -7,6 +7,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 as defaultFieldSha256 } from "../../shared/field-hash.js";
 import {
+  USAGE_ADAPTATION_NECESSITY,
+  USAGE_ADAPTATION_NECESSITY_MECHANISMS,
   USAGE_MASS_CAP,
   projectSoftUsage,
   usageWeightFor
@@ -34,6 +36,7 @@ describe("causal plasticity", () => {
 
     expect(first.mass).toBe(1);
     expect(first.hard_relation).toBe(false);
+    expect(first.writes_path_relation).toBe(false);
     expect(first.strength).toBeLessThan(1);
   });
 
@@ -71,8 +74,39 @@ describe("causal plasticity", () => {
     expect(projectSoftUsage([{ receipt: future, channel: "usage" }], T0, 0)).toEqual({
       mass: 0,
       strength: 0,
-      hard_relation: false
+      hard_relation: false,
+      writes_path_relation: false
     });
+  });
+
+  it("closes the four no-learner necessity dispositions without selecting a learner", () => {
+    expect(USAGE_ADAPTATION_NECESSITY_MECHANISMS).toEqual([
+      "reinforcement_decay",
+      "conditional_program_learning",
+      "cost_informed_scheduling",
+      "exact_path_compilation"
+    ]);
+    expect(USAGE_ADAPTATION_NECESSITY.reinforcement_decay.disposition).toBe("NOT_REQUIRED");
+    expect(USAGE_ADAPTATION_NECESSITY.conditional_program_learning.disposition).toBe(
+      "BENEFIT_NOT_ESTABLISHED"
+    );
+    expect(USAGE_ADAPTATION_NECESSITY.cost_informed_scheduling.disposition).toBe(
+      "BENEFIT_NOT_ESTABLISHED"
+    );
+    expect(USAGE_ADAPTATION_NECESSITY.exact_path_compilation.disposition).toBe("NOT_REQUIRED");
+
+    for (const mechanism of USAGE_ADAPTATION_NECESSITY_MECHANISMS) {
+      const row = USAGE_ADAPTATION_NECESSITY[mechanism];
+      expect(row.mechanism).toBe(mechanism);
+      expect(["NOT_REQUIRED", "BENEFIT_NOT_ESTABLISHED"]).toContain(row.disposition);
+      expect(row.unmet_need.length).toBeGreaterThan(0);
+      expect(row.identifiable_signal.length).toBeGreaterThan(0);
+      expect(row.exposure_assumptions.length).toBeGreaterThan(0);
+      expect(row.counterexample.length).toBeGreaterThan(0);
+      expect(row.cost.length).toBeGreaterThan(0);
+      expect(row.working_reference).toMatch(/PathRelation\.strength unchanged/);
+      expect(row.working_reference).toMatch(/never writes PathRelation/);
+    }
   });
 });
 

@@ -196,24 +196,22 @@ describe("conditional-field engine", () => {
     expect(proposed.starvedFinite).toBe(false);
   });
 
-  it("never drops seen identities when memory is exhausted", () => {
+  it("refuses to retain chain identities that do not fit remaining_memory_bytes", () => {
     const hops: Transition[] = [];
     for (let index = 0; index < 8; index += 1) {
       hops.push(edge(productKey(`n${index}`), productKey(`n${index + 1}`), "chain", 900, true));
     }
     const state = createConditionalField({
       interpretation: interpretation(),
-      budget: defaultBudget({ memory_bytes: 300, work_units: 50, finalization_reserve: 5 }),
+      budget: defaultBudget({ memory_bytes: 300, work_units: 50, finalization_reserve: 5, min_envelope: 1 }),
       seeds: [seed(productKey("n0"), 900)],
       transitions: hops
     });
-    expect(state.seen_identities.length).toBeGreaterThan(state.identity_spool.length);
-    expect(state.identity_spool.length).toBeGreaterThan(0);
     expect(state.memory_exhausted).toBe(true);
-    expect(state.seen_identities.map((row) => row.object_id).sort())
-      .toEqual(["n0", "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8"]);
-    expect(state.remaining_reserve).toBe(5);
-    expect(valueOf(state, "n8")).toBe(0);
+    expect(state.identity_spool).toHaveLength(0);
+    expect(state.seen_identities.length).toBeLessThan(9);
+    expect(state.closure.requested_index).not.toBe("complete");
+    expect(proposeFieldWork(state).actions).toHaveLength(0);
   });
 
   it("does not let duplicate observations manufacture association strength", () => {
@@ -233,7 +231,7 @@ describe("conditional-field engine", () => {
     expect(duplicate.observations).toHaveLength(2);
   });
 
-  it("keeps a usable field and the finalization reserve when exploration work is exhausted", () => {
+  it("spends remaining_reserve on the solver after exploration is exhausted", () => {
     const state = createConditionalField({
       interpretation: interpretation(),
       budget: defaultBudget({ work_units: 8, finalization_reserve: 2, min_envelope: 1 }),
@@ -242,9 +240,80 @@ describe("conditional-field engine", () => {
     });
     expect(state.binding.kind).toBe("bound");
     expect(valueOf(state, "c")).toBe(850);
-    expect(state.remaining_reserve).toBe(2);
-    expect(state.remaining_work.some((item) => item.kind === "state_create" || item.kind === "relaxation"))
-      .toBe(true);
+    expect(state.remaining_reserve).toBeLessThan(2);
+    expect(state.remaining_work.some((item) => item.kind === "state_create" || item.kind === "relaxation")
+      || state.remaining_reserve < 2).toBe(true);
+  });
+
+  it("B02 treats scalar fixed point as a projection, not explanation coverage", () => {
+    const state = createDeploymentField();
+    expect(state.closure.propagation).toBe("fixed_point");
+    const openSupport = applyEvidenceEffect(state, {
+      support: state.support,
+      work_status: "open"
+    });
+    const kinds = ["seed", "adjacency", "guard", "binding"] as const;
+    let exhausted = openSupport;
+    for (const kind of kinds) {
+      exhausted = applyObserverPage(exhausted, {
+        page: page({
+          region_id: kind,
+          status: "exhausted",
+          open_regions: [{ schema_version: 1, region_id: kind, kind, status: "exhausted" }]
+        })
+      });
+    }
+    expect(exhausted.closure.propagation).toBe("fixed_point");
+    expect(exhausted.support_work_status).toBe("open");
+    expect(exhausted.closure.observation).toBe("exhausted");
+    expect(exhausted.closure.requested_index).not.toBe("complete");
+  });
+
+  it("B09 keeps a cheaper complete alternative derivation after a stronger path wins", () => {
+    const cheap = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      derivation_id: "or-cheap",
+      kind: "or" as const,
+      children: ["cheap"],
+      observation_ids: ["cheap"],
+      leaf_ids: ["cheap"],
+      source_revisions: ["rev-cheap"],
+      witness_id: "cheap"
+    };
+    const expensive = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      derivation_id: "or-expensive",
+      kind: "or" as const,
+      children: ["expensive"],
+      observation_ids: ["expensive"],
+      leaf_ids: ["expensive"],
+      source_revisions: ["rev-expensive"],
+      witness_id: "expensive"
+    };
+    const state = applyObserverPage(createEmptyField(), {
+      page: page({ region_id: "adjacency" }),
+      effects: [
+        {
+          observation_id: "cheap",
+          seed: seed(productKey("r"), 1000),
+          transition: edge(productKey("r"), productKey("c"), "cheap_path", 400, true),
+          derivation: cheap,
+          derivations: [cheap]
+        },
+        {
+          observation_id: "expensive",
+          transition: edge(productKey("r"), productKey("c"), "expensive_path", 900, true),
+          derivation: expensive,
+          derivations: [expensive]
+        }
+      ]
+    });
+    expect(valueOf(state, "c")).toBe(900);
+    expect(state.derivations.map((row) => row.derivation_id).sort()).toEqual([
+      "or-cheap",
+      "or-expensive"
+    ]);
+    expect(state.transitions).toHaveLength(2);
   });
 
   it("starts a new epoch on snapshot revision instead of monotone refinement", () => {

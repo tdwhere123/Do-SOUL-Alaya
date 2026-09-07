@@ -1,11 +1,8 @@
 /**
- * PathPlasticityTask: Garden integration for the path-axis plasticity feedback
- * loop (A3). The Librarian dispatches a `path_plasticity_update` task kind onto
- * a Garden tier so plasticity computation never runs on the recall request
- * path. The actual computation lives in `@do-soul/alaya-core`'s
- * `PathPlasticityService`; this file defines the *port* that Librarian depends
- * on so the soul package stays free of any core dependency (Package
- * Dependency Direction invariant).
+ * PathPlasticityTask: Garden integration for residual path-axis usage
+ * watermarks. The Librarian may dispatch `path_plasticity_update`; upgraded
+ * compute must not write PathRelation.strength. The historical
+ * `PathPlasticityService` mutation owner is not selected on this target.
  */
 
 export const PATH_PLASTICITY_TASK_DEFAULTS = {
@@ -18,6 +15,13 @@ export const PATH_PLASTICITY_TASK_DEFAULTS = {
   MAX_EXECUTION_MS: 30_000
 } as const;
 
+export const PATH_PLASTICITY_NO_MUTATION_RESULT = Object.freeze({
+  reinforced: 0,
+  weakened: 0,
+  retired: 0,
+  affectedPathIds: Object.freeze([]) as readonly string[]
+});
+
 export interface PathPlasticityComputeResult {
   readonly reinforced: number;
   readonly weakened: number;
@@ -26,9 +30,8 @@ export interface PathPlasticityComputeResult {
 }
 
 /**
- * The minimal contract the Garden Librarian needs from a path-plasticity
- * compute service. Implemented structurally by
- * `@do-soul/alaya-core`'s `PathPlasticityService`.
+ * Residual Librarian contract. Supported implementations attribute usage and
+ * may advance watermarks; they must not persist PathRelation plasticity.
  */
 export interface PathPlasticityComputePort {
   computeAndApplyPlasticity(params: {
@@ -37,10 +40,8 @@ export interface PathPlasticityComputePort {
     readonly untilIso?: string;
     readonly abortSignal?: AbortSignal;
     /**
-     * Called immediately before the compute service enters the EventPublisher
-     * mutation boundary. After this point a timeout must not cancel the
-     * operation because PathRelation rows may become durable before
-     * post-commit propagation returns.
+     * Residual hook from the retired write path. Attribution-only compute
+     * never calls it, because no PathRelation row is mutated.
      */
     readonly onMutationBoundaryEntered?: () => void;
   }): Promise<PathPlasticityComputeResult>;
@@ -53,6 +54,17 @@ export interface PathPlasticityComputePort {
 
 export interface PathPlasticityPendingPort {
   clearPendingWorkspace(workspaceId: string): Promise<void> | void;
+}
+
+export function createAttributionOnlyPathPlasticityPort(options?: {
+  readonly markProcessed?: PathPlasticityComputePort["markProcessed"];
+}): PathPlasticityComputePort {
+  return {
+    async computeAndApplyPlasticity() {
+      return PATH_PLASTICITY_NO_MUTATION_RESULT;
+    },
+    ...(options?.markProcessed === undefined ? {} : { markProcessed: options.markProcessed })
+  };
 }
 
 /**

@@ -171,7 +171,7 @@ describe("conditional-field evidence governance", () => {
       }],
       access: new Map([["obj-a", "protected"]])
     });
-    expect(mapped.map((row) => row.evidence_id).sort()).toEqual(["e-assert", "e-claim"]);
+    expect([...new Set(mapped.map((row) => row.evidence_id))].sort()).toEqual(["e-assert", "e-claim"]);
     expect(mapped.find((row) => row.evidence_id === "e-assert")?.polarity).toBe("refutes");
     expect(mapped.every((row) => row.access === "protected")).toBe(true);
     expect(mapped.every((row) => row.source_revision === SOURCE_REVISION)).toBe(true);

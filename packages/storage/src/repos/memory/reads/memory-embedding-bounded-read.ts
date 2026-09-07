@@ -46,25 +46,35 @@ export function readBoundedEmbeddingIds(
   profile: BoundedEmbeddingProfile,
   afterObjectId: string | null = null
 ):
-  BoundedEmbeddingReadReceipt & { readonly objectIds: readonly string[] } {
+  BoundedEmbeddingReadReceipt & {
+    readonly objectIds: readonly string[];
+    readonly committedThrough: string | null;
+  } {
   validateProfile(workspaceId, profile);
-  if (profile.maxRows === 0) return Object.freeze({ objectIds: Object.freeze([]), rowVisits: 0, metadataUtf8Bytes: 0, filteredRows: 0, truncated: true });
+  if (profile.maxRows === 0) return Object.freeze({ objectIds: Object.freeze([]), rowVisits: 0, metadataUtf8Bytes: 0, filteredRows: 0, truncated: true, committedThrough: afterObjectId });
   // The indexed canonical prefix owns the native visit cap; downstream source admission owns lifecycle and tier.
   const rows = db.connection.prepare(`WITH candidates AS MATERIALIZED (
     SELECT e.object_id AS object_id FROM memory_embeddings e INDEXED BY idx_memory_embeddings_recall_profile_identity
     WHERE e.workspace_id = ? AND e.provider_kind = ? AND e.model_id = ? AND e.schema_version = ? AND e.vector_valid = 1
       AND e.object_id > ?
     ORDER BY e.object_id ASC LIMIT ?
-  ) SELECT CASE WHEN octet_length(object_id) <= ? THEN object_id ELSE NULL END AS object_id,
+  ) SELECT object_id AS raw_id,
+    CASE WHEN octet_length(object_id) <= ? THEN object_id ELSE NULL END AS object_id,
     CASE WHEN octet_length(object_id) <= ? THEN octet_length(object_id) ELSE 0 END AS metadata_bytes
     FROM candidates ORDER BY object_id`).all(workspaceId, profile.providerKind, profile.modelId,
     profile.schemaVersion, afterObjectId ?? "", profile.maxRows, profile.maxMetadataUtf8Bytes, profile.maxMetadataUtf8Bytes) as
-    { object_id: string | null; metadata_bytes: number }[];
+    { object_id: string | null; raw_id: string; metadata_bytes: number }[];
   const objectIds = rows.flatMap((row) => row.object_id === null ? [] : [row.object_id]);
   const filteredRows = rows.length - objectIds.length;
-  return Object.freeze({ objectIds: Object.freeze(objectIds), rowVisits: rows.length,
-    metadataUtf8Bytes: rows.reduce((sum, row) => sum + row.metadata_bytes, 0), filteredRows,
-    truncated: filteredRows > 0 || rows.length === profile.maxRows });
+  const committedThrough = rows.at(-1)?.raw_id ?? afterObjectId;
+  return Object.freeze({
+    objectIds: Object.freeze(objectIds),
+    rowVisits: rows.length,
+    metadataUtf8Bytes: rows.reduce((sum, row) => sum + row.metadata_bytes, 0),
+    filteredRows,
+    truncated: filteredRows > 0 || rows.length === profile.maxRows,
+    committedThrough
+  });
 }
 
 const METADATA_COLUMNS = ["object_id", "workspace_id", "content_hash", "provider_kind", "model_id", "created_at", "updated_at"] as const;

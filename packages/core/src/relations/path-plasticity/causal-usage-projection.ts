@@ -1,12 +1,33 @@
 import {
   getPathAnchorBackingObjectId,
   type CausalUsageReceipt,
-  type PathRelation
+  type PathRelation,
+  type UsageReport
 } from "@do-soul/alaya-protocol";
 import {
   DEFAULT_USAGE_DECAY_PER_MS,
   projectSoftUsage
 } from "../../governance/effects/causal-plasticity.js";
+
+export type CausalUsagePathAttribution = Readonly<{
+  readonly path_id: string;
+  readonly receipt_identities: readonly string[];
+  readonly writes_path_relation: false;
+}>;
+
+export type UsageReportAttribution = Readonly<{
+  readonly grain: UsageReport["grain"];
+  readonly exposure: UsageReport["exposure"];
+  readonly reported_use: UsageReport["reported_use"];
+  readonly query_id: string | undefined;
+  readonly snapshot_id: string | undefined;
+  readonly object_id: string | undefined;
+  readonly output_id: string | undefined;
+  readonly witness_id: string | undefined;
+  readonly action_id: string | undefined;
+  readonly path_credit: "none";
+  readonly witness_credit: "none" | "claimed" | "unknown";
+}>;
 
 export function projectCausalUsageOntoPaths(
   paths: readonly Readonly<PathRelation>[],
@@ -17,37 +38,88 @@ export function projectCausalUsageOntoPaths(
   const receiptsByRef = indexApplicableReceipts(receipts, asOf);
   return Object.freeze(paths.map((path) => {
     const applicable = receiptsForPath(path, receiptsByRef);
-    if (applicable.length === 0) return path;
-    const projection = projectSoftUsage(
-      applicable.map((receipt) => ({ receipt, channel: "usage" as const })),
-      asOf,
-      decayPerMs
-    );
+    if (applicable.length > 0) {
+      // Soft mass is operational telemetry. Combining it into strength would
+      // treat usage as a relation write, which the upgraded target forbids.
+      void projectSoftUsage(
+        applicable.map((receipt) => ({ receipt, channel: "usage" as const })),
+        asOf,
+        decayPerMs
+      );
+    }
     return Object.freeze({
       ...path,
-      plasticity_state: Object.freeze({
-        ...path.plasticity_state,
-        strength: combineStrength(path.plasticity_state.strength, projection.strength),
-        support_events_count: path.plasticity_state.support_events_count + applicable.length,
-        last_reinforced_at: latestReinforcement(path, applicable)
-      })
+      plasticity_state: Object.freeze({ ...path.plasticity_state })
     });
   }));
 }
 
-function combineStrength(base: number, usage: number): number {
-  return 1 - (1 - base) * (1 - usage);
+export function attributeCausalUsageOntoPaths(
+  paths: readonly Readonly<PathRelation>[],
+  receipts: readonly Readonly<CausalUsageReceipt>[],
+  asOf: string
+): readonly CausalUsagePathAttribution[] {
+  const receiptsByRef = indexApplicableReceipts(receipts, asOf);
+  return Object.freeze(paths.flatMap((path) => {
+    const applicable = receiptsForPath(path, receiptsByRef);
+    if (applicable.length === 0) return [];
+    return [Object.freeze({
+      path_id: path.path_id,
+      receipt_identities: Object.freeze(applicable.map((receipt) => receipt.identity)),
+      writes_path_relation: false
+    })];
+  }));
 }
 
-function latestReinforcement(
-  path: Readonly<PathRelation>,
-  receipts: readonly Readonly<CausalUsageReceipt>[]
-): string {
-  const usageLatest = latestOccurredAt(receipts);
-  const existing = path.plasticity_state.last_reinforced_at;
-  return existing !== undefined && Date.parse(existing) > Date.parse(usageLatest)
-    ? existing
-    : usageLatest;
+export function attributeUsageReports(
+  reports: readonly UsageReport[]
+): readonly UsageReportAttribution[] {
+  return Object.freeze(uniqueUsageReports(reports).map((report) => Object.freeze({
+    grain: report.grain,
+    exposure: report.exposure,
+    reported_use: report.reported_use,
+    query_id: report.query_id,
+    snapshot_id: report.snapshot_id,
+    object_id: report.object_id,
+    output_id: report.output_id,
+    witness_id: report.witness_id,
+    action_id: report.action_id,
+    path_credit: "none",
+    witness_credit: witnessCredit(report)
+  })));
+}
+
+function witnessCredit(report: UsageReport): UsageReportAttribution["witness_credit"] {
+  if (report.grain !== "witness") return "none";
+  if (report.exposure === "unknown" || report.reported_use === "unknown") return "unknown";
+  if (report.exposure === "exposed" && report.reported_use === "used") return "claimed";
+  return "none";
+}
+
+function uniqueUsageReports(reports: readonly UsageReport[]): readonly UsageReport[] {
+  const seen = new Set<string>();
+  const unique: UsageReport[] = [];
+  for (const report of reports) {
+    const key = usageReportKey(report);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(report);
+  }
+  return unique;
+}
+
+function usageReportKey(report: UsageReport): string {
+  return [
+    report.grain,
+    report.exposure,
+    report.reported_use,
+    report.query_id ?? "",
+    report.snapshot_id ?? "",
+    report.object_id ?? "",
+    report.output_id ?? "",
+    report.witness_id ?? "",
+    report.action_id ?? ""
+  ].join("\0");
 }
 
 function indexApplicableReceipts(
@@ -93,10 +165,4 @@ function receiptsForPath(
 
 function receiptIndexKey(workspaceId: string, downstreamRef: string): string {
   return `${workspaceId}\u0000${downstreamRef}`;
-}
-
-function latestOccurredAt(receipts: readonly Readonly<CausalUsageReceipt>[]): string {
-  return receipts.reduce((latest, receipt) =>
-    Date.parse(receipt.occurred_at) > Date.parse(latest) ? receipt.occurred_at : latest,
-  receipts[0]!.occurred_at);
 }

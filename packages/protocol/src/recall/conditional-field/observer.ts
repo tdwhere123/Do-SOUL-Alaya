@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
+  BoundedLabelSchema,
+  IsoDatetimeStringSchema,
   NonNegativeIntSchema
 } from "../../shared/schema-primitives.js";
 import {
@@ -89,7 +91,12 @@ export const TypedObservationSchema = z
     applicability: GuardSchema,
     association_milligrades: MilligradeSchema.optional(),
     low_milligrades: MilligradeSchema.optional(),
-    high_milligrades: MilligradeSchema.optional()
+    high_milligrades: MilligradeSchema.optional(),
+    relation_kind: BoundedLabelSchema.optional(),
+    measurement_id: ConditionalFieldIdSchema.optional(),
+    model_id: ConditionalFieldIdSchema.optional(),
+    binding_context: ConditionalFieldIdSchema.optional(),
+    observed_at: IsoDatetimeStringSchema.optional()
   })
   .strict()
   .readonly();

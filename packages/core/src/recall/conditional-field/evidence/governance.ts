@@ -89,15 +89,15 @@ function observationsFromAssertion(
   const sourceRevision = assertion.formation_receipt?.source_observations[0]?.source_sha256
     ?? input.source_revision;
   const polarity = polarityForRelation(assertion.relation_kind);
-  return assertion.evidence_receipts.map((receipt, index) => {
+  return assertion.evidence_receipts.flatMap((receipt, index) => {
     const lineageId = receipt.source_event_anchor.event_id;
-    return observation({
-      observation_id: `${assertion.assertion_id}:${receipt.evidence_id}:${String(index)}`,
+    return [sourceId, targetId].map((premiseId, premiseIndex) => observation({
+      observation_id: `${assertion.assertion_id}:${receipt.evidence_id}:${String(index)}:${String(premiseIndex)}`,
       evidence_id: receipt.evidence_id,
       source_id: sourceId,
       source_revision: sourceRevision,
-      premise_id: assertion.assertion_id,
-      proposition_id: assertion.relation_kind,
+      premise_id: premiseId,
+      proposition_id: assertion.assertion_id,
       polarity,
       access: resolveAccess(input.access, receipt.evidence_id, sourceId, targetId),
       validity: assertion.validity,
@@ -106,7 +106,7 @@ function observationsFromAssertion(
       path_governance: input.path_governance?.get(assertion.assertion_id),
       path_lifecycle: input.path_lifecycle?.get(assertion.assertion_id),
       context: input
-    });
+    }));
   });
 }
 

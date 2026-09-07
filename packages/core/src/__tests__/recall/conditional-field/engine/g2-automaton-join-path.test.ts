@@ -1,0 +1,354 @@
+import { describe, expect, it } from "vitest";
+import {
+  CONDITIONAL_FIELD_SCHEMA_VERSION,
+  type QueryInterpretation,
+  type QueryProgram,
+  type RelationValidity
+} from "@do-soul/alaya-protocol";
+import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
+import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
+import { type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
+import { SNAPSHOT_ID, defaultBudget, defaultView } from "../reference/deployment.fixture.js";
+
+const VALIDITY: RelationValidity = { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
+const AS_OF = "2026-09-07T00:00:00.000Z";
+
+describe("G2 automaton, compatible join, and composed path identity", () => {
+  it("keeps a flat sequence control that reaches end", () => {
+    expect(acceptedIds(observeProgram(
+      seq(rel("observed_log", "x", "y"), rel("config_direct", "y", "z")),
+      [edge("seed", "middle", "observed_log"), edge("middle", "end", "config_direct")]
+    ))).toContain("end");
+  });
+
+  it("nested sequence reaches the outer endpoint", () => {
+    expect(acceptedIds(observeProgram(
+      seq(
+        seq(rel("observed_log", "x", "y"), rel("config_via_log", "y", "z")),
+        rel("config_direct", "z", "out")
+      ),
+      [
+        edge("seed", "m1", "observed_log"),
+        edge("m1", "m2", "config_via_log"),
+        edge("m2", "end", "config_direct")
+      ]
+    ))).toContain("end");
+  });
+
+  it("alternative of a sequence reaches the inner endpoint", () => {
+    expect(acceptedIds(observeProgram(
+      alt(
+        seq(rel("observed_log", "x", "y"), rel("config_direct", "y", "z")),
+        rel("uses_service", "x", "w")
+      ),
+      [edge("seed", "middle", "observed_log"), edge("middle", "end", "config_direct")]
+    ))).toContain("end");
+  });
+
+  it("closure re-enters and accepts seed, middle, and end of a two-edge chain", () => {
+    const ids = acceptedIds(observeProgram(
+      {
+        schema_version: 1,
+        kind: "closure",
+        product_state_sufficient: true,
+        body: rel("observed_log")
+      },
+      [
+        edge("seed", "middle", "observed_log", "a1"),
+        edge("middle", "end", "observed_log", "a2")
+      ]
+    ));
+    expect(ids).toEqual(expect.arrayContaining(["seed", "middle", "end"]));
+  });
+
+  it("bounded repeat keeps distinct control states and reaches the second edge", () => {
+    expect(acceptedIds(observeProgram(
+      { schema_version: 1, kind: "repeat", count: 2, body: rel("observed_log") },
+      [
+        edge("seed", "middle", "observed_log", "a1"),
+        edge("middle", "end", "observed_log", "a2")
+      ]
+    ))).toContain("end");
+  });
+
+  it("AND with the same target variable and incompatible targets rejects", () => {
+    expect(acceptedIds(observeProgram(
+      {
+        schema_version: 1,
+        kind: "hyperedge",
+        join: "and",
+        premises: [rel("observed_log", "x", "y"), rel("service_history", "x", "y")]
+      },
+      [edge("seed", "left", "observed_log"), edge("seed", "right", "service_history")]
+    ))).toEqual([]);
+  });
+
+  it("OR preserves a complete one-branch witness", () => {
+    expect(acceptedIds(observeProgram(
+      {
+        schema_version: 1,
+        kind: "hyperedge",
+        join: "or",
+        premises: [rel("observed_log", "x", "y"), rel("service_history", "x", "y")]
+      },
+      [edge("seed", "left", "observed_log")]
+    ))).toContain("left");
+  });
+
+  it("AND of a nested sequence and a compatible relation accepts the shared endpoint", () => {
+    expect(acceptedIds(observeProgram(
+      {
+        schema_version: 1,
+        kind: "hyperedge",
+        join: "and",
+        premises: [
+          seq(rel("observed_log", "x", "y"), rel("config_direct", "y", "z")),
+          rel("uses_service", "x", "z")
+        ]
+      },
+      [
+        edge("seed", "mid", "observed_log"),
+        edge("mid", "end", "config_direct"),
+        edge("seed", "end", "uses_service")
+      ]
+    ))).toContain("end");
+  });
+
+  it("AND of a nested sequence and an incompatible target rejects", () => {
+    expect(acceptedIds(observeProgram(
+      {
+        schema_version: 1,
+        kind: "hyperedge",
+        join: "and",
+        premises: [
+          seq(rel("observed_log", "x", "y"), rel("config_direct", "y", "z")),
+          rel("uses_service", "x", "z")
+        ]
+      },
+      [
+        edge("seed", "mid", "observed_log"),
+        edge("mid", "end", "config_direct"),
+        edge("seed", "other", "uses_service")
+      ]
+    ))).toEqual([]);
+  });
+
+  it("OR preserves a complete nested sequence branch", () => {
+    expect(acceptedIds(observeProgram(
+      {
+        schema_version: 1,
+        kind: "hyperedge",
+        join: "or",
+        premises: [
+          seq(rel("observed_log", "x", "y"), rel("config_direct", "y", "z")),
+          rel("uses_service", "x", "w")
+        ]
+      },
+      [edge("seed", "mid", "observed_log"), edge("mid", "end", "config_direct")]
+    ))).toContain("end");
+  });
+
+  it("nested hyperedge inside a sequence reaches the outer endpoint", () => {
+    expect(acceptedIds(observeProgram(
+      seq(
+        {
+          schema_version: 1,
+          kind: "hyperedge",
+          join: "and",
+          premises: [rel("observed_log", "x", "y"), rel("uses_service", "x", "y")]
+        },
+        rel("config_direct", "y", "z")
+      ),
+      [
+        edge("seed", "mid", "observed_log"),
+        edge("seed", "mid", "uses_service"),
+        edge("mid", "end", "config_direct")
+      ]
+    ))).toContain("end");
+  });
+
+  it("ordinary retained transitions emit distinct same_path facets", () => {
+    const state = observeProgram(
+      alt(rel("config_direct", "x", "y"), rel("config_via_log", "x", "y")),
+      [edge("seed", "config", "config_direct"), edge("seed", "config", "config_via_log")]
+    );
+    if (state.binding.kind !== "bound") throw new Error("expected bound field");
+    const pathIds = state.facets.map((vector) => vector.path_id);
+    expect(new Set(pathIds).size).toBeGreaterThan(1);
+    expect(state.facets.some((vector) => vector.coordinates.includes(800))).toBe(true);
+    expect(state.facets.some((vector) => vector.coordinates.includes(850))).toBe(true);
+    expect(state.facets.some((vector) => vector.coordinates[0] === 850 && vector.coordinates[1] === 800)).toBe(false);
+  });
+
+  it("alternative discovery order preserves same_path membership at 825", () => {
+    const orders = [
+      ["config_direct", "config_via_log"],
+      ["config_via_log", "config_direct"]
+    ] as const;
+    const outputs = orders.map((order) => {
+      const state = observeProgram(
+        alt(...order.map((kind) => rel(kind, "x", "y"))),
+        order.map((kind) => edge("seed", "config", kind))
+      );
+      if (state.binding.kind !== "bound") return [];
+      const index = projectAcceptingIndex({
+        snapshot: state.binding.snapshot,
+        view: { ...state.interpretation.view, threshold_milligrades: 825 },
+        query_id: "probe",
+        snapshot_id: state.snapshot_id,
+        result_version: "v1",
+        budget: defaultBudget()
+      });
+      return index.entries.map((entry) => entry.object_id);
+    });
+    expect(outputs[0]).toEqual(outputs[1]);
+    expect(outputs[0]).toContain("config");
+  });
+
+  it("does not mint a joint same_path witness from incompatible coordinates", () => {
+    const state = observeProgram(
+      alt(rel("config_direct", "x", "y"), rel("config_via_log", "x", "y")),
+      [edge("seed", "config", "config_direct"), edge("seed", "config", "config_via_log")]
+    );
+    if (state.binding.kind !== "bound") throw new Error("expected bound field");
+    const config = state.binding.snapshot.values.find((value) =>
+      value.state.object_id === "config" && value.accepting
+    );
+    if (config === undefined) throw new Error("expected accepting config");
+    const identity = `${config.state.object_id}:${config.state.hypothesis_id}:${config.state.binding_context}`;
+    const index = projectAcceptingIndex({
+      snapshot: {
+        ...state.binding.snapshot,
+        facets: [
+          { schema_version: 1, path_id: `${identity}:weak`, coordinates: [900, 200] },
+          { schema_version: 1, path_id: `${identity}:strong`, coordinates: [200, 900] }
+        ]
+      },
+      view: { ...state.interpretation.view, threshold_milligrades: 800 },
+      query_id: "probe",
+      snapshot_id: state.snapshot_id,
+      result_version: "v1",
+      budget: defaultBudget()
+    });
+    expect(index.entries.map((entry) => entry.object_id)).not.toContain("config");
+  });
+});
+
+function observeProgram(
+  program: QueryProgram,
+  edges: readonly ReturnType<typeof edge>[]
+) {
+  return observeField(interpretation(program), input(edges));
+}
+
+function interpretation(program: QueryProgram): QueryInterpretation {
+  return {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    query_id: "g2-probe",
+    status: "resolved",
+    snapshot_id: SNAPSHOT_ID,
+    program,
+    view: defaultView(),
+    holes: [],
+    hypotheses: []
+  };
+}
+
+function rel(
+  relationKind: string,
+  source = "s",
+  target = "t"
+): QueryProgram {
+  return {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    kind: "relation",
+    relation_kind: relationKind,
+    source_variable: source,
+    target_variable: target,
+    guard: {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      kind: "query_predicate",
+      verdict: "unresolved",
+      time_scope: "none"
+    },
+    facet_mode: "same_path",
+    threshold_milligrades: 0
+  };
+}
+
+function seq(...steps: QueryProgram[]): QueryProgram {
+  return { schema_version: 1, kind: "sequence", steps };
+}
+
+function alt(...options: QueryProgram[]): QueryProgram {
+  return { schema_version: 1, kind: "alternative", options };
+}
+
+function edge(
+  sourceObjectId: string,
+  targetObjectId: string,
+  predicate: string,
+  assertionId = predicate
+) {
+  return {
+    sourceObjectId,
+    targetObjectId,
+    predicate,
+    assertionId,
+    resultObjectId: targetObjectId,
+    validity: VALIDITY,
+    evidenceRefs: [`evidence-${assertionId}`]
+  };
+}
+
+function input(edges: readonly ReturnType<typeof edge>[]) {
+  const readers: ObserverReaders = {
+    lexical: () => ({
+      ids: ["seed"],
+      nativeVisits: 1,
+      nativeBytes: 1,
+      rowsRead: 1,
+      bytesRead: 1,
+      truncated: false
+    }),
+    source: ({ objectId }) => ({
+      row: {
+        object_id: objectId,
+        sourceRevision: "rev",
+        lifecycle_state: "active",
+        scope_class: "project",
+        observed_at: "2026-09-06T12:00:00.000Z"
+      },
+      rowsRead: 1,
+      bytesRead: 1,
+      unavailable: false
+    }),
+    relation: ({ subject, predicate }) => {
+      const observations = edges.filter((item) =>
+        item.sourceObjectId === subject && item.predicate === predicate
+      );
+      return {
+        observations,
+        nativeVisits: observations.length,
+        nativeBytes: 1,
+        rowsRead: observations.length,
+        bytesRead: 1,
+        truncated: false
+      };
+    }
+  };
+  return {
+    workspace_id: "ws",
+    query_text: "seed",
+    budget: defaultBudget(),
+    as_of: AS_OF,
+    readers
+  };
+}
+
+function acceptedIds(state: ReturnType<typeof observeField>): readonly string[] {
+  if (state.binding.kind !== "bound") return [];
+  return state.binding.snapshot.values
+    .filter((value) => value.accepting && value.milligrades > 0)
+    .map((value) => value.state.object_id);
+}

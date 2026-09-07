@@ -53,14 +53,22 @@ export type ConditionalFieldRecallParams = RecallExecutionParams & Readonly<{
 export type RecallServiceSynthesisDeps = SelectGammaSynthesisDependencies;
 
 export type { ObserverReaders };
+export { toSourceObserverRow } from "./conditional-field/observers/observe.js";
 export {
+  captureIndexPreviews,
   encodeRecallResult,
   runConditionalFieldRecall,
+  snapshotIdFromPin,
   RELATION_MILLIGRADES,
   type ConditionalFieldRecallPort,
+  type ConditionalFieldRecallPortResult,
   type ConditionalFieldRecallRequest,
   type ConditionalFieldRecallResult
 } from "./runtime/recall-service-runner.js";
+export {
+  attributeUsageReports,
+  type UsageReportAttribution
+} from "../relations/path-plasticity/causal-usage-projection.js";
 export { classifyGlobalCandidate } from "./runtime/recall-service-helpers.js";
 export type {
   KeywordSearchBatchQuery,

@@ -115,10 +115,10 @@ These rules always win over lower-level docs and task-card convenience.
     promotion requires explicit evidence, governance, and audit.
     Turn text an agent forwards for passive extraction (`recent_turn`
     on `soul.recall`, `turn_digest` on `soul.report_context_usage`) is
-    *input*, not an agent claim of truth. **LIVE:** `soul.recall` may
-    enqueue `POST_TURN_EXTRACT` from that text; `soul.report_context_usage`
-    may enqueue from `turn_digest`. **TARGET:** Recall does not enqueue
-    ingestion; explicit post-turn events and A-track emission remain.
+    *input*, not an agent claim of truth. Ordinary `soul.recall` does
+    not enqueue ingestion; `recent_turn` is ignored. `soul.report_context_usage`
+    may enqueue `POST_TURN_EXTRACT` from `turn_digest`. Explicit post-turn
+    events and A-track emission remain.
     Garden candidates still pass deterministic triage, evidence
     synthesis, and EventLog audit before any durable write — that
     triage step is the "Alaya decides". When an attached MCP session has
@@ -140,13 +140,12 @@ These rules always win over lower-level docs and task-card convenience.
     incidences. Optional formation failure does not delete or
     invalidate that capsule. Soul materialization does not compensate
     a later memory-create failure by deleting the evidence.
-20b. **One query as-of and one pinned generation.** `prepareRecallRequest`
-    captures `effective_as_of` once and pins exactly one projection
-    generation. **LIVE:** Canonical `prefixSK` is the admission-order and
-    delivery owner; `selectGammaWalk` is only the explicit outer legacy
-    delivery implementation. **TARGET:** One captured QuerySpec, one indexed
-    field, and one budget-aware evidence-set selector own admission and
-    delivery (`ranking_authority = "budget_aware_q"`). There is no all-K
+20b. **One query as-of and one pinned generation.** Ordinary Recall pins
+    one snapshot (`observablePin` / worker snapshot lease) and one
+    interpretation clock. The live owner is the conditional field
+    (`compileConditionalFieldQuery` → `observeField` →
+    `projectAcceptingIndex`). Historical `prefixSK` / `selectGammaWalk` /
+    budget-aware-q are not the admission-order owner. There is no all-K
     prefix promise and no runtime self-replay. Later consensus does not
     reorder the delivered set. Missing generation or condition pins fail
     closed.

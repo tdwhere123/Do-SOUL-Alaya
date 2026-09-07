@@ -70,7 +70,7 @@ export function retainCompleteAlternatives(
   const complete = joinHyperedgeOr(witnesses) as readonly PolarizedWitness[];
   const unique = new Map<string, PolarizedWitness>();
   for (const witness of complete) {
-    const key = `${witness.polarity}\0${witness.witness_id}\0${witness.premises.join("\0")}\0${String(witness.cost)}`;
+    const key = `${witness.polarity}\0${witness.witness_id}`;
     if (!unique.has(key)) unique.set(key, witness);
   }
   return [...unique.values()].sort(compareWitnesses);

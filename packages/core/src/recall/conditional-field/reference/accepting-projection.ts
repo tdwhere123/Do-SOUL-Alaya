@@ -266,6 +266,8 @@ function indexEntryForValue(
     object_id: value.state.object_id,
     hypothesis_id: value.state.hypothesis_id,
     output_binding: value.state.binding_context,
+    program_state: value.state.program_state,
+    time_state: value.state.time_state,
     role,
     association_milligrades: value.milligrades,
     claim: input.claims?.get(value.state.object_id) ?? "unknown",
@@ -313,7 +315,9 @@ function entrySortKey(entry: IndexEntry): string {
   return stableStringify({
     object_id: entry.object_id,
     hypothesis_id: entry.hypothesis_id,
-    output_binding: entry.output_binding
+    output_binding: entry.output_binding,
+    program_state: entry.program_state ?? "",
+    time_state: entry.time_state ?? ""
   });
 }
 

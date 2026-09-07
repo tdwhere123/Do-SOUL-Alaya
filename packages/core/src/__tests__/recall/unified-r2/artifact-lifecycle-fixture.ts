@@ -35,10 +35,12 @@ export function wireArtifacts(database: StorageDatabase) {
       entity_type: 'garden_task', entity_id: task.id, workspace_id: task.workspaceId,
       run_id: RUN, caused_by: 'garden', payload_json: SoulGardenSemanticEnrichmentPayloadSchema.parse({ task_id: task.id, source_revision: task.revision, action }) }], mutate);
   function worker(transport: SemanticEnrichmentWorkerDependencies['transport'],
-    auditOverride = audit, maxAttempts = 3, maxReservedUtf8Bytes = 32 * 16_384) {
+    auditOverride = audit, maxAttempts = 3, maxReservedUtf8Bytes = 32 * 16_384,
+    maxCompletionUtf8Bytes?: number) {
     return new SemanticEnrichmentWorker({ repo, codec, transport, audit: auditOverride,
       now: () => now, leaseMs: 1000, maxAttempts, maxUnits: 32, transportTimeoutMs: 100, maxLocalRecoveries: 8,
-      maxReservedUtf8Bytes });
+      maxReservedUtf8Bytes,
+      ...(maxCompletionUtf8Bytes === undefined ? {} : { maxCompletionUtf8Bytes }) });
   }
   return { events, garden, repo, codec, audit, worker,
     advance: () => { now = new Date(Date.parse(now) + 2000).toISOString(); } };

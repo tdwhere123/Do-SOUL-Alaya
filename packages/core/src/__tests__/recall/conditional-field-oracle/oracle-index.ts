@@ -23,6 +23,7 @@ import {
 import type { NativeReaderPage } from "./finite-worlds.js";
 
 export const CONTRACT_ONLY_UNTIL_C07 = "contract-only until C07 binds real producers";
+export const CONTRACT_ONLY_UNTIL_U07 = "contract-only until U07 binds real producers";
 
 export type OracleCounts = Readonly<{
   readonly matches: number;
@@ -53,6 +54,8 @@ export type IndexOracleInput = Readonly<{
   readonly prior_continuation?: Continuation;
   readonly observer?: ObserverCoverage;
   readonly interpretation_status?: QueryInterpretationStatus;
+  readonly interpretation_coverage?: CompletenessStatus;
+  readonly omitted_hypotheses?: readonly string[];
   readonly relation_facet_modes?: ReadonlyMap<string, FacetMode>;
   readonly retained_relation_kinds?: ReadonlyMap<string, string>;
 }>;
@@ -194,6 +197,16 @@ export function entryIdentity(entry: Pick<IndexEntry, "object_id" | "hypothesis_
   return `${entry.hypothesis_id}\0${entry.output_binding}\0${entry.object_id}`;
 }
 
+export function productIdentity(entry: Pick<IndexEntry, "object_id" | "hypothesis_id" | "output_binding" | "program_state" | "time_state">): string {
+  return [
+    entry.object_id,
+    entry.hypothesis_id,
+    entry.output_binding,
+    entry.program_state ?? "",
+    entry.time_state ?? ""
+  ].join("\0");
+}
+
 function completenessForInterpretation(
   status: QueryInterpretationStatus | undefined
 ): CompletenessReport | undefined {
@@ -210,53 +223,55 @@ function composeCompleteness(
   const observerStatus = input.observer?.outcome.status;
   const open = (input.observer?.open_regions ?? []).some((region) => region.status === "open")
     || observerStatus === "open";
-  if (observerStatus === "unavailable") return uniformCompleteness("unavailable", remaining);
+  if (observerStatus === "unavailable") {
+    return withInterpretationCoverage(uniformCompleteness("unavailable", remaining), input);
+  }
   if (
     observerStatus === "cancelled"
     || observerStatus === "unknown"
     || observerStatus === "not_applicable"
     || observerStatus === "invalidated"
   ) {
-    return {
+    return withInterpretationCoverage({
       schema_version: 1,
       logical_index: "open",
       observed_coverage: observerStatus,
       transport: remaining > 0 ? "partial" : "open",
       payload: remaining > 0 ? "partial" : "open",
       representation: "complete"
-    };
+    }, input);
   }
   if (observerStatus === "interrupted" || open) {
-    return {
+    return withInterpretationCoverage({
       schema_version: 1,
       logical_index: "open",
       observed_coverage: observerStatus === "interrupted" ? "interrupted" : "open",
       transport: remaining > 0 ? "partial" : "open",
       payload: remaining > 0 ? "partial" : "open",
       representation: "complete"
-    };
+    }, input);
   }
   if (total === 0) {
     if (input.interpretation_status !== undefined && !interpretationMayEmitCompleteEmpty(input.interpretation_status)) {
-      return uniformCompleteness("unavailable");
+      return withInterpretationCoverage(uniformCompleteness("unavailable"), input);
     }
-    return {
+    return withInterpretationCoverage({
       schema_version: 1,
       logical_index: "complete",
       observed_coverage: "exhausted_empty",
       transport: "complete",
       payload: "complete",
       representation: "complete"
-    };
+    }, input);
   }
-  return {
+  return withInterpretationCoverage({
     schema_version: 1,
     logical_index: "complete",
     observed_coverage: "complete",
     transport: remaining > 0 ? "partial" : "complete",
     payload: remaining > 0 ? "partial" : "complete",
     representation: "complete"
-  };
+  }, input);
 }
 
 function acceptingEntries(input: IndexOracleInput): IndexEntry[] {
@@ -283,7 +298,9 @@ function entryForValue(value: FieldValue, input: IndexOracleInput): IndexEntry |
     role,
     association_milligrades: value.milligrades,
     claim: input.claims?.get(value.state.object_id) ?? "unknown",
-    explanation_ids: []
+    explanation_ids: [],
+    program_state: value.state.program_state,
+    time_state: value.state.time_state
   };
 }
 
@@ -349,6 +366,24 @@ function uniformCompleteness(status: CompletenessStatus, remaining = 0): Complet
       ? status
       : "complete"
   };
+}
+
+function withInterpretationCoverage(
+  report: CompletenessReport,
+  input: IndexOracleInput
+): CompletenessReport {
+  const coverage = interpretationCoverageOf(input);
+  if (coverage === undefined) return report;
+  return { ...report, interpretation_coverage: coverage };
+}
+
+function interpretationCoverageOf(input: IndexOracleInput): CompletenessStatus | undefined {
+  if (input.interpretation_coverage !== undefined) return input.interpretation_coverage;
+  if ((input.omitted_hypotheses?.length ?? 0) > 0) return "open";
+  if (input.interpretation_status === "hypotheses" || input.interpretation_status === "partial") {
+    return "open";
+  }
+  return undefined;
 }
 
 function defaultOpenRegions(): readonly CoverageRegion[] {

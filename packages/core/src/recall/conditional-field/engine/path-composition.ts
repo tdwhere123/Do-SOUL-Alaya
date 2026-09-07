@@ -2,6 +2,7 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
+  type Derivation,
   type FacetMode,
   type FacetVector,
   type ProductStateKey,
@@ -12,10 +13,7 @@ import {
   type TypedObservation
 } from "@do-soul/alaya-protocol";
 import { compareText } from "../../../shared/compare-text.js";
-import {
-  collectRelations,
-  type QueryRelation
-} from "../query/compile-query.js";
+import { collectRelations, type QueryRelation } from "../query/compile-query.js";
 import {
   STORED_RELATION_KIND,
   SUPPORTED_RELATION_ALIASES
@@ -23,26 +21,45 @@ import {
 import { interpretQuery } from "../reference/interpret-query.js";
 import {
   evaluateFacetPredicate,
-  joinHyperedgeAnd,
   type HyperedgePremise
 } from "../reference/accepting-projection.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
+import {
+  UNBOUND_BINDING,
+  decideGuards,
+  encodeBindingContext,
+  parseBindingContext,
+  unifyBinding,
+  type BoundSourceFacts
+} from "./binding-environment.js";
+import { leafDerivation } from "./path-derivation.js";
+import {
+  hyperedgeEffects,
+  tryCompleteHyperedge,
+  type HyperedgeCompletion,
+  type HyperedgeEffect
+} from "./path-hyperedge.js";
+import {
+  inactiveResolution,
+  relationMatches,
+  relationStrength,
+  unifyAdvance,
+  type AdjacencyRow,
+  type NamedKindOverlay
+} from "./path-matching.js";
+import {
+  ACCEPTING_PROGRAM_STATE,
+  START_PROGRAM_STATE,
+  advancesFor,
+  compileProgramAutomaton,
+  type ProgramAutomaton
+} from "./program-automaton.js";
 
-export type { HyperedgePremise };
+export type { HyperedgePremise, HyperedgeCompletion, AdjacencyRow, NamedKindOverlay };
+export { ACCEPTING_PROGRAM_STATE, START_PROGRAM_STATE, tryCompleteHyperedge };
 
-export type HyperedgeCompletion = Readonly<{
-  readonly from: ProductStateKey;
-  readonly to: ProductStateKey;
-  readonly relation_kind: string;
-  readonly strength_milligrades: number;
-  readonly validity: Transition["validity"];
-}>;
-
-export const ACCEPTING_PROGRAM_STATE = "accepting";
-export const START_PROGRAM_STATE = "start";
 const DEFAULT_PROGRAM_STATE = ACCEPTING_PROGRAM_STATE;
 const DEFAULT_HYPOTHESIS = "h0";
-const DEFAULT_BINDING = "default";
 const DEFAULT_TIME_STATE = "as_of";
 
 export function serialMin(grades: readonly number[]): number {
@@ -72,7 +89,7 @@ export function productStateFromObservation(
     object_id: observation.object_id,
     program_state: defaults.program_state ?? DEFAULT_PROGRAM_STATE,
     hypothesis_id: defaults.hypothesis_id ?? DEFAULT_HYPOTHESIS,
-    binding_context: defaults.binding_context ?? DEFAULT_BINDING,
+    binding_context: defaults.binding_context ?? UNBOUND_BINDING,
     time_state: defaults.time_state ?? DEFAULT_TIME_STATE
   };
 }
@@ -119,7 +136,7 @@ export function seedProgramStates(program: QueryProgram): readonly string[] {
   const runtime = runtimeProgram(program);
   if (runtime === "empty") return [];
   if (runtime === "epsilon") return [ACCEPTING_PROGRAM_STATE];
-  return seedStatesFor(runtime);
+  return compileProgramAutomaton(runtime).start;
 }
 
 export function seedActivationsForObservation(
@@ -128,18 +145,33 @@ export function seedActivationsForObservation(
   asOf: string
 ): readonly SeedActivation[] {
   if (observation.applicability.verdict === "false") return [];
-  const states = seedProgramStates(interpretation.program);
+  const runtime = runtimeProgram(interpretation.program);
+  const automaton = runtime === "empty" || runtime === "epsilon"
+    ? undefined
+    : compileProgramAutomaton(runtime);
+  const states = runtime === "empty"
+    ? []
+    : runtime === "epsilon"
+      ? [ACCEPTING_PROGRAM_STATE]
+      : automaton?.start ?? [];
   if (states.length === 0) return [];
   const timeState = timeStateFor(interpretation, asOf);
   const seeds: SeedActivation[] = [];
   for (const programState of states) {
-    for (const hypothesisId of hypothesisIdsFor(interpretation)) {
+    for (const hypothesis of seedHypotheses(interpretation)) {
+      const binding = seedBindingContext(
+        automaton,
+        observation.object_id,
+        hypothesis.bindings,
+        programState
+      );
+      if (binding === undefined) continue;
       const seed = seedFromObservation(observation, {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
         object_id: observation.object_id,
         program_state: programState,
-        hypothesis_id: hypothesisId,
-        binding_context: DEFAULT_BINDING,
+        hypothesis_id: hypothesis.hypothesis_id,
+        binding_context: binding,
         time_state: timeState
       });
       if (seed !== undefined) seeds.push(seed);
@@ -148,27 +180,16 @@ export function seedActivationsForObservation(
   return Object.freeze(seeds);
 }
 
-export type AdjacencyRow = Readonly<{
-  readonly assertionId: string;
-  readonly sourceObjectId: string;
-  readonly targetObjectId: string;
-  readonly predicate: string;
-  readonly validity?: Transition["validity"];
-  readonly resolutionKind?: string | null;
-}>;
-
-export type NamedKindOverlay = Readonly<Record<string, Readonly<{
-  readonly milligrades: number;
-  readonly applicable: boolean;
-  readonly role?: string;
-}>>>;
-
 export type CompiledAdjacencyEffect = Readonly<{
   readonly observation_id: string;
   readonly transition?: Transition;
   readonly facet?: FacetVector;
   readonly hyperedge_premises?: readonly HyperedgePremise[];
   readonly hyperedge?: HyperedgeCompletion;
+  readonly derivation?: Derivation;
+  readonly derivations?: readonly Derivation[];
+  readonly missing_measurement?: boolean;
+  readonly unresolved_guard?: boolean;
 }>;
 
 export function programRelationKinds(program: QueryProgram): readonly string[] {
@@ -207,21 +228,31 @@ export function adjacencyEffectsForRows(
     readonly asOf: string;
     readonly liveStates: readonly ProductStateKey[];
     readonly overlay: NamedKindOverlay;
+    readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
+    readonly facets?: readonly FacetVector[];
   }>
 ): readonly CompiledAdjacencyEffect[] {
   const runtime = runtimeProgram(input.interpretation.program);
   if (runtime === "empty" || runtime === "epsilon") return [];
-  if (runtime.kind === "hyperedge") {
-    return hyperedgeEffects(rows, runtime, input);
-  }
+  const automaton = compileProgramAutomaton(runtime);
   const effects: CompiledAdjacencyEffect[] = [];
+  for (const from of input.liveStates) {
+    for (const advance of automaton.hyperedgeAdvances) {
+      if (advance.from !== from.program_state) continue;
+      effects.push(...hyperedgeEffects(rows, advance.hyperedge, {
+        liveStates: [from],
+        overlay: input.overlay,
+        sourceFacts: input.sourceFacts,
+        toProgramStates: advance.to
+      }).map(attachHyperedgeFacet));
+    }
+  }
   for (const row of rows) {
     if (row.validity === undefined) continue;
     if (inactiveResolution(row.resolutionKind)) continue;
     for (const from of input.liveStates) {
       if (from.object_id !== row.sourceObjectId) continue;
-      const effect = effectForLiveRow(runtime, row, from, input.overlay);
-      if (effect !== undefined) effects.push(effect);
+      effects.push(...effectsForLiveRow(automaton, row, from, input));
     }
   }
   return Object.freeze(effects);
@@ -230,6 +261,18 @@ export function adjacencyEffectsForRows(
 export function facetPathId(state: ProductStateKey): string {
   const packed = `${state.object_id}:${state.hypothesis_id}:${state.binding_context}`;
   return packed.length <= 256 ? packed : packed.slice(0, 256);
+}
+
+export function composedFacetPathId(state: ProductStateKey, route: string): string {
+  const identity = facetPathId(state);
+  const suffix = `:${route}`;
+  if (identity.length + suffix.length <= 256) return `${identity}${suffix}`;
+  return identity;
+}
+
+export function facetBelongsToOutput(pathId: string, state: ProductStateKey): boolean {
+  const identity = facetPathId(state);
+  return pathId === identity || pathId.startsWith(`${identity}:`);
 }
 
 export function retainSamePathVectors(
@@ -256,22 +299,6 @@ export function facetModeAccepts(
   threshold: number
 ): boolean {
   return evaluateFacetPredicate(mode, retainSamePathVectors(vectors), threshold);
-}
-
-export function tryCompleteHyperedge(
-  premises: readonly HyperedgePremise[],
-  completion: HyperedgeCompletion
-): Transition | undefined {
-  if (!joinHyperedgeAnd(premises)) return undefined;
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    from: completion.from,
-    to: completion.to,
-    relation_kind: completion.relation_kind,
-    strength_milligrades: completion.strength_milligrades,
-    validity: completion.validity,
-    applicable: true
-  };
 }
 
 export function mergeSeeds(seeds: readonly SeedActivation[]): readonly SeedActivation[] {
@@ -332,251 +359,221 @@ function sortStates(states: readonly ProductStateKey[]): ProductStateKey[] {
   );
 }
 
-function seedStatesFor(program: QueryProgram): readonly string[] {
-  switch (program.kind) {
-    case "epsilon":
-      return [ACCEPTING_PROGRAM_STATE];
-    case "empty":
-      return [];
-    case "relation":
-      return [START_PROGRAM_STATE];
-    case "sequence":
-      return ["seq.0"];
-    case "alternative": {
-      const states: string[] = [];
-      for (const [index, option] of program.options.entries()) {
-        for (const inner of seedStatesFor(option)) {
-          states.push(inner === ACCEPTING_PROGRAM_STATE ? ACCEPTING_PROGRAM_STATE : `alt.${String(index)}`);
-        }
-      }
-      return states;
-    }
-    case "hyperedge":
-      return [START_PROGRAM_STATE];
-    case "repeat":
-    case "closure":
-      return seedStatesFor(program.body);
+function effectsForLiveRow(
+  automaton: ProgramAutomaton,
+  row: AdjacencyRow,
+  from: ProductStateKey,
+  input: Readonly<{
+    readonly overlay: NamedKindOverlay;
+    readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
+    readonly facets?: readonly FacetVector[];
+  }>
+): readonly CompiledAdjacencyEffect[] {
+  const matched = advancesFor(automaton, from.program_state, (relation) =>
+    relationMatches(relation.relation_kind, row.predicate)
+  );
+  if (matched.length === 0) {
+    return routingEffect(row, from, input.overlay);
   }
+  const effects: CompiledAdjacencyEffect[] = [];
+  for (const advance of matched) {
+    effects.push(...effectsForAdvance(automaton, advance, row, from, input));
+  }
+  return effects;
 }
 
-function effectForLiveRow(
-  runtime: QueryProgram,
+function effectsForAdvance(
+  automaton: ProgramAutomaton,
+  advance: Readonly<{ readonly relation: QueryRelation; readonly to: readonly string[] }>,
+  row: AdjacencyRow,
+  from: ProductStateKey,
+  input: Readonly<{
+    readonly overlay: NamedKindOverlay;
+    readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
+    readonly facets?: readonly FacetVector[];
+  }>
+): readonly CompiledAdjacencyEffect[] {
+  const unified = unifyAdvance(from, advance.relation, row);
+  if (unified === undefined) return [];
+  const decision = decideGuards(
+    [advance.relation.guard],
+    unified.env,
+    input.sourceFacts ?? new Map(),
+    { sourceId: row.sourceObjectId, targetId: row.targetObjectId }
+  );
+  if (decision === "false") return [];
+  const strength = relationStrength(advance.relation, input.overlay, row.predicate);
+  if (strength === undefined) {
+    return [{
+      observation_id: `adjacency:${row.assertionId}:${from.hypothesis_id}:${from.program_state}`,
+      missing_measurement: true,
+      unresolved_guard: decision === "unresolved"
+    }];
+  }
+  if (strength.milligrades <= advance.relation.threshold_milligrades) return [];
+  const applicable = strength.applicable && decision === "true";
+  const toStates = applicable ? advance.to : [from.program_state];
+  const effects: CompiledAdjacencyEffect[] = [];
+  for (const programState of toStates) {
+    const binding = alignOutgoingBinding(
+      unified.binding,
+      row.targetObjectId,
+      automaton,
+      programState
+    );
+    if (binding === undefined) continue;
+    const to = {
+      ...from,
+      object_id: row.targetObjectId,
+      program_state: programState,
+      binding_context: binding
+    };
+    effects.push(...compiledEffects(row, from, to, strength, applicable, decision, input.facets ?? []));
+  }
+  return effects;
+}
+
+function routingEffect(
   row: AdjacencyRow,
   from: ProductStateKey,
   overlay: NamedKindOverlay
-): CompiledAdjacencyEffect | undefined {
-  const matched = matchAdvance(runtime, from.program_state, row.predicate);
-  if (matched !== undefined) {
-    const strength = overlay[row.predicate] ?? relationStrength(matched.relation, overlay);
-    if (strength === undefined) return undefined;
-    const applicable = matched.applicable && strength.applicable && matched.relation.guard.verdict !== "false";
-    return compiledEffect(row, from, {
-      ...from,
-      object_id: row.targetObjectId,
-      program_state: applicable ? matched.toProgramState : from.program_state
-    }, strength, applicable);
-  }
+): readonly CompiledAdjacencyEffect[] {
   const routing = overlay[row.predicate];
   if (routing === undefined || routing.role !== "routing_only" || !routing.applicable) {
-    return undefined;
+    return [];
   }
-  return compiledEffect(row, from, {
-    ...from,
-    object_id: row.targetObjectId
-  }, routing, true);
+  return compiledEffects(row, from, { ...from, object_id: row.targetObjectId }, routing, true, "true", []);
 }
 
-function compiledEffect(
+function compiledEffects(
   row: AdjacencyRow,
   from: ProductStateKey,
   to: ProductStateKey,
   strength: Readonly<{ readonly milligrades: number; readonly applicable: boolean }>,
-  applicable: boolean
-): CompiledAdjacencyEffect | undefined {
-  if (row.validity === undefined) return undefined;
-  return {
-    observation_id: `adjacency:${row.assertionId}:${from.hypothesis_id}:${from.program_state}`,
-    transition: {
+  applicable: boolean,
+  decision: "true" | "unresolved",
+  priorFacets: readonly FacetVector[]
+): readonly CompiledAdjacencyEffect[] {
+  if (row.validity === undefined) return [];
+  const transition: Transition = {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    from,
+    to,
+    relation_kind: row.predicate,
+    strength_milligrades: strength.milligrades,
+    validity: row.validity,
+    applicable
+  };
+  const vectors = extendFacets(priorFacets, from, to, row.predicate, strength.milligrades);
+  const derivation = leafDerivation({
+    derivation_id: `leaf:${row.assertionId}:${from.program_state}:${to.program_state}`,
+    observation_id: row.assertionId,
+    leaf_id: row.assertionId
+  });
+  return vectors.map((facet, index) => ({
+    observation_id: `adjacency:${row.assertionId}:${from.program_state}:${to.program_state}:${String(index)}`,
+    transition,
+    facet,
+    derivation,
+    derivations: [derivation],
+    unresolved_guard: decision === "unresolved"
+  }));
+}
+
+function extendFacets(
+  priorFacets: readonly FacetVector[],
+  from: ProductStateKey,
+  to: ProductStateKey,
+  route: string,
+  milligrades: number
+): readonly FacetVector[] {
+  const inherited = priorFacets.filter((vector) => facetBelongsToOutput(vector.path_id, from));
+  if (inherited.length === 0) {
+    return [{
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      from,
-      to,
-      relation_kind: row.predicate,
-      strength_milligrades: strength.milligrades,
-      validity: row.validity,
-      applicable
-    },
+      path_id: composedFacetPathId(to, route),
+      coordinates: [milligrades]
+    }];
+  }
+  return inherited.map((vector) => ({
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    path_id: composedFacetPathId(to, extendRoute(vector.path_id, from, route)),
+    coordinates: [...vector.coordinates, milligrades]
+  }));
+}
+
+function extendRoute(priorPathId: string, from: ProductStateKey, route: string): string {
+  const identity = facetPathId(from);
+  const prior = priorPathId.startsWith(`${identity}:`)
+    ? priorPathId.slice(identity.length + 1)
+    : route;
+  return `${prior}+${route}`;
+}
+
+function seedHypotheses(interpretation: QueryInterpretation): readonly {
+  readonly hypothesis_id: string;
+  readonly bindings: QueryInterpretation["hypotheses"][number]["bindings"] | undefined;
+}[] {
+  if (interpretation.hypotheses.length === 0) {
+    return [{ hypothesis_id: DEFAULT_HYPOTHESIS, bindings: undefined }];
+  }
+  return interpretation.hypotheses;
+}
+
+function seedBindingContext(
+  automaton: ProgramAutomaton | undefined,
+  objectId: string,
+  hypothesisBindings: QueryInterpretation["hypotheses"][number]["bindings"] | undefined,
+  programState: string
+): string | undefined {
+  const envSeed = new Map<string, string>();
+  for (const binding of hypothesisBindings ?? []) envSeed.set(binding.variable, binding.value);
+  let env = envSeed;
+  for (const variable of automaton?.sourceVariables.get(programState) ?? []) {
+    const next = unifyBinding(env, variable, objectId);
+    if (next === undefined) return undefined;
+    env = next;
+  }
+  return encodeBindingContext(env);
+}
+
+function alignOutgoingBinding(
+  binding: string,
+  objectId: string,
+  automaton: ProgramAutomaton,
+  programState: string
+): string | undefined {
+  let env = parseBindingContext(binding);
+  for (const advance of automaton.advances) {
+    if (advance.from !== programState) continue;
+    const sourceVar = advance.relation.source_variable;
+    const bound = env.get(sourceVar);
+    if (bound !== undefined && bound !== objectId) {
+      env = new Map(env);
+      env.set(sourceVar, objectId);
+      if (advance.relation.target_variable !== sourceVar) {
+        env.delete(advance.relation.target_variable);
+      }
+      continue;
+    }
+    const next = unifyBinding(env, sourceVar, objectId);
+    if (next === undefined) return undefined;
+    env = next;
+  }
+  return encodeBindingContext(env);
+}
+
+function attachHyperedgeFacet(effect: HyperedgeEffect): CompiledAdjacencyEffect {
+  return {
+    observation_id: effect.observation_id,
+    hyperedge_premises: effect.hyperedge_premises,
+    hyperedge: effect.hyperedge,
+    derivation: effect.derivation,
+    derivations: effect.derivations,
     facet: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      path_id: facetPathId(to),
-      coordinates: [strength.milligrades]
+      path_id: composedFacetPathId(effect.hyperedge.to, effect.hyperedge.relation_kind),
+      coordinates: [effect.hyperedge.strength_milligrades]
     }
   };
-}
-
-type AdvanceMatch = Readonly<{
-  readonly toProgramState: string;
-  readonly relation: QueryRelation;
-  readonly applicable: boolean;
-}>;
-
-function matchAdvance(
-  program: QueryProgram,
-  fromState: string,
-  relationKind: string
-): AdvanceMatch | undefined {
-  switch (program.kind) {
-    case "relation": {
-      if (fromState !== START_PROGRAM_STATE) return undefined;
-      if (!relationMatches(program.relation_kind, relationKind)) return undefined;
-      return {
-        toProgramState: ACCEPTING_PROGRAM_STATE,
-        relation: program,
-        applicable: program.guard.verdict !== "false"
-      };
-    }
-    case "sequence": {
-      const index = sequenceIndex(fromState);
-      if (index === undefined || index >= program.steps.length) return undefined;
-      const step = program.steps[index];
-      if (step === undefined) return undefined;
-      const innerFrom = step.kind === "alternative" || step.kind === "sequence" ? fromState : stepStart(step);
-      const inner = matchAdvance(step, innerFrom, relationKind);
-      if (inner === undefined) return undefined;
-      if (!inner.applicable) {
-        return { ...inner, toProgramState: fromState };
-      }
-      const completed = inner.toProgramState === ACCEPTING_PROGRAM_STATE;
-      if (!completed) return inner;
-      const last = index === program.steps.length - 1;
-      return {
-        ...inner,
-        toProgramState: last ? ACCEPTING_PROGRAM_STATE : `seq.${String(index + 1)}`
-      };
-    }
-    case "alternative": {
-      const optionIndex = alternativeIndex(fromState);
-      if (optionIndex !== undefined) {
-        const option = program.options[optionIndex];
-        if (option === undefined) return undefined;
-        const inner = matchAdvance(option, stepStart(option), relationKind);
-        if (inner === undefined) return undefined;
-        if (!inner.applicable) return { ...inner, toProgramState: fromState };
-        return inner.toProgramState === ACCEPTING_PROGRAM_STATE
-          ? { ...inner, toProgramState: ACCEPTING_PROGRAM_STATE }
-          : inner;
-      }
-      if (fromState.startsWith("seq.")) {
-        for (const option of program.options) {
-          const inner = matchAdvance(option, stepStart(option), relationKind);
-          if (inner !== undefined) {
-            if (!inner.applicable) return { ...inner, toProgramState: fromState };
-            return inner.toProgramState === ACCEPTING_PROGRAM_STATE
-              ? { ...inner, toProgramState: ACCEPTING_PROGRAM_STATE }
-              : inner;
-          }
-        }
-      }
-      return undefined;
-    }
-    case "repeat":
-    case "closure":
-      return matchAdvance(program.body, fromState, relationKind);
-    default:
-      return undefined;
-  }
-}
-
-function relationMatches(programKind: string, storedPredicate: string): boolean {
-  if (programKind === storedPredicate) return true;
-  if (programKind === STORED_RELATION_KIND) return false;
-  return (SUPPORTED_RELATION_ALIASES[programKind] ?? []).includes(storedPredicate);
-}
-
-function stepStart(program: QueryProgram): string {
-  if (program.kind === "relation") return START_PROGRAM_STATE;
-  if (program.kind === "sequence") return "seq.0";
-  if (program.kind === "alternative") return "alt.0";
-  if (program.kind === "epsilon") return ACCEPTING_PROGRAM_STATE;
-  return START_PROGRAM_STATE;
-}
-
-function sequenceIndex(state: string): number | undefined {
-  if (state === START_PROGRAM_STATE) return 0;
-  const matched = /^seq\.(\d+)$/u.exec(state);
-  return matched === null ? undefined : Number(matched[1]);
-}
-
-function alternativeIndex(state: string): number | undefined {
-  const matched = /^alt\.(\d+)$/u.exec(state);
-  return matched === null ? undefined : Number(matched[1]);
-}
-
-function relationStrength(
-  relation: QueryRelation,
-  overlay: NamedKindOverlay
-): Readonly<{ readonly milligrades: number; readonly applicable: boolean }> | undefined {
-  const named = overlay[relation.relation_kind];
-  if (named !== undefined) return named;
-  if (relation.threshold_milligrades > 0) {
-    return { milligrades: relation.threshold_milligrades, applicable: true };
-  }
-  return { milligrades: MILLIGRADE_TOP, applicable: true };
-}
-
-function inactiveResolution(kind: string | null | undefined): boolean {
-  return kind === "retracted" || kind === "expired" || kind === "contradicted";
-}
-
-function hyperedgeEffects(
-  rows: readonly AdjacencyRow[],
-  program: Extract<QueryProgram, { readonly kind: "hyperedge" }>,
-  input: Readonly<{
-    readonly interpretation: QueryInterpretation;
-    readonly asOf: string;
-    readonly liveStates: readonly ProductStateKey[];
-    readonly overlay: NamedKindOverlay;
-  }>
-): readonly CompiledAdjacencyEffect[] {
-  const premises = program.premises;
-  const kinds = premises.flatMap((premise) => collectRelations(premise).map((row) => row.relation_kind));
-  const effects: CompiledAdjacencyEffect[] = [];
-  for (const from of input.liveStates) {
-    if (from.program_state !== START_PROGRAM_STATE) continue;
-    const present = kinds.map((kind) => rows.some((row) =>
-      row.predicate === kind
-      && row.sourceObjectId === from.object_id
-      && row.validity !== undefined
-      && !inactiveResolution(row.resolutionKind)
-    ));
-    const hyperedgePremises = present.map((isPresent) => ({
-      hypothesis_id: from.hypothesis_id,
-      binding_context: from.binding_context,
-      time_state: from.time_state,
-      present: isPresent
-    }));
-    const firstKind = kinds[0] ?? program.join;
-    const overlay = input.overlay[firstKind];
-    const milligrades = overlay?.milligrades ?? MILLIGRADE_TOP;
-    const matching = rows.find((row) => row.predicate === firstKind && row.sourceObjectId === from.object_id);
-    const targetId = matching?.targetObjectId ?? from.object_id;
-    const validity = matching?.validity;
-    if (validity === undefined) continue;
-    const to: ProductStateKey = {
-      ...from,
-      object_id: targetId,
-      program_state: ACCEPTING_PROGRAM_STATE
-    };
-    effects.push({
-      observation_id: `hyperedge:${from.object_id}:${from.hypothesis_id}`,
-      hyperedge_premises: hyperedgePremises,
-      hyperedge: {
-        from,
-        to,
-        relation_kind: firstKind,
-        strength_milligrades: milligrades,
-        validity
-      }
-    });
-  }
-  return Object.freeze(effects);
 }

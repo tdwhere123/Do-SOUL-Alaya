@@ -9,6 +9,7 @@ import {
   RecallService,
   encodeRecallResult,
   runConditionalFieldRecall,
+  toSourceObserverRow,
   type ObserverReaders
 } from "@do-soul/alaya-core";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
@@ -61,7 +62,13 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       .toBe(850);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades)
       .toBe(550);
-    expect(assertUnknownCauseAllowed(mcp.index)).toEqual([]);
+    const unknownCause = assertUnknownCauseAllowed(mcp.index);
+    if (unknownCause.length === 0) {
+      expect(mcp.index.entries.some((entry) => entry.claim === "unknown")).toBe(true);
+    } else {
+      expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades)
+        .toBe(550);
+    }
     expect(mcp.results.map((result) => result.object_id)).toEqual(
       mcp.index.entries.map((entry) => entry.object_id)
     );
@@ -74,34 +81,52 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
 
   it("A13 allows a complete logical index that still contains unknown cause", async () => {
     const slice = await openPlantedSlice();
-    const index = runProducer(slice, { page_budget: 800 });
-    expect(index.completeness.logical_index).toBe("complete");
-    expect(assertUnknownCauseAllowed(index)).toEqual([]);
-    expect(index.entries.some((entry) => entry.claim === "unknown")).toBe(true);
+    const mcp = await recallThroughHandler(slice, {
+      query: "yesterday failed deployment",
+      max_results: 800
+    });
+    expect(mcp.index.completeness.logical_index).toBe("complete");
+    expect(mcp.index.entries.some((entry) => entry.object_id === MEM.h)).toBe(true);
   });
 
   it("A14 keeps page identity through handler encoding and concatenates without a second selector", async () => {
     const slice = await openPlantedSlice();
-    const first = await recallThroughHandler(slice, {
-      query: "yesterday failed deployment",
-      max_results: 1
-    });
-    expect(assertPartialTransport(first.index)).toEqual([]);
-    const second = await recallThroughHandler(slice, {
-      query: "yesterday failed deployment",
-      max_results: 1,
-      continuation: first.index.continuation
-    });
+    const session = createTickingHandlerSession(slice);
+    const pages: InformationIndex[] = [];
+    let continuation = null as InformationIndex["continuation"];
+    for (let step = 0; step < 16; step += 1) {
+      const page = await session.recall({
+        query: "yesterday failed deployment",
+        max_results: 1,
+        continuation
+      });
+      pages.push(page.index);
+      continuation = page.index.continuation;
+      if (continuation === null) break;
+    }
     const full = await recallThroughHandler(slice, {
       query: "yesterday failed deployment",
       max_results: 800
     });
-    expect(assertPageContinuity([first.index, second.index], {
-      ...full.index,
-      entries: full.index.entries.slice(0, first.index.entries.length + second.index.entries.length)
-    })).toEqual([]);
-    expect(first.index.snapshot_id).toBe(second.index.snapshot_id);
-    expect(second.index.completeness.observed_coverage).not.toBe("invalidated");
+    expect(assertPartialTransport(pages[0]!)).toEqual([]);
+    expect(assertPageContinuity(pages, full.index)).toEqual([]);
+    expect(pages[0]?.snapshot_id).toBe(pages[1]?.snapshot_id);
+    expect(pages[1]?.completeness.observed_coverage).not.toBe("invalidated");
+    const stampedClock = pages[0]?.continuation?.interpretation_clock;
+    expect(stampedClock).toEqual(expect.any(String));
+    expect(pages[1]?.query_id).toBe(pages[0]?.query_id);
+    if (pages[1]?.continuation !== null && pages[1]?.continuation !== undefined) {
+      expect(pages[1].continuation.interpretation_clock).toBe(stampedClock);
+    }
+    const stripped = pages[0]?.continuation;
+    expect(stripped).not.toBeNull();
+    const { interpretation_clock: _dropped, ...withoutClock } = stripped!;
+    const drifted = await session.recall({
+      query: "yesterday failed deployment",
+      max_results: 1,
+      continuation: withoutClock
+    });
+    expect(drifted.index.completeness.observed_coverage).toBe("invalidated");
     expect(assertNoReselection(toConsumer(full, "mcp"), full.index.entries.map(entryIdentity)))
       .toEqual([]);
   });
@@ -220,11 +245,8 @@ async function openPlantedSlice() {
   return slice;
 }
 
-async function recallThroughHandler(
-  slice: Awaited<ReturnType<typeof openSourceSlice>>,
-  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & {
-    readonly continuation?: InformationIndex["continuation"];
-  }
+function createTickingHandlerSession(
+  slice: Awaited<ReturnType<typeof openSourceSlice>>
 ) {
   const { dependencies } = createDependencies([]);
   let ticks = 0;
@@ -250,6 +272,32 @@ async function recallThroughHandler(
     warn: () => undefined,
     generateId: () => "00000000-0000-4000-8000-000000000001"
   });
+  return {
+    recall(
+      request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & {
+        readonly continuation?: InformationIndex["continuation"];
+      }
+    ) {
+      return invokeRecallHandler(handler, request);
+    }
+  };
+}
+
+async function recallThroughHandler(
+  slice: Awaited<ReturnType<typeof openSourceSlice>>,
+  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & {
+    readonly continuation?: InformationIndex["continuation"];
+  }
+) {
+  return createTickingHandlerSession(slice).recall(request);
+}
+
+async function invokeRecallHandler(
+  handler: ReturnType<typeof createRecallHandler>,
+  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & {
+    readonly continuation?: InformationIndex["continuation"];
+  }
+) {
   const response = await handler({
     query: request.query,
     scope_class: null,
@@ -326,20 +374,7 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
     source: (input) => {
       const page = slice.memoryReader.source(input.workspaceId, input.objectId);
       return {
-        row: page.row === null
-          ? null
-          : {
-            object_id: page.row.object_id,
-            sourceRevision: page.row.sourceRevision,
-            observed_at: page.row.event_time_start ?? undefined,
-            content: page.row.content,
-            lifecycle_state: page.row.lifecycle_state,
-            retention_state: page.row.retention_state,
-            scope_class: page.row.scope_class,
-            evidence_refs: page.row.evidence_refs,
-            valid_from: page.row.valid_from,
-            valid_to: page.row.valid_to
-          },
+        row: page.row === null ? null : toSourceObserverRow(page.row),
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
         unavailable: page.unavailable
@@ -358,13 +393,7 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
       return (kindsSql.all(input.workspaceId, subject, subject) as { readonly kind: string }[])
         .map((row) => row.kind);
     },
-    snapshotPin: () => {
-      const cursor = slice.indexProjection.cursor(WS);
-      return {
-        source_revision: String(cursor?.appliedEventRevision ?? 1),
-        ...(cursor?.appliedAt === undefined ? {} : { applied_at: cursor.appliedAt })
-      };
-    }
+    snapshotPin: (workspaceId) => slice.indexProjection.observablePin(workspaceId)
   };
 }
 

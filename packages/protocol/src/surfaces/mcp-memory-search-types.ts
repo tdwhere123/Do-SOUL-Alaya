@@ -55,6 +55,9 @@ export const MemorySearchResultSchema = z
     relevance_score: z.number().min(0).max(1),
     content_preview: NonEmptyStringSchema,
     evidence_pointers: z.array(NonEmptyStringSchema).readonly(),
+    hypothesis_id: NonEmptyStringSchema.optional(),
+    program_state: NonEmptyStringSchema.optional(),
+    time_state: NonEmptyStringSchema.optional(),
     // Diagnostic-only prose. Agents must not branch on its wording or use it
     // as a ranking key. ranking_authority on the parent packet names the owner.
     selection_reason: BoundedReasonSchema,

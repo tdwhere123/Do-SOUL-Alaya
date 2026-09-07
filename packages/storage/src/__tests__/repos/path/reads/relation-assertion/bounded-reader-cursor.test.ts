@@ -26,7 +26,7 @@ describe("SqliteRelationRecallReader cursor", () => {
       const page = reader.read("workspace-1", "vega", "owns", 2, 512, after);
       pages.push(...page.observations.map((row) => row.assertionId));
       if (!page.truncated) break;
-      after = page.observations.at(-1)?.assertionId ?? after;
+      after = page.committedThrough ?? after;
     }
     expect(pages).toEqual(full.observations.map((row) => row.assertionId));
     expect(pages).toEqual(ids);
@@ -50,6 +50,51 @@ describe("SqliteRelationRecallReader cursor", () => {
     expect(empty.truncated).toBe(false);
   });
 
+  it("advances a compound cursor through two evidence rows at nativeLimit 1", () => {
+    const database = openDatabase();
+    const ids = plantAssertions(database, 2);
+    database.connection.prepare(`
+      INSERT INTO relation_assertion_evidence (
+        assertion_id, evidence_id, source_event_type, source_event_id, source_occurred_at
+      ) VALUES (?, ?, 'soul.signal.emitted', ?, ?)
+    `).run(ids[0], "evidence-extra", "event-extra", "2026-01-01T00:00:00.000Z");
+    const reader = new SqliteRelationRecallReader(database);
+    reader.prepareIndex();
+    const first = reader.read("workspace-1", "vega", "owns", 1, 1, null);
+    expect(first.observations).toEqual([]);
+    expect(first.truncated).toBe(true);
+    expect(first.committedThrough).not.toBeNull();
+    const second = reader.read("workspace-1", "vega", "owns", 1, 1, first.committedThrough);
+    expect(second.observations.map((row) => row.assertionId)).toEqual([ids[0]]);
+    expect(second.observations[0]?.evidenceRefs.length).toBeGreaterThanOrEqual(2);
+    const third = reader.read("workspace-1", "vega", "owns", 1, 1, second.committedThrough);
+    expect(third.observations.map((row) => row.assertionId)).toEqual([ids[1]]);
+  });
+
+  it("advances past seven evidence receipts at nativeLimit 1 without repeating the assertion", () => {
+    const database = openDatabase();
+    const ids = plantAssertions(database, 2);
+    const insert = database.connection.prepare(`
+      INSERT INTO relation_assertion_evidence (
+        assertion_id, evidence_id, source_event_type, source_event_id, source_occurred_at
+      ) VALUES (?, ?, 'soul.signal.emitted', ?, ?)
+    `);
+    for (let index = 0; index < 6; index += 1) {
+      insert.run(ids[0], `evidence-extra-${index}`, `event-extra-${index}`, "2026-01-01T00:00:00.000Z");
+    }
+    const reader = new SqliteRelationRecallReader(database);
+    reader.prepareIndex();
+    const seen: string[] = [];
+    let after: string | null = null;
+    for (let step = 0; step < 16; step += 1) {
+      const page = reader.read("workspace-1", "vega", "owns", 1, 1, after);
+      seen.push(...page.observations.map((row) => row.assertionId));
+      after = page.committedThrough;
+      if (!page.truncated) break;
+    }
+    expect(seen).toEqual(ids);
+  });
+
   it("emits a 32-row prefix of 40 matches and concatenates resume without skip or dup", () => {
     const database = openDatabase();
     const ids = plantAssertions(database, 40);
@@ -58,8 +103,7 @@ describe("SqliteRelationRecallReader cursor", () => {
     const first = reader.read("workspace-1", "vega", "owns", 32, 32);
     expect(first.observations.map((row) => row.assertionId)).toEqual(ids.slice(0, 32));
     expect(first.truncated).toBe(true);
-    const after = first.observations.at(-1)?.assertionId ?? null;
-    const second = reader.read("workspace-1", "vega", "owns", 32, 32, after);
+    const second = reader.read("workspace-1", "vega", "owns", 32, 32, first.committedThrough);
     const concatenated = [
       ...first.observations.map((row) => row.assertionId),
       ...second.observations.map((row) => row.assertionId)

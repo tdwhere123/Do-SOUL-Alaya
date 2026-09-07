@@ -80,6 +80,24 @@ describe("conditional-field evidence support", () => {
     }
   });
 
+  it("B09 keeps equal-leaf AND and OR derivations as distinct alternatives", () => {
+    const assessed = assessEvidence(assessmentInput({
+      observations: [
+        observation({ observation_id: "oa", evidence_id: "ea", premise_id: "a", proposition_id: "cause" }),
+        observation({ observation_id: "ob", evidence_id: "eb", premise_id: "b", proposition_id: "cause" }),
+        observation({ observation_id: "oc", evidence_id: "ec", premise_id: "c", proposition_id: "cause" })
+      ],
+      propositions: [demand("cause", "explanation", [
+        template("and-ab", ["a", "b"], 400),
+        template("or-c", ["c"], 400)
+      ])]
+    }));
+    expect(assessed.records[0]?.witnesses.filter((witness) => witness.complete)).toHaveLength(2);
+    expect(assessed.derivations.some((row) => row.kind === "and" && row.leaf_ids.includes("a"))).toBe(true);
+    expect(assessed.derivations.some((row) => row.leaf_ids.includes("c"))).toBe(true);
+    expect(assessed.explanation_ids).toEqual(expect.arrayContaining(["and-ab/supports", "or-c/supports"]));
+  });
+
   it("A08 keeps a cheaper complete witness when a canonical expensive id sorts first", () => {
     const assessed = assessEvidence(assessmentInput({
       observations: [

@@ -27,7 +27,7 @@ export { INTERPRETATION_CLOCK, defaultBudget, SNAPSHOT_ID } from "../../../../..
 
 export async function recallThroughHandler(
   slice: SourceSlice,
-  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & {
+  request: Pick<SoulMemorySearchRequest, "query" | "max_results" | "dimension" | "domain_tags"> & {
     readonly continuation?: InformationIndex["continuation"];
     readonly now?: string;
   }
@@ -60,8 +60,8 @@ export async function recallThroughHandler(
   const response = await handler({
     query: request.query,
     scope_class: null,
-    dimension: null,
-    domain_tags: null,
+    dimension: request.dimension ?? null,
+    domain_tags: request.domain_tags ?? null,
     max_results: request.max_results,
     ...(request.continuation === undefined || request.continuation === null
       ? {}

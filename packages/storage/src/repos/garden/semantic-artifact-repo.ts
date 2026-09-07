@@ -20,6 +20,9 @@ const sourceEventRevisionSql = (alias: string) => `(SELECT revision FROM event_l
   WHERE workspace_id=${alias}.workspace_id AND entity_type='memory_entry' AND entity_id=${alias}.object_id
     AND event_type IN ('soul.memory.created','soul.memory.updated') ORDER BY revision DESC LIMIT 1)`;
 
+const sourceEligibleSql = (alias: string) =>
+  `${alias}.lifecycle_state = 'active' AND COALESCE(${alias}.retention_state, '') != 'tombstoned'`;
+
 interface SemanticProjectionReadRow {
   workspace_id: string; object_id: string;
   projectionId: string | null; sourceRevision: string | null; projectionText: string | null;
@@ -54,7 +57,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
   public source(workspaceId: string, objectId: string): SemanticSourceSnapshot | null {
     const row = this.db.prepare(`SELECT object_id, content, run_id, created_at, source_kind,
       evidence_refs, updated_at, ${sourceEventRevisionSql('m')} AS sourceEventRevision FROM memory_entries m
-      WHERE workspace_id = ? AND object_id = ? AND lifecycle_state = 'active'`)
+      WHERE workspace_id = ? AND object_id = ? AND ${sourceEligibleSql('m')}`)
       .get(workspaceId, objectId) as { object_id: string; content: string; run_id: string;
         created_at: string; source_kind: string; evidence_refs: string; updated_at: string;
         sourceEventRevision: number | null } | undefined;
@@ -197,6 +200,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
 
   public dispatch(task: SemanticEnrichmentTask, key: string, attemptId: string): boolean {
     this.assertClaim(task);
+    this.requireEligibleSource(task);
     this.db.prepare(`INSERT OR IGNORE INTO garden_semantic_work_claims VALUES (?, ?, ?)`)
       .run(task.workspaceId, key, task.id);
     const owner = this.db.prepare(`SELECT task_id FROM garden_semantic_work_claims
@@ -214,6 +218,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
 
   public receive(task: SemanticEnrichmentTask, attemptId: string, rawJson: string): void {
     this.assertAttemptOwnership(task, attemptId);
+    this.requireEligibleSource(task);
     const result = this.db.prepare(`UPDATE garden_semantic_attempts SET state='received', raw_json=?
       WHERE id=? AND state='dispatched'`).run(rawJson, attemptId);
     if (result.changes !== 1) throw new Error("stale transport result");
@@ -227,6 +232,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
 
   public reconcile(task: SemanticEnrichmentTask, attemptId: string, rawJson: string | null): void {
     this.assertAttemptOwnership(task, attemptId);
+    if (rawJson !== null) this.requireEligibleSource(task);
     const result = this.db.prepare(`UPDATE garden_semantic_attempts SET state=?, raw_json=?
       WHERE id=? AND state IN ('dispatched','uncertain')`)
       .run(rawJson === null ? 'not_sent' : 'received', rawJson, attemptId);
@@ -235,6 +241,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
 
   public put(task: SemanticEnrichmentTask, artifact: AdmittedSemanticArtifact): void {
     this.assertClaim(task);
+    this.requireEligibleSource(task);
     const existing = this.artifact(task.workspaceId, artifact.key);
     if (existing) {
       if (existing.payloadJson !== artifact.payloadJson || existing.searchText !== artifact.searchText) {
@@ -270,11 +277,14 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
     const text = texts.join("\n");
     this.db.prepare(`INSERT INTO garden_semantic_projections
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, evidence_refs, updated_at, ? FROM memory_entries
-      WHERE workspace_id=? AND object_id=?
+      WHERE workspace_id=? AND object_id=? AND ${sourceEligibleSql('memory_entries')}
       ON CONFLICT(workspace_id,object_id) DO UPDATE SET source_revision=excluded.source_revision,
       publication_key=excluded.publication_key, task_id=excluded.task_id, source_content=excluded.source_content,
       source_evidence_refs=excluded.source_evidence_refs, source_updated_at=excluded.source_updated_at, source_event_revision=excluded.source_event_revision, search_text=excluded.search_text, published_at=excluded.published_at`)
       .run(task.workspaceId, task.objectId, source.revision, publicationKey, task.id, source.content, text, now, source.sourceEventRevision, task.workspaceId, task.objectId);
+    if (this.source(task.workspaceId, task.objectId)?.revision !== task.revision) {
+      throw new Error("superseded source result");
+    }
     this.db.prepare("DELETE FROM garden_semantic_fts WHERE workspace_id=? AND object_id=?")
       .run(task.workspaceId, task.objectId);
     this.db.prepare("INSERT INTO garden_semantic_fts VALUES (?, ?, ?)").run(task.workspaceId, task.objectId, text);
@@ -347,12 +357,12 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
         m.object_id AS sourceId, i.object_id AS intentId,
         ${sourceEventRevisionSql('m')} AS observedSourceRevision,
         p.source_event_revision AS expectedSourceRevision,
-        CASE WHEN m.lifecycle_state='active' AND i.task_id=p.task_id
+        CASE WHEN ${sourceEligibleSql('m')} AND i.task_id=p.task_id
           AND m.content=p.source_content AND m.evidence_refs=p.source_evidence_refs
           AND m.updated_at=p.source_updated_at THEN 1 ELSE 0 END AS sourceEligible,
         ${columnBytes('p', ['workspace_id', 'object_id', 'source_revision', 'search_text', 'task_id',
           'source_content', 'source_evidence_refs', 'source_updated_at', 'source_event_revision'])} AS projectionBytes,
-        ${columnBytes('m', ['workspace_id', 'object_id', 'content', 'evidence_refs', 'updated_at', 'lifecycle_state'])} AS sourceBytes,
+        ${columnBytes('m', ['workspace_id', 'object_id', 'content', 'evidence_refs', 'updated_at', 'lifecycle_state', 'retention_state'])} AS sourceBytes,
         ${columnBytes('i', ['workspace_id', 'object_id', 'task_id'])} AS intentBytes
       FROM candidate c
       LEFT JOIN garden_semantic_projections p ON p.workspace_id=c.workspace_id AND p.object_id=c.object_id
@@ -385,6 +395,13 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       this.db.prepare(`INSERT INTO garden_semantic_intents VALUES (?, ?, ?)
         ON CONFLICT(workspace_id,object_id) DO UPDATE SET task_id=excluded.task_id`)
         .run(task.workspaceId, task.objectId, task.id);
+    }
+  }
+
+  private requireEligibleSource(task: SemanticEnrichmentTask): void {
+    const source = this.source(task.workspaceId, task.objectId);
+    if (source === null || source.revision !== task.revision || !this.isCurrent(task)) {
+      throw new Error("superseded source result");
     }
   }
 

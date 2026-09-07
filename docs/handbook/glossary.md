@@ -205,11 +205,10 @@ before the trigger is called consumable.
 **UGAF** — Unified Governed Associative Field. One continuous governed
 associative-memory field, not a stack of post-processors. In-repo owner:
 `docs/handbook/recall.md`. Hopfield / Lyapunov / attractor wording is a
-design lens, not a proved runtime. **LIVE** HEAD connects the principal
-field, path, Slice, activation, and canonical `prefixSK` owners.
-**TARGET** (C01) is the budget-aware evidence-set selector in
-`recall.md` § Target algorithm (candidate); query-proof `prefixSK` is
-not the implementation target.
+design lens, not a proved runtime. **LIVE** HEAD is the conditional field
+(`compileConditionalFieldQuery` → `observeField` → `projectAcceptingIndex`).
+Historical query-proof `prefixSK` and C01 budget-aware-q are receipts, not
+the live selector.
 
 **Safe Dominance** — LIVE/historical query-proof vocabulary: a strict
 query-conditioned pointwise partial order over applicable attributed
@@ -227,16 +226,15 @@ required-proposition, compiler-required certified-independent support).
 **TARGET** does not use compiled Gamma as the live selector; `Q(S)` is the
 lexicographic evidence-set objective.
 
-**Budgeted Capture Walk** — **LIVE:** one deterministic canonical `prefixSK`
-walk whose prefixes define every budget K. K truncates the walk, so each
-smaller captured set is a prefix subset of the next. `selectGammaWalk` is
-only the optional outer legacy delivery implementation. **TARGET:** no
-all-K prefix promise; changing K or token budget may change membership.
+**Budgeted Capture Walk** — **LIVE:** observer work and page budget on the
+conditional field; continuation is offset paging plus worker-lifetime
+`FIELD_RESUME`. There is no all-K prefix promise; changing page budget may
+change which accepting states fit one packet. Historical `prefixSK` /
+`selectGammaWalk` wording is a receipt.
 
-**Lexical Recall** — BM25 / FTS-based search. **LIVE** family-max RRF still
-moves scores (`fusion-delivery-families.ts`); that scalarization is diagnosed
-as noncompliant. **TARGET** uses lexical probe rank as one family in
-`R(v) = sum_f 1/r_f(v)` and does not multiply lexical votes. See `recall.md`.
+**Lexical Recall** — BM25 / FTS-based search used as a seed observer on
+the live conditional field. Historical family-max RRF
+(`fusion-delivery-families.ts`) is not the live scorer. See `recall.md`.
 
 **Path-Aware Recall** — Intended runtime manifestation of
 `PathRelation` via typed transfer \(G_L\). Active recall-eligible paths can

@@ -26,6 +26,40 @@ export class SqliteIndexedRecallProjection {
     return row ?? null;
   }
 
+  public observablePin(workspaceId: string): Readonly<{
+    readonly source_revision: string;
+    readonly applied_at?: string;
+  }> {
+    const eventRow = this.db.prepare(
+      `SELECT COALESCE(MAX(revision), 0) AS revision FROM event_log WHERE workspace_id = ?`
+    ).get(workspaceId) as { readonly revision: number };
+    const relationRow = this.db.prepare(
+      `SELECT COUNT(*) AS count, COALESCE(MAX(assertion_id), '') AS last_id
+       FROM relation_assertions WHERE workspace_id = ?`
+    ).get(workspaceId) as { readonly count: number; readonly last_id: string };
+    const resolutionRow = this.db.prepare(
+      `SELECT COUNT(*) AS count, COALESCE(MAX(resolved_at), '') AS last_resolved
+       FROM relation_assertion_resolution_current WHERE workspace_id = ?`
+    ).get(workspaceId) as { readonly count: number; readonly last_resolved: string };
+    const tombstoneRow = this.db.prepare(
+      `SELECT COUNT(*) AS count FROM memory_entries
+       WHERE workspace_id = ? AND retention_state = 'tombstoned'`
+    ).get(workspaceId) as { readonly count: number };
+    const garden = this.cursor(workspaceId);
+    return {
+      source_revision: [
+        String(eventRow.revision),
+        String(relationRow.count),
+        relationRow.last_id,
+        String(resolutionRow.count),
+        resolutionRow.last_resolved,
+        String(tombstoneRow.count),
+        String(garden?.appliedEventRevision ?? 0)
+      ].join(":"),
+      ...(garden?.appliedAt === undefined ? {} : { applied_at: garden.appliedAt })
+    };
+  }
+
   public freshness(workspaceId: string, objectId: string): IndexedRecallFreshness {
     const row = this.db.prepare(`SELECT object_id, source_event_revision, semantic_publication_key,
       embedding_content_hash, tombstoned FROM garden_index_revisions

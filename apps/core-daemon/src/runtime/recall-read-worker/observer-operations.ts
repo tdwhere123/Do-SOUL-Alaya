@@ -1,9 +1,12 @@
 import {
-  InformationIndexSchema,
-  type InformationIndex
+  InformationIndexSchema
 } from "@do-soul/alaya-protocol";
 import {
+  captureIndexPreviews,
   runConditionalFieldRecall,
+  snapshotIdFromPin,
+  toSourceObserverRow,
+  type ConditionalFieldRecallPortResult,
   type ObserverReaders
 } from "@do-soul/alaya-core";
 import {
@@ -20,25 +23,34 @@ const readersByRuntime = new WeakMap<RecallReadWorkerRuntime, ObserverReaders>()
 export function runConditionalFieldWorkerRecall(
   runtime: RecallReadWorkerRuntime,
   payload: unknown
-): InformationIndex {
+): ConditionalFieldRecallPortResult {
   const body = asPayload(payload);
-  return InformationIndexSchema.parse(runConditionalFieldRecall({
-    workspace_id: readString(body.workspace_id, "workspace_id"),
+  const workspaceId = readString(body.workspace_id, "workspace_id");
+  const readers = readersFor(runtime);
+  const index = InformationIndexSchema.parse(runConditionalFieldRecall({
+    workspace_id: workspaceId,
     query_text: readString(body.query_text, "query_text"),
     budget: body.budget as Parameters<typeof runConditionalFieldRecall>[0]["budget"],
-    snapshot_id: readString(body.snapshot_id, "snapshot_id"),
+    snapshot_id: snapshotIdFromPin(workspaceId, readers.snapshotPin?.(workspaceId)),
     interpretation_clock: readString(body.interpretation_clock, "interpretation_clock"),
     as_of: readString(body.as_of, "as_of"),
     expires_at: readString(body.expires_at, "expires_at"),
-    readers: readersFor(runtime),
+    readers,
     ...(body.since === undefined ? {} : { since: readString(body.since, "since") }),
     ...(body.until === undefined ? {} : { until: readString(body.until, "until") }),
+    ...(body.time_field === undefined ? {} : { time_field: readString(body.time_field, "time_field") as "created_at" | "last_used_at" }),
+    ...(body.dimension_filter === undefined ? {} : { dimension_filter: body.dimension_filter as readonly string[] }),
+    ...(body.domain_tag_filter === undefined ? {} : { domain_tag_filter: body.domain_tag_filter as readonly string[] }),
     continuation: (body.continuation ?? null) as Parameters<typeof runConditionalFieldRecall>[0]["continuation"],
     cancelled: body.cancelled === true,
     ...(body.authorized_scopes === undefined
       ? {}
       : { authorized_scopes: body.authorized_scopes as readonly string[] })
   }));
+  return {
+    index,
+    previews: Object.fromEntries(captureIndexPreviews(index, readers, workspaceId))
+  };
 }
 
 export function createConditionalFieldObserverReaders(database: StorageDatabase): ObserverReaders {
@@ -52,9 +64,6 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase)
      WHERE workspace_id = ?
        AND (? IS NULL OR lower(json_extract(anchors_json, '$.source_anchor.object_id')) = ?)`
   );
-  const maxRevisionSql = database.connection.prepare(
-    `SELECT COALESCE(MAX(revision), 0) AS revision FROM event_log WHERE workspace_id = ?`
-  );
   return {
     lexical: (input) => memory.lexical(
       input.workspaceId,
@@ -64,22 +73,13 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase)
       input.afterObjectId
     ),
     source: (input) => {
-      const page = memory.source(input.workspaceId, input.objectId);
+      const page = memory.source(
+        input.workspaceId,
+        input.objectId,
+        input.byteLimit ?? 65536
+      );
       return {
-        row: page.row === null
-          ? null
-          : {
-            object_id: page.row.object_id,
-            sourceRevision: page.row.sourceRevision,
-            observed_at: page.row.event_time_start ?? undefined,
-            content: page.row.content,
-            lifecycle_state: page.row.lifecycle_state,
-            retention_state: page.row.retention_state,
-            scope_class: page.row.scope_class,
-            evidence_refs: page.row.evidence_refs,
-            valid_from: page.row.valid_from,
-            valid_to: page.row.valid_to
-          },
+        row: page.row === null ? null : toSourceObserverRow(page.row),
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
         unavailable: page.unavailable
@@ -98,17 +98,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase)
       const rows = kindsSql.all(input.workspaceId, subject, subject) as { readonly kind: string }[];
       return rows.map((row) => row.kind);
     },
-    snapshotPin: (workspaceId) => {
-      const cursor = projection.cursor(workspaceId);
-      if (cursor !== null) {
-        return {
-          source_revision: String(cursor.appliedEventRevision),
-          applied_at: cursor.appliedAt
-        };
-      }
-      const row = maxRevisionSql.get(workspaceId) as { readonly revision: number };
-      return { source_revision: String(row.revision) };
-    }
+    snapshotPin: (workspaceId) => projection.observablePin(workspaceId)
   };
 }
 

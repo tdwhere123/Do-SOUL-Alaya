@@ -10,6 +10,7 @@ import {
 import type { FiniteWorld } from "./finite-worlds.js";
 import {
   CONTRACT_ONLY_UNTIL_C07,
+  CONTRACT_ONLY_UNTIL_U07,
   admitRequestBudget,
   emptyCounts,
   milligradeOf,
@@ -25,7 +26,7 @@ import {
   type SourceSlice
 } from "./bound-producer.js";
 
-export { CONTRACT_ONLY_UNTIL_C07 };
+export { CONTRACT_ONLY_UNTIL_C07, CONTRACT_ONLY_UNTIL_U07 };
 
 export const FORBIDDEN_CONSUMER_KEYS = [
   "ranking_authority",

@@ -1,9 +1,11 @@
 import {
+  attributeUsageReports,
   type AsyncSideEffectAuditEventLogPort,
   type AsyncSideEffectAuditNotifierPort,
   type EventPublisher
 } from "@do-soul/alaya-core";
 import {
+  CONDITIONAL_FIELD_SCHEMA_VERSION,
   ControlPlaneObjectKind,
   GardenRole,
   GardenTaskKind,
@@ -12,6 +14,7 @@ import {
   SoulMemorySearchResponseSchema,
   SoulReportContextUsageResponseSchema,
   TaskObjectSurfaceSchema,
+  UsageReportSchema,
   type ContextDeliveryRecord,
   type MemoryEntry,
   type RecallCandidate,
@@ -22,13 +25,15 @@ import {
   type SoulMemorySearchResponse,
   type SoulRecallHostContext,
   type SoulReportContextUsageRequest,
-  type UsageProofRecord
+  type UsageProofRecord,
+  type UsageReport
 } from "@do-soul/alaya-protocol";
 import type { GardenTaskEnqueueInput, GardenTaskRow } from "@do-soul/alaya-storage";
 import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-queue.js";
 import {
   buildRecallStrategyMix,
   encodeIndexResults,
+  frameEncodedIndex,
   resolveMcpDegradationReason,
   selectRecallMcpHonestyDiagnostics,
   unavailableIndex,
@@ -176,7 +181,7 @@ async function executeRecall(
     taskSurface,
     policyOverride
   });
-  const encoded = encodeRecallHandlerResults(recallResult);
+  const encoded = encodeRecallHandlerResults(recallResult, policyOverride);
   const delivery = buildRecallDelivery(params, context, encoded.results, recallResult);
   await params.deps.trustStateRecorder.recordDelivery(delivery.record);
   await emitRecallDeliveredTelemetry(params, {
@@ -210,14 +215,16 @@ function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => st
   });
 }
 
-function encodeRecallHandlerResults(recallResult: RecallServiceResult) {
+function encodeRecallHandlerResults(recallResult: RecallServiceResult, policy: RecallPolicy) {
   const index = recallResult.index ?? unavailableIndex();
   const previews = new Map(
     recallResult.candidates.map((candidate) => [candidate.object_id, candidate.content_preview] as const)
   );
+  const maxTotalTokens = policy.fine_assessment.budgets.max_total_tokens;
+  const results = encodeIndexResults(index, previews, maxTotalTokens);
   return {
-    index,
-    results: encodeIndexResults(index, previews),
+    index: frameEncodedIndex(index, results),
+    results,
     explainabilityPartial: false
   };
 }
@@ -312,6 +319,11 @@ export function createReportContextUsageHandler(params: Readonly<{
     const usageState = resolveUsageState(request);
     const usedObjectIds = resolveUsedObjectIds(request);
     const usedObjects = resolveUsedObjectIdentities(request);
+    const reports = usageReportsFromContextUsage(request);
+    const attributed = attributeUsageReports(reports);
+    if (attributed.some((row) => row.grain === "witness" || row.witness_credit === "claimed")) {
+      throw new Error("context usage cannot mint a witness report");
+    }
     await deps.trustStateRecorder.recordUsage(
       {
         delivery_id: request.delivery_id,
@@ -346,6 +358,36 @@ export function createReportContextUsageHandler(params: Readonly<{
       status: "recorded"
     });
   };
+}
+
+export function usageReportsFromContextUsage(
+  request: SoulReportContextUsageRequest
+): readonly UsageReport[] {
+  const reportedUse = request.usage_state === "used"
+    ? "used"
+    : request.usage_state === "skipped"
+      ? "unused"
+      : "unknown";
+  const reports: UsageReport[] = [
+    UsageReportSchema.parse({
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      grain: "output",
+      exposure: "exposed",
+      reported_use: reportedUse,
+      output_id: request.delivery_id
+    })
+  ];
+  for (const objectId of request.used_object_ids ?? []) {
+    reports.push(UsageReportSchema.parse({
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      grain: "object",
+      exposure: "exposed",
+      reported_use: "used",
+      object_id: objectId,
+      output_id: request.delivery_id
+    }));
+  }
+  return reports;
 }
 
 export function createGardenTaskPayloadFingerprint(

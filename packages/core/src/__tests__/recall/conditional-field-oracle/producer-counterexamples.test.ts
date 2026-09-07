@@ -165,7 +165,7 @@ describe("conditional-field producer-consumer F1-F7 counterexamples", () => {
     const concatenated = pages.flatMap((page) => page.entries.map((entry) => entry.object_id));
     const fullIds = full.entries.map((entry) => entry.object_id);
     expect(new Set(concatenated).size).toBe(concatenated.length);
-    expect(concatenated).toEqual(fullIds.slice(0, concatenated.length));
+    expect(concatenated).toEqual(fullIds);
     expect(planted.length).toBe(40);
     if (full.completeness.logical_index === "complete") {
       expect(fullIds.length).toBeGreaterThan(32);
@@ -196,8 +196,9 @@ describe("conditional-field producer-consumer F1-F7 counterexamples", () => {
         page_budget: 800
       })
     });
-    const completeThirtyOne = tiny.completeness.logical_index === "complete" && tiny.entries.length >= 31;
-    expect(completeThirtyOne).toBe(false);
+    expect(tiny.completeness.logical_index).not.toBe("complete");
+    expect(tiny.completeness.representation).not.toBe("complete");
+    expect(tiny.entries.length).toBeLessThan(31);
     const longPreview = "x".repeat(1400);
     const encoded = encodedRecall(tight, new Map(tight.entries.map((entry) => [entry.object_id, longPreview])));
     const estimates = encoded.candidates.map((candidate) => candidate.token_estimate);

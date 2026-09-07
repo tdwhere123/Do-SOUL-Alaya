@@ -1,22 +1,31 @@
 # Runtime Snapshot
 
-Package version is `0.3.11`. The live Recall target/shadow direction is the
-2026-08-29 query-proof contract in
-`.do-it/plans/recall-any5-evidence-first/query-proof-architecture-decision.md`
-and [`recall.md`](recall.md). This file is readiness vocabulary and dated
-snapshots. It is **not** a KPI-promotion or merge-readiness claim, and the
-S14–S20 table below is **not** live target authority.
+Package version is `0.3.11`. The live Recall entry is the conditional field
+in [`recall.md`](recall.md). This file is readiness vocabulary and dated
+snapshots. It is **not** a KPI-promotion or merge-readiness claim. The
+2026-08-29 query-proof table and S14–S20 rows below are **historical
+receipts**, not live target authority.
 
-Recall algorithm (target vs live): [`recall.md`](recall.md).
+Recall algorithm (live vs historical): [`recall.md`](recall.md).
 
-## Recall posture (2026-08-29 query-proof target)
+## Recall posture (live conditional field)
 
 | Fact | Status |
 |---|---|
-| Target decision path | `Psi` → `Gamma_q` → query-owned exact tie → deterministic identity → `prefixSK` |
+| Live decision path | `compileConditionalFieldQuery` → `observeField` → `projectAcceptingIndex` |
+| Entry | `RecallService.recall` / worker `conditionalField.recall` / MCP `soul.recall` |
+| Association domain | `assoc.bottleneck.milligrade.v1` |
+| Continuation | `query_id` + `snapshot_id` + `interpretation_id` + result version; `FIELD_RESUME` is worker-lifetime |
+| Historical prefixSK / Select_Gamma | Unreachable from `executeRecall`; physical deletion is D00 |
+
+## Recall posture (2026-08-29 query-proof target) — historical
+
+| Fact | Status |
+|---|---|
+| Historical decision path | `Psi` → `Gamma_q` → query-owned exact tie → deterministic identity → `prefixSK` |
 | V1 semantic prior | **Forbidden**. Query-independent state cannot decide a tie or serialize an unresolved trade-off as a tie |
 | Exact tie | Only after proposition-level and Gamma equality with no unresolved trade-off crossing the boundary |
-| Canonical walk | `prefixSK(S_infty, K)`; `selectGammaWalk` is optional outer legacy delivery only |
+| Historical canonical walk | `prefixSK(S_infty, K)`; `selectGammaWalk` was optional outer legacy delivery only |
 | Query-proof freeze | No unbound mutable read after `SnapshotReadLeaseV1` finalization; later reads must use bound views |
 
 ## Recall posture delta (2026-08-24–25, S14–S20) — historical
@@ -59,7 +68,7 @@ query-proof target.
 | Graph/PathRelation candidate expansion | Live; path fuel activates only with attributed eligible inflow |
 | Slice compatibility and integrated flood | Live; missing or rejected inputs retain explicit status |
 | F3-only field membership | Live; planted SQLite/daemon proof — see [`recall.md`](recall.md) |
-| Final selector | Two-mode: omitted `delivery_path` is `prefixSK`; `"legacy"` keeps `Select_Gamma` as the sole admission-order owner of that mode |
+| Final selector | Historical two-mode `prefixSK` / `Select_Gamma`. Live owner is the conditional field; those modes are not on `executeRecall` |
 | Exact selection-boundary replay | Live on `delivery_path: "legacy"`; canonical-absent (`shadowTrace` / capture prefix) |
 | Provider execution authority | One exported engine-gateway executor owns attempts, retry timing, timeout/abort classification, response inspection, usage, and completion witnesses |
 | Provider-backed cache admission | New writes and all live readers require versioned completion authority; deterministic no-provider shards remain explicit |

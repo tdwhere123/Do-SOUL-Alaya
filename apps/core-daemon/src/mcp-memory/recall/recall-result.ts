@@ -30,6 +30,7 @@ export function unavailableIndex(): InformationIndex {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       logical_index: "unavailable",
       observed_coverage: "unavailable",
+      interpretation_coverage: "unavailable",
       transport: "unavailable",
       payload: "unavailable",
       representation: "unavailable"
@@ -46,22 +47,29 @@ export function unavailableIndex(): InformationIndex {
 
 export function encodeIndexResults(
   index: InformationIndex,
-  previews: ReadonlyMap<string, string> = new Map()
+  previews: ReadonlyMap<string, string> = new Map(),
+  maxTotalTokens = 2_000
 ): readonly MemorySearchResult[] {
-  const maxTotalTokens = 2_000;
+  const encoded: MemorySearchResult[] = [];
   let usedTokens = 0;
-  return index.entries.map((entry, offset) => {
+  for (const [offset, entry] of index.entries.entries()) {
+    if (offset >= index.representation.page_budget) break;
     const score = entry.association_milligrades / MILLIGRADE_TOP;
     const preview = previews.get(entry.object_id) ?? "[payload omitted]";
     const tokenEstimate = Math.max(1, Buffer.byteLength(preview, "utf8"));
     const usedThrough = usedTokens + tokenEstimate;
+    // Emitting the bytes then flagging within_budget=false is not an allowance.
+    if (usedThrough > maxTotalTokens) break;
     usedTokens = usedThrough;
-    return {
+    encoded.push({
       object_id: entry.object_id,
       object_kind: "memory_entry",
       relevance_score: score,
       content_preview: preview,
-      evidence_pointers: entry.explanation_ids.length > 0 ? entry.explanation_ids : [entry.object_id],
+      evidence_pointers: [],
+      ...(entry.hypothesis_id === undefined ? {} : { hypothesis_id: entry.hypothesis_id }),
+      ...(entry.program_state === undefined ? {} : { program_state: entry.program_state }),
+      ...(entry.time_state === undefined ? {} : { time_state: entry.time_state }),
       selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
       source_channels: ["conditional_field"],
       score_factors: { activation: score, relevance: score },
@@ -69,12 +77,28 @@ export function encodeIndexResults(
         token_estimate: tokenEstimate,
         max_entries: index.representation.page_budget,
         max_total_tokens: maxTotalTokens,
-        remaining_entries: Math.max(0, index.representation.page_budget - offset - 1),
+        remaining_entries: Math.max(0, index.representation.page_budget - encoded.length),
         remaining_tokens: Math.max(0, maxTotalTokens - usedThrough),
-        within_budget: offset < index.representation.page_budget && usedThrough <= maxTotalTokens
+        within_budget: true
       }
-    };
-  });
+    });
+  }
+  return encoded;
+}
+
+export function frameEncodedIndex(
+  index: InformationIndex,
+  results: readonly MemorySearchResult[]
+): InformationIndex {
+  if (results.length >= index.entries.length) return index;
+  return {
+    ...index,
+    completeness: {
+      ...index.completeness,
+      payload: "omitted",
+      transport: index.completeness.transport === "complete" ? "partial" : index.completeness.transport
+    }
+  };
 }
 
 export function buildMemorySearchResult(

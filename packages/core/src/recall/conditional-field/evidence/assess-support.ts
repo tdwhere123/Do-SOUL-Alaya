@@ -1,4 +1,10 @@
-import { CONDITIONAL_FIELD_SCHEMA_VERSION, type ClaimState, type SupportRecord } from "@do-soul/alaya-protocol";
+import {
+  CONDITIONAL_FIELD_SCHEMA_VERSION,
+  type ClaimState,
+  type Derivation,
+  type SupportRecord
+} from "@do-soul/alaya-protocol";
+import { joinDerivation, leafDerivation, mergeDerivations } from "../engine/path-derivation.js";
 import { compareText } from "../../../shared/compare-text.js";
 import { evaluateGovernance } from "./governance.js";
 import {
@@ -48,10 +54,12 @@ export function assessEvidence(input: EvidenceAssessmentInput): EvidenceAssessme
   const collapsed = collapseDuplicateEvidence(admitted);
   const records: SupportRecord[] = [];
   const polarities: Record<string, EvidencePolarity> = {};
+  const derivations: Derivation[] = [];
   for (const demand of input.propositions) {
     const assessed = assessProposition(demand, collapsed, input, work);
     records.push(assessed.record);
     Object.assign(polarities, assessed.polarities);
+    derivations.push(...assessed.derivations);
   }
   return {
     query_id: input.query_id,
@@ -62,7 +70,8 @@ export function assessEvidence(input: EvidenceAssessmentInput): EvidenceAssessme
     governance,
     explanation_ids: explanationIdsFrom(records.flatMap((record) => record.witnesses)),
     work_status: work.interrupted ? "open" : "complete",
-    correlations
+    correlations,
+    derivations: mergeDerivations(derivations)
   };
 }
 
@@ -108,6 +117,7 @@ function assessProposition(
 ): Readonly<{
   readonly record: SupportRecord;
   readonly polarities: Readonly<Record<string, EvidencePolarity>>;
+  readonly derivations: readonly Derivation[];
 }> {
   const scoped = observations.filter(
     (observation) => observation.proposition_id === demand.proposition.proposition_id
@@ -125,7 +135,8 @@ function assessProposition(
       claim: claimFromSides(supporting, refuting),
       witnesses: witnesses.map(stripPolarity)
     },
-    polarities
+    polarities,
+    derivations: derivationsFromWitnesses(witnesses)
   };
 }
 
@@ -148,6 +159,7 @@ function unknownRecord(
 ): Readonly<{
   readonly record: SupportRecord;
   readonly polarities: Readonly<Record<string, EvidencePolarity>>;
+  readonly derivations: readonly Derivation[];
 }> {
   return {
     record: {
@@ -156,8 +168,31 @@ function unknownRecord(
       claim: "unknown",
       witnesses: witnesses.map(stripPolarity)
     },
-    polarities: {}
+    polarities: {},
+    derivations: []
   };
+}
+
+function derivationsFromWitnesses(witnesses: readonly PolarizedWitness[]): readonly Derivation[] {
+  const complete = witnesses.filter((witness) => witness.complete);
+  const nodes: Derivation[] = [];
+  for (const witness of complete) {
+    const leaves = witness.premises.map((premise) => leafDerivation({
+      derivation_id: `leaf:${premise}`,
+      observation_id: premise,
+      leaf_id: premise,
+      witness_id: witness.witness_id
+    }));
+    const first = leaves[0];
+    if (first === undefined) continue;
+    nodes.push(...leaves);
+    nodes.push(
+      leaves.length === 1
+        ? first
+        : joinDerivation("and", leaves, { witness_id: witness.witness_id })
+    );
+  }
+  return mergeDerivations(nodes);
 }
 
 function stripPolarity(witness: PolarizedWitness): SupportRecord["witnesses"][number] {

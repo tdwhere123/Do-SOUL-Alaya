@@ -1,6 +1,9 @@
 import type {
   CompletenessReport,
+  CompletenessStatus,
   Guard,
+  QueryHole,
+  QueryHypothesis,
   QueryInterpretationStatus,
   QueryProgram
 } from "@do-soul/alaya-protocol";
@@ -27,14 +30,32 @@ export function interpretationMayEmitCompleteEmpty(
   return status === "resolved";
 }
 
+export function interpretationCoverageFor(
+  status: QueryInterpretationStatus,
+  interpretation?: Readonly<{
+    readonly hypotheses?: readonly QueryHypothesis[];
+    readonly holes?: readonly QueryHole[];
+  }>
+): CompletenessStatus {
+  if (status === "resource_rejected") return "resource_rejected";
+  if (status === "unsupported" || status === "malformed") return "unavailable";
+  if (status === "hypotheses" || (interpretation?.hypotheses?.length ?? 0) > 0) return "open";
+  if (status === "partial" || (interpretation?.holes ?? []).some((hole) => hole.status !== "bound")) {
+    return "open";
+  }
+  return "complete";
+}
+
 export function completenessForInterpretationStatus(
   status: QueryInterpretationStatus
 ): CompletenessReport | undefined {
+  // Hypotheses/partial stay undefined here so the engine does not treat them as envelope rejection.
   if (status === "resource_rejected") {
     return {
       schema_version: 1,
       logical_index: "resource_rejected",
       observed_coverage: "resource_rejected",
+      interpretation_coverage: "resource_rejected",
       transport: "resource_rejected",
       payload: "resource_rejected",
       representation: "resource_rejected"
@@ -45,6 +66,7 @@ export function completenessForInterpretationStatus(
       schema_version: 1,
       logical_index: "unavailable",
       observed_coverage: "unavailable",
+      interpretation_coverage: "unavailable",
       transport: "unavailable",
       payload: "unavailable",
       representation: "unavailable"

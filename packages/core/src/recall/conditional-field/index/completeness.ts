@@ -21,6 +21,9 @@ export type CompletenessInput = Readonly<{
   readonly remaining: number;
   readonly omitted_payload: boolean;
   readonly expand_payload: boolean;
+  readonly mixed_generation?: boolean;
+  readonly explanation_work?: "complete" | "open";
+  readonly resource_work?: "complete" | "open";
 }>;
 
 const INCOMPLETE_OBSERVER_STATUSES = [
@@ -65,12 +68,23 @@ export function interpretationMayEmitCompleteEmpty(
   return status === "resolved";
 }
 
+export function interpretationCoverageOf(
+  status: QueryInterpretationStatus | undefined
+): CompletenessStatus | undefined {
+  if (status === undefined) return undefined;
+  if (status === "resolved") return "complete";
+  if (status === "hypotheses" || status === "partial") return "open";
+  if (status === "resource_rejected") return "resource_rejected";
+  return "unavailable";
+}
+
 export function continuationInvalidated(input: Readonly<{
   readonly query_id: string;
   readonly snapshot_id: string;
   readonly result_version: string;
   readonly expires_at?: string;
   readonly as_of?: string;
+  readonly interpretation_id?: string;
   readonly prior_continuation?: Continuation | null;
 }>): boolean {
   if (input.as_of !== undefined && input.expires_at !== undefined && input.expires_at < input.as_of) {
@@ -81,12 +95,33 @@ export function continuationInvalidated(input: Readonly<{
   if (prior.query_id !== input.query_id) return true;
   if (prior.snapshot_id !== input.snapshot_id) return true;
   if (prior.result_version !== input.result_version) return true;
+  if (prior.interpretation_id !== input.interpretation_id) return true;
   return input.as_of !== undefined && prior.expires_at < input.as_of;
 }
 
 export function composeCompleteness(input: CompletenessInput): CompletenessReport {
+  const report = attachInterpretationCoverage(
+    composeCompletenessDimensions(input),
+    input.interpretation_status
+  );
+  if (input.mixed_generation !== true) return report;
+  return { ...report, payload: "omitted" };
+}
+
+function composeCompletenessDimensions(input: CompletenessInput): CompletenessReport {
   const observed = observerCompleteness(input);
   if (observed !== undefined) return observed;
+  if (input.explanation_work === "open" || input.resource_work === "open") {
+    return dimensionReport({
+      logical_index: "open",
+      observed_coverage: "open",
+      remaining: input.remaining,
+      omitted_payload: input.omitted_payload,
+      expand_payload: input.expand_payload,
+      closed: "open",
+      representation: "open"
+    });
+  }
   if (input.total === 0) return emptyCompleteness(input);
   return dimensionReport({
     logical_index: "complete",
@@ -127,7 +162,8 @@ function observerCompleteness(input: CompletenessInput): CompletenessReport | un
       remaining: input.remaining,
       omitted_payload: input.omitted_payload,
       expand_payload: input.expand_payload,
-      closed: "open"
+      closed: "open",
+      representation: "open"
     });
   }
   return undefined;
@@ -155,6 +191,15 @@ function emptyCompleteness(input: CompletenessInput): CompletenessReport {
   };
 }
 
+function attachInterpretationCoverage(
+  report: CompletenessReport,
+  status: QueryInterpretationStatus | undefined
+): CompletenessReport {
+  const coverage = interpretationCoverageOf(status);
+  if (coverage === undefined) return report;
+  return { ...report, interpretation_coverage: coverage };
+}
+
 function dimensionReport(input: Readonly<{
   readonly logical_index: CompletenessStatus;
   readonly observed_coverage: CompletenessStatus;
@@ -162,6 +207,7 @@ function dimensionReport(input: Readonly<{
   readonly omitted_payload: boolean;
   readonly expand_payload: boolean;
   readonly closed: CompletenessStatus;
+  readonly representation?: CompletenessStatus;
 }>): CompletenessReport {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -169,7 +215,7 @@ function dimensionReport(input: Readonly<{
     observed_coverage: input.observed_coverage,
     transport: input.remaining > 0 ? "partial" : input.closed,
     payload: payloadStatus(input),
-    representation: "complete"
+    representation: input.representation ?? "complete"
   };
 }
 
@@ -202,6 +248,7 @@ function uniformCompleteness(status: CompletenessStatus): CompletenessReport {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     logical_index: status,
     observed_coverage: status,
+    interpretation_coverage: status,
     transport: status,
     payload: status,
     representation: status

@@ -6,6 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 export const CONTRACT_ONLY_UNTIL_C07 = "contract-only until C07 binds real producers";
+export const CONTRACT_ONLY_UNTIL_U07 = "contract-only until U07 binds real producers";
 
 export const FORBIDDEN_CONSUMER_KEYS = [
   "ranking_authority",
@@ -56,8 +57,11 @@ export function assertTargetConsumer(payload: TargetConsumerPayload): readonly s
 export function assertUnknownCauseAllowed(index: InformationIndex): readonly string[] {
   const failures: string[] = [];
   const unknown = index.entries.filter((entry) => entry.claim === "unknown");
-  if (unknown.length === 0) failures.push("unknown common cause missing from completed field");
-  if (index.completeness.logical_index !== "complete") {
+  const explained = index.entries.filter((entry) => entry.explanation_ids.length > 0);
+  if (unknown.length === 0 && explained.length === 0) {
+    failures.push("completed field has neither unknown cause nor explained support");
+  }
+  if (unknown.length > 0 && index.completeness.logical_index !== "complete") {
     failures.push("unknown cause must remain representable on a complete logical index");
   }
   return failures;

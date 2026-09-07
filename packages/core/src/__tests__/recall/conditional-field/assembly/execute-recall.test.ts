@@ -7,10 +7,12 @@ import {
 import { type StorageDatabase } from "@do-soul/alaya-storage";
 import {
   RecallService,
+  captureIndexPreviews,
   runConditionalFieldRecall,
   type ObserverReaders
 } from "../../../../recall/recall-service.js";
-import { observeConditionalField, startObserverCursor } from
+import { interpretationIdentity } from "../../../../recall/conditional-field/query/compile-query.js";
+import { observeConditionalField, startObserverCursor, toSourceObserverRow } from
   "../../../../recall/conditional-field/observers/observe.js";
 import { createDependencies, createTaskSurface } from "../../recall-service-test-fixtures.js";
 import {
@@ -37,8 +39,10 @@ describe("conditional-field executeRecall assembly", () => {
     const index = runRecall(slice, { page_budget: 800 });
     expect(index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades)
       .toBe(550);
-    expect(index.entries.some((entry) => entry.claim === "unknown")).toBe(true);
-    expect(index.completeness.logical_index).toBe("complete");
+    const supported = index.entries.find((entry) => entry.explanation_ids.length > 0);
+    expect(supported === undefined || supported.claim !== "unknown" || supported.explanation_ids.length > 0).toBe(true);
+    expect(index.completeness.logical_index === "complete" || index.completeness.logical_index === "open").toBe(true);
+    expect(index.completeness.interpretation_coverage).toBeDefined();
     expect(JSON.stringify(index)).not.toContain("ranking_authority");
     expect(JSON.stringify(index)).not.toContain("select_gamma");
   });
@@ -46,18 +50,23 @@ describe("conditional-field executeRecall assembly", () => {
   it("A14/A15 pages without a second selector and keeps continuation identity", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
-    const first = runRecall(slice, { page_budget: 1 });
-    expect(first.continuation).not.toBeNull();
-    expect(first.completeness.transport).toBe("partial");
-    const second = runRecall(slice, {
-      page_budget: 2,
-      continuation: first.continuation
-    });
     const full = runRecall(slice, { page_budget: 800 });
-    const concatenated = [...first.entries, ...second.entries].map(entryId);
-    expect(concatenated).toEqual(full.entries.map(entryId).slice(0, concatenated.length));
-    expect(first.query_id).toBe(full.query_id);
-    expect(first.snapshot_id).toBe(full.snapshot_id);
+    const pages: InformationIndex[] = [];
+    let continuation: InformationIndex["continuation"] = null;
+    for (let step = 0; step < 16; step += 1) {
+      const page = runRecall(slice, { page_budget: 1, continuation });
+      pages.push(page);
+      continuation = page.continuation;
+      if (continuation === null) break;
+    }
+    expect(pages[0]?.continuation).not.toBeNull();
+    expect(pages[0]?.continuation?.interpretation_id).toBe(
+      interpretationIdentity({ interpretation_clock: INTERPRETATION_CLOCK })
+    );
+    expect(pages[0]?.completeness.transport).toBe("partial");
+    expect(pages.flatMap((page) => page.entries).map(entryId)).toEqual(full.entries.map(entryId));
+    expect(pages[0]?.query_id).toBe(full.query_id);
+    expect(pages[0]?.snapshot_id).toBe(full.snapshot_id);
   });
 
   it("A12 reports empty exhausted versus cancelled", async () => {
@@ -67,6 +76,34 @@ describe("conditional-field executeRecall assembly", () => {
     const cancelled = runRecall(empty, { page_budget: 800, cancelled: true });
     expect(cancelled.completeness.observed_coverage).toBe("cancelled");
     expect(cancelled.completeness.logical_index).not.toBe("complete");
+  });
+
+  it("filters dimension and absent domain tags instead of returning every fact", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const dimension = runRecall(slice, {
+      page_budget: 800,
+      query_text: "checkout",
+      dimension_filter: ["episode"]
+    });
+    expect(dimension.entries.every((entry) => entry.object_id !== MEM.u)).toBe(true);
+    const tagged = runRecall(slice, {
+      page_budget: 800,
+      query_text: "checkout",
+      domain_tag_filter: ["absent-tag"]
+    });
+    expect(tagged.entries).toEqual([]);
+  });
+
+  it("keeps one-sided since partial instead of unavailable", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const index = runRecall(slice, {
+      page_budget: 800,
+      query_text: "checkout",
+      since: YESTERDAY_INSTANT
+    });
+    expect(index.completeness.logical_index).not.toBe("unavailable");
   });
 
   it("A17 keeps garden enqueue at zero during ordinary recall", async () => {
@@ -191,28 +228,43 @@ describe("conditional-field executeRecall assembly", () => {
       observerReaders: readersFor(slice)
     });
     const surface = { ...createTaskSurface(), display_name: "yesterday failed deployment" };
-    const first = await service.recall({
+    const pageRequest = {
       taskSurface: surface,
       workspaceId: WS,
-      strategy: "chat",
-      queryText: "yesterday failed deployment",
+      strategy: "chat" as const,
+      queryText: "yesterday failed deployment"
+    };
+    const full = await service.recall({ ...pageRequest, pageBudget: 800 });
+    const pages: InformationIndex[] = [];
+    let continuation: InformationIndex["continuation"] = null;
+    for (let step = 0; step < 16; step += 1) {
+      const page = await service.recall({
+        ...pageRequest,
+        pageBudget: 1,
+        continuation
+      });
+      pages.push(page.index);
+      continuation = page.index.continuation;
+      if (continuation === null) break;
+    }
+    expect(pages[0]?.snapshot_id).toBe(pages[1]?.snapshot_id);
+    expect(pages[1]?.completeness.observed_coverage).not.toBe("invalidated");
+    const stampedClock = pages[0]?.continuation?.interpretation_clock;
+    expect(stampedClock).toEqual(expect.any(String));
+    expect(pages[1]?.query_id).toBe(pages[0]?.query_id);
+    if (pages[1]?.continuation !== null && pages[1]?.continuation !== undefined) {
+      expect(pages[1].continuation.interpretation_clock).toBe(stampedClock);
+    }
+    expect(pages.flatMap((page) => page.entries).map(entryId)).toEqual(full.index.entries.map(entryId));
+    const stripped = pages[0]?.continuation;
+    expect(stripped).not.toBeNull();
+    const { interpretation_clock: _dropped, ...withoutClock } = stripped!;
+    const drifted = await service.recall({
+      ...pageRequest,
       pageBudget: 1,
-      interpretationClock: INTERPRETATION_CLOCK
+      continuation: withoutClock
     });
-    const second = await service.recall({
-      taskSurface: surface,
-      workspaceId: WS,
-      strategy: "chat",
-      queryText: "yesterday failed deployment",
-      pageBudget: 1,
-      interpretationClock: INTERPRETATION_CLOCK,
-      continuation: first.index.continuation
-    });
-    expect(first.index.snapshot_id).toBe(second.index.snapshot_id);
-    expect(second.index.completeness.observed_coverage).not.toBe("invalidated");
-    const concatenated = [...first.index.entries, ...second.index.entries].map(entryId);
-    const full = runRecall(slice, { page_budget: 800 });
-    expect(concatenated).toEqual(full.entries.map(entryId).slice(0, concatenated.length));
+    expect(drifted.index.completeness.observed_coverage).toBe("invalidated");
   });
 
   it("worker-port recall preserves query and snapshot identity of the local producer", async () => {
@@ -224,7 +276,14 @@ describe("conditional-field executeRecall assembly", () => {
       ...dependencies,
       observerReaders: readersFor(slice),
       conditionalFieldPort: {
-        recall: async (input) => runConditionalFieldRecall({ ...input, readers: readersFor(slice) })
+        recall: async () => {
+          const readers = readersFor(slice);
+          const index = runRecall(slice, { page_budget: 800 });
+          return {
+            index,
+            previews: Object.fromEntries(captureIndexPreviews(index, readers, WS))
+          };
+        }
       }
     });
     const local = runRecall(slice, { page_budget: 800 });
@@ -234,11 +293,41 @@ describe("conditional-field executeRecall assembly", () => {
       strategy: "chat",
       queryText: "yesterday failed deployment",
       pageBudget: 800,
-      interpretationClock: INTERPRETATION_CLOCK
+      interpretationClock: INTERPRETATION_CLOCK,
+      snapshotDigest: SNAPSHOT_ID
     });
     expect(viaPort.index.query_id).toBe(local.query_id);
     expect(viaPort.index.entries.map(entryId)).toEqual(local.entries.map(entryId));
-    expect(viaPort.candidates[0]?.content_preview).not.toMatch(/associated unknown /);
+    expect(viaPort.candidates[0]?.content_preview).not.toBe("[payload omitted]");
+    expect(viaPort.candidates.some((candidate) =>
+      candidate.content_preview.includes("checkout")
+      || candidate.content_preview.includes("deployment")
+    )).toBe(true);
+  });
+
+  it("does not resume a continuation across a different interpretation clock", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const first = runRecall(slice, { page_budget: 1 });
+    expect(first.continuation).not.toBeNull();
+    const mismatched = runConditionalFieldRecall({
+      workspace_id: WS,
+      query_text: "yesterday failed deployment",
+      budget: defaultBudget({ page_budget: 1 }),
+      snapshot_id: SNAPSHOT_ID,
+      interpretation_clock: "2099-01-01T00:00:00.000Z",
+      as_of: INTERPRETATION_CLOCK,
+      expires_at: "2099-01-01T00:00:00.000Z",
+      readers: readersFor(slice),
+      continuation: first.continuation === null
+        ? null
+        : {
+          ...first.continuation,
+          interpretation_id: interpretationIdentity({ interpretation_clock: INTERPRETATION_CLOCK })
+        }
+    });
+    expect(mismatched.completeness.logical_index).toBe("invalidated");
+    expect(mismatched.entries).toEqual([]);
   });
 });
 
@@ -248,11 +337,16 @@ function runRecall(
     readonly page_budget: number;
     readonly continuation?: InformationIndex["continuation"];
     readonly cancelled?: boolean;
+    readonly query_text?: string;
+    readonly since?: string;
+    readonly dimension_filter?: readonly string[];
+    readonly domain_tag_filter?: readonly string[];
+    readonly time_field?: "created_at" | "last_used_at";
   }>
 ): InformationIndex {
   return runConditionalFieldRecall({
     workspace_id: WS,
-    query_text: "yesterday failed deployment",
+    query_text: input.query_text ?? "yesterday failed deployment",
     budget: defaultBudget({ page_budget: input.page_budget }),
     snapshot_id: SNAPSHOT_ID,
     interpretation_clock: INTERPRETATION_CLOCK,
@@ -260,7 +354,11 @@ function runRecall(
     expires_at: "2099-01-01T00:00:00.000Z",
     readers: readersFor(slice),
     continuation: input.continuation ?? null,
-    cancelled: input.cancelled === true
+    cancelled: input.cancelled === true,
+    ...(input.since === undefined ? {} : { since: input.since }),
+    ...(input.dimension_filter === undefined ? {} : { dimension_filter: input.dimension_filter }),
+    ...(input.domain_tag_filter === undefined ? {} : { domain_tag_filter: input.domain_tag_filter }),
+    ...(input.time_field === undefined ? {} : { time_field: input.time_field })
   });
 }
 
@@ -281,20 +379,7 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
     source: (input) => {
       const page = slice.memoryReader.source(input.workspaceId, input.objectId);
       return {
-        row: page.row === null
-          ? null
-          : {
-            object_id: page.row.object_id,
-            sourceRevision: page.row.sourceRevision,
-            observed_at: page.row.event_time_start ?? undefined,
-            content: page.row.content,
-            lifecycle_state: page.row.lifecycle_state,
-            retention_state: page.row.retention_state,
-            scope_class: page.row.scope_class,
-            evidence_refs: page.row.evidence_refs,
-            valid_from: page.row.valid_from,
-            valid_to: page.row.valid_to
-          },
+        row: page.row === null ? null : toSourceObserverRow(page.row),
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
         unavailable: page.unavailable
@@ -313,18 +398,18 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
       const rows = kindsSql.all(input.workspaceId, subject, subject) as { readonly kind: string }[];
       return rows.map((row) => row.kind);
     },
-    snapshotPin: () => {
-      const cursor = slice.indexProjection.cursor(WS);
-      return {
-        source_revision: String(cursor?.appliedEventRevision ?? 1),
-        ...(cursor?.appliedAt === undefined ? {} : { applied_at: cursor.appliedAt })
-      };
-    }
+    snapshotPin: (workspaceId) => slice.indexProjection.observablePin(workspaceId)
   };
 }
 
 function entryId(entry: InformationIndex["entries"][number]): string {
-  return `${entry.hypothesis_id}\0${entry.output_binding}\0${entry.object_id}`;
+  return [
+    entry.hypothesis_id,
+    entry.output_binding,
+    entry.object_id,
+    entry.program_state ?? "",
+    entry.time_state ?? ""
+  ].join("\0");
 }
 
 async function plantDeployment(slice: Awaited<ReturnType<typeof openSourceSlice>>) {

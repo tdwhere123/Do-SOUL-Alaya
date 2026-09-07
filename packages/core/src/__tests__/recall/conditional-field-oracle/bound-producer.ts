@@ -9,6 +9,7 @@ import { type StorageDatabase } from "@do-soul/alaya-storage";
 import {
   encodeRecallResult,
   runConditionalFieldRecall,
+  toSourceObserverRow,
   type ObserverReaders
 } from "../../../recall/recall-service.js";
 import { compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
@@ -65,20 +66,7 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
     source: (input) => {
       const page = slice.memoryReader.source(input.workspaceId, input.objectId);
       return {
-        row: page.row === null
-          ? null
-          : {
-            object_id: page.row.object_id,
-            sourceRevision: page.row.sourceRevision,
-            observed_at: page.row.event_time_start ?? undefined,
-            content: page.row.content,
-            lifecycle_state: page.row.lifecycle_state,
-            retention_state: page.row.retention_state,
-            scope_class: page.row.scope_class,
-            evidence_refs: page.row.evidence_refs,
-            valid_from: page.row.valid_from,
-            valid_to: page.row.valid_to
-          },
+        row: page.row === null ? null : toSourceObserverRow(page.row),
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
         unavailable: page.unavailable
@@ -97,13 +85,7 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
       return (kindsSql.all(input.workspaceId, subject, subject) as { readonly kind: string }[])
         .map((row) => row.kind);
     },
-    snapshotPin: () => {
-      const cursor = slice.indexProjection.cursor(WS);
-      return {
-        source_revision: String(cursor?.appliedEventRevision ?? 1),
-        ...(cursor?.appliedAt === undefined ? {} : { applied_at: cursor.appliedAt })
-      };
-    }
+    snapshotPin: (workspaceId) => slice.indexProjection.observablePin(workspaceId)
   };
 }
 
