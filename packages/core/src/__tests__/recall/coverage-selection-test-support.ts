@@ -12,13 +12,13 @@ import {
 } from "../../recall/delivery/coverage-selection.js";
 import type { CandidateCoverageReceipt } from
   "../../recall/delivery/fine-assessment-selection/coverage-atoms.js";
-import type { FineAssessmentCandidate } from
-  "../../recall/delivery/fine-assessment-selection.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
+import type { DeliverySelectionCandidate } from
+  "../../recall/delivery/delivery-selection.js";
+import { buildEmptyRecallFusionBreakdown } from "./recall-service-test-fixtures.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 
-export function createCandidate(objectId: string, fusedScore: number): FineAssessmentCandidate {
+export function createCandidate(objectId: string, fusedScore: number): DeliverySelectionCandidate {
   const breakdown = buildEmptyRecallFusionBreakdown(objectId);
   return {
     entry: createMemoryEntry(objectId),
@@ -67,9 +67,9 @@ export function createMemoryEntry(objectId: string): MemoryEntry {
 }
 
 export function withDimension(
-  candidate: FineAssessmentCandidate,
+  candidate: DeliverySelectionCandidate,
   dimension: MemoryDimension
-): FineAssessmentCandidate {
+): DeliverySelectionCandidate {
   return { ...candidate, entry: { ...candidate.entry, dimension } };
 }
 
@@ -84,11 +84,11 @@ export function createScoreFactors(): RecallScoreFactors {
   };
 }
 
-export function createRanks(candidates: readonly FineAssessmentCandidate[]): ReadonlyMap<string, number> {
+export function createRanks(candidates: readonly DeliverySelectionCandidate[]): ReadonlyMap<string, number> {
   return new Map(candidates.map((candidate, index) => [candidate.fusion.candidate_key, index + 1]));
 }
 
-export function relevanceMap(candidates: readonly FineAssessmentCandidate[]): ReadonlyMap<string, number> {
+export function relevanceMap(candidates: readonly DeliverySelectionCandidate[]): ReadonlyMap<string, number> {
   return new Map(candidates.map((candidate) => [
     candidate.fusion.candidate_key,
     candidate.fusion.fused_score
@@ -96,16 +96,16 @@ export function relevanceMap(candidates: readonly FineAssessmentCandidate[]): Re
 }
 
 export function legacyCoveragePass(
-  candidates: readonly FineAssessmentCandidate[],
+  candidates: readonly DeliverySelectionCandidate[],
   relevanceByCandidateKey: ReadonlyMap<string, number>,
   supplementaryData: RecallSupplementaryData,
   rejected: ReadonlySet<string>
 ): Readonly<{
-  readonly ordered: readonly FineAssessmentCandidate[];
+  readonly ordered: readonly DeliverySelectionCandidate[];
   readonly observations: readonly CoverageMarginalObservation[];
 }> {
   const remaining = [...candidates];
-  const ordered: FineAssessmentCandidate[] = [];
+  const ordered: DeliverySelectionCandidate[] = [];
   const observations: CoverageMarginalObservation[] = [];
   const objectCounts = new Map<string, number>();
   const gistCounts = new Map<string, number>();
@@ -168,12 +168,12 @@ export function createSupplementaryData(
 }
 
 export function captureCoverageReceipt(
-  candidate: FineAssessmentCandidate,
+  candidate: DeliverySelectionCandidate,
   supplementaryData: RecallSupplementaryData
 ): CandidateCoverageReceipt {
   let receipt: CandidateCoverageReceipt | null = null;
   const objective: CoverageSelectionObjective<
-    FineAssessmentCandidate,
+    DeliverySelectionCandidate,
     Record<string, never>
   > = Object.freeze({
     operator_id: "coverage_receipt_probe_v1",

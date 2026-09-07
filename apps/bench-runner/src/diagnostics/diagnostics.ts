@@ -49,13 +49,3 @@ export {
   reclassifyQuestionDiagnostic,
   reclassifyQuestionDiagnostics
 } from "./miss/reclassify-question-diagnostics.js";
-export {
-  evaluateRecallEvalGzipTailDegeneracy,
-  scoreRecallEvalGzipRankingRung
-} from "./ranking/score-stored-ranking-rung.js";
-export {
-  evaluateRecallEvalGzipD1Counterfactual,
-  type D1CounterfactualCaptureIdentity,
-  type D1CounterfactualRate,
-  type D1CounterfactualReport
-} from "./ranking/score-d1-counterfactual.js";

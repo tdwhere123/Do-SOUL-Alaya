@@ -11,7 +11,7 @@ import type {
   RecallPathInflowAvailability,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
-import { resolveConformantPathWeight } from "./conformant-fusion-scoring.js";
+import { readRecallUnitFloat } from "../../runtime/config/recall-env-access.js";
 import { resolveSliceAxis } from "./flood-slice-axis.js";
 
 export type {
@@ -19,6 +19,10 @@ export type {
   FloodFuelCoverageSummary,
   IntegratedFloodCandidateDiagnostics
 } from "../runtime/recall-service-types.js";
+
+export function resolveConformantPathWeight(): number {
+  return readRecallUnitFloat("ALAYA_RECALL_CONF_W_PATH", 0.6);
+}
 
 export interface IntegratedFloodAxisInputs {
   readonly R_obj: number;

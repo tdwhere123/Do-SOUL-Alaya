@@ -13,15 +13,12 @@ import {
 } from "../../../../recall/field/retrieval/retrieval-field-source-authority.js";
 import { withActiveRecallReadSnapshot } from
   "../../../../recall/runtime/recall-read-snapshot.js";
-import { admitLiveLexicalIntervalSources } from
-  "../../../../recall/decision/query-proof/live-query-proof-authority.js";
 import {
-  authorityFrom,
   capturedLexicalPreparedAuthority,
   cleanup,
   preparedAuthority,
   stubMemoryRepo
-} from "../../integration/shadow/live-receipt-fixtures.js";
+} from "./lexical-source-authority.fixture.js";
 
 describe("lexical interval source authority", () => {
   it("issues only inside an active physical read and rejects a clone", async () => {
@@ -40,18 +37,12 @@ describe("lexical interval source authority", () => {
       [source] = readMemoryLexicalIntervalSources(bundle);
       expect(source?.status).toBe("captured");
       expect(() => verifyLexicalIntervalSourceReceiptV1(source!)).not.toThrow();
-      expect(admitLiveLexicalIntervalSources(
-        authorityFor(prepared, source!, bundle), [source!]
-      )).toEqual([source]);
       expect(() => verifyLexicalIntervalSourceReceiptV1({ ...source! }))
         .toThrow(/issued source authority/u);
     });
     expect(readMemoryLexicalIntervalSources(bundle)).toEqual([]);
     expect(() => verifyLexicalIntervalSourceReceiptV1(source!))
       .toThrow(/active source authority/u);
-    expect(admitLiveLexicalIntervalSources(
-      authorityFor(prepared, source!, bundle), [source!]
-    )).toBeUndefined();
     expect(search.mock.calls).toEqual([["workspace-1", "stable", 1, {}]]);
     expect("memoryLexicalIntervalSourcesForSnapshot" in bundle).toBe(false);
     cleanup(prepared);
@@ -132,17 +123,11 @@ describe("lexical interval source authority", () => {
       });
       [source] = readMemoryLexicalIntervalSources(bundle);
       expect(() => verifyLexicalIntervalSourceReceiptV1(source!)).not.toThrow();
-      expect(admitLiveLexicalIntervalSources(
-        authorityFor(prepared, source!, bundle), [source!]
-      )).toEqual([source]);
       throw new Error("rollback");
     })).rejects.toThrow("rollback");
 
     expect(() => verifyLexicalIntervalSourceReceiptV1(source!))
       .toThrow(/active source authority/u);
-    expect(admitLiveLexicalIntervalSources(
-      authorityFor(prepared, source!, bundle), [source!]
-    )).toBeUndefined();
     cleanup(prepared);
   });
 
@@ -295,23 +280,6 @@ describe("lexical interval source authority", () => {
 
 function snapshotPort() {
   return { beginDeferred() {}, commit() {}, rollback() {} };
-}
-
-function authorityFor(
-  prepared: Awaited<ReturnType<typeof preparedAuthority>>,
-  source: ReturnType<typeof readMemoryLexicalIntervalSources>[number],
-  bundle: ReturnType<typeof createRecallRetrievalFieldBundle>
-) {
-  return Object.freeze({
-    ...authorityFrom(prepared),
-    lexical_source_bundle: bundle,
-    expected_lexical_request_pins: [Object.freeze({
-      workspace_id: source.workspace_id,
-      request_digest: source.request_digest,
-      field_prefix: source.field_prefix,
-      candidate_key_domain: source.candidate_key_domain
-    })]
-  });
 }
 
 function fieldResult() {

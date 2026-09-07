@@ -224,14 +224,10 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(Array.isArray(recallResult.results)).toBe(true);
       const recalledIds = recallResult.results.map((r) => r.object_id);
       expect(recalledIds).toContain(seed.memoryId);
-      const diagnostics = recallResult.diagnostics as
-        | { readonly delivered_count?: number; readonly candidates?: readonly { readonly object_id: string; readonly final_rank: number | null }[] }
-        | undefined;
-      expect(diagnostics?.delivered_count).toBe(recallResult.results.length);
-      const seededDiagnostic = diagnostics?.candidates?.find(
-        (candidate) => candidate.object_id === seed.memoryId
-      );
-      expect(seededDiagnostic?.final_rank).not.toBeNull();
+      expect(recallResult.index?.entries.map((entry) => entry.object_id)).toContain(seed.memoryId);
+      expect(recallResult.results.every((row) => row.source_channels.includes("conditional_field"))).toBe(true);
+      expect(recallResult.provider_calls).toBe(0);
+      expect(recallResult.garden_enqueue).toBe(0);
     },
     60_000
   );

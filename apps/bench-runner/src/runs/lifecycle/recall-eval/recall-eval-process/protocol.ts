@@ -36,8 +36,6 @@ export interface RecallEvalPagerIpcSuccess {
   readonly pid?: number;
   readonly mapsHint?: RecallEvalPagerMapsHint | null;
   readonly pack?: unknown;
-  readonly selectionArtifact?: unknown;
-  readonly selectionSpoolRootPath?: unknown;
   readonly evidenceProjectionRebuild?: unknown;
   readonly embeddingCacheOverlay?: unknown;
 }

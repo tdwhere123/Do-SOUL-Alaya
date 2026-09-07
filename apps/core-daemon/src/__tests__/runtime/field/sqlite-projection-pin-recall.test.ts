@@ -1,9 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
-  ControlPlaneObjectKind,
   FACTOR_INCIDENCE_OPERATOR_ID,
   QUERY_CONDITION_OPERATOR_ID,
-  RetentionPolicy,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   fieldReceiptContractFields,
   hashAddressableSourceSpanId,
@@ -14,14 +12,10 @@ import {
   hashQueryCacheKey,
   hashSourceRecordId,
   verifyQueryConditionReceipt,
-  type EventLogEntry,
-  type ProjectionPin,
-  type TaskObjectSurface
+  type ProjectionPin
 } from "@do-soul/alaya-protocol";
 import {
-  RecallService,
-  fieldContractSha256,
-  type RecallServiceDependencies
+  fieldContractSha256
 } from "@do-soul/alaya-core";
 import {
   initDatabase,
@@ -66,122 +60,31 @@ describe("sqlite projection pin recall", () => {
     ).candidate_keys).toEqual(expect.any(Array));
   });
 
-  it("pins at operational now when recall as-of is historical", async () => {
+  it("keeps operational pin time separate from historical source selection", () => {
     const { database, querySession, stores } = openComposition();
     seedProjectionSource(stores);
-    let pinnedAt: string | undefined;
-    const renew = vi.fn(querySession.renew.bind(querySession));
-    const service = createSqliteRecallService({
-      fieldQuerySession: {
-        ...querySession,
-        pinActiveGeneration(workspaceId, recordedAt) {
-          pinnedAt = recordedAt;
-          return querySession.pinActiveGeneration(workspaceId, recordedAt);
-        },
-        renew
-      },
-      now: () => CLOCK
-    });
-
-    await expect(service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "build",
-      referenceTime: PAST_AS_OF
-    })).resolves.toMatchObject({ candidates: expect.any(Array) });
-    expect(pinnedAt).toBe(CLOCK);
-    expect(renew).toHaveBeenCalledTimes(1);
-    expect(database.connection.prepare(`
-      SELECT COUNT(*) AS n FROM projection_pins WHERE released_at IS NULL
-    `).get()).toMatchObject({ n: 0 });
+    const pin = querySession.pinActiveGeneration("workspace-1", CLOCK);
+    expect(pin.pinned_at).toBe(CLOCK);
+    expect(querySession.selectCandidates(sqliteQueryCondition(pin, PAST_AS_OF), pin, CLOCK).candidate_keys)
+      .toEqual(expect.any(Array));
+    querySession.release(pin, CLOCK);
+    expect(database.connection.prepare("SELECT COUNT(*) AS n FROM projection_pins WHERE released_at IS NULL").get())
+      .toMatchObject({ n: 0 });
   });
 
-  it("keeps the sqlite pin live when operational time passes the original expiry", async () => {
+  it("renews the native lease past its original expiry and releases it", () => {
     const { database, querySession, stores } = openComposition();
     seedProjectionSource(stores);
-    let now = CLOCK;
-    let heartbeat: (() => void) | null = null;
-    const service = createSqliteRecallService({
-      fieldQuerySession: querySession,
-      now: () => now,
-      projectionPinHeartbeatScheduler: {
-        every: (_intervalMs, callback) => {
-          heartbeat = callback;
-          return () => {
-            heartbeat = null;
-          };
-        }
-      },
-      onPreparationRead: () => {
-        now = "2026-08-16T00:04:00.000Z";
-        heartbeat?.();
-        now = "2026-08-16T00:06:00.000Z";
-      }
-    });
-
-    await expect(service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "build"
-    })).resolves.toMatchObject({ candidates: expect.any(Array) });
-    expect(database.connection.prepare(`
-      SELECT COUNT(*) AS n FROM projection_pins WHERE released_at IS NULL
-    `).get()).toMatchObject({ n: 0 });
+    const pin = querySession.pinActiveGeneration("workspace-1", CLOCK);
+    const renewed = querySession.renew(pin, "2026-08-16T00:04:00.000Z");
+    expect(Date.parse(renewed.expires_at)).toBeGreaterThan(Date.parse(pin.expires_at));
+    expect(querySession.selectCandidates(sqliteQueryCondition(pin, "2026-08-16T00:06:00.000Z"),
+      pin, "2026-08-16T00:06:00.000Z").candidate_keys).toEqual(expect.any(Array));
+    querySession.release(pin, "2026-08-16T00:06:00.000Z");
+    expect(database.connection.prepare("SELECT COUNT(*) AS n FROM projection_pins WHERE released_at IS NULL").get())
+      .toMatchObject({ n: 0 });
   });
 });
-
-function createSqliteRecallService(input: Readonly<{
-  readonly fieldQuerySession: NonNullable<
-    ConstructorParameters<typeof RecallService>[0]["fieldQuerySession"]
-  >;
-  readonly now: () => string;
-  readonly projectionPinHeartbeatScheduler?: ConstructorParameters<
-    typeof RecallService
-  >[0]["projectionPinHeartbeatScheduler"];
-  readonly onPreparationRead?: () => void;
-}>): RecallService {
-  return new RecallService({
-    ...stubRecallDependencies(input.now, input.onPreparationRead),
-    fieldQuerySession: input.fieldQuerySession,
-    projectionPinHeartbeatScheduler: input.projectionPinHeartbeatScheduler
-  });
-}
-
-function stubRecallDependencies(
-  now: () => string,
-  onPreparationRead?: () => void
-): RecallServiceDependencies {
-  return {
-    now,
-    generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
-    memoryRepo: {
-      findByWorkspaceId: vi.fn(async () => []),
-      findByDimension: vi.fn(async () => []),
-      findByScopeClass: vi.fn(async () => []),
-      findByEvidenceRefs: vi.fn(async () => [])
-    },
-    slotRepo: {
-      findByWorkspace: vi.fn(async () => {
-        onPreparationRead?.();
-        return [];
-      })
-    },
-    eventLogRepo: {
-      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-        event_id: "event-1",
-        created_at: CLOCK,
-        revision: 0,
-        ...entry
-      })),
-      queryByEntity: vi.fn(async () => [])
-    },
-    graphSupportPort: {
-      countInboundSupports: vi.fn(async () => 0),
-      countInboundEdgesWeighted: vi.fn(async () => 0),
-      countInboundRecalls: vi.fn(async () => 0)
-    }
-  };
-}
 
 function sqliteQueryCondition(pin: ProjectionPin, recordedAt: string) {
   const condition = {
@@ -216,20 +119,6 @@ function sqliteQueryCondition(pin: ProjectionPin, recordedAt: string) {
     }, fieldContractSha256),
     recorded_at: recordedAt
   }, fieldContractSha256);
-}
-
-function createTaskSurface(): TaskObjectSurface {
-  return {
-    runtime_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
-    object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-    task_surface_ref: null,
-    expires_at: "2026-08-16T00:30:00.000Z",
-    derived_from: null,
-    retention_policy: RetentionPolicy.SESSION_ONLY,
-    surface_kind: "build",
-    display_name: "Ada",
-    context_refs: []
-  };
 }
 
 function openComposition() {

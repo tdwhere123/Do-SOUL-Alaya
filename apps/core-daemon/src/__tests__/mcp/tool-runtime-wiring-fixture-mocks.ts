@@ -167,7 +167,11 @@ vi.mock("../../mcp/catalog/mcp-runtime-registry.js", () => ({
 
 vi.mock("@do-soul/alaya-storage", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("@do-soul/alaya-storage");
-  return buildToolRuntimeWiringStorageMocks({ actual, hoisted });
+  return {
+    ...await buildToolRuntimeWiringStorageMocks({ actual, hoisted }),
+    // Wiring uses inert repositories; real schema preparation is covered by indexed-recall-projection.test.ts.
+    prepareIndexedRecallProjection: vi.fn()
+  };
 });
 
 vi.mock("@do-soul/alaya-core", async (importOriginal) => {

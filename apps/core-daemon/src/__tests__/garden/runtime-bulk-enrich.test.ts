@@ -241,7 +241,13 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(detectAndLinkConflicts).not.toHaveBeenCalled();
     expect(currentScheduler().completions[0]).toMatchObject({
       success: false,
-      audit_entries: ["source_enrich_unwired"]
+      audit_entries: [
+        "source_enrich_unwired",
+        "source_enrich_capability:unconfigured",
+        "source_enrich_spend:unsupported",
+        "source_enrich_completion_tokens:unsupported",
+        "source_enrich_family:none"
+      ]
     });
   });
 

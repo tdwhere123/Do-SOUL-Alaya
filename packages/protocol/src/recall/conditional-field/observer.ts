@@ -13,6 +13,9 @@ import {
 } from "./common.js";
 import { GuardSchema } from "./query.js";
 
+// One workspace cursor plus the canonical temporal state and selected generation.
+export const SNAPSHOT_PIN_NATIVE_WORK = 3;
+
 export const ObserverStatusSchema = z.enum([
   "exhausted",
   "open",

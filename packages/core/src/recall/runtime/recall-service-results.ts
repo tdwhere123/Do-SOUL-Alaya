@@ -15,8 +15,30 @@ import type { AttributedKeyActivationV1 } from "../flood/attributed-key-activati
 import type { RecallFiniteFieldSeal } from "../field/finite-field-seal.js";
 import type { RecallQueryFieldAttributionReceipt } from
   "../field/query-attribution/query-field-attribution.js";
-import type { SelectGammaSynthesisStatus } from
-  "../delivery/select-gamma/synthesis-adapter.js";
+export interface SelectGammaSynthesisPort {
+  synthesize(
+    input: Readonly<{
+      readonly workspace_id: string;
+      readonly run_id: string | null;
+      readonly query_text: string | null;
+      readonly selected_evidence: readonly Readonly<RecallCandidate>[];
+    }>
+  ): Promise<unknown>;
+}
+
+export type SelectGammaSynthesisDependencies = Readonly<{
+  readonly selectGammaSynthesisPort?: SelectGammaSynthesisPort;
+}>;
+
+export type SelectGammaSynthesisStatus =
+  | Readonly<{ readonly status: "absent" }>
+  | Readonly<{ readonly status: "ok"; readonly text: string }>
+  | Readonly<{
+      readonly status: "malformed" | "truncated" | "failed";
+      readonly failure: string;
+      readonly text?: string;
+    }>;
+
 
 import type { RecallAdmissionPlane, RecallDiagnostics, RecallPathExpansionSourceDiagnostic } from "./recall-service-diagnostics.js";
 
@@ -95,11 +117,17 @@ export interface RecallEvidenceSemanticActivationReceipt {
   readonly missing_channel_policy: "no_op";
 }
 
+export type RecallSourceMetadata = Readonly<
+  Partial<Pick<MemoryEntry, "evidence_refs">> & Pick<RecallCandidate, "staged_warnings">
+>;
+
 export interface RecallResult {
+  readonly source_metadata?: Readonly<Record<string, RecallSourceMetadata>>;
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly synthesis: SelectGammaSynthesisStatus;
   readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
-  readonly active_constraints_count: number;
+  readonly active_constraints_count: number | null;
+  readonly active_constraints_completeness?: "complete" | "incomplete";
   readonly total_scanned: number;
   readonly coarse_filter_count: number;
   readonly fine_assessment_count: number;

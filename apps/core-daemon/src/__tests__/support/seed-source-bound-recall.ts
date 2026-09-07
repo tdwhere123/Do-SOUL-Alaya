@@ -6,11 +6,37 @@ import {
   hashContentDigest,
   hashFactorId,
   hashIncidenceId,
-  hashSourceRecordId
+  hashSourceRecordId,
+  type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import { fieldContractSha256 } from "@do-soul/alaya-core";
-import { SqliteEventLogRepo, type StorageDatabase } from "@do-soul/alaya-storage";
+import { fieldContractSha256, MemoryService } from "@do-soul/alaya-core";
+import { SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteMemoryEntryRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createDaemonFieldComposition } from "../../runtime/field/field-composition.js";
+
+export async function seedRecallMemory(input: Readonly<{ database: StorageDatabase; memory: MemoryEntry }>) {
+  const { database, memory } = input;
+  for (const evidenceId of memory.evidence_refs) {
+    seedSourceBoundRecall({ database, workspaceId: memory.workspace_id, runId: memory.run_id,
+      evidenceId, factorValue: memory.content, body: memory.content, recordedAt: memory.created_at });
+  }
+  const evidence = new SqliteEvidenceCapsuleRepo(database);
+  const service = new MemoryService({
+    now: () => memory.created_at,
+    generateObjectId: () => memory.object_id,
+    memoryEntryRepo: new SqliteMemoryEntryRepo(database),
+    eventLogRepo: new SqliteEventLogRepo(database),
+    evidenceService: { findById: (id) => evidence.findById(id),
+      findByIds: (workspaceId, ids) => evidence.findByIds(workspaceId, ids) },
+    runtimeNotifier: { notifyEntry: async () => {} }
+  });
+  return service.create({
+    created_by: memory.created_by, dimension: memory.dimension, source_kind: memory.source_kind,
+    formation_kind: memory.formation_kind, scope_class: memory.scope_class, content: memory.content,
+    domain_tags: memory.domain_tags, evidence_refs: memory.evidence_refs,
+    workspace_id: memory.workspace_id, run_id: memory.run_id, surface_id: memory.surface_id,
+    storage_tier: memory.storage_tier
+  });
+}
 
 export function seedSourceBoundRecall(input: Readonly<{
   database: StorageDatabase;

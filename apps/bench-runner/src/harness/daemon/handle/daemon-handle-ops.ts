@@ -6,9 +6,7 @@ import {
   RetentionPolicy,
   TaskObjectSurfaceSchema,
   type MemorySearchResult,
-  type RecallCandidate,
   type RecallPolicy,
-  type SoulMemorySearchResponse,
   type SoulReportContextUsageResponse
 } from "@do-soul/alaya-protocol";
 import {
@@ -21,7 +19,6 @@ import {
 import { createBenchSeedProposalReviewer } from "../seed/daemon-seed-review.js";
 import {
   buildBenchDiagnosticRecallPolicy,
-  buildBenchMemorySearchResult,
   callMcpTool,
   closeBenchDaemonResources,
   emitBenchContextLensAssembledEvent,
@@ -59,11 +56,8 @@ import {
   resolveBenchEmbeddingSchemaVersion,
   shouldRunBenchEdgePlane
 } from "./daemon-handle-ops-support.js";
-import { buildBenchRecallResponse } from "./bench-recall-response.js";
+import { buildBenchRecallResponse, encodeBenchRecallResults } from "./bench-recall-response.js";
 import { invokeBoundRecall } from "@do-soul/alaya/recall/bound-execution";
-import { parseBenchRecallDiagnosticsForRun } from
-  "../../recall/recall-diagnostics-schema.js";
-import { assertEmbeddingTreatmentDiagnosticsPresent } from "../../embedding/embedding-treatment-activation.js";
 import { createFieldProjectionCheckpointOperation } from "../runtime/daemon-field-projection.js";
 import { createRelationProjectionCheckpointOperation } from "../runtime/daemon-relation-projection.js";
 
@@ -146,7 +140,7 @@ function createBenchRecallOperation(
   return async (
     query: string,
     opts: BenchRecallOptions = {}
-  ): Promise<SoulMemorySearchResponse & { readonly diagnostics?: unknown }> => {
+  ): ReturnType<BenchDaemonHandle["recall"]> => {
     const taskSurface = createBenchTaskSurface(query);
     const policy = buildBenchRecallPolicy(
       taskSurface.runtime_id,
@@ -166,11 +160,6 @@ function createBenchRecallOperation(
           ? "packet_trace"
           : "answer_features",
       ...(opts.referenceTime === undefined ? {} : { referenceTime: opts.referenceTime }),
-      ...(opts.selectionBoundaryObserver === undefined
-        ? {}
-        : { selectionBoundaryObserver: opts.selectionBoundaryObserver }),
-      ...(opts.diagnosticObserver === undefined ? {}
-        : { diagnosticObserver: opts.diagnosticObserver }),
       ...(opts.querySemanticFactorFormationCapture === undefined
         ? {}
         : { querySemanticFactorFormationCapture: opts.querySemanticFactorFormationCapture }),
@@ -181,8 +170,8 @@ function createBenchRecallOperation(
       ...(opts.snapshotDigest === undefined ? {} : { snapshotDigest: opts.snapshotDigest }),
       activeConstraintsCap: null
     });
-    const recallResult = validateBenchRecallDiagnostics(rawRecallResult, input.effectiveEnv);
-    const results = collectBenchRecallResults(recallResult, policy, opts.maxResults);
+    const recallResult = rawRecallResult;
+    const results = encodeBenchRecallResults(recallResult, policy);
     const delivery = await recordBenchRecallDelivery(input, results, recallResult);
     await emitBenchContextLensAssembledEvent(input.dataDir, {
       taskSurfaceRef: taskSurface.runtime_id,
@@ -194,18 +183,8 @@ function createBenchRecallOperation(
       runId: input.activeContext.runId,
       workspaceId: input.activeContext.workspaceId
     });
-    return buildBenchRecallResponse(delivery.deliveryId, results, recallResult, policy);
+    return buildBenchRecallResponse(delivery.deliveryId, results, recallResult);
   };
-}
-
-function validateBenchRecallDiagnostics(
-  recallResult: BenchRecallServiceResult,
-  effectiveEnv: Readonly<Record<string, string | undefined>>
-): BenchRecallServiceResult {
-  assertEmbeddingTreatmentDiagnosticsPresent(recallResult.diagnostics, effectiveEnv);
-  if (recallResult.diagnostics === undefined) return recallResult;
-  parseBenchRecallDiagnosticsForRun(recallResult.diagnostics, effectiveEnv);
-  return recallResult;
 }
 
 function createBenchReportContextUsageOperation(
@@ -401,35 +380,6 @@ function buildBenchRecallPolicy(
     opts.conflictAwareness ?? true
   );
   return applyBenchRecallWeightOverrides(basePolicy, recallWeightOverrides);
-}
-
-function collectBenchRecallResults(
-  recallResult: BenchRecallServiceResult,
-  policy: RecallPolicy,
-  maxResultsInput: number | undefined
-): readonly MemorySearchResult[] {
-  const candidates = selectBenchRecallCandidates(recallResult, maxResultsInput);
-  let usedTokens = 0;
-  return candidates.map((candidate, index) => {
-    const result = buildBenchMemorySearchResult(candidate, policy, index, usedTokens);
-    usedTokens += candidate.token_estimate;
-    return result;
-  });
-}
-
-function selectBenchRecallCandidates(
-  recallResult: BenchRecallServiceResult,
-  maxResultsInput: number | undefined
-): readonly Readonly<RecallCandidate>[] {
-  const maxResults = Math.max(maxResultsInput ?? 10, 1);
-  const activeConstraintIds = new Set(
-    recallResult.active_constraints.map(
-      (constraint: { readonly object_id: string }) => constraint.object_id
-    )
-  );
-  return recallResult.candidates
-    .filter((candidate: RecallCandidate) => !activeConstraintIds.has(candidate.object_id))
-    .slice(0, maxResults);
 }
 
 async function recordBenchRecallDelivery(

@@ -60,7 +60,7 @@ export const MemorySearchResultSchema = z
     time_state: NonEmptyStringSchema.optional(),
     output_binding: NonEmptyStringSchema.optional(),
     // Diagnostic-only prose. Agents must not branch on its wording or use it
-    // as a ranking key. ranking_authority on the parent packet names the owner.
+    // as a ranking key. The information index owns association and ordering.
     selection_reason: BoundedReasonSchema,
     source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     // Public numeric explainability API for soul.recall consumers.
@@ -128,7 +128,7 @@ export const SoulMemorySearchRequestSchema = z
     until: IsoDatetimeStringSchema.nullable().optional(),
     time_field: RecallTimeFieldSchema.optional(),
     host_context: SoulRecallHostContextSchema.optional(),
-    // Ignored for extraction on the target path. Ordinary recall does not enqueue.
+    /** @deprecated Ignored by Recall; post-turn extraction uses report_context_usage. */
     recent_turn: BoundedQuerySchema.optional(),
     // Maps to the query interpretation clock.
     source_observed_at: IsoDatetimeStringSchema.optional(),
@@ -160,13 +160,14 @@ export const SoulMemorySearchResponseSchema = z
     protocol_version: NonNegativeIntSchema.min(1).optional(),
     results: z.array(MemorySearchResultSchema).readonly(),
     active_constraints: z.array(SoulActiveConstraintSchema).readonly().optional(),
-    active_constraints_count: NonNegativeIntSchema.optional(),
+    active_constraints_count: NonNegativeIntSchema.nullable().optional(),
+    active_constraints_completeness: z.enum(["complete", "incomplete"]).optional(),
     total_count: NonNegativeIntSchema,
     strategy_mix: SoulRecallStrategyMixSchema,
     degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional(),
-    // Ignored on the target path; D01 retires after a named consumer census.
+    /** @deprecated Historical response reader only; current delivery uses index. */
     delivery_path: z.enum(["legacy", "canonical"]).optional(),
-    // Ignored on the target path; D01 retires after a named consumer census.
+    /** @deprecated Historical response reader only; current association uses index. */
     ranking_authority: z.enum(["prefix_sk", "select_gamma"]).optional(),
     capture_identity: z.object({
       algorithm_id: NonEmptyStringSchema,

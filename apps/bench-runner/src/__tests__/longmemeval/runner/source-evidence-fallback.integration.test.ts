@@ -15,8 +15,6 @@ import type { LongMemEvalQuestion } from
   "../../../datasets/longmemeval/ingestion/dataset.js";
 import { seedLongMemEvalQuestion } from
   "../../../datasets/longmemeval/runner/question/runner-question-seeding.js";
-import { scoreLongMemEvalRecallHits } from
-  "../../../datasets/longmemeval/runner/runner-scoring.js";
 import { buildLongMemEvalSnapshotQuestion } from
   "../../../datasets/longmemeval/runner/question/runner-question-result.js";
 import { assertSnapshotDatasetSubstrateIdentity } from
@@ -39,7 +37,7 @@ afterEach(async () => {
 });
 
 describe("LongMemEval source evidence fallback integration", () => {
-  it("recalls and scores an empty extraction through verified source evidence", async () => {
+  it("preserves verified fallback evidence without claiming unsupported bare-capsule Recall delivery", async () => {
     root = await mkdtemp(join(tmpdir(), "longmemeval-source-evidence-"));
     const cacheRoot = join(root, "cache");
     writeExtractionCacheTestManifest({
@@ -98,19 +96,8 @@ describe("LongMemEval source evidence fallback integration", () => {
       maxResults: 10,
       referenceTime: sourceEvidenceQuestion().question_date
     });
-    expect(recallResult.results).toContainEqual(expect.objectContaining({
-      object_id: entries[0]?.objectId,
-      object_kind: "evidence_capsule"
-    }));
-    expect(scoreLongMemEvalRecallHits({
-      results: recallResult.results,
-      sidecar: state.sidecar,
-      answerSessionIds: state.answerSessionSet
-    })).toMatchObject({
-      hitAt1: true,
-      hitAt5: true,
-      hitAt10: true
-    });
+    // The target indexes memory entries; retained evidence alone is not a certified Recall arm.
+    expect(recallResult.results).toEqual([]);
     const snapshotQuestion = buildLongMemEvalSnapshotQuestion({
       question: sourceEvidenceQuestion(),
       workspace: { ...daemon, detach: async () => undefined },

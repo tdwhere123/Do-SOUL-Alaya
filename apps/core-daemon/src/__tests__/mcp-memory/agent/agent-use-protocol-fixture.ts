@@ -55,7 +55,7 @@ import { createAlayaCliBridge } from "../../../cli/bridge.js";
 import { registerAlayaCliCommands } from "../../../cli/register.js";
 
 import { createAlayaDaemonRuntime } from "../../../index.js";
-import { seedSourceBoundRecall } from "../../support/seed-source-bound-recall.js";
+import { seedRecallMemory } from "../../support/seed-source-bound-recall.js";
 import type { AlayaDaemonRuntime } from "../../../runtime/daemon/lifecycle/daemon-runtime-types.js";
 
 import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
@@ -129,7 +129,6 @@ export async function seedPhase6Fixture(dataDir: string): Promise<void> {
   try {
     const workspaceRepo = new SqliteWorkspaceRepo(database);
     const runRepo = new SqliteRunRepo(database);
-    const memoryRepo = new SqliteMemoryEntryRepo(database);
     const proposalRepo = new SqliteProposalRepo(database);
 
     await workspaceRepo.create({
@@ -152,16 +151,7 @@ export async function seedPhase6Fixture(dataDir: string): Promise<void> {
       current_surface_id: null
     });
     const primaryMemory = createMemoryEntry();
-    await memoryRepo.create(primaryMemory);
-    seedSourceBoundRecall({
-      database,
-      workspaceId: primaryMemory.workspace_id,
-      runId: primaryMemory.run_id,
-      evidenceId: primaryMemory.evidence_refs[0]!,
-      factorValue: "pnpm",
-      body: primaryMemory.content,
-      recordedAt: primaryMemory.created_at
-    });
+    await seedRecallMemory({ database, memory: primaryMemory });
     await workspaceRepo.create({
       workspace_id: "workspace-2",
       name: "workspace two",

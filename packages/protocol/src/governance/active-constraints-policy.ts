@@ -16,6 +16,32 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "../relations/path-relation.js";
+import type { SoulActiveConstraint } from "../surfaces/mcp-memory-search-types.js";
+import { ScopeClassSchema } from "../memory/object-kind.js";
+
+export interface BoundedActiveConstraintsRequest {
+  readonly workspaceId: string;
+  readonly asOf: string;
+  readonly snapshotId?: string;
+  readonly authorizedScopes?: readonly string[];
+  readonly cap?: number | null;
+  readonly nativeLimit: number;
+  readonly byteLimit: number;
+}
+
+export interface BoundedActiveConstraintsResult {
+  readonly constraints: readonly Readonly<SoulActiveConstraint>[];
+  readonly total_count: number | null;
+  readonly completeness: "complete" | "incomplete";
+  readonly paths: readonly Readonly<PathRelation>[];
+  readonly temporal_uncertain: boolean;
+  readonly work: Readonly<{ native_visits: number; bytes_read: number; retained_bytes: number }>;
+  readonly binding: Readonly<{ workspace_id: string; as_of: string; snapshot_id: string; authorized_scopes: readonly string[] }>;
+}
+
+export function normalizeActiveConstraintScopes(scopes: readonly string[] | undefined): readonly string[] {
+  return Object.freeze([...new Set((scopes ?? []).map((scope) => ScopeClassSchema.parse(scope)))].sort());
+}
 
 export const DEFAULT_ACTIVE_CONSTRAINTS_CAP = 20;
 export const MAX_ACTIVE_CONSTRAINTS_CAP = 50;
@@ -39,6 +65,8 @@ export interface ActiveConstraintRecord {
   readonly source_channels: readonly ActiveConstraintSourceChannel[];
 }
 
+export type ActiveConstraintClaim = Readonly<Pick<ClaimForm, "claim_status" | "source_object_refs">>;
+
 export interface ActiveConstraintQueryResult {
   readonly constraints: readonly Readonly<ActiveConstraintRecord>[];
   readonly total_count: number;
@@ -52,7 +80,7 @@ export function normalizeActiveConstraintsCap(cap: number | null | undefined): n
 }
 
 export function listActiveConstraintCandidateMemoryIds(input: Readonly<{
-  readonly claims: readonly Readonly<ClaimForm>[];
+  readonly claims: readonly ActiveConstraintClaim[];
   readonly paths: readonly Readonly<PathRelation>[];
 }>): readonly string[] {
   return Object.freeze([
@@ -67,7 +95,7 @@ export function listActiveConstraintCandidateMemoryIds(input: Readonly<{
 export function selectActiveConstraintRecords(input: Readonly<{
   readonly workspaceId: string;
   readonly memories: readonly Readonly<MemoryEntry>[];
-  readonly claims: readonly Readonly<ClaimForm>[];
+  readonly claims: readonly ActiveConstraintClaim[];
   readonly paths: readonly Readonly<PathRelation>[];
   readonly cap?: number | null;
 }>): Readonly<ActiveConstraintQueryResult> {
@@ -99,7 +127,7 @@ function createSelectableMemoryMap(
 function applyActiveConstraintClaims(
   records: Map<string, ActiveConstraintRecord>,
   memoryById: ReadonlyMap<string, Readonly<MemoryEntry>>,
-  claims: readonly Readonly<ClaimForm>[]
+  claims: readonly ActiveConstraintClaim[]
 ): void {
   for (const claim of claims) {
     for (const memoryId of claim.source_object_refs) {
@@ -162,7 +190,7 @@ function upsertActiveConstraintRecord(
   });
 }
 
-function isActiveConstraintClaim(claim: Readonly<ClaimForm>): boolean {
+function isActiveConstraintClaim(claim: ActiveConstraintClaim): boolean {
   return (ACTIVE_CONSTRAINT_CLAIM_STATUSES as readonly ClaimStatus[]).includes(claim.claim_status);
 }
 

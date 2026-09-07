@@ -81,7 +81,9 @@ async function expectFrozenCoreConfig(
   expect(process.env.ALAYA_LOCAL_ONNX_LOCK_PATH)
     .toBe(launch.environment.ALAYA_LOCAL_ONNX_LOCK_PATH);
   const recallResult = await activeDaemon.recall("frozen core configuration probe");
-  expect(recallResult.diagnostics).toMatchObject({ answer_rerank_status: "not_requested" });
+  expect(recallResult.provider_calls).toBe(0);
+  expect(recallResult.garden_enqueue).toBe(0);
+  expect(recallResult.strategy_mix.semantic_supplement).toBe(false);
   const options = { maxResults: 10, conflictAwareness: true };
   expect(buildEffectiveRecallConfigIdentity(process.env, options)).toEqual(
     buildEffectiveRecallConfigIdentity(launch.environment, options)
@@ -279,9 +281,9 @@ describe("effective bench daemon environment", () => {
         daemon.runtime.services.embeddingStatusService.getStatus(daemon.workspaceId)
       ).resolves.toMatchObject({ embedding_enabled: false, model_id: null });
       const recallResult = await daemon.recall("empty treatment isolation probe");
-      expect(recallResult.diagnostics).toMatchObject({
-        answer_rerank_status: "not_requested"
-      });
+      expect(recallResult.provider_calls).toBe(0);
+      expect(recallResult.garden_enqueue).toBe(0);
+      expect(recallResult.strategy_mix.semantic_supplement).toBe(false);
 
       const isolatedConfigDir = launch.environment.ALAYA_CONFIG_DIR;
       await daemon.shutdown();

@@ -20,32 +20,19 @@ import {
   readWarmDerivedSnapshotReceipt,
   type WarmDerivedSnapshotReceipt
 } from "../../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
-import {
-  captureRecallEvalQuestion,
-  createRecallEvalSelectionBoundarySpool,
-  finalizeRecallEvalSelectionBoundarySpool
-} from "../recall-eval-selection-replay.js";
 import { recallEvalOneQuestion } from "../question/recall-eval-question.js";
-import {
-  combineSelectionBoundaryObservers,
-  createCandidateActivationCapture
-} from "../recall-eval-candidate-activation.js";
 import { resolveWorkspaceSliceSnapshotDigest } from "./child-snapshot-digest.js";
 import { readRecallEvalPagerMapsHint } from "./maps-hint.js";
 import { seedParentOpenedFileProofs } from "./parent-opened-file-proofs.js";
 import type {
-  RecallEvalPagerCloseResult,
   RecallEvalPagerOpenPayload,
   RecallEvalPagerOpenResult,
   RecallEvalPagerRecallPayload
 } from "./payload.js";
 import type { RecallEvalQuestionResult } from "../recall-eval-contract.js";
-import type { LongMemEvalSelectionBoundarySpool } from
-  "../../../selection-replay/selection-boundary-spool.js";
 
 interface PagerRuntime {
   daemon: BenchDaemonHandle | null;
-  readonly spool: LongMemEvalSelectionBoundarySpool | null;
   readonly open: RecallEvalPagerOpenPayload;
   readonly slices: ExplodedWorkspaceSlices | null;
   installedWorkspaceId: string | null;
@@ -82,17 +69,15 @@ export async function openRecallEvalPagerChild(
   if (runtime !== null) throw new Error("recall-eval pager child is already open");
   seedParentOpenedFileProofs(payload);
   const working = await openRecallEvalPagerWorkingCopy(payload, onProgress);
-  const spool = await createRecallEvalSelectionBoundarySpool(process.env);
   runtime = {
     daemon: null,
-    spool,
     open: payload,
     slices: working.slices,
     installedWorkspaceId: working.slices?.workspaceIds[0] ?? null,
     workingDbPath: workingAlayaDbPath(payload.dataDirRoot),
     switchIndex: 0
   };
-  return { ...working.sqlite, selectionSpoolRootPath: spool?.rootPath ?? null };
+  return working.sqlite;
 }
 
 export async function recallRecallEvalPagerChild(
@@ -104,29 +89,22 @@ export async function recallRecallEvalPagerChild(
   if (daemon === null) {
     throw new Error("recall-eval pager daemon is not running");
   }
-  const activation = createCandidateActivationCapture(true);
   const snapshotDigest = resolveWorkspaceSliceSnapshotDigest(
     current.slices,
     payload.question.workspaceId
   );
-  const result = await captureRecallEvalQuestion(
-    current.spool,
-    payload.question.questionId,
-    (observer) => recallEvalOneQuestion({
-      daemon,
-      question: payload.question,
-      turnIndex: payload.turnIndex,
-      embeddingMode: current.open.embeddingMode,
-      recallOptions: {
-        ...payload.recallOptions,
-        ...observerFields(observer, activation.observer),
-        ...(snapshotDigest === undefined ? {} : { snapshotDigest })
-      },
-      simulateReport: current.open.simulateReport,
-      measurement: payload.measurement
-    })
-  );
-  return activation.attach(result);
+  return recallEvalOneQuestion({
+    daemon,
+    question: payload.question,
+    turnIndex: payload.turnIndex,
+    embeddingMode: current.open.embeddingMode,
+    recallOptions: {
+      ...payload.recallOptions,
+      ...(snapshotDigest === undefined ? {} : { snapshotDigest })
+    },
+    simulateReport: current.open.simulateReport,
+    measurement: payload.measurement
+  });
 }
 
 async function ensurePagerDaemonForQuestion(
@@ -183,17 +161,11 @@ async function ensurePagerDaemonForQuestion(
   removeClosedPagerWorkingDir(current.open.dataDirRoot, previousWorking);
 }
 
-export async function closeRecallEvalPagerChild(): Promise<RecallEvalPagerCloseResult> {
+export async function closeRecallEvalPagerChild(): Promise<void> {
   const current = runtime;
   runtime = null;
-  if (current === null) return { selectionArtifact: null };
-  let selectionArtifact = null;
+  if (current === null) return;
   let primaryError: unknown;
-  try {
-    selectionArtifact = await finalizeRecallEvalSelectionBoundarySpool(current.spool);
-  } catch (error) {
-    primaryError = error;
-  }
   if (current.daemon !== null) {
     try {
       await current.daemon.shutdown();
@@ -204,18 +176,7 @@ export async function closeRecallEvalPagerChild(): Promise<RecallEvalPagerCloseR
   closeCachedDatabase(
     current.workingDbPath ?? workingAlayaDbPath(current.open.dataDirRoot)
   );
-  if (primaryError !== undefined) {
-    try {
-      await current.spool?.dispose();
-    } catch (error) {
-      primaryError = new AggregateError(
-        [primaryError, error],
-        "recall-eval pager child cleanup failed"
-      );
-    }
-    throw primaryError;
-  }
-  return { selectionArtifact };
+  if (primaryError !== undefined) throw primaryError;
 }
 
 export function childMapsHint() {
@@ -334,14 +295,4 @@ function readWarmReceipt(
     sourceSnapshotDbSha256,
     sourceSchemaVersion: payload.manifest.schema_migration_version
   });
-}
-
-function observerFields(
-  selection: Parameters<typeof combineSelectionBoundaryObservers>[0],
-  diagnostic: ReturnType<typeof createCandidateActivationCapture>["observer"]
-) {
-  return {
-    ...(selection === undefined ? {} : { selectionBoundaryObserver: selection }),
-    ...(diagnostic === undefined ? {} : { diagnosticObserver: diagnostic })
-  };
 }

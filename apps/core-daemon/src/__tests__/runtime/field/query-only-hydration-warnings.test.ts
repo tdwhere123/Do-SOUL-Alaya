@@ -1,53 +1,23 @@
 import { describe, expect, it } from "vitest";
-import {
-  EVIDENCE_ID,
-  MEMORY_ID,
-  createPlantedRecall,
-  recallRequest
-} from "./p217-planted-harness.js";
-import {
-  INDEX_ONLY_ID,
-  LIVE_B_ID,
-  UNBOUND_EVIDENCE_ID,
-  createQueryOnlyHydrationHarness,
-  fieldProjectionIds,
-  selectWithUnboundEvidence
-} from "./query-only-hydration-fixture.js";
+import type { ConditionalFieldRecallPortResult } from "@do-soul/alaya-core";
+import { conditionalRecallPayload, createQueryOnlyHydrationHarness, dispatchQueryOnly,
+  persistConditionalSource } from "./query-only-hydration-fixture.js";
 
 const hydration = createQueryOnlyHydrationHarness();
 
-describe("query-only hydration gap warnings", () => {
-  it("warns selected-but-unbound and hydrated-but-dropped without a public trace field", async () => {
-    const fixture = await hydration.openHydrationFixture();
-    const warnings: Array<{ readonly message: string; readonly meta: Record<string, unknown> }> = [];
-    const result = await createPlantedRecall({
-      database: fixture.writer,
-      field: {
-        ...fixture.field,
-        querySession: selectWithUnboundEvidence(fixture.field.querySession)
-      },
-      memoryRepo: fixture.dispatchedMemoryPort,
-      extra: {
-        warn: (message, meta) => {
-          warnings.push({ message, meta });
-        }
-      }
-    }).recall(recallRequest("Ada"));
-
-    const trace = result.diagnostics?.field_projection_trace;
-    expect(trace?.candidate_keys).toEqual([EVIDENCE_ID, UNBOUND_EVIDENCE_ID]);
-    expect(fieldProjectionIds(result)).toEqual([MEMORY_ID, LIVE_B_ID]);
-    expect(trace).not.toHaveProperty("selected_but_unbound");
-    expect(trace).not.toHaveProperty("hydrated_but_dropped");
-    expect(warnings).toEqual([
-      {
-        message: "field projection selected evidence has no hydrated JSON binding",
-        meta: { selected_but_unbound: [UNBOUND_EVIDENCE_ID] }
-      },
-      {
-        message: "field projection hydrated memory omitted by JSON activation binding",
-        meta: { hydrated_but_dropped: [INDEX_ONLY_ID] }
-      }
-    ]);
+describe("query-only conditional resource outcomes", () => {
+  it("reports a bounded open outcome instead of inventing complete-empty hydration", async () => {
+    const fixture = hydration.openQueryOnlyPair();
+    const objectId = "88888888-8888-4888-8888-888888888888";
+    await persistConditionalSource(fixture.writer, objectId, "nebulapivot published source");
+    const payload = conditionalRecallPayload("nebulapivot");
+    const full = await dispatchQueryOnly(fixture.queryOnlyRuntime, "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
+    expect(full.index.entries.map((entry) => entry.object_id)).toContain(objectId);
+    const limited = await dispatchQueryOnly(fixture.queryOnlyRuntime, "conditionalField.recall", {
+      ...payload, budget: { ...payload.budget, memory_bytes: 1 }
+    }) as ConditionalFieldRecallPortResult;
+    expect(limited.index.completeness.logical_index).not.toBe("complete");
+    expect(limited.index.completeness.observed_coverage).not.toBe("exhausted_empty");
+    expect(fixture.queryOnly.connection.pragma("query_only", { simple: true })).toBe(1);
   });
 });

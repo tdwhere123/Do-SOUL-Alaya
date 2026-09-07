@@ -85,6 +85,8 @@ function relation(
     relation_kind: kind,
     source_variable: source,
     target_variable: target,
+    facet_mode: "same_path",
+    threshold_milligrades: 0,
     guard: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       kind: "query_predicate",

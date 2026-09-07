@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RecallService } from "../../../recall/recall-service.js";
+import { buildRecallDiagnostics } from "../../../recall/runtime/diagnostics.js";
+import { compileRecallQueryProbes } from "../../../recall/query/recall-query-probes.js";
 import {
   CAPTURE_PARITY_GEOMETRY_BASIS,
   compareCaptureParity,
@@ -171,33 +173,12 @@ describe("capture parity comparer", () => {
 
   it("throws when query_probes are absent", async () => {
     const result = await recallYoga();
-
-    expect(() => extractCaptureParityView("yoga-place", {
-      ...result,
-      diagnostics: {
-        retrieval_field_captures: [{
-          channel: {
-            channel_id: "lexical_relaxed_exact",
-            status: "complete",
-            observations: []
-          }
-        }],
-        query_probes: null as never
-      }
-    })).toThrow(/query probes missing/);
-    expect(() => extractCaptureParityView("yoga-place", {
-      ...result,
-      diagnostics: {
-        retrieval_field_captures: [{
-          channel: {
-            channel_id: "lexical_relaxed_exact",
-            status: "complete",
-            observations: []
-          }
-        }],
-        query_probes: undefined as never
-      }
-    })).toThrow(/query probes missing/);
+    for (const missing of [null, undefined]) {
+      const diagnostics = { ...syntheticDiagnostics() };
+      Object.defineProperty(diagnostics, "query_probes", { value: missing });
+      expect(() => extractCaptureParityView("yoga-place", { ...result, diagnostics }))
+        .toThrow(/query probes missing/);
+    }
   });
 
   it("live recall does not emit capture-parity diagnostics or prefix_sk ranking", async () => {
@@ -277,5 +258,30 @@ function withLexical(
         observation_keys: [...observationKeys]
       }
     ]
+  });
+}
+
+function syntheticDiagnostics() {
+  return buildRecallDiagnostics({
+    queryProbes: compileRecallQueryProbes("yoga"),
+    totalScanned: 0, candidatePoolCount: 0, preBudgetCount: 0, deliveredCount: 0,
+    embeddingProviderStatus: "provider_not_requested", embeddingSupplementStatus: "disabled",
+    providerDegradationReason: null,
+    answerRerankDiagnostics: { status: "not_requested", expected_count: 0, scored_count: 0, failure_class: null },
+    graphExpansionDiagnostics: {
+      graph_expansion_plane_count_per_hop: [0, 0],
+      graph_expansion_plane_count_per_edge_type: { derives_from: 0, recalls: 0, supports: 0 }
+    },
+    candidates: [], fineAssessmentPrunedCandidates: [],
+    retrievalFieldCaptures: [{
+      schema_version: 1, operator_id: "recall_finite_field_channel_capture_v1",
+      source_snapshot_digest: `sha256:${"a".repeat(64)}`,
+      capture_digest: `sha256:${"b".repeat(64)}`,
+      channel: { channel_id: "lexical_relaxed_exact", status: "complete",
+        depth: 0, unseen_upper_bound: null, observations: [] }
+    }],
+    tokenEconomy: { delivered_context_tokens_estimate: 0, coarse_pool_size: 0,
+      fine_evaluated: 0, fine_pruned_count: 0, fine_priority_overflow_count: 0,
+      fusion_families_with_hits: 0, embedding_inference_calls: 0 }
   });
 }

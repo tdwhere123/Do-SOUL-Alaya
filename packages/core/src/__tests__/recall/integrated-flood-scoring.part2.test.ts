@@ -4,7 +4,7 @@ import {
   computeIntegratedFloodScore,
   structuralLikelihoodGate
 } from "../../recall/scoring/integrated-flood-scoring.js";
-import { resolveConformantPathWeight } from "../../recall/scoring/conformant-fusion-scoring.js";
+import { resolveConformantPathWeight } from "../../recall/scoring/integrated-flood-scoring.js";
 import { createMemoryEntry, supplementary } from "./integrated-flood-scoring.test-support.js";
 
 const CONF_ENV = [

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { RecallService } from "../../../recall/recall-service.js";
+import { isActiveRecallReadCapability, withActiveRecallReadSnapshot } from
+  "../../../recall/runtime/recall-read-snapshot.js";
 import {
   createSeededTestOnlyInMemoryFieldQuerySession,
   createTestOnlyInMemoryFieldQuerySession
@@ -8,7 +10,6 @@ import {
   "../../../recall/runtime/query/field-query-session.js";
 import { captureQueryCondition } from
   "../../../recall/query/condition/query-condition-capture.js";
-import { executeRecall } from "../../../recall/runtime/recall-service-runner.js";
 import { finishProjectionPinCleanup, startProjectionPinLeaseGuard } from
   "../../../recall/runtime/query/projection-pin-lease.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
@@ -18,6 +19,53 @@ import {
 } from "../recall-8factor-test-fixtures.js";
 
 const CLOCK = "2026-08-16T00:00:00.000Z";
+
+describe("conditional field read snapshot lifecycle", () => {
+  it("rolls back a failed field read without committing or writing EventLog", async () => {
+    const { dependencies } = createDependencies([]);
+    const commit = vi.fn();
+    const rollback = vi.fn();
+    const append = vi.fn(dependencies.eventLogRepo.append);
+    const failure = new Error("field read failed");
+    const service = new RecallService({
+      ...dependencies,
+      readSnapshot: { beginDeferred: vi.fn(), commit, rollback },
+      conditionalFieldPort: { recall: async () => { throw failure; } },
+      eventLogRepo: { ...dependencies.eventLogRepo, append }
+    });
+    await expect(service.recall({
+      taskSurface: createTaskSurface("Ada"), workspaceId: "workspace-1", strategy: "build"
+    })).rejects.toBe(failure);
+    expect(rollback).toHaveBeenCalledOnce();
+    expect(commit).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("revokes the read capability after failed read=%s", async (fail) => {
+    let captured: unknown;
+    const commit = vi.fn();
+    const rollback = vi.fn();
+    const work = withActiveRecallReadSnapshot({ beginDeferred: vi.fn(), commit, rollback }, async (capability) => {
+      captured = capability;
+      expect(isActiveRecallReadCapability(capability)).toBe(true);
+      if (fail) throw new Error("read failed");
+      return "read";
+    });
+    if (fail) await expect(work).rejects.toThrow("read failed");
+    else await expect(work).resolves.toBe("read");
+    expect(isActiveRecallReadCapability(captured)).toBe(false);
+    expect(commit).toHaveBeenCalledTimes(fail ? 0 : 1);
+    expect(rollback).toHaveBeenCalledTimes(fail ? 1 : 0);
+  });
+
+  it("preserves the read failure when rollback also fails", async () => {
+    const failure = new Error("read failed");
+    await expect(withActiveRecallReadSnapshot({
+      beginDeferred: vi.fn(), commit: vi.fn(),
+      rollback: () => { throw new Error("rollback failed"); }
+    }, async () => { throw failure; })).rejects.toBe(failure);
+  });
+});
 
 describe("projection reader lifecycle", () => {
   it("requires an explicit production field session", () => {
@@ -36,32 +84,7 @@ describe("projection reader lifecycle", () => {
       .toThrow(/active projection generation is missing/u);
   });
 
-  it("does not mint a generation for a workspace the test never activated", async () => {
-    const fixture = createDependencies([]).dependencies;
-    const { fieldQuerySession: _seeded, ...unseeded } = fixture;
-    const service = new RecallService({
-      ...unseeded,
-      testOnlyAllowInMemoryFieldQuerySession: true,
-      now: () => CLOCK
-    });
-    await expect(runRecall(service, "workspace-other"))
-      .rejects.toThrow(/active projection generation is missing/u);
-  });
 
-  it("releases the pin when candidate selection fails", async () => {
-    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
-    const release = vi.fn(delegate.release);
-    const service = createService({
-      ...delegate,
-      selectCandidates: () => {
-        throw new Error("planted selection failure");
-      },
-      release
-    });
-
-    await expect(runRecall(service)).rejects.toThrow(/planted selection failure/u);
-    expect(release).toHaveBeenCalledTimes(1);
-  });
 
   it("binds selection to a live unreleased reader identity", () => {
     const session = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
@@ -101,18 +124,6 @@ describe("projection reader lifecycle", () => {
     ).candidate_keys).toEqual([]);
   });
 
-  it("does not use query as-of as the pin lease clock", async () => {
-    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
-    const pinActiveGeneration = vi.fn(delegate.pinActiveGeneration.bind(delegate));
-    const service = createService({ ...delegate, pinActiveGeneration });
-    await expect(service.recall({
-      taskSurface: createTaskSurface("Ada"),
-      workspaceId: "workspace-1",
-      strategy: "build",
-      referenceTime: "2023-03-15T12:00:00.000Z"
-    })).resolves.toMatchObject({ candidates: expect.any(Array) });
-    expect(pinActiveGeneration).toHaveBeenCalledWith("workspace-1", CLOCK);
-  });
 
   it("keeps the reader live across awaits through an injected heartbeat", () => {
     const session = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
@@ -265,23 +276,6 @@ describe("projection reader lifecycle", () => {
     guard.stop();
   });
 
-  it("fails preparation immediately when the initial renewal fails", async () => {
-    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
-    const selectCandidates = vi.fn(delegate.selectCandidates.bind(delegate));
-    const release = vi.fn(delegate.release.bind(delegate));
-    const service = createService({
-      ...delegate,
-      selectCandidates,
-      renew: () => {
-        throw new Error("planted initial renewal failure");
-      },
-      release
-    });
-
-    await expect(runRecall(service)).rejects.toThrow(/planted initial renewal failure/u);
-    expect(selectCandidates).not.toHaveBeenCalled();
-    expect(release).toHaveBeenCalledTimes(1);
-  });
 
   it("keeps the in-flight heartbeat referenced on the event loop", () => {
     const session = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
@@ -301,101 +295,9 @@ describe("projection reader lifecycle", () => {
     }
   });
 
-  it("fails a recall when lease stop throws and still releases the pin", async () => {
-    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
-    const release = vi.fn(delegate.release.bind(delegate));
-    const warn = vi.fn();
-    const cancel = vi.fn(() => {
-      throw new Error("planted lease stop failure");
-    });
-    const onEventAppend = vi.fn();
-    await expect(runExecuteRecall({ ...delegate, release }, {
-      warn,
-      projectionPinHeartbeatScheduler: {
-        every: () => cancel
-      },
-      onEventAppend
-    })).rejects.toThrow(/projection pin cleanup failed/u);
-    expect(cancel).toHaveBeenCalledTimes(2);
-    expect(release).toHaveBeenCalledTimes(1);
-    expect(onEventAppend).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(
-      "projection pin cleanup failed",
-      expect.objectContaining({
-        operation: "projection_pin_cleanup",
-        error: "projection pin heartbeat cancellation failed"
-      })
-    );
-  });
 
-  it("fails a recall when pin release throws", async () => {
-    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
-    const warn = vi.fn();
-    await expect(runExecuteRecall({
-      ...delegate,
-      release: () => {
-        throw new Error("planted pin release failure");
-      }
-    }, { warn })).rejects.toThrow(/projection pin cleanup failed/u);
-    expect(warn).toHaveBeenCalledWith(
-      "projection pin cleanup failed",
-      expect.objectContaining({
-        operation: "projection_pin_cleanup",
-        error: "planted pin release failure"
-      })
-    );
-  });
 
-  it("stops renewal when cancellation and release both fail", async () => {
-    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
-    const renew = vi.fn(delegate.renew.bind(delegate));
-    const heartbeat: { fn: (() => void) | null } = { fn: null };
-    const onEventAppend = vi.fn();
-    await expect(runExecuteRecall({
-      ...delegate,
-      renew,
-      release: () => {
-        throw new Error("planted combined release failure");
-      }
-    }, {
-      projectionPinHeartbeatScheduler: {
-        every: (_intervalMs, callback) => {
-          heartbeat.fn = callback;
-          return () => {
-            throw new Error("planted combined cancellation failure");
-          };
-        }
-      },
-      onEventAppend
-    })).rejects.toThrow(/projection pin cleanup failed/u);
-    const renewalsAfterFailure = renew.mock.calls.length;
-    heartbeat.fn?.();
-    expect(renew).toHaveBeenCalledTimes(renewalsAfterFailure);
-    expect(onEventAppend).not.toHaveBeenCalled();
-  });
 
-  it("does not duplicate a heartbeat failure as cleanup failure", async () => {
-    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
-    let renewCount = 0;
-    const warn = vi.fn();
-    await expect(runExecuteRecall({
-      ...delegate,
-      renew(pin, renewedAt) {
-        renewCount += 1;
-        if (renewCount > 1) throw new Error("planted late renewal failure");
-        return delegate.renew(pin, renewedAt);
-      }
-    }, {
-      warn,
-      projectionPinHeartbeatScheduler: {
-        every: (_intervalMs, callback) => {
-          callback();
-          return () => undefined;
-        }
-      }
-    })).rejects.toThrow(/^planted late renewal failure$/u);
-    expect(warn).not.toHaveBeenCalled();
-  });
 
   it("attempts every cleanup step even when warning delivery fails", () => {
     const first = vi.fn(() => {
@@ -412,151 +314,10 @@ describe("projection reader lifecycle", () => {
     expect(second).toHaveBeenCalledTimes(1);
   });
 
-  it("releases the pin when preparation input loading fails", async () => {
-    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
-    const release = vi.fn(delegate.release);
-    const warn = vi.fn();
-    const dependencies = createDependencies([]).dependencies;
-    const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
-      ...dependencies,
-      now: () => CLOCK,
-      warn,
-      projectionPinHeartbeatScheduler: {
-        every: () => () => {
-          throw new Error("planted lease stop failure");
-        }
-      },
-      slotRepo: {
-        findByWorkspace: vi.fn(async () => {
-          throw new Error("planted slot load failure");
-        })
-      },
-      fieldQuerySession: { ...delegate, release }
-    });
 
-    const error = await runRecall(service).catch((failure: unknown) => failure);
-    expect(error).toBeInstanceOf(AggregateError);
-    expect((error as AggregateError).message).toBe(
-      "recall preparation failed: planted slot load failure"
-    );
-    expect((error as AggregateError).errors.map(String).join(" ")).toMatch(
-      /planted slot load failure.*projection pin cleanup failed/u
-    );
-    expect(release).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(
-      "projection pin cleanup failed",
-      expect.objectContaining({
-        operation: "projection_pin_cleanup",
-        error: "projection pin heartbeat cancellation failed"
-      })
-    );
-  });
 
-  it("releases the pin when evidence-bound memory loading fails", async () => {
-    const delegate = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
-    const release = vi.fn(delegate.release);
-    const dependencies = createDependencies([]).dependencies;
-    const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
-      ...dependencies,
-      now: () => CLOCK,
-      memoryRepo: {
-        ...dependencies.memoryRepo,
-        findByEvidenceRefs: vi.fn(async () => {
-          throw new Error("planted evidence memory load failure");
-        })
-      },
-      fieldQuerySession: {
-        ...delegate,
-        selectCandidates(condition, pin, selectedAt) {
-          return Object.freeze({
-            ...delegate.selectCandidates(condition, pin, selectedAt),
-            candidate_keys: Object.freeze(["evidence-1"])
-          });
-        },
-        release
-      }
-    });
 
-    await expect(runRecall(service)).rejects.toThrow(/planted evidence memory load failure/u);
-    expect(release).toHaveBeenCalledTimes(1);
-  });
-
-  it("still fail-closes a missing generation after snapshot receipt attach", async () => {
-    const fixture = createDependencies([]).dependencies;
-    const { fieldQuerySession: _seeded, ...unseeded } = fixture;
-    const service = new RecallService({
-      ...unseeded,
-      testOnlyAllowInMemoryFieldQuerySession: true,
-      now: () => CLOCK
-    });
-    await expect(runRecall(service, "workspace-other"))
-      .rejects.toThrow(/active projection generation is missing/u);
-  });
 });
-
-function createService(
-  fieldQuerySession: NonNullable<ConstructorParameters<typeof RecallService>[0]["fieldQuerySession"]>
-): RecallService {
-  return new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
-    ...createDependencies([]).dependencies,
-    now: () => CLOCK,
-    fieldQuerySession
-  });
-}
-
-async function runRecall(service: RecallService, workspaceId = "workspace-1") {
-  return await service.recall({
-    taskSurface: createTaskSurface("Ada"),
-    workspaceId,
-    strategy: "build"
-  });
-}
-
-async function runExecuteRecall(
-  fieldQuerySession: NonNullable<ConstructorParameters<typeof RecallService>[0]["fieldQuerySession"]>,
-  extras: Readonly<{
-    readonly warn?: ConstructorParameters<typeof RecallService>[0]["warn"];
-    readonly projectionPinHeartbeatScheduler?: Parameters<
-      typeof startProjectionPinLeaseGuard
-    >[0]["scheduler"];
-    readonly onEventAppend?: () => void;
-  }> = {}
-) {
-  const { dependencies } = createDependencies([]);
-  const runtimeDependencies = {
-    ...dependencies,
-    eventLogRepo: {
-      ...dependencies.eventLogRepo,
-      append: async (...args: Parameters<typeof dependencies.eventLogRepo.append>) => {
-        extras.onEventAppend?.();
-        return await dependencies.eventLogRepo.append(...args);
-      }
-    }
-  };
-  const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
-    ...runtimeDependencies,
-    now: () => CLOCK,
-    fieldQuerySession
-  });
-  return executeRecall({
-    dependencies: runtimeDependencies,
-    warn: extras.warn ?? (() => undefined),
-    now: () => CLOCK,
-    buildDefaultPolicy: (strategy, taskSurfaceRef, capturedAt) =>
-      service.buildDefaultPolicy(strategy, taskSurfaceRef, capturedAt),
-    fieldQuerySession,
-    sha256: fieldContractSha256,
-    projectionPinHeartbeatScheduler: extras.projectionPinHeartbeatScheduler
-  }, {
-    taskSurface: createTaskSurface("Ada"),
-    workspaceId: "workspace-1",
-    strategy: "build"
-  });
-}
 
 function queryCondition(
   pin: ReturnType<ReturnType<typeof createTestOnlyInMemoryFieldQuerySession>["pinActiveGeneration"]>,

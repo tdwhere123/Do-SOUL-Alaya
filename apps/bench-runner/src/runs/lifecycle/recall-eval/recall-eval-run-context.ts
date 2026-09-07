@@ -53,8 +53,6 @@ import { assertProductDefaultRecallEnvironment } from
   "../../../datasets/longmemeval/promotion/verifiers/product-policy-verifier.js";
 import type { EvidenceSearchProjectionRebuildReport } from
   "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
-import type { LongMemEvalSelectionBoundarySpool } from
-  "../../selection-replay/selection-boundary-spool.js";
 import type { WarmDerivedSnapshotBinding } from
   "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 import {
@@ -94,7 +92,6 @@ export interface RecallEvalRunContext {
   readonly derivedEvidenceProjectionRebuild:
     EvidenceSearchProjectionRebuildReport | null;
   readonly warmDerivedSnapshot: WarmDerivedSnapshotBinding | null;
-  readonly selectionBoundarySpool: LongMemEvalSelectionBoundarySpool | null;
   readonly querySemanticFactorCache: LoadedQuerySemanticFactorCache | null;
   readonly memoryProfile: RecallEvalMemoryProfile | null;
   readonly sourceExtractionSystemPromptSha256: string | undefined;
@@ -236,7 +233,7 @@ async function prepareBoundRecallEvalRunContext(
       });
   return buildBoundRecallEvalRunContext({
     options, bundle, window, policyShape, recallOptions, recallWeightOverrides,
-    daemonLaunch, dataDir, runtimeAttribution, selectionBoundarySpool: null,
+    daemonLaunch, dataDir, runtimeAttribution,
     querySemanticFactorCache, memoryProfile
   });
 }
@@ -316,7 +313,6 @@ function buildBoundRecallEvalRunContext(input: Readonly<{
   daemonLaunch: BenchDaemonLaunchConfig;
   dataDir: Awaited<ReturnType<typeof prepareRecallEvalDataRoot>>;
   runtimeAttribution: RecallEvalRunContext["runtimeAttribution"];
-  selectionBoundarySpool: LongMemEvalSelectionBoundarySpool | null;
   querySemanticFactorCache: LoadedQuerySemanticFactorCache | null;
   memoryProfile: RecallEvalMemoryProfile | null;
 }>): RecallEvalRunContext {
@@ -341,7 +337,6 @@ function buildBoundRecallEvalRunContext(input: Readonly<{
     extractionAuthority: input.bundle.extractionAuthority,
     derivedEvidenceProjectionRebuild: input.dataDir.evidenceProjectionRebuild,
     warmDerivedSnapshot: input.dataDir.warmDerivedSnapshot,
-    selectionBoundarySpool: input.selectionBoundarySpool,
     querySemanticFactorCache: input.querySemanticFactorCache,
     memoryProfile: input.memoryProfile,
     sourceExtractionSystemPromptSha256: input.bundle.sourceExtractionSystemPromptSha256

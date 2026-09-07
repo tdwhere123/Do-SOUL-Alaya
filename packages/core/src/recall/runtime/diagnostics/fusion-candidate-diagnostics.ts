@@ -9,11 +9,9 @@ import type {
   IntegratedFloodCandidateDiagnostics
 } from "./flood-diagnostics.js";
 import type { RecallAdmissionPlane, RecallCandidateDropReason } from "./vocabulary.js";
-import type { SelectGammaDecisionReceipt } from
-  "../../delivery/select-gamma/types.js";
 
 export type RecallSelectGammaDecisionDiagnostic = Readonly<{
-  readonly kind: SelectGammaDecisionReceipt["kind"];
+  readonly kind: "ineligible" | "retained" | "duplicate" | "coverage_displaced" | "quality_displaced" | "rank_displaced" | "dimension_limit" | "max_entries" | "max_total_tokens";
   readonly identity_channel?: "object" | "source";
 }>;
 

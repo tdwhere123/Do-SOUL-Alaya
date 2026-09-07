@@ -11,10 +11,6 @@ import { materializeOpenSemanticFactorFormation } from
   "../../../../semantic/open-semantic-factor-formation.js";
 import { collectRecallEvidenceContexts } from
   "../../../../recall/supplements/evidence/evidence-contexts.js";
-import { materializeFineAssessmentSelectionBoundary } from
-  "../../../../recall/delivery/selection-boundary/selection-boundary-capture.js";
-import type { FineAssessmentSelectionBoundaryCase } from
-  "../../../../recall/delivery/selection-boundary/selection-boundary-types.js";
 import { createMemoryEntry } from "../../recall-service-test-fixtures.js";
 import {
   BOOKSHELF_ASSERTION,
@@ -30,15 +26,9 @@ import {
   evidenceId,
   semanticProposal
 } from "../../supplementary-data-test-fixtures.js";
-import {
-  createConfig,
-  createRankedCandidate,
-  rankMap,
-  selectCandidates
-} from "../../fine-assessment-selection-fixtures.js";
 
 describe("capture-only fact-frame load isolation", () => {
-  it("keeps shared ranking/OSF maps and selection inputs identical", async () => {
+  it("keeps shared ranking/OSF maps identical", async () => {
     const evidenceText = "I used Atlas.";
     const alice = createEvidenceCapsule({
       object_id: evidenceId(1),
@@ -157,7 +147,6 @@ describe("capture-only fact-frame load isolation", () => {
     );
     expect(on.semanticFactorFormationsByEvidenceId).not.toHaveProperty(bob.object_id);
     expect(rankingAndOsfSlice(on)).toEqual(rankingAndOsfSlice(off));
-    expect(serializeSelectionInput(on)).toEqual(serializeSelectionInput(off));
   });
 
   it("does not load extras when answer-feature capture is off", async () => {
@@ -238,25 +227,4 @@ function rankingAndOsfSlice(data: Awaited<ReturnType<typeof collectWith>>) {
     evidenceGistsByMemoryId: data.evidenceGistsByMemoryId,
     evidenceSemanticDocumentsByMemoryId: data.evidenceSemanticDocumentsByMemoryId
   };
-}
-
-function serializeSelectionInput(data: Awaited<ReturnType<typeof collectWith>>) {
-  const candidates = [createRankedCandidate("candidate-1", 1, 0.9)];
-  let boundary: FineAssessmentSelectionBoundaryCase | undefined;
-  selectCandidates({
-    workspace_id: "workspace-1",
-    orderedCandidates: candidates,
-    config: createConfig(),
-    supplementaryData: data,
-    tokenEstimator: { estimate: () => 5 },
-    rankByCandidateKey: rankMap(candidates),
-    selectionBoundaryObserver: (pending) => {
-      boundary = materializeFineAssessmentSelectionBoundary(pending);
-      return undefined;
-    }
-  });
-  if (boundary === undefined) throw new Error("selection boundary was not observed");
-  expect(boundary.input.supplementary_data)
-    .not.toHaveProperty("factFrameFormationsByEvidenceId");
-  return boundary.input.supplementary_data;
 }

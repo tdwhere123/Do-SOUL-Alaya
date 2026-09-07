@@ -8,13 +8,30 @@ import type { RecallDegradationReason } from
   "../../../recall/runtime/recall-service-types.js";
 import type { RecallServiceMemoryRepoPort } from
   "../../../recall/runtime/recall-service-ports.js";
-import { createFieldBackedRecallService } from "../fixtures/keyword-field-fixture.js";
 import { createMemoryEntry } from "../recall-service-test-fixtures.js";
-import {
-  createDependencies,
-  createMemoryEntry as createScoringMemory,
-  createTaskSurface
-} from "../recall-8factor-test-fixtures.js";
+import { runConditionalFieldRecall } from "../../../recall/recall-service.js";
+import { defaultBudget, SNAPSHOT_ID, INTERPRETATION_CLOCK } from
+  "../conditional-field/reference/deployment.fixture.js";
+
+describe("conditional field source hydration", () => {
+  it("keeps a failed lexical source hydration unavailable instead of known empty", () => {
+    const source = vi.fn(() => ({ row: null, rowsRead: 0, bytesRead: 0, unavailable: true }));
+    const result = runConditionalFieldRecall({
+      workspace_id: "workspace-1", query_text: "needle", budget: defaultBudget(),
+      snapshot_id: SNAPSHOT_ID, interpretation_clock: INTERPRETATION_CLOCK,
+      as_of: INTERPRETATION_CLOCK, expires_at: "2026-12-01T00:00:00.000Z",
+      readers: {
+        lexical: () => ({ ids: ["missing"], nativeVisits: 1, nativeBytes: 9,
+          rowsRead: 1, bytesRead: 9, truncated: false }),
+        source
+      }
+    });
+    expect(source).toHaveBeenCalled();
+    expect(result.entries).toEqual([]);
+    expect(result.completeness.observed_coverage).toBe("unavailable");
+    expect(result.completeness.logical_index).not.toBe("complete");
+  });
+});
 
 function stubRepo(
   overrides: Partial<RecallServiceMemoryRepoPort> = {}
@@ -102,36 +119,5 @@ describe("hydrateQueryEvidenceRefMemories lookup failure", () => {
       operation: "findByEvidenceRefs",
       error: "evidence ref lookup unavailable"
     }));
-  });
-});
-
-describe("live recall memory hydrate lookup failure", () => {
-  it("records memory_id_hydrate_failed when lexical findByIds throws", async () => {
-    const { dependencies } = createDependencies([
-      createScoringMemory({ object_id: "memory-1" })
-    ]);
-    const findByIds = vi.fn(async () => {
-      throw new Error("memory id lookup unavailable");
-    });
-    const service = createFieldBackedRecallService({
-      ...dependencies,
-      memoryRepo: {
-        ...dependencies.memoryRepo,
-        searchByKeyword: vi.fn(async () => [
-          { object_id: "fts-only", normalized_rank: 1 }
-        ]),
-        findByIds
-      }
-    });
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface("Implement recall"),
-      workspaceId: "workspace-1",
-      strategy: "build",
-      diagnosticCapture: "answer_features"
-    });
-
-    expect(findByIds).toHaveBeenCalledWith("workspace-1", ["fts-only"]);
-    expect(result.diagnostics?.degradation_reasons).toEqual(["memory_id_hydrate_failed"]);
   });
 });

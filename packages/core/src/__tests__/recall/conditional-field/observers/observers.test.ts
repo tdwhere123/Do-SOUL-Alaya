@@ -101,12 +101,14 @@ describe("conditional-field resumable observers", () => {
     expect(before.page.open_regions.some((region) => region.status === "open")).toBe(true);
     expect(before.page.outcome.status).not.toBe("exhausted");
     const during = observeConditionalField(observeInput(slice, {
-      action: action("seed", 1),
+      action: action("seed", 7),
+      page_limit: 1,
       seed_query: "needle"
     }));
     expect(during.page.observations).toHaveLength(1);
     expect(during.page.outcome.status).toBe("open");
-    expect(during.work.native_visits).toBe(1);
+    expect(during.work.native_visits).toBe(7);
+    expect(during.work.work_units).toBe(7);
     expect(during.work.work_units).toBeGreaterThan(0);
     expect(during.page.cursor.committed_through).not.toBeNull();
   });

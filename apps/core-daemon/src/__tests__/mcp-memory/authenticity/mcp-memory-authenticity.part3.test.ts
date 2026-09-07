@@ -50,7 +50,7 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { createAlayaDaemonRuntime } from "../../../index.js";
-import { seedSourceBoundRecall } from "../../support/seed-source-bound-recall.js";
+import { seedRecallMemory } from "../../support/seed-source-bound-recall.js";
 import type { AlayaDaemonRuntime } from "../../../runtime/daemon/lifecycle/daemon-runtime-types.js";
 
 import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
@@ -191,16 +191,7 @@ async function seedFixture(
       current_surface_id: null
     });
     const memory = createMemoryEntry();
-    await repos.memoryRepo.create(memory);
-    seedSourceBoundRecall({
-      database,
-      workspaceId: memory.workspace_id,
-      runId: memory.run_id,
-      evidenceId: memory.evidence_refs[0]!,
-      factorValue: "pnpm",
-      body: memory.content,
-      recordedAt: memory.created_at
-    });
+    await seedRecallMemory({ database, memory: memory });
 
     if (extraSeed !== undefined) {
       await extraSeed(repos);

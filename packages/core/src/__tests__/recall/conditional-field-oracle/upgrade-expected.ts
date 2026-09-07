@@ -34,9 +34,11 @@ export type InterpretationState = Readonly<{
 export type UsageCredit = Readonly<{
   readonly grain: UsageReport["grain"];
   readonly credited_ids: readonly string[];
+  readonly interpretation_id?: string;
+  readonly as_of?: string;
 }>;
 
-export function leafDerivation(id: string, milligrades: number, revision = `src-${id}`): Derivation {
+export function leafDerivation(id: string, revision = `src-${id}`): Derivation {
   return DerivationSchema.parse({
     schema_version: 1,
     derivation_id: id,
@@ -66,9 +68,9 @@ export function nodeDerivation(
 }
 
 export function andOrWithdrawalForest(): ReadonlyMap<string, Derivation> {
-  const a = leafDerivation("a", 800);
-  const b = leafDerivation("b", 800);
-  const c = leafDerivation("c", 800);
+  const a = leafDerivation("a");
+  const b = leafDerivation("b");
+  const c = leafDerivation("c");
   const andAb = nodeDerivation("and-ab", "and", [a, b]);
   const orLeft = nodeDerivation("or-left", "or", [andAb, c]);
   const orAb = nodeDerivation("or-ab", "or", [a, b]);

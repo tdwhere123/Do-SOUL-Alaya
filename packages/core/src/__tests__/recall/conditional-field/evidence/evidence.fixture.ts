@@ -5,11 +5,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import type {
   EvidenceAssessmentInput,
-  EvidenceIdentityContext,
   EvidenceObservation,
   PropositionDemand,
   WitnessTemplate
 } from "../../../../recall/conditional-field/evidence/assess-support.js";
+import type { EvidenceIdentityContext } from "../../../../recall/conditional-field/evidence/types.js";
 
 export const QUERY_ID = "failed-deployment";
 export const SNAPSHOT_ID = `sha256:${"c".repeat(64)}`;

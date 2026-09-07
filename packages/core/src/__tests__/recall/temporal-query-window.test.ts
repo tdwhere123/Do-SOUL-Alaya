@@ -5,7 +5,7 @@ import {
   scoreTemporalEventTime,
   scoreTemporalQueryWindow
 } from "../../recall/scoring/temporal-fusion-scoring.js";
-import { scoreTemporalFusion } from "../../recall/delivery/fusion-delivery-scoring-streams.js";
+import { scoreTemporalFusion } from "../../recall/scoring/temporal-fusion-scoring.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 describe("parseQueryTimeWindow", () => {

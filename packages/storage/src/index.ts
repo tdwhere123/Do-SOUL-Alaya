@@ -107,6 +107,7 @@ export {
   type MemoryObjectKeyRepo,
   type RecallActivationTopKQuery
 } from "./repos/memory-entry/index.js";
+export { SqliteGovernancePathReader } from "./repos/path/reads/governance-path-reader.js";
 export {
   DEFAULT_ACTIVE_CONSTRAINTS_CAP,
   MAX_ACTIVE_CONSTRAINTS_CAP,
@@ -424,3 +425,4 @@ export {
 export { SqliteRelationRecallReader, type RecallAssertionObservation, RELATION_RECALL_INDEX_SQL } from "./repos/path/reads/relation-assertion/bounded-reader.js";
 
 export { SqliteMemoryRecallReader } from "./repos/memory-entry/reads/bounded-recall-reader.js";
+export { readBoundedActiveConstraints, type BoundedGovernancePathReader } from "./repos/governance/reads/bounded-active-constraints.js";

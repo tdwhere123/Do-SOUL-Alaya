@@ -20,16 +20,11 @@ import type {
 } from "../../../snapshot/materialize.js";
 import type { SnapshotQuestionMeasurementOracle } from
   "../../../snapshot/measurement-oracle.js";
-import type { RecallEvalSelectionBoundaryArtifact } from
-  "../recall-eval-selection-replay.js";
 import type { EvidenceSearchProjectionRebuildReport } from
   "../../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
 import type { OpenedFileSha256 } from "../../../snapshot/bound-file.js";
 
-export type RecallEvalPagerRecallOptions = Omit<
-  BenchRecallOptions,
-  "selectionBoundaryObserver"
->;
+export type RecallEvalPagerRecallOptions = BenchRecallOptions;
 
 export interface RecallEvalPagerOpenPayload {
   readonly dataDirRoot: string;
@@ -55,9 +50,4 @@ export interface RecallEvalPagerRecallPayload {
 export interface RecallEvalPagerOpenResult {
   readonly evidenceProjectionRebuild: EvidenceSearchProjectionRebuildReport | null;
   readonly embeddingCacheOverlay: EmbeddingCacheOverlayBinding | null;
-  readonly selectionSpoolRootPath: string | null;
-}
-
-export interface RecallEvalPagerCloseResult {
-  readonly selectionArtifact: RecallEvalSelectionBoundaryArtifact | null;
 }

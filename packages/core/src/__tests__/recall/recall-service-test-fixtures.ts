@@ -23,6 +23,81 @@ import { createSeededTestOnlyInMemoryFieldQuerySession } from
   "../../recall/runtime/query/field-query-session.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 
+export async function createSourceBoundRecallFixture(
+  register: (database: import("@do-soul/alaya-storage").StorageDatabase) => void
+) {
+  const { openSourceSlice, NOW } = await import("./conditional-field/vertical/source-slice.js");
+  const { readersFor } = await import("./conditional-field-oracle/bound-producer.js");
+  const { RecallService } = await import("../../recall/recall-service.js");
+  const { MemoryService } = await import("../../memory/memory-service.js");
+  const { createBoundedActiveConstraintsReader } = await import("../../../../../apps/core-daemon/src/runtime/recall-read-worker/active-constraints.js");
+  const { SqliteClaimFormRepo } = await import("@do-soul/alaya-storage");
+  const slice = await openSourceSlice(register);
+  const readConstraints = createBoundedActiveConstraintsReader(slice.database);
+  const dependencies: RecallServiceDependencies & RecallServiceFieldDeps = {
+    ...createDependencies([]).dependencies,
+    now: () => NOW,
+    defaultPolicyDecorator: (policy) => policy,
+    memoryRepo: slice.storage.memoryEntryRepo,
+    eventLogRepo: slice.storage.eventLogRepo,
+    observerReaders: readersFor(slice),
+    activeConstraintsPort: {
+      readBounded: async (request) => readConstraints(request),
+      findActiveConstraints: async () => { throw new Error("target fixture must use bounded constraints"); }
+    }
+  };
+  const service = new RecallService(dependencies);
+  async function writeSource(input: {
+    readonly objectId: string;
+    readonly content: string;
+    readonly workspaceId?: string;
+    readonly dimension?: MemoryEntry["dimension"];
+    readonly scopeClass?: MemoryEntry["scope_class"];
+    readonly domainTags?: readonly string[];
+    readonly createdAt?: string;
+  }) {
+    const writer = new MemoryService({
+      now: () => input.createdAt ?? NOW,
+      generateObjectId: () => input.objectId,
+      memoryEntryRepo: slice.memoryEntryRepo,
+      eventLogRepo: slice.storage.eventLogRepo,
+      evidenceService: {
+        findById: async (id) => slice.storage.evidenceCapsuleRepo.findById(id),
+        findByIds: async (workspaceId, ids) => slice.storage.evidenceCapsuleRepo.findByIds(workspaceId, ids)
+      },
+      runtimeNotifier: { notifyEntry: async () => {} }
+    });
+    return writer.create({ created_by: "user_action", dimension: input.dimension ?? MemoryDimension.FACT,
+      source_kind: "user", formation_kind: "explicit", scope_class: input.scopeClass ?? ScopeClass.PROJECT,
+      content: input.content, domain_tags: input.domainTags ?? [], evidence_refs: [],
+      workspace_id: input.workspaceId ?? "workspace-1", run_id: "run-1", surface_id: null });
+  }
+  return { ...slice, dependencies, service, writeSource, claimFormRepo: new SqliteClaimFormRepo(slice.database) };
+}
+import { RECALL_FUSION_STREAMS } from "../../recall/delivery/fusion-delivery-streams.js";
+import type {
+  RecallFusionBreakdown,
+  RecallFusionStreamContributions,
+  RecallFusionStreamRanks
+} from "../../recall/runtime/recall-service-types.js";
+
+export function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<RecallFusionBreakdown> {
+  return Object.freeze({
+    candidate_key: `workspace_local:memory_entry:${objectId}`,
+    object_id: objectId,
+    object_kind: "memory_entry",
+    origin_plane: "workspace_local",
+    per_stream_rank: Object.freeze(Object.fromEntries(
+      RECALL_FUSION_STREAMS.map((stream) => [stream, null])
+    )) as RecallFusionStreamRanks,
+    fused_rank: Number.MAX_SAFE_INTEGER,
+    fused_score: 0,
+    fused_rank_contribution_per_stream: Object.freeze(Object.fromEntries(
+      RECALL_FUSION_STREAMS.map((stream) => [stream, 0])
+    )) as RecallFusionStreamContributions
+  });
+}
+
 export function createTaskSurface(): TaskObjectSurface {
   return {
     runtime_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",

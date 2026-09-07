@@ -113,6 +113,7 @@ describe("conditional-field SQLite source-to-index slice", () => {
       readerAvailable: true
     });
     expect(mapped.outcome.status).toBe("interrupted");
+    if (mapped.open_regions === undefined) throw new Error("truncated reader must expose open regions");
     expect(mapped.open_regions.length).toBeGreaterThan(0);
     expect(mapped.outcome.status).not.toBe("exhausted");
   });

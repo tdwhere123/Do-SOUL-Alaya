@@ -87,8 +87,8 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
   });
 
   it("scalar agreement does not complete explanations", () => {
-    const a = leafDerivation("a", 800);
-    const b = leafDerivation("b", 500);
+    const a = leafDerivation("a");
+    const b = leafDerivation("b");
     const andAb = nodeDerivation("and-ab", "and", [a, b]);
     const forest = new Map([[a.derivation_id, a], [b.derivation_id, b], [andAb.derivation_id, andAb]]);
     const grades = { a: 800, b: 500 };
@@ -281,4 +281,3 @@ function indexEntry(input: {
     ...(input.time_state === undefined ? {} : { time_state: input.time_state })
   });
 }
-

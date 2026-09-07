@@ -317,6 +317,8 @@ export interface RecallServicePathExpansionPort {
 }
 
 export interface RecallServiceActiveConstraintsPort {
+  readBounded?(params: Readonly<import("@do-soul/alaya-protocol").BoundedActiveConstraintsRequest>):
+    Promise<Readonly<import("@do-soul/alaya-protocol").BoundedActiveConstraintsResult>>;
   findActiveConstraints(params: Readonly<{
     readonly workspaceId: string;
     readonly cap?: number | null;

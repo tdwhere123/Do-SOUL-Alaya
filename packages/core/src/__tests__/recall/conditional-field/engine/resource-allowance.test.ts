@@ -23,6 +23,32 @@ import {
 } from "../reference/deployment.fixture.js";
 
 describe("request resource allowance", () => {
+  it("charges fallback pin capture and reserves seven units for a hydrated action", () => {
+    let pinReads = 0;
+    let sourceReads = 0;
+    const readers = {
+      snapshotPin: () => { pinReads += 1; return { source_revision: "fixed" }; },
+      lexical: () => ({ ids: ["memory-1"], nativeVisits: 1, nativeBytes: 1, rowsRead: 1, bytesRead: 1, truncated: true }),
+      source: () => {
+        sourceReads += 1;
+        return { row: { object_id: "memory-1", sourceRevision: "source-1", content: "needle" },
+          rowsRead: 3, bytesRead: 32, unavailable: false };
+      }
+    };
+    const query = compileQuery("needle");
+    const tiny = observeField(query, { workspace_id: "workspace-1", query_text: "needle", as_of: INTERPRETATION_CLOCK,
+      budget: defaultBudget({ work_units: 2, finalization_reserve: 0, min_envelope: 0 }), readers });
+    expect(pinReads).toBe(0);
+    expect(tiny.remaining_exploration).toBe(1);
+    expect(tiny.last_observer_status).toBe("interrupted");
+    const completedAction = observeField(query, { workspace_id: "workspace-1", query_text: "needle", as_of: INTERPRETATION_CLOCK,
+      budget: defaultBudget({ work_units: 11, finalization_reserve: 0, min_envelope: 0 }), readers });
+    expect(pinReads).toBe(2);
+    expect(sourceReads).toBe(1);
+    expect(completedAction.remaining_exploration).toBe(0);
+    expect(completedAction.closure.observation).not.toBe("exhausted");
+  });
+
   it("does not retain a 12KB identity set when memory_bytes is 1", () => {
     let reads = 0;
     const query = compileQuery("needle");

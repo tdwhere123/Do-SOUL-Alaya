@@ -51,6 +51,7 @@ export {
   type RequestBudget
 } from "./query.js";
 export {
+  SNAPSHOT_PIN_NATIVE_WORK,
   CoverageRegionKindSchema,
   CoverageRegionSchema,
   ObserverActionSchema,

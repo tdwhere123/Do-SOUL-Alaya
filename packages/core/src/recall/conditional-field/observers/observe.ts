@@ -1,5 +1,6 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  SNAPSHOT_PIN_NATIVE_WORK,
   type CoverageRegion,
   type CoverageRegionKind,
   type ObserverAction,
@@ -9,6 +10,7 @@ import {
   type QueryInterpretation,
   type RelationValidity,
   type SnapshotReadLease,
+  type StagedWarningArray,
   type TypedObservation
 } from "@do-soul/alaya-protocol";
 import {
@@ -41,6 +43,7 @@ export type SourceObserverRow = Readonly<{
   readonly retention_state?: string | null;
   readonly scope_class?: string;
   readonly evidence_refs?: readonly string[];
+  readonly staged_warnings?: StagedWarningArray;
   readonly valid_from?: string | null;
   readonly valid_to?: string | null;
   readonly dimension?: string;
@@ -179,6 +182,7 @@ export function toSourceObserverRow(row: Readonly<{
   readonly retention_state?: string | null;
   readonly scope_class?: string;
   readonly evidence_refs?: readonly string[];
+  readonly staged_warnings?: StagedWarningArray;
   readonly valid_from?: string | null;
   readonly valid_to?: string | null;
   readonly dimension?: string;
@@ -195,6 +199,7 @@ export function toSourceObserverRow(row: Readonly<{
     ...(row.retention_state === undefined ? {} : { retention_state: row.retention_state }),
     ...(row.scope_class === undefined ? {} : { scope_class: row.scope_class }),
     ...(row.evidence_refs === undefined ? {} : { evidence_refs: row.evidence_refs }),
+    ...(row.staged_warnings === undefined ? {} : { staged_warnings: row.staged_warnings }),
     ...(row.valid_from === undefined ? {} : { valid_from: row.valid_from }),
     ...(row.valid_to === undefined ? {} : { valid_to: row.valid_to }),
     ...(row.dimension === undefined ? {} : { dimension: row.dimension }),
@@ -222,8 +227,23 @@ export function startObserverCursor(input: Readonly<{
 }
 
 export function observeConditionalField(input: ObserveConditionalFieldInput): ObserverActionResult {
-  const invalid = invalidSnapshotPage(input);
-  if (invalid !== null) return invalid;
+  const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
+  if (input.action.work_limit < pinWork) return interruptedAction(input);
+  const bounded = { ...input, action: { ...input.action, work_limit: input.action.work_limit - pinWork } };
+  const invalid = invalidSnapshotPage(bounded);
+  const result = invalid ?? (bounded.action.work_limit === 0 ? interruptedAction(bounded) : observeAction(bounded));
+  return { ...result, work: { ...result.work,
+    work_units: result.work.work_units + pinWork,
+    native_visits: result.work.native_visits + pinWork
+  } };
+}
+
+function interruptedAction(input: ObserveConditionalFieldInput): ObserverActionResult {
+  return finish({ input, cursor: input.cursor, observations: [], ids: [], truncated: true,
+    readerAvailable: true, status: "interrupted", work: workReceipt(0, 0, 0, true) });
+}
+
+function observeAction(input: ObserveConditionalFieldInput): ObserverActionResult {
   switch (input.action.action) {
     case "seed":
       return observeSeed(input);
@@ -364,6 +384,12 @@ function collectObserved(
   let resourceLimited = false;
   let processed = 0;
   for (const [index, identity] of native.identities.entries()) {
+    if (native.identityKind !== "embedding" && input.readers.source !== undefined
+      && input.action.work_limit - workUnits < 3) {
+      hydrationUnavailable = true;
+      resourceLimited = true;
+      break;
+    }
     const prepared = prepareObservation(input, native, identity, index);
     workUnits += prepared.extraWork;
     bytes += prepared.extraBytes;
@@ -398,7 +424,7 @@ function collectObserved(
     ...(hydrationUnavailable ? { status: resourceLimited ? "interrupted" as const : "unavailable" as const } : {}),
     work: workReceipt(
       workUnits,
-      native.nativeVisits,
+      workUnits,
       bytes,
       native.truncated || hydrationUnavailable
     )

@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DeliverySelectionCandidate } from
   "../../../recall/delivery/delivery-selection.js";
-import { composeFineAssessmentDeepHeadDelivery } from
-  "../../../recall/delivery/fine-assessment-deep-head.js";
-import { applyDeliverySelection } from
-  "../../../recall/delivery/delivery-selection.js";
 import { orderByCoverageMarginalGain } from
   "../../../recall/delivery/coverage-selection.js";
 import {
@@ -146,13 +142,7 @@ describe("deep head fallbacks", () => {
       })
     });
     expect(assessment.embeddingObserved).toBe(false);
-    const composed = composeFineAssessmentDeepHeadDelivery(assessment);
-    const result = applyDeliverySelection(
-      [seed, lexicalRescue, conflictOnly, lexicalPeer], composed.orderScores,
-      { replacePublicRelevance: false }
-    );
-    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
-      .toEqual(["path-seed", "lexical-rescue", "conflict-only", "lexical-peer"]);
+
   });
 
   it("keeps field-only baselines in the existing fused order", () => {
@@ -176,10 +166,6 @@ describe("deep head fallbacks", () => {
     expect(scores.get(pathOnly.fusion.candidate_key)).toBeCloseTo(0.07);
     expect(scores.get(lexicalTail.fusion.candidate_key)).toBeCloseTo(0.05);
 
-    const result = applyDeliverySelection([lexicalHead, pathOnly, lexicalTail], scores, {
-      replacePublicRelevance: false
-    });
-    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
-      .toEqual(["lexical-head", "path-only", "lexical-tail"]);
+
   });
 });

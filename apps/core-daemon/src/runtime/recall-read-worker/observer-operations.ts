@@ -3,7 +3,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   captureIndexPreviews,
+  captureIndexSourceMetadata,
   runConditionalFieldRecall,
+  reserveSnapshotPinWork,
   snapshotIdFromPin,
   toSourceObserverRow,
   type ConditionalFieldRecallPortResult,
@@ -26,12 +28,26 @@ export function runConditionalFieldWorkerRecall(
 ): ConditionalFieldRecallPortResult {
   const body = asPayload(payload);
   const workspaceId = readString(body.workspace_id, "workspace_id");
-  const readers = readersFor(runtime);
+  const reserved = reserveSnapshotPinWork(body.budget as Parameters<typeof runConditionalFieldRecall>[0]["budget"]);
+  const readers: ObserverReaders = reserved.permitted && body.cancelled !== true ? readersFor(runtime) : {};
+  let governance = body.governance as Parameters<typeof runConditionalFieldRecall>[0]["governance"];
+  const snapshotId = "snapshotPin" in readers && readers.snapshotPin !== undefined
+    ? snapshotIdFromPin(workspaceId, readers.snapshotPin(workspaceId))
+    : readString(body.snapshot_id, "snapshot_id");
+  if (governance?.completeness === "incomplete" && governance.work.native_visits === 0
+    && governance.paths.length === 0 && governance.constraints.length === 0) {
+    governance = { ...governance, binding: { ...governance.binding, snapshot_id: snapshotId } };
+  }
+  if (reserved.permitted && governance !== undefined && (governance.binding.workspace_id !== workspaceId
+    || governance.binding.snapshot_id !== snapshotId || governance.binding.as_of !== body.as_of)) {
+    throw new Error("conditional field governance snapshot mismatch");
+  }
   const index = runConditionalFieldRecall({
     workspace_id: workspaceId,
     query_text: readString(body.query_text, "query_text"),
-    budget: body.budget as Parameters<typeof runConditionalFieldRecall>[0]["budget"],
-    snapshot_id: snapshotIdFromPin(workspaceId, readers.snapshotPin?.(workspaceId)),
+    budget: reserved.budget,
+    snapshot_id: snapshotId,
+    ...(governance === undefined ? {} : { governance }),
     interpretation_clock: readString(body.interpretation_clock, "interpretation_clock"),
     as_of: readString(body.as_of, "as_of"),
     expires_at: readString(body.expires_at, "expires_at"),
@@ -50,7 +66,8 @@ export function runConditionalFieldWorkerRecall(
   });
   return {
     index: InformationIndexSchema.parse(index),
-    previews: Object.fromEntries(captureIndexPreviews(index, readers, workspaceId))
+    previews: Object.fromEntries(captureIndexPreviews(index, readers, workspaceId)),
+    source_metadata: captureIndexSourceMetadata(index)
   };
 }
 

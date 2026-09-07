@@ -24,6 +24,8 @@ export type BoundSourceFacts = Readonly<{
   readonly dimension?: string;
   readonly domain_tags?: readonly string[];
   readonly scope_class?: string;
+  readonly evidence_refs?: readonly string[];
+  readonly staged_warnings?: import("@do-soul/alaya-protocol").StagedWarningArray;
   readonly predicates?: Readonly<Record<string, boolean>>;
 }>;
 

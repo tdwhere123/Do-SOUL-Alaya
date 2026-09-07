@@ -17,19 +17,8 @@ import { copyTypedFactFrameReceiptsFromFormations } from
 import { CONTENT_OWNED_ASSERTION_FACT_KEY_OPERATOR_ID } from
   "../../../../recall/delivery/fine-assessment-selection/content-owned-fact-key.js";
 import { buildRecallDiagnostics } from "../../../../recall/runtime/diagnostics.js";
-import { materializeFineAssessmentSelectionBoundary } from
-  "../../../../recall/delivery/selection-boundary/selection-boundary-capture.js";
-import type { FineAssessmentSelectionBoundaryCase } from
-  "../../../../recall/delivery/selection-boundary/selection-boundary-types.js";
 import type { CaptureProofDiagnostics } from
   "../../../../recall/runtime/diagnostics/capture-proof-diagnostics.js";
-import {
-  createConfig,
-  createRankedCandidate,
-  createSupplementaryData,
-  rankMap,
-  selectCandidates
-} from "../../fine-assessment-selection-fixtures.js";
 
 const PRODUCER = "rule_based_evidence_fact_frame_normalizer_v1";
 const SOURCE_HASH = `sha256:${"a".repeat(64)}`;
@@ -261,29 +250,6 @@ describe("capture proof typed fact-frame receipts", () => {
     expect(JSON.stringify(omitted)).not.toContain(PRODUCER);
   });
 
-  it("omits evidence fact-frame formations from selection receipts", () => {
-    const candidates = [createRankedCandidate("candidate-1", 1, 0.9)];
-    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
-    selectCandidates({
-      workspace_id: "workspace-1",
-      orderedCandidates: candidates,
-      config: createConfig(),
-      supplementaryData: createSupplementaryData({
-        factFrameFormationsByEvidenceId: Object.freeze({
-          "ev-1": formed(PRODUCER, ALICE_PARIS)
-        })
-      }),
-      tokenEstimator: { estimate: () => 5 },
-      rankByCandidateKey: rankMap(candidates),
-      selectionBoundaryObserver: (pending) => {
-        boundary = materializeFineAssessmentSelectionBoundary(pending);
-        return undefined;
-      }
-    });
-    if (boundary === undefined) throw new Error("selection boundary was not observed");
-    expect(boundary.input.supplementary_data)
-      .not.toHaveProperty("factFrameFormationsByEvidenceId");
-  });
 });
 
 function emptyCaptureProofPrepared() {

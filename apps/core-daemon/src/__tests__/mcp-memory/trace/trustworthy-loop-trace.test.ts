@@ -5,6 +5,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 
 import {
   FormationKind,
@@ -208,6 +209,7 @@ async function createTrustworthyLoopHarness(
     recallService: {
       recall: async () => ({
         candidates: [createRecallCandidate()],
+        index: stubRecallIndex([createRecallCandidate().object_id]),
         active_constraints: [],
         active_constraints_count: 0,
         total_scanned: 1,

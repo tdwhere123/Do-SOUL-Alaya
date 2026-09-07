@@ -1152,8 +1152,8 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2235,
-      "expected_sha256": "c445fa57f2b0b2514cad149c56eabc52d263339994d4991d4955a5159da8503b"
+      "expected_count": 2240,
+      "expected_sha256": "d02ab0671f741d458fa36dc1a1d1dbde4b6f8155771cb25a2c45106d43af8bd1"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
@@ -1164,8 +1164,8 @@
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 1210,
-      "expected_sha256": "0fa3fc5e7d6252fea200233f9ba4a438ad74f31d07af554d14dd2b48b80d1334"
+      "expected_count": 1125,
+      "expected_sha256": "e55ff6b76b9d69db10fb16df2e42cfa850f667eb77f7cff82096d98fc694595c"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
@@ -1200,8 +1200,8 @@
     {
       "specifier": "@do-soul/alaya-storage",
       "path": "packages/storage/src/index.ts",
-      "expected_count": 304,
-      "expected_sha256": "1ecfe8eb4886445b895c007ffc397fbb06560ab77e2dcab9e62c727bf4e4a4eb"
+      "expected_count": 307,
+      "expected_sha256": "e30d87c81ede937dd9aa34ed0e6c12549e89d5bf930de69c8c68d19ef0547c03"
     },
     {
       "specifier": "@do-soul/alaya",
@@ -1241,8 +1241,8 @@
     }
   ],
   "private_barrel_snapshot": {
-    "expected_count": 45,
-    "expected_sha256": "4c463a62811cd33b873ce5c39f6024bdd1a7088de7e762d17d4b861804ece682"
+    "expected_count": 40,
+    "expected_sha256": "a0db19c8593df9658c97248bc67ad350c0afd69d0bff9aef196365f5eac9c1c5"
   },
   "existing_duplicate_export_authorities": [],
   "existing_index_to_index_edges": [
@@ -1250,8 +1250,6 @@
     "packages/core/src/index.ts -> packages/core/src/runtime/config/index.ts",
     "packages/core/src/index.ts -> packages/core/src/relations/path-plasticity/index.ts",
     "packages/core/src/index.ts -> packages/core/src/governance/permission-policy/index.ts",
-    "packages/core/src/index.ts -> packages/core/src/recall/decision/query-proof/adapters/lexical-bound/index.ts",
-    "packages/core/src/recall/decision/query-proof/dominance/index.ts -> packages/core/src/recall/decision/query-proof/measurement/index.ts",
     "packages/engine-gateway/src/index.ts -> packages/engine-gateway/src/provider/chat-completion/index.ts",
     "packages/eval/src/index.ts -> packages/eval/src/cli/index.ts",
     "packages/protocol/src/index.ts -> packages/protocol/src/recall/conditional-field/index.ts",

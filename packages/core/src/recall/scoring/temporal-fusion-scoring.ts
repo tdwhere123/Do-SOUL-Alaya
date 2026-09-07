@@ -10,6 +10,18 @@ import { classifyRecallIntent, hasTemporalQuerySignal } from "../query/recall-qu
 import type { RecallFusionStream } from "../runtime/recall-service-types.js";
 import { recallProjectionScoringEnabled } from "../../runtime/config/recall-env-access.js";
 
+// An unresolved date query cannot silently become a recency query.
+export function scoreTemporalFusion(
+  entry: Readonly<MemoryEntry>,
+  queryProbes: Readonly<RecallQueryProbes>,
+  nowIso: string
+): number {
+  const window = parseQueryTimeWindow(queryProbes, nowIso);
+  if (window !== null) return scoreTemporalQueryWindow(entry, window, nowIso);
+  if (queryProbes.date_terms.length > 0) return 0;
+  return scoreTemporalEventTime(entry, nowIso);
+}
+
 export function resolveDefaultFusionWeightForIntent(
   stream: RecallFusionStream,
   baseWeight: number,

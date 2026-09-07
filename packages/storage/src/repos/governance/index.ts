@@ -23,3 +23,4 @@ export {
   SqliteSlotRepo,
   type SlotRepo
 } from "./slot-repo.js";
+export { readBoundedActiveConstraints, type BoundedGovernancePathReader } from "./reads/bounded-active-constraints.js";

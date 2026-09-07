@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { lstatSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
@@ -66,6 +67,8 @@ function listSourceFilesWithGit(root, includeTests) {
   )
     .split("\0")
     .filter((file) => file.length > 0 && isGuardedSourcePath(file, includeTests))
+    // The index retains unstaged deletions; tracked ignored files still need inspection.
+    .filter((file) => lstatSync(path.join(root, file), { throwIfNoEntry: false }) !== undefined)
     .sort(compareText);
 }
 

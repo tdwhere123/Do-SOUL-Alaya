@@ -1,424 +1,57 @@
-// @ts-nocheck
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  createSeededTestOnlyInMemoryFieldQuerySession,
-  fieldContractSha256,
-  RecallService,
-  resetCoreConfigForTests,
-  type RecallServiceDependencies
-} from "@do-soul/alaya-core";
-import {
-  ControlPlaneObjectKind,
-  FormationKind,
-  MemoryDimension,
-  RetentionPolicy,
-  RunMode,
-  RunState,
-  ScopeClass,
-  SourceKind,
-  StorageTier,
-  WorkspaceKind,
-  WorkspaceState,
-  type EventLogEntry,
-  type MemoryEntry,
-  type PathRelation,
-  type TaskObjectSurface
-} from "@do-soul/alaya-protocol";
-import {
-  initDatabase,
-  SqliteMemoryEntryRepo,
-  SqlitePathRelationRepo,
-  SqliteRunRepo,
-  SqliteWorkspaceRepo,
-  type StorageDatabase
-} from "@do-soul/alaya-storage";
-
-import { BenchRecallDiagnosticsSchema } from "../../../harness/recall/recall-diagnostics-schema.js";
-import { buildQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
-import { LongMemEvalQuestionDiagnosticSchema } from "../../../diagnostics/schema/diagnostics-schema.js";
-
-const WORKSPACE_ID = "workspace-edge-trace";
-const RUN_ID = "run-edge-trace";
-const SEED_ID = "00000000-0000-4000-8000-000000000101";
-const TARGET_ID = "00000000-0000-4000-8000-000000000102";
-const PATH_ID = "path-edge-trace";
-const SLICE_ENV = "ALAYA_RECALL_CONF_SLICE_COMPATIBILITY";
-const CAP_ENV = "ALAYA_RECALL_CONF_FLOOD_CAP";
+import { InformationIndexSchema } from "@do-soul/alaya-protocol";
+import type { StorageDatabase } from "@do-soul/alaya-storage";
+import { openBoundSlice, plantDeployment, readersFor, runRecall } from
+  "../../../../../../packages/core/src/__tests__/recall/conditional-field-oracle/bound-producer.js";
+import { MEM, WS } from
+  "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 
 const databases = new Set<StorageDatabase>();
-
-    afterEach(() => {
+afterEach(() => {
   for (const database of databases) database.close();
   databases.clear();
-  delete process.env[SLICE_ENV];
-  delete process.env[CAP_ENV];
-  delete process.env.ALAYA_RECALL_ALLOW_LEGACY_DELIVERY;
-  resetCoreConfigForTests();
+  vi.unstubAllEnvs();
 });
 
-describe("LongMemEval edge trace integration", () => {
-  it("parses a capped path transfer without inventing a query facet", async () => {
-    process.env[SLICE_ENV] = "on";
-    process.env[CAP_ENV] = "0.001";
-    resetCoreConfigForTests();
-    const storage = await createStorage();
-    await storage.memoryRepo.create(memory(SEED_ID, "deploy staging database edge trace"));
-    await storage.memoryRepo.create(memory(
-      TARGET_ID,
-      "Paris deploy staging database target answer",
-      [{ facet: "location_place", value: "Paris" }]
-    ));
-    storage.pathRepo.create(answerPath("location_place"));
-
-    const service = createRecallService(storage.memoryRepo, storage.pathRepo);
-    const result = await service.recall({
-      taskSurface: taskSurface(),
-      workspaceId: WORKSPACE_ID,
-      runId: RUN_ID,
-      strategy: "build",
-      diagnosticCapture: "answer_features"
+describe("conditional-field persisted relation integration", () => {
+  it("carries admitted relation evidence into a typed associated index without a legacy rank trace", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const relation = slice.relationReader.read(WS, MEM.r, "observed_log", 16);
+    expect(relation.observations).toHaveLength(1);
+    expect(relation.observations[0]).toMatchObject({
+      sourceObjectId: MEM.r, targetObjectId: MEM.l, predicate: "observed_log",
+      validity: { kind: "open" },
+      evidenceRefs: expect.arrayContaining([expect.any(String)])
     });
-    const parsed = BenchRecallDiagnosticsSchema.parse(result.diagnostics);
-    expect(parsed.query_probes.normalized_query).toBe(taskSurface().display_name);
-    expect(parsed.query_sought_facets).toEqual([]);
-    const targetCandidate = parsed.candidates.find((row) => row.object_id === TARGET_ID);
-    expect(targetCandidate).toMatchObject({
-      answer_features: {
-        content: "Paris deploy staging database target answer",
-        evidence_gist: null,
-        evidence_gist_truncated: false,
-        facet_tags: [{ facet: "location_place", value: "Paris" }],
-        projection_schema_version: 1
-      },
-      selector_observation: {
-        evidence: { directness: "none", validity: "none" },
-        path: {
-          status: "complete",
-          receipts: [expect.objectContaining({
-            receipt_status: "complete",
-            path_id: PATH_ID,
-            relation_kind: "answers_with",
-            source_object_id: SEED_ID,
-            target_object_id: TARGET_ID,
-            source_anchor: {
-              kind: "object_facet",
-              object_id: SEED_ID,
-              facet_key: "location_place"
-            },
-            target_anchor: { kind: "object", object_id: TARGET_ID },
-            edge_conductance: 1
-          })]
-        }
-      },
-      path_suppression_score: 0
-    });
-    const target = parsed.fusion_breakdown.find((row) => row.object_id === TARGET_ID);
-    expect(target?.flood_potential?.edge_traces).toEqual([
-      expect.objectContaining({
-        schema_version: 1,
-        path_id: PATH_ID,
-        relation_kind: "answers_with",
-        seed_object_id: SEED_ID,
-        target_object_id: TARGET_ID,
-        slice_compatibility: "no_query_key",
-        capped_transfer: 0.001,
-        decision: "transferred",
-        reason: "capped"
-      })
-    ]);
-
-    const strictQuestion = buildStrictQuestion(result);
-    expect(strictQuestion).toMatchObject({
-      query_condition: parsed.query_condition,
-      query_probes: { normalized_query: taskSurface().display_name },
-      query_sought_facets: []
-    });
-    expect(strictQuestion.candidates.find((row) => row.object_id === TARGET_ID)).toMatchObject({
-      answer_features: targetCandidate?.answer_features,
-      selector_observation: targetCandidate?.selector_observation,
-      path_suppression_score: 0
-    });
-    expect(strictQuestion.gold[0]?.flood_potential?.edge_traces?.[0]).toEqual(
-      expect.objectContaining({ path_id: PATH_ID, slice_compatibility: "no_query_key" })
-    );
+    const index = InformationIndexSchema.parse(runRecall(slice));
+    const config = index.entries.find((entry) => entry.object_id === MEM.c && entry.association_milligrades === 850);
+    expect(config).toMatchObject({ claim: "supported", association_milligrades: 850 });
+    expect(config?.explanation_ids.length).toBeGreaterThan(0);
+    const explanationIds = new Set(index.explanations?.map((explanation) => explanation.derivation_id));
+    expect(config?.explanation_ids.every((id) => explanationIds.has(id))).toBe(true);
+    expect(JSON.stringify(index)).not.toContain("flood_potential");
+    expect(JSON.stringify(index)).not.toContain("ranking_authority");
   });
 
-  it("passes an unavailable target projection through both strict schemas", async () => {
-    process.env[SLICE_ENV] = "on";
-    resetCoreConfigForTests();
-    const storage = await createStorage();
-    await storage.memoryRepo.create(memory(SEED_ID, "deploy staging database edge trace"));
-    await storage.memoryRepo.create(memory(
-      TARGET_ID,
-      "Paris deploy staging database target answer"
-    ));
-    storage.pathRepo.create(answerPath("location_place"));
-
-    const result = await createRecallService(storage.memoryRepo, storage.pathRepo).recall({
-      taskSurface: taskSurface(),
-      workspaceId: WORKSPACE_ID,
-      runId: RUN_ID,
-      strategy: "build",
-      diagnosticCapture: "answer_features"
-    });
-    const parsed = BenchRecallDiagnosticsSchema.parse(result.diagnostics);
-    const target = parsed.fusion_breakdown.find((row) => row.object_id === TARGET_ID);
-    expect(target?.flood_potential?.edge_traces?.[0]).toEqual(expect.objectContaining({
-      slice_compatibility: "no_query_key",
-      decision: "transferred",
-      reason: "transferred"
-    }));
-
-    const strictQuestion = buildStrictQuestion(result);
-    expect(strictQuestion.gold[0]?.flood_potential?.edge_traces?.[0]).toEqual(
-      expect.objectContaining({
-        slice_compatibility: "no_query_key",
-        decision: "transferred"
-      })
-    );
+  it("keeps legacy flood and slice switches from changing the target field interpretation", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const baseline = runRecall(slice);
+    vi.stubEnv("ALAYA_RECALL_CONF_FLOOD_CAP", "0.001");
+    vi.stubEnv("ALAYA_RECALL_CONF_SLICE_COMPATIBILITY", "on");
+    expect(runRecall(slice)).toEqual(baseline);
+    vi.stubEnv("ALAYA_RECALL_CONF_SLICE_COMPATIBILITY", "off");
+    expect(runRecall(slice)).toEqual(baseline);
   });
 
-  it("keeps scores identical when no source-bound query facet is available", async () => {
-    const storage = await createStorage();
-    await storage.memoryRepo.create(memory(SEED_ID, "deploy staging database edge trace"));
-    await storage.memoryRepo.create(memory(
-      TARGET_ID,
-      "Paris deploy staging database target answer",
-      [{ facet: "location_place", value: "Paris" }]
-    ));
-    storage.pathRepo.create(answerPath("food_dining"));
-    const service = createRecallService(storage.memoryRepo, storage.pathRepo);
-
-    const defaultResult = await service.recall(recallInput());
-    process.env[SLICE_ENV] = "off";
-    resetCoreConfigForTests();
-    const envOffResult = await service.recall(recallInput());
-    process.env[SLICE_ENV] = "on";
-    resetCoreConfigForTests();
-    const envOnResult = await service.recall(recallInput());
-
-    const defaultFlood = targetFlood(defaultResult.diagnostics);
-    const envOffFlood = targetFlood(envOffResult.diagnostics);
-    const envOnFlood = targetFlood(envOnResult.diagnostics);
-    expect(defaultFlood.edge_traces?.[0]).toEqual(expect.objectContaining({
-      slice_compatibility: "no_query_key",
-      decision: "transferred"
+  it("does not turn an unavailable native relation reader into complete support", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const index = InformationIndexSchema.parse(runRecall(slice, {
+      readers: { ...readersFor(slice), relation: undefined }
     }));
-    expect(Object.is(defaultFlood.A_path, envOffFlood.A_path)).toBe(true);
-    expect(Object.is(defaultFlood.final_score, envOffFlood.final_score)).toBe(true);
-    expect(Object.is(defaultFlood.A_path, envOnFlood.A_path)).toBe(true);
-    expect(Object.is(defaultFlood.final_score, envOnFlood.final_score)).toBe(true);
-    expect(envOnFlood.edge_traces?.[0]).toEqual(expect.objectContaining({
-      slice_compatibility: "no_query_key",
-      decision: "transferred",
-      reason: "transferred"
-    }));
+    expect(index.completeness.logical_index).not.toBe("complete");
+    expect(index.entries.some((entry) => entry.object_id === MEM.c)).toBe(false);
   });
 });
-
-function buildStrictQuestion(result: Awaited<ReturnType<RecallService["recall"]>>) {
-  const question = buildQuestionDiagnostic({
-    questionId: "q-edge-trace",
-    goldMemoryIds: [TARGET_ID],
-    answerSessionIds: [],
-    deliveredResults: result.candidates.map((candidate, index) => ({
-      object_id: candidate.object_id,
-      object_kind: candidate.object_kind,
-      rank: index + 1,
-      relevance_score: candidate.relevance_score
-    })),
-    hitAt1: result.candidates[0]?.object_id === TARGET_ID,
-    hitAt5: result.candidates.slice(0, 5).some((row) => row.object_id === TARGET_ID),
-    hitAt10: result.candidates.slice(0, 10).some((row) => row.object_id === TARGET_ID),
-    degradationReason: result.degradation_reason,
-    embeddingMode: "disabled",
-    recallResult: result
-  });
-  return LongMemEvalQuestionDiagnosticSchema.parse(question);
-}
-
-function recallInput() {
-  return {
-    taskSurface: taskSurface(),
-    workspaceId: WORKSPACE_ID,
-    runId: RUN_ID,
-    strategy: "build" as const,
-    diagnosticCapture: "answer_features" as const
-  };
-}
-
-function targetFlood(diagnostics: unknown) {
-  const parsed = BenchRecallDiagnosticsSchema.parse(diagnostics);
-  const flood = parsed.fusion_breakdown.find((row) => row.object_id === TARGET_ID)?.flood_potential;
-  if (flood === undefined) throw new Error("target flood diagnostics missing");
-  return flood;
-}
-
-async function createStorage(): Promise<Readonly<{
-  database: StorageDatabase;
-  memoryRepo: SqliteMemoryEntryRepo;
-  pathRepo: SqlitePathRelationRepo;
-}>> {
-  const database = initDatabase({ filename: ":memory:" });
-  databases.add(database);
-  await new SqliteWorkspaceRepo(database).create({
-    workspace_id: WORKSPACE_ID,
-    name: "edge trace workspace",
-    root_path: "/tmp/edge-trace",
-    workspace_kind: WorkspaceKind.LOCAL_REPO,
-    default_engine_binding: null,
-    workspace_state: WorkspaceState.ACTIVE
-  });
-  await new SqliteRunRepo(database).create({
-    run_id: RUN_ID,
-    workspace_id: WORKSPACE_ID,
-    title: "edge trace run",
-    goal: null,
-    run_mode: RunMode.CHAT,
-    engine_binding_id: null,
-    engine_class: null,
-    run_state: RunState.IDLE,
-    current_surface_id: null
-  });
-  return Object.freeze({
-    database,
-    memoryRepo: new SqliteMemoryEntryRepo(database),
-    pathRepo: new SqlitePathRelationRepo(database)
-  });
-}
-
-function createRecallService(
-  memoryRepo: SqliteMemoryEntryRepo,
-  pathRepo: SqlitePathRelationRepo
-): RecallService {
-  const append = vi.fn(async (
-    event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
-  ): Promise<EventLogEntry> => ({
-    event_id: `event-${event.event_type}`,
-    created_at: "2026-07-10T00:00:00.000Z",
-    revision: 0,
-    ...event
-  }));
-  const dependencies: RecallServiceDependencies = {
-    now: () => "2026-07-10T00:00:00.000Z",
-    generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
-    defaultPolicyDecorator: (policy) => {
-      process.env.ALAYA_RECALL_ALLOW_LEGACY_DELIVERY = "1";
-      return {
-        ...policy,
-        fine_assessment: { ...policy.fine_assessment, delivery_path: "legacy" }
-      };
-    },
-    sha256: fieldContractSha256,
-    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, WORKSPACE_ID),
-    memoryRepo: {
-      findByWorkspaceId: memoryRepo.findByWorkspaceId.bind(memoryRepo),
-      findByDimension: memoryRepo.findByDimension.bind(memoryRepo),
-      findByScopeClass: memoryRepo.findByScopeClass.bind(memoryRepo),
-      searchByKeyword: memoryRepo.searchByKeyword.bind(memoryRepo),
-      searchByKeywordWithinObjectIds: memoryRepo.searchByKeywordWithinObjectIds.bind(memoryRepo),
-      findByEvidenceRefs: memoryRepo.findByEvidenceRefs.bind(memoryRepo)
-    },
-    slotRepo: { findByWorkspace: vi.fn(async () => []) },
-    eventLogRepo: { append, queryByEntity: vi.fn(async () => []) },
-    pathExpansionPort: {
-      findByAnchors: pathRepo.findByAnchors.bind(pathRepo)
-    }
-  };
-  return new RecallService(dependencies);
-}
-
-function memory(
-  objectId: string,
-  content: string,
-  facetTags: MemoryEntry["facet_tags"] = null
-): MemoryEntry {
-  return {
-    object_id: objectId,
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-07-10T00:00:00.000Z",
-    updated_at: "2026-07-10T00:00:00.000Z",
-    created_by: "edge-trace-test",
-    dimension: MemoryDimension.FACT,
-    source_kind: SourceKind.USER,
-    formation_kind: FormationKind.EXPLICIT,
-    scope_class: ScopeClass.PROJECT,
-    content,
-    domain_tags: ["database"],
-    evidence_refs: [],
-    facet_tags: facetTags,
-    canonical_entities: null,
-    projection_schema_version: 1,
-    workspace_id: WORKSPACE_ID,
-    run_id: RUN_ID,
-    surface_id: null,
-    storage_tier: StorageTier.HOT,
-    activation_score: 0.8,
-    retention_score: 0.8,
-    manifestation_state: "full_eligible",
-    retention_state: "consolidated",
-    decay_profile: "stable",
-    confidence: 0.9,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: 0,
-    contradiction_count: 0,
-    superseded_by: null
-  };
-}
-
-function answerPath(sourceFacet: string): PathRelation {
-  return {
-    path_id: PATH_ID,
-    workspace_id: WORKSPACE_ID,
-    anchors: {
-      source_anchor: {
-        kind: "object_facet",
-        object_id: SEED_ID,
-        facet_key: sourceFacet
-      },
-      target_anchor: { kind: "object", object_id: TARGET_ID }
-    },
-    constitution: {
-      relation_kind: "answers_with",
-      why_this_relation_exists: ["integration evidence"]
-    },
-    effect_vector: {
-      salience: 1,
-      recall_bias: 1,
-      verification_bias: 0,
-      unfinishedness_bias: 0,
-      default_manifestation_preference: "lens_entry"
-    },
-    plasticity_state: {
-      strength: 1,
-      direction_bias: "source_to_target",
-      stability_class: "stable",
-      support_events_count: 1,
-      contradiction_events_count: 0
-    },
-    lifecycle: { status: "active", retirement_rule: "manual" },
-    legitimacy: {
-      evidence_basis: ["integration evidence"],
-      governance_class: "recall_allowed"
-    },
-    created_at: "2026-07-10T00:00:00.000Z",
-    updated_at: "2026-07-10T00:00:00.000Z"
-  };
-}
-
-function taskSurface(): TaskObjectSurface {
-  return {
-    runtime_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
-    object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-    task_surface_ref: null,
-    expires_at: "2026-07-10T00:30:00.000Z",
-    derived_from: null,
-    retention_policy: RetentionPolicy.SESSION_ONLY,
-    surface_kind: "build",
-    display_name: "where was the deploy staging database",
-    context_refs: []
-  };
-}

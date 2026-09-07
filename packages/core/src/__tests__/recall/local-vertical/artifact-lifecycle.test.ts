@@ -273,32 +273,31 @@ describe('durable semantic artifact lifecycle', () => {
     await expect(f.audit('received', old, () => f.repo.receive(old, 'late-attempt', '{}'))).rejects.toThrow(/stale worker claim/);
   });
 
-  it('feeds admitted kind projection to the existing Recall selector and source pack consumer', async () => {
+  it('keeps admitted artifacts and raw source recall independently observable', async () => {
     const f = await fixture();
     const acceptedAt = performance.now();
     const task = await f.write(MEM.orion, 'Alice owns Orion');
     const sourceAckAt = performance.now();
-    const input = { text: 'decision', familyCaps: { embedding: 'unavailable' as const } };
+    const input = { text: 'Alice owns Orion', familyCaps: { embedding: 'unavailable' as const } };
     const before = await f.slice.runRecall(input);
-    expect(before.membership).not.toContain(MEM.orion);
+    expect(before.membership).toContain(MEM.orion);
     const t = transport();
     const workerStartedAt = performance.now();
     expect(await f.worker(t).run(WS, task)).toBe('completed');
     const publishedAt = performance.now();
-    let readyReads = 0;
-    f.slice.bindReadyArtifactReader({ searchReadyObserved: (workspace, query, limit) => {
-      readyReads++;
-      return f.repo.searchReadyObserved(workspace, query, limit);
-    } });
+    const readyArtifacts = f.repo.searchReadyObserved(WS, 'decision', 10);
+    expect(JSON.stringify(readyArtifacts)).toContain(MEM.orion);
+    const artifactKind = await f.slice.runRecall({ text: 'decision' });
+    expect(artifactKind.membership).not.toContain(MEM.orion);
+    expect(artifactKind.index.completeness.interpretation_coverage).not.toBe('complete');
     const queryStarted = performance.now();
     const delivered = await f.slice.runRecall(input);
     const repeated = await f.slice.runRecall(input);
     expect(delivered.membership).toContain(MEM.orion);
     expect(repeated.membership).toEqual(delivered.membership);
-    expect(delivered.selectionCount).toBe(1);
-    expect(readyReads).toBeGreaterThan(0);
+    expect(delivered.index.completeness.interpretation_coverage).not.toBe('complete');
     expect(t.calls).toHaveLength(1);
-    expect(delivered.referenceInput.units.find((unit) => unit.id === MEM.orion)?.content).toBe('Alice owns Orion');
+    expect(delivered.previews.get(MEM.orion)).toBe('Alice owns Orion');
     const phaseMetrics = { worker_execution_ms: publishedAt - workerStartedAt,
       actual_queue_lag_ms: workerStartedAt - sourceAckAt, actual_projection_lag_ms: publishedAt - sourceAckAt,
       actual_source_ack_ms: sourceAckAt - acceptedAt, rss_bytes: process.memoryUsage().rss,
@@ -309,9 +308,10 @@ describe('durable semantic artifact lifecycle', () => {
     expect(phaseMetrics.actual_source_ack_ms).toBeLessThanOrEqual(250);
     expect(phaseMetrics.rss_bytes).toBeLessThanOrEqual(1024 ** 3);
     expect(phaseMetrics.sqlite_allocated_bytes).toBeLessThanOrEqual(8 * 1024 ** 2);
-    probes.push({ probe: 'artifact_to_recall', phaseMetrics, ready_reads: readyReads, calls: t.calls.length,
+    probes.push({ probe: 'artifact_and_source_recall', phaseMetrics, readyArtifacts, calls: t.calls.length,
       repeat_query_ms: performance.now() - queryStarted, membership: delivered.membership,
-      per_request_selections: delivered.selectionCount, counters: delivered.counters, write_ack_ms: f.writeDurations });
+      index: delivered.index, artifactKindIndex: artifactKind.index,
+      counters: delivered.counters, write_ack_ms: f.writeDurations });
   });
 
   it('canonicalizes profile field order and keeps large source bytes out of task payloads', async () => {

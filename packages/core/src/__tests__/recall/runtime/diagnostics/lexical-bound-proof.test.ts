@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { freezeFieldResult } from
   "../../../../recall/field/retrieval/retrieval-field-validation.js";
 import {
@@ -8,22 +8,10 @@ import {
   verifyLexicalBoundProof
 } from "../../../../recall/runtime/diagnostics/lexical-bound-proof.js";
 import {
-  installCoreConfigFromProcessEnv,
-  resetCoreConfigForTests
-} from "../../../../runtime/config/install-core-config.js";
-import { buildDefaultPolicy } from "../../../../recall/runtime/orchestration.js";
-import { buildLiveObservationField } from
-  "../../../../recall/integration/shadow/live-observations.js";
-import {
-  candidateOf,
   completeReceipt,
-  emptySupplementary,
   fieldResult,
-  stripLive,
   truncatedReceipt
 } from "./lexical-bound-proof-fixture.js";
-
-afterEach(() => resetCoreConfigForTests());
 
 describe("lexical bound proof diagnostics", () => {
   it("round-trips complete and truncated producer rows through freeze", () => {
@@ -60,27 +48,6 @@ describe("lexical bound proof diagnostics", () => {
     expect(frozen.lexical_raw_rank?.lanes[0]).not.toHaveProperty("requested_limit");
     expect(frozen.lexical_raw_rank_receipt?.lanes.find((lane) => lane.lane_id === "porter")?.rows)
       .toEqual(receipt.lanes.find((lane) => lane.lane_id === "porter")?.rows);
-  });
-
-  it("does not let the sibling change liveLexical missing_rank", () => {
-    installCoreConfigFromProcessEnv();
-    const receipt = truncatedReceipt();
-    const live = stripLive(receipt);
-    const field = buildLiveObservationField({
-      candidates: [candidateOf("p3")],
-      policy: buildDefaultPolicy({
-        strategy: "chat",
-        taskSurfaceRef: "lexical-bound-proof",
-        now: () => "2026-07-12T00:00:00.000Z",
-        generateRuntimeId: () => "11111111-1111-4111-8111-111111111111"
-      }),
-      supplementaryData: emptySupplementary("stable"),
-      memoryLexicalCaptures: [live]
-    });
-    expect(field["workspace_local:memory_entry:p3"]?.lineages.lexical?.envelope).toEqual({
-      state: "not_observed",
-      reason: "missing_rank"
-    });
   });
 
   it("does not invent a snapshot identity when seal data is missing", () => {

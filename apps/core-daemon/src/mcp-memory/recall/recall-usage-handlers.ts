@@ -33,6 +33,7 @@ import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-que
 import {
   buildRecallStrategyMix,
   encodeIndexResults,
+  sourceMetadataForRecallResult,
   frameEncodedIndex,
   resolveMcpDegradationReason,
   selectRecallMcpHonestyDiagnostics,
@@ -86,7 +87,8 @@ export interface RecallUsageHandlerDependencies {
     }): Promise<Readonly<{
       readonly candidates: readonly Readonly<RecallCandidate>[];
       readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
-      readonly active_constraints_count: number;
+      readonly active_constraints_count: number | null;
+      readonly active_constraints_completeness?: "complete" | "incomplete";
       readonly total_scanned: number;
       readonly coarse_filter_count: number;
       readonly fine_assessment_count: number;
@@ -221,7 +223,8 @@ function encodeRecallHandlerResults(recallResult: RecallServiceResult, policy: R
     recallResult.candidates.map((candidate) => [candidate.object_id, candidate.content_preview] as const)
   );
   const maxTotalTokens = policy.fine_assessment.budgets.max_total_tokens;
-  const results = encodeIndexResults(index, previews, maxTotalTokens);
+  const metadata = sourceMetadataForRecallResult(recallResult);
+  const results = encodeIndexResults(index, previews, maxTotalTokens, metadata);
   return {
     index: frameEncodedIndex(index, results),
     results,
@@ -289,6 +292,9 @@ function buildRecallResponse(
     results,
     active_constraints: recallResult.active_constraints,
     active_constraints_count: recallResult.active_constraints_count,
+    ...(recallResult.active_constraints_completeness === undefined ? {} : {
+      active_constraints_completeness: recallResult.active_constraints_completeness
+    }),
     total_count: totalCount,
     strategy_mix: strategyMix,
     degradation_reason: resolveMcpDegradationReason(

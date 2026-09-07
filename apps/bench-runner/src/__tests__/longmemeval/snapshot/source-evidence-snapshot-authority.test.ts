@@ -260,6 +260,12 @@ describe("source evidence snapshot authority", () => {
           FROM evidence_capsules WHERE object_id = ?
       `).run(fixture.evidenceId);
       db.prepare(`
+        INSERT INTO event_log (event_id, event_type, entity_type, entity_id,
+          workspace_id, run_id, caused_by, revision, payload_json, created_at)
+        VALUES ('collision-memory-created', 'soul.memory.created', 'memory_entry', ?,
+          ?, ?, 'fixture', 1, '{"content":"same id memory"}', '2026-07-20T00:00:00.000Z')
+      `).run(fixture.evidenceId, question.workspaceId, question.runId);
+      db.prepare(`
         INSERT INTO memory_entries (
           object_id, object_kind, schema_version, lifecycle_state,
           created_at, updated_at, created_by, dimension, scope_class,

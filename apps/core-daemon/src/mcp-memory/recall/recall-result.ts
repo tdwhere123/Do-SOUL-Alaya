@@ -3,6 +3,7 @@ import {
   MILLIGRADE_TOP,
   type InformationIndex,
   type MemorySearchResult,
+  type StagedWarningArray,
   type RecallBudgetState,
   type RecallCandidate,
   type RecallPolicy,
@@ -48,7 +49,11 @@ export function unavailableIndex(): InformationIndex {
 export function encodeIndexResults(
   index: InformationIndex,
   previews: ReadonlyMap<string, string> = new Map(),
-  maxTotalTokens = 2_000
+  maxTotalTokens = 2_000,
+  sourceMetadata: Readonly<Record<string, Readonly<{
+    readonly evidence_refs?: readonly string[];
+    readonly staged_warnings?: StagedWarningArray;
+  }>>> = {}
 ): readonly MemorySearchResult[] {
   const encoded: MemorySearchResult[] = [];
   let usedTokens = 0;
@@ -56,7 +61,14 @@ export function encodeIndexResults(
     if (offset >= index.representation.page_budget) break;
     const score = entry.association_milligrades / MILLIGRADE_TOP;
     const preview = previews.get(entry.object_id) ?? "[payload omitted]";
-    const tokenEstimate = Math.max(1, Buffer.byteLength(preview, "utf8"));
+    const metadata = sourceMetadata[entry.object_id];
+    const evidencePointers = metadata?.evidence_refs ?? [];
+    const stagedWarnings = metadata?.staged_warnings?.map((warning) => ({
+      ...warning, target_object_id: entry.object_id
+    }));
+    const metadataBytes = evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0
+      ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings }), "utf8");
+    const tokenEstimate = Math.max(1, Buffer.byteLength(preview, "utf8") + metadataBytes);
     const usedThrough = usedTokens + tokenEstimate;
     // Emitting the bytes then flagging within_budget=false is not an allowance.
     if (usedThrough > maxTotalTokens) break;
@@ -66,7 +78,8 @@ export function encodeIndexResults(
       object_kind: "memory_entry",
       relevance_score: score,
       content_preview: preview,
-      evidence_pointers: [],
+      evidence_pointers: evidencePointers,
+      ...(stagedWarnings === undefined ? {} : { staged_warnings: stagedWarnings }),
       ...(entry.hypothesis_id === undefined ? {} : { hypothesis_id: entry.hypothesis_id }),
       ...(entry.program_state === undefined ? {} : { program_state: entry.program_state }),
       ...(entry.time_state === undefined ? {} : { time_state: entry.time_state }),
@@ -100,6 +113,21 @@ export function frameEncodedIndex(
       transport: index.completeness.transport === "complete" ? "partial" : index.completeness.transport
     }
   };
+}
+
+export function sourceMetadataForRecallResult(result: Readonly<{
+  readonly candidates: readonly Pick<RecallCandidate, "object_id" | "staged_warnings">[];
+  readonly source_metadata?: Parameters<typeof encodeIndexResults>[3];
+}>): NonNullable<Parameters<typeof encodeIndexResults>[3]> {
+  const metadata = { ...result.source_metadata };
+  for (const candidate of result.candidates) {
+    if (candidate.staged_warnings === undefined) continue;
+    metadata[candidate.object_id] = {
+      staged_warnings: candidate.staged_warnings,
+      ...metadata[candidate.object_id]
+    };
+  }
+  return metadata;
 }
 
 export function buildMemorySearchResult(

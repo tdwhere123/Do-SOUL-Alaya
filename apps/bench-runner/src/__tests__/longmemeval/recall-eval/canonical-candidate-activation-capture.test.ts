@@ -1,54 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createCandidateActivationCapture } from
-  "../../../runs/lifecycle/recall-eval/recall-eval-candidate-activation.js";
 import { CanonicalSelectionReceiptSchema } from
   "../../../harness/recall/capture/capture-receipt-schema.js";
 
-describe("canonical candidate activation capture", () => {
-  it("keeps the sidecar field missing when the observer never fired", () => {
-    const capture = createCandidateActivationCapture(true);
-    const attached = capture.attach({ diagnostics: {} } as never) as Readonly<{
-      diagnostics: Readonly<Record<string, unknown>>;
-    }>;
-    expect(attached.diagnostics)
-      .not.toHaveProperty("open_semantic_factor_candidate_activations");
-  });
-
-  it("records an observed empty list for a valid pure control", () => {
-    const capture = createCandidateActivationCapture(true);
-    capture.observer?.({
-      supplementaryData: {},
-      result: { ranking_authority: "prefix_sk" }
-    } as never);
-
-    const attached = capture.attach({ diagnostics: {} } as never) as Readonly<{
-      diagnostics: Readonly<{
-        open_semantic_factor_candidate_activations: readonly unknown[];
-      }>;
-    }>;
-
-    expect(attached.diagnostics.open_semantic_factor_candidate_activations).toEqual([]);
-  });
-
-  it("roundtrips a nonempty attributed observation", () => {
-    const capture = createCandidateActivationCapture(true);
-    const receipt = { state: "direct", score: 0.7 };
-    capture.observer?.({
-      supplementaryData: {
-        openSemanticFactorCandidateActivationsByCandidateKey: new Map([
-          ["candidate:b", receipt]
-        ])
-      },
-      result: { ranking_authority: "prefix_sk" }
-    } as never);
-    const attached = capture.attach({ diagnostics: {} } as never) as Readonly<{
-      diagnostics: Readonly<{ open_semantic_factor_candidate_activations: readonly unknown[] }>;
-    }>;
-    expect(attached.diagnostics.open_semantic_factor_candidate_activations).toEqual([{
-      candidate_key: "candidate:b", receipt
-    }]);
-  });
-
+describe("canonical selection receipt schema compatibility", () => {
   it("accepts the shared membership failure reason with empty delivery", () => {
     const receipt = createCanonicalSelectionReceipt({
       schema_version: 1,

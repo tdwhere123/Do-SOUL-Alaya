@@ -231,7 +231,7 @@ describe("conditional-field schemas", () => {
     expect(COMPATIBILITY_LEDGER.find((row) => row.field === "operational_feedback")?.disposition)
       .toBe("unreachable-on-target");
     expect(COMPATIBILITY_LEDGER.find((row) => row.field === "ranking_authority")?.disposition)
-      .toBe("deferred-D01");
+      .toBe("freeze-live");
   });
 
   it("requires interpretation status and a snapshot pin", () => {

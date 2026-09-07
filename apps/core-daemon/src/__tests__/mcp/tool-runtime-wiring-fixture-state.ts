@@ -49,6 +49,7 @@ const hoisted = vi.hoisted(() => {
     // callable that runs the supplied function with its args (matching
     // better-sqlite3's transaction wrapper contract).
     connection: {
+      exec: vi.fn(),
       prepare: vi.fn((sql: string) => ({
         run: vi.fn(() => ({ changes: 0 })),
         get: vi.fn(() => {

@@ -38,7 +38,7 @@ import {
 import { createAlayaCliBridge } from "../../cli/bridge.js";
 import { registerAlayaCliCommands } from "../../cli/register.js";
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
-import { seedSourceBoundRecall } from "../support/seed-source-bound-recall.js";
+import { seedRecallMemory } from "../support/seed-source-bound-recall.js";
 import { createAlayaMcpServer } from "../../mcp/server/mcp-server.js";
 
 const tempDirs: string[] = [];
@@ -345,7 +345,6 @@ async function seedRecallFixture(dataDir: string): Promise<void> {
   try {
     const workspaceRepo = new SqliteWorkspaceRepo(database);
     const runRepo = new SqliteRunRepo(database);
-    const memoryRepo = new SqliteMemoryEntryRepo(database);
 
     await workspaceRepo.create({
       workspace_id: "workspace-1",
@@ -367,16 +366,7 @@ async function seedRecallFixture(dataDir: string): Promise<void> {
       current_surface_id: null
     });
     const memory = createMemoryEntry();
-    await memoryRepo.create(memory);
-    seedSourceBoundRecall({
-      database,
-      workspaceId: memory.workspace_id,
-      runId: memory.run_id,
-      evidenceId: memory.evidence_refs[0]!,
-      factorValue: "pnpm",
-      body: memory.content,
-      recordedAt: memory.created_at
-    });
+    await seedRecallMemory({ database, memory: memory });
   } finally {
     database.close();
   }

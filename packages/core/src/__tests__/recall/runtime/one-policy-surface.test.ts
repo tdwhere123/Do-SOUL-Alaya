@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { RecallService } from "../../../recall/recall-service.js";
 import { buildFineAssessmentAnswerSupportContext } from
   "../../../recall/delivery/answer-support/answer-support-context.js";
@@ -12,11 +12,8 @@ import { compileRecallQueryDemand } from
 import { compileRecallQueryProbes } from
   "../../../recall/query/recall-query-probes.js";
 import { resolveDeepHeadScores } from "../../../recall/rerank/deep-head.js";
-import {
-  createCandidate,
-  createSupplementaryData
-} from "../fine-assessment-selection-fixtures.js";
 import { emptySupplementary, fusedCandidate } from "../rerank/deep-head-fixtures.js";
+import { createSupplementaryData } from "../fine-assessment-selection-fixtures.js";
 import {
   createDependencies,
   createMemoryEntry,
@@ -61,10 +58,14 @@ describe("one policy surface", () => {
     const placePlan = compileRecallAnswerShapePlan(
       compileRecallQueryProbes("Where did I buy my new bookshelf from?")
     );
-    const candidate = createCandidate("bookshelf", {
-      content: "The new bookshelf is from IKEA.",
-      evidence_refs: ["evidence-bookshelf"]
-    });
+    const candidate = {
+      ...fusedCandidate({ objectId: "bookshelf", fusedScore: 0.7 }),
+      entry: createMemoryEntry({
+        object_id: "bookshelf",
+        content: "The new bookshelf is from IKEA.",
+        evidence_refs: ["evidence-bookshelf"]
+      })
+    };
 
     const support = buildFineAssessmentAnswerSupportContext({
       candidates: [candidate],
@@ -93,13 +94,11 @@ describe("one policy surface", () => {
       strategy: "analyze",
       diagnosticCapture: "answer_features"
     });
-    const selectionBoundaryObserver = vi.fn(() => undefined);
     const captured = await service.recall({
       taskSurface,
       workspaceId: "workspace-1",
       strategy: "analyze",
-      selectionBoundaryObserver,
-      diagnosticCapture: "answer_features"
+      diagnosticCapture: "packet_trace"
     });
 
     expect(ordinary.diagnostics?.answer_shape_plan).toBeUndefined();
@@ -109,7 +108,8 @@ describe("one policy surface", () => {
     expect(ordinary.index).toEqual(captured.index);
     expect(ordinary.provider_calls).toBe(0);
     expect(ordinary.garden_enqueue).toBe(0);
-    expect(selectionBoundaryObserver).not.toHaveBeenCalled();
+    expect(captured.provider_calls).toBe(0);
+    expect(captured.garden_enqueue).toBe(0);
   });
 
   it("does not let a dormant cross-encoder map replace lightweight scores", () => {

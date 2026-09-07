@@ -7,7 +7,7 @@ import {
 import type { DeliverySelectionCandidate } from
   "../../../recall/delivery/delivery-selection.js";
 import { buildEmptyRecallFusionBreakdown } from
-  "../../../recall/delivery/fusion-delivery-scoring.js";
+  "../recall-service-test-fixtures.js";
 import { compileRecallQueryProbes } from
   "../../../recall/query/recall-query-probes.js";
 import type { RecallFusionBreakdown } from

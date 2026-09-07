@@ -43,13 +43,13 @@ export const COMPATIBILITY_LEDGER: readonly CompatibilityLedgerRow[] = Object.fr
   }),
   Object.freeze({
     field: "delivery_path",
-    disposition: "deferred-D01",
-    note: "optional public field omitted on the target path; retire or freeze ignored-on-read in D01"
+    disposition: "freeze-live",
+    note: "deprecated historical response parsing retained under invariant 25; rejected as a request selector"
   }),
   Object.freeze({
     field: "ranking_authority",
-    disposition: "deferred-D01",
-    note: "optional public field omitted on the target path; retire or freeze ignored-on-read in D01"
+    disposition: "freeze-live",
+    note: "deprecated historical response parsing retained under invariant 25; rejected as a request selector"
   }),
   Object.freeze({
     field: "host_context",

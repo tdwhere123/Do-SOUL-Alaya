@@ -1,487 +1,52 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryDimension, ProjectMappingState, ScopeClass } from "@do-soul/alaya-protocol";
+import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { RecallService } from "../../recall/recall-service.js";
-import { createAnchor, createDependencies, createMemoryEntry, createPreparedQueryHandle, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import { createSourceBoundRecallFixture, createTaskSurface } from "./recall-service-test-fixtures.js";
 
-describe("RecallService", () => {
-  afterEach(() => { vi.unstubAllEnvs(); });
-it("merges adopted global-source candidates through optional recall ports and excludes non-adopted globals", async () => {
-    const memories = [
-      createMemoryEntry({
-        object_id: "project-memory",
-        scope_class: ScopeClass.PROJECT,
-        activation_score: 0.9
-      })
-    ];
-    const recordClassifications = vi.fn(async () => {});
-    const globalRecall = vi.fn(async () => [
-      {
-        global_object_id: "global-accepted",
-        dimension: MemoryDimension.PROCEDURE,
-        scope_class: ScopeClass.GLOBAL_DOMAIN,
-        content: "Accepted global content",
-        domain_tags: ["repo"],
-        evidence_refs: ["evidence-accepted"],
-        activation_score: 0.75,
-        created_at: "2026-03-23T00:00:00.000Z",
-        updated_at: "2026-03-23T00:00:00.000Z"
-      },
-      {
-        global_object_id: "global-suggested",
-        dimension: MemoryDimension.PROCEDURE,
-        scope_class: ScopeClass.GLOBAL_DOMAIN,
-        content: "Suggested global content",
-        domain_tags: ["repo"],
-        evidence_refs: [],
-        activation_score: 0.7,
-        created_at: "2026-03-23T00:00:00.000Z",
-        updated_at: "2026-03-23T00:00:00.000Z"
-      }
-    ]);
-    const ensureSuggestedAnchors = vi.fn(async () => [
-      createAnchor({
-        object_id: "mapping-accepted",
-        global_object_id: "global-accepted",
-        mapping_state: ProjectMappingState.ACCEPTED
-      }),
-      createAnchor({
-        object_id: "mapping-suggested",
-        global_object_id: "global-suggested",
-        mapping_state: ProjectMappingState.SUGGESTED
-      })
-    ]);
-    const { dependencies } = createDependencies(memories);
-    const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
-      ...dependencies,
-      projectMappingPort: {
-        findByWorkspace: vi.fn(async () => []),
-        ensureSuggestedAnchors
-      },
-      globalRecallPort: {
-        recall: globalRecall
-      },
-      globalRecallCachePort: {
-        recordClassifications
-      }
-    });
-    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
-    const policy = overridePolicy(basePolicy, {
-      coarse_filter: {
-        ...basePolicy.coarse_filter,
-        deterministic_match: {
-          ...basePolicy.coarse_filter.deterministic_match,
-          scope_filter: null,
-          dimension_filter: null,
-          domain_tag_filter: null
-        },
-        precomputed_rank: {
-          ...basePolicy.coarse_filter.precomputed_rank,
-          max_candidates: 10,
-          min_activation_score: null
-        }
-      },
-      fine_assessment: {
-        ...basePolicy.fine_assessment,
-        budgets: {
-          max_entries: 10,
-          max_total_tokens: 1000,
-          per_dimension_limits: null
-        }
-      }
-    });
+const databases = new Set<StorageDatabase>();
+afterEach(() => { vi.restoreAllMocks(); for (const database of databases) database.close(); databases.clear(); });
+const fixture = () => createSourceBoundRecallFixture((database) => databases.add(database));
+const request = () => ({ taskSurface: createTaskSurface(), workspaceId: "workspace-1",
+  strategy: "analyze" as const, queryText: "deployment checklist" });
 
-    const result = await service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride: policy,
-      diagnosticCapture: "answer_features"
-    });
-
-    expect(globalRecall).toHaveBeenCalledWith({
-      workspaceId: "workspace-1",
-      queryText: "Implement recall",
-      limit: 10
-    });
-    expect(ensureSuggestedAnchors).toHaveBeenCalledWith(
-      ["global-accepted", "global-suggested"],
-      "workspace-1",
-      "system"
-    );
-    expect(result.candidates.map((candidate) => candidate.object_id).sort()).toEqual([
-      "global-accepted",
-      "project-memory"
-    ]);
-    expect(
-      result.candidates.find((candidate) => candidate.object_id === "global-accepted")?.origin_plane
-    ).toBe("global");
-    expect(
-      result.candidates.find((candidate) => candidate.object_id === "global-accepted")?.is_advisory
-    ).toBe(false);
-    expect(result.candidates.some((candidate) => candidate.object_id === "global-suggested")).toBe(
-      false
-    );
-    expect(recordClassifications).toHaveBeenCalledWith([
-      {
-        workspaceId: "workspace-1",
-        globalObjectId: "global-accepted",
-        classification: "included"
-      },
-      {
-        workspaceId: "workspace-1",
-        globalObjectId: "global-suggested",
-        classification: "excluded"
-      }
-    ]);
+describe("RecallService conditional entry", () => {
+  it("delivers positive raw source evidence without a provider or durable query mutation", async () => {
+    const f = await fixture();
+    await f.writeMemory("aaaaaaaa-aaaa-4aaa-8aaa-000000000001", "deployment checklist", "procedure");
+    const network = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("provider forbidden"));
+    const before = f.database.connection.prepare("SELECT COUNT(*) AS count FROM event_log").get();
+    const pending = f.pendingGarden();
+    const result = await f.service.recall(request());
+    expect(result.candidates.map((row) => row.object_id)).toContain("aaaaaaaa-aaaa-4aaa-8aaa-000000000001");
+    expect(result.index.entries[0]?.claim).toBe("unknown");
+    expect(result.index.completeness.interpretation_coverage).not.toBe("complete");
+    expect(f.database.connection.prepare("SELECT COUNT(*) AS count FROM event_log").get()).toEqual(before);
+    expect(f.pendingGarden()).toEqual(pending);
+    expect(network).not.toHaveBeenCalled();
+    expect(result.provider_calls).toBe(0);
   });
 
-it("delivers one object for matching local and global ids while preserving provenance diagnostics", async () => {
-    const sharedObjectId = "shared-object-id";
-    const memories = [
-      createMemoryEntry({
-        object_id: sharedObjectId,
-        scope_class: ScopeClass.PROJECT,
-        content: "Local workspace procedure",
-        activation_score: 0.9
-      })
-    ];
-    const globalRecall = vi.fn(async () => [
-      {
-        global_object_id: sharedObjectId,
-        dimension: MemoryDimension.PROCEDURE,
-        scope_class: ScopeClass.GLOBAL_DOMAIN,
-        content: "Global source-plane procedure",
-        domain_tags: ["repo"],
-        evidence_refs: ["evidence-shared"],
-        activation_score: 0.8,
-        created_at: "2026-03-23T00:00:00.000Z",
-        updated_at: "2026-03-23T00:00:00.000Z"
-      }
-    ]);
-    const { dependencies } = createDependencies(memories);
-    const preparedQuery = createPreparedQueryHandle("prepared-query-origin-collision");
-    const querySupplementIfReady = vi.fn(async () => ({
-      supplementaryEntries: Object.freeze([memories[0]!] as const),
-      similarityHintsByObjectId: Object.freeze({
-        [sharedObjectId]: Object.freeze({
-          object_id: sharedObjectId,
-          normalized_similarity: 0.25
-        })
-      })
-    }));
-    const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
-      ...dependencies,
-      projectMappingPort: {
-        findByWorkspace: vi.fn(async () => []),
-        ensureSuggestedAnchors: vi.fn(async () => [
-          createAnchor({
-            object_id: "mapping-shared",
-            global_object_id: sharedObjectId,
-            mapping_state: ProjectMappingState.ACCEPTED
-          })
-        ])
-      },
-      globalRecallPort: {
-        recall: globalRecall
-      },
-      embeddingRecallService: {
-        hasStoredVectors: vi.fn(async () => true),
-        prepareQueryEmbedding: vi.fn(() => preparedQuery),
-        querySupplementIfReady,
-        querySupplement: vi.fn(async () => ({
-          supplementaryEntries: Object.freeze([]),
-          similarityHintsByObjectId: Object.freeze({})
-        }))
-      }
-    });
-    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
-    const policy = overridePolicy(basePolicy, {
-      coarse_filter: {
-        ...basePolicy.coarse_filter,
-        deterministic_match: {
-          ...basePolicy.coarse_filter.deterministic_match,
-          scope_filter: null,
-          dimension_filter: null,
-          domain_tag_filter: null
-        },
-        precomputed_rank: {
-          ...basePolicy.coarse_filter.precomputed_rank,
-          max_candidates: 10,
-          min_activation_score: null
-        },
-        semantic_supplement: {
-          enabled: true,
-          max_supplement: 5,
-          embedding_enabled: true
-        }
-      },
-      fine_assessment: {
-        ...basePolicy.fine_assessment,
-        budgets: {
-          max_entries: 10,
-          max_total_tokens: 1000,
-          per_dimension_limits: null
-        }
-      }
-    });
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride: policy,
-      diagnosticCapture: "answer_features"
-    });
-
-    const collidingCandidates = result.candidates.filter(
-      (candidate) => candidate.object_id === sharedObjectId
-    );
-    expect(querySupplementIfReady).toHaveBeenCalled();
-    expect(collidingCandidates).toHaveLength(1);
-    expect(collidingCandidates[0]).toMatchObject({
-      object_id: sharedObjectId,
-      origin_plane: "workspace_local"
-    });
-    expect(collidingCandidates[0]?.source_channels).toEqual(
-      expect.arrayContaining(["workspace_local", "global"])
-    );
-    expect(result.coarse_filter_count).toBe(1);
-    expect(result.diagnostics?.candidate_pool_count).toBe(1);
-    expect(result.diagnostics?.token_economy).toMatchObject({
-      coarse_pool_size: 1,
-      fine_evaluated: 1,
-      fine_pruned_count: 0
-    });
-    const collidingDiagnostics = result.diagnostics?.candidates.filter(
-      (candidate) => candidate.object_id === sharedObjectId
-    );
-    expect(collidingDiagnostics).toHaveLength(1);
-    expect(collidingDiagnostics?.[0]).toMatchObject({
-      origin_plane: "workspace_local",
-      dropped_reason: null
-    });
+  it("keeps unavailable source observation distinct from an observed empty workspace", async () => {
+    const f = await fixture();
+    const empty = await f.service.recall(request());
+    const unavailable = await new RecallService({ ...f.dependencies, observerReaders: {
+      snapshotPin: f.dependencies.observerReaders!.snapshotPin
+    } }).recall(request());
+    expect(empty.candidates).toEqual([]);
+    expect(empty.index.completeness.observed_coverage).not.toBe("unavailable");
+    expect(unavailable.candidates).toEqual([]);
+    expect(unavailable.index.completeness.observed_coverage).toBe("unavailable");
   });
 
-it("applies embedding hits to the local candidate when a global candidate shares its object id", async () => {
-    const sharedObjectId = "shared-object-id-embedding";
-    const memories = [
-      createMemoryEntry({
-        object_id: sharedObjectId,
-        scope_class: ScopeClass.PROJECT,
-        content: "Local workspace procedure with the semantic answer.",
-        activation_score: 0.19
-      })
-    ];
-    const globalRecall = vi.fn(async () => [
-      {
-        global_object_id: sharedObjectId,
-        dimension: MemoryDimension.PROCEDURE,
-        scope_class: ScopeClass.GLOBAL_DOMAIN,
-        content: "Global source-plane procedure.",
-        domain_tags: ["repo"],
-        evidence_refs: ["evidence-shared"],
-        activation_score: 0.2,
-        created_at: "2026-03-23T00:00:00.000Z",
-        updated_at: "2026-03-23T00:00:00.000Z"
-      }
-    ]);
-    const { dependencies } = createDependencies(memories);
-    const preparedQuery = createPreparedQueryHandle("prepared-query-origin-local");
-    const querySupplementIfReady = vi.fn(async () => ({
-      supplementaryEntries: Object.freeze([memories[0]!]),
-      similarityHintsByObjectId: Object.freeze({
-        [sharedObjectId]: Object.freeze({
-          object_id: sharedObjectId,
-          normalized_similarity: 1
-        })
-      })
-    }));
-    const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
-      ...dependencies,
-      projectMappingPort: {
-        findByWorkspace: vi.fn(async () => []),
-        ensureSuggestedAnchors: vi.fn(async () => [
-          createAnchor({
-            object_id: "mapping-shared-embedding",
-            global_object_id: sharedObjectId,
-            mapping_state: ProjectMappingState.ACCEPTED
-          })
-        ])
-      },
-      globalRecallPort: {
-        recall: globalRecall
-      },
-      embeddingRecallService: {
-        hasStoredVectors: vi.fn(async () => true),
-        prepareQueryEmbedding: vi.fn(() => preparedQuery),
-        querySupplementIfReady,
-        querySupplement: vi.fn(async () => ({
-          supplementaryEntries: Object.freeze([]),
-          similarityHintsByObjectId: Object.freeze({})
-        }))
-      }
-    });
-    const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
-    const policy = overridePolicy(basePolicy, {
-      coarse_filter: {
-        ...basePolicy.coarse_filter,
-        deterministic_match: {
-          ...basePolicy.coarse_filter.deterministic_match,
-          scope_filter: null,
-          dimension_filter: null,
-          domain_tag_filter: null
-        },
-        precomputed_rank: {
-          ...basePolicy.coarse_filter.precomputed_rank,
-          max_candidates: 10,
-          min_activation_score: null
-        },
-        semantic_supplement: {
-          enabled: true,
-          max_supplement: 5,
-          embedding_enabled: true
-        }
-      },
-      fine_assessment: {
-        ...basePolicy.fine_assessment,
-        budgets: {
-          max_entries: 1,
-          max_total_tokens: 1000,
-          per_dimension_limits: null
-        }
-      }
-    });
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride: policy,
-      diagnosticCapture: "answer_features"
-    });
-
-    expect(querySupplementIfReady).toHaveBeenCalled();
+  it("does not invoke retired global candidate merging or recording from target Recall", async () => {
+    const f = await fixture();
+    await f.writeMemory("aaaaaaaa-aaaa-4aaa-8aaa-000000000002", "deployment checklist", "procedure");
+    const recall = vi.fn(async () => { throw new Error("retired merge invoked"); });
+    const recordClassifications = vi.fn(async () => { throw new Error("retired mutation invoked"); });
+    const result = await new RecallService({ ...f.dependencies,
+      globalRecallPort: { recall }, globalRecallCachePort: { recordClassifications } }).recall(request());
     expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0]).toMatchObject({
-      object_id: sharedObjectId,
-      origin_plane: "workspace_local"
-    });
-    expect(result.candidates[0]?.score_factors?.embedding_similarity).toBe(1);
-    expect(result.candidates[0]?.source_channels).toContain("semantic_supplement");
-  });
-
-it("does not record global recall classifications when recall completion fails", async () => {
-    const recordClassifications = vi.fn(async () => {});
-    const globalRecall = vi.fn(async () => [
-      {
-        global_object_id: "global-accepted",
-        dimension: MemoryDimension.PROCEDURE,
-        scope_class: ScopeClass.GLOBAL_DOMAIN,
-        content: "Accepted global content",
-        domain_tags: ["repo"],
-        evidence_refs: ["evidence-accepted"],
-        activation_score: 0.75,
-        created_at: "2026-03-23T00:00:00.000Z",
-        updated_at: "2026-03-23T00:00:00.000Z"
-      }
-    ]);
-    const { dependencies, appendSpy } = createDependencies([]);
-    appendSpy.mockRejectedValueOnce(new Error("completion append failed"));
-    const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
-      ...dependencies,
-      projectMappingPort: {
-        findByWorkspace: vi.fn(async () => []),
-        ensureSuggestedAnchors: vi.fn(async () => [
-          createAnchor({
-            object_id: "mapping-accepted",
-            global_object_id: "global-accepted",
-            mapping_state: ProjectMappingState.ACCEPTED
-          })
-        ])
-      },
-      globalRecallPort: {
-        recall: globalRecall
-      },
-      globalRecallCachePort: {
-        recordClassifications
-      }
-    });
-
-    await expect(
-      service.recall({
-        taskSurface: createTaskSurface(),
-        workspaceId: "workspace-1",
-        strategy: "analyze",
-      diagnosticCapture: "answer_features"
-})
-    ).rejects.toThrow("completion append failed");
+    expect(recall).not.toHaveBeenCalled();
     expect(recordClassifications).not.toHaveBeenCalled();
-  });
-
-it("does not fail recall when optional global recall cache recording throws and emits a warning witness", async () => {
-    const recordClassifications = vi.fn(async () => {
-      throw new Error("cache write failed");
-    });
-    const globalRecall = vi.fn(async () => [
-      {
-        global_object_id: "global-accepted",
-        dimension: MemoryDimension.PROCEDURE,
-        scope_class: ScopeClass.GLOBAL_DOMAIN,
-        content: "Accepted global content",
-        domain_tags: ["repo"],
-        evidence_refs: ["evidence-accepted"],
-        activation_score: 0.75,
-        created_at: "2026-03-23T00:00:00.000Z",
-        updated_at: "2026-03-23T00:00:00.000Z"
-      }
-    ]);
-    const { dependencies, warnSpy } = createDependencies([]);
-    const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
-      ...dependencies,
-      projectMappingPort: {
-        findByWorkspace: vi.fn(async () => []),
-        ensureSuggestedAnchors: vi.fn(async () => [
-          createAnchor({
-            object_id: "mapping-accepted",
-            global_object_id: "global-accepted",
-            mapping_state: ProjectMappingState.ACCEPTED
-          })
-        ])
-      },
-      globalRecallPort: {
-        recall: globalRecall
-      },
-      globalRecallCachePort: {
-        recordClassifications
-      }
-    });
-
-    const result = await service.recall({
-      taskSurface: createTaskSurface(),
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      diagnosticCapture: "answer_features"
-    });
-
-    expect(result.candidates.map((candidate) => candidate.object_id)).toContain("global-accepted");
-    expect(recordClassifications).toHaveBeenCalledWith([
-      {
-        workspaceId: "workspace-1",
-        globalObjectId: "global-accepted",
-        classification: "included"
-      }
-    ]);
-    expect(warnSpy).toHaveBeenCalledWith("global recall cache record failed", {
-      workspace_id: "workspace-1",
-      classification_count: 1,
-      operation: "global_recall_cache_record",
-      errorName: "Error",
-      error: "cache write failed"
-    });
   });
 });

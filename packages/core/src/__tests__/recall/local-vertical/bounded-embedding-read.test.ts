@@ -1,26 +1,17 @@
 import { writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SqliteMemoryEmbeddingRepo, type MemoryEmbeddingRecord } from "@do-soul/alaya-storage";
-import { LocalOnnxEmbeddingClient } from "../../../embedding-recall/local-onnx-embedding-client.js";
 import { createSliceHarness } from "./harness.js";
 
-const provider = new LocalOnnxEmbeddingClient({ execution: "in_process" });
+const provider = { providerKind: "local_onnx" as const, modelId: "storage-fixture-384", schemaVersion: 1 };
 const databases = new Set<{ close(): void }>();
-let vector: Float32Array;
+const vector = Float32Array.from({ length: 384 }, (_, index) => (index + 1) / 384);
 const content = "Alex works from Lisbon weekdays.";
 const profile = { providerKind: provider.providerKind, modelId: provider.modelId, schemaVersion: provider.schemaVersion,
   maxRows: 3, maxMetadataUtf8Bytes: 1024 };
 const options = { ...profile, expectedDimensions: 384, maxVectorBytes: 1536, maxObjectIds: 3 };
 
-beforeAll(async () => {
-  vi.stubGlobal("fetch", () => { throw new Error("bounded embedding test attempted network"); });
-  const vectors = await provider.embedTexts([content], { timeoutMs: 60_000 });
-  vector = vectors[0]!;
-  expect(vector.length).toBe(384);
-  expect(new Set(vector).size).toBeGreaterThan(1);
-}, 120_000);
-afterAll(async () => { await provider.close(); vi.unstubAllGlobals(); });
 afterEach(() => { vi.restoreAllMocks(); for (const db of databases) db.close(); databases.clear(); });
 
 function record(id: string, overrides: Partial<MemoryEmbeddingRecord> = {}): MemoryEmbeddingRecord {
@@ -30,8 +21,8 @@ function record(id: string, overrides: Partial<MemoryEmbeddingRecord> = {}): Mem
 }
 
 describe("bounded exact-profile embedding storage reads", () => {
-  it("never materializes oversized vectors or metadata and admits the real local model vector", async () => {
-    const slice = await createSliceHarness((db) => databases.add(db), ":memory:", provider);
+  it("never materializes oversized vectors or metadata and admits exact-profile synthetic bytes", async () => {
+    const slice = await createSliceHarness((db) => databases.add(db));
     const repo = new SqliteMemoryEmbeddingRepo(slice.database);
     const ids = ["75000000-0000-4000-8000-000000000001", "75000000-0000-4000-8000-000000000002", "75000000-0000-4000-8000-000000000003"];
     for (const id of ids) await slice.writeMemory(id, content, "fact", false);
@@ -66,21 +57,20 @@ describe("bounded exact-profile embedding storage reads", () => {
     expect(materialized.at(-1)!.embedding_blob).toBeNull();
     const capped = await repo.listBoundedByObjectIds("workspace-1", [...ids].reverse(), { ...options, maxRows: 1 });
     expect(capped).toMatchObject({ records: [], rowVisits: 1, vectorBytes: 0, truncated: true });
-    const recalled = await slice.runRecall({ text: "Who works remotely?", nBase: 0, rBase: 0, nExtension: 1, rExtension: 4,
+    const recalled = await slice.runRecall({ text: "Who works remotely?",
       familyCaps: { lexical: "unavailable", typed_relation: "unavailable", embedding: "ready" } });
     expect(recalled.membership).toEqual([]);
     expect(recalled.counters.query_embed_count).toBe(0);
     expect(recalled.counters.embedding_vector_payload_bytes).toBe(0);
-    expect(recalled.counters.row_visits).toBe(2);
-    expect(recalled.pack.truncated).toBe(true);
+    expect(recalled.index.completeness.observed_coverage).toBe("unavailable");
     writeFileSync("/tmp/stop01-bounded-vector-raw-06.json", JSON.stringify({ createdAt: new Date().toISOString(),
       eligibleVectorBytes: result.vectorBytes, rows: result.rowVisits, filtered: result.filteredRows,
       materializedRows: materialized.map((row) => ({ eligible: row.eligible, vectorBytes: Buffer.isBuffer(row.embedding_blob) ? row.embedding_blob.length : 0, maskedMetadata: row.content_hash === null })),
-      integratedRextension: 4, counters: recalled.counters, truncated: recalled.pack.truncated }, null, 2));
+      counters: recalled.counters, completeness: recalled.index.completeness }, null, 2));
   });
 
   it("caps native indexed identity visits before inactive source filtering with no refill", async () => {
-    const slice = await createSliceHarness((db) => databases.add(db), ":memory:", provider);
+    const slice = await createSliceHarness((db) => databases.add(db));
     const repo = new SqliteMemoryEmbeddingRepo(slice.database);
     repo.prepareBoundedRecallIndex();
     for (let index = 0; index < 64; index += 1) {

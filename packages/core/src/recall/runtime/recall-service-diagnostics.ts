@@ -108,7 +108,7 @@ export interface RecallGraphExpansionDiagnostics {
 
 export interface RecallDiagnostics {
   readonly capture_receipt?: Readonly<
-    import("../delivery/canonical-delivery.js").CanonicalSelectionReceipt
+    import("@do-soul/alaya-protocol").CanonicalSelectionReceipt
   >;
   readonly query_probes: {
     readonly normalized_query: string | null;

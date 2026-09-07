@@ -11,8 +11,6 @@ import {
   type RecallEvalPagerMapsHint
 } from "./protocol.js";
 import { formatPagerExit, formatRecallEvalPagerMapsHint } from "./maps-hint.js";
-import { RecallEvalSelectionArtifactCollector } from
-  "./selection-artifact-collector.js";
 import { proveParentOpenedFileProofs } from "./parent-opened-file-proofs.js";
 import { attachRecallEvalHarnessTimers } from "./harness-timers.js";
 
@@ -101,7 +99,6 @@ export class RecallEvalPagerIpcSession {
   private closing = false;
   private recycling = false;
   private openPayload: unknown | undefined;
-  private readonly selectionArtifacts = new RecallEvalSelectionArtifactCollector();
   private readonly pending = new Map<number, PendingIpcRequest>();
   private exitError: RecallEvalPagerChildExitedError | null = null;
   private mapsHint: RecallEvalPagerMapsHint | null = null;
@@ -158,17 +155,15 @@ export class RecallEvalPagerIpcSession {
       recallDurationMs,
       totalWallMs
     });
-    this.selectionArtifacts.recordQuestion(payload);
     return pack;
   }
 
   public async close(
     timeoutMs: number = this.defaultTimeoutMs
-  ): Promise<unknown> {
-    if (this.child === null) return this.selectionArtifacts.finalize();
+  ): Promise<void> {
+    if (this.child === null) return;
     this.closing = true;
     await this.releaseAttachedChild(timeoutMs);
-    return this.selectionArtifacts.finalize();
   }
 
   // Recycle kills the pager process. Live recall-eval keep-alives it; SIGBUS
@@ -210,8 +205,7 @@ export class RecallEvalPagerIpcSession {
 
   private async closeAttachedChild(timeoutMs: number): Promise<void> {
     try {
-      const response = await this.request("close", {}, timeoutMs);
-      this.selectionArtifacts.recordArtifact(response.selectionArtifact);
+      await this.request("close", {}, timeoutMs);
     } catch (error) {
       if (this.exitError !== null) throw this.exitError;
       if (
@@ -279,7 +273,6 @@ export class RecallEvalPagerIpcSession {
   private recordIdentity(response: RecallEvalPagerIpcSuccess): void {
     this.childPid = response.pid ?? this.child?.pid ?? this.childPid;
     this.mapsHint = response.mapsHint ?? this.mapsHint;
-    this.selectionArtifacts.recordOpenRoot(response.selectionSpoolRootPath);
   }
 
   private onMessage(message: unknown): void {

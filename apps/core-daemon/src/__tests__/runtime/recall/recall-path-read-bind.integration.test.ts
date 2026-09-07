@@ -15,17 +15,8 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { EventPublisher, RelationAssertionService, stableStringify } from "@do-soul/alaya-core";
-import { compileRecallQueryProbes } from "../../../../../../packages/core/src/recall/query/recall-query-probes.js";
 import { loadActiveConstraints } from "../../../../../../packages/core/src/recall/runtime/orchestration.js";
 import { collectGovernancePathDerivations } from "../../../../../../packages/core/src/recall/supplements/supplementary-data-governance-paths.js";
-import { computeIntegratedFloodScore } from "../../../../../../packages/core/src/recall/scoring/integrated-flood-scoring.js";
-import { computeFloodEdgeTransfer } from "../../../../../../packages/core/src/recall/flood/edge-transfer.js";
-import {
-  resolveConformantFloodCapPerSource,
-  resolveConformantFloodCapTotal,
-  resolveConformantRhoPath
-} from "../../../../../../packages/core/src/recall/scoring/conformant-fusion-scoring.js";
-import type { RecallSupplementaryData } from "../../../../../../packages/core/src/recall/runtime/recall-service-types.js";
 import {
   StorageDatabase,
   SqliteEvidenceCapsuleRepo,
@@ -88,57 +79,10 @@ describe("typed path transfer bind seam", () => {
     const inflow = derivations.pathInflowByTarget[TARGET_ID] ?? [];
     expect(derivations.pathInflowAvailability).toBe("available");
     expect(inflow).toEqual(expect.arrayContaining([
-      expect.objectContaining({ pathId: PATH_ID, seedObjectId: SOURCE_ID, targetObjectId: TARGET_ID })
+      expect.objectContaining({ pathId: PATH_ID, seedObjectId: SOURCE_ID, targetObjectId: TARGET_ID,
+        relationKind: "answers_with", weight: 0.75 })
     ]));
 
-    const flood = computeIntegratedFloodScore({
-      entry: memory(TARGET_ID),
-      // This assertion isolates status mapping from edge-transfer arithmetic.
-      axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0 },
-      supplementaryData: supplementary({
-        pathInflowByTarget: derivations.pathInflowByTarget,
-        pathInflowAvailability: derivations.pathInflowAvailability
-      })
-    });
-    expect(flood.diagnostics.path_status).toBe("active");
-  });
-
-  it("attributes a production transfer receipt without injecting A_path", async () => {
-    const database = openFixtureReadonly();
-    const derivations = await collectLocatorDerivations(database);
-    const inflow = derivations.pathInflowByTarget[TARGET_ID] ?? [];
-    expect(inflow.length).toBeGreaterThan(0);
-
-    const transfer = computeFloodEdgeTransfer({
-      inflow,
-      targetObjectId: TARGET_ID,
-      rObjectById: new Map([[SOURCE_ID, 1], [TARGET_ID, 1]]),
-      capPerSource: resolveConformantFloodCapPerSource(),
-      capTotal: resolveConformantFloodCapTotal(),
-      rhoPath: resolveConformantRhoPath()
-    });
-    expect(transfer.traces).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        path_id: PATH_ID,
-        relation_kind: "answers_with",
-        seed_object_id: SOURCE_ID,
-        target_object_id: TARGET_ID,
-        decision: "transferred",
-        edge_conductance: expect.closeTo(0.75)
-      })
-    ]));
-    expect(transfer.value).toBeCloseTo(0.75);
-
-    const flood = computeIntegratedFloodScore({
-      entry: memory(TARGET_ID),
-      axisInputs: { R_obj: 0.2, A_path: transfer.value, B_evidence: 0 },
-      supplementaryData: supplementary({
-        pathInflowByTarget: derivations.pathInflowByTarget,
-        pathInflowAvailability: derivations.pathInflowAvailability
-      })
-    });
-    expect(flood.diagnostics.path_status).toBe("active");
-    expect(flood.diagnostics.A_path).toBeCloseTo(0.75);
   });
 
   it("keeps the explicit production bind on temporal authority", () => {
@@ -161,18 +105,8 @@ describe("typed path transfer bind seam", () => {
       pathProjectionAsOf: historicalAsOf,
       candidates
     });
-    const flood = computeIntegratedFloodScore({
-      entry: candidates[1]!,
-      axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0 },
-      supplementaryData: supplementary({
-        pathInflowByTarget: derivations.pathInflowByTarget,
-        pathInflowAvailability: derivations.pathInflowAvailability
-      })
-    });
 
     expect(derivations.pathInflowAvailability).toBe("unavailable");
-    expect(flood.diagnostics.path_status).toBe("inactive:index_unavailable");
-    expect(flood.diagnostics.A_path).not.toBe(1);
 
     const warn = vi.fn();
     const constraints = await loadActiveConstraints({
@@ -219,18 +153,7 @@ describe("refresh-required path index", () => {
       workspaceId: WORKSPACE_ID,
       candidates
     });
-    const flood = computeIntegratedFloodScore({
-      entry: candidates[1]!,
-      // This assertion isolates status mapping from edge-transfer arithmetic.
-      axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0 },
-      supplementaryData: supplementary({
-        pathInflowByTarget: derivations.pathInflowByTarget,
-        pathInflowAvailability: derivations.pathInflowAvailability
-      })
-    });
     expect(derivations.pathInflowAvailability).toBe("storage_error");
-    expect(flood.diagnostics.path_status).toBe("inactive:storage_error");
-    expect(flood.diagnostics.A_path).not.toBe(1);
   });
 
   it("fails closed when a ready state points at a missing active generation", async () => {
@@ -445,34 +368,5 @@ function memory(objectId: string): MemoryEntry {
     reinforcement_count: 0,
     contradiction_count: 0,
     superseded_by: null
-  };
-}
-
-function supplementary(overrides: Partial<RecallSupplementaryData> = {}): RecallSupplementaryData {
-  return {
-    queryProbes: compileRecallQueryProbes("typed path bind seam"),
-    ftsRanks: {},
-    trigramFtsRanks: {},
-    synthesisFtsRanks: {},
-    evidenceFtsRanks: {},
-    evidenceProjectionMatchesByRef: {},
-    sourceProximityScores: {},
-    sourceCohortKeys: {},
-    structuralScores: {},
-    graphExpansionScores: {},
-    entitySeedScores: {},
-    pathExpansionScores: {},
-    pathSuppressionScores: {},
-    embeddingSimilarityScores: {},
-    evidenceSemanticActivationsByCandidateKey: new Map(),
-    graphSupportCounts: {},
-    budgetPenaltyFactor: 0,
-    plasticityFactors: {},
-    graphAndPathColdScore: 0,
-    recallsEdgeCount: 0,
-    weightTransferAmount: 0,
-    evidenceGistsByMemoryId: {},
-    governanceCeilingByMemoryId: {},
-    ...overrides
   };
 }

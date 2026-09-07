@@ -97,7 +97,7 @@ describe("incremental projection and read-only recall", () => {
       text: "Where is the deployment checklist?", familyCaps: { embedding: "unavailable" }
     });
     expect(first.membership).toEqual(second.membership);
-    expect(first.selectionCount).toBe(1);
+    expect(first.index.query_id).toBe(second.index.query_id);
     expect(second.counters.recall_provider_calls).toBe(0);
     expect(second.counters.recall_source_writes).toBe(0);
     expect(second.counters.garden_enqueue).toBe(beforeEnqueue);
@@ -116,15 +116,15 @@ describe("incremental projection and read-only recall", () => {
     const truncated = await slice.runRecall({
       text: "Where is the deployment checklist?",
       familyCaps: { embedding: "unavailable" },
-      rBase: 1, nBase: 1, k: 1
+      budget: { work_units: 1 }
     });
-    expect(truncated.pack.truncated).toBe(true);
-    expect(truncated.pack.claims).toContainEqual({ kind: "truncated" });
-    expect(truncated.pack.claims).not.toContainEqual(expect.objectContaining({ kind: "unsupported_exact_aggregate" }));
+    expect(truncated.index.completeness.logical_index).not.toBe("complete");
+    expect(truncated.index.entries).toEqual([]);
     const missingCap = await slice.runRecall({
       text: "Who is working remotely?", familyCaps: { embedding: "unavailable" }
     });
-    expect(missingCap.pack.claims).toContainEqual({ kind: "capability_unavailable", capability: "embedding" });
+    expect(missingCap.counters.recall_provider_calls).toBe(0);
+    expect(missingCap.index.completeness.interpretation_coverage).not.toBe("complete");
   });
 });
 

@@ -162,40 +162,6 @@ describe("invokeBoundRecall shared input contract", () => {
     expect(sharedWrapper(mcpCall)).toEqual(sharedWrapper(benchCall));
   });
 
-  it("forwards the experiment observer only when the benchmark opts in", async () => {
-    const policy = makeSharedPolicy();
-    const taskSurface = TaskObjectSurfaceSchema.parse({
-      runtime_id: policy.task_surface_ref,
-      object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-      task_surface_ref: null,
-      expires_at: null,
-      derived_from: null,
-      retention_policy: RetentionPolicy.SESSION_ONLY,
-      surface_kind: "mcp_memory_tool",
-      display_name: "deployment rules",
-      context_refs: []
-    });
-    const recallService = {
-      recall: vi.fn(async () => buildSeededRecallResult("deployment rules"))
-    };
-    const selectionBoundaryObserver = vi.fn(
-      (_boundary: FineAssessmentSelectionBoundaryCase) => undefined
-    ) as never;
-
-    await invokeBoundRecall({
-      sideEffectMode: "benchmark",
-      recallService,
-      taskSurface,
-      workspaceId: "ws-observer",
-      policyOverride: policy,
-      selectionBoundaryObserver
-    });
-
-    expect(recallService.recall).toHaveBeenCalledWith(expect.objectContaining({
-      selectionBoundaryObserver
-    }));
-  });
-
   it("forwards snapshotDigest only when the benchmark supplies it", async () => {
     const policy = makeSharedPolicy();
     const taskSurface = TaskObjectSurfaceSchema.parse({

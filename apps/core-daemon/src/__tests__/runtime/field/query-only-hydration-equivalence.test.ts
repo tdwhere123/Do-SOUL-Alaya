@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import type { ConditionalFieldRecallPortResult } from "@do-soul/alaya-core";
 import {
   EVIDENCE_ID,
   MEMORY_ID,
   WORKSPACE_ID,
-  createPlantedRecall,
-  recallRequest
 } from "./p217-planted-harness.js";
 import {
   DORMANT_ID,
@@ -13,11 +12,12 @@ import {
   JSON_ONLY_ID,
   LIVE_B_ID,
   MISSING_ID,
-  OMITTED_MEMORY_IDS,
   TOMBSTONE_ID,
   createQueryOnlyHydrationHarness,
   dispatchQueryOnly,
-  fieldRecallContract,
+  conditionalRecallPayload,
+  createQueryOnlyRuntime,
+  persistConditionalSource,
   selectAdaEvidenceIds
 } from "./query-only-hydration-fixture.js";
 
@@ -53,32 +53,20 @@ describe("query-only field hydration equivalence", () => {
     }
   });
 
-  it("preserves unsorted field membership, source, admission, and receipts", async () => {
+  it("preserves actual source-backed index through query-only worker dispatch", async () => {
     const fixture = await hydration.openHydrationFixture();
-    const directRecall = await createPlantedRecall({
-      database: fixture.writer,
-      field: fixture.field,
-      memoryRepo: fixture.directRepo
-    }).recall(recallRequest("Ada"));
-    const dispatchedRecall = await createPlantedRecall({
-      database: fixture.writer,
-      field: fixture.field,
-      memoryRepo: fixture.dispatchedMemoryPort
-    }).recall(recallRequest("Ada"));
-
-    const directContract = fieldRecallContract(directRecall);
-    expect(fieldRecallContract(dispatchedRecall)).toEqual(directContract);
-    expect(directContract.candidate_keys).toEqual([EVIDENCE_ID]);
-    expect(directContract.field_projection_ids).toEqual([MEMORY_ID, LIVE_B_ID]);
-    expect(new Set(directContract.field_projection_ids)).toEqual(new Set([MEMORY_ID, LIVE_B_ID]));
-    expect(directContract.receipts?.[EVIDENCE_ID]?.length).toBeGreaterThan(0);
-    for (const omittedId of OMITTED_MEMORY_IDS) {
-      expect(directContract.field_projection_ids).not.toContain(omittedId);
-    }
-    expect(directRecall.diagnostics?.field_projection_trace?.activation).toMatchObject({
-      generation_id: expect.any(String),
-      opened_candidate_keys: expect.arrayContaining([EVIDENCE_ID])
-    });
+    const objectId = "88888888-8888-4888-8888-888888888888";
+    await persistConditionalSource(fixture.writer, objectId, "nebulapivot published source");
+    const payload = conditionalRecallPayload("nebulapivot");
+    const direct = await dispatchQueryOnly(createQueryOnlyRuntime(fixture.writer),
+      "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
+    const dispatched = await dispatchQueryOnly(fixture.queryOnlyRuntime,
+      "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
+    expect(dispatched.index).toEqual(direct.index);
+    expect(dispatched.previews).toEqual(direct.previews);
+    expect(dispatched.index.entries.map((entry) => entry.object_id)).toEqual([objectId]);
+    expect(dispatched.previews[objectId]).toContain("nebulapivot");
+    expect(fixture.queryOnly.connection.pragma("query_only", { simple: true })).toBe(1);
   });
 
   it("reads a recall tier window through in-process runOperation", async () => {

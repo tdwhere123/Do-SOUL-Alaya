@@ -56,7 +56,7 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
         action: "seed",
         region_id: "seed",
-        work_limit: 1
+        work_limit: 4
       },
       cursor: startObserverCursor({
         cursor_id: "seed",
@@ -128,13 +128,14 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
           schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
           action: "adjacency",
           region_id: "adjacency",
-          work_limit: 1
+          work_limit: 7
         },
         cursor,
         query,
         workspace_id: WS,
         as_of: "2026-09-01T00:00:00.000Z",
         relation_subject: MEM.r,
+        page_limit: 1,
         relation_kind: "owns",
         readers: readersFor(slice)
       });

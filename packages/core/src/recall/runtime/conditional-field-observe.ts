@@ -1,5 +1,6 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  SNAPSHOT_PIN_NATIVE_WORK,
   type CoverageRegion,
   type IndexRole,
   type ObserverCursor,
@@ -81,6 +82,12 @@ export function observeField(
   );
   let state = startObservedField(interpretation, input, residuals);
   if (input.cancelled === true) return cancelledField(state);
+  let expectedRevision = input.expected_source_revision;
+  if (expectedRevision === undefined && input.readers.snapshotPin !== undefined) {
+    if (state.remaining_exploration < SNAPSHOT_PIN_NATIVE_WORK) return interruptObservedField(state);
+    expectedRevision = input.readers.snapshotPin(input.workspace_id).source_revision;
+    state = { ...state, remaining_exploration: state.remaining_exploration - SNAPSHOT_PIN_NATIVE_WORK };
+  }
   const lease = activeLease(interpretation);
   const cursors = new Map<string, ObserverCursor>();
   const pairProgress = new Map<string, string | null>(Object.entries(state.pair_progress));
@@ -109,6 +116,7 @@ export function observeField(
   const sourceCache = new Map<string, SourceObserverPage>();
   const observedInput: ObserveFieldInput = {
     ...input,
+    ...(expectedRevision === undefined ? {} : { expected_source_revision: expectedRevision }),
     readers: meterReaders(input.readers, memoryBox, sourceCache)
   };
   let pairIndex = 0;
@@ -132,11 +140,11 @@ export function observeField(
     const proposal = proposeFieldWork(state);
     if (proposal.actions.length === 0) break;
     for (const proposed of proposal.actions) {
-      const action = { ...proposed, work_limit: Math.min(4, state.remaining_exploration) };
-      if ((action.action === "seed" || action.action === "adjacency") && action.work_limit < 4) {
-        state = { ...state, last_observer_status: "interrupted", remaining_exploration: 0,
-          residuals: state.residuals.map((region) => region.status === "open" ? { ...region, status: "interrupted" } : region) };
-        break;
+      const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
+      const action = { ...proposed, work_limit: Math.min(4 + pinWork, state.remaining_exploration) };
+      const minimum = (action.action === "seed" || action.action === "adjacency" ? 4 : 1) + pinWork;
+      if (action.work_limit < minimum) {
+        return interruptObservedField(state);
       }
       if (action.action === "seed") {
         const before = state;
@@ -245,6 +253,12 @@ export function observeField(
     pair_progress: Object.freeze(Object.fromEntries(pairProgress)),
     resume_subjects: Object.freeze([...subjects])
   });
+}
+
+function interruptObservedField(state: FieldEngineState): FieldEngineState {
+  return { ...state, last_observer_status: "interrupted",
+    closure: { ...state.closure, observation: "interrupted", requested_index: "open" },
+    residuals: state.residuals.map((region) => region.status === "open" ? { ...region, status: "interrupted" } : region) };
 }
 
 function retainObservedContext(
@@ -505,7 +519,9 @@ function recordObservedAt(
       ...(row.last_used_at === undefined ? {} : { last_used_at: row.last_used_at }),
       ...(row.dimension === undefined ? {} : { dimension: row.dimension }),
       ...(row.domain_tags === undefined ? {} : { domain_tags: row.domain_tags }),
-      ...(row.scope_class === undefined ? {} : { scope_class: row.scope_class })
+      ...(row.scope_class === undefined ? {} : { scope_class: row.scope_class }),
+      ...(row.evidence_refs === undefined ? {} : { evidence_refs: row.evidence_refs }),
+      ...(row.staged_warnings === undefined ? {} : { staged_warnings: row.staged_warnings })
     });
     if (row.observed_at !== undefined) observedAt[objectId] = row.observed_at;
   }
@@ -651,8 +667,7 @@ function pinExpectation(input: ObserveFieldInput): Readonly<{
   readonly model_id?: string;
   readonly expected_model_id?: string;
 }> {
-  const revision = input.expected_source_revision
-    ?? input.readers.snapshotPin?.(input.workspace_id)?.source_revision;
+  const revision = input.expected_source_revision;
   return {
     ...(revision === undefined ? {} : { expected_source_revision: revision }),
     ...(input.model_id === undefined ? {} : { model_id: input.model_id }),

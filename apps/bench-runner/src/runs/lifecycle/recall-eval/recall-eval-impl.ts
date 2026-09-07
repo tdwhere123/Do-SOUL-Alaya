@@ -43,11 +43,6 @@ import {
 } from "./recall-eval-run-context.js";
 import { renderRecallEvalReport } from "../../kpi/recall-eval-report.js";
 import { recordedWorktreeIdentityForSlug } from "../../provenance/identity/history-code-slug.js";
-import {
-  disposeRecallEvalSelectionBoundaryArtifact,
-  RECALL_EVAL_SELECTION_BOUNDARY_FILENAME,
-  type RecallEvalSelectionBoundaryArtifact
-} from "./recall-eval-selection-replay.js";
 import type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./recall-eval-contract.js";
 import { executeRecallEvalRun } from "./recall-eval-execute.js";
 import {
@@ -129,15 +124,13 @@ async function executeManagedRecallEval(
   diagnosticsSpool: RecallEvalDiagnosticsSpool
 ): Promise<RecallEvalResult> {
   let result: RecallEvalResult | undefined;
-  let selectionArtifact: RecallEvalSelectionBoundaryArtifact | null = null;
   let primaryError: unknown;
   try {
     await context.memoryProfile?.sample({ phase: "snapshot_restored" });
     const ran = await executeRecallEvalRun(context, diagnosticsSpool);
-    selectionArtifact = ran.selectionArtifact;
     result = await writeRecallEvalArtifacts(
       withPagerRebuildReport(context, ran.evidenceProjectionRebuild),
-      diagnosticsSpool, ran.collected, selectionArtifact
+      diagnosticsSpool, ran.collected
     );
   } catch (error) {
     primaryError = error;
@@ -146,29 +139,14 @@ async function executeManagedRecallEval(
     { path: context.dataDirRoot, owned: context.ownsDataDirRoot },
     result !== undefined
   ));
-  const selectionError = await captureCleanupError(async () => {
-    const cleanups = await Promise.allSettled([
-      context.selectionBoundarySpool?.dispose(),
-      disposeRecallEvalSelectionBoundaryArtifact(selectionArtifact)
-    ]);
-    const failures = cleanups.flatMap((cleanup) =>
-      cleanup.status === "rejected" ? [cleanup.reason] : []
-    );
-    if (failures.length > 0) {
-      throw new AggregateError(failures, "selection replay cleanup failed");
-    }
-  });
   if (result === undefined) {
     throwLifecycleErrors("recall-eval lifecycle failed", [
-      primaryError, dataRootError, selectionError
+      primaryError, dataRootError
     ]);
     throw new Error("recall-eval produced no result");
   }
   if (dataRootError !== undefined) {
     result = appendCompletionFailure(result, "data_root_cleanup", dataRootError);
-  }
-  if (selectionError !== undefined) {
-    result = appendCompletionFailure(result, "selection_spool_cleanup", selectionError);
   }
   return result;
 }
@@ -176,8 +154,7 @@ async function executeManagedRecallEval(
 async function writeRecallEvalArtifacts(
   context: RecallEvalRunContext,
   diagnosticsSpool: RecallEvalDiagnosticsSpool,
-  collected: readonly RecallEvalQuestionResult[],
-  selectionArtifact: RecallEvalSelectionBoundaryArtifact | null
+  collected: readonly RecallEvalQuestionResult[]
 ): Promise<RecallEvalResult> {
   await context.memoryProfile?.sample({ phase: "before_kpi" });
   const prepared = await prepareRecallEvalArtifacts(context, collected);
@@ -186,8 +163,7 @@ async function writeRecallEvalArtifacts(
     { ...context, runtimeAttribution: prepared.runtimeAttribution },
     diagnosticsSpool,
     collected,
-    prepared,
-    selectionArtifact
+    prepared
   );
 }
 
@@ -244,11 +220,10 @@ async function persistRecallEvalArtifacts(
   context: RecallEvalRunContext,
   diagnosticsSpool: RecallEvalDiagnosticsSpool,
   collected: readonly RecallEvalQuestionResult[],
-  prepared: Awaited<ReturnType<typeof prepareRecallEvalArtifacts>>,
-  selectionArtifact: RecallEvalSelectionBoundaryArtifact | null
+  prepared: Awaited<ReturnType<typeof prepareRecallEvalArtifacts>>
 ): Promise<RecallEvalResult> {
   const { slug, report, findings, bundle } = await stageRecallEvalArtifacts(
-    context, diagnosticsSpool, collected, prepared, selectionArtifact
+    context, diagnosticsSpool, collected, prepared
   );
   const entry = await withPublishedDiagnosticsArtifact(
     bundle.diagnosticsArtifact,
@@ -257,7 +232,7 @@ async function persistRecallEvalArtifacts(
       return writeEntry(
         prepared.layout, "public", slug, prepared.payload, report, findings, {
           sidecars: bundle.sidecars,
-          fileSidecars: buildRecallEvalFileSidecars(bundle, selectionArtifact)
+          fileSidecars: buildRecallEvalFileSidecars(bundle)
         }
       );
     },
@@ -320,8 +295,7 @@ async function stageRecallEvalArtifacts(
   context: RecallEvalRunContext,
   diagnosticsSpool: RecallEvalDiagnosticsSpool,
   collected: readonly RecallEvalQuestionResult[],
-  prepared: Awaited<ReturnType<typeof prepareRecallEvalArtifacts>>,
-  selectionArtifact: RecallEvalSelectionBoundaryArtifact | null
+  prepared: Awaited<ReturnType<typeof prepareRecallEvalArtifacts>>
 ) {
   const slug = buildRecallEvalArchiveSlug({
     ...context,
@@ -354,30 +328,19 @@ async function stageRecallEvalArtifacts(
         }),
     ...(context.warmDerivedSnapshot === null
       ? {}
-      : { warmDerivedSnapshot: context.warmDerivedSnapshot }),
-    ...(selectionArtifact === null
-      ? {}
-      : { selectionBoundary: selectionArtifact.binding })
+      : { warmDerivedSnapshot: context.warmDerivedSnapshot })
   });
   return { slug, report, findings, bundle };
 }
 
 function buildRecallEvalFileSidecars(
-  bundle: Awaited<ReturnType<typeof buildRecallEvalArchiveBundle>>,
-  selectionArtifact: RecallEvalSelectionBoundaryArtifact | null
+  bundle: Awaited<ReturnType<typeof buildRecallEvalArchiveBundle>>
 ) {
   return [{
     filename: bundle.diagnosticsFilename,
     sourcePath: bundle.diagnosticsArtifact.finalPath,
     identity: bundle.diagnosticsArtifact.identity
-  }, ...(selectionArtifact === null ? [] : [{
-    filename: RECALL_EVAL_SELECTION_BOUNDARY_FILENAME,
-    sourcePath: selectionArtifact.sourcePath,
-    identity: {
-      sha256: selectionArtifact.binding.sha256,
-      bytes: selectionArtifact.binding.bytes
-    }
-  }])];
+  }];
 }
 
 function withPagerRebuildReport(

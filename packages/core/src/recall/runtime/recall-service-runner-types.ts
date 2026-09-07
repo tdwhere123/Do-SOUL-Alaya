@@ -9,47 +9,25 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type { RecallFieldQuerySession } from "./query/field-query-session.js";
 import type { NodeStrategy } from "../../conversation/task-surface-builder.js";
-import type {
-  EvidenceCandidateScoringResult
-} from "../../embedding-recall/embedding-recall-service.js";
-import type {
-  FineAssessmentDiagnosticCapture,
-  FineAssessParams,
-  fineAssess,
-  prepareFineAssessment
-} from "../delivery/fine-assessment.js";
 import type { loadActiveConstraints } from "./orchestration.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import type { RecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import type { CanonicalQueryEvidenceV1 } from "../query/canonical-query/index.js";
-import type { EmbeddingCoarseInjectionResult } from "./recall-service-runner-coarse.js";
 import type { RecallTimeFilter } from "./recall-service-helpers.js";
 import type {
-  RecallFineAssessmentCandidateDiagnostic,
-  RecallAnswerRerankDiagnostics,
   RecallDegradationReason,
-  RecallEmbeddingProviderStatus,
-  RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort,
   TokenEstimator
 } from "./recall-service-types.js";
-import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
-import type { prepareEmbeddingSupplementQuery } from "../supplements/supplements.js";
-import type { RecallPacketPlanTrace } from
-  "../delivery/packet-plan/packet-plan-trace.js";
-import type { FineAssessmentSelectionBoundaryPendingCapture } from
-  "../delivery/selection-boundary/selection-boundary-capture.js";
 import type { RecallQueryEntityExtractionCapture } from
   "../field/query-entity-attribution-producer.js";
 import type { RecallRetrievalFieldBundle } from
   "../field/retrieval/retrieval-field-bundle.js";
-import type { RecallFiniteFieldChannelCapture } from
-  "../field/finite-field-capture.js";
 import type { PinnedProjectionCandidateSelection } from
   "../field/retrieval/projection/pinned-projection-selection.js";
 import type { SelectGammaSynthesisDependencies } from
-  "../delivery/select-gamma/synthesis-adapter.js";
+  "./recall-service-results.js";
 import type { RecallRequestTimeContext } from "./query/recall-request-time.js";
 import type { RecallReadSnapshotPort } from "./recall-read-snapshot.js";
 import type {
@@ -85,15 +63,7 @@ export interface RecallExecutionParams {
     import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
   >;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
-  readonly queryProofPreview?: FineAssessParams["query_proof_preview"];
   readonly snapshotDigest?: string;
-  // Observer attachment is observation-only; answer features follow diagnosticCapture.
-  readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryPendingCapture
-  ) => undefined;
-  readonly diagnosticObserver?: (
-    capture: FineAssessmentDiagnosticCapture
-  ) => undefined;
 }
 
 export interface RecallExecutionContext {
@@ -114,9 +84,6 @@ export interface RecallExecutionContext {
 }
 
 export type ActiveConstraintsResult = Awaited<ReturnType<typeof loadActiveConstraints>>;
-export type PreparedEmbeddingQuery = Awaited<ReturnType<typeof prepareEmbeddingSupplementQuery>>;
-export type FineAssessmentResult = ReturnType<typeof fineAssess>;
-export type FineAssessmentPreparation = ReturnType<typeof prepareFineAssessment>;
 
 export interface PreparedRecallRequest {
   readonly time: RecallRequestTimeContext;
@@ -148,32 +115,4 @@ export interface PreparedRecallRequest {
   readonly snapshotReadLease: SnapshotReadLeaseV1;
   readonly canonicalQueryEvidence: CanonicalQueryEvidenceV1;
   readonly canonicalQueryCompilation: CanonicalQueryCompilationV1;
-}
-
-type PreparedRecallSupplementaryData = Parameters<typeof fineAssess>[0]["supplementaryData"];
-
-export interface RecallAssessmentStageResult {
-  readonly finalAssessment: FineAssessmentResult;
-  readonly supplementaryData: PreparedRecallSupplementaryData;
-  readonly preparedEmbeddingQuery: PreparedEmbeddingQuery;
-  readonly embeddingCoarseInjection: EmbeddingCoarseInjectionResult;
-  readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
-  readonly embeddingSupplementStatus: EmbeddingSupplementCollectionStatus;
-  readonly evidenceEmbeddingScoring: Readonly<EvidenceCandidateScoringResult>;
-  readonly retrievalFieldCaptures: readonly Readonly<RecallFiniteFieldChannelCapture>[];
-  readonly providerDegradationReason: string | null;
-  readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
-  readonly packetPlanTrace?: Readonly<RecallPacketPlanTrace>;
-  readonly phaseLatencyMs: Readonly<{
-    readonly embedding: number;
-    readonly assessment: number;
-    readonly cross_rerank: number;
-    readonly delivery: number;
-  }>;
-}
-
-export interface RecallManifestedResult {
-  readonly candidates: RecallResult["candidates"];
-  readonly candidateDiagnostics: readonly Readonly<RecallFineAssessmentCandidateDiagnostic>[];
-  readonly manifestationLatencyMs: number;
 }

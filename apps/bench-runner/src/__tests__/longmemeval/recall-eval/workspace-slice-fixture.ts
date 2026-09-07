@@ -19,6 +19,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   EventPublisher,
+  MemoryService,
   RelationAssertionService,
   stableStringify
 } from "@do-soul/alaya-core";
@@ -288,13 +289,15 @@ async function seedMemory(
     readonly token: string;
   }
 ): Promise<void> {
-  await new SqliteMemoryEntryRepo(database).create({
-    object_id: input.memoryId,
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: CLOCK,
-    updated_at: CLOCK,
+  const service = new MemoryService({
+    now: () => CLOCK,
+    generateObjectId: () => input.memoryId,
+    memoryEntryRepo: new SqliteMemoryEntryRepo(database),
+    eventLogRepo: new SqliteEventLogRepo(database),
+    evidenceService: { findById: async () => null },
+    runtimeNotifier: { notifyEntry: async () => {} }
+  });
+  await service.create({
     created_by: "workspace-slice-test",
     dimension: MemoryDimension.FACT,
     source_kind: "user",
@@ -306,18 +309,7 @@ async function seedMemory(
     workspace_id: input.workspaceId,
     run_id: input.runId,
     surface_id: null,
-    storage_tier: "hot",
-    activation_score: 0.5,
-    retention_score: null,
-    manifestation_state: null,
-    retention_state: null,
-    decay_profile: null,
-    confidence: null,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: null,
-    contradiction_count: null,
-    superseded_by: null
+    storage_tier: "hot"
   });
 }
 

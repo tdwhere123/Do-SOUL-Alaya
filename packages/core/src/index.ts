@@ -105,14 +105,6 @@ export {
   SemanticEnrichmentWorker,
   type SemanticEnrichmentWorkerDependencies
 } from "./conversation/semantic-enrichment-worker.js";
-export {
-  retrieveIndexedFamilies,
-  type IndexedEmbeddingReadPort,
-  type IndexedMemoryReadPort,
-  type IndexedRelationReadPort,
-  type ReadyArtifactReader,
-  type RetrievalCounters
-} from "./recall/retrieval/indexed-family-read.js";
 export * from "./conversation/message-history.js";
 export * from "./conversation/narrative-budget-service.js";
 export * from "./tooling/node-template-resolver.js";
@@ -131,6 +123,7 @@ export { createProjectionEraseBarrier } from
   "./recall/field/retrieval/projection/generation-erase.js";
 export * from "./governance/reconciliation/reconciliation-service.js";
 export * from "./recall/recall-service.js";
+export { reserveSnapshotPinWork } from "./recall/runtime/snapshot-pin-budget.js";
 export * from "./recall/query/recall-query-probes.js";
 export { compileRecallQueryDemand } from "./recall/query/recall-query-demand.js";
 export {
@@ -154,51 +147,7 @@ export {
   type CaptureParityReport,
   type CaptureParityView
 } from "./recall/runtime/capture-parity.js";
-export {
-  replayFineAssessmentSelectionBoundary,
-  type FineAssessmentSelectionBoundaryCase
-} from "./recall/delivery/selection-boundary/selection-boundary-replay.js";
-export {
-  materializeFineAssessmentSelectionBoundary,
-  type FineAssessmentSelectionBoundaryPendingCapture
-} from "./recall/delivery/selection-boundary/selection-boundary-capture.js";
-export {
-  SELECTION_BOUNDARY_FIDELITY_MISMATCH,
-  SelectionBoundaryFidelityMismatchError
-} from "./recall/delivery/selection-boundary/selection-boundary-restore.js";
-export {
-  reconstructFineAssessmentComposition,
-  CAPTURED_SCORE_FIDELITY_ASSERT,
-  CAPTURED_SCORE_FIDELITY_RECOMPUTE_LIVE,
-  SELECTION_COMPOSITION_FIDELITY_MISMATCH,
-  type CapturedScoreFidelityMode,
-  type SelectionCompositionOptions,
-  type SelectionCompositionReconstruction
-} from "./recall/delivery/selection-boundary/selection-boundary-composition.js";
 export type { FamilyGroupedScores } from "./recall/rerank/deep-head-types.js";
-export {
-  INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
-  NONLEXICAL_UNIT_INTERVAL_COMPOSITION_OPERATOR,
-  counterfactualDeliveredCandidateKeys,
-  reconstructIndependentEmbeddingEvidenceComposition,
-  reconstructNonlexicalUnitIntervalComposition,
-  type CounterfactualCompositionOptions
-} from "./recall/delivery/selection-boundary/selection-boundary-counterfactual.js";
-export {
-  CF_TOKEN_COMPANION_ESTIMATOR,
-  CF_TOKEN_COMPANION_SCHEMA_VERSION,
-  auxiliaryEstimatesToMap,
-  buildCfTokenCompanionAuxiliaryEstimates,
-  cfTokenCompanionEstimatorIdentity,
-  createLivePlusCompanionTokenEstimator,
-  proveLiveTokenEstimatesMatchDeclaredEstimator,
-  selectionBoundaryContentSha256,
-  type CfTokenCompanionRecordSlice,
-  type LiveTokenEstimateReconstructionProof
-} from "./recall/delivery/selection-boundary/selection-boundary-cf-token-companion.js";
-export {
-  buildFineAssessmentComponentLedger
-} from "./recall/delivery/selection-boundary/selection-boundary-component-ledger.js";
 export {
   RECALL_FUSION_FAMILY_IDS,
   RECALL_FUSION_FAMILY_STREAMS,
@@ -206,18 +155,8 @@ export {
   familyMaxContributionsById,
   type RecallFusionFamilyId
 } from "./recall/delivery/fusion-delivery-families.js";
-export { buildSelectGammaPacketObservation } from
-  "./recall/delivery/select-gamma/packet-observation.js";
 export { captureSupportSetPacketPlanTrace } from
   "./recall/delivery/packet-plan/packet-plan-trace.js";
-export type { FineAssessmentDiagnosticCapture } from
-  "./recall/delivery/fine-assessment.js";
-export {
-  assertFineAssessmentOrderLedgerAttribution,
-  buildFineAssessmentOrderLedger,
-  type FineAssessmentMembershipOwner,
-  type FineAssessmentOrderLedger
-} from "./recall/delivery/fine-assessment-selection/order-ledger.js";
 export {
   resolveCandidateSemanticActivation,
   resolveCandidateSemanticActivationScope,
@@ -317,52 +256,3 @@ export * from "./governance/security/worker-safety-gate.js";
 export * from "./governance/security/worker-trust-assessor.js";
 export * from "./runtime/runs/workspace-service.js";
 export * from "./governance/security/zero-day-security-layer.js";
-export {
-  deterministicTailDecidedThisPick,
-  type DeterministicTailPickEvidence
-} from "./recall/decision/prefix-capture/walk.js";
-export {
-  FIRST_PICK_TAIL_DEGENERACY_PROPERTY,
-  FIRST_PICK_TAIL_DECIDED_SHARE_MAX,
-  evaluateFirstPickTailDegeneracy,
-  evaluateFirstPickTailDegeneracyStream,
-  type FirstPickTailDegeneracyReport
-} from "./recall/runtime/diagnostics/tail-degeneracy.js";
-export {
-  CHEAP_RANKING_RUNG_COST,
-  CHEAP_RANKING_RUNG_ID,
-  CHEAP_RANKING_RUNG_K,
-  cheapRungAnyAt5,
-  scoreCheapRankingRung,
-  type CheapRankingRungReport,
-  type CheapRankingRungRow
-} from "./recall/runtime/diagnostics/cheap-rung.js";
-export {
-  applicableChannelsOf,
-  compareD1FrozenCandidatePairs,
-  D1_NONBINDING_TOKEN_BUDGET,
-  d1HasLegalEnvelope,
-  d1IdentitiesEqual,
-  d1IntervalVote,
-  d1LaneEnvelopes,
-  d1LexicalChannelVote,
-  d1PsiOutcome,
-  d1PsiPredicate,
-  d1PsiQ,
-  replayD1CaptureWalk,
-  replayD1FrozenCapture,
-  type D1CandidateEnvelopeMap,
-  type D1EnvelopeIdentity,
-  type D1EnvelopeValue,
-  type D1FrozenCaptureInput,
-  type D1FrozenCandidatePair,
-  type D1FrozenCandidatePairBlocking,
-  type D1FrozenCandidatePairInput,
-  type D1IntervalEnvelope,
-  type D1LaneEnvelope,
-  type D1MissingnessCoverage,
-  type D1PrimaryObservation,
-  type D1ReplayInput,
-  type D1ReplayMetrics,
-  type D1ReplayResult
-} from "./recall/decision/query-proof/adapters/lexical-bound/index.js";

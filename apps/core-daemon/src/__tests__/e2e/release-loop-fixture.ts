@@ -59,7 +59,7 @@ import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.j
 
 import { createAlayaMcpServer } from "../../mcp/server/mcp-server.js";
 
-import { seedSourceBoundRecall } from "../support/seed-source-bound-recall.js";
+import { seedRecallMemory } from "../support/seed-source-bound-recall.js";
 
 export const PRIMARY_MEMORY_ID = "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
 
@@ -130,7 +130,6 @@ export async function seedReleaseFixtureAtDbPath(dbPath: string): Promise<void> 
   try {
     const workspaceRepo = new SqliteWorkspaceRepo(database);
     const runRepo = new SqliteRunRepo(database);
-    const memoryRepo = new SqliteMemoryEntryRepo(database);
     const proposalRepo = new SqliteProposalRepo(database);
 
     await workspaceRepo.create({
@@ -153,16 +152,7 @@ export async function seedReleaseFixtureAtDbPath(dbPath: string): Promise<void> 
       current_surface_id: null
     });
     const primaryMemory = createMemoryEntry();
-    await memoryRepo.create(primaryMemory);
-    seedSourceBoundRecall({
-      database,
-      workspaceId: primaryMemory.workspace_id,
-      runId: primaryMemory.run_id,
-      evidenceId: primaryMemory.evidence_refs[0]!,
-      factorValue: "pnpm",
-      body: primaryMemory.content,
-      recordedAt: primaryMemory.created_at
-    });
+    await seedRecallMemory({ database, memory: primaryMemory });
     await workspaceRepo.create({
       workspace_id: "workspace-2",
       name: "workspace two",
@@ -182,14 +172,15 @@ export async function seedReleaseFixtureAtDbPath(dbPath: string): Promise<void> 
       run_state: RunState.IDLE,
       current_surface_id: null
     });
-    await memoryRepo.create(
-      createMemoryEntry({
+    await seedRecallMemory({ database,
+      memory: createMemoryEntry({
         object_id: FOREIGN_MEMORY_ID,
         content: "Foreign workspace memory must not be opened from workspace one.",
+        evidence_refs: ["11111111-1111-4111-8111-111111111199"],
         workspace_id: "workspace-2",
         run_id: "run-2"
       })
-    );
+    });
     await proposalRepo.create({
       proposal: createProposal(),
       workspace_id: "workspace-2",

@@ -50,6 +50,10 @@ const benchRunnerAlias = [
     find: "@do-soul/alaya/recall/bound-execution",
     replacement: path.resolve(rootDir, "apps/core-daemon/src/recall/recall-bound-execution.ts")
   },
+  {
+    find: "@do-soul/alaya/recall/index-response",
+    replacement: path.resolve(rootDir, "apps/core-daemon/src/mcp-memory/recall/recall-result.ts")
+  },
   exactPackageAlias("@do-soul/alaya", path.resolve(rootDir, "apps/core-daemon/src/index.ts")),
   ...sharedAliasEntries
 ];

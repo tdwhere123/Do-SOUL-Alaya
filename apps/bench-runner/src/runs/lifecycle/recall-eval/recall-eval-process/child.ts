@@ -64,8 +64,8 @@ async function runChildRequest(
   request: RecallEvalPagerIpcRequest
 ): Promise<RecallEvalPagerIpcResponse> {
   if (request.op === "close") {
-    const closed = await closeRecallEvalPagerChild();
-    return { id: request.id, ok: true, selectionArtifact: closed.selectionArtifact };
+    await closeRecallEvalPagerChild();
+    return { id: request.id, ok: true };
   }
   if (request.op === "open") {
     let progressSequence = 0;
@@ -84,8 +84,7 @@ async function runChildRequest(
       pid: process.pid,
       mapsHint: childMapsHint(),
       evidenceProjectionRebuild: opened.evidenceProjectionRebuild,
-      embeddingCacheOverlay: opened.embeddingCacheOverlay,
-      selectionSpoolRootPath: opened.selectionSpoolRootPath
+      embeddingCacheOverlay: opened.embeddingCacheOverlay
     };
   }
   const pack = await recallRecallEvalPagerChild(

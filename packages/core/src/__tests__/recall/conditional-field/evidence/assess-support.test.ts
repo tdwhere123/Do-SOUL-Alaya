@@ -237,7 +237,7 @@ describe("conditional-field evidence support", () => {
     expect(assessed.records[0]?.claim).toBe("conflict");
     expect(assessed.polarities["yes/supports"]).toBe("supports");
     expect(assessed.polarities["no/refutes"]).toBe("refutes");
-    expect(assessed.explanation_ids.sort()).toEqual(["no/refutes", "yes/supports"]);
+    expect([...assessed.explanation_ids].sort()).toEqual(["no/refutes", "yes/supports"]);
   });
 
   it("exhausting the work bound yields open support, not exhaustive absence", () => {

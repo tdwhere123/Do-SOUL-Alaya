@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MemoryDimension,
@@ -31,6 +31,28 @@ afterEach(() => {
 });
 
 describe("conditional-field observation revision lifecycle", () => {
+  it("reserves native pin reads before tiny observer actions without advancing the cursor", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    const native = readersFor(slice, false);
+    const pin = vi.fn(native.snapshotPin!);
+    const lexical = vi.fn(native.lexical!);
+    const source = vi.fn(native.source!);
+    const base = observeInput(slice, { action: action("seed", 2), seed_query: "needle",
+      readers: { ...native, snapshotPin: pin, lexical, source } });
+    const insufficient = observeConditionalField(base);
+    expect(insufficient.page.outcome.status).toBe("interrupted");
+    expect(insufficient.page.cursor).toEqual(base.cursor);
+    expect(insufficient.work).toMatchObject({ work_units: 0, native_visits: 0 });
+    expect(pin).not.toHaveBeenCalled();
+    const pinOnly = observeConditionalField({ ...base, action: action("seed", 3) });
+    expect(pinOnly.page.outcome.status).toBe("interrupted");
+    expect(pinOnly.page.cursor).toEqual(base.cursor);
+    expect(pinOnly.work).toMatchObject({ work_units: 3, native_visits: 3 });
+    expect(pin).toHaveBeenCalledTimes(1);
+    expect(lexical).not.toHaveBeenCalled();
+    expect(source).not.toHaveBeenCalled();
+  });
+
   it("emits source, relation, time, binding, and model effect fields", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
@@ -109,6 +131,7 @@ describe("conditional-field observation revision lifecycle", () => {
     }));
     expect(stale.page.outcome.status).toBe("invalidated");
     expect(stale.page.observations).toEqual([]);
+    expect(stale.work).toMatchObject({ work_units: 3, native_visits: 3 });
     const mixedModel = observeConditionalField(observeInput(slice, {
       action: action("seed", 16),
       seed_query: "needle",
@@ -156,7 +179,8 @@ describe("conditional-field observation revision lifecycle", () => {
     });
     for (let step = 0; step < 8; step += 1) {
       const observed = observeConditionalField(observeInput(slice, {
-        action: action("adjacency", 1),
+        action: action("adjacency", 7),
+        page_limit: 1,
         cursor,
         relation_subject: MEM.r,
         relation_kind: "owns",

@@ -1,6 +1,32 @@
-import { SoulActiveConstraintSchema } from "@do-soul/alaya-protocol";
-import { findActiveConstraints } from "@do-soul/alaya-storage";
+import { SoulActiveConstraintSchema, type BoundedActiveConstraintsRequest } from "@do-soul/alaya-protocol";
+import { snapshotIdFromPin } from "@do-soul/alaya-core";
+import { findActiveConstraints, readBoundedActiveConstraints, SqliteGovernancePathReader,
+  SqliteIndexedRecallProjection, type StorageDatabase } from "@do-soul/alaya-storage";
 import type { RecallPathReadPorts } from "../recall/recall-path-readers.js";
+
+export function createBoundedActiveConstraintsReader(database: StorageDatabase) {
+  const paths = new SqliteGovernancePathReader(database);
+  paths.prepareIndex();
+  const projection = new SqliteIndexedRecallProjection(database.connection);
+  return (request: Readonly<BoundedActiveConstraintsRequest>) => database.connection.transaction(() => {
+    if (request.nativeLimit < 3 || request.byteLimit < 2048) throw new Error("active constraints snapshot allowance unavailable");
+    const pin = projection.observablePin(request.workspaceId);
+    const pinBytes = Buffer.byteLength(JSON.stringify(pin), "utf8");
+    const snapshot = snapshotIdFromPin(request.workspaceId, pin);
+    if (request.snapshotId !== undefined && request.snapshotId !== snapshot) throw new Error("active constraints snapshot mismatch");
+    const result = readBoundedActiveConstraints(database, {
+      ...request, snapshotId: snapshot, nativeLimit: request.nativeLimit - 3, byteLimit: request.byteLimit - pinBytes
+    },
+      (input) => paths.read(input));
+    const response = { ...result, work: {
+      ...result.work, native_visits: result.work.native_visits + 3, bytes_read: result.work.bytes_read + pinBytes
+    } };
+    for (let pass = 0; pass < 3; pass += 1) {
+      response.work.retained_bytes = Buffer.byteLength(JSON.stringify(response), "utf8");
+    }
+    return response;
+  })();
+}
 
 export async function runWorkerActiveConstraints(input: Readonly<{
   readonly payload: Record<string, unknown>;

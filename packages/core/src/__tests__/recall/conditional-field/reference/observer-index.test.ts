@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   type CoverageRegion,
+  type IndexRole,
   type ObserverCursor
 } from "@do-soul/alaya-protocol";
 import {
@@ -32,6 +33,7 @@ describe("conditional-field observer and index contracts", () => {
       readerAvailable: true
     });
     expect(mapped.outcome.status).toBe("interrupted");
+    if (mapped.open_regions === undefined) throw new Error("interrupted reader must expose open regions");
     expect(mapped.open_regions.map((region) => region.kind).sort())
       .toEqual(["adjacency", "binding", "guard", "seed"]);
     expect(mapped.outcome.status).not.toBe("exhausted");
@@ -49,6 +51,7 @@ describe("conditional-field observer and index contracts", () => {
         openRegion("binding", "binding")
       ]
     }).open_regions;
+    if (regions === undefined) throw new Error("partial reader must expose open regions");
     expect(regions.map((region) => region.kind).sort())
       .toEqual(["adjacency", "binding", "guard", "seed"]);
     expect(regions.every((region) => region.status === "open")).toBe(true);
@@ -155,7 +158,7 @@ describe("conditional-field observer and index contracts", () => {
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
       budget: defaultBudget(),
-      roles: new Map([
+      roles: new Map<string, IndexRole>([
         ["r", "requested"],
         ["l", "associated"],
         ["c", "associated"],
@@ -184,7 +187,7 @@ describe("conditional-field observer and index contracts", () => {
       result_version: RESULT_VERSION,
       budget: defaultBudget({ page_budget: 2 }),
       expires_at: FAR_FUTURE_EXPIRY,
-      roles: new Map([
+      roles: new Map<string, IndexRole>([
         ["r", "requested"],
         ["l", "associated"],
         ["c", "associated"],

@@ -14,10 +14,7 @@ import {
 import {
   RecallService,
   SignalService,
-  buildRecallEvidencePack,
-  createSeededTestOnlyInMemoryFieldQuerySession,
-  fieldContractSha256,
-  type RecallServiceDependencies
+  buildRecallEvidencePack
 } from "@do-soul/alaya-core";
 import {
   InMemoryHandoffGapHandler,
@@ -25,6 +22,8 @@ import {
   type MaterializationRouterDeps,
   normalizeSchemaGroundedSignal
 } from "@do-soul/alaya-soul";
+import { createSourceBoundRecallFixture } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
+import { seedRecallMemory } from "../../support/seed-source-bound-recall.js";
 
 interface IntegrationFixture {
   readonly fixture_id: string;
@@ -115,12 +114,12 @@ function createHarness(initialMemories: MemoryEntry[]) {
     evidenceService: {
       create: vi.fn(async () => ({
         object_kind: "evidence_capsule",
-        object_id: `evidence-${++evidenceCounter}`
+        object_id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(++evidenceCounter).padStart(12, "0")}`
       }))
     },
     memoryService: {
       create: vi.fn(async (input: Parameters<MaterializationRouterDeps["memoryService"]["create"]>[0]) => {
-        const objectId = `memory-${++memoryCounter}`;
+        const objectId = `bbbbbbbb-bbbb-4bbb-8bbb-${String(++memoryCounter).padStart(12, "0")}`;
         const memory = createMemoryEntry({
           object_id: objectId,
           dimension: input.dimension,
@@ -219,70 +218,18 @@ function createHarness(initialMemories: MemoryEntry[]) {
 }
 
 async function recallWithMemories(memories: readonly MemoryEntry[], query: string) {
-  const service = new RecallService(createRecallDependencies(memories) as never);
-  const policy = createPolicy(service, query);
-  return await service.recall({
-    taskSurface: createTaskSurface(query),
-    workspaceId: "workspace-1",
-    strategy: "analyze",
-    policyOverride: policy,
-    hostContext: { tokenizer_hint: "approx_chars_per_token" }
-  });
+  const fixture = await createSourceBoundRecallFixture(() => {});
+  try {
+    for (const memory of memories) await seedRecallMemory({ database: fixture.database, memory });
+    return await fixture.service.recall({
+      taskSurface: createTaskSurface(query), workspaceId: "workspace-1", strategy: "analyze",
+      queryText: query, policyOverride: createPolicy(fixture.service, query),
+      hostContext: { tokenizer_hint: "approx_chars_per_token" }
+    });
+  } finally {
+    fixture.database.close();
+  }
 }
-
-function createRecallDependencies(memories: readonly MemoryEntry[]) {
-  return {
-    testOnlyAllowInMemoryFieldQuerySession: true,
-    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
-      fieldContractSha256,
-      "workspace-1"
-    ),
-    now: () => "2026-05-13T00:00:00.000Z",
-    generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
-    memoryRepo: {
-      findByWorkspaceId: vi.fn(async (_workspaceId, tier) =>
-        memories.filter((memory) => tier === undefined || memory.storage_tier === tier)
-      ),
-      findByDimension: vi.fn(async (_workspaceId, dimension) =>
-        memories.filter((memory) => memory.dimension === dimension)
-      ),
-      findByScopeClass: vi.fn(async (_workspaceId, scopeClass) =>
-        memories.filter((memory) => memory.scope_class === scopeClass)
-      ),
-      searchByKeywordWithinObjectIds: vi.fn(async (_workspaceId, queryText, limit, objectIds) => {
-        const tokens = tokenize(queryText);
-        return memories
-          .filter((memory) => objectIds.includes(memory.object_id))
-          .map((memory) => ({
-            object_id: memory.object_id,
-            normalized_rank: computeLexicalRank(tokens, memory)
-          }))
-          .filter((match) => match.normalized_rank > 0)
-          .sort((left, right) => right.normalized_rank - left.normalized_rank)
-          .slice(0, limit);
-      })
-    },
-    slotRepo: { findByWorkspace: vi.fn(async () => []) },
-    eventLogRepo: {
-      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-        event_id: "event-1",
-        created_at: "2026-05-13T00:00:00.000Z",
-        revision: 0,
-        ...entry
-      })),
-      queryByEntity: vi.fn(async () => [])
-    },
-    graphSupportPort: {
-      countInboundSupports: vi.fn(async (memoryId) =>
-        memoryId.includes("relation") ? 3 : 0
-      ),
-      countInboundEdgesWeighted: vi.fn(async (memoryId) =>
-        memoryId.includes("relation") ? 3 : 0
-      )
-    }
-  };
-}
-
 function createIntegrationFixtures(): readonly IntegrationFixture[] {
   return [
     {
@@ -297,7 +244,7 @@ function createIntegrationFixtures(): readonly IntegrationFixture[] {
       query: "current deploy status",
       baseline_memories: [
         createMemoryEntry({
-          object_id: "baseline-status-old",
+          object_id: "cccccccc-cccc-4ccc-8ccc-000000000001",
           content: "Deploy status was blocked yesterday.",
           activation_score: 0.2
         })
@@ -419,7 +366,7 @@ function createTaskSurface(query: string): TaskObjectSurface {
 
 function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
-    object_id: "memory-1",
+    object_id: "bbbbbbbb-bbbb-4bbb-8bbb-000000000001",
     object_kind: "memory_entry",
     schema_version: 1,
     lifecycle_state: "active",
@@ -450,18 +397,4 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     superseded_by: null,
     ...overrides
   };
-}
-
-function computeLexicalRank(queryTokens: readonly string[], memory: MemoryEntry): number {
-  const haystack = `${memory.content} ${memory.domain_tags.join(" ")}`.toLowerCase();
-  const hits = queryTokens.filter((token) => haystack.includes(token.toLowerCase())).length;
-  return queryTokens.length === 0 ? 0 : hits / queryTokens.length;
-}
-
-function tokenize(value: string): readonly string[] {
-  return value
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}_-]+/u)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
 }

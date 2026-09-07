@@ -61,7 +61,7 @@ describe("recall-eval query cache authority window", () => {
     const consumed = recallOptionsForQuestion({
       recallOptions: { maxResults: 5, conflictAwareness: true },
       querySemanticFactorCache: bound
-    } as RecallEvalRunContext, FORMED, undefined);
+    } as RecallEvalRunContext, FORMED);
     expect(consumed.querySemanticFactorFormationCapture?.status).toBe("formed");
     expect(consumed.querySemanticFactorCompletenessReceipt).toEqual(receipt);
 

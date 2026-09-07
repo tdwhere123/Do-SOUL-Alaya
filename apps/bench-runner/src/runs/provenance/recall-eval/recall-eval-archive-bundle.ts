@@ -35,7 +35,7 @@ import {
 import type { WarmDerivedSnapshotBinding } from
   "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 import type { RecallEvalSelectionBoundaryBinding } from
-  "../../lifecycle/recall-eval/recall-eval-selection-replay.js";
+  "./recall-eval-rank-identity.js";
 import type { RecallEvalDiagnosticsSpool } from "./recall-eval-diagnostics-spool.js";
 
 export interface RecallEvalArchiveBundle {

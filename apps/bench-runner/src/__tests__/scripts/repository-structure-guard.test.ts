@@ -477,7 +477,7 @@ describe("repository structure guard", () => {
       path.join(repoRoot, "scripts/ci/repository-structure-policy.json")
     );
     expect(createHash("sha256").update(canonicalizeLf(policyBytes)).digest("hex")).toBe(
-      "2ca4eb5c4d2fc760660bf2bd8f9cb2a258f87b0ead07f80cce5eb78f16150fa0"
+      "8bea1eb93b3e15033433ef2ed548e757be2235045ab6a3cd28adcddeebbef98e"
     );
   });
 
@@ -526,6 +526,31 @@ describe("repository structure guard", () => {
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("errors=0");
     expect(result.stdout).not.toContain("workspace-inventory-drift");
+  });
+
+  it("skips unstaged tracked deletions while still inspecting tracked ignored sources", async () => {
+    const root = await createFixtureRoot();
+    const deleted = "packages/base/src/deleted.ts";
+    const ignored = "packages/base/src/ignored.ts";
+    await writeSource(root, deleted, sourceWithLines(800));
+    await writeSource(root, ignored, sourceWithLines(800));
+    stageFixtureInventory(root);
+    await rm(path.join(root, deleted));
+    await writeSource(root, ".gitignore", `${ignored}\n`);
+    const policyPath = await writePolicy(root, policy());
+    await expect(execFileWithFileCapture(process.execPath, [scriptPath, "--root", root, "--policy", policyPath], {
+      cwd: repoRoot
+    })).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining(`path=${ignored}`)
+    });
+    await writeSource(root, ignored, "export const value = 1;");
+    const result = await execFileWithFileCapture(process.execPath, [scriptPath, "--root", root, "--policy", policyPath], {
+      cwd: repoRoot
+    });
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("errors=0");
+    expect(result.stdout).not.toContain(deleted);
   });
 
   it("includes git-tracked hidden src files that ripgrep skips", async () => {

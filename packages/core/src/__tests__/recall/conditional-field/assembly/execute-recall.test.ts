@@ -21,6 +21,7 @@ import {
   SNAPSHOT_ID,
   YESTERDAY_INSTANT,
   defaultBudget,
+  defaultView,
   yesterdayAnchorGuard
 } from "../reference/deployment.fixture.js";
 import { INAPPLICABLE_KIND, MEM, WS, openSourceSlice } from "../vertical/source-slice.js";
@@ -171,7 +172,7 @@ describe("conditional-field executeRecall assembly", () => {
           facet_mode: "same_path",
           threshold_milligrades: 0
         },
-        view: { schema_version: 1, requested_roles: ["requested", "associated"] },
+        view: defaultView(),
         holes: [],
         hypotheses: []
       },

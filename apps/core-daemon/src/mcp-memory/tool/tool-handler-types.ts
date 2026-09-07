@@ -101,7 +101,8 @@ export interface McpMemoryToolHandlerDependencies {
     }): Promise<Readonly<{
       readonly candidates: readonly Readonly<RecallCandidate>[];
       readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
-      readonly active_constraints_count: number;
+      readonly active_constraints_count: number | null;
+      readonly active_constraints_completeness?: "complete" | "incomplete";
       readonly total_scanned: number;
       readonly coarse_filter_count: number;
       readonly fine_assessment_count: number;

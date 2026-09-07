@@ -1,48 +1,70 @@
 import type { AlayaDaemonRuntime } from "@do-soul/alaya";
 import {
+  InformationIndexSchema,
   SoulMemorySearchResponseSchema,
+  type InformationIndex,
   type MemorySearchResult,
   type RecallPolicy,
   type SoulMemorySearchResponse
 } from "@do-soul/alaya-protocol";
-import { buildBenchRecallStrategyMix } from "../daemon-support.js";
-import { resolveBenchRecallDegradationReason } from "./daemon-handle-ops-support.js";
+import { encodeIndexResults, frameEncodedIndex, sourceMetadataForRecallResult } from "@do-soul/alaya/recall/index-response";
 
 type BenchRecallServiceResult = Awaited<
   ReturnType<AlayaDaemonRuntime["services"]["recallService"]["recall"]>
 >;
 
+export function validateBenchRecallIndex(result: BenchRecallServiceResult): InformationIndex {
+  const index = InformationIndexSchema.parse(result.index);
+  if (result.provider_calls !== 0 || result.garden_enqueue !== 0) {
+    throw new Error("conditional field Recall requires observed zero provider calls and Garden enqueue");
+  }
+  return index;
+}
+
+export function encodeBenchRecallResults(
+  result: BenchRecallServiceResult,
+  policy: RecallPolicy
+): readonly MemorySearchResult[] {
+  const index = validateBenchRecallIndex(result);
+  const previews = new Map(result.candidates.map((candidate) =>
+    [candidate.object_id, candidate.content_preview] as const));
+  const metadata = sourceMetadataForRecallResult(result);
+  return encodeIndexResults(index, previews, policy.fine_assessment.budgets.max_total_tokens, metadata);
+}
+
 export function buildBenchRecallResponse(
   deliveryId: string,
   results: readonly MemorySearchResult[],
-  recallResult: BenchRecallServiceResult,
-  policy: RecallPolicy
-): SoulMemorySearchResponse & { readonly diagnostics?: unknown } {
+  recallResult: BenchRecallServiceResult
+): SoulMemorySearchResponse & {
+  readonly diagnostics?: unknown;
+  readonly provider_calls: 0;
+  readonly garden_enqueue: 0;
+} {
+  const index = frameEncodedIndex(validateBenchRecallIndex(recallResult), results);
   const response = SoulMemorySearchResponseSchema.parse({
     delivery_id: deliveryId,
     protocol_version: 1,
     results,
+    index,
     active_constraints: recallResult.active_constraints,
     active_constraints_count: recallResult.active_constraints_count,
+    active_constraints_completeness: recallResult.active_constraints_completeness,
     total_count: results.length,
-    strategy_mix: buildBenchRecallStrategyMix(policy, results),
-    degradation_reason: resolveBenchRecallDegradationReason(
-      results, recallResult.degradation_reason
-    ),
-    ...(recallResult.delivery_path === undefined ? {} : {
-      delivery_path: recallResult.delivery_path
-    }),
-    ...(recallResult.ranking_authority === undefined ? {} : {
-      ranking_authority: recallResult.ranking_authority
-    }),
-    ...(recallResult.capture_identity === undefined ? {} : {
-      capture_identity: recallResult.capture_identity
-    }),
-    ...(recallResult.capture_execution === undefined ? {} : {
-      capture_execution: recallResult.capture_execution
-    })
+    strategy_mix: {
+      deterministic_match: true,
+      precomputed_rank: false,
+      semantic_supplement: false,
+      graph_support: false,
+      path_plasticity: false,
+      global_recall: false
+    },
+    degradation_reason: recallResult.degradation_reason
   });
-  return recallResult.diagnostics === undefined
-    ? response
-    : { ...response, diagnostics: recallResult.diagnostics };
+  return {
+    ...response,
+    provider_calls: recallResult.provider_calls,
+    garden_enqueue: recallResult.garden_enqueue,
+    ...(recallResult.diagnostics === undefined ? {} : { diagnostics: recallResult.diagnostics })
+  };
 }

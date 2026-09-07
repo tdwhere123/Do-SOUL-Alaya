@@ -301,7 +301,7 @@ describe("mcp memory tool handler wiring", () => {
     );
   });
 
-  it("defaults time_field to created_at when only since is provided", async () => {
+  it("forwards since as a compiler hint without inventing a storage timestamp field", async () => {
     const deps = createDeps();
     const handler = createMcpMemoryToolHandler(deps);
 
@@ -321,11 +321,11 @@ describe("mcp memory tool handler wiring", () => {
     expect(deps.recallService.recall).toHaveBeenCalledWith(
       expect.objectContaining({
         timeFilter: expect.objectContaining({
-          since: "2026-05-01T00:00:00.000Z",
-          field: "created_at"
+          since: "2026-05-01T00:00:00.000Z"
         })
       })
     );
+    expect(vi.mocked(deps.recallService.recall).mock.calls.at(-1)?.[0].timeFilter).not.toHaveProperty("field");
   });
 
   it("forwards staged_warnings from recall candidates onto the public result", async () => {
@@ -382,7 +382,14 @@ describe("mcp memory tool handler wiring", () => {
     const output = result.output as { readonly results: ReadonlyArray<Record<string, unknown>> };
     expect(output.results).toHaveLength(1);
     expect(output.results[0]).toMatchObject({ object_id: "mem1" });
-    expect(output.results[0]?.["staged_warnings"]).toBeUndefined();
+    expect(output.results[0]?.["staged_warnings"]).toEqual([{
+      target_object_id: "mem1",
+      kind: "contradiction_pending",
+      severity: "blocking",
+      policy: "conflict_detection.v1",
+      summary: "Contradicts memory-42.",
+      resolution_options: ["accept_pending", "reject_pending", "escalate_human"]
+    }]);
   });
 
   it("forwards manifestation sidecar fields onto the public recall result", async () => {

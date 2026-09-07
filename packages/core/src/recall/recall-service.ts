@@ -28,7 +28,7 @@ import {
 import type { ObserverReaders } from "./conditional-field/observers/observe.js";
 import { wrapRecallFaultWarn } from "./runtime/recall-failure-health-inbox.js";
 import type { SelectGammaSynthesisDependencies } from
-  "./delivery/select-gamma/synthesis-adapter.js";
+  "./runtime/recall-service-results.js";
 
 export type RecallServiceFieldDeps = Readonly<{
   readonly fieldQuerySession?: RecallFieldQuerySession;
@@ -56,6 +56,7 @@ export type { ObserverReaders };
 export { toSourceObserverRow } from "./conditional-field/observers/observe.js";
 export {
   captureIndexPreviews,
+  captureIndexSourceMetadata,
   encodeRecallResult,
   runConditionalFieldRecall,
   snapshotIdFromPin,
@@ -102,7 +103,7 @@ export type {
 } from "./runtime/recall-service-types.js";
 export { makeTokenEstimator } from "./runtime/recall-service-types.js";
 export { computeRecallTokenEconomy } from "./runtime/diagnostics.js";
-export { RECALL_FUSION_STREAMS } from "./delivery/fusion-delivery.js";
+export { RECALL_FUSION_STREAMS } from "./delivery/fusion-delivery-streams.js";
 export type { RecallDiagnosticCapture } from
   "./runtime/recall-service-runner-types.js";
 export {
@@ -112,7 +113,7 @@ export {
 export type {
   SelectGammaSynthesisPort,
   SelectGammaSynthesisStatus
-} from "./delivery/select-gamma/synthesis-adapter.js";
+} from "./runtime/recall-service-results.js";
 
 export class RecallService {
   private readonly generateRuntimeId: () => string;

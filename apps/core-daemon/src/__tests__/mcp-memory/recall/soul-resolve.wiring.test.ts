@@ -25,6 +25,7 @@ import {
 
 import { createSoulResolveHandler } from "../../../mcp-memory/tool/resolve-handler.js";
 import { createSoulResolveEffectFixture } from "./soul-resolve-effect-fixture.js";
+import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 
 // invariant: handler-fixture wiring for soul.recall -> staged_warning ->
 // soul.resolve -> apply. Maps + mock publish; not a live EventLog path. The confirm path activates a draft
@@ -224,6 +225,7 @@ function createHarness(): WiringHarness {
     })(),
     recallService: {
       recall: vi.fn(async () => ({
+        index: stubRecallIndex(["mem-source-1"]),
         candidates: [
           {
             object_id: "mem-source-1",

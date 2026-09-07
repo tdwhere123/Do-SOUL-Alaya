@@ -141,7 +141,7 @@ describe("conditional-field engine", () => {
     expect(state.closure.propagation).toBe("fixed_point");
     expect(state.closure.observation).toBe("open");
     expect(state.closure.requested_index).toBe("open");
-    expect(openKinds(state.residuals).sort()).toEqual(["adjacency", "binding", "guard", "seed"]);
+    expect([...openKinds(state.residuals)].sort()).toEqual(["adjacency", "binding", "guard", "seed"]);
     expect(projectFieldDelta(state).accepted_states.find((row) => row.state.object_id === "x"))
       .toBeUndefined();
     const late = applyObserverPage(state, {

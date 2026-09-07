@@ -6,8 +6,6 @@ import type {
   TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import type {
-  FineAssessmentDiagnosticCapture,
-  FineAssessmentSelectionBoundaryPendingCapture,
   NodeStrategy,
   RecallDiagnosticCapture
 } from "@do-soul/alaya-core";
@@ -34,12 +32,6 @@ export type BoundRecallInvokeParams = Readonly<{
   readonly querySemanticFactorCompletenessReceipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   readonly snapshotDigest?: string;
-  readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryPendingCapture
-  ) => undefined;
-  readonly diagnosticObserver?: (
-    capture: FineAssessmentDiagnosticCapture
-  ) => undefined;
 }>;
 
 export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
@@ -60,12 +52,6 @@ export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
   readonly querySemanticFactorCompletenessReceipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   readonly snapshotDigest?: string;
-  readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryPendingCapture
-  ) => undefined;
-  readonly diagnosticObserver?: (
-    capture: FineAssessmentDiagnosticCapture
-  ) => undefined;
 }>;
 
 // Recall scoring is identical across modes; sideEffectMode documents post-recall
@@ -92,12 +78,6 @@ export async function invokeBoundRecall<TRecallResult>(
     }),
     ...(params.diagnosticCapture === undefined ? {} : { diagnosticCapture: params.diagnosticCapture }),
     ...(params.snapshotDigest === undefined ? {} : { snapshotDigest: params.snapshotDigest }),
-    ...(params.selectionBoundaryObserver === undefined
-      ? {}
-      : { selectionBoundaryObserver: params.selectionBoundaryObserver }),
-    ...(params.diagnosticObserver === undefined
-      ? {}
-      : { diagnosticObserver: params.diagnosticObserver }),
     activeConstraintsCap: params.activeConstraintsCap ?? null
   });
 }

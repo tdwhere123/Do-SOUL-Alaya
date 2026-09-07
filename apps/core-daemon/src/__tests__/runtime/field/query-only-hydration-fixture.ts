@@ -9,13 +9,15 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   fieldContractSha256,
-  type RecallService
+  MemoryService
 } from "@do-soul/alaya-core";
 import {
   SqliteClaimFormRepo,
   SqliteEvidenceCapsuleRepo,
+  SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
   SqliteSynthesisCapsuleRepo,
+  initializeSemanticArtifactCandidateSchema,
   StorageDatabase
 } from "@do-soul/alaya-storage";
 import { applySqliteWritePragmas } from
@@ -28,6 +30,7 @@ import {
   type WorkerTierWindowResult
 } from "../../../runtime/recall-read-worker/memory-client.js";
 import { runOperation } from "../../../runtime/recall-read-worker/dispatch.js";
+import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import type { RecallReadWorkerOperation } from
   "../../../runtime/recall-read-worker/protocol.js";
 import type { RecallReadWorkerRuntime } from
@@ -52,13 +55,6 @@ export const JSON_ONLY_ID = "44444444-4444-4444-8444-444444444444";
 export const INDEX_ONLY_ID = "55555555-5555-4555-8555-555555555555";
 export const DORMANT_ID = "66666666-6666-4666-8666-666666666666";
 export const MISSING_ID = "99999999-9999-4999-8999-999999999999";
-export const UNBOUND_EVIDENCE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-export const OMITTED_MEMORY_IDS = [
-  TOMBSTONE_ID,
-  JSON_ONLY_ID,
-  INDEX_ONLY_ID,
-  DORMANT_ID
-] as const;
 
 export function createQueryOnlyHydrationHarness() {
   const planted = createPlantedHarness();
@@ -69,8 +65,10 @@ export function createQueryOnlyHydrationHarness() {
   });
   return {
     planted,
-    openQueryOnlyPair(filename = planted.createTempFilename()) {
-      const writer = planted.openDatabase(filename, { seed: true });
+    openQueryOnlyPair(filename = planted.createTempFilename(), seed = true) {
+      const writer = planted.openDatabase(filename, { seed });
+      initializeSemanticArtifactCandidateSchema(writer.connection);
+      createConditionalFieldObserverReaders(writer);
       const queryOnly = openQueryOnlyDatabase(filename, queryOnlyHandles);
       return {
         writer,
@@ -84,6 +82,33 @@ export function createQueryOnlyHydrationHarness() {
   };
 }
 
+export async function persistConditionalSource(database: StorageDatabase, objectId: string, content: string) {
+  initializeSemanticArtifactCandidateSchema(database.connection);
+  const evidence = new SqliteEvidenceCapsuleRepo(database);
+  const service = new MemoryService({
+    memoryEntryRepo: new SqliteMemoryEntryRepo(database),
+    eventLogRepo: new SqliteEventLogRepo(database),
+    now: () => CLOCK,
+    generateObjectId: () => objectId,
+    evidenceService: {
+      findById: (id) => evidence.findById(id),
+      findByIds: (workspaceId, ids) => evidence.findByIds(workspaceId, ids)
+    },
+    runtimeNotifier: { notifyEntry: async () => {} }
+  });
+  return service.create({ created_by: "user_action", dimension: "fact", source_kind: "user",
+    formation_kind: "explicit", scope_class: "project", content, domain_tags: [], evidence_refs: [],
+    workspace_id: WORKSPACE_ID, run_id: "run-1", surface_id: null });
+}
+
+export function conditionalRecallPayload(queryText: string) {
+  return { workspace_id: WORKSPACE_ID, query_text: queryText,
+    interpretation_clock: CLOCK, as_of: CLOCK, lifetime_now: CLOCK,
+    expires_at: "2099-01-01T00:00:00.000Z",
+    budget: { schema_version: 1, work_units: 10_000, memory_bytes: 1_000_000,
+      page_budget: 100, finalization_reserve: 100, min_envelope: 10 } };
+}
+
 async function openHydrationFixture(
   planted: ReturnType<typeof createPlantedHarness>,
   queryOnlyHandles: Set<StorageDatabase>
@@ -94,6 +119,8 @@ async function openHydrationFixture(
   await persistHydrationMemories(formation);
   planted.close(formation);
   const writer = planted.openDatabase(filename);
+  initializeSemanticArtifactCandidateSchema(writer.connection);
+  createConditionalFieldObserverReaders(writer);
   const queryOnly = openQueryOnlyDatabase(filename, queryOnlyHandles);
   const field = composeField(writer);
   const queryOnlyRuntime = createQueryOnlyRuntime(queryOnly);
@@ -128,7 +155,7 @@ function closeQueryOnlyHandle(database: StorageDatabase): void {
   if (connection.open) connection.close();
 }
 
-function createQueryOnlyRuntime(database: StorageDatabase): RecallReadWorkerRuntime {
+export function createQueryOnlyRuntime(database: StorageDatabase): RecallReadWorkerRuntime {
   return {
     database,
     memoryEntryRepo: new SqliteMemoryEntryRepo(database),
@@ -204,24 +231,25 @@ function plantEvidenceRefMismatch(database: StorageDatabase): void {
 }
 
 export function selectAdaEvidenceIds(
-  querySession: PlantedField["querySession"]
+  querySession: PlantedField["querySession"],
+  asOf = CLOCK
 ): readonly string[] {
   const pin = querySession.pinActiveGeneration(WORKSPACE_ID, CLOCK);
   try {
-    return querySession.selectCandidates(adaQueryCondition(pin), pin, CLOCK).candidate_keys;
+    return querySession.selectCandidates(adaQueryCondition(pin, asOf), pin, CLOCK).candidate_keys;
   } finally {
     querySession.release(pin, CLOCK);
   }
 }
 
-function adaQueryCondition(pin: ProjectionPin) {
+function adaQueryCondition(pin: ProjectionPin, asOf: string) {
   const condition = {
     principal: WORKSPACE_ID,
     workspace_id: WORKSPACE_ID,
     authorized_scopes: [WORKSPACE_ID],
     explicit_bridges: [] as const,
     workspace_project: WORKSPACE_ID,
-    effective_as_of: CLOCK,
+    effective_as_of: asOf,
     query_task_factors: ["Ada"] as const,
     governance_state: "open" as const,
     activation_budget: 8,
@@ -247,48 +275,4 @@ function adaQueryCondition(pin: ProjectionPin) {
     }, fieldContractSha256),
     recorded_at: CLOCK
   }, fieldContractSha256);
-}
-
-export function fieldRecallContract(
-  result: Awaited<ReturnType<RecallService["recall"]>>
-) {
-  const trace = result.diagnostics?.field_projection_trace;
-  return {
-    membership: result.candidates.map((candidate) => candidate.object_id),
-    field_projection_ids: fieldProjectionIds(result),
-    source_channels: result.candidates.map((candidate) => ({
-      object_id: candidate.object_id,
-      source_channels: candidate.source_channels
-    })),
-    admission_planes: (result.diagnostics?.candidates ?? []).map((candidate) => ({
-      object_id: candidate.object_id,
-      admission_planes: candidate.admission_planes
-    })),
-    candidate_keys: trace?.candidate_keys ?? [],
-    receipts: trace?.candidate_receipts,
-    activation: trace?.activation
-  };
-}
-
-export function fieldProjectionIds(
-  result: Awaited<ReturnType<RecallService["recall"]>>
-): readonly string[] {
-  return result.candidates
-    .filter((candidate) => candidate.source_channels?.includes("field_projection"))
-    .map((candidate) => candidate.object_id);
-}
-
-export function selectWithUnboundEvidence(
-  session: PlantedField["querySession"]
-): PlantedField["querySession"] {
-  return {
-    ...session,
-    selectCandidates(condition, pin, selectedAt) {
-      const selected = session.selectCandidates(condition, pin, selectedAt);
-      return Object.freeze({
-        ...selected,
-        candidate_keys: Object.freeze([...selected.candidate_keys, UNBOUND_EVIDENCE_ID])
-      });
-    }
-  };
 }

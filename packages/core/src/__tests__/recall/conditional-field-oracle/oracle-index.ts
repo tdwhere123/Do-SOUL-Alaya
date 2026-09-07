@@ -12,6 +12,7 @@ import {
   type IndexRole,
   type InformationIndex,
   type ObserverCursor,
+  type ObserverOutcome,
   type QueryInterpretationStatus,
   type QueryView,
   type RequestBudget
@@ -33,7 +34,7 @@ export type OracleCounts = Readonly<{
 }>;
 
 export type ObserverCoverage = Readonly<{
-  readonly outcome: { readonly schema_version: 1; readonly status: CompletenessStatus };
+  readonly outcome: ObserverOutcome;
   readonly open_regions: readonly CoverageRegion[];
 }>;
 
@@ -402,5 +403,4 @@ function region(id: string, kind: CoverageRegion["kind"]): CoverageRegion {
     status: "open"
   };
 }
-
 

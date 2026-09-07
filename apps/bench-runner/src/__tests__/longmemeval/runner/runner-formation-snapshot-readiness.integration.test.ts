@@ -133,6 +133,15 @@ async function seedEndpoints(
       formation_kind, scope_class, content, workspace_id, run_id
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   for (const [index, member] of members.entries()) {
+    await eventLog.append({
+      event_type: "soul.memory.created",
+      entity_type: "memory_entry",
+      entity_id: member.memoryId,
+      workspace_id: workspaceId,
+      run_id: runId,
+      caused_by: "test",
+      payload_json: { source: "formation-fixture", content: `Answer memory ${member.memoryId}` }
+    });
     insertMemory.run(
       member.memoryId,
       "2026-07-30T00:00:00.000Z",

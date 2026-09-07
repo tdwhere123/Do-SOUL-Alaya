@@ -17,6 +17,7 @@ import {
   type EvidenceSearchMatch
 } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../recall-read-worker/observer-operations.js";
+import { createBoundedActiveConstraintsReader } from "../recall-read-worker/active-constraints.js";
 import { DegradationPipeline } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 import { DAEMON_ONLY_CONFIG_ENV_KEYS } from "../config/daemon-config-environment.js";
@@ -182,12 +183,18 @@ function createRecallSynthesisSearchPort(
 
 export function createRecallActiveConstraintsPort(
   input: Readonly<{
+    readonly database?: import("@do-soul/alaya-storage").StorageDatabase;
     readonly memoryEntryRepo: Parameters<typeof findActiveConstraints>[0]["memoryRepo"];
     readonly claimFormRepo: Parameters<typeof findActiveConstraints>[0]["claimFormRepo"];
   }>,
   directPathReadPorts: RecallPathReadPorts
 ) {
+  const bounded = input.database === undefined ? undefined : createBoundedActiveConstraintsReader(input.database);
   return {
+    ...(bounded === undefined ? {} : {
+      readBounded: async (request: import("@do-soul/alaya-protocol").BoundedActiveConstraintsRequest) =>
+        bounded(request)
+    }),
     findActiveConstraints: async (
       activeConstraintsInput: Readonly<{
         readonly workspaceId: string;

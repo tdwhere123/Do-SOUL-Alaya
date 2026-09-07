@@ -65,7 +65,9 @@ describe("conditional-field independent field oracle", () => {
     expect(guardAppliesToVariable(yesterday, "c")).toBe(false);
     expect(inGuardInterval(YESTERDAY_INSTANT, yesterday.interval)).toBe(true);
     expect(inGuardInterval(LAST_WEEK_INSTANT, yesterday.interval)).toBe(false);
-    expect(inGuardInterval(OBJECT_OBSERVED_AT.c, yesterday.interval)).toBe(false);
+    const configObservedAt = OBJECT_OBSERVED_AT.c;
+    if (configObservedAt === undefined) throw new Error("missing planted config timestamp");
+    expect(inGuardInterval(configObservedAt, yesterday.interval)).toBe(false);
     const index = projectWorld(world, field);
     expect(index.entries.find((entry) => entry.object_id === "c")?.association_milligrades).toBe(850);
     const appliedEverywhere = index.entries.filter((entry) =>

@@ -190,6 +190,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   };
 
   public readonly activeConstraintsPort: RecallServiceActiveConstraintsPort = {
+    readBounded: async (params) => await this.request("constraints.readBounded", params),
     findActiveConstraints: async ({ workspaceId, cap, asOf }) =>
       await this.request("constraints.findActive", { workspaceId, cap, asOf })
   };

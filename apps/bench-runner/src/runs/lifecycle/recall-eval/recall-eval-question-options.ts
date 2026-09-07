@@ -3,13 +3,10 @@ import type { RecallEvalRunContext } from "./recall-eval-run-context.js";
 
 export function recallOptionsForQuestion(
   context: RecallEvalRunContext,
-  questionText: string,
-  selectionBoundaryObserver: BenchRecallOptions["selectionBoundaryObserver"]
+  questionText: string
 ): BenchRecallOptions {
   if (context.querySemanticFactorCache === null) {
-    return selectionBoundaryObserver === undefined
-      ? context.recallOptions
-      : { ...context.recallOptions, selectionBoundaryObserver };
+    return context.recallOptions;
   }
   const capture = context.querySemanticFactorCache.captures_by_source_text.get(questionText);
   const receipt = context.querySemanticFactorCache.receipts_by_source_text.get(questionText);
@@ -18,7 +15,6 @@ export function recallOptionsForQuestion(
   }
   return {
     ...context.recallOptions,
-    ...(selectionBoundaryObserver === undefined ? {} : { selectionBoundaryObserver }),
     querySemanticFactorFormationCapture: capture,
     ...(receipt === undefined ? {} : { querySemanticFactorCompletenessReceipt: receipt })
   };

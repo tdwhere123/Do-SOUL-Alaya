@@ -52,21 +52,21 @@ it("measures bounded first/repeat/reopened local Recall including setup, final q
         slice = await createSliceHarness((db) => databases.add(db), filename);
         reopenSetupMs = performance.now() - reopenStarted;
       }
-      for (const rBase of [1, 12, 512]) {
-        const result = await slice.runRecall({ text: "Who owns Vega?", rBase, nBase: 4, nExtension: 0 });
-        expect(result.counters.row_visits).toBeLessThanOrEqual(rBase);
-        expect(result.counters.source_reads).toBeLessThanOrEqual(rBase);
+      for (const workUnits of [1, 120, 512]) {
+        const result = await slice.runRecall({ text: "Who owns Vega?", budget: { work_units: workUnits } });
+        expect(result.counters.row_visits).toBeLessThanOrEqual(workUnits);
+        expect(result.counters.source_reads).toBeLessThanOrEqual(workUnits);
         expect(result.counters.recall_provider_calls).toBe(0);
         expect(result.counters.phase_ms.total).toBeGreaterThan(0);
         expect(result.counters.phase_ms.total).toBeLessThanOrEqual(250);
         expect(result.counters.rss).toBeLessThanOrEqual(1024 ** 3);
-        expect(result.decisionDiagnostics.phaseWork?.unit).toBe("instrumented_logical_operations");
+        expect(result.index.completeness.logical_index).not.toBe("complete");
         const pages = slice.database.connection.prepare("PRAGMA page_count").get() as { page_count: number };
         const pageSize = slice.database.connection.prepare("PRAGMA page_size").get() as { page_size: number };
         expect(pages.page_count * pageSize.page_size).toBeLessThanOrEqual(8 * 1024 ** 2);
-        records.push({ stage, rBase, counters: result.counters, decision: result.decisionDiagnostics,
+        records.push({ stage, workUnits, counters: result.counters, index: result.index,
           sqliteAllocatedBytes: pages.page_count * pageSize.page_size, membership: result.membership,
-          pack: result.pack.accounting, index: slice.recallReader.explain("workspace-1", "vega", "owns") });
+          readerPlan: slice.recallReader.explain("workspace-1", "vega", "owns") });
       }
     }
     expect(noNetwork).not.toHaveBeenCalled();

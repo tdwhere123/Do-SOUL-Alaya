@@ -69,9 +69,12 @@ describe("conditional-field reference binder", () => {
     expect(guardAppliesToVariable(yesterday, "c")).toBe(false);
     expect(inGuardInterval(YESTERDAY_INSTANT, yesterday.interval)).toBe(true);
     expect(inGuardInterval(LAST_WEEK_INSTANT, yesterday.interval)).toBe(false);
-    expect(inGuardInterval(OBJECT_OBSERVED_AT.c, yesterday.interval)).toBe(false);
-    const configRelation = deploymentProgram().kind === "sequence"
-      ? deploymentProgram().steps[1]
+    const configObservedAt = OBJECT_OBSERVED_AT.c;
+    if (configObservedAt === undefined) throw new Error("missing planted config timestamp");
+    expect(inGuardInterval(configObservedAt, yesterday.interval)).toBe(false);
+    const program = deploymentProgram();
+    const configRelation = program.kind === "sequence"
+      ? program.steps[1]
       : undefined;
     const configGuard = configRelation && configRelation.kind === "alternative"
       && configRelation.options[0]?.kind === "relation"

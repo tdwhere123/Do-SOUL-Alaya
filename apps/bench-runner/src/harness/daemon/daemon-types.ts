@@ -11,10 +11,6 @@ import type {
   FieldProjectionAdmissionMode,
   RelationProjectionAdmissionMode
 } from "@do-soul/alaya";
-import type {
-  FineAssessmentDiagnosticCapture,
-  FineAssessmentSelectionBoundaryPendingCapture
-} from "@do-soul/alaya-core";
 import type { BenchRecallWeightOverrides } from "../recall/recall-weight-overrides.js";
 import type { SeedObjectKind } from "../seeding/seed-rotation.js";
 import type {
@@ -86,12 +82,6 @@ export interface BenchRecallOptions {
   readonly referenceTime?: string;
   readonly querySemanticFactorFormationCapture?: Readonly<OpenSemanticFactorFormationCapture>;
   readonly querySemanticFactorCompletenessReceipt?: Readonly<QueryOsfSemanticCompletenessReceipt>;
-  readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryPendingCapture
-  ) => undefined;
-  readonly diagnosticObserver?: (
-    capture: FineAssessmentDiagnosticCapture
-  ) => undefined;
   readonly snapshotDigest?: string;
 }
 
@@ -111,7 +101,11 @@ export interface BenchDaemonHandle {
   recall(
     query: string,
     opts?: BenchRecallOptions
-  ): Promise<SoulMemorySearchResponse & { readonly diagnostics?: unknown }>;
+  ): Promise<SoulMemorySearchResponse & {
+    readonly diagnostics?: unknown;
+    readonly provider_calls: 0;
+    readonly garden_enqueue: 0;
+  }>;
   warmEmbeddingCache(
     objectIds: readonly string[],
     opts?: BenchEmbeddingWarmupOptions

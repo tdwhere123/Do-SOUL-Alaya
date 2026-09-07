@@ -3,13 +3,15 @@ import {
   type RecallReadWorkerRequest
 } from "./protocol.js";
 import { asPayload } from "./payload-readers.js";
-import { runWorkerActiveConstraints } from "./active-constraints.js";
+import { createBoundedActiveConstraintsReader, runWorkerActiveConstraints } from "./active-constraints.js";
 import { runMemoryOperation } from "./memory-operations.js";
 import { runEvidenceOperation } from "./evidence-operations.js";
 import { runSynthesisOperation } from "./synthesis-operations.js";
 import { runPathOperation } from "./path-operations.js";
 import { runConditionalFieldWorkerRecall } from "./observer-operations.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
+
+const boundedConstraintsReaders = new WeakMap<RecallReadWorkerRuntime, ReturnType<typeof createBoundedActiveConstraintsReader>>();
 
 export async function runOperation(
   runtime: RecallReadWorkerRuntime,
@@ -66,6 +68,14 @@ export async function runOperation(
         claimFormRepo: runtime.claimFormRepo,
         pathReadPorts: runtime.recallPathReadPorts
       });
+    case "constraints.readBounded": {
+      let reader = boundedConstraintsReaders.get(runtime);
+      if (reader === undefined) {
+        reader = createBoundedActiveConstraintsReader(runtime.database);
+        boundedConstraintsReaders.set(runtime, reader);
+      }
+      return reader(payload as unknown as import("@do-soul/alaya-protocol").BoundedActiveConstraintsRequest);
+    }
     case "snapshot.beginDeferred":
       runtime.database.connection.exec("BEGIN DEFERRED");
       return null;

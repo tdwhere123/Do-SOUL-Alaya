@@ -10,14 +10,8 @@ import { materializeOpenSemanticFactorActivation } from
   "../../../../recall/field/open-semantic-factors/activation.js";
 import { attributeOpenSemanticFactorActivations } from
   "../../../../recall/field/open-semantic-factors/candidate-attribution.js";
-import { assertOpenSemanticCandidateActivations } from
-  "../../../../recall/delivery/selection-boundary/validation/open-semantic-candidate-activation-receipt.js";
-import { cloneSelectionBoundaryJson } from
-  "../../../../recall/delivery/selection-boundary/selection-boundary-json.js";
 import type { CoarseRecallCandidate } from
   "../../../../recall/runtime/recall-service-types.js";
-import type { SerializedRecallSupplementaryData } from
-  "../../../../recall/delivery/selection-boundary/selection-boundary-types.js";
 
 describe("open semantic merged-solution attribution", () => {
   it("keeps both evidence proposition matches when solutions share a result key", () => {
@@ -68,11 +62,6 @@ describe("open semantic merged-solution attribution", () => {
       activation
     });
     expect(activations.size).toBe(3);
-    expect(() => assertOpenSemanticCandidateActivations(
-      cloneSelectionBoundaryJson({
-        openSemanticFactorCandidateActivationsByCandidateKey: [...activations]
-      }) as unknown as SerializedRecallSupplementaryData
-    )).not.toThrow();
   });
 });
 

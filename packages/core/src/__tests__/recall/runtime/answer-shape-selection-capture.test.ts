@@ -59,7 +59,7 @@ async function recallYogaPair() {
     taskSurface,
     workspaceId: "workspace-1",
     strategy: "analyze",
-    selectionBoundaryObserver: () => undefined
+    diagnosticCapture: "answer_features"
   });
   return { ordinary, captured };
 }

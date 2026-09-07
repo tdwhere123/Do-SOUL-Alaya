@@ -4,7 +4,6 @@ import {
   GardenEventType,
   GardenRole,
   GardenTaskKind,
-  SignalSource,
 } from "@do-soul/alaya-protocol";
 import type { GardenComputeProvider } from "@do-soul/alaya-soul";
 
@@ -24,7 +23,6 @@ import {
   postTurnRows,
   recall,
   reportUsage,
-  seedRun,
   sessionRunContext,
   unwrapOk,
   type GardenListPendingTasksOutput,
@@ -209,7 +207,7 @@ describe("post-turn extract Garden task", () => {
     expect(postTurnRows(harness.gardenTaskRepo)).toHaveLength(1);
   });
 
-  it("a recall with a long query enqueues a recall-driven extract task from the turn text", async () => {
+  it("a recall with a long query does not enqueue extraction", async () => {
     const harness = await createHandlerHarness();
 
     const result = await recall(harness.handler, {
@@ -217,17 +215,7 @@ describe("post-turn extract Garden task", () => {
     });
 
     expect(result.ok).toBe(true);
-    const rows = postTurnRows(harness.gardenTaskRepo);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.id.startsWith("recall_extract_")).toBe(true);
-    const payload = rows[0]!.payload as PostTurnPayload;
-    expect(payload.run_id).toBe("run-1");
-    expect(payload.workspace_id).toBe("workspace-1");
-    expect(payload.turn_digest.last_messages).toEqual([
-      { role: "user", content_excerpt: "remember that I always use pnpm for this project" }
-    ]);
-    expect(payload.source_observation).toBeUndefined();
-    expect(payload).not.toHaveProperty("source_observed_at");
+    expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
   });
 
   it("does not persist a public recall timestamp without a verified delivery", async () => {
@@ -238,12 +226,10 @@ describe("post-turn extract Garden task", () => {
       source_observed_at: "1999-01-01T00:00:00.000Z"
     });
 
-    const payload = postTurnRows(harness.gardenTaskRepo)[0]!.payload as PostTurnPayload;
-    expect(payload.source_observation).toBeUndefined();
-    expect(payload).not.toHaveProperty("source_observed_at");
+    expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
   });
 
-  it("prefers recent_turn over query for the recall-driven extract task", async () => {
+  it("ignores recent_turn for extraction and accepts the later explicit turn digest", async () => {
     const harness = await createHandlerHarness();
 
     await recall(harness.handler, {
@@ -251,11 +237,17 @@ describe("post-turn extract Garden task", () => {
       recent_turn: "From now on always reply to me in Chinese for this project."
     });
 
+    expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
+    const result = await reportUsage(harness.handler, {
+      turn_index: 15,
+      last_messages: [{ role: "user", content_excerpt: "Explicit completed-turn digest." }]
+    });
+    expect(result.ok).toBe(true);
     const rows = postTurnRows(harness.gardenTaskRepo);
     expect(rows).toHaveLength(1);
-    expect((rows[0]!.payload as PostTurnPayload).turn_digest.last_messages[0]!.content_excerpt).toBe(
-      "From now on always reply to me in Chinese for this project."
-    );
+    expect((rows[0]!.payload as PostTurnPayload).turn_digest.last_messages).toEqual([
+      { role: "user", content_excerpt: "Explicit completed-turn digest." }
+    ]);
   });
 
   it("recall with no run id enqueues no extract work", async () => {
@@ -271,7 +263,7 @@ describe("post-turn extract Garden task", () => {
     expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
   });
 
-  it("recall with an attached session run enqueues recall-driven extract work", async () => {
+  it("recall with an attached session run still does not enqueue extraction", async () => {
     const harness = await createHandlerHarness();
 
     const result = await recall(harness.handler, {
@@ -281,14 +273,7 @@ describe("post-turn extract Garden task", () => {
     });
 
     expect(result.ok).toBe(true);
-    const rows = postTurnRows(harness.gardenTaskRepo);
-    expect(rows).toHaveLength(1);
-    const payload = rows[0]!.payload as PostTurnPayload;
-    expect(rows[0]!.id.startsWith("recall_extract_")).toBe(true);
-    expect(payload.run_id).toBe("mcp-session-run-1");
-    expect(payload.turn_digest.last_messages[0]!.content_excerpt).toBe(
-      "Please remember that I do not want fixable issues parked in backlog."
-    );
+    expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
   });
 
   it("does not enqueue a recall-driven extract task for a short query and no recent_turn", async () => {
@@ -299,33 +284,37 @@ describe("post-turn extract Garden task", () => {
     expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
   });
 
-  it("dedupes repeated recalls for the same turn text within a run", async () => {
+  it("repeated recalls remain extraction-free within a run", async () => {
     const harness = await createHandlerHarness();
 
     await recall(harness.handler, { query: "remember that I always use pnpm for this project" });
     await recall(harness.handler, { query: "remember that I always use pnpm for this project" });
 
-    expect(postTurnRows(harness.gardenTaskRepo)).toHaveLength(1);
+    expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
   });
 
-  it("a report for the same recalled user message does not enqueue duplicate extract work", async () => {
+  it("a report after Recall owns the extraction task and repeated reports remain idempotent", async () => {
     const harness = await createHandlerHarness();
 
     await recall(harness.handler, { query: "remember that I always use pnpm for this project" });
-    await reportUsage(harness.handler, {
+    expect(postTurnRows(harness.gardenTaskRepo)).toEqual([]);
+    const report = {
       turn_index: 3,
       last_messages: [
         { role: "user", content_excerpt: "remember that I always use pnpm for this project" },
         { role: "assistant", content_excerpt: "I used the project preference." }
       ]
-    });
+    } as const;
+    expect((await reportUsage(harness.handler, report)).ok).toBe(true);
+    expect((await reportUsage(harness.handler, report)).ok).toBe(true);
 
     const rows = postTurnRows(harness.gardenTaskRepo);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.id.startsWith("recall_extract_")).toBe(true);
+    expect(rows[0]!.id.startsWith("post_turn_extract_")).toBe(true);
+    expect((rows[0]!.payload as PostTurnPayload).turn_digest.last_messages).toEqual(report.last_messages);
   });
 
-  it("skips the recall-driven extract task when the librarian queue is already saturated", async () => {
+  it("keeps Recall extraction-free while an explicit report remains observable at high queue depth", async () => {
     const harness = await createHandlerHarness();
     for (let i = 0; i < 128; i += 1) {
       harness.gardenTaskRepo.enqueue({
@@ -339,6 +328,10 @@ describe("post-turn extract Garden task", () => {
     }
 
     await recall(harness.handler, { query: "remember that I always use pnpm for this project" });
+    expect(harness.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get()).toEqual({ count: 128 });
+    const reported = await reportUsage(harness.handler, { turn_index: 129 });
+    expect(reported.ok).toBe(true);
+    expect(harness.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get()).toEqual({ count: 129 });
 
     expect(harness.gardenTaskRepo.findById("seed-extract-0")).not.toBeNull();
     expect(

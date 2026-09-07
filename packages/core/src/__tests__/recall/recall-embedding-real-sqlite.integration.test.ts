@@ -1,318 +1,107 @@
-import { afterEach, describe, expect, it } from "vitest";
-import {
-  ComputeRecallGardenEventType,
-  ControlPlaneObjectKind,
-  RetentionPolicy,
-  type EventLogEntry,
-  type RecallPolicy,
-  type TaskObjectSurface
-} from "@do-soul/alaya-protocol";
-import { NO_STORED_VECTORS_DEGRADATION_REASON } from "../../embedding-recall/constants.js";
-import {
-  SqliteEvidenceCapsuleRepo,
-  SqliteEventLogRepo,
-  SqliteMemoryEmbeddingRepo,
-  SqliteMemoryEntryRepo,
-  type StorageDatabase
-} from "@do-soul/alaya-storage";
-import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
-import {
-  RecallService,
-  type RecallServiceDependencies,
-  type RecallServiceFieldDeps
-} from "../../recall/recall-service.js";
-import { createSeededTestOnlyInMemoryFieldQuerySession } from
-  "../../recall/runtime/query/field-query-session.js";
-import { fieldContractSha256 } from "../../shared/field-hash.js";
-import { withFineDeliveryPath } from "./recall-service-test-fixtures.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryDimension } from "@do-soul/alaya-protocol";
+import type { StorageDatabase } from "@do-soul/alaya-storage";
+import { readBoundedEmbeddingIds } from "../../../../storage/src/repos/memory/reads/memory-embedding-bounded-read.js";
+import { RecallService } from "../../recall/recall-service.js";
 import { hashMemoryContent } from "../embedding-recall/embedding-recall-test-helpers.js";
-import {
-  REAL_SQLITE_TEST_RUN_ID,
-  REAL_SQLITE_TEST_WORKSPACE_ID,
-  createRecallEmbeddingRealStorage
-} from "../shared/real-sqlite.test-support.js";
-import { createMemoryEntry, overridePolicy } from "./recall-service-test-fixtures.js";
-
-const WS = REAL_SQLITE_TEST_WORKSPACE_ID;
-const RUN = REAL_SQLITE_TEST_RUN_ID;
-const NOW = "2026-07-29T00:00:00.000Z";
-
-const PROVIDER_KIND = "openai";
-const MODEL_ID = "text-embedding-3-small";
-const SCHEMA_VERSION = 1;
-
-const LEXICAL_ID = "00000000-0000-4000-8000-000000000001";
-const SEMANTIC_ID = "00000000-0000-4000-8000-000000000002";
-
-const LEXICAL_CONTENT =
-  "kubernetes staging pipeline deployment checklist alpha procedure.";
-const SEMANTIC_CONTENT = "Zephyr qixotl mnop hidden semantic vector only.";
-
-const QUERY_TEXT = "kubernetes staging pipeline deployment checklist";
+import { createSourceBoundRecallFixture, createTaskSurface } from "./recall-service-test-fixtures.js";
 
 const databases = new Set<StorageDatabase>();
-
 afterEach(() => {
-  for (const database of databases) {
-    database.close();
-  }
+  for (const database of databases) database.close();
   databases.clear();
 });
+const LEXICAL_ID = "aaaaaaaa-aaaa-4aaa-8aaa-000000000294";
+const VECTOR_ID = "aaaaaaaa-aaaa-4aaa-8aaa-000000000295";
+const OTHER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-000000000296";
+const NOW = "2026-09-06T12:00:00.000Z";
 
-type RecallEmbeddingFixture = Readonly<{
-  readonly database: StorageDatabase;
-  readonly memoryEntryRepo: SqliteMemoryEntryRepo;
-  readonly evidenceCapsuleRepo: SqliteEvidenceCapsuleRepo;
-  readonly memoryEmbeddingRepo: SqliteMemoryEmbeddingRepo;
-  readonly eventLogRepo: SqliteEventLogRepo;
-  readonly recallService: RecallService;
-}>;
-
-// anti-patterns-lint-allow: real-DB stand-up mirrors recall integration precedents on purpose.
-async function createRecallEmbeddingFixture(params: {
-  readonly seedVectors: boolean;
-}): Promise<RecallEmbeddingFixture> {
-  const storage = await createRecallEmbeddingRealStorage((database) => {
-    databases.add(database);
-  });
-
-  await storage.memoryEntryRepo.create(
-    createMemoryEntry({
-      object_id: LEXICAL_ID,
-      content: LEXICAL_CONTENT,
-      activation_score: 0.8
-    })
-  );
-  await storage.memoryEntryRepo.create(
-    createMemoryEntry({
-      object_id: SEMANTIC_ID,
-      content: SEMANTIC_CONTENT,
-      activation_score: 0.1
-    })
-  );
-
-  if (params.seedVectors) {
-    await storage.memoryEmbeddingRepo.upsert({
-      object_id: LEXICAL_ID,
-      workspace_id: WS,
-      content_hash: hashMemoryContent(LEXICAL_CONTENT),
-      provider_kind: PROVIDER_KIND,
-      model_id: MODEL_ID,
-      schema_version: SCHEMA_VERSION,
-      dimensions: 2,
-      embedding: new Float32Array([0.01, 0.99]),
-      created_at: NOW,
-      updated_at: NOW
-    });
-    await storage.memoryEmbeddingRepo.upsert({
-      object_id: SEMANTIC_ID,
-      workspace_id: WS,
-      content_hash: hashMemoryContent(SEMANTIC_CONTENT),
-      provider_kind: PROVIDER_KIND,
-      model_id: MODEL_ID,
-      schema_version: SCHEMA_VERSION,
-      dimensions: 2,
-      embedding: new Float32Array([0.99, 0.01]),
-      created_at: NOW,
-      updated_at: NOW
-    });
-  }
-
-  return {
-    ...storage,
-    recallService: buildRecallService(storage)
-  };
-}
-
-function buildRecallService(params: {
-  readonly memoryEntryRepo: SqliteMemoryEntryRepo;
-  readonly evidenceCapsuleRepo: SqliteEvidenceCapsuleRepo;
-  readonly memoryEmbeddingRepo: SqliteMemoryEmbeddingRepo;
-  readonly eventLogRepo: SqliteEventLogRepo;
-}): RecallService {
-  const memoryRepo = params.memoryEntryRepo;
-  const embeddingRecallService = new EmbeddingRecallService({
-    embeddingRepo: params.memoryEmbeddingRepo,
-    provider: createDeterministicEmbeddingProvider(),
-    eventLogRepo: params.eventLogRepo,
-    generateQueryId: () => "recall-embedding-real-sqlite-query",
-    now: () => NOW
-  });
-
-  const deps: RecallServiceDependencies & RecallServiceFieldDeps = {
-    defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),
-    testOnlyAllowInMemoryFieldQuerySession: true,
-    fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
-      fieldContractSha256,
-      REAL_SQLITE_TEST_WORKSPACE_ID
-    ),
-    now: () => NOW,
-    generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
-    memoryRepo: {
-      findByWorkspaceId: memoryRepo.findByWorkspaceId.bind(memoryRepo),
-      findByDimension: memoryRepo.findByDimension.bind(memoryRepo),
-      findByScopeClass: memoryRepo.findByScopeClass.bind(memoryRepo),
-      searchByKeyword: memoryRepo.searchByKeyword.bind(memoryRepo),
-      searchByKeywordWithinObjectIds: memoryRepo.searchByKeywordWithinObjectIds.bind(memoryRepo),
-      findByEvidenceRefs: memoryRepo.findByEvidenceRefs.bind(memoryRepo)
-    },
-    slotRepo: {
-      findByWorkspace: async () => []
-    },
-    eventLogRepo: params.eventLogRepo,
-    evidenceSearchPort: {
-      searchByKeyword: params.evidenceCapsuleRepo.searchByKeyword.bind(params.evidenceCapsuleRepo),
-      findByIds: (workspaceId: string, evidenceObjectIds: readonly string[]) =>
-        params.evidenceCapsuleRepo.findByIds(workspaceId, evidenceObjectIds)
-    },
-    embeddingRecallService
-  };
-
-  return new RecallService(deps);
-}
-
-function createDeterministicEmbeddingProvider() {
-  return {
-    providerKind: PROVIDER_KIND,
-    modelId: MODEL_ID,
-    schemaVersion: SCHEMA_VERSION,
-    isAvailable: true,
-    embedTexts: async (texts: readonly string[]) =>
-      texts.map((text) => deterministicEmbeddingForText(text))
-  };
-}
-
-function deterministicEmbeddingForText(text: string): Float32Array {
-  if (text === QUERY_TEXT) {
-    return new Float32Array([0.95, 0.05]);
-  }
-  if (text.includes("Zephyr qixotl")) {
-    return new Float32Array([1, 0]);
-  }
-  if (text.includes("deployment checklist")) {
-    return new Float32Array([0, 1]);
-  }
-  return new Float32Array([0.5, 0.5]);
-}
-
-function createTaskSurface(displayName: string): TaskObjectSurface {
-  return {
-    runtime_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
-    object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-    task_surface_ref: null,
-    expires_at: "2026-05-13T00:30:00.000Z",
-    derived_from: null,
-    retention_policy: RetentionPolicy.SESSION_ONLY,
-    surface_kind: "analyze",
-    display_name: displayName,
-    context_refs: []
-  };
-}
-
-function embeddingEnabledPolicy(recallService: RecallService): RecallPolicy {
-  const base = recallService.buildDefaultPolicy("analyze", createTaskSurface(QUERY_TEXT).runtime_id);
-  return overridePolicy(base, {
-    coarse_filter: {
-      ...base.coarse_filter,
-      semantic_supplement: {
-        enabled: true,
-        max_supplement: 5,
-        embedding_enabled: true
-      }
-    },
-    fine_assessment: {
-      ...base.fine_assessment,
-      budgets: {
-        ...base.fine_assessment.budgets,
-        max_entries: 2
-      }
+async function createFixture(seedVectors: boolean) {
+  const fixture = await createSourceBoundRecallFixture((database) => databases.add(database));
+  await fixture.writeMemory(LEXICAL_ID, "kubernetes deployment checklist", MemoryDimension.FACT);
+  await fixture.writeMemory(VECTOR_ID, "opaque archival payload", MemoryDimension.FACT);
+  fixture.database.connection.prepare(`INSERT INTO workspaces(workspace_id,name,root_path,workspace_kind,created_at)
+    VALUES ('workspace-other','foreign workspace','/tmp/foreign','local_repo',?)`).run(NOW);
+  await fixture.writeSource({ objectId: OTHER_ID, workspaceId: "workspace-other", content: "foreign vector payload" });
+  fixture.storage.memoryEmbeddingRepo.prepareBoundedRecallIndex();
+  if (seedVectors) {
+    for (const [objectId, workspaceId, content] of [
+      [LEXICAL_ID, "workspace-1", "kubernetes deployment checklist"],
+      [VECTOR_ID, "workspace-1", "opaque archival payload"],
+      [OTHER_ID, "workspace-other", "foreign vector payload"]
+    ]) {
+      await fixture.storage.memoryEmbeddingRepo.upsert({
+        object_id: objectId!, workspace_id: workspaceId!, content_hash: hashMemoryContent(content!),
+        provider_kind: "openai", model_id: "stored-fixture", schema_version: 1,
+        dimensions: 2, embedding: new Float32Array([1, 0]), created_at: NOW, updated_at: NOW
+      });
     }
+  }
+  const embeddingIds = vi.fn((input: { workspaceId: string; afterObjectId: string | null; maxRows: number }) =>
+    readBoundedEmbeddingIds(fixture.database, input.workspaceId, {
+      providerKind: "openai", modelId: "stored-fixture", schemaVersion: 1,
+      maxRows: input.maxRows, maxMetadataUtf8Bytes: 65536
+    }, input.afterObjectId));
+  const prepareQuerySupplement = vi.fn(async () => { throw new Error("query-time provider forbidden"); });
+  const scoreEvidenceCandidates = vi.fn(async () => { throw new Error("transient scoring forbidden"); });
+  const querySupplement = vi.fn(async () => { throw new Error("query-time provider forbidden"); });
+  const service = new RecallService({
+    ...fixture.dependencies,
+    observerReaders: { ...fixture.dependencies.observerReaders, embeddingIds },
+    embeddingRecallService: { prepareQuerySupplement, scoreEvidenceCandidates, querySupplement }
+  });
+  return { ...fixture, service, embeddingIds, prepareQuerySupplement, scoreEvidenceCandidates, querySupplement };
+}
+
+async function recall(service: RecallService, workspaceId = "workspace-1") {
+  return service.recall({
+    workspaceId, taskSurface: { ...createTaskSurface(), display_name: "kubernetes" },
+    queryText: "kubernetes", strategy: "chat", pageBudget: 800
   });
 }
-describe("RecallService embedding integration (real SQLite + stored vectors)", () => {
-  it("activates embedding RRF without bypassing a higher family-max R_obj", async () => {
-    const withVectors = await createRecallEmbeddingFixture({ seedVectors: true });
-    const withoutVectors = await createRecallEmbeddingFixture({ seedVectors: false });
-    const policy = embeddingEnabledPolicy(withVectors.recallService);
 
-    const live = await withVectors.recallService.recall({
-      taskSurface: createTaskSurface(QUERY_TEXT),
-      workspaceId: WS,
-      runId: RUN,
-      strategy: "analyze",
-      policyOverride: policy,
-      diagnosticCapture: "answer_features"
-    });
-    const emptyTable = await withoutVectors.recallService.recall({
-      taskSurface: createTaskSurface(QUERY_TEXT),
-      workspaceId: WS,
-      runId: RUN,
-      strategy: "analyze",
-      policyOverride: embeddingEnabledPolicy(withoutVectors.recallService),
-      diagnosticCapture: "answer_features"
-    });
-
-    expect(live.candidates.slice(0, 2).map((candidate) => candidate.object_id)).toEqual([
-      LEXICAL_ID,
-      SEMANTIC_ID
-    ]);
-    expect(live.diagnostics?.provider_degradation_reason).toBeNull();
-    const semanticDiagnostic = live.diagnostics?.candidates.find(
-      (candidate) => candidate.object_id === SEMANTIC_ID
-    );
-    expect(semanticDiagnostic?.score_factors!.embedding_similarity).toBeGreaterThan(0);
-    expect(semanticDiagnostic?.per_stream_rank!.embedding_similarity).toBe(1);
-    expect(semanticDiagnostic?.fused_rank_contribution_per_stream!.embedding_similarity)
-      .toBeGreaterThan(0);
-    expect(semanticDiagnostic?.fused_score).toBeCloseTo(
-      semanticDiagnostic?.flood_potential?.R_obj ?? -1,
-      12
-    );
-
-    // Empty vector table still fills the delivery budget from non-embedding paths.
-    expect(emptyTable.candidates.slice(0, 2).map((candidate) => candidate.object_id)).toEqual([
-      LEXICAL_ID,
-      SEMANTIC_ID
-    ]);
-    expect(emptyTable.diagnostics?.provider_degradation_reason).toBe(
-      NO_STORED_VECTORS_DEGRADATION_REASON
-    );
-
-    withVectors.database.close();
-    withoutVectors.database.close();
-    databases.delete(withVectors.database);
-    databases.delete(withoutVectors.database);
+describe("conditional Recall with real SQLite stored embeddings", () => {
+  it("enumerates persisted workspace vectors without promoting vector-only objects or calling a provider", async () => {
+    const fixture = await createFixture(true);
+    const before = fixture.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get();
+    const result = await recall(fixture.service);
+    expect(fixture.embeddingIds).toHaveBeenCalled();
+    const observedIds = fixture.embeddingIds.mock.results.flatMap((result) =>
+      result.type === "return" ? result.value.objectIds : []);
+    expect(observedIds).toContain(LEXICAL_ID);
+    expect(observedIds).toContain(VECTOR_ID);
+    expect(observedIds).not.toContain(OTHER_ID);
+    expect(result.index.entries.some((entry) => entry.object_id === LEXICAL_ID)).toBe(true);
+    expect(result.index.entries.some((entry) => entry.object_id === VECTOR_ID)).toBe(false);
+    expect(result.candidates.some((candidate) => candidate.object_id === OTHER_ID)).toBe(false);
+    expect(fixture.prepareQuerySupplement).not.toHaveBeenCalled();
+    expect(fixture.scoreEvidenceCandidates).not.toHaveBeenCalled();
+    expect(fixture.querySupplement).not.toHaveBeenCalled();
+    expect(fixture.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get()).toEqual(before);
   });
 
-  it("surfaces no_stored_vectors through recall diagnostics and SqliteEventLogRepo", async () => {
-    const fixture = await createRecallEmbeddingFixture({ seedVectors: false });
+  it("retains lexical source availability when no stored vectors or optional measurement capability exists", async () => {
+    const fixture = await createFixture(false);
+    const withEmptyStore = await recall(fixture.service);
+    const withoutCapability = await recall(new RecallService(fixture.dependencies));
+    expect(withEmptyStore.index.entries.map((entry) => entry.object_id))
+      .toEqual(withoutCapability.index.entries.map((entry) => entry.object_id));
+    expect(withEmptyStore.index.entries.some((entry) => entry.object_id === LEXICAL_ID)).toBe(true);
+    expect(fixture.embeddingIds.mock.results.every((result) =>
+      result.type === "return" && result.value.objectIds.length === 0)).toBe(true);
+    expect(fixture.prepareQuerySupplement).not.toHaveBeenCalled();
+  });
 
-    const result = await fixture.recallService.recall({
-      taskSurface: createTaskSurface(QUERY_TEXT),
-      workspaceId: WS,
-      runId: RUN,
-      strategy: "analyze",
-      policyOverride: embeddingEnabledPolicy(fixture.recallService),
-      diagnosticCapture: "answer_features"
-    });
-
-    expect(result.diagnostics?.provider_degradation_reason).toBe(
-      NO_STORED_VECTORS_DEGRADATION_REASON
-    );
-    expect(result.diagnostics?.embedding_provider_status).toBe("provider_failed");
-
-    const events = await fixture.eventLogRepo.queryByWorkspaceAll(WS);
-    const degradedEvents = events.filter(
-      (entry: EventLogEntry) =>
-        entry.event_type === ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED
-    );
-    expect(degradedEvents.length).toBeGreaterThan(0);
-    expect(degradedEvents.some((entry) => {
-      const payload = entry.payload_json as { readonly degradation_reason?: string };
-      return payload.degradation_reason === NO_STORED_VECTORS_DEGRADATION_REASON;
-    })).toBe(true);
-
-    fixture.database.close();
-    databases.delete(fixture.database);
+  it("keeps stored-vector enumeration scoped and does not deliver revoked sources", async () => {
+    const fixture = await createFixture(true);
+    const foreign = fixture.embeddingIds({ workspaceId: "workspace-other", afterObjectId: null, maxRows: 10 });
+    expect(foreign.objectIds).toEqual([OTHER_ID]);
+    const missing = fixture.embeddingIds({ workspaceId: "workspace-absent", afterObjectId: null, maxRows: 10 });
+    expect(missing.objectIds).toEqual([]);
+    fixture.database.connection.prepare("UPDATE memory_entries SET lifecycle_state='tombstone' WHERE object_id=?")
+      .run(LEXICAL_ID);
+    const result = await recall(fixture.service);
+    expect(result.index.entries.some((entry) => entry.object_id === LEXICAL_ID)).toBe(false);
+    expect(fixture.prepareQuerySupplement).not.toHaveBeenCalled();
   });
 });

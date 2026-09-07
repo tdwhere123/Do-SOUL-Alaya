@@ -15,7 +15,7 @@ describe("daemon indexed recall projection composition", () => {
     databases.add(database);
     createDaemonRepositories({ database, warn: () => undefined });
     expect(database.connection.prepare("SELECT revision FROM garden_semantic_schema").all())
-      .toEqual([{ revision: 5 }]);
+      .toEqual([{ revision: 6 }]);
     expect(database.connection.prepare(
       "SELECT name FROM sqlite_master WHERE name='garden_index_revisions'"
     ).get()).toEqual({ name: "garden_index_revisions" });

@@ -5,67 +5,15 @@ import {
   type RecallScoreFactors
 } from "@do-soul/alaya-protocol";
 
-import {
-  selectFineAssessmentCandidates,
-  type FineAssessmentCandidate
-} from "../../recall/delivery/fine-assessment-selection.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { buildEmptyRecallFusionBreakdown } from "./recall-service-test-fixtures.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
-
-export const FIELD_PINS = {
-  workspace_id: "workspace-1",
-  generation_id: `sha256:${"c".repeat(64)}`,
-  condition_digest: `sha256:${"d".repeat(64)}`
-} as const;
-
-export function selectCandidates(
-  params: Parameters<typeof selectFineAssessmentCandidates>[0]
-): ReturnType<typeof selectFineAssessmentCandidates> {
-  return selectFineAssessmentCandidates({
-    ...FIELD_PINS,
-    ...params
-  });
-}
-
-export function createRankedCandidate(
-  objectId: string,
-  fusedRank: number,
-  fusedScore: number
-): FineAssessmentCandidate {
-  const candidate = createCandidate(objectId);
-  return {
-    ...candidate,
-    fusion: { ...candidate.fusion, fused_rank: fusedRank, fused_score: fusedScore }
-  };
-}
-
-export function rankMap(
-  candidates: readonly FineAssessmentCandidate[]
-): ReadonlyMap<string, number> {
-  return new Map(candidates.map((candidate) => [
-    candidate.fusion.candidate_key,
-    candidate.fusion.fused_rank
-  ]));
-}
-
-export function stageRanks(
-  result: ReturnType<typeof selectFineAssessmentCandidates>,
-  objectId: string
-) {
-  const diagnostic = result.diagnostics.find((candidate) => candidate.object_id === objectId);
-  return [
-    diagnostic?.rank_after_feature_rerank,
-    diagnostic?.rank_after_coverage_selector,
-    diagnostic?.coverage_selector_action
-  ];
-}
 
 export function createCandidate(
   objectId: string,
   entryOverrides: Partial<MemoryEntry> = {},
-  objectKind: FineAssessmentCandidate["objectKind"] = "memory_entry"
-): FineAssessmentCandidate {
+  objectKind: "memory_entry" | "evidence_capsule" | "synthesis_capsule" = "memory_entry"
+) {
   const breakdown = buildEmptyRecallFusionBreakdown(objectId);
   return {
     entry: { ...createMemoryEntry(objectId), ...entryOverrides },
@@ -78,17 +26,6 @@ export function createCandidate(
       fused_score: 0.7
     }
   };
-}
-
-export function createConfig() {
-  return {
-    conflict_awareness: false,
-    budgets: {
-      max_entries: 10,
-      max_total_tokens: 100,
-      per_dimension_limits: null
-    }
-  } as const;
 }
 
 function createMemoryEntry(objectId: string): MemoryEntry {
@@ -134,10 +71,6 @@ function createScoreFactors(): RecallScoreFactors {
     budget_penalty: 0,
     conflict_penalty: 0
   };
-}
-
-export function createRanks(): ReadonlyMap<string, number> {
-  return new Map();
 }
 
 export function createSupplementaryData(

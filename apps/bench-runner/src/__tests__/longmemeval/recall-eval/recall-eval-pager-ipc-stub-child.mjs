@@ -1,9 +1,3 @@
-import { createHash } from "node:crypto";
-import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { gzipSync } from "node:zlib";
-
 process.title = "alaya-recall-eval-pager-stub";
 
 if (typeof process.send !== "function") {
@@ -15,32 +9,17 @@ process.on("message", (message) => {
   void handle(message);
 });
 
-let selectionBoundaryFixture;
-let selectionRootLogPath;
-let selectionQuestionIdOverride;
-let selectionRootPath;
-const selectionRecords = [];
-
 async function handle(message) {
   const id = message?.id;
   if (typeof id !== "number" || typeof process.send !== "function") return;
   const op = message?.op;
   if (op === "close") {
-    process.send({ id, ok: true, selectionArtifact: writeSelectionArtifact() });
+    process.send({ id, ok: true });
     process.exit(0);
     return;
   }
   if (op === "open") {
-    selectionBoundaryFixture = message?.open?.selectionBoundaryFixture;
-    selectionRootLogPath = message?.open?.selectionRootLogPath;
-    selectionQuestionIdOverride = message?.open?.selectionQuestionIdOverride;
     await emitOpenProgress(id, message?.open);
-    if (selectionBoundaryFixture !== undefined) {
-      selectionRootPath = mkdtempSync(join(tmpdir(), "alaya-selection-replay-stub-"));
-      if (typeof selectionRootLogPath === "string") {
-        appendFileSync(selectionRootLogPath, `${selectionRootPath}\n`);
-      }
-    }
     process.send({
       id,
       ok: true,
@@ -50,8 +29,7 @@ async function handle(message) {
         comm: process.title,
         alaya_db_mappings: 0,
         onnxruntime_mappings: 0
-      },
-      selectionSpoolRootPath: selectionRootPath ?? null
+      }
     });
     return;
   }
@@ -76,16 +54,6 @@ async function handle(message) {
     return;
   }
   const questionId = typeof probe === "string" ? probe : "q";
-  if (selectionBoundaryFixture !== undefined) {
-    selectionRecords.push({
-      question_id: typeof selectionQuestionIdOverride === "string"
-        ? selectionQuestionIdOverride
-        : questionId,
-      invocation_index: 0,
-      authoritative: true,
-      boundary: selectionBoundaryFixture
-    });
-  }
   process.send({
     id,
     ok: true,
@@ -113,26 +81,6 @@ async function emitOpenProgress(id, open) {
       await new Promise((resolve) => setTimeout(resolve, everyMs));
     }
   }
-}
-
-function writeSelectionArtifact() {
-  if (selectionBoundaryFixture === undefined || selectionRecords.length === 0) return null;
-  const rootPath = selectionRootPath;
-  if (rootPath === undefined) throw new Error("selection root was not opened");
-  const sourcePath = join(rootPath, "selection-boundaries.ndjson.gz");
-  const record = `${selectionRecords.map((row) => JSON.stringify(row)).join("\n")}\n`;
-  const artifact = gzipSync(Buffer.from(record, "utf8"));
-  writeFileSync(sourcePath, artifact);
-  return {
-    rootPath,
-    sourcePath,
-    binding: {
-      filename: "selection-boundaries.ndjson.gz",
-      sha256: createHash("sha256").update(artifact).digest("hex"),
-      bytes: artifact.byteLength,
-      record_count: selectionRecords.length
-    }
-  };
 }
 
 function stubPack(questionId) {

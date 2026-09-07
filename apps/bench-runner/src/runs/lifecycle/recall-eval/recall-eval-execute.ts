@@ -6,10 +6,6 @@ import {
 } from "../../provenance/recall-eval/recall-eval-diagnostics-spool.js";
 import type { RecallEvalRunContext } from "./recall-eval-run-context.js";
 import type { RecallEvalQuestionResult } from "./recall-eval-contract.js";
-import {
-  disposeRecallEvalSelectionBoundaryArtifact,
-  type RecallEvalSelectionBoundaryArtifact
-} from "./recall-eval-selection-replay.js";
 import { recallOptionsForQuestion } from "./recall-eval-question-options.js";
 import {
   RecallEvalPagerChildExitedError,
@@ -32,19 +28,17 @@ export async function executeRecallEvalRun(
   diagnosticsSpool: RecallEvalDiagnosticsSpool
 ): Promise<Readonly<{
   collected: readonly RecallEvalQuestionResult[];
-  selectionArtifact: RecallEvalSelectionBoundaryArtifact | null;
   evidenceProjectionRebuild: unknown;
 }>> {
   assertRecallZeroLiveExtraction();
   const session = createRecallEvalPagerSession();
   let collected: readonly RecallEvalQuestionResult[] = [];
-  let selectionArtifact: RecallEvalSelectionBoundaryArtifact | null = null;
   let evidenceProjectionRebuild: unknown = null;
   let primaryError: unknown;
   try {
     evidenceProjectionRebuild = await openPager(session, context);
     collected = await executeRecallEvalQuestions(context, session, diagnosticsSpool);
-    selectionArtifact = await closePager(session);
+    await session.close();
     await context.memoryProfile?.sample({ phase: "daemon_stopped" });
   } catch (error) {
     primaryError = error;
@@ -52,7 +46,7 @@ export async function executeRecallEvalRun(
     await closePagerQuietly(session);
   }
   throwLifecycleErrors("recall-eval daemon lifecycle failed", [primaryError]);
-  return { collected, selectionArtifact, evidenceProjectionRebuild };
+  return { collected, evidenceProjectionRebuild };
 }
 
 async function openPager(
@@ -77,17 +71,9 @@ async function openPager(
   return opened.evidenceProjectionRebuild ?? null;
 }
 
-async function closePager(
-  session: RecallEvalPagerIpcSession
-): Promise<RecallEvalSelectionBoundaryArtifact | null> {
-  const artifact = await session.close();
-  return (artifact ?? null) as RecallEvalSelectionBoundaryArtifact | null;
-}
-
 async function closePagerQuietly(session: RecallEvalPagerIpcSession): Promise<void> {
   try {
-    const artifact = await closePager(session);
-    await disposeRecallEvalSelectionBoundaryArtifact(artifact);
+    await session.close();
   } catch {
     // Primary failure already owns the arm; close is best-effort reap.
   }
@@ -148,8 +134,7 @@ function buildPagerRecallPayload(
   question: RecallEvalRunContext["window"][number],
   turnIndex: number
 ): RecallEvalPagerRecallPayload {
-  const { selectionBoundaryObserver: _observer, ...recallOptions } =
-    recallOptionsForQuestion(context, question.question, undefined);
+  const recallOptions = recallOptionsForQuestion(context, question.question);
   return {
     question,
     turnIndex,

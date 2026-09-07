@@ -5,8 +5,13 @@ import type { EvidenceSearchProjectionRebuildReport } from
   "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
 import type { WarmDerivedSnapshotBinding } from
   "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
-import type { RecallEvalSelectionBoundaryBinding } from
-  "../../lifecycle/recall-eval/recall-eval-selection-replay.js";
+
+export interface RecallEvalSelectionBoundaryBinding {
+  readonly filename: "selection-boundaries.ndjson.gz";
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly record_count: number;
+}
 
 export const RECALL_EVAL_RANK_IDENTITY_FILENAME =
   "recall-eval-rank-identity.json";

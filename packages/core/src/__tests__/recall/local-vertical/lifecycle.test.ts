@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GardenRole, GardenTaskKind, GardenTier, MemoryDimension } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
-import { captureQuerySpec } from "../../../recall/decision/budget-aware-q/capture.js";
-import { fieldContractSha256 } from "../../../shared/field-hash.js";
+import { compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
+import { defaultBudget, SNAPSHOT_ID } from "../conditional-field/reference/deployment.fixture.js";
 import { SOURCE_ENRICHMENT_QUEUE_HARD_CAP } from "../../../memory/source-write-garden-intent.js";
 import { createSliceHarness } from "./harness.js";
 import { CONTENT, MEM, NOW, WS } from "./ids.js";
@@ -151,23 +151,25 @@ describe("lifecycle probes", () => {
       familyCaps: { embedding: "unavailable" }
     });
     expect(first.membership).toEqual(second.membership);
-    expect(first.selectionCount).toBe(1);
-    expect(second.selectionCount).toBe(1);
+    expect(first.index.query_id).toBe(second.index.query_id);
+    expect(first.index.snapshot_id).toBe(second.index.snapshot_id);
     expect(first.counters.recall_provider_calls).toBe(0);
     expect(second.counters.full_tier_scan).toBe(0);
     expect(writeAck === "not_observed" || (typeof writeAck === "number" && writeAck >= 0)).toBe(true);
     expect(performanceNow() - coldWrite).toBeGreaterThanOrEqual(0);
   });
 
-  it("M1 capture detaches caller mutation on the slice QuerySpec", () => {
+  it("query interpretation detaches caller scope mutation", () => {
     const scopes = ["workspace-1"];
-    const captured = captureQuerySpec({
-      text: "M1 slice",
-      asOf: NOW,
-      authorizedScopes: scopes
-    }, fieldContractSha256, () => NOW);
+    const captured = compileConditionalFieldQuery({
+      source: "ordinary", text: "deployment checklist",
+      snapshot_id: SNAPSHOT_ID, interpretation_clock: NOW,
+      budget: defaultBudget(), authorized_scopes: scopes
+    });
+    const before = JSON.stringify(captured);
     scopes.push("attacker");
-    expect(captured.spec.authorizedScopes).toEqual(["workspace-1"]);
+    expect(JSON.stringify(captured)).toBe(before);
+    expect(JSON.stringify(captured)).not.toContain("attacker");
   });
 });
 

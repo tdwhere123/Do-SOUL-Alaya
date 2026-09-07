@@ -7,6 +7,7 @@ import {
   ScopeClass,
   formatConditionalFieldDigest,
   type Continuation,
+  type BoundedActiveConstraintsResult,
   type InformationIndex,
   type QueryInterpretation,
   type RequestBudget
@@ -19,8 +20,10 @@ import { interpretationCoverageFor } from "../conditional-field/reference/interp
 import { type ObserverReaders } from "../conditional-field/observers/observe.js";
 import { projectFieldDelta, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
-import { createContentPreview, normalizeQueryText } from "./recall-service-helpers.js";
+import { normalizeQueryText } from "./recall-service-helpers.js";
 import type { RecallResult } from "./recall-service-types.js";
+import type { RecallSourceMetadata } from "./recall-service-results.js";
+import { BoundedIndexPayload } from "./index-payload.js";
 import type { RecallExecutionContext, RecallExecutionParams } from "./recall-service-runner-types.js";
 import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
 import { assertRecallZeroLiveExtraction } from "./zero-live-extraction.js";
@@ -30,6 +33,10 @@ import {
   observeField
 } from "./conditional-field-observe.js";
 import { assessUnknownCause, rolesFrom } from "./semantic-attribution.js";
+import { captureEffectiveAsOf } from "../query/condition/query-condition-capture.js";
+import { readRequestGovernance } from "./request-governance.js";
+import { reserveSnapshotPinWork } from "./snapshot-pin-budget.js";
+import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
 
 export type { RecallExecutionContext, RecallExecutionParams, PreparedRecallRequest } from "./recall-service-runner-types.js";
 export { RELATION_MILLIGRADES };
@@ -45,6 +52,7 @@ const FIELD_RESUME_MAX = 32;
 // re-observes. Parent isolate pins one worker for a single snapshot lease.
 const FIELD_RESUME = new Map<string, FieldEngineState>();
 const INDEX_PREVIEWS = new WeakMap<InformationIndex, ReadonlyMap<string, string>>();
+const INDEX_SOURCE_METADATA = new WeakMap<InformationIndex, Readonly<Record<string, RecallSourceMetadata>>>();
 const FIELD_SOURCE_PINS = new WeakMap<FieldEngineState, string>();
 
 export type ConditionalFieldRecallRequest = Readonly<{
@@ -65,6 +73,7 @@ export type ConditionalFieldRecallRequest = Readonly<{
   readonly continuation?: Continuation | null;
   readonly cancelled?: boolean;
   readonly authorized_scopes?: readonly string[];
+  readonly governance?: BoundedActiveConstraintsResult;
 }>;
 
 export type ConditionalFieldRecallResult = RecallResult & Readonly<{
@@ -76,6 +85,7 @@ export type ConditionalFieldRecallResult = RecallResult & Readonly<{
 export type ConditionalFieldRecallPortResult = Readonly<{
   readonly index: InformationIndex;
   readonly previews: Readonly<Record<string, string>>;
+  readonly source_metadata?: Readonly<Record<string, RecallSourceMetadata>>;
 }>;
 
 export type ConditionalFieldRecallPort = Readonly<{
@@ -90,22 +100,36 @@ export async function executeRecall(
 ): Promise<ConditionalFieldRecallResult> {
   assertRecallZeroLiveExtraction();
   let previews = new Map<string, string>();
+  let sourceMetadata: Readonly<Record<string, RecallSourceMetadata>> = {};
+  let governance: BoundedActiveConstraintsResult | undefined;
   const index = await withRecallReadSnapshot(context.readSnapshot, async () => {
-    const request = buildRecallRequest(context, params);
     const port = fieldDeps(context).conditionalFieldPort;
+    const original = captureRequestSnapshot(buildRecallRequest(context, params),
+      port === undefined && validSnapshot(params.snapshotDigest) === undefined);
+    const governed = await readRequestGovernance(original, context.dependencies.activeConstraintsPort,
+      params.activeConstraintsCap, port !== undefined);
+    governance = governed.governance;
+    const request = { ...original, snapshot_id: governance.binding.snapshot_id,
+      budget: governed.budget, governance };
     if (port !== undefined) {
       const recalled = portIndexAndPreviews(await port.recall(withoutReaders(request)));
       previews = recalled.previews;
+      sourceMetadata = recalled.source_metadata;
       return recalled.index;
     }
     const recalled = runConditionalFieldRecall(request);
     previews = captureIndexPreviews(recalled, request.readers, request.workspace_id);
+    sourceMetadata = captureIndexSourceMetadata(recalled);
     return recalled;
   });
-  return encodeRecallResult(index, previews);
+  return encodeRecallResult(index, previews, governance, sourceMetadata);
 }
 
 export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest): InformationIndex {
+  if (input.readers.snapshotPin !== undefined) {
+    const reserved = reserveSnapshotPinWork(input.budget);
+    input = { ...input, budget: reserved.budget };
+  }
   const interpretation = compileConditionalFieldQuery({
     source: "ordinary",
     text: input.query_text,
@@ -208,9 +232,14 @@ function projectFromField(
       retained_transitions: state.transitions,
       facets: state.facets
     };
-  const previews = new Map<string, string>(Object.entries(state.preview_cache ?? {}));
+  const ceilings = governanceManifestationCeilings(input.governance?.paths ?? []);
+  const manifestationFor = (id: string) => input.governance === undefined ? "excerpt" as const
+    : governanceManifestationFor(id, ceilings, input.governance.completeness === "complete"
+      && !input.governance.temporal_uncertain);
   let retained = state;
-  let memory = state.remaining_memory_bytes;
+  const payload = new BoundedIndexPayload({ sourceFacts: state.source_facts,
+    previewCache: state.preview_cache, readers: input.readers, workspaceId: input.workspace_id,
+    remainingMemoryBytes: state.remaining_memory_bytes, manifestationFor });
   const index = annotatePublicIndex(InformationIndexSchema.parse(projectAcceptingIndex({
     snapshot,
     view: interpretation.view,
@@ -224,41 +253,18 @@ function projectFromField(
     transition_derivations: state.transition_derivations,
     source_facts: state.source_facts,
     grounding_progress: state.grounding_progress,
-    remaining_memory_bytes: memory,
+    remaining_memory_bytes: payload.remainingMemoryBytes,
     on_grounding_progress: (progress, retainedBytes) => {
-      memory = Math.max(0, memory - retainedBytes);
-      retained = { ...retained, grounding_progress: progress, remaining_memory_bytes: memory };
+      payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
+      retained = { ...retained, grounding_progress: progress, remaining_memory_bytes: payload.remainingMemoryBytes };
     },
     on_remaining_reserve: (remaining) => { retained = { ...retained, remaining_reserve: remaining }; },
     support: state.support,
     expires_at: input.expires_at,
     as_of: input.as_of,
     lifetime_now: input.lifetime_now,
-    payload_work_per_entry: 4,
-    finalize_payload: (entries, allowance) => {
-      let remaining = allowance;
-      let complete = true;
-      for (const entry of entries) {
-        if (previews.has(entry.object_id)) continue;
-        const retainedContent = state.source_facts?.[entry.object_id]?.content;
-        if (retainedContent !== undefined) {
-          const preview = createContentPreview(retainedContent, "excerpt");
-          const bytes = Buffer.byteLength(preview, "utf8");
-          if (remaining < 1 || bytes > memory) { complete = false; continue; }
-          remaining -= 1; memory -= bytes;
-          previews.set(entry.object_id, preview);
-          continue;
-        }
-        if (input.readers.source === undefined || remaining < 4 || memory < 1) { complete = false; continue; }
-        const page = input.readers.source({ workspaceId: input.workspace_id, objectId: entry.object_id,
-          byteLimit: Math.max(1, Math.min(65536, memory)) });
-        remaining -= Math.max(1, page.rowsRead) + 1;
-        memory = Math.max(0, memory - page.bytesRead);
-        if (page.row?.content === undefined || page.unavailable) { complete = false; continue; }
-        previews.set(entry.object_id, createContentPreview(page.row.content, "excerpt"));
-      }
-      return { remaining: Math.max(0, remaining), complete };
-    },
+    payload_work_per_entry: 5,
+    finalize_payload: (entries, allowance) => payload.finalize(entries, allowance),
     prior_continuation: input.continuation ?? null,
     observer: {
       outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: state.closure.observation },
@@ -280,16 +286,21 @@ function projectFromField(
       ? { resource_work: "open" as const }
       : {})
   })), interpretation);
-  INDEX_PREVIEWS.set(index, previews);
-  retained = { ...retained, preview_cache: Object.fromEntries(previews), remaining_memory_bytes: memory };
+  INDEX_PREVIEWS.set(index, payload.previews);
+  INDEX_SOURCE_METADATA.set(index, payload.sourceMetadata);
+  retained = { ...retained, preview_cache: Object.fromEntries(payload.previews),
+    remaining_memory_bytes: payload.remainingMemoryBytes };
   retain?.(retained);
   return index;
 }
 
 export function encodeRecallResult(
   index: InformationIndex,
-  previews: ReadonlyMap<string, string> = new Map()
+  previews: ReadonlyMap<string, string> = new Map(),
+  governance?: BoundedActiveConstraintsResult,
+  sourceMetadata: Readonly<Record<string, RecallSourceMetadata>> = {}
 ): ConditionalFieldRecallResult {
+  const ceilings = governanceManifestationCeilings(governance?.paths ?? []);
   const excerpts = index.entries.map((entry) => previews.get(entry.object_id));
   const hydrated = excerpts.filter((excerpt) => excerpt !== undefined).length;
   const payload = index.entries.length === 0
@@ -314,18 +325,25 @@ export function encodeRecallResult(
       relevance_score: score,
       content_preview: excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW,
       token_estimate: previewTokenEstimate(excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW),
-      manifestation: "excerpt" as const,
+      manifestation: governance === undefined ? "excerpt" as const
+        : governanceManifestationFor(entry.object_id, ceilings,
+          governance.completeness === "complete" && !governance.temporal_uncertain),
       dimension: MemoryDimension.FACT,
       scope_class: ScopeClass.PROJECT,
       origin_plane: "workspace_local" as const,
-      selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`
+      selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
+      ...(sourceMetadata[entry.object_id]?.staged_warnings === undefined ? {} : {
+        staged_warnings: sourceMetadata[entry.object_id]!.staged_warnings
+      })
     };
   });
   return {
     candidates,
+    source_metadata: sourceMetadata,
     synthesis: { status: "absent" },
-    active_constraints: [],
-    active_constraints_count: 0,
+    active_constraints: governance?.constraints ?? [],
+    active_constraints_count: governance?.total_count ?? null,
+    active_constraints_completeness: governance?.completeness ?? "incomplete",
     total_scanned: encodedIndex.entries.length,
     coarse_filter_count: encodedIndex.entries.length,
     fine_assessment_count: encodedIndex.entries.length,
@@ -347,13 +365,19 @@ export function captureIndexPreviews(
   return new Map(INDEX_PREVIEWS.get(index) ?? []);
 }
 
+export function captureIndexSourceMetadata(index: InformationIndex): Readonly<Record<string, RecallSourceMetadata>> {
+  return INDEX_SOURCE_METADATA.get(index) ?? {};
+}
+
 function portIndexAndPreviews(
   recalled: InformationIndex | ConditionalFieldRecallPortResult
-): Readonly<{ readonly index: InformationIndex; readonly previews: Map<string, string> }> {
+): Readonly<{ readonly index: InformationIndex; readonly previews: Map<string, string>;
+  readonly source_metadata: Readonly<Record<string, RecallSourceMetadata>> }> {
   if ("previews" in recalled && "index" in recalled) {
     return {
       index: recalled.index,
-      previews: new Map(Object.entries(recalled.previews))
+      previews: new Map(Object.entries(recalled.previews)),
+      source_metadata: recalled.source_metadata ?? {}
     };
   }
   throw new TypeError("conditionalField.recall must return index and previews");
@@ -441,12 +465,12 @@ function buildRecallRequest(
     ?? extra.budget?.page_budget
     ?? params.policyOverride?.fine_assessment.budgets.max_entries
     ?? 30;
-  const snapshotId = pinnedSnapshotId(params, fieldDeps(context));
+  const snapshotId = validSnapshot(params.snapshotDigest) ?? snapshotIdFromPin(params.workspaceId, undefined);
   const continued = extra.continuation;
-  const clock = extra.interpretationClock
+  const clock = captureEffectiveAsOf(extra.interpretationClock
     ?? params.referenceTime
     ?? continued?.interpretation_clock
-    ?? now;
+    ?? now, context.now);
   return {
     workspace_id: params.workspaceId,
     query_text: queryText,
@@ -511,13 +535,16 @@ export function snapshotIdFromPin(
   );
 }
 
-function pinnedSnapshotId(
-  params: RecallExecutionParams,
-  deps: ReturnType<typeof fieldDeps>
-): string {
-  const supplied = validSnapshot(params.snapshotDigest);
-  if (supplied !== undefined) return supplied;
-  return snapshotIdFromPin(params.workspaceId, deps.observerReaders?.snapshotPin?.(params.workspaceId));
+function captureRequestSnapshot(
+  request: ConditionalFieldRecallRequest,
+  capture: boolean
+): ConditionalFieldRecallRequest {
+  if (!capture || request.cancelled || request.readers.snapshotPin === undefined) return request;
+  const reserved = reserveSnapshotPinWork(request.budget);
+  return { ...request, budget: reserved.budget,
+    snapshot_id: reserved.permitted
+      ? snapshotIdFromPin(request.workspace_id, request.readers.snapshotPin(request.workspace_id))
+      : request.snapshot_id };
 }
 
 function fieldDeps(context: RecallExecutionContext): Readonly<{

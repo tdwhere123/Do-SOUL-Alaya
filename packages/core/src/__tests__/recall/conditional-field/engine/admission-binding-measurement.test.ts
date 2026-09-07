@@ -195,7 +195,7 @@ function relation(
   source: string,
   target: string,
   guard: Partial<Guard> = {}
-): QueryProgram {
+): Extract<QueryProgram, { readonly kind: "relation" }> {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     kind: "relation",

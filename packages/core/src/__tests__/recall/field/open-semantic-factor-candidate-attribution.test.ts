@@ -6,10 +6,6 @@ import type { OpenSemanticFactorActivationReceipt } from
   "../../../recall/field/open-semantic-factors/activation.js";
 import type { CoarseRecallCandidate } from
   "../../../recall/runtime/recall-service-types.js";
-import { assertOpenSemanticCandidateActivations } from
-  "../../../recall/delivery/selection-boundary/validation/open-semantic-candidate-activation-receipt.js";
-import type { SerializedRecallSupplementaryData } from
-  "../../../recall/delivery/selection-boundary/selection-boundary-types.js";
 
 describe("open semantic factor candidate attribution", () => {
   it("maps complete solution evidence to linked and direct candidates", () => {
@@ -50,15 +46,11 @@ describe("open semantic factor candidate attribution", () => {
       }))],
       activation: composedActivation(false)
     });
-    const data = {
-      openSemanticFactorCandidateActivationsByCandidateKey: [...activations]
-    } as unknown as SerializedRecallSupplementaryData;
 
     expect([...activations.values()][0]?.evidence_ids).toEqual([
       "evidence-a",
       "evidence-b"
     ]);
-    expect(() => assertOpenSemanticCandidateActivations(data)).not.toThrow();
   });
 
   it("keeps observed cover when mixed reconstructed partners share a candidate", () => {
@@ -126,46 +118,7 @@ describe("open semantic factor candidate attribution", () => {
     })).toEqual(new Map());
   });
 
-  it("seals attributed activation receipts into selection-boundary state", () => {
-    const activations = attributeOpenSemanticFactorActivations({
-      candidates: [candidate(createMemoryEntry({
-        object_id: "memory-1",
-        evidence_refs: ["evidence-a"]
-      }))],
-      activation: composedActivation(false)
-    });
-    const data = {
-      openSemanticFactorCandidateActivationsByCandidateKey: [...activations]
-    } as unknown as SerializedRecallSupplementaryData;
 
-    expect(() => assertOpenSemanticCandidateActivations(data)).not.toThrow();
-    expect(() => assertOpenSemanticCandidateActivations({
-      ...data,
-      openSemanticFactorCandidateActivationsByCandidateKey: [[
-        "workspace_local:memory_entry:memory-1",
-        { ...activations.values().next().value!, receipt_digest: "sha256:forged" as const }
-      ]]
-    } as unknown as SerializedRecallSupplementaryData)).toThrow(/selection boundary fidelity mismatch/u);
-  });
-
-  it("rejects an unknown activation state at the selection boundary", () => {
-    const activations = attributeOpenSemanticFactorActivations({
-      candidates: [candidate(createMemoryEntry({
-        object_id: "memory-1",
-        evidence_refs: ["evidence-a"]
-      }))],
-      activation: composedActivation(false)
-    });
-    const receipt = activations.values().next().value;
-    expect(() => assertOpenSemanticCandidateActivations({
-      openSemanticFactorCandidateActivationsByCandidateKey: [[
-        "workspace_local:memory_entry:memory-1",
-        { ...receipt, state: "inferred" }
-      ]]
-    } as unknown as SerializedRecallSupplementaryData)).toThrow(
-      /selection boundary fidelity mismatch/u
-    );
-  });
 });
 
 function composedActivation(
