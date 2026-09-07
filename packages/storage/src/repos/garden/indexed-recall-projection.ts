@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   IndexedRecallCursor,
   IndexedRecallFreshness
@@ -30,13 +31,16 @@ export class SqliteIndexedRecallProjection {
     readonly source_revision: string;
     readonly applied_at?: string;
   }> {
-    const row = this.db.prepare(`SELECT observable_epoch, CAST(observable_generation AS TEXT) AS generation,
-      applied_at FROM garden_projection_cursor WHERE workspace_id = ?`).get(workspaceId) as
-      { readonly observable_epoch: string; readonly generation: string; readonly applied_at: string } | undefined;
-    return {
-      source_revision: row === undefined ? "uninitialized" : `${row.observable_epoch}:${row.generation}`,
-      ...(row === undefined ? {} : { applied_at: row.applied_at })
-    };
+    return this.db.transaction(() => {
+      const row = this.db.prepare(`SELECT observable_epoch, CAST(observable_generation AS TEXT) AS generation,
+        applied_at FROM garden_projection_cursor WHERE workspace_id = ?`).get(workspaceId) as
+        { readonly observable_epoch: string; readonly generation: string; readonly applied_at: string } | undefined;
+      const local = row === undefined ? "uninitialized" : `${row.observable_epoch}:${row.generation}`;
+      return {
+        source_revision: `${local}:${temporalGovernanceIdentity(this.db)}`,
+        ...(row === undefined ? {} : { applied_at: row.applied_at })
+      };
+    })();
   }
 
   public freshness(workspaceId: string, objectId: string): IndexedRecallFreshness {
@@ -72,8 +76,27 @@ export class SqliteIndexedRecallProjection {
   }
 }
 
+function temporalGovernanceIdentity(db: SqliteConnection): string {
+  // Canonical singleton plus its selected generation avoids a workspace-wide scan or timestamp authority.
+  const row = db.prepare(`SELECT json_array(
+    s.assertion_schema_generation, s.assertion_event_contract_generation, s.projection_schema_generation,
+    s.active_projection_generation, s.active_as_of, s.projection_policy_id, s.projection_policy_sha256,
+    s.history_digest, s.projection_count, s.projection_digest, s.status,
+    s.temporal_projection_selection_required, s.temporal_projection_selected, s.selection_id, s.projection_refresh_required,
+    g.generation, g.assertion_schema_generation, g.assertion_event_contract_generation, g.projection_schema_generation,
+    g.projection_policy_id, g.projection_policy_sha256, g.history_digest, g.as_of, g.projection_count,
+    g.projection_digest, g.status, g.verified_at IS NOT NULL
+  ) AS identity FROM temporal_schema_state s LEFT JOIN temporal_projection_generations g
+    ON g.generation = s.active_projection_generation WHERE s.state_id = 1`).get() as
+    { readonly identity: string } | undefined;
+  return createHash("sha256").update(row?.identity ?? "missing-temporal-state").digest("hex");
+}
+
 export function prepareIndexedRecallProjection(database: StorageDatabase): void {
-  initializeSemanticArtifactCandidateSchema(database.connection);
-  database.connection.exec(RELATION_RECALL_INDEX_SQL);
-  database.connection.exec(BOUNDED_EMBEDDING_INDEX_SQL);
+  // A current schema marker must never survive failure to prepare its native readers.
+  database.connection.transaction(() => {
+    initializeSemanticArtifactCandidateSchema(database.connection);
+    database.connection.exec(RELATION_RECALL_INDEX_SQL);
+    database.connection.exec(BOUNDED_EMBEDDING_INDEX_SQL);
+  })();
 }
