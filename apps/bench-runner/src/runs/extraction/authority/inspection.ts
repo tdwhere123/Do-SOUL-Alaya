@@ -324,6 +324,8 @@ function readGitText(args: readonly string[]): string {
 function readGitBuffer(args: readonly string[]): Buffer {
   return execFileSync("git", args, {
     encoding: "buffer",
+    // Authority binds the full patch; large legitimate retirements exceed Node's default.
+    maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "ignore"]
   }) as Buffer;
 }
