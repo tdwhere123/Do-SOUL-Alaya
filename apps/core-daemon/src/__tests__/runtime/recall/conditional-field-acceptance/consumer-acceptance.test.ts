@@ -79,12 +79,16 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     await plantSharedProviderBridge(slice);
     const checkout = `s=${MEM.s}`;
     const mcp = await recallAllThroughHandler(slice, "yesterday failed deployment");
-    expect(mcp.entries.some((entry) => entry.object_id === MEM.h)).toBe(true);
+    expect(mcp.entries.some((entry) =>
+      entry.object_id === MEM.h && entry.output_binding.includes(checkout)
+    )).toBe(true);
     expect(mcp.entries.some((entry) =>
       entry.object_id === MEM.hb && entry.output_binding.includes(checkout)
     )).toBe(false);
     const assembled = collectAssembled(slice);
-    expect(assembled.some((entry) => entry.object_id === MEM.h)).toBe(true);
+    expect(assembled.some((entry) =>
+      entry.object_id === MEM.h && entry.output_binding.includes(checkout)
+    )).toBe(true);
     expect(assembled.some((entry) =>
       entry.object_id === MEM.hb && entry.output_binding.includes(checkout)
     )).toBe(false);
