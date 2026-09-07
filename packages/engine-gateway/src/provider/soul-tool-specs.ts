@@ -34,7 +34,7 @@ export const soulToolDefs: readonly SoulToolSpec[] = [
   {
     name: "soul.recall",
     description:
-      "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall relevant durable memory for the current task. Returns ranked candidates, evidence pointers, and a delivery id for later usage proof. Optional time filter via `since` / `until` (ISO datetime) — useful for queries like \"what did I say on May 20\". Pass the user's latest message verbatim in `recent_turn` so Alaya passively extracts durable candidates from this turn — you do not have to file them yourself.",
+      "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall a structured information index for the current task: association milligrades, completeness dimensions, unknown-cause claims, and a delivery id. `max_results` is the page budget, not a ranking cutoff. When the index cannot fit one packet, the response `index.continuation` can be sent back as request `continuation` to fetch the next page. Optional `since` / `until` are compiler hints. `recent_turn` is ignored for extraction; ordinary recall does not enqueue Garden work or call a missing embedding provider. Additive `index` carries the target view; older agents can keep using `results` in the same order.",
     parametersSchema: SoulMemorySearchRequestSchema
   },
   {

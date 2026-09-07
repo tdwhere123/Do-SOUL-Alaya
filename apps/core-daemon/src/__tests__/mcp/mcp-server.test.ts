@@ -128,6 +128,10 @@ describe("mcp server", () => {
     expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("soul.recall -> soul.open_pointer");
     expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("soul.emit_candidate_signal");
     expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("accepted proposal apply");
+    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).toContain("Ordinary soul.recall does not enqueue extraction");
+    expect(ALAYA_MCP_SERVER_INSTRUCTIONS).not.toContain(
+      "On soul.recall, pass the user's latest message verbatim in recent_turn"
+    );
   });
 
   it("derives MCP server info version from runtime metadata instead of a hardcoded sentinel", () => {

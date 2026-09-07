@@ -39,7 +39,7 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("conditional-field producer-consumer F1-F7 counterexamples", () => {
+describe("conditional-field producer-consumer counterexamples", () => {
   it("F1 program variants differ on the same planted graph", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantChain(slice);

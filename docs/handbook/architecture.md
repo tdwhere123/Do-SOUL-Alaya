@@ -316,9 +316,10 @@ review finding:
    - RecallService (needs Memory + Embedding repos; fusion, delivery,
      graph-expansion, path-relation, field-generation, and diagnostics helpers
      live under `packages/core/src/recall/`). Helper presence is not
-     connectedness. **LIVE** HEAD has field/path/Slice/flood wiring, canonical
-     `prefixSK`, and explicit legacy `selectGammaWalk`, including live F3-only
-     membership. **TARGET** replaces that selector at C08; see
+     connectedness. **LIVE** HEAD is the conditional field:
+     `compileConditionalFieldQuery` → `observeField` → `projectAcceptingIndex`.
+     Historical `prefixSK` / `selectGammaWalk` / flood wiring remain on disk
+     and are not reachable from `executeRecall`. See
      [`recall.md`](recall.md).
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService

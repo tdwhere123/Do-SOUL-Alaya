@@ -4,9 +4,9 @@ import {
   type InformationIndex,
   type MemorySearchResult
 } from "@do-soul/alaya-protocol";
-import { CONTRACT_ONLY_UNTIL_U07 } from "./consumer-contract.js";
+import { CONTRACT_ONLY_UNTIL_REAL_PRODUCERS } from "./consumer-contract.js";
 
-export { CONTRACT_ONLY_UNTIL_U07 };
+export { CONTRACT_ONLY_UNTIL_REAL_PRODUCERS };
 
 export const PAYLOAD_OMITTED_PREVIEW = "[payload omitted]";
 

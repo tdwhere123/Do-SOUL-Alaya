@@ -106,7 +106,7 @@ function indexEntry(input: {
   });
 }
 
-describe("U00 upgrade contracts", () => {
+describe("conditional-field upgrade contracts", () => {
   it("B01 keeps object+program+time as distinct accepting keys", () => {
     const left = indexEntry({ object_id: "cfg", program_state: "accepting", time_state: "yesterday" });
     const right = indexEntry({ object_id: "cfg", program_state: "mid", time_state: "yesterday" });

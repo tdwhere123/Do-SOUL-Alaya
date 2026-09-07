@@ -265,10 +265,7 @@ function projectFromField(
       open_regions: state.residuals
     },
     resume_cursors: state.resume_cursors,
-    interpretation_status: interpretation.status === "resolved" || interpretation.status === "partial"
-      || interpretation.status === "hypotheses"
-      ? undefined
-      : interpretation.status,
+    interpretation_status: interpretation.status,
     remaining_reserve: state.remaining_reserve,
     interpretation_id: interpretationIdentity({
       interpretation_clock: interpretation.interpretation_clock

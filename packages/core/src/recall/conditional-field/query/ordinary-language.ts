@@ -230,7 +230,7 @@ function timestampForSourceFilters(
 ): string | undefined {
   if (filters.time_field === "last_used_at") return facts.last_used_at ?? undefined;
   if (filters.time_field === "created_at") return facts.created_at;
-  return facts.observed_at ?? facts.created_at;
+  return facts.observed_at;
 }
 
 function mapProgramGuards(program: QueryProgram, map: (guard: Guard) => Guard): QueryProgram {

@@ -11,7 +11,7 @@ import {
   defaultBudget,
   defaultView
 } from "./finite-worlds.js";
-import { CONTRACT_ONLY_UNTIL_U07, productIdentity, projectOracleIndex } from "./oracle-index.js";
+import { CONTRACT_ONLY_UNTIL_REAL_PRODUCERS, productIdentity, projectOracleIndex } from "./oracle-index.js";
 import {
   COVERAGE_ROWS,
   coverageById,
@@ -48,7 +48,7 @@ import {
   withdrawLeaf
 } from "./upgrade-expected.js";
 
-describe("conditional-field upgrade oracle (contract-only until U07)", () => {
+describe("conditional-field upgrade oracle (contract-only until real producers bind)", () => {
   it("coverage matrix names every A/B row and inherited finding", () => {
     expect(COVERAGE_ROWS.map((row) => row.id)).toEqual(requiredIds());
     for (const id of requiredIds()) {
@@ -58,7 +58,7 @@ describe("conditional-field upgrade oracle (contract-only until U07)", () => {
       if (row.binding === "incomplete") expect(row.incomplete_reason).toBeDefined();
     }
     expect(formatCoverageMarkdown()).toContain("| B03 | real-producer |");
-    expect(CONTRACT_ONLY_UNTIL_U07).toMatch(/U07/);
+    expect(CONTRACT_ONLY_UNTIL_REAL_PRODUCERS).toMatch(/contract-only until real producers bind/);
   });
 
   it("B01 keeps object+program+time as distinct accepting keys", () => {

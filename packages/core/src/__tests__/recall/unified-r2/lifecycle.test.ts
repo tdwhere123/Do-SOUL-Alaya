@@ -21,7 +21,7 @@ async function harness() {
   return createSliceHarness((database) => databases.add(database));
 }
 
-describe("C02 lifecycle probes", () => {
+describe("lifecycle probes", () => {
   it("X1 local source transaction acks with no transport wired", async () => {
     const slice = await harness();
     await slice.writeMemory(MEM.checklist, CONTENT.checklist, MemoryDimension.PROCEDURE, true);

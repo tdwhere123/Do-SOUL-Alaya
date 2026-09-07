@@ -31,7 +31,7 @@ function attemptRows(database: StorageDatabase, taskId: string): readonly { stat
   ).all(taskId) as { state: string; bytes: number | null }[];
 }
 
-describe("W03 retained lifecycle and completion admission", () => {
+describe("retained lifecycle and completion admission", () => {
   it("does not extract or republish after retention tombstone of an enqueued source", async () => {
     const f = await fixture();
     const task = await f.write(MEM.orion, "Alice owns Orion");

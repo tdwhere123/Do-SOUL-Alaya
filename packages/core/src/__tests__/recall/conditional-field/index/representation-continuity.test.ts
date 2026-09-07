@@ -27,7 +27,7 @@ const EXPIRES_AT = "2099-01-01T00:00:00.000Z";
 const EVENING = "2026-09-06T23:59:59.000Z";
 const MORNING = "2026-09-07T00:00:01.000Z";
 
-describe("U04 index representation continuity", () => {
+describe("index representation continuity", () => {
   it("B01 keeps program_state and time_state in the accepting key", () => {
     const index = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([

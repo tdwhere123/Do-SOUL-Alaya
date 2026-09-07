@@ -203,7 +203,8 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       query: "pnpm workspace commands",
       max_results: 800
     });
-    expect(commands.index.completeness.observed_coverage).not.toBe("unavailable");
+    expect(commands.index.completeness.logical_index).not.toBe("complete");
+    expect(commands.index.completeness.observed_coverage).not.toBe("exhausted_empty");
     expect(commands.index.query_id).not.toBe(rules.index.query_id);
     const mixed = await recallThroughHandler(slice, {
       query: "pnpm workspace commands",
@@ -478,6 +479,6 @@ function stamp(
   instant: string
 ): void {
   slice.database.connection.prepare(
-    "UPDATE memory_entries SET created_at = ?, updated_at = ? WHERE object_id = ?"
+    "UPDATE memory_entries SET event_time_start = ?, updated_at = ? WHERE object_id = ?"
   ).run(instant, instant, objectId);
 }

@@ -326,7 +326,7 @@ export async function plantDeployment(slice: SourceSlice): Promise<void> {
 
 export function stamp(slice: SourceSlice, objectId: string, instant: string): void {
   slice.database.connection.prepare(
-    "UPDATE memory_entries SET created_at = ?, updated_at = ? WHERE object_id = ?"
+    "UPDATE memory_entries SET event_time_start = ?, updated_at = ? WHERE object_id = ?"
   ).run(instant, instant, objectId);
 }
 

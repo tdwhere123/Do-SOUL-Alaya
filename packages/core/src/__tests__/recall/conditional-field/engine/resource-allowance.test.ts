@@ -22,7 +22,7 @@ import {
   productKey
 } from "../reference/deployment.fixture.js";
 
-describe("G4 request resource allowance", () => {
+describe("request resource allowance", () => {
   it("does not retain a 12KB identity set when memory_bytes is 1", () => {
     let reads = 0;
     const query = compileQuery("needle");

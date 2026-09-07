@@ -15,7 +15,7 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("W02 incremental projection and read-only recall", () => {
+describe("incremental projection and read-only recall", () => {
   it("A1 raw recall hits planted evidence while enrichment is pending then updates only the changed view", async () => {
     const f = await artifactFixture((database) => databases.add(database));
     await f.write(MEM.checklist, CONTENT.checklist);

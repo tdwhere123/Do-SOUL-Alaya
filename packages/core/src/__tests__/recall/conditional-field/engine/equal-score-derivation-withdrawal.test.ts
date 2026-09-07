@@ -30,7 +30,7 @@ const OVERLAY = {
   rel_c: { milligrades: 800, applicable: true }
 };
 
-describe("B03 equal-score AND/OR withdrawal", () => {
+describe("equal-score AND/OR withdrawal", () => {
   it("withdrawing c distinguishes (a AND b) OR c from (a OR b) AND c", () => {
     const a = leafDerivation({ derivation_id: "a", observation_id: "a", leaf_id: "a" });
     const b = leafDerivation({ derivation_id: "b", observation_id: "b", leaf_id: "b" });

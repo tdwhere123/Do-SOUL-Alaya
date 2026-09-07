@@ -235,6 +235,50 @@ describe("invokeBoundRecall shared input contract", () => {
       { readonly snapshotDigest?: string };
     expect(productionCall).not.toHaveProperty("snapshotDigest");
   });
+
+  it("does not default MCP time_field to created_at when since/until omit it", async () => {
+    const policy = makeSharedPolicy();
+    const taskSurface = TaskObjectSurfaceSchema.parse({
+      runtime_id: policy.task_surface_ref,
+      object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
+      task_surface_ref: null,
+      expires_at: null,
+      derived_from: null,
+      retention_policy: RetentionPolicy.SESSION_ONLY,
+      surface_kind: "mcp_memory_tool",
+      display_name: "deployment rules",
+      context_refs: []
+    });
+    const recallService = {
+      recall: vi.fn(async () => buildSeededRecallResult("deployment rules"))
+    };
+    await runProductionBoundRecall({
+      deps: { recallService } as unknown as RecallUsageHandlerDependencies,
+      request: {
+        query: "deployment rules",
+        max_results: 5,
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        since: "2026-09-05T00:00:00.000Z",
+        until: "2026-09-06T00:00:00.000Z"
+      },
+      context: {
+        workspaceId: "ws-time",
+        runId: null,
+        agentTarget: "codex",
+        sessionId: "s"
+      },
+      taskSurface,
+      policyOverride: policy
+    });
+    const productionCall = (recallService.recall as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      readonly since?: string;
+      readonly timeFilter?: { readonly field?: string };
+    };
+    expect(productionCall.since).toBe("2026-09-05T00:00:00.000Z");
+    expect(productionCall.timeFilter?.field).not.toBe("created_at");
+  });
 });
 
 function buildSeededRecallResult(query: string) {

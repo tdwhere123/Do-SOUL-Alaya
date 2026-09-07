@@ -17,7 +17,7 @@ async function harness() {
   return createSliceHarness((database) => databases.add(database));
 }
 
-describe("C02 real local vertical slice", () => {
+describe("real local vertical recall", () => {
   it("L5 text boundary overrides request as-of against real dated sources", async () => {
     const slice = await harness();
     await slice.plantLaunchCorpus({ includeTemporalOwners: true, includeChannel: false });
@@ -197,7 +197,7 @@ describe("C02 real local vertical slice", () => {
   });
 });
 
-describe("C02 launch plants", () => {
+describe("launch plants", () => {
   it("keeps checklist gist as planted source text", () => {
     expect(CONTENT.checklist).toContain("deployment checklist");
   });

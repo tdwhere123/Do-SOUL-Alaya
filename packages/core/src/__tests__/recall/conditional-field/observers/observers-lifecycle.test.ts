@@ -17,6 +17,7 @@ import {
 import {
   QUERY_ID,
   SNAPSHOT_ID,
+  YESTERDAY_INSTANT,
   defaultView,
   yesterdayAnchorGuard
 } from "../reference/deployment.fixture.js";
@@ -420,6 +421,11 @@ async function plantDeployment(slice: Awaited<ReturnType<typeof openSourceSlice>
   await slice.writeMemory(MEM.r, "yesterday failed deployment of checkout", MemoryDimension.EPISODE);
   await slice.writeMemory(MEM.l, "deployment log for yesterday checkout failure", MemoryDimension.EPISODE);
   await slice.writeMemory(MEM.c, "last-week configuration change for checkout", MemoryDimension.FACT);
+  for (const objectId of [MEM.r, MEM.l, MEM.c]) {
+    slice.database.connection.prepare(
+      "UPDATE memory_entries SET event_time_start = ? WHERE object_id = ?"
+    ).run(YESTERDAY_INSTANT, objectId);
+  }
   const open = { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" };
   await slice.admitRelation({
     evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000201",

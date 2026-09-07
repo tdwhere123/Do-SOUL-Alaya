@@ -5,8 +5,7 @@ import {
   type InformationIndex
 } from "@do-soul/alaya-protocol";
 
-export const CONTRACT_ONLY_UNTIL_C07 = "contract-only until C07 binds real producers";
-export const CONTRACT_ONLY_UNTIL_U07 = "contract-only until U07 binds real producers";
+export const CONTRACT_ONLY_UNTIL_REAL_PRODUCERS = "contract-only until real producers bind";
 
 export const FORBIDDEN_CONSUMER_KEYS = [
   "ranking_authority",

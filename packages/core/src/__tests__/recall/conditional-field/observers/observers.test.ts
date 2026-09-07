@@ -14,6 +14,7 @@ import {
   toSourceObserverRow,
   type ObserverReaders
 } from "../../../../recall/conditional-field/observers/observe.js";
+import { buildTypedObservation } from "../../../../recall/conditional-field/observers/observation-admission.js";
 import {
   LAST_WEEK_INSTANT,
   QUERY_ID,
@@ -32,6 +33,34 @@ afterEach(() => {
 });
 
 describe("conditional-field resumable observers", () => {
+  it("does not resolve observed_at from created_at", () => {
+    const observation = buildTypedObservation({
+      lease: lease(),
+      action: action("seed", 16),
+      cursor: startObserverCursor({
+        cursor_id: "seed-cursor",
+        snapshot_id: SNAPSHOT_ID,
+        query_id: QUERY_ID,
+        region_id: "seed"
+      }),
+      query: interpretation(),
+      workspace_id: WS,
+      readers: {}
+    }, {
+      objectId: MEM.r,
+      sourceRevision: "rev",
+      observationKey: "only-created",
+      sourceRow: {
+        object_id: MEM.r,
+        sourceRevision: "rev",
+        created_at: "2026-01-01T00:00:00.000Z",
+        lifecycle_state: "active"
+      },
+      identityKind: "object"
+    });
+    expect(observation?.observed_at).toBeUndefined();
+  });
+
   it("concatenates advancing seed pages onto the finite pinned lexical domain", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     const ids = await plantNeedles(slice, 8);

@@ -47,6 +47,6 @@ function buildRecallTimeFilter(request: SoulMemorySearchRequest) {
   return {
     since: request.since ?? null,
     until: request.until ?? null,
-    field: request.time_field ?? "created_at"
+    ...(request.time_field === undefined ? {} : { field: request.time_field })
   } as const;
 }

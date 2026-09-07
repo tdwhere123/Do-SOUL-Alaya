@@ -78,6 +78,21 @@ describe("conditional-field executeRecall assembly", () => {
     expect(cancelled.completeness.logical_index).not.toBe("complete");
   });
 
+  it("does not mint known-empty complete for a lexical zero-hit query", async () => {
+    const empty = await openSourceSlice((database) => databases.add(database));
+    const lexical = runRecall(empty, { page_budget: 800, query_text: "deployment rules" });
+    expect(lexical.entries).toEqual([]);
+    expect(lexical.completeness.logical_index).not.toBe("complete");
+    expect(lexical.completeness.observed_coverage).not.toBe("exhausted_empty");
+    const partial = runRecall(empty, {
+      page_budget: 800,
+      query_text: "failed deployment of checkout"
+    });
+    expect(partial.entries).toEqual([]);
+    expect(partial.completeness.logical_index).not.toBe("complete");
+    expect(partial.completeness.observed_coverage).not.toBe("exhausted_empty");
+  });
+
   it("filters dimension and absent domain tags instead of returning every fact", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
@@ -195,7 +210,8 @@ describe("conditional-field executeRecall assembly", () => {
       expires_at: "2099-01-01T00:00:00.000Z",
       readers: readersFor(slice)
     });
-    expect(commands.completeness.observed_coverage).not.toBe("unavailable");
+    expect(commands.completeness.logical_index).not.toBe("complete");
+    expect(commands.completeness.observed_coverage).not.toBe("exhausted_empty");
   });
 
   it("does not mint complete-empty after an unavailable observer", async () => {
@@ -461,6 +477,6 @@ function stampObservedAt(
   instant: string
 ): void {
   slice.database.connection.prepare(
-    "UPDATE memory_entries SET created_at = ?, updated_at = ? WHERE object_id = ?"
+    "UPDATE memory_entries SET event_time_start = ?, updated_at = ? WHERE object_id = ?"
   ).run(instant, instant, objectId);
 }

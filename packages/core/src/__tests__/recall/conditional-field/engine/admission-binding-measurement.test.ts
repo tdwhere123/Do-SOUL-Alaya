@@ -21,7 +21,7 @@ import { INTERPRETATION_CLOCK, SNAPSHOT_ID, defaultBudget, defaultView } from ".
 const VALIDITY: RelationValidity = { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
 const AS_OF = "2026-09-07T00:00:00.000Z";
 
-describe("G1 admission, binding, measurement, and evidence identities", () => {
+describe("admission, binding, measurement, and evidence identities", () => {
   it("rejects equality, hypothesis, and associated-time negatives", () => {
     expect(acceptedIds(observeProgram(
       relation("a", "x", "y", {
@@ -180,7 +180,7 @@ function interpretation(
 ): QueryInterpretation {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    query_id: "g1-probe",
+    query_id: "admission-probe",
     status: "resolved",
     snapshot_id: SNAPSHOT_ID,
     program,

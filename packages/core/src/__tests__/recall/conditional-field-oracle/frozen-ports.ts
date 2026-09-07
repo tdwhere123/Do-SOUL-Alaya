@@ -9,8 +9,7 @@ import {
 } from "./enumerate-simple-paths.js";
 import type { FiniteWorld } from "./finite-worlds.js";
 import {
-  CONTRACT_ONLY_UNTIL_C07,
-  CONTRACT_ONLY_UNTIL_U07,
+  CONTRACT_ONLY_UNTIL_REAL_PRODUCERS,
   admitRequestBudget,
   emptyCounts,
   milligradeOf,
@@ -26,7 +25,7 @@ import {
   type SourceSlice
 } from "./bound-producer.js";
 
-export { CONTRACT_ONLY_UNTIL_C07, CONTRACT_ONLY_UNTIL_U07 };
+export { CONTRACT_ONLY_UNTIL_REAL_PRODUCERS };
 
 export const FORBIDDEN_CONSUMER_KEYS = [
   "ranking_authority",
@@ -117,7 +116,7 @@ export function targetPayload(surface: "mcp" | "cli", index: InformationIndex): 
     schema_version: 1,
     surface,
     bound: false,
-    note: CONTRACT_ONLY_UNTIL_C07,
+    note: CONTRACT_ONLY_UNTIL_REAL_PRODUCERS,
     provider_calls: 0,
     garden_enqueue: 0,
     index: InformationIndexSchema.parse(index)

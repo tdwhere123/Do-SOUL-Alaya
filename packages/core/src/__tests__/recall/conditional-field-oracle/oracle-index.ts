@@ -22,8 +22,7 @@ import {
 } from "./enumerate-simple-paths.js";
 import type { NativeReaderPage } from "./finite-worlds.js";
 
-export const CONTRACT_ONLY_UNTIL_C07 = "contract-only until C07 binds real producers";
-export const CONTRACT_ONLY_UNTIL_U07 = "contract-only until U07 binds real producers";
+export const CONTRACT_ONLY_UNTIL_REAL_PRODUCERS = "contract-only until real producers bind";
 
 export type OracleCounts = Readonly<{
   readonly matches: number;

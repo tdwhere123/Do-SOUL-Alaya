@@ -7,7 +7,6 @@ import {
   type InformationIndex
 } from "@do-soul/alaya-protocol";
 import {
-  CONTRACT_ONLY_UNTIL_C07,
   type TargetConsumerPayload
 } from "./consumer-contract.js";
 

@@ -4,10 +4,22 @@ import {
   type FieldSnapshot,
   type FieldValue
 } from "@do-soul/alaya-protocol";
-import { collectRelations, compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
+import {
+  collectRelations,
+  compileConditionalFieldQuery,
+  SERVICE_VARIABLE
+} from "../../../recall/conditional-field/query/compile-query.js";
 import { projectAcceptingIndex } from "../../../recall/conditional-field/index/project-accepting-index.js";
+import { observeField } from "../../../recall/runtime/conditional-field-observe.js";
+import { type ObserverReaders } from "../../../recall/conditional-field/observers/observe.js";
 import { coverageById } from "./coverage-matrix.js";
-import { INTERPRETATION_CLOCK, SNAPSHOT_ID, defaultBudget, defaultView } from "./finite-worlds.js";
+import {
+  INTERPRETATION_CLOCK,
+  SNAPSHOT_ID,
+  YESTERDAY_INSTANT,
+  defaultBudget,
+  defaultView
+} from "./finite-worlds.js";
 import { productIdentity } from "./oracle-index.js";
 
 describe("conditional-field compiler and projection contracts", () => {
@@ -39,14 +51,42 @@ describe("conditional-field compiler and projection contracts", () => {
       budget: defaultBudget(),
       interpretation_clock: INTERPRETATION_CLOCK
     });
-    const bound = collectRelations(interpretation.program)
-      .some((relation) =>
-        relation.relation_kind === "uses_service"
-        && relation.source_variable === "r"
-        && relation.target_variable === "s"
-      );
-    expect(bound).toBe(true);
+    const relations = collectRelations(interpretation.program);
+    const usesService = relations.some((relation) =>
+      relation.relation_kind === "uses_service"
+      && relation.source_variable === "r"
+      && relation.target_variable === SERVICE_VARIABLE
+    );
+    const historyOffService = relations.some((relation) =>
+      relation.relation_kind === "associated_history"
+      && relation.source_variable === SERVICE_VARIABLE
+    );
+    expect(usesService).toBe(true);
+    expect(historyOffService).toBe(true);
     expect(interpretation.status).toBe("partial");
+    expect(coverageById("B04").binding).toBe("incomplete");
+  });
+
+  it("B04 high-grade shared-provider bridge does not admit another service history as the same service", () => {
+    const interpretation = compileConditionalFieldQuery({
+      source: "ordinary",
+      text: "yesterday's failed deployment",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      interpretation_clock: INTERPRETATION_CLOCK
+    });
+    const field = observeField(interpretation, {
+      workspace_id: "workspace-1",
+      query_text: "yesterday's failed deployment",
+      budget: defaultBudget(),
+      as_of: INTERPRETATION_CLOCK,
+      readers: sharedProviderWorld()
+    });
+    const values = field.binding.kind === "bound" ? field.binding.snapshot.values : [];
+    const historyA = values.filter((row) => row.state.object_id === "history-a");
+    const historyB = values.filter((row) => row.state.object_id === "history-b");
+    expect(historyA.some((row) => row.state.binding_context.includes(`${SERVICE_VARIABLE}=service-a`))).toBe(true);
+    expect(historyB.some((row) => row.state.binding_context.includes(`${SERVICE_VARIABLE}=service-a`))).toBe(false);
   });
 
   it("B05 projects the actual compiler hypothesis coverage", () => {
@@ -71,7 +111,7 @@ describe("conditional-field compiler and projection contracts", () => {
   });
 
   it("incomplete rows keep a named reason", () => {
-    for (const row of ["A21", "A22", "B13"].map(coverageById)) {
+    for (const row of ["A21", "A22", "B04", "B13"].map(coverageById)) {
       expect(row.binding).toBe("incomplete");
       expect(row.incomplete_reason?.length ?? 0).toBeGreaterThan(8);
     }
@@ -107,5 +147,59 @@ function fieldValue(
     },
     milligrades,
     accepting: true
+  };
+}
+
+function sharedProviderWorld(): ObserverReaders {
+  const validity = { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" };
+  const edges = [
+    { assertionId: "u-a", sourceObjectId: "event-a", targetObjectId: "service-a", predicate: "uses_service" },
+    { assertionId: "u-p", sourceObjectId: "event-a", targetObjectId: "shared-provider", predicate: "uses_service" },
+    { assertionId: "h-a", sourceObjectId: "service-a", targetObjectId: "history-a", predicate: "service_history" },
+    { assertionId: "h-p", sourceObjectId: "shared-provider", targetObjectId: "history-b", predicate: "service_history" },
+    { assertionId: "h-b", sourceObjectId: "service-b", targetObjectId: "history-b", predicate: "service_history" }
+  ];
+  return {
+    lexical: () => ({
+      ids: ["event-a"],
+      nativeVisits: 1,
+      nativeBytes: 1,
+      rowsRead: 1,
+      bytesRead: 1,
+      truncated: false
+    }),
+    source: (input) => ({
+      row: {
+        object_id: input.objectId,
+        sourceRevision: "rev",
+        lifecycle_state: "active",
+        scope_class: "project",
+        observed_at: YESTERDAY_INSTANT,
+        created_at: "2020-01-01T00:00:00.000Z",
+        content: input.objectId === "event-a" ? "failed deployment of checkout" : input.objectId
+      },
+      rowsRead: 1,
+      bytesRead: 1,
+      unavailable: false
+    }),
+    relation: (input) => {
+      const observations = edges
+        .filter((edge) => (input.subject === null || edge.sourceObjectId === input.subject)
+          && edge.predicate === input.predicate)
+        .map((edge) => ({
+          ...edge,
+          resultObjectId: edge.targetObjectId,
+          validity,
+          evidenceRefs: ["e1"]
+        }));
+      return {
+        observations,
+        nativeVisits: observations.length,
+        nativeBytes: 1,
+        rowsRead: observations.length,
+        bytesRead: 1,
+        truncated: false
+      };
+    }
   };
 }

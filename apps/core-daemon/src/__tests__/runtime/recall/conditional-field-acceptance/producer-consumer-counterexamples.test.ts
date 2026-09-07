@@ -29,7 +29,7 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("conditional-field MCP/CLI F1-F7 producer-consumer counterexamples", () => {
+describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
   it("F1 ordinary programs do not collapse to one field", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);

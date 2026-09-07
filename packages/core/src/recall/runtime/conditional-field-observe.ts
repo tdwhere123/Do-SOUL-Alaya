@@ -500,15 +500,14 @@ function recordObservedAt(
       source_revision: row.sourceRevision,
       ...(row.content === undefined ? {} : { content: row.content }),
       ...(row.predicates === undefined ? {} : { predicates: row.predicates }),
-      ...((row.observed_at ?? row.created_at) === undefined ? {} : { observed_at: row.observed_at ?? row.created_at }),
+      ...(row.observed_at === undefined ? {} : { observed_at: row.observed_at }),
       ...(row.created_at === undefined ? {} : { created_at: row.created_at }),
       ...(row.last_used_at === undefined ? {} : { last_used_at: row.last_used_at }),
       ...(row.dimension === undefined ? {} : { dimension: row.dimension }),
       ...(row.domain_tags === undefined ? {} : { domain_tags: row.domain_tags }),
       ...(row.scope_class === undefined ? {} : { scope_class: row.scope_class })
     });
-    const instant = row.observed_at ?? row.created_at;
-    if (instant !== undefined) observedAt[objectId] = instant;
+    if (row.observed_at !== undefined) observedAt[objectId] = row.observed_at;
   }
 }
 

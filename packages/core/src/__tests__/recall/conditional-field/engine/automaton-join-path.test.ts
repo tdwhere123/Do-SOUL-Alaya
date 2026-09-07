@@ -14,7 +14,7 @@ import { composedFacetPathId } from "../../../../recall/conditional-field/engine
 const VALIDITY: RelationValidity = { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
 const AS_OF = "2026-09-07T00:00:00.000Z";
 
-describe("G2 automaton, compatible join, and composed path identity", () => {
+describe("automaton, compatible join, and composed path identity", () => {
   it("rejects a reused persistent source variable while preserving an explicit chain", () => {
     const rows = [edge("seed", "middle", "observed_log"), edge("middle", "end", "config_direct")];
     expect(acceptedIds(observeProgram(seq(rel("observed_log", "service", "provider"), rel("config_direct", "service", "history")), rows))).not.toContain("end");
@@ -260,7 +260,7 @@ function observeProgram(
 function interpretation(program: QueryProgram): QueryInterpretation {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    query_id: "g2-probe",
+    query_id: "join-path-probe",
     status: "resolved",
     snapshot_id: SNAPSHOT_ID,
     program,

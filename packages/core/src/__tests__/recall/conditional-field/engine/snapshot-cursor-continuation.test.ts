@@ -28,7 +28,7 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("G3 snapshot, cursor, unavailable source, and continuation", () => {
+describe("snapshot, cursor, unavailable source, and continuation", () => {
   it("changes the observable pin when a relation is admitted", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await slice.writeMemory(MEM.r, "needle seed", MemoryDimension.FACT);

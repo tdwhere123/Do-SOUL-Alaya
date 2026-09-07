@@ -19,8 +19,12 @@ describe("mcp memory tool catalog", () => {
     const byName = new Map(listAlayaMemoryTools().map((tool) => [tool.name, tool] as const));
 
     expect(byName.get("soul.recall")?.annotations.readOnlyHint).toBe(false);
-    expect(byName.get("soul.recall")?.description).toContain("POST_TURN_EXTRACT");
-    expect(byName.get("soul.recall")?.description).toContain("not a read-only tool");
+    expect(byName.get("soul.recall")?.description).toContain("information index");
+    expect(byName.get("soul.recall")?.description).toContain("not a ranking cutoff");
+    expect(byName.get("soul.recall")?.description).toContain("`recent_turn` is ignored for extraction");
+    expect(byName.get("soul.recall")?.description).toContain("does not enqueue Garden work");
+    expect(byName.get("soul.recall")?.description).not.toContain("POST_TURN_EXTRACT");
+    expect(byName.get("soul.recall")?.description).not.toContain("ranked candidates");
     expect(byName.get("soul.open_pointer")?.annotations.readOnlyHint).toBe(true);
     expect(byName.get("soul.explore_graph")?.annotations.readOnlyHint).toBe(true);
     expect(byName.get("garden.list_pending_tasks")?.annotations.readOnlyHint).toBe(true);
@@ -65,5 +69,9 @@ describe("mcp memory tool catalog", () => {
     expect(daemonCatalog.find((tool) => tool.name === "garden.claim_task")?.description).toContain(
       "already_claimed"
     );
+    const recallSpec = soulToolDefs.find((spec) => spec.name === "soul.recall")?.description ?? "";
+    expect(recallSpec).toContain("information index");
+    expect(recallSpec).toContain("`recent_turn` is ignored for extraction");
+    expect(recallSpec).not.toContain("ranked candidates");
   });
 });

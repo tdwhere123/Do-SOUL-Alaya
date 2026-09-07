@@ -14,6 +14,7 @@ import {
   SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
   type QueryMemoryPort
 } from "../../../../recall/conditional-field/query/compile-query.js";
+import { sourceFactsSatisfyFilters } from "../../../../recall/conditional-field/query/ordinary-language.js";
 import {
   completenessForInterpretationStatus,
   guardAppliesToVariable,
@@ -437,6 +438,31 @@ describe("conditional-field query compiler", () => {
     ))).toBe(true);
     expect(interpretationCoverageFor(filtered.status, filtered)).toBe("open");
     expect(interpretationCoverageFor(filtered.status, filtered)).not.toBe("complete");
+  });
+
+  it("does not encode time_field=created_at when since/until omit time_field", () => {
+    const interpretation = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "deployment rules",
+      interpretation_clock: INTERPRETATION_CLOCK,
+      since: YESTERDAY_START,
+      until: YESTERDAY_END
+    });
+    const packed = collectRelations(interpretation.program)
+      .map((relation) => relation.guard.predicate_name ?? "")
+      .join("|");
+    expect(packed).toContain(`since=${YESTERDAY_START}`);
+    expect(packed).not.toContain("time_field=created_at");
+    expect(sourceFactsSatisfyFilters(
+      { since: YESTERDAY_START },
+      { created_at: YESTERDAY_INSTANT }
+    )).toBe("unresolved");
+    expect(sourceFactsSatisfyFilters(
+      { since: YESTERDAY_START },
+      { observed_at: YESTERDAY_INSTANT }
+    )).toBe("true");
   });
 });
 

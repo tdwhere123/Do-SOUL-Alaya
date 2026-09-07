@@ -96,7 +96,7 @@ function effectObservedAt(
   observedAt: string | undefined,
   sourceRow: SourceObserverRow | undefined
 ): string | undefined {
-  return observedAt ?? sourceRow?.observed_at ?? sourceRow?.created_at;
+  return observedAt ?? sourceRow?.observed_at;
 }
 
 function applicabilityFor(
