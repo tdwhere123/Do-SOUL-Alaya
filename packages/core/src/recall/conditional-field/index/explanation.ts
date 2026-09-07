@@ -10,11 +10,13 @@ import {
   type Witness
 } from "@do-soul/alaya-protocol";
 import { joinHyperedgeOr } from "../reference/accepting-projection.js";
+import { productStateNodeId } from "../reference/bind-max-min.js";
 
 export type ExplanationSelectionInput = Readonly<{
   readonly value: FieldValue;
   readonly support?: readonly SupportRecord[];
   readonly derivations?: readonly Derivation[];
+  readonly output_derivations?: Readonly<Record<string, readonly string[]>>;
   readonly page_budget: number;
   readonly expand_payload: boolean;
 }>;
@@ -39,6 +41,19 @@ export function explanationIdsForEntry(input: ExplanationSelectionInput): readon
     return derivationExplanationIds(input);
   }
   return witnessExplanationIds(input);
+}
+
+export function recoverExplanationForest(ids: readonly string[], rows: readonly Derivation[]): readonly Derivation[] {
+  const forest = new Map(rows.map((row) => [row.derivation_id, row]));
+  const retained = new Map<string, Derivation>();
+  const visit = (id: string): boolean => {
+    if (retained.has(id)) return true;
+    const node = forest.get(id);
+    if (node === undefined) return false;
+    retained.set(id, node);
+    return node.children.every(visit);
+  };
+  return ids.every(visit) ? [...retained.values()] : [];
 }
 
 export function omittedStructuredPayload(
@@ -87,6 +102,8 @@ export function witnessAttributionHandle(input: Readonly<{
   readonly witness_id: string;
   readonly query_id: string;
   readonly snapshot_id: string;
+  readonly interpretation_id: string;
+  readonly as_of: string;
 }>): UsageReport {
   return UsageReportSchema.parse({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -94,6 +111,8 @@ export function witnessAttributionHandle(input: Readonly<{
     exposure: "exposed",
     reported_use: "unknown",
     witness_id: input.witness_id,
+    interpretation_id: input.interpretation_id,
+    as_of: input.as_of,
     object_id: input.entry.object_id,
     query_id: input.query_id,
     snapshot_id: input.snapshot_id
@@ -102,41 +121,17 @@ export function witnessAttributionHandle(input: Readonly<{
 
 function derivationExplanationIds(input: ExplanationSelectionInput): readonly string[] {
   const forest = input.derivations ?? [];
+  const owned = new Set(input.output_derivations?.[productStateNodeId(input.value.state)] ?? []);
   const ids: string[] = [];
-  for (const derivation of derivationRoots(forest)) {
-    if (!derivationBelongsTo(derivation, input.value)) continue;
-    if (derivationIsRevoked(derivation, forest)) continue;
+  for (const derivation of forest) {
+    if (!owned.has(derivation.derivation_id)) continue;
+    // Grounding already paid for this retained forest; entry width cannot revoke it.
+    const recovered = recoverExplanationForest([derivation.derivation_id], forest);
+    if (recovered.length === 0) continue;
     if (!derivationIsFeasible(derivation, input.support, input.page_budget)) continue;
     ids.push(derivation.derivation_id);
   }
   return ids;
-}
-
-function derivationIsRevoked(
-  derivation: Derivation,
-  forest: readonly Derivation[]
-): boolean {
-  const latest = latestSourceRevision(
-    forest.filter((candidate) => sameLeaves(candidate, derivation))
-  );
-  if (latest === undefined) return false;
-  return !derivation.source_revisions.includes(latest);
-}
-
-function sameLeaves(left: Derivation, right: Derivation): boolean {
-  if (left.leaf_ids.length !== right.leaf_ids.length) return false;
-  const rightIds = new Set(right.leaf_ids);
-  return left.leaf_ids.every((id) => rightIds.has(id));
-}
-
-function latestSourceRevision(forest: readonly Derivation[]): string | undefined {
-  let latest: string | undefined;
-  for (const derivation of forest) {
-    for (const revision of derivation.source_revisions) {
-      if (latest === undefined || revision > latest) latest = revision;
-    }
-  }
-  return latest;
 }
 
 function witnessExplanationIds(input: ExplanationSelectionInput): readonly string[] {
@@ -154,15 +149,6 @@ function witnessExplanationIds(input: ExplanationSelectionInput): readonly strin
 function derivationRoots(derivations: readonly Derivation[]): readonly Derivation[] {
   const childIds = new Set(derivations.flatMap((derivation) => derivation.children));
   return derivations.filter((derivation) => !childIds.has(derivation.derivation_id));
-}
-
-function derivationBelongsTo(derivation: Derivation, value: FieldValue): boolean {
-  const named = new Set([
-    ...derivation.leaf_ids,
-    ...derivation.observation_ids,
-    ...(derivation.witness_id === undefined ? [] : [derivation.witness_id])
-  ]);
-  return named.has(value.state.object_id) || named.has(value.state.hypothesis_id);
 }
 
 function supportBelongsTo(record: SupportRecord, value: FieldValue): boolean {

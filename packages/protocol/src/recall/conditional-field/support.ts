@@ -46,6 +46,7 @@ export const DerivationSchema = z
     schema_version: SchemaVersionSchema,
     derivation_id: ConditionalFieldIdSchema,
     kind: DerivationKindSchema,
+    association_milligrades: z.number().int().min(0).max(1000).optional(),
     children: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     observation_ids: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     leaf_ids: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),

@@ -7,6 +7,19 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
+## Unreleased — protocol 4.0.0 conditional-field candidate
+
+The isolated Recall candidate follows the major semantic-cutover classification
+in `docs/handbook/invariants.md` §25. Query-conditioned index delivery replaces
+the former ranking contract. This candidate also carries grounded explanations,
+explicit interpretation and proposition identity, and optional witness usage
+reports verified against recorded delivery exposure. Existing object/output
+usage reports and historical records retain their supported meaning.
+
+The version and public-schema snapshots describe the local candidate only.
+Migration packaging, activation, and release remain separate work; no public
+symbol is removed by this repair.
+
 ## v0.3.11 — 2026-06-04 (implementation checkpoint; not a published 500q-gated release)
 
 **Status:** implementation checkpoint, not a published 500q-gated release.

@@ -43,7 +43,7 @@ describe("conditional-field query field coordinates", () => {
       relation.relation_kind !== "caused_by"
       && relation.relation_kind !== "common_cause"
     ))).toBe(true);
-    expect(interpretation.status).toBe("resolved");
+    expect(interpretation.status).toBe("partial");
   });
 
   it("B04 same-service binding is not a shared-provider object", () => {
@@ -67,7 +67,7 @@ describe("conditional-field query field coordinates", () => {
     expect(collectRelations(ordinary.program).some((relation) => (
       relation.relation_kind === USES_SERVICE_RELATION
       && relation.target_variable === SERVICE_VARIABLE
-      && relation.guard.kind === "source_bound_entity"
+      && relation.guard.kind === "interval_relation"
     ))).toBe(true);
     expect(collectRecoverableBindings(ordinary.program)).toEqual([]);
     expect(recoverableBindingContext([])).toBe(UNBOUND_BINDING_CONTEXT);
@@ -114,7 +114,7 @@ describe("conditional-field query field coordinates", () => {
 
   it("A04 keeps association finite and explicit rather than an unbounded spread", () => {
     const supported = compileOrdinary("yesterday's failed deployment");
-    expect(collectRelations(supported.program)).toHaveLength(4);
+    expect(collectRelations(supported.program)).toHaveLength(5);
     const repeat = compileTyped({
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       kind: "repeat",

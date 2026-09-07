@@ -9,11 +9,27 @@ import { observeField } from "../../../../recall/runtime/conditional-field-obser
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import { SNAPSHOT_ID, defaultBudget, defaultView } from "../reference/deployment.fixture.js";
+import { composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
 
 const VALIDITY: RelationValidity = { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
 const AS_OF = "2026-09-07T00:00:00.000Z";
 
 describe("G2 automaton, compatible join, and composed path identity", () => {
+  it("rejects a reused persistent source variable while preserving an explicit chain", () => {
+    const rows = [edge("seed", "middle", "observed_log"), edge("middle", "end", "config_direct")];
+    expect(acceptedIds(observeProgram(seq(rel("observed_log", "service", "provider"), rel("config_direct", "service", "history")), rows))).not.toContain("end");
+    expect(acceptedIds(observeProgram(seq(rel("observed_log", "service", "provider"), rel("config_direct", "provider", "history")), rows))).toContain("end");
+  });
+
+  it("incoming reciprocal edges preserve every independently admitted anchor", () => {
+    const program: QueryProgram = { schema_version: 1, kind: "closure", product_state_sufficient: true,
+      local_variables: ["s", "t"], body: rel("observed_log") };
+    const request = input([edge("seed", "middle", "observed_log", "out"), edge("middle", "seed", "observed_log", "back")]);
+    const state = observeField(interpretation(program), { ...request, readers: { ...request.readers,
+      lexical: () => ({ ids: ["seed", "middle"], nativeVisits: 2, nativeBytes: 1, rowsRead: 2, bytesRead: 1, truncated: false }) } });
+    expect(new Set(state.seeds.map((seed) => seed.state.object_id))).toEqual(new Set(["seed", "middle"]));
+    expect(acceptedIds(state)).toEqual(expect.arrayContaining(["seed", "middle"]));
+  });
   it("keeps a flat sequence control that reaches end", () => {
     expect(acceptedIds(observeProgram(
       seq(rel("observed_log", "x", "y"), rel("config_direct", "y", "z")),
@@ -51,6 +67,7 @@ describe("G2 automaton, compatible join, and composed path identity", () => {
         schema_version: 1,
         kind: "closure",
         product_state_sufficient: true,
+        local_variables: ["s", "t"],
         body: rel("observed_log")
       },
       [
@@ -63,7 +80,7 @@ describe("G2 automaton, compatible join, and composed path identity", () => {
 
   it("bounded repeat keeps distinct control states and reaches the second edge", () => {
     expect(acceptedIds(observeProgram(
-      { schema_version: 1, kind: "repeat", count: 2, body: rel("observed_log") },
+      { schema_version: 1, kind: "repeat", count: 2, local_variables: ["s", "t"], body: rel("observed_log") },
       [
         edge("seed", "middle", "observed_log", "a1"),
         edge("middle", "end", "observed_log", "a2")
@@ -180,7 +197,7 @@ describe("G2 automaton, compatible join, and composed path identity", () => {
     expect(state.facets.some((vector) => vector.coordinates[0] === 850 && vector.coordinates[1] === 800)).toBe(false);
   });
 
-  it("alternative discovery order preserves same_path membership at 825", () => {
+  it.each(["config", "x".repeat(180)])("alternative discovery order preserves same_path membership at 825 for %s", (objectId) => {
     const orders = [
       ["config_direct", "config_via_log"],
       ["config_via_log", "config_direct"]
@@ -188,7 +205,7 @@ describe("G2 automaton, compatible join, and composed path identity", () => {
     const outputs = orders.map((order) => {
       const state = observeProgram(
         alt(...order.map((kind) => rel(kind, "x", "y"))),
-        order.map((kind) => edge("seed", "config", kind))
+        order.map((kind) => edge("seed", objectId, kind))
       );
       if (state.binding.kind !== "bound") return [];
       const index = projectAcceptingIndex({
@@ -202,7 +219,7 @@ describe("G2 automaton, compatible join, and composed path identity", () => {
       return index.entries.map((entry) => entry.object_id);
     });
     expect(outputs[0]).toEqual(outputs[1]);
-    expect(outputs[0]).toContain("config");
+    expect(outputs[0]).toContain(objectId);
   });
 
   it("does not mint a joint same_path witness from incompatible coordinates", () => {
@@ -215,13 +232,12 @@ describe("G2 automaton, compatible join, and composed path identity", () => {
       value.state.object_id === "config" && value.accepting
     );
     if (config === undefined) throw new Error("expected accepting config");
-    const identity = `${config.state.object_id}:${config.state.hypothesis_id}:${config.state.binding_context}`;
     const index = projectAcceptingIndex({
       snapshot: {
         ...state.binding.snapshot,
         facets: [
-          { schema_version: 1, path_id: `${identity}:weak`, coordinates: [900, 200] },
-          { schema_version: 1, path_id: `${identity}:strong`, coordinates: [200, 900] }
+          { schema_version: 1, path_id: composedFacetPathId(config.state, "weak"), coordinates: [900, 200] },
+          { schema_version: 1, path_id: composedFacetPathId(config.state, "strong"), coordinates: [200, 900] }
         ]
       },
       view: { ...state.interpretation.view, threshold_milligrades: 800 },

@@ -1,8 +1,8 @@
 import { MEMORY_SOURCE_REVISION_INDEX_SQL } from "../memory-entry/source-revision.js";
 import type { SqliteConnection } from "../../sqlite/db.js";
-import { INDEXED_RECALL_PROJECTION_SCHEMA_SQL } from "./indexed-recall-projection-schema.js";
+import { INDEXED_RECALL_PROJECTION_SCHEMA_SQL, initializeObservableMutationGeneration } from "./indexed-recall-projection-schema.js";
 
-export const SEMANTIC_ARTIFACT_CANDIDATE_SCHEMA_REVISION = 5;
+export const SEMANTIC_ARTIFACT_CANDIDATE_SCHEMA_REVISION = 6;
 
 /** Explicit candidate initialization; the runtime migration ledger remains unchanged. */
 export function initializeSemanticArtifactCandidateSchema(db: SqliteConnection): void {
@@ -10,7 +10,7 @@ export function initializeSemanticArtifactCandidateSchema(db: SqliteConnection):
     db.exec(`
       CREATE TABLE IF NOT EXISTS garden_semantic_schema (revision INTEGER PRIMARY KEY);
       INSERT OR IGNORE INTO garden_semantic_schema
-        SELECT 5 WHERE NOT EXISTS (SELECT 1 FROM garden_semantic_schema);
+        SELECT 6 WHERE NOT EXISTS (SELECT 1 FROM garden_semantic_schema);
       ${MEMORY_SOURCE_REVISION_INDEX_SQL};
       CREATE TABLE IF NOT EXISTS garden_semantic_artifacts (
         workspace_id TEXT NOT NULL, artifact_key TEXT NOT NULL,
@@ -61,6 +61,7 @@ export function initializeSemanticArtifactCandidateSchema(db: SqliteConnection):
       ${INDEXED_RECALL_PROJECTION_SCHEMA_SQL}
     `);
     upgradeIndexedRecallProjectionSchema(db);
+    initializeObservableMutationGeneration(db);
     assertSemanticArtifactCandidateSchema(db);
   })();
 }
@@ -71,9 +72,11 @@ export function assertSemanticArtifactCandidateSchema(db: SqliteConnection): voi
     .get() as { sql: string } | undefined;
   const indexTable = db.prepare("SELECT sql FROM sqlite_master WHERE name='garden_index_revisions'")
     .get() as { sql: string } | undefined;
+  const cursorColumns = new Set((db.prepare("PRAGMA table_info(garden_projection_cursor)").all() as { name: string }[])
+    .map((column) => column.name));
   if (revisions.length !== 1 || (revisions[0] as { revision: number }).revision !==
       SEMANTIC_ARTIFACT_CANDIDATE_SCHEMA_REVISION || !fts || /workspace_id\s+UNINDEXED/iu.test(fts.sql) ||
-      indexTable === undefined) {
+      indexTable === undefined || !cursorColumns.has("observable_generation") || !cursorColumns.has("observable_epoch")) {
     throw new Error("incompatible semantic artifact candidate schema");
   }
 }
@@ -82,6 +85,6 @@ function upgradeIndexedRecallProjectionSchema(db: SqliteConnection): void {
   const revision = (db.prepare("SELECT revision FROM garden_semantic_schema").get() as
     { revision: number } | undefined)?.revision;
   if (revision === SEMANTIC_ARTIFACT_CANDIDATE_SCHEMA_REVISION) return;
-  if (revision !== 4) throw new Error("incompatible semantic artifact candidate schema");
-  db.prepare("UPDATE garden_semantic_schema SET revision=5 WHERE revision=4").run();
+  if (revision !== 4 && revision !== 5) throw new Error("incompatible semantic artifact candidate schema");
+  db.prepare("UPDATE garden_semantic_schema SET revision=6 WHERE revision IN (4, 5)").run();
 }

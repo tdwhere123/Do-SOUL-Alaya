@@ -24,6 +24,9 @@ export function sourceRowEligible(
   if (row === undefined) return true;
   if (row.lifecycle_state !== undefined && row.lifecycle_state !== "active") return false;
   if (row.retention_state === "tombstoned") return false;
+  const asOf = input.as_of ?? input.query.interpretation_clock;
+  if (asOf !== undefined && ((row.valid_from != null && row.valid_from > asOf)
+    || (row.valid_to != null && row.valid_to <= asOf))) return false;
   const scopes = input.authorized_scopes ?? [];
   if (scopes.length > 0 && (row.scope_class === undefined || !scopes.includes(row.scope_class))) {
     return false;
@@ -35,13 +38,14 @@ export function relationRowEligible(
   input: ObserveConditionalFieldInput,
   row: RelationObserverRow
 ): boolean {
-  if (row.resolutionKind === "retracted" || row.resolutionKind === "expired" || row.resolutionKind === "contradicted") {
+  const asOf = input.as_of ?? input.query.interpretation_clock;
+  if (row.resolutionKind != null && (row.resolvedAt == null || asOf === undefined || row.resolvedAt <= asOf)) {
     return false;
   }
   if (row.validity === undefined) return false;
-  const asOf = input.as_of ?? input.query.interpretation_clock;
   if (asOf === undefined) return true;
-  return isRelationValidityActiveAt(row.validity, asOf, new Set());
+  return isRelationValidityActiveAt(row.validity, asOf,
+    new Set(input.permitted_timeless_policy_ids ?? input.readers.permittedTimelessPolicyIds?.() ?? []));
 }
 
 export function buildTypedObservation(
@@ -152,11 +156,17 @@ function evaluateApplicableGuard(
   if (guard.kind === "authorization") return undefined;
   if (guard.kind === "interval_relation") {
     if (!appliesTimeGuard(input, guard, objectId)) return undefined;
+    const filters = decodeSourceFilters(guard.predicate_name);
+    if (filters !== undefined && (filters.event_kind === undefined || input.action.action === "seed")) {
+      const verdict = sourceFactsSatisfyFilters(filters, sourceRow);
+      if (verdict !== "true") return { ...guard, verdict };
+    }
     return evaluateInterval(guard, input.object_observed_at?.[objectId] ?? observedAt ?? sourceRow?.observed_at);
   }
   if (guard.kind === "query_predicate") {
     const filters = decodeSourceFilters(guard.predicate_name);
     if (filters === undefined) return undefined;
+    if (filters.event_kind !== undefined && input.action.action !== "seed") return undefined;
     const verdict = sourceFactsSatisfyFilters(filters, sourceRow);
     return { ...guard, verdict };
   }

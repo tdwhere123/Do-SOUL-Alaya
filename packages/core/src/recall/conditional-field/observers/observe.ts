@@ -34,6 +34,7 @@ export type LexicalObserverPage = Readonly<{
 export type SourceObserverRow = Readonly<{
   readonly object_id: string;
   readonly sourceRevision: string;
+  readonly predicates?: Readonly<Record<string, boolean>>;
   readonly observed_at?: string;
   readonly content?: string;
   readonly lifecycle_state?: string;
@@ -53,6 +54,7 @@ export type SourceObserverPage = Readonly<{
   readonly rowsRead: number;
   readonly bytesRead: number;
   readonly unavailable: boolean;
+  readonly resourceLimited?: boolean;
 }>;
 
 export type RelationObserverRow = Readonly<{
@@ -63,6 +65,7 @@ export type RelationObserverRow = Readonly<{
   readonly predicate: string;
   readonly validity?: RelationValidity;
   readonly evidenceRefs?: readonly string[];
+  readonly evidenceReceipts?: readonly Readonly<{ evidenceId: string; eventId: string; eventType: string; occurredAt: string }>[];
   readonly resolutionKind?: string | null;
   readonly resolvedAt?: string | null;
   readonly source_event_id?: string;
@@ -70,6 +73,7 @@ export type RelationObserverRow = Readonly<{
 }>;
 
 export type RelationObserverPage = Readonly<{
+  readonly unavailable?: boolean;
   readonly observations: readonly RelationObserverRow[];
   readonly nativeVisits: number;
   readonly nativeBytes: number;
@@ -88,6 +92,7 @@ export type EmbeddingObserverPage = Readonly<{
 }>;
 
 export type ObserverReaders = Readonly<{
+  readonly permittedTimelessPolicyIds?: () => readonly string[];
   readonly lexical?: (input: Readonly<{
     readonly workspaceId: string;
     readonly query: string;
@@ -107,10 +112,12 @@ export type ObserverReaders = Readonly<{
     readonly limit: number;
     readonly nativeLimit: number;
     readonly afterAssertionId: string | null;
+    readonly asOf?: string;
   }>) => RelationObserverPage;
   readonly relationKinds?: (input: Readonly<{
     readonly workspaceId: string;
     readonly subject: string | null;
+    readonly limit?: number;
   }>) => readonly string[];
   readonly snapshotPin?: (workspaceId: string) => Readonly<{
     readonly source_revision: string;
@@ -141,6 +148,7 @@ export type ObserveConditionalFieldInput = Readonly<{
   readonly relation_subject?: string | null;
   readonly relation_kind?: string;
   readonly authorized_scopes?: readonly string[];
+  readonly permitted_timeless_policy_ids?: readonly string[];
   readonly anchor_object_ids?: readonly string[];
   readonly object_observed_at?: Readonly<Record<string, string>>;
   readonly page_limit?: number;
@@ -296,8 +304,14 @@ function observeRelation(input: ObserveConditionalFieldInput): ObserverActionRes
     predicate,
     limit: pageLimit(input),
     nativeLimit: input.action.work_limit,
-    afterAssertionId: input.cursor.committed_through
+    afterAssertionId: input.cursor.committed_through,
+    asOf: input.as_of ?? input.query.interpretation_clock
   });
+  if (page.unavailable === true) {
+    const result = unavailableOrNotApplicable(input, "unavailable");
+    return { ...result, work: { work_units: page.nativeVisits, residual_work_units: 0,
+      native_visits: page.nativeVisits, bytes_read: page.bytesRead } };
+  }
   const rows = page.observations.filter((row) => relationRowEligible(input, row));
   return collectObserved(input, {
     identities: rows.map((row) => row.assertionId),
@@ -347,6 +361,7 @@ function collectObserved(
   let workUnits = native.nativeVisits;
   let bytes = native.bytesRead;
   let hydrationUnavailable = false;
+  let resourceLimited = false;
   let processed = 0;
   for (const [index, identity] of native.identities.entries()) {
     const prepared = prepareObservation(input, native, identity, index);
@@ -354,6 +369,7 @@ function collectObserved(
     bytes += prepared.extraBytes;
     if (prepared.unavailable === true) {
       hydrationUnavailable = true;
+      resourceLimited = prepared.resourceLimited === true;
       break;
     }
     if (prepared.observation !== null) observations.push(prepared.observation);
@@ -379,7 +395,7 @@ function collectObserved(
     ids: native.identities,
     truncated: native.truncated,
     readerAvailable: true,
-    ...(hydrationUnavailable ? { status: "unavailable" as const } : {}),
+    ...(hydrationUnavailable ? { status: resourceLimited ? "interrupted" as const : "unavailable" as const } : {}),
     work: workReceipt(
       workUnits,
       native.nativeVisits,
@@ -402,6 +418,7 @@ function prepareObservation(
   readonly extraWork: number;
   readonly extraBytes: number;
   readonly unavailable?: boolean;
+  readonly resourceLimited?: boolean;
 }> {
   if (native.identityKind === "assertion") {
     const row = native.rows?.[index];
@@ -426,7 +443,8 @@ function prepareObservation(
         observation: null,
         extraWork: Math.max(1, page.rowsRead),
         extraBytes: page.bytesRead,
-        unavailable: true
+        unavailable: true,
+        resourceLimited: page.resourceLimited
       };
     }
     if (page.row === null) {
@@ -439,7 +457,7 @@ function prepareObservation(
     return {
       observation: buildTypedObservation(input, {
         objectId: row.targetObjectId,
-        sourceRevision: row.assertionId,
+        sourceRevision: page.row.sourceRevision,
         observationKey: identity,
         observedAt: page.row.observed_at,
         sourceRow: page.row,
@@ -473,6 +491,7 @@ function hydrateSeedObservation(
   readonly extraWork: number;
   readonly extraBytes: number;
   readonly unavailable?: boolean;
+  readonly resourceLimited?: boolean;
 }> {
   const source = input.readers.source;
   if (source === undefined) {
@@ -491,7 +510,7 @@ function hydrateSeedObservation(
   const extraWork = Math.max(1, page.rowsRead);
   const extraBytes = page.bytesRead;
   if (page.unavailable) {
-    return { observation: null, extraWork, extraBytes, unavailable: true };
+    return { observation: null, extraWork, extraBytes, unavailable: true, resourceLimited: page.resourceLimited };
   }
   if (page.row === null) {
     return { observation: null, extraWork, extraBytes };

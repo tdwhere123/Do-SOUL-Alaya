@@ -182,7 +182,7 @@ async function executeRecall(
     policyOverride
   });
   const encoded = encodeRecallHandlerResults(recallResult, policyOverride);
-  const delivery = buildRecallDelivery(params, context, encoded.results, recallResult);
+  const delivery = buildRecallDelivery(params, context, encoded.results, { ...recallResult, index: encoded.index });
   await params.deps.trustStateRecorder.recordDelivery(delivery.record);
   await emitRecallDeliveredTelemetry(params, {
     deliveryId: delivery.deliveryId,
@@ -258,6 +258,7 @@ function buildRecallDelivery(
       run_id: context.runId,
       delivered_object_ids: deliveredObjectIds,
       delivered_objects: deliveredObjects,
+      witness_exposures: witnessExposures(recallResult.index),
       delivered_at: params.now()
     }
   };
@@ -320,15 +321,13 @@ export function createReportContextUsageHandler(params: Readonly<{
     const usedObjectIds = resolveUsedObjectIds(request);
     const usedObjects = resolveUsedObjectIdentities(request);
     const reports = usageReportsFromContextUsage(request);
-    const attributed = attributeUsageReports(reports);
-    if (attributed.some((row) => row.grain === "witness" || row.witness_credit === "claimed")) {
-      throw new Error("context usage cannot mint a witness report");
-    }
+    attributeUsageReports(reports, linkedDelivery?.witness_exposures ?? []);
     await deps.trustStateRecorder.recordUsage(
       {
         delivery_id: request.delivery_id,
         usage_state: usageState,
         used_object_ids: usedObjectIds,
+        ...(request.witness_reports === undefined ? {} : { witness_reports: request.witness_reports }),
         ...(request.delivered_objects === undefined || request.delivered_objects.length === 0
           ? {}
           : { used_objects: usedObjects }),
@@ -387,7 +386,30 @@ export function usageReportsFromContextUsage(
       output_id: request.delivery_id
     }));
   }
-  return reports;
+  return [...reports, ...(request.witness_reports ?? [])];
+}
+
+function witnessExposures(index: RecallServiceResult["index"]): readonly UsageReport[] {
+  if (index?.interpretation_id === undefined || index.as_of === undefined) return [];
+  const forest = new Map((index.explanations ?? []).map((node) => [node.derivation_id, node]));
+  const roots = new Set(index.entries.flatMap((entry) => entry.explanation_ids));
+  const pending = [...roots];
+  const visited = new Set<string>();
+  const witnesses = new Set<string>();
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    const node = forest.get(id);
+    if (node === undefined) continue;
+    witnesses.add(node.witness_id ?? node.derivation_id);
+    pending.push(...node.children);
+  }
+  return [...witnesses].map((witness_id) => UsageReportSchema.parse({
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, grain: "witness", exposure: "exposed",
+    reported_use: "missing", witness_id, query_id: index.query_id, snapshot_id: index.snapshot_id,
+    interpretation_id: index.interpretation_id, as_of: index.as_of
+  }));
 }
 
 export function createGardenTaskPayloadFingerprint(

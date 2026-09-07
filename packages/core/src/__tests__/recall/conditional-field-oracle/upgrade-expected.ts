@@ -215,6 +215,8 @@ export function creditFromReport(
   }
   return {
     grain: "witness",
+    interpretation_id: "interpretation-1",
+    as_of: "2026-09-07T00:00:00.000Z",
     credited_ids: exposed.has(report.witness_id) ? [report.witness_id] : []
   };
 }
@@ -326,6 +328,8 @@ export function witnessReport(
   return UsageReportSchema.parse({
     schema_version: 1,
     grain: "witness",
+    interpretation_id: "interpretation-1",
+    as_of: "2026-09-07T00:00:00.000Z",
     exposure,
     reported_use: exposure === "exposed" ? "used" : "unknown",
     witness_id: witnessId,

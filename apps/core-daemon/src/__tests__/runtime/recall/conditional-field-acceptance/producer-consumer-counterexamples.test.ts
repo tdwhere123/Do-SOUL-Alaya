@@ -103,9 +103,14 @@ describe("conditional-field MCP/CLI F1-F7 producer-consumer counterexamples", ()
   it("F4 paged 32-cap observation concatenates without skip or duplicate", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 40, 701);
-    const full = await recallThroughHandler(slice, { query: "needle", max_results: 800 });
+    const full = runRecall(slice, {
+      query_text: "needle",
+      budget: defaultBudget({ page_budget: 800, finalization_reserve: 1_000 })
+    });
+    expect(full.entries).toHaveLength(40);
+    expect(full.completeness.logical_index).toBe("complete");
     const pages: string[][] = [];
-    let continuation = null as typeof full.index.continuation;
+    let continuation = null as typeof full.continuation;
     for (let step = 0; step < 16; step += 1) {
       const page = await recallThroughHandler(slice, {
         query: "needle",
@@ -117,8 +122,9 @@ describe("conditional-field MCP/CLI F1-F7 producer-consumer counterexamples", ()
       if (continuation === null) break;
     }
     const concatenated = pages.flat();
+    expect(continuation).toBeNull();
     expect(new Set(concatenated).size).toBe(concatenated.length);
-    expect(concatenated).toEqual(full.index.entries.map(entryId));
+    expect(concatenated).toEqual(full.entries.map(entryId));
   });
 
   it("F5 handler encoding does not freeze token_estimate at 1 for long previews", async () => {

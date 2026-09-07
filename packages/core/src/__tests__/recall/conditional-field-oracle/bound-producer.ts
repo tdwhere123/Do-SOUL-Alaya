@@ -16,11 +16,11 @@ import { compileConditionalFieldQuery } from "../../../recall/conditional-field/
 import { projectFieldDelta } from "../../../recall/conditional-field/engine/field-engine.js";
 import { projectAcceptingIndex } from "../../../recall/conditional-field/index/project-accepting-index.js";
 import {
-  assessUnknownCause,
   observeField,
-  rolesFrom,
+  RELATION_MILLIGRADES,
   type ObserveFieldInput
 } from "../../../recall/runtime/conditional-field-observe.js";
+import { assessUnknownCause, rolesFrom } from "../../../recall/runtime/semantic-attribution.js";
 import {
   INAPPLICABLE_KIND,
   MEM,
@@ -244,8 +244,11 @@ export function indexFromObserved(
     snapshot_id: interpretation.snapshot_id,
     result_version: "v1",
     budget: observeInput.budget,
-    roles: rolesFrom(field),
+    roles: rolesFrom(field, RELATION_MILLIGRADES),
     claims: field.claims,
+    claim_propositions: field.claim_propositions,
+    derivations: field.derivations,
+    transition_derivations: field.transition_derivations,
     support: field.support,
     expires_at: "2099-01-01T00:00:00.000Z",
     as_of: observeInput.as_of,

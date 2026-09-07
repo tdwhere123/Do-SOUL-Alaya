@@ -27,7 +27,7 @@ export function runConditionalFieldWorkerRecall(
   const body = asPayload(payload);
   const workspaceId = readString(body.workspace_id, "workspace_id");
   const readers = readersFor(runtime);
-  const index = InformationIndexSchema.parse(runConditionalFieldRecall({
+  const index = runConditionalFieldRecall({
     workspace_id: workspaceId,
     query_text: readString(body.query_text, "query_text"),
     budget: body.budget as Parameters<typeof runConditionalFieldRecall>[0]["budget"],
@@ -35,6 +35,7 @@ export function runConditionalFieldWorkerRecall(
     interpretation_clock: readString(body.interpretation_clock, "interpretation_clock"),
     as_of: readString(body.as_of, "as_of"),
     expires_at: readString(body.expires_at, "expires_at"),
+    ...(body.lifetime_now === undefined ? {} : { lifetime_now: readString(body.lifetime_now, "lifetime_now") }),
     readers,
     ...(body.since === undefined ? {} : { since: readString(body.since, "since") }),
     ...(body.until === undefined ? {} : { until: readString(body.until, "until") }),
@@ -46,25 +47,25 @@ export function runConditionalFieldWorkerRecall(
     ...(body.authorized_scopes === undefined
       ? {}
       : { authorized_scopes: body.authorized_scopes as readonly string[] })
-  }));
+  });
   return {
-    index,
+    index: InformationIndexSchema.parse(index),
     previews: Object.fromEntries(captureIndexPreviews(index, readers, workspaceId))
   };
 }
 
-export function createConditionalFieldObserverReaders(database: StorageDatabase): ObserverReaders {
+export function createConditionalFieldObserverReaders(database: StorageDatabase, permittedTimelessPolicyIds: readonly string[] = []): ObserverReaders {
   const memory = new SqliteMemoryRecallReader(database);
   const relation = new SqliteRelationRecallReader(database);
   const projection = new SqliteIndexedRecallProjection(database.connection);
   memory.prepareIndex();
   relation.prepareIndex();
   const kindsSql = database.connection.prepare(
-    `SELECT DISTINCT relation_kind AS kind FROM relation_assertions
-     WHERE workspace_id = ?
-       AND (? IS NULL OR lower(json_extract(anchors_json, '$.source_anchor.object_id')) = ?)`
+    `SELECT relation_kind AS kind FROM relation_assertions INDEXED BY idx_relation_recall_predicate
+     WHERE workspace_id = ? AND relation_kind > ? ORDER BY relation_kind LIMIT 1`
   );
   return {
+    permittedTimelessPolicyIds: () => permittedTimelessPolicyIds,
     lexical: (input) => memory.lexical(
       input.workspaceId,
       input.query,
@@ -82,7 +83,8 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase)
         row: page.row === null ? null : toSourceObserverRow(page.row),
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
-        unavailable: page.unavailable
+        unavailable: page.unavailable,
+        resourceLimited: page.resourceLimited
       };
     },
     relation: (input) => relation.read(
@@ -91,12 +93,17 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase)
       input.predicate,
       input.limit,
       input.nativeLimit,
-      input.afterAssertionId
+      input.afterAssertionId,
+      input.asOf
     ),
     relationKinds: (input) => {
-      const subject = input.subject === null ? null : input.subject.toLowerCase();
-      const rows = kindsSql.all(input.workspaceId, subject, subject) as { readonly kind: string }[];
-      return rows.map((row) => row.kind);
+      const kinds: string[] = [];
+      for (let i = 0; i < Math.min(512, input.limit ?? 32); i += 1) {
+        const row = kindsSql.get(input.workspaceId, kinds.at(-1) ?? "") as { readonly kind: string } | undefined;
+        if (row === undefined) break;
+        kinds.push(row.kind);
+      }
+      return kinds;
     },
     snapshotPin: (workspaceId) => projection.observablePin(workspaceId)
   };

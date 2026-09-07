@@ -5,6 +5,7 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { attributeCausalUsageOntoPaths } from "../../../../../../packages/core/src/relations/path-plasticity/causal-usage-projection.js";
 import { initDatabase, SqliteFieldCausalUsageRepo } from "@do-soul/alaya-storage";
 import { createCausalUsageTemporalPathReader } from
   "../../../runtime/recall/causal-usage-temporal-path-reader.js";
@@ -25,11 +26,10 @@ describe("causal usage temporal path reader", () => {
       const restarted = await createCausalUsageTemporalPathReader({ base, usageRepo })
         .findByWorkspace("workspace-1", { asOf: AS_OF });
 
-      const usageStrength = 1 - Math.exp(-1);
-      expect(first[0]?.plasticity_state.strength).toBeCloseTo(
-        1 - (1 - path().plasticity_state.strength) * (1 - usageStrength),
-        10
-      );
+      expect(first[0]?.plasticity_state).toEqual(path().plasticity_state);
+      expect(attributeCausalUsageOntoPaths(first, [usageRow()], AS_OF)).toEqual([{
+        path_id: "path-1", receipt_identities: [usageRow().identity], writes_path_relation: false
+      }]);
       expect(restarted).toEqual(first);
     } finally {
       database.close();

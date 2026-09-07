@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UsageReportSchema } from "../recall/conditional-field/feedback.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BoundedIdSchema,
@@ -63,6 +64,7 @@ export const SoulReportContextUsageRequestSchema = z
   .object({
     delivery_id: BoundedIdSchema,
     usage_state: SoulContextUsageStateSchema,
+    witness_reports: z.array(UsageReportSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     used_object_ids: z.array(BoundedIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     delivered_objects: z
       .array(SoulContextDeliveredObjectUsageSchema)

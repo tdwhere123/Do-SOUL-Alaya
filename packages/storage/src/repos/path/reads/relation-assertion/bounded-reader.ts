@@ -10,6 +10,7 @@ export interface RecallAssertionObservation {
   readonly resultObjectId: string;
   readonly validity: RelationValidity;
   readonly evidenceRefs: readonly string[];
+  readonly evidenceReceipts: readonly Readonly<{ evidenceId: string; eventId: string; eventType: string; occurredAt: string }>[];
   readonly resolvedAt: string | null;
   readonly resolutionKind: string | null;
 }
@@ -26,7 +27,7 @@ SELECT a.assertion_id, a.workspace_id, a.relation_kind,
        json_extract(a.anchors_json, '$.source_anchor.object_id') AS source_id,
        json_extract(a.anchors_json, '$.target_anchor.object_id') AS target_id,
        json_extract(a.formation_receipt_json, '$.parameters.result_object_id') AS result_id,
-       a.validity_json, e.evidence_id, r.resolved_at, r.resolution_kind
+       a.validity_json, e.evidence_id, e.source_event_id, e.source_event_type, e.source_occurred_at, r.resolved_at, r.resolution_kind
 FROM relation_assertions a INDEXED BY idx_relation_recall_subject
 JOIN relation_assertion_evidence e ON e.assertion_id = a.assertion_id
 LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id AND r.workspace_id = a.workspace_id
@@ -53,7 +54,8 @@ export class SqliteRelationRecallReader {
     predicate: string,
     limit: number,
     nativeLimit = limit,
-    afterAssertionId: string | null = null
+    afterAssertionId: string | null = null,
+    asOf?: string
   ): Readonly<{
     nativeVisits: number; nativeBytes: number; rawRows: readonly Record<string, unknown>[]; observations: readonly RecallAssertionObservation[]; rowsRead: number; bytesRead: number; truncated: boolean; committedThrough: string | null;
   }> {
@@ -68,20 +70,30 @@ export class SqliteRelationRecallReader {
     const sql = subject === null ? READ_SQL.replace("idx_relation_recall_subject", "idx_relation_recall_predicate")
       .replace(" AND lower(json_extract(a.anchors_json, '$.source_anchor.object_id')) = ?", "") : READ_SQL;
     const cursor = relationResumeParams(afterAssertionId);
-    const boundedSql = sql.replace(
+    let boundedSql = sql.replace(
       "AND a.assertion_id >= ? AND (a.assertion_id > ? OR e.evidence_id > ?)",
       cursor.sql
     );
-    const tail = [...cursor.params, fetchLimit + 1];
+    if (asOf !== undefined) {
+      boundedSql = boundedSql.replace("LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id AND r.workspace_id = a.workspace_id", `
+LEFT JOIN event_log resolution_event ON resolution_event.event_id = (
+  SELECT event_id FROM event_log
+  WHERE workspace_id = a.workspace_id AND entity_id = a.assertion_id
+    AND event_type = 'relation.assertion_resolved'
+    AND json_extract(payload_json, '$.resolved_at') <= @asOf
+  ORDER BY revision DESC LIMIT 1
+)
+LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id
+  AND r.workspace_id = a.workspace_id AND r.resolved_at <= @asOf`)
+        .replace("r.resolved_at, r.resolution_kind", "COALESCE(json_extract(resolution_event.payload_json, '$.resolved_at'), r.resolved_at) AS resolved_at, COALESCE(json_extract(resolution_event.payload_json, '$.resolution_kind'), r.resolution_kind) AS resolution_kind")
+        .replace("AND a.relation_kind = ?", "AND a.relation_kind = ? AND a.admitted_at <= @asOf");
+    }
+    const tail = [...cursor.params, fetchLimit];
     const parameters = subject === null ? [workspaceId, predicate, ...tail] : [workspaceId, subject.toLowerCase(), predicate, ...tail];
-    const fetched = this.db.connection.prepare(boundedSql).all(...parameters) as readonly Record<string, unknown>[];
-    const truncated = fetched.length > fetchLimit;
-    const pageRows = truncated ? fetched.slice(0, fetchLimit) : fetched;
-    const peek = truncated ? fetched[fetchLimit] : undefined;
-    const trailingId = pageRows.at(-1)?.assertion_id;
-    const incompleteId = peek !== undefined && trailingId !== undefined && peek.assertion_id === trailingId
-      ? String(trailingId)
-      : null;
+    const fetched = this.db.connection.prepare(boundedSql).all(...(asOf === undefined ? parameters : [{ asOf }, ...parameters])) as readonly Record<string, unknown>[];
+    // A full page retains an open cursor; exhaustion needs its own bounded read.
+    const truncated = fetched.length === fetchLimit;
+    const pageRows = fetched;
     const lastRow = pageRows.at(-1);
     const committedThrough = lastRow === undefined
       ? afterAssertionId
@@ -91,7 +103,7 @@ export class SqliteRelationRecallReader {
       nativeVisits: fetched.length,
       nativeBytes: bytesRead,
       rawRows: pageRows,
-      observations: this.fillEvidence(this.decode(pageRows, incompleteId)),
+      observations: this.decode(pageRows, null),
       rowsRead: pageRows.length,
       bytesRead,
       truncated,
@@ -118,32 +130,13 @@ export class SqliteRelationRecallReader {
         predicate: String(row.relation_kind), sourceObjectId: String(row.source_id), targetObjectId: String(row.target_id),
         resultObjectId: String(row.result_id), validity: prior?.validity ?? RelationValiditySchema.parse(JSON.parse(String(row.validity_json))),
         evidenceRefs: Object.freeze(evidenceRefs), resolvedAt: row.resolved_at === null ? null : String(row.resolved_at),
+        evidenceReceipts: Object.freeze([...(prior?.evidenceReceipts ?? []), { evidenceId: String(row.evidence_id),
+          eventId: String(row.source_event_id), eventType: String(row.source_event_type), occurredAt: String(row.source_occurred_at) }]),
         resolutionKind: row.resolution_kind === null ? null : String(row.resolution_kind) }));
     }
     return Object.freeze([...grouped.values()]);
   }
 
-  private fillEvidence(
-    observations: readonly RecallAssertionObservation[]
-  ): readonly RecallAssertionObservation[] {
-    if (observations.length === 0) return observations;
-    const ids = observations.map((observation) => observation.assertionId);
-    const rows = this.db.connection.prepare(
-      `SELECT assertion_id, evidence_id FROM relation_assertion_evidence
-       WHERE assertion_id IN (${ids.map(() => "?").join(",")})
-       ORDER BY assertion_id, evidence_id`
-    ).all(...ids) as readonly { readonly assertion_id: string; readonly evidence_id: string }[];
-    const grouped = new Map<string, string[]>();
-    for (const row of rows) {
-      const prior = grouped.get(row.assertion_id) ?? [];
-      prior.push(row.evidence_id);
-      grouped.set(row.assertion_id, prior);
-    }
-    return Object.freeze(observations.map((observation) => Object.freeze({
-      ...observation,
-      evidenceRefs: Object.freeze(grouped.get(observation.assertionId) ?? [...observation.evidenceRefs])
-    })));
-  }
 }
 
 const RELATION_CURSOR_SEP = "\u001f";

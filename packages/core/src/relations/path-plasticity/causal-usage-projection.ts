@@ -72,7 +72,8 @@ export function attributeCausalUsageOntoPaths(
 }
 
 export function attributeUsageReports(
-  reports: readonly UsageReport[]
+  reports: readonly UsageReport[],
+  verifiedExposures: readonly UsageReport[] = []
 ): readonly UsageReportAttribution[] {
   return Object.freeze(uniqueUsageReports(reports).map((report) => Object.freeze({
     grain: report.grain,
@@ -85,14 +86,19 @@ export function attributeUsageReports(
     witness_id: report.witness_id,
     action_id: report.action_id,
     path_credit: "none",
-    witness_credit: witnessCredit(report)
+    witness_credit: witnessCredit(report, verifiedExposures)
   })));
 }
 
-function witnessCredit(report: UsageReport): UsageReportAttribution["witness_credit"] {
+function witnessCredit(report: UsageReport, exposures: readonly UsageReport[]): UsageReportAttribution["witness_credit"] {
   if (report.grain !== "witness") return "none";
   if (report.exposure === "unknown" || report.reported_use === "unknown") return "unknown";
-  if (report.exposure === "exposed" && report.reported_use === "used") return "claimed";
+  if (report.exposure === "exposed" && report.reported_use === "used") {
+    return exposures.some((exposure) => exposure.grain === "witness" && exposure.exposure === "exposed"
+      && exposure.witness_id === report.witness_id && exposure.query_id === report.query_id
+      && exposure.snapshot_id === report.snapshot_id && exposure.interpretation_id === report.interpretation_id
+      && exposure.as_of === report.as_of && report.interpretation_id !== undefined) ? "claimed" : "unknown";
+  }
   return "none";
 }
 

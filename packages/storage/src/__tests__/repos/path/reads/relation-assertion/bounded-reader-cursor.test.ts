@@ -12,6 +12,22 @@ afterEach(() => {
 });
 
 describe("SqliteRelationRecallReader cursor", () => {
+  it("reconstructs the exact admitted resolution at as-of from EventLog history", () => {
+    const database = openDatabase();
+    const [id] = plantAssertions(database, 1);
+    const append = database.connection.prepare(`INSERT INTO event_log
+      (event_id,event_type,entity_type,entity_id,workspace_id,run_id,caused_by,payload_json,created_at,revision)
+      VALUES (?, 'relation.assertion_resolved', 'relation_assertion', ?, 'workspace-1', NULL, 'test', ?, ?, ?)`);
+    for (const [revision, kind, stamp] of [[1, "contradicted", "2026-02-01T00:00:00.000Z"], [2, "retracted", "2026-03-01T00:00:00.000Z"]] as const) {
+      append.run(`resolution-${revision}`, id, JSON.stringify({ assertion_id: id, resolution_kind: kind, resolved_at: stamp }), stamp, revision);
+    }
+    const reader = new SqliteRelationRecallReader(database); reader.prepareIndex();
+    expect(reader.read("workspace-1", "vega", "owns", 1, 1, null, "2025-12-01T00:00:00.000Z").observations).toEqual([]);
+    expect(reader.read("workspace-1", "vega", "owns", 1, 1, null, "2026-01-15T00:00:00.000Z").observations[0]?.resolutionKind).toBeNull();
+    expect(reader.read("workspace-1", "vega", "owns", 1, 1, null, "2026-02-15T00:00:00.000Z").observations[0]?.resolutionKind).toBe("contradicted");
+    expect(reader.read("workspace-1", "vega", "owns", 1, 1, null, "2026-03-15T00:00:00.000Z").observations[0]?.resolutionKind).toBe("retracted");
+  });
+
   it("keeps the one-shot relation page and concatenates advancing pages", () => {
     const database = openDatabase();
     const ids = plantAssertions(database, 8);
@@ -61,17 +77,19 @@ describe("SqliteRelationRecallReader cursor", () => {
     const reader = new SqliteRelationRecallReader(database);
     reader.prepareIndex();
     const first = reader.read("workspace-1", "vega", "owns", 1, 1, null);
-    expect(first.observations).toEqual([]);
+    expect(first.observations[0]?.evidenceRefs).toHaveLength(1);
+    expect(first.nativeVisits).toBe(1);
     expect(first.truncated).toBe(true);
     expect(first.committedThrough).not.toBeNull();
     const second = reader.read("workspace-1", "vega", "owns", 1, 1, first.committedThrough);
     expect(second.observations.map((row) => row.assertionId)).toEqual([ids[0]]);
-    expect(second.observations[0]?.evidenceRefs.length).toBeGreaterThanOrEqual(2);
+    expect(second.observations[0]?.evidenceRefs).toHaveLength(1);
+    expect(new Set([...first.observations[0]!.evidenceRefs, ...second.observations[0]!.evidenceRefs]).size).toBe(2);
     const third = reader.read("workspace-1", "vega", "owns", 1, 1, second.committedThrough);
     expect(third.observations.map((row) => row.assertionId)).toEqual([ids[1]]);
   });
 
-  it("advances past seven evidence receipts at nativeLimit 1 without repeating the assertion", () => {
+  it("retains one evidence fragment per native visit across a thousand receipts", () => {
     const database = openDatabase();
     const ids = plantAssertions(database, 2);
     const insert = database.connection.prepare(`
@@ -79,20 +97,26 @@ describe("SqliteRelationRecallReader cursor", () => {
         assertion_id, evidence_id, source_event_type, source_event_id, source_occurred_at
       ) VALUES (?, ?, 'soul.signal.emitted', ?, ?)
     `);
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 999; index += 1) {
       insert.run(ids[0], `evidence-extra-${index}`, `event-extra-${index}`, "2026-01-01T00:00:00.000Z");
     }
     const reader = new SqliteRelationRecallReader(database);
     reader.prepareIndex();
     const seen: string[] = [];
+    const evidence = new Set<string>();
     let after: string | null = null;
-    for (let step = 0; step < 16; step += 1) {
+    for (let step = 0; step < 1010; step += 1) {
       const page = reader.read("workspace-1", "vega", "owns", 1, 1, after);
       seen.push(...page.observations.map((row) => row.assertionId));
+      expect(page.nativeVisits).toBeLessThanOrEqual(1);
+      expect(page.observations.flatMap((row) => row.evidenceRefs)).toHaveLength(page.rowsRead);
+      expect(page.bytesRead).toBe(Buffer.byteLength(JSON.stringify(page.rawRows), "utf8"));
+      for (const row of page.observations) for (const ref of row.evidenceRefs) evidence.add(ref);
       after = page.committedThrough;
       if (!page.truncated) break;
     }
-    expect(seen).toEqual(ids);
+    expect([...new Set(seen)]).toEqual(ids);
+    expect(evidence.size).toBe(1001);
   });
 
   it("emits a 32-row prefix of 40 matches and concatenates resume without skip or dup", () => {

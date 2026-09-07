@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
+import { facetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   InformationIndexSchema,
@@ -189,7 +191,7 @@ describe("conditional-field production information index", () => {
 
   it("A06 rejects coordinate-wise max under same_path and honors a relation facet override", () => {
     const vectors: FacetVector[] = [
-      { schema_version: 1, path_id: "c:h0:default", coordinates: [900, 200] },
+      { schema_version: 1, path_id: facetPathId(fieldValue("c", 1).state), coordinates: [900, 200] },
       { schema_version: 1, path_id: "c", coordinates: [200, 900] }
     ];
     expect(evaluateFacetPredicate("same_path", vectors, 800)).toBe(false);
@@ -208,7 +210,7 @@ describe("conditional-field production information index", () => {
     expect(independent.entries).toEqual([]);
     const overridden = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([fieldValue("r", 900), fieldValue("c", 900)], {
-        facets: [{ schema_version: 1, path_id: "c:h0:default", coordinates: [900] }],
+        facets: [{ schema_version: 1, path_id: facetPathId(fieldValue("c", 1).state), coordinates: [900] }],
         retained_transitions: [transition("r", "c", "associated_config", 900)]
       }),
       view: defaultView({ facet_mode: "same_path", threshold_milligrades: 800 }),
@@ -219,8 +221,8 @@ describe("conditional-field production information index", () => {
   });
 
   it("A06 evaluates same_path facets per candidate, not the global bag", () => {
-    const weak = { schema_version: 1, path_id: "a:h0:default", coordinates: [900, 200] } as const;
-    const strong = { schema_version: 1, path_id: "b:h0:default", coordinates: [900, 900] } as const;
+    const weak = { schema_version: 1, path_id: facetPathId(fieldValue("a", 1).state), coordinates: [900, 200] } as const;
+    const strong = { schema_version: 1, path_id: facetPathId(fieldValue("b", 1).state), coordinates: [900, 900] } as const;
     const index = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([
         fieldValue("a", 900),
@@ -430,6 +432,8 @@ function deploymentInput(
 }
 
 function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): AcceptingProjectionInput {
+  const roles = new Map([...overrides.roles ?? []].map(([id, role]) => [productStateNodeId(fieldValue(id, 1).state), role]));
+  const roots = (overrides.derivations ?? []).filter((node) => !(overrides.derivations ?? []).some((parent) => parent.children.includes(node.derivation_id)));
   return {
     snapshot: emptySnapshot(),
     view: defaultView(),
@@ -437,7 +441,9 @@ function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): Accepting
     snapshot_id: SNAPSHOT_ID,
     result_version: RESULT_VERSION,
     budget: defaultBudget(),
-    ...overrides
+    ...overrides,
+    roles,
+    output_derivations: overrides.output_derivations ?? Object.fromEntries((overrides.snapshot?.values ?? []).map((value) => [productStateNodeId(value.state), roots.map((root) => root.derivation_id)]))
   };
 }
 

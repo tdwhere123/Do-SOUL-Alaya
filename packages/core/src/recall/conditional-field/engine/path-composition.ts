@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_BOTTOM,
@@ -129,7 +130,7 @@ export function runtimeProgram(program: QueryProgram): QueryProgram | "empty" | 
   if (interpreted.kind === "empty") return "empty";
   if (interpreted.kind === "epsilon") return "epsilon";
   if (interpreted.kind === "unsupported") return "empty";
-  return interpreted.program;
+  return program;
 }
 
 export function seedProgramStates(program: QueryProgram): readonly string[] {
@@ -259,15 +260,12 @@ export function adjacencyEffectsForRows(
 }
 
 export function facetPathId(state: ProductStateKey): string {
-  const packed = `${state.object_id}:${state.hypothesis_id}:${state.binding_context}`;
-  return packed.length <= 256 ? packed : packed.slice(0, 256);
+  return createHash("sha256").update(productStateNodeId(state)).digest("hex");
 }
 
 export function composedFacetPathId(state: ProductStateKey, route: string): string {
   const identity = facetPathId(state);
-  const suffix = `:${route}`;
-  if (identity.length + suffix.length <= 256) return `${identity}${suffix}`;
-  return identity;
+  return `${identity}:${createHash("sha256").update(route).digest("hex")}`;
 }
 
 export function facetBelongsToOutput(pathId: string, state: ProductStateKey): boolean {
@@ -402,12 +400,15 @@ function effectsForAdvance(
     { sourceId: row.sourceObjectId, targetId: row.targetObjectId }
   );
   if (decision === "false") return [];
+  if (decision === "unresolved") return [{
+    observation_id: `guard:${row.assertionId}:${from.program_state}`,
+    unresolved_guard: true
+  }];
   const strength = relationStrength(advance.relation, input.overlay, row.predicate);
   if (strength === undefined) {
     return [{
       observation_id: `adjacency:${row.assertionId}:${from.hypothesis_id}:${from.program_state}`,
-      missing_measurement: true,
-      unresolved_guard: decision === "unresolved"
+      missing_measurement: true
     }];
   }
   if (strength.milligrades <= advance.relation.threshold_milligrades) return [];
@@ -428,7 +429,8 @@ function effectsForAdvance(
       program_state: programState,
       binding_context: binding
     };
-    effects.push(...compiledEffects(row, from, to, strength, applicable, decision, input.facets ?? []));
+    effects.push(...compiledEffects({ ...row, source_revision: row.source_revision ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision },
+      from, to, strength, applicable, decision, input.facets ?? []));
   }
   return effects;
 }
@@ -468,7 +470,9 @@ function compiledEffects(
   const derivation = leafDerivation({
     derivation_id: `leaf:${row.assertionId}:${from.program_state}:${to.program_state}`,
     observation_id: row.assertionId,
-    leaf_id: row.assertionId
+    leaf_id: row.assertionId,
+    association_milligrades: strength.milligrades,
+    source_revision: row.source_revision
   });
   return vectors.map((facet, index) => ({
     observation_id: `adjacency:${row.assertionId}:${from.program_state}:${to.program_state}:${String(index)}`,
@@ -544,17 +548,14 @@ function alignOutgoingBinding(
   programState: string
 ): string | undefined {
   let env = parseBindingContext(binding);
+  env = new Map(env);
+  for (const variable of automaton.localVariables.get(programState) ?? []) env.delete(variable);
   for (const advance of automaton.advances) {
     if (advance.from !== programState) continue;
     const sourceVar = advance.relation.source_variable;
     const bound = env.get(sourceVar);
     if (bound !== undefined && bound !== objectId) {
-      env = new Map(env);
-      env.set(sourceVar, objectId);
-      if (advance.relation.target_variable !== sourceVar) {
-        env.delete(advance.relation.target_variable);
-      }
-      continue;
+      return undefined;
     }
     const next = unifyBinding(env, sourceVar, objectId);
     if (next === undefined) return undefined;

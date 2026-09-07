@@ -331,9 +331,34 @@ accepted EventLog / SQLite
 ```
 
 Continuation identity is `query_id`, `snapshot_id`, `interpretation_id`
-(clock), `as_of`, `continuation_id`. `FIELD_RESUME` is worker-lifetime, not
-SQLite. Worker RPC returns index plus payload previews; the parent does not
-hydrate from a second live connection.
+(clock), `as_of`, `continuation_id`. Its expiry uses the current request clock,
+separately from the interpretation clock. Both direct and worker paths check
+the actual source/projection identity before restoring field state.
+`FIELD_RESUME` belongs to the reader process lifetime, not SQLite; a missing
+retained instance invalidates its continuation. Worker RPC returns index plus
+payload previews captured under its read lifetime.
+
+Query conditions own anchor admission and persistent variable bindings.
+Repeat/closure operators declare their local variables explicitly; advancing
+an edge cannot overwrite a persistent service binding. Uninterpreted query
+meaning and unobserved predicates remain visible as incomplete knowledge.
+
+Accepting product states own their roles, propositions and grounded explanation
+roots. Supported association context does not prove a requested common cause:
+the query declares that proposition, and the public index retains its typed
+meaning and claim state. Derivation alternatives retain their source dependencies
+so withdrawal and bounded explanation recovery use the same accepted field.
+Observer coverage, logical index progress, transport and payload completion
+are separate; unfinished observation or explanation work requires recoverable
+progress under the request allowance.
+
+Witness usage reports name an exposed explanation and its query, snapshot,
+interpretation and as-of identity. The existing delivery/report persistence
+records and validates that exposure, including reports after restart. Object
+and output reports remain at their declared granularity; reports do not revise
+relation strength or establish proposition truth. The local protocol 4.0.0
+candidate follows the major semantic-change rule in invariant §25 and is
+unreleased.
 
 The following prefixSK / Select_Gamma composition is historical and is **not**
 the live entry. Mixed stages remain impossible because those owners are not
@@ -661,10 +686,15 @@ root before the credentialless 1Q -> 3Q -> 100Q diagnostic ladder can begin.
 | Dated full-dataset KPI archives | [`../bench-history/README.md`](../bench-history/README.md) |
 
 
-### Candidate repair clarifications (not activated)
+### Historical revision-2 repair clarifications (superseded)
 
-The candidate remains subject to STOP-01. Historical C01/C02 local receipts are
-not acceptance evidence for the repaired source. The target arithmetic compares
+This subsection records the superseded rank-fusion candidate and its original
+gates. It is not the current algorithm, current repair acceptance, or authority
+to activate a retained selector. The conditional-field path above owns current
+Recall; its cumulative candidate review covers the repaired implementation.
+
+Historical C01/C02 local receipts are not acceptance evidence for the current
+source. The superseded candidate arithmetic compares
 exact rational family fusion and marginal gain divided by incremental cost once;
 an exact density tie chooses fewer tokens, then ascending unit identity sequence.
 Unused baseline new-identity capacity is not lent to the extension stage.

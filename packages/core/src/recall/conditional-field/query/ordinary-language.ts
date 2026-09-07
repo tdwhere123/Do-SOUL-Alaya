@@ -92,6 +92,7 @@ export const USES_SERVICE_RELATION = "uses_service";
 export const UNBOUND_BINDING_CONTEXT = "unbound";
 
 export type OrdinarySourceFilters = Readonly<{
+  readonly event_kind?: "failed_deployment";
   readonly dimension_filter?: readonly string[];
   readonly domain_tag_filter?: readonly string[];
   readonly time_field?: "created_at" | "last_used_at";
@@ -133,6 +134,7 @@ export function uninterpretedQueryHole(): QueryHole {
 
 export function encodeSourceFilters(filters: OrdinarySourceFilters): string | undefined {
   const parts = [SOURCE_FILTER_PREDICATE];
+  if (filters.event_kind !== undefined) parts.push(`event=${filters.event_kind}`);
   for (const dimension of filters.dimension_filter ?? []) parts.push(`dimension=${dimension}`);
   for (const tag of filters.domain_tag_filter ?? []) parts.push(`tag=${tag}`);
   if (filters.time_field !== undefined) parts.push(`time_field=${filters.time_field}`);
@@ -152,7 +154,9 @@ export function decodeSourceFilters(predicateName: string | undefined): Ordinary
   let time_field: OrdinarySourceFilters["time_field"];
   let since: string | undefined;
   let until: string | undefined;
+  let event_kind: "failed_deployment" | undefined;
   for (const part of predicateName.split("|").slice(1)) {
+    if (part === "event=failed_deployment") event_kind = "failed_deployment";
     const sep = part.indexOf("=");
     if (sep <= 0) continue;
     const key = part.slice(0, sep);
@@ -164,6 +168,7 @@ export function decodeSourceFilters(predicateName: string | undefined): Ordinary
     else if (key === "until") until = value;
   }
   return {
+    ...(event_kind === undefined ? {} : { event_kind }),
     ...(dimension_filter.length === 0 ? {} : { dimension_filter }),
     ...(domain_tag_filter.length === 0 ? {} : { domain_tag_filter }),
     ...(time_field === undefined ? {} : { time_field }),
@@ -177,7 +182,7 @@ export function attachSourceFilters(program: QueryProgram, filters: OrdinarySour
   if (encoded === undefined) return program;
   return mapProgramGuards(program, (guard) => (
     guard.predicate_name === undefined || guard.predicate_name.startsWith(SOURCE_FILTER_PREDICATE)
-      ? { ...guard, predicate_name: encoded }
+      ? { ...guard, predicate_name: encodeSourceFilters({ ...decodeSourceFilters(guard.predicate_name), ...filters }) }
       : guard
   ));
 }
@@ -190,9 +195,14 @@ export function sourceFactsSatisfyFilters(
     readonly created_at?: string;
     readonly last_used_at?: string | null;
     readonly observed_at?: string;
+    readonly content?: string;
   }> | undefined
 ): "true" | "false" | "unresolved" {
   if (facts === undefined) return "unresolved";
+  if (filters.event_kind === "failed_deployment") {
+    if (facts.content === undefined) return "unresolved";
+    if (!sourceIsFailedDeployment(facts.content)) return "false";
+  }
   if (filters.dimension_filter !== undefined && filters.dimension_filter.length > 0) {
     if (facts.dimension === undefined) return "unresolved";
     if (!filters.dimension_filter.includes(facts.dimension)) return "false";
@@ -262,34 +272,49 @@ export function sourceBoundEntityGuard(variable: string, entityId?: string): Gua
 }
 
 export function supportedFailedDeploymentProgram(anchorGuard: Guard): QueryProgram {
+  anchorGuard = { ...anchorGuard, predicate_name: encodeSourceFilters({ event_kind: "failed_deployment" }) };
   // History hangs off the service variable so a shared-provider object cannot unify another service.
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    kind: "sequence",
-    steps: [
+    kind: "alternative",
+    options: [
+      { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "epsilon" },
+      relationProgram("config_direct", ANCHOR_EVENT_VARIABLE, "c", anchorGuard),
       {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-        kind: "alternative",
-        options: [
-          relationProgram("failed_deployment", "anchor", ANCHOR_EVENT_VARIABLE, anchorGuard),
-          relationProgram(
-            USES_SERVICE_RELATION,
-            ANCHOR_EVENT_VARIABLE,
-            SERVICE_VARIABLE,
-            sourceBoundEntityGuard(SERVICE_VARIABLE)
-          )
+        kind: "sequence",
+        steps: [
+          relationProgram("observed_log", ANCHOR_EVENT_VARIABLE, "l", anchorGuard),
+          relationProgram("config_via_log", "l", "c", associatedItemGuard("c"))
         ]
       },
       {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-        kind: "alternative",
-        options: [
-          relationProgram("associated_config", ANCHOR_EVENT_VARIABLE, "c", associatedItemGuard("c")),
+        kind: "sequence",
+        steps: [
+          relationProgram(USES_SERVICE_RELATION, ANCHOR_EVENT_VARIABLE, SERVICE_VARIABLE, anchorGuard),
           relationProgram("associated_history", SERVICE_VARIABLE, "h", associatedItemGuard("h"))
         ]
       }
     ]
   };
+}
+
+export function sourceIsFailedDeployment(content: string): boolean {
+  const normalized = normalizeOrdinaryText(content);
+  return /\b(?:failed|unsuccessful) deploy(?:ment)?\b|\bdeployment (?:failed|failure)\b/u.test(normalized)
+    && !/\b(?:not|never) (?:a )?(?:failed|unsuccessful) deploy/u.test(normalized);
+}
+
+export function ordinaryRemainder(text: string): string {
+  return normalizeOrdinaryText(text).replace(YESTERDAY_PATTERN, "").replace(FAILED_PATTERN, "")
+    .replace(DEPLOY_PATTERN, "").replace(/\b(?:s|the|find|show|me|please|tell|about)\b/gu, "")
+    .replace(/\s+/gu, " ").trim();
+}
+
+export function proposeOrdinaryRelations(text: string): readonly OpenRelationCapture[] {
+  const match = /^\s*(?:find|show)\s+([\p{L}\p{N}_-]+)\s+from\s+([\p{L}\p{N}_-]+)\s+to\s+([\p{L}\p{N}_-]+)\s*$/iu.exec(text);
+  return match === null ? [] : [{ relation_kind: match[1]!, source_variable: match[2]!, target_variable: match[3]! }];
 }
 
 export function programFromOpenRelations(

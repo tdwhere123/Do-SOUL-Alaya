@@ -51,6 +51,29 @@ afterEach(() => {
 });
 
 describe("conditional-field MCP/CLI acceptance (real producers)", () => {
+  it("retains mediated config for an older log and direct config after mediated evidence is withdrawn", async () => {
+    const slice = await openPlantedSlice();
+    stamp(slice, MEM.l, LAST_WEEK_INSTANT);
+    const mediated = await recallThroughHandler(slice, { query: "yesterday failed deployment", max_results: 800 });
+    expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(850);
+    expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.explanation_ids.length).toBeGreaterThan(0);
+    slice.database.connection.prepare("DELETE FROM relation_assertion_evidence WHERE assertion_id = ?").run("assert-l-c");
+    const direct = await recallThroughHandler(slice, { query: "yesterday failed deployment", max_results: 800 });
+    expect(direct.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(800);
+    expect(direct.index.explanations?.some((node) => node.leaf_ids.includes("assert-r-c"))).toBe(true);
+  });
+
+  it("keeps unhandled service, exclusion and shared-provider meanings distinct and open", async () => {
+    const slice = await openPlantedSlice();
+    const results = [];
+    for (const query of ["yesterday failed deployment of checkout", "yesterday failed deployment of payments",
+      "yesterday failed deployment but exclude previous failures", "yesterday failed deployment with shared-provider history"]) {
+      results.push(await recallThroughHandler(slice, { query, max_results: 800 }));
+    }
+    expect(new Set(results.map((result) => result.index.query_id)).size).toBe(4);
+    for (const result of results) expect(result.index.completeness.interpretation_coverage).toBe("open");
+  });
+
   it("A01/A02 expose last-week config and unknown-cause history through MCP encoding", async () => {
     const slice = await openPlantedSlice();
     const mcp = await recallThroughHandler(slice, {
@@ -62,13 +85,9 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       .toBe(850);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades)
       .toBe(550);
-    const unknownCause = assertUnknownCauseAllowed(mcp.index);
-    if (unknownCause.length === 0) {
-      expect(mcp.index.entries.some((entry) => entry.claim === "unknown")).toBe(true);
-    } else {
-      expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades)
-        .toBe(550);
-    }
+    expect(assertUnknownCauseAllowed(mcp.index)).toEqual([]);
+    expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.claim).toBe("unknown");
+    expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.claim_proposition?.kind).toBe("common_cause");
     expect(mcp.results.map((result) => result.object_id)).toEqual(
       mcp.index.entries.map((entry) => entry.object_id)
     );
@@ -87,6 +106,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     });
     expect(mcp.index.completeness.logical_index).toBe("complete");
     expect(mcp.index.entries.some((entry) => entry.object_id === MEM.h)).toBe(true);
+    expect(assertUnknownCauseAllowed(mcp.index)).toEqual([]);
   });
 
   it("A14 keeps page identity through handler encoding and concatenates without a second selector", async () => {

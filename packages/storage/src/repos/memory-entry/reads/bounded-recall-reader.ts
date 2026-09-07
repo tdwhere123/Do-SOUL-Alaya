@@ -33,8 +33,9 @@ export class SqliteMemoryRecallReader {
           rowsRead: 1,
           sourceRowsRead: 1,
           revisionRowsRead: 0,
-          bytesRead: lengthRow.byte_length,
-          unavailable: true
+          bytesRead: Buffer.byteLength(JSON.stringify(lengthRow), "utf8"),
+          unavailable: true,
+          resourceLimited: true
         };
       }
       const rows = this.db.connection.prepare(`SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
@@ -48,7 +49,7 @@ export class SqliteMemoryRecallReader {
       const revision = revisions[0]?.revision;
       const row = raw && revision !== undefined ? { ...parseMemoryEntryRow(raw), sourceEventRevision: revision,
         sourceRevision: memorySourceRevision(revision, raw.content, raw.evidence_refs, raw.updated_at) } : null;
-      return { row, rowsRead: rows.length + revisions.length, sourceRowsRead: rows.length, revisionRowsRead: revisions.length,
+      return { row, rowsRead: 1 + rows.length + revisions.length, sourceRowsRead: 1 + rows.length, revisionRowsRead: revisions.length,
         bytesRead: Buffer.byteLength(JSON.stringify(rows), "utf8") +
           (rows.length ? Buffer.byteLength(JSON.stringify(revisions), "utf8") : 0), unavailable: row === null };
     })();

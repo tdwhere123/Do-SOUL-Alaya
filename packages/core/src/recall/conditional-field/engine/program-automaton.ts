@@ -22,6 +22,7 @@ export type ProgramAutomaton = Readonly<{
   readonly advances: readonly AutomatonAdvance[];
   readonly hyperedgeAdvances: readonly HyperedgeAdvance[];
   readonly sourceVariables: ReadonlyMap<string, readonly string[]>;
+  readonly localVariables: ReadonlyMap<string, readonly string[]>;
 }>;
 
 type Fragment = Readonly<{
@@ -34,12 +35,13 @@ type Builder = {
   readonly eps: Map<string, string[]>;
   readonly advances: AutomatonAdvance[];
   readonly hyperedgeAdvances: HyperedgeAdvance[];
+  readonly locals: Map<string, readonly string[]>;
 };
 
 export function compileProgramAutomaton(program: QueryProgram): ProgramAutomaton {
   if (program.kind === "empty") return emptyAutomaton();
   if (program.kind === "epsilon") return epsilonAutomaton();
-  const builder: Builder = { next: 0, eps: new Map(), advances: [], hyperedgeAdvances: [] };
+  const builder: Builder = { next: 0, eps: new Map(), advances: [], hyperedgeAdvances: [], locals: new Map() };
   const fragment = compileFragment(program, builder);
   addEps(builder, fragment.accept, ACCEPTING_PROGRAM_STATE);
   const start = liveStates(builder, epsilonClosure(builder.eps, [fragment.start]));
@@ -49,7 +51,8 @@ export function compileProgramAutomaton(program: QueryProgram): ProgramAutomaton
     start,
     advances,
     hyperedgeAdvances,
-    sourceVariables: sourceVariablesFrom(advances, hyperedgeAdvances)
+    sourceVariables: sourceVariablesFrom(advances, hyperedgeAdvances),
+    localVariables: builder.locals
   };
 }
 
@@ -68,7 +71,8 @@ function emptyAutomaton(): ProgramAutomaton {
     start: [],
     advances: [],
     hyperedgeAdvances: [],
-    sourceVariables: new Map()
+    sourceVariables: new Map(),
+    localVariables: new Map()
   };
 }
 
@@ -77,7 +81,8 @@ function epsilonAutomaton(): ProgramAutomaton {
     start: [ACCEPTING_PROGRAM_STATE],
     advances: [],
     hyperedgeAdvances: [],
-    sourceVariables: new Map()
+    sourceVariables: new Map(),
+    localVariables: new Map()
   };
 }
 
@@ -94,12 +99,9 @@ function compileFragment(program: QueryProgram, builder: Builder): Fragment {
     case "alternative":
       return compileAlternative(program.options, builder);
     case "repeat":
-      return compileSequence(
-        Array.from({ length: program.count }, () => program.body),
-        builder
-      );
+      return compileRepeat(program, builder);
     case "closure":
-      return compileClosure(program.body, builder);
+      return compileClosure(program.body, builder, program.local_variables ?? []);
     case "hyperedge":
       return compileHyperedge(program, builder);
   }
@@ -153,8 +155,26 @@ function compileHyperedge(
   return { start, accept };
 }
 
-function compileClosure(body: QueryProgram, builder: Builder): Fragment {
+function compileRepeat(program: Extract<QueryProgram, { kind: "repeat" }>, builder: Builder): Fragment {
+  let first: Fragment | undefined;
+  let prior: Fragment | undefined;
+  for (let i = 0; i < program.count; i += 1) {
+    const inner = compileFragment(program.body, builder);
+    for (const state of liveStates(builder, epsilonClosure(builder.eps, [inner.start]))) {
+      builder.locals.set(state, program.local_variables ?? []);
+    }
+    if (prior !== undefined) addEps(builder, prior.accept, inner.start);
+    first ??= inner;
+    prior = inner;
+  }
+  return first === undefined || prior === undefined ? compileEpsilon(builder) : { start: first.start, accept: prior.accept };
+}
+
+function compileClosure(body: QueryProgram, builder: Builder, locals: readonly string[]): Fragment {
   const inner = compileFragment(body, builder);
+  for (const state of liveStates(builder, epsilonClosure(builder.eps, [inner.start]))) {
+    builder.locals.set(state, locals);
+  }
   const start = fresh(builder, "clo");
   const accept = fresh(builder, "clo");
   addEps(builder, start, inner.start);

@@ -54,7 +54,8 @@ export const INAPPLICABLE_KIND = "unrelated";
 
 export async function openSourceSlice(
   register: (database: StorageDatabase) => void,
-  filename = ":memory:"
+  filename = ":memory:",
+  permittedTimelessPolicyIds?: ReadonlySet<string>
 ) {
   const storage = await createRecallEmbeddingRealStorage(register, filename);
   initializeSemanticArtifactCandidateSchema(storage.database.connection);
@@ -101,6 +102,7 @@ export async function openSourceSlice(
     runtimeNotifier: notify
   });
   const relations = new RelationAssertionService({
+    permittedTimelessPolicyIds,
     repo: relationRepo,
     eventPublisher,
     eventHistory: storage.eventLogRepo,
@@ -219,6 +221,7 @@ export async function openSourceSlice(
     indexProjection,
     memoryReader,
     relationReader,
+    relations,
     writeMemory,
     admitRelation,
     pendingGarden: () => garden.peekPending(GardenRole.LIBRARIAN, WS, 128)

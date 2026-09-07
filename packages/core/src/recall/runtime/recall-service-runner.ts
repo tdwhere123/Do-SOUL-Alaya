@@ -26,11 +26,10 @@ import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
 import { assertRecallZeroLiveExtraction } from "./zero-live-extraction.js";
 import {
   RELATION_MILLIGRADES,
-  assessUnknownCause,
   emptyField,
-  observeField,
-  rolesFrom
+  observeField
 } from "./conditional-field-observe.js";
+import { assessUnknownCause, rolesFrom } from "./semantic-attribution.js";
 
 export type { RecallExecutionContext, RecallExecutionParams, PreparedRecallRequest } from "./recall-service-runner-types.js";
 export { RELATION_MILLIGRADES };
@@ -45,6 +44,8 @@ const FIELD_RESUME_MAX = 32;
 // Worker-lifetime only. Continuation restore is not SQLite; a new worker
 // re-observes. Parent isolate pins one worker for a single snapshot lease.
 const FIELD_RESUME = new Map<string, FieldEngineState>();
+const INDEX_PREVIEWS = new WeakMap<InformationIndex, ReadonlyMap<string, string>>();
+const FIELD_SOURCE_PINS = new WeakMap<FieldEngineState, string>();
 
 export type ConditionalFieldRecallRequest = Readonly<{
   readonly workspace_id: string;
@@ -54,6 +55,7 @@ export type ConditionalFieldRecallRequest = Readonly<{
   readonly interpretation_clock: string;
   readonly as_of: string;
   readonly expires_at: string;
+  readonly lifetime_now?: string;
   readonly readers: ObserverReaders;
   readonly since?: string;
   readonly until?: string;
@@ -117,7 +119,11 @@ export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest):
     ...(input.domain_tag_filter === undefined ? {} : { domain_tag_filter: input.domain_tag_filter }),
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes })
   });
-  if (continuationEpochMismatch(input.continuation, interpretation)) {
+  if (continuationEpochMismatch(input.continuation, interpretation)
+    || (input.continuation != null && (
+      input.continuation.snapshot_id !== input.snapshot_id
+      || Date.parse(input.continuation.expires_at) <= Date.parse(input.lifetime_now ?? new Date().toISOString())
+    ))) {
     return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
   }
   if (interpretation.status === "resource_rejected" || interpretation.status === "malformed"
@@ -129,6 +135,12 @@ export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest):
     return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
   }
   const pin = input.readers.snapshotPin?.(input.workspace_id);
+  const currentPin = pin === undefined ? undefined : JSON.stringify([
+    snapshotIdFromPin(input.workspace_id, pin), [...(input.readers.permittedTimelessPolicyIds?.() ?? [])].sort()
+  ]);
+  if (restored !== undefined && FIELD_SOURCE_PINS.get(restored) !== currentPin) {
+    return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
+  }
   const field = observeField(interpretation, {
     workspace_id: input.workspace_id,
     query_text: input.query_text,
@@ -140,8 +152,10 @@ export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest):
     ...(restored === undefined ? {} : { resume_field: restored }),
     ...(pin === undefined ? {} : { expected_source_revision: pin.source_revision })
   });
-  rememberField(field);
-  return projectFromField(assessUnknownCause(field, input), input, interpretation);
+  return projectFromField(assessUnknownCause(field, input), input, interpretation, (retained) => {
+    if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
+    rememberField(retained);
+  });
 }
 
 function fieldResumeKey(queryId: string, snapshotId: string, interpretationId: string): string {
@@ -179,7 +193,8 @@ function restoreField(
 function projectFromField(
   state: ReturnType<typeof observeField>,
   input: ConditionalFieldRecallRequest,
-  interpretation: ReturnType<typeof compileConditionalFieldQuery>
+  interpretation: ReturnType<typeof compileConditionalFieldQuery>,
+  retain?: (state: FieldEngineState) => void
 ): InformationIndex {
   const delta = projectFieldDelta(state);
   const snapshot = state.binding.kind === "bound"
@@ -193,18 +208,57 @@ function projectFromField(
       retained_transitions: state.transitions,
       facets: state.facets
     };
-  return annotatePublicIndex(InformationIndexSchema.parse(projectAcceptingIndex({
+  const previews = new Map<string, string>(Object.entries(state.preview_cache ?? {}));
+  let retained = state;
+  let memory = state.remaining_memory_bytes;
+  const index = annotatePublicIndex(InformationIndexSchema.parse(projectAcceptingIndex({
     snapshot,
     view: interpretation.view,
     query_id: interpretation.query_id,
     snapshot_id: interpretation.snapshot_id,
     result_version: RESULT_VERSION,
     budget: input.budget,
-    roles: rolesFrom(state),
+    roles: rolesFrom(state, RELATION_MILLIGRADES),
     claims: state.claims,
+    claim_propositions: state.claim_propositions,
+    transition_derivations: state.transition_derivations,
+    source_facts: state.source_facts,
+    grounding_progress: state.grounding_progress,
+    remaining_memory_bytes: memory,
+    on_grounding_progress: (progress, retainedBytes) => {
+      memory = Math.max(0, memory - retainedBytes);
+      retained = { ...retained, grounding_progress: progress, remaining_memory_bytes: memory };
+    },
+    on_remaining_reserve: (remaining) => { retained = { ...retained, remaining_reserve: remaining }; },
     support: state.support,
     expires_at: input.expires_at,
     as_of: input.as_of,
+    lifetime_now: input.lifetime_now,
+    payload_work_per_entry: 4,
+    finalize_payload: (entries, allowance) => {
+      let remaining = allowance;
+      let complete = true;
+      for (const entry of entries) {
+        if (previews.has(entry.object_id)) continue;
+        const retainedContent = state.source_facts?.[entry.object_id]?.content;
+        if (retainedContent !== undefined) {
+          const preview = createContentPreview(retainedContent, "excerpt");
+          const bytes = Buffer.byteLength(preview, "utf8");
+          if (remaining < 1 || bytes > memory) { complete = false; continue; }
+          remaining -= 1; memory -= bytes;
+          previews.set(entry.object_id, preview);
+          continue;
+        }
+        if (input.readers.source === undefined || remaining < 4 || memory < 1) { complete = false; continue; }
+        const page = input.readers.source({ workspaceId: input.workspace_id, objectId: entry.object_id,
+          byteLimit: Math.max(1, Math.min(65536, memory)) });
+        remaining -= Math.max(1, page.rowsRead) + 1;
+        memory = Math.max(0, memory - page.bytesRead);
+        if (page.row?.content === undefined || page.unavailable) { complete = false; continue; }
+        previews.set(entry.object_id, createContentPreview(page.row.content, "excerpt"));
+      }
+      return { remaining: Math.max(0, remaining), complete };
+    },
     prior_continuation: input.continuation ?? null,
     observer: {
       outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: state.closure.observation },
@@ -229,6 +283,10 @@ function projectFromField(
       ? { resource_work: "open" as const }
       : {})
   })), interpretation);
+  INDEX_PREVIEWS.set(index, previews);
+  retained = { ...retained, preview_cache: Object.fromEntries(previews), remaining_memory_bytes: memory };
+  retain?.(retained);
+  return index;
 }
 
 export function encodeRecallResult(
@@ -286,17 +344,10 @@ const PAYLOAD_OMITTED_PREVIEW = "[payload omitted]";
 
 export function captureIndexPreviews(
   index: InformationIndex,
-  readers: ObserverReaders,
-  workspaceId: string
+  _readers: ObserverReaders,
+  _workspaceId: string
 ): Map<string, string> {
-  const previews = new Map<string, string>();
-  if (readers.source === undefined || workspaceId === "") return previews;
-  for (const entry of index.entries) {
-    const content = readers.source({ workspaceId, objectId: entry.object_id }).row?.content;
-    if (content === undefined || content.length === 0) continue;
-    previews.set(entry.object_id, createContentPreview(content, "excerpt"));
-  }
-  return previews;
+  return new Map(INDEX_PREVIEWS.get(index) ?? []);
 }
 
 function portIndexAndPreviews(
@@ -341,8 +392,8 @@ function annotatePublicIndex(
       interpretation_clock: index.continuation.interpretation_clock
         ?? interpretation.interpretation_clock
     };
-  if (completeness === index.completeness && continuation === index.continuation) return index;
-  return { ...index, completeness, continuation };
+  return { ...index, completeness, continuation, interpretation_id: interpretationId,
+    as_of: interpretation.interpretation_clock };
 }
 
 function invalidatedPublicIndex(
@@ -413,6 +464,7 @@ function buildRecallRequest(
     snapshot_id: snapshotId,
     interpretation_clock: clock,
     as_of: clock,
+    lifetime_now: now,
     expires_at: new Date(Date.parse(now) + CONTINUATION_MS).toISOString(),
     readers: fieldDeps(context).observerReaders ?? {},
     ...(nullableTime(params.timeFilter?.since) === undefined
@@ -468,11 +520,6 @@ function pinnedSnapshotId(
 ): string {
   const supplied = validSnapshot(params.snapshotDigest);
   if (supplied !== undefined) return supplied;
-  const continued = (params as RecallExecutionParams & {
-    readonly continuation?: Continuation | null;
-  }).continuation?.snapshot_id;
-  const fromContinuation = validSnapshot(continued);
-  if (fromContinuation !== undefined) return fromContinuation;
   return snapshotIdFromPin(params.workspaceId, deps.observerReaders?.snapshotPin?.(params.workspaceId));
 }
 

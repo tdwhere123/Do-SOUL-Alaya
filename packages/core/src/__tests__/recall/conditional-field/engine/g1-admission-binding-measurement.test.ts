@@ -7,7 +7,9 @@ import {
   type RelationValidity
 } from "@do-soul/alaya-protocol";
 import { compileConditionalFieldQuery } from "../../../../recall/conditional-field/query/compile-query.js";
-import { observeField, assessUnknownCause } from "../../../../recall/runtime/conditional-field-observe.js";
+import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
+import { assessUnknownCause } from "../../../../recall/runtime/semantic-attribution.js";
+import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import {
   encodeBindingContext,
@@ -107,15 +109,17 @@ describe("G1 admission, binding, measurement, and evidence identities", () => {
   });
 
   it("threads distinct evidence identities into a supported claim", () => {
-    const request = input([edge("seed", "fact", "supports", "assert-supports")], {});
+    const request = input([edge("seed", "fact", "observed_log", "assert-supports")], {});
     const state = assessUnknownCause(
-      observeField(interpretation(relation("supports", "x", "y")), request),
+      observeField(interpretation(relation("observed_log", "x", "y")), request),
       request
     );
-    const record = state.support.find((row) => row.proposition_id === "assert-supports");
+    const target = state.seen_identities.find((identity) => identity.object_id === "fact" && identity.program_state === "accepting")!;
+    const key = productStateNodeId(target);
+    const record = state.support.find((row) => row.proposition_id === state.claim_propositions?.get(key)?.proposition_id);
     expect(record?.claim).toBe("supported");
     expect(record?.witnesses.some((witness) => witness.complete && witness.witness_id.includes("evidence-assert-supports"))).toBe(true);
-    expect(state.claims.get("fact")).toBe("supported");
+    expect(state.claims.get(key)).toBe("supported");
   });
 
   it("does not treat unresolved authorization as true", () => {
@@ -155,7 +159,7 @@ describe("G1 admission, binding, measurement, and evidence identities", () => {
       budget: defaultBudget()
     });
     expect(compiled.status).toBe("resolved");
-    expect(compiled.program.kind).toBe("sequence");
+    expect(compiled.program.kind).toBe("alternative");
   });
 });
 
@@ -225,7 +229,8 @@ function edge(
     assertionId,
     resultObjectId: targetObjectId,
     validity: VALIDITY,
-    evidenceRefs: [`evidence-${assertionId}`]
+    evidenceRefs: [`evidence-${assertionId}`],
+    evidenceReceipts: [{ evidenceId: `evidence-${assertionId}`, eventId: `event-${assertionId}`, eventType: "relation.evidence", occurredAt: AS_OF }]
   };
 }
 

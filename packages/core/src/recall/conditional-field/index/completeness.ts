@@ -8,6 +8,7 @@ import {
   type QueryInterpretationStatus,
   type RequestBudget
 } from "@do-soul/alaya-protocol";
+import { aggregateObserverStatus } from "../reference/accepting-projection.js";
 
 export type ObserverCoverage = Readonly<{
   readonly outcome: ObserverOutcome;
@@ -84,10 +85,12 @@ export function continuationInvalidated(input: Readonly<{
   readonly result_version: string;
   readonly expires_at?: string;
   readonly as_of?: string;
+  readonly lifetime_now?: string;
   readonly interpretation_id?: string;
   readonly prior_continuation?: Continuation | null;
 }>): boolean {
-  if (input.as_of !== undefined && input.expires_at !== undefined && input.expires_at < input.as_of) {
+  const now = input.lifetime_now ?? input.as_of;
+  if (now !== undefined && input.expires_at !== undefined && input.expires_at <= now) {
     return true;
   }
   const prior = input.prior_continuation;
@@ -96,7 +99,7 @@ export function continuationInvalidated(input: Readonly<{
   if (prior.snapshot_id !== input.snapshot_id) return true;
   if (prior.result_version !== input.result_version) return true;
   if (prior.interpretation_id !== input.interpretation_id) return true;
-  return input.as_of !== undefined && prior.expires_at < input.as_of;
+  return now !== undefined && prior.expires_at <= now;
 }
 
 export function composeCompleteness(input: CompletenessInput): CompletenessReport {
@@ -114,7 +117,7 @@ function composeCompletenessDimensions(input: CompletenessInput): CompletenessRe
   if (input.explanation_work === "open" || input.resource_work === "open") {
     return dimensionReport({
       logical_index: "open",
-      observed_coverage: "open",
+      observed_coverage: "complete",
       remaining: input.remaining,
       omitted_payload: input.omitted_payload,
       expand_payload: input.expand_payload,
@@ -134,7 +137,8 @@ function composeCompletenessDimensions(input: CompletenessInput): CompletenessRe
 }
 
 function observerCompleteness(input: CompletenessInput): CompletenessReport | undefined {
-  const observerStatus = input.observer?.outcome.status;
+  const observerStatus = input.observer === undefined ? undefined
+    : aggregateObserverStatus(input.observer.outcome.status, input.observer.open_regions ?? []);
   if (observerStatus === "unavailable") {
     return dimensionReport({
       logical_index: "unavailable",

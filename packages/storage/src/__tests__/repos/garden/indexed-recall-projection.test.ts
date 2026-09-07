@@ -55,7 +55,7 @@ describe("indexed recall projection schema", () => {
     `);
     initializeSemanticArtifactCandidateSchema(database.connection);
     expect(database.connection.prepare("SELECT revision FROM garden_semantic_schema").all())
-      .toEqual([{ revision: 5 }]);
+      .toEqual([{ revision: 6 }]);
     expect(database.connection.prepare(
       "SELECT object_id, source_event_revision, tombstoned FROM garden_index_revisions"
     ).all()).toEqual([{ object_id: "mem-1", source_event_revision: 1, tombstoned: 0 }]);

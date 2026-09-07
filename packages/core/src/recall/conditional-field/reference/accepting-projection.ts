@@ -13,6 +13,7 @@ import {
   type InformationIndex,
   type ObserverCursor,
   type ObserverOutcome,
+  type ObserverStatus,
   type QueryInterpretationStatus,
   type QueryView,
   type RequestBudget,
@@ -30,6 +31,14 @@ export type ObserverCoverage = Readonly<{
   readonly outcome: ObserverOutcome;
   readonly open_regions?: readonly CoverageRegion[];
 }>;
+
+export function aggregateObserverStatus(last: ObserverStatus | undefined, residuals: readonly CoverageRegion[]): ObserverStatus {
+  const statuses = new Set([last, ...residuals.map((region) => region.status)]);
+  for (const status of ["invalidated", "cancelled", "unavailable", "unknown", "not_applicable", "interrupted", "open"] as const) {
+    if (statuses.has(status)) return status;
+  }
+  return last === "exhausted" ? "exhausted" : "open";
+}
 
 export type HyperedgePremise = Readonly<{
   readonly hypothesis_id: string;

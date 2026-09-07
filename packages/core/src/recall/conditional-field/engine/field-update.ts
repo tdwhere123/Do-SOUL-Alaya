@@ -15,6 +15,7 @@ import {
   type TypedObservation
 } from "@do-soul/alaya-protocol";
 import { completenessForInterpretationStatus } from "../reference/interpret-query.js";
+import { aggregateObserverStatus } from "../reference/accepting-projection.js";
 import {
   bindMaxMinField,
   productStateNodeId,
@@ -22,7 +23,7 @@ import {
 } from "../reference/bind-max-min.js";
 import type { FairWorkRegion } from "../reference/schedule-fair-work.js";
 import { recoveredBindingSnapshot } from "./binding-environment.js";
-import { mergeDerivations } from "./path-derivation.js";
+import { joinDerivation, mergeDerivations } from "./path-derivation.js";
 import {
   collectIdentities,
   mergeSeeds,
@@ -114,7 +115,9 @@ export function absorbObservations(
   const quota = {
     remaining: remainingMemory,
     exhausted: memoryExhausted,
-    remainingWork
+    remainingWork,
+    retained: new Set([...state.observations, ...state.seeds, ...state.transitions, ...state.facets, ...state.derivations]
+      .map((value) => JSON.stringify(value)))
   };
   const effectSeedIds = new Set(
     (consumption.effects ?? []).flatMap((effect) => effect.seed === undefined ? [] : [effect.observation_id])
@@ -148,7 +151,7 @@ export function absorbObservations(
   if (workUnits > remainingExploration) remainingWork.push({ kind: "state_create", units: workUnits - remainingExploration });
   remainingExploration = Math.max(0, remainingExploration - workUnits);
   const mergedTransitions = mergeTransitions(transitions);
-  const mergedSeeds = pruneAssociatedSeeds(mergeSeeds(seeds), mergedTransitions);
+  const mergedSeeds = mergeSeeds(seeds);
   const { binding: _binding, closure: _closure, ...rest } = state;
   return {
     ...rest,
@@ -158,7 +161,7 @@ export function absorbObservations(
     remaining_work: remainingWork,
     observations: Object.freeze(observations),
     seeds: mergedSeeds,
-    guaranteed_seeds: pruneAssociatedSeeds(mergeSeeds(guaranteedSeeds), mergedTransitions),
+    guaranteed_seeds: mergeSeeds(guaranteedSeeds),
     transitions: mergedTransitions,
     guaranteed_transitions: mergeTransitions(guaranteedTransitions),
     facets: retainSamePathVectors(facets),
@@ -197,6 +200,7 @@ type MemoryQuota = {
   remaining: number;
   exhausted: boolean;
   remainingWork: RemainingWork[];
+  retained: Set<string>;
 };
 
 function absorbPageObservations(
@@ -302,7 +306,14 @@ function rememberTransitionDerivation(
 ): void {
   if (effect.derivation === undefined) return;
   derivations.push(effect.derivation);
-  transitionDerivations[transitionKey(transition)] = effect.derivation.derivation_id;
+  const key = transitionKey(transition);
+  const prior = derivations.find((node) => node.derivation_id === transitionDerivations[key]);
+  if (prior?.derivation_id === effect.derivation.derivation_id || prior?.children.includes(effect.derivation.derivation_id)) return;
+  const alternatives = prior?.kind === "or"
+    ? prior.children.flatMap((id) => derivations.find((node) => node.derivation_id === id) ?? []) : prior === undefined ? [] : [prior];
+  const root = joinDerivation("or", [...alternatives, effect.derivation]);
+  derivations.push(root);
+  transitionDerivations[key] = root.derivation_id;
 }
 
 function chargeIdentities(state: BindableState): BindableState {
@@ -356,13 +367,16 @@ function chargeIdentities(state: BindableState): BindableState {
 }
 
 function retainPayload(value: unknown, quota: MemoryQuota): boolean {
-  const cost = payloadBytes(value);
+  const serialized = JSON.stringify(value);
+  if (quota.retained.has(serialized)) return true;
+  const cost = Buffer.byteLength(serialized, "utf8");
   if (quota.remaining < cost) {
     quota.exhausted = true;
     quota.remainingWork.push({ kind: "state_create", units: 1 });
     return false;
   }
   quota.remaining -= cost;
+  quota.retained.add(serialized);
   return true;
 }
 
@@ -448,19 +462,6 @@ function residualUpper(residuals: readonly CoverageRegion[]): number {
   return upper;
 }
 
-function pruneAssociatedSeeds(
-  seeds: readonly SeedActivation[],
-  transitions: readonly Transition[]
-): readonly SeedActivation[] {
-  // Lexical TOP on a path target would outrank the stored bottleneck.
-  const associated = new Set(
-    transitions
-      .filter((transition) => transition.applicable && transition.from.object_id !== transition.to.object_id)
-      .map((transition) => transition.to.object_id)
-  );
-  return Object.freeze(seeds.filter((seed) => !associated.has(seed.state.object_id)));
-}
-
 function mergeResiduals(
   current: readonly CoverageRegion[],
   page: ObserverPage
@@ -499,17 +500,7 @@ function closureFacts(
 }
 
 function observationClosure(state: BindableState): ObserverStatus {
-  if (state.last_observer_status === "unavailable") return "unavailable";
-  if (state.last_observer_status === "cancelled") return "cancelled";
-  if (state.last_observer_status === "unknown") return "unknown";
-  if (state.last_observer_status === "not_applicable") return "not_applicable";
-  if (state.last_observer_status === "invalidated") return "invalidated";
-  if (state.memory_exhausted || state.last_observer_status === "interrupted") return "interrupted";
-  if (state.residuals.some((region) => region.status === "open" || region.status === "interrupted")) {
-    return "open";
-  }
-  if (state.last_observer_status === "exhausted") return "exhausted";
-  return "open";
+  return aggregateObserverStatus(state.memory_exhausted ? "interrupted" : state.last_observer_status, state.residuals);
 }
 
 function requestedIndexClosure(

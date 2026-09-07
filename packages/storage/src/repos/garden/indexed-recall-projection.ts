@@ -30,33 +30,12 @@ export class SqliteIndexedRecallProjection {
     readonly source_revision: string;
     readonly applied_at?: string;
   }> {
-    const eventRow = this.db.prepare(
-      `SELECT COALESCE(MAX(revision), 0) AS revision FROM event_log WHERE workspace_id = ?`
-    ).get(workspaceId) as { readonly revision: number };
-    const relationRow = this.db.prepare(
-      `SELECT COUNT(*) AS count, COALESCE(MAX(assertion_id), '') AS last_id
-       FROM relation_assertions WHERE workspace_id = ?`
-    ).get(workspaceId) as { readonly count: number; readonly last_id: string };
-    const resolutionRow = this.db.prepare(
-      `SELECT COUNT(*) AS count, COALESCE(MAX(resolved_at), '') AS last_resolved
-       FROM relation_assertion_resolution_current WHERE workspace_id = ?`
-    ).get(workspaceId) as { readonly count: number; readonly last_resolved: string };
-    const tombstoneRow = this.db.prepare(
-      `SELECT COUNT(*) AS count FROM memory_entries
-       WHERE workspace_id = ? AND retention_state = 'tombstoned'`
-    ).get(workspaceId) as { readonly count: number };
-    const garden = this.cursor(workspaceId);
+    const row = this.db.prepare(`SELECT observable_epoch, CAST(observable_generation AS TEXT) AS generation,
+      applied_at FROM garden_projection_cursor WHERE workspace_id = ?`).get(workspaceId) as
+      { readonly observable_epoch: string; readonly generation: string; readonly applied_at: string } | undefined;
     return {
-      source_revision: [
-        String(eventRow.revision),
-        String(relationRow.count),
-        relationRow.last_id,
-        String(resolutionRow.count),
-        resolutionRow.last_resolved,
-        String(tombstoneRow.count),
-        String(garden?.appliedEventRevision ?? 0)
-      ].join(":"),
-      ...(garden?.appliedAt === undefined ? {} : { applied_at: garden.appliedAt })
+      source_revision: row === undefined ? "uninitialized" : `${row.observable_epoch}:${row.generation}`,
+      ...(row === undefined ? {} : { applied_at: row.applied_at })
     };
   }
 

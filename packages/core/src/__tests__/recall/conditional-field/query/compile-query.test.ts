@@ -45,6 +45,22 @@ const SUPPORTED_PARAPHRASES = [
 ] as const;
 
 describe("conditional-field query compiler", () => {
+  it("preserves unhandled service and exclusion meaning as distinct open interpretations", () => {
+    const interpretations = ["of checkout", "of payments", "with shared-provider history", "but exclude previous failures"]
+      .map((tail) => compileOrdinary(`yesterday failed deployment ${tail}`));
+    expect(new Set(interpretations.map((item) => item.query_id)).size).toBe(4);
+    for (const interpretation of interpretations) {
+      expect(interpretation.status).toBe("partial");
+      expect(interpretation.holes.some((hole) => hole.status === "unresolved")).toBe(true);
+    }
+  });
+
+  it("admits an ordinary open relation proposal without a relation-name catalog", () => {
+    const interpretation = compileOrdinary("find depends_on_build_agent from deployment to build");
+    expect(interpretation.status).toBe("resolved");
+    expect(collectRelations(interpretation.program).map((relation) => relation.relation_kind)).toEqual(["depends_on_build_agent"]);
+    expect(collectRelations(interpretation.program)[0]?.source_variable).toBe("deployment");
+  });
   it("A01 keeps yesterday on the anchor and admits last-week associated config", () => {
     const interpretation = compileOrdinary("yesterday's failed deployment");
     expect(interpretation.status).toBe("resolved");
@@ -52,8 +68,8 @@ describe("conditional-field query compiler", () => {
     expect(interpretation.query_id).not.toBe(SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID);
     expect(interpretation.time_window).toEqual({ start: YESTERDAY_START, end: YESTERDAY_END });
     const relations = collectRelations(interpretation.program);
-    const anchor = relations.find((relation) => relation.relation_kind === "failed_deployment");
-    const config = relations.find((relation) => relation.relation_kind === "associated_config");
+    const anchor = relations.find((relation) => relation.relation_kind === "observed_log");
+    const config = relations.find((relation) => relation.relation_kind === "config_via_log");
     const history = relations.find((relation) => relation.relation_kind === "associated_history");
     expect(anchor).toBeDefined();
     expect(config).toBeDefined();
@@ -82,7 +98,7 @@ describe("conditional-field query compiler", () => {
       interpretation_clock: INTERPRETATION_CLOCK
     });
     const movedConfig = collectRelations(moved.program)
-      .find((relation) => relation.relation_kind === "associated_config");
+      .find((relation) => relation.relation_kind === "config_via_log");
     expect(movedConfig?.guard.variable).toBe("c");
     expect(movedConfig?.guard.time_scope).toBe("anchor");
     expect(inGuardInterval(LAST_WEEK_INSTANT, movedConfig?.guard.interval)).toBe(false);
@@ -91,11 +107,11 @@ describe("conditional-field query compiler", () => {
 
   it.each(SUPPORTED_PARAPHRASES)("A01 close paraphrase compiles the supported program: %s", (text) => {
     const interpretation = compileOrdinary(text);
-    expect(interpretation.status).toBe("resolved");
+    expect(interpretation.status).toBe(/complete information|of checkout|last week|prior same/u.test(text) ? "partial" : "resolved");
     const relations = collectRelations(interpretation.program);
     expect(relations.find((relation) => relation.guard.time_scope === "anchor")?.guard.variable)
       .toBe("r");
-    expect(relations.find((relation) => relation.target_variable === "c")?.guard.time_scope)
+    expect(relations.find((relation) => relation.relation_kind === "config_via_log")?.guard.time_scope)
       .toBe("none");
   });
 
@@ -106,9 +122,9 @@ describe("conditional-field query compiler", () => {
     expect(collectRelations(owns.program).every((relation) => relation.relation_kind === "lexical_observation"))
       .toBe(true);
     const wrapped = compileOrdinary("who owns yesterday's failed deployment");
-    expect(wrapped.status).toBe("resolved");
+    expect(wrapped.status).toBe("partial");
     expect(collectRelations(wrapped.program).map((relation) => relation.relation_kind).sort())
-      .toEqual(["associated_config", "associated_history", "failed_deployment", "uses_service"]);
+      .toEqual(["associated_history", "config_direct", "config_via_log", "observed_log", "uses_service"]);
   });
 
   it("keeps unseen ordinary language partial instead of false-resolved epsilon", () => {
@@ -331,12 +347,12 @@ describe("conditional-field query compiler", () => {
     expect(compileOrdinary("xyzzy unrelated request").status).toBe("partial");
     const partial = compileOrdinary("failed deployment of checkout");
     expect(partial.status).toBe("partial");
-    expect(partial.holes).toEqual([{
+    expect(partial.holes).toContainEqual({
       schema_version: 1,
       hole_id: "hole.anchor.time",
       variable: "r",
       status: "open"
-    }]);
+    });
     const hinted = compileConditionalFieldQuery({
       source: "ordinary",
       snapshot_id: SNAPSHOT_ID,
@@ -346,9 +362,9 @@ describe("conditional-field query compiler", () => {
       since: YESTERDAY_START,
       until: YESTERDAY_END
     });
-    expect(hinted.status).toBe("resolved");
+    expect(hinted.status).toBe("partial");
     expect(collectRelations(hinted.program)[0]?.guard.time_scope).toBe("anchor");
-    expect(collectRelations(hinted.program).find((relation) => relation.target_variable === "c")
+    expect(collectRelations(hinted.program).find((relation) => relation.relation_kind === "config_via_log")
       ?.guard.time_scope).toBe("none");
     for (const status of ["malformed", "unsupported", "partial", "resource_rejected"] as const) {
       expect(interpretationMayEmitCompleteEmpty(status)).toBe(false);
@@ -513,7 +529,7 @@ function moveAnchorGuardToAssociated(program: QueryProgram): QueryProgram {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     kind: "sequence",
     steps: collectRelations(program).map((item) => (
-      item.relation_kind === "associated_config"
+      item.relation_kind === "config_via_log"
         ? {
             ...item,
             guard: { ...yesterday, variable: "c", time_scope: "anchor" as const }

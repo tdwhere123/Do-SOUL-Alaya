@@ -146,7 +146,7 @@ describe("conditional-field producer-consumer F1-F7 counterexamples", () => {
     };
     const full = runRecall(slice, {
       query_text: "needle",
-      budget: defaultBudget({ page_budget: 800 }),
+      budget: defaultBudget({ page_budget: 800, finalization_reserve: 1000 }),
       readers: capped
     });
     const pages = [];
@@ -167,9 +167,8 @@ describe("conditional-field producer-consumer F1-F7 counterexamples", () => {
     expect(new Set(concatenated).size).toBe(concatenated.length);
     expect(concatenated).toEqual(fullIds);
     expect(planted.length).toBe(40);
-    if (full.completeness.logical_index === "complete") {
-      expect(fullIds.length).toBeGreaterThan(32);
-    }
+    expect(full.completeness.logical_index).toBe("complete");
+    expect(fullIds).toHaveLength(40);
   });
 
   it("F5 native visits stay inside work_units; memory_bytes=1 is not a complete 31-entry index; tokens follow preview bytes", async () => {
@@ -296,7 +295,7 @@ function sequence(
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     kind: "sequence",
-    steps: [relation(first, verdict), relation(second)]
+    steps: [relation(first, verdict), { ...relation(second), source_variable: "t", target_variable: "u" } as QueryProgram]
   };
 }
 

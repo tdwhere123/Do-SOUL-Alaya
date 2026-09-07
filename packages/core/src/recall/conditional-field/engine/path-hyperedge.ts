@@ -189,22 +189,28 @@ function walkCompiledPremise(
     programState,
     milligrades: MILLIGRADE_TOP,
     validity: openValidity(),
-    binding: from.binding_context
+    binding: from.binding_context,
+    derivations: [],
+    roots: [],
+    visited: []
   }));
-  const seen = new Set<string>();
   const found: PremiseAssignment[] = [];
   while (queue.length > 0) {
     const node = queue.shift();
     if (node === undefined) break;
     const key = `${node.objectId}\0${node.programState}\0${node.binding}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (node.visited.includes(key)) continue;
+    const visited = [...node.visited, key];
     if (node.programState === ACCEPTING_PROGRAM_STATE) {
-      found.push(terminalAssignment(
+      const terminal = terminalAssignment(
         from, node.objectId, node.milligrades, node.validity, "path", node.binding
-      ));
+      );
+      const root = node.roots.length === 0 ? terminal.derivation : joinDerivation("serial", node.roots);
+      found.push({ ...terminal, derivation: root, derivations: mergeDerivations([...node.derivations, root]) });
     }
-    const here = { ...from, object_id: node.objectId, binding_context: node.binding };
+    const env = parseBindingContext(node.binding);
+    for (const variable of automaton.localVariables.get(node.programState) ?? []) env.delete(variable);
+    const here = { ...from, object_id: node.objectId, binding_context: encodeBindingContext(env) };
     for (const hyperedge of automaton.hyperedgeAdvances) {
       if (hyperedge.from !== node.programState) continue;
       for (const effect of hyperedgeEffects(rows, hyperedge.hyperedge, {
@@ -222,7 +228,10 @@ function walkCompiledPremise(
             programState,
             milligrades,
             validity: effect.hyperedge.validity,
-            binding: effect.hyperedge.to.binding_context
+            binding: effect.hyperedge.to.binding_context,
+            roots: [...node.roots, effect.derivation],
+            derivations: [...node.derivations, ...effect.derivations],
+            visited
           });
         }
       }
@@ -240,7 +249,10 @@ function walkCompiledPremise(
             programState,
             milligrades,
             validity: assignment.validity,
-            binding: assignment.binding_context
+            binding: assignment.binding_context,
+            roots: [...node.roots, assignment.derivation],
+            derivations: [...node.derivations, ...assignment.derivations],
+            visited
           });
         }
       }
@@ -255,6 +267,9 @@ type WalkNode = Readonly<{
   readonly milligrades: number;
   readonly validity: Transition["validity"];
   readonly binding: string;
+  readonly roots: readonly Derivation[];
+  readonly derivations: readonly Derivation[];
+  readonly visited: readonly string[];
 }>;
 
 function openValidity(): Transition["validity"] {
@@ -273,7 +288,8 @@ function terminalAssignment(
   const derivation = leafDerivation({
     derivation_id: `leaf:${leafId}`,
     observation_id: leafId,
-    leaf_id: leafId
+    leaf_id: leafId,
+    association_milligrades: milligrades
   });
   return {
     hypothesis_id: from.hypothesis_id,
@@ -319,7 +335,9 @@ function assignmentFromRow(
   const derivation = leafDerivation({
     derivation_id: `leaf:${leafId}`,
     observation_id: leafId,
-    leaf_id: leafId
+    leaf_id: leafId,
+    association_milligrades: strength.milligrades,
+    source_revision: row.source_revision ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision
   });
   return {
     hypothesis_id: from.hypothesis_id,

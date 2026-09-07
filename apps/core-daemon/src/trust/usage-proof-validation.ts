@@ -20,6 +20,16 @@ export function validateUsageProofAgainstDelivery(
 ): void {
   validateUsedObjects(record, delivery);
   validatePerAnchorUsage(record, delivery);
+  for (const report of record.witness_reports ?? []) {
+    const exposure = delivery.witness_exposures?.find((candidate) =>
+      candidate.grain === "witness" && candidate.witness_id === report.witness_id
+      && candidate.query_id === report.query_id && candidate.snapshot_id === report.snapshot_id
+      && candidate.interpretation_id === report.interpretation_id && candidate.as_of === report.as_of);
+    if (report.grain !== "witness" || exposure === undefined
+      || (report.exposure === "exposed" && exposure.exposure !== "exposed")) {
+      throw new TrustStateInvalidUsageProofError("Witness was not exposed by this delivery at the reported semantic epoch.");
+    }
+  }
 }
 
 function validateUsedObjects(

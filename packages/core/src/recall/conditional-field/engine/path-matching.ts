@@ -15,6 +15,7 @@ import {
 
 export type AdjacencyRow = Readonly<{
   readonly assertionId: string;
+  readonly source_revision?: string;
   readonly sourceObjectId: string;
   readonly targetObjectId: string;
   readonly predicate: string;

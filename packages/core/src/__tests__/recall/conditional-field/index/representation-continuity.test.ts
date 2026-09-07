@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   DerivationSchema,
@@ -139,14 +140,14 @@ describe("U04 index representation continuity", () => {
     });
     const index = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([fieldValue("cfg", 850)]),
-      derivations: [current, revoked],
+      derivations: [leaf("cfg-leaf"), current, revoked],
       support: [supportRecord([
         witness("w-current", ["cfg"], 1),
         witness("w-revoked", ["cfg"], 1)
       ])]
     }));
-    expect(index.entries[0]?.explanation_ids).toEqual(["cfg-current"]);
-    expect(index.entries[0]?.explanation_ids).not.toContain("cfg-revoked");
+    expect(index.entries[0]?.explanation_ids).toEqual(["cfg-current", "cfg-revoked"]);
+    expect(index.entries[0]?.explanation_ids).toContain("cfg-revoked");
     expect(current.source_revisions).toEqual(["rev-2"]);
     expect(revoked.source_revisions).not.toEqual(current.source_revisions);
   });
@@ -235,6 +236,33 @@ describe("U04 index representation continuity", () => {
     expect(one.completeness.logical_index).toBe("open");
   });
 
+  it("resumes unfinished representation while observation stays exhausted", () => {
+    const input = deploymentInput({ remaining_reserve: 1, expires_at: EXPIRES_AT,
+      observer: { outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] } });
+    const ids: string[] = [];
+    let page = projectAcceptingIndex(input);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      ids.push(...page.entries.map((entry) => entry.object_id));
+      expect(page.completeness.observed_coverage).toBe("complete");
+      if (page.continuation === null) break;
+      page = continueAcceptingIndex(page, input);
+    }
+    expect(page.continuation).toBeNull();
+    expect(ids).toEqual(["c", "h", "l", "r"]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("retries payload work at the same product cursor and charges its actual allowance", () => {
+    const input = baseInput({ snapshot: snapshotOf([fieldValue("cfg", 850)]), remaining_reserve: 2,
+      expires_at: EXPIRES_AT, observer: { outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] } });
+    const first = projectAcceptingIndex({ ...input, finalize_payload: (_entries, remaining) => ({ remaining, complete: false }) });
+    expect(first.continuation).not.toBeNull();
+    const resumed = continueAcceptingIndex(first, { ...input, finalize_payload: (_entries, remaining) => ({ remaining: remaining - 1, complete: true }) });
+    expect(resumed.entries.map((entry) => entry.object_id)).toEqual(["cfg"]);
+    expect(resumed.continuation).toBeNull();
+    expect(resumed.completeness.payload).toBe("complete");
+  });
+
   it("B10 exposure handles stay output- or witness-grained and do not claim use", () => {
     const index = projectAcceptingIndex(deploymentInput({
       support: [supportRecord([witness("for-r", ["r"], 1)])]
@@ -253,6 +281,8 @@ describe("U04 index representation continuity", () => {
     const witnessReport = witnessAttributionHandle({
       entry,
       witness_id: "for-r",
+      interpretation_id: "meaning-1",
+      as_of: EVENING,
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID
     });
@@ -298,6 +328,8 @@ function deploymentInput(
 }
 
 function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): AcceptingProjectionInput {
+  const roles = new Map([...overrides.roles ?? []].map(([id, role]) => [productStateNodeId(fieldValue(id, 1).state), role]));
+  const roots = (overrides.derivations ?? []).filter((node) => !(overrides.derivations ?? []).some((parent) => parent.children.includes(node.derivation_id)));
   return {
     snapshot: snapshotOf([]),
     view: {
@@ -311,7 +343,9 @@ function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): Accepting
     snapshot_id: SNAPSHOT_ID,
     result_version: RESULT_VERSION,
     budget: defaultBudget(),
-    ...overrides
+    ...overrides,
+    roles,
+    output_derivations: overrides.output_derivations ?? Object.fromEntries((overrides.snapshot?.values ?? []).map((value) => [productStateNodeId(value.state), roots.map((root) => root.derivation_id)]))
   };
 }
 

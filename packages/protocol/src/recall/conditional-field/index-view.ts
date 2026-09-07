@@ -10,7 +10,7 @@ import {
   SchemaVersionSchema,
   Sha256DigestSchema
 } from "./common.js";
-import { ClaimStateSchema } from "./support.js";
+import { ClaimStateSchema, DerivationSchema, PropositionSchema } from "./support.js";
 
 export const IndexRoleSchema = z.enum(["requested", "associated", "routing_only"]);
 
@@ -23,6 +23,8 @@ export const IndexEntrySchema = z
     role: IndexRoleSchema,
     association_milligrades: MilligradeSchema,
     claim: ClaimStateSchema,
+    claim_proposition_id: ConditionalFieldIdSchema.optional(),
+    claim_proposition: PropositionSchema.optional(),
     explanation_ids: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     program_state: ConditionalFieldIdSchema.optional(),
     time_state: ConditionalFieldIdSchema.optional()
@@ -90,6 +92,9 @@ export const InformationIndexSchema = z
     snapshot_id: Sha256DigestSchema,
     result_version: ConditionalFieldIdSchema,
     entries: z.array(IndexEntrySchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    interpretation_id: ConditionalFieldIdSchema.optional(),
+    as_of: IsoDatetimeStringSchema.optional(),
+    explanations: z.array(DerivationSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     completeness: CompletenessReportSchema,
     continuation: ContinuationSchema.nullable(),
     representation: RepresentationDecisionSchema

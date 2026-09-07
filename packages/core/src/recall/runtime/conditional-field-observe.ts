@@ -1,6 +1,5 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  isPathActiveForRecall,
   type CoverageRegion,
   type IndexRole,
   type ObserverCursor,
@@ -17,7 +16,6 @@ import {
   type SourceObserverPage
 } from "../conditional-field/observers/observe.js";
 import {
-  applyEvidenceEffect,
   applyObserverPage,
   createConditionalField,
   proposeFieldWork,
@@ -32,14 +30,9 @@ import {
 } from "../conditional-field/engine/path-composition.js";
 import { STORED_RELATION_KIND } from "../conditional-field/query/ordinary-language.js";
 import {
-  UNBOUND_BINDING,
   type BoundSourceFacts
 } from "../conditional-field/engine/binding-environment.js";
 import { collectRelations } from "../conditional-field/query/compile-query.js";
-import {
-  assessEvidence,
-  observationsFromOwners
-} from "../conditional-field/evidence/assess-support.js";
 export type ObserveFieldInput = Readonly<{
   readonly workspace_id: string;
   readonly query_text: string;
@@ -108,11 +101,11 @@ export function observeField(
       committed_through: position
     });
   }
-  const subjects = new Set<string>(state.resume_subjects);
-  const relationRows: RelationObserverRow[] = [];
+  const subjects = new Set<string>([...state.resume_subjects, ...state.seen_identities.map((row) => row.object_id)]);
+  let relationRows: RelationObserverRow[] = [...(state.observed_relations ?? [])];
   const observedAt: Record<string, string> = {};
-  const sourceFacts = new Map<string, BoundSourceFacts>();
-  const memoryBox = { remaining: state.remaining_memory_bytes };
+  const sourceFacts = new Map<string, BoundSourceFacts>(Object.entries(state.source_facts ?? {}));
+  const memoryBox = { remaining: state.remaining_memory_bytes, cachedBytes: 0 };
   const sourceCache = new Map<string, SourceObserverPage>();
   const observedInput: ObserveFieldInput = {
     ...input,
@@ -134,12 +127,19 @@ export function observeField(
     });
   }
   for (let round = 0; round < MAX_OBSERVE_ROUNDS; round += 1) {
-    memoryBox.remaining = state.remaining_memory_bytes;
+    memoryBox.remaining = Math.max(0, state.remaining_memory_bytes - memoryBox.cachedBytes);
     if (terminalObserver(state.last_observer_status)) break;
     const proposal = proposeFieldWork(state);
     if (proposal.actions.length === 0) break;
-    for (const action of proposal.actions) {
+    for (const proposed of proposal.actions) {
+      const action = { ...proposed, work_limit: Math.min(4, state.remaining_exploration) };
+      if ((action.action === "seed" || action.action === "adjacency") && action.work_limit < 4) {
+        state = { ...state, last_observer_status: "interrupted", remaining_exploration: 0,
+          residuals: state.residuals.map((region) => region.status === "open" ? { ...region, status: "interrupted" } : region) };
+        break;
+      }
       if (action.action === "seed") {
+        const before = state;
         const observed = observeSeed(observedInput, interpretation, lease, action, cursors, observedAt);
         cursors.set(action.region_id, observed.page.cursor);
         const seedIds = observed.page.observations.map((row) => row.object_id);
@@ -151,6 +151,10 @@ export function observeField(
           work: observed.work,
           resume_cursors: resumeCursors(cursors, pairProgress)
         });
+        if (state.retention_rejected !== undefined || state.memory_exhausted) return state;
+        state = retainObservedContext(before, state, sourceFacts, relationRows, subjects, pairProgress);
+        if (state.memory_exhausted) return state;
+        if (observed.page.outcome.status === "interrupted") return state;
         continue;
       }
       if (action.action === "measurement") {
@@ -187,7 +191,8 @@ export function observeField(
       if (incompleteObserver(state.last_observer_status)) {
         break;
       }
-      const predicates = adjacencyKindsFor(interpretation.program, storedKinds.kinds);
+      const predicates = [...new Set([...adjacencyKindsFor(interpretation.program, storedKinds.kinds),
+        ...(interpretation.view.claim_demands ?? []).map((demand) => demand.proposition_kind)])];
       const pair = nextAdjacencyPair(subjects, predicates, pairProgress, pairIndex);
       pairIndex += 1;
       if (pair === undefined) {
@@ -199,7 +204,7 @@ export function observeField(
         observedInput, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt, sourceFacts
       );
       cursors.set(action.region_id, observed.page.cursor);
-      relationRows.push(...captured);
+      relationRows = mergeRelationRows(relationRows, captured);
       addSubjects(subjects, captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]));
       recordObservedAt(
         observedInput,
@@ -207,6 +212,7 @@ export function observeField(
         observedAt,
         sourceFacts
       );
+      const before = state;
       state = applyObserverPage(state, {
         page: maskAdjacencyExhaustion(observed.page, hasOpenPairs(subjects, predicates, pairProgress)),
         effects: (() => {
@@ -225,6 +231,13 @@ export function observeField(
         work: observed.work,
         resume_cursors: resumeCursors(cursors, pairProgress)
       });
+      if (state.retention_rejected !== undefined || state.memory_exhausted) return state;
+      state = retainObservedContext(before, state, sourceFacts, relationRows, subjects, pairProgress);
+      if (state.memory_exhausted) return state;
+      if (observed.page.outcome.status === "interrupted") {
+        if ((before.pair_progress[pairKey(pair.subject, pair.predicate)] ?? null) === observed.page.cursor.committed_through) return state;
+        state = { ...state, last_observer_status: "open" };
+      }
     }
   }
   return Object.freeze({
@@ -232,6 +245,33 @@ export function observeField(
     pair_progress: Object.freeze(Object.fromEntries(pairProgress)),
     resume_subjects: Object.freeze([...subjects])
   });
+}
+
+function retainObservedContext(
+  before: FieldEngineState, state: FieldEngineState,
+  facts: ReadonlyMap<string, BoundSourceFacts>, relations: readonly RelationObserverRow[],
+  subjects: ReadonlySet<string>, pairProgress: ReadonlyMap<string, string | null>
+): FieldEngineState {
+  const source_facts = Object.fromEntries(facts);
+  const bytes = Buffer.byteLength(JSON.stringify([source_facts, relations]), "utf8")
+    - Buffer.byteLength(JSON.stringify([before.source_facts ?? {}, before.observed_relations ?? []]), "utf8");
+  if (bytes > state.remaining_memory_bytes) return { ...before,
+    remaining_exploration: state.remaining_exploration, memory_exhausted: true, last_observer_status: "interrupted",
+    closure: { ...before.closure, observation: "interrupted", requested_index: "open" },
+    residuals: before.residuals.map((region) => region.status === "open" ? { ...region, status: "interrupted" } : region) };
+  return { ...state, source_facts, observed_relations: relations, remaining_memory_bytes: state.remaining_memory_bytes - bytes,
+    pair_progress: Object.fromEntries(pairProgress), resume_subjects: [...subjects] };
+}
+
+function mergeRelationRows(prior: readonly RelationObserverRow[], rows: readonly RelationObserverRow[]): RelationObserverRow[] {
+  const merged = new Map(prior.map((row) => [row.assertionId, row]));
+  for (const row of rows) {
+    const previous = merged.get(row.assertionId);
+    const receipts = new Map([...(previous?.evidenceReceipts ?? []), ...(row.evidenceReceipts ?? [])].map((receipt) => [receipt.evidenceId, receipt]));
+    merged.set(row.assertionId, { ...row, evidenceRefs: [...new Set([...(previous?.evidenceRefs ?? []), ...(row.evidenceRefs ?? [])])],
+      evidenceReceipts: [...receipts.values()] });
+  }
+  return [...merged.values()];
 }
 
 function startObservedField(
@@ -250,88 +290,16 @@ function startObservedField(
       ...resumed,
       interpretation,
       budget: input.budget,
-      remaining_exploration: resumed.remaining_exploration + exploration,
+      remaining_exploration: exploration,
       remaining_reserve: input.budget.finalization_reserve,
-      remaining_memory_bytes: Math.max(resumed.remaining_memory_bytes, input.budget.memory_bytes),
-      memory_exhausted: false
+      remaining_memory_bytes: Math.max(0, input.budget.memory_bytes
+        - (resumed.budget.memory_bytes - resumed.remaining_memory_bytes)),
+      memory_exhausted: false,
+      last_observer_status: resumed.last_observer_status === "interrupted" ? "open" : resumed.last_observer_status,
+      retention_rejected: undefined
     };
   }
   return createConditionalField({ interpretation, budget: input.budget, residuals });
-}
-
-export function assessUnknownCause(
-  state: FieldEngineState,
-  input: ObserveFieldInput
-): FieldEngineState {
-  if (state.remaining_reserve < 1) {
-    return applyEvidenceEffect(state, { support: state.support, work_status: "open" });
-  }
-  const assertions = assertionReadsFrom(state, input);
-  const hypothesisId = state.interpretation.hypotheses[0]?.hypothesis_id ?? "h0";
-  const timeState = state.interpretation.time_window?.end ?? input.as_of;
-  const context = {
-    query_id: state.query_id,
-    snapshot_id: state.snapshot_id,
-    source_revision: state.snapshot_id,
-    hypothesis_id: hypothesisId,
-    binding_context: UNBOUND_BINDING,
-    time_state: timeState,
-    jurisdiction: "workspace",
-    as_of: input.as_of,
-    permitted_timeless_policy_ids: new Set<string>(),
-    assertions,
-    claims: [] as const,
-    access: new Map()
-  };
-  const observations = observationsFromOwners(context).filter((row) =>
-    isPathActiveForRecall(row.path_lifecycle)
-  );
-  const propositions = assertions.map((assertion) => ({
-    proposition: {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      proposition_id: assertion.assertion_id,
-      kind: assertion.relation_kind,
-      arguments: [assertion.assertion_id]
-    },
-    templates: assertion.evidence_receipts.map((receipt) => ({
-      witness_id: receipt.evidence_id,
-      premises: [
-        assertion.anchors.source_anchor.object_id,
-        assertion.anchors.target_anchor.object_id
-      ],
-      cost: 1
-    }))
-  }));
-  const assessed = assessEvidence({
-    ...context,
-    observations,
-    propositions,
-    work_limit: state.remaining_reserve
-  });
-  const claims = new Map<string, (typeof assessed.records)[number]["claim"]>();
-  for (const [index, record] of assessed.records.entries()) {
-    const targetId = assertions[index]?.anchors.target_anchor.object_id;
-    if (targetId !== undefined) claims.set(targetId, record.claim);
-    claims.set(record.proposition_id, record.claim);
-  }
-  return applyEvidenceEffect(state, {
-    support: assessed.records,
-    claims,
-    work_status: assessed.work_status
-  });
-}
-
-export function rolesFrom(state: FieldEngineState): ReadonlyMap<string, IndexRole> {
-  const roles = new Map<string, IndexRole>();
-  for (const identity of state.seen_identities) roles.set(identity.object_id, "associated");
-  for (const seed of state.seeds) roles.set(seed.state.object_id, "requested");
-  for (const transition of state.transitions) {
-    if (RELATION_MILLIGRADES[transition.relation_kind]?.role === "routing_only"
-      && roles.get(transition.to.object_id) !== "requested") {
-      roles.set(transition.to.object_id, "routing_only");
-    }
-  }
-  return roles;
 }
 
 export function cancelledField(state: FieldEngineState): FieldEngineState {
@@ -381,6 +349,7 @@ function observeSeed(
     workspace_id: input.workspace_id,
     readers: input.readers,
     seed_query: input.query_text,
+    page_limit: 1,
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,
     as_of: input.as_of,
@@ -432,6 +401,7 @@ function observeAdjacency(
     workspace_id: input.workspace_id,
     readers: capturingReaders(input.readers, captured),
     relation_subject: pair.subject,
+    page_limit: 1,
     relation_kind: pair.predicate,
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,
@@ -507,11 +477,9 @@ function loadStoredRelationKinds(
   const listed = readers.relationKinds;
   if (listed === undefined) return { kinds: [], charged: 0, open: true };
   if (remainingExploration < 1) return { kinds: [], charged: 0, open: true };
-  return {
-    kinds: listed({ workspaceId, subject: null }),
-    charged: 1,
-    open: false
-  };
+  const limit = Math.min(32, remainingExploration);
+  const kinds = listed({ workspaceId, subject: null, limit });
+  return { kinds, charged: Math.min(limit, kinds.length + 1), open: kinds.length === limit };
 }
 
 function recordObservedAt(
@@ -529,6 +497,9 @@ function recordObservedAt(
     if (row === null) continue;
     sourceFacts.set(objectId, {
       object_id: row.object_id,
+      source_revision: row.sourceRevision,
+      ...(row.content === undefined ? {} : { content: row.content }),
+      ...(row.predicates === undefined ? {} : { predicates: row.predicates }),
       ...((row.observed_at ?? row.created_at) === undefined ? {} : { observed_at: row.observed_at ?? row.created_at }),
       ...(row.created_at === undefined ? {} : { created_at: row.created_at }),
       ...(row.last_used_at === undefined ? {} : { last_used_at: row.last_used_at }),
@@ -572,60 +543,9 @@ function transitionEffects(
   });
 }
 
-function assertionReadsFrom(
-  state: FieldEngineState,
-  input: ObserveFieldInput
-) {
-  const relation = input.readers.relation;
-  if (relation === undefined || state.remaining_reserve < 1) return [];
-  const kinds = adjacencyKindsFor(state.interpretation.program);
-  const subjects = new Set(state.seen_identities.map((identity) => identity.object_id));
-  const assertions = [];
-  let allowance = state.remaining_reserve;
-  const cap = Math.min(512, Math.max(1, Math.min(input.budget.page_budget, allowance)));
-  for (const subject of subjects) {
-    for (const predicate of kinds) {
-      if (allowance < 1) return assertions;
-      allowance -= 1;
-      const page = relation({
-        workspaceId: input.workspace_id,
-        subject,
-        predicate,
-        limit: cap,
-        nativeLimit: cap,
-        afterAssertionId: null
-      });
-      for (const row of page.observations) {
-        const validity = row.validity;
-        if (validity === undefined) continue;
-        const occurredAt = row.occurred_at
-          ?? (validity.kind === "timeless" ? input.as_of : validity.valid_from);
-        assertions.push({
-          assertion_id: row.assertionId,
-          relation_kind: row.predicate,
-          evidence_receipts: (row.evidenceRefs ?? []).map((evidenceId) => ({
-            evidence_id: evidenceId,
-            source_event_anchor: {
-              event_id: row.source_event_id ?? row.assertionId,
-              event_type: "relation.evidence",
-              occurred_at: occurredAt
-            }
-          })),
-          anchors: {
-            source_anchor: { kind: "object" as const, object_id: row.sourceObjectId },
-            target_anchor: { kind: "object" as const, object_id: row.targetObjectId }
-          },
-          validity
-        });
-      }
-    }
-  }
-  return assertions;
-}
-
 function meterReaders(
   readers: ObserverReaders,
-  memory: { remaining: number },
+  memory: { remaining: number; cachedBytes: number },
   cache: Map<string, SourceObserverPage>
 ): ObserverReaders {
   const source = readers.source;
@@ -634,9 +554,11 @@ function meterReaders(
     ...readers,
     source: (args) => {
       const hit = cache.get(args.objectId);
-      if (hit !== undefined) return hit;
+      if (hit !== undefined) return { ...hit, rowsRead: 0, bytesRead: 0 };
       const byteLimit = Math.max(1, Math.min(65536, memory.remaining));
       const page = source({ ...args, byteLimit });
+      memory.remaining = Math.max(0, memory.remaining - page.bytesRead);
+      memory.cachedBytes += page.bytesRead;
       cache.set(args.objectId, page);
       return page;
     }

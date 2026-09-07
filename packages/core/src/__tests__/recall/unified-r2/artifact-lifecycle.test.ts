@@ -492,7 +492,7 @@ describe('durable semantic artifact lifecycle', () => {
     const hydrated = reader.source(WS, MEM.orion);
     expect(hydrated.row?.sourceRevision).toBe(current.revision);
     expect(hydrated.row?.sourceRevision).not.toBe(initial.revision);
-    expect(hydrated).toMatchObject({ rowsRead: 2, sourceRowsRead: 1, revisionRowsRead: 1 });
+    expect(hydrated).toMatchObject({ rowsRead: 3, sourceRowsRead: 2, revisionRowsRead: 1 });
     probes.push({ probe: 'durable_source_hydration', hydrated });
     probes.push({ probe: 'fixed_clock_source_aba', first, second, again, initial, current, sourceEvents, calls: t.calls.length });
   });
@@ -555,7 +555,7 @@ describe('durable semantic artifact lifecycle', () => {
     db.close();
     db.reopenIfClosed();
     initializeSemanticArtifactCandidateSchema(db.connection);
-    expect(db.connection.prepare('SELECT revision FROM garden_semantic_schema').all()).toEqual([{ revision: 5 }]);
+    expect(db.connection.prepare('SELECT revision FROM garden_semantic_schema').all()).toEqual([{ revision: 6 }]);
   });
 
   it.each([1, 2, 3])('rejects old candidate schema %i after file reopen without silently reusing its FTS layout', async (revision) => {

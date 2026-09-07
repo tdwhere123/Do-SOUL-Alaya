@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UsageReportSchema } from "../recall/conditional-field/feedback.js";
 import {
   BoundedIdSchema,
   BoundedLabelSchema,
@@ -46,6 +47,7 @@ export const ContextDeliveryRecordSchema = z
     run_id: BoundedIdSchema.nullable(),
     delivered_object_ids: z.array(BoundedIdSchema).readonly(),
     delivered_objects: z.array(SoulContextObjectIdentitySchema).readonly().optional(),
+    witness_exposures: z.array(UsageReportSchema).readonly().optional(),
     delivered_at: IsoDatetimeStringSchema,
     audit_event_id: BoundedIdSchema
   })
@@ -58,6 +60,7 @@ export const UsageProofRecordSchema = z
     usage_state: SoulContextUsageStateSchema,
     used_object_ids: z.array(BoundedIdSchema).readonly(),
     used_objects: z.array(SoulContextObjectIdentitySchema).readonly().optional(),
+    witness_reports: z.array(UsageReportSchema).readonly().optional(),
     per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).readonly().optional(),
     trust_mode: SoulContextUsageTrustModeSchema.optional(),
     reason: BoundedReasonSchema.nullable(),

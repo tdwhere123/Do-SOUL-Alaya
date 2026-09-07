@@ -56,6 +56,11 @@ export const QueryViewSchema = z
       .max(BOUNDED_DEFAULT_ARRAY_MAX)
       .readonly(),
     include_routing_only: z.boolean().default(false),
+    claim_demands: z.array(z.object({
+      variable: ConditionalFieldIdSchema,
+      proposition_kind: BoundedLabelSchema,
+      argument_variables: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly()
+    }).strict().readonly()).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     facet_mode: FacetModeSchema.default("same_path"),
     threshold_milligrades: MilligradeSchema.default(0)
   })
@@ -149,12 +154,14 @@ export type QueryProgram =
   | {
       readonly schema_version: 1;
       readonly kind: "repeat";
+      readonly local_variables?: readonly string[];
       readonly count: number;
       readonly body: QueryProgram;
     }
   | {
       readonly schema_version: 1;
       readonly kind: "closure";
+      readonly local_variables?: readonly string[];
       readonly product_state_sufficient: true;
       readonly body: QueryProgram;
     }
@@ -190,6 +197,7 @@ export const QueryProgramSchema: z.ZodType<QueryProgram> = z.lazy(() =>
       .object({
         schema_version: SchemaVersionSchema,
         kind: z.literal("repeat"),
+        local_variables: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().default([]),
         count: z.number().int().min(1).max(8),
         body: QueryProgramSchema
       })
@@ -199,6 +207,7 @@ export const QueryProgramSchema: z.ZodType<QueryProgram> = z.lazy(() =>
       .object({
         schema_version: SchemaVersionSchema,
         kind: z.literal("closure"),
+        local_variables: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().default([]),
         product_state_sufficient: z.literal(true),
         body: QueryProgramSchema
       })

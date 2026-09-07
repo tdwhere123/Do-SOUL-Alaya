@@ -110,7 +110,9 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
         parsed.agent_target,
         parsed.workspace_id,
         parsed.run_id,
-        JSON.stringify(parsed.delivered_objects ?? parsed.delivered_object_ids),
+        JSON.stringify(parsed.witness_exposures === undefined
+          ? parsed.delivered_objects ?? parsed.delivered_object_ids
+          : { identities: parsed.delivered_objects ?? parsed.delivered_object_ids, witnesses: parsed.witness_exposures }),
         parsed.delivered_at,
         parsed.audit_event_id
       );
@@ -130,7 +132,9 @@ export class SqliteTrustStateRepo implements TrustStateRepo {
         parsed.delivery_id,
         parsed.usage_state,
         parsed.trust_mode ?? null,
-        JSON.stringify(parsed.used_objects ?? parsed.used_object_ids),
+        JSON.stringify(parsed.witness_reports === undefined
+          ? parsed.used_objects ?? parsed.used_object_ids
+          : { identities: parsed.used_objects ?? parsed.used_object_ids, witnesses: parsed.witness_reports }),
         JSON.stringify(parsed.per_anchor_usage ?? []),
         parsed.reason,
         parsed.reported_at,
@@ -207,6 +211,7 @@ function parseDeliveryRow(row: DeliveryRow): Readonly<ContextDeliveryRecord> {
       workspace_id: row.workspace_id,
       run_id: row.run_id,
       delivered_object_ids: deliveredPayload.ids,
+      ...(deliveredPayload.witnesses === undefined ? {} : { witness_exposures: deliveredPayload.witnesses }),
       ...(deliveredPayload.objects === undefined
         ? {}
         : { delivered_objects: deliveredPayload.objects }),
@@ -228,6 +233,7 @@ function parseUsageRow(row: UsageRow): Readonly<UsageProofRecord> {
       usage_state: row.usage_state,
       ...(row.trust_mode === null ? {} : { trust_mode: row.trust_mode }),
       used_object_ids: usedPayload.ids,
+      ...(usedPayload.witnesses === undefined ? {} : { witness_reports: usedPayload.witnesses }),
       ...(usedPayload.objects === undefined
         ? {}
         : { used_objects: usedPayload.objects }),
@@ -245,8 +251,12 @@ function parseUsageRow(row: UsageRow): Readonly<UsageProofRecord> {
 function parseObjectIdentityPayload(value: string, label: string): {
   readonly ids: readonly string[];
   readonly objects?: readonly SoulContextObjectIdentity[];
+  readonly witnesses?: unknown;
 } {
   const parsed = JSON.parse(value) as unknown;
+  if (typeof parsed === "object" && parsed !== null && "identities" in parsed && "witnesses" in parsed) {
+    return { ...parseObjectIdentityPayload(JSON.stringify(parsed.identities), label), witnesses: parsed.witnesses };
+  }
   if (!Array.isArray(parsed)) {
     throw new StorageError("VALIDATION_FAILED", `${label} object payload must be an array.`);
   }

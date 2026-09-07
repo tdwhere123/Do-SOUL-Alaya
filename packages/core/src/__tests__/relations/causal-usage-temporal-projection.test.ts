@@ -138,7 +138,7 @@ describe("causal usage temporal path projection", () => {
       witness_id: "w-hidden"
     });
 
-    const attributed = attributeUsageReports([claimed, unknown, missing, nonexposure]);
+    const attributed = attributeUsageReports([claimed, unknown, missing, nonexposure], [claimed]);
     expect(attributed.map((row) => row.witness_credit)).toEqual([
       "claimed",
       "unknown",
@@ -169,6 +169,8 @@ function usageReport(overrides: Partial<UsageReport> & Pick<
     schema_version: 1,
     query_id: "q1",
     snapshot_id: SNAPSHOT,
+    interpretation_id: "clock-1",
+    as_of: "2026-09-07T00:00:00.000Z",
     ...overrides
   });
 }

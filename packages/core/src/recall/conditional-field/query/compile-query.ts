@@ -32,6 +32,8 @@ import {
   classifyOrdinaryRequest,
   lexicalStoredRelationProgram,
   openAnchorTimeGuard,
+  ordinaryRemainder,
+  proposeOrdinaryRelations,
   programFromOpenRelations,
   supportedFailedDeploymentProgram,
   UNBOUND_BINDING_CONTEXT,
@@ -236,14 +238,18 @@ function compileOrdinary(
     return ordinaryMalformed(input, snapshotId, view);
   }
   const classified = classifyOrdinaryRequest(input.text);
-  const relations = input.relations ?? [];
-  if (relations.length > 0) {
-    return compileOpenRelations(input, snapshotId, budget, view, queryId, classified, yesterday, hints);
-  }
-  if (classified.kind === "lexical") {
-    return compileLexicalRequest(input, snapshotId, budget, view, queryId, hints);
-  }
-  return compileSupportedRequest(input, snapshotId, budget, view, queryId, classified, yesterday, hints);
+  const relations = input.relations ?? proposeOrdinaryRelations(input.text);
+  const interpreted = relations.length > 0
+    ? compileOpenRelations({ ...input, relations }, snapshotId, budget, view, queryId, classified, yesterday, hints)
+    : classified.kind === "lexical"
+      ? compileLexicalRequest(input, snapshotId, budget, view, queryId, hints)
+      : compileSupportedRequest(input, snapshotId, budget, view, queryId, classified, yesterday, hints);
+  return { ...interpreted, query_id: identityFor(queryId, {
+    program: interpreted.program, view: interpreted.view, hypotheses: interpreted.hypotheses,
+    interpretation_clock: input.interpretation_clock, time_window: interpreted.time_window,
+    authorized_scopes: input.authorized_scopes, lexical_text: input.text,
+    ordinary_request: { relations, query_id: queryId }
+  }) };
 }
 
 function compileSupportedRequest(
@@ -256,6 +262,7 @@ function compileSupportedRequest(
   yesterday: QueryTimeWindow,
   hints: TimeHints
 ): QueryInterpretation {
+  view = { ...view, claim_demands: view.claim_demands ?? [{ variable: "h", proposition_kind: "common_cause", argument_variables: ["r", "h"] }] };
   if (classified.kind === "malformed") {
     return ordinaryMalformed(input, snapshotId, view);
   }
@@ -304,12 +311,14 @@ function compileSupportedRequest(
   consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
   const holes = [
     ...(window === undefined ? [openTimeHole()] : []),
+    ...(ordinaryRemainder(input.text).length > 0 ? [uninterpretedQueryHole()] : []),
     ...openEndpointHoles(hints)
   ];
   return interpretationOf({
     query_id: identityFor(queryId, {
       program,
       view,
+      lexical_text: input.text,
       interpretation_clock: input.interpretation_clock,
       time_window: window,
       authorized_scopes: input.authorized_scopes
@@ -424,6 +433,9 @@ function admissionStatus(
   if (interpretQuery(program).kind === "unsupported") return "unsupported";
   if (hypotheses.length > 0) return "hypotheses";
   if (holes.some((hole) => hole.status !== "bound")) return "partial";
+  if (collectRelations(program).some(({ guard }) => guard.kind === "query_predicate"
+    && guard.predicate_name !== undefined && !guard.predicate_name.startsWith("source.filters")
+    && guard.verdict === "unresolved")) return "partial";
   return "resolved";
 }
 
@@ -595,6 +607,7 @@ function identityFor(
     readonly time_window?: QueryTimeWindow;
     readonly authorized_scopes?: readonly string[];
     readonly lexical_text?: string;
+    readonly ordinary_request?: unknown;
   }>
 ): string {
   if (queryId !== undefined) return queryId;
@@ -606,7 +619,8 @@ function identityFor(
       interpretation_clock: parts.interpretation_clock ?? null,
       time_window: parts.time_window ?? null,
       authorized_scopes: [...(parts.authorized_scopes ?? [])].sort(),
-      lexical_text: parts.lexical_text ?? ""
+      lexical_text: parts.lexical_text ?? "",
+      ordinary_request: parts.ordinary_request ?? null
     }), "utf8").digest("hex")
   );
 }

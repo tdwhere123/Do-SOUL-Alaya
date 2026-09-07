@@ -1,3 +1,5 @@
+import type { SqliteConnection } from "../../sqlite/db.js";
+
 const SOURCE_EVENT_REVISION_SQL = `COALESCE((SELECT revision FROM event_log
   INDEXED BY garden_semantic_source_event_revision
   WHERE workspace_id=new.workspace_id AND entity_type='memory_entry' AND entity_id=new.object_id
@@ -126,3 +128,41 @@ INSERT OR IGNORE INTO garden_projection_cursor(workspace_id, applied_event_revis
 SELECT workspace_id, MAX(source_event_revision), MAX(applied_at)
 FROM garden_index_revisions GROUP BY workspace_id;
 `;
+
+/** Publication generations count observable mutations, never per-entity revisions. */
+export function initializeObservableMutationGeneration(db: SqliteConnection): void {
+  const columns = new Set((db.prepare("PRAGMA table_info(garden_projection_cursor)").all() as { name: string }[])
+    .map((column) => column.name));
+  if (!columns.has("observable_generation")) db.exec(`ALTER TABLE garden_projection_cursor
+    ADD COLUMN observable_generation INTEGER NOT NULL DEFAULT 0
+    CHECK (typeof(observable_generation) = 'integer' AND observable_generation >= 0)`);
+  if (!columns.has("observable_epoch")) db.exec("ALTER TABLE garden_projection_cursor ADD COLUMN observable_epoch TEXT NOT NULL DEFAULT ''");
+  db.exec("UPDATE garden_projection_cursor SET observable_epoch = lower(hex(randomblob(16))) WHERE observable_epoch = ''");
+  for (const table of ["memory_entries", "garden_semantic_projections", "memory_embeddings", "relation_assertions", "relation_assertion_evidence",
+    "relation_assertion_resolution_current", "event_log"]) installMutationTriggers(db, table);
+}
+
+function installMutationTriggers(db: SqliteConnection, table: string): void {
+  const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((column) => column.name);
+  const changed = columns.map((column) => {
+    const quoted = column.replaceAll('"', '""');
+    return `new."${quoted}" IS NOT old."${quoted}"`;
+  }).join(" OR ");
+  for (const [operation, suffix] of [["INSERT", "ai"], ["UPDATE", "au"], ["DELETE", "ad"]] as const) {
+    const rows = operation === "INSERT" ? ["new"] : operation === "DELETE" ? ["old"] : ["old", "new"];
+    const name = `garden_observable_${table}_${suffix}`;
+    const workspaces = rows.map((row) => {
+      const workspace = table === "relation_assertion_evidence"
+        ? `(SELECT workspace_id FROM relation_assertions WHERE assertion_id = ${row}.assertion_id)` : `${row}.workspace_id`;
+      const relevant = table === "event_log"
+        ? ` AND ${row}.event_type IN ('soul.memory.created', 'soul.memory.updated', 'relation.assertion_admitted', 'relation.assertion_resolved')` : "";
+      return `SELECT ${workspace} AS workspace_id WHERE ${workspace} IS NOT NULL${relevant}`;
+    }).join(" UNION ");
+    const writes = `INSERT INTO garden_projection_cursor(workspace_id, applied_event_revision, applied_at, observable_epoch, observable_generation)
+      SELECT workspace_id, 0, '1970-01-01T00:00:00.000Z', lower(hex(randomblob(16))), 1 FROM (${workspaces}) WHERE 1
+      ON CONFLICT(workspace_id) DO UPDATE SET observable_generation = observable_generation + 1,
+        observable_epoch = CASE WHEN observable_epoch = '' THEN excluded.observable_epoch ELSE observable_epoch END;`;
+    db.exec(`DROP TRIGGER IF EXISTS ${name}; CREATE TRIGGER ${name} AFTER ${operation} ON ${table}
+      ${operation === "UPDATE" ? `WHEN ${changed}` : ""} BEGIN ${writes} END;`);
+  }
+}

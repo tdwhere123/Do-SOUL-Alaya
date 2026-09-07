@@ -16,12 +16,15 @@ const RECOVERED_BINDINGS = new Map<string, string>();
 
 export type BoundSourceFacts = Readonly<{
   readonly object_id: string;
+  readonly source_revision?: string;
+  readonly content?: string;
   readonly observed_at?: string;
   readonly created_at?: string;
   readonly last_used_at?: string | null;
   readonly dimension?: string;
   readonly domain_tags?: readonly string[];
   readonly scope_class?: string;
+  readonly predicates?: Readonly<Record<string, boolean>>;
 }>;
 
 export type GuardDecision = "true" | "false" | "unresolved";
@@ -100,6 +103,12 @@ export function evaluateGuard(
   }>
 ): GuardDecision {
   if (guard.verdict === "false") return "false";
+  const filters = decodeSourceFilters(guard.predicate_name);
+  if (filters !== undefined) {
+    const objectId = objectForFilters(guard, env, endpoints);
+    const decision = sourceFactsSatisfyFilters(filters, objectId === undefined ? undefined : facts.get(objectId));
+    if (decision !== "true") return decision;
+  }
   if (guard.verdict === "true" && guard.kind !== "query_predicate" && guard.kind !== "interval_relation") {
     return "true";
   }
@@ -190,7 +199,11 @@ function evaluateQueryPredicate(
 ): GuardDecision {
   const filters = decodeSourceFilters(guard.predicate_name);
   if (filters === undefined) {
-    return guard.verdict === "false" ? "false" : "true";
+    if (guard.predicate_name === undefined) return guard.verdict === "false" ? "false" : "true";
+    if (guard.verdict !== "unresolved") return guard.verdict;
+    const id = objectForFilters(guard, env, endpoints);
+    const observed = id === undefined ? undefined : facts.get(id)?.predicates?.[guard.predicate_name];
+    return observed === undefined ? "unresolved" : observed ? "true" : "false";
   }
   const objectId = objectForFilters(guard, env, endpoints);
   if (objectId === undefined) return "unresolved";
@@ -207,4 +220,3 @@ function objectForFilters(
   }
   return endpoints?.targetId ?? endpoints?.sourceId;
 }
-

@@ -190,6 +190,8 @@ describe("U00 upgrade contracts", () => {
       witness_id: "w1",
       object_id: "cfg",
       query_id: "q1",
+      interpretation_id: "clock-1",
+      as_of: "2026-09-07T00:00:00.000Z",
       snapshot_id: SNAPSHOT
     });
     expect(witness.grain).toBe("witness");

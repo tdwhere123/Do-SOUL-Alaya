@@ -11,6 +11,7 @@ import {
   type ObserverPage,
   type ObserverStatus,
   type ProductStateKey,
+  type Proposition,
   type QueryInterpretation,
   type RequestBudget,
   type SeedActivation,
@@ -40,7 +41,10 @@ import {
   type HyperedgeCompletion,
   type HyperedgePremise
 } from "./path-composition.js";
-import { derivationsAfterWithdraw } from "./path-derivation.js";
+import { derivationForest, evaluateDerivation, reviseDerivations } from "./path-derivation.js";
+import type { RelationObserverRow } from "../observers/observe.js";
+import type { BoundSourceFacts } from "./binding-environment.js";
+import type { GroundingProgress } from "./output-derivations.js";
 import {
   ACTION_BY_KIND,
   absorbObservations,
@@ -114,10 +118,19 @@ export type FieldEngineState = Readonly<{
   readonly remaining_reserve: number;
   readonly remaining_memory_bytes: number;
   readonly memory_exhausted: boolean;
+  readonly retention_rejected?: "memory" | "work";
   readonly seen_identities: readonly ProductStateKey[];
   readonly identity_spool: readonly ProductStateKey[];
   readonly charged_identity_ids: readonly string[];
   readonly observations: readonly TypedObservation[];
+  readonly observed_relations?: readonly RelationObserverRow[];
+  readonly source_facts?: Readonly<Record<string, BoundSourceFacts>>;
+  readonly grounding_progress?: GroundingProgress;
+  readonly preview_cache?: Readonly<Record<string, string>>;
+  readonly support_progress?: Readonly<Record<string, { readonly offset: number; readonly complete: boolean }>>;
+  readonly support_observation_count?: number;
+  readonly support_retained_bytes?: number;
+  readonly claim_propositions?: ReadonlyMap<string, Proposition>;
   readonly seeds: readonly SeedActivation[];
   readonly guaranteed_seeds: readonly SeedActivation[];
   readonly transitions: readonly Transition[];
@@ -208,21 +221,47 @@ export function applyObserverPage(
   if (page.query_id !== state.query_id || page.snapshot_id !== state.snapshot_id) {
     return reviseEpoch(state, consumption);
   }
-  return bindEngineState(absorbObservations(state, consumption));
+  const observedWork = consumption.work?.work_units ?? 0;
+  const reserved = { ...state, remaining_exploration: Math.max(0, state.remaining_exploration - observedWork) };
+  const candidate = bindEngineState(absorbObservations(reserved, { ...consumption, work: { work_units: 0 } }));
+  const workRejected = observedWork > state.remaining_exploration
+    || candidate.remaining_work.reduce((sum, row) => sum + row.units, 0) > state.remaining_work.reduce((sum, row) => sum + row.units, 0);
+  if (!candidate.memory_exhausted && !workRejected) return { ...candidate, retention_rejected: undefined };
+  return Object.freeze({
+    ...state,
+    remaining_exploration: candidate.remaining_exploration,
+    remaining_reserve: candidate.remaining_reserve,
+    memory_exhausted: candidate.memory_exhausted,
+    retention_rejected: candidate.memory_exhausted ? "memory" : "work",
+    last_observer_status: "interrupted",
+    residuals: state.residuals.map((region) => region.status === "exhausted" ? region : { ...region, status: "interrupted" as const }),
+    closure: { ...state.closure, observation: "interrupted" as const, requested_index: "interrupted" as const }
+  });
 }
 
 export function withdrawDerivationLeaves(
   state: FieldEngineState,
   withdrawnLeafId: string
 ): FieldEngineState {
-  const derivations = derivationsAfterWithdraw(state.derivations, withdrawnLeafId);
-  const keptIds = new Set(derivations.map((row) => row.derivation_id));
-  const transitions = state.transitions.filter((transition) => {
+  const revised = reviseDerivations(state.derivations, withdrawnLeafId);
+  const derivations = revised.derivations;
+  const forest = derivationForest(derivations);
+  const grades = new Map(derivations.flatMap((row) => row.association_milligrades === undefined ? [] :
+    row.leaf_ids.map((id) => [id, row.association_milligrades!] as const)));
+  const retained = state.transitions.filter((transition) => {
     const derivationId = state.transition_derivations[transitionKey(transition)];
     if (derivationId === undefined) {
       return !leafTouchesTransition(transition, withdrawnLeafId);
     }
-    return keptIds.has(derivationId);
+    return revised.roots.get(derivationId) !== undefined;
+  });
+  const transitionRoots: Record<string, string> = {};
+  const transitions = retained.map((transition) => {
+    const root = revised.roots.get(state.transition_derivations[transitionKey(transition)] ?? "");
+    const grade = root === undefined ? undefined : evaluateDerivation(forest, root, grades);
+    const next = grade === undefined ? transition : { ...transition, strength_milligrades: grade };
+    if (root !== undefined) transitionRoots[transitionKey(next)] = root;
+    return next;
   });
   const { binding: _binding, closure: _closure, ...rest } = state;
   return bindEngineState({
@@ -230,9 +269,7 @@ export function withdrawDerivationLeaves(
     derivations,
     transitions: mergeTransitions(transitions),
     guaranteed_transitions: mergeTransitions(transitions.filter((transition) => transition.applicable)),
-    transition_derivations: Object.fromEntries(
-      Object.entries(state.transition_derivations).filter(([, derivationId]) => keptIds.has(derivationId))
-    )
+    transition_derivations: transitionRoots
   });
 }
 

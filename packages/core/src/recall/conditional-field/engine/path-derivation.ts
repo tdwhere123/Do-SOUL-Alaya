@@ -18,6 +18,7 @@ export function leafDerivation(input: {
   readonly leaf_id?: string;
   readonly source_revision?: string;
   readonly witness_id?: string;
+  readonly association_milligrades?: number;
 }): Derivation {
   const leafId = input.leaf_id ?? input.observation_id;
   return Object.freeze({
@@ -27,6 +28,7 @@ export function leafDerivation(input: {
     children: Object.freeze([]),
     observation_ids: Object.freeze([input.observation_id]),
     leaf_ids: Object.freeze([leafId]),
+    ...(input.association_milligrades === undefined ? {} : { association_milligrades: input.association_milligrades }),
     source_revisions: Object.freeze(
       input.source_revision === undefined ? [] : [input.source_revision]
     ),
@@ -42,6 +44,8 @@ export function joinDerivation(
     readonly witness_id?: string;
   } = {}
 ): Derivation {
+  if (kind === "and" || kind === "or") children = [...new Map(children.map((child) => [child.derivation_id, child])).values()]
+    .sort((left, right) => left.derivation_id.localeCompare(right.derivation_id));
   const only = children[0];
   if (only !== undefined && children.length === 1 && (kind === "or" || kind === "serial")) {
     return only;
@@ -101,47 +105,46 @@ export function withdrawDerivation(
   rootId: string,
   withdrawnLeafId: string
 ): Derivation | undefined {
-  const current = forest.get(rootId);
-  if (current === undefined) return undefined;
-  if (current.kind === "leaf") {
-    return current.leaf_ids.includes(withdrawnLeafId) || current.derivation_id === withdrawnLeafId
-      ? undefined
-      : current;
-  }
-  const kept: Derivation[] = [];
-  for (const childId of current.children) {
-    const next = withdrawDerivation(forest, childId, withdrawnLeafId);
-    if (next === undefined) continue;
-    kept.push(next);
-  }
-  if (current.kind === "and" || current.kind === "serial") {
-    if (kept.length !== current.children.length) return undefined;
-  }
-  if (kept.length === 0) return undefined;
-  if (kept.length === 1 && current.kind === "or") return kept[0];
-  if (kept.length === current.children.length
-    && kept.every((child, index) => child.derivation_id === current.children[index])) {
-    return current;
-  }
-  return joinDerivation(current.kind, kept, {
-    derivation_id: `${current.derivation_id}-w`,
-    witness_id: current.witness_id
-  });
+  const revised = reviseDerivations([...forest.values()], withdrawnLeafId);
+  const root = revised.roots.get(rootId);
+  return revised.derivations.find((node) => node.derivation_id === root);
 }
 
 export function derivationsAfterWithdraw(
   rows: readonly Derivation[],
   withdrawnLeafId: string
 ): readonly Derivation[] {
+  return reviseDerivations(rows, withdrawnLeafId).derivations;
+}
+
+export function reviseDerivations(rows: readonly Derivation[], withdrawnLeafId: string): {
+  readonly derivations: readonly Derivation[];
+  readonly roots: ReadonlyMap<string, string | undefined>;
+} {
   const forest = derivationForest(rows);
-  const childIds = new Set(rows.flatMap((row) => row.children));
-  const kept: Derivation[] = [];
-  const seen = new Set<string>();
-  for (const row of rows) {
-    if (childIds.has(row.derivation_id)) continue;
-    collectWithdrawn(forest, row.derivation_id, withdrawnLeafId, kept, seen);
-  }
-  return mergeDerivations(kept);
+  const retained = new Map<string, Derivation>();
+  const roots = new Map<string, string | undefined>();
+  const visit = (id: string): Derivation | undefined => {
+    if (roots.has(id)) return retained.get(roots.get(id) ?? "");
+    const node = forest.get(id);
+    if (node === undefined) return undefined;
+    roots.set(id, undefined);
+    if (node.kind === "leaf") {
+      if (node.leaf_ids.includes(withdrawnLeafId) || id === withdrawnLeafId) return undefined;
+      retained.set(id, node);
+      roots.set(id, id);
+      return node;
+    }
+    const children = node.children.map(visit).filter((child): child is Derivation => child !== undefined);
+    if (children.length === 0 || (node.kind !== "or" && children.length !== node.children.length)) return undefined;
+    const next = children.every((child, index) => child.derivation_id === node.children[index])
+      && children.length === node.children.length ? node : joinDerivation(node.kind, children);
+    retained.set(next.derivation_id, next);
+    roots.set(id, next.derivation_id);
+    return next;
+  };
+  for (const row of rows) visit(row.derivation_id);
+  return { derivations: [...retained.values()], roots };
 }
 
 export function derivationIdentity(
@@ -149,33 +152,6 @@ export function derivationIdentity(
   children: readonly Derivation[]
 ): string {
   return clipId(`${kind}:${children.map((child) => child.derivation_id).join("+")}`);
-}
-
-function collectWithdrawn(
-  forest: DerivationForest,
-  rootId: string,
-  withdrawnLeafId: string,
-  kept: Derivation[],
-  seen: Set<string>
-): void {
-  const next = withdrawDerivation(forest, rootId, withdrawnLeafId);
-  if (next === undefined) return;
-  remember(forest, next, kept, seen);
-}
-
-function remember(
-  forest: DerivationForest,
-  node: Derivation,
-  kept: Derivation[],
-  seen: Set<string>
-): void {
-  if (seen.has(node.derivation_id)) return;
-  seen.add(node.derivation_id);
-  kept.push(node);
-  for (const childId of node.children) {
-    const child = forest.get(childId) ?? kept.find((row) => row.derivation_id === childId);
-    if (child !== undefined) remember(forest, child, kept, seen);
-  }
 }
 
 function unique(values: readonly string[]): string[] {
