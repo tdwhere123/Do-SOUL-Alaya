@@ -62,7 +62,7 @@ describe("conditional-field query compiler", () => {
     expect(collectRelations(interpretation.program).map((relation) => relation.relation_kind)).toEqual(["depends_on_build_agent"]);
     expect(collectRelations(interpretation.program)[0]?.source_variable).toBe("deployment");
   });
-  it("A01 keeps yesterday on the anchor and admits last-week associated config", () => {
+  it("keeps yesterday on the anchor and admits last-week associated config", () => {
     const interpretation = compileOrdinary("yesterday's failed deployment");
     expect(interpretation.status).toBe("resolved");
     expect(interpretation.query_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
@@ -195,7 +195,7 @@ describe("conditional-field query compiler", () => {
     }));
   });
 
-  it("A03 keeps epsilon distinct from empty and does not rewrite grammar", () => {
+  it("keeps epsilon distinct from empty and does not rewrite grammar", () => {
     const epsilon = compileTyped({ schema_version: 1, kind: "epsilon" });
     const empty = compileTyped({ schema_version: 1, kind: "empty" });
     expect(epsilon.program.kind).toBe("epsilon");
@@ -222,7 +222,7 @@ describe("conditional-field query compiler", () => {
       .not.toBe("or");
   });
 
-  it("A03 keeps holes and hypotheses as separate identities", () => {
+  it("keeps holes and hypotheses as separate identities", () => {
     const first = hypothesis("h1", "event", "failed_deployment");
     const second = hypothesis("h2", "event", "outage");
     const interpretation = compileConditionalFieldQuery({
@@ -250,7 +250,7 @@ describe("conditional-field query compiler", () => {
       .toBeGreaterThan(1);
   });
 
-  it("A06 defaults same_path and does not rewrite it to independent", () => {
+  it("defaults same_path and does not rewrite it to independent", () => {
     const ordinary = compileOrdinary("yesterday's failed deployment");
     expect(ordinary.view.facet_mode).toBe("same_path");
     expect(collectRelations(ordinary.program).every((relation) => relation.facet_mode === "same_path"))

@@ -11,7 +11,7 @@ import {
 } from "./evidence.fixture.js";
 
 describe("conditional-field evidence support", () => {
-  it("A07 requires both compatible premises and keeps an alternate complete witness", () => {
+  it("requires both compatible premises and keeps an alternate complete witness", () => {
     const twoPremise = demand("rel-and", "two_premise", [
       template("and", ["p1", "p2"], 400),
       template("alt", ["p3"], 200)
@@ -56,7 +56,7 @@ describe("conditional-field evidence support", () => {
     expect(alternate.explanation_ids).toContain("alt/supports");
   });
 
-  it("A07 rejects identical endpoints under incompatible time, binding, jurisdiction, or hypothesis", () => {
+  it("rejects identical endpoints under incompatible time, binding, jurisdiction, or hypothesis", () => {
     const twoPremise = demand("rel-and", "two_premise", [template("and", ["p1", "p2"], 400)]);
     const p1 = observation({
       observation_id: "o1",
@@ -80,7 +80,7 @@ describe("conditional-field evidence support", () => {
     }
   });
 
-  it("B09 keeps equal-leaf AND and OR derivations as distinct alternatives", () => {
+  it("keeps equal-leaf AND and OR derivations as distinct alternatives", () => {
     const assessed = assessEvidence(assessmentInput({
       observations: [
         observation({ observation_id: "oa", evidence_id: "ea", premise_id: "a", proposition_id: "cause" }),
@@ -98,7 +98,7 @@ describe("conditional-field evidence support", () => {
     expect(assessed.explanation_ids).toEqual(expect.arrayContaining(["and-ab/supports", "or-c/supports"]));
   });
 
-  it("A08 keeps a cheaper complete witness when a canonical expensive id sorts first", () => {
+  it("keeps a cheaper complete witness when a canonical expensive id sorts first", () => {
     const assessed = assessEvidence(assessmentInput({
       observations: [
         observation({
@@ -128,7 +128,7 @@ describe("conditional-field evidence support", () => {
     ]);
   });
 
-  it("A02 leaves common cause unknown while association milligrades stay non-probative", () => {
+  it("leaves common cause unknown while association milligrades stay non-probative", () => {
     const assessed = assessEvidence(assessmentInput({
       observations: [
         observation({
@@ -153,7 +153,7 @@ describe("conditional-field evidence support", () => {
     expect(assessed.records[0]?.witnesses.some((witness) => witness.complete)).toBe(false);
   });
 
-  it("A13 fully assessed unknown is a resolved claim, not missing work", () => {
+  it("fully assessed unknown is a resolved claim, not missing work", () => {
     const assessed = assessEvidence(assessmentInput({
       observations: [],
       propositions: [demand("common-cause", COMMON_CAUSE_PROPOSITION_KIND, [
@@ -164,7 +164,7 @@ describe("conditional-field evidence support", () => {
     expect(assessed.work_status).toBe("complete");
   });
 
-  it("A19 duplicate hits and shared lineage do not mint independence", () => {
+  it("duplicate hits and shared lineage do not mint independence", () => {
     const first = observation({
       observation_id: "hit-1",
       evidence_id: "e-copy",

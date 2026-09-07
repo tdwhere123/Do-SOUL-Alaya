@@ -191,8 +191,8 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
       "packages/storage/src/repos/garden/semantic-artifact-repo.ts",
       "packages/storage/src/__tests__/repos/garden/semantic-artifact-eligibility.test.ts",
       "packages/core/src/conversation/semantic-enrichment-worker.ts",
-      "packages/core/src/__tests__/recall/unified-r2/artifact-lifecycle-fixture.ts",
-      "packages/core/src/__tests__/recall/unified-r2/artifact-lifecycle-admission.test.ts"
+      "packages/core/src/__tests__/recall/local-vertical/artifact-lifecycle-fixture.ts",
+      "packages/core/src/__tests__/recall/local-vertical/artifact-lifecycle-admission.test.ts"
     ])
   }),
   Object.freeze({

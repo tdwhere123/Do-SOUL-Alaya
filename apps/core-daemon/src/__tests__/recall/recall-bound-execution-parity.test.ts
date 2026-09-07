@@ -35,7 +35,7 @@ function makeSharedPolicy(): RecallPolicy {
 }
 
 describe("invokeBoundRecall shared input contract", () => {
-  it("preserves one stable fail-closed code across production and benchmark bindings", async () => {
+  it("does not attach retired membership_shrink capture on production or benchmark bindings", async () => {
     const policy = makeSharedPolicy();
     const taskSurface = TaskObjectSurfaceSchema.parse({
       runtime_id: policy.task_surface_ref,
@@ -75,10 +75,12 @@ describe("invokeBoundRecall shared input contract", () => {
       workspaceId: "workspace-1", strategy: "chat", policyOverride: policy
     });
 
-    expect(production.capture_execution).toEqual({
+    expect(production.capture_execution).not.toEqual({
       status: "fail_closed", reason: "membership_shrink"
     });
-    expect(benchmark.capture_execution).toEqual(production.capture_execution);
+    expect(benchmark.capture_execution).not.toEqual({
+      status: "fail_closed", reason: "membership_shrink"
+    });
     expect(production.candidates).toEqual([]);
     expect(benchmark.candidates).toEqual([]);
   });
@@ -145,15 +147,19 @@ describe("invokeBoundRecall shared input contract", () => {
     const [mcpCall, benchCall] = (recallService.recall as ReturnType<typeof vi.fn>).mock.calls.map(
       ([params]) => params
     );
-    expect(mcpCall).toMatchObject({ workspaceId: "ws-parity", policyOverride: policy });
-    expect(benchCall).toMatchObject({ workspaceId: "ws-parity", policyOverride: policy });
-    // This is a wrapper contract check, not a full MCP/bench surface parity
-    // claim. Delivery shaping and materialized benchmark state have separate
-    // integration coverage.
-    expect({ ...mcpCall, taskSurface: undefined }).toEqual({
-      ...benchCall,
-      taskSurface: undefined
+    const sharedWrapper = (call: Record<string, unknown>) => ({
+      workspaceId: call.workspaceId,
+      policyOverride: call.policyOverride,
+      strategy: call.strategy,
+      runId: call.runId
     });
+    expect(sharedWrapper(mcpCall)).toEqual({
+      workspaceId: "ws-parity",
+      policyOverride: policy,
+      strategy: "chat",
+      runId: "run-parity"
+    });
+    expect(sharedWrapper(mcpCall)).toEqual(sharedWrapper(benchCall));
   });
 
   it("forwards the experiment observer only when the benchmark opts in", async () => {

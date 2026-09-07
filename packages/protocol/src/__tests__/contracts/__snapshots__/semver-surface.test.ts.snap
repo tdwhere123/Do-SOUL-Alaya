@@ -46,7 +46,7 @@ soul:mcp-types.ts#GardenListPendingTasksResponseSchema(tasks)#a2aa65e
 soul:mcp-types.ts#GardenMcpWorkerRoleSchema()#16723db|enum=auditor|host_worker|janitor|librarian
 soul:mcp-types.ts#GardenPendingTaskSnapshotSchema(created_at,kind,payload,role,task_id)#c1703c3
 soul:mcp-types.ts#GardenTaskResultEnvelopeSchema(candidate_signals,edge_verdict,extracted_proposals,notes)#096db0d
-soul:mcp-types.ts#MemorySearchResultSchema(budget_state,content_preview,evidence_pointers,hypothesis_id,object_id,object_kind,pending_incomplete,program_state,relevance_score,score_factors,selection_reason,source_channels,staged_warnings,time_state,unfinishedness_bias)#86740a9
+soul:mcp-types.ts#MemorySearchResultSchema(budget_state,content_preview,evidence_pointers,hypothesis_id,object_id,object_kind,output_binding,pending_incomplete,program_state,relevance_score,score_factors,selection_reason,source_channels,staged_warnings,time_state,unfinishedness_bias)#e0f96cb
 soul:mcp-types.ts#RecallTimeFieldSchema()#4ac42fd|enum=created_at|last_used_at
 soul:mcp-types.ts#SoulActiveConstraintGovernanceStateSchema(claim_status,governance_class,source_channels)#6360c27
 soul:mcp-types.ts#SoulActiveConstraintSchema(content,dimension,governance_state,object_id,object_kind,scope_class)#003d9b8
@@ -72,7 +72,7 @@ soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#4da2b41
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#64cb79e
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a36fda8|enum=cold_cascade_engaged|no_stored_vectors|provider_failed|provider_missing|provider_unavailable|recall_explainability_partial|warm_cascade_engaged
 soul:mcp-types.ts#SoulMemorySearchRequestSchema(active_constraints_cap,continuation,dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,source_observed_at,time_field,until)#c08d73e
-soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_count,capture_execution,capture_identity,degradation_reason,delivery_id,delivery_path,index,protocol_version,ranking_authority,results,strategy_mix,total_count)#aca3f74
+soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_count,capture_execution,capture_identity,degradation_reason,delivery_id,delivery_path,index,protocol_version,ranking_authority,results,strategy_mix,total_count)#176dced
 soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version)#e9b7fcd
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a7a3c8a
 soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#4d23f8a

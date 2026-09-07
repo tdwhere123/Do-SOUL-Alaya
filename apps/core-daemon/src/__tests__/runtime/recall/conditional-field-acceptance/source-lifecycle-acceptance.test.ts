@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe("conditional-field source and worker acceptance", () => {
-  it("A09 interrupted zero rows stay open and resumable, not known-empty", async () => {
+  it("interrupted zero rows stay open and resumable, not known-empty", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const inner = readersFor(slice);
@@ -43,7 +43,7 @@ describe("conditional-field source and worker acceptance", () => {
     expect(resumed.completeness.observed_coverage).not.toBe("exhausted_empty");
   });
 
-  it("A18 hides tombstones and keeps the current source after restart", async () => {
+  it("hides tombstones and keeps the current source after restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "conditional-field-accept-a18-"));
     const filename = join(directory, "source.sqlite");
     const first = await openBoundSlice((database) => databases.add(database), filename);
@@ -70,7 +70,7 @@ describe("conditional-field source and worker acceptance", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  it("A18 mixed generations cannot resume an old complete page", async () => {
+  it("mixed generations cannot resume an old complete page", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 8, 911);
     const first = await recallThroughHandler(slice, {

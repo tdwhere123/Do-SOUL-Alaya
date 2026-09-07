@@ -23,7 +23,7 @@ import {
 import { productIdentity } from "./oracle-index.js";
 
 describe("conditional-field compiler and projection contracts", () => {
-  it("B01 does not claim real-producer while IndexEntry drops program/time", () => {
+  it("does not claim real-producer while IndexEntry drops program/time", () => {
     const index = projectAcceptingIndex({
       snapshot: snapshotOf([
         fieldValue("cfg", 850, { program_state: "accepting", time_state: "yesterday" }),
@@ -43,7 +43,7 @@ describe("conditional-field compiler and projection contracts", () => {
     expect(hasProductFields && distinct).toBe(true);
   });
 
-  it("B04 real-producer is service-role history, not named entity_id", () => {
+  it("real-producer is service-role history, not named entity_id", () => {
     const interpretation = compileConditionalFieldQuery({
       source: "ordinary",
       text: "prior same-service failure around yesterday's failed deployment",
@@ -68,7 +68,7 @@ describe("conditional-field compiler and projection contracts", () => {
     expect(coverageById("B04").binding).toBe("real-producer");
   });
 
-  it("B04 high-grade shared-provider bridge does not admit another service history as the same service", () => {
+  it("high-grade shared-provider bridge does not admit another service history as the same service", () => {
     const interpretation = compileConditionalFieldQuery({
       source: "ordinary",
       text: "yesterday's failed deployment",
@@ -90,7 +90,7 @@ describe("conditional-field compiler and projection contracts", () => {
     expect(historyB.some((row) => row.state.binding_context.includes(`${SERVICE_VARIABLE}=service-a`))).toBe(false);
   });
 
-  it("B05 projects the actual compiler hypothesis coverage", () => {
+  it("projects the actual compiler hypothesis coverage", () => {
     const ambiguous = compileConditionalFieldQuery({
       source: "ordinary", text: "yesterday's failure", snapshot_id: SNAPSHOT_ID,
       budget: defaultBudget(), interpretation_clock: INTERPRETATION_CLOCK

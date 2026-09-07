@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 describe("conditional-field upgrade consumer falsifiers", () => {
-  it("B01/B05 handler index is inspected, not assumed complete", async () => {
+  it("handler index is inspected, not assumed complete", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const mcp = await recallThroughHandler(slice, {
@@ -52,7 +52,7 @@ describe("conditional-field upgrade consumer falsifiers", () => {
     expect(mcp.index.completeness.interpretation_coverage).toBeDefined();
   });
 
-  it("B10 planted: encodeIndexResults cannot credit a witness from an output-only receipt", () => {
+  it("planted: encodeIndexResults cannot credit a witness from an output-only receipt", () => {
     const index = sampleIndex([
       {
         object_id: "cfg",
@@ -71,7 +71,7 @@ describe("conditional-field upgrade consumer falsifiers", () => {
     expect(outputOnlyReceipt.grain).not.toBe("witness");
   });
 
-  it("B12/B14 contract-only: compatibility says feedback is unreachable; packaging is not this band", () => {
+  it("contract-only: compatibility says feedback is unreachable; packaging is not this band", () => {
     const feedback = COMPATIBILITY_LEDGER.find((row) => row.field === "operational_feedback");
     expect(feedback?.disposition).toBe("unreachable-on-target");
     expect(COMPATIBILITY_LEDGER.find((row) => row.field === "persisted_old_receipts")?.disposition)
@@ -80,7 +80,7 @@ describe("conditional-field upgrade consumer falsifiers", () => {
     expect(physicalDeletionIsOutOfBand("exclusivity")).toBe(false);
   });
 
-  it("B13 planted: MCP result rows flatten program_state while the index may still carry it", () => {
+  it("planted: MCP result rows flatten program_state while the index may still carry it", () => {
     const index = sampleIndex([
       {
         object_id: "cfg",
@@ -94,7 +94,7 @@ describe("conditional-field upgrade consumer falsifiers", () => {
     expect(index.entries[0]?.program_state).toBe("accepting");
   });
 
-  it("F8 plants worker-preview residual: empty map hydrates omitted placeholder, not the source excerpt", async () => {
+  it("plants worker-preview residual: empty map hydrates omitted placeholder, not the source excerpt", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const mcp = await recallThroughHandler(slice, {
@@ -109,7 +109,7 @@ describe("conditional-field upgrade consumer falsifiers", () => {
     expect(mcp.results.length).toBeGreaterThan(0);
   });
 
-  it("A16/A21 handler encoding still does not reselect or restore retired selector keys", async () => {
+  it("handler encoding still does not reselect or restore retired selector keys", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 6, 961);
     const mcp = await recallThroughHandler(slice, { query: "needle", max_results: 800 });
@@ -119,7 +119,7 @@ describe("conditional-field upgrade consumer falsifiers", () => {
     expect("delivery_path" in mcp).toBe(false);
   });
 
-  it("A14 continuation identity is still query/snapshot/result, not a second selector", async () => {
+  it("continuation identity is still query/snapshot/result, not a second selector", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 8, 971);
     const first = await recallThroughHandler(slice, { query: "needle", max_results: 1 });

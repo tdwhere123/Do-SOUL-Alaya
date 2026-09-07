@@ -28,7 +28,7 @@ const EVENING = "2026-09-06T23:59:59.000Z";
 const MORNING = "2026-09-07T00:00:01.000Z";
 
 describe("index representation continuity", () => {
-  it("B01 keeps program_state and time_state in the accepting key", () => {
+  it("keeps program_state and time_state in the accepting key", () => {
     const index = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([
         fieldValue("cfg", 850, { program_state: "accepting", time_state: "yesterday" }),
@@ -44,7 +44,7 @@ describe("index representation continuity", () => {
     expect(plantedMerge).toHaveLength(3);
   });
 
-  it("B05 keeps interpretation coverage open when one resolved page is complete", () => {
+  it("keeps interpretation coverage open when one resolved page is complete", () => {
     const index = projectAcceptingIndex(deploymentInput({
       interpretation_status: "hypotheses",
       observer: {
@@ -71,7 +71,7 @@ describe("index representation continuity", () => {
       .not.toBe(parsed.completeness.interpretation_coverage);
   });
 
-  it("R7/B03/B09 references AND/OR derivations instead of a flattened source list", () => {
+  it("references AND/OR derivations instead of a flattened source list", () => {
     const a = leaf("a");
     const b = leaf("b");
     const c = leaf("c");
@@ -117,7 +117,7 @@ describe("index representation continuity", () => {
     expect(affordable.entries[0]?.explanation_ids).not.toContain("expensive-and");
   });
 
-  it("B07 keeps source revisions on the referenced derivation, not a winning scalar", () => {
+  it("keeps source revisions on the referenced derivation, not a winning scalar", () => {
     const current = DerivationSchema.parse({
       schema_version: 1,
       derivation_id: "cfg-current",
@@ -152,7 +152,7 @@ describe("index representation continuity", () => {
     expect(revoked.source_revisions).not.toEqual(current.source_revisions);
   });
 
-  it("R8 invalidates an offset continuation reused against an empty field", () => {
+  it("invalidates an offset continuation reused against an empty field", () => {
     const first = projectAcceptingIndex(deploymentInput({
       budget: defaultBudget({ page_budget: 1 }),
       expires_at: EXPIRES_AT
@@ -177,7 +177,7 @@ describe("index representation continuity", () => {
       .not.toEqual(first.entries.map((entry) => entry.object_id));
   });
 
-  it("F6 omits mixed-generation payload without claiming a complete explanation", () => {
+  it("omits mixed-generation payload without claiming a complete explanation", () => {
     const mixed = projectAcceptingIndex(deploymentInput({
       payload_generation: OTHER_GENERATION,
       support: [supportRecord([witness("for-r", ["r"], 1)])]
@@ -194,7 +194,7 @@ describe("index representation continuity", () => {
     expect(sameGeneration.completeness.payload).toBe("complete");
   });
 
-  it("F7 midnight interpretation identity cannot splice the previous page", () => {
+  it("midnight interpretation identity cannot splice the previous page", () => {
     const evening = projectAcceptingIndex(deploymentInput({
       budget: defaultBudget({ page_budget: 1 }),
       expires_at: EXPIRES_AT,
@@ -219,7 +219,7 @@ describe("index representation continuity", () => {
     expect(sameMorning.completeness.logical_index).not.toBe("invalidated");
   });
 
-  it("B08/A20 stops projection when the remaining reserve is exhausted", () => {
+  it("stops projection when the remaining reserve is exhausted", () => {
     const truncated = projectAcceptingIndex(deploymentInput({
       remaining_reserve: 0,
       expires_at: EXPIRES_AT
@@ -263,7 +263,7 @@ describe("index representation continuity", () => {
     expect(resumed.completeness.payload).toBe("complete");
   });
 
-  it("B10 exposure handles stay output- or witness-grained and do not claim use", () => {
+  it("exposure handles stay output- or witness-grained and do not claim use", () => {
     const index = projectAcceptingIndex(deploymentInput({
       support: [supportRecord([witness("for-r", ["r"], 1)])]
     }));
@@ -292,7 +292,7 @@ describe("index representation continuity", () => {
     expect(witnessReport.output_id).toBeUndefined();
   });
 
-  it("A16 retains roles, association, and explanation references on the index", () => {
+  it("retains roles, association, and explanation references on the index", () => {
     const index = InformationIndexSchema.parse(projectAcceptingIndex(deploymentInput({
       support: [supportRecord([witness("for-r", ["r"], 1)])]
     })));

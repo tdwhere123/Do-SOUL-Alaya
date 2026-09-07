@@ -77,7 +77,7 @@ describe("conditional-field reference program interpreter", () => {
       .toEqual({ kind: "program", program: relation });
   });
 
-  it("A04 refuses unbounded repeat instead of compiling a hidden flood", () => {
+  it("refuses unbounded repeat instead of compiling a hidden flood", () => {
     expect(interpretQuery({
       schema_version: 1,
       kind: "repeat",
@@ -92,7 +92,7 @@ describe("conditional-field reference program interpreter", () => {
     }).kind).toBe("unsupported");
   });
 
-  it("A07 keeps hyperedge AND distinct from alternative OR and from a planted join rewrite", () => {
+  it("keeps hyperedge AND distinct from alternative OR and from a planted join rewrite", () => {
     const andJoin: QueryProgram = {
       schema_version: 1,
       kind: "hyperedge",
@@ -121,7 +121,7 @@ describe("conditional-field reference program interpreter", () => {
     expect(interpretQuery(plantedOr)).not.toEqual(interpretQuery(andJoin));
   });
 
-  it("B05 keeps hypothesis coverage open and does not treat it as envelope rejection", () => {
+  it("keeps hypothesis coverage open and does not treat it as envelope rejection", () => {
     const hypotheses: readonly QueryHypothesis[] = [{
       schema_version: 1,
       hypothesis_id: "h1",

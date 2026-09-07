@@ -26,7 +26,7 @@ import {
 } from "../reference/deployment.fixture.js";
 
 describe("conditional-field query field coordinates", () => {
-  it("A02 keeps same-service history as association without a causal predicate", () => {
+  it("keeps same-service history as association without a causal predicate", () => {
     const interpretation = compileOrdinary(
       "prior same-service failure around yesterday's failed deployment"
     );
@@ -46,7 +46,7 @@ describe("conditional-field query field coordinates", () => {
     expect(interpretation.status).toBe("partial");
   });
 
-  it("B04 same-service binding is not a shared-provider object", () => {
+  it("same-service binding is not a shared-provider object", () => {
     const serviceA = compileTyped(usesServiceProgram("service-a"));
     const serviceB = compileTyped(usesServiceProgram("service-b"));
     const provider = compileTyped(usesServiceProgram("shared-provider"));
@@ -77,7 +77,7 @@ describe("conditional-field query field coordinates", () => {
     ))).toBe(false);
   });
 
-  it("B01 keeps recoverable bindings as distinct product coordinates", () => {
+  it("keeps recoverable bindings as distinct product coordinates", () => {
     const left = compileTyped(usesServiceProgram("service-a"));
     const right = compileTyped(usesServiceProgram("service-b"));
     expect(left.query_id).not.toBe(right.query_id);
@@ -88,7 +88,7 @@ describe("conditional-field query field coordinates", () => {
       .not.toBe(hashedMerge);
   });
 
-  it("B05 does not mark omitted hypotheses as resolved coverage", () => {
+  it("does not mark omitted hypotheses as resolved coverage", () => {
     const first = hypothesis("h-failed-deployment", "event", "failed_deployment");
     const second = hypothesis("h-unresolved-event", "event", "unresolved");
     const compiled = compileConditionalFieldQuery({
@@ -112,7 +112,7 @@ describe("conditional-field query field coordinates", () => {
     expect(interpretationCoverageFor(ambiguous.status, ambiguous)).toBe("open");
   });
 
-  it("A04 keeps association finite and explicit rather than an unbounded spread", () => {
+  it("keeps association finite and explicit rather than an unbounded spread", () => {
     const supported = compileOrdinary("yesterday's failed deployment");
     expect(collectRelations(supported.program)).toHaveLength(5);
     const repeat = compileTyped({
@@ -132,7 +132,7 @@ describe("conditional-field query field coordinates", () => {
     expect(overflow.status).toBe("malformed");
   });
 
-  it("A07 retains hyperedge AND versus alternative OR as distinct bindings", () => {
+  it("retains hyperedge AND versus alternative OR as distinct bindings", () => {
     const left = relation("p1", "a", "b");
     const right = relation("p2", "b", "c", sourceBoundEntityGuard("c", "cfg-1"));
     const andJoin = compileTyped({

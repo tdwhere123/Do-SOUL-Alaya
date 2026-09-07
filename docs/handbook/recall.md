@@ -449,23 +449,22 @@ chain in the box at the top of this page.
 
 ## Algorithm-closure boundary
 
-The integrated implementation must not be described as a degenerate projection
-or as unimplemented. Planted live-path proof now covers:
+LIVE planted proof is the conditional-field chain in the box at the top of
+this page: source/SQLite observation through `observeField` to an information
+index on `soul.recall`. The F3-only / `slice_key` / `selectGammaWalk`
+paragraphs below are **historical receipts** of the retired stack. They are
+not live connectedness proof and must not be implemented from.
 
-1. **F3-only membership.** Formed query captures add accepted semantic
-   identities to `query_task_factors`. Source formation emits both the grounded
-   surface and the identity as F3 factors. Proposed routing keys can open field
+Historical receipt (not live):
+
+1. **F3-only membership.** Formed query captures added accepted semantic
+   identities to `query_task_factors`. Proposed routing keys could open field
    membership without becoming grounded truth.
 2. **Ordinary legal `slice_key` visibility.** `selectPinnedProjectionCandidates`
-   matches every legal `artifacts.slice_keys` owner, then runs attributed
-   activation. Closed persisted `opened` values cannot withhold membership.
+   matched every legal `artifacts.slice_keys` owner, then ran attributed
+   activation.
 
-Ordinary SQLite/daemon planted proof now exists for field-only, path-only,
-F3-only, and governance revoke. Post-`selectGammaWalk` order is proved on the
-optional outer legacy selector. In-process query-only worker-read re-resolves
-already selected evidence ids and does not re-run pin/select.
-Selection-boundary replay remains the exact-order owner when a legacy observer
-is attached.
+Those receipts remain in the archive. Do not treat them as the current entry.
 
 This closure covers field membership, selector ordering, and — since the
 G17a/G17b closures — the query-conditioned coverage objective with its

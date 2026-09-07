@@ -70,6 +70,7 @@ export function encodeIndexResults(
       ...(entry.hypothesis_id === undefined ? {} : { hypothesis_id: entry.hypothesis_id }),
       ...(entry.program_state === undefined ? {} : { program_state: entry.program_state }),
       ...(entry.time_state === undefined ? {} : { time_state: entry.time_state }),
+      ...(entry.output_binding === undefined ? {} : { output_binding: entry.output_binding }),
       selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
       source_channels: ["conditional_field"],
       score_factors: { activation: score, relevance: score },

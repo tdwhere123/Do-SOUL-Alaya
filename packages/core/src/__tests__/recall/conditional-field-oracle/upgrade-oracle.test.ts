@@ -61,7 +61,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(CONTRACT_ONLY_UNTIL_REAL_PRODUCERS).toMatch(/contract-only until real producers bind/);
   });
 
-  it("B01 keeps object+program+time as distinct accepting keys", () => {
+  it("keeps object+program+time as distinct accepting keys", () => {
     const accepting = indexEntry({ object_id: "cfg", program_state: "accepting", time_state: "yesterday" });
     const mid = indexEntry({ object_id: "cfg", program_state: "mid", time_state: "yesterday" });
     expect(collidingProductKeys(accepting, mid)).toBe(false);
@@ -86,7 +86,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(new Set(index.entries.map(productIdentity)).size).toBe(2);
   });
 
-  it("B02 scalar agreement does not complete explanations", () => {
+  it("scalar agreement does not complete explanations", () => {
     const a = leafDerivation("a", 800);
     const b = leafDerivation("b", 500);
     const andAb = nodeDerivation("and-ab", "and", [a, b]);
@@ -99,7 +99,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(plantedCompleteBecauseNumeric && explanationsComplete(forest, "and-ab", new Set(["a"]))).toBe(false);
   });
 
-  it("B03 equal-leaf AND/OR structures remain distinct after withdrawing c", () => {
+  it("equal-leaf AND/OR structures remain distinct after withdrawing c", () => {
     const forest = andOrWithdrawalForest();
     const afterOr = withdrawLeaf(forest, "or-left", "c");
     const afterAnd = withdrawLeaf(forest, "and-right", "c");
@@ -109,7 +109,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(afterOr?.kind === afterAnd?.kind).toBe(false);
   });
 
-  it("B04 same-service binding is not a shared-provider object", () => {
+  it("same-service binding is not a shared-provider object", () => {
     const query = { service_id: "service-a", provider_id: "shared-provider" };
     const other = { service_id: "service-b", provider_id: "shared-provider" };
     expect(admitsSameService(query, query)).toBe(true);
@@ -118,7 +118,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(plantedProviderBridge(query, other) && admitsSameService(query, other)).toBe(false);
   });
 
-  it("B05 completing one interpretation does not cover omitted hypotheses", () => {
+  it("completing one interpretation does not cover omitted hypotheses", () => {
     const oneDone = interpretationCoverageOf({
       hypotheses: ["h-config", "h-history"],
       completed: ["h-config"],
@@ -143,7 +143,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(index.completeness.interpretation_coverage).toBe("open");
   });
 
-  it("B06 mixed epoch identities invalidate instead of silently refining", () => {
+  it("mixed epoch identities invalidate instead of silently refining", () => {
     const prior = {
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
@@ -156,7 +156,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(resumeDisposition(prior, { ...prior, snapshot_id: `sha256:${"c".repeat(64)}` })).toBe("invalidate");
   });
 
-  it("B07 cached grade cannot recover a revoked intermediate", () => {
+  it("cached grade cannot recover a revoked intermediate", () => {
     const path = ["r", "s", "h"];
     expect(intermediateAuthorized(path, new Set())).toBe(true);
     expect(intermediateAuthorized(path, new Set(["s"]))).toBe(false);
@@ -164,7 +164,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(plantedBypass).toBe(false);
   });
 
-  it("B08 required unfinished regions survive a tight budget", () => {
+  it("required unfinished regions survive a tight budget", () => {
     const leftover = unfinishedAfterBudget([
       { id: "join", required: true, work: 40 },
       { id: "refine", required: false, work: 10_000 }
@@ -173,7 +173,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(leftover.includes("join")).toBe(true);
   });
 
-  it("B09 keeps the cheap complete witness when the scalar winner differs", () => {
+  it("keeps the cheap complete witness when the scalar winner differs", () => {
     const cheapest = cheapestRecoverableWitness([
       { id: "winner", cost: 1200, complete: true },
       { id: "cheap", cost: 400, complete: true },
@@ -183,7 +183,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(cheapest).not.toBe("winner");
   });
 
-  it("B10 output grain cannot stand in for a witness report", () => {
+  it("output grain cannot stand in for a witness report", () => {
     const output = outputReport("idx-1");
     const witness = witnessReport("w1");
     const exposed = new Set(["w1"]);
@@ -194,7 +194,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(creditFromReport(witnessReport("w1", "nonexposure"), exposed).credited_ids).toEqual([]);
   });
 
-  it("B11 duplicate, missing, nonexposure, and unknown remain distinct", () => {
+  it("duplicate, missing, nonexposure, and unknown remain distinct", () => {
     const folded = foldReports([
       outputReport("idx-1"),
       outputReport("idx-1"),
@@ -210,13 +210,13 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(plantedMissingAsNegative).toBe(false);
   });
 
-  it("B12 usage reports do not own PathRelation.strength", () => {
+  it("usage reports do not own PathRelation.strength", () => {
     expect(usageMayMutateStrength()).toBe(false);
     expect(plantedUsageMutator(0.2, true)).toBeGreaterThan(0.2);
     expect(plantedUsageMutator(0.2, true) !== 0.2 && usageMayMutateStrength()).toBe(false);
   });
 
-  it("B13 contract payload keeps index identity fields that results flattening drops", () => {
+  it("contract payload keeps index identity fields that results flattening drops", () => {
     const entry = indexEntry({ object_id: "cfg", program_state: "accepting", time_state: "yesterday" });
     const flattened = { object_id: entry.object_id, association_milligrades: entry.association_milligrades };
     expect("program_state" in flattened).toBe(false);
@@ -224,7 +224,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(coverageById("B13").binding).toBe("incomplete");
   });
 
-  it("B14 necessity dispositions are closed without claiming finite examples as learning", () => {
+  it("necessity dispositions are closed without claiming finite examples as learning", () => {
     expect(NECESSITY_ROWS).toHaveLength(4);
     expect(new Set(NECESSITY_ROWS.map((row) => row.disposition)))
       .toEqual(new Set(["NOT_REQUIRED", "BENEFIT_NOT_ESTABLISHED"]));
@@ -233,7 +233,7 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(plantedCompleteLearner).toBe(false);
   });
 
-  it("A19 duplicate source sets do not mint independence", () => {
+  it("duplicate source sets do not mint independence", () => {
     expect(duplicatePathsMintIndependence([
       { id: "p1", sources: ["src-a"] },
       { id: "p2", sources: ["src-a"] }
@@ -244,19 +244,19 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     ])).toBe(true);
   });
 
-  it("A20 a page budget is not a complete universe", () => {
+  it("a page budget is not a complete universe", () => {
     expect(actualBudgetRepresentsUniverse(1, 5, false)).toBe(false);
     expect(actualBudgetRepresentsUniverse(800, 5, true)).toBe(false);
     expect(actualBudgetRepresentsUniverse(800, 5, false)).toBe(true);
   });
 
-  it("A21 pre-retirement exclusivity is not physical deletion", () => {
+  it("pre-retirement exclusivity is not physical deletion", () => {
     expect(coverageById("A21").binding).toBe("incomplete");
     expect(coverageById("A21").incomplete_reason).toMatch(/D00/);
     expect(coverageById("A21").planted_failure).toMatch(/old decision chain/);
   });
 
-  it("A22 dispositions stay explicit and packaging stays out of U-band", () => {
+  it("dispositions stay explicit and packaging stays out of U-band", () => {
     expect(coverageById("A22").expected).toMatch(/freeze-live/);
     expect(coverageById("A22").incomplete_reason).toMatch(/D\/T/);
     expect(coverageById("A22").planted_failure).toMatch(/silent reinterpretation/);

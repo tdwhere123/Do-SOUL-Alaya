@@ -54,7 +54,7 @@ afterEach(() => {
 });
 
 describe("conditional-field independent field oracle", () => {
-  it("A01 keeps yesterday on the failed deployment and last-week config at 850", () => {
+  it("keeps yesterday on the failed deployment and last-week config at 850", () => {
     const world = deploymentWorld();
     const field = enumerateSimplePaths(world.seeds, world.edges);
     expect(field.kind).toBe("enumerated");
@@ -74,7 +74,7 @@ describe("conditional-field independent field oracle", () => {
     expect(appliedEverywhere.map((entry) => entry.object_id)).toEqual(["r"]);
   });
 
-  it("A02 includes prior same-service failure at 550 with unknown common cause", () => {
+  it("includes prior same-service failure at 550 with unknown common cause", () => {
     const world = deploymentWorld();
     const field = enumerateSimplePaths(world.seeds, world.edges);
     const index = projectWorld(world, field);
@@ -85,7 +85,7 @@ describe("conditional-field independent field oracle", () => {
     expect(history?.claim).not.toBe("supported");
   });
 
-  it("A03 keeps epsilon distinct from empty and does not pool hypotheses or bindings", () => {
+  it("keeps epsilon distinct from empty and does not pool hypotheses or bindings", () => {
     const epsilon = QueryProgramSchema.parse({ schema_version: 1, kind: "epsilon" });
     const empty = QueryProgramSchema.parse({ schema_version: 1, kind: "empty" });
     expect(epsilon.kind).not.toBe(empty.kind);
@@ -119,7 +119,7 @@ describe("conditional-field independent field oracle", () => {
       ?.association_milligrades).toBe(850);
   });
 
-  it("A04 keeps long homogeneous chains and fan-out grades without hop attenuation", () => {
+  it("keeps long homogeneous chains and fan-out grades without hop attenuation", () => {
     const world = longChainWorld(20, 8);
     const field = enumerateSimplePaths(world.seeds, world.edges);
     expect(milligradeOf(field, "n20")).toBe(900);
@@ -129,7 +129,7 @@ describe("conditional-field independent field oracle", () => {
     expect(milligradeOf(field, "n20")).not.toBeLessThan(900);
   });
 
-  it("A05 agrees with the freeze milligrades and does not amplify cycles", async () => {
+  it("agrees with the freeze milligrades and does not amplify cycles", async () => {
     const world = deploymentWorld();
     const field = enumerateSimplePaths(world.seeds, world.edges);
     const counts = compareObjectMilligrades(field, DEPLOYMENT_MILLIGRADES);
@@ -148,7 +148,7 @@ describe("conditional-field independent field oracle", () => {
     expect(producer.mismatches).toBe(0);
   });
 
-  it("A06 rejects coordinate-wise max under same_path", () => {
+  it("rejects coordinate-wise max under same_path", () => {
     const vectors = samePathFacetVectors();
     expect(evaluateFacets("same_path", vectors, 800)).toBe(false);
     expect(evaluateFacets("independent", vectors, 800)).toBe(true);
@@ -181,7 +181,7 @@ describe("conditional-field independent field oracle", () => {
     expect(independent.entries).toHaveLength(1);
   });
 
-  it("A07 requires AND premises under one binding and keeps complete OR witnesses", () => {
+  it("requires AND premises under one binding and keeps complete OR witnesses", () => {
     expect(joinHyperedgeAnd([
       { hypothesis_id: "h0", binding_context: "default", time_state: "as_of", present: true },
       { hypothesis_id: "h0", binding_context: "default", time_state: "as_of", present: true }
@@ -202,7 +202,7 @@ describe("conditional-field independent field oracle", () => {
     expect(witnesses.map((witness) => witness.witness_id)).toEqual(["expensive", "cheap"]);
   });
 
-  it("A08 keeps the cheap complete witness instead of a greedy strongest path", () => {
+  it("keeps the cheap complete witness instead of a greedy strongest path", () => {
     const cheapest = cheapestCompleteWitness(cheapAlternateWitnesses(), 800);
     expect(cheapest?.witness_id).toBe("cheap");
     const greedyFirst = cheapAlternateWitnesses().find((witness) => witness.complete);

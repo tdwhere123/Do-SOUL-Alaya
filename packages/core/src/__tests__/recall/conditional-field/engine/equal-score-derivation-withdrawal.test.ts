@@ -139,7 +139,7 @@ function fieldFor(program: QueryProgram, rows: readonly ReturnType<typeof edge>[
 function interpretationOf(program: QueryProgram): QueryInterpretation {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    query_id: "b03-probe",
+    query_id: "withdrawal-probe",
     status: "resolved",
     snapshot_id: SNAPSHOT_ID,
     program,

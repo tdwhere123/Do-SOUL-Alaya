@@ -154,7 +154,7 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
     "index product identity and interpretation_coverage survive real dispatch",
     "contract tests pass while dispatch flattens fields, invokes a provider, or selects again",
     "runConditionalFieldRecall + handler index", "MCP/CLI/worker", "incomplete",
-    "in-process MCP preserves A-row index; worker RPC and upgraded fields unbound"),
+    "worker source already calls runConditionalFieldRecall; worker acceptance still spawns gitignored dist that can skew from source"),
   row("B14", "no-learner reference and completed necessity dispositions",
     "four mechanisms NOT_REQUIRED or BENEFIT_NOT_ESTABLISHED; finite examples ≠ learning gains",
     "a deferred selected mechanism is called complete",

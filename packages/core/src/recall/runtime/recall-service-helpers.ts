@@ -260,7 +260,10 @@ export function entryMatchesTimeFilter(
     return true;
   }
 
-  const field = filter.field ?? "created_at";
+  const field = filter.field;
+  if (field === undefined) {
+    return false;
+  }
   const stamp = field === "last_used_at" ? entry.last_used_at : entry.created_at;
 
   if (stamp === null || stamp === undefined) {

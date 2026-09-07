@@ -65,7 +65,7 @@ describe("conditional-field engine", () => {
       .toBe(false);
   });
 
-  it("A04 keeps long homogeneous chains and shared-service fan-out without hop attenuation", () => {
+  it("keeps long homogeneous chains and shared-service fan-out without hop attenuation", () => {
     const hops: Transition[] = [];
     for (let index = 0; index < 20; index += 1) {
       hops.push(edge(productKey(`n${index}`), productKey(`n${index + 1}`), "chain", 900, true));
@@ -87,7 +87,7 @@ describe("conditional-field engine", () => {
     }
   });
 
-  it("A07 completes hyperedge AND only under one binding and all premises", () => {
+  it("completes hyperedge AND only under one binding and all premises", () => {
     const from = productKey("r");
     const to = productKey("c");
     const completion = {
@@ -245,7 +245,7 @@ describe("conditional-field engine", () => {
       || state.remaining_reserve < 2).toBe(true);
   });
 
-  it("B02 treats scalar fixed point as a projection, not explanation coverage", () => {
+  it("treats scalar fixed point as a projection, not explanation coverage", () => {
     const state = createDeploymentField();
     expect(state.closure.propagation).toBe("fixed_point");
     const openSupport = applyEvidenceEffect(state, {
@@ -269,7 +269,7 @@ describe("conditional-field engine", () => {
     expect(exhausted.closure.requested_index).not.toBe("complete");
   });
 
-  it("B09 keeps a cheaper complete alternative derivation after a stronger path wins", () => {
+  it("keeps a cheaper complete alternative derivation after a stronger path wins", () => {
     const cheap = {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       derivation_id: "or-cheap",

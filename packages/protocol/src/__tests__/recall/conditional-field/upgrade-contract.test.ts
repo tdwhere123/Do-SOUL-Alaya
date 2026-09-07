@@ -107,7 +107,7 @@ function indexEntry(input: {
 }
 
 describe("conditional-field upgrade contracts", () => {
-  it("B01 keeps object+program+time as distinct accepting keys", () => {
+  it("keeps object+program+time as distinct accepting keys", () => {
     const left = indexEntry({ object_id: "cfg", program_state: "accepting", time_state: "yesterday" });
     const right = indexEntry({ object_id: "cfg", program_state: "mid", time_state: "yesterday" });
     expect(acceptingKey(left)).not.toBe(acceptingKey(right));
@@ -115,7 +115,7 @@ describe("conditional-field upgrade contracts", () => {
     expect(plantedMerge).not.toBe(acceptingKey(left));
   });
 
-  it("B03 equal-leaf AND/OR structures remain distinct after withdrawing c", () => {
+  it("equal-leaf AND/OR structures remain distinct after withdrawing c", () => {
     const a = leaf("a");
     const b = leaf("b");
     const c = leaf("c");
@@ -142,7 +142,7 @@ describe("conditional-field upgrade contracts", () => {
     expect(plantedCollapse).toBe(false);
   });
 
-  it("B04 same-service binding is not a shared-provider object", () => {
+  it("same-service binding is not a shared-provider object", () => {
     const serviceA = relationProgram("service-a");
     const serviceB = relationProgram("service-b");
     expect(serviceA).not.toEqual(serviceB);
@@ -151,7 +151,7 @@ describe("conditional-field upgrade contracts", () => {
     expect(plantedBridge).not.toEqual(serviceA);
   });
 
-  it("B05 interpretation coverage is independent of observer coverage", () => {
+  it("interpretation coverage is independent of observer coverage", () => {
     const observedComplete = CompletenessReportSchema.parse({
       schema_version: 1,
       logical_index: "complete",
@@ -170,7 +170,7 @@ describe("conditional-field upgrade contracts", () => {
     expect(plantedCertainty.interpretation_coverage).not.toBe(observedComplete.interpretation_coverage);
   });
 
-  it("B10 output grain cannot stand in for a witness report", () => {
+  it("output grain cannot stand in for a witness report", () => {
     const outputOnly = UsageReportSchema.parse({
       schema_version: 1,
       grain: "output",

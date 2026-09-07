@@ -75,7 +75,7 @@ describe("conditional-field production information index", () => {
     }
   });
 
-  it("A12 closes authorized empty exhaustion and keeps unavailable coverage unavailable", () => {
+  it("closes authorized empty exhaustion and keeps unavailable coverage unavailable", () => {
     const exhausted = projectAcceptingIndex(baseInput({
       snapshot: emptySnapshot(),
       observer: coverage("exhausted")
@@ -90,7 +90,7 @@ describe("conditional-field production information index", () => {
     expect(unavailable.completeness.observed_coverage).toBe("unavailable");
   });
 
-  it("A13 can complete the logical index with an unknown common-cause claim", () => {
+  it("can complete the logical index with an unknown common-cause claim", () => {
     const index = projectAcceptingIndex(deploymentInput({
       claims: new Map<string, ClaimState>([["h", "unknown"], ["c", "unknown"]])
     }));
@@ -103,7 +103,7 @@ describe("conditional-field production information index", () => {
     expect(index.entries.find((entry) => entry.object_id === "s")).toBeUndefined();
   });
 
-  it("A14 pages keep query, snapshot and result identity and concatenate in serialization order", () => {
+  it("pages keep query, snapshot and result identity and concatenate in serialization order", () => {
     const input = deploymentInput({
       budget: defaultBudget({ page_budget: 2 }),
       expires_at: EXPIRES_AT
@@ -128,7 +128,7 @@ describe("conditional-field production information index", () => {
     expect([...keys].sort()).toEqual(keys);
   });
 
-  it("A15 labels a first page as partial transport, never complete_inline", () => {
+  it("labels a first page as partial transport, never complete_inline", () => {
     const first = projectAcceptingIndex(deploymentInput({
       budget: defaultBudget({ page_budget: 1 }),
       expires_at: EXPIRES_AT
@@ -189,7 +189,7 @@ describe("conditional-field production information index", () => {
     expect(index.entries.map((entry) => entry.object_id)).toEqual(["r"]);
   });
 
-  it("A06 rejects coordinate-wise max under same_path and honors a relation facet override", () => {
+  it("rejects coordinate-wise max under same_path and honors a relation facet override", () => {
     const vectors: FacetVector[] = [
       { schema_version: 1, path_id: facetPathId(fieldValue("c", 1).state), coordinates: [900, 200] },
       { schema_version: 1, path_id: "c", coordinates: [200, 900] }
@@ -220,7 +220,7 @@ describe("conditional-field production information index", () => {
     expect(overridden.entries.some((entry) => entry.object_id === "c")).toBe(true);
   });
 
-  it("A06 evaluates same_path facets per candidate, not the global bag", () => {
+  it("evaluates same_path facets per candidate, not the global bag", () => {
     const weak = { schema_version: 1, path_id: facetPathId(fieldValue("a", 1).state), coordinates: [900, 200] } as const;
     const strong = { schema_version: 1, path_id: facetPathId(fieldValue("b", 1).state), coordinates: [900, 900] } as const;
     const index = projectAcceptingIndex(baseInput({

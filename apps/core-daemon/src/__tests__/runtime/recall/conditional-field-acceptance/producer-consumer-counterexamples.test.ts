@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
-  it("F1 ordinary programs do not collapse to one field", async () => {
+  it("ordinary programs do not collapse to one field", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const failed = await recallThroughHandler(slice, {
@@ -47,7 +47,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
   });
 
 
-  it("F1 public dimension and absent domain tags do not return every fact", async () => {
+  it("public dimension and absent domain tags do not return every fact", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const dimension = await recallThroughHandler(slice, {
@@ -64,7 +64,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     expect(tagged.results).toEqual([]);
   });
 
-  it("F2 tombstone, scope, and expired relation are excluded through the handler", async () => {
+  it("tombstone, scope, and expired relation are excluded through the handler", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantGovernedExtras(slice);
     const mcp = await recallThroughHandler(slice, {
@@ -79,7 +79,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     expect(scoped.entries.map((entry) => entry.object_id)).not.toContain(GLOBAL);
   });
 
-  it("F3 handler explanations do not copy another object's witnesses", async () => {
+  it("handler explanations do not copy another object's witnesses", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     await plantNeedles(slice, 4, 951);
@@ -100,7 +100,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     }
   });
 
-  it("F4 paged 32-cap observation concatenates without skip or duplicate", async () => {
+  it("paged 32-cap observation concatenates without skip or duplicate", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 40, 701);
     const full = runRecall(slice, {
@@ -127,7 +127,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     expect(concatenated).toEqual(full.entries.map(entryId));
   });
 
-  it("F5 handler encoding does not freeze token_estimate at 1 for long previews", async () => {
+  it("handler encoding does not freeze token_estimate at 1 for long previews", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 8, 801);
     const counted = countingReaders(slice);
@@ -160,7 +160,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     }
   });
 
-  it("F5 encoding stops before the advertised token cap", () => {
+  it("encoding stops before the advertised token cap", () => {
     const entries = Array.from({ length: 30 }, (_, index) => ({
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       object_id: `obj-${String(index).padStart(2, "0")}`,
@@ -209,7 +209,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     expect(framed.completeness.logical_index).toBe("complete");
   });
 
-  it("F6 handler previews are not mixed with a later source generation", async () => {
+  it("handler previews are not mixed with a later source generation", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const mcp = await recallThroughHandler(slice, {
@@ -235,7 +235,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     }
   });
 
-  it("F7 midnight continuation is not a spliced two-day page", async () => {
+  it("midnight continuation is not a spliced two-day page", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 8, 931);
     const evening = await recallThroughHandler(slice, {

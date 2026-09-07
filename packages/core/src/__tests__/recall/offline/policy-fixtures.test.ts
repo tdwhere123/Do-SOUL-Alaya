@@ -47,7 +47,7 @@ function packet(id: string, unitIds: readonly string[]): PacketProposal {
   return { id, unitIds };
 }
 
-describe("C02 independent reference and tiny oracle", () => {
+describe("independent recall reference and tiny oracle", () => {
   it("W1 records prefix vs global-opt conflict and TARGET matches the reference", () => {
     const packets: OraclePacket[] = [
       { id: "A", units: ["1", "2", "3", "4"], cost: 3, rank: 1 },

@@ -28,7 +28,7 @@ import {
 } from "./oracle-index.js";
 
 describe("conditional-field independent observer and index oracle", () => {
-  it("A09 maps interrupted zero rows to interrupted/open, not exhausted/empty", () => {
+  it("maps interrupted zero rows to interrupted/open, not exhausted/empty", () => {
     const mapped = mapNativeReaderPage(sqliteInterruptedZero().reader);
     expect(mapped.outcome.status).toBe("interrupted");
     expect(mapped.open_regions.map((region) => region.kind).sort())
@@ -40,7 +40,7 @@ describe("conditional-field independent observer and index oracle", () => {
     expect(index.completeness.observed_coverage).not.toBe("exhausted_empty");
   });
 
-  it("A09 resume concatenates the same pinned coverage without skipping or duplicating", () => {
+  it("resume concatenates the same pinned coverage without skipping or duplicating", () => {
     const start: ObserverCursor = {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       cursor_id: "seed-cursor",
@@ -61,7 +61,7 @@ describe("conditional-field independent observer and index oracle", () => {
       .toEqual(ids);
   });
 
-  it("A10 keeps seed, adjacency, guard and binding regions after a partial run", () => {
+  it("keeps seed, adjacency, guard and binding regions after a partial run", () => {
     const mapped = mapNativeReaderPage({ ids: ["r"], truncated: true, readerAvailable: true });
     expect(mapped.open_regions.map((region) => region.kind).sort())
       .toEqual(["adjacency", "binding", "guard", "seed"]);
@@ -72,7 +72,7 @@ describe("conditional-field independent observer and index oracle", () => {
     expect(missing).toEqual([]);
   });
 
-  it("A11 serves a finite region without consuming the finalization reserve", () => {
+  it("serves a finite region without consuming the finalization reserve", () => {
     const scheduled = scheduleFairWork({
       regions: [
         { id: "high-refine", finite: false, work: 10_000 },
@@ -86,7 +86,7 @@ describe("conditional-field independent observer and index oracle", () => {
     expect(scheduled.starvedFinite).toBe(false);
   });
 
-  it("A12 distinguishes empty exhausted from unavailable and cancelled coverage", () => {
+  it("distinguishes empty exhausted from unavailable and cancelled coverage", () => {
     const exhausted = mapNativeReaderPage({ ids: [], truncated: false, readerAvailable: true });
     const emptyIndex = projectWithObserver(exhausted, emptyField());
     expect(emptyIndex.entries).toEqual([]);
@@ -107,7 +107,7 @@ describe("conditional-field independent observer and index oracle", () => {
     }
   });
 
-  it("A13 can complete the logical index with unknown common cause", () => {
+  it("can complete the logical index with unknown common cause", () => {
     const world = deploymentWorld();
     const field = enumerateSimplePaths(world.seeds, world.edges);
     const index = projectOracleIndex({
@@ -125,7 +125,7 @@ describe("conditional-field independent observer and index oracle", () => {
     expect(index.completeness.logical_index).toBe("complete");
   });
 
-  it("A14 pages share query/snapshot/result identity and concatenate in serialization order", () => {
+  it("pages share query/snapshot/result identity and concatenate in serialization order", () => {
     const world = deploymentWorld();
     const field = enumerateSimplePaths(world.seeds, world.edges);
     const input = {
@@ -155,7 +155,7 @@ describe("conditional-field independent observer and index oracle", () => {
     expect([...keys].sort()).toEqual(keys);
   });
 
-  it("A15 labels a first page as partial transport, never a full inline index", () => {
+  it("labels a first page as partial transport, never a full inline index", () => {
     const field = enumerateSimplePaths(
       [{ state: productKey("r"), milligrades: 1000 }],
       [

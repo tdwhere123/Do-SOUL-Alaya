@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 describe("conditional-field producer-consumer counterexamples", () => {
-  it("F1 program variants differ on the same planted graph", async () => {
+  it("program variants differ on the same planted graph", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantChain(slice);
     const epsilon = grades(observeProgram(slice, { schema_version: 1, kind: "epsilon" }, { query_text: "seed" }));
@@ -63,7 +63,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     expect(incompleteAnd[`${END}:accepting`] ?? 0).toBe(0);
   });
 
-  it("F2 tombstone, scope, and expired relation stay out of seed/intermediate/target/preview", async () => {
+  it("tombstone, scope, and expired relation stay out of seed/intermediate/target/preview", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     await slice.writeMemory(SECRET, "secret deployment leftover", MemoryDimension.FACT);
@@ -105,7 +105,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     expect(texts.some((text) => /secret deployment leftover/i.test(text))).toBe(false);
   });
 
-  it("F3 support, conflict, unknown, and no cross-object witness", async () => {
+  it("support, conflict, unknown, and no cross-object witness", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     await slice.writeMemory(CONFLICT, "yesterday failed deployment contradicted copy", MemoryDimension.EPISODE);
@@ -135,7 +135,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     expect(needles.entries.some((entry) => entry.claim === "unknown")).toBe(true);
   });
 
-  it("F4 40-match/32-cap resume equals the full observation", async () => {
+  it("40-match/32-cap resume equals the full observation", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     const planted = await plantNeedles(slice, 40, 501);
     const inner = readersFor(slice);
@@ -171,7 +171,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     expect(fullIds).toHaveLength(40);
   });
 
-  it("F5 native visits stay inside work_units; memory_bytes=1 is not a complete 31-entry index; tokens follow preview bytes", async () => {
+  it("native visits stay inside work_units; memory_bytes=1 is not a complete 31-entry index; tokens follow preview bytes", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 31, 601);
     const counted = countingReaders(slice);
@@ -208,7 +208,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     expect(tight.completeness.observed_coverage).not.toBeUndefined();
   });
 
-  it("F6 pin and preview are not mixed across snapshot commit", async () => {
+  it("pin and preview are not mixed across snapshot commit", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const inner = readersFor(slice);
@@ -245,7 +245,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
       && previews.some((preview) => preview.includes("content-after"))).toBe(false);
   });
 
-  it("F7 midnight continuation is invalidated or same-instance; pages are not spliced", async () => {
+  it("midnight continuation is invalidated or same-instance; pages are not spliced", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 8, 921);
     const evening = runRecall(slice, {

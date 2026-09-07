@@ -175,9 +175,19 @@ function observerCompleteness(input: CompletenessInput): CompletenessReport | un
 
 function emptyCompleteness(input: CompletenessInput): CompletenessReport {
   const status = input.interpretation_status;
+  if (status === "partial" || status === "hypotheses") {
+    return dimensionReport({
+      logical_index: "open",
+      observed_coverage: "exhausted_empty",
+      remaining: 0,
+      omitted_payload: false,
+      expand_payload: true,
+      closed: "open"
+    });
+  }
   if (status !== undefined && !interpretationMayEmitCompleteEmpty(status)) {
     return dimensionReport({
-      logical_index: "unavailable",
+      logical_index: status === "resource_rejected" ? "resource_rejected" : "unavailable",
       observed_coverage: "unavailable",
       remaining: 0,
       omitted_payload: false,

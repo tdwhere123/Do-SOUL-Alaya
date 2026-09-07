@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe("conditional-field source lifecycle oracle", () => {
-  it("A18 hides tombstones and keeps the current source after a restart snapshot", async () => {
+  it("hides tombstones and keeps the current source after a restart snapshot", async () => {
     const directory = mkdtempSync(join(tmpdir(), "conditional-field-oracle-a18-"));
     const filename = join(directory, "source.sqlite");
     const first = await openBoundSlice((database) => databases.add(database), filename);
@@ -47,7 +47,7 @@ describe("conditional-field source lifecycle oracle", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  it("A18 invalidates mixed-generation coverage instead of minting a complete index", async () => {
+  it("invalidates mixed-generation coverage instead of minting a complete index", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantNeedles(slice, 8, 901);
     const first = runRecall(slice, {
@@ -91,7 +91,7 @@ describe("conditional-field source lifecycle oracle", () => {
     expect(resumed.completeness.observed_coverage).not.toBe("exhausted_empty");
   });
 
-  it("A17-shaped normal-entry counters stay at zero while unbound production rows fail", async () => {
+  it("normal-entry counters stay at zero while unbound production rows fail", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const before = slice.pendingGarden().length;

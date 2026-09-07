@@ -44,20 +44,32 @@ describe("filterMemoriesByTimeWindow", () => {
     expect(result).toBe(all);
   });
 
+  it("matches nothing when since or until is set without field", () => {
+    expect(filterMemoriesByTimeWindow(all, { since: "2026-05-20T00:00:00.000Z" })).toEqual([]);
+    expect(filterMemoriesByTimeWindow(all, { until: "2026-05-20T23:59:59.000Z" })).toEqual([]);
+  });
+
   it("applies an only-since lower bound on created_at", () => {
-    const result = filterMemoriesByTimeWindow(all, { since: "2026-05-20T00:00:00.000Z" });
+    const result = filterMemoriesByTimeWindow(all, {
+      since: "2026-05-20T00:00:00.000Z",
+      field: "created_at"
+    });
     expect(result.map((entry) => entry.object_id)).toEqual(["may-20", "may-25"]);
   });
 
   it("applies an only-until upper bound on created_at", () => {
-    const result = filterMemoriesByTimeWindow(all, { until: "2026-05-20T23:59:59.000Z" });
+    const result = filterMemoriesByTimeWindow(all, {
+      until: "2026-05-20T23:59:59.000Z",
+      field: "created_at"
+    });
     expect(result.map((entry) => entry.object_id)).toEqual(["may-10", "may-20"]);
   });
 
   it("applies both bounds (single-day window)", () => {
     const result = filterMemoriesByTimeWindow(all, {
       since: "2026-05-20T00:00:00.000Z",
-      until: "2026-05-20T23:59:59.000Z"
+      until: "2026-05-20T23:59:59.000Z",
+      field: "created_at"
     });
     expect(result.map((entry) => entry.object_id)).toEqual(["may-20"]);
   });
@@ -80,7 +92,8 @@ describe("filterMemoriesByTimeWindow", () => {
 
   it("returns an empty array when no entry falls within the window", () => {
     const result = filterMemoriesByTimeWindow(all, {
-      since: "2027-01-01T00:00:00.000Z"
+      since: "2027-01-01T00:00:00.000Z",
+      field: "created_at"
     });
     expect(result).toEqual([]);
   });
@@ -98,7 +111,8 @@ describe("filterMemoriesByTimeWindow", () => {
     });
     const result = filterMemoriesByTimeWindow([hazardOutOfWindow, constraintOutOfWindow, may20], {
       since: "2026-05-20T00:00:00.000Z",
-      until: "2026-05-20T23:59:59.000Z"
+      until: "2026-05-20T23:59:59.000Z",
+      field: "created_at"
     });
     expect(result.map((entry) => entry.object_id)).toEqual(["may-20"]);
   });

@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe("conditional-field SQLite source-to-index slice", () => {
-  it("A01 binds last-week config at 850 from retained projections", async () => {
+  it("binds last-week config at 850 from retained projections", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     expect(slice.indexProjection.freshness(WS, MEM.c)).toMatchObject({
@@ -60,7 +60,7 @@ describe("conditional-field SQLite source-to-index slice", () => {
       .toBe(false);
   });
 
-  it("A17 keeps garden enqueue and provider counters at zero during the read", async () => {
+  it("keeps garden enqueue and provider counters at zero during the read", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     expect(slice.pendingGarden()).toHaveLength(0);
@@ -72,7 +72,7 @@ describe("conditional-field SQLite source-to-index slice", () => {
     expect(slice.pendingGarden()).toHaveLength(0);
   });
 
-  it("A18 hides a tombstone and keeps the current source after close/reopen", async () => {
+  it("hides a tombstone and keeps the current source after close/reopen", async () => {
     const directory = mkdtempSync(join(tmpdir(), "conditional-field-a18-"));
     const filename = join(directory, "source.sqlite");
     const first = await openSourceSlice((database) => databases.add(database), filename);
@@ -101,7 +101,7 @@ describe("conditional-field SQLite source-to-index slice", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  it("A09 maps a truncated native zero-id page to interrupted/open", async () => {
+  it("maps a truncated native zero-id page to interrupted/open", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const page = slice.memoryReader.lexical(WS, "failed deployment", 16, 0);
@@ -117,7 +117,7 @@ describe("conditional-field SQLite source-to-index slice", () => {
     expect(mapped.outcome.status).not.toBe("exhausted");
   });
 
-  it("A12 reports empty exhausted versus unavailable coverage", async () => {
+  it("reports empty exhausted versus unavailable coverage", async () => {
     const empty = await openSourceSlice((database) => databases.add(database));
     const page = empty.memoryReader.lexical(WS, "failed deployment", 16);
     expect(page.ids).toEqual([]);

@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe("conditional-field executeRecall assembly", () => {
-  it("A01/A02/A13 bind last-week config and unknown-cause history", async () => {
+  it("bind last-week config and unknown-cause history", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const index = runRecall(slice, { page_budget: 800 });
@@ -47,7 +47,7 @@ describe("conditional-field executeRecall assembly", () => {
     expect(JSON.stringify(index)).not.toContain("select_gamma");
   });
 
-  it("A14/A15 pages without a second selector and keeps continuation identity", async () => {
+  it("pages without a second selector and keeps continuation identity", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const full = runRecall(slice, { page_budget: 800 });
@@ -69,7 +69,7 @@ describe("conditional-field executeRecall assembly", () => {
     expect(pages[0]?.snapshot_id).toBe(full.snapshot_id);
   });
 
-  it("A12 reports empty exhausted versus cancelled", async () => {
+  it("reports empty exhausted versus cancelled", async () => {
     const empty = await openSourceSlice((database) => databases.add(database));
     const exhausted = runRecall(empty, { page_budget: 800 });
     expect(exhausted.entries).toEqual([]);
@@ -82,15 +82,15 @@ describe("conditional-field executeRecall assembly", () => {
     const empty = await openSourceSlice((database) => databases.add(database));
     const lexical = runRecall(empty, { page_budget: 800, query_text: "deployment rules" });
     expect(lexical.entries).toEqual([]);
-    expect(lexical.completeness.logical_index).not.toBe("complete");
-    expect(lexical.completeness.observed_coverage).not.toBe("exhausted_empty");
+    expect(lexical.completeness.logical_index).toBe("open");
+    expect(lexical.completeness.observed_coverage).toBe("exhausted_empty");
     const partial = runRecall(empty, {
       page_budget: 800,
       query_text: "failed deployment of checkout"
     });
     expect(partial.entries).toEqual([]);
-    expect(partial.completeness.logical_index).not.toBe("complete");
-    expect(partial.completeness.observed_coverage).not.toBe("exhausted_empty");
+    expect(partial.completeness.logical_index).toBe("open");
+    expect(partial.completeness.observed_coverage).toBe("exhausted_empty");
   });
 
   it("filters dimension and absent domain tags instead of returning every fact", async () => {
@@ -121,7 +121,7 @@ describe("conditional-field executeRecall assembly", () => {
     expect(index.completeness.logical_index).not.toBe("unavailable");
   });
 
-  it("A17 keeps garden enqueue at zero during ordinary recall", async () => {
+  it("keeps garden enqueue at zero during ordinary recall", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const before = slice.pendingGarden().length;
@@ -130,7 +130,7 @@ describe("conditional-field executeRecall assembly", () => {
     expect(slice.pendingGarden()).toHaveLength(0);
   });
 
-  it("A01 keeps last-week config; applying yesterday to every object drops it from seeds", async () => {
+  it("keeps last-week config; applying yesterday to every object drops it from seeds", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const index = runRecall(slice, { page_budget: 800 });
@@ -210,8 +210,8 @@ describe("conditional-field executeRecall assembly", () => {
       expires_at: "2099-01-01T00:00:00.000Z",
       readers: readersFor(slice)
     });
-    expect(commands.completeness.logical_index).not.toBe("complete");
-    expect(commands.completeness.observed_coverage).not.toBe("exhausted_empty");
+    expect(commands.completeness.logical_index).toBe("open");
+    expect(commands.completeness.observed_coverage).toBe("exhausted_empty");
   });
 
   it("does not mint complete-empty after an unavailable observer", async () => {

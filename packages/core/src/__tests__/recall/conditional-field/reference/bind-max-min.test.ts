@@ -46,7 +46,7 @@ import {
 } from "./deployment.fixture.js";
 
 describe("conditional-field reference binder", () => {
-  it("A01 indexes last-week config at 850 without applying yesterday to every object", () => {
+  it("indexes last-week config at 850 without applying yesterday to every object", () => {
     const bound = bindDeployment();
     const index = projectBound(bound);
     const config = index.entries.find((entry) => entry.object_id === "c");
@@ -83,7 +83,7 @@ describe("conditional-field reference binder", () => {
       .toBe(850);
   });
 
-  it("A02 includes prior same-service failure at 550 with unknown common cause", () => {
+  it("includes prior same-service failure at 550 with unknown common cause", () => {
     const bound = bindDeployment();
     const index = projectAcceptingIndex({
       snapshot: bound.snapshot,
@@ -107,7 +107,7 @@ describe("conditional-field reference binder", () => {
     expect(index.entries.find((entry) => entry.object_id === "s")).toBeUndefined();
   });
 
-  it("A03 keeps epsilon distinct from empty and does not pool hypotheses or bindings", () => {
+  it("keeps epsilon distinct from empty and does not pool hypotheses or bindings", () => {
     const epsilon = QueryProgramSchema.parse({ schema_version: 1, kind: "epsilon" });
     const empty = QueryProgramSchema.parse({ schema_version: 1, kind: "empty" });
     expect(epsilon.kind).not.toBe(empty.kind);
@@ -144,7 +144,7 @@ describe("conditional-field reference binder", () => {
     expect(rows.find((row) => row.hypothesis_id === "h2")?.association_milligrades).toBe(400);
   });
 
-  it("A04 keeps long homogeneous chains and fan-out grades without hop attenuation", () => {
+  it("keeps long homogeneous chains and fan-out grades without hop attenuation", () => {
     const hops: Transition[] = [];
     const seeds: SeedActivation[] = [seed(productKey("n0"), 900)];
     for (let index = 0; index < 20; index += 1) {
@@ -168,7 +168,7 @@ describe("conditional-field reference binder", () => {
     }
   });
 
-  it("B02 evaluates a legal derivation step as one max-min projection", () => {
+  it("evaluates a legal derivation step as one max-min projection", () => {
     expect(projectLegalDerivationStep("serial", [900, 800])).toBe(800);
     expect(projectLegalDerivationStep("and", [900, 800])).toBe(800);
     expect(projectLegalDerivationStep("or", [400, 800])).toBe(800);
@@ -195,7 +195,7 @@ describe("conditional-field reference binder", () => {
     expect(valueOf(cyclic.snapshot.values, "b")).toBe(800);
   });
 
-  it("A05 agrees with an independent enumerator on the deployment graph", () => {
+  it("agrees with an independent enumerator on the deployment graph", () => {
     const bound = bindDeployment();
     const enumerated = enumerateBottleneck(deploymentSeeds(), deploymentTransitions());
     for (const objectId of ["r", "l", "c", "s", "h"]) {
@@ -206,7 +206,7 @@ describe("conditional-field reference binder", () => {
       .toBe(false);
   });
 
-  it("A06 rejects coordinate-wise max under same_path", () => {
+  it("rejects coordinate-wise max under same_path", () => {
     const vectors: FacetVector[] = [
       { schema_version: 1, path_id: "p1", coordinates: [900, 200] },
       { schema_version: 1, path_id: "p2", coordinates: [200, 900] }
@@ -274,7 +274,7 @@ describe("conditional-field reference binder", () => {
     expect(routed.snapshot.values[0]?.milligrades).toBe(900);
   });
 
-  it("A07 requires all AND premises under one binding and keeps complete OR witnesses", () => {
+  it("requires all AND premises under one binding and keeps complete OR witnesses", () => {
     const compatible = [
       { hypothesis_id: "h0", binding_context: "default", time_state: "as_of", present: true },
       { hypothesis_id: "h0", binding_context: "default", time_state: "as_of", present: true }
@@ -295,7 +295,7 @@ describe("conditional-field reference binder", () => {
     expect(joinHyperedgeOr(witnesses).map((witness) => witness.witness_id)).toEqual(["w-and"]);
   });
 
-  it("A08 keeps the cheap complete witness under a page budget of 800", () => {
+  it("keeps the cheap complete witness under a page budget of 800", () => {
     const witnesses: Witness[] = [
       { schema_version: 1, witness_id: "expensive", premises: ["a"], cost: 1200, complete: true },
       { schema_version: 1, witness_id: "cheap", premises: ["b"], cost: 400, complete: true }

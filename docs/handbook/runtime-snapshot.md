@@ -58,28 +58,32 @@ query-proof target.
 | E0/E1 target | E1 monotonically extends the candidate field, cannot evict E0 candidates, and adds one embedding observation on shared candidates; admission receipt creates no preference |
 | Complete-form extraction | Withdrawn; formation boundary stays immutable source -> F0-F2 -> optional F3 -> projections |
 
-## Recall posture (2026-08-19 live-source pass)
+## Recall posture (2026-08-19 source pass) — historical receipt
+
+This table is a dated receipt. LIVE recall is the conditional-field chain in
+[`recall.md`](recall.md). Flood / Slice / F3-only / prefixSK rows are not live
+connectedness proof.
 
 | Fact | Status |
 |---|---|
-| Algorithm contract | UGAF read path. In-repo owner: [`recall.md`](recall.md) |
-| Live composition operator | `lightweight_deep_head_prob_or_v1` (`packages/core/src/recall/rerank/deep-head-assessment-builder.ts:18`) |
-| Pinned field generation and field admission | Live in Core and SQLite daemon composition |
-| Graph/PathRelation candidate expansion | Live; path fuel activates only with attributed eligible inflow |
-| Slice compatibility and integrated flood | Live; missing or rejected inputs retain explicit status |
-| F3-only field membership | Live; planted SQLite/daemon proof — see [`recall.md`](recall.md) |
+| Algorithm contract | Historical UGAF read-path receipt. Live owner: [`recall.md`](recall.md) |
+| Composition operator | Historical: `lightweight_deep_head_prob_or_v1` |
+| Pinned field generation and field admission | Historical receipt |
+| Graph/PathRelation candidate expansion | Historical receipt |
+| Slice compatibility and integrated flood | Historical receipt |
+| F3-only field membership | Historical receipt — not live connectedness proof |
 | Final selector | Historical two-mode `prefixSK` / `Select_Gamma`. Live owner is the conditional field; those modes are not on `executeRecall` |
-| Exact selection-boundary replay | Live on `delivery_path: "legacy"`; canonical-absent (`shadowTrace` / capture prefix) |
+| Exact selection-boundary replay | Historical on `delivery_path: "legacy"` |
 | Provider execution authority | One exported engine-gateway executor owns attempts, retry timing, timeout/abort classification, response inspection, usage, and completion witnesses |
 | Provider-backed cache admission | New writes and all live readers require versioned completion authority; deterministic no-provider shards remain explicit |
 | Cache-only replay authority | Canonical manifest binds the exact dataset window, cache closure, provider route, and source digests; replay emits a structured zero-call receipt |
 | Diagnostic resume authority | v2 checkpoints bind cache, snapshot, question window, query-factor inputs, artifacts, and a per-work-root execution lock |
 | Official 100Q / 500Q promotion | **Not claimed** |
 
-The previous integrated implementation is therefore not a degenerate
-projection and must not be reimplemented wholesale. Its connectedness and
-single-selector ownership remain live, while its relevance scalarization is
-explicitly not algorithmically closed. P217 was a planted end-to-end
+The previous integrated implementation is a historical receipt. Do not
+reimplement it wholesale. Live connectedness is the conditional-field chain
+in [`recall.md`](recall.md). Its relevance scalarization is explicitly not
+algorithmically closed. P217 was a planted end-to-end
 acceptance gate that repaired only a demonstrated missing live seam.
 The legacy MiMo cache predates the completion-witness contract and is not a
 current replay authority. Cache regeneration and the 1Q -> 3Q -> 100Q ladder

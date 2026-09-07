@@ -74,7 +74,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     for (const result of results) expect(result.index.completeness.interpretation_coverage).toBe("open");
   });
 
-  it("B04 keeps same-service history and rejects provider-bridged other-service history", async () => {
+  it("keeps same-service history and rejects provider-bridged other-service history", async () => {
     const slice = await openPlantedSlice();
     await plantSharedProviderBridge(slice);
     const checkout = `s=${MEM.s}`;
@@ -94,7 +94,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     )).toBe(false);
   });
 
-  it("A01/A02 expose last-week config and unknown-cause history through MCP encoding", async () => {
+  it("expose last-week config and unknown-cause history through MCP encoding", async () => {
     const slice = await openPlantedSlice();
     const mcp = await recallThroughHandler(slice, {
       query: "yesterday failed deployment",
@@ -118,7 +118,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     expect("delivery_path" in mcp).toBe(false);
   });
 
-  it("A13 allows a complete logical index that still contains unknown cause", async () => {
+  it("allows a complete logical index that still contains unknown cause", async () => {
     const slice = await openPlantedSlice();
     const mcp = await recallThroughHandler(slice, {
       query: "yesterday failed deployment",
@@ -129,7 +129,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     expect(assertUnknownCauseAllowed(mcp.index)).toEqual([]);
   });
 
-  it("A14 keeps page identity through handler encoding and concatenates without a second selector", async () => {
+  it("keeps page identity through handler encoding and concatenates without a second selector", async () => {
     const slice = await openPlantedSlice();
     const session = createTickingHandlerSession(slice);
     const pages: InformationIndex[] = [];
@@ -171,7 +171,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       .toEqual([]);
   });
 
-  it("A15 distinguishes logical completeness from partial transport and payload", async () => {
+  it("distinguishes logical completeness from partial transport and payload", async () => {
     const slice = await openPlantedSlice();
     const first = await recallThroughHandler(slice, {
       query: "yesterday failed deployment",
@@ -183,7 +183,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     expect(first.index.entries).toHaveLength(1);
   });
 
-  it("A12 reports empty exhausted versus unavailable versus cancelled", async () => {
+  it("reports empty exhausted versus unavailable versus cancelled", async () => {
     const empty = await openSourceSlice((database) => databases.add(database));
     const exhausted = runProducer(empty, { page_budget: 800 });
     expect(exhausted.entries).toEqual([]);
@@ -204,7 +204,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     expect(unavailable.completeness.observed_coverage).not.toBe("exhausted_empty");
   });
 
-  it("A17 keeps garden enqueue and provider counters at zero on the handler path", async () => {
+  it("keeps garden enqueue and provider counters at zero on the handler path", async () => {
     const slice = await openPlantedSlice();
     const before = slice.pendingGarden().length;
     const encoded = encodeRecallResult(runProducer(slice, { page_budget: 800 }));
@@ -223,8 +223,8 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       query: "pnpm workspace commands",
       max_results: 800
     });
-    expect(commands.index.completeness.logical_index).not.toBe("complete");
-    expect(commands.index.completeness.observed_coverage).not.toBe("exhausted_empty");
+    expect(commands.index.completeness.logical_index).toBe("open");
+    expect(commands.index.completeness.observed_coverage).toBe("exhausted_empty");
     expect(commands.index.query_id).not.toBe(rules.index.query_id);
     const mixed = await recallThroughHandler(slice, {
       query: "pnpm workspace commands",

@@ -58,6 +58,7 @@ export const MemorySearchResultSchema = z
     hypothesis_id: NonEmptyStringSchema.optional(),
     program_state: NonEmptyStringSchema.optional(),
     time_state: NonEmptyStringSchema.optional(),
+    output_binding: NonEmptyStringSchema.optional(),
     // Diagnostic-only prose. Agents must not branch on its wording or use it
     // as a ranking key. ranking_authority on the parent packet names the owner.
     selection_reason: BoundedReasonSchema,

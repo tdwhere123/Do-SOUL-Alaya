@@ -25,7 +25,7 @@ import {
 } from "./deployment.fixture.js";
 
 describe("conditional-field observer and index contracts", () => {
-  it("A09 maps interrupted zero rows to interrupted/open, not exhausted/empty", () => {
+  it("maps interrupted zero rows to interrupted/open, not exhausted/empty", () => {
     const mapped = mapNativeReaderPage({
       ids: [],
       truncated: true,
@@ -37,7 +37,7 @@ describe("conditional-field observer and index contracts", () => {
     expect(mapped.outcome.status).not.toBe("exhausted");
   });
 
-  it("A10 keeps seed, adjacency, guard and binding regions open after a partial run", () => {
+  it("keeps seed, adjacency, guard and binding regions open after a partial run", () => {
     const regions = mapNativeReaderPage({
       ids: ["r"],
       truncated: true,
@@ -54,7 +54,7 @@ describe("conditional-field observer and index contracts", () => {
     expect(regions.every((region) => region.status === "open")).toBe(true);
   });
 
-  it("A11 serves a finite lower-bound region without consuming the finalization reserve", () => {
+  it("serves a finite lower-bound region without consuming the finalization reserve", () => {
     const scheduled = scheduleFairWork({
       regions: [
         { id: "high-refine", priority: 2, finite: false, work: 10_000 },
@@ -69,7 +69,7 @@ describe("conditional-field observer and index contracts", () => {
     expect(scheduled.starvedFinite).toBe(false);
   });
 
-  it("A12 distinguishes empty exhausted from unavailable coverage", () => {
+  it("distinguishes empty exhausted from unavailable coverage", () => {
     const bound = bindMaxMinField({
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
@@ -139,7 +139,7 @@ describe("conditional-field observer and index contracts", () => {
     }
   });
 
-  it("A13 can complete the logical index with unknown common cause", () => {
+  it("can complete the logical index with unknown common cause", () => {
     const bound = bindMaxMinField({
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
@@ -167,7 +167,7 @@ describe("conditional-field observer and index contracts", () => {
     expect(index.entries.find((entry) => entry.object_id === "h")?.claim).toBe("unknown");
   });
 
-  it("A14 pages share query, snapshot and result identity and concatenate in serialization order", () => {
+  it("pages share query, snapshot and result identity and concatenate in serialization order", () => {
     const bound = bindMaxMinField({
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
@@ -210,7 +210,7 @@ describe("conditional-field observer and index contracts", () => {
     expect([...keys].sort()).toEqual(keys);
   });
 
-  it("A15 labels a first page as partial transport, never complete_inline", () => {
+  it("labels a first page as partial transport, never complete_inline", () => {
     const bound = bindMaxMinField({
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
