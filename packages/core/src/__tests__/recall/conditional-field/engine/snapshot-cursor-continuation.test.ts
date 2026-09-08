@@ -29,6 +29,46 @@ afterEach(() => {
 });
 
 describe("snapshot, cursor, unavailable source, and continuation", () => {
+  it("binds the complete issued token, rejecting a changed cursor without consuming its valid token", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    const ids = await plantNeedles(slice, 4, 991);
+    const first = runRecall(slice, { page_budget: 2 });
+    expect(first.continuation).not.toBeNull();
+    const changed = runRecall(slice, { page_budget: 2, continuation: { ...first.continuation!, cursor: "p999g0" } });
+    expect(changed.entries).toEqual([]);
+    expect(changed.completeness.logical_index).toBe("invalidated");
+    const valid = runRecall(slice, { page_budget: 2, continuation: first.continuation });
+    expect(valid.entries.map((entry) => entry.object_id)).toEqual(ids.slice(2));
+  });
+
+  it("invalidates a consumed token without consuming the next page's retained state", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    const ids = await plantNeedles(slice, 6, 951);
+    const first = runRecall(slice, { page_budget: 2 });
+    const second = runRecall(slice, { page_budget: 2, continuation: first.continuation });
+    expect(second.entries.map((entry) => entry.object_id)).toEqual(ids.slice(2, 4));
+    const replay = runRecall(slice, { page_budget: 2, continuation: first.continuation });
+    expect(replay.entries).toEqual([]);
+    expect(replay.completeness.logical_index).toBe("invalidated");
+    const third = runRecall(slice, { page_budget: 2, continuation: second.continuation });
+    expect(third.entries.map((entry) => entry.object_id)).toEqual(ids.slice(4));
+    expect(third.continuation).toBeNull();
+  });
+
+  it("does not let a same-query instance consume another instance's continuation state", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    const ids = await plantNeedles(slice, 6, 971);
+    const firstInstance = runRecall(slice, { page_budget: 2 });
+    const secondInstance = runRecall(slice, { page_budget: 2 });
+    expect(firstInstance.query_id).toBe(secondInstance.query_id);
+    expect(firstInstance.continuation).not.toEqual(secondInstance.continuation);
+    const displaced = runRecall(slice, { page_budget: 2, continuation: firstInstance.continuation });
+    expect(displaced.entries).toEqual([]);
+    expect(displaced.completeness.logical_index).toBe("invalidated");
+    const continued = runRecall(slice, { page_budget: 2, continuation: secondInstance.continuation });
+    expect(continued.entries.map((entry) => entry.object_id)).toEqual(ids.slice(2, 4));
+  });
+
   it("changes the observable pin when a relation is admitted", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await slice.writeMemory(MEM.r, "needle seed", MemoryDimension.FACT);

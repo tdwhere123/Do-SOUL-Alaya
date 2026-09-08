@@ -119,9 +119,8 @@ describe("conditional-field query compiler", () => {
   it("does not compile owner or channel phrasing as a relation catalog", () => {
     const owns = compileOrdinary("who owns this channel");
     expect(owns.status).toBe("partial");
-    expect(owns.program.kind).not.toBe("epsilon");
-    expect(collectRelations(owns.program).every((relation) => relation.relation_kind === "lexical_observation"))
-      .toBe(true);
+    expect(owns.program.kind).toBe("epsilon");
+    expect(collectRelations(owns.program)).toEqual([]);
     const wrapped = compileOrdinary("who owns yesterday's failed deployment");
     expect(wrapped.status).toBe("partial");
     expect(collectRelations(wrapped.program).map((relation) => relation.relation_kind).sort())
@@ -132,7 +131,7 @@ describe("conditional-field query compiler", () => {
     for (const text of ["deployment rules", "pnpm workspace commands", "xyzzy unrelated request"]) {
       const interpretation = compileOrdinary(text);
       expect(interpretation.status).toBe("partial");
-      expect(interpretation.program.kind).not.toBe("epsilon");
+      expect(interpretation.program.kind).toBe("epsilon");
       expect(interpretation.holes.some((hole) => hole.status !== "bound")).toBe(true);
       expect(interpretation.query_id).not.toBe("unsupported");
     }
@@ -393,7 +392,7 @@ describe("conditional-field query compiler", () => {
   it("keeps unseen relational language partial rather than resolved epsilon", () => {
     const interpretation = compileOrdinary("Which database migration caused the outage last Tuesday?");
     expect(interpretation.status).toBe("partial");
-    expect(interpretation.program.kind).not.toBe("epsilon");
+    expect(interpretation.program.kind).toBe("epsilon");
   });
 
   it("maps one-sided since to partial with an open hole instead of malformed", () => {
@@ -431,11 +430,9 @@ describe("conditional-field query compiler", () => {
     });
     expect(filtered.query_id).not.toBe(base.query_id);
     expect(filtered.status).toBe("partial");
-    expect(collectRelations(filtered.program).some((relation) => (
-      relation.guard.predicate_name?.includes("dimension=episode") === true
-      && relation.guard.predicate_name.includes("tag=absent-tag")
-      && relation.guard.predicate_name.includes("time_field=created_at")
-    ))).toBe(true);
+    expect(filtered.source_guard?.predicate_name).toContain("dimension=episode");
+    expect(filtered.source_guard?.predicate_name).toContain("tag=absent-tag");
+    expect(filtered.source_guard?.predicate_name).toContain("time_field=created_at");
     expect(interpretationCoverageFor(filtered.status, filtered)).toBe("open");
     expect(interpretationCoverageFor(filtered.status, filtered)).not.toBe("complete");
   });
@@ -450,9 +447,7 @@ describe("conditional-field query compiler", () => {
       since: YESTERDAY_START,
       until: YESTERDAY_END
     });
-    const packed = collectRelations(interpretation.program)
-      .map((relation) => relation.guard.predicate_name ?? "")
-      .join("|");
+    const packed = interpretation.source_guard?.predicate_name ?? "";
     expect(packed).toContain(`since=${YESTERDAY_START}`);
     expect(packed).not.toContain("time_field=created_at");
     expect(sourceFactsSatisfyFilters(

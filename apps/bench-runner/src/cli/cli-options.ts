@@ -242,14 +242,7 @@ function consumeExtendedFlagToken(
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--weights")) {
-    state.weightOverridesJson = readRequiredFlagValue(
-      args,
-      index,
-      token,
-      "--weights",
-      "--weights requires a JSON value"
-    );
-    return nextIndex(index, token);
+    throw new Error("--weights is retired; conditional-field Recall has no weighted selector");
   }
   return consumePathAndBooleanFlags(args, index, token, state);
 }

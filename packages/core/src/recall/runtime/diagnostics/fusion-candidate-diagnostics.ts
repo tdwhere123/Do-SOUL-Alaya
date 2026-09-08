@@ -1,7 +1,7 @@
 import type { MemoryEntry, RecallCandidate, RecallOriginPlane, RecallScoreFactors } from
   "@do-soul/alaya-protocol";
 import type { CandidateActivationReceipt } from
-  "../../scoring/candidate-semantic-activation.js";
+  "./historical-selection-diagnostics.js";
 import type { RecallCandidateSelectorObservation } from
   "./candidate-selector-observation.js";
 import type {
@@ -109,7 +109,7 @@ export interface RecallCandidateDiagnostic {
   readonly path_expansion_sources: readonly RecallPathExpansionSourceDiagnostic[];
   readonly answer_features?: Readonly<RecallCandidateAnswerFeatures>;
   readonly deep_head_trace?: Readonly<
-    import("../../rerank/deep-head.js").RecallDeepHeadTrace
+    import("./historical-selection-diagnostics.js").RecallDeepHeadTrace
   >;
   readonly coverage_marginal_gain?: number;
   // Capture-only upstream state; delivery never reads this field.
@@ -194,10 +194,10 @@ export interface RecallCandidateAnswerFeatures {
   readonly preference_category: Exclude<MemoryEntry["preference_category"], undefined>;
   readonly preference_polarity: Exclude<MemoryEntry["preference_polarity"], undefined>;
   readonly answer_support?: Readonly<
-    import("../../query/recall-candidate-answer-support.js").RecallCandidateAnswerSupport
+    import("./historical-answer-diagnostics.js").RecallCandidateAnswerSupport
   >;
   readonly answer_support_observations?: readonly Readonly<
-    import("../../query/recall-answer-support-observation.js").RecallAnswerSupportObservation
+    import("./historical-answer-diagnostics.js").RecallAnswerSupportObservation
   >[];
 }
 

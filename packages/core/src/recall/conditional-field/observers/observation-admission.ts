@@ -106,7 +106,8 @@ function applicabilityFor(
   sourceRow: SourceObserverRow | undefined,
   identityKind: "object" | "assertion" | "embedding"
 ): Guard {
-  const guards = collectGuards(input.query.program);
+  const guards = [...collectGuards(input.query.program),
+    ...(input.query.source_guard === undefined ? [] : [input.query.source_guard])];
   const authorization = evaluateAuthorization(input, guards, sourceRow);
   if (authorization.verdict === "false") return authorization;
   if (sourceRow === undefined && identityKind !== "embedding") {

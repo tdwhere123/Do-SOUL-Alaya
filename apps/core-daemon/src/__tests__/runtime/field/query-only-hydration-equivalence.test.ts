@@ -17,8 +17,7 @@ import {
   dispatchQueryOnly,
   conditionalRecallPayload,
   createQueryOnlyRuntime,
-  persistConditionalSource,
-  selectAdaEvidenceIds
+  persistConditionalSource
 } from "./query-only-hydration-fixture.js";
 
 const hydration = createQueryOnlyHydrationHarness();
@@ -32,9 +31,7 @@ describe("query-only field hydration equivalence", () => {
       UPDATE workspaces SET name = ? WHERE workspace_id = ?
     `).run("query-only write probe", WORKSPACE_ID)).toThrow(/readonly|query.?only|attempt to write/iu);
 
-    const selectedIds = selectAdaEvidenceIds(fixture.field.querySession);
-    expect(selectedIds).toEqual([EVIDENCE_ID]);
-    const evidenceObjectIds = Object.freeze([...selectedIds, MISSING_ID]);
+    const evidenceObjectIds = Object.freeze([EVIDENCE_ID, MISSING_ID]);
     const direct = await fixture.directRepo.findByEvidenceRefs(WORKSPACE_ID, evidenceObjectIds);
     const dispatched = await dispatchQueryOnly(fixture.queryOnlyRuntime, "memory.findByEvidenceRefs", {
       workspaceId: WORKSPACE_ID,

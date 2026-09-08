@@ -24,14 +24,13 @@ describe("parseFlags", () => {
     expect(parsed.edgePlane).toBe(true);
   });
 
-  it("parses inline long flags for provider, policy, weights, snapshot, and concurrency", () => {
+  it("parses inline long flags for provider, policy, snapshot, and concurrency", () => {
     const parsed = parseFlags([
       "--embedding",
       "env",
       "--embedding-provider=local_onnx",
       "--policy-shape=chat",
       "--simulate-report=mixed",
-      "--weights={\"foo\":1}",
       "--snapshot=/tmp/snapshot.db",
       "--snapshot-out=/tmp/out.db",
       "--data-dir-root=/tmp/data-dir",
@@ -53,7 +52,7 @@ describe("parseFlags", () => {
     expect(parsed.embeddingProviderKind).toBe("local_onnx");
     expect(parsed.policyShape).toBe("chat");
     expect(parsed.simulateReport).toBe("mixed");
-    expect(parsed.weightOverridesJson).toBe("{\"foo\":1}");
+    expect(parsed.weightOverridesJson).toBeUndefined();
     expect(parsed.snapshot).toBe("/tmp/snapshot.db");
     expect(parsed.snapshotOut).toBe("/tmp/out.db");
     expect(parsed.dataDirRoot).toBe("/tmp/data-dir");

@@ -82,7 +82,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
   const relation = new SqliteRelationRecallReader(database);
   const projection = new SqliteIndexedRecallProjection(database.connection);
   const kindsSql = database.connection.prepare(
-    `SELECT relation_kind AS kind FROM relation_assertions INDEXED BY idx_relation_recall_predicate
+    `SELECT relation_kind AS kind FROM relation_assertions
      WHERE workspace_id = ? AND relation_kind > ? ORDER BY relation_kind LIMIT 1`
   );
   return {

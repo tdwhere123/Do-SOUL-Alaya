@@ -253,24 +253,13 @@ function applyEmbeddingPolicyDecorator(
   if (embeddingProvider === null || !embeddingProvider.isAvailable) {
     return applyRecallPolicyEmbeddingState(policy, { embeddingEnabled: false });
   }
-  const existingFusionWeights = policy.scoring_weight_overrides?.fusion_weights ?? {};
   const semantic = policy.coarse_filter.semantic_supplement;
-  const embeddingPolicy = applyRecallPolicyEmbeddingState(policy, {
+  return applyRecallPolicyEmbeddingState(policy, {
     embeddingEnabled: true,
     injectionCap: semantic.injection_cap ?? EMBEDDING_MAX_INJECTED_DELIVERY,
     injectionSimilarityFloor:
       semantic.injection_similarity_floor ?? EMBEDDING_INJECTION_SIMILARITY_FLOOR
   });
-  return {
-    ...embeddingPolicy,
-    scoring_weight_overrides: {
-      ...(embeddingPolicy.scoring_weight_overrides ?? {}),
-      fusion_weights: {
-        embedding_similarity: DEFAULT_EMBEDDING_FUSION_WEIGHT,
-        ...existingFusionWeights
-      }
-    }
-  };
 }
 
 function createProviderWarmup(
@@ -300,8 +289,6 @@ function createProviderWarmup(
     });
 }
 
-// Equal family ballot with RECALL_FUSION_DEFAULT_WEIGHTS — not a fitted emb boost.
-const DEFAULT_EMBEDDING_FUSION_WEIGHT = 1;
 
 function resolveEmbeddingProvider(input: {
   readonly providerKind: EmbeddingProviderKind;

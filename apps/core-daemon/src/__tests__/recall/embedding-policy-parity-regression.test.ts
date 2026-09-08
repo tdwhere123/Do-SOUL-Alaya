@@ -8,7 +8,6 @@ import {
 } from "@do-soul/alaya-storage";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 
-const EXPECTED_EMBEDDING_FUSION_WEIGHT = 1;
 
 function makeBasePolicy(): RecallPolicy {
   return {
@@ -98,9 +97,7 @@ describe("embedding policy parity regression net", () => {
       expect(defaultPolicyDecorator).toBeDefined();
       await expect(providerWarmup).resolves.toBe("ready");
       const decorated = defaultPolicyDecorator!(makeBasePolicy());
-      expect(decorated.scoring_weight_overrides?.fusion_weights?.embedding_similarity).toBe(
-        EXPECTED_EMBEDDING_FUSION_WEIGHT
-      );
+      expect(decorated.scoring_weight_overrides?.fusion_weights).toBeUndefined();
     } finally {
       fixture.database.close();
       for (const [key, value] of Object.entries(saved)) {

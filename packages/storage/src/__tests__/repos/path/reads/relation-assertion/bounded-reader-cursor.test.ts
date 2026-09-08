@@ -12,6 +12,27 @@ afterEach(() => {
 });
 
 describe("SqliteRelationRecallReader cursor", () => {
+  it("uses the prepared subject index without requiring it in SQL", () => {
+    const database = openDatabase();
+    plantAssertions(database, 3);
+    const reader = new SqliteRelationRecallReader(database);
+    reader.prepareIndex();
+    expect(JSON.stringify(reader.explain("workspace-1", "vega", "owns"))).toContain("idx_relation_recall_subject");
+  });
+
+  it("reads and advances a query-only snapshot without optional recall indexes", () => {
+    const database = openDatabase();
+    const ids = plantAssertions(database, 3);
+    database.connection.exec("DROP INDEX IF EXISTS idx_relation_recall_subject; DROP INDEX IF EXISTS idx_relation_recall_predicate;");
+    database.connection.pragma("query_only = ON");
+    const reader = new SqliteRelationRecallReader(database);
+    const first = reader.read("workspace-1", "vega", "owns", 1);
+    const rest = reader.read("workspace-1", null, "owns", 8, 8, first.committedThrough);
+    expect([...first.observations, ...rest.observations].map((row) => row.assertionId)).toEqual(ids);
+    expect(rest.truncated).toBe(false);
+    expect(database.connection.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'idx_relation_recall_%'").all()).toEqual([]);
+  });
+
   it("reconstructs the exact admitted resolution at as-of from EventLog history", () => {
     const database = openDatabase();
     const [id] = plantAssertions(database, 1);

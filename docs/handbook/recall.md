@@ -33,20 +33,46 @@ readers, global-memory lifecycle ports and historical protocol shapes have
 independent consumers; retaining those does not authorize running a retired
 selector.
 
-Retained leftover surfaces and their non-Recall consumers:
+Retained mechanisms and their independent consumers:
 
 - `SELECT_GAMMA_OPERATOR_ID` / `packages/protocol/src/recall/field-contract/`:
-  generation-identity hash freeze, not a live walk.
-- `EMBEDDING_INJECTION_*` / `embedding-coarse-injection`: daemon embedding
-  runtime, not ordinary ranking.
+  historical generation identity and EventLog readers. Its manifest and hash
+  remain frozen for those rows. New generation receipts use only the
+  conditional source-frontier, governance-frontier and generation operators,
+  with `conditional_field_snapshot` as their consumer. The current core
+  lifecycle rejects historical manifests before verification or activation.
+- `field/retrieval/projection/`: immutable source body validation, deterministic
+  source and governance frontiers, generation verification, audit and atomic
+  active-pointer changes. The source frontier is versioned separately from the
+  retired projection format. New generations contain no SliceKey, L1 posting,
+  L2 bundle or attributed-activation artifact. Existing historical rows are not
+  rewritten or interpreted as a new ranking execution. Storage validates both
+  explicitly known manifests and rejects unknown or tampered rows on reads.
+- `EMBEDDING_INJECTION_*` in `embedding-recall/constants.ts`: daemon embedding
+  configuration, not ordinary ranking.
+- `embedding-recall/evidence/`: source-authorized document backfill, bounded
+  document previews and the embedding service's lexical candidate prefix.
+- `runtime/global-memory/bounded-top-k.ts`: bounded global-memory lifecycle
+  source selection. It does not select ordinary conditional-field results.
 - `RECALL_FUSION_FAMILY_IDS` / `aggregateFamilyContributions`: bench historical
   diagnostic reader (`honest-higher-r-obj`), not `executeRecall`.
 - `findRecallTierWindow` worker/storage window: snapshot/materialization source
   window, unused by `executeRecall` ranking.
+- Historical diagnostic shapes under `runtime/diagnostics/` and the protocol
+  selection/OSF schemas: bench artifact readers and offline query-cache
+  verification. These shapes have no live Recall producer. Keeping an archive
+  decoder does not keep its old compiler, scorer or selector operational.
 - in-process `FIELD_RESUME`: process-local continuation; process loss
   invalidates; not durable.
 
 Retaining these does not authorize running a retired selector.
+
+The retired `flood/`, `coarse-filter/`, `scoring/`, `expansion/`, `rerank/` and
+`supplements/` implementation directories are physically absent. The former
+daemon field query session and its pinned candidate selector are also absent.
+Tests for the retired equations and projection artifacts have been removed;
+source integrity, source-frontier identity, actual lifecycle effects and
+conditional-field delivery remain tested at their current owners.
 
 ## Conditional meaning
 

@@ -1,15 +1,10 @@
 import {
-  CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_TOP,
   type InformationIndex,
   type MemorySearchResult,
   type StagedWarningArray,
-  type RecallBudgetState,
   type RecallCandidate,
-  type RecallPolicy,
-  type RecallScoreFactors,
-  type SoulMemorySearchDegradationReason,
-  type SoulRecallStrategyMix
+  type SoulMemorySearchDegradationReason
 } from "@do-soul/alaya-protocol";
 import { mapEmbeddingProviderDiagnosticToMcpReason } from "@do-soul/alaya-core";
 
@@ -19,32 +14,6 @@ export type RecallMcpHonestyDiagnostics = Readonly<{
   readonly embedding_provider_status?: string;
   readonly provider_degradation_reason?: string | null;
 }>;
-
-export function unavailableIndex(): InformationIndex {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    query_id: "unavailable",
-    snapshot_id: `sha256:${"0".repeat(64)}`,
-    result_version: "v1",
-    entries: [],
-    completeness: {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      logical_index: "unavailable",
-      observed_coverage: "unavailable",
-      interpretation_coverage: "unavailable",
-      transport: "unavailable",
-      payload: "unavailable",
-      representation: "unavailable"
-    },
-    continuation: null,
-    representation: {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      policy: "construct_index_then_page_then_payload",
-      page_budget: 0,
-      identity_tie_break: "serialization"
-    }
-  };
-}
 
 export function encodeIndexResults(
   index: InformationIndex,
@@ -130,37 +99,6 @@ export function sourceMetadataForRecallResult(result: Readonly<{
   return metadata;
 }
 
-export function buildMemorySearchResult(
-  candidate: Readonly<RecallCandidate>,
-  policy: RecallPolicy,
-  index: number,
-  usedTokensBeforeCandidate: number
-): MemorySearchResult {
-  const base: MemorySearchResult = {
-    object_id: candidate.object_id,
-    object_kind: candidate.object_kind,
-    relevance_score: candidate.relevance_score,
-    content_preview: candidate.content_preview,
-    evidence_pointers: [candidate.object_id],
-    selection_reason: candidate.selection_reason ?? buildSelectionReason(candidate),
-    source_channels: candidate.source_channels ?? buildSourceChannels(candidate),
-    score_factors: buildScoreFactors(candidate),
-    budget_state: candidate.budget_state ?? buildBudgetState(candidate, policy, index, usedTokensBeforeCandidate),
-    ...(candidate.pending_incomplete === undefined ? {} : { pending_incomplete: candidate.pending_incomplete }),
-    ...(candidate.unfinishedness_bias === undefined ? {} : { unfinishedness_bias: candidate.unfinishedness_bias })
-  };
-  if (candidate.staged_warnings !== undefined && candidate.staged_warnings.length > 0) {
-    return {
-      ...base,
-      staged_warnings: candidate.staged_warnings.map((warning) => ({
-        target_object_id: candidate.object_id,
-        ...warning
-      }))
-    };
-  }
-  return base;
-}
-
 export function selectRecallMcpHonestyDiagnostics(
   diagnostics: RecallMcpHonestyDiagnostics | null | undefined
 ): RecallMcpHonestyDiagnostics | null {
@@ -177,30 +115,6 @@ export function selectRecallMcpHonestyDiagnostics(
     ...(diagnostics.provider_degradation_reason === undefined
       ? {}
       : { provider_degradation_reason: diagnostics.provider_degradation_reason })
-  };
-}
-
-export function buildRecallStrategyMix(
-  policy: RecallPolicy,
-  results: readonly Readonly<MemorySearchResult>[],
-  diagnostics?: RecallMcpHonestyDiagnostics | null
-): SoulRecallStrategyMix {
-  return {
-    deterministic_match: true,
-    precomputed_rank: policy.coarse_filter.precomputed_rank.max_candidates > 0,
-    // Only when the embedding supplement path was actually requested.
-    semantic_supplement: diagnostics?.embedding_supplement_status === "requested",
-    graph_support: results.some(
-      (result) =>
-        result.source_channels.includes("graph_support") ||
-        (result.score_factors.graph_support ?? 0) > 0
-    ),
-    path_plasticity: results.some(
-      (result) =>
-        result.source_channels.includes("path_plasticity") ||
-        (result.score_factors.path_plasticity ?? 0) > 0
-    ),
-    global_recall: results.some((result) => result.source_channels.includes("global"))
   };
 }
 
@@ -266,51 +180,4 @@ function isHardEmbeddingFailureReason(
     reason === "provider_missing" ||
     reason === "no_stored_vectors"
   );
-}
-
-function buildSelectionReason(candidate: Readonly<RecallCandidate>): string {
-  const origin = candidate.origin_plane === "global" ? "global recall" : "workspace recall";
-  return `Selected by ${origin}. Final fusion evidence score ` +
-    `${candidate.relevance_score.toFixed(6)}; diagnostic supporting signal: ` +
-    `activation ${candidate.activation_score.toFixed(3)}.`;
-}
-
-function buildSourceChannels(candidate: Readonly<RecallCandidate>): readonly string[] {
-  const channels = ["ranked_recall", candidate.origin_plane] as string[];
-  if (candidate.is_advisory === true) {
-    channels.push("advisory");
-  }
-  return channels;
-}
-
-function buildScoreFactors(candidate: Readonly<RecallCandidate>): RecallScoreFactors {
-  return {
-    ...candidate.score_factors,
-    activation: clampScore(candidate.activation_score),
-    relevance: clampScore(candidate.relevance_score)
-  };
-}
-
-function buildBudgetState(
-  candidate: Readonly<RecallCandidate>,
-  policy: RecallPolicy,
-  index: number,
-  usedTokensBeforeCandidate: number
-): RecallBudgetState {
-  const maxEntries = policy.fine_assessment.budgets.max_entries;
-  const maxTotalTokens = policy.fine_assessment.budgets.max_total_tokens;
-  const usedTokensThroughCandidate = usedTokensBeforeCandidate + candidate.token_estimate;
-
-  return {
-    token_estimate: candidate.token_estimate,
-    max_entries: maxEntries,
-    max_total_tokens: maxTotalTokens,
-    remaining_entries: Math.max(maxEntries - index - 1, 0),
-    remaining_tokens: Math.max(maxTotalTokens - usedTokensThroughCandidate, 0),
-    within_budget: index < maxEntries && usedTokensThroughCandidate <= maxTotalTokens
-  };
-}
-
-function clampScore(value: number): number {
-  return Math.min(Math.max(value, 0), 1);
 }

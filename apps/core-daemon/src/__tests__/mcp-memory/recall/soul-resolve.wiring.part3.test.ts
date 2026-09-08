@@ -1,3 +1,4 @@
+import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -233,6 +234,7 @@ function createHarness(): WiringHarness {
     })(),
     recallService: {
       recall: vi.fn(async () => ({
+        index: stubRecallIndex(["mem-source-1"]),
         candidates: [
           {
             object_id: "mem-source-1",

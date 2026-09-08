@@ -14,12 +14,6 @@ import type { RecallReadSnapshotPort } from "./recall-read-snapshot.js";
 
 export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
 
-export function capturesRecallAnswerFeatures(
-  capture: RecallDiagnosticCapture | undefined
-): boolean {
-  return capture === "answer_features" || capture === "packet_trace";
-}
-
 export interface RecallExecutionParams {
   readonly taskSurface: Readonly<TaskObjectSurface>;
   readonly workspaceId: string;

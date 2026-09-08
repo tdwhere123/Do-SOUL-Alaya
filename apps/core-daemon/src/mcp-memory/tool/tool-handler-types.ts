@@ -2,7 +2,6 @@ import type { DynamicsService } from "@do-soul/alaya-core";
 import {
   SoulBatchReviewEdgeProposalsResponseSchema,
   SoulListPendingEdgeProposalsResponseSchema,
-  TaskObjectSurfaceSchema,
   type CandidateMemorySignal,
   type ContextDeliveryRecord,
   type EdgeClassifyVerdict,
@@ -12,13 +11,9 @@ import {
   type MemoryEntryMutableFields,
   type MemoryGraphEdgeTypeValue,
   type Proposal,
-  type RecallCandidate,
-  type RecallPolicy,
-  type SoulActiveConstraint,
   type SoulBatchReviewEdgeProposalsRequest,
   type SoulListPendingEdgeProposalsRequest,
   type SoulListPendingProposalsRequest,
-  type SoulMemorySearchDegradationReason,
   type SoulPendingProposalSummary,
   type GardenClaimTaskResponse,
   type GardenCompleteTaskResponse,
@@ -34,7 +29,6 @@ import {
   type SoulProposeEdgeResponse,
   type SoulProposeMemoryUpdateRequest,
   type SoulProposeMemoryUpdateResponse,
-  type SoulRecallHostContext,
   type SoulReportContextUsageResponse,
   type SoulResolveResponse,
   type SoulReviewMemoryProposalRequest,
@@ -78,38 +72,7 @@ export interface McpMemoryToolHandlerDependencies {
   readonly zeroDayToolAccess?: Readonly<{
     enforceToolAccess(workspaceId: string, toolName: string): Promise<void>;
   }>;
-  readonly recallService: {
-    recall(params: {
-      readonly taskSurface: ReturnType<typeof TaskObjectSurfaceSchema.parse>;
-      readonly workspaceId: string;
-      readonly strategy: "chat" | "analyze" | "build" | "govern";
-      readonly runId?: string | null;
-      readonly policyOverride?: Readonly<RecallPolicy>;
-      readonly timeFilter?: Readonly<{
-        readonly since?: string | null;
-        readonly until?: string | null;
-        readonly field?: "created_at" | "last_used_at";
-      }>;
-      readonly hostContext?: Readonly<SoulRecallHostContext>;
-      readonly activeConstraintsCap?: number | null;
-      readonly pageBudget?: number;
-      readonly queryText?: string;
-      readonly interpretationClock?: string;
-      readonly since?: string;
-      readonly until?: string;
-      readonly continuation?: import("@do-soul/alaya-protocol").Continuation | null;
-    }): Promise<Readonly<{
-      readonly candidates: readonly Readonly<RecallCandidate>[];
-      readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
-      readonly active_constraints_count: number | null;
-      readonly active_constraints_completeness?: "complete" | "incomplete";
-      readonly total_scanned: number;
-      readonly coarse_filter_count: number;
-      readonly fine_assessment_count: number;
-      readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
-      readonly index?: import("@do-soul/alaya-protocol").InformationIndex;
-    }>>;
-  };
+  readonly recallService: RecallUsageHandlerDependencies["recallService"];
   readonly memoryService: {
     findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
     findByIdScoped(

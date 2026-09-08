@@ -1,43 +1,22 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { materializeOpenSemanticFactorFormation } from "@do-soul/alaya-core";
-import { compileRecallQueryProbes } from
-  "../../../../../../../../packages/core/src/recall/query/recall-query-probes.js";
-import {
-  extendQueryProbesWithOpenSemanticFactors
-} from
-  "../../../../../../../../packages/core/src/recall/query/query-factor-expanded-terms.js";
-import { materializeOpenSemanticFactorCompatibilityTrace } from
-  "../../../../../../../../packages/core/src/recall/field/open-semantic-factors/compatibility-trace.js";
-import { materializeOpenSemanticFactorComposition } from
-  "../../../../../../../../packages/core/src/recall/field/open-semantic-factors/composition.js";
-import { buildTreatmentExposureReceipts } from
-  "../../../../../diagnostics/stage-attribution/exposure/build-receipts.js";
-import { assertTreatmentExposureReceipt } from
-  "../../../../../diagnostics/stage-attribution/exposure/contract.js";
-import type { LongMemEvalQuestionDiagnostic } from
-  "../../../../../diagnostics/schema/diagnostics-types.js";
-import type { QuestionStageRow } from
-  "../../../../../diagnostics/stage-attribution/types.js";
+import { z } from "zod";
+import { OpenSemanticFactorFormationCaptureSchema } from "@do-soul/alaya-protocol";
+import { OpenSemanticFactorCompositionReceiptSchema } from "../../../../../harness/recall/semantic-factors/open-semantic-factor-diagnostics-schema.js";
+import { buildTreatmentExposureReceipts } from "../../../../../diagnostics/stage-attribution/exposure/build-receipts.js";
+import { assertTreatmentExposureReceipt } from "../../../../../diagnostics/stage-attribution/exposure/contract.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../../../diagnostics/schema/diagnostics-types.js";
+import type { QuestionStageRow } from "../../../../../diagnostics/stage-attribution/types.js";
 
-const QUERY = "How long is my daily commute to work?";
 const EXTRA = "daily commute";
 
 describe("treatment exposure receipt v4 FTS extras", () => {
-  it("seals formed extras after a real composition no_match", () => {
-    const formed = formedQuery();
-    const composition = materializeOpenSemanticFactorComposition({
-      trace: materializeOpenSemanticFactorCompatibilityTrace({
-        query_capture: formed,
-        evidence_formations: { disjoint: disjointEvidence() }
-      }),
-      query_capture: formed
-    });
-    const treatmentTerms = extendQueryProbesWithOpenSemanticFactors(
-      compileRecallQueryProbes(QUERY), formed
-    ).expanded_terms;
-    const controlTerms = extendQueryProbesWithOpenSemanticFactors(
-      compileRecallQueryProbes(QUERY), undefined
-    ).expanded_terms;
+  it("preserves archived formed extras with no_match composition", () => {
+    const raw = JSON.parse(readFileSync(new URL("./receipt-v4-fts-formed-extras.fixture.json", import.meta.url), "utf8"));
+    const formed = OpenSemanticFactorFormationCaptureSchema.parse(raw.formed);
+    const composition = OpenSemanticFactorCompositionReceiptSchema.parse(raw.composition);
+    const treatmentTerms = z.array(z.string()).parse(raw.treatmentTerms);
+    const controlTerms = z.array(z.string()).parse(raw.controlTerms);
     expect(formed.status).toBe("formed");
     expect(composition.status).toBe("no_match");
     expect(treatmentTerms).toEqual(expect.arrayContaining([EXTRA]));
@@ -68,91 +47,6 @@ describe("treatment exposure receipt v4 FTS extras", () => {
     expect(() => assertTreatmentExposureReceipt(receipt!)).not.toThrow();
   });
 });
-
-function formedQuery() {
-  return materializeOpenSemanticFactorFormation({
-    source_kind: "query",
-    source_text: QUERY,
-    proposal: {
-      schema_version: 1,
-      producer_operator_id: "open-factor-test-producer-v1",
-      source_text: QUERY,
-      graph: {
-        schema_version: 2,
-        source_kind: "query",
-        factors: [
-          { factor_id: "copula.be", surface: "is", semantic_identity: "be" },
-          {
-            factor_id: "subject.commute",
-            surface: "my daily commute to work",
-            semantic_identity: "daily commute"
-          }
-        ],
-        variables: [{ variable_id: "answer", surface: "How" }],
-        result_variable_ids: ["answer"],
-        propositions: [{
-          proposition_id: "query",
-          predicate_factor_id: "copula.be",
-          arguments: [
-            {
-              position: 0,
-              binding_identity: "agent",
-              reference_kind: "variable",
-              reference_id: "answer"
-            },
-            {
-              position: 1,
-              binding_identity: "argument-1",
-              reference_kind: "factor",
-              reference_id: "subject.commute"
-            }
-          ]
-        }]
-      }
-    }
-  });
-}
-
-function disjointEvidence() {
-  return materializeOpenSemanticFactorFormation({
-    source_kind: "evidence",
-    source_text: "Alice likes tea.",
-    proposal: {
-      schema_version: 1,
-      producer_operator_id: "open-factor-test-producer-v1",
-      source_text: "Alice likes tea.",
-      graph: {
-        schema_version: 2,
-        source_kind: "evidence",
-        factors: [
-          { factor_id: "alice", surface: "Alice", semantic_identity: "alice" },
-          { factor_id: "likes", surface: "likes", semantic_identity: "like" },
-          { factor_id: "tea", surface: "tea", semantic_identity: "tea" }
-        ],
-        variables: [],
-        result_variable_ids: [],
-        propositions: [{
-          proposition_id: "likes-tea",
-          predicate_factor_id: "likes",
-          arguments: [
-            {
-              position: 0,
-              binding_identity: "agent",
-              reference_kind: "factor",
-              reference_id: "alice"
-            },
-            {
-              position: 1,
-              binding_identity: "object",
-              reference_kind: "factor",
-              reference_id: "tea"
-            }
-          ]
-        }]
-      }
-    }
-  });
-}
 
 function arm(questionId: string, expandedTerms: readonly string[]) {
   return {

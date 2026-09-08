@@ -1,3 +1,4 @@
+import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -188,6 +189,7 @@ export async function createGardenMcpHarness(
     generateId: () => "00000000-0000-4000-8000-000000000001",
     recallService: {
       recall: async () => ({
+        index: stubRecallIndex([]),
         candidates: [],
         active_constraints: [],
         active_constraints_count: 0,

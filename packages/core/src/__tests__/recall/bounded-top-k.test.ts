@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectBoundedTopK } from "../../recall/coarse-filter/selection/bounded-top-k.js";
+import { selectBoundedTopK } from "../../recall/runtime/global-memory/bounded-top-k.js";
 
 interface RankedValue {
   readonly id: string;

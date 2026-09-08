@@ -175,18 +175,6 @@ describe("LongMemEval runner", () => {
         "# findings\n- regression\n"
       );
 
-      const weightOverridesJson = JSON.stringify({
-        activation_weights_phase4b: {
-          scope_match: 0.08,
-          relevance: 0.2
-        },
-        additive: {
-          CONFIDENCE_DIRECT_WEIGHT: 0.1
-        },
-        fusion_weights: {
-          lexical_fts: 0.5
-        }
-      });
 
       const result = await runLongMemEval({
         variant,
@@ -196,7 +184,6 @@ describe("LongMemEval runner", () => {
         pinnedMetaRoot,
         policyShape: "chat",
         simulateReport: "mixed",
-        weightOverridesJson,
         extractionCacheRoot: join(tmpDir, "extraction-cache")
       });
 
@@ -217,26 +204,14 @@ describe("LongMemEval runner", () => {
       });
       expect(result.payload.seed_policy).not.toHaveProperty("object_kind");
       expect(result.payload.seed_policy?.description).not.toMatch(/\bK\d\b/);
-      expect(result.payload.recall_weight_overrides).toMatchObject({
-        source: "cli",
-        activation_weights_phase4b: {
-          scope_match: 0.08,
-          relevance: 0.2
-        },
-        additive: {
-          CONFIDENCE_DIRECT_WEIGHT: 0.1
-        },
-        fusion_weights: {
-          lexical_fts: 0.5
-        }
-      });
+      expect(result.payload.recall_weight_overrides).toBeUndefined();
       expect(result.payload.diff_vs_previous).toBeNull();
 
       // KPI payload must pass schema validation
       const parseResult = KpiPayloadSchema.safeParse(result.payload);
       expect(parseResult.success).toBe(true);
       const report = await readFile(result.reportPath, "utf8");
-      expect(report).toContain("Recall weights: source=cli");
+      expect(report).not.toContain("Recall weights: source=cli");
       expect(report).toContain(`Recall pipeline: ${RECALL_RANKING_IDENTITY}`);
       expect(report).toContain(
         "Seed policy: label_independent_open_vocabulary_extraction (label-independent)"

@@ -487,7 +487,7 @@ function mergeResiduals(
   return Object.freeze([...byId.values()]);
 }
 
-function closureFacts(
+export function closureFacts(
   state: BindableState,
   propagation: FieldClosureFacts["propagation"]
 ): FieldClosureFacts {

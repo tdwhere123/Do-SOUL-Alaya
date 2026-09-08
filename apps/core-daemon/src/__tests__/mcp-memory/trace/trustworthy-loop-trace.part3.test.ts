@@ -1,3 +1,4 @@
+import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -204,6 +205,7 @@ async function createTrustworthyLoopHarness(
     generateId: nextUuid,
     recallService: {
       recall: async () => ({
+        index: stubRecallIndex([PRIMARY_MEMORY_ID]),
         candidates: [createRecallCandidate()],
         active_constraints: [],
         active_constraints_count: 0,

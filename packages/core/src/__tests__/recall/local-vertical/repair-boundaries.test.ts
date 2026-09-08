@@ -67,9 +67,11 @@ describe("repair boundary falsifiers", () => {
     const byId = vi.spyOn(slice.memoryEntryRepo, "findById");
     for (const page_budget of [1, 12] as const) {
       const result = runLive(slice, { query_text: "Who owns Vega?", page_budget });
-      expect(result.entries.length).toBeLessThanOrEqual(page_budget);
+      expect(result.entries).toHaveLength(page_budget);
       expect(result.representation.page_budget).toBe(page_budget);
-      expect(pageTruncated(result) || result.completeness.logical_index !== "complete").toBe(true);
+      expect(result.completeness.transport).toBe(page_budget === 1 ? "partial" : "complete");
+      expect(result.completeness.interpretation_coverage).toBe("open");
+      expect(result.continuation === null).toBe(page_budget === 12);
     }
     expect(byId).not.toHaveBeenCalled();
   });
@@ -165,11 +167,4 @@ function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): Observe
     },
     snapshotPin: (workspaceId) => slice.indexProjection.observablePin(workspaceId)
   };
-}
-
-function pageTruncated(index: InformationIndex): boolean {
-  return index.continuation !== null
-    || index.completeness.transport === "partial"
-    || index.completeness.representation === "partial"
-    || index.completeness.logical_index === "open";
 }

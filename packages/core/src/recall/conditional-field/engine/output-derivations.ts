@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Derivation, SeedActivation, Transition } from "@do-soul/alaya-protocol";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import { transitionKey } from "./path-composition.js";
@@ -8,7 +9,7 @@ type GroundTask = { readonly key: string; readonly root: string; readonly visite
   | { readonly key: string; readonly root: string; readonly visited: readonly string[]; readonly edge: string; readonly child: number };
 
 export type GroundingProgress = Readonly<{
-  readonly counts: string;
+  readonly input_digest: string;
   readonly completed_work: number;
   readonly retained_bytes: number;
   readonly forest: ReadonlyMap<string, Derivation>;
@@ -31,8 +32,11 @@ export function groundedOutputDerivations(input: {
   readonly source_facts?: Readonly<Record<string, BoundSourceFacts>>;
 }): { derivations: readonly Derivation[]; roots: Readonly<Record<string, readonly string[]>>; work: number;
   retained_bytes: number; complete: boolean; progress: GroundingProgress } {
-  const counts = `${input.seeds.length}:${input.transitions.length}:${input.derivations.length}`;
-  const prior = input.progress?.counts === counts ? input.progress : undefined;
+  const inputDigest = createHash("sha256").update(JSON.stringify([
+    input.seeds, input.transitions, input.derivations, input.transition_derivations,
+    input.seeds.map((seed) => input.source_facts?.[seed.state.object_id]?.source_revision ?? null)
+  ])).digest("hex");
+  const prior = input.progress?.input_digest === inputDigest ? input.progress : undefined;
   const forest = new Map(prior?.forest);
   const outgoing = new Map(prior?.outgoing);
   const roots = { ...prior?.roots };
@@ -68,9 +72,11 @@ export function groundedOutputDerivations(input: {
       const root = leafDerivation({ derivation_id: `seed:${key}`, observation_id: seed.state.object_id,
         source_revision: input.source_facts?.[seed.state.object_id]?.source_revision, association_milligrades: seed.milligrades });
       const task: GroundTask = { key, root: root.derivation_id, visited: [], offset: 0 };
-      if (!retain(bytesFor([root, task]))) break;
+      const hasOutgoing = (outgoing.get(key)?.length ?? 0) > 0;
+      if (!retain(bytesFor(root) + bytesFor([key, root.derivation_id]) + (hasOutgoing ? bytesFor(task) : 0))) break;
       forest.set(root.derivation_id, root);
-      tasks.push(task);
+      roots[key] = [...roots[key] ?? [], root.derivation_id];
+      if (hasOutgoing) tasks.push(task);
       seedOffset += 1;
     } else {
       const task = tasks[0];
@@ -80,7 +86,7 @@ export function groundedOutputDerivations(input: {
     }
     work += 1;
   }
-  const progress: GroundingProgress = { counts, forest, outgoing, roots, tasks, completed_work: (prior?.completed_work ?? 0) + work,
+  const progress: GroundingProgress = { input_digest: inputDigest, forest, outgoing, roots, tasks, completed_work: (input.progress?.completed_work ?? 0) + work,
     retained_bytes: (prior?.retained_bytes ?? 0) + retainedBytes,
     derivation_offset: derivationOffset, transition_offset: transitionOffset, seed_offset: seedOffset };
   return { derivations: [...forest.values()], roots, work, retained_bytes: retainedBytes - releasedPrior, progress,

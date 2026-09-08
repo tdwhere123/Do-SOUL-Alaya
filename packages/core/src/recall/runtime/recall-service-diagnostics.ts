@@ -1,13 +1,3 @@
-import type { RecallPacketPlanTrace } from
-  "../delivery/packet-plan/packet-plan-trace.js";
-import type { RecallFiniteFieldChannelCapture } from
-  "../field/finite-field-capture.js";
-import type { RecallQueryEntityExtractionCapture } from
-  "../field/query-entity-attribution-producer.js";
-import type { RecallFieldRefinementStopCertificate } from
-  "../field/refinement/field-refinement-stop-certificate.js";
-import type { PinnedProjectionCandidateSelection } from
-  "../field/retrieval/projection/pinned-projection-selection.js";
 import type {
   RecallAnswerRerankFailureClass,
   RecallAnswerRerankStatus,
@@ -130,67 +120,14 @@ export interface RecallDiagnostics {
     readonly char_ngrams: readonly string[];
     readonly date_terms: readonly string[];
   };
-  readonly answer_shape_plan?: Readonly<
-    import("../query/recall-answer-shape-plan.js").RecallAnswerShapePlan
-  >;
-  readonly lexical_bound_proofs?: readonly Readonly<
-    import("./diagnostics/lexical-bound-proof.js").LexicalBoundProof
-  >[];
-  readonly candidate_proposition_provenance?: Readonly<
-    import("./diagnostics/candidate-proposition-provenance.js")
-      .CandidatePropositionProvenanceMap
-  >;
   readonly query_sought_facets: readonly string[];
-  readonly retrieval_field_captures?: readonly Readonly<RecallFiniteFieldChannelCapture>[];
-  readonly retrieval_field_refinement_receipts?: readonly Readonly<
-    import("../field/refinement/field-refinement-receipt.js")
-      .RecallRetrievalFieldRefinementReceipt
-  >[];
-  readonly field_refinement_stop_certificate?:
-    Readonly<RecallFieldRefinementStopCertificate>;
-  readonly query_condition?: Readonly<
-    import("./query-condition-parity.js").QueryConditionParityView
-  >;
-  readonly field_projection_trace?: Readonly<
-    PinnedProjectionCandidateSelection & {
-      readonly generation_id: string;
-      readonly condition_digest: string;
-    }
-  >;
-  readonly query_entity_extraction?: Readonly<RecallQueryEntityExtractionCapture>;
-  readonly query_fact_frame_extraction?: Readonly<
-    import("../field/query-attribution/query-fact-frame-attribution-producer.js")
-      .RecallQueryFactFrameExtractionCapture
-  >;
-  readonly query_open_semantic_factor_formation?: Readonly<
-    import("@do-soul/alaya-protocol").OpenSemanticFactorFormationCapture
-  >;
-  readonly query_open_semantic_factor_completeness_receipt?: Readonly<
-    import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
-  >;
-  readonly open_semantic_factor_compatibility_trace?: Readonly<
-    import("../field/open-semantic-factors/compatibility-trace.js")
-      .OpenSemanticFactorCompatibilityTrace
-  >;
-  readonly open_semantic_factor_composition?: Readonly<
-    import("../field/open-semantic-factors/composition.js")
-      .OpenSemanticFactorCompositionReceipt
-  >;
-  readonly open_semantic_factor_activation?: Readonly<
-    import("../field/open-semantic-factors/activation.js")
-      .OpenSemanticFactorActivationReceipt
-  >;
-  readonly kind_constraint_alignment?: Readonly<
-    import("../field/kind-projection/alignment.js").KindConstraintAlignmentReceipt
-  >;
   readonly total_scanned: number;
   readonly candidate_pool_count: number;
   readonly pre_budget_count: number;
   readonly delivered_count: number;
-  readonly packet_plan_trace?: Readonly<RecallPacketPlanTrace>;
   readonly embedding_provider_status: RecallEmbeddingProviderStatus;
   readonly embedding_supplement_status:
-    import("../supplements/supplements.js").EmbeddingSupplementCollectionStatus;
+    "disabled" | "provider_missing" | "query_missing" | "empty_candidate_pool" | "not_attempted" | "requested";
   readonly evidence_embedding_status: RecallEvidenceEmbeddingStatus;
   readonly evidence_embedding_expected_count: number;
   readonly evidence_embedding_scored_count: number;

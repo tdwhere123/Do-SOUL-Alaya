@@ -77,6 +77,11 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     expect(mcp.results.some((result) => /secret deployment leftover/i.test(result.content_preview))).toBe(false);
     const scoped = runRecall(slice, { authorized_scopes: [ScopeClass.PROJECT] });
     expect(scoped.entries.map((entry) => entry.object_id)).not.toContain(GLOBAL);
+    const independent = await recallThroughHandler(slice, {
+      query: "retired audit attachment",
+      max_results: 10
+    });
+    expect(independent.index.entries.map((entry) => entry.object_id)).toContain(EXPIRED);
   });
 
   it("handler explanations do not copy another object's witnesses", async () => {
@@ -279,7 +284,7 @@ async function plantGovernedExtras(slice: SourceSlice): Promise<void> {
   tombstone(slice, SECRET);
   await slice.writeMemory(GLOBAL, "yesterday failed deployment global_core copy", MemoryDimension.EPISODE);
   setScope(slice, GLOBAL, ScopeClass.GLOBAL_CORE);
-  await slice.writeMemory(EXPIRED, "expired relation target from yesterday failed deployment", MemoryDimension.FACT);
+  await slice.writeMemory(EXPIRED, "retired audit attachment", MemoryDimension.FACT);
   await slice.admitRelation({
     evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000313",
     assertionId: "assert-r-expired-accept",

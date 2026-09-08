@@ -1,5 +1,4 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import { toErrorMessage } from "../../recall/runtime/recall-service-helpers.js";
 import {
   EmbeddingBackfillPartialFailureError,
   hashMemoryContent,
@@ -7,7 +6,7 @@ import {
   type EmbeddedBackfillCandidate,
   type EmbeddingBackfillHandlerDependencies
 } from "../embedding-backfill-handler-shared.js";
-import { assertValidEmbeddingBatch } from "../helpers.js";
+import { assertValidEmbeddingBatch, toErrorMessage } from "../helpers.js";
 import type { EmbeddingVectorRecord } from "../types.js";
 
 interface PersistEmbeddedBatchParams {

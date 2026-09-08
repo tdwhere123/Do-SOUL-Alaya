@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { groundAssociativeFactFrame, type AssociativeFactFrame } from
   "@do-soul/alaya-protocol";
-import { projectFactFrameSemanticFactors } from
-  "../../recall/field/fact-frame-semantic-factors.js";
-import { materializeAttributedQueryFacilityDemand } from
-  "../../recall/field/query-facility-demand.js";
 import { RuleBasedQueryFactFrameExtractor } from
   "../../shared/query-fact-frame-extraction-rules.js";
 
@@ -174,22 +170,6 @@ describe("RuleBasedQueryFactFrameExtractor", () => {
     expect(frame?.slots.some((slot) => slot.text === "I in Japan for")).toBe(false);
     expect(frame?.slots.some((slot) => slot.text === "Japan")).toBe(true);
 
-    const receipt = materializeAttributedQueryFacilityDemand({
-      query_demand: { schema_version: 1, atoms: [] },
-      weights: {
-        entity: 1,
-        relation: 1,
-        time: 1,
-        logical_object: 1,
-        independent_evidence: 1
-      },
-      semantic_factors: projectFactFrameSemanticFactors(frame!.slots, 0)
-    });
-    const entityValues = receipt.demand_atoms
-      .filter((atom) => atom.kind === "entity")
-      .map((atom) => atom.value);
-    expect(entityValues).toContain("japan");
-    expect(entityValues).not.toContain("in japan for");
   });
 
   it("keeps an ordinary copular measure question on the content-relation path", async () => {

@@ -1,4 +1,5 @@
-import type { Workspace } from "@do-soul/alaya-protocol";
+import { CONDITIONAL_FIELD_GENERATION_OPERATOR_ID, type Workspace } from "@do-soul/alaya-protocol";
+import { generationFromRow } from "@do-soul/alaya-storage";
 import type { DaemonFieldComposition } from "../../field/field-composition.js";
 
 export type FieldProjectionWorkspaceBootstrap = Pick<
@@ -22,7 +23,8 @@ export function createFieldProjectionWorkspaceEnsureMutation(
   now: () => string
 ): (workspace: Workspace) => void {
   return (workspace) => {
-    if (fieldComposition.fieldRepos.generations.readActive(workspace.workspace_id) !== null) {
+    const active = fieldComposition.fieldRepos.generations.readActive(workspace.workspace_id);
+    if (active !== null && generationFromRow(active).producer === CONDITIONAL_FIELD_GENERATION_OPERATOR_ID) {
       return;
     }
     fieldComposition.projectionLifecycle.rebuild(workspace.workspace_id, now());

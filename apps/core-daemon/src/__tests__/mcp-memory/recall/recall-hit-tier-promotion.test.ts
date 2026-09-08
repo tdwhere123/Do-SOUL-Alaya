@@ -1,3 +1,4 @@
+import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EventPublisher,
@@ -168,6 +169,7 @@ async function createHarness(options: {
   const handler = createMcpMemoryToolHandler({
     recallService: {
       recall: vi.fn(async () => ({
+        index: stubRecallIndex([]),
         candidates: [],
         active_constraints: [],
         active_constraints_count: 0,

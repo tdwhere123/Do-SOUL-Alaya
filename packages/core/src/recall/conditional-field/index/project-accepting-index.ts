@@ -58,6 +58,11 @@ export type AcceptingProjectionInput = Readonly<{
   readonly claims?: ReadonlyMap<string, ClaimState>;
   readonly support?: readonly SupportRecord[];
   readonly page_offset?: number;
+  readonly projection_scan_offset?: number;
+  readonly projection_generation?: number;
+  readonly delivered_product_ids?: ReadonlySet<string>;
+  readonly delivered_entry_revisions?: Readonly<Record<string, string>>;
+  readonly on_projection_progress?: (offset: number) => void;
   readonly expires_at?: string;
   readonly as_of?: string;
   readonly lifetime_now?: string;
@@ -77,7 +82,8 @@ export type AcceptingProjectionInput = Readonly<{
   readonly on_grounding_progress?: (progress: GroundingProgress, retainedBytes: number) => void;
   readonly claim_propositions?: ReadonlyMap<string, Proposition>;
   readonly on_remaining_reserve?: (remaining: number) => void;
-  readonly finalize_payload?: (entries: readonly IndexEntry[], remaining: number) => { readonly remaining: number; readonly complete: boolean };
+  readonly finalize_payload?: (entries: readonly IndexEntry[], remaining: number) => {
+    readonly remaining: number; readonly complete: boolean; readonly retryable?: boolean };
   readonly payload_work_per_entry?: number;
   readonly payload_generation?: string;
   readonly relation_facet_modes?: ReadonlyMap<string, FacetMode>;
@@ -91,8 +97,9 @@ export type AcceptingProjectionInput = Readonly<{
 
 const OFFSET_CURSOR = /^offset-(\d+)$/u;
 const RESUME_CURSOR = /^o(\d+)(?:\|(.*))?$/u;
-const PROJECTION_CURSOR = /^p(\d+)(?:g(\d+))?$/u;
+const PROJECTION_CURSOR = /^p(\d+)(?:g(\d+))?(?:r(\d+))?$/u;
 const REPRESENTATION_POLICY = "construct_index_then_page_then_payload" as const;
+const MAX_PAYLOAD_MEMORY_BYTES = 16_384;
 
 export function evaluateSamePathPredicate(
   vectors: readonly FacetVector[],
@@ -153,18 +160,23 @@ function pageAcceptingIndex(
   representation: InformationIndex["representation"]
 ): InformationIndex {
   if (input.transition_derivations !== undefined && input.output_derivations === undefined) {
+    const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
+    const payloadMemory = input.finalize_payload === undefined ? 0
+      : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
     const grounded = groundedOutputDerivations({ seeds: input.snapshot.seeds,
       transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
       transition_derivations: input.transition_derivations, source_facts: input.source_facts,
-      progress: input.grounding_progress, memory_bytes: input.remaining_memory_bytes ?? input.budget.memory_bytes,
+      progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
       allowance: input.remaining_reserve ?? input.budget.finalization_reserve });
     input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
     input = { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
       grounding_complete: grounded.complete,
+      ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
       remaining_reserve: Math.max(0, (input.remaining_reserve ?? input.budget.finalization_reserve) - grounded.work),
       ...(!grounded.complete ? { resource_work: "open" } : {}) };
   }
   const projected = acceptingEntries(input);
+  input.on_projection_progress?.(projected.next);
   const entries = sortEntries(projected.entries);
   if (continuationSetMismatch(input, entries)) {
     return closedIndex(input, representation, invalidatedCompleteness());
@@ -173,6 +185,7 @@ function pageAcceptingIndex(
   const page = entries.slice(offset, offset + input.budget.page_budget);
   const remaining = Math.max(projected.truncated ? 1 : 0, entries.length - offset - page.length);
   const finalized = input.finalize_payload?.(page, projected.remaining);
+  const retryPayload = finalized !== undefined && !finalized.complete && finalized.retryable !== false;
   if (finalized !== undefined) input = { ...input, payload_work: finalized.complete ? "complete" : "open" };
   input.on_remaining_reserve?.(finalized?.remaining ?? projected.remaining);
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
@@ -194,7 +207,8 @@ function pageAcceptingIndex(
     completeness: composeCompleteness({
       observer: input.observer,
       interpretation_status: input.interpretation_status,
-      total: entries.length + Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0),
+      total: entries.length + (input.delivered_product_ids?.size
+        ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)),
       remaining,
       omitted_payload: omittedPayload,
       expand_payload: expandPayload,
@@ -203,9 +217,9 @@ function pageAcceptingIndex(
       ...(resourceOpen ? { resource_work: "open" as const } : {})
     }),
     continuation: nextContinuation({ ...input, ...(resourceOpen || omittedPayload ? { resource_work: "open" } : {}) },
-      remaining, input.payload_work === "open" ? offset : offset + page.length, entries,
-      input.payload_work === "open" ? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)
-        : projected.truncated ? projected.next : undefined),
+      remaining, retryPayload ? offset : offset + page.length, entries,
+      retryPayload ? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)
+        : projected.truncated || input.delivered_product_ids !== undefined ? projected.next : undefined),
     representation
   };
 }
@@ -216,27 +230,52 @@ function acceptingEntries(
   const entries: IndexEntry[] = [];
   let allowance = input.remaining_reserve;
   let truncated = false;
-  const start = Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0);
-  if (input.grounding_complete === false) return { entries, truncated: true, next: start,
-    remaining: allowance ?? input.budget.finalization_reserve };
+  let groundingDeferred = false;
+  const start = input.projection_scan_offset
+    ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0);
   const values = [...input.snapshot.values].sort((a, b) => compareText(valueSortKey(a), valueSortKey(b)));
   let next = start;
   for (const value of values.slice(start)) {
+    if (input.delivered_entry_revisions === undefined && input.delivered_product_ids?.has(productStateNodeId(value.state))) { next += 1; continue; }
+    const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, input);
+    const entry = grounded ? indexEntryForValue(value, input) : null;
+    if (entry !== null && input.delivered_entry_revisions?.[productStateNodeId(value.state)] === indexEntryRevision(entry)) {
+      next += 1;
+      continue;
+    }
     if (allowance !== undefined) {
       const payloadReserve = input.finalize_payload === undefined ? 0
-        : (input.payload_work_per_entry ?? 1) * (entries.length + (value.accepting ? 1 : 0));
+        : (input.payload_work_per_entry ?? 1) * (entries.length + (value.accepting && grounded ? 1 : 0));
       if (allowance < 1 + payloadReserve) {
         truncated = true;
         break;
       }
       allowance -= 1;
     }
-    const entry = indexEntryForValue(value, input);
+    if (!grounded) {
+      groundingDeferred ||= value.accepting;
+      next += 1;
+      continue;
+    }
     if (entry !== null) entries.push(entry);
     next += 1;
     if (input.remaining_reserve !== undefined && entries.length >= input.budget.page_budget && next < values.length) { truncated = true; break; }
   }
-  return { entries, truncated, next, remaining: allowance ?? input.budget.finalization_reserve };
+  return { entries, truncated: truncated || groundingDeferred, next, remaining: allowance ?? input.budget.finalization_reserve };
+}
+
+export function indexEntryRevision(entry: IndexEntry): string {
+  return createHash("sha256").update(stableStringify(entry)).digest("hex");
+}
+
+function groundedSeedAccepts(value: FieldValue, input: AcceptingProjectionInput): boolean {
+  const key = productStateNodeId(value.state);
+  const roots = new Set(input.output_derivations?.[key] ?? []);
+  return input.derivations?.some((root) => roots.has(root.derivation_id) && root.kind === "leaf"
+      && root.observation_ids.includes(value.state.object_id)
+      && (root.association_milligrades ?? 0) >= value.milligrades) === true
+    && input.snapshot.seeds.some((seed) => productStateNodeId(seed.state) === key
+      && seed.milligrades >= value.milligrades);
 }
 
 function indexEntryForValue(
@@ -329,6 +368,7 @@ function entrySortKey(entry: Pick<IndexEntry, "object_id" | "hypothesis_id" | "o
 }
 
 function resolvePageOffset(input: AcceptingProjectionInput, total: number): number {
+  if (input.delivered_product_ids !== undefined) return 0;
   if (input.page_offset !== undefined) return Math.max(0, input.page_offset);
   const cursor = input.prior_continuation?.cursor;
   if (cursor === undefined) return 0;
@@ -351,6 +391,7 @@ function continuationSetMismatch(
   input: AcceptingProjectionInput,
   entries: readonly IndexEntry[]
 ): boolean {
+  if (input.delivered_product_ids !== undefined) return false;
   if (input.page_offset !== undefined) return false;
   const cursor = input.prior_continuation?.cursor;
   if (cursor === undefined) return false;
@@ -376,7 +417,8 @@ function nextContinuation(
   if (remaining <= 0 && !observerOpen && input.resource_work !== "open" && input.support_work_status !== "open") return null;
   const cursor = projectionOffset === undefined
     ? encodeResumeCursor(nextOffset, entries.slice(0, nextOffset).map(entrySortKey))
-    : `p${projectionOffset}g${input.grounding_progress?.completed_work ?? 0}`;
+    : `p${projectionOffset}g${input.grounding_progress?.completed_work ?? 0}`
+      + (input.projection_generation === undefined ? "" : `r${input.projection_generation}`);
   if (cursor === null) return null;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

@@ -27,6 +27,7 @@ import {
   adjacencyEffectsForRows,
   adjacencyKindsFor,
   programRelationKinds,
+  seedProgramStates,
   seedActivationsForObservation
 } from "../conditional-field/engine/path-composition.js";
 import { STORED_RELATION_KIND } from "../conditional-field/query/ordinary-language.js";
@@ -50,6 +51,8 @@ export type ObserveFieldInput = Readonly<{
 }>;
 
 const MAX_OBSERVE_ROUNDS = 4_096;
+const SEED_PAGE_SIZE = 32;
+const MAX_FINALIZATION_MEMORY_BYTES = 65_536;
 const INCOMPLETE_OBSERVER: ReadonlySet<ObserverStatus> = new Set([
   "cancelled",
   "unavailable",
@@ -80,7 +83,24 @@ export function observeField(
     input.readers.embeddingIds !== undefined,
     programNeedsGuardWork(interpretation.program)
   );
-  let state = startObservedField(interpretation, input, residuals);
+  const initial = startObservedField(interpretation, input, residuals);
+  // Retained observations still need bytes for grounded explanations and serialized payloads.
+  const finalizationBytes = Math.min(initial.remaining_memory_bytes, MAX_FINALIZATION_MEMORY_BYTES,
+    Math.max(0, Math.floor((input.budget.memory_bytes - input.budget.min_envelope) / 4)));
+  const observed = observeWithinMemory(interpretation, input, {
+    ...initial, remaining_memory_bytes: initial.remaining_memory_bytes - finalizationBytes
+  });
+  return { ...observed, remaining_memory_bytes: observed.remaining_memory_bytes + finalizationBytes };
+}
+
+function observeWithinMemory(
+  interpretation: QueryInterpretation,
+  input: ObserveFieldInput,
+  initial: FieldEngineState
+): FieldEngineState {
+  let state = initial;
+  const seedUnitCost = 4 + seedProgramStates(interpretation.program).length
+    * Math.max(1, interpretation.hypotheses.length);
   if (input.cancelled === true) return cancelledField(state);
   let expectedRevision = input.expected_source_revision;
   if (expectedRevision === undefined && input.readers.snapshotPin !== undefined) {
@@ -141,7 +161,9 @@ export function observeField(
     if (proposal.actions.length === 0) break;
     for (const proposed of proposal.actions) {
       const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
-      const action = { ...proposed, work_limit: Math.min(4 + pinWork, state.remaining_exploration) };
+      const seedRows = Math.min(SEED_PAGE_SIZE, Math.floor((state.remaining_exploration - pinWork - 1) / seedUnitCost));
+      const action = { ...proposed, work_limit: Math.min(
+        (proposed.action === "seed" ? 4 * Math.max(0, seedRows) : 4) + pinWork, state.remaining_exploration) };
       const minimum = (action.action === "seed" || action.action === "adjacency" ? 4 : 1) + pinWork;
       if (action.work_limit < minimum) {
         return interruptObservedField(state);
@@ -363,7 +385,8 @@ function observeSeed(
     workspace_id: input.workspace_id,
     readers: input.readers,
     seed_query: input.query_text,
-    page_limit: 1,
+    page_limit: Math.min(SEED_PAGE_SIZE, Math.floor((action.work_limit
+      - (input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK)) / 4)),
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,
     as_of: input.as_of,

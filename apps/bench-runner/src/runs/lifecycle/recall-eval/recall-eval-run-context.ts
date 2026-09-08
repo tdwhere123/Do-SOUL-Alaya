@@ -103,6 +103,9 @@ export async function prepareRecallEvalRunContext(
   ambientEnv: Readonly<Record<string, string | undefined>> = process.env,
   memoryProfile: RecallEvalMemoryProfile | null = null
 ): Promise<RecallEvalRunContext> {
+  if (options.querySemanticFactorCachePath !== undefined) {
+    throw new Error("query semantic factor cache input is retired for conditional-field Recall");
+  }
   if (options.dataDirRoot !== undefined) {
     await assertDistinctSnapshotRestorePaths(
       options.snapshotDbPath,

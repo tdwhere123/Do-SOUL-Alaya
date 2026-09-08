@@ -435,7 +435,7 @@ export interface RecallServiceDependencies {
   readonly routingKeyProjectionPort?: RecallRoutingKeyProjectionPort;
   readonly synthesisSearchPort?: RecallServiceSynthesisSearchPort;
   readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
-  // Optional decorator over every buildDefaultPolicy output; the daemon injects runtime-driven scoring_weight_overrides. Must return a valid RecallPolicy; identity is the safe default.
+  // The decorator applies runtime policy defaults before request validation.
   readonly defaultPolicyDecorator?: (
     policy: Readonly<import("@do-soul/alaya-protocol").RecallPolicy>
   ) => Readonly<import("@do-soul/alaya-protocol").RecallPolicy>;
@@ -454,7 +454,4 @@ export interface RecallServiceDependencies {
   readonly readSnapshot?: RecallReadSnapshotPort;
   // Unexpected recall auxiliary failures (not graceful degradations) land here.
   readonly recallFailureHealthInbox?: RecallFailureHealthInboxPort;
-  readonly testOnlyTransformCoarseCandidates?: (
-    candidates: readonly Readonly<import("./recall-service-results.js").CoarseRecallCandidate>[]
-  ) => readonly Readonly<import("./recall-service-results.js").CoarseRecallCandidate>[];
 }

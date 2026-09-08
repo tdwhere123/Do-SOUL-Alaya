@@ -7,7 +7,7 @@ import {
 } from "../helpers.js";
 import { EVIDENCE_DOCUMENT_MAX_OPERATOR_ID } from "../constants.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
-import { scoreQueryEvidenceContent } from "../../recall/scoring/query-evidence-scoring.js";
+import { scoreQueryEvidenceContent } from "./query-evidence-scoring.js";
 
 export const EVIDENCE_CANDIDATE_EMBEDDING_TOP_N = 32;
 import {

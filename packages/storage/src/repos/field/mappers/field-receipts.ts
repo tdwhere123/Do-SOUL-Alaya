@@ -5,7 +5,7 @@ import {
   FactorDescriptorSchema,
   FactorIncidenceSchema,
   FieldProjectionGenerationSchema,
-  PROJECTION_GENERATION_OPERATOR_ID,
+  fieldProjectionGenerationContract,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   SourceRecordIdentitySchema,
   fieldReceiptContractFields,
@@ -116,18 +116,19 @@ export function jobFromRow(row: FieldDerivationJobRow): DerivationJobReceipt {
 }
 
 export function generationFromRow(row: FieldProjectionGenerationRow): FieldProjectionGeneration {
+  const versions = FieldProjectionGenerationSchema.unwrap().shape.operator_versions.parse(JSON.parse(row.operator_versions_json));
+  const contract = fieldProjectionGenerationContract(versions.map(([id, version]) => ({ id, version })));
   return FieldProjectionGenerationSchema.parse({
     ...fieldReceiptContractFields({
       identity: row.generation_id,
-      producer: PROJECTION_GENERATION_OPERATOR_ID,
-      consumer: "activation",
+      ...contract,
       deletion_behavior: "rebuildable"
     }),
     schema_version: 1,
     workspace_id: row.workspace_id,
     generation_id: row.generation_id,
     operator_manifest_digest: row.operator_manifest_digest,
-    operator_versions: parseOperatorVersions(row.operator_versions_json),
+    operator_versions: versions,
     field_schema_version: row.schema_version,
     input_event_frontier: row.input_event_frontier,
     governance_frontier: row.governance_frontier,
@@ -150,19 +151,4 @@ export function generationToRow(
     status: generation.status,
     recorded_at: generation.recorded_at
   };
-}
-
-function parseOperatorVersions(
-  json: string
-): readonly (readonly [string, string])[] {
-  const parsed: unknown = JSON.parse(json);
-  if (!Array.isArray(parsed)) {
-    throw new Error("operator versions must be an array");
-  }
-  return parsed.map((entry) => {
-    if (!Array.isArray(entry) || entry.length !== 2) {
-      throw new Error("operator version tuple is invalid");
-    }
-    return [String(entry[0]), String(entry[1])] as const;
-  });
 }

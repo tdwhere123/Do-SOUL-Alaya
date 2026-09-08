@@ -1,343 +1,90 @@
-// @ts-nocheck
 import { describe, expect, it } from "vitest";
-import { materializeOpenSemanticFactorFormation } from "@do-soul/alaya-core";
+import { digestRecallFieldIdentity } from "@do-soul/alaya-core";
 import {
   OpenSemanticFactorActivationReceiptSchema,
   OpenSemanticFactorCompatibilityTraceSchema,
   OpenSemanticFactorCompositionReceiptSchema
-} from
-  "../../../harness/recall/semantic-factors/open-semantic-factor-diagnostics-schema.js";
-import { materializeOpenSemanticFactorActivation } from
-  "../../../../../../packages/core/src/recall/field/open-semantic-factors/activation.js";
-import { materializeOpenSemanticFactorCompatibilityTrace } from
-  "../../../../../../packages/core/src/recall/field/open-semantic-factors/compatibility-trace.js";
-import { materializeOpenSemanticFactorComposition } from
-  "../../../../../../packages/core/src/recall/field/open-semantic-factors/composition.js";
-import { digestRecallFieldIdentity } from
-  "../../../../../../packages/core/src/recall/field/field-identity.js";
+} from "../../../harness/recall/semantic-factors/open-semantic-factor-diagnostics-schema.js";
 
-describe("open semantic factor diagnostics schema cutover", () => {
-  it("accepts the v2 compatibility trace emitted by Core", () => {
-    const trace = coreCompatibilityTrace();
+const DIGEST = `sha256:${"a".repeat(64)}`;
 
-    expect(trace.entries[0]?.receipt.operator_id)
-      .toBe("open_semantic_factor_compatibility_v6");
-    expect(trace.operator_id).toBe("open_semantic_factor_compatibility_trace_v2");
-    expect(trace.schema_version).toBe(2);
-    expect(OpenSemanticFactorCompatibilityTraceSchema.parse(trace)).toEqual(trace);
-  });
-
-  it("archives observed unformed evidence without a compatibility receipt", () => {
-    const query = materializeOpenSemanticFactorFormation({
-      source_kind: "query",
-      source_text: "Who graduated with a degree?",
-      proposal: proposal("Who graduated with a degree?", queryGraph())
-    });
-    const incompatible = materializeOpenSemanticFactorFormation({
-      source_kind: "evidence",
-      source_text: "Alice likes tea.",
-      proposal: proposal("Alice likes tea.", disjointEvidenceGraph())
-    });
-    const unavailable = materializeOpenSemanticFactorFormation({
-      source_kind: "evidence",
-      source_text: "I redeemed a $5 coupon on coffee creamer at Target."
-    });
-    const trace = materializeOpenSemanticFactorCompatibilityTrace({
-      query_capture: query,
-      evidence_formations: {
-        "coupon-source": unavailable,
-        "sunday-card": incompatible
-      }
-    });
-
-    expect(trace.unevaluated_evidence_ids).toEqual(["coupon-source"]);
-    expect(trace.unavailable_evidence_ids).toEqual([]);
-    expect(trace.entries.map((entry) => entry.evidence_id)).toEqual(["sunday-card"]);
-    expect(trace.entries[0]?.receipt.status).toBe("incompatible");
-    expect(OpenSemanticFactorCompatibilityTraceSchema.parse(trace)).toEqual(trace);
-  });
-
-  it("rejects a compatibility trace still sealed as v1", () => {
-    const current = coreCompatibilityTrace();
-    const { unevaluated_evidence_ids: _unevaluated, ...legacyBody } = current;
-    const legacy = {
-      ...legacyBody,
-      schema_version: 1 as const,
-      operator_id: "open_semantic_factor_compatibility_trace_v1" as const
-    };
-
-    expect(OpenSemanticFactorCompatibilityTraceSchema.safeParse(legacy).success)
-      .toBe(false);
-  });
-
-  it("rejects a resealed trace from the prior v3 compatibility operator", () => {
-    const legacyTrace = resealAsLegacyV3(coreCompatibilityTrace());
-
-    expect(OpenSemanticFactorCompatibilityTraceSchema.safeParse(legacyTrace).success)
-      .toBe(false);
+describe("archived semantic-factor diagnostics", () => {
+  it("reads sealed historical evidence and keeps unavailable remainder distinct", () => {
+    const trace = archivedTrace();
+    expect(OpenSemanticFactorCompatibilityTraceSchema.parse(JSON.parse(JSON.stringify(trace)))).toEqual(trace);
+    expect(trace.entries).toHaveLength(1);
+    expect(trace.unevaluated_evidence_ids).toEqual(["evidence-2", "evidence-3"]);
   });
 
   it.each([
-    ["omitted remainder id", (trace: ReturnType<typeof coreCompatibilityTrace>) => ({
-      ...omitDigest(trace),
-      unevaluated_evidence_ids: []
-    })],
-    ["renamed remainder id", (trace: ReturnType<typeof coreCompatibilityTrace>) => ({
-      ...omitDigest(trace),
-      unevaluated_evidence_ids: ["renamed-remainder"]
-    })],
-    ["unsorted remainder ids", (trace: ReturnType<typeof unformedRemainderTrace>) => ({
-      ...omitDigest(trace),
-      unevaluated_evidence_ids: [...trace.unevaluated_evidence_ids].reverse()
-    })],
-    ["duplicate remainder id", (trace: ReturnType<typeof unformedRemainderTrace>) => ({
-      ...omitDigest(trace),
-      unevaluated_evidence_ids: [
-        ...trace.unevaluated_evidence_ids,
-        ...trace.unevaluated_evidence_ids
-      ]
-    })],
-    ["overlapping evaluated id", (trace: ReturnType<typeof unformedRemainderTrace>) => ({
-      ...omitDigest(trace),
-      unevaluated_evidence_ids: [
-        ...trace.unevaluated_evidence_ids,
-        trace.entries[0]!.evidence_id
-      ]
-    })],
-    ["bad remainder count", (trace: ReturnType<typeof coreCompatibilityTrace>) => ({
-      ...omitDigest(trace),
-      unevaluated_evidence_ids: ["extra-remainder"]
-    })]
-  ] as const)("rejects a present v2 dump with %s", (_name, mutate) => {
-    const mutated = resealTrace(mutate(unformedRemainderTrace()));
-    expect(OpenSemanticFactorCompatibilityTraceSchema.safeParse(mutated).success)
-      .toBe(false);
-  });
-
-  it("rejects a present v2 dump whose trace digest does not match the body", () => {
-    const current = coreCompatibilityTrace();
+    { unevaluated_evidence_ids: [] },
+    { unevaluated_evidence_ids: ["evidence-3", "evidence-2"] },
+    { unevaluated_evidence_ids: ["evidence-2", "evidence-2"] },
+    { unevaluated_evidence_ids: ["evidence-1", "evidence-2"] },
+    { observed_evidence_count: 4 },
+    { evaluated_evidence_count: 2 },
+    { incomparable_seal: "none" }
+  ])("rejects a resealed inconsistent remainder %j", (patch) => {
+    const { trace_digest: _digest, ...body } = archivedTrace();
+    const altered = { ...body, ...patch };
     expect(OpenSemanticFactorCompatibilityTraceSchema.safeParse({
-      ...current,
-      trace_digest: digestRecallFieldIdentity({ forged: true })
+      ...altered, trace_digest: digestRecallFieldIdentity(altered)
     }).success).toBe(false);
   });
 
-  it("rejects composition and activation receipts still sealed as v1", () => {
-    const { query, trace, composition, activation } = composedChain();
-    expect(query.status).toBe("formed");
+  it("rejects unknown versions, digests and a join operator in a pairwise receipt", () => {
+    const trace = archivedTrace();
+    expect(OpenSemanticFactorCompatibilityTraceSchema.safeParse({ ...trace, schema_version: 1 }).success).toBe(false);
+    expect(OpenSemanticFactorCompatibilityTraceSchema.safeParse({ ...trace, trace_digest: DIGEST }).success).toBe(false);
+    const entry = trace.entries[0]!;
+    const receipt = { ...entry.receipt, operator_id: "open_semantic_factor_composition_v2" };
+    const { trace_digest: _digest, ...body } = trace;
+    const altered = { ...body, entries: [{ ...entry, receipt }] };
+    expect(OpenSemanticFactorCompatibilityTraceSchema.safeParse({
+      ...altered, trace_digest: digestRecallFieldIdentity(altered)
+    }).success).toBe(false);
+  });
+
+  it("reads sealed archived composition and activation without loading an executor", () => {
+    const composition = seal({
+      schema_version: 2, operator_id: "open_semantic_factor_composition_v2", status: "no_match",
+      compatibility_trace_digest: archivedTrace().trace_digest, query_capture_digest: DIGEST,
+      result_variable_ids: [], search_step_count: 0, solution_count: 0,
+      observed_binding_count: 0, binding_observation_count: 0, truncated: false,
+      bindings: [], solutions: [], variable_collections: []
+    });
+    const activation = seal({
+      schema_version: 2, operator_id: "open_semantic_solution_membership_activation_v2", status: "no_match",
+      composition_receipt_digest: composition.receipt_digest, entry_count: 0, truncated: false,
+      entries: [], missing_evidence_policy: "no_op", ranking_effect: "candidate_attribution"
+    });
     expect(OpenSemanticFactorCompositionReceiptSchema.parse(composition)).toEqual(composition);
     expect(OpenSemanticFactorActivationReceiptSchema.parse(activation)).toEqual(activation);
-
-    const { receipt_digest: _compositionDigest, ...compositionBody } = composition;
-    expect(OpenSemanticFactorCompositionReceiptSchema.safeParse({
-      ...compositionBody,
-      schema_version: 1,
-      operator_id: "open_semantic_factor_composition_v1"
-    }).success).toBe(false);
-
-    const { receipt_digest: _activationDigest, ...activationBody } = activation;
-    expect(OpenSemanticFactorActivationReceiptSchema.safeParse({
-      ...activationBody,
-      schema_version: 1,
-      operator_id: "open_semantic_solution_membership_activation_v1"
-    }).success).toBe(false);
-    expect(trace.schema_version).toBe(2);
-  });
-
-  it("rejects a pairwise receipt that claims the join operator", () => {
-    const current = coreCompatibilityTrace();
-    const forged = structuredClone(current);
-    const match = forged.entries[0]?.receipt.proposition_matches[0] ??
-      forged.entries[0]?.receipt.proposition_match_candidates[0];
-    expect(match).toBeDefined();
-    match!.predicate_alignment.operator_id = "source_bound_join_identity_v1";
-    expect(OpenSemanticFactorCompatibilityTraceSchema.safeParse(forged).success)
-      .toBe(false);
+    expect(OpenSemanticFactorCompositionReceiptSchema.safeParse({ ...composition, schema_version: 1 }).success).toBe(false);
+    expect(OpenSemanticFactorActivationReceiptSchema.safeParse({ ...activation, receipt_digest: DIGEST }).success).toBe(false);
   });
 });
 
-function coreCompatibilityTrace() {
-  const evidenceText = "The user graduated with a degree.";
-  const queryText = "Who graduated with a degree?";
-  const evidence = materializeOpenSemanticFactorFormation({
-    source_kind: "evidence",
-    source_text: evidenceText,
-    proposal: proposal(evidenceText, evidenceGraph())
+function archivedTrace() {
+  const receipt = seal({
+    schema_version: 1, operator_id: "open_semantic_factor_compatibility_v6", status: "ineligible",
+    evidence_capture_digest: DIGEST, query_capture_digest: DIGEST,
+    evidence_graph_digest: null, query_graph_digest: null,
+    query_proposition_count: 0, matched_query_proposition_count: 0,
+    proposition_match_candidates: [], proposition_matches: []
   });
-  const query = materializeOpenSemanticFactorFormation({
-    source_kind: "query",
-    source_text: queryText,
-    proposal: proposal(queryText, queryGraph())
-  });
-  return materializeOpenSemanticFactorCompatibilityTrace({
-    query_capture: query,
-    evidence_formations: { gold: evidence }
-  });
-}
-
-function resealAsLegacyV3(trace: ReturnType<typeof coreCompatibilityTrace>) {
-  const legacy = structuredClone(trace);
-  const receipt = legacy.entries[0]!.receipt;
-  Reflect.set(receipt, "operator_id", "open_semantic_factor_compatibility_v4");
-  const { receipt_digest: _receiptDigest, ...receiptBody } = receipt;
-  Reflect.set(receipt, "receipt_digest", digestRecallFieldIdentity(receiptBody));
-  const { trace_digest: _traceDigest, ...traceBody } = legacy;
-  Reflect.set(legacy, "trace_digest", digestRecallFieldIdentity(traceBody));
-  return legacy;
-}
-
-function unformedRemainderTrace() {
-  const query = materializeOpenSemanticFactorFormation({
-    source_kind: "query",
-    source_text: "Who graduated with a degree?",
-    proposal: proposal("Who graduated with a degree?", queryGraph())
-  });
-  return materializeOpenSemanticFactorCompatibilityTrace({
-    query_capture: query,
-    evidence_formations: {
-      "coupon-source": materializeOpenSemanticFactorFormation({
-        source_kind: "evidence",
-        source_text: "I redeemed a $5 coupon on coffee creamer at Target."
-      }),
-      "later-source": materializeOpenSemanticFactorFormation({
-        source_kind: "evidence",
-        source_text: "I bought groceries on Sunday."
-      }),
-      "sunday-card": materializeOpenSemanticFactorFormation({
-        source_kind: "evidence",
-        source_text: "Alice likes tea.",
-        proposal: proposal("Alice likes tea.", disjointEvidenceGraph())
-      })
-    }
-  });
-}
-
-function composedChain() {
-  const query = materializeOpenSemanticFactorFormation({
-    source_kind: "query",
-    source_text: "Who graduated with a degree?",
-    proposal: proposal("Who graduated with a degree?", queryGraph())
-  });
-  const evidence = materializeOpenSemanticFactorFormation({
-    source_kind: "evidence",
-    source_text: "The user graduated with a degree.",
-    proposal: proposal("The user graduated with a degree.", evidenceGraph())
-  });
-  const trace = materializeOpenSemanticFactorCompatibilityTrace({
-    query_capture: query,
-    evidence_formations: { gold: evidence }
-  });
-  const composition = materializeOpenSemanticFactorComposition({
-    trace,
-    query_capture: query
-  });
-  const activation = materializeOpenSemanticFactorActivation({
-    composition,
-    trace,
-    query_capture: query
-  });
-  return { query, trace, composition, activation };
-}
-
-function omitDigest<T extends { readonly trace_digest: string }>(
-  trace: T
-): Omit<T, "trace_digest"> {
-  const { trace_digest: _digest, ...body } = trace;
-  return body;
-}
-
-function resealTrace(body: Omit<ReturnType<typeof coreCompatibilityTrace>, "trace_digest">) {
+  const body = {
+    schema_version: 2, operator_id: "open_semantic_factor_compatibility_trace_v2",
+    query_capture_digest: DIGEST, observed_evidence_count: 3,
+    matchable_evidence_count: 1, evaluated_evidence_count: 1,
+    unavailable_evidence_ids: ["evidence-2", "evidence-3"],
+    unevaluated_evidence_ids: ["evidence-2", "evidence-3"],
+    incomparable_seal: "unavailable", truncated: false,
+    entries: [{ evidence_id: "evidence-1", receipt }]
+  };
   return { ...body, trace_digest: digestRecallFieldIdentity(body) };
 }
 
-function evidenceGraph() {
-  return {
-    schema_version: 2 as const,
-    source_kind: "evidence" as const,
-    factors: [
-      factor("predicate", "graduated", "graduate"),
-      factor("user", "user", "user"),
-      factor("degree", "degree", "degree")
-    ],
-    variables: [],
-    result_variable_ids: [],
-    propositions: [{
-      proposition_id: "graduation",
-      predicate_factor_id: "predicate",
-      arguments: [
-        argument(0, "user", "factor", "user"),
-        argument(1, "degree", "factor", "degree")
-      ]
-    }]
-  };
-}
-
-function disjointEvidenceGraph() {
-  return {
-    schema_version: 2 as const,
-    source_kind: "evidence" as const,
-    factors: [
-      factor("alice", "Alice", "alice"),
-      factor("likes", "likes", "like"),
-      factor("tea", "tea", "tea")
-    ],
-    variables: [],
-    result_variable_ids: [],
-    propositions: [{
-      proposition_id: "likes-tea",
-      predicate_factor_id: "likes",
-      arguments: [
-        argument(0, "agent", "factor", "alice"),
-        argument(1, "object", "factor", "tea")
-      ]
-    }]
-  };
-}
-
-function queryGraph() {
-  return {
-    schema_version: 2 as const,
-    source_kind: "query" as const,
-    factors: [
-      factor("predicate", "graduated", "graduate"),
-      factor("degree", "degree", "degree")
-    ],
-    variables: [{ variable_id: "answer", surface: "Who" }],
-    result_variable_ids: ["answer"],
-    propositions: [{
-      proposition_id: "graduation-query",
-      predicate_factor_id: "predicate",
-      arguments: [
-        argument(0, "agent", "variable", "answer"),
-        argument(1, "obtained", "factor", "degree")
-      ]
-    }]
-  };
-}
-
-function proposal(sourceText: string, graph: unknown) {
-  return {
-    schema_version: 1 as const,
-    producer_operator_id: "open-factor-bench-test-v1",
-    source_text: sourceText,
-    graph
-  };
-}
-
-function factor(factorId: string, surface: string, semanticIdentity: string) {
-  return { factor_id: factorId, surface, semantic_identity: semanticIdentity };
-}
-
-function argument(
-  position: number,
-  bindingIdentity: string,
-  referenceKind: "factor" | "variable",
-  referenceId: string
-) {
-  return {
-    position,
-    binding_identity: bindingIdentity,
-    reference_kind: referenceKind,
-    reference_id: referenceId
-  };
+function seal<T extends Record<string, unknown>>(body: T) {
+  return { ...body, receipt_digest: digestRecallFieldIdentity(body) };
 }

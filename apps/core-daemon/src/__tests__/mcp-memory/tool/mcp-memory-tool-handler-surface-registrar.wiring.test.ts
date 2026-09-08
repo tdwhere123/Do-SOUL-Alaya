@@ -1,3 +1,4 @@
+import { stubRecallIndex } from "./mcp-memory-tool-handler-fixture.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   createMcpMemoryToolHandler,
@@ -17,6 +18,7 @@ function makeMinimalDeps(
     recallService: {
       recall: vi.fn(async () => ({
         candidates: [],
+        index: stubRecallIndex([]),
         active_constraints: [],
         active_constraints_count: 0,
         total_scanned: 0,

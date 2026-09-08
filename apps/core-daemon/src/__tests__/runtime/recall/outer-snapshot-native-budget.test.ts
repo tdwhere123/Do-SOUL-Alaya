@@ -16,9 +16,12 @@ afterEach(() => {
 });
 
 describe("outer recall snapshot native allowance", () => {
-  it("constructs cold governance and field readers under query_only without DDL after startup", async () => {
+  it.each([true, false])("constructs query-only cold readers without DDL when recall indexes exist=%s", async (indexed) => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await slice.writeMemory(MEM.r, "needle", MemoryDimension.FACT);
+    if (!indexed) {
+      slice.database.connection.exec("DROP INDEX IF EXISTS idx_relation_recall_subject; DROP INDEX IF EXISTS idx_relation_recall_predicate;");
+    }
     slice.database.connection.pragma("query_only = ON");
     const executed = vi.spyOn(slice.database.connection, "exec");
     const prepared = vi.spyOn(slice.database.connection, "prepare");

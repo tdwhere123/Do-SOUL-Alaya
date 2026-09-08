@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import {
-  QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
+  RequestBudgetSchema,
   buildVerifiedUserAssertionReceiptV2Preimage,
-  certifyQueryOsfSemanticCompleteness,
   formatVerifiedUserAssertionV2SourceHash,
   hashDerivationJobId,
   type CandidateMemorySignal,
@@ -10,10 +9,12 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   EvidenceService,
+  MemoryService,
   RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
-  RuleBasedQueryFactFrameExtractor,
   SignalService,
-  fieldContractSha256
+  fieldContractSha256,
+  runConditionalFieldRecall,
+  snapshotIdFromPin
 } from "@do-soul/alaya-core";
 import {
   InMemoryHandoffGapHandler,
@@ -24,17 +25,14 @@ import {
   SqliteEventLogRepo,
   SqliteEvidenceCapsuleRepo,
   SqliteSignalRepo,
+  SqliteMemoryEntryRepo,
+  prepareIndexedRecallProjection,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { readStoredSemanticFactorFormation } from
   "../../../../../../packages/storage/src/repos/capsules/reads/qualification/semantic-factor-formation-read.js";
-import { createMemoryEntry } from
-  "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
-import {
-  binaryUseQuerySemanticGraph,
-  collectWith,
-  emptyGraphSupportPort
-} from "../../../../../../packages/core/src/__tests__/recall/supplementary-data-test-fixtures.js";
+import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
+import { conditionalRecallPayload } from "../../runtime/field/query-only-hydration-fixture.js";
 import {
   CLOCK,
   EVIDENCE_ID,
@@ -235,21 +233,29 @@ export function readDurableFormation(
     );
 }
 
-export async function collectLiveSupplement(
-  repo: SqliteEvidenceCapsuleRepo,
+export async function recallLiveSource(
+  runtime: EligibilityLiveRuntime,
   evidenceId: string
 ) {
-  return await collectWith({
-    candidates: [createMemoryEntry({
-      object_id: MEMORY_ID,
-      content: ASSERTION,
-      evidence_refs: [evidenceId]
-    })],
-    graphSupportPort: emptyGraphSupportPort(),
-    queryText: QUERY,
-    queryFactFrameExtractionPort: new RuleBasedQueryFactFrameExtractor(),
-    openSemanticFactorExtractionPort: certifiedQueryPort(),
-    evidenceSearchPort: repo
+  prepareIndexedRecallProjection(runtime.database);
+  const memory = new MemoryService({
+    memoryEntryRepo: new SqliteMemoryEntryRepo(runtime.database),
+    eventLogRepo: new SqliteEventLogRepo(runtime.database),
+    now: () => CLOCK, generateObjectId: () => MEMORY_ID,
+    evidenceService: runtime.evidenceRepo,
+    runtimeNotifier: { notifyEntry: async () => undefined }
+  });
+  await memory.create({
+    created_by: "user_action", dimension: "fact", source_kind: "user",
+    formation_kind: "explicit", scope_class: "project", content: ASSERTION,
+    domain_tags: [], evidence_refs: [evidenceId], workspace_id: WORKSPACE_ID,
+    run_id: "run-1", surface_id: null
+  });
+  const readers = createConditionalFieldObserverReaders(runtime.database);
+  const request = conditionalRecallPayload(QUERY);
+  return runConditionalFieldRecall({
+    ...request, readers, as_of: CLOCK, budget: RequestBudgetSchema.parse(request.budget),
+    snapshot_id: snapshotIdFromPin(WORKSPACE_ID, readers.snapshotPin!(WORKSPACE_ID))
   });
 }
 
@@ -263,30 +269,4 @@ export function f3CaptureJob(field: PlantedField, producer: string) {
     operator_id: producer,
     input_evidence_ids: [EVIDENCE_ID]
   }, fieldContractSha256));
-}
-
-function certifiedQueryPort() {
-  return {
-    operator_id: "test_open_semantic_factor_v1",
-    extract: async () => null,
-    extractCertifiedQuery: async (
-      sourceText: string,
-      obligation: Parameters<typeof certifyQueryOsfSemanticCompleteness>[0]["obligation"]
-    ) => {
-      const graph = binaryUseQuerySemanticGraph();
-      const receipt = certifyQueryOsfSemanticCompleteness({
-        query_text: sourceText,
-        graph,
-        obligation,
-        producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
-        sha256: (value) => createHash("sha256").update(value, "utf8").digest("hex")
-      });
-      return receipt === null ? null : {
-        schema_version: 1 as const,
-        producer_operator_id: QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID,
-        graph,
-        semantic_completeness_receipt: receipt
-      };
-    }
-  };
 }

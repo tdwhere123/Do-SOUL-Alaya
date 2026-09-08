@@ -45,7 +45,7 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).not.toContain("selection-order-ledger");
     expect(stdoutBuf).toContain("--policy-shape stress|chat");
     expect(stdoutBuf).toContain("--simulate-report none|always-used|gold-only|mixed");
-    expect(stdoutBuf).toContain("--weights '<json>'");
+    expect(stdoutBuf).not.toContain("--weights '<json>'");
     expect(stdoutBuf).toContain("--data-dir <path>");
     expect(stdoutBuf).toContain("--force");
     expect(stdoutBuf).toContain("--edge-plane");
@@ -63,7 +63,7 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("--embedding-cache-overlay <receipt.json>");
     expect(stdoutBuf).toContain("emit-embedding-cache-overlay --snapshot");
     expect(stdoutBuf).not.toContain("embedding-cache-overlay-build");
-    expect(stdoutBuf).toContain("--query-semantic-factor-cache <json>");
+    expect(stdoutBuf).not.toContain("--query-semantic-factor-cache <json>");
     expect(stdoutBuf).toContain("--concurrency N");
     expect(stdoutBuf).not.toContain("--direct-deepseek-500-operator");
     expect(stdoutBuf).not.toContain("--direct-newapi-deepseek-500-operator");
@@ -179,6 +179,6 @@ describe("bench-runner CLI", () => {
     ]);
 
     expect(exitCode).toBe(2);
-    expect(stderrBuf).toMatch(/activation_weights_phase4b must sum to 1\.0/);
+    expect(stderrBuf).toMatch(/--weights is retired/);
   });
 });

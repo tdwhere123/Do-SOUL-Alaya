@@ -13,7 +13,7 @@ import {
   type FieldContractSha256,
   type FieldOperatorVersionEntry
 } from "./canonical-identity.js";
-import { assertCanonicalFieldOperatorManifest } from "./operator-manifest.js";
+import { fieldProjectionGenerationContract } from "./operator-manifest.js";
 
 export const ProjectionGenerationStatusSchema = z.enum([
   "shadow",
@@ -99,11 +99,10 @@ export function verifyFieldProjectionGeneration(
   sha256: FieldContractSha256
 ): FieldProjectionGeneration {
   const operators = toOperatorEntries(receipt.operator_versions);
-  assertCanonicalFieldOperatorManifest(
-    operators,
-    receipt.operator_manifest_digest,
-    sha256
-  );
+  const contract = fieldProjectionGenerationContract(operators);
+  if (receipt.producer !== contract.producer || receipt.consumer !== contract.consumer) {
+    throw new Error("projection generation producer or consumer does not match its operator manifest");
+  }
   const generationId = hashGenerationId({
     operators,
     operator_manifest_digest: receipt.operator_manifest_digest,

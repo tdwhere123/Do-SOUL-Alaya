@@ -31,13 +31,11 @@ import {
 import type { GardenTaskEnqueueInput, GardenTaskRow } from "@do-soul/alaya-storage";
 import { enqueuePostTurnExtractTask } from "../garden-task/post-turn-extract-queue.js";
 import {
-  buildRecallStrategyMix,
   encodeIndexResults,
   sourceMetadataForRecallResult,
   frameEncodedIndex,
   resolveMcpDegradationReason,
   selectRecallMcpHonestyDiagnostics,
-  unavailableIndex,
   type RecallMcpHonestyDiagnostics
 } from "./recall-result.js";
 import { buildRecallPolicy, dedupeDeliveredObjectIdentities, uniqueObjectIds } from "./recall-usage-recall-support.js";
@@ -94,7 +92,7 @@ export interface RecallUsageHandlerDependencies {
       readonly fine_assessment_count: number;
       readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
       readonly diagnostics?: RecallMcpHonestyDiagnostics | null;
-      readonly index?: import("@do-soul/alaya-protocol").InformationIndex;
+      readonly index: import("@do-soul/alaya-protocol").InformationIndex;
       readonly provider_calls?: 0;
       readonly garden_enqueue?: 0;
     }>>;
@@ -198,7 +196,6 @@ async function executeRecall(
     encoded.results,
     encoded.results.length,
     { ...recallResult, index: encoded.index },
-    policyOverride,
     encoded.explainabilityPartial
   );
 }
@@ -218,7 +215,8 @@ function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => st
 }
 
 function encodeRecallHandlerResults(recallResult: RecallServiceResult, policy: RecallPolicy) {
-  const index = recallResult.index ?? unavailableIndex();
+  const index = recallResult.index;
+  if (index === undefined) throw new Error("conditional-field Recall requires an authoritative index");
   const previews = new Map(
     recallResult.candidates.map((candidate) => [candidate.object_id, candidate.content_preview] as const)
   );
@@ -272,13 +270,10 @@ function buildRecallResponse(
   results: readonly RecallSearchResult[],
   totalCount: number,
   recallResult: RecallServiceResult,
-  policyOverride: RecallPolicy,
   explainabilityPartial: boolean
 ): SoulMemorySearchResponse {
   const honestyDiagnostics = selectRecallMcpHonestyDiagnostics(recallResult.diagnostics);
-  const strategyMix = recallResult.index === undefined
-    ? buildRecallStrategyMix(policyOverride, results, honestyDiagnostics)
-    : {
+  const strategyMix = {
       deterministic_match: true,
       precomputed_rank: false,
       semantic_supplement: false,
@@ -304,7 +299,7 @@ function buildRecallResponse(
       },
       explainabilityPartial
     ),
-    ...(recallResult.index === undefined ? {} : { index: recallResult.index })
+    index: recallResult.index
   });
 }
 

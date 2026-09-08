@@ -12,7 +12,7 @@
 #   apps/bench-runner/scripts/run-full-public-bench.sh \
 #     [--variant s|oracle] [--embedding disabled|env] [--embedding-provider openai|local_onnx] \
 #     [--shards N] [--limit M] [--policy-shape stress|chat] \
-#     [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir path] [--history-root path]
+#     [--simulate-report none|always-used|gold-only|mixed] [--data-dir path] [--history-root path]
 #
 # Defaults: variant=s, embedding=disabled+env sequentially,
 # policy_shape=stress+chat sequentially, simulate_report=none, shards=2
@@ -38,7 +38,6 @@ SIMULATE_REPORT="none"
 # (~1500 MB reserved per shard).
 SHARDS=""
 LIMIT=""
-WEIGHTS=""
 DATA_DIR="${BENCH_DATA_DIR:-apps/bench-runner/data/longmemeval}"
 HISTORY_ROOT="${BENCH_PUBLIC_HISTORY_ROOT:-docs/bench-history}"
 LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
@@ -134,7 +133,7 @@ while [[ $# -gt 0 ]]; do
     --embedding-provider) EMBEDDING_PROVIDER="$2"; shift 2;;
     --policy-shape) POLICY_SHAPE="$2"; POLICY_SHAPE_SPECIFIED=1; shift 2;;
     --simulate-report) SIMULATE_REPORT="$2"; shift 2;;
-    --weights) WEIGHTS="$2"; shift 2;;
+    --weights) echo "--weights is retired; conditional-field Recall has no weighted selector" >&2; exit 2;;
     --data-dir) DATA_DIR="$2"; shift 2;;
     --shards) SHARDS="$2"; shift 2;;
     --limit) LIMIT="$2"; shift 2;;
@@ -289,7 +288,7 @@ run_one() {
   # Shard size: ceil(effective_total / shards_for_run)
   local shard_size=$(( (EFFECTIVE_TOTAL + shards_for_run - 1) / shards_for_run ))
 
-  echo "[$(date -u -Iseconds)] driver=$run_tag variant=$VARIANT embedding=$embedding policy_shape=$policy_shape simulate_report=$SIMULATE_REPORT shards=$shards_for_run total=$EFFECTIVE_TOTAL shard_size=$shard_size data_dir=$DATA_DIR weights=${WEIGHTS:-none}" | tee "$master_log"
+  echo "[$(date -u -Iseconds)] driver=$run_tag variant=$VARIANT embedding=$embedding policy_shape=$policy_shape simulate_report=$SIMULATE_REPORT shards=$shards_for_run total=$EFFECTIVE_TOTAL shard_size=$shard_size data_dir=$DATA_DIR" | tee "$master_log"
 
   local -a shard_pids=()
   local -a shard_roots=()
@@ -303,10 +302,6 @@ run_one() {
     local slice=$(( remain < shard_size ? remain : shard_size ))
     local shard_root="/tmp/alaya-bench-shards/${run_tag}/shard-${i}"
     local shard_log="$LOG_DIR/${run_tag}_shard${i}.log"
-    local -a weights_args=()
-    if [[ -n "$WEIGHTS" ]]; then
-      weights_args=(--weights "$WEIGHTS")
-    fi
     mkdir -p "$shard_root"
     shard_roots+=("$shard_root")
     echo "[$(date -u -Iseconds)] launching shard $i offset=$offset limit=$slice root=$shard_root log=$shard_log" | tee -a "$master_log"
@@ -319,7 +314,6 @@ run_one() {
         --embedding-provider "$EMBEDDING_PROVIDER" \
         --policy-shape "$policy_shape" \
         --simulate-report "$SIMULATE_REPORT" \
-        "${weights_args[@]}" \
         --data-dir "$DATA_DIR" \
         --history-root "$shard_root" \
         >"$shard_log" 2>&1

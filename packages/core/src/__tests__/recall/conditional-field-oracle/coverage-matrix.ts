@@ -1,5 +1,11 @@
 export type CoverageBinding = "contract-only" | "real-producer" | "incomplete";
 
+export const COVERAGE_EVIDENCE_SCOPE = "real-producer identifies exercised production classes, not a real-world dataset or KPI. "
+  + "Most fixtures are small synthetic SQLite graphs. scale-delivery.test.ts adds 1,024 synthetic sources with 180 lexical matches, "
+  + "48 matches at work=120/reserve=30 including reverse/interleaved UUID arrival, 12 out-of-order relation targets, "
+  + "1,024 matches exceeding default retained memory, and zero/one-work termination. "
+  + "These are deterministic direct-runtime regressions; full benchmark snapshots, query quality, and thousand-source worker/CLI scale are not established by this ledger.";
+
 export type CoverageRow = Readonly<{
   readonly id: string;
   readonly requirement: string;
@@ -53,9 +59,9 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
     "queue omission or ANN absence creates false closure",
     "observers.test.ts / observer-index.test.ts seed/adjacency/guard/binding residuals", "observer residuals", "real-producer"),
   row("A11", "fair work, memory, reserved finalization hold",
-    "finite region served; reserve untouched",
+    "finite region served; support cannot consume finalization reserve; native batch admission pays product-state cost",
     "high-bound refinement starves a finite region",
-    "scheduleFairWork independent", "F5 work_units counters", "real-producer"),
+    "scheduleFairWork independent; grounded-revision.test.ts support budget; scale-delivery.test.ts native batch admission", "F5 work_units counters", "real-producer"),
   row("A12", "empty finite authorized scope can close; unavailable stays open",
     "exhausted_empty vs unavailable vs cancelled",
     "unavailable producer reported as complete empty",
@@ -65,9 +71,10 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
     "every fact must be proved, or unresolved fields disappear",
     "projectOracleIndex claims map", "MCP unknown-cause", "real-producer"),
   row("A14", "stable pages retain snapshot/query/authorization identity",
-    "pages concatenate; identities match",
+    "each qualified product is delivered once even when later observation inserts an earlier identity",
     "next page changes snapshot or reselects by old ranker",
-    "projectOracleIndex paging + handler pages", "MCP/CLI continuation", "real-producer"),
+    "projectOracleIndex paging + handler pages; scale-delivery.test.ts reverse/interleaved seeds and later relation pages",
+    "retained product delivery set in direct runtime; separate MCP/CLI continuation fixtures", "real-producer"),
   row("A15", "logical index, inline portion and payload status differ",
     "first page transport=partial, continuation set",
     "first page called full inline delivery",
@@ -123,17 +130,18 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
     "completing one interpretation produces certainty about omitted hypotheses",
     "projectAcceptingIndex CompletenessReport", "MCP completeness", "real-producer"),
   row("B06", "revised-source evaluation agrees with fresh evaluation; mixed epochs invalidate",
-    "public epoch tuple mismatch → invalidate/restart; same tuple → refine",
+    "epoch mismatch or stale/displaced/tampered issued token invalidates; only the current exact token refines retained state",
     "old source/model/interpretation silently refines a new epoch",
-    "continuationInvalidated + interpretation_id", "paged resume", "real-producer"),
+    "continuationInvalidated + interpretation_id; snapshot-cursor-continuation.test.ts exact token and interleaved instances",
+    "paged resume; grounded-revision.test.ts same-count stronger seed, transition, derivation, root-map and source-revision equal fresh grounding", "real-producer"),
   row("B07", "recovered explanations preserve dependency versions and intermediate authorization",
     "revoked intermediate makes explanation unrecoverable even if grade is cached",
     "available endpoint or cached grade bypasses a revoked intermediate",
     "U02/U03/U04 support recovery", "expansion payload", "real-producer"),
   row("B08", "bounded observations/joins/continuation retain unfinished regions",
-    "required unfinished regions survive numerical stability and cursor advance",
+    "grounding work advances through observation growth; zero/one-work and exhausted-memory requests terminate honestly",
     "memory eviction or cursor reset erases required work",
-    "FIELD_RESUME + observer cursors", "worker/RPC resume", "real-producer"),
+    "FIELD_RESUME + observer cursors; scale-delivery.test.ts 48-match tight work and 1,024-match memory pressure", "direct runtime plus separate small worker/RPC resume fixtures", "real-producer"),
   row("B09", "affordable complete alternative explanations remain available",
     "cheap complete witness retained when scalar winner differs",
     "winning scalar deletes a needed weaker/cheaper witness",
@@ -172,9 +180,9 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
     "cross-object witness ids",
     "runRecall + handler", "MCP F3", "real-producer"),
   row("F4", "40-match/32-cap resume equals full observation",
-    "concatenated pages = full ids, no skip/duplicate",
+    "40-match worker pages and 180-match direct pages concatenate to full ids without skips or duplicates",
     "32-cap silently drops remainder",
-    "conditional-field-acceptance/lifecycle-usage.test.ts: 40 planted matches through native32 direct/real worker",
+    "conditional-field-acceptance/lifecycle-usage.test.ts: 40 synthetic matches through direct/real worker; scale-delivery.test.ts: 180 matches in 1,024-source SQLite corpus",
     "same test: complete ordered product equality, exact count/identity set, payload and pinned page identity", "real-producer"),
   row("F5", "work_units/memory_bytes/token_estimate are actual",
     "nativeVisits≤work_units; memory_bytes=1 not complete 31; tokens follow preview bytes",
@@ -223,6 +231,7 @@ export function formatCoverageMarkdown(rows: readonly CoverageRow[] = COVERAGE_R
     "",
     "Independent expected outcomes live in `upgrade-expected.ts` / existing A-row oracles.",
     "Bindings name current evidence; incomplete identifies the remaining unproved scope, not a skipped test or a pre-retirement deferral. Historical STOP records remain in the worklog.",
+    COVERAGE_EVIDENCE_SCOPE,
     "",
     "| ID | Binding | Expected | Planted failure | Producer | Consumer | Incomplete reason |",
     "| --- | --- | --- | --- | --- | --- | --- |"

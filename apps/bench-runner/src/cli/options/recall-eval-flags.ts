@@ -19,11 +19,7 @@ export function consumeRecallEvalPathFlag(
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--query-semantic-factor-cache")) {
-    state.querySemanticFactorCache = readRequiredFlagValue(
-      args, index, token, "--query-semantic-factor-cache",
-      "--query-semantic-factor-cache requires a JSON cache path"
-    );
-    return nextIndex(index, token);
+    throw new Error("--query-semantic-factor-cache is retired for conditional-field Recall");
   }
   if (matchFlagToken(token, "--warm-derived-snapshot-receipt")) {
     state.warmDerivedSnapshotReceipt = readRequiredFlagValue(

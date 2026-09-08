@@ -13,8 +13,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   RecallService,
-  SignalService,
-  buildRecallEvidencePack
+  SignalService
 } from "@do-soul/alaya-core";
 import {
   InMemoryHandoffGapHandler,
@@ -50,25 +49,14 @@ describe("memory quality read/write fixtures", () => {
         writeHarness.memoryIdsByContent.get(content) ?? []
       );
 
-      packs.push(
-        buildRecallEvidencePack({
-          fixture_id: fixture.fixture_id,
-          query: fixture.query,
-          result: after,
-          expected_object_ids: expectedObjectIds,
-          delivery: {
-            delivery_id: `delivery-${fixture.fixture_id}`,
-            delivered_object_ids: after.candidates.map((candidate) => candidate.object_id)
-          },
-          usage: {
-            delivery_id: `delivery-${fixture.fixture_id}`,
-            used_object_ids: expectedObjectIds
-          }
-        })
-      );
+      packs.push({
+        fixture_id: fixture.fixture_id,
+        selected_ids: after.index.entries.map((entry) => entry.object_id),
+        expected_ids: expectedObjectIds
+      });
 
       if (fixture.expected_after_content.length > 0) {
-        expect(baseline.candidates.map((candidate) => candidate.object_id)).not.toEqual(
+        expect(baseline.index.entries.map((entry) => entry.object_id)).not.toEqual(
           expect.arrayContaining(expectedObjectIds)
         );
       }
@@ -82,15 +70,11 @@ describe("memory quality read/write fixtures", () => {
       "broad_thematic_recall",
       "chinese_preference_constraint"
     ]);
-    expect(packs.every((pack) => pack.metrics.factual_expected_hit)).toBe(true);
-    expect(packs.find((pack) => pack.fixture_id === "negative_query")?.metrics).toMatchObject({
-      selected_count: 0,
-      coverage: 1
-    });
-    expect(packs.find((pack) => pack.fixture_id === "broad_thematic_recall")?.metrics).toMatchObject({
-      expected_hit_count: 2,
-      coverage: 1
-    });
+    expect(packs.every((pack) => pack.expected_ids.every((id) => pack.selected_ids.includes(id)))).toBe(true);
+    expect(packs.find((pack) => pack.fixture_id === "negative_query")?.selected_ids).toEqual([]);
+    const broad = packs.find((pack) => pack.fixture_id === "broad_thematic_recall")!;
+    expect(broad.expected_ids).toHaveLength(2);
+    expect(broad.selected_ids).toEqual(expect.arrayContaining(broad.expected_ids));
   });
 });
 

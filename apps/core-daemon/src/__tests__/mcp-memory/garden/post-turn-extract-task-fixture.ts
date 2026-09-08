@@ -1,3 +1,4 @@
+import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 import { expect, vi } from "vitest";
 import {
   GardenRole,
@@ -305,6 +306,7 @@ export function createMcpDeps(base: {
     recallService: {
       recall: async () => ({
         candidates: [],
+        index: stubRecallIndex([]),
         active_constraints: [],
         active_constraints_count: 0,
         total_scanned: 0,

@@ -14,8 +14,8 @@ describe("recall answer-shape selection capture", () => {
     expect(captured.ranking_authority).not.toBe("prefix_sk");
     expect(ordinary.capture_execution).toBeUndefined();
     expect(captured.capture_execution).toBeUndefined();
-    expect(ordinary.diagnostics?.answer_shape_plan).toBeUndefined();
-    expect(captured.diagnostics?.answer_shape_plan).toBeUndefined();
+    expect(ordinary.diagnostics).toBeUndefined();
+    expect(captured.diagnostics).toBeUndefined();
     expect(ordinary.provider_calls).toBe(0);
     expect(ordinary.garden_enqueue).toBe(0);
     expect(ordinary.index).toBeDefined();

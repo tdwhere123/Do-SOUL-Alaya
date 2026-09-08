@@ -1,5 +1,5 @@
 import type { GlobalMemoryEntry } from "@do-soul/alaya-protocol";
-import { selectBoundedTopK } from "../../coarse-filter/selection/bounded-top-k.js";
+import { selectBoundedTopK } from "./bounded-top-k.js";
 import type { GlobalMemoryRecallSourcePort } from "../global-memory-recall-service.js";
 
 const GLOBAL_RECALL_CORPUS_PAGE_LIMIT = 500;

@@ -7,13 +7,16 @@ import { transitionKey } from "../conditional-field/engine/path-composition.js";
 import { assessEvidence, observationsFromOwners, type RelationAssertionRead } from "../conditional-field/evidence/assess-support.js";
 
 export function assessUnknownCause(state: FieldEngineState, input: { readonly as_of: string }): FieldEngineState {
+  if ((state.observed_relations?.length ?? 0) === 0 && (state.interpretation.view.claim_demands?.length ?? 0) === 0) {
+    return applyEvidenceEffect(state, { support: [], work_status: "complete" });
+  }
   const count = (state.observed_relations ?? []).reduce((sum, row) => sum + 1 + (row.evidenceReceipts?.length ?? 0), 0);
   const same = state.support_observation_count === count;
   const claims = new Map<string, ClaimState>(same ? state.claims : []);
   const propositions = new Map<string, Proposition>(same ? state.claim_propositions : []);
   const progress = { ...same ? state.support_progress : {} };
   const support = new Map((same ? state.support : []).map((record) => [record.proposition_id, record]));
-  let remaining = state.remaining_reserve;
+  let remaining = state.remaining_exploration;
   let memory = state.remaining_memory_bytes + (same ? 0 : state.support_retained_bytes ?? 0);
   let retainedBytes = same ? state.support_retained_bytes ?? 0 : 0;
   let complete = true;
@@ -40,7 +43,7 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
     progress[key] = { offset: nextOffset, complete: nextOffset >= receiptCount };
     if (!progress[key]!.complete) complete = false;
   }
-  const next = applyEvidenceEffect({ ...state, support: [], claims, remaining_reserve: remaining, remaining_memory_bytes: memory },
+  const next = applyEvidenceEffect({ ...state, support: [], claims, remaining_exploration: remaining, remaining_memory_bytes: memory },
     { support: [...support.values()], claims, work_status: complete ? "complete" : "open" });
   return { ...next, claim_propositions: propositions, support_progress: progress, support_observation_count: count, support_retained_bytes: retainedBytes };
 }

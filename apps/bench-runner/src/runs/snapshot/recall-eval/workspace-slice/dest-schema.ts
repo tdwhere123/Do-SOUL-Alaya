@@ -1,6 +1,10 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { initDatabase, type StorageDatabase } from "@do-soul/alaya-storage";
+import {
+  initDatabase,
+  initializeSemanticArtifactCandidateSchema,
+  type StorageDatabase
+} from "@do-soul/alaya-storage";
 import { quoteIdent } from "./names.js";
 
 export interface DestTrigger {
@@ -18,6 +22,7 @@ export interface PreparedSliceDest {
 export function createSliceDest(workspaceId: string, dbPath: string): PreparedSliceDest {
   mkdirSync(dirname(dbPath), { recursive: true });
   const database = initDatabase({ filename: dbPath });
+  initializeSemanticArtifactCandidateSchema(database.connection);
   const triggers = readTriggers(database);
   dropTriggers(database, triggers);
   database.connection.pragma("foreign_keys = OFF");

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CAUSAL_USAGE_OPERATOR_ID,
+  fieldReceiptContractFields,
   hashCausalUsageId,
   type PathRelation
 } from "@do-soul/alaya-protocol";
@@ -53,6 +54,8 @@ function usageRow() {
     operator_id: CAUSAL_USAGE_OPERATOR_ID
   }, fieldContractSha256);
   return {
+    ...fieldReceiptContractFields({ identity, producer: CAUSAL_USAGE_OPERATOR_ID, consumer: "path_projection" }),
+    schema_version: 1 as const,
     identity,
     workspace_id: "workspace-1",
     causal_key: "resolution-event-1",

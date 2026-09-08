@@ -1,0 +1,100 @@
+{
+  "formed": {
+    "schema_version": 1,
+    "operator_id": "open_semantic_factor_formation_v1",
+    "status": "formed",
+    "producer_operator_id": "open-factor-test-producer-v1",
+    "source_sha256": "sha256:092f4e554cd2fc97f90d1dce7badab62d9779c64d596789beef74fd878e2d64c",
+    "graph": {
+      "schema_version": 2,
+      "source_kind": "query",
+      "result_variable_ids": [
+        "answer"
+      ],
+      "propositions": [
+        {
+          "proposition_id": "query",
+          "predicate_factor_id": "copula.be",
+          "arguments": [
+            {
+              "position": 0,
+              "binding_identity": "agent",
+              "reference_kind": "variable",
+              "reference_id": "answer"
+            },
+            {
+              "position": 1,
+              "binding_identity": "argument-1",
+              "reference_kind": "factor",
+              "reference_id": "subject.commute"
+            }
+          ]
+        }
+      ],
+      "factors": [
+        {
+          "surface": "is",
+          "source_span": [
+            9,
+            11
+          ],
+          "factor_id": "copula.be",
+          "semantic_identity": "be"
+        },
+        {
+          "surface": "my daily commute to work",
+          "source_span": [
+            12,
+            36
+          ],
+          "factor_id": "subject.commute",
+          "semantic_identity": "daily commute"
+        }
+      ],
+      "variables": [
+        {
+          "surface": "How",
+          "source_span": [
+            0,
+            3
+          ],
+          "variable_id": "answer"
+        }
+      ]
+    },
+    "capture_digest": "sha256:b41338eb0617b4290c747268b0f78b316feedc6d3049cbe404a9eab6495dcd91"
+  },
+  "composition": {
+    "schema_version": 2,
+    "operator_id": "open_semantic_factor_composition_v2",
+    "status": "no_match",
+    "compatibility_trace_digest": "sha256:9d39906b76a0a6c2c1f1f423f2a056539acb1366e385c004045fa5807a52c91e",
+    "query_capture_digest": "sha256:b41338eb0617b4290c747268b0f78b316feedc6d3049cbe404a9eab6495dcd91",
+    "result_variable_ids": [
+      "answer"
+    ],
+    "search_step_count": 2,
+    "solution_count": 0,
+    "observed_binding_count": 0,
+    "binding_observation_count": 0,
+    "truncated": false,
+    "bindings": [],
+    "solutions": [],
+    "variable_collections": [],
+    "receipt_digest": "sha256:6cea8045b117075688e51d1fd30da036ef08bc0872fc2744ca26bad557c9a1c1"
+  },
+  "treatmentTerms": [
+    "daily commute",
+    "daily commute work",
+    "longs",
+    "dailies",
+    "commutes",
+    "works"
+  ],
+  "controlTerms": [
+    "longs",
+    "dailies",
+    "commutes",
+    "works"
+  ]
+}

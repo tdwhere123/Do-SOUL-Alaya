@@ -48,7 +48,7 @@ describe("recall-eval query cache authority window", () => {
     const snapshotDbPath = join(root, "snapshot.db");
     await writeFile(`${snapshotDbPath}.sidecar.json`, `${JSON.stringify(sidecar(COUNT))}\n`);
     const cachePath = join(root, "query-cache.json");
-    const { cache, receipt } = await cacheFor(COUNT);
+    const { cache } = await cacheFor(COUNT);
     await writeQuerySemanticFactorCache(cachePath, cache);
     const bundle = liveBundle();
     const options = {
@@ -58,12 +58,10 @@ describe("recall-eval query cache authority window", () => {
     const bound = await bindRecallEvalQuerySemanticFactorCache(options, bundle);
     expect(bound.binding.entry_count).toBe(COUNT);
     expect(bound.captures_by_source_text.size).toBe(COUNT);
-    const consumed = recallOptionsForQuestion({
+    expect(() => recallOptionsForQuestion({
       recallOptions: { maxResults: 5, conflictAwareness: true },
       querySemanticFactorCache: bound
-    } as RecallEvalRunContext, FORMED);
-    expect(consumed.querySemanticFactorFormationCapture?.status).toBe("formed");
-    expect(consumed.querySemanticFactorCompletenessReceipt).toEqual(receipt);
+    } as RecallEvalRunContext, FORMED)).toThrow(/retired/);
 
     await expect(bindRecallEvalQuerySemanticFactorCache(options, identityBundle(bundle, {
       request_profile: "mimo-v2.5-nonthinking-v1"

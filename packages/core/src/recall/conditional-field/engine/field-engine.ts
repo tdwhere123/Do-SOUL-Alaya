@@ -49,6 +49,7 @@ import {
   ACTION_BY_KIND,
   absorbObservations,
   bindEngineState,
+  closureFacts,
   defaultOpenResiduals,
   residualWorkRegions
 } from "./field-update.js";
@@ -126,6 +127,12 @@ export type FieldEngineState = Readonly<{
   readonly observed_relations?: readonly RelationObserverRow[];
   readonly source_facts?: Readonly<Record<string, BoundSourceFacts>>;
   readonly grounding_progress?: GroundingProgress;
+  readonly projection_progress?: Readonly<{
+    readonly revision: string;
+    readonly generation: number;
+    readonly offset: number;
+    readonly delivered_entries: Readonly<Record<string, string>>;
+  }>;
   readonly preview_cache?: Readonly<Record<string, string>>;
   readonly support_progress?: Readonly<Record<string, { readonly offset: number; readonly complete: boolean }>>;
   readonly support_observation_count?: number;
@@ -289,13 +296,13 @@ export function applyEvidenceEffect(
   if (effect.claims !== undefined) {
     for (const [objectId, claim] of effect.claims) claims.set(objectId, claim);
   }
-  const { binding: _binding, closure: _closure, ...rest } = state;
-  return bindEngineState({
-    ...rest,
+  const next = {
+    ...state,
     support: Object.freeze([...supportById.values()]),
     claims,
     ...(effect.work_status === undefined ? {} : { support_work_status: effect.work_status })
-  });
+  };
+  return Object.freeze({ ...next, closure: closureFacts(next, state.closure.propagation) });
 }
 
 export function proposeFieldWork(state: FieldEngineState): WorkProposal {

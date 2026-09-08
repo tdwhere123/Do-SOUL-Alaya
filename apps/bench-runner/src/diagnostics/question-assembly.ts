@@ -216,9 +216,10 @@ function buildRecallTelemetryFields(
     ...(diagnostics?.embeddingWorkspaceSchemaVersion === null || diagnostics === null
       ? {}
       : { embedding_workspace_schema_version: diagnostics.embeddingWorkspaceSchemaVersion }),
-    answer_rerank_status: diagnostics?.answerRerankStatus ?? null,
-    answer_rerank_expected_count: diagnostics?.answerRerankExpectedCount ?? null,
-    answer_rerank_scored_count: diagnostics?.answerRerankScoredCount ?? null,
+    // Absence is not a third status: retired/disabled rerank was not requested.
+    answer_rerank_status: diagnostics?.answerRerankStatus ?? "not_requested",
+    answer_rerank_expected_count: diagnostics?.answerRerankExpectedCount ?? 0,
+    answer_rerank_scored_count: diagnostics?.answerRerankScoredCount ?? 0,
     answer_rerank_failure_class: diagnostics?.answerRerankFailureClass ?? null,
     evidence_embedding_status: diagnostics?.evidenceEmbeddingStatus ?? null,
     evidence_embedding_expected_count:

@@ -37,7 +37,7 @@ export { assertValidEmbeddingBatch } from "./embedding-recall/helpers.js";
 export {
   EMBEDDING_INJECTION_SIMILARITY_FLOOR,
   EMBEDDING_MAX_INJECTED_DELIVERY
-} from "./recall/coarse-filter/embedding-coarse-injection.js";
+} from "./embedding-recall/constants.js";
 export * from "./embedding-recall/embed-text-resolver.js";
 export * from "./embedding-recall/local-onnx-embedding-client.js";
 export * from "./embedding-recall/local-onnx-host-single-flight.js";
@@ -49,23 +49,10 @@ export {
   type FieldFormationStores,
   type SourceRecordEvidenceBinding
 } from "./memory/evidence-create/field-stores.js";
-export {
-  activateTestOnlyEmptyGeneration,
-  createSeededTestOnlyInMemoryFieldQuerySession,
-  createTestOnlyInMemoryFieldQuerySession,
-  SEALED_EMPTY_FRONTIER,
-  type RecallFieldQuerySession,
-  type TestOnlyInMemoryFieldQuerySession
-} from "./recall/runtime/query/field-query-session.js";
 export { createProjectionGenerationReceipt } from
   "./recall/field/retrieval/projection/generation-identity.js";
-export * from "./recall/field/retrieval/projection/generation-artifacts.js";
 export * from "./recall/field/retrieval/projection/generation-lifecycle.js";
-export * from "./recall/field/retrieval/projection/pinned-projection-selection.js";
 export * from "./recall/field/retrieval/projection/source-projection.js";
-export {
-  type ProjectionGenerationLifecycleStore
-} from "./recall/field/retrieval/projection/generation-store.js";
 export type { RecallServiceFieldDeps } from "./recall/recall-service.js";
 export * from "./runtime/async-side-effect-auditor.js";
 export * from "./runtime/event-publisher.js";
@@ -135,33 +122,16 @@ export {
 export * from "./recall/field/field-identity.js";
 export * from "./recall/field/finite-field-seal.js";
 export * from "./recall/field/finite-field-capture.js";
-export * from "./recall/field/refinement/field-refinement-receipt.js";
-export * from "./recall/field/refinement/field-refinement-stop-certificate.js";
 export * from "./recall/field/object-embedding-field-capture.js";
 export * from "./recall/field/evidence-semantic-field-capture.js";
-export * from "./recall/field/retrieval/retrieval-field-bundle.js";
-export * from "./recall/field/independent-corroboration.js";
-export * from "./recall/field/facility-objective.js";
-export * from "./recall/field/facility/match-materialization.js";
-export * from "./recall/field/facility/cardinality-solvers.js";
-export * from "./recall/field/facility/selection-objective.js";
-export * from "./recall/field/query-facility-demand.js";
 export * from "./recall/field/fact-frame-semantic-factors.js";
 export * from "./recall/field/query-attribution/query-field-attribution.js";
-export { canonicalProjectionPinTime, projectionPinExpiry } from
-  "./recall/runtime/query/projection-pin-lease.js";
 export * from "./recall/field/query-attribution/query-fact-frame-attribution-producer.js";
 export * from "./shared/query-fact-frame-extraction-port.js";
 export * from "./shared/query-fact-frame-extraction-rules.js";
-export * from "./recall/field/open-semantic-factors/query-obligation.js";
-export * from "./recall/field/open-semantic-factors/query-obligation/facets.js";
-export * from "./recall/rerank/relevance-upper-bound-receipt.js";
-export * from "./recall/field/query-entity-attribution-producer.js";
-export * from "./recall/field/safe-dominance.js";
 export * from "./shared/cjk-segmentation.js";
 export * from "./shared/entity-extraction-port.js";
 export * from "./shared/entity-extraction-rules.js";
-export * from "./recall/runtime/recall-evidence-pack.js";
 export {
   assertRecallZeroLiveExtraction,
   refuseRecallCampaignLiveExtraction,

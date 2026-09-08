@@ -64,6 +64,11 @@ const FTS_REBUILDS: readonly FtsRebuildSpec[] = Object.freeze([
     fts: "memory_object_key_fts_trigram",
     insertSql: `INSERT INTO memory_object_key_fts_trigram (rowid, owner_id, workspace_id, content)
       SELECT rowid, owner_id, workspace_id, surface FROM memory_object_keys`
+  },
+  {
+    fts: "garden_semantic_fts",
+    insertSql: `INSERT INTO garden_semantic_fts (workspace_id, object_id, search_text)
+      SELECT workspace_id, object_id, search_text FROM garden_semantic_projections`
   }
 ]);
 

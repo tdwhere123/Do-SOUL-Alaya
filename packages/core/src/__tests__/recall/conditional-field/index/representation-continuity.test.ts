@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
+import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   DerivationSchema,
@@ -10,6 +11,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   continueAcceptingIndex,
+  indexEntryRevision,
   outputAttributionHandle,
   projectAcceptingIndex,
   witnessAttributionHandle,
@@ -28,6 +30,68 @@ const EVENING = "2026-09-06T23:59:59.000Z";
 const MORNING = "2026-09-07T00:00:01.000Z";
 
 describe("index representation continuity", () => {
+  it("redelivers semantic refinements and suppresses unchanged products through terminal projection", () => {
+    const value = fieldValue("same", 400);
+    const key = productStateNodeId(value.state);
+    const input = baseInput({ snapshot: snapshotOf([value]), resource_work: "open", expires_at: EXPIRES_AT,
+      delivered_product_ids: new Set(), delivered_entry_revisions: {}, projection_scan_offset: 0 });
+    const first = projectAcceptingIndex(input);
+    expect(first.entries).toHaveLength(1);
+    const ledger = { [key]: indexEntryRevision(first.entries[0]!) };
+    const continued = { ...input, delivered_product_ids: new Set([key]), delivered_entry_revisions: ledger,
+      prior_continuation: first.continuation };
+    expect(projectAcceptingIndex(continued).entries).toEqual([]);
+    const stronger = projectAcceptingIndex({ ...continued, snapshot: snapshotOf([fieldValue("same", 900)]) });
+    expect(stronger.entries[0]?.association_milligrades).toBe(900);
+    ledger[key] = indexEntryRevision(stronger.entries[0]!);
+    const supported = projectAcceptingIndex({ ...continued, snapshot: snapshotOf([fieldValue("same", 900)]),
+      claims: new Map([[key, "supported" as const]]) });
+    expect(supported.entries[0]?.claim).toBe("supported");
+    ledger[key] = indexEntryRevision(supported.entries[0]!);
+    const explainedInput = { ...continued, snapshot: snapshotOf([fieldValue("same", 900)]),
+      claims: new Map([[key, "supported" as const]]), derivations: [leaf("same")],
+      output_derivations: { [key]: [leaf("same").derivation_id] }, resource_work: undefined };
+    const explained = projectAcceptingIndex(explainedInput);
+    expect(explained.entries).toHaveLength(1);
+    expect(explained.entries[0]?.explanation_ids.length).toBeGreaterThan(0);
+    expect(explained.continuation).toBeNull();
+    ledger[key] = indexEntryRevision(explained.entries[0]!);
+    expect(projectAcceptingIndex(explainedInput).entries).toEqual([]);
+  });
+
+  it.each([false, true])("does not let an ungrounded earlier value block a later proved seed (accepting=%s)", (accepting) => {
+    const a = fieldValue("a", 800, { program_state: accepting ? "accepting" : "routing", accepting });
+    const z = fieldValue("z", 900);
+    const seeds = [z, a].map((value) => ({ schema_version: 1 as const, state: value.state, milligrades: value.milligrades }));
+    const ground = groundedOutputDerivations({ seeds, transitions: [], derivations: [], transition_derivations: {}, allowance: 1 });
+    expect(ground.complete).toBe(false);
+    let scanOffset = 0;
+    const input = baseInput({ snapshot: { ...snapshotOf([a, z]), seeds }, remaining_reserve: 10,
+      derivations: ground.derivations, output_derivations: ground.roots, grounding_progress: ground.progress,
+      grounding_complete: false, resource_work: "open", expires_at: EXPIRES_AT,
+      delivered_product_ids: new Set(), projection_scan_offset: 0,
+      on_projection_progress: (offset) => { scanOffset = offset; } });
+    const first = projectAcceptingIndex(input);
+    expect(first.entries.map((entry) => entry.object_id)).toEqual(["z"]);
+    expect(scanOffset).toBe(2);
+    const resumed = projectAcceptingIndex({ ...input, prior_continuation: first.continuation,
+      projection_scan_offset: scanOffset, delivered_product_ids: new Set([productStateNodeId(z.state)]),
+      derivations: [], output_derivations: undefined, transition_derivations: {}, resource_work: undefined });
+    expect(resumed.entries.map((entry) => entry.object_id)).toEqual(accepting ? ["a"] : []);
+    expect(resumed.continuation).toBeNull();
+  });
+
+  it("emits an incomplete-grounding seed only when its own retained leaf proves the full grade", () => {
+    const value = fieldValue("seed", 900);
+    const root = { ...leaf("seed"), association_milligrades: 900 };
+    const input = baseInput({ snapshot: { ...snapshotOf([value]), seeds: [{ schema_version: 1, state: value.state, milligrades: 900 }] },
+      derivations: [root], grounding_complete: false, remaining_reserve: 10, expires_at: EXPIRES_AT });
+    expect(projectAcceptingIndex(input).entries.map((entry) => entry.object_id)).toEqual(["seed"]);
+    expect(projectAcceptingIndex({ ...input, derivations: [{ ...root, association_milligrades: 800 }] }).entries).toEqual([]);
+    expect(projectAcceptingIndex({ ...input, derivations: [] }).entries).toEqual([]);
+    expect(projectAcceptingIndex({ ...input, snapshot: { ...input.snapshot, seeds: [] } }).entries).toEqual([]);
+  });
+
   it("keeps program_state and time_state in the accepting key", () => {
     const index = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([

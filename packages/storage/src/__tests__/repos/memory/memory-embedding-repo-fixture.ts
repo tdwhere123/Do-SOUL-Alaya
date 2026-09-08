@@ -13,7 +13,7 @@ import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 import type {
   MemoryEmbeddingRecord,
-  MemoryEmbeddingRepo
+  SqliteMemoryEmbeddingRepo
 } from "../../../repos/memory/memory-embedding-repo.js";
 
 export const trackedDatabases = new Set<ReturnType<typeof initDatabase>>();
@@ -22,7 +22,7 @@ export async function createRepoContext(): Promise<{
   readonly database: ReturnType<typeof initDatabase>;
   readonly workspaceId: string;
   readonly memoryRepo: SqliteMemoryEntryRepo;
-  readonly repo: MemoryEmbeddingRepo;
+  readonly repo: SqliteMemoryEmbeddingRepo;
 }> {
   const database = initDatabase({ filename: ":memory:" });
   trackedDatabases.add(database);

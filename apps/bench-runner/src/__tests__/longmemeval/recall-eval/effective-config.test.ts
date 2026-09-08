@@ -9,6 +9,15 @@ import { resolveBenchRecallWeightOverrides } from "../../../harness/recall/recal
 import { buildBenchDiagnosticRecallPolicy } from "../../../harness/daemon/runtime/daemon-recall-result.js";
 
 describe("effective recall config identity", () => {
+  it("rejects retired query cache input before opening a snapshot", async () => {
+    await expect(prepareRecallEvalRunContext({
+      snapshotDbPath: "/missing/snapshot.db",
+      variant: "longmemeval_s",
+      historyRoot: "/missing/history",
+      querySemanticFactorCachePath: "/missing/query-cache.json"
+    }, undefined, {})).rejects.toThrow(/query semantic factor cache input is retired/);
+  });
+
   it("parses recall-eval max results strictly", () => {
     expect(readRecallEvalMaxResults(undefined)).toBe(10);
     expect(readRecallEvalMaxResults("20")).toBe(20);
@@ -100,30 +109,15 @@ describe("effective recall config identity", () => {
     }, options).effective_config_sha256);
   });
 
-  it("hashes the normalized final RecallPolicy including weight overrides", () => {
-    const options = { maxResults: 10, conflictAwareness: true };
-    const base = buildEffectiveRecallConfigIdentity({}, options);
-    const overrides = resolveBenchRecallWeightOverrides({
+  it("rejects retired weight overrides before they can alter execution provenance", () => {
+    expect(() => resolveBenchRecallWeightOverrides({
       cliJson: JSON.stringify({ fusion_weights: { lexical_fts: 2 } })
-    });
-    const weighted = buildEffectiveRecallConfigIdentity({}, options, overrides);
-
-    expect(weighted.effective_config_sha256).not.toBe(base.effective_config_sha256);
-  });
-
-  it("allows attributed diagnostic weight overrides before reading recall inputs", async () => {
-    const rawOverrides = JSON.stringify({
-      fusion_weights: { evidence_fts: 3, evidence_structural_agreement: 6 }
-    });
-    const overrides = resolveBenchRecallWeightOverrides({ envJson: rawOverrides });
-
-    await expect(prepareRecallEvalRunContext({
-      snapshotDbPath: "/missing/snapshot.db",
-      variant: "longmemeval_oracle",
-      historyRoot: "/missing/history"
-    }, overrides, {
-      ALAYA_RECALL_WEIGHT_OVERRIDES: rawOverrides
-    })).rejects.toThrow(/ENOENT|no such file|snapshot manifest/u);
+    })).toThrow(/retired/);
+    expect(() => buildEffectiveRecallConfigIdentity({}, {
+      maxResults: 10, conflictAwareness: true
+    }, {
+      source: "env", summary: { source: "env", fusion_weights: { lexical_fts: 2 } }
+    })).toThrow(/retired/);
   });
 
   it("ignores retired bounded-final-authority env before reading inputs", async () => {

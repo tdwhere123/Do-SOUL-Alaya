@@ -1,14 +1,6 @@
 import { afterEach } from "vitest";
 import BetterSqlite3 from "better-sqlite3";
 import {
-  QUERY_CONDITION_OPERATOR_ID,
-  hashConditionDigest,
-  hashQueryCacheKey,
-  verifyQueryConditionReceipt,
-  type ProjectionPin
-} from "@do-soul/alaya-protocol";
-import {
-  fieldContractSha256,
   MemoryService
 } from "@do-soul/alaya-core";
 import {
@@ -44,8 +36,7 @@ import {
   memoryEntry,
   persistMemory,
   produceAdaSource,
-  realMemoryRepo,
-  type PlantedField
+  realMemoryRepo
 } from "./p217-planted-harness.js";
 
 export const LIVE_B_ID = "22222222-2222-4222-8222-222222222222";
@@ -225,51 +216,4 @@ function plantEvidenceRefMismatch(database: StorageDatabase): void {
     INSERT OR IGNORE INTO memory_entry_evidence_refs(workspace_id, memory_id, evidence_ref)
     VALUES (?, ?, ?)
   `).run(WORKSPACE_ID, INDEX_ONLY_ID, EVIDENCE_ID);
-}
-
-export function selectAdaEvidenceIds(
-  querySession: PlantedField["querySession"],
-  asOf = CLOCK
-): readonly string[] {
-  const pin = querySession.pinActiveGeneration(WORKSPACE_ID, CLOCK);
-  try {
-    return querySession.selectCandidates(adaQueryCondition(pin, asOf), pin, CLOCK).candidate_keys;
-  } finally {
-    querySession.release(pin, CLOCK);
-  }
-}
-
-function adaQueryCondition(pin: ProjectionPin, asOf: string) {
-  const condition = {
-    principal: WORKSPACE_ID,
-    workspace_id: WORKSPACE_ID,
-    authorized_scopes: [WORKSPACE_ID],
-    explicit_bridges: [] as const,
-    workspace_project: WORKSPACE_ID,
-    effective_as_of: asOf,
-    query_task_factors: ["Ada"] as const,
-    governance_state: "open" as const,
-    activation_budget: 8,
-    token_budget: 256
-  };
-  const identity = hashConditionDigest(condition, fieldContractSha256);
-  return verifyQueryConditionReceipt({
-    schema_version: 1,
-    producer: QUERY_CONDITION_OPERATOR_ID,
-    consumer: "attributed_activation",
-    identity,
-    replay_rule: "idempotent_same_identity",
-    failure_disposition: "fail_closed",
-    governance_effect: "none",
-    deletion_behavior: "rebuildable",
-    condition,
-    generation_id: pin.generation_id,
-    query_operator_id: QUERY_CONDITION_OPERATOR_ID,
-    query_cache_key: hashQueryCacheKey({
-      generation_id: pin.generation_id,
-      condition_digest: identity,
-      query_operator_id: QUERY_CONDITION_OPERATOR_ID
-    }, fieldContractSha256),
-    recorded_at: CLOCK
-  }, fieldContractSha256);
 }

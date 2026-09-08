@@ -27,7 +27,7 @@ export { INTERPRETATION_CLOCK, defaultBudget, SNAPSHOT_ID } from "../../../../..
 
 export async function recallThroughHandler(
   slice: SourceSlice,
-  request: Pick<SoulMemorySearchRequest, "query" | "max_results" | "dimension" | "domain_tags"> & {
+  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "dimension" | "domain_tags">> & {
     readonly continuation?: InformationIndex["continuation"];
     readonly now?: string;
   }
@@ -72,7 +72,7 @@ export async function recallThroughHandler(
     sessionId: "c06"
   });
   if (response.index === undefined) throw new Error("handler omitted index");
-  return response;
+  return { ...response, index: response.index };
 }
 
 export function toConsumer(
@@ -82,13 +82,13 @@ export function toConsumer(
   return {
     schema_version: 1 as const,
     surface,
-    bound: true,
+    bound: true as const,
     note: "real producer",
     query_id: response.index.query_id,
     snapshot_id: response.index.snapshot_id,
     result_version: response.index.result_version,
-    provider_calls: 0,
-    garden_enqueue: 0,
+    provider_calls: 0 as const,
+    garden_enqueue: 0 as const,
     index: response.index
   };
 }

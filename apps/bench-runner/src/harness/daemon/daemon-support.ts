@@ -19,9 +19,7 @@ export {
   makeDispatchCli
 } from "./runtime/daemon-mcp-support.js";
 export {
-  buildBenchDiagnosticRecallPolicy,
-  buildBenchMemorySearchResult,
-  buildBenchRecallStrategyMix
+  buildBenchDiagnosticRecallPolicy
 } from "./runtime/daemon-recall-result.js";
 export {
   emitBenchContextLensAssembledEvent,

@@ -361,7 +361,7 @@ async function invokeRecallHandler(
     sessionId: "c06"
   });
   if (response.index === undefined) throw new Error("handler omitted index");
-  return response;
+  return { ...response, index: response.index };
 }
 
 function runProducer(
@@ -410,13 +410,13 @@ function toConsumer(
   return {
     schema_version: 1 as const,
     surface,
-    bound: true,
+    bound: true as const,
     note: "real producer",
     query_id: response.index.query_id,
     snapshot_id: response.index.snapshot_id,
     result_version: response.index.result_version,
-    provider_calls: 0,
-    garden_enqueue: 0,
+    provider_calls: 0 as const,
+    garden_enqueue: 0 as const,
     index: response.index
   };
 }

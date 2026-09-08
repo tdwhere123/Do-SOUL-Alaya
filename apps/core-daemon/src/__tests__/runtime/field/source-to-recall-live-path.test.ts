@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { EvidenceService, type ConditionalFieldRecallPortResult } from "@do-soul/alaya-core";
 import { SqliteEvidenceCapsuleRepo, SqliteEventLogRepo } from "@do-soul/alaya-storage";
-import { EVIDENCE_ID, MEMORY_ID, composeField, plantRevoke, produceAdaSource } from "./p217-planted-harness.js";
+import { EVIDENCE_ID, MEMORY_ID, WORKSPACE_ID, composeField, plantRevoke, produceAdaSource } from "./p217-planted-harness.js";
 import { conditionalRecallPayload, createQueryOnlyHydrationHarness, dispatchQueryOnly,
-  persistConditionalSource, selectAdaEvidenceIds } from "./query-only-hydration-fixture.js";
+  persistConditionalSource } from "./query-only-hydration-fixture.js";
 
 const hydration = createQueryOnlyHydrationHarness();
 
@@ -39,8 +39,11 @@ describe("native source publication and conditional Recall", () => {
       now: () => "2026-08-16T00:01:00.000Z", projectionLifecycle: field.projectionLifecycle
     });
     await evidenceService.transitionHealth(EVIDENCE_ID, "broken", "test_transition", "system");
-    expect(selectAdaEvidenceIds(field.querySession, "2026-08-16T00:00:30.000Z")).toContain(EVIDENCE_ID);
-    expect(selectAdaEvidenceIds(field.querySession, "2026-08-16T00:02:00.000Z")).not.toContain(EVIDENCE_ID);
+    const before = field.projectionLifecycle.rebuild(WORKSPACE_ID, "2026-08-16T00:00:30.000Z");
+    const after = field.projectionLifecycle.rebuild(WORKSPACE_ID, "2026-08-16T00:02:00.000Z");
+    expect(after.governance_frontier).not.toBe(before.governance_frontier);
+    expect(after.input_event_frontier).toBe(before.input_event_frontier);
+    expect(field.fieldRepos.generations.readArtifacts(WORKSPACE_ID, after.generation_id)).toBeNull();
   });
 
   it("keeps the source revocation ledger temporal without an ordinary Recall selector", async () => {
@@ -48,7 +51,10 @@ describe("native source publication and conditional Recall", () => {
     const field = composeField(pair.writer);
     await produceAdaSource(pair.writer, field.stores, "ada");
     plantRevoke(field, EVIDENCE_ID, "2026-08-16T00:01:00.000Z");
-    expect(selectAdaEvidenceIds(field.querySession, "2026-08-16T00:00:30.000Z")).toContain(EVIDENCE_ID);
-    expect(selectAdaEvidenceIds(field.querySession, "2026-08-16T00:02:00.000Z")).not.toContain(EVIDENCE_ID);
+    const before = field.projectionLifecycle.rebuild(WORKSPACE_ID, "2026-08-16T00:00:30.000Z");
+    const after = field.projectionLifecycle.rebuild(WORKSPACE_ID, "2026-08-16T00:02:00.000Z");
+    expect(after.governance_frontier).not.toBe(before.governance_frontier);
+    expect(after.input_event_frontier).toBe(before.input_event_frontier);
+    expect(field.fieldRepos.generations.readArtifacts(WORKSPACE_ID, after.generation_id)).toBeNull();
   });
 });

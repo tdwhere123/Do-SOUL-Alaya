@@ -1,0 +1,370 @@
+{
+  "query": {
+    "schema_version": 1,
+    "operator_id": "open_semantic_factor_formation_v1",
+    "status": "formed",
+    "producer_operator_id": "open_semantic_factor_query_compiler_v9",
+    "source_sha256": "sha256:117c159b9968f5a32a76d74a797f1de8c5eac4d9523c5f3419323cdf706814a2",
+    "graph": {
+      "schema_version": 2,
+      "source_kind": "query",
+      "result_variable_ids": [
+        "answer"
+      ],
+      "propositions": [
+        {
+          "proposition_id": "extra-query",
+          "predicate_factor_id": "aux",
+          "arguments": [
+            {
+              "position": 0,
+              "binding_identity": "object",
+              "reference_kind": "factor",
+              "reference_id": "tail"
+            }
+          ]
+        },
+        {
+          "proposition_id": "redeem-query",
+          "predicate_factor_id": "predicate",
+          "arguments": [
+            {
+              "position": 0,
+              "binding_identity": "subject",
+              "reference_kind": "factor",
+              "reference_id": "subject"
+            },
+            {
+              "position": 1,
+              "binding_identity": "constraint",
+              "reference_kind": "factor",
+              "reference_id": "tail"
+            },
+            {
+              "position": 2,
+              "binding_identity": "location",
+              "reference_kind": "variable",
+              "reference_id": "answer"
+            }
+          ]
+        }
+      ],
+      "factors": [
+        {
+          "surface": "did",
+          "source_span": [
+            6,
+            9
+          ],
+          "factor_id": "aux",
+          "semantic_identity": "do"
+        },
+        {
+          "surface": "I",
+          "source_span": [
+            10,
+            11
+          ],
+          "factor_id": "subject",
+          "semantic_identity": "i"
+        },
+        {
+          "surface": "redeem",
+          "source_span": [
+            12,
+            18
+          ],
+          "factor_id": "predicate",
+          "semantic_identity": "redeem"
+        },
+        {
+          "surface": "a $5 coupon on coffee creamer",
+          "source_span": [
+            19,
+            48
+          ],
+          "factor_id": "tail",
+          "semantic_identity": "coupon"
+        }
+      ],
+      "variables": [
+        {
+          "surface": "Where",
+          "source_span": [
+            0,
+            5
+          ],
+          "variable_id": "answer"
+        }
+      ]
+    },
+    "capture_digest": "sha256:66f33996adde61feb7e3bcfba83d9bdfd7a37600971a63d1cc36822d40af3948"
+  },
+  "trace": {
+    "schema_version": 2,
+    "operator_id": "open_semantic_factor_compatibility_trace_v2",
+    "query_capture_digest": "sha256:66f33996adde61feb7e3bcfba83d9bdfd7a37600971a63d1cc36822d40af3948",
+    "observed_evidence_count": 2,
+    "matchable_evidence_count": 2,
+    "evaluated_evidence_count": 2,
+    "unavailable_evidence_ids": [],
+    "unevaluated_evidence_ids": [],
+    "incomparable_seal": "none",
+    "truncated": false,
+    "entries": [
+      {
+        "evidence_id": "partner",
+        "receipt": {
+          "schema_version": 1,
+          "operator_id": "open_semantic_factor_compatibility_v6",
+          "status": "incompatible",
+          "evidence_capture_digest": "sha256:e7d1565ce95c443f7018e97bf479c2327e66b51609ac2238b113dd6ed53b7a0b",
+          "query_capture_digest": "sha256:66f33996adde61feb7e3bcfba83d9bdfd7a37600971a63d1cc36822d40af3948",
+          "evidence_graph_digest": "sha256:b702ce3c5c16abca19ddebe7c957c8316a1fd9f105beddf31c327c28da7ce743",
+          "query_graph_digest": "sha256:89cbc5e28d6a02df94792bfd22b75e4c07cf965b6d95602bf5d585257ef42a2b",
+          "query_proposition_count": 2,
+          "matched_query_proposition_count": 0,
+          "proposition_match_candidates": [],
+          "proposition_matches": [],
+          "receipt_digest": "sha256:761f82c79702bf39907df034ecfab369bfa1323f7bfe6fc310ac525dd0c8f275"
+        }
+      },
+      {
+        "evidence_id": "redeem",
+        "receipt": {
+          "schema_version": 1,
+          "operator_id": "open_semantic_factor_compatibility_v6",
+          "status": "compatible",
+          "evidence_capture_digest": "sha256:57a44dd280a5515f17606044231c6c529712a20da5a81b428ce0f31078d3a7f0",
+          "query_capture_digest": "sha256:66f33996adde61feb7e3bcfba83d9bdfd7a37600971a63d1cc36822d40af3948",
+          "evidence_graph_digest": "sha256:0798277b81d86c0eb5577d2ed2ce459faab3a8f1370b0080767ec2397bf225ba",
+          "query_graph_digest": "sha256:89cbc5e28d6a02df94792bfd22b75e4c07cf965b6d95602bf5d585257ef42a2b",
+          "query_proposition_count": 2,
+          "matched_query_proposition_count": 1,
+          "proposition_match_candidates": [
+            {
+              "query_proposition_id": "redeem-query",
+              "evidence_proposition_id": "redeem-event",
+              "predicate_alignment": {
+                "query_factor_id": "predicate",
+                "evidence_factor_id": "predicate",
+                "operator_id": "exact_semantic_identity_v1"
+              },
+              "argument_mappings": [
+                {
+                  "binding_identity": "subject",
+                  "evidence_binding_identity": "subject",
+                  "binding_alignment_operator_id": "exact_binding_identity_v1",
+                  "query_position": 0,
+                  "evidence_position": 0,
+                  "query_reference_kind": "factor",
+                  "query_reference_id": "subject",
+                  "evidence_factor_id": "subject",
+                  "evidence_semantic_identity": "i",
+                  "evidence_surface": "I",
+                  "evidence_source_span": [
+                    0,
+                    1
+                  ],
+                  "operator_id": "exact_semantic_identity_v1"
+                },
+                {
+                  "binding_identity": "constraint",
+                  "evidence_binding_identity": "constraint",
+                  "binding_alignment_operator_id": "exact_binding_identity_v1",
+                  "query_position": 1,
+                  "evidence_position": 1,
+                  "query_reference_kind": "factor",
+                  "query_reference_id": "tail",
+                  "evidence_factor_id": "tail",
+                  "evidence_semantic_identity": "coupon",
+                  "evidence_surface": "a $5 coupon on coffee creamer",
+                  "evidence_source_span": [
+                    20,
+                    49
+                  ],
+                  "operator_id": "exact_semantic_identity_v1"
+                }
+              ]
+            }
+          ],
+          "proposition_matches": [
+            {
+              "query_proposition_id": "redeem-query",
+              "evidence_proposition_id": "redeem-event",
+              "predicate_alignment": {
+                "query_factor_id": "predicate",
+                "evidence_factor_id": "predicate",
+                "operator_id": "exact_semantic_identity_v1"
+              },
+              "argument_mappings": [
+                {
+                  "binding_identity": "subject",
+                  "evidence_binding_identity": "subject",
+                  "binding_alignment_operator_id": "exact_binding_identity_v1",
+                  "query_position": 0,
+                  "evidence_position": 0,
+                  "query_reference_kind": "factor",
+                  "query_reference_id": "subject",
+                  "evidence_factor_id": "subject",
+                  "evidence_semantic_identity": "i",
+                  "evidence_surface": "I",
+                  "evidence_source_span": [
+                    0,
+                    1
+                  ],
+                  "operator_id": "exact_semantic_identity_v1"
+                },
+                {
+                  "binding_identity": "constraint",
+                  "evidence_binding_identity": "constraint",
+                  "binding_alignment_operator_id": "exact_binding_identity_v1",
+                  "query_position": 1,
+                  "evidence_position": 1,
+                  "query_reference_kind": "factor",
+                  "query_reference_id": "tail",
+                  "evidence_factor_id": "tail",
+                  "evidence_semantic_identity": "coupon",
+                  "evidence_surface": "a $5 coupon on coffee creamer",
+                  "evidence_source_span": [
+                    20,
+                    49
+                  ],
+                  "operator_id": "exact_semantic_identity_v1"
+                }
+              ]
+            }
+          ],
+          "receipt_digest": "sha256:bb8e3207c5b2c31b02c55c8a2c50e980d3797edee3d2d305c6dfd16c10f9eb0f"
+        }
+      }
+    ],
+    "trace_digest": "sha256:e361cc781478b4690801e13d4998414b37f5fb4743954452f7d94ba0ecfdb43a"
+  },
+  "composition": {
+    "schema_version": 2,
+    "operator_id": "open_semantic_factor_composition_v2",
+    "status": "composed",
+    "compatibility_trace_digest": "sha256:e361cc781478b4690801e13d4998414b37f5fb4743954452f7d94ba0ecfdb43a",
+    "query_capture_digest": "sha256:66f33996adde61feb7e3bcfba83d9bdfd7a37600971a63d1cc36822d40af3948",
+    "result_variable_ids": [
+      "answer"
+    ],
+    "search_step_count": 4,
+    "solution_count": 1,
+    "observed_binding_count": 1,
+    "binding_observation_count": 1,
+    "truncated": false,
+    "bindings": [
+      {
+        "variable_id": "answer",
+        "binding_identity": "location",
+        "evidence_id": "partner",
+        "evidence_factor_id": "location",
+        "semantic_identity": "target",
+        "surface": "Target",
+        "source_span": [
+          40,
+          46
+        ],
+        "query_proposition_id": "redeem-query",
+        "evidence_proposition_id": "use-event"
+      }
+    ],
+    "solutions": [
+      {
+        "result_bindings": [
+          {
+            "variable_id": "answer",
+            "semantic_identity": "target",
+            "surfaces": [
+              "Target"
+            ],
+            "evidence_ids": [
+              "partner"
+            ]
+          }
+        ],
+        "evidence_ids": [
+          "partner",
+          "redeem"
+        ],
+        "proposition_matches": [
+          {
+            "query_proposition_id": "redeem-query",
+            "evidence_id": "redeem",
+            "evidence_proposition_id": "redeem-event"
+          },
+          {
+            "query_proposition_id": "redeem-query",
+            "evidence_id": "partner",
+            "evidence_proposition_id": "use-event"
+          }
+        ]
+      }
+    ],
+    "variable_collections": [
+      {
+        "variable_id": "answer",
+        "observation_count": 1,
+        "distinct_value_count": 1,
+        "values": [
+          {
+            "semantic_identity": "target",
+            "surfaces": [
+              "Target"
+            ],
+            "evidence_ids": [
+              "partner"
+            ]
+          }
+        ]
+      }
+    ],
+    "receipt_digest": "sha256:299524ecafead076f8265039a9bd7770ded9a118b26c53e37b0feb0662fac2b2"
+  },
+  "activation": {
+    "schema_version": 2,
+    "operator_id": "open_semantic_solution_membership_activation_v2",
+    "status": "composed",
+    "composition_receipt_digest": "sha256:299524ecafead076f8265039a9bd7770ded9a118b26c53e37b0feb0662fac2b2",
+    "entry_count": 2,
+    "truncated": false,
+    "entries": [
+      {
+        "evidence_id": "partner",
+        "state": "reconstructed",
+        "activation": 0.5,
+        "solution_count": 1,
+        "proposition_match_count": 1
+      },
+      {
+        "evidence_id": "redeem",
+        "state": "observed",
+        "activation": 0.5,
+        "solution_count": 1,
+        "proposition_match_count": 1
+      }
+    ],
+    "missing_evidence_policy": "no_op",
+    "ranking_effect": "candidate_attribution",
+    "receipt_digest": "sha256:9dec3819195d42e2b2333b08da5e638b9d9ceba73ccc28880a6c11e4a9f0c42c"
+  },
+  "entries": [
+    {
+      "candidate_key": "workspace_local:evidence_capsule:partner",
+      "receipt": {
+        "schema_version": 1,
+        "operator_id": "open_semantic_factor_candidate_activation_v1",
+        "state": "reconstructed",
+        "score": 0.5,
+        "evidence_ids": [
+          "partner"
+        ],
+        "solution_count": 1,
+        "proposition_match_count": 1,
+        "receipt_digest": "sha256:726c864bd7a28c8b9660e62cfd1c1ea221e99a44bc094ab5928480b286d063aa"
+      }
+    }
+  ]
+}

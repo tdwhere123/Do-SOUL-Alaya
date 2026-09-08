@@ -107,7 +107,7 @@ export function registerCatalogRefillRecoveryCases(fixture: RecoveryFixture): vo
       targetSelectionReceiptPath: authority.selection
     }, phase);
 
-    expect(crashed).toMatchObject(process.platform === "win32"
+    expect(crashed, crashed.output).toMatchObject(process.platform === "win32"
       ? { code: 1, signal: null }
       : { code: null, signal: "SIGKILL" });
     expect(fixture.controlArtifacts(".catalog-refill-resume.")).toEqual([]);
@@ -172,16 +172,20 @@ function runCatalogRefillCrashChild(
   entryUrl: string,
   input: CrashChildInput,
   phase: "in-progress-result-manifest-published" | "failure-manifest-published"
-): Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null }> {
+): Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null; readonly output: string }> {
   const child = spawn(process.execPath, [
     join(process.cwd(), "node_modules/vitest/vitest.mjs"), "run",
     fileURLToPath(entryUrl), "--pool=threads", "--maxWorkers=1"
   ], {
-    cwd: process.cwd(), stdio: ["ignore", "ignore", "ignore"],
+    cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, [CRASH_CHILD_ENV]: JSON.stringify(input), [FAILPOINT_ENV]: phase }
   });
+  let output = "";
+  const collect = (chunk: Buffer) => { output = (output + chunk.toString()).slice(-12_000); };
+  child.stdout.on("data", collect);
+  child.stderr.on("data", collect);
   return new Promise((resolve, reject) => {
     child.once("error", reject);
-    child.once("close", (code, signal) => resolve({ code, signal }));
+    child.once("close", (code, signal) => resolve({ code, signal, output }));
   });
 }

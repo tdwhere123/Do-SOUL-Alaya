@@ -1,3 +1,4 @@
+import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -167,6 +168,7 @@ async function createHarness(
     recallService: {
       recall: vi.fn(async () => ({
         candidates: (options.recallCandidateIds ?? []).map((objectId) => createRecallCandidate(objectId)),
+        index: stubRecallIndex(options.recallCandidateIds ?? []),
         active_constraints: [],
         active_constraints_count: 0,
         total_scanned: 0,

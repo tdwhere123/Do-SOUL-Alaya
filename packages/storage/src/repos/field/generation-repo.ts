@@ -344,11 +344,13 @@ export class SqliteFieldProjectionGenerationRepo implements FieldProjectionGener
     workspaceId: string,
     generationId: string
   ): FieldProjectionGenerationRow | null {
-    return parseOptionalRow(
+    const row = parseOptionalRow(
       this.selectPinnedStatement.get(workspaceId, generationId),
       fieldProjectionGenerationParser,
       "projection generation"
     );
+    if (row !== null) verifyPersistedGeneration(row, this.sha256);
+    return row;
   }
 
   public asGenerationPort(): ProjectionGenerationPort {

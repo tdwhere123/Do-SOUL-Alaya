@@ -6,15 +6,13 @@ import type {
 import {
   fieldContractSha256,
   type EffectDecisionStore,
-  type FieldFormationStores,
-  type RecallFieldQuerySession
+  type FieldFormationStores
 } from
   "@do-soul/alaya-core";
 import type { SqliteEventLogRepo, StorageDatabase } from "@do-soul/alaya-storage";
 import { createDaemonFieldRepos, type DaemonFieldRepos } from "./field-repos.js";
 import { createSqliteCausalUsagePort } from "./sqlite-causal-usage-port.js";
 import { createSqliteFieldFormationStores } from "./sqlite-field-formation-stores.js";
-import { createSqliteFieldQuerySession } from "./sqlite-field-query-session.js";
 import { admitFieldProjectionLifecycle, type FieldProjectionCheckpointPort } from
   "./admission-checkpoint.js";
 import {
@@ -33,7 +31,6 @@ export type DaemonFieldComposition = Readonly<{
   readonly stores: FieldFormationStores;
   readonly usagePort: CausalUsagePort;
   readonly effectDecisionStore: EffectDecisionStore;
-  readonly querySession: RecallFieldQuerySession;
   readonly projectionLifecycle: SqliteFieldProjectionLifecycle;
   readonly fieldProjectionCheckpoint: FieldProjectionCheckpointPort;
 }>;
@@ -79,12 +76,7 @@ export function createDaemonFieldComposition(input: Readonly<{
       admitted.projectionLifecycle
     ),
     projectionLifecycle: admitted.projectionLifecycle,
-    fieldProjectionCheckpoint: admitted.fieldProjectionCheckpoint,
-    querySession: createSqliteFieldQuerySession({
-      generations: fieldRepos.generations,
-      database: input.database,
-      sha256
-    })
+    fieldProjectionCheckpoint: admitted.fieldProjectionCheckpoint
   });
 }
 

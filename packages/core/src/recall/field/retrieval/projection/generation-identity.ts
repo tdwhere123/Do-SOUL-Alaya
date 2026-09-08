@@ -1,9 +1,9 @@
 import {
   FIELD_CONTRACT_SCHEMA_VERSION,
-  FIELD_OPERATOR_MANIFEST,
+  CONDITIONAL_FIELD_OPERATOR_MANIFEST,
+  CONDITIONAL_FIELD_GENERATION_OPERATOR_ID,
   FieldProjectionGenerationSchema,
-  PROJECTION_GENERATION_OPERATOR_ID,
-  fieldOperatorManifestDigest,
+  conditionalFieldOperatorManifestDigest,
   hashGenerationId,
   verifyFieldProjectionGeneration,
   type FieldContractSha256,
@@ -24,10 +24,10 @@ export function projectionGenerationId(
   governanceFrontier: string,
   sha256: FieldContractSha256
 ): string {
-  const operators = FIELD_OPERATOR_MANIFEST;
+  const operators = CONDITIONAL_FIELD_OPERATOR_MANIFEST;
   return hashGenerationId({
     operators,
-    operator_manifest_digest: fieldOperatorManifestDigest(sha256),
+    operator_manifest_digest: conditionalFieldOperatorManifestDigest(sha256),
     field_schema_version: FIELD_CONTRACT_SCHEMA_VERSION,
     input_event_frontier: inputEventFrontier,
     governance_frontier: governanceFrontier
@@ -45,8 +45,8 @@ export function createProjectionGenerationReceipt(
   );
   const receipt = FieldProjectionGenerationSchema.parse({
     schema_version: 1,
-    producer: PROJECTION_GENERATION_OPERATOR_ID,
-    consumer: "activation",
+    producer: CONDITIONAL_FIELD_GENERATION_OPERATOR_ID,
+    consumer: "conditional_field_snapshot",
     identity: generationId,
     replay_rule: "idempotent_same_identity",
     failure_disposition: "fail_closed",
@@ -54,7 +54,7 @@ export function createProjectionGenerationReceipt(
     deletion_behavior: "rebuildable",
     workspace_id: draft.workspace_id,
     generation_id: generationId,
-    operator_manifest_digest: fieldOperatorManifestDigest(sha256),
+    operator_manifest_digest: conditionalFieldOperatorManifestDigest(sha256),
     operator_versions: operatorVersionTuples(),
     field_schema_version: FIELD_CONTRACT_SCHEMA_VERSION,
     input_event_frontier: draft.input_event_frontier,
@@ -62,33 +62,22 @@ export function createProjectionGenerationReceipt(
     status: draft.status,
     recorded_at: draft.recorded_at
   });
-  return verifyFieldProjectionGeneration(receipt, sha256);
+  return verifyConditionalProjectionGeneration(receipt, sha256);
 }
 
-export function withProjectionGenerationStatus(
+export function verifyConditionalProjectionGeneration(
   receipt: FieldProjectionGeneration,
-  status: ProjectionGenerationStatus,
   sha256: FieldContractSha256
 ): FieldProjectionGeneration {
-  return verifyFieldProjectionGeneration(
-    FieldProjectionGenerationSchema.parse({ ...receipt, status }),
-    sha256
-  );
-}
-
-export function sameProjectionGenerationIdentity(
-  existing: FieldProjectionGeneration,
-  incoming: FieldProjectionGeneration
-): boolean {
-  return existing.operator_manifest_digest === incoming.operator_manifest_digest &&
-    JSON.stringify(existing.operator_versions) === JSON.stringify(incoming.operator_versions) &&
-    existing.field_schema_version === incoming.field_schema_version &&
-    existing.input_event_frontier === incoming.input_event_frontier &&
-    existing.governance_frontier === incoming.governance_frontier;
+  const verified = verifyFieldProjectionGeneration(receipt, sha256);
+  if (verified.producer !== CONDITIONAL_FIELD_GENERATION_OPERATOR_ID) {
+    throw new Error("conditional field lifecycle cannot approve a historical projection manifest");
+  }
+  return verified;
 }
 
 function operatorVersionTuples(): readonly (readonly [string, string])[] {
-  return Object.freeze(FIELD_OPERATOR_MANIFEST.map((entry) =>
+  return Object.freeze(CONDITIONAL_FIELD_OPERATOR_MANIFEST.map((entry) =>
     Object.freeze([entry.id, entry.version] as const)
   ));
 }

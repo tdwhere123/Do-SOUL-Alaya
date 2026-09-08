@@ -49,18 +49,15 @@ afterEach(() => {
 });
 
 describe("field projection workspace birth", () => {
-  it("does not mint a generation from an unwrapped ensure (query pin stays fail-closed)", async () => {
+  it("does not mint a generation from an unwrapped ensure (construction stays read-only)", async () => {
     const { composition, service } = openHarness();
     const workspace = await service.ensureLocalWorkspace(ensureInput("ws_unwrapped_ensure"));
 
     expect(composition.fieldRepos.generations.readActive(workspace.workspace_id)).toBeNull();
-    expect(() => composition.querySession.pinActiveGeneration(
-      workspace.workspace_id,
-      workspace.created_at
-    )).toThrow(/active projection generation is missing/u);
+    expect(composition).not.toHaveProperty("querySession");
   });
 
-  it("commits an active generation with create so query pin succeeds", async () => {
+  it("commits an active frontier generation with workspace creation", async () => {
     const { composition, service } = openHarness();
     const born = withBirth(service, composition);
     const workspace = await born.create({
@@ -70,10 +67,7 @@ describe("field projection workspace birth", () => {
     });
 
     expect(composition.fieldRepos.generations.readActive(workspace.workspace_id)).not.toBeNull();
-    expect(() => composition.querySession.pinActiveGeneration(
-      workspace.workspace_id,
-      workspace.created_at
-    )).not.toThrow();
+    expect(composition).not.toHaveProperty("querySession");
   });
 
   it("rolls back workspace row and WORKSPACE_CREATED when projection init fails during create", async () => {
@@ -91,7 +85,7 @@ describe("field projection workspace birth", () => {
     expect(listCreatedEvents(database)).toHaveLength(0);
   });
 
-  it("rebuilds a seeded workspace at injected now so later source is in the active artifacts", async () => {
+  it("rebuilds a seeded workspace at injected now so later source is reflected in the active frontier", async () => {
     const { composition, database, service, workspaceRepo } = openHarness();
     seedLegacyWorkspace(database, "ws_recovery_now");
     const seeded = await workspaceRepo.getById("ws_recovery_now");
@@ -111,12 +105,9 @@ describe("field projection workspace birth", () => {
 
     expect(active?.recorded_at).toBe(NOW);
     expect(active?.recorded_at).not.toBe(CREATED_AT);
-    expect(artifacts).not.toBeNull();
-    expect(JSON.parse(artifacts!.artifacts_json).slice_keys.length).toBeGreaterThan(0);
-    expect(() => composition.querySession.pinActiveGeneration(
-      workspace.workspace_id,
-      NOW
-    )).not.toThrow();
+    expect(artifacts).toBeNull();
+    expect(active?.input_event_frontier).toMatch(/^sha256:/);
+    expect(composition).not.toHaveProperty("querySession");
   });
 
   it("does not rebuild an already-active generation merely by ensure", async () => {
@@ -154,8 +145,7 @@ describe("field projection workspace birth", () => {
     await wrapped.list();
 
     expect(composition.fieldRepos.generations.readActive("ws_no_mint_get")).toBeNull();
-    expect(() => composition.querySession.pinActiveGeneration("ws_no_mint_get", NOW))
-      .toThrow(/active projection generation is missing/u);
+    expect(composition).not.toHaveProperty("querySession");
   });
 
   it("initializes security on ensure with existing nonfatal propagation semantics", async () => {

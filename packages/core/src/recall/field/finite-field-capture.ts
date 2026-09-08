@@ -1,7 +1,6 @@
 import {
   createRecallFiniteFieldSeal,
-  type RecallFiniteFieldChannelInput,
-  type RecallFiniteFieldSeal
+  type RecallFiniteFieldChannelInput
 } from "./finite-field-seal.js";
 import {
   digestRecallFieldIdentity,
@@ -66,26 +65,6 @@ export function createRecallFiniteFieldChannelCapture(params: Readonly<{
   });
 }
 
-export type RecallFiniteFieldPostingSeed = Readonly<{
-  readonly channel_id: RecallRetrievalFieldChannelId;
-  readonly candidate_key: string;
-  readonly rank: number;
-}>;
-
-export function recallFiniteFieldCapturePostingSeeds(
-  capture: RecallFiniteFieldChannelCapture
-): readonly RecallFiniteFieldPostingSeed[] {
-  verifyRecallFiniteFieldChannelCapture(capture);
-  if (capture.channel.status === "unavailable" || capture.channel.status === "ineligible") {
-    return Object.freeze([]);
-  }
-  return Object.freeze(capture.channel.observations.map((observation) => Object.freeze({
-    channel_id: capture.channel.channel_id,
-    candidate_key: observation.candidate_key,
-    rank: observation.rank
-  })));
-}
-
 export function verifyRecallFiniteFieldChannelCapture(
   capture: RecallFiniteFieldChannelCapture
 ): void {
@@ -100,39 +79,6 @@ export function verifyRecallFiniteFieldChannelCapture(
   if (rebuilt.capture_digest !== capture.capture_digest) {
     throw new Error("finite field channel capture digest mismatch");
   }
-}
-
-export function materializeRecallRetrievalFieldCaptures(
-  captures: readonly Readonly<RecallFiniteFieldChannelCapture>[]
-): readonly Readonly<RecallFiniteFieldChannelCapture>[] {
-  const capturesByChannel = indexCaptures(captures);
-  return Object.freeze(RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1.map((channelId) =>
-    capturesByChannel.get(channelId) ?? createRecallFiniteFieldChannelCapture({
-      source_snapshot_digest: unavailableSourceDigest(channelId),
-      channel: unavailableChannel(channelId)
-    })
-  ));
-}
-
-export function materializeRecallRetrievalFieldSeal(
-  captures: readonly Readonly<RecallFiniteFieldChannelCapture>[]
-): RecallFiniteFieldSeal {
-  const materialized = materializeRecallRetrievalFieldCaptures(captures);
-  const channels = materialized.map(({ channel }) => channel);
-  const sourceSnapshots = materialized.map(({ channel, source_snapshot_digest }) =>
-    Object.freeze({
-      channel_id: channel.channel_id,
-      source_snapshot_digest
-    })
-  );
-  return createRecallFiniteFieldSeal({
-    upstream_snapshot_digest: digestRecallFieldIdentity({
-      channel_catalog: RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1,
-      source_snapshots: sourceSnapshots
-    }),
-    channel_catalog: RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1,
-    channels
-  });
 }
 
 function validateAndFreezeChannel(params: Readonly<{
@@ -150,45 +96,6 @@ function validateAndFreezeChannel(params: Readonly<{
     depth: validated.depth,
     observations: validated.observations,
     unseen_upper_bound: validated.unseen_upper_bound
-  });
-}
-
-function indexCaptures(
-  captures: readonly Readonly<RecallFiniteFieldChannelCapture>[]
-): ReadonlyMap<RecallRetrievalFieldChannelId, RecallFiniteFieldChannelCapture> {
-  const indexed = new Map<
-    RecallRetrievalFieldChannelId,
-    RecallFiniteFieldChannelCapture
-  >();
-  for (const capture of captures) {
-    verifyRecallFiniteFieldChannelCapture(capture);
-    const channelId = capture.channel.channel_id;
-    if (indexed.has(channelId)) {
-      throw new Error("finite field capture channel owners must be unique");
-    }
-    indexed.set(channelId, capture);
-  }
-  return indexed;
-}
-
-function unavailableChannel(
-  channelId: RecallRetrievalFieldChannelId
-): RetrievalFieldChannelInput {
-  return Object.freeze({
-    channel_id: channelId,
-    status: "unavailable",
-    depth: 0,
-    observations: Object.freeze([]),
-    unseen_upper_bound: null
-  });
-}
-
-function unavailableSourceDigest(
-  channelId: RecallRetrievalFieldChannelId
-): RecallFieldDigest {
-  return digestRecallFieldIdentity({
-    channel_id: channelId,
-    status: "producer_receipt_unavailable"
   });
 }
 

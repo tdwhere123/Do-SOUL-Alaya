@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
-  DYNAMICS_CONSTANTS,
   type Continuation,
   type RecallPolicy,
   type RequestBudget
 } from "@do-soul/alaya-protocol";
 import { type NodeStrategy } from "../conversation/task-surface-builder.js";
-import { assertActivationWeightsSumToOne } from "./runtime/recall-service-helpers.js";
 import type {
   RecallServiceDependencies,
   RecallServiceWarnPort
@@ -58,7 +56,6 @@ export {
   attributeUsageReports,
   type UsageReportAttribution
 } from "../relations/path-plasticity/causal-usage-projection.js";
-export { classifyGlobalCandidate } from "./runtime/recall-service-helpers.js";
 export type {
   KeywordSearchBatchQuery,
   KeywordSearchLaneScope,
@@ -90,7 +87,6 @@ export type {
   TokenEstimator
 } from "./runtime/recall-service-types.js";
 export { makeTokenEstimator } from "./runtime/recall-service-types.js";
-export { computeRecallTokenEconomy } from "./runtime/diagnostics.js";
 export { RECALL_FUSION_STREAMS } from "./delivery/fusion-delivery-streams.js";
 export type { RecallDiagnosticCapture } from
   "./runtime/recall-service-runner-types.js";
@@ -108,7 +104,6 @@ export class RecallService {
     private readonly dependencies: RecallServiceDependencies &
       RecallServiceFieldDeps
   ) {
-    assertActivationWeightsSumToOne(DYNAMICS_CONSTANTS.activation_weights_phase4b);
     this.generateRuntimeId = dependencies.generateRuntimeId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? (() => undefined);

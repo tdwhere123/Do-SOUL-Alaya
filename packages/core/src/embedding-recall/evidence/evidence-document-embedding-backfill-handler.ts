@@ -1,8 +1,8 @@
 import type { GardenTaskDescriptor } from "@do-soul/alaya-protocol";
 import { getCoreConfig } from "../../runtime/config/install-core-config.js";
-import { createBoundedNonMemoryPreview } from "../../recall/coarse-filter/non-memory-preview.js";
+import { createBoundedNonMemoryPreview } from "./document-preview.js";
 import { preferOwnerGistDocumentIdentity } from
-  "../../recall/supplements/evidence/owner-semantic-documents.js";
+  "./owner-semantic-documents.js";
 import { hasEvidenceDocumentEmbeddingAuthority } from
   "../../shared/evidence-recall-authority.js";
 import {

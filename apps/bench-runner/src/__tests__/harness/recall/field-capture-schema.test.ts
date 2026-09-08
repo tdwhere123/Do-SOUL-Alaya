@@ -1,101 +1,36 @@
 import { describe, expect, it } from "vitest";
-import {
-  captureRecallQueryEntities,
-  captureRecallQueryFactFrames,
-  createRecallRetrievalFieldRefinementReceipt,
-  materializeRecallRetrievalFieldCaptures,
-  RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
-  RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1
-} from "@do-soul/alaya-core";
+import { RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID } from "@do-soul/alaya-protocol";
 import { LongMemEvalQuestionDiagnosticSchema } from
   "../../../diagnostics/schema/diagnostics-schema.js";
 import { buildQuestionDiagnostic } from
   "../../../diagnostics/diagnostics-question.js";
 
 describe("recall field capture persistence", () => {
-  it("preserves the fixed retrieval catalog and query entity receipt", async () => {
-    const retrievalFieldCaptures = materializeRecallRetrievalFieldCaptures([]);
-    const refinementReceipt = createRecallRetrievalFieldRefinementReceipt({
-      request_digest: `sha256:${"a".repeat(64)}`,
-      requested_depth: 1,
-      object_kind: "memory_entry",
-      result: {
-        matches: [{ object_id: "memory-1", normalized_rank: 1 }],
-        lanes: [
-          emptyLane("exact"),
-          {
-            lane: "porter",
-            status: "complete",
-            depth: 1,
-            observations: [{ object_id: "memory-1", rank: 1, normalized_rank: 1 }],
-            unseen_upper_bound: 0
-          },
-          emptyLane("trigram")
-        ]
-      }
-    });
-    if (refinementReceipt === null) throw new Error("refinement receipt missing");
-    const queryEntityExtraction = await captureRecallQueryEntities({ query_text: null });
-    const queryFactFrameExtraction = await captureRecallQueryFactFrames({ query_text: null });
-    const stopCertificate = {
-      schema_version: 1 as const,
-      operator_id: RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
-      activation_mode: "live" as const,
-      field_seal_digest: `sha256:${"b".repeat(64)}`,
-      refinement_receipt_digests: [refinementReceipt.receipt_digest],
-      objective: {
-        schema_version: 1 as const,
-        operator_id: "duplicate_gist_penalty_v1",
-        mathematical_class: null,
-        configuration_digest: null
-      },
-      relevance_upper_bound: null,
-      selection_capacity: 0,
-      selected_candidate_keys: [],
-      exchange_bounds: [],
-      maximum_exchange_improvement_upper_bound: null,
-      status: "certified" as const,
-      reason: "all_channels_closed" as const,
-      candidate_membership_changed: false as const,
-      receipt_digest: `sha256:${"c".repeat(64)}`
-    };
+  it("round-trips archived field metadata without its retired producers", () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    const retrieval = ["lexical_relaxed_exact", "evidence_fts_porter", "explicit_pointer"].map((channel_id) => ({
+      schema_version: 1, operator_id: "recall_finite_field_channel_capture_v1",
+      source_snapshot_digest: digest, capture_digest: digest,
+      channel: { channel_id, status: "unavailable", depth: 0, observations: [], unseen_upper_bound: null }
+    }));
     const diagnostic = buildQuestionDiagnostic({
-      questionId: "field-capture-round-trip",
-      goldMemoryIds: [],
-      answerSessionIds: [],
-      deliveredResults: [],
-      hitAt1: false,
-      hitAt5: false,
-      hitAt10: false,
-      degradationReason: null,
-      recallResult: {
-        diagnostics: {
-          retrieval_field_captures: retrievalFieldCaptures,
-          retrieval_field_refinement_receipts: [refinementReceipt],
-          field_refinement_stop_certificate: stopCertificate,
-          query_entity_extraction: queryEntityExtraction,
-          query_fact_frame_extraction: queryFactFrameExtraction
+      questionId: "archived-field-capture", goldMemoryIds: [], answerSessionIds: [], deliveredResults: [],
+      hitAt1: false, hitAt5: false, hitAt10: false, degradationReason: null, embeddingMode: "disabled",
+      recallResult: { diagnostics: {
+        retrieval_field_captures: retrieval,
+        query_entity_extraction: {
+          schema_version: 1, operator_id: "query_entity_extraction_capture_v1", status: "ineligible",
+          query_text_digest: digest, producer_operator_id: null, candidates: [], capture_digest: digest
         }
-      },
-      embeddingMode: "disabled"
+      } }
     });
-
     const parsed = LongMemEvalQuestionDiagnosticSchema.parse(diagnostic);
-    expect(parsed.retrieval_field_captures).toHaveLength(
-      RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1.length
-    );
-    expect(parsed.retrieval_field_captures?.every(({ channel }) =>
-      channel.status === "unavailable")).toBe(true);
-    expect(parsed.retrieval_field_refinement_receipts?.[0]?.receipt_digest)
-      .toBe(refinementReceipt.receipt_digest);
-    expect(parsed.field_refinement_stop_certificate?.reason)
-      .toBe("all_channels_closed");
+    expect(parsed.retrieval_field_captures).toEqual(retrieval);
     expect(parsed.query_entity_extraction?.status).toBe("ineligible");
-    expect(parsed.query_entity_extraction?.capture_digest)
-      .toBe(queryEntityExtraction.capture_digest);
-    expect(parsed.query_fact_frame_extraction?.status).toBe("ineligible");
-    expect(parsed.query_fact_frame_extraction?.capture_digest)
-      .toBe(queryFactFrameExtraction.capture_digest);
+    expect(() => LongMemEvalQuestionDiagnosticSchema.parse({
+      ...diagnostic,
+      retrieval_field_captures: [{ ...retrieval[0], channel: { ...retrieval[0]!.channel, channel_id: "invented" } }]
+    })).toThrow();
   });
 
   it("accepts dynamic selection capacity and rejects inconsistent membership", () => {
@@ -180,15 +115,5 @@ function emptyQuestionDiagnostic() {
     },
     candidate_key_collisions: [],
     gold: []
-  };
-}
-
-function emptyLane(lane: "exact" | "trigram") {
-  return {
-    lane,
-    status: "ineligible" as const,
-    depth: 0,
-    observations: [],
-    unseen_upper_bound: null
   };
 }

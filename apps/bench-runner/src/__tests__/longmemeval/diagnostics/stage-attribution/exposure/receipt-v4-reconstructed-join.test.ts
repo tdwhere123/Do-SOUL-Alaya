@@ -1,36 +1,22 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID } from "@do-soul/alaya-protocol";
+import { digestRecallFieldIdentity } from "@do-soul/alaya-core";
+import { OpenSemanticFactorFormationCaptureSchema } from "@do-soul/alaya-protocol";
 import {
-  digestRecallFieldIdentity,
-  materializeOpenSemanticFactorFormation
-} from "@do-soul/alaya-core";
-import { materializeOpenSemanticFactorCompatibilityTrace } from
-  "../../../../../../../../packages/core/src/recall/field/open-semantic-factors/compatibility-trace.js";
-import { materializeOpenSemanticFactorComposition } from
-  "../../../../../../../../packages/core/src/recall/field/open-semantic-factors/composition.js";
-import { materializeOpenSemanticFactorActivation } from
-  "../../../../../../../../packages/core/src/recall/field/open-semantic-factors/activation.js";
-import { attributeOpenSemanticFactorActivations } from
-  "../../../../../../../../packages/core/src/recall/field/open-semantic-factors/candidate-attribution.js";
-import type { CoarseRecallCandidate } from
-  "../../../../../../../../packages/core/src/recall/runtime/recall-service-types.js";
-import { OpenSemanticFactorCandidateActivationsSchema } from
-  "../../../../../diagnostics/schema/field/open-semantic-candidate-activation-schema.js";
-import { buildTreatmentExposureReceipts } from
-  "../../../../../diagnostics/stage-attribution/exposure/build-receipts.js";
-import { assertTreatmentExposureReceipt } from
-  "../../../../../diagnostics/stage-attribution/exposure/contract.js";
-import type { LongMemEvalQuestionDiagnostic } from
-  "../../../../../diagnostics/schema/diagnostics-types.js";
-import type { QuestionStageRow } from
-  "../../../../../diagnostics/stage-attribution/types.js";
+  OpenSemanticFactorActivationReceiptSchema,
+  OpenSemanticFactorCompatibilityTraceSchema,
+  OpenSemanticFactorCompositionReceiptSchema
+} from "../../../../../harness/recall/semantic-factors/open-semantic-factor-diagnostics-schema.js";
+import { OpenSemanticFactorCandidateActivationsSchema } from "../../../../../diagnostics/schema/field/open-semantic-candidate-activation-schema.js";
+import { buildTreatmentExposureReceipts } from "../../../../../diagnostics/stage-attribution/exposure/build-receipts.js";
+import { assertTreatmentExposureReceipt } from "../../../../../diagnostics/stage-attribution/exposure/contract.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../../../../diagnostics/schema/diagnostics-types.js";
+import type { QuestionStageRow } from "../../../../../diagnostics/stage-attribution/types.js";
 
-const QUERY = "Where did I redeem a $5 coupon on coffee creamer?";
-const TAIL = "a $5 coupon on coffee creamer";
 const PARTNER_KEY = "workspace_local:evidence_capsule:partner";
 
-describe("treatment exposure receipt v4 reconstructed join", () => {
-  it("seals a real Q3 reconstructed join attribution on the v4 receipt", () => {
+describe("archived treatment exposure receipt v4 reconstructed join", () => {
+  it("preserves a historical reconstructed join attribution on the v4 receipt", () => {
     const fixture = reconstructedJoinFixture();
     expect(fixture.reconstructed.state).toBe("reconstructed");
     expect(OpenSemanticFactorCandidateActivationsSchema.parse(fixture.entries))
@@ -72,39 +58,20 @@ describe("treatment exposure receipt v4 reconstructed join", () => {
   });
 });
 
+
 function reconstructedJoinFixture() {
-  const query = whereQuery();
-  const redeem = redeemEvidence();
-  const partner = partnerEvidence();
-  const formations = { redeem, partner };
-  const trace = materializeOpenSemanticFactorCompatibilityTrace({
-    query_capture: query,
-    evidence_formations: formations
-  });
-  const composition = materializeOpenSemanticFactorComposition({
-    trace,
-    query_capture: query,
-    evidence_formations: formations
-  });
-  const activation = materializeOpenSemanticFactorActivation({
-    composition,
-    trace,
-    query_capture: query,
-    evidence_formations: formations
-  });
-  const attributed = attributeOpenSemanticFactorActivations({
-    candidates: [capsuleCandidate("partner")],
-    activation
-  });
-  const reconstructed = attributed.get(PARTNER_KEY);
-  if (reconstructed === undefined) {
-    throw new Error("expected reconstructed partner attribution");
-  }
-  const entries = [{
-    candidate_key: PARTNER_KEY,
-    receipt: reconstructed
-  }];
-  return { query, trace, composition, activation, reconstructed, entries };
+  const raw: Record<string, unknown> = JSON.parse(readFileSync(
+    new URL("./receipt-v4-reconstructed-join.fixture.json", import.meta.url), "utf8"
+  ));
+  const entries = OpenSemanticFactorCandidateActivationsSchema.parse(raw.entries);
+  return {
+    query: OpenSemanticFactorFormationCaptureSchema.parse(raw.query),
+    trace: OpenSemanticFactorCompatibilityTraceSchema.parse(raw.trace),
+    composition: OpenSemanticFactorCompositionReceiptSchema.parse(raw.composition),
+    activation: OpenSemanticFactorActivationReceiptSchema.parse(raw.activation),
+    entries,
+    reconstructed: entries[0]!.receipt
+  };
 }
 
 function treatmentArm(fixture: ReturnType<typeof reconstructedJoinFixture>) {
@@ -132,126 +99,6 @@ function controlArm() {
     candidates: [{ candidate_key: PARTNER_KEY, final_rank: 1 }],
     open_semantic_factor_candidate_activations: []
   } as unknown as LongMemEvalQuestionDiagnostic;
-}
-
-function whereQuery() {
-  return formation("query", QUERY, {
-    schema_version: 2,
-    source_kind: "query",
-    factors: [
-      factor("subject", "I", "i"),
-      factor("predicate", "redeem", "redeem"),
-      factor("tail", TAIL, "coupon"),
-      factor("aux", "did", "do")
-    ],
-    variables: [{ variable_id: "answer", surface: "Where" }],
-    result_variable_ids: ["answer"],
-    propositions: [{
-      proposition_id: "redeem-query",
-      predicate_factor_id: "predicate",
-      arguments: [
-        argument(0, "subject", "factor", "subject"),
-        argument(1, "constraint", "factor", "tail"),
-        argument(2, "location", "variable", "answer")
-      ]
-    }, {
-      proposition_id: "extra-query",
-      predicate_factor_id: "aux",
-      arguments: [argument(0, "object", "factor", "tail")]
-    }]
-  }, QUERY_OSF_GRAPH_PRODUCER_OPERATOR_ID);
-}
-
-function redeemEvidence() {
-  return formation("evidence", `I actually redeemed ${TAIL} last Sunday.`, {
-    schema_version: 2,
-    source_kind: "evidence",
-    factors: [
-      factor("subject", "I", "i"),
-      factor("predicate", "redeemed", "redeem"),
-      factor("tail", TAIL, "coupon"),
-      factor("when", "last Sunday", "last sunday")
-    ],
-    variables: [],
-    result_variable_ids: [],
-    propositions: [{
-      proposition_id: "redeem-event",
-      predicate_factor_id: "predicate",
-      arguments: [
-        argument(0, "subject", "factor", "subject"),
-        argument(1, "constraint", "factor", "tail"),
-        argument(2, "time", "factor", "when")
-      ]
-    }]
-  });
-}
-
-function partnerEvidence() {
-  return formation("evidence", `I used ${TAIL} at Target.`, {
-    schema_version: 2,
-    source_kind: "evidence",
-    factors: [
-      factor("subject", "I", "i"),
-      factor("predicate", "used", "use"),
-      factor("tail", TAIL, "coupon"),
-      factor("location", "Target", "target")
-    ],
-    variables: [],
-    result_variable_ids: [],
-    propositions: [{
-      proposition_id: "use-event",
-      predicate_factor_id: "predicate",
-      arguments: [
-        argument(0, "subject", "factor", "subject"),
-        argument(1, "constraint", "factor", "tail"),
-        argument(2, "location", "factor", "location")
-      ]
-    }]
-  });
-}
-
-function capsuleCandidate(objectId: string) {
-  return Object.freeze({
-    entry: { object_id: objectId },
-    originPlane: "workspace_local",
-    objectKind: "evidence_capsule"
-  }) as CoarseRecallCandidate;
-}
-
-function formation(
-  sourceKind: "evidence" | "query",
-  sourceText: string,
-  graph: unknown,
-  producerOperatorId = "open-factor-test-producer-v1"
-) {
-  return materializeOpenSemanticFactorFormation({
-    source_kind: sourceKind,
-    source_text: sourceText,
-    proposal: {
-      schema_version: 1,
-      producer_operator_id: producerOperatorId,
-      source_text: sourceText,
-      graph
-    }
-  });
-}
-
-function factor(factorId: string, surface: string, semanticIdentity: string) {
-  return { factor_id: factorId, surface, semantic_identity: semanticIdentity };
-}
-
-function argument(
-  position: number,
-  bindingIdentity: string,
-  referenceKind: "factor" | "variable",
-  referenceId: string
-) {
-  return {
-    position,
-    binding_identity: bindingIdentity,
-    reference_kind: referenceKind,
-    reference_id: referenceId
-  };
 }
 
 function stage(questionId: string): QuestionStageRow {

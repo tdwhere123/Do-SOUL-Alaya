@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import { ControlPlaneObjectKind, RetentionPolicy, type RecallPolicy } from "@do-soul/alaya-protocol";
 import {
   applyBenchRecallWeightOverrides,
-  formatBenchRecallWeightOverrides,
   resolveBenchRecallWeightOverrides
 } from "../../../harness/recall/recall-weight-overrides.js";
 import { preflightEmbeddingProvider } from "../../../harness/embedding/embedding-provider-preflight.js";
@@ -45,175 +44,31 @@ function basePolicy(): RecallPolicy {
 }
 
 describe("bench recall weight overrides", () => {
-  it("parses CLI JSON and applies bench-only policy fields", () => {
-    const overrides = resolveBenchRecallWeightOverrides({
-      cliJson: JSON.stringify({
-        activation_weights_phase4b: {
-          scope_match: 0.08,
-          relevance: 0.2
-        },
-        additive: {
-          NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT: 0.2,
-          CONFIDENCE_DIRECT_WEIGHT: 0.1,
-          PATH_PLASTICITY_WEIGHT: 0.12
-        },
-        fusion_weights: {
-          lexical_fts: 0.5
-        }
-      })
-    });
-
-    expect(overrides?.source).toBe("cli");
-    expect(overrides?.summary.activation_weights_phase4b).toMatchObject({
-      scope_match: 0.08,
-      relevance: 0.2
-    });
-    expect(formatBenchRecallWeightOverrides(overrides!)).toContain("lexical_fts=0.5");
-
-    const policy = applyBenchRecallWeightOverrides(basePolicy(), overrides);
-    expect(policy.domain_weight_overrides?.["bench-seed"]).toEqual({
-      scope_match: 0.08,
-      relevance: 0.2
-    });
-    expect(policy.domain_weight_overrides?.["bench-reviewed"]).toEqual({
-      scope_match: 0.08,
-      relevance: 0.2
-    });
-    expect(policy.scoring_weight_overrides?.additive).toEqual({
-      NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT: 0.2,
-      CONFIDENCE_DIRECT_WEIGHT: 0.1,
-      PATH_PLASTICITY_WEIGHT: 0.12
-    });
-    expect(policy.scoring_weight_overrides?.fusion_weights).toEqual({
-      lexical_fts: 0.5
-    });
+  it("rejects retired selectors from both CLI and environment", () => {
+    for (const key of ["fusion_weights", "activation_weights_phase4b", "additive"]) {
+      const raw = JSON.stringify({ [key]: { relevance: 1 } });
+      expect(() => resolveBenchRecallWeightOverrides({ cliJson: raw })).toThrow(/retired/);
+      expect(() => resolveBenchRecallWeightOverrides({ envJson: raw })).toThrow(/retired/);
+    }
+    expect(resolveBenchRecallWeightOverrides({})).toBeUndefined();
+    const policy = basePolicy();
+    expect(applyBenchRecallWeightOverrides(policy, undefined)).toBe(policy);
+    expect(() => applyBenchRecallWeightOverrides(policy, {
+      source: "cli", summary: { source: "cli", fusion_weights: { lexical_fts: 1 } }
+    })).toThrow(/retired/);
   });
 
-  it("accepts every production fusion stream incl. trigram_fts / synthesis_fts", () => {
-    const overrides = resolveBenchRecallWeightOverrides({
-      cliJson: JSON.stringify({
-        fusion_weights: {
-          trigram_fts: 2,
-          synthesis_fts: 1.5
-        }
-      })
-    });
-
-    expect(overrides?.summary.fusion_weights).toEqual({
-      trigram_fts: 2,
-      synthesis_fts: 1.5
-    });
-
-    const policy = applyBenchRecallWeightOverrides(basePolicy(), overrides);
-    expect(policy.scoring_weight_overrides?.fusion_weights).toEqual({
-      trigram_fts: 2,
-      synthesis_fts: 1.5
-    });
-  });
-
-  it("accepts derived per-lane RRF k keys for fusion tuning", () => {
-    const overrides = resolveBenchRecallWeightOverrides({
-      cliJson: JSON.stringify({
-        fusion_weights: {
-          lexical_fts_rrf_k: 72,
-          evidence_structural_agreement_rrf_k: 75
-        }
-      })
-    });
-
-    expect(overrides?.summary.fusion_weights).toEqual({
-      lexical_fts_rrf_k: 72,
-      evidence_structural_agreement_rrf_k: 75
-    });
-
-    const policy = applyBenchRecallWeightOverrides(basePolicy(), overrides);
-    expect(policy.scoring_weight_overrides?.fusion_weights).toEqual({
-      lexical_fts_rrf_k: 72,
-      evidence_structural_agreement_rrf_k: 75
-    });
-  });
-
-  it("rejects partial activation overrides that do not resolve to sum 1", () => {
-    expect(() =>
-      resolveBenchRecallWeightOverrides({
-        cliJson: JSON.stringify({
-          activation_weights_phase4b: {
-            relevance: 0.2
-          }
-        })
-      })
-    ).toThrow(/activation_weights_phase4b must sum to 1\.0/);
-  });
-
-  it("rejects invalid additive and fusion weights", () => {
-    expect(() =>
-      resolveBenchRecallWeightOverrides({
-        cliJson: JSON.stringify({
-          additive: {
-            CONFIDENCE_DIRECT_WEIGHT: -0.1
-          }
-        })
-      })
-    ).toThrow(/additive\.CONFIDENCE_DIRECT_WEIGHT must be >= 0/);
-
-    expect(() =>
-      resolveBenchRecallWeightOverrides({
-        cliJson: JSON.stringify({
-          fusion_weights: {
-            lexical_fts: -0.5
-          }
-        })
-      })
-    ).toThrow(/fusion_weights\.lexical_fts must be >= 0/);
-
-    expect(() =>
-      resolveBenchRecallWeightOverrides({
-        cliJson: JSON.stringify({
-          fusion_weights: {
-            lexcial_fts: 0.5
-          }
-        })
-      })
-    ).toThrow(/fusion_weights contains unknown key\(s\): lexcial_fts/);
-  });
-
-  it("lets direct CLI JSON take precedence over the env JSON", () => {
-    const overrides = resolveBenchRecallWeightOverrides({
-      cliJson: JSON.stringify({ fusion_weights: { lexical_fts: 1 } }),
-      envJson: JSON.stringify({ fusion_weights: { evidence_fts: 1 } })
-    });
-
-    expect(overrides?.source).toBe("cli");
-    expect(overrides?.summary.fusion_weights).toEqual({ lexical_fts: 1 });
-  });
-
-  it("parses env JSON when direct CLI JSON is absent", () => {
-    const overrides = resolveBenchRecallWeightOverrides({
-      envJson: JSON.stringify({
-        additive: {
-          PATH_PLASTICITY_WEIGHT: 0.12
-        }
-      })
-    });
-
-    expect(overrides?.source).toBe("env");
-    expect(overrides?.summary.additive).toEqual({
-      PATH_PLASTICITY_WEIGHT: 0.12
-    });
-  });
-
-  it("exposes and forwards --weights from the sharded public bench script", async () => {
+  it("rejects retired weights while forwarding supported bench options", async () => {
     const script = await readFile(
       path.resolve(process.cwd(), "apps/bench-runner/scripts/run-full-public-bench.sh"),
       "utf8"
     );
 
-    expect(script).toContain("--weights) WEIGHTS=\"$2\"; shift 2;;");
+    expect(script).toContain("--weights is retired");
     expect(script).toContain("--embedding-provider) EMBEDDING_PROVIDER=\"$2\"; shift 2;;");
     expect(script).toContain("EMBEDDING_PROVIDER=\"local_onnx\"");
     expect(script).toContain("--data-dir) DATA_DIR=\"$2\"; shift 2;;");
-    expect(script).toContain("weights_args=(--weights \"$WEIGHTS\")");
-    expect(script).toContain("\"${weights_args[@]}\"");
+    expect(script).not.toContain("weights_args");
     expect(script).toContain("--data-dir \"$DATA_DIR\"");
     expect(script).toContain("BENCH_NODE_USE_ENV_PROXY");
     expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/embedding-provider-preflight.mjs");

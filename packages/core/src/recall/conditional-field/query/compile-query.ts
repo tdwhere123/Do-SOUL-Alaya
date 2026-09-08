@@ -13,6 +13,7 @@ import {
   RequestBudgetSchema,
   formatConditionalFieldDigest,
   type QueryBinding,
+  type Guard,
   type QueryHole,
   type QueryHypothesis,
   type QueryInterpretation,
@@ -30,7 +31,7 @@ import {
   attachSourceFilters,
   calendarYesterdayWindow,
   classifyOrdinaryRequest,
-  lexicalStoredRelationProgram,
+  encodeSourceFilters,
   openAnchorTimeGuard,
   ordinaryRemainder,
   proposeOrdinaryRelations,
@@ -246,6 +247,7 @@ function compileOrdinary(
       : compileSupportedRequest(input, snapshotId, budget, view, queryId, classified, yesterday, hints);
   return { ...interpreted, query_id: identityFor(queryId, {
     program: interpreted.program, view: interpreted.view, hypotheses: interpreted.hypotheses,
+    source_guard: interpreted.source_guard,
     interpretation_clock: input.interpretation_clock, time_window: interpreted.time_window,
     authorized_scopes: input.authorized_scopes, lexical_text: input.text,
     ordinary_request: { relations, query_id: queryId }
@@ -341,7 +343,12 @@ function compileLexicalRequest(
   queryId: string | undefined,
   hints: TimeHints
 ): QueryInterpretation {
-  const program = admitOrdinaryProgram(lexicalStoredRelationProgram(), input, hints);
+  const program = EPSILON;
+  const predicate = encodeSourceFilters(sourceFiltersFrom(input, hints));
+  const sourceGuard: Guard | undefined = predicate === undefined ? undefined : {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "query_predicate",
+    verdict: "unresolved", time_scope: "none", predicate_name: predicate
+  };
   consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
   const holes = [uninterpretedQueryHole(), ...openEndpointHoles(hints)];
   const window = closedHintWindow(hints);
@@ -352,13 +359,15 @@ function compileLexicalRequest(
       interpretation_clock: input.interpretation_clock,
       time_window: window,
       authorized_scopes: input.authorized_scopes,
-      lexical_text: input.text
+      lexical_text: input.text,
+      source_guard: sourceGuard
     }),
     status: admissionStatus(program, holes, []),
     snapshot_id: snapshotId,
     program,
     view,
     holes,
+    source_guard: sourceGuard,
     interpretation_clock: input.interpretation_clock,
     ...(window === undefined ? {} : { time_window: window })
   });
@@ -444,6 +453,7 @@ function interpretationOf(input: {
   readonly status: QueryInterpretationStatus;
   readonly snapshot_id: string;
   readonly program: QueryProgram;
+  readonly source_guard?: Guard;
   readonly view: QueryView;
   readonly holes?: readonly QueryHole[];
   readonly hypotheses?: readonly QueryHypothesis[];
@@ -456,6 +466,7 @@ function interpretationOf(input: {
     status: input.status,
     snapshot_id: input.snapshot_id,
     program: input.program,
+    ...(input.source_guard === undefined ? {} : { source_guard: input.source_guard }),
     view: input.view,
     holes: input.holes ?? [],
     hypotheses: input.hypotheses ?? [],
@@ -601,6 +612,7 @@ function identityFor(
   queryId: string | undefined,
   parts: Readonly<{
     readonly program: QueryProgram;
+    readonly source_guard?: Guard;
     readonly view?: QueryView;
     readonly hypotheses?: readonly QueryHypothesis[];
     readonly interpretation_clock?: string;
@@ -620,7 +632,8 @@ function identityFor(
       time_window: parts.time_window ?? null,
       authorized_scopes: [...(parts.authorized_scopes ?? [])].sort(),
       lexical_text: parts.lexical_text ?? "",
-      ordinary_request: parts.ordinary_request ?? null
+      ordinary_request: parts.ordinary_request ?? null,
+      source_guard: parts.source_guard ?? null
     }), "utf8").digest("hex")
   );
 }

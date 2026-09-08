@@ -1,15 +1,15 @@
-import {
-  QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID,
-  QUERY_ENTITY_EXTRACTION_CAPTURE_OPERATOR_ID,
-  RECALL_FIELD_PREFIX_ORDERING_OPERATOR_ID,
-  RECALL_FIELD_SCORE_CALIBRATION_OPERATOR_ID,
-  RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID,
-  RECALL_FINITE_FIELD_CHANNEL_CAPTURE_OPERATOR_ID,
-  RECALL_RELEVANCE_UPPER_BOUND_OPERATOR_ID,
-  RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1,
-  RECALL_RETRIEVAL_FIELD_REFINEMENT_OPERATOR_ID
-} from "@do-soul/alaya-core";
+import { RECALL_FIELD_SELECTOR_EXCHANGE_BOUND_OPERATOR_ID } from "@do-soul/alaya-protocol";
 import { z } from "zod";
+
+// Archived diagnostic packets remain readable without loading their retired producers.
+const RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1 = [
+  "lexical_relaxed_exact", "lexical_relaxed_porter", "lexical_relaxed_trigram",
+  "lexical_expanded_exact", "lexical_expanded_porter", "lexical_expanded_trigram",
+  "lexical_anchor_exact", "lexical_anchor_porter", "lexical_anchor_trigram",
+  "synthesis_fts", "evidence_fts_exact", "evidence_fts_porter", "evidence_fts_trigram",
+  "object_embedding_pool", "object_embedding_workspace", "evidence_semantic",
+  "session_event_index", "explicit_pointer"
+] as const;
 
 const RecallFieldDigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 
@@ -29,7 +29,7 @@ const RecallFiniteFieldChannelSchema = z.object({
 
 export const RecallFiniteFieldChannelCaptureSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.literal(RECALL_FINITE_FIELD_CHANNEL_CAPTURE_OPERATOR_ID),
+  operator_id: z.literal("recall_finite_field_channel_capture_v1"),
   source_snapshot_digest: RecallFieldDigestSchema,
   channel: RecallFiniteFieldChannelSchema,
   capture_digest: RecallFieldDigestSchema
@@ -57,11 +57,11 @@ const RecallFieldLaneRefinementReceiptSchema = z.object({
 
 export const RecallRetrievalFieldRefinementReceiptSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.literal(RECALL_RETRIEVAL_FIELD_REFINEMENT_OPERATOR_ID),
+  operator_id: z.literal("recall_retrieval_field_refinement_v1"),
   activation_mode: z.literal("live"),
-  ordering_operator_id: z.literal(RECALL_FIELD_PREFIX_ORDERING_OPERATOR_ID),
+  ordering_operator_id: z.literal("ordered_object_source_prefix_v1"),
   score_calibration_operator_id:
-    z.literal(RECALL_FIELD_SCORE_CALIBRATION_OPERATOR_ID),
+    z.literal("grouped_ordinal_rank_v1"),
   request_digest: RecallFieldDigestSchema,
   source_snapshot_digest: RecallFieldDigestSchema,
   requested_depths: z.array(z.number().int().positive()).min(1).readonly(),
@@ -84,7 +84,7 @@ const RecallCoverageSelectionObjectiveReceiptSchema = z.object({
 
 const RecallRelevanceUpperBoundReceiptSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.literal(RECALL_RELEVANCE_UPPER_BOUND_OPERATOR_ID),
+  operator_id: z.literal("recall_relevance_upper_bound_v1"),
   score_operator_id: z.string().min(1),
   lower_bound: z.literal(0),
   upper_bound: z.literal(1),
@@ -160,7 +160,7 @@ const RecallEntityCandidateSchema = z.object({
 
 export const RecallQueryEntityExtractionCaptureSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.literal(QUERY_ENTITY_EXTRACTION_CAPTURE_OPERATOR_ID),
+  operator_id: z.literal("query_entity_extraction_capture_v1"),
   status: z.enum(["returned", "ineligible", "unavailable"]),
   query_text_digest: RecallFieldDigestSchema,
   producer_operator_id: z.string().min(1).nullable(),
@@ -188,7 +188,7 @@ const RecallQueryFactFrameCaptureFrameSchema = z.object({
 
 export const RecallQueryFactFrameExtractionCaptureSchema = z.object({
   schema_version: z.literal(1),
-  operator_id: z.literal(QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID),
+  operator_id: z.literal("query_fact_frame_extraction_capture_v1"),
   status: z.enum(["returned", "ineligible", "unavailable"]),
   query_text_digest: RecallFieldDigestSchema,
   producer_operator_id: z.string().min(1).nullable(),

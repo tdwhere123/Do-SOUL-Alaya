@@ -28,7 +28,7 @@ SELECT a.assertion_id, a.workspace_id, a.relation_kind,
        json_extract(a.anchors_json, '$.target_anchor.object_id') AS target_id,
        json_extract(a.formation_receipt_json, '$.parameters.result_object_id') AS result_id,
        a.validity_json, e.evidence_id, e.source_event_id, e.source_event_type, e.source_occurred_at, r.resolved_at, r.resolution_kind
-FROM relation_assertions a INDEXED BY idx_relation_recall_subject
+FROM relation_assertions a
 JOIN relation_assertion_evidence e ON e.assertion_id = a.assertion_id
 LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id AND r.workspace_id = a.workspace_id
 WHERE a.workspace_id = ? AND lower(json_extract(a.anchors_json, '$.source_anchor.object_id')) = ?
@@ -67,7 +67,7 @@ export class SqliteRelationRecallReader {
         committedThrough: afterAssertionId
       });
     }
-    const sql = subject === null ? READ_SQL.replace("idx_relation_recall_subject", "idx_relation_recall_predicate")
+    const sql = subject === null ? READ_SQL
       .replace(" AND lower(json_extract(a.anchors_json, '$.source_anchor.object_id')) = ?", "") : READ_SQL;
     const cursor = relationResumeParams(afterAssertionId);
     let boundedSql = sql.replace(

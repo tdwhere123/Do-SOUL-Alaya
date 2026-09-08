@@ -1,4 +1,6 @@
 import {
+  CONDITIONAL_FIELD_GENERATION_OPERATOR_ID,
+  CONDITIONAL_GOVERNANCE_FRONTIER_OPERATOR_ID,
   SoulEvidenceDeletedPayloadSchema,
   SoulEvidenceHealthChangedPayloadSchema,
   type FieldContractSha256,
@@ -10,8 +12,7 @@ import {
   digestRecallFieldIdentity,
   projectSourceFormationSnapshot,
   verifyProjectionGeneration,
-  type FieldFormationStores,
-  type SourceProjectionState
+  type FieldFormationStores
 } from "@do-soul/alaya-core";
 import {
   generationFromRow,
@@ -94,11 +95,11 @@ function rebuildActiveGeneration(
   recordedAt: string
 ): FieldProjectionGeneration {
   return input.database.connection.transaction(() => {
-    const source = readSourceSnapshot(input, workspaceId, recordedAt);
+    const source = readSourceSnapshot(input, workspaceId);
     const governanceFrontier = readGovernanceFrontier(input.database, workspaceId, recordedAt);
     const active = readActiveGeneration(input.generations, workspaceId);
     if (generationMatchesSnapshot(
-      store, active, source.input_event_frontier, governanceFrontier
+      active, source.input_event_frontier, governanceFrontier
     )) return active!;
     const rebuilt = rebuildGeneration({
       input, store, source, active, workspaceId, governanceFrontier, recordedAt
@@ -110,15 +111,11 @@ function rebuildActiveGeneration(
 
 function readSourceSnapshot(
   input: SqliteFieldProjectionLifecycleInput,
-  workspaceId: string,
-  recordedAt: string
+  workspaceId: string
 ) {
   return projectSourceFormationSnapshot({
     workspaceId,
-    stores: input.stores,
-    resolveState: ({ record, evidenceId, scope }) => readSourceState(
-      input.database, evidenceId, record, scope, recordedAt
-    )
+    stores: input.stores
   });
 }
 
@@ -131,15 +128,14 @@ function readActiveGeneration(
 }
 
 function generationMatchesSnapshot(
-  store: ReturnType<typeof createSqliteProjectionGenerationStore>,
   active: FieldProjectionGeneration | null,
   sourceFrontier: string,
   governanceFrontier: string
 ): boolean {
   return active !== null &&
+    active.producer === CONDITIONAL_FIELD_GENERATION_OPERATOR_ID &&
     active.input_event_frontier === sourceFrontier &&
-    active.governance_frontier === governanceFrontier &&
-    store.readArtifacts(active.workspace_id, active.generation_id) !== null;
+    active.governance_frontier === governanceFrontier;
 }
 
 function rebuildGeneration(params: Readonly<{
@@ -157,8 +153,7 @@ function rebuildGeneration(params: Readonly<{
     workspace_id: params.workspaceId,
     input_event_frontier: params.source.input_event_frontier,
     governance_frontier: params.governanceFrontier,
-    recorded_at: params.recordedAt,
-    sliceKeys: params.source.slice_keys
+    recorded_at: params.recordedAt
   });
   requireSynchronousAudit(appendGenerationRebuildStarted(params.input.eventLog, built.generation));
   const verified = verifyProjectionGeneration(
@@ -170,7 +165,7 @@ function rebuildGeneration(params: Readonly<{
     workspace_id: params.workspaceId,
     active_generation_id: verified.generation_id,
     activated_at: params.recordedAt
-  });
+  }, params.input.sha256);
   requireSynchronousAudit(appendGenerationActivated(
     params.input.eventLog,
     verified,
@@ -207,49 +202,9 @@ function readGovernanceFrontier(
     object_id,
     ...readEvidenceTemporalState(database, workspaceId, object_id, recordedAt)
   }));
-  return digestRecallFieldIdentity({ barriers, effects, evidence: evidenceStates });
-}
-
-function readSourceState(
-  database: StorageDatabase,
-  evidenceId: string,
-  record: Readonly<{
-    readonly workspace_id: string;
-    readonly event_time: string | null;
-    readonly valid_from: string | null;
-    readonly valid_to: string | null;
-  }>,
-  scope: string,
-  recordedAt: string
-): SourceProjectionState {
-  const evidence = readEvidenceTemporalHistory(
-    database, record.workspace_id, evidenceId, recordedAt
-  );
-  const effects = database.connection.prepare(`
-    SELECT action, effective_as_of
-    FROM proof_effect_decisions
-    WHERE workspace_id = ? AND target = ? AND decision = 'allow'
-      AND recorded_at <= ?
-      AND action IN ('activate', 'revoke', 'seal', 'erase')
-    ORDER BY effective_as_of, recorded_at, request_digest
-  `).all(record.workspace_id, evidenceId, recordedAt) as readonly Readonly<{
-    action: "activate" | "revoke" | "seal" | "erase";
-    effective_as_of: string;
-  }>[];
-  return Object.freeze({
-    scope,
-    event_time: record.event_time,
-    valid_from: record.valid_from,
-    valid_to: record.valid_to,
-    lifecycle_state: evidence.initial.lifecycle_state === "active" ? "active" : "inactive",
-    governance_state: evidence.initial.evidence_health_state === "verified"
-      ? "ordinary_evidence"
-      : "restricted",
-    sealed: false,
-    erased: false,
-    revoked: false,
-    evidence_transitions: evidence.transitions,
-    governance_effects: Object.freeze(effects.map((effect) => Object.freeze({ ...effect })))
+  return digestRecallFieldIdentity({
+    format: CONDITIONAL_GOVERNANCE_FRONTIER_OPERATOR_ID,
+    barriers, effects, evidence: evidenceStates
   });
 }
 

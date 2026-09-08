@@ -18,6 +18,7 @@ import {
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
 } from "../../../diagnostics/diagnostics.js";
+import { assembleQuestionDiagnostic } from "../../../diagnostics/question-assembly.js";
 
 const emptyQueryProbes = {
   object_ids: [],
@@ -452,6 +453,31 @@ describe("LongMemEval recall diagnostics", () => {
     });
     expect(parsed.fusion_breakdown[0]?.flood_potential?.fuel_verified).toBe(true);
     expect(parsed.fusion_breakdown[0]?.flood_fuel_coverage?.fuel_verified_count).toBe(1);
+  });
+
+  it("records absent rerank diagnostics as not_requested with zero scores", () => {
+    const assembled = assembleQuestionDiagnostic({
+      questionId: "absent-rerank",
+      goldMemoryIds: [],
+      answerSessionIds: [],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      recallResult: {},
+      embeddingMode: "disabled"
+    }, {
+      diagnostics: null,
+      deliveredResults: [],
+      activeConstraintResults: [],
+      gold: [],
+      candidates: []
+    });
+    expect(assembled.answer_rerank_status).toBe("not_requested");
+    expect(assembled.answer_rerank_expected_count).toBe(0);
+    expect(assembled.answer_rerank_scored_count).toBe(0);
+    expect(assembled.answer_rerank_failure_class).toBeNull();
   });
 
 });

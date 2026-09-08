@@ -23,7 +23,7 @@ import {
 } from "../reference/deployment.fixture.js";
 
 describe("request resource allowance", () => {
-  it("charges fallback pin capture and reserves seven units for a hydrated action", () => {
+  it("reserves hydration, identity admission, and solver work before reading a seed page", () => {
     let pinReads = 0;
     let sourceReads = 0;
     const readers = {
@@ -42,10 +42,12 @@ describe("request resource allowance", () => {
     expect(tiny.remaining_exploration).toBe(1);
     expect(tiny.last_observer_status).toBe("interrupted");
     const completedAction = observeField(query, { workspace_id: "workspace-1", query_text: "needle", as_of: INTERPRETATION_CLOCK,
-      budget: defaultBudget({ work_units: 11, finalization_reserve: 0, min_envelope: 0 }), readers });
+      budget: defaultBudget({ work_units: 13, finalization_reserve: 0, min_envelope: 0 }), readers });
     expect(pinReads).toBe(2);
     expect(sourceReads).toBe(1);
     expect(completedAction.remaining_exploration).toBe(0);
+    expect(completedAction.retention_rejected).toBeUndefined();
+    expect(completedAction.seeds).toHaveLength(1);
     expect(completedAction.closure.observation).not.toBe("exhausted");
   });
 

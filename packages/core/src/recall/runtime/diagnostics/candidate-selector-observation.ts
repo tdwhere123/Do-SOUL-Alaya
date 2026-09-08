@@ -1,7 +1,7 @@
 import type { MemoryEntry, PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
   RecallQueryDemandAtom
-} from "../../query/recall-query-demand.js";
+} from "./historical-answer-diagnostics.js";
 
 export type RecallSelectorDemandAtom = RecallQueryDemandAtom;
 

@@ -3,11 +3,9 @@ import {
   StorageTier,
   type EventLogEntry,
   type KarmaEvent,
-  type MemoryEntry,
-  type RecallPolicy
+  type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { DynamicsService, type DynamicsServiceDependencies } from "../../dynamics/dynamics-service.js";
-import { matchesPrecomputedRankFilter } from "../../recall/runtime/recall-service-helpers.js";
 import { createKarmaEvent, createMemoryEntry } from "./karma-fixtures.js";
 
 function createDecayHarness(getNow: () => string): {
@@ -95,7 +93,7 @@ function createDecayHarness(getNow: () => string): {
 }
 
 describe("lifecycle recall feedback", () => {
-  it("time-injected retention decay lowers stored activation and recall precomputed rank eligibility", async () => {
+  it("time-injected retention decay lowers stored activation and appends the lifecycle event", async () => {
     let nowIso = "2025-06-01T00:00:00.000Z";
     const createdAt = "2025-01-01T00:00:00.000Z";
     const { service, entriesById, appendedEvents } = createDecayHarness(() => nowIso);
@@ -121,10 +119,6 @@ describe("lifecycle recall feedback", () => {
     );
 
     const beforeActivation = entriesById.get("memory-decay")!.activation_score ?? 0;
-    const coarseFilter = {
-      precomputed_rank: { min_activation_score: beforeActivation - 0.01 }
-    } as RecallPolicy["coarse_filter"];
-    expect(matchesPrecomputedRankFilter(entriesById.get("memory-decay")!, coarseFilter)).toBe(true);
 
     nowIso = "2026-07-01T00:00:00.000Z";
     const result = await service.scanRetentionDecay("workspace-1");
@@ -133,7 +127,6 @@ describe("lifecycle recall feedback", () => {
     const updated = entriesById.get("memory-decay");
     expect(updated).toBeDefined();
     expect(updated!.activation_score).toBeLessThan(beforeActivation);
-    expect(matchesPrecomputedRankFilter(updated!, coarseFilter)).toBe(false);
     expect(
       appendedEvents.some((entry) => entry.event_type === "soul.memory.retention_updated")
     ).toBe(true);

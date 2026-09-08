@@ -107,22 +107,6 @@ export const SUPPORTED_RELATION_ALIASES: Readonly<Record<string, readonly string
   associated_history: Object.freeze(["service_history"])
 });
 
-export function lexicalStoredRelationProgram(guard?: Guard): QueryProgram {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    kind: "alternative",
-    options: [
-      { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "epsilon" },
-      relationProgram(
-        "lexical_observation",
-        "q",
-        "hit",
-        guard ?? associatedItemGuard("hit")
-      )
-    ]
-  };
-}
-
 export function uninterpretedQueryHole(): QueryHole {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

@@ -1,5 +1,6 @@
 import {
-  FIELD_OPERATOR_MANIFEST,
+  fieldProjectionGenerationContract,
+  FieldProjectionGenerationSchema,
   PROOF_EFFECT_OPERATOR_ID,
   PROOF_EFFECT_OPERATOR_VERSION,
   hashAddressableSourceSpanId,
@@ -12,8 +13,7 @@ import {
   hashGenerationId,
   hashIncidenceId,
   hashSourceRecordId,
-  type FieldContractSha256,
-  type FieldOperatorVersionEntry
+  type FieldContractSha256
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 import type { StorageDatabase } from "../../sqlite/db.js";
@@ -119,8 +119,11 @@ export function verifyPersistedGeneration(
   row: FieldProjectionGenerationRow,
   sha256: FieldContractSha256
 ): void {
-  const operators = parseOperatorVersions(row.operator_versions_json);
-  if (!sameOperators(operators, FIELD_OPERATOR_MANIFEST)) {
+  const operators = FieldProjectionGenerationSchema.unwrap().shape.operator_versions
+    .parse(JSON.parse(row.operator_versions_json)).map(([id, version]) => ({ id, version }));
+  try {
+    fieldProjectionGenerationContract(operators);
+  } catch {
     throw new StorageError("VALIDATION_FAILED", "projection generation operator list drift");
   }
   assertHashed("projection generation", row.generation_id, () => hashGenerationId({
@@ -185,28 +188,6 @@ function assertHashed(label: string, actual: string, compute: () => string): voi
   if (actual !== expected) {
     throw new StorageError("VALIDATION_FAILED", `${label} identity mismatch.`);
   }
-}
-
-function parseOperatorVersions(json: string): readonly FieldOperatorVersionEntry[] {
-  const parsed: unknown = JSON.parse(json);
-  if (!Array.isArray(parsed)) {
-    throw new StorageError("VALIDATION_FAILED", "operator versions must be an array.");
-  }
-  return parsed.map((entry) => {
-    if (!Array.isArray(entry) || entry.length !== 2) {
-      throw new StorageError("VALIDATION_FAILED", "operator version tuple is invalid.");
-    }
-    return { id: String(entry[0]), version: String(entry[1]) };
-  });
-}
-
-function sameOperators(
-  actual: readonly FieldOperatorVersionEntry[],
-  expected: readonly FieldOperatorVersionEntry[]
-): boolean {
-  return actual.length === expected.length &&
-    actual.every((entry, index) =>
-      entry.id === expected[index]?.id && entry.version === expected[index]?.version);
 }
 
 function compareCodeUnits(left: string, right: string): number {

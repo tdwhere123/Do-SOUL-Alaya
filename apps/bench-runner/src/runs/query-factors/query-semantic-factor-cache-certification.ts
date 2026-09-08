@@ -10,10 +10,10 @@ import {
 import {
   RuleBasedQueryFactFrameExtractor,
   captureRecallQueryFactFrames,
-  deriveQueryFactFrameOsfObligation,
   materializeOpenSemanticFactorFormation
 } from "@do-soul/alaya-core";
 import { OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID } from "@do-soul/alaya-soul";
+import { deriveQueryFactFrameOsfObligation } from "./query-semantic-factor-cache-obligation.js";
 
 export type CertifiedQueryCacheValue = Readonly<{
   capture: OpenSemanticFactorFormationCapture;

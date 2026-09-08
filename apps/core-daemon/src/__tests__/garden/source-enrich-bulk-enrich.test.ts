@@ -119,7 +119,8 @@ async function runTask(
           markProcessed: vi.fn(),
           recordFailedAttempt: vi.fn(),
           delete: vi.fn(),
-          countPending: vi.fn(() => 1)
+          countPending: vi.fn(() => 1),
+          reclaimStale: vi.fn(() => 0)
         },
         memoryLookup: { findById: vi.fn() },
         edgeProducer: { produceForNewMemory: vi.fn() },
@@ -161,7 +162,8 @@ describe("per-source bulk_enrich routing", () => {
             markProcessed: vi.fn(),
             recordFailedAttempt: vi.fn(),
             delete: vi.fn(),
-            countPending: vi.fn(() => 1)
+            countPending: vi.fn(() => 1),
+          reclaimStale: vi.fn(() => 0)
           },
           memoryLookup: { findById: vi.fn() },
           edgeProducer: { produceForNewMemory: vi.fn() },
@@ -270,7 +272,8 @@ describe("per-source bulk_enrich routing", () => {
             markProcessed: vi.fn(),
             recordFailedAttempt: vi.fn(),
             delete: vi.fn(),
-            countPending: vi.fn(() => 1)
+            countPending: vi.fn(() => 1),
+          reclaimStale: vi.fn(() => 0)
           },
           memoryLookup: { findById: vi.fn() },
           edgeProducer: { produceForNewMemory: vi.fn() },
@@ -311,7 +314,8 @@ describe("per-source bulk_enrich routing", () => {
             markProcessed: vi.fn(),
             recordFailedAttempt: vi.fn(),
             delete: vi.fn(),
-            countPending: vi.fn(() => 1)
+            countPending: vi.fn(() => 1),
+          reclaimStale: vi.fn(() => 0)
           },
           memoryLookup: { findById: vi.fn() },
           edgeProducer: { produceForNewMemory: vi.fn() },
@@ -366,7 +370,7 @@ describe("per-source bulk_enrich routing", () => {
     const h = await sourceHarness();
     const objectId = "aaaaaaaa-aaaa-4aaa-8aaa-000000000011";
     const taskId = await h.write(objectId, "Alice owns Orion");
-    const extract = vi.fn(async ({ userPrompt }: { userPrompt: string }) => ({
+    const extract = vi.fn(async ({ userPrompt }: { userPrompt: string; systemPrompt: string }) => ({
       rawJson: signalResponse(userPrompt)
     }));
     const runtime = createSourceEnrichmentRuntime({

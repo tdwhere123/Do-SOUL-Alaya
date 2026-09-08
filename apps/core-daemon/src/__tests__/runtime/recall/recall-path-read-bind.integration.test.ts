@@ -2,21 +2,16 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import BetterSqlite3 from "better-sqlite3";
 import {
-  MemoryDimension,
   RunMode,
   RunState,
-  ScopeClass,
   SignalEventType,
   type EvidenceCapsule,
-  type EventLogEntry,
-  type MemoryEntry
+  type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { EventPublisher, RelationAssertionService, stableStringify } from "@do-soul/alaya-core";
-import { loadActiveConstraints } from "../../../../../../packages/core/src/recall/runtime/orchestration.js";
-import { collectGovernancePathDerivations } from "../../../../../../packages/core/src/recall/supplements/supplementary-data-governance-paths.js";
 import {
   StorageDatabase,
   SqliteEvidenceCapsuleRepo,
@@ -28,7 +23,6 @@ import {
   initDatabase,
   isTemporalProjectionSelected
 } from "@do-soul/alaya-storage";
-import { createRecallActiveConstraintsPort } from "../../../runtime/recall-materialization/recall-materialization-recall-runtime.js";
 import {
   createBoundRecallPathReadPorts,
   resolveRecallPathReadBind
@@ -75,13 +69,8 @@ describe("typed path transfer bind seam", () => {
     expect(countActivePathProjections(database)).toBeGreaterThan(0);
     expect(resolveRecallPathReadBind({ database })).toBe("temporal");
 
-    const derivations = await collectLocatorDerivations(database);
-    const inflow = derivations.pathInflowByTarget[TARGET_ID] ?? [];
-    expect(derivations.pathInflowAvailability).toBe("available");
-    expect(inflow).toEqual(expect.arrayContaining([
-      expect.objectContaining({ pathId: PATH_ID, seedObjectId: SOURCE_ID, targetObjectId: TARGET_ID,
-        relationKind: "answers_with", weight: 0.75 })
-    ]));
+    const rows = await createBoundRecallPathReadPorts({ database }).findActiveByWorkspace(WORKSPACE_ID);
+    expect(rows.map((row) => row.path_id)).toContain(PATH_ID);
 
   });
 
@@ -93,43 +82,10 @@ describe("typed path transfer bind seam", () => {
     })).toBe("temporal");
   });
 
-  it("seals a historical as-of miss instead of aborting recall", async () => {
+  it("keeps a missing historical generation distinct from an empty relation domain", async () => {
     const database = openFixtureReadonly();
-    const historicalAsOf = "2023-05-30T23:40:00.000Z";
     const ports = createBoundRecallPathReadPorts({ database });
-    const candidates = [memory(SOURCE_ID), memory(TARGET_ID)];
-    const derivations = await collectGovernancePathDerivations({
-      dependencies: { pathExpansionPort: ports.pathExpansionPort },
-      warn: () => undefined,
-      workspaceId: WORKSPACE_ID,
-      pathProjectionAsOf: historicalAsOf,
-      candidates
-    });
-
-    expect(derivations.pathInflowAvailability).toBe("unavailable");
-
-    const warn = vi.fn();
-    const constraints = await loadActiveConstraints({
-      workspaceId: WORKSPACE_ID,
-      cap: null,
-      asOf: historicalAsOf,
-      warn,
-      activeConstraintsPort: createRecallActiveConstraintsPort({
-        memoryEntryRepo: { findByIds: vi.fn(async () => []) },
-        claimFormRepo: { findByStatus: vi.fn(async () => []) }
-      }, ports)
-    });
-    expect(constraints).toEqual({ constraints: [], total_count: 0 });
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(
-      "active constraints lookup skipped",
-      expect.objectContaining({
-        workspace_id: WORKSPACE_ID,
-        operation: "active_constraints",
-        errorName: "TemporalProjectionGenerationMissingError"
-      })
-    );
-    await expect(ports.findActiveByWorkspace(WORKSPACE_ID, { asOf: historicalAsOf }))
+    await expect(ports.findActiveByWorkspace(WORKSPACE_ID, { asOf: "2023-05-30T23:40:00.000Z" }))
       .rejects.toMatchObject({ name: "TemporalProjectionGenerationMissingError" });
   });
 });
@@ -146,14 +102,7 @@ describe("refresh-required path index", () => {
     expect(resolveRecallPathReadBind({ database })).toBe("temporal");
 
     const ports = createBoundRecallPathReadPorts({ database });
-    const candidates = [memory(SOURCE_ID), memory(TARGET_ID)];
-    const derivations = await collectGovernancePathDerivations({
-      dependencies: { pathExpansionPort: ports.pathExpansionPort },
-      warn: () => undefined,
-      workspaceId: WORKSPACE_ID,
-      candidates
-    });
-    expect(derivations.pathInflowAvailability).toBe("storage_error");
+    await expect(ports.findActiveByWorkspace(WORKSPACE_ID)).rejects.toThrow(/requires a refresh/);
   });
 
   it("fails closed when a ready state points at a missing active generation", async () => {
@@ -171,16 +120,6 @@ describe("refresh-required path index", () => {
     );
   });
 });
-
-async function collectLocatorDerivations(database: StorageDatabase) {
-  const ports = createBoundRecallPathReadPorts({ database });
-  return await collectGovernancePathDerivations({
-    dependencies: { pathExpansionPort: ports.pathExpansionPort },
-    warn: () => undefined,
-    workspaceId: WORKSPACE_ID,
-    candidates: [memory(SOURCE_ID), memory(TARGET_ID)]
-  });
-}
 
 function openFixtureReadonly(): StorageDatabase {
   if (fixtureDatabasePath === null) {
@@ -332,41 +271,4 @@ function countActivePathProjections(database: StorageDatabase): number {
     )
   `).get() as { n: number };
   return row.n;
-}
-
-function memory(objectId: string): MemoryEntry {
-  return {
-    object_id: objectId,
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-08-13T00:00:00.000Z",
-    updated_at: "2026-08-13T00:00:00.000Z",
-    created_by: "bind-seam-test",
-    dimension: MemoryDimension.FACT,
-    source_kind: "user",
-    formation_kind: "explicit",
-    scope_class: ScopeClass.PROJECT,
-    content: "typed path bind seam locator",
-    domain_tags: [],
-    evidence_refs: [],
-    facet_tags: null,
-    canonical_entities: null,
-    projection_schema_version: 1,
-    workspace_id: WORKSPACE_ID,
-    run_id: "run-bind-seam",
-    surface_id: null,
-    storage_tier: "hot",
-    activation_score: 0.5,
-    retention_score: 0.5,
-    manifestation_state: "full_eligible",
-    retention_state: "consolidated",
-    decay_profile: "stable",
-    confidence: 0.9,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: 0,
-    contradiction_count: 0,
-    superseded_by: null
-  };
 }

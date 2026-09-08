@@ -12,6 +12,10 @@ import { CoreError } from "../shared/errors.js";
 export { SOURCE_ENRICHMENT_CONTRACT };
 export const SOURCE_ENRICHMENT_QUEUE_HARD_CAP = 128;
 
+export function isSourceEnrichmentQueueBackpressure(error: unknown): boolean {
+  return error instanceof CoreError && error.subCode === "RETRYABLE_BACKPRESSURE";
+}
+
 export interface SourceWriteGardenIntentPort {
   enqueue(input: {
     readonly id?: string;

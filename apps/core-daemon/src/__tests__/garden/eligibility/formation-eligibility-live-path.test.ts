@@ -8,12 +8,12 @@ import { EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID } from
 import { FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID } from
   "../../../../../../packages/core/src/memory/evidence-create/evidence-semantic-completeness.js";
 import { binaryUseEvidenceSemanticGraph } from
-  "../../../../../../packages/core/src/__tests__/recall/supplementary-data-test-fixtures.js";
-import { EVIDENCE_ID } from "../../runtime/field/p217-planted-harness.js";
+  "../../../../../../packages/core/src/__tests__/memory/evidence-create/semantic-graph-fixture.js";
+import { EVIDENCE_ID, MEMORY_ID } from "../../runtime/field/p217-planted-harness.js";
 import {
   assertionSignal,
   ASSERTION,
-  collectLiveSupplement,
+  recallLiveSource,
   createdEvidenceId,
   f3CaptureJob,
   f3Factors,
@@ -25,12 +25,11 @@ import {
 } from "./formation-eligibility-live-path-fixture.js";
 
 const QUALIFIED_NEGATIVE_CASES = [
-  { name: "graphless", payload: {}, status: "unavailable", seal: "unavailable" },
+  { name: "graphless", payload: {}, status: "unavailable" },
   {
     name: "unbound",
     payload: { semantic_factor_graph: unboundEvidenceGraph() },
-    status: "rejected",
-    seal: "rejected"
+    status: "rejected"
   },
   {
     name: "gold-only",
@@ -38,8 +37,7 @@ const QUALIFIED_NEGATIVE_CASES = [
       gold_semantic_factor_graph: binaryUseEvidenceSemanticGraph(),
       gold_osf_ids: ["gold-atlas"]
     },
-    status: "unavailable",
-    seal: "unavailable"
+    status: "unavailable"
   }
 ] as const;
 
@@ -90,13 +88,9 @@ describe("formation eligibility live producer to consumer path", () => {
       )).toBeNull();
       expect(JSON.stringify(capture)).not.toContain("gold-atlas");
 
-      const supplement = await collectLiveSupplement(runtime.evidenceRepo, EVIDENCE_ID);
-      expect(supplement.semanticFactorFormationsByEvidenceId![EVIDENCE_ID]).toEqual(capture);
-      expect(supplement.openSemanticFactorCompatibilityTrace!).toMatchObject({
-        incomparable_seal: testCase.seal,
-        matchable_evidence_count: 0,
-        entries: []
-      });
+      const index = await recallLiveSource(runtime, EVIDENCE_ID);
+      expect(index.entries.find((entry) => entry.object_id === MEMORY_ID)?.claim).toBe("unknown");
+      expect(JSON.stringify(index)).not.toContain("gold-atlas");
     }
   );
 
@@ -142,14 +136,8 @@ describe("formation eligibility live producer to consumer path", () => {
       GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID
     )).toBeNull();
 
-    const supplement = await collectLiveSupplement(runtime.evidenceRepo, EVIDENCE_ID);
-    expect(supplement.semanticFactorFormationsByEvidenceId![EVIDENCE_ID]).toBeUndefined();
-    expect(supplement.openSemanticFactorCompatibilityTrace!).toMatchObject({
-      matchable_evidence_count: 0,
-      entries: []
-    });
-    expect(supplement.openSemanticFactorCompatibilityTrace!.incomparable_seal)
-      .not.toBe("rejected");
+    const index = await recallLiveSource(runtime, EVIDENCE_ID);
+    expect(index.entries.find((entry) => entry.object_id === MEMORY_ID)?.claim).toBe("unknown");
   });
 
   it("canonicalizes an incomplete Official API graph from the live fact-frame", async () => {
@@ -180,16 +168,11 @@ describe("formation eligibility live producer to consumer path", () => {
       operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID
     });
 
-    const supplement = await collectLiveSupplement(runtime.evidenceRepo, EVIDENCE_ID);
-    expect(supplement.semanticFactorFormationsByEvidenceId![EVIDENCE_ID]).toEqual(capture);
-    expect(supplement.openSemanticFactorCompatibilityTrace!).toMatchObject({
-      incomparable_seal: "none",
-      matchable_evidence_count: 1,
-      entries: [{ evidence_id: EVIDENCE_ID, receipt: { status: "compatible" } }]
-    });
+    const index = await recallLiveSource(runtime, EVIDENCE_ID);
+    expect(index.entries.find((entry) => entry.object_id === MEMORY_ID)?.claim).toBe("unknown");
   });
 
-  it("keeps a source-bound formed graph matchable on the same live path", async () => {
+  it("retains a source-bound formed graph without promoting it to Recall claim authority", async () => {
     const runtime = await openEligibilityRuntime();
     const received = await runtime.signalService.receiveSignal(
       assertionSignal("signal-formed", {
@@ -218,13 +201,8 @@ describe("formation eligibility live producer to consumer path", () => {
       operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID
     });
 
-    const supplement = await collectLiveSupplement(runtime.evidenceRepo, EVIDENCE_ID);
-    expect(supplement.semanticFactorFormationsByEvidenceId![EVIDENCE_ID]).toEqual(capture);
-    expect(supplement.openSemanticFactorCompatibilityTrace!).toMatchObject({
-      incomparable_seal: "none",
-      matchable_evidence_count: 1,
-      entries: [{ evidence_id: EVIDENCE_ID, receipt: { status: "compatible" } }]
-    });
+    const index = await recallLiveSource(runtime, EVIDENCE_ID);
+    expect(index.entries.find((entry) => entry.object_id === MEMORY_ID)?.claim).toBe("unknown");
   });
 });
 

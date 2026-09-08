@@ -249,6 +249,7 @@ export const QueryInterpretationSchema = z
     status: QueryInterpretationStatusSchema,
     snapshot_id: Sha256DigestSchema,
     program: QueryProgramSchema,
+    source_guard: GuardSchema.optional(),
     view: QueryViewSchema,
     holes: z.array(QueryHoleSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     hypotheses: z.array(QueryHypothesisSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),

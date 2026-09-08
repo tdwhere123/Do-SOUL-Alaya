@@ -7,12 +7,6 @@ import {
 } from "../../../memory/evidence-create/evidence-semantic-completeness.js";
 import { materializeOpenSemanticFactorFormation } from
   "../../../semantic/open-semantic-factor-formation.js";
-import { materializeOpenSemanticFactorCompatibility } from
-  "../../../recall/field/open-semantic-factors/compatibility.js";
-import { materializeOpenSemanticFactorCompatibilityTrace } from
-  "../../../recall/field/open-semantic-factors/compatibility-trace.js";
-import { materializeOpenSemanticFactorComposition } from
-  "../../../recall/field/open-semantic-factors/composition.js";
 import { rematerializeG8LiveFormation } from
   "../../recall/field/open-semantic-factors/fixtures/g8-live-formation.js";
 
@@ -49,10 +43,6 @@ describe("evidence semantic completeness", () => {
         }
       }
     });
-    expect(materializeOpenSemanticFactorCompatibility({
-      evidence_capture: certified.semanticFormation,
-      query_capture: graduationQueryFormation()
-    })).toMatchObject({ status: "compatible", matched_query_proposition_count: 1 });
   });
 
   it.each([
@@ -76,8 +66,7 @@ describe("evidence semantic completeness", () => {
         ["value", "redeemed a $5 coupon on coffee creamer last Sunday"]
       ] as const
     }
-  ])("keeps the $name negative control at no_match", ({ query, evidence, slots }) => {
-    const queryFormation = rematerializeG8LiveFormation(query);
+  ])("certifies the source-grounded $name formation", ({ evidence, slots }) => {
     const upstream = rematerializeG8LiveFormation(evidence);
     const source = evidence === "q2_evidence"
       ? "I've been listening to audiobooks during my daily commute, which takes 45 minutes each way."
@@ -87,20 +76,11 @@ describe("evidence semantic completeness", () => {
       factFrame: factFrame(source, slots),
       semanticFormation: upstream
     });
-    const trace = materializeOpenSemanticFactorCompatibilityTrace({
-      query_capture: queryFormation,
-      evidence_formations: { evidence: certified.semanticFormation }
-    });
 
     expect(certified).toMatchObject({
       receipt: { status: "certified" },
       semanticFormation: { status: "formed" }
     });
-    expect(materializeOpenSemanticFactorComposition({
-      trace,
-      query_capture: queryFormation,
-      evidence_formations: { evidence: certified.semanticFormation }
-    })).toMatchObject({ status: "no_match", solution_count: 0 });
   });
 
   it("does not reject a formed Garden graph when the fact-frame never formed", () => {
@@ -198,44 +178,6 @@ function graduationGraph() {
       }]
     }]
   };
-}
-
-function graduationQueryFormation() {
-  const source = "What degree did I graduate with?";
-  return materializeOpenSemanticFactorFormation({
-    source_kind: "query",
-    source_text: source,
-    proposal: {
-      schema_version: 1,
-      producer_operator_id: "open_semantic_factor_query_compiler_v9",
-      source_text: source,
-      graph: {
-        schema_version: 2,
-        source_kind: "query",
-        result_variable_ids: ["answer"],
-        propositions: [{
-          proposition_id: "query",
-          predicate_factor_id: "predicate",
-          arguments: [{
-            position: 0,
-            binding_identity: "graduatee",
-            reference_kind: "factor",
-            reference_id: "participant"
-          }, {
-            position: 1,
-            binding_identity: "degree",
-            reference_kind: "variable",
-            reference_id: "answer"
-          }]
-        }],
-        factors: [
-          factor("participant", "I", "i"),
-          factor("predicate", "graduate", "graduate")
-        ],
-        variables: [{ variable_id: "answer", surface: "What degree", source_occurrence: 0 }]
-      }
-    }
-  });
 }
 
 function factor(factorId: string, surface: string, semanticIdentity: string) {

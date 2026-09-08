@@ -1,6 +1,8 @@
 import { getCoreConfig } from "../runtime/config/install-core-config.js";
 
 export const DEFAULT_QUERY_TIMEOUT_MS = 2500;
+export const EMBEDDING_INJECTION_SIMILARITY_FLOOR = 0.5;
+export const EMBEDDING_MAX_INJECTED_DELIVERY = 10;
 export const MAX_QUERY_TIMEOUT_MS = 5000;
 export const MIN_QUERY_TIMEOUT_MS = 50;
 export const DEFAULT_QUERY_EMBEDDING_CACHE_SIZE = 512;

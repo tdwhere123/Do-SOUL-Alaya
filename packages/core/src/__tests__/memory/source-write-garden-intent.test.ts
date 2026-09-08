@@ -16,6 +16,7 @@ import { MemoryService } from "../../memory/memory-service.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
 import {
   SOURCE_ENRICHMENT_CONTRACT,
+  SOURCE_ENRICHMENT_QUEUE_HARD_CAP,
   admitSourceEnrichmentIntent,
   buildSourceEnrichmentTaskId
 } from "../../memory/source-write-garden-intent.js";
@@ -165,6 +166,46 @@ describe("W00 durable write garden intent", () => {
     await memory.create(memoryInput("deployment checklist lives in docs/runbook.md"));
     expect(garden.peekPending(GardenRole.LIBRARIAN, WS, 8)).toHaveLength(1);
     expect(enrichPending).toEqual([]);
+  });
+
+  it("defers source enrichment to enrich_pending when the Garden intent queue is full", async () => {
+    const enrichPending: Array<{ readonly memoryId: string }> = [];
+    const storage = await createRecallEmbeddingRealStorage((database) => databases.add(database));
+    const notify = { notify: async () => {}, notifyEntry: async () => {} };
+    const garden = {
+      findById: () => null,
+      peekPending: () => Array.from(
+        { length: SOURCE_ENRICHMENT_QUEUE_HARD_CAP },
+        () => ({})
+      ),
+      enqueue: () => {
+        throw new Error("Garden intent enqueue must not run after backpressure");
+      }
+    };
+    const memory = new MemoryService({
+      now: () => NOW,
+      generateObjectId: () => IDS.checklist,
+      evidenceService: {
+        findById: async (id) => storage.evidenceCapsuleRepo.findById(id),
+        findByIds: async (workspaceId, objectIds) =>
+          storage.evidenceCapsuleRepo.findByIds?.(workspaceId, objectIds) ?? []
+      },
+      eventLogRepo: storage.eventLogRepo,
+      memoryEntryRepo: storage.memoryEntryRepo,
+      gardenIntentPort: garden,
+      enrichPendingWriter: {
+        enqueue: (input) => {
+          enrichPending.push({ memoryId: input.memoryId });
+        }
+      },
+      runtimeNotifier: notify
+    });
+    const created = await memory.create(
+      memoryInput("deployment checklist lives in docs/runbook.md")
+    );
+    expect(created.object_id).toBe(IDS.checklist);
+    expect(await storage.memoryEntryRepo.findById(IDS.checklist)).not.toBeNull();
+    expect(enrichPending).toEqual([{ memoryId: IDS.checklist }]);
   });
 
   it("evidence create enqueues recoverable intent on the same connection", async () => {

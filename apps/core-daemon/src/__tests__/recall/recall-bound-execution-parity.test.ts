@@ -8,10 +8,9 @@ import {
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
 import {
-  buildRecallPolicy,
-  RecallService
+  buildRecallPolicy
 } from "@do-soul/alaya-core";
-import { createDependencies, createMemoryEntry, createTaskSurface } from
+import { createTaskSurface } from
   "../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { runProductionBoundRecall } from "../../mcp-memory/recall/recall-bound-service.js";
 import type { RecallUsageHandlerDependencies } from "../../mcp-memory/recall/recall-usage-handlers.js";
@@ -49,55 +48,6 @@ describe("invokeBoundRecall shared input contract", () => {
     });
     expect(recall).toHaveBeenCalledWith(expect.objectContaining(options));
     expect(recall.mock.calls[0]?.[0].budget).toBe(budget);
-  });
-
-  it("does not attach retired membership_shrink capture on production or benchmark bindings", async () => {
-    const policy = makeSharedPolicy();
-    const taskSurface = TaskObjectSurfaceSchema.parse({
-      runtime_id: policy.task_surface_ref,
-      object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-      task_surface_ref: null,
-      expires_at: null,
-      derived_from: null,
-      retention_policy: RetentionPolicy.SESSION_ONLY,
-      surface_kind: "mcp_memory_tool",
-      display_name: "membership failure",
-      context_refs: []
-    });
-    const memory = createMemoryEntry({
-      object_id: "membership-anchor", content: "membership failure anchor",
-      activation_score: 0.8
-    });
-    const { dependencies } = createDependencies([memory]);
-    const recallService = new RecallService({
-      ...dependencies,
-      defaultPolicyDecorator: (value) => value,
-      testOnlyTransformCoarseCandidates: () => []
-    });
-    const request: SoulMemorySearchRequest = {
-      query: "membership failure", max_results: 5, scope_class: null,
-      dimension: null, domain_tags: null
-    };
-    const production = await runProductionBoundRecall({
-      deps: { recallService } as unknown as RecallUsageHandlerDependencies,
-      request,
-      context: { workspaceId: "workspace-1", runId: null, agentTarget: "codex", sessionId: "s" },
-      taskSurface,
-      policyOverride: policy
-    });
-    const benchmark = await invokeBoundRecall({
-      sideEffectMode: "benchmark", recallService, taskSurface,
-      workspaceId: "workspace-1", strategy: "chat", policyOverride: policy
-    });
-
-    expect(production.capture_execution).not.toEqual({
-      status: "fail_closed", reason: "membership_shrink"
-    });
-    expect(benchmark.capture_execution).not.toEqual({
-      status: "fail_closed", reason: "membership_shrink"
-    });
-    expect(production.candidates).toEqual([]);
-    expect(benchmark.candidates).toEqual([]);
   });
 
   it("keeps production_mcp and benchmark wrappers on the same recall-service inputs", async () => {

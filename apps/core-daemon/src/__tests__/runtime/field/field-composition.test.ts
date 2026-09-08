@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  CONDITIONAL_FIELD_GENERATION_OPERATOR_ID,
+  FIELD_OPERATOR_MANIFEST,
   FACTOR_INCIDENCE_OPERATOR_ID,
   FieldGenerationEventType,
   MemoryGovernanceEventType,
   SoulEvidenceDeletedPayloadSchema,
   SoulEvidenceHealthChangedPayloadSchema,
   fieldReceiptContractFields,
+  fieldOperatorManifestDigest,
+  hashGenerationId,
   hashAddressableSourceSpanId,
   hashCausalUsageId,
   hashContentDigest,
@@ -14,14 +18,11 @@ import {
   hashSourceRecordId,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID
 } from "@do-soul/alaya-protocol";
-import {
-  fieldContractSha256,
-  INTERNED_SOURCE_STATE_ARTIFACTS_FORMAT,
-  parseProjectionGenerationArtifacts,
-  type SourceProjectionSliceKey
-} from "@do-soul/alaya-core";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
 import {
   initDatabase,
+  generationFromRow,
+  generationToRow,
   SqliteEventLogRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
@@ -37,11 +38,10 @@ afterEach(() => {
 });
 
 describe("field composition", () => {
-  it("does not rebuild a missing generation from the query path", () => {
-    const { database, fieldRepos, querySession } = openComposition();
-
-    expect(() => querySession.pinActiveGeneration("workspace-1", CLOCK))
-      .toThrow(/active projection generation is missing/u);
+  it("does not expose a retired selector or create a generation on construction", () => {
+    const field = openComposition();
+    const { database, fieldRepos } = field;
+    expect(field).not.toHaveProperty("querySession");
     expect(fieldRepos.generations.readActive("workspace-1")).toBeNull();
     expect(database.connection.prepare(`
       SELECT COUNT(*) AS n FROM projection_generations WHERE workspace_id = ?
@@ -79,41 +79,57 @@ describe("field composition", () => {
   });
 
   it("rebuilds a sealed frontier twice with the same generation and activates the pointer", () => {
-    const { database, fieldRepos, querySession, stores } = openComposition();
+    const { database, fieldRepos, projectionLifecycle, stores } = openComposition();
     seedProjectionSource(stores);
-    const first = querySession.pinActiveGeneration("workspace-1", CLOCK);
-    const second = querySession.pinActiveGeneration("workspace-1", CLOCK);
+    const first = projectionLifecycle.rebuild("workspace-1", CLOCK);
+    const second = projectionLifecycle.rebuild("workspace-1", CLOCK);
     const active = fieldRepos.generations.readActive("workspace-1");
     expect(second.generation_id).toBe(first.generation_id);
     expect(active?.generation_id).toBe(first.generation_id);
     expect(active?.status).toBe("active");
-    const stored = fieldRepos.generations.readArtifacts("workspace-1", first.generation_id);
-    expect(stored).not.toBeNull();
-    const storedGraph = JSON.parse(stored!.artifacts_json) as {
-      readonly artifacts_format?: string;
-      readonly slice_keys: ReadonlyArray<{ readonly source_state?: unknown }>;
+    expect(fieldRepos.generations.readArtifacts("workspace-1", first.generation_id)).toBeNull();
+  });
+
+  it("replaces an active historical manifest even when its source and governance frontiers match", () => {
+    const { fieldRepos, projectionLifecycle } = openComposition();
+    const current = projectionLifecycle.rebuild("workspace-1", CLOCK);
+    const digest = fieldOperatorManifestDigest(fieldContractSha256);
+    const identity = hashGenerationId({
+      operators: FIELD_OPERATOR_MANIFEST, operator_manifest_digest: digest,
+      field_schema_version: current.field_schema_version,
+      input_event_frontier: current.input_event_frontier,
+      governance_frontier: current.governance_frontier
+    }, fieldContractSha256);
+    const historical = {
+      ...current, identity, generation_id: identity, status: "shadow" as const,
+      producer: "projection_generation_v1", consumer: "activation",
+      operator_manifest_digest: digest,
+      operator_versions: FIELD_OPERATOR_MANIFEST.map(({ id, version }) => [id, version] as [string, string])
     };
-    expect(storedGraph.artifacts_format).toBe(INTERNED_SOURCE_STATE_ARTIFACTS_FORMAT);
-    expect(storedGraph.slice_keys[0]?.source_state).toBeUndefined();
-    const activated = database.connection.prepare(`
-      SELECT COUNT(*) AS n FROM event_log WHERE event_type = ? AND workspace_id = ?
-    `).get(
-      FieldGenerationEventType.SOUL_FIELD_GENERATION_ACTIVATED,
-      "workspace-1"
-    ) as { readonly n: number };
-    expect(activated.n).toBeGreaterThan(0);
+    const repo = fieldRepos.generations;
+    repo.insert(generationToRow(historical));
+    repo.persistStatus("workspace-1", identity, "verified");
+    repo.activatePointer({ workspace_id: "workspace-1", active_generation_id: identity, activated_at: CLOCK });
+    repo.pin({ workspace_id: "workspace-1", generation_id: identity, reader_id: "historical-reader",
+      pinned_at: CLOCK, expires_at: "2026-08-17T00:00:00.000Z", released_at: null });
+
+    const rebuilt = projectionLifecycle.rebuild("workspace-1", CLOCK);
+    expect(rebuilt.generation_id).toBe(current.generation_id);
+    expect(rebuilt.producer).toBe(CONDITIONAL_FIELD_GENERATION_OPERATOR_ID);
+    expect(rebuilt.consumer).toBe("conditional_field_snapshot");
+    expect(generationFromRow(repo.readPinned("workspace-1", identity)!).producer).toBe("projection_generation_v1");
   });
 
   it("replays one sealed frontier byte-identically across query clocks", () => {
-    const { database, fieldRepos, projectionLifecycle, querySession, stores } = openComposition();
+    const { database, fieldRepos, projectionLifecycle, stores } = openComposition();
     seedProjectionSource(stores);
-    const first = querySession.pinActiveGeneration("workspace-1", CLOCK);
-    const before = fieldRepos.generations.readArtifacts("workspace-1", first.generation_id)!;
+    const first = projectionLifecycle.rebuild("workspace-1", CLOCK);
+    const before = first.input_event_frontier;
     const intervening = stores.putRecord(
       sourceRecord("Ada revised notes."),
       "Ada revised notes."
     );
-    const second = querySession.pinActiveGeneration(
+    const second = projectionLifecycle.rebuild(
       "workspace-1",
       "2026-08-16T00:01:00.000Z"
     );
@@ -123,14 +139,13 @@ describe("field composition", () => {
     `).run("workspace-1", intervening.identity);
     projectionLifecycle.rebuild("workspace-1", "2026-08-16T00:02:00.000Z");
 
-    const replay = querySession.pinActiveGeneration(
+    const replay = projectionLifecycle.rebuild(
       "workspace-1",
       "2026-08-16T00:02:00.000Z"
     );
-    const after = fieldRepos.generations.readArtifacts("workspace-1", replay.generation_id)!;
     expect(replay.generation_id).toBe(first.generation_id);
-    expect(after.artifact_digest).toBe(before.artifact_digest);
-    expect(after.artifacts_json).toBe(before.artifacts_json);
+    expect(replay.input_event_frontier).toBe(before);
+    expect(fieldRepos.generations.readArtifacts("workspace-1", replay.generation_id)).toBeNull();
     const pointer = database.connection.prepare(`
       SELECT activated_at FROM projection_generation_pointer WHERE workspace_id = ?
     `).get("workspace-1") as { readonly activated_at: string };
@@ -149,10 +164,10 @@ describe("field composition", () => {
 
   it("rebuilds when authoritative evidence health changes", () => {
     const {
-      database, eventLogRepo, fieldRepos, projectionLifecycle, querySession, stores
+      database, eventLogRepo, fieldRepos, projectionLifecycle, stores
     } = openComposition();
     seedProjectionSource(stores);
-    const first = querySession.pinActiveGeneration("workspace-1", CLOCK);
+    const first = projectionLifecycle.rebuild("workspace-1", CLOCK);
     eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_HEALTH_CHANGED,
       entity_type: "evidence_capsule",
@@ -190,27 +205,18 @@ describe("field composition", () => {
     const next = projectionLifecycle.rebuild(
       "workspace-1", "2026-08-16T00:02:00.000Z"
     );
-    const artifacts = parseStoredArtifacts(fieldRepos.generations.readArtifacts(
-      "workspace-1",
-      next.generation_id
-    )!);
     expect(next.generation_id).not.toBe(first.generation_id);
-    expect(sourceStateOf(artifacts.slice_keys[0])).toMatchObject({
-      lifecycle_state: "active",
-      governance_state: "ordinary_evidence",
-      evidence_transitions: [expect.objectContaining({
-        kind: "health",
-        to_state: "broken"
-      })]
-    });
+    expect(next.governance_frontier).not.toBe(first.governance_frontier);
+    expect(next.input_event_frontier).toBe(first.input_event_frontier);
+    expect(fieldRepos.generations.readArtifacts("workspace-1", next.generation_id)).toBeNull();
   });
 
   it("reconstructs evidence lifecycle before and after deletion", () => {
     const {
-      database, eventLogRepo, fieldRepos, projectionLifecycle, querySession, stores
+      database, eventLogRepo, fieldRepos, projectionLifecycle, stores
     } = openComposition();
     seedProjectionSource(stores);
-    const first = querySession.pinActiveGeneration("workspace-1", CLOCK);
+    const first = projectionLifecycle.rebuild("workspace-1", CLOCK);
     eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_DELETED,
       entity_type: "evidence_capsule",
@@ -247,50 +253,10 @@ describe("field composition", () => {
     const current = projectionLifecycle.rebuild(
       "workspace-1", "2026-08-16T00:02:00.000Z"
     );
-    const artifacts = parseStoredArtifacts(fieldRepos.generations.readArtifacts(
-      "workspace-1", current.generation_id
-    )!);
-    expect(sourceStateOf(artifacts.slice_keys[0])).toMatchObject({
-      lifecycle_state: "active",
-      evidence_transitions: [expect.objectContaining({
-        kind: "lifecycle",
-        to_state: "deleted"
-      })]
-    });
-  });
-
-  it("retains a retired generation while its reader lease is renewed", () => {
-    const { fieldRepos, querySession, stores } = openComposition();
-    seedProjectionSource(stores);
-    const first = querySession.pinActiveGeneration("workspace-1", CLOCK);
-    const renewed = querySession.renew(first, "2026-08-16T00:04:00.000Z");
-    stores.putRecord(sourceRecord("Ada revised notes."), "Ada revised notes.");
-
-    const next = querySession.pinActiveGeneration(
-      "workspace-1",
-      "2026-08-16T00:06:00.000Z"
-    );
-    expect(next.generation_id).not.toBe(first.generation_id);
-    expect(fieldRepos.generations.readPinned("workspace-1", first.generation_id)).not.toBeNull();
-
-    const released = querySession.release(renewed, "2026-08-16T00:06:01.000Z");
-    expect(released).toMatchObject({
-      reader_id: first.reader_id,
-      released_at: "2026-08-16T00:06:01.000Z"
-    });
-    expect(fieldRepos.generations.readPinned("workspace-1", first.generation_id)).toBeNull();
-  });
-
-  it("fails closed when an expired reader was collected before release", () => {
-    const { fieldRepos, querySession, stores } = openComposition();
-    seedProjectionSource(stores);
-    const first = querySession.pinActiveGeneration("workspace-1", CLOCK);
-    stores.putRecord(sourceRecord("Ada revised notes."), "Ada revised notes.");
-
-    querySession.pinActiveGeneration("workspace-1", "2026-08-16T00:06:00.000Z");
-    expect(fieldRepos.generations.readPinned("workspace-1", first.generation_id)).toBeNull();
-    expect(() => querySession.release(first, "2026-08-16T00:06:01.000Z"))
-      .toThrow(/projection pin is missing/u);
+    expect(current.generation_id).not.toBe(first.generation_id);
+    expect(current.governance_frontier).not.toBe(first.governance_frontier);
+    expect(current.input_event_frontier).toBe(first.input_event_frontier);
+    expect(fieldRepos.generations.readArtifacts("workspace-1", current.generation_id)).toBeNull();
   });
 
   it("retains source and drains the durable rebuild request after restart", () => {
@@ -347,22 +313,6 @@ function openComposition() {
       sha256: fieldContractSha256
     })
   };
-}
-
-function parseStoredArtifacts(row: Readonly<{
-  readonly generation_id: string;
-  readonly artifact_digest: string;
-  readonly artifacts_json: string;
-}>) {
-  return parseProjectionGenerationArtifacts(
-    JSON.parse(row.artifacts_json),
-    row.generation_id,
-    row.artifact_digest
-  );
-}
-
-function sourceStateOf(key: unknown) {
-  return (key as SourceProjectionSliceKey | undefined)?.source_state;
 }
 
 function seedProjectionSource(

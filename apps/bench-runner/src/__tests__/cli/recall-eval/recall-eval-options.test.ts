@@ -27,15 +27,11 @@ describe("recall-eval CLI options", () => {
     });
   });
 
-  it("forwards the immutable query semantic factor cache", () => {
-    const flags = parseFlags([
+  it("rejects the retired query semantic factor cache", () => {
+    expect(() => parseFlags([
       "--snapshot", "/tmp/source.db",
       "--query-semantic-factor-cache", "/tmp/query-cache.json"
-    ]);
-
-    expect(buildRecallEvalOptions(flags, flags.snapshot!)).toMatchObject({
-      querySemanticFactorCachePath: "/tmp/query-cache.json"
-    });
+    ])).toThrow(/retired/);
   });
 
   it("forwards process-shard concurrency", () => {

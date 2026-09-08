@@ -1,179 +1,80 @@
 import { describe, expect, it } from "vitest";
+import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
+import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import {
-  MemoryDimension,
-  MemorySearchResultSchema,
-  ScopeClass,
-  SoulMemorySearchResponseSchema,
-  type MemorySearchResult,
-  type RecallCandidate,
-  type RecallPolicy
-} from "@do-soul/alaya-protocol";
-import {
-  buildMemorySearchResult,
-  buildRecallStrategyMix,
+  encodeIndexResults,
+  frameEncodedIndex,
   resolveMcpDegradationReason,
   selectRecallMcpHonestyDiagnostics
 } from "../../../mcp-memory/recall/recall-result.js";
 
-const GOLDEN_MCP_RECALL_RESULT = Object.freeze({
-  object_id: "memory-1",
-  object_kind: "memory_entry",
-  relevance_score: 0.5,
-  content_preview: "Recall content",
-  evidence_pointers: ["memory-1"],
-  selection_reason:
-    "Selected by workspace recall. Final fusion evidence score 0.500000; " +
-    "diagnostic supporting signals: activation 0.800, graph support 0.400.",
-  source_channels: ["ranked_recall", "workspace_local"],
-  score_factors: Object.freeze({
-    activation: 0.8,
-    relevance: 0.5,
-    graph_support: 0.4
-  }),
-  budget_state: Object.freeze({
-    token_estimate: 4,
-    max_entries: 10,
-    max_total_tokens: 100,
-    remaining_entries: 9,
-    remaining_tokens: 96,
-    within_budget: true
-  })
-});
+import { context, createDeps, stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 
-describe("buildMemorySearchResult", () => {
-  it("projects the final relevance scalar into MCP reason and score factors", () => {
-    const candidate: RecallCandidate = {
-      object_id: "memory-1",
-      object_kind: "memory_entry",
-      activation_score: 0.8,
-      relevance_score: 0.5,
-      content_preview: "Recall content",
-      token_estimate: 4,
-      manifestation: "full_eligible",
-      dimension: MemoryDimension.PROCEDURE,
-      scope_class: ScopeClass.PROJECT,
-      origin_plane: "workspace_local",
-      selection_reason: GOLDEN_MCP_RECALL_RESULT.selection_reason,
-      score_factors: {
-        activation: 0.8,
-        relevance: 0.5,
-        graph_support: 0.4
-      }
+describe("conditional-field result encoding", () => {
+  it("rejects a missing authoritative index before recording any delivery", async () => {
+    const deps = createDeps();
+    const recall = deps.recallService.recall;
+    deps.recallService.recall = async (input) => {
+      const malformed = { ...await recall(input) };
+      Reflect.deleteProperty(malformed, "index");
+      return malformed;
     };
-
-    const result = buildMemorySearchResult(candidate, createPolicy(), 0, 0);
-
-    expect(result.relevance_score).toBe(0.5);
-    expect(result.selection_reason).toBe(candidate.selection_reason);
-    expect(result.selection_reason).toContain("Final fusion evidence score 0.500000");
-    expect(result.selection_reason).toContain("diagnostic supporting signals");
-    expect(result.score_factors).toMatchObject({
-      activation: 0.8,
-      relevance: 0.5,
-      graph_support: 0.4
+    const handler = createRecallHandler({
+      deps,
+      now: () => "2026-09-08T00:00:00.000Z",
+      generateId: () => "00000000-0000-4000-8000-000000000001",
+      warn: () => undefined
     });
+    await expect(handler({
+      query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null
+    }, context)).rejects.toThrow(/requires an authoritative index/);
+    expect(deps.trustStateRecorder.recordDelivery).not.toHaveBeenCalled();
   });
 
-  it("freezes the MCP soul.recall result shape as a golden fixture", () => {
-    const candidate: RecallCandidate = {
-      object_id: GOLDEN_MCP_RECALL_RESULT.object_id,
-      object_kind: "memory_entry",
-      activation_score: GOLDEN_MCP_RECALL_RESULT.score_factors.activation,
-      relevance_score: GOLDEN_MCP_RECALL_RESULT.relevance_score,
-      content_preview: GOLDEN_MCP_RECALL_RESULT.content_preview,
-      token_estimate: GOLDEN_MCP_RECALL_RESULT.budget_state.token_estimate,
-      manifestation: "full_eligible",
-      dimension: MemoryDimension.PROCEDURE,
-      scope_class: ScopeClass.PROJECT,
-      origin_plane: "workspace_local",
-      selection_reason: GOLDEN_MCP_RECALL_RESULT.selection_reason,
-      source_channels: GOLDEN_MCP_RECALL_RESULT.source_channels,
-      score_factors: { ...GOLDEN_MCP_RECALL_RESULT.score_factors }
-    };
-
-    const result = buildMemorySearchResult(candidate, createPolicy(), 0, 0);
-    const parsed = MemorySearchResultSchema.parse(result);
-
-    expect(parsed).toEqual(GOLDEN_MCP_RECALL_RESULT);
-    expect(Object.keys(parsed.score_factors).sort()).toEqual(
-      ["activation", "graph_support", "relevance"].sort()
-    );
-    expect(typeof parsed.selection_reason).toBe("string");
-    expect(typeof parsed.score_factors.activation).toBe("number");
-    expect(typeof parsed.score_factors.relevance).toBe("number");
-  });
-
-  it("keeps MCP soul.recall JSON free of query-proof delivery packs", () => {
-    const candidate: RecallCandidate = {
-      object_id: GOLDEN_MCP_RECALL_RESULT.object_id,
-      object_kind: "memory_entry",
-      activation_score: GOLDEN_MCP_RECALL_RESULT.score_factors.activation,
-      relevance_score: GOLDEN_MCP_RECALL_RESULT.relevance_score,
-      content_preview: GOLDEN_MCP_RECALL_RESULT.content_preview,
-      token_estimate: GOLDEN_MCP_RECALL_RESULT.budget_state.token_estimate,
-      manifestation: "full_eligible",
-      dimension: MemoryDimension.PROCEDURE,
-      scope_class: ScopeClass.PROJECT,
-      origin_plane: "workspace_local",
-      selection_reason: GOLDEN_MCP_RECALL_RESULT.selection_reason,
-      source_channels: GOLDEN_MCP_RECALL_RESULT.source_channels,
-      score_factors: { ...GOLDEN_MCP_RECALL_RESULT.score_factors }
-    };
-    const parsed = MemorySearchResultSchema.parse(
-      buildMemorySearchResult(candidate, createPolicy(), 0, 0)
-    );
-    const json = JSON.stringify(parsed);
-    expect(json).not.toContain("delivery_pack");
-    expect(json).not.toContain("query_proof_delivery_pack_v1");
-    expect(json).not.toContain("best_effort_uncertified");
-  });
-});
-
-describe("buildRecallStrategyMix", () => {
-  it("keeps semantic_supplement false when embedding is disabled even if scores look semantic", () => {
-    const results: MemorySearchResult[] = [
-      {
+  it("encodes only the authoritative index in product order", () => {
+    const index = {
+      ...stubRecallIndex([]),
+      entries: [{
         object_id: "memory-1",
-        object_kind: "memory_entry",
-        relevance_score: 0.9,
-        content_preview: "semantic-looking hit",
-        evidence_pointers: ["memory-1"],
-        selection_reason: "Selected by workspace recall.",
-        source_channels: ["ranked_recall", "workspace_local", "semantic_supplement"],
-        score_factors: {
-          activation: 0.5,
-          relevance: 0.9,
-          embedding_similarity: 0.88
-        },
-        budget_state: {
-          token_estimate: 4,
-          max_entries: 10,
-          max_total_tokens: 100,
-          remaining_entries: 9,
-          remaining_tokens: 96,
-          within_budget: true
-        }
-      }
-    ];
-
-    const mix = buildRecallStrategyMix(createPolicy(), results, {
-      embedding_supplement_status: "disabled"
+        association_milligrades: 500,
+        schema_version: 1 as const,
+        claim: "unknown" as const,
+        role: "requested" as const,
+        explanation_ids: [],
+        hypothesis_id: "h1",
+        program_state: "accept",
+        output_binding: "memory-1"
+      }],
+      representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
+    };
+    const results = encodeIndexResults(index, new Map([["memory-1", "Recall content"]]));
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      object_id: "memory-1",
+      hypothesis_id: "h1",
+      program_state: "accept",
+      output_binding: "memory-1",
+      source_channels: ["conditional_field"],
+      evidence_pointers: []
     });
-
-    expect(mix.semantic_supplement).toBe(false);
+    expect(results[0]?.selection_reason).not.toContain("fusion");
+    expect(frameEncodedIndex(index, results)).toBe(index);
   });
 
-  it("sets semantic_supplement true only when embedding_supplement_status is requested", () => {
-    const mix = buildRecallStrategyMix(createPolicy(), [], {
-      embedding_supplement_status: "requested"
-    });
-    expect(mix.semantic_supplement).toBe(true);
-
-    expect(
-      buildRecallStrategyMix(createPolicy(), [], {
-        embedding_supplement_status: "provider_missing"
-      }).semantic_supplement
-    ).toBe(false);
+  it("preserves the index and exposes payload omission when encoding cannot fit", () => {
+    const index = {
+      ...stubRecallIndex([]),
+      entries: [{
+        schema_version: 1 as const, object_id: "memory-1", hypothesis_id: "h1",
+        output_binding: "memory-1", role: "requested" as const, explanation_ids: [],
+        association_milligrades: 500, claim: "unknown" as const
+      }],
+      representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
+    };
+    const results = encodeIndexResults(index, new Map([["memory-1", "too large"]]), 1);
+    expect(results).toEqual([]);
+    expect(frameEncodedIndex(index, results).entries).toEqual(index.entries);
+    expect(frameEncodedIndex(index, results).completeness.payload).toBe("omitted");
   });
 });
 
@@ -327,41 +228,6 @@ describe("resolveMcpDegradationReason", () => {
     ).toBe("cold_cascade_engaged");
   });
 
-  it("names ranking_authority on the packet and does not treat relevance as ranking", () => {
-    const parsed = SoulMemorySearchResponseSchema.parse({
-      delivery_id: "delivery-1",
-      protocol_version: 1,
-      results: [],
-      total_count: 0,
-      strategy_mix: {
-        deterministic_match: true,
-        precomputed_rank: true,
-        semantic_supplement: false,
-        graph_support: false,
-        path_plasticity: false,
-        global_recall: false
-      },
-      delivery_path: "canonical",
-      ranking_authority: "prefix_sk",
-      capture_identity: {
-        algorithm_id: "alaya.recall.shadow.safe-dominance-capture.v1",
-        version: "safe-dominance-capture.v1.0.1",
-        digest: "384af589ca9be6791147016463a44519aa9405a70d694cf38a1db9b8991913cd"
-      },
-      capture_execution: {
-        status: "fail_closed",
-        reason: "psi_cycle_contract_failure"
-      }
-    });
-    expect(parsed.ranking_authority).toBe("prefix_sk");
-    expect(parsed.delivery_path).toBe("canonical");
-    expect(parsed.results).toEqual([]);
-    expect(parsed.capture_execution).toEqual({
-      status: "fail_closed",
-      reason: "psi_cycle_contract_failure"
-    });
-  });
-
   it("emits schema-valid SoulMemorySearchResponse degradation_reason values", () => {
     for (const reason of [
       "provider_missing",
@@ -414,22 +280,3 @@ describe("selectRecallMcpHonestyDiagnostics", () => {
     expect(selectRecallMcpHonestyDiagnostics(null)).toBeNull();
   });
 });
-
-
-function createPolicy(): RecallPolicy {
-  return {
-    coarse_filter: {
-      precomputed_rank: {
-        max_candidates: 10
-      }
-    },
-    fine_assessment: {
-      conflict_awareness: false,
-      budgets: {
-        max_entries: 10,
-        max_total_tokens: 100,
-        per_dimension_limits: null
-      }
-    }
-  } as RecallPolicy;
-}

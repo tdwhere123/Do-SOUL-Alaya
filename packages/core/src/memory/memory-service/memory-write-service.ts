@@ -29,6 +29,7 @@ import type { MemoryObjectKeyWriter } from "../object-keys/write-service.js";
 import {
   SOURCE_ENRICHMENT_CONTRACT,
   admitSourceEnrichmentIntent,
+  isSourceEnrichmentQueueBackpressure,
   type SourceWriteGardenIntentPort
 } from "../source-write-garden-intent.js";
 import {
@@ -441,15 +442,24 @@ export class MemoryWriteService {
       return;
     }
     if (this.dependencies.gardenIntentPort !== undefined) {
-      admitSourceEnrichmentIntent(this.dependencies.gardenIntentPort, {
-        workspaceId,
-        sourceObjectId,
-        sourceRevision,
-        enrichmentContract: SOURCE_ENRICHMENT_CONTRACT,
-        runId: enqueueEnrichment.runId,
-        createdAt
-      });
-      return;
+      try {
+        admitSourceEnrichmentIntent(this.dependencies.gardenIntentPort, {
+          workspaceId,
+          sourceObjectId,
+          sourceRevision,
+          enrichmentContract: SOURCE_ENRICHMENT_CONTRACT,
+          runId: enqueueEnrichment.runId,
+          createdAt
+        });
+        return;
+      } catch (error) {
+        if (
+          !isSourceEnrichmentQueueBackpressure(error) ||
+          this.dependencies.enrichPendingWriter === undefined
+        ) {
+          throw error;
+        }
+      }
     }
     this.dependencies.enrichPendingWriter?.enqueue({
       workspaceId,

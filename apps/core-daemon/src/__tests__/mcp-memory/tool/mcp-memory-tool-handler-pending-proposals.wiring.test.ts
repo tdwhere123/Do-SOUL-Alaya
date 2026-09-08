@@ -1,3 +1,4 @@
+import { stubRecallIndex } from "./mcp-memory-tool-handler-fixture.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
@@ -158,6 +159,7 @@ function createDeps(options: CreateDepsOptions = {}): McpMemoryToolHandlerDepend
     generateId: () => `00000000-0000-4000-8000-${String(++idCounter).padStart(12, "0")}`,
     recallService: {
       recall: vi.fn(async () => ({
+        index: stubRecallIndex([]),
         candidates: [],
         active_constraints: [],
         active_constraints_count: 0,

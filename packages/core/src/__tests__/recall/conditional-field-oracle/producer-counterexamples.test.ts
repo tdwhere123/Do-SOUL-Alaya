@@ -80,7 +80,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     tombstone(slice, SECRET);
     await slice.writeMemory(GLOBAL, "yesterday failed deployment global_core copy", MemoryDimension.EPISODE);
     setScope(slice, GLOBAL, ScopeClass.GLOBAL_CORE);
-    await slice.writeMemory(EXPIRED, "expired relation target from yesterday failed deployment", MemoryDimension.FACT);
+    await slice.writeMemory(EXPIRED, "expired relation target", MemoryDimension.FACT);
     await slice.admitRelation({
       evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000303",
       assertionId: "assert-r-expired",

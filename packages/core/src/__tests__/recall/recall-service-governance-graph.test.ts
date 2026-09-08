@@ -79,7 +79,10 @@ describe("conditional source governance ceilings", () => {
     const f = await fixture([path("hint_only")]);
     const service = new RecallService({ ...f.dependencies, activeConstraintsPort: {
       findActiveConstraints: async () => { throw new Error("unbounded governance is retired"); },
-      readBounded: async (request) => readBoundedActiveConstraints(f.database, request, (input) => f.reader.read(input))
+      readBounded: async (request) => {
+        if (request.snapshotId === undefined) throw new Error("governance requires the pinned snapshot");
+        return readBoundedActiveConstraints(f.database, { ...request, snapshotId: request.snapshotId }, (input) => f.reader.read(input));
+      }
     } });
     const result = await service.recall({ taskSurface: { ...createTaskSurface(), display_name: "Atlas deployment" }, workspaceId: WS, strategy: "analyze" });
     const candidate = result.candidates.find((row) => row.object_id === MEM.r);

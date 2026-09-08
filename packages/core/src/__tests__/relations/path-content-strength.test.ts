@@ -5,7 +5,6 @@ import {
   contentTokenJaccard,
   pathRelContentStrengthEnabled
 } from "../../relations/producers/path-content-strength.js";
-import { scorePathRelationExpansion } from "../../recall/expansion/path-relations.js";
 
 const FLAG = "ALAYA_PATHREL_CONTENT_STRENGTH";
 const PATH_ID = "11111111-1111-4111-8111-aaaaaaaaaaaa";
@@ -111,8 +110,6 @@ describe("buildPathRelation ON path (content-driven, kind-differentiated)", () =
       AT
     );
     expect(derives.plasticity_state.strength).toBeGreaterThan(coheres.plasticity_state.strength);
-    // the differentiation must survive into the recall path_expansion scorer.
-    expect(scorePathRelationExpansion(derives)).toBeGreaterThan(scorePathRelationExpansion(coheres));
   });
 
   it("clamps to [0,1] at the extremes", () => {

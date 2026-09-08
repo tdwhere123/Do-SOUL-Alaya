@@ -31,6 +31,44 @@ function field(program: QueryProgram, rows: ReturnType<typeof edge>[]): FieldEng
 const grade = (state: FieldEngineState) => Math.max(0, ...(state.binding.kind === "bound" ? state.binding.snapshot.values.filter((value) => value.accepting && value.state.object_id === "end").map((value) => value.milligrades) : []));
 
 describe("grounded retained derivation revisions", () => {
+  it.each(["transition", "derivation", "root-map", "source-revision"])("rebuilds same-count %s changes exactly as fresh grounding", (changedPart) => {
+    const base = { ...field(rel("a"), [edge("seed", "end", "a")]),
+      source_facts: { seed: { object_id: "seed", source_revision: "before" } }, allowance: 1_000 };
+    const before = groundedOutputDerivations(base);
+    const changed = {
+      ...base,
+      ...(changedPart === "transition" ? { transitions: base.transitions.map((edge) => ({ ...edge, applicable: false })) } : {}),
+      ...(changedPart === "derivation" ? { derivations: base.derivations.map((node) => node.kind !== "leaf" ? node : {
+        ...node, observation_ids: ["replacement"], leaf_ids: ["replacement"], source_revisions: ["after"] }) } : {}),
+      ...(changedPart === "root-map" ? { transition_derivations: Object.fromEntries(
+        Object.entries(base.transition_derivations).map(([key, root]) => [key, `retired:${root}`])) } : {}),
+      ...(changedPart === "source-revision" ? { source_facts: { seed: { object_id: "seed", source_revision: "after" } } } : {})
+    };
+    const fresh = groundedOutputDerivations(changed);
+    const resumed = groundedOutputDerivations({ ...changed, progress: before.progress });
+    expect(resumed.derivations).toEqual(fresh.derivations);
+    expect(resumed.roots).toEqual(fresh.roots);
+    expect(resumed.complete).toBe(fresh.complete);
+    expect(resumed.work).toBeGreaterThan(0);
+  });
+
+  it("rebuilds a retained root after a stronger same-snapshot seed merges without changing counts", () => {
+    const base = field({ schema_version: 1, kind: "epsilon" }, []);
+    const low = createConditionalField({ interpretation: base.interpretation, budget: base.budget,
+      seeds: base.seeds.map((seed) => ({ ...seed, milligrades: 200 })) });
+    const before = groundedOutputDerivations({ ...low, allowance: 100 });
+    const stronger = applyObserverPage(low, { page: { schema_version: 1, query_id: low.query_id, snapshot_id: low.snapshot_id,
+      cursor: { schema_version: 1, cursor_id: "seed", query_id: low.query_id, snapshot_id: low.snapshot_id,
+        region_id: "seed", position: "stronger", committed_through: "stronger" },
+      observations: [], outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] },
+      effects: [{ observation_id: "stronger-seed", seed: { ...low.seeds[0]!, milligrades: 900 } }] });
+    expect(stronger.seeds).toHaveLength(low.seeds.length);
+    expect(stronger.seeds[0]!.milligrades).toBe(900);
+    const resumed = groundedOutputDerivations({ ...stronger, allowance: 100, progress: before.progress });
+    expect(resumed.derivations.find((node) => node.kind === "leaf")?.association_milligrades).toBe(900);
+    expect(resumed.work).toBeGreaterThan(0);
+  });
+
   it("retains grounding progress beyond a fixed allowance and recovers identical complete roots", () => {
     const rows = Array.from({ length: 25 }, (_, index) => edge("seed", "end", "a", `assert-${index}`));
     const state = field(rel("a"), rows);
@@ -48,20 +86,22 @@ describe("grounded retained derivation revisions", () => {
     expect(step.derivations).toEqual(full.derivations);
   });
 
-  it("assesses many actual receipts across fixed reserves without repeating completed work", () => {
+  it("assesses many actual receipts across exploration allowances without spending finalization reserve", () => {
     const row = edge("seed", "end", "a");
     let state = { ...field(rel("a"), [row]), observed_relations: [{ ...row, resultObjectId: "end",
       evidenceReceipts: Array.from({ length: 50 }, (_, index) => ({ evidenceId: `e${index}`, eventId: `event${index}`,
         eventType: "relation.evidence", occurredAt: "2026-09-06T00:00:00.000Z" })) }] } as FieldEngineState;
+    const initialReserve = state.remaining_reserve;
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      state = assessUnknownCause({ ...state, remaining_reserve: 30 }, { as_of: "2026-09-07T00:00:00.000Z" });
+      state = assessUnknownCause({ ...state, remaining_exploration: 30 }, { as_of: "2026-09-07T00:00:00.000Z" });
+      expect(state.remaining_reserve).toBe(initialReserve);
       if (state.support_work_status === "complete") break;
     }
     expect(state.support_work_status).toBe("complete");
     const supported = state.support.find((record) => record.claim === "supported");
     expect(supported?.witnesses).toHaveLength(50);
-    const repeat = assessUnknownCause({ ...state, remaining_reserve: 30 }, { as_of: "2026-09-07T00:00:00.000Z" });
-    expect(repeat.remaining_reserve).toBe(30);
+    const repeat = assessUnknownCause({ ...state, remaining_exploration: 30 }, { as_of: "2026-09-07T00:00:00.000Z" });
+    expect(repeat.remaining_exploration).toBe(30);
     expect(repeat.support).toEqual(state.support);
   });
 

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   InformationIndexSchema,
@@ -20,10 +20,11 @@ import { interpretationCoverageFor } from "../conditional-field/reference/interp
 import { type ObserverReaders } from "../conditional-field/observers/observe.js";
 import { projectFieldDelta, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
-import { normalizeQueryText } from "./recall-service-helpers.js";
+import { captureEffectiveAsOf, normalizeQueryText } from "./recall-service-helpers.js";
 import type { RecallResult } from "./recall-service-types.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { BoundedIndexPayload } from "./index-payload.js";
+import { resumeIndexProjection, retainIndexDelivery } from "./index-continuation.js";
 import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
 import type { RecallExecutionContext, RecallExecutionParams } from "./recall-service-runner-types.js";
 import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
@@ -34,7 +35,6 @@ import {
   observeField
 } from "./conditional-field-observe.js";
 import { assessUnknownCause, rolesFrom } from "./semantic-attribution.js";
-import { captureEffectiveAsOf } from "../query/condition/query-condition-capture.js";
 import { readRequestGovernance } from "./request-governance.js";
 import { reserveSnapshotPinWork } from "./snapshot-pin-budget.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
@@ -49,9 +49,8 @@ const DEFAULT_RESERVE = 100;
 const DEFAULT_MIN_ENVELOPE = 10;
 const CONTINUATION_MS = 5 * 60_000;
 const FIELD_RESUME_MAX = 32;
-// Worker-lifetime only. Continuation restore is not SQLite; a new worker
-// re-observes. Parent isolate pins one worker for a single snapshot lease.
-const FIELD_RESUME = new Map<string, FieldEngineState>();
+// Process loss invalidates issued tokens; the parent pins one worker per snapshot lease.
+const FIELD_RESUME = new Map<string, Readonly<{ state: FieldEngineState; token_digest: string }>>();
 const INDEX_PREVIEWS = new WeakMap<InformationIndex, ReadonlyMap<string, string>>();
 const INDEX_SOURCE_METADATA = new WeakMap<InformationIndex, Readonly<Record<string, RecallSourceMetadata>>>();
 const FIELD_SOURCE_PINS = new WeakMap<FieldEngineState, string>();
@@ -101,6 +100,14 @@ export async function executeRecall(
   context: RecallExecutionContext,
   params: RecallExecutionParams
 ): Promise<ConditionalFieldRecallResult> {
+  if (params.policyOverride?.scoring_weight_overrides !== undefined
+    || params.policyOverride?.domain_weight_overrides !== undefined) {
+    throw new TypeError("Recall scoring_weight_overrides and domain_weight_overrides are retired for conditional-field requests");
+  }
+  if (params.querySemanticFactorFormationCapture !== undefined
+    || params.querySemanticFactorCompletenessReceipt !== undefined) {
+    throw new TypeError("Recall query semantic factor capture and completeness receipt overrides are retired for conditional-field requests");
+  }
   assertRecallZeroLiveExtraction();
   let previews = new Map<string, string>();
   let sourceMetadata: Readonly<Record<string, RecallSourceMetadata>> = {};
@@ -204,24 +211,36 @@ function runCompiledConditionalFieldRecall(
     ...(restored === undefined ? {} : { resume_field: restored }),
     ...(pin === undefined ? {} : { expected_source_revision: pin.source_revision })
   });
-  return projectFromField(assessUnknownCause(field, input), input, interpretation, (retained) => {
-    if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
-    rememberField(retained);
-  });
+  let retained = field;
+  const projected = projectFromField(assessUnknownCause(field, input), input, interpretation, (next) => { retained = next; });
+  const index = projected.entries.length === 0 && fieldProgress(retained) === fieldProgress(restored)
+    && (restored !== undefined || input.budget.work_units <= 1)
+    ? { ...projected, continuation: null } : projected;
+  if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
+  rememberField(retained, index.continuation);
+  return index;
+}
+
+function fieldProgress(state: FieldEngineState | undefined): string {
+  return JSON.stringify([state?.observations.length ?? 0, state?.seeds.length ?? 0,
+    state?.transitions.length ?? 0, state?.grounding_progress?.completed_work ?? 0,
+    state?.resume_cursors ?? {}, state?.pair_progress ?? {}, state?.support_progress ?? {},
+    state?.projection_progress?.offset ?? 0, state?.projection_progress?.delivered_entries ?? {}]);
 }
 
 function fieldResumeKey(queryId: string, snapshotId: string, interpretationId: string): string {
   return `${queryId}\0${snapshotId}\0${interpretationId}\0${RESULT_VERSION}`;
 }
 
-function rememberField(state: FieldEngineState): void {
+function rememberField(state: FieldEngineState, continuation: Continuation | null): void {
   const key = fieldResumeKey(
     state.query_id,
     state.snapshot_id,
     interpretationIdentity({ interpretation_clock: state.interpretation.interpretation_clock })
   );
   FIELD_RESUME.delete(key);
-  FIELD_RESUME.set(key, state);
+  if (continuation === null) return;
+  FIELD_RESUME.set(key, { state, token_digest: continuationDigest(continuation) });
   while (FIELD_RESUME.size > FIELD_RESUME_MAX) {
     const oldest = FIELD_RESUME.keys().next().value;
     if (oldest === undefined) break;
@@ -234,12 +253,19 @@ function restoreField(
   interpretation: QueryInterpretation
 ): FieldEngineState | undefined {
   if (continuation === undefined || continuation === null) return undefined;
-  return FIELD_RESUME.get(fieldResumeKey(
+  const retained = FIELD_RESUME.get(fieldResumeKey(
     continuation.query_id,
     continuation.snapshot_id,
     continuation.interpretation_id
       ?? interpretationIdentity({ interpretation_clock: interpretation.interpretation_clock })
   ));
+  return retained?.token_digest === continuationDigest(continuation) ? retained.state : undefined;
+}
+
+function continuationDigest(continuation: Continuation): string {
+  return createHash("sha256").update(JSON.stringify([continuation.schema_version, continuation.continuation_id,
+    continuation.query_id, continuation.snapshot_id, continuation.result_version, continuation.expires_at,
+    continuation.cursor, continuation.interpretation_id, continuation.interpretation_clock])).digest("hex");
 }
 
 function projectFromField(
@@ -265,16 +291,22 @@ function projectFromField(
     : governanceManifestationFor(id, ceilings, input.governance.completeness === "complete"
       && !input.governance.temporal_uncertain);
   let retained = state;
+  let projectionProgress = resumeIndexProjection(state, snapshot);
   const payload = new BoundedIndexPayload({ sourceFacts: state.source_facts,
     previewCache: state.preview_cache, readers: input.readers, workspaceId: input.workspace_id,
     remainingMemoryBytes: state.remaining_memory_bytes, manifestationFor });
-  const index = annotatePublicIndex(InformationIndexSchema.parse(projectAcceptingIndex({
+  let index = annotatePublicIndex(InformationIndexSchema.parse(projectAcceptingIndex({
     snapshot,
     view: interpretation.view,
     query_id: interpretation.query_id,
     snapshot_id: interpretation.snapshot_id,
     result_version: RESULT_VERSION,
     budget: input.budget,
+    projection_scan_offset: projectionProgress.offset,
+    projection_generation: projectionProgress.generation,
+    delivered_product_ids: new Set(Object.keys(projectionProgress.delivered_entries)),
+    delivered_entry_revisions: projectionProgress.delivered_entries,
+    on_projection_progress: (offset) => { projectionProgress = { ...projectionProgress, offset }; },
     roles: rolesFrom(state, RELATION_MILLIGRADES),
     claims: state.claims,
     claim_propositions: state.claim_propositions,
@@ -285,14 +317,19 @@ function projectFromField(
     on_grounding_progress: (progress, retainedBytes) => {
       payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
       retained = { ...retained, grounding_progress: progress, remaining_memory_bytes: payload.remainingMemoryBytes };
+      projectionProgress = resumeIndexProjection(retained, snapshot);
     },
-    on_remaining_reserve: (remaining) => { retained = { ...retained, remaining_reserve: remaining }; },
+    on_remaining_reserve: (remaining) => {
+      retained = { ...retained, remaining_reserve: Math.min(state.remaining_reserve, remaining),
+        remaining_exploration: Math.max(0, remaining - state.remaining_reserve) };
+    },
     support: state.support,
     expires_at: input.expires_at,
     as_of: input.as_of,
     lifetime_now: input.lifetime_now,
     payload_work_per_entry: 5,
-    finalize_payload: (entries, allowance) => payload.finalize(entries, allowance),
+    // Entry admission reserves every payload work unit; missing source or retained-memory capacity cannot improve by replaying the same page.
+    finalize_payload: (entries, allowance) => ({ ...payload.finalize(entries, allowance), retryable: false }),
     prior_continuation: input.continuation ?? null,
     observer: {
       outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: state.closure.observation },
@@ -300,7 +337,7 @@ function projectFromField(
     },
     resume_cursors: state.resume_cursors,
     interpretation_status: interpretation.status,
-    remaining_reserve: state.remaining_reserve,
+    remaining_reserve: state.remaining_exploration + state.remaining_reserve,
     interpretation_id: interpretationIdentity({
       interpretation_clock: interpretation.interpretation_clock
     }),
@@ -314,6 +351,14 @@ function projectFromField(
       ? { resource_work: "open" as const }
       : {})
   })), interpretation);
+  const delivery = retainIndexDelivery(projectionProgress, index.entries, state.projection_progress === undefined);
+  if (delivery.bytes > payload.remainingMemoryBytes) index = { ...index, continuation: null };
+  else {
+    payload.remainingMemoryBytes -= delivery.bytes;
+    retained = { ...retained, projection_progress: delivery.progress };
+  }
+  if (index.continuation !== null) index = { ...index,
+    continuation: { ...index.continuation, continuation_id: randomUUID() } };
   INDEX_PREVIEWS.set(index, payload.previews);
   INDEX_SOURCE_METADATA.set(index, payload.sourceMetadata);
   retained = { ...retained, preview_cache: Object.fromEntries(payload.previews),

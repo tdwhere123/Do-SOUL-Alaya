@@ -208,10 +208,8 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     expect([...new Set([...first.index!.entries, ...resumed.index!.entries].map((entry) => entry.object_id))].sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
     const tightReserve = await service.recall({ ...params, budget: { ...params.budget, memory_bytes: 1000000, finalization_reserve: 1 } } as Parameters<typeof service.recall>[0]);
     expect(tightReserve.index!.completeness.observed_coverage).toBe("complete");
-    expect(tightReserve.index!.continuation).not.toBeNull();
-    const finalized = await service.recall({ ...params, budget: { ...params.budget, memory_bytes: 1000000 },
-      continuation: tightReserve.index!.continuation } as Parameters<typeof service.recall>[0]);
-    expect(finalized.index!.entries.map((entry) => entry.object_id).sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
+    expect(tightReserve.index!.continuation).toBeNull();
+    expect(tightReserve.index!.entries.map((entry) => entry.object_id).sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
   });
 
   it("bounds physical lexical, source and relation visits by one request allowance", async () => {
