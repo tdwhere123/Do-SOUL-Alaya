@@ -477,7 +477,7 @@ describe("repository structure guard", () => {
       path.join(repoRoot, "scripts/ci/repository-structure-policy.json")
     );
     expect(createHash("sha256").update(canonicalizeLf(policyBytes)).digest("hex")).toBe(
-      "8bea1eb93b3e15033433ef2ed548e757be2235045ab6a3cd28adcddeebbef98e"
+      "71adf39d60210bafa93959c3124f819ad8b0ca2487b0dd606eb40fca74c586a0"
     );
   });
 
