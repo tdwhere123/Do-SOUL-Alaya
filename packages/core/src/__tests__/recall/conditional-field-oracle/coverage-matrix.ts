@@ -39,7 +39,7 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
   row("A07", "hyperedge AND/OR retain bindings and support",
     "AND requires one binding; OR keeps complete witnesses",
     "separate reachable premises become a complete conjunction",
-    "field-engine.test.ts hyperedge AND/OR", "typed hyperedge observe", "real-producer"),
+    "field-engine.test.ts hyperedge AND; field-coordinates.test.ts AND vs OR; equal-score-derivation-withdrawal.test.ts OR/AND", "typed hyperedge observe", "real-producer"),
   row("A08", "cheapest feasible complete explanation remains available",
     "cheap cost=400 over expensive=1200",
     "canonical strongest/first path hides cheap witness",
