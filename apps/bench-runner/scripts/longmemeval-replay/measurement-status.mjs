@@ -7,6 +7,7 @@ const MATERIALIZATION_STATUSES = new Set([
   "memory_emitted", "evidence_preserved", "drop", "unknown"
 ]);
 const EVALUATION_ISSUES = new Set([
+  "invalid_target_measurement",
   "missing_diagnostics", "empty_gold_identity", "extraction_materialization_drop",
   "gold_taxonomy_fallthrough", "identity_join_error",
   "evaluator_data_identity_inconsistency", "evaluator_data_identity_indeterminate",

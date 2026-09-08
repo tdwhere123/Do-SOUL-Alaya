@@ -4,6 +4,7 @@ import type { AlayaDaemonRuntime } from "@do-soul/alaya";
 import {
   ControlPlaneObjectKind,
   RetentionPolicy,
+  RequestBudgetSchema,
   TaskObjectSurfaceSchema,
   type MemorySearchResult,
   type RecallPolicy,
@@ -147,6 +148,18 @@ function createBenchRecallOperation(
       opts,
       input.recallWeightOverrides
     );
+    if (opts.maxResults !== undefined && opts.budget !== undefined
+      && opts.maxResults !== opts.budget.page_budget) {
+      throw new Error("maxResults conflicts with the explicit request budget page_budget");
+    }
+    const requestBudget = RequestBudgetSchema.parse(opts.budget ?? {
+      schema_version: 1 as const,
+      work_units: 10_000,
+      memory_bytes: 1_000_000,
+      page_budget: policy.fine_assessment.budgets.max_entries,
+      finalization_reserve: 100,
+      min_envelope: 10
+    });
     const rawRecallResult = await invokeBoundRecall({
       sideEffectMode: "benchmark",
       recallService: input.activeRuntime.services.recallService,
@@ -168,10 +181,18 @@ function createBenchRecallOperation(
         : { querySemanticFactorCompletenessReceipt:
             opts.querySemanticFactorCompletenessReceipt }),
       ...(opts.snapshotDigest === undefined ? {} : { snapshotDigest: opts.snapshotDigest }),
+      queryText: query,
+      budget: requestBudget,
+      ...(opts.continuation === undefined ? {} : { continuation: opts.continuation }),
+      ...(opts.cancelled === undefined ? {} : { cancelled: opts.cancelled }),
+      ...(opts.interpretationClock === undefined ? {} : { interpretationClock: opts.interpretationClock }),
+      ...(opts.since === undefined ? {} : { since: opts.since }),
+      ...(opts.until === undefined ? {} : { until: opts.until }),
+      ...(opts.timeFilter === undefined ? {} : { timeFilter: opts.timeFilter }),
       activeConstraintsCap: null
     });
     const recallResult = rawRecallResult;
-    const results = encodeBenchRecallResults(recallResult, policy);
+    const results = encodeBenchRecallResults(recallResult, policy, requestBudget);
     const delivery = await recordBenchRecallDelivery(input, results, recallResult);
     await emitBenchContextLensAssembledEvent(input.dataDir, {
       taskSurfaceRef: taskSurface.runtime_id,
@@ -183,7 +204,7 @@ function createBenchRecallOperation(
       runId: input.activeContext.runId,
       workspaceId: input.activeContext.workspaceId
     });
-    return buildBenchRecallResponse(delivery.deliveryId, results, recallResult);
+    return buildBenchRecallResponse(delivery.deliveryId, results, recallResult, requestBudget);
   };
 }
 

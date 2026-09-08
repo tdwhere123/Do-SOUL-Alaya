@@ -106,6 +106,14 @@ async function assertQaFailureArchive(result: {
     failed_question_ids: ["q002"]
   });
   const kpi = KpiPayloadSchema.parse(JSON.parse(await readFile(result.kpiPath, "utf8")));
+  const cohort = await readJson<{ rows: Array<{ question_id: string }> }>(
+    join(dirname(result.kpiPath), LONGMEMEVAL_COHORT_LEDGER_FILENAME)
+  );
+  expect(cohort.rows.find((row) => row.question_id === "q001")).toMatchObject({
+    dataset_cohort: "answerable",
+    extraction_materialization: { status: "memory_emitted" },
+    evaluator_gold_identity: { status: "present", object_ids: expect.arrayContaining([expect.any(String)]) }
+  });
   expect(kpi).toMatchObject({ evaluated_count: 1, answerable_evaluated_count: 1 });
   expect(kpi.kpi.per_scenario).toHaveLength(1);
   await assertQaEvidenceFiles(dirname(result.kpiPath));

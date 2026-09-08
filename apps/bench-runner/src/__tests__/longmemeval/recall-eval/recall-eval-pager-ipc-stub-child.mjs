@@ -57,7 +57,7 @@ async function handle(message) {
   process.send({
     id,
     ok: true,
-    pack: stubPack(questionId)
+    pack: { ...stubPack(questionId), recallOptions: message.recall.recallOptions }
   });
 }
 

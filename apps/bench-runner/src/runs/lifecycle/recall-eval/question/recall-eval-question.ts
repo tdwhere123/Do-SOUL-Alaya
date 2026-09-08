@@ -73,7 +73,9 @@ async function recallEvalAttachedQuestion(
   workspace: BenchWorkspaceHandle
 ): Promise<RecallEvalQuestionResult> {
   const sidecar = buildSnapshotSidecar(input.question);
-  const readiness = await warmLongMemEvalEmbeddingCaches({
+  const readiness = input.recallOptions.continuation != null
+    ? { embeddingWarmup: null, queryEmbeddingWarmup: null, documentWarmupLatencyMs: null }
+    : await warmLongMemEvalEmbeddingCaches({
     embeddingMode: input.embeddingMode,
     workspace,
     objectIds: deriveLongMemEvalMemoryObjectIds(sidecar),
@@ -162,7 +164,7 @@ async function buildRecallEvalQuestionResult(
     latencyMs: recallCycle.scoredRecallLatencyMs,
     degradationReason: recallResult.degradation_reason ?? null,
     diagnostics: buildRecallEvalDiagnostics(
-      input, recallResult, sidecar, gold, scoredHits
+      input, recallResult, sidecar, gold, scoredHits, recallCycle.scoredRecallLatencyMs
     ),
     tokenMetrics: await workspace.queryTokenMetrics(),
     recallTokenEconomy: extractRecallTokenEconomy(recallResult),
@@ -180,9 +182,16 @@ function buildRecallEvalDiagnostics(
   recallResult: Awaited<ReturnType<typeof runLongMemEvalRecallCycle>>["scoredRecallResult"],
   sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
   gold: RecallEvalGold,
-  scoredHits: Pick<RecallEvalQuestionResult, "hitAt1" | "hitAt5" | "hitAt10">
+  scoredHits: Pick<RecallEvalQuestionResult, "hitAt1" | "hitAt5" | "hitAt10">,
+  recallLatencyMs: number
 ): LongMemEvalQuestionDiagnostic {
   const diagnostic = buildQuestionDiagnostic({
+    queryText: input.question.question,
+    referenceTime: input.recallOptions.interpretationClock ?? requireLongMemEvalTimestamp(input.question.questionDate),
+    snapshotDigest: input.recallOptions.snapshotDigest,
+    expectedIndexSnapshotId: input.recallOptions.continuation?.snapshot_id,
+    requestBudget: input.recallOptions.budget,
+    recallLatencyMs,
     questionId: input.question.questionId,
     goldMemoryIds: gold.goldMemoryIds,
     goldEvidenceIds: gold.goldEvidenceIds,

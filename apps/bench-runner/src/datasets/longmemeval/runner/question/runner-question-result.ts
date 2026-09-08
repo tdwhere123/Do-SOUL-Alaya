@@ -87,6 +87,9 @@ function buildDiagnostics(
 ): LongMemEvalQuestionDiagnostic {
   const recallResult = input.recallCycle.scoredRecallResult;
   const diagnostic = buildQuestionDiagnostic({
+    queryText: input.question.question,
+    referenceTime: requireLongMemEvalTimestamp(input.question.question_date),
+    recallLatencyMs: input.recallCycle.scoredRecallLatencyMs,
     questionId: input.question.question_id,
     questionType: input.question.question_type,
     goldMemoryIds: input.goldMemoryIds,

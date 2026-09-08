@@ -41,6 +41,33 @@ describe("recall-eval pager IPC isolation", () => {
     expect(counted.pids[0]).toBe(session.pid);
   });
 
+  it("preserves budget, continuation, cancellation and interpretation fields across IPC", async () => {
+    const session = openSession();
+    await session.open({});
+    const recallOptions = {
+      budget: { schema_version: 1, work_units: 1000, memory_bytes: 65536, page_budget: 1,
+        finalization_reserve: 100, min_envelope: 10 },
+      continuation: { schema_version: 1, continuation_id: "next", query_id: "query",
+        snapshot_id: `sha256:${"a".repeat(64)}`, result_version: "v1", cursor: "cursor",
+        expires_at: "2099-01-01T00:00:00.000Z", interpretation_clock: "2026-09-06T00:00:00.000Z" },
+      cancelled: true, interpretationClock: "2026-09-06T00:00:00.000Z",
+      timeFilter: { field: "created_at", since: "2020-01-01T00:00:00.000Z" }
+    };
+    const pack = await session.recall({ questionId: "page", recallOptions }) as { recallOptions: unknown };
+    expect(pack.recallOptions).toEqual(recallOptions);
+  });
+
+  it("rejects continuation after recycle before respawning a process", async () => {
+    const counted = countingHost();
+    const session = openSession(undefined, counted.host);
+    await session.open({});
+    await session.recall({ questionId: "q1" });
+    await session.recycle();
+    await expect(session.recall({ questionId: "q1", recallOptions: { continuation: { cursor: "old" } } }))
+      .rejects.toThrow(/continuation invalidated/);
+    expect(counted.pids).toHaveLength(1);
+  });
+
   it("spawns a new child for each recycled question", async () => {
     const counted = countingHost();
     const session = openSession(undefined, counted.host);

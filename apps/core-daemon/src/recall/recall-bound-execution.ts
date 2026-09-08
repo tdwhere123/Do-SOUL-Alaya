@@ -6,11 +6,17 @@ import type {
   TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import type {
+  ConditionalFieldRecallParams,
   NodeStrategy,
   RecallDiagnosticCapture
 } from "@do-soul/alaya-core";
 
 export type RecallBoundSideEffectMode = "production_mcp" | "benchmark";
+
+type BoundRecallFieldOptions = Pick<ConditionalFieldRecallParams,
+  "pageBudget" | "queryText" | "interpretationClock" | "since" | "until" |
+  "continuation" | "cancelled" | "budget"
+>;
 
 type BoundRecallTimeFilter = Readonly<{
   readonly since?: string | null;
@@ -18,7 +24,7 @@ type BoundRecallTimeFilter = Readonly<{
   readonly field?: "created_at" | "last_used_at";
 }>;
 
-export type BoundRecallInvokeParams = Readonly<{
+export type BoundRecallInvokeParams = BoundRecallFieldOptions & Readonly<{
   readonly taskSurface: Readonly<TaskObjectSurface>;
   readonly workspaceId: string;
   readonly strategy: NodeStrategy;
@@ -34,7 +40,7 @@ export type BoundRecallInvokeParams = Readonly<{
   readonly snapshotDigest?: string;
 }>;
 
-export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
+export type InvokeBoundRecallParams<TRecallResult> = BoundRecallFieldOptions & Readonly<{
   readonly sideEffectMode: RecallBoundSideEffectMode;
   readonly recallService: {
     recall(params: BoundRecallInvokeParams): Promise<TRecallResult>;
@@ -78,6 +84,14 @@ export async function invokeBoundRecall<TRecallResult>(
     }),
     ...(params.diagnosticCapture === undefined ? {} : { diagnosticCapture: params.diagnosticCapture }),
     ...(params.snapshotDigest === undefined ? {} : { snapshotDigest: params.snapshotDigest }),
+    ...(params.pageBudget === undefined ? {} : { pageBudget: params.pageBudget }),
+    ...(params.queryText === undefined ? {} : { queryText: params.queryText }),
+    ...(params.interpretationClock === undefined ? {} : { interpretationClock: params.interpretationClock }),
+    ...(params.since === undefined ? {} : { since: params.since }),
+    ...(params.until === undefined ? {} : { until: params.until }),
+    ...(params.continuation === undefined ? {} : { continuation: params.continuation }),
+    ...(params.cancelled === undefined ? {} : { cancelled: params.cancelled }),
+    ...(params.budget === undefined ? {} : { budget: params.budget }),
     activeConstraintsCap: params.activeConstraintsCap ?? null
   });
 }

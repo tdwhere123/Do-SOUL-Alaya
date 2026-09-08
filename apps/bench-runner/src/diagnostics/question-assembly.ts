@@ -24,8 +24,10 @@ import {
   createEmptyGraphExpansionPlaneCountPerHop
 } from "./schema/diagnostics-private.js";
 import { buildGoldObjectIds } from "./gold-object-identities.js";
+import type { ConditionalFieldMeasurement, ConditionalMeasurementInput } from "../runs/measurement/conditional-field-measurement.js";
 
-export interface QuestionDiagnosticInput {
+export interface QuestionDiagnosticInput extends Pick<ConditionalMeasurementInput,
+  "queryText" | "referenceTime" | "snapshotDigest" | "expectedIndexSnapshotId" | "requestBudget" | "recallLatencyMs"> {
   readonly questionId: string;
   readonly questionType?: string | null;
   readonly goldMemoryIds: readonly string[];
@@ -47,6 +49,7 @@ export interface QuestionDiagnosticInput {
 }
 
 export interface QuestionDiagnosticParts {
+  readonly conditionalFieldMeasurement?: ConditionalFieldMeasurement | null;
   readonly diagnostics: NarrowRecallDiagnostics | null;
   readonly deliveredResults: readonly DiagnosticRecallResult[];
   readonly activeConstraintResults: readonly DiagnosticActiveConstraintResult[];
@@ -82,6 +85,7 @@ export function assembleQuestionDiagnostic(
     hit_at_10: scoringInput.hitAt10,
     ...missFields,
     degradation_reason: input.degradationReason,
+    conditional_field_measurement: parts.conditionalFieldMeasurement ?? null,
     ...buildRecallTelemetryFields(input, parts, candidatePoolComplete),
     query_probes: parts.diagnostics?.queryProbes ?? null,
     ranking_authority: parts.diagnostics?.rankingAuthority ?? null,
@@ -129,6 +133,7 @@ export function assembleQuestionDiagnostic(
       goldObjectIds,
       gold: parts.gold,
       diagnosticsAvailable: parts.diagnostics !== null,
+      targetMeasurementStatus: parts.conditionalFieldMeasurement?.status ?? null,
       candidatePoolComplete,
       identityConflictObjectKeys: candidateCollisions.identityConflictObjectKeys,
       missTaxonomy: missFields.miss_taxonomy,
@@ -148,6 +153,14 @@ function buildQuestionMissFields(
   parts: QuestionDiagnosticParts
 ) {
   const goldObjectIds = buildGoldObjectIds(input);
+  if (parts.conditionalFieldMeasurement?.status === "validated") {
+    return {
+      miss_classification: input.isAbstention === true ? "abstention_uncalibrated" as const
+        : input.hitAt5 ? "hit_at_5" as const : "diagnostics_unavailable" as const,
+      miss_taxonomy: null,
+      ...(hasLongMemEvalSeedDropReasons(input.seedDropReasons) ? { seed_drop_reasons: input.seedDropReasons } : {})
+    };
+  }
   return {
     miss_classification: classifyMiss({
       hitAt5: input.hitAt5,

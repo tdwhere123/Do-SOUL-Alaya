@@ -2,10 +2,12 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } f
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { initDatabase, closeCachedDatabase } from "@do-soul/alaya-storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createPackedTwoWorkspaceDb,
+  seedMemory,
   TOKEN_A,
   TOKEN_B,
   WORKSPACE_A,
@@ -42,6 +44,9 @@ import type {
   RecallEvalPagerOpenPayload,
   RecallEvalPagerRecallPayload
 } from "../../../runs/lifecycle/recall-eval/recall-eval-process/payload.js";
+import { ConditionalFieldMeasurementSchema } from "../../../runs/measurement/conditional-field-measurement.js";
+import { createForkRecallEvalPagerHost, createRecallEvalPagerSession } from
+  "../../../runs/lifecycle/recall-eval/recall-eval-process/ipc-client.js";
 
 const previousWriteQueue = process.env.ALAYA_SQLITE_WRITE_QUEUE;
 
@@ -49,6 +54,7 @@ let root: string;
 let packedPath: string;
 let snapshotDbPath: string;
 let sealedSlices: ExplodedWorkspaceSlices;
+const nativeSessions: ReturnType<typeof createRecallEvalPagerSession>[] = [];
 
 beforeEach(async () => {
   process.env.ALAYA_SQLITE_WRITE_QUEUE = "0";
@@ -70,6 +76,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  for (const session of nativeSessions.splice(0)) await session.close().catch(() => undefined);
   delete process.env[SEALED_SLICE_RESTORE_ENV];
   delete process.env[SKIP_WORKSPACE_SLICE_ENV];
   await closeRecallEvalPagerChild().catch(() => undefined);
@@ -136,6 +143,77 @@ function buildRecallPayload(
 }
 
 describe("H02 — sealed slice private working copy", () => {
+  it.each(["direct", "native fork"] as const)("continues nonempty pages through %s on the same child and working inode", async (transport) => {
+    const expandedSnapshot = join(root, "expanded-snapshot.db");
+    copyFileSync(snapshotDbPath, expandedSnapshot);
+    snapshotDbPath = expandedSnapshot;
+    const database = initDatabase({ filename: snapshotDbPath });
+    try {
+      for (const suffix of ["1", "2"]) await seedMemory(database, {
+        workspaceId: WORKSPACE_A, runId: "run-a", token: TOKEN_A,
+        memoryId: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${suffix}`
+      });
+    } finally { database.close(); }
+    const expandedDir = join(root, "expanded");
+    installWorkspaceSlice({ dataDir: expandedDir, sliceDbPath: snapshotDbPath });
+    const expanded = await explodeRecallEvalWorkingCopyIfNeeded({
+      dataDirRoot: expandedDir, snapshotDbPath, env: { [SEALED_SLICE_RESTORE_ENV]: "0" }
+    });
+    if (expanded === null) throw new Error("expanded source slices missing");
+    sealedSlices = expanded;
+    const dataDirRoot = join(root, "continued-child");
+    const nativeSession = transport === "native fork" ? createRecallEvalPagerSession({
+      host: createForkRecallEvalPagerHost(fileURLToPath(new URL(
+        "../../../../dist/runs/lifecycle/recall-eval/recall-eval-process/child.js", import.meta.url
+      )))
+    }) : null;
+    if (nativeSession !== null) nativeSessions.push(nativeSession);
+    const recallPage = nativeSession === null ? recallRecallEvalPagerChild
+      : async (payload: RecallEvalPagerRecallPayload) =>
+        await nativeSession.recall(payload) as Awaited<ReturnType<typeof recallRecallEvalPagerChild>>;
+    if (nativeSession === null) await openRecallEvalPagerChild(buildOpenPayload(dataDirRoot));
+    else await nativeSession.open(buildOpenPayload(dataDirRoot));
+    const base = buildRecallPayload("paged", WORKSPACE_A, TOKEN_A);
+    const budget = { schema_version: 1 as const, work_units: 10_000, memory_bytes: 1_000_000,
+      page_budget: 1, finalization_reserve: 100, min_envelope: 10 };
+    const completePack = await recallPage({
+      ...base, recallOptions: { budget: { ...budget, page_budget: 20 } }
+    });
+    const complete = ConditionalFieldMeasurementSchema.parse(completePack.diagnostics.conditional_field_measurement);
+    if (complete.status !== "validated") throw new Error("complete target measurement invalid");
+    expect(complete.entries).toHaveLength(3);
+    const firstPack = await recallPage({ ...base, recallOptions: { budget } });
+    const first = ConditionalFieldMeasurementSchema.parse(firstPack.diagnostics.conditional_field_measurement);
+    if (first.status !== "validated") throw new Error("first target page invalid");
+    expect(first.entries).toHaveLength(1);
+    expect(first.continuation).not.toBeNull();
+    expect(first.request.budget).toEqual(budget);
+    const workingPath = workingAlayaDbPath(pagerSwitchWorkingDataDir(dataDirRoot, 2, WORKSPACE_A));
+    const inode = statSync(workingPath).ino;
+    const pid = nativeSession?.pid ?? process.pid;
+    if (nativeSession !== null) expect(pid).not.toBe(process.pid);
+    const all = [...first.entries];
+    let continuation = first.continuation;
+    for (let step = 0; step < 8 && continuation !== null; step += 1) {
+      const pack = await recallPage({ ...base, recallOptions: { budget, continuation } });
+      const page = ConditionalFieldMeasurementSchema.parse(pack.diagnostics.conditional_field_measurement);
+      if (page.status !== "validated") throw new Error("continued target page invalid");
+      expect(page.identity).toEqual(first.identity);
+      expect(page.request.budget).toEqual(budget);
+      expect(pack.embeddingWarmup).toBeNull();
+      expect(pack.queryEmbeddingWarmup).toBeNull();
+      expect(page.provider_calls).toBe(0);
+      expect(page.garden_enqueue).toBe(0);
+      expect(nativeSession?.pid ?? process.pid).toBe(pid);
+      expect(statSync(workingPath).ino).toBe(inode);
+      expect(existsSync(pagerSwitchWorkingDataDir(dataDirRoot, 3, WORKSPACE_A))).toBe(false);
+      all.push(...page.entries);
+      continuation = page.continuation;
+    }
+    expect(continuation).toBeNull();
+    expect(all).toEqual(complete.entries);
+  }, 60_000);
+
   it("sealed source inode and bytes are unchanged after a recall that appends EventLog on the working copy", async () => {
     const dataDirRoot = join(root, "data-child");
     const slicePathA = sealedSlices.sliceDbPaths[WORKSPACE_A]!;
@@ -156,7 +234,7 @@ describe("H02 — sealed slice private working copy", () => {
     });
     try {
       const row = workingDb.connection.prepare(
-        "SELECT COUNT(*) AS count FROM event_log WHERE event_type = 'soul.recall.completed'"
+        "SELECT COUNT(*) AS count FROM event_log WHERE event_type = 'soul.context_lens.assembled'"
       ).get() as { count: number };
       expect(row.count).toBeGreaterThanOrEqual(1);
     } finally {
@@ -271,7 +349,7 @@ describe("H02 — sealed slice private working copy", () => {
     });
     try {
       const row = workingDb.connection.prepare(
-        "SELECT COUNT(*) AS count FROM event_log WHERE event_type = 'soul.recall.completed'"
+        "SELECT COUNT(*) AS count FROM event_log WHERE event_type = 'soul.context_lens.assembled'"
       ).get() as { count: number };
       expect(row.count).toBe(1);
     } finally {

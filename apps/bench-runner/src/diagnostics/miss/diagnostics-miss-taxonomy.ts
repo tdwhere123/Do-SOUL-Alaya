@@ -141,6 +141,7 @@ export function classifyQuestionMissTaxonomy(input: {
 export function readQuestionMissTaxonomy(
   question: LongMemEvalQuestionDiagnostic
 ): LongMemEvalMissTaxonomy | null {
+  if (question.conditional_field_measurement?.status === "validated") return question.miss_taxonomy ?? null;
   if (question.miss_taxonomy !== null && question.miss_taxonomy !== undefined) {
     return question.miss_taxonomy;
   }

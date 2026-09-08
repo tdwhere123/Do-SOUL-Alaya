@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
+import type { ConditionalFieldRecallParams } from "@do-soul/alaya-core";
 import type {
   SoulMemorySearchResponse,
   OpenSemanticFactorFormationCapture,
@@ -76,7 +77,9 @@ export type BenchEmbeddingMode = "disabled" | "env";
 export type BenchEmbeddingProviderKind = "openai" | "local_onnx";
 export const DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND = "local_onnx" as const;
 
-export interface BenchRecallOptions {
+export interface BenchRecallOptions extends Pick<ConditionalFieldRecallParams,
+  "budget" | "continuation" | "cancelled" | "interpretationClock" | "since" | "until" | "timeFilter"
+> {
   readonly maxResults?: number;
   readonly conflictAwareness?: boolean;
   readonly referenceTime?: string;
@@ -105,6 +108,7 @@ export interface BenchDaemonHandle {
     readonly diagnostics?: unknown;
     readonly provider_calls: 0;
     readonly garden_enqueue: 0;
+    readonly request_budget: NonNullable<ConditionalFieldRecallParams["budget"]>;
   }>;
   warmEmbeddingCache(
     objectIds: readonly string[],

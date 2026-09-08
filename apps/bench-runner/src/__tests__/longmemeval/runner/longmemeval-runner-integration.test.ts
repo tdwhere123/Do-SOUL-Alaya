@@ -406,8 +406,8 @@ describe("LongMemEval runner", () => {
       expect(fullDiagnostics.questions).toHaveLength(2);
       expect(fullDiagnostics.questions[0]?.question_id).toBe("q001");
       expect(fullDiagnostics.questions[0]?.gold_memory_ids.length).toBeGreaterThan(0);
-      expect(fullDiagnostics.questions[0]?.recall_diagnostics_present).toBe(true);
-      expect(fullDiagnostics.questions[0]?.recall_diagnostics_keys).toContain("candidates");
+      expect(fullDiagnostics.questions[0]?.recall_diagnostics_present).toBe(false);
+      expect(fullDiagnostics.questions[0]?.recall_diagnostics_keys).toEqual([]);
       expect(JSON.stringify(diagnostics)).not.toContain("correct fact");
       const comparison = JSON.parse(
         await readFile(

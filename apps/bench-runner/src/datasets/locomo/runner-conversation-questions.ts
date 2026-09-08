@@ -159,6 +159,8 @@ function recordRetrievalOutcome(
   recordRecallCounts(state, result, hits);
   state.questionDiagnostics.push(
     buildQuestionDiagnostic({
+      queryText: context.qa.question,
+      recallLatencyMs: result.latencyMs,
       questionId: context.questionId,
       goldMemoryIds: context.goldMemoryIds,
       answerSessionIds: [...context.evidenceSet],

@@ -10,6 +10,8 @@ import {
 
 type Result = Parameters<typeof encodeBenchRecallResults>[0];
 const policy = buildBenchDiagnosticRecallPolicy("surface", 2, false);
+const budget = { schema_version: 1 as const, work_units: 10_000, memory_bytes: 1_000_000,
+  page_budget: 2, finalization_reserve: 100, min_envelope: 10 };
 
 function fixture(): Result {
   const index = InformationIndexSchema.parse({
@@ -35,10 +37,14 @@ function fixture(): Result {
 }
 
 describe("bench conditional field index response", () => {
+  it("rejects a response representation that contradicts the sent budget before delivery encoding", () => {
+    expect(() => encodeBenchRecallResults(fixture(), policy, { ...budget, page_budget: 1 }))
+      .toThrow(/page budget differs/);
+  });
   it("uses the normal MCP encoder and preserves product coordinates and incomplete constraints", () => {
     const result = fixture();
     const rows = encodeBenchRecallResults(result, policy);
-    const response = buildBenchRecallResponse("delivery", rows, result);
+    const response = buildBenchRecallResponse("delivery", rows, result, budget);
     expect(rows).toEqual(encodeIndexResults(result.index, new Map(), policy.fine_assessment.budgets.max_total_tokens));
     expect(response.index).toEqual(result.index);
     expect(response.results.map((row) => [row.object_id, row.hypothesis_id, row.output_binding,
@@ -50,6 +56,7 @@ describe("bench conditional field index response", () => {
     expect(response.active_constraints_completeness).toBe("incomplete");
     expect(response.provider_calls).toBe(0);
     expect(response.garden_enqueue).toBe(0);
+    expect(response.request_budget).toEqual(budget);
     expect(response.strategy_mix.precomputed_rank).toBe(false);
     expect(response.strategy_mix.semantic_supplement).toBe(false);
   });
@@ -59,7 +66,7 @@ describe("bench conditional field index response", () => {
     const tight = { ...policy, fine_assessment: { ...policy.fine_assessment,
       budgets: { ...policy.fine_assessment.budgets, max_total_tokens: 20 } } };
     const rows = encodeBenchRecallResults(result, tight);
-    const response = buildBenchRecallResponse("delivery", rows, result);
+    const response = buildBenchRecallResponse("delivery", rows, result, budget);
     expect(rows).toHaveLength(1);
     expect(response.index).toEqual(frameEncodedIndex(result.index, rows));
     expect(response.index?.entries).toHaveLength(2);

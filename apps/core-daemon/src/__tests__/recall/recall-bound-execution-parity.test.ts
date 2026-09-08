@@ -9,14 +9,13 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   buildRecallPolicy,
-  RecallService,
-  type FineAssessmentSelectionBoundaryCase
+  RecallService
 } from "@do-soul/alaya-core";
-import { createDependencies, createMemoryEntry } from
+import { createDependencies, createMemoryEntry, createTaskSurface } from
   "../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { runProductionBoundRecall } from "../../mcp-memory/recall/recall-bound-service.js";
 import type { RecallUsageHandlerDependencies } from "../../mcp-memory/recall/recall-usage-handlers.js";
-import { invokeBoundRecall } from "../../recall/recall-bound-execution.js";
+import { invokeBoundRecall, type BoundRecallInvokeParams } from "../../recall/recall-bound-execution.js";
 
 function makeSharedPolicy(): RecallPolicy {
   const taskSurfaceId = randomUUID();
@@ -35,6 +34,23 @@ function makeSharedPolicy(): RecallPolicy {
 }
 
 describe("invokeBoundRecall shared input contract", () => {
+  it("forwards target request options without normalizing clock or replacing the caller budget", async () => {
+    const recall = vi.fn(async (_params: BoundRecallInvokeParams) => "result");
+    const budget = { schema_version: 1 as const, work_units: 1000, memory_bytes: 65536,
+      page_budget: 1, finalization_reserve: 100, min_envelope: 10 };
+    const options = {
+      queryText: "needle", interpretationClock: "2026-09-06T00:00:00.000Z",
+      since: "2020-01-01T00:00:00.000Z", until: "2026-09-06T00:00:00.000Z",
+      timeFilter: { field: "last_used_at" as const }, budget, cancelled: true, continuation: null
+    };
+    await invokeBoundRecall({
+      sideEffectMode: "benchmark", recallService: { recall }, taskSurface: createTaskSurface(),
+      workspaceId: "workspace-1", policyOverride: makeSharedPolicy(), ...options
+    });
+    expect(recall).toHaveBeenCalledWith(expect.objectContaining(options));
+    expect(recall.mock.calls[0]?.[0].budget).toBe(budget);
+  });
+
   it("does not attach retired membership_shrink capture on production or benchmark bindings", async () => {
     const policy = makeSharedPolicy();
     const taskSurface = TaskObjectSurfaceSchema.parse({

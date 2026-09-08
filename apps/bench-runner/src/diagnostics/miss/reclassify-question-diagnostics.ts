@@ -39,6 +39,7 @@ export interface ReclassifyArtifactSummary {
 export function reclassifyQuestionDiagnostic(
   question: LongMemEvalQuestionDiagnostic
 ): LongMemEvalQuestionDiagnostic {
+  if (question.conditional_field_measurement?.status === "validated") return question;
   const field = readQuestionFieldContext(question);
   const gold = question.gold.map((row) => ({
     ...row,

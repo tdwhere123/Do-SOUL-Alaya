@@ -27,6 +27,7 @@ export interface LongMemEvalQuestionCohortLedger {
   readonly evidence_status: "complete" | "partial" | "missing";
   readonly evaluation_issue_reason:
     | "missing_diagnostics"
+    | "invalid_target_measurement"
     | "empty_gold_identity"
     | "extraction_materialization_drop"
     | "gold_taxonomy_fallthrough"
@@ -73,6 +74,7 @@ export function buildQuestionCohortLedger(input: {
   readonly goldObjectIds?: readonly string[];
   readonly gold: readonly LongMemEvalGoldDiagnostic[];
   readonly diagnosticsAvailable: boolean;
+  readonly targetMeasurementStatus?: "validated" | "invalid" | null;
   readonly candidatePoolComplete: boolean;
   readonly identityConflictObjectKeys?: readonly string[];
   readonly missTaxonomy: LongMemEvalMissTaxonomy | null;
@@ -97,7 +99,7 @@ export function buildQuestionCohortLedger(input: {
     retrieval_status: measurementStatus === "scorable"
       ? input.hitAt5 ? "hit_at_5" : "miss_at_5"
       : "not_applicable",
-    evidence_status: !input.diagnosticsAvailable
+    evidence_status: !input.diagnosticsAvailable && input.targetMeasurementStatus !== "validated"
       ? "missing"
       : input.candidatePoolComplete ? "complete" : "partial",
     candidate_pool_complete: input.candidatePoolComplete,
@@ -155,6 +157,7 @@ export function deriveQuestionEvaluationIssueReason(input: {
   readonly goldEvidenceIds?: readonly string[];
   readonly goldObjectIds?: readonly string[];
   readonly diagnosticsAvailable: boolean;
+  readonly targetMeasurementStatus?: "validated" | "invalid" | null;
   readonly missTaxonomy: LongMemEvalMissTaxonomy | null;
   readonly seedDropReasons?: LongMemEvalSeedDropReasons;
   readonly ambiguousIdentity: boolean;
@@ -162,7 +165,8 @@ export function deriveQuestionEvaluationIssueReason(input: {
   if (input.premiseInvalid) return "adjudicated_dataset_issue";
   if (input.ambiguousIdentity) return "identity_join_error";
   if (input.isAbstention) return null;
-  if (!input.diagnosticsAvailable) return "missing_diagnostics";
+  if (input.targetMeasurementStatus === "invalid") return "invalid_target_measurement";
+  if (!input.diagnosticsAvailable && input.targetMeasurementStatus !== "validated") return "missing_diagnostics";
   if (deriveQuestionExtractionMaterialization(input).status === "drop") {
     return "extraction_materialization_drop";
   }

@@ -280,7 +280,7 @@ async function seedWorkspaceAndRun(
   });
 }
 
-async function seedMemory(
+export async function seedMemory(
   database: ReturnType<typeof initDatabase>,
   input: {
     readonly workspaceId: string;

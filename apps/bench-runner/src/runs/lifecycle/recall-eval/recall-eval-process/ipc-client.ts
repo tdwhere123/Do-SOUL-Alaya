@@ -139,6 +139,12 @@ export class RecallEvalPagerIpcSession {
     payload: unknown,
     timeoutMs: number = this.defaultTimeoutMs
   ): Promise<unknown> {
+    if (this.child === null && typeof payload === "object" && payload !== null
+      && "recallOptions" in payload && typeof payload.recallOptions === "object"
+      && payload.recallOptions !== null && "continuation" in payload.recallOptions
+      && payload.recallOptions.continuation != null) {
+      throw new Error("recall continuation invalidated: pager process is unavailable");
+    }
     const startedAt = performance.now();
     const initialOpen = this.child !== null ? (this.initialOpenDurationMs ?? 0) : undefined;
     if (initialOpen !== undefined) this.initialOpenDurationMs = undefined;

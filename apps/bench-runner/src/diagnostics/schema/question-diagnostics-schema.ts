@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ConditionalFieldMeasurementSchema } from "../../runs/measurement/conditional-field-measurement.js";
 import { RecallOriginPlaneSchema } from "@do-soul/alaya-protocol";
 import {
   BenchAnswerRerankFailureClassSchema,
@@ -201,6 +202,7 @@ const LongMemEvalQuestionCohortLedgerSchema = z
     retrieval_status: z.enum(["hit_at_5", "miss_at_5", "not_applicable"]),
     evidence_status: z.enum(["complete", "partial", "missing"]),
     evaluation_issue_reason: z.enum([
+      "invalid_target_measurement",
       "missing_diagnostics",
       "empty_gold_identity",
       "extraction_materialization_drop",
@@ -387,6 +389,7 @@ export const LongMemEvalQuestionDiagnosticSchema = z.preprocess(
     seed_drop_reasons: LongMemEvalSeedDropReasonsSchema.optional(),
     degradation_reason: z.string().nullable(),
     recall_diagnostics_present: z.boolean(),
+    conditional_field_measurement: ConditionalFieldMeasurementSchema.nullable().optional(),
     recall_diagnostics_keys: z.array(z.string()).readonly(),
     packet_plan_trace: RecallPacketPlanTraceSchema.nullable().default(null),
     phase_latency_ms: PhaseLatencyMsSchema.optional(),

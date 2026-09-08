@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { stableStringify } from "@do-soul/alaya-core";
 import { relative, resolve } from "node:path";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import {
@@ -38,6 +40,23 @@ interface PagerRuntime {
   installedWorkspaceId: string | null;
   workingDbPath: string | null;
   switchIndex: number;
+  continuationBinding: PagerContinuationBinding | null;
+}
+
+export interface PagerContinuationBinding {
+  readonly requestIdentity: string;
+  readonly workingFileIdentity: string;
+}
+
+export function assertPagerContinuationBinding(
+  active: PagerContinuationBinding | null,
+  requested: PagerContinuationBinding
+): void {
+  if (active === null || requested.workingFileIdentity === "unavailable"
+    || active.requestIdentity !== requested.requestIdentity
+    || active.workingFileIdentity !== requested.workingFileIdentity) {
+    throw new Error("recall continuation invalidated: active question or source snapshot is unavailable");
+  }
 }
 
 export function pagerSwitchWorkingDataDir(
@@ -75,7 +94,8 @@ export async function openRecallEvalPagerChild(
     slices: working.slices,
     installedWorkspaceId: working.slices?.workspaceIds[0] ?? null,
     workingDbPath: workingAlayaDbPath(payload.dataDirRoot),
-    switchIndex: 0
+    switchIndex: 0,
+    continuationBinding: null
   };
   return working.sqlite;
 }
@@ -84,16 +104,26 @@ export async function recallRecallEvalPagerChild(
   payload: RecallEvalPagerRecallPayload
 ): Promise<RecallEvalQuestionResult> {
   const current = requireRuntime();
-  await ensurePagerDaemonForQuestion(current, payload.question.workspaceId);
+  const snapshotDigest = resolveWorkspaceSliceSnapshotDigest(current.slices, payload.question.workspaceId);
+  const requestIdentity = createHash("sha256").update(stableStringify({
+    question: payload.question,
+    turnIndex: payload.turnIndex,
+    sourceDigest: snapshotDigest ?? current.open.manifest.artifact_integrity?.db_sha256 ?? null
+  })).digest("hex");
+  if (payload.recallOptions.continuation != null) {
+    assertPagerContinuationBinding(current.daemon === null ? null : current.continuationBinding, {
+      requestIdentity,
+      workingFileIdentity: workingFileIdentity(current.workingDbPath)
+    });
+  } else {
+    current.continuationBinding = null;
+    await ensurePagerDaemonForQuestion(current, payload.question.workspaceId);
+  }
   const daemon = current.daemon;
   if (daemon === null) {
     throw new Error("recall-eval pager daemon is not running");
   }
-  const snapshotDigest = resolveWorkspaceSliceSnapshotDigest(
-    current.slices,
-    payload.question.workspaceId
-  );
-  return recallEvalOneQuestion({
+  const result = await recallEvalOneQuestion({
     daemon,
     question: payload.question,
     turnIndex: payload.turnIndex,
@@ -105,6 +135,17 @@ export async function recallRecallEvalPagerChild(
     simulateReport: current.open.simulateReport,
     measurement: payload.measurement
   });
+  current.continuationBinding = {
+    requestIdentity,
+    workingFileIdentity: workingFileIdentity(current.workingDbPath)
+  };
+  return result;
+}
+
+function workingFileIdentity(path: string | null): string {
+  if (path === null || !existsSync(path)) return "unavailable";
+  const stat = statSync(path, { bigint: true });
+  return `${stat.dev}:${stat.ino}`;
 }
 
 async function ensurePagerDaemonForQuestion(

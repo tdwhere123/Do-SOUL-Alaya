@@ -16,6 +16,7 @@ import {
 } from "./schema/diagnostics-private.js";
 import { requireDeliveryMissDropReason } from "./miss/delivery-miss-taxonomy.js";
 import { buildGoldDiagnostics } from "./gold-diagnostics.js";
+import { measureConditionalFieldResponse } from "../runs/measurement/conditional-field-measurement.js";
 import {
   assembleQuestionDiagnostic,
   type QuestionDiagnosticInput
@@ -53,6 +54,7 @@ export function buildQuestionDiagnostic(
   });
   const candidates = diagnostics === null ? [] : buildReplayCandidates(diagnostics);
   return assembleQuestionDiagnostic(input, {
+    conditionalFieldMeasurement: measureConditionalFieldResponse(input),
     diagnostics,
     deliveredResults,
     activeConstraintResults,
