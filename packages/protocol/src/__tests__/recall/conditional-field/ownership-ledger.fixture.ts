@@ -19,7 +19,8 @@ export const OWNERSHIP_CARDS = [
   "U05",
   "U06",
   "U07",
-  "live-unowned"
+  "retired-deleted",
+  "retained-exception"
 ] as const;
 
 export type OwnershipCard = (typeof OWNERSHIP_CARDS)[number];
@@ -31,7 +32,9 @@ export type OwnershipClassification =
   | "reuse-gap"
   | "missing"
   | "unowned-live"
-  | "transferred";
+  | "transferred"
+  | "retired-deleted"
+  | "retained-exception";
 
 export type OwnershipRow = Readonly<{
   readonly card: OwnershipCard;
@@ -268,15 +271,22 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
     ])
   }),
   Object.freeze({
-    card: "live-unowned",
-    classification: "unowned-live",
-    note: "Retired decision trees and field-contract stay out of U-band writes.",
+    card: "retired-deleted",
+    classification: "retired-deleted",
+    note: "Deleted retired decision/delivery surfaces; not live Recall and not U-band writes.",
     paths: Object.freeze([
       "packages/core/src/recall/decision/budget-aware-q/",
       "packages/core/src/recall/decision/query-proof/",
-      "packages/protocol/src/recall/field-contract/",
       "packages/core/src/recall/retrieval/indexed-family-read.ts",
       "packages/core/src/recall/delivery/canonical-delivery.ts"
+    ])
+  }),
+  Object.freeze({
+    card: "retained-exception",
+    classification: "retained-exception",
+    note: "field-contract SELECT_GAMMA_OPERATOR_ID is a generation-identity hash freeze, not a live walk.",
+    paths: Object.freeze([
+      "packages/protocol/src/recall/field-contract/"
     ])
   })
 ]);

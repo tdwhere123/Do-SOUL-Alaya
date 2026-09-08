@@ -66,7 +66,7 @@ export const FineAssessmentConfigSchema = z
   .object({
     budgets: RecallBudgetsSchema,
     conflict_awareness: z.boolean(),
-    // Omitted means canonical prefixSK delivery; "legacy" restores deliverFineAssessment.
+    // Unused freeze-live compatibility; executeRecall ignores it. Omitted does not select prefixSK or any ranking algorithm.
     delivery_path: z.enum(["legacy", "canonical"]).optional()
   })
   .strict()

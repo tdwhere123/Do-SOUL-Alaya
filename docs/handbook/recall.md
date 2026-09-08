@@ -31,6 +31,23 @@ not be reintroduced as a fallback. Source/history readers, global-memory
 lifecycle ports and historical protocol shapes have independent consumers;
 retaining those does not authorize running a retired selector.
 
+Retained leftover surfaces and their non-Recall consumers:
+
+- `SELECT_GAMMA_OPERATOR_ID` / `packages/protocol/src/recall/field-contract/`:
+  generation-identity hash freeze, not a live walk.
+- `EMBEDDING_INJECTION_*` / `embedding-coarse-injection`: daemon embedding
+  runtime, not ordinary ranking.
+- `RECALL_FUSION_FAMILY_IDS` / `aggregateFamilyContributions`: bench historical
+  diagnostic reader (`honest-higher-r-obj`), not `executeRecall`.
+- `findRecallTierWindow` worker/storage window: snapshot/materialization source
+  window, unused by `executeRecall` ranking.
+- `ALAYA_RECALL_CONF_FLOOD_CAP` and related rho/w_path/head-drop: leftover
+  scoring-test config, not ordinary Recall.
+- in-process `FIELD_RESUME`: process-local continuation; process loss
+  invalidates; not durable.
+
+Retaining these does not authorize running a retired selector.
+
 ## Conditional meaning
 
 The field retains object, hypothesis, program state, binding and temporal

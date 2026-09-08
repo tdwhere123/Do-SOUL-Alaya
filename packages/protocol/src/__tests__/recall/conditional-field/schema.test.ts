@@ -296,7 +296,19 @@ describe("conditional-field schemas", () => {
     const u01 = OWNERSHIP_LEDGER.find((row) => row.card === "U01");
     expect(c00?.classification).toBe("already-written");
     expect(u01?.paths).toContain("packages/core/src/recall/conditional-field/query/");
-    expect(OWNERSHIP_LEDGER.find((row) => row.card === "live-unowned")?.paths)
-      .toContain("packages/core/src/recall/decision/budget-aware-q/");
+    expect(OWNERSHIP_LEDGER.find((row) => row.card === "live-unowned")).toBeUndefined();
+    expect(OWNERSHIP_LEDGER.find((row) => row.card === "retired-deleted")?.classification)
+      .toBe("retired-deleted");
+    expect(OWNERSHIP_LEDGER.find((row) => row.card === "retired-deleted")?.paths)
+      .toEqual([
+        "packages/core/src/recall/decision/budget-aware-q/",
+        "packages/core/src/recall/decision/query-proof/",
+        "packages/core/src/recall/retrieval/indexed-family-read.ts",
+        "packages/core/src/recall/delivery/canonical-delivery.ts"
+      ]);
+    expect(OWNERSHIP_LEDGER.find((row) => row.card === "retained-exception")?.classification)
+      .toBe("retained-exception");
+    expect(OWNERSHIP_LEDGER.find((row) => row.card === "retained-exception")?.paths)
+      .toContain("packages/protocol/src/recall/field-contract/");
   });
 });

@@ -59,14 +59,10 @@ export function writeDoctorAuditSummary(
     `retain unrouted facts: ${snapshot.retain_unrouted_facts ? "on" : "off"}` +
       ` (ALAYA_RETAIN_UNROUTED_FACTS default off; set 1/true to enable)\n`
   );
-  if (snapshot.recall_conf_flood_cap.defaulted) {
-    stream.write(
-      "recall flood cap WARNING: ALAYA_RECALL_CONF_FLOOD_CAP is unset or default 1.0;" +
-        " flood damping is effectively disabled.\n"
-    );
-  } else {
-    stream.write(`recall flood cap: ${snapshot.recall_conf_flood_cap.raw}\n`);
-  }
+  stream.write(
+    "ALAYA_RECALL_CONF_FLOOD_CAP leftover/non-decision scoring-test config;" +
+      " does not affect soul.recall.\n"
+  );
   stream.write(`mcp server config json: ${snapshot.mcp_server_config}\n`);
   stream.write(
     `temporal projection: schema=${snapshot.temporal_projection.schema}` +
