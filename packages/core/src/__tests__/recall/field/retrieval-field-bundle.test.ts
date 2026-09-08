@@ -2,15 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createRecallRetrievalFieldBundle } from
   "../../../recall/field/retrieval/retrieval-field-bundle.js";
-import {
-  addSemanticSupplementCandidates,
-  type SemanticSupplementParams
-} from "../../../recall/coarse-filter/coarse-filter-semantic.js";
-import { buildDefaultPolicy } from
-  "../../../recall/runtime/orchestration.js";
-import { compileRecallQueryProbes } from
-  "../../../recall/query/recall-query-probes.js";
-import { createCandidate } from "../fine-assessment-selection-fixtures.js";
 import type {
   KeywordSearchLaneScope,
   RecallServiceMemoryRepoPort
@@ -389,85 +380,7 @@ describe("request-scoped retrieval field bundle", () => {
     expect(onFailure).toHaveBeenCalledTimes(1);
     expect(bundle.refinementReceipts()).toHaveLength(0);
   });
-
-  it("feeds maximum observations through the same coarse admission owner", async () => {
-    const searchByKeywordField = vi.fn(async () => refinementFieldResult());
-    const bundle = createRecallRetrievalFieldBundle({
-      workspaceId: "workspace-1",
-      queryText: "deploy",
-      refinementMaxDepth: 2,
-      memoryRepo: stubMemoryRepo({ searchByKeywordField })
-    });
-    const entries = ["memory-1", "memory-2"].map((id) => createCandidate(id).entry);
-    const requested = createSemanticAdmissionFixture(bundle, entries);
-    const maximum = createSemanticAdmissionFixture(
-      bundle.forObservationView("maximum"),
-      entries
-    );
-
-    await addSemanticSupplementCandidates(requested.params);
-    const requestedCallCount = searchByKeywordField.mock.calls.length;
-    await addSemanticSupplementCandidates(maximum.params);
-
-    expect(requested.admitted()).toEqual(["memory-1"]);
-    expect(maximum.admitted()).toEqual(["memory-1", "memory-2"]);
-    expect(requested.params.ftsRanks).toEqual(new Map([["memory-1", 1]]));
-    expect(maximum.params.ftsRanks).toEqual(new Map([
-      ["memory-1", 0.75],
-      ["memory-2", 0.25]
-    ]));
-    expect(requestedCallCount).toBeGreaterThan(0);
-    expect(searchByKeywordField).toHaveBeenCalledTimes(requestedCallCount);
-  });
 });
-
-function createSemanticAdmissionFixture(
-  retrievalFieldBundle: SemanticSupplementParams["retrievalFieldBundle"],
-  entries: readonly ReturnType<typeof createCandidate>["entry"][]
-) {
-  const queryProbes = compileRecallQueryProbes("deploy");
-  const addCandidate = vi.fn();
-  const basePolicy = buildDefaultPolicy({
-    strategy: "chat",
-    taskSurfaceRef: "field-refinement-test",
-    now: () => "2026-08-05T00:00:00.000Z",
-    generateRuntimeId: () => "11111111-1111-4111-8111-111111111111"
-  });
-  const params: SemanticSupplementParams = {
-    context: {
-      dependencies: { memoryRepo: {} },
-      warn: vi.fn()
-    } as unknown as SemanticSupplementParams["context"],
-    workspaceId: "workspace-1",
-    config: {
-      ...basePolicy.coarse_filter,
-      semantic_supplement: {
-        ...basePolicy.coarse_filter.semantic_supplement,
-        enabled: true,
-        max_supplement: 1,
-        field_observation_max_depth: 2
-      }
-    },
-    queryText: "deploy",
-    queryProbes,
-    tier: "hot",
-    tierScopedSearchEligible: true,
-    byId: new Map(entries.map((entry) => [entry.object_id, entry])),
-    addCandidate,
-    ftsRanks: new Map(),
-    trigramFtsRanks: new Map(),
-    evidenceFtsRanks: new Map(),
-    evidenceFtsRanksPerRef: new Map(),
-    evidenceProjectionMatchesByRef: new Map(),
-    retrievalFieldBundle
-  };
-  return Object.freeze({
-    params,
-    admitted: () => [...new Set(addCandidate.mock.calls.map(
-      ([entry]) => entry.object_id as string
-    ))]
-  });
-}
 
 function stubMemoryRepo(
   overrides: Partial<RecallServiceMemoryRepoPort> = {}

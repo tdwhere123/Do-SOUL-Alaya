@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { RecallService } from "../../recall/recall-service.js";
 import {
   createDependencies,
@@ -10,11 +10,7 @@ describe("RecallService provider isolation", () => {
   it("keeps the frozen synthesis port unused during ordinary recall", async () => {
     const memory = createMemoryEntry({ object_id: "selected-memory" });
     const { dependencies } = createDependencies([memory]);
-    const synthesize = vi.fn(async () => ({ text: "selected evidence summary" }));
-    const service = new RecallService({
-      ...dependencies,
-      selectGammaSynthesisPort: { synthesize }
-    });
+    const service = new RecallService(dependencies);
 
     const result = await service.recall({
       taskSurface: createTaskSurface(),
@@ -23,7 +19,6 @@ describe("RecallService provider isolation", () => {
       runId: "run-1"
     });
 
-    expect(synthesize).not.toHaveBeenCalled();
     expect(result.synthesis).toEqual({ status: "absent" });
     expect(result.index).toBeDefined();
   });

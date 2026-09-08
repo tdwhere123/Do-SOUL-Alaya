@@ -290,25 +290,17 @@ function createRecallService(input: {
     memoryRepo: input.recallSearchRuntime.recallMemoryRepo,
     slotRepo: input.input.slotRepo,
     eventLogRepo: input.input.eventLogRepo,
-    graphSupportPort: createRecallGraphSupportPort(
-      input.input,
-      input.recallPathRuntime.directPathReadPorts
-    ),
     projectMappingPort: input.input.projectMappingService,
     pathPlasticityPort: input.recallPathRuntime.recallPathPlasticityPort as never,
-    pathExpansionPort: input.recallPathRuntime.recallPathExpansionPort as never,
     activeConstraintsPort: input.recallSearchRuntime.recallActiveConstraintsPort,
     robustSourceRefParsing: readRobustSourceRefParsing(input.input.configEnv),
-    evidenceSearchPort: input.recallSearchRuntime.recallEvidenceSearchPort,
     routingKeyProjectionPort: new SqliteRecallRoutingKeyProjectionRepo(input.input.database),
-    synthesisSearchPort: input.recallSearchRuntime.recallSynthesisSearchPort,
     ...createRecallGlobalMemoryPorts(input),
     budgetPenaltyPort: {
       getSnapshot: async (runId: string) =>
         await input.input.budgetBankruptcyService.getSnapshot(runId, input.input.budgetNow())
     },
     claimResolverPort: input.input.claimFormRepo,
-    embeddingRecallService: input.embeddingRuntime.embeddingRecallService,
     manifestationSidecarPort: input.manifestationSidecarPort as never,
     ...(input.embeddingRuntime.defaultPolicyDecorator === undefined
       ? {}
@@ -320,7 +312,6 @@ function createRecallService(input: {
       : { openSemanticFactorExtractionPort: input.input.openSemanticFactorExtractionPort }),
     recallFailureHealthInbox: input.input.recallFailureHealthInboxPort,
     warn: input.input.warn,
-    fieldQuerySession: input.input.fieldQuerySession,
     readSnapshot: input.readSnapshot,
     observerReaders: createConditionalFieldObserverReaders(input.input.database),
     ...(input.recallSearchRuntime.conditionalFieldPort === undefined

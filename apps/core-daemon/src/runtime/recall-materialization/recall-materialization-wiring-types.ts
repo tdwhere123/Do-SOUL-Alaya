@@ -98,7 +98,6 @@ export type CreateRecallMaterializationWiringInput = {
   readonly pathFailureHealthInboxPort: PathFailureHealthInboxPort;
   readonly recallFailureHealthInboxPort: RecallFailureHealthInboxPort;
   readonly evidenceService: EvidenceService;
-  readonly fieldQuerySession: import("@do-soul/alaya-core").RecallFieldQuerySession;
   readonly fieldComposition: import("../field/field-composition.js").DaemonFieldComposition;
   readonly openSemanticFactorExtractionPort?: import("@do-soul/alaya-core")
     .OpenSemanticFactorExtractionPort;

@@ -10,31 +10,8 @@ type RecallEnvLookup = Readonly<
 const RECALL_ENV_NOT_MATCHED: RecallEnvLookup = Object.freeze({ matched: false });
 
 export function recallEnvRaw(name: string): string | undefined {
-  const recall = getCoreConfig().recall;
-  let lookup = readRecallFloodEnv(recall, name);
-  if (lookup.matched) return lookup.value;
-  lookup = readRecallDeliveryEnv(recall, name);
-  if (lookup.matched) return lookup.value;
-  return undefined;
-}
-
-function readRecallFloodEnv(recall: RecallConfig, name: string): RecallEnvLookup {
-  switch (name) {
-    case "ALAYA_RECALL_CONF_RHO_PATH":
-      return matched(stringify(recall.confRhoPath));
-    case "ALAYA_RECALL_CONF_RHO_EVIDENCE":
-      return matched(stringify(recall.confRhoEvidence));
-    case "ALAYA_RECALL_CONF_W_PATH":
-      return matched(stringify(recall.confWPath));
-    case "ALAYA_RECALL_CONF_FLOOD_CAP":
-      return matched(stringify(recall.confFloodCap));
-    case "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL":
-      return matched(stringify(recall.confFloodCapTotal));
-    case "ALAYA_RECALL_PATH_EMB_MODULATION":
-      return matched(recall.pathEmbModulation);
-    default:
-      return RECALL_ENV_NOT_MATCHED;
-  }
+  const lookup = readRecallDeliveryEnv(getCoreConfig().recall, name);
+  return lookup.matched ? lookup.value : undefined;
 }
 
 function readRecallDeliveryEnv(recall: RecallConfig, name: string): RecallEnvLookup {
@@ -43,8 +20,6 @@ function readRecallDeliveryEnv(recall: RecallConfig, name: string): RecallEnvLoo
       return matched(recall.projectionsEnabled ? "on" : "off");
     case "ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS":
       return matched(recall.extraSynonymClusters);
-    case "ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP":
-      return matched(stringify(recall.finalAuthorityMaxHeadDrop));
     default:
       return RECALL_ENV_NOT_MATCHED;
   }
@@ -52,10 +27,6 @@ function readRecallDeliveryEnv(recall: RecallConfig, name: string): RecallEnvLoo
 
 function matched(value: string | undefined): RecallEnvLookup {
   return Object.freeze({ matched: true, value });
-}
-
-function stringify(value: number | undefined): string | undefined {
-  return value === undefined ? undefined : String(value);
 }
 
 export function recallProjectionScoringEnabled(): boolean {

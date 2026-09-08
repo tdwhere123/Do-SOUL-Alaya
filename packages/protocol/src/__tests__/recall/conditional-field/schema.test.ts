@@ -306,9 +306,13 @@ describe("conditional-field schemas", () => {
         "packages/core/src/recall/retrieval/indexed-family-read.ts",
         "packages/core/src/recall/delivery/canonical-delivery.ts",
         "packages/core/src/recall/coarse-filter/coarse-filter-pipeline.ts",
+        "packages/core/src/recall/coarse-filter/coarse-filter.ts",
+        "packages/core/src/recall/coarse-filter/coarse-filter-result.ts",
         "packages/core/src/recall/runtime/query/prepare-recall-request.ts",
+        "packages/core/src/recall/runtime/query/prepare-recall-query-condition.ts",
         "packages/core/src/recall/field/family-rank-base.ts",
-        "packages/core/src/recall/scoring/integrated-flood-scoring.ts"
+        "packages/core/src/recall/scoring/integrated-flood-scoring.ts",
+        "packages/core/src/recall/scoring/flood-slice-axis.ts"
       ]);
     expect(OWNERSHIP_LEDGER.find((row) => row.card === "retained-exception")?.classification)
       .toBe("retained-exception");

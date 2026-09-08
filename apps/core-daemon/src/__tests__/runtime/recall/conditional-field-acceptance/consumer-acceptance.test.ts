@@ -247,7 +247,6 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     const { dependencies } = createDependencies([]);
     const readBounded = createBoundedActiveConstraintsReader(slice.database);
     const service = new RecallService({
-      testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       now: () => INTERPRETATION_CLOCK,
       observerReaders: readersFor(slice),
@@ -299,7 +298,6 @@ function createTickingHandlerSession(
   const readBounded = createBoundedActiveConstraintsReader(slice.database);
   let ticks = 0;
   const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     now: () => new Date(Date.parse(INTERPRETATION_CLOCK) + ticks++ * 1_000).toISOString(),
     observerReaders: readersFor(slice),

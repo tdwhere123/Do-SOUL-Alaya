@@ -43,8 +43,6 @@ Retained leftover surfaces and their non-Recall consumers:
   diagnostic reader (`honest-higher-r-obj`), not `executeRecall`.
 - `findRecallTierWindow` worker/storage window: snapshot/materialization source
   window, unused by `executeRecall` ranking.
-- `ALAYA_RECALL_CONF_FLOOD_CAP` and related rho/w_path/head-drop: leftover
-  scoring-test config, not ordinary Recall.
 - in-process `FIELD_RESUME`: process-local continuation; process loss
   invalidates; not durable.
 

@@ -131,7 +131,6 @@ export function createPlantedRecall(input: Readonly<{
   return new RecallService({
     now: () => CLOCK,
     generateRuntimeId: () => RUNTIME_ID,
-    fieldQuerySession: input.field.querySession,
     memoryRepo: input.memoryRepo,
     slotRepo: { findByWorkspace: async () => [] },
     eventLogRepo: new SqliteEventLogRepo(input.database),

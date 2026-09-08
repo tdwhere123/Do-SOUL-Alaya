@@ -1,6 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { collectEmbeddingCoarseInjection } from
-  "../../recall/coarse-filter/embedding-coarse-injection.js";
 import { RecallService } from "../../recall/recall-service.js";
 import { prepareEmbeddingSupplementQuery } from "../../recall/supplements/supplements.js";
 import {
@@ -35,7 +33,6 @@ describe("lexical recall does not wait for query embedding", () => {
     })];
     const { dependencies } = createDependencies(memories);
     const service = new RecallService({
-      testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors: vi.fn(async () => true),
@@ -108,70 +105,5 @@ describe("lexical recall does not wait for query embedding", () => {
     expect(prepared.handle).toBeNull();
     expect(prepareQueryEmbedding).not.toHaveBeenCalled();
     expect(waitForSnapshot).not.toHaveBeenCalled();
-  });
-
-  it("does not start workspace neighbor embedding when the supplement is off", async () => {
-    const waitForSnapshot = vi.fn(async () => {
-      throw new Error("lexical path must not wait for query embedding");
-    });
-    const prepareRecallEmbeddingSnapshot = vi.fn(async () => {
-      throw new Error("lexical path must not prepare embedding snapshot");
-    });
-    const collectWorkspaceNeighborsWithMetadata = vi.fn(async () => {
-      throw new Error("lexical path must not scan neighbors");
-    });
-    const { dependencies } = createDependencies([createMemoryEntry()]);
-    const policy = overridePolicy(
-      new RecallService(dependencies).buildDefaultPolicy(
-        "analyze",
-        createTaskSurface().runtime_id
-      ),
-      {
-        coarse_filter: {
-          ...new RecallService(dependencies).buildDefaultPolicy(
-            "analyze",
-            createTaskSurface().runtime_id
-          ).coarse_filter,
-          semantic_supplement: {
-            enabled: true,
-            max_supplement: 5,
-            embedding_enabled: false
-          }
-        }
-      }
-    );
-
-    const result = await collectEmbeddingCoarseInjection({
-      dependencies: {
-        embeddingRecallService: {
-          prepareQueryEmbedding: vi.fn(() => ({
-            ...createPreparedQueryHandle("unused"),
-            waitForSnapshot
-          })),
-          prepareRecallEmbeddingSnapshot,
-          materializeEmbeddingSupplementFromSnapshot: vi.fn(async () => ({
-            supplementaryEntries: Object.freeze([]),
-            similarityHintsByObjectId: Object.freeze({})
-          })),
-          collectWorkspaceNeighborsWithMetadata,
-          querySupplement: vi.fn(async () => ({
-            supplementaryEntries: Object.freeze([]),
-            similarityHintsByObjectId: Object.freeze({})
-          }))
-        },
-        memoryRepo: dependencies.memoryRepo
-      },
-      warn: vi.fn(),
-      policy,
-      workspaceId: "workspace-1",
-      runId: null,
-      queryText: "query",
-      poolCandidates: [{ entry: createMemoryEntry() }]
-    });
-
-    expect(result.candidates).toEqual([]);
-    expect(waitForSnapshot).not.toHaveBeenCalled();
-    expect(prepareRecallEmbeddingSnapshot).not.toHaveBeenCalled();
-    expect(collectWorkspaceNeighborsWithMetadata).not.toHaveBeenCalled();
   });
 });

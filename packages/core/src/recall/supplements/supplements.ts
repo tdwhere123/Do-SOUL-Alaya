@@ -19,7 +19,6 @@ import type {
 import { normalizeEmbeddingProviderDegradationReason } from "../runtime/diagnostics.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { collectSynthesisChildCandidates } from "./synthesis/child-candidates.js";
-export { collectEmbeddingCoarseInjection } from "../coarse-filter/embedding-coarse-injection.js";
 
 export type EmbeddingSupplementCollectionStatus =
   | "disabled"

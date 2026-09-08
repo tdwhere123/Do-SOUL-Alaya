@@ -54,7 +54,7 @@ describe("workspace observable source generation", () => {
         try {
           await worker?.ready();
           const { dependencies } = createDependencies([]);
-          const service = new RecallService({ ...dependencies, now: () => NOW, testOnlyAllowInMemoryFieldQuerySession: true,
+          const service = new RecallService({ ...dependencies, now: () => NOW,
             ...(worker ? { readSnapshot: worker.readSnapshot, conditionalFieldPort: worker.conditionalFieldPort }
               : { observerReaders: readers }) });
           const before = readers.snapshotPin!(WS);

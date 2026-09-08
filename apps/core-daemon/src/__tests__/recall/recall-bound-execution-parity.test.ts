@@ -70,7 +70,6 @@ describe("invokeBoundRecall shared input contract", () => {
     });
     const { dependencies } = createDependencies([memory]);
     const recallService = new RecallService({
-      testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       defaultPolicyDecorator: (value) => value,
       testOnlyTransformCoarseCandidates: () => []

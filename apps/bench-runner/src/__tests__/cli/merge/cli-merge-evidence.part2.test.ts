@@ -136,7 +136,7 @@ describe("merge-longmemeval evidence bundle", () => {
     const drifted = provenance(1, 1);
     await writeProvenance(shardB, {
       ...drifted,
-      runtime: { ...drifted.runtime, paired_env: { ALAYA_RECALL_CONF_RHO_PATH: "drift" } }
+      runtime: { ...drifted.runtime, paired_env: { ALAYA_RECALL_ANSWERS_WITH: "drift" } }
     });
     expect(await runMergeCli(root, [
       "merge-longmemeval", "--variant", "s", "--history-root", path.join(root, "identity"),

@@ -298,10 +298,10 @@ describe("LongMemEval evidence contract traces", () => {
 
   it("binds effective ranking switches into paired provenance", () => {
     expect(collectPairedEnvironment({
-      ALAYA_RECALL_CONF_RHO_PATH: "0.5",
+      ALAYA_RECALL_SOURCE_REF_ROBUST: "true",
       UNRELATED_SECRET: "not-recorded"
     })).toEqual({
-      ALAYA_RECALL_CONF_RHO_PATH: "0.5",
+      ALAYA_RECALL_SOURCE_REF_ROBUST: "true",
       ALAYA_OFFICIAL_GARDEN_API_KEY_STATE: "unset",
       ALAYA_OFFICIAL_GARDEN_SECRET_REF_STATE: "unset"
     });

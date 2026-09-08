@@ -2,15 +2,8 @@ type ConfigEnvironment = Readonly<Record<string, string | undefined>>;
 
 export const CORE_CONFIG_ENV_KEYS = Object.freeze({
   recall: Object.freeze({
-    confRhoPath: "ALAYA_RECALL_CONF_RHO_PATH",
-    confRhoEvidence: "ALAYA_RECALL_CONF_RHO_EVIDENCE",
-    confWPath: "ALAYA_RECALL_CONF_W_PATH",
-    confFloodCap: "ALAYA_RECALL_CONF_FLOOD_CAP",
-    confFloodCapTotal: "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
-    pathEmbModulation: "ALAYA_RECALL_PATH_EMB_MODULATION",
     projections: "ALAYA_RECALL_PROJECTIONS",
-    extraSynonymClusters: "ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS",
-    finalAuthorityMaxHeadDrop: "ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP"
+    extraSynonymClusters: "ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS"
   }),
   embedding: Object.freeze({
     backfillConcurrency: "ALAYA_EMBEDDING_BACKFILL_CONCURRENCY",

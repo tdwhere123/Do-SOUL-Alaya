@@ -280,9 +280,13 @@ export const OWNERSHIP_LEDGER: readonly OwnershipRow[] = Object.freeze([
       "packages/core/src/recall/retrieval/indexed-family-read.ts",
       "packages/core/src/recall/delivery/canonical-delivery.ts",
       "packages/core/src/recall/coarse-filter/coarse-filter-pipeline.ts",
+      "packages/core/src/recall/coarse-filter/coarse-filter.ts",
+      "packages/core/src/recall/coarse-filter/coarse-filter-result.ts",
       "packages/core/src/recall/runtime/query/prepare-recall-request.ts",
+      "packages/core/src/recall/runtime/query/prepare-recall-query-condition.ts",
       "packages/core/src/recall/field/family-rank-base.ts",
-      "packages/core/src/recall/scoring/integrated-flood-scoring.ts"
+      "packages/core/src/recall/scoring/integrated-flood-scoring.ts",
+      "packages/core/src/recall/scoring/flood-slice-axis.ts"
     ])
   }),
   Object.freeze({

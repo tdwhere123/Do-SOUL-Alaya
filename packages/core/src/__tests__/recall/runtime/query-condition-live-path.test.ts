@@ -9,8 +9,6 @@ import { queryConditionParityView } from
 import {
   createSeededTestOnlyInMemoryFieldQuerySession
 } from "../../../recall/runtime/query/field-query-session.js";
-import { prepareRecallQueryCondition } from
-  "../../../recall/runtime/query/prepare-recall-query-condition.js";
 import { captureRecallRequestTime } from
   "../../../recall/runtime/query/recall-request-time.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
@@ -29,19 +27,9 @@ import {
 describe("live query condition capture", () => {
   it("stamps field snapshot and as-of without pinning a query-session generation", async () => {
     const { dependencies } = createDependencies([]);
-    const baseSession = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
-    const session = {
-      pinActiveGeneration: vi.fn(baseSession.pinActiveGeneration),
-      selectCandidates: vi.fn(baseSession.selectCandidates),
-      renew: vi.fn(baseSession.renew),
-      release: vi.fn(baseSession.release)
-    };
     const service = new RecallService({
-      testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
-      now: frozenClock(),
-      fieldQuerySession: session,
-      sha256: fieldContractSha256
+      now: frozenClock()
     });
 
     const result = await service.recall({
@@ -52,7 +40,6 @@ describe("live query condition capture", () => {
 
     expect(result.index.snapshot_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(result.index.as_of).toBe(CLOCK_AS_OF);
-    expect(session.pinActiveGeneration).not.toHaveBeenCalled();
     expect(result.ranking_authority).not.toBe("prefix_sk");
     expect(result.capture_execution).toBeUndefined();
     expect(result.provider_calls).toBe(0);
@@ -65,11 +52,8 @@ describe("live query condition capture", () => {
       createMemoryEntry({ object_id: "memory-1", content: "Implement recall" })
     ]);
     const service = new RecallService({
-      testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       now: frozenClock(),
-      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1"),
-      sha256: fieldContractSha256,
       pathExpansionPort: { findByAnchors }
     });
 
@@ -90,11 +74,8 @@ describe("live query condition capture", () => {
       createMemoryEntry({ object_id: "memory-1", content: "Implement recall" })
     ]);
     const service = new RecallService({
-      testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
-      now: frozenClock(),
-      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1"),
-      sha256: fieldContractSha256
+      now: frozenClock()
     });
 
     const result = await service.recall({
@@ -113,14 +94,25 @@ describe("live query condition capture", () => {
     const clock = countingClock("2026-08-16T23:59:59.000Z");
     const session = createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, "workspace-1");
     const pin = session.pinActiveGeneration("workspace-1", EXPLICIT_AS_OF);
-    const receipt = prepareRecallQueryCondition({
-      workspaceId: "workspace-1",
+    const time = captureRecallRequestTime({
       explicitAsOf: EXPLICIT_AS_OF,
-      queryText: "Ada",
-      tokenBudget: 400,
-      activationBudget: 8,
+      now: clock.now
+    });
+    const receipt = captureQueryCondition({
+      principal: "workspace-1",
+      workspace_id: "workspace-1",
+      authorized_scopes: ["workspace-1"],
+      explicit_bridges: [],
+      workspace_project: "workspace-1",
+      query_task_factors: ["Ada"],
+      governance_state: "open",
+      activation_budget: 8,
+      token_budget: 400,
+      effective_as_of: time.effectiveAsOf
+    }, {
       sha256: fieldContractSha256,
-      time: captureRecallRequestTime({ explicitAsOf: EXPLICIT_AS_OF, now: clock.now }),
+      now: () => time.effectiveAsOf,
+      recordedAt: time.capturedAt,
       pin
     });
 

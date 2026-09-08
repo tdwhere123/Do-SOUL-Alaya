@@ -10,15 +10,8 @@ type ToolRuntimeWiringHoisted = Record<string, any>;
 function createStubCoreConfig(): CoreConfig {
   return {
     recall: {
-      confRhoPath: undefined,
-      confRhoEvidence: undefined,
-      confWPath: undefined,
-      confFloodCap: undefined,
-      confFloodCapTotal: undefined,
-      pathEmbModulation: undefined,
       projectionsEnabled: true,
-      extraSynonymClusters: undefined,
-      finalAuthorityMaxHeadDrop: undefined
+      extraSynonymClusters: undefined
     },
     embedding: {
       backfillConcurrency: undefined,

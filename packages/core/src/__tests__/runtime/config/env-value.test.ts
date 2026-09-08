@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   parseDefaultOnFlag,
+  parseEnvOptionalNumber,
   parseEnvPositiveInt,
   parseRecallRuntimeConfigFromEnv,
   parseSourceRefRobust,
@@ -29,15 +30,15 @@ describe("parseSourceRefRobust", () => {
   });
 });
 
-describe("parseRecallRuntimeConfigFromEnv numbers", () => {
-  it("throws when a written recall number is not finite", () => {
-    expect(() => parseRecallRuntimeConfigFromEnv({
-      ALAYA_RECALL_CONF_RHO_PATH: "abc"
-    })).toThrow(/ALAYA_RECALL_CONF_RHO_PATH must be a finite number/);
+describe("parseEnvOptionalNumber", () => {
+  it("throws when a written number is not finite", () => {
+    expect(() => parseEnvOptionalNumber("abc", "ALAYA_EMBEDDING_WORKSPACE_SCAN_CAP"))
+      .toThrow(/ALAYA_EMBEDDING_WORKSPACE_SCAN_CAP must be a finite number/);
   });
 
   it("keeps unset optional numbers undefined", () => {
-    expect(parseRecallRuntimeConfigFromEnv({}).confRhoPath).toBeUndefined();
+    expect(parseEnvOptionalNumber(undefined, "ALAYA_EMBEDDING_WORKSPACE_SCAN_CAP"))
+      .toBeUndefined();
   });
 });
 
@@ -69,7 +70,7 @@ describe("readRecallUnitFloat", () => {
   });
 
   it("uses the documented fallback when the value is unset", () => {
-    expect(readRecallUnitFloat("ALAYA_RECALL_CONF_RHO_PATH", 0.5)).toBe(0.5);
+    expect(readRecallUnitFloat("ALAYA_RECALL_UNKNOWN", 0.5)).toBe(0.5);
   });
 });
 

@@ -19,7 +19,7 @@ async function planted() {
 }
 function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverReaders = readersFor(slice)) {
   const { dependencies } = createDependencies([]);
-  const service = new RecallService({ ...dependencies, testOnlyAllowInMemoryFieldQuerySession: true,
+  const service = new RecallService({ ...dependencies,
     now: () => INTERPRETATION_CLOCK, observerReaders: readers });
   const handler = createRecallHandler({ deps: { recallService: {
     recall: (params: Parameters<RecallService["recall"]>[0]) => service.recall({

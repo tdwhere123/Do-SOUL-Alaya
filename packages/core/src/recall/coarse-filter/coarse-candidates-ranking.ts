@@ -45,7 +45,6 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
     return 3;
   }
   // invariant: semantic_supplement has no lexical or structural anchor.
-  // see also: packages/core/src/recall/supplements.ts:collectEmbeddingCoarseInjection.
   if (draft.admissionPlanes.includes("semantic_supplement")) {
     return 2;
   }

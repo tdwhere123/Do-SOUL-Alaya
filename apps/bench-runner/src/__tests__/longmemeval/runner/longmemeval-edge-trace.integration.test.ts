@@ -34,11 +34,10 @@ describe("conditional-field persisted relation integration", () => {
     expect(JSON.stringify(index)).not.toContain("ranking_authority");
   });
 
-  it("keeps legacy flood and slice switches from changing the target field interpretation", async () => {
+  it("keeps legacy slice switches from changing the target field interpretation", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const baseline = runRecall(slice);
-    vi.stubEnv("ALAYA_RECALL_CONF_FLOOD_CAP", "0.001");
     vi.stubEnv("ALAYA_RECALL_CONF_SLICE_COMPATIBILITY", "on");
     expect(runRecall(slice)).toEqual(baseline);
     vi.stubEnv("ALAYA_RECALL_CONF_SLICE_COMPATIBILITY", "off");

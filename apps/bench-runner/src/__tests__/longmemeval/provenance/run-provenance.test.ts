@@ -103,7 +103,6 @@ describe("LongMemEval run provenance", () => {
         ALAYA_OFFICIAL_GARDEN_API_KEY_STATE: "unset",
         ALAYA_OFFICIAL_GARDEN_SECRET_REF_STATE: "unset",
         ALAYA_RECALL_ANSWERS_WITH: "1",
-        ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2",
         OFFICIAL_API_GARDEN_MODEL: "cached-model"
       }
     });

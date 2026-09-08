@@ -29,7 +29,6 @@ describe("conditional Recall after retired route removal", () => {
       ...fixture.dependencies,
       observerReaders: { ...fixture.dependencies.observerReaders, lexical },
       entityExtractionPort: { extract: forbiddenAsync },
-      selectGammaSynthesisPort: { synthesize: forbiddenAsync },
       embeddingRecallService: {
         hasStoredVectors: forbiddenAsync,
         prepareQueryEmbedding: forbiddenSync,

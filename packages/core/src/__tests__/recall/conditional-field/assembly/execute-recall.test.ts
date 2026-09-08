@@ -242,7 +242,6 @@ describe("conditional-field executeRecall assembly", () => {
     let ticks = 0;
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
-      testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       now: () => new Date(Date.parse(INTERPRETATION_CLOCK) + ticks++ * 1_000).toISOString(),
       observerReaders: readersFor(slice)
@@ -295,7 +294,6 @@ describe("conditional-field executeRecall assembly", () => {
     await plantDeployment(slice);
     const { dependencies } = createDependencies([]);
     const service = new RecallService({
-      testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       observerReaders: readersFor(slice),
       conditionalFieldPort: {

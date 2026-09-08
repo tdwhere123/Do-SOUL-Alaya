@@ -8,12 +8,6 @@ import {
 } from "../../../runtime/config/index.js";
 
 const RECALL_ENV_FIXTURE = Object.freeze({
-  ALAYA_RECALL_CONF_RHO_PATH: "0.11",
-  ALAYA_RECALL_CONF_RHO_EVIDENCE: "0.22",
-      ALAYA_RECALL_CONF_W_PATH: "0.33",
-      ALAYA_RECALL_CONF_FLOOD_CAP: "0.55",
-  ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL: "0.66",
-  ALAYA_RECALL_PATH_EMB_MODULATION: "path-emb",
   ALAYA_RECALL_PROJECTIONS: "off",
   ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS: "synonyms"
 });
@@ -24,6 +18,13 @@ const EXPECTED_RECALL_ENV = Object.freeze({
 });
 
 const RETIRED_RECALL_ENV_NAMES = Object.freeze([
+  "ALAYA_RECALL_CONF_RHO_PATH",
+  "ALAYA_RECALL_CONF_RHO_EVIDENCE",
+  "ALAYA_RECALL_CONF_W_PATH",
+  "ALAYA_RECALL_CONF_FLOOD_CAP",
+  "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
+  "ALAYA_RECALL_PATH_EMB_MODULATION",
+  "ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP",
   "ALAYA_RECALL_CONF_EVIDENCE_BETA",
   "ALAYA_RECALL_EMBED_POOL_RESCORE",
   "ALAYA_RECALL_QUERY_HYDE_JSON",
@@ -112,21 +113,6 @@ describe("core config environment contract", () => {
 });
 
 describe("parseRecallRuntimeConfigFromEnv", () => {
-  it("strictly parses the optional bounded final-authority treatment", () => {
-    expect(parseRecallRuntimeConfigFromEnv({}).finalAuthorityMaxHeadDrop).toBeUndefined();
-    expect(parseRecallRuntimeConfigFromEnv({
-      ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "0"
-    }).finalAuthorityMaxHeadDrop).toBe(0);
-    expect(parseRecallRuntimeConfigFromEnv({
-      ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2"
-    }).finalAuthorityMaxHeadDrop).toBe(2);
-    for (const value of ["", "-1", "1.5", "NaN", "9007199254740992"]) {
-      expect(() => parseRecallRuntimeConfigFromEnv({
-        ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: value
-      })).toThrow(/non-negative safe integer/);
-    }
-  });
-
   it("does not expose retired per-query embedding controls", () => {
     const config = parseRecallRuntimeConfigFromEnv({
       ALAYA_RECALL_EMBED_POOL_RESCORE: "off",
@@ -138,6 +124,13 @@ describe("parseRecallRuntimeConfigFromEnv", () => {
 
   it("does not expose retired ranking-authority flags", () => {
     const config = parseRecallRuntimeConfigFromEnv({
+      ALAYA_RECALL_CONF_RHO_PATH: "0.11",
+      ALAYA_RECALL_CONF_RHO_EVIDENCE: "0.22",
+      ALAYA_RECALL_CONF_W_PATH: "0.33",
+      ALAYA_RECALL_CONF_FLOOD_CAP: "0.55",
+      ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL: "0.66",
+      ALAYA_RECALL_PATH_EMB_MODULATION: "path-emb",
+      ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2",
       ALAYA_RECALL_CONF_EVIDENCE_BETA: "0.44",
       ALAYA_RECALL_FACET_SLICE: "on",
       ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
@@ -146,6 +139,13 @@ describe("parseRecallRuntimeConfigFromEnv", () => {
       ALAYA_RECALL_SESSION_ROUTE: "on",
       ALAYA_RECALL_LEXICAL_DECORR: "on"
     });
+    expect(config).not.toHaveProperty("confRhoPath");
+    expect(config).not.toHaveProperty("confRhoEvidence");
+    expect(config).not.toHaveProperty("confWPath");
+    expect(config).not.toHaveProperty("confFloodCap");
+    expect(config).not.toHaveProperty("confFloodCapTotal");
+    expect(config).not.toHaveProperty("pathEmbModulation");
+    expect(config).not.toHaveProperty("finalAuthorityMaxHeadDrop");
     expect(config).not.toHaveProperty("confEvidenceBeta");
     expect(config).not.toHaveProperty("facetSlice");
     expect(config).not.toHaveProperty("confSliceCompatibility");

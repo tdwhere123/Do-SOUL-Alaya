@@ -36,7 +36,6 @@ export async function recallThroughHandler(
   let ticks = 0;
   const clock = request.now ?? INTERPRETATION_CLOCK;
   const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     now: () => new Date(Date.parse(clock) + ticks++ * 1_000).toISOString(),
     observerReaders: readersFor(slice)
@@ -97,7 +96,6 @@ export function toConsumer(
 export async function recallThroughCli(slice: SourceSlice, query: string, maxResults: number) {
   const { dependencies } = createDependencies([]);
   const service = new RecallService({
-    testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     now: () => INTERPRETATION_CLOCK,
     observerReaders: readersFor(slice)

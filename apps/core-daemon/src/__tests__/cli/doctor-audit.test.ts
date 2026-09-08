@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { doctorAuditCheckStatus, readDoctorAuditSnapshot } from "../../cli/doctor/doctor-audit.js";
+import {
+  doctorAuditCheckStatus,
+  readDoctorAuditSnapshot,
+  writeDoctorAuditSummary
+} from "../../cli/doctor/doctor-audit.js";
 import { restoreProcessEnv } from "../support/restore-process-env.js";
 
 const ORIGINAL_MCP = process.env.ALAYA_MCP_SERVER_CONFIG_JSON;
@@ -17,9 +21,18 @@ describe("doctor audit snapshot", () => {
     const snapshot = readDoctorAuditSnapshot("");
     expect(snapshot.retain_unrouted_facts).toBe(false);
     expect(snapshot.mcp_server_config).toBe("invalid");
+    expect(snapshot).not.toHaveProperty("recall_conf_flood_cap");
     expect(doctorAuditCheckStatus(snapshot)).toBe("fail");
     expect(snapshot.registered_env_keys).toEqual(
       expect.arrayContaining(["PORT", "DAEMON_HOST", "LOG_LEVEL", "ALLOWED_ORIGIN"])
     );
+    const chunks: string[] = [];
+    writeDoctorAuditSummary({
+      write(chunk: string) {
+        chunks.push(chunk);
+        return true;
+      }
+    } as NodeJS.WritableStream, snapshot);
+    expect(chunks.join("")).not.toContain("ALAYA_RECALL_CONF_FLOOD_CAP");
   });
 });

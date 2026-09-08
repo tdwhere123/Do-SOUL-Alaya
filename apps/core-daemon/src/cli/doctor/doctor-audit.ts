@@ -10,10 +10,6 @@ export type DoctorMcpConfigStatus = "unset" | "valid" | "invalid";
 
 export interface DoctorAuditSnapshot {
   readonly retain_unrouted_facts: boolean;
-  readonly recall_conf_flood_cap: Readonly<{
-    readonly raw: string | null;
-    readonly defaulted: boolean;
-  }>;
   readonly mcp_server_config: DoctorMcpConfigStatus;
   readonly temporal_projection: Readonly<{
     readonly schema: "legacy" | "temporal" | "unknown";
@@ -25,13 +21,8 @@ export interface DoctorAuditSnapshot {
 }
 
 export function readDoctorAuditSnapshot(dbPath: string): DoctorAuditSnapshot {
-  const floodCap = process.env.ALAYA_RECALL_CONF_FLOOD_CAP?.trim() ?? null;
   return {
     retain_unrouted_facts: isRetainUnroutedFactsEnabled(),
-    recall_conf_flood_cap: {
-      raw: floodCap !== null && floodCap.length > 0 ? floodCap : null,
-      defaulted: floodCap === null || floodCap.length === 0 || floodCap === "1" || floodCap === "1.0"
-    },
     mcp_server_config: readMcpServerConfigStatus(),
     temporal_projection: readTemporalProjectionStatus(dbPath),
     conflict_llm_raw_key_only: isConflictLlmRawKeyOnly(),
@@ -58,10 +49,6 @@ export function writeDoctorAuditSummary(
   stream.write(
     `retain unrouted facts: ${snapshot.retain_unrouted_facts ? "on" : "off"}` +
       ` (ALAYA_RETAIN_UNROUTED_FACTS default off; set 1/true to enable)\n`
-  );
-  stream.write(
-    "ALAYA_RECALL_CONF_FLOOD_CAP leftover/non-decision scoring-test config;" +
-      " does not affect soul.recall.\n"
   );
   stream.write(`mcp server config json: ${snapshot.mcp_server_config}\n`);
   stream.write(

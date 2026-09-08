@@ -39,7 +39,7 @@ import { readRequestGovernance } from "./request-governance.js";
 import { reserveSnapshotPinWork } from "./snapshot-pin-budget.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
 
-export type { RecallExecutionContext, RecallExecutionParams, PreparedRecallRequest } from "./recall-service-runner-types.js";
+export type { RecallExecutionContext, RecallExecutionParams } from "./recall-service-runner-types.js";
 export { RELATION_MILLIGRADES };
 
 const RESULT_VERSION = "v1";

@@ -19,9 +19,6 @@ import type {
   RecallServiceDependencies,
   RecallServiceFieldDeps
 } from "../../recall/recall-service.js";
-import { createSeededTestOnlyInMemoryFieldQuerySession } from
-  "../../recall/runtime/query/field-query-session.js";
-import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { fieldSearchFromScalar } from
   "../recall/fixtures/keyword-field-fixture.js";
 import { withFineDeliveryPath } from
@@ -122,11 +119,6 @@ export function deps(
     tier === undefined ? memories : memories.filter((entry) => entry.storage_tier === tier);
   return {
     dependencies: {
-      testOnlyAllowInMemoryFieldQuerySession: true,
-      fieldQuerySession: createSeededTestOnlyInMemoryFieldQuerySession(
-        fieldContractSha256,
-        WS
-      ),
       now: () => NOW,
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       defaultPolicyDecorator: (policy) => withFineDeliveryPath(policy, "legacy"),

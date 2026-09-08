@@ -10,25 +10,18 @@ import {
   RecallService,
   type RecallServiceFieldDeps
 } from "../../../recall/recall-service.js";
-import { createSeededTestOnlyInMemoryFieldQuerySession } from
-  "../../../recall/runtime/query/field-query-session.js";
-import { fieldContractSha256 } from "../../../shared/field-hash.js";
 
 export function createFieldBackedRecallService(
-  dependencies: Readonly<RecallServiceDependencies & RecallServiceFieldDeps>,
-  pinWorkspaceId?: string
+  dependencies: Readonly<RecallServiceDependencies & RecallServiceFieldDeps>
 ): RecallService {
-  return new RecallService(withKeywordFieldFixturePorts(dependencies, pinWorkspaceId));
+  return new RecallService(withKeywordFieldFixturePorts(dependencies));
 }
 
 export function withKeywordFieldFixturePorts(
-  dependencies: Readonly<RecallServiceDependencies & RecallServiceFieldDeps>,
-  pinWorkspaceId?: string
+  dependencies: Readonly<RecallServiceDependencies & RecallServiceFieldDeps>
 ): RecallServiceDependencies & RecallServiceFieldDeps {
   return {
     ...dependencies,
-    testOnlyAllowInMemoryFieldQuerySession: true,
-    fieldQuerySession: resolveFixtureFieldQuerySession(dependencies, pinWorkspaceId),
     memoryRepo: withMemoryFieldFixture(dependencies.memoryRepo),
     evidenceSearchPort: dependencies.evidenceSearchPort === undefined
       ? undefined
@@ -37,17 +30,6 @@ export function withKeywordFieldFixturePorts(
       ? undefined
       : withSynthesisFieldFixture(dependencies.synthesisSearchPort)
   };
-}
-
-function resolveFixtureFieldQuerySession(
-  dependencies: Readonly<RecallServiceDependencies & RecallServiceFieldDeps>,
-  pinWorkspaceId: string | undefined
-) {
-  if (dependencies.fieldQuerySession !== undefined) return dependencies.fieldQuerySession;
-  if (pinWorkspaceId !== undefined && pinWorkspaceId !== "") {
-    return createSeededTestOnlyInMemoryFieldQuerySession(fieldContractSha256, pinWorkspaceId);
-  }
-  throw new Error("keyword field fixture requires fieldQuerySession or pinWorkspaceId");
 }
 
 function withMemoryFieldFixture(

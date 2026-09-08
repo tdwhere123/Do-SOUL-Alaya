@@ -248,7 +248,7 @@ describe("runLongMemEvalConcurrent", () => {
             ...base,
             runtime: {
               ...base.runtime,
-              paired_env: { ...base.runtime.paired_env, ALAYA_RECALL_CONF_RHO_PATH: "drift" }
+              paired_env: { ...base.runtime.paired_env, ALAYA_RECALL_ANSWERS_WITH: "drift" }
             }
           };
           await writeFile(

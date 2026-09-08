@@ -68,16 +68,6 @@ describe("conditional field read snapshot lifecycle", () => {
 });
 
 describe("projection reader lifecycle", () => {
-  it("requires an explicit production field session", () => {
-    const fixture = createDependencies([]).dependencies;
-    const {
-      testOnlyAllowInMemoryFieldQuerySession: _testOnly,
-      fieldQuerySession: _session,
-      ...production
-    } = fixture;
-    expect(() => new RecallService(production)).toThrow(/production field query session/u);
-  });
-
   it("refuses to pin when no generation was activated", () => {
     const session = createTestOnlyInMemoryFieldQuerySession(fieldContractSha256);
     expect(() => session.pinActiveGeneration("workspace-1", CLOCK))
