@@ -1242,7 +1242,7 @@
   ],
   "private_barrel_snapshot": {
     "expected_count": 40,
-    "expected_sha256": "a0db19c8593df9658c97248bc67ad350c0afd69d0bff9aef196365f5eac9c1c5"
+    "expected_sha256": "bd5a41463fe4106e41df8c9c32f503b2d9ccd5b7bfbe56d353719b984f91625e"
   },
   "existing_duplicate_export_authorities": [],
   "existing_index_to_index_edges": [

@@ -5,8 +5,6 @@ import type {
   FloodAxisInactiveReason,
   RecallSupplementaryData
 } from "../../runtime/recall-service-types.js";
-import type { IntegratedFloodAxisInputs } from
-  "../../scoring/integrated-flood-scoring.js";
 import type { RecallQueryFieldAttributionReceipt } from
   "../query-attribution/query-field-attribution.js";
 import type { RecallFieldDigest } from "../field-identity.js";
@@ -106,7 +104,6 @@ export type ActivationAttributionProximityObservation = Readonly<{
 
 export type ActivationAttributionFloodObservation = Readonly<{
   readonly entry: Readonly<MemoryEntry>;
-  readonly axisInputs: IntegratedFloodAxisInputs;
   readonly supplementaryData: RecallSupplementaryData;
   readonly memorySupplementEligible?: boolean;
 }>;

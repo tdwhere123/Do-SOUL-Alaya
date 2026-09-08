@@ -26,10 +26,12 @@ runner owns request budgets and continuation. Storage owns native persistence
 and generation changes; the daemon wires worker snapshots and MCP/CLI.
 
 The conditional field is the single ordinary Recall decision route. Retired
-prefix-capture, budget-aware-q, query-proof shadow and Select_Gamma code must
-not be reintroduced as a fallback. Source/history readers, global-memory
-lifecycle ports and historical protocol shapes have independent consumers;
-retaining those does not authorize running a retired selector.
+prefix-capture, budget-aware-q, query-proof shadow, Select_Gamma walks,
+`runCoarseFilter`, `prepareRecallRequest` selector prepare, family-rank-base
+and flood score-as-rank must not be reintroduced as a fallback. Source/history
+readers, global-memory lifecycle ports and historical protocol shapes have
+independent consumers; retaining those does not authorize running a retired
+selector.
 
 Retained leftover surfaces and their non-Recall consumers:
 

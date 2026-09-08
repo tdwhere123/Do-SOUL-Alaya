@@ -1,8 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { prepareRecallRequest } from
-  "../../../../recall/runtime/query/prepare-recall-request.js";
-import { captureRecallRequestTime } from
-  "../../../../recall/runtime/query/recall-request-time.js";
+import { describe, expect, it } from "vitest";
+import { captureQueryCondition } from
+  "../../../../recall/query/condition/query-condition-capture.js";
 import { createSeededTestOnlyInMemoryFieldQuerySessionWithStore } from
   "../../../../recall/runtime/query/field-query-session.js";
 import { InMemoryProjectionGenerationStore } from
@@ -13,24 +11,16 @@ import {
   publicSnapshotCoherenceReceiptBytes,
   type SourceFrontierDeclarationV1
 } from "../../../../recall/runtime/snapshot-coherence/index.js";
-import { buildRecallPolicy } from "../../../../shared/recall-policy.js";
 import { fieldContractSha256 } from "../../../../shared/field-hash.js";
-import { CLOCK_AS_OF } from "../../query/query-condition-test-fixtures.js";
 import {
-  createDependencies,
-  createTaskSurface
-} from "../../recall-service-test-fixtures.js";
+  CLOCK_AS_OF,
+  conditionDraft
+} from "../../query/query-condition-test-fixtures.js";
 import { HIDDEN_SCOPE, declaration } from "./fixtures.js";
 
 describe("snapshot hidden universe integration", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("keeps public freeze bytes insensitive to restricted hidden sources", async () => {
-    const { prepared } = await prepareSample();
-    const queryCondition = prepared.queryCondition;
-    const pin = prepared.projectionPin;
+  it("keeps public freeze bytes insensitive to restricted hidden sources", () => {
+    const { queryCondition, pin, session } = prepareSample();
     const principal = queryCondition.condition.principal;
     const first = capturePreparedSnapshotCoherenceReceipt({
       queryCondition,
@@ -66,8 +56,7 @@ describe("snapshot hidden universe integration", () => {
         })]
       }
     })).toThrow(SnapshotCoherenceContractError);
-    prepared.releaseProjectionPin();
-    prepared.projectionPinLease.stop();
+    session.release(pin, CLOCK_AS_OF);
   });
 });
 
@@ -86,35 +75,18 @@ function hiddenSource(
   });
 }
 
-async function prepareSample() {
-  const { dependencies } = createDependencies([]);
-  const taskSurface = createTaskSurface();
-  const policy = buildRecallPolicy({
-    runtimeId: "00000000-0000-0000-0000-000000000000",
-    taskSurfaceId: taskSurface.runtime_id,
-    maxResults: 10,
-    filters: { scopeFilter: null, dimensionFilter: null, domainTagFilter: null },
-    conflictAwareness: false,
-    maxTotalTokens: 1_000
-  });
-  const time = captureRecallRequestTime({ now: () => CLOCK_AS_OF });
+function prepareSample() {
   const store = new InMemoryProjectionGenerationStore(fieldContractSha256);
   const session = createSeededTestOnlyInMemoryFieldQuerySessionWithStore(
     fieldContractSha256,
     "workspace-1",
     store
   );
-  const prepared = await prepareRecallRequest({
-    dependencies,
-    warn: () => undefined,
+  const pin = session.pinActiveGeneration("workspace-1", CLOCK_AS_OF);
+  const queryCondition = captureQueryCondition(conditionDraft(), {
+    sha256: fieldContractSha256,
     now: () => CLOCK_AS_OF,
-    buildDefaultPolicy: () => policy,
-    fieldQuerySession: session,
-    sha256: fieldContractSha256
-  }, {
-    taskSurface,
-    workspaceId: "workspace-1",
-    strategy: "analyze"
-  }, time);
-  return { prepared };
+    pin
+  });
+  return { queryCondition, pin, session };
 }

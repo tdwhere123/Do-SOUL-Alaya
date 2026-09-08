@@ -26,11 +26,12 @@ import {
   type ActivationAttributionFloodObservation,
   type ActivationAttributionStatus
 } from "../../../../recall/field/activation-attribution/audit.js";
+import { createSelectedSliceKeyV2 } from "../../../../recall/flood/slice-key-contract.js";
+import type { SliceCompatibilityInputV2 } from "../../../../recall/flood/slice-key-selector.js";
 import { compileRecallQueryDemand } from "../../../../recall/query/recall-query-demand.js";
 import { compileRecallQueryProbes } from "../../../../recall/query/recall-query-probes.js";
 import {
   createMemoryEntry,
-  entityQueryKey,
   supplementary
 } from "../../integrated-flood-scoring.test-support.js";
 
@@ -42,7 +43,6 @@ const T3_QUERY = "Did I ever mention the yoga studio on Oak Street?";
 const T3_GOLD = "ran into an old classmate near the river";
 const UPDATE_QUERY = "I originally used Spotify but now I switched.";
 const TARGET_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-const SEED_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 describe("activation flood attribution audit", () => {
   it("compiles char_ngrams with no retrieval consumer", () => {
@@ -125,60 +125,56 @@ describe("activation flood attribution audit", () => {
   });
 
   it("reads live slice, path, and evidence axis standings", () => {
-    const passThrough = auditActivationAttribution(floodRow("t1-flood-pass", T1_QUERY, T1_GOLD));
-    const compatible = auditActivationAttribution(compatibleFloodRow());
-    const rejected = auditActivationAttribution(rejectedFloodRow());
-    const noEvidence = auditActivationAttribution(noEvidenceRow());
+    const floodOnly = auditActivationAttribution(floodRow("t1-flood-only", T1_QUERY, T1_GOLD));
+    const passThrough = auditActivationAttribution(sliceRow(
+      "t1-slice-pass", T1_QUERY, T1_GOLD, passThroughSlice()
+    ));
+    const compatible = auditActivationAttribution(sliceRow(
+      "t1-slice-compatible", T1_QUERY, T1_GOLD, compatibleSlice()
+    ));
+    const rejected = auditActivationAttribution(sliceRow(
+      "t3-slice-rejected", T3_QUERY, T3_GOLD, rejectedSlice()
+    ));
+    expect(channel(floodOnly, "slice_compatibility")).toMatchObject({
+      reason: "slice_unobserved",
+      flood_axis_status: null,
+      counts_as_fuel: false
+    });
+    expect(channel(floodOnly, "path_inflow").reason).toBe("path_unobserved");
+    expect(channel(floodOnly, "evidence_support").reason).toBe("evidence_unobserved");
+    expect(floodOnly.fuel_verified).toBeNull();
     expect(channel(passThrough, "slice_compatibility")).toMatchObject({
       reason: "slice_pass_through",
       flood_axis_status: "inactive:no_slice",
       counts_as_fuel: true
     });
-    expect(channel(passThrough, "path_inflow")).toMatchObject({
-      reason: "path_pass_through",
-      flood_axis_status: "inactive:pass_through",
-      counts_as_fuel: false
-    });
-    expect(channel(passThrough, "evidence_support")).toMatchObject({
-      status: "not_applicable",
-      reason: "evidence_pass_through",
-      flood_axis_status: "inactive:pass_through"
-    });
+    expect(channel(passThrough, "path_inflow").reason).toBe("path_unobserved");
+    expect(channel(passThrough, "evidence_support").reason).toBe("evidence_unobserved");
     expect(channel(compatible, "slice_compatibility")).toMatchObject({
       reason: "slice_attributed_fuel",
       flood_axis_status: "active",
       counts_as_fuel: true
     });
-    expect(channel(compatible, "path_inflow").reason).toBe("path_attributed_fuel");
-    expect(channel(compatible, "evidence_support").reason).toBe("evidence_attributed_fuel");
-    expect(compatible.fuel_verified).toBe(true);
+    expect(channel(compatible, "path_inflow").reason).toBe("path_unobserved");
+    expect(channel(compatible, "evidence_support").reason).toBe("evidence_unobserved");
+    expect(compatible.fuel_verified).toBeNull();
     expect(channel(rejected, "slice_compatibility")).toMatchObject({
       status: "zero_match",
       reason: "slice_no_match",
       flood_axis_status: "inactive:no_slice_match"
     });
-    expect(channel(noEvidence, "evidence_support")).toMatchObject({
-      status: "zero_match",
-      reason: "evidence_no_support",
-      flood_axis_status: "inactive:no_evidence"
-    });
-    expect(channel(auditActivationAttribution({
-      ...floodRow("t1-capsule", T1_QUERY, T1_GOLD),
-      flood: { ...liveFlood(), memorySupplementEligible: false }
-    }), "path_inflow").reason).toBe("path_not_eligible");
   });
 
   it("keeps date and neighbors non-fuel on a live verified flood row", () => {
     const receipt = auditActivationAttribution({
-      ...compatibleFloodRow(),
-      query_id: "t1-live-non-fuel",
+      ...sliceRow("t1-live-non-fuel", T1_QUERY, T1_GOLD, compatibleSlice()),
       source_proximity: Object.freeze({
         tier: StorageTier.HOT,
         seed_count: 3,
         neighbor_count: 2
       })
     });
-    expect(receipt.fuel_verified).toBe(true);
+    expect(receipt.fuel_verified).toBeNull();
     expect(channel(receipt, "slice_compatibility")?.counts_as_fuel).toBe(true);
     expect(channel(receipt, "date")).toMatchObject({
       status: "not_applicable",
@@ -314,76 +310,67 @@ function floodRow(
   });
 }
 
-function compatibleFloodRow(): ActivationAttributionAuditRow {
-  const seed = createMemoryEntry({ object_id: SEED_ID });
-  const entry = createMemoryEntry({
-    object_id: TARGET_ID,
-    canonical_entities: ["Ada Lovelace"],
-    evidence_refs: ["ev-fiber"]
-  });
+function sliceRow(
+  queryId: string,
+  queryText: string,
+  gold: string,
+  slice: SliceCompatibilityInputV2
+): ActivationAttributionAuditRow {
   return Object.freeze({
-    query_id: "t1-slice-compatible",
+    query_id: queryId,
     query_shape: "t1",
-    query_text: T1_QUERY,
-    gold_surface: T1_GOLD,
-    flood: Object.freeze({
-      entry,
-      axisInputs: Object.freeze({ R_obj: 0.2, A_path: 0.5, B_evidence: 0.7 }),
-      supplementaryData: supplementary({
-        queryRoutingKeys: [entityQueryKey(entry.workspace_id, "Ada Lovelace")],
-        pathInflowByTarget: {
-          [TARGET_ID]: [{ seedObjectId: seed.object_id, weight: 1 }]
-        },
-        evidenceSupportVectorsByMemoryId: {
-          [TARGET_ID]: [{ source_kind: "evidence_ref", source_id: "ev-fiber", support: 0.7 }]
-        }
-      })
-    })
+    query_text: queryText,
+    gold_surface: gold,
+    slice
   });
 }
 
-function rejectedFloodRow(): ActivationAttributionAuditRow {
-  const compatible = compatibleFloodRow();
-  const flood = compatible.flood!;
+function compatibleSlice(): SliceCompatibilityInputV2 {
   return Object.freeze({
-    ...compatible,
-    query_id: "t3-slice-rejected",
-    query_shape: "t3",
-    flood: Object.freeze({
-      ...flood,
-      entry: createMemoryEntry({
-        object_id: TARGET_ID,
-        canonical_entities: ["Charles Babbage"],
-        evidence_refs: ["ev-fiber"]
-      })
-    })
+    queryKeys: [sliceKey("query_probe", "ada lovelace")],
+    sourceKeys: [sliceKey("canonical_entity", "ada lovelace")],
+    targetKeys: [sliceKey("object_anchor", "ada lovelace")]
   });
 }
 
-function noEvidenceRow(): ActivationAttributionAuditRow {
-  const entry = createMemoryEntry({ object_id: TARGET_ID, evidence_refs: ["ev-zero"] });
+function rejectedSlice(): SliceCompatibilityInputV2 {
   return Object.freeze({
-    query_id: "t3-evidence-zero",
-    query_shape: "t3",
-    query_text: T3_QUERY,
-    gold_surface: T3_GOLD,
-    flood: Object.freeze({
-      entry,
-      axisInputs: Object.freeze({ R_obj: 0.2, A_path: 0, B_evidence: 0 }),
-      supplementaryData: supplementary({
-        evidenceSupportVectorsByMemoryId: {
-          [TARGET_ID]: [{ source_kind: "evidence_ref", source_id: "ev-zero", support: 0 }]
-        }
-      })
-    })
+    queryKeys: [sliceKey("query_probe", "ada lovelace")],
+    sourceKeys: [sliceKey("canonical_entity", "ada lovelace")],
+    targetKeys: [sliceKey("object_anchor", "charles babbage")]
+  });
+}
+
+function passThroughSlice(): SliceCompatibilityInputV2 {
+  return Object.freeze({
+    queryKeys: [],
+    sourceKeys: [],
+    targetKeys: []
+  });
+}
+
+function sliceKey(
+  provenance: "query_probe" | "canonical_entity" | "object_anchor",
+  value: string
+) {
+  const query = provenance === "query_probe";
+  return createSelectedSliceKeyV2({
+    workspace_id: "workspace-a",
+    owner_id: query ? null : `${provenance}-owner`,
+    dimension: "entity",
+    value,
+    authority: query ? "derived_query" : "grounded",
+    reliability: 1,
+    independence_group: query ? "query:workspace-a" : `${provenance}:source`,
+    provenance: { kind: provenance, source_ref: `${provenance}:${value}` },
+    source_version: "v1",
+    freshness: { state: "fresh", as_of_ms: 1 }
   });
 }
 
 function liveFlood(): ActivationAttributionFloodObservation {
-  const entry = createMemoryEntry({ object_id: TARGET_ID });
   return Object.freeze({
-    entry,
-    axisInputs: Object.freeze({ R_obj: 0.42, A_path: 0, B_evidence: 0 }),
+    entry: createMemoryEntry({ object_id: TARGET_ID }),
     supplementaryData: supplementary()
   });
 }
