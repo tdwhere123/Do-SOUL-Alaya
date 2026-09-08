@@ -27,7 +27,7 @@ import { buildGoldObjectIds } from "./gold-object-identities.js";
 import type { ConditionalFieldMeasurement, ConditionalMeasurementInput } from "../runs/measurement/conditional-field-measurement.js";
 
 export interface QuestionDiagnosticInput extends Pick<ConditionalMeasurementInput,
-  "queryText" | "referenceTime" | "snapshotDigest" | "expectedIndexSnapshotId" | "requestBudget" | "recallLatencyMs"> {
+  "queryText" | "workspaceId" | "requestFilters" | "referenceTime" | "snapshotDigest" | "expectedIndexSnapshotId" | "requestBudget" | "recallLatencyMs"> {
   readonly questionId: string;
   readonly questionType?: string | null;
   readonly goldMemoryIds: readonly string[];

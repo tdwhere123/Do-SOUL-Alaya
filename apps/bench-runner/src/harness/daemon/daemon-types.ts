@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
-import type { ConditionalFieldRecallParams } from "@do-soul/alaya-core";
+import type { ConditionalFieldRecallParams, ConditionalFieldExecutionReceipt } from "@do-soul/alaya-core";
 import type {
   SoulMemorySearchResponse,
   OpenSemanticFactorFormationCapture,
@@ -109,6 +109,7 @@ export interface BenchDaemonHandle {
     readonly provider_calls: 0;
     readonly garden_enqueue: 0;
     readonly request_budget: NonNullable<ConditionalFieldRecallParams["budget"]>;
+    readonly execution_receipt: ConditionalFieldExecutionReceipt;
   }>;
   warmEmbeddingCache(
     objectIds: readonly string[],

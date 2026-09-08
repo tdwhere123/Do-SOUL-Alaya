@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { compileConditionalFieldQuery, interpretationIdentity } from "@do-soul/alaya-core";
 import { InformationIndexSchema, type MemorySearchResult } from "@do-soul/alaya-protocol";
-import { measureConditionalFieldResponse } from "../../../runs/measurement/conditional-field-measurement.js";
+import { measureConditionalFieldResponse, ConditionalFieldMeasurementSchema } from "../../../runs/measurement/conditional-field-measurement.js";
 import { buildQuestionDiagnostic } from "../../../diagnostics/diagnostics-question.js";
 import { LongMemEvalQuestionDiagnosticSchema } from "../../../diagnostics/schema/diagnostics-schema.js";
 import { classifyQuestionMeasurementStatus } from "../../../runs/measurement/question-validity.js";
@@ -13,17 +14,24 @@ const BUDGET = { schema_version: 1 as const, work_units: 10000, memory_bytes: 10
 const SECRET = "private source body must never appear in a measurement artifact";
 
 function fixture(ids = ["gold"] ) {
+  const compile_input = { source: "ordinary" as const, text: "deployment checklist",
+    snapshot_id: SNAPSHOT, budget: BUDGET, interpretation_clock: NOW };
+  const query_id = compileConditionalFieldQuery(compile_input).query_id;
+  const interpretation_id = interpretationIdentity({ interpretation_clock: NOW });
+  const execution_receipt = { schema_version: 1 as const, workspace_id: "workspace", requested_budget: BUDGET,
+    compile_input, query_id, interpretation_id, snapshot_id: SNAPSHOT, interpretation_clock: NOW };
   const index = InformationIndexSchema.parse({
-    schema_version: 1, query_id: "query-observed", snapshot_id: SNAPSHOT, result_version: "v1",
-    interpretation_id: "interpretation-observed", as_of: NOW,
+    schema_version: 1, query_id, snapshot_id: SNAPSHOT, result_version: "v1",
+    interpretation_id, as_of: NOW,
     entries: ids.map((object_id, offset) => ({ schema_version: 1, object_id,
       hypothesis_id: `h${offset}`, output_binding: `binding${offset}`, role: "requested",
-      association_milligrades: 850, claim: "unknown", explanation_ids: ["unresolved-explanation"] })),
+      association_milligrades: 850, claim: "unknown", explanation_ids: ["unresolved-explanation"],
+      program_state: "matched", time_state: "current" })),
     completeness: { schema_version: 1, logical_index: "open", observed_coverage: "open",
       interpretation_coverage: "open", transport: "partial", payload: "complete", representation: "complete" },
-    continuation: { schema_version: 1, continuation_id: "next", query_id: "query-observed",
+    continuation: { schema_version: 1, continuation_id: "next", query_id,
       snapshot_id: SNAPSHOT, result_version: "v1", cursor: "cursor", expires_at: "2099-01-01T00:00:00.000Z",
-      interpretation_id: "interpretation-observed", interpretation_clock: NOW },
+      interpretation_id, interpretation_clock: NOW },
     representation: { schema_version: 1, policy: "construct_index_then_page_then_payload",
       page_budget: 10, identity_tie_break: "serialization" }
   });
@@ -31,6 +39,7 @@ function fixture(ids = ["gold"] ) {
     object_id: entry.object_id, object_kind: "memory_entry", relevance_score: 0.85,
     content_preview: SECRET, evidence_pointers: [], selection_reason: "observed association",
     hypothesis_id: entry.hypothesis_id, output_binding: entry.output_binding,
+    program_state: entry.program_state, time_state: entry.time_state,
     source_channels: ["conditional_field"], score_factors: { activation: 0.85, relevance: 0.85 },
     budget_state: { token_estimate: 1, max_entries: 10, max_total_tokens: 2000,
       remaining_entries: 0, remaining_tokens: 0, within_budget: true }
@@ -38,11 +47,11 @@ function fixture(ids = ["gold"] ) {
   const recallResult = { delivery_id: "delivery", protocol_version: 1, index, results,
     total_count: results.length, strategy_mix: { deterministic_match: true, precomputed_rank: false,
       semantic_supplement: false, graph_support: false, path_plasticity: false, global_recall: false },
-    provider_calls: 0, garden_enqueue: 0, request_budget: BUDGET };
+    provider_calls: 0, garden_enqueue: 0, request_budget: BUDGET, execution_receipt };
   const deliveredResults = results.slice(0, 10).map((row, offset) => ({
     object_id: row.object_id, object_kind: row.object_kind, rank: offset + 1, relevance_score: row.relevance_score
   }));
-  return { recallResult, deliveredResults, queryText: "deployment checklist", referenceTime: NOW,
+  return { recallResult, deliveredResults, queryText: "deployment checklist", workspaceId: "workspace", referenceTime: NOW,
     expectedIndexSnapshotId: SNAPSHOT, requestBudget: BUDGET, recallLatencyMs: 12 };
 }
 
@@ -53,6 +62,88 @@ function diagnostic(input = fixture(), hitAt5 = true) {
 }
 
 describe("conditional target measurement evidence", () => {
+  it("rejects omitted and prefix product pages even when the evaluator copies the shortened slots", () => {
+    const input = fixture(["gold", "other"]);
+    for (const length of [0, 1]) {
+      const recallResult = { ...input.recallResult, results: input.recallResult.results.slice(0, length),
+        index: { ...input.recallResult.index, continuation: null,
+          completeness: { ...input.recallResult.index.completeness, logical_index: "complete" as const } } };
+      expect(measureConditionalFieldResponse({ ...input, recallResult,
+        deliveredResults: input.deliveredResults.slice(0, length) }))
+        .toMatchObject({ status: "invalid", reason: "result_index_mismatch" });
+    }
+  });
+
+  it("binds copied responses to the independently supplied query, workspace, clock and filters", () => {
+    const input = fixture();
+    for (const changed of [{ queryText: "unrelated medical query" }, { workspaceId: "foreign" },
+      { referenceTime: "2020-01-01T00:00:00.000Z" }, { requestFilters: { authorized_scopes: ["private"] } },
+      { requestFilters: { since: "2020-01-01T00:00:00.000Z" } }, { workspaceId: undefined }]) {
+      expect(measureConditionalFieldResponse({ ...input, ...changed })?.status).toBe("invalid");
+    }
+    for (const index of [
+      { ...input.recallResult.index, query_id: "foreign" },
+      { ...input.recallResult.index, interpretation_id: undefined },
+      { ...input.recallResult.index, interpretation_id: "foreign" },
+      { ...input.recallResult.index, continuation: { ...input.recallResult.index.continuation!,
+        interpretation_clock: "2020-01-01T00:00:00.000Z" } }
+    ]) expect(measureConditionalFieldResponse({ ...input, recallResult: { ...input.recallResult, index } })?.status).toBe("invalid");
+    expect(measureConditionalFieldResponse({ ...input,
+      recallResult: { ...input.recallResult, execution_receipt: undefined } }))
+      .toMatchObject({ status: "invalid", reason: "execution_receipt_invalid" });
+  });
+
+  it("joins program and temporal state in every structured product slot", () => {
+    const input = fixture();
+    for (const changed of [{ program_state: "foreign" }, { time_state: "foreign" },
+      { program_state: undefined }, { time_state: undefined }]) {
+      expect(measureConditionalFieldResponse({ ...input, recallResult: { ...input.recallResult,
+        results: input.recallResult.results.map((row) => ({ ...row, ...changed })) } }))
+        .toMatchObject({ status: "invalid", reason: "result_index_mismatch" });
+    }
+  });
+
+  it("reuses canonical compiler identity for scoped and time-filtered requests", () => {
+    const input = fixture();
+    const requestFilters = { authorized_scopes: ["workspace", "project"],
+      since: "2025-01-01T00:00:00.000Z", until: "2026-09-01T00:00:00.000Z",
+      time_field: "last_used_at" as const, dimension_filter: ["knowledge"], domain_tag_filter: ["deployment"] };
+    const compile_input = { ...input.recallResult.execution_receipt.compile_input, ...requestFilters };
+    const query_id = compileConditionalFieldQuery(compile_input).query_id;
+    const execution_receipt = { ...input.recallResult.execution_receipt, compile_input, query_id };
+    const index = { ...input.recallResult.index, query_id,
+      continuation: { ...input.recallResult.index.continuation!, query_id } };
+    const scoped = { ...input, requestFilters, recallResult: { ...input.recallResult, index, execution_receipt } };
+    expect(measureConditionalFieldResponse(scoped)?.status).toBe("validated");
+    expect(measureConditionalFieldResponse({ ...scoped,
+      requestFilters: { ...requestFilters, authorized_scopes: ["project", "workspace"] } })?.status).toBe("validated");
+    expect(measureConditionalFieldResponse({ ...scoped, requestFilters: {} })?.status).toBe("invalid");
+  });
+
+  it("revalidates archived identity, cardinality, source usability and derived counters", () => {
+    const row = diagnostic();
+    const metric = row.conditional_field_measurement;
+    if (metric?.status !== "validated") throw new Error("valid fixture expected");
+    const corruptions = [
+      { ...metric, response_slots: [] },
+      { ...metric, evaluated_slots: [] },
+      { ...metric, completeness: { ...metric.completeness, logical_index: "invalidated" } },
+      { ...metric, metrics: { ...metric.metrics, index_entry_count: 0 } },
+      { ...metric, metrics: { ...metric.metrics, association_min: 0 } },
+      { ...metric, identity: { ...metric.identity, interpretation_id: "foreign" } },
+      { ...metric, request: { ...metric.request, budget: { ...BUDGET, page_budget: 0 } } }
+    ];
+    for (const changed of corruptions) {
+      expect(ConditionalFieldMeasurementSchema.safeParse(changed).success).toBe(false);
+      const archived = { ...row, conditional_field_measurement: changed } as typeof row;
+      expect(classifyQuestionMeasurementStatus(archived)).toBe("evaluator_identity_unscorable");
+      expect(reclassifyQuestionDiagnostic(archived).conditional_field_measurement?.status).toBe("invalid");
+    }
+    const missingDelivery = { ...row, delivered_results: [] };
+    expect(classifyQuestionMeasurementStatus(missingDelivery)).toBe("evaluator_identity_unscorable");
+    expect(reclassifyQuestionDiagnostic(missingDelivery).conditional_field_measurement?.status).toBe("invalid");
+  });
+
   it("makes observed target delivery scorable without claiming complete pool or legacy diagnostics", () => {
     const row = diagnostic();
     expect(classifyQuestionMeasurementStatus(row)).toBe("scorable");
@@ -111,7 +202,7 @@ describe("conditional target measurement evidence", () => {
       .toMatchObject({ status: "invalid", reason: "request_budget_mismatch" });
     expect(measureConditionalFieldResponse({ ...input, requestBudget: undefined,
       recallResult: { ...input.recallResult, request_budget: undefined } }))
-      .toMatchObject({ status: "invalid", reason: "missing_request_budget" });
+      .toMatchObject({ status: "invalid", reason: "missing_request_binding" });
     expect(measureConditionalFieldResponse({ ...input, recallResult: { ...input.recallResult,
       index: { ...input.recallResult.index, representation: { ...input.recallResult.index.representation, page_budget: 9 } } } }))
       .toMatchObject({ status: "invalid", reason: "request_budget_mismatch" });

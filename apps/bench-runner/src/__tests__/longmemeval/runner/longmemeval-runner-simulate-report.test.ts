@@ -32,6 +32,14 @@ import { buildRecallResult } from "./longmemeval-runner-fixture.js";
 
 let tmpDir: string;
 
+const expectedRecallOptions = {
+  maxResults: 10, conflictAwareness: true,
+  referenceTime: "2026-03-04T05:06:07.000Z",
+  interpretationClock: "2026-03-04T05:06:07.000Z",
+  budget: { schema_version: 1, work_units: 10000, memory_bytes: 1000000,
+    page_budget: 10, finalization_reserve: 100, min_envelope: 10 }
+};
+
 function memoryGold(...objectIds: readonly string[]) {
   return objectIds.map((objectId) => ({
     objectId,
@@ -234,16 +242,8 @@ describe("LongMemEval runner", () => {
     });
 
     expect(recall).toHaveBeenCalledTimes(2);
-    expect(recall).toHaveBeenNthCalledWith(1, "Which memory was used?", {
-      maxResults: 10,
-      conflictAwareness: true,
-      referenceTime: "2026-03-04T05:06:07.000Z"
-    });
-    expect(recall).toHaveBeenNthCalledWith(2, "Which memory was used?", {
-      maxResults: 10,
-      conflictAwareness: true,
-      referenceTime: "2026-03-04T05:06:07.000Z"
-    });
+    expect(recall).toHaveBeenNthCalledWith(1, "Which memory was used?", expectedRecallOptions);
+    expect(recall).toHaveBeenNthCalledWith(2, "Which memory was used?", expectedRecallOptions);
     expect(reportContextUsage).toHaveBeenCalledTimes(1);
     expect(reportContextUsage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -281,11 +281,7 @@ describe("LongMemEval runner", () => {
     });
 
     expect(recall).toHaveBeenCalledTimes(1);
-    expect(recall).toHaveBeenCalledWith("Which memory was used?", {
-      maxResults: 10,
-      conflictAwareness: true,
-      referenceTime: "2026-03-04T05:06:07.000Z"
-    });
+    expect(recall).toHaveBeenCalledWith("Which memory was used?", expectedRecallOptions);
     expect(reportContextUsage).not.toHaveBeenCalled();
     expect(result.scoredRecallResult.delivery_id).toBe("delivery-scored");
     expect(result.reportUsageStats.reportsAttempted).toBe(0);

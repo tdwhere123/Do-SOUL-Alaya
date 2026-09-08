@@ -52,6 +52,7 @@ describe("recall-eval question memory profile wiring", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.recall.mockResolvedValue({
+      scoredRecallOptions: {},
       scoredRecallResult: { results: [], active_constraints: [] },
       scoredRecallLatencyMs: 1
     });

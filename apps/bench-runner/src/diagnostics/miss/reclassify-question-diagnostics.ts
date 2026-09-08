@@ -1,5 +1,6 @@
 import { classifyQuestionMeasurementStatus } from
   "../../runs/measurement/question-validity.js";
+import { ConditionalFieldMeasurementSchema, conditionalFieldDeliveryMatches } from "../../runs/measurement/conditional-field-measurement.js";
 import { streamRecallEvalQuestionDiagnostics } from
   "../stage-attribution/load-recall-eval-diagnostics.js";
 import { buildLongMemEvalFullGoldCoverage } from
@@ -39,7 +40,19 @@ export interface ReclassifyArtifactSummary {
 export function reclassifyQuestionDiagnostic(
   question: LongMemEvalQuestionDiagnostic
 ): LongMemEvalQuestionDiagnostic {
-  if (question.conditional_field_measurement?.status === "validated") return question;
+  if (question.conditional_field_measurement != null) {
+    const measurement = ConditionalFieldMeasurementSchema.safeParse(question.conditional_field_measurement);
+    if (measurement.success && measurement.data.status === "validated"
+      && conditionalFieldDeliveryMatches(measurement.data, question.delivered_results)) return question;
+    return { ...question,
+      conditional_field_measurement: measurement.success && measurement.data.status === "invalid" ? measurement.data
+        : { schema_version: 1, status: "invalid", reason: "invalid_response" },
+      cohort_ledger: question.cohort_ledger === undefined ? undefined : {
+        ...question.cohort_ledger, measurement_status: "evaluator_identity_unscorable",
+        evaluation_issue_reason: "invalid_target_measurement"
+      }
+    };
+  }
   const field = readQuestionFieldContext(question);
   const gold = question.gold.map((row) => ({
     ...row,

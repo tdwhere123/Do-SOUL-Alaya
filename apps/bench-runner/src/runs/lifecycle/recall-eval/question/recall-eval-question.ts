@@ -1,4 +1,5 @@
 import type { BenchSimulateReportMode } from "@do-soul/alaya-eval";
+import { benchRequestFilters } from "../../../../harness/recall/conditional-request-budget.js";
 import {
   type BenchDaemonHandle,
   type BenchEmbeddingMode,
@@ -164,7 +165,7 @@ async function buildRecallEvalQuestionResult(
     latencyMs: recallCycle.scoredRecallLatencyMs,
     degradationReason: recallResult.degradation_reason ?? null,
     diagnostics: buildRecallEvalDiagnostics(
-      input, recallResult, sidecar, gold, scoredHits, recallCycle.scoredRecallLatencyMs
+      input, recallResult, sidecar, gold, scoredHits, recallCycle.scoredRecallLatencyMs, recallCycle.scoredRecallOptions
     ),
     tokenMetrics: await workspace.queryTokenMetrics(),
     recallTokenEconomy: extractRecallTokenEconomy(recallResult),
@@ -183,14 +184,17 @@ function buildRecallEvalDiagnostics(
   sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
   gold: RecallEvalGold,
   scoredHits: Pick<RecallEvalQuestionResult, "hitAt1" | "hitAt5" | "hitAt10">,
-  recallLatencyMs: number
+  recallLatencyMs: number,
+  executedOptions: BenchRecallOptions
 ): LongMemEvalQuestionDiagnostic {
   const diagnostic = buildQuestionDiagnostic({
     queryText: input.question.question,
-    referenceTime: input.recallOptions.interpretationClock ?? requireLongMemEvalTimestamp(input.question.questionDate),
+    workspaceId: input.question.workspaceId,
+    requestFilters: benchRequestFilters(executedOptions),
+    referenceTime: executedOptions.interpretationClock,
     snapshotDigest: input.recallOptions.snapshotDigest,
     expectedIndexSnapshotId: input.recallOptions.continuation?.snapshot_id,
-    requestBudget: input.recallOptions.budget,
+    requestBudget: executedOptions.budget,
     recallLatencyMs,
     questionId: input.question.questionId,
     goldMemoryIds: gold.goldMemoryIds,

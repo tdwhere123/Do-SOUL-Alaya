@@ -1,4 +1,5 @@
 import type { BenchDaemonHandle, BenchWorkspaceHandle } from "../../../../harness/daemon.js";
+import { benchRequestFilters } from "../../../../harness/recall/conditional-request-budget.js";
 import type { BenchTokenMetrics } from "../../../../harness/token/token-metrics.js";
 import type { BenchRecallTokenEconomy } from "../../../../harness/recall/recall-diagnostics-schema.js";
 import type { EdgeProposalKpiEventRow } from "@do-soul/alaya-eval";
@@ -88,7 +89,12 @@ function buildDiagnostics(
   const recallResult = input.recallCycle.scoredRecallResult;
   const diagnostic = buildQuestionDiagnostic({
     queryText: input.question.question,
-    referenceTime: requireLongMemEvalTimestamp(input.question.question_date),
+    workspaceId: input.workspace.workspaceId,
+    referenceTime: input.recallCycle.scoredRecallOptions.interpretationClock,
+    requestBudget: input.recallCycle.scoredRecallOptions.budget,
+    requestFilters: benchRequestFilters(input.recallCycle.scoredRecallOptions),
+    snapshotDigest: input.recallCycle.scoredRecallOptions.snapshotDigest,
+    expectedIndexSnapshotId: input.recallCycle.scoredRecallOptions.continuation?.snapshot_id,
     recallLatencyMs: input.recallCycle.scoredRecallLatencyMs,
     questionId: input.question.question_id,
     questionType: input.question.question_type,

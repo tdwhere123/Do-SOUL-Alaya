@@ -10,13 +10,25 @@ import {
   type SoulMemorySearchResponse
 } from "@do-soul/alaya-protocol";
 import { encodeIndexResults, frameEncodedIndex, sourceMetadataForRecallResult } from "@do-soul/alaya/recall/index-response";
+import { ConditionalFieldExecutionReceiptSchema, executionBindingMismatch,
+  type ExpectedConditionalFieldRequest, type ConditionalFieldExecutionBinding
+} from "../../../runs/measurement/conditional-field-request-binding.js";
 
 type BenchRecallServiceResult = Awaited<
   ReturnType<AlayaDaemonRuntime["services"]["recallService"]["recall"]>
 >;
 
-export function validateBenchRecallIndex(result: BenchRecallServiceResult, budget?: RequestBudget): InformationIndex {
+export function validateBenchRecallIndex(result: BenchRecallServiceResult, budget?: RequestBudget,
+  expected?: ExpectedConditionalFieldRequest): InformationIndex {
   const index = InformationIndexSchema.parse(result.index);
+  const receipt = ConditionalFieldExecutionReceiptSchema.parse(result.execution_receipt);
+  if (index.query_id !== receipt.query_id || index.snapshot_id !== receipt.snapshot_id
+    || index.interpretation_id !== receipt.interpretation_id || index.as_of !== receipt.interpretation_clock) {
+    throw new Error("conditional field index contradicts executed request identity");
+  }
+  if (expected !== undefined && executionBindingMismatch(receipt, expected) !== null) {
+    throw new Error("conditional field execution differs from the invoked request");
+  }
   if (result.provider_calls !== 0 || result.garden_enqueue !== 0) {
     throw new Error("conditional field Recall requires observed zero provider calls and Garden enqueue");
   }
@@ -29,9 +41,10 @@ export function validateBenchRecallIndex(result: BenchRecallServiceResult, budge
 export function encodeBenchRecallResults(
   result: BenchRecallServiceResult,
   policy: RecallPolicy,
-  requestBudget?: RequestBudget
+  requestBudget?: RequestBudget,
+  expected?: ExpectedConditionalFieldRequest
 ): readonly MemorySearchResult[] {
-  const index = validateBenchRecallIndex(result, requestBudget);
+  const index = validateBenchRecallIndex(result, requestBudget, expected);
   const previews = new Map(result.candidates.map((candidate) =>
     [candidate.object_id, candidate.content_preview] as const));
   const metadata = sourceMetadataForRecallResult(result);
@@ -48,6 +61,7 @@ export function buildBenchRecallResponse(
   readonly provider_calls: 0;
   readonly garden_enqueue: 0;
   readonly request_budget: RequestBudget;
+  readonly execution_receipt: ConditionalFieldExecutionBinding;
 } {
   const budget = RequestBudgetSchema.parse(requestBudget);
   const index = frameEncodedIndex(validateBenchRecallIndex(recallResult, budget), results);
@@ -75,6 +89,7 @@ export function buildBenchRecallResponse(
     provider_calls: recallResult.provider_calls,
     garden_enqueue: recallResult.garden_enqueue,
     request_budget: budget,
+    execution_receipt: ConditionalFieldExecutionReceiptSchema.parse(recallResult.execution_receipt),
     ...(recallResult.diagnostics === undefined ? {} : { diagnostics: recallResult.diagnostics })
   };
 }

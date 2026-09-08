@@ -4,7 +4,6 @@ import type { AlayaDaemonRuntime } from "@do-soul/alaya";
 import {
   ControlPlaneObjectKind,
   RetentionPolicy,
-  RequestBudgetSchema,
   TaskObjectSurfaceSchema,
   type MemorySearchResult,
   type RecallPolicy,
@@ -61,6 +60,7 @@ import { buildBenchRecallResponse, encodeBenchRecallResults } from "./bench-reca
 import { invokeBoundRecall } from "@do-soul/alaya/recall/bound-execution";
 import { createFieldProjectionCheckpointOperation } from "../runtime/daemon-field-projection.js";
 import { createRelationProjectionCheckpointOperation } from "../runtime/daemon-relation-projection.js";
+import { benchRequestFilters, resolveBenchRequestBudget } from "../../recall/conditional-request-budget.js";
 
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 12;
 const EMBEDDING_WARMUP_MAX_STALL_PASSES = 6;
@@ -148,18 +148,9 @@ function createBenchRecallOperation(
       opts,
       input.recallWeightOverrides
     );
-    if (opts.maxResults !== undefined && opts.budget !== undefined
-      && opts.maxResults !== opts.budget.page_budget) {
-      throw new Error("maxResults conflicts with the explicit request budget page_budget");
-    }
-    const requestBudget = RequestBudgetSchema.parse(opts.budget ?? {
-      schema_version: 1 as const,
-      work_units: 10_000,
-      memory_bytes: 1_000_000,
-      page_budget: policy.fine_assessment.budgets.max_entries,
-      finalization_reserve: 100,
-      min_envelope: 10
-    });
+    const requestBudget = resolveBenchRequestBudget(opts);
+    const interpretationClock = new Date(opts.interpretationClock ?? opts.referenceTime
+      ?? opts.continuation?.interpretation_clock ?? new Date().toISOString()).toISOString();
     const rawRecallResult = await invokeBoundRecall({
       sideEffectMode: "benchmark",
       recallService: input.activeRuntime.services.recallService,
@@ -185,14 +176,18 @@ function createBenchRecallOperation(
       budget: requestBudget,
       ...(opts.continuation === undefined ? {} : { continuation: opts.continuation }),
       ...(opts.cancelled === undefined ? {} : { cancelled: opts.cancelled }),
-      ...(opts.interpretationClock === undefined ? {} : { interpretationClock: opts.interpretationClock }),
+      interpretationClock,
       ...(opts.since === undefined ? {} : { since: opts.since }),
       ...(opts.until === undefined ? {} : { until: opts.until }),
       ...(opts.timeFilter === undefined ? {} : { timeFilter: opts.timeFilter }),
       activeConstraintsCap: null
     });
     const recallResult = rawRecallResult;
-    const results = encodeBenchRecallResults(recallResult, policy, requestBudget);
+    const results = encodeBenchRecallResults(recallResult, policy, requestBudget, {
+      queryText: query, workspaceId: input.activeContext.workspaceId, referenceTime: interpretationClock,
+      requestBudget, requestFilters: benchRequestFilters(opts, policy),
+      expectedIndexSnapshotId: opts.continuation?.snapshot_id
+    });
     const delivery = await recordBenchRecallDelivery(input, results, recallResult);
     await emitBenchContextLensAssembledEvent(input.dataDir, {
       taskSurfaceRef: taskSurface.runtime_id,

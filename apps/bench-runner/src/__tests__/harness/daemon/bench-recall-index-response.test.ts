@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InformationIndexSchema, RecallCandidateSchema } from "@do-soul/alaya-protocol";
+import { runConditionalFieldRecallWithReceipt } from "@do-soul/alaya-core";
 import { encodeIndexResults, frameEncodedIndex } from "@do-soul/alaya/recall/index-response";
 import { buildBenchDiagnosticRecallPolicy } from "../../../harness/daemon/daemon-support.js";
 import {
@@ -14,9 +15,15 @@ const budget = { schema_version: 1 as const, work_units: 10_000, memory_bytes: 1
   page_budget: 2, finalization_reserve: 100, min_envelope: 10 };
 
 function fixture(): Result {
+  const executed = runConditionalFieldRecallWithReceipt({
+    workspace_id: "workspace", query_text: "needle", budget,
+    snapshot_id: `sha256:${"a".repeat(64)}`,
+    interpretation_clock: "2026-09-06T00:00:00.000Z", as_of: "2026-09-06T00:00:00.000Z",
+    expires_at: "2099-01-01T00:00:00.000Z", readers: {}
+  });
   const index = InformationIndexSchema.parse({
-    schema_version: 1, query_id: "query", snapshot_id: `sha256:${"a".repeat(64)}`,
-    result_version: "v1", interpretation_id: "interpretation", as_of: "2026-09-06T00:00:00.000Z",
+    schema_version: 1, query_id: executed.execution_receipt.query_id, snapshot_id: executed.execution_receipt.snapshot_id,
+    result_version: "v1", interpretation_id: executed.execution_receipt.interpretation_id, as_of: "2026-09-06T00:00:00.000Z",
     entries: ["first", "second"].map((object_id) => ({
       schema_version: 1, object_id, hypothesis_id: "h0", output_binding: object_id,
       program_state: "accept", time_state: "as_of", role: "requested",
@@ -29,6 +36,7 @@ function fixture(): Result {
       page_budget: 2, identity_tie_break: "serialization" }
   });
   return {
+    execution_receipt: executed.execution_receipt,
     index, candidates: [], active_constraints: [], active_constraints_count: null,
     active_constraints_completeness: "incomplete", total_scanned: 0, coarse_filter_count: 0,
     fine_assessment_count: 0, degradation_reason: null, synthesis: { status: "absent" },

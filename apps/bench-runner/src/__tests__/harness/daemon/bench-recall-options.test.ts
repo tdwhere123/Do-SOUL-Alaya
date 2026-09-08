@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { InformationIndexSchema, type InformationIndex, type RequestBudget } from "@do-soul/alaya-protocol";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
+import { measureConditionalFieldResponse, ConditionalFieldMeasurementSchema } from "../../../runs/measurement/conditional-field-measurement.js";
 
 const handles: BenchDaemonHandle[] = [];
 afterEach(async () => {
@@ -38,6 +39,19 @@ describe("bench target recall request options", () => {
       expect(index.as_of).toBe(interpretationClock);
       expect(result.provider_calls).toBe(0);
       expect(result.garden_enqueue).toBe(0);
+      const measurementInput = {
+        recallResult: result, queryText: "needle", workspaceId: daemon.workspaceId,
+        referenceTime: interpretationClock, requestBudget: budget,
+        expectedIndexSnapshotId: expected.snapshot_id,
+        deliveredResults: result.results.slice(0, 10).map((row, offset) => ({
+          object_id: row.object_id, object_kind: row.object_kind, rank: offset + 1
+        }))
+      };
+      const measured = measureConditionalFieldResponse(measurementInput);
+      expect(measured?.status).toBe("validated");
+      expect(ConditionalFieldMeasurementSchema.parse(JSON.parse(JSON.stringify(measured)))).toEqual(measured);
+      expect(measureConditionalFieldResponse({ ...measurementInput, queryText: "a different question" }))
+        .toMatchObject({ status: "invalid", reason: "request_identity_mismatch" });
       delivered.push(...index.entries.map((entry) => entry.object_id));
       continuation = index.continuation;
       if (continuation === null) break;

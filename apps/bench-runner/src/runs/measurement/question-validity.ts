@@ -1,4 +1,5 @@
 import type { LongMemEvalQuestionDiagnostic } from "../../diagnostics/schema/diagnostics-types.js";
+import { ConditionalFieldMeasurementSchema, conditionalFieldDeliveryMatches } from "./conditional-field-measurement.js";
 import {
   validateQuestionMeasurementStatus,
   type QuestionMeasurementStatus
@@ -26,6 +27,11 @@ export function classifyQuestionMeasurementCohort(
 export function classifyQuestionMeasurementStatus(
   diagnostic: LongMemEvalQuestionDiagnostic
 ): QuestionMeasurementStatus {
+  if (diagnostic.conditional_field_measurement != null) {
+    const target = ConditionalFieldMeasurementSchema.safeParse(diagnostic.conditional_field_measurement);
+    if (!target.success || target.data.status !== "validated"
+      || !conditionalFieldDeliveryMatches(target.data, diagnostic.delivered_results)) return "evaluator_identity_unscorable";
+  }
   if (diagnostic.cohort_ledger === undefined) {
     throw new Error(`Question ${diagnostic.question_id} has no current cohort ledger`);
   }

@@ -10,6 +10,7 @@ import type {
 import type { BenchSimulateReportMode } from "@do-soul/alaya-eval";
 import type { LongMemEvalReportSideEffectSnapshot } from "../../../diagnostics/diagnostics.js";
 import { monotonicElapsedMs, monotonicNowNs } from "../../../shared/monotonic.js";
+import { resolveBenchRequestBudget } from "../../../harness/recall/conditional-request-budget.js";
 import type { LongMemEvalGoldObjectIdentity } from
   "../../../diagnostics/gold-object-identities.js";
 import {
@@ -29,6 +30,7 @@ export type LongMemEvalBenchRecallResult = Awaited<
 >;
 
 export interface LongMemEvalRecallCycleResult {
+  readonly scoredRecallOptions: BenchRecallOptions;
   readonly scoredRecallResult: LongMemEvalBenchRecallResult;
   readonly scoredRecallLatencyMs: number;
   readonly reportUsageStats: LongMemEvalReportSimulationStats;
@@ -48,7 +50,9 @@ interface LongMemEvalRecallCycleInput {
 export async function runLongMemEvalRecallCycle(
   input: LongMemEvalRecallCycleInput
 ): Promise<LongMemEvalRecallCycleResult> {
-  const recallOptions = { ...input.recallOptions, referenceTime: input.referenceTime };
+  const recallOptions = { ...input.recallOptions, referenceTime: input.referenceTime,
+    interpretationClock: input.recallOptions.interpretationClock ?? input.referenceTime,
+    budget: resolveBenchRequestBudget(input.recallOptions) };
   if (input.simulateReport === "none") {
     return runUnreportedRecallCycle(input, recallOptions);
   }
@@ -81,6 +85,7 @@ async function runReportedRecallCycle(
     recallOptions
   );
   return {
+    scoredRecallOptions: recallOptions,
     scoredRecallResult,
     scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
     reportUsageStats: reportUsage.stats
@@ -94,6 +99,7 @@ async function runUnreportedRecallCycle(
   const recallStart = monotonicNowNs();
   const scoredRecallResult = await input.daemon.recall(input.query, recallOptions);
   return {
+    scoredRecallOptions: recallOptions,
     scoredRecallResult,
     scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
     reportUsageStats: {
