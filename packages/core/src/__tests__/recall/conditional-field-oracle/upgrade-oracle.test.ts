@@ -221,7 +221,8 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     const flattened = { object_id: entry.object_id, association_milligrades: entry.association_milligrades };
     expect("program_state" in flattened).toBe(false);
     expect(entry.program_state).toBe("accepting");
-    expect(coverageById("B13").binding).toBe("incomplete");
+    expect(coverageById("B13").binding).toBe("real-producer");
+    expect(coverageById("B13").consumer).toContain("same persisted witness exposure");
   });
 
   it("necessity dispositions are closed without claiming finite examples as learning", () => {
@@ -250,15 +251,17 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(actualBudgetRepresentsUniverse(800, 5, false)).toBe(true);
   });
 
-  it("pre-retirement exclusivity is not physical deletion", () => {
-    expect(coverageById("A21").binding).toBe("incomplete");
-    expect(coverageById("A21").incomplete_reason).toMatch(/D00/);
+  it("retired route isolation keeps required compatibility metadata separate from selection", () => {
+    expect(coverageById("A21").binding).toBe("real-producer");
+    expect(coverageById("A21").producer).toContain("retired-route-isolation.test.ts");
+    expect(coverageById("A21").expected).toContain("strategy_mix remains required compatibility metadata");
     expect(coverageById("A21").planted_failure).toMatch(/old decision chain/);
   });
 
-  it("dispositions stay explicit and packaging stays out of U-band", () => {
+  it("historical receipt dispositions do not certify every persisted snapshot", () => {
     expect(coverageById("A22").expected).toMatch(/freeze-live/);
-    expect(coverageById("A22").incomplete_reason).toMatch(/D\/T/);
+    expect(coverageById("A22").binding).toBe("real-producer");
+    expect(coverageById("A22").consumer).toContain("historical sealed snapshot replayability is a separate measurement gate");
     expect(coverageById("A22").planted_failure).toMatch(/silent reinterpretation/);
   });
 });

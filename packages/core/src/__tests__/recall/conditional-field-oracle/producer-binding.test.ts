@@ -112,10 +112,11 @@ describe("conditional-field compiler and projection contracts", () => {
     expect(omittedHypotheses).toBe(true);
   });
 
-  it("incomplete rows keep a named reason", () => {
-    for (const row of ["A21", "A22", "B13"].map(coverageById)) {
-      expect(row.binding).toBe("incomplete");
-      expect(row.incomplete_reason?.length ?? 0).toBeGreaterThan(8);
+  it("current closure references real source and consumer tests rather than retirement deferrals", () => {
+    for (const row of ["A21", "A22", "B13", "F4", "F6", "F7", "S13"].map(coverageById)) {
+      expect(row.binding).toBe("real-producer");
+      expect(row.producer).toContain(".test.ts");
+      expect(row.incomplete_reason).toBeUndefined();
     }
   });
 });

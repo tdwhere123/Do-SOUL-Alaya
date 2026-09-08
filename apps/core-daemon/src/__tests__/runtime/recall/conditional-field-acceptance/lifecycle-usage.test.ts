@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 
 function serviceFor(database: StorageDatabase, now: () => string = () => NOW,
-  worker?: ReturnType<typeof createRecallReadWorkerClient>) {
+  worker?: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>) {
   const { dependencies } = createDependencies([]);
   const readBounded = createBoundedActiveConstraintsReader(database);
   return new RecallService({ ...dependencies, testOnlyAllowInMemoryFieldQuerySession: true, now,
@@ -63,6 +63,32 @@ async function recall(handler: ReturnType<typeof handlerFor>, continuation?: Inf
     ...(continuation == null ? {} : { continuation }) }, context });
   if (!response.ok) throw new Error(response.error.message);
   return response.output as SoulMemorySearchResponse & { index: InformationIndex };
+}
+
+async function collectBoundaryPages(handler: ReturnType<typeof handlerFor>) {
+  const entries: InformationIndex["entries"][number][] = [];
+  let continuation: InformationIndex["continuation"] = null;
+  let first: InformationIndex | null = null;
+  for (let pageNumber = 0; pageNumber < 20; pageNumber += 1) {
+    const page = await recall(handler, continuation, 8);
+    first ??= page.index;
+    expect(page.index.query_id).toBe(first.query_id);
+    expect(page.index.snapshot_id).toBe(first.snapshot_id);
+    expect(page.index.interpretation_id).toBe(first.interpretation_id);
+    expect(page.index.as_of).toBe(first.as_of);
+    expect(page.index.result_version).toBe(first.result_version);
+    expect(page.results.map((result) => result.object_id)).toEqual(page.index.entries.map((entry) => entry.object_id));
+    expect(page.results.every((result) => result.content_preview.includes("needle boundary"))).toBe(true);
+    entries.push(...page.index.entries);
+    continuation = page.index.continuation;
+    if (continuation === null) {
+      expect(page.index.completeness.observed_coverage).toBe("complete");
+      expect(page.index.completeness.logical_index).toBe("complete");
+      break;
+    }
+  }
+  expect(continuation).toBeNull();
+  return entries;
 }
 
 describe("conditional-field lifecycle and verified usage through actual consumers", () => {
@@ -122,6 +148,44 @@ describe("conditional-field lifecycle and verified usage through actual consumer
       const scopeChanged = await recall(handler, beforeScope.index.continuation);
       expect(scopeChanged.index.completeness.logical_index).toBe("invalidated");
     } finally { await worker?.close(); }
+  });
+
+  it("recovers all 40 matches across native32 worker pages and preserves the pinned midnight interpretation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "alaya-worker-boundary-")); directories.push(dir);
+    const filename = join(dir, "field.sqlite");
+    const slice = await openSourceSlice((db) => databases.add(db), filename);
+    const ids = Array.from({ length: 40 }, (_, index) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(index + 2000).padStart(12, "0")}`);
+    for (const id of ids) await slice.writeMemory(id, "needle boundary", MemoryDimension.FACT);
+    const worker = createRecallReadWorkerClient({ databaseFilename: filename, workerCount: 1,
+      workerUrl: new URL("../../../../../dist/runtime/recall/recall-read-worker.js", import.meta.url) });
+    if (worker === null) throw new Error("real worker required");
+    try {
+      await worker.ready();
+      let now = "2026-09-07T23:59:59.000Z";
+      const direct = await collectBoundaryPages(handlerFor(slice.database, serviceFor(slice.database, () => now)));
+      const service = serviceFor(slice.database, () => now, worker);
+      const handler = handlerFor(slice.database, service);
+      const entries = await collectBoundaryPages(handler);
+      expect(entries).toEqual(direct);
+      expect(entries).toHaveLength(40);
+      expect(new Set(entries.map((entry) => entry.object_id))).toEqual(new Set(ids));
+      let evening = await recall(handler, null, 8);
+      for (let attempt = 0; evening.index.entries.length === 0 && attempt < 20; attempt += 1) {
+        expect(evening.index.continuation).not.toBeNull();
+        evening = await recall(handler, evening.index.continuation, 8);
+      }
+      expect(evening.index.entries.length).toBeGreaterThan(0);
+      expect(evening.index.continuation).not.toBeNull();
+      expect(evening.index.as_of).toBe(now);
+      now = "2026-09-08T00:00:01.000Z";
+      const morning = await recall(handler, evening.index.continuation, 8);
+      expect(morning.index.entries.length).toBeGreaterThan(0);
+      expect(morning.index).toMatchObject({ query_id: evening.index.query_id,
+        snapshot_id: evening.index.snapshot_id, interpretation_id: evening.index.interpretation_id,
+        result_version: evening.index.result_version, as_of: evening.index.as_of });
+      expect(morning.index.entries.every((entry) => entry.time_state === evening.index.as_of)).toBe(true);
+      expect(morning.index.continuation?.interpretation_clock).toBe(evening.index.as_of);
+    } finally { await worker.close(); }
   });
 
   it("admits source validity at semantic as-of and recovers all identities after low memory", async () => {
@@ -200,14 +264,22 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     expect([...payloads].sort()).toEqual(ids.sort());
   });
 
-  it("persists grounded witness exposure, rejects forged/stale reports, and accepts CLI reporting after restart", async () => {
+  it("persists real worker witness exposure, rejects forged/stale reports, and accepts CLI reporting after restart", async () => {
     const dir = await mkdtemp(join(tmpdir(), "alaya-field-usage-")); directories.push(dir);
     const filename = join(dir, "usage.sqlite");
     const slice = await openSourceSlice((db) => databases.add(db), filename);
     await slice.writeMemory(MEM.r, "needle", MemoryDimension.FACT);
-    let handler = handlerFor(slice.database);
-    const delivered = await recall(handler, null, 100);
+    const worker = createRecallReadWorkerClient({ databaseFilename: filename, workerCount: 1,
+      workerUrl: new URL("../../../../../dist/runtime/recall/recall-read-worker.js", import.meta.url) });
+    if (worker === null) throw new Error("real worker required");
+    let handler = handlerFor(slice.database, serviceFor(slice.database, () => NOW, worker));
+    let delivered: Awaited<ReturnType<typeof recall>>;
+    try { await worker.ready(); delivered = await recall(handler, null, 100); }
+    finally { await worker.close(); }
     expect(delivered.index.explanations?.length).toBeGreaterThan(0);
+    const expandedWitnesses = new Set(delivered.index.explanations?.map((node) => node.derivation_id));
+    expect(delivered.index.entries.every((entry) => entry.program_state !== undefined && entry.time_state !== undefined
+      && entry.explanation_ids.every((id) => expandedWitnesses.has(id)))).toBe(true);
     const repo = new SqliteTrustStateRepo(slice.database);
     const delivery = await repo.findDeliveryById(delivered.delivery_id);
     const exposure = delivery?.witness_exposures?.[0];
