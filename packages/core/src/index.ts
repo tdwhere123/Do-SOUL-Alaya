@@ -125,29 +125,6 @@ export * from "./governance/reconciliation/reconciliation-service.js";
 export * from "./recall/recall-service.js";
 export { reserveSnapshotPinWork } from "./recall/runtime/snapshot-pin-budget.js";
 export * from "./recall/query/recall-query-probes.js";
-export { compileRecallQueryDemand } from "./recall/query/recall-query-demand.js";
-export {
-  CAPTURE_PARITY_GEOMETRY_BASIS,
-  assertCaptureParityWindow,
-  compareCaptureParity,
-  createCaptureParityView,
-  extractCaptureParityView,
-  mapCaptureParityChannels,
-  requireRetrievalFieldCaptures,
-  type CaptureParityAxis,
-  type CaptureParityAxisDigests,
-  type CaptureParityChannel,
-  type CaptureParityDifference,
-  type CaptureParityGeometry,
-  type CaptureParityGeometryBasis,
-  type CaptureParityMask,
-  type CaptureParityMember,
-  type CaptureParityQuestionDigests,
-  type CaptureParityQuestionVerdict,
-  type CaptureParityReport,
-  type CaptureParityView
-} from "./recall/runtime/capture-parity.js";
-export type { FamilyGroupedScores } from "./recall/rerank/deep-head-types.js";
 export {
   RECALL_FUSION_FAMILY_IDS,
   RECALL_FUSION_FAMILY_STREAMS,
@@ -155,30 +132,6 @@ export {
   familyMaxContributionsById,
   type RecallFusionFamilyId
 } from "./recall/delivery/fusion-delivery-families.js";
-export { captureSupportSetPacketPlanTrace } from
-  "./recall/delivery/packet-plan/packet-plan-trace.js";
-export {
-  resolveCandidateSemanticActivation,
-  resolveCandidateSemanticActivationScope,
-  type CandidateActivationObservation,
-  type CandidateActivationOperatorId,
-  type CandidateActivationReceipt,
-  type CandidateActivationState,
-  type CandidateActivationWinner,
-  type CandidateSemanticActivation,
-  type CandidateSemanticActivationInput,
-  type CandidateSemanticActivationScope,
-  type CandidateSemanticActivationScopeInput,
-  type CandidateSemanticActivationSource
-} from "./recall/scoring/candidate-semantic-activation.js";
-export {
-  COVERAGE_ATOM_OPERATOR_ID,
-  buildCoverageProjectionFormKey,
-  type CandidateCoverageAtom,
-  type CandidateCoverageReceipt,
-  type CoverageDemandRole,
-  type CoverageObservationChannel
-} from "./recall/delivery/fine-assessment-selection/coverage-atoms.js";
 export * from "./recall/field/field-identity.js";
 export * from "./recall/field/finite-field-seal.js";
 export * from "./recall/field/finite-field-capture.js";
@@ -187,7 +140,6 @@ export * from "./recall/field/refinement/field-refinement-stop-certificate.js";
 export * from "./recall/field/object-embedding-field-capture.js";
 export * from "./recall/field/evidence-semantic-field-capture.js";
 export * from "./recall/field/retrieval/retrieval-field-bundle.js";
-export * from "./recall/field/family-rank-base.js";
 export * from "./recall/field/independent-corroboration.js";
 export * from "./recall/field/facility-objective.js";
 export * from "./recall/field/facility/match-materialization.js";
