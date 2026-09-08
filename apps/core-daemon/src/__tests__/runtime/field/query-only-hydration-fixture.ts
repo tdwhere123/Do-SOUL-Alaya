@@ -17,7 +17,7 @@ import {
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
   SqliteSynthesisCapsuleRepo,
-  initializeSemanticArtifactCandidateSchema,
+  prepareIndexedRecallProjection,
   StorageDatabase
 } from "@do-soul/alaya-storage";
 import { applySqliteWritePragmas } from
@@ -30,7 +30,6 @@ import {
   type WorkerTierWindowResult
 } from "../../../runtime/recall-read-worker/memory-client.js";
 import { runOperation } from "../../../runtime/recall-read-worker/dispatch.js";
-import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import type { RecallReadWorkerOperation } from
   "../../../runtime/recall-read-worker/protocol.js";
 import type { RecallReadWorkerRuntime } from
@@ -67,8 +66,7 @@ export function createQueryOnlyHydrationHarness() {
     planted,
     openQueryOnlyPair(filename = planted.createTempFilename(), seed = true) {
       const writer = planted.openDatabase(filename, { seed });
-      initializeSemanticArtifactCandidateSchema(writer.connection);
-      createConditionalFieldObserverReaders(writer);
+      prepareIndexedRecallProjection(writer);
       const queryOnly = openQueryOnlyDatabase(filename, queryOnlyHandles);
       return {
         writer,
@@ -83,7 +81,7 @@ export function createQueryOnlyHydrationHarness() {
 }
 
 export async function persistConditionalSource(database: StorageDatabase, objectId: string, content: string) {
-  initializeSemanticArtifactCandidateSchema(database.connection);
+  prepareIndexedRecallProjection(database);
   const evidence = new SqliteEvidenceCapsuleRepo(database);
   const service = new MemoryService({
     memoryEntryRepo: new SqliteMemoryEntryRepo(database),
@@ -119,8 +117,7 @@ async function openHydrationFixture(
   await persistHydrationMemories(formation);
   planted.close(formation);
   const writer = planted.openDatabase(filename);
-  initializeSemanticArtifactCandidateSchema(writer.connection);
-  createConditionalFieldObserverReaders(writer);
+  prepareIndexedRecallProjection(writer);
   const queryOnly = openQueryOnlyDatabase(filename, queryOnlyHandles);
   const field = composeField(writer);
   const queryOnlyRuntime = createQueryOnlyRuntime(queryOnly);

@@ -10,6 +10,7 @@ import { defaultBudget, INTERPRETATION_CLOCK, YESTERDAY_INSTANT, SNAPSHOT_ID } f
 import { compileConditionalFieldQuery } from "../../../../../../../packages/core/src/recall/conditional-field/query/compile-query.js";
 
 const databases = new Set<StorageDatabase>();
+const COMPLETE_FINALIZATION_RESERVE = 512;
 afterEach(() => { for (const database of databases) database.close(); databases.clear(); });
 async function planted() {
   const slice = await openBoundSlice((database) => databases.add(database));
@@ -20,7 +21,14 @@ function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverRe
   const { dependencies } = createDependencies([]);
   const service = new RecallService({ ...dependencies, testOnlyAllowInMemoryFieldQuerySession: true,
     now: () => INTERPRETATION_CLOCK, observerReaders: readers });
-  const handler = createRecallHandler({ deps: { recallService: service,
+  const handler = createRecallHandler({ deps: { recallService: {
+    recall: (params: Parameters<RecallService["recall"]>[0]) => service.recall({
+      ...params, budget: defaultBudget({
+        page_budget: params.policyOverride?.fine_assessment.budgets.max_entries ?? 30,
+        finalization_reserve: COMPLETE_FINALIZATION_RESERVE
+      })
+    } as Parameters<RecallService["recall"]>[0])
+  },
     trustStateRecorder: { recordDelivery: vi.fn(async (input) => ({ ...input, audit_event_id: "event1" })),
       recordUsage: vi.fn(async (input) => ({ ...input, audit_event_id: "event2" })), findDeliveryById: vi.fn(async () => null) },
     memoryService: { findByIdScoped: async () => null } }, now: () => INTERPRETATION_CLOCK,
@@ -34,6 +42,12 @@ function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverRe
 }
 const key = (entry: InformationIndex["entries"][number]) => JSON.stringify([entry.object_id, entry.hypothesis_id,
   entry.output_binding, entry.program_state, entry.time_state]);
+
+function expectCompleteBaseline(index: InformationIndex): void {
+  expect(index.completeness).toMatchObject({ logical_index: "complete", observed_coverage: "complete",
+    transport: "complete", representation: "complete" });
+  expect(index.continuation).toBeNull();
+}
 
 async function complete(read: ReturnType<typeof session>): Promise<InformationIndex> {
   let page = await read();
@@ -70,6 +84,7 @@ describe("bounded semantic residual producer-consumer regressions", () => {
   it("delivers the independently admitted requested deployment alongside its associated outputs", async () => {
     const slice = await planted();
     const index = await session(slice)();
+    expectCompleteBaseline(index);
     expect(index.entries.find((entry) => entry.object_id === MEM.r)).toMatchObject({ role: "requested", association_milligrades: 1000 });
     expect(index.entries.some((entry) => entry.object_id === MEM.c && entry.association_milligrades === 850)).toBe(true);
     expect(index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ role: "associated", association_milligrades: 550 });
@@ -94,6 +109,7 @@ describe("bounded semantic residual producer-consumer regressions", () => {
   it("one-entry MCP pages recover exactly the wide page's grounded forests", async () => {
     const slice = await planted();
     const wide = await session(slice)();
+    expectCompleteBaseline(wide);
     const read = session(slice);
     const entries: InformationIndex["entries"][number][] = [];
     const forest = new Map<string, NonNullable<InformationIndex["explanations"]>[number]>();
@@ -117,6 +133,7 @@ describe("bounded semantic residual producer-consumer regressions", () => {
   it("observes actual demanded causal receipts and respects retraction and unavailable capability", async () => {
     const slice = await planted();
     const absent = await session(slice)();
+    expectCompleteBaseline(absent);
     expect(absent.entries.find((entry) => entry.object_id === MEM.h)?.claim).toBe("unknown");
     await slice.admitRelation({ evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000887", assertionId: "assert-cause-live",
       sourceId: MEM.r, targetId: MEM.h, resultObjectId: MEM.h, relationKind: "common_cause",
