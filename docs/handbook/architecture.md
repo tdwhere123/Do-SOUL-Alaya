@@ -116,15 +116,16 @@ Do not implement recall from flood / SliceKey / fused-score prose.
 `compileConditionalFieldQuery` → `observeField` → `projectAcceptingIndex`,
 entered from `RecallService.recall` / worker `conditionalField.recall` /
 MCP `soul.recall`. Association is milligrade max-min on
-`assoc.bottleneck.milligrade.v1`. `prefixSK`, `selectGammaWalk`, fusion
-ranker, and budget-aware-q remain on disk and are not reachable from
-`executeRecall`. Kind/category projections remain independent rebuildable
+`assoc.bottleneck.milligrade.v1`. Retired `prefixSK`, `selectGammaWalk`, fusion
+ranking and budget-aware-q are removed; retained historical receipt readers
+cannot select another route. Kind/category projections remain independent rebuildable
 routing projections and must not be schema-coupled to strict base graph
 acceptance.
 
 Connectedness does not certify relevance algebra. Historical
 `effectiveScore` / family-max / `prefixSK` receipts stay in
-[`recall.md`](recall.md); they are not a second production selector.
+the [historical handbook](../archive/recall-before-retirement-2026-09-08.md);
+they are not a second production selector.
 
 **Historical C01 candidate (not live):** budget-aware-q / RRF
 `R(v)=sum_f 1/r_f(v)` was a prior target, not the current entry. Dual
@@ -317,13 +318,13 @@ review finding:
    - HealthJournalService, EventPublisher
    - EvidenceService, MemoryService, SignalService
    - GreenService, GovernanceLeaseService, SessionOverrideService
-   - RecallService (needs Memory + Embedding repos; fusion, delivery,
-     graph-expansion, path-relation, field-generation, and diagnostics helpers
+   - RecallService (needs governed source readers; observation, delivery,
+     path-relation, field-generation, and diagnostics helpers
      live under `packages/core/src/recall/`). Helper presence is not
      connectedness. **LIVE** HEAD is the conditional field:
      `compileConditionalFieldQuery` → `observeField` → `projectAcceptingIndex`.
-     Historical `prefixSK` / `selectGammaWalk` / flood wiring remain on disk
-     and are not reachable from `executeRecall`. See
+     Retired `prefixSK` / `selectGammaWalk` decision wiring is removed.
+     Historical diagnostic shapes do not activate another route. See
      [`recall.md`](recall.md).
    - OutputShapingService, NarrativeBudgetService, ManifestationResolver
    - SynthesisService, ProposalService

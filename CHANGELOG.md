@@ -9,6 +9,22 @@ below as the live ranking recipe.
 
 ## Unreleased — protocol 4.0.0 conditional-field candidate
 
+`SoulMemorySearchResponse.delivery_path`,
+`SoulMemorySearchResponse.ranking_authority`, and
+`SoulMemorySearchRequest.recent_turn` are deprecated and remain parseable.
+The target emits `index` and never executes a legacy selector or enqueues
+extraction from Recall. Under invariant §25, removal is planned no earlier
+than 4.2.0, conditional on deprecation shipping in 4.1.0 first. This unreleased
+candidate does not count as a published minor deprecation interval.
+
+Active constraints remain a separate governed response, read within the same
+snapshot and request allowance. `active_constraints_count` is nullable when
+bounded or historical observation cannot establish an exact total;
+`active_constraints_completeness` states that limitation. This is part of the
+unreleased 4.0.0 semantic cutover, not an additional published version.
+Source evidence pointers and supplied governance warnings remain visible at
+their supported granularity. Hint-only output omits source bodies and pointers.
+
 The isolated Recall candidate follows the major semantic-cutover classification
 in `docs/handbook/invariants.md` §25. Query-conditioned index delivery replaces
 the former ranking contract. This candidate also carries grounded explanations,
