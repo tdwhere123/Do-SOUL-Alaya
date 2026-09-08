@@ -122,6 +122,7 @@ export type RecallSourceMetadata = Readonly<
 >;
 
 export interface RecallResult {
+  readonly execution_receipt?: import("./conditional-field-execution-receipt.js").ConditionalFieldExecutionReceipt;
   readonly source_metadata?: Readonly<Record<string, RecallSourceMetadata>>;
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly synthesis: SelectGammaSynthesisStatus;

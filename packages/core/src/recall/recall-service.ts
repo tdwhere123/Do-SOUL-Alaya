@@ -59,6 +59,7 @@ export {
   captureIndexSourceMetadata,
   encodeRecallResult,
   runConditionalFieldRecall,
+  runConditionalFieldRecallWithReceipt,
   snapshotIdFromPin,
   RELATION_MILLIGRADES,
   type ConditionalFieldRecallPort,
@@ -66,6 +67,8 @@ export {
   type ConditionalFieldRecallRequest,
   type ConditionalFieldRecallResult
 } from "./runtime/recall-service-runner.js";
+export type { ConditionalFieldExecutionReceipt } from "./runtime/conditional-field-execution-receipt.js";
+export { compileConditionalFieldQuery, interpretationIdentity } from "./conditional-field/query/compile-query.js";
 export {
   attributeUsageReports,
   type UsageReportAttribution

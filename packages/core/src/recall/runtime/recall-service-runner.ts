@@ -24,6 +24,7 @@ import { normalizeQueryText } from "./recall-service-helpers.js";
 import type { RecallResult } from "./recall-service-types.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { BoundedIndexPayload } from "./index-payload.js";
+import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
 import type { RecallExecutionContext, RecallExecutionParams } from "./recall-service-runner-types.js";
 import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
 import { assertRecallZeroLiveExtraction } from "./zero-live-extraction.js";
@@ -56,6 +57,7 @@ const INDEX_SOURCE_METADATA = new WeakMap<InformationIndex, Readonly<Record<stri
 const FIELD_SOURCE_PINS = new WeakMap<FieldEngineState, string>();
 
 export type ConditionalFieldRecallRequest = Readonly<{
+  readonly requested_budget?: RequestBudget;
   readonly workspace_id: string;
   readonly query_text: string;
   readonly budget: RequestBudget;
@@ -83,6 +85,7 @@ export type ConditionalFieldRecallResult = RecallResult & Readonly<{
 }>;
 
 export type ConditionalFieldRecallPortResult = Readonly<{
+  readonly execution_receipt?: ConditionalFieldExecutionReceipt;
   readonly index: InformationIndex;
   readonly previews: Readonly<Record<string, string>>;
   readonly source_metadata?: Readonly<Record<string, RecallSourceMetadata>>;
@@ -102,36 +105,47 @@ export async function executeRecall(
   let previews = new Map<string, string>();
   let sourceMetadata: Readonly<Record<string, RecallSourceMetadata>> = {};
   let governance: BoundedActiveConstraintsResult | undefined;
+  let executionReceipt: ConditionalFieldExecutionReceipt | undefined;
   const index = await withRecallReadSnapshot(context.readSnapshot, async () => {
     const port = fieldDeps(context).conditionalFieldPort;
-    const original = captureRequestSnapshot(buildRecallRequest(context, params),
-      port === undefined);
+    const sent = buildRecallRequest(context, params);
+    const original = captureRequestSnapshot(sent, port === undefined);
     const governed = await readRequestGovernance(original, context.dependencies.activeConstraintsPort,
       params.activeConstraintsCap, port !== undefined);
     governance = governed.governance;
     const request = { ...original, snapshot_id: governance.binding.snapshot_id,
-      budget: governed.budget, governance };
+      budget: governed.budget, requested_budget: sent.budget, governance };
     if (port !== undefined) {
       const recalled = portIndexAndPreviews(await port.recall(withoutReaders(request)));
       previews = recalled.previews;
       sourceMetadata = recalled.source_metadata;
+      executionReceipt = recalled.execution_receipt;
       return recalled.index;
     }
-    const recalled = runConditionalFieldRecall(request);
+    const executed = runConditionalFieldRecallWithReceipt(request);
+    const recalled = executed.index;
+    executionReceipt = executed.execution_receipt;
     previews = captureIndexPreviews(recalled, request.readers, request.workspace_id);
     sourceMetadata = captureIndexSourceMetadata(recalled);
     return recalled;
   });
-  return encodeRecallResult(index, previews, governance, sourceMetadata);
+  return { ...encodeRecallResult(index, previews, governance, sourceMetadata), execution_receipt: executionReceipt };
 }
 
 export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest): InformationIndex {
+  return runConditionalFieldRecallWithReceipt(input).index;
+}
+
+export function runConditionalFieldRecallWithReceipt(input: ConditionalFieldRecallRequest): Readonly<{
+  index: InformationIndex; execution_receipt: ConditionalFieldExecutionReceipt;
+}> {
+  const requestedBudget = input.requested_budget ?? input.budget;
   if (input.readers.snapshotPin !== undefined) {
     const reserved = reserveSnapshotPinWork(input.budget);
     input = { ...input, budget: reserved.budget };
   }
-  const interpretation = compileConditionalFieldQuery({
-    source: "ordinary",
+  const compileInput = {
+    source: "ordinary" as const,
     text: input.query_text,
     snapshot_id: input.snapshot_id,
     budget: input.budget,
@@ -142,7 +156,21 @@ export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest):
     ...(input.dimension_filter === undefined ? {} : { dimension_filter: input.dimension_filter }),
     ...(input.domain_tag_filter === undefined ? {} : { domain_tag_filter: input.domain_tag_filter }),
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes })
-  });
+  };
+  const interpretation = compileConditionalFieldQuery(compileInput);
+  const executionReceipt: ConditionalFieldExecutionReceipt = {
+    schema_version: 1, workspace_id: input.workspace_id, requested_budget: requestedBudget,
+    compile_input: compileInput, query_id: interpretation.query_id,
+    interpretation_id: interpretationIdentity({ interpretation_clock: input.interpretation_clock }),
+    snapshot_id: input.snapshot_id, interpretation_clock: input.interpretation_clock
+  };
+  return { index: runCompiledConditionalFieldRecall(input, interpretation), execution_receipt: executionReceipt };
+}
+
+function runCompiledConditionalFieldRecall(
+  input: ConditionalFieldRecallRequest,
+  interpretation: QueryInterpretation
+): InformationIndex {
   if (continuationEpochMismatch(input.continuation, interpretation)
     || (input.continuation != null && (
       input.continuation.snapshot_id !== input.snapshot_id
@@ -372,12 +400,14 @@ export function captureIndexSourceMetadata(index: InformationIndex): Readonly<Re
 function portIndexAndPreviews(
   recalled: InformationIndex | ConditionalFieldRecallPortResult
 ): Readonly<{ readonly index: InformationIndex; readonly previews: Map<string, string>;
-  readonly source_metadata: Readonly<Record<string, RecallSourceMetadata>> }> {
+  readonly source_metadata: Readonly<Record<string, RecallSourceMetadata>>;
+  readonly execution_receipt?: ConditionalFieldExecutionReceipt }> {
   if ("previews" in recalled && "index" in recalled) {
     return {
       index: recalled.index,
       previews: new Map(Object.entries(recalled.previews)),
-      source_metadata: recalled.source_metadata ?? {}
+      source_metadata: recalled.source_metadata ?? {},
+      execution_receipt: recalled.execution_receipt
     };
   }
   throw new TypeError("conditionalField.recall must return index and previews");

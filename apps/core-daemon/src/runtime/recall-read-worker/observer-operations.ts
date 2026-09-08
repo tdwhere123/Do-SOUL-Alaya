@@ -5,6 +5,7 @@ import {
   captureIndexPreviews,
   captureIndexSourceMetadata,
   runConditionalFieldRecall,
+  runConditionalFieldRecallWithReceipt,
   reserveSnapshotPinWork,
   snapshotIdFromPin,
   toSourceObserverRow,
@@ -42,10 +43,13 @@ export function runConditionalFieldWorkerRecall(
     || governance.binding.snapshot_id !== snapshotId || governance.binding.as_of !== body.as_of)) {
     throw new Error("conditional field governance snapshot mismatch");
   }
-  const index = runConditionalFieldRecall({
+  const executed = runConditionalFieldRecallWithReceipt({
     workspace_id: workspaceId,
     query_text: readString(body.query_text, "query_text"),
     budget: reserved.budget,
+    ...(body.requested_budget === undefined ? {} : {
+      requested_budget: body.requested_budget as Parameters<typeof runConditionalFieldRecall>[0]["budget"]
+    }),
     snapshot_id: snapshotId,
     ...(governance === undefined ? {} : { governance }),
     interpretation_clock: readString(body.interpretation_clock, "interpretation_clock"),
@@ -64,7 +68,9 @@ export function runConditionalFieldWorkerRecall(
       ? {}
       : { authorized_scopes: body.authorized_scopes as readonly string[] })
   });
+  const index = executed.index;
   return {
+    execution_receipt: executed.execution_receipt,
     index: InformationIndexSchema.parse(index),
     previews: Object.fromEntries(captureIndexPreviews(index, readers, workspaceId)),
     source_metadata: captureIndexSourceMetadata(index)

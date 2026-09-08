@@ -60,6 +60,18 @@ describe("workspace observable source generation", () => {
           const before = readers.snapshotPin!(WS);
           const first = await request(service);
           expect(first.index!.continuation).not.toBeNull();
+          expect(first.execution_receipt).toMatchObject({
+            workspace_id: WS,
+            requested_budget: { schema_version: 1, work_units: 10000, memory_bytes: 1000000,
+              page_budget: 1, finalization_reserve: 100, min_envelope: 1 },
+            query_id: first.index!.query_id,
+            interpretation_id: first.index!.interpretation_id,
+            snapshot_id: first.index!.snapshot_id,
+            interpretation_clock: NOW,
+            compile_input: { text: "needle", snapshot_id: first.index!.snapshot_id,
+              interpretation_clock: NOW }
+          });
+          expect(first.execution_receipt!.compile_input.budget.work_units).toBeLessThan(10000);
           audit(slice.database);
           slice.database.connection.prepare("UPDATE memory_entries SET content = content, valid_from = valid_from WHERE object_id = ?").run(MEM.c);
           expect(readers.snapshotPin!(WS)).toEqual(before);
@@ -82,6 +94,8 @@ describe("workspace observable source generation", () => {
           expect(stale.index!.entries).toEqual([]);
           const fresh = await request(service);
           expect(fresh.index!.snapshot_id).not.toBe(first.index!.snapshot_id);
+          expect(fresh.execution_receipt!.snapshot_id).toBe(fresh.index!.snapshot_id);
+          expect(fresh.execution_receipt!.snapshot_id).not.toBe(first.execution_receipt!.snapshot_id);
           expect(slice.database.connection.prepare("SELECT revision FROM event_log WHERE entity_id = ? AND event_type = 'soul.memory.created'")
             .get(MEM.h)).toEqual({ revision: 9999 });
         } finally { await worker?.close(); }
