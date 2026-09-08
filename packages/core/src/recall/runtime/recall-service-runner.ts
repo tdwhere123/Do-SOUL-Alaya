@@ -105,7 +105,7 @@ export async function executeRecall(
   const index = await withRecallReadSnapshot(context.readSnapshot, async () => {
     const port = fieldDeps(context).conditionalFieldPort;
     const original = captureRequestSnapshot(buildRecallRequest(context, params),
-      port === undefined && validSnapshot(params.snapshotDigest) === undefined);
+      port === undefined);
     const governed = await readRequestGovernance(original, context.dependencies.activeConstraintsPort,
       params.activeConstraintsCap, port !== undefined);
     governance = governed.governance;

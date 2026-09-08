@@ -6,7 +6,6 @@ import type { RecallPathReadPorts } from "../recall/recall-path-readers.js";
 
 export function createBoundedActiveConstraintsReader(database: StorageDatabase) {
   const paths = new SqliteGovernancePathReader(database);
-  paths.prepareIndex();
   const projection = new SqliteIndexedRecallProjection(database.connection);
   return (request: Readonly<BoundedActiveConstraintsRequest>) => database.connection.transaction(() => {
     if (request.nativeLimit < 3 || request.byteLimit < 2048) throw new Error("active constraints snapshot allowance unavailable");

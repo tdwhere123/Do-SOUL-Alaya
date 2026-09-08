@@ -63,6 +63,7 @@ export interface RecallExecutionParams {
     import("@do-soul/alaya-protocol").QueryOsfSemanticCompletenessReceipt
   >;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
+  // Artifact provenance may outlive a working copy; live readers own the runtime pin.
   readonly snapshotDigest?: string;
 }
 

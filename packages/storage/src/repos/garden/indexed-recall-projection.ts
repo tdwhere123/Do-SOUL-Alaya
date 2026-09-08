@@ -7,6 +7,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import type { SqliteConnection } from "../../sqlite/db.js";
 import { BOUNDED_EMBEDDING_INDEX_SQL } from "../memory/reads/memory-embedding-bounded-read.js";
 import { RELATION_RECALL_INDEX_SQL } from "../path/reads/relation-assertion/bounded-reader.js";
+import { GOVERNANCE_PATH_INDEX_SQL } from "../path/reads/governance-path-reader.js";
 import { initializeSemanticArtifactCandidateSchema } from "./semantic-artifact-schema.js";
 
 interface IndexRevisionRow {
@@ -98,5 +99,6 @@ export function prepareIndexedRecallProjection(database: StorageDatabase): void 
     initializeSemanticArtifactCandidateSchema(database.connection);
     database.connection.exec(RELATION_RECALL_INDEX_SQL);
     database.connection.exec(BOUNDED_EMBEDDING_INDEX_SQL);
+    database.connection.exec(GOVERNANCE_PATH_INDEX_SQL);
   })();
 }

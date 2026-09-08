@@ -87,18 +87,19 @@ describe("indexed Recall isolated migration and rollback", () => {
     expect(() => assertSemanticArtifactCandidateSchema(retained.connection)).toThrow(/incompatible/);
   });
 
-  it("rolls back the entire preparation when a required native index cannot be created", () => {
+  it.each(["idx_memory_embeddings_recall_profile_identity", "idx_governance_paths_page", "idx_governance_projection_page"])(
+    "rolls back the entire preparation when required native index %s cannot be created", (indexName) => {
     const { database } = fixture();
     database.connection.exec(`
       UPDATE garden_semantic_schema SET revision=5;
-      DROP INDEX idx_memory_embeddings_recall_profile_identity;
-      CREATE TABLE idx_memory_embeddings_recall_profile_identity (blocked INTEGER);
+      DROP INDEX ${indexName};
+      CREATE TABLE ${indexName} (blocked INTEGER);
     `);
     const originalTruth = truth(database);
     expect(() => prepareIndexedRecallProjection(database)).toThrow();
     expect(database.connection.prepare("SELECT revision FROM garden_semantic_schema").all()).toEqual([{ revision: 5 }]);
     expect(truth(database)).toBe(originalTruth);
-    database.connection.exec("DROP TABLE idx_memory_embeddings_recall_profile_identity");
+    database.connection.exec(`DROP TABLE ${indexName}`);
     prepareIndexedRecallProjection(database);
     assertSemanticArtifactCandidateSchema(database.connection);
   });

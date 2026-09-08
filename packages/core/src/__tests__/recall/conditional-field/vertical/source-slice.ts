@@ -10,7 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   digestRelationFormationEventSource,
-  initializeSemanticArtifactCandidateSchema,
+  prepareIndexedRecallProjection,
   SqliteGardenTaskRepo,
   SqliteIndexedRecallProjection,
   SqliteMemoryRecallReader,
@@ -61,7 +61,7 @@ export async function openSourceSlice(
   permittedTimelessPolicyIds?: ReadonlySet<string>
 ) {
   const storage = await createRecallEmbeddingRealStorage(register, filename);
-  initializeSemanticArtifactCandidateSchema(storage.database.connection);
+  prepareIndexedRecallProjection(storage.database);
   const indexProjection = new SqliteIndexedRecallProjection(storage.database.connection);
   const notify = { notify: async () => {}, notifyEntry: async () => {} };
   const eventPublisher = new EventPublisher({

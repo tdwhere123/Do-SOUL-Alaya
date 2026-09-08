@@ -29,10 +29,7 @@ export class SqliteGovernancePathReader {
   public constructor(private readonly database: StorageDatabase) {}
 
   public prepareIndex(): void {
-    this.database.connection.exec(`CREATE INDEX IF NOT EXISTS idx_governance_paths_page
-      ON path_relations(workspace_id, path_id);
-      CREATE INDEX IF NOT EXISTS idx_governance_projection_page
-      ON relation_path_projections(generation, workspace_id, path_id);`);
+    this.database.connection.exec(GOVERNANCE_PATH_INDEX_SQL);
   }
 
   public read(input: GovernancePathReadInput): GovernancePathReadPage {
@@ -121,3 +118,8 @@ export class SqliteGovernancePathReader {
     }
   }
 }
+
+export const GOVERNANCE_PATH_INDEX_SQL = `CREATE INDEX IF NOT EXISTS idx_governance_paths_page
+  ON path_relations(workspace_id, path_id);
+  CREATE INDEX IF NOT EXISTS idx_governance_projection_page
+  ON relation_path_projections(generation, workspace_id, path_id);`;

@@ -4,6 +4,7 @@ import { runConditionalFieldRecall, snapshotIdFromPin } from "@do-soul/alaya-cor
 import { SqliteIndexedRecallProjection, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders, runConditionalFieldWorkerRecall } from "../../../runtime/recall-read-worker/observer-operations.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
+import { createBoundedActiveConstraintsReader } from "../../../runtime/recall-read-worker/active-constraints.js";
 import { MEM, WS, NOW, openSourceSlice } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import { defaultBudget } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 
@@ -15,6 +16,24 @@ afterEach(() => {
 });
 
 describe("outer recall snapshot native allowance", () => {
+  it("constructs cold governance and field readers under query_only without DDL after startup", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await slice.writeMemory(MEM.r, "needle", MemoryDimension.FACT);
+    slice.database.connection.pragma("query_only = ON");
+    const executed = vi.spyOn(slice.database.connection, "exec");
+    const prepared = vi.spyOn(slice.database.connection, "prepare");
+    const governance = createBoundedActiveConstraintsReader(slice.database)({
+      workspaceId: WS, asOf: NOW, nativeLimit: 128, byteLimit: 65536
+    });
+    expect(governance.completeness).toBe("complete");
+    const result = runConditionalFieldWorkerRecall(runtime(slice.database), {
+      ...payload(defaultBudget()), governance
+    });
+    expect(result.index.entries.map((entry) => entry.object_id)).toContain(MEM.r);
+    expect(executed).not.toHaveBeenCalled();
+    expect(prepared.mock.calls.every(([sql]) => !/^\s*(CREATE|DROP|ALTER)\b/iu.test(sql))).toBe(true);
+  });
+
   it.each(["direct", "cold worker"] as const)("%s rejects a tiny budget before any pin or SQL work", async (route) => {
     const slice = await openSourceSlice((database) => databases.add(database));
     const readers = route === "direct" ? createConditionalFieldObserverReaders(slice.database) : undefined;
