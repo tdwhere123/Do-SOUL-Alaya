@@ -136,6 +136,16 @@ formulas are unchanged, but structured product slots are explicitly
 non-equivalent to the old ranked candidate pool. Duplicate product slots are
 not silently deduplicated.
 
+An internal execution receipt captures the actual compiler inputs, query and
+interpretation identities, live source snapshot, and original request budget.
+The worker transports that receipt through the same result boundary. Measurement
+checks the independently supplied request against it and reuses the compiler's
+identity rules. Archived measurement admission repeats identity and ordered
+product-slot checks. These unsigned local receipts detect inconsistent or stale
+bindings; they do not authenticate an artifact whose entire evidence was forged.
+Payload omission that leaves fewer compatibility results than index entries is
+unscorable, while the response retains its original index and omission status.
+
 Requested work/memory limits are not measured consumption. The measurement
 record keeps actual work, memory, independent relationship/explanation truth
 and downstream utilization unavailable when the response supplies no such
