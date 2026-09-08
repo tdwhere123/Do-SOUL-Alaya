@@ -127,6 +127,29 @@ bridge schema versions.
 
 ## Evidence limits and historical records
 
+The benchmark's `conditional-field-delivered-slots-v1` measurement contract
+validates the actual index, ordered result slots, query/clock/snapshot binding,
+explicit sent budget and zero Recall provider/Garden counters. It does not
+invent legacy diagnostics to make a question scorable. Unusable source states
+remain unscorable; partial/open results retain that status. Any@K and full-gold
+formulas are unchanged, but structured product slots are explicitly
+non-equivalent to the old ranked candidate pool. Duplicate product slots are
+not silently deduplicated.
+
+Requested work/memory limits are not measured consumption. The measurement
+record keeps actual work, memory, independent relationship/explanation truth
+and downstream utilization unavailable when the response supplies no such
+evidence. Native-fork synthetic pagination verifies the real worker route;
+it does not establish replayability of a historical dataset snapshot.
+
+Continuation in the benchmark reuses the active question/source/working-file
+identity and skips repeated warmup. Lost or changed process/source state
+invalidates continuation before creating a fresh working copy. An old cache's
+matching byte seal does not prove current target schemas, interpretation
+dependencies or observer compatibility. Incompatible artifacts remain
+`NOT_REPLAYABLE` until separately prepared and verified; baseline execution is
+a separate action.
+
 The selected index has memory identities. Standalone evidence-capsule Recall
 delivery and artifact-kind semantic retrieval are unsupported live arms.
 Capsule storage, qualified User/Assistant projections, provenance and evidence
