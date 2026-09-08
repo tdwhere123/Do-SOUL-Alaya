@@ -84,6 +84,7 @@ describe("conditional-field compiler and projection contracts", () => {
       readers: sharedProviderWorld()
     });
     const values = field.binding.kind === "bound" ? field.binding.snapshot.values : [];
+    expect(field.closure.observation).toBe("exhausted");
     const historyA = values.filter((row) => row.state.object_id === "history-a");
     const historyB = values.filter((row) => row.state.object_id === "history-b");
     expect(historyA.some((row) => row.state.binding_context.includes(`${SERVICE_VARIABLE}=service-a`))).toBe(true);
@@ -184,9 +185,11 @@ function sharedProviderWorld(): ObserverReaders {
       unavailable: false
     }),
     relation: (input) => {
-      const observations = edges
+      const remaining = edges
         .filter((edge) => (input.subject === null || edge.sourceObjectId === input.subject)
-          && edge.predicate === input.predicate)
+          && edge.predicate === input.predicate && edge.assertionId > (input.afterAssertionId ?? ""))
+        .sort((left, right) => left.assertionId.localeCompare(right.assertionId));
+      const observations = remaining.slice(0, Math.min(input.limit, input.nativeLimit))
         .map((edge) => ({
           ...edge,
           resultObjectId: edge.targetObjectId,
@@ -199,7 +202,8 @@ function sharedProviderWorld(): ObserverReaders {
         nativeBytes: 1,
         rowsRead: observations.length,
         bytesRead: 1,
-        truncated: false
+        truncated: remaining.length > observations.length,
+        committedThrough: observations.at(-1)?.assertionId ?? input.afterAssertionId
       };
     }
   };

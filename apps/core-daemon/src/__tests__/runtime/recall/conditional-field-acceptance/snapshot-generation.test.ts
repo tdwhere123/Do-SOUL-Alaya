@@ -107,10 +107,14 @@ describe("workspace observable source generation", () => {
     const projection = new SqliteIndexedRecallProjection(reopened.connection);
     expect(projection.observablePin(WS)).toEqual(before);
     reopened.connection.prepare("DELETE FROM garden_projection_cursor WHERE workspace_id = ?").run(WS);
-    expect(projection.observablePin(WS).source_revision).toBe("uninitialized");
+    const uninitialized = projection.observablePin(WS);
+    expect(uninitialized.source_revision).not.toBe(before.source_revision);
+    expect(projection.observablePin(WS)).toEqual(uninitialized);
     initializeSemanticArtifactCandidateSchema(reopened.connection);
     const rebuilt = projection.observablePin(WS);
-    expect(rebuilt.source_revision.split(":")[0]).not.toBe(before.source_revision.split(":")[0]);
+    expect(rebuilt.source_revision).not.toBe(before.source_revision);
+    expect(rebuilt.source_revision).not.toBe(uninitialized.source_revision);
+    expect(projection.observablePin(WS)).toEqual(rebuilt);
     expect(rebuilt.applied_at).toBe(before.applied_at);
     expect(reopened.connection.prepare("SELECT revision FROM garden_semantic_schema").all()).toEqual([{ revision: 6 }]);
   });
@@ -154,7 +158,10 @@ describe("workspace observable source generation", () => {
     expect(slice.database.connection.prepare("SELECT applied_event_revision FROM garden_projection_cursor WHERE workspace_id=?").get(WS)).toEqual(cursor);
     const projection = new SqliteIndexedRecallProjection(slice.database.connection);
     const before = projection.observablePin(WS);
-    expect(before.source_revision).toMatch(/^[0-9a-f]{32}:0$/);
+    expect(before.source_revision.length).toBeGreaterThan(0);
+    expect(projection.observablePin(WS)).toEqual(before);
+    expect(slice.database.connection.prepare("SELECT observable_generation FROM garden_projection_cursor WHERE workspace_id=?")
+      .get(WS)).toEqual({ observable_generation: 0 });
     slice.database.connection.prepare("UPDATE memory_entries SET valid_from=? WHERE object_id=?").run(NOW, MEM.c);
     expect(projection.observablePin(WS).source_revision).not.toBe(before.source_revision);
   });

@@ -8,6 +8,7 @@ import { MemoryDimension, type InformationIndex, type SoulMemorySearchResponse, 
 import { EventPublisher, RecallService, attributeUsageReports } from "@do-soul/alaya-core";
 import { SqliteTrustStateRepo, SqliteEventLogRepo, SqliteMemoryEntryRepo, SqliteRunRepo, initDatabase, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../../../../runtime/recall-read-worker/observer-operations.js";
+import { createBoundedActiveConstraintsReader } from "../../../../runtime/recall-read-worker/active-constraints.js";
 import { createRecallReadWorkerClient } from "../../../../runtime/recall/recall-read-worker-client.js";
 import { createMcpMemoryToolHandler } from "../../../../mcp-memory/tool/tool-handler.js";
 import { TrustStateRecorder } from "../../../../trust/state.js";
@@ -30,7 +31,11 @@ afterEach(async () => {
 function serviceFor(database: StorageDatabase, now: () => string = () => NOW,
   worker?: ReturnType<typeof createRecallReadWorkerClient>) {
   const { dependencies } = createDependencies([]);
+  const readBounded = createBoundedActiveConstraintsReader(database);
   return new RecallService({ ...dependencies, testOnlyAllowInMemoryFieldQuerySession: true, now,
+    activeConstraintsPort: worker?.activeConstraintsPort ?? {
+      ...dependencies.activeConstraintsPort!, readBounded: async (request) => readBounded(request)
+    },
     ...(worker === undefined ? { observerReaders: createConditionalFieldObserverReaders(database) }
       : { readSnapshot: worker.readSnapshot, conditionalFieldPort: worker.conditionalFieldPort }) });
 }
@@ -74,7 +79,7 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     const observe = (policies: readonly string[]) => observeConditionalField({ query,
       lease: { schema_version: 1, lease_id: "lease", query_id: query.query_id, snapshot_id: query.snapshot_id, status: "active" },
       cursor: startObserverCursor({ cursor_id: "adj", region_id: "adj", query_id: query.query_id, snapshot_id: query.snapshot_id }),
-      action: { schema_version: 1, region_id: "adj", action: "adjacency", work_limit: 4 }, page_limit: 1,
+      action: { schema_version: 1, region_id: "adj", action: "adjacency", work_limit: 7 }, page_limit: 1,
       workspace_id: WS, relation_subject: MEM.r, relation_kind: "config_direct", as_of: NOW,
       readers: createConditionalFieldObserverReaders(slice.database, policies) });
     expect(observe([]).page.observations).toEqual([]);

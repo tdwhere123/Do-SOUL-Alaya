@@ -27,6 +27,7 @@ import {
 import { INAPPLICABLE_KIND, MEM, WS, openSourceSlice } from "../vertical/source-slice.js";
 
 const databases = new Set<StorageDatabase>();
+const COMPLETE_FINALIZATION_RESERVE = 512;
 
 afterEach(() => {
   for (const database of databases) database.close();
@@ -38,7 +39,8 @@ describe("conditional-field executeRecall assembly", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const index = runRecall(slice, { page_budget: 800 });
-    expect(index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades)
+    expectCompleteBaseline(index);
+    expect(index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades, JSON.stringify(index.completeness))
       .toBe(550);
     const supported = index.entries.find((entry) => entry.explanation_ids.length > 0);
     expect(supported === undefined || supported.claim !== "unknown" || supported.explanation_ids.length > 0).toBe(true);
@@ -52,6 +54,7 @@ describe("conditional-field executeRecall assembly", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const full = runRecall(slice, { page_budget: 800 });
+    expectCompleteBaseline(full);
     const pages: InformationIndex[] = [];
     let continuation: InformationIndex["continuation"] = null;
     for (let step = 0; step < 16; step += 1) {
@@ -251,7 +254,10 @@ describe("conditional-field executeRecall assembly", () => {
       strategy: "chat" as const,
       queryText: "yesterday failed deployment"
     };
-    const full = await service.recall({ ...pageRequest, pageBudget: 800 });
+    const full = await service.recall({ ...pageRequest, pageBudget: 800,
+      budget: defaultBudget({ page_budget: 800, finalization_reserve: COMPLETE_FINALIZATION_RESERVE })
+    } as Parameters<typeof service.recall>[0]);
+    expectCompleteBaseline(full.index);
     const pages: InformationIndex[] = [];
     let continuation: InformationIndex["continuation"] = null;
     for (let step = 0; step < 16; step += 1) {
@@ -364,7 +370,7 @@ function runRecall(
   return runConditionalFieldRecall({
     workspace_id: WS,
     query_text: input.query_text ?? "yesterday failed deployment",
-    budget: defaultBudget({ page_budget: input.page_budget }),
+    budget: defaultBudget({ page_budget: input.page_budget, finalization_reserve: COMPLETE_FINALIZATION_RESERVE }),
     snapshot_id: SNAPSHOT_ID,
     interpretation_clock: INTERPRETATION_CLOCK,
     as_of: INTERPRETATION_CLOCK,
@@ -377,6 +383,13 @@ function runRecall(
     ...(input.domain_tag_filter === undefined ? {} : { domain_tag_filter: input.domain_tag_filter }),
     ...(input.time_field === undefined ? {} : { time_field: input.time_field })
   });
+}
+
+function expectCompleteBaseline(index: InformationIndex): void {
+  expect(index.completeness, JSON.stringify(index.completeness)).toMatchObject({
+    logical_index: "complete", observed_coverage: "complete", transport: "complete", representation: "complete"
+  });
+  expect(index.continuation).toBeNull();
 }
 
 function readersFor(slice: Awaited<ReturnType<typeof openSourceSlice>>): ObserverReaders {

@@ -26,7 +26,14 @@ describe("automaton, compatible join, and composed path identity", () => {
       local_variables: ["s", "t"], body: rel("observed_log") };
     const request = input([edge("seed", "middle", "observed_log", "out"), edge("middle", "seed", "observed_log", "back")]);
     const state = observeField(interpretation(program), { ...request, readers: { ...request.readers,
-      lexical: () => ({ ids: ["seed", "middle"], nativeVisits: 2, nativeBytes: 1, rowsRead: 2, bytesRead: 1, truncated: false }) } });
+      lexical: ({ afterObjectId, limit, nativeLimit }) => {
+        const candidates = ["seed", "middle"];
+        const remaining = candidates.slice(afterObjectId === null ? 0 : candidates.indexOf(afterObjectId) + 1);
+        const ids = remaining.slice(0, Math.min(limit, nativeLimit));
+        return { ids, nativeVisits: ids.length, nativeBytes: 1, rowsRead: ids.length, bytesRead: 1,
+          truncated: remaining.length > ids.length, committedThrough: ids.at(-1) ?? afterObjectId };
+      } } });
+    expect(state.closure.observation).toBe("exhausted");
     expect(new Set(state.seeds.map((seed) => seed.state.object_id))).toEqual(new Set(["seed", "middle"]));
     expect(acceptedIds(state)).toEqual(expect.arrayContaining(["seed", "middle"]));
   });
@@ -339,17 +346,19 @@ function input(edges: readonly ReturnType<typeof edge>[]) {
       bytesRead: 1,
       unavailable: false
     }),
-    relation: ({ subject, predicate }) => {
-      const observations = edges.filter((item) =>
-        item.sourceObjectId === subject && item.predicate === predicate
-      );
+    relation: ({ subject, predicate, afterAssertionId, limit, nativeLimit }) => {
+      const remaining = edges.filter((item) =>
+        item.sourceObjectId === subject && item.predicate === predicate && item.assertionId > (afterAssertionId ?? "")
+      ).sort((left, right) => left.assertionId.localeCompare(right.assertionId));
+      const observations = remaining.slice(0, Math.min(limit, nativeLimit));
       return {
         observations,
         nativeVisits: observations.length,
         nativeBytes: 1,
         rowsRead: observations.length,
         bytesRead: 1,
-        truncated: false
+        truncated: remaining.length > observations.length,
+        committedThrough: observations.at(-1)?.assertionId ?? afterAssertionId
       };
     }
   };

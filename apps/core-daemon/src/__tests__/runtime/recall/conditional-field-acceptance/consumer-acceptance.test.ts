@@ -13,6 +13,7 @@ import {
   type ObserverReaders
 } from "@do-soul/alaya-core";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
+import { createBoundedActiveConstraintsReader } from "../../../../runtime/recall-read-worker/active-constraints.js";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../../../cli/bridge.js";
 import { createToolsCommand } from "../../../../cli/tools.js";
 import { createRecallHandler } from "../../../../mcp-memory/recall/recall-usage-handlers.js";
@@ -44,6 +45,7 @@ import {
 } from "./consumer-contract.js";
 
 const databases = new Set<StorageDatabase>();
+const COMPLETE_FINALIZATION_RESERVE = 512;
 
 afterEach(() => {
   for (const database of databases) database.close();
@@ -100,6 +102,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       query: "yesterday failed deployment",
       max_results: 800
     });
+    expectCompleteBaseline(mcp.index);
     expect(assertTargetConsumer(toConsumer(mcp, "mcp"))).toEqual([]);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
       .toBe(850);
@@ -149,6 +152,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       max_results: 800
     });
     expect(assertPartialTransport(pages[0]!)).toEqual([]);
+    expectCompleteBaseline(full.index);
     expect(assertPageContinuity(pages, full.index)).toEqual([]);
     expect(pages[0]?.snapshot_id).toBe(pages[1]?.snapshot_id);
     expect(pages[1]?.completeness.observed_coverage).not.toBe("invalidated");
@@ -241,16 +245,18 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       max_results: 800
     });
     const { dependencies } = createDependencies([]);
+    const readBounded = createBoundedActiveConstraintsReader(slice.database);
     const service = new RecallService({
       testOnlyAllowInMemoryFieldQuerySession: true,
       ...dependencies,
       now: () => INTERPRETATION_CLOCK,
-      observerReaders: readersFor(slice)
+      observerReaders: readersFor(slice),
+      activeConstraintsPort: { ...dependencies.activeConstraintsPort!, readBounded: async (request) => readBounded(request) }
     });
     const command = createToolsCommand({
       handler: createMcpMemoryToolHandler({
         ...createDeps(),
-        recallService: service
+        recallService: completeBudgetService(service)
       }),
       defaultWorkspaceId: WS,
       defaultAgentTarget: "codex"
@@ -290,16 +296,18 @@ function createTickingHandlerSession(
   slice: Awaited<ReturnType<typeof openSourceSlice>>
 ) {
   const { dependencies } = createDependencies([]);
+  const readBounded = createBoundedActiveConstraintsReader(slice.database);
   let ticks = 0;
   const service = new RecallService({
     testOnlyAllowInMemoryFieldQuerySession: true,
     ...dependencies,
     now: () => new Date(Date.parse(INTERPRETATION_CLOCK) + ticks++ * 1_000).toISOString(),
-    observerReaders: readersFor(slice)
+    observerReaders: readersFor(slice),
+    activeConstraintsPort: { ...dependencies.activeConstraintsPort!, readBounded: async (request) => readBounded(request) }
   });
   const handler = createRecallHandler({
     deps: {
-      recallService: service,
+      recallService: completeBudgetService(service),
       trustStateRecorder: {
         recordDelivery: vi.fn(async (input) => ({ ...input, audit_event_id: "event1" })),
         recordUsage: vi.fn(async (input) => ({ ...input, audit_event_id: "event2" })),
@@ -369,7 +377,7 @@ function runProducer(
   return runConditionalFieldRecall({
     workspace_id: WS,
     query_text: "yesterday failed deployment",
-    budget: defaultBudget({ page_budget: input.page_budget }),
+    budget: defaultBudget({ page_budget: input.page_budget, finalization_reserve: COMPLETE_FINALIZATION_RESERVE }),
     snapshot_id: snapshotFor(slice),
     interpretation_clock: INTERPRETATION_CLOCK,
     as_of: INTERPRETATION_CLOCK,
@@ -378,6 +386,23 @@ function runProducer(
     continuation: input.continuation ?? null,
     cancelled: input.cancelled === true
   });
+}
+
+function completeBudgetService(service: RecallService) {
+  return {
+    recall: (params: Parameters<RecallService["recall"]>[0]) => service.recall({
+      ...params, budget: defaultBudget({
+        page_budget: params.policyOverride?.fine_assessment.budgets.max_entries ?? 30,
+        finalization_reserve: COMPLETE_FINALIZATION_RESERVE
+      })
+    } as Parameters<RecallService["recall"]>[0])
+  };
+}
+
+function expectCompleteBaseline(index: InformationIndex): void {
+  expect(index.completeness).toMatchObject({ logical_index: "complete", observed_coverage: "complete",
+    transport: "complete", representation: "complete" });
+  expect(index.continuation).toBeNull();
 }
 
 function toConsumer(
