@@ -13,7 +13,7 @@ import {
   type TypedObservation
 } from "@do-soul/alaya-protocol";
 import { compileConditionalFieldQuery } from "../../../../recall/conditional-field/query/compile-query.js";
-import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
+import { observeField, RELATION_MILLIGRADES } from "../../../../recall/runtime/conditional-field-observe.js";
 import { assessUnknownCause } from "../../../../recall/runtime/semantic-attribution.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { buildTypedObservation } from "../../../../recall/conditional-field/observers/observation-admission.js";
@@ -23,6 +23,13 @@ import {
   type SourceRootObserverRow
 } from "../../../../recall/conditional-field/observers/observe.js";
 import {
+  applyObserverPage,
+  createConditionalField
+} from "../../../../recall/conditional-field/engine/field-engine.js";
+import {
+  adjacencyEffectsForRows,
+  overlayIsRoutingOnly,
+  routingDiscoveryEffect,
   seedActivationsForObservation,
   seedFromObservation
 } from "../../../../recall/conditional-field/engine/path-composition.js";
@@ -319,6 +326,94 @@ describe("admission, binding, measurement, and evidence identities", () => {
       || missingVector.last_observer_status === "unavailable"
       || missingVector.last_observer_status === "not_applicable"
       || missingVector.last_observer_status === "unknown").toBe(true);
+  });
+
+  it("unmatched routing_only is discovery, not a compiled product or reseed", () => {
+    const query = interpretation({
+      schema_version: 1,
+      kind: "alternative",
+      options: [relation("observed_log", "x", "y"), relation("uses_service", "x", "w")]
+    });
+    const from = memoryProductStateKey({
+      workspace_id: "ws",
+      object_id: "fact",
+      source_revision: "rev",
+      program_state: "accepting",
+      hypothesis_id: "h0",
+      binding_context: "unbound",
+      time_state: "as_of"
+    });
+    const row = {
+      assertionId: "route-1",
+      sourceObjectId: "fact",
+      targetObjectId: "routed",
+      predicate: "uses_service",
+      validity: VALIDITY
+    };
+    expect(overlayIsRoutingOnly(RELATION_MILLIGRADES, "uses_service")).toBe(true);
+    expect(overlayIsRoutingOnly(RELATION_MILLIGRADES, "observed_log")).toBe(false);
+    const discovered = routingDiscoveryEffect(row, RELATION_MILLIGRADES);
+    expect(discovered).toEqual([{
+      observation_id: "routing:route-1",
+      discovery: {
+        source_id: "fact",
+        subject_id: "routed",
+        predicate: "uses_service",
+        assertion_id: "route-1"
+      }
+    }]);
+    const effects = adjacencyEffectsForRows([row], {
+      interpretation: query,
+      asOf: AS_OF,
+      liveStates: [from],
+      overlay: RELATION_MILLIGRADES
+    });
+    expect(effects.some((effect) => effect.discovery?.subject_id === "routed")).toBe(true);
+    expect(effects.every((effect) => effect.transition === undefined && effect.facet === undefined
+      && effect.derivation === undefined)).toBe(true);
+    const observed = observeProgram(query.program, [
+      edge("seed", "fact", "observed_log"),
+      edge("fact", "routed", "uses_service")
+    ]);
+    expect(acceptedIds(observed)).toContain("fact");
+    expect(acceptedIds(observed)).not.toContain("routed");
+    expect(observed.guaranteed_seeds.every((seed) => productSubjectId(seed.state) !== "routed")).toBe(true);
+    expect(observed.transitions.every((item) => productSubjectId(item.to) !== "routed")).toBe(true);
+    expect(observed.resume_subjects).toContain("routed");
+    expect(seedActivationsForObservation({
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      observation_id: "seed:routed",
+      object_id: "routed",
+      source_revision: "rev",
+      applicability: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        kind: "query_predicate",
+        verdict: "true",
+        predicate_name: "source.identity.v1"
+      },
+      association_milligrades: 900
+    }, interpretation({ schema_version: 1, kind: "empty" }), AS_OF)).toEqual([]);
+    const initial = createConditionalField({ interpretation: query, budget: defaultBudget() });
+    const absorbed = applyObserverPage(initial, {
+      page: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        query_id: query.query_id,
+        snapshot_id: query.snapshot_id,
+        cursor: startObserverCursor({
+          cursor_id: "adjacency",
+          snapshot_id: query.snapshot_id,
+          query_id: query.query_id,
+          region_id: "adjacency"
+        }),
+        observations: [],
+        outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: "exhausted" },
+        open_regions: []
+      },
+      effects: discovered
+    });
+    expect(absorbed.seeds).toEqual(initial.seeds);
+    expect(absorbed.guaranteed_seeds).toEqual(initial.guaranteed_seeds);
+    expect(absorbed.transitions).toEqual([]);
   });
 });
 

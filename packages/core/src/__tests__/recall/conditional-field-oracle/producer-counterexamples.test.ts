@@ -64,6 +64,32 @@ describe("conditional-field producer-consumer counterexamples", () => {
     expect(incompleteAnd[`${END}:accepting`] ?? 0).toBe(0);
   });
 
+  it("extra unmatched uses_service edges do not change accepted membership", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantChain(slice);
+    await slice.writeMemory(SECRET, "irrelevant routing target", MemoryDimension.FACT);
+    const program: QueryProgram = {
+      schema_version: 1,
+      kind: "alternative",
+      options: [sequence("observed_log", "config_via_log"), relation("uses_service")]
+    };
+    const baseline = grades(observeProgram(slice, program, { query_text: "seed" }));
+    await slice.admitRelation({
+      evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000410",
+      assertionId: "assert-end-secret-route",
+      sourceId: END,
+      targetId: SECRET,
+      resultObjectId: SECRET,
+      relationKind: "uses_service",
+      validity: OPEN,
+      gist: "irrelevant routing"
+    });
+    const mutated = grades(observeProgram(slice, program, { query_text: "seed" }));
+    expect(baseline[`${END}:accepting`]).toBeGreaterThan(0);
+    expect(mutated).toEqual(baseline);
+    expect(mutated[`${SECRET}:accepting`] ?? 0).toBe(0);
+  });
+
   it("tombstone, scope, and expired relation stay out of seed/intermediate/target/preview", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);

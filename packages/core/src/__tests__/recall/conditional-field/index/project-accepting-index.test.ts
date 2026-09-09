@@ -233,6 +233,20 @@ describe("conditional-field production information index", () => {
     expect(index.entries.map((entry) => entry.object_id)).toEqual(["r"]);
   });
 
+  it("keeps an admitted uses_service product when include_routing_only is false", () => {
+    const index = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([
+        fieldValue("r", 1000),
+        fieldValue("s", 900)
+      ], {
+        retained_transitions: [transition("r", "s", "uses_service", 900)]
+      }),
+      roles: new Map([["r", "requested"], ["s", "associated"]]),
+      view: defaultView({ include_routing_only: false })
+    }));
+    expect(index.entries.map((entry) => entry.object_id).sort()).toEqual(["r", "s"]);
+  });
+
   it("rejects coordinate-wise max under same_path and honors a relation facet override", () => {
     const vectors: FacetVector[] = [
       { schema_version: 1, path_id: facetPathId(fieldValue("c", 1).state), coordinates: [900, 200] },

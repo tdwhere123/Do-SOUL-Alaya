@@ -30,6 +30,35 @@ afterEach(() => {
 });
 
 describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
+  it("extra irrelevant routing edges do not change members or enqueue Garden", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const before = await recallThroughHandler(slice, {
+      query: "yesterday failed deployment",
+      max_results: 800
+    });
+    await slice.admitRelation({
+      evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000401",
+      assertionId: "assert-c-u-route",
+      sourceId: MEM.c,
+      targetId: MEM.u,
+      resultObjectId: MEM.u,
+      relationKind: "uses_service",
+      validity: OPEN,
+      gist: "irrelevant routing"
+    });
+    const gardenBefore = slice.pendingGarden();
+    const after = await recallThroughHandler(slice, {
+      query: "yesterday failed deployment",
+      max_results: 800
+    });
+    expect(after.index.query_id).toBe(before.index.query_id);
+    expect(after.index.entries.map(entryId)).toEqual(before.index.entries.map(entryId));
+    expect(after.index.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
+    expect(after.index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades).toBe(550);
+    expect(slice.pendingGarden()).toEqual(gardenBefore);
+  });
+
   it("ordinary programs do not collapse to one field", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     await plantDeployment(slice);

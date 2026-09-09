@@ -56,13 +56,10 @@ function mergeSupportRecord(prior: SupportRecord | undefined, next: SupportRecor
     witnesses: [...new Map([...(prior?.witnesses ?? []), ...next.witnesses].map((witness) => [witness.witness_id, witness])).values()] };
 }
 
-export function rolesFrom(state: FieldEngineState,
-  overlay: Readonly<Record<string, { readonly role: IndexRole }>> = {}): ReadonlyMap<string, IndexRole> {
+export function rolesFrom(state: FieldEngineState): ReadonlyMap<string, IndexRole> {
   const roles = new Map<string, IndexRole>();
+  // Overlay routing_only classifies unmatched discovery, not admitted products.
   for (const identity of state.seen_identities) roles.set(productStateNodeId(identity), "associated");
-  for (const transition of state.transitions) {
-    if (overlay[transition.relation_kind]?.role === "routing_only") roles.set(productStateNodeId(transition.to), "routing_only");
-  }
   for (const seed of state.seeds) roles.set(productStateNodeId(seed.state), "requested");
   return roles;
 }

@@ -42,6 +42,7 @@ import {
   type HyperedgeCompletion,
   type HyperedgePremise
 } from "./path-composition.js";
+import type { RoutingDiscovery } from "./path-routing.js";
 import { derivationForest, evaluateDerivation, reviseDerivations } from "./path-derivation.js";
 import type { RelationObserverRow } from "../observers/observe.js";
 import type { BoundSourceFacts } from "./binding-environment.js";
@@ -66,6 +67,7 @@ export type FieldObservationEffect = Readonly<{
   readonly hyperedge?: HyperedgeCompletion;
   readonly derivation?: Derivation;
   readonly derivations?: readonly Derivation[];
+  readonly discovery?: RoutingDiscovery;
 }>;
 
 export type ObserverWorkUnits = Readonly<{

@@ -53,6 +53,10 @@ import {
   type NamedKindOverlay
 } from "./path-matching.js";
 import {
+  routingDiscoveryEffect,
+  type RoutingDiscovery
+} from "./path-routing.js";
+import {
   ACCEPTING_PROGRAM_STATE,
   START_PROGRAM_STATE,
   advancesFor,
@@ -62,6 +66,7 @@ import {
 
 export type { HyperedgePremise, HyperedgeCompletion, AdjacencyRow, NamedKindOverlay };
 export { ACCEPTING_PROGRAM_STATE, START_PROGRAM_STATE, tryCompleteHyperedge };
+export { overlayIsRoutingOnly, routingDiscoveryEffect, type RoutingDiscovery } from "./path-routing.js";
 
 const DEFAULT_PROGRAM_STATE = ACCEPTING_PROGRAM_STATE;
 const DEFAULT_HYPOTHESIS = "h0";
@@ -226,6 +231,7 @@ export type CompiledAdjacencyEffect = Readonly<{
   readonly derivations?: readonly Derivation[];
   readonly missing_measurement?: boolean;
   readonly unresolved_guard?: boolean;
+  readonly discovery?: RoutingDiscovery;
 }>;
 
 export function programRelationKinds(program: QueryProgram): readonly string[] {
@@ -406,7 +412,9 @@ function effectsForLiveRow(
     relationMatches(relation.relation_kind, row.predicate)
   );
   if (matched.length === 0) {
-    return routingEffect(row, from, input.overlay);
+    // Overlay routing_only nominates physical work. Copying program_state
+    // would mint an unadmitted product.
+    return routingDiscoveryEffect(row, input.overlay);
   }
   const effects: CompiledAdjacencyEffect[] = [];
   for (const advance of matched) {
@@ -467,18 +475,6 @@ function effectsForAdvance(
       from, to, strength, applicable, decision, input.facets ?? []));
   }
   return effects;
-}
-
-function routingEffect(
-  row: AdjacencyRow,
-  from: ProductStateKey,
-  overlay: NamedKindOverlay
-): readonly CompiledAdjacencyEffect[] {
-  const routing = overlay[row.predicate];
-  if (routing === undefined || routing.role !== "routing_only" || !routing.applicable) {
-    return [];
-  }
-  return compiledEffects(row, from, retargetMemoryProduct(from, { object_id: row.targetObjectId }), routing, true, "true", []);
 }
 
 function compiledEffects(

@@ -29,7 +29,6 @@ import { projectFieldDelta } from "../../../recall/conditional-field/engine/fiel
 import { projectAcceptingIndex } from "../../../recall/conditional-field/index/project-accepting-index.js";
 import {
   observeField,
-  RELATION_MILLIGRADES,
   type ObserveFieldInput
 } from "../../../recall/runtime/conditional-field-observe.js";
 import { assessUnknownCause, rolesFrom } from "../../../recall/runtime/semantic-attribution.js";
@@ -306,7 +305,7 @@ export function indexFromObserved(
     snapshot_id: interpretation.snapshot_id,
     result_version: "v1",
     budget: observeInput.budget,
-    roles: rolesFrom(field, RELATION_MILLIGRADES),
+    roles: rolesFrom(field),
     claims: field.claims,
     claim_propositions: field.claim_propositions,
     derivations: field.derivations,

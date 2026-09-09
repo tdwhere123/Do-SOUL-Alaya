@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, StorageTier, type InformationIndex } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { RecallService } from "../../../../recall/recall-service.js";
-import { createSourceBoundRecallFixture, createTaskSurface } from "../../recall-service-test-fixtures.js";
+import { createDependencies, createSourceBoundRecallFixture, createTaskSurface } from "../../recall-service-test-fixtures.js";
+import { plantDeployment, readersFor } from "../../conditional-field-oracle/bound-producer.js";
+import { MEM, openSourceSlice } from "../../conditional-field/vertical/source-slice.js";
 
 const databases = new Set<StorageDatabase>();
 const QUERY = "materialization routing";
@@ -113,5 +115,49 @@ describe("conditional Recall after retired route removal", () => {
     expect(pages.flatMap((page) => page.entries).map((entry) => entry.object_id)).toEqual(
       full.index.entries.map((entry) => entry.object_id)
     );
+  });
+
+  it("extra irrelevant routing edges do not change members or touch fetch/Garden", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const { dependencies } = createDependencies();
+    const network = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Recall network access forbidden"));
+    const service = new RecallService({
+      ...dependencies,
+      observerReaders: readersFor(slice)
+    });
+    const deployed = {
+      workspaceId: "workspace-1",
+      strategy: "analyze" as const,
+      taskSurface: { ...createTaskSurface(), display_name: "yesterday failed deployment" },
+      queryText: "yesterday failed deployment",
+      pageBudget: 800
+    };
+    const before = await service.recall(deployed);
+    await slice.admitRelation({
+      evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000401",
+      assertionId: "assert-c-u-route",
+      sourceId: MEM.c,
+      targetId: MEM.u,
+      resultObjectId: MEM.u,
+      relationKind: "uses_service",
+      validity: { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" },
+      gist: "irrelevant routing"
+    });
+    const gardenBefore = slice.pendingGarden();
+    const writesBefore = slice.database.connection.prepare("SELECT total_changes() AS count").get();
+    const after = await service.recall(deployed);
+    expect(after.index.entries.map((entry) => [
+      entry.hypothesis_id, entry.output_binding, entry.object_id, entry.program_state ?? "", entry.time_state ?? ""
+    ].join("\0"))).toEqual(before.index.entries.map((entry) => [
+      entry.hypothesis_id, entry.output_binding, entry.object_id, entry.program_state ?? "", entry.time_state ?? ""
+    ].join("\0")));
+    expect(after.index.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
+    expect(after.provider_calls).toBe(0);
+    expect(after.garden_enqueue).toBe(0);
+    expect(after.ranking_authority).toBeUndefined();
+    expect(network).not.toHaveBeenCalled();
+    expect(slice.pendingGarden()).toEqual(gardenBefore);
+    expect(slice.database.connection.prepare("SELECT total_changes() AS count").get()).toEqual(writesBefore);
   });
 });

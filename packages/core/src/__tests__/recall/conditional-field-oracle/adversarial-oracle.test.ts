@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FacetVector, InformationIndex, Witness } from "@do-soul/alaya-protocol";
+import { solveMaxMinField } from "@do-soul/alaya-graph-algorithms";
 import {
   cheapestCompleteWitness,
   enumerateSimplePaths,
@@ -164,6 +165,37 @@ describe("conditional-field adversarial falsifiers", () => {
     expect(unboundPorts().bound).toBe(false);
     expect(() => compareProducerField(unboundPorts(), world, defaultBudget(), DEPLOYMENT_MILLIGRADES))
       .toThrow(/bound production ports/);
+  });
+
+  it("independent max-min membership ignores unmatched routing edges", () => {
+    const admitted = [
+      { from: "seed", to: "middle", strength: 950 },
+      { from: "middle", to: "end", strength: 800 }
+    ];
+    const solver = solveMaxMinField({
+      nodeIds: ["seed", "middle", "end", "routed"],
+      seeds: new Map([["seed", 1000]]),
+      transitions: admitted,
+      bottom: 0,
+      top: 1000
+    });
+    const leaked = solveMaxMinField({
+      nodeIds: ["seed", "middle", "end", "routed"],
+      seeds: new Map([["seed", 1000]]),
+      transitions: [...admitted, { from: "end", to: "routed", strength: 900 }],
+      bottom: 0,
+      top: 1000
+    });
+    expect(solver.values.get("end")).toBe(800);
+    expect(solver.values.get("routed")).toBe(0);
+    expect(leaked.values.get("routed")).toBe(800);
+    const world = deploymentWorld();
+    const field = enumerateSimplePaths(
+      world.seeds,
+      world.edges.filter((edge) => edge.relation_kind !== "uses_service")
+    );
+    expect(milligradeOf(field, "h")).toBe(0);
+    expect(milligradeOf(field, "c")).toBe(850);
   });
 });
 

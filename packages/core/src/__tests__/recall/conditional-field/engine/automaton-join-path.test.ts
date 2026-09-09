@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { solveMaxMinField } from "@do-soul/alaya-graph-algorithms";
 import {
   productSubjectId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -255,6 +256,79 @@ describe("automaton, compatible join, and composed path identity", () => {
       budget: defaultBudget()
     });
     expect(index.entries.map((entry) => entry.object_id)).not.toContain("config");
+  });
+
+  it("does not copy program state for unmatched routing_only overlay", () => {
+    const base = [
+      edge("seed", "middle", "observed_log"),
+      edge("middle", "end", "config_direct")
+    ];
+    const extras = [
+      edge("end", "routed", "uses_service"),
+      edge("end", "routed", "uses_service", "dup-uses"),
+      edge("routed", "end", "uses_service", "rev-uses")
+    ];
+    const program = alt(
+      seq(rel("observed_log", "x", "y"), rel("config_direct", "y", "z")),
+      seq(rel("uses_service", "x", "s"), rel("associated_history", "s", "h"))
+    );
+    const members = (edges: readonly ReturnType<typeof edge>[]) => {
+      const state = observeProgram(program, edges);
+      return {
+        accepted: [...acceptedIds(state)].sort(),
+        claims: state.binding.kind === "bound"
+          ? state.binding.snapshot.values.filter((value) => value.accepting).map((value) =>
+            `${productSubjectId(value.state)}:${value.milligrades ?? 0}`).sort()
+          : [],
+        identities: state.seen_identities.map((identity) =>
+          `${productSubjectId(identity)}:${identity.program_state}`).sort()
+      };
+    };
+    expect(members([...base, ...extras])).toEqual(members(base));
+    expect(members([...base, ...extras]).accepted).toContain("end");
+    expect(members([...base, ...extras]).accepted).not.toContain("routed");
+    const solver = solveMaxMinField({
+      nodeIds: ["seed", "middle", "end", "routed"],
+      seeds: new Map([["seed", 1000]]),
+      transitions: [
+        { from: "seed", to: "middle", strength: 950 },
+        { from: "middle", to: "end", strength: 800 }
+      ],
+      bottom: 0,
+      top: 1000
+    });
+    expect(solver.values.get("end")).toBe(800);
+    expect(solver.values.get("routed")).toBe(0);
+  });
+
+  it("admitted uses_service still binds same-service history", () => {
+    const state = observeProgram(
+      seq(rel("uses_service", "x", "s"), rel("associated_history", "s", "h")),
+      [edge("seed", "svc", "uses_service"), edge("svc", "hist", "service_history")]
+    );
+    expect(acceptedIds(state)).toContain("hist");
+    expect(acceptedIds(state)).not.toContain("svc");
+    expect(state.transitions.some((row) => row.relation_kind === "uses_service"
+      && productSubjectId(row.to) === "svc")).toBe(true);
+  });
+
+  it("tiny budget leaves routing discovery residual unknown", () => {
+    const state = observeField(
+      interpretation(alt(
+        seq(rel("observed_log", "x", "y"), rel("config_direct", "y", "z")),
+        seq(rel("uses_service", "x", "s"), rel("associated_history", "s", "h"))
+      )),
+      {
+        ...input([
+          edge("seed", "middle", "observed_log"),
+          edge("middle", "end", "config_direct"),
+          edge("end", "routed", "uses_service")
+        ]),
+        budget: defaultBudget({ work_units: 16, finalization_reserve: 6, min_envelope: 2 })
+      }
+    );
+    expect(["interrupted", "open", "unknown"]).toContain(state.closure.observation);
+    expect(state.residuals.some((region) => region.status !== "exhausted")).toBe(true);
   });
 });
 

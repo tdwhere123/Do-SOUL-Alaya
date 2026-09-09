@@ -351,6 +351,37 @@ describe("conditional-field executeRecall assembly", () => {
     expect(mismatched.completeness.logical_index).toBe("invalidated");
     expect(mismatched.entries).toEqual([]);
   });
+
+  it("unmatched routing edges do not copy program state or rewrite query identity", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    const baseline = runRecall(slice, { page_budget: 800 });
+    expect(baseline.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades).toBe(550);
+    await plantIrrelevantRouting(slice);
+    const mutated = runRecall(slice, { page_budget: 800 });
+    expect(mutated.query_id).toBe(baseline.query_id);
+    expect(mutated.entries.map(entryId)).toEqual(baseline.entries.map(entryId));
+    expect(mutated.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
+    expect(mutated.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades).toBe(550);
+  });
+
+  it("tiny work_units leaves unmatched routing residual unknown", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantDeployment(slice);
+    await plantIrrelevantRouting(slice);
+    const tiny = runConditionalFieldRecall({
+      workspace_id: WS,
+      query_text: "yesterday failed deployment",
+      budget: defaultBudget({ work_units: 24, finalization_reserve: 8, min_envelope: 2, page_budget: 800 }),
+      snapshot_id: SNAPSHOT_ID,
+      interpretation_clock: INTERPRETATION_CLOCK,
+      as_of: INTERPRETATION_CLOCK,
+      expires_at: "2099-01-01T00:00:00.000Z",
+      readers: readersFor(slice)
+    });
+    expect(["open", "interrupted", "unknown"]).toContain(tiny.completeness.observed_coverage);
+    expect(tiny.completeness.logical_index).not.toBe("complete");
+  });
 });
 
 function runRecall(
@@ -473,6 +504,27 @@ async function plantDeployment(slice: Awaited<ReturnType<typeof openSourceSlice>
   for (const [index, [assertionId, sourceId, targetId, relationKind]] of edges.entries()) {
     await slice.admitRelation({
       evidenceId: `bbbbbbbb-bbbb-4bbb-8bbb-${String(index + 201).padStart(12, "0")}`,
+      assertionId,
+      sourceId,
+      targetId,
+      resultObjectId: targetId,
+      relationKind,
+      validity: open,
+      gist: relationKind
+    });
+  }
+}
+
+async function plantIrrelevantRouting(slice: Awaited<ReturnType<typeof openSourceSlice>>): Promise<void> {
+  const open = { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" };
+  const extras = [
+    ["assert-c-u-route", MEM.c, MEM.u, "uses_service"],
+    ["assert-r-s-dup", MEM.r, MEM.s, "uses_service"],
+    ["assert-s-r-rev", MEM.s, MEM.r, "uses_service"]
+  ] as const;
+  for (const [index, [assertionId, sourceId, targetId, relationKind]] of extras.entries()) {
+    await slice.admitRelation({
+      evidenceId: `bbbbbbbb-bbbb-4bbb-8bbb-${String(index + 401).padStart(12, "0")}`,
       assertionId,
       sourceId,
       targetId,

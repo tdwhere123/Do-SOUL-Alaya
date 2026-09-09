@@ -329,7 +329,7 @@ function projectFromField(
     delivered_product_ids: new Set(Object.keys(projectionProgress.delivered_entries)),
     delivered_entry_revisions: projectionProgress.delivered_entries,
     on_projection_progress: (offset) => { projectionProgress = { ...projectionProgress, offset }; },
-    roles: rolesFrom(state, RELATION_MILLIGRADES),
+    roles: rolesFrom(state),
     claims: state.claims,
     claim_propositions: state.claim_propositions,
     transition_derivations: state.transition_derivations,
