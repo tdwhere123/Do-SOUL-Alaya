@@ -11,12 +11,16 @@ import {
   QueryViewSchema,
   SoulMemorySearchRequestSchema,
   SoulReportContextUsageRequestSchema,
+  SourceDeliveredSpanSchema,
   canonicalProductIdentity,
   memoryIndexEntry,
   memoryProductStateKey,
   retargetMemoryProduct,
+  sameRecallTarget,
+  sameSourceEvidenceRoot,
   sourceIndexEntry,
-  sourceProductStateKey
+  sourceProductStateKey,
+  sourceRecallTarget
 } from "../../../index.js";
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
@@ -230,6 +234,119 @@ describe("conditional-field product identity", () => {
         usage_status: "used"
       }]
     })).toThrow();
+    expect(SoulReportContextUsageRequestSchema.parse({
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      per_anchor_usage: [{
+        target,
+        object_kind: "source_evidence",
+        anchor_role: "target"
+      }]
+    }).per_anchor_usage?.[0]?.target).toEqual(target);
+    expect(() => SoulReportContextUsageRequestSchema.parse({
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      per_anchor_usage: [{
+        object_kind: "source_evidence",
+        anchor_role: "target"
+      }]
+    })).toThrow();
+    expect(() => SoulReportContextUsageRequestSchema.parse({
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      per_anchor_usage: [{
+        object_id: "fake-capsule",
+        object_kind: "source_evidence",
+        target,
+        anchor_role: "target"
+      }]
+    })).toThrow();
+    expect(() => SoulReportContextUsageRequestSchema.parse({
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      delivered_objects: [{
+        object_kind: "memory_entry",
+        usage_status: "used"
+      }]
+    })).toThrow();
+    expect(SoulReportContextUsageRequestSchema.parse({
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      delivered_objects: [{
+        target: {
+          kind: "memory_entry",
+          workspace_id: "ws",
+          object_id: "mem-1",
+          source_revision: "rev-1"
+        },
+        object_kind: "memory_entry",
+        usage_status: "used"
+      }]
+    }).delivered_objects?.[0]?.object_id).toBeUndefined();
+  });
+
+  it("treats two delivered spans of the same source root as distinct identities", () => {
+    const root = {
+      workspace_id: "ws",
+      root_kind: "source_record" as const,
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: DIGEST,
+      evidence_object_id: null
+    };
+    const firstSpan = SourceDeliveredSpanSchema.parse({
+      content_start: 0,
+      content_end: 32,
+      retained_extent: "body",
+      content_complete: false,
+      original_complete: true
+    });
+    const secondSpan = SourceDeliveredSpanSchema.parse({
+      content_start: 32,
+      content_end: 64,
+      retained_extent: "body",
+      content_complete: true,
+      original_complete: true
+    });
+    const first = sourceRecallTarget({ ...root, span: firstSpan });
+    const second = sourceRecallTarget({ ...root, span: secondSpan });
+    const unspanned = sourceRecallTarget(root);
+    expect(sameSourceEvidenceRoot(first, second)).toBe(true);
+    expect(sameRecallTarget(first, second)).toBe(false);
+    expect(sameRecallTarget(first, unspanned)).toBe(false);
+    expect(canonicalProductIdentity(sourceProductStateKey({
+      ...root,
+      span: firstSpan,
+      program_state: "accepting",
+      hypothesis_id: "h0",
+      binding_context: "default",
+      time_state: "as_of"
+    }))).not.toBe(canonicalProductIdentity(sourceProductStateKey({
+      ...root,
+      span: secondSpan,
+      program_state: "accepting",
+      hypothesis_id: "h0",
+      binding_context: "default",
+      time_state: "as_of"
+    })));
+    expect(() => SourceDeliveredSpanSchema.parse({
+      ...firstSpan,
+      content_start: 32,
+      content_end: 16
+    })).toThrow();
+    expect(SoulReportContextUsageRequestSchema.parse({
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      delivered_objects: [{
+        target: first,
+        object_kind: "source_evidence",
+        usage_status: "used"
+      }, {
+        target: second,
+        object_kind: "source_evidence",
+        usage_status: "used"
+      }]
+    }).delivered_objects?.map((object) => object.target)).toEqual([first, second]);
   });
 
   it("keeps preview-size-independent source identity on a public index", () => {

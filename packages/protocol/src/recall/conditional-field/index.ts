@@ -88,8 +88,10 @@ export {
   ProductStateKeySchema,
   RecallTargetRefSchema,
   SeedActivationSchema,
+  SourceDeliveredSpanSchema,
   SourceEvidenceRootKindSchema,
   SourceEvidenceTargetSchema,
+  SourceRetainedExtentSchema,
   TransitionSchema,
   canonicalProductIdentity,
   memoryProductStateKey,
@@ -99,6 +101,8 @@ export {
   recallTargetWorkspaceId,
   retargetMemoryProduct,
   sameRecallTarget,
+  sameSourceEvidenceRoot,
+  sourceEvidenceRootKey,
   sourceProductStateKey,
   sourceRecallTarget,
   stableCanonicalStringify,
@@ -110,9 +114,11 @@ export {
   type ProductStateKey,
   type RecallTargetRef,
   type SeedActivation,
+  type SourceDeliveredSpan,
   type SourceEvidenceRootKind,
   type SourceEvidenceTarget,
   type SourceProductStateInput,
+  type SourceRetainedExtent,
   type Transition
 } from "./field.js";
 export {

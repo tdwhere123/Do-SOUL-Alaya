@@ -4,9 +4,14 @@ import {
   indexEntryCacheKey,
   indexEntrySubjectId,
   indexMemoryObjectId,
+  sameSourceEvidenceRoot,
+  sourceEvidenceRootKey,
+  sourceRecallTarget,
   type IndexEntry,
+  type InformationIndex,
   type ManifestationState,
   type PayloadContinuationRequest,
+  type SourceDeliveredSpan,
   type SourceEvidenceTarget
 } from "@do-soul/alaya-protocol";
 import type { BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
@@ -18,6 +23,7 @@ export class BoundedIndexPayload {
   public readonly previews: Map<string, string>;
   public readonly sourceMetadata: Record<string, RecallSourceMetadata> = {};
   public remainingMemoryBytes: number;
+  private readonly deliveredSpans = new Map<string, SourceDeliveredSpan>();
 
   public constructor(private readonly input: Readonly<{
     readonly sourceFacts?: Readonly<Record<string, BoundSourceFacts>>;
@@ -115,11 +121,16 @@ export class BoundedIndexPayload {
     return { remaining: Math.max(0, remaining), complete, retryable: !complete && retryable };
   }
 
+  public applyDeliveredSpans(index: InformationIndex): InformationIndex {
+    if (this.deliveredSpans.size === 0) return index;
+    return { ...index, entries: index.entries.map((entry) => this.stampDeliveredSpan(entry)) };
+  }
+
   private payloadContinuationFor(target: IndexEntry["target"]): PayloadContinuationRequest | undefined {
     const continuation = this.input.payloadContinuation;
     if (continuation === undefined || continuation.purpose !== "payload_expansion") return undefined;
     if (target.kind !== "source_evidence" || continuation.target.kind !== "source_evidence") return undefined;
-    return sameSourceEvidenceTarget(target, continuation.target) ? continuation : undefined;
+    return sameSourceEvidenceRoot(target, continuation.target) ? continuation : undefined;
   }
 
   private hydrateSourceTarget(
@@ -150,6 +161,7 @@ export class BoundedIndexPayload {
       return { ok: false, remaining: nextRemaining, retryable: false };
     }
     const truncated = page.resourceLimited === true || page.row.content_complete === false;
+    this.deliveredSpans.set(sourceEvidenceRootKey(target), deliveredSpanFromHydrate(page.row, offset, !truncated));
     if (page.row.content.length > 0) {
       rememberPreview(
         this.previews,
@@ -165,15 +177,31 @@ export class BoundedIndexPayload {
     }
     return { ok: !truncated, remaining: nextRemaining, retryable: truncated };
   }
-}
 
-function sameSourceEvidenceTarget(left: SourceEvidenceTarget, right: SourceEvidenceTarget): boolean {
-  return left.workspace_id === right.workspace_id
-    && left.root_kind === right.root_kind
-    && left.root_id === right.root_id
-    && left.source_version === right.source_version
-    && left.content_digest === right.content_digest
-    && left.evidence_object_id === right.evidence_object_id;
+  private stampDeliveredSpan(entry: IndexEntry): IndexEntry {
+    if (entry.target.kind !== "source_evidence") return entry;
+    const span = this.deliveredSpans.get(sourceEvidenceRootKey(entry.target));
+    if (span === undefined) return entry;
+    const stamped = sourceRecallTarget({
+      workspace_id: entry.target.workspace_id,
+      root_kind: entry.target.root_kind,
+      root_id: entry.target.root_id,
+      source_version: entry.target.source_version,
+      content_digest: entry.target.content_digest,
+      evidence_object_id: entry.target.evidence_object_id,
+      span
+    });
+    const next = { ...entry, target: stamped };
+    const previousKey = indexEntryCacheKey(entry);
+    const nextKey = indexEntryCacheKey(next);
+    if (previousKey !== nextKey) {
+      const preview = this.previews.get(previousKey);
+      if (preview !== undefined) this.previews.set(nextKey, preview);
+      const metadata = this.sourceMetadata[previousKey];
+      if (metadata !== undefined) this.sourceMetadata[nextKey] = metadata;
+    }
+    return next;
+  }
 }
 
 function hydrateByteLimit(
@@ -244,4 +272,47 @@ function knownEnum<T extends string>(
   return (Object.values(allowed) as readonly string[]).includes(value ?? "")
     ? value as T
     : undefined;
+}
+
+type HydrateSpanRow = Readonly<{
+  readonly content?: string;
+  readonly content_start?: number;
+  readonly content_end?: number;
+  readonly content_complete?: boolean;
+  readonly original_complete?: boolean;
+  readonly retained_extent?: string;
+}>;
+
+function deliveredSpanFromHydrate(
+  row: HydrateSpanRow,
+  offset: number,
+  contentComplete: boolean
+): SourceDeliveredSpan {
+  const start = nonNegativeInt(row.content_start) ?? offset;
+  const contentEnd = start + Buffer.byteLength(row.content ?? "", "utf8");
+  const end = Math.max(nonNegativeInt(row.content_end) ?? contentEnd, start);
+  const originalComplete = row.original_complete ?? true;
+  return {
+    content_start: start,
+    content_end: end,
+    retained_extent: retainedExtentFromHydrate(row, originalComplete),
+    content_complete: contentComplete,
+    original_complete: originalComplete
+  };
+}
+
+function nonNegativeInt(value: number | undefined): number | undefined {
+  return Number.isSafeInteger(value) && value !== undefined && value >= 0 ? value : undefined;
+}
+
+function retainedExtentFromHydrate(
+  row: HydrateSpanRow,
+  originalComplete: boolean
+): SourceDeliveredSpan["retained_extent"] {
+  if (row.retained_extent === "body" || row.retained_extent === "excerpt" || row.retained_extent === "gist") {
+    return row.retained_extent;
+  }
+  // Observer hydrate currently drops retained_extent; incomplete originals are
+  // retained reductions, never the body.
+  return originalComplete ? "body" : "excerpt";
 }

@@ -104,9 +104,30 @@ describe("source payload encode", () => {
     expect(nextCalls[0]).toEqual({ offset: firstChunk.end_offset, byteLimit: 32 });
     expect([...continued.previews.values()][0]).toBe(secondChunk.text);
     expect(secondPage.retryable).toBe(!secondChunk.complete);
+    const firstDelivered = first.applyDeliveredSpans(sourceIndex([sourceEntry()]));
+    const secondDelivered = continued.applyDeliveredSpans(sourceIndex([sourceEntry()]));
+    const firstTarget = firstDelivered.entries[0]?.target;
+    const secondTarget = secondDelivered.entries[0]?.target;
+    expect(firstTarget?.kind).toBe("source_evidence");
+    expect(secondTarget?.kind).toBe("source_evidence");
+    if (firstTarget?.kind !== "source_evidence" || secondTarget?.kind !== "source_evidence") return;
+    expect(firstTarget.span).toEqual({
+      content_start: 0,
+      content_end: firstChunk.end_offset,
+      retained_extent: "body",
+      content_complete: false,
+      original_complete: true
+    });
+    expect(secondTarget.span?.content_start).toBe(firstChunk.end_offset);
+    expect(secondTarget.span?.content_end).toBe(secondChunk.end_offset);
+    expect(firstTarget).not.toEqual(secondTarget);
   });
 
   it("threads payload_continuation offset through source-only Recall hydrate", () => {
+    const firstChunk = hydrateUtf8Chunk(OVERSIZED_BODY, { offset: 0, byteLimit: 32 });
+    expect(firstChunk.status).toBe("chunk");
+    if (firstChunk.status !== "chunk") return;
+    const startOffset = firstChunk.end_offset;
     const calls: HydrateCall[] = [];
     const index = runConditionalFieldRecall({
       workspace_id: "workspace",
@@ -121,7 +142,7 @@ describe("source payload encode", () => {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
         purpose: "payload_expansion",
         target: SOURCE_TARGET,
-        start_offset: 12,
+        start_offset: startOffset,
         byte_budget: 16
       },
       readers: {
@@ -145,8 +166,11 @@ describe("source payload encode", () => {
         sourceRoot: hydrateReaders(calls).sourceRoot
       }
     });
-    expect(index.entries.some((entry) => entry.target.kind === "source_evidence")).toBe(true);
-    expect(calls.some((call) => call.offset === 12 && call.byteLimit === 16)).toBe(true);
+    const sourceEntryOnIndex = index.entries.find((entry) => entry.target.kind === "source_evidence");
+    expect(sourceEntryOnIndex?.target.kind).toBe("source_evidence");
+    if (sourceEntryOnIndex?.target.kind !== "source_evidence") return;
+    expect(calls.some((call) => call.offset === startOffset && call.byteLimit === 16)).toBe(true);
+    expect(sourceEntryOnIndex.target.span?.content_start).toBe(startOffset);
     const encoded = encodeRecallResult(
       index,
       captureIndexPreviews(index, {}, "workspace"),

@@ -518,4 +518,100 @@ describe("recall usage evidence proof", () => {
       }]
     }, context.workspaceId, delivery)).rejects.toBeInstanceOf(ContextUsageNotFoundError);
   });
+
+  it("records source-evidence usage without object_id and rejects memory_entry without identity", async () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    const target = {
+      kind: "source_evidence" as const,
+      workspace_id: context.workspaceId,
+      root_kind: "source_record" as const,
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: digest,
+      evidence_object_id: null,
+      span: {
+        content_start: 0,
+        content_end: 8,
+        retained_extent: "body" as const,
+        content_complete: true,
+        original_complete: true
+      }
+    };
+    const deps = {
+      ...createDeps(),
+      fieldSource: {
+        findRecordById: vi.fn(async () => ({
+          workspace_id: context.workspaceId,
+          record_id: "rec-1",
+          source_version: "v1",
+          content_digest: digest,
+          evidence_object_id: null,
+          source_body: "retained"
+        }))
+      }
+    };
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async () => ({
+      ...createDeliveryRecord("delivery_1"),
+      workspace_id: context.workspaceId,
+      delivered_object_ids: [],
+      delivered_objects: [{ object_kind: "source_evidence", target }]
+    }));
+    const handler = createMcpMemoryToolHandler(deps);
+
+    const recorded = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        delivered_objects: [{
+          object_kind: "source_evidence",
+          target,
+          usage_status: "used"
+        }],
+        per_anchor_usage: [{
+          object_kind: "source_evidence",
+          target,
+          anchor_role: "target"
+        }]
+      },
+      context
+    });
+
+    expect(recorded.ok).toBe(true);
+    expect(deps.trustStateRecorder.recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usage_state: "used",
+        used_object_ids: [],
+        used_objects: [{
+          object_kind: "source_evidence",
+          target
+        }],
+        per_anchor_usage: [{
+          object_kind: "source_evidence",
+          target,
+          anchor_role: "target"
+        }]
+      }),
+      expect.objectContaining({
+        expectedWorkspaceId: context.workspaceId
+      })
+    );
+
+    const missingIdentity = await handler.call({
+      toolName: "soul.report_context_usage",
+      arguments: {
+        delivery_id: "delivery_1",
+        usage_state: "used",
+        delivered_objects: [{
+          object_kind: "memory_entry",
+          usage_status: "used"
+        }]
+      },
+      context
+    });
+    expect(missingIdentity).toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION" }
+    });
+  });
 });

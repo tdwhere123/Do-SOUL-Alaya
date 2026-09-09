@@ -1,8 +1,10 @@
 import {
   RecallCandidateObjectKindSchema,
   sameRecallTarget,
+  stableCanonicalStringify,
   type ContextDeliveryRecord,
   type SoulContextObjectIdentity,
+  type SoulContextPerAnchorUsage,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 
@@ -59,14 +61,12 @@ function validatePerAnchorUsage(
 ): void {
   const usedIdentityKeys = resolveUsedIdentityKeys(record);
   for (const usage of record.per_anchor_usage ?? []) {
-    const identity = {
-      object_id: usage.object_id,
-      object_kind: usage.object_kind ?? "memory_entry"
-    };
+    const identity = identityFromPerAnchor(usage);
     assertDeliveredIdentity(delivery, identity, record.used_objects === undefined);
-    if (record.usage_state === "used" && !usedIdentityKeys.has(identityKey(identity))) {
+    if (record.usage_state === "used"
+      && !identityKeys(identity).some((key) => usedIdentityKeys.has(key))) {
       throw new TrustStateInvalidUsageProofError(
-        `Per-anchor usage references object identity that was not reported as used: ${identity.object_kind}:${identity.object_id}`
+        `Per-anchor usage references object identity that was not reported as used: ${identity.object_kind}:${identity.object_id ?? "target"}`
       );
     }
   }
@@ -127,11 +127,28 @@ function resolveUsedIdentityKeys(record: Readonly<UsageProofRecord>): ReadonlySe
       object_id: objectId,
       object_kind: "memory_entry"
     }));
-  return new Set(identities.map(identityKey));
+  return new Set(identities.flatMap(identityKeys));
 }
 
-function identityKey(identity: Readonly<SoulContextObjectIdentity>): string {
-  return `${identity.object_kind}\0${identity.object_id}`;
+function identityFromPerAnchor(
+  usage: Readonly<SoulContextPerAnchorUsage>
+): SoulContextObjectIdentity {
+  const objectKind = usage.object_kind
+    ?? (usage.target?.kind === "source_evidence" ? "source_evidence" : "memory_entry");
+  return {
+    ...(usage.object_id === undefined ? {} : { object_id: usage.object_id }),
+    object_kind: objectKind,
+    ...(usage.target === undefined ? {} : { target: usage.target })
+  };
+}
+
+function identityKeys(identity: Readonly<SoulContextObjectIdentity>): readonly string[] {
+  return [
+    ...(identity.target === undefined ? [] : [`target\0${stableCanonicalStringify(identity.target)}`]),
+    ...(identity.object_id === undefined
+      ? []
+      : [`${identity.object_kind ?? "memory_entry"}\0${identity.object_id}`])
+  ];
 }
 
 function throwUndelivered(identity: Readonly<SoulContextObjectIdentity>): never {

@@ -384,6 +384,7 @@ function projectFromField(
   }
   if (index.continuation !== null) index = { ...index,
     continuation: { ...index.continuation, continuation_id: randomUUID() } };
+  index = payload.applyDeliveredSpans(index);
   INDEX_PREVIEWS.set(index, payload.previews);
   INDEX_SOURCE_METADATA.set(index, payload.sourceMetadata);
   retained = { ...retained, preview_cache: Object.fromEntries(payload.previews),

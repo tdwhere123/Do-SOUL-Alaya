@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BoundedIdSchema } from "../../shared/schema-primitives.js";
+import { BoundedIdSchema, NonNegativeIntSchema } from "../../shared/schema-primitives.js";
 import { compareCodeUnits } from "../field-contract/canonical-identity.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -10,6 +10,27 @@ import {
 
 export const CANONICAL_PRODUCT_IDENTITY_VERSION = "product-identity.v1" as const;
 export const SourceEvidenceRootKindSchema = z.enum(["evidence_capsule", "source_record"]);
+export const SourceRetainedExtentSchema = z.enum(["body", "excerpt", "gist"]);
+
+export const SourceDeliveredSpanSchema = z
+  .object({
+    content_start: NonNegativeIntSchema,
+    content_end: NonNegativeIntSchema,
+    retained_extent: SourceRetainedExtentSchema,
+    content_complete: z.boolean(),
+    original_complete: z.boolean()
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.content_end < value.content_start) {
+      context.addIssue({
+        code: "custom",
+        path: ["content_end"],
+        message: "delivered span must be half-open with end >= start"
+      });
+    }
+  })
+  .readonly();
 
 export const MemoryEntryTargetSchema = z
   .object({
@@ -29,7 +50,8 @@ export const SourceEvidenceTargetSchema = z
     root_id: ConditionalFieldIdSchema,
     source_version: ConditionalFieldIdSchema,
     content_digest: Sha256DigestSchema,
-    evidence_object_id: ConditionalFieldIdSchema.nullable()
+    evidence_object_id: ConditionalFieldIdSchema.nullable(),
+    span: SourceDeliveredSpanSchema.optional()
   })
   .strict()
   .readonly();
@@ -52,6 +74,8 @@ export const ProductStateKeySchema = z
   .readonly();
 
 export type SourceEvidenceRootKind = z.infer<typeof SourceEvidenceRootKindSchema>;
+export type SourceRetainedExtent = z.infer<typeof SourceRetainedExtentSchema>;
+export type SourceDeliveredSpan = z.infer<typeof SourceDeliveredSpanSchema>;
 export type MemoryEntryTarget = z.infer<typeof MemoryEntryTargetSchema>;
 export type SourceEvidenceTarget = z.infer<typeof SourceEvidenceTargetSchema>;
 export type RecallTargetRef = z.infer<typeof RecallTargetRefSchema>;
@@ -74,6 +98,7 @@ export type SourceProductStateInput = Readonly<{
   readonly source_version: string;
   readonly content_digest: string;
   readonly evidence_object_id: string | null;
+  readonly span?: SourceDeliveredSpan;
   readonly program_state: string;
   readonly hypothesis_id: string;
   readonly binding_context: string;
@@ -100,6 +125,7 @@ export function sourceRecallTarget(input: Readonly<{
   readonly source_version: string;
   readonly content_digest: string;
   readonly evidence_object_id: string | null;
+  readonly span?: SourceDeliveredSpan;
 }>): SourceEvidenceTarget {
   return SourceEvidenceTargetSchema.parse({
     kind: "source_evidence",
@@ -108,7 +134,8 @@ export function sourceRecallTarget(input: Readonly<{
     root_id: input.root_id,
     source_version: input.source_version,
     content_digest: input.content_digest,
-    evidence_object_id: input.evidence_object_id
+    evidence_object_id: input.evidence_object_id,
+    ...(input.span === undefined ? {} : { span: input.span })
   });
 }
 
@@ -155,6 +182,21 @@ export function recallTargetWorkspaceId(target: RecallTargetRef): string {
 
 export function sameRecallTarget(left: RecallTargetRef, right: RecallTargetRef): boolean {
   return stableCanonicalStringify(left) === stableCanonicalStringify(right);
+}
+
+export function sameSourceEvidenceRoot(left: SourceEvidenceTarget, right: SourceEvidenceTarget): boolean {
+  return sourceEvidenceRootKey(left) === sourceEvidenceRootKey(right);
+}
+
+export function sourceEvidenceRootKey(target: SourceEvidenceTarget): string {
+  return stableCanonicalStringify({
+    workspace_id: target.workspace_id,
+    root_kind: target.root_kind,
+    root_id: target.root_id,
+    source_version: target.source_version,
+    content_digest: target.content_digest,
+    evidence_object_id: target.evidence_object_id
+  });
 }
 
 export function retargetMemoryProduct(

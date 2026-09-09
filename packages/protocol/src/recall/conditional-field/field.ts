@@ -18,8 +18,10 @@ export {
   MemoryEntryTargetSchema,
   ProductStateKeySchema,
   RecallTargetRefSchema,
+  SourceDeliveredSpanSchema,
   SourceEvidenceRootKindSchema,
   SourceEvidenceTargetSchema,
+  SourceRetainedExtentSchema,
   canonicalProductIdentity,
   memoryProductStateKey,
   memoryRecallTarget,
@@ -28,6 +30,8 @@ export {
   recallTargetWorkspaceId,
   retargetMemoryProduct,
   sameRecallTarget,
+  sameSourceEvidenceRoot,
+  sourceEvidenceRootKey,
   sourceProductStateKey,
   sourceRecallTarget,
   stableCanonicalStringify,
@@ -35,9 +39,11 @@ export {
   type MemoryProductStateInput,
   type ProductStateKey,
   type RecallTargetRef,
+  type SourceDeliveredSpan,
   type SourceEvidenceRootKind,
   type SourceEvidenceTarget,
-  type SourceProductStateInput
+  type SourceProductStateInput,
+  type SourceRetainedExtent
 } from "./product-identity.js";
 
 export const TransitionSchema = z
