@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ContextUsageNotFoundError,
   ContextUsageValidationError,
   validateReportedRecallHits
 } from "../../../mcp-memory/usage/recall-usage-object-validation.js";
@@ -439,7 +440,22 @@ describe("recall usage evidence proof", () => {
         target
       }]
     };
-    const deps = createDeps();
+    const deps = {
+      ...createDeps(),
+      fieldSource: {
+        findRecordById: vi.fn(async (workspaceId: string, recordId: string) => {
+          if (workspaceId !== context.workspaceId || recordId !== "rec-1") return null;
+          return {
+            workspace_id: context.workspaceId,
+            record_id: "rec-1",
+            source_version: "v1",
+            content_digest: digest,
+            evidence_object_id: null,
+            source_body: "retained"
+          };
+        })
+      }
+    };
     await expect(validateReportedRecallHits(deps, {
       delivery_id: "delivery_1",
       usage_state: "used",
@@ -467,5 +483,39 @@ describe("recall usage evidence proof", () => {
         usage_status: "used"
       }]
     }, context.workspaceId, delivery)).rejects.toBeInstanceOf(ContextUsageValidationError);
+  });
+
+  it("rejects source-record usage when the native root is missing", async () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    const target = {
+      kind: "source_evidence" as const,
+      workspace_id: context.workspaceId,
+      root_kind: "source_record" as const,
+      root_id: "rec-missing",
+      source_version: "v1",
+      content_digest: digest,
+      evidence_object_id: null
+    };
+    const delivery = {
+      ...createDeliveryRecord("delivery_1"),
+      workspace_id: context.workspaceId,
+      delivered_object_ids: [],
+      delivered_objects: [{ object_kind: "source_evidence", target }]
+    };
+    const deps = {
+      ...createDeps(),
+      fieldSource: {
+        findRecordById: vi.fn(async () => null)
+      }
+    };
+    await expect(validateReportedRecallHits(deps, {
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      delivered_objects: [{
+        object_kind: "source_evidence",
+        target,
+        usage_status: "used"
+      }]
+    }, context.workspaceId, delivery)).rejects.toBeInstanceOf(ContextUsageNotFoundError);
   });
 });

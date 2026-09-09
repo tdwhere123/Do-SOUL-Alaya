@@ -42,7 +42,11 @@ export type ConditionalFieldRecallParams = RecallExecutionParams & Readonly<{
 }>;
 
 export type { ObserverReaders };
-export { toSourceObserverRow } from "./conditional-field/observers/observe.js";
+export {
+  applyUtf8HydrateToSourceRootPage,
+  toSourceObserverRow,
+  toSourceRootObserverRow
+} from "./conditional-field/observers/observe.js";
 export {
   captureIndexPreviews,
   captureIndexSourceMetadata,

@@ -15,11 +15,15 @@ import {
 } from "./mappers/mappers.js";
 import type {
   FieldSourceEvidenceBindingRow,
+  FieldSourceRecordPage,
+  FieldSourceRecordPageOptions,
   FieldSourceRecordRepo,
   FieldSourceRecordRow,
   FieldSourceSpanRepo,
   FieldSourceSpanRow
 } from "./ports.js";
+
+const SOURCE_RECORD_PAGE_MAX = 512;
 
 const RECORD_SELECT = `
   SELECT record_id, workspace_id, source_id, source_version, content_digest,
@@ -38,6 +42,7 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   private readonly insertStatement;
   private readonly selectStatement;
   private readonly listStatement;
+  private readonly pageStatement;
   private readonly insertEvidenceBindingStatement;
   private readonly listEvidenceBindingsStatement;
 
@@ -59,6 +64,14 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     this.listStatement = database.connection.prepare(
       `${RECORD_SELECT} WHERE workspace_id = ? ORDER BY record_id`
     );
+    this.pageStatement = database.connection.prepare(`
+      ${RECORD_SELECT}
+      WHERE workspace_id = ?
+        AND source_body IS NOT NULL
+        AND (recorded_at > ? OR (recorded_at = ? AND record_id > ?))
+      ORDER BY recorded_at ASC, record_id ASC
+      LIMIT ?
+    `);
     this.insertEvidenceBindingStatement = database.connection.prepare(`
       INSERT INTO source_record_evidence_refs (
         workspace_id, record_id, evidence_object_id
@@ -108,6 +121,31 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
 
   public listByWorkspace(workspaceId: string): readonly FieldSourceRecordRow[] {
     return parseRows(this.listStatement.all(workspaceId), fieldSourceRecordParser, "source record");
+  }
+
+  public listPage(workspaceId: string, options: FieldSourceRecordPageOptions): FieldSourceRecordPage {
+    const limit = options.limit;
+    if (!Number.isSafeInteger(limit) || limit < 0 || limit > SOURCE_RECORD_PAGE_MAX) {
+      throw new Error("invalid source record page limit");
+    }
+    if (limit === 0) {
+      return { rows: [], truncated: true, committedThrough: encodeRecordCursor(options) };
+    }
+    const afterRecordedAt = options.afterRecordedAt ?? "";
+    const afterRecordId = options.afterRecordId ?? "";
+    const rows = parseRows(
+      this.pageStatement.all(workspaceId, afterRecordedAt, afterRecordedAt, afterRecordId, limit),
+      fieldSourceRecordParser,
+      "source record"
+    );
+    const last = rows.at(-1);
+    return {
+      rows,
+      truncated: rows.length === limit,
+      committedThrough: last === undefined
+        ? encodeRecordCursor(options)
+        : encodeRecordCursor({ afterRecordedAt: last.recorded_at, afterRecordId: last.record_id })
+    };
   }
 
   public listEvidenceBindings(workspaceId: string): readonly FieldSourceEvidenceBindingRow[] {
@@ -173,6 +211,33 @@ export class SqliteFieldSourceSpanRepo implements FieldSourceSpanRepo {
   public listByWorkspace(workspaceId: string): readonly FieldSourceSpanRow[] {
     return parseRows(this.listStatement.all(workspaceId), fieldSourceSpanParser, "source span");
   }
+}
+
+export function encodeRecordCursor(input: Readonly<{
+  readonly afterRecordedAt?: string | null;
+  readonly afterRecordId?: string | null;
+}>): string | null {
+  if (input.afterRecordedAt == null || input.afterRecordedAt === "" ||
+      input.afterRecordId == null || input.afterRecordId === "") {
+    return null;
+  }
+  return `r:${input.afterRecordedAt}\t${input.afterRecordId}`;
+}
+
+export function parseRecordCursor(cursor: string | null | undefined): Readonly<{
+  readonly afterRecordedAt: string | null;
+  readonly afterRecordId: string | null;
+}> {
+  if (cursor == null || cursor === "" || !cursor.startsWith("r:")) {
+    return { afterRecordedAt: null, afterRecordId: null };
+  }
+  const payload = cursor.slice(2);
+  const split = payload.indexOf("\t");
+  if (split <= 0) return { afterRecordedAt: null, afterRecordId: null };
+  return {
+    afterRecordedAt: payload.slice(0, split),
+    afterRecordId: payload.slice(split + 1)
+  };
 }
 
 function sameRecord(existing: FieldSourceRecordRow, incoming: FieldSourceRecordRow): boolean {

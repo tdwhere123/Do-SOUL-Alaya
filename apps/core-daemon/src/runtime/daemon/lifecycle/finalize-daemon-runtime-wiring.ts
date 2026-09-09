@@ -54,6 +54,10 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     },
     memoryEntryRepo: input.memoryEntryRepo,
     evidenceService: input.evidenceService,
+    fieldSource: {
+      findRecordById: (workspaceId: string, recordId: string) =>
+        input.fieldComposition.fieldRepos.records.findById(workspaceId, recordId)
+    },
     objectAnchorGate: input.pathRelationProposalService,
     synthesisEvidenceReader: createSynthesisEvidenceReader(input),
     synthesisMemberResolver: createSynthesisMemberResolver(input),

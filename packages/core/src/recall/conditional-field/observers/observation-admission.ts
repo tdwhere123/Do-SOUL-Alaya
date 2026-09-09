@@ -3,6 +3,7 @@ import {
   isRelationValidityActiveAt,
   type Guard,
   type QueryProgram,
+  type RecallTargetRef,
   type TypedObservation
 } from "@do-soul/alaya-protocol";
 import {
@@ -12,7 +13,8 @@ import {
 import type {
   ObserveConditionalFieldInput,
   RelationObserverRow,
-  SourceObserverRow
+  SourceObserverRow,
+  SourceRootObserverRow
 } from "./observe.js";
 
 const SCHEMA = CONDITIONAL_FIELD_SCHEMA_VERSION;
@@ -30,6 +32,21 @@ export function sourceRowEligible(
   const scopes = input.authorized_scopes ?? [];
   if (scopes.length > 0 && (row.scope_class === undefined || !scopes.includes(row.scope_class))) {
     return false;
+  }
+  return true;
+}
+
+export function sourceRootEligible(
+  input: ObserveConditionalFieldInput,
+  row: SourceRootObserverRow
+): boolean {
+  if (row.body_erased === true) return false;
+  const asOf = input.as_of ?? input.query.interpretation_clock;
+  if (asOf !== undefined && ((row.valid_from != null && row.valid_from > asOf)
+    || (row.valid_to != null && row.valid_to <= asOf))) return false;
+  const scopes = input.authorized_scopes ?? [];
+  if (scopes.length > 0) {
+    if (row.scope_class === undefined || !scopes.includes(row.scope_class)) return false;
   }
   return true;
 }
@@ -56,17 +73,21 @@ export function buildTypedObservation(
     readonly observationKey: string;
     readonly observedAt?: string;
     readonly sourceRow?: SourceObserverRow;
+    readonly sourceRoot?: SourceRootObserverRow;
+    readonly target?: RecallTargetRef;
     readonly relation?: RelationObserverRow;
     readonly identityKind: "object" | "assertion" | "embedding";
   }>
 ): TypedObservation | null {
+  if (args.sourceRoot !== undefined && !sourceRootEligible(input, args.sourceRoot)) return null;
   if (!sourceRowEligible(input, args.sourceRow)) return null;
   const applicability = applicabilityFor(
     input,
     args.objectId,
     args.observedAt,
     args.sourceRow,
-    args.identityKind
+    args.identityKind,
+    args.sourceRoot
   );
   if (applicability.verdict === "false") return null;
   const relationKind = args.relation?.predicate ?? (
@@ -77,7 +98,9 @@ export function buildTypedObservation(
     ? (input.measurement_id ?? args.objectId)
     : input.measurement_id;
   const modelId = input.model_id;
-  const stamp = effectObservedAt(args.observedAt, args.sourceRow);
+  const stamp = args.sourceRoot === undefined
+    ? effectObservedAt(args.observedAt, args.sourceRow)
+    : args.sourceRoot.event_time ?? args.observedAt;
   return {
     schema_version: SCHEMA,
     observation_id: `${input.action.region_id}:${args.observationKey}`,
@@ -89,7 +112,8 @@ export function buildTypedObservation(
     ...(measurementId === undefined ? {} : { measurement_id: measurementId }),
     ...(modelId === undefined ? {} : { model_id: modelId }),
     ...(binding === undefined ? {} : { binding_context: binding }),
-    ...(stamp === undefined ? {} : { observed_at: stamp })
+    ...(stamp === undefined ? {} : { observed_at: stamp }),
+    ...(args.target === undefined ? {} : { target: args.target })
   };
 }
 
@@ -105,18 +129,26 @@ function applicabilityFor(
   objectId: string,
   observedAt: string | undefined,
   sourceRow: SourceObserverRow | undefined,
-  identityKind: "object" | "assertion" | "embedding"
+  identityKind: "object" | "assertion" | "embedding",
+  sourceRoot?: SourceRootObserverRow
 ): Guard {
   const guards = [...collectGuards(input.query.program),
     ...(input.query.source_guard === undefined ? [] : [input.query.source_guard])];
-  const authorization = evaluateAuthorization(input, guards, sourceRow);
+  const authorization = evaluateAuthorization(input, guards, sourceRow, sourceRoot);
   if (authorization.verdict === "false") return authorization;
-  if (sourceRow === undefined && identityKind !== "embedding") {
+  if (sourceRow === undefined && sourceRoot === undefined && identityKind !== "embedding") {
     return { schema_version: SCHEMA, kind: "query_predicate", verdict: "unresolved" };
   }
   let unresolved: Guard | undefined;
   for (const guard of guards) {
-    const decision = evaluateApplicableGuard(input, guard, objectId, observedAt, sourceRow);
+    const decision = evaluateApplicableGuard(
+      input,
+      guard,
+      objectId,
+      observedAt,
+      sourceRow,
+      sourceRoot
+    );
     if (decision === undefined) continue;
     if (decision.verdict === "false") return decision;
     if (decision.verdict === "unresolved") unresolved = decision;
@@ -130,7 +162,8 @@ function applicabilityFor(
 function evaluateAuthorization(
   input: ObserveConditionalFieldInput,
   guards: readonly Guard[],
-  sourceRow?: SourceObserverRow
+  sourceRow?: SourceObserverRow,
+  sourceRoot?: SourceRootObserverRow
 ): Guard {
   const authorization = guards.find((guard) => guard.kind === "authorization");
   const scopes = input.authorized_scopes ?? [];
@@ -140,7 +173,7 @@ function evaluateAuthorization(
     return { ...authorization, verdict: allowed ? "true" : "false" };
   }
   if (scopes.length > 0) {
-    const scopeClass = sourceRow?.scope_class;
+    const scopeClass = sourceRoot?.scope_class ?? sourceRow?.scope_class;
     if (scopeClass === undefined || !scopes.includes(scopeClass)) {
       return { schema_version: SCHEMA, kind: "authorization", verdict: "false" };
     }
@@ -153,26 +186,73 @@ function evaluateApplicableGuard(
   guard: Guard,
   objectId: string,
   observedAt: string | undefined,
-  sourceRow?: SourceObserverRow
+  sourceRow?: SourceObserverRow,
+  sourceRoot?: SourceRootObserverRow
 ): Guard | undefined {
   if (guard.kind === "authorization") return undefined;
   if (guard.kind === "interval_relation") {
     if (!appliesTimeGuard(input, guard, objectId)) return undefined;
     const filters = decodeSourceFilters(guard.predicate_name);
     if (filters !== undefined && (filters.event_kind === undefined || input.action.action === "seed")) {
-      const verdict = sourceFactsSatisfyFilters(filters, sourceRow);
+      const verdict = sourceRoot === undefined
+        ? sourceFactsSatisfyFilters(filters, sourceRow)
+        : sourceRootFilters(filters, sourceRoot);
       if (verdict !== "true") return { ...guard, verdict };
     }
-    return evaluateInterval(guard, input.object_observed_at?.[objectId] ?? observedAt ?? sourceRow?.observed_at);
+    const stamp = sourceRoot === undefined
+      ? (input.object_observed_at?.[objectId] ?? observedAt ?? sourceRow?.observed_at)
+      : (sourceRoot.event_time ?? undefined);
+    if (sourceRoot !== undefined && stamp === undefined) {
+      return { ...guard, verdict: "unresolved" };
+    }
+    return evaluateInterval(guard, stamp);
   }
   if (guard.kind === "query_predicate") {
+    if (guard.predicate_name === "source.role.v1") {
+      if (sourceRoot === undefined || sourceRoot.role === undefined) {
+        return { ...guard, verdict: "unresolved" };
+      }
+      return { ...guard, verdict: "true" };
+    }
+    if (guard.predicate_name === "source.event_time.interval.v1") {
+      if (sourceRoot?.event_time === undefined || sourceRoot.event_time === null) {
+        return { ...guard, verdict: "unresolved" };
+      }
+      return { ...guard, verdict: "true" };
+    }
     const filters = decodeSourceFilters(guard.predicate_name);
     if (filters === undefined) return undefined;
     if (filters.event_kind !== undefined && input.action.action !== "seed") return undefined;
-    const verdict = sourceFactsSatisfyFilters(filters, sourceRow);
+    const verdict = sourceRoot === undefined
+      ? sourceFactsSatisfyFilters(filters, sourceRow)
+      : sourceRootFilters(filters, sourceRoot);
     return { ...guard, verdict };
   }
   return undefined;
+}
+
+function sourceRootFilters(
+  filters: NonNullable<ReturnType<typeof decodeSourceFilters>>,
+  root: SourceRootObserverRow
+): "true" | "false" | "unresolved" {
+  if (filters.dimension_filter !== undefined || filters.domain_tag_filter !== undefined) {
+    return "unresolved";
+  }
+  if (filters.time_field === "created_at" || filters.time_field === "last_used_at") {
+    return "unresolved";
+  }
+  if (filters.event_kind === "failed_deployment") {
+    if (root.content === undefined) return "unresolved";
+    const normalized = root.content.normalize("NFC").toLowerCase();
+    if (!/failed|unsuccessful|deployment|deploy/u.test(normalized)) return "false";
+  }
+  if (filters.since !== undefined || filters.until !== undefined) {
+    const stamp = root.event_time;
+    if (stamp === undefined || stamp === null) return "unresolved";
+    if (filters.since !== undefined && stamp < filters.since) return "false";
+    if (filters.until !== undefined && stamp >= filters.until) return "false";
+  }
+  return "true";
 }
 
 function appliesTimeGuard(

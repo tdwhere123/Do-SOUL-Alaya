@@ -2,9 +2,11 @@ import {
   MemoryDimension,
   ScopeClass,
   indexEntryCacheKey,
+  indexEntrySubjectId,
   indexMemoryObjectId,
   type IndexEntry,
-  type ManifestationState
+  type ManifestationState,
+  type SourceEvidenceTarget
 } from "@do-soul/alaya-protocol";
 import type { BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
 import type { ObserverReaders } from "../conditional-field/observers/observe.js";
@@ -34,6 +36,7 @@ export class BoundedIndexPayload {
     for (const entry of entries) {
       const cacheKey = indexEntryCacheKey(entry);
       const objectId = indexMemoryObjectId(entry);
+      const subjectId = indexEntrySubjectId(entry);
       if (objectId !== undefined && this.input.manifestationFor(objectId) === "hint") {
         const preview = `[memory ref: ${objectId}]`;
         const bytes = Buffer.byteLength(preview, "utf8");
@@ -46,8 +49,9 @@ export class BoundedIndexPayload {
         rememberPreview(this.previews, cacheKey, objectId, preview);
         continue;
       }
-      const facts = objectId === undefined ? undefined : this.input.sourceFacts?.[objectId];
-      if (objectId !== undefined && this.sourceMetadata[cacheKey] === undefined && facts !== undefined) {
+      const facts = this.input.sourceFacts?.[subjectId]
+        ?? (objectId === undefined ? undefined : this.input.sourceFacts?.[objectId]);
+      if (this.sourceMetadata[cacheKey] === undefined && facts !== undefined) {
         const metadata = sourceMetadataFrom(facts);
         const bytes = Buffer.byteLength(JSON.stringify([objectId, metadata]), "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) {
@@ -59,13 +63,20 @@ export class BoundedIndexPayload {
         rememberMetadata(this.sourceMetadata, cacheKey, objectId, metadata);
       }
       if (this.previews.has(cacheKey) || (objectId !== undefined && this.previews.has(objectId))) continue;
-      const retainedContent = objectId === undefined ? undefined : this.input.sourceFacts?.[objectId]?.content;
+      const retainedContent = facts?.content
+        ?? (objectId === undefined ? undefined : this.input.sourceFacts?.[objectId]?.content);
       if (retainedContent !== undefined) {
         const preview = createContentPreview(retainedContent, "excerpt");
         const bytes = Buffer.byteLength(preview, "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) { complete = false; continue; }
         remaining -= 1; this.remainingMemoryBytes -= bytes;
         rememberPreview(this.previews, cacheKey, objectId, preview);
+        continue;
+      }
+      if (entry.target.kind === "source_evidence") {
+        const hydrated = this.hydrateSourceTarget(entry.target, cacheKey, remaining);
+        if (!hydrated.ok) complete = false;
+        remaining = hydrated.remaining;
         continue;
       }
       if (objectId === undefined || this.input.readers.source === undefined || remaining < 5 || this.remainingMemoryBytes < 1) { complete = false; continue; }
@@ -82,6 +93,38 @@ export class BoundedIndexPayload {
       rememberPreview(this.previews, cacheKey, objectId, createContentPreview(page.row.content, "excerpt"));
     }
     return { remaining: Math.max(0, remaining), complete };
+  }
+
+  private hydrateSourceTarget(
+    target: SourceEvidenceTarget,
+    cacheKey: string,
+    remaining: number
+  ): Readonly<{ readonly ok: boolean; readonly remaining: number }> {
+    const reader = this.input.readers.sourceRoot;
+    if (reader === undefined || remaining < 5 || this.remainingMemoryBytes < 1) {
+      return { ok: false, remaining };
+    }
+    const page = reader({
+      workspaceId: this.input.workspaceId,
+      rootKind: target.root_kind,
+      rootId: target.root_id,
+      revision: target.source_version,
+      digest: target.content_digest,
+      evidenceObjectId: target.evidence_object_id,
+      byteLimit: Math.max(1, Math.min(65536, this.remainingMemoryBytes))
+    });
+    const nextRemaining = remaining - Math.max(1, page.rowsRead) - 2;
+    this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead);
+    if (page.row?.content === undefined || page.unavailable) {
+      return { ok: false, remaining: nextRemaining };
+    }
+    rememberPreview(
+      this.previews,
+      cacheKey,
+      undefined,
+      createContentPreview(page.row.content, "excerpt")
+    );
+    return { ok: true, remaining: nextRemaining };
   }
 }
 

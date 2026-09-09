@@ -11,6 +11,7 @@ import {
   SchemaVersionSchema,
   Sha256DigestSchema
 } from "./common.js";
+import { RecallTargetRefSchema } from "./product-identity.js";
 import { GuardSchema } from "./query.js";
 
 // One workspace cursor plus the canonical temporal state and selected generation.
@@ -100,7 +101,9 @@ export const TypedObservationSchema = z
     measurement_id: ConditionalFieldIdSchema.optional(),
     model_id: ConditionalFieldIdSchema.optional(),
     binding_context: ConditionalFieldIdSchema.optional(),
-    observed_at: IsoDatetimeStringSchema.optional()
+    observed_at: IsoDatetimeStringSchema.optional(),
+    // Native source identity when the observation is not a memory object.
+    target: RecallTargetRefSchema.optional()
   })
   .strict()
   .readonly();

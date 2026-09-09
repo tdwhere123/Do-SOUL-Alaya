@@ -3,23 +3,30 @@ import {
   InformationIndexSchema,
   PayloadContinuationRequestSchema,
   QueryInterpretationProposalSchema,
-  ResultKindViewSchema
+  ResultKindViewSchema,
+  sourceRecallTarget
 } from "@do-soul/alaya-protocol";
 import {
   captureIndexPreviews,
   captureIndexSourceMetadata,
+  fieldContractSha256,
   runConditionalFieldRecall,
   runConditionalFieldRecallWithReceipt,
   reserveSnapshotPinWork,
   snapshotIdFromPin,
+  applyUtf8HydrateToSourceRootPage,
   toSourceObserverRow,
+  toSourceRootObserverRow,
   type ConditionalFieldRecallPortResult,
   type ObserverReaders
 } from "@do-soul/alaya-core";
 import {
+  SqliteEvidenceCapsuleRepo,
+  SqliteFieldSourceRecordRepo,
   SqliteIndexedRecallProjection,
   SqliteMemoryRecallReader,
   SqliteRelationRecallReader,
+  SqliteSourceRootRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { asPayload, readString } from "./payload-readers.js";
@@ -101,6 +108,10 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
   const memory = new SqliteMemoryRecallReader(database);
   const relation = new SqliteRelationRecallReader(database);
   const projection = new SqliteIndexedRecallProjection(database.connection);
+  const sourceRoots = new SqliteSourceRootRecallReader(
+    new SqliteFieldSourceRecordRepo(database, fieldContractSha256),
+    new SqliteEvidenceCapsuleRepo(database)
+  );
   const kindsSql = database.connection.prepare(
     `SELECT relation_kind AS kind FROM relation_assertions
      WHERE workspace_id = ? AND relation_kind > ? ORDER BY relation_kind LIMIT 1`
@@ -127,6 +138,48 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
         unavailable: page.unavailable,
         resourceLimited: page.resourceLimited
       };
+    },
+    sourceRoots: (input) => {
+      const page = sourceRoots.page({
+        workspaceId: input.workspaceId,
+        limit: input.limit,
+        nativeLimit: input.nativeLimit,
+        afterCursor: input.afterCursor,
+        byteLimit: input.byteLimit
+      });
+      return {
+        rows: page.rows.map(toSourceRootObserverRow),
+        nativeVisits: page.nativeVisits,
+        nativeBytes: page.nativeBytes,
+        rowsRead: page.rowsRead,
+        bytesRead: page.bytesRead,
+        truncated: page.truncated,
+        committedThrough: page.committedThrough,
+        unavailable: page.unavailable
+      };
+    },
+    sourceRoot: (input) => {
+      if (input.revision === undefined || input.digest === undefined) {
+        return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
+      }
+      const loaded = sourceRoots.load(
+        input.workspaceId,
+        sourceRecallTarget({
+          workspace_id: input.workspaceId,
+          root_kind: input.rootKind,
+          root_id: input.rootId,
+          source_version: input.revision,
+          content_digest: input.digest,
+          evidence_object_id: input.evidenceObjectId ?? (input.rootKind === "evidence_capsule" ? input.rootId : null)
+        })
+      );
+      return applyUtf8HydrateToSourceRootPage({
+        row: loaded.row === null ? null : toSourceRootObserverRow(loaded.row),
+        rowsRead: loaded.rowsRead,
+        bytesRead: loaded.bytesRead,
+        unavailable: loaded.unavailable,
+        resourceLimited: loaded.resourceLimited
+      }, input.offset ?? 0, input.byteLimit ?? 65536);
     },
     relation: (input) => relation.read(
       input.workspaceId,

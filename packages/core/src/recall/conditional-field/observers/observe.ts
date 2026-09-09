@@ -10,6 +10,7 @@ import {
   type QueryInterpretation,
   type RelationValidity,
   type SnapshotReadLease,
+  type SourceEvidenceRootKind,
   type StagedWarningArray,
   type TypedObservation
 } from "@do-soul/alaya-protocol";
@@ -22,6 +23,8 @@ import {
   relationRowEligible,
   sourceRowEligible
 } from "./observation-admission.js";
+import { hydrateUtf8Chunk } from "../../../memory/evidence-create/source-utf8-hydrate.js";
+import { observeSourceAwareSeed } from "./source-root-observe.js";
 
 export type LexicalObserverPage = Readonly<{
   readonly ids: readonly string[];
@@ -54,6 +57,43 @@ export type SourceObserverRow = Readonly<{
 
 export type SourceObserverPage = Readonly<{
   readonly row: SourceObserverRow | null;
+  readonly rowsRead: number;
+  readonly bytesRead: number;
+  readonly unavailable: boolean;
+  readonly resourceLimited?: boolean;
+}>;
+
+export type SourceRootObserverRow = Readonly<{
+  readonly kind: SourceEvidenceRootKind;
+  readonly workspace_id: string;
+  readonly root_id: string;
+  readonly revision: string;
+  readonly digest: string;
+  readonly evidence_object_id: string | null;
+  readonly event_time?: string | null;
+  readonly role?: string;
+  readonly content?: string;
+  readonly content_complete?: boolean;
+  readonly original_complete?: boolean;
+  readonly scope_class?: string;
+  readonly valid_from?: string | null;
+  readonly valid_to?: string | null;
+  readonly body_erased?: boolean;
+}>;
+
+export type SourceRootObserverPage = Readonly<{
+  readonly rows: readonly SourceRootObserverRow[];
+  readonly nativeVisits: number;
+  readonly nativeBytes: number;
+  readonly rowsRead: number;
+  readonly bytesRead: number;
+  readonly truncated: boolean;
+  readonly committedThrough?: string | null;
+  readonly unavailable?: boolean;
+}>;
+
+export type SourceRootHydrateObserverPage = Readonly<{
+  readonly row: SourceRootObserverRow | null;
   readonly rowsRead: number;
   readonly bytesRead: number;
   readonly unavailable: boolean;
@@ -108,6 +148,24 @@ export type ObserverReaders = Readonly<{
     readonly objectId: string;
     readonly byteLimit?: number;
   }>) => SourceObserverPage;
+  readonly sourceRoots?: (input: Readonly<{
+    readonly workspaceId: string;
+    readonly query?: string;
+    readonly limit: number;
+    readonly nativeLimit: number;
+    readonly afterCursor: string | null;
+    readonly byteLimit?: number;
+  }>) => SourceRootObserverPage;
+  readonly sourceRoot?: (input: Readonly<{
+    readonly workspaceId: string;
+    readonly rootKind: SourceEvidenceRootKind;
+    readonly rootId: string;
+    readonly revision?: string;
+    readonly digest?: string;
+    readonly evidenceObjectId?: string | null;
+    readonly byteLimit?: number;
+    readonly offset?: number;
+  }>) => SourceRootHydrateObserverPage;
   readonly relation?: (input: Readonly<{
     readonly workspaceId: string;
     readonly subject: string | null;
@@ -209,6 +267,65 @@ export function toSourceObserverRow(row: Readonly<{
   };
 }
 
+export function applyUtf8HydrateToSourceRootPage(
+  page: SourceRootHydrateObserverPage,
+  offset: number,
+  byteLimit: number
+): SourceRootHydrateObserverPage {
+  if (page.row === null || page.unavailable || page.row.content === undefined) return page;
+  const chunk = hydrateUtf8Chunk(page.row.content, { offset, byteLimit });
+  if (chunk.status === "unavailable") {
+    return { row: null, rowsRead: page.rowsRead, bytesRead: page.bytesRead, unavailable: true };
+  }
+  return {
+    row: {
+      ...page.row,
+      content: chunk.text,
+      content_complete: chunk.complete
+    },
+    rowsRead: page.rowsRead,
+    bytesRead: Buffer.byteLength(chunk.text, "utf8"),
+    unavailable: false,
+    ...(chunk.complete ? {} : { resourceLimited: true })
+  };
+}
+
+export function toSourceRootObserverRow(row: Readonly<{
+  readonly kind: SourceEvidenceRootKind;
+  readonly workspace_id: string;
+  readonly root_id: string;
+  readonly revision: string;
+  readonly digest: string;
+  readonly evidence_object_id: string | null;
+  readonly event_time?: string | null;
+  readonly role?: string;
+  readonly content?: string;
+  readonly content_complete?: boolean;
+  readonly original_complete?: boolean;
+  readonly scope_class?: string;
+  readonly valid_from?: string | null;
+  readonly valid_to?: string | null;
+  readonly body_erased?: boolean;
+}>): SourceRootObserverRow {
+  return {
+    kind: row.kind,
+    workspace_id: row.workspace_id,
+    root_id: row.root_id,
+    revision: row.revision,
+    digest: row.digest,
+    evidence_object_id: row.evidence_object_id,
+    ...(row.event_time === undefined ? {} : { event_time: row.event_time }),
+    ...(row.role === undefined ? {} : { role: row.role }),
+    ...(row.content === undefined ? {} : { content: row.content }),
+    ...(row.content_complete === undefined ? {} : { content_complete: row.content_complete }),
+    ...(row.original_complete === undefined ? {} : { original_complete: row.original_complete }),
+    ...(row.scope_class === undefined ? {} : { scope_class: row.scope_class }),
+    ...(row.valid_from === undefined ? {} : { valid_from: row.valid_from }),
+    ...(row.valid_to === undefined ? {} : { valid_to: row.valid_to }),
+    ...(row.body_erased === undefined ? {} : { body_erased: row.body_erased })
+  };
+}
+
 export function startObserverCursor(input: Readonly<{
   readonly cursor_id: string;
   readonly snapshot_id: string;
@@ -287,6 +404,17 @@ function invalidSnapshotPage(input: ObserveConditionalFieldInput): ObserverActio
 }
 
 function observeSeed(input: ObserveConditionalFieldInput): ObserverActionResult {
+  const view = input.query.view.result_kind_view ?? "mixed";
+  if (view !== "memory_only" && input.readers.sourceRoots !== undefined) {
+    return observeSourceAwareSeed(input, view !== "source_only");
+  }
+  if (view === "source_only") {
+    return unavailableOrNotApplicable(input, "unavailable");
+  }
+  return observeLexicalSeed(input);
+}
+
+function observeLexicalSeed(input: ObserveConditionalFieldInput): ObserverActionResult {
   const queryText = input.seed_query;
   const lexical = input.readers.lexical;
   if (queryText === undefined || lexical === undefined) {
@@ -364,7 +492,7 @@ function observeMeasurement(input: ObserveConditionalFieldInput): ObserverAction
   });
 }
 
-function collectObserved(
+export function collectObserved(
   input: ObserveConditionalFieldInput,
   native: Readonly<{
     readonly identities: readonly string[];
@@ -574,7 +702,7 @@ function readSource(
   });
 }
 
-function unavailableOrNotApplicable(
+export function unavailableOrNotApplicable(
   input: ObserveConditionalFieldInput,
   status: "unavailable" | "not_applicable"
 ): ObserverActionResult {
@@ -590,7 +718,7 @@ function unavailableOrNotApplicable(
   });
 }
 
-function finish(args: Readonly<{
+export function finish(args: Readonly<{
   readonly input: ObserveConditionalFieldInput;
   readonly cursor: ObserverCursor;
   readonly observations: readonly TypedObservation[];
@@ -641,7 +769,7 @@ function regionKind(action: ObserverAction["action"]): CoverageRegionKind {
   return "seed";
 }
 
-function workReceipt(
+export function workReceipt(
   workUnits: number,
   nativeVisits: number,
   bytesRead: number,
@@ -659,6 +787,6 @@ function emptyWork(nativeVisits: number): ObserverWorkReceipt {
   return workReceipt(nativeVisits, nativeVisits, 0, false);
 }
 
-function pageLimit(input: ObserveConditionalFieldInput): number {
+export function pageLimit(input: ObserveConditionalFieldInput): number {
   return Math.min(input.page_limit ?? input.action.work_limit, input.action.work_limit);
 }

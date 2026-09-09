@@ -58,6 +58,10 @@ export interface EvidenceCapsuleRepo {
     workspaceId: string,
     page: EvidenceCapsuleListPageOptions
   ): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  pageCapsuleOnlyRoots?(
+    workspaceId: string,
+    options: EvidenceCapsuleRootPageOptions
+  ): EvidenceCapsuleRootPage;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByWorkspaceIdAll?(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByHealthPage?(
@@ -102,3 +106,15 @@ export interface EvidenceCapsuleListPageOptions {
   readonly limit: number;
   readonly offset: number;
 }
+
+export type EvidenceCapsuleRootPageOptions = Readonly<{
+  readonly limit: number;
+  readonly afterCreatedAt?: string | null;
+  readonly afterObjectId?: string | null;
+}>;
+
+export type EvidenceCapsuleRootPage = Readonly<{
+  readonly rows: readonly Readonly<EvidenceCapsule>[];
+  readonly truncated: boolean;
+  readonly committedThrough: string | null;
+}>;

@@ -207,6 +207,37 @@ describe("field contract repos", () => {
     expect(() => effects.insert(racedReceipt)).toThrow(/stale|witness/u);
     expect(effects.findById("workspace-1", racedReceipt.request_digest)).toBeNull();
   });
+
+  it("pages source records with cursor and limit and skips erased bodies", () => {
+    const { database, records } = createRepos();
+    const first = records.insert(hashedRecord("workspace-1", "alpha body", "src-a"));
+    const second = records.insert(hashedRecord("workspace-1", "beta body", "src-b"));
+    const erased = records.insert(hashedRecord("workspace-1", "gone body", "src-c"));
+    database.connection.prepare(
+      "UPDATE source_records SET source_body = NULL WHERE workspace_id = ? AND record_id = ?"
+    ).run("workspace-1", erased.record_id);
+
+    const page = records.listPage("workspace-1", { limit: 1 });
+    expect(page.rows).toHaveLength(1);
+    expect(page.truncated).toBe(true);
+    expect(page.committedThrough).toContain(page.rows[0]!.record_id);
+
+    const next = records.listPage("workspace-1", {
+      limit: 8,
+      afterRecordedAt: page.rows[0]!.recorded_at,
+      afterRecordId: page.rows[0]!.record_id
+    });
+    const remaining = [first.record_id, second.record_id]
+      .filter((id) => id !== page.rows[0]!.record_id)
+      .sort();
+    expect([...next.rows.map((row) => row.record_id)].sort()).toEqual(remaining);
+    expect(next.rows.some((row) => row.record_id === erased.record_id)).toBe(false);
+    expect(next.truncated).toBe(false);
+
+    const empty = records.listPage("workspace-1", { limit: 0 });
+    expect(empty.rows).toEqual([]);
+    expect(empty.truncated).toBe(true);
+  });
 });
 
 function createRepos() {

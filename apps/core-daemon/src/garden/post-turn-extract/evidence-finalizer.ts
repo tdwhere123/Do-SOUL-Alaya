@@ -26,11 +26,23 @@ export async function finalizePostTurnEvidence(
   input: PostTurnEvidenceFinalizationInput
 ): Promise<readonly string[]> {
   const received = await receiveCandidateSignals(input);
-  if (!received.createdEvidence) {
+  if (!received.createdEvidence || !candidatesPreserveOriginalTurn(input)) {
     await receiveEvidenceFallback(input, received.signalIds);
   }
   await input.beforeReceive?.();
   return received.signalIds;
+}
+
+function candidatesPreserveOriginalTurn(input: PostTurnEvidenceFinalizationInput): boolean {
+  return input.candidates.some((candidate) => {
+    const payload = candidate.raw_payload;
+    if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return false;
+    const record = payload as Record<string, unknown>;
+    if (typeof record.full_turn_content === "string" && record.full_turn_content === input.turnContent) {
+      return true;
+    }
+    return record.gist === input.turnContent || record.excerpt === input.turnContent;
+  });
 }
 
 async function receiveCandidateSignals(

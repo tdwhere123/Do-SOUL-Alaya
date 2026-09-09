@@ -6,6 +6,7 @@ import {
   memoryProductStateKey,
   productSubjectId,
   retargetMemoryProduct,
+  sourceProductStateKey,
   type Derivation,
   type FacetMode,
   type FacetVector,
@@ -96,14 +97,33 @@ export function productStateFromObservation(
   if (workspaceId === undefined) {
     throw new Error("product state requires workspace_id");
   }
+  const programState = defaults.program_state ?? DEFAULT_PROGRAM_STATE;
+  const hypothesisId = defaults.hypothesis_id ?? DEFAULT_HYPOTHESIS;
+  const bindingContext = defaults.binding_context ?? UNBOUND_BINDING;
+  const timeState = defaults.time_state ?? DEFAULT_TIME_STATE;
+  const target = observation.target;
+  if (target !== undefined && target.kind === "source_evidence") {
+    return sourceProductStateKey({
+      workspace_id: workspaceId,
+      root_kind: target.root_kind,
+      root_id: target.root_id,
+      source_version: defaults.source_revision ?? target.source_version,
+      content_digest: target.content_digest,
+      evidence_object_id: target.evidence_object_id,
+      program_state: programState,
+      hypothesis_id: hypothesisId,
+      binding_context: bindingContext,
+      time_state: timeState
+    });
+  }
   return memoryProductStateKey({
     workspace_id: workspaceId,
     object_id: defaults.object_id ?? observation.object_id,
     source_revision: defaults.source_revision ?? observation.source_revision,
-    program_state: defaults.program_state ?? DEFAULT_PROGRAM_STATE,
-    hypothesis_id: defaults.hypothesis_id ?? DEFAULT_HYPOTHESIS,
-    binding_context: defaults.binding_context ?? UNBOUND_BINDING,
-    time_state: defaults.time_state ?? DEFAULT_TIME_STATE
+    program_state: programState,
+    hypothesis_id: hypothesisId,
+    binding_context: bindingContext,
+    time_state: timeState
   });
 }
 

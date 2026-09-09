@@ -1,17 +1,27 @@
 import {
   productSubjectId,
   retargetMemoryProduct,
+  sourceRecallTarget,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MemoryDimension,
   type InformationIndex,
   type QueryProgram,
-  type RequestBudget
+  type RequestBudget,
+  type ResultKindView
 } from "@do-soul/alaya-protocol";
-import { type StorageDatabase } from "@do-soul/alaya-storage";
 import {
+  SqliteEvidenceCapsuleRepo,
+  SqliteFieldSourceRecordRepo,
+  SqliteSourceRootRecallReader,
+  type StorageDatabase
+} from "@do-soul/alaya-storage";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
+import {
+  applyUtf8HydrateToSourceRootPage,
   encodeRecallResult,
   runConditionalFieldRecall,
   toSourceObserverRow,
+  toSourceRootObserverRow,
   type ObserverReaders
 } from "../../../recall/recall-service.js";
 import { compileConditionalFieldQuery } from "../../../recall/conditional-field/query/compile-query.js";
@@ -57,6 +67,10 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
      WHERE workspace_id = ?
        AND (? IS NULL OR lower(json_extract(anchors_json, '$.source_anchor.object_id')) = ?)`
   );
+  const sourceRoots = new SqliteSourceRootRecallReader(
+    new SqliteFieldSourceRecordRepo(slice.database, fieldContractSha256),
+    new SqliteEvidenceCapsuleRepo(slice.database)
+  );
   return {
     lexical: (input) => slice.memoryReader.lexical(
       input.workspaceId,
@@ -73,6 +87,50 @@ export function readersFor(slice: SourceSlice): ObserverReaders {
         bytesRead: page.bytesRead,
         unavailable: page.unavailable
       };
+    },
+    sourceRoots: (input) => {
+      const page = sourceRoots.page({
+        workspaceId: input.workspaceId,
+        limit: input.limit,
+        nativeLimit: input.nativeLimit,
+        afterCursor: input.afterCursor,
+        byteLimit: input.byteLimit
+      });
+      return {
+        rows: page.rows.map(toSourceRootObserverRow),
+        nativeVisits: page.nativeVisits,
+        nativeBytes: page.nativeBytes,
+        rowsRead: page.rowsRead,
+        bytesRead: page.bytesRead,
+        truncated: page.truncated,
+        committedThrough: page.committedThrough,
+        unavailable: page.unavailable
+      };
+    },
+    sourceRoot: (input) => {
+      if (input.revision === undefined || input.digest === undefined) {
+        return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
+      }
+      const loaded = sourceRoots.load(
+        input.workspaceId,
+        sourceRecallTarget({
+          workspace_id: input.workspaceId,
+          root_kind: input.rootKind,
+          root_id: input.rootId,
+          source_version: input.revision,
+          content_digest: input.digest,
+          evidence_object_id: input.evidenceObjectId ?? (
+            input.rootKind === "evidence_capsule" ? input.rootId : null
+          )
+        })
+      );
+      return applyUtf8HydrateToSourceRootPage({
+        row: loaded.row === null ? null : toSourceRootObserverRow(loaded.row),
+        rowsRead: loaded.rowsRead,
+        bytesRead: loaded.bytesRead,
+        unavailable: loaded.unavailable,
+        resourceLimited: loaded.resourceLimited
+      }, input.offset ?? 0, input.byteLimit ?? 65536);
     },
     relation: (input) => slice.relationReader.read(
       input.workspaceId,
@@ -178,6 +236,7 @@ export function runRecall(
     readonly as_of?: string;
     readonly readers?: ObserverReaders;
     readonly snapshot_id?: string;
+    readonly result_kind_view?: ResultKindView;
   }> = {}
 ): InformationIndex {
   const clock = input.interpretation_clock ?? INTERPRETATION_CLOCK;
@@ -192,7 +251,8 @@ export function runRecall(
     readers: input.readers ?? readersFor(slice),
     continuation: input.continuation ?? null,
     cancelled: input.cancelled === true,
-    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes })
+    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    ...(input.result_kind_view === undefined ? {} : { result_kind_view: input.result_kind_view })
   });
 }
 

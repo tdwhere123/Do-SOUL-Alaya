@@ -17,6 +17,7 @@ export interface EvidenceCapsuleStatements {
   readonly findByRunIdPagedStatement: SqliteStatement;
   readonly findByWorkspaceIdStatement: SqliteStatement;
   readonly findByWorkspaceIdPagedStatement: SqliteStatement;
+  readonly pageCapsuleOnlyRootsStatement: SqliteStatement;
   readonly findByHealthStatement: SqliteStatement;
   readonly findByHealthPagedStatement: SqliteStatement;
   readonly updateHealthStatement: SqliteStatement;
@@ -51,6 +52,7 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
     findByWorkspaceIdPagedStatement: db.connection.prepare(
       findEvidenceCapsuleSql("byWorkspace", "paged")
     ),
+    pageCapsuleOnlyRootsStatement: db.connection.prepare(PAGE_CAPSULE_ONLY_ROOTS_SQL),
     findByHealthStatement: db.connection.prepare(findEvidenceCapsuleSql("byHealth")),
     findByHealthPagedStatement: db.connection.prepare(
       findEvidenceCapsuleSql("byHealth", "paged")
@@ -88,6 +90,21 @@ const EVIDENCE_CAPSULE_SUFFIXES: Readonly<Record<EvidenceCapsuleSuffixKey, strin
   limitOne: "LIMIT 1",
   paged: "LIMIT ? OFFSET ?"
 });
+
+const PAGE_CAPSULE_ONLY_ROOTS_SQL = `
+      SELECT${EVIDENCE_CAPSULE_SELECT_COLUMNS}
+      FROM evidence_capsules e
+      WHERE e.workspace_id = ?
+        AND e.lifecycle_state = 'active'
+        AND NOT EXISTS (
+          SELECT 1 FROM source_records s
+          WHERE s.workspace_id = e.workspace_id
+            AND s.evidence_object_id = e.object_id
+        )
+        AND (e.created_at > ? OR (e.created_at = ? AND e.object_id > ?))
+      ORDER BY e.created_at ASC, e.object_id ASC
+      LIMIT ?
+    `;
 
 function findEvidenceCapsuleSql(whereKey: EvidenceCapsuleWhereKey, suffixKey?: EvidenceCapsuleSuffixKey): string {
   const suffixSql = suffixKey === undefined ? "" : `\n      ${EVIDENCE_CAPSULE_SUFFIXES[suffixKey]}`;

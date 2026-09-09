@@ -48,14 +48,20 @@ import { EvidenceProjectionIntegrityError } from
 import type {
   EvidenceCapsuleListPageOptions,
   EvidenceCapsuleRepo,
+  EvidenceCapsuleRootPage,
+  EvidenceCapsuleRootPageOptions,
   EvidenceSourceAnchor
 } from "./evidence-capsule-repo-port.js";
 
 export type {
   EvidenceCapsuleListPageOptions,
   EvidenceCapsuleRepo,
+  EvidenceCapsuleRootPage,
+  EvidenceCapsuleRootPageOptions,
   EvidenceSourceAnchor
 } from "./evidence-capsule-repo-port.js";
+
+const CAPSULE_ROOT_PAGE_MAX = 512;
 
 export type {
   EvidenceCapsuleKeywordHit,
@@ -251,14 +257,18 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
 
   public async findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null> {
     try {
-      return parseOptionalRow(
-        this.statements.findByIdStatement.get(objectId),
-        EvidenceCapsuleRowParser,
-        "evidence capsule row"
-      );
+      return this.getById(objectId);
     } catch (error) {
       throw wrapEvidenceCapsuleQueryError(`Failed to load evidence capsule ${objectId}.`, error);
     }
+  }
+
+  public getById(objectId: string): Readonly<EvidenceCapsule> | null {
+    return parseOptionalRow(
+      this.statements.findByIdStatement.get(objectId),
+      EvidenceCapsuleRowParser,
+      "evidence capsule row"
+    );
   }
 
   public async findByArtifactRef(
@@ -375,6 +385,47 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     }
   }
 
+  public pageCapsuleOnlyRoots(
+    workspaceId: string,
+    options: EvidenceCapsuleRootPageOptions
+  ): EvidenceCapsuleRootPage {
+    const limit = options.limit;
+    if (!Number.isSafeInteger(limit) || limit < 0 || limit > CAPSULE_ROOT_PAGE_MAX) {
+      throw new Error("invalid capsule-only root page limit");
+    }
+    if (limit === 0) {
+      return { rows: [], truncated: true, committedThrough: encodeCapsuleCursor(options) };
+    }
+    const afterCreatedAt = options.afterCreatedAt ?? "";
+    const afterObjectId = options.afterObjectId ?? "";
+    try {
+      const rows = parseRows(
+        this.statements.pageCapsuleOnlyRootsStatement.all(
+          workspaceId,
+          afterCreatedAt,
+          afterCreatedAt,
+          afterObjectId,
+          limit
+        ),
+        EvidenceCapsuleRowParser,
+        "evidence capsule row"
+      );
+      const last = rows.at(-1);
+      return {
+        rows,
+        truncated: rows.length === limit,
+        committedThrough: last === undefined
+          ? encodeCapsuleCursor(options)
+          : encodeCapsuleCursor({ afterCreatedAt: last.created_at, afterObjectId: last.object_id })
+      };
+    } catch (error) {
+      throw wrapEvidenceCapsuleQueryError(
+        `Failed to page capsule-only roots for workspace ${workspaceId}.`,
+        error
+      );
+    }
+  }
+
   public async findByWorkspaceIdPage(
     workspaceId: string,
     page: EvidenceCapsuleListPageOptions
@@ -481,4 +532,31 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       );
     }
   }
+}
+
+export function encodeCapsuleCursor(input: Readonly<{
+  readonly afterCreatedAt?: string | null;
+  readonly afterObjectId?: string | null;
+}>): string | null {
+  if (input.afterCreatedAt == null || input.afterCreatedAt === "" ||
+      input.afterObjectId == null || input.afterObjectId === "") {
+    return null;
+  }
+  return `c:${input.afterCreatedAt}\t${input.afterObjectId}`;
+}
+
+export function parseCapsuleCursor(cursor: string | null | undefined): Readonly<{
+  readonly afterCreatedAt: string | null;
+  readonly afterObjectId: string | null;
+}> {
+  if (cursor == null || cursor === "" || !cursor.startsWith("c:")) {
+    return { afterCreatedAt: null, afterObjectId: null };
+  }
+  const payload = cursor.slice(2);
+  const split = payload.indexOf("\t");
+  if (split <= 0) return { afterCreatedAt: null, afterObjectId: null };
+  return {
+    afterCreatedAt: payload.slice(0, split),
+    afterObjectId: payload.slice(split + 1)
+  };
 }

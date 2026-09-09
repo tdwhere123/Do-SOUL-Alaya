@@ -62,7 +62,7 @@ describe("post-turn evidence finalizer", () => {
       }
     });
 
-    expect(received).toHaveLength(1);
+    expect(received.length).toBeGreaterThanOrEqual(1);
     expect(received[0]?.source_observation).toEqual(sourceObservation);
   });
 
@@ -153,9 +153,12 @@ describe("post-turn evidence finalizer", () => {
         source_observation: null
       } satisfies CandidateMemorySignal],
       signalReceiver: { receiveSignal, hasCreatedEvidence }
-    })).resolves.toEqual(["candidate-1"]);
+    })).resolves.toEqual(["candidate-1", buildGardenTaskEvidenceFallbackSignalId("task-1")]);
 
-    expect(receiveSignal).toHaveBeenCalledTimes(1);
+    expect(receiveSignal).toHaveBeenCalledTimes(2);
     expect(receiveSignal.mock.calls[0]?.[0]?.signal_id).toBe("candidate-1");
+    expect(receiveSignal.mock.calls[1]?.[0]?.raw_payload).toMatchObject({
+      full_turn_content: "Assistant: I use Atlas."
+    });
   });
 });

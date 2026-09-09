@@ -3,6 +3,8 @@ export {
   type EvidenceCapsuleKeywordHit,
   type EvidenceCapsuleListPageOptions,
   type EvidenceCapsuleRepo,
+  type EvidenceCapsuleRootPage,
+  type EvidenceCapsuleRootPageOptions,
   type EvidenceSearchMatch,
   type EvidenceSearchProjectionIdentity,
   type RecallQualifiedEvidence,

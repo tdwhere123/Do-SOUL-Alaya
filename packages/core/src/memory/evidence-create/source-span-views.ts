@@ -111,6 +111,6 @@ function rangeError(message: string): CoreError {
   return new CoreError("VALIDATION", message);
 }
 
-function isUtf8Boundary(bytes: Buffer, offset: number): boolean {
+export function isUtf8Boundary(bytes: Buffer, offset: number): boolean {
   return offset === 0 || offset === bytes.length || (bytes[offset]! & 0xc0) !== 0x80;
 }

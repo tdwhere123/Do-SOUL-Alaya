@@ -15,6 +15,8 @@ export type {
   FieldProjectionPointerRow,
   FieldProofEffectRepo,
   FieldProofEffectRow,
+  FieldSourceRecordPage,
+  FieldSourceRecordPageOptions,
   FieldSourceRecordRepo,
   FieldSourceRecordRow,
   FieldSourceEvidenceBindingRow,
@@ -28,9 +30,20 @@ export {
 export { SqliteFieldEraseBarrierRepo } from "./erase-repo.js";
 export { SqliteFieldProjectionGenerationRepo } from "./generation-repo.js";
 export {
+  encodeRecordCursor,
+  parseRecordCursor,
   SqliteFieldSourceRecordRepo,
   SqliteFieldSourceSpanRepo
 } from "./source-repo.js";
+export {
+  chunkUtf8,
+  SqliteSourceRootRecallReader,
+  type SourceRootHydratePage,
+  type SourceRootKind,
+  type SourceRootPage,
+  type SourceRootPageInput,
+  type SourceRootRow
+} from "./bounded-source-root-reader.js";
 export {
   SqliteFieldCausalUsageRepo,
   SqliteFieldProofEffectRepo

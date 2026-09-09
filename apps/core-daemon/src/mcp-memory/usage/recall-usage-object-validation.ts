@@ -255,8 +255,29 @@ async function validateUsedSourceTarget(
   if (target === undefined || target.kind !== "source_evidence") {
     throw new ContextUsageValidationError("source_evidence usage requires a source_evidence target.");
   }
-  if (target.evidence_object_id === null) return;
-  await validateUsedEvidence(deps, target.evidence_object_id, workspaceId);
+  if (target.root_kind === "source_record") {
+    const row = await deps.fieldSource?.findRecordById(workspaceId, target.root_id);
+    if (row === null || row === undefined) {
+      throw new ContextUsageNotFoundError(`Source record ${target.root_id} was not found.`);
+    }
+    if (row.workspace_id !== workspaceId || row.source_body === null) {
+      throw new ContextUsageNotFoundError(`Source record ${target.root_id} was not found.`);
+    }
+    if (row.content_digest !== target.content_digest
+        || row.source_version !== target.source_version
+        || row.evidence_object_id !== target.evidence_object_id) {
+      throw new ContextUsageValidationError("source_evidence target does not match the retained source record.");
+    }
+    if (target.evidence_object_id !== null) {
+      await validateUsedEvidence(deps, target.evidence_object_id, workspaceId);
+    }
+    return;
+  }
+  const capsuleId = target.evidence_object_id ?? target.root_id;
+  if (target.root_id !== capsuleId) {
+    throw new ContextUsageValidationError("evidence_capsule source target root_id must be the capsule id.");
+  }
+  await validateUsedEvidence(deps, capsuleId, workspaceId);
 }
 
 function validateUsedIdsMatchDeliveredObjects(

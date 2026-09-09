@@ -132,6 +132,26 @@ export interface RecallUsageHandlerDependencies {
       readonly evidence_health_state: string;
     }> | null>;
   };
+  readonly fieldSource?: {
+    findRecordById(
+      workspaceId: string,
+      recordId: string
+    ): Promise<Readonly<{
+      readonly workspace_id: string;
+      readonly record_id: string;
+      readonly source_version: string;
+      readonly content_digest: string;
+      readonly evidence_object_id: string | null;
+      readonly source_body: string | null;
+    }> | null> | Readonly<{
+      readonly workspace_id: string;
+      readonly record_id: string;
+      readonly source_version: string;
+      readonly content_digest: string;
+      readonly evidence_object_id: string | null;
+      readonly source_body: string | null;
+    }> | null;
+  };
   readonly asyncSideEffectAudit?: {
     readonly eventLogRepo: AsyncSideEffectAuditEventLogPort;
     readonly runtimeNotifier?: AsyncSideEffectAuditNotifierPort;

@@ -2,7 +2,18 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { type StorageDatabase } from "@do-soul/alaya-storage";
+import {
+  EvidenceHealthState,
+  SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+  hashContentDigest,
+  hashSourceRecordId
+} from "@do-soul/alaya-protocol";
+import {
+  SqliteEvidenceCapsuleRepo,
+  SqliteFieldSourceRecordRepo,
+  type StorageDatabase
+} from "@do-soul/alaya-storage";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { assertTargetConsumer } from "./consumer-contract.js";
 import {
   MEM,
@@ -120,4 +131,98 @@ describe("conditional-field source and worker acceptance", () => {
     expect(slice.pendingGarden()).toHaveLength(before);
     expect(assertTargetConsumer(toConsumer(mcp, "mcp"))).toEqual([]);
   });
+
+  it("discovers a capsule-only root after optional formation is absent", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    const capsule = await new SqliteEvidenceCapsuleRepo(slice.database).create({
+      object_id: "cccccccc-cccc-4ccc-8ccc-000000000201",
+      object_kind: "evidence_capsule",
+      schema_version: 1,
+      lifecycle_state: "active",
+      created_at: "2026-09-05T12:00:00.000Z",
+      updated_at: "2026-09-05T12:00:00.000Z",
+      created_by: "user_action",
+      evidence_kind: "conversation_excerpt",
+      semantic_anchor: { topic: "source", keywords: ["capsule"], summary: "capsule only root" },
+      event_anchor: {
+        event_type: "engine.response.received",
+        event_id: "evt-cap",
+        occurred_at: "2026-09-05T12:00:00.000Z"
+      },
+      physical_anchor: null,
+      evidence_health_state: EvidenceHealthState.VERIFIED,
+      gist: "capsule only root gist",
+      excerpt: "capsule only root excerpt",
+      source_hash: null,
+      run_id: "run-1",
+      workspace_id: WS,
+      surface_id: null
+    });
+    const mcp = await recallThroughHandler(slice, {
+      query: "capsule only root excerpt",
+      max_results: 32,
+      result_kind_view: "source_only"
+    });
+    expect(assertTargetConsumer(toConsumer(mcp, "mcp"))).toEqual([]);
+    const entry = mcp.index.entries.find((item) => item.target.kind === "source_evidence");
+    expect(entry?.object_id).toBeUndefined();
+    if (entry?.target.kind !== "source_evidence") throw new Error("expected source_evidence");
+    expect(entry.target.root_kind).toBe("evidence_capsule");
+    expect(entry.target.root_id).toBe(capsule.object_id);
+    expect(entry.target.evidence_object_id).toBe(capsule.object_id);
+  });
+
+  it("fails closed after source-body erasure and unauthorized scope", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    const record = plantRecord(slice.database, "scope-erased source");
+    const found = await recallThroughHandler(slice, {
+      query: "scope-erased source",
+      max_results: 32,
+      result_kind_view: "source_only"
+    });
+    expect(found.index.entries.some((entry) =>
+      entry.target.kind === "source_evidence" && entry.target.root_id === record.record_id
+    )).toBe(true);
+
+    const scoped = runRecall(slice, {
+      query_text: "scope-erased source",
+      result_kind_view: "source_only",
+      authorized_scopes: ["private"]
+    });
+    expect(scoped.entries).toEqual([]);
+
+    slice.database.connection.prepare(
+      "UPDATE source_records SET source_body = NULL WHERE workspace_id = ? AND record_id = ?"
+    ).run(WS, record.record_id);
+    const erased = await recallThroughHandler(slice, {
+      query: "scope-erased source",
+      max_results: 32,
+      result_kind_view: "source_only"
+    });
+    expect(erased.index.entries.some((entry) =>
+      entry.target.kind === "source_evidence" && entry.target.root_id === record.record_id
+    )).toBe(false);
+  });
 });
+
+function plantRecord(database: StorageDatabase, body: string) {
+  const content_digest = hashContentDigest(body, fieldContractSha256);
+  return new SqliteFieldSourceRecordRepo(database, fieldContractSha256).insert({
+    record_id: hashSourceRecordId({
+      source_id: "speaker-a",
+      source_version: "v1",
+      content_digest
+    }, fieldContractSha256),
+    workspace_id: WS,
+    source_id: "speaker-a",
+    source_version: "v1",
+    content_digest,
+    evidence_object_id: null,
+    recorded_at: "2026-09-05T12:00:00.000Z",
+    event_time: "2026-09-05T12:00:00.000Z",
+    valid_from: null,
+    valid_to: null,
+    operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+    source_body: body
+  });
+}

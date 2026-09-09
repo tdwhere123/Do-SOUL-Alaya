@@ -23,6 +23,18 @@ export type FieldSourceRecordRow = Readonly<{
   readonly source_body: string | null;
 }>;
 
+export type FieldSourceRecordPageOptions = Readonly<{
+  readonly limit: number;
+  readonly afterRecordedAt?: string | null;
+  readonly afterRecordId?: string | null;
+}>;
+
+export type FieldSourceRecordPage = Readonly<{
+  readonly rows: readonly FieldSourceRecordRow[];
+  readonly truncated: boolean;
+  readonly committedThrough: string | null;
+}>;
+
 export type FieldSourceSpanRow = Readonly<{
   readonly span_id: string;
   readonly record_id: string;
@@ -156,6 +168,7 @@ export interface FieldSourceRecordRepo {
   insert(row: FieldSourceRecordRow): FieldSourceRecordRow;
   findById(workspaceId: string, recordId: string): FieldSourceRecordRow | null;
   listByWorkspace(workspaceId: string): readonly FieldSourceRecordRow[];
+  listPage(workspaceId: string, options: FieldSourceRecordPageOptions): FieldSourceRecordPage;
   listEvidenceBindings(workspaceId: string): readonly FieldSourceEvidenceBindingRow[];
 }
 

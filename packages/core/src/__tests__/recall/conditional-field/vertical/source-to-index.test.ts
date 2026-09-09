@@ -4,18 +4,27 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   productSubjectId,
+  SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+  hashContentDigest,
+  hashSourceRecordId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MemoryDimension,
   type Transition
 } from "@do-soul/alaya-protocol";
-import { type StorageDatabase } from "@do-soul/alaya-storage";
+import {
+  SqliteFieldSourceRecordRepo,
+  type StorageDatabase
+} from "@do-soul/alaya-storage";
+import { fieldContractSha256 } from "../../../../shared/field-hash.js";
+import { encodedRecall, runRecall } from "../../conditional-field-oracle/bound-producer.js";
 import { mapNativeReaderPage, projectAcceptingIndex } from
   "../../../../recall/conditional-field/reference/accepting-projection.js";
 import { bindMaxMinField } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import {
   defaultBudget,
   defaultView,
-  productKey
+  productKey,
+  YESTERDAY_INSTANT
 } from "../reference/deployment.fixture.js";
 import {
   INAPPLICABLE_KIND,
@@ -165,7 +174,80 @@ describe("conditional-field SQLite source-to-index slice", () => {
     expect(unavailableIndex.completeness.observed_coverage).toBe("unavailable");
     expect(unavailableIndex.completeness.logical_index).not.toBe("complete");
   });
+
+  it("delivers a record-only SQLite root as source_evidence with zero provider and garden work", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    const record = plantRecord(slice.database, WS, "needle source retained", "speaker-a");
+    const index = runRecall(slice, {
+      query_text: "needle source retained",
+      result_kind_view: "source_only"
+    });
+    const encoded = encodedRecall(index);
+    expect(encoded.provider_calls).toBe(0);
+    expect(encoded.garden_enqueue).toBe(0);
+    expect(slice.pendingGarden()).toHaveLength(0);
+    const entry = index.entries.find((item) => item.target.kind === "source_evidence");
+    expect(entry).toBeDefined();
+    expect(entry?.object_id).toBeUndefined();
+    if (entry?.target.kind !== "source_evidence") throw new Error("expected source_evidence");
+    expect(entry.target.root_kind).toBe("source_record");
+    expect(entry.target.root_id).toBe(record.record_id);
+    expect(entry.target.evidence_object_id).toBeNull();
+    expect(entry.target.content_digest).toBe(record.content_digest);
+  });
+
+  it("keeps duplicate text from different speakers as distinct roots", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    const left = plantRecord(slice.database, WS, "same spoken line", "user");
+    const right = plantRecord(slice.database, WS, "same spoken line", "assistant");
+    expect(left.record_id).not.toBe(right.record_id);
+    const index = runRecall(slice, {
+      query_text: "same spoken line",
+      result_kind_view: "source_only"
+    });
+    const roots = index.entries
+      .filter((entry) => entry.target.kind === "source_evidence")
+      .map((entry) => entry.target.kind === "source_evidence" ? entry.target.root_id : "");
+    expect(roots.sort()).toEqual([left.record_id, right.record_id].sort());
+  });
+
+  it("still discovers source in mixed view when memories exist", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await slice.writeMemory(MEM.r, "needle memory also present", MemoryDimension.EPISODE);
+    const record = plantRecord(slice.database, WS, "needle source retained", "speaker-a");
+    const index = runRecall(slice, {
+      query_text: "needle",
+      result_kind_view: "mixed"
+    });
+    expect(index.entries.some((entry) => entry.object_id === MEM.r)).toBe(true);
+    expect(index.entries.some((entry) =>
+      entry.target.kind === "source_evidence" && entry.target.root_id === record.record_id
+    )).toBe(true);
+  });
 });
+
+function plantRecord(database: StorageDatabase, workspaceId: string, body: string, sourceId: string) {
+  const content_digest = hashContentDigest(body, fieldContractSha256);
+  const record = {
+    record_id: hashSourceRecordId({
+      source_id: sourceId,
+      source_version: "v1",
+      content_digest
+    }, fieldContractSha256),
+    workspace_id: workspaceId,
+    source_id: sourceId,
+    source_version: "v1",
+    content_digest,
+    evidence_object_id: null as string | null,
+    recorded_at: YESTERDAY_INSTANT,
+    event_time: YESTERDAY_INSTANT,
+    valid_from: null as string | null,
+    valid_to: null as string | null,
+    operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+    source_body: body
+  };
+  return new SqliteFieldSourceRecordRepo(database, fieldContractSha256).insert(record);
+}
 
 async function plantDeployment(slice: Awaited<ReturnType<typeof openSourceSlice>>) {
   await slice.writeMemory(MEM.r, "yesterday failed deployment of checkout", MemoryDimension.EPISODE);

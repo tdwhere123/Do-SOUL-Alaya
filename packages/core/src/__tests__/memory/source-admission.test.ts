@@ -72,6 +72,16 @@ describe("source admission", () => {
     expect(first.record.identity).not.toBe(second.record.identity);
   });
 
+  it("admits a record-only root with null evidence_object_id and no minted capsule", () => {
+    const admitted = createPort().admit(request({ evidence_object_id: null }));
+    expect(admitted.record.evidence_object_id).toBeNull();
+    expect(admitted.record.identity).toBe(hashSourceRecordId({
+      source_id: "src-1",
+      source_version: "v1",
+      content_digest: hashContentDigest(BODY, fieldSha256)
+    }, fieldSha256));
+  });
+
   it("admits unknown valid time without requiring event or valid time", () => {
     const admitted = createPort().admit(request({
       event_time: null,

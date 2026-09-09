@@ -26,6 +26,7 @@ export interface DaemonMcpMemoryToolHandlerInput {
   readonly dynamicsService?: McpMemoryToolHandlerDependencies["dynamicsService"];
   readonly memoryEntryRepo: NonNullable<McpMemoryToolHandlerDependencies["memoryEntryRepo"]>;
   readonly evidenceService?: McpMemoryToolHandlerDependencies["evidenceService"];
+  readonly fieldSource?: McpMemoryToolHandlerDependencies["fieldSource"];
   // invariant: path-relation proposal accept must validate object anchors before the storage insert.
   // see also: apps/core-daemon/src/mcp-memory/proposal-workflow.ts objectAnchorGate
   readonly objectAnchorGate?: McpMemoryProposalWorkflowDependencies["objectAnchorGate"];
@@ -184,6 +185,7 @@ export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandl
     ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
     memoryEntryRepo: input.memoryEntryRepo,
     ...(input.evidenceService === undefined ? {} : { evidenceService: input.evidenceService }),
+    ...(input.fieldSource === undefined ? {} : { fieldSource: input.fieldSource }),
     signalService: input.signalService,
     ...(input.postTurnSignalReceiver === undefined
       ? {}

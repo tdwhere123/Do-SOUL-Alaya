@@ -81,6 +81,8 @@ export {
   scanObjectKeyRetrofitSources,
   type EvidenceCapsuleRepo,
   type EvidenceCapsuleListPageOptions,
+  type EvidenceCapsuleRootPage,
+  type EvidenceCapsuleRootPageOptions,
   type EvidenceCapsuleKeywordHit,
   type EvidenceRecallEmbeddingRecord,
   type EvidenceRecallEmbeddingRef,
@@ -206,6 +208,8 @@ export {
   SqliteFieldProofEffectRepo,
   SqliteFieldSourceRecordRepo,
   SqliteFieldSourceSpanRepo,
+  SqliteSourceRootRecallReader,
+  chunkUtf8,
   factorFromRow,
   generationFromRow,
   generationToRow,
@@ -229,10 +233,17 @@ export {
   type FieldProjectionGenerationRow,
   type FieldProofEffectRepo,
   type FieldProofEffectRow,
+  type FieldSourceRecordPage,
+  type FieldSourceRecordPageOptions,
   type FieldSourceRecordRepo,
   type FieldSourceRecordRow,
   type FieldSourceSpanRepo,
-  type FieldSourceSpanRow
+  type FieldSourceSpanRow,
+  type SourceRootHydratePage,
+  type SourceRootKind,
+  type SourceRootPage,
+  type SourceRootPageInput,
+  type SourceRootRow
 } from "./repos/field/index.js";
 export {
   assertRelationProjectionCurrent,
