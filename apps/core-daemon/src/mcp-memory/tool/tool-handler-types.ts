@@ -124,6 +124,7 @@ export interface McpMemoryToolHandlerDependencies {
     }> | null>;
   };
   readonly fieldSource?: RecallUsageHandlerDependencies["fieldSource"];
+  readonly sourceAdmission?: RecallUsageHandlerDependencies["sourceAdmission"];
   readonly signalService: {
     receiveSignal(signal: CandidateMemorySignal): Promise<Readonly<{
       readonly signal: Readonly<CandidateMemorySignal>;

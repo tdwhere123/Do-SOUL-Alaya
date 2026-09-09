@@ -28,6 +28,7 @@ import {
   defaultContext,
   gardenTaskSignalId,
   noRunContext,
+  pageWorkspaceSourceRoots,
   postTurnRows,
   recall,
   reportUsage,
@@ -278,6 +279,58 @@ describe("post-turn extract Garden task", () => {
       && row.root_id === "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
       && (row.content ?? "").includes("I prefer pnpm commands")
     )).toBe(true);
+  });
+
+  it("enqueue of a turn longer than 800 chars keeps the unsliced root after a throwing provider", async () => {
+    const tail = "BEYOND_EIGHT_HUNDRED_MARKER";
+    const excerpt = `${"a".repeat(800)}${tail}`;
+    const compile = vi.fn(async () => {
+      throw new Error("provider blew up");
+    });
+    const harness = await createRoutingHarness({
+      provider_kind: "local_heuristics",
+      localCompile: compile
+    });
+    const handler = createMcpMemoryToolHandler(createMcpDeps(harness));
+
+    expect((await reportUsage(handler, {
+      turn_index: 21,
+      last_messages: [{ role: "user", content_excerpt: excerpt }]
+    })).ok).toBe(true);
+
+    const enqueued = postTurnRows(harness.gardenTaskRepo);
+    expect(enqueued).toHaveLength(1);
+    const taskId = enqueued[0]!.id;
+    const payload = enqueued[0]!.payload as PostTurnPayload;
+    expect(payload.turn_digest.last_messages[0]!.content_excerpt).toHaveLength(800);
+    expect(payload.turn_digest.last_messages[0]!.content_excerpt.includes(tail)).toBe(false);
+    expect(payload.admitted_source_root_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
+
+    await expect(harness.runScheduler()).resolves.toBeUndefined();
+    expect(compile).toHaveBeenCalledTimes(1);
+    expect(String(compile.mock.calls[0]?.[0] ?? "")).not.toContain(tail);
+    expect(harness.gardenTaskRepo.findById(taskId)).toMatchObject({
+      status: "failed",
+      last_error_text: expect.stringContaining("provider blew up")
+    });
+
+    const roots = pageWorkspaceSourceRoots(harness.database);
+    expect(roots.rows.some((row) =>
+      row.kind === "source_record"
+      && row.original_complete === true
+      && (row.content ?? "").includes(tail)
+      && (row.content ?? "").length > 800
+    )).toBe(true);
+    expect(roots.rows.some((row) =>
+      row.original_complete === true
+      && (row.content ?? "").length > 0
+      && !(row.content ?? "").includes(tail)
+    )).toBe(false);
+    expect(
+      (harness.database.connection.prepare("SELECT COUNT(*) AS count FROM memory_entries").get() as {
+        count: number;
+      }).count
+    ).toBe(0);
   });
 
   it("host_worker end-to-end: enqueue then MCP claim/complete delivers candidate signals", async () => {

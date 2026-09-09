@@ -1,7 +1,11 @@
 import type { AlayaDaemonRuntime } from "./daemon-runtime-types.js";
 import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
 import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
-import { HqAnswerOverlapPairSource } from "@do-soul/alaya-core";
+import {
+  createSourceAdmissionPort,
+  fieldContractSha256,
+  HqAnswerOverlapPairSource
+} from "@do-soul/alaya-core";
 import type { FinalizeDaemonRuntimeWiringInput } from "../../../index.js";
 import { createPostTurnSignalReceiver } from "../../../garden/post-turn-extract/signal-receiver.js";
 import { createPrivacyEffectLookup } from "../../../mcp-memory/proposal/phases/privacy-hard-effect.js";
@@ -58,6 +62,10 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
       findRecordById: (workspaceId: string, recordId: string) =>
         input.fieldComposition.fieldRepos.records.findById(workspaceId, recordId)
     },
+    sourceAdmission: createSourceAdmissionPort({
+      sha256: fieldContractSha256,
+      stores: input.fieldComposition.stores
+    }),
     objectAnchorGate: input.pathRelationProposalService,
     synthesisEvidenceReader: createSynthesisEvidenceReader(input),
     synthesisMemberResolver: createSynthesisMemberResolver(input),

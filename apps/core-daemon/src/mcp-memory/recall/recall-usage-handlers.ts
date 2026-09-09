@@ -22,6 +22,7 @@ import {
   type SoulMemorySearchResponse,
   type SoulRecallHostContext,
   type SoulReportContextUsageRequest,
+  type SourceAdmissionPort,
   type UsageProofRecord,
   type UsageReport
 } from "@do-soul/alaya-protocol";
@@ -152,6 +153,7 @@ export interface RecallUsageHandlerDependencies {
       readonly source_body: string | null;
     }> | null;
   };
+  readonly sourceAdmission?: SourceAdmissionPort;
   readonly asyncSideEffectAudit?: {
     readonly eventLogRepo: AsyncSideEffectAuditEventLogPort;
     readonly runtimeNotifier?: AsyncSideEffectAuditNotifierPort;

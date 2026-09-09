@@ -83,6 +83,9 @@ async function finalizeExternalPostTurnEvidence(
     sourceObservation: payload.source_observation,
     candidates,
     signalReceiver: receiver,
+    ...(payload.admitted_source_root_id === undefined
+      ? {}
+      : { admittedSourceRootId: payload.admitted_source_root_id }),
     beforeReceive: async () => {
       if (params.deps.gardenTaskRepo!.refreshClaim(row.id, completionClaimedBy, params.now())) return;
       throw new GardenTaskValidationError(

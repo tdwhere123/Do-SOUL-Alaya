@@ -12,12 +12,19 @@ import {
   type ContextDeliveryRecord,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
-import { EventPublisher, SignalService } from "@do-soul/alaya-core";
+import {
+  createSourceAdmissionPort,
+  EventPublisher,
+  fieldContractSha256,
+  SignalService
+} from "@do-soul/alaya-core";
 import type { GardenComputeProvider } from "@do-soul/alaya-soul";
 import {
   createGardenBackgroundDataPorts,
   initDatabase,
   SqliteEventLogRepo,
+  SqliteEvidenceCapsuleRepo,
+  SqliteFieldSourceRecordRepo,
   SqliteGardenTaskRepo,
   SqliteHandoffGapRepo,
   SqliteHealthJournalRepo,
@@ -25,9 +32,12 @@ import {
   SqlitePathRelationRepo,
   SqliteRunRepo,
   SqliteSignalRepo,
+  SqliteSourceRootRecallReader,
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
+import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import type { BackgroundServiceConfig } from "../../../background/bootstrap.js";
 import { createGardenRuntime } from "../../../garden/runtime/runtime.js";
 import type { PostTurnSignalReceiver } from "../../../garden/post-turn-extract/signal-receiver.js";
@@ -111,6 +121,7 @@ export interface PostTurnPayload {
   readonly priority?: number;
   readonly created_at?: string;
   readonly source_observation?: NonNullable<CandidateMemorySignal["source_observation"]> | null;
+  readonly admitted_source_root_id?: string;
   readonly turn_index: number;
   readonly workspace_id: string;
   readonly turn_digest: {
@@ -288,6 +299,7 @@ export async function seedRun(runRepo: SqliteRunRepo, runId: string): Promise<vo
 }
 
 export function createMcpDeps(base: {
+  readonly database: StorageDatabase;
   readonly eventPublisher: EventPublisher;
   readonly gardenTaskRepo: SqliteGardenTaskRepo;
   readonly signalRepo: SqliteSignalRepo;
@@ -340,8 +352,27 @@ export function createMcpDeps(base: {
       findDeliveryById: async () => options.delivery === undefined ? createDeliveryRecord() : options.delivery
     },
     eventPublisher: base.eventPublisher,
-    gardenTaskRepo: base.gardenTaskRepo
+    gardenTaskRepo: base.gardenTaskRepo,
+    sourceAdmission: createSourceAdmissionPort({
+      sha256: fieldContractSha256,
+      stores: createSqliteFieldFormationStores({
+        repos: createDaemonFieldRepos({ database: base.database }),
+        database: base.database
+      })
+    })
   };
+}
+
+export function pageWorkspaceSourceRoots(database: StorageDatabase) {
+  return new SqliteSourceRootRecallReader(
+    new SqliteFieldSourceRecordRepo(database, fieldContractSha256),
+    new SqliteEvidenceCapsuleRepo(database)
+  ).page({
+    workspaceId: "workspace-1",
+    limit: 8,
+    nativeLimit: 8,
+    afterCursor: null
+  });
 }
 
 export async function recall(

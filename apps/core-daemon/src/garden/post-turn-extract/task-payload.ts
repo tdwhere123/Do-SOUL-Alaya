@@ -10,6 +10,7 @@ export interface PostTurnExtractTaskPayload {
   readonly created_at?: string;
   readonly source_observation: VerifiedDeliverySourceObservation | null;
   readonly turn_index: number;
+  readonly admitted_source_root_id?: string;
   readonly turn_digest: Readonly<{
     readonly last_messages: readonly Readonly<{
       readonly role: string;
@@ -23,12 +24,16 @@ export function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtra
     throw new Error("Invalid post-turn extract task payload.");
   }
   const createdAt = parseOptionalStringField(payload, "created_at");
+  const admittedSourceRootId = parseOptionalStringField(payload, "admitted_source_root_id");
   return {
     run_id: parseStringField(payload, "run_id"),
     workspace_id: parseStringField(payload, "workspace_id"),
     ...(createdAt === undefined ? {} : { created_at: createdAt }),
     source_observation: readVerifiedDeliverySourceObservation(payload.source_observation),
     turn_index: parsePostTurnIndex(payload.turn_index),
+    ...(admittedSourceRootId === undefined
+      ? {}
+      : { admitted_source_root_id: admittedSourceRootId }),
     turn_digest: { last_messages: parsePostTurnMessages(payload.turn_digest) }
   };
 }

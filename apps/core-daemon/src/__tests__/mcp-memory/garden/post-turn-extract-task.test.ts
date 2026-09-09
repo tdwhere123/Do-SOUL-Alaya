@@ -24,6 +24,7 @@ import {
   recall,
   reportUsage,
   sessionRunContext,
+  pageWorkspaceSourceRoots,
   unwrapOk,
   type GardenListPendingTasksOutput,
   type PostTurnPayload
@@ -74,6 +75,13 @@ describe("post-turn extract Garden task", () => {
       "memory-b"
     ]);
     expect(payload.turn_digest.last_messages[0]!.content_excerpt).toHaveLength(800);
+    expect(payload.admitted_source_root_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(pageWorkspaceSourceRoots(harness.database).rows.some((row) =>
+      row.kind === "source_record"
+      && row.original_complete === true
+      && (row.content ?? "").includes("x".repeat(800))
+      && (row.content ?? "").includes("x".repeat(900))
+    )).toBe(true);
 
     const listed = unwrapOk<GardenListPendingTasksOutput>(
       await harness.handler.call({

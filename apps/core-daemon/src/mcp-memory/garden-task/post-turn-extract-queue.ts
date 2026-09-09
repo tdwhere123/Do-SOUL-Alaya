@@ -5,9 +5,14 @@ import {
   GardenTier,
   POST_TURN_EXTRACT_EXCERPT_MAX_CHARS,
   type ContextDeliveryRecord,
-  type SoulReportContextUsageRequest
+  type SoulReportContextUsageRequest,
+  type SourceAdmissionPort
 } from "@do-soul/alaya-protocol";
 import { isDuplicateKeyError } from "@do-soul/alaya-storage";
+import {
+  admitPostTurnSourceRoot,
+  joinAdmittedTurnExcerpts
+} from "../../garden/post-turn-extract/admitted-source-root.js";
 import {
   createVerifiedDeliverySourceObservation,
   type VerifiedDeliverySourceObservation
@@ -41,6 +46,16 @@ export function enqueuePostTurnExtractTask(
   const lastMessages = normalizeTurnDigestMessages(request.turn_digest?.last_messages ?? []);
   const taskId = buildPostTurnExtractTaskId(workspaceId, runId, turnIndex);
   const createdAt = params.now();
+  const sourceObservation = linkedDelivery === null
+    ? null
+    : createVerifiedDeliverySourceObservation([linkedDelivery]);
+  const admittedSourceRootId = persistAdmittedTurnRoot(params.deps.sourceAdmission, {
+    taskId,
+    workspaceId,
+    createdAt,
+    lastMessages,
+    eventTime: sourceObservation?.observed_at ?? null
+  });
 
   try {
     params.deps.gardenTaskRepo.enqueue({
@@ -54,11 +69,10 @@ export function enqueuePostTurnExtractTask(
         runId,
         deliveredObjectIds,
         createdAt,
-        sourceObservation: linkedDelivery === null
-          ? null
-          : createVerifiedDeliverySourceObservation([linkedDelivery]),
+        sourceObservation,
         turnIndex,
-        lastMessages
+        lastMessages: sliceExtractDigestMessages(lastMessages),
+        admittedSourceRootId
       }),
       created_at: createdAt
     });
@@ -101,8 +115,45 @@ function resolveDeliveredObjectIds(request: SoulReportContextUsageRequest): read
   return Object.freeze([...new Set(ids)]);
 }
 
+function persistAdmittedTurnRoot(
+  admission: SourceAdmissionPort | undefined,
+  input: Readonly<{
+    readonly taskId: string;
+    readonly workspaceId: string;
+    readonly createdAt: string;
+    readonly lastMessages: readonly { readonly role: string; readonly content_excerpt: string }[];
+    readonly eventTime: string | null;
+  }>
+): string | undefined {
+  if (admission === undefined) {
+    return undefined;
+  }
+  const record = admitPostTurnSourceRoot({
+    admission,
+    workspaceId: input.workspaceId,
+    sourceId: `post-turn:${input.taskId}`,
+    content: joinAdmittedTurnExcerpts(input.lastMessages),
+    recordedAt: input.createdAt,
+    eventTime: input.eventTime
+  });
+  return record?.identity;
+}
+
 function normalizeTurnDigestMessages(
   messages: NonNullable<SoulReportContextUsageRequest["turn_digest"]>["last_messages"]
+): readonly { readonly role: string; readonly content_excerpt: string }[] {
+  return Object.freeze(
+    messages.map((message) =>
+      Object.freeze({
+        role: message.role,
+        content_excerpt: message.content_excerpt
+      })
+    )
+  );
+}
+
+function sliceExtractDigestMessages(
+  messages: readonly { readonly role: string; readonly content_excerpt: string }[]
 ): readonly { readonly role: string; readonly content_excerpt: string }[] {
   return Object.freeze(
     messages.map((message) =>
@@ -123,6 +174,7 @@ function buildPostTurnExtractPayload(input: {
   readonly sourceObservation: VerifiedDeliverySourceObservation | null;
   readonly turnIndex: number;
   readonly lastMessages: readonly { readonly role: string; readonly content_excerpt: string }[];
+  readonly admittedSourceRootId: string | undefined;
 }) {
   return Object.freeze({
     task_id: input.taskId,
@@ -133,6 +185,9 @@ function buildPostTurnExtractPayload(input: {
     priority: 20 as const,
     created_at: input.createdAt,
     ...(input.sourceObservation === null ? {} : { source_observation: input.sourceObservation }),
+    ...(input.admittedSourceRootId === undefined
+      ? {}
+      : { admitted_source_root_id: input.admittedSourceRootId }),
     turn_index: input.turnIndex,
     workspace_id: input.workspaceId,
     turn_digest: Object.freeze({

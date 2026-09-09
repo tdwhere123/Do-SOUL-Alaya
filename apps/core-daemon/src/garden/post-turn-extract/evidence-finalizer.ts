@@ -19,6 +19,7 @@ export interface PostTurnEvidenceFinalizationInput {
   readonly sourceObservation: CandidateMemorySignal["source_observation"];
   readonly candidates: readonly CandidateMemorySignal[];
   readonly signalReceiver: PostTurnSignalReceiver;
+  readonly admittedSourceRootId?: string;
   readonly beforeReceive?: () => Promise<void>;
 }
 
@@ -26,7 +27,12 @@ export async function finalizePostTurnEvidence(
   input: PostTurnEvidenceFinalizationInput
 ): Promise<readonly string[]> {
   const received = await receiveCandidateSignals(input);
-  if (!received.createdEvidence || !candidatesPreserveOriginalTurn(input)) {
+  if (
+    input.admittedSourceRootId === undefined &&
+    (!received.createdEvidence || !candidatesPreserveOriginalTurn(input))
+  ) {
+    // The extract-task digest is an 800-char slice. Rebuilding from it would
+    // admit a clipped body as if it were the complete original.
     await receiveEvidenceFallback(input, received.signalIds);
   }
   await input.beforeReceive?.();

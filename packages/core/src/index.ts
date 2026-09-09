@@ -48,6 +48,7 @@ export {
   type FieldFormationStores,
   type SourceRecordEvidenceBinding
 } from "./memory/evidence-create/field-stores.js";
+export { createSourceAdmissionPort } from "./memory/evidence-create/source-admission.js";
 export { createProjectionGenerationReceipt } from
   "./recall/field/retrieval/projection/generation-identity.js";
 export * from "./recall/field/retrieval/projection/generation-lifecycle.js";

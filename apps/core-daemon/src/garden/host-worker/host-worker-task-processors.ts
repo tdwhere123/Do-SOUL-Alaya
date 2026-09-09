@@ -235,6 +235,9 @@ async function emitPostTurnExtractSignals(
     turnMessages: buildPostTurnConversationMessages(payload),
     sourceObservation: payload.source_observation,
     signalReceiver: input.signalReceiver,
+    ...(payload.admitted_source_root_id === undefined
+      ? {}
+      : { admittedSourceRootId: payload.admitted_source_root_id }),
     beforeReceive: async () => await refreshPostTurnExtractClaim(
       input.gardenTaskRepo,
       row.id,
