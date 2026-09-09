@@ -25,10 +25,9 @@ import { parseObjectId } from "../../shared/validators.js";
 // edge_type enum (mapRelationKindToGraphEdgeType) and path_id is the
 // edge_id. countInbound* below also read the path plane: directional paths
 // contribute at their target, while unordered semantic paths contribute at
-// both endpoints, and feed recall graph_support scoring
-// (RecallServiceGraphSupportPort). The result is positive-only: negative
-// paths (recall_bias < 0) never contribute here — active suppression is the
-// governance-gated recall-plane channel, not graph_support. This service is
+// both endpoints. These inspection aggregates are positive-only: negative
+// paths (recall_bias < 0) never contribute here. Ordinary conditional-field
+// Recall owns its association and governance decisions. This service is
 // path-only: it has no edge repo and exposes no edge-write surface.
 export interface GraphExploreServicePathRepoPort {
   findByAnchors(

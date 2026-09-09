@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
-import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
+import { groundedOutputDerivations, type GroundingProgress } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   DerivationSchema,
@@ -283,9 +283,11 @@ describe("index representation continuity", () => {
     expect(sameMorning.completeness.logical_index).not.toBe("invalidated");
   });
 
-  it("does not let grounding work consume the payload reserve to zero entries", () => {
+  it("retains grounding so a one-unit continuation can deliver the requested entry", () => {
     const value = fieldValue("cfg", 850);
-    const index = projectAcceptingIndex({
+    let progress: GroundingProgress | undefined;
+    let remaining = -1;
+    const input: AcceptingProjectionInput = {
       ...baseInput({
         snapshot: {
           ...snapshotOf([value]),
@@ -295,10 +297,21 @@ describe("index representation continuity", () => {
         expires_at: EXPIRES_AT
       }),
       output_derivations: undefined,
-      transition_derivations: {}
-    });
-    expect(index.entries.map((entry) => entry.object_id)).toEqual(["cfg"]);
-    expect(index.entries).not.toEqual([]);
+      transition_derivations: {},
+      on_grounding_progress: (next) => { progress = next; },
+      on_remaining_reserve: (next) => { remaining = next; }
+    };
+    const first = projectAcceptingIndex(input);
+    expect(first.entries).toEqual([]);
+    expect(first.continuation).not.toBeNull();
+    expect(first.completeness.logical_index).toBe("open");
+    expect(progress?.completed_work).toBe(1);
+    expect(remaining).toBe(0);
+    const second = continueAcceptingIndex(first, { ...input, grounding_progress: progress });
+    expect(second.entries.map((entry) => entry.object_id)).toEqual(["cfg"]);
+    expect(second.continuation).toBeNull();
+    expect(progress?.completed_work).toBe(1);
+    expect(remaining).toBe(0);
   });
 
   it("stops projection when the remaining reserve is exhausted", () => {

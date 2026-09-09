@@ -3,7 +3,7 @@ import { ScopeClass } from "@do-soul/alaya-protocol";
 import { buildRecallPolicy } from "../../shared/recall-policy.js";
 
 describe("recall policy delivery path", () => {
-  it("passes optional legacy rollback through the public builder", () => {
+  it("preserves the ignored delivery path field for policy compatibility", () => {
     const omitted = buildRecallPolicy({
       runtimeId: "policy-omitted",
       taskSurfaceId: "surface-omitted",
@@ -12,7 +12,7 @@ describe("recall policy delivery path", () => {
       conflictAwareness: true,
       maxTotalTokens: 2_000
     });
-    const rollback = buildRecallPolicy({
+    const compatible = buildRecallPolicy({
       runtimeId: "policy-legacy",
       taskSurfaceId: "surface-legacy",
       maxResults: 5,
@@ -22,6 +22,6 @@ describe("recall policy delivery path", () => {
       deliveryPath: "legacy"
     });
     expect(omitted.fine_assessment.delivery_path).toBeUndefined();
-    expect(rollback.fine_assessment.delivery_path).toBe("legacy");
+    expect(compatible.fine_assessment.delivery_path).toBe("legacy");
   });
 });

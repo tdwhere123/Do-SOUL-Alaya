@@ -210,21 +210,23 @@ design lens, not a proved runtime. **LIVE** HEAD is the conditional field
 Historical query-proof `prefixSK` and C01 budget-aware-q are receipts, not
 the live selector.
 
-**Safe Dominance** — LIVE/historical query-proof vocabulary: a strict
+**Safe Dominance** — Historical query-proof vocabulary: a strict
 query-conditioned pointwise partial order over applicable attributed
 observations. It is not a scalar score or general outranking; a cycle is a
-contract failure. TARGET relevance is rank fusion `R(v)`, not this order.
+contract failure in that historical contract. The current conditional field
+uses declared association domains and accepting product states.
 
-**Pointwise Frontier** — A deterministic layer of safe-dominance structure.
+**Pointwise Frontier** — A historical deterministic layer of safe-dominance structure.
 Frontier index is not Gamma gain and does not require F1-before-F2 capture when
 a lower frontier supplies positive gain on a compiled Gamma atom that every
-eligible higher-frontier candidate is proved not to cover.
+eligible higher-frontier candidate is proved not to cover. This is archive
+vocabulary, not an ordinary Recall scheduling rule.
 
-**Gamma_q** — LIVE/historical query-proof vocabulary: query-compiled,
+**Gamma_q** — Historical query-proof vocabulary: query-compiled,
 selected-set-dependent marginal strata (answer binding/position,
 required-proposition, compiler-required certified-independent support).
-**TARGET** does not use compiled Gamma as the live selector; `Q(S)` is the
-lexicographic evidence-set objective.
+Compiled Gamma and the later `Q(S)` evidence-set objective are retired decision
+contracts. The current owner is the conditional accepting index in `recall.md`.
 
 **Budgeted Capture Walk** — **LIVE:** observer work and page budget on the
 conditional field; continuation is offset paging plus worker-lifetime
@@ -236,20 +238,20 @@ change which accepting states fit one packet. Historical `prefixSK` /
 the live conditional field. Historical family-max RRF
 (`fusion-delivery-families.ts`) is not the live scorer. See `recall.md`.
 
-**Path-Aware Recall** — Intended runtime manifestation of
-`PathRelation` via typed transfer \(G_L\). Active recall-eligible paths can
-introduce graph-expansion candidates, and attributed target inflow can count as
-integrated-flood fuel. No-inflow, unavailable, storage-error, ineligible, and
-non-positive states remain explicit and do not fabricate fuel.
+**Path-Aware Recall** — Query-conditioned traversal of eligible
+`PathRelation` projections through the conditional field. Transfers preserve
+bindings, semantic time, association domains and derivation dependencies.
+Only accepting product states enter the index. Missing measurements and
+unavailable observations remain explicit; propagation does not establish truth.
 
-**Embedding Supplement** — Vector signal that may score or, in the
-live field, seed \(\Omega\). The bundled local ONNX provider is enabled
-by default after verified startup warmup; operators can explicitly
-disable it. It never decides durable truth (invariant §18). On the
-current path it can inject candidates and rescore an eligible pool. Historical
-discovery rates belong to their frozen benchmark commit. **TARGET:**
-embedding is the extension family only; unused extension capacity is not
-lent to baseline; E1 cannot evict E0 identities. See `recall.md`.
+**Embedding Supplement** — Optional vector infrastructure with independent
+storage and enrichment consumers. The conditional observer interface includes
+a bounded embedding-measurement extension; the ordinary daemon reader does
+not currently bind it. Ordinary Recall does not call a provider or use the
+retired candidate-injection/pool-rescoring path. Vector presence alone does
+not define conditional association or durable truth (invariant §18).
+Historical discovery rates and E0/E1 ranking promises belong to their frozen
+benchmark contracts. See `recall.md`.
 
 **API Embedding Provider** — A network-backed embedding supplement. API use is
 always explicit opt-in through `ALAYA_EMBEDDING_PROVIDER=openai` and requires

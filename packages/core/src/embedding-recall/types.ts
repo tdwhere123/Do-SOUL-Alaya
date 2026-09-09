@@ -174,8 +174,8 @@ export interface PreparedEmbeddingQueryHandle {
   // no provider invocation was issued for this prepared query. False when
   // the provider was called (even if the call later failed or is still
   // pending). Stable across the handle lifetime — set at handle creation
-  // and not mutated by subsequent reads. Consumed by RecallService to
-  // populate RecallTokenEconomy.embedding_inference_calls.
+  // and not mutated by subsequent reads. Embedding diagnostics retain this
+  // distinction independently of ordinary conditional-field Recall.
   readonly cacheHit: boolean;
   getSnapshot(): PreparedEmbeddingQuerySnapshot;
   waitForSnapshot?(timeoutMs: number): Promise<PreparedEmbeddingQuerySnapshot>;

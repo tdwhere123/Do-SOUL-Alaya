@@ -28,9 +28,11 @@ import { admitRequestBudget } from "../reference/bind-max-min.js";
 import { interpretQuery } from "../reference/interpret-query.js";
 import {
   SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
+  SourceFilterCapacityError,
   attachSourceFilters,
   calendarYesterdayWindow,
   classifyOrdinaryRequest,
+  decodeSourceFilters,
   encodeSourceFilters,
   openAnchorTimeGuard,
   ordinaryRemainder,
@@ -192,6 +194,7 @@ function compileTyped(
     || hypotheses === undefined
     || timeWindow === "invalid"
     || queryId === "invalid"
+    || (program.success && !sourceFilterPredicatesValid(program.data))
   ) {
     return interpretationOf({
       query_id: fallbackQueryId(input.query_id, "malformed"),
@@ -240,11 +243,19 @@ function compileOrdinary(
   }
   const classified = classifyOrdinaryRequest(input.text);
   const relations = input.relations ?? proposeOrdinaryRelations(input.text);
-  const interpreted = relations.length > 0
-    ? compileOpenRelations({ ...input, relations }, snapshotId, budget, view, queryId, classified, yesterday, hints)
-    : classified.kind === "lexical"
-      ? compileLexicalRequest(input, snapshotId, budget, view, queryId, hints)
-      : compileSupportedRequest(input, snapshotId, budget, view, queryId, classified, yesterday, hints);
+  let interpreted: QueryInterpretation;
+  try {
+    interpreted = relations.length > 0
+      ? compileOpenRelations({ ...input, relations }, snapshotId, budget, view, queryId, classified, yesterday, hints)
+      : classified.kind === "lexical"
+        ? compileLexicalRequest(input, snapshotId, budget, view, queryId, hints)
+        : compileSupportedRequest(input, snapshotId, budget, view, queryId, classified, yesterday, hints);
+  } catch (error) {
+    if (!(error instanceof SourceFilterCapacityError)) throw error;
+    return interpretationOf({ query_id: fallbackQueryId(input.query_id, "resource-rejected"),
+      status: "resource_rejected", snapshot_id: snapshotId, program: EPSILON, view,
+      interpretation_clock: input.interpretation_clock });
+  }
   return { ...interpreted, query_id: identityFor(queryId, {
     program: interpreted.program, view: interpreted.view, hypotheses: interpreted.hypotheses,
     source_guard: interpreted.source_guard,
@@ -391,7 +402,7 @@ function compileOpenRelations(
     window === undefined ? undefined : yesterdayAnchorGuard(window)
   );
   const parsed = compiled === undefined ? undefined : QueryProgramSchema.safeParse(compiled);
-  if (parsed === undefined || !parsed.success) {
+  if (parsed === undefined || !parsed.success || !sourceFilterPredicatesValid(parsed.data)) {
     return ordinaryMalformed(input, snapshotId, view);
   }
   const program = admitOrdinaryProgram(parsed.data, input, hints);
@@ -432,6 +443,15 @@ function consumeMemoryIfNeeded(
     return;
   }
   memory.readAuthorizedSnapshot({ snapshot_id: snapshotId, budget });
+}
+
+function sourceFilterPredicatesValid(program: QueryProgram): boolean {
+  try {
+    for (const relation of collectRelations(program)) decodeSourceFilters(relation.guard.predicate_name);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function admissionStatus(

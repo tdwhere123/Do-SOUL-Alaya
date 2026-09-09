@@ -14,7 +14,7 @@ import {
   SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
   type QueryMemoryPort
 } from "../../../../recall/conditional-field/query/compile-query.js";
-import { sourceFactsSatisfyFilters } from "../../../../recall/conditional-field/query/ordinary-language.js";
+import { decodeSourceFilters, sourceFactsSatisfyFilters } from "../../../../recall/conditional-field/query/ordinary-language.js";
 import {
   completenessForInterpretationStatus,
   guardAppliesToVariable,
@@ -430,9 +430,9 @@ describe("conditional-field query compiler", () => {
     });
     expect(filtered.query_id).not.toBe(base.query_id);
     expect(filtered.status).toBe("partial");
-    expect(filtered.source_guard?.predicate_name).toContain("dimension=episode");
-    expect(filtered.source_guard?.predicate_name).toContain("tag=absent-tag");
-    expect(filtered.source_guard?.predicate_name).toContain("time_field=created_at");
+    expect(decodeSourceFilters(filtered.source_guard?.predicate_name)).toEqual({
+      dimension_filter: ["episode"], domain_tag_filter: ["absent-tag"], time_field: "created_at"
+    });
     expect(interpretationCoverageFor(filtered.status, filtered)).toBe("open");
     expect(interpretationCoverageFor(filtered.status, filtered)).not.toBe("complete");
   });
@@ -447,9 +447,9 @@ describe("conditional-field query compiler", () => {
       since: YESTERDAY_START,
       until: YESTERDAY_END
     });
-    const packed = interpretation.source_guard?.predicate_name ?? "";
-    expect(packed).toContain(`since=${YESTERDAY_START}`);
-    expect(packed).not.toContain("time_field=created_at");
+    expect(decodeSourceFilters(interpretation.source_guard?.predicate_name)).toEqual({
+      since: YESTERDAY_START, until: YESTERDAY_END
+    });
     expect(sourceFactsSatisfyFilters(
       { since: YESTERDAY_START },
       { created_at: YESTERDAY_INSTANT }

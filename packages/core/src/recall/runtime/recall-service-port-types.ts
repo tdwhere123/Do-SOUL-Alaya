@@ -39,7 +39,3 @@ export interface RecallTemporalProjectionReadOptions {
 export interface TokenEstimator {
   estimate(text: string): number;
 }
-
-export interface RecallServiceWarnPort {
-  (message: string, meta: Record<string, unknown>): void;
-}

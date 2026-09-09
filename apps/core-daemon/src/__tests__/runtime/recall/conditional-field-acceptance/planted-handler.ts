@@ -32,7 +32,7 @@ export async function recallThroughHandler(
     readonly now?: string;
   }
 ) {
-  const { dependencies } = createDependencies([]);
+  const { dependencies } = createDependencies();
   let ticks = 0;
   const clock = request.now ?? INTERPRETATION_CLOCK;
   const service = new RecallService({
@@ -94,7 +94,7 @@ export function toConsumer(
 }
 
 export async function recallThroughCli(slice: SourceSlice, query: string, maxResults: number) {
-  const { dependencies } = createDependencies([]);
+  const { dependencies } = createDependencies();
   const service = new RecallService({
     ...dependencies,
     now: () => INTERPRETATION_CLOCK,

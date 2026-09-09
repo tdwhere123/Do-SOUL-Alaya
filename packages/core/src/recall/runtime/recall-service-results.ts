@@ -3,13 +3,12 @@ import type {
   AssociativeFactKeyProjectionForm,
   FtsLaneId,
   MemoryEntry,
-  PathAnchorRef,
   RecallCandidate,
   SoulActiveConstraint,
   SoulMemorySearchDegradationReason
 } from "@do-soul/alaya-protocol";
 
-export type SelectGammaSynthesisStatus =
+export type RecallSynthesisStatus =
   | Readonly<{ readonly status: "absent" }>
   | Readonly<{ readonly status: "ok"; readonly text: string }>
   | Readonly<{
@@ -17,32 +16,6 @@ export type SelectGammaSynthesisStatus =
     readonly failure: string;
     readonly text?: string;
   }>;
-
-/** Immutable scoring provenance prevents diagnostics from re-querying mutable path state. */
-export interface PathInflowEdge {
-  /** Optional only for legacy or synthetic callers; PathRelation producers populate these fields. */
-  readonly pathId?: string;
-  readonly relationKind?: string;
-  readonly seedObjectId: string;
-  readonly targetObjectId?: string;
-  readonly seedAnchor?: Readonly<PathAnchorRef>;
-  readonly targetAnchor?: Readonly<PathAnchorRef>;
-  readonly pathSourceVersion?: string;
-  readonly weight: number;
-}
-
-export type RecallPathInflowAvailability =
-  | "not_observed"
-  | "available"
-  | "unavailable"
-  | "storage_error";
-
-
-export interface EvidenceSupportVector {
-  readonly source_kind: "evidence_ref";
-  readonly source_id: string;
-  readonly support: number;
-}
 
 export interface RecallEvidenceProjectionMatchReceipt {
   readonly evidence_ref: string;
@@ -102,7 +75,7 @@ export interface RecallResult {
   readonly execution_receipt?: import("./conditional-field-execution-receipt.js").ConditionalFieldExecutionReceipt;
   readonly source_metadata?: Readonly<Record<string, RecallSourceMetadata>>;
   readonly candidates: readonly Readonly<RecallCandidate>[];
-  readonly synthesis: SelectGammaSynthesisStatus;
+  readonly synthesis: RecallSynthesisStatus;
   readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
   readonly active_constraints_count: number | null;
   readonly active_constraints_completeness?: "complete" | "incomplete";

@@ -1,13 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { RecallService, runConditionalFieldRecall } from "../../recall/recall-service.js";
 import { createDependencies, createTaskSurface } from "./recall-service-test-fixtures.js";
 
 describe("conditional Recall request snapshot", () => {
-  it("executes the target under one snapshot without invoking legacy embedding phases", async () => {
+  it("executes the target under one snapshot and exposes unavailable observers", async () => {
     const events: string[] = [];
-    const { dependencies, appendSpy } = createDependencies([]);
-    const querySupplement = vi.fn(async () => { throw new Error("query provider forbidden"); });
-    const prepareRecallEmbeddingSnapshot = vi.fn(async () => { throw new Error("legacy embedding phase forbidden"); });
+    const { dependencies } = createDependencies();
     const service = new RecallService({
       ...dependencies,
       defaultPolicyDecorator: (policy) => policy,
@@ -16,7 +14,6 @@ describe("conditional Recall request snapshot", () => {
         commit: () => { events.push("commit"); },
         rollback: () => { events.push("rollback"); }
       },
-      embeddingRecallService: { querySupplement, prepareRecallEmbeddingSnapshot },
       conditionalFieldPort: {
         recall: async (request) => {
           expect(events).toEqual(["begin"]);
@@ -31,16 +28,12 @@ describe("conditional Recall request snapshot", () => {
     expect(events).toEqual(["begin", "observe", "commit"]);
     expect(result.index.completeness.observed_coverage).toBe("unavailable");
     expect(result.provider_calls).toBe(0);
-    expect(querySupplement).not.toHaveBeenCalled();
-    expect(prepareRecallEmbeddingSnapshot).not.toHaveBeenCalled();
-    expect(appendSpy).not.toHaveBeenCalled();
   });
 
-  it("rolls back a failed target read and retains the original fault without provider fallback", async () => {
+  it("rolls back a failed target read and retains the original fault without replacing its failure", async () => {
     const events: string[] = [];
-    const { dependencies, appendSpy } = createDependencies([]);
+    const { dependencies } = createDependencies();
     const failure = new Error("snapshot source failed");
-    const querySupplement = vi.fn(async () => { throw new Error("query provider forbidden"); });
     const service = new RecallService({
       ...dependencies,
       defaultPolicyDecorator: (policy) => policy,
@@ -49,13 +42,10 @@ describe("conditional Recall request snapshot", () => {
         commit: () => { events.push("commit"); },
         rollback: () => { events.push("rollback"); }
       },
-      embeddingRecallService: { querySupplement },
       conditionalFieldPort: { recall: async () => { throw failure; } }
     });
     await expect(service.recall({ taskSurface: createTaskSurface(),
       workspaceId: "workspace-1", strategy: "analyze" })).rejects.toBe(failure);
     expect(events).toEqual(["begin", "rollback"]);
-    expect(querySupplement).not.toHaveBeenCalled();
-    expect(appendSpy).not.toHaveBeenCalled();
   });
 });

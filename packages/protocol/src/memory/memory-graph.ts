@@ -37,62 +37,18 @@ export const MemoryGraphEdgeType = {
 
 export const MemoryGraphEdgeTypeSchema = z.enum(memoryGraphEdgeTypeValues);
 
-// Single source of truth for how each edge_type participates in recall.
-// Two orthogonal recall concepts share one per-edge_type row so they can
-// never silently diverge again:
-//
-//   contribution_weight — the static per-edge contribution. Consumed in
-//     two places that legitimately reuse the same value: the inbound
-//     weighted-aggregate (`RecallServiceGraphSupportPort.countInboundEdgesWeighted`,
-//     read by recall scoring as `graphSupportFactor`) and the single-edge
-//     admission score in two-hop graph expansion (`scoreGraphExpansionEdge`,
-//     which floors negatives at 0 for traversal while the aggregate keeps
-//     the sign).
-//   hop_decay — the per-hop multiplicative decay applied only at hop >= 2
-//     in graph expansion. `null` for non-transitive types, which never
-//     propagate past one hop.
-//   transitive — whether the type propagates in multi-hop expansion. The
-//     graph-expansion tracked-edge-type set is exactly the transitive rows.
-//
-// invariant: graph_support counts inbound POSITIVE paths only. The inbound
-// aggregate (`countInboundEdgesWeighted`) filters to recall-eligible paths
-// (active lifecycle AND recall_bias > 0) BEFORE summing `contribution_weight`,
-// so the negative-signal kinds (supersedes / contradicts / incompatible_with,
-// recall_bias < 0) never enter this sum at all — they do NOT offset positive
-// graph_support. Negative-path suppression lives solely in the
-// governance-gated active-suppression channel in recall-service.ts, not in
-// this aggregate. The resulting positive-only sum is clamped to [0, 3] by
-// `normalizeGraphSupport`; the upper clamp matches the rest of the score range.
-// see also: packages/core/src/relations/path-relations/graph-explore-service.ts
-//   (countInbound* positive-only filter via isPathRecallEligible).
-//
-// invariant: RECALLS edge accumulation can saturate graph_support once
-// inbound RECALLS count × weight crosses the upper clamp. A high-traffic
-// agent that repeatedly reports the same memory used will pin its
-// preferred memories to max graph_support; per-run / per-window decay
-// would be the principled fix.
-//
-// invariant: `EDGE_TYPE_RECALL_MODEL` is the single contribution-weight
-// source even though durable writes no longer land in `memory_graph_edges`.
-// Recall graph_support scoring (`countInboundEdgesWeighted`) reads this table
-// over the inbound positive-path aggregate. No code path creates a
-// `memory_graph_edges` row.
-//
-// invariant (graph_support zero-drift, narrowly): graph_support is zero-drift
-// across an accept-minted path (`EdgeProposalService.acceptProposal`) and an
-// auto-producer path of the SAME mapped edge_type, because
-// `countInboundEdgesWeighted` weights each inbound path by its mapped
-// edge_type's `contribution_weight` here — NOT by recall_bias. The minted and
-// auto-producer paths are NOT otherwise numerically identical: auto-producer
-// seed profiles differ on recall_bias magnitude, strength, governance_class,
-// and relation_kind. Only the graph_support contribution coincides, and only
-// when the two map to the same edge_type.
+// Graph inspection retains static edge weights for positive inbound path
+// aggregates. These are not conditional-field association or delivery scores.
+// The historical hop-decay and transitivity fields remain part of this model;
+// ordinary Recall does not run graph expansion from them.
+// GraphExploreService filters ineligible paths before summing contributions,
+// so a negative path does not cancel an independently positive contribution.
 export interface EdgeTypeRecallModelEntry {
   // Static per-edge contribution; negative for suppressing edge types.
   readonly contribution_weight: number;
-  // Per-hop multiplicative decay at hop >= 2; null when not transitive.
+  // Historical per-hop decay; null when the retired expansion was non-transitive.
   readonly hop_decay: number | null;
-  // Whether the type propagates in multi-hop graph expansion.
+  // Historical multi-hop expansion classification.
   readonly transitive: boolean;
 }
 

@@ -244,7 +244,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       query: "yesterday failed deployment",
       max_results: 800
     });
-    const { dependencies } = createDependencies([]);
+    const { dependencies } = createDependencies();
     const readBounded = createBoundedActiveConstraintsReader(slice.database);
     const service = new RecallService({
       ...dependencies,
@@ -294,7 +294,7 @@ async function openPlantedSlice() {
 function createTickingHandlerSession(
   slice: Awaited<ReturnType<typeof openSourceSlice>>
 ) {
-  const { dependencies } = createDependencies([]);
+  const { dependencies } = createDependencies();
   const readBounded = createBoundedActiveConstraintsReader(slice.database);
   let ticks = 0;
   const service = new RecallService({

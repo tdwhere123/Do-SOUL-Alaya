@@ -9,7 +9,7 @@ import { FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID } from
   "../../../../../../packages/core/src/memory/evidence-create/evidence-semantic-completeness.js";
 import { binaryUseEvidenceSemanticGraph } from
   "../../../../../../packages/core/src/__tests__/memory/evidence-create/semantic-graph-fixture.js";
-import { EVIDENCE_ID, MEMORY_ID } from "../../runtime/field/p217-planted-harness.js";
+import { EVIDENCE_ID, MEMORY_ID } from "../../runtime/field/source-field-harness.js";
 import {
   assertionSignal,
   ASSERTION,

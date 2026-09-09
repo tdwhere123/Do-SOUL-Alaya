@@ -22,9 +22,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   EvidenceService,
-  RecallService,
-  fieldContractSha256,
-  type RecallServiceDependencies
+  fieldContractSha256
 } from "@do-soul/alaya-core";
 import {
   initDatabase,
@@ -60,7 +58,7 @@ export function createPlantedHarness() {
       return this.openDatabase(":memory:", { seed: true });
     },
     createTempFilename(): string {
-      const root = mkdtempSync(join(tmpdir(), "alaya-p217-"));
+      const root = mkdtempSync(join(tmpdir(), "alaya-source-field-"));
       trackedRoots.add(root);
       return join(root, "alaya.db");
     },
@@ -120,22 +118,6 @@ export async function persistMemory(
   entry: MemoryEntry
 ): Promise<Readonly<MemoryEntry>> {
   return await new SqliteMemoryEntryRepo(database).create(entry);
-}
-
-export function createPlantedRecall(input: Readonly<{
-  readonly database: StorageDatabase;
-  readonly field: PlantedField;
-  readonly memoryRepo: RecallServiceDependencies["memoryRepo"];
-  readonly extra?: Partial<RecallServiceDependencies>;
-}>): RecallService {
-  return new RecallService({
-    now: () => CLOCK,
-    generateRuntimeId: () => RUNTIME_ID,
-    memoryRepo: input.memoryRepo,
-    slotRepo: { findByWorkspace: async () => [] },
-    eventLogRepo: new SqliteEventLogRepo(input.database),
-    ...input.extra
-  });
 }
 
 export async function produceAdaSource(

@@ -114,7 +114,6 @@ function buildRecallServiceInput(
     synthesisService: foundation.synthesisService,
     enqueueEnrichPending: repositories.enqueueEnrichPending,
     pathFailureHealthInboxPort: foundation.pathFailureHealthInboxPort,
-    recallFailureHealthInboxPort: foundation.recallFailureHealthInboxPort,
     evidenceService: foundation.evidenceService,
     fieldComposition: repositories.fieldComposition,
     openSemanticFactorExtractionPort: {

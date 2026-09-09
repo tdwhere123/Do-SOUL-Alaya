@@ -23,7 +23,6 @@ export * from "./relations/relation-assertions/relation-assertion-service-types.
 export * from "./relations/relation-assertions/relation-projection-policy.js";
 export * from "./relations/producers/path-candidate-sink.js";
 export * from "./relations/path-relations/path-failure-health-inbox.js";
-export * from "./recall/runtime/recall-failure-health-inbox.js";
 export * from "./recall/embedding-mcp-degradation.js";
 export * from "./runtime/dirty-state-panic-service.js";
 export * from "./dynamics/dynamics-constants-runtime.js";
@@ -111,7 +110,6 @@ export * from "./recall/field/finite-field-seal.js";
 export * from "./recall/field/finite-field-capture.js";
 export * from "./recall/field/object-embedding-field-capture.js";
 export * from "./recall/field/evidence-semantic-field-capture.js";
-export * from "./recall/field/fact-frame-semantic-factors.js";
 export * from "./shared/query-fact-frame-extraction-port.js";
 export * from "./shared/query-fact-frame-extraction-rules.js";
 export {

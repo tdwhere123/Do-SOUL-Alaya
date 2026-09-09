@@ -13,8 +13,7 @@ import type {
   SessionOverrideService,
   SynthesisService,
   TaskSurfaceBuilder,
-  PathFailureHealthInboxPort,
-  RecallFailureHealthInboxPort
+  PathFailureHealthInboxPort
 } from "@do-soul/alaya-core";
 import type { ContextDeliveryRecord } from "@do-soul/alaya-protocol";
 import type {
@@ -96,7 +95,6 @@ export type CreateRecallMaterializationWiringInput = {
   readonly signalRepo: SqliteSignalRepo;
   readonly sourceGroundingDeferQueueRepo: SqliteSourceGroundingDeferQueueRepo;
   readonly pathFailureHealthInboxPort: PathFailureHealthInboxPort;
-  readonly recallFailureHealthInboxPort: RecallFailureHealthInboxPort;
   readonly evidenceService: EvidenceService;
   readonly fieldComposition: import("../field/field-composition.js").DaemonFieldComposition;
   readonly openSemanticFactorExtractionPort?: import("@do-soul/alaya-core")

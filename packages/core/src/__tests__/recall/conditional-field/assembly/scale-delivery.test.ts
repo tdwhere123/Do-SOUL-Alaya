@@ -149,6 +149,7 @@ function collectPages(readers: ObserverReaders, budget: RequestBudget, maximum: 
     pages.push(index);
     continuation = index.continuation;
     if (continuation === null) break;
+    expect(continuation.continuation_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
   }
   return pages;
 }

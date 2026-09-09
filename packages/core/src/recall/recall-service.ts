@@ -6,8 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { type NodeStrategy } from "../conversation/task-surface-builder.js";
 import type {
-  RecallServiceDependencies,
-  RecallServiceWarnPort
+  RecallServiceDependencies
 } from "./runtime/recall-service-types.js";
 import { buildDefaultPolicy } from "./runtime/orchestration.js";
 import {
@@ -17,7 +16,6 @@ import {
   type RecallExecutionParams
 } from "./runtime/recall-service-runner.js";
 import type { ObserverReaders } from "./conditional-field/observers/observe.js";
-import { wrapRecallFaultWarn } from "./runtime/recall-failure-health-inbox.js";
 
 export type RecallServiceFieldDeps = Readonly<{
   readonly observerReaders?: ObserverReaders;
@@ -68,22 +66,13 @@ export type {
   RecallCandidate,
   RecallCandidateDropReason,
   RecallResult,
-  RecallServiceBudgetPenaltyPort,
   RecallServiceActiveConstraintsPort,
-  RecallServiceClaimResolverPort,
   RecallServiceDependencies,
   RecallServiceEvidenceSearchPort,
-  RecallServiceEmbeddingRecallPort,
-  RecallServiceEventLogRepoPort,
-  RecallServiceGraphSupportPort,
   RecallServiceMemoryRepoPort,
   RecallServicePathExpansionPort,
   RecallServicePathPlasticityPort,
-  RecallServiceProjectMappingPort,
-  RecallServiceSlotRepoPort,
   RecallServiceSynthesisSearchPort,
-  RecallServiceWarnPort,
-  RecallTokenEconomy,
   TokenEstimator
 } from "./runtime/recall-service-types.js";
 export { makeTokenEstimator } from "./runtime/recall-service-types.js";
@@ -97,7 +86,6 @@ export {
 export class RecallService {
   private readonly generateRuntimeId: () => string;
   private readonly now: () => string;
-  private readonly warn: RecallServiceWarnPort;
 
   public constructor(
     private readonly dependencies: RecallServiceDependencies &
@@ -105,18 +93,11 @@ export class RecallService {
   ) {
     this.generateRuntimeId = dependencies.generateRuntimeId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
-    this.warn = dependencies.warn ?? (() => undefined);
   }
 
   public async recall(params: ConditionalFieldRecallParams): Promise<ConditionalFieldRecallResult> {
     return executeRecall({
       dependencies: this.dependencies,
-      warn: wrapRecallFaultWarn(
-        this.warn,
-        this.dependencies.recallFailureHealthInbox,
-        params.workspaceId,
-        this.now
-      ),
       now: this.now,
       buildDefaultPolicy: (strategy, taskSurfaceRef, capturedAt) =>
         this.buildDefaultPolicy(strategy, taskSurfaceRef, capturedAt),

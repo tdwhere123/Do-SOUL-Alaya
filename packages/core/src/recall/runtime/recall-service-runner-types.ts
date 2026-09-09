@@ -6,9 +6,7 @@ import type {
 import type { NodeStrategy } from "../../conversation/task-surface-builder.js";
 import type { RecallTimeFilter } from "./recall-service-helpers.js";
 import type {
-  RecallDegradationReason,
-  RecallServiceDependencies,
-  RecallServiceWarnPort
+  RecallServiceDependencies
 } from "./recall-service-types.js";
 import type { RecallReadSnapshotPort } from "./recall-read-snapshot.js";
 
@@ -37,7 +35,6 @@ export interface RecallExecutionParams {
 
 export interface RecallExecutionContext {
   readonly dependencies: RecallServiceDependencies;
-  readonly warn: RecallServiceWarnPort;
   readonly now: () => string;
   readonly readSnapshot?: RecallReadSnapshotPort;
   readonly buildDefaultPolicy: (
@@ -45,5 +42,4 @@ export interface RecallExecutionContext {
     taskSurfaceRef: string,
     capturedAt: string
   ) => Readonly<RecallPolicy>;
-  readonly degradationReasons?: Set<RecallDegradationReason>;
 }

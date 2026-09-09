@@ -116,22 +116,15 @@ export type RecallEvalAttribution = z.infer<typeof RecallEvalAttributionSchema>;
 // call cost in token-shaped work — delivered tokens, pool sizes, evaluated
 // candidates, fusion-stream coverage, and embedding provider invocations.
 //
-// These figures publish what the recall pipeline ACTUALLY did on every call.
-// Release policy uses only embedding_inference_calls as a liveness check for
-// embedding-on LongMemEval; the remaining figures stay descriptive telemetry.
+// Historical runs may carry these per-call diagnostics. The bench archive
+// reader owns their aggregation; this schema does not measure current Recall.
 //
 // @anchor recall-token-economy-token-units: every *_tokens / *_token_*
-// figure under this block is the chars/4 approximation produced by
-// makeTokenEstimator (resolveCharsPerToken in
-// packages/core/src/recall/recall-service-types.ts). The default 4 chars/token
-// is an OpenAI-style English heuristic; CJK content is underestimated
-// by roughly 3-4x because Chinese/Japanese/Korean characters average
-// closer to 1-1.5 chars/token under cl100k/o200k. Release notes citing
-// mean / p95 figures from this block must carry the same caveat.
+// figure under this block retains the archived emitter's approximation,
+// rather than a measured tokenizer count. Comparisons must preserve that basis.
 // see also:
-//   packages/core/src/recall/recall-service-types.ts RecallTokenEconomy
-//   packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy
-//   apps/bench-runner/src/harness/recall-diagnostics-schema.ts
+//   apps/bench-runner/src/runs/qa/recall-token-economy.ts
+//   apps/bench-runner/src/harness/recall/recall-diagnostics-schema.ts
 const PerCallStatSchema = z
   .object({
     mean: z.number().nonnegative(),

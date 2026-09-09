@@ -37,7 +37,7 @@ import {
   persistMemory,
   produceAdaSource,
   realMemoryRepo
-} from "./p217-planted-harness.js";
+} from "./source-field-harness.js";
 
 export const LIVE_B_ID = "22222222-2222-4222-8222-222222222222";
 export const TOMBSTONE_ID = "33333333-3333-4333-8333-333333333333";

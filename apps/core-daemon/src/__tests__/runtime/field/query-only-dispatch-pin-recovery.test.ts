@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { withRecallReadSnapshot } from "@do-soul/alaya-core";
-import { EVIDENCE_ID, MEMORY_ID, WORKSPACE_ID } from "./p217-planted-harness.js";
+import { EVIDENCE_ID, MEMORY_ID, WORKSPACE_ID } from "./source-field-harness.js";
 import { createQueryOnlyHydrationHarness, dispatchQueryOnly } from "./query-only-hydration-fixture.js";
 
 const hydration = createQueryOnlyHydrationHarness();

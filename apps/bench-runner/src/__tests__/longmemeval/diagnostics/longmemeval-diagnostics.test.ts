@@ -243,7 +243,7 @@ describe("LongMemEval recall diagnostics", () => {
     });
   });
 
-  it("does not use fused stream ranks as live candidate-pool completeness", () => {
+  it("does not certify historical candidate pools with missing replay observations", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-incomplete-replay-candidates",
       goldMemoryIds: ["gold-a"],
@@ -287,8 +287,9 @@ describe("LongMemEval recall diagnostics", () => {
     });
 
     expect(row.conditional_field_measurement).toBeNull();
-    expect(row.candidate_pool_complete).toBe(true);
-    expect(LongMemEvalQuestionDiagnosticSchema.parse(row).candidate_pool_complete).toBe(true);
+    expect(row.candidate_pool_complete).toBe(false);
+    expect(row.cohort_ledger?.evidence_status).toBe("partial");
+    expect(LongMemEvalQuestionDiagnosticSchema.parse(row).candidate_pool_complete).toBe(false);
   });
 
   it("persists phase latency into per-question diagnostics", () => {

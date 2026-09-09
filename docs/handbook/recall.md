@@ -52,16 +52,26 @@ Retained mechanisms and their independent consumers:
   configuration, not ordinary ranking.
 - `embedding-recall/evidence/`: source-authorized document backfill, bounded
   document previews and the embedding service's lexical candidate prefix.
+- `ObserverReaders.embeddingIds`: an optional bounded measurement extension,
+  currently exercised by observer tests. The ordinary daemon reader does not
+  bind it, and the field does not turn enumerated vector identities into
+  similarity-ranked seeds. A query-conditioned measurement and association
+  contract would be required before connecting that retrieval capability.
 - `runtime/global-memory/bounded-top-k.ts`: bounded global-memory lifecycle
   source selection. It does not select ordinary conditional-field results.
-- `RECALL_FUSION_FAMILY_IDS` / `aggregateFamilyContributions`: bench historical
-  diagnostic reader (`honest-higher-r-obj`), not `executeRecall`.
+- `RECALL_FUSION_FAMILY_IDS` / `aggregateFamilyContributions` in the bench
+  runner's `diagnostics/stage-attribution/fusion-delivery-families.ts`:
+  historical diagnostic reader (`honest-higher-r-obj`), not `executeRecall`.
 - `findRecallTierWindow` worker/storage window: snapshot/materialization source
   window, unused by `executeRecall` ranking.
-- Historical diagnostic shapes under `runtime/diagnostics/` and the protocol
+- Historical diagnostic shapes in the bench runner and the protocol
   selection/OSF schemas: bench artifact readers and offline query-cache
   verification. These shapes have no live Recall producer. Keeping an archive
   decoder does not keep its old compiler, scorer or selector operational.
+  The bench artifact reader retains historical pool, capture-receipt and
+  answer-evidence consistency checks; missing evidence cannot become a complete
+  archive merely because all candidate rows are present. Current conditional-field
+  measurement uses its own index completeness contract.
 - in-process `FIELD_RESUME`: process-local continuation; process loss
   invalidates; not durable.
 

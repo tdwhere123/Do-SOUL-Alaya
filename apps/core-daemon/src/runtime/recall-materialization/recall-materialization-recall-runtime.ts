@@ -172,8 +172,6 @@ function createRecallService(input: {
     ...(input.embeddingRuntime.defaultPolicyDecorator === undefined
       ? {}
       : { defaultPolicyDecorator: input.embeddingRuntime.defaultPolicyDecorator }),
-    recallFailureHealthInbox: input.input.recallFailureHealthInboxPort,
-    warn: input.input.warn,
     readSnapshot: input.readSnapshot,
     observerReaders: createConditionalFieldObserverReaders(input.input.database),
     ...(input.recallSearchRuntime.conditionalFieldPort === undefined

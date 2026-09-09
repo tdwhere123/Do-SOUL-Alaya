@@ -53,7 +53,7 @@ describe("workspace observable source generation", () => {
           workerUrl: new URL("../../../../../dist/runtime/recall/recall-read-worker.js", import.meta.url) })! : undefined;
         try {
           await worker?.ready();
-          const { dependencies } = createDependencies([]);
+          const { dependencies } = createDependencies();
           const service = new RecallService({ ...dependencies, now: () => NOW,
             ...(worker ? { readSnapshot: worker.readSnapshot, conditionalFieldPort: worker.conditionalFieldPort }
               : { observerReaders: readers }) });

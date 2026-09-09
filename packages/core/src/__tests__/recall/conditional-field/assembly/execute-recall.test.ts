@@ -241,7 +241,7 @@ describe("conditional-field executeRecall assembly", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     let ticks = 0;
-    const { dependencies } = createDependencies([]);
+    const { dependencies } = createDependencies();
     const service = new RecallService({
       ...dependencies,
       now: () => new Date(Date.parse(INTERPRETATION_CLOCK) + ticks++ * 1_000).toISOString(),
@@ -293,7 +293,7 @@ describe("conditional-field executeRecall assembly", () => {
   it("worker-port recall preserves query and snapshot identity of the local producer", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
-    const { dependencies } = createDependencies([]);
+    const { dependencies } = createDependencies();
     const service = new RecallService({
       ...dependencies,
       observerReaders: readersFor(slice),

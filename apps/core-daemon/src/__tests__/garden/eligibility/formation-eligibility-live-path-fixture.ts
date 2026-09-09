@@ -41,7 +41,7 @@ import {
   composeField,
   createPlantedHarness,
   type PlantedField
-} from "../../runtime/field/p217-planted-harness.js";
+} from "../../runtime/field/source-field-harness.js";
 
 export const planted = createPlantedHarness();
 export const ASSERTION = "I used Atlas.";

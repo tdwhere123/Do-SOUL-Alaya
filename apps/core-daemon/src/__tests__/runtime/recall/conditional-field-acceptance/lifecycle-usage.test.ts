@@ -30,7 +30,7 @@ afterEach(async () => {
 
 function serviceFor(database: StorageDatabase, now: () => string = () => NOW,
   worker?: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>) {
-  const { dependencies } = createDependencies([]);
+  const { dependencies } = createDependencies();
   const readBounded = createBoundedActiveConstraintsReader(database);
   return new RecallService({ ...dependencies, now,
     activeConstraintsPort: worker?.activeConstraintsPort ?? {
@@ -218,7 +218,7 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     const readers = createConditionalFieldObserverReaders(slice.database);
     for (const work_units of [5, 8, 12, 20]) {
       let visits = 0;
-      const { dependencies } = createDependencies([]);
+      const { dependencies } = createDependencies();
       const service = new RecallService({ ...dependencies, now: () => NOW,
         observerReaders: { ...readers,
           source: (input) => { const page = readers.source!(input); visits += page.rowsRead; return page; },

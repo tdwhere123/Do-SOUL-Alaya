@@ -1,11 +1,14 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  GuardSchema,
+  IsoDatetimeStringSchema,
   type FacetMode,
   type Guard,
   type QueryHole,
   type QueryProgram,
   type QueryTimeWindow
 } from "@do-soul/alaya-protocol";
+import { compareText } from "../../../shared/compare-text.js";
 
 export const SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID = "failed-deployment";
 
@@ -100,6 +103,8 @@ export type OrdinarySourceFilters = Readonly<{
   readonly until?: string;
 }>;
 
+export class SourceFilterCapacityError extends RangeError {}
+
 // Supported ordinary steps name query roles; planted freeze edges keep stored predicates.
 export const SUPPORTED_RELATION_ALIASES: Readonly<Record<string, readonly string[]>> = Object.freeze({
   failed_deployment: Object.freeze(["observed_log"]),
@@ -117,48 +122,42 @@ export function uninterpretedQueryHole(): QueryHole {
 }
 
 export function encodeSourceFilters(filters: OrdinarySourceFilters): string | undefined {
-  const parts = [SOURCE_FILTER_PREDICATE];
-  if (filters.event_kind !== undefined) parts.push(`event=${filters.event_kind}`);
-  for (const dimension of filters.dimension_filter ?? []) parts.push(`dimension=${dimension}`);
-  for (const tag of filters.domain_tag_filter ?? []) parts.push(`tag=${tag}`);
-  if (filters.time_field !== undefined) parts.push(`time_field=${filters.time_field}`);
-  if (filters.since !== undefined) parts.push(`since=${filters.since}`);
-  if (filters.until !== undefined) parts.push(`until=${filters.until}`);
-  if (parts.length === 1) return undefined;
-  const packed = parts.join("|");
-  return packed.length <= 1024 ? packed : packed.slice(0, 1024);
+  const entries = Object.entries(filters).filter(([, value]) => value !== undefined
+    && (!Array.isArray(value) || value.length > 0));
+  if (entries.length === 0) return undefined;
+  const packed = `${SOURCE_FILTER_PREDICATE}:${JSON.stringify(Object.fromEntries(entries))}`;
+  if (!sourceFilterPredicateFits(packed)) {
+    throw new SourceFilterCapacityError("Source filters exceed the conditional-field predicate capacity");
+  }
+  return packed;
 }
 
 export function decodeSourceFilters(predicateName: string | undefined): OrdinarySourceFilters | undefined {
+  const prefix = `${SOURCE_FILTER_PREDICATE}:`;
   if (predicateName === undefined || !predicateName.startsWith(SOURCE_FILTER_PREDICATE)) {
     return undefined;
   }
-  const dimension_filter: string[] = [];
-  const domain_tag_filter: string[] = [];
-  let time_field: OrdinarySourceFilters["time_field"];
-  let since: string | undefined;
-  let until: string | undefined;
-  let event_kind: "failed_deployment" | undefined;
-  for (const part of predicateName.split("|").slice(1)) {
-    if (part === "event=failed_deployment") event_kind = "failed_deployment";
-    const sep = part.indexOf("=");
-    if (sep <= 0) continue;
-    const key = part.slice(0, sep);
-    const value = part.slice(sep + 1);
-    if (key === "dimension") dimension_filter.push(value);
-    else if (key === "tag") domain_tag_filter.push(value);
-    else if (key === "time_field" && (value === "created_at" || value === "last_used_at")) time_field = value;
-    else if (key === "since") since = value;
-    else if (key === "until") until = value;
+  if (!predicateName.startsWith(prefix) || !sourceFilterPredicateFits(predicateName)) {
+    throw new TypeError("Invalid conditional-field source filter predicate");
   }
-  return {
-    ...(event_kind === undefined ? {} : { event_kind }),
-    ...(dimension_filter.length === 0 ? {} : { dimension_filter }),
-    ...(domain_tag_filter.length === 0 ? {} : { domain_tag_filter }),
-    ...(time_field === undefined ? {} : { time_field }),
-    ...(since === undefined ? {} : { since }),
-    ...(until === undefined ? {} : { until })
-  };
+  const parsed: unknown = JSON.parse(predicateName.slice(prefix.length));
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || Object.keys(parsed).length === 0) {
+    throw new TypeError("Invalid conditional-field source filters");
+  }
+  for (const [key, value] of Object.entries(parsed)) {
+    const valid = key === "dimension_filter" || key === "domain_tag_filter"
+      ? Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string" && item.length > 0)
+      : key === "event_kind" ? value === "failed_deployment"
+      : key === "time_field" ? value === "created_at" || value === "last_used_at"
+      : (key === "since" || key === "until") && IsoDatetimeStringSchema.safeParse(value).success;
+    if (!valid) throw new TypeError("Invalid conditional-field source filters");
+  }
+  return parsed as OrdinarySourceFilters;
+}
+
+function sourceFilterPredicateFits(predicate_name: string): boolean {
+  return GuardSchema.safeParse({ schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    kind: "query_predicate", predicate_name }).success;
 }
 
 export function attachSourceFilters(program: QueryProgram, filters: OrdinarySourceFilters): QueryProgram {
@@ -198,10 +197,27 @@ export function sourceFactsSatisfyFilters(
   const stamp = timestampForSourceFilters(facts, filters);
   if (filters.since !== undefined || filters.until !== undefined) {
     if (stamp === undefined) return "unresolved";
-    if (filters.since !== undefined && stamp < filters.since) return "false";
-    if (filters.until !== undefined && stamp > filters.until) return "false";
+    const sinceOrder = filters.since === undefined ? 0 : sourceTimestampOrder(stamp, filters.since);
+    const untilOrder = filters.until === undefined ? 0 : sourceTimestampOrder(stamp, filters.until);
+    if (sinceOrder === undefined || untilOrder === undefined) return "unresolved";
+    if (sinceOrder < 0 || untilOrder > 0) return "false";
   }
   return "true";
+}
+
+function sourceTimestampOrder(left: string, right: string): number | undefined {
+  if (!IsoDatetimeStringSchema.safeParse(left).success || !IsoDatetimeStringSchema.safeParse(right).success) {
+    return undefined;
+  }
+  const [leftWhole, leftFraction = ""] = left.slice(0, -1).split(".");
+  const [rightWhole, rightFraction = ""] = right.slice(0, -1).split(".");
+  const leftSeconds = leftWhole!.length === 16 ? `${leftWhole}:00` : leftWhole!;
+  const rightSeconds = rightWhole!.length === 16 ? `${rightWhole}:00` : rightWhole!;
+  const secondsOrder = compareText(leftSeconds, rightSeconds);
+  if (secondsOrder !== 0) return secondsOrder;
+  // Date.parse loses submillisecond distinctions that the public datetime schema permits.
+  const width = Math.max(leftFraction.length, rightFraction.length);
+  return compareText(leftFraction.padEnd(width, "0"), rightFraction.padEnd(width, "0"));
 }
 
 function timestampForSourceFilters(

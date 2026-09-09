@@ -18,7 +18,7 @@ async function planted() {
   return slice;
 }
 function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverReaders = readersFor(slice)) {
-  const { dependencies } = createDependencies([]);
+  const { dependencies } = createDependencies();
   const service = new RecallService({ ...dependencies,
     now: () => INTERPRETATION_CLOCK, observerReaders: readers });
   const handler = createRecallHandler({ deps: { recallService: {

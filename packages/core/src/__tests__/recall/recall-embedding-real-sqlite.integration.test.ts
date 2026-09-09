@@ -42,15 +42,11 @@ async function createFixture(seedVectors: boolean) {
       providerKind: "openai", modelId: "stored-fixture", schemaVersion: 1,
       maxRows: input.maxRows, maxMetadataUtf8Bytes: 65536
     }, input.afterObjectId));
-  const prepareQuerySupplement = vi.fn(async () => { throw new Error("query-time provider forbidden"); });
-  const scoreEvidenceCandidates = vi.fn(async () => { throw new Error("transient scoring forbidden"); });
-  const querySupplement = vi.fn(async () => { throw new Error("query-time provider forbidden"); });
   const service = new RecallService({
     ...fixture.dependencies,
-    observerReaders: { ...fixture.dependencies.observerReaders, embeddingIds },
-    embeddingRecallService: { prepareQuerySupplement, scoreEvidenceCandidates, querySupplement }
+    observerReaders: { ...fixture.dependencies.observerReaders, embeddingIds }
   });
-  return { ...fixture, service, embeddingIds, prepareQuerySupplement, scoreEvidenceCandidates, querySupplement };
+  return { ...fixture, service, embeddingIds };
 }
 
 async function recall(service: RecallService, workspaceId = "workspace-1") {
@@ -66,6 +62,7 @@ describe("conditional Recall with real SQLite stored embeddings", () => {
     const before = fixture.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get();
     const result = await recall(fixture.service);
     expect(fixture.embeddingIds).toHaveBeenCalled();
+    expect(result.provider_calls).toBe(0);
     const observedIds = fixture.embeddingIds.mock.results.flatMap((result) =>
       result.type === "return" ? result.value.objectIds : []);
     expect(observedIds).toContain(LEXICAL_ID);
@@ -74,9 +71,6 @@ describe("conditional Recall with real SQLite stored embeddings", () => {
     expect(result.index.entries.some((entry) => entry.object_id === LEXICAL_ID)).toBe(true);
     expect(result.index.entries.some((entry) => entry.object_id === VECTOR_ID)).toBe(false);
     expect(result.candidates.some((candidate) => candidate.object_id === OTHER_ID)).toBe(false);
-    expect(fixture.prepareQuerySupplement).not.toHaveBeenCalled();
-    expect(fixture.scoreEvidenceCandidates).not.toHaveBeenCalled();
-    expect(fixture.querySupplement).not.toHaveBeenCalled();
     expect(fixture.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get()).toEqual(before);
   });
 
@@ -89,7 +83,6 @@ describe("conditional Recall with real SQLite stored embeddings", () => {
     expect(withEmptyStore.index.entries.some((entry) => entry.object_id === LEXICAL_ID)).toBe(true);
     expect(fixture.embeddingIds.mock.results.every((result) =>
       result.type === "return" && result.value.objectIds.length === 0)).toBe(true);
-    expect(fixture.prepareQuerySupplement).not.toHaveBeenCalled();
   });
 
   it("keeps stored-vector enumeration scoped and does not deliver revoked sources", async () => {
@@ -102,6 +95,5 @@ describe("conditional Recall with real SQLite stored embeddings", () => {
       .run(LEXICAL_ID);
     const result = await recall(fixture.service);
     expect(result.index.entries.some((entry) => entry.object_id === LEXICAL_ID)).toBe(false);
-    expect(fixture.prepareQuerySupplement).not.toHaveBeenCalled();
   });
 });

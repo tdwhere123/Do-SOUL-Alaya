@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EvidenceService, type ConditionalFieldRecallPortResult } from "@do-soul/alaya-core";
 import { SqliteEvidenceCapsuleRepo, SqliteEventLogRepo } from "@do-soul/alaya-storage";
-import { EVIDENCE_ID, MEMORY_ID, WORKSPACE_ID, composeField, plantRevoke, produceAdaSource } from "./p217-planted-harness.js";
+import { EVIDENCE_ID, MEMORY_ID, WORKSPACE_ID, composeField, plantRevoke, produceAdaSource } from "./source-field-harness.js";
 import { conditionalRecallPayload, createQueryOnlyHydrationHarness, dispatchQueryOnly,
   persistConditionalSource } from "./query-only-hydration-fixture.js";
 

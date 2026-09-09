@@ -1,16 +1,13 @@
 import { describe, expect, it } from "vitest";
-import {
-  createFieldBackedRecallService
-} from
-  "./fixtures/keyword-field-fixture.js";
+import { RecallService } from "../../recall/recall-service.js";
 import {
   createDependencies,
   createTaskSurface
 } from "./recall-service-test-fixtures.js";
 
-describe("retained component contracts", () => {
-it("keeps the keyword supplement enabled for chat and analyze", () => {
-    const service = createFieldBackedRecallService(createDependencies([]).dependencies);
+describe("recall policy compatibility defaults", () => {
+  it("preserves the historical semantic supplement defaults for policy compatibility", () => {
+    const service = new RecallService(createDependencies().dependencies);
     const expected = {
       enabled: true,
       max_supplement: 5,

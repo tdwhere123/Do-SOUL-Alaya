@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EvidenceService, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteEvidenceCapsuleRepo, SqliteEventLogRepo } from "@do-soul/alaya-storage";
-import { CLOCK, EVIDENCE_ID, WORKSPACE_ID, composeField, createPlantedHarness } from "./p217-planted-harness.js";
+import { CLOCK, EVIDENCE_ID, WORKSPACE_ID, composeField, createPlantedHarness } from "./source-field-harness.js";
 
 const planted = createPlantedHarness();
 const EXCERPT = "I completed Sichuan recipes last autumn";

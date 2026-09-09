@@ -1,6 +1,6 @@
 import { MemoryDimension, type EvidenceCapsule } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { RecallService } from "../../recall/recall-service.js";
 import { createSourceBoundRecallFixture, createTaskSurface } from "./recall-service-test-fixtures.js";
 
@@ -14,7 +14,7 @@ const EVIDENCE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-000000000292";
 const NOW = "2026-09-06T12:00:00.000Z";
 
 describe("evidence storage and conditional Recall without transient embedding", () => {
-  it.each([true, false])("keeps source delivery with optional legacy scoring capability=%s", async (withScoring) => {
+  it("keeps capsule storage independent of source delivery", async () => {
     const fixture = await createSourceBoundRecallFixture((database) => databases.add(database));
     await fixture.writeMemory(MEMORY_ID, "The assistant recommended blue.", MemoryDimension.FACT);
     const capsule: EvidenceCapsule = {
@@ -28,22 +28,15 @@ describe("evidence storage and conditional Recall without transient embedding", 
     };
     await fixture.storage.evidenceCapsuleRepo.create(capsule);
     const before = fixture.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get();
-    const scoreEvidenceCandidates = vi.fn(async () => { throw new Error("query-time scoring forbidden"); });
-    const prepareQuerySupplement = vi.fn(async () => { throw new Error("query-time provider forbidden"); });
-    const querySupplement = vi.fn(async () => { throw new Error("query-time provider forbidden"); });
-    const service = new RecallService({
-      ...fixture.dependencies,
-      ...(withScoring ? { embeddingRecallService: { scoreEvidenceCandidates, prepareQuerySupplement, querySupplement } } : {})
-    });
+    const service = fixture.service;
     const result = await service.recall({
       workspaceId: "workspace-1", taskSurface: { ...createTaskSurface(), display_name: "blue" },
       queryText: "blue", strategy: "chat", pageBudget: 800
     });
     expect(result.candidates.some((candidate) => candidate.object_id === MEMORY_ID)).toBe(true);
+    expect(result.candidates.some((candidate) => candidate.object_id === EVIDENCE_ID)).toBe(false);
+    expect(result.provider_calls).toBe(0);
     expect(result.index.entries.some((entry) => entry.object_id === MEMORY_ID)).toBe(true);
-    expect(scoreEvidenceCandidates).not.toHaveBeenCalled();
-    expect(prepareQuerySupplement).not.toHaveBeenCalled();
-    expect(querySupplement).not.toHaveBeenCalled();
     expect(fixture.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get()).toEqual(before);
     expect(await fixture.storage.evidenceCapsuleRepo.findByIds("workspace-1", [EVIDENCE_ID])).toEqual([capsule]);
     expect(await fixture.storage.evidenceCapsuleRepo.findByIds("workspace-other", [EVIDENCE_ID])).toEqual([]);
@@ -54,20 +47,16 @@ describe("evidence storage and conditional Recall without transient embedding", 
   it("does not use transient scoring to hide an unavailable source reader", async () => {
     const fixture = await createSourceBoundRecallFixture((database) => databases.add(database));
     await fixture.writeMemory(MEMORY_ID, "The assistant recommended blue.", MemoryDimension.FACT);
-    const scoreEvidenceCandidates = vi.fn(async () => { throw new Error("query-time scoring forbidden"); });
-    const querySupplement = vi.fn(async () => { throw new Error("query-time provider forbidden"); });
     const service = new RecallService({
       ...fixture.dependencies,
       observerReaders: { ...fixture.dependencies.observerReaders,
-        source: () => ({ row: null, rowsRead: 1, bytesRead: 0, unavailable: true }) },
-      embeddingRecallService: { scoreEvidenceCandidates, querySupplement }
+        source: () => ({ row: null, rowsRead: 1, bytesRead: 0, unavailable: true }) }
     });
     const result = await service.recall({
       workspaceId: "workspace-1", taskSurface: { ...createTaskSurface(), display_name: "blue" },
       queryText: "blue", strategy: "chat", pageBudget: 800
     });
     expect(result.index.completeness.logical_index).not.toBe("complete");
-    expect(scoreEvidenceCandidates).not.toHaveBeenCalled();
-    expect(querySupplement).not.toHaveBeenCalled();
+    expect(result.provider_calls).toBe(0);
   });
 });

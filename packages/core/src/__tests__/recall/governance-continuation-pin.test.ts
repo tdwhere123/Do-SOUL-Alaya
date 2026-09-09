@@ -12,7 +12,7 @@ afterEach(() => { for (const database of databases.splice(0)) database.close(); 
 describe("governance mutation invalidates conditional Recall continuations", () => {
   it.each(["claim", "path", "selection", "generation"])("rejects a stale page after same-time %s mutation", async (kind) => {
     const fixture = await openSourceSlice((database) => databases.push(database));
-    const service = new RecallService({ ...createDependencies([]).dependencies, now: () => NOW,
+    const service = new RecallService({ ...createDependencies().dependencies, now: () => NOW,
       observerReaders: readersFor(fixture) });
     for (let index = 0; index < 3; index += 1) {
       await fixture.writeMemory(`aaaaaaaa-aaaa-4aaa-8aaa-00000000030${index}`, "deployment source", MemoryDimension.FACT);

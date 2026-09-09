@@ -60,11 +60,11 @@ These rules always win over lower-level docs and task-card convenience.
     truth. A `PathRelation` is its rebuildable current/as-of routing
     projection, never a second memory ontology or durable truth. A
     query-time transfer along one of its directed edges and the
-    resulting fused score are runtime decisions and projections.
-    Rebuildable SliceKey routing views remain workspace-scoped
-    projections. Live connectedness of flood, SliceKey matching, and
-    typed path transfer must be proved by their producer-to-consumer path,
-    not inferred from this ontology constraint; see
+    resulting conditional association are runtime decisions and projections.
+    Typed path transfer and accepting-index delivery must be proved by
+    their source-to-consumer path, not inferred from this ontology constraint.
+    Historical flood and SliceKey projections do not authorize a second
+    live recall route; see
     `docs/handbook/recall.md`.
 12a. **Temporal relation authority.** Evidence owns the source
     observation/event time. Storage or ingestion timestamps, including
@@ -149,10 +149,10 @@ These rules always win over lower-level docs and task-card convenience.
     prefix promise and no runtime self-replay. Later consensus does not
     reorder the delivered set. Missing generation or condition pins fail
     closed.
-20c. **Mechanism and measurement stay separate.** Planted query-proof proofs
-    cannot be closed by minting zeros for missing live provider/cache,
-    production Clock-A, dataset KPI, or prepare-time unavailable snapshot
-    sources. Those absences are `NOT_REPLAYABLE`.
+20c. **Mechanism and measurement stay separate.** Finite-model and planted
+    integration checks do not establish live provider/cache availability,
+    production Clock-A, dataset KPI, or prepare-time snapshot compatibility.
+    Missing evidence remains `NOT_REPLAYABLE`; do not replace it with zeros.
 
 ### Temporal Relation Contract
 

@@ -5,19 +5,10 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { QueryFactFrameExtractionPort } from
   "../../../shared/query-fact-frame-extraction-port.js";
-import type { RecallQueryDemand } from "../../query/recall-query-demand.js";
-import {
-  createRecallQueryFieldAttributionContribution,
-  type RecallQueryFieldAttributionContribution
-} from "./query-field-attribution.js";
 import {
   digestRecallFieldIdentity,
   type RecallFieldDigest
 } from "../field-identity.js";
-import {
-  projectFactFrameSemanticFactors,
-  type FactFrameSemanticFactor
-} from "../fact-frame-semantic-factors.js";
 
 export const RECALL_QUERY_FACT_FRAME_MAX_FRAMES = 8;
 export const QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID =
@@ -79,77 +70,6 @@ export async function captureRecallQueryFactFrames(params: Readonly<{
     params.on_failure?.(error);
     return createCapture("unavailable", queryDigest, null, []);
   }
-}
-
-export function createUnavailableRecallQueryFactFrameCapture(
-  queryText: string | null
-): RecallQueryFactFrameExtractionCapture {
-  return createCapture(
-    queryText === null ? "ineligible" : "unavailable",
-    digestRecallFieldIdentity({ query_text: queryText }),
-    null,
-    []
-  );
-}
-
-export function produceRelationQueryFieldAttributionContribution(params: Readonly<{
-  readonly query_text: string | null;
-  readonly query_demand: Readonly<RecallQueryDemand>;
-  readonly capture: Readonly<RecallQueryFactFrameExtractionCapture>;
-}>): RecallQueryFieldAttributionContribution | undefined {
-  verifyRecallQueryFactFrameExtractionCapture(params.capture);
-  if (params.query_text === null || params.capture.status !== "returned" ||
-      params.capture.producer_operator_id === null ||
-      params.capture.query_text_digest !== digestRecallFieldIdentity({
-        query_text: params.query_text
-      })) {
-    return undefined;
-  }
-  verifyCapturedFramesAgainstQuery(params.capture.frames, params.query_text);
-  const sourceSpansByValue = indexRelationSourceSpans(params.capture.frames);
-  const attributions = params.query_demand.atoms.flatMap((atom) => {
-    const sourceSpans = sourceSpansByValue.get(atom.value);
-    return (atom.kind === "lexical_term" || atom.kind === "phrase") &&
-      sourceSpans !== undefined
-      ? [{
-          query_atom_id: atom.id,
-          role: "relation" as const,
-          source_spans: sourceSpans
-        }]
-      : [];
-  });
-  return createRecallQueryFieldAttributionContribution({
-    producer_operator_id: params.capture.producer_operator_id,
-    producer_capture_digest: params.capture.capture_digest,
-    query_demand: params.query_demand,
-    attributions
-  });
-}
-
-export function collectRelationDemandTermsFromFactFrameCapture(
-  capture: Readonly<RecallQueryFactFrameExtractionCapture>
-): readonly string[] {
-  verifyRecallQueryFactFrameExtractionCapture(capture);
-  if (capture.status !== "returned") return Object.freeze([]);
-  const terms = new Map<string, string>();
-  for (const frame of capture.frames) {
-    for (const slot of frame.slots) {
-      if (slot.role !== "relation") continue;
-      const normalized = normalizeDemandValue(slot.text);
-      if (!terms.has(normalized)) terms.set(normalized, slot.text);
-    }
-  }
-  return Object.freeze([...terms.values()]);
-}
-
-export function collectFactFrameSemanticFactorsFromCapture(
-  capture: Readonly<RecallQueryFactFrameExtractionCapture>
-): readonly Readonly<FactFrameSemanticFactor>[] {
-  verifyRecallQueryFactFrameExtractionCapture(capture);
-  if (capture.status !== "returned") return Object.freeze([]);
-  return Object.freeze(capture.frames.flatMap((frame, frameIndex) =>
-    projectFactFrameSemanticFactors(frame.slots, frameIndex)
-  ));
 }
 
 export function verifyRecallQueryFactFrameExtractionCapture(
@@ -253,43 +173,6 @@ function validateCapturedSlot(slot: Readonly<RecallQueryFactFrameSlotCapture>): 
   }
 }
 
-function verifyCapturedFramesAgainstQuery(
-  frames: readonly Readonly<RecallQueryFactFrameCaptureFrame>[],
-  queryText: string
-): void {
-  for (const frame of frames) {
-    let cursor = 0;
-    for (const slot of frame.slots) {
-      const [start, end] = slot.source_offset;
-      if (start < cursor || end > queryText.length ||
-          queryText.slice(start, end) !== slot.text) {
-        throw new Error("query fact-frame capture is not source-exact");
-      }
-      cursor = end;
-    }
-  }
-}
-
-function indexRelationSourceSpans(
-  frames: readonly Readonly<RecallQueryFactFrameCaptureFrame>[]
-): ReadonlyMap<string, readonly (readonly [number, number])[]> {
-  const indexed = new Map<string, Map<string, readonly [number, number]>>();
-  for (const { slots } of frames) {
-    for (const slot of slots) {
-      if (slot.role !== "relation") continue;
-      const value = normalizeDemandValue(slot.text);
-      const spans = indexed.get(value) ?? new Map();
-      const [start, end] = slot.source_offset;
-      spans.set(`${start}:${end}`, Object.freeze([start, end] as const));
-      indexed.set(value, spans);
-    }
-  }
-  return new Map([...indexed].map(([value, spans]) => [
-    value,
-    Object.freeze([...spans.values()].sort(compareSpans))
-  ]));
-}
-
 function compareCapturedFrames(
   left: Readonly<RecallQueryFactFrameCaptureFrame>,
   right: Readonly<RecallQueryFactFrameCaptureFrame>
@@ -298,13 +181,6 @@ function compareCapturedFrames(
   const rightStart = right.slots[0]?.source_offset[0] ?? 0;
   return leftStart - rightStart ||
     digestRecallFieldIdentity(left).localeCompare(digestRecallFieldIdentity(right));
-}
-
-function compareSpans(
-  left: readonly [number, number],
-  right: readonly [number, number]
-): number {
-  return left[0] - right[0] || left[1] - right[1];
 }
 
 function canonicalProducerId(value: string): string {
@@ -317,10 +193,6 @@ function canonicalProducerId(value: string): string {
 
 function assertSha256(value: string, field: string): void {
   if (!/^sha256:[0-9a-f]{64}$/u.test(value)) throw new Error(`${field} must be sha256`);
-}
-
-function normalizeDemandValue(value: string): string {
-  return value.trim().replace(/[.]+$/u, "").replace(/\s+/gu, " ").toLocaleLowerCase();
 }
 
 const REQUIRED_ROLES: readonly AssociativeFactSlotRole[] =

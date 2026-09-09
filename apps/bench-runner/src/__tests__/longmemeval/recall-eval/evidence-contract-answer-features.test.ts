@@ -347,6 +347,33 @@ describe("LongMemEval evidence contract answer features", () => {
     }], candidateKeys: [key] })).toBe(false);
   });
 
+  it.each(["missing", "malformed", "fail_closed"] as const)(
+    "does not certify canonical rows with a %s capture receipt", (status) => {
+      const key = "workspace_local:memory_entry:gold-a";
+      const selected = canonicalReceipt(key);
+      const { receipt_digest: _digest, ...body } = selected;
+      const failed = createCanonicalSelectionReceipt({ ...body,
+        execution: { status: "fail_closed", reason: "invalid_state" },
+        observations_by_candidate_key: null, frontiers: null,
+        gamma: { set_utilities: [], decisions: [], rejects: [] },
+        dispositions: [{ candidate_key: key, status: "unavailable", reason: "fail_closed_unavailable" }],
+        delivery: []
+      }, (preimage) => createHash("sha256").update(preimage, "utf8").digest("hex"));
+      const receipt = status === "missing" ? undefined
+        : status === "malformed" ? { ...selected, receipt_digest: "invalid" } : failed;
+      const row = diagnostic({ id: `q-canonical-${status}`, gold: ["gold-a"], recallResult: {
+        ranking_authority: "prefix_sk", diagnostics: {
+          ...(receipt === undefined ? {} : { capture_receipt: receipt }),
+          candidate_pool_count: 1, fine_assessment_pruned_candidates: [],
+          token_economy: { fine_pruned_count: 0, fine_evaluated: 1, coarse_pool_size: 1 },
+          candidates: [canonicalRow(selected, key)]
+        }
+      } });
+      expect(row.candidate_pool_complete).toBe(false);
+      expect(row.cohort_ledger?.evidence_status).not.toBe("complete");
+    }
+  );
+
   it("preserves synthesis null and empty answer features without fabricating projections", () => {
     const answerFeatures = completeAnswerFeatures({
       content: "A concise synthesis.",

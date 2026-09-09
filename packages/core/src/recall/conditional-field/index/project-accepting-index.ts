@@ -160,6 +160,10 @@ function pageAcceptingIndex(
   representation: InformationIndex["representation"]
 ): InformationIndex {
   if (input.transition_derivations !== undefined && input.output_derivations === undefined) {
+    const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
+    const deliveryWork = 1 + (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1);
+    // Preserve one delivery opportunity when grounding can still advance; smaller requests resume after grounding.
+    const groundingAllowance = allowance > deliveryWork ? allowance - deliveryWork : allowance;
     const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
     const payloadMemory = input.finalize_payload === undefined ? 0
       : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
@@ -167,21 +171,27 @@ function pageAcceptingIndex(
       transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
       transition_derivations: input.transition_derivations, source_facts: input.source_facts,
       progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
-      allowance: input.remaining_reserve ?? input.budget.finalization_reserve });
+      allowance: groundingAllowance });
     input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
     input = { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
       grounding_complete: grounded.complete,
       ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
-      // Grounding has its own allowance copy; debiting remaining_reserve here starves payload to zero.
-      remaining_reserve: input.remaining_reserve ?? input.budget.finalization_reserve,
+      remaining_reserve: allowance - grounded.work,
       ...(!grounded.complete ? { resource_work: "open" } : {}) };
   }
   const projected = acceptingEntries(input);
-  input.on_projection_progress?.(projected.next);
   const entries = sortEntries(projected.entries);
+  if (continuationPrefixUnverified(input, entries, projected.truncated)) {
+    input.on_remaining_reserve?.(projected.remaining);
+    return { ...closedIndex(input, representation, composeCompleteness({ observer: input.observer,
+      interpretation_status: input.interpretation_status, total: entries.length, remaining: 1,
+      omitted_payload: false, expand_payload: input.expand_payload !== false, resource_work: "open" })),
+      continuation: input.prior_continuation ?? null };
+  }
   if (continuationSetMismatch(input, entries)) {
     return closedIndex(input, representation, invalidatedCompleteness());
   }
+  input.on_projection_progress?.(projected.next);
   const offset = resolvePageOffset(input, entries.length);
   const page = entries.slice(offset, offset + input.budget.page_budget);
   const remaining = Math.max(projected.truncated ? 1 : 0, entries.length - offset - page.length);
@@ -220,7 +230,8 @@ function pageAcceptingIndex(
     continuation: nextContinuation({ ...input, ...(resourceOpen || omittedPayload ? { resource_work: "open" } : {}) },
       remaining, retryPayload ? offset : offset + page.length, entries,
       retryPayload ? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)
-        : projected.truncated || input.delivered_product_ids !== undefined ? projected.next : undefined),
+        : projected.truncated || input.delivered_product_ids !== undefined
+          || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined),
     representation
   };
 }
@@ -229,12 +240,21 @@ function acceptingEntries(
   input: AcceptingProjectionInput
 ): { readonly entries: IndexEntry[]; readonly truncated: boolean; readonly next: number; readonly remaining: number } {
   const entries: IndexEntry[] = [];
-  let allowance = input.remaining_reserve;
+  let allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
   let truncated = false;
   let groundingDeferred = false;
   const start = input.projection_scan_offset
     ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0);
   const values = [...input.snapshot.values].sort((a, b) => compareText(valueSortKey(a), valueSortKey(b)));
+  const payloadWork = input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1;
+  const pageLimited = input.projection_scan_offset !== undefined || input.delivered_product_ids !== undefined
+    || input.delivered_entry_revisions !== undefined || input.grounding_complete === false
+    || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "")
+    || allowance < values.length * (1 + payloadWork);
+  const pageEnd = resolvePageOffset(input, values.length) + input.budget.page_budget;
+  if (input.budget.page_budget === 0 && pageLimited) {
+    return { entries, truncated: start < values.length, next: start, remaining: allowance };
+  }
   let next = start;
   for (const value of values.slice(start)) {
     if (input.delivered_entry_revisions === undefined && input.delivered_product_ids?.has(productStateNodeId(value.state))) { next += 1; continue; }
@@ -244,25 +264,24 @@ function acceptingEntries(
       next += 1;
       continue;
     }
-    if (allowance !== undefined) {
-      const payloadReserve = input.finalize_payload === undefined ? 0
-        : (input.payload_work_per_entry ?? 1) * (entries.length + (value.accepting && grounded ? 1 : 0));
-      if (allowance < 1 + payloadReserve) {
-        truncated = true;
-        break;
-      }
-      allowance -= 1;
+    const payloadReserve = input.finalize_payload === undefined ? 0
+      : (input.payload_work_per_entry ?? 1) * (entries.length + (value.accepting && grounded ? 1 : 0));
+    if (allowance < 1 + payloadReserve) {
+      truncated = true;
+      break;
     }
+    allowance -= 1;
     if (!grounded) {
       groundingDeferred ||= value.accepting;
+      if (value.accepting && input.delivered_product_ids === undefined) break;
       next += 1;
       continue;
     }
     if (entry !== null) entries.push(entry);
     next += 1;
-    if (input.remaining_reserve !== undefined && entries.length >= input.budget.page_budget && next < values.length) { truncated = true; break; }
+    if (pageLimited && entries.length >= pageEnd && next < values.length) { truncated = true; break; }
   }
-  return { entries, truncated: truncated || groundingDeferred, next, remaining: allowance ?? input.budget.finalization_reserve };
+  return { entries, truncated: truncated || groundingDeferred, next, remaining: allowance };
 }
 
 export function indexEntryRevision(entry: IndexEntry): string {
@@ -396,13 +415,37 @@ function continuationSetMismatch(
   if (input.page_offset !== undefined) return false;
   const cursor = input.prior_continuation?.cursor;
   if (cursor === undefined) return false;
-  if (PROJECTION_CURSOR.test(cursor)) return false;
+  const projection = PROJECTION_CURSOR.exec(cursor);
+  if (projection !== null) {
+    const offset = Number(projection[1]);
+    return offset > input.snapshot.values.length
+      || input.prior_continuation?.continuation_id !== projectionPrefixIdentity(input, offset);
+  }
   const offset = resolvePageOffset(input, entries.length);
   if (offset === 0) return false;
   if (entries.length < offset) return true;
   const digest = resumeDigest(cursor);
   if (digest === undefined) return false;
   return digest !== identityDigest(entries.slice(0, offset).map(entrySortKey));
+}
+
+function continuationPrefixUnverified(
+  input: AcceptingProjectionInput,
+  entries: readonly IndexEntry[],
+  truncated: boolean
+): boolean {
+  if (!truncated || input.delivered_product_ids !== undefined || input.page_offset !== undefined) return false;
+  const cursor = input.prior_continuation?.cursor;
+  return cursor !== undefined && !PROJECTION_CURSOR.test(cursor)
+    && entries.length < resolvePageOffset(input, entries.length);
+}
+
+function projectionPrefixIdentity(input: AcceptingProjectionInput, offset: number): string {
+  const prefix = [...input.snapshot.values].sort((a, b) => compareText(valueSortKey(a), valueSortKey(b)))
+    .slice(0, offset).map((value) => stableStringify([value,
+      input.roles?.get(productStateNodeId(value.state)) ?? "associated",
+      facetsForCandidate(value, input), facetModeForValue(value, input)]));
+  return `projection-${identityDigest([stableStringify(input.view), ...prefix])}`;
 }
 
 function nextContinuation(
@@ -423,7 +466,8 @@ function nextContinuation(
   if (cursor === null) return null;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    continuation_id: `page-${nextOffset}`,
+    continuation_id: projectionOffset !== undefined && input.delivered_product_ids === undefined
+      ? projectionPrefixIdentity(input, projectionOffset) : `page-${nextOffset}`,
     query_id: input.query_id,
     snapshot_id: input.snapshot_id,
     result_version: input.result_version,

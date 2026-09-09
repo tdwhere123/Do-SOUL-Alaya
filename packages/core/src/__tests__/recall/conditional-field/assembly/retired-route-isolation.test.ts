@@ -11,6 +11,7 @@ const request = { workspaceId: "workspace-1", strategy: "analyze" as const,
 const objectId = (number: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(number).padStart(12, "0")}`;
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const database of databases) database.close();
   databases.clear();
 });
@@ -20,22 +21,13 @@ describe("conditional Recall after retired route removal", () => {
     const fixture = await createSourceBoundRecallFixture((database) => databases.add(database));
     const id = objectId(701);
     await fixture.writeSource({ objectId: id, content: QUERY });
-    const forbiddenAsync = vi.fn(async () => { throw new Error("retired provider route called"); });
-    const forbiddenSync = vi.fn(() => { throw new Error("retired preparation route called"); });
+    const network = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Recall network access forbidden"));
     const nativeLexical = fixture.dependencies.observerReaders?.lexical;
     if (nativeLexical === undefined) throw new Error("fixture must bind the native lexical reader");
     const lexical = vi.fn(nativeLexical);
     const service = new RecallService({
       ...fixture.dependencies,
-      observerReaders: { ...fixture.dependencies.observerReaders, lexical },
-      entityExtractionPort: { extract: forbiddenAsync },
-      embeddingRecallService: {
-        hasStoredVectors: forbiddenAsync,
-        prepareQueryEmbedding: forbiddenSync,
-        querySupplement: forbiddenAsync,
-        querySupplementIfReady: forbiddenAsync,
-        collectWorkspaceNeighborsWithMetadata: forbiddenAsync
-      }
+      observerReaders: { ...fixture.dependencies.observerReaders, lexical }
     });
     const base = service.buildDefaultPolicy("analyze", request.taskSurface.runtime_id);
     const policyOverride = { ...base, coarse_filter: { ...base.coarse_filter,
@@ -43,17 +35,29 @@ describe("conditional Recall after retired route removal", () => {
         enabled: true, embedding_enabled: true, injection_cap: 50 } } };
     const before = fixture.database.connection.prepare("SELECT total_changes() AS count").get();
     const gardenBefore = fixture.pendingGarden();
-    for (const diagnosticCapture of [undefined, "answer_features", "packet_trace"] as const) {
-      const result = await service.recall({ ...request, policyOverride, diagnosticCapture });
+    let entries: InformationIndex["entries"] | undefined;
+    for (const [diagnosticCapture, deliveryPath] of [
+      [undefined, undefined], ["answer_features", "legacy"], ["packet_trace", "canonical"]
+    ] as const) {
+      const result = await service.recall({ ...request, diagnosticCapture, policyOverride: {
+        ...policyOverride, fine_assessment: { ...policyOverride.fine_assessment,
+          ...(deliveryPath === undefined ? {} : { delivery_path: deliveryPath }) }
+      } });
       expect(result.index.entries.map((entry) => entry.object_id)).toContain(id);
       expect(result.candidates.map((entry) => entry.object_id)).toEqual(
         result.index.entries.map((entry) => entry.object_id)
       );
       expect(result.synthesis).toEqual({ status: "absent" });
+      expect(result.diagnostics).toBeUndefined();
+      expect(result.capture_execution).toBeUndefined();
+      expect(result.ranking_authority).toBeUndefined();
+      expect(result.provider_calls).toBe(0);
+      expect(result.garden_enqueue).toBe(0);
+      if (entries === undefined) entries = result.index.entries;
+      else expect(result.index.entries).toEqual(entries);
     }
     expect(lexical).toHaveBeenCalled();
-    expect(forbiddenAsync).not.toHaveBeenCalled();
-    expect(forbiddenSync).not.toHaveBeenCalled();
+    expect(network).not.toHaveBeenCalled();
     expect(fixture.database.connection.prepare("SELECT total_changes() AS count").get()).toEqual(before);
     expect(fixture.pendingGarden()).toEqual(gardenBefore);
   });

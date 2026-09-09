@@ -1,4 +1,5 @@
 import { resolvePremiseInvalid } from "./abstention.js";
+import { historicalCandidatePoolComplete } from "../artifacts/candidate-readers/historical-completeness.js";
 import { classifyMiss } from "./miss/classify-miss.js";
 import { classifyQuestionMissTaxonomy } from "./miss/diagnostics-miss-taxonomy.js";
 import { readDiagnosticsFieldContext } from "./gold-field-membership.js";
@@ -248,7 +249,7 @@ function isCandidatePoolComplete(parts: QuestionDiagnosticParts): boolean {
     return isClosedFieldCompleteness(measurement.completeness);
   }
   if (measurement?.status === "invalid") return false;
-  return parts.diagnostics?.candidatePoolComplete === true;
+  return historicalCandidatePoolComplete(parts.diagnostics, parts.candidates);
 }
 
 function isClosedFieldCompleteness(
