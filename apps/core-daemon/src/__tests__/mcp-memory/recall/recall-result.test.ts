@@ -76,6 +76,28 @@ describe("conditional-field result encoding", () => {
     expect(frameEncodedIndex(index, results).entries).toEqual(index.entries);
     expect(frameEncodedIndex(index, results).completeness.payload).toBe("omitted");
   });
+
+  it("truncates the first preview to fit remaining tokens instead of omitting the row", () => {
+    const index = {
+      ...stubRecallIndex([]),
+      entries: [{
+        schema_version: 1 as const, object_id: "memory-1", hypothesis_id: "h1",
+        output_binding: "memory-1", role: "requested" as const, explanation_ids: [],
+        association_milligrades: 500, claim: "unknown" as const
+      }],
+      representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
+    };
+    const preview = "x".repeat(3_000);
+    const results = encodeIndexResults(index, new Map([["memory-1", preview]]), 2_000);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.object_id).toBe("memory-1");
+    expect(results[0]?.content_preview.length).toBeGreaterThanOrEqual(1);
+    expect(results[0]?.content_preview.length).toBeLessThan(preview.length);
+    expect(results[0]?.budget_state.within_budget).toBe(true);
+    expect(results[0]?.budget_state.token_estimate).toBeLessThanOrEqual(2_000);
+    expect(Buffer.byteLength(results[0]!.content_preview, "utf8")).toBeLessThanOrEqual(2_000);
+    expect(frameEncodedIndex(index, results).entries).toEqual(index.entries);
+  });
 });
 
 describe("resolveMcpDegradationReason", () => {
@@ -239,14 +261,6 @@ describe("resolveMcpDegradationReason", () => {
         delivery_id: "delivery-1",
         results: [],
         total_count: 0,
-        strategy_mix: {
-          deterministic_match: true,
-          precomputed_rank: true,
-          semantic_supplement: false,
-          graph_support: false,
-          path_plasticity: false,
-          global_recall: false
-        },
         degradation_reason: reason
       });
       expect(parsed.degradation_reason).toBe(reason);

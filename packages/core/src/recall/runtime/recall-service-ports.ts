@@ -26,13 +26,9 @@ import type {
   PreparedEmbeddingQueryHandle
 } from "../../embedding-recall/embedding-recall-service.js";
 import type { ManifestationBiasSidecarEntry } from "../../manifestation/manifestation-resolver.js";
-import type {
-  GlobalMemoryRecallCachePort,
-  GlobalMemoryRecallPort
-} from "./global-memory-recall-port.js";
+import type { GlobalMemoryRecallCachePort } from "./global-memory-recall-port.js";
 import type { RecallFailureHealthInboxPort } from "./recall-failure-health-inbox.js";
 import type { RecallReadSnapshotPort } from "./recall-read-snapshot.js";
-import type { RecallRoutingKeyProjectionPort } from "./routing-key-projection-port.js";
 import type {
   KeywordSearchBatchQuery,
   KeywordSearchFieldResult,
@@ -424,7 +420,6 @@ export interface RecallServiceDependencies {
   readonly graphSupportPort?: RecallServiceGraphSupportPort;
   readonly budgetPenaltyPort?: RecallServiceBudgetPenaltyPort;
   readonly projectMappingPort?: RecallServiceProjectMappingPort;
-  readonly globalRecallPort?: GlobalMemoryRecallPort;
   readonly globalRecallCachePort?: GlobalMemoryRecallCachePort;
   readonly claimResolverPort?: RecallServiceClaimResolverPort;
   readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
@@ -432,7 +427,6 @@ export interface RecallServiceDependencies {
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly activeConstraintsPort?: RecallServiceActiveConstraintsPort;
   readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
-  readonly routingKeyProjectionPort?: RecallRoutingKeyProjectionPort;
   readonly synthesisSearchPort?: RecallServiceSynthesisSearchPort;
   readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
   // The decorator applies runtime policy defaults before request validation.

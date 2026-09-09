@@ -65,14 +65,13 @@ describe("bench conditional field index response", () => {
     expect(response.provider_calls).toBe(0);
     expect(response.garden_enqueue).toBe(0);
     expect(response.request_budget).toEqual(budget);
-    expect(response.strategy_mix.precomputed_rank).toBe(false);
-    expect(response.strategy_mix.semantic_supplement).toBe(false);
+    expect(response).not.toHaveProperty("strategy_mix");
   });
 
   it("keeps the raw logical index when the payload budget truncates encoding", () => {
     const result = fixture();
     const tight = { ...policy, fine_assessment: { ...policy.fine_assessment,
-      budgets: { ...policy.fine_assessment.budgets, max_total_tokens: 20 } } };
+      budgets: { ...policy.fine_assessment.budgets, max_total_tokens: 2 } } };
     const rows = encodeBenchRecallResults(result, tight);
     const response = buildBenchRecallResponse("delivery", rows, result, budget);
     expect(rows).toHaveLength(1);

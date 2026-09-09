@@ -97,7 +97,8 @@ export interface RecallEvidenceSemanticActivationReceipt {
 }
 
 export type RecallSourceMetadata = Readonly<
-  Partial<Pick<MemoryEntry, "evidence_refs">> & Pick<RecallCandidate, "staged_warnings">
+  Partial<Pick<MemoryEntry, "evidence_refs" | "dimension" | "scope_class">>
+  & Pick<RecallCandidate, "staged_warnings">
 >;
 
 export interface RecallResult {

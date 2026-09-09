@@ -87,7 +87,6 @@ export type {
   TokenEstimator
 } from "./runtime/recall-service-types.js";
 export { makeTokenEstimator } from "./runtime/recall-service-types.js";
-export { RECALL_FUSION_STREAMS } from "./delivery/fusion-delivery-streams.js";
 export type { RecallDiagnosticCapture } from
   "./runtime/recall-service-runner-types.js";
 export {

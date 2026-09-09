@@ -8,7 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { mapEmbeddingProviderDiagnosticToMcpReason } from "@do-soul/alaya-core";
 
-/** Diagnostics slice needed for honest MCP strategy_mix / degradation_reason. */
+/** Diagnostics slice needed for honest MCP degradation_reason. */
 export type RecallMcpHonestyDiagnostics = Readonly<{
   readonly embedding_supplement_status?: string;
   readonly embedding_provider_status?: string;
@@ -37,16 +37,16 @@ export function encodeIndexResults(
     }));
     const metadataBytes = evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0
       ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings }), "utf8");
-    const tokenEstimate = Math.max(1, Buffer.byteLength(preview, "utf8") + metadataBytes);
-    const usedThrough = usedTokens + tokenEstimate;
+    const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedTokens);
+    if (fitted === null) break;
     // Emitting the bytes then flagging within_budget=false is not an allowance.
-    if (usedThrough > maxTotalTokens) break;
+    const usedThrough = usedTokens + fitted.tokenEstimate;
     usedTokens = usedThrough;
     encoded.push({
       object_id: entry.object_id,
       object_kind: "memory_entry",
       relevance_score: score,
-      content_preview: preview,
+      content_preview: fitted.preview,
       evidence_pointers: evidencePointers,
       ...(stagedWarnings === undefined ? {} : { staged_warnings: stagedWarnings }),
       ...(entry.hypothesis_id === undefined ? {} : { hypothesis_id: entry.hypothesis_id }),
@@ -57,7 +57,7 @@ export function encodeIndexResults(
       source_channels: ["conditional_field"],
       score_factors: { activation: score, relevance: score },
       budget_state: {
-        token_estimate: tokenEstimate,
+        token_estimate: fitted.tokenEstimate,
         max_entries: index.representation.page_budget,
         max_total_tokens: maxTotalTokens,
         remaining_entries: Math.max(0, index.representation.page_budget - encoded.length),
@@ -180,4 +180,30 @@ function isHardEmbeddingFailureReason(
     reason === "provider_missing" ||
     reason === "no_stored_vectors"
   );
+}
+
+function fitEncodedPreview(
+  preview: string,
+  metadataBytes: number,
+  remaining: number
+): Readonly<{ readonly preview: string; readonly tokenEstimate: number }> | null {
+  const tokenEstimate = Math.max(1, Buffer.byteLength(preview, "utf8") + metadataBytes);
+  if (tokenEstimate <= remaining) return { preview, tokenEstimate };
+  const maxPreviewBytes = remaining - metadataBytes;
+  // A 1-token remainder is the token_estimate floor; it cannot also hold a 1-byte preview plus metadata.
+  if (maxPreviewBytes < 1 || remaining <= 1) return null;
+  const truncated = truncateUtf8(preview, maxPreviewBytes);
+  const truncatedEstimate = Math.max(1, Buffer.byteLength(truncated, "utf8") + metadataBytes);
+  if (truncated.length < 1 || truncatedEstimate > remaining) return null;
+  return { preview: truncated, tokenEstimate: truncatedEstimate };
+}
+
+function truncateUtf8(text: string, maxBytes: number): string {
+  if (maxBytes < 1) return "";
+  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
+  let truncated = text.slice(0, maxBytes);
+  while (truncated.length > 0 && Buffer.byteLength(truncated, "utf8") > maxBytes) {
+    truncated = truncated.slice(0, truncated.length - 1);
+  }
+  return truncated;
 }

@@ -379,14 +379,6 @@ export function buildRecallResult(
       }
     })),
     total_count: objectIds.length,
-    strategy_mix: {
-      deterministic_match: true,
-      precomputed_rank: true,
-      semantic_supplement: false,
-      graph_support: false,
-      path_plasticity: false,
-      global_recall: false
-    },
     degradation_reason: null
   };
 }

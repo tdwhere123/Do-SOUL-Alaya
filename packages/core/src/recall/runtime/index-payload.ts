@@ -1,4 +1,4 @@
-import type { IndexEntry, ManifestationState } from "@do-soul/alaya-protocol";
+import { MemoryDimension, ScopeClass, type IndexEntry, type ManifestationState } from "@do-soul/alaya-protocol";
 import type { BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
 import type { ObserverReaders } from "../conditional-field/observers/observe.js";
 import { createContentPreview } from "./recall-service-helpers.js";
@@ -35,10 +35,7 @@ export class BoundedIndexPayload {
       }
       const facts = this.input.sourceFacts?.[entry.object_id];
       if (this.sourceMetadata[entry.object_id] === undefined && facts !== undefined) {
-        const metadata = {
-          ...(facts.evidence_refs === undefined ? {} : { evidence_refs: facts.evidence_refs }),
-          ...(facts.staged_warnings === undefined ? {} : { staged_warnings: facts.staged_warnings })
-        };
+        const metadata = sourceMetadataFrom(facts);
         const bytes = Buffer.byteLength(JSON.stringify([entry.object_id, metadata]), "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) {
           complete = false; this.previews.delete(entry.object_id); continue;
@@ -62,10 +59,7 @@ export class BoundedIndexPayload {
       remaining -= Math.max(1, page.rowsRead) + 2;
       this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead);
       if (page.row?.content === undefined || page.unavailable) { complete = false; continue; }
-      const metadata = {
-        ...(page.row.evidence_refs === undefined ? {} : { evidence_refs: page.row.evidence_refs }),
-        ...(page.row.staged_warnings === undefined ? {} : { staged_warnings: page.row.staged_warnings })
-      };
+      const metadata = sourceMetadataFrom(page.row);
       const metadataBytes = Buffer.byteLength(JSON.stringify([entry.object_id, metadata]), "utf8");
       if (metadataBytes > this.remainingMemoryBytes) { complete = false; continue; }
       this.remainingMemoryBytes -= metadataBytes;
@@ -74,4 +68,29 @@ export class BoundedIndexPayload {
     }
     return { remaining: Math.max(0, remaining), complete };
   }
+}
+
+function sourceMetadataFrom(row: Readonly<{
+  readonly evidence_refs?: readonly string[];
+  readonly staged_warnings?: RecallSourceMetadata["staged_warnings"];
+  readonly dimension?: string;
+  readonly scope_class?: string;
+}>): RecallSourceMetadata {
+  const dimension = knownEnum(row.dimension, MemoryDimension);
+  const scopeClass = knownEnum(row.scope_class, ScopeClass);
+  return {
+    ...(row.evidence_refs === undefined ? {} : { evidence_refs: row.evidence_refs }),
+    ...(row.staged_warnings === undefined ? {} : { staged_warnings: row.staged_warnings }),
+    ...(dimension === undefined ? {} : { dimension }),
+    ...(scopeClass === undefined ? {} : { scope_class: scopeClass })
+  };
+}
+
+function knownEnum<T extends string>(
+  value: string | undefined,
+  allowed: Readonly<Record<string, T>>
+): T | undefined {
+  return (Object.values(allowed) as readonly string[]).includes(value ?? "")
+    ? value as T
+    : undefined;
 }

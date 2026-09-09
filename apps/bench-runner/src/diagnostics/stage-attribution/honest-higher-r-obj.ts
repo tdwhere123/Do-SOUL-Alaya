@@ -3,7 +3,7 @@ import {
   aggregateFamilyContributions,
   familyMaxContributionsById,
   type RecallFusionFamilyId
-} from "@do-soul/alaya-core";
+} from "./fusion-delivery-families.js";
 import type {
   DiagnosticStreamContributions,
   LongMemEvalGoldDiagnostic,

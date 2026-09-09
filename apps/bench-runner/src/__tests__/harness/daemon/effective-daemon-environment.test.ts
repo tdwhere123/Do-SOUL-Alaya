@@ -83,7 +83,7 @@ async function expectFrozenCoreConfig(
   const recallResult = await activeDaemon.recall("frozen core configuration probe");
   expect(recallResult.provider_calls).toBe(0);
   expect(recallResult.garden_enqueue).toBe(0);
-  expect(recallResult.strategy_mix.semantic_supplement).toBe(false);
+  expect(recallResult).not.toHaveProperty("strategy_mix");
   const options = { maxResults: 10, conflictAwareness: true };
   expect(buildEffectiveRecallConfigIdentity(process.env, options)).toEqual(
     buildEffectiveRecallConfigIdentity(launch.environment, options)
@@ -283,7 +283,7 @@ describe("effective bench daemon environment", () => {
       const recallResult = await daemon.recall("empty treatment isolation probe");
       expect(recallResult.provider_calls).toBe(0);
       expect(recallResult.garden_enqueue).toBe(0);
-      expect(recallResult.strategy_mix.semantic_supplement).toBe(false);
+      expect(recallResult).not.toHaveProperty("strategy_mix");
 
       const isolatedConfigDir = launch.environment.ALAYA_CONFIG_DIR;
       await daemon.shutdown();

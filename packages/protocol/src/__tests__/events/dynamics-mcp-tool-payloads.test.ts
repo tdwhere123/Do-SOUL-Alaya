@@ -150,14 +150,6 @@ describe("MCP tool request/response schemas", () => {
             }
           ],
           total_count: 1,
-          strategy_mix: {
-            deterministic_match: true,
-            precomputed_rank: true,
-            semantic_supplement: true,
-            graph_support: true,
-            path_plasticity: true,
-            global_recall: true
-          },
           degradation_reason: null
         }
       },
@@ -227,15 +219,7 @@ describe("MCP tool request/response schemas", () => {
     const baseResponse = {
       delivery_id: "delivery-1",
       results: [],
-      total_count: 0,
-      strategy_mix: {
-        deterministic_match: true,
-        precomputed_rank: true,
-        semantic_supplement: false,
-        graph_support: false,
-        path_plasticity: false,
-        global_recall: false
-      }
+      total_count: 0
     };
 
     expect(SoulMemorySearchResponseSchema.parse({
@@ -272,15 +256,7 @@ describe("MCP tool request/response schemas", () => {
     const baseResponse = {
       delivery_id: "delivery-1",
       results: [],
-      total_count: 0,
-      strategy_mix: {
-        deterministic_match: true,
-        precomputed_rank: true,
-        semantic_supplement: false,
-        graph_support: false,
-        path_plasticity: false,
-        global_recall: false
-      }
+      total_count: 0
     };
 
     expect(SoulMemorySearchResponseSchema.safeParse({
@@ -293,15 +269,7 @@ describe("MCP tool request/response schemas", () => {
     const baseResponse = {
       delivery_id: "delivery-1",
       results: [],
-      total_count: 0,
-      strategy_mix: {
-        deterministic_match: true,
-        precomputed_rank: true,
-        semantic_supplement: false,
-        graph_support: false,
-        path_plasticity: false,
-        global_recall: false
-      }
+      total_count: 0
     };
 
     expect(SoulMemorySearchResponseSchema.parse(baseResponse).active_constraints).toBeUndefined();

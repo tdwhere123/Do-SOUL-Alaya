@@ -13,7 +13,6 @@ import {
 } from "@do-soul/alaya-core";
 import {
   findActiveConstraints,
-  SqliteRecallRoutingKeyProjectionRepo,
   type EvidenceSearchMatch
 } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../recall-read-worker/observer-operations.js";
@@ -294,7 +293,6 @@ function createRecallService(input: {
     pathPlasticityPort: input.recallPathRuntime.recallPathPlasticityPort as never,
     activeConstraintsPort: input.recallSearchRuntime.recallActiveConstraintsPort,
     robustSourceRefParsing: readRobustSourceRefParsing(input.input.configEnv),
-    routingKeyProjectionPort: new SqliteRecallRoutingKeyProjectionRepo(input.input.database),
     ...createRecallGlobalMemoryPorts(input),
     budgetPenaltyPort: {
       getSnapshot: async (runId: string) =>
@@ -401,18 +399,12 @@ function readRobustSourceRefParsing(configEnv: ReadonlyMap<string, string>): boo
 
 function createRecallGlobalMemoryPorts(input: {
   readonly input: CreateRecallMaterializationWiringInput;
-  readonly globalMemoryRuntime: {
-    readonly globalMemoryRecallService:
-      | import("@do-soul/alaya-core").GlobalMemoryRecallServicePort
-      | undefined;
-  };
 }) {
   if (input.input.globalMemoryRepo === null) {
     return {};
   }
 
   return {
-    globalRecallPort: input.globalMemoryRuntime.globalMemoryRecallService,
     ...(input.input.globalMemoryRecallCacheRepo === null
       ? {}
       : {

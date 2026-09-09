@@ -119,6 +119,28 @@ describe("conditional-field compiler and projection contracts", () => {
       expect(row.incomplete_reason).toBeUndefined();
     }
   });
+
+  it("records oracle-only helpers as contract-only and production classes as real-producer", () => {
+    expect(coverageById("B07").binding).toBe("contract-only");
+    expect(coverageById("B07").incomplete_reason).toMatch(/not a production class/);
+    expect(coverageById("A04").binding).toBe("contract-only");
+    expect(coverageById("A04").consumer).toBe("none");
+    expect(coverageById("A13").binding).toBe("real-producer");
+    expect(coverageById("A13").producer).toContain("projectAcceptingIndex");
+    expect(coverageById("B02").binding).toBe("real-producer");
+    expect(coverageById("B02").producer).toContain("field-engine.ts");
+    expect(coverageById("B03").binding).toBe("contract-only");
+    expect(coverageById("B03").consumer).toBe("none");
+    expect(coverageById("B03").consumer).toBe("none");
+    expect(coverageById("B10").binding).toBe("real-producer");
+    expect(coverageById("B10").producer).toContain("attributeUsageReports");
+    expect(coverageById("B11").binding).toBe("real-producer");
+    expect(coverageById("B11").producer).toContain("attributeUsageReports");
+    expect(coverageById("B12").binding).toBe("real-producer");
+    expect(coverageById("B12").producer).toContain("projectCausalUsageOntoPaths");
+    expect(coverageById("B14").binding).toBe("real-producer");
+    expect(coverageById("B14").producer).toContain("USAGE_ADAPTATION_NECESSITY");
+  });
 });
 
 function snapshotOf(values: readonly FieldValue[]): FieldSnapshot {

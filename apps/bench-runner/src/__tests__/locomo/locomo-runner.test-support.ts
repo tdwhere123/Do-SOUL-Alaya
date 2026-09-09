@@ -224,14 +224,6 @@ export function buildRecallResult(objectId = "memory-d1") {
     active_constraints: [],
     active_constraints_count: 0,
     total_count: 1,
-    strategy_mix: {
-      deterministic_match: true,
-      precomputed_rank: true,
-      semantic_supplement: true,
-      graph_support: false,
-      path_plasticity: false,
-      global_recall: false
-    },
     degradation_reason: null,
     diagnostics: {
       embedding_provider_status: "provider_returned",

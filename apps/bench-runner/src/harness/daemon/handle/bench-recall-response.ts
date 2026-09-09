@@ -74,14 +74,6 @@ export function buildBenchRecallResponse(
     active_constraints_count: recallResult.active_constraints_count,
     active_constraints_completeness: recallResult.active_constraints_completeness,
     total_count: results.length,
-    strategy_mix: {
-      deterministic_match: true,
-      precomputed_rank: false,
-      semantic_supplement: false,
-      graph_support: false,
-      path_plasticity: false,
-      global_recall: false
-    },
     degradation_reason: recallResult.degradation_reason
   });
   return {

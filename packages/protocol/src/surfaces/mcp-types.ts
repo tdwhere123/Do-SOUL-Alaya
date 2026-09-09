@@ -57,7 +57,6 @@ import {
 export { SoulMemorySearchResponseSchema };
 
 export {
-  SoulRecallStrategyMixSchema,
   SoulMemorySearchDegradationReasonSchema,
   MemorySearchResultSchema,
   SoulActiveConstraintGovernanceStateSchema,
@@ -69,7 +68,6 @@ export {
   type MemorySearchResult,
   type SoulActiveConstraintGovernanceState,
   type SoulActiveConstraint,
-  type SoulRecallStrategyMix,
   type SoulMemorySearchDegradationReason,
   type SoulRecallTokenizerHint,
   type SoulRecallHostContext,

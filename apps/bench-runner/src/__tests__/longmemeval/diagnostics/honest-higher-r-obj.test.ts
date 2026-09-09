@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { RecallFusionFamilyId } from "@do-soul/alaya-core";
+import type { RecallFusionFamilyId } from
+  "../../../diagnostics/stage-attribution/fusion-delivery-families.js";
 import { classifyHonestHigherRObj } from
   "../../../diagnostics/stage-attribution/honest-higher-r-obj.js";
 import { classifyGoldObjectStage } from

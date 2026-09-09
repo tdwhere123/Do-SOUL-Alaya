@@ -34,7 +34,9 @@ export function stubRecallIndex(objectIds: readonly string[] = ["mem1"]): Inform
       role: "associated",
       association_milligrades: 800,
       claim: "unknown",
-      explanation_ids: []
+      explanation_ids: [],
+      program_state: "accepting",
+      time_state: "as_of"
     })),
     completeness: {
       schema_version: 1,

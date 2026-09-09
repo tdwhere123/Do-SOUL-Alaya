@@ -156,8 +156,9 @@ The protocol 4.0.0 candidate is an unreleased major semantic cutover under
 invariant §25. Explicit legacy selector request keys are rejected. Historical
 response `delivery_path` and `ranking_authority` remain deprecated parseable
 fields and are omitted on the target path. `recent_turn` remains accepted and
-ignored by Recall. Required `results`, `strategy_mix`, `index` and continuation
-retain their documented roles; ignored inputs do not activate old behavior.
+ignored by Recall. Required `results`, `index` and continuation retain their
+documented roles. Retired `strategy_mix` is absent from the target payload and
+rejected by the strict response schema; ignored inputs do not activate old behavior.
 
 Indexed projection schema 6 prepares schema, relation indexes and embedding
 indexes in one transaction. Failure leaves the previous schema and truth

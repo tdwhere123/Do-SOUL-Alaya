@@ -3,11 +3,7 @@ import { SoulMemorySearchRequestSchema, SoulMemorySearchResponseSchema } from ".
 
 const request = { query: "source", scope_class: null, dimension: null, domain_tags: null, max_results: 5 };
 const response = {
-  delivery_id: "delivery", results: [], total_count: 0,
-  strategy_mix: {
-    deterministic_match: false, precomputed_rank: false, semantic_supplement: false,
-    graph_support: false, path_plasticity: false, global_recall: false
-  }
+  delivery_id: "delivery", results: [], total_count: 0
 };
 
 // Public compatibility remains until the minor deprecation window in invariant §25 closes.
@@ -31,10 +27,15 @@ describe("retired Recall surface sibling compatibility", () => {
     }
   });
 
-  it("keeps results and strategy_mix required for sibling consumers", () => {
+  it("keeps results required and rejects retired strategy_mix", () => {
     const { results: _results, ...missingResults } = response;
-    const { strategy_mix: _mix, ...missingMix } = response;
     expect(SoulMemorySearchResponseSchema.safeParse(missingResults).success).toBe(false);
-    expect(SoulMemorySearchResponseSchema.safeParse(missingMix).success).toBe(false);
+    expect(SoulMemorySearchResponseSchema.safeParse({
+      ...response,
+      strategy_mix: {
+        deterministic_match: false, precomputed_rank: false, semantic_supplement: false,
+        graph_support: false, path_plasticity: false, global_recall: false
+      }
+    }).success).toBe(false);
   });
 });

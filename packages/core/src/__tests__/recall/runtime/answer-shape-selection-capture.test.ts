@@ -20,9 +20,7 @@ describe("recall answer-shape selection capture", () => {
     expect(ordinary.garden_enqueue).toBe(0);
     expect(ordinary.index).toBeDefined();
     expect(captured.index).toEqual(ordinary.index);
-    expect(ordinary.index.completeness.logical_index === "complete"
-      || ordinary.index.completeness.logical_index === "open"
-      || ordinary.index.completeness.logical_index === "unavailable").toBe(true);
+    expect(ordinary.index.completeness.logical_index).toBe("unavailable");
   });
 
   it("delivers the information index without answer-feature capture", async () => {

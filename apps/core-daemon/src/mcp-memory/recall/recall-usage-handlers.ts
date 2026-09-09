@@ -273,14 +273,6 @@ function buildRecallResponse(
   explainabilityPartial: boolean
 ): SoulMemorySearchResponse {
   const honestyDiagnostics = selectRecallMcpHonestyDiagnostics(recallResult.diagnostics);
-  const strategyMix = {
-      deterministic_match: true,
-      precomputed_rank: false,
-      semantic_supplement: false,
-      graph_support: false,
-      path_plasticity: false,
-      global_recall: false
-    };
   return SoulMemorySearchResponseSchema.parse({
     delivery_id: deliveryId,
     protocol_version: 1,
@@ -291,7 +283,6 @@ function buildRecallResponse(
       active_constraints_completeness: recallResult.active_constraints_completeness
     }),
     total_count: totalCount,
-    strategy_mix: strategyMix,
     degradation_reason: resolveMcpDegradationReason(
       {
         degradation_reason: recallResult.degradation_reason,

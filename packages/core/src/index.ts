@@ -68,12 +68,6 @@ export * from "./tooling/extension-registry-service.js";
 export * from "./shared/file-path.js";
 export * from "./recall/runtime/global-memory-recall-port.js";
 export * from "./recall/runtime/global-memory-recall-service.js";
-export {
-  LegacyPathIndexUnboundError,
-  classifyPathIndexReadFailure,
-  isLegacyPathIndexUnboundError
-} from "./recall/runtime/legacy-path-index-unbound-error.js";
-
 export * from "./health/garden-backlog-telemetry-service.js";
 export * from "./relations/path-relations/graph-contract-service.js";
 export * from "./governance/policy/governance-lease-service.js";
@@ -112,23 +106,19 @@ export * from "./governance/reconciliation/reconciliation-service.js";
 export * from "./recall/recall-service.js";
 export { reserveSnapshotPinWork } from "./recall/runtime/snapshot-pin-budget.js";
 export * from "./recall/query/recall-query-probes.js";
-export {
-  RECALL_FUSION_FAMILY_IDS,
-  RECALL_FUSION_FAMILY_STREAMS,
-  aggregateFamilyContributions,
-  familyMaxContributionsById,
-  type RecallFusionFamilyId
-} from "./recall/delivery/fusion-delivery-families.js";
 export * from "./recall/field/field-identity.js";
 export * from "./recall/field/finite-field-seal.js";
 export * from "./recall/field/finite-field-capture.js";
 export * from "./recall/field/object-embedding-field-capture.js";
 export * from "./recall/field/evidence-semantic-field-capture.js";
 export * from "./recall/field/fact-frame-semantic-factors.js";
-export * from "./recall/field/query-attribution/query-field-attribution.js";
-export * from "./recall/field/query-attribution/query-fact-frame-attribution-producer.js";
 export * from "./shared/query-fact-frame-extraction-port.js";
 export * from "./shared/query-fact-frame-extraction-rules.js";
+export {
+  captureRecallQueryFactFrames,
+  verifyRecallQueryFactFrameExtractionCapture,
+  type RecallQueryFactFrameExtractionCapture
+} from "./recall/field/query-attribution/query-fact-frame-attribution-producer.js";
 export * from "./shared/cjk-segmentation.js";
 export * from "./shared/entity-extraction-port.js";
 export * from "./shared/entity-extraction-rules.js";

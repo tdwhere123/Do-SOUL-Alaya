@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   IndexEntrySchema,
-  type IndexEntry
+  type IndexEntry,
+  type PathRelation
 } from "@do-soul/alaya-protocol";
+import {
+  USAGE_ADAPTATION_NECESSITY,
+  USAGE_ADAPTATION_NECESSITY_MECHANISMS
+} from "../../../governance/effects/causal-plasticity.js";
+import { projectCausalUsageOntoPaths } from "../../../relations/path-plasticity/causal-usage-projection.js";
 import { enumerateSimplePaths, productKey } from "./enumerate-simple-paths.js";
 import {
   QUERY_ID,
@@ -19,7 +25,6 @@ import {
   requiredIds
 } from "./coverage-matrix.js";
 import {
-  NECESSITY_ROWS,
   admitsSameService,
   andOrWithdrawalForest,
   actualBudgetRepresentsUniverse,
@@ -28,7 +33,6 @@ import {
   creditFromReport,
   duplicatePathsMintIndependence,
   explanationsComplete,
-  finiteExamplesAreLearningGains,
   foldReports,
   intermediateAuthorized,
   interpretationCoverageOf,
@@ -43,7 +47,6 @@ import {
   resumeDisposition,
   scalarOf,
   unfinishedAfterBudget,
-  usageMayMutateStrength,
   witnessReport,
   withdrawLeaf
 } from "./upgrade-expected.js";
@@ -57,7 +60,9 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
       expect(row.planted_failure.length).toBeGreaterThan(8);
       if (row.binding === "incomplete") expect(row.incomplete_reason).toBeDefined();
     }
-    expect(formatCoverageMarkdown()).toContain("| B03 | real-producer |");
+    expect(formatCoverageMarkdown()).toContain("| A04 | contract-only |");
+    expect(formatCoverageMarkdown()).toContain("| B03 | contract-only |");
+    expect(formatCoverageMarkdown()).toContain("| B07 | contract-only |");
     expect(CONTRACT_ONLY_UNTIL_REAL_PRODUCERS).toMatch(/contract-only until real producers bind/);
   });
 
@@ -211,9 +216,11 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
   });
 
   it("usage reports do not own PathRelation.strength", () => {
-    expect(usageMayMutateStrength()).toBe(false);
+    const stored = productionPath(0.2);
+    const [projected] = projectCausalUsageOntoPaths([stored], [], "2026-08-17T00:00:00.000Z", 0);
+    expect(projected?.plasticity_state.strength).toBe(0.2);
     expect(plantedUsageMutator(0.2, true)).toBeGreaterThan(0.2);
-    expect(plantedUsageMutator(0.2, true) !== 0.2 && usageMayMutateStrength()).toBe(false);
+    expect(projected?.plasticity_state.strength).not.toBe(plantedUsageMutator(0.2, true));
   });
 
   it("contract payload keeps index identity fields that results flattening drops", () => {
@@ -226,12 +233,12 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
   });
 
   it("necessity dispositions are closed without claiming finite examples as learning", () => {
-    expect(NECESSITY_ROWS).toHaveLength(4);
-    expect(new Set(NECESSITY_ROWS.map((row) => row.disposition)))
+    expect(USAGE_ADAPTATION_NECESSITY_MECHANISMS).toHaveLength(4);
+    expect(new Set(Object.values(USAGE_ADAPTATION_NECESSITY).map((row) => row.disposition)))
       .toEqual(new Set(["NOT_REQUIRED", "BENEFIT_NOT_ESTABLISHED"]));
-    expect(finiteExamplesAreLearningGains(12)).toBe(false);
-    const plantedCompleteLearner = NECESSITY_ROWS.some((row) => row.mechanism === "learner-selected");
-    expect(plantedCompleteLearner).toBe(false);
+    expect(USAGE_ADAPTATION_NECESSITY.cost_informed_scheduling.counterexample)
+      .toMatch(/Finite mathematical examples are not workload gains/);
+    expect(USAGE_ADAPTATION_NECESSITY_MECHANISMS).not.toContain("learner-selected");
   });
 
   it("duplicate source sets do not mint independence", () => {
@@ -254,7 +261,8 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
   it("retired route isolation keeps required compatibility metadata separate from selection", () => {
     expect(coverageById("A21").binding).toBe("real-producer");
     expect(coverageById("A21").producer).toContain("retired-route-isolation.test.ts");
-    expect(coverageById("A21").expected).toContain("strategy_mix remains required compatibility metadata");
+    expect(coverageById("A21").expected).toContain("no ranking_authority/delivery_path/strategy_mix on target payload");
+    expect(coverageById("A21").consumer).toContain("MCP forbidden keys");
     expect(coverageById("A21").planted_failure).toMatch(/old decision chain/);
   });
 
@@ -283,4 +291,34 @@ function indexEntry(input: {
     ...(input.program_state === undefined ? {} : { program_state: input.program_state }),
     ...(input.time_state === undefined ? {} : { time_state: input.time_state })
   });
+}
+
+function productionPath(strength: number): PathRelation {
+  return {
+    path_id: "path-1",
+    workspace_id: "workspace-1",
+    anchors: {
+      source_anchor: { kind: "object", object_id: "memory-1" },
+      target_anchor: { kind: "object", object_id: "memory-2" }
+    },
+    constitution: { relation_kind: "supports", why_this_relation_exists: ["evidence"] },
+    effect_vector: {
+      salience: 0.5,
+      recall_bias: 0.5,
+      verification_bias: 0,
+      unfinishedness_bias: 0,
+      default_manifestation_preference: "stance_bias"
+    },
+    plasticity_state: {
+      strength,
+      direction_bias: "source_to_target",
+      stability_class: "normal",
+      support_events_count: 0,
+      contradiction_events_count: 0
+    },
+    lifecycle: { status: "active", retirement_rule: "default" },
+    legitimacy: { evidence_basis: ["evidence-1"], governance_class: "attention_only" },
+    created_at: "2026-08-01T00:00:00.000Z",
+    updated_at: "2026-08-01T00:00:00.000Z"
+  };
 }

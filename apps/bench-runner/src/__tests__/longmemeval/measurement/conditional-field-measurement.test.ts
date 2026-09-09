@@ -45,8 +45,7 @@ function fixture(ids = ["gold"] ) {
       remaining_entries: 0, remaining_tokens: 0, within_budget: true }
   }));
   const recallResult = { delivery_id: "delivery", protocol_version: 1, index, results,
-    total_count: results.length, strategy_mix: { deterministic_match: true, precomputed_rank: false,
-      semantic_supplement: false, graph_support: false, path_plasticity: false, global_recall: false },
+    total_count: results.length,
     provider_calls: 0, garden_enqueue: 0, request_budget: BUDGET, execution_receipt };
   const deliveredResults = results.slice(0, 10).map((row, offset) => ({
     object_id: row.object_id, object_kind: row.object_kind, rank: offset + 1, relevance_score: row.relevance_score

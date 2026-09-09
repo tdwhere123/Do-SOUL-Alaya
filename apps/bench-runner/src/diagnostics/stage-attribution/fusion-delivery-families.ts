@@ -1,9 +1,3 @@
-import type {
-  RecallFusionStream,
-  RecallFusionStreamContributions,
-  RecallFusionStreamRanks
-} from "../runtime/recall-service-types.js";
-
 export type RecallFusionFamilyId =
   | "semantic"
   | "lexical"
@@ -14,34 +8,34 @@ export type RecallFusionFamilyId =
 // Correlated projections share one family ballot so repeated views of the same
 // evidence cannot multiply topical popularity against independent signals.
 export const RECALL_FUSION_FAMILY_STREAMS: Readonly<
-  Record<RecallFusionFamilyId, readonly RecallFusionStream[]>
+  Record<RecallFusionFamilyId, readonly string[]>
 > = Object.freeze({
-  semantic: Object.freeze(["embedding_similarity"] as const satisfies readonly RecallFusionStream[]),
+  semantic: Object.freeze(["embedding_similarity"]),
   lexical: Object.freeze([
     "lexical_fts",
     "trigram_fts",
     "synthesis_fts",
     "evidence_fts"
-  ] as const satisfies readonly RecallFusionStream[]),
+  ]),
   structural: Object.freeze([
     "evidence_structural_agreement",
     "source_proximity",
     "source_evidence_agreement",
     "structural",
     "existing_score"
-  ] as const satisfies readonly RecallFusionStream[]),
+  ]),
   graph_path: Object.freeze([
     "graph_expansion",
     "entity_seed",
     "path_expansion"
-  ] as const satisfies readonly RecallFusionStream[]),
+  ]),
   // subject_alignment is query-conditioned (self/preference), not topical-popularity ρ
   // with existing_score — keep it out of structural max so personal queries still lift.
   temporal_facet: Object.freeze([
     "temporal_recency",
     "workspace_activation",
     "subject_alignment"
-  ] as const satisfies readonly RecallFusionStream[])
+  ])
 });
 
 export const RECALL_FUSION_FAMILY_IDS: readonly RecallFusionFamilyId[] = Object.freeze([
@@ -56,7 +50,7 @@ export const RECALL_FUSION_FAMILY_IDS: readonly RecallFusionFamilyId[] = Object.
 // Correlated duplicates collapse (max(a,a,a)=a); a lone strong lane is not diluted by
 // weak siblings. Mean would still be ~one vote under high ρ, but softens the best signal.
 export function familyMaxContributionsById(
-  contributions: Readonly<Partial<Record<RecallFusionStream, number>>> | RecallFusionStreamContributions
+  contributions: Readonly<Partial<Record<string, number>>>
 ): Readonly<Record<RecallFusionFamilyId, number>> {
   const entries = RECALL_FUSION_FAMILY_IDS.map((familyId) => {
     let familyVote = 0;
@@ -75,7 +69,7 @@ export function familyMaxContributionsById(
 }
 
 export function aggregateFamilyContributions(
-  contributions: Readonly<Partial<Record<RecallFusionStream, number>>> | RecallFusionStreamContributions
+  contributions: Readonly<Partial<Record<string, number>>>
 ): number {
   const byId = familyMaxContributionsById(contributions);
   let total = 0;
@@ -83,20 +77,4 @@ export function aggregateFamilyContributions(
     total += byId[familyId];
   }
   return total;
-}
-
-export function countFamiliesWithHits(
-  candidates: readonly Readonly<{ readonly per_stream_rank: RecallFusionStreamRanks }>[]
-): number {
-  let familiesWithHits = 0;
-  for (const familyId of RECALL_FUSION_FAMILY_IDS) {
-    const streams = RECALL_FUSION_FAMILY_STREAMS[familyId];
-    const hit = candidates.some((candidate) =>
-      streams.some((stream) => candidate.per_stream_rank[stream] !== null)
-    );
-    if (hit) {
-      familiesWithHits += 1;
-    }
-  }
-  return familiesWithHits;
 }

@@ -401,8 +401,8 @@ export function encodeRecallResult(
       manifestation: governance === undefined ? "excerpt" as const
         : governanceManifestationFor(entry.object_id, ceilings,
           governance.completeness === "complete" && !governance.temporal_uncertain),
-      dimension: MemoryDimension.FACT,
-      scope_class: ScopeClass.PROJECT,
+      dimension: sourceMetadata[entry.object_id]?.dimension ?? MemoryDimension.FACT,
+      scope_class: sourceMetadata[entry.object_id]?.scope_class ?? ScopeClass.PROJECT,
       origin_plane: "workspace_local" as const,
       selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
       ...(sourceMetadata[entry.object_id]?.staged_warnings === undefined ? {} : {

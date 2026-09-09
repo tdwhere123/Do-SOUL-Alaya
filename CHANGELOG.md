@@ -9,6 +9,9 @@ below as the live ranking recipe.
 
 ## Unreleased — protocol 4.0.0 conditional-field candidate
 
+`SoulMemorySearchResponse.strategy_mix` is removed from the unreleased 4.0.0
+target payload and rejected by the strict response schema; it is not a
+deprecated parseable sibling field.
 `SoulMemorySearchResponse.delivery_path`,
 `SoulMemorySearchResponse.ranking_authority`, and
 `SoulMemorySearchRequest.recent_turn` are deprecated and remain parseable.

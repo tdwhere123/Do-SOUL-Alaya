@@ -52,6 +52,7 @@ export type ObserveFieldInput = Readonly<{
 
 const MAX_OBSERVE_ROUNDS = 4_096;
 const SEED_PAGE_SIZE = 32;
+const ADJACENCY_PAGE_SIZE = 16;
 const MAX_FINALIZATION_MEMORY_BYTES = 65_536;
 const INCOMPLETE_OBSERVER: ReadonlySet<ObserverStatus> = new Set([
   "cancelled",
@@ -162,8 +163,11 @@ function observeWithinMemory(
     for (const proposed of proposal.actions) {
       const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
       const seedRows = Math.min(SEED_PAGE_SIZE, Math.floor((state.remaining_exploration - pinWork - 1) / seedUnitCost));
-      const action = { ...proposed, work_limit: Math.min(
-        (proposed.action === "seed" ? 4 * Math.max(0, seedRows) : 4) + pinWork, state.remaining_exploration) };
+      const adjacencyRows = Math.min(ADJACENCY_PAGE_SIZE, Math.floor((state.remaining_exploration - pinWork - 1) / seedUnitCost));
+      const batchedRows = proposed.action === "seed" ? 4 * Math.max(0, seedRows)
+        : proposed.action === "adjacency" ? 4 * Math.max(0, adjacencyRows)
+        : 4;
+      const action = { ...proposed, work_limit: Math.min(batchedRows + pinWork, state.remaining_exploration) };
       const minimum = (action.action === "seed" || action.action === "adjacency" ? 4 : 1) + pinWork;
       if (action.work_limit < minimum) {
         return interruptObservedField(state);
@@ -385,8 +389,7 @@ function observeSeed(
     workspace_id: input.workspace_id,
     readers: input.readers,
     seed_query: input.query_text,
-    page_limit: Math.min(SEED_PAGE_SIZE, Math.floor((action.work_limit
-      - (input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK)) / 4)),
+    page_limit: observerPageLimit(SEED_PAGE_SIZE, action.work_limit, input),
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,
     as_of: input.as_of,
@@ -438,7 +441,7 @@ function observeAdjacency(
     workspace_id: input.workspace_id,
     readers: capturingReaders(input.readers, captured),
     relation_subject: pair.subject,
-    page_limit: 1,
+    page_limit: observerPageLimit(ADJACENCY_PAGE_SIZE, action.work_limit, input),
     relation_kind: pair.predicate,
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,
@@ -683,6 +686,15 @@ function addSubjects(subjects: Set<string>, ids: readonly string[]): void {
 
 function pairKey(subject: string, predicate: string): string {
   return `${subject}\0${predicate}`;
+}
+
+function observerPageLimit(
+  pageSize: number,
+  workLimit: number,
+  input: ObserveFieldInput
+): number {
+  const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
+  return Math.min(pageSize, Math.floor((workLimit - pinWork) / 4));
 }
 
 function pinExpectation(input: ObserveFieldInput): Readonly<{

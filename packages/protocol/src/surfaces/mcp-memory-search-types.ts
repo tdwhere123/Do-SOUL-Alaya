@@ -23,18 +23,6 @@ import {
   InformationIndexSchema
 } from "../recall/conditional-field/index-view.js";
 
-export const SoulRecallStrategyMixSchema = z
-  .object({
-    deterministic_match: z.boolean(),
-    precomputed_rank: z.boolean(),
-    semantic_supplement: z.boolean(),
-    graph_support: z.boolean(),
-    path_plasticity: z.boolean(),
-    global_recall: z.boolean()
-  })
-  .strict()
-  .readonly();
-
 export const SoulMemorySearchDegradationReasonSchema = z.enum([
   "recall_explainability_partial",
   "warm_cascade_engaged",
@@ -163,7 +151,6 @@ export const SoulMemorySearchResponseSchema = z
     active_constraints_count: NonNegativeIntSchema.nullable().optional(),
     active_constraints_completeness: z.enum(["complete", "incomplete"]).optional(),
     total_count: NonNegativeIntSchema,
-    strategy_mix: SoulRecallStrategyMixSchema,
     degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional(),
     /** @deprecated Historical response reader only; current delivery uses index. */
     delivery_path: z.enum(["legacy", "canonical"]).optional(),
@@ -183,7 +170,6 @@ export const SoulMemorySearchResponseSchema = z
 export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>;
 export type SoulActiveConstraintGovernanceState = z.infer<typeof SoulActiveConstraintGovernanceStateSchema>;
 export type SoulActiveConstraint = z.infer<typeof SoulActiveConstraintSchema>;
-export type SoulRecallStrategyMix = z.infer<typeof SoulRecallStrategyMixSchema>;
 export type SoulMemorySearchDegradationReason = z.infer<typeof SoulMemorySearchDegradationReasonSchema>;
 export type SoulRecallTokenizerHint = z.infer<typeof SoulRecallTokenizerHintSchema>;
 export type SoulRecallHostContext = z.infer<typeof SoulRecallHostContextSchema>;

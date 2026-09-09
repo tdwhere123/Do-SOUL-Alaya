@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
 import {
+  captureIndexPreviews,
   captureIndexSourceMetadata,
+  encodeRecallResult,
   runConditionalFieldRecall,
   toSourceObserverRow
 } from "../../../../recall/recall-service.js";
@@ -10,7 +13,7 @@ import { BoundedIndexPayload } from "../../../../recall/runtime/index-payload.js
 function recall(metadata: boolean, memoryBytes = 1_000_000) {
   const row = toSourceObserverRow({
     object_id: "memory", sourceRevision: "rev", content: "needle source content",
-    lifecycle_state: "active", scope_class: "project", dimension: "fact",
+    lifecycle_state: "active", scope_class: "project", dimension: "episode",
     ...(metadata ? {
       evidence_refs: ["capsule"],
       staged_warnings: [{ kind: "evidence_missing" as const, severity: "warning" as const,
@@ -41,6 +44,18 @@ describe("bounded source metadata retention", () => {
     } });
     expect(enriched.entries[0]?.explanation_ids).toEqual(bare.entries[0]?.explanation_ids);
     expect(JSON.stringify(enriched)).not.toContain("capsule");
+  });
+
+  it("copies observed dimension and scope onto candidates instead of overwriting them", () => {
+    const index = recall(false);
+    const encoded = encodeRecallResult(
+      index,
+      captureIndexPreviews(index, { source: () => ({ row: null, rowsRead: 0, bytesRead: 0, unavailable: false }) }, "workspace"),
+      undefined,
+      captureIndexSourceMetadata(index)
+    );
+    expect(encoded.candidates[0]?.dimension).toBe(MemoryDimension.EPISODE);
+    expect(encoded.candidates[0]?.scope_class).toBe(ScopeClass.PROJECT);
   });
 
   it("does not retain source metadata outside the memory allowance", () => {

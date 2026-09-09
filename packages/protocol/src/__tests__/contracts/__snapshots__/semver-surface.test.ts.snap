@@ -72,7 +72,7 @@ soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#4da2b41
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#64cb79e
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a36fda8|enum=cold_cascade_engaged|no_stored_vectors|provider_failed|provider_missing|provider_unavailable|recall_explainability_partial|warm_cascade_engaged
 soul:mcp-types.ts#SoulMemorySearchRequestSchema(active_constraints_cap,continuation,dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,source_observed_at,time_field,until)#c08d73e
-soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_completeness,active_constraints_count,capture_execution,capture_identity,degradation_reason,delivery_id,delivery_path,index,protocol_version,ranking_authority,results,strategy_mix,total_count)#a325264
+soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_completeness,active_constraints_count,capture_execution,capture_identity,degradation_reason,delivery_id,delivery_path,index,protocol_version,ranking_authority,results,total_count)#16a6c8f
 soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version)#e9b7fcd
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a7a3c8a
 soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#4d23f8a
@@ -82,7 +82,6 @@ soul:mcp-types.ts#SoulProposeEdgeResponseSchema(proposal_id,status)#6b20a6f
 soul:mcp-types.ts#SoulProposeMemoryUpdateRequestSchema()#c8985c0
 soul:mcp-types.ts#SoulProposeMemoryUpdateResponseSchema(proposal_id,status)#9fc8076
 soul:mcp-types.ts#SoulRecallHostContextSchema(tokenizer_hint)#378010f
-soul:mcp-types.ts#SoulRecallStrategyMixSchema(deterministic_match,global_recall,graph_support,path_plasticity,precomputed_rank,semantic_supplement)#f24ace8
 soul:mcp-types.ts#SoulRecallTokenizerHintSchema()#affc1f5|enum=approx_chars_per_token|cl100k|o200k
 soul:mcp-types.ts#SoulReportContextUsageRequestSchema(delivered_objects,delivery_id,per_anchor_usage,reason,source_observed_at,turn_digest,turn_index,usage_state,used_object_ids,witness_reports)#fe2f0c6
 soul:mcp-types.ts#SoulReportContextUsageResponseSchema(delivery_id,status)#802bcfe

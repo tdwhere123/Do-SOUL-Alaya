@@ -38,15 +38,13 @@ describe("RecallService conditional entry", () => {
     expect(unavailable.index.completeness.observed_coverage).toBe("unavailable");
   });
 
-  it("does not invoke retired global candidate merging or recording from target Recall", async () => {
+  it("does not invoke retired global candidate recording from target Recall", async () => {
     const f = await fixture();
     await f.writeMemory("aaaaaaaa-aaaa-4aaa-8aaa-000000000002", "deployment checklist", "procedure");
-    const recall = vi.fn(async () => { throw new Error("retired merge invoked"); });
     const recordClassifications = vi.fn(async () => { throw new Error("retired mutation invoked"); });
     const result = await new RecallService({ ...f.dependencies,
-      globalRecallPort: { recall }, globalRecallCachePort: { recordClassifications } }).recall(request());
+      globalRecallCachePort: { recordClassifications } }).recall(request());
     expect(result.candidates).toHaveLength(1);
-    expect(recall).not.toHaveBeenCalled();
     expect(recordClassifications).not.toHaveBeenCalled();
   });
 });
