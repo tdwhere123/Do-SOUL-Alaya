@@ -137,7 +137,8 @@ function persistAdmittedTurnRoot(
     content: joinAdmittedTurnExcerpts(input.lastMessages),
     recordedAt: input.createdAt,
     eventTime: input.eventTime,
-    ...(speaker === undefined ? {} : { speaker })
+    ...(speaker === undefined ? {} : { speaker }),
+    scope_class: "project"
   });
   return record?.identity;
 }

@@ -32,7 +32,7 @@ describe("SqliteEnrichPendingRepo", () => {
     const applied = database.connection
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
-    expect(applied?.version).toBe(11);
+    expect(applied?.version).toBe(12);
 
     const columns = (
       database.connection.prepare("PRAGMA table_info(enrich_pending)").all() as ReadonlyArray<{
@@ -57,7 +57,7 @@ describe("SqliteEnrichPendingRepo", () => {
     const applied = database.connection
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
-    expect(applied?.version).toBe(11);
+    expect(applied?.version).toBe(12);
 
     const repo = new SqliteEnrichPendingRepo(database);
     repo.enqueue({

@@ -245,6 +245,7 @@ function plantRecord(database: StorageDatabase, workspaceId: string, body: strin
     valid_to: null as string | null,
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
     speaker: null,
+    scope_class: null,
     source_body: body
   };
   return new SqliteFieldSourceRecordRepo(database, fieldContractSha256).insert(record);

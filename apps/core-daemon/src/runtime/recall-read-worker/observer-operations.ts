@@ -147,6 +147,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
     sourceRoots: (input) => {
       const page = sourceRoots.page({
         workspaceId: input.workspaceId,
+        query: input.query,
         limit: input.limit,
         nativeLimit: input.nativeLimit,
         afterCursor: input.afterCursor,

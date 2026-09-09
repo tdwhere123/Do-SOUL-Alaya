@@ -240,6 +240,8 @@ export type ObserveConditionalFieldInput = Readonly<{
 }>;
 
 export const DEFAULT_SOURCE_BYTE_LIMIT = 65_536;
+/** Spare work `collectObserved` needs after native visits before hydrating one identity. */
+export const SOURCE_IDENTITY_HYDRATE_RESERVE = 3;
 
 export type ObserverActionResult = Readonly<{
   readonly page: ObserverPage;
@@ -514,7 +516,7 @@ export function collectObserved(
   let processed = 0;
   for (const [index, identity] of native.identities.entries()) {
     if (native.identityKind !== "embedding" && input.readers.source !== undefined
-      && input.action.work_limit - workUnits < 3) {
+      && input.action.work_limit - workUnits < SOURCE_IDENTITY_HYDRATE_RESERVE) {
       hydrationUnavailable = true;
       resourceLimited = true;
       break;

@@ -2,6 +2,7 @@ import type {
   AddressableSourceSpan,
   AddressableSourceSpanPurpose,
   SourceRecordIdentity,
+  SourceScopeClass,
   SourceSpeakerRole
 } from "./source-span.js";
 import type { DerivationJobReceipt, FactorIncidence } from "./factor-incidence.js";
@@ -27,6 +28,7 @@ export type SourceAdmissionRequest = Readonly<{
   readonly valid_from: string | null;
   readonly valid_to: string | null;
   readonly speaker?: SourceSpeakerRole | null;
+  readonly scope_class?: SourceScopeClass | null;
   readonly spans: readonly Readonly<{
     readonly start_offset: number;
     readonly end_offset: number;

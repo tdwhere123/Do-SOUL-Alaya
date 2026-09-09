@@ -81,6 +81,7 @@ export function hashedRecord(
     valid_to: null as string | null,
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
     speaker: null as "user" | "assistant" | "system" | null,
+    scope_class: null as "project" | "global_domain" | "global_core" | null,
     source_body: body as string | null
   };
 }

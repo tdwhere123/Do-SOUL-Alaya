@@ -39,6 +39,7 @@ export type SourceRootRow = Readonly<{
   readonly content_complete: boolean;
   readonly original_complete: boolean;
   readonly retained_extent: "body" | "excerpt" | "gist";
+  readonly scope_class?: string;
   readonly valid_from?: string | null;
   readonly valid_to?: string | null;
 }>;
@@ -64,6 +65,7 @@ export type SourceRootHydratePage = Readonly<{
 
 export type SourceRootPageInput = Readonly<{
   readonly workspaceId: string;
+  readonly query?: string;
   readonly limit: number;
   readonly nativeLimit: number;
   readonly afterCursor: string | null;
@@ -83,6 +85,9 @@ export class SqliteSourceRootRecallReader {
   }
 
   public page(input: SourceRootPageInput): SourceRootPage {
+    // Enumeration stays unqueried: `query` is accepted so mixed-seed callers can
+    // pass a needle without a second SQL path. Membership interleave is the observer.
+    void input.query;
     const limit = Math.min(input.limit, input.nativeLimit);
     if (!Number.isSafeInteger(input.limit) || input.limit < 0 || input.limit > PAGE_MAX ||
         !Number.isSafeInteger(input.nativeLimit) || input.nativeLimit < 0 || input.nativeLimit > PAGE_MAX) {
@@ -96,6 +101,10 @@ export class SqliteSourceRootRecallReader {
       return emptyPage(true, input.afterCursor);
     }
     const after = input.afterCursor;
+    const pinned = parseContentCursor(after);
+    if (pinned !== null) {
+      return this.pageFromContentCursor(input.workspaceId, pinned, limit, byteLimit);
+    }
     if (after === null || after.startsWith("r:")) {
       const recordPage = this.pageRecords(input.workspaceId, after, limit, byteLimit);
       if (recordPage.truncated || recordPage.rows.length === limit) return recordPage;
@@ -185,6 +194,94 @@ export class SqliteSourceRootRecallReader {
     };
   }
 
+  private pageFromContentCursor(
+    workspaceId: string,
+    pin: ContentCursor,
+    limit: number,
+    byteLimit: number
+  ): SourceRootPage {
+    const continued = this.readPinnedChunk(workspaceId, pin, byteLimit);
+    if (continued === null) {
+      return pin.kind === "source_record"
+        ? this.pageAfterRecord(workspaceId, pin.rootId, limit, byteLimit)
+        : this.pageCapsules(workspaceId, null, limit, byteLimit);
+    }
+    if (limit === 1) {
+      return { ...continued.page, truncated: true };
+    }
+    const rest = pin.kind === "source_record"
+      ? this.pageAfterCollection(workspaceId, continued.collectionCursor, limit - 1, byteLimit)
+      : this.pageCapsules(workspaceId, continued.collectionCursor, limit - 1, byteLimit);
+    return mergePages(continued.page, rest);
+  }
+
+  private readPinnedChunk(
+    workspaceId: string,
+    pin: ContentCursor,
+    byteLimit: number
+  ): Readonly<{
+    readonly page: SourceRootPage;
+    readonly collectionCursor: string | null;
+  }> | null {
+    if (pin.kind === "source_record") {
+      const bounded = this.records.findByIdBounded(workspaceId, pin.rootId, byteLimit, pin.offset);
+      if (bounded === null) return null;
+      const mapped = mapBoundedRecord(bounded, pin.offset);
+      if (mapped === null) return null;
+      const collectionCursor = encodeRecordCursor({
+        afterRecordedAt: bounded.record.recorded_at,
+        afterRecordId: bounded.record.record_id
+      });
+      return { page: singleRowPage(mapped, bounded.prefixBytes, collectionCursor), collectionCursor };
+    }
+    const capsule = this.capsules.getById(pin.rootId);
+    if (capsule === null || capsule.workspace_id !== workspaceId || capsule.lifecycle_state !== "active") {
+      return null;
+    }
+    const mapped = mapCapsule(capsule, byteLimit, pin.offset);
+    if (mapped === null) return null;
+    const collectionCursor = encodeCapsuleCursor({
+      afterCreatedAt: capsule.created_at,
+      afterObjectId: capsule.object_id
+    });
+    return {
+      page: singleRowPage(mapped, Buffer.byteLength(mapped.content ?? "", "utf8"), collectionCursor),
+      collectionCursor
+    };
+  }
+
+  private pageAfterRecord(
+    workspaceId: string,
+    recordId: string,
+    limit: number,
+    byteLimit: number
+  ): SourceRootPage {
+    const row = this.records.findById(workspaceId, recordId);
+    if (row === null) {
+      return this.pageCapsules(workspaceId, null, limit, byteLimit);
+    }
+    return this.pageAfterCollection(
+      workspaceId,
+      encodeRecordCursor({ afterRecordedAt: row.recorded_at, afterRecordId: row.record_id }),
+      limit,
+      byteLimit
+    );
+  }
+
+  private pageAfterCollection(
+    workspaceId: string,
+    after: string | null,
+    limit: number,
+    byteLimit: number
+  ): SourceRootPage {
+    const recordPage = this.pageRecords(workspaceId, after, limit, byteLimit);
+    if (recordPage.truncated || recordPage.rows.length === limit) return recordPage;
+    return mergePages(
+      recordPage,
+      this.pageCapsules(workspaceId, null, limit - recordPage.rows.length, byteLimit)
+    );
+  }
+
   private pageRecords(
     workspaceId: string,
     after: string | null,
@@ -261,6 +358,23 @@ function mergePages(records: SourceRootPage, capsules: SourceRootPage): SourceRo
   };
 }
 
+function singleRowPage(
+  row: SourceRootRow,
+  bytesRead: number,
+  committedThrough: string | null
+): SourceRootPage {
+  return {
+    rows: [row],
+    nativeVisits: 1,
+    nativeBytes: bytesRead,
+    rowsRead: 1,
+    bytesRead,
+    truncated: false,
+    committedThrough,
+    unavailable: false
+  };
+}
+
 function emptyPage(truncated: boolean, committedThrough: string | null): SourceRootPage {
   return {
     rows: [],
@@ -308,6 +422,7 @@ function sourceRecordRoot(row: FieldSourceRecordRow): Omit<
   "content" | "content_start" | "content_end" | "content_complete"
 > {
   const role = speakerRole(row.speaker);
+  const scopeClass = sourceScopeClass(row.scope_class);
   return {
     kind: "source_record",
     workspace_id: row.workspace_id,
@@ -320,6 +435,7 @@ function sourceRecordRoot(row: FieldSourceRecordRow): Omit<
     ...(role === undefined ? {} : { role }),
     original_complete: true,
     retained_extent: "body",
+    ...(scopeClass === undefined ? {} : { scope_class: scopeClass }),
     valid_from: row.valid_from,
     valid_to: row.valid_to
   };
@@ -327,6 +443,13 @@ function sourceRecordRoot(row: FieldSourceRecordRow): Omit<
 
 function speakerRole(value: string | null | undefined): "user" | "assistant" | "system" | undefined {
   if (value === "user" || value === "assistant" || value === "system") return value;
+  return undefined;
+}
+
+function sourceScopeClass(
+  value: string | null | undefined
+): "project" | "global_domain" | "global_core" | undefined {
+  if (value === "project" || value === "global_domain" || value === "global_core") return value;
   return undefined;
 }
 
@@ -440,6 +563,30 @@ function hydrateMapped(
     unavailable: false,
     ...(mapped.content_complete ? {} : { resourceLimited: true })
   };
+}
+
+export type ContentCursor = Readonly<{
+  readonly kind: SourceRootKind;
+  readonly rootId: string;
+  readonly offset: number;
+}>;
+
+export function encodeContentCursor(input: ContentCursor): string {
+  return `o:${input.kind}\t${input.rootId}\t${input.offset}`;
+}
+
+export function parseContentCursor(cursor: string | null | undefined): ContentCursor | null {
+  if (cursor == null || !cursor.startsWith("o:")) return null;
+  const payload = cursor.slice(2);
+  const first = payload.indexOf("\t");
+  const second = first < 0 ? -1 : payload.indexOf("\t", first + 1);
+  if (first <= 0 || second <= first) return null;
+  const kind = payload.slice(0, first);
+  const rootId = payload.slice(first + 1, second);
+  const offset = Number(payload.slice(second + 1));
+  if (kind !== "source_record" && kind !== "evidence_capsule") return null;
+  if (rootId.length === 0 || !Number.isSafeInteger(offset) || offset < 0) return null;
+  return { kind, rootId, offset };
 }
 
 export { encodeRecordCursor, parseRecordCursor, encodeCapsuleCursor, parseCapsuleCursor };

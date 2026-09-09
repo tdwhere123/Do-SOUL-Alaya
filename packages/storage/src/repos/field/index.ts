@@ -37,7 +37,10 @@ export {
 } from "./source-repo.js";
 export {
   chunkUtf8,
+  encodeContentCursor,
+  parseContentCursor,
   SqliteSourceRootRecallReader,
+  type ContentCursor,
   type SourceRootHydratePage,
   type SourceRootKind,
   type SourceRootPage,

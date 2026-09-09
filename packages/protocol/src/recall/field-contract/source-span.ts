@@ -24,6 +24,7 @@ export const AddressableSourceSpanPurposeSchema = z.enum([
 ]);
 
 export const SourceSpeakerRoleSchema = z.enum(["user", "assistant", "system"]);
+export const SourceScopeClassSchema = z.enum(["project", "global_domain", "global_core"]);
 
 export const SourceRecordIdentitySchema = FieldReceiptContractFieldsSchema.extend({
   schema_version: z.literal(1),
@@ -37,7 +38,8 @@ export const SourceRecordIdentitySchema = FieldReceiptContractFieldsSchema.exten
   valid_from: IsoDatetimeStringSchema.nullable(),
   valid_to: IsoDatetimeStringSchema.nullable(),
   operator_id: NonEmptyStringSchema.max(128),
-  speaker: SourceSpeakerRoleSchema.nullable().optional()
+  speaker: SourceSpeakerRoleSchema.nullable().optional(),
+  scope_class: SourceScopeClassSchema.nullable().optional()
 }).strict().superRefine((record, context) => {
   if (record.valid_from === null && record.valid_to !== null) {
     context.addIssue({ code: "custom", message: "valid_to requires valid_from" });
@@ -68,6 +70,7 @@ export const AddressableSourceSpanSchema = FieldReceiptContractFieldsSchema.exte
 
 export type AddressableSourceSpanPurpose = z.infer<typeof AddressableSourceSpanPurposeSchema>;
 export type SourceSpeakerRole = z.infer<typeof SourceSpeakerRoleSchema>;
+export type SourceScopeClass = z.infer<typeof SourceScopeClassSchema>;
 export type SourceRecordIdentity = z.infer<typeof SourceRecordIdentitySchema>;
 export type AddressableSourceSpan = z.infer<typeof AddressableSourceSpanSchema>;
 

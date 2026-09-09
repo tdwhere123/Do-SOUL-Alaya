@@ -10,6 +10,7 @@ import { fieldContractSha256 as fieldSha256 } from "../../shared/field-hash.js";
 import { createInMemoryFieldStores } from "../../memory/evidence-create/field-stores.js";
 import {
   createSourceAdmissionPort,
+  retainedSourceScopeClass,
   retainedSourceSpeaker
 } from "../../memory/evidence-create/source-admission.js";
 
@@ -95,6 +96,16 @@ describe("source admission", () => {
     expect(admitted.record.event_time).toBeNull();
     expect(admitted.record.valid_from).toBeNull();
     expect(admitted.record.valid_to).toBeNull();
+  });
+
+  it("retains a writer-supplied scope_class and omits an unknown or missing one", () => {
+    expect(retainedSourceScopeClass("project")).toBe("project");
+    expect(retainedSourceScopeClass("global_domain")).toBe("global_domain");
+    expect(retainedSourceScopeClass("global_core")).toBe("global_core");
+    expect(retainedSourceScopeClass("secret")).toBeUndefined();
+    expect(retainedSourceScopeClass(null)).toBeUndefined();
+    expect(createPort().admit(request({ scope_class: "project" })).record.scope_class).toBe("project");
+    expect(createPort().admit(request()).record.scope_class).toBeUndefined();
   });
 
   it("retains a single speaker and omits mixed or unknown roles", () => {

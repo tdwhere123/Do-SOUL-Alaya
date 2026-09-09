@@ -3,7 +3,10 @@ import { EvidenceHealthState } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { SqliteEvidenceCapsuleRepo } from "../../../repos/capsules/evidence-capsule-repo.js";
 import { SqliteFieldSourceRecordRepo } from "../../../repos/field/source-repo.js";
-import { SqliteSourceRootRecallReader } from "../../../repos/field/bounded-source-root-reader.js";
+import {
+  encodeContentCursor,
+  SqliteSourceRootRecallReader
+} from "../../../repos/field/bounded-source-root-reader.js";
 import { fieldSha256, hashedRecord, openFieldDatabase } from "./field-contract-fixture.js";
 
 const tracked = new Set<StorageDatabase>();
@@ -83,6 +86,67 @@ describe("bounded source-root pages", () => {
     }, 64, 1);
     expect(broken.unavailable).toBe(true);
     expect(broken.row).toBeNull();
+  });
+
+  it("continues an oversized body from the content-offset cursor", () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+    const capsules = new SqliteEvidenceCapsuleRepo(database);
+    const needle = "NEEDLE_ONLY_AFTER_64K";
+    const body = `${"a".repeat(65_536)}${needle}`;
+    const row = records.insert(hashedRecord("workspace-1", body, "src-oversize"));
+    const reader = new SqliteSourceRootRecallReader(records, capsules);
+    const first = reader.page({
+      workspaceId: "workspace-1",
+      limit: 1,
+      nativeLimit: 1,
+      afterCursor: null,
+      byteLimit: 65_536
+    });
+    const head = first.rows.find((candidate) => candidate.root_id === row.record_id);
+    expect(head?.content_complete).toBe(false);
+    expect(head?.content?.includes(needle)).toBe(false);
+    const continued = reader.page({
+      workspaceId: "workspace-1",
+      limit: 1,
+      nativeLimit: 1,
+      afterCursor: encodeContentCursor({
+        kind: "source_record",
+        rootId: row.record_id,
+        offset: head?.content_end ?? 65_536
+      }),
+      byteLimit: 65_536
+    });
+    const rest = continued.rows.find((candidate) => candidate.root_id === row.record_id);
+    expect(rest?.content).toContain(needle);
+    expect(rest?.content_complete).toBe(true);
+    expect(rest?.content_start).toBe(head?.content_end);
+  });
+
+  it("maps persisted scope_class and leaves omitted scope unset", () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+    const capsules = new SqliteEvidenceCapsuleRepo(database);
+    const project = records.insert({
+      ...hashedRecord("workspace-1", "project body", "src-project"),
+      scope_class: "project"
+    });
+    const other = records.insert({
+      ...hashedRecord("workspace-1", "global body", "src-global"),
+      scope_class: "global_domain"
+    });
+    const omitted = records.insert(hashedRecord("workspace-1", "omitted body", "src-omitted"));
+    const roots = new SqliteSourceRootRecallReader(records, capsules).page({
+      workspaceId: "workspace-1",
+      limit: 8,
+      nativeLimit: 8,
+      afterCursor: null
+    });
+    expect(roots.rows.find((row) => row.root_id === project.record_id)?.scope_class).toBe("project");
+    expect(roots.rows.find((row) => row.root_id === other.record_id)?.scope_class).toBe("global_domain");
+    expect(roots.rows.find((row) => row.root_id === omitted.record_id)?.scope_class).toBeUndefined();
   });
 
   it("projects retained speaker identity onto source-record roots", () => {

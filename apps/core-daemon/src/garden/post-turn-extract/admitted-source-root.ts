@@ -1,6 +1,7 @@
 import type {
   SourceAdmissionPort,
   SourceRecordIdentity,
+  SourceScopeClass,
   SourceSpeakerRole
 } from "@do-soul/alaya-protocol";
 
@@ -23,6 +24,7 @@ export function admitPostTurnSourceRoot(input: Readonly<{
   readonly recordedAt: string;
   readonly eventTime: string | null;
   readonly speaker?: SourceSpeakerRole;
+  readonly scope_class?: SourceScopeClass;
 }>): SourceRecordIdentity | null {
   if (input.content.length === 0) {
     return null;
@@ -38,6 +40,7 @@ export function admitPostTurnSourceRoot(input: Readonly<{
     valid_from: null,
     valid_to: null,
     ...(input.speaker === undefined ? {} : { speaker: input.speaker }),
+    ...(input.scope_class === undefined ? {} : { scope_class: input.scope_class }),
     spans: [
       {
         start_offset: 0,

@@ -45,6 +45,7 @@ export const fieldSourceRecordParser: RowParser<FieldSourceRecordRow> = {
       valid_to: readNullableStringField(row, "valid_to"),
       operator_id: readNonEmptyStringField(row, "operator_id"),
       speaker: readSpeakerField(row),
+      scope_class: readScopeClassField(row),
       source_body: readNullableStringField(row, "source_body")
     });
   }
@@ -300,6 +301,15 @@ function readSpeakerField(
   if (value === null) return null;
   if (value === "user" || value === "assistant" || value === "system") return value;
   throw new StorageError("VALIDATION_FAILED", "Failed to validate speaker.");
+}
+
+function readScopeClassField(
+  record: Record<string, unknown>
+): "project" | "global_domain" | "global_core" | null {
+  const value = readNullableStringField(record, "scope_class");
+  if (value === null) return null;
+  if (value === "project" || value === "global_domain" || value === "global_core") return value;
+  throw new StorageError("VALIDATION_FAILED", "Failed to validate scope_class.");
 }
 
 function readNullableStringField(

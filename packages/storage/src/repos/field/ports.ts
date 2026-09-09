@@ -21,6 +21,7 @@ export type FieldSourceRecordRow = Readonly<{
   readonly valid_to: string | null;
   readonly operator_id: string;
   readonly speaker: "user" | "assistant" | "system" | null;
+  readonly scope_class: "project" | "global_domain" | "global_core" | null;
   readonly source_body: string | null;
 }>;
 

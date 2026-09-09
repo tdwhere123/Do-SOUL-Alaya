@@ -101,6 +101,7 @@ function recordToRow(
     valid_to: record.valid_to,
     operator_id: record.operator_id,
     speaker: record.speaker ?? null,
+    scope_class: record.scope_class ?? null,
     source_body: contentBytes
   };
 }
