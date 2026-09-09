@@ -14,7 +14,6 @@ import {
   runConditionalFieldRecallWithReceipt,
   reserveSnapshotPinWork,
   snapshotIdFromPin,
-  applyUtf8HydrateToSourceRootPage,
   toSourceObserverRow,
   toSourceRootObserverRow,
   type ConditionalFieldRecallPortResult,
@@ -162,7 +161,7 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
       if (input.revision === undefined || input.digest === undefined) {
         return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
       }
-      const loaded = sourceRoots.load(
+      const page = sourceRoots.hydrate(
         input.workspaceId,
         sourceRecallTarget({
           workspace_id: input.workspaceId,
@@ -171,15 +170,17 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
           source_version: input.revision,
           content_digest: input.digest,
           evidence_object_id: input.evidenceObjectId ?? (input.rootKind === "evidence_capsule" ? input.rootId : null)
-        })
+        }),
+        input.byteLimit ?? 65536,
+        input.offset ?? 0
       );
-      return applyUtf8HydrateToSourceRootPage({
-        row: loaded.row === null ? null : toSourceRootObserverRow(loaded.row),
-        rowsRead: loaded.rowsRead,
-        bytesRead: loaded.bytesRead,
-        unavailable: loaded.unavailable,
-        resourceLimited: loaded.resourceLimited
-      }, input.offset ?? 0, input.byteLimit ?? 65536);
+      return {
+        row: page.row === null ? null : toSourceRootObserverRow(page.row),
+        rowsRead: page.rowsRead,
+        bytesRead: page.bytesRead,
+        unavailable: page.unavailable,
+        resourceLimited: page.resourceLimited
+      };
     },
     relation: (input) => relation.read(
       input.workspaceId,

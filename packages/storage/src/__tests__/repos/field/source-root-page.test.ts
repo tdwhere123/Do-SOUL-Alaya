@@ -109,6 +109,122 @@ describe("bounded source-root pages", () => {
     expect(lineagePage.rows.find((candidate) => candidate.root_id === lineage.record_id)?.role).toBeUndefined();
   });
 
+  it("pages and hydrates a large body through a byte-bounded prefix", () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+    const capsules = new SqliteEvidenceCapsuleRepo(database);
+    const body = "汉".repeat(30_000);
+    const row = records.insert(hashedRecord("workspace-1", body, "src-bound"));
+    expect(records.findById("workspace-1", row.record_id)?.source_body).toBe(body);
+    const reader = new SqliteSourceRootRecallReader(records, capsules);
+    const roots = reader.page({
+      workspaceId: "workspace-1",
+      limit: 8,
+      nativeLimit: 8,
+      afterCursor: null,
+      byteLimit: 64
+    });
+    const found = roots.rows.find((candidate) => candidate.root_id === row.record_id);
+    expect(found?.original_complete).toBe(true);
+    expect(found?.retained_extent).toBe("body");
+    expect(found?.content_complete).toBe(false);
+    expect(Buffer.byteLength(found?.content ?? "", "utf8")).toBeLessThanOrEqual(64);
+    expect(roots.nativeBytes).toBeGreaterThan(0);
+    expect(roots.nativeBytes).toBeLessThanOrEqual(64);
+    expect(roots.bytesRead).toBe(roots.nativeBytes);
+
+    const page = reader.hydrate("workspace-1", {
+      kind: "source_evidence",
+      workspace_id: "workspace-1",
+      root_kind: "source_record",
+      root_id: row.record_id,
+      source_version: row.source_version,
+      content_digest: row.content_digest,
+      evidence_object_id: null
+    }, 64);
+    expect(page.unavailable).toBe(false);
+    expect(page.resourceLimited).toBe(true);
+    expect(page.row?.content_complete).toBe(false);
+    expect(page.bytesRead).toBeLessThanOrEqual(64);
+    expect(Buffer.byteLength(page.row?.content ?? "", "utf8")).toBe(page.bytesRead);
+  });
+
+  it("copies validity so an expired closed interval is distinct from an open one", () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+    const capsules = new SqliteEvidenceCapsuleRepo(database);
+    const expired = records.insert({
+      ...hashedRecord("workspace-1", "expired body", "src-expired"),
+      valid_from: "2025-01-01T00:00:00.000Z",
+      valid_to: "2026-01-01T00:00:00.000Z"
+    });
+    const open = records.insert({
+      ...hashedRecord("workspace-1", "open body", "src-open"),
+      valid_from: "2025-01-01T00:00:00.000Z",
+      valid_to: null
+    });
+    const roots = new SqliteSourceRootRecallReader(records, capsules).page({
+      workspaceId: "workspace-1",
+      limit: 8,
+      nativeLimit: 8,
+      afterCursor: null
+    });
+    const expiredRow = roots.rows.find((candidate) => candidate.root_id === expired.record_id);
+    const openRow = roots.rows.find((candidate) => candidate.root_id === open.record_id);
+    const asOf = "2026-09-09T00:00:00.000Z";
+    expect(expiredRow?.valid_from).toBe("2025-01-01T00:00:00.000Z");
+    expect(expiredRow?.valid_to).toBe("2026-01-01T00:00:00.000Z");
+    expect(openRow?.valid_from).toBe("2025-01-01T00:00:00.000Z");
+    expect(openRow?.valid_to).toBeNull();
+    expect(expiredRow!.valid_to != null && expiredRow!.valid_to <= asOf).toBe(true);
+    expect(openRow!.valid_to == null || openRow!.valid_to > asOf).toBe(true);
+  });
+
+  it("does not treat a populated excerpt as the complete original", async () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+    const capsules = new SqliteEvidenceCapsuleRepo(database);
+    const excerpt = "e".repeat(800);
+    const stored = await capsules.create(capsule(
+      "33333333-3333-4333-8333-333333333333",
+      "workspace-1",
+      excerpt
+    ));
+    const roots = new SqliteSourceRootRecallReader(records, capsules).page({
+      workspaceId: "workspace-1",
+      limit: 8,
+      nativeLimit: 8,
+      afterCursor: null
+    });
+    const found = roots.rows.find((candidate) => candidate.root_id === stored.object_id);
+    expect(found?.retained_extent).toBe("excerpt");
+    expect(found?.original_complete).toBe(false);
+    expect(found?.content).toBe(excerpt);
+    expect(roots.nativeBytes).toBe(Buffer.byteLength(excerpt, "utf8"));
+    expect(roots.bytesRead).toBe(roots.nativeBytes);
+
+    const gistOnly = await capsules.create({
+      ...capsule(
+        "44444444-4444-4444-8444-444444444444",
+        "workspace-1",
+        "gist only"
+      ),
+      excerpt: null
+    });
+    const gistPage = new SqliteSourceRootRecallReader(records, capsules).page({
+      workspaceId: "workspace-1",
+      limit: 8,
+      nativeLimit: 8,
+      afterCursor: null
+    });
+    const gistRow = gistPage.rows.find((candidate) => candidate.root_id === gistOnly.object_id);
+    expect(gistRow?.retained_extent).toBe("gist");
+    expect(gistRow?.original_complete).toBe(false);
+  });
+
   it("marks a missing root unavailable rather than empty", () => {
     const database = openFieldDatabase();
     tracked.add(database);

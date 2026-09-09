@@ -43,6 +43,23 @@ const ROWS = [
     insert: `INSERT INTO relation_path_projections(generation,path_id,assertion_id,workspace_id,projection_json)
       SELECT active_projection_generation,'projection','assertion','workspace','{}' FROM temporal_schema_state WHERE state_id=1`,
     mutation: "projection_json = '{\"ceiling\":0}'"
+  },
+  {
+    table: "source_records",
+    insert: `INSERT INTO source_records(record_id,workspace_id,source_id,source_version,content_digest,
+      evidence_object_id,recorded_at,event_time,valid_from,valid_to,operator_id,source_body)
+      VALUES ('record','workspace','src','v1','sha256:aaa',NULL,'2026-09-06T00:00:00.000Z',NULL,NULL,NULL,'op','body')`,
+    mutation: "source_body = 'mutated'"
+  },
+  {
+    table: "evidence_capsules",
+    insert: `INSERT INTO evidence_capsules(object_id,object_kind,schema_version,lifecycle_state,created_at,updated_at,
+      created_by,evidence_kind,semantic_anchor,event_anchor,physical_anchor,evidence_health_state,gist,excerpt,
+      source_hash,run_id,workspace_id,surface_id)
+      VALUES ('11111111-1111-4111-8111-111111111111','evidence_capsule',1,'active','2026-09-06T00:00:00.000Z',
+      '2026-09-06T00:00:00.000Z','user_action','conversation_excerpt',
+      '{"topic":"pin","keywords":["pin"],"summary":"gist"}',NULL,NULL,'verified','gist',NULL,NULL,'run','workspace',NULL)`,
+    mutation: "gist = 'mutated gist'"
   }
 ];
 

@@ -12,7 +12,8 @@ import {
 import {
   encodeRecordCursor,
   parseRecordCursor,
-  SqliteFieldSourceRecordRepo
+  SqliteFieldSourceRecordRepo,
+  type BoundedSourceRecordRead
 } from "./source-repo.js";
 import type { FieldSourceRecordRow } from "./ports.js";
 
@@ -38,6 +39,8 @@ export type SourceRootRow = Readonly<{
   readonly content_complete: boolean;
   readonly original_complete: boolean;
   readonly retained_extent: "body" | "excerpt" | "gist";
+  readonly valid_from?: string | null;
+  readonly valid_to?: string | null;
 }>;
 
 export type SourceRootPage = Readonly<{
@@ -138,30 +141,24 @@ export class SqliteSourceRootRecallReader {
       return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
     }
     if (target.root_kind === "source_record") {
-      const row = this.records.findById(workspaceId, target.root_id);
-      if (row === null) {
+      if (unbounded) {
+        const row = this.records.findById(workspaceId, target.root_id);
+        if (row === null) {
+          return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
+        }
+        const mapped = mapRecord(
+          row,
+          row.source_body !== null ? Math.max(1, Buffer.byteLength(row.source_body, "utf8")) : byteLimit,
+          0
+        );
+        return hydrateMapped(mapped, target, row.source_body === null ? 0 : Buffer.byteLength(row.record_id, "utf8"));
+      }
+      const bounded = this.records.findByIdBounded(workspaceId, target.root_id, byteLimit, offset);
+      if (bounded === null) {
         return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
       }
-      const mapped = mapRecord(
-        row,
-        unbounded && row.source_body !== null ? Math.max(1, Buffer.byteLength(row.source_body, "utf8")) : byteLimit,
-        unbounded ? 0 : offset
-      );
-      if (mapped === null || !sameSourceIdentity(mapped, target)) {
-        return {
-          row: null,
-          rowsRead: 1,
-          bytesRead: Buffer.byteLength(row.record_id, "utf8"),
-          unavailable: true
-        };
-      }
-      return {
-        row: mapped,
-        rowsRead: 1,
-        bytesRead: hydrateBytes(mapped),
-        unavailable: false,
-        ...(mapped.content_complete ? {} : { resourceLimited: true })
-      };
+      const mapped = mapBoundedRecord(bounded, offset);
+      return hydrateMapped(mapped, target, bounded.prefixBytes);
     }
     const capsule = this.capsules.getById(target.root_id);
     if (capsule === null || capsule.workspace_id !== workspaceId) {
@@ -195,16 +192,16 @@ export class SqliteSourceRootRecallReader {
     byteLimit: number
   ): SourceRootPage {
     const cursor = parseRecordCursor(after);
-    const page = this.records.listPage(workspaceId, {
+    const page = this.records.listPageBounded(workspaceId, {
       limit,
       afterRecordedAt: cursor.afterRecordedAt,
       afterRecordId: cursor.afterRecordId
-    });
-    const rows = page.rows.flatMap((row) => {
-      const mapped = mapRecord(row, byteLimit, 0);
+    }, byteLimit);
+    const rows = page.rows.flatMap((read) => {
+      const mapped = mapBoundedRecord(read, 0);
       return mapped === null ? [] : [mapped];
     });
-    const bytesRead = Buffer.byteLength(JSON.stringify(page.rows), "utf8");
+    const bytesRead = page.rows.reduce((sum, read) => sum + read.prefixBytes, 0);
     return {
       rows,
       nativeVisits: page.rows.length,
@@ -233,7 +230,10 @@ export class SqliteSourceRootRecallReader {
       const mapped = mapCapsule(row, byteLimit, 0);
       return mapped === null ? [] : [mapped];
     });
-    const bytesRead = Buffer.byteLength(JSON.stringify(page.rows.map((row) => row.object_id)), "utf8");
+    const bytesRead = page.rows.reduce(
+      (sum, row) => sum + Buffer.byteLength(row.excerpt ?? row.gist, "utf8"),
+      0
+    );
     return {
       rows,
       nativeVisits: page.rows.length,
@@ -296,7 +296,32 @@ function mapRecord(
     content_end: chunk.end,
     content_complete: chunk.complete,
     original_complete: true,
-    retained_extent: "body"
+    retained_extent: "body",
+    valid_from: row.valid_from,
+    valid_to: row.valid_to
+  };
+}
+
+function mapBoundedRecord(read: BoundedSourceRecordRead, offset: number): SourceRootRow | null {
+  if (read.invalidOffset || read.record.source_body === null) return null;
+  const end = offset + read.prefixBytes;
+  return {
+    kind: "source_record",
+    workspace_id: read.record.workspace_id,
+    root_id: read.record.record_id,
+    revision: read.record.source_version,
+    digest: read.record.content_digest,
+    evidence_object_id: read.record.evidence_object_id,
+    event_time: read.record.event_time,
+    ...(SPEAKER_ROLES.has(read.record.source_id) ? { role: read.record.source_id } : {}),
+    content: read.record.source_body,
+    content_start: offset,
+    content_end: end,
+    content_complete: end === read.bodyBytes,
+    original_complete: true,
+    retained_extent: "body",
+    valid_from: read.record.valid_from,
+    valid_to: read.record.valid_to
   };
 }
 
@@ -322,7 +347,8 @@ function mapCapsule(
     content_start: chunk.start,
     content_end: chunk.end,
     content_complete: chunk.complete,
-    original_complete: excerpt !== null,
+    // Capsule gist/excerpt are retained reductions, not the original body.
+    original_complete: false,
     retained_extent: retainedExtent
   };
 }
@@ -387,6 +413,23 @@ function utf8Width(lead: number): number {
 
 function hydrateBytes(row: SourceRootRow): number {
   return Buffer.byteLength(row.content ?? "", "utf8");
+}
+
+function hydrateMapped(
+  mapped: SourceRootRow | null,
+  target: SourceEvidenceTarget,
+  fallbackBytes: number
+): SourceRootHydratePage {
+  if (mapped === null || !sameSourceIdentity(mapped, target)) {
+    return { row: null, rowsRead: 1, bytesRead: fallbackBytes, unavailable: true };
+  }
+  return {
+    row: mapped,
+    rowsRead: 1,
+    bytesRead: hydrateBytes(mapped),
+    unavailable: false,
+    ...(mapped.content_complete ? {} : { resourceLimited: true })
+  };
 }
 
 export { encodeRecordCursor, parseRecordCursor, encodeCapsuleCursor, parseCapsuleCursor };

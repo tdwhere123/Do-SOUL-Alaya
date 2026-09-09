@@ -140,7 +140,7 @@ export function initializeObservableMutationGeneration(db: SqliteConnection): vo
   db.exec("UPDATE garden_projection_cursor SET observable_epoch = lower(hex(randomblob(16))) WHERE observable_epoch = ''");
   for (const table of ["memory_entries", "garden_semantic_projections", "memory_embeddings", "relation_assertions", "relation_assertion_evidence",
     "relation_assertion_resolution_current", "path_relations", "relation_path_projections", "claim_forms",
-    "event_log"]) installMutationTriggers(db, table);
+    "event_log", "source_records", "evidence_capsules"]) installMutationTriggers(db, table);
 }
 
 function installMutationTriggers(db: SqliteConnection, table: string): void {
