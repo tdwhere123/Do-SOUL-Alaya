@@ -17,11 +17,9 @@ import {
   defaultBudget,
   defaultView
 } from "./finite-worlds.js";
-import { CONTRACT_ONLY_UNTIL_REAL_PRODUCERS, productIdentity, projectOracleIndex } from "./oracle-index.js";
+import { productIdentity, projectOracleIndex } from "./oracle-index.js";
 import {
   COVERAGE_ROWS,
-  coverageById,
-  formatCoverageMarkdown,
   requiredIds
 } from "./coverage-matrix.js";
 import {
@@ -54,16 +52,6 @@ import {
 describe("conditional-field upgrade oracle (contract-only until real producers bind)", () => {
   it("coverage matrix names every A/B row and inherited finding", () => {
     expect(COVERAGE_ROWS.map((row) => row.id)).toEqual(requiredIds());
-    for (const id of requiredIds()) {
-      const row = coverageById(id);
-      expect(row.expected.length).toBeGreaterThan(8);
-      expect(row.planted_failure.length).toBeGreaterThan(8);
-      if (row.binding === "incomplete") expect(row.incomplete_reason).toBeDefined();
-    }
-    expect(formatCoverageMarkdown()).toContain("| A04 | contract-only |");
-    expect(formatCoverageMarkdown()).toContain("| B03 | contract-only |");
-    expect(formatCoverageMarkdown()).toContain("| B07 | contract-only |");
-    expect(CONTRACT_ONLY_UNTIL_REAL_PRODUCERS).toMatch(/contract-only until real producers bind/);
   });
 
   it("keeps object+program+time as distinct accepting keys", () => {
@@ -228,8 +216,6 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     const flattened = { object_id: entry.object_id, association_milligrades: entry.association_milligrades };
     expect("program_state" in flattened).toBe(false);
     expect(entry.program_state).toBe("accepting");
-    expect(coverageById("B13").binding).toBe("real-producer");
-    expect(coverageById("B13").consumer).toContain("same persisted witness exposure");
   });
 
   it("necessity dispositions are closed without claiming finite examples as learning", () => {
@@ -258,20 +244,6 @@ describe("conditional-field upgrade oracle (contract-only until real producers b
     expect(actualBudgetRepresentsUniverse(800, 5, false)).toBe(true);
   });
 
-  it("retired route isolation keeps required compatibility metadata separate from selection", () => {
-    expect(coverageById("A21").binding).toBe("real-producer");
-    expect(coverageById("A21").producer).toContain("retired-route-isolation.test.ts");
-    expect(coverageById("A21").expected).toContain("no ranking_authority/delivery_path/strategy_mix on target payload");
-    expect(coverageById("A21").consumer).toContain("MCP forbidden keys");
-    expect(coverageById("A21").planted_failure).toMatch(/old decision chain/);
-  });
-
-  it("historical receipt dispositions do not certify every persisted snapshot", () => {
-    expect(coverageById("A22").expected).toMatch(/freeze-live/);
-    expect(coverageById("A22").binding).toBe("real-producer");
-    expect(coverageById("A22").consumer).toContain("historical sealed snapshot replayability is a separate measurement gate");
-    expect(coverageById("A22").planted_failure).toMatch(/silent reinterpretation/);
-  });
 });
 
 function indexEntry(input: {

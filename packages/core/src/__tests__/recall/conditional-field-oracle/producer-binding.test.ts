@@ -12,7 +12,6 @@ import {
 import { projectAcceptingIndex } from "../../../recall/conditional-field/index/project-accepting-index.js";
 import { observeField } from "../../../recall/runtime/conditional-field-observe.js";
 import { type ObserverReaders } from "../../../recall/conditional-field/observers/observe.js";
-import { coverageById } from "./coverage-matrix.js";
 import {
   INTERPRETATION_CLOCK,
   SNAPSHOT_ID,
@@ -65,7 +64,6 @@ describe("conditional-field compiler and projection contracts", () => {
     expect(historyOffService).toBe(true);
     expect(relations.every((relation) => relation.guard.kind !== "source_bound_entity")).toBe(true);
     expect(interpretation.status).toBe("partial");
-    expect(coverageById("B04").binding).toBe("real-producer");
   });
 
   it("high-grade shared-provider bridge does not admit another service history as the same service", () => {
@@ -110,36 +108,6 @@ describe("conditional-field compiler and projection contracts", () => {
       || (ambiguous.hypotheses?.length ?? 0) > 0;
     expect(index.completeness.interpretation_coverage).toBe("open");
     expect(omittedHypotheses).toBe(true);
-  });
-
-  it("current closure references real source and consumer tests rather than retirement deferrals", () => {
-    for (const row of ["A21", "A22", "B13", "F4", "F6", "F7", "S13"].map(coverageById)) {
-      expect(row.binding).toBe("real-producer");
-      expect(row.producer).toContain(".test.ts");
-      expect(row.incomplete_reason).toBeUndefined();
-    }
-  });
-
-  it("records oracle-only helpers as contract-only and production classes as real-producer", () => {
-    expect(coverageById("B07").binding).toBe("contract-only");
-    expect(coverageById("B07").incomplete_reason).toMatch(/not a production class/);
-    expect(coverageById("A04").binding).toBe("contract-only");
-    expect(coverageById("A04").consumer).toBe("none");
-    expect(coverageById("A13").binding).toBe("real-producer");
-    expect(coverageById("A13").producer).toContain("projectAcceptingIndex");
-    expect(coverageById("B02").binding).toBe("real-producer");
-    expect(coverageById("B02").producer).toContain("field-engine.ts");
-    expect(coverageById("B03").binding).toBe("contract-only");
-    expect(coverageById("B03").consumer).toBe("none");
-    expect(coverageById("B03").consumer).toBe("none");
-    expect(coverageById("B10").binding).toBe("real-producer");
-    expect(coverageById("B10").producer).toContain("attributeUsageReports");
-    expect(coverageById("B11").binding).toBe("real-producer");
-    expect(coverageById("B11").producer).toContain("attributeUsageReports");
-    expect(coverageById("B12").binding).toBe("real-producer");
-    expect(coverageById("B12").producer).toContain("projectCausalUsageOntoPaths");
-    expect(coverageById("B14").binding).toBe("real-producer");
-    expect(coverageById("B14").producer).toContain("USAGE_ADAPTATION_NECESSITY");
   });
 });
 

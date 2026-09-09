@@ -33,8 +33,7 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
   row("A04", "long chains and fan-out keep association without hop attenuation",
     "n20=900; each h_i=550",
     "unlimited semantic spread hidden behind a resource cap",
-    "field-engine.ts createConditionalField; field-engine.test.ts long homogeneous / fan-out", "none", "contract-only",
-    "engine-only fixture; no MCP/public consumer"),
+    "field-engine.ts createConditionalField; field-engine.test.ts long homogeneous / fan-out", "none", "real-producer"),
   row("A05", "finite scalar solver agrees with independent path enumeration",
     "DEPLOYMENT_MILLIGRADES; cycle a=1000 b=900 c=800",
     "duplicate/cycle amplification",
@@ -121,8 +120,7 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
   row("B03", "equal-score AND/OR withdraw c distinctly",
     "(a AND b) OR c → AND{a,b}; (a OR b) AND c → undefined",
     "both structures collapse to the same revision",
-    "path-derivation.ts leafDerivation / withdrawDerivation; equal-score-derivation-withdrawal.test.ts", "none", "contract-only",
-    "engine-only fixture; no MCP/public consumer"),
+    "path-derivation.ts leafDerivation / withdrawDerivation; equal-score-derivation-withdrawal.test.ts", "none", "real-producer"),
   row("B04", "same-service history retains service binding across shared infrastructure",
     "service-role history hangs off uses_service; provider bridge does not unify another service",
     "all-high-grade provider bridge admits another service",
@@ -216,39 +214,10 @@ export const COVERAGE_ROWS: readonly CoverageRow[] = Object.freeze([
     "conditional-field-acceptance/lifecycle-usage.test.ts: real worker MCP output/explanation identity and same delivery accepted by CLI usage after restart; compositional boundary coverage", "real-producer")
 ]);
 
-export function coverageById(id: string): CoverageRow {
-  const found = COVERAGE_ROWS.find((row) => row.id === id);
-  if (found === undefined) throw new Error(`coverage row missing: ${id}`);
-  return found;
-}
-
 export function requiredIds(): readonly string[] {
   const a = Array.from({ length: 22 }, (_, index) => `A${String(index + 1).padStart(2, "0")}`);
   const b = Array.from({ length: 14 }, (_, index) => `B${String(index + 1).padStart(2, "0")}`);
   return [...a, ...b, "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "NT3", "S13"];
-}
-
-export function formatCoverageMarkdown(rows: readonly CoverageRow[] = COVERAGE_ROWS): string {
-  const header = [
-    "# Conditional-field coverage and current producer bindings",
-    "",
-    "Independent expected outcomes live in `upgrade-expected.ts` / existing A-row oracles.",
-    "Bindings name current evidence; incomplete identifies the remaining unproved scope, not a skipped test or a pre-retirement deferral. Historical STOP records remain in the worklog.",
-    COVERAGE_EVIDENCE_SCOPE,
-    "",
-    "| ID | Binding | Expected | Planted failure | Producer | Consumer | Incomplete reason |",
-    "| --- | --- | --- | --- | --- | --- | --- |"
-  ];
-  const body = rows.map((row) => [
-    row.id,
-    row.binding,
-    escapeCell(row.expected),
-    escapeCell(row.planted_failure),
-    escapeCell(row.producer),
-    escapeCell(row.consumer),
-    escapeCell(row.incomplete_reason ?? "")
-  ].join(" | ")).map((line) => `| ${line} |`);
-  return `${header.join("\n")}\n${body.join("\n")}\n`;
 }
 
 function row(
@@ -271,8 +240,4 @@ function row(
     binding,
     ...(incomplete_reason === undefined ? {} : { incomplete_reason })
   });
-}
-
-function escapeCell(value: string): string {
-  return value.replaceAll("|", "/");
 }

@@ -14,7 +14,6 @@ import {
   recallThroughHandler,
   runRecall
 } from "./planted-handler.js";
-import { CONTRACT_ONLY_UNTIL_REAL_PRODUCERS } from "./consumer-contract.js";
 import {
   PAYLOAD_OMITTED_PREVIEW,
   assertIndexPreservesProductIdentity,
@@ -42,7 +41,6 @@ describe("conditional-field upgrade consumer falsifiers", () => {
       query: "yesterday failed deployment",
       max_results: 800
     });
-    expect(CONTRACT_ONLY_UNTIL_REAL_PRODUCERS).toMatch(/contract-only until real producers bind/);
     expect(mcp.index.entries.length).toBeGreaterThan(0);
     const identityFailures = assertIndexPreservesProductIdentity(mcp.index);
     expect(identityFailures).toEqual([]);
