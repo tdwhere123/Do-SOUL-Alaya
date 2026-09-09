@@ -21,6 +21,7 @@ export {
   type Sha256Hex
 } from "./common.js";
 export {
+  AssociationCapContractSchema,
   EnumerationPolicySchema,
   GuardIntervalSchema,
   GuardKindSchema,
@@ -38,6 +39,7 @@ export {
   QueryViewSchema,
   RequestBudgetSchema,
   ResultKindViewSchema,
+  type AssociationCapContract,
   type EnumerationPolicy,
   type Guard,
   type GuardInterval,

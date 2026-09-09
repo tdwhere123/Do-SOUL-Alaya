@@ -51,6 +51,15 @@ export const GuardSchema = z
 export const EnumerationPolicySchema = z.enum(["canonical", "associative"]);
 export const ResultKindViewSchema = z.enum(["mixed", "memory_only", "source_only"]);
 
+export const AssociationCapContractSchema = z
+  .object({
+    domain_id: ConditionalFieldIdSchema,
+    transfer_id: ConditionalFieldIdSchema,
+    transfer_version: ConditionalFieldIdSchema
+  })
+  .strict()
+  .readonly();
+
 export const QueryViewSchema = z
   .object({
     schema_version: SchemaVersionSchema,
@@ -67,7 +76,8 @@ export const QueryViewSchema = z
     facet_mode: FacetModeSchema.default("same_path"),
     threshold_milligrades: MilligradeSchema.default(0),
     enumeration_policy: EnumerationPolicySchema.default("canonical"),
-    result_kind_view: ResultKindViewSchema.default("mixed")
+    result_kind_view: ResultKindViewSchema.default("mixed"),
+    cap_contracts: z.array(AssociationCapContractSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
   })
   .strict()
   .readonly();
@@ -288,6 +298,7 @@ export const QueryInterpretationSchema = z
 
 export type EnumerationPolicy = z.infer<typeof EnumerationPolicySchema>;
 export type ResultKindView = z.infer<typeof ResultKindViewSchema>;
+export type AssociationCapContract = z.infer<typeof AssociationCapContractSchema>;
 export type QueryInterpretationProposal = z.infer<typeof QueryInterpretationProposalSchema>;
 export type GuardVerdict = z.infer<typeof GuardVerdictSchema>;
 export type GuardTimeScope = z.infer<typeof GuardTimeScopeSchema>;

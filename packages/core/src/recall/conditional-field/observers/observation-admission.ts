@@ -10,6 +10,11 @@ import {
   decodeSourceFilters,
   sourceFactsSatisfyFilters
 } from "../query/ordinary-language.js";
+import {
+  classifyQueryPredicate,
+  evaluateFrozenSourcePredicate,
+  type SourcePredicateSubject
+} from "../query/source-predicates.js";
 import type {
   ObserveConditionalFieldInput,
   RelationObserverRow,
@@ -132,8 +137,11 @@ function applicabilityFor(
   identityKind: "object" | "assertion" | "embedding",
   sourceRoot?: SourceRootObserverRow
 ): Guard {
-  const guards = [...collectGuards(input.query.program),
-    ...(input.query.source_guard === undefined ? [] : [input.query.source_guard])];
+  const guards = [
+    ...collectGuards(input.query.program),
+    ...(input.query.source_guard === undefined ? [] : [input.query.source_guard]),
+    ...(input.query.interpretation_proposal?.conditions ?? [])
+  ];
   const authorization = evaluateAuthorization(input, guards, sourceRow, sourceRoot);
   if (authorization.verdict === "false") return authorization;
   if (sourceRow === undefined && sourceRoot === undefined && identityKind !== "embedding") {
@@ -208,18 +216,19 @@ function evaluateApplicableGuard(
     return evaluateInterval(guard, stamp);
   }
   if (guard.kind === "query_predicate") {
-    if (guard.predicate_name === "source.role.v1") {
-      if (sourceRoot === undefined || sourceRoot.role === undefined) {
-        return { ...guard, verdict: "unresolved" };
-      }
-      return { ...guard, verdict: "true" };
+    const classified = classifyQueryPredicate(guard.predicate_name);
+    if (classified.kind === "frozen") {
+      return {
+        ...guard,
+        verdict: evaluateFrozenSourcePredicate(
+          classified.name,
+          guard,
+          predicateSubject(sourceRoot, sourceRow),
+          input.seed_query
+        )
+      };
     }
-    if (guard.predicate_name === "source.event_time.interval.v1") {
-      if (sourceRoot?.event_time === undefined || sourceRoot.event_time === null) {
-        return { ...guard, verdict: "unresolved" };
-      }
-      return { ...guard, verdict: "true" };
-    }
+    if (classified.kind === "unknown") return { ...guard, verdict: "unresolved" };
     const filters = decodeSourceFilters(guard.predicate_name);
     if (filters === undefined) return undefined;
     if (filters.event_kind !== undefined && input.action.action !== "seed") return undefined;
@@ -298,6 +307,28 @@ function collectGuards(program: QueryProgram): readonly Guard[] {
     default:
       return [];
   }
+}
+
+function predicateSubject(
+  sourceRoot: SourceRootObserverRow | undefined,
+  sourceRow: SourceObserverRow | undefined
+): SourcePredicateSubject | undefined {
+  if (sourceRoot !== undefined) {
+    return {
+      workspace_id: sourceRoot.workspace_id,
+      root_kind: sourceRoot.kind,
+      root_id: sourceRoot.root_id,
+      source_version: sourceRoot.revision,
+      evidence_object_id: sourceRoot.evidence_object_id,
+      ...(sourceRoot.content === undefined ? {} : { content: sourceRoot.content }),
+      ...(sourceRoot.role === undefined ? {} : { role: sourceRoot.role }),
+      ...(sourceRoot.event_time === undefined ? {} : { event_time: sourceRoot.event_time })
+    };
+  }
+  if (sourceRow === undefined) return undefined;
+  return {
+    ...(sourceRow.content === undefined ? {} : { content: sourceRow.content })
+  };
 }
 
 function packedBinding(

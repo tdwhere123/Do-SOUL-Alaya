@@ -1,22 +1,37 @@
 import { describe, expect, it } from "vitest";
 import {
+  fieldActivationOf,
+  memoryProductStateKey,
+  memoryRecallTarget,
   productSubjectId,
+  RawMeasurementSchema,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   type Guard,
   type QueryInterpretation,
   type QueryProgram,
-  type RelationValidity
+  type RelationValidity,
+  type TypedObservation
 } from "@do-soul/alaya-protocol";
 import { compileConditionalFieldQuery } from "../../../../recall/conditional-field/query/compile-query.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
 import { assessUnknownCause } from "../../../../recall/runtime/semantic-attribution.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
-import { type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
+import { buildTypedObservation } from "../../../../recall/conditional-field/observers/observation-admission.js";
+import {
+  startObserverCursor,
+  type ObserverReaders,
+  type SourceRootObserverRow
+} from "../../../../recall/conditional-field/observers/observe.js";
+import {
+  seedActivationsForObservation,
+  seedFromObservation
+} from "../../../../recall/conditional-field/engine/path-composition.js";
 import {
   encodeBindingContext,
   evaluateGuard,
   parseBindingContext
 } from "../../../../recall/conditional-field/engine/binding-environment.js";
+import { evaluateFrozenSourcePredicate } from "../../../../recall/conditional-field/query/source-predicates.js";
 import { INTERPRETATION_CLOCK, SNAPSHOT_ID, defaultBudget, defaultView } from "../reference/deployment.fixture.js";
 
 const VALIDITY: RelationValidity = { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
@@ -162,6 +177,149 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(compiled.status).toBe("resolved");
     expect(compiled.program.kind).toBe("alternative");
   });
+
+  it("keeps missing measurement distinct from reachable zero", () => {
+    const missing = observeProgram(relation("novel_relation", "x", "y"), [edge("seed", "fact", "novel_relation")]);
+    const fact = missing.binding.kind === "bound"
+      ? missing.binding.snapshot.values.find((value) => productSubjectId(value.state) === "fact")
+      : undefined;
+    expect(fact).toBeUndefined();
+    expect(fieldActivationOf({})).toEqual({ kind: "unreachable" });
+    expect(fieldActivationOf({ milligrades: 0 })).toEqual({ kind: "reachable", milligrades: 0 });
+    expect(RawMeasurementSchema.parse({ status: "missing" }).status).toBe("missing");
+    expect(RawMeasurementSchema.parse({
+      status: "measured",
+      producer_id: "p",
+      model_id: "m",
+      domain: "d",
+      normalization: "n",
+      referent: memoryRecallTarget({ workspace_id: "ws", object_id: "fact", source_revision: "rev" }),
+      source_revision: "rev",
+      query_digest: SNAPSHOT_ID,
+      raw: 0
+    }).raw).toBe(0);
+  });
+
+  it("does not promote unresolved or epsilon discovery seeds onto the guaranteed list", () => {
+    const state = memoryProductStateKey({
+      workspace_id: "ws",
+      object_id: "seed",
+      source_revision: "rev",
+      program_state: "accepting",
+      hypothesis_id: "h0",
+      binding_context: "unbound",
+      time_state: "as_of"
+    });
+    const unresolved: TypedObservation = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      observation_id: "seed:seed",
+      object_id: "seed",
+      source_revision: "rev",
+      applicability: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        kind: "query_predicate",
+        verdict: "unresolved",
+        predicate_name: "source.role.v1"
+      },
+      association_milligrades: 850
+    };
+    expect(seedFromObservation(unresolved, state)).toBeUndefined();
+    const admittedZero: TypedObservation = {
+      ...unresolved,
+      applicability: { ...unresolved.applicability, verdict: "true", predicate_name: "source.identity.v1" },
+      association_milligrades: 0
+    };
+    expect(seedFromObservation(admittedZero, state)?.milligrades).toBe(0);
+    expect(seedActivationsForObservation(unresolved, interpretation(relation("observed_log", "x", "y")), AS_OF))
+      .toEqual([]);
+    expect(seedActivationsForObservation(admittedZero, interpretation({ schema_version: 1, kind: "empty" }), AS_OF))
+      .toEqual([]);
+    const roleQuery = interpretation(relation("observed_log", "x", "y", {
+      kind: "query_predicate",
+      predicate_name: "source.role.v1",
+      variable: "y",
+      time_scope: "none"
+    }));
+    const observed = observeField(roleQuery, input([edge("seed", "fact", "observed_log")], {}));
+    expect(observed.guaranteed_seeds).toEqual([]);
+  });
+
+  it("does not guaranteed-seed a lexical hit under an unknown query_predicate", () => {
+    const observed = observeProgram(
+      relation("observed_log", "x", "y", {
+        kind: "query_predicate",
+        predicate_name: "source.not_a_frozen_predicate.v1",
+        variable: "y",
+        time_scope: "none"
+      }),
+      [edge("seed", "fact", "observed_log")]
+    );
+    expect(observed.guaranteed_seeds).toEqual([]);
+    expect(observed.seeds.every((seed) => seed.milligrades !== undefined)).toBe(true);
+  });
+
+  it("evaluates frozen source predicates without using created_at or packing filters", () => {
+    const interval = {
+      start: "2026-09-06T00:00:00.000Z",
+      end: "2026-09-07T00:00:00.000Z",
+      time_domain: "event_time"
+    };
+    const guard = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      kind: "query_predicate" as const,
+      verdict: "unresolved" as const,
+      predicate_name: "source.event_time.interval.v1",
+      interval
+    };
+    expect(evaluateFrozenSourcePredicate("source.event_time.interval.v1", guard, {
+      created_at: "2026-09-06T12:00:00.000Z",
+      last_used_at: "2026-09-06T12:00:00.000Z"
+    })).toBe("unresolved");
+    expect(evaluateFrozenSourcePredicate("source.event_time.interval.v1", guard, {
+      event_time: "2026-09-06T12:00:00.000Z"
+    })).toBe("true");
+    expect(evaluateFrozenSourcePredicate("source.literal.nfc.v1", {
+      ...guard,
+      predicate_name: "source.literal.nfc.v1",
+      entity_id: "\uFB00"
+    }, { content: "\uFB00 ligature" })).toBe("true");
+    expect(evaluateFrozenSourcePredicate("source.literal.nfc.v1", {
+      ...guard,
+      predicate_name: "source.literal.nfc.v1",
+      entity_id: "\uFB00"
+    }, { content: "ff ligature" })).toBe("false");
+    const unknownRole = buildTypedObservation(observeInput(relation("observed_log", "x", "y", {
+      kind: "query_predicate",
+      predicate_name: "source.role.v1",
+      variable: "y"
+    })), {
+      objectId: "root-1",
+      sourceRevision: "rev-1",
+      observationKey: "root-1",
+      sourceRoot: sourceRoot({ role: undefined }),
+      identityKind: "object"
+    });
+    expect(unknownRole?.applicability.verdict).toBe("unresolved");
+    expect(unknownRole?.applicability.verdict).not.toBe("false");
+    const linked = buildTypedObservation(observeInput(relation("observed_log", "x", "y", {
+      kind: "query_predicate",
+      predicate_name: "source.evidence_link.v1",
+      variable: "y"
+    })), {
+      objectId: "root-1",
+      sourceRevision: "rev-1",
+      observationKey: "root-1",
+      sourceRoot: sourceRoot({ evidence_object_id: null }),
+      identityKind: "object"
+    });
+    expect(linked).toBeNull();
+    const missingVector = observeField(interpretation(relation("observed_log", "x", "y")), input([], {}));
+    expect(missingVector.last_observer_status === undefined
+      || missingVector.last_observer_status === "exhausted"
+      || missingVector.last_observer_status === "unavailable"
+      || missingVector.last_observer_status === "not_applicable"
+      || missingVector.last_observer_status === "unknown").toBe(true);
+  });
 });
 
 function observeProgram(
@@ -210,7 +368,9 @@ function relation(
       variable: guard.variable ?? target,
       time_scope: guard.time_scope ?? "none",
       ...(guard.equals_variable === undefined ? {} : { equals_variable: guard.equals_variable }),
-      ...(guard.interval === undefined ? {} : { interval: guard.interval })
+      ...(guard.interval === undefined ? {} : { interval: guard.interval }),
+      ...(guard.predicate_name === undefined ? {} : { predicate_name: guard.predicate_name }),
+      ...(guard.entity_id === undefined ? {} : { entity_id: guard.entity_id })
     },
     facet_mode: "same_path",
     threshold_milligrades: 0
@@ -295,4 +455,46 @@ function grades(state: ReturnType<typeof observeField>, objectId: string): numbe
   return state.binding.snapshot.values.find((value) =>
     productSubjectId(value.state) === objectId && value.accepting
   )?.milligrades ?? 0;
+}
+
+function observeInput(program: QueryProgram) {
+  return {
+    lease: {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      lease_id: "lease",
+      snapshot_id: SNAPSHOT_ID,
+      query_id: "admission-probe",
+      status: "active" as const
+    },
+    action: {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      action: "seed" as const,
+      region_id: "seed",
+      work_limit: 16
+    },
+    cursor: startObserverCursor({
+      cursor_id: "seed",
+      snapshot_id: SNAPSHOT_ID,
+      query_id: "admission-probe",
+      region_id: "seed"
+    }),
+    query: interpretation(program),
+    workspace_id: "ws",
+    readers: {},
+    seed_query: "needle"
+  };
+}
+
+function sourceRoot(
+  overrides: Partial<SourceRootObserverRow> = {}
+): SourceRootObserverRow {
+  return {
+    kind: "source_record",
+    workspace_id: "ws",
+    root_id: "root-1",
+    revision: "rev-1",
+    digest: SNAPSHOT_ID,
+    evidence_object_id: "capsule-1",
+    ...overrides
+  };
 }

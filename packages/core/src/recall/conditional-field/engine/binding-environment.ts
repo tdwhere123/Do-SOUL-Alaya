@@ -9,6 +9,10 @@ import {
   decodeSourceFilters,
   sourceFactsSatisfyFilters
 } from "../query/ordinary-language.js";
+import {
+  classifyQueryPredicate,
+  evaluateFrozenSourcePredicate
+} from "../query/source-predicates.js";
 
 export const UNBOUND_BINDING = "unbound";
 
@@ -199,6 +203,20 @@ function evaluateQueryPredicate(
   facts: ReadonlyMap<string, BoundSourceFacts>,
   endpoints?: Readonly<{ readonly sourceId: string; readonly targetId: string }>
 ): GuardDecision {
+  const classified = classifyQueryPredicate(guard.predicate_name);
+  if (classified.kind === "frozen") {
+    const id = objectForFilters(guard, env, endpoints);
+    const bound = id === undefined ? undefined : facts.get(id);
+    return evaluateFrozenSourcePredicate(classified.name, guard, bound === undefined ? undefined : {
+      root_id: bound.object_id,
+      source_version: bound.source_revision,
+      content: bound.content,
+      event_time: undefined,
+      created_at: bound.created_at,
+      last_used_at: bound.last_used_at
+    });
+  }
+  if (classified.kind === "unknown") return "unresolved";
   const filters = decodeSourceFilters(guard.predicate_name);
   if (filters === undefined) {
     if (guard.predicate_name === undefined) return guard.verdict === "false" ? "false" : "true";

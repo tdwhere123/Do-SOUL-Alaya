@@ -131,11 +131,15 @@ export function observationIsGuaranteed(observation: TypedObservation): boolean 
   return observation.applicability.verdict === "true";
 }
 
+export function queryAdmitsGuaranteedSeed(interpretation: QueryInterpretation): boolean {
+  return runtimeProgram(interpretation.program) !== "empty";
+}
+
 export function seedFromObservation(
   observation: TypedObservation,
   state: ProductStateKey
 ): SeedActivation | undefined {
-  if (observation.applicability.verdict === "false") return undefined;
+  if (observation.applicability.verdict !== "true") return undefined;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     state,
@@ -177,7 +181,8 @@ export function seedActivationsForObservation(
   interpretation: QueryInterpretation,
   asOf: string
 ): readonly SeedActivation[] {
-  if (observation.applicability.verdict === "false") return [];
+  if (observation.applicability.verdict !== "true") return [];
+  if (!queryAdmitsGuaranteedSeed(interpretation)) return [];
   const runtime = runtimeProgram(interpretation.program);
   const automaton = runtime === "empty" || runtime === "epsilon"
     ? undefined

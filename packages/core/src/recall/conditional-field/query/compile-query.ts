@@ -1,22 +1,13 @@
 import {
-  CONDITIONAL_FIELD_SCHEMA_VERSION,
-  ConditionalFieldIdSchema,
   ConditionalFieldSha256DigestSchema,
-  IsoDatetimeStringSchema,
   QueryHoleSchema,
   QueryHypothesisSchema,
-  QueryInterpretationSchema,
   QueryProgramSchema,
-  QueryTimeWindowSchema,
-  QueryViewSchema,
   RequestBudgetSchema,
-  type QueryBinding,
-  type Guard,
   type QueryHole,
   type QueryHypothesis,
   type QueryInterpretation,
   type QueryInterpretationProposal,
-  type QueryInterpretationStatus,
   type QueryProgram,
   type QueryTimeWindow,
   type QueryView,
@@ -24,31 +15,29 @@ import {
 } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import { admitRequestBudget } from "../reference/bind-max-min.js";
+import { compileOrdinary } from "./compile-query-ordinary.js";
+import { identityFor } from "./compile-query-identity.js";
+import type { OpenRelationCapture } from "./ordinary-language.js";
 import {
-  identityFor,
-  proposalBindsOriginalQuery,
-  type QueryDenotationParts
-} from "./compile-query-identity.js";
-import { interpretQuery } from "../reference/interpret-query.js";
-import {
-  SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
-  SourceFilterCapacityError,
-  attachSourceFilters,
-  calendarYesterdayWindow,
-  classifyOrdinaryRequest,
-  decodeSourceFilters,
-  encodeSourceFilters,
-  openAnchorTimeGuard,
-  ordinaryRemainder,
-  proposeOrdinaryRelations,
-  programFromOpenRelations,
-  supportedFailedDeploymentProgram,
-  UNBOUND_BINDING_CONTEXT,
-  uninterpretedQueryHole,
-  yesterdayAnchorGuard,
-  type OpenRelationCapture,
-  type OrdinarySourceFilters
-} from "./ordinary-language.js";
+  admissionStatus,
+  admitBoundProposalFields,
+  admitQueryPredicates,
+  associativeCapDomainAdmission,
+  boundProposal,
+  consumeMemoryIfNeeded,
+  defaultView,
+  denotation,
+  EPSILON,
+  explicitQueryId,
+  extraGuardsForAdmission,
+  fallbackQueryId,
+  incompatibleCapInterpretation,
+  interpretationOf,
+  optionalWindow,
+  parseItems,
+  requiredView,
+  type QueryMemoryPort
+} from "./query-admission.js";
 
 export {
   continuationViewMismatch,
@@ -57,8 +46,19 @@ export {
   interpretationIdentity,
   proposalBindsOriginalQuery
 } from "./compile-query-identity.js";
-export { SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID };
-export type { OpenRelationCapture };
+export {
+  collectRecoverableBindings,
+  collectRelations,
+  recoverableBindingContext,
+  type QueryMemoryPort,
+  type QueryRelation
+} from "./query-admission.js";
+export {
+  FROZEN_SOURCE_PREDICATE_NAMES,
+  UNSUPPORTED_POLICY_QUERY_ID
+} from "./source-predicates.js";
+export { SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID } from "./ordinary-language.js";
+export type { OpenRelationCapture } from "./ordinary-language.js";
 export {
   ANCHOR_EVENT_VARIABLE,
   SERVICE_VARIABLE,
@@ -66,16 +66,6 @@ export {
   USES_SERVICE_RELATION,
   sourceBoundEntityGuard
 } from "./ordinary-language.js";
-
-const EPSILON: QueryProgram = { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "epsilon" };
-const MAX_ORDINARY_TEXT = 4096;
-
-export type QueryMemoryPort = Readonly<{
-  readonly readAuthorizedSnapshot: (input: Readonly<{
-    readonly snapshot_id: string;
-    readonly budget: RequestBudget;
-  }>) => void;
-}>;
 
 type CompileCommon = Readonly<{
   readonly snapshot_id: string;
@@ -102,15 +92,13 @@ export type OrdinaryLanguageCompileInput = CompileCommon & Readonly<{
   readonly interpretation_clock: string;
   readonly since?: string;
   readonly until?: string;
-  readonly time_field?: "created_at" | "last_used_at";
   readonly dimension_filter?: readonly string[];
   readonly domain_tag_filter?: readonly string[];
+  readonly time_field?: "created_at" | "last_used_at";
   readonly relations?: readonly OpenRelationCapture[];
 }>;
 
 export type QueryCompileInput = TypedQueryCompileInput | OrdinaryLanguageCompileInput;
-
-export type QueryRelation = Extract<QueryProgram, { readonly kind: "relation" }>;
 
 export function compileConditionalFieldQuery(input: QueryCompileInput): QueryInterpretation {
   const snapshot = ConditionalFieldSha256DigestSchema.safeParse(input.snapshot_id);
@@ -138,74 +126,58 @@ export function compileConditionalFieldQuery(input: QueryCompileInput): QueryInt
       interpretation_clock: input.interpretation_clock
     });
   }
-  return input.source === "typed"
-    ? compileTyped(input, snapshot.data, budget.data)
-    : compileOrdinary(input, snapshot.data, budget.data);
-}
-
-export function collectRelations(program: QueryProgram): readonly QueryRelation[] {
-  const relations: QueryRelation[] = [];
-  visitQueryProgram(program, (node) => {
-    if (node.kind === "relation") relations.push(node);
-  });
-  return relations;
-}
-
-export function collectRecoverableBindings(program: QueryProgram): readonly QueryBinding[] {
-  const bindings: QueryBinding[] = [];
-  visitQueryProgram(program, (node) => {
-    if (node.kind !== "relation") return;
-    if (node.guard.kind !== "source_bound_entity") return;
-    if (node.guard.variable === undefined || node.guard.entity_id === undefined) return;
-    bindings.push({
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      variable: node.guard.variable,
-      value: node.guard.entity_id
+  const view = requiredView(input.view);
+  const queryId = explicitQueryId(input.query_id);
+  if (view === undefined || queryId === "invalid") {
+    return interpretationOf({
+      query_id: fallbackQueryId(input.query_id, "malformed"),
+      status: "malformed",
+      snapshot_id: snapshot.data,
+      program: typedProgramOrEpsilon(input),
+      view: view ?? defaultView(),
+      interpretation_clock: input.interpretation_clock
     });
-  });
-  return bindings;
-}
-
-export function recoverableBindingContext(bindings: readonly QueryBinding[]): string {
-  if (bindings.length === 0) return UNBOUND_BINDING_CONTEXT;
-  return [...bindings]
-    .sort((left, right) => left.variable === right.variable
-      ? left.value.localeCompare(right.value)
-      : left.variable.localeCompare(right.variable))
-    .map((binding) => `${binding.variable}=${binding.value}`)
-    .join(";");
+  }
+  return input.source === "typed"
+    ? compileTyped(input, snapshot.data, budget.data, view, queryId)
+    : compileOrdinary(input, snapshot.data, budget.data, view, queryId);
 }
 
 function compileTyped(
   input: TypedQueryCompileInput,
   snapshotId: string,
-  budget: RequestBudget
+  budget: RequestBudget,
+  view: QueryView,
+  queryId: string | undefined
 ): QueryInterpretation {
   const program = QueryProgramSchema.safeParse(input.program);
-  const view = requiredView(input.view);
   const holes = parseItems(input.holes, QueryHoleSchema);
   const hypotheses = parseItems(input.hypotheses, QueryHypothesisSchema);
   const timeWindow = optionalWindow(input.time_window);
-  const queryId = explicitQueryId(input.query_id);
   if (
     !program.success
-    || view === undefined
     || holes === undefined
     || hypotheses === undefined
     || timeWindow === "invalid"
-    || queryId === "invalid"
-    || (program.success && !sourceFilterPredicatesValid(program.data))
   ) {
     return interpretationOf({
       query_id: fallbackQueryId(input.query_id, "malformed"),
       status: "malformed",
       snapshot_id: snapshotId,
       program: program.success ? program.data : EPSILON,
-      view: view ?? defaultView(),
+      view,
       interpretation_clock: input.interpretation_clock
     });
   }
-  consumeMemoryIfNeeded(program.data, snapshotId, budget, input.memory);
+  if (associativeCapDomainAdmission(view) === "incompatible") {
+    return incompatibleCapInterpretation({
+      query_id: queryId,
+      snapshot_id: snapshotId,
+      program: program.data,
+      view,
+      interpretation_clock: input.interpretation_clock
+    });
+  }
   const proposal = boundProposal(input.interpretation_proposal, stableStringify(program.data));
   if (proposal === "invalid") {
     return interpretationOf({
@@ -217,501 +189,52 @@ function compileTyped(
       interpretation_clock: input.interpretation_clock
     });
   }
-  return interpretationOf({
-    query_id: identityFor(queryId, denotation(input, {
-      program: program.data,
-      view,
-      hypotheses,
-      interpretation_clock: input.interpretation_clock,
-      time_window: timeWindow,
-      authorized_scopes: input.authorized_scopes
-    })),
-    status: admissionStatus(program.data, holes, hypotheses),
-    snapshot_id: snapshotId,
+  const admitted = admitBoundProposalFields({
     program: program.data,
-    view,
     holes,
-    hypotheses,
-    interpretation_clock: input.interpretation_clock,
-    time_window: timeWindow
-  });
-}
-
-function compileOrdinary(
-  input: OrdinaryLanguageCompileInput,
-  snapshotId: string,
-  budget: RequestBudget
-): QueryInterpretation {
-  const view = requiredView(input.view);
-  const queryId = explicitQueryId(input.query_id);
-  if (view === undefined || queryId === "invalid" || input.text.length > MAX_ORDINARY_TEXT) {
-    return ordinaryMalformed(input, snapshotId, view ?? defaultView());
-  }
-  const yesterday = calendarYesterdayWindow(input.interpretation_clock);
-  const hints = compileTimeHints(input.since, input.until);
-  if (yesterday === undefined || hints.kind === "invalid") {
-    return ordinaryMalformed(input, snapshotId, view);
-  }
-  const classified = classifyOrdinaryRequest(input.text);
-  const proposal = boundProposal(input.interpretation_proposal, input.text);
-  if (proposal === "invalid") {
-    return ordinaryMalformed(input, snapshotId, view);
-  }
-  const relations = input.relations ?? proposeOrdinaryRelations(input.text);
-  let interpreted: QueryInterpretation;
-  try {
-    interpreted = relations.length > 0
-      ? compileOpenRelations({ ...input, relations }, snapshotId, budget, view, queryId, classified, yesterday, hints)
-      : classified.kind === "lexical"
-        ? compileLexicalRequest(input, snapshotId, budget, view, queryId, hints)
-        : compileSupportedRequest(input, snapshotId, budget, view, queryId, classified, yesterday, hints);
-  } catch (error) {
-    if (!(error instanceof SourceFilterCapacityError)) throw error;
-    return interpretationOf({ query_id: fallbackQueryId(input.query_id, "resource-rejected"),
-      status: "resource_rejected", snapshot_id: snapshotId, program: EPSILON, view,
-      interpretation_clock: input.interpretation_clock });
-  }
-  return { ...interpreted, query_id: identityFor(queryId, denotation(input, {
-    program: interpreted.program, view: interpreted.view, hypotheses: interpreted.hypotheses,
-    source_guard: interpreted.source_guard,
-    interpretation_clock: input.interpretation_clock, time_window: interpreted.time_window,
-    authorized_scopes: input.authorized_scopes, lexical_text: input.text,
-    ordinary_request: { relations, query_id: queryId }
-  })) };
-}
-
-function compileSupportedRequest(
-  input: OrdinaryLanguageCompileInput,
-  snapshotId: string,
-  budget: RequestBudget,
-  view: QueryView,
-  queryId: string | undefined,
-  classified: ReturnType<typeof classifyOrdinaryRequest>,
-  yesterday: QueryTimeWindow,
-  hints: TimeHints
-): QueryInterpretation {
-  view = { ...view, claim_demands: view.claim_demands ?? [{ variable: "h", proposition_kind: "common_cause", argument_variables: ["r", "h"] }] };
-  if (classified.kind === "malformed") {
-    return ordinaryMalformed(input, snapshotId, view);
-  }
-  if (classified.kind === "unsupported") {
+    hypotheses
+  }, proposal);
+  const predicates = admitQueryPredicates(
+    admitted.program,
+    extraGuardsForAdmission(undefined, proposal)
+  );
+  if (predicates.kind === "malformed") {
     return interpretationOf({
-      query_id: fallbackQueryId(queryId, "unsupported"),
-      status: "unsupported",
+      query_id: fallbackQueryId(input.query_id, "malformed"),
+      status: "malformed",
       snapshot_id: snapshotId,
-      program: EPSILON,
+      program: admitted.program,
       view,
       interpretation_clock: input.interpretation_clock
     });
   }
-  if (classified.kind === "lexical") {
-    return compileLexicalRequest(input, snapshotId, budget, view, queryId, hints);
-  }
-  if (classified.kind === "hypotheses") {
-    const program = admitOrdinaryProgram(
-      supportedFailedDeploymentProgram(yesterdayAnchorGuard(yesterday)),
-      input,
-      hints
-    );
-    const hypotheses = ambiguousEventHypotheses();
-    consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
-    return interpretationOf({
-      query_id: identityFor(queryId, denotation(input, {
-        program,
-        view,
-        hypotheses,
-        interpretation_clock: input.interpretation_clock,
-        time_window: yesterday,
-        authorized_scopes: input.authorized_scopes
-      })),
-      status: "hypotheses",
-      snapshot_id: snapshotId,
-      program,
-      view,
-      hypotheses,
-      interpretation_clock: input.interpretation_clock,
-      time_window: yesterday
-    });
-  }
-  const window = classified.kind === "supported" ? yesterday : closedHintWindow(hints);
-  const guard = window === undefined ? openAnchorTimeGuard() : yesterdayAnchorGuard(window);
-  const program = admitOrdinaryProgram(supportedFailedDeploymentProgram(guard), input, hints);
-  consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
-  const holes = [
-    ...(window === undefined ? [openTimeHole()] : []),
-    ...(ordinaryRemainder(input.text).length > 0 ? [uninterpretedQueryHole()] : []),
-    ...openEndpointHoles(hints)
-  ];
+  consumeMemoryIfNeeded(admitted.program, snapshotId, budget, input.memory);
+  const admittedHoles = predicates.kind === "unknown"
+    ? [...admitted.holes, ...predicates.holes]
+    : admitted.holes;
   return interpretationOf({
-    query_id: identityFor(queryId, denotation(input, {
-      program,
+    query_id: identityFor(queryId, denotation(proposal, {
+      program: admitted.program,
       view,
-      lexical_text: input.text,
+      hypotheses: admitted.hypotheses,
       interpretation_clock: input.interpretation_clock,
-      time_window: window,
+      time_window: timeWindow,
       authorized_scopes: input.authorized_scopes
     })),
-    status: admissionStatus(program, holes, []),
+    status: admissionStatus(admitted.program, admittedHoles, admitted.hypotheses),
     snapshot_id: snapshotId,
-    program,
+    program: admitted.program,
     view,
-    holes,
+    holes: admittedHoles,
+    hypotheses: admitted.hypotheses,
     interpretation_clock: input.interpretation_clock,
-    ...(window === undefined ? {} : { time_window: window })
+    time_window: timeWindow,
+    interpretation_proposal: proposal
   });
-}
-
-function compileLexicalRequest(
-  input: OrdinaryLanguageCompileInput,
-  snapshotId: string,
-  budget: RequestBudget,
-  view: QueryView,
-  queryId: string | undefined,
-  hints: TimeHints
-): QueryInterpretation {
-  const program = EPSILON;
-  const predicate = encodeSourceFilters(sourceFiltersFrom(input, hints));
-  const sourceGuard: Guard | undefined = predicate === undefined ? undefined : {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "query_predicate",
-    verdict: "unresolved", time_scope: "none", predicate_name: predicate
-  };
-  consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
-  const holes = [uninterpretedQueryHole(), ...openEndpointHoles(hints)];
-  const window = closedHintWindow(hints);
-  return interpretationOf({
-    query_id: identityFor(queryId, denotation(input, {
-      program,
-      view,
-      interpretation_clock: input.interpretation_clock,
-      time_window: window,
-      authorized_scopes: input.authorized_scopes,
-      lexical_text: input.text,
-      source_guard: sourceGuard
-    })),
-    status: admissionStatus(program, holes, []),
-    snapshot_id: snapshotId,
-    program,
-    view,
-    holes,
-    source_guard: sourceGuard,
-    interpretation_clock: input.interpretation_clock,
-    ...(window === undefined ? {} : { time_window: window })
-  });
-}
-
-function compileOpenRelations(
-  input: OrdinaryLanguageCompileInput,
-  snapshotId: string,
-  budget: RequestBudget,
-  view: QueryView,
-  queryId: string | undefined,
-  classified: ReturnType<typeof classifyOrdinaryRequest>,
-  yesterday: QueryTimeWindow,
-  hints: TimeHints
-): QueryInterpretation {
-  const window = classified.kind === "supported" || classified.kind === "hypotheses"
-    ? yesterday
-    : closedHintWindow(hints);
-  const compiled = programFromOpenRelations(
-    input.relations ?? [],
-    window === undefined ? undefined : yesterdayAnchorGuard(window)
-  );
-  const parsed = compiled === undefined ? undefined : QueryProgramSchema.safeParse(compiled);
-  if (parsed === undefined || !parsed.success || !sourceFilterPredicatesValid(parsed.data)) {
-    return ordinaryMalformed(input, snapshotId, view);
-  }
-  const program = admitOrdinaryProgram(parsed.data, input, hints);
-  consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
-  const holes = [
-    ...(classified.kind === "partial" && window === undefined ? [openTimeHole()] : []),
-    ...openEndpointHoles(hints)
-  ];
-  return interpretationOf({
-    query_id: identityFor(queryId, denotation(input, {
-      program,
-      view,
-      interpretation_clock: input.interpretation_clock,
-      time_window: window,
-      authorized_scopes: input.authorized_scopes
-    })),
-    status: admissionStatus(program, holes, []),
-    snapshot_id: snapshotId,
-    program,
-    view,
-    holes,
-    interpretation_clock: input.interpretation_clock,
-    ...(window === undefined ? {} : { time_window: window })
-  });
-}
-
-function consumeMemoryIfNeeded(
-  program: QueryProgram,
-  snapshotId: string,
-  budget: RequestBudget,
-  memory: QueryMemoryPort | undefined
-): void {
-  // Pure parse may run earlier; entity reads still require the admitted snapshot pin.
-  if (memory === undefined) return;
-  if (!collectRelations(program).some((relation) =>
-    relation.guard.kind === "source_bound_entity" && relation.guard.entity_id !== undefined
-  )) {
-    return;
-  }
-  memory.readAuthorizedSnapshot({ snapshot_id: snapshotId, budget });
-}
-
-function sourceFilterPredicatesValid(program: QueryProgram): boolean {
-  try {
-    for (const relation of collectRelations(program)) decodeSourceFilters(relation.guard.predicate_name);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function admissionStatus(
-  program: QueryProgram,
-  holes: readonly QueryHole[],
-  hypotheses: readonly QueryHypothesis[]
-): QueryInterpretationStatus {
-  if (interpretQuery(program).kind === "unsupported") return "unsupported";
-  if (hypotheses.length > 0) return "hypotheses";
-  if (holes.some((hole) => hole.status !== "bound")) return "partial";
-  if (collectRelations(program).some(({ guard }) => guard.kind === "query_predicate"
-    && guard.predicate_name !== undefined && !guard.predicate_name.startsWith("source.filters")
-    && guard.verdict === "unresolved")) return "partial";
-  return "resolved";
-}
-
-function interpretationOf(input: {
-  readonly query_id: string;
-  readonly status: QueryInterpretationStatus;
-  readonly snapshot_id: string;
-  readonly program: QueryProgram;
-  readonly source_guard?: Guard;
-  readonly view: QueryView;
-  readonly holes?: readonly QueryHole[];
-  readonly hypotheses?: readonly QueryHypothesis[];
-  readonly interpretation_clock?: string;
-  readonly time_window?: QueryTimeWindow;
-}): QueryInterpretation {
-  return QueryInterpretationSchema.parse({
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    query_id: input.query_id,
-    status: input.status,
-    snapshot_id: input.snapshot_id,
-    program: input.program,
-    ...(input.source_guard === undefined ? {} : { source_guard: input.source_guard }),
-    view: input.view,
-    holes: input.holes ?? [],
-    hypotheses: input.hypotheses ?? [],
-    ...(input.interpretation_clock === undefined
-      ? {}
-      : { interpretation_clock: input.interpretation_clock }),
-    ...(input.time_window === undefined ? {} : { time_window: input.time_window })
-  });
-}
-
-function ordinaryMalformed(
-  input: OrdinaryLanguageCompileInput,
-  snapshotId: string,
-  view: QueryView
-): QueryInterpretation {
-  return interpretationOf({
-    query_id: fallbackQueryId(input.query_id, "malformed"),
-    status: "malformed",
-    snapshot_id: snapshotId,
-    program: EPSILON,
-    view,
-    interpretation_clock: input.interpretation_clock
-  });
-}
-
-function defaultView(): QueryView {
-  return QueryViewSchema.parse({
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    requested_roles: ["requested", "associated"]
-  });
-}
-
-function requiredView(view: QueryView | undefined): QueryView | undefined {
-  if (view === undefined) return defaultView();
-  const parsed = QueryViewSchema.safeParse(view);
-  return parsed.success ? parsed.data : undefined;
-}
-
-function parseItems<T>(
-  values: readonly T[] | undefined,
-  schema: { readonly safeParse: (value: unknown) => { success: true; data: T } | { success: false } }
-): readonly T[] | undefined {
-  if (values === undefined) return [];
-  const parsed: T[] = [];
-  for (const item of values) {
-    const result = schema.safeParse(item);
-    if (!result.success) return undefined;
-    parsed.push(result.data);
-  }
-  return parsed;
-}
-
-function optionalWindow(
-  window: QueryTimeWindow | undefined
-): QueryTimeWindow | undefined | "invalid" {
-  if (window === undefined) return undefined;
-  const parsed = QueryTimeWindowSchema.safeParse(window);
-  return parsed.success ? parsed.data : "invalid";
-}
-
-type TimeHints =
-  | { readonly kind: "none" }
-  | { readonly kind: "window"; readonly window: QueryTimeWindow }
-  | { readonly kind: "partial"; readonly since?: string; readonly until?: string }
-  | { readonly kind: "invalid" };
-
-function compileTimeHints(
-  since: string | undefined,
-  until: string | undefined
-): TimeHints {
-  if (since === undefined && until === undefined) return { kind: "none" };
-  if (since !== undefined && until !== undefined) {
-    const parsed = optionalWindow({ start: since, end: until });
-    return parsed === "invalid" || parsed === undefined
-      ? { kind: "invalid" }
-      : { kind: "window", window: parsed };
-  }
-  const present = since ?? until;
-  if (present === undefined || !IsoDatetimeStringSchema.safeParse(present).success) {
-    return { kind: "invalid" };
-  }
-  return {
-    kind: "partial",
-    ...(since === undefined ? {} : { since }),
-    ...(until === undefined ? {} : { until })
-  };
-}
-
-function closedHintWindow(hints: TimeHints): QueryTimeWindow | undefined {
-  return hints.kind === "window" ? hints.window : undefined;
-}
-
-function openEndpointHoles(hints: TimeHints): readonly QueryHole[] {
-  if (hints.kind !== "partial") return [];
-  if (hints.since !== undefined && hints.until === undefined) {
-    return [{ schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, hole_id: "hole.time.until", variable: "r", status: "open" }];
-  }
-  if (hints.until !== undefined && hints.since === undefined) {
-    return [{ schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, hole_id: "hole.time.since", variable: "r", status: "open" }];
-  }
-  return [];
-}
-
-function admitOrdinaryProgram(
-  program: QueryProgram,
-  input: OrdinaryLanguageCompileInput,
-  hints: TimeHints
-): QueryProgram {
-  return attachSourceFilters(program, sourceFiltersFrom(input, hints));
-}
-
-function sourceFiltersFrom(
-  input: OrdinaryLanguageCompileInput,
-  hints: TimeHints
-): OrdinarySourceFilters {
-  const since = hints.kind === "window" ? hints.window.start : hints.kind === "partial" ? hints.since : input.since;
-  const until = hints.kind === "window" ? hints.window.end : hints.kind === "partial" ? hints.until : input.until;
-  return {
-    ...(input.dimension_filter === undefined || input.dimension_filter.length === 0
-      ? {}
-      : { dimension_filter: input.dimension_filter }),
-    ...(input.domain_tag_filter === undefined || input.domain_tag_filter.length === 0
-      ? {}
-      : { domain_tag_filter: input.domain_tag_filter }),
-    ...(input.time_field === undefined ? {} : { time_field: input.time_field }),
-    ...(since === undefined ? {} : { since }),
-    ...(until === undefined ? {} : { until })
-  };
-}
-
-function explicitQueryId(value: string | undefined): string | undefined | "invalid" {
-  if (value === undefined) return undefined;
-  const parsed = ConditionalFieldIdSchema.safeParse(value);
-  return parsed.success ? parsed.data : "invalid";
-}
-
-function fallbackQueryId(value: string | undefined, fallback: string): string {
-  const parsed = value === undefined ? undefined : ConditionalFieldIdSchema.safeParse(value);
-  return parsed?.success === true ? parsed.data : fallback;
-}
-
-function denotation(
-  input: CompileCommon,
-  parts: Omit<QueryDenotationParts, "interpretation_proposal">
-): QueryDenotationParts {
-  return {
-    ...parts,
-    ...(input.interpretation_proposal === undefined
-      ? {}
-      : { interpretation_proposal: input.interpretation_proposal })
-  };
-}
-
-function boundProposal(
-  proposal: QueryInterpretationProposal | undefined,
-  originalQuery: string
-): QueryInterpretationProposal | undefined | "invalid" {
-  if (proposal === undefined) return undefined;
-  return proposalBindsOriginalQuery(proposal, originalQuery) ? proposal : "invalid";
 }
 
 function typedProgramOrEpsilon(input: QueryCompileInput): QueryProgram {
   if (input.source !== "typed") return EPSILON;
   const parsed = QueryProgramSchema.safeParse(input.program);
   return parsed.success ? parsed.data : EPSILON;
-}
-
-function visitQueryProgram(program: QueryProgram, visit: (node: QueryProgram) => void): void {
-  visit(program);
-  if (program.kind === "sequence") {
-    for (const step of program.steps) visitQueryProgram(step, visit);
-    return;
-  }
-  if (program.kind === "alternative") {
-    for (const option of program.options) visitQueryProgram(option, visit);
-    return;
-  }
-  if (program.kind === "repeat" || program.kind === "closure") {
-    visitQueryProgram(program.body, visit);
-    return;
-  }
-  if (program.kind === "hyperedge") {
-    for (const premise of program.premises) visitQueryProgram(premise, visit);
-  }
-}
-
-function openTimeHole(): QueryHole {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    hole_id: "hole.anchor.time",
-    variable: "r",
-    status: "open"
-  };
-}
-
-function ambiguousEventHypotheses(): readonly QueryHypothesis[] {
-  return [
-    hypothesis("h-failed-deployment", "event", "failed_deployment"),
-    hypothesis("h-unresolved-event", "event", "unresolved")
-  ];
-}
-
-function hypothesis(id: string, variable: string, value: string): QueryHypothesis {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    hypothesis_id: id,
-    bindings: [{
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      variable,
-      value
-    }]
-  };
 }

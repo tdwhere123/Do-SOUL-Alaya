@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   QueryInterpretationSchema,
   type Guard,
@@ -12,10 +13,13 @@ import {
   compileConditionalFieldQuery,
   continuationViewMismatch,
   digestOriginalQuery,
+  FROZEN_SOURCE_PREDICATE_NAMES,
   interpretationIdentity,
   SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
+  UNSUPPORTED_POLICY_QUERY_ID,
   type QueryMemoryPort
 } from "../../../../recall/conditional-field/query/compile-query.js";
+import { UNSUPPORTED_PREDICATE_HOLE_ID } from "../../../../recall/conditional-field/query/source-predicates.js";
 import { decodeSourceFilters, sourceFactsSatisfyFilters } from "../../../../recall/conditional-field/query/ordinary-language.js";
 import {
   completenessForInterpretationStatus,
@@ -530,6 +534,157 @@ describe("conditional-field query compiler", () => {
       ...canonicalContinuation,
       authorized_scopes: ["public"]
     }, associative.view, ["private"])).toBe(true);
+  });
+
+  it("compiles frozen source predicates as query_predicate names", () => {
+    for (const predicateName of FROZEN_SOURCE_PREDICATE_NAMES) {
+      const interpretation = compileTyped(relation("observed_log", "s", "t", {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        kind: "query_predicate",
+        verdict: "unresolved",
+        variable: "t",
+        time_scope: "none",
+        predicate_name: predicateName
+      }));
+      expect(interpretation.status).toBe("resolved");
+      expect(collectRelations(interpretation.program)[0]?.guard).toMatchObject({
+        kind: "query_predicate",
+        predicate_name: predicateName
+      });
+      expect(decodeSourceFilters(predicateName)).toBeUndefined();
+      expect(collectRelations(interpretation.program)[0]?.guard.predicate_name?.startsWith("source.filters"))
+        .toBe(false);
+    }
+  });
+
+  it("keeps an unknown predicate as a hole instead of dropping it into source.filters", () => {
+    const interpretation = compileTyped(relation("observed_log", "s", "t", {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      kind: "query_predicate",
+      verdict: "unresolved",
+      variable: "t",
+      time_scope: "none",
+      predicate_name: "source.not_a_frozen_predicate.v1"
+    }));
+    expect(interpretation.status).toBe("partial");
+    expect(interpretation.holes.some((hole) => hole.hole_id === UNSUPPORTED_PREDICATE_HOLE_ID)).toBe(true);
+    expect(decodeSourceFilters("source.not_a_frozen_predicate.v1")).toBeUndefined();
+    expect(collectRelations(interpretation.program)[0]?.guard.predicate_name)
+      .toBe("source.not_a_frozen_predicate.v1");
+  });
+
+  it("rejects associative execution with incompatible cap domains", () => {
+    const view = {
+      ...defaultView(),
+      enumeration_policy: "associative" as const,
+      cap_contracts: [
+        {
+          domain_id: ASSOCIATION_DOMAIN_ID,
+          transfer_id: "policy.fixture.v1",
+          transfer_version: "1"
+        },
+        {
+          domain_id: "cosine.embedding.v1",
+          transfer_id: "policy.fixture.v1",
+          transfer_version: "1"
+        }
+      ]
+    };
+    const interpretation = compileTyped(deploymentProgram(), { view });
+    expect(interpretation.status).toBe("unsupported");
+    expect(interpretation.query_id).toBe(UNSUPPORTED_POLICY_QUERY_ID);
+    expect(interpretation.view.enumeration_policy).toBe("associative");
+    const cosineOnly = compileTyped(deploymentProgram(), {
+      view: {
+        ...defaultView(),
+        enumeration_policy: "associative",
+        cap_contracts: [{
+          domain_id: "cosine.embedding.v1",
+          transfer_id: "policy.fixture.v1",
+          transfer_version: "1"
+        }]
+      }
+    });
+    expect(cosineOnly.status).toBe("unsupported");
+    expect(cosineOnly.query_id).not.toMatch(/^sha256:/u);
+    const admitted = compileTyped(deploymentProgram(), {
+      view: {
+        ...defaultView(),
+        enumeration_policy: "associative",
+        cap_contracts: [{
+          domain_id: ASSOCIATION_DOMAIN_ID,
+          transfer_id: "policy.fixture.v1",
+          transfer_version: "1"
+        }]
+      }
+    });
+    expect(admitted.status).toBe("resolved");
+    expect(admitted.query_id).not.toBe(UNSUPPORTED_POLICY_QUERY_ID);
+  });
+
+  it("admits a digest-bound proposal onto the interpretation without erasing holes", () => {
+    const text = "xyzzy unrelated request";
+    const digest = digestOriginalQuery(text);
+    const proposalProgram = relation("observed_log", "s", "t", {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      kind: "query_predicate",
+      verdict: "unresolved",
+      variable: "t",
+      time_scope: "none",
+      predicate_name: "source.identity.v1"
+    });
+    const interpretation = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text,
+      interpretation_clock: INTERPRETATION_CLOCK,
+      interpretation_proposal: {
+        schema_version: 1,
+        original_query_digest: digest,
+        producer_id: "compiler.test.v1",
+        program: proposalProgram,
+        conditions: [{
+          schema_version: 1,
+          kind: "query_predicate",
+          verdict: "unresolved",
+          predicate_name: "source.literal.nfc.v1",
+          entity_id: "needle"
+        }]
+      }
+    });
+    expect(interpretation.interpretation_proposal?.original_query_digest).toBe(digest);
+    expect(interpretation.interpretation_proposal?.program).toEqual(proposalProgram);
+    expect(interpretation.program.kind).toBe("relation");
+    expect(collectRelations(interpretation.program)[0]?.guard.predicate_name).toBe("source.identity.v1");
+    expect(interpretation.holes.some((hole) => hole.status !== "bound")).toBe(true);
+    expect(interpretation.status).toBe("partial");
+    const narrow = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget({ page_budget: 1 }),
+      text,
+      interpretation_clock: INTERPRETATION_CLOCK,
+      interpretation_proposal: {
+        schema_version: 1,
+        original_query_digest: digest,
+        producer_id: "compiler.test.v1"
+      }
+    });
+    const wide = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget({ page_budget: 800 }),
+      text,
+      interpretation_clock: INTERPRETATION_CLOCK,
+      interpretation_proposal: {
+        schema_version: 1,
+        original_query_digest: digest,
+        producer_id: "compiler.test.v1"
+      }
+    });
+    expect(narrow.query_id).toBe(wide.query_id);
+    expect(narrow.interpretation_proposal?.producer_id).toBe("compiler.test.v1");
   });
 });
 
