@@ -85,6 +85,30 @@ describe("bounded source-root pages", () => {
     expect(broken.row).toBeNull();
   });
 
+  it("projects retained speaker identity onto source-record roots", () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+    const capsules = new SqliteEvidenceCapsuleRepo(database);
+    const row = records.insert(hashedRecord("workspace-1", "user said hello", "user"));
+    const roots = new SqliteSourceRootRecallReader(records, capsules).page({
+      workspaceId: "workspace-1",
+      limit: 8,
+      nativeLimit: 8,
+      afterCursor: null
+    });
+    const found = roots.rows.find((candidate) => candidate.root_id === row.record_id);
+    expect(found?.role).toBe("user");
+    const lineage = records.insert(hashedRecord("workspace-1", "lineage body", "alaya:garden-turn-evidence:sig"));
+    const lineagePage = new SqliteSourceRootRecallReader(records, capsules).page({
+      workspaceId: "workspace-1",
+      limit: 8,
+      nativeLimit: 8,
+      afterCursor: null
+    });
+    expect(lineagePage.rows.find((candidate) => candidate.root_id === lineage.record_id)?.role).toBeUndefined();
+  });
+
   it("marks a missing root unavailable rather than empty", () => {
     const database = openFieldDatabase();
     tracked.add(database);

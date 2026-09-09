@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  EvidenceHealthState,
   GardenEventType,
   GardenRole,
   GardenTaskKind,
   SignalSource,
 } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
+import {
+  SqliteEvidenceCapsuleRepo,
+  SqliteFieldSourceRecordRepo,
+  SqliteSourceRootRecallReader
+} from "@do-soul/alaya-storage";
 import { buildGardenTaskEvidenceFallbackSignalId } from "../../../garden/support/task-signal-id.js";
 
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
@@ -77,7 +84,7 @@ describe("post-turn extract Garden task", () => {
     expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({ status: "completed" });
     await expect(harness.signalRepo.getById(fallbackId)).resolves.toMatchObject({
       signal_id: fallbackId,
-      raw_payload: { evidence_preservation: { reason: "no_evidence_created" } }
+      raw_payload: { evidence_preservation: { reason: "empty_extraction" } }
     });
   });
 
@@ -204,6 +211,73 @@ describe("post-turn extract Garden task", () => {
       success: false,
       candidate_signals_count: 0
     });
+    await expect(harness.signalRepo.getById(
+      buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1")
+    )).resolves.toMatchObject({
+      object_kind: "source_turn",
+      raw_payload: { evidence_preservation: { reason: "empty_extraction" } }
+    });
+  });
+
+  it("failed compile still leaves a discoverable SQLite source root", async () => {
+    const compile = vi.fn(async () => {
+      throw new Error("provider blew up");
+    });
+    const harness = await createRoutingHarness({
+      provider_kind: "local_heuristics",
+      localCompile: compile,
+      receiveSignal: async (signal) => {
+        const gist = typeof signal.raw_payload === "object"
+          && signal.raw_payload !== null
+          && !Array.isArray(signal.raw_payload)
+          && typeof signal.raw_payload.full_turn_content === "string"
+          ? signal.raw_payload.full_turn_content
+          : "retained original turn";
+        await new SqliteEvidenceCapsuleRepo(harness.database).create({
+          object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          object_kind: "evidence_capsule",
+          schema_version: 1,
+          lifecycle_state: "active",
+          created_at: "2026-05-07T00:10:00.000Z",
+          updated_at: "2026-05-07T00:10:00.000Z",
+          created_by: "user_action",
+          evidence_kind: "conversation_excerpt",
+          semantic_anchor: { topic: "source", keywords: ["source"], summary: gist },
+          event_anchor: null,
+          physical_anchor: null,
+          evidence_health_state: EvidenceHealthState.VERIFIED,
+          gist,
+          excerpt: gist,
+          source_hash: null,
+          run_id: signal.run_id,
+          workspace_id: signal.workspace_id,
+          surface_id: null
+        });
+        return { signal };
+      }
+    });
+    harness.enqueuePostTurnTask();
+
+    await expect(harness.runScheduler()).resolves.toBeUndefined();
+    expect(compile).toHaveBeenCalledTimes(1);
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "failed"
+    });
+
+    const roots = new SqliteSourceRootRecallReader(
+      new SqliteFieldSourceRecordRepo(harness.database, fieldContractSha256),
+      new SqliteEvidenceCapsuleRepo(harness.database)
+    ).page({
+      workspaceId: "workspace-1",
+      limit: 8,
+      nativeLimit: 8,
+      afterCursor: null
+    });
+    expect(roots.rows.some((row) =>
+      row.kind === "evidence_capsule"
+      && row.root_id === "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+      && (row.content ?? "").includes("I prefer pnpm commands")
+    )).toBe(true);
   });
 
   it("host_worker end-to-end: enqueue then MCP claim/complete delivers candidate signals", async () => {
@@ -270,13 +344,16 @@ describe("post-turn extract Garden task", () => {
       status: "completed"
     });
     const signals = await harness.signalService.listByRun("run-1");
-    expect(signals).toHaveLength(1);
-    expect(signals[0]).toMatchObject({
+    expect(signals).toHaveLength(2);
+    expect(signals.find((signal) => signal.object_kind === "memory_entry")).toMatchObject({
       source: SignalSource.GARDEN_COMPILE,
       signal_state: "triaged",
       source_memory_refs: ["memory-a"],
       incompatible_with_refs: ["memory-b"],
       raw_payload: { observation: "user prefers vitest watch mode" }
+    });
+    expect(signals.find((signal) => signal.object_kind === "source_turn")).toMatchObject({
+      signal_id: buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1")
     });
   });
 
@@ -324,8 +401,8 @@ describe("post-turn extract Garden task", () => {
 
     expect(completeResult.status).toBe("completed");
     const signals = await harness.signalService.listByRun("run-1");
-    expect(signals).toHaveLength(1);
-    expect(signals[0]).toMatchObject({
+    expect(signals).toHaveLength(2);
+    expect(signals.find((signal) => signal.object_kind === "memory_entry")).toMatchObject({
       source: SignalSource.GARDEN_COMPILE,
       signal_state: "triaged",
       source_memory_refs: [],
@@ -333,6 +410,9 @@ describe("post-turn extract Garden task", () => {
         observation: "user prefers vitest watch mode",
         source_memory_refs: "legacy metadata, not a graph hint"
       }
+    });
+    expect(signals.find((signal) => signal.object_kind === "source_turn")).toMatchObject({
+      signal_id: buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1")
     });
   });
 
@@ -391,12 +471,17 @@ describe("post-turn extract Garden task", () => {
     await harness.runScheduler();
 
     const signals = await harness.signalService.listByRun("run-1");
-    expect(signals).toEqual([
+    expect(signals).toEqual(expect.arrayContaining([
       expect.objectContaining({
         signal_id: gardenTaskSignalId("post-turn-task-1", 0),
         source: SignalSource.GARDEN_COMPILE,
         signal_state: "triaged"
+      }),
+      expect.objectContaining({
+        signal_id: buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1"),
+        object_kind: "source_turn"
       })
-    ]);
+    ]));
+    expect(signals).toHaveLength(2);
   });
 });

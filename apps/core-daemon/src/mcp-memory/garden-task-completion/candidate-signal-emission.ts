@@ -29,9 +29,13 @@ export async function emitTaskCandidateSignals(
   candidateSignals: readonly CandidateMemorySignal[],
   completionClaimedBy: string
 ): Promise<readonly string[]> {
-  if (postTurnPayload !== null && request.status === "completed") {
+  if (postTurnPayload !== null) {
     return await finalizeExternalPostTurnEvidence(
-      params, row, postTurnPayload, candidateSignals, completionClaimedBy
+      params,
+      row,
+      postTurnPayload,
+      request.status === "completed" ? candidateSignals : [],
+      completionClaimedBy
     );
   }
   const emittedSignalIds: string[] = [];

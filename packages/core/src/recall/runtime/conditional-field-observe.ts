@@ -36,6 +36,7 @@ import {
   type BoundSourceFacts
 } from "../conditional-field/engine/binding-environment.js";
 import { collectRelations } from "../conditional-field/query/compile-query.js";
+import { recordObservedAt, recordSourceRootFacts } from "./observed-source-facts.js";
 export type ObserveFieldInput = Readonly<{
   readonly workspace_id: string;
   readonly query_text: string;
@@ -180,6 +181,7 @@ function observeWithinMemory(
         const seedIds = observed.page.observations.map((row) => row.object_id);
         addSubjects(subjects, seedIds);
         recordObservedAt(observedInput, seedIds, observedAt, sourceFacts);
+        recordSourceRootFacts(observedInput, observed.page.observations, sourceFacts);
         state = applyObserverPage(state, {
           page: observed.page,
           effects: seedEffects(observed.page.observations, interpretation, input.as_of),
@@ -205,12 +207,25 @@ function observeWithinMemory(
         }
         const observed = observeMeasurement(observedInput, interpretation, lease, action, cursors);
         cursors.set(action.region_id, observed.page.cursor);
+        const effects = observed.page.observations.length === 0
+          ? [{
+            observation_id: `${action.region_id}:missing-measurement`,
+            missing_measurement: true
+          }]
+          : observed.page.observations.map((observation) => ({
+            observation_id: observation.observation_id,
+            missing_measurement: true
+          }));
+        missingMeasurement = true;
         state = applyObserverPage(state, {
           page: observed.page,
-          effects: [],
+          effects,
           work: observed.work,
           resume_cursors: resumeCursors(cursors, pairProgress)
         });
+        if (observed.page.outcome.status === "exhausted") {
+          state = closeRegion(state, interpretation, action, cursors, "unknown");
+        }
         continue;
       }
       if (action.action === "relation") {
@@ -521,37 +536,6 @@ function loadStoredRelationKinds(
   const limit = Math.min(32, remainingExploration);
   const kinds = listed({ workspaceId, subject: null, limit });
   return { kinds, charged: Math.min(limit, kinds.length + 1), open: kinds.length === limit };
-}
-
-function recordObservedAt(
-  input: ObserveFieldInput,
-  objectIds: readonly string[],
-  observedAt: Record<string, string>,
-  sourceFacts: Map<string, BoundSourceFacts>
-): void {
-  const source = input.readers.source;
-  if (source === undefined) return;
-  for (const objectId of objectIds) {
-    if (sourceFacts.has(objectId)) continue;
-    const page = source({ workspaceId: input.workspace_id, objectId });
-    const row = page.row;
-    if (row === null) continue;
-    sourceFacts.set(objectId, {
-      object_id: row.object_id,
-      source_revision: row.sourceRevision,
-      ...(row.content === undefined ? {} : { content: row.content }),
-      ...(row.predicates === undefined ? {} : { predicates: row.predicates }),
-      ...(row.observed_at === undefined ? {} : { observed_at: row.observed_at }),
-      ...(row.created_at === undefined ? {} : { created_at: row.created_at }),
-      ...(row.last_used_at === undefined ? {} : { last_used_at: row.last_used_at }),
-      ...(row.dimension === undefined ? {} : { dimension: row.dimension }),
-      ...(row.domain_tags === undefined ? {} : { domain_tags: row.domain_tags }),
-      ...(row.scope_class === undefined ? {} : { scope_class: row.scope_class }),
-      ...(row.evidence_refs === undefined ? {} : { evidence_refs: row.evidence_refs }),
-      ...(row.staged_warnings === undefined ? {} : { staged_warnings: row.staged_warnings })
-    });
-    if (row.observed_at !== undefined) observedAt[objectId] = row.observed_at;
-  }
 }
 
 function seedEffects(

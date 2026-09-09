@@ -118,9 +118,12 @@ describe("external post-turn evidence finalization", () => {
     expect(harness.getGardenTask(taskId)).toMatchObject({ status: "pending" });
   });
 
-  it("allows a failed post-turn task to complete without fabricating evidence", async () => {
+  it("failed post-turn complete retains the original turn and does not mint memory entries", async () => {
     const taskId = "post-turn-failed";
-    const harness = await createGardenMcpHarness({ omitPostTurnSignalReceiver: true });
+    const fallbackId = buildGardenTaskEvidenceFallbackSignalId(taskId);
+    const harness = await createGardenMcpHarness({
+      hasCreatedEvidence: async (result) => result.signal.signal_id === fallbackId
+    });
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
@@ -128,9 +131,23 @@ describe("external post-turn evidence finalization", () => {
       status: "failed"
     });
     expect(harness.getGardenTask(taskId)).toMatchObject({ status: "failed" });
-    await expect(harness.signalRepo.getById(
-      buildGardenTaskEvidenceFallbackSignalId(taskId)
-    )).resolves.toBeNull();
+    await expect(harness.signalRepo.getById(fallbackId)).resolves.toMatchObject({
+      signal_id: fallbackId,
+      object_kind: "source_turn",
+      raw_payload: { evidence_preservation: { reason: "empty_extraction" } }
+    });
+  });
+
+  it("failed post-turn complete without a durable receiver fails closed", async () => {
+    const taskId = "post-turn-failed-no-receiver";
+    const harness = await createGardenMcpHarness({ omitPostTurnSignalReceiver: true });
+    enqueuePostTurnTask(harness, taskId);
+    await claimTask(harness, taskId);
+
+    await expect(completeTask(harness, taskId, [], "failed")).rejects.toThrow(
+      "without a durable signal receiver"
+    );
+    expect(harness.getGardenTask(taskId)).toMatchObject({ status: "pending" });
   });
 });
 

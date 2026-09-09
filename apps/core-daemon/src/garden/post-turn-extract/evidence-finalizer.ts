@@ -33,6 +33,14 @@ export async function finalizePostTurnEvidence(
   return received.signalIds;
 }
 
+export async function receivePostTurnCandidates(
+  input: PostTurnEvidenceFinalizationInput
+): Promise<readonly string[]> {
+  const received = await receiveCandidateSignals(input);
+  await input.beforeReceive?.();
+  return received.signalIds;
+}
+
 function candidatesPreserveOriginalTurn(input: PostTurnEvidenceFinalizationInput): boolean {
   return input.candidates.some((candidate) => {
     const payload = candidate.raw_payload;

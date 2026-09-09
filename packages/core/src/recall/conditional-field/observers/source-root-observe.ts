@@ -49,6 +49,7 @@ export function observeSourceAwareSeed(
     for (const row of page.rows) {
       if (!sourceRootEligible(input, row)) continue;
       if (needle.length > 0 && row.content !== undefined && !sourceLiteralOccurs(row.content, needle)) {
+        if (row.content_complete === false) resourceLimited = true;
         continue;
       }
       const observation = buildTypedObservation(input, {
@@ -120,7 +121,9 @@ export function observeSourceAwareSeed(
     readerAvailable: true,
     ...(hydrationUnavailable
       ? { status: resourceLimited ? "interrupted" as const : "unavailable" as const }
-      : {}),
+      : resourceLimited
+        ? { status: "interrupted" as const }
+        : {}),
     work: workReceipt(workUnits, workUnits, bytes, truncated || hydrationUnavailable)
   });
 }

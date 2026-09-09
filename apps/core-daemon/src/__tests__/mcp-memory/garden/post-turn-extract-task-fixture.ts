@@ -143,6 +143,7 @@ export async function createRoutingHarness(options: {
   readonly officialCompile?: GardenComputeProvider["compile"];
   readonly localCompile?: GardenComputeProvider["compile"];
   readonly hasCreatedEvidence?: PostTurnSignalReceiver["hasCreatedEvidence"];
+  readonly receiveSignal?: PostTurnSignalReceiver["receiveSignal"];
 }): Promise<RoutingHarness> {
   const base = await createSqliteHarnessBase();
   const now = options.now ?? (() => "2026-05-07T00:10:00.000Z");
@@ -192,7 +193,7 @@ export async function createRoutingHarness(options: {
     // receiver models a successful evidence postcondition; production wiring
     // verifies that postcondition against materialization events.
     signalReceiver: {
-      receiveSignal: (signal) => signalService.receiveSignal(signal),
+      receiveSignal: options.receiveSignal ?? ((signal) => signalService.receiveSignal(signal)),
       hasCreatedEvidence: options.hasCreatedEvidence ?? (async () => true)
     } satisfies PostTurnSignalReceiver,
     strongRefService: {

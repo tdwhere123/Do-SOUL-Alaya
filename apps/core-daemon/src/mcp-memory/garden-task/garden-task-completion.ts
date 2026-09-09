@@ -170,8 +170,7 @@ async function completeCandidateSignalTask(
 ): Promise<GardenTaskCompletionResult> {
   const repo = requireGardenTaskRepo(params.deps);
   const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
-  const preservesPostTurnEvidence =
-    row.kind === GardenTaskKind.POST_TURN_EXTRACT && request.status === "completed";
+  const preservesPostTurnEvidence = row.kind === GardenTaskKind.POST_TURN_EXTRACT;
   const completionEnvelopeJson = contentOnlySignals.length > 0 || preservesPostTurnEvidence
     ? buildGardenCompletionEnvelopeJson(row.id, contentOnlySignals)
     : null;

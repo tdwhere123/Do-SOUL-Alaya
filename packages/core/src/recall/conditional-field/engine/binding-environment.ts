@@ -20,8 +20,14 @@ const RECOVERED_BINDINGS = new Map<string, string>();
 
 export type BoundSourceFacts = Readonly<{
   readonly object_id: string;
+  readonly workspace_id?: string;
+  readonly root_kind?: string;
   readonly source_revision?: string;
   readonly content?: string;
+  readonly role?: string;
+  readonly event_time?: string | null;
+  readonly evidence_object_id?: string | null;
+  readonly evidence_verified?: boolean;
   readonly observed_at?: string;
   readonly created_at?: string;
   readonly last_used_at?: string | null;
@@ -209,9 +215,14 @@ function evaluateQueryPredicate(
     const bound = id === undefined ? undefined : facts.get(id);
     return evaluateFrozenSourcePredicate(classified.name, guard, bound === undefined ? undefined : {
       root_id: bound.object_id,
+      workspace_id: bound.workspace_id,
+      root_kind: bound.root_kind,
       source_version: bound.source_revision,
       content: bound.content,
-      event_time: undefined,
+      role: bound.role,
+      event_time: bound.event_time,
+      evidence_object_id: bound.evidence_object_id,
+      evidence_verified: bound.evidence_verified,
       created_at: bound.created_at,
       last_used_at: bound.last_used_at
     });

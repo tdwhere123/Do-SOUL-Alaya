@@ -36,7 +36,8 @@ import {
 import {
   encodeBindingContext,
   evaluateGuard,
-  parseBindingContext
+  parseBindingContext,
+  type BoundSourceFacts
 } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import { evaluateFrozenSourcePredicate } from "../../../../recall/conditional-field/query/source-predicates.js";
 import { INTERPRETATION_CLOCK, SNAPSHOT_ID, defaultBudget, defaultView } from "../reference/deployment.fixture.js";
@@ -326,6 +327,77 @@ describe("admission, binding, measurement, and evidence identities", () => {
       || missingVector.last_observer_status === "unavailable"
       || missingVector.last_observer_status === "not_applicable"
       || missingVector.last_observer_status === "unknown").toBe(true);
+  });
+
+  it("wired embeddingIds emit missing_measurement effects instead of empty completion", () => {
+    const observed = observeField(
+      interpretation(relation("observed_log", "x", "y")),
+      {
+        ...input([], {}),
+        readers: {
+          ...input([], {}).readers,
+          embeddingIds: () => ({
+            objectIds: ["emb-1"],
+            rowVisits: 1,
+            metadataUtf8Bytes: 8,
+            truncated: false,
+            committedThrough: "emb-1"
+          })
+        }
+      }
+    );
+    expect(observed.residuals.some((region) =>
+      region.kind === "binding" && region.status === "unknown"
+    )).toBe(true);
+    expect(observed.last_observer_status).not.toBe("exhausted");
+    const emptyPage = observeField(
+      interpretation(relation("observed_log", "x", "y")),
+      {
+        ...input([], {}),
+        readers: {
+          ...input([], {}).readers,
+          embeddingIds: () => ({
+            objectIds: [],
+            rowVisits: 0,
+            metadataUtf8Bytes: 0,
+            truncated: false,
+            committedThrough: null
+          })
+        }
+      }
+    );
+    expect(emptyPage.residuals.some((region) =>
+      region.kind === "binding" && region.status === "unknown"
+    )).toBe(true);
+    expect(emptyPage.last_observer_status).not.toBe("exhausted");
+  });
+
+  it("engine frozen identity can transfer on bound source facts", () => {
+    const facts = new Map<string, BoundSourceFacts>([[
+      "root-1",
+      {
+        object_id: "root-1",
+        workspace_id: "ws",
+        root_kind: "source_record",
+        source_revision: "rev-1"
+      }
+    ]]);
+    const guard: Guard = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      kind: "query_predicate",
+      verdict: "unresolved",
+      variable: "y",
+      time_scope: "none",
+      predicate_name: "source.identity.v1",
+      entity_id: "root-1"
+    };
+    expect(evaluateGuard(guard, new Map([["y", "root-1"]]), facts, {
+      sourceId: "seed",
+      targetId: "root-1"
+    })).toBe("true");
+    expect(evaluateGuard(guard, new Map([["y", "root-1"]]), new Map([
+      ["root-1", { object_id: "root-1", source_revision: "rev-1" }]
+    ]), { sourceId: "seed", targetId: "root-1" })).toBe("unresolved");
   });
 
   it("unmatched routing_only is discovery, not a compiled product or reseed", () => {

@@ -21,7 +21,10 @@ import type {
 import { buildGardenTaskSignalId } from "../support/task-signal-id.js";
 import type { VerifiedDeliverySourceObservation } from "../../runtime/recall-materialization/recall-materialization-source-receipt.js";
 import type { PostTurnSignalReceiver } from "../post-turn-extract/signal-receiver.js";
-import { finalizePostTurnEvidence } from "../post-turn-extract/evidence-finalizer.js";
+import {
+  finalizePostTurnEvidence,
+  receivePostTurnCandidates
+} from "../post-turn-extract/evidence-finalizer.js";
 import {
   buildPostTurnContent,
   buildPostTurnConversationMessages,
@@ -223,19 +226,7 @@ async function emitPostTurnExtractSignals(
     readonly signalReceiver: NonNullable<PostTurnExtractRuntimeInput["signalReceiver"]>;
   }
 ): Promise<readonly string[]> {
-  const candidateSignals = await compilePostTurnExtractTask(
-    provider,
-    payload,
-    payload.source_observation
-  );
-  const stableCandidates = candidateSignals.map((signal, index) =>
-    CandidateMemorySignalSchema.parse({
-      ...signal,
-      signal_id: buildGardenTaskSignalId(row.id, index),
-      source_observation: payload.source_observation
-    })
-  );
-  return await finalizePostTurnEvidence({
+  const retainInput = {
     taskId: row.id,
     workspaceId: payload.workspace_id,
     runId: payload.run_id,
@@ -243,14 +234,34 @@ async function emitPostTurnExtractSignals(
     turnContent: buildPostTurnContent(payload),
     turnMessages: buildPostTurnConversationMessages(payload),
     sourceObservation: payload.source_observation,
-    candidates: stableCandidates,
     signalReceiver: input.signalReceiver,
     beforeReceive: async () => await refreshPostTurnExtractClaim(
       input.gardenTaskRepo,
       row.id,
       input.now
     )
+  };
+  // Retain the admitted original before optional extract can throw.
+  const retainedIds = await finalizePostTurnEvidence({
+    ...retainInput,
+    candidates: []
   });
+  const candidateSignals = await compilePostTurnExtractTask(
+    provider,
+    payload,
+    payload.source_observation
+  );
+  const extraIds = await receivePostTurnCandidates({
+    ...retainInput,
+    candidates: candidateSignals.map((signal, index) =>
+      CandidateMemorySignalSchema.parse({
+        ...signal,
+        signal_id: buildGardenTaskSignalId(row.id, index),
+        source_observation: payload.source_observation
+      })
+    )
+  });
+  return extraIds.length > 0 ? extraIds : retainedIds;
 }
 
 async function refreshPostTurnExtractClaim(

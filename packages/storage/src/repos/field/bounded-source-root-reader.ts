@@ -19,6 +19,7 @@ import type { FieldSourceRecordRow } from "./ports.js";
 const PAGE_MAX = 512;
 const DEFAULT_BYTE_LIMIT = 65_536;
 const SHA256_PREFIX = "sha256:";
+const SPEAKER_ROLES = new Set(["user", "assistant", "system"]);
 
 export type SourceRootKind = "source_record" | "evidence_capsule";
 
@@ -289,6 +290,7 @@ function mapRecord(
     digest: row.content_digest,
     evidence_object_id: row.evidence_object_id,
     event_time: row.event_time,
+    ...(SPEAKER_ROLES.has(row.source_id) ? { role: row.source_id } : {}),
     content: chunk.text,
     content_start: chunk.start,
     content_end: chunk.end,
