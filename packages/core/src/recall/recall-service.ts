@@ -41,9 +41,10 @@ export type ConditionalFieldRecallParams = RecallExecutionParams & Readonly<{
   readonly payload_continuation?: PayloadContinuationRequest;
 }>;
 
-export type { ObserverReaders };
+export type { ObserverReaders, StoredEmbeddingVector, StoredPairMeasurement } from "./conditional-field/observers/observe.js";
 export {
   applyUtf8HydrateToSourceRootPage,
+  hasMeasurementProducer,
   toSourceObserverRow,
   toSourceRootObserverRow
 } from "./conditional-field/observers/observe.js";

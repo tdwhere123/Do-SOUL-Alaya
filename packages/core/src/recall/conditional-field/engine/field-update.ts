@@ -41,6 +41,7 @@ import type {
   BindableState,
   FieldClosureFacts,
   FieldEngineState,
+  FieldMeasurement,
   FieldObservationEffect,
   ObserverConsumption,
   RemainingWork
@@ -105,6 +106,7 @@ export function absorbObservations(
 ): BindableState {
   const priorIds = new Set(state.observations.map((row) => row.observation_id));
   const observations = [...state.observations];
+  const measurements = [...state.measurements];
   const seeds = [...state.seeds];
   const guaranteedSeeds = [...state.guaranteed_seeds];
   const transitions = [...state.transitions];
@@ -139,6 +141,7 @@ export function absorbObservations(
   remainingExploration = absorbEffects(
     consumption,
     priorIds,
+    measurements,
     seeds,
     guaranteedSeeds,
     transitions,
@@ -171,6 +174,7 @@ export function absorbObservations(
     memory_exhausted: memoryExhausted,
     remaining_work: remainingWork,
     observations: Object.freeze(observations),
+    measurements: Object.freeze(measurements),
     seeds: mergedSeeds,
     guaranteed_seeds: mergeSeeds(guaranteedSeeds),
     transitions: mergedTransitions,
@@ -245,9 +249,27 @@ function absorbPageObservations(
   }
 }
 
+function absorbMeasurement(
+  effect: FieldObservationEffect,
+  measurements: FieldMeasurement[],
+  retainedIds: Set<string>,
+  quota: MemoryQuota
+): void {
+  if (effect.raw_measurement === undefined || retainedIds.has(effect.observation_id)) return;
+  const row: FieldMeasurement = {
+    observation_id: effect.observation_id,
+    raw: effect.raw_measurement,
+    cap: effect.projected_cap ?? { status: "inapplicable" }
+  };
+  if (!retainPayload(row, quota)) return;
+  retainedIds.add(row.observation_id);
+  measurements.push(row);
+}
+
 function absorbEffects(
   consumption: ObserverConsumption,
   priorIds: ReadonlySet<string>,
+  measurements: FieldMeasurement[],
   seeds: SeedActivation[],
   guaranteedSeeds: SeedActivation[],
   transitions: Transition[],
@@ -261,8 +283,10 @@ function absorbEffects(
   quota: MemoryQuota
 ): number {
   let exploration = remainingExploration;
+  const retainedMeasurementIds = new Set(measurements.map((row) => row.observation_id));
   for (const effect of consumption.effects ?? []) {
     if (priorIds.has(effect.observation_id)) continue;
+    absorbMeasurement(effect, measurements, retainedMeasurementIds, quota);
     if (effect.seed !== undefined && retainPayload(effect.seed, quota)) {
       seeds.push(effect.seed);
       guaranteedSeeds.push(effect.seed);

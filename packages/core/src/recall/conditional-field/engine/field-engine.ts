@@ -10,7 +10,9 @@ import {
   type ObserverAction,
   type ObserverPage,
   type ObserverStatus,
+  type ProjectedCap,
   productSubjectId,
+  type RawMeasurement,
   type ProductStateKey,
   type Proposition,
   type QueryInterpretation,
@@ -56,9 +58,17 @@ import {
   residualWorkRegions
 } from "./field-update.js";
 
+export type FieldMeasurement = Readonly<{
+  readonly observation_id: string;
+  readonly raw: RawMeasurement;
+  readonly cap: ProjectedCap;
+}>;
+
 export type FieldObservationEffect = Readonly<{
   readonly observation_id: string;
   readonly missing_measurement?: boolean;
+  readonly raw_measurement?: RawMeasurement;
+  readonly projected_cap?: ProjectedCap;
   readonly unresolved_guard?: boolean;
   readonly seed?: SeedActivation;
   readonly transition?: Transition;
@@ -127,6 +137,7 @@ export type FieldEngineState = Readonly<{
   readonly identity_spool: readonly ProductStateKey[];
   readonly charged_identity_ids: readonly string[];
   readonly observations: readonly TypedObservation[];
+  readonly measurements: readonly FieldMeasurement[];
   readonly observed_relations?: readonly RelationObserverRow[];
   readonly source_facts?: Readonly<Record<string, BoundSourceFacts>>;
   readonly grounding_progress?: GroundingProgress;
@@ -203,6 +214,7 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     identity_spool: [],
     charged_identity_ids: [],
     observations: [],
+    measurements: [],
     seeds,
     guaranteed_seeds: seeds,
     transitions,
@@ -395,6 +407,7 @@ function rejectedField(
     identity_spool: [],
     charged_identity_ids: [],
     observations: [],
+    measurements: [],
     seeds: mergeSeeds(input.seeds ?? []),
     guaranteed_seeds: mergeSeeds(input.seeds ?? []),
     transitions: mergeTransitions(input.transitions ?? []),

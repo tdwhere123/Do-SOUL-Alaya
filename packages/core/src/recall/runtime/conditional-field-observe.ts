@@ -16,6 +16,8 @@ import {
   type RelationObserverRow,
   type SourceObserverPage
 } from "../conditional-field/observers/observe.js";
+import { hasMeasurementProducer } from "../conditional-field/observers/measure-stored.js";
+import { measurementEffectsFor, measurementIsMissing } from "./measurement-effects.js";
 import {
   applyObserverPage,
   createConditionalField,
@@ -88,7 +90,7 @@ export function observeField(
   input: ObserveFieldInput
 ): FieldEngineState {
   const residuals = openResiduals(
-    input.readers.embeddingIds !== undefined,
+    hasMeasurementProducer(input.readers),
     programNeedsGuardWork(interpretation.program)
   );
   const initial = startObservedField(interpretation, input, residuals);
@@ -213,7 +215,7 @@ function observeWithinMemory(
         continue;
       }
       if (action.action === "measurement") {
-        if (observedInput.readers.embeddingIds === undefined) {
+        if (!hasMeasurementProducer(observedInput.readers)) {
           state = closeRegion(
             state,
             interpretation,
@@ -225,16 +227,8 @@ function observeWithinMemory(
         }
         const observed = observeMeasurement(observedInput, interpretation, lease, action, cursors);
         cursors.set(action.region_id, observed.page.cursor);
-        const effects = observed.page.observations.length === 0
-          ? [{
-            observation_id: `${action.region_id}:missing-measurement`,
-            missing_measurement: true
-          }]
-          : observed.page.observations.map((observation) => ({
-            observation_id: observation.observation_id,
-            missing_measurement: true
-          }));
-        missingMeasurement = true;
+        const effects = measurementEffectsFor(observed);
+        if (measurementIsMissing(effects)) missingMeasurement = true;
         state = applyObserverPage(state, {
           page: observed.page,
           effects,
@@ -242,7 +236,13 @@ function observeWithinMemory(
           resume_cursors: resumeCursors(cursors, pairProgress)
         });
         if (observed.page.outcome.status === "exhausted") {
-          state = closeRegion(state, interpretation, action, cursors, "unknown");
+          state = closeRegion(
+            state,
+            interpretation,
+            action,
+            cursors,
+            missingMeasurement ? "unknown" : "exhausted"
+          );
         }
         continue;
       }
@@ -457,6 +457,7 @@ function observeMeasurement(
     query: interpretation,
     workspace_id: input.workspace_id,
     readers: input.readers,
+    seed_query: input.query_text,
     as_of: input.as_of,
     ...pinExpectation(input)
   });

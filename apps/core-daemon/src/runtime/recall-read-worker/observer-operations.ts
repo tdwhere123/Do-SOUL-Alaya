@@ -17,7 +17,8 @@ import {
   toSourceObserverRow,
   toSourceRootObserverRow,
   type ConditionalFieldRecallPortResult,
-  type ObserverReaders
+  type ObserverReaders,
+  type StoredEmbeddingVector
 } from "@do-soul/alaya-core";
 import {
   SqliteEvidenceCapsuleRepo,
@@ -28,6 +29,11 @@ import {
   SqliteSourceRootRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { decodeValidEmbeddingBlob } from "../../../../../packages/storage/src/repos/memory/embedding-vector-validity.js";
+import {
+  BOUNDED_EMBEDDING_INDEX_SQL,
+  readBoundedEmbeddingIds
+} from "../../../../../packages/storage/src/repos/memory/reads/memory-embedding-bounded-read.js";
 import { asPayload, readString } from "./payload-readers.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 
@@ -200,7 +206,126 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
       }
       return kinds;
     },
-    snapshotPin: (workspaceId) => projection.observablePin(workspaceId)
+    snapshotPin: (workspaceId) => projection.observablePin(workspaceId),
+    ...storedMeasurementReaders(database)
+  };
+}
+
+type StoredVectorRow = Readonly<{
+  readonly object_id: string;
+  readonly provider_kind: string;
+  readonly model_id: string;
+  readonly schema_version: number;
+  readonly dimensions: number;
+  readonly content_hash: string;
+  readonly embedding_blob: Buffer;
+}>;
+
+function storedMeasurementReaders(database: StorageDatabase): Pick<ObserverReaders, "embeddingIds" | "measureStoredPair"> {
+  database.connection.exec(BOUNDED_EMBEDDING_INDEX_SQL);
+  const profileOf = database.connection.prepare(
+    `SELECT provider_kind, model_id, schema_version FROM memory_embeddings
+     WHERE workspace_id = ? AND vector_valid = 1
+     ORDER BY object_id ASC LIMIT 1`
+  );
+  const objectVector = database.connection.prepare(
+    `SELECT object_id, provider_kind, model_id, schema_version, dimensions, content_hash, embedding_blob
+     FROM memory_embeddings
+     WHERE workspace_id = ? AND object_id = ? AND vector_valid = 1`
+  );
+  const queryVector = database.connection.prepare(
+    `SELECT object_id, provider_kind, model_id, schema_version, dimensions, content_hash, embedding_blob
+     FROM memory_embeddings
+     WHERE workspace_id = ? AND content_hash = ? AND vector_valid = 1
+       AND provider_kind = ? AND model_id = ? AND schema_version = ? AND dimensions = ?
+     ORDER BY object_id ASC LIMIT 1`
+  );
+  return {
+    embeddingIds: (input) => {
+      const maxRows = Math.min(512, Math.max(0, input.maxRows));
+      if (maxRows === 0) {
+        return {
+          objectIds: [],
+          rowVisits: 0,
+          metadataUtf8Bytes: 0,
+          truncated: true,
+          committedThrough: input.afterObjectId
+        };
+      }
+      const profile = profileOf.get(input.workspaceId) as {
+        readonly provider_kind: string;
+        readonly model_id: string;
+        readonly schema_version: number;
+      } | undefined;
+      if (profile === undefined) {
+        return {
+          objectIds: [],
+          rowVisits: 0,
+          metadataUtf8Bytes: 0,
+          truncated: false,
+          committedThrough: input.afterObjectId
+        };
+      }
+      const page = readBoundedEmbeddingIds(database, input.workspaceId, {
+        providerKind: profile.provider_kind,
+        modelId: profile.model_id,
+        schemaVersion: profile.schema_version,
+        maxRows,
+        maxMetadataUtf8Bytes: 256
+      }, input.afterObjectId);
+      return {
+        objectIds: page.objectIds,
+        rowVisits: page.rowVisits,
+        metadataUtf8Bytes: page.metadataUtf8Bytes,
+        truncated: page.truncated,
+        committedThrough: page.committedThrough
+      };
+    },
+    measureStoredPair: (input) => {
+      const objectRow = objectVector.get(input.workspaceId, input.objectId) as StoredVectorRow | undefined;
+      const object = objectRow === undefined ? null : vectorFromRow(objectRow);
+      if (objectRow === undefined || object === null) {
+        return {
+          object: null,
+          query: null,
+          objectStatus: objectRow === undefined ? "missing" : "unavailable",
+          queryStatus: "missing",
+          rowVisits: 1,
+          bytesRead: 0
+        };
+      }
+      const queryRow = queryVector.get(
+        input.workspaceId,
+        input.queryDigest,
+        object.provider_kind,
+        object.model_id,
+        object.schema_version,
+        object.dimensions
+      ) as StoredVectorRow | undefined;
+      const query = queryRow === undefined ? null : vectorFromRow(queryRow);
+      return {
+        object,
+        query,
+        objectStatus: "ready",
+        queryStatus: query === null ? (queryRow === undefined ? "missing" : "unavailable") : "ready",
+        rowVisits: 2,
+        bytesRead: objectRow.embedding_blob.byteLength + (queryRow?.embedding_blob.byteLength ?? 0)
+      };
+    }
+  };
+}
+
+function vectorFromRow(row: StoredVectorRow): StoredEmbeddingVector | null {
+  const embedding = decodeValidEmbeddingBlob(row.embedding_blob, row.dimensions);
+  if (embedding === null) return null;
+  return {
+    object_id: row.object_id,
+    provider_kind: row.provider_kind,
+    model_id: row.model_id,
+    schema_version: row.schema_version,
+    dimensions: row.dimensions,
+    content_hash: row.content_hash,
+    embedding
   };
 }
 

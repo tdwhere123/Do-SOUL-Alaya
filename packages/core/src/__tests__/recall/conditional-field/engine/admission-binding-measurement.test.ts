@@ -382,6 +382,59 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(emptyPage.last_observer_status).not.toBe("exhausted");
   });
 
+  it("produces measured raw from a stored pair without using cosine as cap milligrades", () => {
+    const content = `sha256:${"b".repeat(64)}`;
+    const object = {
+      object_id: "emb-1",
+      model_id: "stored-fixture",
+      provider_kind: "openai",
+      schema_version: 1,
+      dimensions: 2,
+      content_hash: content,
+      embedding: new Float32Array([1, 0])
+    };
+    const query = { ...object, object_id: "query", embedding: new Float32Array([1, 0]) };
+    const request = {
+      ...input([], {}),
+      readers: {
+        ...input([], {}).readers,
+        embeddingIds: () => ({
+          objectIds: ["emb-1"],
+          rowVisits: 1,
+          metadataUtf8Bytes: 8,
+          truncated: false,
+          committedThrough: "emb-1"
+        }),
+        measureStoredPair: () => ({
+          object,
+          query,
+          objectStatus: "ready" as const,
+          queryStatus: "ready" as const,
+          rowVisits: 2,
+          bytesRead: 16
+        })
+      }
+    };
+    const observed = observeField(interpretation(relation("observed_log", "x", "y")), request);
+    expect(observed.observations.some((observation) =>
+      observation.object_id === "emb-1" && observation.association_milligrades === undefined
+    )).toBe(true);
+    expect(observed.residuals.some((region) =>
+      region.kind === "binding" && region.status === "unknown"
+    )).toBe(false);
+    const measured = observed.observations.find((observation) => observation.object_id === "emb-1");
+    expect(measured?.association_milligrades).not.toBe(1);
+    expect(measured?.association_milligrades).not.toBe(950);
+    const retained = observed.measurements.find((row) =>
+      row.raw.status === "measured" && row.raw.referent.kind === "memory_entry"
+        && row.raw.referent.object_id === "emb-1"
+    );
+    expect(retained?.raw.status).toBe("measured");
+    if (retained?.raw.status !== "measured") throw new Error("expected retained measured raw");
+    expect(retained.raw.raw).toBe(1);
+    expect(retained.cap.status).toBe("inapplicable");
+  });
+
   it("engine frozen identity can transfer on bound source facts", () => {
     const facts = new Map<string, BoundSourceFacts>([[
       "root-1",

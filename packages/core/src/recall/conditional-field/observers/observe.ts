@@ -25,6 +25,18 @@ import {
 } from "./observation-admission.js";
 import { hydrateUtf8Chunk } from "../../../memory/evidence-create/source-utf8-hydrate.js";
 import { observeSourceAwareSeed } from "./source-root-observe.js";
+import {
+  observeStoredMeasurement,
+  type ObservationMeasurement,
+  type StoredPairMeasurement
+} from "./measure-stored.js";
+
+export type {
+  ObservationMeasurement,
+  StoredEmbeddingVector,
+  StoredPairMeasurement
+} from "./measure-stored.js";
+export { hasMeasurementProducer, queryDigestOf } from "./measure-stored.js";
 
 export type LexicalObserverPage = Readonly<{
   readonly ids: readonly string[];
@@ -189,6 +201,11 @@ export type ObserverReaders = Readonly<{
     readonly afterObjectId: string | null;
     readonly maxRows: number;
   }>) => EmbeddingObserverPage;
+  readonly measureStoredPair?: (input: Readonly<{
+    readonly workspaceId: string;
+    readonly objectId: string;
+    readonly queryDigest: string;
+  }>) => StoredPairMeasurement;
 }>;
 
 export type ObserverWorkReceipt = Readonly<{
@@ -226,6 +243,7 @@ export const DEFAULT_SOURCE_BYTE_LIMIT = 65_536;
 export type ObserverActionResult = Readonly<{
   readonly page: ObserverPage;
   readonly work: ObserverWorkReceipt;
+  readonly measurements?: readonly ObservationMeasurement[];
 }>;
 
 const SCHEMA = CONDITIONAL_FIELD_SCHEMA_VERSION;
@@ -368,7 +386,7 @@ function observeAction(input: ObserveConditionalFieldInput): ObserverActionResul
     case "relation":
       return observeRelation(input);
     case "measurement":
-      return observeMeasurement(input);
+      return observeStoredMeasurement(input);
   }
 }
 
@@ -469,26 +487,6 @@ function observeRelation(input: ObserveConditionalFieldInput): ObserverActionRes
     identityKind: "assertion",
     rows,
     commitThrough: page.committedThrough ?? input.cursor.committed_through
-  });
-}
-
-function observeMeasurement(input: ObserveConditionalFieldInput): ObserverActionResult {
-  const embeddingIds = input.readers.embeddingIds;
-  if (embeddingIds === undefined) {
-    return unavailableOrNotApplicable(input, "unavailable");
-  }
-  const page = embeddingIds({
-    workspaceId: input.workspace_id,
-    afterObjectId: input.cursor.committed_through,
-    maxRows: pageLimit(input)
-  });
-  return collectObserved(input, {
-    identities: page.objectIds,
-    truncated: page.truncated,
-    nativeVisits: page.rowVisits,
-    bytesRead: page.metadataUtf8Bytes,
-    identityKind: "embedding",
-    commitThrough: page.committedThrough ?? page.objectIds.at(-1) ?? input.cursor.committed_through
   });
 }
 
@@ -765,6 +763,7 @@ function openOrStatus(status: ObserverStatus): ObserverStatus {
 }
 
 function regionKind(action: ObserverAction["action"]): CoverageRegionKind {
+  if (action === "measurement") return "binding";
   if (action === "adjacency" || action === "relation") return "adjacency";
   return "seed";
 }

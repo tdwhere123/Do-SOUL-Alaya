@@ -61,7 +61,12 @@ describe("query-only field hydration equivalence", () => {
       "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
     expect(dispatched.index).toEqual(direct.index);
     expect(dispatched.previews).toEqual(direct.previews);
-    expect(dispatched.index.entries.map((entry) => entry.object_id)).toEqual([objectId]);
+    expect(dispatched.index.entries.map((entry) => entry.target.kind)).toEqual([
+      "source_evidence",
+      "memory_entry"
+    ]);
+    expect(dispatched.index.entries.find((entry) => entry.target.kind === "memory_entry")?.object_id)
+      .toBe(objectId);
     expect(dispatched.previews[objectId]).toContain("nebulapivot");
     expect(fixture.queryOnly.connection.pragma("query_only", { simple: true })).toBe(1);
   });

@@ -13,7 +13,7 @@ describe("native source publication and conditional Recall", () => {
     const payload = conditionalRecallPayload("nebulapivot");
     const empty = await dispatchQueryOnly(pair.queryOnlyRuntime, "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
     expect(empty.index.entries).toEqual([]);
-    expect(empty.index.completeness.observed_coverage).toBe("exhausted_empty");
+    expect(empty.index.completeness.observed_coverage).toBe("unknown");
     await persistConditionalSource(pair.writer, MEMORY_ID, "nebulapivot native source");
     const published = await dispatchQueryOnly(pair.queryOnlyRuntime, "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
     expect(published.index.entries.map((entry) => entry.object_id)).toEqual([MEMORY_ID]);
