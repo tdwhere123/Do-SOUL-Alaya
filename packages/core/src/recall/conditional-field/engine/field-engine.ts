@@ -160,6 +160,7 @@ export type FieldEngineState = Readonly<{
   readonly resume_cursors: Readonly<Record<string, string | null>>;
   readonly pair_progress: Readonly<Record<string, string | null>>;
   readonly resume_subjects: readonly string[];
+  readonly discoveries: readonly RoutingDiscovery[];
   readonly support_work_status?: "complete" | "open";
   readonly closure: FieldClosureFacts;
 }>;
@@ -219,7 +220,8 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     last_observer_status: undefined,
     resume_cursors: {},
     pair_progress: {},
-    resume_subjects: []
+    resume_subjects: [],
+    discoveries: []
   });
 }
 
@@ -412,6 +414,7 @@ function rejectedField(
     resume_cursors: {},
     pair_progress: {},
     resume_subjects: [],
+    discoveries: [],
     closure: {
       propagation: "open",
       observation: "open",

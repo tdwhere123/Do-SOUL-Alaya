@@ -61,7 +61,7 @@ export const SnapshotReadLeaseSchema = z
   .strict()
   .readonly();
 
-export const CoverageRegionKindSchema = z.enum(["seed", "adjacency", "guard", "binding"]);
+export const CoverageRegionKindSchema = z.enum(["seed", "adjacency", "guard", "binding", "discovery"]);
 
 export const CoverageRegionSchema = z
   .object({

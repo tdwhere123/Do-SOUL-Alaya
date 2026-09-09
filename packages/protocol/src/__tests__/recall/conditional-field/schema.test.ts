@@ -6,6 +6,8 @@ import {
   FacetModeSchema,
   CompletenessStatusSchema,
   ConditionalFieldSha256DigestSchema,
+  CoverageRegionKindSchema,
+  CoverageRegionSchema,
   GuardKindSchema,
   GuardSchema,
   InformationIndexSchema,
@@ -283,6 +285,19 @@ describe("conditional-field schemas", () => {
     expect(CompletenessStatusSchema.parse("invalidated")).toBe("invalidated");
     expect(ObserverStatusSchema.parse("cancelled")).toBe("cancelled");
     expect(ObserverStatusSchema.parse("unknown")).toBe("unknown");
+    expect(CoverageRegionKindSchema.options).toEqual([
+      "seed",
+      "adjacency",
+      "guard",
+      "binding",
+      "discovery"
+    ]);
+    expect(CoverageRegionSchema.parse({
+      schema_version: 1,
+      region_id: "discovery",
+      kind: "discovery",
+      status: "open"
+    }).kind).toBe("discovery");
   });
 
   it("keeps an exclusive ownership ledger and ordinary-language admission statuses", () => {

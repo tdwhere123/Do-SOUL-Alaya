@@ -26,6 +26,7 @@ import { recoveredBindingSnapshot } from "./binding-environment.js";
 import { joinDerivation, mergeDerivations } from "./path-derivation.js";
 import {
   collectIdentities,
+  mergeDiscoveries,
   mergeSeeds,
   mergeTransitions,
   observationIsGuaranteed,
@@ -35,6 +36,7 @@ import {
   transitionKey,
   tryCompleteHyperedge
 } from "./path-composition.js";
+import type { RoutingDiscovery } from "./path-routing.js";
 import type {
   BindableState,
   FieldClosureFacts,
@@ -47,6 +49,7 @@ import type {
 export const KIND_PRIORITY: Readonly<Record<CoverageRegion["kind"], number>> = {
   seed: 0,
   adjacency: 1,
+  discovery: 1,
   guard: 2,
   binding: 3
 };
@@ -54,6 +57,7 @@ export const KIND_PRIORITY: Readonly<Record<CoverageRegion["kind"], number>> = {
 export const ACTION_BY_KIND: Readonly<Record<CoverageRegion["kind"], "seed" | "adjacency" | "relation" | "measurement">> = {
   seed: "seed",
   adjacency: "adjacency",
+  discovery: "adjacency",
   guard: "relation",
   binding: "measurement"
 };
@@ -107,6 +111,7 @@ export function absorbObservations(
   const guaranteedTransitions = [...state.guaranteed_transitions];
   const facets = [...state.facets];
   const derivations = [...state.derivations];
+  const discoveries = [...state.discoveries];
   const transitionDerivations = { ...state.transition_derivations };
   let remainingExploration = state.remaining_exploration;
   let remainingMemory = state.remaining_memory_bytes;
@@ -116,7 +121,7 @@ export function absorbObservations(
     remaining: remainingMemory,
     exhausted: memoryExhausted,
     remainingWork,
-    retained: new Set([...state.observations, ...state.seeds, ...state.transitions, ...state.facets, ...state.derivations]
+    retained: new Set([...state.observations, ...state.seeds, ...state.transitions, ...state.facets, ...state.derivations, ...state.discoveries]
       .map((value) => JSON.stringify(value)))
   };
   const effectSeedIds = new Set(
@@ -140,6 +145,7 @@ export function absorbObservations(
     guaranteedTransitions,
     facets,
     derivations,
+    discoveries,
     transitionDerivations,
     remainingExploration,
     remainingWork,
@@ -152,7 +158,12 @@ export function absorbObservations(
   remainingExploration = Math.max(0, remainingExploration - workUnits);
   const mergedTransitions = mergeTransitions(transitions);
   const mergedSeeds = mergeSeeds(seeds);
+  const mergedDiscoveries = mergeDiscoveries(discoveries);
+  const absorbedNewDiscoveries = mergedDiscoveries.length > state.discoveries.length;
   const { binding: _binding, closure: _closure, ...rest } = state;
+  const residuals = memoryExhausted
+    ? interruptOpenResiduals(mergeResiduals(state.residuals, consumption.page))
+    : mergeResiduals(state.residuals, consumption.page);
   return {
     ...rest,
     remaining_exploration: remainingExploration,
@@ -166,11 +177,10 @@ export function absorbObservations(
     guaranteed_transitions: mergeTransitions(guaranteedTransitions),
     facets: retainSamePathVectors(facets),
     derivations: mergeDerivations(derivations),
+    discoveries: mergedDiscoveries,
     transition_derivations: Object.freeze(transitionDerivations),
     seen_identities: collectIdentities(mergedSeeds, mergedTransitions, state.seen_identities),
-    residuals: memoryExhausted
-      ? interruptOpenResiduals(mergeResiduals(state.residuals, consumption.page))
-      : mergeResiduals(state.residuals, consumption.page),
+    residuals: admitDiscoveryResidual(residuals, mergedDiscoveries, memoryExhausted, absorbedNewDiscoveries),
     last_observer_status: memoryExhausted ? "interrupted" : consumption.page.outcome.status,
     resume_cursors: consumption.resume_cursors ?? state.resume_cursors
   };
@@ -187,6 +197,7 @@ export function defaultOpenResiduals(): readonly CoverageRegion[] {
 
 export function residualWorkRegions(residuals: readonly CoverageRegion[]): FairWorkRegion[] {
   return residuals
+    .filter((region) => region.kind !== "discovery")
     .filter((region) => region.status === "open" || region.status === "interrupted")
     .map((region) => ({
       id: region.region_id,
@@ -243,6 +254,7 @@ function absorbEffects(
   guaranteedTransitions: Transition[],
   facets: FacetVector[],
   derivations: Derivation[],
+  discoveries: RoutingDiscovery[],
   transitionDerivations: Record<string, string>,
   remainingExploration: number,
   remainingWork: RemainingWork[],
@@ -261,6 +273,9 @@ function absorbEffects(
       rememberTransitionDerivation(effect, effect.transition, derivations, transitionDerivations);
     }
     if (effect.facet !== undefined && retainPayload(effect.facet, quota)) facets.push(effect.facet);
+    if (effect.discovery !== undefined && retainPayload(effect.discovery, quota)) {
+      discoveries.push(effect.discovery);
+    }
     for (const derivation of effect.derivations ?? (effect.derivation === undefined ? [] : [effect.derivation])) {
       if (retainPayload(derivation, quota)) derivations.push(derivation);
     }
@@ -460,6 +475,24 @@ function residualUpper(residuals: readonly CoverageRegion[]): number {
     if (bound > upper) upper = bound;
   }
   return upper;
+}
+
+function admitDiscoveryResidual(
+  residuals: readonly CoverageRegion[],
+  discoveries: readonly RoutingDiscovery[],
+  memoryExhausted: boolean,
+  absorbedNew: boolean
+): readonly CoverageRegion[] {
+  if (discoveries.length === 0) return residuals;
+  const status = memoryExhausted ? "interrupted" as const : "open" as const;
+  let found = false;
+  const next = residuals.map((region) => {
+    if (region.kind !== "discovery") return region;
+    found = true;
+    return absorbedNew && region.status === "exhausted" ? { ...region, status } : region;
+  });
+  if (!found) next.push({ ...openRegion("discovery", "discovery"), status });
+  return Object.freeze(next);
 }
 
 function mergeResiduals(

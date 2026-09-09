@@ -461,6 +461,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(acceptedIds(observed)).not.toContain("routed");
     expect(observed.guaranteed_seeds.every((seed) => productSubjectId(seed.state) !== "routed")).toBe(true);
     expect(observed.transitions.every((item) => productSubjectId(item.to) !== "routed")).toBe(true);
+    expect(observed.discoveries.some((row) => row.subject_id === "routed" && row.assertion_id === "uses_service")).toBe(true);
     expect(observed.resume_subjects).toContain("routed");
     expect(seedActivationsForObservation({
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -496,6 +497,32 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(absorbed.seeds).toEqual(initial.seeds);
     expect(absorbed.guaranteed_seeds).toEqual(initial.guaranteed_seeds);
     expect(absorbed.transitions).toEqual([]);
+    expect(absorbed.discoveries).toEqual([{
+      source_id: "fact",
+      subject_id: "routed",
+      predicate: "uses_service",
+      assertion_id: "route-1"
+    }]);
+    expect(absorbed.residuals.some((region) => region.kind === "discovery" && region.status === "open")).toBe(true);
+    const duplicated = applyObserverPage(absorbed, {
+      page: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        query_id: query.query_id,
+        snapshot_id: query.snapshot_id,
+        cursor: startObserverCursor({
+          cursor_id: "adjacency",
+          snapshot_id: query.snapshot_id,
+          query_id: query.query_id,
+          region_id: "adjacency"
+        }),
+        observations: [],
+        outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: "exhausted" },
+        open_regions: []
+      },
+      effects: [...discovered, ...discovered]
+    });
+    expect(duplicated.discoveries).toEqual(absorbed.discoveries);
+    expect(duplicated.transitions).toEqual([]);
   });
 });
 

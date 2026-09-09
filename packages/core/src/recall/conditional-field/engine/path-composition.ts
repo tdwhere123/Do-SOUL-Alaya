@@ -66,7 +66,16 @@ import {
 
 export type { HyperedgePremise, HyperedgeCompletion, AdjacencyRow, NamedKindOverlay };
 export { ACCEPTING_PROGRAM_STATE, START_PROGRAM_STATE, tryCompleteHyperedge };
-export { overlayIsRoutingOnly, routingDiscoveryEffect, type RoutingDiscovery } from "./path-routing.js";
+export {
+  overlayIsRoutingOnly,
+  routingDiscoveryEffect,
+  routingOverlayKinds,
+  mergeDiscoveries,
+  pairKey,
+  nextAdjacencyPair,
+  hasOpenPairs,
+  type RoutingDiscovery
+} from "./path-routing.js";
 
 const DEFAULT_PROGRAM_STATE = ACCEPTING_PROGRAM_STATE;
 const DEFAULT_HYPOTHESIS = "h0";

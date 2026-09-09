@@ -5,7 +5,6 @@ import {
   type CoverageRegion,
   type IndexRole,
   type ObserverCursor,
-  type ObserverStatus,
   type QueryInterpretation,
   type SnapshotReadLease,
   type TypedObservation
@@ -27,7 +26,12 @@ import {
 import {
   adjacencyEffectsForRows,
   adjacencyKindsFor,
+  hasOpenPairs,
+  nextAdjacencyPair,
+  overlayIsRoutingOnly,
+  pairKey,
   programRelationKinds,
+  routingOverlayKinds,
   seedProgramStates,
   seedActivationsForObservation
 } from "../conditional-field/engine/path-composition.js";
@@ -37,6 +41,15 @@ import {
 } from "../conditional-field/engine/binding-environment.js";
 import { collectRelations } from "../conditional-field/query/compile-query.js";
 import { recordObservedAt, recordSourceRootFacts } from "./observed-source-facts.js";
+import {
+  closeAdjacency,
+  closeRegion,
+  cursorOf,
+  incompleteObserver,
+  openResiduals,
+  settleDiscoveryResidual,
+  terminalObserver
+} from "./observe-field-residuals.js";
 export type ObserveFieldInput = Readonly<{
   readonly workspace_id: string;
   readonly query_text: string;
@@ -56,14 +69,6 @@ const MAX_OBSERVE_ROUNDS = 4_096;
 const SEED_PAGE_SIZE = 32;
 const ADJACENCY_PAGE_SIZE = 16;
 const MAX_FINALIZATION_MEMORY_BYTES = 65_536;
-const INCOMPLETE_OBSERVER: ReadonlySet<ObserverStatus> = new Set([
-  "cancelled",
-  "unavailable",
-  "interrupted",
-  "unknown",
-  "not_applicable",
-  "invalidated"
-]);
 
 export const RELATION_MILLIGRADES: Readonly<Record<string, Readonly<{
   readonly milligrades: number;
@@ -131,7 +136,11 @@ function observeWithinMemory(
       committed_through: position
     });
   }
-  const subjects = new Set<string>([...state.resume_subjects, ...state.seen_identities.map((row) => productSubjectId(row))]);
+  const subjects = new Set<string>([
+    ...state.resume_subjects,
+    ...state.seen_identities.map((row) => productSubjectId(row)),
+    ...state.discoveries.map((row) => row.subject_id)
+  ]);
   let relationRows: RelationObserverRow[] = [...(state.observed_relations ?? [])];
   const observedAt: Record<string, string> = {};
   const sourceFacts = new Map<string, BoundSourceFacts>(Object.entries(state.source_facts ?? {}));
@@ -157,6 +166,15 @@ function observeWithinMemory(
       remaining_exploration: Math.max(0, state.remaining_exploration - storedKinds.charged)
     });
   }
+  const programKinds = adjacencyKindsFor(interpretation.program, storedKinds.kinds);
+  const predicates = [...new Set([
+    ...adjacencyKindsFor(
+      interpretation.program,
+      storedKinds.kinds,
+      programKinds.length === 0 ? [] : routingOverlayKinds(RELATION_MILLIGRADES)
+    ),
+    ...(interpretation.view.claim_demands ?? []).map((demand) => demand.proposition_kind)
+  ])];
   for (let round = 0; round < MAX_OBSERVE_ROUNDS; round += 1) {
     memoryBox.remaining = Math.max(0, state.remaining_memory_bytes - memoryBox.cachedBytes);
     if (terminalObserver(state.last_observer_status)) break;
@@ -241,9 +259,7 @@ function observeWithinMemory(
       if (incompleteObserver(state.last_observer_status)) {
         break;
       }
-      const predicates = [...new Set([...adjacencyKindsFor(interpretation.program, storedKinds.kinds),
-        ...(interpretation.view.claim_demands ?? []).map((demand) => demand.proposition_kind)])];
-      const pair = nextAdjacencyPair(subjects, predicates, pairProgress, pairIndex);
+      const pair = nextAdjacencyPair(subjects, predicates, pairProgress, pairIndex, state.discoveries);
       pairIndex += 1;
       if (pair === undefined) {
         state = closeAdjacency(state, interpretation, action, cursors, storedKinds.open);
@@ -255,33 +271,40 @@ function observeWithinMemory(
       );
       cursors.set(action.region_id, observed.page.cursor);
       relationRows = mergeRelationRows(relationRows, captured);
-      addSubjects(subjects, captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]));
       recordObservedAt(
         observedInput,
         captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]),
         observedAt,
         sourceFacts
       );
+      const effects = transitionEffects(
+        relationRows,
+        interpretation,
+        state.seen_identities,
+        input.as_of,
+        sourceFacts,
+        state.facets
+      );
+      if (effects.some((effect) => effect.unresolved_guard === true)) unresolvedGuard = true;
+      if (effects.some((effect) => effect.missing_measurement === true)) missingMeasurement = true;
+      for (const row of captured) {
+        if (overlayIsRoutingOnly(RELATION_MILLIGRADES, row.predicate)) continue;
+        addSubjects(subjects, [row.sourceObjectId, row.targetObjectId]);
+      }
+      addAgendaFromEffects(subjects, effects);
       const before = state;
       state = applyObserverPage(state, {
-        page: maskAdjacencyExhaustion(observed.page, hasOpenPairs(subjects, predicates, pairProgress)),
-        effects: (() => {
-          const effects = transitionEffects(
-            relationRows,
-            interpretation,
-            state.seen_identities,
-            input.as_of,
-            sourceFacts,
-            state.facets
-          );
-          if (effects.some((effect) => effect.unresolved_guard === true)) unresolvedGuard = true;
-          if (effects.some((effect) => effect.missing_measurement === true)) missingMeasurement = true;
-          return effects;
-        })(),
+        page: maskAdjacencyExhaustion(
+          observed.page,
+          hasOpenPairs(subjects, predicates, pairProgress, state.discoveries)
+        ),
+        effects,
         work: observed.work,
         resume_cursors: resumeCursors(cursors, pairProgress)
       });
       if (state.retention_rejected !== undefined || state.memory_exhausted) return state;
+      addSubjects(subjects, state.discoveries.map((row) => row.subject_id));
+      addSubjects(subjects, state.seen_identities.map((row) => productSubjectId(row)));
       state = retainObservedContext(before, state, sourceFacts, relationRows, subjects, pairProgress);
       if (state.memory_exhausted) return state;
       if (observed.page.outcome.status === "interrupted") {
@@ -291,7 +314,14 @@ function observeWithinMemory(
     }
   }
   return Object.freeze({
-    ...state,
+    ...settleDiscoveryResidual(
+      state,
+      interpretation,
+      cursors,
+      subjects,
+      predicates,
+      pairProgress
+    ),
     pair_progress: Object.freeze(Object.fromEntries(pairProgress)),
     resume_subjects: Object.freeze([...subjects])
   });
@@ -479,48 +509,6 @@ function observeAdjacency(
   return observed;
 }
 
-function closeAdjacency(
-  state: FieldEngineState,
-  interpretation: QueryInterpretation,
-  action: ReturnType<typeof proposeFieldWork>["actions"][number],
-  cursors: Map<string, ObserverCursor>,
-  kindsOpen: boolean
-): FieldEngineState {
-  if (incompleteObserver(state.last_observer_status)) return state;
-  return closeRegion(state, interpretation, action, cursors, kindsOpen ? "open" : "exhausted");
-}
-
-function closeRegion(
-  state: FieldEngineState,
-  interpretation: QueryInterpretation,
-  action: ReturnType<typeof proposeFieldWork>["actions"][number],
-  cursors: Map<string, ObserverCursor>,
-  status: ObserverStatus
-): FieldEngineState {
-  const kind = action.action === "seed"
-    ? "seed"
-    : action.action === "measurement"
-      ? "binding"
-      : "adjacency";
-  return applyObserverPage(state, {
-    page: {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      query_id: interpretation.query_id,
-      snapshot_id: interpretation.snapshot_id,
-      cursor: cursorOf(cursors, interpretation, action.region_id),
-      observations: [],
-      outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status },
-      open_regions: [{
-        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-        region_id: action.region_id,
-        kind,
-        status
-      }]
-    },
-    effects: []
-  });
-}
-
 function loadStoredRelationKinds(
   program: QueryInterpretation["program"],
   readers: ObserverReaders,
@@ -607,51 +595,6 @@ function capturingReaders(
   };
 }
 
-function cursorOf(
-  cursors: Map<string, ObserverCursor>,
-  interpretation: QueryInterpretation,
-  regionId: string
-): ObserverCursor {
-  const existing = cursors.get(regionId);
-  if (existing !== undefined) return existing;
-  const created = startObserverCursor({
-    cursor_id: regionId,
-    snapshot_id: interpretation.snapshot_id,
-    query_id: interpretation.query_id,
-    region_id: regionId
-  });
-  cursors.set(regionId, created);
-  return created;
-}
-
-function nextAdjacencyPair(
-  subjects: ReadonlySet<string>,
-  predicates: readonly string[],
-  pairProgress: Map<string, string | null>,
-  pairIndex: number
-): Readonly<{ readonly subject: string; readonly predicate: string }> | undefined {
-  const subjectList = [...subjects];
-  if (subjectList.length === 0 || predicates.length === 0) return undefined;
-  const total = subjectList.length * predicates.length;
-  for (let offset = 0; offset < total; offset += 1) {
-    const index = (pairIndex + offset) % total;
-    const subject = subjectList[Math.floor(index / predicates.length)]!;
-    const predicate = predicates[index % predicates.length]!;
-    if (!pairProgress.has(`${pairKey(subject, predicate)}:done`)) {
-      return { subject, predicate };
-    }
-  }
-  return undefined;
-}
-
-function hasOpenPairs(
-  subjects: ReadonlySet<string>,
-  predicates: readonly string[],
-  pairProgress: Map<string, string | null>
-): boolean {
-  return nextAdjacencyPair(subjects, predicates, pairProgress, 0) !== undefined;
-}
-
 function maskAdjacencyExhaustion(
   page: ReturnType<typeof observeConditionalField>["page"],
   stillOpen: boolean
@@ -669,8 +612,14 @@ function addSubjects(subjects: Set<string>, ids: readonly string[]): void {
   for (const id of ids) subjects.add(id);
 }
 
-function pairKey(subject: string, predicate: string): string {
-  return `${subject}\0${predicate}`;
+function addAgendaFromEffects(subjects: Set<string>, effects: readonly FieldObservationEffect[]): void {
+  for (const effect of effects) {
+    if (effect.discovery !== undefined) subjects.add(effect.discovery.subject_id);
+    if (effect.transition !== undefined) {
+      subjects.add(productSubjectId(effect.transition.from));
+      subjects.add(productSubjectId(effect.transition.to));
+    }
+  }
 }
 
 function observerPageLimit(
@@ -704,31 +653,12 @@ function resumeCursors(
   return resume;
 }
 
-function openResiduals(includeBinding: boolean, includeGuard: boolean): readonly CoverageRegion[] {
-  const residuals: CoverageRegion[] = [
-    residual("seed", "seed"),
-    residual("adjacency", "adjacency")
-  ];
-  if (includeGuard) residuals.push(residual("guard", "guard"));
-  if (includeBinding) residuals.push(residual("binding", "binding"));
-  return residuals;
-}
-
 function programNeedsGuardWork(program: QueryInterpretation["program"]): boolean {
   return collectRelations(program).some((relation) =>
     relation.guard.kind === "equality"
     || relation.guard.kind === "source_bound_entity"
     || (relation.guard.kind === "interval_relation" && relation.guard.time_scope === "associated")
   );
-}
-
-function residual(id: string, kind: CoverageRegion["kind"]): CoverageRegion {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    region_id: id,
-    kind,
-    status: "open"
-  };
 }
 
 function activeLease(interpretation: QueryInterpretation): SnapshotReadLease {
@@ -741,14 +671,3 @@ function activeLease(interpretation: QueryInterpretation): SnapshotReadLease {
   };
 }
 
-function incompleteObserver(status: ObserverStatus | undefined): boolean {
-  return status !== undefined && INCOMPLETE_OBSERVER.has(status);
-}
-
-function terminalObserver(status: ObserverStatus | undefined): boolean {
-  return status === "cancelled"
-    || status === "unavailable"
-    || status === "unknown"
-    || status === "not_applicable"
-    || status === "invalidated";
-}

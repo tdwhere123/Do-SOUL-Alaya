@@ -11,7 +11,14 @@ import { observeField } from "../../../../recall/runtime/conditional-field-obser
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import { SNAPSHOT_ID, defaultBudget, defaultView } from "../reference/deployment.fixture.js";
-import { composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
+import {
+  adjacencyKindsFor,
+  composedFacetPathId,
+  nextAdjacencyPair,
+  pairKey,
+  routingOverlayKinds
+} from "../../../../recall/conditional-field/engine/path-composition.js";
+import { RELATION_MILLIGRADES } from "../../../../recall/runtime/conditional-field-observe.js";
 
 const VALIDITY: RelationValidity = { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
 const AS_OF = "2026-09-07T00:00:00.000Z";
@@ -329,6 +336,47 @@ describe("automaton, compatible join, and composed path identity", () => {
     );
     expect(["interrupted", "open", "unknown"]).toContain(state.closure.observation);
     expect(state.residuals.some((region) => region.status !== "exhausted")).toBe(true);
+    expect(state.residuals.some((region) =>
+      region.kind === "discovery" && region.status !== "exhausted"
+    )).toBe(true);
+  });
+
+  it("reads overlay routing_only kinds the program does not name", () => {
+    expect(adjacencyKindsFor(
+      rel("observed_log", "x", "y"),
+      [],
+      routingOverlayKinds(RELATION_MILLIGRADES)
+    )).toEqual(expect.arrayContaining(["observed_log", "uses_service"]));
+    const state = observeProgram(rel("observed_log", "x", "y"), [
+      edge("seed", "fact", "observed_log"),
+      edge("fact", "routed", "uses_service"),
+      edge("routed", "hist", "service_history")
+    ]);
+    expect(acceptedIds(state)).toContain("fact");
+    expect(acceptedIds(state)).not.toContain("routed");
+    expect(acceptedIds(state)).not.toContain("hist");
+    expect(state.discoveries.some((row) =>
+      row.subject_id === "routed" && row.predicate === "uses_service"
+    )).toBe(true);
+    expect(state.resume_subjects).toContain("routed");
+    expect(state.transitions.every((item) => productSubjectId(item.to) !== "routed")).toBe(true);
+    expect(Object.keys(state.pair_progress).some((key) => key.startsWith("routed\0"))).toBe(true);
+    expect(state.residuals.some((region) => region.kind === "discovery")).toBe(true);
+  });
+
+  it("nextAdjacencyPair follows absorbed discovery subjects", () => {
+    const progress = new Map<string, string | null>([
+      [`${pairKey("seed", "observed_log")}:done`, "1"],
+      [`${pairKey("seed", "uses_service")}:done`, "1"]
+    ]);
+    expect(nextAdjacencyPair(new Set(["seed"]), ["observed_log", "uses_service"], progress, 0)).toBeUndefined();
+    expect(nextAdjacencyPair(
+      new Set(["seed"]),
+      ["observed_log", "uses_service"],
+      progress,
+      0,
+      [{ source_id: "seed", subject_id: "routed", predicate: "uses_service", assertion_id: "route-1" }]
+    )).toEqual({ subject: "routed", predicate: "observed_log" });
   });
 });
 
