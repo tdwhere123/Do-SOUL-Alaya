@@ -63,6 +63,7 @@ export function recordSourceRootFacts(
       root_kind: target.root_kind,
       source_revision: target.source_version,
       evidence_object_id: target.evidence_object_id,
+      ...(row?.evidence_verified === true ? { evidence_verified: true } : {}),
       ...(observation.observed_at === undefined ? {} : {
         observed_at: observation.observed_at,
         event_time: observation.observed_at

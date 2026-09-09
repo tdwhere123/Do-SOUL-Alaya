@@ -42,7 +42,7 @@ describe("SqliteSurfaceIdentityRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(10);
+    expect(migration?.version).toBe(11);
   });
 
   it("creates and finds surface identity by id", async () => {

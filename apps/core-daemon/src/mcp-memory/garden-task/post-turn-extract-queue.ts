@@ -8,6 +8,7 @@ import {
   type SoulReportContextUsageRequest,
   type SourceAdmissionPort
 } from "@do-soul/alaya-protocol";
+import { retainedSourceSpeaker } from "@do-soul/alaya-core";
 import { isDuplicateKeyError } from "@do-soul/alaya-storage";
 import {
   admitPostTurnSourceRoot,
@@ -128,13 +129,15 @@ function persistAdmittedTurnRoot(
   if (admission === undefined) {
     return undefined;
   }
+  const speaker = retainedSourceSpeaker(input.lastMessages.map((message) => message.role));
   const record = admitPostTurnSourceRoot({
     admission,
     workspaceId: input.workspaceId,
     sourceId: `post-turn:${input.taskId}`,
     content: joinAdmittedTurnExcerpts(input.lastMessages),
     recordedAt: input.createdAt,
-    eventTime: input.eventTime
+    eventTime: input.eventTime,
+    ...(speaker === undefined ? {} : { speaker })
   });
   return record?.identity;
 }

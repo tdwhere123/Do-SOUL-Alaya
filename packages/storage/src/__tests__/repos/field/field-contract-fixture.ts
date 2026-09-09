@@ -80,6 +80,7 @@ export function hashedRecord(
     valid_from: null as string | null,
     valid_to: null as string | null,
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+    speaker: null as "user" | "assistant" | "system" | null,
     source_body: body as string | null
   };
 }

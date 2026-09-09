@@ -1,4 +1,9 @@
-import type { AddressableSourceSpan, AddressableSourceSpanPurpose, SourceRecordIdentity } from "./source-span.js";
+import type {
+  AddressableSourceSpan,
+  AddressableSourceSpanPurpose,
+  SourceRecordIdentity,
+  SourceSpeakerRole
+} from "./source-span.js";
 import type { DerivationJobReceipt, FactorIncidence } from "./factor-incidence.js";
 import type {
   FieldProjectionGeneration,
@@ -21,6 +26,7 @@ export type SourceAdmissionRequest = Readonly<{
   readonly event_time: string | null;
   readonly valid_from: string | null;
   readonly valid_to: string | null;
+  readonly speaker?: SourceSpeakerRole | null;
   readonly spans: readonly Readonly<{
     readonly start_offset: number;
     readonly end_offset: number;

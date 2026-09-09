@@ -82,6 +82,7 @@ export type SourceRootObserverRow = Readonly<{
   readonly revision: string;
   readonly digest: string;
   readonly evidence_object_id: string | null;
+  readonly evidence_verified?: boolean;
   readonly event_time?: string | null;
   readonly role?: string;
   readonly content?: string;
@@ -315,6 +316,7 @@ export function toSourceRootObserverRow(row: Readonly<{
   readonly revision: string;
   readonly digest: string;
   readonly evidence_object_id: string | null;
+  readonly evidence_verified?: boolean;
   readonly event_time?: string | null;
   readonly role?: string;
   readonly content?: string;
@@ -332,6 +334,7 @@ export function toSourceRootObserverRow(row: Readonly<{
     revision: row.revision,
     digest: row.digest,
     evidence_object_id: row.evidence_object_id,
+    ...(row.evidence_verified === undefined ? {} : { evidence_verified: row.evidence_verified }),
     ...(row.event_time === undefined ? {} : { event_time: row.event_time }),
     ...(row.role === undefined ? {} : { role: row.role }),
     ...(row.content === undefined ? {} : { content: row.content }),

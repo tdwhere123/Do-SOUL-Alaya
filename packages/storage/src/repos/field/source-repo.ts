@@ -35,7 +35,7 @@ const UTF8_MAX_TAIL = 3;
 const RECORD_SELECT = `
   SELECT record_id, workspace_id, source_id, source_version, content_digest,
          evidence_object_id, recorded_at, event_time, valid_from, valid_to,
-         operator_id, source_body
+         operator_id, speaker, source_body
   FROM source_records
 `;
 
@@ -43,7 +43,7 @@ const RECORD_SELECT = `
 const RECORD_BOUNDED_SELECT = `
   SELECT record_id, workspace_id, source_id, source_version, content_digest,
          evidence_object_id, recorded_at, event_time, valid_from, valid_to,
-         operator_id,
+         operator_id, speaker,
          CASE WHEN source_body IS NULL THEN NULL
               ELSE substr(CAST(source_body AS BLOB), ? + 1, ?)
          END AS source_body_prefix,
@@ -88,8 +88,8 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
       INSERT INTO source_records (
         record_id, workspace_id, source_id, source_version, content_digest,
         evidence_object_id, recorded_at, event_time, valid_from, valid_to,
-        operator_id, source_body
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        operator_id, speaker, source_body
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, record_id) DO NOTHING
     `);
     this.selectStatement = database.connection.prepare(
@@ -141,7 +141,7 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
         () => this.insertStatement.run(
           row.record_id, row.workspace_id, row.source_id, row.source_version,
           row.content_digest, row.evidence_object_id, row.recorded_at, row.event_time,
-          row.valid_from, row.valid_to, row.operator_id, row.source_body
+          row.valid_from, row.valid_to, row.operator_id, row.speaker, row.source_body
         ),
         () => this.findById(row.workspace_id, row.record_id),
         (existing) => sameRecord(existing, row),

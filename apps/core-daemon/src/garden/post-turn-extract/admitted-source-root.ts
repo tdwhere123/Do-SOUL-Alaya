@@ -1,6 +1,7 @@
 import type {
   SourceAdmissionPort,
-  SourceRecordIdentity
+  SourceRecordIdentity,
+  SourceSpeakerRole
 } from "@do-soul/alaya-protocol";
 
 export function joinAdmittedTurnExcerpts(
@@ -21,6 +22,7 @@ export function admitPostTurnSourceRoot(input: Readonly<{
   readonly content: string;
   readonly recordedAt: string;
   readonly eventTime: string | null;
+  readonly speaker?: SourceSpeakerRole;
 }>): SourceRecordIdentity | null {
   if (input.content.length === 0) {
     return null;
@@ -35,6 +37,7 @@ export function admitPostTurnSourceRoot(input: Readonly<{
     event_time: input.eventTime,
     valid_from: null,
     valid_to: null,
+    ...(input.speaker === undefined ? {} : { speaker: input.speaker }),
     spans: [
       {
         start_offset: 0,

@@ -42,7 +42,8 @@ export function sourceRecordFromRow(row: FieldSourceRecordRow): SourceRecordIden
     event_time: row.event_time,
     valid_from: row.valid_from,
     valid_to: row.valid_to,
-    operator_id: row.operator_id
+    operator_id: row.operator_id,
+    ...(row.speaker === null ? {} : { speaker: row.speaker })
   });
 }
 

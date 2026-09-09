@@ -44,6 +44,7 @@ export const fieldSourceRecordParser: RowParser<FieldSourceRecordRow> = {
       valid_from: readNullableStringField(row, "valid_from"),
       valid_to: readNullableStringField(row, "valid_to"),
       operator_id: readNonEmptyStringField(row, "operator_id"),
+      speaker: readSpeakerField(row),
       source_body: readNullableStringField(row, "source_body")
     });
   }
@@ -290,6 +291,15 @@ export function insertIdempotent<T>(
     }
     return row;
   }, label);
+}
+
+function readSpeakerField(
+  record: Record<string, unknown>
+): "user" | "assistant" | "system" | null {
+  const value = readNullableStringField(record, "speaker");
+  if (value === null) return null;
+  if (value === "user" || value === "assistant" || value === "system") return value;
+  throw new StorageError("VALIDATION_FAILED", "Failed to validate speaker.");
 }
 
 function readNullableStringField(

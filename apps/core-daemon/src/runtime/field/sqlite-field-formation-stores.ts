@@ -100,6 +100,7 @@ function recordToRow(
     valid_from: record.valid_from,
     valid_to: record.valid_to,
     operator_id: record.operator_id,
+    speaker: record.speaker ?? null,
     source_body: contentBytes
   };
 }

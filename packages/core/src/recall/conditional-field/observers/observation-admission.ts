@@ -463,6 +463,7 @@ function predicateSubject(
       root_id: sourceRoot.root_id,
       source_version: sourceRoot.revision,
       evidence_object_id: sourceRoot.evidence_object_id,
+      ...(sourceRoot.evidence_verified === true ? { evidence_verified: true } : {}),
       ...(sourceRoot.content === undefined ? {} : { content: sourceRoot.content }),
       ...(sourceRoot.content_complete === undefined ? {} : { content_complete: sourceRoot.content_complete }),
       ...(sourceRoot.role === undefined ? {} : { role: sourceRoot.role }),

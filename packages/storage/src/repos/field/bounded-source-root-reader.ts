@@ -20,7 +20,6 @@ import type { FieldSourceRecordRow } from "./ports.js";
 const PAGE_MAX = 512;
 const DEFAULT_BYTE_LIMIT = 65_536;
 const SHA256_PREFIX = "sha256:";
-const SPEAKER_ROLES = new Set(["user", "assistant", "system"]);
 
 export type SourceRootKind = "source_record" | "evidence_capsule";
 
@@ -31,6 +30,7 @@ export type SourceRootRow = Readonly<{
   readonly revision: string;
   readonly digest: string;
   readonly evidence_object_id: string | null;
+  readonly evidence_verified?: boolean;
   readonly event_time: string | null;
   readonly role?: string;
   readonly content?: string;
@@ -283,22 +283,11 @@ function mapRecord(
   const chunk = chunkUtf8(row.source_body, offset, byteLimit);
   if (chunk === null) return null;
   return {
-    kind: "source_record",
-    workspace_id: row.workspace_id,
-    root_id: row.record_id,
-    revision: row.source_version,
-    digest: row.content_digest,
-    evidence_object_id: row.evidence_object_id,
-    event_time: row.event_time,
-    ...(SPEAKER_ROLES.has(row.source_id) ? { role: row.source_id } : {}),
+    ...sourceRecordRoot(row),
     content: chunk.text,
     content_start: chunk.start,
     content_end: chunk.end,
-    content_complete: chunk.complete,
-    original_complete: true,
-    retained_extent: "body",
-    valid_from: row.valid_from,
-    valid_to: row.valid_to
+    content_complete: chunk.complete
   };
 }
 
@@ -306,23 +295,43 @@ function mapBoundedRecord(read: BoundedSourceRecordRead, offset: number): Source
   if (read.invalidOffset || read.record.source_body === null) return null;
   const end = offset + read.prefixBytes;
   return {
-    kind: "source_record",
-    workspace_id: read.record.workspace_id,
-    root_id: read.record.record_id,
-    revision: read.record.source_version,
-    digest: read.record.content_digest,
-    evidence_object_id: read.record.evidence_object_id,
-    event_time: read.record.event_time,
-    ...(SPEAKER_ROLES.has(read.record.source_id) ? { role: read.record.source_id } : {}),
+    ...sourceRecordRoot(read.record),
     content: read.record.source_body,
     content_start: offset,
     content_end: end,
-    content_complete: end === read.bodyBytes,
+    content_complete: end === read.bodyBytes
+  };
+}
+
+function sourceRecordRoot(row: FieldSourceRecordRow): Omit<
+  SourceRootRow,
+  "content" | "content_start" | "content_end" | "content_complete"
+> {
+  const role = speakerRole(row.speaker);
+  return {
+    kind: "source_record",
+    workspace_id: row.workspace_id,
+    root_id: row.record_id,
+    revision: row.source_version,
+    digest: row.content_digest,
+    evidence_object_id: row.evidence_object_id,
+    ...(verifiedEvidenceBind(row.evidence_object_id) ? { evidence_verified: true } : {}),
+    event_time: row.event_time,
+    ...(role === undefined ? {} : { role }),
     original_complete: true,
     retained_extent: "body",
-    valid_from: read.record.valid_from,
-    valid_to: read.record.valid_to
+    valid_from: row.valid_from,
+    valid_to: row.valid_to
   };
+}
+
+function speakerRole(value: string | null | undefined): "user" | "assistant" | "system" | undefined {
+  if (value === "user" || value === "assistant" || value === "system") return value;
+  return undefined;
+}
+
+function verifiedEvidenceBind(evidenceObjectId: string | null): boolean {
+  return evidenceObjectId !== null && evidenceObjectId.length > 0;
 }
 
 function mapCapsule(
@@ -342,6 +351,7 @@ function mapCapsule(
     revision: capsule.updated_at,
     digest: contentDigest(body, capsule.source_hash),
     evidence_object_id: capsule.object_id,
+    evidence_verified: true,
     event_time: eventTimeOf(capsule),
     content: chunk.text,
     content_start: chunk.start,

@@ -8,7 +8,10 @@ import {
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 as fieldSha256 } from "../../shared/field-hash.js";
 import { createInMemoryFieldStores } from "../../memory/evidence-create/field-stores.js";
-import { createSourceAdmissionPort } from "../../memory/evidence-create/source-admission.js";
+import {
+  createSourceAdmissionPort,
+  retainedSourceSpeaker
+} from "../../memory/evidence-create/source-admission.js";
 
 const CLOCK = "2026-08-16T00:00:00.000Z";
 const BODY = "Alpha line.\nBeta line shares Alpha.";
@@ -92,6 +95,18 @@ describe("source admission", () => {
     expect(admitted.record.event_time).toBeNull();
     expect(admitted.record.valid_from).toBeNull();
     expect(admitted.record.valid_to).toBeNull();
+  });
+
+  it("retains a single speaker and omits mixed or unknown roles", () => {
+    expect(retainedSourceSpeaker(["user"])).toBe("user");
+    expect(retainedSourceSpeaker(["assistant", "assistant"])).toBe("assistant");
+    expect(retainedSourceSpeaker(["system"])).toBe("system");
+    expect(retainedSourceSpeaker(["user", "assistant"])).toBeUndefined();
+    expect(retainedSourceSpeaker(["tool"])).toBeUndefined();
+    expect(retainedSourceSpeaker([])).toBeUndefined();
+    const admitted = createPort().admit(request({ speaker: "user" }));
+    expect(admitted.record.speaker).toBe("user");
+    expect(createPort().admit(request()).record.speaker).toBeUndefined();
   });
 
   it("rejects inverted or out-of-range spans fail-closed", () => {

@@ -11,7 +11,8 @@ import {
   type FieldContractSha256,
   type SourceAdmissionPort,
   type SourceAdmissionRequest,
-  type SourceRecordIdentity
+  type SourceRecordIdentity,
+  type SourceSpeakerRole
 } from "@do-soul/alaya-protocol";
 import type { FieldFormationStores } from "./field-stores.js";
 import {
@@ -54,6 +55,9 @@ function persistRecord(
     source_version: request.source_version,
     content_digest: contentDigest
   }, sha256);
+  const speaker = retainedSourceSpeaker(
+    request.speaker === undefined || request.speaker === null ? [] : [request.speaker]
+  );
   const record = verifySourceRecordIdentity(SourceRecordIdentitySchema.parse({
     ...receiptFields(identity),
     schema_version: 1,
@@ -66,9 +70,20 @@ function persistRecord(
     event_time: request.event_time,
     valid_from: request.valid_from,
     valid_to: request.valid_to,
-    operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID
+    operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+    ...(speaker === undefined ? {} : { speaker })
   }), sha256);
   return stores.putRecord(record, request.content_bytes);
+}
+
+export function retainedSourceSpeaker(
+  roles: readonly string[]
+): SourceSpeakerRole | undefined {
+  const speakers = new Set<SourceSpeakerRole>();
+  for (const role of roles) {
+    if (role === "user" || role === "assistant" || role === "system") speakers.add(role);
+  }
+  return speakers.size === 1 ? [...speakers][0] : undefined;
 }
 
 function persistSpan(

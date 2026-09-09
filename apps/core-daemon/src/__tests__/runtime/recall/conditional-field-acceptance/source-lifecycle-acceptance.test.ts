@@ -223,6 +223,7 @@ function plantRecord(database: StorageDatabase, body: string) {
     valid_from: null,
     valid_to: null,
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+    speaker: null,
     source_body: body
   });
 }

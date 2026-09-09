@@ -90,23 +90,60 @@ describe("bounded source-root pages", () => {
     tracked.add(database);
     const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
     const capsules = new SqliteEvidenceCapsuleRepo(database);
-    const row = records.insert(hashedRecord("workspace-1", "user said hello", "user"));
+    const user = records.insert({
+      ...hashedRecord("workspace-1", "user said hello", "alaya:garden-turn-evidence:user-turn"),
+      speaker: "user"
+    });
+    const assistant = records.insert({
+      ...hashedRecord("workspace-1", "assistant replied", "alaya:garden-turn-evidence:assistant-turn"),
+      speaker: "assistant"
+    });
+    const lineage = records.insert(hashedRecord(
+      "workspace-1",
+      "lineage body",
+      "alaya:garden-turn-evidence:sig"
+    ));
+    const userToken = records.insert(hashedRecord("workspace-1", "source_id is not speaker", "user"));
     const roots = new SqliteSourceRootRecallReader(records, capsules).page({
       workspaceId: "workspace-1",
       limit: 8,
       nativeLimit: 8,
       afterCursor: null
     });
-    const found = roots.rows.find((candidate) => candidate.root_id === row.record_id);
-    expect(found?.role).toBe("user");
-    const lineage = records.insert(hashedRecord("workspace-1", "lineage body", "alaya:garden-turn-evidence:sig"));
-    const lineagePage = new SqliteSourceRootRecallReader(records, capsules).page({
+    expect(roots.rows.find((candidate) => candidate.root_id === user.record_id)?.role).toBe("user");
+    expect(roots.rows.find((candidate) => candidate.root_id === assistant.record_id)?.role).toBe("assistant");
+    expect(roots.rows.find((candidate) => candidate.root_id === lineage.record_id)?.role).toBeUndefined();
+    expect(roots.rows.find((candidate) => candidate.root_id === userToken.record_id)?.role).toBeUndefined();
+  });
+
+  it("marks a verified evidence bind and leaves record-only unverified", async () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+    const capsules = new SqliteEvidenceCapsuleRepo(database);
+    const boundCapsule = await capsules.create(capsule(
+      "55555555-5555-4555-8555-555555555555",
+      "workspace-1",
+      "bound gist"
+    ));
+    const bound = records.insert({
+      ...hashedRecord("workspace-1", "bound body", "src-bound-evidence"),
+      evidence_object_id: boundCapsule.object_id
+    });
+    const recordOnly = records.insert(hashedRecord("workspace-1", "record only body", "src-record-only"));
+    const reader = new SqliteSourceRootRecallReader(records, capsules);
+    const roots = reader.page({
       workspaceId: "workspace-1",
       limit: 8,
       nativeLimit: 8,
       afterCursor: null
     });
-    expect(lineagePage.rows.find((candidate) => candidate.root_id === lineage.record_id)?.role).toBeUndefined();
+    const boundRow = roots.rows.find((candidate) => candidate.root_id === bound.record_id);
+    const recordOnlyRow = roots.rows.find((candidate) => candidate.root_id === recordOnly.record_id);
+    expect(boundRow?.evidence_object_id).toBe(boundCapsule.object_id);
+    expect(boundRow?.evidence_verified).toBe(true);
+    expect(recordOnlyRow?.evidence_object_id).toBeNull();
+    expect(recordOnlyRow?.evidence_verified).toBeUndefined();
   });
 
   it("pages and hydrates a large body through a byte-bounded prefix", () => {

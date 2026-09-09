@@ -20,6 +20,7 @@ export type FieldSourceRecordRow = Readonly<{
   readonly valid_from: string | null;
   readonly valid_to: string | null;
   readonly operator_id: string;
+  readonly speaker: "user" | "assistant" | "system" | null;
   readonly source_body: string | null;
 }>;
 

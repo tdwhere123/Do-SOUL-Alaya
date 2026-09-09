@@ -68,11 +68,13 @@ export {
   AddressableSourceSpanPurposeSchema,
   AddressableSourceSpanSchema,
   SourceRecordIdentitySchema,
+  SourceSpeakerRoleSchema,
   verifyAddressableSourceSpan,
   verifySourceRecordIdentity,
   type AddressableSourceSpan,
   type AddressableSourceSpanPurpose,
-  type SourceRecordIdentity
+  type SourceRecordIdentity,
+  type SourceSpeakerRole
 } from "./source-span.js";
 export {
   DerivationJobReceiptSchema,
