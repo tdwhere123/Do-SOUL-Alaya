@@ -253,6 +253,12 @@ function indexEntry(input: {
 }): IndexEntry {
   return IndexEntrySchema.parse({
     schema_version: 1,
+    target: {
+      kind: "memory_entry",
+      workspace_id: "ws",
+      object_id: input.object_id,
+      source_revision: "rev"
+    },
     object_id: input.object_id,
     hypothesis_id: "h0",
     output_binding: "requested",

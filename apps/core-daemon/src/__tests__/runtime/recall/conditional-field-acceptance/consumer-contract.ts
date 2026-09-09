@@ -27,8 +27,10 @@ export type TargetConsumerPayload = Readonly<{
   readonly index: InformationIndex;
 }>;
 
-export function entryIdentity(entry: Pick<IndexEntry, "object_id" | "hypothesis_id" | "output_binding">): string {
-  return `${entry.hypothesis_id}\0${entry.output_binding}\0${entry.object_id}`;
+export function entryIdentity(entry: Pick<IndexEntry, "object_id" | "hypothesis_id" | "output_binding" | "target">): string {
+  const id = entry.object_id
+    ?? (entry.target.kind === "memory_entry" ? entry.target.object_id : entry.target.root_id);
+  return `${entry.hypothesis_id}\0${entry.output_binding}\0${id}`;
 }
 
 export function assertTargetConsumer(payload: TargetConsumerPayload): readonly string[] {

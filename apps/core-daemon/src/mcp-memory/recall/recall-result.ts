@@ -1,5 +1,8 @@
 import {
   MILLIGRADE_TOP,
+  indexEntryCacheKey,
+  indexEntryObjectKind,
+  indexMemoryObjectId,
   type InformationIndex,
   type MemorySearchResult,
   type StagedWarningArray,
@@ -29,11 +32,16 @@ export function encodeIndexResults(
   for (const [offset, entry] of index.entries.entries()) {
     if (offset >= index.representation.page_budget) break;
     const score = entry.association_milligrades / MILLIGRADE_TOP;
-    const preview = previews.get(entry.object_id) ?? "[payload omitted]";
-    const metadata = sourceMetadata[entry.object_id];
+    const cacheKey = indexEntryCacheKey(entry);
+    const objectId = indexMemoryObjectId(entry);
+    const preview = previews.get(cacheKey) ?? (objectId === undefined ? undefined : previews.get(objectId))
+      ?? "[payload omitted]";
+    const metadata = sourceMetadata[cacheKey] ?? (objectId === undefined ? undefined : sourceMetadata[objectId]);
     const evidencePointers = metadata?.evidence_refs ?? [];
     const stagedWarnings = metadata?.staged_warnings?.map((warning) => ({
-      ...warning, target_object_id: entry.object_id
+      ...warning,
+      target_object_id: objectId
+        ?? (entry.target.kind === "source_evidence" ? entry.target.root_id : warning.target_object_id)
     }));
     const metadataBytes = evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0
       ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings }), "utf8");
@@ -43,8 +51,9 @@ export function encodeIndexResults(
     const usedThrough = usedTokens + fitted.tokenEstimate;
     usedTokens = usedThrough;
     encoded.push({
-      object_id: entry.object_id,
-      object_kind: "memory_entry",
+      ...(objectId === undefined ? {} : { object_id: objectId }),
+      object_kind: indexEntryObjectKind(entry),
+      target: entry.target,
       relevance_score: score,
       content_preview: fitted.preview,
       evidence_pointers: evidencePointers,
@@ -91,9 +100,11 @@ export function sourceMetadataForRecallResult(result: Readonly<{
   const metadata = { ...result.source_metadata };
   for (const candidate of result.candidates) {
     if (candidate.staged_warnings === undefined) continue;
-    metadata[candidate.object_id] = {
+    const key = candidate.object_id;
+    if (key === undefined) continue;
+    metadata[key] = {
       staged_warnings: candidate.staged_warnings,
-      ...metadata[candidate.object_id]
+      ...metadata[key]
     };
   }
   return metadata;

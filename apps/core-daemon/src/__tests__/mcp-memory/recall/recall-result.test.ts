@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
+import {
+  MemorySearchResultSchema,
+  SoulMemorySearchResponseSchema,
+  sourceIndexEntry
+} from "@do-soul/alaya-protocol";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import {
   encodeIndexResults,
@@ -9,6 +13,10 @@ import {
 } from "../../../mcp-memory/recall/recall-result.js";
 
 import { context, createDeps, stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
+
+function memoryEntry(objectId = "memory-1") {
+  return stubRecallIndex([objectId]).entries[0]!;
+}
 
 describe("conditional-field result encoding", () => {
   it("rejects a missing authoritative index before recording any delivery", async () => {
@@ -35,12 +43,9 @@ describe("conditional-field result encoding", () => {
     const index = {
       ...stubRecallIndex([]),
       entries: [{
-        object_id: "memory-1",
+        ...memoryEntry(),
         association_milligrades: 500,
-        schema_version: 1 as const,
-        claim: "unknown" as const,
         role: "requested" as const,
-        explanation_ids: [],
         hypothesis_id: "h1",
         program_state: "accepting",
         time_state: "present",
@@ -67,10 +72,13 @@ describe("conditional-field result encoding", () => {
     const index = {
       ...stubRecallIndex([]),
       entries: [{
-        schema_version: 1 as const, object_id: "memory-1", hypothesis_id: "h1",
-        output_binding: "memory-1", role: "requested" as const, explanation_ids: [],
-        association_milligrades: 500, claim: "unknown" as const,
-        program_state: "accepting", time_state: "present"
+        ...memoryEntry(),
+        hypothesis_id: "h1",
+        output_binding: "memory-1",
+        role: "requested" as const,
+        association_milligrades: 500,
+        program_state: "accepting",
+        time_state: "present"
       }],
       representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
     };
@@ -84,10 +92,13 @@ describe("conditional-field result encoding", () => {
     const index = {
       ...stubRecallIndex([]),
       entries: [{
-        schema_version: 1 as const, object_id: "memory-1", hypothesis_id: "h1",
-        output_binding: "memory-1", role: "requested" as const, explanation_ids: [],
-        association_milligrades: 500, claim: "unknown" as const,
-        program_state: "accepting", time_state: "present"
+        ...memoryEntry(),
+        hypothesis_id: "h1",
+        output_binding: "memory-1",
+        role: "requested" as const,
+        association_milligrades: 500,
+        program_state: "accepting",
+        time_state: "present"
       }],
       representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
     };
@@ -101,6 +112,39 @@ describe("conditional-field result encoding", () => {
     expect(results[0]?.budget_state.token_estimate).toBeLessThanOrEqual(2_000);
     expect(Buffer.byteLength(results[0]!.content_preview, "utf8")).toBeLessThanOrEqual(2_000);
     expect(frameEncodedIndex(index, results).entries).toEqual(index.entries);
+  });
+
+  it("encodes a source-record-only index row with its native target and no fake memory id", () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    const entry = sourceIndexEntry({
+      workspace_id: "ws",
+      root_kind: "source_record",
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: digest,
+      evidence_object_id: null,
+      association_milligrades: 700,
+      hypothesis_id: "h1",
+      output_binding: "default",
+      program_state: "accepting",
+      time_state: "present"
+    });
+    const index = {
+      ...stubRecallIndex([]),
+      entries: [entry],
+      representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
+    };
+    const results = encodeIndexResults(index, new Map([[
+      // keyed by canonical identity in production; object_id fallback must not invent a memory id
+      "rec-1",
+      "quoted source excerpt"
+    ]]));
+    expect(results).toHaveLength(1);
+    const parsed = MemorySearchResultSchema.parse(results[0]);
+    expect(parsed.object_kind).toBe("source_evidence");
+    expect(parsed.object_id).toBeUndefined();
+    expect(parsed.target).toEqual(entry.target);
+    expect(parsed.object_kind).not.toBe("memory_entry");
   });
 });
 

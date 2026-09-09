@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  productSubjectId,
   type FieldSnapshot,
   type FieldValue
 } from "@do-soul/alaya-protocol";
@@ -83,8 +84,8 @@ describe("conditional-field compiler and projection contracts", () => {
     });
     const values = field.binding.kind === "bound" ? field.binding.snapshot.values : [];
     expect(field.closure.observation).toBe("exhausted");
-    const historyA = values.filter((row) => row.state.object_id === "history-a");
-    const historyB = values.filter((row) => row.state.object_id === "history-b");
+    const historyA = values.filter((row) => productSubjectId(row.state) === "history-a");
+    const historyB = values.filter((row) => productSubjectId(row.state) === "history-b");
     expect(historyA.some((row) => row.state.binding_context.includes(`${SERVICE_VARIABLE}=service-a`))).toBe(true);
     expect(historyB.some((row) => row.state.binding_context.includes(`${SERVICE_VARIABLE}=service-a`))).toBe(false);
   });
@@ -132,7 +133,7 @@ function fieldValue(
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     state: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      object_id: objectId,
+      target: { kind: "memory_entry" as const, workspace_id: "ws", object_id: objectId, source_revision: "rev" },
       program_state: extras.program_state ?? "accepting",
       hypothesis_id: extras.hypothesis_id ?? "h0",
       binding_context: extras.binding_context ?? "default",

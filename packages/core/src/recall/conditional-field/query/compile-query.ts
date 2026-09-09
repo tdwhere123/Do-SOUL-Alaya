@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   ConditionalFieldIdSchema,
@@ -11,12 +10,12 @@ import {
   QueryTimeWindowSchema,
   QueryViewSchema,
   RequestBudgetSchema,
-  formatConditionalFieldDigest,
   type QueryBinding,
   type Guard,
   type QueryHole,
   type QueryHypothesis,
   type QueryInterpretation,
+  type QueryInterpretationProposal,
   type QueryInterpretationStatus,
   type QueryProgram,
   type QueryTimeWindow,
@@ -25,6 +24,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import { admitRequestBudget } from "../reference/bind-max-min.js";
+import {
+  identityFor,
+  proposalBindsOriginalQuery,
+  type QueryDenotationParts
+} from "./compile-query-identity.js";
 import { interpretQuery } from "../reference/interpret-query.js";
 import {
   SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
@@ -46,6 +50,13 @@ import {
   type OrdinarySourceFilters
 } from "./ordinary-language.js";
 
+export {
+  continuationViewMismatch,
+  digestOriginalQuery,
+  identityFor,
+  interpretationIdentity,
+  proposalBindsOriginalQuery
+} from "./compile-query-identity.js";
 export { SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID };
 export type { OpenRelationCapture };
 export {
@@ -73,6 +84,7 @@ type CompileCommon = Readonly<{
   readonly query_id?: string;
   readonly memory?: QueryMemoryPort;
   readonly authorized_scopes?: readonly string[];
+  readonly interpretation_proposal?: QueryInterpretationProposal;
 }>;
 
 export type TypedQueryCompileInput = CompileCommon & Readonly<{
@@ -164,18 +176,6 @@ export function recoverableBindingContext(bindings: readonly QueryBinding[]): st
     .join(";");
 }
 
-export function interpretationIdentity(input: Readonly<{
-  readonly interpretation_clock?: string;
-  readonly model_id?: string;
-}>): string {
-  return formatConditionalFieldDigest(
-    createHash("sha256").update(stableStringify({
-      interpretation_clock: input.interpretation_clock ?? null,
-      model_id: input.model_id ?? null
-    }), "utf8").digest("hex")
-  );
-}
-
 function compileTyped(
   input: TypedQueryCompileInput,
   snapshotId: string,
@@ -206,15 +206,26 @@ function compileTyped(
     });
   }
   consumeMemoryIfNeeded(program.data, snapshotId, budget, input.memory);
+  const proposal = boundProposal(input.interpretation_proposal, stableStringify(program.data));
+  if (proposal === "invalid") {
+    return interpretationOf({
+      query_id: fallbackQueryId(input.query_id, "malformed"),
+      status: "malformed",
+      snapshot_id: snapshotId,
+      program: program.data,
+      view,
+      interpretation_clock: input.interpretation_clock
+    });
+  }
   return interpretationOf({
-    query_id: identityFor(queryId, {
+    query_id: identityFor(queryId, denotation(input, {
       program: program.data,
       view,
       hypotheses,
       interpretation_clock: input.interpretation_clock,
       time_window: timeWindow,
       authorized_scopes: input.authorized_scopes
-    }),
+    })),
     status: admissionStatus(program.data, holes, hypotheses),
     snapshot_id: snapshotId,
     program: program.data,
@@ -242,6 +253,10 @@ function compileOrdinary(
     return ordinaryMalformed(input, snapshotId, view);
   }
   const classified = classifyOrdinaryRequest(input.text);
+  const proposal = boundProposal(input.interpretation_proposal, input.text);
+  if (proposal === "invalid") {
+    return ordinaryMalformed(input, snapshotId, view);
+  }
   const relations = input.relations ?? proposeOrdinaryRelations(input.text);
   let interpreted: QueryInterpretation;
   try {
@@ -256,13 +271,13 @@ function compileOrdinary(
       status: "resource_rejected", snapshot_id: snapshotId, program: EPSILON, view,
       interpretation_clock: input.interpretation_clock });
   }
-  return { ...interpreted, query_id: identityFor(queryId, {
+  return { ...interpreted, query_id: identityFor(queryId, denotation(input, {
     program: interpreted.program, view: interpreted.view, hypotheses: interpreted.hypotheses,
     source_guard: interpreted.source_guard,
     interpretation_clock: input.interpretation_clock, time_window: interpreted.time_window,
     authorized_scopes: input.authorized_scopes, lexical_text: input.text,
     ordinary_request: { relations, query_id: queryId }
-  }) };
+  })) };
 }
 
 function compileSupportedRequest(
@@ -301,14 +316,14 @@ function compileSupportedRequest(
     const hypotheses = ambiguousEventHypotheses();
     consumeMemoryIfNeeded(program, snapshotId, budget, input.memory);
     return interpretationOf({
-      query_id: identityFor(queryId, {
+      query_id: identityFor(queryId, denotation(input, {
         program,
         view,
         hypotheses,
         interpretation_clock: input.interpretation_clock,
         time_window: yesterday,
         authorized_scopes: input.authorized_scopes
-      }),
+      })),
       status: "hypotheses",
       snapshot_id: snapshotId,
       program,
@@ -328,14 +343,14 @@ function compileSupportedRequest(
     ...openEndpointHoles(hints)
   ];
   return interpretationOf({
-    query_id: identityFor(queryId, {
+    query_id: identityFor(queryId, denotation(input, {
       program,
       view,
       lexical_text: input.text,
       interpretation_clock: input.interpretation_clock,
       time_window: window,
       authorized_scopes: input.authorized_scopes
-    }),
+    })),
     status: admissionStatus(program, holes, []),
     snapshot_id: snapshotId,
     program,
@@ -364,7 +379,7 @@ function compileLexicalRequest(
   const holes = [uninterpretedQueryHole(), ...openEndpointHoles(hints)];
   const window = closedHintWindow(hints);
   return interpretationOf({
-    query_id: identityFor(queryId, {
+    query_id: identityFor(queryId, denotation(input, {
       program,
       view,
       interpretation_clock: input.interpretation_clock,
@@ -372,7 +387,7 @@ function compileLexicalRequest(
       authorized_scopes: input.authorized_scopes,
       lexical_text: input.text,
       source_guard: sourceGuard
-    }),
+    })),
     status: admissionStatus(program, holes, []),
     snapshot_id: snapshotId,
     program,
@@ -412,13 +427,13 @@ function compileOpenRelations(
     ...openEndpointHoles(hints)
   ];
   return interpretationOf({
-    query_id: identityFor(queryId, {
+    query_id: identityFor(queryId, denotation(input, {
       program,
       view,
       interpretation_clock: input.interpretation_clock,
       time_window: window,
       authorized_scopes: input.authorized_scopes
-    }),
+    })),
     status: admissionStatus(program, holes, []),
     snapshot_id: snapshotId,
     program,
@@ -628,34 +643,24 @@ function fallbackQueryId(value: string | undefined, fallback: string): string {
   return parsed?.success === true ? parsed.data : fallback;
 }
 
-function identityFor(
-  queryId: string | undefined,
-  parts: Readonly<{
-    readonly program: QueryProgram;
-    readonly source_guard?: Guard;
-    readonly view?: QueryView;
-    readonly hypotheses?: readonly QueryHypothesis[];
-    readonly interpretation_clock?: string;
-    readonly time_window?: QueryTimeWindow;
-    readonly authorized_scopes?: readonly string[];
-    readonly lexical_text?: string;
-    readonly ordinary_request?: unknown;
-  }>
-): string {
-  if (queryId !== undefined) return queryId;
-  return formatConditionalFieldDigest(
-    createHash("sha256").update(stableStringify({
-      program: parts.program,
-      view: parts.view ?? null,
-      hypotheses: parts.hypotheses ?? [],
-      interpretation_clock: parts.interpretation_clock ?? null,
-      time_window: parts.time_window ?? null,
-      authorized_scopes: [...(parts.authorized_scopes ?? [])].sort(),
-      lexical_text: parts.lexical_text ?? "",
-      ordinary_request: parts.ordinary_request ?? null,
-      source_guard: parts.source_guard ?? null
-    }), "utf8").digest("hex")
-  );
+function denotation(
+  input: CompileCommon,
+  parts: Omit<QueryDenotationParts, "interpretation_proposal">
+): QueryDenotationParts {
+  return {
+    ...parts,
+    ...(input.interpretation_proposal === undefined
+      ? {}
+      : { interpretation_proposal: input.interpretation_proposal })
+  };
+}
+
+function boundProposal(
+  proposal: QueryInterpretationProposal | undefined,
+  originalQuery: string
+): QueryInterpretationProposal | undefined | "invalid" {
+  if (proposal === undefined) return undefined;
+  return proposalBindsOriginalQuery(proposal, originalQuery) ? proposal : "invalid";
 }
 
 function typedProgramOrEpsilon(input: QueryCompileInput): QueryProgram {

@@ -171,6 +171,7 @@ describe("Phase-6 MCP agent-use protocol proof", () => {
       expect(recall.results).toHaveLength(1);
 
       const objectId = recall.results[0]!.object_id;
+      if (objectId === undefined) throw new Error("expected memory object_id on recall result");
       expect(objectId).toBe(PRIMARY_MEMORY_ID);
       const pointer = await callTool<SoulOpenPointerResponse>(client, "soul.open_pointer", {
         object_id: objectId

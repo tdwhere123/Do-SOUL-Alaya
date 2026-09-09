@@ -62,7 +62,7 @@ describe("index representation continuity", () => {
   it.each([false, true])("does not let an ungrounded earlier value block a later proved seed (accepting=%s)", (accepting) => {
     const a = fieldValue("a", 800, { program_state: accepting ? "accepting" : "routing", accepting });
     const z = fieldValue("z", 900);
-    const seeds = [z, a].map((value) => ({ schema_version: 1 as const, state: value.state, milligrades: value.milligrades }));
+    const seeds = [z, a].map((value) => ({ schema_version: 1 as const, state: value.state, milligrades: value.milligrades ?? 0 }));
     const ground = groundedOutputDerivations({ seeds, transitions: [], derivations: [], transition_derivations: {}, allowance: 1 });
     expect(ground.complete).toBe(false);
     let scanOffset = 0;
@@ -72,12 +72,12 @@ describe("index representation continuity", () => {
       delivered_product_ids: new Set(), projection_scan_offset: 0,
       on_projection_progress: (offset) => { scanOffset = offset; } });
     const first = projectAcceptingIndex(input);
-    expect(first.entries.map((entry) => entry.object_id)).toEqual(["z"]);
+    expect(first.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["z"]);
     expect(scanOffset).toBe(2);
     const resumed = projectAcceptingIndex({ ...input, prior_continuation: first.continuation,
       projection_scan_offset: scanOffset, delivered_product_ids: new Set([productStateNodeId(z.state)]),
       derivations: [], output_derivations: undefined, transition_derivations: {}, resource_work: undefined });
-    expect(resumed.entries.map((entry) => entry.object_id)).toEqual(accepting ? ["a"] : []);
+    expect(resumed.entries.map((entry) => (entry.object_id ?? ""))).toEqual(accepting ? ["a"] : []);
     expect(resumed.continuation).toBeNull();
   });
 
@@ -86,7 +86,7 @@ describe("index representation continuity", () => {
     const root = { ...leaf("seed"), association_milligrades: 900 };
     const input = baseInput({ snapshot: { ...snapshotOf([value]), seeds: [{ schema_version: 1, state: value.state, milligrades: 900 }] },
       derivations: [root], grounding_complete: false, remaining_reserve: 10, expires_at: EXPIRES_AT });
-    expect(projectAcceptingIndex(input).entries.map((entry) => entry.object_id)).toEqual(["seed"]);
+    expect(projectAcceptingIndex(input).entries.map((entry) => (entry.object_id ?? ""))).toEqual(["seed"]);
     expect(projectAcceptingIndex({ ...input, derivations: [{ ...root, association_milligrades: 800 }] }).entries).toEqual([]);
     expect(projectAcceptingIndex({ ...input, derivations: [] }).entries).toEqual([]);
     expect(projectAcceptingIndex({ ...input, snapshot: { ...input.snapshot, seeds: [] } }).entries).toEqual([]);
@@ -104,7 +104,7 @@ describe("index representation continuity", () => {
     expect(new Set(index.entries.map(acceptingKey)).size).toBe(3);
     expect(index.entries.every((entry) => entry.program_state !== undefined)).toBe(true);
     expect(index.entries.every((entry) => entry.time_state !== undefined)).toBe(true);
-    const plantedMerge = index.entries.filter((entry) => entry.object_id === "cfg");
+    const plantedMerge = index.entries.filter((entry) => (entry.object_id ?? "") === "cfg");
     expect(plantedMerge).toHaveLength(3);
   });
 
@@ -237,8 +237,8 @@ describe("index representation continuity", () => {
       expires_at: EXPIRES_AT
     }));
     expect(continued.completeness.logical_index).not.toBe("invalidated");
-    expect(continued.entries.map((entry) => entry.object_id))
-      .not.toEqual(first.entries.map((entry) => entry.object_id));
+    expect(continued.entries.map((entry) => (entry.object_id ?? "")))
+      .not.toEqual(first.entries.map((entry) => (entry.object_id ?? "")));
   });
 
   it("omits mixed-generation payload without claiming a complete explanation", () => {
@@ -253,7 +253,7 @@ describe("index representation continuity", () => {
       payload_generation: SNAPSHOT_ID,
       support: [supportRecord([witness("for-r", ["r"], 1)])]
     }));
-    expect(sameGeneration.entries.find((entry) => entry.object_id === "r")?.explanation_ids)
+    expect(sameGeneration.entries.find((entry) => (entry.object_id ?? "") === "r")?.explanation_ids)
       .toEqual(["for-r"]);
     expect(sameGeneration.completeness.payload).toBe("complete");
   });
@@ -291,7 +291,7 @@ describe("index representation continuity", () => {
       ...baseInput({
         snapshot: {
           ...snapshotOf([value]),
-          seeds: [{ schema_version: 1, state: value.state, milligrades: value.milligrades }]
+          seeds: [{ schema_version: 1, state: value.state, milligrades: value.milligrades ?? 0 }]
         },
         remaining_reserve: 1,
         expires_at: EXPIRES_AT
@@ -308,7 +308,7 @@ describe("index representation continuity", () => {
     expect(progress?.completed_work).toBe(1);
     expect(remaining).toBe(0);
     const second = continueAcceptingIndex(first, { ...input, grounding_progress: progress });
-    expect(second.entries.map((entry) => entry.object_id)).toEqual(["cfg"]);
+    expect(second.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["cfg"]);
     expect(second.continuation).toBeNull();
     expect(progress?.completed_work).toBe(1);
     expect(remaining).toBe(0);
@@ -337,7 +337,7 @@ describe("index representation continuity", () => {
     const ids: string[] = [];
     let page = projectAcceptingIndex(input);
     for (let attempt = 0; attempt < 10; attempt += 1) {
-      ids.push(...page.entries.map((entry) => entry.object_id));
+      ids.push(...page.entries.map((entry) => (entry.object_id ?? "")));
       expect(page.completeness.observed_coverage).toBe("complete");
       if (page.continuation === null) break;
       page = continueAcceptingIndex(page, input);
@@ -353,7 +353,7 @@ describe("index representation continuity", () => {
     const first = projectAcceptingIndex({ ...input, finalize_payload: (_entries, remaining) => ({ remaining, complete: false }) });
     expect(first.continuation).not.toBeNull();
     const resumed = continueAcceptingIndex(first, { ...input, finalize_payload: (_entries, remaining) => ({ remaining: remaining - 1, complete: true }) });
-    expect(resumed.entries.map((entry) => entry.object_id)).toEqual(["cfg"]);
+    expect(resumed.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["cfg"]);
     expect(resumed.continuation).toBeNull();
     expect(resumed.completeness.payload).toBe("complete");
   });
@@ -362,7 +362,7 @@ describe("index representation continuity", () => {
     const index = projectAcceptingIndex(deploymentInput({
       support: [supportRecord([witness("for-r", ["r"], 1)])]
     }));
-    const entry = index.entries.find((item) => item.object_id === "r");
+    const entry = index.entries.find((item) => (item.object_id ?? "") === "r");
     if (entry === undefined) throw new Error("expected requested entry");
     const output = outputAttributionHandle({
       entry,
@@ -373,6 +373,8 @@ describe("index representation continuity", () => {
     expect(output.exposure).toBe("exposed");
     expect(output.reported_use).toBe("unknown");
     expect(output.witness_id).toBeUndefined();
+    expect(output.target).toEqual(entry.target);
+    expect(output.object_id).toBe("r");
     const witnessReport = witnessAttributionHandle({
       entry,
       witness_id: "for-r",
@@ -385,17 +387,54 @@ describe("index representation continuity", () => {
     expect(witnessReport.witness_id).toBe("for-r");
     expect(witnessReport.reported_use).toBe("unknown");
     expect(witnessReport.output_id).toBeUndefined();
+    expect(witnessReport.target).toEqual(entry.target);
+    expect(witnessReport.object_id).toBe("r");
+  });
+
+  it("source-record attribution carries native target identity without minting an object id", () => {
+    const sourceTarget = {
+      kind: "source_evidence" as const,
+      workspace_id: "ws",
+      root_kind: "source_record" as const,
+      root_id: "src-root",
+      source_version: "rev",
+      content_digest: SNAPSHOT_ID,
+      evidence_object_id: null
+    };
+    const index = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([fieldValue("src-root", 900, { target: sourceTarget })])
+    }));
+    const entry = index.entries.find((item) => item.target.kind === "source_evidence");
+    if (entry === undefined) throw new Error("expected source-record entry");
+    expect(entry.object_id).toBeUndefined();
+    const output = outputAttributionHandle({
+      entry,
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID
+    });
+    expect(output.object_id).toBeUndefined();
+    expect(output.target).toEqual(sourceTarget);
+    const witnessReport = witnessAttributionHandle({
+      entry,
+      witness_id: "for-src",
+      interpretation_id: "meaning-1",
+      as_of: EVENING,
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID
+    });
+    expect(witnessReport.object_id).toBeUndefined();
+    expect(witnessReport.target).toEqual(sourceTarget);
   });
 
   it("retains roles, association, and explanation references on the index", () => {
     const index = InformationIndexSchema.parse(projectAcceptingIndex(deploymentInput({
       support: [supportRecord([witness("for-r", ["r"], 1)])]
     })));
-    const requested = index.entries.find((entry) => entry.object_id === "r");
+    const requested = index.entries.find((entry) => (entry.object_id ?? "") === "r");
     expect(requested?.role).toBe("requested");
     expect(requested?.association_milligrades).toBe(1000);
     expect(requested?.explanation_ids).toEqual(["for-r"]);
-    expect(index.entries.some((entry) => entry.object_id === "h")).toBe(true);
+    expect(index.entries.some((entry) => (entry.object_id ?? "") === "h")).toBe(true);
     expect(index.representation.policy).toBe("construct_index_then_page_then_payload");
   });
 });
@@ -431,6 +470,8 @@ function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): Accepting
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       requested_roles: ["requested", "associated"],
       include_routing_only: false,
+      enumeration_policy: "canonical",
+      result_kind_view: "mixed",
       facet_mode: "same_path",
       threshold_milligrades: 0
     },
@@ -468,7 +509,7 @@ function fieldValue(
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     state: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      object_id: objectId,
+      target: { kind: "memory_entry" as const, workspace_id: "ws", object_id: objectId, source_revision: "rev" },
       program_state: "accepting",
       hypothesis_id: "h0",
       binding_context: "default",
@@ -561,14 +602,14 @@ function supportRecord(witnesses: readonly Witness[]): SupportRecord {
 }
 
 function acceptingKey(entry: {
-  readonly object_id: string;
+  readonly object_id?: string;
   readonly hypothesis_id: string;
   readonly output_binding: string;
   readonly program_state?: string;
   readonly time_state?: string;
 }): string {
   return [
-    entry.object_id,
+    (entry.object_id ?? ""),
     entry.hypothesis_id,
     entry.output_binding,
     entry.program_state ?? "",

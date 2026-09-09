@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   CompletenessReportSchema,
   ContinuationSchema,
+  RecallTargetRefSchema,
   RequestBudgetSchema,
   SoulMemorySearchResponseSchema,
   type RequestBudget
@@ -17,7 +18,8 @@ import {
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 const usableSourceStates = new Set(["complete", "partial", "open", "exhausted_empty"]);
 const Entry = z.object({
-  object_id: z.string(), hypothesis_id: z.string(), output_binding: z.string(),
+  object_id: z.string().optional(), target: RecallTargetRefSchema,
+  hypothesis_id: z.string(), output_binding: z.string(),
   role: z.enum(["requested", "associated", "routing_only"]),
   association_milligrades: z.number().int().min(0).max(1000),
   claim: z.enum(["supported", "refuted", "conflict", "unknown"]),
@@ -25,7 +27,8 @@ const Entry = z.object({
   program_state: z.string().min(1), time_state: z.string().min(1)
 }).strict().readonly();
 const ResultSlot = z.object({
-  rank: z.number().int().positive(), object_id: z.string(), object_kind: z.string(),
+  rank: z.number().int().positive(), object_id: z.string().optional(), object_kind: z.string(),
+  target: RecallTargetRefSchema,
   index_entry_offset: z.number().int().nonnegative(),
   hypothesis_id: z.string(), output_binding: z.string(),
   program_state: z.string().min(1), time_state: z.string().min(1)
@@ -91,7 +94,8 @@ const ValidatedMeasurement = ValidatedMeasurementBase.superRefine((value, contex
     || value.response_slots.some((slot, offset) => {
       const entry = value.entries[offset];
       return entry === undefined || slot.rank !== offset + 1 || slot.index_entry_offset !== offset
-        || slot.object_kind !== "memory_entry" || slot.object_id !== entry.object_id
+        || slot.object_kind !== (entry.target.kind === "source_evidence" ? "source_evidence" : "memory_entry")
+        || slot.object_id !== entry.object_id
         || slot.hypothesis_id !== entry.hypothesis_id || slot.output_binding !== entry.output_binding
         || slot.program_state !== entry.program_state || slot.time_state !== entry.time_state;
     }) || value.evaluated_slots.some((slot, offset) => JSON.stringify(slot) !== JSON.stringify(value.response_slots[offset]));
@@ -100,7 +104,9 @@ const ValidatedMeasurement = ValidatedMeasurementBase.superRefine((value, contex
   const associations = value.entries.map((entry) => entry.association_milligrades);
   const metrics = value.metrics;
   const badMetrics = metrics.index_entry_count !== value.entries.length
-    || metrics.distinct_object_count !== new Set(value.entries.map((entry) => entry.object_id)).size
+    || metrics.distinct_object_count !== new Set(value.entries.map((entry) =>
+      entry.object_id ?? (entry.target.kind === "source_evidence" ? entry.target.root_id : entry.target.object_id)
+    )).size
     || metrics.hypothesis_count !== new Set(value.entries.map((entry) => entry.hypothesis_id)).size
     || metrics.output_binding_count !== new Set(value.entries.map((entry) => entry.output_binding)).size
     || metrics.declared_explanation_count !== explanations.size
@@ -142,8 +148,8 @@ export function conditionalFieldDeliveryMatches(
 
 export interface ConditionalMeasurementInput {
   readonly recallResult: unknown;
-  readonly deliveredResults: readonly { readonly object_id: string;
-    readonly object_kind?: string | null; readonly rank: number }[];
+  readonly deliveredResults: readonly { readonly object_id?: string;
+    readonly object_kind?: string | null; readonly rank: number; readonly relevance_score?: number }[];
   readonly queryText?: string;
   readonly workspaceId?: string;
   readonly requestFilters?: ConditionalFieldRequestFilters;
@@ -196,11 +202,12 @@ export function measureConditionalFieldResponse(input: ConditionalMeasurementInp
   const slots = response.data.results.map((result, offset) => {
     const entry = index.entries[offset];
     if (entry === undefined || entry.object_id !== result.object_id
-      || result.object_kind !== "memory_entry"
+      || result.object_kind !== (entry.target.kind === "source_evidence" ? "source_evidence" : "memory_entry")
       || entry.hypothesis_id !== result.hypothesis_id || entry.output_binding !== result.output_binding
       || entry.program_state === undefined || entry.time_state === undefined
       || entry.program_state !== result.program_state || entry.time_state !== result.time_state) return null;
-    return { rank: offset + 1, object_id: result.object_id, object_kind: result.object_kind,
+    return { rank: offset + 1, ...(result.object_id === undefined ? {} : { object_id: result.object_id }),
+      object_kind: result.object_kind, target: entry.target,
       index_entry_offset: offset, hypothesis_id: entry.hypothesis_id, output_binding: entry.output_binding,
       program_state: entry.program_state, time_state: entry.time_state };
   });
@@ -213,9 +220,10 @@ export function measureConditionalFieldResponse(input: ConditionalMeasurementInp
       || result.object_kind !== slot.object_kind) return invalid("evaluated_slot_mismatch");
     evaluated.push(slot);
   }
-  const entries = index.entries.map(({ object_id, hypothesis_id, output_binding, role,
+  const entries = index.entries.map(({ object_id, target, hypothesis_id, output_binding, role,
     association_milligrades, claim, explanation_ids, program_state, time_state }) => ({
-    object_id, hypothesis_id, output_binding, role, association_milligrades, claim, explanation_ids,
+    ...(object_id === undefined ? {} : { object_id }), target, hypothesis_id, output_binding, role,
+    association_milligrades, claim, explanation_ids,
     program_state: program_state ?? null, time_state: time_state ?? null
   }));
   const explanations = new Set((index.explanations ?? []).map((entry) => entry.derivation_id));
@@ -235,7 +243,9 @@ export function measureConditionalFieldResponse(input: ConditionalMeasurementInp
     evaluated_slots: evaluated, response_slots: slots, response_slot_count: response.data.results.length,
     provider_calls, garden_enqueue,
     metrics: {
-      index_entry_count: entries.length, distinct_object_count: new Set(entries.map((entry) => entry.object_id)).size,
+      index_entry_count: entries.length, distinct_object_count: new Set(entries.map((entry) =>
+        entry.object_id ?? (entry.target.kind === "source_evidence" ? entry.target.root_id : entry.target.object_id)
+      )).size,
       hypothesis_count: new Set(entries.map((entry) => entry.hypothesis_id)).size,
       output_binding_count: new Set(entries.map((entry) => entry.output_binding)).size,
       declared_explanation_count: explanations.size, explanation_reference_count: references.length,

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ConditionalFieldIdSchema, SchemaVersionSchema, Sha256DigestSchema } from "./common.js";
 import { IsoDatetimeStringSchema } from "../../shared/schema-primitives.js";
+import { RecallTargetRefSchema } from "./product-identity.js";
 
 export const UsageReportGrainSchema = z.enum(["object", "output", "witness", "action"]);
 export const UsageExposureSchema = z.enum(["exposed", "nonexposure", "unknown"]);
@@ -17,6 +18,7 @@ const UsageReportBaseSchema = z
     interpretation_id: ConditionalFieldIdSchema.optional(),
     as_of: IsoDatetimeStringSchema.optional(),
     object_id: ConditionalFieldIdSchema.optional(),
+    target: RecallTargetRefSchema.optional(),
     output_id: ConditionalFieldIdSchema.optional(),
     witness_id: ConditionalFieldIdSchema.optional(),
     action_id: ConditionalFieldIdSchema.optional()
@@ -25,8 +27,8 @@ const UsageReportBaseSchema = z
   .readonly();
 
 export const UsageReportSchema = UsageReportBaseSchema.superRefine((value, ctx) => {
-  if (value.grain === "object" && value.object_id === undefined) {
-    ctx.addIssue({ code: "custom", message: "object grain requires object_id" });
+  if (value.grain === "object" && value.object_id === undefined && value.target === undefined) {
+    ctx.addIssue({ code: "custom", message: "object grain requires object_id or target" });
   }
   if (value.grain === "output" && value.output_id === undefined) {
     ctx.addIssue({ code: "custom", message: "output grain requires output_id" });

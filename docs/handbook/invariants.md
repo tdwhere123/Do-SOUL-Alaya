@@ -148,7 +148,8 @@ These rules always win over lower-level docs and task-card convenience.
     budget-aware-q are not the admission-order owner. There is no all-K
     prefix promise and no runtime self-replay. Later consensus does not
     reorder the delivered set. Missing generation or condition pins fail
-    closed.
+    closed. Product identity is a tagged memory or native source-evidence
+    target; source-record-only delivery must not mint a memory or capsule id.
 20c. **Mechanism and measurement stay separate.** Finite-model and planted
     integration checks do not establish live provider/cache availability,
     production Clock-A, dataset KPI, or prepare-time snapshot compatibility.

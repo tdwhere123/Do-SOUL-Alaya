@@ -3,6 +3,9 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
+  memoryProductStateKey,
+  productSubjectId,
+  retargetMemoryProduct,
   type Derivation,
   type FacetMode,
   type FacetVector,
@@ -83,16 +86,25 @@ export function alternativeMax(grades: readonly number[]): number {
 
 export function productStateFromObservation(
   observation: TypedObservation,
-  defaults: Partial<Omit<ProductStateKey, "schema_version" | "object_id">> = {}
+  defaults: Partial<Omit<ProductStateKey, "schema_version" | "target">> & {
+    readonly workspace_id?: string;
+    readonly object_id?: string;
+    readonly source_revision?: string;
+  } = {}
 ): ProductStateKey {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    object_id: observation.object_id,
+  const workspaceId = defaults.workspace_id ?? observation.workspace_id;
+  if (workspaceId === undefined) {
+    throw new Error("product state requires workspace_id");
+  }
+  return memoryProductStateKey({
+    workspace_id: workspaceId,
+    object_id: defaults.object_id ?? observation.object_id,
+    source_revision: defaults.source_revision ?? observation.source_revision,
     program_state: defaults.program_state ?? DEFAULT_PROGRAM_STATE,
     hypothesis_id: defaults.hypothesis_id ?? DEFAULT_HYPOTHESIS,
     binding_context: defaults.binding_context ?? UNBOUND_BINDING,
     time_state: defaults.time_state ?? DEFAULT_TIME_STATE
-  };
+  });
 }
 
 export function observationIsGuaranteed(observation: TypedObservation): boolean {
@@ -167,14 +179,12 @@ export function seedActivationsForObservation(
         programState
       );
       if (binding === undefined) continue;
-      const seed = seedFromObservation(observation, {
-        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-        object_id: observation.object_id,
+      const seed = seedFromObservation(observation, productStateFromObservation(observation, {
         program_state: programState,
         hypothesis_id: hypothesis.hypothesis_id,
         binding_context: binding,
         time_state: timeState
-      });
+      }));
       if (seed !== undefined) seeds.push(seed);
     }
   }
@@ -252,7 +262,7 @@ export function adjacencyEffectsForRows(
     if (row.validity === undefined) continue;
     if (inactiveResolution(row.resolutionKind)) continue;
     for (const from of input.liveStates) {
-      if (from.object_id !== row.sourceObjectId) continue;
+      if (productSubjectId(from) !== row.sourceObjectId) continue;
       effects.push(...effectsForLiveRow(automaton, row, from, input));
     }
   }
@@ -423,12 +433,11 @@ function effectsForAdvance(
       programState
     );
     if (binding === undefined) continue;
-    const to = {
-      ...from,
+    const to = retargetMemoryProduct(from, {
       object_id: row.targetObjectId,
       program_state: programState,
       binding_context: binding
-    };
+    });
     effects.push(...compiledEffects({ ...row, source_revision: row.source_revision ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision },
       from, to, strength, applicable, decision, input.facets ?? []));
   }
@@ -444,7 +453,7 @@ function routingEffect(
   if (routing === undefined || routing.role !== "routing_only" || !routing.applicable) {
     return [];
   }
-  return compiledEffects(row, from, { ...from, object_id: row.targetObjectId }, routing, true, "true", []);
+  return compiledEffects(row, from, retargetMemoryProduct(from, { object_id: row.targetObjectId }), routing, true, "true", []);
 }
 
 function compiledEffects(

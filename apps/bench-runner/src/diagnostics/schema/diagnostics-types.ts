@@ -141,7 +141,7 @@ export interface FineAssessmentPrunedCandidateDiagnostic {
 }
 
 export interface DiagnosticRecallResultInput {
-  readonly object_id: string;
+  readonly object_id?: string;
   readonly object_kind?: string | null;
   readonly rank: number;
   readonly relevance_score: number;

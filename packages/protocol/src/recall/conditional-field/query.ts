@@ -48,6 +48,9 @@ export const GuardSchema = z
   .strict()
   .readonly();
 
+export const EnumerationPolicySchema = z.enum(["canonical", "associative"]);
+export const ResultKindViewSchema = z.enum(["mixed", "memory_only", "source_only"]);
+
 export const QueryViewSchema = z
   .object({
     schema_version: SchemaVersionSchema,
@@ -62,7 +65,9 @@ export const QueryViewSchema = z
       argument_variables: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly()
     }).strict().readonly()).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     facet_mode: FacetModeSchema.default("same_path"),
-    threshold_milligrades: MilligradeSchema.default(0)
+    threshold_milligrades: MilligradeSchema.default(0),
+    enumeration_policy: EnumerationPolicySchema.default("canonical"),
+    result_kind_view: ResultKindViewSchema.default("mixed")
   })
   .strict()
   .readonly();
@@ -242,6 +247,27 @@ export const QueryTimeWindowSchema = z
   .strict()
   .readonly();
 
+export const QueryInterpretationProposalSchema = z
+  .object({
+    schema_version: SchemaVersionSchema,
+    original_query_digest: Sha256DigestSchema,
+    producer_id: ConditionalFieldIdSchema,
+    conditions: z.array(GuardSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    input_limits: z
+      .object({
+        work_units: NonNegativeIntSchema.optional(),
+        memory_bytes: NonNegativeIntSchema.optional()
+      })
+      .strict()
+      .readonly()
+      .optional(),
+    program: QueryProgramSchema.optional(),
+    holes: z.array(QueryHoleSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    hypotheses: z.array(QueryHypothesisSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
+  })
+  .strict()
+  .readonly();
+
 export const QueryInterpretationSchema = z
   .object({
     schema_version: SchemaVersionSchema,
@@ -254,11 +280,15 @@ export const QueryInterpretationSchema = z
     holes: z.array(QueryHoleSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     hypotheses: z.array(QueryHypothesisSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     interpretation_clock: IsoDatetimeStringSchema.optional(),
-    time_window: QueryTimeWindowSchema.optional()
+    time_window: QueryTimeWindowSchema.optional(),
+    interpretation_proposal: QueryInterpretationProposalSchema.optional()
   })
   .strict()
   .readonly();
 
+export type EnumerationPolicy = z.infer<typeof EnumerationPolicySchema>;
+export type ResultKindView = z.infer<typeof ResultKindViewSchema>;
+export type QueryInterpretationProposal = z.infer<typeof QueryInterpretationProposalSchema>;
 export type GuardVerdict = z.infer<typeof GuardVerdictSchema>;
 export type GuardTimeScope = z.infer<typeof GuardTimeScopeSchema>;
 export type GuardKind = z.infer<typeof GuardKindSchema>;

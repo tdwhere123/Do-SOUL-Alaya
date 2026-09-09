@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  productSubjectId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   type Guard,
   type QueryInterpretation,
@@ -114,7 +115,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
       observeField(interpretation(relation("observed_log", "x", "y")), request),
       request
     );
-    const target = state.seen_identities.find((identity) => identity.object_id === "fact" && identity.program_state === "accepting")!;
+    const target = state.seen_identities.find((identity) => productSubjectId(identity) === "fact" && identity.program_state === "accepting")!;
     const key = productStateNodeId(target);
     const record = state.support.find((row) => row.proposition_id === state.claim_propositions?.get(key)?.proposition_id);
     expect(record?.claim).toBe("supported");
@@ -285,13 +286,13 @@ function input(
 function acceptedIds(state: ReturnType<typeof observeField>): readonly string[] {
   if (state.binding.kind !== "bound") return [];
   return state.binding.snapshot.values
-    .filter((value) => value.accepting && value.milligrades > 0)
-    .map((value) => value.state.object_id);
+    .filter((value) => value.accepting && (value.milligrades ?? 0) > 0)
+    .map((value) => productSubjectId(value.state));
 }
 
 function grades(state: ReturnType<typeof observeField>, objectId: string): number {
   if (state.binding.kind !== "bound") return 0;
   return state.binding.snapshot.values.find((value) =>
-    value.state.object_id === objectId && value.accepting
+    productSubjectId(value.state) === objectId && value.accepting
   )?.milligrades ?? 0;
 }

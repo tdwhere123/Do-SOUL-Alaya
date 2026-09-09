@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { FieldSnapshot, IndexEntry } from "@do-soul/alaya-protocol";
+import { productStateKeyFromIndexEntry, type FieldSnapshot, type IndexEntry } from "@do-soul/alaya-protocol";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
 import { indexEntryRevision } from "../conditional-field/index/project-accepting-index.js";
@@ -25,9 +25,7 @@ export function retainIndexDelivery(
   const delivered = { ...progress.delivered_entries };
   let bytes = first ? 256 : 0;
   for (const entry of entries) {
-    const key = productStateNodeId({ schema_version: 1, object_id: entry.object_id,
-      hypothesis_id: entry.hypothesis_id, binding_context: entry.output_binding,
-      program_state: entry.program_state!, time_state: entry.time_state! });
+    const key = productStateNodeId(productStateKeyFromIndexEntry(entry));
     if (delivered[key] === undefined) bytes += 128 + Buffer.byteLength(key, "utf8");
     // Open observation can refine an already emitted product; retain only its latest semantic revision.
     delivered[key] = indexEntryRevision(entry);

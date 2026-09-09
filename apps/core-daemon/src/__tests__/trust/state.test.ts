@@ -352,9 +352,10 @@ describe("trust state recorder", () => {
     expect(appendManyWithMutation.mock.calls[0]?.[0]?.[0]).toEqual(
       expect.objectContaining({
         payload_json: expect.objectContaining({
-          used_objects: [
-            { object_id: "shared-object", object_kind: "synthesis_capsule" }
-          ]
+          used_objects: {
+            count: 1,
+            sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+          }
         })
       })
     );
@@ -418,10 +419,10 @@ describe("trust state recorder", () => {
         event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
         payload_json: expect.objectContaining({
           used_object_ids: ["memory-a", "evidence-a"],
-          used_objects: [
-            { object_id: "memory-a", object_kind: "memory_entry" },
-            { object_id: "evidence-a", object_kind: "evidence_capsule" }
-          ]
+          used_objects: {
+            count: 2,
+            sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+          }
         })
       })
     );

@@ -174,7 +174,7 @@ async function buildRecallEvalQuestionResult(
     queryEmbeddingWarmup: readiness.queryEmbeddingWarmup,
     documentEmbeddingWarmupLatencyMs: readiness.documentWarmupLatencyMs,
     deliveredObjectIds: buildDeliveredResults(recallResult)
-      .map((result) => result.object_id)
+      .flatMap((result) => result.object_id === undefined ? [] : [result.object_id])
   };
 }
 

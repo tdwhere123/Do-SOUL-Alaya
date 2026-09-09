@@ -79,6 +79,7 @@ describe("alaya tools real-handler CLI/MCP parity", () => {
       entries: [
         {
           schema_version: 1,
+          target: { kind: "memory_entry", workspace_id: "ws", object_id: "c", source_revision: "rev" },
           object_id: "c",
           hypothesis_id: "h0",
           output_binding: "default",
@@ -89,6 +90,7 @@ describe("alaya tools real-handler CLI/MCP parity", () => {
         },
         {
           schema_version: 1,
+          target: { kind: "memory_entry", workspace_id: "ws", object_id: "h", source_revision: "rev" },
           object_id: "h",
           hypothesis_id: "h0",
           output_binding: "default",

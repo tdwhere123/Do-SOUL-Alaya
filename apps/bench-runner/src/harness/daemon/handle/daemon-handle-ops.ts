@@ -405,10 +405,12 @@ async function recordBenchRecallDelivery(
 ): Promise<BenchDeliveryRecord> {
   const deliveryId = `delivery_${randomUUID()}`;
   const deliveredObjects = dedupeDeliveredObjects([
-    ...results.map((result) => ({
-      object_id: result.object_id,
-      object_kind: result.object_kind
-    })),
+    ...results.flatMap((result) => result.object_id === undefined
+      ? []
+      : [{
+        object_id: result.object_id,
+        object_kind: result.object_kind
+      }]),
     ...recallResult.active_constraints.map(
       (constraint: { readonly object_id: string; readonly object_kind: string }) => ({
         object_id: constraint.object_id,

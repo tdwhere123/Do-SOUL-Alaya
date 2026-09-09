@@ -4,6 +4,8 @@ import { facetPathId } from "../../../../recall/conditional-field/engine/path-co
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   InformationIndexSchema,
+  QueryViewSchema,
+  memoryProductStateKey,
   type ClaimState,
   type CoverageRegion,
   type FacetVector,
@@ -158,6 +160,48 @@ describe("conditional-field production information index", () => {
     }));
     expect(swapped.entries.map((entry) => entry.object_id)).toEqual(["a", "z"]);
     expect(new Set(swapped.entries.map((entry) => entry.object_id))).toEqual(new Set(["a", "z"]));
+  });
+
+  it("associative order uses guaranteed lower milligrades then the canonical product identity", () => {
+    const members = [
+      fieldValue("z", 900),
+      fieldValue("a", 600)
+    ];
+    const canonical = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf(members),
+      view: defaultView({ enumeration_policy: "canonical" })
+    }));
+    const associative = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf(members),
+      view: defaultView({ enumeration_policy: "associative" })
+    }));
+    expect(canonical.entries.map((entry) => entry.object_id)).toEqual(["a", "z"]);
+    expect(associative.entries.map((entry) => entry.object_id)).toEqual(["z", "a"]);
+    expect(new Set(associative.entries.map((entry) => entry.object_id)))
+      .toEqual(new Set(canonical.entries.map((entry) => entry.object_id)));
+    const tied = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([fieldValue("z", 700), fieldValue("a", 700)]),
+      view: defaultView({ enumeration_policy: "associative" })
+    }));
+    expect(tied.entries.map((entry) => entry.object_id)).toEqual(["a", "z"]);
+    const mismatched = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf(members),
+      view: defaultView({ enumeration_policy: "associative" }),
+      prior_continuation: associative.continuation === null
+        ? {
+          schema_version: 1,
+          continuation_id: "page-1",
+          query_id: QUERY_ID,
+          snapshot_id: SNAPSHOT_ID,
+          result_version: RESULT_VERSION,
+          expires_at: EXPIRES_AT,
+          cursor: "offset-0",
+          enumeration_policy: "canonical",
+          result_kind_view: "mixed"
+        }
+        : { ...associative.continuation, enumeration_policy: "canonical" }
+    }));
+    expect(mismatched.completeness.logical_index).toBe("invalidated");
   });
 
   it("does not collapse distinct hypotheses or bindings of one object", () => {
@@ -508,14 +552,29 @@ function productKey(
   objectId: string,
   extras: Partial<FieldValue["state"]> = {}
 ): FieldValue["state"] {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+  return memoryProductStateKey({
+    workspace_id: "ws",
     object_id: objectId,
+    source_revision: "rev",
     program_state: "accepting",
     hypothesis_id: "h0",
     binding_context: "default",
     time_state: "as_of",
-    ...extras
+    ...productStatePatch(extras)
+  });
+}
+
+function productStatePatch(extras: Partial<FieldValue["state"]>): {
+  readonly program_state?: string;
+  readonly hypothesis_id?: string;
+  readonly binding_context?: string;
+  readonly time_state?: string;
+} {
+  return {
+    ...(extras.program_state === undefined ? {} : { program_state: extras.program_state }),
+    ...(extras.hypothesis_id === undefined ? {} : { hypothesis_id: extras.hypothesis_id }),
+    ...(extras.binding_context === undefined ? {} : { binding_context: extras.binding_context }),
+    ...(extras.time_state === undefined ? {} : { time_state: extras.time_state })
   };
 }
 
@@ -549,14 +608,16 @@ function defaultBudget(overrides: Partial<RequestBudget> = {}): RequestBudget {
 }
 
 function defaultView(overrides: Partial<QueryView> = {}): QueryView {
-  return {
+  return QueryViewSchema.parse({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     requested_roles: ["requested", "associated"],
     include_routing_only: false,
+    enumeration_policy: "canonical",
+    result_kind_view: "mixed",
     facet_mode: "same_path",
     threshold_milligrades: 0,
     ...overrides
-  };
+  });
 }
 
 function coverage(

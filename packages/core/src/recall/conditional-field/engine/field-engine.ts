@@ -10,6 +10,7 @@ import {
   type ObserverAction,
   type ObserverPage,
   type ObserverStatus,
+  productSubjectId,
   type ProductStateKey,
   type Proposition,
   type QueryInterpretation,
@@ -282,8 +283,8 @@ export function withdrawDerivationLeaves(
 
 function leafTouchesTransition(transition: Transition, withdrawnLeafId: string): boolean {
   return transition.relation_kind === withdrawnLeafId
-    || transition.from.object_id === withdrawnLeafId
-    || transition.to.object_id === withdrawnLeafId;
+    || productSubjectId(transition.from) === withdrawnLeafId
+    || productSubjectId(transition.to) === withdrawnLeafId;
 }
 
 export function applyEvidenceEffect(

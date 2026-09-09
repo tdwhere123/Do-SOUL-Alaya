@@ -82,7 +82,9 @@ export function defaultView(includeRoutingOnly = false): QueryView {
       : ["requested", "associated"],
     include_routing_only: includeRoutingOnly,
     facet_mode: "same_path",
-    threshold_milligrades: 0
+    threshold_milligrades: 0,
+    enumeration_policy: "canonical",
+    result_kind_view: "mixed"
   };
 }
 

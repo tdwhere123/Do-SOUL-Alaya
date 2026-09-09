@@ -1,7 +1,10 @@
 import {
   RecallCandidateObjectKindSchema,
+  recallTargetWorkspaceId,
+  sameRecallTarget,
   type ContextDeliveryRecord,
   type RecallCandidate,
+  type RecallTargetRef,
   type SoulContextObjectIdentity,
   type SoulReportContextUsageRequest
 } from "@do-soul/alaya-protocol";
@@ -10,8 +13,9 @@ import type { RecallUsageHandlerDependencies } from "../recall/recall-usage-hand
 type SupportedUsageObjectKind = RecallCandidate["object_kind"];
 
 type ReportedUsedObject = Readonly<{
-  readonly objectId: string;
+  readonly objectId?: string;
   readonly objectKind: SupportedUsageObjectKind;
+  readonly target?: RecallTargetRef;
 }>;
 
 export class ContextUsageValidationError extends Error {
@@ -39,11 +43,17 @@ export async function validateReportedRecallHits(
   linkedDelivery: Readonly<ContextDeliveryRecord> | null
 ): Promise<void> {
   const usedObjects = resolveUsedObjects(request);
+  validateUsedObjectTargets(usedObjects, workspaceId);
   validateUsedObjectsBelongToDelivery(request, linkedDelivery, usedObjects);
   await validateUsedMemories(deps, selectObjectIds(usedObjects, "memory_entry"), workspaceId);
   await Promise.all(
     selectObjectIds(usedObjects, "evidence_capsule").map((objectId) =>
       validateUsedEvidence(deps, objectId, workspaceId)
+    )
+  );
+  await Promise.all(
+    usedObjects.filter((object) => object.objectKind === "source_evidence").map((object) =>
+      validateUsedSourceTarget(deps, object, workspaceId)
     )
   );
 }
@@ -58,8 +68,9 @@ export function resolveUsedObjectIdentities(
   request: SoulReportContextUsageRequest
 ): readonly SoulContextObjectIdentity[] {
   return Object.freeze(resolveUsedObjects(request).map((object) => Object.freeze({
-    object_id: object.objectId,
-    object_kind: object.objectKind
+    ...(object.objectId === undefined ? {} : { object_id: object.objectId }),
+    object_kind: object.objectKind,
+    ...(object.target === undefined ? {} : { target: object.target })
   })));
 }
 
@@ -111,7 +122,14 @@ function resolveUsedObjects(
           `Unsupported used object_kind ${objectKind}.`
         );
       }
-      return [{ objectId: object.object_id, objectKind }];
+      if (objectKind === "source_evidence" && object.target === undefined) {
+        throw new ContextUsageValidationError("source_evidence usage requires a tagged target.");
+      }
+      return [{
+        ...(object.object_id === undefined ? {} : { objectId: object.object_id }),
+        objectKind,
+        ...(object.target === undefined ? {} : { target: object.target })
+      }];
     });
   }
   return request.usage_state === "used"
@@ -180,7 +198,7 @@ function validateUsedObjectsBelongToDelivery(
     );
     if (!belongs) {
       throw new ContextUsageValidationError(
-        `Used ${object.objectKind} ${object.objectId} was not part of delivery ${request.delivery_id}.`
+        `Used ${object.objectKind} ${object.objectId ?? "target"} was not part of delivery ${request.delivery_id}.`
       );
     }
   }
@@ -192,6 +210,12 @@ function belongsToLinkedDelivery(
   delivery: Readonly<ContextDeliveryRecord>,
   deliveredIds: ReadonlySet<string>
 ): boolean {
+  if (object.target !== undefined && delivery.delivered_objects !== undefined) {
+    return delivery.delivered_objects.some((delivered) =>
+      delivered.target !== undefined && sameRecallTarget(delivered.target, object.target!)
+    );
+  }
+  if (object.objectId === undefined) return false;
   if (delivery.delivered_objects === undefined) {
     return object.objectKind === "memory_entry" && deliveredIds.has(object.objectId);
   }
@@ -202,6 +226,37 @@ function belongsToLinkedDelivery(
     return matches.length === 1 && matches[0]?.object_kind === "memory_entry";
   }
   return matches.some((delivered) => delivered.object_kind === object.objectKind);
+}
+
+function validateUsedObjectTargets(
+  usedObjects: readonly ReportedUsedObject[],
+  workspaceId: string
+): void {
+  for (const object of usedObjects) {
+    if (object.objectKind === "source_evidence" && object.target === undefined) {
+      throw new ContextUsageValidationError("source_evidence usage requires a tagged target.");
+    }
+    if (object.target === undefined) continue;
+    if (recallTargetWorkspaceId(object.target) !== workspaceId) {
+      throw new ContextUsageValidationError("Used target workspace does not match the current workspace.");
+    }
+    if (object.target.kind === "source_evidence" && object.objectId !== undefined) {
+      throw new ContextUsageValidationError("source_evidence usage must not fill object_id.");
+    }
+  }
+}
+
+async function validateUsedSourceTarget(
+  deps: RecallUsageHandlerDependencies,
+  object: ReportedUsedObject,
+  workspaceId: string
+): Promise<void> {
+  const target = object.target;
+  if (target === undefined || target.kind !== "source_evidence") {
+    throw new ContextUsageValidationError("source_evidence usage requires a source_evidence target.");
+  }
+  if (target.evidence_object_id === null) return;
+  await validateUsedEvidence(deps, target.evidence_object_id, workspaceId);
 }
 
 function validateUsedIdsMatchDeliveredObjects(
@@ -234,7 +289,9 @@ function selectObjectIds(
 }
 
 function selectUniqueObjectIds(objects: readonly ReportedUsedObject[]): readonly string[] {
-  return Object.freeze(Array.from(new Set(objects.map((object) => object.objectId))));
+  return Object.freeze(Array.from(new Set(objects.flatMap((object) =>
+    object.objectId === undefined ? [] : [object.objectId]
+  ))));
 }
 
 function resolveReportObjectKind(

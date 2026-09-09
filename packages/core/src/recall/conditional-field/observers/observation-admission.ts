@@ -83,6 +83,7 @@ export function buildTypedObservation(
     observation_id: `${input.action.region_id}:${args.observationKey}`,
     object_id: args.objectId,
     source_revision: args.sourceRevision,
+    workspace_id: input.workspace_id,
     applicability,
     ...(relationKind === undefined ? {} : { relation_kind: relationKind }),
     ...(measurementId === undefined ? {} : { measurement_id: measurementId }),

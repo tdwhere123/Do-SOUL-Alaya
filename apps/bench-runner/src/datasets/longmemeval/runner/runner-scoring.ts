@@ -24,7 +24,7 @@ export interface LongMemEvalSidecarEntry {
 
 export interface LongMemEvalHitScoringInput {
   readonly results: readonly {
-    readonly object_id: string;
+    readonly object_id?: string;
     readonly object_kind?: string;
     readonly relevance_score: number;
     readonly fused_score?: number | null;
@@ -70,7 +70,7 @@ export function resolveLongMemEvalHitVerdict(
  */
 export function joinFusedScoresOntoResults<
   T extends {
-    readonly object_id: string;
+    readonly object_id?: string;
     readonly object_kind?: string | null;
     readonly fused_score?: number | null;
   }
@@ -89,7 +89,7 @@ export function joinFusedScoresOntoResults<
     }
     const objectKind = result.object_kind ?? "memory_entry";
     const candidate = diagnostics?.candidatesByObjectIdentity.get(
-      buildObjectIdentityKey(objectKind, result.object_id)
+      buildObjectIdentityKey(objectKind, result.object_id ?? "")
     );
     return {
       ...result,
@@ -127,7 +127,7 @@ export function scoreLongMemEvalRecallHits(
       firstTier = inferTier(pointer.relevance_score);
     }
     const objectKind = resolveLongMemEvalGoldObjectKind(pointer.object_kind);
-    if (objectKind === null) {
+    if (objectKind === null || pointer.object_id === undefined) {
       continue;
     }
     const meta = input.sidecar.get(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { QueryProgram, QueryInterpretation, Transition } from "@do-soul/alaya-protocol";
+import { productSubjectId, type QueryProgram, type QueryInterpretation, type Transition } from "@do-soul/alaya-protocol";
 import { createConditionalField, applyObserverPage, withdrawDerivationLeaves, type FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { adjacencyEffectsForRows, seedProgramStates, composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
 import { leafDerivation, joinDerivation, reviseDerivations, derivationForest, evaluateDerivation } from "../../../../recall/conditional-field/engine/path-derivation.js";
@@ -21,14 +21,14 @@ const overlay = Object.fromEntries(Object.entries({ a: 800, b: 800, c: 800, weak
 function field(program: QueryProgram, rows: ReturnType<typeof edge>[]): FieldEngineState {
   const interpretation: QueryInterpretation = { schema_version: 1, query_id: "grounded", status: "resolved", snapshot_id: SNAPSHOT_ID, program, view: defaultView(), holes: [], hypotheses: [] };
   const seeds = seedProgramStates(program).map((program_state) => ({ schema_version: 1 as const, state: { schema_version: 1 as const,
-    object_id: "seed", program_state, hypothesis_id: "h0", binding_context: "unbound", time_state: "as_of" }, milligrades: 1000 }));
+    target: { kind: "memory_entry" as const, workspace_id: "ws", object_id: "seed", source_revision: "rev" }, program_state, hypothesis_id: "h0", binding_context: "unbound", time_state: "as_of" }, milligrades: 1000 }));
   const initial = createConditionalField({ interpretation, budget: defaultBudget(), seeds });
   return applyObserverPage(initial, { page: { schema_version: 1, query_id: "grounded", snapshot_id: SNAPSHOT_ID,
     cursor: { schema_version: 1, cursor_id: "a", snapshot_id: SNAPSHOT_ID, query_id: "grounded", region_id: "adjacency", position: null, committed_through: null },
     observations: [], outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] },
     effects: adjacencyEffectsForRows(rows, { interpretation, asOf: "2026-09-07T00:00:00.000Z", liveStates: initial.seen_identities, overlay }) });
 }
-const grade = (state: FieldEngineState) => Math.max(0, ...(state.binding.kind === "bound" ? state.binding.snapshot.values.filter((value) => value.accepting && value.state.object_id === "end").map((value) => value.milligrades) : []));
+const grade = (state: FieldEngineState) => Math.max(0, ...(state.binding.kind === "bound" ? state.binding.snapshot.values.filter((value) => value.accepting && productSubjectId(value.state) === "end").map((value) => value.milligrades ?? 0) : []));
 
 describe("grounded retained derivation revisions", () => {
   it.each(["transition", "derivation", "root-map", "source-revision"])("rebuilds same-count %s changes exactly as fresh grounding", (changedPart) => {

@@ -159,6 +159,12 @@ function sampleIndex(
     result_version: "v1",
     entries: entries.map((entry) => ({
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      target: {
+        kind: "memory_entry" as const,
+        workspace_id: "ws",
+        object_id: entry.object_id,
+        source_revision: "rev"
+      },
       object_id: entry.object_id,
       hypothesis_id: "h0",
       output_binding: "requested",

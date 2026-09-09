@@ -248,12 +248,23 @@ describe("conditional-field lifecycle and verified usage through actual consumer
       const audit = slice.database.connection.prepare("SELECT payload_json FROM event_log WHERE event_id = ?")
         .get(delivery!.audit_event_id) as { payload_json: string };
       expect(audit.payload_json.length).toBeLessThanOrEqual(16384);
+      const payload = JSON.parse(audit.payload_json) as Record<string, unknown>;
       if ((delivery!.witness_exposures?.length ?? 0) > 0) {
-        expect(JSON.parse(audit.payload_json).witness_exposures).toEqual({ count: delivery!.witness_exposures!.length,
+        expect(payload.witness_exposures).toEqual({ count: delivery!.witness_exposures!.length,
           sha256: createHash("sha256").update(JSON.stringify(delivery!.witness_exposures), "utf8").digest("hex") });
       }
-      for (const entry of page.index.entries) delivered.add(entry.object_id);
-      for (const result of page.results) if (result.content_preview.includes("needle")) payloads.add(result.object_id);
+      if ((delivery!.delivered_objects?.length ?? 0) > 0) {
+        expect(payload.delivered_objects).toEqual({ count: delivery!.delivered_objects!.length,
+          sha256: createHash("sha256").update(JSON.stringify(delivery!.delivered_objects), "utf8").digest("hex") });
+      }
+      for (const entry of page.index.entries) {
+        if (entry.object_id !== undefined) delivered.add(entry.object_id);
+      }
+      for (const result of page.results) {
+        if (result.content_preview.includes("needle") && result.object_id !== undefined) {
+          payloads.add(result.object_id);
+        }
+      }
       continuation = page.index.continuation;
       if (continuation === null) break;
     }

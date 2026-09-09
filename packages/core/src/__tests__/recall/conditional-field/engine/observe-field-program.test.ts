@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  productSubjectId,
   type QueryInterpretation,
   type QueryProgram,
   type RelationValidity
@@ -161,13 +162,13 @@ function grade(
 ): number {
   if (state.binding.kind !== "bound") return 0;
   return state.binding.snapshot.values.find((row) =>
-    row.state.object_id === objectId && row.state.program_state === programState
+    productSubjectId(row.state) === objectId && row.state.program_state === programState
   )?.milligrades ?? 0;
 }
 
 function bestGrade(state: ReturnType<typeof observeField>, objectId: string): number {
   if (state.binding.kind !== "bound") return 0;
   return state.binding.snapshot.values
-    .filter((row) => row.state.object_id === objectId)
-    .reduce((best, row) => Math.max(best, row.milligrades), 0);
+    .filter((row) => productSubjectId(row.state) === objectId)
+    .reduce((best, row) => Math.max(best, row.milligrades ?? 0), 0);
 }

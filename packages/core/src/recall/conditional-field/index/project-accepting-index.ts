@@ -2,9 +2,13 @@ import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_BOTTOM,
+  canonicalIndexEntryIdentity,
+  productSubjectId,
+  reachableMilligradesOf,
   type ClaimState,
   type Continuation,
   type Derivation,
+  type EnumerationPolicy,
   type FacetMode,
   type FacetVector,
   type FieldSnapshot,
@@ -18,6 +22,7 @@ import {
   type RequestBudget,
   type SupportRecord
 } from "@do-soul/alaya-protocol";
+import { CoreError } from "../../../shared/errors.js";
 import { compareText } from "../../../shared/compare-text.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import { composedFacetPathId, facetBelongsToOutput } from "../engine/path-composition.js";
@@ -121,8 +126,12 @@ export function projectAcceptingIndex(input: AcceptingProjectionInput): Informat
   const representation = representationDecision(input.budget.page_budget);
   const interpretationId = resolveInterpretationId(input);
   const epochInput = { ...input, interpretation_id: interpretationId };
-  if (continuationInvalidated(epochInput) || continuationCursorInvalid(input)) {
+  if (continuationInvalidated(epochInput) || continuationCursorInvalid(input)
+    || continuationPolicyMismatch(input)) {
     return closedIndex(epochInput, representation, invalidatedCompleteness());
+  }
+  if ((input.view.enumeration_policy ?? "canonical") === "associative") {
+    assertAssociativeMilligradeContract(input.snapshot.values);
   }
   const admission = input.interpretation_status === undefined
     ? undefined
@@ -180,7 +189,7 @@ function pageAcceptingIndex(
       ...(!grounded.complete ? { resource_work: "open" } : {}) };
   }
   const projected = acceptingEntries(input);
-  const entries = sortEntries(projected.entries);
+  const entries = sortEntries(projected.entries, input.view.enumeration_policy ?? "canonical");
   if (continuationPrefixUnverified(input, entries, projected.truncated)) {
     input.on_remaining_reserve?.(projected.remaining);
     return { ...closedIndex(input, representation, composeCompleteness({ observer: input.observer,
@@ -232,7 +241,9 @@ function pageAcceptingIndex(
       retryPayload ? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)
         : projected.truncated || input.delivered_product_ids !== undefined
           || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined),
-    representation
+    representation,
+    page_purpose: "membership",
+    order_status: remaining > 0 || resourceOpen ? "open" : "complete"
   };
 }
 
@@ -292,10 +303,10 @@ function groundedSeedAccepts(value: FieldValue, input: AcceptingProjectionInput)
   const key = productStateNodeId(value.state);
   const roots = new Set(input.output_derivations?.[key] ?? []);
   return input.derivations?.some((root) => roots.has(root.derivation_id) && root.kind === "leaf"
-      && root.observation_ids.includes(value.state.object_id)
-      && (root.association_milligrades ?? 0) >= value.milligrades) === true
+      && root.observation_ids.includes(productSubjectId(value.state))
+      && (root.association_milligrades ?? 0) >= (value.milligrades ?? 0)) === true
     && input.snapshot.seeds.some((seed) => productStateNodeId(seed.state) === key
-      && seed.milligrades >= value.milligrades);
+      && seed.milligrades >= (value.milligrades ?? 0));
 }
 
 function indexEntryForValue(
@@ -303,27 +314,37 @@ function indexEntryForValue(
   input: AcceptingProjectionInput
 ): IndexEntry | null {
   if (!value.accepting) return null;
-  if (value.milligrades <= input.view.threshold_milligrades) return null;
+  const milligrades = reachableMilligradesOf(value);
+  if (milligrades === undefined) return null;
+  if (milligrades <= input.view.threshold_milligrades) return null;
   if (!facetsAccept(value, input)) return null;
+  const kindView = input.view.result_kind_view ?? "mixed";
+  if (kindView === "memory_only" && value.state.target.kind !== "memory_entry") return null;
+  if (kindView === "source_only" && value.state.target.kind !== "source_evidence") return null;
   const key = productStateNodeId(value.state);
-  const role = input.roles?.get(key) ?? "associated";
+  const role = input.roles?.get(key)
+    ?? input.roles?.get(productSubjectId(value.state))
+    ?? "associated";
   if (role === "routing_only" && !input.view.include_routing_only) return null;
   if (!input.view.requested_roles.includes(role)) return null;
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
+  const subjectId = productSubjectId(value.state);
+  const proposition = input.claim_propositions?.get(key) ?? input.claim_propositions?.get(subjectId);
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    object_id: value.state.object_id,
+    target: value.state.target,
+    ...(value.state.target.kind === "memory_entry" ? { object_id: value.state.target.object_id } : {}),
     hypothesis_id: value.state.hypothesis_id,
     output_binding: value.state.binding_context,
     program_state: value.state.program_state,
     time_state: value.state.time_state,
     role,
-    association_milligrades: value.milligrades,
-    claim: input.claims?.get(key) ?? "unknown",
-    ...(input.claim_propositions?.get(key) === undefined ? {} : {
-      claim_proposition_id: input.claim_propositions.get(key)!.proposition_id,
-      claim_proposition: input.claim_propositions.get(key)
+    association_milligrades: milligrades,
+    claim: input.claims?.get(key) ?? input.claims?.get(subjectId) ?? "unknown",
+    ...(proposition === undefined ? {} : {
+      claim_proposition_id: proposition.proposition_id,
+      claim_proposition: proposition
     }),
     explanation_ids: explanationIdsForEntry({
       value,
@@ -360,31 +381,49 @@ function facetsForCandidate(
 
 function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): FacetMode {
   for (const transition of input.snapshot.retained_transitions) {
-    if (transition.to.object_id !== value.state.object_id) continue;
+    if (productSubjectId(transition.to) !== productSubjectId(value.state)) continue;
     const override = input.relation_facet_modes?.get(transition.relation_kind);
     if (override !== undefined) return override;
   }
   return input.view.facet_mode;
 }
 
-function sortEntries(entries: readonly IndexEntry[]): IndexEntry[] {
-  // Identity serialization is presentation only; milligrades and fusion ranks are not keys.
-  return [...entries].sort((left, right) => compareText(entrySortKey(left), entrySortKey(right)));
+function sortEntries(entries: readonly IndexEntry[], policy: EnumerationPolicy = "canonical"): IndexEntry[] {
+  // Canonical order is full product identity. Associative uses guaranteed lower milligrades
+  // then exactly that canonical key. Membership is unchanged.
+  return [...entries].sort((left, right) => compareIndexEntries(left, right, policy));
+}
+
+function compareIndexEntries(
+  left: IndexEntry,
+  right: IndexEntry,
+  policy: EnumerationPolicy
+): number {
+  if (policy === "associative") {
+    const grade = right.association_milligrades - left.association_milligrades;
+    if (grade !== 0) return grade;
+  }
+  return compareText(canonicalIndexEntryIdentity(left), canonicalIndexEntryIdentity(right));
 }
 
 function valueSortKey(value: FieldValue): string {
-  return entrySortKey({ object_id: value.state.object_id, hypothesis_id: value.state.hypothesis_id,
-    output_binding: value.state.binding_context, program_state: value.state.program_state, time_state: value.state.time_state });
+  return canonicalIndexEntryIdentity({
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    target: value.state.target,
+    ...(value.state.target.kind === "memory_entry" ? { object_id: value.state.target.object_id } : {}),
+    hypothesis_id: value.state.hypothesis_id,
+    output_binding: value.state.binding_context,
+    program_state: value.state.program_state,
+    time_state: value.state.time_state,
+    role: "associated",
+    association_milligrades: reachableMilligradesOf(value) ?? 0,
+    claim: "unknown",
+    explanation_ids: []
+  });
 }
 
-function entrySortKey(entry: Pick<IndexEntry, "object_id" | "hypothesis_id" | "output_binding" | "program_state" | "time_state">): string {
-  return stableStringify({
-    object_id: entry.object_id,
-    hypothesis_id: entry.hypothesis_id,
-    output_binding: entry.output_binding,
-    program_state: entry.program_state ?? "",
-    time_state: entry.time_state ?? ""
-  });
+function entrySortKey(entry: IndexEntry): string {
+  return canonicalIndexEntryIdentity(entry);
 }
 
 function resolvePageOffset(input: AcceptingProjectionInput, total: number): number {
@@ -404,6 +443,12 @@ function continuationCursorInvalid(input: AcceptingProjectionInput): boolean {
   if (input.page_offset !== undefined) return false;
   const cursor = input.prior_continuation?.cursor;
   if (cursor === undefined) return false;
+  // Associative order is not an offset into a canonical scan. Progressive
+  // emitted-set pagination is CP08; an offset cursor under associative policy
+  // cannot be replayed without skipping or duplicating members.
+  if ((input.view.enumeration_policy ?? "canonical") === "associative" && OFFSET_CURSOR.test(cursor)) {
+    return true;
+  }
   return !OFFSET_CURSOR.test(cursor) && !RESUME_CURSOR.test(cursor) && !PROJECTION_CURSOR.test(cursor);
 }
 
@@ -473,8 +518,30 @@ function nextContinuation(
     result_version: input.result_version,
     expires_at: input.expires_at,
     cursor,
-    ...(input.interpretation_id === undefined ? {} : { interpretation_id: input.interpretation_id })
+    ...(input.interpretation_id === undefined ? {} : { interpretation_id: input.interpretation_id }),
+    enumeration_policy: input.view.enumeration_policy ?? "canonical",
+    result_kind_view: input.view.result_kind_view ?? "mixed"
   };
+}
+
+function continuationPolicyMismatch(input: AcceptingProjectionInput): boolean {
+  const prior = input.prior_continuation;
+  if (prior === undefined || prior === null) return false;
+  return (prior.enumeration_policy ?? "canonical") !== (input.view.enumeration_policy ?? "canonical")
+    || (prior.result_kind_view ?? "mixed") !== (input.view.result_kind_view ?? "mixed");
+}
+
+function assertAssociativeMilligradeContract(values: readonly FieldValue[]): void {
+  for (const value of values) {
+    const milligrades = reachableMilligradesOf(value);
+    if (milligrades === undefined) continue;
+    if (!Number.isInteger(milligrades) || milligrades < MILLIGRADE_BOTTOM || milligrades > 1000) {
+      throw new CoreError(
+        "VALIDATION",
+        "unsupported-policy: associative requires a shared milligrade cap contract"
+      );
+    }
+  }
 }
 
 function encodeResumeCursor(offset: number, prefixKeys: readonly string[]): string | null {

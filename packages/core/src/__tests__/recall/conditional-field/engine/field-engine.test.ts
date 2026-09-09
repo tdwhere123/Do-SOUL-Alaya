@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_TOP,
+  productSubjectId,
   type CoverageRegion,
   type FacetVector,
   type ObserverPage,
@@ -61,7 +62,7 @@ describe("conditional-field engine", () => {
     expect(withClaim.support[0]?.claim).toBe("unknown");
     expect(withClaim.binding.kind).toBe("bound");
     if (withClaim.binding.kind !== "bound") return;
-    expect(withClaim.binding.snapshot.retained_transitions.some((row) => row.to.object_id === "u"))
+    expect(withClaim.binding.snapshot.retained_transitions.some((row) => productSubjectId(row.to) === "u"))
       .toBe(false);
   });
 
@@ -142,7 +143,7 @@ describe("conditional-field engine", () => {
     expect(state.closure.observation).toBe("open");
     expect(state.closure.requested_index).toBe("open");
     expect([...openKinds(state.residuals)].sort()).toEqual(["adjacency", "binding", "guard", "seed"]);
-    expect(projectFieldDelta(state).accepted_states.find((row) => row.state.object_id === "x"))
+    expect(projectFieldDelta(state).accepted_states.find((row) => productSubjectId(row.state) === "x"))
       .toBeUndefined();
     const late = applyObserverPage(state, {
       page: page({
@@ -399,6 +400,7 @@ function observation(
     observation_id: observationId,
     object_id: objectId,
     source_revision: "rev-1",
+    workspace_id: "ws",
     applicability: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       kind: "query_predicate",
@@ -464,6 +466,6 @@ function valueOf(
   objectId: string
 ): number {
   if (state.binding.kind !== "bound") return 0;
-  return state.binding.snapshot.values.find((row) => row.state.object_id === objectId)
+  return state.binding.snapshot.values.find((row) => productSubjectId(row.state) === objectId)
     ?.milligrades ?? 0;
 }

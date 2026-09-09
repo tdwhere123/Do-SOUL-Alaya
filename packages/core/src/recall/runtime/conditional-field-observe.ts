@@ -1,6 +1,7 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   SNAPSHOT_PIN_NATIVE_WORK,
+  productSubjectId,
   type CoverageRegion,
   type IndexRole,
   type ObserverCursor,
@@ -129,7 +130,7 @@ function observeWithinMemory(
       committed_through: position
     });
   }
-  const subjects = new Set<string>([...state.resume_subjects, ...state.seen_identities.map((row) => row.object_id)]);
+  const subjects = new Set<string>([...state.resume_subjects, ...state.seen_identities.map((row) => productSubjectId(row))]);
   let relationRows: RelationObserverRow[] = [...(state.observed_relations ?? [])];
   const observedAt: Record<string, string> = {};
   const sourceFacts = new Map<string, BoundSourceFacts>(Object.entries(state.source_facts ?? {}));

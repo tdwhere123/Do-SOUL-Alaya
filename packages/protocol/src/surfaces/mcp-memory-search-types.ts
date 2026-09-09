@@ -20,8 +20,18 @@ import {
 import { StagedWarningArraySchema } from "../governance/staged-warning.js";
 import {
   ContinuationSchema,
-  InformationIndexSchema
+  InformationIndexSchema,
+  OrderStatusSchema,
+  PagePurposeSchema,
+  PayloadContinuationRequestSchema,
+  ProductUpdateSchema
 } from "../recall/conditional-field/index-view.js";
+import {
+  EnumerationPolicySchema,
+  QueryInterpretationProposalSchema,
+  ResultKindViewSchema
+} from "../recall/conditional-field/query.js";
+import { RecallTargetRefSchema } from "../recall/conditional-field/product-identity.js";
 
 export const SoulMemorySearchDegradationReasonSchema = z.enum([
   "recall_explainability_partial",
@@ -36,8 +46,9 @@ export const SoulMemorySearchDegradationReasonSchema = z.enum([
 
 export const MemorySearchResultSchema = z
   .object({
-    object_id: NonEmptyStringSchema,
+    object_id: NonEmptyStringSchema.optional(),
     object_kind: NonEmptyStringSchema,
+    target: RecallTargetRefSchema,
     // Not ranking authority. Delivery order is the parent `results` array.
     // Do not re-sort on this field or score_factors.relevance.
     relevance_score: z.number().min(0).max(1),
@@ -65,6 +76,39 @@ export const MemorySearchResultSchema = z
     staged_warnings: StagedWarningArraySchema.optional()
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.target.kind === "memory_entry") {
+      if (value.object_id !== value.target.object_id) {
+        context.addIssue({
+          code: "custom",
+          path: ["object_id"],
+          message: "memory_entry object_id must match target.object_id"
+        });
+      }
+      if (value.object_kind !== "memory_entry") {
+        context.addIssue({
+          code: "custom",
+          path: ["object_kind"],
+          message: "memory_entry target requires object_kind memory_entry"
+        });
+      }
+      return;
+    }
+    if (value.object_id !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["object_id"],
+        message: "source_evidence must not fill object_id"
+      });
+    }
+    if (value.object_kind !== "source_evidence") {
+      context.addIssue({
+        code: "custom",
+        path: ["object_kind"],
+        message: "source_evidence target requires object_kind source_evidence"
+      });
+    }
+  })
   .readonly();
 
 export const SoulActiveConstraintGovernanceStateSchema = z
@@ -122,7 +166,11 @@ export const SoulMemorySearchRequestSchema = z
     source_observed_at: IsoDatetimeStringSchema.optional(),
     active_constraints_cap: NonNegativeIntSchema.max(50).optional(),
     // Resume a previously issued index page. Identity must match query/snapshot/result.
-    continuation: ContinuationSchema.optional()
+    continuation: ContinuationSchema.optional(),
+    enumeration_policy: EnumerationPolicySchema.default("canonical"),
+    result_kind_view: ResultKindViewSchema.default("mixed"),
+    interpretation_proposal: QueryInterpretationProposalSchema.optional(),
+    payload_continuation: PayloadContinuationRequestSchema.optional()
   })
   .strict()
   .superRefine((value, context) => {
@@ -162,7 +210,10 @@ export const SoulMemorySearchResponseSchema = z
       digest: NonEmptyStringSchema
     }).strict().readonly().optional(),
     capture_execution: CaptureExecutionSchema.optional(),
-    index: InformationIndexSchema.optional()
+    index: InformationIndexSchema.optional(),
+    order_status: OrderStatusSchema.optional(),
+    page_purpose: PagePurposeSchema.optional(),
+    product_updates: z.array(ProductUpdateSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
   })
   .strict()
   .readonly();
@@ -173,5 +224,5 @@ export type SoulActiveConstraint = z.infer<typeof SoulActiveConstraintSchema>;
 export type SoulMemorySearchDegradationReason = z.infer<typeof SoulMemorySearchDegradationReasonSchema>;
 export type SoulRecallTokenizerHint = z.infer<typeof SoulRecallTokenizerHintSchema>;
 export type SoulRecallHostContext = z.infer<typeof SoulRecallHostContextSchema>;
-export type SoulMemorySearchRequest = z.infer<typeof SoulMemorySearchRequestSchema>;
+export type SoulMemorySearchRequest = z.input<typeof SoulMemorySearchRequestSchema>;
 export type SoulMemorySearchResponse = z.infer<typeof SoulMemorySearchResponseSchema>;

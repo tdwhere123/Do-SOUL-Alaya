@@ -267,7 +267,9 @@ function parseObjectIdentityPayload(value: string, label: string): {
   }
   const objects = parsed.map((item) => SoulContextObjectIdentitySchema.parse(item));
   return {
-    ids: [...new Set(objects.map((object) => object.object_id))],
+    ids: [...new Set(objects.flatMap((object) =>
+      object.object_id === undefined ? [] : [object.object_id]
+    ))],
     objects
   };
 }

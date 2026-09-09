@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type FieldSnapshot, type IndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
+import {
+  productSubjectId, type FieldSnapshot, type IndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../../../../recall/conditional-field/engine/output-derivations.js";
 import { defaultBudget, defaultView, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
@@ -19,16 +20,16 @@ describe("one allowance across grounding, projection, and payload", () => {
         prior_continuation, expires_at: "2099-01-01T00:00:00.000Z",
         observer: { outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] } });
     let page = read(partial);
-    expect(page.entries.map((entry) => entry.object_id)).toEqual(["memory-0"]);
+    expect(page.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-0"]);
     expect(page.continuation?.cursor).toMatch(/^p1/);
-    const ids = page.entries.map((entry) => entry.object_id);
+    const ids = page.entries.map((entry) => (entry.object_id ?? ""));
     for (let attempt = 0; page.continuation !== null && attempt < 10; attempt += 1) {
       page = read(complete, page.continuation);
-      ids.push(...page.entries.map((entry) => entry.object_id));
+      ids.push(...page.entries.map((entry) => (entry.object_id ?? "")));
     }
     expect(page.continuation).toBeNull();
     expect(page.completeness.logical_index).toBe("complete");
-    expect(ids).toEqual(source.values.map((value) => value.state.object_id));
+    expect(ids).toEqual(source.values.map((value) => productSubjectId(value.state)));
   });
 
   it("retains every accepting prerequisite when stateless grounding arrives in reverse order", () => {
@@ -54,7 +55,7 @@ describe("one allowance across grounding, projection, and payload", () => {
       expect(used).toBeLessThanOrEqual(3);
       expect(remaining).toBe(3 - used);
       expect(index.completeness.logical_index).not.toBe("invalidated");
-      ids.push(...index.entries.map((entry) => entry.object_id));
+      ids.push(...index.entries.map((entry) => (entry.object_id ?? "")));
       continuation = index.continuation;
       if (attempt < 6) {
         expect(index.entries).toEqual([]);
@@ -66,16 +67,16 @@ describe("one allowance across grounding, projection, and payload", () => {
       }
     }
     expect(continuation).toBeNull();
-    expect(ids).toEqual(source.values.map((value) => value.state.object_id));
+    expect(ids).toEqual(source.values.map((value) => productSubjectId(value.state)));
   });
 
   it("keeps a projection cursor at the end while nontransport work remains", () => {
     const source = snapshot(2);
     const first = projectStateless(source, 1, 1, undefined, "open");
-    expect(first.index.entries.map((entry) => entry.object_id)).toEqual(["memory-0"]);
+    expect(first.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-0"]);
     expect(first.index.continuation?.cursor).toMatch(/^p1/);
     const lastEntry = projectStateless(source, 1, 1, first.index.continuation, "open");
-    expect(lastEntry.index.entries.map((entry) => entry.object_id)).toEqual(["memory-1"]);
+    expect(lastEntry.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-1"]);
     expect(lastEntry.index.continuation?.cursor).toMatch(/^p2/);
     const completed = projectStateless(source, 1, 1, lastEntry.index.continuation);
     expect(completed.index.entries).toEqual([]);
@@ -101,7 +102,7 @@ describe("one allowance across grounding, projection, and payload", () => {
     const first = projectStateless(snapshot(7), 3, 1);
     const second = projectStateless(snapshot(8), 3, 1, first.index.continuation);
     expect(second.index.completeness.logical_index).not.toBe("invalidated");
-    expect(second.index.entries.map((entry) => entry.object_id)).toEqual(["memory-1"]);
+    expect(second.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-1"]);
   });
 
   it("retains an unverified offset token when a smaller budget cannot replay its prefix", () => {
@@ -115,7 +116,7 @@ describe("one allowance across grounding, projection, and payload", () => {
     expect(small.index.completeness).toMatchObject({ logical_index: "open", representation: "open" });
     expect(small.index.continuation).toEqual(first.index.continuation);
     const resumed = projectStateless(source, 20, 7, small.index.continuation);
-    expect(resumed.index.entries.map((entry) => entry.object_id)).toEqual(["memory-4", "memory-5", "memory-6"]);
+    expect(resumed.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-4", "memory-5", "memory-6"]);
     expect(resumed.index.continuation).toBeNull();
     expect(resumed.index.completeness.logical_index).toBe("complete");
   });
@@ -127,20 +128,20 @@ describe("one allowance across grounding, projection, and payload", () => {
     expect(first.index.entries).toEqual([]);
     expect(first.index.continuation?.cursor).toMatch(/^p0/);
     const resumed = projectStateless(source, 3, 1, first.index.continuation);
-    expect(resumed.index.entries.map((entry) => entry.object_id)).toEqual(["memory-0"]);
+    expect(resumed.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-0"]);
   });
 
   it("keeps bounded progress after an offset prefix fits but the full snapshot no longer fits", () => {
     const source = snapshot(7);
     const first = projectStateless(source, 20, 4);
     const bounded = projectStateless(source, 5, 1, first.index.continuation);
-    expect(bounded.index.entries.map((entry) => entry.object_id)).toEqual(["memory-4"]);
+    expect(bounded.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-4"]);
     expect(bounded.index.continuation?.cursor).toMatch(/^p5/);
     const larger = projectStateless(source, 20, 1, bounded.index.continuation);
-    expect(larger.index.entries.map((entry) => entry.object_id)).toEqual(["memory-5"]);
+    expect(larger.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-5"]);
     expect(larger.index.continuation?.cursor).toMatch(/^p6/);
     const last = projectStateless(source, 20, 1, larger.index.continuation);
-    expect(last.index.entries.map((entry) => entry.object_id)).toEqual(["memory-6"]);
+    expect(last.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-6"]);
     expect(last.index.continuation).toBeNull();
     expect(last.index.completeness.logical_index).toBe("complete");
   });
@@ -177,7 +178,7 @@ describe("one allowance across grounding, projection, and payload", () => {
         const used = nextOffset - scanOffset + payloadWork;
         expect(used).toBeLessThanOrEqual(3);
         expect(remaining).toBe(3 - used);
-        ids.push(...index.entries.map((entry) => entry.object_id));
+        ids.push(...index.entries.map((entry) => (entry.object_id ?? "")));
         continuation = index.continuation;
         scanOffset = nextOffset;
         if (continuation === null) {
@@ -186,7 +187,7 @@ describe("one allowance across grounding, projection, and payload", () => {
         }
       }
       expect(continuation).toBeNull();
-      expect(ids).toEqual(source.values.map((value) => value.state.object_id));
+      expect(ids).toEqual(source.values.map((value) => productSubjectId(value.state)));
     }
   );
 
@@ -213,7 +214,7 @@ describe("one allowance across grounding, projection, and payload", () => {
     expect(second.projectionWork).toBe(1);
     expect(second.payloadWork).toBe(1);
     expect(second.remaining).toBe(0);
-    expect(second.index.entries.map((entry) => entry.object_id)).toEqual(["memory-0"]);
+    expect(second.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-0"]);
     expect(second.index.continuation).toBeNull();
     expect(second.index.completeness.logical_index).toBe("complete");
   });
@@ -258,7 +259,7 @@ function project(allowance: number, source: FieldSnapshot, prior?: GroundingProg
 
 function snapshot(count: number): FieldSnapshot {
   const values = Array.from({ length: count }, (_, index) => ({ schema_version: 1 as const,
-    state: { schema_version: 1 as const, object_id: `memory-${index}`, program_state: "accepting",
+    state: { schema_version: 1 as const, target: { kind: "memory_entry" as const, workspace_id: "ws", object_id: `memory-${index}`, source_revision: "rev" }, program_state: "accepting",
       hypothesis_id: "h0", binding_context: "unbound", time_state: "as_of" },
     milligrades: 1000, accepting: true }));
   return { schema_version: 1, query_id: "query", snapshot_id: SNAPSHOT_ID, values,

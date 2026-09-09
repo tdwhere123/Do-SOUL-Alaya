@@ -329,7 +329,9 @@ export class ContextLensAssembler {
     workspaceId: string,
     candidates: readonly Readonly<RecallCandidate>[]
   ): Promise<ReadonlyMap<string, Readonly<MemoryEntry>>> {
-    const objectIds = [...new Set(candidates.map((candidate) => candidate.object_id))];
+    const objectIds = [...new Set(candidates.flatMap((candidate) =>
+      candidate.object_id === undefined ? [] : [candidate.object_id]
+    ))];
     if (objectIds.length === 0) {
       return new Map();
     }

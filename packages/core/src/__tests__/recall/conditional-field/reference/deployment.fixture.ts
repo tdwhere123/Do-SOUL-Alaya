@@ -1,5 +1,7 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  memoryProductStateKey,
+  QueryViewSchema,
   type Guard,
   type IndexRole,
   type ProductStateKey,
@@ -35,20 +37,24 @@ export const DEPLOYMENT_ROLES: ReadonlyMap<string, IndexRole> = new Map([
   ["u", "associated"]
 ]);
 
+export const TEST_WORKSPACE_ID = "ws";
+export const TEST_SOURCE_REVISION = "rev";
+
 export function productKey(
   objectId: string,
   hypothesisId = "h0",
   bindingContext = "default",
   programState = "accepting"
 ): ProductStateKey {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+  return memoryProductStateKey({
+    workspace_id: TEST_WORKSPACE_ID,
     object_id: objectId,
+    source_revision: TEST_SOURCE_REVISION,
     program_state: programState,
     hypothesis_id: hypothesisId,
     binding_context: bindingContext,
     time_state: "as_of"
-  };
+  });
 }
 
 export function yesterdayAnchorGuard(): Guard {
@@ -79,7 +85,7 @@ export function defaultBudget(overrides: Partial<RequestBudget> = {}): RequestBu
 }
 
 export function defaultView(includeRoutingOnly = false): QueryView {
-  return {
+  return QueryViewSchema.parse({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     requested_roles: includeRoutingOnly
       ? ["requested", "associated", "routing_only"]
@@ -87,7 +93,7 @@ export function defaultView(includeRoutingOnly = false): QueryView {
     include_routing_only: includeRoutingOnly,
     facet_mode: "same_path",
     threshold_milligrades: 0
-  };
+  });
 }
 
 export function deploymentSeeds(): readonly SeedActivation[] {

@@ -37,8 +37,9 @@ export interface SoulResolveHandlerDependencies {
       readonly run_id: string | null;
       readonly delivered_object_ids: readonly string[];
       readonly delivered_objects?: readonly {
-        readonly object_id: string;
-        readonly object_kind: string;
+        readonly object_id?: string;
+        readonly object_kind?: string;
+        readonly target?: unknown;
       }[];
     }> | null>;
   };

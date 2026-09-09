@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   QueryProgramSchema,
+  productSubjectId,
   type QueryProgram
 } from "@do-soul/alaya-protocol";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
@@ -69,21 +70,21 @@ describe("conditional-field independent field oracle", () => {
     if (configObservedAt === undefined) throw new Error("missing planted config timestamp");
     expect(inGuardInterval(configObservedAt, yesterday.interval)).toBe(false);
     const index = projectWorld(world, field);
-    expect(index.entries.find((entry) => entry.object_id === "c")?.association_milligrades).toBe(850);
+    expect(index.entries.find((entry) => (entry.object_id ?? "") === "c")?.association_milligrades).toBe(850);
     const appliedEverywhere = index.entries.filter((entry) =>
-      inGuardInterval(OBJECT_OBSERVED_AT[entry.object_id] ?? LAST_WEEK_INSTANT, yesterday.interval)
+      inGuardInterval(OBJECT_OBSERVED_AT[(entry.object_id ?? "")] ?? LAST_WEEK_INSTANT, yesterday.interval)
     );
-    expect(appliedEverywhere.map((entry) => entry.object_id)).toEqual(["r"]);
+    expect(appliedEverywhere.map((entry) => (entry.object_id ?? ""))).toEqual(["r"]);
   });
 
   it("includes prior same-service failure at 550 with unknown common cause", () => {
     const world = deploymentWorld();
     const field = enumerateSimplePaths(world.seeds, world.edges);
     const index = projectWorld(world, field);
-    const history = index.entries.find((entry) => entry.object_id === "h");
+    const history = index.entries.find((entry) => (entry.object_id ?? "") === "h");
     expect(milligradeOf(field, "h")).toBe(550);
     expect(history?.claim).toBe("unknown");
-    expect(index.entries.find((entry) => entry.object_id === "s")).toBeUndefined();
+    expect(index.entries.find((entry) => (entry.object_id ?? "") === "s")).toBeUndefined();
     expect(history?.claim).not.toBe("supported");
   });
 
@@ -113,7 +114,7 @@ describe("conditional-field independent field oracle", () => {
       .toEqual({ kind: "epsilon" });
     const world = hypothesisWorld();
     const index = projectWorld(world, enumerateSimplePaths(world.seeds, world.edges));
-    const rows = index.entries.filter((entry) => entry.object_id === "c");
+    const rows = index.entries.filter((entry) => (entry.object_id ?? "") === "c");
     expect(rows).toHaveLength(3);
     expect(rows.map((row) => row.hypothesis_id).sort()).toEqual(["h1", "h1", "h2"]);
     expect(rows.map((row) => row.output_binding).sort()).toEqual(["bind-b", "default", "default"]);
@@ -138,7 +139,10 @@ describe("conditional-field independent field oracle", () => {
     expect(counts.mismatches).toBe(0);
     expect(counts.unsupported).toBe(0);
     expect(milligradeOf(field, "u")).toBe(0);
-    expect(field.witnesses.some((witness) => witness.nodes.at(-1)?.object_id === "u")).toBe(false);
+    expect(field.witnesses.some((witness) => {
+      const last = witness.nodes.at(-1);
+      return last !== undefined && productSubjectId(last) === "u";
+    })).toBe(false);
     const cyclic = enumerateSimplePaths(cyclicWorld().seeds, cyclicWorld().edges);
     expect(milligradeOf(cyclic, "a")).toBe(1000);
     expect(milligradeOf(cyclic, "b")).toBe(900);

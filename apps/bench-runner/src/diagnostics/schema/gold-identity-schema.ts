@@ -5,7 +5,8 @@ import { validateQuestionMeasurementStatus } from
 export const DiagnosticRecallObjectKindSchema = z.enum([
   "memory_entry",
   "synthesis_capsule",
-  "evidence_capsule"
+  "evidence_capsule",
+  "source_evidence"
 ]);
 
 export const LongMemEvalGoldObjectKindSchema = z.enum([

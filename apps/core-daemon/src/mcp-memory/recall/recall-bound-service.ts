@@ -1,4 +1,10 @@
-import type { RecallPolicy, SoulMemorySearchRequest, TaskObjectSurface } from "@do-soul/alaya-protocol";
+import {
+  PayloadContinuationRequestSchema,
+  QueryInterpretationProposalSchema,
+  type RecallPolicy,
+  type SoulMemorySearchRequest,
+  type TaskObjectSurface
+} from "@do-soul/alaya-protocol";
 import type {
   RecallUsageHandlerDependencies,
   RecallUsageToolCallContext
@@ -32,7 +38,15 @@ export async function runProductionBoundRecall(input: Readonly<{
       : { until: input.request.until }),
     ...(timeFilter === undefined ? {} : { timeFilter }),
     ...(input.request.host_context === undefined ? {} : { hostContext: input.request.host_context }),
-    activeConstraintsCap: input.request.active_constraints_cap ?? null
+    activeConstraintsCap: input.request.active_constraints_cap ?? null,
+    enumeration_policy: input.request.enumeration_policy,
+    result_kind_view: input.request.result_kind_view,
+    ...(input.request.interpretation_proposal === undefined
+      ? {}
+      : { interpretation_proposal: QueryInterpretationProposalSchema.parse(input.request.interpretation_proposal) }),
+    ...(input.request.payload_continuation === undefined
+      ? {}
+      : { payload_continuation: PayloadContinuationRequestSchema.parse(input.request.payload_continuation) })
   });
 }
 

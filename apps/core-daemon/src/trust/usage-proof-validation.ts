@@ -1,5 +1,6 @@
 import {
   RecallCandidateObjectKindSchema,
+  sameRecallTarget,
   type ContextDeliveryRecord,
   type SoulContextObjectIdentity,
   type UsageProofRecord
@@ -76,12 +77,13 @@ function assertDeliveredIdentity(
   identity: Readonly<SoulContextObjectIdentity>,
   legacyProof: boolean
 ): void {
-  if (!isSupportedUsageObjectKind(identity.object_kind)) {
+  if (identity.object_kind === undefined || !isSupportedUsageObjectKind(identity.object_kind)) {
     throwUndelivered(identity);
   }
   if (delivery.delivered_objects === undefined) {
     if (
       identity.object_kind === "memory_entry" &&
+      identity.object_id !== undefined &&
       delivery.delivered_object_ids.includes(identity.object_id)
     ) {
       return;
@@ -89,9 +91,12 @@ function assertDeliveredIdentity(
     throwUndelivered(identity);
   }
 
-  const matches = delivery.delivered_objects.filter(
-    (object) => object.object_id === identity.object_id
-  );
+  const matches = delivery.delivered_objects.filter((object) => {
+    if (identity.target !== undefined && object.target !== undefined) {
+      return sameRecallTarget(object.target, identity.target);
+    }
+    return identity.object_id !== undefined && object.object_id === identity.object_id;
+  });
   const delivered = legacyProof
     ? matches.length === 1 && matches[0]?.object_kind === "memory_entry"
     : matches.some((object) => object.object_kind === identity.object_kind);
@@ -105,7 +110,9 @@ function isSupportedUsageObjectKind(objectKind: string): boolean {
 function assertIdProjectionMatches(record: Readonly<UsageProofRecord>): void {
   const ids = [...new Set(record.used_object_ids)].sort();
   const projected = [
-    ...new Set(record.used_objects?.map((object) => object.object_id) ?? [])
+    ...new Set((record.used_objects ?? []).flatMap((object) =>
+      object.object_id === undefined ? [] : [object.object_id]
+    ))
   ].sort();
   if (ids.join("\0") !== projected.join("\0")) {
     throw new TrustStateInvalidUsageProofError(

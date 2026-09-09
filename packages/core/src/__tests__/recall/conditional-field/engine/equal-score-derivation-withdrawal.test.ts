@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  productSubjectId,
   type Derivation,
   type QueryInterpretation,
   type QueryProgram
@@ -91,7 +92,7 @@ function fieldFor(program: QueryProgram, rows: readonly ReturnType<typeof edge>[
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     state: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      object_id: "seed",
+      target: { kind: "memory_entry" as const, workspace_id: "ws", object_id: "seed", source_revision: "rev" },
       program_state: programState,
       hypothesis_id: "h0",
       binding_context: "unbound",
@@ -189,6 +190,6 @@ function edge(
 function gradeOf(state: ReturnType<typeof createConditionalField>, objectId: string): number {
   if (state.binding.kind !== "bound") return 0;
   return state.binding.snapshot.values.find((row) =>
-    row.state.object_id === objectId && row.accepting
+    productSubjectId(row.state) === objectId && row.accepting
   )?.milligrades ?? 0;
 }

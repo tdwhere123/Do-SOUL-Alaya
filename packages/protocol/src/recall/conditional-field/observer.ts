@@ -91,6 +91,7 @@ export const TypedObservationSchema = z
     observation_id: ConditionalFieldIdSchema,
     object_id: ConditionalFieldIdSchema,
     source_revision: ConditionalFieldIdSchema,
+    workspace_id: ConditionalFieldIdSchema.optional(),
     applicability: GuardSchema,
     association_milligrades: MilligradeSchema.optional(),
     low_milligrades: MilligradeSchema.optional(),

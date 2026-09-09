@@ -167,7 +167,7 @@ describe("conditional-field observer and index contracts", () => {
       claims: new Map([["h", "unknown"]])
     });
     expect(index.completeness.logical_index).toBe("complete");
-    expect(index.entries.find((entry) => entry.object_id === "h")?.claim).toBe("unknown");
+    expect(index.entries.find((entry) => (entry.object_id ?? "") === "h")?.claim).toBe("unknown");
   });
 
   it("pages share query, snapshot and result identity and concatenate in serialization order", () => {
@@ -341,9 +341,9 @@ function openRegion(id: string, kind: CoverageRegion["kind"]): CoverageRegion {
 }
 
 function entryKey(entry: {
-  readonly object_id: string;
+  readonly object_id?: string;
   readonly hypothesis_id: string;
   readonly output_binding: string;
 }): string {
-  return `${entry.hypothesis_id}:${entry.output_binding}:${entry.object_id}`;
+  return `${entry.hypothesis_id}:${entry.output_binding}:${entry.object_id ?? ""}`;
 }

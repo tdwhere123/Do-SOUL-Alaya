@@ -10,18 +10,35 @@ import {
   SchemaVersionSchema,
   Sha256DigestSchema
 } from "./common.js";
+import { FieldActivationSchema } from "./measurement.js";
+import { ProductStateKeySchema } from "./product-identity.js";
 
-export const ProductStateKeySchema = z
-  .object({
-    schema_version: SchemaVersionSchema,
-    object_id: ConditionalFieldIdSchema,
-    program_state: ConditionalFieldIdSchema,
-    hypothesis_id: ConditionalFieldIdSchema,
-    binding_context: ConditionalFieldIdSchema,
-    time_state: ConditionalFieldIdSchema
-  })
-  .strict()
-  .readonly();
+export {
+  CANONICAL_PRODUCT_IDENTITY_VERSION,
+  MemoryEntryTargetSchema,
+  ProductStateKeySchema,
+  RecallTargetRefSchema,
+  SourceEvidenceRootKindSchema,
+  SourceEvidenceTargetSchema,
+  canonicalProductIdentity,
+  memoryProductStateKey,
+  memoryRecallTarget,
+  productMemoryObjectId,
+  productSubjectId,
+  recallTargetWorkspaceId,
+  retargetMemoryProduct,
+  sameRecallTarget,
+  sourceProductStateKey,
+  sourceRecallTarget,
+  stableCanonicalStringify,
+  type MemoryEntryTarget,
+  type MemoryProductStateInput,
+  type ProductStateKey,
+  type RecallTargetRef,
+  type SourceEvidenceRootKind,
+  type SourceEvidenceTarget,
+  type SourceProductStateInput
+} from "./product-identity.js";
 
 export const TransitionSchema = z
   .object({
@@ -49,12 +66,35 @@ export const FieldValueSchema = z
   .object({
     schema_version: SchemaVersionSchema,
     state: ProductStateKeySchema,
-    milligrades: MilligradeSchema,
+    milligrades: MilligradeSchema.optional(),
     accepting: z.boolean(),
     low_milligrades: MilligradeSchema.optional(),
-    high_milligrades: MilligradeSchema.optional()
+    high_milligrades: MilligradeSchema.optional(),
+    activation: FieldActivationSchema.optional()
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.activation?.kind === "unreachable") {
+      if (value.milligrades !== undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["milligrades"],
+          message: "unreachable activation omits milligrades"
+        });
+      }
+      return;
+    }
+    const milligrades = value.activation?.kind === "reachable"
+      ? value.activation.milligrades
+      : value.milligrades;
+    if (milligrades === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["milligrades"],
+        message: "reachable field value requires milligrades"
+      });
+    }
+  })
   .readonly();
 
 export const FacetVectorSchema = z
@@ -79,7 +119,6 @@ export const FieldSnapshotSchema = z
   .strict()
   .readonly();
 
-export type ProductStateKey = z.infer<typeof ProductStateKeySchema>;
 export type Transition = z.infer<typeof TransitionSchema>;
 export type SeedActivation = z.infer<typeof SeedActivationSchema>;
 export type FieldValue = z.infer<typeof FieldValueSchema>;

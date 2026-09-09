@@ -63,7 +63,12 @@ export {
 export { EvidenceCandidateScoringSelectionReceiptSchema } from
   "./evidence/evidence-scoring-schema.js";
 
-const RecallDiagnosticObjectKindSchema = z.enum(["memory_entry", "evidence_capsule", "synthesis_capsule"]);
+const RecallDiagnosticObjectKindSchema = z.enum([
+  "memory_entry",
+  "evidence_capsule",
+  "synthesis_capsule",
+  "source_evidence"
+]);
 export const DiagnosticSelectGammaDecisionSchema = z.object({
   kind: z.enum([
     "ineligible",

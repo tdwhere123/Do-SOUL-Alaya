@@ -140,7 +140,7 @@ export async function readLongMemEvalReportSideEffectSnapshot(
 }
 
 type LongMemEvalDeliveredResult = {
-  readonly object_id: string;
+  readonly object_id?: string;
   readonly object_kind?: string;
 };
 
@@ -209,7 +209,9 @@ function buildReportInput(input: {
   const usedIdentityKeys = new Set(
     input.safeUsedObjects.map(requireEligibleIdentityKey)
   );
-  const usedObjectIds = input.safeUsedObjects.map((result) => result.object_id);
+  const usedObjectIds = input.safeUsedObjects.flatMap((result) =>
+    result.object_id === undefined ? [] : [result.object_id]
+  );
   const usageState = usedObjectIds.length > 0 ? "used" : "skipped";
   return {
     deliveryId: input.deliveryId,
@@ -217,15 +219,19 @@ function buildReportInput(input: {
     ...(usedObjectIds.length === 0
       ? {}
       : { usedObjectIds }),
-    deliveredObjects: input.deliveredResults.map((result) => ({
-      objectId: result.object_id,
-      objectKind: result.object_kind ?? "memory_entry",
-      usageStatus:
-        eligibleIdentityKey(result) !== null &&
-        usedIdentityKeys.has(requireEligibleIdentityKey(result))
-          ? "used"
-          : "skipped"
-    })),
+    deliveredObjects: input.deliveredResults.flatMap((result) =>
+      result.object_id === undefined
+        ? []
+        : [{
+          objectId: result.object_id,
+          objectKind: result.object_kind ?? "memory_entry",
+          usageStatus:
+            eligibleIdentityKey(result) !== null &&
+            usedIdentityKeys.has(requireEligibleIdentityKey(result))
+              ? "used"
+              : "skipped"
+        }]
+    ),
     turnIndex: input.turnIndex,
     turnDigest: {
       lastMessages: [
@@ -327,7 +333,7 @@ function buildReportedContextUsage(
 
 function eligibleIdentityKey(result: LongMemEvalDeliveredResult): string | null {
   const objectKind = resolveLongMemEvalGoldObjectKind(result.object_kind);
-  return objectKind === null
+  return objectKind === null || result.object_id === undefined
     ? null
     : buildLongMemEvalSidecarKey(objectKind, result.object_id);
 }

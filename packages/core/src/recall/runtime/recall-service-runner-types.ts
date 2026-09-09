@@ -1,5 +1,9 @@
 import type {
+  EnumerationPolicy,
+  PayloadContinuationRequest,
+  QueryInterpretationProposal,
   RecallPolicy,
+  ResultKindView,
   SoulRecallHostContext,
   TaskObjectSurface
 } from "@do-soul/alaya-protocol";
@@ -31,6 +35,10 @@ export interface RecallExecutionParams {
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   // Artifact provenance may outlive a working copy; live readers own the runtime pin.
   readonly snapshotDigest?: string;
+  readonly enumeration_policy?: EnumerationPolicy;
+  readonly result_kind_view?: ResultKindView;
+  readonly interpretation_proposal?: QueryInterpretationProposal;
+  readonly payload_continuation?: PayloadContinuationRequest;
 }
 
 export interface RecallExecutionContext {

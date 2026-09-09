@@ -1,4 +1,6 @@
 import {
+  productSubjectId,
+  retargetMemoryProduct,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MemoryDimension,
   type InformationIndex,
@@ -269,17 +271,15 @@ export function enumeratedFromField(state: ReturnType<typeof observeField>): Enu
   if (state.binding.kind !== "bound") {
     return { kind: "unsupported", reason: state.binding.kind, values: new Map(), accepting: [], witnesses: [] };
   }
-  const accepting = state.binding.snapshot.values.map((value) => ({
-    ...value,
-    state: {
-      ...value.state,
-      object_id: SHORT_BY_MEM[value.state.object_id] ?? value.state.object_id
-    }
-  }));
+  const accepting = state.binding.snapshot.values.map((value) => {
+    if (value.state.target.kind !== "memory_entry") return value;
+    const shortId = SHORT_BY_MEM[productSubjectId(value.state)] ?? productSubjectId(value.state);
+    return { ...value, state: retargetMemoryProduct(value.state, { object_id: shortId }) };
+  });
   const values = new Map<string, number>();
   for (const value of accepting) {
     const id = productStateId(value.state);
-    values.set(id, Math.max(values.get(id) ?? 0, value.milligrades));
+    values.set(id, Math.max(values.get(id) ?? 0, value.milligrades ?? 0));
   }
   return { kind: "enumerated", values, accepting, witnesses: [] };
 }

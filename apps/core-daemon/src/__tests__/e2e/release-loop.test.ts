@@ -182,6 +182,7 @@ describe("P5 v0.1 release loop E2E", () => {
       expect(recall.results).toHaveLength(1);
 
       const objectId = recall.results[0]!.object_id;
+      if (objectId === undefined) throw new Error("expected memory object_id on recall result");
       const pointer = await callTool<SoulOpenPointerResponse>(client, "soul.open_pointer", {
         object_id: objectId
       });

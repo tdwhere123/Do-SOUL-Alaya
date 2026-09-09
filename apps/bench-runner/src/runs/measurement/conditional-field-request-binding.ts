@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { RequestBudgetSchema, type RequestBudget } from "@do-soul/alaya-protocol";
+import {
+  EnumerationPolicySchema,
+  QueryInterpretationProposalSchema,
+  QueryViewSchema,
+  RequestBudgetSchema,
+  ResultKindViewSchema,
+  type RequestBudget
+} from "@do-soul/alaya-protocol";
 import { compileConditionalFieldQuery, interpretationIdentity } from "@do-soul/alaya-core";
 
 const Id = z.string().min(1);
@@ -10,7 +17,9 @@ const Filters = {
   time_field: z.enum(["created_at", "last_used_at"]).optional(),
   dimension_filter: z.array(Id).readonly().optional(),
   domain_tag_filter: z.array(Id).readonly().optional(),
-  authorized_scopes: z.array(Id).readonly().optional()
+  authorized_scopes: z.array(Id).readonly().optional(),
+  enumeration_policy: EnumerationPolicySchema.optional(),
+  result_kind_view: ResultKindViewSchema.optional()
 };
 
 export const ConditionalFieldRequestFiltersSchema = z.object(Filters).strict().readonly();
@@ -18,7 +27,9 @@ export const ConditionalFieldRequestFiltersSchema = z.object(Filters).strict().r
 export const ConditionalFieldExecutionReceiptSchema = z.object({
   schema_version: z.literal(1), workspace_id: Id, requested_budget: RequestBudgetSchema,
   compile_input: z.object({ source: z.literal("ordinary"), text: z.string(),
-    snapshot_id: Digest, budget: RequestBudgetSchema, interpretation_clock: Clock, ...Filters
+    snapshot_id: Digest, budget: RequestBudgetSchema, interpretation_clock: Clock, ...Filters,
+    view: QueryViewSchema.optional(),
+    interpretation_proposal: QueryInterpretationProposalSchema.optional()
   }).strict().readonly(),
   query_id: Id, interpretation_id: Id, snapshot_id: Digest, interpretation_clock: Clock
 }).strict().readonly().superRefine((receipt, context) => {
@@ -65,7 +76,9 @@ export function executionBindingMismatch(
   const input = receipt.compile_input;
   const actual = { since: input.since, until: input.until, time_field: input.time_field,
     dimension_filter: input.dimension_filter, domain_tag_filter: input.domain_tag_filter,
-    authorized_scopes: input.authorized_scopes };
+    authorized_scopes: input.authorized_scopes,
+    enumeration_policy: input.view?.enumeration_policy ?? input.enumeration_policy,
+    result_kind_view: input.view?.result_kind_view ?? input.result_kind_view };
   return normalizedFilters(actual) === normalizedFilters(expected.requestFilters ?? {}) ? null : "request_identity_mismatch";
 }
 
@@ -74,7 +87,9 @@ function normalizedFilters(filters: ConditionalFieldRequestFilters): string {
     since: filters.since, until: filters.until, time_field: filters.time_field,
     dimension_filter: filters.dimension_filter === undefined ? undefined : [...filters.dimension_filter].sort(),
     domain_tag_filter: filters.domain_tag_filter === undefined ? undefined : [...filters.domain_tag_filter].sort(),
-    authorized_scopes: filters.authorized_scopes === undefined ? undefined : [...filters.authorized_scopes].sort()
+    authorized_scopes: filters.authorized_scopes === undefined ? undefined : [...filters.authorized_scopes].sort(),
+    enumeration_policy: filters.enumeration_policy ?? "canonical",
+    result_kind_view: filters.result_kind_view ?? "mixed"
   });
 }
 

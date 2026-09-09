@@ -27,13 +27,19 @@ export function stubRecallIndex(objectIds: readonly string[] = ["mem1"]): Inform
     snapshot_id: `sha256:${"c".repeat(64)}`,
     result_version: "v1",
     entries: objectIds.map((objectId) => ({
-      schema_version: 1,
+      schema_version: 1 as const,
+      target: {
+        kind: "memory_entry" as const,
+        workspace_id: "ws",
+        object_id: objectId,
+        source_revision: "rev"
+      },
       object_id: objectId,
       hypothesis_id: "h0",
       output_binding: "default",
-      role: "associated",
+      role: "associated" as const,
       association_milligrades: 800,
-      claim: "unknown",
+      claim: "unknown" as const,
       explanation_ids: [],
       program_state: "accepting",
       time_state: "as_of"

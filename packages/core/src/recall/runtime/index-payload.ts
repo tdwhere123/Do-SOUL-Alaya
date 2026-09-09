@@ -1,4 +1,11 @@
-import { MemoryDimension, ScopeClass, type IndexEntry, type ManifestationState } from "@do-soul/alaya-protocol";
+import {
+  MemoryDimension,
+  ScopeClass,
+  indexEntryCacheKey,
+  indexMemoryObjectId,
+  type IndexEntry,
+  type ManifestationState
+} from "@do-soul/alaya-protocol";
 import type { BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
 import type { ObserverReaders } from "../conditional-field/observers/observe.js";
 import { createContentPreview } from "./recall-service-helpers.js";
@@ -25,49 +32,86 @@ export class BoundedIndexPayload {
     let remaining = allowance;
     let complete = true;
     for (const entry of entries) {
-      if (this.input.manifestationFor(entry.object_id) === "hint") {
-        const preview = `[memory ref: ${entry.object_id}]`;
+      const cacheKey = indexEntryCacheKey(entry);
+      const objectId = indexMemoryObjectId(entry);
+      if (objectId !== undefined && this.input.manifestationFor(objectId) === "hint") {
+        const preview = `[memory ref: ${objectId}]`;
         const bytes = Buffer.byteLength(preview, "utf8");
-        if (remaining < 1 || bytes > this.remainingMemoryBytes) { complete = false; this.previews.delete(entry.object_id); continue; }
-        remaining -= 1; this.remainingMemoryBytes -= bytes;
-        this.previews.set(entry.object_id, preview);
-        continue;
-      }
-      const facts = this.input.sourceFacts?.[entry.object_id];
-      if (this.sourceMetadata[entry.object_id] === undefined && facts !== undefined) {
-        const metadata = sourceMetadataFrom(facts);
-        const bytes = Buffer.byteLength(JSON.stringify([entry.object_id, metadata]), "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) {
-          complete = false; this.previews.delete(entry.object_id); continue;
+          complete = false;
+          forgetPreview(this.previews, cacheKey, objectId);
+          continue;
         }
         remaining -= 1; this.remainingMemoryBytes -= bytes;
-        this.sourceMetadata[entry.object_id] = metadata;
+        rememberPreview(this.previews, cacheKey, objectId, preview);
+        continue;
       }
-      if (this.previews.has(entry.object_id)) continue;
-      const retainedContent = this.input.sourceFacts?.[entry.object_id]?.content;
+      const facts = objectId === undefined ? undefined : this.input.sourceFacts?.[objectId];
+      if (objectId !== undefined && this.sourceMetadata[cacheKey] === undefined && facts !== undefined) {
+        const metadata = sourceMetadataFrom(facts);
+        const bytes = Buffer.byteLength(JSON.stringify([objectId, metadata]), "utf8");
+        if (remaining < 1 || bytes > this.remainingMemoryBytes) {
+          complete = false;
+          forgetPreview(this.previews, cacheKey, objectId);
+          continue;
+        }
+        remaining -= 1; this.remainingMemoryBytes -= bytes;
+        rememberMetadata(this.sourceMetadata, cacheKey, objectId, metadata);
+      }
+      if (this.previews.has(cacheKey) || (objectId !== undefined && this.previews.has(objectId))) continue;
+      const retainedContent = objectId === undefined ? undefined : this.input.sourceFacts?.[objectId]?.content;
       if (retainedContent !== undefined) {
         const preview = createContentPreview(retainedContent, "excerpt");
         const bytes = Buffer.byteLength(preview, "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) { complete = false; continue; }
         remaining -= 1; this.remainingMemoryBytes -= bytes;
-        this.previews.set(entry.object_id, preview);
+        rememberPreview(this.previews, cacheKey, objectId, preview);
         continue;
       }
-      if (this.input.readers.source === undefined || remaining < 5 || this.remainingMemoryBytes < 1) { complete = false; continue; }
-      const page = this.input.readers.source({ workspaceId: this.input.workspaceId, objectId: entry.object_id,
+      if (objectId === undefined || this.input.readers.source === undefined || remaining < 5 || this.remainingMemoryBytes < 1) { complete = false; continue; }
+      const page = this.input.readers.source({ workspaceId: this.input.workspaceId, objectId,
         byteLimit: Math.max(1, Math.min(65536, this.remainingMemoryBytes)) });
       remaining -= Math.max(1, page.rowsRead) + 2;
       this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead);
       if (page.row?.content === undefined || page.unavailable) { complete = false; continue; }
       const metadata = sourceMetadataFrom(page.row);
-      const metadataBytes = Buffer.byteLength(JSON.stringify([entry.object_id, metadata]), "utf8");
+      const metadataBytes = Buffer.byteLength(JSON.stringify([objectId, metadata]), "utf8");
       if (metadataBytes > this.remainingMemoryBytes) { complete = false; continue; }
       this.remainingMemoryBytes -= metadataBytes;
-      this.sourceMetadata[entry.object_id] = metadata;
-      this.previews.set(entry.object_id, createContentPreview(page.row.content, "excerpt"));
+      rememberMetadata(this.sourceMetadata, cacheKey, objectId, metadata);
+      rememberPreview(this.previews, cacheKey, objectId, createContentPreview(page.row.content, "excerpt"));
     }
     return { remaining: Math.max(0, remaining), complete };
   }
+}
+
+function rememberPreview(
+  previews: Map<string, string>,
+  cacheKey: string,
+  objectId: string | undefined,
+  preview: string
+): void {
+  previews.set(cacheKey, preview);
+  if (objectId !== undefined && objectId !== cacheKey) previews.set(objectId, preview);
+}
+
+function forgetPreview(
+  previews: Map<string, string>,
+  cacheKey: string,
+  objectId: string | undefined
+): void {
+  previews.delete(cacheKey);
+  if (objectId !== undefined) previews.delete(objectId);
+}
+
+function rememberMetadata(
+  metadata: Record<string, RecallSourceMetadata>,
+  cacheKey: string,
+  objectId: string | undefined,
+  value: RecallSourceMetadata
+): void {
+  metadata[cacheKey] = value;
+  if (objectId !== undefined && objectId !== cacheKey) metadata[objectId] = value;
 }
 
 function sourceMetadataFrom(row: Readonly<{

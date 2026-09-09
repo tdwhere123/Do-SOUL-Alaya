@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ClaimState, FieldValue, IndexRole, Proposition, SupportRecord } from "@do-soul/alaya-protocol";
+import { productSubjectId, type ClaimState, type FieldValue, type IndexRole, type Proposition, type SupportRecord } from "@do-soul/alaya-protocol";
 import { applyEvidenceEffect, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { parseBindingContext } from "../conditional-field/engine/binding-environment.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
@@ -21,7 +21,7 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
   let retainedBytes = same ? state.support_retained_bytes ?? 0 : 0;
   let complete = true;
   for (const value of state.binding.kind === "bound" ? state.binding.snapshot.values : []) {
-    if (!value.accepting || value.milligrades <= 0) continue;
+    if (!value.accepting || (value.milligrades ?? 0) <= 0) continue;
     const key = productStateNodeId(value.state);
     if (progress[key]?.complete) continue;
     const demand = evidenceDemandForProduct(state, value, input.as_of, progress[key]?.offset ?? 0, Math.max(0, Math.floor((remaining - 2) / 8)));
@@ -70,13 +70,13 @@ export function rolesFrom(state: FieldEngineState,
 function evidenceDemandForProduct(state: FieldEngineState, value: FieldValue, asOf: string, offset: number, limit: number) {
   const key = productStateNodeId(value.state);
   const env = parseBindingContext(value.state.binding_context);
-  const claimDemand = state.interpretation.view.claim_demands?.find((demand) => env.get(demand.variable) === value.state.object_id);
+  const claimDemand = state.interpretation.view.claim_demands?.find((demand) => env.get(demand.variable) === productSubjectId(value.state));
   const causeDemand = claimDemand !== undefined;
   const claimKind = claimDemand?.proposition_kind ?? "association";
-  const arguments_ = claimDemand?.argument_variables.map((variable) => env.get(variable) ?? "unbound") ?? [value.state.object_id];
+  const arguments_ = claimDemand?.argument_variables.map((variable) => env.get(variable) ?? "unbound") ?? [productSubjectId(value.state)];
   const assertionIds = new Set(state.transitions.filter((transition) => productStateNodeId(transition.to) === key)
     .flatMap((transition) => state.derivations.find((root) => root.derivation_id === state.transition_derivations[transitionKey(transition)])?.leaf_ids ?? []));
-  const rows = (state.observed_relations ?? []).filter((row) => row.targetObjectId === value.state.object_id
+  const rows = (state.observed_relations ?? []).filter((row) => row.targetObjectId === productSubjectId(value.state)
     && (assertionIds.has(row.assertionId) || causeDemand && row.predicate === claimKind && row.sourceObjectId === arguments_[0]));
   const receiptCount = rows.reduce((sum, row) => sum + (row.evidenceReceipts?.length ?? 0), 0);
   const nextOffset = Math.min(receiptCount, offset + limit);
@@ -107,11 +107,11 @@ function evidenceDemandForProduct(state: FieldEngineState, value: FieldValue, as
     ];
   });
   const demands = (causeDemand ? [[associationId, "association"], [id, claimKind]] : [[id, "association"]]).map(([propositionId, kind]) => ({
-    proposition: { schema_version: 1 as const, proposition_id: propositionId!, kind: kind!, arguments: propositionId === id ? arguments_ : [value.state.object_id] },
+    proposition: { schema_version: 1 as const, proposition_id: propositionId!, kind: kind!, arguments: propositionId === id ? arguments_ : [productSubjectId(value.state)] },
     templates: assertions.filter((assertion) => observations.some((row) => row.proposition_id === propositionId
       && assertion.evidence_receipts.some((receipt) => receipt.evidence_id === row.evidence_id)))
       .flatMap((assertion) => assertion.evidence_receipts.map((receipt) => ({ witness_id: receipt.evidence_id,
-        premises: [rows.find((row) => row.assertionId === assertion.assertion_id)!.sourceObjectId, value.state.object_id], cost: 1 })))
+        premises: [rows.find((row) => row.assertionId === assertion.assertion_id)!.sourceObjectId, productSubjectId(value.state)], cost: 1 })))
   }));
   const required = observations.length + demands.length + demands.reduce((sum, demand) => sum + demand.templates.length * 2, 0);
   return { key, id, context, observations, demands, required, nextOffset, receiptCount };

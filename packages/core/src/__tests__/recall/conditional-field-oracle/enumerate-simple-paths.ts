@@ -2,6 +2,8 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
+  canonicalProductIdentity,
+  memoryProductStateKey,
   type FacetMode,
   type FacetVector,
   type FieldValue,
@@ -62,24 +64,19 @@ export function productKey(
   programState = "accepting",
   timeState = "as_of"
 ): ProductStateKey {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+  return memoryProductStateKey({
+    workspace_id: "ws",
     object_id: objectId,
+    source_revision: "rev",
     program_state: programState,
     hypothesis_id: hypothesisId,
     binding_context: bindingContext,
     time_state: timeState
-  };
+  });
 }
 
 export function productStateId(state: ProductStateKey): string {
-  return [
-    state.object_id,
-    state.program_state,
-    state.hypothesis_id,
-    state.binding_context,
-    state.time_state
-  ].join("\0");
+  return canonicalProductIdentity(state);
 }
 
 export function clampMilligrade(value: number): number {

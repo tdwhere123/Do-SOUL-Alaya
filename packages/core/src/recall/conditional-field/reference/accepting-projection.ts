@@ -1,5 +1,7 @@
 import {
   MILLIGRADE_BOTTOM,
+  canonicalIndexEntryIdentity,
+  productSubjectId,
   type ClaimState,
   type CompletenessReport,
   type Continuation,
@@ -21,11 +23,11 @@ import {
   type Witness
 } from "@do-soul/alaya-protocol";
 import { compareText } from "../../../shared/compare-text.js";
-import { stableStringify } from "../../../shared/stable-stringify.js";
 import {
   completenessForInterpretationStatus,
   interpretationMayEmitCompleteEmpty
 } from "./interpret-query.js";
+import { productStateNodeId } from "./bind-max-min.js";
 
 export type ObserverCoverage = Readonly<{
   readonly outcome: ObserverOutcome;
@@ -265,21 +267,24 @@ function indexEntryForValue(
   input: AcceptingProjectionInput
 ): IndexEntry | null {
   if (!value.accepting) return null;
-  if (value.milligrades <= input.view.threshold_milligrades) return null;
+  if ((value.milligrades ?? 0) <= input.view.threshold_milligrades) return null;
   if (!facetsAccept(value, input)) return null;
-  const role = input.roles?.get(value.state.object_id) ?? "associated";
+  const role = input.roles?.get(productStateNodeId(value.state))
+    ?? input.roles?.get(productSubjectId(value.state))
+    ?? "associated";
   if (role === "routing_only" && !input.view.include_routing_only) return null;
   if (!input.view.requested_roles.includes(role)) return null;
   return {
     schema_version: 1,
-    object_id: value.state.object_id,
+    target: value.state.target,
+    ...(value.state.target.kind === "memory_entry" ? { object_id: value.state.target.object_id } : {}),
     hypothesis_id: value.state.hypothesis_id,
     output_binding: value.state.binding_context,
     program_state: value.state.program_state,
     time_state: value.state.time_state,
     role,
-    association_milligrades: value.milligrades,
-    claim: input.claims?.get(value.state.object_id) ?? "unknown",
+    association_milligrades: value.milligrades ?? 0,
+    claim: input.claims?.get(productStateNodeId(value.state)) ?? "unknown",
     explanation_ids: explanationIds(input.support, input.budget.page_budget)
   };
 }
@@ -295,7 +300,7 @@ function facetsAccept(value: FieldValue, input: AcceptingProjectionInput): boole
 
 function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): FacetMode {
   for (const transition of input.snapshot.retained_transitions) {
-    if (transition.to.object_id !== value.state.object_id) continue;
+    if (productSubjectId(transition.to) !== productSubjectId(value.state)) continue;
     const override = input.relation_facet_modes?.get(transition.relation_kind);
     if (override !== undefined) return override;
   }
@@ -321,13 +326,7 @@ function sortEntries(entries: readonly IndexEntry[]): IndexEntry[] {
 }
 
 function entrySortKey(entry: IndexEntry): string {
-  return stableStringify({
-    object_id: entry.object_id,
-    hypothesis_id: entry.hypothesis_id,
-    output_binding: entry.output_binding,
-    program_state: entry.program_state ?? "",
-    time_state: entry.time_state ?? ""
-  });
+  return canonicalIndexEntryIdentity(entry);
 }
 
 function composeCompleteness(

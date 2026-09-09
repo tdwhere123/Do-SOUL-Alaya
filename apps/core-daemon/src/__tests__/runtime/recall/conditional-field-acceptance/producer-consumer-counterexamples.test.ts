@@ -158,7 +158,9 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     });
     expect(tiny.completeness.logical_index === "complete" && tiny.entries.length >= 31).toBe(false);
     const long = "y".repeat(1400);
-    const encoded = encodeIndexResults(tight, new Map(tight.entries.map((entry) => [entry.object_id, long])));
+    const encoded = encodeIndexResults(tight, new Map(tight.entries.flatMap((entry) =>
+      entry.object_id === undefined ? [] : [[entry.object_id, long] as const]
+    )));
     if (encoded.length > 0) {
       expect(encoded.every((row) => row.budget_state.token_estimate === 1)).toBe(false);
       expect(Math.max(...encoded.map((row) => row.budget_state.token_estimate))).toBeGreaterThan(1);
@@ -166,16 +168,25 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
   });
 
   it("encoding stops before the advertised token cap", () => {
-    const entries = Array.from({ length: 30 }, (_, index) => ({
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      object_id: `obj-${String(index).padStart(2, "0")}`,
-      hypothesis_id: "h0",
-      output_binding: "hit",
-      role: "associated" as const,
-      association_milligrades: 800,
-      claim: "unknown" as const,
-      explanation_ids: []
-    }));
+    const entries = Array.from({ length: 30 }, (_, index) => {
+      const objectId = `obj-${String(index).padStart(2, "0")}`;
+      return {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        target: {
+          kind: "memory_entry" as const,
+          workspace_id: "ws",
+          object_id: objectId,
+          source_revision: "rev"
+        },
+        object_id: objectId,
+        hypothesis_id: "h0",
+        output_binding: "hit",
+        role: "associated" as const,
+        association_milligrades: 800,
+        claim: "unknown" as const,
+        explanation_ids: []
+      };
+    });
     const index = {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       query_id: "probe",
@@ -265,8 +276,16 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
   });
 });
 
-function entryId(entry: { readonly object_id: string; readonly hypothesis_id: string; readonly output_binding: string }): string {
-  return `${entry.hypothesis_id}\0${entry.output_binding}\0${entry.object_id}`;
+function entryId(entry: {
+  readonly object_id?: string;
+  readonly hypothesis_id: string;
+  readonly output_binding: string;
+  readonly target?: { readonly kind: string; readonly object_id?: string; readonly root_id?: string };
+}): string {
+  const id = entry.object_id
+    ?? (entry.target?.kind === "memory_entry" ? entry.target.object_id : entry.target?.root_id)
+    ?? "";
+  return `${entry.hypothesis_id}\0${entry.output_binding}\0${id}`;
 }
 
 async function plantGovernedExtras(slice: SourceSlice): Promise<void> {

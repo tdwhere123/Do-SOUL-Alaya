@@ -9,7 +9,7 @@ import type { LongMemEvalGoldObjectIdentity } from
 
 type RecallResult = {
   readonly results: readonly {
-    readonly object_id: string;
+    readonly object_id?: string;
     readonly object_kind?: string;
   }[];
   readonly diagnostics?: unknown;
@@ -27,10 +27,11 @@ export function writeQuestionDiagnosticDumps(input: {
 
 function writeGoldRankDumpIfEnabled(input: Parameters<typeof writeQuestionDiagnosticDumps>[0]): void {
   if (process.env.ALAYA_BENCH_GOLD_RANK_DUMP === undefined) return;
-  const rankByIdentity = new Map(input.recallResult.results.map((pointer, index) => [
-    objectIdentity(pointer.object_kind, pointer.object_id),
-    index + 1
-  ]));
+  const rankByIdentity = new Map(input.recallResult.results.flatMap((pointer, index) =>
+    pointer.object_id === undefined
+      ? []
+      : [[objectIdentity(pointer.object_kind, pointer.object_id), index + 1] as const]
+  ));
   const ranks = input.goldObjectIdentities
     .map((gold) => rankByIdentity.get(
       objectIdentity(gold.objectKind, gold.objectId)
@@ -70,8 +71,9 @@ function writePoolDumpIfEnabled(input: Parameters<typeof writeQuestionDiagnostic
   const dumpPath = process.env.ALAYA_BENCH_POOL_DUMP;
   if (dumpPath === undefined) return;
   const candidates = buildPoolDumpCandidates(input);
-  const recalled = new Set(input.recallResult.results.map((pointer) =>
-    objectIdentity(pointer.object_kind, pointer.object_id)));
+  const recalled = new Set(input.recallResult.results.flatMap((pointer) =>
+    pointer.object_id === undefined ? [] : [objectIdentity(pointer.object_kind, pointer.object_id)]
+  ));
   const goldMemories = input.goldObjectIdentities.map((gold) => {
     const entry = input.sidecar.get(
       buildLongMemEvalSidecarKey(gold.objectKind, gold.objectId)
@@ -107,9 +109,9 @@ function buildPoolDumpCandidates(input: Parameters<typeof writeQuestionDiagnosti
       objectKind === "evidence_capsule" || objectKind === "synthesis_capsule"
         ? objectKind
         : "memory_entry",
-      pointer.object_id
+      pointer.object_id ?? ""
     ));
-    const identity = objectIdentity(objectKind, pointer.object_id);
+    const identity = objectIdentity(objectKind, pointer.object_id ?? "");
     const fusion = fusionByOid.get(identity);
     return {
       rank: index + 1,

@@ -27,7 +27,7 @@ export { INTERPRETATION_CLOCK, defaultBudget, SNAPSHOT_ID } from "../../../../..
 
 export async function recallThroughHandler(
   slice: SourceSlice,
-  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "dimension" | "domain_tags">> & {
+  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "dimension" | "domain_tags" | "enumeration_policy" | "result_kind_view" | "interpretation_proposal">> & {
     readonly continuation?: InformationIndex["continuation"];
     readonly now?: string;
   }
@@ -64,7 +64,12 @@ export async function recallThroughHandler(
     max_results: request.max_results,
     ...(request.continuation === undefined || request.continuation === null
       ? {}
-      : { continuation: request.continuation })
+      : { continuation: request.continuation }),
+    ...(request.enumeration_policy === undefined ? {} : { enumeration_policy: request.enumeration_policy }),
+    ...(request.result_kind_view === undefined ? {} : { result_kind_view: request.result_kind_view }),
+    ...(request.interpretation_proposal === undefined
+      ? {}
+      : { interpretation_proposal: request.interpretation_proposal })
   }, {
     workspaceId: WS,
     runId: null,

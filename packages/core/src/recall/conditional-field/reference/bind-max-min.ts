@@ -5,6 +5,7 @@ import {
 import {
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
+  canonicalProductIdentity,
   type CompletenessReport,
   type DerivationKind,
   type FieldSnapshot,
@@ -14,7 +15,6 @@ import {
   type SeedActivation,
   type Transition
 } from "@do-soul/alaya-protocol";
-import { stableStringify } from "../../../shared/stable-stringify.js";
 
 export type BindMaxMinSuccess = Readonly<{
   readonly kind: "bound";
@@ -39,7 +39,7 @@ export type BindMaxMinInput = Readonly<{
 }>;
 
 export function productStateNodeId(key: ProductStateKey): string {
-  return stableStringify(key);
+  return canonicalProductIdentity(key);
 }
 
 export function projectLegalDerivationStep(
@@ -107,7 +107,7 @@ export function bindMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
       snapshot_id: input.snapshot_id,
       query_id: input.query_id,
       seeds: input.seeds,
-      values: fieldValues(keys, solved.values),
+      values: fieldValues(keys, solved.values, input.seeds, legalTransitions),
       retained_transitions: retainedProtocolTransitions(legalTransitions, solved.retainedTransitions),
       facets: input.facets ?? []
     }
@@ -137,16 +137,31 @@ function toMaxMinTransition(transition: Transition): MaxMinTransition {
 
 function fieldValues(
   keys: ReadonlyMap<string, ProductStateKey>,
-  values: ReadonlyMap<string, number>
+  values: ReadonlyMap<string, number>,
+  seeds: readonly SeedActivation[],
+  transitions: readonly Transition[]
 ): readonly FieldValue[] {
+  const seeded = new Set(seeds.map((seed) => productStateNodeId(seed.state)));
+  const incoming = new Set(transitions.map((transition) => productStateNodeId(transition.to)));
   const fields: FieldValue[] = [];
   for (const [nodeId, state] of keys) {
     const milligrades = values.get(nodeId) ?? MILLIGRADE_BOTTOM;
+    const reachable = seeded.has(nodeId) || incoming.has(nodeId) || milligrades > MILLIGRADE_BOTTOM;
+    if (!reachable) {
+      fields.push({
+        schema_version: 1,
+        state,
+        accepting: state.program_state === "accepting",
+        activation: { kind: "unreachable" }
+      });
+      continue;
+    }
     fields.push({
       schema_version: 1,
       state,
       milligrades,
-      accepting: state.program_state === "accepting"
+      accepting: state.program_state === "accepting",
+      activation: { kind: "reachable", milligrades }
     });
   }
   return fields;

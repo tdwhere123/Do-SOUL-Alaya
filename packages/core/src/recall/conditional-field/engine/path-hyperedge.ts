@@ -2,6 +2,8 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
+  productSubjectId,
+  retargetMemoryProduct,
   type Derivation,
   type ProductStateKey,
   type QueryProgram,
@@ -118,7 +120,7 @@ function assignmentsForPremise(
   if (premise.kind === "relation") return relationAssignments(premise, from, rows, input);
   if (premise.kind === "empty") return [];
   if (premise.kind === "epsilon") {
-    return [terminalAssignment(from, from.object_id, MILLIGRADE_TOP, openValidity(), "epsilon")];
+    return [terminalAssignment(from, productSubjectId(from), MILLIGRADE_TOP, openValidity(), "epsilon")];
   }
   if (premise.kind === "hyperedge") {
     return nestedHyperedgeAssignments(premise, from, rows, input);
@@ -159,7 +161,7 @@ function nestedHyperedgeAssignments(
   }).map((effect) => {
     const assigned = terminalAssignment(
       from,
-      effect.hyperedge.to.object_id,
+      productSubjectId(effect.hyperedge.to),
       effect.hyperedge.strength_milligrades,
       effect.hyperedge.validity,
       effect.hyperedge.relation_kind,
@@ -185,7 +187,7 @@ function walkCompiledPremise(
 ): readonly PremiseAssignment[] {
   const automaton = compileProgramAutomaton(program);
   const queue: WalkNode[] = automaton.start.map((programState) => ({
-    objectId: from.object_id,
+    objectId: productSubjectId(from),
     programState,
     milligrades: MILLIGRADE_TOP,
     validity: openValidity(),
@@ -210,7 +212,7 @@ function walkCompiledPremise(
     }
     const env = parseBindingContext(node.binding);
     for (const variable of automaton.localVariables.get(node.programState) ?? []) env.delete(variable);
-    const here = { ...from, object_id: node.objectId, binding_context: encodeBindingContext(env) };
+    const here = retargetMemoryProduct(from, { object_id: node.objectId, binding_context: encodeBindingContext(env) });
     for (const hyperedge of automaton.hyperedgeAdvances) {
       if (hyperedge.from !== node.programState) continue;
       for (const effect of hyperedgeEffects(rows, hyperedge.hyperedge, {
@@ -224,7 +226,7 @@ function walkCompiledPremise(
           : node.milligrades;
         for (const programState of hyperedge.to) {
           queue.push({
-            objectId: effect.hyperedge.to.object_id,
+            objectId: productSubjectId(effect.hyperedge.to),
             programState,
             milligrades,
             validity: effect.hyperedge.validity,
@@ -283,7 +285,7 @@ function terminalAssignment(
   validity: Transition["validity"],
   relationKind: string,
   binding = from.binding_context,
-  leafId = `${from.object_id}:${target}:${relationKind}`
+  leafId = `${productSubjectId(from)}:${target}:${relationKind}`
 ): PremiseAssignment {
   const derivation = leafDerivation({
     derivation_id: `leaf:${leafId}`,
@@ -316,7 +318,7 @@ function assignmentFromRow(
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
   }>
 ): PremiseAssignment | undefined {
-  if (row.sourceObjectId !== from.object_id) return undefined;
+  if (row.sourceObjectId !== productSubjectId(from)) return undefined;
   if (!relationMatches(relation.relation_kind, row.predicate)) return undefined;
   if (row.validity === undefined || inactiveResolution(row.resolutionKind)) return undefined;
   const unified = unifyAdvance(from, relation, row);
@@ -414,14 +416,13 @@ function completionEffects(
     derivation
   ]);
   return toProgramStates.map((programState) => {
-    const to: ProductStateKey = {
-      ...from,
+    const to: ProductStateKey = retargetMemoryProduct(from, {
       object_id: spec.target,
       program_state: programState,
       binding_context: spec.binding
-    };
+    });
     return {
-      observation_id: `hyperedge:${from.object_id}:${from.hypothesis_id}:${from.program_state}:${programState}:${spec.join}:${spec.relation_kind}:${spec.target}`,
+      observation_id: `hyperedge:${productSubjectId(from)}:${from.hypothesis_id}:${from.program_state}:${programState}:${spec.join}:${spec.relation_kind}:${spec.target}`,
       hyperedge_premises: premises.map((premise) => ({
         hypothesis_id: premise.hypothesis_id,
         binding_context: premise.binding_context,
@@ -483,7 +484,7 @@ function orWitnesses(
   return premises.map((premise, index) => ({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     witness_id: `or-${String(index)}`,
-    premises: [completion.from.object_id, completion.to.object_id],
+    premises: [productSubjectId(completion.from), productSubjectId(completion.to)],
     cost: 1,
     complete: premise.present
   }));

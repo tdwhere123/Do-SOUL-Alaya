@@ -60,6 +60,8 @@ describe("conditional-field schemas", () => {
     });
     expect(view.facet_mode).toBe("same_path");
     expect(view.threshold_milligrades).toBe(0);
+    expect(view.enumeration_policy).toBe("canonical");
+    expect(view.result_kind_view).toBe("mixed");
     expect(FacetModeSchema.parse("independent")).toBe("independent");
     const relation = QueryProgramSchema.parse({
       schema_version: 1,
@@ -176,12 +178,17 @@ describe("conditional-field schemas", () => {
     }).policy).toBe("construct_index_then_page_then_payload");
     expect(ProductStateKeySchema.parse({
       schema_version: 1,
-      object_id: "r",
+      target: {
+        kind: "memory_entry",
+        workspace_id: "ws",
+        object_id: "r",
+        source_revision: "rev"
+      },
       program_state: "accepting",
       hypothesis_id: "h0",
       binding_context: "default",
       time_state: "as_of"
-    }).object_id).toBe("r");
+    }).target).toMatchObject({ kind: "memory_entry", object_id: "r" });
     expect(InformationIndexSchema.parse({
       schema_version: 1,
       query_id: "q1",
@@ -215,7 +222,10 @@ describe("conditional-field schemas", () => {
       "rebuildable_projections",
       "operational_feedback",
       "continuation",
-      "second_production_selector"
+      "second_production_selector",
+      "enumeration_policy",
+      "result_kind_view",
+      "tagged_target"
     ]);
     for (const row of COMPATIBILITY_LEDGER) {
       expect(COMPATIBILITY_DISPOSITIONS).toContain(row.disposition);

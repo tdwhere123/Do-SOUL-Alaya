@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  productSubjectId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MemoryDimension,
   type Transition
@@ -43,7 +44,7 @@ describe("conditional-field SQLite source-to-index slice", () => {
     const lexical = slice.memoryReader.lexical(WS, "failed deployment", 16);
     expect(lexical.ids).toContain(MEM.r);
     const bound = bindObserved(slice);
-    const config = bound.snapshot.values.find((value) => value.state.object_id === MEM.c);
+    const config = bound.snapshot.values.find((value) => productSubjectId(value.state) === MEM.c);
     expect(config?.milligrades).toBe(850);
     const index = projectAcceptingIndex({
       snapshot: bound.snapshot,
@@ -56,7 +57,7 @@ describe("conditional-field SQLite source-to-index slice", () => {
     });
     expect(index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
       .toBe(850);
-    expect(bound.snapshot.retained_transitions.some((transition) => transition.to.object_id === MEM.u))
+    expect(bound.snapshot.retained_transitions.some((transition) => productSubjectId(transition.to) === MEM.u))
       .toBe(false);
   });
 
@@ -88,7 +89,7 @@ describe("conditional-field SQLite source-to-index slice", () => {
     expect(first.indexProjection.freshness(WS, MEM.u).lexical).toBe("tombstoned");
     const hidden = bindObserved(first);
     expect(hidden.snapshot.values.some((value) =>
-      value.state.object_id === MEM.u && value.milligrades > 0
+      productSubjectId(value.state) === MEM.u && (value.milligrades ?? 0) > 0
     )).toBe(false);
     first.database.close();
     databases.delete(first.database);

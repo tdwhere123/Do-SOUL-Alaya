@@ -1,5 +1,9 @@
 import {
-  InformationIndexSchema
+  EnumerationPolicySchema,
+  InformationIndexSchema,
+  PayloadContinuationRequestSchema,
+  QueryInterpretationProposalSchema,
+  ResultKindViewSchema
 } from "@do-soul/alaya-protocol";
 import {
   captureIndexPreviews,
@@ -66,7 +70,23 @@ export function runConditionalFieldWorkerRecall(
     cancelled: body.cancelled === true,
     ...(body.authorized_scopes === undefined
       ? {}
-      : { authorized_scopes: body.authorized_scopes as readonly string[] })
+      : { authorized_scopes: body.authorized_scopes as readonly string[] }),
+    ...(body.enumeration_policy === undefined
+      ? {}
+      : { enumeration_policy: EnumerationPolicySchema.parse(body.enumeration_policy) }),
+    ...(body.result_kind_view === undefined
+      ? {}
+      : { result_kind_view: ResultKindViewSchema.parse(body.result_kind_view) }),
+    ...(body.interpretation_proposal === undefined
+      ? {}
+      : {
+        interpretation_proposal: QueryInterpretationProposalSchema.parse(body.interpretation_proposal)
+      }),
+    ...(body.payload_continuation === undefined
+      ? {}
+      : {
+        payload_continuation: PayloadContinuationRequestSchema.parse(body.payload_continuation)
+      })
   });
   const index = executed.index;
   return {

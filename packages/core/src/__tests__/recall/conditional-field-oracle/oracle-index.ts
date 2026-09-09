@@ -1,4 +1,5 @@
 import {
+  productSubjectId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   type ClaimState,
   type CompletenessReport,
@@ -187,8 +188,8 @@ export function interpretationMayEmitCompleteEmpty(status: QueryInterpretationSt
 export function milligradeOf(field: EnumeratedField, objectId: string): number {
   let best = 0;
   for (const value of field.accepting) {
-    if (value.state.object_id !== objectId) continue;
-    best = Math.max(best, value.milligrades);
+    if (productSubjectId(value.state) !== objectId) continue;
+    best = Math.max(best, value.milligrades ?? 0);
   }
   return best;
 }
@@ -285,19 +286,20 @@ function acceptingEntries(input: IndexOracleInput): IndexEntry[] {
 
 function entryForValue(value: FieldValue, input: IndexOracleInput): IndexEntry | null {
   if (!value.accepting) return null;
-  if (value.milligrades <= input.view.threshold_milligrades) return null;
+  if ((value.milligrades ?? 0) <= input.view.threshold_milligrades) return null;
   if (!facetsAccept(value, input)) return null;
-  const role = input.roles.get(value.state.object_id) ?? "associated";
+  const role = input.roles.get(productSubjectId(value.state)) ?? "associated";
   if (role === "routing_only" && !input.view.include_routing_only) return null;
   if (!input.view.requested_roles.includes(role)) return null;
   return {
     schema_version: 1,
-    object_id: value.state.object_id,
+    target: value.state.target,
+    ...(value.state.target.kind === "memory_entry" ? { object_id: value.state.target.object_id } : {}),
     hypothesis_id: value.state.hypothesis_id,
     output_binding: value.state.binding_context,
     role,
-    association_milligrades: value.milligrades,
-    claim: input.claims?.get(value.state.object_id) ?? "unknown",
+    association_milligrades: value.milligrades ?? 0,
+    claim: input.claims?.get(productSubjectId(value.state)) ?? "unknown",
     explanation_ids: [],
     program_state: value.state.program_state,
     time_state: value.state.time_state
@@ -307,7 +309,7 @@ function entryForValue(value: FieldValue, input: IndexOracleInput): IndexEntry |
 function facetsAccept(value: FieldValue, input: IndexOracleInput): boolean {
   const facets = input.facets ?? [];
   if (facets.length === 0) return true;
-  const relationKind = input.retained_relation_kinds?.get(value.state.object_id);
+  const relationKind = input.retained_relation_kinds?.get(productSubjectId(value.state));
   const mode = relationKind === undefined
     ? input.view.facet_mode
     : (input.relation_facet_modes?.get(relationKind) ?? input.view.facet_mode);

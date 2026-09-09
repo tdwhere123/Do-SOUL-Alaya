@@ -4,16 +4,25 @@ import {
   InformationIndexSchema,
   MemoryDimension,
   MILLIGRADE_TOP,
+  QueryViewSchema,
   ScopeClass,
   formatConditionalFieldDigest,
+  indexEntryCacheKey,
+  indexEntryObjectKind,
+  indexMemoryObjectId,
   type Continuation,
   type BoundedActiveConstraintsResult,
+  type EnumerationPolicy,
   type InformationIndex,
+  type PayloadContinuationRequest,
   type QueryInterpretation,
-  type RequestBudget
+  type QueryInterpretationProposal,
+  type RequestBudget,
+  type ResultKindView
 } from "@do-soul/alaya-protocol";
 import {
   compileConditionalFieldQuery,
+  continuationViewMismatch,
   interpretationIdentity
 } from "../conditional-field/query/compile-query.js";
 import { interpretationCoverageFor } from "../conditional-field/reference/interpret-query.js";
@@ -75,6 +84,10 @@ export type ConditionalFieldRecallRequest = Readonly<{
   readonly cancelled?: boolean;
   readonly authorized_scopes?: readonly string[];
   readonly governance?: BoundedActiveConstraintsResult;
+  readonly enumeration_policy?: EnumerationPolicy;
+  readonly result_kind_view?: ResultKindView;
+  readonly interpretation_proposal?: QueryInterpretationProposal;
+  readonly payload_continuation?: PayloadContinuationRequest;
 }>;
 
 export type ConditionalFieldRecallResult = RecallResult & Readonly<{
@@ -162,7 +175,16 @@ export function runConditionalFieldRecallWithReceipt(input: ConditionalFieldReca
     ...(input.time_field === undefined ? {} : { time_field: input.time_field }),
     ...(input.dimension_filter === undefined ? {} : { dimension_filter: input.dimension_filter }),
     ...(input.domain_tag_filter === undefined ? {} : { domain_tag_filter: input.domain_tag_filter }),
-    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes })
+    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    view: QueryViewSchema.parse({
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      requested_roles: ["requested", "associated"],
+      enumeration_policy: input.enumeration_policy ?? "canonical",
+      result_kind_view: input.result_kind_view ?? "mixed"
+    }),
+    ...(input.interpretation_proposal === undefined
+      ? {}
+      : { interpretation_proposal: input.interpretation_proposal })
   };
   const interpretation = compileConditionalFieldQuery(compileInput);
   const executionReceipt: ConditionalFieldExecutionReceipt = {
@@ -178,7 +200,7 @@ function runCompiledConditionalFieldRecall(
   input: ConditionalFieldRecallRequest,
   interpretation: QueryInterpretation
 ): InformationIndex {
-  if (continuationEpochMismatch(input.continuation, interpretation)
+  if (continuationEpochMismatch(input.continuation, interpretation, input.authorized_scopes)
     || (input.continuation != null && (
       input.continuation.snapshot_id !== input.snapshot_id
       || Date.parse(input.continuation.expires_at) <= Date.parse(input.lifetime_now ?? new Date().toISOString())
@@ -374,7 +396,11 @@ export function encodeRecallResult(
   sourceMetadata: Readonly<Record<string, RecallSourceMetadata>> = {}
 ): ConditionalFieldRecallResult {
   const ceilings = governanceManifestationCeilings(governance?.paths ?? []);
-  const excerpts = index.entries.map((entry) => previews.get(entry.object_id));
+  const excerpts = index.entries.map((entry) => {
+    const cacheKey = indexEntryCacheKey(entry);
+    const objectId = indexMemoryObjectId(entry);
+    return previews.get(cacheKey) ?? (objectId === undefined ? undefined : previews.get(objectId));
+  });
   const hydrated = excerpts.filter((excerpt) => excerpt !== undefined).length;
   const payload = index.entries.length === 0
     ? index.completeness.payload
@@ -391,22 +417,27 @@ export function encodeRecallResult(
     };
   const candidates = encodedIndex.entries.map((entry, offset) => {
     const score = entry.association_milligrades / MILLIGRADE_TOP;
+    const objectId = indexMemoryObjectId(entry);
+    const cacheKey = indexEntryCacheKey(entry);
+    const metadata = sourceMetadata[cacheKey] ?? (objectId === undefined ? undefined : sourceMetadata[objectId]);
+    const kind = indexEntryObjectKind(entry);
     return {
-      object_id: entry.object_id,
-      object_kind: "memory_entry" as const,
+      ...(objectId === undefined ? {} : { object_id: objectId }),
+      object_kind: kind,
+      target: entry.target,
       activation_score: score,
       relevance_score: score,
       content_preview: excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW,
       token_estimate: previewTokenEstimate(excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW),
-      manifestation: governance === undefined ? "excerpt" as const
-        : governanceManifestationFor(entry.object_id, ceilings,
+      manifestation: governance === undefined || objectId === undefined ? "excerpt" as const
+        : governanceManifestationFor(objectId, ceilings,
           governance.completeness === "complete" && !governance.temporal_uncertain),
-      dimension: sourceMetadata[entry.object_id]?.dimension ?? MemoryDimension.FACT,
-      scope_class: sourceMetadata[entry.object_id]?.scope_class ?? ScopeClass.PROJECT,
+      dimension: metadata?.dimension ?? MemoryDimension.FACT,
+      scope_class: metadata?.scope_class ?? ScopeClass.PROJECT,
       origin_plane: "workspace_local" as const,
       selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
-      ...(sourceMetadata[entry.object_id]?.staged_warnings === undefined ? {} : {
-        staged_warnings: sourceMetadata[entry.object_id]!.staged_warnings
+      ...(metadata?.staged_warnings === undefined ? {} : {
+        staged_warnings: metadata.staged_warnings
       })
     };
   });
@@ -464,11 +495,13 @@ function interpretationIdOf(interpretation: QueryInterpretation): string {
 
 function continuationEpochMismatch(
   continuation: Continuation | null | undefined,
-  interpretation: QueryInterpretation
+  interpretation: QueryInterpretation,
+  authorizedScopes?: readonly string[]
 ): boolean {
   if (continuation === undefined || continuation === null) return false;
   if (continuation.interpretation_id === undefined) return true;
-  return continuation.interpretation_id !== interpretationIdOf(interpretation);
+  if (continuation.interpretation_id !== interpretationIdOf(interpretation)) return true;
+  return continuationViewMismatch(continuation, interpretation.view, authorizedScopes);
 }
 
 function annotatePublicIndex(
@@ -486,7 +519,11 @@ function annotatePublicIndex(
       ...index.continuation,
       interpretation_id: index.continuation.interpretation_id ?? interpretationId,
       interpretation_clock: index.continuation.interpretation_clock
-        ?? interpretation.interpretation_clock
+        ?? interpretation.interpretation_clock,
+      enumeration_policy: index.continuation.enumeration_policy
+        ?? interpretation.view.enumeration_policy,
+      result_kind_view: index.continuation.result_kind_view
+        ?? interpretation.view.result_kind_view
     };
   return { ...index, completeness, continuation, interpretation_id: interpretationId,
     as_of: interpretation.interpretation_clock };
@@ -587,7 +624,13 @@ function buildRecallRequest(
     ...nullableStringList(
       params.policyOverride?.coarse_filter.deterministic_match.domain_tag_filter,
       "domain_tag_filter"
-    )
+    ),
+    ...(extra.enumeration_policy === undefined ? {} : { enumeration_policy: extra.enumeration_policy }),
+    ...(extra.result_kind_view === undefined ? {} : { result_kind_view: extra.result_kind_view }),
+    ...(extra.interpretation_proposal === undefined
+      ? {}
+      : { interpretation_proposal: extra.interpretation_proposal }),
+    ...(extra.payload_continuation === undefined ? {} : { payload_continuation: extra.payload_continuation })
   };
 }
 

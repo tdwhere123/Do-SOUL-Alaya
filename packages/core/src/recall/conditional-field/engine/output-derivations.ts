@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Derivation, SeedActivation, Transition } from "@do-soul/alaya-protocol";
+import { productSubjectId, type Derivation, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import { transitionKey } from "./path-composition.js";
 import { joinDerivation, leafDerivation } from "./path-derivation.js";
@@ -34,7 +34,7 @@ export function groundedOutputDerivations(input: {
   retained_bytes: number; complete: boolean; progress: GroundingProgress } {
   const inputDigest = createHash("sha256").update(JSON.stringify([
     input.seeds, input.transitions, input.derivations, input.transition_derivations,
-    input.seeds.map((seed) => input.source_facts?.[seed.state.object_id]?.source_revision ?? null)
+    input.seeds.map((seed) => input.source_facts?.[productSubjectId(seed.state)]?.source_revision ?? null)
   ])).digest("hex");
   const prior = input.progress?.input_digest === inputDigest ? input.progress : undefined;
   const forest = new Map(prior?.forest);
@@ -69,8 +69,8 @@ export function groundedOutputDerivations(input: {
     } else if (seedOffset < input.seeds.length) {
       const seed = input.seeds[seedOffset]!;
       const key = productStateNodeId(seed.state);
-      const root = leafDerivation({ derivation_id: `seed:${key}`, observation_id: seed.state.object_id,
-        source_revision: input.source_facts?.[seed.state.object_id]?.source_revision, association_milligrades: seed.milligrades });
+      const root = leafDerivation({ derivation_id: `seed:${key}`, observation_id: productSubjectId(seed.state),
+        source_revision: input.source_facts?.[productSubjectId(seed.state)]?.source_revision, association_milligrades: seed.milligrades });
       const task: GroundTask = { key, root: root.derivation_id, visited: [], offset: 0 };
       const hasOutgoing = (outgoing.get(key)?.length ?? 0) > 0;
       if (!retain(bytesFor(root) + bytesFor([key, root.derivation_id]) + (hasOutgoing ? bytesFor(task) : 0))) break;

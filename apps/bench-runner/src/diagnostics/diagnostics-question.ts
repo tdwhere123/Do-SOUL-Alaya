@@ -165,16 +165,18 @@ function normalizeDeliveredResults(
 ): readonly DiagnosticRecallResult[] {
   const joined = deliveredResults.map((result): DiagnosticRecallResult => {
     const objectKind = result.object_kind ?? "memory_entry";
-    const candidate = diagnostics?.candidatesByObjectIdentity.get(
-      buildObjectIdentityKey(objectKind, result.object_id)
-    );
+    const candidate = result.object_id === undefined
+      ? undefined
+      : diagnostics?.candidatesByObjectIdentity.get(
+        buildObjectIdentityKey(objectKind, result.object_id)
+      );
     const fusedScore = result.fused_score ?? candidate?.fusedScore ?? null;
     const confidence =
       result.abstention_confidence_score !== undefined
         ? result.abstention_confidence_score
         : null;
     return {
-      object_id: result.object_id,
+      object_id: result.object_id ?? "",
       ...(objectKind === "memory_entry" ? {} : { object_kind: objectKind }),
       dimension: candidate?.dimension ?? null,
       rank: result.rank,

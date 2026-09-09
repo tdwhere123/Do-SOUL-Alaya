@@ -11,6 +11,7 @@ import {
   SoulReportContextUsageResponseSchema,
   TaskObjectSurfaceSchema,
   UsageReportSchema,
+  indexEntryCacheKey,
   type ContextDeliveryRecord,
   type MemoryEntry,
   type RecallCandidate,
@@ -78,6 +79,10 @@ export interface RecallUsageHandlerDependencies {
       readonly since?: string;
       readonly until?: string;
       readonly continuation?: import("@do-soul/alaya-protocol").Continuation | null;
+      readonly enumeration_policy?: import("@do-soul/alaya-protocol").EnumerationPolicy;
+      readonly result_kind_view?: import("@do-soul/alaya-protocol").ResultKindView;
+      readonly interpretation_proposal?: import("@do-soul/alaya-protocol").QueryInterpretationProposal;
+      readonly payload_continuation?: import("@do-soul/alaya-protocol").PayloadContinuationRequest;
     }): Promise<Readonly<{
       readonly candidates: readonly Readonly<RecallCandidate>[];
       readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
@@ -214,7 +219,10 @@ function encodeRecallHandlerResults(recallResult: RecallServiceResult, policy: R
   const index = recallResult.index;
   if (index === undefined) throw new Error("conditional-field Recall requires an authoritative index");
   const previews = new Map(
-    recallResult.candidates.map((candidate) => [candidate.object_id, candidate.content_preview] as const)
+    index.entries.map((entry, offset) => [
+      indexEntryCacheKey(entry),
+      recallResult.candidates[offset]?.content_preview ?? "[payload omitted]"
+    ] as const)
   );
   const maxTotalTokens = policy.fine_assessment.budgets.max_total_tokens;
   const metadata = sourceMetadataForRecallResult(recallResult);
@@ -234,7 +242,11 @@ function buildRecallDelivery(
 ) {
   const deliveryId = `delivery_${params.generateId()}`;
   const deliveredObjects = dedupeDeliveredObjectIdentities([
-    ...results.map((result) => ({ object_id: result.object_id, object_kind: result.object_kind })),
+    ...results.map((result) => ({
+      ...(result.object_id === undefined ? {} : { object_id: result.object_id }),
+      object_kind: result.object_kind,
+      target: result.target
+    })),
     ...recallResult.active_constraints.map((constraint) => ({
       object_id: constraint.object_id,
       object_kind: constraint.object_kind
@@ -286,7 +298,12 @@ function buildRecallResponse(
       },
       explainabilityPartial
     ),
-    index: recallResult.index
+    index: recallResult.index,
+    ...(recallResult.index.order_status === undefined ? {} : { order_status: recallResult.index.order_status }),
+    ...(recallResult.index.page_purpose === undefined ? {} : { page_purpose: recallResult.index.page_purpose }),
+    ...(recallResult.index.product_updates === undefined
+      ? {}
+      : { product_updates: recallResult.index.product_updates })
   });
 }
 

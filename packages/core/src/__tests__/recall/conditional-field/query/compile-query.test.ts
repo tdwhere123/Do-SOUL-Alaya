@@ -10,6 +10,8 @@ import {
 import {
   collectRelations,
   compileConditionalFieldQuery,
+  continuationViewMismatch,
+  digestOriginalQuery,
   interpretationIdentity,
   SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID,
   type QueryMemoryPort
@@ -265,6 +267,8 @@ describe("conditional-field query compiler", () => {
         schema_version: 1,
         requested_roles: ["requested", "associated"],
         include_routing_only: false,
+        enumeration_policy: "canonical",
+        result_kind_view: "mixed",
         facet_mode: "independent",
         threshold_milligrades: 800
       }
@@ -458,6 +462,74 @@ describe("conditional-field query compiler", () => {
       { since: YESTERDAY_START },
       { observed_at: YESTERDAY_INSTANT }
     )).toBe("true");
+  });
+
+  it("keeps page_budget out of query denotation while policy and proposal change query_id", () => {
+    const narrow = compileOrdinary("yesterday's failed deployment", defaultBudget({ page_budget: 1 }));
+    const wide = compileOrdinary("yesterday's failed deployment", defaultBudget({ page_budget: 800 }));
+    expect(narrow.query_id).toBe(wide.query_id);
+    const associative = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "yesterday's failed deployment",
+      interpretation_clock: INTERPRETATION_CLOCK,
+      view: defaultView()
+    });
+    const requestedAssociative = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "yesterday's failed deployment",
+      interpretation_clock: INTERPRETATION_CLOCK,
+      view: { ...defaultView(), enumeration_policy: "associative" }
+    });
+    expect(requestedAssociative.query_id).not.toBe(associative.query_id);
+    const digest = digestOriginalQuery("yesterday's failed deployment");
+    const withProposal = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "yesterday's failed deployment",
+      interpretation_clock: INTERPRETATION_CLOCK,
+      interpretation_proposal: {
+        schema_version: 1,
+        original_query_digest: digest,
+        producer_id: "compiler.test.v1"
+      }
+    });
+    expect(withProposal.query_id).not.toBe(associative.query_id);
+    const unbound = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "yesterday's failed deployment",
+      interpretation_clock: INTERPRETATION_CLOCK,
+      interpretation_proposal: {
+        schema_version: 1,
+        original_query_digest: digestOriginalQuery("other query"),
+        producer_id: "compiler.test.v1"
+      }
+    });
+    expect(unbound.status).toBe("malformed");
+    const canonicalContinuation = {
+      schema_version: 1 as const,
+      continuation_id: "page-1",
+      query_id: associative.query_id,
+      snapshot_id: SNAPSHOT_ID,
+      result_version: "v1",
+      expires_at: "2099-01-01T00:00:00.000Z",
+      cursor: "offset-1",
+      enumeration_policy: "canonical" as const,
+      result_kind_view: "mixed" as const
+    };
+    expect(continuationViewMismatch(canonicalContinuation, requestedAssociative.view)).toBe(true);
+    expect(continuationViewMismatch(canonicalContinuation, associative.view)).toBe(false);
+    expect(continuationViewMismatch(canonicalContinuation, associative.view, ["private"])).toBe(false);
+    expect(continuationViewMismatch({
+      ...canonicalContinuation,
+      authorized_scopes: ["public"]
+    }, associative.view, ["private"])).toBe(true);
   });
 });
 

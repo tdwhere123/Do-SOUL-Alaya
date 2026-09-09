@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { UsageReportSchema } from "../recall/conditional-field/feedback.js";
+import { RecallTargetRefSchema } from "../recall/conditional-field/product-identity.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BoundedIdSchema,
@@ -13,16 +14,41 @@ import {
 export const SoulContextUsageStateSchema = z.enum(["used", "skipped", "not_applicable"]);
 export const SoulContextUsageTrustModeSchema = z.enum(["manual", "automatic"]);
 
-// object_kind is an open BoundedLabel, not a closed enum, on purpose: it is
-// the same open vocabulary as SoulActiveConstraint.object_kind and must admit
-// kinds the wire does not yet model. Consumers fail closed — an unknown kind
-// simply never tuple-matches a delivered/expected (object_id, object_kind).
+// Tagged target is the Recall usage identity. Permissive object_kind strings
+// are not sufficient validation; source-record-only rows omit object_id.
 export const SoulContextObjectIdentitySchema = z
   .object({
-    object_id: BoundedIdSchema,
-    object_kind: BoundedLabelSchema
+    object_id: BoundedIdSchema.optional(),
+    object_kind: BoundedLabelSchema.optional(),
+    target: RecallTargetRefSchema.optional()
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.target === undefined && value.object_id === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["target"],
+        message: "usage identity requires target or object_id"
+      });
+    }
+    if (value.target?.kind === "memory_entry") {
+      if (value.object_id !== value.target.object_id) {
+        context.addIssue({
+          code: "custom",
+          path: ["object_id"],
+          message: "memory_entry object_id must match target.object_id"
+        });
+      }
+      return;
+    }
+    if (value.target?.kind === "source_evidence" && value.object_id !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["object_id"],
+        message: "source_evidence must not fill object_id"
+      });
+    }
+  })
   .readonly();
 
 export const SoulContextUsageAnchorRoleSchema = z.enum(["source", "target"]);
@@ -38,11 +64,28 @@ export const SoulContextPerAnchorUsageSchema = z
 
 export const SoulContextDeliveredObjectUsageSchema = z
   .object({
-    object_id: BoundedIdSchema,
+    object_id: BoundedIdSchema.optional(),
     object_kind: BoundedLabelSchema.optional(),
+    target: RecallTargetRefSchema.optional(),
     usage_status: SoulContextUsageStateSchema
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.target === undefined && value.object_id === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["target"],
+        message: "delivered usage requires target or object_id"
+      });
+    }
+    if (value.target?.kind === "source_evidence" && value.object_id !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["object_id"],
+        message: "source_evidence usage must not fill object_id"
+      });
+    }
+  })
   .readonly();
 
 export const SoulContextUsageTurnMessageSchema = z

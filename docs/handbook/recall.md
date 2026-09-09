@@ -86,11 +86,17 @@ conditional-field delivery remain tested at their current owners.
 
 ## Conditional meaning
 
-The field retains object, hypothesis, program state, binding and temporal
-coordinates. Query compilation preserves supported ordinary-language meaning
+The field retains a tagged target (memory entry or native source evidence),
+hypothesis, program state, binding and temporal coordinates. A source-record-only
+product uses root/revision/digest identity and must not mint a memory or capsule
+id. Query compilation preserves supported ordinary-language meaning
 and exposes interpretation holes. Missing knowledge is not a zero association
 or a complete empty universe. Same-service bindings remain distinct from two
-services that happen to share a provider.
+services that happen to share a provider. Canonical identity order is the
+default enumeration; associative order is an explicit query-view policy over
+the same legal membership. Source-root discovery and payload expansion remain
+owned by later admission/hydration work; protocol identity is not by itself
+proof that those readers exist.
 
 Association uses `assoc.bottleneck.milligrade.v1`. Under the declared scalar
 reference assumptions, compatible serial and AND composition use minimum;

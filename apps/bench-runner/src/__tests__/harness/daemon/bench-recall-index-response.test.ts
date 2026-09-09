@@ -14,18 +14,20 @@ const policy = buildBenchDiagnosticRecallPolicy("surface", 2, false);
 const budget = { schema_version: 1 as const, work_units: 10_000, memory_bytes: 1_000_000,
   page_budget: 2, finalization_reserve: 100, min_envelope: 10 };
 
-function fixture(): Result {
+function fixture(enumerationPolicy?: "canonical" | "associative"): Result {
   const executed = runConditionalFieldRecallWithReceipt({
     workspace_id: "workspace", query_text: "needle", budget,
     snapshot_id: `sha256:${"a".repeat(64)}`,
     interpretation_clock: "2026-09-06T00:00:00.000Z", as_of: "2026-09-06T00:00:00.000Z",
-    expires_at: "2099-01-01T00:00:00.000Z", readers: {}
+    expires_at: "2099-01-01T00:00:00.000Z", readers: {},
+    ...(enumerationPolicy === undefined ? {} : { enumeration_policy: enumerationPolicy })
   });
   const index = InformationIndexSchema.parse({
     schema_version: 1, query_id: executed.execution_receipt.query_id, snapshot_id: executed.execution_receipt.snapshot_id,
     result_version: "v1", interpretation_id: executed.execution_receipt.interpretation_id, as_of: "2026-09-06T00:00:00.000Z",
     entries: ["first", "second"].map((object_id) => ({
       schema_version: 1, object_id, hypothesis_id: "h0", output_binding: object_id,
+      target: { kind: "memory_entry" as const, workspace_id: "workspace", object_id, source_revision: "rev" },
       program_state: "accept", time_state: "as_of", role: "requested",
       association_milligrades: 850, claim: "unknown", explanation_ids: []
     })),
@@ -123,5 +125,22 @@ describe("bench conditional field index response", () => {
   ])("does not invent zero calls for absent or contradictory counters", (counts) => {
     expect(() => validateBenchRecallIndex({ ...fixture(), ...counts } as Result))
       .toThrow(/observed zero/);
+  });
+
+  it("binds omitted filters to a live canonical receipt and associative expected to an associative receipt", () => {
+    const expected = {
+      queryText: "needle",
+      workspaceId: "workspace",
+      referenceTime: "2026-09-06T00:00:00.000Z",
+      requestBudget: budget
+    };
+    expect(() => encodeBenchRecallResults(fixture(), policy, budget, { ...expected, requestFilters: {} }))
+      .not.toThrow();
+    const associative = fixture("associative");
+    expect(() => encodeBenchRecallResults(associative, policy, budget, {
+      ...expected, requestFilters: { enumeration_policy: "associative" }
+    })).not.toThrow();
+    expect(() => encodeBenchRecallResults(associative, policy, budget, { ...expected, requestFilters: {} }))
+      .toThrow(/differs from the invoked request/);
   });
 });

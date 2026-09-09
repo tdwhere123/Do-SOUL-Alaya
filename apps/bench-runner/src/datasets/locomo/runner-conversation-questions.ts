@@ -61,7 +61,7 @@ interface MutableConversationQuestionResults {
 
 interface QaResult {
   readonly latencyMs: number;
-  readonly pointers: ReadonlyArray<{ readonly object_id: string; readonly relevance_score: number }>;
+  readonly pointers: ReadonlyArray<{ readonly object_id?: string; readonly relevance_score: number }>;
   readonly degradationReason: string | null;
   readonly recallResult: unknown;
 }
@@ -184,7 +184,9 @@ function computeRetrievalHits(
 ): { readonly hit1: boolean; readonly hit5: boolean; readonly hit10: boolean } {
   const ranked = result.pointers
     .slice(0, 10)
-    .map((pointer) => seeded.diaIdByMemoryId.get(pointer.object_id));
+    .map((pointer) => pointer.object_id === undefined
+      ? undefined
+      : seeded.diaIdByMemoryId.get(pointer.object_id));
   return {
     hit1: ranked[0] !== undefined && evidenceSet.has(ranked[0]),
     hit5: ranked
@@ -254,6 +256,14 @@ function buildWideQaPool(
   result: QaResult
 ): QaDeliveredCandidate[] {
   return result.pointers.map((pointer, index) => {
+    if (pointer.object_id === undefined) {
+      return {
+        objectId: "",
+        content: "",
+        sessionId: null,
+        sourceRank: index + 1
+      };
+    }
     const date = seeded.dateByMemoryId.get(pointer.object_id);
     return {
       objectId: pointer.object_id,

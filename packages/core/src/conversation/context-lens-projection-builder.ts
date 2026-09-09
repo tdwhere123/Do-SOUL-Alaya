@@ -54,12 +54,15 @@ export class ContextLensProjectionBuilder {
     const recallCandidates = recallResult.candidates.filter((candidate) =>
       isLensRecallCandidate(candidate, recalledMemories)
     );
-    const recallEntries = recallCandidates.map((candidate) =>
-      createLensEntry(candidate.object_id, ObjectKind.MEMORY_ENTRY, candidate.relevance_score, candidate.manifestation, {
-        scopeClass: candidate.scope_class
-      })
+    const recallEntries = recallCandidates.flatMap((candidate) =>
+      candidate.object_id === undefined
+        ? []
+        : [createLensEntry(candidate.object_id, ObjectKind.MEMORY_ENTRY, candidate.relevance_score, candidate.manifestation, {
+          scopeClass: candidate.scope_class
+        })]
     );
     const evidenceEntries = [...new Set(recallCandidates.flatMap((candidate) => {
+      if (candidate.object_id === undefined) return [];
       const memory = recalledMemories.get(candidate.object_id);
       return memory?.evidence_refs ?? [];
     }))].map((evidenceRef) => createLensEntry(evidenceRef, ObjectKind.EVIDENCE_CAPSULE, 0.25, "hint"));
@@ -100,7 +103,9 @@ export class ContextLensProjectionBuilder {
   ): Readonly<WorkingProjection> {
     let taskSurfaceEntryIndex = 0;
     const strictWinnerMap = new Map(strictWinners.map((claim) => [claim.object_id, claim] as const));
-    const recallCandidateMap = new Map(recallResult.candidates.map((candidate) => [candidate.object_id, candidate] as const));
+    const recallCandidateMap = new Map(recallResult.candidates.flatMap((candidate) =>
+      candidate.object_id === undefined ? [] : [[candidate.object_id, candidate] as const]
+    ));
     const overrideMap = new Map(activeOverrides.map((override) => [override.runtime_id, override] as const));
 
     const entries = contextLens.lens_entries.map((entry) => {
@@ -214,6 +219,7 @@ function isLensRecallCandidate(
   candidate: Readonly<RecallCandidate>,
   recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>
 ): boolean {
+  if (candidate.object_id === undefined) return false;
   if (candidate.scope_class === ScopeClass.PROJECT) {
     return recalledMemories.has(candidate.object_id);
   }

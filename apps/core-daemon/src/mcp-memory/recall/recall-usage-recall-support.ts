@@ -1,5 +1,8 @@
 import {
+  sameRecallTarget,
   type RecallPolicy,
+  type RecallTargetRef,
+  type SoulContextObjectIdentity,
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
 import {
@@ -7,13 +10,17 @@ import {
   resolveRecallPolicyFiltersFromSearchRequest,
 } from "@do-soul/alaya-core";
 
+export type DeliveredObjectIdentity = SoulContextObjectIdentity;
+
 export function dedupeDeliveredObjectIdentities(
-  objects: readonly { readonly object_id: string; readonly object_kind: string }[]
-): readonly { readonly object_id: string; readonly object_kind: string }[] {
+  objects: readonly DeliveredObjectIdentity[]
+): readonly DeliveredObjectIdentity[] {
   const seen = new Set<string>();
-  const result: Array<{ readonly object_id: string; readonly object_kind: string }> = [];
+  const result: DeliveredObjectIdentity[] = [];
   for (const object of objects) {
-    const key = `${object.object_kind}\0${object.object_id}`;
+    const key = object.target === undefined
+      ? `${object.object_kind}\0${object.object_id ?? ""}`
+      : `${object.object_kind}\0${JSON.stringify(object.target)}`;
     if (seen.has(key)) {
       continue;
     }
@@ -24,9 +31,19 @@ export function dedupeDeliveredObjectIdentities(
 }
 
 export function uniqueObjectIds(
-  objects: readonly { readonly object_id: string }[]
+  objects: readonly { readonly object_id?: string }[]
 ): readonly string[] {
-  return Object.freeze([...new Set(objects.map((object) => object.object_id))]);
+  return Object.freeze([...new Set(objects.flatMap((object) =>
+    object.object_id === undefined ? [] : [object.object_id]
+  ))]);
+}
+
+export function sameDeliveredTarget(
+  left: RecallTargetRef | undefined,
+  right: RecallTargetRef | undefined
+): boolean {
+  if (left === undefined || right === undefined) return false;
+  return sameRecallTarget(left, right);
 }
 
 export function buildRecallPolicy(

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   UsageReportSchema,
+  productSubjectId,
   type Derivation,
   type FieldValue,
   type IndexEntry,
@@ -91,7 +92,8 @@ export function outputAttributionHandle(input: Readonly<{
     exposure: "exposed",
     reported_use: "unknown",
     output_id: boundedOutputId(input.entry),
-    object_id: input.entry.object_id,
+    ...(input.entry.object_id === undefined ? {} : { object_id: input.entry.object_id }),
+    target: input.entry.target,
     query_id: input.query_id,
     snapshot_id: input.snapshot_id
   });
@@ -113,7 +115,8 @@ export function witnessAttributionHandle(input: Readonly<{
     witness_id: input.witness_id,
     interpretation_id: input.interpretation_id,
     as_of: input.as_of,
-    object_id: input.entry.object_id,
+    ...(input.entry.object_id === undefined ? {} : { object_id: input.entry.object_id }),
+    target: input.entry.target,
     query_id: input.query_id,
     snapshot_id: input.snapshot_id
   });
@@ -153,7 +156,7 @@ function derivationRoots(derivations: readonly Derivation[]): readonly Derivatio
 
 function supportBelongsTo(record: SupportRecord, value: FieldValue): boolean {
   const named = [record.proposition_id, ...record.witnesses.flatMap((witness) => [...witness.premises])];
-  return named.includes(value.state.object_id) || named.includes(value.state.hypothesis_id);
+  return named.includes(productSubjectId(value.state)) || named.includes(value.state.hypothesis_id);
 }
 
 function derivationIsComplete(

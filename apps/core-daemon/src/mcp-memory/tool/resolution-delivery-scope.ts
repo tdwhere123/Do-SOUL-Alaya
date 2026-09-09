@@ -10,8 +10,9 @@ type DeliveryScopeRecord = Readonly<{
   run_id: string | null;
   delivered_object_ids: readonly string[];
   delivered_objects?: readonly Readonly<{
-    object_id: string;
-    object_kind: string;
+    object_id?: string;
+    object_kind?: string;
+    target?: unknown;
   }>[];
 }>;
 

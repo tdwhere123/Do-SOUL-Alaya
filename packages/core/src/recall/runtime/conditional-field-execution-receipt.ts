@@ -5,7 +5,7 @@ export interface ConditionalFieldExecutionReceipt {
   readonly schema_version: 1;
   readonly workspace_id: string;
   readonly requested_budget: RequestBudget;
-  readonly compile_input: Omit<OrdinaryLanguageCompileInput, "memory" | "relations" | "query_id" | "view">;
+  readonly compile_input: Omit<OrdinaryLanguageCompileInput, "memory" | "relations" | "query_id">;
   readonly query_id: string;
   readonly interpretation_id: string;
   readonly snapshot_id: string;

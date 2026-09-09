@@ -85,5 +85,20 @@ export const COMPATIBILITY_LEDGER: readonly CompatibilityLedgerRow[] = Object.fr
     field: "second_production_selector",
     disposition: "forbidden-second-selector",
     note: "select_gamma/prefix_sk must not become a parallel production selector"
+  }),
+  Object.freeze({
+    field: "enumeration_policy",
+    disposition: "already-migrated",
+    note: "canonical default and explicit associative live on QueryView, public request, continuation and execution receipt"
+  }),
+  Object.freeze({
+    field: "result_kind_view",
+    disposition: "already-migrated",
+    note: "mixed default with explicit memory_only/source_only view restrictions in identity and coverage"
+  }),
+  Object.freeze({
+    field: "tagged_target",
+    disposition: "already-migrated",
+    note: "RecallTargetRef is the product subject; source-record-only omits object_id and never mints a capsule id"
   })
 ]);

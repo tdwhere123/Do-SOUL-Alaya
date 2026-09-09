@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  productSubjectId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   QueryInterpretationSchema,
   QueryProgramSchema,
@@ -204,8 +205,10 @@ describe("conditional-field reference binder", () => {
     for (const objectId of ["r", "l", "c", "s", "h"]) {
       expect(valueOf(bound.snapshot.values, objectId)).toBe(enumerated.get(objectId));
     }
-    expect(valueOf(bound.snapshot.values, "u")).toBe(0);
-    expect(bound.snapshot.retained_transitions.some((transition) => transition.to.object_id === "u"))
+    const unrelated = bound.snapshot.values.find((value) => productSubjectId(value.state) === "u");
+    expect(unrelated?.activation).toEqual({ kind: "unreachable" });
+    expect(unrelated?.milligrades).toBeUndefined();
+    expect(bound.snapshot.retained_transitions.some((transition) => productSubjectId(transition.to) === "u"))
       .toBe(false);
   });
 
@@ -451,10 +454,10 @@ function edge(
 }
 
 function valueOf(
-  values: readonly { readonly state: ProductStateKey; readonly milligrades: number }[],
+  values: readonly { readonly state: ProductStateKey; readonly milligrades?: number }[],
   objectId: string
 ): number {
-  return values.find((value) => value.state.object_id === objectId)?.milligrades ?? 0;
+  return values.find((value) => productSubjectId(value.state) === objectId)?.milligrades ?? 0;
 }
 
 function inGuardInterval(
@@ -471,11 +474,11 @@ function enumerateBottleneck(
 ): Map<string, number> {
   const best = new Map<string, number>();
   const edges = new Map<string, Array<{ to: string; strength: number }>>();
-  for (const seedRow of seeds) best.set(seedRow.state.object_id, seedRow.milligrades);
+  for (const seedRow of seeds) best.set(productSubjectId(seedRow.state), seedRow.milligrades);
   for (const transition of transitions) {
     if (!transition.applicable) continue;
-    const from = transition.from.object_id;
-    const to = transition.to.object_id;
+    const from = productSubjectId(transition.from);
+    const to = productSubjectId(transition.to);
     if (!best.has(from)) best.set(from, 0);
     if (!best.has(to)) best.set(to, 0);
     const outgoing = edges.get(from) ?? [];
@@ -483,7 +486,7 @@ function enumerateBottleneck(
     edges.set(from, outgoing);
   }
   for (const seedRow of seeds) {
-    visit(seedRow.state.object_id, seedRow.milligrades, new Set([seedRow.state.object_id]), best, edges);
+    visit(productSubjectId(seedRow.state), seedRow.milligrades, new Set([productSubjectId(seedRow.state)]), best, edges);
   }
   return best;
 }

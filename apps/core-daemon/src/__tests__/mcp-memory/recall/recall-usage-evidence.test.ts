@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  ContextUsageValidationError,
+  validateReportedRecallHits
+} from "../../../mcp-memory/usage/recall-usage-object-validation.js";
 
 import {
   createMcpMemoryToolHandler,
@@ -103,9 +107,15 @@ describe("recall usage evidence proof", () => {
       expect.objectContaining({
         delivered_object_ids: ["mem1", EVIDENCE_ID, "mem2"],
         delivered_objects: [
-          { object_id: "mem1", object_kind: "memory_entry" },
-          { object_id: EVIDENCE_ID, object_kind: "memory_entry" },
-          { object_id: "mem2", object_kind: "memory_entry" }
+          { object_id: "mem1", object_kind: "memory_entry", target: {
+            kind: "memory_entry", workspace_id: "ws", object_id: "mem1", source_revision: "rev"
+          } },
+          { object_id: EVIDENCE_ID, object_kind: "memory_entry", target: {
+            kind: "memory_entry", workspace_id: "ws", object_id: EVIDENCE_ID, source_revision: "rev"
+          } },
+          { object_id: "mem2", object_kind: "memory_entry", target: {
+            kind: "memory_entry", workspace_id: "ws", object_id: "mem2", source_revision: "rev"
+          } }
         ]
       })
     );
@@ -407,5 +417,55 @@ describe("recall usage evidence proof", () => {
     expect(deps.trustStateRecorder.recordUsage).not.toHaveBeenCalled();
     expect(deps.memoryService.findByIdsScoped).not.toHaveBeenCalled();
     expect(deps.memoryService.updateScoped).not.toHaveBeenCalled();
+  });
+
+  it("accepts a delivered source-record-only target and rejects forged or foreign targets", async () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    const target = {
+      kind: "source_evidence" as const,
+      workspace_id: context.workspaceId,
+      root_kind: "source_record" as const,
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: digest,
+      evidence_object_id: null
+    };
+    const delivery = {
+      ...createDeliveryRecord("delivery_1"),
+      workspace_id: context.workspaceId,
+      delivered_object_ids: [],
+      delivered_objects: [{
+        object_kind: "source_evidence",
+        target
+      }]
+    };
+    const deps = createDeps();
+    await expect(validateReportedRecallHits(deps, {
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      delivered_objects: [{
+        object_kind: "source_evidence",
+        target,
+        usage_status: "used"
+      }]
+    }, context.workspaceId, delivery)).resolves.toBeUndefined();
+    await expect(validateReportedRecallHits(deps, {
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      delivered_objects: [{
+        object_kind: "source_evidence",
+        target: { ...target, root_id: "forged" },
+        usage_status: "used"
+      }]
+    }, context.workspaceId, delivery)).rejects.toBeInstanceOf(ContextUsageValidationError);
+    await expect(validateReportedRecallHits(deps, {
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      delivered_objects: [{
+        object_kind: "source_evidence",
+        target: { ...target, workspace_id: "foreign-workspace" },
+        usage_status: "used"
+      }]
+    }, context.workspaceId, delivery)).rejects.toBeInstanceOf(ContextUsageValidationError);
   });
 });

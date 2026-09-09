@@ -6,7 +6,7 @@ export function writeRecallEvalPoolDump(
   questionId: string,
   goldObjects: readonly LongMemEvalGoldObjectIdentity[],
   results: readonly {
-    readonly object_id: string;
+    readonly object_id?: string;
     readonly object_kind?: string | null;
   }[]
 ): void {
@@ -31,7 +31,7 @@ function identityKey(identity: LongMemEvalGoldObjectIdentity): string {
 }
 
 function isGoldResult(
-  result: Readonly<{ object_id: string; object_kind?: string | null }>,
+  result: Readonly<{ object_id?: string; object_kind?: string | null }>,
   gold: ReadonlySet<string>
 ): boolean {
   const objectKind = result.object_kind ?? "memory_entry";

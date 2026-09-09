@@ -83,7 +83,7 @@ export function dedupeQaDeliveredCandidates(
 }
 
 interface QaSourceRecallPointer {
-  readonly object_id: string;
+  readonly object_id?: string;
   readonly object_kind?: string | null;
 }
 
@@ -163,6 +163,7 @@ function buildDeliveryCandidates(
     const objectKind = result.object_kind ?? "memory_entry";
     if (objectKind !== "memory_entry" && objectKind !== "synthesis_capsule" &&
         objectKind !== "evidence_capsule") continue;
+    if (result.object_id === undefined) continue;
     const entry = lookupCandidate(objectKind, result.object_id);
     candidates.push({
       objectId: result.object_id,
@@ -183,6 +184,7 @@ function buildMemoryEntryCandidates(
   const candidates: QaSourceCandidate[] = [];
   for (const [index, result] of results.entries()) {
     if ((result.object_kind ?? "memory_entry") !== "memory_entry") continue;
+    if (result.object_id === undefined) continue;
     const entry = lookupMemoryEntry(result.object_id);
     candidates.push({
       objectId: result.object_id,
@@ -202,6 +204,7 @@ function indexCandidateRanks(
   for (const [index, pointer] of results.entries()) {
     const objectKind = pointer.object_kind ?? "memory_entry";
     if (objectKind !== "memory_entry" && objectKind !== "evidence_capsule") continue;
+    if (pointer.object_id === undefined) continue;
     const key = buildLongMemEvalSidecarKey(objectKind, pointer.object_id);
     ranks.set(key, ranks.get(key) ?? index + 1);
   }
@@ -431,7 +434,7 @@ export async function scoreLongMemEvalQaIfRequested(input: {
   readonly qaChat?: QaChatFn;
   readonly qaJudgeChat?: QaChatFn;
   readonly isAbstention: boolean;
-  readonly results: readonly { readonly object_id: string; readonly object_kind?: string | null }[];
+  readonly results: readonly { readonly object_id?: string; readonly object_kind?: string | null }[];
   readonly goldMemoryIds: readonly string[];
   readonly goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[];
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;

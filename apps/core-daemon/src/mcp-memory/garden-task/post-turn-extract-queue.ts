@@ -97,7 +97,7 @@ function resolveDeliveredObjectIds(request: SoulReportContextUsageRequest): read
       ? request.used_object_ids ?? []
       : request.delivered_objects
         .filter((object) => (object.object_kind ?? "memory_entry") === "memory_entry")
-        .map((object) => object.object_id);
+        .flatMap((object) => object.object_id === undefined ? [] : [object.object_id]);
   return Object.freeze([...new Set(ids)]);
 }
 

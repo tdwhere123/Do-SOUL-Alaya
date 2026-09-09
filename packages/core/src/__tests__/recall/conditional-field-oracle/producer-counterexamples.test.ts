@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  productSubjectId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MemoryDimension,
   ScopeClass,
@@ -96,7 +97,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
       gist: "expired"
     });
     const index = runRecall(slice, { authorized_scopes: [ScopeClass.PROJECT] });
-    const ids = index.entries.map((entry) => entry.object_id);
+    const ids = index.entries.map((entry) => (entry.object_id ?? ""));
     expect(ids).not.toContain(SECRET);
     expect(ids).not.toContain(GLOBAL);
     expect(ids).not.toContain(EXPIRED);
@@ -162,8 +163,8 @@ describe("conditional-field producer-consumer counterexamples", () => {
       continuation = page.continuation;
       if (continuation === null) break;
     }
-    const concatenated = pages.flatMap((page) => page.entries.map((entry) => entry.object_id));
-    const fullIds = full.entries.map((entry) => entry.object_id);
+    const concatenated = pages.flatMap((page) => page.entries.map((entry) => (entry.object_id ?? "")));
+    const fullIds = full.entries.map((entry) => (entry.object_id ?? ""));
     expect(new Set(concatenated).size).toBe(concatenated.length);
     expect(concatenated).toEqual(fullIds);
     expect(planted.length).toBe(40);
@@ -199,7 +200,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     expect(tiny.completeness.representation).not.toBe("complete");
     expect(tiny.entries.length).toBeLessThan(31);
     const longPreview = "x".repeat(1400);
-    const encoded = encodedRecall(tight, new Map(tight.entries.map((entry) => [entry.object_id, longPreview])));
+    const encoded = encodedRecall(tight, new Map(tight.entries.map((entry) => [(entry.object_id ?? ""), longPreview])));
     const estimates = encoded.candidates.map((candidate) => candidate.token_estimate);
     if (estimates.length > 0) {
       expect(estimates.every((value) => value === 1)).toBe(false);
@@ -229,8 +230,8 @@ describe("conditional-field producer-consumer counterexamples", () => {
     };
     const index = runRecall(slice, { readers });
     const pinPreviews = new Map(index.entries.map((entry) => {
-      const page = readers.source({ workspaceId: WS, objectId: entry.object_id });
-      return [entry.object_id, page.row?.content ?? ""] as const;
+      const page = readers.source({ workspaceId: WS, objectId: (entry.object_id ?? "") });
+      return [(entry.object_id ?? ""), page.row?.content ?? ""] as const;
     }));
     generation = "after";
     setContent(slice, MEM.r, "content-after");
@@ -259,8 +260,8 @@ describe("conditional-field producer-consumer counterexamples", () => {
       budget: defaultBudget({ page_budget: 1 }),
       continuation: evening.continuation
     });
-    const eveningIds = evening.entries.map((entry) => entry.object_id);
-    const morningIds = morning.entries.map((entry) => entry.object_id);
+    const eveningIds = evening.entries.map((entry) => (entry.object_id ?? ""));
+    const morningIds = morning.entries.map((entry) => (entry.object_id ?? ""));
     const invalidated = morning.completeness.observed_coverage === "invalidated";
     const sameInstance = morning.query_id === evening.query_id && morning.snapshot_id === evening.snapshot_id;
     expect(invalidated || sameInstance).toBe(true);
@@ -276,13 +277,13 @@ function grades(observed: ReturnType<typeof observeProgram>): Readonly<Record<st
   const index = indexFromObserved(observed);
   const fromIndex: Record<string, number> = {};
   for (const entry of index.entries) {
-    fromIndex[`${entry.object_id}:index`] = entry.association_milligrades;
+    fromIndex[`${(entry.object_id ?? "")}:index`] = entry.association_milligrades;
   }
   if (observed.field.binding.kind !== "bound") return fromIndex;
   const out: Record<string, number> = { ...fromIndex };
   for (const value of observed.field.binding.snapshot.values) {
-    const key = `${value.state.object_id}:${value.state.program_state}`;
-    out[key] = Math.max(out[key] ?? 0, value.milligrades);
+    const key = `${productSubjectId(value.state)}:${value.state.program_state}`;
+    out[key] = Math.max(out[key] ?? 0, value.milligrades ?? 0);
   }
   return out;
 }

@@ -29,15 +29,15 @@ const USAGE_ENTITY_TYPE = "trust_usage_proof";
 const COUNTER_ENTITY_TYPE = "trust_state_counter";
 const PLACEHOLDER_AUDIT_EVENT_ID = "pending";
 
-function witnessAuditCommitment(
-  kind: "witness_exposures" | "witness_reports",
-  reports: UsageProofRecord["witness_reports"]
+function arrayAuditCommitment(
+  kind: "witness_exposures" | "witness_reports" | "delivered_objects" | "used_objects",
+  rows: readonly unknown[] | undefined
 ): Record<string, { readonly count: number; readonly sha256: string }> {
-  if (reports === undefined || reports.length === 0) return {};
+  if (rows === undefined || rows.length === 0) return {};
   // The full typed array is persisted in the same transaction; its audit
   // commitment fits the EventLog envelope independently of delivery width.
-  return { [kind]: { count: reports.length,
-    sha256: createHash("sha256").update(JSON.stringify(reports), "utf8").digest("hex") } };
+  return { [kind]: { count: rows.length,
+    sha256: createHash("sha256").update(JSON.stringify(rows), "utf8").digest("hex") } };
 }
 
 type TrustEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
@@ -155,10 +155,8 @@ export class TrustStateRecorder {
             delivery_id: draftRecord.delivery_id,
             agent_target: draftRecord.agent_target,
             delivered_object_ids: draftRecord.delivered_object_ids,
-            ...witnessAuditCommitment("witness_exposures", draftRecord.witness_exposures),
-            ...(draftRecord.delivered_objects === undefined
-              ? {}
-              : { delivered_objects: draftRecord.delivered_objects }),
+            ...arrayAuditCommitment("witness_exposures", draftRecord.witness_exposures),
+            ...arrayAuditCommitment("delivered_objects", draftRecord.delivered_objects),
             delivered_at: draftRecord.delivered_at,
             recorded_at: this.nowIso()
           }
@@ -220,10 +218,8 @@ export class TrustStateRecorder {
             // would fail open and grant unearned reinforcement weight.
             trust_mode: draftRecord.trust_mode ?? "automatic",
             used_object_ids: draftRecord.used_object_ids,
-            ...witnessAuditCommitment("witness_reports", draftRecord.witness_reports),
-            ...(draftRecord.used_objects === undefined
-              ? {}
-              : { used_objects: draftRecord.used_objects }),
+            ...arrayAuditCommitment("witness_reports", draftRecord.witness_reports),
+            ...arrayAuditCommitment("used_objects", draftRecord.used_objects),
             ...(draftRecord.per_anchor_usage === undefined
               ? {}
               : { per_anchor_usage: draftRecord.per_anchor_usage }),

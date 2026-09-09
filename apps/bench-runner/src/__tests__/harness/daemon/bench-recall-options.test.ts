@@ -52,7 +52,9 @@ describe("bench target recall request options", () => {
       expect(ConditionalFieldMeasurementSchema.parse(JSON.parse(JSON.stringify(measured)))).toEqual(measured);
       expect(measureConditionalFieldResponse({ ...measurementInput, queryText: "a different question" }))
         .toMatchObject({ status: "invalid", reason: "request_identity_mismatch" });
-      delivered.push(...index.entries.map((entry) => entry.object_id));
+      delivered.push(...index.entries.flatMap((entry) =>
+        entry.object_id === undefined ? [] : [entry.object_id]
+      ));
       continuation = index.continuation;
       if (continuation === null) break;
     }

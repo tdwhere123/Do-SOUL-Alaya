@@ -10,6 +10,7 @@ import { ManifestationStateSchema, MemoryDimensionSchema } from "../memory/memor
 import { ScopeClassSchema } from "../memory/object-kind.js";
 import { ActivationWeightsSchema } from "./recall-policy.js";
 import { StagedWarningArraySchema } from "../governance/staged-warning.js";
+import { RecallTargetRefSchema } from "./conditional-field/product-identity.js";
 
 const recallOriginPlaneValues = ["workspace_local", "global"] as const;
 
@@ -81,13 +82,15 @@ export const RecallBudgetStateSchema = z
 export const RecallCandidateObjectKindSchema = z.enum([
   "memory_entry",
   "synthesis_capsule",
-  "evidence_capsule"
+  "evidence_capsule",
+  "source_evidence"
 ]);
 
 export const RecallCandidateSchema = z
   .object({
-    object_id: NonEmptyStringSchema,
+    object_id: NonEmptyStringSchema.optional(),
     object_kind: RecallCandidateObjectKindSchema,
+    target: RecallTargetRefSchema.optional(),
     activation_score: z.number().min(0).max(1),
     relevance_score: z.number().min(0).max(1),
     content_preview: NonEmptyStringSchema,
@@ -113,6 +116,32 @@ export const RecallCandidateSchema = z
     staged_warnings: StagedWarningArraySchema.optional()
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.object_kind === "source_evidence") {
+      if (value.target === undefined || value.target.kind !== "source_evidence") {
+        context.addIssue({
+          code: "custom",
+          path: ["target"],
+          message: "source_evidence candidate requires a source_evidence target"
+        });
+      }
+      if (value.object_id !== undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["object_id"],
+          message: "source_evidence must not fill object_id"
+        });
+      }
+      return;
+    }
+    if (value.object_id === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["object_id"],
+        message: "non-source candidates require object_id"
+      });
+    }
+  })
   .readonly();
 
 export type RecallOriginPlane = z.infer<typeof RecallOriginPlaneSchema>;

@@ -22,6 +22,8 @@ export function benchRequestFilters(options: BenchRecallOptions, policy?: Recall
     ...(options.timeFilter?.field === undefined ? {} : { time_field: options.timeFilter.field }),
     ...(deterministic?.scope_filter == null ? {} : { authorized_scopes: deterministic.scope_filter }),
     ...(!deterministic?.dimension_filter?.length ? {} : { dimension_filter: deterministic.dimension_filter }),
-    ...(!deterministic?.domain_tag_filter?.length ? {} : { domain_tag_filter: deterministic.domain_tag_filter })
+    ...(!deterministic?.domain_tag_filter?.length ? {} : { domain_tag_filter: deterministic.domain_tag_filter }),
+    ...(options.enumeration_policy === undefined ? {} : { enumeration_policy: options.enumeration_policy }),
+    ...(options.result_kind_view === undefined ? {} : { result_kind_view: options.result_kind_view })
   };
 }

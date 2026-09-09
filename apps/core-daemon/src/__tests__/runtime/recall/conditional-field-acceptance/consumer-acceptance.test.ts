@@ -121,6 +121,27 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     expect("delivery_path" in mcp).toBe(false);
   });
 
+  it("keeps enumeration_policy and result_kind_view through handler mapping", async () => {
+    const slice = await openPlantedSlice();
+    const canonical = await recallThroughHandler(slice, {
+      query: "yesterday failed deployment",
+      max_results: 800,
+      enumeration_policy: "canonical",
+      result_kind_view: "mixed"
+    });
+    const associative = await recallThroughHandler(slice, {
+      query: "yesterday failed deployment",
+      max_results: 800,
+      enumeration_policy: "associative",
+      result_kind_view: "mixed"
+    });
+    expect(associative.index.query_id).not.toBe(canonical.index.query_id);
+    expect(new Set(associative.index.entries.map((entry) => entry.object_id)))
+      .toEqual(new Set(canonical.index.entries.map((entry) => entry.object_id)));
+    expect(associative.results.every((result) => result.target !== undefined)).toBe(true);
+    expect(canonical.results.every((result) => result.object_kind === "memory_entry")).toBe(true);
+  });
+
   it("allows a complete logical index that still contains unknown cause", async () => {
     const slice = await openPlantedSlice();
     const mcp = await recallThroughHandler(slice, {
@@ -321,7 +342,7 @@ function createTickingHandlerSession(
   });
   return {
     recall(
-      request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & {
+      request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "enumeration_policy" | "result_kind_view" | "interpretation_proposal">> & {
         readonly continuation?: InformationIndex["continuation"];
       }
     ) {
@@ -332,7 +353,7 @@ function createTickingHandlerSession(
 
 async function recallThroughHandler(
   slice: Awaited<ReturnType<typeof openSourceSlice>>,
-  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & {
+  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "enumeration_policy" | "result_kind_view" | "interpretation_proposal">> & {
     readonly continuation?: InformationIndex["continuation"];
   }
 ) {
@@ -341,7 +362,7 @@ async function recallThroughHandler(
 
 async function invokeRecallHandler(
   handler: ReturnType<typeof createRecallHandler>,
-  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & {
+  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "enumeration_policy" | "result_kind_view" | "interpretation_proposal">> & {
     readonly continuation?: InformationIndex["continuation"];
   }
 ) {
@@ -353,7 +374,12 @@ async function invokeRecallHandler(
     max_results: request.max_results,
     ...(request.continuation === undefined || request.continuation === null
       ? {}
-      : { continuation: request.continuation })
+      : { continuation: request.continuation }),
+    ...(request.enumeration_policy === undefined ? {} : { enumeration_policy: request.enumeration_policy }),
+    ...(request.result_kind_view === undefined ? {} : { result_kind_view: request.result_kind_view }),
+    ...(request.interpretation_proposal === undefined
+      ? {}
+      : { interpretation_proposal: request.interpretation_proposal })
   }, {
     workspaceId: WS,
     runId: null,

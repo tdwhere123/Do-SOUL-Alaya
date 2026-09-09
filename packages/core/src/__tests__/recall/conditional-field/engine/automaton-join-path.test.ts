@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  productSubjectId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   type QueryInterpretation,
   type QueryProgram,
@@ -34,7 +35,7 @@ describe("automaton, compatible join, and composed path identity", () => {
           truncated: remaining.length > ids.length, committedThrough: ids.at(-1) ?? afterObjectId };
       } } });
     expect(state.closure.observation).toBe("exhausted");
-    expect(new Set(state.seeds.map((seed) => seed.state.object_id))).toEqual(new Set(["seed", "middle"]));
+    expect(new Set(state.seeds.map((seed) => productSubjectId(seed.state)))).toEqual(new Set(["seed", "middle"]));
     expect(acceptedIds(state)).toEqual(expect.arrayContaining(["seed", "middle"]));
   });
   it("keeps a flat sequence control that reaches end", () => {
@@ -236,7 +237,7 @@ describe("automaton, compatible join, and composed path identity", () => {
     );
     if (state.binding.kind !== "bound") throw new Error("expected bound field");
     const config = state.binding.snapshot.values.find((value) =>
-      value.state.object_id === "config" && value.accepting
+      productSubjectId(value.state) === "config" && value.accepting
     );
     if (config === undefined) throw new Error("expected accepting config");
     const index = projectAcceptingIndex({
@@ -374,6 +375,6 @@ function input(edges: readonly ReturnType<typeof edge>[]) {
 function acceptedIds(state: ReturnType<typeof observeField>): readonly string[] {
   if (state.binding.kind !== "bound") return [];
   return state.binding.snapshot.values
-    .filter((value) => value.accepting && value.milligrades > 0)
-    .map((value) => value.state.object_id);
+    .filter((value) => value.accepting && (value.milligrades ?? 0) > 0)
+    .map((value) => productSubjectId(value.state));
 }

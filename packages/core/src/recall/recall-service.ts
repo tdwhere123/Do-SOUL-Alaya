@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
   type Continuation,
+  type EnumerationPolicy,
+  type PayloadContinuationRequest,
+  type QueryInterpretationProposal,
   type RecallPolicy,
-  type RequestBudget
+  type RequestBudget,
+  type ResultKindView
 } from "@do-soul/alaya-protocol";
 import { type NodeStrategy } from "../conversation/task-surface-builder.js";
 import type {
@@ -31,6 +35,10 @@ export type ConditionalFieldRecallParams = RecallExecutionParams & Readonly<{
   readonly continuation?: Continuation | null;
   readonly cancelled?: boolean;
   readonly budget?: RequestBudget;
+  readonly enumeration_policy?: EnumerationPolicy;
+  readonly result_kind_view?: ResultKindView;
+  readonly interpretation_proposal?: QueryInterpretationProposal;
+  readonly payload_continuation?: PayloadContinuationRequest;
 }>;
 
 export type { ObserverReaders };

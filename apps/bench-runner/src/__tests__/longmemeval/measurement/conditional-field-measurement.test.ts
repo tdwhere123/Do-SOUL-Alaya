@@ -24,6 +24,7 @@ function fixture(ids = ["gold"] ) {
     schema_version: 1, query_id, snapshot_id: SNAPSHOT, result_version: "v1",
     interpretation_id, as_of: NOW,
     entries: ids.map((object_id, offset) => ({ schema_version: 1, object_id,
+      target: { kind: "memory_entry" as const, workspace_id: "workspace", object_id, source_revision: "rev" },
       hypothesis_id: `h${offset}`, output_binding: `binding${offset}`, role: "requested",
       association_milligrades: 850, claim: "unknown", explanation_ids: ["unresolved-explanation"],
       program_state: "matched", time_state: "current" })),
@@ -36,7 +37,7 @@ function fixture(ids = ["gold"] ) {
       page_budget: 10, identity_tie_break: "serialization" }
   });
   const results: MemorySearchResult[] = index.entries.map((entry) => ({
-    object_id: entry.object_id, object_kind: "memory_entry", relevance_score: 0.85,
+    object_id: entry.object_id, object_kind: "memory_entry", target: entry.target, relevance_score: 0.85,
     content_preview: SECRET, evidence_pointers: [], selection_reason: "observed association",
     hypothesis_id: entry.hypothesis_id, output_binding: entry.output_binding,
     program_state: entry.program_state, time_state: entry.time_state,
@@ -223,5 +224,53 @@ describe("conditional target measurement evidence", () => {
         expect(classifyQuestionMeasurementStatus(row)).toBe("evaluator_identity_unscorable");
       }
     }
+  });
+
+  it("retains source_evidence slot kind instead of rewriting it to memory_entry", () => {
+    const digest = `sha256:${"d".repeat(64)}`;
+    const input = fixture();
+    const target = {
+      kind: "source_evidence" as const,
+      workspace_id: "workspace",
+      root_kind: "source_record" as const,
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: digest,
+      evidence_object_id: null
+    };
+    const entry = {
+      ...input.recallResult.index.entries[0]!,
+      object_id: undefined,
+      target,
+      hypothesis_id: "h0",
+      output_binding: "binding0"
+    };
+    const result = {
+      ...input.recallResult.results[0]!,
+      object_id: undefined,
+      object_kind: "source_evidence",
+      target
+    };
+    const recallResult = {
+      ...input.recallResult,
+      index: { ...input.recallResult.index, entries: [entry] },
+      results: [result],
+      total_count: 1
+    };
+    const measured = measureConditionalFieldResponse({
+      ...input,
+      recallResult,
+      deliveredResults: [{
+        object_id: undefined,
+        object_kind: "source_evidence",
+        rank: 1,
+        relevance_score: result.relevance_score
+      }]
+    });
+    expect(measured?.status).toBe("validated");
+    if (measured?.status !== "validated") return;
+    expect(measured.response_slots[0]?.object_kind).toBe("source_evidence");
+    expect(measured.response_slots[0]?.object_id).toBeUndefined();
+    expect(measured.entries[0]?.target).toEqual(target);
   });
 });

@@ -426,7 +426,7 @@ function guaranteedValues(state: BindableState): ReadonlyMap<string, number> {
   if (bound.kind !== "bound") return new Map();
   const values = new Map<string, number>();
   for (const value of bound.snapshot.values) {
-    values.set(productStateNodeId(value.state), value.milligrades);
+    values.set(productStateNodeId(value.state), value.milligrades ?? MILLIGRADE_BOTTOM);
   }
   return values;
 }
@@ -441,7 +441,7 @@ function annotateBounds(
   const open = residuals.some((region) => region.status === "open" || region.status === "interrupted");
   const values = binding.snapshot.values.map((value) => {
     const low = guaranteed.get(productStateNodeId(value.state)) ?? MILLIGRADE_BOTTOM;
-    const high = open ? Math.max(value.milligrades, residualHigh) : value.milligrades;
+    const high = open ? Math.max(value.milligrades ?? MILLIGRADE_BOTTOM, residualHigh) : (value.milligrades ?? MILLIGRADE_BOTTOM);
     return { ...value, low_milligrades: low, high_milligrades: high };
   });
   return {
