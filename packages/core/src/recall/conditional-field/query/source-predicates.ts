@@ -35,6 +35,7 @@ export type SourcePredicateSubject = Readonly<{
   readonly root_id?: string;
   readonly source_version?: string;
   readonly content?: string;
+  readonly content_complete?: boolean;
   readonly role?: string;
   readonly event_time?: string | null;
   readonly evidence_object_id?: string | null;
@@ -99,7 +100,9 @@ function identityVerdict(subject: SourcePredicateSubject, requiredRootId?: strin
 function literalVerdict(subject: SourcePredicateSubject, needle: string | undefined): GuardVerdict {
   if (needle === undefined || needle.length === 0) return "unresolved";
   if (subject.content === undefined) return "unresolved";
-  return sourceLiteralOccurs(subject.content, needle) ? "true" : "false";
+  if (sourceLiteralOccurs(subject.content, needle)) return "true";
+  // A bounded first chunk is not the whole body; miss is not absence.
+  return subject.content_complete === false ? "unresolved" : "false";
 }
 
 function roleVerdict(subject: SourcePredicateSubject, required: string | undefined): GuardVerdict {

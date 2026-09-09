@@ -245,7 +245,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
     const roleQuery = interpretation(relation("observed_log", "x", "y", {
       kind: "query_predicate",
       predicate_name: "source.role.v1",
-      variable: "y",
+      variable: "x",
       time_scope: "none"
     }));
     const observed = observeField(roleQuery, input([edge("seed", "fact", "observed_log")], {}));
@@ -257,7 +257,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
       relation("observed_log", "x", "y", {
         kind: "query_predicate",
         predicate_name: "source.not_a_frozen_predicate.v1",
-        variable: "y",
+        variable: "x",
         time_scope: "none"
       }),
       [edge("seed", "fact", "observed_log")]
@@ -296,10 +296,20 @@ describe("admission, binding, measurement, and evidence identities", () => {
       predicate_name: "source.literal.nfc.v1",
       entity_id: "\uFB00"
     }, { content: "ff ligature" })).toBe("false");
+    expect(evaluateFrozenSourcePredicate("source.literal.nfc.v1", {
+      ...guard,
+      predicate_name: "source.literal.nfc.v1",
+      entity_id: "needle-after-chunk"
+    }, { content: "prefix without the needle", content_complete: false })).toBe("unresolved");
+    expect(evaluateFrozenSourcePredicate("source.literal.nfc.v1", {
+      ...guard,
+      predicate_name: "source.literal.nfc.v1",
+      entity_id: "needle-after-chunk"
+    }, { content: "prefix without the needle", content_complete: true })).toBe("false");
     const unknownRole = buildTypedObservation(observeInput(relation("observed_log", "x", "y", {
       kind: "query_predicate",
       predicate_name: "source.role.v1",
-      variable: "y"
+      variable: "x"
     })), {
       objectId: "root-1",
       sourceRevision: "rev-1",
@@ -312,7 +322,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
     const linked = buildTypedObservation(observeInput(relation("observed_log", "x", "y", {
       kind: "query_predicate",
       predicate_name: "source.evidence_link.v1",
-      variable: "y"
+      variable: "x"
     })), {
       objectId: "root-1",
       sourceRevision: "rev-1",

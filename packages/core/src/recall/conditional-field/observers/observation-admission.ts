@@ -92,7 +92,8 @@ export function buildTypedObservation(
     args.observedAt,
     args.sourceRow,
     args.identityKind,
-    args.sourceRoot
+    args.sourceRoot,
+    args.relation
   );
   if (applicability.verdict === "false") return null;
   const relationKind = args.relation?.predicate ?? (
@@ -129,42 +130,54 @@ function effectObservedAt(
   return observedAt ?? sourceRow?.observed_at;
 }
 
+type ObserverRole =
+  | { readonly kind: "seed" }
+  | { readonly kind: "assertion"; readonly predicate: string }
+  | { readonly kind: "embedding" };
+
 function applicabilityFor(
   input: ObserveConditionalFieldInput,
   objectId: string,
   observedAt: string | undefined,
   sourceRow: SourceObserverRow | undefined,
   identityKind: "object" | "assertion" | "embedding",
-  sourceRoot?: SourceRootObserverRow
+  sourceRoot?: SourceRootObserverRow,
+  relation?: RelationObserverRow
 ): Guard {
-  const guards = [
-    ...collectGuards(input.query.program),
+  const extras = [
     ...(input.query.source_guard === undefined ? [] : [input.query.source_guard]),
     ...(input.query.interpretation_proposal?.conditions ?? [])
   ];
-  const authorization = evaluateAuthorization(input, guards, sourceRow, sourceRoot);
+  const authorization = evaluateAuthorization(
+    input,
+    [...collectGuards(input.query.program), ...extras],
+    sourceRow,
+    sourceRoot
+  );
   if (authorization.verdict === "false") return authorization;
   if (sourceRow === undefined && sourceRoot === undefined && identityKind !== "embedding") {
     return { schema_version: SCHEMA, kind: "query_predicate", verdict: "unresolved" };
   }
-  let unresolved: Guard | undefined;
-  for (const guard of guards) {
-    const decision = evaluateApplicableGuard(
-      input,
-      guard,
-      objectId,
-      observedAt,
-      sourceRow,
-      sourceRoot
-    );
-    if (decision === undefined) continue;
-    if (decision.verdict === "false") return decision;
-    if (decision.verdict === "unresolved") unresolved = decision;
-  }
-  if (unresolved !== undefined) return unresolved;
+  const role = observerRole(identityKind, relation);
+  const combined = andObserverDecisions([
+    decideProgramObserver(input.query.program, input, objectId, observedAt, sourceRow, sourceRoot, role),
+    decideExtraGuards(extras, input, objectId, observedAt, sourceRow, sourceRoot, role)
+  ]);
+  if (combined !== undefined && combined.verdict !== "true") return combined;
   return authorization.kind === "authorization"
     ? { ...authorization, verdict: "true" }
     : { schema_version: SCHEMA, kind: "query_predicate", verdict: "true" };
+}
+
+function observerRole(
+  identityKind: "object" | "assertion" | "embedding",
+  relation?: RelationObserverRow
+): ObserverRole {
+  if (identityKind === "embedding") return { kind: "embedding" };
+  if (identityKind === "assertion" && relation !== undefined) {
+    return { kind: "assertion", predicate: relation.predicate };
+  }
+  return { kind: "seed" };
 }
 
 function evaluateAuthorization(
@@ -194,8 +207,9 @@ function evaluateApplicableGuard(
   guard: Guard,
   objectId: string,
   observedAt: string | undefined,
-  sourceRow?: SourceObserverRow,
-  sourceRoot?: SourceRootObserverRow
+  sourceRow: SourceObserverRow | undefined,
+  sourceRoot: SourceRootObserverRow | undefined,
+  subject: string | ReadonlySet<string>
 ): Guard | undefined {
   if (guard.kind === "authorization") return undefined;
   if (guard.kind === "interval_relation") {
@@ -215,6 +229,7 @@ function evaluateApplicableGuard(
     }
     return evaluateInterval(guard, stamp);
   }
+  if (!guardBindsSubject(guard, subject)) return undefined;
   if (guard.kind === "query_predicate") {
     const classified = classifyQueryPredicate(guard.predicate_name);
     if (classified.kind === "frozen") {
@@ -223,8 +238,7 @@ function evaluateApplicableGuard(
         verdict: evaluateFrozenSourcePredicate(
           classified.name,
           guard,
-          predicateSubject(sourceRoot, sourceRow),
-          input.seed_query
+          predicateSubject(sourceRoot, sourceRow)
         )
       };
     }
@@ -237,7 +251,12 @@ function evaluateApplicableGuard(
       : sourceRootFilters(filters, sourceRoot);
     return { ...guard, verdict };
   }
-  return undefined;
+  return { ...guard, verdict: "unresolved" };
+}
+
+function guardBindsSubject(guard: Guard, subject: string | ReadonlySet<string>): boolean {
+  if (guard.variable === undefined) return true;
+  return typeof subject === "string" ? guard.variable === subject : subject.has(guard.variable);
 }
 
 function sourceRootFilters(
@@ -309,6 +328,130 @@ function collectGuards(program: QueryProgram): readonly Guard[] {
   }
 }
 
+function decideProgramObserver(
+  program: QueryProgram,
+  input: ObserveConditionalFieldInput,
+  objectId: string,
+  observedAt: string | undefined,
+  sourceRow: SourceObserverRow | undefined,
+  sourceRoot: SourceRootObserverRow | undefined,
+  role: ObserverRole
+): Guard | undefined {
+  const next = (node: QueryProgram): Guard | undefined =>
+    decideProgramObserver(node, input, objectId, observedAt, sourceRow, sourceRoot, role);
+  switch (program.kind) {
+    case "relation": {
+      if (role.kind === "embedding") return undefined;
+      if (role.kind === "assertion" && program.relation_kind !== role.predicate) return undefined;
+      const decision = evaluateApplicableGuard(
+        input,
+        program.guard,
+        objectId,
+        observedAt,
+        sourceRow,
+        sourceRoot,
+        role.kind === "assertion" ? program.target_variable : program.source_variable
+      );
+      // A relation that does not constrain this subject remains a seed option.
+      return decision ?? { schema_version: SCHEMA, kind: "query_predicate", verdict: "true" };
+    }
+    case "sequence": {
+      if (role.kind === "seed") {
+        const first = program.steps[0];
+        return first === undefined ? undefined : next(first);
+      }
+      return andObserverDecisions(program.steps.map(next));
+    }
+    case "alternative":
+      return orObserverDecisions(program.options.map(next));
+    case "repeat":
+    case "closure":
+      return next(program.body);
+    case "hyperedge": {
+      const premises = program.premises.map(next);
+      return program.join === "or" ? orObserverDecisions(premises) : andObserverDecisions(premises);
+    }
+    default:
+      return undefined;
+  }
+}
+
+function decideExtraGuards(
+  extras: readonly Guard[],
+  input: ObserveConditionalFieldInput,
+  objectId: string,
+  observedAt: string | undefined,
+  sourceRow: SourceObserverRow | undefined,
+  sourceRoot: SourceRootObserverRow | undefined,
+  role: ObserverRole
+): Guard | undefined {
+  const subjects = new Set<string>();
+  collectObserverSubjects(input.query.program, role, subjects);
+  let unresolved: Guard | undefined;
+  for (const guard of extras) {
+    const decision = evaluateApplicableGuard(
+      input, guard, objectId, observedAt, sourceRow, sourceRoot, subjects
+    );
+    if (decision === undefined) continue;
+    if (decision.verdict === "false") return decision;
+    if (decision.verdict === "unresolved") unresolved = decision;
+  }
+  return unresolved;
+}
+
+function collectObserverSubjects(program: QueryProgram, role: ObserverRole, into: Set<string>): void {
+  switch (program.kind) {
+    case "relation":
+      if (role.kind === "embedding") return;
+      if (role.kind === "assertion" && program.relation_kind !== role.predicate) return;
+      into.add(role.kind === "assertion" ? program.target_variable : program.source_variable);
+      return;
+    case "sequence": {
+      if (role.kind === "seed") {
+        const first = program.steps[0];
+        if (first !== undefined) collectObserverSubjects(first, role, into);
+        return;
+      }
+      for (const step of program.steps) collectObserverSubjects(step, role, into);
+      return;
+    }
+    case "alternative":
+      for (const option of program.options) collectObserverSubjects(option, role, into);
+      return;
+    case "repeat":
+    case "closure":
+      collectObserverSubjects(program.body, role, into);
+      return;
+    case "hyperedge":
+      for (const premise of program.premises) collectObserverSubjects(premise, role, into);
+      return;
+    default:
+      return;
+  }
+}
+
+function andObserverDecisions(decisions: readonly (Guard | undefined)[]): Guard | undefined {
+  let unresolved: Guard | undefined;
+  for (const decision of decisions) {
+    if (decision === undefined) continue;
+    if (decision.verdict === "false") return decision;
+    if (decision.verdict === "unresolved") unresolved = decision;
+  }
+  return unresolved;
+}
+
+function orObserverDecisions(decisions: readonly (Guard | undefined)[]): Guard | undefined {
+  let unresolved: Guard | undefined;
+  let rejection: Guard | undefined;
+  for (const decision of decisions) {
+    if (decision === undefined) continue;
+    if (decision.verdict === "true") return decision;
+    if (decision.verdict === "unresolved") unresolved = decision;
+    else rejection = decision;
+  }
+  return unresolved ?? rejection;
+}
+
 function predicateSubject(
   sourceRoot: SourceRootObserverRow | undefined,
   sourceRow: SourceObserverRow | undefined
@@ -321,6 +464,7 @@ function predicateSubject(
       source_version: sourceRoot.revision,
       evidence_object_id: sourceRoot.evidence_object_id,
       ...(sourceRoot.content === undefined ? {} : { content: sourceRoot.content }),
+      ...(sourceRoot.content_complete === undefined ? {} : { content_complete: sourceRoot.content_complete }),
       ...(sourceRoot.role === undefined ? {} : { role: sourceRoot.role }),
       ...(sourceRoot.event_time === undefined ? {} : { event_time: sourceRoot.event_time })
     };

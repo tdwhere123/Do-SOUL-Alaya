@@ -86,7 +86,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
     });
     const mutated = grades(observeProgram(slice, program, { query_text: "seed" }));
     expect(baseline[`${END}:accepting`]).toBeGreaterThan(0);
-    expect(mutated).toEqual(baseline);
+    expect(chainGrades(mutated)).toEqual(chainGrades(baseline));
     expect(mutated[`${SECRET}:accepting`] ?? 0).toBe(0);
   });
 
@@ -298,6 +298,10 @@ describe("conditional-field producer-consumer counterexamples", () => {
     expect(spliced).toBe(false);
   });
 });
+
+function chainGrades(grades: Readonly<Record<string, number>>): Readonly<Record<string, number>> {
+  return Object.fromEntries(Object.entries(grades).filter(([key]) => !key.startsWith("bbbbbbbb")));
+}
 
 function grades(observed: ReturnType<typeof observeProgram>): Readonly<Record<string, number>> {
   const index = indexFromObserved(observed);

@@ -1,5 +1,4 @@
 import { sourceRecallTarget, type TypedObservation } from "@do-soul/alaya-protocol";
-import { sourceLiteralOccurs } from "../../../memory/evidence-create/source-utf8-hydrate.js";
 import { buildTypedObservation, sourceRootEligible } from "./observation-admission.js";
 import {
   collectObserved,
@@ -45,13 +44,8 @@ export function observeSourceAwareSeed(
     truncated = page.truncated;
     sourceCommitted = page.committedThrough ?? sourceCommitted;
     if (page.unavailable === true) hydrationUnavailable = true;
-    const needle = input.seed_query ?? "";
     for (const row of page.rows) {
       if (!sourceRootEligible(input, row)) continue;
-      if (needle.length > 0 && row.content !== undefined && !sourceLiteralOccurs(row.content, needle)) {
-        if (row.content_complete === false) resourceLimited = true;
-        continue;
-      }
       const observation = buildTypedObservation(input, {
         objectId: row.root_id,
         sourceRevision: row.revision,
@@ -68,7 +62,12 @@ export function observeSourceAwareSeed(
           evidence_object_id: row.evidence_object_id
         })
       });
-      if (observation !== null) observations.push(observation);
+      if (observation === null) continue;
+      if (row.content_complete === false && observation.applicability.verdict === "unresolved") {
+        resourceLimited = true;
+        truncated = true;
+      }
+      observations.push(observation);
     }
   }
   const sourcesDone = cursor.sourcesDone || !sourcesTruncated;
@@ -124,7 +123,7 @@ export function observeSourceAwareSeed(
       : resourceLimited
         ? { status: "interrupted" as const }
         : {}),
-    work: workReceipt(workUnits, workUnits, bytes, truncated || hydrationUnavailable)
+    work: workReceipt(workUnits, workUnits, bytes, truncated || hydrationUnavailable || resourceLimited)
   });
 }
 
