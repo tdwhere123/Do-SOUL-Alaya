@@ -10,7 +10,8 @@ import {
 import {
   encodeBindingContext,
   parseBindingContext,
-  unifyBinding
+  unifyBinding,
+  type BoundSourceFacts
 } from "./binding-environment.js";
 
 export type AdjacencyRow = Readonly<{
@@ -61,4 +62,19 @@ export function unifyAdvance(
 
 export function inactiveResolution(kind: string | null | undefined): boolean {
   return kind === "retracted" || kind === "expired" || kind === "contradicted";
+}
+
+export function observedTargetRevision(
+  targetObjectId: string,
+  sourceFacts: ReadonlyMap<string, BoundSourceFacts> | undefined,
+  liveStates: readonly ProductStateKey[]
+): string | undefined {
+  const fact = sourceFacts?.get(targetObjectId)?.source_revision;
+  if (fact !== undefined && fact.length > 0) return fact;
+  for (const state of liveStates) {
+    if (state.target.kind === "memory_entry" && state.target.object_id === targetObjectId) {
+      return state.target.source_revision;
+    }
+  }
+  return undefined;
 }

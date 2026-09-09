@@ -46,6 +46,7 @@ import {
 } from "./path-hyperedge.js";
 import {
   inactiveResolution,
+  observedTargetRevision,
   relationMatches,
   relationStrength,
   unifyAdvance,
@@ -288,13 +289,15 @@ export function adjacencyEffectsForRows(
   const automaton = compileProgramAutomaton(runtime);
   const effects: CompiledAdjacencyEffect[] = [];
   for (const from of input.liveStates) {
+    if (from.target.kind !== "memory_entry") continue;
     for (const advance of automaton.hyperedgeAdvances) {
       if (advance.from !== from.program_state) continue;
       effects.push(...hyperedgeEffects(rows, advance.hyperedge, {
         liveStates: [from],
         overlay: input.overlay,
         sourceFacts: input.sourceFacts,
-        toProgramStates: advance.to
+        toProgramStates: advance.to,
+        observedStates: input.liveStates
       }).map(attachHyperedgeFacet));
     }
   }
@@ -415,8 +418,13 @@ function effectsForLiveRow(
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: readonly FacetVector[];
+    readonly liveStates: readonly ProductStateKey[];
   }>
 ): readonly CompiledAdjacencyEffect[] {
+  if (from.target.kind !== "memory_entry") {
+    // Terminal evidence product: never retarget into a memory Transition.
+    return routingDiscoveryEffect(row, input.overlay);
+  }
   const matched = advancesFor(automaton, from.program_state, (relation) =>
     relationMatches(relation.relation_kind, row.predicate)
   );
@@ -441,6 +449,7 @@ function effectsForAdvance(
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: readonly FacetVector[];
+    readonly liveStates: readonly ProductStateKey[];
   }>
 ): readonly CompiledAdjacencyEffect[] {
   const unified = unifyAdvance(from, advance.relation, row);
@@ -464,6 +473,17 @@ function effectsForAdvance(
     }];
   }
   if (strength.milligrades <= advance.relation.threshold_milligrades) return [];
+  const targetRevision = observedTargetRevision(
+    row.targetObjectId,
+    input.sourceFacts,
+    input.liveStates
+  );
+  if (targetRevision === undefined) {
+    return [{
+      observation_id: `revision:${row.assertionId}:${from.program_state}`,
+      unresolved_guard: true
+    }];
+  }
   const applicable = strength.applicable && decision === "true";
   const toStates = applicable ? advance.to : [from.program_state];
   const effects: CompiledAdjacencyEffect[] = [];
@@ -478,7 +498,8 @@ function effectsForAdvance(
     const to = retargetMemoryProduct(from, {
       object_id: row.targetObjectId,
       program_state: programState,
-      binding_context: binding
+      binding_context: binding,
+      source_revision: targetRevision
     });
     effects.push(...compiledEffects({ ...row, source_revision: row.source_revision ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision },
       from, to, strength, applicable, decision, input.facets ?? []));
@@ -604,6 +625,12 @@ function alignOutgoingBinding(
 }
 
 function attachHyperedgeFacet(effect: HyperedgeEffect): CompiledAdjacencyEffect {
+  if (effect.unresolved_guard === true || effect.hyperedge === undefined) {
+    return {
+      observation_id: effect.observation_id,
+      unresolved_guard: true
+    };
+  }
   return {
     observation_id: effect.observation_id,
     hyperedge_premises: effect.hyperedge_premises,

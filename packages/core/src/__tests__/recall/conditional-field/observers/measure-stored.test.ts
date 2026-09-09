@@ -31,6 +31,7 @@ import { INTERPRETATION_CLOCK, SNAPSHOT_ID, defaultBudget, defaultView } from ".
 
 const DIGEST = digestOriginalQuery("seed");
 const CONTENT = `sha256:${"a".repeat(64)}`;
+const MEMORY_REVISION = "memory-rev-1";
 const OBJECT_ID = "emb-1";
 
 describe("stored pair measurement producer", () => {
@@ -43,7 +44,8 @@ describe("stored pair measurement producer", () => {
       workspaceId: "ws",
       objectId: OBJECT_ID,
       queryDigest: DIGEST,
-      pair: readyPair(object, query)
+      pair: readyPair(object, query),
+      sourceRevision: MEMORY_REVISION
     }));
     expect(raw.status).toBe("measured");
     if (raw.status !== "measured") throw new Error("expected measured raw");
@@ -54,6 +56,11 @@ describe("stored pair measurement producer", () => {
     expect(raw.producer_id).toBe(STORED_COSINE_PRODUCER_ID);
     expect(raw.domain).toBe(COSINE_DOMAIN_ID);
     expect(raw.query_digest).toBe(DIGEST);
+    expect(raw.referent.kind).toBe("memory_entry");
+    if (raw.referent.kind !== "memory_entry") throw new Error("expected memory referent");
+    expect(raw.referent.source_revision).toBe(MEMORY_REVISION);
+    expect(raw.referent.source_revision).not.toBe(CONTENT);
+    expect(raw.source_revision).toBe(CONTENT);
     const cap = ProjectedCapSchema.parse(INAPPLICABLE_CAP);
     expect(cap.status).toBe("inapplicable");
     expect("milligrades" in cap).toBe(false);
@@ -97,6 +104,38 @@ describe("stored pair measurement producer", () => {
     expect(raw).not.toEqual(expect.objectContaining({ raw: 0 }));
   });
 
+  it("does not use the embedding content_hash as the memory product revision", () => {
+    const object = vector(OBJECT_ID, new Float32Array([1, 0]));
+    const query = vector("query", new Float32Array([1, 0]));
+    const raw = RawMeasurementSchema.parse(rawMeasurementFromPair({
+      workspaceId: "ws",
+      objectId: OBJECT_ID,
+      queryDigest: DIGEST,
+      pair: readyPair(object, query),
+      sourceRevision: MEMORY_REVISION
+    }));
+    expect(raw.status).toBe("measured");
+    if (raw.status !== "measured") throw new Error("expected measured raw");
+    expect(MEMORY_REVISION).not.toBe(CONTENT);
+    expect(raw.referent).toEqual({
+      kind: "memory_entry",
+      workspace_id: "ws",
+      object_id: OBJECT_ID,
+      source_revision: MEMORY_REVISION
+    });
+    expect(raw.source_revision).toBe(CONTENT);
+  });
+
+  it("keeps a ready pair unavailable when the memory product revision is missing", () => {
+    const raw = RawMeasurementSchema.parse(rawMeasurementFromPair({
+      workspaceId: "ws",
+      objectId: OBJECT_ID,
+      queryDigest: DIGEST,
+      pair: readyPair(vector(OBJECT_ID, new Float32Array([1, 0])), vector("query", new Float32Array([1, 0])))
+    }));
+    expect(raw.status).toBe("unavailable");
+  });
+
   it("attaches measured effects on the observer path without minting milligrades from cosine", () => {
     const object = vector(OBJECT_ID, new Float32Array([0, 1]));
     const query = vector("query", new Float32Array([1, 0]));
@@ -108,7 +147,8 @@ describe("stored pair measurement producer", () => {
         truncated: false,
         committedThrough: OBJECT_ID
       }),
-      measureStoredPair: () => readyPair(object, query)
+      measureStoredPair: () => readyPair(object, query),
+      source: memorySourceReader()
     }));
     expect(result.page.observations).toHaveLength(1);
     expect(result.page.observations[0]?.association_milligrades).toBeUndefined();
@@ -125,6 +165,12 @@ describe("stored pair measurement producer", () => {
     expect(effects[0].projected_cap).not.toEqual(expect.objectContaining({
       milligrades: effects[0].raw_measurement.raw
     }));
+    expect(effects[0].raw_measurement.referent.kind).toBe("memory_entry");
+    if (effects[0].raw_measurement.referent.kind !== "memory_entry") return;
+    expect(effects[0].raw_measurement.referent.source_revision).toBe(MEMORY_REVISION);
+    expect(effects[0].raw_measurement.referent.source_revision).not.toBe(CONTENT);
+    expect(effects[0].raw_measurement.source_revision).toBe(CONTENT);
+    expect(result.page.observations[0]?.source_revision).toBe(MEMORY_REVISION);
   });
 
   it("emits missing rather than zero when the stored object vector is absent", () => {
@@ -198,7 +244,8 @@ describe("stored pair measurement producer", () => {
       workspaceId: "ws",
       objectId: OBJECT_ID,
       queryDigest: DIGEST,
-      pair: readyPair(vector(OBJECT_ID, new Float32Array([1, 0])), vector("query", new Float32Array([1, 0])))
+      pair: readyPair(vector(OBJECT_ID, new Float32Array([1, 0])), vector("query", new Float32Array([1, 0]))),
+      sourceRevision: MEMORY_REVISION
     }));
     const measured = applyObserverPage(initial, {
       page: {
@@ -259,6 +306,19 @@ describe("stored pair measurement producer", () => {
     expect(missing.measurements[0]?.raw).not.toEqual(expect.objectContaining({ raw: 0 }));
   });
 });
+
+function memorySourceReader(): NonNullable<ObserverReaders["source"]> {
+  return ({ objectId }) => ({
+    row: {
+      object_id: objectId,
+      sourceRevision: MEMORY_REVISION,
+      lifecycle_state: "active"
+    },
+    rowsRead: 1,
+    bytesRead: 8,
+    unavailable: false
+  });
+}
 
 function vector(objectId: string, embedding: Float32Array): StoredEmbeddingVector {
   return {

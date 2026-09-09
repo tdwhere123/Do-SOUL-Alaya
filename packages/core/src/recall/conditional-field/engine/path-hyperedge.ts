@@ -25,6 +25,7 @@ import {
 } from "./program-automaton.js";
 import {
   inactiveResolution,
+  observedTargetRevision,
   relationMatches,
   relationStrength,
   unifyAdvance,
@@ -43,10 +44,19 @@ export type HyperedgeCompletion = Readonly<{
 
 export type HyperedgeEffect = Readonly<{
   readonly observation_id: string;
-  readonly hyperedge_premises: readonly HyperedgePremise[];
-  readonly hyperedge: HyperedgeCompletion;
-  readonly derivation: Derivation;
-  readonly derivations: readonly Derivation[];
+  readonly hyperedge_premises?: readonly HyperedgePremise[];
+  readonly hyperedge?: HyperedgeCompletion;
+  readonly derivation?: Derivation;
+  readonly derivations?: readonly Derivation[];
+  readonly unresolved_guard?: boolean;
+}>;
+
+type HyperedgeInput = Readonly<{
+  readonly liveStates: readonly ProductStateKey[];
+  readonly overlay: NamedKindOverlay;
+  readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
+  readonly toProgramStates?: readonly string[];
+  readonly observedStates?: readonly ProductStateKey[];
 }>;
 
 type PremiseAssignment = HyperedgePremise & Readonly<{
@@ -83,23 +93,19 @@ export function tryCompleteHyperedge(
 export function hyperedgeEffects(
   rows: readonly AdjacencyRow[],
   program: Extract<QueryProgram, { readonly kind: "hyperedge" }>,
-  input: Readonly<{
-    readonly liveStates: readonly ProductStateKey[];
-    readonly overlay: NamedKindOverlay;
-    readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-    readonly toProgramStates?: readonly string[];
-  }>
+  input: HyperedgeInput
 ): readonly HyperedgeEffect[] {
   const toProgramStates = input.toProgramStates ?? [ACCEPTING_PROGRAM_STATE];
   const effects: HyperedgeEffect[] = [];
   for (const from of input.liveStates) {
+    if (from.target.kind !== "memory_entry") continue;
     const grouped = program.premises.map((premise) =>
       assignmentsForPremise(premise, from, rows, input)
     );
     if (program.join === "or") {
-      effects.push(...orHyperedgeEffects(from, grouped, toProgramStates));
+      effects.push(...orHyperedgeEffects(from, grouped, toProgramStates, input));
     } else {
-      effects.push(...andHyperedgeEffects(from, grouped, toProgramStates));
+      effects.push(...andHyperedgeEffects(from, grouped, toProgramStates, input));
     }
   }
   return Object.freeze(effects);
@@ -109,10 +115,7 @@ function assignmentsForPremise(
   premise: QueryProgram,
   from: ProductStateKey,
   rows: readonly AdjacencyRow[],
-  input: Readonly<{
-    readonly overlay: NamedKindOverlay;
-    readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-  }>
+  input: HyperedgeInput
 ): readonly PremiseAssignment[] {
   if (premise.kind === "alternative") {
     return premise.options.flatMap((option) => assignmentsForPremise(option, from, rows, input));
@@ -132,10 +135,7 @@ function relationAssignments(
   relation: QueryRelation,
   from: ProductStateKey,
   rows: readonly AdjacencyRow[],
-  input: Readonly<{
-    readonly overlay: NamedKindOverlay;
-    readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-  }>
+  input: HyperedgeInput
 ): readonly PremiseAssignment[] {
   const found: PremiseAssignment[] = [];
   for (const row of rows) {
@@ -149,16 +149,15 @@ function nestedHyperedgeAssignments(
   program: Extract<QueryProgram, { readonly kind: "hyperedge" }>,
   from: ProductStateKey,
   rows: readonly AdjacencyRow[],
-  input: Readonly<{
-    readonly overlay: NamedKindOverlay;
-    readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-  }>
+  input: HyperedgeInput
 ): readonly PremiseAssignment[] {
   return hyperedgeEffects(rows, program, {
     liveStates: [from],
     overlay: input.overlay,
-    sourceFacts: input.sourceFacts
-  }).map((effect) => {
+    sourceFacts: input.sourceFacts,
+    observedStates: input.observedStates ?? input.liveStates
+  }).flatMap((effect) => {
+    if (effect.hyperedge === undefined || effect.derivation === undefined) return [];
     const assigned = terminalAssignment(
       from,
       productSubjectId(effect.hyperedge.to),
@@ -168,11 +167,11 @@ function nestedHyperedgeAssignments(
       effect.hyperedge.to.binding_context,
       effect.observation_id
     );
-    return {
+    return [{
       ...assigned,
       derivation: effect.derivation,
-      derivations: effect.derivations
-    };
+      derivations: effect.derivations ?? [effect.derivation]
+    }];
   });
 }
 
@@ -180,11 +179,9 @@ function walkCompiledPremise(
   program: QueryProgram,
   from: ProductStateKey,
   rows: readonly AdjacencyRow[],
-  input: Readonly<{
-    readonly overlay: NamedKindOverlay;
-    readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-  }>
+  input: HyperedgeInput
 ): readonly PremiseAssignment[] {
+  if (from.target.kind !== "memory_entry") return [];
   const automaton = compileProgramAutomaton(program);
   const queue: WalkNode[] = automaton.start.map((programState) => ({
     objectId: productSubjectId(from),
@@ -197,6 +194,7 @@ function walkCompiledPremise(
     visited: []
   }));
   const found: PremiseAssignment[] = [];
+  const observed = input.observedStates ?? input.liveStates;
   while (queue.length > 0) {
     const node = queue.shift();
     if (node === undefined) break;
@@ -212,15 +210,23 @@ function walkCompiledPremise(
     }
     const env = parseBindingContext(node.binding);
     for (const variable of automaton.localVariables.get(node.programState) ?? []) env.delete(variable);
-    const here = retargetMemoryProduct(from, { object_id: node.objectId, binding_context: encodeBindingContext(env) });
+    const revision = observedTargetRevision(node.objectId, input.sourceFacts, observed);
+    if (revision === undefined) continue;
+    const here = retargetMemoryProduct(from, {
+      object_id: node.objectId,
+      binding_context: encodeBindingContext(env),
+      source_revision: revision
+    });
     for (const hyperedge of automaton.hyperedgeAdvances) {
       if (hyperedge.from !== node.programState) continue;
       for (const effect of hyperedgeEffects(rows, hyperedge.hyperedge, {
         liveStates: [here],
         overlay: input.overlay,
         sourceFacts: input.sourceFacts,
-        toProgramStates: hyperedge.to
+        toProgramStates: hyperedge.to,
+        observedStates: observed
       })) {
+        if (effect.hyperedge === undefined || effect.derivation === undefined) continue;
         const milligrades = effect.hyperedge.strength_milligrades < node.milligrades
           ? effect.hyperedge.strength_milligrades
           : node.milligrades;
@@ -232,7 +238,7 @@ function walkCompiledPremise(
             validity: effect.hyperedge.validity,
             binding: effect.hyperedge.to.binding_context,
             roots: [...node.roots, effect.derivation],
-            derivations: [...node.derivations, ...effect.derivations],
+            derivations: [...node.derivations, ...(effect.derivations ?? [effect.derivation])],
             visited
           });
         }
@@ -360,7 +366,8 @@ function assignmentFromRow(
 function orHyperedgeEffects(
   from: ProductStateKey,
   grouped: readonly (readonly PremiseAssignment[])[],
-  toProgramStates: readonly string[]
+  toProgramStates: readonly string[],
+  input: HyperedgeInput
 ): readonly HyperedgeEffect[] {
   return grouped.flatMap((options) => options.flatMap((option) => completionEffects(from, [option], {
     target: option.target_object_id,
@@ -369,13 +376,14 @@ function orHyperedgeEffects(
     relation_kind: option.relation_kind,
     join: "or",
     binding: option.binding_context
-  }, toProgramStates)));
+  }, toProgramStates, input)));
 }
 
 function andHyperedgeEffects(
   from: ProductStateKey,
   grouped: readonly (readonly PremiseAssignment[])[],
-  toProgramStates: readonly string[]
+  toProgramStates: readonly string[],
+  input: HyperedgeInput
 ): readonly HyperedgeEffect[] {
   if (grouped.some((group) => group.length === 0)) return [];
   const effects: HyperedgeEffect[] = [];
@@ -391,7 +399,7 @@ function andHyperedgeEffects(
       relation_kind: first.relation_kind,
       join: "and",
       binding: first.binding_context
-    }, toProgramStates));
+    }, toProgramStates, input));
   }
   return effects;
 }
@@ -407,8 +415,26 @@ function completionEffects(
     readonly join: "and" | "or";
     readonly binding: string;
   }>,
-  toProgramStates: readonly string[]
+  toProgramStates: readonly string[],
+  input: HyperedgeInput
 ): readonly HyperedgeEffect[] {
+  if (from.target.kind !== "memory_entry") {
+    return [{
+      observation_id: `revision:${productSubjectId(from)}:${from.program_state}:${spec.target}`,
+      unresolved_guard: true
+    }];
+  }
+  const targetRevision = observedTargetRevision(
+    spec.target,
+    input.sourceFacts,
+    input.observedStates ?? input.liveStates
+  );
+  if (targetRevision === undefined) {
+    return [{
+      observation_id: `revision:${productSubjectId(from)}:${from.program_state}:${spec.target}`,
+      unresolved_guard: true
+    }];
+  }
   const children = premises.map((premise) => premise.derivation);
   const derivation = joinDerivation(spec.join, children);
   const derivations = mergeDerivations([
@@ -419,7 +445,8 @@ function completionEffects(
     const to: ProductStateKey = retargetMemoryProduct(from, {
       object_id: spec.target,
       program_state: programState,
-      binding_context: spec.binding
+      binding_context: spec.binding,
+      source_revision: targetRevision
     });
     return {
       observation_id: `hyperedge:${productSubjectId(from)}:${from.hypothesis_id}:${from.program_state}:${programState}:${spec.join}:${spec.relation_kind}:${spec.target}`,

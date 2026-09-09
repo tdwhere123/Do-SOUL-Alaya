@@ -50,6 +50,9 @@ export class BoundedIndexPayload {
       const cacheKey = indexEntryCacheKey(entry);
       const objectId = indexMemoryObjectId(entry);
       const subjectId = indexEntrySubjectId(entry);
+      if (entry.target.kind === "memory_entry" && objectId !== undefined && !this.previews.has(cacheKey)) {
+        this.previews.delete(objectId);
+      }
       if (objectId !== undefined && this.input.manifestationFor(objectId) === "hint") {
         const preview = `[memory ref: ${objectId}]`;
         const bytes = Buffer.byteLength(preview, "utf8");
@@ -64,7 +67,8 @@ export class BoundedIndexPayload {
       }
       const facts = this.input.sourceFacts?.[subjectId]
         ?? (objectId === undefined ? undefined : this.input.sourceFacts?.[objectId]);
-      if (this.sourceMetadata[cacheKey] === undefined && facts !== undefined) {
+      const factsMatchEntry = observedMemoryRevisionMatches(entry, facts?.source_revision);
+      if (this.sourceMetadata[cacheKey] === undefined && facts !== undefined && factsMatchEntry) {
         const metadata = sourceMetadataFrom(facts);
         const bytes = Buffer.byteLength(JSON.stringify([objectId, metadata]), "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) {
@@ -77,12 +81,17 @@ export class BoundedIndexPayload {
       }
       const continued = this.payloadContinuationFor(entry.target);
       if (continued !== undefined) forgetPreview(this.previews, cacheKey, objectId);
-      if (continued === undefined
-        && (this.previews.has(cacheKey) || (objectId !== undefined && this.previews.has(objectId)))) {
+      const cachedPreview = this.previews.has(cacheKey)
+        || (objectId !== undefined
+          && entry.target.kind !== "memory_entry"
+          && this.previews.has(objectId));
+      if (continued === undefined && cachedPreview) {
         continue;
       }
-      const retainedContent = facts?.content
-        ?? (objectId === undefined ? undefined : this.input.sourceFacts?.[objectId]?.content);
+      const retainedContent = factsMatchEntry
+        ? (facts?.content
+          ?? (objectId === undefined ? undefined : this.input.sourceFacts?.[objectId]?.content))
+        : undefined;
       if (retainedContent !== undefined && entry.target.kind !== "source_evidence") {
         const preview = createContentPreview(retainedContent, "excerpt");
         const bytes = Buffer.byteLength(preview, "utf8");
@@ -111,6 +120,12 @@ export class BoundedIndexPayload {
       remaining -= Math.max(1, page.rowsRead) + 2;
       this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead);
       if (page.row?.content === undefined || page.unavailable) { complete = false; continue; }
+      // Object-id source lookup is current state, not the pinned product.
+      if (!observedMemoryRevisionMatches(entry, page.row.sourceRevision)) {
+        complete = false;
+        forgetPreview(this.previews, cacheKey, objectId);
+        continue;
+      }
       const metadata = sourceMetadataFrom(page.row);
       const metadataBytes = Buffer.byteLength(JSON.stringify([objectId, metadata]), "utf8");
       if (metadataBytes > this.remainingMemoryBytes) { complete = false; continue; }
@@ -247,6 +262,14 @@ function rememberMetadata(
 ): void {
   metadata[cacheKey] = value;
   if (objectId !== undefined && objectId !== cacheKey) metadata[objectId] = value;
+}
+
+function observedMemoryRevisionMatches(
+  entry: IndexEntry,
+  observedRevision: string | undefined
+): boolean {
+  if (entry.target.kind !== "memory_entry") return true;
+  return observedRevision === entry.target.source_revision;
 }
 
 function sourceMetadataFrom(row: Readonly<{

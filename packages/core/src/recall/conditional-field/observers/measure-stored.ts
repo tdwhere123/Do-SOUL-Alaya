@@ -77,6 +77,7 @@ export function rawMeasurementFromPair(
     readonly objectId: string;
     readonly queryDigest: string;
     readonly pair: StoredPairMeasurement | undefined;
+    readonly sourceRevision?: string;
   }>
 ): RawMeasurement {
   const pair = input.pair;
@@ -88,6 +89,8 @@ export function rawMeasurementFromPair(
   if (!compatibleSpaces(pair.object, pair.query)) return { status: "unsupported" };
   const cosine = finiteCosine(pair.query.embedding, pair.object.embedding);
   if (cosine === null) return { status: "unavailable" };
+  const memoryRevision = input.sourceRevision;
+  if (memoryRevision === undefined || memoryRevision.length === 0) return { status: "unavailable" };
   return {
     status: "measured",
     producer_id: STORED_COSINE_PRODUCER_ID,
@@ -97,7 +100,7 @@ export function rawMeasurementFromPair(
     referent: memoryRecallTarget({
       workspace_id: input.workspaceId,
       object_id: input.objectId,
-      source_revision: pair.object.content_hash
+      source_revision: memoryRevision
     }),
     source_revision: pair.object.content_hash,
     query_digest: input.queryDigest,
@@ -155,14 +158,20 @@ function attachPairMeasurements(
     });
     extraWork += pair?.rowVisits ?? 0;
     extraBytes += pair?.bytesRead ?? 0;
+    const memory = pairNeedsMemoryRevision(pair)
+      ? memoryProductRevision(input, observation.object_id)
+      : { rowVisits: 0, bytesRead: 0 };
+    extraWork += memory.rowVisits;
+    extraBytes += memory.bytesRead;
     const raw = rawMeasurementFromPair({
       workspaceId: input.workspace_id,
       objectId: observation.object_id,
       queryDigest: digest,
-      pair
+      pair,
+      sourceRevision: memory.revision
     });
     measurements.push({ observation_id: observation.observation_id, raw, cap: INAPPLICABLE_CAP });
-    observations.push(stampMeasuredObservation(observation, raw, pair));
+    observations.push(stampMeasuredObservation(observation, raw, pair, memory.revision));
   }
   return withMeasurements({
     page: { ...collected.page, observations },
@@ -178,14 +187,44 @@ function attachPairMeasurements(
 function stampMeasuredObservation(
   observation: TypedObservation,
   raw: RawMeasurement,
-  pair: StoredPairMeasurement | undefined
+  pair: StoredPairMeasurement | undefined,
+  memoryRevision: string | undefined
 ): TypedObservation {
-  if (raw.status !== "measured" || pair?.object === undefined) return observation;
+  if (raw.status !== "measured" || pair?.object == null || memoryRevision === undefined) {
+    return observation;
+  }
   return {
     ...observation,
-    source_revision: pair.object.content_hash,
+    source_revision: memoryRevision,
     measurement_id: STORED_COSINE_PRODUCER_ID,
     model_id: pair.object.model_id
+  };
+}
+
+function pairNeedsMemoryRevision(pair: StoredPairMeasurement | undefined): boolean {
+  return pair !== undefined
+    && pair.objectStatus === "ready"
+    && pair.object !== null
+    && pair.queryStatus === "ready"
+    && pair.query !== null;
+}
+
+function memoryProductRevision(
+  input: ObserveConditionalFieldInput,
+  objectId: string
+): Readonly<{
+  readonly revision?: string;
+  readonly rowVisits: number;
+  readonly bytesRead: number;
+}> {
+  const source = input.readers.source;
+  if (source === undefined) return { rowVisits: 0, bytesRead: 0 };
+  const page = source({ workspaceId: input.workspace_id, objectId });
+  const revision = page.unavailable ? undefined : page.row?.sourceRevision;
+  return {
+    ...(revision === undefined || revision.length === 0 ? {} : { revision }),
+    rowVisits: Math.max(1, page.rowsRead),
+    bytesRead: page.bytesRead
   };
 }
 

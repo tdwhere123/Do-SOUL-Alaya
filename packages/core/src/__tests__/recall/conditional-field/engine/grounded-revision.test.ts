@@ -26,9 +26,21 @@ function field(program: QueryProgram, rows: ReturnType<typeof edge>[]): FieldEng
   return applyObserverPage(initial, { page: { schema_version: 1, query_id: "grounded", snapshot_id: SNAPSHOT_ID,
     cursor: { schema_version: 1, cursor_id: "a", snapshot_id: SNAPSHOT_ID, query_id: "grounded", region_id: "adjacency", position: null, committed_through: null },
     observations: [], outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] },
-    effects: adjacencyEffectsForRows(rows, { interpretation, asOf: "2026-09-07T00:00:00.000Z", liveStates: initial.seen_identities, overlay }) });
+    effects: adjacencyEffectsForRows(rows, {
+      interpretation, asOf: "2026-09-07T00:00:00.000Z", liveStates: initial.seen_identities, overlay,
+      sourceFacts: factsFor(rows)
+    }) });
 }
 const grade = (state: FieldEngineState) => Math.max(0, ...(state.binding.kind === "bound" ? state.binding.snapshot.values.filter((value) => value.accepting && productSubjectId(value.state) === "end").map((value) => value.milligrades ?? 0) : []));
+function factsFor(rows: readonly ReturnType<typeof edge>[]) {
+  const facts = new Map<string, { object_id: string; source_revision: string }>();
+  facts.set("seed", { object_id: "seed", source_revision: "rev" });
+  for (const row of rows) {
+    facts.set(row.sourceObjectId, { object_id: row.sourceObjectId, source_revision: "rev" });
+    facts.set(row.targetObjectId, { object_id: row.targetObjectId, source_revision: "rev" });
+  }
+  return facts;
+}
 
 describe("grounded retained derivation revisions", () => {
   it.each(["transition", "derivation", "root-map", "source-revision"])("rebuilds same-count %s changes exactly as fresh grounding", (changedPart) => {

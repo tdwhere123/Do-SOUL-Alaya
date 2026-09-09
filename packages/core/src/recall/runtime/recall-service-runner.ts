@@ -400,11 +400,7 @@ export function encodeRecallResult(
   sourceMetadata: Readonly<Record<string, RecallSourceMetadata>> = {}
 ): ConditionalFieldRecallResult {
   const ceilings = governanceManifestationCeilings(governance?.paths ?? []);
-  const excerpts = index.entries.map((entry) => {
-    const cacheKey = indexEntryCacheKey(entry);
-    const objectId = indexMemoryObjectId(entry);
-    return previews.get(cacheKey) ?? (objectId === undefined ? undefined : previews.get(objectId));
-  });
+  const excerpts = index.entries.map((entry) => encodedPreview(previews, entry));
   const hydrated = excerpts.filter((excerpt) => excerpt !== undefined).length;
   const payload = index.entries.length === 0
     ? index.completeness.payload
@@ -460,6 +456,18 @@ export function encodeRecallResult(
     provider_calls: 0,
     garden_enqueue: 0
   };
+}
+
+function encodedPreview(
+  previews: ReadonlyMap<string, string>,
+  entry: InformationIndex["entries"][number]
+): string | undefined {
+  const cacheKey = indexEntryCacheKey(entry);
+  const hit = previews.get(cacheKey);
+  if (hit !== undefined) return hit;
+  if (entry.target.kind === "memory_entry") return undefined;
+  const objectId = indexMemoryObjectId(entry);
+  return objectId === undefined ? undefined : previews.get(objectId);
 }
 
 function candidatePlaneAttributes(

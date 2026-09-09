@@ -132,7 +132,8 @@ function fieldFor(program: QueryProgram, rows: readonly ReturnType<typeof edge>[
       interpretation,
       asOf: "2026-09-07T00:00:00.000Z",
       liveStates: created.seen_identities,
-      overlay: OVERLAY
+      overlay: OVERLAY,
+      sourceFacts: factsFor(rows)
     })
   });
 }
@@ -185,6 +186,16 @@ function edge(
     predicate,
     validity: VALIDITY
   };
+}
+
+function factsFor(rows: readonly ReturnType<typeof edge>[]) {
+  const facts = new Map<string, { object_id: string; source_revision: string }>();
+  facts.set("seed", { object_id: "seed", source_revision: "rev" });
+  for (const row of rows) {
+    facts.set(row.sourceObjectId, { object_id: row.sourceObjectId, source_revision: "rev" });
+    facts.set(row.targetObjectId, { object_id: row.targetObjectId, source_revision: "rev" });
+  }
+  return facts;
 }
 
 function gradeOf(state: ReturnType<typeof createConditionalField>, objectId: string): number {
