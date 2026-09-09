@@ -42,7 +42,8 @@ describe("conditional-field result encoding", () => {
         role: "requested" as const,
         explanation_ids: [],
         hypothesis_id: "h1",
-        program_state: "accept",
+        program_state: "accepting",
+        time_state: "present",
         output_binding: "memory-1"
       }],
       representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
@@ -52,7 +53,8 @@ describe("conditional-field result encoding", () => {
     expect(results[0]).toMatchObject({
       object_id: "memory-1",
       hypothesis_id: "h1",
-      program_state: "accept",
+      program_state: "accepting",
+      time_state: "present",
       output_binding: "memory-1",
       source_channels: ["conditional_field"],
       evidence_pointers: []
@@ -67,7 +69,8 @@ describe("conditional-field result encoding", () => {
       entries: [{
         schema_version: 1 as const, object_id: "memory-1", hypothesis_id: "h1",
         output_binding: "memory-1", role: "requested" as const, explanation_ids: [],
-        association_milligrades: 500, claim: "unknown" as const
+        association_milligrades: 500, claim: "unknown" as const,
+        program_state: "accepting", time_state: "present"
       }],
       representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
     };
@@ -83,7 +86,8 @@ describe("conditional-field result encoding", () => {
       entries: [{
         schema_version: 1 as const, object_id: "memory-1", hypothesis_id: "h1",
         output_binding: "memory-1", role: "requested" as const, explanation_ids: [],
-        association_milligrades: 500, claim: "unknown" as const
+        association_milligrades: 500, claim: "unknown" as const,
+        program_state: "accepting", time_state: "present"
       }],
       representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
     };

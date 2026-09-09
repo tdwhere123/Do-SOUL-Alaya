@@ -11,8 +11,12 @@ import type {
   SoulActiveConstraint,
   Slot,
   StorageTier as StorageTierType,
-  SynthesisCapsule
+  SynthesisCapsule,
+  RecallPolicy
 } from "@do-soul/alaya-protocol";
+import type { EntityExtractionPort } from "../../shared/entity-extraction-port.js";
+import type { QueryFactFrameExtractionPort } from "../../shared/query-fact-frame-extraction-port.js";
+import type { OpenSemanticFactorExtractionPort } from "../../semantic/open-semantic-factor-extraction-port.js";
 import type {
   EmbeddingNeighborHit,
   EmbeddingRecallRequestScoreSnapshot,
@@ -414,38 +418,35 @@ export interface RecallServiceEmbeddingRecallPort {
 }
 
 export interface RecallServiceDependencies {
-  readonly memoryRepo: RecallServiceMemoryRepoPort;
-  readonly slotRepo: RecallServiceSlotRepoPort;
-  readonly eventLogRepo: RecallServiceEventLogRepoPort;
-  readonly graphSupportPort?: RecallServiceGraphSupportPort;
-  readonly budgetPenaltyPort?: RecallServiceBudgetPenaltyPort;
-  readonly projectMappingPort?: RecallServiceProjectMappingPort;
-  readonly globalRecallCachePort?: GlobalMemoryRecallCachePort;
-  readonly claimResolverPort?: RecallServiceClaimResolverPort;
-  readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
-  readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
-  readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly activeConstraintsPort?: RecallServiceActiveConstraintsPort;
-  readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
-  readonly synthesisSearchPort?: RecallServiceSynthesisSearchPort;
-  readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
   // The decorator applies runtime policy defaults before request validation.
   readonly defaultPolicyDecorator?: (
-    policy: Readonly<import("@do-soul/alaya-protocol").RecallPolicy>
-  ) => Readonly<import("@do-soul/alaya-protocol").RecallPolicy>;
-  // see also: shared/entity-extraction-port.ts, shared/entity-extraction-rules.ts RuleBasedEntityExtractor.
-  readonly entityExtractionPort?: import("../../shared/entity-extraction-port.js").EntityExtractionPort;
-  // Optional read-only structured query parser; absent means relation demand is unavailable.
-  readonly queryFactFrameExtractionPort?: import("../../shared/query-fact-frame-extraction-port.js").QueryFactFrameExtractionPort;
-  readonly openSemanticFactorExtractionPort?: import(
-    "../../semantic/open-semantic-factor-extraction-port.js"
-  ).OpenSemanticFactorExtractionPort;
-  // Opt-in (ALAYA_RECALL_SOURCE_REF_ROBUST): also parse round-labeled / per-fact source refs (`s3-r2`, `s3-r2-f1`) so source proximity engages on conversational corpora. Default off.
-  readonly robustSourceRefParsing?: boolean;
+    policy: Readonly<RecallPolicy>
+  ) => Readonly<RecallPolicy>;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
   readonly warn?: RecallServiceWarnPort;
   readonly readSnapshot?: RecallReadSnapshotPort;
   // Unexpected recall auxiliary failures (not graceful degradations) land here.
   readonly recallFailureHealthInbox?: RecallFailureHealthInboxPort;
+
+  // executeRecall does not read these; extra keys stay so existing test doubles still type-check.
+  readonly memoryRepo?: RecallServiceMemoryRepoPort;
+  readonly slotRepo?: RecallServiceSlotRepoPort;
+  readonly eventLogRepo?: RecallServiceEventLogRepoPort;
+  readonly projectMappingPort?: RecallServiceProjectMappingPort;
+  readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
+  readonly budgetPenaltyPort?: RecallServiceBudgetPenaltyPort;
+  readonly claimResolverPort?: RecallServiceClaimResolverPort;
+  readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
+  readonly entityExtractionPort?: EntityExtractionPort;
+  readonly queryFactFrameExtractionPort?: QueryFactFrameExtractionPort;
+  readonly openSemanticFactorExtractionPort?: OpenSemanticFactorExtractionPort;
+  readonly globalRecallCachePort?: GlobalMemoryRecallCachePort;
+  readonly robustSourceRefParsing?: boolean;
+  readonly graphSupportPort?: RecallServiceGraphSupportPort;
+  readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
+  readonly synthesisSearchPort?: RecallServiceSynthesisSearchPort;
+  readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
+  readonly pathExpansionPort?: RecallServicePathExpansionPort;
 }

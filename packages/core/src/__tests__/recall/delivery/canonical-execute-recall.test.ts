@@ -19,10 +19,10 @@ describe("ordinary Recall snapshot lifecycle", () => {
         rollback: () => { events.push("rollback"); }
       },
       eventLogRepo: {
-        ...dependencies.eventLogRepo,
+        ...dependencies.eventLogRepo!,
         append: async (...args) => {
           events.push("side-effect");
-          return await dependencies.eventLogRepo.append(...args);
+          return await dependencies.eventLogRepo!.append(...args);
         }
       }
     });

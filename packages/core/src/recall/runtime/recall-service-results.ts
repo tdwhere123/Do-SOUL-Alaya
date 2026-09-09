@@ -13,13 +13,10 @@ export type SelectGammaSynthesisStatus =
   | Readonly<{ readonly status: "absent" }>
   | Readonly<{ readonly status: "ok"; readonly text: string }>
   | Readonly<{
-      readonly status: "malformed" | "truncated" | "failed";
-      readonly failure: string;
-      readonly text?: string;
-    }>;
-
-
-import type { RecallDiagnostics } from "./recall-service-diagnostics.js";
+    readonly status: "malformed" | "truncated" | "failed";
+    readonly failure: string;
+    readonly text?: string;
+  }>;
 
 /** Immutable scoring provenance prevents diagnostics from re-querying mutable path state. */
 export interface PathInflowEdge {
@@ -90,9 +87,9 @@ export interface RecallEvidenceSemanticActivationReceipt {
   readonly winner: Readonly<RecallEvidenceSemanticWinnerReceipt>;
   readonly observations: readonly Readonly<RecallEvidenceSemanticWinnerReceipt>[];
   readonly observation_completeness:
-    | "complete"
-    | "bounded_candidate_prefix"
-    | "winner_only_legacy";
+  | "complete"
+  | "bounded_candidate_prefix"
+  | "winner_only_legacy";
   readonly missing_channel_policy: "no_op";
 }
 
@@ -114,7 +111,14 @@ export interface RecallResult {
   readonly fine_assessment_count: number;
   readonly degradation_reason: SoulMemorySearchDegradationReason | null;
   readonly working_projection: null;
-  readonly diagnostics?: Readonly<RecallDiagnostics>;
+  readonly diagnostics?: {
+    readonly embedding_provider_status: string;
+    readonly provider_degradation_reason: string | null;
+    readonly capture_receipt?: unknown;
+    readonly phase_latency_ms?: Readonly<Record<string, number>>;
+    readonly evidence_embedding_latency_ms?: number | null;
+    readonly [key: string]: unknown;
+  };
   readonly delivery_path?: "legacy" | "canonical";
   readonly capture_identity?: Readonly<{
     readonly algorithm_id: string;

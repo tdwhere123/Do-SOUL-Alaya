@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  type InformationIndex
+  type InformationIndex,
+  type UsageReport
 } from "@do-soul/alaya-protocol";
+import { attributeUsageReports } from "@do-soul/alaya-core";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
 import { encodeIndexResults } from "../../../../mcp-memory/recall/recall-result.js";
 import { COMPATIBILITY_LEDGER } from "../../../../../../../packages/protocol/src/__tests__/recall/conditional-field/compatibility-ledger.fixture.js";
@@ -63,10 +65,17 @@ describe("conditional-field upgrade consumer falsifiers", () => {
     expect(encoded[0]?.evidence_pointers).toEqual([]);
     expect(encoded[0]?.program_state).toBe("accepting");
     expect(encoded[0]?.time_state).toBe("yesterday");
-    const outputOnlyReceipt = { grain: "output", output_id: "cfg", reported_use: "used" };
+    const outputOnlyReceipt: UsageReport = {
+      schema_version: 1,
+      grain: "output",
+      exposure: "exposed",
+      reported_use: "used",
+      output_id: "cfg"
+    };
     const plantedCredit = outputOnlyReceipt.grain === "output" ? encoded[0]?.evidence_pointers : [];
     expect(plantedCredit).toEqual([]);
-    expect(outputOnlyReceipt.grain).not.toBe("witness");
+    const [attributed] = attributeUsageReports([outputOnlyReceipt]);
+    expect(attributed?.witness_credit).toBe("none");
   });
 
   it("contract-only: compatibility says feedback is unreachable; packaging is not this band", () => {

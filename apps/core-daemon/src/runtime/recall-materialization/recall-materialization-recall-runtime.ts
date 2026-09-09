@@ -4,22 +4,14 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   ContextLensAssembler,
-  GraphExploreService,
-  parseSourceRefRobust,
   RecallService,
-  RuleBasedEntityExtractor,
-  RuleBasedQueryFactFrameExtractor,
   type RecallReadSnapshotPort
 } from "@do-soul/alaya-core";
-import {
-  findActiveConstraints,
-  type EvidenceSearchMatch
-} from "@do-soul/alaya-storage";
+import { findActiveConstraints } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../recall-read-worker/observer-operations.js";
 import { createBoundedActiveConstraintsReader } from "../recall-read-worker/active-constraints.js";
 import { DegradationPipeline } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
-import { DAEMON_ONLY_CONFIG_ENV_KEYS } from "../config/daemon-config-environment.js";
 import {
   annotateRecallEmbeddingWarmupHold,
   type EmbeddingWarmupHoldReason
@@ -30,17 +22,8 @@ import {
   type SingleUsedAnchorTelemetryEmitter
 } from "../../routes/memory/recall/recall-utilization.js";
 import { createRecallUtilizationService } from "../../services/status/recall-utilization-service.js";
-import {
-  createGlobalMemoryRecallCachePort,
-  readConfigEnvValue
-} from "../daemon/lifecycle/daemon-runtime-support.js";
-import {
-  type RecallPathProjectionReadOptions,
-  type RecallPathReadPorts
-} from "../recall/recall-path-readers.js";
-import { createRecallGraphExplorePathReader } from "../recall/recall-graph-path-reader.js";
+import { type RecallPathReadPorts } from "../recall/recall-path-readers.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
-import { bindMainThreadHotReads } from "./main-thread-hot-reads.js";
 
 export function createRecallUtilizationRuntime(input: CreateRecallMaterializationWiringInput) {
   const recallUtilizationService = createRecallUtilizationService({
@@ -94,89 +77,10 @@ export function createRecallSearchRuntime(
   directPathReadPorts: RecallPathReadPorts
 ) {
   return {
-    recallMemoryRepo: recallReadWorkerClient === null
-      ? input.memoryEntryRepo
-      : bindMainThreadHotReads(recallReadWorkerClient.memoryRepo, input.memoryEntryRepo),
-    recallEvidenceSearchPort: createRecallEvidenceSearchPort(input, recallReadWorkerClient),
-    recallSynthesisSearchPort: createRecallSynthesisSearchPort(input, recallReadWorkerClient),
     recallActiveConstraintsPort:
       recallReadWorkerClient?.activeConstraintsPort
       ?? createRecallActiveConstraintsPort(input, directPathReadPorts),
     conditionalFieldPort: recallReadWorkerClient?.conditionalFieldPort
-  };
-}
-
-function createRecallEvidenceSearchPort(
-  input: CreateRecallMaterializationWiringInput,
-  recallReadWorkerClient: ReturnType<typeof import("../recall/recall-read-worker-client.js").createRecallReadWorkerClient>
-) {
-  return recallReadWorkerClient?.evidenceSearchPort ?? {
-    searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
-      input.evidenceCapsuleRepo.searchByKeyword === undefined
-        ? []
-        : await input.evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
-    searchByKeywordField: async (
-      workspaceId: string,
-      queryText: string,
-      limit: number,
-      refinementDepths?: readonly number[]
-    ) => await input.evidenceCapsuleRepo.searchByKeywordField(
-      workspaceId, queryText, limit, refinementDepths
-    ),
-    searchManyByKeywordField: async (
-      workspaceId: string,
-      queries: readonly Readonly<{
-        readonly queryText: string;
-        readonly limit: number;
-        readonly refinement_depths?: readonly number[];
-      }>[]
-    ) => await input.evidenceCapsuleRepo.searchManyByKeywordField(workspaceId, queries),
-    findByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) => {
-      return await input.evidenceCapsuleRepo.findByIds(workspaceId, evidenceObjectIds);
-    },
-    findRecallQualifiedByIds: async (
-      workspaceId: string,
-      matches: readonly EvidenceSearchMatch[]
-    ) => await input.evidenceCapsuleRepo.findRecallQualifiedByIds(workspaceId, matches),
-    findRecallQualifiedFactKeysByIds: async (
-      workspaceId: string,
-      evidenceObjectIds: readonly string[]
-    ) => await input.evidenceCapsuleRepo.findRecallQualifiedFactKeysByIds(
-      workspaceId,
-      evidenceObjectIds
-    ),
-    findSourceAnchorsByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
-      await input.evidenceCapsuleRepo.findSourceAnchorsByIds(workspaceId, evidenceObjectIds)
-  };
-}
-
-function createRecallSynthesisSearchPort(
-  input: CreateRecallMaterializationWiringInput,
-  recallReadWorkerClient: ReturnType<typeof import("../recall/recall-read-worker-client.js").createRecallReadWorkerClient>
-) {
-  return recallReadWorkerClient?.synthesisSearchPort ?? {
-    searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
-      input.synthesisCapsuleRepo.searchByKeyword === undefined
-        ? []
-        : await input.synthesisCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
-    searchByKeywordField: async (
-      workspaceId: string,
-      queryText: string,
-      limit: number,
-      refinementDepths?: readonly number[]
-    ) => await input.synthesisCapsuleRepo.searchByKeywordField(
-      workspaceId, queryText, limit, refinementDepths
-    ),
-    searchManyByKeywordField: async (
-      workspaceId: string,
-      queries: readonly Readonly<{
-        readonly queryText: string;
-        readonly limit: number;
-        readonly refinement_depths?: readonly number[];
-      }>[]
-    ) => await input.synthesisCapsuleRepo.searchManyByKeywordField(workspaceId, queries),
-    findByIds: async (workspaceId: string, objectIds: readonly string[]) =>
-      await input.synthesisCapsuleRepo.findByIds(workspaceId, objectIds)
   };
 }
 
@@ -210,8 +114,8 @@ export function createRecallActiveConstraintsPort(
             const relations = activeConstraintsInput.asOf === undefined
               ? await directPathReadPorts.findActiveByWorkspace(workspaceId)
               : await directPathReadPorts.findActiveByWorkspace(workspaceId, {
-                  asOf: activeConstraintsInput.asOf
-                });
+                asOf: activeConstraintsInput.asOf
+              });
             return { relations, truncated: false };
           }
         },
@@ -243,17 +147,6 @@ function toActiveConstraintRecord(record: Awaited<ReturnType<typeof findActiveCo
 export function createRecallServiceRuntime(input: {
   readonly input: CreateRecallMaterializationWiringInput;
   readonly embeddingRuntime: ReturnType<typeof createDaemonEmbeddingRuntime>;
-  readonly globalMemoryRuntime: {
-    readonly globalMemoryRecallService:
-      | import("@do-soul/alaya-core").GlobalMemoryRecallServicePort
-      | undefined;
-  };
-  readonly recallPathRuntime: {
-    readonly recallPathPlasticityPort: unknown;
-    readonly recallPathExpansionPort: unknown;
-    readonly directPathReadPorts: RecallPathReadPorts;
-  };
-  readonly manifestationSidecarPort: unknown;
   readonly recallSearchRuntime: ReturnType<typeof createRecallSearchRuntime>;
   readonly readSnapshot: RecallReadSnapshotPort;
 }) {
@@ -271,43 +164,14 @@ export function createRecallServiceRuntime(input: {
 function createRecallService(input: {
   readonly input: CreateRecallMaterializationWiringInput;
   readonly embeddingRuntime: ReturnType<typeof createDaemonEmbeddingRuntime>;
-  readonly globalMemoryRuntime: {
-    readonly globalMemoryRecallService:
-      | import("@do-soul/alaya-core").GlobalMemoryRecallServicePort
-      | undefined;
-  };
-  readonly recallPathRuntime: {
-    readonly recallPathPlasticityPort: unknown;
-    readonly recallPathExpansionPort: unknown;
-    readonly directPathReadPorts: RecallPathReadPorts;
-  };
-  readonly manifestationSidecarPort: unknown;
   readonly recallSearchRuntime: ReturnType<typeof createRecallSearchRuntime>;
   readonly readSnapshot: RecallReadSnapshotPort;
 }) {
   const service = new RecallService({
-    memoryRepo: input.recallSearchRuntime.recallMemoryRepo,
-    slotRepo: input.input.slotRepo,
-    eventLogRepo: input.input.eventLogRepo,
-    projectMappingPort: input.input.projectMappingService,
-    pathPlasticityPort: input.recallPathRuntime.recallPathPlasticityPort as never,
     activeConstraintsPort: input.recallSearchRuntime.recallActiveConstraintsPort,
-    robustSourceRefParsing: readRobustSourceRefParsing(input.input.configEnv),
-    ...createRecallGlobalMemoryPorts(input),
-    budgetPenaltyPort: {
-      getSnapshot: async (runId: string) =>
-        await input.input.budgetBankruptcyService.getSnapshot(runId, input.input.budgetNow())
-    },
-    claimResolverPort: input.input.claimFormRepo,
-    manifestationSidecarPort: input.manifestationSidecarPort as never,
     ...(input.embeddingRuntime.defaultPolicyDecorator === undefined
       ? {}
       : { defaultPolicyDecorator: input.embeddingRuntime.defaultPolicyDecorator }),
-    entityExtractionPort: new RuleBasedEntityExtractor(),
-    queryFactFrameExtractionPort: new RuleBasedQueryFactFrameExtractor(),
-    ...(input.input.openSemanticFactorExtractionPort === undefined
-      ? {}
-      : { openSemanticFactorExtractionPort: input.input.openSemanticFactorExtractionPort }),
     recallFailureHealthInbox: input.input.recallFailureHealthInboxPort,
     warn: input.input.warn,
     readSnapshot: input.readSnapshot,
@@ -318,43 +182,6 @@ function createRecallService(input: {
   });
   return withEmbeddingWarmupHoldAnnotation(service, input.embeddingRuntime.getWarmupHoldReason);
 }
-
-function createRecallGraphSupportPort(
-  input: Pick<CreateRecallMaterializationWiringInput, "eventLogRepo">,
-  directPathReadPorts: RecallPathReadPorts
-) {
-  const createGraphService = (options: RecallPathProjectionReadOptions = {}) =>
-    new GraphExploreService({
-      pathRepo: createRecallGraphExplorePathReader(directPathReadPorts, options),
-      eventLogRepo: input.eventLogRepo
-    });
-  return {
-    countInboundSupports: async (
-      memoryId: string,
-      workspaceId: string,
-      options?: RecallPathProjectionReadOptions
-    ) => await createGraphService(options).countInboundSupports(memoryId, workspaceId),
-    countInboundEdgesWeighted: async (
-      memoryId: string,
-      workspaceId: string,
-      options?: RecallPathProjectionReadOptions
-    ) => await createGraphService(options).countInboundEdgesWeighted(memoryId, workspaceId),
-    countInboundRecalls: async (
-      memoryId: string,
-      workspaceId: string,
-      options?: RecallPathProjectionReadOptions
-    ) => await createGraphService(options).countInboundRecalls(memoryId, workspaceId),
-    countInboundRecallMetricsByMemoryId: async (
-      memoryIds: readonly string[],
-      workspaceId: string,
-      options?: RecallPathProjectionReadOptions
-    ) => await createGraphService(options).countInboundRecallMetricsByMemoryId(memoryIds, workspaceId)
-  };
-}
-
-export const recallMaterializationRecallRuntimeTestInternals = Object.freeze({
-  createRecallGraphSupportPort
-});
 
 function withEmbeddingWarmupHoldAnnotation(
   service: RecallService,
@@ -389,29 +216,4 @@ function createRecallContextLensAssembler(
     bankruptcyService: input.budgetBankruptcyService,
     warn: input.warn
   });
-}
-
-function readRobustSourceRefParsing(configEnv: ReadonlyMap<string, string>): boolean {
-  return parseSourceRefRobust(
-    readConfigEnvValue(configEnv, DAEMON_ONLY_CONFIG_ENV_KEYS.recall.sourceRefRobust)
-  );
-}
-
-function createRecallGlobalMemoryPorts(input: {
-  readonly input: CreateRecallMaterializationWiringInput;
-}) {
-  if (input.input.globalMemoryRepo === null) {
-    return {};
-  }
-
-  return {
-    ...(input.input.globalMemoryRecallCacheRepo === null
-      ? {}
-      : {
-          globalRecallCachePort: createGlobalMemoryRecallCachePort({
-            globalMemoryRecallCacheRepo: input.input.globalMemoryRecallCacheRepo,
-            now: () => new Date().toISOString()
-          })
-        })
-  };
 }

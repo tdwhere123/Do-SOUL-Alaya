@@ -1,5 +1,4 @@
 import {
-  attributeUsageReports,
   type AsyncSideEffectAuditEventLogPort,
   type AsyncSideEffectAuditNotifierPort,
   type EventPublisher
@@ -7,9 +6,6 @@ import {
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   ControlPlaneObjectKind,
-  GardenRole,
-  GardenTaskKind,
-  GardenTier,
   RetentionPolicy,
   SoulMemorySearchResponseSchema,
   SoulReportContextUsageResponseSchema,
@@ -312,8 +308,7 @@ export function createReportContextUsageHandler(params: Readonly<{
     const usageState = resolveUsageState(request);
     const usedObjectIds = resolveUsedObjectIds(request);
     const usedObjects = resolveUsedObjectIdentities(request);
-    const reports = usageReportsFromContextUsage(request);
-    attributeUsageReports(reports, linkedDelivery?.witness_exposures ?? []);
+    // Discarded attribution is not a second usage write; recordUsage already owns the proof.
     await deps.trustStateRecorder.recordUsage(
       {
         delivery_id: request.delivery_id,

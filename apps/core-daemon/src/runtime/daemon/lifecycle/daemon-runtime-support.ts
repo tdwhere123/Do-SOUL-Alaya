@@ -20,7 +20,6 @@ import {
   ToolGovernanceClient,
   SqliteKarmaEventStore,
   createGlobalMemoryRecallPort as createCoreGlobalMemoryRecallPort,
-  type GlobalMemoryRecallCachePort,
   type GlobalMemoryRecallServicePort
 } from "@do-soul/alaya-core";
 import * as StorageModule from "@do-soul/alaya-storage";
@@ -335,27 +334,6 @@ export function createGlobalMemoryRecallPort(params: {
           })
     }
   });
-}
-
-export function createGlobalMemoryRecallCachePort(params: {
-  readonly globalMemoryRecallCacheRepo: GlobalMemoryRecallCacheRepo;
-  readonly now?: () => string;
-}): GlobalMemoryRecallCachePort {
-  const now = params.now ?? (() => new Date().toISOString());
-
-  return {
-    recordClassifications: async (records) => {
-      const updatedAt = now();
-      await params.globalMemoryRecallCacheRepo.upsertMany(
-        records.map((record) => ({
-          workspace_id: record.workspaceId,
-          global_object_id: record.globalObjectId,
-          classification: record.classification,
-          updated_at: updatedAt
-        }))
-      );
-    }
-  };
 }
 
 export function createEngineBindingTester() {

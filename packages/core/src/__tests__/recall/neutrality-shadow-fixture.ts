@@ -73,7 +73,7 @@ export async function runYogaNeutralityBundle(): Promise<NeutralityBundle> {
       isAvailable: true,
       embedTexts: ports.embedTexts
     },
-    eventLogRepo: dependencies.eventLogRepo,
+    eventLogRepo: dependencies.eventLogRepo!,
     generateQueryId: () => NEUTRALITY_QUERY_ID,
     now: dependencies.now,
     queryTimeoutMs: QUERY_TIMEOUT_MS
@@ -83,7 +83,7 @@ export async function runYogaNeutralityBundle(): Promise<NeutralityBundle> {
     defaultPolicyDecorator: (policy) => policy,
     embeddingRecallService,
     memoryRepo: {
-      ...dependencies.memoryRepo,
+      ...dependencies.memoryRepo!,
       findByIds: async (_workspaceId, ids) =>
         [memory].filter((entry) => ids.includes(entry.object_id))
     }
@@ -170,12 +170,12 @@ function publicRecallReceipt(result: RecallResult): unknown {
 }
 
 function omitLatency(diagnostics: RecallResult["diagnostics"]): unknown {
-  if (diagnostics === undefined) return null;
+  if (diagnostics === undefined || diagnostics === null) return null;
   const {
     phase_latency_ms: _phase,
     evidence_embedding_latency_ms: _evidence,
     ...rest
-  } = diagnostics;
+  } = diagnostics as Record<string, unknown>;
   return rest;
 }
 

@@ -70,10 +70,8 @@ export {
   type EventLogRepo
 } from "./repos/runtime/index.js";
 export {
-  SqliteRecallRoutingKeyProjectionRepo,
   SqliteSignalRepo,
-  type SignalRepo,
-  type StoredRecallRoutingKeyProjection
+  type SignalRepo
 } from "./repos/signal/index.js";
 export {
   RecallQualifiedEvidenceReader,

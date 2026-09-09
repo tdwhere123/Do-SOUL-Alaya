@@ -1,15 +1,11 @@
-import { isPathActiveForRecall } from "@do-soul/alaya-protocol";
 import {
   DeferredObligationService,
-  ManifestationResolver,
-  PathActivationCandidateProducer,
   RelationAssertionService,
   ResolutionService,
   appendEventLogSynchronously,
   fieldContractSha256,
   type GlobalMemoryRecallSubscription,
-  type ManifestationResolverEventLogWriterPort,
-  type PathActivationCandidateProducerPathReaderPort
+  type ManifestationResolverEventLogWriterPort
 } from "@do-soul/alaya-core";
 import {
   SqliteFieldCausalUsageRepo,
@@ -28,7 +24,6 @@ import {
 } from "../recall/recall-path-readers.js";
 import { resolveRecallPathReadBind } from "../recall/recall-path-read-bind.js";
 import {
-  createGlobalMemoryRecallCachePort,
   createGlobalMemoryRecallPort,
   createGlobalMemoryRouteService
 } from "../daemon/lifecycle/daemon-runtime-support.js";
@@ -68,7 +63,6 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
   try {
     const recallReadRuntime = createRecallReadRuntime(
       input,
-      globalMemoryRuntime,
       recallReadWorkerClient,
       directPathReadPorts
     );
@@ -118,34 +112,21 @@ function createGlobalMemoryRuntime(input: CreateRecallMaterializationWiringInput
 
 function createRecallReadRuntime(
   input: CreateRecallMaterializationWiringInput,
-  globalMemoryRuntime: ReturnType<typeof createGlobalMemoryRuntime>,
   recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>,
   directPathReadPorts: ReturnType<typeof createDirectRecallPathReadPorts>
 ) {
   const embeddingRuntime = createEmbeddingRuntimeWithWarmupObserver(input);
-  const recallPathRuntime = createRecallPathRuntime(
-    recallReadWorkerClient,
-    directPathReadPorts
-  );
-  const manifestationRuntime = createManifestationRuntime(
-    input,
-    recallPathRuntime.pathActivationCandidateProducer
-  );
   const recallSearchRuntime = createRecallSearchRuntime(
     input,
     recallReadWorkerClient,
-    recallPathRuntime.directPathReadPorts
+    directPathReadPorts
   );
   return {
     embeddingRuntime,
-    recallPathRuntime,
     recallUtilizationRuntime: createRecallUtilizationRuntime(input),
     recallServiceRuntime: createRecallServiceRuntime({
       input,
       embeddingRuntime,
-      globalMemoryRuntime,
-      recallPathRuntime,
-      manifestationSidecarPort: manifestationRuntime.manifestationSidecarPort,
       recallSearchRuntime,
       readSnapshot: recallReadWorkerClient?.readSnapshot
         ?? createSqliteConnectionReadSnapshot(input.database.connection)
@@ -281,38 +262,6 @@ function createEmbeddingRuntimeWithWarmupObserver(input: CreateRecallMaterializa
   return embeddingRuntime;
 }
 
-function createRecallPathRuntime(
-  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>,
-  directPathReadPorts: ReturnType<typeof createDirectRecallPathReadPorts>
-) {
-  const recallPathExpansionPort =
-    recallReadWorkerClient?.pathExpansionPort ?? directPathReadPorts.pathExpansionPort;
-  const recallPathPlasticityPort =
-    recallReadWorkerClient?.pathPlasticityPort ?? directPathReadPorts.pathPlasticityPort;
-  const pathActivationReaderPort: PathActivationCandidateProducerPathReaderPort = {
-    async findActiveByAnchorObjectIds(workspaceId, memoryObjectIds) {
-      if (memoryObjectIds.length === 0) {
-        return [];
-      }
-      const anchors = memoryObjectIds.map((objectId) => ({
-        kind: "object" as const,
-        object_id: objectId
-      }));
-      const paths = await recallPathExpansionPort.findByAnchors(workspaceId, anchors);
-      return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
-    }
-  };
-  const pathActivationCandidateProducer = new PathActivationCandidateProducer({
-    pathReader: pathActivationReaderPort
-  });
-  return {
-    recallPathExpansionPort,
-    recallPathPlasticityPort,
-    directPathReadPorts,
-    pathActivationCandidateProducer
-  };
-}
-
 function createDirectRecallPathReadPorts(
   input: CreateRecallMaterializationWiringInput,
   bindTemporalPathReads: boolean
@@ -333,48 +282,6 @@ function createDirectRecallPathReadPorts(
     softAssociationPathReader: input.softAssociationPathRepo,
     ensureTemporalProjection: createRecallTemporalProjectionEnsurer(relationAssertionService)
   });
-}
-
-function createManifestationRuntime(
-  input: CreateRecallMaterializationWiringInput,
-  pathActivationCandidateProducer: PathActivationCandidateProducer
-) {
-  let manifestationResolverInstance: ManifestationResolver | null = null;
-  const getManifestationResolver = (): ManifestationResolver => {
-    if (manifestationResolverInstance === null) {
-      manifestationResolverInstance = new ManifestationResolver({
-        budgetConfigProvider: input.manifestationBudgetConfigProvider,
-        eventLogWriter: createAtomicManifestationEventLogWriter(input.eventLogRepo)
-      });
-    }
-    return manifestationResolverInstance;
-  };
-  return {
-    manifestationSidecarPort: {
-      buildBiasSidecar: async (params: Readonly<{
-        readonly workspaceId: string;
-        readonly runId: string;
-        readonly anchorMemoryObjectIds: readonly string[];
-        readonly taskSurfaceRef: Parameters<ManifestationResolver["resolveWithBias"]>[0]["taskSurfaceRef"];
-      }>) => {
-        const candidates = await pathActivationCandidateProducer.produce({
-          workspaceId: params.workspaceId,
-          runId: params.runId,
-          anchorMemoryObjectIds: params.anchorMemoryObjectIds
-        });
-        if (candidates.length === 0) {
-          return [];
-        }
-        const result = await getManifestationResolver().resolveWithBias({
-          workspaceId: params.workspaceId,
-          runId: params.runId,
-          candidates,
-          taskSurfaceRef: params.taskSurfaceRef
-        });
-        return result.biasSidecar;
-      }
-    }
-  };
 }
 
 export function createAtomicManifestationEventLogWriter(

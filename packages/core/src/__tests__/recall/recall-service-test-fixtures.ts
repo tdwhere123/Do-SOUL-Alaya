@@ -62,37 +62,16 @@ export async function createSourceBoundRecallFixture(
         findById: async (id) => slice.storage.evidenceCapsuleRepo.findById(id),
         findByIds: async (workspaceId, ids) => slice.storage.evidenceCapsuleRepo.findByIds(workspaceId, ids)
       },
-      runtimeNotifier: { notifyEntry: async () => {} }
+      runtimeNotifier: { notifyEntry: async () => { } }
     });
-    return writer.create({ created_by: "user_action", dimension: input.dimension ?? MemoryDimension.FACT,
+    return writer.create({
+      created_by: "user_action", dimension: input.dimension ?? MemoryDimension.FACT,
       source_kind: "user", formation_kind: "explicit", scope_class: input.scopeClass ?? ScopeClass.PROJECT,
       content: input.content, domain_tags: input.domainTags ?? [], evidence_refs: [],
-      workspace_id: input.workspaceId ?? "workspace-1", run_id: "run-1", surface_id: null });
+      workspace_id: input.workspaceId ?? "workspace-1", run_id: "run-1", surface_id: null
+    });
   }
   return { ...slice, dependencies, service, writeSource, claimFormRepo: new SqliteClaimFormRepo(slice.database) };
-}
-import { RECALL_FUSION_STREAMS } from "../../recall/delivery/fusion-delivery-streams.js";
-import type {
-  RecallFusionBreakdown,
-  RecallFusionStreamContributions,
-  RecallFusionStreamRanks
-} from "../../recall/runtime/recall-service-types.js";
-
-export function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<RecallFusionBreakdown> {
-  return Object.freeze({
-    candidate_key: `workspace_local:memory_entry:${objectId}`,
-    object_id: objectId,
-    object_kind: "memory_entry",
-    origin_plane: "workspace_local",
-    per_stream_rank: Object.freeze(Object.fromEntries(
-      RECALL_FUSION_STREAMS.map((stream) => [stream, null])
-    )) as RecallFusionStreamRanks,
-    fused_rank: Number.MAX_SAFE_INTEGER,
-    fused_score: 0,
-    fused_rank_contribution_per_stream: Object.freeze(Object.fromEntries(
-      RECALL_FUSION_STREAMS.map((stream) => [stream, 0])
-    )) as RecallFusionStreamContributions
-  });
 }
 
 export function createTaskSurface(): TaskObjectSurface {

@@ -7,7 +7,7 @@ import {
   CaptureRejectSchema, CaptureSetUtilitySchema, CANONICAL_CAPTURE_DETERMINISTIC_TAIL
 } from "./capture-receipt-structures.js";
 
-export const CANONICAL_CAPTURE_ALGORITHM_ID =
+const CANONICAL_CAPTURE_ALGORITHM_ID =
   "alaya.recall.shadow.safe-dominance-capture.v1" as const;
 export const CANONICAL_CAPTURE_ALGORITHM_VERSION =
   "safe-dominance-capture.v1.0.1" as const;
@@ -34,32 +34,42 @@ export const CANONICAL_CAPTURE_IDENTITY_BLOB = `${[
 
 const Key = z.string().min(1);
 const ReceiptDigest = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
-const Identity = z.object({ algorithm_id: z.literal(CANONICAL_CAPTURE_ALGORITHM_ID),
+const Identity = z.object({
+  algorithm_id: z.literal(CANONICAL_CAPTURE_ALGORITHM_ID),
   version: z.literal(CANONICAL_CAPTURE_ALGORITHM_VERSION),
-  digest: z.literal(CANONICAL_CAPTURE_IDENTITY_DIGEST) }).strict().readonly();
+  digest: z.literal(CANONICAL_CAPTURE_IDENTITY_DIGEST)
+}).strict().readonly();
 export const CANONICAL_CAPTURE_IDENTITY = Object.freeze({
   algorithm_id: CANONICAL_CAPTURE_ALGORITHM_ID,
   version: CANONICAL_CAPTURE_ALGORITHM_VERSION,
   digest: CANONICAL_CAPTURE_IDENTITY_DIGEST
 });
-export const CanonicalDispositionSchema = z.object({ candidate_key: Key, status: z.enum([
-  "selected", "rejected", "ineligible", "unavailable"
-]), reason: z.enum(["selected_by_gamma", "duplicate_object", "dimension_limit",
-  "max_total_tokens", "h_ineligible", "fail_closed_unavailable"]) }).strict().readonly();
+export const CanonicalDispositionSchema = z.object({
+  candidate_key: Key, status: z.enum([
+    "selected", "rejected", "ineligible", "unavailable"
+  ]), reason: z.enum(["selected_by_gamma", "duplicate_object", "dimension_limit",
+    "max_total_tokens", "h_ineligible", "fail_closed_unavailable"])
+}).strict().readonly();
 
 const CanonicalSelectionReceiptBodyObject = z.object({
   schema_version: z.literal(1), ranking_authority: z.literal("prefix_sk"),
   identity: Identity, execution: CaptureExecutionSchema,
-  field_membership: z.object({ e0_keys: z.array(Key).readonly(),
-    e1_keys: z.array(Key).readonly(), eligible_keys: z.array(Key).readonly() }).strict(),
+  field_membership: z.object({
+    e0_keys: z.array(Key).readonly(),
+    e1_keys: z.array(Key).readonly(), eligible_keys: z.array(Key).readonly()
+  }).strict(),
   observations_by_candidate_key: z.record(Key, CaptureCandidateObservationSchema).nullable(),
   frontiers: CaptureFrontierSchema.nullable(),
-  gamma: z.object({ set_utilities: z.array(CaptureSetUtilitySchema).readonly(),
+  gamma: z.object({
+    set_utilities: z.array(CaptureSetUtilitySchema).readonly(),
     decisions: z.array(CaptureDecisionSchema).readonly(),
-    rejects: z.array(CaptureRejectSchema).readonly() }).strict(),
+    rejects: z.array(CaptureRejectSchema).readonly()
+  }).strict(),
   dispositions: z.array(CanonicalDispositionSchema).readonly(),
-  delivery: z.array(z.object({ candidate_key: Key,
-    delivery_rank: z.number().int().positive() }).strict()).readonly()
+  delivery: z.array(z.object({
+    candidate_key: Key,
+    delivery_rank: z.number().int().positive()
+  }).strict()).readonly()
 }).strict();
 export const CanonicalSelectionReceiptBodySchema =
   CanonicalSelectionReceiptBodyObject.readonly();
@@ -122,13 +132,13 @@ function validateReceipt(receipt: CanonicalSelectionReceipt, report: ReceiptIssu
     return report("capture execution reason contradicts status");
   }
   if (captured !== (receipt.observations_by_candidate_key !== null) ||
-      captured !== (receipt.frontiers !== null)) return report("capture execution mismatch");
+    captured !== (receipt.frontiers !== null)) return report("capture execution mismatch");
   if (![membership.e0_keys, membership.e1_keys, membership.eligible_keys].every(unique) ||
-      membership.eligible_keys.some((key) => !membership.e1_keys.includes(key))) {
+    membership.eligible_keys.some((key) => !membership.e1_keys.includes(key))) {
     return report("capture field membership mismatch");
   }
   if (membership.e0_keys.some((key) => !membership.e1_keys.includes(key)) !==
-      (receipt.execution.reason === "membership_shrink")) {
+    (receipt.execution.reason === "membership_shrink")) {
     return report("capture membership shrink status mismatch");
   }
   if (!captured) return validateFailClosed(receipt, report);
@@ -144,8 +154,8 @@ function validateFailClosed(
   const unavailable = receipt.dispositions.every((row) =>
     row.status === "unavailable" && row.reason === "fail_closed_unavailable");
   if (!gammaEmpty || receipt.delivery.length > 0 ||
-      !sameSet(receipt.dispositions.map(keyOf), receipt.field_membership.e1_keys) ||
-      !unavailable) report("failed capture receipt is not closed");
+    !sameSet(receipt.dispositions.map(keyOf), receipt.field_membership.e1_keys) ||
+    !unavailable) report("failed capture receipt is not closed");
 }
 
 function validateCapturedClosure(
@@ -157,8 +167,8 @@ function validateCapturedClosure(
   const utilities = receipt.gamma.set_utilities.map(keyOf);
   const dispositions = receipt.dispositions.map(keyOf);
   if (!sameSet(observations, e1) || !sameSet(utilities, e1) ||
-      !sameSet(dispositions, e1) || receipt.dispositions.some((row) =>
-        row.status === "unavailable")) {
+    !sameSet(dispositions, e1) || receipt.dispositions.some((row) =>
+      row.status === "unavailable")) {
     return report("captured candidate closure mismatch");
   }
   validateFrontiers(receipt, report);
@@ -186,8 +196,8 @@ function validateDispositions(
   const decisions = receipt.gamma.decisions.map(keyOf);
   const rejects = receipt.gamma.rejects.map(keyOf);
   if (!unique(decisions) || !unique(rejects) ||
-      !sameSet([...decisions, ...rejects], eligible) ||
-      decisions.some((key) => rejects.includes(key))) {
+    !sameSet([...decisions, ...rejects], eligible) ||
+    decisions.some((key) => rejects.includes(key))) {
     return report("capture decisions and rejects must partition eligible keys");
   }
   const rejectedReasons = new Map(receipt.gamma.rejects.map((row) =>

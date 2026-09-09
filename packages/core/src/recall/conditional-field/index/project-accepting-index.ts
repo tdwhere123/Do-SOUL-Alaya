@@ -172,7 +172,8 @@ function pageAcceptingIndex(
     input = { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
       grounding_complete: grounded.complete,
       ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
-      remaining_reserve: Math.max(0, (input.remaining_reserve ?? input.budget.finalization_reserve) - grounded.work),
+      // Grounding has its own allowance copy; debiting remaining_reserve here starves payload to zero.
+      remaining_reserve: input.remaining_reserve ?? input.budget.finalization_reserve,
       ...(!grounded.complete ? { resource_work: "open" } : {}) };
   }
   const projected = acceptingEntries(input);

@@ -6,7 +6,10 @@ import {
   type QueryInterpretation
 } from "@do-soul/alaya-protocol";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
-import { compileConditionalFieldQuery } from "../../../../recall/conditional-field/query/compile-query.js";
+import {
+  compileConditionalFieldQuery,
+  interpretationIdentity
+} from "../../../../recall/conditional-field/query/compile-query.js";
 import {
   observeConditionalField,
   startObserverCursor,
@@ -29,6 +32,32 @@ afterEach(() => {
 });
 
 describe("snapshot, cursor, unavailable source, and continuation", () => {
+  it("invalidates a continuation whose resume state is missing instead of replaying page one", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantNeedles(slice, 4, 811);
+    const interpretation = compileQuery("needle");
+    const missing = runRecall(slice, {
+      page_budget: 2,
+      continuation: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        continuation_id: "missing-resume-state",
+        query_id: interpretation.query_id,
+        snapshot_id: SNAPSHOT_ID,
+        result_version: "v1",
+        expires_at: "2099-01-01T00:00:00.000Z",
+        cursor: "p2g0",
+        interpretation_id: interpretationIdentity({ interpretation_clock: INTERPRETATION_CLOCK })
+      }
+    });
+    expect(missing.entries).toEqual([]);
+    expect(missing.completeness.observed_coverage).toBe("invalidated");
+    expect(missing.completeness.logical_index).toBe("invalidated");
+    expect(missing.continuation).toBeNull();
+    const fresh = runRecall(slice, { page_budget: 2 });
+    expect(fresh.entries).toHaveLength(2);
+    expect(missing.entries).not.toEqual(fresh.entries);
+  });
+
   it("binds the complete issued token, rejecting a changed cursor without consuming its valid token", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     const ids = await plantNeedles(slice, 4, 991);

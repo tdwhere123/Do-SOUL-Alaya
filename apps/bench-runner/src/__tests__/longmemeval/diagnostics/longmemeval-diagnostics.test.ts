@@ -243,7 +243,7 @@ describe("LongMemEval recall diagnostics", () => {
     });
   });
 
-  it("does not declare replay candidate pools complete when tie-break inputs are missing", () => {
+  it("does not use fused stream ranks as live candidate-pool completeness", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-incomplete-replay-candidates",
       goldMemoryIds: ["gold-a"],
@@ -256,6 +256,13 @@ describe("LongMemEval recall diagnostics", () => {
       embeddingMode: "disabled",
       recallResult: {
         diagnostics: {
+          candidate_pool_count: 1,
+          fine_assessment_pruned_candidates: [],
+          token_economy: {
+            coarse_pool_size: 1,
+            fine_evaluated: 1,
+            fine_pruned_count: 0
+          },
           candidates: [
             {
               object_id: "gold-a",
@@ -267,8 +274,8 @@ describe("LongMemEval recall diagnostics", () => {
               fused_rank: 1,
               fused_score: 0.4,
               final_rank: null,
-              per_stream_rank: { lexical_fts: 1 },
-              fused_rank_contribution_per_stream: { lexical_fts: 0.3 },
+              per_stream_rank: null,
+              fused_rank_contribution_per_stream: null,
               score_factors: {
                 activation: 0.7,
                 relevance: 0.9
@@ -279,8 +286,9 @@ describe("LongMemEval recall diagnostics", () => {
       }
     });
 
-    expect(row.candidate_pool_complete).toBe(false);
-    expect(LongMemEvalQuestionDiagnosticSchema.parse(row).candidate_pool_complete).toBe(false);
+    expect(row.conditional_field_measurement).toBeNull();
+    expect(row.candidate_pool_complete).toBe(true);
+    expect(LongMemEvalQuestionDiagnosticSchema.parse(row).candidate_pool_complete).toBe(true);
   });
 
   it("persists phase latency into per-question diagnostics", () => {

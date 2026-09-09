@@ -81,8 +81,12 @@ export function createDeps(): McpMemoryToolHandlerDependencies {
         active_constraints: [],
         active_constraints_count: 0,
         total_scanned: 1,
-        coarse_filter_count: 1,
-        fine_assessment_count: 1,
+        coarse_filter_count: 0,
+        fine_assessment_count: 0,
+        degradation_reason: null,
+        working_projection: null,
+        provider_calls: 0,
+        garden_enqueue: 0,
         index
       })) as McpMemoryToolHandlerDependencies["recallService"]["recall"]
     },

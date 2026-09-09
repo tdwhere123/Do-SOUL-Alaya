@@ -43,7 +43,8 @@ describe("conditional-field executeRecall assembly", () => {
     expect(index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades, JSON.stringify(index.completeness))
       .toBe(550);
     const supported = index.entries.find((entry) => entry.explanation_ids.length > 0);
-    expect(supported === undefined || supported.claim !== "unknown" || supported.explanation_ids.length > 0).toBe(true);
+    expect(supported).toBeDefined();
+    expect(supported?.explanation_ids.length).toBeGreaterThan(0);
     expect(index.completeness.logical_index === "complete" || index.completeness.logical_index === "open").toBe(true);
     expect(index.completeness.interpretation_coverage).toBeDefined();
     expect(JSON.stringify(index)).not.toContain("ranking_authority");

@@ -15,7 +15,7 @@ describe("classifyMiss canonical ordering residual", () => {
       deliveredObjectIds: ["planted-a"]
     });
 
-    expect(row.ranking_authority).toBe("prefix_sk");
+    expect(row.conditional_field_measurement).toBeNull();
     expect(row.gold[0]?.fused_rank).toBeNull();
     expect(row.gold[0]?.pre_budget_rank).toBeNull();
     expect(row.gold[0]?.candidate_status).toBe("candidate_not_delivered");
@@ -54,11 +54,11 @@ describe("classifyMiss canonical ordering residual", () => {
       degradationReason: null,
       embeddingMode: "disabled",
       recallResult: {
-        ranking_authority: "prefix_sk",
         diagnostics: { candidates: [] }
       }
     });
 
+    expect(row.ranking_authority).toBeNull();
     expect(row.gold[0]?.candidate_status).toBe("candidate_absent");
     expect(row.miss_classification).toBe("candidate_absent");
     expect(row.miss_taxonomy).toBe("candidate_absent");
@@ -92,7 +92,6 @@ describe("classifyMiss canonical ordering residual", () => {
       degradationReason: null,
       embeddingMode: "disabled",
       recallResult: {
-        ranking_authority: "select_gamma",
         diagnostics: {
           candidate_pool: [{
             object_id: PLANTED_GOLD_ID,
@@ -115,7 +114,6 @@ describe("classifyMiss canonical ordering residual", () => {
       degradationReason: null,
       embeddingMode: "disabled",
       recallResult: {
-        ranking_authority: "select_gamma",
         diagnostics: {
           candidate_pool: [{
             object_id: PLANTED_GOLD_ID,
@@ -128,8 +126,12 @@ describe("classifyMiss canonical ordering residual", () => {
       }
     });
 
+    expect(budgetDropped.ranking_authority).toBeNull();
+    expect(budgetDropped.conditional_field_measurement).toBeNull();
     expect(budgetDropped.miss_classification).toBe("budget_dropped");
     expect(budgetDropped.miss_taxonomy).toBe("budget_drop");
+    expect(underRanked.ranking_authority).toBeNull();
+    expect(underRanked.conditional_field_measurement).toBeNull();
     expect(underRanked.miss_classification).toBe("under_ranked");
     expect(underRanked.miss_taxonomy).toBe("delivery_order_drop");
   });

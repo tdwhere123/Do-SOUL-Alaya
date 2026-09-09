@@ -257,7 +257,8 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     const invalidated = morning.index.completeness.observed_coverage === "invalidated";
     const sameInstance = morning.index.query_id === evening.index.query_id
       && morning.index.snapshot_id === evening.index.snapshot_id;
-    expect(invalidated || sameInstance).toBe(true);
+    expect(sameInstance).toBe(true);
+    expect(invalidated).toBe(false);
     if (invalidated) {
       expect(morning.index.completeness.logical_index).not.toBe("complete");
     }

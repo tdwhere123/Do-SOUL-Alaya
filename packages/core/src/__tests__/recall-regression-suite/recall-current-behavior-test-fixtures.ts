@@ -17,7 +17,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import type {
   RecallServiceDependencies,
-  RecallServiceFieldDeps
+  RecallServiceEventLogRepoPort,
+  RecallServiceFieldDeps,
+  RecallServiceMemoryRepoPort
 } from "../../recall/recall-service.js";
 import { fieldSearchFromScalar } from
   "../recall/fixtures/keyword-field-fixture.js";
@@ -110,9 +112,9 @@ export function deps(
     readonly activeConstraintsPort?: RecallServiceDependencies["activeConstraintsPort"];
     readonly embeddingRecallService?: RecallServiceDependencies["embeddingRecallService"];
     readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
-    readonly queryByEntity?: RecallServiceDependencies["eventLogRepo"]["queryByEntity"];
+    readonly queryByEntity?: RecallServiceEventLogRepoPort["queryByEntity"];
     readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
-    readonly searchByKeyword?: RecallServiceDependencies["memoryRepo"]["searchByKeyword"];
+    readonly searchByKeyword?: RecallServiceMemoryRepoPort["searchByKeyword"];
   } = {}
 ): { readonly dependencies: RecallServiceDependencies & RecallServiceFieldDeps } {
   const findByWorkspaceId = async (_workspaceId: string, tier?: StorageTier) =>
@@ -156,11 +158,11 @@ export function deps(
         (options.activeConstraints === undefined
           ? undefined
           : {
-              findActiveConstraints: async () => ({
-                constraints: options.activeConstraints ?? [],
-                total_count: options.activeConstraints?.length ?? 0
-              })
-            }),
+            findActiveConstraints: async () => ({
+              constraints: options.activeConstraints ?? [],
+              total_count: options.activeConstraints?.length ?? 0
+            })
+          }),
       embeddingRecallService: options.embeddingRecallService,
       pathExpansionPort: options.pathExpansionPort,
       evidenceSearchPort: withEvidenceFieldPort(options.evidenceSearchPort)

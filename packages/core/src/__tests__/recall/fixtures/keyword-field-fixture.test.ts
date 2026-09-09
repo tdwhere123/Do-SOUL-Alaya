@@ -12,12 +12,12 @@ describe("keyword field fixture", () => {
     const wrapped = withKeywordFieldFixturePorts({
       ...dependencies,
       memoryRepo: {
-        ...dependencies.memoryRepo,
+        ...dependencies.memoryRepo!,
         ...keywordSearchMethods(planted),
         searchByKeyword: vi.fn(async () => [])
       }
     });
-    const field = await wrapped.memoryRepo.searchByKeywordField?.(
+    const field = await wrapped.memoryRepo!.searchByKeywordField?.(
       "workspace-1",
       "q",
       8

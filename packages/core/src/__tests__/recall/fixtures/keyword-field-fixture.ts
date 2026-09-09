@@ -22,7 +22,9 @@ export function withKeywordFieldFixturePorts(
 ): RecallServiceDependencies & RecallServiceFieldDeps {
   return {
     ...dependencies,
-    memoryRepo: withMemoryFieldFixture(dependencies.memoryRepo),
+    memoryRepo: dependencies.memoryRepo === undefined
+      ? undefined
+      : withMemoryFieldFixture(dependencies.memoryRepo),
     evidenceSearchPort: dependencies.evidenceSearchPort === undefined
       ? undefined
       : withEvidenceFieldFixture(dependencies.evidenceSearchPort),

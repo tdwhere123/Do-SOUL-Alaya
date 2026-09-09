@@ -283,6 +283,24 @@ describe("index representation continuity", () => {
     expect(sameMorning.completeness.logical_index).not.toBe("invalidated");
   });
 
+  it("does not let grounding work consume the payload reserve to zero entries", () => {
+    const value = fieldValue("cfg", 850);
+    const index = projectAcceptingIndex({
+      ...baseInput({
+        snapshot: {
+          ...snapshotOf([value]),
+          seeds: [{ schema_version: 1, state: value.state, milligrades: value.milligrades }]
+        },
+        remaining_reserve: 1,
+        expires_at: EXPIRES_AT
+      }),
+      output_derivations: undefined,
+      transition_derivations: {}
+    });
+    expect(index.entries.map((entry) => entry.object_id)).toEqual(["cfg"]);
+    expect(index.entries).not.toEqual([]);
+  });
+
   it("stops projection when the remaining reserve is exhausted", () => {
     const truncated = projectAcceptingIndex(deploymentInput({
       remaining_reserve: 0,
