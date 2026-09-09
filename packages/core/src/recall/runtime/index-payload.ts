@@ -6,6 +6,7 @@ import {
   indexMemoryObjectId,
   type IndexEntry,
   type ManifestationState,
+  type PayloadContinuationRequest,
   type SourceEvidenceTarget
 } from "@do-soul/alaya-protocol";
 import type { BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
@@ -25,14 +26,20 @@ export class BoundedIndexPayload {
     readonly workspaceId: string;
     readonly remainingMemoryBytes: number;
     readonly manifestationFor: (objectId: string) => ManifestationState;
+    readonly payloadContinuation?: PayloadContinuationRequest;
   }>) {
     this.previews = new Map(Object.entries(input.previewCache ?? {}));
     this.remainingMemoryBytes = input.remainingMemoryBytes;
   }
 
-  public finalize(entries: readonly IndexEntry[], allowance: number): Readonly<{ remaining: number; complete: boolean }> {
+  public finalize(entries: readonly IndexEntry[], allowance: number): Readonly<{
+    readonly remaining: number;
+    readonly complete: boolean;
+    readonly retryable: boolean;
+  }> {
     let remaining = allowance;
     let complete = true;
+    let retryable = false;
     for (const entry of entries) {
       const cacheKey = indexEntryCacheKey(entry);
       const objectId = indexMemoryObjectId(entry);
@@ -62,10 +69,15 @@ export class BoundedIndexPayload {
         remaining -= 1; this.remainingMemoryBytes -= bytes;
         rememberMetadata(this.sourceMetadata, cacheKey, objectId, metadata);
       }
-      if (this.previews.has(cacheKey) || (objectId !== undefined && this.previews.has(objectId))) continue;
+      const continued = this.payloadContinuationFor(entry.target);
+      if (continued !== undefined) forgetPreview(this.previews, cacheKey, objectId);
+      if (continued === undefined
+        && (this.previews.has(cacheKey) || (objectId !== undefined && this.previews.has(objectId)))) {
+        continue;
+      }
       const retainedContent = facts?.content
         ?? (objectId === undefined ? undefined : this.input.sourceFacts?.[objectId]?.content);
-      if (retainedContent !== undefined) {
+      if (retainedContent !== undefined && entry.target.kind !== "source_evidence") {
         const preview = createContentPreview(retainedContent, "excerpt");
         const bytes = Buffer.byteLength(preview, "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) { complete = false; continue; }
@@ -75,8 +87,16 @@ export class BoundedIndexPayload {
       }
       if (entry.target.kind === "source_evidence") {
         const hydrated = this.hydrateSourceTarget(entry.target, cacheKey, remaining);
-        if (!hydrated.ok) complete = false;
         remaining = hydrated.remaining;
+        if (hydrated.retryable) retryable = true;
+        if (hydrated.ok) continue;
+        complete = false;
+        if (hydrated.retryable || this.previews.has(cacheKey) || retainedContent === undefined) continue;
+        const preview = createContentPreview(retainedContent, "excerpt");
+        const bytes = Buffer.byteLength(preview, "utf8");
+        if (remaining < 1 || bytes > this.remainingMemoryBytes) continue;
+        remaining -= 1; this.remainingMemoryBytes -= bytes;
+        rememberPreview(this.previews, cacheKey, objectId, preview);
         continue;
       }
       if (objectId === undefined || this.input.readers.source === undefined || remaining < 5 || this.remainingMemoryBytes < 1) { complete = false; continue; }
@@ -92,18 +112,28 @@ export class BoundedIndexPayload {
       rememberMetadata(this.sourceMetadata, cacheKey, objectId, metadata);
       rememberPreview(this.previews, cacheKey, objectId, createContentPreview(page.row.content, "excerpt"));
     }
-    return { remaining: Math.max(0, remaining), complete };
+    return { remaining: Math.max(0, remaining), complete, retryable: !complete && retryable };
+  }
+
+  private payloadContinuationFor(target: IndexEntry["target"]): PayloadContinuationRequest | undefined {
+    const continuation = this.input.payloadContinuation;
+    if (continuation === undefined || continuation.purpose !== "payload_expansion") return undefined;
+    if (target.kind !== "source_evidence" || continuation.target.kind !== "source_evidence") return undefined;
+    return sameSourceEvidenceTarget(target, continuation.target) ? continuation : undefined;
   }
 
   private hydrateSourceTarget(
     target: SourceEvidenceTarget,
     cacheKey: string,
     remaining: number
-  ): Readonly<{ readonly ok: boolean; readonly remaining: number }> {
+  ): Readonly<{ readonly ok: boolean; readonly remaining: number; readonly retryable: boolean }> {
     const reader = this.input.readers.sourceRoot;
     if (reader === undefined || remaining < 5 || this.remainingMemoryBytes < 1) {
-      return { ok: false, remaining };
+      return { ok: false, remaining, retryable: false };
     }
+    const continuation = this.payloadContinuationFor(target);
+    const offset = continuation?.start_offset ?? 0;
+    const byteLimit = hydrateByteLimit(continuation, this.remainingMemoryBytes);
     const page = reader({
       workspaceId: this.input.workspaceId,
       rootKind: target.root_kind,
@@ -111,21 +141,55 @@ export class BoundedIndexPayload {
       revision: target.source_version,
       digest: target.content_digest,
       evidenceObjectId: target.evidence_object_id,
-      byteLimit: Math.max(1, Math.min(65536, this.remainingMemoryBytes))
+      byteLimit,
+      offset
     });
     const nextRemaining = remaining - Math.max(1, page.rowsRead) - 2;
     this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead);
     if (page.row?.content === undefined || page.unavailable) {
-      return { ok: false, remaining: nextRemaining };
+      return { ok: false, remaining: nextRemaining, retryable: false };
     }
-    rememberPreview(
-      this.previews,
-      cacheKey,
-      undefined,
-      createContentPreview(page.row.content, "excerpt")
-    );
-    return { ok: true, remaining: nextRemaining };
+    const truncated = page.resourceLimited === true || page.row.content_complete === false;
+    if (page.row.content.length > 0) {
+      rememberPreview(
+        this.previews,
+        cacheKey,
+        undefined,
+        createContentPreview(page.row.content, "excerpt")
+      );
+      const metadata = sourceMetadataFrom(page.row);
+      if (metadata.dimension !== undefined || metadata.scope_class !== undefined
+        || metadata.evidence_refs !== undefined || metadata.staged_warnings !== undefined) {
+        rememberMetadata(this.sourceMetadata, cacheKey, undefined, metadata);
+      }
+    }
+    return { ok: !truncated, remaining: nextRemaining, retryable: truncated };
   }
+}
+
+function sameSourceEvidenceTarget(left: SourceEvidenceTarget, right: SourceEvidenceTarget): boolean {
+  return left.workspace_id === right.workspace_id
+    && left.root_kind === right.root_kind
+    && left.root_id === right.root_id
+    && left.source_version === right.source_version
+    && left.content_digest === right.content_digest
+    && left.evidence_object_id === right.evidence_object_id;
+}
+
+function hydrateByteLimit(
+  continuation: PayloadContinuationRequest | undefined,
+  remainingMemoryBytes: number
+): number {
+  const memoryCap = Math.max(1, Math.min(65536, remainingMemoryBytes));
+  if (continuation === undefined) return memoryCap;
+  if (continuation.byte_budget !== undefined) {
+    return Math.max(1, Math.min(continuation.byte_budget, memoryCap));
+  }
+  if (continuation.end_offset !== undefined) {
+    const start = continuation.start_offset ?? 0;
+    return Math.max(1, Math.min(continuation.end_offset - start, memoryCap));
+  }
+  return memoryCap;
 }
 
 function rememberPreview(

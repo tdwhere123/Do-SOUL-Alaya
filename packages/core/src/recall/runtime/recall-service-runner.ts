@@ -316,7 +316,10 @@ function projectFromField(
   let projectionProgress = resumeIndexProjection(state, snapshot);
   const payload = new BoundedIndexPayload({ sourceFacts: state.source_facts,
     previewCache: state.preview_cache, readers: input.readers, workspaceId: input.workspace_id,
-    remainingMemoryBytes: state.remaining_memory_bytes, manifestationFor });
+    remainingMemoryBytes: state.remaining_memory_bytes, manifestationFor,
+    ...(input.payload_continuation === undefined
+      ? {}
+      : { payloadContinuation: input.payload_continuation }) });
   let index = annotatePublicIndex(InformationIndexSchema.parse(projectAcceptingIndex({
     snapshot,
     view: interpretation.view,
@@ -350,8 +353,8 @@ function projectFromField(
     as_of: input.as_of,
     lifetime_now: input.lifetime_now,
     payload_work_per_entry: 5,
-    // Entry admission reserves every payload work unit; missing source or retained-memory capacity cannot improve by replaying the same page.
-    finalize_payload: (entries, allowance) => ({ ...payload.finalize(entries, allowance), retryable: false }),
+    // Truncated source chunks stay retryable so payload_continuation can fetch the next offset.
+    finalize_payload: (entries, allowance) => payload.finalize(entries, allowance),
     prior_continuation: input.continuation ?? null,
     observer: {
       outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: state.closure.observation },
@@ -432,8 +435,7 @@ export function encodeRecallResult(
       manifestation: governance === undefined || objectId === undefined ? "excerpt" as const
         : governanceManifestationFor(objectId, ceilings,
           governance.completeness === "complete" && !governance.temporal_uncertain),
-      dimension: metadata?.dimension ?? MemoryDimension.FACT,
-      scope_class: metadata?.scope_class ?? ScopeClass.PROJECT,
+      ...candidatePlaneAttributes(kind, metadata),
       origin_plane: "workspace_local" as const,
       selection_reason: `Associated at ${entry.association_milligrades} milligrades; claim ${entry.claim}.`,
       ...(metadata?.staged_warnings === undefined ? {} : {
@@ -456,6 +458,22 @@ export function encodeRecallResult(
     index: encodedIndex,
     provider_calls: 0,
     garden_enqueue: 0
+  };
+}
+
+function candidatePlaneAttributes(
+  kind: ReturnType<typeof indexEntryObjectKind>,
+  metadata: RecallSourceMetadata | undefined
+): Pick<RecallSourceMetadata, "dimension" | "scope_class"> {
+  if (kind === "source_evidence") {
+    return {
+      ...(metadata?.dimension === undefined ? {} : { dimension: metadata.dimension }),
+      ...(metadata?.scope_class === undefined ? {} : { scope_class: metadata.scope_class })
+    };
+  }
+  return {
+    dimension: metadata?.dimension ?? MemoryDimension.FACT,
+    scope_class: metadata?.scope_class ?? ScopeClass.PROJECT
   };
 }
 

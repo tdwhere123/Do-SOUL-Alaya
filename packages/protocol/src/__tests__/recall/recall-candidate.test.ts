@@ -159,4 +159,43 @@ describe("Recall candidate protocol schema", () => {
     );
     expect(withoutResolvedWeights.score_factors?.resolved_activation_weights).toBeUndefined();
   });
+
+  it("omits dimension and scope_class on source_evidence and requires them on memory_entry", () => {
+    const target = {
+      kind: "source_evidence" as const,
+      workspace_id: "ws",
+      root_kind: "source_record" as const,
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: `sha256:${"a".repeat(64)}`,
+      evidence_object_id: null
+    };
+    const source = RecallCandidateSchema.parse({
+      object_kind: "source_evidence",
+      target,
+      activation_score: 0.5,
+      relevance_score: 0.5,
+      content_preview: "quoted excerpt",
+      token_estimate: 4,
+      manifestation: "excerpt"
+    });
+    expect(source.dimension).toBeUndefined();
+    expect(source.scope_class).toBeUndefined();
+    expect(
+      RecallCandidateSchema.parse({
+        ...source,
+        dimension: MemoryDimension.EPISODE,
+        scope_class: ScopeClass.PROJECT
+      }).dimension
+    ).toBe(MemoryDimension.EPISODE);
+    expect(() => RecallCandidateSchema.parse({
+      object_id: "memory-1",
+      object_kind: "memory_entry",
+      activation_score: 0.5,
+      relevance_score: 0.5,
+      content_preview: "memory",
+      token_estimate: 1,
+      manifestation: "excerpt"
+    })).toThrow();
+  });
 });

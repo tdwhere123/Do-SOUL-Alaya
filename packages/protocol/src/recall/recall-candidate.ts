@@ -96,8 +96,10 @@ export const RecallCandidateSchema = z
     content_preview: NonEmptyStringSchema,
     token_estimate: NonNegativeIntSchema,
     manifestation: ManifestationStateSchema,
-    dimension: MemoryDimensionSchema,
-    scope_class: ScopeClassSchema,
+    // invariant: memory products require these; source_evidence omits them unless
+    // the source row actually carries them. Do not copy MemoryEntry defaults.
+    dimension: MemoryDimensionSchema.optional(),
+    scope_class: ScopeClassSchema.optional(),
     origin_plane: RecallOriginPlaneSchema.default("workspace_local"),
     is_advisory: z.boolean().optional(),
     selection_reason: BoundedReasonSchema.optional(),
@@ -139,6 +141,20 @@ export const RecallCandidateSchema = z
         code: "custom",
         path: ["object_id"],
         message: "non-source candidates require object_id"
+      });
+    }
+    if (value.dimension === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["dimension"],
+        message: "non-source candidates require dimension"
+      });
+    }
+    if (value.scope_class === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["scope_class"],
+        message: "non-source candidates require scope_class"
       });
     }
   })
