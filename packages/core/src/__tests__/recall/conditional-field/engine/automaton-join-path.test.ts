@@ -42,7 +42,9 @@ describe("automaton, compatible join, and composed path identity", () => {
         return { ids, nativeVisits: ids.length, nativeBytes: 1, rowsRead: ids.length, bytesRead: 1,
           truncated: remaining.length > ids.length, committedThrough: ids.at(-1) ?? afterObjectId };
       } } });
-    expect(state.closure.observation).toBe("exhausted");
+    // Mixed observe without sourceRoots leaves required source_domain unknown.
+    expect(state.closure.observation).toBe("unknown");
+    expect(state.residuals.some((region) => region.kind === "source_domain" && region.status === "unknown")).toBe(true);
     expect(new Set(state.seeds.map((seed) => productSubjectId(seed.state)))).toEqual(new Set(["seed", "middle"]));
     expect(acceptedIds(state)).toEqual(expect.arrayContaining(["seed", "middle"]));
   });
