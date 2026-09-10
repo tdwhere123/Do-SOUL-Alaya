@@ -9,11 +9,15 @@ interface TarjanState {
 
 export {
   solveMaxMinField,
+  extendMaxMinGraph,
+  type MaxMinPreparedGraph,
   type MaxMinInput,
   type MaxMinResult,
   type MaxMinTransition,
   type MaxMinWorkItem
 } from "./max-min-field.js";
+export { MaxMinWorkQueue } from "./max-min-work-queue.js";
+export { PersistentStringMap } from "./persistent-string-map.js";
 
 export {
   parseAbsoluteTemporalWindow

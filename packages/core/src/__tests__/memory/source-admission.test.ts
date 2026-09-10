@@ -114,6 +114,8 @@ describe("source admission", () => {
     expect(retainedSourceSpeaker(["system"])).toBe("system");
     expect(retainedSourceSpeaker(["user", "assistant"])).toBeUndefined();
     expect(retainedSourceSpeaker(["tool"])).toBeUndefined();
+    expect(retainedSourceSpeaker(["user", "tool"])).toBeUndefined();
+    expect(retainedSourceSpeaker(["assistant", "unknown"])).toBeUndefined();
     expect(retainedSourceSpeaker([])).toBeUndefined();
     const admitted = createPort().admit(request({ speaker: "user" }));
     expect(admitted.record.speaker).toBe("user");

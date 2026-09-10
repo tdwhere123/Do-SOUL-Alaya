@@ -20,6 +20,9 @@ function truncateExcerpt(value: string): string {
 export function buildDeliveredResults(
   results: readonly {
     readonly object_id: string;
+    readonly target?: import("@do-soul/alaya-protocol").RecallTargetRef;
+    readonly hypothesis_id?: string; readonly output_binding?: string;
+    readonly program_state?: string; readonly time_state?: string;
     readonly object_kind?: string | null;
     readonly relevance_score: number;
     readonly score_factors?: unknown;
@@ -27,6 +30,11 @@ export function buildDeliveredResults(
 ): readonly DiagnosticRecallResultInput[] {
   return results.slice(0, 10).map((pointer, index) => ({
     object_id: pointer.object_id,
+    ...(pointer.target === undefined ? {} : { target: pointer.target }),
+    hypothesis_id: pointer.hypothesis_id,
+    output_binding: pointer.output_binding,
+    program_state: pointer.program_state,
+    time_state: pointer.time_state,
     object_kind: pointer.object_kind,
     rank: index + 1,
     relevance_score: pointer.relevance_score,

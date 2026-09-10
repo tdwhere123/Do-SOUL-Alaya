@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  BOUNDED_DEFAULT_ARRAY_MAX,
   MILLIGRADE_BOTTOM,
   canonicalIndexEntryIdentity,
+  productStateKeyFromIndexEntry,
   productSubjectId,
   reachableMilligradesOf,
   type ClaimState,
@@ -27,8 +29,10 @@ import { compareText } from "../../../shared/compare-text.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import { composedFacetPathId, facetBelongsToOutput } from "../engine/path-composition.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../engine/output-derivations.js";
-import type { BoundSourceFacts } from "../engine/binding-environment.js";
-import { productStateNodeId } from "../reference/bind-max-min.js";
+import { productStateNodeId, productIndexOrderKey } from "../reference/bind-max-min.js";
+import { traceDerivationForest } from "../engine/derivation-provenance.js";
+import { ExplanationDelivery, type ProjectedPage } from "./explanation-delivery.js";
+import type { RetainedRows } from "../engine/retained-sequence.js";
 import {
   admitIndexBudget,
   completenessForInterpretationStatus,
@@ -55,12 +59,13 @@ export {
 
 export type AcceptingProjectionInput = Readonly<{
   readonly snapshot: FieldSnapshot;
+  readonly ordered_values?: Readonly<{ size: number; at(index: number): FieldValue | undefined }>;
   readonly view: QueryView;
   readonly query_id: string;
   readonly snapshot_id: string;
   readonly result_version: string;
   readonly budget: RequestBudget;
-  readonly roles?: ReadonlyMap<string, IndexRole>;
+  readonly roles?: Readonly<{ get(id: string): IndexRole | undefined }>;
   readonly claims?: ReadonlyMap<string, ClaimState>;
   readonly support?: readonly SupportRecord[];
   readonly page_offset?: number;
@@ -69,6 +74,9 @@ export type AcceptingProjectionInput = Readonly<{
   readonly delivered_product_ids?: ReadonlySet<string>;
   readonly delivered_entry_revisions?: Readonly<Record<string, string>>;
   readonly on_projection_progress?: (offset: number) => void;
+  readonly on_semantic_entries?: (entries: readonly IndexEntry[]) => void;
+  readonly explanation_progress?: ExplanationDelivery;
+  readonly on_explanation_progress?: (progress: ExplanationDelivery | undefined, retainedBytes: number, work: number) => void;
   readonly expires_at?: string;
   readonly as_of?: string;
   readonly lifetime_now?: string;
@@ -79,10 +87,15 @@ export type AcceptingProjectionInput = Readonly<{
   readonly interpretation_clock?: string;
   readonly model_id?: string;
   readonly derivations?: readonly Derivation[];
+  readonly derivation_forest?: ReadonlyMap<string, Derivation>;
+  readonly output_derivation_roots?: ReadonlyMap<string, readonly string[]>;
   readonly output_derivations?: Readonly<Record<string, readonly string[]>>;
-  readonly transition_derivations?: Readonly<Record<string, string>>;
-  readonly source_facts?: Readonly<Record<string, BoundSourceFacts>>;
+  readonly transition_derivations?: import("../engine/path-derivation.js").DerivationRootLookup;
   readonly grounding_progress?: GroundingProgress;
+  readonly grounding_transitions?: RetainedRows<FieldSnapshot["retained_transitions"][number]>;
+  readonly grounding_seeds?: RetainedRows<FieldSnapshot["seeds"][number]>;
+  readonly grounding_derivations?: RetainedRows<Derivation>;
+  readonly projection_facets?: RetainedRows<FacetVector>;
   readonly grounding_complete?: boolean;
   readonly remaining_memory_bytes?: number;
   readonly on_grounding_progress?: (progress: GroundingProgress, retainedBytes: number) => void;
@@ -103,7 +116,7 @@ export type AcceptingProjectionInput = Readonly<{
 
 const OFFSET_CURSOR = /^offset-(\d+)$/u;
 const RESUME_CURSOR = /^o(\d+)(?:\|(.*))?$/u;
-const PROJECTION_CURSOR = /^p(\d+)(?:g(\d+))?(?:r(\d+))?$/u;
+const PROJECTION_CURSOR = /^p(\d+)(?:g(\d+))?(?:r(\d+))?(?:e(\d+))?$/u;
 const REPRESENTATION_POLICY = "construct_index_then_page_then_payload" as const;
 const MAX_PAYLOAD_MEMORY_BYTES = 16_384;
 
@@ -131,7 +144,7 @@ export function projectAcceptingIndex(input: AcceptingProjectionInput): Informat
     || continuationPolicyMismatch(input)) {
     return closedIndex(epochInput, representation, invalidatedCompleteness());
   }
-  if ((input.view.enumeration_policy ?? "canonical") === "associative") {
+  if (input.ordered_values === undefined && (input.view.enumeration_policy ?? "canonical") === "associative") {
     assertAssociativeMilligradeContract(input.snapshot.values);
   }
   const admission = input.interpretation_status === undefined
@@ -169,7 +182,9 @@ function pageAcceptingIndex(
   input: AcceptingProjectionInput,
   representation: InformationIndex["representation"]
 ): InformationIndex {
-  if (input.transition_derivations !== undefined && input.output_derivations === undefined) {
+  if (input.explanation_progress !== undefined) return finalizeIndexPage(input, representation,
+    input.explanation_progress.page, input.remaining_reserve ?? input.budget.finalization_reserve, true);
+  if (input.transition_derivations !== undefined && input.output_derivations === undefined && input.output_derivation_roots === undefined) {
     const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
     const deliveryWork = 1 + (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1);
     // Preserve one delivery opportunity when grounding can still advance; smaller requests resume after grounding.
@@ -177,13 +192,14 @@ function pageAcceptingIndex(
     const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
     const payloadMemory = input.finalize_payload === undefined ? 0
       : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
-    const grounded = groundedOutputDerivations({ seeds: input.snapshot.seeds,
-      transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
-      transition_derivations: input.transition_derivations, source_facts: input.source_facts,
+    const grounded = groundedOutputDerivations({ seeds: input.grounding_seeds ?? input.snapshot.seeds,
+      transitions: input.grounding_transitions ?? input.snapshot.retained_transitions,
+      derivations: input.grounding_derivations ?? input.derivations ?? [],
+      transition_derivations: input.transition_derivations,
       progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
       allowance: groundingAllowance });
     input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
-    input = { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
+    input = { ...input, derivation_forest: grounded.progress.forest, output_derivation_roots: grounded.progress.root_map, grounding_progress: grounded.progress,
       grounding_complete: grounded.complete,
       ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
       remaining_reserve: allowance - grounded.work,
@@ -206,19 +222,75 @@ function pageAcceptingIndex(
   const offset = resolvePageOffset(input, entries.length);
   const page = entries.slice(offset, offset + input.budget.page_budget);
   const remaining = Math.max(projected.truncated ? 1 : 0, entries.length - offset - page.length);
-  const finalized = input.finalize_payload?.(page, projected.remaining);
+  return finalizeIndexPage(input, representation, { entries, page, offset, remaining,
+    next: projected.next, truncated: projected.truncated }, projected.remaining);
+}
+
+function finalizeIndexPage(input: AcceptingProjectionInput, representation: InformationIndex["representation"],
+  projected: ProjectedPage, allowance: number, proofOnly = false): InformationIndex {
+  const { entries, offset, remaining } = projected;
+  let page = proofOnly ? [] : projected.page;
+  let proofRemaining = allowance;
+  let explanations: readonly Derivation[];
+  let proofOmitted = false;
+  let proofOpen = false;
+  if (input.on_explanation_progress !== undefined && (input.explanation_progress !== undefined || input.derivation_forest !== undefined)) {
+    const cursor = input.explanation_progress ?? new ExplanationDelivery(projected, input.derivation_forest!);
+    const reserve = page.length * (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1);
+    const proof = cursor.advance(Math.max(0, allowance - reserve), input.remaining_memory_bytes ?? input.budget.memory_bytes);
+    proofRemaining -= proof.work;
+    if (!proof.complete && !proof.invalid && !proof.capacity_limited) {
+      input.on_explanation_progress(cursor, proof.bytes, proof.work);
+      input = { ...input, explanation_progress: cursor };
+      explanations = [];
+      proofOmitted = true;
+      proofOpen = true;
+    } else {
+      input.on_explanation_progress(undefined, proof.bytes - cursor.retainedBytes, proof.work);
+      explanations = proof.explanations;
+      proofOmitted = proof.invalid || proof.capacity_limited;
+      if (proofOmitted) page = page.map((entry) => ({ ...entry, explanation_ids: [] }));
+    }
+  } else if (input.derivation_forest !== undefined) {
+    const roots = page.flatMap((entry) => entry.explanation_ids);
+    // Traversal and serialization each pay their own node/edge visits.
+    const traced = traceDerivationForest({ forest: input.derivation_forest, roots,
+      maxVisits: Math.floor(Math.max(0, proofRemaining - page.length * (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1)) / 2) });
+    proofRemaining -= traced.work;
+    if (traced.complete && traced.traversal.nodes.size <= proofRemaining) {
+      explanations = [...traced.traversal.nodes.values()];
+      proofRemaining -= explanations.length;
+    } else {
+      explanations = [];
+      proofOmitted = roots.length > 0;
+      page = page.map((entry) => ({ ...entry, explanation_ids: [] }));
+    }
+  } else explanations = recoverExplanationForest(page.flatMap((entry) => entry.explanation_ids), input.derivations ?? []);
+  if (explanations.length > BOUNDED_DEFAULT_ARRAY_MAX) {
+    explanations = []; proofOmitted = true;
+    page = page.map((entry) => ({ ...entry, explanation_ids: [] }));
+  }
+  const proofUpdates = proofOnly && !proofOpen && !proofOmitted ? projected.page.flatMap((entry) =>
+    entry.explanation_ids.map((root) => ({ schema_version: 1 as const,
+      product: productStateKeyFromIndexEntry(entry), update_kind: "proof" as const,
+      revision: root, previous_revision: indexEntryRevision(entry) }))) : [];
+  if (proofUpdates.length > BOUNDED_DEFAULT_ARRAY_MAX) {
+    explanations = []; proofOmitted = true;
+  }
+  if (!proofOnly) input.on_semantic_entries?.(projected.page);
+  const finalized = input.finalize_payload?.(page, proofRemaining);
   const retryPayload = finalized !== undefined && !finalized.complete && finalized.retryable !== false;
   if (finalized !== undefined) input = { ...input, payload_work: finalized.complete ? "complete" : "open" };
-  input.on_remaining_reserve?.(finalized?.remaining ?? projected.remaining);
+  input.on_remaining_reserve?.(finalized?.remaining ?? proofRemaining);
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
-  const omittedPayload = mixedPayload || input.payload_work === "open"
-    || (expandPayload && omittedStructuredPayload(
+  const omittedPayload = mixedPayload || proofOmitted || input.payload_work === "open"
+    || (input.derivation_forest === undefined && input.explanation_progress === undefined && expandPayload && omittedStructuredPayload(
       input.support,
       input.derivations,
       input.budget.page_budget
     ));
-  const resourceOpen = projected.truncated || input.resource_work === "open";
+  const resourceOpen = projected.truncated || input.resource_work === "open" || proofOpen;
   const completeness = indexCompleteness(input, {
     total: entries.length + (input.delivered_product_ids?.size
       ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)),
@@ -235,18 +307,17 @@ function pageAcceptingIndex(
     snapshot_id: input.snapshot_id,
     result_version: input.result_version,
     entries: page,
-    explanations: recoverExplanationForest(page.flatMap((entry) => entry.explanation_ids), input.derivations ?? []),
+    explanations,
     completeness,
-    continuation: nextContinuation({ ...input, ...(resourceOpen || omittedPayload ? { resource_work: "open" } : {}) },
+    continuation: nextContinuation({ ...input, ...(resourceOpen || retryPayload ? { resource_work: "open" } : {}) },
       remaining, retryPayload ? offset : offset + page.length, entries,
       retryPayload ? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)
         : projected.truncated || input.delivered_product_ids !== undefined
           || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined),
     representation,
-    page_purpose: "membership",
-    order_status: remaining > 0 || resourceOpen || completeness.order_coverage !== "complete"
-      ? "open"
-      : "complete"
+    page_purpose: proofOnly ? "payload" : "membership",
+    ...(proofOnly && !proofOpen && !proofOmitted ? { product_updates: proofUpdates } : {}),
+    order_status: remaining > 0 || resourceOpen || completeness.order_coverage !== "complete" ? "open" : "complete"
   };
 }
 
@@ -274,18 +345,26 @@ function acceptingEntries(
   let groundingDeferred = false;
   const start = input.projection_scan_offset
     ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0);
-  const values = [...input.snapshot.values].sort((a, b) => compareText(valueSortKey(a), valueSortKey(b)));
+  const legacyValues = input.ordered_values === undefined
+    ? [...input.snapshot.values].sort((a, b) => compareText(valueSortKey(a), valueSortKey(b))) : undefined;
+  const values = input.ordered_values ?? { size: legacyValues!.length, at: (index: number) => legacyValues![index] };
   const payloadWork = input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1;
   const pageLimited = input.projection_scan_offset !== undefined || input.delivered_product_ids !== undefined
     || input.delivered_entry_revisions !== undefined || input.grounding_complete === false
     || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "")
-    || allowance < values.length * (1 + payloadWork);
-  const pageEnd = resolvePageOffset(input, values.length) + input.budget.page_budget;
+    || allowance < values.size * (1 + payloadWork);
+  const pageEnd = resolvePageOffset(input, values.size) + input.budget.page_budget;
   if (input.budget.page_budget === 0 && pageLimited) {
-    return { entries, truncated: start < values.length, next: start, remaining: allowance };
+    return { entries, truncated: start < values.size, next: start, remaining: allowance };
   }
   let next = start;
-  for (const value of values.slice(start)) {
+  for (let index = start; index < values.size; index += 1) {
+    // Retained outputs own their payload reserve; another candidate may need
+    // the same reserve, so admission precedes reading either candidate.
+    if (allowance < 1 + payloadWork * (entries.length + 1)) { truncated = true; break; }
+    allowance -= 1;
+    const value = values.at(index)!;
+    if ((input.view.enumeration_policy ?? "canonical") === "associative") assertAssociativeMilligradeContract([value]);
     if (input.delivered_entry_revisions === undefined && input.delivered_product_ids?.has(productStateNodeId(value.state))) { next += 1; continue; }
     const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, input);
     const entry = grounded ? indexEntryForValue(value, input) : null;
@@ -295,11 +374,10 @@ function acceptingEntries(
     }
     const payloadReserve = input.finalize_payload === undefined ? 0
       : (input.payload_work_per_entry ?? 1) * (entries.length + (value.accepting && grounded ? 1 : 0));
-    if (allowance < 1 + payloadReserve) {
+    if (allowance < payloadReserve) {
       truncated = true;
       break;
     }
-    allowance -= 1;
     if (!grounded) {
       groundingDeferred ||= value.accepting;
       if (value.accepting && input.delivered_product_ids === undefined) break;
@@ -308,22 +386,26 @@ function acceptingEntries(
     }
     if (entry !== null) entries.push(entry);
     next += 1;
-    if (pageLimited && entries.length >= pageEnd && next < values.length) { truncated = true; break; }
+    if (pageLimited && entries.length >= pageEnd && next < values.size) { truncated = true; break; }
   }
   return { entries, truncated: truncated || groundingDeferred, next, remaining: allowance };
 }
 
 export function indexEntryRevision(entry: IndexEntry): string {
-  return createHash("sha256").update(stableStringify(entry)).digest("hex");
+  const { target, ...membership } = entry;
+  const { span: _span, ...root } = target.kind === "source_evidence" ? target : { ...target, span: undefined };
+  return createHash("sha256").update(stableStringify({ ...membership, target: root })).digest("hex");
 }
 
 function groundedSeedAccepts(value: FieldValue, input: AcceptingProjectionInput): boolean {
   const key = productStateNodeId(value.state);
+  if (input.grounding_progress !== undefined) return (input.grounding_progress.grades.get(key) ?? -1) >= (value.milligrades ?? 0)
+    && input.grounding_progress.root_map.has(key);
   const roots = new Set(input.output_derivations?.[key] ?? []);
   return input.derivations?.some((root) => roots.has(root.derivation_id) && root.kind === "leaf"
       && root.observation_ids.includes(productSubjectId(value.state))
       && (root.association_milligrades ?? 0) >= (value.milligrades ?? 0)) === true
-    && input.snapshot.seeds.some((seed) => productStateNodeId(seed.state) === key
+    && (input.grounding_seeds ?? input.snapshot.seeds).some((seed) => productStateNodeId(seed.state) === key
       && seed.milligrades >= (value.milligrades ?? 0));
 }
 
@@ -368,6 +450,8 @@ function indexEntryForValue(
       value,
       support: input.support,
       derivations: input.derivations,
+      derivation_forest: input.derivation_forest,
+      output_derivation_roots: input.output_derivation_roots,
       output_derivations: input.output_derivations,
       page_budget: input.budget.page_budget,
       expand_payload: expandPayload
@@ -376,7 +460,7 @@ function indexEntryForValue(
 }
 
 function facetsAccept(value: FieldValue, input: AcceptingProjectionInput): boolean {
-  if (input.snapshot.facets.length === 0) return true;
+  if ((input.projection_facets ?? input.snapshot.facets).length === 0) return true;
   const vectors = facetsForCandidate(value, input);
   if (vectors.length === 0) return false;
   return evaluateFacetPredicate(
@@ -390,14 +474,15 @@ function facetsForCandidate(
   value: FieldValue,
   input: AcceptingProjectionInput
 ): readonly FacetVector[] {
-  const facets = input.snapshot.facets;
-  const seeds = input.snapshot.seeds.filter((seed) => productStateNodeId(seed.state) === productStateNodeId(value.state));
+  const facets = input.projection_facets ?? input.snapshot.facets;
+  const seeds = (input.grounding_seeds ?? input.snapshot.seeds).filter((seed) => productStateNodeId(seed.state) === productStateNodeId(value.state));
   return [...facets.filter((vector) => facetBelongsToOutput(vector.path_id, value.state)),
     ...seeds.map((seed) => ({ schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       path_id: composedFacetPathId(seed.state, "seed"), coordinates: [seed.milligrades] }))];
 }
 
 function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): FacetMode {
+  if (input.relation_facet_modes === undefined) return input.view.facet_mode;
   for (const transition of input.snapshot.retained_transitions) {
     if (productStateNodeId(transition.to) !== productStateNodeId(value.state)) continue;
     const override = input.relation_facet_modes?.get(transition.relation_kind);
@@ -425,19 +510,7 @@ function compareIndexEntries(
 }
 
 function valueSortKey(value: FieldValue): string {
-  return canonicalIndexEntryIdentity({
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    target: value.state.target,
-    ...(value.state.target.kind === "memory_entry" ? { object_id: value.state.target.object_id } : {}),
-    hypothesis_id: value.state.hypothesis_id,
-    output_binding: value.state.binding_context,
-    program_state: value.state.program_state,
-    time_state: value.state.time_state,
-    role: "associated",
-    association_milligrades: reachableMilligradesOf(value) ?? 0,
-    claim: "unknown",
-    explanation_ids: []
-  });
+  return productIndexOrderKey(value.state);
 }
 
 function entrySortKey(entry: IndexEntry): string {
@@ -504,6 +577,7 @@ function continuationPrefixUnverified(
 }
 
 function projectionPrefixIdentity(input: AcceptingProjectionInput, offset: number): string {
+  if (input.delivered_product_ids !== undefined) return `projection-${input.projection_generation ?? 0}-${offset}`;
   const prefix = [...input.snapshot.values].sort((a, b) => compareText(valueSortKey(a), valueSortKey(b)))
     .slice(0, offset).map((value) => stableStringify([value,
       input.roles?.get(productStateNodeId(value.state)) ?? "associated",
@@ -525,7 +599,8 @@ function nextContinuation(
   const cursor = projectionOffset === undefined
     ? encodeResumeCursor(nextOffset, entries.slice(0, nextOffset).map(entrySortKey))
     : `p${projectionOffset}g${input.grounding_progress?.completed_work ?? 0}`
-      + (input.projection_generation === undefined ? "" : `r${input.projection_generation}`);
+      + (input.projection_generation === undefined ? "" : `r${input.projection_generation}`)
+      + (input.explanation_progress === undefined ? "" : `e${input.explanation_progress.completedWork}`);
   if (cursor === null) return null;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

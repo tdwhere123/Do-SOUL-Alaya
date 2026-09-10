@@ -106,7 +106,7 @@ describe("bounded source-root pages", () => {
       source_version: row.source_version,
       content_digest: row.content_digest,
       evidence_object_id: null
-    }, 64);
+    }, 64, 0, 16384);
     expect(page.unavailable).toBe(false);
     expect(page.row?.content_complete).toBe(false);
     expect(page.row?.content_end).toBeGreaterThan(0);
@@ -121,7 +121,7 @@ describe("bounded source-root pages", () => {
       source_version: row.source_version,
       content_digest: row.content_digest,
       evidence_object_id: null
-    }, 64, 1);
+    }, 64, 1, 16384);
     expect(broken.unavailable).toBe(true);
     expect(broken.row).toBeNull();
   });
@@ -145,21 +145,28 @@ describe("bounded source-root pages", () => {
     const head = first.rows.find((candidate) => candidate.root_id === row.record_id);
     expect(head?.content_complete).toBe(false);
     expect(head?.content?.includes(needle)).toBe(false);
-    const continued = reader.page({
+    let rest = head;
+    while (rest !== undefined && !rest.content_complete) {
+      const offset = rest.content_end;
+      const continued = reader.page({
       workspaceId: "workspace-1",
       limit: 1,
       nativeLimit: 1,
       afterCursor: encodeContentCursor({
         kind: "source_record",
         rootId: row.record_id,
-        offset: head?.content_end ?? 65_536
+        offset
       }),
       byteLimit: 65_536
     });
-    const rest = continued.rows.find((candidate) => candidate.root_id === row.record_id);
+      rest = continued.rows.find((candidate) => candidate.root_id === row.record_id);
+      expect(rest?.content_start).toBe(offset);
+      expect(rest?.content_end).toBeGreaterThan(offset);
+      expect(continued.bytesRead).toBeLessThanOrEqual(4096);
+    }
     expect(rest?.content).toContain(needle);
     expect(rest?.content_complete).toBe(true);
-    expect(rest?.content_start).toBe(head?.content_end);
+    expect(rest?.content_end).toBe(Buffer.byteLength(body, "utf8"));
   });
 
   it("maps persisted scope_class and leaves omitted scope unset", () => {
@@ -262,7 +269,8 @@ describe("bounded source-root pages", () => {
       limit: 8,
       nativeLimit: 8,
       afterCursor: null,
-      byteLimit: 64
+      byteLimit: 64,
+      nativeByteLimit: 16384
     });
     const found = roots.rows.find((candidate) => candidate.root_id === row.record_id);
     expect(found?.original_complete).toBe(true);
@@ -270,7 +278,7 @@ describe("bounded source-root pages", () => {
     expect(found?.content_complete).toBe(false);
     expect(Buffer.byteLength(found?.content ?? "", "utf8")).toBeLessThanOrEqual(64);
     expect(roots.nativeBytes).toBeGreaterThan(0);
-    expect(roots.nativeBytes).toBeLessThanOrEqual(64);
+    expect(roots.nativeBytes).toBeLessThanOrEqual(4096);
     expect(roots.bytesRead).toBe(roots.nativeBytes);
 
     const page = reader.hydrate("workspace-1", {
@@ -281,12 +289,13 @@ describe("bounded source-root pages", () => {
       source_version: row.source_version,
       content_digest: row.content_digest,
       evidence_object_id: null
-    }, 64);
+    }, 64, 0, 16384);
     expect(page.unavailable).toBe(false);
     expect(page.resourceLimited).toBe(true);
     expect(page.row?.content_complete).toBe(false);
-    expect(page.bytesRead).toBeLessThanOrEqual(64);
-    expect(Buffer.byteLength(page.row?.content ?? "", "utf8")).toBe(page.bytesRead);
+    expect(page.bytesRead).toBeLessThanOrEqual(4096);
+    expect(Buffer.byteLength(page.row?.content ?? "", "utf8")).toBeLessThanOrEqual(page.bytesRead);
+    expect(Buffer.byteLength(page.row?.content ?? "", "utf8")).toBeLessThanOrEqual(64);
   });
 
   it("copies validity so an expired closed interval is distinct from an open one", () => {

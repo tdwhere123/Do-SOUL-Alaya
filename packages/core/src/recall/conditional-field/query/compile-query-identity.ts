@@ -46,6 +46,7 @@ export function identityFor(queryId: string | undefined, parts: QueryDenotationP
         : {
           original_query_digest: parts.interpretation_proposal.original_query_digest,
           producer_id: parts.interpretation_proposal.producer_id,
+          stored_cosine_admission: parts.interpretation_proposal.stored_cosine_admission ?? null,
           conditions: parts.interpretation_proposal.conditions ?? null,
           input_limits: parts.interpretation_proposal.input_limits ?? null,
           program: parts.interpretation_proposal.program ?? null,

@@ -6,6 +6,7 @@ import { toSourceObserverRow, type ObserverReaders } from "../../../../recall/co
 import { defaultBudget, INTERPRETATION_CLOCK, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 import { openSourceSlice, WS } from "../vertical/source-slice.js";
 import { indexEntryRevision } from "../../../../recall/conditional-field/index/project-accepting-index.js";
+import { traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 
 const databases = new Set<StorageDatabase>();
 afterEach(() => { for (const database of databases) database.close(); databases.clear(); });
@@ -46,7 +47,7 @@ describe("native lexical delivery at corpus scale", () => {
         expect(entry.claim).toBe("unknown");
         expect(entry.explanation_ids.length).toBeGreaterThan(0);
         expect(previews.get((entry.object_id ?? ""))).toContain("graduation degree");
-        expect(page.explanations?.some((root) => root.leaf_ids.includes((entry.object_id ?? "")))).toBe(true);
+        expect(page.explanations?.some((root) => root.kind === "leaf" && root.observation_ids.includes((entry.object_id ?? "")))).toBe(true);
       }
     }
   }, 30_000);
@@ -68,20 +69,24 @@ describe("native lexical delivery at corpus scale", () => {
     expect(cursors).not.toContain("p0g0");
   });
 
-  it.each(["reverse", "interleaved"])("delivers each product once when %s UUID order arrives across observation pages", async (order) => {
+  it.each(["reverse", "interleaved"].flatMap((order) => [
+    { order, count: 48, work: 120, reserve: 30, partial: false },
+    { order, count: 96, work: 240, reserve: 160, partial: true }
+  ]))("delivers $count products once in $order UUID order with unchanged allowance", async ({ order, count, work, reserve, partial }) => {
     const slice = await openSourceSlice((database) => databases.add(database));
-    const numbers = Array.from({ length: 48 }, (_, index) => order === "reverse" ? 47 - index
-      : index % 2 === 0 ? 47 - index / 2 : (index - 1) / 2);
+    const numbers = Array.from({ length: count }, (_, index) => order === "reverse" ? count - 1 - index
+      : index % 2 === 0 ? count - 1 - index / 2 : (index - 1) / 2);
     const ids = numbers.map((number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(40_000 + number).padStart(12, "0")}`);
     for (const id of ids) await slice.writeMemory(id, "graduation degree", MemoryDimension.FACT);
-    const pages = collectPages(readersFor(slice, []), defaultBudget({ work_units: 120,
-      finalization_reserve: 30, min_envelope: 1, page_budget: 3 }), 100);
+    const pages = collectPages(readersFor(slice, []), defaultBudget({ work_units: work,
+      finalization_reserve: reserve, min_envelope: 1, page_budget: 3 }), 100);
     const delivered = pages.flatMap((page) => page.entries.map((entry) => (entry.object_id ?? "")));
     expect(pages.at(-1)!.continuation).toBeNull();
-    expect(delivered).toHaveLength(ids.length);
+    expect(delivered, JSON.stringify(pages.map((page) => [page.entries.length, page.continuation?.cursor, page.completeness]))).toHaveLength(ids.length);
     expect([...delivered].sort()).toEqual([...ids].sort());
     expect(new Set(delivered).size).toBe(ids.length);
-    expect(pages.some((page) => page.entries.length > 0 && page.completeness.observed_coverage === "interrupted")).toBe(true);
+    if (partial) expect(pages.some((page) => page.entries.length > 0 && page.completeness.observed_coverage === "interrupted"),
+      JSON.stringify(pages.map((page) => [page.entries.length, page.completeness]))).toBe(true);
   });
 
   it("retains delivered identities when later relation pages discover earlier-sorting targets", async () => {
@@ -131,10 +136,18 @@ describe("native lexical delivery at corpus scale", () => {
     expect(new Set(delivered.map((entry) => (entry.object_id ?? ""))).size).toBe(delivered.length);
     expect(pages.at(-1)!.continuation).toBeNull();
     expect(pages.at(-1)!.completeness.logical_index).not.toBe("complete");
+    const forest = new Map(pages.flatMap((page) => (page.explanations ?? []).map((node) => [node.derivation_id, node] as const)));
+    let explained = 0;
     for (const page of pages) for (const entry of page.entries) {
       expect(entry.explanation_ids.length).toBeGreaterThan(0);
-      expect(page.explanations?.some((root) => root.leaf_ids.includes((entry.object_id ?? "")))).toBe(true);
+      const traced = traceDerivationForest({ forest, roots: entry.explanation_ids });
+      if (traced.complete) {
+        expect([...traced.traversal.nodes.values()].some((root) => root.kind === "leaf"
+          && root.observation_ids.includes(entry.object_id ?? ""))).toBe(true);
+        explained += 1;
+      } else expect(page.completeness.payload).not.toBe("complete");
     }
+    expect(explained).toBeGreaterThan(0);
   }, 30_000);
 });
 
@@ -144,6 +157,7 @@ function collectPages(readers: ObserverReaders, budget: RequestBudget, maximum: 
   let continuation: InformationIndex["continuation"] = null;
   for (let attempt = 0; attempt < maximum; attempt += 1) {
     const index = runConditionalFieldRecall({ workspace_id: WS, query_text: query, budget,
+      result_kind_view: "memory_only",
       snapshot_id: SNAPSHOT_ID, interpretation_clock: clock, as_of: clock,
       expires_at: "2099-01-01T00:00:00.000Z", readers, continuation });
     pages.push(index);

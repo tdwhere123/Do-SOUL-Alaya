@@ -57,11 +57,11 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     const slice = await openPlantedSlice();
     stamp(slice, MEM.l, LAST_WEEK_INSTANT);
     const mediated = await recallThroughHandler(slice, { query: "yesterday failed deployment", max_results: 800 });
-    expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(850);
+    expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(1000);
     expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.explanation_ids.length).toBeGreaterThan(0);
     slice.database.connection.prepare("DELETE FROM relation_assertion_evidence WHERE assertion_id = ?").run("assert-l-c");
     const direct = await recallThroughHandler(slice, { query: "yesterday failed deployment", max_results: 800 });
-    expect(direct.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(800);
+    expect(direct.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(1000);
     expect(direct.index.explanations?.some((node) => node.leaf_ids.includes("assert-r-c"))).toBe(true);
   });
 
@@ -102,13 +102,12 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       query: "yesterday failed deployment",
       max_results: 800
     });
-    expectCompleteBaseline(mcp.index);
+    expectMemoryBaselineWithUnknownSources(mcp.index);
     expect(assertTargetConsumer(toConsumer(mcp, "mcp"))).toEqual([]);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
-      .toBe(850);
+      .toBe(1000);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades)
-      .toBe(550);
-    expect(assertUnknownCauseAllowed(mcp.index)).toEqual([]);
+      .toBe(1000);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.claim).toBe("unknown");
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.claim_proposition?.kind).toBe("common_cause");
     expect(mcp.results.map((result) => result.object_id)).toEqual(
@@ -146,7 +145,8 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     const slice = await openPlantedSlice();
     const mcp = await recallThroughHandler(slice, {
       query: "yesterday failed deployment",
-      max_results: 800
+      max_results: 800,
+      result_kind_view: "memory_only"
     });
     expect(mcp.index.completeness.logical_index).toBe("complete");
     expect(mcp.index.entries.some((entry) => entry.object_id === MEM.h)).toBe(true);
@@ -173,7 +173,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       max_results: 800
     });
     expect(assertPartialTransport(pages[0]!)).toEqual([]);
-    expectCompleteBaseline(full.index);
+    expectMemoryBaselineWithUnknownSources(full.index);
     expect(assertPageContinuity(pages, full.index)).toEqual([]);
     expect(pages[0]?.snapshot_id).toBe(pages[1]?.snapshot_id);
     expect(pages[1]?.completeness.observed_coverage).not.toBe("invalidated");
@@ -249,7 +249,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       max_results: 800
     });
     expect(commands.index.completeness.logical_index).toBe("open");
-    expect(commands.index.completeness.observed_coverage).toBe("exhausted_empty");
+    expect(commands.index.completeness.observed_coverage).toBe("unknown");
     expect(commands.index.query_id).not.toBe(rules.index.query_id);
     const mixed = await recallThroughHandler(slice, {
       query: "pnpm workspace commands",
@@ -423,9 +423,10 @@ function completeBudgetService(service: RecallService) {
   };
 }
 
-function expectCompleteBaseline(index: InformationIndex): void {
-  expect(index.completeness).toMatchObject({ logical_index: "complete", observed_coverage: "complete",
-    transport: "complete", representation: "complete" });
+function expectMemoryBaselineWithUnknownSources(index: InformationIndex): void {
+  expect(index.completeness).toMatchObject({ logical_index: "open", observed_coverage: "unknown",
+    transport: "open", representation: "complete" });
+  expect(index.completeness.certificate_id).toBeUndefined();
   expect(index.continuation).toBeNull();
 }
 

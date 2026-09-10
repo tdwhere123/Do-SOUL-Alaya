@@ -209,9 +209,6 @@ export {
   SqliteFieldSourceRecordRepo,
   SqliteFieldSourceSpanRepo,
   SqliteSourceRootRecallReader,
-  chunkUtf8,
-  encodeContentCursor,
-  parseContentCursor,
   factorFromRow,
   generationFromRow,
   generationToRow,
@@ -366,6 +363,8 @@ export {
   type GlobalMemoryRecallCacheRepo,
   type GlobalMemoryRecallClassification
 } from "./repos/memory/index.js";
+export { readBoundedEmbeddingIds, readBoundedEmbeddings, readUniqueEmbeddingProfile
+} from "./repos/memory/reads/memory-embedding-bounded-read.js";
 export {
   SqliteMemoryEmbeddingRepo,
   type MemoryEmbeddingRecord,

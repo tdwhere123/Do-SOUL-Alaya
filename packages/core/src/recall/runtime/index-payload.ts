@@ -14,7 +14,7 @@ import {
   type SourceDeliveredSpan,
   type SourceEvidenceTarget
 } from "@do-soul/alaya-protocol";
-import type { BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
+import { sourceFactKey, type BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
 import type { ObserverReaders } from "../conditional-field/observers/observe.js";
 import { createContentPreview } from "./recall-service-helpers.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
@@ -26,7 +26,7 @@ export class BoundedIndexPayload {
   private readonly deliveredSpans = new Map<string, SourceDeliveredSpan>();
 
   public constructor(private readonly input: Readonly<{
-    readonly sourceFacts?: Readonly<Record<string, BoundSourceFacts>>;
+    readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly previewCache?: Readonly<Record<string, string>>;
     readonly readers: ObserverReaders;
     readonly workspaceId: string;
@@ -49,7 +49,6 @@ export class BoundedIndexPayload {
     for (const entry of entries) {
       const cacheKey = indexEntryCacheKey(entry);
       const objectId = indexMemoryObjectId(entry);
-      const subjectId = indexEntrySubjectId(entry);
       if (entry.target.kind === "memory_entry" && objectId !== undefined && !this.previews.has(cacheKey)) {
         this.previews.delete(objectId);
       }
@@ -65,8 +64,7 @@ export class BoundedIndexPayload {
         rememberPreview(this.previews, cacheKey, objectId, preview);
         continue;
       }
-      const facts = this.input.sourceFacts?.[subjectId]
-        ?? (objectId === undefined ? undefined : this.input.sourceFacts?.[objectId]);
+      const facts = this.input.sourceFacts?.get(sourceFactKey(entry.target));
       const factsMatchEntry = observedMemoryRevisionMatches(entry, facts?.source_revision);
       if (this.sourceMetadata[cacheKey] === undefined && facts !== undefined && factsMatchEntry) {
         const metadata = sourceMetadataFrom(facts);
@@ -90,7 +88,7 @@ export class BoundedIndexPayload {
       }
       const retainedContent = factsMatchEntry
         ? (facts?.content
-          ?? (objectId === undefined ? undefined : this.input.sourceFacts?.[objectId]?.content))
+          ?? (objectId === undefined ? undefined : this.input.sourceFacts?.get(objectId)?.content))
         : undefined;
       if (retainedContent !== undefined && entry.target.kind !== "source_evidence") {
         const preview = createContentPreview(retainedContent, "excerpt");
@@ -159,9 +157,9 @@ export class BoundedIndexPayload {
     }
     const continuation = this.payloadContinuationFor(target);
     const offset = continuation?.start_offset ?? 0;
-    const byteLimit = hydrateByteLimit(continuation, this.remainingMemoryBytes);
+    const byteLimit = hydrateByteLimit(continuation, this.remainingMemoryBytes, this.input.readers.sourceRootMetadataByteLimit ?? 0);
     if (byteLimit < 1) {
-      return { ok: false, remaining, retryable: false };
+      return { ok: false, remaining, retryable: continuation?.byte_budget !== 0 };
     }
     const page = reader({
       workspaceId: this.input.workspaceId,
@@ -171,21 +169,22 @@ export class BoundedIndexPayload {
       digest: target.content_digest,
       evidenceObjectId: target.evidence_object_id,
       byteLimit,
+      nativeByteLimit: this.remainingMemoryBytes,
       offset
     });
-    const nextRemaining = remaining - Math.max(1, page.rowsRead) - 2;
-    this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead);
+    const nextRemaining = remaining - Math.max(1, page.nativeWork ?? page.rowsRead) - 2;
+    this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead - (page.metadataBytes ?? 0));
     if (page.row?.content === undefined || page.unavailable) {
-      return { ok: false, remaining: nextRemaining, retryable: false };
+      return { ok: false, remaining: nextRemaining, retryable: page.resourceLimited === true };
     }
     const truncated = page.resourceLimited === true || page.row.content_complete === false;
     this.deliveredSpans.set(sourceEvidenceRootKey(target), deliveredSpanFromHydrate(page.row, offset, !truncated));
-    if (page.row.content.length > 0) {
+    {
       rememberPreview(
         this.previews,
         cacheKey,
         undefined,
-        createContentPreview(page.row.content, "excerpt")
+        page.row.content
       );
       const metadata = sourceMetadataFrom(page.row);
       if (metadata.dimension !== undefined || metadata.scope_class !== undefined
@@ -224,20 +223,14 @@ export class BoundedIndexPayload {
 
 function hydrateByteLimit(
   continuation: PayloadContinuationRequest | undefined,
-  remainingMemoryBytes: number
+  remainingMemoryBytes: number,
+  metadataReserve: number
 ): number {
-  const memoryCap = Math.max(1, Math.min(65536, remainingMemoryBytes));
+  const memoryCap = Math.max(0, Math.min(65536, remainingMemoryBytes - metadataReserve));
   if (continuation === undefined) return memoryCap;
-  if (continuation.byte_budget !== undefined) {
-    // Storage bounded reads reject byteLimit < 1; 0 is a no-op, not a 1-byte coerce.
-    if (continuation.byte_budget < 1) return 0;
-    return Math.max(1, Math.min(continuation.byte_budget, memoryCap));
-  }
-  if (continuation.end_offset !== undefined) {
-    const start = continuation.start_offset ?? 0;
-    return Math.max(1, Math.min(continuation.end_offset - start, memoryCap));
-  }
-  return memoryCap;
+  const spanCap = continuation.end_offset === undefined ? memoryCap
+    : continuation.end_offset - (continuation.start_offset ?? 0);
+  return Math.max(0, Math.min(continuation.byte_budget ?? memoryCap, spanCap, memoryCap));
 }
 
 function rememberPreview(
@@ -318,7 +311,7 @@ function deliveredSpanFromHydrate(
 ): SourceDeliveredSpan {
   const start = nonNegativeInt(row.content_start) ?? offset;
   const contentEnd = start + Buffer.byteLength(row.content ?? "", "utf8");
-  const end = Math.max(nonNegativeInt(row.content_end) ?? contentEnd, start);
+  const end = contentEnd;
   const originalComplete = row.original_complete ?? true;
   return {
     content_start: start,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { localLeafIds, traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   productSubjectId,
@@ -48,7 +49,8 @@ describe("equal-score AND/OR withdrawal", () => {
     const afterOr = withdrawDerivation(forest, orLeft.derivation_id, "c");
     const afterAnd = withdrawDerivation(forest, andRight.derivation_id, "c");
     expect(afterOr?.kind).toBe("and");
-    expect(afterOr?.leaf_ids).toEqual(["a", "b"]);
+    expect([...localLeafIds(traceDerivationForest({ forest: derivationForest([a, b, afterOr!]),
+      roots: [afterOr!.derivation_id] }).traversal)].sort()).toEqual(["a", "b"]);
     expect(afterAnd).toBeUndefined();
     expect(evaluateDerivation(derivationForest([a, b, andAb, afterOr as Derivation]), afterOr!.derivation_id, grades))
       .toBe(800);

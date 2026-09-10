@@ -1,5 +1,6 @@
 import { sourceRecallTarget, type TypedObservation } from "@do-soul/alaya-protocol";
 import { buildTypedObservation, sourceRootEligible } from "./observation-admission.js";
+import { scanSourceLiterals } from "./source-literal-stream.js";
 import {
   collectObserved,
   DEFAULT_SOURCE_BYTE_LIMIT,
@@ -24,6 +25,7 @@ export function observeSourceAwareSeed(
   }
   const cursor = parseSeedCursor(input.cursor.committed_through);
   const observations: TypedObservation[] = [];
+  const sourceRows: SourceRootObserverRow[] = [];
   let workUnits = 0;
   let bytes = 0;
   let truncated = false;
@@ -40,6 +42,7 @@ export function observeSourceAwareSeed(
     );
     pagedSources = true;
     observations.push(...sourced.observations);
+    sourceRows.push(...sourced.rows);
     workUnits += sourced.workUnits;
     bytes += sourced.bytes;
     sourcesTruncated = sourced.sourcesTruncated;
@@ -66,10 +69,11 @@ export function observeSourceAwareSeed(
   }
   if (!cursor.sourcesDone && !pagedSources && memoryIdle) {
     const sourced = takeSourcePage(
-      input, sourceRoots, pageLimit(input), input.action.work_limit, sourceCommitted, cursor.source
+      input, sourceRoots, pageLimit(input), Math.max(0, input.action.work_limit - workUnits), sourceCommitted, cursor.source
     );
     pagedSources = true;
     observations.push(...sourced.observations);
+    sourceRows.push(...sourced.rows);
     workUnits += sourced.workUnits;
     bytes += sourced.bytes;
     sourcesTruncated = sourced.sourcesTruncated;
@@ -90,7 +94,7 @@ export function observeSourceAwareSeed(
   const cursorOut = committed === null
     ? input.cursor
     : { ...input.cursor, position: committed, committed_through: committed };
-  return finish({
+  return { ...finish({
     input,
     cursor: cursorOut,
     observations,
@@ -103,7 +107,7 @@ export function observeSourceAwareSeed(
         ? { status: "interrupted" as const }
         : {}),
     work: workReceipt(workUnits, workUnits, bytes, truncated || hydrationUnavailable || resourceLimited)
-  });
+  }), source_roots: sourceRows };
 }
 
 function takeSourcePage(
@@ -115,6 +119,7 @@ function takeSourcePage(
   pinCursor: string | null
 ): Readonly<{
   readonly observations: readonly TypedObservation[];
+  readonly rows: readonly SourceRootObserverRow[];
   readonly workUnits: number;
   readonly bytes: number;
   readonly truncated: boolean;
@@ -128,16 +133,37 @@ function takeSourcePage(
     query: input.seed_query,
     limit,
     nativeLimit,
+    workLimit: nativeLimit,
     afterCursor,
     byteLimit: input.source_byte_limit ?? DEFAULT_SOURCE_BYTE_LIMIT
   });
   const observations: TypedObservation[] = [];
+  const rows: SourceRootObserverRow[] = [];
   let truncated = page.truncated;
   let sourcesTruncated = page.truncated;
   let sourceCommitted = page.committedThrough ?? afterCursor;
-  let resourceLimited = false;
-  for (const row of page.rows) {
-    if (!sourceRootEligible(input, row)) continue;
+  let resourceLimited = page.resourceLimited === true || page.rows.length === 0 && page.truncated && page.committedThrough === afterCursor;
+  for (const nativeRow of page.rows) {
+    if (!sourceRootEligible(input, nativeRow)) continue;
+    const scanned = scanSourceLiterals(input.query, nativeRow, pinCursor, sourceCommitted);
+    if (scanned.limited) {
+      observations.length = 0;
+      rows.length = 0;
+      sourceCommitted = pinCursor;
+      truncated = true;
+      sourcesTruncated = true;
+      resourceLimited = true;
+      break;
+    }
+    const row = scanned.row;
+    rows.push(row);
+    sourceCommitted = scanned.cursor;
+    if (scanned.needsContent) {
+      resourceLimited = true;
+      truncated = true;
+      sourcesTruncated = true;
+      sourceCommitted = scanned.cursor;
+    }
     const observation = buildTypedObservation(input, {
       objectId: row.root_id,
       sourceRevision: row.revision,
@@ -155,19 +181,13 @@ function takeSourcePage(
       })
     });
     if (observation === null) continue;
-    if (row.content_complete === false && observation.applicability.verdict === "unresolved") {
-      resourceLimited = true;
-      truncated = true;
-      sourcesTruncated = true;
-      sourceCommitted = encodeContentCursor(row, nextContentOffset(pinCursor, row));
-    }
     observations.push(observation);
-    if (sourceCommitted !== null && sourceCommitted.startsWith("o:")) break;
   }
   return {
     observations,
-    workUnits: page.nativeVisits,
-    bytes: page.bytesRead,
+    rows,
+    workUnits: page.nativeWork ?? page.nativeVisits,
+    bytes: page.bytesRead + (page.metadataBytes ?? 0),
     truncated,
     sourcesTruncated,
     sourceCommitted,
@@ -325,24 +345,4 @@ function encodeSeedCursor(input: Readonly<{
     memory: input.memory,
     sourcesDone: false
   })}`;
-}
-
-function encodeContentCursor(row: SourceRootObserverRow, offset: number): string {
-  return `o:${row.kind}\t${row.root_id}\t${offset}`;
-}
-
-function nextContentOffset(sourceCommitted: string | null, row: SourceRootObserverRow): number {
-  const prior = parseContentOffset(sourceCommitted, row.root_id);
-  return prior + Buffer.byteLength(row.content ?? "", "utf8");
-}
-
-function parseContentOffset(cursor: string | null, rootId: string): number {
-  if (cursor === null || !cursor.startsWith("o:")) return 0;
-  const payload = cursor.slice(2);
-  const first = payload.indexOf("\t");
-  const second = first < 0 ? -1 : payload.indexOf("\t", first + 1);
-  if (first <= 0 || second <= first) return 0;
-  if (payload.slice(first + 1, second) !== rootId) return 0;
-  const offset = Number(payload.slice(second + 1));
-  return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
 }

@@ -20,7 +20,7 @@ describe("observeField program-state stepping", () => {
     expect(grade(epsilon, "end", "accepting")).toBe(0);
 
     const empty = observeField(interpretation({ schema_version: 1, kind: "empty" }), input());
-    expect(empty.seeds).toEqual([]);
+    expect(empty.seeds).toHaveLength(0);
     expect(grade(empty, "seed", "accepting")).toBe(0);
 
     const sequenced = observeField(interpretation({

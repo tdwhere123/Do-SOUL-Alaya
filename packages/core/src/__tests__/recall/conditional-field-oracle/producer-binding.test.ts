@@ -83,7 +83,9 @@ describe("conditional-field compiler and projection contracts", () => {
       readers: sharedProviderWorld()
     });
     const values = field.binding.kind === "bound" ? field.binding.snapshot.values : [];
-    expect(field.closure.observation).toBe("exhausted");
+    expect(field.closure.observation).toBe("unknown");
+    expect(field.residuals.find((row) => row.kind === "seed")?.status).toBe("exhausted");
+    expect(field.residuals.find((row) => row.kind === "source_domain")?.status).toBe("unknown");
     const historyA = values.filter((row) => productSubjectId(row.state) === "history-a");
     const historyB = values.filter((row) => productSubjectId(row.state) === "history-b");
     expect(historyA.some((row) => row.state.binding_context.includes(`${SERVICE_VARIABLE}=service-a`))).toBe(true);

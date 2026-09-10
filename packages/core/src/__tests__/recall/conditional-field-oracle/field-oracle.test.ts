@@ -150,7 +150,7 @@ describe("conditional-field independent field oracle", () => {
     expect(milligradeOf(cyclic, "c")).toBe(800);
     const slice = await openBoundSlice((database) => databases.add(database));
     const ports = await plantBoundSlice(slice);
-    const producer = compareProducerField(ports, world, defaultBudget(), DEPLOYMENT_MILLIGRADES);
+    const producer = compareProducerField(ports, world, defaultBudget(), { r: 1000, l: 1000, c: 1000, s: 1000, h: 1000, u: 0 });
     expect(producer.skipped_environments).toBe(0);
     expect(producer.mismatches).toBe(0);
   });

@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
 import {
-  SHA256_DIGEST_PATTERN,
-  type EvidenceCapsule,
   type SourceEvidenceTarget
 } from "@do-soul/alaya-protocol";
+import type { BoundedCapsuleSource, BoundedCapsuleSourceReader } from "../capsules/reads/bounded-capsule-source-reader.js";
 import {
   encodeCapsuleCursor,
   parseCapsuleCursor,
@@ -13,13 +11,14 @@ import {
   encodeRecordCursor,
   parseRecordCursor,
   SqliteFieldSourceRecordRepo,
+  trimUtf8Prefix,
   type BoundedSourceRecordRead
 } from "./source-repo.js";
 import type { FieldSourceRecordRow } from "./ports.js";
+import { RETAINED_SOURCE_READ_RESERVATION } from "./retained-source-chunks.js";
 
 const PAGE_MAX = 512;
 const DEFAULT_BYTE_LIMIT = 65_536;
-const SHA256_PREFIX = "sha256:";
 
 export type SourceRootKind = "source_record" | "evidence_capsule";
 
@@ -50,15 +49,20 @@ export type SourceRootPage = Readonly<{
   readonly nativeBytes: number;
   readonly rowsRead: number;
   readonly bytesRead: number;
+  readonly metadataBytes?: number;
+  readonly nativeWork?: number;
   readonly truncated: boolean;
   readonly committedThrough: string | null;
   readonly unavailable: boolean;
+  readonly resourceLimited?: boolean;
 }>;
 
 export type SourceRootHydratePage = Readonly<{
   readonly row: SourceRootRow | null;
   readonly rowsRead: number;
   readonly bytesRead: number;
+  readonly metadataBytes?: number;
+  readonly nativeWork?: number;
   readonly unavailable: boolean;
   readonly resourceLimited?: boolean;
 }>;
@@ -68,20 +72,23 @@ export type SourceRootPageInput = Readonly<{
   readonly query?: string;
   readonly limit: number;
   readonly nativeLimit: number;
+  readonly workLimit?: number;
   readonly afterCursor: string | null;
   readonly byteLimit?: number;
+  /** Total physical chunk and metadata allowance; logical byteLimit only clips exposed content. */
+  readonly nativeByteLimit?: number;
 }>;
 
 export class SqliteSourceRootRecallReader {
   private readonly records: SqliteFieldSourceRecordRepo;
-  private readonly capsules: SqliteEvidenceCapsuleRepo;
+  private readonly boundedCapsules: BoundedCapsuleSourceReader;
 
   public constructor(
     records: SqliteFieldSourceRecordRepo,
     capsules: SqliteEvidenceCapsuleRepo
   ) {
     this.records = records;
-    this.capsules = capsules;
+    this.boundedCapsules = capsules.boundedSourceReader();
   }
 
   public page(input: SourceRootPageInput): SourceRootPage {
@@ -94,15 +101,21 @@ export class SqliteSourceRootRecallReader {
       throw new Error("invalid source-root page limit");
     }
     const byteLimit = input.byteLimit ?? DEFAULT_BYTE_LIMIT;
+    const nativeByteLimit = input.nativeByteLimit ?? byteLimit;
     if (!Number.isSafeInteger(byteLimit) || byteLimit < 1 || byteLimit > DEFAULT_BYTE_LIMIT) {
       throw new Error("invalid source-root byte limit");
     }
     if (limit === 0) {
       return emptyPage(true, input.afterCursor);
     }
+    if (!Number.isSafeInteger(nativeByteLimit) || nativeByteLimit < 0) throw new Error("invalid source-root native byte limit");
+    if (nativeByteLimit < RETAINED_SOURCE_READ_RESERVATION) {
+      return { ...emptyPage(true, input.afterCursor), resourceLimited: true };
+    }
     const after = input.afterCursor;
     const pinned = parseContentCursor(after);
     if (pinned !== null) {
+      if ((input.workLimit ?? Infinity) < 5) return emptyPage(true, after);
       return this.pageFromContentCursor(input.workspaceId, pinned, limit, byteLimit);
     }
     const family = parseFamilyCursor(after) ?? (
@@ -116,27 +129,33 @@ export class SqliteSourceRootRecallReader {
         : null
     );
     if (family !== null) {
-      return this.pageFamilies(input.workspaceId, family, limit, byteLimit);
+      return this.pageFamilies(input.workspaceId, family, limit, byteLimit, input.workLimit, nativeByteLimit);
     }
     if (after !== null && after.startsWith("c:")) {
-      return this.pageCapsules(input.workspaceId, after, limit, byteLimit);
+      return this.pageFamilies(input.workspaceId, { recordsAfter: null, capsulesAfter: after,
+        recordsDone: true, capsulesDone: false }, limit, byteLimit, input.workLimit, nativeByteLimit);
     }
-    return this.pageCapsules(input.workspaceId, null, limit, byteLimit);
+    return this.pageFamilies(input.workspaceId, { recordsAfter: null, capsulesAfter: null,
+      recordsDone: true, capsulesDone: false }, limit, byteLimit, input.workLimit, nativeByteLimit);
   }
 
   public load(
     workspaceId: string,
     target: SourceEvidenceTarget
   ): SourceRootHydratePage {
-    return this.read(workspaceId, target, DEFAULT_BYTE_LIMIT, 0, true);
+    return this.read(workspaceId, target, DEFAULT_BYTE_LIMIT, 0);
   }
 
   public hydrate(
     workspaceId: string,
     target: SourceEvidenceTarget,
     byteLimit = DEFAULT_BYTE_LIMIT,
-    offset = 0
+    offset = 0,
+    nativeByteLimit = byteLimit
   ): SourceRootHydratePage {
+    if (!Number.isSafeInteger(nativeByteLimit) || nativeByteLimit < 0) throw new Error("invalid source-root native byte limit");
+    if (nativeByteLimit < RETAINED_SOURCE_READ_RESERVATION) return {
+      row: null, rowsRead: 0, bytesRead: 0, unavailable: false, resourceLimited: true };
     return this.read(workspaceId, target, byteLimit, offset);
   }
 
@@ -144,57 +163,40 @@ export class SqliteSourceRootRecallReader {
     workspaceId: string,
     target: SourceEvidenceTarget,
     byteLimit: number,
-    offset: number,
-    unbounded = false
+    offset: number
   ): SourceRootHydratePage {
-    if (!unbounded && (
+    if (
       !Number.isSafeInteger(byteLimit) || byteLimit < 1 || byteLimit > DEFAULT_BYTE_LIMIT
-    )) {
+    ) {
       throw new Error("invalid source-root byte limit");
     }
     if (target.workspace_id !== workspaceId) {
       return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
     }
     if (target.root_kind === "source_record") {
-      if (unbounded) {
-        const row = this.records.findById(workspaceId, target.root_id);
-        if (row === null) {
-          return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
-        }
-        const mapped = mapRecord(
-          row,
-          row.source_body !== null ? Math.max(1, Buffer.byteLength(row.source_body, "utf8")) : byteLimit,
-          0
-        );
-        return hydrateMapped(mapped, target, row.source_body === null ? 0 : Buffer.byteLength(row.record_id, "utf8"));
-      }
       const bounded = this.records.findByIdBounded(workspaceId, target.root_id, byteLimit, offset);
       if (bounded === null) {
         return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
       }
       const mapped = mapBoundedRecord(bounded, offset);
-      return hydrateMapped(mapped, target, bounded.prefixBytes);
+      return { ...hydrateMapped(mapped, target, bounded.nativeBytes), metadataBytes: bounded.metadataBytes,
+        nativeWork: 5 };
     }
-    const capsule = this.capsules.getById(target.root_id);
-    if (capsule === null || capsule.workspace_id !== workspaceId) {
+    const capsule = this.boundedCapsules.read(workspaceId, target.root_id, byteLimit, offset);
+    if (capsule === null) {
       return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
     }
-    if (capsule.lifecycle_state !== "active") {
-      return { row: null, rowsRead: 1, bytesRead: 0, unavailable: true };
-    }
-    const body = capsule.excerpt ?? capsule.gist;
-    const mapped = mapCapsule(
-      capsule,
-      unbounded ? Math.max(1, Buffer.byteLength(body, "utf8")) : byteLimit,
-      unbounded ? 0 : offset
-    );
+    const mapped = mapBoundedCapsule(capsule, byteLimit, offset);
     if (mapped === null || !sameSourceIdentity(mapped, target)) {
-      return { row: null, rowsRead: 1, bytesRead: 0, unavailable: true };
+      return { row: null, rowsRead: 1, bytesRead: capsule.nativeBytes,
+        metadataBytes: capsuleMetadataBytes(capsule), nativeWork: 2, unavailable: true };
     }
     return {
       row: mapped,
       rowsRead: 1,
-      bytesRead: hydrateBytes(mapped),
+      bytesRead: capsule.nativeBytes,
+      metadataBytes: capsuleMetadataBytes(capsule),
+      nativeWork: 2,
       unavailable: false,
       ...(mapped.content_complete ? {} : { resourceLimited: true })
     };
@@ -207,18 +209,10 @@ export class SqliteSourceRootRecallReader {
     byteLimit: number
   ): SourceRootPage {
     const continued = this.readPinnedChunk(workspaceId, pin, byteLimit);
-    if (continued === null) {
-      return pin.kind === "source_record"
-        ? this.pageAfterRecord(workspaceId, pin.rootId, limit, byteLimit)
-        : this.pageCapsules(workspaceId, null, limit, byteLimit);
-    }
-    if (limit === 1) {
-      return { ...continued.page, truncated: true };
-    }
-    const rest = pin.kind === "source_record"
-      ? this.pageAfterCollection(workspaceId, continued.collectionCursor, limit - 1, byteLimit)
-      : this.pageCapsules(workspaceId, continued.collectionCursor, limit - 1, byteLimit);
-    return mergePages(continued.page, rest);
+    void limit;
+    if (continued === null) return { ...emptyPage(true, encodeContentCursor(pin)), unavailable: true };
+    return { ...continued.page, truncated: true,
+      committedThrough: pin.afterCursor ?? continued.collectionCursor };
   }
 
   private readPinnedChunk(
@@ -231,108 +225,60 @@ export class SqliteSourceRootRecallReader {
   }> | null {
     if (pin.kind === "source_record") {
       const bounded = this.records.findByIdBounded(workspaceId, pin.rootId, byteLimit, pin.offset);
-      if (bounded === null) return null;
+      if (bounded === null || bounded.record === null) return null;
       const mapped = mapBoundedRecord(bounded, pin.offset);
       if (mapped === null) return null;
       const collectionCursor = encodeRecordCursor({
         afterRecordedAt: bounded.record.recorded_at,
         afterRecordId: bounded.record.record_id
       });
-      return { page: singleRowPage(mapped, bounded.prefixBytes, collectionCursor), collectionCursor };
+      return { page: { ...singleRowPage(mapped, bounded.nativeBytes, collectionCursor), metadataBytes: bounded.metadataBytes,
+        nativeWork: 5 }, collectionCursor };
     }
-    const capsule = this.capsules.getById(pin.rootId);
-    if (capsule === null || capsule.workspace_id !== workspaceId || capsule.lifecycle_state !== "active") {
+    const capsule = this.boundedCapsules.read(workspaceId, pin.rootId, byteLimit, pin.offset);
+    if (capsule === null) {
       return null;
     }
-    const mapped = mapCapsule(capsule, byteLimit, pin.offset);
+    const mapped = mapBoundedCapsule(capsule, byteLimit, pin.offset);
     if (mapped === null) return null;
     const collectionCursor = encodeCapsuleCursor({
       afterCreatedAt: capsule.created_at,
       afterObjectId: capsule.object_id
     });
     return {
-      page: singleRowPage(mapped, Buffer.byteLength(mapped.content ?? "", "utf8"), collectionCursor),
+      page: { ...singleRowPage(mapped, capsule.nativeBytes, collectionCursor),
+        metadataBytes: capsuleMetadataBytes(capsule), nativeWork: 2 },
       collectionCursor
     };
-  }
-
-  private pageAfterRecord(
-    workspaceId: string,
-    recordId: string,
-    limit: number,
-    byteLimit: number
-  ): SourceRootPage {
-    const row = this.records.findById(workspaceId, recordId);
-    if (row === null) {
-      return this.pageCapsules(workspaceId, null, limit, byteLimit);
-    }
-    return this.pageAfterCollection(
-      workspaceId,
-      encodeRecordCursor({ afterRecordedAt: row.recorded_at, afterRecordId: row.record_id }),
-      limit,
-      byteLimit
-    );
-  }
-
-  private pageAfterCollection(
-    workspaceId: string,
-    after: string | null,
-    limit: number,
-    byteLimit: number
-  ): SourceRootPage {
-    return this.pageFamilies(workspaceId, {
-      recordsAfter: after,
-      capsulesAfter: null,
-      recordsDone: false,
-      capsulesDone: false
-    }, limit, byteLimit);
   }
 
   private pageFamilies(
     workspaceId: string,
     family: FamilyCursor,
     limit: number,
-    byteLimit: number
+    byteLimit: number,
+    workLimit = Number.MAX_SAFE_INTEGER,
+    nativeByteLimit = DEFAULT_BYTE_LIMIT
   ): SourceRootPage {
-    if (family.recordsDone && family.capsulesDone) {
-      return emptyPage(false, encodeFamilyCursor(family));
+    let next = family;
+    let result = emptyPage(true, encodeFamilyCursor(family));
+    while (result.nativeVisits < limit && (!next.recordsDone || !next.capsulesDone)) {
+      const takeCapsule = next.recordsDone || !next.capsulesDone && next.nextFamily === "capsule";
+      const minimum = 5;
+      if (workLimit - (result.nativeWork ?? 0) < minimum) break;
+      if (nativeByteLimit - result.bytesRead - (result.metadataBytes ?? 0) < RETAINED_SOURCE_READ_RESERVATION) {
+        result = { ...result, resourceLimited: true };
+        break;
+      }
+      const page = takeCapsule ? this.pageCapsules(workspaceId, next.capsulesAfter, 1, byteLimit)
+        : this.pageRecords(workspaceId, next.recordsAfter, 1, byteLimit);
+      result = mergePages(result, page);
+      next = { ...next, nextFamily: takeCapsule ? "record" : "capsule",
+        ...(takeCapsule ? { capsulesAfter: page.committedThrough, capsulesDone: !page.truncated }
+          : { recordsAfter: page.committedThrough, recordsDone: !page.truncated }) };
+      if (page.unavailable) break;
     }
-    if (family.recordsDone) {
-      return this.pageCapsules(workspaceId, family.capsulesAfter, limit, byteLimit);
-    }
-    if (family.capsulesDone) {
-      const records = this.pageRecords(workspaceId, family.recordsAfter, limit, byteLimit);
-      return continueRecords(records, family);
-    }
-    // Split the page so a full record share cannot hide capsule-only roots.
-    const recordShare = Math.max(1, Math.floor(limit / 2));
-    const capsuleShare = Math.max(1, limit - Math.floor(limit / 2));
-    let records = this.pageRecords(workspaceId, family.recordsAfter, recordShare, byteLimit);
-    let capsules = this.pageCapsules(workspaceId, family.capsulesAfter, capsuleShare, byteLimit);
-    if (!records.truncated && records.rows.length < recordShare) {
-      const extra = recordShare - records.rows.length;
-      capsules = mergePages(
-        capsules,
-        this.pageCapsules(
-          workspaceId,
-          capsules.committedThrough ?? family.capsulesAfter,
-          extra,
-          byteLimit
-        )
-      );
-    } else if (!capsules.truncated && capsules.rows.length < capsuleShare) {
-      const extra = capsuleShare - capsules.rows.length;
-      records = mergePages(
-        records,
-        this.pageRecords(
-          workspaceId,
-          records.committedThrough ?? family.recordsAfter,
-          extra,
-          byteLimit
-        )
-      );
-    }
-    return mergeFamilyPages(records, capsules, family);
+    return { ...result, committedThrough: encodeFamilyCursor(next), truncated: !next.recordsDone || !next.capsulesDone };
   }
 
   private pageRecords(
@@ -351,16 +297,18 @@ export class SqliteSourceRootRecallReader {
       const mapped = mapBoundedRecord(read, 0);
       return mapped === null ? [] : [mapped];
     });
-    const bytesRead = page.rows.reduce((sum, read) => sum + read.prefixBytes, 0);
+    const bytesRead = page.rows.reduce((sum, read) => sum + read.nativeBytes, 0);
     return {
       rows,
       nativeVisits: page.rows.length,
       nativeBytes: bytesRead,
       rowsRead: page.rows.length,
       bytesRead,
+      metadataBytes: page.rows.reduce((sum, row) => sum + row.metadataBytes, 0),
+      nativeWork: Math.max(1, page.rows.length * 5),
       truncated: page.truncated,
       committedThrough: page.committedThrough,
-      unavailable: false
+      unavailable: page.unavailable === true
     };
   }
 
@@ -371,28 +319,28 @@ export class SqliteSourceRootRecallReader {
     byteLimit: number
   ): SourceRootPage {
     const cursor = parseCapsuleCursor(after);
-    const page = this.capsules.pageCapsuleOnlyRoots(workspaceId, {
-      limit,
-      afterCreatedAt: cursor.afterCreatedAt,
-      afterObjectId: cursor.afterObjectId
-    });
-    const rows = page.rows.flatMap((row) => {
-      const mapped = mapCapsule(row, byteLimit, 0);
+    const candidates = this.boundedCapsules.page(workspaceId, cursor, limit, byteLimit);
+    const rows = candidates.flatMap((row) => {
+      const mapped = row.linked === 1 ? null : mapBoundedCapsule(row, byteLimit, 0);
       return mapped === null ? [] : [mapped];
     });
-    const bytesRead = page.rows.reduce(
-      (sum, row) => sum + Buffer.byteLength(row.excerpt ?? row.gist, "utf8"),
+    const bytesRead = candidates.reduce(
+      (sum, row) => sum + row.nativeBytes,
       0
     );
     return {
       rows,
-      nativeVisits: page.rows.length,
+      nativeVisits: candidates.length,
       nativeBytes: bytesRead,
-      rowsRead: page.rows.length,
+      rowsRead: candidates.length,
       bytesRead,
-      truncated: page.truncated,
-      committedThrough: page.committedThrough,
-      unavailable: false
+      metadataBytes: candidates.reduce((sum, row) => sum + capsuleMetadataBytes(row), 0),
+      nativeWork: Math.max(1, candidates.length * 5),
+      truncated: candidates.length === limit,
+      committedThrough: candidates.length === 0 ? after : encodeCapsuleCursor({
+        afterCreatedAt: candidates.at(-1)!.created_at, afterObjectId: candidates.at(-1)!.object_id
+      }),
+      unavailable: candidates.some((row) => row.linked === 0 && (row.digest === null || row.prefix === null))
     };
   }
 }
@@ -404,54 +352,12 @@ function mergePages(left: SourceRootPage, right: SourceRootPage): SourceRootPage
     nativeBytes: left.nativeBytes + right.nativeBytes,
     rowsRead: left.rowsRead + right.rowsRead,
     bytesRead: left.bytesRead + right.bytesRead,
+    metadataBytes: (left.metadataBytes ?? 0) + (right.metadataBytes ?? 0),
+    nativeWork: (left.nativeWork ?? left.nativeVisits) + (right.nativeWork ?? right.nativeVisits),
     truncated: left.truncated || right.truncated,
     committedThrough: right.committedThrough ?? left.committedThrough,
-    unavailable: false
+    unavailable: left.unavailable || right.unavailable
   };
-}
-
-function continueRecords(records: SourceRootPage, family: FamilyCursor): SourceRootPage {
-  if (!records.truncated) return records;
-  return {
-    ...records,
-    committedThrough: encodeFamilyCursor({
-      recordsAfter: records.committedThrough,
-      capsulesAfter: family.capsulesAfter,
-      recordsDone: false,
-      capsulesDone: true
-    })
-  };
-}
-
-function mergeFamilyPages(
-  records: SourceRootPage,
-  capsules: SourceRootPage,
-  prior: FamilyCursor
-): SourceRootPage {
-  const next: FamilyCursor = {
-    recordsAfter: records.committedThrough ?? prior.recordsAfter,
-    capsulesAfter: capsules.committedThrough ?? prior.capsulesAfter,
-    recordsDone: !records.truncated,
-    capsulesDone: !capsules.truncated
-  };
-  const truncated = !next.recordsDone || !next.capsulesDone;
-  return {
-    rows: [...records.rows, ...capsules.rows],
-    nativeVisits: records.nativeVisits + capsules.nativeVisits,
-    nativeBytes: records.nativeBytes + capsules.nativeBytes,
-    rowsRead: records.rowsRead + capsules.rowsRead,
-    bytesRead: records.bytesRead + capsules.bytesRead,
-    truncated,
-    committedThrough: familyCommittedThrough(next, truncated),
-    unavailable: false
-  };
-}
-
-function familyCommittedThrough(next: FamilyCursor, truncated: boolean): string | null {
-  if (!truncated) return next.capsulesAfter ?? next.recordsAfter;
-  // Records-done continues as a capsule cursor so a later `r:` does not restart capsules.
-  if (next.recordsDone) return next.capsulesAfter;
-  return encodeFamilyCursor(next);
 }
 
 function singleRowPage(
@@ -484,28 +390,11 @@ function emptyPage(truncated: boolean, committedThrough: string | null): SourceR
   };
 }
 
-function mapRecord(
-  row: FieldSourceRecordRow,
-  byteLimit: number,
-  offset: number
-): SourceRootRow | null {
-  if (row.source_body === null) return null;
-  const chunk = chunkUtf8(row.source_body, offset, byteLimit);
-  if (chunk === null) return null;
-  return {
-    ...sourceRecordRoot(row),
-    content: chunk.text,
-    content_start: chunk.start,
-    content_end: chunk.end,
-    content_complete: chunk.complete
-  };
-}
-
 function mapBoundedRecord(read: BoundedSourceRecordRead, offset: number): SourceRootRow | null {
-  if (read.invalidOffset || read.record.source_body === null) return null;
+  if (read.invalidOffset || read.record === null || read.record.source_body === null) return null;
   const end = offset + read.prefixBytes;
   return {
-    ...sourceRecordRoot(read.record),
+    ...sourceRecordRoot(read.record, read.evidenceVerified),
     content: read.record.source_body,
     content_start: offset,
     content_end: end,
@@ -513,7 +402,7 @@ function mapBoundedRecord(read: BoundedSourceRecordRead, offset: number): Source
   };
 }
 
-function sourceRecordRoot(row: FieldSourceRecordRow): Omit<
+function sourceRecordRoot(row: FieldSourceRecordRow, evidenceVerified: boolean): Omit<
   SourceRootRow,
   "content" | "content_start" | "content_end" | "content_complete"
 > {
@@ -525,8 +414,8 @@ function sourceRecordRoot(row: FieldSourceRecordRow): Omit<
     root_id: row.record_id,
     revision: row.source_version,
     digest: row.content_digest,
-    evidence_object_id: row.evidence_object_id,
-    ...(verifiedEvidenceBind(row.evidence_object_id) ? { evidence_verified: true } : {}),
+    evidence_object_id: evidenceVerified ? row.evidence_object_id : null,
+    ...(evidenceVerified ? { evidence_verified: true } : {}),
     event_time: row.event_time,
     ...(role === undefined ? {} : { role }),
     original_complete: true,
@@ -549,37 +438,36 @@ function sourceScopeClass(
   return undefined;
 }
 
-function verifiedEvidenceBind(evidenceObjectId: string | null): boolean {
-  return evidenceObjectId !== null && evidenceObjectId.length > 0;
-}
-
-function mapCapsule(
-  capsule: EvidenceCapsule,
+function mapBoundedCapsule(
+  capsule: BoundedCapsuleSource,
   byteLimit: number,
   offset: number
 ): SourceRootRow | null {
-  const excerpt = capsule.excerpt;
-  const retainedExtent = excerpt !== null ? "excerpt" : "gist";
-  const body = excerpt ?? capsule.gist;
-  const chunk = chunkUtf8(body, offset, byteLimit);
-  if (chunk === null) return null;
+  if (capsule.prefix === null || capsule.digest === null || capsule.body_bytes === null
+    || offset > capsule.body_bytes || (capsule.prefix.length > 0 && (capsule.prefix[0]! & 0xc0) === 0x80)) return null;
+  const text = trimUtf8Prefix(capsule.prefix, byteLimit).toString("utf8");
   return {
     kind: "evidence_capsule",
     workspace_id: capsule.workspace_id,
     root_id: capsule.object_id,
     revision: capsule.updated_at,
-    digest: contentDigest(body, capsule.source_hash),
+    digest: capsule.digest,
     evidence_object_id: capsule.object_id,
     evidence_verified: true,
-    event_time: eventTimeOf(capsule),
-    content: chunk.text,
-    content_start: chunk.start,
-    content_end: chunk.end,
-    content_complete: chunk.complete,
+    event_time: capsule.event_time,
+    content: text,
+    content_start: offset,
+    content_end: offset + Buffer.byteLength(text, "utf8"),
+    content_complete: offset + Buffer.byteLength(text, "utf8") === capsule.body_bytes,
     // Capsule gist/excerpt are retained reductions, not the original body.
     original_complete: false,
-    retained_extent: retainedExtent
+    retained_extent: capsule.retained_extent
   };
+}
+
+function capsuleMetadataBytes(row: BoundedCapsuleSource): number {
+  return Object.entries(row).reduce((sum, [key, value]) =>
+    sum + (key !== "prefix" && typeof value === "string" ? Buffer.byteLength(value, "utf8") : 0), row.metadataBytes ?? 0);
 }
 
 function sameSourceIdentity(row: SourceRootRow, target: SourceEvidenceTarget): boolean {
@@ -588,60 +476,6 @@ function sameSourceIdentity(row: SourceRootRow, target: SourceEvidenceTarget): b
     && row.revision === target.source_version
     && row.digest === target.content_digest
     && row.evidence_object_id === target.evidence_object_id;
-}
-
-function eventTimeOf(capsule: EvidenceCapsule): string | null {
-  return capsule.event_anchor?.occurred_at ?? null;
-}
-
-function contentDigest(body: string, sourceHash: string | null): string {
-  if (sourceHash !== null && SHA256_DIGEST_PATTERN.test(sourceHash)) return sourceHash;
-  return `${SHA256_PREFIX}${createHash("sha256").update(body, "utf8").digest("hex")}`;
-}
-
-export function chunkUtf8(
-  content: string,
-  offset: number,
-  byteLimit: number
-): Readonly<{
-  readonly text: string;
-  readonly start: number;
-  readonly end: number;
-  readonly complete: boolean;
-}> | null {
-  const bytes = Buffer.from(content, "utf8");
-  if (!Number.isSafeInteger(offset) || offset < 0 || offset > bytes.length) return null;
-  if (!isUtf8Boundary(bytes, offset)) return null;
-  if (offset === bytes.length) {
-    return { text: "", start: offset, end: offset, complete: true };
-  }
-  let end = Math.min(bytes.length, offset + byteLimit);
-  while (end > offset && !isUtf8Boundary(bytes, end)) end -= 1;
-  if (end === offset) {
-    const width = utf8Width(bytes[offset]!);
-    end = Math.min(bytes.length, offset + width);
-  }
-  return {
-    text: bytes.subarray(offset, end).toString("utf8"),
-    start: offset,
-    end,
-    complete: end === bytes.length
-  };
-}
-
-function isUtf8Boundary(bytes: Buffer, offset: number): boolean {
-  return offset === 0 || offset === bytes.length || (bytes[offset]! & 0xc0) !== 0x80;
-}
-
-function utf8Width(lead: number): number {
-  if (lead < 0x80) return 1;
-  if (lead < 0xe0) return 2;
-  if (lead < 0xf0) return 3;
-  return 4;
-}
-
-function hydrateBytes(row: SourceRootRow): number {
-  return Buffer.byteLength(row.content ?? "", "utf8");
 }
 
 function hydrateMapped(
@@ -655,7 +489,7 @@ function hydrateMapped(
   return {
     row: mapped,
     rowsRead: 1,
-    bytesRead: hydrateBytes(mapped),
+    bytesRead: fallbackBytes,
     unavailable: false,
     ...(mapped.content_complete ? {} : { resourceLimited: true })
   };
@@ -665,14 +499,25 @@ export type ContentCursor = Readonly<{
   readonly kind: SourceRootKind;
   readonly rootId: string;
   readonly offset: number;
+  readonly afterCursor?: string;
 }>;
 
 export function encodeContentCursor(input: ContentCursor): string {
+  if (input.afterCursor !== undefined) return `o:${JSON.stringify(input)}`;
   return `o:${input.kind}\t${input.rootId}\t${input.offset}`;
 }
 
 export function parseContentCursor(cursor: string | null | undefined): ContentCursor | null {
   if (cursor == null || !cursor.startsWith("o:")) return null;
+  if (cursor.startsWith("o:{")) {
+    try {
+      const value = JSON.parse(cursor.slice(2)) as Partial<ContentCursor>;
+      if ((value.kind !== "source_record" && value.kind !== "evidence_capsule")
+        || typeof value.rootId !== "string" || !Number.isSafeInteger(value.offset) || value.offset! < 0) return null;
+      return { kind: value.kind, rootId: value.rootId, offset: value.offset!,
+        ...(typeof value.afterCursor === "string" ? { afterCursor: value.afterCursor } : {}) };
+    } catch { return null; }
+  }
   const payload = cursor.slice(2);
   const first = payload.indexOf("\t");
   const second = first < 0 ? -1 : payload.indexOf("\t", first + 1);
@@ -690,13 +535,23 @@ type FamilyCursor = Readonly<{
   readonly capsulesAfter: string | null;
   readonly recordsDone: boolean;
   readonly capsulesDone: boolean;
+  readonly nextFamily?: "record" | "capsule";
 }>;
 
 function encodeFamilyCursor(input: FamilyCursor): string {
-  return `f:${input.recordsDone ? "1" : "0"}${input.capsulesDone ? "1" : "0"}\n${input.recordsAfter ?? ""}\n${input.capsulesAfter ?? ""}`;
+  return `f:${JSON.stringify(input)}`;
 }
 
 function parseFamilyCursor(cursor: string | null | undefined): FamilyCursor | null {
+  if (cursor?.startsWith("f:{")) {
+    try {
+      const value = JSON.parse(cursor.slice(2)) as FamilyCursor;
+      if ((value.recordsAfter !== null && typeof value.recordsAfter !== "string")
+        || (value.capsulesAfter !== null && typeof value.capsulesAfter !== "string")
+        || typeof value.recordsDone !== "boolean" || typeof value.capsulesDone !== "boolean") return null;
+      return value;
+    } catch { return null; }
+  }
   if (cursor == null || !cursor.startsWith("f:") || cursor.length < 5) return null;
   const recordsDoneFlag = cursor[2];
   const capsulesDoneFlag = cursor[3];

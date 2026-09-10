@@ -252,7 +252,7 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
     expect(forward.transitions.map((row) => row.relation_kind)).not.toEqual(
       reversed.transitions.map((row) => row.relation_kind)
     );
-    expect(transitionKey(forward.transitions[0]!)).not.toBe(transitionKey(reversed.transitions[0]!));
+    expect(transitionKey(forward.transitions.at(0)!)).not.toBe(transitionKey(reversed.transitions.at(0)!));
   });
 
   it("does not coordinate-max (900,200) and (200,900) under same-path conjunction", () => {
@@ -319,7 +319,7 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
       interpretation: interpretation(),
       budget: defaultBudget(),
       seeds: [activation(src, 1000)],
-      transitions: [edge(src, left, "rel", 900), edge(src, right, "rel", 900)],
+      transitions: [{ ...edge(src, left, "rel", 900), instance_id: "left-assertion", revision_id: "v1" }, edge(src, right, "rel", 900)],
       support: [
         supportRecord(leftId, [witnessOf("w-left", [leftId], 1)]),
         supportRecord(rightId, [witnessOf("w-right", [rightId], 1)])
@@ -330,7 +330,7 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
     expect(state.support.map((row) => row.proposition_id).sort()).toEqual([leftId, rightId].sort());
     const decreased = applyObserverPage(state, {
       page: adjacencyPage(),
-      effects: [{ observation_id: "rel-cap-down", transition: edge(src, left, "rel", 200) }]
+      effects: [{ observation_id: "rel-cap-down", transition: { ...edge(src, left, "rel", 200), instance_id: "left-assertion", revision_id: "v2" } }]
     });
     expect(gradeOf(decreased, left)).toBe(200);
     expect(gradeOf(decreased, right)).toBe(900);
@@ -347,7 +347,7 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
       interpretation: interpretation(),
       budget: defaultBudget(),
       seeds: [activation(a, 1000)],
-      transitions: [edge(a, b, "ab", 900), edge(b, a, "ba", 900)],
+      transitions: [{ ...edge(a, b, "ab", 900), instance_id: "ab-assertion", revision_id: "v1" }, edge(b, a, "ba", 900)],
       support: [
         supportRecord("a", [witnessOf("cycle-a", ["a"], 1)]),
         supportRecord("b", [witnessOf("cycle-b", ["b"], 1)])
@@ -356,7 +356,7 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
     expect(gradeOf(state, b)).toBe(900);
     const revoked = applyObserverPage(state, {
       page: adjacencyPage(),
-      effects: [{ observation_id: "ab-denied", transition: edge(a, b, "ab", 900, false) }]
+      effects: [{ observation_id: "ab-denied", transition: { ...edge(a, b, "ab", 900, false), instance_id: "ab-assertion", revision_id: "v2" } }]
     });
     expect(gradeOf(revoked, a)).toBe(1000);
     expect(activationOf(revoked, b)).toEqual({ kind: "unreachable" });

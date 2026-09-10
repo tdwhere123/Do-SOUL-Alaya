@@ -50,7 +50,6 @@ export {
 } from "./memory/evidence-create/field-stores.js";
 export {
   createSourceAdmissionPort,
-  retainedSourceScopeClass,
   retainedSourceSpeaker
 } from "./memory/evidence-create/source-admission.js";
 export { createProjectionGenerationReceipt } from

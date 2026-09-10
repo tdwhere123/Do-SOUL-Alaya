@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { productStateKeyFromIndexEntry, type FieldSnapshot, type IndexEntry } from "@do-soul/alaya-protocol";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
@@ -7,14 +6,16 @@ import { indexEntryRevision } from "../conditional-field/index/project-accepting
 type ProjectionProgress = NonNullable<FieldEngineState["projection_progress"]>;
 
 export function resumeIndexProjection(state: FieldEngineState, snapshot: FieldSnapshot): ProjectionProgress {
-  const revision = createHash("sha256").update(JSON.stringify([
-    snapshot.values, snapshot.seeds, snapshot.facets, state.resume_cursors, state.support_progress,
-    [...state.claims], [...(state.claim_propositions ?? [])], state.support, state.derivations,
-    state.grounding_progress?.input_digest, state.grounding_progress?.completed_work
-  ])).digest("hex");
+  const references = [state.binding.kind === "bound" ? state.binding.values : snapshot.values,
+    state.binding.kind === "bound" ? state.binding.guaranteed_values : null,
+    state.ordered_identities, state.seeds, state.facets,
+    state.claims, state.claim_propositions, state.transitions, state.derivations, state.transition_derivations
+  ];
   const prior = state.projection_progress;
-  return { revision, generation: (prior?.generation ?? 0) + (prior?.revision === revision ? 0 : 1),
-    offset: prior?.revision === revision ? prior.offset : 0, delivered_entries: prior?.delivered_entries ?? {} };
+  const same = prior !== undefined && references.every((reference, index) => reference === prior.input_references[index]);
+  const generation = (prior?.generation ?? 0) + (same ? 0 : 1);
+  return { revision: `projection-generation:${generation}`, input_references: references, generation,
+    offset: same ? prior!.offset : 0, delivered_entries: prior?.delivered_entries ?? {} };
 }
 
 export function retainIndexDelivery(

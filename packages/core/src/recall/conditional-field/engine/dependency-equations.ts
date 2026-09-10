@@ -6,11 +6,12 @@ import {
   type Transition
 } from "@do-soul/alaya-protocol";
 import { productStateNodeId } from "../reference/bind-max-min.js";
+import type { RetainedRows } from "./retained-sequence.js";
 import { ruleIdentity, transitionKey } from "./path-composition.js";
+import { localLeafIds, traceDerivationForest } from "./derivation-provenance.js";
 import {
-  joinDerivation,
   ruleDerivationIdentity,
-  seedDerivationIdentity
+  seedDerivationIdentity, derivationRootAt, type DerivationRootLookup
 } from "./path-derivation.js";
 
 export type SharedRule = Readonly<{
@@ -22,8 +23,8 @@ export type SharedRule = Readonly<{
 }>;
 
 export function incomingRules(
-  transitions: readonly Transition[],
-  transitionRoots: Readonly<Record<string, string>>
+  transitions: RetainedRows<Transition>,
+  transitionRoots: DerivationRootLookup
 ): Map<string, SharedRule[]> {
   const incoming = new Map<string, SharedRule[]>();
   for (const transition of transitions) {
@@ -35,7 +36,7 @@ export function incomingRules(
       from: productStateNodeId(transition.from),
       to,
       cap: transition.strength_milligrades,
-      derivation_id: transitionRoots[key] ?? ruleDerivationIdentity(key)
+      derivation_id: derivationRootAt(transitionRoots, key) ?? ruleDerivationIdentity(key)
     };
     const list = incoming.get(to);
     if (list === undefined) incoming.set(to, [rule]);
@@ -95,84 +96,20 @@ export function productSccs(
   return sccs;
 }
 
-export function assembleOrder(
-  nodeIds: readonly string[],
-  incoming: ReadonlyMap<string, readonly SharedRule[]>,
-  seedIds: ReadonlySet<string> = new Set()
-): { readonly sccs: readonly (readonly string[])[]; readonly order: readonly string[] } {
-  const edges: { from: string; to: string }[] = [];
-  for (const rules of incoming.values()) {
-    for (const rule of rules) edges.push({ from: rule.from, to: rule.to });
-  }
-  const sccs = productSccs(nodeIds, edges);
-  const order: string[] = [];
-  for (const scc of sccs) {
-    const withIncoming = scc.filter((id) => (incoming.get(id) ?? []).length > 0);
-    const seeded = withIncoming.filter((id) => seedIds.has(id));
-    const rest = withIncoming.filter((id) => !seedIds.has(id));
-    order.push(...seeded, ...rest);
-  }
-  return { sccs, order };
-}
-
-export function assembleProductEquation(input: {
-  readonly seed: Derivation | undefined;
-  readonly incoming: readonly SharedRule[];
-  readonly forest: ReadonlyMap<string, Derivation>;
-  readonly assembled: ReadonlyMap<string, Derivation>;
-  readonly scc: ReadonlySet<string>;
-  readonly sccSeeds: ReadonlyMap<string, Derivation>;
-}): { readonly root: Derivation | undefined; readonly created: readonly Derivation[] } {
-  const created: Derivation[] = [];
-  const remember = (node: Derivation): Derivation => {
-    created.push(node);
-    return node;
-  };
-  const options: Derivation[] = [];
-  if (input.seed !== undefined) options.push(input.seed);
-  for (const rule of input.incoming) {
-    const edge = input.forest.get(rule.derivation_id);
-    const premise = input.scc.has(rule.from)
-      ? input.sccSeeds.get(rule.from)
-      : input.assembled.get(rule.from);
-    if (edge === undefined && premise === undefined) continue;
-    if (edge === undefined) {
-      options.push(premise!);
-      continue;
-    }
-    if (premise === undefined) {
-      options.push(edge);
-      continue;
-    }
-    options.push(remember(joinDerivation("serial", [premise, edge])));
-  }
-  if (options.length === 0) return { root: undefined, created };
-  return { root: remember(joinDerivation("or", options)), created };
-}
-
 export function productsTouchedByLeaf(input: {
   readonly withdrawnLeafId: string;
-  readonly seeds: readonly SeedActivation[];
-  readonly transitions: readonly Transition[];
-  readonly derivations: readonly Derivation[];
-  readonly transition_derivations: Readonly<Record<string, string>>;
+  readonly seeds: RetainedRows<SeedActivation>;
+  readonly transitions: RetainedRows<Transition>;
+  readonly derivations: RetainedRows<Derivation>;
+  readonly transition_derivations: DerivationRootLookup;
 }): Set<string> {
   const touched = new Set<string>();
   const forest = new Map(input.derivations.map((row) => [row.derivation_id, row]));
   const leafHits = (rootId: string | undefined): boolean => {
     if (rootId === undefined) return false;
-    const seen = new Set<string>();
-    const visit = (id: string): boolean => {
-      if (seen.has(id)) return false;
-      seen.add(id);
-      const node = forest.get(id);
-      if (node === undefined) return id === input.withdrawnLeafId;
-      if (node.derivation_id === input.withdrawnLeafId || node.leaf_ids.includes(input.withdrawnLeafId)) {
-        return true;
-      }
-      return node.children.some(visit);
-    };
-    return visit(rootId);
+    const traced = traceDerivationForest({ forest, roots: [rootId] });
+    return rootId === input.withdrawnLeafId || traced.traversal.nodes.has(input.withdrawnLeafId)
+      || localLeafIds(traced.traversal).has(input.withdrawnLeafId);
   };
   for (const seed of input.seeds) {
     const key = productStateNodeId(seed.state);
@@ -187,7 +124,7 @@ export function productsTouchedByLeaf(input: {
   for (const transition of input.transitions) {
     const from = productStateNodeId(transition.from);
     const to = productStateNodeId(transition.to);
-    const root = input.transition_derivations[transitionKey(transition)];
+    const root = derivationRootAt(input.transition_derivations, transitionKey(transition));
     if (
       transition.relation_kind === input.withdrawnLeafId
       || from === input.withdrawnLeafId
@@ -242,8 +179,8 @@ export function reviseSccSupport(
 }
 
 export function affectedSubjectsOf(
-  seeds: readonly SeedActivation[],
-  transitions: readonly Transition[],
+  seeds: RetainedRows<SeedActivation>,
+  transitions: RetainedRows<Transition>,
   affectedProductIds: ReadonlySet<string>
 ): Set<string> {
   const subjects = new Set<string>();
@@ -269,8 +206,8 @@ export function seedTouchesLeaf(seed: SeedActivation, withdrawnLeafId: string): 
 }
 
 export function capOrPermissionRevisions(
-  prior: readonly Transition[],
-  next: readonly Transition[]
+  prior: RetainedRows<Transition>,
+  next: RetainedRows<Transition>
 ): readonly Transition[] {
   const nextKeys = new Set(next.map((row) => transitionKey(row)));
   const nextByRule = new Map<string, Transition[]>();
@@ -298,9 +235,9 @@ export function capOrPermissionRevisions(
 }
 
 export function repairSupportAfterRuleRevision(input: {
-  readonly priorTransitions: readonly Transition[];
-  readonly nextTransitions: readonly Transition[];
-  readonly seeds: readonly SeedActivation[];
+  readonly priorTransitions: RetainedRows<Transition>;
+  readonly nextTransitions: RetainedRows<Transition>;
+  readonly seeds: RetainedRows<SeedActivation>;
   readonly support: readonly SupportRecord[];
 }): readonly SupportRecord[] {
   const revised = capOrPermissionRevisions(input.priorTransitions, input.nextTransitions);

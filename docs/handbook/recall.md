@@ -52,11 +52,10 @@ Retained mechanisms and their independent consumers:
   configuration, not ordinary ranking.
 - `embedding-recall/evidence/`: source-authorized document backfill, bounded
   document previews and the embedding service's lexical candidate prefix.
-- `ObserverReaders.embeddingIds`: an optional bounded measurement extension,
-  currently exercised by observer tests. The ordinary daemon reader does not
-  bind it, and the field does not turn enumerated vector identities into
-  similarity-ranked seeds. A query-conditioned measurement and association
-  contract would be required before connecting that retrieval capability.
+- `ObserverReaders.embeddingIds` and `measureStoredPair`: ordinary worker
+  readers for already stored query/object vectors. Enumeration is discovery;
+  semantic admission additionally requires current source provenance, query
+  guards and an explicit prepared measurement declaration described below.
 - `runtime/global-memory/bounded-top-k.ts`: bounded global-memory lifecycle
   source selection. It does not select ordinary conditional-field results.
 - `RECALL_FUSION_FAMILY_IDS` / `aggregateFamilyContributions` in the bench
@@ -94,15 +93,69 @@ and exposes interpretation holes. Missing knowledge is not a zero association
 or a complete empty universe. Same-service bindings remain distinct from two
 services that happen to share a provider. Canonical identity order is the
 default enumeration; associative order is an explicit query-view policy over
-the same legal membership. Source-root discovery and payload expansion remain
-owned by later admission/hydration work; protocol identity is not by itself
-proof that those readers exist.
+the same legal membership. Source records and retained capsule text have
+bounded discovery and UTF-8 payload readers through the ordinary worker route.
+Record-only roots remain deliverable after optional memory formation fails.
+
+Retained source bodies remain authoritative. Write transactions maintain a
+derived projection of UTF-8-aligned chunks of at most 4 KiB, with a digest bound
+to root kind, workspace, revision, original digest and offset. Migration builds
+this projection for existing retained roots transactionally. Recall never
+backfills it: absent, corrupt or stale chunks produce an unavailable read.
+The native byte allowance pays for each physical chunk and metadata, including
+when only a few excerpt bytes are returned. Verified record-to-capsule aliases
+come from canonical evidence references and current workspace/lifecycle checks.
 
 Association uses `assoc.bottleneck.milligrade.v1`. Under the declared scalar
 reference assumptions, compatible serial and AND composition use minimum;
 OR alternatives use maximum. Witness dependencies and alternative roots are
 retained even when their scores or source sets coincide. Withdrawal reevaluates
 accepted dependencies; a score alone cannot reconstruct the derivation.
+
+Numeric preparation, adjacency and work queues retain immutable state across
+pages. One relaxation unit handles at most one outgoing edge. New seeds and
+rules enter through bounded preparation; a disjoint addition reuses the solved
+graph. Reachable grade zero remains distinct from an absent activation.
+Path cursors retain immutable input versions; their owners replace versions
+instead of mutating arrays or maps held by an interrupted cursor. Native
+relation-page exhaustion does not establish semantic closure: newly admitted
+product states and facets must still consume the retained relation evidence.
+
+Dependency equations retain independent rule instances and shared compatible
+alternatives. Generated derivations declare `provenance_layout: local_leaves.v1`:
+leaf nodes own local provenance and ancestors reference children. Consumers
+trace the retained forest; ancestor summary arrays do not establish evidence.
+Witness traversal is resumable and rejects missing nodes or cycles. Materialized
+explanations consume their own remaining allowance, so a founded product does
+not require every proof path to be expanded before delivery.
+Temporary explanation omission does not change a product's semantic delivery
+revision. Interrupted proof work retains its own progress and shares the
+remaining allowance with projection and payload delivery.
+When a later payload page materializes that forest, its proof update identifies
+the full prior product, semantic revision and new explanation root. It adds
+witness exposure receipts without repeating object or source-span exposure.
+An unknown observation region retains its uncertainty while other open regions
+continue consuming their independently authorized work.
+Per-candidate facet and seed filtering still scans retained collections;
+those projection visits are not yet fully accounted by the finalization work
+counter. The bounded native, relaxation and retained-input mechanisms above
+do not establish a complete bound on every projection operation.
+
+Admitted immutable hard relation instances transfer at identity (1000).
+Relation names do not assign grades. Prepared cosine admission is opt-in via
+`interpretation_proposal.stored_cosine_admission`, using registry
+`stored.cosine.admission.v1`. Each named obligation pins producer
+`stored.cosine.pair.v1`, provider, model, schema, dimensions, domain
+`cosine.unit.v1`, normalization `l2.dot.v1`, and a raw threshold. The object
+vector must match the current memory content hash; the query vector must match
+the original-query digest in the same profile. The raw threshold is checked
+before policy transfer `policy.cosine.linear.milligrade.v1` version `1` maps
+cosine `c` to `floor(500 * (clamp(c, -1, 1) + 1))`. This is a declared policy,
+not a probability or an empirical calibration. The declaration combines named
+obligations with explicit `any` (maximum) or `all` (minimum); missing required
+measurements cannot satisfy `all`. Without a declaration, measured raw values
+retain an inapplicable cap and do not create semantic seeds. Recall performs
+no embedding generation or provider calls.
 
 Same-path labels travel together. Product-specific explanations preserve
 bindings and proposition identity. Association support is distinct from a

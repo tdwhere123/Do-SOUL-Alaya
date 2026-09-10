@@ -12,6 +12,7 @@ import {
   type SnapshotReadLease,
   type SourceEvidenceRootKind,
   type StagedWarningArray,
+  type StoredCosineObligation,
   type TypedObservation
 } from "@do-soul/alaya-protocol";
 import {
@@ -87,6 +88,10 @@ export type SourceRootObserverRow = Readonly<{
   readonly role?: string;
   readonly content?: string;
   readonly content_complete?: boolean;
+  readonly content_start?: number;
+  readonly content_end?: number;
+  readonly retained_extent?: "body" | "excerpt" | "gist";
+  readonly literal_verdicts?: Readonly<Record<string, "true" | "false" | "unresolved">>;
   readonly original_complete?: boolean;
   readonly scope_class?: string;
   readonly valid_from?: string | null;
@@ -100,6 +105,9 @@ export type SourceRootObserverPage = Readonly<{
   readonly nativeBytes: number;
   readonly rowsRead: number;
   readonly bytesRead: number;
+  readonly metadataBytes?: number;
+  readonly nativeWork?: number;
+  readonly resourceLimited?: boolean;
   readonly truncated: boolean;
   readonly committedThrough?: string | null;
   readonly unavailable?: boolean;
@@ -109,6 +117,8 @@ export type SourceRootHydrateObserverPage = Readonly<{
   readonly row: SourceRootObserverRow | null;
   readonly rowsRead: number;
   readonly bytesRead: number;
+  readonly metadataBytes?: number;
+  readonly nativeWork?: number;
   readonly unavailable: boolean;
   readonly resourceLimited?: boolean;
 }>;
@@ -149,6 +159,8 @@ export type EmbeddingObserverPage = Readonly<{
 }>;
 
 export type ObserverReaders = Readonly<{
+  readonly sourceRootMetadataByteLimit?: number;
+  readonly sourceRootChunkByteLimit?: number;
   readonly permittedTimelessPolicyIds?: () => readonly string[];
   readonly lexical?: (input: Readonly<{
     readonly workspaceId: string;
@@ -167,8 +179,10 @@ export type ObserverReaders = Readonly<{
     readonly query?: string;
     readonly limit: number;
     readonly nativeLimit: number;
+    readonly workLimit?: number;
     readonly afterCursor: string | null;
     readonly byteLimit?: number;
+    readonly nativeByteLimit?: number;
   }>) => SourceRootObserverPage;
   readonly sourceRoot?: (input: Readonly<{
     readonly workspaceId: string;
@@ -178,6 +192,7 @@ export type ObserverReaders = Readonly<{
     readonly digest?: string;
     readonly evidenceObjectId?: string | null;
     readonly byteLimit?: number;
+    readonly nativeByteLimit?: number;
     readonly offset?: number;
   }>) => SourceRootHydrateObserverPage;
   readonly relation?: (input: Readonly<{
@@ -202,12 +217,17 @@ export type ObserverReaders = Readonly<{
     readonly workspaceId: string;
     readonly afterObjectId: string | null;
     readonly maxRows: number;
+    readonly byteLimit?: number;
     readonly modelId?: string;
+    readonly profile?: StoredCosineObligation;
   }>) => EmbeddingObserverPage;
   readonly measureStoredPair?: (input: Readonly<{
     readonly workspaceId: string;
     readonly objectId: string;
     readonly queryDigest: string;
+    readonly profile?: StoredCosineObligation;
+    readonly byteLimit?: number;
+    readonly workLimit?: number;
   }>) => StoredPairMeasurement;
 }>;
 
@@ -219,6 +239,7 @@ export type ObserverWorkReceipt = Readonly<{
 }>;
 
 export type ObserveConditionalFieldInput = Readonly<{
+  readonly measurement_profile?: StoredCosineObligation;
   readonly lease: SnapshotReadLease;
   readonly action: ObserverAction;
   readonly cursor: ObserverCursor;
@@ -249,6 +270,7 @@ export type ObserverActionResult = Readonly<{
   readonly page: ObserverPage;
   readonly work: ObserverWorkReceipt;
   readonly measurements?: readonly ObservationMeasurement[];
+  readonly source_roots?: readonly SourceRootObserverRow[];
 }>;
 
 const SCHEMA = CONDITIONAL_FIELD_SCHEMA_VERSION;
@@ -313,42 +335,8 @@ export function applyUtf8HydrateToSourceRootPage(
   };
 }
 
-export function toSourceRootObserverRow(row: Readonly<{
-  readonly kind: SourceEvidenceRootKind;
-  readonly workspace_id: string;
-  readonly root_id: string;
-  readonly revision: string;
-  readonly digest: string;
-  readonly evidence_object_id: string | null;
-  readonly evidence_verified?: boolean;
-  readonly event_time?: string | null;
-  readonly role?: string;
-  readonly content?: string;
-  readonly content_complete?: boolean;
-  readonly original_complete?: boolean;
-  readonly scope_class?: string;
-  readonly valid_from?: string | null;
-  readonly valid_to?: string | null;
-  readonly body_erased?: boolean;
-}>): SourceRootObserverRow {
-  return {
-    kind: row.kind,
-    workspace_id: row.workspace_id,
-    root_id: row.root_id,
-    revision: row.revision,
-    digest: row.digest,
-    evidence_object_id: row.evidence_object_id,
-    ...(row.evidence_verified === undefined ? {} : { evidence_verified: row.evidence_verified }),
-    ...(row.event_time === undefined ? {} : { event_time: row.event_time }),
-    ...(row.role === undefined ? {} : { role: row.role }),
-    ...(row.content === undefined ? {} : { content: row.content }),
-    ...(row.content_complete === undefined ? {} : { content_complete: row.content_complete }),
-    ...(row.original_complete === undefined ? {} : { original_complete: row.original_complete }),
-    ...(row.scope_class === undefined ? {} : { scope_class: row.scope_class }),
-    ...(row.valid_from === undefined ? {} : { valid_from: row.valid_from }),
-    ...(row.valid_to === undefined ? {} : { valid_to: row.valid_to }),
-    ...(row.body_erased === undefined ? {} : { body_erased: row.body_erased })
-  };
+export function toSourceRootObserverRow(row: SourceRootObserverRow): SourceRootObserverRow {
+  return { ...row };
 }
 
 export function startObserverCursor(input: Readonly<{

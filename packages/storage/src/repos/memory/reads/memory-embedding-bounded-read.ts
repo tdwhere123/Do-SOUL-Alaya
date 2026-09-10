@@ -32,14 +32,14 @@ export interface EmbeddingProfileIdentity {
   readonly schemaVersion: number;
 }
 
-export type UniqueEmbeddingProfileLookup = Readonly<{
-  readonly status: "unique" | "missing" | "unavailable";
-  readonly profile?: EmbeddingProfileIdentity;
-  readonly rowVisits: number;
-}>;
+export type UniqueEmbeddingProfileLookup =
+  | Readonly<{ status: "unique"; profile: EmbeddingProfileIdentity; rowVisits: number; metadataUtf8Bytes: number }>
+  | Readonly<{ status: "missing" | "unavailable"; profile?: undefined; rowVisits: number; metadataUtf8Bytes: number }>;
 
 export const BOUNDED_EMBEDDING_INDEX_SQL = `CREATE INDEX IF NOT EXISTS idx_memory_embeddings_recall_profile_identity
-  ON memory_embeddings(workspace_id, provider_kind, model_id, schema_version, vector_valid, object_id)`;
+  ON memory_embeddings(workspace_id, provider_kind, model_id, schema_version, vector_valid, object_id);
+  CREATE INDEX IF NOT EXISTS idx_memory_embeddings_recall_profile_seek
+  ON memory_embeddings(workspace_id, vector_valid, model_id, provider_kind, schema_version, object_id)`;
 
 function validateProfile(workspaceId: string, profile: BoundedEmbeddingProfile): void {
   parseWorkspaceId(workspaceId); parseProviderKind(profile.providerKind); parseModelId(profile.modelId);
@@ -59,38 +59,49 @@ export function readUniqueEmbeddingProfile(
 ): UniqueEmbeddingProfileLookup {
   parseWorkspaceId(workspaceId);
   const pinned = modelId === undefined ? undefined : parseModelId(modelId);
-  // Distinct identity only; ranking by object_id would pick a stale profile as the domain.
-  const rows = pinned === undefined
-    ? db.connection.prepare(`SELECT provider_kind, model_id, schema_version FROM memory_embeddings
-        WHERE workspace_id = ? AND vector_valid = 1
-        GROUP BY provider_kind, model_id, schema_version LIMIT 2`).all(workspaceId) as ProfileIdentityRow[]
-    : db.connection.prepare(`SELECT provider_kind, model_id, schema_version FROM memory_embeddings
-        WHERE workspace_id = ? AND vector_valid = 1 AND model_id = ?
-        GROUP BY provider_kind, model_id, schema_version LIMIT 2`).all(workspaceId, pinned) as ProfileIdentityRow[];
-  if (rows.length !== 1) {
+  const predicate = pinned === undefined ? "" : " AND model_id = $model";
+  const args = { workspace: workspaceId, ...(pinned === undefined ? {} : { model: pinned }) };
+  const first = db.connection.prepare(`SELECT
+    CASE WHEN octet_length(provider_kind) + octet_length(model_id) <= 2048 THEN provider_kind ELSE NULL END AS provider_kind,
+    CASE WHEN octet_length(provider_kind) + octet_length(model_id) <= 2048 THEN model_id ELSE NULL END AS model_id,
+    schema_version FROM memory_embeddings
+    WHERE workspace_id = $workspace AND vector_valid = 1 ${predicate}
+    ORDER BY model_id, provider_kind, schema_version LIMIT 1`).get(args) as ProfileIdentityRow | undefined;
+  if (first !== undefined && (first.provider_kind === null || first.model_id === null)) {
+    return { status: "unavailable", rowVisits: 1, metadataUtf8Bytes: 0 };
+  }
+  const metadataUtf8Bytes = first === undefined ? 0 : Buffer.byteLength(first.provider_kind!, "utf8") + Buffer.byteLength(first.model_id!, "utf8");
+  const second = first === undefined ? undefined : db.connection.prepare(`
+    SELECT 1 FROM memory_embeddings
+    WHERE workspace_id = $workspace AND vector_valid = 1 ${predicate}
+      AND (model_id, provider_kind, schema_version) > ($afterModel, $afterProvider, $afterSchema)
+    ORDER BY model_id, provider_kind, schema_version LIMIT 1`).get({ ...args,
+    afterModel: first.model_id, afterProvider: first.provider_kind, afterSchema: first.schema_version
+  });
+  if (first === undefined || second !== undefined) {
     return Object.freeze({
-      status: rows.length === 0 ? "missing" : "unavailable",
-      rowVisits: rows.length
+      status: first === undefined ? "missing" : "unavailable",
+      rowVisits: first === undefined ? 1 : 2, metadataUtf8Bytes
     });
   }
-  const row = rows[0]!;
+  const row = first;
   if (!Number.isSafeInteger(row.schema_version) || row.schema_version < 0) {
     throw new StorageError("VALIDATION_FAILED", "Invalid bounded embedding profile");
   }
   return Object.freeze({
     status: "unique",
     profile: Object.freeze({
-      providerKind: parseProviderKind(row.provider_kind),
-      modelId: parseModelId(row.model_id),
+      providerKind: parseProviderKind(row.provider_kind!),
+      modelId: parseModelId(row.model_id!),
       schemaVersion: row.schema_version
     }),
-    rowVisits: 1
+    rowVisits: 2, metadataUtf8Bytes
   });
 }
 
 type ProfileIdentityRow = Readonly<{
-  readonly provider_kind: string;
-  readonly model_id: string;
+  readonly provider_kind: string | null;
+  readonly model_id: string | null;
   readonly schema_version: number;
 }>;
 
@@ -112,15 +123,16 @@ export function readBoundedEmbeddingIds(
     WHERE e.workspace_id = ? AND e.provider_kind = ? AND e.model_id = ? AND e.schema_version = ? AND e.vector_valid = 1
       AND e.object_id > ?
     ORDER BY e.object_id ASC LIMIT ?
-  ) SELECT object_id AS raw_id,
+  ) SELECT
     CASE WHEN octet_length(object_id) <= ? THEN object_id ELSE NULL END AS object_id,
     CASE WHEN octet_length(object_id) <= ? THEN octet_length(object_id) ELSE 0 END AS metadata_bytes
-    FROM candidates ORDER BY object_id`).all(workspaceId, profile.providerKind, profile.modelId,
+    FROM candidates ORDER BY candidates.object_id`).all(workspaceId, profile.providerKind, profile.modelId,
     profile.schemaVersion, afterObjectId ?? "", profile.maxRows, profile.maxMetadataUtf8Bytes, profile.maxMetadataUtf8Bytes) as
-    { object_id: string | null; raw_id: string; metadata_bytes: number }[];
-  const objectIds = rows.flatMap((row) => row.object_id === null ? [] : [row.object_id]);
+    { object_id: string | null; metadata_bytes: number }[];
+  const firstInvalid = rows.findIndex((row) => row.object_id === null);
+  const objectIds = rows.slice(0, firstInvalid < 0 ? rows.length : firstInvalid).map((row) => row.object_id!);
   const filteredRows = rows.length - objectIds.length;
-  const committedThrough = rows.at(-1)?.raw_id ?? afterObjectId;
+  const committedThrough = objectIds.at(-1) ?? afterObjectId;
   return Object.freeze({
     objectIds: Object.freeze(objectIds),
     rowVisits: rows.length,

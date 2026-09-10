@@ -1,3 +1,6 @@
+import { PersistentStringMap } from "./persistent-string-map.js";
+import { MaxMinWorkQueue } from "./max-min-work-queue.js";
+
 export interface MaxMinTransition {
   readonly from: string;
   readonly to: string;
@@ -7,6 +10,7 @@ export interface MaxMinTransition {
 export interface MaxMinWorkItem {
   readonly nodeId: string;
   readonly strength: number;
+  readonly edgeOffset?: number;
 }
 
 export interface MaxMinInput {
@@ -18,6 +22,33 @@ export interface MaxMinInput {
   readonly priorValues?: ReadonlyMap<string, number>;
   readonly worklist?: readonly MaxMinWorkItem[];
   readonly workLimit?: number;
+  readonly preparedGraph?: MaxMinPreparedGraph;
+  readonly workQueue?: MaxMinWorkQueue;
+}
+
+export interface MaxMinPreparedGraph {
+  readonly nodeIds: PersistentStringMap<true>;
+  readonly edges: PersistentStringMap<MaxMinOutgoingEdges>;
+}
+
+export class MaxMinOutgoingEdges {
+  public constructor(public readonly length = 0, private readonly items = new PersistentStringMap<MaxMinTransition>()) {}
+  public at(offset: number): MaxMinTransition | undefined { return this.items.get(String(offset)); }
+  public append(edge: MaxMinTransition): MaxMinOutgoingEdges {
+    return new MaxMinOutgoingEdges(this.length + 1, this.items.with(String(this.length), edge));
+  }
+}
+
+export function extendMaxMinGraph(prior: MaxMinPreparedGraph | undefined,
+  nodeIds: readonly string[], transitions: readonly MaxMinTransition[]): MaxMinPreparedGraph {
+  let nodes = prior?.nodeIds ?? new PersistentStringMap<true>();
+  let edges = prior?.edges ?? new PersistentStringMap<MaxMinOutgoingEdges>();
+  for (const id of nodeIds) nodes = nodes.with(id, true);
+  for (const edge of transitions) {
+    if (!nodes.has(edge.from) || !nodes.has(edge.to)) continue;
+    edges = edges.with(edge.from, (edges.get(edge.from) ?? new MaxMinOutgoingEdges()).append(edge));
+  }
+  return { nodeIds: nodes, edges };
 }
 
 export interface MaxMinResult {
@@ -26,23 +57,27 @@ export interface MaxMinResult {
   readonly remainingWorklist: readonly MaxMinWorkItem[];
   readonly steps: number;
   readonly complete: boolean;
+  readonly workQueue: MaxMinWorkQueue;
 }
 
 export function solveMaxMinField(input: MaxMinInput): MaxMinResult {
   const top = requireIntegerTop(input.top, input.bottom);
-  const nodeIds = uniqueNodeIds(input.nodeIds);
-  const values = initialValues(nodeIds, input.seeds, input.bottom, top, input.priorValues);
-  const retainedTransitions = legalTransitions(nodeIds, input.transitions, input.bottom, top);
+  const nodeIds = input.preparedGraph === undefined ? uniqueNodeIds(input.nodeIds) : [];
+  const values = initialValues(input.preparedGraph?.nodeIds ?? new Set(nodeIds), input.seeds, input.bottom, top, input.priorValues);
+  const retainedTransitions = input.preparedGraph === undefined
+    ? legalTransitions(nodeIds, input.transitions, input.bottom, top) : input.transitions;
   const relaxed = relaxMaxMin(
     values,
-    adjacency(retainedTransitions),
+    input.preparedGraph?.edges ?? adjacency(retainedTransitions),
     input.worklist,
-    input.workLimit
+    input.workLimit,
+    input.workQueue
   );
   return {
-    values,
+    values: relaxed.values,
     retainedTransitions,
-    remainingWorklist: relaxed.remainingWorklist,
+    get remainingWorklist() { return [...relaxed.workQueue]; },
+    workQueue: relaxed.workQueue,
     steps: relaxed.steps,
     complete: relaxed.complete
   };
@@ -68,24 +103,23 @@ function clampInteger(value: number, bottom: number, top: number): number {
 }
 
 function initialValues(
-  nodeIds: readonly string[],
+  nodeIds: Readonly<{ has(key: string): boolean }>,
   seeds: ReadonlyMap<string, number>,
   bottom: 0,
   top: number,
   priorValues: ReadonlyMap<string, number> | undefined
-): Map<string, number> {
-  const nodeSet = new Set(nodeIds);
-  const values = new Map<string, number>();
-  for (const nodeId of nodeIds) {
-    if (!seeds.has(nodeId)) continue;
-    values.set(nodeId, clampInteger(seeds.get(nodeId)!, bottom, top));
-  }
-  if (priorValues === undefined) return values;
-  for (const [nodeId, value] of priorValues) {
-    if (!nodeSet.has(nodeId)) continue;
+): PersistentStringMap<number> {
+  let values = priorValues instanceof PersistentStringMap ? priorValues : new PersistentStringMap<number>();
+  for (const [nodeId, value] of priorValues instanceof PersistentStringMap ? [] : priorValues ?? []) {
+    if (!nodeIds.has(nodeId)) continue;
     const clamped = clampInteger(value, bottom, top);
     const current = values.get(nodeId);
-    if (current === undefined || clamped > current) values.set(nodeId, clamped);
+    if (current === undefined || clamped > current) values = values.with(nodeId, clamped);
+  }
+  for (const [nodeId, value] of seeds) {
+    if (!nodeIds.has(nodeId)) continue;
+    const grade = clampInteger(value, bottom, top);
+    if (!values.has(nodeId) || grade > values.get(nodeId)!) values = values.with(nodeId, grade);
   }
   return values;
 }
@@ -111,108 +145,49 @@ function legalTransitions(
 
 function adjacency(
   transitions: readonly MaxMinTransition[]
-): ReadonlyMap<string, readonly MaxMinTransition[]> {
-  const edges = new Map<string, MaxMinTransition[]>();
+): ReadonlyMap<string, MaxMinOutgoingEdges> {
+  const edges = new Map<string, MaxMinOutgoingEdges>();
   for (const transition of transitions) {
-    const outgoing = edges.get(transition.from);
-    if (outgoing === undefined) edges.set(transition.from, [transition]);
-    else outgoing.push(transition);
+    edges.set(transition.from, (edges.get(transition.from) ?? new MaxMinOutgoingEdges()).append(transition));
   }
   return edges;
 }
 
 function relaxMaxMin(
-  values: Map<string, number>,
-  edges: ReadonlyMap<string, readonly MaxMinTransition[]>,
+  priorValues: PersistentStringMap<number>,
+  edges: ReadonlyMap<string, MaxMinOutgoingEdges>,
   worklist: readonly MaxMinWorkItem[] | undefined,
-  workLimit: number | undefined
-): { remainingWorklist: readonly MaxMinWorkItem[]; steps: number; complete: boolean } {
-  const heap = new MaxHeap();
-  if (worklist !== undefined && worklist.length > 0) {
-    for (const item of worklist) heap.push(item.strength, item.nodeId);
-  } else {
-    for (const [nodeId, value] of values) heap.push(value, nodeId);
+  workLimit: number | undefined,
+  retainedQueue: MaxMinWorkQueue | undefined
+): { values: PersistentStringMap<number>; workQueue: MaxMinWorkQueue; steps: number; complete: boolean } {
+  let values = priorValues;
+  let heap = retainedQueue ?? new MaxMinWorkQueue();
+  if (worklist !== undefined) {
+    for (const item of worklist) heap = heap.push(item);
+  } else if (retainedQueue === undefined) {
+    for (const [nodeId, value] of values) heap = heap.push({ strength: value, nodeId });
   }
   let steps = 0;
-  while (!heap.isEmpty()) {
-    const current = heap.pop();
-    if (current.strength !== values.get(current.nodeId)) continue;
+  while (heap.size > 0) {
     if (workLimit !== undefined && steps >= workLimit) {
-      heap.push(current.strength, current.nodeId);
-      return { remainingWorklist: heap.remaining(), steps, complete: false };
+      return { values, workQueue: heap, steps, complete: false };
     }
+    const popped = heap.pop()!;
+    const current = popped.item;
+    heap = popped.queue;
+    if (current.strength !== values.get(current.nodeId)) { steps += 1; continue; }
+    const outgoing = edges.get(current.nodeId);
+    const offset = current.edgeOffset ?? 0;
+    const transition = outgoing?.at(offset);
     steps += 1;
-    for (const transition of edges.get(current.nodeId) ?? []) {
+    if (transition !== undefined) {
+      if (offset + 1 < outgoing!.length) heap = heap.push({ ...current, edgeOffset: offset + 1 });
       const next = Math.min(current.strength, transition.strength);
       const prior = values.get(transition.to);
       if (prior !== undefined && next <= prior) continue;
-      values.set(transition.to, next);
-      heap.push(next, transition.to);
+      values = values.with(transition.to, next);
+      heap = heap.push({ strength: next, nodeId: transition.to });
     }
   }
-  return { remainingWorklist: [], steps, complete: true };
-}
-
-class MaxHeap {
-  private readonly items: Array<{ strength: number; nodeId: string }> = [];
-
-  public push(strength: number, nodeId: string): void {
-    this.items.push({ strength, nodeId });
-    this.siftUp(this.items.length - 1);
-  }
-
-  public pop(): { strength: number; nodeId: string } {
-    const first = this.items[0];
-    const last = this.items.pop();
-    if (first === undefined || last === undefined) {
-      throw new Error("max-min heap underflow");
-    }
-    if (this.items.length > 0) {
-      this.items[0] = last;
-      this.siftDown(0);
-    }
-    return first;
-  }
-
-  public isEmpty(): boolean {
-    return this.items.length === 0;
-  }
-
-  public remaining(): readonly MaxMinWorkItem[] {
-    return this.items.map((item) => ({ nodeId: item.nodeId, strength: item.strength }));
-  }
-
-  private siftUp(index: number): void {
-    let current = index;
-    while (current > 0) {
-      const parent = Math.floor((current - 1) / 2);
-      if (this.items[parent]!.strength >= this.items[current]!.strength) return;
-      this.swap(parent, current);
-      current = parent;
-    }
-  }
-
-  private siftDown(index: number): void {
-    let current = index;
-    while (true) {
-      const left = current * 2 + 1;
-      const right = left + 1;
-      let best = current;
-      if (left < this.items.length && this.items[left]!.strength > this.items[best]!.strength) {
-        best = left;
-      }
-      if (right < this.items.length && this.items[right]!.strength > this.items[best]!.strength) {
-        best = right;
-      }
-      if (best === current) return;
-      this.swap(current, best);
-      current = best;
-    }
-  }
-
-  private swap(left: number, right: number): void {
-    const stored = this.items[left]!;
-    this.items[left] = this.items[right]!;
-    this.items[right] = stored;
-  }
+  return { values, workQueue: heap, steps, complete: true };
 }

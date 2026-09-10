@@ -1,4 +1,4 @@
-import { inactiveResolution, type AdjacencyRow, type NamedKindOverlay } from "./path-matching.js";
+import { type AdjacencyRow, type NamedKindOverlay } from "./path-matching.js";
 
 export type RoutingDiscovery = Readonly<{
   readonly source_id: string;
@@ -44,33 +44,6 @@ export function routingDiscoveryEffect(
   }];
 }
 
-export function routingFrontierEffects(
-  rows: readonly AdjacencyRow[],
-  overlay: NamedKindOverlay,
-  origins: ReadonlySet<string>
-): readonly RoutingDiscoveryEffect[] {
-  // Routing-only hops have no ProductState, so later hops cannot wait for a semantic `from`.
-  const frontier = new Set(origins);
-  const effects: RoutingDiscoveryEffect[] = [];
-  const emitted = new Set<string>();
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const row of rows) {
-      if (row.validity === undefined || inactiveResolution(row.resolutionKind)) continue;
-      if (emitted.has(row.assertionId) || !frontier.has(row.sourceObjectId)) continue;
-      const discovered = routingDiscoveryEffect(row, overlay);
-      if (discovered.length === 0) continue;
-      emitted.add(row.assertionId);
-      effects.push(...discovered);
-      if (frontier.has(row.targetObjectId)) continue;
-      frontier.add(row.targetObjectId);
-      grew = true;
-    }
-  }
-  return Object.freeze(effects);
-}
-
 export function mergeDiscoveries(
   current: readonly RoutingDiscovery[],
   incoming: readonly RoutingDiscovery[] = []
@@ -95,24 +68,35 @@ export function nextAdjacencyPair(
   discoveries: readonly RoutingDiscovery[] = []
 ): Readonly<{ readonly subject: string; readonly predicate: string }> | undefined {
   const subjectList = [...new Set([...subjects, ...discoveries.map((row) => row.subject_id)])];
-  if (subjectList.length === 0 || predicates.length === 0) return undefined;
-  const total = subjectList.length * predicates.length;
-  for (let offset = 0; offset < total; offset += 1) {
-    const index = (pairIndex + offset) % total;
-    const subject = subjectList[Math.floor(index / predicates.length)]!;
+  return scanAdjacencyPairs({ size: subjectList.length, at: (index) => subjectList[index] }, predicates, pairProgress,
+    pairIndex, subjectList.length * predicates.length).pair;
+}
+
+export function scanAdjacencyPairs(subjects: Readonly<{ size: number; at(index: number): string | undefined }>,
+  predicates: readonly string[], pairProgress: Readonly<{ has(id: string): boolean }>, start: number, allowance: number): Readonly<{
+    pair?: Readonly<{ subject: string; predicate: string }>; next: number; work: number;
+  }> {
+  const total = subjects.size * predicates.length;
+  let work = 0;
+  for (; work < Math.min(total, allowance);) {
+    const index = (start + work) % total;
+    const subject = subjects.at(Math.floor(index / predicates.length))!;
     const predicate = predicates[index % predicates.length]!;
+    work += 1;
     if (!pairProgress.has(`${pairKey(subject, predicate)}:done`)) {
-      return { subject, predicate };
+      return { pair: { subject, predicate }, next: index + 1, work };
     }
   }
-  return undefined;
+  return { next: total === 0 ? 0 : (start + work) % total, work };
 }
 
 export function hasOpenPairs(
   subjects: ReadonlySet<string>,
   predicates: readonly string[],
   pairProgress: ReadonlyMap<string, string | null>,
-  discoveries: readonly RoutingDiscovery[] = []
+  discoveries: readonly RoutingDiscovery[] = [],
+  completedPairs?: number
 ): boolean {
+  if (completedPairs !== undefined) return completedPairs < subjects.size * predicates.length;
   return nextAdjacencyPair(subjects, predicates, pairProgress, 0, discoveries) !== undefined;
 }

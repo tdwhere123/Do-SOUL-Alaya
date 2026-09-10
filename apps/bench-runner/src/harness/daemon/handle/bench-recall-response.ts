@@ -1,6 +1,7 @@
 import type { AlayaDaemonRuntime } from "@do-soul/alaya";
 import {
   InformationIndexSchema,
+  indexEntryCacheKey,
   RequestBudgetSchema,
   SoulMemorySearchResponseSchema,
   type InformationIndex,
@@ -45,9 +46,10 @@ export function encodeBenchRecallResults(
   expected?: ExpectedConditionalFieldRequest
 ): readonly MemorySearchResult[] {
   const index = validateBenchRecallIndex(result, requestBudget, expected);
-  const previews = new Map(result.candidates.flatMap((candidate) =>
-    candidate.object_id === undefined ? [] : [[candidate.object_id, candidate.content_preview] as const]
-  ));
+  const previews = new Map(index.entries.flatMap((entry, offset) => {
+    const candidate = result.candidates[offset];
+    return candidate === undefined ? [] : [[indexEntryCacheKey(entry), candidate.content_preview] as const];
+  }));
   const metadata = sourceMetadataForRecallResult(result);
   return encodeIndexResults(index, previews, policy.fine_assessment.budgets.max_total_tokens, metadata);
 }

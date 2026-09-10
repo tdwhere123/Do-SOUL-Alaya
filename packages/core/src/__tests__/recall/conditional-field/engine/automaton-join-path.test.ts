@@ -18,7 +18,7 @@ import {
   pairKey,
   routingOverlayKinds
 } from "../../../../recall/conditional-field/engine/path-composition.js";
-import { RELATION_MILLIGRADES } from "../../../../recall/runtime/conditional-field-observe.js";
+import { RELATION_ROUTING } from "../../../../recall/runtime/conditional-field-observe.js";
 
 const VALIDITY: RelationValidity = { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
 const AS_OF = "2026-09-07T00:00:00.000Z";
@@ -210,9 +210,8 @@ describe("automaton, compatible join, and composed path identity", () => {
     if (state.binding.kind !== "bound") throw new Error("expected bound field");
     const pathIds = state.facets.map((vector) => vector.path_id);
     expect(new Set(pathIds).size).toBeGreaterThan(1);
-    expect(state.facets.some((vector) => vector.coordinates.includes(800))).toBe(true);
-    expect(state.facets.some((vector) => vector.coordinates.includes(850))).toBe(true);
-    expect(state.facets.some((vector) => vector.coordinates[0] === 850 && vector.coordinates[1] === 800)).toBe(false);
+    expect(state.facets.every((vector) => vector.coordinates.every((grade) => grade === 1000))).toBe(true);
+    expect(state.facets.every((vector) => vector.coordinates.length === 1)).toBe(true);
   });
 
   it.each(["config", "x".repeat(180)])("alternative discovery order preserves same_path membership at 825 for %s", (objectId) => {
@@ -347,7 +346,7 @@ describe("automaton, compatible join, and composed path identity", () => {
     expect(adjacencyKindsFor(
       rel("observed_log", "x", "y"),
       [],
-      routingOverlayKinds(RELATION_MILLIGRADES)
+      routingOverlayKinds(RELATION_ROUTING)
     )).toEqual(expect.arrayContaining(["observed_log", "uses_service"]));
     const state = observeProgram(rel("observed_log", "x", "y"), [
       edge("seed", "fact", "observed_log"),
@@ -360,9 +359,9 @@ describe("automaton, compatible join, and composed path identity", () => {
     expect(state.discoveries.some((row) =>
       row.subject_id === "routed" && row.predicate === "uses_service"
     )).toBe(true);
-    expect(state.resume_subjects).toContain("routed");
+    expect([...state.resume_subjects.keys()]).toContain("routed");
     expect(state.transitions.every((item) => productSubjectId(item.to) !== "routed")).toBe(true);
-    expect(Object.keys(state.pair_progress).some((key) => key.startsWith("routed\0"))).toBe(true);
+    expect([...state.pair_progress.keys()].some((key) => key.startsWith("routed\0"))).toBe(true);
     expect(state.residuals.some((region) => region.kind === "discovery")).toBe(true);
   });
 
@@ -390,8 +389,8 @@ describe("automaton, compatible join, and composed path identity", () => {
     expect(state.discoveries.some((row) =>
       row.subject_id === "node-c" && row.assertion_id === "route-bc"
     )).toBe(true);
-    expect(state.resume_subjects).toEqual(expect.arrayContaining(["node-b", "node-c"]));
-    expect(Object.keys(state.pair_progress).some((key) => key.startsWith("node-c\0"))).toBe(true);
+    expect([...state.resume_subjects.keys()]).toEqual(expect.arrayContaining(["node-b", "node-c"]));
+    expect([...state.pair_progress.keys()].some((key) => key.startsWith("node-c\0"))).toBe(true);
     expect(state.residuals.some((region) =>
       region.kind === "discovery" && region.status === "exhausted"
     )).toBe(true);

@@ -3,30 +3,52 @@ import { productSubjectId, type ClaimState, type FieldValue, type IndexRole, typ
 import { applyEvidenceEffect, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { parseBindingContext } from "../conditional-field/engine/binding-environment.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
-import { transitionKey } from "../conditional-field/engine/path-composition.js";
 import { assessEvidence, observationsFromOwners, type RelationAssertionRead } from "../conditional-field/evidence/assess-support.js";
+import { prepareProductEvidence } from "../conditional-field/evidence/product-evidence.js";
+import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
+import type { RelationObserverRow } from "../conditional-field/observers/observe.js";
 
 export function assessUnknownCause(state: FieldEngineState, input: { readonly as_of: string }): FieldEngineState {
   if ((state.observed_relations?.length ?? 0) === 0 && (state.interpretation.view.claim_demands?.length ?? 0) === 0) {
     return applyEvidenceEffect(state, { support: [], work_status: "complete" });
   }
-  const count = (state.observed_relations ?? []).reduce((sum, row) => sum + 1 + (row.evidenceReceipts?.length ?? 0), 0);
-  const same = state.support_observation_count === count;
+  const references = [state.query_id, state.snapshot_id, input.as_of,
+    state.observed_relations, state.transitions, state.transition_derivations, state.derivations, state.ordered_identities];
+  const same = state.support_dependency_revision !== undefined
+    && references.every((reference, index) => reference === state.support_dependency_references?.[index]);
+  if (same && state.support_work_status === "complete") return state;
+  const dependencyRevision = same ? state.support_dependency_revision! : `support-generation:${Number(state.support_dependency_revision?.split(":").at(-1) ?? 0) + 1}`;
   const claims = new Map<string, ClaimState>(same ? state.claims : []);
   const propositions = new Map<string, Proposition>(same ? state.claim_propositions : []);
+  let propositionChanged = !same;
   const progress = { ...same ? state.support_progress : {} };
+  const dependencies = { ...same ? state.support_dependencies : {} };
   const support = new Map((same ? state.support : []).map((record) => [record.proposition_id, record]));
   let remaining = state.remaining_exploration;
   let memory = state.remaining_memory_bytes + (same ? 0 : state.support_retained_bytes ?? 0);
   let retainedBytes = same ? state.support_retained_bytes ?? 0 : 0;
-  let complete = true;
-  for (const value of state.binding.kind === "bound" ? state.binding.snapshot.values : []) {
-    if (!value.accepting || (value.milligrades ?? 0) <= 0) continue;
+  let offset = same ? state.support_scan_offset ?? 0 : 0;
+  const fallback = state.binding.kind === "bound" && state.ordered_identities === undefined ? state.binding.snapshot.values : [];
+  const values = orderedProjectionValues(state) ?? { size: fallback.length, at: (index: number) => fallback[index] };
+  while (offset < values.size && remaining > 0) {
+    remaining -= 1;
+    const value = values.at(offset)!;
+    if (!value.accepting || value.activation?.kind === "unreachable" || value.milligrades === undefined) { offset += 1; continue; }
     const key = productStateNodeId(value.state);
-    if (progress[key]?.complete) continue;
-    const demand = evidenceDemandForProduct(state, value, input.as_of, progress[key]?.offset ?? 0, Math.max(0, Math.floor((remaining - 2) / 8)));
-    const { id, context, observations, demands, required, nextOffset, receiptCount } = demand;
-    if (required > remaining || nextOffset === (progress[key]?.offset ?? 0) && receiptCount > nextOffset) { complete = false; continue; }
+    if (progress[key]?.complete) { offset += 1; continue; }
+    const claim = claimForProduct(state, value);
+    const prepared = prepareProductEvidence({ state, value, claimKind: claim.causeDemand ? claim.claimKind : undefined,
+      causeSource: claim.causeDemand ? claim.arguments_[0] : undefined, progress: progress[key]?.cursor,
+      workLimit: remaining, memoryLimit: memory });
+    remaining -= prepared.work;
+    if (prepared.rows.length === 0 && !prepared.complete) {
+      progress[key] = { cursor: prepared.progress, complete: false };
+      memory -= prepared.retained_bytes; retainedBytes += prepared.retained_bytes;
+      break;
+    }
+    const demand = evidenceDemandForProduct(state, value, input.as_of, prepared.rows, prepared.progress.assertion_ids);
+    const { id, context, observations, demands, required, dependencyIds } = demand;
+    if (required > remaining) break;
     const assessed = assessEvidence({ ...context, observations, propositions: demands, work_limit: required });
     remaining -= required;
     const records = assessed.records.map((record) => mergeSupportRecord(support.get(record.proposition_id), record));
@@ -34,18 +56,25 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
     const bytes = records.reduce((sum, record) => sum + Math.max(0, Buffer.byteLength(JSON.stringify(record))
       - Buffer.byteLength(JSON.stringify(support.get(record.proposition_id) ?? null))), 0)
       + (progress[key] === undefined ? Buffer.byteLength(JSON.stringify(proposition)) + 100 : 0);
-    if (bytes > memory) { complete = false; continue; }
-    memory -= bytes;
-    retainedBytes += bytes;
+    if (bytes + prepared.retained_bytes > memory) break;
+    memory -= bytes + prepared.retained_bytes;
+    retainedBytes += bytes + prepared.retained_bytes;
     for (const record of records) support.set(record.proposition_id, record);
-    propositions.set(key, proposition);
+    if (propositions.get(key)?.proposition_id !== proposition.proposition_id) {
+      propositions.set(key, proposition); propositionChanged = true;
+    }
     claims.set(key, support.get(id)?.claim ?? "unknown");
-    progress[key] = { offset: nextOffset, complete: nextOffset >= receiptCount };
-    if (!progress[key]!.complete) complete = false;
+    dependencies[key] = [...new Set([...(dependencies[key] ?? []), ...dependencyIds])];
+    progress[key] = { cursor: prepared.progress, complete: prepared.complete };
+    if (prepared.complete) offset += 1;
   }
-  const next = applyEvidenceEffect({ ...state, support: [], claims, remaining_exploration: remaining, remaining_memory_bytes: memory },
+  const complete = offset === values.size;
+  const next = applyEvidenceEffect({ ...state, support: [], remaining_exploration: remaining, remaining_memory_bytes: memory },
     { support: [...support.values()], claims, work_status: complete ? "complete" : "open" });
-  return { ...next, claim_propositions: propositions, support_progress: progress, support_observation_count: count, support_retained_bytes: retainedBytes };
+  return { ...next, claim_propositions: propositionChanged ? propositions : state.claim_propositions, support_progress: progress,
+    support_scan_offset: offset, support_completed_work: (state.support_completed_work ?? 0) + state.remaining_exploration - remaining,
+    support_dependency_revision: dependencyRevision, support_dependency_references: references,
+    support_dependencies: dependencies, support_retained_bytes: retainedBytes };
 }
 
 function mergeSupportRecord(prior: SupportRecord | undefined, next: SupportRecord): SupportRecord {
@@ -56,36 +85,29 @@ function mergeSupportRecord(prior: SupportRecord | undefined, next: SupportRecor
     witnesses: [...new Map([...(prior?.witnesses ?? []), ...next.witnesses].map((witness) => [witness.witness_id, witness])).values()] };
 }
 
-export function rolesFrom(state: FieldEngineState): ReadonlyMap<string, IndexRole> {
-  const roles = new Map<string, IndexRole>();
-  // Overlay routing_only classifies unmatched discovery, not admitted products.
-  for (const identity of state.seen_identities) roles.set(productStateNodeId(identity), "associated");
-  for (const seed of state.seeds) roles.set(productStateNodeId(seed.state), "requested");
-  return roles;
+export function rolesFrom(state: FieldEngineState): Readonly<{ get(id: string): IndexRole | undefined }> {
+  return { get: (id) => state.retained_index?.seeds.has(id) ? "requested" : state.roles.get(id) ?? "associated" };
 }
 
-function evidenceDemandForProduct(state: FieldEngineState, value: FieldValue, asOf: string, offset: number, limit: number) {
-  const key = productStateNodeId(value.state);
+function claimForProduct(state: FieldEngineState, value: FieldValue) {
   const env = parseBindingContext(value.state.binding_context);
   const claimDemand = state.interpretation.view.claim_demands?.find((demand) => env.get(demand.variable) === productSubjectId(value.state));
   const causeDemand = claimDemand !== undefined;
   const claimKind = claimDemand?.proposition_kind ?? "association";
   const arguments_ = claimDemand?.argument_variables.map((variable) => env.get(variable) ?? "unbound") ?? [productSubjectId(value.state)];
-  const assertionIds = new Set(state.transitions.filter((transition) => productStateNodeId(transition.to) === key)
-    .flatMap((transition) => state.derivations.find((root) => root.derivation_id === state.transition_derivations[transitionKey(transition)])?.leaf_ids ?? []));
-  const rows = (state.observed_relations ?? []).filter((row) => row.targetObjectId === productSubjectId(value.state)
-    && (assertionIds.has(row.assertionId) || causeDemand && row.predicate === claimKind && row.sourceObjectId === arguments_[0]));
-  const receiptCount = rows.reduce((sum, row) => sum + (row.evidenceReceipts?.length ?? 0), 0);
-  const nextOffset = Math.min(receiptCount, offset + limit);
-  let passed = 0;
+  return { causeDemand, claimKind, arguments_ };
+}
+
+function evidenceDemandForProduct(state: FieldEngineState, value: FieldValue, asOf: string,
+  rows: readonly RelationObserverRow[], assertionIds: Readonly<{ has(id: string): boolean }>) {
+  const key = productStateNodeId(value.state);
+  const { causeDemand, claimKind, arguments_ } = claimForProduct(state, value);
   const assertions: RelationAssertionRead[] = rows.flatMap((row) => {
     const receipts = row.evidenceReceipts ?? [];
-    const selected = receipts.slice(Math.max(0, offset - passed), Math.max(0, nextOffset - passed));
-    passed += receipts.length;
     return row.validity === undefined ? [] : [{
       assertion_id: row.assertionId, relation_kind: row.predicate, validity: row.validity,
       anchors: { source_anchor: { kind: "object" as const, object_id: row.sourceObjectId }, target_anchor: { kind: "object" as const, object_id: row.targetObjectId } },
-      evidence_receipts: selected.map((receipt) => ({ evidence_id: receipt.evidenceId,
+      evidence_receipts: receipts.map((receipt) => ({ evidence_id: receipt.evidenceId,
         source_event_anchor: { event_id: receipt.eventId, event_type: receipt.eventType, occurred_at: receipt.occurredAt } }))
     }];
   });
@@ -111,5 +133,6 @@ function evidenceDemandForProduct(state: FieldEngineState, value: FieldValue, as
         premises: [rows.find((row) => row.assertionId === assertion.assertion_id)!.sourceObjectId, productSubjectId(value.state)], cost: 1 })))
   }));
   const required = observations.length + demands.length + demands.reduce((sum, demand) => sum + demand.templates.length * 2, 0);
-  return { key, id, context, observations, demands, required, nextOffset, receiptCount };
+  return { key, id, context, observations, demands, required,
+    dependencyIds: rows.flatMap((row) => [row.assertionId, ...(row.evidenceReceipts ?? []).flatMap((receipt) => [receipt.evidenceId, receipt.eventId])]) };
 }

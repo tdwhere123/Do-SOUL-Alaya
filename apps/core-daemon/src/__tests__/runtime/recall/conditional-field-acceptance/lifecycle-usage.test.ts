@@ -82,8 +82,8 @@ async function collectBoundaryPages(handler: ReturnType<typeof handlerFor>) {
     entries.push(...page.index.entries);
     continuation = page.index.continuation;
     if (continuation === null) {
-      expect(page.index.completeness.observed_coverage).toBe("complete");
-      expect(page.index.completeness.logical_index).toBe("complete");
+      expect(page.index.completeness.observed_coverage).toBe("unknown");
+      expect(page.index.completeness.logical_index).toBe("open");
       break;
     }
   }
@@ -207,7 +207,7 @@ describe("conditional-field lifecycle and verified usage through actual consumer
       continuation: first.index!.continuation } as Parameters<typeof service.recall>[0]);
     expect([...new Set([...first.index!.entries, ...resumed.index!.entries].map((entry) => entry.object_id))].sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
     const tightReserve = await service.recall({ ...params, budget: { ...params.budget, memory_bytes: 1000000, finalization_reserve: 1 } } as Parameters<typeof service.recall>[0]);
-    expect(tightReserve.index!.completeness.observed_coverage).toBe("complete");
+    expect(tightReserve.index!.completeness.observed_coverage).toBe("unknown");
     expect(tightReserve.index!.continuation).toBeNull();
     expect(tightReserve.index!.entries.map((entry) => entry.object_id).sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
   });

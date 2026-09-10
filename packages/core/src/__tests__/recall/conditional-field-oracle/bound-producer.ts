@@ -305,6 +305,7 @@ export function indexFromObserved(
     snapshot_id: interpretation.snapshot_id,
     result_version: "v1",
     budget: observeInput.budget,
+    remaining_reserve: field.remaining_reserve + field.remaining_exploration,
     roles: rolesFrom(field),
     claims: field.claims,
     claim_propositions: field.claim_propositions,

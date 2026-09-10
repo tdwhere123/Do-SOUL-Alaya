@@ -1,6 +1,21 @@
 import type { TypedObservation } from "@do-soul/alaya-protocol";
-import type { ObserverReaders } from "../conditional-field/observers/observe.js";
-import type { BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
+import type { ObserverReaders, SourceRootObserverRow } from "../conditional-field/observers/observe.js";
+import { sourceFactKey, type BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
+import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
+
+type FactWriter = Readonly<{ has(id: string): boolean; set(id: string, facts: BoundSourceFacts): unknown }>;
+
+export class ObservedSourceFacts {
+  public constructor(public snapshot: PersistentStringMap<BoundSourceFacts> = new PersistentStringMap(), public bytes = 0) {}
+  public has(id: string): boolean { return this.snapshot.has(id); }
+  public set(id: string, facts: BoundSourceFacts): this {
+    const before = this.snapshot.get(id);
+    this.bytes += Buffer.byteLength(JSON.stringify([id, facts]), "utf8")
+      - (before === undefined ? 0 : Buffer.byteLength(JSON.stringify([id, before]), "utf8"));
+    this.snapshot = this.snapshot.with(id, facts);
+    return this;
+  }
+}
 
 type ObservedFactInput = Readonly<{
   readonly workspace_id: string;
@@ -11,7 +26,7 @@ export function recordObservedAt(
   input: ObservedFactInput,
   objectIds: readonly string[],
   observedAt: Record<string, string>,
-  sourceFacts: Map<string, BoundSourceFacts>
+  sourceFacts: FactWriter
 ): void {
   const source = input.readers.source;
   if (source === undefined) return;
@@ -40,24 +55,16 @@ export function recordObservedAt(
 }
 
 export function recordSourceRootFacts(
-  input: ObservedFactInput,
+  rows: readonly SourceRootObserverRow[],
   observations: readonly TypedObservation[],
-  sourceFacts: Map<string, BoundSourceFacts>
+  sourceFacts: FactWriter
 ): void {
-  const load = input.readers.sourceRoot;
   for (const observation of observations) {
     const target = observation.target;
     if (target === undefined || target.kind !== "source_evidence") continue;
-    const loaded = load === undefined ? undefined : load({
-      workspaceId: target.workspace_id,
-      rootKind: target.root_kind,
-      rootId: target.root_id,
-      revision: target.source_version,
-      digest: target.content_digest,
-      evidenceObjectId: target.evidence_object_id
-    });
-    const row = loaded?.row;
-    sourceFacts.set(observation.object_id, {
+    const row = rows.find((candidate) => candidate.kind === target.root_kind && candidate.root_id === target.root_id
+      && candidate.revision === target.source_version && candidate.digest === target.content_digest);
+    sourceFacts.set(sourceFactKey(target), {
       object_id: target.root_id,
       workspace_id: target.workspace_id,
       root_kind: target.root_kind,
@@ -69,6 +76,8 @@ export function recordSourceRootFacts(
         event_time: observation.observed_at
       }),
       ...(row?.content === undefined ? {} : { content: row.content }),
+      content_complete: row?.content_complete === true,
+      ...(row?.literal_verdicts === undefined ? {} : { literal_verdicts: row.literal_verdicts }),
       ...(row?.role === undefined ? {} : { role: row.role }),
       ...(row?.event_time === undefined || row.event_time === null
         ? {}

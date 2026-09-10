@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  EvidenceHealthState,
   sourceRecallTarget,
   type Guard,
   type QueryInterpretation,
@@ -21,7 +22,7 @@ import {
 } from "../../../../recall/conditional-field/observers/observe.js";
 import { defaultView } from "../../../../recall/conditional-field/query/query-admission.js";
 import { evaluateFrozenSourcePredicate } from "../../../../recall/conditional-field/query/source-predicates.js";
-import type { BoundSourceFacts } from "../../../../recall/conditional-field/engine/binding-environment.js";
+import { sourceFactKey, type BoundSourceFacts } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import { recordSourceRootFacts } from "../../../../recall/runtime/observed-source-facts.js";
 import {
   fieldSha256,
@@ -93,28 +94,16 @@ describe("source-root speaker and evidence bind", () => {
     const boundRow = toSourceRootObserverRow(page.rows.find((row) => row.root_id === bound.record_id)!);
     const facts = new Map<string, BoundSourceFacts>();
     recordSourceRootFacts(
-      {
-        workspace_id: "workspace-1",
-        readers: {
-          sourceRoot: ({ rootId }) => ({
-            row: rootId === userRow.root_id ? userRow
-              : rootId === boundRow.root_id ? boundRow
-              : null,
-            rowsRead: 1,
-            bytesRead: 1,
-            unavailable: false
-          })
-        }
-      },
+      [userRow, boundRow],
       [
         observationFor(userRow),
         observationFor(boundRow)
       ],
       facts
     );
-    expect(facts.get(userRow.root_id)?.role).toBe("user");
-    expect(facts.get(boundRow.root_id)?.evidence_verified).toBe(true);
-    expect(facts.get(boundRow.root_id)?.evidence_object_id).toBe(bound.evidence_object_id);
+    expect(facts.get(sourceFactKey(observationFor(userRow).target))?.role).toBe("user");
+    expect(facts.get(sourceFactKey(observationFor(boundRow).target))?.evidence_verified).toBe(true);
+    expect(facts.get(sourceFactKey(observationFor(boundRow).target))?.evidence_object_id).toBe(bound.evidence_object_id);
   });
 });
 
@@ -123,6 +112,11 @@ function plantedRoots() {
   tracked.add(database);
   const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
   const capsules = new SqliteEvidenceCapsuleRepo(database);
+  capsules.createInCurrentTransaction({ object_id: "55555555-5555-4555-8555-555555555555", object_kind: "evidence_capsule", schema_version: 1,
+    lifecycle_state: "active", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", created_by: "user_action",
+    evidence_kind: "conversation_excerpt", semantic_anchor: { topic: "source", keywords: ["source"], summary: "source" },
+    event_anchor: null, physical_anchor: null, evidence_health_state: EvidenceHealthState.VERIFIED, gist: "bound body", excerpt: "bound body",
+    source_hash: null, run_id: "run-1", workspace_id: "workspace-1", surface_id: null });
   const user = records.insert({
     ...hashedRecord("workspace-1", "user said hello", "alaya:artifact:user-turn"),
     speaker: "user"

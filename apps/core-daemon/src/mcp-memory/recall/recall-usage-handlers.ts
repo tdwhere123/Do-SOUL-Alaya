@@ -419,6 +419,10 @@ function witnessExposures(index: RecallServiceResult["index"]): readonly UsageRe
   if (index?.interpretation_id === undefined || index.as_of === undefined) return [];
   const forest = new Map((index.explanations ?? []).map((node) => [node.derivation_id, node]));
   const roots = new Set(index.entries.flatMap((entry) => entry.explanation_ids));
+  for (const update of index.product_updates ?? []) {
+    if (update.update_kind === "proof" && update.previous_revision !== undefined
+      && forest.has(update.revision)) roots.add(update.revision);
+  }
   const pending = [...roots];
   const visited = new Set<string>();
   const witnesses = new Set<string>();

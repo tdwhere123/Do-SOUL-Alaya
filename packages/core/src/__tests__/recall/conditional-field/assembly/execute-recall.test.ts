@@ -39,9 +39,9 @@ describe("conditional-field executeRecall assembly", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const index = runRecall(slice, { page_budget: 800 });
-    expectCompleteBaseline(index);
+    expectMemoryBaselineWithUnknownSources(index);
     expect(index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades, JSON.stringify(index.completeness))
-      .toBe(550);
+      .toBe(1000);
     const supported = index.entries.find((entry) => entry.explanation_ids.length > 0);
     expect(supported).toBeDefined();
     expect(supported?.explanation_ids.length).toBeGreaterThan(0);
@@ -55,7 +55,7 @@ describe("conditional-field executeRecall assembly", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const full = runRecall(slice, { page_budget: 800 });
-    expectCompleteBaseline(full);
+    expectMemoryBaselineWithUnknownSources(full);
     const pages: InformationIndex[] = [];
     let continuation: InformationIndex["continuation"] = null;
     for (let step = 0; step < 16; step += 1) {
@@ -88,14 +88,14 @@ describe("conditional-field executeRecall assembly", () => {
     const lexical = runRecall(empty, { page_budget: 800, query_text: "deployment rules" });
     expect(lexical.entries).toEqual([]);
     expect(lexical.completeness.logical_index).toBe("open");
-    expect(lexical.completeness.observed_coverage).toBe("exhausted_empty");
+    expect(lexical.completeness.observed_coverage).toBe("unknown");
     const partial = runRecall(empty, {
       page_budget: 800,
       query_text: "failed deployment of checkout"
     });
     expect(partial.entries).toEqual([]);
     expect(partial.completeness.logical_index).toBe("open");
-    expect(partial.completeness.observed_coverage).toBe("exhausted_empty");
+    expect(partial.completeness.observed_coverage).toBe("unknown");
   });
 
   it("filters dimension and absent domain tags instead of returning every fact", async () => {
@@ -140,7 +140,7 @@ describe("conditional-field executeRecall assembly", () => {
     await plantDeployment(slice);
     const index = runRecall(slice, { page_budget: 800 });
     expect(index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
-      .toBe(850);
+      .toBe(1000);
     const seed = observeConditionalField({
       lease: {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -216,7 +216,7 @@ describe("conditional-field executeRecall assembly", () => {
       readers: readersFor(slice)
     });
     expect(commands.completeness.logical_index).toBe("open");
-    expect(commands.completeness.observed_coverage).toBe("exhausted_empty");
+    expect(commands.completeness.observed_coverage).toBe("unknown");
   });
 
   it("does not mint complete-empty after an unavailable observer", async () => {
@@ -257,7 +257,7 @@ describe("conditional-field executeRecall assembly", () => {
     const full = await service.recall({ ...pageRequest, pageBudget: 800,
       budget: defaultBudget({ page_budget: 800, finalization_reserve: COMPLETE_FINALIZATION_RESERVE })
     } as Parameters<typeof service.recall>[0]);
-    expectCompleteBaseline(full.index);
+    expectMemoryBaselineWithUnknownSources(full.index);
     const pages: InformationIndex[] = [];
     let continuation: InformationIndex["continuation"] = null;
     for (let step = 0; step < 16; step += 1) {
@@ -356,13 +356,13 @@ describe("conditional-field executeRecall assembly", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const baseline = runRecall(slice, { page_budget: 800 });
-    expect(baseline.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades).toBe(550);
+    expect(baseline.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades).toBe(1000);
     await plantIrrelevantRouting(slice);
     const mutated = runRecall(slice, { page_budget: 800 });
     expect(mutated.query_id).toBe(baseline.query_id);
     expect(mutated.entries.map(entryId)).toEqual(baseline.entries.map(entryId));
     expect(mutated.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
-    expect(mutated.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades).toBe(550);
+    expect(mutated.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades).toBe(1000);
   });
 
   it("tiny work_units leaves unmatched routing residual unknown", async () => {
@@ -415,10 +415,11 @@ function runRecall(
   });
 }
 
-function expectCompleteBaseline(index: InformationIndex): void {
+function expectMemoryBaselineWithUnknownSources(index: InformationIndex): void {
   expect(index.completeness, JSON.stringify(index.completeness)).toMatchObject({
-    logical_index: "complete", observed_coverage: "complete", transport: "complete", representation: "complete"
+    logical_index: "open", observed_coverage: "unknown", transport: "open", representation: "complete"
   });
+  expect(index.completeness.certificate_id).toBeUndefined();
   expect(index.continuation).toBeNull();
 }
 

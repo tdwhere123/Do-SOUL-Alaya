@@ -30,15 +30,15 @@
       },
       "packages/core/src/recall/runtime/recall-service-runner.ts": {
         "kind": "handwritten",
-        "reason": "Single normal-entry owner: admit budget, compile, snapshot pin, C01-C05 dispatch, encode."
+        "reason": "Normal request coordinator for shared budgets, snapshot admission, compilation, field execution and delivery encoding."
       },
       "packages/core/src/recall/runtime/conditional-field-observe.ts": {
         "kind": "handwritten",
-        "reason": "Production observation agenda: seed/adjacency scheduling, milligrade conversion, incomplete-observer closure."
+        "reason": "One observation agenda coordinates seed, adjacency and prepared measurement scheduling with shared resource accounting and interruption."
       },
       "packages/core/src/recall/conditional-field/observers/observe.ts": {
         "kind": "handwritten",
-        "reason": "C02 native observer: seed/relation/measurement pages plus anchor time-guard evaluation."
+        "reason": "Native observer port contracts, cursor validation and action dispatch; source and measurement algorithms have separate owners."
       }
     }
   },
@@ -1152,20 +1152,20 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 2243,
-      "expected_sha256": "fd7680809260f8e666cd7e8434aac5e2371db4fa7d772f146c43ede740ca4bdd"
+      "expected_count": 2333,
+      "expected_sha256": "a1fc246c5d54659d9bda2b93e7fe602d586e346e858ba00d31e59fcb12857c4d"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
       "path": "packages/graph-algorithms/src/index.ts",
-      "expected_count": 12,
-      "expected_sha256": "eccf63603f2395b105922a40883eebd488a8542bdcffecc7d6994bf1a4488496"
+      "expected_count": 17,
+      "expected_sha256": "98b486044b2807d1ba06c7c946ba8ab11bca4d118490228f3adc935d3d09fe5e"
     },
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 908,
-      "expected_sha256": "8bf74fad1dcb61f54c90c3e7b4cceccf6625579224325a40ec928672e940eb81"
+      "expected_count": 914,
+      "expected_sha256": "90ab0672136f74944be5fa367e6749f4662ca651ff6345f263f4d0e817abae6b"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
@@ -1200,8 +1200,8 @@
     {
       "specifier": "@do-soul/alaya-storage",
       "path": "packages/storage/src/index.ts",
-      "expected_count": 305,
-      "expected_sha256": "48f4e4d1a6ba10d8ed746002ad04b7c6274a34841669182bb76b86a823e347f2"
+      "expected_count": 319,
+      "expected_sha256": "98bb849e7d4931653f1b8bd999978758410cb84daa90022365bbcfbbdfa088d5"
     },
     {
       "specifier": "@do-soul/alaya",

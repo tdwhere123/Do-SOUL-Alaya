@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   InformationIndexSchema,
@@ -39,7 +40,6 @@ import type { RecallExecutionContext, RecallExecutionParams } from "./recall-ser
 import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
 import { assertRecallZeroLiveExtraction } from "./zero-live-extraction.js";
 import {
-  RELATION_MILLIGRADES,
   emptyField,
   observeField
 } from "./conditional-field-observe.js";
@@ -49,7 +49,6 @@ import { reserveSnapshotPinWork } from "./snapshot-pin-budget.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
 
 export type { RecallExecutionContext, RecallExecutionParams } from "./recall-service-runner-types.js";
-export { RELATION_MILLIGRADES };
 
 const RESULT_VERSION = "v1";
 const DEFAULT_WORK_UNITS = 10_000;
@@ -237,6 +236,7 @@ function runCompiledConditionalFieldRecall(
   const projected = projectFromField(assessUnknownCause(field, input), input, interpretation, (next) => { retained = next; });
   const index = projected.entries.length === 0 && fieldProgress(retained) === fieldProgress(restored)
     && (restored !== undefined || input.budget.work_units <= 1)
+    && retained.pending_path_effects === undefined && !retained.memory_exhausted && retained.retention_rejected === undefined
     ? { ...projected, continuation: null } : projected;
   if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
   rememberField(retained, index.continuation);
@@ -246,7 +246,10 @@ function runCompiledConditionalFieldRecall(
 function fieldProgress(state: FieldEngineState | undefined): string {
   return JSON.stringify([state?.observations.length ?? 0, state?.seeds.length ?? 0,
     state?.transitions.length ?? 0, state?.grounding_progress?.completed_work ?? 0,
-    state?.resume_cursors ?? {}, state?.pair_progress ?? {}, state?.support_progress ?? {},
+    state?.resume_cursors ?? {}, state?.pair_revision ?? 0, state?.pair_scan_offset ?? 0, state?.support_completed_work ?? 0,
+    state?.pending_path_effects?.completed_work ?? 0, state?.pending_path_effects?.offset ?? 0,
+    state?.explanation_completed_work ?? 0,
+    state?.solver_completed_work ?? 0,
     state?.projection_progress?.offset ?? 0, state?.projection_progress?.delivered_entries ?? {}]);
 }
 
@@ -296,17 +299,16 @@ function projectFromField(
   interpretation: ReturnType<typeof compileConditionalFieldQuery>,
   retain?: (state: FieldEngineState) => void
 ): InformationIndex {
-  const delta = projectFieldDelta(state);
   const snapshot = state.binding.kind === "bound"
     ? state.binding.snapshot
     : {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       snapshot_id: state.snapshot_id,
       query_id: state.query_id,
-      seeds: state.seeds,
-      values: delta.accepted_states,
-      retained_transitions: state.transitions,
-      facets: state.facets
+      seeds: [...state.seeds],
+      values: projectFieldDelta(state).accepted_states,
+      retained_transitions: [...state.transitions],
+      facets: [...state.facets]
     };
   const ceilings = governanceManifestationCeilings(input.governance?.paths ?? []);
   const manifestationFor = (id: string) => input.governance === undefined ? "excerpt" as const
@@ -314,6 +316,7 @@ function projectFromField(
       && !input.governance.temporal_uncertain);
   let retained = state;
   let projectionProgress = resumeIndexProjection(state, snapshot);
+  let semanticEntries: readonly import("@do-soul/alaya-protocol").IndexEntry[] = [];
   const payload = new BoundedIndexPayload({ sourceFacts: state.source_facts,
     previewCache: state.preview_cache, readers: input.readers, workspaceId: input.workspace_id,
     remainingMemoryBytes: state.remaining_memory_bytes, manifestationFor,
@@ -322,6 +325,7 @@ function projectFromField(
       : { payloadContinuation: input.payload_continuation }) });
   let index = annotatePublicIndex(InformationIndexSchema.parse(projectAcceptingIndex({
     snapshot,
+    ordered_values: orderedProjectionValues(state),
     view: interpretation.view,
     query_id: interpretation.query_id,
     snapshot_id: interpretation.snapshot_id,
@@ -332,17 +336,27 @@ function projectFromField(
     delivered_product_ids: new Set(Object.keys(projectionProgress.delivered_entries)),
     delivered_entry_revisions: projectionProgress.delivered_entries,
     on_projection_progress: (offset) => { projectionProgress = { ...projectionProgress, offset }; },
+    on_semantic_entries: (entries) => { semanticEntries = entries; },
+    explanation_progress: state.explanation_progress,
+    on_explanation_progress: (progress, retainedBytes, work) => {
+      payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
+      retained = { ...retained, explanation_progress: progress,
+        explanation_completed_work: (retained.explanation_completed_work ?? 0) + work,
+        remaining_memory_bytes: payload.remainingMemoryBytes };
+    },
     roles: rolesFrom(state),
     claims: state.claims,
     claim_propositions: state.claim_propositions,
     transition_derivations: state.transition_derivations,
-    source_facts: state.source_facts,
     grounding_progress: state.grounding_progress,
+    grounding_transitions: state.transitions,
+    grounding_seeds: state.seeds,
+    grounding_derivations: state.derivations,
+    projection_facets: state.facets,
     remaining_memory_bytes: payload.remainingMemoryBytes,
     on_grounding_progress: (progress, retainedBytes) => {
       payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
       retained = { ...retained, grounding_progress: progress, remaining_memory_bytes: payload.remainingMemoryBytes };
-      projectionProgress = resumeIndexProjection(retained, snapshot);
     },
     on_remaining_reserve: (remaining) => {
       retained = { ...retained, remaining_reserve: Math.min(state.remaining_reserve, remaining),
@@ -370,13 +384,12 @@ function projectFromField(
       ? {}
       : { interpretation_clock: interpretation.interpretation_clock }),
     payload_generation: interpretation.snapshot_id,
-    ...((state.derivations?.length ?? 0) === 0 ? {} : { derivations: state.derivations }),
     ...(state.support_work_status === undefined ? {} : { support_work_status: state.support_work_status }),
     ...(state.memory_exhausted || state.remaining_work.length > 0
       ? { resource_work: "open" as const }
       : {})
   })), interpretation);
-  const delivery = retainIndexDelivery(projectionProgress, index.entries, state.projection_progress === undefined);
+  const delivery = retainIndexDelivery(projectionProgress, semanticEntries, state.projection_progress === undefined);
   if (delivery.bytes > payload.remainingMemoryBytes) index = { ...index, continuation: null };
   else {
     payload.remainingMemoryBytes -= delivery.bytes;

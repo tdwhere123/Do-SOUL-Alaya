@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  ASSOCIATION_DOMAIN_ID,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
   memoryProductStateKey,
@@ -39,11 +40,13 @@ import {
 } from "./binding-environment.js";
 import { leafDerivation } from "./path-derivation.js";
 import {
-  hyperedgeEffects,
+  hyperedgeEffectSteps,
   tryCompleteHyperedge,
   type HyperedgeCompletion,
   type HyperedgeEffect
 } from "./path-hyperedge.js";
+import { PathEffectCursor, type PathComputation } from "./path-effect-cursor.js";
+import type { RetainedRows } from "./retained-sequence.js";
 import {
   inactiveResolution,
   observedTargetRevision,
@@ -55,7 +58,6 @@ import {
 } from "./path-matching.js";
 import {
   routingDiscoveryEffect,
-  routingFrontierEffects,
   type RoutingDiscovery
 } from "./path-routing.js";
 import {
@@ -275,48 +277,88 @@ export function adjacencyKindsFor(
 }
 
 export function adjacencyEffectsForRows(
-  rows: readonly AdjacencyRow[],
-  input: Readonly<{
+  rows: Iterable<AdjacencyRow>,
+  input: AdjacencyEffectsInput
+): readonly CompiledAdjacencyEffect[] {
+  const effects: CompiledAdjacencyEffect[] = [];
+  for (const step of adjacencyEffectSteps(rows, input)) if (step.kind === "effect") effects.push(step.effect);
+  return effects;
+}
+
+export type AdjacencyEffectsInput = Readonly<{
     readonly interpretation: QueryInterpretation;
     readonly asOf: string;
-    readonly liveStates: readonly ProductStateKey[];
+    readonly liveStates: RetainedRows<ProductStateKey>;
+    readonly liveStateOffset?: number;
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-    readonly facets?: readonly FacetVector[];
-    readonly discoveries?: readonly RoutingDiscovery[];
-  }>
-): readonly CompiledAdjacencyEffect[] {
+    readonly facets?: RetainedRows<FacetVector>;
+    readonly discoveries?: RetainedRows<RoutingDiscovery>;
+  }>;
+
+export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput): PathEffectCursor;
+export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput, memoryLimit: number): PathEffectCursor | undefined;
+export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput, memoryLimit = Number.MAX_SAFE_INTEGER): PathEffectCursor | undefined {
+  const initialBytes = 8192 + 256;
+  if (initialBytes > memoryLimit) return undefined;
+  // A pending computation owns this immutable input version. Producers replace
+  // versions; retaining their references needs no eager element traversal.
+  return new PathEffectCursor(adjacencyEffectSteps(rows, input), initialBytes);
+}
+
+function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput): PathComputation<void> {
   const runtime = runtimeProgram(input.interpretation.program);
-  if (runtime === "empty" || runtime === "epsilon") return [];
+  if (runtime === "empty" || runtime === "epsilon") return;
+  yield { kind: "work", retained_bytes: 1024 + Buffer.byteLength(JSON.stringify(runtime), "utf8") * 8 };
   const automaton = compileProgramAutomaton(runtime);
-  const effects: CompiledAdjacencyEffect[] = [];
-  for (const from of input.liveStates) {
+  for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
+    yield { kind: "work", retained_bytes: 64 };
+    const from = input.liveStates.at(index)!;
     if (from.target.kind !== "memory_entry") continue;
     for (const advance of automaton.hyperedgeAdvances) {
       if (advance.from !== from.program_state) continue;
-      effects.push(...hyperedgeEffects(rows, advance.hyperedge, {
+      for (const step of hyperedgeEffectSteps(rows, advance.hyperedge, {
         liveStates: [from],
         overlay: input.overlay,
         sourceFacts: input.sourceFacts,
         toProgramStates: advance.to,
         observedStates: input.liveStates
-      }).map(attachHyperedgeFacet));
+      })) yield step.kind === "work" ? step : { kind: "effect", effect: attachHyperedgeFacet(step.effect) };
     }
   }
   for (const row of rows) {
     if (row.validity === undefined) continue;
     if (inactiveResolution(row.resolutionKind)) continue;
-    for (const from of input.liveStates) {
+    for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
+      yield { kind: "work" };
+      const from = input.liveStates.at(index)!;
       if (productSubjectId(from) !== row.sourceObjectId) continue;
-      effects.push(...effectsForLiveRow(automaton, row, from, input));
+      yield* effectsForLiveRow(automaton, row, from, input);
     }
   }
-  const origins = new Set<string>([
-    ...input.liveStates.map((state) => productSubjectId(state)),
-    ...(input.discoveries ?? []).map((row) => row.subject_id)
-  ]);
-  effects.push(...routingFrontierEffects(rows, input.overlay, origins));
-  return Object.freeze(effects);
+  const origins = new Set<string>();
+  for (const state of input.liveStates) {
+    yield { kind: "work", retained_bytes: 64 };
+    origins.add(productSubjectId(state));
+  }
+  for (const discovery of input.discoveries ?? []) {
+    yield { kind: "work", retained_bytes: 64 };
+    origins.add(discovery.subject_id);
+  }
+  const emitted = new Set<string>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const row of rows) {
+      yield { kind: "work", retained_bytes: 128 };
+      if (row.validity === undefined || inactiveResolution(row.resolutionKind)
+        || !origins.has(row.sourceObjectId) || emitted.has(row.assertionId)) continue;
+      for (const effect of routingDiscoveryEffect(row, input.overlay)) {
+        emitted.add(row.assertionId);
+        if (!origins.has(effect.discovery.subject_id)) { origins.add(effect.discovery.subject_id); grew = true; }
+        yield { kind: "effect", effect };
+      }
+    }
+  }
 }
 
 export function facetPathId(state: ProductStateKey): string {
@@ -370,36 +412,20 @@ export function mergeSeeds(seeds: readonly SeedActivation[]): readonly SeedActiv
 }
 
 export function mergeTransitions(
-  transitions: readonly Transition[],
+  transitions: RetainedRows<Transition>,
   incoming: readonly Transition[] = []
 ): readonly Transition[] {
   if (incoming.length === 0) return uniqueByTransitionKey(transitions);
   const batch = uniqueByTransitionKey(incoming);
-  const incomingByRule = new Map<string, Transition[]>();
-  for (const row of batch) {
-    const id = ruleIdentity(row);
-    const group = incomingByRule.get(id);
-    if (group === undefined) incomingByRule.set(id, [row]);
-    else group.push(row);
-  }
-  const priorCountByRule = new Map<string, number>();
-  for (const row of transitions) {
-    const id = ruleIdentity(row);
-    priorCountByRule.set(id, (priorCountByRule.get(id) ?? 0) + 1);
-  }
-  const kept: Transition[] = [];
-  for (const row of transitions) {
-    const id = ruleIdentity(row);
-    const replacements = incomingByRule.get(id);
-    // One later row revises one prior stack. Simultaneous alt completions share
-    // endpoints+relation but not strength and must not last-write each other.
-    if (replacements?.length === 1 && (priorCountByRule.get(id) ?? 0) <= 1) continue;
-    kept.push(row);
-  }
+  const kept = transitions.filter((row) => !batch.some((next) =>
+    row.instance_id !== undefined && next.instance_id === row.instance_id
+    && row.revision_id !== undefined && next.revision_id !== undefined
+    && next.revision_id !== row.revision_id && ruleIdentity(next) === ruleIdentity(row)
+  ));
   return uniqueByTransitionKey([...kept, ...batch]);
 }
 
-function uniqueByTransitionKey(rows: readonly Transition[]): readonly Transition[] {
+function uniqueByTransitionKey(rows: RetainedRows<Transition>): readonly Transition[] {
   const unique = new Map<string, Transition>();
   for (const row of rows) {
     const key = transitionKey(row);
@@ -427,7 +453,8 @@ export function ruleIdentity(transition: Transition): string {
   return [
     productStateNodeId(transition.from),
     productStateNodeId(transition.to),
-    transition.relation_kind
+    transition.relation_kind,
+    transition.instance_id ?? ""
   ].join("\0");
 }
 
@@ -435,7 +462,9 @@ export function transitionKey(transition: Transition): string {
   return [
     ruleIdentity(transition),
     String(transition.strength_milligrades),
-    String(transition.applicable)
+    String(transition.applicable),
+    transition.revision_id ?? "",
+    JSON.stringify(transition.validity)
   ].join("\0");
 }
 
@@ -451,20 +480,21 @@ function sortStates(states: readonly ProductStateKey[]): ProductStateKey[] {
   );
 }
 
-function effectsForLiveRow(
+function* effectsForLiveRow(
   automaton: ProgramAutomaton,
   row: AdjacencyRow,
   from: ProductStateKey,
   input: Readonly<{
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-    readonly facets?: readonly FacetVector[];
-    readonly liveStates: readonly ProductStateKey[];
+    readonly facets?: RetainedRows<FacetVector>;
+    readonly liveStates: RetainedRows<ProductStateKey>;
   }>
-): readonly CompiledAdjacencyEffect[] {
+): PathComputation<void> {
   if (from.target.kind !== "memory_entry") {
     // Terminal evidence product: never retarget into a memory Transition.
-    return routingDiscoveryEffect(row, input.overlay);
+    for (const effect of routingDiscoveryEffect(row, input.overlay)) yield { kind: "effect", effect };
+    return;
   }
   const matched = advancesFor(automaton, from.program_state, (relation) =>
     relationMatches(relation.relation_kind, row.predicate)
@@ -472,16 +502,16 @@ function effectsForLiveRow(
   if (matched.length === 0) {
     // Overlay routing_only nominates physical work. Copying program_state
     // would mint an unadmitted product.
-    return routingDiscoveryEffect(row, input.overlay);
+    for (const effect of routingDiscoveryEffect(row, input.overlay)) yield { kind: "effect", effect };
+    return;
   }
-  const effects: CompiledAdjacencyEffect[] = [];
   for (const advance of matched) {
-    effects.push(...effectsForAdvance(automaton, advance, row, from, input));
+    yield { kind: "work" };
+    yield* effectsForAdvance(automaton, advance, row, from, input);
   }
-  return effects;
 }
 
-function effectsForAdvance(
+function* effectsForAdvance(
   automaton: ProgramAutomaton,
   advance: Readonly<{ readonly relation: QueryRelation; readonly to: readonly string[] }>,
   row: AdjacencyRow,
@@ -489,46 +519,46 @@ function effectsForAdvance(
   input: Readonly<{
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-    readonly facets?: readonly FacetVector[];
-    readonly liveStates: readonly ProductStateKey[];
+    readonly facets?: RetainedRows<FacetVector>;
+    readonly liveStates: RetainedRows<ProductStateKey>;
   }>
-): readonly CompiledAdjacencyEffect[] {
+): PathComputation<void> {
   const unified = unifyAdvance(from, advance.relation, row);
-  if (unified === undefined) return [];
+  if (unified === undefined) return;
   const decision = decideGuards(
     [advance.relation.guard],
     unified.env,
     input.sourceFacts ?? new Map(),
     { sourceId: row.sourceObjectId, targetId: row.targetObjectId }
   );
-  if (decision === "false") return [];
-  if (decision === "unresolved") return [{
+  if (decision === "false") return;
+  if (decision === "unresolved") { yield { kind: "effect", effect: {
     observation_id: `guard:${row.assertionId}:${from.program_state}`,
     unresolved_guard: true
-  }];
+  } }; return; }
   const strength = relationStrength(advance.relation, input.overlay, row.predicate);
   if (strength === undefined) {
-    return [{
+    yield { kind: "effect", effect: {
       observation_id: `adjacency:${row.assertionId}:${from.hypothesis_id}:${from.program_state}`,
       missing_measurement: true
-    }];
+    } }; return;
   }
-  if (strength.milligrades <= advance.relation.threshold_milligrades) return [];
+  if (strength.milligrades <= advance.relation.threshold_milligrades) return;
   const targetRevision = observedTargetRevision(
     row.targetObjectId,
     input.sourceFacts,
     input.liveStates
   );
   if (targetRevision === undefined) {
-    return [{
+    yield { kind: "effect", effect: {
       observation_id: `revision:${row.assertionId}:${from.program_state}`,
       unresolved_guard: true
-    }];
+    } }; return;
   }
   const applicable = strength.applicable && decision === "true";
   const toStates = applicable ? advance.to : [from.program_state];
-  const effects: CompiledAdjacencyEffect[] = [];
   for (const programState of toStates) {
+    yield { kind: "work" };
     const binding = alignOutgoingBinding(
       unified.binding,
       row.targetObjectId,
@@ -542,32 +572,33 @@ function effectsForAdvance(
       binding_context: binding,
       source_revision: targetRevision
     });
-    effects.push(...compiledEffects({ ...row, source_revision: row.source_revision ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision },
-      from, to, strength, applicable, decision, input.facets ?? []));
+    yield* compiledEffects({ ...row, source_revision: row.source_revision ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision },
+      from, to, strength, applicable, decision, input.facets ?? []);
   }
-  return effects;
 }
 
-function compiledEffects(
+function* compiledEffects(
   row: AdjacencyRow,
   from: ProductStateKey,
   to: ProductStateKey,
   strength: Readonly<{ readonly milligrades: number; readonly applicable: boolean }>,
   applicable: boolean,
   decision: "true" | "unresolved",
-  priorFacets: readonly FacetVector[]
-): readonly CompiledAdjacencyEffect[] {
-  if (row.validity === undefined) return [];
+  priorFacets: RetainedRows<FacetVector>
+): PathComputation<void> {
+  if (row.validity === undefined) return;
   const transition: Transition = {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     from,
     to,
     relation_kind: row.predicate,
+    instance_id: row.assertionId,
+    ...(row.source_revision === undefined ? {} : { revision_id: row.source_revision }),
     strength_milligrades: strength.milligrades,
     validity: row.validity,
     applicable
   };
-  const vectors = extendFacets(priorFacets, from, to, row.predicate, strength.milligrades);
+  const vectors = yield* extendFacets(priorFacets, from, to, `${from.program_state}:${to.program_state}:${row.predicate}`, strength.milligrades);
   const derivation = leafDerivation({
     derivation_id: `leaf:${row.assertionId}:${from.program_state}:${to.program_state}`,
     observation_id: row.assertionId,
@@ -575,44 +606,53 @@ function compiledEffects(
     association_milligrades: strength.milligrades,
     source_revision: row.source_revision
   });
-  return vectors.map((facet, index) => ({
+  for (const [index, facet] of vectors.entries()) {
+    yield { kind: "work", retained_bytes: 512 + Buffer.byteLength(JSON.stringify({ transition, derivation, facet }), "utf8") };
+    yield { kind: "effect", effect: {
     observation_id: `adjacency:${row.assertionId}:${from.program_state}:${to.program_state}:${String(index)}`,
     transition,
     facet,
     derivation,
     derivations: [derivation],
     unresolved_guard: decision === "unresolved"
-  }));
+    } };
+  }
 }
 
-function extendFacets(
-  priorFacets: readonly FacetVector[],
+function* extendFacets(
+  priorFacets: RetainedRows<FacetVector>,
   from: ProductStateKey,
   to: ProductStateKey,
   route: string,
   milligrades: number
-): readonly FacetVector[] {
-  const inherited = priorFacets.filter((vector) => facetBelongsToOutput(vector.path_id, from));
+): PathComputation<readonly FacetVector[]> {
+  const inherited: FacetVector[] = [];
+  for (const vector of priorFacets) {
+    if (facetBelongsToOutput(vector.path_id, from)) inherited.push(vector);
+    yield { kind: "work" };
+  }
+  const obligation = { obligation_id: createHash("sha256").update(route).digest("hex"), domain_id: ASSOCIATION_DOMAIN_ID };
   if (inherited.length === 0) {
     return [{
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       path_id: composedFacetPathId(to, route),
+      obligations: [obligation],
       coordinates: [milligrades]
     }];
   }
-  return inherited.map((vector) => ({
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    path_id: composedFacetPathId(to, extendRoute(vector.path_id, from, route)),
-    coordinates: [...vector.coordinates, milligrades]
-  }));
-}
-
-function extendRoute(priorPathId: string, from: ProductStateKey, route: string): string {
-  const identity = facetPathId(from);
-  const prior = priorPathId.startsWith(`${identity}:`)
-    ? priorPathId.slice(identity.length + 1)
-    : route;
-  return `${prior}+${route}`;
+  const joint = new Map<string, FacetVector>();
+  for (const vector of inherited) {
+    const obligations = [...vector.obligations ?? vector.coordinates.map((_, index) => ({
+      obligation_id: `retained-coordinate:${index}`, domain_id: ASSOCIATION_DOMAIN_ID }))];
+    const coordinates = [...vector.coordinates];
+    const index = obligations.findIndex((item) => item.obligation_id === obligation.obligation_id && item.domain_id === obligation.domain_id);
+    if (index < 0) { obligations.push(obligation); coordinates.push(milligrades); }
+    else coordinates[index] = Math.min(coordinates[index]!, milligrades);
+    const identity = JSON.stringify([obligations, coordinates]);
+    joint.set(identity, { schema_version: 1, path_id: composedFacetPathId(to, identity), obligations, coordinates });
+    yield { kind: "work", retained_bytes: Buffer.byteLength(identity, "utf8") + 128 };
+  }
+  return [...joint.values()];
 }
 
 function seedHypotheses(interpretation: QueryInterpretation): readonly {
@@ -681,6 +721,8 @@ function attachHyperedgeFacet(effect: HyperedgeEffect): CompiledAdjacencyEffect 
     facet: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       path_id: composedFacetPathId(effect.hyperedge.to, effect.hyperedge.relation_kind),
+      obligations: [{ obligation_id: createHash("sha256").update(`${effect.hyperedge.from.program_state}:${effect.hyperedge.to.program_state}`).digest("hex"),
+        domain_id: ASSOCIATION_DOMAIN_ID }],
       coordinates: [effect.hyperedge.strength_milligrades]
     }
   };

@@ -160,6 +160,11 @@ function renderRankIdentity(
     questionId: question.questionId,
     deliveredObjects: question.diagnostics.delivered_results.map((result) => ({
       object_id: result.object_id,
+      target: result.target,
+      hypothesis_id: result.hypothesis_id,
+      output_binding: result.output_binding,
+      program_state: result.program_state,
+      time_state: result.time_state,
       object_kind: result.object_kind ?? "memory_entry"
     }))
   })), {

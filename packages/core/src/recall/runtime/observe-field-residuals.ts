@@ -10,13 +10,13 @@ import {
 } from "@do-soul/alaya-protocol";
 import { startObserverCursor } from "../conditional-field/observers/observe.js";
 import { applyObserverPage, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
+import { isPhysicalRegionKind } from "../conditional-field/engine/field-update.js";
 import { hasOpenPairs } from "../conditional-field/engine/path-composition.js";
 
 const INCOMPLETE_OBSERVER: ReadonlySet<ObserverStatus> = new Set([
   "cancelled",
   "unavailable",
   "interrupted",
-  "unknown",
   "not_applicable",
   "invalidated"
 ]);
@@ -78,7 +78,7 @@ export function settleDiscoveryResidual(
   const adjacency = state.residuals.find((region) => region.kind === "adjacency");
   const busy = adjacency?.status === "open"
     || adjacency?.status === "interrupted"
-    || hasOpenPairs(subjects, predicates, pairProgress, state.discoveries);
+    || hasOpenPairs(subjects, predicates, pairProgress, [], state.pair_completed_count);
   const status = state.memory_exhausted || adjacency?.status === "interrupted" || state.last_observer_status === "interrupted"
     ? "interrupted"
     : busy ? "open" : "exhausted";
@@ -152,7 +152,6 @@ export function incompleteObserver(status: ObserverStatus | undefined): boolean 
 export function terminalObserver(status: ObserverStatus | undefined): boolean {
   return status === "cancelled"
     || status === "unavailable"
-    || status === "unknown"
     || status === "not_applicable"
     || status === "invalidated";
 }
@@ -184,7 +183,9 @@ function applyCoverage(
       snapshot_id: interpretation.snapshot_id,
       cursor: cursorOf(cursors, interpretation, regionId),
       observations: [],
-      outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status },
+      // Semantic coverage annotates native progress; it is not another native observation.
+      outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        status: isPhysicalRegionKind(kind) ? status : state.last_observer_status ?? "open" },
       open_regions: [overlay ?? residual(regionId, kind, status)]
     },
     effects: []

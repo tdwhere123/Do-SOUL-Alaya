@@ -6,7 +6,7 @@ import {
   type QueryHole
 } from "@do-soul/alaya-protocol";
 import { sourceLiteralOccurs } from "../../../memory/evidence-create/source-utf8-hydrate.js";
-import { SOURCE_FILTER_PREDICATE } from "./ordinary-language.js";
+import { SOURCE_FILTER_PREDICATE, sourceTimestampOrder } from "./ordinary-language.js";
 
 export const FROZEN_SOURCE_PREDICATE_NAMES = [
   "source.identity.v1",
@@ -36,6 +36,7 @@ export type SourcePredicateSubject = Readonly<{
   readonly source_version?: string;
   readonly content?: string;
   readonly content_complete?: boolean;
+  readonly literal_verdicts?: Readonly<Record<string, GuardVerdict>>;
   readonly role?: string;
   readonly event_time?: string | null;
   readonly evidence_object_id?: string | null;
@@ -99,6 +100,8 @@ function identityVerdict(subject: SourcePredicateSubject, requiredRootId?: strin
 
 function literalVerdict(subject: SourcePredicateSubject, needle: string | undefined): GuardVerdict {
   if (needle === undefined || needle.length === 0) return "unresolved";
+  const streamed = subject.literal_verdicts?.[needle.normalize("NFC")];
+  if (streamed !== undefined) return streamed;
   if (subject.content === undefined) return "unresolved";
   if (sourceLiteralOccurs(subject.content, needle)) return "true";
   // A bounded first chunk is not the whole body; miss is not absence.
@@ -117,8 +120,11 @@ function eventTimeVerdict(
 ): GuardVerdict {
   const stamp = subject.event_time;
   if (stamp === undefined || stamp === null) return "unresolved";
-  if (interval === undefined) return "true";
-  return stamp >= interval.start && stamp < interval.end ? "true" : "false";
+  if (interval === undefined) return sourceTimestampOrder(stamp, stamp) === undefined ? "unresolved" : "true";
+  const lower = sourceTimestampOrder(stamp, interval.start);
+  const upper = sourceTimestampOrder(stamp, interval.end);
+  if (lower === undefined || upper === undefined) return "unresolved";
+  return lower >= 0 && upper < 0 ? "true" : "false";
 }
 
 function evidenceLinkVerdict(subject: SourcePredicateSubject): GuardVerdict {

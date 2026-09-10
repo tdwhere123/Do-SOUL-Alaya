@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import {
   fieldActivationOf,
   memoryProductStateKey,
@@ -13,7 +14,7 @@ import {
   type TypedObservation
 } from "@do-soul/alaya-protocol";
 import { compileConditionalFieldQuery } from "../../../../recall/conditional-field/query/compile-query.js";
-import { observeField, RELATION_MILLIGRADES } from "../../../../recall/runtime/conditional-field-observe.js";
+import { observeField, RELATION_ROUTING } from "../../../../recall/runtime/conditional-field-observe.js";
 import { assessUnknownCause } from "../../../../recall/runtime/semantic-attribution.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { buildTypedObservation } from "../../../../recall/conditional-field/observers/observation-admission.js";
@@ -186,12 +187,12 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(compiled.program.kind).toBe("alternative");
   });
 
-  it("keeps missing measurement distinct from reachable zero", () => {
+  it("admits a typed immutable relation by identity while keeping absent measurements and reachable zero distinct", () => {
     const missing = observeProgram(relation("novel_relation", "x", "y"), [edge("seed", "fact", "novel_relation")]);
     const fact = missing.binding.kind === "bound"
       ? missing.binding.snapshot.values.find((value) => productSubjectId(value.state) === "fact")
       : undefined;
-    expect(fact).toBeUndefined();
+    expect(fact?.activation).toEqual({ kind: "reachable", milligrades: 1000 });
     expect(fieldActivationOf({})).toEqual({ kind: "unreachable" });
     expect(fieldActivationOf({ milligrades: 0 })).toEqual({ kind: "reachable", milligrades: 0 });
     expect(RawMeasurementSchema.parse({ status: "missing" }).status).toBe("missing");
@@ -249,7 +250,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
       time_scope: "none"
     }));
     const observed = observeField(roleQuery, input([edge("seed", "fact", "observed_log")], {}));
-    expect(observed.guaranteed_seeds).toEqual([]);
+    expect(observed.guaranteed_seeds).toHaveLength(0);
   });
 
   it("does not guaranteed-seed a lexical hit under an unknown query_predicate", () => {
@@ -262,7 +263,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
       }),
       [edge("seed", "fact", "observed_log")]
     );
-    expect(observed.guaranteed_seeds).toEqual([]);
+    expect(observed.guaranteed_seeds).toHaveLength(0);
     expect(observed.seeds.every((seed) => seed.milligrades !== undefined)).toBe(true);
   });
 
@@ -359,7 +360,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(observed.residuals.some((region) =>
       region.kind === "binding" && region.status === "unknown"
     )).toBe(true);
-    expect(observed.last_observer_status).not.toBe("exhausted");
+    expect(observed.closure.observation).toBe("unknown");
     const emptyPage = observeField(
       interpretation(relation("observed_log", "x", "y")),
       {
@@ -379,11 +380,12 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(emptyPage.residuals.some((region) =>
       region.kind === "binding" && region.status === "unknown"
     )).toBe(true);
-    expect(emptyPage.last_observer_status).not.toBe("exhausted");
+    expect(emptyPage.closure.observation).toBe("unknown");
   });
 
   it("produces measured raw from a stored pair without using cosine as cap milligrades", () => {
-    const content = `sha256:${"b".repeat(64)}`;
+    const body = "retained fixture content";
+    const content = `sha256:${createHash("sha256").update(body).digest("hex")}`;
     const object = {
       object_id: "emb-1",
       model_id: "stored-fixture",
@@ -398,6 +400,8 @@ describe("admission, binding, measurement, and evidence identities", () => {
       ...input([], {}),
       readers: {
         ...input([], {}).readers,
+        source: ({ objectId }: { objectId: string }) => ({ row: { object_id: objectId, sourceRevision: "rev", content: body,
+          lifecycle_state: "active" as const, scope_class: "project" as const }, rowsRead: 1, bytesRead: body.length, unavailable: false }),
         embeddingIds: () => ({
           objectIds: ["emb-1"],
           rowVisits: 1,
@@ -485,9 +489,9 @@ describe("admission, binding, measurement, and evidence identities", () => {
       predicate: "uses_service",
       validity: VALIDITY
     };
-    expect(overlayIsRoutingOnly(RELATION_MILLIGRADES, "uses_service")).toBe(true);
-    expect(overlayIsRoutingOnly(RELATION_MILLIGRADES, "observed_log")).toBe(false);
-    const discovered = routingDiscoveryEffect(row, RELATION_MILLIGRADES);
+    expect(overlayIsRoutingOnly(RELATION_ROUTING, "uses_service")).toBe(true);
+    expect(overlayIsRoutingOnly(RELATION_ROUTING, "observed_log")).toBe(false);
+    const discovered = routingDiscoveryEffect(row, RELATION_ROUTING);
     expect(discovered).toEqual([{
       observation_id: "routing:route-1",
       discovery: {
@@ -501,7 +505,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
       interpretation: query,
       asOf: AS_OF,
       liveStates: [from],
-      overlay: RELATION_MILLIGRADES
+      overlay: RELATION_ROUTING
     });
     expect(effects.some((effect) => effect.discovery?.subject_id === "routed")).toBe(true);
     expect(effects.every((effect) => effect.transition === undefined && effect.facet === undefined
@@ -515,7 +519,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(observed.guaranteed_seeds.every((seed) => productSubjectId(seed.state) !== "routed")).toBe(true);
     expect(observed.transitions.every((item) => productSubjectId(item.to) !== "routed")).toBe(true);
     expect(observed.discoveries.some((row) => row.subject_id === "routed" && row.assertion_id === "uses_service")).toBe(true);
-    expect(observed.resume_subjects).toContain("routed");
+    expect([...observed.resume_subjects.keys()]).toContain("routed");
     expect(seedActivationsForObservation({
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       observation_id: "seed:routed",
@@ -549,8 +553,8 @@ describe("admission, binding, measurement, and evidence identities", () => {
     });
     expect(absorbed.seeds).toEqual(initial.seeds);
     expect(absorbed.guaranteed_seeds).toEqual(initial.guaranteed_seeds);
-    expect(absorbed.transitions).toEqual([]);
-    expect(absorbed.discoveries).toEqual([{
+    expect(absorbed.transitions).toHaveLength(0);
+    expect([...absorbed.discoveries]).toEqual([{
       source_id: "fact",
       subject_id: "routed",
       predicate: "uses_service",
@@ -575,7 +579,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
       effects: [...discovered, ...discovered]
     });
     expect(duplicated.discoveries).toEqual(absorbed.discoveries);
-    expect(duplicated.transitions).toEqual([]);
+    expect(duplicated.transitions).toHaveLength(0);
   });
 
   it("recursively discovers routing_only hops without minting products", () => {
@@ -595,7 +599,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
       interpretation: query,
       asOf: AS_OF,
       liveStates: [from],
-      overlay: RELATION_MILLIGRADES
+      overlay: RELATION_ROUTING
     });
     expect(closed.some((effect) => effect.discovery?.subject_id === "node-b"
       && effect.discovery.assertion_id === "route-ab")).toBe(true);
@@ -607,7 +611,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
       interpretation: query,
       asOf: AS_OF,
       liveStates: [from],
-      overlay: RELATION_MILLIGRADES,
+      overlay: RELATION_ROUTING,
       discoveries: [{
         source_id: "node-a",
         subject_id: "node-b",
@@ -629,8 +633,8 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(semanticSubjects(observed)).not.toContain("node-c");
     expect(observed.discoveries.some((row) => row.subject_id === "node-b" && row.assertion_id === "route-ab")).toBe(true);
     expect(observed.discoveries.some((row) => row.subject_id === "node-c" && row.assertion_id === "route-bc")).toBe(true);
-    expect(observed.resume_subjects).toEqual(expect.arrayContaining(["node-b", "node-c"]));
-    expect(Object.keys(observed.pair_progress).some((key) => key.startsWith("node-c\0"))).toBe(true);
+    expect([...observed.resume_subjects.keys()]).toEqual(expect.arrayContaining(["node-b", "node-c"]));
+    expect([...observed.pair_progress.keys()].some((key) => key.startsWith("node-c\0"))).toBe(true);
     expect(observed.residuals.some((region) =>
       region.kind === "discovery" && region.status === "exhausted"
     )).toBe(true);

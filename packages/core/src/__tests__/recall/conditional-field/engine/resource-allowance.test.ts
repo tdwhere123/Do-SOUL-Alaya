@@ -39,7 +39,7 @@ describe("request resource allowance", () => {
     const tiny = observeField(query, { workspace_id: "workspace-1", query_text: "needle", as_of: INTERPRETATION_CLOCK,
       budget: defaultBudget({ work_units: 2, finalization_reserve: 0, min_envelope: 0 }), readers });
     expect(pinReads).toBe(0);
-    expect(tiny.remaining_exploration).toBe(1);
+    expect(tiny.remaining_exploration).toBe(2);
     expect(tiny.last_observer_status).toBe("interrupted");
     const completedAction = observeField(query, { workspace_id: "workspace-1", query_text: "needle", as_of: INTERPRETATION_CLOCK,
       budget: defaultBudget({ work_units: 13, finalization_reserve: 0, min_envelope: 0 }), readers });

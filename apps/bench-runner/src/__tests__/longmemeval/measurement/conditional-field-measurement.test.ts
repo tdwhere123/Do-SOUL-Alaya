@@ -49,7 +49,8 @@ function fixture(ids = ["gold"] ) {
     total_count: results.length,
     provider_calls: 0, garden_enqueue: 0, request_budget: BUDGET, execution_receipt };
   const deliveredResults = results.slice(0, 10).map((row, offset) => ({
-    object_id: row.object_id, object_kind: row.object_kind, rank: offset + 1, relevance_score: row.relevance_score
+    object_id: row.object_id, target: row.target, object_kind: row.object_kind, rank: offset + 1, relevance_score: row.relevance_score
+    , hypothesis_id: row.hypothesis_id, output_binding: row.output_binding, program_state: row.program_state, time_state: row.time_state
   }));
   return { recallResult, deliveredResults, queryText: "deployment checklist", workspaceId: "workspace", referenceTime: NOW,
     expectedIndexSnapshotId: SNAPSHOT, requestBudget: BUDGET, recallLatencyMs: 12 };
@@ -62,6 +63,46 @@ function diagnostic(input = fixture(), hitAt5 = true) {
 }
 
 describe("conditional target measurement evidence", () => {
+  it("preserves source-only identity through diagnostics, archived admission and reclassification", () => {
+    const base = fixture();
+    const target = { kind: "source_evidence" as const, workspace_id: "workspace", root_kind: "source_record" as const,
+      root_id: "root", source_version: "v1", content_digest: SNAPSHOT, evidence_object_id: null };
+    const { object_id: _entryId, ...entry } = base.recallResult.index.entries[0]!;
+    const { object_id: _resultId, ...result } = base.recallResult.results[0]!;
+    const delivered = { target, object_kind: "source_evidence", rank: 1, relevance_score: result.relevance_score,
+      hypothesis_id: result.hypothesis_id, output_binding: result.output_binding, program_state: result.program_state, time_state: result.time_state };
+    const input = { ...base, deliveredResults: [delivered], recallResult: { ...base.recallResult,
+      index: { ...base.recallResult.index, entries: [{ ...entry, target }] },
+      results: [{ ...result, object_kind: "source_evidence", target }] } };
+    const diagnostic = buildQuestionDiagnostic({ ...input, questionId: "source", goldMemoryIds: ["gold"], answerSessionIds: ["session"],
+      hitAt1: false, hitAt5: false, hitAt10: false, degradationReason: null, embeddingMode: "disabled" });
+    expect(diagnostic.conditional_field_measurement?.status).toBe("validated");
+    expect(diagnostic.delivered_results[0]).not.toHaveProperty("object_id");
+    expect(diagnostic.delivered_results[0]?.target).toEqual(target);
+    const archived = LongMemEvalQuestionDiagnosticSchema.parse(JSON.parse(JSON.stringify(diagnostic)));
+    expect(reclassifyQuestionDiagnostic(archived).conditional_field_measurement?.status).toBe("validated");
+    expect(classifyQuestionMeasurementStatus(archived)).toBe("scorable");
+    expect(measureConditionalFieldResponse({ ...input, deliveredResults: [{ ...delivered, output_binding: "foreign-binding" }] })?.status).toBe("invalid");
+  });
+  it("rejects a result whose tagged target revision differs from its index entry", () => {
+    const input = fixture();
+    const results = input.recallResult.results.map((result) => ({ ...result,
+      target: { kind: "memory_entry" as const, workspace_id: "workspace", object_id: "gold", source_revision: "foreign-revision" }
+    }));
+    expect(measureConditionalFieldResponse({ ...input, recallResult: { ...input.recallResult, results } })?.status).toBe("invalid");
+  });
+
+  it("rejects archived slots with foreign tagged target revisions", () => {
+    const measured = measureConditionalFieldResponse(fixture());
+    if (measured?.status !== "validated") throw new Error("valid fixture expected");
+    const foreign = (slot: (typeof measured.response_slots)[number]) => ({ ...slot,
+      target: { kind: "memory_entry" as const, workspace_id: "workspace", object_id: "gold", source_revision: "foreign-revision" }
+    });
+    expect(ConditionalFieldMeasurementSchema.safeParse({ ...measured,
+      response_slots: measured.response_slots.map(foreign), evaluated_slots: measured.evaluated_slots.map(foreign)
+    }).success).toBe(false);
+  });
+
   it("rejects omitted and prefix product pages even when the evaluator copies the shortened slots", () => {
     const input = fixture(["gold", "other"]);
     for (const length of [0, 1]) {
@@ -262,6 +303,11 @@ describe("conditional target measurement evidence", () => {
       recallResult,
       deliveredResults: [{
         object_id: undefined,
+        target,
+        hypothesis_id: result.hypothesis_id,
+        output_binding: result.output_binding,
+        program_state: result.program_state,
+        time_state: result.time_state,
         object_kind: "source_evidence",
         rank: 1,
         relevance_score: result.relevance_score

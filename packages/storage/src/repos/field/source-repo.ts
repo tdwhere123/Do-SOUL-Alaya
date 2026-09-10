@@ -1,5 +1,6 @@
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { readRetainedSourceChunk, writeRetainedSourceChunks } from "./retained-source-chunks.js";
 import {
   parseOptionalRow,
   parseRows,
@@ -30,7 +31,10 @@ import type {
 
 const SOURCE_RECORD_PAGE_MAX = 512;
 const SOURCE_BODY_BYTE_MAX = 65_536;
-const UTF8_MAX_TAIL = 3;
+const SOURCE_METADATA_BYTE_MAX = 7864;
+const SOURCE_METADATA_COLUMNS = ["record_id", "workspace_id", "source_id", "source_version", "content_digest",
+  "evidence_object_id", "recorded_at", "event_time", "valid_from", "valid_to", "operator_id", "speaker", "scope_class"] as const;
+const METADATA_BYTES = SOURCE_METADATA_COLUMNS.map((column) => `COALESCE(octet_length(${column}), 0)`).join(" + ");
 
 const RECORD_SELECT = `
   SELECT record_id, workspace_id, source_id, source_version, content_digest,
@@ -39,29 +43,35 @@ const RECORD_SELECT = `
   FROM source_records
 `;
 
-// TEXT substr is character-bounded and still materializes oversize CJK bodies.
+// The canonical body is never selected by a Recall read. Even BLOB substr
+// materializes a complete TEXT value inside SQLite before returning its prefix.
 const RECORD_BOUNDED_SELECT = `
-  SELECT record_id, workspace_id, source_id, source_version, content_digest,
-         evidence_object_id, recorded_at, event_time, valid_from, valid_to,
-         operator_id, speaker, scope_class,
-         CASE WHEN source_body IS NULL THEN NULL
-              ELSE substr(CAST(source_body AS BLOB), ? + 1, ?)
-         END AS source_body_prefix,
-         COALESCE(length(CAST(source_body AS BLOB)), 0) AS source_body_bytes
+  SELECT ${SOURCE_METADATA_COLUMNS.map((column) =>
+    `CASE WHEN (${METADATA_BYTES}) <= ${SOURCE_METADATA_BYTE_MAX} THEN ${column} ELSE NULL END AS ${column}`).join(", ")},
+         (${METADATA_BYTES}) > ${SOURCE_METADATA_BYTE_MAX} AS metadata_limited,
+         (SELECT CASE WHEN octet_length(evidence_object_id) <= 256 THEN evidence_object_id ELSE NULL END FROM source_record_active_evidence_refs ref
+           WHERE ref.workspace_id = source_records.workspace_id AND ref.record_id = source_records.record_id
+           ORDER BY evidence_object_id LIMIT 1) AS effective_evidence_object_id,
+         CASE WHEN retained_content_bytes = octet_length(source_body) THEN retained_content_bytes ELSE NULL END AS source_body_bytes,
+         octet_length(source_body) IS NOT NULL AS body_retained
   FROM source_records
 `;
 
 export type BoundedSourceRecordRead = Readonly<{
-  readonly record: FieldSourceRecordRow;
+  readonly record: FieldSourceRecordRow | null;
   readonly bodyBytes: number;
   readonly prefixBytes: number;
   readonly invalidOffset: boolean;
+  readonly evidenceVerified: boolean;
+  readonly nativeBytes: number;
+  readonly metadataBytes: number;
 }>;
 
 export type BoundedSourceRecordPage = Readonly<{
   readonly rows: readonly BoundedSourceRecordRead[];
   readonly truncated: boolean;
   readonly committedThrough: string | null;
+  readonly unavailable?: boolean;
 }>;
 
 const SPAN_SELECT = `
@@ -88,8 +98,8 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
       INSERT INTO source_records (
         record_id, workspace_id, source_id, source_version, content_digest,
         evidence_object_id, recorded_at, event_time, valid_from, valid_to,
-        operator_id, speaker, scope_class, source_body
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        operator_id, speaker, scope_class, source_body, retained_content_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, record_id) DO NOTHING
     `);
     this.selectStatement = database.connection.prepare(
@@ -101,16 +111,14 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     this.pageStatement = database.connection.prepare(`
       ${RECORD_SELECT}
       WHERE workspace_id = ?
-        AND source_body IS NOT NULL
-        AND (recorded_at > ? OR (recorded_at = ? AND record_id > ?))
+        AND (recorded_at, record_id) > (?, ?)
       ORDER BY recorded_at ASC, record_id ASC
       LIMIT ?
     `);
     this.boundedPageStatement = database.connection.prepare(`
       ${RECORD_BOUNDED_SELECT}
       WHERE workspace_id = ?
-        AND source_body IS NOT NULL
-        AND (recorded_at > ? OR (recorded_at = ? AND record_id > ?))
+        AND (recorded_at, record_id) > (?, ?)
       ORDER BY recorded_at ASC, record_id ASC
       LIMIT ?
     `);
@@ -137,12 +145,19 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
       assertSubjectNotErased(this.database, row.workspace_id, "source_record", row.record_id);
     }
     return persistFieldTransaction(this.database, () => {
+      const existing = this.findById(row.workspace_id, row.record_id);
+      // A matching erased identity remains a tombstone even when its formerly
+      // bound capsule has also been erased. No replay may recreate either body.
+      if (existing?.source_body === null && sameRecord(existing, row)) return existing;
+      if (row.evidence_object_id !== null && !this.verifiedEvidenceBinding(row.workspace_id, row.evidence_object_id)) {
+        throw new Error("source evidence binding requires an active capsule in the same workspace");
+      }
       const persisted = insertIdempotent(
         () => this.insertStatement.run(
           row.record_id, row.workspace_id, row.source_id, row.source_version,
           row.content_digest, row.evidence_object_id, row.recorded_at, row.event_time,
           row.valid_from, row.valid_to, row.operator_id, row.speaker, row.scope_class,
-          row.source_body
+          row.source_body, row.source_body === null ? null : Buffer.byteLength(row.source_body, "utf8")
         ),
         () => this.findById(row.workspace_id, row.record_id),
         (existing) => sameRecord(existing, row),
@@ -153,8 +168,21 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
           row.workspace_id, row.record_id, row.evidence_object_id
         );
       }
+      if (persisted.source_body !== null) {
+        writeRetainedSourceChunks(this.database, { workspaceId: persisted.workspace_id, kind: "source_record",
+          rootId: persisted.record_id, revision: persisted.source_version, digest: persisted.content_digest }, persisted.source_body);
+        this.database.connection.prepare(`UPDATE source_records SET retained_content_bytes = ?
+          WHERE workspace_id = ? AND record_id = ?`).run(Buffer.byteLength(persisted.source_body, "utf8"),
+          persisted.workspace_id, persisted.record_id);
+      }
       return persisted;
     }, "source record with evidence binding");
+  }
+
+  public verifiedEvidenceBinding(workspaceId: string, evidenceObjectId: string): boolean {
+    return this.database.connection.prepare(
+      "SELECT 1 FROM evidence_capsules WHERE workspace_id = ? AND object_id = ? AND lifecycle_state = 'active' LIMIT 1"
+    ).get(workspaceId, evidenceObjectId) !== undefined;
   }
 
   public findById(workspaceId: string, recordId: string): FieldSourceRecordRow | null {
@@ -180,13 +208,13 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     const afterRecordedAt = options.afterRecordedAt ?? "";
     const afterRecordId = options.afterRecordId ?? "";
     const rows = parseRows(
-      this.pageStatement.all(workspaceId, afterRecordedAt, afterRecordedAt, afterRecordId, limit),
+      this.pageStatement.all(workspaceId, afterRecordedAt, afterRecordId, limit),
       fieldSourceRecordParser,
       "source record"
     );
     const last = rows.at(-1);
     return {
-      rows,
+      rows: rows.filter((row) => row.source_body !== null),
       truncated: rows.length === limit,
       committedThrough: last === undefined
         ? encodeRecordCursor(options)
@@ -210,22 +238,20 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     const afterRecordedAt = options.afterRecordedAt ?? "";
     const afterRecordId = options.afterRecordId ?? "";
     const raw = this.boundedPageStatement.all(
-      0,
-      byteLimit + UTF8_MAX_TAIL,
       workspaceId,
-      afterRecordedAt,
       afterRecordedAt,
       afterRecordId,
       limit
     );
-    const rows = parseBoundedRows(raw, byteLimit, 0);
+    const rows = raw.map((row) => this.readBoundedBody(row, byteLimit, 0));
     const last = rows.at(-1)?.record;
     return {
       rows,
       truncated: rows.length === limit,
-      committedThrough: last === undefined
+      committedThrough: last == null
         ? encodeRecordCursor(options)
         : encodeRecordCursor({ afterRecordedAt: last.recorded_at, afterRecordId: last.record_id })
+      , unavailable: rows.some((row) => row.record === null || row.record.source_body === null && row.bodyBytes > 0)
     };
   }
 
@@ -239,9 +265,30 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     if (!Number.isSafeInteger(offset) || offset < 0) {
       throw new Error("invalid source-root byte offset");
     }
-    const raw = this.boundedSelectStatement.get(offset, byteLimit + UTF8_MAX_TAIL, workspaceId, recordId);
+    const raw = this.boundedSelectStatement.get(workspaceId, recordId);
     if (raw === undefined || raw === null) return null;
-    return parseBoundedSourceRecord(raw, byteLimit, offset);
+    return this.readBoundedBody(raw, byteLimit, offset);
+  }
+
+  private readBoundedBody(value: unknown, byteLimit: number, offset: number): BoundedSourceRecordRead {
+    const row = readRecord(value, "bounded source record");
+    const nativeMetadataBytes = [...SOURCE_METADATA_COLUMNS, "effective_evidence_object_id"].reduce((sum, column) =>
+      sum + (typeof row[column] === "string" ? Buffer.byteLength(row[column] as string, "utf8") : 0), 0);
+    const verified = row.effective_evidence_object_id != null && this.database.connection.prepare(`
+      SELECT 1 FROM source_record_evidence_refs ref JOIN evidence_capsules e
+        ON e.object_id = ref.evidence_object_id AND e.workspace_id = ref.workspace_id
+      WHERE ref.workspace_id = ? AND ref.record_id = ? AND ref.evidence_object_id = ?
+        AND e.lifecycle_state = 'active' LIMIT 1`).get(row.workspace_id, row.record_id,
+      row.effective_evidence_object_id) !== undefined;
+    const body = row.metadata_limited === 1 || typeof row.source_body_bytes !== "number"
+      ? { prefix: null, nativeBytes: 0, metadataBytes: 0 }
+      : readRetainedSourceChunk(this.database, { workspaceId: row.workspace_id as string, kind: "source_record",
+        rootId: row.record_id as string, revision: row.source_version as string, digest: row.content_digest as string },
+      offset, byteLimit, row.source_body_bytes);
+    return parseBoundedSourceRecord({ ...row, evidence_object_id: verified ? row.effective_evidence_object_id : null,
+      evidence_verified: verified ? 1 : 0,
+      source_body_bytes: row.source_body_bytes ?? (row.body_retained === 1 ? 1 : 0), source_body_prefix: body.prefix,
+      native_bytes: body.nativeBytes, metadata_bytes: nativeMetadataBytes + body.metadataBytes }, byteLimit, offset);
   }
 
   public listEvidenceBindings(workspaceId: string): readonly FieldSourceEvidenceBindingRow[] {
@@ -343,7 +390,9 @@ function sameRecord(existing: FieldSourceRecordRow, incoming: FieldSourceRecordR
     existing.operator_id === incoming.operator_id &&
     existing.event_time === incoming.event_time &&
     existing.valid_from === incoming.valid_from &&
-    existing.valid_to === incoming.valid_to;
+    existing.valid_to === incoming.valid_to &&
+    (existing.speaker ?? null) === (incoming.speaker ?? null) &&
+    (existing.scope_class ?? null) === (incoming.scope_class ?? null);
 }
 
 function sameSpan(existing: FieldSourceSpanRow, incoming: FieldSourceSpanRow): boolean {
@@ -360,17 +409,6 @@ function assertSourceBodyByteLimit(byteLimit: number): void {
   }
 }
 
-function parseBoundedRows(
-  values: unknown,
-  byteLimit: number,
-  offset: number
-): readonly BoundedSourceRecordRead[] {
-  if (!Array.isArray(values)) {
-    throw new Error("invalid bounded source record page");
-  }
-  return values.map((row) => parseBoundedSourceRecord(row, byteLimit, offset));
-}
-
 function parseBoundedSourceRecord(
   value: unknown,
   byteLimit: number,
@@ -379,12 +417,16 @@ function parseBoundedSourceRecord(
   const row = readRecord(value, "bounded source record");
   const bodyBytes = readIntegerField(row, "source_body_bytes");
   const prefix = prefixBuffer(row.source_body_prefix);
+  const metadataBytes = readIntegerField(row, "metadata_bytes");
+  const receipt = { evidenceVerified: row.evidence_verified === 1, nativeBytes: readIntegerField(row, "native_bytes"), metadataBytes };
+  if (row.metadata_limited === 1) return { record: null, bodyBytes, prefixBytes: 0, invalidOffset: false, ...receipt };
   if (prefix === null) {
     return {
       record: fieldSourceRecordParser.parse({ ...row, source_body: null }),
       bodyBytes,
       prefixBytes: 0,
       invalidOffset: offset !== 0
+      , ...receipt
     };
   }
   if (offset > bodyBytes || (offset < bodyBytes && prefix.length > 0 && (prefix[0]! & 0xc0) === 0x80)) {
@@ -393,6 +435,7 @@ function parseBoundedSourceRecord(
       bodyBytes,
       prefixBytes: 0,
       invalidOffset: true
+      , ...receipt
     };
   }
   if (offset === bodyBytes) {
@@ -401,6 +444,7 @@ function parseBoundedSourceRecord(
       bodyBytes,
       prefixBytes: 0,
       invalidOffset: false
+      , ...receipt
     };
   }
   const trimmed = trimUtf8Prefix(prefix, byteLimit);
@@ -409,6 +453,7 @@ function parseBoundedSourceRecord(
     bodyBytes,
     prefixBytes: trimmed.length,
     invalidOffset: false
+    , ...receipt
   };
 }
 
@@ -420,18 +465,13 @@ function prefixBuffer(value: unknown): Buffer | null {
   throw new Error("invalid source body prefix");
 }
 
-function trimUtf8Prefix(bytes: Buffer, byteLimit: number): Buffer {
+export function trimUtf8Prefix(bytes: Buffer, byteLimit: number): Buffer {
   if (bytes.length === 0) return bytes;
   let end = Math.min(bytes.length, byteLimit);
-  while (end > 0 && !isUtf8Boundary(bytes, end)) end -= 1;
-  if (end === 0) {
-    const lead = bytes[0]!;
-    const width = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
-    end = Math.min(bytes.length, width);
-  }
+  let last = end - 1;
+  while (last > 0 && (bytes[last]! & 0xc0) === 0x80) last -= 1;
+  const lead = bytes[last]!;
+  const width = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+  if (last + width > end) end = last;
   return bytes.subarray(0, end);
-}
-
-function isUtf8Boundary(bytes: Buffer, offset: number): boolean {
-  return offset === 0 || offset === bytes.length || (bytes[offset]! & 0xc0) !== 0x80;
 }

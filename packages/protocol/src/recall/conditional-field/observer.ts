@@ -43,9 +43,9 @@ export const ObserverCursorSchema = z
     snapshot_id: Sha256DigestSchema,
     query_id: ConditionalFieldIdSchema,
     region_id: ConditionalFieldIdSchema,
-    position: ConditionalFieldIdSchema.nullable(),
+    position: z.string().max(65536).nullable(),
     // Progress commits only after identities are observed; retry resumes here.
-    committed_through: ConditionalFieldIdSchema.nullable()
+    committed_through: z.string().max(65536).nullable()
   })
   .strict()
   .readonly();

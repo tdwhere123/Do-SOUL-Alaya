@@ -55,7 +55,6 @@ export {
   runConditionalFieldRecall,
   runConditionalFieldRecallWithReceipt,
   snapshotIdFromPin,
-  RELATION_MILLIGRADES,
   type ConditionalFieldRecallPort,
   type ConditionalFieldRecallPortResult,
   type ConditionalFieldRecallRequest,

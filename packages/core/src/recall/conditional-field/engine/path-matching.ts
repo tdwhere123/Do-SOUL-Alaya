@@ -25,7 +25,7 @@ export type AdjacencyRow = Readonly<{
 }>;
 
 export type NamedKindOverlay = Readonly<Record<string, Readonly<{
-  readonly milligrades: number;
+  readonly milligrades?: number;
   readonly applicable: boolean;
   readonly role?: string;
 }>>>;
@@ -41,7 +41,8 @@ export function relationStrength(
   overlay: NamedKindOverlay,
   storedPredicate: string
 ): Readonly<{ readonly milligrades: number; readonly applicable: boolean }> | undefined {
-  return overlay[storedPredicate] ?? overlay[relation.relation_kind];
+  const declared = overlay[storedPredicate] ?? overlay[relation.relation_kind];
+  return { milligrades: declared?.milligrades ?? 1000, applicable: declared?.applicable ?? true };
 }
 
 export function unifyAdvance(
@@ -67,7 +68,7 @@ export function inactiveResolution(kind: string | null | undefined): boolean {
 export function observedTargetRevision(
   targetObjectId: string,
   sourceFacts: ReadonlyMap<string, BoundSourceFacts> | undefined,
-  liveStates: readonly ProductStateKey[]
+  liveStates: Iterable<ProductStateKey>
 ): string | undefined {
   const fact = sourceFacts?.get(targetObjectId)?.source_revision;
   if (fact !== undefined && fact.length > 0) return fact;

@@ -13,11 +13,14 @@ import {
 } from "@do-soul/alaya-protocol";
 import { joinHyperedgeOr } from "../reference/accepting-projection.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
+import { traceDerivationForest } from "../engine/derivation-provenance.js";
 
 export type ExplanationSelectionInput = Readonly<{
   readonly value: FieldValue;
   readonly support?: readonly SupportRecord[];
   readonly derivations?: readonly Derivation[];
+  readonly derivation_forest?: ReadonlyMap<string, Derivation>;
+  readonly output_derivation_roots?: ReadonlyMap<string, readonly string[]>;
   readonly output_derivations?: Readonly<Record<string, readonly string[]>>;
   readonly page_budget: number;
   readonly expand_payload: boolean;
@@ -39,7 +42,7 @@ export function mixedPayloadGeneration(
 
 export function explanationIdsForEntry(input: ExplanationSelectionInput): readonly string[] {
   if (!input.expand_payload) return [];
-  if (input.derivations !== undefined && input.derivations.length > 0) {
+  if (input.derivation_forest !== undefined || (input.derivations !== undefined && input.derivations.length > 0)) {
     return derivationExplanationIds(input);
   }
   return witnessExplanationIds(input);
@@ -47,15 +50,8 @@ export function explanationIdsForEntry(input: ExplanationSelectionInput): readon
 
 export function recoverExplanationForest(ids: readonly string[], rows: readonly Derivation[]): readonly Derivation[] {
   const forest = new Map(rows.map((row) => [row.derivation_id, row]));
-  const retained = new Map<string, Derivation>();
-  const visit = (id: string): boolean => {
-    if (retained.has(id)) return true;
-    const node = forest.get(id);
-    if (node === undefined) return false;
-    retained.set(id, node);
-    return node.children.every(visit);
-  };
-  return ids.every(visit) ? [...retained.values()] : [];
+  const traced = traceDerivationForest({ forest, roots: ids });
+  return traced.complete ? [...traced.traversal.nodes.values()] : [];
 }
 
 export function omittedStructuredPayload(
@@ -124,6 +120,13 @@ export function witnessAttributionHandle(input: Readonly<{
 }
 
 function derivationExplanationIds(input: ExplanationSelectionInput): readonly string[] {
+  if (input.derivation_forest !== undefined) {
+    const owned = input.output_derivation_roots?.get(productStateNodeId(input.value.state)) ?? [];
+    return owned.filter((id) => {
+      const node = input.derivation_forest!.get(id);
+      return node !== undefined && derivationIsFeasible(node, input.support, input.page_budget);
+    });
+  }
   const forest = input.derivations ?? [];
   const owned = new Set(input.output_derivations?.[productStateNodeId(input.value.state)] ?? []);
   const ids: string[] = [];

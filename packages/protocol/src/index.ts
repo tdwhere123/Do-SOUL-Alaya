@@ -169,6 +169,7 @@ export * from "./shared/read-error-message.js";
 export { AlayaError, type AlayaErrorOptions } from "./shared/alaya-error.js";
 export { deepFreeze } from "./shared/deep-freeze.js";
 export {
+  BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_JSON_OBJECT_MAX_CHARS,
   BoundedJsonObjectSchema,
   IsoDatetimeStringSchema,

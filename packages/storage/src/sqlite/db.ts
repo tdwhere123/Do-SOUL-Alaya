@@ -23,6 +23,8 @@ import {
 import { bindEmbeddingOverlayIfPresent } from "./embedding-overlay-bind.js";
 import { restrictSqliteFileModes } from "./sqlite-file-modes.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
+import { registerRetainedSourceChunkDigest } from "./retained-source-chunk-digest.js";
+import { migrateRetainedSourceChunks } from "./retained-source-migration.js";
 
 export { TEMPORAL_OFFLINE_MIGRATION_VERSION, type TemporalDatabaseMode } from "./temporal-cutover-gate.js";
 
@@ -77,6 +79,7 @@ export class StorageDatabase {
   ) {
     this.filename = filename;
     this.connection = connection;
+    registerRetainedSourceChunkDigest(connection);
     this.reopenTemporalMode = reopenTemporalMode;
   }
 
@@ -112,6 +115,7 @@ export class StorageDatabase {
     restrictSqliteFileModes(this.filename);
     bindEmbeddingOverlayIfPresent(database, this.filename);
     this.connection = database;
+    registerRetainedSourceChunkDigest(database);
     this.connectionVersion += 1;
     this.closed = false;
     if (this.filename !== ":memory:") {
@@ -217,6 +221,7 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
 
   try {
     configureDatabaseConnection(database, busyTimeoutMs);
+    registerRetainedSourceChunkDigest(database);
     restrictSqliteFileModes(filename);
     runMigrations(database, temporalMode);
     bindEmbeddingOverlayIfPresent(database, filename);
@@ -409,7 +414,8 @@ const DATA_MIGRATIONS: Readonly<Partial<Record<
   },
   [TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION]: (database) => {
     migrateVerifiedProjectionBindKey(database);
-  }
+  },
+  13: migrateRetainedSourceChunks
 };
 
 function runDataMigrationIfPresent(
