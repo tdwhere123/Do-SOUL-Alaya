@@ -13,6 +13,8 @@ import {
   SoulReportContextUsageRequestSchema,
   SourceDeliveredSpanSchema,
   canonicalProductIdentity,
+  indexEntryObjectKind,
+  indexEntrySubjectId,
   memoryIndexEntry,
   memoryProductStateKey,
   retargetMemoryProduct,
@@ -84,6 +86,8 @@ describe("conditional-field product identity", () => {
     });
     expect(source.object_id).toBeUndefined();
     expect(source.target.kind).toBe("source_evidence");
+    expect(indexEntrySubjectId(source)).toBe("rec-1");
+    expect(indexEntryObjectKind(source)).toBe("source_evidence");
     expect(() => IndexEntrySchema.parse({
       ...source,
       object_id: "fake-capsule"
@@ -122,6 +126,22 @@ describe("conditional-field product identity", () => {
       object_id: "fake-memory",
       object_kind: "memory_entry"
     })).toThrow();
+    const measuredMemory = {
+      object_id: "mem-1",
+      target: {
+        kind: "memory_entry" as const,
+        workspace_id: "ws",
+        object_id: "mem-1",
+        source_revision: "rev-1"
+      }
+    };
+    expect(indexEntrySubjectId(measuredMemory)).toBe("mem-1");
+    expect(indexEntryObjectKind(measuredMemory)).toBe("memory_entry");
+    const measuredSource = { object_id: "fake-capsule", target: source.target };
+    expect(indexEntrySubjectId(measuredSource)).toBe("rec-1");
+    expect(indexEntryObjectKind(measuredSource)).toBe("source_evidence");
+    expect(indexEntrySubjectId({ target: source.target })).toBe("rec-1");
+    expect(indexEntryObjectKind({ target: source.target })).toBe("source_evidence");
     expect(() => retargetMemoryProduct(sourceProductStateKey({
       workspace_id: "ws",
       root_kind: "source_record",

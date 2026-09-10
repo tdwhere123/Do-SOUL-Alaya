@@ -291,11 +291,15 @@ export function indexMemoryObjectId(entry: IndexEntry): string | undefined {
   return productMemoryObjectId(productStateKeyFromIndexEntry(entry));
 }
 
-export function indexEntrySubjectId(entry: IndexEntry): string {
+export function indexEntrySubjectId(entry: {
+  readonly target: RecallTargetRef;
+}): string {
   return entry.target.kind === "memory_entry" ? entry.target.object_id : entry.target.root_id;
 }
 
-export function indexEntryObjectKind(entry: IndexEntry): "memory_entry" | "source_evidence" {
+export function indexEntryObjectKind(entry: {
+  readonly target: RecallTargetRef;
+}): "memory_entry" | "source_evidence" {
   return entry.target.kind === "source_evidence" ? "source_evidence" : "memory_entry";
 }
 
