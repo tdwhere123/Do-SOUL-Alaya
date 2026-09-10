@@ -53,6 +53,7 @@ import {
   terminalObserver,
   type SourceDomainCoverage
 } from "./observe-field-residuals.js";
+import type { RequestCostLedger, RequestCostPhase } from "./request-cost-ledger.js";
 export type ObserveFieldInput = Readonly<{
   readonly workspace_id: string;
   readonly query_text: string;
@@ -66,6 +67,7 @@ export type ObserveFieldInput = Readonly<{
   readonly expected_source_revision?: string;
   readonly model_id?: string;
   readonly expected_model_id?: string;
+  readonly cost?: RequestCostLedger;
 }>;
 
 const MAX_OBSERVE_ROUNDS = 4_096;
@@ -114,6 +116,7 @@ function observeWithinMemory(
   if (expectedRevision === undefined && input.readers.snapshotPin !== undefined) {
     if (state.remaining_exploration < SNAPSHOT_PIN_NATIVE_WORK) return interruptObservedField(state);
     expectedRevision = input.readers.snapshotPin(input.workspace_id).source_revision;
+    input.cost?.add("observe", { native_visits: SNAPSHOT_PIN_NATIVE_WORK });
     state = { ...state, remaining_exploration: state.remaining_exploration - SNAPSHOT_PIN_NATIVE_WORK };
   }
   const lease = activeLease(interpretation);
@@ -163,6 +166,7 @@ function observeWithinMemory(
     state.remaining_exploration
   );
   if (storedKinds.charged > 0) {
+    input.cost?.add("observe", { native_visits: storedKinds.charged });
     state = Object.freeze({
       ...state,
       remaining_exploration: Math.max(0, state.remaining_exploration - storedKinds.charged)
@@ -211,14 +215,16 @@ function runObservationRounds(session: ObservationSession): FieldEngineState {
       const action = { ...proposed, work_limit: Math.min(batchedRows + pinWork, session.state.remaining_exploration) };
       const minimum = (action.action === "seed" || action.action === "adjacency" ? 4 : 1) + pinWork;
       if (action.work_limit < minimum) return interruptObservedField(session.state);
-      if (action.action === "seed") { if (consumeSeedPage(session, action)) return session.state; }
-      else if (action.action === "measurement") { if (consumeMeasurementPage(session, action)) return session.state; }
-      else if (action.action === "relation") {
+      if (action.action === "seed") {
+        if (phaseTime(session, "seed", () => consumeSeedPage(session, action))) return session.state;
+      } else if (action.action === "measurement") {
+        if (phaseTime(session, "measurement", () => consumeMeasurementPage(session, action))) return session.state;
+      } else if (action.action === "relation") {
         session.state = closeRegion(session.state, interpretation, action, session.cursors,
           session.unresolvedGuard || session.missingMeasurement ? "unknown" : "exhausted");
       } else {
         if (incompleteObserver(session.state.last_observer_status)) break;
-        if (consumeAdjacencyPage(session, action)) return session.state;
+        if (phaseTime(session, "adjacency", () => consumeAdjacencyPage(session, action))) return session.state;
       }
     }
   }
@@ -235,6 +241,7 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   const { input, interpretation, lease, cursors, pairProgress, subjects, observedAt, sourceFacts } = session;
   const before = session.state;
   const observed = observeSeed(input, interpretation, lease, action, cursors, observedAt);
+  recordObserverWork(session, "seed", observed);
   cursors.set(action.region_id, observed.page.cursor);
   const seedIds = observed.page.observations.filter((row) => row.target?.kind !== "source_evidence").map((row) => row.object_id);
   addSubjects(subjects, seedIds);
@@ -288,6 +295,7 @@ function consumeMeasurementPage(session: ObservationSession, action: Observation
     return false;
   }
   const observed = observeMeasurement(input, interpretation, lease, action, cursors);
+  recordObserverWork(session, "measurement", observed);
   cursors.set(action.region_id, observed.page.cursor);
   const effects = measurementEffectsFor(observed, interpretation, input.as_of, session.state.measurements);
   session.missingMeasurement ||= measurementIsMissing(effects);
@@ -308,6 +316,7 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     Math.max(0, session.state.remaining_exploration - minimum));
   const pair = scanned.pair;
   session.pairIndex = scanned.next;
+  if (scanned.work > 0) session.input.cost?.add("adjacency", { joins: scanned.work });
   session.state = { ...session.state, pair_scan_offset: scanned.next,
     remaining_exploration: session.state.remaining_exploration - scanned.work };
   action = { ...action, work_limit: Math.min(action.work_limit, session.state.remaining_exploration) };
@@ -320,6 +329,7 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   }
   const captured: RelationObserverRow[] = [];
   const observed = observeAdjacency(input, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt, sourceFacts);
+  recordObserverWork(session, "adjacency", observed);
   cursors.set(action.region_id, observed.page.cursor);
   if (captured.length === 0) {
     session.state = applyObserverPage({ ...session.state, pair_progress: pairProgress.snapshot,
@@ -651,6 +661,22 @@ function maskAdjacencyExhaustion(
 
 function addSubjects(subjects: ObservationSubjects, ids: readonly string[]): void {
   for (const id of ids) subjects.add(id);
+}
+
+function phaseTime<T>(session: ObservationSession, phase: RequestCostPhase, run: () => T): T {
+  return session.input.cost?.time(phase, run) ?? run();
+}
+
+function recordObserverWork(
+  session: ObservationSession,
+  phase: RequestCostPhase,
+  observed: ReturnType<typeof observeConditionalField>
+): void {
+  session.input.cost?.add(phase, {
+    native_visits: observed.work.native_visits,
+    native_rows: observed.page.observations.length,
+    native_bytes: observed.work.bytes_read
+  });
 }
 
 function observerPageLimit(

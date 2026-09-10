@@ -27,9 +27,15 @@ import { claimObligationAccepts } from "./claim-obligation.js";
 import { CoreError } from "../../../shared/errors.js";
 import { compareText } from "../../../shared/compare-text.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
-import { composedFacetPathId, facetBelongsToOutput } from "../engine/path-composition.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../engine/output-derivations.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
+import {
+  accountFacetPreparation,
+  indexedFacetsForCandidate,
+  type FacetVisitIndex,
+  type FacetVisitProgress
+} from "./facet-visit-accounting.js";
+import type { RequestCostLedger } from "../../runtime/request-cost-ledger.js";
 import {
   OFFSET_CURSOR,
   PROJECTION_CURSOR,
@@ -89,7 +95,10 @@ export type AcceptingProjectionInput = Readonly<{
   readonly delivered_product_ids?: ReadonlySet<string>;
   readonly delivered_entry_revisions?: Readonly<Record<string, string>>;
   readonly ordered_values?: Readonly<{ size: number; at(index: number): FieldValue | undefined }>;
-  readonly on_projection_progress?: (offset: number) => void;
+  readonly on_projection_progress?: (offset: number, facet?: FacetVisitProgress) => void;
+  readonly projection_facet_offset?: number;
+  readonly projection_facet_index?: FacetVisitIndex;
+  readonly cost?: RequestCostLedger;
   readonly on_semantic_entries?: (entries: readonly IndexEntry[]) => void;
   readonly explanation_progress?: import("./explanation-delivery.js").ExplanationDelivery;
   readonly on_explanation_progress?: (
@@ -216,11 +225,18 @@ function pageAcceptingIndex(
     const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
     const payloadMemory = input.finalize_payload === undefined ? 0
       : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
-    const grounded = groundedOutputDerivations({ seeds: input.snapshot.seeds,
+    const groundingInput = { seeds: input.snapshot.seeds,
       transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
       transition_derivations: input.transition_derivations ?? {},
       progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
-      allowance: groundingAllowance });
+      allowance: groundingAllowance };
+    const grounded = input.cost === undefined
+      ? groundedOutputDerivations(groundingInput)
+      : input.cost.time("solve", () => groundedOutputDerivations(groundingInput));
+    input.cost?.add("solve", {
+      relaxations: grounded.work,
+      charged_retained_bytes: grounded.retained_bytes
+    });
     input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
     input = { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
       grounding_complete: grounded.complete,
@@ -247,7 +263,14 @@ function pageAcceptingIndex(
   if (!useEmittedSet && continuationSetMismatch(input, entries)) {
     return closedIndex(input, representation, invalidatedCompleteness());
   }
-  input.on_projection_progress?.(projected.next);
+  input.on_projection_progress?.(projected.next, projected.facet);
+  if (projected.facet !== undefined) {
+    input.cost?.add("index", {
+      native_visits: projected.facet.visits,
+      cache_hits: projected.facet.cache_hits,
+      cache_misses: projected.facet.cache_misses
+    });
+  }
   const offset = useEmittedSet ? 0 : resolvePageOffset(input, entries.length);
   const members = useEmittedSet
     ? projected.members
@@ -299,6 +322,8 @@ function pageAcceptingIndex(
     completeness,
     continuation: nextContinuation({
       ...input,
+      projection_facet_offset: projected.facet.scan_offset,
+      projection_facet_index: projected.facet.index,
       ...(resourceOpen || omittedPayload ? { resource_work: "open" } : {}),
       delivered_entry_revisions: committedRevisions
     }, remaining, nextOffset, useEmittedSet ? [...members, ...updates] : entries, scanOffset,
@@ -350,6 +375,7 @@ function acceptingEntries(
   readonly truncated: boolean;
   readonly next: number;
   readonly remaining: number;
+  readonly facet: FacetVisitProgress;
 } {
   const entries: IndexEntry[] = [];
   const members: IndexEntry[] = [];
@@ -358,10 +384,11 @@ function acceptingEntries(
   let truncated = false;
   let groundingDeferred = false;
   const policy = input.view.enumeration_policy ?? "canonical";
+  const cursorMatch = PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "");
   const start = emitted !== undefined && Object.keys(emitted).length > 0
     ? 0
     : input.projection_scan_offset
-      ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0);
+      ?? Number(cursorMatch?.[1] ?? 0);
   const sorted = sortFieldValues(input.snapshot.values, emitted === undefined ? "canonical" : policy);
   const values = input.ordered_values !== undefined && emitted === undefined
     ? input.ordered_values
@@ -372,10 +399,28 @@ function acceptingEntries(
     || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "")
     || allowance < values.size * (1 + payloadWork);
   const pageEnd = resolvePageOffset(input, values.size) + input.budget.page_budget;
+  const scanOffset = input.projection_facet_offset ?? Number(cursorMatch?.[4] ?? 0);
   if (input.budget.page_budget === 0) {
     return {
       entries, members, updates, unemitted: values.size,
-      truncated: start < values.size, next: start, remaining: allowance
+      truncated: start < values.size, next: start, remaining: allowance,
+      facet: accountFacetPreparation(input.snapshot.facets, input.snapshot.seeds, 0,
+        input.projection_facet_index, scanOffset).facet
+    };
+  }
+  const prepared = accountFacetPreparation(
+    input.snapshot.facets, input.snapshot.seeds, allowance, input.projection_facet_index, scanOffset,
+    Math.min(input.budget.page_budget, Math.max(1, values.size))
+      * (1 + (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1))
+  );
+  allowance = prepared.remaining;
+  let facet = prepared.facet;
+  truncated = prepared.truncated;
+  const indexed = { ...input, projection_facet_index: prepared.facet.index };
+  if (prepared.truncated && allowance <= 0) {
+    return {
+      entries, members, updates, unemitted: values.size,
+      truncated: true, next: start, remaining: allowance, facet
     };
   }
   let next = start;
@@ -387,7 +432,7 @@ function acceptingEntries(
       const prior = emitted[key];
       if (prior !== undefined) {
         const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, input);
-        const entry = grounded ? indexEntryForValue(value, input) : null;
+        const entry = grounded ? indexEntryForValue(value, indexed) : null;
         if (entry === null || prior === indexEntryRevision(entry)) {
           next += 1;
           continue;
@@ -407,10 +452,10 @@ function acceptingEntries(
       next += 1;
       continue;
     }
-    const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, input);
-    const entry = grounded ? indexEntryForValue(value, input) : null;
+    const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, indexed);
+    const entry = grounded ? indexEntryForValue(value, indexed) : null;
     if (entry !== null && input.delivered_entry_revisions?.[key] === indexEntryRevision(entry)) {
-      next += 1;
+      next += 1; facet = { ...facet, scan_offset: 0 };
       continue;
     }
     const collected = emitted === undefined ? entries.length : members.length;
@@ -418,20 +463,21 @@ function acceptingEntries(
       : (input.payload_work_per_entry ?? 1) * (collected + (value.accepting && grounded ? 1 : 0));
     if (allowance < 1 + payloadReserve) {
       truncated = true;
+      facet = { ...facet, scan_offset: Math.max(facet.scan_offset, 1) };
       break;
     }
     allowance -= 1;
     if (!grounded) {
       groundingDeferred ||= value.accepting;
       if (value.accepting && input.delivered_product_ids === undefined && emitted === undefined) break;
-      next += 1;
+      next += 1; facet = { ...facet, scan_offset: 0 };
       continue;
     }
     if (entry !== null) {
       entries.push(entry);
       if (emitted !== undefined && members.length < input.budget.page_budget) members.push(entry);
     }
-    next += 1;
+    next += 1; facet = { ...facet, scan_offset: 0 };
     if (emitted !== undefined) {
       if (members.length >= input.budget.page_budget) {
         truncated = truncated || next < values.size;
@@ -451,7 +497,8 @@ function acceptingEntries(
     unemitted,
     truncated: truncated || groundingDeferred,
     next,
-    remaining: allowance
+    remaining: allowance,
+    facet
   };
 }
 
@@ -519,7 +566,7 @@ function indexEntryForValue(
 function facetsAccept(value: FieldValue, input: AcceptingProjectionInput): boolean {
   if (input.snapshot.facets.length === 0) return true;
   const vectors = facetsForCandidate(value, input);
-  if (vectors.length === 0) return false;
+  if (vectors.length === 0) return input.projection_facet_index?.complete !== true;
   return evaluateFacetPredicate(
     facetModeForValue(value, input),
     vectors,
@@ -531,11 +578,8 @@ function facetsForCandidate(
   value: FieldValue,
   input: AcceptingProjectionInput
 ): readonly FacetVector[] {
-  const facets = input.snapshot.facets;
-  const seeds = input.snapshot.seeds.filter((seed) => productStateNodeId(seed.state) === productStateNodeId(value.state));
-  return [...facets.filter((vector) => facetBelongsToOutput(vector.path_id, value.state)),
-    ...seeds.map((seed) => ({ schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      path_id: composedFacetPathId(seed.state, "seed"), coordinates: [seed.milligrades] }))];
+  if (input.snapshot.facets.length === 0 || input.projection_facet_index === undefined) return [];
+  return indexedFacetsForCandidate(value, input.projection_facet_index, input.snapshot.facets);
 }
 
 function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): FacetMode {
@@ -641,7 +685,8 @@ function nextContinuation(
       useEmittedSet ? emittedKeys : entries.slice(0, nextOffset).map(entrySortKey)
     )
     : `p${projectionOffset}g${input.grounding_progress?.completed_work ?? 0}`
-      + (input.projection_generation === undefined ? "" : `r${input.projection_generation}`);
+      + (input.projection_generation === undefined ? "" : `r${input.projection_generation}`)
+      + ((input.projection_facet_offset ?? 0) > 0 ? `e${input.projection_facet_offset}` : "");
   if (cursor === null) return null;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

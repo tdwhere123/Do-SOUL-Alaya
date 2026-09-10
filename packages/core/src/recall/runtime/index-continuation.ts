@@ -203,7 +203,9 @@ export function resumeIndexProjection(state: FieldEngineState, snapshot: FieldSn
     input_references: references,
     generation,
     offset: same ? prior!.offset : 0,
-    delivered_entries: prior?.delivered_entries ?? {}
+    delivered_entries: prior?.delivered_entries ?? {},
+    ...(same && prior?.facet_offset !== undefined ? { facet_offset: prior.facet_offset } : {}),
+    ...(prior?.facet_index !== undefined ? { facet_index: prior.facet_index } : {})
   };
 }
 

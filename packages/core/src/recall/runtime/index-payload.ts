@@ -22,6 +22,8 @@ export class BoundedIndexPayload {
   public readonly previews: Map<string, string>;
   public readonly sourceMetadata: Record<string, RecallSourceMetadata> = {};
   public remainingMemoryBytes: number;
+  private nativeVisits = 0;
+  private nativeBytes = 0;
   private readonly deliveredSpans = new Map<string, SourceDeliveredSpan>();
 
   public constructor(private readonly input: Readonly<{
@@ -115,6 +117,8 @@ export class BoundedIndexPayload {
       const page = this.input.readers.source({ workspaceId: this.input.workspaceId, objectId,
         byteLimit: Math.max(1, Math.min(65536, this.remainingMemoryBytes)) });
       remaining -= Math.max(1, page.rowsRead) + 2;
+      this.nativeVisits += Math.max(1, page.rowsRead);
+      this.nativeBytes += page.bytesRead;
       this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead);
       if (page.row?.content === undefined || page.unavailable) { complete = false; continue; }
       // Object-id source lookup is current state, not the pinned product.
@@ -131,6 +135,13 @@ export class BoundedIndexPayload {
       rememberPreview(this.previews, cacheKey, objectId, createContentPreview(page.row.content, "excerpt"));
     }
     return { remaining: Math.max(0, remaining), complete, retryable: !complete && retryable };
+  }
+
+  public takeNativeWork(): Readonly<{ readonly native_visits: number; readonly native_bytes: number }> {
+    const work = { native_visits: this.nativeVisits, native_bytes: this.nativeBytes };
+    this.nativeVisits = 0;
+    this.nativeBytes = 0;
+    return work;
   }
 
   public applyDeliveredSpans(index: InformationIndex): InformationIndex {
@@ -172,6 +183,8 @@ export class BoundedIndexPayload {
       offset
     });
     const nextRemaining = remaining - Math.max(1, page.nativeWork ?? page.rowsRead) - 2;
+    this.nativeVisits += Math.max(1, page.nativeWork ?? page.rowsRead);
+    this.nativeBytes += page.bytesRead + (page.metadataBytes ?? 0);
     this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead - (page.metadataBytes ?? 0));
     if (page.row?.content === undefined || page.unavailable) {
       return { ok: false, remaining: nextRemaining, retryable: page.resourceLimited === true };

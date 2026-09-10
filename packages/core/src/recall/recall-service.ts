@@ -84,7 +84,10 @@ export {
   type RecallConsumerCapability
 } from "./runtime/recall-consumer-compatibility.js";
 export { bindIssuedDeliveryId, issuedDeliveryIdOf } from "./runtime/index-continuation.js";
-export type { ConditionalFieldExecutionReceipt } from "./runtime/conditional-field-execution-receipt.js";
+export type {
+  ConditionalFieldExecutionReceipt,
+  RequestActualCost
+} from "./runtime/conditional-field-execution-receipt.js";
 export { compileConditionalFieldQuery, interpretationIdentity } from "./conditional-field/query/compile-query.js";
 export {
   attributeUsageReports,

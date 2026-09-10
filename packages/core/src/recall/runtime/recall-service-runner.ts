@@ -26,7 +26,14 @@ import { projectFieldDelta, type FieldEngineState } from "../conditional-field/e
 import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
-import { captureEffectiveAsOf, normalizeQueryText } from "./recall-service-helpers.js";
+import { fieldProgressFingerprint } from "../conditional-field/index/facet-visit-accounting.js";
+import {
+  captureEffectiveAsOf,
+  normalizeQueryText,
+  nullableTime,
+  previewTokenEstimate,
+  validSnapshot
+} from "./recall-service-helpers.js";
 import type { RecallResult } from "./recall-service-types.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { BoundedIndexPayload } from "./index-payload.js";
@@ -47,6 +54,7 @@ import {
   mergeCommittedRevisions
 } from "./index-continuation.js";
 import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
+import { startRequestCost, type RequestCostLedger } from "./request-cost-ledger.js";
 import type {
   ConditionalFieldRecallRequest,
   RecallExecutionContext,
@@ -167,6 +175,7 @@ export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest):
 export function runConditionalFieldRecallWithReceipt(input: ConditionalFieldRecallRequest): Readonly<{
   index: InformationIndex; execution_receipt: ConditionalFieldExecutionReceipt;
 }> {
+  const cost = startRequestCost();
   const requestedBudget = input.requested_budget ?? input.budget;
   if (input.readers.snapshotPin !== undefined) {
     const reserved = reserveSnapshotPinWork(input.budget);
@@ -197,19 +206,22 @@ export function runConditionalFieldRecallWithReceipt(input: ConditionalFieldReca
       ? {}
       : { interpretation_proposal: input.interpretation_proposal })
   };
-  const interpretation = compileConditionalFieldQuery(compileInput);
-  const executionReceipt: ConditionalFieldExecutionReceipt = {
+  const interpretation = cost.time("compile", () => compileConditionalFieldQuery(compileInput));
+  const index = runCompiledConditionalFieldRecall(input, interpretation, cost);
+  cost.markAfterProjection();
+  return { index, execution_receipt: {
     schema_version: 1, workspace_id: input.workspace_id, requested_budget: requestedBudget,
     compile_input: compileInput, query_id: interpretation.query_id,
     interpretation_id: interpretationIdentity({ interpretation_clock: input.interpretation_clock }),
-    snapshot_id: input.snapshot_id, interpretation_clock: input.interpretation_clock
-  };
-  return { index: runCompiledConditionalFieldRecall(input, interpretation), execution_receipt: executionReceipt };
+    snapshot_id: input.snapshot_id, interpretation_clock: input.interpretation_clock,
+    actual: cost.snapshot()
+  } };
 }
 
 function runCompiledConditionalFieldRecall(
   input: ConditionalFieldRecallRequest,
-  interpretation: QueryInterpretation
+  interpretation: QueryInterpretation,
+  cost: RequestCostLedger
 ): InformationIndex {
   if (continuationEpochMismatch(input.continuation, interpretation, input.authorized_scopes)
     || (input.continuation != null && (
@@ -220,7 +232,7 @@ function runCompiledConditionalFieldRecall(
   }
   if (interpretation.status === "resource_rejected" || interpretation.status === "malformed"
     || interpretation.status === "unsupported") {
-    return projectFromField(emptyField(interpretation, input), input, interpretation);
+    return projectFromField(emptyField(interpretation, input), input, interpretation, undefined, cost);
   }
   const restored = restoreField(
     input.continuation,
@@ -237,21 +249,27 @@ function runCompiledConditionalFieldRecall(
   if (restored !== undefined && FIELD_SOURCE_PINS.get(restored) !== currentPin) {
     return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
   }
-  const field = observeField(interpretation, {
+  const field = cost.time("observe", () => observeField(interpretation, {
     workspace_id: input.workspace_id,
     query_text: input.query_text,
     budget: input.budget,
     as_of: input.as_of,
     readers: input.readers,
+    cost,
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
     ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),
     ...(restored === undefined ? {} : { resume_field: restored }),
     ...(pin === undefined ? {} : { expected_source_revision: pin.source_revision })
-  });
+  }));
+  cost.add("solve", { relaxations: field.solver_completed_work ?? 0 });
+  cost.add("observe", { pending_work: field.remaining_work.reduce((sum, row) => sum + row.units, 0),
+    state_creates: field.seen_identities.length,
+    charged_retained_bytes: Math.max(0, input.budget.memory_bytes - field.remaining_memory_bytes) });
   let retained = field;
-  const projected = projectFromField(assessUnknownCause(field, input), input, interpretation, (next) => { retained = next; });
+  const projected = projectFromField(assessUnknownCause(field, input), input, interpretation, (next) => { retained = next; }, cost);
   const unserviceable = input.budget.work_units <= 1 && projected.entries.length === 0;
-  const noProgress = projected.entries.length === 0 && fieldProgress(retained) === fieldProgress(restored);
+  const noProgress = projected.entries.length === 0
+    && fieldProgressFingerprint(retained) === fieldProgressFingerprint(restored);
   const index = unserviceable || (noProgress && restored !== undefined && observationSettled(retained))
     ? { ...projected, continuation: null } : projected;
   if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
@@ -259,15 +277,6 @@ function runCompiledConditionalFieldRecall(
   // null) can still replay the same issued delivery_id.
   rememberField(retained, index.continuation ?? input.continuation ?? null);
   return index;
-}
-
-function fieldProgress(state: FieldEngineState | undefined): string {
-  return JSON.stringify([state?.observations.length ?? 0, state?.seeds.length ?? 0,
-    state?.transitions.length ?? 0, state?.grounding_progress?.completed_work ?? 0,
-    state?.resume_cursors ?? {}, state?.pair_progress ?? {}, state?.support_progress ?? {},
-    state?.projection_progress?.offset ?? 0, state?.projection_progress?.delivered_entries ?? {},
-    state?.seen_identities.length ?? 0, state?.pending_path_effects?.offset ?? 0,
-    state?.last_observer_status ?? null]);
 }
 
 function observationSettled(state: FieldEngineState): boolean {
@@ -282,7 +291,8 @@ function projectFromField(
   state: ReturnType<typeof observeField>,
   input: ConditionalFieldRecallRequest,
   interpretation: ReturnType<typeof compileConditionalFieldQuery>,
-  retain?: (state: FieldEngineState) => void
+  retain: ((state: FieldEngineState) => void) | undefined,
+  cost: RequestCostLedger
 ): InformationIndex {
   const delta = projectFieldDelta(state);
   const snapshot = state.binding.kind === "bound"
@@ -332,7 +342,7 @@ function projectFromField(
     ...(input.payload_continuation === undefined
       ? {}
       : { payloadContinuation: input.payload_continuation }) });
-  let index = annotatePublicIndex(InformationIndexSchema.parse(projectAcceptingIndex({
+  let index = annotatePublicIndex(InformationIndexSchema.parse(cost.time("index", () => projectAcceptingIndex({
     snapshot,
     ordered_values: orderedProjectionValues(state),
     view: interpretation.view,
@@ -340,11 +350,17 @@ function projectFromField(
     snapshot_id: interpretation.snapshot_id,
     result_version: RESULT_VERSION,
     budget: input.budget,
+    cost,
     projection_scan_offset: projectionProgress.offset,
     projection_generation: projectionProgress.generation,
+    projection_facet_offset: projectionProgress.facet_offset,
+    projection_facet_index: projectionProgress.facet_index,
     delivered_product_ids: new Set(Object.keys(projectionProgress.delivered_entries)),
     delivered_entry_revisions: projectionProgress.delivered_entries,
-    on_projection_progress: (offset) => { projectionProgress = { ...projectionProgress, offset }; },
+    on_projection_progress: (offset, facet) => {
+      projectionProgress = { ...projectionProgress, offset,
+        ...(facet === undefined ? {} : { facet_offset: facet.scan_offset, facet_index: facet.index }) };
+    },
     explanation_progress: state.explanation_progress,
     on_explanation_progress: (progress, retainedBytes, work) => {
       payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
@@ -378,7 +394,13 @@ function projectFromField(
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
     payload_work_per_entry: 5,
     // Truncated source chunks stay retryable so payload_continuation can fetch the next offset.
-    finalize_payload: (entries, allowance) => payload.finalize(entries, allowance),
+    finalize_payload: (entries, allowance) => cost.time("payload", () => {
+      const result = payload.finalize(entries, allowance);
+      const work = payload.takeNativeWork();
+      cost.add("payload", { native_visits: work.native_visits, native_bytes: work.native_bytes,
+        charged_retained_bytes: work.native_bytes, native_rows: entries.length });
+      return result;
+    }),
     prior_continuation: input.continuation ?? null,
     observer: {
       outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: state.closure.observation },
@@ -399,7 +421,7 @@ function projectFromField(
     ...(state.memory_exhausted || state.remaining_work.length > 0
       ? { resource_work: "open" as const }
       : {})
-  })), interpretation);
+  }))), interpretation);
   const committed = index.completeness.logical_index === "invalidated"
     ? projectionProgress.delivered_entries
     : index.continuation?.emitted_revisions
@@ -635,10 +657,6 @@ function invalidatedPublicIndex(
   };
 }
 
-function previewTokenEstimate(preview: string): number {
-  return Math.max(1, Buffer.byteLength(preview, "utf8"));
-}
-
 function buildRecallRequest(
   context: RecallExecutionContext,
   params: RecallExecutionParams
@@ -768,10 +786,4 @@ function withoutReaders(
   return rest;
 }
 
-function validSnapshot(value: string | undefined): string | undefined {
-  return value !== undefined && /^sha256:[0-9a-f]{64}$/u.test(value) ? value : undefined;
-}
 
-function nullableTime(value: string | null | undefined): string | undefined {
-  return value === null || value === undefined ? undefined : value;
-}

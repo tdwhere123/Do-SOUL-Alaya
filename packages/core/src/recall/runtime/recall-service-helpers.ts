@@ -36,3 +36,15 @@ export type RecallTimeFilter = Readonly<{
   readonly until?: string | null;
   readonly field?: "created_at" | "last_used_at";
 }>;
+
+export function previewTokenEstimate(preview: string): number {
+  return Math.max(1, Buffer.byteLength(preview, "utf8"));
+}
+
+export function validSnapshot(value: string | undefined): string | undefined {
+  return value !== undefined && /^sha256:[0-9a-f]{64}$/u.test(value) ? value : undefined;
+}
+
+export function nullableTime(value: string | null | undefined): string | undefined {
+  return value === null || value === undefined ? undefined : value;
+}
