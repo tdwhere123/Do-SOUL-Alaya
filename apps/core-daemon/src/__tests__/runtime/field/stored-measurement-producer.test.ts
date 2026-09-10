@@ -10,6 +10,7 @@ import {
   type StoredCosineObligation
 } from "@do-soul/alaya-protocol";
 import {
+  capableRecallConsumerDeclaration,
   compileConditionalFieldQuery,
   RecallService,
   snapshotIdFromPin
@@ -63,7 +64,7 @@ describe("worker stored measurement producer", () => {
       await worker.ready();
       const service = new RecallService({ ...fixture.dependencies, now: () => NOW,
         readSnapshot: worker.readSnapshot, conditionalFieldPort: worker.conditionalFieldPort });
-      const request = { workspaceId: WORKSPACE, taskSurface: { ...createTaskSurface(), display_name: QUERY_TEXT }, strategy: "chat" as const,
+      const request = { ...capableRecallConsumerDeclaration(), workspaceId: WORKSPACE, taskSurface: { ...createTaskSurface(), display_name: QUERY_TEXT }, strategy: "chat" as const,
         budget: { ...defaultBudget(), work_units: 10000, memory_bytes: 1000000, page_budget: 64 } };
       const rawOnly = await service.recall(request);
       expect(rawOnly.index?.entries.some((entry) => entry.object_id === OBJECT_B)).toBe(false);

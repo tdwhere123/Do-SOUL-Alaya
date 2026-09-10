@@ -37,7 +37,7 @@ describe("admitted relation to worker Recall", () => {
     }) as ConditionalFieldRecallPortResult;
     const entry = result.index.entries.find((row) => row.object_id === linked);
     expect(entry, JSON.stringify(result.index)).toBeDefined();
-    expect(entry?.association_milligrades).toBe(800);
+    expect(entry?.association_milligrades).toBe(1000);
     expect(entry?.claim).toBe("supported");
     expect(result.index.explanations?.some((row) => row.leaf_ids.includes("worker-path-source"))).toBe(true);
     expect(result.previews[linked]).toContain("isolated routing");

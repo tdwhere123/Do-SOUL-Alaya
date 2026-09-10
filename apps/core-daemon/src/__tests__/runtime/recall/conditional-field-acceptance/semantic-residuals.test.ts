@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InformationIndexSchema, MemoryDimension, type InformationIndex, type QueryProgram } from "@do-soul/alaya-protocol";
-import { RecallService, type ObserverReaders } from "@do-soul/alaya-core";
+import { capableRecallConsumerDeclaration, RecallService, type ObserverReaders } from "@do-soul/alaya-core";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { createRecallHandler } from "../../../../mcp-memory/recall/recall-usage-handlers.js";
 import { createDependencies } from "../../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
@@ -23,6 +23,7 @@ function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverRe
     now: () => INTERPRETATION_CLOCK, observerReaders: readers });
   const handler = createRecallHandler({ deps: { recallService: {
     recall: (params: Parameters<RecallService["recall"]>[0]) => service.recall({
+      ...capableRecallConsumerDeclaration(),
       ...params, budget: defaultBudget({
         page_budget: params.policyOverride?.fine_assessment.budgets.max_entries ?? 30,
         finalization_reserve: COMPLETE_FINALIZATION_RESERVE
@@ -89,8 +90,10 @@ describe("bounded semantic residual producer-consumer regressions", () => {
     const index = await session(slice)();
     expectCompleteBaseline(index);
     expect(index.entries.find((entry) => entry.object_id === MEM.r)).toMatchObject({ role: "requested", association_milligrades: 1000 });
-    expect(index.entries.some((entry) => entry.object_id === MEM.c && entry.association_milligrades === 850)).toBe(true);
-    expect(index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ role: "associated", association_milligrades: 550 });
+    expect(index.entries.some((entry) => entry.object_id === MEM.c && entry.association_milligrades === 1000)).toBe(true);
+    expect(index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({
+      role: "associated", association_milligrades: 1000, claim: "unknown"
+    });
   });
 
   it("preserves unknown guard coverage through actual SQLite observation and index projection", async () => {
@@ -145,13 +148,13 @@ describe("bounded semantic residual producer-consumer regressions", () => {
       sourceId: MEM.r, targetId: MEM.h, resultObjectId: MEM.h, relationKind: "common_cause",
       validity: { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" }, gist: "Accepted common cause" });
     const supported = await complete(session(slice));
-    expect(supported.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ claim: "supported", association_milligrades: 550,
+    expect(supported.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ claim: "supported", association_milligrades: 1000,
       claim_proposition: { kind: "common_cause", arguments: [MEM.r, MEM.h] } });
     const native = readersFor(slice);
     const unavailable = await session(slice, { ...native, relation: (input) => input.predicate === "common_cause"
       ? { observations: [], nativeVisits: 0, nativeBytes: 0, rowsRead: 0, bytesRead: 0, truncated: false, unavailable: true }
       : native.relation!(input) })();
-    expect(unavailable.completeness.observed_coverage).toBe("unavailable");
+    expect(unavailable.completeness.observed_coverage).toBe("unknown");
     expect(unavailable.completeness.logical_index).not.toBe("complete");
     await slice.relations.resolve({ assertionId: "assert-cause-live", workspaceId: WS, runId: null, causedBy: "test",
       resolutionKind: "retracted", reason: "source correction", resolvedAt: INTERPRETATION_CLOCK });
@@ -164,6 +167,8 @@ describe("bounded semantic residual producer-consumer regressions", () => {
     }
     expect(retracted.continuation).toBeNull();
     expect(retracted.completeness.logical_index).toBe("complete");
-    expect(retractedEntries.find((entry) => entry.object_id === MEM.h)?.claim).toBe("unknown");
+    expect(retractedEntries.find((entry) => entry.object_id === MEM.h)).toMatchObject({
+      role: "associated", association_milligrades: 1000, claim: "unknown"
+    });
   });
 });

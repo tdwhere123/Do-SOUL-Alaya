@@ -71,6 +71,22 @@ describe("conditional-field query compiler", () => {
     expect(collectRelations(interpretation.program).map((relation) => relation.relation_kind)).toEqual(["depends_on_build_agent"]);
     expect(collectRelations(interpretation.program)[0]?.source_variable).toBe("deployment");
   });
+  it("assesses ordinary common_cause without hiding unknown associated history", () => {
+    const interpretation = compileConditionalFieldQuery({
+      source: "ordinary",
+      text: "yesterday failed deployment",
+      interpretation_clock: INTERPRETATION_CLOCK,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget()
+    });
+    expect(interpretation.view.claim_demands).toEqual([{
+      variable: "h",
+      proposition_kind: "common_cause",
+      argument_variables: ["r", "h"],
+      required_claim: "any"
+    }]);
+  });
+
   it("keeps yesterday on the anchor and admits last-week associated config", () => {
     const interpretation = compileOrdinary("yesterday's failed deployment");
     expect(interpretation.status).toBe("resolved");

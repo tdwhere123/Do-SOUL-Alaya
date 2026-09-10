@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryDimension, type InformationIndex, type SoulMemorySearchResponse, type UsageReport } from "@do-soul/alaya-protocol";
-import { EventPublisher, RecallService, attributeUsageReports } from "@do-soul/alaya-core";
+import { capableRecallConsumerDeclaration, EventPublisher, RecallService, attributeUsageReports } from "@do-soul/alaya-core";
 import { SqliteTrustStateRepo, SqliteEventLogRepo, SqliteMemoryEntryRepo, SqliteRunRepo, initDatabase, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../../../../runtime/recall-read-worker/observer-operations.js";
 import { createBoundedActiveConstraintsReader } from "../../../../runtime/recall-read-worker/active-constraints.js";
@@ -32,12 +32,15 @@ function serviceFor(database: StorageDatabase, now: () => string = () => NOW,
   worker?: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>) {
   const { dependencies } = createDependencies();
   const readBounded = createBoundedActiveConstraintsReader(database);
-  return new RecallService({ ...dependencies, now,
+  const service = new RecallService({ ...dependencies, now,
     activeConstraintsPort: worker?.activeConstraintsPort ?? {
       ...dependencies.activeConstraintsPort!, readBounded: async (request) => readBounded(request)
     },
     ...(worker === undefined ? { observerReaders: createConditionalFieldObserverReaders(database) }
       : { readSnapshot: worker.readSnapshot, conditionalFieldPort: worker.conditionalFieldPort }) });
+  const recall = service.recall.bind(service);
+  service.recall = (params) => recall({ ...capableRecallConsumerDeclaration(), ...params });
+  return service;
 }
 
 function recorderFor(database: StorageDatabase) {
@@ -227,7 +230,7 @@ describe("conditional-field lifecycle and verified usage through actual consumer
           source: (input) => { const page = readers.source!(input); visits += page.rowsRead; return page; },
           lexical: (input) => { const page = readers.lexical!(input); visits += page.nativeVisits; return page; },
           relation: (input) => { const page = readers.relation!(input); visits += page.nativeVisits; return page; } } });
-      await service.recall({ workspaceId: WS, taskSurface: { display_name: "needle" }, strategy: "chat",
+      await service.recall({ ...capableRecallConsumerDeclaration(), workspaceId: WS, taskSurface: { display_name: "needle" }, strategy: "chat",
         budget: { schema_version: 1, work_units, memory_bytes: 1000000, page_budget: 100, finalization_reserve: 1, min_envelope: 1 } } as Parameters<typeof service.recall>[0]);
       expect(visits).toBeLessThanOrEqual(work_units);
     }

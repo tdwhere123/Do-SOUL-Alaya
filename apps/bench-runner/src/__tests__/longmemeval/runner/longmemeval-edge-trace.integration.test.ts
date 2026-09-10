@@ -25,8 +25,8 @@ describe("conditional-field persisted relation integration", () => {
       evidenceRefs: expect.arrayContaining([expect.any(String)])
     });
     const index = InformationIndexSchema.parse(runRecall(slice));
-    const config = index.entries.find((entry) => entry.object_id === MEM.c && entry.association_milligrades === 850);
-    expect(config).toMatchObject({ claim: "supported", association_milligrades: 850 });
+    const config = index.entries.find((entry) => entry.object_id === MEM.c && entry.association_milligrades === 1000);
+    expect(config).toMatchObject({ claim: "supported", association_milligrades: 1000 });
     expect(config?.explanation_ids.length).toBeGreaterThan(0);
     const explanationIds = new Set(index.explanations?.map((explanation) => explanation.derivation_id));
     expect(config?.explanation_ids.every((id) => explanationIds.has(id))).toBe(true);

@@ -55,7 +55,9 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
     expect(after.index.query_id).toBe(before.index.query_id);
     expect(after.index.entries.map(entryId)).toEqual(before.index.entries.map(entryId));
     expect(after.index.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
-    expect(after.index.entries.find((entry) => entry.object_id === MEM.h)).toBeUndefined();
+    expect(after.index.entries.some((entry) => entry.object_id === MEM.h)).toBe(
+      before.index.entries.some((entry) => entry.object_id === MEM.h)
+    );
     expect(slice.pendingGarden()).toEqual(gardenBefore);
   });
 

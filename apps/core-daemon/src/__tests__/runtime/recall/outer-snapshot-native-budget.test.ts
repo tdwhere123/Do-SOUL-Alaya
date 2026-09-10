@@ -113,7 +113,10 @@ function payload(budget: RequestBudget) {
   return {
     workspace_id: WS, query_text: "needle", budget,
     snapshot_id: `sha256:${"a".repeat(64)}`, interpretation_clock: NOW, as_of: NOW,
-    expires_at: "2027-01-01T00:00:00.000Z", lifetime_now: NOW
+    expires_at: "2027-01-01T00:00:00.000Z", lifetime_now: NOW,
+    protocol_version: 1 as const,
+    supports_source_evidence: true,
+    supported_result_kinds: ["memory_entry", "source_evidence"] as const
   };
 }
 

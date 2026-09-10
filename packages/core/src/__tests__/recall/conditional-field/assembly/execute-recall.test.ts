@@ -12,7 +12,7 @@ import {
   runConditionalFieldRecall,
   type ObserverReaders
 } from "../../../../recall/recall-service.js";
-import { interpretationIdentity } from "../../../../recall/conditional-field/query/compile-query.js";
+import { compileConditionalFieldQuery, interpretationIdentity } from "../../../../recall/conditional-field/query/compile-query.js";
 import { observeConditionalField, startObserverCursor, toSourceObserverRow } from
   "../../../../recall/conditional-field/observers/observe.js";
 import { createDependencies, createTaskSurface } from "../../recall-service-test-fixtures.js";
@@ -39,9 +39,24 @@ describe("conditional-field executeRecall assembly", () => {
   it("bind last-week config and unknown-cause history", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
+    const compiled = compileConditionalFieldQuery({
+      source: "ordinary",
+      text: "yesterday failed deployment",
+      interpretation_clock: INTERPRETATION_CLOCK,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget()
+    });
+    expect(compiled.view.claim_demands).toEqual([{
+      variable: "h",
+      proposition_kind: "common_cause",
+      argument_variables: ["r", "h"],
+      required_claim: "any"
+    }]);
     const index = runRecall(slice, { page_budget: 800 });
     expectMemoryBaselineWithUnknownSources(index);
-    expect(index.entries.find((entry) => entry.object_id === MEM.h)).toBeUndefined();
+    expect(index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({
+      role: "associated", association_milligrades: 1000, claim: "unknown"
+    });
     expect(index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
       .toBe(1000);
     const supported = index.entries.find((entry) => entry.explanation_ids.length > 0);
@@ -360,13 +375,17 @@ describe("conditional-field executeRecall assembly", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const baseline = runRecall(slice, { page_budget: 800 });
-    expect(baseline.entries.find((entry) => entry.object_id === MEM.h)).toBeUndefined();
+    expect(baseline.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({
+      role: "associated", association_milligrades: 1000, claim: "unknown"
+    });
     await plantIrrelevantRouting(slice);
     const mutated = runRecall(slice, { page_budget: 800 });
     expect(mutated.query_id).toBe(baseline.query_id);
     expect(mutated.entries.map(entryId)).toEqual(baseline.entries.map(entryId));
     expect(mutated.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
-    expect(mutated.entries.find((entry) => entry.object_id === MEM.h)).toBeUndefined();
+    expect(mutated.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({
+      role: "associated", association_milligrades: 1000, claim: "unknown"
+    });
   });
 
   it("tiny work_units leaves unmatched routing residual unknown", async () => {

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryDimension, type Continuation } from "@do-soul/alaya-protocol";
-import { RecallService } from "@do-soul/alaya-core";
+import { capableRecallConsumerDeclaration, RecallService } from "@do-soul/alaya-core";
 import { initDatabase, initializeSemanticArtifactCandidateSchema, SqliteIndexedRecallProjection, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../../../../runtime/recall-read-worker/observer-operations.js";
 import { createRecallReadWorkerClient } from "../../../../runtime/recall/recall-read-worker-client.js";
@@ -37,7 +37,7 @@ function audit(database: StorageDatabase) {
 }
 
 function request(service: RecallService, continuation: Continuation | null = null) {
-  return service.recall({ workspaceId: WS, taskSurface: { display_name: "needle" }, strategy: "chat",
+  return service.recall({ ...capableRecallConsumerDeclaration(), workspaceId: WS, taskSurface: { display_name: "needle" }, strategy: "chat",
     continuation, budget: { schema_version: 1, work_units: 10000, memory_bytes: 1000000,
       page_budget: 1, finalization_reserve: 100, min_envelope: 1 } } as Parameters<RecallService["recall"]>[0]);
 }

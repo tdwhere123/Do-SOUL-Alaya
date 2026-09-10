@@ -84,14 +84,14 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     const mcp = await recallAllThroughHandler(slice, "yesterday failed deployment");
     expect(mcp.entries.some((entry) =>
       entry.object_id === MEM.h && entry.output_binding.includes(checkout)
-    )).toBe(false);
+    )).toBe(true);
     expect(mcp.entries.some((entry) =>
       entry.object_id === MEM.hb && entry.output_binding.includes(checkout)
     )).toBe(false);
     const assembled = collectAssembled(slice);
     expect(assembled.some((entry) =>
       entry.object_id === MEM.h && entry.output_binding.includes(checkout)
-    )).toBe(false);
+    )).toBe(true);
     expect(assembled.some((entry) =>
       entry.object_id === MEM.hb && entry.output_binding.includes(checkout)
     )).toBe(false);
@@ -107,7 +107,9 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     expect(assertTargetConsumer(toConsumer(mcp, "mcp"))).toEqual([]);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
       .toBe(1000);
-    expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)).toBeUndefined();
+    expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({
+      role: "associated", association_milligrades: 1000, claim: "unknown"
+    });
     expect(mcp.results.map((result) => result.object_id)).toEqual(
       mcp.index.entries.map((entry) => entry.object_id)
     );
@@ -148,7 +150,9 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       result_kind_view: "memory_only"
     });
     expect(mcp.index.completeness.logical_index).toBe("complete");
-    expect(mcp.index.entries.some((entry) => entry.object_id === MEM.h)).toBe(false);
+    expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({
+      claim: "unknown"
+    });
     expect(assertUnknownCauseAllowed(mcp.index)).toEqual([]);
   });
 
