@@ -537,6 +537,10 @@ describe("MCP memory authenticity proof", () => {
 
     try {
       const recall = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "ZebraQuiltNine wifi passphrase, 448291 vault unlock PIN, and on-call rotation starter Mina Voss",
         scope_class: null,
         dimension: null,
