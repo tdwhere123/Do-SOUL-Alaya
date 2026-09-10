@@ -52,6 +52,44 @@ describe("bounded source-root pages", () => {
     expect(roots.rows.some((row) => row.root_id === linked.object_id && row.kind === "evidence_capsule")).toBe(false);
   });
 
+  it("does not starve a capsule-only exact root behind a full record page", async () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+    const capsules = new SqliteEvidenceCapsuleRepo(database);
+    const needle = "CAPSULE_ONLY_NEEDLE";
+    for (let index = 0; index < 24; index += 1) {
+      records.insert(hashedRecord("workspace-1", `unrelated body ${index}`, `src-unrelated-${index}`));
+    }
+    const only = await capsules.create(capsule(
+      "99999999-9999-4999-8999-999999999999",
+      "workspace-1",
+      needle
+    ));
+    const reader = new SqliteSourceRootRecallReader(records, capsules);
+    const first = reader.page({
+      workspaceId: "workspace-1",
+      limit: 4,
+      nativeLimit: 4,
+      afterCursor: null
+    });
+    expect(first.rows.some((row) => row.kind === "source_record")).toBe(true);
+    expect(first.rows.some((row) => (
+      row.kind === "evidence_capsule" && row.root_id === only.object_id && row.content?.includes(needle)
+    ))).toBe(true);
+    expect(first.nativeVisits).toBeLessThan(24);
+    expect(first.truncated).toBe(true);
+    expect(first.committedThrough).not.toBeNull();
+    const second = reader.page({
+      workspaceId: "workspace-1",
+      limit: 4,
+      nativeLimit: 4,
+      afterCursor: first.committedThrough
+    });
+    expect(second.rows.some((row) => row.kind === "source_record")).toBe(true);
+    expect(second.rows.some((row) => row.root_id === only.object_id)).toBe(false);
+  });
+
   it("hydrates oversized CJK at UTF-8 boundaries and rejects a broken offset", () => {
     const database = openFieldDatabase();
     tracked.add(database);

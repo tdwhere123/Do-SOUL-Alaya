@@ -160,6 +160,9 @@ export class BoundedIndexPayload {
     const continuation = this.payloadContinuationFor(target);
     const offset = continuation?.start_offset ?? 0;
     const byteLimit = hydrateByteLimit(continuation, this.remainingMemoryBytes);
+    if (byteLimit < 1) {
+      return { ok: false, remaining, retryable: false };
+    }
     const page = reader({
       workspaceId: this.input.workspaceId,
       rootKind: target.root_kind,
@@ -226,6 +229,8 @@ function hydrateByteLimit(
   const memoryCap = Math.max(1, Math.min(65536, remainingMemoryBytes));
   if (continuation === undefined) return memoryCap;
   if (continuation.byte_budget !== undefined) {
+    // Storage bounded reads reject byteLimit < 1; 0 is a no-op, not a 1-byte coerce.
+    if (continuation.byte_budget < 1) return 0;
     return Math.max(1, Math.min(continuation.byte_budget, memoryCap));
   }
   if (continuation.end_offset !== undefined) {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  EvidenceHealthState,
   type Guard,
   type QueryInterpretation,
   type QueryProgram,
@@ -96,6 +97,21 @@ describe("source-root seam membership", () => {
     expect(ids).not.toContain(omitted.record_id);
   });
 
+  it("observes a capsule-only exact source without draining unrelated records", async () => {
+    const needle = "CAPSULE_ONLY_NEEDLE";
+    const { reader, capsuleId } = await plantedCapsuleAmongRecords(needle, 24);
+    const observed = observeConditionalField(seedInput({
+      program: literalProgram(needle),
+      readers: readerFor(reader),
+      actionWork: 4,
+      page_limit: 4
+    }));
+    expect(observed.page.observations.some((row) => row.object_id === capsuleId)).toBe(true);
+    expect(observed.work.native_visits).toBeLessThan(24);
+    const hit = observed.page.observations.find((row) => row.object_id === capsuleId);
+    expect(hit?.applicability.verdict).toBe("true");
+  });
+
   it("observes exact lexical memory while unrelated source roots remain", () => {
     const memoryId = "aaaaaaaa-aaaa-4aaa-8aaa-000000000099";
     const sources: SourceRootObserverRow[] = Array.from({ length: 24 }, (_, index) => sourceRoot({
@@ -154,6 +170,40 @@ function plantedBody(body: string) {
   return {
     reader: new SqliteSourceRootRecallReader(records, new SqliteEvidenceCapsuleRepo(database)),
     record
+  };
+}
+
+async function plantedCapsuleAmongRecords(needle: string, recordCount: number) {
+  const database = openFieldDatabase();
+  tracked.add(database);
+  const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+  const capsules = new SqliteEvidenceCapsuleRepo(database);
+  for (let index = 0; index < recordCount; index += 1) {
+    records.insert(hashedRecord("workspace-1", `unrelated body ${index}`, `src-unrelated-${index}`));
+  }
+  const stored = await capsules.create({
+    object_id: "99999999-9999-4999-8999-999999999999",
+    object_kind: "evidence_capsule" as const,
+    schema_version: 1 as const,
+    lifecycle_state: "active" as const,
+    created_at: "2026-08-16T00:00:00.000Z",
+    updated_at: "2026-08-16T00:00:00.000Z",
+    created_by: "user_action" as const,
+    evidence_kind: "conversation_excerpt" as const,
+    semantic_anchor: { topic: "source", keywords: ["source"], summary: needle },
+    event_anchor: null,
+    physical_anchor: null,
+    evidence_health_state: EvidenceHealthState.VERIFIED,
+    gist: needle,
+    excerpt: needle,
+    source_hash: null,
+    run_id: "run-1",
+    workspace_id: "workspace-1",
+    surface_id: null
+  });
+  return {
+    reader: new SqliteSourceRootRecallReader(records, capsules),
+    capsuleId: stored.object_id
   };
 }
 

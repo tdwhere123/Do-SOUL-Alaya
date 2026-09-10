@@ -123,6 +123,28 @@ describe("source payload encode", () => {
     expect(firstTarget).not.toEqual(secondTarget);
   });
 
+  it("treats payload byte_budget 0 as a no-op instead of a 1-byte read", () => {
+    const calls: HydrateCall[] = [];
+    const payload = new BoundedIndexPayload({
+      readers: hydrateReaders(calls),
+      workspaceId: "workspace",
+      remainingMemoryBytes: 32,
+      manifestationFor: () => "excerpt",
+      payloadContinuation: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        purpose: "payload_expansion",
+        target: SOURCE_TARGET,
+        start_offset: 0,
+        byte_budget: 0
+      }
+    });
+    const page = payload.finalize([sourceEntry()], 20);
+    expect(calls.some((call) => call.byteLimit === 1)).toBe(false);
+    expect(calls).toEqual([]);
+    expect([...payload.previews.values()].some((preview) => preview.includes("needle"))).toBe(false);
+    expect(page.complete).toBe(false);
+  });
+
   it("threads payload_continuation offset through source-only Recall hydrate", () => {
     const firstChunk = hydrateUtf8Chunk(OVERSIZED_BODY, { offset: 0, byteLimit: 32 });
     expect(firstChunk.status).toBe("chunk");

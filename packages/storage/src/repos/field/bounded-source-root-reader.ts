@@ -105,14 +105,20 @@ export class SqliteSourceRootRecallReader {
     if (pinned !== null) {
       return this.pageFromContentCursor(input.workspaceId, pinned, limit, byteLimit);
     }
-    if (after === null || after.startsWith("r:")) {
-      const recordPage = this.pageRecords(input.workspaceId, after, limit, byteLimit);
-      if (recordPage.truncated || recordPage.rows.length === limit) return recordPage;
-      const remaining = limit - recordPage.rows.length;
-      const capsulePage = this.pageCapsules(input.workspaceId, null, remaining, byteLimit);
-      return mergePages(recordPage, capsulePage);
+    const family = parseFamilyCursor(after) ?? (
+      after === null || after.startsWith("r:")
+        ? {
+          recordsAfter: after,
+          capsulesAfter: null,
+          recordsDone: false,
+          capsulesDone: false
+        }
+        : null
+    );
+    if (family !== null) {
+      return this.pageFamilies(input.workspaceId, family, limit, byteLimit);
     }
-    if (after.startsWith("c:")) {
+    if (after !== null && after.startsWith("c:")) {
       return this.pageCapsules(input.workspaceId, after, limit, byteLimit);
     }
     return this.pageCapsules(input.workspaceId, null, limit, byteLimit);
@@ -274,12 +280,59 @@ export class SqliteSourceRootRecallReader {
     limit: number,
     byteLimit: number
   ): SourceRootPage {
-    const recordPage = this.pageRecords(workspaceId, after, limit, byteLimit);
-    if (recordPage.truncated || recordPage.rows.length === limit) return recordPage;
-    return mergePages(
-      recordPage,
-      this.pageCapsules(workspaceId, null, limit - recordPage.rows.length, byteLimit)
-    );
+    return this.pageFamilies(workspaceId, {
+      recordsAfter: after,
+      capsulesAfter: null,
+      recordsDone: false,
+      capsulesDone: false
+    }, limit, byteLimit);
+  }
+
+  private pageFamilies(
+    workspaceId: string,
+    family: FamilyCursor,
+    limit: number,
+    byteLimit: number
+  ): SourceRootPage {
+    if (family.recordsDone && family.capsulesDone) {
+      return emptyPage(false, encodeFamilyCursor(family));
+    }
+    if (family.recordsDone) {
+      return this.pageCapsules(workspaceId, family.capsulesAfter, limit, byteLimit);
+    }
+    if (family.capsulesDone) {
+      const records = this.pageRecords(workspaceId, family.recordsAfter, limit, byteLimit);
+      return continueRecords(records, family);
+    }
+    // Split the page so a full record share cannot hide capsule-only roots.
+    const recordShare = Math.max(1, Math.floor(limit / 2));
+    const capsuleShare = Math.max(1, limit - Math.floor(limit / 2));
+    let records = this.pageRecords(workspaceId, family.recordsAfter, recordShare, byteLimit);
+    let capsules = this.pageCapsules(workspaceId, family.capsulesAfter, capsuleShare, byteLimit);
+    if (!records.truncated && records.rows.length < recordShare) {
+      const extra = recordShare - records.rows.length;
+      capsules = mergePages(
+        capsules,
+        this.pageCapsules(
+          workspaceId,
+          capsules.committedThrough ?? family.capsulesAfter,
+          extra,
+          byteLimit
+        )
+      );
+    } else if (!capsules.truncated && capsules.rows.length < capsuleShare) {
+      const extra = capsuleShare - capsules.rows.length;
+      records = mergePages(
+        records,
+        this.pageRecords(
+          workspaceId,
+          records.committedThrough ?? family.recordsAfter,
+          extra,
+          byteLimit
+        )
+      );
+    }
+    return mergeFamilyPages(records, capsules, family);
   }
 
   private pageRecords(
@@ -344,18 +397,61 @@ export class SqliteSourceRootRecallReader {
   }
 }
 
-function mergePages(records: SourceRootPage, capsules: SourceRootPage): SourceRootPage {
-  const rows = [...records.rows, ...capsules.rows];
+function mergePages(left: SourceRootPage, right: SourceRootPage): SourceRootPage {
   return {
-    rows,
+    rows: [...left.rows, ...right.rows],
+    nativeVisits: left.nativeVisits + right.nativeVisits,
+    nativeBytes: left.nativeBytes + right.nativeBytes,
+    rowsRead: left.rowsRead + right.rowsRead,
+    bytesRead: left.bytesRead + right.bytesRead,
+    truncated: left.truncated || right.truncated,
+    committedThrough: right.committedThrough ?? left.committedThrough,
+    unavailable: false
+  };
+}
+
+function continueRecords(records: SourceRootPage, family: FamilyCursor): SourceRootPage {
+  if (!records.truncated) return records;
+  return {
+    ...records,
+    committedThrough: encodeFamilyCursor({
+      recordsAfter: records.committedThrough,
+      capsulesAfter: family.capsulesAfter,
+      recordsDone: false,
+      capsulesDone: true
+    })
+  };
+}
+
+function mergeFamilyPages(
+  records: SourceRootPage,
+  capsules: SourceRootPage,
+  prior: FamilyCursor
+): SourceRootPage {
+  const next: FamilyCursor = {
+    recordsAfter: records.committedThrough ?? prior.recordsAfter,
+    capsulesAfter: capsules.committedThrough ?? prior.capsulesAfter,
+    recordsDone: !records.truncated,
+    capsulesDone: !capsules.truncated
+  };
+  const truncated = !next.recordsDone || !next.capsulesDone;
+  return {
+    rows: [...records.rows, ...capsules.rows],
     nativeVisits: records.nativeVisits + capsules.nativeVisits,
     nativeBytes: records.nativeBytes + capsules.nativeBytes,
     rowsRead: records.rowsRead + capsules.rowsRead,
     bytesRead: records.bytesRead + capsules.bytesRead,
-    truncated: capsules.truncated,
-    committedThrough: capsules.committedThrough ?? records.committedThrough ?? encodeCapsuleCursor({}),
+    truncated,
+    committedThrough: familyCommittedThrough(next, truncated),
     unavailable: false
   };
+}
+
+function familyCommittedThrough(next: FamilyCursor, truncated: boolean): string | null {
+  if (!truncated) return next.capsulesAfter ?? next.recordsAfter;
+  // Records-done continues as a capsule cursor so a later `r:` does not restart capsules.
+  if (next.recordsDone) return next.capsulesAfter;
+  return encodeFamilyCursor(next);
 }
 
 function singleRowPage(
@@ -587,6 +683,42 @@ export function parseContentCursor(cursor: string | null | undefined): ContentCu
   if (kind !== "source_record" && kind !== "evidence_capsule") return null;
   if (rootId.length === 0 || !Number.isSafeInteger(offset) || offset < 0) return null;
   return { kind, rootId, offset };
+}
+
+type FamilyCursor = Readonly<{
+  readonly recordsAfter: string | null;
+  readonly capsulesAfter: string | null;
+  readonly recordsDone: boolean;
+  readonly capsulesDone: boolean;
+}>;
+
+function encodeFamilyCursor(input: FamilyCursor): string {
+  return `f:${input.recordsDone ? "1" : "0"}${input.capsulesDone ? "1" : "0"}\n${input.recordsAfter ?? ""}\n${input.capsulesAfter ?? ""}`;
+}
+
+function parseFamilyCursor(cursor: string | null | undefined): FamilyCursor | null {
+  if (cursor == null || !cursor.startsWith("f:") || cursor.length < 5) return null;
+  const recordsDoneFlag = cursor[2];
+  const capsulesDoneFlag = cursor[3];
+  if (
+    (recordsDoneFlag !== "0" && recordsDoneFlag !== "1")
+    || (capsulesDoneFlag !== "0" && capsulesDoneFlag !== "1")
+    || cursor[4] !== "\n"
+  ) {
+    return null;
+  }
+  const rest = cursor.slice(5);
+  const split = rest.indexOf("\n");
+  if (split < 0) return null;
+  const recordsAfter = rest.slice(0, split);
+  const capsulesAfter = rest.slice(split + 1);
+  if (capsulesAfter.includes("\n")) return null;
+  return {
+    recordsAfter: recordsAfter === "" ? null : recordsAfter,
+    capsulesAfter: capsulesAfter === "" ? null : capsulesAfter,
+    recordsDone: recordsDoneFlag === "1",
+    capsulesDone: capsulesDoneFlag === "1"
+  };
 }
 
 export { encodeRecordCursor, parseRecordCursor, encodeCapsuleCursor, parseCapsuleCursor };

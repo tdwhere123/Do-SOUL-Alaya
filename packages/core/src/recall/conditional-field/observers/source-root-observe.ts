@@ -271,7 +271,13 @@ function parseSeedCursor(committed: string | null): Readonly<{
     return { source: null, memory: null, sourcesDone: false };
   }
   if (committed.startsWith("s:")) return parseBundledSeedCursor(committed.slice(2));
-  if (committed.startsWith("r:") || committed.startsWith("c:") || committed.startsWith("o:")) {
+  // `f:` is dual-family source progress; treating it as a memory id would skip remaining roots.
+  if (
+    committed.startsWith("r:")
+    || committed.startsWith("c:")
+    || committed.startsWith("o:")
+    || committed.startsWith("f:")
+  ) {
     return { source: committed, memory: null, sourcesDone: false };
   }
   if (committed.startsWith("m:")) {
