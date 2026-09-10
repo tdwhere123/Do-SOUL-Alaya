@@ -67,22 +67,42 @@ describe("conditional field execution receipt actual-cost encoding", () => {
     })).toThrow(/canonical request compiler/);
   });
 
-  it("accepts an optional nested actual object from the core receipt without requiring its type", () => {
+  it("accepts nested actual only when it matches the core ledger snapshot", () => {
+    const phase = {
+      exclusive_ms: 0, inclusive_ms: 0, native_visits: 0, native_rows: 0, native_bytes: 0,
+      charged_retained_bytes: 0, joins: 0, relaxations: 0, state_creates: 0, pending_work: 0,
+      cache_hits: 0, cache_misses: 0
+    };
     const receipt = ConditionalFieldExecutionReceiptSchema.parse({
       ...compileIdentityReceipt(),
       native_visits: 4,
       actual: {
         native_visits: 4, native_rows: 4, native_bytes: 128, charged_retained_bytes: 64,
-        phases: { observe: { exclusive_ms: 1, inclusive_ms: 2, native_visits: 4 } },
+        phases: {
+          compile: phase, observe: { ...phase, exclusive_ms: 1, inclusive_ms: 2, native_visits: 4 },
+          seed: phase, adjacency: phase, measurement: phase, solve: phase, index: phase, payload: phase
+        },
         rss: {
           method: "process.memoryUsage().rss", start_bytes: 1_000, after_projection_bytes: 1_100
-        },
-        extra_sibling_counter: 9
+        }
       }
     });
     expect(receipt.actual?.native_visits).toBe(4);
-    expect(receipt.actual?.rss?.method).toBe("process.memoryUsage().rss");
+    expect(receipt.actual?.rss.method).toBe("process.memoryUsage().rss");
     expect(receipt.native_visits).toBe(4);
+  });
+
+  it("rejects a nested actual object that is missing required ledger fields", () => {
+    expect(() => ConditionalFieldExecutionReceiptSchema.parse({
+      ...compileIdentityReceipt(),
+      actual: {
+        native_visits: 4, native_rows: 4, native_bytes: 128, charged_retained_bytes: 64,
+        phases: { observe: { exclusive_ms: 1, inclusive_ms: 2, native_visits: 4 } },
+        rss: {
+          method: "process.memoryUsage().rss", start_bytes: 1_000, after_projection_bytes: 1_100
+        }
+      }
+    })).toThrow();
   });
 
   it("rejects guessed RSS methods and unknown receipt keys", () => {

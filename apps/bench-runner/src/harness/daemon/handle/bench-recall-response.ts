@@ -1,4 +1,5 @@
 import type { AlayaDaemonRuntime } from "@do-soul/alaya";
+import type { ConditionalFieldExecutionReceipt } from "@do-soul/alaya-core";
 import {
   InformationIndexSchema,
   indexEntryCacheKey,
@@ -13,7 +14,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { encodeIndexResults, frameEncodedIndex, sourceMetadataForRecallResult } from "@do-soul/alaya/recall/index-response";
 import { ConditionalFieldExecutionReceiptSchema, executionBindingMismatch,
-  type ExpectedConditionalFieldRequest, type ConditionalFieldExecutionBinding
+  type ExpectedConditionalFieldRequest
 } from "../../../runs/measurement/conditional-field-request-binding.js";
 
 /** Independent RSS sample from the live process; never a guessed envelope constant. */
@@ -93,7 +94,7 @@ export function buildBenchRecallResponse(
   readonly provider_calls: 0;
   readonly garden_enqueue: 0;
   readonly request_budget: RequestBudget;
-  readonly execution_receipt: ConditionalFieldExecutionBinding;
+  readonly execution_receipt: ConditionalFieldExecutionReceipt;
 } {
   const budget = RequestBudgetSchema.parse(requestBudget);
   const index = frameEncodedIndex(validateBenchRecallIndex(recallResult, budget), results);
@@ -113,7 +114,9 @@ export function buildBenchRecallResponse(
     provider_calls: recallResult.provider_calls,
     garden_enqueue: recallResult.garden_enqueue,
     request_budget: budget,
-    execution_receipt: ConditionalFieldExecutionReceiptSchema.parse(receiptWithHandleRss(recallResult.execution_receipt)),
+    execution_receipt: ConditionalFieldExecutionReceiptSchema.parse(
+      receiptWithHandleRss(recallResult.execution_receipt)
+    ),
     ...(recallResult.diagnostics === undefined ? {} : { diagnostics: recallResult.diagnostics })
   };
 }

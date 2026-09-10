@@ -25,18 +25,26 @@ const Filters = {
 export const ConditionalFieldRequestFiltersSchema = z.object(Filters).strict().readonly();
 
 const NonNegInt = z.number().int().nonnegative();
+const NonNegMs = z.number().finite().nonnegative();
+// Nested `actual` is the core ledger snapshot; root visits/bytes/rss stay optional worker fields.
+const PhaseCost = z.object({
+  exclusive_ms: NonNegMs, inclusive_ms: NonNegMs,
+  native_visits: NonNegInt, native_rows: NonNegInt, native_bytes: NonNegInt,
+  charged_retained_bytes: NonNegInt, joins: NonNegInt, relaxations: NonNegInt,
+  state_creates: NonNegInt, pending_work: NonNegInt, cache_hits: NonNegInt, cache_misses: NonNegInt
+}).strict().readonly();
 const ActualReceipt = z.object({
-  native_visits: NonNegInt.optional(),
-  native_rows: NonNegInt.optional(),
-  native_bytes: NonNegInt.optional(),
-  charged_retained_bytes: NonNegInt.optional(),
-  phases: z.record(z.string(), z.object({}).passthrough().readonly()).optional(),
+  native_visits: NonNegInt, native_rows: NonNegInt, native_bytes: NonNegInt,
+  charged_retained_bytes: NonNegInt,
+  phases: z.object({
+    compile: PhaseCost, observe: PhaseCost, seed: PhaseCost, adjacency: PhaseCost,
+    measurement: PhaseCost, solve: PhaseCost, index: PhaseCost, payload: PhaseCost
+  }).strict().readonly(),
   rss: z.object({
-    method: z.string().min(1).optional(),
-    start_bytes: NonNegInt.optional(),
-    after_projection_bytes: NonNegInt.optional()
-  }).passthrough().readonly().optional()
-}).passthrough().readonly();
+    method: z.literal("process.memoryUsage().rss"),
+    start_bytes: NonNegInt, after_projection_bytes: NonNegInt
+  }).strict().readonly()
+}).strict().readonly();
 
 export const ConditionalFieldExecutionReceiptSchema = z.object({
   schema_version: z.literal(1), workspace_id: Id, requested_budget: RequestBudgetSchema,
