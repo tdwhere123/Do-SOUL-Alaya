@@ -3,11 +3,11 @@ import {
   sourceRecallTarget
 } from "@do-soul/alaya-protocol";
 import {
+  assertRecallConsumerCompatibility,
   captureIndexPreviews,
   captureIndexSourceMetadata,
   fieldContractSha256,
   issuedDeliveryIdOf,
-  runConditionalFieldRecall,
   runConditionalFieldRecallWithReceipt,
   reserveSnapshotPinWork,
   snapshotIdFromPin,
@@ -35,10 +35,11 @@ export function runConditionalFieldWorkerRecall(
   runtime: RecallReadWorkerRuntime,
   payload: ConditionalFieldRecallWorkerPayload
 ): ConditionalFieldRecallPortResult {
+  assertRecallConsumerCompatibility(payload);
   const workspaceId = payload.workspace_id;
   const reserved = reserveSnapshotPinWork(payload.budget);
   const readers: ObserverReaders = reserved.permitted && payload.cancelled !== true ? readersFor(runtime) : {};
-  let governance = payload.governance as Parameters<typeof runConditionalFieldRecall>[0]["governance"];
+  let governance = payload.governance;
   const snapshotId = "snapshotPin" in readers && readers.snapshotPin !== undefined
     ? snapshotIdFromPin(workspaceId, readers.snapshotPin(workspaceId))
     : payload.snapshot_id;
@@ -87,7 +88,17 @@ export function runConditionalFieldWorkerRecall(
       ? {}
       : { payload_continuation: payload.payload_continuation }),
     ...(payload.cap_contracts === undefined ? {} : { cap_contracts: payload.cap_contracts }),
-    ...(payload.claim_demands === undefined ? {} : { claim_demands: payload.claim_demands })
+    ...(payload.claim_demands === undefined ? {} : { claim_demands: payload.claim_demands }),
+    ...(payload.protocol_version === undefined ? {} : { protocol_version: payload.protocol_version }),
+    ...(payload.supported_result_kinds === undefined
+      ? {}
+      : { supported_result_kinds: payload.supported_result_kinds }),
+    ...(payload.supports_source_evidence === undefined
+      ? {}
+      : { supports_source_evidence: payload.supports_source_evidence }),
+    ...(payload.supports_product_updates === undefined
+      ? {}
+      : { supports_product_updates: payload.supports_product_updates })
   });
   const index = InformationIndexSchema.parse(executed.index);
   const issuedDeliveryId = issuedDeliveryIdOf(executed.index);

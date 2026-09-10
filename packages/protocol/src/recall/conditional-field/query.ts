@@ -12,6 +12,7 @@ import {
   SchemaVersionSchema,
   Sha256DigestSchema
 } from "./common.js";
+import { RecallTargetKindSchema } from "./product-identity.js";
 
 export const GuardVerdictSchema = z.enum(["true", "false", "unresolved"]);
 export const GuardTimeScopeSchema = z.enum(["anchor", "associated", "none"]);
@@ -85,7 +86,9 @@ export const QueryViewSchema = z
     threshold_milligrades: MilligradeSchema.default(0),
     enumeration_policy: EnumerationPolicySchema.default("canonical"),
     result_kind_view: ResultKindViewSchema.default("mixed"),
-    cap_contracts: z.array(AssociationCapContractSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
+    cap_contracts: z.array(AssociationCapContractSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    protocol_version: NonNegativeIntSchema.min(1).optional(),
+    supported_result_kinds: z.array(RecallTargetKindSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
   })
   .strict()
   .readonly();

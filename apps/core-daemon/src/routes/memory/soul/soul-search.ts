@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
-import type { WorkspaceService } from "@do-soul/alaya-core";
+import { capableRecallConsumerDeclaration, type WorkspaceService } from "@do-soul/alaya-core";
 import type { McpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { isRequestBodyTooLargeError, throwInvalidRequestBody } from "../../shared/shared.js";
 
@@ -70,6 +70,7 @@ export function registerSoulSearchRoutes(app: Hono, services: SoulSearchRouteSer
     }
 
     const args: Record<string, unknown> = {
+      ...capableRecallConsumerDeclaration(),
       query: text,
       scope_class: null,
       dimension: null,

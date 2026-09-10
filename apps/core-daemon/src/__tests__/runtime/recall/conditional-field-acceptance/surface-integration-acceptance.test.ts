@@ -154,6 +154,10 @@ async function callRecall(
   const response = await handler.call({
     toolName: "soul.recall",
     arguments: {
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
       query: input.query,
       max_results: input.max_results,
       scope_class: null,
@@ -352,6 +356,10 @@ describe("CP09 worker MCP CLI surfaces", () => {
       "call",
       "soul.recall",
       JSON.stringify({
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "yesterday failed deployment",
         scope_class: null,
         dimension: null,
@@ -674,6 +682,10 @@ describe("CP09 worker MCP CLI surfaces", () => {
       "call",
       "soul.recall",
       JSON.stringify({
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "needle cli",
         scope_class: null,
         dimension: null,

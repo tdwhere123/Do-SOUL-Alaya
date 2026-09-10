@@ -77,7 +77,7 @@ const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string
 
 const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
   "soul.recall":
-    "Start memory-sensitive turns here; use the returned delivery_id later in soul.report_context_usage.",
+    "Start memory-sensitive turns here; use the returned delivery_id later in soul.report_context_usage. Mixed or source_only views require protocol_version=1 and source_evidence support; undeclared mixed is a compatibility error rather than a later parse failure.",
   "soul.open_pointer":
     "Use this before citing memory content so evidence is grounded in retrieved objects.",
   "soul.emit_candidate_signal":

@@ -14,6 +14,7 @@ import {
   type RelationObserverRow,
   type SourceObserverPage
 } from "../conditional-field/observers/observe.js";
+import { sourceFamilySettled } from "../conditional-field/observers/source-root-observe.js";
 import { hasMeasurementProducer } from "../conditional-field/observers/measure-stored.js";
 import { measurementEffectsFor, measurementIsMissing } from "./measurement-effects.js";
 import { resumePathEffects } from "./pending-path-effects.js";
@@ -179,7 +180,8 @@ function observeWithinMemory(
   if (hasOpenPairs(subjects, predicates, pairProgress, [], pairProgress.completed)) state = reopenAdjacency(state);
   return runObservationRounds({ state, interpretation, input: observedInput, lease, cursors, pairProgress,
     subjects, relationRows, observedAt, sourceFacts, memoryBox, predicates, seedUnitCost,
-    storedKindsOpen: storedKinds.open, pairIndex: state.pair_scan_offset, unresolvedGuard, missingMeasurement });
+    storedKindsOpen: storedKinds.open, pairIndex: state.pair_scan_offset, unresolvedGuard, missingMeasurement,
+    sourceFamilyUnavailable: false });
 }
 
 type ObservationAction = ReturnType<typeof proposeFieldWork>["actions"][number];
@@ -189,6 +191,7 @@ type ObservationSession = {
   relationRows: ObservedRelations; observedAt: Record<string, string>; sourceFacts: ObservedSourceFacts;
   memoryBox: { remaining: number; cachedBytes: number }; predicates: readonly string[]; seedUnitCost: number;
   storedKindsOpen: boolean; pairIndex: number; unresolvedGuard: boolean; missingMeasurement: boolean;
+  sourceFamilyUnavailable: boolean;
 };
 
 function runObservationRounds(session: ObservationSession): FieldEngineState {
@@ -219,12 +222,10 @@ function runObservationRounds(session: ObservationSession): FieldEngineState {
       }
     }
   }
-  const seed = session.state.residuals.find((region) => region.kind === "seed");
   const settled = settleSourceDomainResidual(
     settleDiscoveryResidual(session.state, interpretation, session.cursors,
       session.subjects, session.predicates, session.pairProgress),
-    interpretation, session.cursors, { ...sourceDomainCoverageOf(interpretation, input),
-      truncated: seed?.status !== "exhausted", unavailable: seed?.status === "unavailable", settled: true });
+    interpretation, session.cursors, sourceDomainSettleCoverage(session));
   return Object.freeze({ ...settled,
     pair_progress: session.pairProgress.snapshot, pair_completed_count: session.pairProgress.completed,
     pair_revision: session.pairProgress.revision, pair_scan_offset: session.pairIndex, resume_subjects: session.subjects.snapshot });
@@ -239,6 +240,11 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   addSubjects(subjects, seedIds);
   recordObservedAt(input, seedIds, observedAt, sourceFacts);
   recordSourceRootFacts(observed.source_roots ?? [], observed.page.observations, sourceFacts);
+  if (input.readers.sourceRoots !== undefined
+    && observed.page.outcome.status === "unavailable"
+    && !sourceFamilySettled(observed.page.cursor.committed_through)) {
+    session.sourceFamilyUnavailable = true;
+  }
   session.state = applyObserverPage({ ...session.state, resume_subjects: subjects.snapshot }, { page: observed.page,
     effects: seedEffects(observed.page.observations, interpretation, input.as_of), work: observed.work,
     resume_cursors: resumeCursors(cursors, pairProgress) });
@@ -687,6 +693,24 @@ function sourceDomainCoverageOf(
     hasSourceReader: input.readers.sourceRoots !== undefined,
     hypothesisId: interpretation.hypotheses[0]?.hypothesis_id ?? "h0",
     programBranch: "accepting"
+  };
+}
+
+function sourceDomainSettleCoverage(session: ObservationSession): SourceDomainCoverage {
+  const coverage = sourceDomainCoverageOf(session.interpretation, session.input);
+  // Memory-seed exhaustion is not source-domain coverage.
+  if (coverage.hasSourceReader !== true) return coverage;
+  const seed = session.state.residuals.find((region) => region.kind === "seed");
+  const cursor = seed === undefined
+    ? undefined
+    : session.cursors.get(seed.region_id) ?? session.cursors.get(seed.cursor_id ?? seed.region_id);
+  const settled = sourceFamilySettled(cursor?.committed_through);
+  return {
+    ...coverage,
+    truncated: !settled,
+    unavailable: session.sourceFamilyUnavailable
+      || (seed?.status === "unavailable" && !settled),
+    settled
   };
 }
 

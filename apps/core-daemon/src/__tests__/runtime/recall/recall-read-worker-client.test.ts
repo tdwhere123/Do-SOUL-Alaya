@@ -6,8 +6,20 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
 import { describe, expect, it } from "vitest";
-import { initDatabase, SqliteMemoryEntryRepo } from "@do-soul/alaya-storage";
+import {
+  RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE
+} from "@do-soul/alaya-core";
+import { initDatabase, prepareIndexedRecallProjection, SqliteMemoryEntryRepo } from "@do-soul/alaya-storage";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
+import { runOperation } from "../../../runtime/recall-read-worker/dispatch.js";
+import {
+  RECALL_READ_WORKER_PROTOCOL_VERSION
+} from "../../../runtime/recall-read-worker/protocol.js";
+import {
+  conditionalRecallPayload,
+  createQueryOnlyRuntime
+} from "../field/query-only-hydration-fixture.js";
+import { identityAssociationCap } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 import {
   assertBuiltWorker,
   builtWorkerUrl,
@@ -317,6 +329,110 @@ describe("RecallReadWorkerClient", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("rejects a worker envelope missing protocol_version", async () => {
+    assertBuiltWorker();
+    const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-missing-protocol-"));
+    const databasePath = join(directory, "alaya.db");
+    const database = initDatabase({ filename: databasePath });
+    database.close();
+
+    const worker = new Worker(fileURLToPath(builtWorkerUrl), {
+      execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
+      workerData: { databaseFilename: databasePath }
+    });
+
+    try {
+      const response = await new Promise<unknown>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("missing protocol_version did not receive a prompt error response")),
+          10_000
+        );
+        worker.once("message", (message: unknown) => {
+          clearTimeout(timeout);
+          resolve(message);
+        });
+        worker.postMessage({
+          id: 7,
+          operation: "ready",
+          payload: {}
+        });
+      });
+      expect(response).toEqual({
+        id: 7,
+        ok: false,
+        error: expect.objectContaining({
+          message: "invalid recall read worker request"
+        })
+      });
+    } finally {
+      await worker.terminate();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("rejects an invalid conditionalField.recall payload instead of inventing an empty index", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-invalid-payload-"));
+    const database = initDatabase({ filename: join(directory, "alaya.db") });
+    try {
+      await expect(runOperation(createQueryOnlyRuntime(database), {
+        protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
+        id: 1,
+        operation: "conditionalField.recall",
+        payload: { workspace_id: "workspace-1" }
+      })).rejects.toThrow();
+    } finally {
+      database.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("round-trips cap_contracts through conditionalField.recall", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-cap-roundtrip-"));
+    const database = initDatabase({ filename: join(directory, "alaya.db") });
+    prepareIndexedRecallProjection(database);
+    try {
+      const cap = identityAssociationCap();
+      const result = await runOperation(createQueryOnlyRuntime(database), {
+        protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
+        id: 1,
+        operation: "conditionalField.recall",
+        payload: {
+          ...conditionalRecallPayload("needle"),
+          cap_contracts: [cap]
+        }
+      }) as {
+        readonly execution_receipt?: {
+          readonly compile_input?: {
+            readonly view?: { readonly cap_contracts?: readonly unknown[] };
+          };
+        };
+      };
+      expect(result.execution_receipt?.compile_input?.view?.cap_contracts).toEqual([cap]);
+    } finally {
+      database.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an undeclared mixed consumer before worker execute", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-undeclared-mixed-"));
+    const database = initDatabase({ filename: join(directory, "alaya.db") });
+    try {
+      const { protocol_version: _protocol, supported_result_kinds: _kinds,
+        supports_source_evidence: _source, supports_product_updates: _updates,
+        ...undeclared } = conditionalRecallPayload("needle");
+      await expect(runOperation(createQueryOnlyRuntime(database), {
+        protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
+        id: 1,
+        operation: "conditionalField.recall",
+        payload: undeclared
+      })).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
+    } finally {
+      database.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 async function collectWorkerResponses(

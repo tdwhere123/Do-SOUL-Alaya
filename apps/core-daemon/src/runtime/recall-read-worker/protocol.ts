@@ -4,11 +4,14 @@ import {
   ClaimDemandSchema,
   ContinuationSchema,
   EnumerationPolicySchema,
+  InformationIndexSchema,
+  PathRelationSchema,
   PayloadContinuationRequestSchema,
   QueryInterpretationProposalSchema,
   RecallTargetKindSchema,
   RequestBudgetSchema,
-  ResultKindViewSchema
+  ResultKindViewSchema,
+  SoulActiveConstraintSchema
 } from "@do-soul/alaya-protocol";
 
 // Target recall uses "conditionalField.recall" only. The memory/evidence/
@@ -71,6 +74,45 @@ export function isRecallReadWorkerOperation(
 
 export const RecallReadWorkerProtocolVersionSchema = z.number().int().min(1);
 
+export const BoundedActiveConstraintsResultSchema = z
+  .object({
+    constraints: z.array(SoulActiveConstraintSchema).readonly(),
+    total_count: z.number().int().nullable(),
+    completeness: z.enum(["complete", "incomplete"]),
+    paths: z.array(PathRelationSchema).readonly(),
+    temporal_uncertain: z.boolean(),
+    work: z
+      .object({
+        native_visits: z.number(),
+        bytes_read: z.number(),
+        retained_bytes: z.number()
+      })
+      .strict()
+      .readonly(),
+    binding: z
+      .object({
+        workspace_id: z.string(),
+        as_of: z.string(),
+        snapshot_id: z.string(),
+        authorized_scopes: z.array(z.string()).readonly()
+      })
+      .strict()
+      .readonly()
+  })
+  .strict()
+  .readonly();
+
+export const ConditionalFieldRecallPortResultSchema = z
+  .object({
+    index: InformationIndexSchema,
+    previews: z.record(z.string(), z.string()),
+    source_metadata: z.record(z.string(), z.unknown()).optional(),
+    issued_delivery_id: z.string().optional(),
+    execution_receipt: z.unknown().optional()
+  })
+  .strict()
+  .readonly();
+
 export const ConditionalFieldRecallWorkerPayloadSchema = z
   .object({
     workspace_id: z.string(),
@@ -90,7 +132,7 @@ export const ConditionalFieldRecallWorkerPayloadSchema = z
     domain_tag_filter: z.array(z.string()).readonly().optional(),
     continuation: ContinuationSchema.nullable().optional(),
     authorized_scopes: z.array(z.string()).readonly().optional(),
-    governance: z.unknown().optional(),
+    governance: BoundedActiveConstraintsResultSchema.optional(),
     enumeration_policy: EnumerationPolicySchema.optional(),
     result_kind_view: ResultKindViewSchema.optional(),
     interpretation_proposal: QueryInterpretationProposalSchema.optional(),
@@ -98,7 +140,9 @@ export const ConditionalFieldRecallWorkerPayloadSchema = z
     cap_contracts: z.array(AssociationCapContractSchema).readonly().optional(),
     claim_demands: z.array(ClaimDemandSchema).readonly().optional(),
     protocol_version: RecallReadWorkerProtocolVersionSchema.optional(),
-    supported_result_kinds: z.array(RecallTargetKindSchema).readonly().optional()
+    supported_result_kinds: z.array(RecallTargetKindSchema).readonly().optional(),
+    supports_source_evidence: z.boolean().optional(),
+    supports_product_updates: z.boolean().optional()
   })
   .strict()
   .readonly();

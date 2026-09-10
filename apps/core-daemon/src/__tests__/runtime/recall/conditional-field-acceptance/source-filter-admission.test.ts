@@ -233,7 +233,9 @@ async function setup() {
     },
     recall(input: Partial<SoulMemorySearchRequest>) {
       const request = SoulMemorySearchRequestSchema.parse({ query: "needle", scope_class: null,
-        dimension: null, domain_tags: null, max_results: 30, source_observed_at: NOW, ...input });
+        dimension: null, domain_tags: null, max_results: 30, source_observed_at: NOW,
+        protocol_version: 1, supports_source_evidence: true, supports_product_updates: true,
+        supported_result_kinds: ["memory_entry", "source_evidence"], ...input });
       return handler(request, { workspaceId: WS, runId: null, agentTarget: "codex", sessionId: "literal-filters" });
     },
     async serviceRecall(query: string, extra: Partial<SoulMemorySearchRequest> = {}) {

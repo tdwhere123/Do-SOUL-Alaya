@@ -50,6 +50,10 @@ describe("alaya tools real-handler CLI/MCP parity", () => {
 
   it("returns the same soul.recall output through MCP and CLI", async () => {
     const args = {
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
       query: "deployment rules",
       scope_class: null,
       dimension: null,

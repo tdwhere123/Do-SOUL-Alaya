@@ -11,16 +11,9 @@ import {
   indexEntryObjectKind,
   indexMemoryObjectId,
   type Continuation,
-  type AssociationCapContract,
   type BoundedActiveConstraintsResult,
-  type ClaimDemand,
-  type EnumerationPolicy,
   type InformationIndex,
-  type PayloadContinuationRequest,
-  type QueryInterpretation,
-  type QueryInterpretationProposal,
-  type RequestBudget,
-  type ResultKindView
+  type QueryInterpretation
 } from "@do-soul/alaya-protocol";
 import {
   compileConditionalFieldQuery,
@@ -54,7 +47,11 @@ import {
   mergeCommittedRevisions
 } from "./index-continuation.js";
 import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
-import type { RecallExecutionContext, RecallExecutionParams } from "./recall-service-runner-types.js";
+import type {
+  ConditionalFieldRecallRequest,
+  RecallExecutionContext,
+  RecallExecutionParams
+} from "./recall-service-runner-types.js";
 import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
 import { assertRecallZeroLiveExtraction } from "./zero-live-extraction.js";
 import {
@@ -66,8 +63,17 @@ import { assessUnknownCause, rolesFrom } from "./semantic-attribution.js";
 import { readRequestGovernance } from "./request-governance.js";
 import { reserveSnapshotPinWork } from "./snapshot-pin-budget.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
+import {
+  assertRecallConsumerCompatibility,
+  continuationConsumerIdentity,
+  recallConsumerViewIdentity
+} from "./recall-consumer-compatibility.js";
 
-export type { RecallExecutionContext, RecallExecutionParams } from "./recall-service-runner-types.js";
+export type {
+  ConditionalFieldRecallRequest,
+  RecallExecutionContext,
+  RecallExecutionParams
+} from "./recall-service-runner-types.js";
 export { RELATION_MILLIGRADES };
 
 const RESULT_VERSION = "v1";
@@ -83,34 +89,6 @@ const ISSUED_SURFACES = new Map<string, Readonly<{
   readonly previews: ReadonlyMap<string, string>;
   readonly metadata: Readonly<Record<string, RecallSourceMetadata>>;
 }>>();
-
-export type ConditionalFieldRecallRequest = Readonly<{
-  readonly requested_budget?: RequestBudget;
-  readonly workspace_id: string;
-  readonly query_text: string;
-  readonly budget: RequestBudget;
-  readonly snapshot_id: string;
-  readonly interpretation_clock: string;
-  readonly as_of: string;
-  readonly expires_at: string;
-  readonly lifetime_now?: string;
-  readonly readers: ObserverReaders;
-  readonly since?: string;
-  readonly until?: string;
-  readonly time_field?: "created_at" | "last_used_at";
-  readonly dimension_filter?: readonly string[];
-  readonly domain_tag_filter?: readonly string[];
-  readonly continuation?: Continuation | null;
-  readonly cancelled?: boolean;
-  readonly authorized_scopes?: readonly string[];
-  readonly governance?: BoundedActiveConstraintsResult;
-  readonly enumeration_policy?: EnumerationPolicy;
-  readonly result_kind_view?: ResultKindView;
-  readonly interpretation_proposal?: QueryInterpretationProposal;
-  readonly payload_continuation?: PayloadContinuationRequest;
-  readonly cap_contracts?: readonly AssociationCapContract[];
-  readonly claim_demands?: readonly ClaimDemand[];
-}>;
 
 export type ConditionalFieldRecallResult = RecallResult & Readonly<{
   readonly index: InformationIndex;
@@ -130,7 +108,7 @@ export type ConditionalFieldRecallPortResult = Readonly<{
 export type ConditionalFieldRecallPort = Readonly<{
   recall(
     input: Omit<ConditionalFieldRecallRequest, "readers">
-  ): Promise<InformationIndex | ConditionalFieldRecallPortResult>;
+  ): Promise<ConditionalFieldRecallPortResult>;
 }>;
 
 export async function executeRecall(
@@ -153,6 +131,7 @@ export async function executeRecall(
   const index = await withRecallReadSnapshot(context.readSnapshot, async () => {
     const port = fieldDeps(context).conditionalFieldPort;
     const sent = buildRecallRequest(context, params);
+    assertRecallConsumerCompatibility(sent);
     const original = captureRequestSnapshot(sent, port === undefined);
     const governed = await readRequestGovernance(original, context.dependencies.activeConstraintsPort,
       params.activeConstraintsCap, port !== undefined);
@@ -211,7 +190,8 @@ export function runConditionalFieldRecallWithReceipt(input: ConditionalFieldReca
       enumeration_policy: input.enumeration_policy ?? "canonical",
       result_kind_view: input.result_kind_view ?? "mixed",
       ...(input.cap_contracts === undefined ? {} : { cap_contracts: input.cap_contracts }),
-      ...(input.claim_demands === undefined ? {} : { claim_demands: input.claim_demands })
+      ...(input.claim_demands === undefined ? {} : { claim_demands: input.claim_demands }),
+      ...recallConsumerViewIdentity(input)
     }),
     ...(input.interpretation_proposal === undefined
       ? {}
@@ -561,22 +541,19 @@ export function captureIndexSourceMetadata(index: InformationIndex): Readonly<Re
 }
 
 function portIndexAndPreviews(
-  recalled: InformationIndex | ConditionalFieldRecallPortResult
+  recalled: ConditionalFieldRecallPortResult
 ): Readonly<{ readonly index: InformationIndex; readonly previews: Map<string, string>;
   readonly source_metadata: Readonly<Record<string, RecallSourceMetadata>>;
   readonly execution_receipt?: ConditionalFieldExecutionReceipt }> {
-  if ("previews" in recalled && "index" in recalled) {
-    if (recalled.issued_delivery_id !== undefined) {
-      bindIssuedDeliveryId(recalled.index, recalled.issued_delivery_id);
-    }
-    return {
-      index: recalled.index,
-      previews: new Map(Object.entries(recalled.previews)),
-      source_metadata: recalled.source_metadata ?? {},
-      execution_receipt: recalled.execution_receipt
-    };
+  if (recalled.issued_delivery_id !== undefined) {
+    bindIssuedDeliveryId(recalled.index, recalled.issued_delivery_id);
   }
-  throw new TypeError("conditionalField.recall must return index and previews");
+  return {
+    index: recalled.index,
+    previews: new Map(Object.entries(recalled.previews)),
+    source_metadata: recalled.source_metadata ?? {},
+    execution_receipt: recalled.execution_receipt
+  };
 }
 
 function interpretationIdOf(interpretation: QueryInterpretation): string {
@@ -622,7 +599,8 @@ function annotatePublicIndex(
         : { cap_contracts: index.continuation.cap_contracts ?? interpretation.view.cap_contracts }),
       ...(index.continuation.claim_demands === undefined && interpretation.view.claim_demands === undefined
         ? {}
-        : { claim_demands: index.continuation.claim_demands ?? interpretation.view.claim_demands })
+        : { claim_demands: index.continuation.claim_demands ?? interpretation.view.claim_demands }),
+      ...continuationConsumerIdentity(index.continuation, interpretation.view)
     };
   return { ...index, completeness, continuation, interpretation_id: interpretationId,
     as_of: interpretation.interpretation_clock };
@@ -731,7 +709,14 @@ function buildRecallRequest(
       : { interpretation_proposal: extra.interpretation_proposal }),
     ...(extra.payload_continuation === undefined ? {} : { payload_continuation: extra.payload_continuation }),
     ...(extra.cap_contracts === undefined ? {} : { cap_contracts: extra.cap_contracts }),
-    ...(extra.claim_demands === undefined ? {} : { claim_demands: extra.claim_demands })
+    ...(extra.claim_demands === undefined ? {} : { claim_demands: extra.claim_demands }),
+    ...recallConsumerViewIdentity(extra),
+    ...(extra.supports_source_evidence === undefined
+      ? {}
+      : { supports_source_evidence: extra.supports_source_evidence }),
+    ...(extra.supports_product_updates === undefined
+      ? {}
+      : { supports_product_updates: extra.supports_product_updates })
   };
 }
 

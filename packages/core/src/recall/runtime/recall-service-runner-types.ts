@@ -1,15 +1,20 @@
 import type {
   AssociationCapContract,
+  BoundedActiveConstraintsResult,
   ClaimDemand,
+  Continuation,
   EnumerationPolicy,
   PayloadContinuationRequest,
   QueryInterpretationProposal,
   RecallPolicy,
+  RecallTargetKind,
+  RequestBudget,
   ResultKindView,
   SoulRecallHostContext,
   TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import type { NodeStrategy } from "../../conversation/task-surface-builder.js";
+import type { ObserverReaders } from "../conditional-field/observers/observe.js";
 import type { RecallTimeFilter } from "./recall-service-helpers.js";
 import type {
   RecallServiceDependencies
@@ -17,6 +22,38 @@ import type {
 import type { RecallReadSnapshotPort } from "./recall-read-snapshot.js";
 
 export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
+
+export type ConditionalFieldRecallRequest = Readonly<{
+  readonly requested_budget?: RequestBudget;
+  readonly workspace_id: string;
+  readonly query_text: string;
+  readonly budget: RequestBudget;
+  readonly snapshot_id: string;
+  readonly interpretation_clock: string;
+  readonly as_of: string;
+  readonly expires_at: string;
+  readonly lifetime_now?: string;
+  readonly readers: ObserverReaders;
+  readonly since?: string;
+  readonly until?: string;
+  readonly time_field?: "created_at" | "last_used_at";
+  readonly dimension_filter?: readonly string[];
+  readonly domain_tag_filter?: readonly string[];
+  readonly continuation?: Continuation | null;
+  readonly cancelled?: boolean;
+  readonly authorized_scopes?: readonly string[];
+  readonly governance?: BoundedActiveConstraintsResult;
+  readonly enumeration_policy?: EnumerationPolicy;
+  readonly result_kind_view?: ResultKindView;
+  readonly interpretation_proposal?: QueryInterpretationProposal;
+  readonly payload_continuation?: PayloadContinuationRequest;
+  readonly cap_contracts?: readonly AssociationCapContract[];
+  readonly claim_demands?: readonly ClaimDemand[];
+  readonly protocol_version?: number;
+  readonly supported_result_kinds?: readonly RecallTargetKind[];
+  readonly supports_source_evidence?: boolean;
+  readonly supports_product_updates?: boolean;
+}>;
 
 export interface RecallExecutionParams {
   readonly taskSurface: Readonly<TaskObjectSurface>;
@@ -43,6 +80,10 @@ export interface RecallExecutionParams {
   readonly payload_continuation?: PayloadContinuationRequest;
   readonly cap_contracts?: readonly AssociationCapContract[];
   readonly claim_demands?: readonly ClaimDemand[];
+  readonly protocol_version?: number;
+  readonly supported_result_kinds?: readonly RecallTargetKind[];
+  readonly supports_source_evidence?: boolean;
+  readonly supports_product_updates?: boolean;
 }
 
 export interface RecallExecutionContext {

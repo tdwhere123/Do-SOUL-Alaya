@@ -320,6 +320,10 @@ describe("recall usage: delivery never accrues co-recall plasticity", () => {
       const result = await harness.handler.call({
         toolName: "soul.recall",
         arguments: {
+          protocol_version: 1,
+          supported_result_kinds: ["memory_entry", "source_evidence"],
+          supports_source_evidence: true,
+          supports_product_updates: true,
           query: "coffee",
           scope_class: ScopeClass.PROJECT,
           dimension: MemoryDimension.PREFERENCE,

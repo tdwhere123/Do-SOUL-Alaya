@@ -75,6 +75,8 @@ describe("conditional-field schemas", () => {
     expect(view.threshold_milligrades).toBe(0);
     expect(view.enumeration_policy).toBe("canonical");
     expect(view.result_kind_view).toBe("mixed");
+    expect(view.protocol_version).toBeUndefined();
+    expect(view.supported_result_kinds).toBeUndefined();
     expect(FacetModeSchema.parse("independent")).toBe("independent");
     const relation = QueryProgramSchema.parse({
       schema_version: 1,
@@ -495,6 +497,12 @@ describe("conditional-field transfer identity and request coverage", () => {
     expect(parsed.result_kind_view).toBe("mixed");
     expect(parsed.protocol_version).toBe(1);
     expect(parsed.supports_source_evidence).toBe(true);
+    expect(QueryViewSchema.parse({
+      schema_version: 1,
+      requested_roles: ["requested", "associated"],
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"]
+    }).supported_result_kinds).toEqual(["memory_entry", "source_evidence"]);
     expect(parsed.claim_demands?.[0]?.required_claim).toBe("any");
   });
 

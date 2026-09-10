@@ -15,6 +15,10 @@ import {
   type SourceRootObserverRow
 } from "./observe.js";
 
+export function sourceFamilySettled(committed: string | null | undefined): boolean {
+  return parseSeedCursor(committed ?? null).sourcesDone;
+}
+
 export function observeSourceAwareSeed(
   input: ObserveConditionalFieldInput,
   wantMemory: boolean

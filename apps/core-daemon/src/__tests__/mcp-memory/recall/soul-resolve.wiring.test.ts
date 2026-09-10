@@ -381,6 +381,10 @@ describe("soul.resolve handler fixture wiring", () => {
     const recallResult = await harness.handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         scope_class: null,
         dimension: null,

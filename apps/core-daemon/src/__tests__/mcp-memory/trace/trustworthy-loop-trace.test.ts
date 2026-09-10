@@ -401,6 +401,10 @@ describe("trustworthy-loop-trace", () => {
     const harness = await createTrustworthyLoopHarness();
 
     const recall = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
       query: "pnpm workspace commands",
       scope_class: ScopeClass.PROJECT,
       dimension: MemoryDimension.PREFERENCE,

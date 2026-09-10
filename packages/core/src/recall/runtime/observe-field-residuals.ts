@@ -214,6 +214,7 @@ function sourceDomainStatus(coverage?: SourceDomainCoverage): ObserverStatus {
   const view = coverage?.resultKindView ?? "mixed";
   if (view === "memory_only") return "not_applicable";
   if (coverage?.unavailable === true) return "unavailable";
+  // A source reader is a capability, not a coverage certificate.
   if (coverage?.hasSourceReader !== true) return view === "source_only" ? "unavailable" : "unknown";
   if (coverage.truncated === true) return "open";
   if (coverage.settled === true) return "exhausted";

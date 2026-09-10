@@ -42,6 +42,10 @@ describe("mcp memory tool handler wiring", () => {
     const result = await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         scope_class: null,
         dimension: null,
@@ -69,6 +73,10 @@ describe("mcp memory tool handler wiring", () => {
     const result = await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         scope_class: null,
         dimension: null,
@@ -124,6 +132,10 @@ describe("mcp memory tool handler wiring", () => {
     const result = await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         scope_class: null,
         dimension: null,
@@ -178,6 +190,10 @@ describe("mcp memory tool handler wiring", () => {
     const result = await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         scope_class: null,
         dimension: null,
@@ -205,6 +221,10 @@ describe("mcp memory tool handler wiring", () => {
     await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         scope_class: null,
         dimension: null,
@@ -226,6 +246,10 @@ describe("mcp memory tool handler wiring", () => {
     await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         scope_class: null,
         dimension: null,
@@ -250,6 +274,10 @@ describe("mcp memory tool handler wiring", () => {
     await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "what did I say on May 20",
         scope_class: null,
         dimension: null,
@@ -280,6 +308,10 @@ describe("mcp memory tool handler wiring", () => {
     await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         scope_class: null,
         dimension: null,
@@ -308,6 +340,10 @@ describe("mcp memory tool handler wiring", () => {
     await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "recent context",
         scope_class: null,
         dimension: null,
@@ -366,6 +402,10 @@ describe("mcp memory tool handler wiring", () => {
     const result = await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         scope_class: null,
         dimension: null,
@@ -423,6 +463,10 @@ describe("mcp memory tool handler wiring", () => {
     const result = await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "unfinished migration checklist",
         scope_class: null,
         dimension: null,
@@ -447,6 +491,10 @@ describe("mcp memory tool handler wiring", () => {
     const result = await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         scope_class: null,
         dimension: null,

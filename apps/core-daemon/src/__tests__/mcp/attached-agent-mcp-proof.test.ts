@@ -134,6 +134,10 @@ describe("Gate-4 attached-agent MCP proof", () => {
       );
 
       const recall = await callTool<SoulMemorySearchResponse>(client, "soul.recall", {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "pnpm workspace commands",
         scope_class: ScopeClass.PROJECT,
         dimension: MemoryDimension.PREFERENCE,

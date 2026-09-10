@@ -28,6 +28,10 @@ describe("recall usage causal receipts", () => {
     });
 
     await recall({
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
       query: "what are the deployment rules",
       scope_class: null,
       dimension: null,

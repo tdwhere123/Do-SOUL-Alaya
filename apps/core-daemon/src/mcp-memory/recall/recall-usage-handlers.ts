@@ -1,4 +1,5 @@
 import {
+  assertRecallProductUpdateCompatibility,
   type AsyncSideEffectAuditEventLogPort,
   type AsyncSideEffectAuditNotifierPort,
   type EventPublisher
@@ -206,6 +207,7 @@ async function executeRecall(
     policyOverride
   });
   const encoded = encodeRecallHandlerResults(recallResult, policyOverride);
+  assertRecallProductUpdateCompatibility(request, encoded.index.product_updates);
   const delivery = buildRecallDelivery(params, context, encoded.results, { ...recallResult, index: encoded.index });
   const replayed = encoded.index.page_purpose === "retry"
     ? await params.deps.trustStateRecorder.findDeliveryById(delivery.deliveryId)

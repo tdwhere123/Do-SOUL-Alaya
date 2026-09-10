@@ -7,6 +7,7 @@ import {
   type PayloadContinuationRequest,
   type QueryInterpretationProposal,
   type RecallPolicy,
+  type RecallTargetKind,
   type RequestBudget,
   type ResultKindView
 } from "@do-soul/alaya-protocol";
@@ -43,6 +44,10 @@ export type ConditionalFieldRecallParams = RecallExecutionParams & Readonly<{
   readonly payload_continuation?: PayloadContinuationRequest;
   readonly cap_contracts?: readonly AssociationCapContract[];
   readonly claim_demands?: readonly ClaimDemand[];
+  readonly protocol_version?: number;
+  readonly supported_result_kinds?: readonly RecallTargetKind[];
+  readonly supports_source_evidence?: boolean;
+  readonly supports_product_updates?: boolean;
 }>;
 
 export type { ObserverReaders, StoredEmbeddingVector, StoredPairMeasurement } from "./conditional-field/observers/observe.js";
@@ -64,6 +69,20 @@ export {
   type ConditionalFieldRecallRequest,
   type ConditionalFieldRecallResult
 } from "./runtime/recall-service-runner.js";
+export {
+  RECALL_CONSUMER_PROTOCOL_VERSION,
+  RECALL_PRODUCT_UPDATES_INCOMPATIBLE_MESSAGE,
+  RECALL_PROTOCOL_VERSION_INCOMPATIBLE_MESSAGE,
+  RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE,
+  assertRecallConsumerCompatibility,
+  assertRecallProductUpdateCompatibility,
+  capableRecallConsumerDeclaration,
+  consumerSupportsSourceEvidence,
+  continuationConsumerIdentity,
+  declaredRecallResultKinds,
+  recallConsumerViewIdentity,
+  type RecallConsumerCapability
+} from "./runtime/recall-consumer-compatibility.js";
 export { bindIssuedDeliveryId, issuedDeliveryIdOf } from "./runtime/index-continuation.js";
 export type { ConditionalFieldExecutionReceipt } from "./runtime/conditional-field-execution-receipt.js";
 export { compileConditionalFieldQuery, interpretationIdentity } from "./conditional-field/query/compile-query.js";

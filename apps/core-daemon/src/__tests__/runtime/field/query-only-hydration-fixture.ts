@@ -98,7 +98,11 @@ export function conditionalRecallPayload(queryText: string) {
     interpretation_clock: CLOCK, as_of: CLOCK, lifetime_now: CLOCK,
     expires_at: "2099-01-01T00:00:00.000Z",
     budget: { schema_version: 1 as const, work_units: 10_000, memory_bytes: 1_000_000,
-      page_budget: 100, finalization_reserve: 100, min_envelope: 10 } };
+      page_budget: 100, finalization_reserve: 100, min_envelope: 10 },
+    protocol_version: 1 as const,
+    supported_result_kinds: ["memory_entry", "source_evidence"] as const,
+    supports_source_evidence: true,
+    supports_product_updates: true };
 }
 
 async function openHydrationFixture(

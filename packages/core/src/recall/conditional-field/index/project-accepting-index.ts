@@ -56,7 +56,6 @@ import {
   continuationInvalidated,
   invalidatedCompleteness,
   resourceRejectedCompleteness,
-  sufficientAlternatePaths,
   type ObserverCoverage
 } from "./completeness.js";
 import {
@@ -321,12 +320,13 @@ function indexCompleteness(
 ): ReturnType<typeof composeCompleteness> {
   const residuals = extra.residuals ?? input.observer?.open_regions ?? [];
   return composeCompleteness({
-    observer: input.observer,
-    interpretation_status: input.interpretation_status,
-    query_id: input.query_id,
+    ...extra,
+    observer: extra.observer ?? input.observer,
+    interpretation_status: extra.interpretation_status ?? input.interpretation_status,
+    query_id: extra.query_id ?? input.query_id,
     residuals,
-    sufficient_alternate_paths: extra.sufficient_alternate_paths ?? sufficientAlternatePaths(residuals),
-    ...extra
+    result_kind_view: extra.result_kind_view ?? input.view.result_kind_view,
+    program_id: extra.program_id ?? input.interpretation_id
   });
 }
 

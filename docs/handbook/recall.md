@@ -19,6 +19,14 @@ source / immutable assertions / EventLog
      -> index plus same-order results encoding
 ```
 
+Consumer compatibility is negotiated on the request before compile or execute.
+Mixed and source_only views require `protocol_version` and source-evidence
+support (`supported_result_kinds` or `supports_source_evidence`). The explicit
+legacy view is `result_kind_view=memory_only`. Do not omit source members to
+keep an older parser green; return a compatibility error instead. Worker
+`conditionalField.recall` uses the same consumer check and a versioned RPC
+envelope; a bare information index is not a legal worker result.
+
 `packages/protocol/src/recall/conditional-field/` owns the shared contracts.
 `packages/core/src/recall/conditional-field/` owns query interpretation,
 observation, derivations, support and index projection. The shared runtime
@@ -181,9 +189,13 @@ Cursor acceptance and retained effects must be atomic.
 
 The public index distinguishes interpretation coverage, observed coverage,
 logical-index completeness, transport completeness and payload completeness.
-A page or top set does not prove the logical index complete. Narrow pages keep
-the accepting products and explanation forest available through continuation;
-budget exhaustion must not be reported as a complete empty result.
+Logical-index completeness is a coverage certificate that remaining
+counterfactual influence is none. Observer `exhausted` is an execution fact
+and does not by itself prove that certificate. Memory-path exhaustion does
+not make source-only results irrelevant. A page or top set does not prove
+the logical index complete. Narrow pages keep the accepting products and
+explanation forest available through continuation; budget exhaustion must
+not be reported as a complete empty result.
 
 Continuation is bound to query, snapshot, model/interpretation identity and a
 retained reader-process instance. Mutation generation changes invalidate stale

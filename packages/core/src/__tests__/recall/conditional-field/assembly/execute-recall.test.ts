@@ -7,6 +7,7 @@ import {
 import { type StorageDatabase } from "@do-soul/alaya-storage";
 import {
   RecallService,
+  capableRecallConsumerDeclaration,
   captureIndexPreviews,
   runConditionalFieldRecall,
   type ObserverReaders
@@ -253,7 +254,8 @@ describe("conditional-field executeRecall assembly", () => {
       taskSurface: surface,
       workspaceId: WS,
       strategy: "chat" as const,
-      queryText: "yesterday failed deployment"
+      queryText: "yesterday failed deployment",
+      ...capableRecallConsumerDeclaration()
     };
     const full = await service.recall({ ...pageRequest, pageBudget: 800,
       budget: defaultBudget({ page_budget: 800, finalization_reserve: COMPLETE_FINALIZATION_RESERVE })
@@ -317,7 +319,8 @@ describe("conditional-field executeRecall assembly", () => {
       queryText: "yesterday failed deployment",
       pageBudget: 800,
       interpretationClock: INTERPRETATION_CLOCK,
-      snapshotDigest: SNAPSHOT_ID
+      snapshotDigest: SNAPSHOT_ID,
+      ...capableRecallConsumerDeclaration()
     });
     expect(viaPort.index.query_id).toBe(local.query_id);
     expect(viaPort.index.entries.map(entryId)).toEqual(local.entries.map(entryId));

@@ -558,6 +558,20 @@ describe("conditional-field query compiler", () => {
       ...canonicalContinuation,
       enumeration_policy: "associative"
     }, requestedAssociative.view)).toBe(true);
+    expect(continuationViewMismatch({
+      ...canonicalContinuation,
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"]
+    }, associative.view)).toBe(true);
+    expect(continuationViewMismatch({
+      ...canonicalContinuation,
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"]
+    }, {
+      ...associative.view,
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"]
+    })).toBe(false);
   });
 
   it("rejects associative execution without a declared cap contract", () => {
