@@ -82,7 +82,7 @@ describe("claim support dependencies through reassessment and projection", () =>
     const context = initial.observed_relations!.at(0)!;
     const configured: FieldEngineState = { ...initial, interpretation: { ...initial.interpretation,
       view: { ...initial.interpretation.view, claim_demands: [{ variable: "y", proposition_kind: "common_cause",
-        argument_variables: ["x", "y"] }] } },
+        argument_variables: ["x", "y"], required_claim: "any" }] } },
       observed_relations: [context, { ...context, assertionId: "cause-assertion", predicate: "common_cause",
         evidenceReceipts: [{ evidenceId: "cause-evidence", eventId: "cause-event", eventType: "relation.evidence",
           occurredAt: "2026-09-06T00:00:00.000Z" }] }] };

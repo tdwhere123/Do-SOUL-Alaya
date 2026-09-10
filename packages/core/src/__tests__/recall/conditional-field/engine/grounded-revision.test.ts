@@ -128,7 +128,7 @@ describe("grounded retained derivation revisions", () => {
     const observed = { ...row, resultObjectId: "end", evidenceReceipts: [{ evidenceId: "e-context", eventId: "event-context",
       eventType: "relation.evidence", occurredAt: "2026-09-06T00:00:00.000Z" }] };
     const configured: FieldEngineState = { ...initial, observed_relations: [observed], interpretation: { ...initial.interpretation,
-      view: { ...initial.interpretation.view, claim_demands: [{ variable: "y", proposition_kind: "common_cause", argument_variables: ["x", "y"] }] } } };
+      view: { ...initial.interpretation.view, claim_demands: [{ variable: "y", proposition_kind: "common_cause", argument_variables: ["x", "y"], required_claim: "any" }] } } };
     const unknown = assessUnknownCause(configured, { as_of: "2026-09-07T00:00:00.000Z" });
     expect(unknown.support.some((record) => record.claim === "supported")).toBe(true);
     const proposition = [...unknown.claim_propositions!.values()].find((item) => item.kind === "common_cause")!;

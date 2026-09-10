@@ -580,11 +580,13 @@ describe("conditional-field query compiler", () => {
       cap_contracts: [
         {
           domain_id: ASSOCIATION_DOMAIN_ID,
+          normalization: "identity.unit.v1",
           transfer_id: "policy.fixture.v1",
           transfer_version: "1"
         },
         {
           domain_id: "cosine.embedding.v1",
+          normalization: "l2.dot.v1",
           transfer_id: "policy.fixture.v1",
           transfer_version: "1"
         }
@@ -600,6 +602,7 @@ describe("conditional-field query compiler", () => {
         enumeration_policy: "associative",
         cap_contracts: [{
           domain_id: "cosine.embedding.v1",
+          normalization: "l2.dot.v1",
           transfer_id: "policy.fixture.v1",
           transfer_version: "1"
         }]
@@ -613,6 +616,7 @@ describe("conditional-field query compiler", () => {
         enumeration_policy: "associative",
         cap_contracts: [{
           domain_id: ASSOCIATION_DOMAIN_ID,
+          normalization: "identity.unit.v1",
           transfer_id: "policy.fixture.v1",
           transfer_version: "1"
         }]

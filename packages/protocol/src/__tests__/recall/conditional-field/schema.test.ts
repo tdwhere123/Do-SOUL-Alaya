@@ -1,7 +1,11 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   ASSOCIATION_DOMAIN_ID,
+  AdmittedTransferSchema,
+  AssociationCapContractSchema,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  ClaimDemandSchema,
   ClosureCertificateSchema,
   CompletenessReportSchema,
   FacetModeSchema,
@@ -9,8 +13,12 @@ import {
   ConditionalFieldSha256DigestSchema,
   CoverageRegionKindSchema,
   CoverageRegionSchema,
+  FieldGradeSchema,
   GuardKindSchema,
   GuardSchema,
+  HARD_IDENTITY_TRANSFER_ID,
+  HARD_IDENTITY_TRANSFER_VERSION,
+  IDENTITY_NORMALIZATION_ID,
   InformationIndexSchema,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
@@ -24,8 +32,10 @@ import {
   RequestBudgetSchema,
   Sha256HexSchema,
   SnapshotReadLeaseSchema,
+  capContractId,
   formatConditionalFieldDigest
 } from "../../../recall/conditional-field/index.js";
+import { SoulMemorySearchRequestSchema } from "../../../surfaces/mcp-memory-search-types.js";
 import {
   COMPATIBILITY_DISPOSITIONS,
   COMPATIBILITY_LEDGER
@@ -389,5 +399,133 @@ describe("conditional-field schemas", () => {
       .toBe("retained-exception");
     expect(OWNERSHIP_LEDGER.find((row) => row.card === "retained-exception")?.paths)
       .toContain("packages/protocol/src/recall/field-contract/");
+  });
+});
+
+function sha256Hex(preimage: string): string {
+  return createHash("sha256").update(preimage, "utf8").digest("hex");
+}
+
+describe("conditional-field transfer identity and request coverage", () => {
+  const milligradeContract = AssociationCapContractSchema.parse({
+    domain_id: ASSOCIATION_DOMAIN_ID,
+    normalization: IDENTITY_NORMALIZATION_ID,
+    transfer_id: HARD_IDENTITY_TRANSFER_ID,
+    transfer_version: HARD_IDENTITY_TRANSFER_VERSION
+  });
+
+  it("requires cap-contract normalization and keeps capContractId stable", () => {
+    expect(() => AssociationCapContractSchema.parse({
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      transfer_id: HARD_IDENTITY_TRANSFER_ID,
+      transfer_version: HARD_IDENTITY_TRANSFER_VERSION
+    })).toThrow();
+    expect(milligradeContract.normalization).toBe(IDENTITY_NORMALIZATION_ID);
+    const cosine = AssociationCapContractSchema.parse({
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      normalization: "l2.dot.v1",
+      transfer_id: "policy.cosine.linear.milligrade.v1",
+      transfer_version: "1"
+    });
+    const first = capContractId(milligradeContract, sha256Hex);
+    const second = capContractId({ ...milligradeContract }, sha256Hex);
+    expect(first).toBe(second);
+    expect(first).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(capContractId(cosine, sha256Hex)).not.toBe(first);
+    expect(capContractId({
+      ...milligradeContract,
+      transfer_version: "2"
+    }, sha256Hex)).not.toBe(first);
+  });
+
+  it("parses FieldGrade and AdmittedTransfer", () => {
+    const grade = FieldGradeSchema.parse({
+      milligrades: 1000,
+      cap_contract_id: capContractId(milligradeContract, sha256Hex)
+    });
+    expect(grade.milligrades).toBe(1000);
+    expect(AdmittedTransferSchema.parse({
+      schema_version: 1,
+      transfer_id: HARD_IDENTITY_TRANSFER_ID,
+      transfer_version: HARD_IDENTITY_TRANSFER_VERSION,
+      query_id: "q1",
+      relation_instance_id: "rel-1",
+      relation_revision: "rev-1",
+      direction: "forward",
+      hypothesis_id: "h0",
+      binding: "default",
+      time_state: "as_of",
+      cap_contract: milligradeContract,
+      milligrades: 1000
+    }).transfer_id).toBe(HARD_IDENTITY_TRANSFER_ID);
+  });
+
+  it("defaults claim demand required_claim to any", () => {
+    expect(ClaimDemandSchema.parse({
+      variable: "h",
+      proposition_kind: "common_cause",
+      argument_variables: ["r", "h"]
+    }).required_claim).toBe("any");
+    expect(ClaimDemandSchema.parse({
+      variable: "h",
+      proposition_kind: "common_cause",
+      argument_variables: ["r", "h"],
+      required_claim: "supported"
+    }).required_claim).toBe("supported");
+  });
+
+  it("accepts MCP request capability fields without changing the default kind view", () => {
+    const parsed = SoulMemorySearchRequestSchema.parse({
+      query: "needle",
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
+      max_results: 5,
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
+      cap_contracts: [milligradeContract],
+      claim_demands: [{
+        variable: "h",
+        proposition_kind: "common_cause",
+        argument_variables: ["r", "h"]
+      }]
+    });
+    expect(parsed.result_kind_view).toBe("mixed");
+    expect(parsed.protocol_version).toBe(1);
+    expect(parsed.supports_source_evidence).toBe(true);
+    expect(parsed.claim_demands?.[0]?.required_claim).toBe("any");
+  });
+
+  it("still parses the historical closure certificate shape", () => {
+    expect(ClosureCertificateSchema.parse({
+      schema_version: 1,
+      certificate_id: "q1:pred:op:assoc.bottleneck.milligrade.v1:upper_excludes_predicate",
+      query_id: "q1",
+      predicate_id: "pred",
+      operator_id: "op",
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      coverage_premise: "upper_excludes_predicate",
+      closed_effects: ["membership"]
+    }).includes_source_only).toBeUndefined();
+    expect(ClosureCertificateSchema.parse({
+      schema_version: 1,
+      certificate_id: "q1:pred:op:assoc.bottleneck.milligrade.v1:required_regions_irrelevant",
+      query_id: "q1",
+      predicate_id: "pred",
+      operator_id: "op",
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      coverage_premise: "required_regions_irrelevant",
+      closed_effects: ["membership", "claim", "order"],
+      program_id: "program-1",
+      result_kind_view: "mixed",
+      target_kinds: ["memory_entry", "source_evidence"],
+      source_domains: ["source_evidence"],
+      hypothesis_id: "h0",
+      binding: "default",
+      includes_source_only: true,
+      closed_obligations: ["membership", "claim", "order"]
+    }).includes_source_only).toBe(true);
   });
 });

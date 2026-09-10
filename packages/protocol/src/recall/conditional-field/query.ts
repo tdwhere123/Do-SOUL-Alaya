@@ -50,12 +50,24 @@ export const GuardSchema = z
 
 export const EnumerationPolicySchema = z.enum(["canonical", "associative"]);
 export const ResultKindViewSchema = z.enum(["mixed", "memory_only", "source_only"]);
+export const ClaimRequiredClaimSchema = z.enum(["supported", "unknown", "any"]);
 
 export const AssociationCapContractSchema = z
   .object({
     domain_id: ConditionalFieldIdSchema,
+    normalization: ConditionalFieldIdSchema,
     transfer_id: ConditionalFieldIdSchema,
     transfer_version: ConditionalFieldIdSchema
+  })
+  .strict()
+  .readonly();
+
+export const ClaimDemandSchema = z
+  .object({
+    variable: ConditionalFieldIdSchema,
+    proposition_kind: BoundedLabelSchema,
+    argument_variables: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    required_claim: ClaimRequiredClaimSchema.default("any")
   })
   .strict()
   .readonly();
@@ -68,11 +80,7 @@ export const QueryViewSchema = z
       .max(BOUNDED_DEFAULT_ARRAY_MAX)
       .readonly(),
     include_routing_only: z.boolean().default(false),
-    claim_demands: z.array(z.object({
-      variable: ConditionalFieldIdSchema,
-      proposition_kind: BoundedLabelSchema,
-      argument_variables: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly()
-    }).strict().readonly()).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    claim_demands: z.array(ClaimDemandSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     facet_mode: FacetModeSchema.default("same_path"),
     threshold_milligrades: MilligradeSchema.default(0),
     enumeration_policy: EnumerationPolicySchema.default("canonical"),
@@ -327,7 +335,9 @@ export const QueryInterpretationSchema = z
 
 export type EnumerationPolicy = z.infer<typeof EnumerationPolicySchema>;
 export type ResultKindView = z.infer<typeof ResultKindViewSchema>;
+export type ClaimRequiredClaim = z.infer<typeof ClaimRequiredClaimSchema>;
 export type AssociationCapContract = z.infer<typeof AssociationCapContractSchema>;
+export type ClaimDemand = z.infer<typeof ClaimDemandSchema>;
 export type QueryInterpretationProposal = z.infer<typeof QueryInterpretationProposalSchema>;
 export type GuardVerdict = z.infer<typeof GuardVerdictSchema>;
 export type GuardTimeScope = z.infer<typeof GuardTimeScopeSchema>;

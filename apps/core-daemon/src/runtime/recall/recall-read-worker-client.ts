@@ -15,10 +15,11 @@ import type { InformationIndex } from "@do-soul/alaya-protocol";
 import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
 import type { RecallTemporalProjectionEnsurer } from "./recall-path-readers.js";
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
-import type {
-  RecallReadWorkerOperation,
-  RecallReadWorkerRequest,
-  RecallReadWorkerResponse
+import {
+  RECALL_READ_WORKER_PROTOCOL_VERSION,
+  type RecallReadWorkerOperation,
+  type RecallReadWorkerRequest,
+  type RecallReadWorkerResponse
 } from "../recall-read-worker/protocol.js";
 import {
   isPathAffinityOperation,
@@ -370,7 +371,12 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         ...(consumeSuccess === undefined ? {} : { consumeSuccess })
       });
       try {
-        worker.postMessage({ id, operation, payload } satisfies RecallReadWorkerRequest);
+        worker.postMessage({
+          protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
+          id,
+          operation,
+          payload
+        } satisfies RecallReadWorkerRequest);
       } catch (error) {
         const pending = this.pending.get(id);
         this.pending.delete(id);

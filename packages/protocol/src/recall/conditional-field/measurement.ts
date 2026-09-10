@@ -79,7 +79,8 @@ export const FieldActivationSchema = z.discriminatedUnion("kind", [
       kind: z.literal("reachable"),
       milligrades: MilligradeSchema,
       low: MilligradeSchema.optional(),
-      high: MilligradeSchema.optional()
+      high: MilligradeSchema.optional(),
+      cap_contract_id: Sha256DigestSchema.optional()
     })
     .strict()
     .readonly()

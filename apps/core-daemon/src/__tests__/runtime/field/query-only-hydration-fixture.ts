@@ -22,8 +22,10 @@ import {
   type WorkerTierWindowResult
 } from "../../../runtime/recall-read-worker/memory-client.js";
 import { runOperation } from "../../../runtime/recall-read-worker/dispatch.js";
-import type { RecallReadWorkerOperation } from
-  "../../../runtime/recall-read-worker/protocol.js";
+import {
+  RECALL_READ_WORKER_PROTOCOL_VERSION,
+  type RecallReadWorkerOperation
+} from "../../../runtime/recall-read-worker/protocol.js";
 import type { RecallReadWorkerRuntime } from
   "../../../runtime/recall-read-worker/runtime.js";
 import {
@@ -164,7 +166,12 @@ export async function dispatchQueryOnly(
   operation: RecallReadWorkerOperation,
   payload: unknown
 ): Promise<unknown> {
-  const request = structuredClone({ id: 1, operation, payload });
+  const request = structuredClone({
+    protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
+    id: 1,
+    operation,
+    payload
+  });
   return structuredClone(await runOperation(runtime, request));
 }
 

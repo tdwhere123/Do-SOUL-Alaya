@@ -1,5 +1,5 @@
 import {
-  isRecallReadWorkerOperation,
+  RecallReadWorkerEnvelopeSchema,
   type RecallReadWorkerRequest,
   type RecallReadWorkerResponse
 } from "./protocol.js";
@@ -21,14 +21,7 @@ export function serializeWorkerError(error: unknown): WorkerError {
 }
 
 export function isRecallReadWorkerRequest(value: unknown): value is RecallReadWorkerRequest {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const record = value as {
-    readonly id?: unknown;
-    readonly operation?: unknown;
-  };
-  return isFiniteRequestId(record.id) && isRecallReadWorkerOperation(record.operation);
+  return RecallReadWorkerEnvelopeSchema.safeParse(value).success;
 }
 
 export function readNumericMessageId(value: unknown): number | null {

@@ -1,4 +1,5 @@
 import {
+  ContinuationSchema,
   PayloadContinuationRequestSchema,
   QueryInterpretationProposalSchema,
   type RecallPolicy,
@@ -26,7 +27,9 @@ export async function runProductionBoundRecall(input: Readonly<{
     policyOverride: input.policyOverride,
     queryText: input.request.query,
     pageBudget: input.request.max_results,
-    continuation: input.request.continuation ?? null,
+    continuation: input.request.continuation === undefined || input.request.continuation === null
+      ? null
+      : ContinuationSchema.parse(input.request.continuation),
     ...(input.request.source_observed_at === undefined
       ? {}
       : { interpretationClock: input.request.source_observed_at }),

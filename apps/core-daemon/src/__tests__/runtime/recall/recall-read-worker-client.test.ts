@@ -219,6 +219,7 @@ describe("RecallReadWorkerClient", () => {
       try {
         const responses = await collectWorkerResponses(worker, [
           {
+            protocol_version: 1,
             id: 11,
             operation: "memory.findByWorkspaceId",
             payload: {
@@ -227,6 +228,7 @@ describe("RecallReadWorkerClient", () => {
             }
           },
           {
+            protocol_version: 1,
             id: 12,
             operation: "memory.findByWorkspaceId",
             payload: {
@@ -234,7 +236,7 @@ describe("RecallReadWorkerClient", () => {
               page: { limit: 40, offset: 0 }
             }
           },
-          { id: 13, operation: "ready", payload: {} }
+          { protocol_version: 1, id: 13, operation: "ready", payload: {} }
         ]);
 
         expect(responses.map((response) => response.id)).toEqual([11, 12, 13]);
@@ -298,6 +300,7 @@ describe("RecallReadWorkerClient", () => {
           resolve(message);
         });
         worker.postMessage({
+          protocol_version: 1,
           id: 43,
           operation: "memory.findByIds",
           payload: { workspaceId: "workspace-1", objectIds: [] }

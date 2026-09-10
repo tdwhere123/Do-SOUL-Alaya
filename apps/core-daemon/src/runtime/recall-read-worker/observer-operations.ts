@@ -1,9 +1,5 @@
 import {
-  EnumerationPolicySchema,
   InformationIndexSchema,
-  PayloadContinuationRequestSchema,
-  QueryInterpretationProposalSchema,
-  ResultKindViewSchema,
   sourceRecallTarget
 } from "@do-soul/alaya-protocol";
 import {
@@ -30,71 +26,66 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { storedMeasurementReaders } from "./stored-measurement-readers.js";
-import { asPayload, readString } from "./payload-readers.js";
+import type { ConditionalFieldRecallWorkerPayload } from "./protocol.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 
 const readersByRuntime = new WeakMap<RecallReadWorkerRuntime, ObserverReaders>();
 
 export function runConditionalFieldWorkerRecall(
   runtime: RecallReadWorkerRuntime,
-  payload: unknown
+  payload: ConditionalFieldRecallWorkerPayload
 ): ConditionalFieldRecallPortResult {
-  const body = asPayload(payload);
-  const workspaceId = readString(body.workspace_id, "workspace_id");
-  const reserved = reserveSnapshotPinWork(body.budget as Parameters<typeof runConditionalFieldRecall>[0]["budget"]);
-  const readers: ObserverReaders = reserved.permitted && body.cancelled !== true ? readersFor(runtime) : {};
-  let governance = body.governance as Parameters<typeof runConditionalFieldRecall>[0]["governance"];
+  const workspaceId = payload.workspace_id;
+  const reserved = reserveSnapshotPinWork(payload.budget);
+  const readers: ObserverReaders = reserved.permitted && payload.cancelled !== true ? readersFor(runtime) : {};
+  let governance = payload.governance as Parameters<typeof runConditionalFieldRecall>[0]["governance"];
   const snapshotId = "snapshotPin" in readers && readers.snapshotPin !== undefined
     ? snapshotIdFromPin(workspaceId, readers.snapshotPin(workspaceId))
-    : readString(body.snapshot_id, "snapshot_id");
+    : payload.snapshot_id;
   if (governance?.completeness === "incomplete" && governance.work.native_visits === 0
     && governance.paths.length === 0 && governance.constraints.length === 0) {
     governance = { ...governance, binding: { ...governance.binding, snapshot_id: snapshotId } };
   }
   if (reserved.permitted && governance !== undefined && (governance.binding.workspace_id !== workspaceId
-    || governance.binding.snapshot_id !== snapshotId || governance.binding.as_of !== body.as_of)) {
+    || governance.binding.snapshot_id !== snapshotId || governance.binding.as_of !== payload.as_of)) {
     throw new Error("conditional field governance snapshot mismatch");
   }
   const executed = runConditionalFieldRecallWithReceipt({
     workspace_id: workspaceId,
-    query_text: readString(body.query_text, "query_text"),
+    query_text: payload.query_text,
     budget: reserved.budget,
-    ...(body.requested_budget === undefined ? {} : {
-      requested_budget: body.requested_budget as Parameters<typeof runConditionalFieldRecall>[0]["budget"]
+    ...(payload.requested_budget === undefined ? {} : {
+      requested_budget: payload.requested_budget
     }),
     snapshot_id: snapshotId,
     ...(governance === undefined ? {} : { governance }),
-    interpretation_clock: readString(body.interpretation_clock, "interpretation_clock"),
-    as_of: readString(body.as_of, "as_of"),
-    expires_at: readString(body.expires_at, "expires_at"),
-    ...(body.lifetime_now === undefined ? {} : { lifetime_now: readString(body.lifetime_now, "lifetime_now") }),
+    interpretation_clock: payload.interpretation_clock,
+    as_of: payload.as_of,
+    expires_at: payload.expires_at,
+    ...(payload.lifetime_now === undefined ? {} : { lifetime_now: payload.lifetime_now }),
     readers,
-    ...(body.since === undefined ? {} : { since: readString(body.since, "since") }),
-    ...(body.until === undefined ? {} : { until: readString(body.until, "until") }),
-    ...(body.time_field === undefined ? {} : { time_field: readString(body.time_field, "time_field") as "created_at" | "last_used_at" }),
-    ...(body.dimension_filter === undefined ? {} : { dimension_filter: body.dimension_filter as readonly string[] }),
-    ...(body.domain_tag_filter === undefined ? {} : { domain_tag_filter: body.domain_tag_filter as readonly string[] }),
-    continuation: (body.continuation ?? null) as Parameters<typeof runConditionalFieldRecall>[0]["continuation"],
-    cancelled: body.cancelled === true,
-    ...(body.authorized_scopes === undefined
+    ...(payload.since === undefined ? {} : { since: payload.since }),
+    ...(payload.until === undefined ? {} : { until: payload.until }),
+    ...(payload.time_field === undefined ? {} : { time_field: payload.time_field }),
+    ...(payload.dimension_filter === undefined ? {} : { dimension_filter: payload.dimension_filter }),
+    ...(payload.domain_tag_filter === undefined ? {} : { domain_tag_filter: payload.domain_tag_filter }),
+    continuation: payload.continuation ?? null,
+    cancelled: payload.cancelled === true,
+    ...(payload.authorized_scopes === undefined
       ? {}
-      : { authorized_scopes: body.authorized_scopes as readonly string[] }),
-    ...(body.enumeration_policy === undefined
+      : { authorized_scopes: payload.authorized_scopes }),
+    ...(payload.enumeration_policy === undefined
       ? {}
-      : { enumeration_policy: EnumerationPolicySchema.parse(body.enumeration_policy) }),
-    ...(body.result_kind_view === undefined
+      : { enumeration_policy: payload.enumeration_policy }),
+    ...(payload.result_kind_view === undefined
       ? {}
-      : { result_kind_view: ResultKindViewSchema.parse(body.result_kind_view) }),
-    ...(body.interpretation_proposal === undefined
+      : { result_kind_view: payload.result_kind_view }),
+    ...(payload.interpretation_proposal === undefined
       ? {}
-      : {
-        interpretation_proposal: QueryInterpretationProposalSchema.parse(body.interpretation_proposal)
-      }),
-    ...(body.payload_continuation === undefined
+      : { interpretation_proposal: payload.interpretation_proposal }),
+    ...(payload.payload_continuation === undefined
       ? {}
-      : {
-        payload_continuation: PayloadContinuationRequestSchema.parse(body.payload_continuation)
-      })
+      : { payload_continuation: payload.payload_continuation })
   });
   const index = InformationIndexSchema.parse(executed.index);
   const issuedDeliveryId = issuedDeliveryIdOf(executed.index);

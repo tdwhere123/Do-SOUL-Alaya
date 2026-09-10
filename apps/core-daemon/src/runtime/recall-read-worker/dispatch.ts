@@ -1,4 +1,5 @@
 import {
+  ConditionalFieldRecallWorkerPayloadSchema,
   isRecallReadWorkerOperation,
   type RecallReadWorkerRequest
 } from "./protocol.js";
@@ -90,7 +91,10 @@ export async function runOperation(
       }
       return null;
     case "conditionalField.recall":
-      return runConditionalFieldWorkerRecall(runtime, payload);
+      return runConditionalFieldWorkerRecall(
+        runtime,
+        ConditionalFieldRecallWorkerPayloadSchema.parse(request.payload)
+      );
     case "close":
       runtime.database.close();
       runtime.closed = true;

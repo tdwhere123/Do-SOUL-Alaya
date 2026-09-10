@@ -77,11 +77,12 @@ import "../../../runtime/recall/recall-read-worker.js";
 describe("recall read worker closed runtime", () => {
   it("rejects a later tier-window request before the chunked special-case can reopen", async () => {
     const handleRequest = hoisted.capturedHandleRequest();
-    await handleRequest({ id: 1, operation: "close", payload: {} });
+    await handleRequest({ protocol_version: 1, id: 1, operation: "close", payload: {} });
     expect(hoisted.posted[0]).toEqual({ id: 1, ok: true, result: null });
     expect(hoisted.closeDatabase).toHaveBeenCalledTimes(1);
 
     await handleRequest({
+      protocol_version: 1,
       id: 2,
       operation: "memory.findRecallTierWindow",
       payload: { workspaceId: "workspace-1", tier: "hot", limit: 1 }

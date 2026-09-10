@@ -1,3 +1,16 @@
+import { z } from "zod";
+import {
+  AssociationCapContractSchema,
+  ClaimDemandSchema,
+  ContinuationSchema,
+  EnumerationPolicySchema,
+  PayloadContinuationRequestSchema,
+  QueryInterpretationProposalSchema,
+  RecallTargetKindSchema,
+  RequestBudgetSchema,
+  ResultKindViewSchema
+} from "@do-soul/alaya-protocol";
+
 // Target recall uses "conditionalField.recall" only. The memory/evidence/
 // synthesis/path/plasticity operations remain for leftover RecallService
 // ports and are not a second selector.
@@ -44,6 +57,8 @@ export const RECALL_READ_WORKER_OPERATIONS = [
 
 export type RecallReadWorkerOperation = (typeof RECALL_READ_WORKER_OPERATIONS)[number];
 
+export const RECALL_READ_WORKER_PROTOCOL_VERSION = 1 as const;
+
 const RECALL_READ_WORKER_OPERATION_SET: ReadonlySet<string> = new Set(
   RECALL_READ_WORKER_OPERATIONS
 );
@@ -54,11 +69,62 @@ export function isRecallReadWorkerOperation(
   return typeof value === "string" && RECALL_READ_WORKER_OPERATION_SET.has(value);
 }
 
-export interface RecallReadWorkerRequest {
+export const RecallReadWorkerProtocolVersionSchema = z.number().int().min(1);
+
+export const ConditionalFieldRecallWorkerPayloadSchema = z
+  .object({
+    workspace_id: z.string(),
+    query_text: z.string(),
+    budget: RequestBudgetSchema,
+    requested_budget: RequestBudgetSchema.optional(),
+    snapshot_id: z.string(),
+    interpretation_clock: z.string(),
+    as_of: z.string(),
+    expires_at: z.string(),
+    lifetime_now: z.string().optional(),
+    cancelled: z.boolean().optional(),
+    since: z.string().optional(),
+    until: z.string().optional(),
+    time_field: z.enum(["created_at", "last_used_at"]).optional(),
+    dimension_filter: z.array(z.string()).readonly().optional(),
+    domain_tag_filter: z.array(z.string()).readonly().optional(),
+    continuation: ContinuationSchema.nullable().optional(),
+    authorized_scopes: z.array(z.string()).readonly().optional(),
+    governance: z.unknown().optional(),
+    enumeration_policy: EnumerationPolicySchema.optional(),
+    result_kind_view: ResultKindViewSchema.optional(),
+    interpretation_proposal: QueryInterpretationProposalSchema.optional(),
+    payload_continuation: PayloadContinuationRequestSchema.optional(),
+    cap_contracts: z.array(AssociationCapContractSchema).readonly().optional(),
+    claim_demands: z.array(ClaimDemandSchema).readonly().optional(),
+    protocol_version: RecallReadWorkerProtocolVersionSchema.optional(),
+    supported_result_kinds: z.array(RecallTargetKindSchema).readonly().optional()
+  })
+  .strict()
+  .readonly();
+
+export const RecallReadWorkerEnvelopeSchema = z
+  .object({
+    protocol_version: RecallReadWorkerProtocolVersionSchema,
+    id: z.number().finite(),
+    operation: z.enum(RECALL_READ_WORKER_OPERATIONS),
+    payload: z.unknown()
+  })
+  .strict()
+  .readonly();
+
+export type ConditionalFieldRecallWorkerPayload = z.infer<
+  typeof ConditionalFieldRecallWorkerPayloadSchema
+>;
+
+export type RecallReadWorkerRequest = z.infer<typeof RecallReadWorkerEnvelopeSchema>;
+
+export type ConditionalFieldRecallWorkerRequest = Readonly<{
+  readonly protocol_version: number;
   readonly id: number;
-  readonly operation: RecallReadWorkerOperation;
-  readonly payload: unknown;
-}
+  readonly operation: "conditionalField.recall";
+  readonly payload: ConditionalFieldRecallWorkerPayload;
+}>;
 
 export type RecallReadWorkerResponse =
   | Readonly<{ readonly id: number; readonly ok: true; readonly result: unknown }>
