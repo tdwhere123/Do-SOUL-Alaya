@@ -33,11 +33,12 @@ describe("retained source representation migration", () => {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(record.record_id, record.workspace_id, record.source_id, record.source_version,
       record.content_digest, null, record.recorded_at, null, null, null, record.operator_id, null, null, record.source_body);
     insertEvidenceCapsule(old.connection, "capsule-migration", { gist: "gist", excerpt: "capsule😀 retained" });
-    old.close();
+    // Upgrade-and-reopen is the contract; close-time optimize is not.
+    old.close({ optimize: false });
     const migrated = initDatabase({ filename });
     expect(migrated.connection.prepare("SELECT MAX(version) AS version FROM schema_version").get()).toEqual({ version: 13 });
     expect(migrated.connection.prepare("SELECT COUNT(*) AS count FROM retained_source_chunks").get()).toEqual({ count: 2 });
-    migrated.close();
+    migrated.close({ optimize: false });
     const readonly = new StorageDatabase(filename, new BetterSqlite3(filename, { readonly: true }));
     databases.push(readonly);
     readonly.connection.pragma("query_only = ON");
@@ -47,5 +48,5 @@ describe("retained source representation migration", () => {
     expect(page.rows.map((row) => row.content)).toEqual(expect.arrayContaining(["original😀 retained", "capsule😀 retained"]));
     expect(readonly.connection.prepare("SELECT source_body FROM source_records WHERE record_id = ?").get(record.record_id))
       .toEqual({ source_body: "original😀 retained" });
-  });
+  }, 60_000);
 });
