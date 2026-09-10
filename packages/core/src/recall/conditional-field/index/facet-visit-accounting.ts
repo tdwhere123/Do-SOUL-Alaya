@@ -194,7 +194,10 @@ export function accountFacetPreparation(
   readonly truncated: boolean;
   readonly facet: FacetVisitProgress;
 }> {
-  const cap = hold > 0 ? Math.max(0, allowance - hold) : allowance;
+  const held = hold > 0 ? Math.max(0, allowance - hold) : allowance;
+  // Payload hold must not spend the last visit while facets remain unindexed.
+  const cap = allowance > 0 && facets.length > 0 && prior?.complete !== true
+    ? Math.max(1, held) : held;
   const prepared = prepareFacetVisitIndex(facets, seeds, cap, prior);
   return {
     remaining: allowance - prepared.visits,

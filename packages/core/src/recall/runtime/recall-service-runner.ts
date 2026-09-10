@@ -270,7 +270,9 @@ function runCompiledConditionalFieldRecall(
   const unserviceable = input.budget.work_units <= 1 && projected.entries.length === 0;
   const noProgress = projected.entries.length === 0
     && fieldProgressFingerprint(retained) === fieldProgressFingerprint(restored);
-  const index = unserviceable || (noProgress && restored !== undefined && observationSettled(retained))
+  // Incomplete facet index is truncated-open, not a settled empty certificate.
+  const index = unserviceable || (noProgress && restored !== undefined && observationSettled(retained)
+    && !facetIndexStillOpen(retained))
     ? { ...projected, continuation: null } : projected;
   if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
   // Keep resume under the request token so a last page (response continuation
@@ -285,6 +287,11 @@ function observationSettled(state: FieldEngineState): boolean {
     && state.last_observer_status !== "open"
     && !state.memory_exhausted
     && (state.remaining_work.length === 0);
+}
+
+function facetIndexStillOpen(state: FieldEngineState): boolean {
+  const facets = state.binding.kind === "bound" ? state.binding.snapshot.facets : state.facets;
+  return facets.length > 0 && state.projection_progress?.facet_index?.complete !== true;
 }
 
 function projectFromField(
