@@ -14,7 +14,7 @@ import { createMcpMemoryToolHandler } from "../../../../mcp-memory/tool/tool-han
 import { TrustStateRecorder } from "../../../../trust/state.js";
 import { createToolsCommand } from "../../../../cli/tools.js";
 import { createDeps } from "../../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
-import { createDependencies } from "../../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
+import { createDependencies, createTaskSurface } from "../../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { openSourceSlice, WS, RUN, MEM } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import { compileConditionalFieldQuery } from "../../../../../../../packages/core/src/recall/conditional-field/query/compile-query.js";
 import { observeConditionalField, startObserverCursor } from "../../../../../../../packages/core/src/recall/conditional-field/observers/observe.js";
@@ -132,8 +132,8 @@ describe("conditional-field lifecycle and verified usage through actual consumer
       let now = NOW;
       const service = serviceFor(slice.database, () => now, worker);
       const handler = handlerFor(slice.database, service);
-      const cancelled = await service.recall({ workspaceId: WS, taskSurface: { display_name: "needle" },
-        strategy: "chat", cancelled: true } as Parameters<typeof service.recall>[0]);
+      const cancelled = await service.recall({ workspaceId: WS, taskSurface: { ...createTaskSurface(), display_name: "needle" },
+        strategy: "chat", cancelled: true });
       expect(cancelled.index!.completeness.observed_coverage).toBe("cancelled");
       expect(cancelled.index!.entries).toEqual([]);
       const first = await recall(handler);
@@ -205,14 +205,14 @@ describe("conditional-field lifecycle and verified usage through actual consumer
     expect(historical.index.entries.map((entry) => entry.object_id).sort()).toEqual([MEM.r, MEM.c].sort());
     slice.database.connection.prepare("UPDATE memory_entries SET valid_from = NULL, valid_to = NULL").run();
     const service = serviceFor(slice.database);
-    const params = { workspaceId: WS, taskSurface: { display_name: "needle" }, strategy: "chat",
-      budget: { schema_version: 1, work_units: 10000, memory_bytes: 600, page_budget: 100, finalization_reserve: 100, min_envelope: 1 } } as const;
-    const first = await service.recall(params as Parameters<typeof service.recall>[0]);
+    const params = { workspaceId: WS, taskSurface: { ...createTaskSurface(), display_name: "needle" }, strategy: "chat" as const,
+      budget: { schema_version: 1 as const, work_units: 10000, memory_bytes: 600, page_budget: 100, finalization_reserve: 100, min_envelope: 1 } };
+    const first = await service.recall(params);
     expect(first.index?.continuation).not.toBeNull();
     const resumed = await service.recall({ ...params, budget: { ...params.budget, memory_bytes: 1000000 },
-      continuation: first.index!.continuation } as Parameters<typeof service.recall>[0]);
+      continuation: first.index!.continuation });
     expect([...new Set([...first.index!.entries, ...resumed.index!.entries].map((entry) => entry.object_id))].sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
-    const tightReserve = await service.recall({ ...params, budget: { ...params.budget, memory_bytes: 1000000, finalization_reserve: 1 } } as Parameters<typeof service.recall>[0]);
+    const tightReserve = await service.recall({ ...params, budget: { ...params.budget, memory_bytes: 1000000, finalization_reserve: 1 } });
     expect(tightReserve.index!.completeness.observed_coverage).toBe("unknown");
     expect(tightReserve.index!.continuation).toBeNull();
     expect(tightReserve.index!.entries.map((entry) => entry.object_id).sort()).toEqual([MEM.r, MEM.c, MEM.h].sort());
@@ -230,8 +230,8 @@ describe("conditional-field lifecycle and verified usage through actual consumer
           source: (input) => { const page = readers.source!(input); visits += page.rowsRead; return page; },
           lexical: (input) => { const page = readers.lexical!(input); visits += page.nativeVisits; return page; },
           relation: (input) => { const page = readers.relation!(input); visits += page.nativeVisits; return page; } } });
-      await service.recall({ ...capableRecallConsumerDeclaration(), workspaceId: WS, taskSurface: { display_name: "needle" }, strategy: "chat",
-        budget: { schema_version: 1, work_units, memory_bytes: 1000000, page_budget: 100, finalization_reserve: 1, min_envelope: 1 } } as Parameters<typeof service.recall>[0]);
+      await service.recall({ ...capableRecallConsumerDeclaration(), workspaceId: WS, taskSurface: { ...createTaskSurface(), display_name: "needle" }, strategy: "chat",
+        budget: { schema_version: 1 as const, work_units, memory_bytes: 1000000, page_budget: 100, finalization_reserve: 1, min_envelope: 1 } });
       expect(visits).toBeLessThanOrEqual(work_units);
     }
   });

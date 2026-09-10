@@ -7,7 +7,7 @@ import { capableRecallConsumerDeclaration, RecallService } from "@do-soul/alaya-
 import { initDatabase, initializeSemanticArtifactCandidateSchema, SqliteIndexedRecallProjection, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../../../../runtime/recall-read-worker/observer-operations.js";
 import { createRecallReadWorkerClient } from "../../../../runtime/recall/recall-read-worker-client.js";
-import { createDependencies } from "../../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
+import { createDependencies, createTaskSurface } from "../../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { openSourceSlice, WS, RUN, MEM } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 
 const NOW = "2026-09-07T00:01:00.000Z";
@@ -37,9 +37,9 @@ function audit(database: StorageDatabase) {
 }
 
 function request(service: RecallService, continuation: Continuation | null = null) {
-  return service.recall({ ...capableRecallConsumerDeclaration(), workspaceId: WS, taskSurface: { display_name: "needle" }, strategy: "chat",
-    continuation, budget: { schema_version: 1, work_units: 10000, memory_bytes: 1000000,
-      page_budget: 1, finalization_reserve: 100, min_envelope: 1 } } as Parameters<RecallService["recall"]>[0]);
+  return service.recall({ ...capableRecallConsumerDeclaration(), workspaceId: WS, taskSurface: { ...createTaskSurface(), display_name: "needle" }, strategy: "chat",
+    continuation, budget: { schema_version: 1 as const, work_units: 10000, memory_bytes: 1000000,
+      page_budget: 1, finalization_reserve: 100, min_envelope: 1 } });
 }
 
 describe("workspace observable source generation", () => {
