@@ -244,6 +244,7 @@ export type CompiledAdjacencyEffect = Readonly<{
   readonly derivations?: readonly Derivation[];
   readonly missing_measurement?: boolean;
   readonly unresolved_guard?: boolean;
+  readonly missing_target_revision?: boolean;
   readonly discovery?: RoutingDiscovery;
 }>;
 
