@@ -1,7 +1,8 @@
+import type { AssociationCapContract, ProjectedCap, QueryInterpretation } from "@do-soul/alaya-protocol";
 import type { ObserverActionResult } from "../conditional-field/observers/observe.js";
 import type { ObservationMeasurement } from "../conditional-field/observers/measure-stored.js";
 import type { FieldObservationEffect } from "../conditional-field/engine/field-engine.js";
-import type { QueryInterpretation } from "@do-soul/alaya-protocol";
+import { capContractId } from "../conditional-field/cap-contract.js";
 import { seedActivationsForObservation } from "../conditional-field/engine/path-composition.js";
 
 export function measurementEffectsFor(result: ObserverActionResult, interpretation?: QueryInterpretation,
@@ -20,15 +21,23 @@ export function measurementEffectsFor(result: ObserverActionResult, interpretati
     const targetKey = JSON.stringify(row.raw.referent);
     const compatible = admission.obligations.map((obligation) => measurements.find((candidate) => candidate.raw.status === "measured"
       && candidate.raw.obligation_id === obligation.obligation_id && JSON.stringify(candidate.raw.referent) === targetKey));
-    const grades = compatible.flatMap((candidate) => candidate?.cap.status === "projected" ? [candidate.cap.milligrades] : []);
-    if (grades.length === 0 || admission.join === "all" && grades.length !== admission.obligations.length) continue;
+    const projected = compatible.flatMap((candidate) => {
+      if (candidate?.cap.status !== "projected" || candidate.raw.status !== "measured") return [];
+      const contract = projectedCapContract(candidate.cap, candidate.raw.normalization);
+      return [{ milligrades: candidate.cap.milligrades, contract, contract_id: capContractId(contract) }];
+    });
+    if (projected.length === 0 || admission.join === "all" && projected.length !== admission.obligations.length) continue;
+    const contractIds = new Set(projected.map((item) => item.contract_id));
+    if (contractIds.size !== 1) continue;
     const observation = result.page.observations.find((candidate) => candidate.observation_id === row.observation_id);
     if (observation === undefined || observation.applicability.verdict !== "true") continue;
+    const grades = projected.map((item) => item.milligrades);
     const grade = admission.join === "all" ? Math.min(...grades) : Math.max(...grades);
+    const contractId = projected[0]!.contract_id;
     for (const seed of seedActivationsForObservation({ ...observation, target: row.raw.referent,
       association_milligrades: grade }, interpretation, asOf)) {
       effects.push({ observation_id: `${row.observation_id}:${seed.state.hypothesis_id}:${seed.state.program_state}`,
-        seed, admitted_seed: true });
+        seed: { ...seed, cap_contract_id: contractId }, admitted_seed: true });
     }
   }
   return effects;
@@ -49,6 +58,15 @@ function absentEffect(observationId: string): FieldObservationEffect {
     raw_measurement: { status: "missing" },
     projected_cap: { status: "inapplicable" },
     missing_measurement: true
+  };
+}
+
+function projectedCapContract(cap: Extract<ProjectedCap, { readonly status: "projected" }>, normalization: string): AssociationCapContract {
+  return {
+    domain_id: cap.domain_id,
+    normalization,
+    transfer_id: cap.transfer_id,
+    transfer_version: cap.transfer_version
   };
 }
 

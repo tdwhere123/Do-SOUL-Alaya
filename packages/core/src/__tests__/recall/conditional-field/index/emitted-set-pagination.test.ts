@@ -17,6 +17,7 @@ import {
   projectAcceptingIndex,
   type AcceptingProjectionInput
 } from "../../../../recall/conditional-field/index/project-accepting-index.js";
+import { identityAssociationCap } from "../reference/deployment.fixture.js";
 import {
   issuedDeliveryRevoked,
   productIdOfEntry,
@@ -404,7 +405,7 @@ function defaultBudget(overrides: Partial<RequestBudget> = {}): RequestBudget {
 }
 
 function defaultView(overrides: Partial<QueryView> = {}): QueryView {
-  return QueryViewSchema.parse({
+  const parsed = QueryViewSchema.parse({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     requested_roles: ["requested", "associated"],
     include_routing_only: false,
@@ -414,6 +415,9 @@ function defaultView(overrides: Partial<QueryView> = {}): QueryView {
     threshold_milligrades: 0,
     ...overrides
   });
+  if ((parsed.enumeration_policy ?? "canonical") !== "associative") return parsed;
+  if ((parsed.cap_contracts?.length ?? 0) > 0) return parsed;
+  return { ...parsed, cap_contracts: [identityAssociationCap()] };
 }
 
 function objectId(entry: IndexEntry): string {

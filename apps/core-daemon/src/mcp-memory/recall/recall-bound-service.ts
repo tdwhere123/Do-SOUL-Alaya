@@ -49,7 +49,9 @@ export async function runProductionBoundRecall(input: Readonly<{
       : { interpretation_proposal: QueryInterpretationProposalSchema.parse(input.request.interpretation_proposal) }),
     ...(input.request.payload_continuation === undefined
       ? {}
-      : { payload_continuation: PayloadContinuationRequestSchema.parse(input.request.payload_continuation) })
+      : { payload_continuation: PayloadContinuationRequestSchema.parse(input.request.payload_continuation) }),
+    ...(input.request.cap_contracts === undefined ? {} : { cap_contracts: input.request.cap_contracts }),
+    ...(input.request.claim_demands === undefined ? {} : { claim_demands: input.request.claim_demands })
   });
 }
 

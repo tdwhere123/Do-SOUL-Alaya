@@ -20,6 +20,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { prepareFieldGraph, type FieldGraphAdditions, type PreparedFieldGraph } from "../engine/field-graph-preparation.js";
 import type { RetainedRows } from "../engine/retained-sequence.js";
+import { hardIdentityCapContractId, isHardIdentityContractId } from "../cap-contract.js";
 
 export type BindMaxMinSuccess = Readonly<{
   readonly kind: "bound";
@@ -114,6 +115,12 @@ export function bindMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
   if (admitRequestBudget(input.budget) === "resource_rejected") {
     return { kind: "resource_rejected", completeness: resourceRejectedCompleteness() };
   }
+  const contract = uniqueGradeContract(input.seeds, input.transitions);
+  if (contract === "mixed") return bindPartitionedMaxMinField(input);
+  return bindNumericMaxMinField(input, contract === "" ? undefined : contract);
+}
+
+function bindNumericMaxMinField(input: BindMaxMinInput, contractId: string | undefined): BindMaxMinResult {
   const prepared = input.incremental === undefined ? undefined : prepareFieldGraph({ prior: input.incremental.prior,
     additions: input.incremental.additions, priorValues: input.prior_values, workQueue: input.incremental.queue,
     workLimit: input.work_limit ?? Number.MAX_SAFE_INTEGER });
@@ -149,12 +156,120 @@ export function bindMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
       snapshot_id: input.snapshot_id,
       query_id: input.query_id,
       get seeds() { return snapshotSeeds ??= [...input.seeds]; },
-      get values() { return snapshotValues ??= fieldValues(keys, solved.values); },
+      get values() { return snapshotValues ??= fieldValues(keys, solved.values, contractId); },
       get retained_transitions() { return snapshotTransitions ??= prepared === undefined
         ? retainedProtocolTransitions(legalTransitions!, solved.retainedTransitions) : input.transitions.filter((row) => row.applicable); },
       get facets() { return snapshotFacets ??= [...input.facets ?? []]; }
     }
   };
+}
+
+function bindPartitionedMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
+  const groups = new Map<string, { seeds: SeedActivation[]; transitions: Transition[] }>();
+  for (const seed of input.seeds) {
+    const key = normalizeGradeContract(seed.cap_contract_id);
+    const group = groups.get(key) ?? { seeds: [], transitions: [] };
+    group.seeds.push(seed);
+    groups.set(key, group);
+  }
+  for (const transition of input.transitions) {
+    if (!transition.applicable) continue;
+    const key = normalizeGradeContract(transition.cap_contract_id);
+    const group = groups.get(key) ?? { seeds: [], transitions: [] };
+    group.transitions.push(transition);
+    groups.set(key, group);
+  }
+  const parts: BindMaxMinSuccess[] = [];
+  const contractByNode = new Map<string, string>();
+  const values = new Map<string, number>();
+  let steps = 0;
+  let complete = true;
+  for (const [contract, group] of groups) {
+    const bound = bindNumericMaxMinField({
+      ...input,
+      seeds: group.seeds,
+      transitions: group.transitions,
+      incremental: undefined,
+      identities: collectKeys(group.seeds, group.transitions)
+    }, contract === "" ? undefined : contract);
+    if (bound.kind !== "bound") return bound;
+    parts.push(bound);
+    steps += bound.solver_steps;
+    complete = complete && bound.solver_complete;
+    for (const [nodeId, milligrades] of bound.values) {
+      const prior = values.get(nodeId);
+      const priorContract = contractByNode.get(nodeId);
+      if (prior === undefined || priorContract === undefined) {
+        values.set(nodeId, milligrades);
+        contractByNode.set(nodeId, contract);
+        continue;
+      }
+      if (priorContract === contract) continue;
+      const keepIncoming = isHardIdentityContractId(priorContract === "" ? undefined : priorContract)
+        && !isHardIdentityContractId(contract === "" ? undefined : contract);
+      const keepPrior = isHardIdentityContractId(contract === "" ? undefined : contract)
+        && !isHardIdentityContractId(priorContract === "" ? undefined : priorContract);
+      if (keepIncoming) {
+        values.set(nodeId, milligrades);
+        contractByNode.set(nodeId, contract);
+      } else if (!keepPrior) {
+        values.delete(nodeId);
+        contractByNode.delete(nodeId);
+      }
+    }
+  }
+  const keys = input.identities ?? collectKeys(input.seeds, input.transitions);
+  const last = parts.at(-1);
+  let snapshotSeeds: FieldSnapshot["seeds"] | undefined;
+  let snapshotValues: FieldSnapshot["values"] | undefined;
+  let snapshotTransitions: FieldSnapshot["retained_transitions"] | undefined;
+  let snapshotFacets: FieldSnapshot["facets"] | undefined;
+  return {
+    kind: "bound",
+    values,
+    solver_steps: steps,
+    solver_runs: parts.length,
+    solver_complete: complete,
+    get remaining_worklist() { return last?.remaining_worklist ?? []; },
+    work_queue: last?.work_queue,
+    snapshot: {
+      schema_version: 1,
+      snapshot_id: input.snapshot_id,
+      query_id: input.query_id,
+      get seeds() { return snapshotSeeds ??= [...input.seeds]; },
+      get values() {
+        return snapshotValues ??= fieldValues(keys, values, undefined, contractByNode);
+      },
+      get retained_transitions() {
+        return snapshotTransitions ??= input.transitions.filter((row) => row.applicable);
+      },
+      get facets() { return snapshotFacets ??= [...input.facets ?? []]; }
+    }
+  };
+}
+
+function uniqueGradeContract(
+  seeds: RetainedRows<SeedActivation>,
+  transitions: RetainedRows<Transition>
+): string | "mixed" {
+  const raw = new Set<string>();
+  const normalized = new Set<string>();
+  const note = (id: string | undefined) => {
+    raw.add(id ?? "");
+    normalized.add(normalizeGradeContract(id));
+  };
+  for (const seed of seeds) note(seed.cap_contract_id);
+  for (const transition of transitions) {
+    if (transition.applicable) note(transition.cap_contract_id);
+  }
+  if (normalized.size > 1) return "mixed";
+  if (raw.size === 1 && raw.has("")) return "";
+  return [...normalized][0] ?? "";
+}
+
+function normalizeGradeContract(id: string | undefined): string {
+  if (id === undefined || id.length === 0) return hardIdentityCapContractId();
+  return id;
 }
 
 function collectKeys(
@@ -180,7 +295,9 @@ function toMaxMinTransition(transition: Transition): MaxMinTransition {
 
 function fieldValues(
   keys: ReadonlyMap<string, ProductStateKey>,
-  values: ReadonlyMap<string, number>
+  values: ReadonlyMap<string, number>,
+  contractId?: string,
+  contractByNode?: ReadonlyMap<string, string>
 ): readonly FieldValue[] {
   const fields: FieldValue[] = [];
   for (const [nodeId, state] of keys) {
@@ -194,15 +311,25 @@ function fieldValues(
       });
       continue;
     }
+    const stamped = contractId ?? emptyToUndefined(contractByNode?.get(nodeId));
     fields.push({
       schema_version: 1,
       state,
       milligrades,
       accepting: state.program_state === "accepting",
-      activation: { kind: "reachable", milligrades }
+      activation: {
+        kind: "reachable",
+        milligrades,
+        ...(stamped === undefined ? {} : { cap_contract_id: stamped })
+      },
+      ...(stamped === undefined ? {} : { cap_contract_id: stamped })
     });
   }
   return fields;
+}
+
+function emptyToUndefined(value: string | undefined): string | undefined {
+  return value === undefined || value.length === 0 ? undefined : value;
 }
 
 function retainedProtocolTransitions(

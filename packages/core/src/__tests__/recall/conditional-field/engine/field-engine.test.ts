@@ -48,11 +48,11 @@ const OTHER_SNAPSHOT = `sha256:${"d".repeat(64)}`;
 describe("conditional-field engine", () => {
   it("binds the deployment graph at milligrade min/max without common cause", () => {
     const state = createDeploymentField();
-    expect(valueOf(state, "c")).toBe(850);
-    expect(valueOf(state, "h")).toBe(550);
+    expect(valueOf(state, "c")).toBe(1000);
+    expect(valueOf(state, "h")).toBe(1000);
     expect(valueOf(state, "r")).toBe(1000);
-    expect(valueOf(state, "l")).toBe(950);
-    expect(valueOf(state, "s")).toBe(900);
+    expect(valueOf(state, "l")).toBe(1000);
+    expect(valueOf(state, "s")).toBe(1000);
     expect(valueOf(state, "u")).toBe(0);
     const withClaim = applyEvidenceEffect(state, {
       support: [{
@@ -64,7 +64,7 @@ describe("conditional-field engine", () => {
       claims: new Map([["h", "unknown"], ["c", "unknown"]])
     });
     expect(withClaim.claims.get("h")).toBe("unknown");
-    expect(valueOf(withClaim, "h")).toBe(550);
+    expect(valueOf(withClaim, "h")).toBe(1000);
     expect(withClaim.support[0]?.claim).toBe("unknown");
     expect(withClaim.binding.kind).toBe("bound");
     if (withClaim.binding.kind !== "bound") return;

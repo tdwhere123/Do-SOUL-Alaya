@@ -85,7 +85,9 @@ export function runConditionalFieldWorkerRecall(
       : { interpretation_proposal: payload.interpretation_proposal }),
     ...(payload.payload_continuation === undefined
       ? {}
-      : { payload_continuation: payload.payload_continuation })
+      : { payload_continuation: payload.payload_continuation }),
+    ...(payload.cap_contracts === undefined ? {} : { cap_contracts: payload.cap_contracts }),
+    ...(payload.claim_demands === undefined ? {} : { claim_demands: payload.claim_demands })
   });
   const index = InformationIndexSchema.parse(executed.index);
   const issuedDeliveryId = issuedDeliveryIdOf(executed.index);

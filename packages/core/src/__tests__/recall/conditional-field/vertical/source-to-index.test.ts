@@ -54,7 +54,7 @@ describe("conditional-field SQLite source-to-index slice", () => {
     expect(lexical.ids).toContain(MEM.r);
     const bound = bindObserved(slice);
     const config = bound.snapshot.values.find((value) => productSubjectId(value.state) === MEM.c);
-    expect(config?.milligrades).toBe(850);
+    expect(config?.milligrades).toBe(1000);
     const index = projectAcceptingIndex({
       snapshot: bound.snapshot,
       view: defaultView(),
@@ -65,7 +65,7 @@ describe("conditional-field SQLite source-to-index slice", () => {
       roles: deploymentRoles()
     });
     expect(index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
-      .toBe(850);
+      .toBe(1000);
     expect(bound.snapshot.retained_transitions.some((transition) => productSubjectId(transition.to) === MEM.u))
       .toBe(false);
   });

@@ -50,6 +50,7 @@ import {
   type SourceSlice
 } from "./planted-handler.js";
 import { assertTargetConsumer } from "./consumer-contract.js";
+import { identityAssociationCap } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 
 const NOW = "2026-09-07T00:00:00.000Z";
 const SOURCE_BODY = "record-only surface root for mixed recall";
@@ -226,7 +227,8 @@ function projectTypedUpdateIndex(): InformationIndex {
     enumeration_policy: "associative",
     result_kind_view: "mixed",
     include_routing_only: false,
-    requested_roles: ["requested", "associated"]
+    requested_roles: ["requested", "associated"],
+    cap_contracts: [identityAssociationCap()]
   });
   const base = {
     view,

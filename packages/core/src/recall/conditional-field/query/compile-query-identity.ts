@@ -86,6 +86,8 @@ export function continuationViewMismatch(
   const kindView = continuation.result_kind_view ?? "mixed";
   if (policy !== (view.enumeration_policy ?? "canonical")) return true;
   if (kindView !== (view.result_kind_view ?? "mixed")) return true;
+  if (stableStringify(continuation.cap_contracts ?? null) !== stableStringify(view.cap_contracts ?? null)) return true;
+  if (stableStringify(continuation.claim_demands ?? null) !== stableStringify(view.claim_demands ?? null)) return true;
   if (continuation.authorized_scopes === undefined || authorizedScopes === undefined) return false;
   return stableStringify([...(continuation.authorized_scopes)].sort())
     !== stableStringify([...authorizedScopes].sort());

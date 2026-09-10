@@ -1,7 +1,12 @@
 import {
+  ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  HARD_IDENTITY_TRANSFER_ID,
+  HARD_IDENTITY_TRANSFER_VERSION,
+  IDENTITY_NORMALIZATION_ID,
   memoryProductStateKey,
   QueryViewSchema,
+  type AssociationCapContract,
   type Guard,
   type IndexRole,
   type ProductStateKey,
@@ -84,6 +89,15 @@ export function defaultBudget(overrides: Partial<RequestBudget> = {}): RequestBu
   };
 }
 
+export function identityAssociationCap(): AssociationCapContract {
+  return {
+    domain_id: ASSOCIATION_DOMAIN_ID,
+    normalization: IDENTITY_NORMALIZATION_ID,
+    transfer_id: HARD_IDENTITY_TRANSFER_ID,
+    transfer_version: HARD_IDENTITY_TRANSFER_VERSION
+  };
+}
+
 export function defaultView(includeRoutingOnly = false): QueryView {
   return QueryViewSchema.parse({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -96,6 +110,14 @@ export function defaultView(includeRoutingOnly = false): QueryView {
   });
 }
 
+export function associativeView(includeRoutingOnly = false): QueryView {
+  return {
+    ...defaultView(includeRoutingOnly),
+    enumeration_policy: "associative",
+    cap_contracts: [identityAssociationCap()]
+  };
+}
+
 export function deploymentSeeds(): readonly SeedActivation[] {
   return [{
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -106,11 +128,11 @@ export function deploymentSeeds(): readonly SeedActivation[] {
 
 export function deploymentTransitions(): readonly Transition[] {
   return [
-    edge("r", "l", "observed_log", 950, true),
-    edge("l", "c", "config_via_log", 850, true),
-    edge("r", "c", "config_direct", 800, true),
-    edge("r", "s", "uses_service", 900, true),
-    edge("s", "h", "service_history", 550, true),
+    edge("r", "l", "observed_log", 1000, true),
+    edge("l", "c", "config_via_log", 1000, true),
+    edge("r", "c", "config_direct", 1000, true),
+    edge("r", "s", "uses_service", 1000, true),
+    edge("s", "h", "service_history", 1000, true),
     edge("r", "u", "unrelated", 1000, false)
   ];
 }

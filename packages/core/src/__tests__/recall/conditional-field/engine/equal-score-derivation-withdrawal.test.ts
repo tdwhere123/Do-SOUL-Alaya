@@ -70,8 +70,8 @@ describe("equal-score AND/OR withdrawal", () => {
       hyperedge("or", [rel("rel_a"), rel("rel_b")]),
       rel("rel_c")
     ]), rows);
-    expect(gradeOf(orOfAnd, "end")).toBe(800);
-    expect(gradeOf(andOfOr, "end")).toBe(800);
+    expect(gradeOf(orOfAnd, "end")).toBe(1000);
+    expect(gradeOf(andOfOr, "end")).toBe(1000);
     const orLeaves = new Set(orOfAnd.derivations.flatMap((row) => row.leaf_ids));
     const andLeaves = new Set(andOfOr.derivations.flatMap((row) => row.leaf_ids));
     expect(orLeaves).toEqual(andLeaves);
@@ -82,7 +82,7 @@ describe("equal-score AND/OR withdrawal", () => {
       rel("rel_c")
     ]), rows.filter((row) => row.assertionId !== "c"));
     expect(gradeOf(afterOr, "end")).toBe(gradeOf(freshOr, "end"));
-    expect(gradeOf(afterOr, "end")).toBe(800);
+    expect(gradeOf(afterOr, "end")).toBe(1000);
     expect(gradeOf(afterAnd, "end")).toBe(0);
     expect(gradeOf(afterOr, "end")).not.toBe(gradeOf(afterAnd, "end"));
   });

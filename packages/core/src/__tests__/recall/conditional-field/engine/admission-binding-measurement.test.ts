@@ -192,7 +192,10 @@ describe("admission, binding, measurement, and evidence identities", () => {
     const fact = missing.binding.kind === "bound"
       ? missing.binding.snapshot.values.find((value) => productSubjectId(value.state) === "fact")
       : undefined;
-    expect(fact?.activation).toEqual({ kind: "reachable", milligrades: 1000 });
+    expect(fact?.activation).toEqual(expect.objectContaining({ kind: "reachable", milligrades: 1000 }));
+    const transferred = missing.transitions.find((row) => productSubjectId(row.to) === "fact");
+    expect(transferred?.transfer_id).toBe("transfer.relation.hard_identity.v1");
+    expect(transferred?.cap_contract_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(fieldActivationOf({})).toEqual({ kind: "unreachable" });
     expect(fieldActivationOf({ milligrades: 0 })).toEqual({ kind: "reachable", milligrades: 0 });
     expect(RawMeasurementSchema.parse({ status: "missing" }).status).toBe("missing");

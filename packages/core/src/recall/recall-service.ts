@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
+  type AssociationCapContract,
+  type ClaimDemand,
   type Continuation,
   type EnumerationPolicy,
   type PayloadContinuationRequest,
@@ -39,6 +41,8 @@ export type ConditionalFieldRecallParams = RecallExecutionParams & Readonly<{
   readonly result_kind_view?: ResultKindView;
   readonly interpretation_proposal?: QueryInterpretationProposal;
   readonly payload_continuation?: PayloadContinuationRequest;
+  readonly cap_contracts?: readonly AssociationCapContract[];
+  readonly claim_demands?: readonly ClaimDemand[];
 }>;
 
 export type { ObserverReaders, StoredEmbeddingVector, StoredPairMeasurement } from "./conditional-field/observers/observe.js";

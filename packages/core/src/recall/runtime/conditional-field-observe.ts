@@ -73,12 +73,12 @@ const ADJACENCY_PAGE_SIZE = 16;
 const MAX_FINALIZATION_MEMORY_BYTES = 65_536;
 
 export const RELATION_ROUTING = Object.freeze({
-  observed_log: { milligrades: 950, applicable: true, role: "associated" },
-  config_via_log: { milligrades: 850, applicable: true, role: "associated" },
-  config_direct: { milligrades: 800, applicable: true, role: "associated" },
-  uses_service: { milligrades: 900, applicable: true, role: "routing_only" },
-  service_history: { milligrades: 550, applicable: true, role: "associated" },
-  unrelated: { milligrades: 1000, applicable: false, role: "associated" }
+  observed_log: { applicable: true, role: "associated" },
+  config_via_log: { applicable: true, role: "associated" },
+  config_direct: { applicable: true, role: "associated" },
+  uses_service: { applicable: true, role: "routing_only" },
+  service_history: { applicable: true, role: "associated" },
+  unrelated: { applicable: false, role: "associated" }
 });
 
 export function observeField(

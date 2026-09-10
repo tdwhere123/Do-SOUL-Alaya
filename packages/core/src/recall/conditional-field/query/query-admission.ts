@@ -19,6 +19,7 @@ import {
   type QueryView,
   type RequestBudget
 } from "@do-soul/alaya-protocol";
+import { capContractKey } from "../cap-contract.js";
 import { interpretQuery } from "../reference/interpret-query.js";
 import {
   proposalBindsOriginalQuery,
@@ -181,11 +182,9 @@ export function denotation(
 export function associativeCapDomainAdmission(view: QueryView): "ok" | "incompatible" {
   if ((view.enumeration_policy ?? "canonical") !== "associative") return "ok";
   const contracts = view.cap_contracts ?? [];
-  if (contracts.length === 0) return "ok";
-  const keys = new Set(
-    contracts.map((contract) => `${contract.domain_id}\0${contract.transfer_id}\0${contract.transfer_version}`)
-  );
-  if (keys.size > 1) return "incompatible";
+  if (contracts.length === 0) return "incompatible";
+  const keys = new Set(contracts.map(capContractKey));
+  if (keys.size !== 1) return "incompatible";
   return contracts[0]?.domain_id === ASSOCIATION_DOMAIN_ID ? "ok" : "incompatible";
 }
 

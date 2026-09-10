@@ -60,7 +60,7 @@ describe("conditional-field independent field oracle", () => {
     const world = deploymentWorld();
     const field = enumerateSimplePaths(world.seeds, world.edges);
     expect(field.kind).toBe("enumerated");
-    expect(milligradeOf(field, "c")).toBe(850);
+    expect(milligradeOf(field, "c")).toBe(1000);
     expect(milligradeOf(field, "r")).toBe(1000);
     const yesterday = yesterdayAnchorGuard();
     expect(guardAppliesToVariable(yesterday, "r")).toBe(true);
@@ -71,7 +71,7 @@ describe("conditional-field independent field oracle", () => {
     if (configObservedAt === undefined) throw new Error("missing planted config timestamp");
     expect(inGuardInterval(configObservedAt, yesterday.interval)).toBe(false);
     const index = projectWorld(world, field);
-    expect(index.entries.find((entry) => (entry.object_id ?? "") === "c")?.association_milligrades).toBe(850);
+    expect(index.entries.find((entry) => (entry.object_id ?? "") === "c")?.association_milligrades).toBe(1000);
     const appliedEverywhere = index.entries.filter((entry) =>
       inGuardInterval(OBJECT_OBSERVED_AT[(entry.object_id ?? "")] ?? LAST_WEEK_INSTANT, yesterday.interval)
     );
@@ -83,7 +83,7 @@ describe("conditional-field independent field oracle", () => {
     const field = enumerateSimplePaths(world.seeds, world.edges);
     const index = projectWorld(world, field);
     const history = index.entries.find((entry) => (entry.object_id ?? "") === "h");
-    expect(milligradeOf(field, "h")).toBe(550);
+    expect(milligradeOf(field, "h")).toBe(1000);
     expect(history?.claim).toBe("unknown");
     expect(index.entries.find((entry) => (entry.object_id ?? "") === "s")).toBeUndefined();
     expect(history?.claim).not.toBe("supported");

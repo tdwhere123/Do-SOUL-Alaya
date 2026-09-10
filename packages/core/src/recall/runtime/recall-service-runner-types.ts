@@ -1,4 +1,6 @@
 import type {
+  AssociationCapContract,
+  ClaimDemand,
   EnumerationPolicy,
   PayloadContinuationRequest,
   QueryInterpretationProposal,
@@ -39,6 +41,8 @@ export interface RecallExecutionParams {
   readonly result_kind_view?: ResultKindView;
   readonly interpretation_proposal?: QueryInterpretationProposal;
   readonly payload_continuation?: PayloadContinuationRequest;
+  readonly cap_contracts?: readonly AssociationCapContract[];
+  readonly claim_demands?: readonly ClaimDemand[];
 }
 
 export interface RecallExecutionContext {

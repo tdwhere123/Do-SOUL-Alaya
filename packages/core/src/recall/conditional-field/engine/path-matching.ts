@@ -1,12 +1,20 @@
-import type {
-  ProductStateKey,
-  Transition
+import {
+  HARD_IDENTITY_TRANSFER_ID,
+  HARD_IDENTITY_TRANSFER_VERSION,
+  MILLIGRADE_TOP,
+  type AdmittedTransfer,
+  type ProductStateKey,
+  type Transition
 } from "@do-soul/alaya-protocol";
 import type { QueryRelation } from "../query/compile-query.js";
 import {
   STORED_RELATION_KIND,
   SUPPORTED_RELATION_ALIASES
 } from "../query/ordinary-language.js";
+import {
+  HARD_IDENTITY_CAP_CONTRACT,
+  hardIdentityCapContractId
+} from "../cap-contract.js";
 import {
   encodeBindingContext,
   parseBindingContext,
@@ -30,19 +38,77 @@ export type NamedKindOverlay = Readonly<Record<string, Readonly<{
   readonly role?: string;
 }>>>;
 
+export type RelationTransferAdmission = Readonly<{
+  readonly query_id: string;
+  readonly instance_id: string;
+  readonly revision_id: string | undefined;
+  readonly hypothesis_id: string;
+  readonly binding: string;
+  readonly time_state: string;
+}>;
+
+export type AdmittedRelationStrength = Readonly<{
+  readonly milligrades: number;
+  readonly applicable: true;
+  readonly transfer_id: string;
+  readonly transfer_version: string;
+  readonly cap_contract_id: string;
+  readonly instance_id: string;
+  readonly revision_id: string;
+}>;
+
 export function relationMatches(programKind: string, storedPredicate: string): boolean {
   if (programKind === storedPredicate) return true;
   if (programKind === STORED_RELATION_KIND) return false;
   return (SUPPORTED_RELATION_ALIASES[programKind] ?? []).includes(storedPredicate);
 }
 
+export function overlayBlocksTransfer(
+  overlay: NamedKindOverlay,
+  storedPredicate: string,
+  programKind: string
+): boolean {
+  const declared = overlay[storedPredicate] ?? overlay[programKind];
+  return declared?.applicable === false;
+}
+
 export function relationStrength(
   relation: QueryRelation,
   overlay: NamedKindOverlay,
-  storedPredicate: string
-): Readonly<{ readonly milligrades: number; readonly applicable: boolean }> | undefined {
-  const declared = overlay[storedPredicate] ?? overlay[relation.relation_kind];
-  return { milligrades: declared?.milligrades ?? 1000, applicable: declared?.applicable ?? true };
+  storedPredicate: string,
+  admission: RelationTransferAdmission
+): AdmittedRelationStrength | undefined {
+  if (!relationMatches(relation.relation_kind, storedPredicate)) return undefined;
+  if (overlayBlocksTransfer(overlay, storedPredicate, relation.relation_kind)) return undefined;
+  if (admission.revision_id === undefined || admission.revision_id.length === 0) return undefined;
+  if (admission.instance_id.length === 0) return undefined;
+  const transfer = admitHardIdentityTransfer(admission);
+  return {
+    milligrades: transfer.milligrades,
+    applicable: true,
+    transfer_id: transfer.transfer_id,
+    transfer_version: transfer.transfer_version,
+    cap_contract_id: hardIdentityCapContractId(),
+    instance_id: transfer.relation_instance_id,
+    revision_id: transfer.relation_revision
+  };
+}
+
+function admitHardIdentityTransfer(admission: RelationTransferAdmission): AdmittedTransfer {
+  return {
+    schema_version: 1,
+    transfer_id: HARD_IDENTITY_TRANSFER_ID,
+    transfer_version: HARD_IDENTITY_TRANSFER_VERSION,
+    query_id: admission.query_id,
+    relation_instance_id: admission.instance_id,
+    relation_revision: admission.revision_id!,
+    direction: "forward",
+    hypothesis_id: admission.hypothesis_id,
+    binding: admission.binding,
+    time_state: admission.time_state,
+    cap_contract: HARD_IDENTITY_CAP_CONTRACT,
+    milligrades: MILLIGRADE_TOP
+  };
 }
 
 export function unifyAdvance(

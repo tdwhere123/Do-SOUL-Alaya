@@ -11,7 +11,9 @@ import {
   indexEntryObjectKind,
   indexMemoryObjectId,
   type Continuation,
+  type AssociationCapContract,
   type BoundedActiveConstraintsResult,
+  type ClaimDemand,
   type EnumerationPolicy,
   type InformationIndex,
   type PayloadContinuationRequest,
@@ -106,6 +108,8 @@ export type ConditionalFieldRecallRequest = Readonly<{
   readonly result_kind_view?: ResultKindView;
   readonly interpretation_proposal?: QueryInterpretationProposal;
   readonly payload_continuation?: PayloadContinuationRequest;
+  readonly cap_contracts?: readonly AssociationCapContract[];
+  readonly claim_demands?: readonly ClaimDemand[];
 }>;
 
 export type ConditionalFieldRecallResult = RecallResult & Readonly<{
@@ -205,7 +209,9 @@ export function runConditionalFieldRecallWithReceipt(input: ConditionalFieldReca
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       requested_roles: ["requested", "associated"],
       enumeration_policy: input.enumeration_policy ?? "canonical",
-      result_kind_view: input.result_kind_view ?? "mixed"
+      result_kind_view: input.result_kind_view ?? "mixed",
+      ...(input.cap_contracts === undefined ? {} : { cap_contracts: input.cap_contracts }),
+      ...(input.claim_demands === undefined ? {} : { claim_demands: input.claim_demands })
     }),
     ...(input.interpretation_proposal === undefined
       ? {}
@@ -610,7 +616,13 @@ function annotatePublicIndex(
         ?? interpretation.view.result_kind_view,
       ...(index.continuation.authorized_scopes === undefined ? {} : {
         authorized_scopes: index.continuation.authorized_scopes
-      })
+      }),
+      ...(index.continuation.cap_contracts === undefined && interpretation.view.cap_contracts === undefined
+        ? {}
+        : { cap_contracts: index.continuation.cap_contracts ?? interpretation.view.cap_contracts }),
+      ...(index.continuation.claim_demands === undefined && interpretation.view.claim_demands === undefined
+        ? {}
+        : { claim_demands: index.continuation.claim_demands ?? interpretation.view.claim_demands })
     };
   return { ...index, completeness, continuation, interpretation_id: interpretationId,
     as_of: interpretation.interpretation_clock };
@@ -717,7 +729,9 @@ function buildRecallRequest(
     ...(extra.interpretation_proposal === undefined
       ? {}
       : { interpretation_proposal: extra.interpretation_proposal }),
-    ...(extra.payload_continuation === undefined ? {} : { payload_continuation: extra.payload_continuation })
+    ...(extra.payload_continuation === undefined ? {} : { payload_continuation: extra.payload_continuation }),
+    ...(extra.cap_contracts === undefined ? {} : { cap_contracts: extra.cap_contracts }),
+    ...(extra.claim_demands === undefined ? {} : { claim_demands: extra.claim_demands })
   };
 }
 

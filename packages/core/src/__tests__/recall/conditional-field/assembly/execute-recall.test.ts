@@ -40,8 +40,9 @@ describe("conditional-field executeRecall assembly", () => {
     await plantDeployment(slice);
     const index = runRecall(slice, { page_budget: 800 });
     expectMemoryBaselineWithUnknownSources(index);
-    expect(index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades, JSON.stringify(index.completeness))
-      .toBe(550);
+    expect(index.entries.find((entry) => entry.object_id === MEM.h)).toBeUndefined();
+    expect(index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
+      .toBe(1000);
     const supported = index.entries.find((entry) => entry.explanation_ids.length > 0);
     expect(supported).toBeDefined();
     expect(supported?.explanation_ids.length).toBeGreaterThan(0);
@@ -140,7 +141,7 @@ describe("conditional-field executeRecall assembly", () => {
     await plantDeployment(slice);
     const index = runRecall(slice, { page_budget: 800 });
     expect(index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
-      .toBe(850);
+      .toBe(1000);
     const seed = observeConditionalField({
       lease: {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -356,13 +357,13 @@ describe("conditional-field executeRecall assembly", () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await plantDeployment(slice);
     const baseline = runRecall(slice, { page_budget: 800 });
-    expect(baseline.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades).toBe(550);
+    expect(baseline.entries.find((entry) => entry.object_id === MEM.h)).toBeUndefined();
     await plantIrrelevantRouting(slice);
     const mutated = runRecall(slice, { page_budget: 800 });
     expect(mutated.query_id).toBe(baseline.query_id);
     expect(mutated.entries.map(entryId)).toEqual(baseline.entries.map(entryId));
     expect(mutated.entries.map((entry) => entry.object_id)).not.toContain(MEM.u);
-    expect(mutated.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades).toBe(550);
+    expect(mutated.entries.find((entry) => entry.object_id === MEM.h)).toBeUndefined();
   });
 
   it("tiny work_units leaves unmatched routing residual unknown", async () => {

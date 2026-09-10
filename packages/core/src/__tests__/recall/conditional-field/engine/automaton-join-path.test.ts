@@ -223,8 +223,8 @@ describe("automaton, compatible join, and composed path identity", () => {
     const pathIds = state.facets.map((vector) => vector.path_id);
     expect(new Set(pathIds).size).toBeGreaterThan(1);
     const grades = new Set(state.facets.flatMap((vector) => vector.coordinates));
-    expect([...grades].every((grade) => grade === 800 || grade === 850)).toBe(true);
-    expect(grades.size).toBeGreaterThan(1);
+    expect([...grades].every((grade) => grade === 1000)).toBe(true);
+    expect(grades.size).toBe(1);
     expect(state.facets.every((vector) => vector.coordinates.length === 1)).toBe(true);
   });
 

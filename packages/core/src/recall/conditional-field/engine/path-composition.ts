@@ -18,6 +18,10 @@ import {
   type Transition,
   type TypedObservation
 } from "@do-soul/alaya-protocol";
+import {
+  identitySeedGrade,
+  isHardIdentityContractId
+} from "../cap-contract.js";
 import { compareText } from "../../../shared/compare-text.js";
 import { collectRelations, type QueryRelation } from "../query/compile-query.js";
 import {
@@ -54,6 +58,7 @@ import {
   relationStrength,
   unifyAdvance,
   type AdjacencyRow,
+  type AdmittedRelationStrength,
   type NamedKindOverlay
 } from "./path-matching.js";
 import {
@@ -158,10 +163,11 @@ export function seedFromObservation(
   state: ProductStateKey
 ): SeedActivation | undefined {
   if (observation.applicability.verdict !== "true") return undefined;
+  if (observation.association_milligrades === undefined) return undefined;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     state,
-    milligrades: observation.association_milligrades ?? MILLIGRADE_TOP
+    milligrades: observation.association_milligrades
   };
 }
 
@@ -222,12 +228,15 @@ export function seedActivationsForObservation(
         programState
       );
       if (binding === undefined) continue;
-      const seed = seedFromObservation(observation, productStateFromObservation(observation, {
+      const state = productStateFromObservation(observation, {
         program_state: programState,
         hypothesis_id: hypothesis.hypothesis_id,
         binding_context: binding,
         time_state: timeState
-      }));
+      });
+      const seed = observation.association_milligrades === undefined
+        ? identitySeedGrade(state)
+        : seedFromObservation(observation, state);
       if (seed !== undefined) seeds.push(seed);
     }
   }
@@ -319,6 +328,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     for (const advance of automaton.hyperedgeAdvances) {
       if (advance.from !== from.program_state) continue;
       for (const step of hyperedgeEffectSteps(rows, advance.hyperedge, {
+        query_id: input.interpretation.query_id,
         liveStates: [from],
         overlay: input.overlay,
         sourceFacts: input.sourceFacts,
@@ -334,7 +344,13 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
       yield { kind: "work" };
       const from = input.liveStates.at(index)!;
       if (productSubjectId(from) !== row.sourceObjectId) continue;
-      yield* effectsForLiveRow(automaton, row, from, input);
+      yield* effectsForLiveRow(automaton, row, from, {
+        query_id: input.interpretation.query_id,
+        overlay: input.overlay,
+        sourceFacts: input.sourceFacts,
+        facets: input.facets,
+        liveStates: input.liveStates
+      });
     }
   }
   const origins = new Set<string>();
@@ -407,7 +423,17 @@ export function mergeSeeds(seeds: readonly SeedActivation[]): readonly SeedActiv
   for (const seed of seeds) {
     const nodeId = productStateNodeId(seed.state);
     const prior = best.get(nodeId);
-    if (prior === undefined || seed.milligrades > prior.milligrades) best.set(nodeId, seed);
+    if (prior === undefined) {
+      best.set(nodeId, seed);
+      continue;
+    }
+    if ((prior.cap_contract_id ?? "") === (seed.cap_contract_id ?? "")) {
+      if (seed.milligrades > prior.milligrades) best.set(nodeId, seed);
+      continue;
+    }
+    if (isHardIdentityContractId(prior.cap_contract_id) && !isHardIdentityContractId(seed.cap_contract_id)) {
+      best.set(nodeId, seed);
+    }
   }
   return Object.freeze(sortSeeds([...best.values()]));
 }
@@ -486,6 +512,7 @@ function* effectsForLiveRow(
   row: AdjacencyRow,
   from: ProductStateKey,
   input: Readonly<{
+    readonly query_id: string;
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: RetainedRows<FacetVector>;
@@ -518,12 +545,15 @@ function* effectsForAdvance(
   row: AdjacencyRow,
   from: ProductStateKey,
   input: Readonly<{
+    readonly query_id: string;
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: RetainedRows<FacetVector>;
     readonly liveStates: RetainedRows<ProductStateKey>;
   }>
 ): PathComputation<void> {
+  const declared = input.overlay[row.predicate] ?? input.overlay[advance.relation.relation_kind];
+  if (declared?.applicable === false) return;
   const unified = unifyAdvance(from, advance.relation, row);
   if (unified === undefined) return;
   const decision = decideGuards(
@@ -537,14 +567,6 @@ function* effectsForAdvance(
     observation_id: `guard:${row.assertionId}:${from.program_state}`,
     unresolved_guard: true
   } }; return; }
-  const strength = relationStrength(advance.relation, input.overlay, row.predicate);
-  if (strength === undefined) {
-    yield { kind: "effect", effect: {
-      observation_id: `adjacency:${row.assertionId}:${from.hypothesis_id}:${from.program_state}`,
-      missing_measurement: true
-    } }; return;
-  }
-  if (strength.milligrades <= advance.relation.threshold_milligrades) return;
   const targetRevision = observedTargetRevision(
     row.targetObjectId,
     input.sourceFacts,
@@ -557,9 +579,23 @@ function* effectsForAdvance(
       missing_target_revision: true
     } }; return;
   }
-  const applicable = strength.applicable && decision === "true";
-  const toStates = applicable ? advance.to : [from.program_state];
-  for (const programState of toStates) {
+  const revisionId = relationRevisionId(row, from, input.sourceFacts);
+  const strength = relationStrength(advance.relation, input.overlay, row.predicate, {
+    query_id: input.query_id,
+    instance_id: row.assertionId,
+    revision_id: revisionId,
+    hypothesis_id: from.hypothesis_id,
+    binding: unified.binding,
+    time_state: from.time_state
+  });
+  if (strength === undefined) {
+    yield { kind: "effect", effect: {
+      observation_id: `adjacency:${row.assertionId}:${from.hypothesis_id}:${from.program_state}`,
+      missing_measurement: true
+    } }; return;
+  }
+  if (strength.milligrades <= advance.relation.threshold_milligrades) return;
+  for (const programState of advance.to) {
     yield { kind: "work" };
     const binding = alignOutgoingBinding(
       unified.binding,
@@ -574,17 +610,27 @@ function* effectsForAdvance(
       binding_context: binding,
       source_revision: targetRevision
     });
-    yield* compiledEffects({ ...row, source_revision: row.source_revision ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision },
-      from, to, strength, applicable, decision, input.facets ?? []);
+    yield* compiledEffects({ ...row, source_revision: revisionId },
+      from, to, strength, decision, input.facets ?? []);
   }
+}
+
+function relationRevisionId(
+  row: AdjacencyRow,
+  from: ProductStateKey,
+  sourceFacts: ReadonlyMap<string, BoundSourceFacts> | undefined
+): string | undefined {
+  if (row.source_revision !== undefined && row.source_revision.length > 0) return row.source_revision;
+  const fact = sourceFacts?.get(row.sourceObjectId)?.source_revision;
+  if (fact !== undefined && fact.length > 0) return fact;
+  return from.target.kind === "memory_entry" ? from.target.source_revision : undefined;
 }
 
 function* compiledEffects(
   row: AdjacencyRow,
   from: ProductStateKey,
   to: ProductStateKey,
-  strength: Readonly<{ readonly milligrades: number; readonly applicable: boolean }>,
-  applicable: boolean,
+  strength: AdmittedRelationStrength,
   decision: "true" | "unresolved",
   priorFacets: RetainedRows<FacetVector>
 ): PathComputation<void> {
@@ -594,11 +640,14 @@ function* compiledEffects(
     from,
     to,
     relation_kind: row.predicate,
-    instance_id: row.assertionId,
-    ...(row.source_revision === undefined ? {} : { revision_id: row.source_revision }),
+    instance_id: strength.instance_id,
+    revision_id: strength.revision_id,
+    transfer_id: strength.transfer_id,
+    transfer_version: strength.transfer_version,
     strength_milligrades: strength.milligrades,
     validity: row.validity,
-    applicable
+    applicable: true,
+    cap_contract_id: strength.cap_contract_id
   };
   const vectors = yield* extendFacets(priorFacets, from, to, `${from.program_state}:${to.program_state}:${row.predicate}`, strength.milligrades);
   const derivation = leafDerivation({
