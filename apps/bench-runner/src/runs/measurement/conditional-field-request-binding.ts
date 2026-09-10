@@ -24,6 +24,20 @@ const Filters = {
 
 export const ConditionalFieldRequestFiltersSchema = z.object(Filters).strict().readonly();
 
+const NonNegInt = z.number().int().nonnegative();
+const ActualReceipt = z.object({
+  native_visits: NonNegInt.optional(),
+  native_rows: NonNegInt.optional(),
+  native_bytes: NonNegInt.optional(),
+  charged_retained_bytes: NonNegInt.optional(),
+  phases: z.record(z.string(), z.object({}).passthrough().readonly()).optional(),
+  rss: z.object({
+    method: z.string().min(1).optional(),
+    start_bytes: NonNegInt.optional(),
+    after_projection_bytes: NonNegInt.optional()
+  }).passthrough().readonly().optional()
+}).passthrough().readonly();
+
 export const ConditionalFieldExecutionReceiptSchema = z.object({
   schema_version: z.literal(1), workspace_id: Id, requested_budget: RequestBudgetSchema,
   compile_input: z.object({ source: z.literal("ordinary"), text: z.string(),
@@ -31,7 +45,14 @@ export const ConditionalFieldExecutionReceiptSchema = z.object({
     view: QueryViewSchema.optional(),
     interpretation_proposal: QueryInterpretationProposalSchema.optional()
   }).strict().readonly(),
-  query_id: Id, interpretation_id: Id, snapshot_id: Digest, interpretation_clock: Clock
+  query_id: Id, interpretation_id: Id, snapshot_id: Digest, interpretation_clock: Clock,
+  native_visits: NonNegInt.optional(),
+  bytes_read: NonNegInt.optional(),
+  row_visits: NonNegInt.optional(),
+  elapsed_ms: z.number().finite().nonnegative().optional(),
+  rss_bytes: NonNegInt.optional(),
+  rss_sampling_method: z.literal("process.memoryUsage().rss").optional(),
+  actual: ActualReceipt.optional()
 }).strict().readonly().superRefine((receipt, context) => {
   const compiled = compileConditionalFieldQuery(receipt.compile_input);
   const expectedInterpretation = interpretationIdentity({ interpretation_clock: receipt.compile_input.interpretation_clock });

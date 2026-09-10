@@ -25,6 +25,7 @@ import {
   SqliteSourceRootRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { withWorkerActualCost } from "../recall/worker-actual-cost.js";
 import { storedMeasurementReaders } from "./stored-measurement-readers.js";
 import type { ConditionalFieldRecallWorkerPayload } from "./protocol.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
@@ -51,7 +52,7 @@ export function runConditionalFieldWorkerRecall(
     || governance.binding.snapshot_id !== snapshotId || governance.binding.as_of !== payload.as_of)) {
     throw new Error("conditional field governance snapshot mismatch");
   }
-  const executed = runConditionalFieldRecallWithReceipt({
+  const executed = withWorkerActualCost(readers, (instrumented) => runConditionalFieldRecallWithReceipt({
     workspace_id: workspaceId,
     query_text: payload.query_text,
     budget: reserved.budget,
@@ -64,7 +65,7 @@ export function runConditionalFieldWorkerRecall(
     as_of: payload.as_of,
     expires_at: payload.expires_at,
     ...(payload.lifetime_now === undefined ? {} : { lifetime_now: payload.lifetime_now }),
-    readers,
+    readers: instrumented,
     ...(payload.since === undefined ? {} : { since: payload.since }),
     ...(payload.until === undefined ? {} : { until: payload.until }),
     ...(payload.time_field === undefined ? {} : { time_field: payload.time_field }),
@@ -99,7 +100,7 @@ export function runConditionalFieldWorkerRecall(
     ...(payload.supports_product_updates === undefined
       ? {}
       : { supports_product_updates: payload.supports_product_updates })
-  });
+  }));
   const index = InformationIndexSchema.parse(executed.index);
   const issuedDeliveryId = issuedDeliveryIdOf(executed.index);
   return {

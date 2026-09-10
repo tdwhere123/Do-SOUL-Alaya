@@ -16,14 +16,40 @@ import { ConditionalFieldExecutionReceiptSchema, executionBindingMismatch,
   type ExpectedConditionalFieldRequest, type ConditionalFieldExecutionBinding
 } from "../../../runs/measurement/conditional-field-request-binding.js";
 
+/** Independent RSS sample from the live process; never a guessed envelope constant. */
+export const BENCH_RSS_SAMPLING_METHOD = "process.memoryUsage().rss" as const;
+
 type BenchRecallServiceResult = Awaited<
   ReturnType<AlayaDaemonRuntime["services"]["recallService"]["recall"]>
 >;
 
+export function sampleBenchHandleRss(): Readonly<{
+  readonly rss_bytes: number;
+  readonly rss_sampling_method: typeof BENCH_RSS_SAMPLING_METHOD;
+}> {
+  return { rss_bytes: process.memoryUsage().rss, rss_sampling_method: BENCH_RSS_SAMPLING_METHOD };
+}
+
+function receiptWithHandleRss(receipt: unknown): unknown {
+  if (receipt === null || typeof receipt !== "object") return receipt;
+  const row = receipt as Record<string, unknown>;
+  if (typeof row.rss_bytes === "number" && row.rss_sampling_method === BENCH_RSS_SAMPLING_METHOD) {
+    return receipt;
+  }
+  const sample = sampleBenchHandleRss();
+  return {
+    ...row,
+    rss_bytes: typeof row.rss_bytes === "number" ? row.rss_bytes : sample.rss_bytes,
+    rss_sampling_method: row.rss_sampling_method === undefined
+      ? sample.rss_sampling_method
+      : row.rss_sampling_method
+  };
+}
+
 export function validateBenchRecallIndex(result: BenchRecallServiceResult, budget?: RequestBudget,
   expected?: ExpectedConditionalFieldRequest): InformationIndex {
   const index = InformationIndexSchema.parse(result.index);
-  const receipt = ConditionalFieldExecutionReceiptSchema.parse(result.execution_receipt);
+  const receipt = ConditionalFieldExecutionReceiptSchema.parse(receiptWithHandleRss(result.execution_receipt));
   if (index.query_id !== receipt.query_id || index.snapshot_id !== receipt.snapshot_id
     || index.interpretation_id !== receipt.interpretation_id || index.as_of !== receipt.interpretation_clock) {
     throw new Error("conditional field index contradicts executed request identity");
@@ -87,7 +113,7 @@ export function buildBenchRecallResponse(
     provider_calls: recallResult.provider_calls,
     garden_enqueue: recallResult.garden_enqueue,
     request_budget: budget,
-    execution_receipt: ConditionalFieldExecutionReceiptSchema.parse(recallResult.execution_receipt),
+    execution_receipt: ConditionalFieldExecutionReceiptSchema.parse(receiptWithHandleRss(recallResult.execution_receipt)),
     ...(recallResult.diagnostics === undefined ? {} : { diagnostics: recallResult.diagnostics })
   };
 }
