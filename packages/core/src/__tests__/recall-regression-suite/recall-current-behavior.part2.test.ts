@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
-import { RecallService } from "../../recall/recall-service.js";
+import { capableRecallConsumerDeclaration, RecallService } from "../../recall/recall-service.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { createSourceBoundRecallFixture, createTaskSurface } from "../recall/recall-service-test-fixtures.js";
 import { createClaimForm } from "../governance/claim-service.test-support.js";
@@ -54,7 +54,7 @@ describe("retained temporal probes and active constraints contract", () => {
     await new RecallService({ ...f.dependencies, activeConstraintsPort: {
       ...f.dependencies.activeConstraintsPort!, readBounded
     } })
-      .recall({ ...request(), activeConstraintsCap: 3, referenceTime: "2026-08-22T12:00:00.000Z" });
+      .recall({ ...capableRecallConsumerDeclaration(), ...request(), activeConstraintsCap: 3, referenceTime: "2026-08-22T12:00:00.000Z" });
     expect(readBounded).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace-1", cap: 3,
       asOf: "2026-08-22T12:00:00.000Z", snapshotId: expect.stringMatching(/^sha256:/),
       nativeLimit: expect.any(Number), byteLimit: expect.any(Number) }));

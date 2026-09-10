@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MemoryDimension, type PathRelation } from "@do-soul/alaya-protocol";
 import { SqlitePathRelationRepo, readBoundedActiveConstraints, type StorageDatabase } from "@do-soul/alaya-storage";
 import { SqliteGovernancePathReader } from "../../../../storage/src/repos/path/reads/governance-path-reader.js";
-import { RecallService } from "../../recall/recall-service.js";
+import { capableRecallConsumerDeclaration, RecallService } from "../../recall/recall-service.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "../../recall/runtime/governance-manifestation.js";
 import { createSourceBoundRecallFixture, createPathRelation, createTaskSurface } from "./recall-service-test-fixtures.js";
 import { MEM, WS, NOW } from "./conditional-field/vertical/source-slice.js";
@@ -84,7 +84,7 @@ describe("conditional source governance ceilings", () => {
         return readBoundedActiveConstraints(f.database, { ...request, snapshotId: request.snapshotId }, (input) => f.reader.read(input));
       }
     } });
-    const result = await service.recall({ taskSurface: { ...createTaskSurface(), display_name: "Atlas deployment" }, workspaceId: WS, strategy: "analyze" });
+    const result = await service.recall({ ...capableRecallConsumerDeclaration(), taskSurface: { ...createTaskSurface(), display_name: "Atlas deployment" }, workspaceId: WS, strategy: "analyze" });
     const candidate = result.candidates.find((row) => row.object_id === MEM.r);
     expect(candidate).toBeDefined();
     expect(candidate?.manifestation).toBe("hint");

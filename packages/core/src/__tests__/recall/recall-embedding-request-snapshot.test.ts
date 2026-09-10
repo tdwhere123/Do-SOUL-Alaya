@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RecallService, runConditionalFieldRecall } from "../../recall/recall-service.js";
+import { capableRecallConsumerDeclaration, RecallService, runConditionalFieldRecall } from "../../recall/recall-service.js";
 import { createDependencies, createTaskSurface } from "./recall-service-test-fixtures.js";
 
 describe("conditional Recall request snapshot", () => {
@@ -23,7 +23,7 @@ describe("conditional Recall request snapshot", () => {
         }
       }
     });
-    const result = await service.recall({ taskSurface: createTaskSurface(),
+    const result = await service.recall({ ...capableRecallConsumerDeclaration(), taskSurface: createTaskSurface(),
       workspaceId: "workspace-1", strategy: "analyze", queryText: "deployment checklist" });
     expect(events).toEqual(["begin", "observe", "commit"]);
     expect(result.index.completeness.observed_coverage).toBe("unavailable");
@@ -44,7 +44,7 @@ describe("conditional Recall request snapshot", () => {
       },
       conditionalFieldPort: { recall: async () => { throw failure; } }
     });
-    await expect(service.recall({ taskSurface: createTaskSurface(),
+    await expect(service.recall({ ...capableRecallConsumerDeclaration(), taskSurface: createTaskSurface(),
       workspaceId: "workspace-1", strategy: "analyze" })).rejects.toBe(failure);
     expect(events).toEqual(["begin", "rollback"]);
   });

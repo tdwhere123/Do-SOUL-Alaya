@@ -1,7 +1,7 @@
 import { MemoryDimension, type EvidenceCapsule } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { afterEach, describe, expect, it } from "vitest";
-import { RecallService } from "../../recall/recall-service.js";
+import { capableRecallConsumerDeclaration, RecallService } from "../../recall/recall-service.js";
 import { createSourceBoundRecallFixture, createTaskSurface } from "./recall-service-test-fixtures.js";
 
 const databases = new Set<StorageDatabase>();
@@ -53,6 +53,7 @@ describe("evidence storage and conditional Recall without transient embedding", 
         source: () => ({ row: null, rowsRead: 1, bytesRead: 0, unavailable: true }) }
     });
     const result = await service.recall({
+      ...capableRecallConsumerDeclaration(),
       workspaceId: "workspace-1", taskSurface: { ...createTaskSurface(), display_name: "blue" },
       queryText: "blue", strategy: "chat", pageBudget: 800
     });

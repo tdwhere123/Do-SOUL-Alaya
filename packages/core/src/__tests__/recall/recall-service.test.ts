@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
-import { RecallService } from "../../recall/recall-service.js";
+import { capableRecallConsumerDeclaration, RecallService } from "../../recall/recall-service.js";
 import { createSourceBoundRecallFixture, createTaskSurface } from "./recall-service-test-fixtures.js";
 
 const databases = new Set<StorageDatabase>();
@@ -31,7 +31,7 @@ describe("RecallService conditional entry", () => {
     const empty = await f.service.recall(request());
     const unavailable = await new RecallService({ ...f.dependencies, observerReaders: {
       snapshotPin: f.dependencies.observerReaders!.snapshotPin
-    } }).recall(request());
+    } }).recall({ ...capableRecallConsumerDeclaration(), ...request() });
     expect(empty.candidates).toEqual([]);
     expect(empty.index.completeness.observed_coverage).not.toBe("unavailable");
     expect(unavailable.candidates).toEqual([]);

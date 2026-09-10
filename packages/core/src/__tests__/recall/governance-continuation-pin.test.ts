@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
-import { RecallService } from "../../recall/recall-service.js";
+import { capableRecallConsumerDeclaration, RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createTaskSurface } from "./recall-service-test-fixtures.js";
 import { readersFor } from "./conditional-field-oracle/bound-producer.js";
 import { openSourceSlice, NOW } from "./conditional-field/vertical/source-slice.js";
@@ -17,7 +17,7 @@ describe("governance mutation invalidates conditional Recall continuations", () 
     for (let index = 0; index < 3; index += 1) {
       await fixture.writeMemory(`aaaaaaaa-aaaa-4aaa-8aaa-00000000030${index}`, "deployment source", MemoryDimension.FACT);
     }
-    const request = { workspaceId: "workspace-1", strategy: "chat" as const,
+    const request = { ...capableRecallConsumerDeclaration(), workspaceId: "workspace-1", strategy: "chat" as const,
       taskSurface: { ...createTaskSurface(), display_name: "deployment" }, queryText: "deployment", pageBudget: 1 };
     const first = await service.recall(request);
     expect(first.index.continuation).not.toBeNull();

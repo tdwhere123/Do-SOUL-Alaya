@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { readBoundedEmbeddingIds } from "../../../../storage/src/repos/memory/reads/memory-embedding-bounded-read.js";
-import { RecallService } from "../../recall/recall-service.js";
+import { capableRecallConsumerDeclaration, RecallService } from "../../recall/recall-service.js";
 import { hashMemoryContent } from "../embedding-recall/embedding-recall-test-helpers.js";
 import { createSourceBoundRecallFixture, createTaskSurface } from "./recall-service-test-fixtures.js";
 
@@ -51,6 +51,7 @@ async function createFixture(seedVectors: boolean) {
 
 async function recall(service: RecallService, workspaceId = "workspace-1") {
   return service.recall({
+    ...capableRecallConsumerDeclaration(),
     workspaceId, taskSurface: { ...createTaskSurface(), display_name: "kubernetes" },
     queryText: "kubernetes", strategy: "chat", pageBudget: 800
   });
