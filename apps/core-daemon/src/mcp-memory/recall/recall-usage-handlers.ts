@@ -97,6 +97,7 @@ export interface RecallUsageHandlerDependencies {
       readonly index: import("@do-soul/alaya-protocol").InformationIndex;
       readonly provider_calls?: 0;
       readonly garden_enqueue?: 0;
+      readonly issued_delivery_id?: string;
     }>>;
   };
   readonly trustStateRecorder: {
@@ -206,7 +207,12 @@ async function executeRecall(
   });
   const encoded = encodeRecallHandlerResults(recallResult, policyOverride);
   const delivery = buildRecallDelivery(params, context, encoded.results, { ...recallResult, index: encoded.index });
-  await params.deps.trustStateRecorder.recordDelivery(delivery.record);
+  const replayed = encoded.index.page_purpose === "retry"
+    ? await params.deps.trustStateRecorder.findDeliveryById(delivery.deliveryId)
+    : null;
+  if (replayed === null) {
+    await params.deps.trustStateRecorder.recordDelivery(delivery.record);
+  }
   await emitRecallDeliveredTelemetry(params, {
     deliveryId: delivery.deliveryId,
     query: request.query,
@@ -262,7 +268,9 @@ function buildRecallDelivery(
   results: readonly RecallSearchResult[],
   recallResult: RecallServiceResult
 ) {
-  const deliveryId = `delivery_${params.generateId()}`;
+  const deliveryId = recallResult.issued_delivery_id === undefined
+    ? `delivery_${params.generateId()}`
+    : `delivery_${recallResult.issued_delivery_id}`;
   const deliveredObjects = dedupeDeliveredObjectIdentities([
     ...results.map((result) => ({
       ...(result.object_id === undefined ? {} : { object_id: result.object_id }),

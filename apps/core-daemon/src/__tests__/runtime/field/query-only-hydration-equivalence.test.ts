@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import { canonicalIndexEntryIdentity } from "@do-soul/alaya-protocol";
 import type { ConditionalFieldRecallPortResult } from "@do-soul/alaya-core";
+import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import {
   EVIDENCE_ID,
   MEMORY_ID,
@@ -69,6 +71,35 @@ describe("query-only field hydration equivalence", () => {
       .toBe(objectId);
     expect(dispatched.previews[objectId]).toContain("nebulapivot");
     expect(fixture.queryOnly.connection.pragma("query_only", { simple: true })).toBe(1);
+  });
+
+  it("matches native worker product identities with direct query-only dispatch", async () => {
+    const fixture = await hydration.openHydrationFixture();
+    const objectId = "88888888-8888-4888-8888-888888888888";
+    await persistConditionalSource(fixture.writer, objectId, "nebulapivot published source");
+    const payload = conditionalRecallPayload("nebulapivot");
+    const direct = await dispatchQueryOnly(createQueryOnlyRuntime(fixture.writer),
+      "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
+    const worker = createRecallReadWorkerClient({
+      databaseFilename: fixture.writer.filename,
+      workerCount: 1,
+      workerUrl: new URL("../../../../dist/runtime/recall/recall-read-worker.js", import.meta.url)
+    });
+    if (worker === null) throw new Error("real worker required");
+    try {
+      await worker.ready();
+      const recalled = await worker.conditionalFieldPort.recall(payload);
+      expect(recalled.index.entries.map(canonicalIndexEntryIdentity))
+        .toEqual(direct.index.entries.map(canonicalIndexEntryIdentity));
+      expect(recalled.index.entries.map((entry) => entry.target.kind).sort())
+        .toEqual(["memory_entry", "source_evidence"]);
+      expect(recalled.index.entries.find((entry) => entry.target.kind === "memory_entry")?.object_id)
+        .toBe(objectId);
+      expect(recalled.index.entries.find((entry) => entry.target.kind === "source_evidence")?.object_id)
+        .toBeUndefined();
+    } finally {
+      await worker.close();
+    }
   });
 
   it("reads a recall tier window through in-process runOperation", async () => {

@@ -10,6 +10,7 @@ import {
   captureIndexPreviews,
   captureIndexSourceMetadata,
   fieldContractSha256,
+  issuedDeliveryIdOf,
   runConditionalFieldRecall,
   runConditionalFieldRecallWithReceipt,
   reserveSnapshotPinWork,
@@ -95,12 +96,14 @@ export function runConditionalFieldWorkerRecall(
         payload_continuation: PayloadContinuationRequestSchema.parse(body.payload_continuation)
       })
   });
-  const index = executed.index;
+  const index = InformationIndexSchema.parse(executed.index);
+  const issuedDeliveryId = issuedDeliveryIdOf(executed.index);
   return {
     execution_receipt: executed.execution_receipt,
-    index: InformationIndexSchema.parse(index),
-    previews: Object.fromEntries(captureIndexPreviews(index, readers, workspaceId)),
-    source_metadata: captureIndexSourceMetadata(index)
+    index,
+    previews: Object.fromEntries(captureIndexPreviews(executed.index, readers, workspaceId)),
+    source_metadata: captureIndexSourceMetadata(executed.index),
+    ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId })
   };
 }
 

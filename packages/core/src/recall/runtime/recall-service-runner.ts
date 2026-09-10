@@ -36,11 +36,17 @@ import type { RecallResult } from "./recall-service-types.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { BoundedIndexPayload } from "./index-payload.js";
 import {
+  bindIssuedDeliveryId,
+  continuationDigest,
   evictIssuedDeliveries,
+  fieldResumeKey,
+  issuedDeliveryIdOf,
   issuedDeliveryRevoked,
+  rememberField,
   rememberIssuedDelivery,
   replayIssuedDelivery,
   replayIssuedIndex,
+  restoreField,
   resumeIndexProjection,
   retainCommittedRevisions,
   mergeCommittedRevisions
@@ -50,7 +56,7 @@ import type { RecallExecutionContext, RecallExecutionParams } from "./recall-ser
 import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
 import { assertRecallZeroLiveExtraction } from "./zero-live-extraction.js";
 import {
-  RELATION_MILLIGRADES,
+  RELATION_ROUTING as RELATION_MILLIGRADES,
   emptyField,
   observeField
 } from "./conditional-field-observe.js";
@@ -68,9 +74,6 @@ const DEFAULT_MEMORY_BYTES = 1_000_000;
 const DEFAULT_RESERVE = 100;
 const DEFAULT_MIN_ENVELOPE = 10;
 const CONTINUATION_MS = 5 * 60_000;
-const FIELD_RESUME_MAX = 32;
-// Process loss invalidates issued tokens; the parent pins one worker per snapshot lease.
-const FIELD_RESUME = new Map<string, Readonly<{ state: FieldEngineState; token_digest: string }>>();
 const INDEX_PREVIEWS = new WeakMap<InformationIndex, ReadonlyMap<string, string>>();
 const INDEX_SOURCE_METADATA = new WeakMap<InformationIndex, Readonly<Record<string, RecallSourceMetadata>>>();
 const FIELD_SOURCE_PINS = new WeakMap<FieldEngineState, string>();
@@ -109,6 +112,7 @@ export type ConditionalFieldRecallResult = RecallResult & Readonly<{
   readonly index: InformationIndex;
   readonly provider_calls: 0;
   readonly garden_enqueue: 0;
+  readonly issued_delivery_id?: string;
 }>;
 
 export type ConditionalFieldRecallPortResult = Readonly<{
@@ -116,6 +120,7 @@ export type ConditionalFieldRecallPortResult = Readonly<{
   readonly index: InformationIndex;
   readonly previews: Readonly<Record<string, string>>;
   readonly source_metadata?: Readonly<Record<string, RecallSourceMetadata>>;
+  readonly issued_delivery_id?: string;
 }>;
 
 export type ConditionalFieldRecallPort = Readonly<{
@@ -164,7 +169,12 @@ export async function executeRecall(
     sourceMetadata = captureIndexSourceMetadata(recalled);
     return recalled;
   });
-  return { ...encodeRecallResult(index, previews, governance, sourceMetadata), execution_receipt: executionReceipt };
+  const issuedDeliveryId = issuedDeliveryIdOf(index);
+  return {
+    ...encodeRecallResult(index, previews, governance, sourceMetadata),
+    execution_receipt: executionReceipt,
+    ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId })
+  };
 }
 
 export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest): InformationIndex {
@@ -226,7 +236,11 @@ function runCompiledConditionalFieldRecall(
     || interpretation.status === "unsupported") {
     return projectFromField(emptyField(interpretation, input), input, interpretation);
   }
-  const restored = restoreField(input.continuation, interpretation);
+  const restored = restoreField(
+    input.continuation,
+    interpretation.interpretation_clock,
+    interpretationIdentity({ interpretation_clock: interpretation.interpretation_clock })
+  );
   if (input.continuation != null && restored === undefined) {
     return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
   }
@@ -254,7 +268,9 @@ function runCompiledConditionalFieldRecall(
     && (restored !== undefined || input.budget.work_units <= 1)
     ? { ...projected, continuation: null } : projected;
   if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
-  rememberField(retained, index.continuation);
+  // Keep resume under the request token so a last page (response continuation
+  // null) can still replay the same issued delivery_id.
+  rememberField(retained, index.continuation ?? input.continuation ?? null);
   return index;
 }
 
@@ -263,49 +279,6 @@ function fieldProgress(state: FieldEngineState | undefined): string {
     state?.transitions.length ?? 0, state?.grounding_progress?.completed_work ?? 0,
     state?.resume_cursors ?? {}, state?.pair_progress ?? {}, state?.support_progress ?? {},
     state?.projection_progress?.offset ?? 0, state?.projection_progress?.delivered_entries ?? {}]);
-}
-
-function fieldResumeKey(queryId: string, snapshotId: string, interpretationId: string): string {
-  return `${queryId}\0${snapshotId}\0${interpretationId}\0${RESULT_VERSION}`;
-}
-
-function rememberField(state: FieldEngineState, continuation: Continuation | null): void {
-  const key = fieldResumeKey(
-    state.query_id,
-    state.snapshot_id,
-    interpretationIdentity({ interpretation_clock: state.interpretation.interpretation_clock })
-  );
-  FIELD_RESUME.delete(key);
-  if (continuation === null) return;
-  FIELD_RESUME.set(key, { state, token_digest: continuationDigest(continuation) });
-  while (FIELD_RESUME.size > FIELD_RESUME_MAX) {
-    const oldest = FIELD_RESUME.keys().next().value;
-    if (oldest === undefined) break;
-    FIELD_RESUME.delete(oldest);
-  }
-}
-
-function restoreField(
-  continuation: ConditionalFieldRecallRequest["continuation"],
-  interpretation: QueryInterpretation
-): FieldEngineState | undefined {
-  if (continuation === undefined || continuation === null) return undefined;
-  const retained = FIELD_RESUME.get(fieldResumeKey(
-    continuation.query_id,
-    continuation.snapshot_id,
-    continuation.interpretation_id
-      ?? interpretationIdentity({ interpretation_clock: interpretation.interpretation_clock })
-  ));
-  if (retained === undefined) return undefined;
-  const digest = continuationDigest(continuation);
-  if (replayIssuedDelivery(digest) !== undefined) return retained.state;
-  return retained.token_digest === digest ? retained.state : undefined;
-}
-
-function continuationDigest(continuation: Continuation): string {
-  return createHash("sha256").update(JSON.stringify([continuation.schema_version, continuation.continuation_id,
-    continuation.query_id, continuation.snapshot_id, continuation.result_version, continuation.expires_at,
-    continuation.cursor, continuation.interpretation_id, continuation.interpretation_clock])).digest("hex");
 }
 
 function projectFromField(
@@ -579,6 +552,9 @@ function portIndexAndPreviews(
   readonly source_metadata: Readonly<Record<string, RecallSourceMetadata>>;
   readonly execution_receipt?: ConditionalFieldExecutionReceipt }> {
   if ("previews" in recalled && "index" in recalled) {
+    if (recalled.issued_delivery_id !== undefined) {
+      bindIssuedDeliveryId(recalled.index, recalled.issued_delivery_id);
+    }
     return {
       index: recalled.index,
       previews: new Map(Object.entries(recalled.previews)),

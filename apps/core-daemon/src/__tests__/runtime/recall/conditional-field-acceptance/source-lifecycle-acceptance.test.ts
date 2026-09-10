@@ -172,6 +172,32 @@ describe("conditional-field source and worker acceptance", () => {
     expect(entry.target.evidence_object_id).toBe(capsule.object_id);
   });
 
+  it("exposes a source-record-only root on the public soul.recall body", async () => {
+    const slice = await openBoundSlice((database) => databases.add(database));
+    const record = plantRecord(slice.database, "record only public root excerpt");
+    const mcp = await recallThroughHandler(slice, {
+      query: "record only public root excerpt",
+      max_results: 32,
+      result_kind_view: "source_only"
+    });
+    expect(assertTargetConsumer(toConsumer(mcp, "mcp"))).toEqual([]);
+    const result = mcp.results.find((row) => row.object_kind === "source_evidence");
+    expect(result?.object_id).toBeUndefined();
+    expect(result?.target).toMatchObject({
+      kind: "source_evidence",
+      root_kind: "source_record",
+      root_id: record.record_id,
+      source_version: "v1",
+      evidence_object_id: null
+    });
+    if (result?.target.kind !== "source_evidence") throw new Error("expected source_evidence");
+    expect(result.target.span).toEqual(expect.objectContaining({
+      content_start: 0,
+      retained_extent: "body"
+    }));
+    expect("object_id" in result).toBe(false);
+  });
+
   it("fails closed after source-body erasure and unauthorized scope", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
     const record = plantRecord(slice.database, "scope-erased source");

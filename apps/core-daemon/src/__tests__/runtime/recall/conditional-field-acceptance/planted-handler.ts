@@ -1,10 +1,14 @@
 import { PassThrough } from "node:stream";
 import { vi } from "vitest";
 import {
+  SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+  hashContentDigest,
+  hashSourceRecordId,
   type InformationIndex,
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
-import { RecallService } from "@do-soul/alaya-core";
+import { RecallService, fieldContractSha256 } from "@do-soul/alaya-core";
+import { SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../../../cli/bridge.js";
 import { createToolsCommand } from "../../../../cli/tools.js";
 import { createRecallHandler } from "../../../../mcp-memory/recall/recall-usage-handlers.js";
@@ -24,6 +28,34 @@ export { readersFor, runRecall, plantDeployment, openBoundSlice, tombstone, stam
 export type { SourceSlice } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field-oracle/bound-producer.js";
 export { MEM, WS } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 export { INTERPRETATION_CLOCK, defaultBudget, SNAPSHOT_ID } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field-oracle/finite-worlds.js";
+
+export function recallReadWorkerUrl(): URL {
+  return new URL("../../../../../dist/runtime/recall/recall-read-worker.js", import.meta.url);
+}
+
+export function plantSourceRecord(database: StorageDatabase, body: string, sourceId = "speaker-a") {
+  const content_digest = hashContentDigest(body, fieldContractSha256);
+  return new SqliteFieldSourceRecordRepo(database, fieldContractSha256).insert({
+    record_id: hashSourceRecordId({
+      source_id: sourceId,
+      source_version: "v1",
+      content_digest
+    }, fieldContractSha256),
+    workspace_id: WS,
+    source_id: sourceId,
+    source_version: "v1",
+    content_digest,
+    evidence_object_id: null,
+    recorded_at: "2026-09-05T12:00:00.000Z",
+    event_time: "2026-09-05T12:00:00.000Z",
+    valid_from: null,
+    valid_to: null,
+    operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+    speaker: null,
+    scope_class: null,
+    source_body: body
+  });
+}
 
 export async function recallThroughHandler(
   slice: SourceSlice,

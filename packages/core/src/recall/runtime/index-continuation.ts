@@ -15,6 +15,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
+import { interpretationIdentity } from "../conditional-field/query/compile-query-identity.js";
 import { compareText } from "../../shared/compare-text.js";
 import { stableStringify } from "../../shared/stable-stringify.js";
 
@@ -26,7 +27,10 @@ export const RESUME_CURSOR = /^o(\d+)(?:\|(.*))?$/u;
 export const PROJECTION_CURSOR = /^p(\d+)(?:g(\d+))?(?:r(\d+))?(?:e(\d+))?$/u;
 
 const ISSUED_MAX = 32;
+const FIELD_RESUME_MAX = 32;
 const ISSUED_PAGES = new Map<string, IssuedDelivery>();
+const INDEX_ISSUED_DELIVERY = new WeakMap<InformationIndex, string>();
+const FIELD_RESUME = new Map<string, Readonly<{ state: FieldEngineState; token_digest: string }>>();
 
 export type IssuedDelivery = Readonly<{
   readonly query_key: string;
@@ -243,7 +247,16 @@ export function rememberIssuedDelivery(input: Readonly<{
     if (oldest === undefined) break;
     ISSUED_PAGES.delete(oldest);
   }
+  bindIssuedDeliveryId(input.index, delivery_id);
   return delivery_id;
+}
+
+export function bindIssuedDeliveryId(index: InformationIndex, deliveryId: string): void {
+  INDEX_ISSUED_DELIVERY.set(index, deliveryId);
+}
+
+export function issuedDeliveryIdOf(index: InformationIndex): string | undefined {
+  return INDEX_ISSUED_DELIVERY.get(index);
 }
 
 export function replayIssuedDelivery(requestDigest: string): IssuedDelivery | undefined {
@@ -269,7 +282,56 @@ export function issuedDeliveryRevoked(
 }
 
 export function replayIssuedIndex(issued: IssuedDelivery): InformationIndex {
-  return { ...issued.index, page_purpose: "retry" };
+  const replayed = { ...issued.index, page_purpose: "retry" as const };
+  bindIssuedDeliveryId(replayed, issued.delivery_id);
+  return replayed;
+}
+
+export function fieldResumeKey(queryId: string, snapshotId: string, interpretationId: string): string {
+  return `${queryId}\0${snapshotId}\0${interpretationId}\0v1`;
+}
+
+export function continuationDigest(continuation: Continuation): string {
+  return createHash("sha256").update(JSON.stringify([
+    continuation.schema_version, continuation.continuation_id, continuation.query_id,
+    continuation.snapshot_id, continuation.result_version, continuation.expires_at,
+    continuation.cursor, continuation.interpretation_id, continuation.interpretation_clock
+  ])).digest("hex");
+}
+
+export function rememberField(state: FieldEngineState, continuation: Continuation | null): void {
+  const key = fieldResumeKey(
+    state.query_id,
+    state.snapshot_id,
+    interpretationIdentity({ interpretation_clock: state.interpretation.interpretation_clock })
+  );
+  FIELD_RESUME.delete(key);
+  if (continuation === null) return;
+  FIELD_RESUME.set(key, { state, token_digest: continuationDigest(continuation) });
+  while (FIELD_RESUME.size > FIELD_RESUME_MAX) {
+    const oldest = FIELD_RESUME.keys().next().value;
+    if (oldest === undefined) break;
+    FIELD_RESUME.delete(oldest);
+  }
+}
+
+export function restoreField(
+  continuation: Continuation | null | undefined,
+  interpretationClock?: string,
+  interpretationId?: string
+): FieldEngineState | undefined {
+  if (continuation === undefined || continuation === null) return undefined;
+  const retained = FIELD_RESUME.get(fieldResumeKey(
+    continuation.query_id,
+    continuation.snapshot_id,
+    continuation.interpretation_id
+      ?? interpretationId
+      ?? interpretationIdentity({ interpretation_clock: interpretationClock })
+  ));
+  if (retained === undefined) return undefined;
+  const digest = continuationDigest(continuation);
+  if (replayIssuedDelivery(digest) !== undefined) return retained.state;
+  return retained.token_digest === digest ? retained.state : undefined;
 }
 
 function updateKindFor(entry: IndexEntry, previousRevision: string | undefined): ProductUpdateKind {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   MemorySearchResultSchema,
+  NonEmptyStringSchema,
   SoulMemorySearchResponseSchema,
   indexEntryCacheKey,
   sourceIndexEntry
@@ -160,6 +162,37 @@ describe("conditional-field result encoding", () => {
     expect(parsed.object_id).toBeUndefined();
     expect(parsed.target).toEqual(entry.target);
     expect(parsed.object_kind).not.toBe("memory_entry");
+  });
+
+  it("fails an older consumer that cannot parse source targets instead of dropping them", () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    const entry = sourceIndexEntry({
+      workspace_id: "ws",
+      root_kind: "source_record",
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: digest,
+      evidence_object_id: null,
+      association_milligrades: 700,
+      hypothesis_id: "h1",
+      output_binding: "default",
+      program_state: "accepting",
+      time_state: "present"
+    });
+    const results = encodeIndexResults({
+      ...stubRecallIndex([]),
+      entries: [entry],
+      representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
+    }, new Map([[indexEntryCacheKey(entry), "quoted source excerpt"]]));
+    expect(results).toHaveLength(1);
+    expect(results[0]?.object_kind).toBe("source_evidence");
+    const legacy = z.object({
+      object_id: NonEmptyStringSchema,
+      object_kind: z.literal("memory_entry"),
+      content_preview: NonEmptyStringSchema
+    }).strict();
+    expect(legacy.safeParse(results[0]).success).toBe(false);
+    expect(results.some((row) => row.object_kind === "source_evidence")).toBe(true);
   });
 });
 

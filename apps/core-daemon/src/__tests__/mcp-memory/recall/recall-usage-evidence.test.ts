@@ -614,4 +614,52 @@ describe("recall usage evidence proof", () => {
       error: { code: "VALIDATION" }
     });
   });
+
+  it("rejects a source span that is not inside the retained body", async () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    const target = {
+      kind: "source_evidence" as const,
+      workspace_id: context.workspaceId,
+      root_kind: "source_record" as const,
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: digest,
+      evidence_object_id: null,
+      span: {
+        content_start: 0,
+        content_end: 64,
+        retained_extent: "body" as const,
+        content_complete: false,
+        original_complete: false
+      }
+    };
+    const delivery = {
+      ...createDeliveryRecord("delivery_1"),
+      workspace_id: context.workspaceId,
+      delivered_object_ids: [],
+      delivered_objects: [{ object_kind: "source_evidence", target }]
+    };
+    const deps = {
+      ...createDeps(),
+      fieldSource: {
+        findRecordById: vi.fn(async () => ({
+          workspace_id: context.workspaceId,
+          record_id: "rec-1",
+          source_version: "v1",
+          content_digest: digest,
+          evidence_object_id: null,
+          source_body: "short"
+        }))
+      }
+    };
+    await expect(validateReportedRecallHits(deps, {
+      delivery_id: "delivery_1",
+      usage_state: "used",
+      delivered_objects: [{
+        object_kind: "source_evidence",
+        target,
+        usage_status: "used"
+      }]
+    }, context.workspaceId, delivery)).rejects.toBeInstanceOf(ContextUsageValidationError);
+  });
 });

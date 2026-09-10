@@ -268,6 +268,12 @@ async function validateUsedSourceTarget(
         || row.evidence_object_id !== target.evidence_object_id) {
       throw new ContextUsageValidationError("source_evidence target does not match the retained source record.");
     }
+    if (target.span !== undefined) {
+      const bytes = Buffer.byteLength(row.source_body, "utf8");
+      if (target.span.content_start > bytes || target.span.content_end > bytes) {
+        throw new ContextUsageValidationError("source_evidence span is not inside the retained source body.");
+      }
+    }
     if (target.evidence_object_id !== null) {
       await validateUsedEvidence(deps, target.evidence_object_id, workspaceId);
     }
