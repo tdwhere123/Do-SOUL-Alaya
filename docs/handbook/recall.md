@@ -151,7 +151,8 @@ do not establish a complete bound on every projection operation.
 
 Admitted immutable hard relation instances transfer at identity (1000).
 Relation names do not assign grades. Associative enumeration requires a
-declared common cap contract; absence is incompatibility, not a shared default.
+declared common cap contract (`cap_contracts`); absence is incompatibility,
+not a shared default.
 A compiled causal demand with `required_claim: "supported"` is a membership
 obligation: unknown common-cause products are not members. Prepared cosine
 admission is opt-in via

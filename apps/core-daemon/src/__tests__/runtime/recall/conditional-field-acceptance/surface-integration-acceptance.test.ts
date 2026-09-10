@@ -11,6 +11,7 @@ import {
   QueryViewSchema,
   canonicalIndexEntryIdentity,
   memoryProductStateKey,
+  type AssociationCapContract,
   type FieldSnapshot,
   type FieldValue,
   type InformationIndex,
@@ -148,6 +149,7 @@ async function callRecall(
     readonly continuation?: InformationIndex["continuation"];
     readonly result_kind_view?: "mixed" | "memory_only" | "source_only";
     readonly enumeration_policy?: "canonical" | "associative";
+    readonly cap_contracts?: readonly AssociationCapContract[];
     readonly payload_continuation?: PayloadContinuationRequest;
   }>
 ) {
@@ -166,6 +168,7 @@ async function callRecall(
       ...(input.continuation == null ? {} : { continuation: input.continuation }),
       ...(input.result_kind_view === undefined ? {} : { result_kind_view: input.result_kind_view }),
       ...(input.enumeration_policy === undefined ? {} : { enumeration_policy: input.enumeration_policy }),
+      ...(input.cap_contracts === undefined ? {} : { cap_contracts: input.cap_contracts }),
       ...(input.payload_continuation === undefined ? {} : { payload_continuation: input.payload_continuation })
     },
     context
@@ -342,7 +345,8 @@ describe("CP09 worker MCP CLI surfaces", () => {
     const mcp = await callRecall(handler, {
       query: "yesterday failed deployment",
       max_results: 1,
-      enumeration_policy: "associative"
+      enumeration_policy: "associative",
+      cap_contracts: [identityAssociationCap()]
     });
     expect(mcp.page_purpose).toBe("update");
     expect(mcp.index.page_purpose).toBe("update");
@@ -365,7 +369,8 @@ describe("CP09 worker MCP CLI surfaces", () => {
         dimension: null,
         domain_tags: null,
         max_results: 1,
-        enumeration_policy: "associative"
+        enumeration_policy: "associative",
+        cap_contracts: [identityAssociationCap()]
       }),
       "--workspace",
       WS

@@ -33,6 +33,14 @@ describe("mcp memory tool catalog", () => {
     expect(byName.get("soul.report_context_usage")?.annotations.readOnlyHint).toBe(false);
   });
 
+  it("names cap_contracts as required for associative soul.recall", () => {
+    const description = listAlayaMemoryTools().find((tool) => tool.name === "soul.recall")?.description ?? "";
+
+    expect(description).toContain("`cap_contracts`");
+    expect(description).toMatch(/associative enumeration requires declared `cap_contracts`/i);
+    expect(description).toMatch(/absence is incompatible/i);
+  });
+
   it("guards supported tool names", () => {
     expect(hasAlayaMemoryToolName("soul.recall")).toBe(true);
     expect(hasAlayaMemoryToolName("memory.recall")).toBe(false);

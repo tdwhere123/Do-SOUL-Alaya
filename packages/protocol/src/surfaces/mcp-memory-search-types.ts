@@ -185,14 +185,29 @@ export const SoulMemorySearchRequestSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.since === null || value.since === undefined || value.until === null || value.until === undefined) {
-      return;
-    }
-    if (Date.parse(value.since) > Date.parse(value.until)) {
+    if (
+      value.since !== null &&
+      value.since !== undefined &&
+      value.until !== null &&
+      value.until !== undefined &&
+      Date.parse(value.since) > Date.parse(value.until)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["since"],
         message: "since must be less than or equal to until."
+      });
+    }
+    // Associative is not a shared D2 default; missing contracts are incompatible.
+    if (
+      value.enumeration_policy === "associative" &&
+      (value.cap_contracts === undefined || value.cap_contracts.length === 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["cap_contracts"],
+        message:
+          "associative enumeration requires declared cap_contracts; absence is incompatible, not a shared default."
       });
     }
   })

@@ -506,6 +506,25 @@ describe("conditional-field transfer identity and request coverage", () => {
     expect(parsed.claim_demands?.[0]?.required_claim).toBe("any");
   });
 
+  it("rejects associative MCP recall without declared cap_contracts", () => {
+    const associative = {
+      query: "needle",
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
+      max_results: 5,
+      enumeration_policy: "associative" as const
+    };
+    expect(SoulMemorySearchRequestSchema.safeParse(associative).success).toBe(false);
+    expect(SoulMemorySearchRequestSchema.safeParse({ ...associative, cap_contracts: [] }).success).toBe(false);
+    const parsed = SoulMemorySearchRequestSchema.parse({
+      ...associative,
+      cap_contracts: [milligradeContract]
+    });
+    expect(parsed.enumeration_policy).toBe("associative");
+    expect(parsed.cap_contracts).toEqual([milligradeContract]);
+  });
+
   it("still parses the historical closure certificate shape", () => {
     expect(ClosureCertificateSchema.parse({
       schema_version: 1,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSOCIATION_DOMAIN_ID,
   FieldValueSchema,
+  HARD_IDENTITY_TRANSFER_ID,
+  HARD_IDENTITY_TRANSFER_VERSION,
+  IDENTITY_NORMALIZATION_ID,
   IndexEntrySchema,
   InformationIndexSchema,
   MemorySearchResultSchema,
@@ -182,6 +186,12 @@ describe("conditional-field product identity", () => {
       domain_tags: null,
       max_results: 5,
       enumeration_policy: "associative",
+      cap_contracts: [{
+        domain_id: ASSOCIATION_DOMAIN_ID,
+        normalization: IDENTITY_NORMALIZATION_ID,
+        transfer_id: HARD_IDENTITY_TRANSFER_ID,
+        transfer_version: HARD_IDENTITY_TRANSFER_VERSION
+      }],
       result_kind_view: "source_only",
       interpretation_proposal: proposal,
       payload_continuation: {
