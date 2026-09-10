@@ -6,6 +6,10 @@ import {
   RecallTargetRefSchema,
   RequestBudgetSchema,
   SoulMemorySearchResponseSchema,
+  sameRecallTarget,
+  sourceEvidenceRootKey,
+  stableCanonicalStringify,
+  type RecallTargetRef,
   type RequestBudget
 } from "@do-soul/alaya-protocol";
 import {
@@ -96,6 +100,7 @@ const ValidatedMeasurement = ValidatedMeasurementBase.superRefine((value, contex
       return entry === undefined || slot.rank !== offset + 1 || slot.index_entry_offset !== offset
         || slot.object_kind !== (entry.target.kind === "source_evidence" ? "source_evidence" : "memory_entry")
         || slot.object_id !== entry.object_id
+        || !sameRecallTarget(slot.target, entry.target)
         || slot.hypothesis_id !== entry.hypothesis_id || slot.output_binding !== entry.output_binding
         || slot.program_state !== entry.program_state || slot.time_state !== entry.time_state;
     }) || value.evaluated_slots.some((slot, offset) => JSON.stringify(slot) !== JSON.stringify(value.response_slots[offset]));
@@ -105,7 +110,7 @@ const ValidatedMeasurement = ValidatedMeasurementBase.superRefine((value, contex
   const metrics = value.metrics;
   const badMetrics = metrics.index_entry_count !== value.entries.length
     || metrics.distinct_object_count !== new Set(value.entries.map((entry) =>
-      entry.object_id ?? (entry.target.kind === "source_evidence" ? entry.target.root_id : entry.target.object_id)
+      targetIdentity(entry.target)
     )).size
     || metrics.hypothesis_count !== new Set(value.entries.map((entry) => entry.hypothesis_id)).size
     || metrics.output_binding_count !== new Set(value.entries.map((entry) => entry.output_binding)).size
@@ -142,6 +147,9 @@ export function conditionalFieldDeliveryMatches(
     && delivered.every((row, offset) => {
       const slot = measurement.evaluated_slots[offset];
       return slot !== undefined && row.rank === slot.rank && row.object_id === slot.object_id
+        && row.target !== undefined && sameRecallTarget(row.target, slot.target)
+        && row.hypothesis_id === slot.hypothesis_id && row.output_binding === slot.output_binding
+        && row.program_state === slot.program_state && row.time_state === slot.time_state
         && (row.object_kind ?? "memory_entry") === slot.object_kind;
     });
 }
@@ -149,6 +157,9 @@ export function conditionalFieldDeliveryMatches(
 export interface ConditionalMeasurementInput {
   readonly recallResult: unknown;
   readonly deliveredResults: readonly { readonly object_id?: string;
+    readonly target?: RecallTargetRef;
+    readonly hypothesis_id?: string; readonly output_binding?: string;
+    readonly program_state?: string; readonly time_state?: string;
     readonly object_kind?: string | null; readonly rank: number; readonly relevance_score?: number }[];
   readonly queryText?: string;
   readonly workspaceId?: string;
@@ -202,12 +213,13 @@ export function measureConditionalFieldResponse(input: ConditionalMeasurementInp
   const slots = response.data.results.map((result, offset) => {
     const entry = index.entries[offset];
     if (entry === undefined || entry.object_id !== result.object_id
+      || !sameRecallTarget(entry.target, result.target)
       || result.object_kind !== (entry.target.kind === "source_evidence" ? "source_evidence" : "memory_entry")
       || entry.hypothesis_id !== result.hypothesis_id || entry.output_binding !== result.output_binding
       || entry.program_state === undefined || entry.time_state === undefined
       || entry.program_state !== result.program_state || entry.time_state !== result.time_state) return null;
     return { rank: offset + 1, ...(result.object_id === undefined ? {} : { object_id: result.object_id }),
-      object_kind: result.object_kind, target: entry.target,
+      object_kind: result.object_kind, target: result.target,
       index_entry_offset: offset, hypothesis_id: entry.hypothesis_id, output_binding: entry.output_binding,
       program_state: entry.program_state, time_state: entry.time_state };
   });
@@ -217,6 +229,9 @@ export function measureConditionalFieldResponse(input: ConditionalMeasurementInp
   for (const [offset, result] of input.deliveredResults.entries()) {
     const slot = slots[offset];
     if (slot == null || result.rank !== slot.rank || result.object_id !== slot.object_id
+      || result.target === undefined || !sameRecallTarget(result.target, slot.target)
+      || result.hypothesis_id !== slot.hypothesis_id || result.output_binding !== slot.output_binding
+      || result.program_state !== slot.program_state || result.time_state !== slot.time_state
       || result.object_kind !== slot.object_kind) return invalid("evaluated_slot_mismatch");
     evaluated.push(slot);
   }
@@ -244,7 +259,7 @@ export function measureConditionalFieldResponse(input: ConditionalMeasurementInp
     provider_calls, garden_enqueue,
     metrics: {
       index_entry_count: entries.length, distinct_object_count: new Set(entries.map((entry) =>
-        entry.object_id ?? (entry.target.kind === "source_evidence" ? entry.target.root_id : entry.target.object_id)
+        targetIdentity(entry.target)
       )).size,
       hypothesis_count: new Set(entries.map((entry) => entry.hypothesis_id)).size,
       output_binding_count: new Set(entries.map((entry) => entry.output_binding)).size,
@@ -266,6 +281,9 @@ export function measureConditionalFieldResponse(input: ConditionalMeasurementInp
 
 function invalid(reason: Extract<ConditionalFieldMeasurement, { status: "invalid" }>["reason"]): ConditionalFieldMeasurement {
   return { schema_version: 1, status: "invalid", reason };
+}
+function targetIdentity(target: RecallTargetRef): string {
+  return target.kind === "source_evidence" ? `source_evidence:${sourceEvidenceRootKey(target)}` : stableCanonicalStringify(target);
 }
 function unavailable(reason: string) { return { status: "unavailable" as const, value: null, reason }; }
 function sha256(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }

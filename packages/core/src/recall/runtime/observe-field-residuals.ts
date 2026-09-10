@@ -14,7 +14,6 @@ const INCOMPLETE_OBSERVER: ReadonlySet<ObserverStatus> = new Set([
   "cancelled",
   "unavailable",
   "interrupted",
-  "unknown",
   "not_applicable",
   "invalidated"
 ]);
@@ -61,7 +60,7 @@ export function settleDiscoveryResidual(
   const adjacency = state.residuals.find((region) => region.kind === "adjacency");
   const busy = adjacency?.status === "open"
     || adjacency?.status === "interrupted"
-    || hasOpenPairs(subjects, predicates, pairProgress, state.discoveries);
+    || hasOpenPairs(subjects, predicates, pairProgress, [], state.pair_completed_count);
   const status = state.memory_exhausted || adjacency?.status === "interrupted" || state.last_observer_status === "interrupted"
     ? "interrupted"
     : busy ? "open" : "exhausted";
@@ -107,7 +106,6 @@ export function incompleteObserver(status: ObserverStatus | undefined): boolean 
 export function terminalObserver(status: ObserverStatus | undefined): boolean {
   return status === "cancelled"
     || status === "unavailable"
-    || status === "unknown"
     || status === "not_applicable"
     || status === "invalidated";
 }

@@ -54,6 +54,8 @@ export const TransitionSchema = z
     from: ProductStateKeySchema,
     to: ProductStateKeySchema,
     relation_kind: BoundedLabelSchema,
+    instance_id: ConditionalFieldIdSchema.optional(),
+    revision_id: ConditionalFieldIdSchema.optional(),
     strength_milligrades: MilligradeSchema,
     validity: RelationValiditySchema,
     applicable: z.boolean()
@@ -109,9 +111,15 @@ export const FacetVectorSchema = z
   .object({
     schema_version: SchemaVersionSchema,
     path_id: ConditionalFieldIdSchema,
+    obligations: z.array(z.object({ obligation_id: ConditionalFieldIdSchema, domain_id: ConditionalFieldIdSchema }).strict())
+      .min(1).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     coordinates: z.array(MilligradeSchema).min(1).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly()
   })
   .strict()
+  .superRefine((row, context) => {
+    if (row.obligations !== undefined && row.obligations.length !== row.coordinates.length) context.addIssue({
+      code: "custom", path: ["obligations"], message: "Every coordinate requires one named obligation and domain" });
+  })
   .readonly();
 
 export const FieldSnapshotSchema = z

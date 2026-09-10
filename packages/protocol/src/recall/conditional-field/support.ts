@@ -49,6 +49,8 @@ export const DerivationSchema = z
     association_milligrades: z.number().int().min(0).max(1000).optional(),
     children: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     observation_ids: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    // Provenance is local to leaf nodes; follow children for transitive provenance.
+    provenance_layout: z.literal("local_leaves.v1").optional(),
     leaf_ids: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     witness_id: ConditionalFieldIdSchema.optional(),
     source_revisions: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly()

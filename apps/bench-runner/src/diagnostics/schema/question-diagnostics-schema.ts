@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ConditionalFieldMeasurementSchema } from "../../runs/measurement/conditional-field-measurement.js";
-import { RecallOriginPlaneSchema } from "@do-soul/alaya-protocol";
+import { RecallOriginPlaneSchema, RecallTargetRefSchema } from "@do-soul/alaya-protocol";
 import {
   BenchAnswerRerankFailureClassSchema,
   BenchAnswerRerankStatusSchema
@@ -86,7 +86,12 @@ const PhaseLatencyMsSchema = z.record(z.string(), z.number().nonnegative()).read
 
 export const DiagnosticRecallResultSchema = z
   .object({
-    object_id: z.string(),
+    object_id: z.string().optional(),
+    target: RecallTargetRefSchema.optional(),
+    hypothesis_id: z.string().optional(),
+    output_binding: z.string().optional(),
+    program_state: z.string().optional(),
+    time_state: z.string().optional(),
     object_kind: z.string().optional(),
     dimension: z.string().nullable().default(null),
     rank: z.number(),

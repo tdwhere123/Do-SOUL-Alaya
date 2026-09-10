@@ -30,7 +30,7 @@ import { observeField } from "../../../../recall/runtime/conditional-field-obser
 import { INTERPRETATION_CLOCK, SNAPSHOT_ID, defaultBudget, defaultView } from "../reference/deployment.fixture.js";
 
 const DIGEST = digestOriginalQuery("seed");
-const CONTENT = `sha256:${"a".repeat(64)}`;
+const CONTENT = digestOriginalQuery("retained source");
 const MEMORY_REVISION = "memory-rev-1";
 const OBJECT_ID = "emb-1";
 
@@ -197,6 +197,18 @@ describe("stored pair measurement producer", () => {
     expect(JSON.stringify(effects)).not.toContain("\"raw\":0");
   });
 
+  it("does not report a native source visit when the current source came from the request cache", () => {
+    const source = memorySourceReader();
+    const result = observeConditionalField(measureInput({
+      embeddingIds: () => ({ objectIds: [OBJECT_ID], rowVisits: 1, metadataUtf8Bytes: 8,
+        truncated: false, committedThrough: OBJECT_ID }),
+      measureStoredPair: () => readyPair(vector(OBJECT_ID, new Float32Array([1, 0])), vector("query", new Float32Array([1, 0]))),
+      source: (input) => ({ ...source(input), rowsRead: 0, bytesRead: 0 })
+    }));
+    expect(result.measurements?.[0]?.raw.status).toBe("measured");
+    expect(result.work.native_visits).toBe(3);
+  });
+
   it("keeps a missing query embedding residual unknown on the field", () => {
     const observed = observeField(interpretation(), {
       workspace_id: "ws",
@@ -268,14 +280,15 @@ describe("stored pair measurement producer", () => {
         projected_cap: INAPPLICABLE_CAP
       }]
     });
-    expect(measured.measurements).toEqual([{
+    expect([...measured.measurements]).toEqual([{
       observation_id: "binding:emb-1",
       raw,
       cap: INAPPLICABLE_CAP
     }]);
-    if (measured.measurements[0]?.raw.status !== "measured") throw new Error("expected retained measured raw");
-    expect(measured.measurements[0].raw.raw).toBe(1);
-    expect(measured.measurements[0].cap.status).toBe("inapplicable");
+    const measuredRow = measured.measurements.at(0);
+    if (measuredRow?.raw.status !== "measured") throw new Error("expected retained measured raw");
+    expect(measuredRow.raw.raw).toBe(1);
+    expect(measuredRow.cap.status).toBe("inapplicable");
     const missing = applyObserverPage(initial, {
       page: {
         schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -298,12 +311,12 @@ describe("stored pair measurement producer", () => {
         missing_measurement: true
       }]
     });
-    expect(missing.measurements).toEqual([{
+    expect([...missing.measurements]).toEqual([{
       observation_id: "binding:missing-measurement",
       raw: { status: "missing" },
       cap: INAPPLICABLE_CAP
     }]);
-    expect(missing.measurements[0]?.raw).not.toEqual(expect.objectContaining({ raw: 0 }));
+    expect(missing.measurements.at(0)?.raw).not.toEqual(expect.objectContaining({ raw: 0 }));
   });
 
   it("forwards the request model pin to embeddingIds", () => {
@@ -400,6 +413,7 @@ function memorySourceReader(): NonNullable<ObserverReaders["source"]> {
     row: {
       object_id: objectId,
       sourceRevision: MEMORY_REVISION,
+      content: "retained source",
       lifecycle_state: "active"
     },
     rowsRead: 1,

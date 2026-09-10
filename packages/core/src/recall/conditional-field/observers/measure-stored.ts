@@ -1,17 +1,22 @@
 import {
+  ASSOCIATION_DOMAIN_ID,
+  StoredCosineAdmissionSchema,
   memoryRecallTarget,
   type ProjectedCap,
   type RawMeasurement,
   type TypedObservation
 } from "@do-soul/alaya-protocol";
+import { createHash } from "node:crypto";
 import { digestOriginalQuery } from "../query/compile-query-identity.js";
 import {
   collectObserved,
   pageLimit,
   unavailableOrNotApplicable,
   type ObserveConditionalFieldInput,
-  type ObserverActionResult
+  type ObserverActionResult,
+  type SourceObserverRow
 } from "./observe.js";
+import { buildTypedObservation } from "./observation-admission.js";
 
 export const STORED_COSINE_PRODUCER_ID = "stored.cosine.pair.v1";
 export const COSINE_DOMAIN_ID = "cosine.unit.v1";
@@ -36,6 +41,7 @@ export type StoredPairMeasurement = Readonly<{
   readonly queryStatus: "ready" | "missing" | "unavailable";
   readonly rowVisits: number;
   readonly bytesRead: number;
+  readonly resourceLimited?: boolean;
 }>;
 
 export type ObservationMeasurement = Readonly<{
@@ -87,14 +93,17 @@ export function rawMeasurementFromPair(
   if (pair.queryStatus === "unavailable") return { status: "unavailable" };
   if (pair.queryStatus === "missing" || pair.query === null) return { status: "unavailable" };
   if (!compatibleSpaces(pair.object, pair.query)) return { status: "unsupported" };
-  const cosine = finiteCosine(pair.query.embedding, pair.object.embedding);
-  if (cosine === null) return { status: "unavailable" };
   const memoryRevision = input.sourceRevision;
   if (memoryRevision === undefined || memoryRevision.length === 0) return { status: "unavailable" };
+  const cosine = finiteCosine(pair.query.embedding, pair.object.embedding);
+  if (cosine === null) return { status: "unavailable" };
   return {
     status: "measured",
     producer_id: STORED_COSINE_PRODUCER_ID,
     model_id: pair.object.model_id,
+    provider_kind: pair.object.provider_kind,
+    schema_version: pair.object.schema_version,
+    dimensions: pair.object.dimensions,
     domain: COSINE_DOMAIN_ID,
     normalization: COSINE_NORMALIZATION_ID,
     referent: memoryRecallTarget({
@@ -109,6 +118,32 @@ export function rawMeasurementFromPair(
 }
 
 export function observeStoredMeasurement(input: ObserveConditionalFieldInput): ObserverActionResult {
+  const declaration = input.query.interpretation_proposal?.stored_cosine_admission;
+  if (declaration === undefined) return observeMeasurementProfile(input);
+  if (!StoredCosineAdmissionSchema.safeParse(declaration).success) return unavailableOrNotApplicable(input, "unavailable");
+  const continuation = parseMeasurementCursor(input.cursor.committed_through);
+  const profile = declaration.obligations[continuation.index];
+  if (profile === undefined) return unavailableOrNotApplicable(input, "unavailable");
+  const result = observeMeasurementProfile({ ...input, measurement_profile: profile,
+    cursor: { ...input.cursor, committed_through: continuation.after, position: continuation.after ?? "" } });
+  const finished = result.page.outcome.status === "exhausted";
+  const nextIndex = finished && continuation.index + 1 < declaration.obligations.length ? continuation.index + 1 : continuation.index;
+  const cursor = `s:${JSON.stringify([nextIndex, nextIndex === continuation.index ? result.page.cursor.committed_through : null])}`;
+  return { ...result, page: { ...result.page, cursor: { ...result.page.cursor, position: cursor, committed_through: cursor },
+    open_regions: result.page.open_regions.map((region) => region.region_id === input.action.region_id && nextIndex !== continuation.index
+      ? { ...region, status: "open" } : region),
+    outcome: { ...result.page.outcome, status: nextIndex !== continuation.index ? "open" : result.page.outcome.status } } };
+}
+
+function parseMeasurementCursor(value: string | null): { index: number; after: string | null } {
+  if (!value?.startsWith("s:")) return { index: 0, after: value };
+  try { const [index, after] = JSON.parse(value.slice(2)) as [number, string | null];
+    if (Number.isSafeInteger(index) && index >= 0 && index < 16 && (after === null || typeof after === "string")) return { index, after };
+  } catch { /* Invalid continuations cannot acquire a different measurement profile. */ }
+  return { index: 16, after: null };
+}
+
+function observeMeasurementProfile(input: ObserveConditionalFieldInput): ObserverActionResult {
   const embeddingIds = input.readers.embeddingIds;
   if (embeddingIds === undefined) {
     return withMeasurements(unavailableOrNotApplicable(input, "unavailable"), [absentMeasurement(
@@ -121,6 +156,7 @@ export function observeStoredMeasurement(input: ObserveConditionalFieldInput): O
     workspaceId: input.workspace_id,
     afterObjectId: input.cursor.committed_through,
     maxRows: enumerationBudget(input),
+    ...(input.measurement_profile === undefined ? {} : { profile: input.measurement_profile }),
     ...(modelId === undefined || modelId.length === 0 ? {} : { modelId })
   });
   const domainStatus = page.domainStatus;
@@ -162,33 +198,59 @@ function attachPairMeasurements(
   const measurements: ObservationMeasurement[] = [];
   let extraWork = 0;
   let extraBytes = 0;
+  let computeWork = 0;
   const observations: TypedObservation[] = [];
   const reserves = measurementWorkReserves(input);
   for (const observation of collected.page.observations) {
-    if (collected.work.native_visits + extraWork + reserves.pair + reserves.source > input.action.work_limit) {
+    if (collected.work.native_visits + extraWork + computeWork + reserves.pair + reserves.source > input.action.work_limit) {
       break;
     }
     const pair = measure?.({
       workspaceId: input.workspace_id,
       objectId: observation.object_id,
-      queryDigest: digest
+      queryDigest: digest,
+      profile: input.measurement_profile,
+      byteLimit: 2 * (16384 * 4 + 2048) + 2304,
+      workLimit: input.action.work_limit - collected.work.native_visits - extraWork - computeWork - reserves.source
     });
     extraWork += pair?.rowVisits ?? 0;
     extraBytes += pair?.bytesRead ?? 0;
+    if (pair?.resourceLimited) break;
     const memory = pairNeedsMemoryRevision(pair)
       ? memoryProductRevision(input, observation.object_id)
       : { rowVisits: 0, bytesRead: 0 };
     extraWork += memory.rowVisits;
     extraBytes += memory.bytesRead;
-    const raw = rawMeasurementFromPair({
+    if (collected.work.native_visits + extraWork + computeWork + (pair?.object?.dimensions ?? 0) > input.action.work_limit) break;
+    const fresh = pair?.object == null || memory.contentHash === pair.object.content_hash;
+    if (fresh && memory.revision !== undefined && pairNeedsMemoryRevision(pair) && compatibleSpaces(pair!.object!, pair!.query!)) {
+      computeWork += pair!.object!.dimensions;
+    }
+    let raw: RawMeasurement = fresh ? rawMeasurementFromPair({
       workspaceId: input.workspace_id,
       objectId: observation.object_id,
       queryDigest: digest,
       pair,
       sourceRevision: memory.revision
-    });
-    measurements.push({ observation_id: observation.observation_id, raw, cap: INAPPLICABLE_CAP });
-    observations.push(stampMeasuredObservation(observation, raw, pair, memory.revision));
+    }) : { status: "unavailable" };
+    const profile = input.measurement_profile;
+    if (raw.status === "measured") {
+      if (profile !== undefined) raw = { ...raw, obligation_id: profile.obligation_id };
+    }
+    const cap: ProjectedCap = raw.status === "measured" && typeof raw.raw === "number" && profile !== undefined
+      && raw.producer_id === profile.producer_id && raw.provider_kind === profile.provider_kind && raw.model_id === profile.model_id
+      && raw.schema_version === profile.schema_version && raw.dimensions === profile.dimensions
+      && raw.domain === profile.domain && raw.normalization === profile.normalization && raw.raw >= profile.raw_threshold
+      ? { status: "projected", domain_id: ASSOCIATION_DOMAIN_ID, transfer_id: profile.transfer_id,
+        transfer_version: profile.transfer_version, milligrades: Math.floor(500 * (Math.max(-1, Math.min(1, raw.raw)) + 1)) }
+      : INAPPLICABLE_CAP;
+    const observationId = profile === undefined ? observation.observation_id : `${observation.observation_id}:${profile.obligation_id}`;
+    measurements.push({ observation_id: observationId, raw, cap });
+    const admitted = raw.status !== "measured" ? null : buildTypedObservation(input, {
+      objectId: observation.object_id, sourceRevision: raw.referent.kind === "memory_entry" ? raw.referent.source_revision : observation.source_revision,
+      sourceRow: memory.row, target: raw.referent, observationKey: observationId, identityKind: "object" });
+    observations.push({ ...stampMeasuredObservation(observation, raw, pair, memory.revision), observation_id: observationId,
+      applicability: admitted?.applicability ?? { ...observation.applicability, verdict: "false" } });
   }
   const nativeVisits = collected.work.native_visits + extraWork;
   const truncated = observations.length < collected.page.observations.length;
@@ -196,10 +258,11 @@ function attachPairMeasurements(
     page: {
       ...collected.page,
       observations,
+      cursor: { ...collected.page.cursor, committed_through: observations.at(-1)?.object_id ?? input.cursor.committed_through },
       ...(truncated ? { outcome: { ...collected.page.outcome, status: "interrupted" as const } } : {})
     },
     work: {
-      work_units: nativeVisits,
+      work_units: nativeVisits + computeWork,
       residual_work_units: truncated ? Math.max(1, nativeVisits) : collected.work.residual_work_units,
       native_visits: nativeVisits,
       bytes_read: collected.work.bytes_read + extraBytes
@@ -212,9 +275,9 @@ function measurementWorkReserves(input: ObserveConditionalFieldInput): Readonly<
   readonly pair: number;
   readonly source: number;
 }> {
-  const pair = input.readers.measureStoredPair === undefined ? 0 : 2;
+  const pair = input.readers.measureStoredPair === undefined ? 0 : input.measurement_profile === undefined ? 4 : 3 + input.measurement_profile.dimensions;
   return {
-    lookup: 1,
+    lookup: input.measurement_profile === undefined ? 2 : 0,
     pair,
     // Production source pays length, row, and revision; reserving 1 overshoots native visits.
     source: pair === 0 || input.readers.source === undefined ? 0 : 3
@@ -271,6 +334,8 @@ function memoryProductRevision(
   objectId: string
 ): Readonly<{
   readonly revision?: string;
+  readonly contentHash?: string;
+  readonly row?: SourceObserverRow;
   readonly rowVisits: number;
   readonly bytesRead: number;
 }> {
@@ -280,7 +345,10 @@ function memoryProductRevision(
   const revision = page.unavailable ? undefined : page.row?.sourceRevision;
   return {
     ...(revision === undefined || revision.length === 0 ? {} : { revision }),
-    rowVisits: Math.max(1, page.rowsRead),
+    ...(page.row == null ? {} : { row: page.row }),
+    ...(page.row?.content === undefined || page.unavailable || page.resourceLimited ? {} : {
+      contentHash: `sha256:${createHash("sha256").update(page.row.content, "utf8").digest("hex")}` }),
+    rowVisits: page.rowsRead,
     bytesRead: page.bytesRead
   };
 }

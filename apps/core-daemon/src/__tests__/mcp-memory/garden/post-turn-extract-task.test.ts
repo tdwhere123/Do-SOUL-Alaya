@@ -80,6 +80,8 @@ describe("post-turn extract Garden task", () => {
       row.kind === "source_record"
       && row.original_complete === true
       && row.scope_class === "project"
+      && row.event_time === null
+      && row.role === undefined
       && (row.content ?? "").includes("x".repeat(800))
       && (row.content ?? "").includes("x".repeat(900))
     )).toBe(true);

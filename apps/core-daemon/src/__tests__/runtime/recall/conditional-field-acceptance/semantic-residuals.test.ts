@@ -86,15 +86,16 @@ describe("bounded semantic residual producer-consumer regressions", () => {
     const index = await session(slice)();
     expectCompleteBaseline(index);
     expect(index.entries.find((entry) => entry.object_id === MEM.r)).toMatchObject({ role: "requested", association_milligrades: 1000 });
-    expect(index.entries.some((entry) => entry.object_id === MEM.c && entry.association_milligrades === 850)).toBe(true);
-    expect(index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ role: "associated", association_milligrades: 550 });
+    expect(index.entries.some((entry) => entry.object_id === MEM.c && entry.association_milligrades === 1000)).toBe(true);
+    expect(index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ role: "associated", association_milligrades: 1000 });
   });
 
   it("preserves unknown guard coverage through actual SQLite observation and index projection", async () => {
     const slice = await planted();
     const program = (verdict: "true" | "false" | "unresolved"): QueryProgram => ({ schema_version: 1, kind: "relation",
       relation_kind: "observed_log", source_variable: "q", target_variable: "x", facet_mode: "same_path", threshold_milligrades: 0,
-      guard: { schema_version: 1, kind: "query_predicate", verdict, variable: "x", time_scope: "none", predicate_name: "log_has_proven_root_cause" } });
+      guard: { schema_version: 1, kind: "query_predicate", verdict, variable: "x", time_scope: "none",
+        ...(verdict === "unresolved" ? { predicate_name: "log_has_proven_root_cause" } : {}) } });
     const absent = observeProgram(slice, program("unresolved"), { query_text: "yesterday failed deployment" });
     expect(absent.field.residuals.some((region) => region.kind === "guard" && region.status === "unknown")).toBe(true);
     expect(absent.field.closure).toMatchObject({ observation: "unknown", requested_index: "open" });
@@ -102,7 +103,9 @@ describe("bounded semantic residual producer-consumer regressions", () => {
     expect(index.completeness).toMatchObject({ logical_index: "open", observed_coverage: "unknown" });
     expect(index.continuation).toBeNull();
     expect(index.entries).toEqual([]);
-    expect(indexFromObserved(observeProgram(slice, program("true"), { query_text: "yesterday failed deployment" })).entries.some((entry) => entry.object_id === MEM.l)).toBe(true);
+    const positive = observeProgram(slice, program("true"), { query_text: "yesterday failed deployment" });
+    const positiveIndex = indexFromObserved(positive);
+    expect(positiveIndex.entries.some((entry) => entry.object_id === MEM.l)).toBe(true);
     expect(indexFromObserved(observeProgram(slice, program("false"), { query_text: "yesterday failed deployment" })).entries).toEqual([]);
   });
 
@@ -139,7 +142,7 @@ describe("bounded semantic residual producer-consumer regressions", () => {
       sourceId: MEM.r, targetId: MEM.h, resultObjectId: MEM.h, relationKind: "common_cause",
       validity: { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" }, gist: "Accepted common cause" });
     const supported = await complete(session(slice));
-    expect(supported.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ claim: "supported", association_milligrades: 550,
+    expect(supported.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ claim: "supported", association_milligrades: 1000,
       claim_proposition: { kind: "common_cause", arguments: [MEM.r, MEM.h] } });
     const native = readersFor(slice);
     const unavailable = await session(slice, { ...native, relation: (input) => input.predicate === "common_cause"

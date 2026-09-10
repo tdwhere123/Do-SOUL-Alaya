@@ -205,7 +205,7 @@ export function sourceFactsSatisfyFilters(
   return "true";
 }
 
-function sourceTimestampOrder(left: string, right: string): number | undefined {
+export function sourceTimestampOrder(left: string, right: string): number | undefined {
   if (!IsoDatetimeStringSchema.safeParse(left).success || !IsoDatetimeStringSchema.safeParse(right).success) {
     return undefined;
   }

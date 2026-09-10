@@ -17,7 +17,12 @@ import {
   type HyperedgePremise
 } from "../reference/accepting-projection.js";
 import { decideGuards, encodeBindingContext, parseBindingContext, unifyBinding, type BoundSourceFacts } from "./binding-environment.js";
-import { joinDerivation, leafDerivation, mergeDerivations } from "./path-derivation.js";
+import { joinDerivation, leafDerivation } from "./path-derivation.js";
+import { groundedOutputDerivations } from "./output-derivations.js";
+import { productStateNodeId } from "../reference/bind-max-min.js";
+import { transitionKey } from "./path-composition.js";
+import type { PathComputation } from "./path-effect-cursor.js";
+import type { RetainedRows } from "./retained-sequence.js";
 import {
   ACCEPTING_PROGRAM_STATE,
   advancesFor,
@@ -52,11 +57,11 @@ export type HyperedgeEffect = Readonly<{
 }>;
 
 type HyperedgeInput = Readonly<{
-  readonly liveStates: readonly ProductStateKey[];
+  readonly liveStates: RetainedRows<ProductStateKey>;
   readonly overlay: NamedKindOverlay;
   readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
   readonly toProgramStates?: readonly string[];
-  readonly observedStates?: readonly ProductStateKey[];
+  readonly observedStates?: RetainedRows<ProductStateKey>;
 }>;
 
 type PremiseAssignment = HyperedgePremise & Readonly<{
@@ -90,74 +95,116 @@ export function tryCompleteHyperedge(
   };
 }
 
-export function hyperedgeEffects(
-  rows: readonly AdjacencyRow[],
+export function* hyperedgeEffectSteps(
+  rows: Iterable<AdjacencyRow>,
   program: Extract<QueryProgram, { readonly kind: "hyperedge" }>,
   input: HyperedgeInput
-): readonly HyperedgeEffect[] {
+): PathComputation<void> {
   const toProgramStates = input.toProgramStates ?? [ACCEPTING_PROGRAM_STATE];
-  const effects: HyperedgeEffect[] = [];
   for (const from of input.liveStates) {
+    yield { kind: "work" };
     if (from.target.kind !== "memory_entry") continue;
-    const grouped = program.premises.map((premise) =>
-      assignmentsForPremise(premise, from, rows, input)
-    );
+    const grouped: (readonly PremiseAssignment[])[] = [];
+    for (const premise of program.premises) {
+      const assignments = yield* assignmentsForPremise(premise, from, rows, input);
+      grouped.push(yield* shareCompatibleAssignments(assignments));
+    }
     if (program.join === "or") {
-      effects.push(...orHyperedgeEffects(from, grouped, toProgramStates, input));
+      yield* orHyperedgeEffects(from, grouped, toProgramStates, input);
     } else {
-      effects.push(...andHyperedgeEffects(from, grouped, toProgramStates, input));
+      yield* andHyperedgeEffects(from, grouped, toProgramStates, input);
     }
   }
-  return Object.freeze(effects);
 }
 
-function assignmentsForPremise(
+function* shareCompatibleAssignments(assignments: readonly PremiseAssignment[]): PathComputation<readonly PremiseAssignment[]> {
+  const grouped = new Map<string, PremiseAssignment[]>();
+  for (const assignment of assignments) {
+    const key = JSON.stringify([assignment.hypothesis_id, assignment.binding_context, assignment.time_state,
+      assignment.target_object_id, assignment.validity]);
+    const group = grouped.get(key) ?? [];
+    group.push(assignment);
+    grouped.set(key, group);
+    yield { kind: "work", retained_bytes: 96 + Buffer.byteLength(key, "utf8") };
+  }
+  const shared: PremiseAssignment[] = [];
+  for (const group of grouped.values()) {
+    const first = group[0]!;
+    let root = first.derivation;
+    let grade = first.milligrades;
+    yield { kind: "work", retained_bytes: first.derivations.length * 72 + 256 };
+    const forest = new Map<string, Derivation>();
+    for (const row of first.derivations) { yield { kind: "work" }; forest.set(row.derivation_id, row); }
+    for (let index = 1; index < group.length; index += 1) {
+      const assignment = group[index]!;
+      root = joinDerivation("or", [root, assignment.derivation]);
+      grade = Math.max(grade, assignment.milligrades);
+      for (const row of assignment.derivations) { yield { kind: "work", retained_bytes: 72 }; forest.set(row.derivation_id, row); }
+      forest.set(root.derivation_id, root);
+      yield { kind: "work", retained_bytes: Buffer.byteLength(JSON.stringify(root), "utf8") };
+    }
+    const nodes: Derivation[] = [];
+    for (const row of forest.values()) { yield { kind: "work", retained_bytes: 8 }; nodes.push(row); }
+    shared.push({ ...first, milligrades: grade, derivation: root, derivations: nodes });
+  }
+  return shared;
+}
+
+function* assignmentsForPremise(
   premise: QueryProgram,
   from: ProductStateKey,
-  rows: readonly AdjacencyRow[],
+  rows: Iterable<AdjacencyRow>,
   input: HyperedgeInput
-): readonly PremiseAssignment[] {
+): PathComputation<readonly PremiseAssignment[]> {
   if (premise.kind === "alternative") {
-    return premise.options.flatMap((option) => assignmentsForPremise(option, from, rows, input));
+    const assignments: PremiseAssignment[] = [];
+    for (const option of premise.options) for (const assignment of yield* assignmentsForPremise(option, from, rows, input)) {
+      yield { kind: "work", retained_bytes: 8 }; assignments.push(assignment);
+    }
+    return assignments;
   }
-  if (premise.kind === "relation") return relationAssignments(premise, from, rows, input);
+  if (premise.kind === "relation") return yield* relationAssignments(premise, from, rows, input);
   if (premise.kind === "empty") return [];
   if (premise.kind === "epsilon") {
     return [terminalAssignment(from, productSubjectId(from), MILLIGRADE_TOP, openValidity(), "epsilon")];
   }
   if (premise.kind === "hyperedge") {
-    return nestedHyperedgeAssignments(premise, from, rows, input);
+    return yield* nestedHyperedgeAssignments(premise, from, rows, input);
   }
-  return walkCompiledPremise(premise, from, rows, input);
+  return yield* walkCompiledPremise(premise, from, rows, input);
 }
 
-function relationAssignments(
+function* relationAssignments(
   relation: QueryRelation,
   from: ProductStateKey,
-  rows: readonly AdjacencyRow[],
+  rows: Iterable<AdjacencyRow>,
   input: HyperedgeInput
-): readonly PremiseAssignment[] {
+): PathComputation<readonly PremiseAssignment[]> {
   const found: PremiseAssignment[] = [];
   for (const row of rows) {
     const assignment = assignmentFromRow(relation, from, row, input);
     if (assignment !== undefined) found.push(assignment);
+    yield { kind: "work", retained_bytes: assignment === undefined ? 0 : Buffer.byteLength(JSON.stringify(assignment), "utf8") };
   }
   return found;
 }
 
-function nestedHyperedgeAssignments(
+function* nestedHyperedgeAssignments(
   program: Extract<QueryProgram, { readonly kind: "hyperedge" }>,
   from: ProductStateKey,
-  rows: readonly AdjacencyRow[],
+  rows: Iterable<AdjacencyRow>,
   input: HyperedgeInput
-): readonly PremiseAssignment[] {
-  return hyperedgeEffects(rows, program, {
+): PathComputation<readonly PremiseAssignment[]> {
+  const assignments: PremiseAssignment[] = [];
+  for (const step of hyperedgeEffectSteps(rows, program, {
     liveStates: [from],
     overlay: input.overlay,
     sourceFacts: input.sourceFacts,
     observedStates: input.observedStates ?? input.liveStates
-  }).flatMap((effect) => {
-    if (effect.hyperedge === undefined || effect.derivation === undefined) return [];
+  })) {
+    if (step.kind === "work") { yield step; continue; }
+    const effect = step.effect;
+    if (effect.hyperedge === undefined || effect.derivation === undefined) continue;
     const assigned = terminalAssignment(
       from,
       productSubjectId(effect.hyperedge.to),
@@ -167,118 +214,108 @@ function nestedHyperedgeAssignments(
       effect.hyperedge.to.binding_context,
       effect.observation_id
     );
-    return [{
+    assignments.push({
       ...assigned,
       derivation: effect.derivation,
       derivations: effect.derivations ?? [effect.derivation]
-    }];
-  });
+    });
+  }
+  return assignments;
 }
 
-function walkCompiledPremise(
+function* walkCompiledPremise(
   program: QueryProgram,
   from: ProductStateKey,
-  rows: readonly AdjacencyRow[],
+  rows: Iterable<AdjacencyRow>,
   input: HyperedgeInput
-): readonly PremiseAssignment[] {
+): PathComputation<readonly PremiseAssignment[]> {
   if (from.target.kind !== "memory_entry") return [];
+  yield { kind: "work", retained_bytes: 1024 + Buffer.byteLength(JSON.stringify(program), "utf8") * 8 };
   const automaton = compileProgramAutomaton(program);
-  const queue: WalkNode[] = automaton.start.map((programState) => ({
-    objectId: productSubjectId(from),
-    programState,
-    milligrades: MILLIGRADE_TOP,
-    validity: openValidity(),
-    binding: from.binding_context,
-    derivations: [],
-    roots: [],
-    visited: []
-  }));
-  const found: PremiseAssignment[] = [];
+  const starts = automaton.start.map((program_state) => ({ ...from, program_state }));
+  const queue: ProductStateKey[] = [...starts];
+  const visited = new Map<string, ProductStateKey>();
+  const transitions: Transition[] = [];
+  const derivations = new Map<string, Derivation>();
+  const roots: Record<string, string> = {};
   const observed = input.observedStates ?? input.liveStates;
-  while (queue.length > 0) {
-    const node = queue.shift();
-    if (node === undefined) break;
-    const key = `${node.objectId}\0${node.programState}\0${node.binding}`;
-    if (node.visited.includes(key)) continue;
-    const visited = [...node.visited, key];
-    if (node.programState === ACCEPTING_PROGRAM_STATE) {
-      const terminal = terminalAssignment(
-        from, node.objectId, node.milligrades, node.validity, "path", node.binding
-      );
-      const root = node.roots.length === 0 ? terminal.derivation : joinDerivation("serial", node.roots);
-      found.push({ ...terminal, derivation: root, derivations: mergeDerivations([...node.derivations, root]) });
+  const retain = function* (node: ProductStateKey, assignment: PremiseAssignment, nextStates: readonly string[]): PathComputation<void> {
+    const revision = observedTargetRevision(assignment.target_object_id, input.sourceFacts, observed);
+    if (revision === undefined || node.target.kind !== "memory_entry") return;
+    for (const programState of nextStates) {
+      yield { kind: "work", retained_bytes: 1024 };
+      const to = retargetMemoryProduct(node, { object_id: assignment.target_object_id, source_revision: revision,
+        program_state: programState, binding_context: assignment.binding_context });
+      const edge: Transition = { schema_version: 1, from: node, to, applicable: true,
+        relation_kind: assignment.relation_kind, instance_id: assignment.derivation.derivation_id,
+        strength_milligrades: assignment.milligrades, validity: assignment.validity };
+      transitions.push(edge);
+      roots[transitionKey(edge)] = assignment.derivation.derivation_id;
+      for (const row of assignment.derivations) { yield { kind: "work", retained_bytes: 72 }; derivations.set(row.derivation_id, row); }
+      queue.push(to);
     }
-    const env = parseBindingContext(node.binding);
-    for (const variable of automaton.localVariables.get(node.programState) ?? []) env.delete(variable);
-    const revision = observedTargetRevision(node.objectId, input.sourceFacts, observed);
-    if (revision === undefined) continue;
-    const here = retargetMemoryProduct(from, {
-      object_id: node.objectId,
-      binding_context: encodeBindingContext(env),
-      source_revision: revision
-    });
+  };
+  for (let offset = 0; offset < queue.length; offset += 1) {
+    const node = queue[offset]!;
+    const key = productStateNodeId(node);
+    if (visited.has(key)) continue;
+    visited.set(key, node);
+    yield { kind: "work", retained_bytes: Buffer.byteLength(key, "utf8") + 96 };
+    const env = parseBindingContext(node.binding_context);
+    for (const variable of automaton.localVariables.get(node.program_state) ?? []) env.delete(variable);
+    const here = { ...node, binding_context: encodeBindingContext(env) };
     for (const hyperedge of automaton.hyperedgeAdvances) {
-      if (hyperedge.from !== node.programState) continue;
-      for (const effect of hyperedgeEffects(rows, hyperedge.hyperedge, {
+      if (hyperedge.from !== node.program_state) continue;
+      for (const step of hyperedgeEffectSteps(rows, hyperedge.hyperedge, {
         liveStates: [here],
         overlay: input.overlay,
         sourceFacts: input.sourceFacts,
         toProgramStates: hyperedge.to,
         observedStates: observed
       })) {
+        if (step.kind === "work") { yield step; continue; }
+        const effect = step.effect;
         if (effect.hyperedge === undefined || effect.derivation === undefined) continue;
-        const milligrades = effect.hyperedge.strength_milligrades < node.milligrades
-          ? effect.hyperedge.strength_milligrades
-          : node.milligrades;
-        for (const programState of hyperedge.to) {
-          queue.push({
-            objectId: productSubjectId(effect.hyperedge.to),
-            programState,
-            milligrades,
-            validity: effect.hyperedge.validity,
-            binding: effect.hyperedge.to.binding_context,
-            roots: [...node.roots, effect.derivation],
-            derivations: [...node.derivations, ...(effect.derivations ?? [effect.derivation])],
-            visited
-          });
-        }
+        const assignment = terminalAssignment(node, productSubjectId(effect.hyperedge.to), effect.hyperedge.strength_milligrades,
+          effect.hyperedge.validity, effect.hyperedge.relation_kind, effect.hyperedge.to.binding_context);
+        yield* retain(node, { ...assignment, derivation: effect.derivation, derivations: effect.derivations ?? [effect.derivation] }, hyperedge.to);
+        yield { kind: "work", retained_bytes: Buffer.byteLength(JSON.stringify(assignment), "utf8") };
       }
     }
-    for (const advance of advancesFor(automaton, node.programState, () => true)) {
+    for (const advance of advancesFor(automaton, node.program_state, () => true)) {
       for (const row of rows) {
         const assignment = assignmentFromRow(advance.relation, here, row, input);
+        yield { kind: "work", retained_bytes: assignment === undefined ? 0 : Buffer.byteLength(JSON.stringify(assignment), "utf8") };
         if (assignment === undefined) continue;
-        const milligrades = assignment.milligrades < node.milligrades
-          ? assignment.milligrades
-          : node.milligrades;
-        for (const programState of advance.to) {
-          queue.push({
-            objectId: assignment.target_object_id,
-            programState,
-            milligrades,
-            validity: assignment.validity,
-            binding: assignment.binding_context,
-            roots: [...node.roots, assignment.derivation],
-            derivations: [...node.derivations, ...assignment.derivations],
-            visited
-          });
-        }
+        yield* retain(node, assignment, advance.to);
       }
     }
   }
-  return found;
+  const groundDerivations: Derivation[] = [];
+  for (const row of derivations.values()) { yield { kind: "work", retained_bytes: 8 }; groundDerivations.push(row); }
+  const groundInput = { seeds: starts.map((state) => ({ schema_version: 1 as const, state, milligrades: MILLIGRADE_TOP })),
+    transitions, derivations: groundDerivations, transition_derivations: roots, allowance: 1 };
+  let grounded = groundedOutputDerivations(groundInput);
+  while (!grounded.complete) {
+    yield { kind: "work", retained_bytes: Math.max(0, grounded.retained_bytes) };
+    grounded = groundedOutputDerivations({ ...groundInput, progress: grounded.progress });
+  }
+  yield { kind: "work", retained_bytes: Math.max(0, grounded.retained_bytes) };
+  const forest: Derivation[] = [];
+  for (const row of grounded.progress.forest.values()) { yield { kind: "work", retained_bytes: 8 }; forest.push(row); }
+  const assignments: PremiseAssignment[] = [];
+  for (const [key, node] of visited) {
+    yield { kind: "work", retained_bytes: 256 };
+    if (node.program_state !== ACCEPTING_PROGRAM_STATE) continue;
+    const rootId = grounded.progress.root_map.get(key)?.[0];
+    const root = rootId === undefined ? undefined : grounded.progress.forest.get(rootId);
+    const grade = grounded.progress.grades.get(key);
+    if (root === undefined || grade === undefined) continue;
+    assignments.push({ ...terminalAssignment(from, productSubjectId(node), grade, openValidity(), "path", node.binding_context),
+      derivation: root, derivations: forest });
+  }
+  return assignments;
 }
-
-type WalkNode = Readonly<{
-  readonly objectId: string;
-  readonly programState: string;
-  readonly milligrades: number;
-  readonly validity: Transition["validity"];
-  readonly binding: string;
-  readonly roots: readonly Derivation[];
-  readonly derivations: readonly Derivation[];
-  readonly visited: readonly string[];
-}>;
 
 function openValidity(): Transition["validity"] {
   return { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
@@ -363,48 +400,56 @@ function assignmentFromRow(
   };
 }
 
-function orHyperedgeEffects(
+function* orHyperedgeEffects(
   from: ProductStateKey,
   grouped: readonly (readonly PremiseAssignment[])[],
   toProgramStates: readonly string[],
   input: HyperedgeInput
-): readonly HyperedgeEffect[] {
-  return grouped.flatMap((options) => options.flatMap((option) => completionEffects(from, [option], {
+): PathComputation<void> {
+  for (const options of grouped) for (const option of options) {
+    yield { kind: "work", retained_bytes: completionReservation([option]) };
+    for (const effect of yield* completionEffects(from, [option], {
     target: option.target_object_id,
     milligrades: option.milligrades,
     validity: option.validity,
     relation_kind: option.relation_kind,
     join: "or",
     binding: option.binding_context
-  }, toProgramStates, input)));
+    }, toProgramStates, input)) yield { kind: "effect", effect };
+  }
 }
 
-function andHyperedgeEffects(
+function* andHyperedgeEffects(
   from: ProductStateKey,
   grouped: readonly (readonly PremiseAssignment[])[],
   toProgramStates: readonly string[],
   input: HyperedgeInput
-): readonly HyperedgeEffect[] {
-  if (grouped.some((group) => group.length === 0)) return [];
-  const effects: HyperedgeEffect[] = [];
+): PathComputation<void> {
+  if (grouped.some((group) => group.length === 0)) return;
   for (const combo of cartesian(grouped)) {
+    yield { kind: "work" };
     const merged = mergeAssignments(combo);
     if (merged === undefined) continue;
     const first = merged[0];
     if (first === undefined) continue;
-    effects.push(...completionEffects(from, merged, {
+    yield { kind: "work", retained_bytes: completionReservation(merged) };
+    for (const effect of yield* completionEffects(from, merged, {
       target: first.target_object_id,
       milligrades: bottleneck(merged),
       validity: first.validity,
       relation_kind: first.relation_kind,
       join: "and",
       binding: first.binding_context
-    }, toProgramStates, input));
+    }, toProgramStates, input)) yield { kind: "effect", effect };
   }
-  return effects;
 }
 
-function completionEffects(
+function completionReservation(premises: readonly PremiseAssignment[]): number {
+  // Includes the temporary deduplication map, child references, and emitted metadata.
+  return 2048 + premises.reduce((sum, premise) => sum + 128 + premise.derivations.length * 80, 0);
+}
+
+function* completionEffects(
   from: ProductStateKey,
   premises: readonly PremiseAssignment[],
   spec: Readonly<{
@@ -417,7 +462,7 @@ function completionEffects(
   }>,
   toProgramStates: readonly string[],
   input: HyperedgeInput
-): readonly HyperedgeEffect[] {
+): PathComputation<readonly HyperedgeEffect[]> {
   if (from.target.kind !== "memory_entry") {
     return [{
       observation_id: `revision:${productSubjectId(from)}:${from.program_state}:${spec.target}`,
@@ -437,10 +482,13 @@ function completionEffects(
   }
   const children = premises.map((premise) => premise.derivation);
   const derivation = joinDerivation(spec.join, children);
-  const derivations = mergeDerivations([
-    ...premises.flatMap((premise) => premise.derivations),
-    derivation
-  ]);
+  const forest = new Map<string, Derivation>();
+  for (const premise of premises) for (const row of premise.derivations) {
+    yield { kind: "work", retained_bytes: 72 }; forest.set(row.derivation_id, row);
+  }
+  forest.set(derivation.derivation_id, derivation);
+  const derivations: Derivation[] = [];
+  for (const row of forest.values()) { yield { kind: "work", retained_bytes: 8 }; derivations.push(row); }
   return toProgramStates.map((programState) => {
     const to: ProductStateKey = retargetMemoryProduct(from, {
       object_id: spec.target,
@@ -488,11 +536,9 @@ function mergeAssignments(combo: readonly PremiseAssignment[]): PremiseAssignmen
   return combo.map((row) => ({ ...row, binding_context: merged }));
 }
 
-function cartesian<T>(groups: readonly (readonly T[])[]): T[][] {
-  return groups.reduce<T[][]>(
-    (acc, group) => acc.flatMap((prefix) => group.map((item) => [...prefix, item])),
-    [[]]
-  );
+function* cartesian<T>(groups: readonly (readonly T[])[], index = 0, prefix: readonly T[] = []): Generator<readonly T[]> {
+  if (index === groups.length) { yield prefix; return; }
+  for (const item of groups[index]!) yield* cartesian(groups, index + 1, [...prefix, item]);
 }
 
 function bottleneck(assignments: readonly PremiseAssignment[]): number {

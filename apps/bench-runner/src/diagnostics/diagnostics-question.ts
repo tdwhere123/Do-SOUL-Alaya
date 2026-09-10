@@ -32,7 +32,8 @@ export function buildQuestionDiagnostic(
   );
   const deliveredRankByIdentity = new Map(
     deliveredResults
-      .filter(isLongMemEvalGoldEligibleDiagnosticResult)
+      .filter((result): result is DiagnosticRecallResult & { object_id: string } =>
+        result.object_id !== undefined && isLongMemEvalGoldEligibleDiagnosticResult(result))
       .map((result) => [
         buildObjectIdentityKey(result.object_kind ?? "memory_entry", result.object_id),
         result.rank
@@ -176,7 +177,12 @@ function normalizeDeliveredResults(
         ? result.abstention_confidence_score
         : null;
     return {
-      object_id: result.object_id ?? "",
+      ...(result.object_id === undefined ? {} : { object_id: result.object_id }),
+      ...(result.target === undefined ? {} : { target: result.target }),
+      ...(result.hypothesis_id === undefined ? {} : { hypothesis_id: result.hypothesis_id }),
+      ...(result.output_binding === undefined ? {} : { output_binding: result.output_binding }),
+      ...(result.program_state === undefined ? {} : { program_state: result.program_state }),
+      ...(result.time_state === undefined ? {} : { time_state: result.time_state }),
       ...(objectKind === "memory_entry" ? {} : { object_kind: objectKind }),
       dimension: candidate?.dimension ?? null,
       rank: result.rank,

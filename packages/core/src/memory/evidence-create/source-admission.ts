@@ -85,6 +85,7 @@ export function retainedSourceSpeaker(
   const speakers = new Set<SourceSpeakerRole>();
   for (const role of roles) {
     if (role === "user" || role === "assistant" || role === "system") speakers.add(role);
+    else return undefined;
   }
   return speakers.size === 1 ? [...speakers][0] : undefined;
 }

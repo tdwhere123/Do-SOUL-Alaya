@@ -44,9 +44,6 @@ export function hydrateUtf8Chunk(
   }
   let end = Math.min(bytes.length, offset + byteLimit);
   while (end > offset && !isUtf8Boundary(bytes, end)) end -= 1;
-  if (end === offset) {
-    end = nextCodepointEnd(bytes, offset);
-  }
   const span = { start_offset: offset, end_offset: end, purpose: "native_structure" as const };
   const text = end === offset ? "" : sliceUtf8Span(content, assertSpanInContent(content, span));
   const complete = end === bytes.length;
@@ -58,12 +55,6 @@ export function hydrateUtf8Chunk(
     complete,
     next_offset: complete ? null : end
   };
-}
-
-function nextCodepointEnd(bytes: Buffer, offset: number): number {
-  const lead = bytes[offset]!;
-  const width = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
-  return Math.min(bytes.length, offset + width);
 }
 
 export function normalizeSourceLiteralNfc(text: string): string {

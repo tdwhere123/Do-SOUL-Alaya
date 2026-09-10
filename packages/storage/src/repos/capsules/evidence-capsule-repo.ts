@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { writeRetainedSourceChunks } from "../field/retained-source-chunks.js";
 import {
   type EvidenceCapsule,
   type EvidenceFactFrameFormationCapture,
@@ -39,6 +41,7 @@ import {
   type EvidenceCapsuleStatements
 } from "./statements/evidence-capsule-statements.js";
 import { RecallQualifiedEvidenceReader } from "./reads/recall-qualified-evidence-reader.js";
+import { BoundedCapsuleSourceReader } from "./reads/bounded-capsule-source-reader.js";
 import { prepareFactFrameFormationInsert } from
   "./writes/fact-frame-formation/capture-store.js";
 import { prepareSemanticFactorFormationInsert } from
@@ -94,6 +97,10 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private activeConnection(): StorageDatabase["connection"] {
     this.statementHolder.active();
     return this.db.connection;
+  }
+
+  public boundedSourceReader(): BoundedCapsuleSourceReader {
+    return new BoundedCapsuleSourceReader(this.db);
   }
 
   public async searchByKeyword(
@@ -225,8 +232,15 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       parsedCapsule.source_hash,
       parsedCapsule.run_id,
       parsedCapsule.workspace_id,
-      parsedCapsule.surface_id
+      parsedCapsule.surface_id,
+      `sha256:${createHash("sha256").update(parsedCapsule.excerpt ?? parsedCapsule.gist, "utf8").digest("hex")}`,
+      Buffer.byteLength(parsedCapsule.excerpt ?? parsedCapsule.gist, "utf8"),
+      parsedCapsule.event_anchor?.occurred_at ?? null
     );
+    const retained = parsedCapsule.excerpt ?? parsedCapsule.gist;
+    writeRetainedSourceChunks(this.db, { workspaceId: parsedCapsule.workspace_id, kind: "evidence_capsule",
+      rootId: parsedCapsule.object_id, revision: parsedCapsule.updated_at,
+      digest: `sha256:${createHash("sha256").update(retained, "utf8").digest("hex")}` }, retained);
     for (const projection of searchProjections) {
       this.statements.createSearchProjectionStatement.run(
         parsedCapsule.object_id,

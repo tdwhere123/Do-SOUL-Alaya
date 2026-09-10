@@ -1,12 +1,14 @@
 import {
   solveMaxMinField,
   type MaxMinTransition,
-  type MaxMinWorkItem
+  type MaxMinWorkItem,
+  type MaxMinWorkQueue
 } from "@do-soul/alaya-graph-algorithms";
 import {
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
   canonicalProductIdentity,
+  canonicalIndexEntryIdentity,
   type CompletenessReport,
   type DerivationKind,
   type FieldSnapshot,
@@ -16,6 +18,8 @@ import {
   type SeedActivation,
   type Transition
 } from "@do-soul/alaya-protocol";
+import { prepareFieldGraph, type FieldGraphAdditions, type PreparedFieldGraph } from "../engine/field-graph-preparation.js";
+import type { RetainedRows } from "../engine/retained-sequence.js";
 
 export type BindMaxMinSuccess = Readonly<{
   readonly kind: "bound";
@@ -29,7 +33,10 @@ export type BindMaxMinSuccess = Readonly<{
   readonly guaranteed_complete?: boolean;
   readonly guaranteed_values?: ReadonlyMap<string, number>;
   readonly guaranteed_worklist?: readonly MaxMinWorkItem[];
-  readonly guaranteed_graph_key?: string;
+  readonly preparation?: PreparedFieldGraph;
+  readonly guaranteed_preparation?: PreparedFieldGraph;
+  readonly work_queue?: MaxMinWorkQueue;
+  readonly guaranteed_queue?: MaxMinWorkQueue;
 }>;
 
 export type BindMaxMinRejection = Readonly<{
@@ -42,17 +49,26 @@ export type BindMaxMinResult = BindMaxMinSuccess | BindMaxMinRejection;
 export type BindMaxMinInput = Readonly<{
   readonly query_id: string;
   readonly snapshot_id: string;
-  readonly seeds: readonly SeedActivation[];
-  readonly transitions: readonly Transition[];
+  readonly seeds: RetainedRows<SeedActivation>;
+  readonly transitions: RetainedRows<Transition>;
   readonly budget: RequestBudget;
-  readonly facets?: FieldSnapshot["facets"];
+  readonly facets?: RetainedRows<FieldSnapshot["facets"][number]>;
   readonly prior_values?: ReadonlyMap<string, number>;
   readonly worklist?: readonly MaxMinWorkItem[];
   readonly work_limit?: number;
+  readonly identities?: ReadonlyMap<string, ProductStateKey>;
+  readonly incremental?: Readonly<{ prior?: PreparedFieldGraph; additions: FieldGraphAdditions; queue?: MaxMinWorkQueue }>;
 }>;
 
 export function productStateNodeId(key: ProductStateKey): string {
   return canonicalProductIdentity(key);
+}
+
+export function productIndexOrderKey(state: ProductStateKey): string {
+  return canonicalIndexEntryIdentity({ schema_version: 1, target: state.target,
+    hypothesis_id: state.hypothesis_id, output_binding: state.binding_context,
+    program_state: state.program_state, time_state: state.time_state,
+    role: "associated", association_milligrades: 0, claim: "unknown", explanation_ids: [] });
 }
 
 export function projectLegalDerivationStep(
@@ -98,45 +114,52 @@ export function bindMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
   if (admitRequestBudget(input.budget) === "resource_rejected") {
     return { kind: "resource_rejected", completeness: resourceRejectedCompleteness() };
   }
-  const keys = collectKeys(input.seeds, input.transitions);
-  const nodeIds = [...keys.keys()];
-  const seeds = new Map<string, number>();
-  for (const seed of input.seeds) {
-    seeds.set(productStateNodeId(seed.state), seed.milligrades);
-  }
-  const legalTransitions = input.transitions.filter((transition) => transition.applicable);
+  const prepared = input.incremental === undefined ? undefined : prepareFieldGraph({ prior: input.incremental.prior,
+    additions: input.incremental.additions, priorValues: input.prior_values, workQueue: input.incremental.queue,
+    workLimit: input.work_limit ?? Number.MAX_SAFE_INTEGER });
+  const keys = input.identities ?? prepared?.preparation.keys ?? collectKeys(input.seeds, input.transitions);
+  const seeds = prepared?.seedChanges ?? new Map(input.seeds.map((seed) => [productStateNodeId(seed.state), seed.milligrades]));
+  const legalTransitions = prepared === undefined ? input.transitions.filter((transition) => transition.applicable) : undefined;
   const solved = solveMaxMinField({
-    nodeIds,
+    nodeIds: prepared === undefined ? [...keys.keys()] : [],
     seeds,
-    transitions: legalTransitions.map(toMaxMinTransition),
+    transitions: legalTransitions?.map(toMaxMinTransition) ?? [],
     bottom: MILLIGRADE_BOTTOM,
     top: MILLIGRADE_TOP,
     ...(input.prior_values === undefined ? {} : { priorValues: input.prior_values }),
     ...(input.worklist === undefined ? {} : { worklist: input.worklist }),
-    ...(input.work_limit === undefined ? {} : { workLimit: input.work_limit })
+    ...(input.work_limit === undefined ? {} : { workLimit: Math.max(0, input.work_limit - (prepared?.steps ?? 0)) }),
+    ...(prepared === undefined ? {} : { preparedGraph: prepared.preparation.graph, workQueue: prepared.queue })
   });
+  let snapshotSeeds: FieldSnapshot["seeds"] | undefined;
+  let snapshotValues: FieldSnapshot["values"] | undefined;
+  let snapshotTransitions: FieldSnapshot["retained_transitions"] | undefined;
+  let snapshotFacets: FieldSnapshot["facets"] | undefined;
   return {
     kind: "bound",
     values: solved.values,
-    solver_steps: solved.steps,
+    solver_steps: solved.steps + (prepared?.steps ?? 0),
     solver_runs: 1,
-    solver_complete: solved.complete,
-    remaining_worklist: solved.remainingWorklist,
+    solver_complete: solved.complete && (prepared?.complete ?? true),
+    get remaining_worklist() { return solved.remainingWorklist; },
+    work_queue: solved.workQueue,
+    preparation: prepared?.preparation,
     snapshot: {
       schema_version: 1,
       snapshot_id: input.snapshot_id,
       query_id: input.query_id,
-      seeds: input.seeds,
-      values: fieldValues(keys, solved.values),
-      retained_transitions: retainedProtocolTransitions(legalTransitions, solved.retainedTransitions),
-      facets: input.facets ?? []
+      get seeds() { return snapshotSeeds ??= [...input.seeds]; },
+      get values() { return snapshotValues ??= fieldValues(keys, solved.values); },
+      get retained_transitions() { return snapshotTransitions ??= prepared === undefined
+        ? retainedProtocolTransitions(legalTransitions!, solved.retainedTransitions) : input.transitions.filter((row) => row.applicable); },
+      get facets() { return snapshotFacets ??= [...input.facets ?? []]; }
     }
   };
 }
 
 function collectKeys(
-  seeds: readonly SeedActivation[],
-  transitions: readonly Transition[]
+  seeds: RetainedRows<SeedActivation>,
+  transitions: RetainedRows<Transition>
 ): Map<string, ProductStateKey> {
   const keys = new Map<string, ProductStateKey>();
   for (const seed of seeds) keys.set(productStateNodeId(seed.state), seed.state);

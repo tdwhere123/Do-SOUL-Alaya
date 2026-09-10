@@ -6,6 +6,7 @@ import {
   type DerivationKind
 } from "@do-soul/alaya-protocol";
 import { projectLegalDerivationStep } from "../reference/bind-max-min.js";
+import { traceDerivationForest } from "./derivation-provenance.js";
 
 export { projectLegalDerivationStep };
 
@@ -25,6 +26,7 @@ export function leafDerivation(input: {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     derivation_id: clipId(input.derivation_id),
     kind: "leaf",
+    provenance_layout: "local_leaves.v1",
     children: Object.freeze([]),
     observation_ids: Object.freeze([input.observation_id]),
     leaf_ids: Object.freeze([leafId]),
@@ -55,15 +57,22 @@ export function joinDerivation(
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     derivation_id: clipId(derivationId),
     kind,
+    provenance_layout: "local_leaves.v1",
     children: Object.freeze(children.map((child) => child.derivation_id)),
-    observation_ids: Object.freeze(unique(children.flatMap((child) => child.observation_ids))),
-    leaf_ids: Object.freeze(unique(children.flatMap((child) => child.leaf_ids))),
-    source_revisions: Object.freeze(unique(children.flatMap((child) => child.source_revisions))),
+    observation_ids: Object.freeze([]),
+    leaf_ids: Object.freeze([]),
+    source_revisions: Object.freeze([]),
     ...(extras.witness_id === undefined ? {} : { witness_id: extras.witness_id })
   });
 }
 
-export function derivationForest(rows: readonly Derivation[]): DerivationForest {
+export type DerivationRootLookup = Readonly<Record<string, string>> | Readonly<{ get(id: string): string | undefined }>;
+
+export function derivationRootAt(roots: DerivationRootLookup, key: string): string | undefined {
+  return typeof roots.get === "function" ? roots.get(key) : (roots as Readonly<Record<string, string>>)[key];
+}
+
+export function derivationForest(rows: import("./retained-sequence.js").RetainedRows<Derivation>): DerivationForest {
   const forest = new Map<string, Derivation>();
   for (const row of rows) forest.set(row.derivation_id, row);
   return forest;
@@ -82,22 +91,21 @@ export function evaluateDerivation(
   rootId: string,
   leafGrades: LeafGrades
 ): number | undefined {
-  const current = forest.get(rootId);
-  if (current === undefined) return undefined;
-  if (current.kind === "leaf") {
-    const leafId = current.leaf_ids[0] ?? current.derivation_id;
-    return leafGrades.get(leafId) ?? leafGrades.get(current.derivation_id);
-  }
-  const childGrades: number[] = [];
-  for (const childId of current.children) {
-    const grade = evaluateDerivation(forest, childId, leafGrades);
-    if (grade === undefined) {
-      if (current.kind === "or") continue;
-      return undefined;
+  const traced = traceDerivationForest({ forest, roots: [rootId] });
+  if (!traced.complete) return undefined;
+  const values = new Map<string, number>();
+  for (const node of traced.traversal.postorder.values()) {
+    if (node.kind === "leaf") {
+      const grade = leafGrades.get(node.leaf_ids[0] ?? node.derivation_id) ?? leafGrades.get(node.derivation_id);
+      if (grade !== undefined) values.set(node.derivation_id, grade);
+      continue;
     }
-    childGrades.push(grade);
+    const grades = node.children.flatMap((id) => values.has(id) ? [values.get(id)!] : []);
+    if (grades.length > 0 && (node.kind === "or" || grades.length === node.children.length)) {
+      values.set(node.derivation_id, projectLegalDerivationStep(node.kind, grades));
+    }
   }
-  return projectLegalDerivationStep(current.kind, childGrades);
+  return values.get(rootId);
 }
 
 export function withdrawDerivation(
@@ -117,7 +125,7 @@ export function derivationsAfterWithdraw(
   return reviseDerivations(rows, withdrawnLeafId).derivations;
 }
 
-export function reviseDerivations(rows: readonly Derivation[], withdrawnLeafId: string): {
+export function reviseDerivations(rows: import("./retained-sequence.js").RetainedRows<Derivation>, withdrawnLeafId: string): {
   readonly derivations: readonly Derivation[];
   readonly roots: ReadonlyMap<string, string | undefined>;
 } {
@@ -151,7 +159,7 @@ export function derivationIdentity(
   kind: DerivationKind,
   children: readonly Derivation[]
 ): string {
-  return clipId(`${kind}:${children.map((child) => child.derivation_id).join("+")}`);
+  return clipId(`local-leaves.v1:${kind}:${children.map((child) => child.derivation_id).join("+")}`);
 }
 
 export function seedDerivationIdentity(productNodeId: string): string {
@@ -160,10 +168,6 @@ export function seedDerivationIdentity(productNodeId: string): string {
 
 export function ruleDerivationIdentity(transitionKeyValue: string): string {
   return clipId(`rule:${transitionKeyValue}`);
-}
-
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values)];
 }
 
 function clipId(value: string): string {

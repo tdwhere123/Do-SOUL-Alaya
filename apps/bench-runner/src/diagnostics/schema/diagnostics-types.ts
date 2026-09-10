@@ -142,6 +142,11 @@ export interface FineAssessmentPrunedCandidateDiagnostic {
 
 export interface DiagnosticRecallResultInput {
   readonly object_id?: string;
+  readonly target?: import("@do-soul/alaya-protocol").RecallTargetRef;
+  readonly hypothesis_id?: string;
+  readonly output_binding?: string;
+  readonly program_state?: string;
+  readonly time_state?: string;
   readonly object_kind?: string | null;
   readonly rank: number;
   readonly relevance_score: number;

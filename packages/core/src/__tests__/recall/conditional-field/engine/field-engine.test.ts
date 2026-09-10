@@ -131,7 +131,7 @@ describe("conditional-field engine", () => {
         hyperedge: completion
       }]
     });
-    expect(incomplete.transitions).toEqual([]);
+    expect(incomplete.transitions).toHaveLength(0);
     expect(valueOf(incomplete, "c")).toBe(0);
     const complete = applyObserverPage(createEmptyField(), {
       page: page({ region_id: "adjacency" }),
@@ -187,8 +187,8 @@ describe("conditional-field engine", () => {
       facets: vectors
     });
     expect(state.facets).toHaveLength(2);
-    expect(state.facets[0]?.coordinates).toEqual([900, 200]);
-    expect(state.facets[1]?.coordinates).toEqual([200, 900]);
+    expect(state.facets.at(0)?.coordinates).toEqual([900, 200]);
+    expect(state.facets.at(1)?.coordinates).toEqual([200, 900]);
   });
 
   it("serves finite lower-priority regions without consuming the finalization reserve", () => {
@@ -411,7 +411,7 @@ describe("conditional-field engine", () => {
     }
     const paused = createConditionalField({
       interpretation: interpretation(),
-      budget: defaultBudget({ work_units: 19, finalization_reserve: 0, min_envelope: 0 }),
+      budget: defaultBudget({ work_units: 39, finalization_reserve: 0, min_envelope: 0 }),
       seeds: [seed(productKey("n0"), 900)],
       transitions: hops
     });

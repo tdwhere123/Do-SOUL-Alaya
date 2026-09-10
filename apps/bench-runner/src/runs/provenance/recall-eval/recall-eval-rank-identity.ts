@@ -19,8 +19,11 @@ export const RECALL_EVAL_RANK_IDENTITY_FILENAME =
 export interface RecallEvalRankIdentityInput {
   readonly questionId: string;
   readonly deliveredObjects: readonly Readonly<{
-    object_id: string;
+    object_id?: string;
     object_kind: string;
+    target?: import("@do-soul/alaya-protocol").RecallTargetRef;
+    hypothesis_id?: string; output_binding?: string;
+    program_state?: string; time_state?: string;
   }>[];
 }
 

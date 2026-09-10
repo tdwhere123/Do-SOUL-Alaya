@@ -261,6 +261,11 @@ function buildDeliveredResults(
 ) {
   return recallResult.results.slice(0, 10).map((pointer, index) => ({
     object_id: pointer.object_id,
+    target: pointer.target,
+    hypothesis_id: pointer.hypothesis_id,
+    output_binding: pointer.output_binding,
+    program_state: pointer.program_state,
+    time_state: pointer.time_state,
     object_kind: pointer.object_kind,
     rank: index + 1,
     relevance_score: pointer.relevance_score,

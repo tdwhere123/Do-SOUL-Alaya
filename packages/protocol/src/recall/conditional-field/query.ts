@@ -257,11 +257,40 @@ export const QueryTimeWindowSchema = z
   .strict()
   .readonly();
 
+export const StoredCosineObligationSchema = z.object({
+  obligation_id: ConditionalFieldIdSchema,
+  producer_id: z.literal("stored.cosine.pair.v1"),
+  provider_kind: ConditionalFieldIdSchema,
+  model_id: ConditionalFieldIdSchema,
+  schema_version: NonNegativeIntSchema,
+  dimensions: z.number().int().min(1).max(16384),
+  domain: z.literal("cosine.unit.v1"),
+  normalization: z.literal("l2.dot.v1"),
+  raw_threshold: z.number().finite().min(-1).max(1),
+  transfer_id: z.literal("policy.cosine.linear.milligrade.v1"),
+  transfer_version: z.literal("1"),
+  policy_defined: z.literal(true)
+}).strict().readonly();
+
+export const StoredCosineAdmissionSchema = z.object({
+  registry_version: z.literal("stored.cosine.admission.v1"),
+  join: z.enum(["any", "all"]),
+  obligations: z.array(StoredCosineObligationSchema).min(1).max(16).readonly()
+}).strict().superRefine((value, context) => {
+  if (new Set(value.obligations.map((row) => row.obligation_id)).size !== value.obligations.length) {
+    context.addIssue({ code: "custom", message: "stored cosine obligation identities must be unique" });
+  }
+}).readonly();
+
+export type StoredCosineObligation = z.infer<typeof StoredCosineObligationSchema>;
+export type StoredCosineAdmission = z.infer<typeof StoredCosineAdmissionSchema>;
+
 export const QueryInterpretationProposalSchema = z
   .object({
     schema_version: SchemaVersionSchema,
     original_query_digest: Sha256DigestSchema,
     producer_id: ConditionalFieldIdSchema,
+    stored_cosine_admission: StoredCosineAdmissionSchema.optional(),
     conditions: z.array(GuardSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     input_limits: z
       .object({

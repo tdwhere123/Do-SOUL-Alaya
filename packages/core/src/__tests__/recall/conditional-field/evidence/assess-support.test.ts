@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { localLeafIds, traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 import {
   COMMON_CAUSE_PROPOSITION_KIND,
   assessEvidence
@@ -93,7 +94,9 @@ describe("conditional-field evidence support", () => {
       ])]
     }));
     expect(assessed.records[0]?.witnesses.filter((witness) => witness.complete)).toHaveLength(2);
-    expect(assessed.derivations.some((row) => row.kind === "and" && row.leaf_ids.includes("a"))).toBe(true);
+    const forest = new Map(assessed.derivations.map((row) => [row.derivation_id, row]));
+    expect(assessed.derivations.some((row) => row.kind === "and"
+      && localLeafIds(traceDerivationForest({ forest, roots: [row.derivation_id] }).traversal).has("a"))).toBe(true);
     expect(assessed.derivations.some((row) => row.leaf_ids.includes("c"))).toBe(true);
     expect(assessed.explanation_ids).toEqual(expect.arrayContaining(["and-ab/supports", "or-c/supports"]));
   });

@@ -135,8 +135,11 @@ const CREATE_EVIDENCE_CAPSULE_SQL = `
         source_hash,
         run_id,
         workspace_id,
-        surface_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        surface_id,
+        retained_content_digest,
+        retained_content_bytes,
+        retained_source_event_time
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 const CREATE_EVIDENCE_FACT_FRAME_FORMATION_SQL = `

@@ -42,13 +42,11 @@ describe("memory payload hydrate revision pin", () => {
 
   it("does not deliver retained facts from a different memory revision", () => {
     const payload = new BoundedIndexPayload({
-      sourceFacts: {
-        memory: {
+      sourceFacts: new Map([["memory", {
           object_id: "memory",
           source_revision: "rev2",
           content: "stale facts body"
-        }
-      },
+        }]]),
       readers: {
         source: ({ objectId }) => ({
           row: {

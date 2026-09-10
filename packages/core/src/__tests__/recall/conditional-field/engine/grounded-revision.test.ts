@@ -7,6 +7,7 @@ import { groundedOutputDerivations } from "../../../../recall/conditional-field/
 import { evaluateGuard } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
+import { localLeafIds, traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
 import { defaultBudget, defaultView, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 import { assessUnknownCause } from "../../../../recall/runtime/semantic-attribution.js";
 
@@ -53,8 +54,9 @@ describe("grounded retained derivation revisions", () => {
       ...(changedPart === "derivation" ? { derivations: base.derivations.map((node) => node.kind !== "leaf" ? node : {
         ...node, observation_ids: ["replacement"], leaf_ids: ["replacement"], source_revisions: ["after"] }) } : {}),
       ...(changedPart === "root-map" ? { transition_derivations: Object.fromEntries(
-        Object.entries(base.transition_derivations).map(([key, root]) => [key, `retired:${root}`])) } : {}),
-      ...(changedPart === "source-revision" ? { source_facts: { seed: { object_id: "seed", source_revision: "after" } } } : {})
+        [...base.transition_derivations].map(([key, root]) => [key, `retired:${root}`])) } : {}),
+      ...(changedPart === "source-revision" ? { seeds: base.seeds.map((seed) => ({ ...seed, state: { ...seed.state,
+        target: seed.state.target.kind === "memory_entry" ? { ...seed.state.target, source_revision: "after" } : seed.state.target } })) } : {})
     };
     const fresh = groundedOutputDerivations(changed);
     const resumed = groundedOutputDerivations({ ...changed, progress: before.progress });
@@ -73,9 +75,9 @@ describe("grounded retained derivation revisions", () => {
       cursor: { schema_version: 1, cursor_id: "seed", query_id: low.query_id, snapshot_id: low.snapshot_id,
         region_id: "seed", position: "stronger", committed_through: "stronger" },
       observations: [], outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] },
-      effects: [{ observation_id: "stronger-seed", seed: { ...low.seeds[0]!, milligrades: 900 } }] });
+      effects: [{ observation_id: "stronger-seed", seed: { ...low.seeds.at(0)!, milligrades: 900 } }] });
     expect(stronger.seeds).toHaveLength(low.seeds.length);
-    expect(stronger.seeds[0]!.milligrades).toBe(900);
+    expect(stronger.seeds.at(0)!.milligrades).toBe(900);
     const resumed = groundedOutputDerivations({ ...stronger, allowance: 100, progress: before.progress });
     expect(resumed.derivations.find((node) => node.kind === "leaf")?.association_milligrades).toBe(900);
     expect(resumed.work).toBeGreaterThan(0);
@@ -188,7 +190,7 @@ describe("grounded retained derivation revisions", () => {
     const entry = index.entries.find((entry) => entry.object_id === "end")!;
     expect(entry.explanation_ids.length).toBeGreaterThan(0);
     const forest = new Map(index.explanations?.map((row) => [row.derivation_id, row]));
-    for (const root of entry.explanation_ids) expect(forest.get(root)?.leaf_ids).toContain("opaque-assertion");
+    for (const root of entry.explanation_ids) expect(localLeafIds(traceDerivationForest({ forest, roots: [root] }).traversal)).toContain("opaque-assertion");
     for (const node of forest.values()) for (const child of node.children) expect(forest.has(child)).toBe(true);
   });
 
@@ -206,12 +208,12 @@ describe("grounded retained derivation revisions", () => {
     expect(index.entries.map((entry) => entry.role).sort()).toEqual(["associated", "requested"]);
   });
 
-  it("named guard needs positive evidence and retains absent versus false", () => {
+  it("an unsupported named predicate cannot acquire truth from arbitrary local annotations", () => {
     const guard = { schema_version: 1 as const, kind: "query_predicate" as const, verdict: "unresolved" as const,
       predicate_name: "proven_root_cause", variable: "x", time_scope: "none" as const };
     const env = new Map([["x", "seed"]]);
     expect(evaluateGuard(guard, env, new Map())).toBe("unresolved");
-    expect(evaluateGuard(guard, env, new Map([["seed", { object_id: "seed", predicates: { proven_root_cause: false } }]]))).toBe("false");
-    expect(evaluateGuard(guard, env, new Map([["seed", { object_id: "seed", predicates: { proven_root_cause: true } }]]))).toBe("true");
+    expect(evaluateGuard(guard, env, new Map([["seed", { object_id: "seed", predicates: { proven_root_cause: false } }]]))).toBe("unresolved");
+    expect(evaluateGuard(guard, env, new Map([["seed", { object_id: "seed", predicates: { proven_root_cause: true } }]]))).toBe("unresolved");
   });
 });

@@ -17,8 +17,7 @@ import {
   toSourceObserverRow,
   toSourceRootObserverRow,
   type ConditionalFieldRecallPortResult,
-  type ObserverReaders,
-  type StoredEmbeddingVector
+  type ObserverReaders
 } from "@do-soul/alaya-core";
 import {
   SqliteEvidenceCapsuleRepo,
@@ -29,12 +28,7 @@ import {
   SqliteSourceRootRecallReader,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { decodeValidEmbeddingBlob } from "../../../../../packages/storage/src/repos/memory/embedding-vector-validity.js";
-import {
-  BOUNDED_EMBEDDING_INDEX_SQL,
-  readBoundedEmbeddingIds,
-  readUniqueEmbeddingProfile
-} from "../../../../../packages/storage/src/repos/memory/reads/memory-embedding-bounded-read.js";
+import { storedMeasurementReaders } from "./stored-measurement-readers.js";
 import { asPayload, readString } from "./payload-readers.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 
@@ -145,14 +139,18 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
         resourceLimited: page.resourceLimited
       };
     },
+    sourceRootMetadataByteLimit: 8192,
+    sourceRootChunkByteLimit: 4096,
     sourceRoots: (input) => {
       const page = sourceRoots.page({
         workspaceId: input.workspaceId,
         query: input.query,
         limit: input.limit,
         nativeLimit: input.nativeLimit,
+        workLimit: input.workLimit,
         afterCursor: input.afterCursor,
-        byteLimit: input.byteLimit
+        byteLimit: input.byteLimit,
+        nativeByteLimit: input.nativeByteLimit
       });
       return {
         rows: page.rows.map(toSourceRootObserverRow),
@@ -160,6 +158,8 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
         nativeBytes: page.nativeBytes,
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
+        metadataBytes: page.metadataBytes,
+        nativeWork: page.nativeWork,
         truncated: page.truncated,
         committedThrough: page.committedThrough,
         unavailable: page.unavailable
@@ -180,12 +180,15 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
           evidence_object_id: input.evidenceObjectId ?? (input.rootKind === "evidence_capsule" ? input.rootId : null)
         }),
         input.byteLimit ?? 65536,
-        input.offset ?? 0
+        input.offset ?? 0,
+        input.nativeByteLimit
       );
       return {
         row: page.row === null ? null : toSourceRootObserverRow(page.row),
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
+        metadataBytes: page.metadataBytes,
+        nativeWork: page.nativeWork,
         unavailable: page.unavailable,
         resourceLimited: page.resourceLimited
       };
@@ -210,117 +213,6 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
     },
     snapshotPin: (workspaceId) => projection.observablePin(workspaceId),
     ...storedMeasurementReaders(database)
-  };
-}
-
-type StoredVectorRow = Readonly<{
-  readonly object_id: string;
-  readonly provider_kind: string;
-  readonly model_id: string;
-  readonly schema_version: number;
-  readonly dimensions: number;
-  readonly content_hash: string;
-  readonly embedding_blob: Buffer;
-}>;
-
-function storedMeasurementReaders(database: StorageDatabase): Pick<ObserverReaders, "embeddingIds" | "measureStoredPair"> {
-  database.connection.exec(BOUNDED_EMBEDDING_INDEX_SQL);
-  const objectVector = database.connection.prepare(
-    `SELECT object_id, provider_kind, model_id, schema_version, dimensions, content_hash, embedding_blob
-     FROM memory_embeddings
-     WHERE workspace_id = ? AND object_id = ? AND vector_valid = 1`
-  );
-  const queryVector = database.connection.prepare(
-    `SELECT object_id, provider_kind, model_id, schema_version, dimensions, content_hash, embedding_blob
-     FROM memory_embeddings
-     WHERE workspace_id = ? AND content_hash = ? AND vector_valid = 1
-       AND provider_kind = ? AND model_id = ? AND schema_version = ? AND dimensions = ?
-     ORDER BY object_id ASC LIMIT 1`
-  );
-  return {
-    embeddingIds: (input) => {
-      const maxRows = Math.min(512, Math.max(0, input.maxRows));
-      const lookup = readUniqueEmbeddingProfile(database, input.workspaceId, input.modelId);
-      if (lookup.status !== "unique" || lookup.profile === undefined) {
-        return {
-          objectIds: [],
-          rowVisits: lookup.rowVisits,
-          metadataUtf8Bytes: 0,
-          truncated: false,
-          committedThrough: input.afterObjectId,
-          domainStatus: lookup.status
-        };
-      }
-      if (maxRows === 0) {
-        // Unique domain with no identity budget is interrupt, not missing.
-        return {
-          objectIds: [],
-          rowVisits: lookup.rowVisits,
-          metadataUtf8Bytes: 0,
-          truncated: true,
-          committedThrough: input.afterObjectId
-        };
-      }
-      const page = readBoundedEmbeddingIds(database, input.workspaceId, {
-        providerKind: lookup.profile.providerKind,
-        modelId: lookup.profile.modelId,
-        schemaVersion: lookup.profile.schemaVersion,
-        maxRows,
-        maxMetadataUtf8Bytes: 256
-      }, input.afterObjectId);
-      return {
-        objectIds: page.objectIds,
-        rowVisits: lookup.rowVisits + page.rowVisits,
-        metadataUtf8Bytes: page.metadataUtf8Bytes,
-        truncated: page.truncated,
-        committedThrough: page.committedThrough
-      };
-    },
-    measureStoredPair: (input) => {
-      const objectRow = objectVector.get(input.workspaceId, input.objectId) as StoredVectorRow | undefined;
-      const object = objectRow === undefined ? null : vectorFromRow(objectRow);
-      if (objectRow === undefined || object === null) {
-        return {
-          object: null,
-          query: null,
-          objectStatus: objectRow === undefined ? "missing" : "unavailable",
-          queryStatus: "missing",
-          rowVisits: 1,
-          bytesRead: 0
-        };
-      }
-      const queryRow = queryVector.get(
-        input.workspaceId,
-        input.queryDigest,
-        object.provider_kind,
-        object.model_id,
-        object.schema_version,
-        object.dimensions
-      ) as StoredVectorRow | undefined;
-      const query = queryRow === undefined ? null : vectorFromRow(queryRow);
-      return {
-        object,
-        query,
-        objectStatus: "ready",
-        queryStatus: query === null ? (queryRow === undefined ? "missing" : "unavailable") : "ready",
-        rowVisits: 2,
-        bytesRead: objectRow.embedding_blob.byteLength + (queryRow?.embedding_blob.byteLength ?? 0)
-      };
-    }
-  };
-}
-
-function vectorFromRow(row: StoredVectorRow): StoredEmbeddingVector | null {
-  const embedding = decodeValidEmbeddingBlob(row.embedding_blob, row.dimensions);
-  if (embedding === null) return null;
-  return {
-    object_id: row.object_id,
-    provider_kind: row.provider_kind,
-    model_id: row.model_id,
-    schema_version: row.schema_version,
-    dimensions: row.dimensions,
-    content_hash: row.content_hash,
-    embedding
   };
 }
 

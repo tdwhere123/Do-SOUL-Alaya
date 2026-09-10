@@ -11,7 +11,7 @@ import {
   adjacencyEffectsForRows,
   seedProgramStates
 } from "../../../../recall/conditional-field/engine/path-composition.js";
-import { RELATION_MILLIGRADES } from "../../../../recall/runtime/conditional-field-observe.js";
+import { RELATION_ROUTING } from "../../../../recall/runtime/conditional-field-observe.js";
 import { defaultView, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
 const AS_OF = "2026-09-07T00:00:00.000Z";
@@ -36,7 +36,7 @@ describe("seam identity for transitions", () => {
       interpretation: interpretation(program),
       asOf: AS_OF,
       liveStates: [from],
-      overlay: RELATION_MILLIGRADES,
+      overlay: RELATION_ROUTING,
       sourceFacts: new Map([
         ["mem-a", { object_id: "mem-a", source_revision: "rev-a" }],
         ["mem-b", { object_id: "mem-b", source_revision: "rev-b" }]
@@ -70,7 +70,7 @@ describe("seam identity for transitions", () => {
       interpretation: interpretation(program),
       asOf: AS_OF,
       liveStates: [from],
-      overlay: RELATION_MILLIGRADES
+      overlay: RELATION_ROUTING
     });
     expect(effects.some((effect) => effect.transition !== undefined)).toBe(false);
     expect(effects.some((effect) => effect.unresolved_guard === true)).toBe(true);
@@ -101,7 +101,7 @@ describe("seam identity for transitions", () => {
       interpretation: interpretation(program),
       asOf: AS_OF,
       liveStates: [from],
-      overlay: RELATION_MILLIGRADES,
+      overlay: RELATION_ROUTING,
       sourceFacts: new Map([
         ["mem-b", { object_id: "mem-b", source_revision: "rev-b" }]
       ])
@@ -110,7 +110,7 @@ describe("seam identity for transitions", () => {
       interpretation: interpretation(program),
       asOf: AS_OF,
       liveStates: [from],
-      overlay: RELATION_MILLIGRADES,
+      overlay: RELATION_ROUTING,
       sourceFacts: new Map([
         ["mem-b", { object_id: "mem-b", source_revision: "rev-b" }]
       ])
@@ -131,7 +131,7 @@ describe("seam identity for transitions", () => {
       interpretation: interpretation(andProgram),
       asOf: AS_OF,
       liveStates: [{ ...from, program_state: seedProgramStates(andProgram)[0]! }],
-      overlay: { ...RELATION_MILLIGRADES, rel_b: { milligrades: 800, applicable: true } },
+      overlay: { ...RELATION_ROUTING, rel_b: { milligrades: 800, applicable: true } },
       sourceFacts: new Map([["mem-b", { object_id: "mem-b", source_revision: "rev-b" }]])
     })).not.toThrow();
   });
@@ -243,7 +243,7 @@ describe("seam identity for transitions", () => {
       }),
       asOf: AS_OF,
       liveStates: [from],
-      overlay: RELATION_MILLIGRADES
+      overlay: RELATION_ROUTING
     });
     expect(effects.some((effect) => effect.discovery?.subject_id === "routed")).toBe(true);
     expect(effects.every((effect) => effect.transition === undefined)).toBe(true);

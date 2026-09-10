@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MemorySearchResultSchema,
   SoulMemorySearchResponseSchema,
+  indexEntryCacheKey,
   sourceIndexEntry
 } from "@do-soul/alaya-protocol";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
@@ -19,6 +20,20 @@ function memoryEntry(objectId = "memory-1") {
 }
 
 describe("conditional-field result encoding", () => {
+  it("binds a clipped source span to final UTF-8 exposure", () => {
+    const root = sourceIndexEntry({ workspace_id: "ws", root_kind: "source_record", root_id: "root",
+      source_version: "v1", content_digest: `sha256:${"a".repeat(64)}`, evidence_object_id: null,
+      association_milligrades: 1000, hypothesis_id: "h0", output_binding: "default", program_state: "accepting", time_state: "now" });
+    const entry = { ...root, target: { ...root.target,
+      span: { content_start: 0, content_end: 8, content_complete: true, original_complete: true, retained_extent: "body" as const } } };
+    const index = { ...stubRecallIndex([]), entries: [entry] };
+    const results = encodeIndexResults(index, new Map([[indexEntryCacheKey(entry), "😀😀"]]), 6);
+    expect(results[0]?.content_preview).toBe("😀");
+    expect(results[0]?.target).toMatchObject({ span: { content_start: 0, content_end: 4, content_complete: false } });
+    const framed = frameEncodedIndex(index, results);
+    expect(framed.entries[0]?.target).toEqual(results[0]?.target);
+    expect(framed.completeness.payload).toBe("partial");
+  });
   it("rejects a missing authoritative index before recording any delivery", async () => {
     const deps = createDeps();
     const recall = deps.recallService.recall;

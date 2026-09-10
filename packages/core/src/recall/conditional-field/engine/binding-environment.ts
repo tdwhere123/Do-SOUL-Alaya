@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import {
   formatConditionalFieldDigest,
+  sourceEvidenceRootKey,
+  type RecallTargetRef,
   type Guard,
   type QueryHypothesis
 } from "@do-soul/alaya-protocol";
@@ -24,6 +26,8 @@ export type BoundSourceFacts = Readonly<{
   readonly root_kind?: string;
   readonly source_revision?: string;
   readonly content?: string;
+  readonly content_complete?: boolean;
+  readonly literal_verdicts?: Readonly<Record<string, "true" | "false" | "unresolved">>;
   readonly role?: string;
   readonly event_time?: string | null;
   readonly evidence_object_id?: string | null;
@@ -40,6 +44,10 @@ export type BoundSourceFacts = Readonly<{
 }>;
 
 export type GuardDecision = "true" | "false" | "unresolved";
+
+export function sourceFactKey(target: RecallTargetRef): string {
+  return target.kind === "source_evidence" ? sourceEvidenceRootKey(target) : target.object_id;
+}
 
 export function parseBindingContext(context: string): Map<string, string> {
   const env = new Map<string, string>();
@@ -71,17 +79,6 @@ export function encodeBindingContext(env: ReadonlyMap<string, string>): string {
 
 export function recoverBindingContext(context: string): string {
   return RECOVERED_BINDINGS.get(context) ?? context;
-}
-
-export function recoveredBindingSnapshot(
-  contexts: readonly string[]
-): Readonly<Record<string, string>> {
-  const snapshot: Record<string, string> = {};
-  for (const context of contexts) {
-    const packed = RECOVERED_BINDINGS.get(context);
-    if (packed !== undefined) snapshot[context] = packed;
-  }
-  return Object.freeze(snapshot);
 }
 
 export function unifyBinding(

@@ -34,8 +34,8 @@ export function encodeIndexResults(
     const score = entry.association_milligrades / MILLIGRADE_TOP;
     const cacheKey = indexEntryCacheKey(entry);
     const objectId = indexMemoryObjectId(entry);
-    const preview = previews.get(cacheKey) ?? (objectId === undefined ? undefined : previews.get(objectId))
-      ?? "[payload omitted]";
+    const retainedPreview = previews.get(cacheKey) ?? (objectId === undefined ? undefined : previews.get(objectId));
+    const preview = retainedPreview ?? "[payload omitted]";
     const metadata = sourceMetadata[cacheKey] ?? (objectId === undefined ? undefined : sourceMetadata[objectId]);
     const evidencePointers = metadata?.evidence_refs ?? [];
     const stagedWarnings = metadata?.staged_warnings?.map((warning) => ({
@@ -53,7 +53,7 @@ export function encodeIndexResults(
     encoded.push({
       ...(objectId === undefined ? {} : { object_id: objectId }),
       object_kind: indexEntryObjectKind(entry),
-      target: entry.target,
+      target: deliveredTarget(entry.target, fitted.preview, retainedPreview !== undefined),
       relevance_score: score,
       content_preview: fitted.preview,
       evidence_pointers: evidencePointers,
@@ -82,15 +82,37 @@ export function frameEncodedIndex(
   index: InformationIndex,
   results: readonly MemorySearchResult[]
 ): InformationIndex {
-  if (results.length >= index.entries.length) return index;
+  let partialPayload = results.length < index.entries.length;
+  const entries = index.entries.map((entry, offset) => {
+    if (entry.target.kind !== "source_evidence") return entry;
+    const target = results[offset]?.target;
+    if (target?.kind === "source_evidence") {
+      if (target.span?.content_complete === false) partialPayload = true;
+      return { ...entry, target };
+    }
+    partialPayload = true;
+    const { span: _span, ...root } = entry.target;
+    return { ...entry, target: root };
+  });
+  if (!partialPayload && entries.every((entry, offset) => entry === index.entries[offset])) return index;
   return {
     ...index,
+    entries,
     completeness: {
       ...index.completeness,
-      payload: "omitted",
-      transport: index.completeness.transport === "complete" ? "partial" : index.completeness.transport
+      payload: partialPayload ? (results.length < index.entries.length ? "omitted" : "partial") : index.completeness.payload,
+      transport: results.length < index.entries.length && index.completeness.transport === "complete" ? "partial" : index.completeness.transport
     }
   };
+}
+
+function deliveredTarget(target: MemorySearchResult["target"], content: string, hasPayload: boolean): MemorySearchResult["target"] {
+  if (target.kind !== "source_evidence" || target.span === undefined) return target;
+  const span = target.span;
+  const bytes = hasPayload ? Math.min(Buffer.byteLength(content, "utf8"), span.content_end - span.content_start) : 0;
+  if (hasPayload && bytes === span.content_end - span.content_start) return target;
+  return { ...target, span: { ...span, content_end: span.content_start + bytes,
+    content_complete: span.content_complete && hasPayload && bytes === span.content_end - span.content_start } };
 }
 
 export function sourceMetadataForRecallResult(result: Readonly<{
@@ -212,9 +234,8 @@ function fitEncodedPreview(
 function truncateUtf8(text: string, maxBytes: number): string {
   if (maxBytes < 1) return "";
   if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
-  let truncated = text.slice(0, maxBytes);
-  while (truncated.length > 0 && Buffer.byteLength(truncated, "utf8") > maxBytes) {
-    truncated = truncated.slice(0, truncated.length - 1);
-  }
-  return truncated;
+  const bytes = Buffer.from(text, "utf8");
+  let end = Math.min(bytes.length, maxBytes);
+  while (end > 0 && end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end -= 1;
+  return bytes.subarray(0, end).toString("utf8");
 }

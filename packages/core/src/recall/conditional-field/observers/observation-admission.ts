@@ -466,6 +466,7 @@ function predicateSubject(
       ...(sourceRoot.evidence_verified === true ? { evidence_verified: true } : {}),
       ...(sourceRoot.content === undefined ? {} : { content: sourceRoot.content }),
       ...(sourceRoot.content_complete === undefined ? {} : { content_complete: sourceRoot.content_complete }),
+      ...(sourceRoot.literal_verdicts === undefined ? {} : { literal_verdicts: sourceRoot.literal_verdicts }),
       ...(sourceRoot.role === undefined ? {} : { role: sourceRoot.role }),
       ...(sourceRoot.event_time === undefined ? {} : { event_time: sourceRoot.event_time })
     };

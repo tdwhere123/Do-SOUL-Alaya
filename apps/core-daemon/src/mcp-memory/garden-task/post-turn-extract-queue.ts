@@ -55,7 +55,8 @@ export function enqueuePostTurnExtractTask(
     workspaceId,
     createdAt,
     lastMessages,
-    eventTime: sourceObservation?.observed_at ?? null
+    // Delivery time dates the context exposure, not the returned messages.
+    eventTime: null
   });
 
   try {

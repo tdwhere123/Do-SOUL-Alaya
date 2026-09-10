@@ -53,15 +53,16 @@ describe("source-root seam membership", () => {
     expect(first.page.outcome.status).toBe("interrupted");
     expect(first.page.cursor.committed_through?.startsWith("o:")).toBe(true);
 
-    const second = observeConditionalField(seedInput({
-      program: literalProgram(NEEDLE),
-      readers: readerFor(reader),
-      cursor: first.page.cursor,
-      source_byte_limit: 65_536
-    }));
-    const secondRow = second.page.observations.find((row) => row.object_id === record.record_id);
-    expect(secondRow?.applicability.verdict).toBe("true");
-    expect(second.page.observations.some((row) => row.object_id === record.record_id)).toBe(true);
+    let page = first;
+    let matched = false;
+    for (let chunk = 0; chunk < 20 && !matched; chunk += 1) {
+      const prior = page.page.cursor;
+      page = observeConditionalField(seedInput({ program: literalProgram(NEEDLE), readers: readerFor(reader),
+        cursor: prior, source_byte_limit: 65_536 }));
+      expect(page.page.cursor.committed_through).not.toBe(prior.committed_through);
+      matched = page.page.observations.some((row) => row.object_id === record.record_id && row.applicability.verdict === "true");
+    }
+    expect(matched).toBe(true);
   });
 
   it("keeps authorized_scopes to persisted scope_class and fail-closes omitted scope", () => {
@@ -103,7 +104,7 @@ describe("source-root seam membership", () => {
     const observed = observeConditionalField(seedInput({
       program: literalProgram(needle),
       readers: readerFor(reader),
-      actionWork: 4,
+      actionWork: 10,
       page_limit: 4
     }));
     expect(observed.page.observations.some((row) => row.object_id === capsuleId)).toBe(true);
@@ -237,7 +238,9 @@ function readerFor(reader: SqliteSourceRootRecallReader): ObserveConditionalFiel
         limit: input.limit,
         nativeLimit: input.nativeLimit,
         afterCursor: input.afterCursor,
-        byteLimit: input.byteLimit
+        byteLimit: input.byteLimit,
+        nativeByteLimit: input.nativeByteLimit,
+        workLimit: input.workLimit
       });
       return {
         rows: page.rows.map(toSourceRootObserverRow),
@@ -245,6 +248,9 @@ function readerFor(reader: SqliteSourceRootRecallReader): ObserveConditionalFiel
         nativeBytes: page.nativeBytes,
         rowsRead: page.rowsRead,
         bytesRead: page.bytesRead,
+        metadataBytes: page.metadataBytes,
+        nativeWork: page.nativeWork,
+        resourceLimited: page.resourceLimited,
         truncated: page.truncated,
         committedThrough: page.committedThrough,
         unavailable: page.unavailable

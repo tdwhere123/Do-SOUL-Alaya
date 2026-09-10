@@ -13,7 +13,7 @@ import {
 } from "../runs/provenance/source-rounds.js";
 
 interface DeliveredMeasurementCandidate {
-  readonly object_id: string;
+  readonly object_id?: string;
   readonly object_kind?: string | null;
   readonly rank: number;
 }
@@ -134,7 +134,8 @@ function joinTopFiveCandidates(input: QuestionMeasurementInput): readonly TopFiv
     candidate
   ]));
   return input.deliveredResults
-    .filter((candidate) => candidate.rank <= 5)
+    .filter((candidate): candidate is DeliveredMeasurementCandidate & { object_id: string } =>
+      candidate.rank <= 5 && candidate.object_id !== undefined && candidate.object_kind !== "source_evidence")
     .map((candidate) => {
       const objectKind = normalizeObjectKind(candidate.object_kind);
       return {
