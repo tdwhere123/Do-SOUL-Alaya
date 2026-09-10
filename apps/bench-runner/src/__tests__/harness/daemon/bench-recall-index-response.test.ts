@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { InformationIndexSchema, RecallCandidateSchema } from "@do-soul/alaya-protocol";
+import {
+  ASSOCIATION_DOMAIN_ID,
+  HARD_IDENTITY_TRANSFER_ID,
+  HARD_IDENTITY_TRANSFER_VERSION,
+  IDENTITY_NORMALIZATION_ID,
+  InformationIndexSchema,
+  RecallCandidateSchema
+} from "@do-soul/alaya-protocol";
 import { runConditionalFieldRecallWithReceipt } from "@do-soul/alaya-core";
 import { encodeIndexResults, frameEncodedIndex } from "@do-soul/alaya/recall/index-response";
 import { buildBenchDiagnosticRecallPolicy } from "../../../harness/daemon/daemon-support.js";
@@ -20,7 +27,17 @@ function fixture(enumerationPolicy?: "canonical" | "associative"): Result {
     snapshot_id: `sha256:${"a".repeat(64)}`,
     interpretation_clock: "2026-09-06T00:00:00.000Z", as_of: "2026-09-06T00:00:00.000Z",
     expires_at: "2099-01-01T00:00:00.000Z", readers: {},
-    ...(enumerationPolicy === undefined ? {} : { enumeration_policy: enumerationPolicy })
+    ...(enumerationPolicy === undefined ? {} : {
+      enumeration_policy: enumerationPolicy,
+      ...(enumerationPolicy === "associative" ? {
+        cap_contracts: [{
+          domain_id: ASSOCIATION_DOMAIN_ID,
+          normalization: IDENTITY_NORMALIZATION_ID,
+          transfer_id: HARD_IDENTITY_TRANSFER_ID,
+          transfer_version: HARD_IDENTITY_TRANSFER_VERSION
+        }]
+      } : {})
+    })
   });
   const index = InformationIndexSchema.parse({
     schema_version: 1, query_id: executed.execution_receipt.query_id, snapshot_id: executed.execution_receipt.snapshot_id,

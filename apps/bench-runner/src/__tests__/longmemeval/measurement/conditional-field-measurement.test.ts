@@ -255,8 +255,10 @@ describe("conditional target measurement evidence", () => {
   });
 
   it("excludes unusable source states from KPI denominators despite schema-valid gold delivery", () => {
+    const unusable = ["resource_rejected", "cancelled", "invalidated", "unavailable", "interrupted", "omitted", "not_applicable"] as const;
     for (const axis of ["logical_index", "observed_coverage"] as const) {
-      for (const state of ["resource_rejected", "cancelled", "invalidated", "unavailable", "interrupted", "unknown", "omitted", "not_applicable"] as const) {
+      const states = axis === "logical_index" ? [...unusable, "unknown"] as const : unusable;
+      for (const state of states) {
         const input = fixture();
         const row = diagnostic({ ...input, recallResult: { ...input.recallResult,
           index: { ...input.recallResult.index,
@@ -265,6 +267,21 @@ describe("conditional target measurement evidence", () => {
         expect(classifyQuestionMeasurementStatus(row)).toBe("evaluator_identity_unscorable");
       }
     }
+    const input = fixture();
+    const unknownObserved = diagnostic({ ...input, recallResult: { ...input.recallResult,
+      index: { ...input.recallResult.index,
+        completeness: { ...input.recallResult.index.completeness, observed_coverage: "unknown" } } } });
+    expect(unknownObserved.conditional_field_measurement?.status).toBe("validated");
+    const emptyUnknown = diagnostic({ ...input, deliveredResults: [], recallResult: { ...input.recallResult,
+      results: [],
+      index: { ...input.recallResult.index, entries: [], continuation: null,
+        completeness: { ...input.recallResult.index.completeness, observed_coverage: "unknown" } } } });
+    expect(emptyUnknown.conditional_field_measurement).toMatchObject({ status: "invalid", reason: "unusable_source_state" });
+    expect(classifyQuestionMeasurementStatus(emptyUnknown)).toBe("evaluator_identity_unscorable");
+    const completeUnknown = diagnostic({ ...input, recallResult: { ...input.recallResult,
+      index: { ...input.recallResult.index,
+        completeness: { ...input.recallResult.index.completeness, logical_index: "complete", observed_coverage: "unknown" } } } });
+    expect(completeUnknown.conditional_field_measurement).toMatchObject({ status: "invalid", reason: "unusable_source_state" });
   });
 
   it("retains source_evidence slot kind instead of rewriting it to memory_entry", () => {

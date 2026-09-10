@@ -305,7 +305,7 @@ describe("workspace slice install and daemon reopen", () => {
       runId: "run-a"
     });
     const recallA = await attachedA.recall(TOKEN_A, { maxResults: 10 });
-    expect(recallA.results.map((row) => row.object_id)).toContain(MEMORY_A);
+    expect(deliveredSubjectIds(recallA.results)).toContain(MEMORY_A);
     await attachedA.detach();
     await daemon.shutdown();
 
@@ -325,9 +325,9 @@ describe("workspace slice install and daemon reopen", () => {
       runId: "run-b"
     });
     const stale = await attachedB.recall(TOKEN_A, { maxResults: 10 });
-    expect(stale.results.map((row) => row.object_id)).not.toContain(MEMORY_A);
+    expect(deliveredSubjectIds(stale.results)).not.toContain(MEMORY_A);
     const recallB = await attachedB.recall(TOKEN_B, { maxResults: 10 });
-    expect(recallB.results.map((row) => row.object_id)).toContain(MEMORY_B);
+    expect(deliveredSubjectIds(recallB.results)).toContain(MEMORY_B);
     await attachedB.detach();
   }, 120_000);
 
@@ -421,7 +421,7 @@ describe("workspace slice install and daemon reopen", () => {
       runId: "run-a"
     });
     const recallA = await attachedA.recall(TOKEN_A, { maxResults: 10 });
-    expect(recallA.results.map((row) => row.object_id)).toContain(MEMORY_A);
+    expect(deliveredSubjectIds(recallA.results)).toContain(MEMORY_A);
     await attachedA.detach();
     await daemon.shutdown();
     installRecallEvalWorkspaceSlice({
@@ -440,9 +440,9 @@ describe("workspace slice install and daemon reopen", () => {
       workspaceId: WORKSPACE_B,
       runId: "run-b"
     });
-    expect((await attachedB.recall(TOKEN_A, { maxResults: 10 })).results.map((row) => row.object_id))
+    expect(deliveredSubjectIds((await attachedB.recall(TOKEN_A, { maxResults: 10 })).results))
       .not.toContain(MEMORY_A);
-    expect((await attachedB.recall(TOKEN_B, { maxResults: 10 })).results.map((row) => row.object_id))
+    expect(deliveredSubjectIds((await attachedB.recall(TOKEN_B, { maxResults: 10 })).results))
       .toContain(MEMORY_B);
     await attachedB.detach();
   }, 120_000);
@@ -579,4 +579,20 @@ function matchObjectIds(
     `SELECT object_id FROM ${table} WHERE ${table} MATCH ?`
   ).all(token) as ReadonlyArray<{ readonly object_id: string }>;
   return rows.map((row) => row.object_id);
+}
+
+function deliveredSubjectIds(
+  results: readonly {
+    readonly object_id?: string;
+    readonly target?: {
+      readonly kind: string;
+      readonly object_id?: string;
+      readonly root_id?: string;
+    };
+  }[]
+): readonly (string | undefined)[] {
+  return results.map((row) =>
+    row.object_id
+      ?? (row.target?.kind === "source_evidence" ? row.target.root_id : row.target?.object_id)
+  );
 }

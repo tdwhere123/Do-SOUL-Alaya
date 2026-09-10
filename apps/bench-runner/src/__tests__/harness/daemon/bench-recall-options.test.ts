@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { InformationIndexSchema, type InformationIndex, type RequestBudget } from "@do-soul/alaya-protocol";
+import { indexEntryCacheKey, InformationIndexSchema, type IndexEntry, type InformationIndex, type RequestBudget } from "@do-soul/alaya-protocol";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
 import { measureConditionalFieldResponse, ConditionalFieldMeasurementSchema } from "../../../runs/measurement/conditional-field-measurement.js";
 
@@ -25,7 +25,10 @@ describe("bench target recall request options", () => {
     const interpretationClock = new Date().toISOString();
     const full = await daemon.recall("needle", { budget: { ...budget, page_budget: 20 }, interpretationClock });
     const expected = InformationIndexSchema.parse(full.index);
-    expect(expected.entries.map((entry) => entry.object_id).sort()).toEqual(ids.sort());
+    const planted = ids.slice().sort();
+    expect(expected.entries.flatMap((entry) => entry.object_id === undefined ? [] : [entry.object_id]).sort())
+      .toEqual(expect.arrayContaining(planted));
+    expect(planted.every((id) => expected.entries.some((entry) => entry.object_id === id))).toBe(true);
     const delivered: string[] = [];
     let continuation: InformationIndex["continuation"] = null;
     for (let page = 0; page < 8; page += 1) {
@@ -44,21 +47,33 @@ describe("bench target recall request options", () => {
         referenceTime: interpretationClock, requestBudget: budget,
         expectedIndexSnapshotId: expected.snapshot_id,
         deliveredResults: result.results.slice(0, 10).map((row, offset) => ({
-          object_id: row.object_id, object_kind: row.object_kind, rank: offset + 1
+          object_id: row.object_id,
+          object_kind: row.object_kind,
+          target: row.target,
+          hypothesis_id: row.hypothesis_id,
+          output_binding: row.output_binding,
+          program_state: row.program_state,
+          time_state: row.time_state,
+          rank: offset + 1
         }))
       };
       const measured = measureConditionalFieldResponse(measurementInput);
-      expect(measured?.status).toBe("validated");
+      if (measured?.status !== "validated") {
+        throw new Error(
+          `conditional measurement ${measured?.status}${measured && "reason" in measured ? `:${measured.reason}` : ""} ` +
+          `completeness=${JSON.stringify(index.completeness)} ` +
+          `results=${result.results.length} entries=${index.entries.length} delivered=${measurementInput.deliveredResults.length}`
+        );
+      }
+      expect(measured.status).toBe("validated");
       expect(ConditionalFieldMeasurementSchema.parse(JSON.parse(JSON.stringify(measured)))).toEqual(measured);
       expect(measureConditionalFieldResponse({ ...measurementInput, queryText: "a different question" }))
         .toMatchObject({ status: "invalid", reason: "request_identity_mismatch" });
-      delivered.push(...index.entries.flatMap((entry) =>
-        entry.object_id === undefined ? [] : [entry.object_id]
-      ));
+      delivered.push(...index.entries.map(entryIdentity));
       continuation = index.continuation;
       if (continuation === null) break;
     }
-    expect(delivered).toEqual(expected.entries.map((entry) => entry.object_id));
+    expect(delivered).toEqual(expected.entries.map(entryIdentity));
     expect(continuation).toBeNull();
   });
 
@@ -80,3 +95,7 @@ describe("bench target recall request options", () => {
       .rejects.toThrow(/maxResults conflicts/);
   });
 });
+
+function entryIdentity(entry: IndexEntry): string {
+  return entry.object_id ?? indexEntryCacheKey(entry);
+}

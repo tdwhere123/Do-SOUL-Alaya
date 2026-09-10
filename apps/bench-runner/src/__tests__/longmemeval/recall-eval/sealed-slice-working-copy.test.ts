@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { initDatabase, closeCachedDatabase } from "@do-soul/alaya-storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { indexEntrySubjectId } from "@do-soul/alaya-protocol";
 import {
   createPackedTwoWorkspaceDb,
+  MEMORY_A,
   seedMemory,
   TOKEN_A,
   TOKEN_B,
@@ -180,11 +182,20 @@ describe("H02 — sealed slice private working copy", () => {
       ...base, recallOptions: { budget: { ...budget, page_budget: 20 } }
     });
     const complete = ConditionalFieldMeasurementSchema.parse(completePack.diagnostics.conditional_field_measurement);
-    if (complete.status !== "validated") throw new Error("complete target measurement invalid");
-    expect(complete.entries).toHaveLength(3);
+    if (complete.status !== "validated") {
+      throw new Error(`complete target measurement ${complete.status}:${complete.reason}`);
+    }
+    const planted = [
+      MEMORY_A,
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2"
+    ];
+    expect(planted.every((id) => complete.entries.some((entry) => indexEntrySubjectId(entry) === id))).toBe(true);
     const firstPack = await recallPage({ ...base, recallOptions: { budget } });
     const first = ConditionalFieldMeasurementSchema.parse(firstPack.diagnostics.conditional_field_measurement);
-    if (first.status !== "validated") throw new Error("first target page invalid");
+    if (first.status !== "validated") {
+      throw new Error(`first target page ${first.status}:${first.reason}`);
+    }
     expect(first.entries).toHaveLength(1);
     expect(first.continuation).not.toBeNull();
     expect(first.request.budget).toEqual(budget);
@@ -197,7 +208,9 @@ describe("H02 — sealed slice private working copy", () => {
     for (let step = 0; step < 8 && continuation !== null; step += 1) {
       const pack = await recallPage({ ...base, recallOptions: { budget, continuation } });
       const page = ConditionalFieldMeasurementSchema.parse(pack.diagnostics.conditional_field_measurement);
-      if (page.status !== "validated") throw new Error("continued target page invalid");
+      if (page.status !== "validated") {
+        throw new Error(`continued target page ${page.status}:${page.reason}`);
+      }
       expect(page.identity).toEqual(first.identity);
       expect(page.request.budget).toEqual(budget);
       expect(pack.embeddingWarmup).toBeNull();

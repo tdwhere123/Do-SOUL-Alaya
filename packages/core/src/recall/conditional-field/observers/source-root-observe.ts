@@ -56,7 +56,8 @@ export function observeSourceAwareSeed(
     if (sourced.resourceLimited) resourceLimited = true;
   }
   let memoryIdle = !wantMemory;
-  if (wantMemory && !hydrationUnavailable && share.memoryWork > 0) {
+  // Source hydration failure is not a lexical skip: mixed seed would fail-close FTS memory.
+  if (wantMemory && share.memoryWork > 0) {
     const taken = takeLexicalPage(input, share, memoryCommitted);
     if (taken === null) {
       memoryIdle = true;
@@ -105,7 +106,7 @@ export function observeSourceAwareSeed(
     ids: observations.map((row) => row.object_id),
     truncated,
     readerAvailable: true,
-    ...(hydrationUnavailable
+    ...(hydrationUnavailable && observations.length === 0
       ? { status: resourceLimited ? "interrupted" as const : "unavailable" as const }
       : resourceLimited
         ? { status: "interrupted" as const }
@@ -146,7 +147,9 @@ function takeSourcePage(
   let truncated = page.truncated;
   let sourcesTruncated = page.truncated;
   let sourceCommitted = page.committedThrough ?? afterCursor;
-  let resourceLimited = page.resourceLimited === true || page.rows.length === 0 && page.truncated && page.committedThrough === afterCursor;
+  let resourceLimited = page.resourceLimited === true
+    || (page.unavailable !== true && page.rows.length === 0 && page.truncated
+      && page.committedThrough === afterCursor);
   for (const nativeRow of page.rows) {
     if (!sourceRootEligible(input, nativeRow)) continue;
     const scanned = scanSourceLiterals(input.query, nativeRow, pinCursor, sourceCommitted);

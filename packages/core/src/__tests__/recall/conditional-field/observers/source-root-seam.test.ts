@@ -162,6 +162,106 @@ describe("source-root seam membership", () => {
     expect(observed.page.observations.some((row) => row.object_id === memoryId)).toBe(true);
   });
 
+  it("observes exact lexical memory when sourceRoots reports unavailable", () => {
+    const memoryId = "aaaaaaaa-aaaa-4aaa-8aaa-000000000099";
+    const observed = observeConditionalField(seedInput({
+      program: relation("observed_log"),
+      view: "mixed",
+      seed_query: "exact-memory-needle",
+      actionWork: 8,
+      page_limit: 4,
+      readers: {
+        sourceRoots: () => ({
+          rows: [],
+          nativeVisits: 1,
+          nativeBytes: 0,
+          rowsRead: 0,
+          bytesRead: 0,
+          truncated: true,
+          committedThrough: null,
+          unavailable: true
+        }),
+        lexical: () => ({
+          ids: [memoryId],
+          nativeVisits: 1,
+          nativeBytes: 8,
+          rowsRead: 1,
+          bytesRead: 8,
+          truncated: false,
+          committedThrough: memoryId
+        }),
+        source: (input) => ({
+          row: input.objectId === memoryId
+            ? {
+              object_id: memoryId,
+              sourceRevision: "rev-1",
+              lifecycle_state: "active",
+              content: "exact-memory-needle"
+            }
+            : null,
+          rowsRead: 1,
+          bytesRead: 8,
+          unavailable: false
+        })
+      }
+    }));
+    expect(observed.page.observations.some((row) => row.object_id === memoryId)).toBe(true);
+    expect(observed.page.outcome.status).not.toBe("unavailable");
+  });
+
+  it("does not commit source enumeration when a truncated unavailable page still has remaining families", () => {
+    const memoryId = "aaaaaaaa-aaaa-4aaa-8aaa-000000000099";
+    const remaining = "f:records:r:2026-01-01T00:00:00.000Z\troot-01";
+    const observed = observeConditionalField(seedInput({
+      program: relation("observed_log"),
+      view: "mixed",
+      seed_query: "exact-memory-needle",
+      actionWork: 8,
+      page_limit: 4,
+      readers: {
+        sourceRoots: () => ({
+          rows: [sourceRoot({ root_id: "root-00", content: "readable record", content_complete: true })],
+          nativeVisits: 2,
+          nativeBytes: 16,
+          rowsRead: 1,
+          bytesRead: 16,
+          truncated: true,
+          committedThrough: remaining,
+          unavailable: true
+        }),
+        lexical: () => ({
+          ids: [memoryId],
+          nativeVisits: 1,
+          nativeBytes: 8,
+          rowsRead: 1,
+          bytesRead: 8,
+          truncated: false,
+          committedThrough: memoryId
+        }),
+        source: (input) => ({
+          row: input.objectId === memoryId
+            ? {
+              object_id: memoryId,
+              sourceRevision: "rev-1",
+              lifecycle_state: "active",
+              content: "exact-memory-needle"
+            }
+            : null,
+          rowsRead: 1,
+          bytesRead: 8,
+          unavailable: false
+        })
+      }
+    }));
+    expect(observed.page.observations.some((row) => row.object_id === memoryId)).toBe(true);
+    expect(observed.page.cursor.committed_through?.startsWith("m:")).toBe(false);
+    expect(observed.page.cursor.committed_through?.startsWith("s:")).toBe(true);
+    expect(observed.page.cursor.committed_through).toContain("root-01");
+    expect(JSON.parse(observed.page.cursor.committed_through!.slice(2))).toMatchObject({
+      source: remaining, sourcesDone: false
+    });
+  });
+
   it("resumes mixed seed source enumeration from a bundled cursor", () => {
     const memoryId = "aaaaaaaa-aaaa-4aaa-8aaa-000000000099";
     const after = "r:2026-01-01T00:00:00.000Z\troot-05";

@@ -4,6 +4,7 @@ import {
   indexEntryCacheKey,
   RequestBudgetSchema,
   SoulMemorySearchResponseSchema,
+  sameRecallTarget,
   type InformationIndex,
   type MemorySearchResult,
   type RecallPolicy,
@@ -46,8 +47,10 @@ export function encodeBenchRecallResults(
   expected?: ExpectedConditionalFieldRequest
 ): readonly MemorySearchResult[] {
   const index = validateBenchRecallIndex(result, requestBudget, expected);
-  const previews = new Map(index.entries.flatMap((entry, offset) => {
-    const candidate = result.candidates[offset];
+  const previews = new Map(index.entries.flatMap((entry) => {
+    const candidate = result.candidates.find((row) =>
+      (entry.object_id !== undefined && row.object_id === entry.object_id)
+      || (row.target !== undefined && sameRecallTarget(row.target, entry.target)));
     return candidate === undefined ? [] : [[indexEntryCacheKey(entry), candidate.content_preview] as const];
   }));
   const metadata = sourceMetadataForRecallResult(result);

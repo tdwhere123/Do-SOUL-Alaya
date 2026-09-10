@@ -22,6 +22,7 @@ import { writeQuestionDiagnosticDumps } from "./runner-question-dumps.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
 import { hasLongMemEvalSeedDropReasons } from "../../../../runs/extraction/seed-fuel/seed-drop-reasons.js";
 import { attachQuestionMeasurementAxes } from "../../../../diagnostics/diagnostics-measurement-axes.js";
+import { buildDeliveredResults } from "../../../../runs/qa/question-recall-support.js";
 import {
   buildLongMemEvalSourceDatesBySession,
   requireLongMemEvalTimestamp
@@ -102,7 +103,7 @@ function buildDiagnostics(
     goldEvidenceIds: input.goldEvidenceIds,
     goldObjectIds: input.goldObjectIds,
     answerSessionIds: input.question.answer_session_ids,
-    deliveredResults: deliveredResults(recallResult),
+    deliveredResults: buildDeliveredResults(recallResult.results),
     activeConstraintResults: activeConstraintResults(recallResult),
     hitAt1: hits.hitAt1,
     hitAt5: hits.hitAt5,
@@ -122,16 +123,6 @@ function buildDiagnostics(
     sidecar: input.seedState.sidecar,
     isAbstention
   });
-}
-
-function deliveredResults(recallResult: LongMemEvalBenchRecallResult) {
-  return recallResult.results.slice(0, 10).map((pointer, index) => ({
-    object_id: pointer.object_id,
-    object_kind: pointer.object_kind,
-    rank: index + 1,
-    relevance_score: pointer.relevance_score,
-    score_factors: pointer.score_factors ?? null
-  }));
 }
 
 function activeConstraintResults(recallResult: LongMemEvalBenchRecallResult) {

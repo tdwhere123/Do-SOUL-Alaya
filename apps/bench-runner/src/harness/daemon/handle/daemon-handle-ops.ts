@@ -180,6 +180,11 @@ function createBenchRecallOperation(
       ...(opts.since === undefined ? {} : { since: opts.since }),
       ...(opts.until === undefined ? {} : { until: opts.until }),
       ...(opts.timeFilter === undefined ? {} : { timeFilter: opts.timeFilter }),
+      ...(opts.enumeration_policy === undefined ? {} : { enumeration_policy: opts.enumeration_policy }),
+      ...(opts.result_kind_view === undefined ? {} : { result_kind_view: opts.result_kind_view }),
+      protocol_version: 1,
+      supports_source_evidence: true,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
       activeConstraintsCap: null
     });
     const recallResult = rawRecallResult;

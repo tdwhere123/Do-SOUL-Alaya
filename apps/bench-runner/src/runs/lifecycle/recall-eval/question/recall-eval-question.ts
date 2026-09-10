@@ -39,6 +39,7 @@ import type { SnapshotQuestionMeasurementOracle } from
 import type { LongMemEvalSnapshotQuestion } from
   "../../../snapshot/materialize.js";
 import type { RecallEvalQuestionResult } from "../recall-eval-contract.js";
+import { buildDeliveredResults } from "../../../../runs/qa/question-recall-support.js";
 
 export interface RecallEvalOneQuestionInput {
   readonly daemon: BenchDaemonHandle;
@@ -173,7 +174,7 @@ async function buildRecallEvalQuestionResult(
     embeddingWarmup: readiness.embeddingWarmup,
     queryEmbeddingWarmup: readiness.queryEmbeddingWarmup,
     documentEmbeddingWarmupLatencyMs: readiness.documentWarmupLatencyMs,
-    deliveredObjectIds: buildDeliveredResults(recallResult)
+    deliveredObjectIds: buildDeliveredResults(recallResult.results)
       .flatMap((result) => result.object_id === undefined ? [] : [result.object_id])
   };
 }
@@ -202,7 +203,7 @@ function buildRecallEvalDiagnostics(
     goldObjectIds: gold.goldObjectIds,
     answerSessionIds: input.measurement?.answerSessionIds ??
       input.question.answerSessionIds,
-    deliveredResults: buildDeliveredResults(recallResult),
+    deliveredResults: buildDeliveredResults(recallResult.results),
     activeConstraintResults: buildActiveConstraintResults(recallResult),
     hitAt1: scoredHits.hitAt1,
     hitAt5: scoredHits.hitAt5,
@@ -254,23 +255,6 @@ function resolveRecallEvalGold(
     goldObjectIds: deriveLongMemEvalGoldObjectIds(sidecar, answerSessionSet),
     goldObjectIdentities: buildGoldObjectIdentities({ goldMemoryIds, goldEvidenceIds })
   };
-}
-
-function buildDeliveredResults(
-  recallResult: Awaited<ReturnType<typeof runLongMemEvalRecallCycle>>["scoredRecallResult"]
-) {
-  return recallResult.results.slice(0, 10).map((pointer, index) => ({
-    object_id: pointer.object_id,
-    target: pointer.target,
-    hypothesis_id: pointer.hypothesis_id,
-    output_binding: pointer.output_binding,
-    program_state: pointer.program_state,
-    time_state: pointer.time_state,
-    object_kind: pointer.object_kind,
-    rank: index + 1,
-    relevance_score: pointer.relevance_score,
-    score_factors: pointer.score_factors ?? null
-  }));
 }
 
 function buildActiveConstraintResults(

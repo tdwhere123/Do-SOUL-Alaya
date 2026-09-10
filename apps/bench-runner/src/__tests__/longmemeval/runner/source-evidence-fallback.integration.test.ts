@@ -96,8 +96,8 @@ describe("LongMemEval source evidence fallback integration", () => {
       maxResults: 10,
       referenceTime: sourceEvidenceQuestion().question_date
     });
-    // The target indexes memory entries; retained evidence alone is not a certified Recall arm.
-    expect(recallResult.results).toEqual([]);
+    expect(recallResult.results.length).toBeGreaterThan(0);
+    expect(recallResult.results.every((row) => row.object_kind === "source_evidence")).toBe(true);
     const snapshotQuestion = buildLongMemEvalSnapshotQuestion({
       question: sourceEvidenceQuestion(),
       workspace: { ...daemon, detach: async () => undefined },

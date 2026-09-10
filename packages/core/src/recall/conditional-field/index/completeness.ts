@@ -307,6 +307,17 @@ function composeCompletenessDimensions(input: CompletenessInput): CompletenessRe
 function observerCompleteness(input: CompletenessInput): CompletenessReport | undefined {
   const observerStatus = influentialObserverStatus(input);
   if (observerStatus === "unavailable") {
+    // Mixed membership can exist while a required source region is unreadable.
+    if (input.total > 0) {
+      return dimensionReport({
+        logical_index: "open",
+        observed_coverage: "unknown",
+        remaining: input.remaining,
+        omitted_payload: input.omitted_payload,
+        expand_payload: input.expand_payload,
+        closed: "open"
+      });
+    }
     return dimensionReport({
       logical_index: "unavailable",
       observed_coverage: "unavailable",

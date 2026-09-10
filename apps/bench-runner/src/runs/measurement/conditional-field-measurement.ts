@@ -20,7 +20,10 @@ import {
 } from "./conditional-field-request-binding.js";
 
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
-const usableSourceStates = new Set(["complete", "partial", "open", "exhausted_empty"]);
+const usableLogicalStates = new Set(["complete", "partial", "open", "exhausted_empty"]);
+// Mixed observe keeps required source_domain unknown on a nonempty joined page.
+// Empty unknown is still an unscorable residual, not a KPI zero.
+const usableObservedStates = new Set(["complete", "partial", "open", "exhausted_empty", "unknown"]);
 const Entry = z.object({
   object_id: z.string().optional(), target: RecallTargetRefSchema,
   hypothesis_id: z.string(), output_binding: z.string(),
@@ -119,8 +122,8 @@ const ValidatedMeasurement = ValidatedMeasurementBase.superRefine((value, contex
     || metrics.resolved_explanation_reference_count !== references.filter((id) => explanations.has(id)).length
     || metrics.association_min !== (associations.length === 0 ? null : Math.min(...associations))
     || metrics.association_max !== (associations.length === 0 ? null : Math.max(...associations));
-  const badSource = !usableSourceStates.has(value.completeness.logical_index)
-    || !usableSourceStates.has(value.completeness.observed_coverage)
+  const badSource = !usableLogicalStates.has(value.completeness.logical_index)
+    || !observedCoverageUsable(value.completeness.observed_coverage, value.completeness.logical_index, value.entries.length)
     || value.entries.length > value.request.budget.page_budget;
   if (mismatch !== null || badIdentity || badContinuation || badSlots || badMetrics || badSource) {
     context.addIssue({ code: "custom", message: "archived conditional measurement request, identity or slot join is inconsistent" });
@@ -195,8 +198,10 @@ export function measureConditionalFieldResponse(input: ConditionalMeasurementInp
     return invalid("request_identity_mismatch");
   }
   if (index.representation.page_budget !== budget.data.page_budget) return invalid("request_budget_mismatch");
-  if (!usableSourceStates.has(index.completeness.logical_index)
-    || !usableSourceStates.has(index.completeness.observed_coverage)) return invalid("unusable_source_state");
+  if (!usableLogicalStates.has(index.completeness.logical_index)
+    || !observedCoverageUsable(index.completeness.observed_coverage, index.completeness.logical_index, index.entries.length)) {
+    return invalid("unusable_source_state");
+  }
   if (input.expectedIndexSnapshotId !== undefined && input.expectedIndexSnapshotId !== index.snapshot_id) return invalid("snapshot_mismatch");
   if (input.referenceTime !== undefined && (!Number.isFinite(Date.parse(input.referenceTime))
     || index.as_of !== new Date(input.referenceTime).toISOString())) {
@@ -277,6 +282,13 @@ export function measureConditionalFieldResponse(input: ConditionalMeasurementInp
     }
   });
   return validated.success ? validated.data : invalid("invalid_response");
+}
+
+function observedCoverageUsable(observed: string, logical: string, entryCount: number): boolean {
+  if (observed === "unknown") {
+    return entryCount > 0 && logical !== "complete" && logical !== "exhausted_empty";
+  }
+  return usableObservedStates.has(observed);
 }
 
 function invalid(reason: Extract<ConditionalFieldMeasurement, { status: "invalid" }>["reason"]): ConditionalFieldMeasurement {
