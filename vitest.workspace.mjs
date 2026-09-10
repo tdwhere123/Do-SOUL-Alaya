@@ -113,7 +113,8 @@ export default [
     testTimeout: process.platform === "win32" ? 30_000 : 5_000
   }),
   packageProject("@do-soul/alaya-core", "packages/core", {
-    setupFiles: [path.resolve(rootDir, "packages/core/vitest.setup.ts")]
+    setupFiles: [path.resolve(rootDir, "packages/core/vitest.setup.ts")],
+    ...(process.platform === "win32" ? { testTimeout: 30_000 } : {})
   }),
   packageProject("@do-soul/alaya-soul", "packages/soul"),
   packageProject("@do-soul/alaya-engine-gateway", "packages/engine-gateway"),

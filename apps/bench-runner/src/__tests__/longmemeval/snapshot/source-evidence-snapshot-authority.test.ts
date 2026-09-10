@@ -214,7 +214,12 @@ describe("source evidence snapshot authority", () => {
   it("rejects an extra unbound direct evidence row", () => {
     expect(() => verifyCopy((db) => {
       db.prepare(`
-        INSERT INTO evidence_capsules
+        INSERT INTO evidence_capsules (
+          object_id, object_kind, schema_version, lifecycle_state,
+          created_at, updated_at, created_by, evidence_kind, semantic_anchor,
+          event_anchor, physical_anchor, evidence_health_state, gist, excerpt,
+          source_hash, run_id, workspace_id, surface_id
+        )
         SELECT 'extra-direct', object_kind, schema_version, lifecycle_state,
                created_at, updated_at, created_by, evidence_kind, semantic_anchor,
                event_anchor, physical_anchor, evidence_health_state, gist, excerpt,
@@ -252,7 +257,12 @@ describe("source evidence snapshot authority", () => {
 
     expect(() => verifyCopy((db) => {
       db.prepare(`
-        INSERT INTO evidence_capsules
+        INSERT INTO evidence_capsules (
+          object_id, object_kind, schema_version, lifecycle_state,
+          created_at, updated_at, created_by, evidence_kind, semantic_anchor,
+          event_anchor, physical_anchor, evidence_health_state, gist, excerpt,
+          source_hash, run_id, workspace_id, surface_id
+        )
         SELECT 'supporting-evidence', object_kind, schema_version, lifecycle_state,
                created_at, updated_at, 'fixture', 'inferred', semantic_anchor,
                event_anchor, '{"artifact_ref":"q-source-evidence-authority-s0-r0"}',
@@ -289,7 +299,12 @@ describe("source evidence snapshot authority", () => {
   it("does not treat ordinary supporting evidence as an extra direct object", () => {
     expect(() => verifyCopy((db) => {
       db.prepare(`
-        INSERT INTO evidence_capsules
+        INSERT INTO evidence_capsules (
+          object_id, object_kind, schema_version, lifecycle_state,
+          created_at, updated_at, created_by, evidence_kind, semantic_anchor,
+          event_anchor, physical_anchor, evidence_health_state, gist, excerpt,
+          source_hash, run_id, workspace_id, surface_id
+        )
         SELECT 'ordinary-evidence', object_kind, schema_version, lifecycle_state,
                created_at, updated_at, 'fixture', 'inferred', semantic_anchor,
                event_anchor, '{"artifact_ref":"ordinary-ref"}',
