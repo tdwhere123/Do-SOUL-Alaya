@@ -264,7 +264,7 @@ describe("LocalOnnxEmbeddingClient", () => {
 
       releases.shift()?.(output);
       await vi.waitFor(() => expect(extractor).toHaveBeenCalledTimes(2), {
-        timeout: 5_000
+        timeout: process.platform === "win32" ? 15_000 : 5_000
       });
       releases.shift()?.(output);
       await expect(second).resolves.toHaveLength(1);

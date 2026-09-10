@@ -92,7 +92,11 @@ describe("mcp memory tool handler wiring", () => {
         workspace_id: "ws1",
         run_id: "run1",
         delivered_object_ids: ["mem1"],
-        delivered_objects: [{ object_id: "mem1", object_kind: "memory_entry" }]
+        delivered_objects: [expect.objectContaining({
+          object_id: "mem1",
+          object_kind: "memory_entry",
+          target: expect.objectContaining({ kind: "memory_entry", object_id: "mem1" })
+        })]
       })
     );
     expect(result.ok && result.output).toMatchObject({
@@ -155,9 +159,17 @@ describe("mcp memory tool handler wiring", () => {
     expect(deps.trustStateRecorder.recordDelivery).toHaveBeenCalledWith(expect.objectContaining({
       delivered_object_ids: ["mem1", "mem2", "constraint-2"],
       delivered_objects: [
-        { object_id: "mem1", object_kind: "memory_entry" },
-        { object_id: "mem2", object_kind: "memory_entry" },
-        { object_id: "constraint-2", object_kind: "memory_entry" }
+        expect.objectContaining({
+          object_id: "mem1",
+          object_kind: "memory_entry",
+          target: expect.objectContaining({ kind: "memory_entry", object_id: "mem1" })
+        }),
+        expect.objectContaining({
+          object_id: "mem2",
+          object_kind: "memory_entry",
+          target: expect.objectContaining({ kind: "memory_entry", object_id: "mem2" })
+        }),
+        expect.objectContaining({ object_id: "constraint-2", object_kind: "memory_entry" })
       ]
     }));
   });

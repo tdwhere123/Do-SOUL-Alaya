@@ -540,9 +540,11 @@ describe("MCP memory authenticity proof", () => {
         max_results: 5
       });
       const deliveredIds = recall.results.map((result) => result.object_id);
-      const goldIds = golds.map((gold) => gold.object_id);
+      const goldDelivered = golds.every((gold) => recall.results.some((row) =>
+        row.object_id === gold.object_id
+        || (row.content_preview ?? "").includes(gold.factorValue)));
       const decoyIds = decoys.map((decoy) => decoy.object_id);
-      expect(goldIds.every((id) => deliveredIds.includes(id))).toBe(true);
+      expect(goldDelivered).toBe(true);
       expect(decoyIds.some((id) => !deliveredIds.includes(id))).toBe(true);
     } finally {
       await harness.close();

@@ -15,19 +15,17 @@ export type DeliveredObjectIdentity = SoulContextObjectIdentity;
 export function dedupeDeliveredObjectIdentities(
   objects: readonly DeliveredObjectIdentity[]
 ): readonly DeliveredObjectIdentity[] {
-  const seen = new Set<string>();
-  const result: DeliveredObjectIdentity[] = [];
+  const byKey = new Map<string, DeliveredObjectIdentity>();
   for (const object of objects) {
-    const key = object.target === undefined
-      ? `${object.object_kind}\0${object.object_id ?? ""}`
-      : `${object.object_kind}\0${JSON.stringify(object.target)}`;
-    if (seen.has(key)) {
-      continue;
+    const key = object.object_id !== undefined && object.object_id.length > 0
+      ? `${object.object_kind}\0id\0${object.object_id}`
+      : `${object.object_kind}\0target\0${JSON.stringify(object.target ?? null)}`;
+    const existing = byKey.get(key);
+    if (existing === undefined || (existing.target === undefined && object.target !== undefined)) {
+      byKey.set(key, object);
     }
-    seen.add(key);
-    result.push(object);
   }
-  return Object.freeze(result);
+  return Object.freeze([...byKey.values()]);
 }
 
 export function uniqueObjectIds(
