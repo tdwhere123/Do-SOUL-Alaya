@@ -1,6 +1,7 @@
 import {
   solveMaxMinField,
-  type MaxMinTransition
+  type MaxMinTransition,
+  type MaxMinWorkItem
 } from "@do-soul/alaya-graph-algorithms";
 import {
   MILLIGRADE_BOTTOM,
@@ -20,6 +21,15 @@ export type BindMaxMinSuccess = Readonly<{
   readonly kind: "bound";
   readonly snapshot: FieldSnapshot;
   readonly values: ReadonlyMap<string, number>;
+  readonly solver_steps: number;
+  readonly solver_runs: number;
+  readonly solver_complete: boolean;
+  readonly remaining_worklist: readonly MaxMinWorkItem[];
+  readonly possible_complete?: boolean;
+  readonly guaranteed_complete?: boolean;
+  readonly guaranteed_values?: ReadonlyMap<string, number>;
+  readonly guaranteed_worklist?: readonly MaxMinWorkItem[];
+  readonly guaranteed_graph_key?: string;
 }>;
 
 export type BindMaxMinRejection = Readonly<{
@@ -36,6 +46,9 @@ export type BindMaxMinInput = Readonly<{
   readonly transitions: readonly Transition[];
   readonly budget: RequestBudget;
   readonly facets?: FieldSnapshot["facets"];
+  readonly prior_values?: ReadonlyMap<string, number>;
+  readonly worklist?: readonly MaxMinWorkItem[];
+  readonly work_limit?: number;
 }>;
 
 export function productStateNodeId(key: ProductStateKey): string {
@@ -97,17 +110,24 @@ export function bindMaxMinField(input: BindMaxMinInput): BindMaxMinResult {
     seeds,
     transitions: legalTransitions.map(toMaxMinTransition),
     bottom: MILLIGRADE_BOTTOM,
-    top: MILLIGRADE_TOP
+    top: MILLIGRADE_TOP,
+    ...(input.prior_values === undefined ? {} : { priorValues: input.prior_values }),
+    ...(input.worklist === undefined ? {} : { worklist: input.worklist }),
+    ...(input.work_limit === undefined ? {} : { workLimit: input.work_limit })
   });
   return {
     kind: "bound",
     values: solved.values,
+    solver_steps: solved.steps,
+    solver_runs: 1,
+    solver_complete: solved.complete,
+    remaining_worklist: solved.remainingWorklist,
     snapshot: {
       schema_version: 1,
       snapshot_id: input.snapshot_id,
       query_id: input.query_id,
       seeds: input.seeds,
-      values: fieldValues(keys, solved.values, input.seeds, legalTransitions),
+      values: fieldValues(keys, solved.values),
       retained_transitions: retainedProtocolTransitions(legalTransitions, solved.retainedTransitions),
       facets: input.facets ?? []
     }
@@ -137,17 +157,12 @@ function toMaxMinTransition(transition: Transition): MaxMinTransition {
 
 function fieldValues(
   keys: ReadonlyMap<string, ProductStateKey>,
-  values: ReadonlyMap<string, number>,
-  seeds: readonly SeedActivation[],
-  transitions: readonly Transition[]
+  values: ReadonlyMap<string, number>
 ): readonly FieldValue[] {
-  const seeded = new Set(seeds.map((seed) => productStateNodeId(seed.state)));
-  const incoming = new Set(transitions.map((transition) => productStateNodeId(transition.to)));
   const fields: FieldValue[] = [];
   for (const [nodeId, state] of keys) {
-    const milligrades = values.get(nodeId) ?? MILLIGRADE_BOTTOM;
-    const reachable = seeded.has(nodeId) || incoming.has(nodeId) || milligrades > MILLIGRADE_BOTTOM;
-    if (!reachable) {
+    const milligrades = values.get(nodeId);
+    if (milligrades === undefined) {
       fields.push({
         schema_version: 1,
         state,

@@ -4,26 +4,48 @@ export interface MaxMinTransition {
   readonly strength: number;
 }
 
+export interface MaxMinWorkItem {
+  readonly nodeId: string;
+  readonly strength: number;
+}
+
 export interface MaxMinInput {
   readonly nodeIds: readonly string[];
   readonly seeds: ReadonlyMap<string, number>;
   readonly transitions: readonly MaxMinTransition[];
   readonly bottom: 0;
   readonly top: number;
+  readonly priorValues?: ReadonlyMap<string, number>;
+  readonly worklist?: readonly MaxMinWorkItem[];
+  readonly workLimit?: number;
 }
 
 export interface MaxMinResult {
   readonly values: ReadonlyMap<string, number>;
   readonly retainedTransitions: readonly MaxMinTransition[];
+  readonly remainingWorklist: readonly MaxMinWorkItem[];
+  readonly steps: number;
+  readonly complete: boolean;
 }
 
 export function solveMaxMinField(input: MaxMinInput): MaxMinResult {
   const top = requireIntegerTop(input.top, input.bottom);
   const nodeIds = uniqueNodeIds(input.nodeIds);
-  const values = initialValues(nodeIds, input.seeds, input.bottom, top);
+  const values = initialValues(nodeIds, input.seeds, input.bottom, top, input.priorValues);
   const retainedTransitions = legalTransitions(nodeIds, input.transitions, input.bottom, top);
-  relaxMaxMin(values, adjacency(retainedTransitions), input.bottom);
-  return { values, retainedTransitions };
+  const relaxed = relaxMaxMin(
+    values,
+    adjacency(retainedTransitions),
+    input.worklist,
+    input.workLimit
+  );
+  return {
+    values,
+    retainedTransitions,
+    remainingWorklist: relaxed.remainingWorklist,
+    steps: relaxed.steps,
+    complete: relaxed.complete
+  };
 }
 
 function requireIntegerTop(top: number, bottom: 0): number {
@@ -49,11 +71,21 @@ function initialValues(
   nodeIds: readonly string[],
   seeds: ReadonlyMap<string, number>,
   bottom: 0,
-  top: number
+  top: number,
+  priorValues: ReadonlyMap<string, number> | undefined
 ): Map<string, number> {
+  const nodeSet = new Set(nodeIds);
   const values = new Map<string, number>();
   for (const nodeId of nodeIds) {
-    values.set(nodeId, clampInteger(seeds.get(nodeId) ?? bottom, bottom, top));
+    if (!seeds.has(nodeId)) continue;
+    values.set(nodeId, clampInteger(seeds.get(nodeId)!, bottom, top));
+  }
+  if (priorValues === undefined) return values;
+  for (const [nodeId, value] of priorValues) {
+    if (!nodeSet.has(nodeId)) continue;
+    const clamped = clampInteger(value, bottom, top);
+    const current = values.get(nodeId);
+    if (current === undefined || clamped > current) values.set(nodeId, clamped);
   }
   return values;
 }
@@ -92,24 +124,33 @@ function adjacency(
 function relaxMaxMin(
   values: Map<string, number>,
   edges: ReadonlyMap<string, readonly MaxMinTransition[]>,
-  bottom: 0
-): void {
+  worklist: readonly MaxMinWorkItem[] | undefined,
+  workLimit: number | undefined
+): { remainingWorklist: readonly MaxMinWorkItem[]; steps: number; complete: boolean } {
   const heap = new MaxHeap();
-  for (const [nodeId, value] of values) {
-    if (value > bottom) heap.push(value, nodeId);
+  if (worklist !== undefined && worklist.length > 0) {
+    for (const item of worklist) heap.push(item.strength, item.nodeId);
+  } else {
+    for (const [nodeId, value] of values) heap.push(value, nodeId);
   }
+  let steps = 0;
   while (!heap.isEmpty()) {
     const current = heap.pop();
     if (current.strength !== values.get(current.nodeId)) continue;
+    if (workLimit !== undefined && steps >= workLimit) {
+      heap.push(current.strength, current.nodeId);
+      return { remainingWorklist: heap.remaining(), steps, complete: false };
+    }
+    steps += 1;
     for (const transition of edges.get(current.nodeId) ?? []) {
       const next = Math.min(current.strength, transition.strength);
-      const prior = values.get(transition.to) ?? bottom;
-      if (next > prior) {
-        values.set(transition.to, next);
-        heap.push(next, transition.to);
-      }
+      const prior = values.get(transition.to);
+      if (prior !== undefined && next <= prior) continue;
+      values.set(transition.to, next);
+      heap.push(next, transition.to);
     }
   }
+  return { remainingWorklist: [], steps, complete: true };
 }
 
 class MaxHeap {
@@ -135,6 +176,10 @@ class MaxHeap {
 
   public isEmpty(): boolean {
     return this.items.length === 0;
+  }
+
+  public remaining(): readonly MaxMinWorkItem[] {
+    return this.items.map((item) => ({ nodeId: item.nodeId, strength: item.strength }));
   }
 
   private siftUp(index: number): void {

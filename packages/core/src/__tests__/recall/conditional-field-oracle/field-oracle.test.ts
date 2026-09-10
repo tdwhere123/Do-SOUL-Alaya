@@ -4,6 +4,7 @@ import {
   productSubjectId,
   type QueryProgram
 } from "@do-soul/alaya-protocol";
+import { bindMaxMinField } from "../../../recall/conditional-field/reference/bind-max-min.js";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
 import {
   cheapestCompleteWitness,
@@ -238,6 +239,46 @@ describe("conditional-field independent field oracle", () => {
     });
     expect(first.entries.length).toBeLessThanOrEqual(2);
     expect(first.continuation).not.toBeNull();
+  });
+
+  it("treats seed 0 through a hard edge as reachable and an unseeded acceptor as unreachable", () => {
+    const isolated = bindMaxMinField({
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      seeds: [],
+      transitions: [{
+        schema_version: 1,
+        from: productKey("z"),
+        to: productKey("z"),
+        relation_kind: "loop",
+        strength_milligrades: 1000,
+        validity: { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" },
+        applicable: true
+      }]
+    });
+    if (isolated.kind !== "bound") throw new Error("expected bound field");
+    const isolatedValue = isolated.snapshot.values.find((value) => productSubjectId(value.state) === "z");
+    expect(isolatedValue?.activation).toEqual({ kind: "unreachable" });
+
+    const reached = bindMaxMinField({
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      seeds: [{ schema_version: 1, state: productKey("a"), milligrades: 0 }],
+      transitions: [{
+        schema_version: 1,
+        from: productKey("a"),
+        to: productKey("b"),
+        relation_kind: "hard",
+        strength_milligrades: 1000,
+        validity: { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" },
+        applicable: true
+      }]
+    });
+    if (reached.kind !== "bound") throw new Error("expected bound field");
+    expect(reached.snapshot.values.find((value) => productSubjectId(value.state) === "b")?.activation)
+      .toEqual({ kind: "reachable", milligrades: 0 });
   });
 
   it("parses the deployment program without aliasing epsilon and empty", () => {

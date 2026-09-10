@@ -528,7 +528,7 @@ function loadStoredRelationKinds(
   return { kinds, charged: Math.min(limit, kinds.length + 1), open: kinds.length === limit };
 }
 
-function seedEffects(
+export function seedEffects(
   observations: readonly TypedObservation[],
   interpretation: QueryInterpretation,
   asOf: string
@@ -536,7 +536,8 @@ function seedEffects(
   return observations.flatMap((observation) =>
     seedActivationsForObservation(observation, interpretation, asOf).map((seed) => ({
       observation_id: `${observation.observation_id}:${seed.state.hypothesis_id}:${seed.state.program_state}`,
-      seed
+      seed,
+      admitted_seed: true as const
     }))
   );
 }

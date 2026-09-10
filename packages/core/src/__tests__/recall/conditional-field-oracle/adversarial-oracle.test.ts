@@ -187,7 +187,7 @@ describe("conditional-field adversarial falsifiers", () => {
       top: 1000
     });
     expect(solver.values.get("end")).toBe(800);
-    expect(solver.values.get("routed")).toBe(0);
+    expect(solver.values.has("routed")).toBe(false);
     expect(leaked.values.get("routed")).toBe(800);
     const world = deploymentWorld();
     const field = enumerateSimplePaths(

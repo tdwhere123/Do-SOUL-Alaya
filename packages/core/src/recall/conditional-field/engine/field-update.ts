@@ -1,12 +1,10 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
   type CompletenessStatus,
   type CoverageRegion,
   type Derivation,
   type FacetVector,
-  type FieldSnapshot,
   type ObserverPage,
   type ObserverStatus,
   type ProductStateKey,
@@ -16,11 +14,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { completenessForInterpretationStatus } from "../reference/interpret-query.js";
 import { aggregateObserverStatus } from "../reference/accepting-projection.js";
-import {
-  bindMaxMinField,
-  productStateNodeId,
-  type BindMaxMinResult
-} from "../reference/bind-max-min.js";
+import { productStateNodeId } from "../reference/bind-max-min.js";
+import { bindChargedField } from "./field-solve.js";
 import type { FairWorkRegion } from "../reference/schedule-fair-work.js";
 import { recoveredBindingSnapshot } from "./binding-environment.js";
 import { joinDerivation, mergeDerivations } from "./path-derivation.js";
@@ -66,36 +61,23 @@ export const ACTION_BY_KIND: Readonly<Record<CoverageRegion["kind"], "seed" | "a
 export function bindEngineState(state: BindableState): FieldEngineState {
   const charged = chargeIdentities(state);
   const remainingWork = [...charged.remaining_work];
-  let exploration = charged.remaining_exploration;
-  let reserve = charged.remaining_reserve;
-  const paid = paySolver(exploration, reserve, remainingWork);
-  exploration = paid.exploration;
-  reserve = paid.reserve;
-  const binding = paid.ok
-    ? annotateBounds(
-      bindMaxMinField({
-        query_id: charged.query_id,
-        snapshot_id: charged.snapshot_id,
-        seeds: charged.seeds,
-        transitions: charged.transitions,
-        budget: charged.budget,
-        facets: charged.facets
-      }),
-      guaranteedValues(charged),
-      charged.residuals
-    )
-    : emptyBoundSnapshot(charged);
+  const bound = bindChargedField(charged, remainingWork);
+  const { proven_binding: _proven, ...chargedRest } = charged;
   const next: FieldEngineState = {
-    ...charged,
-    remaining_exploration: exploration,
-    remaining_reserve: reserve,
-    remaining_work: Object.freeze(remainingWork),
+    ...chargedRest,
+    remaining_exploration: bound.exploration,
+    remaining_reserve: bound.reserve,
+    remaining_work: Object.freeze(
+      bound.complete
+        ? remainingWork.filter((row) => row.kind !== "relaxation")
+        : remainingWork
+    ),
     identity_spool: Object.freeze([]),
     recovered_bindings: recoveredBindingSnapshot(
       charged.seen_identities.map((identity) => identity.binding_context)
     ),
-    binding,
-    closure: closureFacts(charged, paid.ok ? "fixed_point" : "open")
+    binding: bound.binding,
+    closure: closureFacts(charged, bound.complete && bound.binding.kind === "bound" ? "fixed_point" : "open")
   };
   return Object.freeze(next);
 }
@@ -163,12 +145,13 @@ export function absorbObservations(
   const mergedSeeds = mergeSeeds(seeds);
   const mergedDiscoveries = mergeDiscoveries(discoveries);
   const absorbedNewDiscoveries = mergedDiscoveries.length > state.discoveries.length;
-  const { binding: _binding, closure: _closure, ...rest } = state;
+  const { binding, closure: _closure, ...rest } = state;
   const residuals = memoryExhausted
     ? interruptOpenResiduals(mergeResiduals(state.residuals, consumption.page))
     : mergeResiduals(state.residuals, consumption.page);
   return {
     ...rest,
+    proven_binding: binding,
     remaining_exploration: remainingExploration,
     remaining_memory_bytes: remainingMemory,
     memory_exhausted: memoryExhausted,
@@ -289,7 +272,9 @@ function absorbEffects(
     absorbMeasurement(effect, measurements, retainedMeasurementIds, quota);
     if (effect.seed !== undefined && retainPayload(effect.seed, quota)) {
       seeds.push(effect.seed);
-      guaranteedSeeds.push(effect.seed);
+      if (effectSeedIsGuaranteed(effect, consumption.page.observations)) {
+        guaranteedSeeds.push(effect.seed);
+      }
     }
     if (effect.transition !== undefined && retainPayload(effect.transition, quota)) {
       transitions.push(effect.transition);
@@ -423,28 +408,24 @@ function payloadBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
-function paySolver(
-  exploration: number,
-  reserve: number,
-  remainingWork: RemainingWork[]
-): { exploration: number; reserve: number; ok: boolean } {
-  if (exploration >= 1) return { exploration: exploration - 1, reserve, ok: true };
-  if (reserve >= 1) return { exploration, reserve: reserve - 1, ok: true };
-  remainingWork.push({ kind: "relaxation", units: 1 });
-  return { exploration, reserve, ok: false };
+function effectSeedIsGuaranteed(
+  effect: FieldObservationEffect,
+  observations: readonly TypedObservation[]
+): boolean {
+  if (effect.missing_measurement === true) return false;
+  if (effect.admitted_seed !== true) return false;
+  const observation = relatedObservation(effect.observation_id, observations);
+  if (observation === undefined || !observationIsGuaranteed(observation)) return false;
+  return true;
 }
 
-function emptyBoundSnapshot(state: BindableState): BindMaxMinResult {
-  const snapshot: FieldSnapshot = {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    snapshot_id: state.snapshot_id,
-    query_id: state.query_id,
-    seeds: state.seeds,
-    values: [],
-    retained_transitions: state.transitions,
-    facets: state.facets
-  };
-  return { kind: "bound", values: new Map(), snapshot };
+function relatedObservation(
+  effectObservationId: string,
+  observations: readonly TypedObservation[]
+): TypedObservation | undefined {
+  const exact = observations.find((row) => row.observation_id === effectObservationId);
+  if (exact !== undefined) return exact;
+  return observations.find((row) => effectObservationId.startsWith(`${row.observation_id}:`));
 }
 
 function interruptOpenResiduals(residuals: readonly CoverageRegion[]): readonly CoverageRegion[] {
@@ -452,53 +433,6 @@ function interruptOpenResiduals(residuals: readonly CoverageRegion[]): readonly 
     if (region.status !== "open" && region.status !== "interrupted") return region;
     return { ...region, status: "interrupted" as const };
   }));
-}
-
-function guaranteedValues(state: BindableState): ReadonlyMap<string, number> {
-  const bound = bindMaxMinField({
-    query_id: state.query_id,
-    snapshot_id: state.snapshot_id,
-    seeds: state.guaranteed_seeds,
-    transitions: state.guaranteed_transitions,
-    budget: state.budget
-  });
-  if (bound.kind !== "bound") return new Map();
-  const values = new Map<string, number>();
-  for (const value of bound.snapshot.values) {
-    values.set(productStateNodeId(value.state), value.milligrades ?? MILLIGRADE_BOTTOM);
-  }
-  return values;
-}
-
-function annotateBounds(
-  binding: BindMaxMinResult,
-  guaranteed: ReadonlyMap<string, number>,
-  residuals: readonly CoverageRegion[]
-): BindMaxMinResult {
-  if (binding.kind !== "bound") return binding;
-  const residualHigh = residualUpper(residuals);
-  const open = residuals.some((region) => region.status === "open" || region.status === "interrupted");
-  const values = binding.snapshot.values.map((value) => {
-    const low = guaranteed.get(productStateNodeId(value.state)) ?? MILLIGRADE_BOTTOM;
-    const high = open ? Math.max(value.milligrades ?? MILLIGRADE_BOTTOM, residualHigh) : (value.milligrades ?? MILLIGRADE_BOTTOM);
-    return { ...value, low_milligrades: low, high_milligrades: high };
-  });
-  return {
-    kind: "bound",
-    values: binding.values,
-    snapshot: { ...binding.snapshot, values }
-  };
-}
-
-function residualUpper(residuals: readonly CoverageRegion[]): number {
-  let upper = MILLIGRADE_BOTTOM;
-  for (const region of residuals) {
-    if (region.status !== "open" && region.status !== "interrupted") continue;
-    const bound = region.conservative_bound_milligrades ?? region.high_milligrades;
-    if (bound === undefined) return MILLIGRADE_TOP;
-    if (bound > upper) upper = bound;
-  }
-  return upper;
 }
 
 function admitDiscoveryResidual(

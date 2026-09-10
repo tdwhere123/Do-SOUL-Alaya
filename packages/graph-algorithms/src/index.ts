@@ -11,7 +11,8 @@ export {
   solveMaxMinField,
   type MaxMinInput,
   type MaxMinResult,
-  type MaxMinTransition
+  type MaxMinTransition,
+  type MaxMinWorkItem
 } from "./max-min-field.js";
 
 export {

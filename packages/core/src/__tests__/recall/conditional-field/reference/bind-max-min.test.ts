@@ -19,6 +19,7 @@ import {
 } from "../../../../recall/conditional-field/reference/accepting-projection.js";
 import {
   bindMaxMinField,
+  productStateNodeId,
   projectLegalDerivationStep
 } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import {
@@ -369,6 +370,88 @@ describe("conditional-field reference binder", () => {
       }).entries.find((entry) => entry.object_id === "c")).toBeDefined();
   });
 
+  it("keeps reachable milligrade 0 distinct from an unseeded accepting state", () => {
+    const isolated = bindMaxMinField({
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      seeds: [],
+      transitions: [edge(productKey("z"), productKey("z"), "loop", 1000, true)]
+    });
+    if (isolated.kind !== "bound") throw new Error("expected bound field");
+    const isolatedValue = isolated.snapshot.values.find((value) => productSubjectId(value.state) === "z");
+    expect(isolatedValue?.activation).toEqual({ kind: "unreachable" });
+    expect(isolatedValue?.milligrades).toBeUndefined();
+
+    const zeroEdge = bindMaxMinField({
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      seeds: [seed(productKey("a"), 0)],
+      transitions: [edge(productKey("a"), productKey("b"), "hard", 1000, true)]
+    });
+    if (zeroEdge.kind !== "bound") throw new Error("expected bound field");
+    expect(activationOf(zeroEdge.snapshot.values, "a")).toEqual({ kind: "reachable", milligrades: 0 });
+    expect(activationOf(zeroEdge.snapshot.values, "b")).toEqual({ kind: "reachable", milligrades: 0 });
+    expect(valueOf(zeroEdge.snapshot.values, "b")).toBe(0);
+
+    const incoming = bindMaxMinField({
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      seeds: [],
+      transitions: [edge(productKey("from"), productKey("to"), "incoming", 1000, true)]
+    });
+    if (incoming.kind !== "bound") throw new Error("expected bound field");
+    expect(activationOf(incoming.snapshot.values, "from")).toEqual({ kind: "unreachable" });
+    expect(activationOf(incoming.snapshot.values, "to")).toEqual({ kind: "unreachable" });
+
+    const cycle = bindMaxMinField({
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      seeds: [],
+      transitions: [
+        edge(productKey("a"), productKey("b"), "ab", 1000, true),
+        edge(productKey("b"), productKey("a"), "ba", 900, true)
+      ]
+    });
+    if (cycle.kind !== "bound") throw new Error("expected bound field");
+    expect(activationOf(cycle.snapshot.values, "a")).toEqual({ kind: "unreachable" });
+    expect(activationOf(cycle.snapshot.values, "b")).toEqual({ kind: "unreachable" });
+  });
+
+  it("resumes a paused bind from the remaining worklist without dropping proven values", () => {
+    const input = {
+      query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      seeds: [seed(productKey("a"), 1000)],
+      transitions: [
+        edge(productKey("a"), productKey("b"), "ab", 900, true),
+        edge(productKey("b"), productKey("c"), "bc", 800, true),
+        edge(productKey("c"), productKey("d"), "cd", 700, true)
+      ]
+    };
+    const paused = bindMaxMinField({ ...input, work_limit: 1 });
+    if (paused.kind !== "bound") throw new Error("expected bound field");
+    expect(paused.solver_complete).toBe(false);
+    expect(paused.solver_steps).toBe(1);
+    expect(paused.values.get(productStateNodeId(productKey("a")))).toBe(1000);
+    expect(paused.values.has(productStateNodeId(productKey("d")))).toBe(false);
+    expect(activationOf(paused.snapshot.values, "d")).toEqual({ kind: "unreachable" });
+    expect(paused.remaining_worklist.length).toBeGreaterThan(0);
+    const resumed = bindMaxMinField({
+      ...input,
+      prior_values: paused.values,
+      worklist: paused.remaining_worklist
+    });
+    if (resumed.kind !== "bound") throw new Error("expected bound field");
+    expect(resumed.solver_complete).toBe(true);
+    expect(activationOf(resumed.snapshot.values, "d")).toEqual({ kind: "reachable", milligrades: 700 });
+    expect(resumed.values.get(productStateNodeId(productKey("d")))).toBe(700);
+  });
+
   it("does not map unsupported interpretation to a complete empty index", () => {
     expect(interpretationMayEmitCompleteEmpty("unsupported")).toBe(false);
     expect(interpretationMayEmitCompleteEmpty("malformed")).toBe(false);
@@ -458,6 +541,13 @@ function valueOf(
   objectId: string
 ): number {
   return values.find((value) => productSubjectId(value.state) === objectId)?.milligrades ?? 0;
+}
+
+function activationOf(
+  values: readonly { readonly state: ProductStateKey; readonly activation?: { readonly kind: string; readonly milligrades?: number } }[],
+  objectId: string
+): { readonly kind: string; readonly milligrades?: number } | undefined {
+  return values.find((value) => productSubjectId(value.state) === objectId)?.activation;
 }
 
 function inGuardInterval(

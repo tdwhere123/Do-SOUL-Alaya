@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_TOP,
   productSubjectId,
@@ -8,6 +9,7 @@ import {
   type ObserverPage,
   type ObserverStatus,
   type ProductStateKey,
+  type ProjectedCap,
   type QueryInterpretation,
   type SeedActivation,
   type Transition,
@@ -20,11 +22,15 @@ import {
   projectFieldDelta,
   proposeFieldWork
 } from "../../../../recall/conditional-field/engine/field-engine.js";
+import { bindEngineState } from "../../../../recall/conditional-field/engine/field-update.js";
+import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import {
   samePathAccepts,
   serialMin,
   tryCompleteHyperedge
 } from "../../../../recall/conditional-field/engine/path-composition.js";
+import { observeField, seedEffects } from "../../../../recall/runtime/conditional-field-observe.js";
+import { type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import {
   QUERY_ID,
   SNAPSHOT_ID,
@@ -64,6 +70,9 @@ describe("conditional-field engine", () => {
     if (withClaim.binding.kind !== "bound") return;
     expect(withClaim.binding.snapshot.retained_transitions.some((row) => productSubjectId(row.to) === "u"))
       .toBe(false);
+    const unrelated = withClaim.binding.snapshot.values.find((row) => productSubjectId(row.state) === "u");
+    expect(unrelated?.activation).toEqual({ kind: "unreachable" });
+    expect(unrelated?.milligrades).toBeUndefined();
   });
 
   it("keeps long homogeneous chains and shared-service fan-out without hop attenuation", () => {
@@ -240,7 +249,7 @@ describe("conditional-field engine", () => {
       transitions: deploymentTransitions()
     });
     expect(state.binding.kind).toBe("bound");
-    expect(valueOf(state, "c")).toBe(850);
+    expect(valueOf(state, "r")).toBe(1000);
     expect(state.remaining_reserve).toBeLessThan(2);
     expect(state.remaining_work.some((item) => item.kind === "state_create" || item.kind === "relaxation")
       || state.remaining_reserve < 2).toBe(true);
@@ -330,6 +339,225 @@ describe("conditional-field engine", () => {
     expect(revised.closure.requested_index).toBe("invalidated");
     expect(valueOf(revised, "c")).toBe(0);
   });
+
+  it("charges two solver runs when exploration can pay both bindings", () => {
+    const budget = defaultBudget({ work_units: 20, finalization_reserve: 2, min_envelope: 1 });
+    const state = createConditionalField({
+      interpretation: interpretation(),
+      budget,
+      seeds: [seed(productKey("r"), 1000)],
+      transitions: []
+    });
+    const spentExploration = (budget.work_units - budget.finalization_reserve) - state.remaining_exploration;
+    const spentReserve = budget.finalization_reserve - state.remaining_reserve;
+    expect(state.binding.kind).toBe("bound");
+    if (state.binding.kind !== "bound") return;
+    expect(state.binding.solver_runs).toBeGreaterThanOrEqual(2);
+    expect(state.binding.solver_steps).toBeGreaterThanOrEqual(2);
+    expect(spentExploration + spentReserve).toBeGreaterThan(state.binding.solver_runs - 1);
+    expect(spentExploration + spentReserve).toBeGreaterThanOrEqual(3);
+  });
+
+  it("keeps proven values and residual relaxation when a second solve cannot be paid", () => {
+    const state = createConditionalField({
+      interpretation: interpretation(),
+      budget: defaultBudget({ work_units: 2, finalization_reserve: 0, min_envelope: 0 }),
+      seeds: [seed(productKey("r"), 1000)],
+      transitions: []
+    });
+    expect(valueOf(state, "r")).toBe(1000);
+    expect(state.binding.kind).toBe("bound");
+    if (state.binding.kind !== "bound") return;
+    expect(state.binding.solver_runs).toBe(1);
+    expect(state.remaining_work.some((row) => row.kind === "relaxation")).toBe(true);
+    expect(state.closure.propagation).toBe("open");
+  });
+
+  it("pauses mid-solve and resumes from the remaining worklist", () => {
+    const hops: Transition[] = [];
+    for (let index = 0; index < 8; index += 1) {
+      hops.push(edge(productKey(`n${index}`), productKey(`n${index + 1}`), "chain", 900, true));
+    }
+    const paused = createConditionalField({
+      interpretation: interpretation(),
+      budget: defaultBudget({ work_units: 11, finalization_reserve: 0, min_envelope: 0 }),
+      seeds: [seed(productKey("n0"), 900)],
+      transitions: hops
+    });
+    expect(paused.binding.kind).toBe("bound");
+    if (paused.binding.kind !== "bound") return;
+    expect(paused.binding.solver_complete).toBe(false);
+    expect(paused.binding.remaining_worklist.length).toBeGreaterThan(0);
+    expect(valueOf(paused, "n0")).toBe(900);
+    expect(activationOf(paused, "n8")).toEqual({ kind: "unreachable" });
+    expect(paused.remaining_work.some((row) => row.kind === "relaxation")).toBe(true);
+    const { binding, closure: _closure, ...rest } = paused;
+    const resumed = bindEngineState({
+      ...rest,
+      remaining_exploration: 100,
+      proven_binding: binding
+    });
+    expect(valueOf(resumed, "n8")).toBe(900);
+    expect(resumed.binding.kind).toBe("bound");
+    if (resumed.binding.kind !== "bound") return;
+    expect(resumed.binding.solver_complete).toBe(true);
+    expect(resumed.remaining_work.some((row) => row.kind === "relaxation")).toBe(false);
+  });
+
+  it("resumes the guaranteed worklist without cold-starting it as the possible system", () => {
+    const hops: Transition[] = [];
+    for (let index = 0; index < 8; index += 1) {
+      hops.push(edge(productKey(`n${index}`), productKey(`n${index + 1}`), "chain", 900, true));
+    }
+    const paused = createConditionalField({
+      interpretation: interpretation(),
+      budget: defaultBudget({ work_units: 19, finalization_reserve: 0, min_envelope: 0 }),
+      seeds: [seed(productKey("n0"), 900)],
+      transitions: hops
+    });
+    expect(paused.binding.kind).toBe("bound");
+    if (paused.binding.kind !== "bound") return;
+    expect(paused.binding.possible_complete).toBe(true);
+    expect(paused.binding.guaranteed_complete).toBe(false);
+    expect(paused.binding.solver_complete).toBe(false);
+    expect(valueOf(paused, "n8")).toBe(900);
+    expect(paused.binding.guaranteed_values?.get(productStateNodeId(productKey("n0")))).toBe(900);
+    expect(paused.binding.guaranteed_values?.has(productStateNodeId(productKey("n8")))).toBe(false);
+    expect((paused.binding.guaranteed_worklist ?? paused.binding.remaining_worklist).length).toBeGreaterThan(0);
+    const { binding, closure: _closure, ...rest } = paused;
+    const stepped = bindEngineState({
+      ...rest,
+      remaining_exploration: 1,
+      remaining_reserve: 0,
+      proven_binding: binding
+    });
+    expect(stepped.binding.kind).toBe("bound");
+    if (stepped.binding.kind !== "bound") return;
+    expect(stepped.binding.possible_complete).toBe(true);
+    expect(stepped.binding.guaranteed_complete).toBe(false);
+    expect(stepped.binding.guaranteed_values?.has(productStateNodeId(productKey("n2")))).toBe(true);
+    const resumed = bindEngineState({
+      ...rest,
+      remaining_exploration: 100,
+      remaining_work: [],
+      proven_binding: stepped.binding
+    });
+    expect(resumed.binding.kind).toBe("bound");
+    if (resumed.binding.kind !== "bound") return;
+    expect(resumed.binding.solver_complete).toBe(true);
+    expect(resumed.binding.guaranteed_values?.get(productStateNodeId(productKey("n8")))).toBe(900);
+    expect(lowOf(resumed, "n8")).toBe(900);
+  });
+
+  it("does not activate a no-seed cycle", () => {
+    const state = createConditionalField({
+      interpretation: interpretation(),
+      budget: defaultBudget(),
+      seeds: [],
+      transitions: [
+        edge(productKey("a"), productKey("b"), "ab", 1000, true),
+        edge(productKey("b"), productKey("a"), "ba", 900, true)
+      ]
+    });
+    expect(activationOf(state, "a")).toEqual({ kind: "unreachable" });
+    expect(activationOf(state, "b")).toEqual({ kind: "unreachable" });
+    expect(valueOf(state, "a")).toBe(0);
+  });
+
+  it("does not put ungated seed effects on guaranteed_seeds", () => {
+    const ungated = applyObserverPage(createEmptyField(), {
+      page: page({ observations: [observation("r-ungated", "r", 850)] }),
+      effects: [{ observation_id: "r-ungated", seed: seed(productKey("r"), 850) }]
+    });
+    expect(ungated.seeds).toHaveLength(1);
+    expect(ungated.guaranteed_seeds).toHaveLength(0);
+    expect(valueOf(ungated, "r")).toBe(850);
+
+    const missing = applyObserverPage(createEmptyField(), {
+      page: page({ observations: [observation("r-missing", "r", 850)] }),
+      effects: [{
+        observation_id: "r-missing",
+        seed: seed(productKey("r"), 850),
+        missing_measurement: true,
+        projected_cap: projectedCap(850),
+        admitted_seed: true
+      }]
+    });
+    expect(missing.guaranteed_seeds).toHaveLength(0);
+
+    const orphanCap = applyObserverPage(createEmptyField(), {
+      page: page({ observations: [] }),
+      effects: [{
+        observation_id: "r-orphan",
+        seed: seed(productKey("r"), 850),
+        projected_cap: projectedCap(850)
+      }]
+    });
+    expect(orphanCap.guaranteed_seeds).toHaveLength(0);
+
+    const liveObservation = observation("seed:r", "r", 850);
+    const liveEffects = seedEffects([liveObservation], interpretation(), "2026-01-01T00:00:00.000Z");
+    expect(liveEffects.length).toBeGreaterThan(0);
+    expect(liveEffects.every((effect) =>
+      effect.admitted_seed === true
+      && effect.projected_cap === undefined
+      && effect.observation_id.startsWith(`${liveObservation.observation_id}:`)
+    )).toBe(true);
+    const admitted = applyObserverPage(createEmptyField(), {
+      page: page({ observations: [liveObservation] }),
+      effects: liveEffects
+    });
+    expect(admitted.guaranteed_seeds.length).toBeGreaterThan(0);
+    expect(valueOf(admitted, "r")).toBe(850);
+    expect(lowOf(admitted, "r")).toBe(850);
+
+    const observed = observeField({
+      ...interpretation(),
+      program: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, kind: "epsilon" }
+    }, {
+      workspace_id: "ws",
+      query_text: "needle",
+      budget: defaultBudget(),
+      as_of: "2026-01-01T00:00:00.000Z",
+      readers: liveSeedReaders("r")
+    });
+    expect(observed.guaranteed_seeds.length).toBeGreaterThan(0);
+    expect(observed.seeds.length).toBeGreaterThan(0);
+    expect(observed.guaranteed_seeds.every((row) => productSubjectId(row.state) === "r")).toBe(true);
+
+    const later = applyObserverPage(ungated, {
+      page: page({ observations: [observation("r-later", "r", 850)] }),
+      effects: seedEffects([observation("r-later", "r", 850)], interpretation(), "2026-01-01T00:00:00.000Z")
+    });
+    expect(ungated.binding.kind).toBe("bound");
+    if (ungated.binding.kind === "bound") {
+      expect(ungated.binding.solver_complete).toBe(true);
+      expect(lowOf(ungated, "r")).toBe(0);
+    }
+    expect(later.guaranteed_seeds.length).toBeGreaterThan(0);
+    expect(lowOf(later, "r")).toBe(850);
+  });
+
+  it("does not raise values on duplicate pages and converges across page widths", () => {
+    const once = absorbEffects(seedChainEffects());
+    const twice = absorbEffects([...seedChainEffects(), ...seedChainEffects()]);
+    expect(valueOf(twice, "c")).toBe(valueOf(once, "c"));
+    expect(valueOf(once, "c")).toBe(850);
+    let paged = createEmptyField();
+    for (const effect of seedChainEffects()) {
+      paged = applyObserverPage(paged, {
+        page: page({
+          region_id: "adjacency",
+          observations: effect.observation_id.startsWith("seed-")
+            ? [observation(effect.observation_id, "r", 1000)]
+            : []
+        }),
+        effects: [effect]
+      });
+    }
+    expect(valueOf(paged, "c")).toBe(valueOf(once, "c"));
+    expect(valueOf(paged, "l")).toBe(valueOf(once, "l"));
+  });
 });
 
 function createDeploymentField() {
@@ -370,6 +598,50 @@ function interpretation(): QueryInterpretation {
 
 function seed(state: ProductStateKey, milligrades: number): SeedActivation {
   return { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state, milligrades };
+}
+
+function projectedCap(milligrades: number): ProjectedCap {
+  return {
+    status: "projected",
+    domain_id: ASSOCIATION_DOMAIN_ID,
+    transfer_id: "policy_defined",
+    transfer_version: "v1",
+    milligrades
+  };
+}
+
+function seedChainEffects(): readonly {
+  readonly observation_id: string;
+  readonly seed?: SeedActivation;
+  readonly transition?: Transition;
+}[] {
+  return [
+    { observation_id: "seed-r", seed: seed(productKey("r"), 1000) },
+    {
+      observation_id: "edge-rl",
+      transition: edge(productKey("r"), productKey("l"), "observed_log", 950, true)
+    },
+    {
+      observation_id: "edge-lc",
+      transition: edge(productKey("l"), productKey("c"), "config_via_log", 850, true)
+    }
+  ];
+}
+
+function absorbEffects(
+  effects: readonly {
+    readonly observation_id: string;
+    readonly seed?: SeedActivation;
+    readonly transition?: Transition;
+  }[]
+) {
+  return applyObserverPage(createEmptyField(), {
+    page: page({
+      region_id: "adjacency",
+      observations: [observation("seed-r", "r", 1000)]
+    }),
+    effects
+  });
 }
 
 function edge(
@@ -468,4 +740,46 @@ function valueOf(
   if (state.binding.kind !== "bound") return 0;
   return state.binding.snapshot.values.find((row) => productSubjectId(row.state) === objectId)
     ?.milligrades ?? 0;
+}
+
+function lowOf(
+  state: ReturnType<typeof createConditionalField>,
+  objectId: string
+): number | undefined {
+  if (state.binding.kind !== "bound") return undefined;
+  return state.binding.snapshot.values.find((row) => productSubjectId(row.state) === objectId)
+    ?.low_milligrades;
+}
+
+function liveSeedReaders(objectId: string): ObserverReaders {
+  return {
+    lexical: () => ({
+      ids: [objectId],
+      nativeVisits: 1,
+      nativeBytes: 1,
+      rowsRead: 1,
+      bytesRead: 1,
+      truncated: false
+    }),
+    source: (input) => ({
+      row: {
+        object_id: input.objectId,
+        sourceRevision: "rev",
+        lifecycle_state: "active",
+        scope_class: "project"
+      },
+      rowsRead: 1,
+      bytesRead: 1,
+      unavailable: false
+    })
+  };
+}
+
+function activationOf(
+  state: ReturnType<typeof createConditionalField>,
+  objectId: string
+): { readonly kind: string; readonly milligrades?: number } | undefined {
+  if (state.binding.kind !== "bound") return undefined;
+  return state.binding.snapshot.values.find((row) => productSubjectId(row.state) === objectId)
+    ?.activation;
 }

@@ -305,7 +305,7 @@ describe("automaton, compatible join, and composed path identity", () => {
       top: 1000
     });
     expect(solver.values.get("end")).toBe(800);
-    expect(solver.values.get("routed")).toBe(0);
+    expect(solver.values.has("routed")).toBe(false);
   });
 
   it("admitted uses_service still binds same-service history", () => {

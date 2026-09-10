@@ -69,6 +69,7 @@ export type FieldObservationEffect = Readonly<{
   readonly missing_measurement?: boolean;
   readonly raw_measurement?: RawMeasurement;
   readonly projected_cap?: ProjectedCap;
+  readonly admitted_seed?: boolean;
   readonly unresolved_guard?: boolean;
   readonly seed?: SeedActivation;
   readonly transition?: Transition;
@@ -176,7 +177,9 @@ export type FieldEngineState = Readonly<{
   readonly closure: FieldClosureFacts;
 }>;
 
-export type BindableState = Omit<FieldEngineState, "binding" | "closure">;
+export type BindableState = Omit<FieldEngineState, "binding" | "closure"> & {
+  readonly proven_binding?: BindMaxMinResult;
+};
 
 export type WorkProposal = Readonly<{
   readonly actions: readonly ObserverAction[];
@@ -249,7 +252,7 @@ export function applyObserverPage(
   const reserved = { ...state, remaining_exploration: Math.max(0, state.remaining_exploration - observedWork) };
   const candidate = bindEngineState(absorbObservations(reserved, { ...consumption, work: { work_units: 0 } }));
   const workRejected = observedWork > state.remaining_exploration
-    || candidate.remaining_work.reduce((sum, row) => sum + row.units, 0) > state.remaining_work.reduce((sum, row) => sum + row.units, 0);
+    || retentionWorkUnits(candidate.remaining_work) > retentionWorkUnits(state.remaining_work);
   if (!candidate.memory_exhausted && !workRejected) return { ...candidate, retention_rejected: undefined };
   return Object.freeze({
     ...state,
@@ -364,6 +367,15 @@ export function projectFieldDelta(state: FieldEngineState): FieldDelta {
     residuals: state.residuals,
     closure: state.closure
   };
+}
+
+function retentionWorkUnits(work: readonly RemainingWork[]): number {
+  let units = 0;
+  for (const row of work) {
+    if (row.kind === "relaxation") continue;
+    units += row.units;
+  }
+  return units;
 }
 
 function admitField(
