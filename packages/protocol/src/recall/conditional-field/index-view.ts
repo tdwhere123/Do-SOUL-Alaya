@@ -12,6 +12,7 @@ import {
   Sha256DigestSchema
 } from "./common.js";
 import { EnumerationPolicySchema, ResultKindViewSchema } from "./query.js";
+import { ResidualSemanticEffectSchema } from "./observer.js";
 import {
   canonicalProductIdentity,
   memoryProductStateKey,
@@ -92,7 +93,36 @@ export const CompletenessReportSchema = z
     interpretation_coverage: CompletenessStatusSchema.optional(),
     transport: CompletenessStatusSchema,
     payload: CompletenessStatusSchema,
-    representation: CompletenessStatusSchema
+    representation: CompletenessStatusSchema,
+    claim_coverage: CompletenessStatusSchema.optional(),
+    explanation_coverage: CompletenessStatusSchema.optional(),
+    order_coverage: CompletenessStatusSchema.optional(),
+    pending_computation: CompletenessStatusSchema.optional(),
+    certificate_id: ConditionalFieldIdSchema.optional()
+  })
+  .strict()
+  .readonly();
+
+export const ClosureComparisonSchema = z.enum(["gt", "gte", "lt", "lte"]);
+export const ClosureCoveragePremiseSchema = z.enum([
+  "required_regions_irrelevant",
+  "upper_excludes_predicate",
+  "alternate_source_path"
+]);
+
+export const ClosureCertificateSchema = z
+  .object({
+    schema_version: SchemaVersionSchema,
+    certificate_id: ConditionalFieldIdSchema,
+    query_id: ConditionalFieldIdSchema,
+    predicate_id: ConditionalFieldIdSchema,
+    operator_id: ConditionalFieldIdSchema,
+    domain_id: ConditionalFieldIdSchema,
+    coverage_premise: ClosureCoveragePremiseSchema,
+    closed_effects: z.array(ResidualSemanticEffectSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    comparison: ClosureComparisonSchema.optional(),
+    threshold_milligrades: MilligradeSchema.optional(),
+    uses_raw_predicate: z.boolean().optional()
   })
   .strict()
   .readonly();
@@ -182,6 +212,9 @@ export type IndexRole = z.infer<typeof IndexRoleSchema>;
 export type IndexEntry = z.infer<typeof IndexEntrySchema>;
 export type CompletenessStatus = z.infer<typeof CompletenessStatusSchema>;
 export type CompletenessReport = z.infer<typeof CompletenessReportSchema>;
+export type ClosureComparison = z.infer<typeof ClosureComparisonSchema>;
+export type ClosureCoveragePremise = z.infer<typeof ClosureCoveragePremiseSchema>;
+export type ClosureCertificate = z.infer<typeof ClosureCertificateSchema>;
 export type Continuation = z.infer<typeof ContinuationSchema>;
 export type RepresentationDecision = z.infer<typeof RepresentationDecisionSchema>;
 export type InformationIndex = z.infer<typeof InformationIndexSchema>;

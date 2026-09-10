@@ -1,12 +1,14 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_TOP,
+  PHYSICAL_COVERAGE_REGION_KINDS,
   type CompletenessStatus,
   type CoverageRegion,
   type Derivation,
   type FacetVector,
   type ObserverPage,
   type ObserverStatus,
+  type PhysicalCoverageRegionKind,
   type ProductStateKey,
   type SeedActivation,
   type Transition,
@@ -14,6 +16,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { completenessForInterpretationStatus } from "../reference/interpret-query.js";
 import { aggregateObserverStatus } from "../reference/accepting-projection.js";
+import { classifyResidualInfluence } from "../index/completeness.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import { bindChargedField } from "./field-solve.js";
 import type { FairWorkRegion } from "../reference/schedule-fair-work.js";
@@ -43,7 +46,7 @@ import type {
   RemainingWork
 } from "./field-engine.js";
 
-export const KIND_PRIORITY: Readonly<Record<CoverageRegion["kind"], number>> = {
+export const KIND_PRIORITY: Readonly<Record<PhysicalCoverageRegionKind, number>> = {
   seed: 0,
   adjacency: 1,
   discovery: 1,
@@ -51,13 +54,17 @@ export const KIND_PRIORITY: Readonly<Record<CoverageRegion["kind"], number>> = {
   binding: 3
 };
 
-export const ACTION_BY_KIND: Readonly<Record<CoverageRegion["kind"], "seed" | "adjacency" | "relation" | "measurement">> = {
+export const ACTION_BY_KIND: Readonly<Record<PhysicalCoverageRegionKind, "seed" | "adjacency" | "relation" | "measurement">> = {
   seed: "seed",
   adjacency: "adjacency",
   discovery: "adjacency",
   guard: "relation",
   binding: "measurement"
 };
+
+export function isPhysicalRegionKind(kind: CoverageRegion["kind"]): kind is PhysicalCoverageRegionKind {
+  return (PHYSICAL_COVERAGE_REGION_KINDS as readonly string[]).includes(kind);
+}
 
 export function bindEngineState(state: BindableState): FieldEngineState {
   const charged = chargeIdentities(state);
@@ -194,7 +201,7 @@ export function defaultOpenResiduals(): readonly CoverageRegion[] {
 
 export function residualWorkRegions(residuals: readonly CoverageRegion[]): FairWorkRegion[] {
   return residuals
-    .filter((region) => region.kind !== "discovery")
+    .filter((region) => isPhysicalRegionKind(region.kind) && region.kind !== "discovery")
     .filter((region) => region.status === "open" || region.status === "interrupted")
     .map((region) => ({
       id: region.region_id,
@@ -520,6 +527,9 @@ function requestedIndexClosure(
     if (state.remaining_work.some((item) => item.kind === "provenance" || item.kind === "join")) {
       return "open";
     }
+    if (state.residuals.some((region) => classifyResidualInfluence(region, {}, "membership") !== "irrelevant")) {
+      return "open";
+    }
     return "complete";
   }
   return "open";
@@ -531,6 +541,8 @@ function openRegion(id: string, kind: CoverageRegion["kind"]): CoverageRegion {
     region_id: id,
     kind,
     status: "open",
-    conservative_bound_milligrades: MILLIGRADE_TOP
+    conservative_bound_milligrades: MILLIGRADE_TOP,
+    cursor_id: id,
+    coverage_role: kind === "discovery" ? "optional_accelerator" : "required"
   };
 }

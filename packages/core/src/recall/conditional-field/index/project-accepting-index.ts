@@ -36,6 +36,7 @@ import {
   continuationInvalidated,
   invalidatedCompleteness,
   resourceRejectedCompleteness,
+  sufficientAlternatePaths,
   type ObserverCoverage
 } from "./completeness.js";
 import {
@@ -192,9 +193,10 @@ function pageAcceptingIndex(
   const entries = sortEntries(projected.entries, input.view.enumeration_policy ?? "canonical");
   if (continuationPrefixUnverified(input, entries, projected.truncated)) {
     input.on_remaining_reserve?.(projected.remaining);
-    return { ...closedIndex(input, representation, composeCompleteness({ observer: input.observer,
-      interpretation_status: input.interpretation_status, total: entries.length, remaining: 1,
-      omitted_payload: false, expand_payload: input.expand_payload !== false, resource_work: "open" })),
+    return { ...closedIndex(input, representation, indexCompleteness(input, {
+      total: entries.length, remaining: 1, omitted_payload: false,
+      expand_payload: input.expand_payload !== false, resource_work: "open"
+    })),
       continuation: input.prior_continuation ?? null };
   }
   if (continuationSetMismatch(input, entries)) {
@@ -217,6 +219,16 @@ function pageAcceptingIndex(
       input.budget.page_budget
     ));
   const resourceOpen = projected.truncated || input.resource_work === "open";
+  const completeness = indexCompleteness(input, {
+    total: entries.length + (input.delivered_product_ids?.size
+      ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)),
+    remaining,
+    omitted_payload: omittedPayload,
+    expand_payload: expandPayload,
+    ...(mixedPayload ? { mixed_generation: true } : {}),
+    ...(input.support_work_status === undefined ? {} : { explanation_work: input.support_work_status }),
+    ...(resourceOpen ? { resource_work: "open" as const } : {})
+  });
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     query_id: input.query_id,
@@ -224,18 +236,7 @@ function pageAcceptingIndex(
     result_version: input.result_version,
     entries: page,
     explanations: recoverExplanationForest(page.flatMap((entry) => entry.explanation_ids), input.derivations ?? []),
-    completeness: composeCompleteness({
-      observer: input.observer,
-      interpretation_status: input.interpretation_status,
-      total: entries.length + (input.delivered_product_ids?.size
-        ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)),
-      remaining,
-      omitted_payload: omittedPayload,
-      expand_payload: expandPayload,
-      ...(mixedPayload ? { mixed_generation: true } : {}),
-      ...(input.support_work_status === undefined ? {} : { explanation_work: input.support_work_status }),
-      ...(resourceOpen ? { resource_work: "open" as const } : {})
-    }),
+    completeness,
     continuation: nextContinuation({ ...input, ...(resourceOpen || omittedPayload ? { resource_work: "open" } : {}) },
       remaining, retryPayload ? offset : offset + page.length, entries,
       retryPayload ? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)
@@ -243,8 +244,25 @@ function pageAcceptingIndex(
           || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined),
     representation,
     page_purpose: "membership",
-    order_status: remaining > 0 || resourceOpen ? "open" : "complete"
+    order_status: remaining > 0 || resourceOpen || completeness.order_coverage !== "complete"
+      ? "open"
+      : "complete"
   };
+}
+
+function indexCompleteness(
+  input: AcceptingProjectionInput,
+  extra: Parameters<typeof composeCompleteness>[0]
+): ReturnType<typeof composeCompleteness> {
+  const residuals = extra.residuals ?? input.observer?.open_regions ?? [];
+  return composeCompleteness({
+    observer: input.observer,
+    interpretation_status: input.interpretation_status,
+    query_id: input.query_id,
+    residuals,
+    sufficient_alternate_paths: extra.sufficient_alternate_paths ?? sufficientAlternatePaths(residuals),
+    ...extra
+  });
 }
 
 function acceptingEntries(

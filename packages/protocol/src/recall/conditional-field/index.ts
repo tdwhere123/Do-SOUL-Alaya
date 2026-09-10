@@ -60,6 +60,7 @@ export {
 } from "./query.js";
 export {
   SNAPSHOT_PIN_NATIVE_WORK,
+  PHYSICAL_COVERAGE_REGION_KINDS,
   CoverageRegionKindSchema,
   CoverageRegionSchema,
   ObserverActionSchema,
@@ -67,6 +68,9 @@ export {
   ObserverOutcomeSchema,
   ObserverPageSchema,
   ObserverStatusSchema,
+  ResidualCoverageRoleSchema,
+  ResidualInfluenceSchema,
+  ResidualSemanticEffectSchema,
   SnapshotReadLeaseSchema,
   TypedObservationSchema,
   type CoverageRegion,
@@ -76,6 +80,10 @@ export {
   type ObserverOutcome,
   type ObserverPage,
   type ObserverStatus,
+  type PhysicalCoverageRegionKind,
+  type ResidualCoverageRole,
+  type ResidualInfluence,
+  type ResidualSemanticEffect,
   type SnapshotReadLease,
   type TypedObservation
 } from "./observer.js";
@@ -160,6 +168,9 @@ export {
   type UsageReportedUse
 } from "./feedback.js";
 export {
+  ClosureCertificateSchema,
+  ClosureComparisonSchema,
+  ClosureCoveragePremiseSchema,
   CompletenessReportSchema,
   CompletenessStatusSchema,
   ContinuationSchema,
@@ -181,6 +192,9 @@ export {
   memoryIndexEntry,
   productStateKeyFromIndexEntry,
   sourceIndexEntry,
+  type ClosureCertificate,
+  type ClosureComparison,
+  type ClosureCoveragePremise,
   type CompletenessReport,
   type CompletenessStatus,
   type Continuation,

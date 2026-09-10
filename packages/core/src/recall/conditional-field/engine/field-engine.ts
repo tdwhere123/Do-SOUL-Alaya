@@ -63,6 +63,7 @@ import {
   bindEngineState,
   closureFacts,
   defaultOpenResiduals,
+  isPhysicalRegionKind,
   residualWorkRegions
 } from "./field-update.js";
 
@@ -378,6 +379,7 @@ export function proposeFieldWork(state: FieldEngineState): WorkProposal {
   for (const id of scheduled.served) {
     const residual = residualById.get(id);
     if (residual === undefined) continue;
+    if (!isPhysicalRegionKind(residual.kind)) continue;
     if (residual.status !== "open" && residual.status !== "interrupted") continue;
     actions.push({
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

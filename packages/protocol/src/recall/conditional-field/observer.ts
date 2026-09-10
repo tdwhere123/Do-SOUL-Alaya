@@ -61,7 +61,39 @@ export const SnapshotReadLeaseSchema = z
   .strict()
   .readonly();
 
-export const CoverageRegionKindSchema = z.enum(["seed", "adjacency", "guard", "binding", "discovery"]);
+export const PHYSICAL_COVERAGE_REGION_KINDS = [
+  "seed",
+  "adjacency",
+  "guard",
+  "binding",
+  "discovery"
+] as const;
+export const CoverageRegionKindSchema = z.enum([
+  "seed",
+  "adjacency",
+  "guard",
+  "binding",
+  "discovery",
+  "hypothesis",
+  "program_branch",
+  "source_domain",
+  "output_obligation",
+  "cursor",
+  "certificate"
+]);
+export const ResidualSemanticEffectSchema = z.enum([
+  "membership",
+  "grade_bound",
+  "claim",
+  "explanation",
+  "order",
+  "payload",
+  "refutation",
+  "validity",
+  "interpretation"
+]);
+export const ResidualCoverageRoleSchema = z.enum(["required", "optional_accelerator"]);
+export const ResidualInfluenceSchema = z.enum(["influential", "irrelevant", "unresolved"]);
 
 export const CoverageRegionSchema = z
   .object({
@@ -71,7 +103,16 @@ export const CoverageRegionSchema = z
     status: ObserverStatusSchema,
     conservative_bound_milligrades: MilligradeSchema.optional(),
     low_milligrades: MilligradeSchema.optional(),
-    high_milligrades: MilligradeSchema.optional()
+    high_milligrades: MilligradeSchema.optional(),
+    // Unseen objects may name these coordinates before a ProductStateKey exists.
+    hypothesis_id: ConditionalFieldIdSchema.optional(),
+    program_branch: ConditionalFieldIdSchema.optional(),
+    source_domain: ConditionalFieldIdSchema.optional(),
+    output_obligations: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    cursor_id: ConditionalFieldIdSchema.optional(),
+    certificate_id: ConditionalFieldIdSchema.optional(),
+    coverage_role: ResidualCoverageRoleSchema.optional(),
+    semantic_effects: z.array(ResidualSemanticEffectSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
   })
   .strict()
   .readonly();
@@ -126,6 +167,10 @@ export type ObserverOutcome = z.infer<typeof ObserverOutcomeSchema>;
 export type ObserverCursor = z.infer<typeof ObserverCursorSchema>;
 export type SnapshotReadLease = z.infer<typeof SnapshotReadLeaseSchema>;
 export type CoverageRegionKind = z.infer<typeof CoverageRegionKindSchema>;
+export type PhysicalCoverageRegionKind = (typeof PHYSICAL_COVERAGE_REGION_KINDS)[number];
+export type ResidualSemanticEffect = z.infer<typeof ResidualSemanticEffectSchema>;
+export type ResidualCoverageRole = z.infer<typeof ResidualCoverageRoleSchema>;
+export type ResidualInfluence = z.infer<typeof ResidualInfluenceSchema>;
 export type CoverageRegion = z.infer<typeof CoverageRegionSchema>;
 export type ObserverAction = z.infer<typeof ObserverActionSchema>;
 export type TypedObservation = z.infer<typeof TypedObservationSchema>;

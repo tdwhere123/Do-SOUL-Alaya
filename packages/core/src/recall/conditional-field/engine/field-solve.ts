@@ -14,6 +14,10 @@ import {
   type BindMaxMinResult,
   type BindMaxMinSuccess
 } from "../reference/bind-max-min.js";
+import {
+  residualGradeUpper,
+  residualsInvalidateBounds
+} from "../index/completeness.js";
 import type { BindableState, RemainingWork } from "./field-engine.js";
 
 type GuaranteedSolve = {
@@ -312,12 +316,17 @@ function emptyBoundSnapshot(state: BindableState): BindMaxMinResult {
 function annotateBounds(solved: DualSolve, residuals: readonly CoverageRegion[]): BindMaxMinResult {
   const binding = solved.possible;
   if (binding.kind !== "bound") return binding;
-  const residualHigh = residualUpper(residuals);
-  const open = residuals.some((region) => region.status === "open" || region.status === "interrupted");
+  const residualHigh = residualGradeUpper(residuals);
+  const invalidated = residualsInvalidateBounds(residuals);
   const values = binding.snapshot.values.map((value) => {
     if (value.activation?.kind === "unreachable") return value;
-    const low = solved.guaranteed.values.get(productStateNodeId(value.state)) ?? MILLIGRADE_BOTTOM;
-    const high = open ? Math.max(value.milligrades ?? MILLIGRADE_BOTTOM, residualHigh) : (value.milligrades ?? MILLIGRADE_BOTTOM);
+    const admitted = solved.guaranteed.values.get(productStateNodeId(value.state));
+    const low = invalidated ? MILLIGRADE_BOTTOM : (admitted ?? MILLIGRADE_BOTTOM);
+    const high = invalidated
+      ? MILLIGRADE_TOP
+      : residualHigh === undefined
+        ? (value.milligrades ?? MILLIGRADE_BOTTOM)
+        : Math.max(value.milligrades ?? MILLIGRADE_BOTTOM, residualHigh);
     return { ...value, low_milligrades: low, high_milligrades: high };
   });
   return {
@@ -334,15 +343,4 @@ function annotateBounds(solved: DualSolve, residuals: readonly CoverageRegion[])
     guaranteed_graph_key: solved.guaranteedGraphKey,
     snapshot: { ...binding.snapshot, values }
   };
-}
-
-function residualUpper(residuals: readonly CoverageRegion[]): number {
-  let upper = MILLIGRADE_BOTTOM;
-  for (const region of residuals) {
-    if (region.status !== "open" && region.status !== "interrupted") continue;
-    const bound = region.conservative_bound_milligrades ?? region.high_milligrades;
-    if (bound === undefined) return MILLIGRADE_TOP;
-    if (bound > upper) upper = bound;
-  }
-  return upper;
 }

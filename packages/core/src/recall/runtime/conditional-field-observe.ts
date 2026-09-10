@@ -50,7 +50,9 @@ import {
   incompleteObserver,
   openResiduals,
   settleDiscoveryResidual,
-  terminalObserver
+  settleSourceDomainResidual,
+  terminalObserver,
+  type SourceDomainCoverage
 } from "./observe-field-residuals.js";
 export type ObserveFieldInput = Readonly<{
   readonly workspace_id: string;
@@ -91,7 +93,8 @@ export function observeField(
 ): FieldEngineState {
   const residuals = openResiduals(
     hasMeasurementProducer(input.readers),
-    programNeedsGuardWork(interpretation.program)
+    programNeedsGuardWork(interpretation.program),
+    sourceDomainCoverageOf(interpretation, input)
   );
   const initial = startObservedField(interpretation, input, residuals);
   // Retained observations still need bytes for grounded explanations and serialized payloads.
@@ -156,6 +159,8 @@ function observeWithinMemory(
   let pairIndex = 0;
   let unresolvedGuard = false;
   let missingMeasurement = false;
+  let sourceTruncated = false;
+  let sourceUnavailable = false;
   const storedKinds = loadStoredRelationKinds(
     interpretation.program,
     observedInput.readers,
@@ -211,7 +216,10 @@ function observeWithinMemory(
         if (state.retention_rejected !== undefined || state.memory_exhausted) return state;
         state = retainObservedContext(before, state, sourceFacts, relationRows, subjects, pairProgress);
         if (state.memory_exhausted) return state;
-        if (observed.page.outcome.status === "interrupted") return state;
+        const seedStatus = observed.page.outcome.status;
+        if (seedStatus === "unavailable") sourceUnavailable = true;
+        if (seedStatus === "interrupted" || seedStatus === "open") sourceTruncated = true;
+        if (seedStatus === "interrupted") return state;
         continue;
       }
       if (action.action === "measurement") {
@@ -314,8 +322,8 @@ function observeWithinMemory(
       }
     }
   }
-  return Object.freeze({
-    ...settleDiscoveryResidual(
+  const settled = settleSourceDomainResidual(
+    settleDiscoveryResidual(
       state,
       interpretation,
       cursors,
@@ -323,6 +331,17 @@ function observeWithinMemory(
       predicates,
       pairProgress
     ),
+    interpretation,
+    cursors,
+    {
+      ...sourceDomainCoverageOf(interpretation, input),
+      truncated: sourceTruncated,
+      unavailable: sourceUnavailable,
+      settled: true
+    }
+  );
+  return Object.freeze({
+    ...settled,
     pair_progress: Object.freeze(Object.fromEntries(pairProgress)),
     resume_subjects: Object.freeze([...subjects])
   });
@@ -416,7 +435,7 @@ export function emptyField(
   return createConditionalField({
     interpretation,
     budget: input.budget,
-    residuals: openResiduals(false, false)
+    residuals: openResiduals(false, false, sourceDomainCoverageOf(interpretation, input))
   });
 }
 
@@ -656,6 +675,18 @@ function resumeCursors(
   const resume: Record<string, string | null> = {};
   for (const [regionId, cursor] of cursors) resume[regionId] = cursor.committed_through;
   return resume;
+}
+
+function sourceDomainCoverageOf(
+  interpretation: QueryInterpretation,
+  input: ObserveFieldInput
+): SourceDomainCoverage {
+  return {
+    resultKindView: interpretation.view.result_kind_view ?? "mixed",
+    hasSourceReader: input.readers.sourceRoots !== undefined,
+    hypothesisId: interpretation.hypotheses[0]?.hypothesis_id ?? "h0",
+    programBranch: "accepting"
+  };
 }
 
 function programNeedsGuardWork(program: QueryInterpretation["program"]): boolean {

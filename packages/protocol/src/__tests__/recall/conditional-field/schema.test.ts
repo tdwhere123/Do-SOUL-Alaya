@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  ClosureCertificateSchema,
   CompletenessReportSchema,
   FacetModeSchema,
   CompletenessStatusSchema,
@@ -172,6 +173,29 @@ describe("conditional-field schemas", () => {
     });
     expect(completeness.logical_index).toBe("complete");
     expect(completeness.observed_coverage).toBe("open");
+    const distinguished = CompletenessReportSchema.parse({
+      ...completeness,
+      interpretation_coverage: "open",
+      claim_coverage: "open",
+      explanation_coverage: "open",
+      order_coverage: "open",
+      pending_computation: "open",
+      certificate_id: "cert-membership"
+    });
+    expect(distinguished.order_coverage).not.toBe(distinguished.logical_index);
+    expect(ClosureCertificateSchema.parse({
+      schema_version: 1,
+      certificate_id: "q1:pred:op:assoc.bottleneck.milligrade.v1:upper_excludes_predicate",
+      query_id: "q1",
+      predicate_id: "pred",
+      operator_id: "op",
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      coverage_premise: "upper_excludes_predicate",
+      closed_effects: ["membership"],
+      comparison: "gt",
+      threshold_milligrades: 800,
+      uses_raw_predicate: true
+    }).closed_effects).toEqual(["membership"]);
     expect(RepresentationDecisionSchema.parse({
       schema_version: 1,
       policy: "construct_index_then_page_then_payload",
@@ -290,7 +314,13 @@ describe("conditional-field schemas", () => {
       "adjacency",
       "guard",
       "binding",
-      "discovery"
+      "discovery",
+      "hypothesis",
+      "program_branch",
+      "source_domain",
+      "output_obligation",
+      "cursor",
+      "certificate"
     ]);
     expect(CoverageRegionSchema.parse({
       schema_version: 1,
@@ -298,6 +328,22 @@ describe("conditional-field schemas", () => {
       kind: "discovery",
       status: "open"
     }).kind).toBe("discovery");
+    const unseen = CoverageRegionSchema.parse({
+      schema_version: 1,
+      region_id: "unseen-source",
+      kind: "source_domain",
+      status: "unknown",
+      source_domain: "source_evidence",
+      hypothesis_id: "h0",
+      program_branch: "accepting",
+      output_obligations: ["membership"],
+      cursor_id: "source-cursor",
+      coverage_role: "required",
+      semantic_effects: ["membership", "grade_bound"],
+      conservative_bound_milligrades: 1000
+    });
+    expect(unseen.kind).toBe("source_domain");
+    expect(unseen).not.toHaveProperty("product_state");
   });
 
   it("keeps an exclusive ownership ledger and ordinary-language admission statuses", () => {
