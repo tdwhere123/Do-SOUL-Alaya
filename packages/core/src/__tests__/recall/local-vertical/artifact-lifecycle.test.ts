@@ -1,5 +1,5 @@
-import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initializeSemanticArtifactCandidateSchema, SqliteMemoryRecallReader, type StorageDatabase } from "@do-soul/alaya-storage";
@@ -7,10 +7,6 @@ import { SemanticEnrichmentWorker } from "../../../conversation/semantic-enrichm
 import { artifactFixture, PROFILE, response, wireArtifacts } from "./artifact-lifecycle-fixture.js";
 import { MEM, WS } from "./ids.js";
 
-const probes: Record<string, unknown>[] = [];
-afterAll(() => writeFileSync('/tmp/r3-artifact-lifecycle-probes.json', JSON.stringify({
-  generatedAt: new Date().toISOString(), transport: 'local external-transport mock only', probes
-}, null, 2)));
 const databases = new Set<StorageDatabase>();
 const directories: string[] = [];
 afterEach(() => {
@@ -54,9 +50,6 @@ describe('durable semantic artifact lifecycle', () => {
     f.repo.searchReady(WS, 'Orion', 10);
     expect(f.slice.database.connection.prepare("SELECT total_changes() AS n").get()).toEqual(before);
     expect(t.calls).toHaveLength(1);
-    probes.push({ probe: 'duplicate_unchanged', calls: t.calls.length,
-      artifacts: count(f.slice.database, 'garden_semantic_artifacts'),
-      bindings: count(f.slice.database, 'garden_semantic_bindings'), write_ack_ms: f.writeDurations });
   });
 
   it('changes only affected units and publishes only the changed source', async () => {
@@ -77,9 +70,6 @@ describe('durable semantic artifact lifecycle', () => {
     expect(t.calls.length - callsBefore).toBe(1);
     expect(f.repo.searchReady(WS, 'Sirius', 10).map((row) => row.objectId)).toEqual([MEM.orion]);
     expect(f.slice.database.connection.prepare(`SELECT * FROM garden_semantic_projections WHERE object_id=?`).get(MEM.channel)).toEqual(before);
-    probes.push({ probe: 'changed_source', additional_calls: t.calls.length - callsBefore,
-      unchanged_source_projection: before, affected_source: MEM.orion,
-      write_ack_ms: f.writeDurations, artifacts: count(f.slice.database, 'garden_semantic_artifacts') });
   });
 
   it('rolls source update and its EventLog back when durable enqueue rejects', async () => {
@@ -135,7 +125,6 @@ describe('durable semantic artifact lifecycle', () => {
     for (let index = 0; index < 3; index++) { f.advance(); await worker.run(WS, task); }
     expect(calls).toBe(1);
     expect(reconciles).toBe(2);
-    probes.push({ probe: 'uncertain_bound', calls, reconciles, task: f.repo.task(WS, task) });
     expect(f.repo.task(WS, task)?.status).toBe('failed');
     expect(count(f.slice.database, 'garden_semantic_artifacts')).toBe(0);
   });
@@ -251,10 +240,6 @@ describe('durable semantic artifact lifecycle', () => {
     f.advance();
     expect(await f.worker(t).run(WS, task)).toBe('completed');
     expect(t.calls).toHaveLength(1);
-    probes.push({ probe: 'publication_before_completion_rollback', calls: t.calls.length,
-      artifacts: count(f.slice.database, 'garden_semantic_artifacts'),
-      bindings: count(f.slice.database, 'garden_semantic_bindings'),
-      projections: count(f.slice.database, 'garden_semantic_projections'), task: f.repo.task(WS, task) });
   });
 
   it('allows only one SQLite claim and rejects a result from a superseded worker token', async () => {
@@ -292,6 +277,7 @@ describe('durable semantic artifact lifecycle', () => {
     expect(artifactKind.index.completeness.interpretation_coverage).not.toBe('complete');
     const queryStarted = performance.now();
     const delivered = await f.slice.runRecall(input);
+    expect(performance.now() - queryStarted).toBeLessThanOrEqual(500);
     const repeated = await f.slice.runRecall(input);
     expect(delivered.membership).toContain(MEM.orion);
     expect(repeated.membership).toEqual(delivered.membership);
@@ -308,10 +294,6 @@ describe('durable semantic artifact lifecycle', () => {
     expect(phaseMetrics.actual_source_ack_ms).toBeLessThanOrEqual(250);
     expect(phaseMetrics.rss_bytes).toBeLessThanOrEqual(1024 ** 3);
     expect(phaseMetrics.sqlite_allocated_bytes).toBeLessThanOrEqual(8 * 1024 ** 2);
-    probes.push({ probe: 'artifact_and_source_recall', phaseMetrics, readyArtifacts, calls: t.calls.length,
-      repeat_query_ms: performance.now() - queryStarted, membership: delivered.membership,
-      index: delivered.index, artifactKindIndex: artifactKind.index,
-      counters: delivered.counters, write_ack_ms: f.writeDurations });
   });
 
   it('canonicalizes profile field order and keeps large source bytes out of task payloads', async () => {
@@ -326,8 +308,6 @@ describe('durable semantic artifact lifecycle', () => {
     expect(f.repo.task(WS, task)?.revision).toMatch(/^[a-f0-9]{64}$/u);
     expect(row.payload_json).not.toContain('Alice');
     expect(Buffer.byteLength(row.payload_json)).toBeLessThan(1024);
-    probes.push({ probe: 'compact_canonical_intent', source_bytes: Buffer.byteLength(content),
-      task_payload_bytes: Buffer.byteLength(row.payload_json), task_count: count(f.slice.database, 'garden_tasks') });
   });
 
   it('recovers the changed source and new intent together after a real file reopen', async () => {
@@ -339,6 +319,7 @@ describe('durable semantic artifact lifecycle', () => {
     const db = f.slice.database;
     const pages = db.connection.pragma('page_count', { simple: true }) as number;
     const pageSize = db.connection.pragma('page_size', { simple: true }) as number;
+    expect(pages * pageSize).toBeLessThanOrEqual(8 * 1024 ** 2);
     db.close();
     db.reopenIfClosed();
     const restarted = wireArtifacts(db);
@@ -347,9 +328,6 @@ describe('durable semantic artifact lifecycle', () => {
     expect(await restarted.worker(t).run(WS, old)).toBe('superseded_source');
     expect(await restarted.worker(t).run(WS, changed)).toBe('completed');
     expect(t.calls).toHaveLength(1);
-    probes.push({ probe: 'changed_restart', calls: t.calls.length, db_page_bytes: pages * pageSize,
-      old_status: restarted.repo.task(WS, old)?.status, new_status: restarted.repo.task(WS, changed)?.status,
-      source: restarted.repo.source(WS, MEM.orion), write_ack_ms: f.writeDurations });
   });
 
   it('shares one durable dispatch across concurrent source occurrences and binds both after completion', async () => {
@@ -370,9 +348,6 @@ describe('durable semantic artifact lifecycle', () => {
     expect(await f.worker(t).run(WS, second)).toBe('completed');
     expect(calls).toBe(1);
     expect(count(f.slice.database, 'garden_semantic_bindings')).toBe(2);
-    probes.push({ probe: 'cross_source_concurrent_reuse', calls,
-      attempts: count(f.slice.database, 'garden_semantic_attempts'),
-      bindings: count(f.slice.database, 'garden_semantic_bindings') });
   });
 
   it('recovers and shares persisted response bytes without spending a second external attempt', async () => {
@@ -391,9 +366,6 @@ describe('durable semantic artifact lifecycle', () => {
     expect(await f.worker(t, f.audit, 1).run(WS, first)).toBe('completed');
     expect(t.calls).toHaveLength(1);
     expect(count(f.slice.database, 'garden_semantic_bindings')).toBe(2);
-    probes.push({ probe: 'local_recovery_at_dispatch_bound', calls: t.calls.length,
-      task_claims: f.repo.task(WS, first)?.attempts,
-      external_attempts: count(f.slice.database, 'garden_semantic_attempts') });
   });
 
   it('rejects older-profile late publication against the durable desired task identity', async () => {
@@ -411,8 +383,6 @@ describe('durable semantic artifact lifecycle', () => {
     expect(await oldRun).toBe('superseded_source');
     expect(f.slice.database.connection.prepare('SELECT * FROM garden_semantic_projections').get()).toEqual(before);
     expect(f.repo.isCurrent(f.repo.task(WS, newer)!)).toBe(true);
-    probes.push({ probe: 'desired_profile_late_result', old: f.repo.task(WS, first)?.status,
-      current: f.repo.task(WS, newer)?.status, publication: before });
   });
 
   it('reconciles a shared uncertain unit after its old source is superseded and fences late ownership', async () => {
@@ -438,8 +408,6 @@ describe('durable semantic artifact lifecycle', () => {
     await expect(f.audit('received', stale, () => f.repo.receive(stale, attempt.id, raw)))
       .rejects.toThrow(/stale semantic work ownership/);
     expect(await f.worker(t).run(WS, first)).toBe('superseded_source');
-    probes.push({ probe: 'shared_uncertain_superseded_source', calls, reconciles,
-      old_status: f.repo.task(WS, first)?.status, new_status: f.repo.task(WS, next)?.status });
   });
 
   it('bounds raw artifact candidates before stale filtering and reports every joined owner read', async () => {
@@ -462,7 +430,6 @@ describe('durable semantic artifact lifecycle', () => {
     expect(expanded).toMatchObject({ nativeVisits: 2, candidateRowsReturned: 2, sourceRevisionRowsRead: 2, truncated: false });
     expect(f.repo.searchReadyObserved('other-workspace', 'decision', 2).rowsRead).toBe(0);
     expect(f.repo.searchReady(WS, 'decision', 3)).toEqual(expanded.rows);
-    probes.push({ probe: 'bounded_artifact_read', capped, expanded });
   });
 
   it('accepts A to B to A at one timestamp with fresh source revisions and reused artifacts', async () => {
@@ -493,8 +460,6 @@ describe('durable semantic artifact lifecycle', () => {
     expect(hydrated.row?.sourceRevision).toBe(current.revision);
     expect(hydrated.row?.sourceRevision).not.toBe(initial.revision);
     expect(hydrated).toMatchObject({ rowsRead: 3, sourceRowsRead: 2, revisionRowsRead: 1 });
-    probes.push({ probe: 'durable_source_hydration', hydrated });
-    probes.push({ probe: 'fixed_clock_source_aba', first, second, again, initial, current, sourceEvents, calls: t.calls.length });
   });
 
   it('repins a completed profile after profile A to B to A and republishes without transport', async () => {
@@ -517,7 +482,6 @@ describe('durable semantic artifact lifecycle', () => {
     expect(f.repo.searchReady(WS, 'decision', 10)).toHaveLength(1);
     expect(f.enqueue(MEM.orion, PROFILE)).toBe(first);
     expect(f.repo.task(WS, first)?.status).toBe('completed');
-    probes.push({ probe: 'profile_aba', first, second, again, calls: t.calls.length });
   });
 
   it('returns the same complete canonical result or empty truncation across publication permutations', async () => {
@@ -535,7 +499,6 @@ describe('durable semantic artifact lifecycle', () => {
       observations.push({ capped, complete });
     }
     expect(observations[0]!.complete.rows).toEqual(observations[1]!.complete.rows);
-    probes.push({ probe: 'publication_order_invariance', observations });
   });
 
   it('invalidates a projection on an accepted same-content update at the same timestamp', async () => {

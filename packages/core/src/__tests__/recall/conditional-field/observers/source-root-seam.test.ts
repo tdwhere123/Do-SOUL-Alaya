@@ -161,6 +161,68 @@ describe("source-root seam membership", () => {
     }));
     expect(observed.page.observations.some((row) => row.object_id === memoryId)).toBe(true);
   });
+
+  it("resumes mixed seed source enumeration from a bundled cursor", () => {
+    const memoryId = "aaaaaaaa-aaaa-4aaa-8aaa-000000000099";
+    const after = "r:2026-01-01T00:00:00.000Z\troot-05";
+    const afterCursors: Array<string | null | undefined> = [];
+    const sources: SourceRootObserverRow[] = Array.from({ length: 24 }, (_, index) => sourceRoot({
+      root_id: `root-${String(index).padStart(2, "0")}`,
+      content: `unrelated body ${index}`,
+      content_complete: true
+    }));
+    observeConditionalField(seedInput({
+      program: relation("observed_log"),
+      view: "mixed",
+      seed_query: "exact-memory-needle",
+      actionWork: 16,
+      page_limit: 4,
+      cursor: {
+        ...startObserverCursor({
+          cursor_id: "seed",
+          snapshot_id: SNAPSHOT_ID,
+          query_id: QUERY_ID,
+          region_id: "seed"
+        }),
+        committed_through: `s:${JSON.stringify({ source: after, memory: memoryId, sourcesDone: false })}`
+      },
+      readers: {
+        sourceRoots: (input) => {
+          afterCursors.push(input.afterCursor);
+          const remaining = sources.filter((row) => row.root_id > "root-05");
+          const take = Math.max(0, Math.min(input.limit, input.nativeLimit, remaining.length));
+          return sourcePage(
+            remaining.slice(0, take),
+            take < remaining.length,
+            take === 0 ? after : `r:2026-01-01T00:00:00.000Z\t${remaining[take - 1]!.root_id}`
+          );
+        },
+        lexical: () => ({
+          ids: [memoryId],
+          nativeVisits: 1,
+          nativeBytes: 8,
+          rowsRead: 1,
+          bytesRead: 8,
+          truncated: false,
+          committedThrough: memoryId
+        }),
+        source: (input) => ({
+          row: input.objectId === memoryId
+            ? {
+              object_id: memoryId,
+              sourceRevision: "rev-1",
+              lifecycle_state: "active",
+              content: "exact-memory-needle"
+            }
+            : null,
+          rowsRead: 1,
+          bytesRead: 8,
+          unavailable: false
+        })
+      }
+    }));
+    expect(afterCursors[0]).toBe(after);
+  });
 });
 
 function plantedBody(body: string) {

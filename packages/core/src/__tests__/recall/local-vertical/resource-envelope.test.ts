@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryDimension, type InformationIndex } from "@do-soul/alaya-protocol";
@@ -70,11 +70,10 @@ it("measures bounded first/repeat/reopened local Recall including setup, final q
       }
     }
     expect(noNetwork).not.toHaveBeenCalled();
+    expect(compositionSetupMs).toBeGreaterThanOrEqual(0);
+    expect(sourceAndEvidenceWriteMs).toBeGreaterThan(0);
+    expect(reopenSetupMs).toBeGreaterThan(0);
   } finally { noNetwork.mockRestore(); }
-  writeFileSync("/tmp/stop01-r2-resource-envelope.json", JSON.stringify({ schema: 1, node: process.version,
-    preparation: { compositionSetupMs, sourceAndEvidenceWriteMs, reopenSetupMs },
-    fixture: { sources: 64, assertions: 64, scope: "one workspace/subject", network: "forbidden",
-      coldDefinition: "first query on reopened SQLite connection; OS/native/module caches are not flushed" }, records }, null, 2));
 });
 
 it("does not materialize an oversized source or read an unavailable family", async () => {

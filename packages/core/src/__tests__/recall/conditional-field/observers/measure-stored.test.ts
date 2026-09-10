@@ -385,6 +385,69 @@ describe("stored pair measurement producer", () => {
     expect(measurementEffectsFor(result)).toEqual([]);
   });
 
+  it("emits missing rather than zero when a complete page has no measurements", () => {
+    const cursor = startObserverCursor({
+      cursor_id: "binding",
+      snapshot_id: SNAPSHOT_ID,
+      query_id: "admission-probe",
+      region_id: "binding"
+    });
+    const effects = measurementEffectsFor({
+      page: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        query_id: "admission-probe",
+        snapshot_id: SNAPSHOT_ID,
+        cursor,
+        observations: [],
+        outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: "exhausted" },
+        open_regions: []
+      },
+      work: { work_units: 0, residual_work_units: 0, native_visits: 0, bytes_read: 0 }
+    });
+    expect(effects).toEqual([{
+      observation_id: "binding:missing-measurement",
+      raw_measurement: { status: "missing" },
+      projected_cap: { status: "inapplicable" },
+      missing_measurement: true
+    }]);
+    expect(JSON.stringify(effects)).not.toContain("\"raw\":0");
+  });
+
+  it("resumes stored cosine admission from the encoded obligation index", () => {
+    const models: string[] = [];
+    const base = measureInput({
+      embeddingIds: (input) => {
+        models.push(input.profile?.model_id ?? input.modelId ?? "");
+        return {
+          objectIds: [],
+          rowVisits: 0,
+          metadataUtf8Bytes: 0,
+          truncated: false,
+          committedThrough: null
+        };
+      }
+    });
+    const result = observeConditionalField({
+      ...base,
+      cursor: { ...base.cursor, committed_through: `s:${JSON.stringify([1, null])}` },
+      query: {
+        ...base.query,
+        interpretation_proposal: {
+          schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+          original_query_digest: DIGEST,
+          producer_id: "stored.cosine.pair.v1",
+          stored_cosine_admission: {
+            registry_version: "stored.cosine.admission.v1",
+            join: "any",
+            obligations: [cosineObligation("ob-a", "model-a"), cosineObligation("ob-b", "model-b")]
+          }
+        }
+      }
+    });
+    expect(models).toEqual(["model-b"]);
+    expect(result.page.outcome.status).not.toBe("invalidated");
+  });
+
   it("does not start pair reads when remaining work cannot pay them", () => {
     let pairCalls = 0;
     const result = observeConditionalField(measureInput({
@@ -431,6 +494,23 @@ function vector(objectId: string, embedding: Float32Array): StoredEmbeddingVecto
     dimensions: embedding.length,
     content_hash: CONTENT,
     embedding
+  };
+}
+
+function cosineObligation(obligationId: string, modelId: string) {
+  return {
+    obligation_id: obligationId,
+    producer_id: "stored.cosine.pair.v1" as const,
+    provider_kind: "openai",
+    model_id: modelId,
+    schema_version: 1,
+    dimensions: 2,
+    domain: "cosine.unit.v1" as const,
+    normalization: "l2.dot.v1" as const,
+    raw_threshold: 0,
+    transfer_id: "policy.cosine.linear.milligrade.v1" as const,
+    transfer_version: "1" as const,
+    policy_defined: true as const
   };
 }
 

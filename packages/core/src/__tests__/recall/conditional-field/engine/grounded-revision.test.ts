@@ -4,7 +4,10 @@ import { createConditionalField, applyObserverPage, withdrawDerivationLeaves, ty
 import { adjacencyEffectsForRows, seedProgramStates, composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
 import { leafDerivation, joinDerivation, reviseDerivations, derivationForest, evaluateDerivation } from "../../../../recall/conditional-field/engine/path-derivation.js";
 import { groundedOutputDerivations } from "../../../../recall/conditional-field/engine/output-derivations.js";
-import { evaluateGuard } from "../../../../recall/conditional-field/engine/binding-environment.js";
+import {
+  bindingsFromHypothesis,
+  evaluateGuard
+} from "../../../../recall/conditional-field/engine/binding-environment.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { localLeafIds, traceDerivationForest } from "../../../../recall/conditional-field/engine/derivation-provenance.js";
@@ -215,5 +218,26 @@ describe("grounded retained derivation revisions", () => {
     expect(evaluateGuard(guard, env, new Map())).toBe("unresolved");
     expect(evaluateGuard(guard, env, new Map([["seed", { object_id: "seed", predicates: { proven_root_cause: false } }]]))).toBe("unresolved");
     expect(evaluateGuard(guard, env, new Map([["seed", { object_id: "seed", predicates: { proven_root_cause: true } }]]))).toBe("unresolved");
+  });
+
+  it("binds hypothesis variables and source_bound_entity against the bound id", () => {
+    const env = bindingsFromHypothesis({
+      schema_version: 1,
+      hypothesis_id: "h1",
+      bindings: [{ schema_version: 1, variable: "y", value: "memory-a" }]
+    });
+    expect(env.get("y")).toBe("memory-a");
+    const guard = {
+      schema_version: 1 as const,
+      kind: "source_bound_entity" as const,
+      verdict: "unresolved" as const,
+      variable: "y",
+      entity_id: "memory-a",
+      time_scope: "none" as const
+    };
+    expect(evaluateGuard(guard, env, new Map())).toBe("true");
+    expect(evaluateGuard({ ...guard, entity_id: undefined }, env, new Map())).toBe("true");
+    expect(evaluateGuard(guard, new Map([["y", "other"]]), new Map())).toBe("false");
+    expect(evaluateGuard(guard, new Map(), new Map())).toBe("unresolved");
   });
 });

@@ -1,4 +1,3 @@
-import { writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SqliteMemoryEmbeddingRepo, type MemoryEmbeddingRecord } from "@do-soul/alaya-storage";
@@ -63,10 +62,6 @@ describe("bounded exact-profile embedding storage reads", () => {
     expect(recalled.counters.query_embed_count).toBe(0);
     expect(recalled.counters.embedding_vector_payload_bytes).toBe(0);
     expect(recalled.index.completeness.observed_coverage).toBe("unavailable");
-    writeFileSync("/tmp/stop01-bounded-vector-raw-06.json", JSON.stringify({ createdAt: new Date().toISOString(),
-      eligibleVectorBytes: result.vectorBytes, rows: result.rowVisits, filtered: result.filteredRows,
-      materializedRows: materialized.map((row) => ({ eligible: row.eligible, vectorBytes: Buffer.isBuffer(row.embedding_blob) ? row.embedding_blob.length : 0, maskedMetadata: row.content_hash === null })),
-      counters: recalled.counters, completeness: recalled.index.completeness }, null, 2));
   });
 
   it("caps native indexed identity visits before inactive source filtering with no refill", async () => {
@@ -96,8 +91,6 @@ describe("bounded exact-profile embedding storage reads", () => {
     expect(result.rowVisits).toBe(3);
     expect(result.objectIds).toEqual([0, 1, 2].map((index) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, "0")}`));
     expect(result.metadataUtf8Bytes).toBe(108);
-    writeFileSync("/tmp/stop01-bounded-embedding-ids-raw-06.json", JSON.stringify({ createdAt: new Date().toISOString(),
-      storedCandidates: 64, maxRows: 3, nativeVisits, instrumented, result }, null, 2));
     expect(result.truncated).toBe(true);
   });
 });

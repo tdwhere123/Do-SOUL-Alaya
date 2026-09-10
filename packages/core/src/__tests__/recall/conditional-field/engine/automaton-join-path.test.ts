@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { solveMaxMinField } from "@do-soul/alaya-graph-algorithms";
+import { PersistentStringMap, solveMaxMinField } from "@do-soul/alaya-graph-algorithms";
 import {
   productSubjectId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  MILLIGRADE_BOTTOM,
   type QueryInterpretation,
   type QueryProgram,
   type RelationValidity
@@ -13,11 +14,22 @@ import { type ObserverReaders } from "../../../../recall/conditional-field/obser
 import { SNAPSHOT_ID, defaultBudget, defaultView } from "../reference/deployment.fixture.js";
 import {
   adjacencyKindsFor,
+  alternativeMax,
   composedFacetPathId,
+  facetModeAccepts,
+  mergeDiscoveries,
   nextAdjacencyPair,
   pairKey,
   routingOverlayKinds
 } from "../../../../recall/conditional-field/engine/path-composition.js";
+import {
+  ACCEPTING_PROGRAM_STATE,
+  compileProgramAutomaton
+} from "../../../../recall/conditional-field/engine/program-automaton.js";
+import {
+  ObservationPairs,
+  ObservationSubjects
+} from "../../../../recall/conditional-field/engine/observation-frontier.js";
 import { RELATION_ROUTING } from "../../../../recall/runtime/conditional-field-observe.js";
 
 const VALIDITY: RelationValidity = { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
@@ -411,6 +423,60 @@ describe("automaton, compatible join, and composed path identity", () => {
       0,
       [{ source_id: "seed", subject_id: "routed", predicate: "uses_service", assertion_id: "route-1" }]
     )).toEqual({ subject: "routed", predicate: "observed_log" });
+  });
+
+  it("compiles empty and epsilon programs without inheriting relation start states", () => {
+    const empty = compileProgramAutomaton({ schema_version: 1, kind: "empty" });
+    expect(empty.start).toEqual([]);
+    expect(empty.advances).toEqual([]);
+    const epsilon = compileProgramAutomaton({ schema_version: 1, kind: "epsilon" });
+    expect(epsilon.start).toEqual([ACCEPTING_PROGRAM_STATE]);
+    const nested = compileProgramAutomaton(alt(
+      { schema_version: 1, kind: "empty" },
+      rel("observed_log")
+    ));
+    expect(nested.advances.some((row) => row.relation.relation_kind === "observed_log")).toBe(true);
+    expect(nested.start.length).toBeGreaterThan(0);
+  });
+
+  it("merges routing discoveries by assertion identity", () => {
+    const first = { source_id: "a", subject_id: "b", predicate: "uses_service", assertion_id: "r1" };
+    const second = { source_id: "b", subject_id: "c", predicate: "uses_service", assertion_id: "r2" };
+    expect(mergeDiscoveries([first], [first, second])).toEqual([first, second]);
+    expect(mergeDiscoveries([first])).toEqual([first]);
+  });
+
+  it("takes alternativeMax as the highest milligrade and same_path facet only when a vector clears the threshold", () => {
+    expect(alternativeMax([])).toBe(MILLIGRADE_BOTTOM);
+    expect(alternativeMax([400, 850, 550])).toBe(850);
+    const vector = { schema_version: 1 as const, path_id: "p", coordinates: [900] };
+    expect(facetModeAccepts("same_path", [vector], 800)).toBe(true);
+    expect(facetModeAccepts("same_path", [vector], 900)).toBe(false);
+  });
+
+  it("exposes observation subjects and pairs as set and map collections", () => {
+    const subjects = new ObservationSubjects(new PersistentStringMap<true>().with("seed", true));
+    expect(subjects.has("seed")).toBe(true);
+    expect(subjects.has("missing")).toBe(false);
+    expect([...subjects]).toEqual(["seed"]);
+    expect([...subjects.keys()]).toEqual(["seed"]);
+    expect([...subjects.values()]).toEqual(["seed"]);
+    expect([...subjects.entries()]).toEqual([["seed", "seed"]]);
+    const seen: string[] = [];
+    subjects.forEach((id) => { seen.push(id); });
+    expect(seen).toEqual(["seed"]);
+    expect(Object.prototype.toString.call(subjects)).toBe("[object ObservationSubjects]");
+    const pairs = new ObservationPairs(new PersistentStringMap<string | null>().with("k", "v"), 0, 0);
+    expect(pairs.size).toBe(1);
+    expect(pairs.has("k")).toBe(true);
+    expect([...pairs.keys()]).toEqual(["k"]);
+    expect([...pairs.values()]).toEqual(["v"]);
+    expect([...pairs.entries()]).toEqual([["k", "v"]]);
+    expect([...pairs]).toEqual([["k", "v"]]);
+    const mapped: string[] = [];
+    pairs.forEach((value, key) => { mapped.push(`${key}:${value}`); });
+    expect(mapped).toEqual(["k:v"]);
+    expect(Object.prototype.toString.call(pairs)).toBe("[object ObservationPairs]");
   });
 });
 
