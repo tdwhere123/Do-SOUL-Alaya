@@ -381,7 +381,7 @@ function facetsForCandidate(
 
 function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): FacetMode {
   for (const transition of input.snapshot.retained_transitions) {
-    if (productSubjectId(transition.to) !== productSubjectId(value.state)) continue;
+    if (productStateNodeId(transition.to) !== productStateNodeId(value.state)) continue;
     const override = input.relation_facet_modes?.get(transition.relation_kind);
     if (override !== undefined) return override;
   }

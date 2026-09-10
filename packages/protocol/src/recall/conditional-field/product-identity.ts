@@ -168,6 +168,23 @@ export function canonicalProductIdentity(key: ProductStateKey): string {
   });
 }
 
+export function sourceEvidenceRootTarget(target: SourceEvidenceTarget): SourceEvidenceTarget {
+  if (target.span === undefined) return target;
+  const { span: _span, ...root } = target;
+  return root;
+}
+
+export function sharedProductIdentity(key: ProductStateKey): string {
+  // Chunk/excerpt spans update evidence for a root product; they are not a second member.
+  if (key.target.kind !== "source_evidence" || key.target.span === undefined) {
+    return canonicalProductIdentity(key);
+  }
+  return canonicalProductIdentity({
+    ...key,
+    target: sourceEvidenceRootTarget(key.target)
+  });
+}
+
 export function productSubjectId(key: ProductStateKey): string {
   return key.target.kind === "memory_entry" ? key.target.object_id : key.target.root_id;
 }

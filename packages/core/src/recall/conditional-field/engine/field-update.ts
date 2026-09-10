@@ -19,6 +19,7 @@ import { bindChargedField } from "./field-solve.js";
 import type { FairWorkRegion } from "../reference/schedule-fair-work.js";
 import { recoveredBindingSnapshot } from "./binding-environment.js";
 import { joinDerivation, mergeDerivations } from "./path-derivation.js";
+import { repairSupportAfterRuleRevision } from "./dependency-equations.js";
 import {
   collectIdentities,
   mergeDiscoveries,
@@ -141,7 +142,10 @@ export function absorbObservations(
   const workUnits = consumption.work?.work_units ?? 0;
   if (workUnits > remainingExploration) remainingWork.push({ kind: "state_create", units: workUnits - remainingExploration });
   remainingExploration = Math.max(0, remainingExploration - workUnits);
-  const mergedTransitions = mergeTransitions(transitions);
+  const mergedTransitions = mergeTransitions(
+    state.transitions,
+    transitions.slice(state.transitions.length)
+  );
   const mergedSeeds = mergeSeeds(seeds);
   const mergedDiscoveries = mergeDiscoveries(discoveries);
   const absorbedNewDiscoveries = mergedDiscoveries.length > state.discoveries.length;
@@ -161,11 +165,17 @@ export function absorbObservations(
     seeds: mergedSeeds,
     guaranteed_seeds: mergeSeeds(guaranteedSeeds),
     transitions: mergedTransitions,
-    guaranteed_transitions: mergeTransitions(guaranteedTransitions),
+    guaranteed_transitions: mergeTransitions(mergedTransitions.filter((row) => row.applicable)),
     facets: retainSamePathVectors(facets),
     derivations: mergeDerivations(derivations),
     discoveries: mergedDiscoveries,
     transition_derivations: Object.freeze(transitionDerivations),
+    support: repairSupportAfterRuleRevision({
+      priorTransitions: state.transitions,
+      nextTransitions: mergedTransitions,
+      seeds: mergedSeeds,
+      support: state.support
+    }),
     seen_identities: collectIdentities(mergedSeeds, mergedTransitions, state.seen_identities),
     residuals: admitDiscoveryResidual(residuals, mergedDiscoveries, memoryExhausted, absorbedNewDiscoveries),
     last_observer_status: memoryExhausted ? "interrupted" : consumption.page.outcome.status,

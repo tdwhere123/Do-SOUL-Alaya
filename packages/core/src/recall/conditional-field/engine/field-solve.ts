@@ -124,7 +124,8 @@ function runPossible(
     transitions: charged.transitions,
     budget: charged.budget,
     facets: charged.facets,
-    ...(prior === undefined ? {} : { prior_values: prior.values }),
+    // Cap/permission revisions are nonmonotone; prior values would pin stale support.
+    ...(prior === undefined || !sameGraph ? {} : { prior_values: prior.values }),
     ...(resume === undefined || resume.length === 0 ? {} : { worklist: resume })
   }, charged.remaining_exploration, charged.remaining_reserve, remainingWork);
   const binding = run.binding ?? prior ?? emptyBoundSnapshot(charged);
@@ -156,7 +157,7 @@ function runGuaranteed(
     seeds: charged.guaranteed_seeds,
     transitions: charged.guaranteed_transitions,
     budget: charged.budget,
-    ...(prior.values.size === 0 ? {} : { prior_values: prior.values }),
+    ...(prior.values.size === 0 || !sameGraph ? {} : { prior_values: prior.values }),
     ...(resume === undefined || resume.length === 0 ? {} : { worklist: resume })
   }, exploration, reserve, remainingWork);
   if (run.binding?.kind !== "bound") {
@@ -256,7 +257,7 @@ function fieldGraphKey(seeds: readonly SeedActivation[], transitions: readonly T
   return [
     ...seeds.map((row) => `s:${productStateNodeId(row.state)}:${row.milligrades}`),
     ...transitions.map((row) =>
-      `e:${productStateNodeId(row.from)}:${productStateNodeId(row.to)}:${row.strength_milligrades}`)
+      `e:${productStateNodeId(row.from)}:${productStateNodeId(row.to)}:${row.relation_kind}:${row.strength_milligrades}:${row.applicable}`)
   ].sort().join("\n");
 }
 

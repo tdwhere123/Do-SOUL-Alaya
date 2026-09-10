@@ -370,12 +370,40 @@ export function mergeSeeds(seeds: readonly SeedActivation[]): readonly SeedActiv
 }
 
 export function mergeTransitions(
-  transitions: readonly Transition[]
+  transitions: readonly Transition[],
+  incoming: readonly Transition[] = []
 ): readonly Transition[] {
+  if (incoming.length === 0) return uniqueByTransitionKey(transitions);
+  const batch = uniqueByTransitionKey(incoming);
+  const incomingByRule = new Map<string, Transition[]>();
+  for (const row of batch) {
+    const id = ruleIdentity(row);
+    const group = incomingByRule.get(id);
+    if (group === undefined) incomingByRule.set(id, [row]);
+    else group.push(row);
+  }
+  const priorCountByRule = new Map<string, number>();
+  for (const row of transitions) {
+    const id = ruleIdentity(row);
+    priorCountByRule.set(id, (priorCountByRule.get(id) ?? 0) + 1);
+  }
+  const kept: Transition[] = [];
+  for (const row of transitions) {
+    const id = ruleIdentity(row);
+    const replacements = incomingByRule.get(id);
+    // One later row revises one prior stack. Simultaneous alt completions share
+    // endpoints+relation but not strength and must not last-write each other.
+    if (replacements?.length === 1 && (priorCountByRule.get(id) ?? 0) <= 1) continue;
+    kept.push(row);
+  }
+  return uniqueByTransitionKey([...kept, ...batch]);
+}
+
+function uniqueByTransitionKey(rows: readonly Transition[]): readonly Transition[] {
   const unique = new Map<string, Transition>();
-  for (const transition of transitions) {
-    const key = transitionKey(transition);
-    if (!unique.has(key)) unique.set(key, transition);
+  for (const row of rows) {
+    const key = transitionKey(row);
+    if (!unique.has(key)) unique.set(key, row);
   }
   return Object.freeze([...unique.values()]);
 }
@@ -395,11 +423,17 @@ export function collectIdentities(
   return Object.freeze(sortStates([...keys.values()]));
 }
 
-export function transitionKey(transition: Transition): string {
+export function ruleIdentity(transition: Transition): string {
   return [
     productStateNodeId(transition.from),
     productStateNodeId(transition.to),
-    transition.relation_kind,
+    transition.relation_kind
+  ].join("\0");
+}
+
+export function transitionKey(transition: Transition): string {
+  return [
+    ruleIdentity(transition),
     String(transition.strength_milligrades),
     String(transition.applicable)
   ].join("\0");

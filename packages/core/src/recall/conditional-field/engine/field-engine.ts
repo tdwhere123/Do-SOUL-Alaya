@@ -11,7 +11,6 @@ import {
   type ObserverPage,
   type ObserverStatus,
   type ProjectedCap,
-  productSubjectId,
   type RawMeasurement,
   type ProductStateKey,
   type Proposition,
@@ -28,6 +27,7 @@ import {
 } from "../reference/interpret-query.js";
 import {
   admitRequestBudget,
+  productStateNodeId,
   resourceRejectedCompleteness,
   type BindMaxMinResult
 } from "../reference/bind-max-min.js";
@@ -49,6 +49,14 @@ import { derivationForest, evaluateDerivation, reviseDerivations } from "./path-
 import type { RelationObserverRow } from "../observers/observe.js";
 import type { BoundSourceFacts } from "./binding-environment.js";
 import type { GroundingProgress } from "./output-derivations.js";
+import {
+  affectedSubjectsOf,
+  productSccs,
+  productsTouchedByLeaf,
+  reviseSccSupport,
+  sccMembersOf,
+  seedTouchesLeaf
+} from "./dependency-equations.js";
 import {
   ACTION_BY_KIND,
   absorbObservations,
@@ -270,11 +278,32 @@ export function withdrawDerivationLeaves(
   state: FieldEngineState,
   withdrawnLeafId: string
 ): FieldEngineState {
+  const nodeIds = [
+    ...state.seeds.map((seed) => productStateNodeId(seed.state)),
+    ...state.transitions.flatMap((transition) => [
+      productStateNodeId(transition.from),
+      productStateNodeId(transition.to)
+    ])
+  ];
+  const edges = state.transitions.flatMap((transition) => transition.applicable
+    ? [{ from: productStateNodeId(transition.from), to: productStateNodeId(transition.to) }]
+    : []);
+  const touched = productsTouchedByLeaf({
+    withdrawnLeafId,
+    seeds: state.seeds,
+    transitions: state.transitions,
+    derivations: state.derivations,
+    transition_derivations: state.transition_derivations
+  });
+  const affected = sccMembersOf(productSccs(nodeIds, edges), touched);
+  const subjects = affectedSubjectsOf(state.seeds, state.transitions, affected);
   const revised = reviseDerivations(state.derivations, withdrawnLeafId);
   const derivations = revised.derivations;
   const forest = derivationForest(derivations);
   const grades = new Map(derivations.flatMap((row) => row.association_milligrades === undefined ? [] :
     row.leaf_ids.map((id) => [id, row.association_milligrades!] as const)));
+  const seeds = state.seeds.filter((seed) => !seedTouchesLeaf(seed, withdrawnLeafId));
+  const guaranteedSeeds = state.guaranteed_seeds.filter((seed) => !seedTouchesLeaf(seed, withdrawnLeafId));
   const retained = state.transitions.filter((transition) => {
     const derivationId = state.transition_derivations[transitionKey(transition)];
     if (derivationId === undefined) {
@@ -293,17 +322,21 @@ export function withdrawDerivationLeaves(
   const { binding: _binding, closure: _closure, ...rest } = state;
   return bindEngineState({
     ...rest,
+    seeds: mergeSeeds(seeds),
+    guaranteed_seeds: mergeSeeds(guaranteedSeeds),
     derivations,
     transitions: mergeTransitions(transitions),
     guaranteed_transitions: mergeTransitions(transitions.filter((transition) => transition.applicable)),
-    transition_derivations: transitionRoots
+    transition_derivations: transitionRoots,
+    support: reviseSccSupport(state.support, withdrawnLeafId, affected, subjects)
   });
 }
 
 function leafTouchesTransition(transition: Transition, withdrawnLeafId: string): boolean {
+  // Subject-id equality would revoke every hypothesis/binding/time of the same object.
   return transition.relation_kind === withdrawnLeafId
-    || productSubjectId(transition.from) === withdrawnLeafId
-    || productSubjectId(transition.to) === withdrawnLeafId;
+    || productStateNodeId(transition.from) === withdrawnLeafId
+    || productStateNodeId(transition.to) === withdrawnLeafId;
 }
 
 export function applyEvidenceEffect(

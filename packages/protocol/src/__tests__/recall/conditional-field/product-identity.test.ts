@@ -18,6 +18,7 @@ import {
   retargetMemoryProduct,
   sameRecallTarget,
   sameSourceEvidenceRoot,
+  sharedProductIdentity,
   sourceIndexEntry,
   sourceProductStateKey,
   sourceRecallTarget
@@ -314,21 +315,41 @@ describe("conditional-field product identity", () => {
     expect(sameSourceEvidenceRoot(first, second)).toBe(true);
     expect(sameRecallTarget(first, second)).toBe(false);
     expect(sameRecallTarget(first, unspanned)).toBe(false);
-    expect(canonicalProductIdentity(sourceProductStateKey({
+    const firstProduct = sourceProductStateKey({
       ...root,
       span: firstSpan,
       program_state: "accepting",
       hypothesis_id: "h0",
       binding_context: "default",
       time_state: "as_of"
-    }))).not.toBe(canonicalProductIdentity(sourceProductStateKey({
+    });
+    const secondProduct = sourceProductStateKey({
       ...root,
       span: secondSpan,
       program_state: "accepting",
       hypothesis_id: "h0",
       binding_context: "default",
       time_state: "as_of"
-    })));
+    });
+    const rootProduct = sourceProductStateKey({
+      ...root,
+      program_state: "accepting",
+      hypothesis_id: "h0",
+      binding_context: "default",
+      time_state: "as_of"
+    });
+    expect(canonicalProductIdentity(firstProduct)).not.toBe(canonicalProductIdentity(secondProduct));
+    expect(sharedProductIdentity(firstProduct)).toBe(sharedProductIdentity(secondProduct));
+    expect(sharedProductIdentity(firstProduct)).toBe(sharedProductIdentity(rootProduct));
+    const otherOrigin = sourceProductStateKey({
+      ...root,
+      root_id: "rec-2",
+      program_state: "accepting",
+      hypothesis_id: "h0",
+      binding_context: "default",
+      time_state: "as_of"
+    });
+    expect(sharedProductIdentity(rootProduct)).not.toBe(sharedProductIdentity(otherOrigin));
     expect(() => SourceDeliveredSpanSchema.parse({
       ...firstSpan,
       content_start: 32,

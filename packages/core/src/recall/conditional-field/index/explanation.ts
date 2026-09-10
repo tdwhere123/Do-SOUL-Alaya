@@ -3,6 +3,7 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   UsageReportSchema,
   productSubjectId,
+  sharedProductIdentity,
   type Derivation,
   type FieldValue,
   type IndexEntry,
@@ -128,9 +129,9 @@ function derivationExplanationIds(input: ExplanationSelectionInput): readonly st
   const ids: string[] = [];
   for (const derivation of forest) {
     if (!owned.has(derivation.derivation_id)) continue;
-    // Grounding already paid for this retained forest; entry width cannot revoke it.
     const recovered = recoverExplanationForest([derivation.derivation_id], forest);
     if (recovered.length === 0) continue;
+    // Page budget omits a witness; it cannot revoke membership of this product.
     if (!derivationIsFeasible(derivation, input.support, input.page_budget)) continue;
     ids.push(derivation.derivation_id);
   }
@@ -155,8 +156,14 @@ function derivationRoots(derivations: readonly Derivation[]): readonly Derivatio
 }
 
 function supportBelongsTo(record: SupportRecord, value: FieldValue): boolean {
-  const named = [record.proposition_id, ...record.witnesses.flatMap((witness) => [...witness.premises])];
-  return named.includes(productSubjectId(value.state)) || named.includes(value.state.hypothesis_id);
+  const named = new Set([
+    record.proposition_id,
+    ...record.witnesses.flatMap((witness) => [...witness.premises])
+  ]);
+  return named.has(productStateNodeId(value.state))
+    || named.has(sharedProductIdentity(value.state))
+    || named.has(productSubjectId(value.state))
+    || named.has(value.state.hypothesis_id);
 }
 
 function derivationIsComplete(

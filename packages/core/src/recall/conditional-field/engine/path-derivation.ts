@@ -154,6 +154,14 @@ export function derivationIdentity(
   return clipId(`${kind}:${children.map((child) => child.derivation_id).join("+")}`);
 }
 
+export function seedDerivationIdentity(productNodeId: string): string {
+  return clipId(`seed:${productNodeId}`);
+}
+
+export function ruleDerivationIdentity(transitionKeyValue: string): string {
+  return clipId(`rule:${transitionKeyValue}`);
+}
+
 function unique(values: readonly string[]): string[] {
   return [...new Set(values)];
 }
