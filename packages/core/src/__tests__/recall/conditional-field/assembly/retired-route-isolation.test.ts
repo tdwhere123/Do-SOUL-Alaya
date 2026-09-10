@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, StorageTier, type InformationIndex } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
-import { RecallService } from "../../../../recall/recall-service.js";
+import { RecallService, capableRecallConsumerDeclaration } from "../../../../recall/recall-service.js";
 import { createDependencies, createSourceBoundRecallFixture, createTaskSurface } from "../../recall-service-test-fixtures.js";
 import { plantDeployment, readersFor } from "../../conditional-field-oracle/bound-producer.js";
 import { MEM, openSourceSlice } from "../../conditional-field/vertical/source-slice.js";
@@ -9,7 +9,8 @@ import { MEM, openSourceSlice } from "../../conditional-field/vertical/source-sl
 const databases = new Set<StorageDatabase>();
 const QUERY = "materialization routing";
 const request = { workspaceId: "workspace-1", strategy: "analyze" as const,
-  taskSurface: { ...createTaskSurface(), display_name: QUERY }, queryText: QUERY };
+  taskSurface: { ...createTaskSurface(), display_name: QUERY }, queryText: QUERY,
+  ...capableRecallConsumerDeclaration() };
 const objectId = (number: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(number).padStart(12, "0")}`;
 
 afterEach(() => {
@@ -131,7 +132,8 @@ describe("conditional Recall after retired route removal", () => {
       strategy: "analyze" as const,
       taskSurface: { ...createTaskSurface(), display_name: "yesterday failed deployment" },
       queryText: "yesterday failed deployment",
-      pageBudget: 800
+      pageBudget: 800,
+      ...capableRecallConsumerDeclaration()
     };
     const before = await service.recall(deployed);
     await slice.admitRelation({

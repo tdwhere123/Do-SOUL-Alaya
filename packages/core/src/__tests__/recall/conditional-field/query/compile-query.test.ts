@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  HARD_IDENTITY_TRANSFER_ID,
+  HARD_IDENTITY_TRANSFER_VERSION,
+  IDENTITY_NORMALIZATION_ID,
   QueryInterpretationSchema,
   type Guard,
   type QueryHypothesis,
@@ -486,7 +489,16 @@ describe("conditional-field query compiler", () => {
       budget: defaultBudget(),
       text: "yesterday's failed deployment",
       interpretation_clock: INTERPRETATION_CLOCK,
-      view: { ...defaultView(), enumeration_policy: "associative" }
+      view: {
+        ...defaultView(),
+        enumeration_policy: "associative",
+        cap_contracts: [{
+          domain_id: ASSOCIATION_DOMAIN_ID,
+          normalization: IDENTITY_NORMALIZATION_ID,
+          transfer_id: HARD_IDENTITY_TRANSFER_ID,
+          transfer_version: HARD_IDENTITY_TRANSFER_VERSION
+        }]
+      }
     });
     expect(requestedAssociative.query_id).not.toBe(associative.query_id);
     const digest = digestOriginalQuery("yesterday's failed deployment");
@@ -525,7 +537,8 @@ describe("conditional-field query compiler", () => {
       expires_at: "2099-01-01T00:00:00.000Z",
       cursor: "offset-1",
       enumeration_policy: "canonical" as const,
-      result_kind_view: "mixed" as const
+      result_kind_view: "mixed" as const,
+      claim_demands: associative.view.claim_demands
     };
     expect(continuationViewMismatch(canonicalContinuation, requestedAssociative.view)).toBe(true);
     expect(continuationViewMismatch(canonicalContinuation, associative.view)).toBe(false);
@@ -534,6 +547,49 @@ describe("conditional-field query compiler", () => {
       ...canonicalContinuation,
       authorized_scopes: ["public"]
     }, associative.view, ["private"])).toBe(true);
+    expect(continuationViewMismatch(canonicalContinuation, requestedAssociative.view)).toBe(true);
+    expect(continuationViewMismatch({
+      ...canonicalContinuation,
+      enumeration_policy: "associative",
+      cap_contracts: requestedAssociative.view.cap_contracts,
+      claim_demands: requestedAssociative.view.claim_demands
+    }, requestedAssociative.view)).toBe(false);
+    expect(continuationViewMismatch({
+      ...canonicalContinuation,
+      enumeration_policy: "associative"
+    }, requestedAssociative.view)).toBe(true);
+    expect(continuationViewMismatch({
+      ...canonicalContinuation,
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"]
+    }, associative.view)).toBe(true);
+    expect(continuationViewMismatch({
+      ...canonicalContinuation,
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"]
+    }, {
+      ...associative.view,
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"]
+    })).toBe(false);
+  });
+
+  it("rejects associative execution without a declared cap contract", () => {
+    const interpretation = compileTyped(deploymentProgram(), {
+      view: { ...defaultView(), enumeration_policy: "associative" }
+    });
+    expect(interpretation.status).toBe("unsupported");
+    expect(interpretation.query_id).toBe(UNSUPPORTED_POLICY_QUERY_ID);
+    const ordinary = compileConditionalFieldQuery({
+      source: "ordinary",
+      snapshot_id: SNAPSHOT_ID,
+      budget: defaultBudget(),
+      text: "yesterday's failed deployment",
+      interpretation_clock: INTERPRETATION_CLOCK,
+      view: { ...defaultView(), enumeration_policy: "associative" }
+    });
+    expect(ordinary.status).toBe("unsupported");
+    expect(ordinary.query_id).toBe(UNSUPPORTED_POLICY_QUERY_ID);
   });
 
   it("compiles frozen source predicates as query_predicate names", () => {
@@ -580,11 +636,13 @@ describe("conditional-field query compiler", () => {
       cap_contracts: [
         {
           domain_id: ASSOCIATION_DOMAIN_ID,
+          normalization: "identity.unit.v1",
           transfer_id: "policy.fixture.v1",
           transfer_version: "1"
         },
         {
           domain_id: "cosine.embedding.v1",
+          normalization: "l2.dot.v1",
           transfer_id: "policy.fixture.v1",
           transfer_version: "1"
         }
@@ -600,6 +658,7 @@ describe("conditional-field query compiler", () => {
         enumeration_policy: "associative",
         cap_contracts: [{
           domain_id: "cosine.embedding.v1",
+          normalization: "l2.dot.v1",
           transfer_id: "policy.fixture.v1",
           transfer_version: "1"
         }]
@@ -613,6 +672,7 @@ describe("conditional-field query compiler", () => {
         enumeration_policy: "associative",
         cap_contracts: [{
           domain_id: ASSOCIATION_DOMAIN_ID,
+          normalization: "identity.unit.v1",
           transfer_id: "policy.fixture.v1",
           transfer_version: "1"
         }]

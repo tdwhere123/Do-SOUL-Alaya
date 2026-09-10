@@ -1,5 +1,7 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  HARD_IDENTITY_TRANSFER_ID,
+  HARD_IDENTITY_TRANSFER_VERSION,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
   productSubjectId,
@@ -10,6 +12,7 @@ import {
   type Transition,
   type Witness
 } from "@do-soul/alaya-protocol";
+import { hardIdentityCapContractId } from "../cap-contract.js";
 import type { QueryRelation } from "../query/compile-query.js";
 import {
   joinHyperedgeAnd,
@@ -45,6 +48,9 @@ export type HyperedgeCompletion = Readonly<{
   readonly strength_milligrades: number;
   readonly validity: Transition["validity"];
   readonly join?: "and" | "or";
+  readonly cap_contract_id?: string;
+  readonly transfer_id?: string;
+  readonly transfer_version?: string;
 }>;
 
 export type HyperedgeEffect = Readonly<{
@@ -58,6 +64,7 @@ export type HyperedgeEffect = Readonly<{
 }>;
 
 type HyperedgeInput = Readonly<{
+  readonly query_id: string;
   readonly liveStates: RetainedRows<ProductStateKey>;
   readonly overlay: NamedKindOverlay;
   readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
@@ -74,6 +81,11 @@ type PremiseAssignment = HyperedgePremise & Readonly<{
   readonly leaf_id: string;
   readonly derivation: Derivation;
   readonly derivations: readonly Derivation[];
+  readonly cap_contract_id?: string;
+  readonly transfer_id?: string;
+  readonly transfer_version?: string;
+  readonly instance_id?: string;
+  readonly revision_id?: string;
 }>;
 
 export function tryCompleteHyperedge(
@@ -92,7 +104,10 @@ export function tryCompleteHyperedge(
     relation_kind: completion.relation_kind,
     strength_milligrades: completion.strength_milligrades,
     validity: completion.validity,
-    applicable: true
+    applicable: true,
+    ...(completion.cap_contract_id === undefined ? {} : { cap_contract_id: completion.cap_contract_id }),
+    ...(completion.transfer_id === undefined ? {} : { transfer_id: completion.transfer_id }),
+    ...(completion.transfer_version === undefined ? {} : { transfer_version: completion.transfer_version })
   };
 }
 
@@ -198,6 +213,7 @@ function* nestedHyperedgeAssignments(
 ): PathComputation<readonly PremiseAssignment[]> {
   const assignments: PremiseAssignment[] = [];
   for (const step of hyperedgeEffectSteps(rows, program, {
+    query_id: input.query_id,
     liveStates: [from],
     overlay: input.overlay,
     sourceFacts: input.sourceFacts,
@@ -248,8 +264,12 @@ function* walkCompiledPremise(
       const to = retargetMemoryProduct(node, { object_id: assignment.target_object_id, source_revision: revision,
         program_state: programState, binding_context: assignment.binding_context });
       const edge: Transition = { schema_version: 1, from: node, to, applicable: true,
-        relation_kind: assignment.relation_kind, instance_id: assignment.derivation.derivation_id,
-        strength_milligrades: assignment.milligrades, validity: assignment.validity };
+        relation_kind: assignment.relation_kind, instance_id: assignment.instance_id ?? assignment.derivation.derivation_id,
+        ...(assignment.revision_id === undefined ? {} : { revision_id: assignment.revision_id }),
+        ...(assignment.transfer_id === undefined ? {} : { transfer_id: assignment.transfer_id }),
+        ...(assignment.transfer_version === undefined ? {} : { transfer_version: assignment.transfer_version }),
+        strength_milligrades: assignment.milligrades, validity: assignment.validity,
+        ...(assignment.cap_contract_id === undefined ? {} : { cap_contract_id: assignment.cap_contract_id }) };
       transitions.push(edge);
       roots[transitionKey(edge)] = assignment.derivation.derivation_id;
       for (const row of assignment.derivations) { yield { kind: "work", retained_bytes: 72 }; derivations.set(row.derivation_id, row); }
@@ -268,6 +288,7 @@ function* walkCompiledPremise(
     for (const hyperedge of automaton.hyperedgeAdvances) {
       if (hyperedge.from !== node.program_state) continue;
       for (const step of hyperedgeEffectSteps(rows, hyperedge.hyperedge, {
+        query_id: input.query_id,
         liveStates: [here],
         overlay: input.overlay,
         sourceFacts: input.sourceFacts,
@@ -349,7 +370,10 @@ function terminalAssignment(
     observation_id: leafId,
     leaf_id: leafId,
     derivation,
-    derivations: [derivation]
+    derivations: [derivation],
+    cap_contract_id: hardIdentityCapContractId(),
+    transfer_id: HARD_IDENTITY_TRANSFER_ID,
+    transfer_version: HARD_IDENTITY_TRANSFER_VERSION
   };
 }
 
@@ -358,6 +382,7 @@ function assignmentFromRow(
   from: ProductStateKey,
   row: AdjacencyRow,
   input: Readonly<{
+    readonly query_id: string;
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
   }>
@@ -365,6 +390,8 @@ function assignmentFromRow(
   if (row.sourceObjectId !== productSubjectId(from)) return undefined;
   if (!relationMatches(relation.relation_kind, row.predicate)) return undefined;
   if (row.validity === undefined || inactiveResolution(row.resolutionKind)) return undefined;
+  const declared = input.overlay[row.predicate] ?? input.overlay[relation.relation_kind];
+  if (declared?.applicable === false) return undefined;
   const unified = unifyAdvance(from, relation, row);
   if (unified === undefined) return undefined;
   const decision = decideGuards(
@@ -374,8 +401,18 @@ function assignmentFromRow(
     { sourceId: row.sourceObjectId, targetId: row.targetObjectId }
   );
   if (decision !== "true") return undefined;
-  const strength = relationStrength(relation, input.overlay, row.predicate);
-  if (strength === undefined || !strength.applicable) return undefined;
+  const revisionId = row.source_revision
+    ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision
+    ?? (from.target.kind === "memory_entry" ? from.target.source_revision : undefined);
+  const strength = relationStrength(relation, input.overlay, row.predicate, {
+    query_id: input.query_id,
+    instance_id: row.assertionId,
+    revision_id: revisionId,
+    hypothesis_id: from.hypothesis_id,
+    binding: unified.binding,
+    time_state: from.time_state
+  });
+  if (strength === undefined) return undefined;
   if (strength.milligrades <= relation.threshold_milligrades) return undefined;
   const leafId = row.assertionId;
   const derivation = leafDerivation({
@@ -383,7 +420,7 @@ function assignmentFromRow(
     observation_id: leafId,
     leaf_id: leafId,
     association_milligrades: strength.milligrades,
-    source_revision: row.source_revision ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision
+    source_revision: revisionId
   });
   return {
     hypothesis_id: from.hypothesis_id,
@@ -397,7 +434,12 @@ function assignmentFromRow(
     observation_id: leafId,
     leaf_id: leafId,
     derivation,
-    derivations: [derivation]
+    derivations: [derivation],
+    cap_contract_id: strength.cap_contract_id,
+    transfer_id: strength.transfer_id,
+    transfer_version: strength.transfer_version,
+    instance_id: strength.instance_id,
+    revision_id: strength.revision_id
   };
 }
 
@@ -415,7 +457,10 @@ function* orHyperedgeEffects(
     validity: option.validity,
     relation_kind: option.relation_kind,
     join: "or",
-    binding: option.binding_context
+    binding: option.binding_context,
+    cap_contract_id: option.cap_contract_id,
+    transfer_id: option.transfer_id,
+    transfer_version: option.transfer_version
     }, toProgramStates, input)) yield { kind: "effect", effect };
   }
 }
@@ -433,14 +478,19 @@ function* andHyperedgeEffects(
     if (merged === undefined) continue;
     const first = merged[0];
     if (first === undefined) continue;
+    const grade = bottleneck(merged);
+    if (grade === undefined) continue;
     yield { kind: "work", retained_bytes: completionReservation(merged) };
     for (const effect of yield* completionEffects(from, merged, {
       target: first.target_object_id,
-      milligrades: bottleneck(merged),
+      milligrades: grade,
       validity: first.validity,
       relation_kind: first.relation_kind,
       join: "and",
-      binding: first.binding_context
+      binding: first.binding_context,
+      cap_contract_id: first.cap_contract_id,
+      transfer_id: first.transfer_id,
+      transfer_version: first.transfer_version
     }, toProgramStates, input)) yield { kind: "effect", effect };
   }
 }
@@ -460,6 +510,9 @@ function* completionEffects(
     readonly relation_kind: string;
     readonly join: "and" | "or";
     readonly binding: string;
+    readonly cap_contract_id?: string;
+    readonly transfer_id?: string;
+    readonly transfer_version?: string;
   }>,
   toProgramStates: readonly string[],
   input: HyperedgeInput
@@ -512,7 +565,10 @@ function* completionEffects(
         relation_kind: spec.relation_kind,
         strength_milligrades: spec.milligrades,
         validity: spec.validity,
-        join: spec.join
+        join: spec.join,
+        ...(spec.cap_contract_id === undefined ? {} : { cap_contract_id: spec.cap_contract_id }),
+        ...(spec.transfer_id === undefined ? {} : { transfer_id: spec.transfer_id }),
+        ...(spec.transfer_version === undefined ? {} : { transfer_version: spec.transfer_version })
       },
       derivation,
       derivations
@@ -543,8 +599,14 @@ function* cartesian<T>(groups: readonly (readonly T[])[], index = 0, prefix: rea
   for (const item of groups[index]!) yield* cartesian(groups, index + 1, [...prefix, item]);
 }
 
-function bottleneck(assignments: readonly PremiseAssignment[]): number {
+function bottleneck(assignments: readonly PremiseAssignment[]): number | undefined {
   if (assignments.length === 0) return MILLIGRADE_BOTTOM;
+  const contracts = new Set(
+    assignments.flatMap((row) => row.cap_contract_id === undefined || row.cap_contract_id.length === 0
+      ? []
+      : [row.cap_contract_id])
+  );
+  if (contracts.size > 1) return undefined;
   let grade = MILLIGRADE_TOP;
   for (const row of assignments) {
     if (row.milligrades < grade) grade = row.milligrades;

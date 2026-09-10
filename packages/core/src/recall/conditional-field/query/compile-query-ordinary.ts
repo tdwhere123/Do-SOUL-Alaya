@@ -165,7 +165,7 @@ function compileSupportedRequest(
   yesterday: QueryTimeWindow,
   hints: TimeHints
 ): QueryInterpretation {
-  view = { ...view, claim_demands: view.claim_demands ?? [{ variable: "h", proposition_kind: "common_cause", argument_variables: ["r", "h"] }] };
+  view = { ...view, claim_demands: view.claim_demands ?? [{ variable: "h", proposition_kind: "common_cause", argument_variables: ["r", "h"], required_claim: "supported" }] };
   if (classified.kind === "malformed") {
     return ordinaryMalformed(input, snapshotId, view);
   }

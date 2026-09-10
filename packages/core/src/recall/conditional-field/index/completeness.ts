@@ -1,7 +1,6 @@
 import {
   ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  MILLIGRADE_TOP,
   type ClosureCertificate,
   type ClosureComparison,
   type ClosureCoveragePremise,
@@ -11,20 +10,35 @@ import {
   type CoverageRegion,
   type ObserverOutcome,
   type QueryInterpretationStatus,
+  type RecallTargetKind,
   type RequestBudget,
-  type ResidualCoverageRole,
-  type ResidualInfluence,
-  type ResidualSemanticEffect
+  type ResidualSemanticEffect,
+  type ResultKindView
 } from "@do-soul/alaya-protocol";
 import { aggregateObserverStatus } from "../reference/accepting-projection.js";
+import {
+  classifyResidualInfluence,
+  coverageRoleOf,
+  membershipCoveredByCertificate,
+  semanticEffectsOf,
+  sufficientAlternatePaths,
+  type ResidualClassificationContext
+} from "./residual-influence.js";
+
+export type { ResidualClassificationContext } from "./residual-influence.js";
+export {
+  classifyResidualInfluence,
+  coverageRoleOf,
+  residualAffectsGrade,
+  residualGradeUpper,
+  residualsInvalidateBounds,
+  semanticEffectsOf,
+  sufficientAlternatePaths
+} from "./residual-influence.js";
 
 export type ObserverCoverage = Readonly<{
   readonly outcome: ObserverOutcome;
   readonly open_regions?: readonly CoverageRegion[];
-}>;
-
-export type ResidualClassificationContext = Readonly<{
-  readonly sufficient_alternate_paths?: boolean;
 }>;
 
 export type CompletenessInput = Readonly<{
@@ -46,6 +60,13 @@ export type CompletenessInput = Readonly<{
   readonly predicate_id?: string;
   readonly operator_id?: string;
   readonly domain_id?: string;
+  readonly program_id?: string;
+  readonly result_kind_view?: ResultKindView;
+  readonly target_kinds?: readonly RecallTargetKind[];
+  readonly source_domains?: readonly string[];
+  readonly hypothesis_id?: string;
+  readonly binding?: string;
+  readonly includes_source_only?: boolean;
 }>;
 
 export type CertifyClosureInput = Readonly<{
@@ -62,6 +83,14 @@ export type CertifyClosureInput = Readonly<{
   readonly upper_milligrades?: number;
   readonly uses_raw_predicate?: boolean;
   readonly quantized_cap_only?: boolean;
+  readonly program_id?: string;
+  readonly result_kind_view?: ResultKindView;
+  readonly target_kinds?: readonly RecallTargetKind[];
+  readonly source_domains?: readonly string[];
+  readonly hypothesis_id?: string;
+  readonly binding?: string;
+  readonly includes_source_only?: boolean;
+  readonly closed_obligations?: readonly ("membership" | "claim" | "order")[];
 }>;
 
 const INCOMPLETE_OBSERVER_STATUSES = [
@@ -139,86 +168,6 @@ export function continuationInvalidated(input: Readonly<{
   return now !== undefined && prior.expires_at <= now;
 }
 
-export function coverageRoleOf(region: CoverageRegion): ResidualCoverageRole {
-  if (region.coverage_role !== undefined) return region.coverage_role;
-  return region.kind === "discovery" ? "optional_accelerator" : "required";
-}
-
-export function semanticEffectsOf(region: CoverageRegion): readonly ResidualSemanticEffect[] {
-  if (region.semantic_effects !== undefined && region.semantic_effects.length > 0) {
-    return region.semantic_effects;
-  }
-  if (region.kind === "guard") return ["validity", "membership"];
-  if (region.kind === "cursor") return ["membership", "order"];
-  if (region.kind === "hypothesis" || region.kind === "program_branch") {
-    return ["membership", "interpretation"];
-  }
-  if (region.kind === "output_obligation") return ["membership"];
-  if (region.kind === "certificate") return [];
-  return ["membership", "grade_bound"];
-}
-
-export function classifyResidualInfluence(
-  region: CoverageRegion,
-  context: ResidualClassificationContext = {},
-  effect?: ResidualSemanticEffect
-): ResidualInfluence {
-  if (region.status === "exhausted" || region.status === "not_applicable") return "irrelevant";
-  if (effect !== undefined && !semanticEffectsOf(region).includes(effect)) return "irrelevant";
-  const optionalCovered = coverageRoleOf(region) === "optional_accelerator"
-    && context.sufficient_alternate_paths === true;
-  if (optionalCovered && region.status !== "open" && region.status !== "interrupted"
-    && region.status !== "invalidated") {
-    if (effect === "membership" || effect === "interpretation") return "irrelevant";
-    if (effect === undefined) {
-      const effects = semanticEffectsOf(region);
-      if (effects.includes("grade_bound") || effects.includes("order")) return "influential";
-      return "irrelevant";
-    }
-  }
-  if (region.status === "unknown" || region.status === "unavailable") {
-    return coverageRoleOf(region) === "required" ? "unresolved" : "influential";
-  }
-  if (region.status === "open" || region.status === "interrupted"
-    || region.status === "cancelled" || region.status === "invalidated") {
-    return "influential";
-  }
-  return "irrelevant";
-}
-
-export function residualAffectsGrade(region: CoverageRegion): boolean {
-  const effects = semanticEffectsOf(region);
-  return effects.includes("grade_bound") || effects.includes("membership");
-}
-
-export function residualsInvalidateBounds(residuals: readonly CoverageRegion[]): boolean {
-  return residuals.some((region) => region.status === "invalidated" && residualAffectsGrade(region));
-}
-
-export function sufficientAlternatePaths(residuals: readonly CoverageRegion[]): boolean {
-  return residuals.some((region) =>
-    coverageRoleOf(region) === "required"
-    && (region.kind === "seed" || region.kind === "source_domain")
-    && region.status === "exhausted");
-}
-
-export function residualGradeUpper(
-  residuals: readonly CoverageRegion[],
-  context: ResidualClassificationContext = {}
-): number | undefined {
-  if (residualsInvalidateBounds(residuals)) return MILLIGRADE_TOP;
-  let upper: number | undefined;
-  for (const region of residuals) {
-    const grade = classifyResidualInfluence(region, context, "grade_bound");
-    const membership = classifyResidualInfluence(region, context, "membership");
-    if (grade === "irrelevant" && membership === "irrelevant") continue;
-    if (!residualAffectsGrade(region)) continue;
-    const bound = region.conservative_bound_milligrades ?? region.high_milligrades ?? MILLIGRADE_TOP;
-    upper = upper === undefined ? bound : Math.max(upper, bound);
-  }
-  return upper;
-}
-
 export function upperExcludesPredicate(input: Readonly<{
   readonly comparison: ClosureComparison;
   readonly upper: number;
@@ -234,14 +183,20 @@ export function upperExcludesPredicate(input: Readonly<{
 }
 
 export function certifyClosure(input: CertifyClosureInput): ClosureCertificate | undefined {
-  const context = { sufficient_alternate_paths: input.sufficient_alternate_paths === true };
   if (input.closed_effects.length === 0) return undefined;
   if (input.residuals.some((region) => region.status === "invalidated")) return undefined;
+  const context: ResidualClassificationContext = {};
   for (const effect of input.closed_effects) {
-    const blocking = input.residuals.some((region) =>
-      classifyResidualInfluence(region, context, effect) !== "irrelevant");
+    const blocking = input.residuals.some((region) => {
+      if (input.coverage_premise === "required_regions_irrelevant"
+        && coverageRoleOf(region) === "optional_accelerator") {
+        return false;
+      }
+      return classifyResidualInfluence(region, context, effect) !== "irrelevant";
+    });
     if (blocking) return undefined;
   }
+  if (!hasRequiredCoverage(input)) return undefined;
   if (input.coverage_premise === "upper_excludes_predicate") {
     if (input.comparison === undefined || input.threshold_milligrades === undefined
       || input.upper_milligrades === undefined) {
@@ -257,7 +212,8 @@ export function certifyClosure(input: CertifyClosureInput): ClosureCertificate |
       return undefined;
     }
   }
-  if (input.coverage_premise === "alternate_source_path" && !context.sufficient_alternate_paths) {
+  if (input.coverage_premise === "alternate_source_path"
+    && !alternateSourcePathCovered(input)) {
     return undefined;
   }
   const certificate_id = [
@@ -276,20 +232,18 @@ export function certifyClosure(input: CertifyClosureInput): ClosureCertificate |
     domain_id: input.domain_id,
     coverage_premise: input.coverage_premise,
     closed_effects: input.closed_effects,
-    ...(input.comparison === undefined ? {} : { comparison: input.comparison }),
-    ...(input.threshold_milligrades === undefined ? {} : { threshold_milligrades: input.threshold_milligrades }),
-    ...(input.uses_raw_predicate === undefined ? {} : { uses_raw_predicate: input.uses_raw_predicate })
+    ...coverageFieldsOf(input)
   };
 }
 
 export function composeCompleteness(input: CompletenessInput): CompletenessReport {
   const residuals = coverageRegionsOf(input);
-  const alternate = input.sufficient_alternate_paths ?? sufficientAlternatePaths(residuals);
+  const certificate = input.certificate ?? membershipCertificate(input, residuals);
   const resolved: CompletenessInput = {
     ...input,
     residuals,
-    sufficient_alternate_paths: alternate,
-    certificate: input.certificate ?? membershipCertificate(input, residuals, alternate)
+    sufficient_alternate_paths: sufficientAlternatePaths(residuals, certificate),
+    certificate
   };
   const report = attachDistinguishableDimensions(
     attachInterpretationCoverage(
@@ -304,18 +258,23 @@ export function composeCompleteness(input: CompletenessInput): CompletenessRepor
 
 function membershipCertificate(
   input: CompletenessInput,
-  residuals: readonly CoverageRegion[],
-  alternate: boolean
+  residuals: readonly CoverageRegion[]
 ): ClosureCertificate | undefined {
   return certifyClosure({
     query_id: input.query_id ?? "query",
     predicate_id: input.predicate_id ?? "membership",
     operator_id: input.operator_id ?? "max-min",
     domain_id: input.domain_id ?? ASSOCIATION_DOMAIN_ID,
-    coverage_premise: alternate ? "alternate_source_path" : "required_regions_irrelevant",
+    coverage_premise: "required_regions_irrelevant",
     closed_effects: ["membership"],
     residuals,
-    sufficient_alternate_paths: alternate
+    program_id: input.program_id,
+    result_kind_view: input.result_kind_view,
+    target_kinds: input.target_kinds,
+    source_domains: input.source_domains,
+    hypothesis_id: input.hypothesis_id,
+    binding: input.binding,
+    includes_source_only: input.includes_source_only
   });
 }
 
@@ -480,7 +439,7 @@ function coverageRegionsOf(input: CompletenessInput): readonly CoverageRegion[] 
 }
 
 function classificationContextOf(input: CompletenessInput): ResidualClassificationContext {
-  return { sufficient_alternate_paths: input.sufficient_alternate_paths === true };
+  return { certificate: input.certificate };
 }
 
 function influentialObserverStatus(input: CompletenessInput): ObserverOutcome["status"] | undefined {
@@ -493,7 +452,9 @@ function influentialObserverStatus(input: CompletenessInput): ObserverOutcome["s
     classifyResidualInfluence(region, context, "membership") !== "irrelevant");
   if (active.length === 0) {
     if (input.observer === undefined) return "exhausted";
-    if (regions.length > 0 && context.sufficient_alternate_paths === true) return "exhausted";
+    if (regions.length > 0 && membershipCoveredByCertificate(context, "membership")) {
+      return "exhausted";
+    }
   }
   return aggregateObserverStatus(input.observer?.outcome.status, active);
 }
@@ -528,4 +489,75 @@ function uniformCompleteness(status: CompletenessStatus): CompletenessReport {
     payload: status,
     representation: status
   };
+}
+
+function hasRequiredCoverage(input: CertifyClosureInput): boolean {
+  return input.closed_effects.some((effect) => input.residuals.some((region) =>
+    coverageRoleOf(region) === "required" && semanticEffectsOf(region).includes(effect)));
+}
+
+function alternateSourcePathCovered(input: CertifyClosureInput): boolean {
+  if (input.result_kind_view === "memory_only") return true;
+  return input.includes_source_only === true;
+}
+
+function coverageFieldsOf(input: CertifyClosureInput): Partial<ClosureCertificate> {
+  const closed_obligations = input.closed_obligations ?? obligationsOf(input.closed_effects);
+  const source_domains = input.source_domains ?? domainsOf(input.residuals);
+  const hypothesis_id = input.hypothesis_id
+    ?? input.residuals.find((region) => region.hypothesis_id !== undefined)?.hypothesis_id;
+  const result_kind_view = input.result_kind_view;
+  const target_kinds = input.target_kinds ?? targetKindsOf(result_kind_view);
+  const includes_source_only = input.includes_source_only
+    ?? includesSourceOnly(result_kind_view, input.residuals);
+  return {
+    ...(input.comparison === undefined ? {} : { comparison: input.comparison }),
+    ...(input.threshold_milligrades === undefined ? {} : { threshold_milligrades: input.threshold_milligrades }),
+    ...(input.uses_raw_predicate === undefined ? {} : { uses_raw_predicate: input.uses_raw_predicate }),
+    ...(input.program_id === undefined ? {} : { program_id: input.program_id }),
+    ...(result_kind_view === undefined ? {} : { result_kind_view }),
+    ...(target_kinds === undefined ? {} : { target_kinds }),
+    ...(source_domains.length === 0 ? {} : { source_domains }),
+    ...(hypothesis_id === undefined ? {} : { hypothesis_id }),
+    ...(input.binding === undefined ? {} : { binding: input.binding }),
+    ...(includes_source_only === undefined ? {} : { includes_source_only }),
+    ...(closed_obligations.length === 0 ? {} : { closed_obligations })
+  };
+}
+
+function obligationsOf(
+  effects: readonly ResidualSemanticEffect[]
+): readonly ("membership" | "claim" | "order")[] {
+  const obligations: ("membership" | "claim" | "order")[] = [];
+  if (effects.includes("membership")) obligations.push("membership");
+  if (effects.includes("claim") || effects.includes("refutation")) obligations.push("claim");
+  if (effects.includes("order")) obligations.push("order");
+  return obligations;
+}
+
+function domainsOf(residuals: readonly CoverageRegion[]): readonly string[] {
+  const domains = new Set<string>();
+  for (const region of residuals) {
+    if (region.source_domain !== undefined) domains.add(region.source_domain);
+  }
+  return [...domains];
+}
+
+function targetKindsOf(view: ResultKindView | undefined): readonly RecallTargetKind[] | undefined {
+  if (view === "memory_only") return ["memory_entry"];
+  if (view === "source_only") return ["source_evidence"];
+  if (view === "mixed") return ["memory_entry", "source_evidence"];
+  return undefined;
+}
+
+function includesSourceOnly(
+  view: ResultKindView | undefined,
+  residuals: readonly CoverageRegion[]
+): boolean | undefined {
+  if (view === "memory_only") return false;
+  if (view !== "mixed" && view !== "source_only") return undefined;
+  const source = residuals.filter((region) =>
+    region.kind === "source_domain" && coverageRoleOf(region) === "required");
+  if (source.length === 0) return undefined;
+  return source.every((region) => region.status === "exhausted" || region.status === "not_applicable");
 }

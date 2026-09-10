@@ -20,7 +20,6 @@ import {
   composeCompleteness,
   residualGradeUpper,
   residualsInvalidateBounds,
-  sufficientAlternatePaths,
   upperExcludesPredicate
 } from "../../../../recall/conditional-field/index/completeness.js";
 import {
@@ -32,31 +31,21 @@ import {
   productKey
 } from "../reference/deployment.fixture.js";
 import type { ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
+import { deploymentWorld } from "../../conditional-field-oracle/finite-worlds.js";
+import {
+  enumerateCompletions,
+  enumerateWorldCompletions,
+  oracleAllowsComplete,
+  oracleGuaranteedMembers,
+  oraclePossibleMembers,
+  oracleSandwichHolds,
+  oracleStability,
+  orderOf,
+  type OracleClaim,
+  type SourceModel
+} from "../../conditional-field-oracle/completeness-oracle.js";
 
 const SCHEMA = CONDITIONAL_FIELD_SCHEMA_VERSION;
-
-type Member = Readonly<{ readonly id: string; readonly grade: number }>;
-type Completion = Readonly<{
-  readonly members: readonly Member[];
-  readonly claims: Readonly<Record<string, "unknown" | "supported" | "refuted">>;
-}>;
-
-type SourceModel = Readonly<{
-  readonly known?: Readonly<{ readonly id: string; readonly grade: number }>;
-  readonly unknown_seed?: boolean;
-  readonly required_measurement?: boolean;
-  readonly optional_discovery?: boolean;
-  readonly incompatible_hypotheses?: boolean;
-  readonly comparison?: "gt" | "gte";
-  readonly threshold?: number;
-  readonly quantized_threshold?: number;
-  readonly uses_raw?: boolean;
-  readonly partial_source?: boolean;
-  readonly unfinished_join?: boolean;
-  readonly join_strength?: number;
-  readonly later_refutation?: boolean;
-  readonly between_grade?: number;
-}>;
 
 describe("residual influence and completeness", () => {
   it("reproduces G07: unknown residual keeps logical-open from repairing a tight numeric upper", () => {
@@ -136,7 +125,7 @@ describe("residual influence and completeness", () => {
       coverage_role: "required"
     });
     expect(classifyResidualInfluence(optional, { sufficient_alternate_paths: true }, "membership"))
-      .toBe("irrelevant");
+      .toBe("influential");
     expect(classifyResidualInfluence(optional, { sufficient_alternate_paths: true }, "grade_bound"))
       .toBe("influential");
     expect(classifyResidualInfluence(optional, { sufficient_alternate_paths: false }, "membership"))
@@ -153,7 +142,22 @@ describe("residual influence and completeness", () => {
       omitted_payload: false,
       expand_payload: true
     });
-    expect(report.logical_index).toBe("complete");
+    expect(report.logical_index).not.toBe("complete");
+    const covered = certifyClosure({
+      query_id: QUERY_ID,
+      predicate_id: "assoc",
+      operator_id: "max-min",
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      coverage_premise: "required_regions_irrelevant",
+      closed_effects: ["membership"],
+      residuals: [region("seed", "seed", "exhausted")],
+      result_kind_view: "memory_only"
+    });
+    expect(covered?.closed_obligations).toEqual(["membership"]);
+    expect(classifyResidualInfluence(optional, { certificate: covered }, "membership"))
+      .toBe("irrelevant");
+    expect(classifyResidualInfluence(optional, { certificate: covered }, "grade_bound"))
+      .toBe("influential");
     const unresolved = composeCompleteness({
       observer: {
         outcome: { schema_version: SCHEMA, status: "exhausted" },
@@ -176,11 +180,20 @@ describe("residual influence and completeness", () => {
       domain_id: ASSOCIATION_DOMAIN_ID,
       coverage_premise: "required_regions_irrelevant",
       closed_effects: ["membership"],
-      residuals: [region("seed", "seed", "exhausted")]
+      residuals: [region("seed", "seed", "exhausted")],
+      program_id: "epsilon",
+      result_kind_view: "memory_only",
+      hypothesis_id: "h0",
+      binding: "default"
     });
     expect(membershipOnly?.closed_effects).toEqual(["membership"]);
     expect(membershipOnly?.closed_effects).not.toContain("order");
     expect(membershipOnly?.closed_effects).not.toContain("refutation");
+    expect(membershipOnly?.closed_obligations).toEqual(["membership"]);
+    expect(membershipOnly?.program_id).toBe("epsilon");
+    expect(membershipOnly?.result_kind_view).toBe("memory_only");
+    expect(membershipOnly?.target_kinds).toEqual(["memory_entry"]);
+    expect(membershipOnly?.includes_source_only).toBe(false);
     expect(certifyClosure({
       query_id: QUERY_ID,
       predicate_id: "assoc",
@@ -196,6 +209,8 @@ describe("residual influence and completeness", () => {
         open_regions: [region("seed", "seed", "exhausted")]
       },
       query_id: QUERY_ID,
+      program_id: "epsilon",
+      result_kind_view: "memory_only",
       total: 1,
       remaining: 0,
       omitted_payload: false,
@@ -220,7 +235,55 @@ describe("residual influence and completeness", () => {
       .toBe(wired.certificate_id);
   });
 
+  it("does not certify complete from an exhausted required seed while source_domain is unknown", () => {
+    const residuals = [
+      region("seed", "seed", "exhausted", { coverage_role: "required" }),
+      region("source_domain", "source_domain", "unknown", {
+        coverage_role: "required",
+        source_domain: "source_evidence",
+        conservative_bound_milligrades: MILLIGRADE_TOP
+      })
+    ];
+    expect(classifyResidualInfluence(residuals[0]!, {}, "membership")).toBe("irrelevant");
+    expect(classifyResidualInfluence(residuals[1]!, {}, "membership")).toBe("unresolved");
+    expect(certifyClosure({
+      query_id: QUERY_ID,
+      predicate_id: "assoc",
+      operator_id: "max-min",
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      coverage_premise: "required_regions_irrelevant",
+      closed_effects: ["membership"],
+      residuals,
+      result_kind_view: "mixed"
+    })).toBeUndefined();
+    expect(certifyClosure({
+      query_id: QUERY_ID,
+      predicate_id: "assoc",
+      operator_id: "max-min",
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      coverage_premise: "alternate_source_path",
+      closed_effects: ["membership"],
+      residuals,
+      sufficient_alternate_paths: true,
+      result_kind_view: "mixed"
+    })).toBeUndefined();
+    const completeness = composeCompleteness({
+      observer: {
+        outcome: { schema_version: SCHEMA, status: "exhausted" },
+        open_regions: residuals
+      },
+      result_kind_view: "mixed",
+      query_id: QUERY_ID,
+      total: 1,
+      remaining: 0,
+      omitted_payload: false,
+      expand_payload: true
+    });
+    expect(completeness.logical_index).not.toBe("complete");
+  });
+
   it("enumerates compatible completions independently and sandwiches production field bounds", () => {
+    expect(enumerateWorldCompletions(deploymentWorld()).length).toBeGreaterThan(0);
     const models: readonly SourceModel[] = [
       { known: { id: "r", grade: 400 }, unknown_seed: true },
       { known: { id: "r", grade: 400 }, required_measurement: true },
@@ -254,31 +317,61 @@ describe("residual influence and completeness", () => {
         seeds: model.known === undefined ? [] : [seed(model.known.id, model.known.grade)],
         residuals
       });
+      const observedMembers = fieldMembers(field);
+      const observedClaims = claimsFromField(field, observedMembers);
+      const observedOrder = orderOf(observedMembers.map((id) => ({
+        id,
+        grade: gradeOf(field, id)
+      })));
+      const lower = {
+        members: observedMembers,
+        claims: observedClaims,
+        order: observedOrder
+      };
+      const allowed = oracleAllowsComplete(lower, completions);
+      const stability = oracleStability(lower, completions);
       const completeness = composeCompleteness({
         observer: {
           outcome: { schema_version: SCHEMA, status: observerStatusOf(residuals) },
           open_regions: residuals
         },
-        sufficient_alternate_paths: sufficientAlternatePaths(residuals),
         pending_computation: model.unfinished_join === true ? "open" : "complete",
         claim_work: model.later_refutation === true ? "open" : "complete",
         query_id: QUERY_ID,
-        total: fieldMembers(field).length,
+        result_kind_view: "mixed",
+        total: observedMembers.length,
         remaining: 0,
         omitted_payload: false,
         expand_payload: true
       });
-      const inField = new Set(fieldMembers(field));
-      const possibleMember = completions.some((completion) => completion.members.length > 0);
-      const unseenPossible = completions.some((completion) =>
-        completion.members.some((member) => !inField.has(member.id)));
-      if (unseenPossible || (possibleMember && inField.size === 0)) {
+      if (!stability.membership) {
         expect(completeness.logical_index, JSON.stringify({ model, completeness })).not.toBe("complete");
         expect(field.closure.requested_index).not.toBe("complete");
       }
+      if (!stability.claim) {
+        expect(completeness.claim_coverage).not.toBe("complete");
+      }
+      if (!stability.order) {
+        expect(completeness.order_coverage).not.toBe("complete");
+      }
+      if (completeness.logical_index === "complete"
+        && completeness.claim_coverage === "complete"
+        && completeness.order_coverage === "complete") {
+        expect(allowed).toBe(true);
+      }
+      const guaranteed = oracleGuaranteedMembers(completions);
+      const possible = oraclePossibleMembers(completions);
+      const observedSet = new Set(observedMembers);
+      expect([...guaranteed].every((id) => observedSet.has(id) || possible.has(id))).toBe(true);
+      expect(oracleSandwichHolds({
+        lower: guaranteed,
+        upper: possible.size === guaranteed.size ? possible : "unbounded",
+        completions
+      })).toBe(true);
+      expect([...observedSet].every((id) => possible.has(id) || !guaranteed.has(id))).toBe(true);
       for (const completion of completions) {
         for (const member of completion.members) {
-          if (!inField.has(member.id)) continue;
+          if (!observedSet.has(member.id)) continue;
           const low = lowOf(field, member.id);
           const high = highOf(field, member.id);
           expect(low, member.id).toBeDefined();
@@ -330,52 +423,6 @@ describe("residual influence and completeness", () => {
   });
 });
 
-function enumerateCompletions(model: SourceModel): readonly Completion[] {
-  const known: Member[] = model.known === undefined ? [] : [model.known];
-  const completions: Completion[] = [{ members: known, claims: claimsOf(model, known) }];
-  if (model.unknown_seed === true) {
-    completions.push({ members: [], claims: {} });
-    completions.push({
-      members: [{ id: "x", grade: MILLIGRADE_TOP }],
-      claims: { x: "unknown" }
-    });
-  }
-  if (model.required_measurement === true) {
-    completions.push({ members: [], claims: {} });
-  }
-  if (model.optional_discovery === true && model.known !== undefined) {
-    completions.push({
-      members: [{ id: model.known.id, grade: Math.min(MILLIGRADE_TOP, model.known.grade + 100) }],
-      claims: claimsOf(model, known)
-    });
-  }
-  if (model.incompatible_hypotheses === true) {
-    return [
-      { members: [{ id: "h0", grade: 500 }], claims: { h0: "unknown" } },
-      { members: [{ id: "h1", grade: 900 }], claims: { h1: "unknown" } }
-    ];
-  }
-  if (model.between_grade !== undefined) {
-    completions.push({
-      members: [{ id: model.known?.id ?? "r", grade: model.between_grade }],
-      claims: { [model.known?.id ?? "r"]: "unknown" }
-    });
-  }
-  if (model.partial_source === true) {
-    completions.push({
-      members: [...known, { id: "src", grade: MILLIGRADE_TOP }],
-      claims: claimsOf(model, [...known, { id: "src", grade: MILLIGRADE_TOP }])
-    });
-  }
-  if (model.unfinished_join === true) {
-    completions.push({
-      members: [{ id: "j", grade: model.join_strength ?? 600 }],
-      claims: { j: "unknown" }
-    });
-  }
-  return completions;
-}
-
 function residualsFor(model: SourceModel): readonly CoverageRegion[] {
   const rows: CoverageRegion[] = [];
   if (model.unknown_seed === true) {
@@ -418,16 +465,6 @@ function residualsFor(model: SourceModel): readonly CoverageRegion[] {
     }));
   }
   return rows;
-}
-
-function claimsOf(
-  model: SourceModel,
-  members: readonly Member[]
-): Readonly<Record<string, "unknown" | "supported" | "refuted">> {
-  return Object.fromEntries(members.map((member) => [
-    member.id,
-    model.later_refutation === true ? "refuted" : "unknown"
-  ]));
 }
 
 function observerStatusOf(residuals: readonly CoverageRegion[]): CoverageRegion["status"] {
@@ -539,6 +576,17 @@ function fieldMembers(state: ReturnType<typeof createConditionalField>): readonl
   return state.binding.snapshot.values
     .filter((row) => row.accepting && row.activation?.kind !== "unreachable")
     .map((row) => productSubjectId(row.state));
+}
+
+function claimsFromField(
+  state: ReturnType<typeof createConditionalField>,
+  members: readonly string[]
+): Readonly<Record<string, OracleClaim>> {
+  return Object.fromEntries(members.map((id) => {
+    const claim = state.claims.get(id);
+    if (claim === "supported" || claim === "refuted" || claim === "unknown") return [id, claim];
+    return [id, "unknown"];
+  }));
 }
 
 function gradeOf(state: ReturnType<typeof createConditionalField>, objectId: string): number {

@@ -128,7 +128,7 @@ describe("grounded retained derivation revisions", () => {
     const observed = { ...row, resultObjectId: "end", evidenceReceipts: [{ evidenceId: "e-context", eventId: "event-context",
       eventType: "relation.evidence", occurredAt: "2026-09-06T00:00:00.000Z" }] };
     const configured: FieldEngineState = { ...initial, observed_relations: [observed], interpretation: { ...initial.interpretation,
-      view: { ...initial.interpretation.view, claim_demands: [{ variable: "y", proposition_kind: "common_cause", argument_variables: ["x", "y"] }] } } };
+      view: { ...initial.interpretation.view, claim_demands: [{ variable: "y", proposition_kind: "common_cause", argument_variables: ["x", "y"], required_claim: "any" }] } } };
     const unknown = assessUnknownCause(configured, { as_of: "2026-09-07T00:00:00.000Z" });
     expect(unknown.support.some((record) => record.claim === "supported")).toBe(true);
     const proposition = [...unknown.claim_propositions!.values()].find((item) => item.kind === "common_cause")!;
@@ -144,7 +144,7 @@ describe("grounded retained derivation revisions", () => {
     for (const order of [rows, [...rows].reverse()]) {
       for (const removed of ["a1", "a2"]) {
         const revised = withdrawDerivationLeaves(field(rel("a"), order), removed);
-        expect(grade(revised)).toBe(800);
+        expect(grade(revised)).toBe(1000);
         expect(grade(revised)).toBe(grade(field(rel("a"), order.filter((row) => row.assertionId !== removed))));
         expect(grade(withdrawDerivationLeaves(revised, removed === "a1" ? "a2" : "a1"))).toBe(0);
       }
@@ -155,7 +155,7 @@ describe("grounded retained derivation revisions", () => {
     const program = and(seq(rel("a", "x", "m"), rel("b", "m", "y")), rel("c"));
     const rows = [edge("seed", "mid", "a"), edge("mid", "end", "b"), edge("seed", "end", "c")];
     const initial = field(program, rows);
-    expect(grade(initial)).toBe(800);
+    expect(grade(initial)).toBe(1000);
     for (const removed of ["a", "b", "c"]) {
       expect(grade(withdrawDerivationLeaves(initial, removed))).toBe(0);
       expect(grade(withdrawDerivationLeaves(initial, removed))).toBe(grade(field(program, rows.filter((row) => row.assertionId !== removed))));
@@ -167,9 +167,9 @@ describe("grounded retained derivation revisions", () => {
     for (const choices of [["weak", "strong"], ["strong", "weak"]]) {
       const program = and(seq(alt(...choices.map((kind) => rel(kind, "x", "m"))), rel("tail", "m", "y")), rel("c"));
       const initial = field(program, rows);
-      expect(grade(initial)).toBe(800);
-      expect(grade(withdrawDerivationLeaves(initial, "strong"))).toBe(200);
-      expect(grade(withdrawDerivationLeaves(initial, "weak"))).toBe(800);
+      expect(grade(initial)).toBe(1000);
+      expect(grade(withdrawDerivationLeaves(initial, "strong"))).toBe(1000);
+      expect(grade(withdrawDerivationLeaves(initial, "weak"))).toBe(1000);
     }
   });
 

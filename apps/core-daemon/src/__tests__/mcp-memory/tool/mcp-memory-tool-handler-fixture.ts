@@ -20,6 +20,17 @@ export const context = {
   sessionId: "mcp-memory-tool-handler-session"
 };
 
+export const CAPABLE_RECALL_CONSUMER = {
+  protocol_version: 1,
+  supported_result_kinds: ["memory_entry", "source_evidence"],
+  supports_source_evidence: true,
+  supports_product_updates: true
+} as const;
+
+export function capableRecallRequest<T extends object>(args: T): T & typeof CAPABLE_RECALL_CONSUMER {
+  return { ...CAPABLE_RECALL_CONSUMER, ...args };
+}
+
 export function stubRecallIndex(objectIds: readonly string[] = ["mem1"]): InformationIndex {
   return {
     schema_version: 1,

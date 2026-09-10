@@ -27,10 +27,10 @@ export const FAR_FUTURE_EXPIRY = "2099-01-01T00:00:00.000Z";
 
 export const DEPLOYMENT_MILLIGRADES: Readonly<Record<string, number>> = Object.freeze({
   r: 1000,
-  l: 950,
-  c: 850,
-  s: 900,
-  h: 550,
+  l: 1000,
+  c: 1000,
+  s: 1000,
+  h: 1000,
   u: 0
 });
 
@@ -121,11 +121,11 @@ export function deploymentWorld(): FiniteWorld {
     id: "deployment",
     seeds: [{ state: productKey("r"), milligrades: 1000 }],
     edges: [
-      edge("r", "l", "observed_log", 950, true, 50),
-      edge("l", "c", "config_via_log", 850, true, 150),
-      edge("r", "c", "config_direct", 800, true, 200),
-      edge("r", "s", "uses_service", 900, true, 100),
-      edge("s", "h", "service_history", 550, true, 450),
+      edge("r", "l", "observed_log", 1000, true, 50),
+      edge("l", "c", "config_via_log", 1000, true, 150),
+      edge("r", "c", "config_direct", 1000, true, 200),
+      edge("r", "s", "uses_service", 1000, true, 100),
+      edge("s", "h", "service_history", 1000, true, 450),
       edge("r", "u", "unrelated", 1000, false, 0)
     ],
     facets: [],

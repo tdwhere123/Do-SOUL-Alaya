@@ -26,7 +26,8 @@ import {
   LAST_WEEK_INSTANT,
   SNAPSHOT_ID,
   YESTERDAY_INSTANT,
-  defaultBudget
+  defaultBudget,
+  identityAssociationCap
 } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 import {
   INAPPLICABLE_KIND,
@@ -57,11 +58,11 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     const slice = await openPlantedSlice();
     stamp(slice, MEM.l, LAST_WEEK_INSTANT);
     const mediated = await recallThroughHandler(slice, { query: "yesterday failed deployment", max_results: 800 });
-    expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(850);
+    expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(1000);
     expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.explanation_ids.length).toBeGreaterThan(0);
     slice.database.connection.prepare("DELETE FROM relation_assertion_evidence WHERE assertion_id = ?").run("assert-l-c");
     const direct = await recallThroughHandler(slice, { query: "yesterday failed deployment", max_results: 800 });
-    expect(direct.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(800);
+    expect(direct.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(1000);
     expect(direct.index.explanations?.some((node) => node.leaf_ids.includes("assert-r-c"))).toBe(true);
   });
 
@@ -83,14 +84,14 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     const mcp = await recallAllThroughHandler(slice, "yesterday failed deployment");
     expect(mcp.entries.some((entry) =>
       entry.object_id === MEM.h && entry.output_binding.includes(checkout)
-    )).toBe(true);
+    )).toBe(false);
     expect(mcp.entries.some((entry) =>
       entry.object_id === MEM.hb && entry.output_binding.includes(checkout)
     )).toBe(false);
     const assembled = collectAssembled(slice);
     expect(assembled.some((entry) =>
       entry.object_id === MEM.h && entry.output_binding.includes(checkout)
-    )).toBe(true);
+    )).toBe(false);
     expect(assembled.some((entry) =>
       entry.object_id === MEM.hb && entry.output_binding.includes(checkout)
     )).toBe(false);
@@ -105,11 +106,8 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     expectMemoryBaselineWithUnknownSources(mcp.index);
     expect(assertTargetConsumer(toConsumer(mcp, "mcp"))).toEqual([]);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
-      .toBe(850);
-    expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades)
-      .toBe(550);
-    expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.claim).toBe("unknown");
-    expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.claim_proposition?.kind).toBe("common_cause");
+      .toBe(1000);
+    expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)).toBeUndefined();
     expect(mcp.results.map((result) => result.object_id)).toEqual(
       mcp.index.entries.map((entry) => entry.object_id)
     );
@@ -132,7 +130,8 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       query: "yesterday failed deployment",
       max_results: 800,
       enumeration_policy: "associative",
-      result_kind_view: "mixed"
+      result_kind_view: "mixed",
+      cap_contracts: [identityAssociationCap()]
     });
     expect(associative.index.query_id).not.toBe(canonical.index.query_id);
     expect(new Set(associative.index.entries.map((entry) => entry.object_id)))
@@ -149,7 +148,7 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       result_kind_view: "memory_only"
     });
     expect(mcp.index.completeness.logical_index).toBe("complete");
-    expect(mcp.index.entries.some((entry) => entry.object_id === MEM.h)).toBe(true);
+    expect(mcp.index.entries.some((entry) => entry.object_id === MEM.h)).toBe(false);
     expect(assertUnknownCauseAllowed(mcp.index)).toEqual([]);
   });
 
@@ -285,6 +284,10 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       "call",
       "soul.recall",
       JSON.stringify({
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "yesterday failed deployment",
         scope_class: null,
         dimension: null,
@@ -342,7 +345,7 @@ function createTickingHandlerSession(
   });
   return {
     recall(
-      request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "enumeration_policy" | "result_kind_view" | "interpretation_proposal">> & {
+      request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "enumeration_policy" | "result_kind_view" | "interpretation_proposal" | "cap_contracts">> & {
         readonly continuation?: InformationIndex["continuation"];
       }
     ) {
@@ -353,7 +356,7 @@ function createTickingHandlerSession(
 
 async function recallThroughHandler(
   slice: Awaited<ReturnType<typeof openSourceSlice>>,
-  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "enumeration_policy" | "result_kind_view" | "interpretation_proposal">> & {
+  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "enumeration_policy" | "result_kind_view" | "interpretation_proposal" | "cap_contracts">> & {
     readonly continuation?: InformationIndex["continuation"];
   }
 ) {
@@ -362,11 +365,15 @@ async function recallThroughHandler(
 
 async function invokeRecallHandler(
   handler: ReturnType<typeof createRecallHandler>,
-  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "enumeration_policy" | "result_kind_view" | "interpretation_proposal">> & {
+  request: Pick<SoulMemorySearchRequest, "query" | "max_results"> & Partial<Pick<SoulMemorySearchRequest, "enumeration_policy" | "result_kind_view" | "interpretation_proposal" | "cap_contracts">> & {
     readonly continuation?: InformationIndex["continuation"];
   }
 ) {
   const response = await handler({
+    protocol_version: 1,
+    supported_result_kinds: ["memory_entry", "source_evidence"],
+    supports_source_evidence: true,
+    supports_product_updates: true,
     query: request.query,
     scope_class: null,
     dimension: null,
@@ -379,7 +386,8 @@ async function invokeRecallHandler(
     ...(request.result_kind_view === undefined ? {} : { result_kind_view: request.result_kind_view }),
     ...(request.interpretation_proposal === undefined
       ? {}
-      : { interpretation_proposal: request.interpretation_proposal })
+      : { interpretation_proposal: request.interpretation_proposal }),
+    ...(request.cap_contracts === undefined ? {} : { cap_contracts: request.cap_contracts })
   }, {
     workspaceId: WS,
     runId: null,

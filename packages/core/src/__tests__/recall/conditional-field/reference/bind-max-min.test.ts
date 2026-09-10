@@ -48,11 +48,11 @@ import {
 } from "./deployment.fixture.js";
 
 describe("conditional-field reference binder", () => {
-  it("indexes last-week config at 850 without applying yesterday to every object", () => {
+  it("indexes last-week config at identity without applying yesterday to every object", () => {
     const bound = bindDeployment();
     const index = projectBound(bound);
     const config = index.entries.find((entry) => entry.object_id === "c");
-    expect(config?.association_milligrades).toBe(850);
+    expect(config?.association_milligrades).toBe(1000);
     const yesterday = yesterdayAnchorGuard();
     const interpretation = QueryInterpretationSchema.parse({
       schema_version: 1,
@@ -85,10 +85,10 @@ describe("conditional-field reference binder", () => {
     expect(configGuard?.time_scope).toBe("none");
     expect(configGuard?.interval).toBeUndefined();
     expect(index.entries.find((entry) => entry.object_id === "c")?.association_milligrades)
-      .toBe(850);
+      .toBe(1000);
   });
 
-  it("includes prior same-service failure at 550 with unknown common cause", () => {
+  it("includes prior same-service failure at identity with unknown common cause", () => {
     const bound = bindDeployment();
     const index = projectAcceptingIndex({
       snapshot: bound.snapshot,
@@ -107,7 +107,7 @@ describe("conditional-field reference binder", () => {
       claims: new Map([["h", "unknown"], ["c", "unknown"]])
     });
     const history = index.entries.find((entry) => entry.object_id === "h");
-    expect(history?.association_milligrades).toBe(550);
+    expect(history?.association_milligrades).toBe(1000);
     expect(history?.claim).toBe("unknown");
     expect(index.entries.find((entry) => entry.object_id === "s")).toBeUndefined();
   });

@@ -50,6 +50,7 @@ import {
   type SourceSlice
 } from "./planted-handler.js";
 import { assertTargetConsumer } from "./consumer-contract.js";
+import { identityAssociationCap } from "../../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 
 const NOW = "2026-09-07T00:00:00.000Z";
 const SOURCE_BODY = "record-only surface root for mixed recall";
@@ -153,6 +154,10 @@ async function callRecall(
   const response = await handler.call({
     toolName: "soul.recall",
     arguments: {
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
       query: input.query,
       max_results: input.max_results,
       scope_class: null,
@@ -226,7 +231,8 @@ function projectTypedUpdateIndex(): InformationIndex {
     enumeration_policy: "associative",
     result_kind_view: "mixed",
     include_routing_only: false,
-    requested_roles: ["requested", "associated"]
+    requested_roles: ["requested", "associated"],
+    cap_contracts: [identityAssociationCap()]
   });
   const base = {
     view,
@@ -350,6 +356,10 @@ describe("CP09 worker MCP CLI surfaces", () => {
       "call",
       "soul.recall",
       JSON.stringify({
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "yesterday failed deployment",
         scope_class: null,
         dimension: null,
@@ -672,6 +682,10 @@ describe("CP09 worker MCP CLI surfaces", () => {
       "call",
       "soul.recall",
       JSON.stringify({
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "needle cli",
         scope_class: null,
         dimension: null,

@@ -167,6 +167,10 @@ export function continuationPolicyMismatch(input: Readonly<{
   readonly view: Readonly<{
     readonly enumeration_policy?: EnumerationPolicy;
     readonly result_kind_view?: "mixed" | "memory_only" | "source_only";
+    readonly protocol_version?: number;
+    readonly supported_result_kinds?: Continuation["supported_result_kinds"];
+    readonly cap_contracts?: Continuation["cap_contracts"];
+    readonly claim_demands?: Continuation["claim_demands"];
   }>;
   readonly authorized_scopes?: readonly string[];
   readonly prior_continuation?: Continuation | null;
@@ -175,6 +179,11 @@ export function continuationPolicyMismatch(input: Readonly<{
   if (prior === undefined || prior === null) return false;
   if ((prior.enumeration_policy ?? "canonical") !== (input.view.enumeration_policy ?? "canonical")) return true;
   if ((prior.result_kind_view ?? "mixed") !== (input.view.result_kind_view ?? "mixed")) return true;
+  if ((prior.protocol_version ?? null) !== (input.view.protocol_version ?? null)) return true;
+  if (stableStringify([...(prior.supported_result_kinds ?? [])].sort(compareText))
+    !== stableStringify([...(input.view.supported_result_kinds ?? [])].sort(compareText))) return true;
+  if (stableStringify(prior.cap_contracts ?? null) !== stableStringify(input.view.cap_contracts ?? null)) return true;
+  if (stableStringify(prior.claim_demands ?? null) !== stableStringify(input.view.claim_demands ?? null)) return true;
   if (prior.authorized_scopes === undefined || input.authorized_scopes === undefined) return false;
   return identityDigest([...(prior.authorized_scopes)].sort(compareText))
     !== identityDigest([...input.authorized_scopes].sort(compareText));

@@ -4,6 +4,7 @@ import { isRecallReadWorkerRequest } from
   "../../../runtime/recall-read-worker/protocol-validation.js";
 import {
   RECALL_READ_WORKER_OPERATIONS,
+  RECALL_READ_WORKER_PROTOCOL_VERSION,
   type RecallReadWorkerOperation,
   type RecallReadWorkerRequest
 } from "../../../runtime/recall-read-worker/protocol.js";
@@ -28,6 +29,7 @@ describe("query-only recall-read dispatch validation", () => {
     }
     for (const operation of FORGED_OPERATIONS) {
       expect(isRecallReadWorkerRequest({
+        protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
         id: 1,
         operation,
         payload: {}
@@ -35,6 +37,7 @@ describe("query-only recall-read dispatch validation", () => {
     }
     for (const id of NON_FINITE_IDS) {
       expect(isRecallReadWorkerRequest({
+        protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
         id,
         operation: "ready",
         payload: {}
@@ -46,6 +49,7 @@ describe("query-only recall-read dispatch validation", () => {
     const { queryOnlyRuntime } = hydration.openQueryOnlyPair();
     for (const operation of FORGED_OPERATIONS) {
       await expect(runOperation(queryOnlyRuntime, {
+        protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
         id: 1,
         operation,
         payload: {}
@@ -57,6 +61,7 @@ describe("query-only recall-read dispatch validation", () => {
     const { queryOnlyRuntime } = hydration.openQueryOnlyPair();
     queryOnlyRuntime.closed = true;
     await expect(runOperation(queryOnlyRuntime, {
+      protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
       id: 1,
       operation: "memory.findRecallTierWindow",
       payload: {}
@@ -65,5 +70,5 @@ describe("query-only recall-read dispatch validation", () => {
 });
 
 function typedRequest(operation: RecallReadWorkerOperation): RecallReadWorkerRequest {
-  return { id: 1, operation, payload: {} };
+  return { protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION, id: 1, operation, payload: {} };
 }

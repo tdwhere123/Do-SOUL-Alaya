@@ -17,6 +17,7 @@ export {
   CANONICAL_PRODUCT_IDENTITY_VERSION,
   MemoryEntryTargetSchema,
   ProductStateKeySchema,
+  RecallTargetKindSchema,
   RecallTargetRefSchema,
   SourceDeliveredSpanSchema,
   SourceEvidenceRootKindSchema,
@@ -40,6 +41,7 @@ export {
   type MemoryEntryTarget,
   type MemoryProductStateInput,
   type ProductStateKey,
+  type RecallTargetKind,
   type RecallTargetRef,
   type SourceDeliveredSpan,
   type SourceEvidenceRootKind,
@@ -56,9 +58,12 @@ export const TransitionSchema = z
     relation_kind: BoundedLabelSchema,
     instance_id: ConditionalFieldIdSchema.optional(),
     revision_id: ConditionalFieldIdSchema.optional(),
+    transfer_id: ConditionalFieldIdSchema.optional(),
+    transfer_version: ConditionalFieldIdSchema.optional(),
     strength_milligrades: MilligradeSchema,
     validity: RelationValiditySchema,
-    applicable: z.boolean()
+    applicable: z.boolean(),
+    cap_contract_id: Sha256DigestSchema.optional()
   })
   .strict()
   .readonly();
@@ -67,7 +72,8 @@ export const SeedActivationSchema = z
   .object({
     schema_version: SchemaVersionSchema,
     state: ProductStateKeySchema,
-    milligrades: MilligradeSchema
+    milligrades: MilligradeSchema,
+    cap_contract_id: Sha256DigestSchema.optional()
   })
   .strict()
   .readonly();
@@ -80,7 +86,8 @@ export const FieldValueSchema = z
     accepting: z.boolean(),
     low_milligrades: MilligradeSchema.optional(),
     high_milligrades: MilligradeSchema.optional(),
-    activation: FieldActivationSchema.optional()
+    activation: FieldActivationSchema.optional(),
+    cap_contract_id: Sha256DigestSchema.optional()
   })
   .strict()
   .superRefine((value, context) => {

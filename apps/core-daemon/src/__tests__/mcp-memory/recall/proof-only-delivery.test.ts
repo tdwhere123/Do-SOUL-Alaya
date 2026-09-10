@@ -75,7 +75,9 @@ describe("bounded explanation continuation delivery", () => {
     for (const page of [first, proof]) {
       current = page;
       const response = SoulMemorySearchResponseSchema.parse(await handler({ query: "needle", max_results: 1,
-        scope_class: null, dimension: null, domain_tags: null }, context));
+        scope_class: null, dimension: null, domain_tags: null,
+        protocol_version: 1, supports_source_evidence: true, supports_product_updates: true,
+        supported_result_kinds: ["memory_entry", "source_evidence"] }, context));
       expect(response.results).toHaveLength(page.entries.length);
       expect(response.index?.page_purpose).toBe(page.page_purpose);
       responses.push(response);

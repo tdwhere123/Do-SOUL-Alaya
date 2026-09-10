@@ -195,7 +195,7 @@ describe("conditional-field adversarial falsifiers", () => {
       world.edges.filter((edge) => edge.relation_kind !== "uses_service")
     );
     expect(milligradeOf(field, "h")).toBe(0);
-    expect(milligradeOf(field, "c")).toBe(850);
+    expect(milligradeOf(field, "c")).toBe(1000);
   });
 });
 

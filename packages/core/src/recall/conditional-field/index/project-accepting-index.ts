@@ -21,6 +21,9 @@ import {
   type RequestBudget,
   type SupportRecord
 } from "@do-soul/alaya-protocol";
+import { associativeCapDomainAdmission } from "../query/query-admission.js";
+import { capContractId } from "../cap-contract.js";
+import { claimObligationAccepts } from "./claim-obligation.js";
 import { CoreError } from "../../../shared/errors.js";
 import { compareText } from "../../../shared/compare-text.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
@@ -53,7 +56,6 @@ import {
   continuationInvalidated,
   invalidatedCompleteness,
   resourceRejectedCompleteness,
-  sufficientAlternatePaths,
   type ObserverCoverage
 } from "./completeness.js";
 import {
@@ -161,7 +163,7 @@ export function projectAcceptingIndex(input: AcceptingProjectionInput): Informat
     return closedIndex(epochInput, representation, invalidatedCompleteness());
   }
   if ((input.view.enumeration_policy ?? "canonical") === "associative") {
-    assertAssociativeMilligradeContract(input.snapshot.values);
+    assertAssociativeMilligradeContract(input.snapshot.values, input.view);
   }
   const admission = input.interpretation_status === undefined
     ? undefined
@@ -318,12 +320,13 @@ function indexCompleteness(
 ): ReturnType<typeof composeCompleteness> {
   const residuals = extra.residuals ?? input.observer?.open_regions ?? [];
   return composeCompleteness({
-    observer: input.observer,
-    interpretation_status: input.interpretation_status,
-    query_id: input.query_id,
+    ...extra,
+    observer: extra.observer ?? input.observer,
+    interpretation_status: extra.interpretation_status ?? input.interpretation_status,
+    query_id: extra.query_id ?? input.query_id,
     residuals,
-    sufficient_alternate_paths: extra.sufficient_alternate_paths ?? sufficientAlternatePaths(residuals),
-    ...extra
+    result_kind_view: extra.result_kind_view ?? input.view.result_kind_view,
+    program_id: extra.program_id ?? input.interpretation_id
   });
 }
 
@@ -482,6 +485,8 @@ function indexEntryForValue(
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
   const subjectId = productSubjectId(value.state);
+  const claim = input.claims?.get(key) ?? input.claims?.get(subjectId) ?? "unknown";
+  if (!claimObligationAccepts(value, input.view, claim)) return null;
   const proposition = input.claim_propositions?.get(key) ?? input.claim_propositions?.get(subjectId);
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -493,7 +498,7 @@ function indexEntryForValue(
     time_state: value.state.time_state,
     role,
     association_milligrades: milligrades,
-    claim: input.claims?.get(key) ?? input.claims?.get(subjectId) ?? "unknown",
+    claim,
     ...(proposition === undefined ? {} : {
       claim_proposition_id: proposition.proposition_id,
       claim_proposition: proposition
@@ -651,6 +656,8 @@ function nextContinuation(
     enumeration_policy: input.view.enumeration_policy ?? "canonical",
     result_kind_view: input.view.result_kind_view ?? "mixed",
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    ...(input.view.cap_contracts === undefined ? {} : { cap_contracts: input.view.cap_contracts }),
+    ...(input.view.claim_demands === undefined ? {} : { claim_demands: input.view.claim_demands }),
     ...wireEmittedRevisions(committed)
   };
 }
@@ -663,16 +670,28 @@ function wireEmittedRevisions(committed: EmittedRevisions): { readonly emitted_r
   return Object.keys(next).length === 0 ? {} : { emitted_revisions: next };
 }
 
-function assertAssociativeMilligradeContract(values: readonly FieldValue[]): void {
+function assertAssociativeMilligradeContract(values: readonly FieldValue[], view: QueryView): void {
+  if (associativeCapDomainAdmission(view) === "incompatible") {
+    throw new CoreError(
+      "VALIDATION",
+      "unsupported-policy: associative requires a shared milligrade cap contract"
+    );
+  }
+  const expected = view.cap_contracts === undefined || view.cap_contracts.length === 0
+    ? undefined
+    : capContractId(view.cap_contracts[0]!);
+  const seen = new Set<string>();
   for (const value of values) {
-    const milligrades = reachableMilligradesOf(value);
-    if (milligrades === undefined) continue;
-    if (!Number.isInteger(milligrades) || milligrades < MILLIGRADE_BOTTOM || milligrades > 1000) {
-      throw new CoreError(
-        "VALIDATION",
-        "unsupported-policy: associative requires a shared milligrade cap contract"
-      );
-    }
+    if (reachableMilligradesOf(value) === undefined) continue;
+    const id = value.cap_contract_id
+      ?? (value.activation?.kind === "reachable" ? value.activation.cap_contract_id : undefined);
+    if (id !== undefined) seen.add(id);
+  }
+  if (seen.size > 1 || (expected !== undefined && seen.size === 1 && !seen.has(expected))) {
+    throw new CoreError(
+      "VALIDATION",
+      "unsupported-policy: associative requires a shared milligrade cap contract"
+    );
   }
 }
 

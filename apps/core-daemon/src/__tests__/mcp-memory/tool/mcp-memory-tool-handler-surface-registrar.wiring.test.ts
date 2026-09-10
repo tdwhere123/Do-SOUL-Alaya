@@ -61,6 +61,10 @@ describe("mcp memory tool handler wiring · attachSurfaceRegistrar", () => {
       sessionId: "sess-1"
     };
     const callArgs = {
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
       query: "any",
       scope_class: null,
       dimension: null,
@@ -100,7 +104,17 @@ describe("mcp memory tool handler wiring · attachSurfaceRegistrar", () => {
       agentTarget: "codex",
       sessionId: "sess-1"
     };
-    const args = { query: "q", scope_class: null, dimension: null, domain_tags: null, max_results: 1 };
+    const args = {
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
+      query: "q",
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
+      max_results: 1
+    };
     await handler.call({ toolName: "soul.recall", arguments: args, context: ctx });
     await handler.call({ toolName: "soul.recall", arguments: args, context: ctx });
     expect(ensureAgentSurface).toHaveBeenCalledTimes(2);
@@ -113,7 +127,17 @@ describe("mcp memory tool handler wiring · attachSurfaceRegistrar", () => {
     const handler = createMcpMemoryToolHandler(makeMinimalDeps({ ensureAgentSurface }));
     const result = await handler.call({
       toolName: "soul.recall",
-      arguments: { query: "q", scope_class: null, dimension: null, domain_tags: null, max_results: 1 },
+      arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
+        query: "q",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 1
+      },
       context: { workspaceId: "ws1", runId: "run1", agentTarget: "codex", sessionId: "s" }
     });
     expect(result.ok).toBe(true);

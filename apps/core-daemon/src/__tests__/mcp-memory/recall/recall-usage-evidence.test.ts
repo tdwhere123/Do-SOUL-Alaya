@@ -93,6 +93,10 @@ describe("recall usage evidence proof", () => {
     const result = await handler.call({
       toolName: "soul.recall",
       arguments: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "recall the earlier assistant response and the related memories",
         recent_turn: "Please use the recalled context to answer this detailed follow-up request.",
         scope_class: null,

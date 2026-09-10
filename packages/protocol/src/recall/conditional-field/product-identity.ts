@@ -9,6 +9,7 @@ import {
 } from "./common.js";
 
 export const CANONICAL_PRODUCT_IDENTITY_VERSION = "product-identity.v1" as const;
+export const RecallTargetKindSchema = z.enum(["memory_entry", "source_evidence"]);
 export const SourceEvidenceRootKindSchema = z.enum(["evidence_capsule", "source_record"]);
 export const SourceRetainedExtentSchema = z.enum(["body", "excerpt", "gist"]);
 
@@ -73,6 +74,7 @@ export const ProductStateKeySchema = z
   .strict()
   .readonly();
 
+export type RecallTargetKind = z.infer<typeof RecallTargetKindSchema>;
 export type SourceEvidenceRootKind = z.infer<typeof SourceEvidenceRootKindSchema>;
 export type SourceRetainedExtent = z.infer<typeof SourceRetainedExtentSchema>;
 export type SourceDeliveredSpan = z.infer<typeof SourceDeliveredSpanSchema>;

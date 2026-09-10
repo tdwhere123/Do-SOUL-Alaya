@@ -399,6 +399,10 @@ describe("trustworthy-loop-trace", () => {
   it("links multi-delivery proposal events by array membership through the public request path", async () => {
     const harness = await createTrustworthyLoopHarness();
     const first = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
       query: "first delivery",
       scope_class: ScopeClass.PROJECT,
       dimension: MemoryDimension.PREFERENCE,
@@ -406,6 +410,10 @@ describe("trustworthy-loop-trace", () => {
       max_results: 3
     });
     const second = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
       query: "second delivery",
       scope_class: ScopeClass.PROJECT,
       dimension: MemoryDimension.PREFERENCE,

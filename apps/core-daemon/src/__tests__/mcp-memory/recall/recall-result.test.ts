@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import {
   MemorySearchResultSchema,
-  NonEmptyStringSchema,
   SoulMemorySearchResponseSchema,
   indexEntryCacheKey,
   sourceIndexEntry
 } from "@do-soul/alaya-protocol";
+import {
+  RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE,
+  capableRecallConsumerDeclaration
+} from "@do-soul/alaya-core";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import {
   encodeIndexResults,
@@ -51,7 +53,8 @@ describe("conditional-field result encoding", () => {
       warn: () => undefined
     });
     await expect(handler({
-      query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null
+      query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null,
+      ...capableRecallConsumerDeclaration()
     }, context)).rejects.toThrow(/requires an authoritative index/);
     expect(deps.trustStateRecorder.recordDelivery).not.toHaveBeenCalled();
   });
@@ -164,35 +167,60 @@ describe("conditional-field result encoding", () => {
     expect(parsed.object_kind).not.toBe("memory_entry");
   });
 
-  it("fails an older consumer that cannot parse source targets instead of dropping them", () => {
-    const digest = `sha256:${"a".repeat(64)}`;
-    const entry = sourceIndexEntry({
-      workspace_id: "ws",
-      root_kind: "source_record",
-      root_id: "rec-1",
-      source_version: "v1",
-      content_digest: digest,
-      evidence_object_id: null,
-      association_milligrades: 700,
-      hypothesis_id: "h1",
-      output_binding: "default",
-      program_state: "accepting",
-      time_state: "present"
+  it("rejects an undeclared mixed consumer before execute instead of emitting source rows", async () => {
+    const deps = createDeps();
+    const handler = createRecallHandler({
+      deps,
+      now: () => "2026-09-08T00:00:00.000Z",
+      generateId: () => "00000000-0000-4000-8000-000000000001",
+      warn: () => undefined
     });
-    const results = encodeIndexResults({
-      ...stubRecallIndex([]),
-      entries: [entry],
-      representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
-    }, new Map([[indexEntryCacheKey(entry), "quoted source excerpt"]]));
-    expect(results).toHaveLength(1);
-    expect(results[0]?.object_kind).toBe("source_evidence");
-    const legacy = z.object({
-      object_id: NonEmptyStringSchema,
-      object_kind: z.literal("memory_entry"),
-      content_preview: NonEmptyStringSchema
-    }).strict();
-    expect(legacy.safeParse(results[0]).success).toBe(false);
-    expect(results.some((row) => row.object_kind === "source_evidence")).toBe(true);
+    await expect(handler({
+      query: "needle", max_results: 5, scope_class: null, dimension: null, domain_tags: null
+    }, context)).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
+    expect(deps.recallService.recall).not.toHaveBeenCalled();
+  });
+
+  it("executes mixed recall when the consumer declares source_evidence support", async () => {
+    const deps = createDeps();
+    const handler = createRecallHandler({
+      deps,
+      now: () => "2026-09-08T00:00:00.000Z",
+      generateId: () => "00000000-0000-4000-8000-000000000001",
+      warn: () => undefined
+    });
+    const response = await handler({
+      query: "needle",
+      max_results: 5,
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
+      ...capableRecallConsumerDeclaration()
+    }, context);
+    expect(deps.recallService.recall).toHaveBeenCalled();
+    expect(response.results.every((row) => row.object_kind === "memory_entry" || row.object_kind === "source_evidence"))
+      .toBe(true);
+  });
+
+  it("allows explicit memory_only without source_evidence support", async () => {
+    const deps = createDeps();
+    const handler = createRecallHandler({
+      deps,
+      now: () => "2026-09-08T00:00:00.000Z",
+      generateId: () => "00000000-0000-4000-8000-000000000001",
+      warn: () => undefined
+    });
+    await handler({
+      query: "needle",
+      max_results: 5,
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
+      result_kind_view: "memory_only"
+    }, context);
+    expect(deps.recallService.recall).toHaveBeenCalledWith(
+      expect.objectContaining({ result_kind_view: "memory_only" })
+    );
   });
 });
 

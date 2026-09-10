@@ -1,4 +1,5 @@
 import {
+  ConditionalFieldRecallWorkerPayloadSchema,
   isRecallReadWorkerOperation,
   type RecallReadWorkerRequest
 } from "./protocol.js";
@@ -22,6 +23,12 @@ export async function runOperation(
   }
   if (runtime.closed && request.operation !== "close") {
     throw new Error("recall read worker database is closed");
+  }
+  if (request.operation === "conditionalField.recall") {
+    return runConditionalFieldWorkerRecall(
+      runtime,
+      ConditionalFieldRecallWorkerPayloadSchema.parse(request.payload)
+    );
   }
   const payload = asPayload(request.payload);
   switch (request.operation) {
@@ -89,8 +96,6 @@ export async function runOperation(
         runtime.database.connection.exec("ROLLBACK");
       }
       return null;
-    case "conditionalField.recall":
-      return runConditionalFieldWorkerRecall(runtime, payload);
     case "close":
       runtime.database.close();
       runtime.closed = true;

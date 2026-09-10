@@ -31,6 +31,7 @@ import {
   selectFeasibleWitnesses,
   type AcceptingProjectionInput
 } from "../../../../recall/conditional-field/index/project-accepting-index.js";
+import { identityAssociationCap } from "../reference/deployment.fixture.js";
 
 const SNAPSHOT_ID = `sha256:${"c".repeat(64)}`;
 const OTHER_SNAPSHOT_ID = `sha256:${"e".repeat(64)}`;
@@ -99,7 +100,7 @@ describe("conditional-field production information index", () => {
     expect(index.completeness.logical_index).toBe("complete");
     expect(index.entries.find((entry) => entry.object_id === "h")?.claim).toBe("unknown");
     expect(index.entries.find((entry) => entry.object_id === "c")?.association_milligrades)
-      .toBe(850);
+      .toBe(1000);
     expect(index.entries.find((entry) => entry.object_id === "c")?.program_state).toBe("accepting");
     expect(index.entries.find((entry) => entry.object_id === "c")?.time_state).toBe("as_of");
     expect(index.entries.find((entry) => entry.object_id === "s")).toBeUndefined();
@@ -509,10 +510,10 @@ function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): Accepting
 function deploymentSnapshot(): FieldSnapshot {
   return snapshotOf([
     fieldValue("r", 1000),
-    fieldValue("l", 950),
-    fieldValue("c", 850),
-    fieldValue("s", 900),
-    fieldValue("h", 550)
+    fieldValue("l", 1000),
+    fieldValue("c", 1000),
+    fieldValue("s", 1000),
+    fieldValue("h", 1000)
   ], {
     seeds: [{
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -520,11 +521,11 @@ function deploymentSnapshot(): FieldSnapshot {
       milligrades: 1000
     }],
     retained_transitions: [
-      transition("r", "l", "observed_log", 950),
-      transition("l", "c", "config_via_log", 850),
-      transition("r", "c", "config_direct", 800),
-      transition("r", "s", "uses_service", 900),
-      transition("s", "h", "service_history", 550)
+      transition("r", "l", "observed_log", 1000),
+      transition("l", "c", "config_via_log", 1000),
+      transition("r", "c", "config_direct", 1000),
+      transition("r", "s", "uses_service", 1000),
+      transition("s", "h", "service_history", 1000)
     ]
   });
 }
@@ -623,7 +624,7 @@ function defaultBudget(overrides: Partial<RequestBudget> = {}): RequestBudget {
 }
 
 function defaultView(overrides: Partial<QueryView> = {}): QueryView {
-  return QueryViewSchema.parse({
+  const parsed = QueryViewSchema.parse({
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     requested_roles: ["requested", "associated"],
     include_routing_only: false,
@@ -633,6 +634,9 @@ function defaultView(overrides: Partial<QueryView> = {}): QueryView {
     threshold_milligrades: 0,
     ...overrides
   });
+  if ((parsed.enumeration_policy ?? "canonical") !== "associative") return parsed;
+  if ((parsed.cap_contracts?.length ?? 0) > 0) return parsed;
+  return { ...parsed, cap_contracts: [identityAssociationCap()] };
 }
 
 function coverage(

@@ -7,7 +7,7 @@ import {
   type InformationIndex,
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
-import { RecallService, fieldContractSha256 } from "@do-soul/alaya-core";
+import { capableRecallConsumerDeclaration, RecallService, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../../../cli/bridge.js";
 import { createToolsCommand } from "../../../../cli/tools.js";
@@ -89,6 +89,7 @@ export async function recallThroughHandler(
     generateId: () => "00000000-0000-4000-8000-000000000001"
   });
   const response = await handler({
+    ...capableRecallConsumerDeclaration(),
     query: request.query,
     scope_class: null,
     dimension: request.dimension ?? null,
@@ -149,6 +150,7 @@ export async function recallThroughCli(slice: SourceSlice, query: string, maxRes
     "call",
     "soul.recall",
     JSON.stringify({
+      ...capableRecallConsumerDeclaration(),
       query,
       scope_class: null,
       dimension: null,

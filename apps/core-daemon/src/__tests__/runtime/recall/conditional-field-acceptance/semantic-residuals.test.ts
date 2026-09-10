@@ -35,7 +35,10 @@ function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverRe
     warn: () => undefined, generateId: () => "00000000-0000-4000-8000-000000000001" });
   return async (width = 800, continuation?: InformationIndex["continuation"]) => {
     const result = await handler({ query: "yesterday failed deployment", scope_class: null, dimension: null,
-      domain_tags: null, max_results: width, ...(continuation == null ? {} : { continuation }) },
+      domain_tags: null, max_results: width,
+      protocol_version: 1, supports_source_evidence: true, supports_product_updates: true,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      ...(continuation == null ? {} : { continuation }) },
     { workspaceId: WS, runId: null, agentTarget: "codex", sessionId: "semantic-residual" });
     return InformationIndexSchema.parse(result.index);
   };

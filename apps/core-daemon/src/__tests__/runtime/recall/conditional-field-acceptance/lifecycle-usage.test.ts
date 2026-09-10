@@ -58,7 +58,10 @@ function handlerFor(database: StorageDatabase, service = serviceFor(database)) {
 
 const context = { workspaceId: WS, runId: RUN, agentTarget: "codex", sessionId: RUN };
 async function recall(handler: ReturnType<typeof handlerFor>, continuation?: InformationIndex["continuation"], max = 1) {
-  const response = await handler.call({ toolName: "soul.recall", arguments: { query: "needle", max_results: max,
+  const response = await handler.call({ toolName: "soul.recall", arguments: {
+    protocol_version: 1, supported_result_kinds: ["memory_entry", "source_evidence"],
+    supports_source_evidence: true, supports_product_updates: true,
+    query: "needle", max_results: max,
     scope_class: null, dimension: null, domain_tags: null,
     ...(continuation == null ? {} : { continuation }) }, context });
   if (!response.ok) throw new Error(response.error.message);

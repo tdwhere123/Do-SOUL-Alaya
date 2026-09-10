@@ -27,11 +27,16 @@ import {
   ProductUpdateSchema
 } from "../recall/conditional-field/index-view.js";
 import {
+  AssociationCapContractSchema,
+  ClaimDemandSchema,
   EnumerationPolicySchema,
   QueryInterpretationProposalSchema,
   ResultKindViewSchema
 } from "../recall/conditional-field/query.js";
-import { RecallTargetRefSchema } from "../recall/conditional-field/product-identity.js";
+import {
+  RecallTargetKindSchema,
+  RecallTargetRefSchema
+} from "../recall/conditional-field/product-identity.js";
 
 export const SoulMemorySearchDegradationReasonSchema = z.enum([
   "recall_explainability_partial",
@@ -170,7 +175,13 @@ export const SoulMemorySearchRequestSchema = z
     enumeration_policy: EnumerationPolicySchema.default("canonical"),
     result_kind_view: ResultKindViewSchema.default("mixed"),
     interpretation_proposal: QueryInterpretationProposalSchema.optional(),
-    payload_continuation: PayloadContinuationRequestSchema.optional()
+    payload_continuation: PayloadContinuationRequestSchema.optional(),
+    protocol_version: NonNegativeIntSchema.min(1).optional(),
+    supported_result_kinds: z.array(RecallTargetKindSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    supports_source_evidence: z.boolean().optional(),
+    supports_product_updates: z.boolean().optional(),
+    cap_contracts: z.array(AssociationCapContractSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    claim_demands: z.array(ClaimDemandSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
   })
   .strict()
   .superRefine((value, context) => {

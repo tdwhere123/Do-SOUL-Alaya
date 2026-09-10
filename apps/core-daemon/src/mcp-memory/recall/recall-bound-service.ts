@@ -1,4 +1,6 @@
+import { assertRecallConsumerCompatibility } from "@do-soul/alaya-core";
 import {
+  ContinuationSchema,
   PayloadContinuationRequestSchema,
   QueryInterpretationProposalSchema,
   type RecallPolicy,
@@ -17,6 +19,7 @@ export async function runProductionBoundRecall(input: Readonly<{
   readonly taskSurface: Readonly<TaskObjectSurface>;
   readonly policyOverride: RecallPolicy;
 }>): Promise<Awaited<ReturnType<RecallUsageHandlerDependencies["recallService"]["recall"]>>> {
+  assertRecallConsumerCompatibility(input.request);
   const timeFilter = buildRecallTimeFilter(input.request);
   return await input.deps.recallService.recall({
     taskSurface: input.taskSurface,
@@ -26,7 +29,9 @@ export async function runProductionBoundRecall(input: Readonly<{
     policyOverride: input.policyOverride,
     queryText: input.request.query,
     pageBudget: input.request.max_results,
-    continuation: input.request.continuation ?? null,
+    continuation: input.request.continuation === undefined || input.request.continuation === null
+      ? null
+      : ContinuationSchema.parse(input.request.continuation),
     ...(input.request.source_observed_at === undefined
       ? {}
       : { interpretationClock: input.request.source_observed_at }),
@@ -46,7 +51,19 @@ export async function runProductionBoundRecall(input: Readonly<{
       : { interpretation_proposal: QueryInterpretationProposalSchema.parse(input.request.interpretation_proposal) }),
     ...(input.request.payload_continuation === undefined
       ? {}
-      : { payload_continuation: PayloadContinuationRequestSchema.parse(input.request.payload_continuation) })
+      : { payload_continuation: PayloadContinuationRequestSchema.parse(input.request.payload_continuation) }),
+    ...(input.request.cap_contracts === undefined ? {} : { cap_contracts: input.request.cap_contracts }),
+    ...(input.request.claim_demands === undefined ? {} : { claim_demands: input.request.claim_demands }),
+    ...(input.request.protocol_version === undefined ? {} : { protocol_version: input.request.protocol_version }),
+    ...(input.request.supported_result_kinds === undefined
+      ? {}
+      : { supported_result_kinds: input.request.supported_result_kinds }),
+    ...(input.request.supports_source_evidence === undefined
+      ? {}
+      : { supports_source_evidence: input.request.supports_source_evidence }),
+    ...(input.request.supports_product_updates === undefined
+      ? {}
+      : { supports_product_updates: input.request.supports_product_updates })
   });
 }
 

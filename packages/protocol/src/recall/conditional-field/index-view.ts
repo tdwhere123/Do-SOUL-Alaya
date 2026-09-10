@@ -12,13 +12,19 @@ import {
   SchemaVersionSchema,
   Sha256DigestSchema
 } from "./common.js";
-import { EnumerationPolicySchema, ResultKindViewSchema } from "./query.js";
+import {
+  AssociationCapContractSchema,
+  ClaimDemandSchema,
+  EnumerationPolicySchema,
+  ResultKindViewSchema
+} from "./query.js";
 import { ResidualSemanticEffectSchema } from "./observer.js";
 import {
   canonicalProductIdentity,
   memoryProductStateKey,
   productMemoryObjectId,
   ProductStateKeySchema,
+  RecallTargetKindSchema,
   RecallTargetRefSchema,
   sourceProductStateKey,
   stableCanonicalStringify,
@@ -123,7 +129,19 @@ export const ClosureCertificateSchema = z
     closed_effects: z.array(ResidualSemanticEffectSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
     comparison: ClosureComparisonSchema.optional(),
     threshold_milligrades: MilligradeSchema.optional(),
-    uses_raw_predicate: z.boolean().optional()
+    uses_raw_predicate: z.boolean().optional(),
+    program_id: ConditionalFieldIdSchema.optional(),
+    result_kind_view: ResultKindViewSchema.optional(),
+    target_kinds: z.array(RecallTargetKindSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    source_domains: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    hypothesis_id: ConditionalFieldIdSchema.optional(),
+    binding: ConditionalFieldIdSchema.optional(),
+    includes_source_only: z.boolean().optional(),
+    closed_obligations: z
+      .array(z.enum(["membership", "claim", "order"]))
+      .max(BOUNDED_DEFAULT_ARRAY_MAX)
+      .readonly()
+      .optional()
   })
   .strict()
   .readonly();
@@ -142,7 +160,11 @@ export const ContinuationSchema = z
     enumeration_policy: EnumerationPolicySchema.optional(),
     result_kind_view: ResultKindViewSchema.optional(),
     authorized_scopes: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
-    emitted_revisions: z.record(BoundedString(4096), ConditionalFieldIdSchema).optional()
+    emitted_revisions: z.record(BoundedString(4096), ConditionalFieldIdSchema).optional(),
+    cap_contracts: z.array(AssociationCapContractSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    claim_demands: z.array(ClaimDemandSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    protocol_version: NonNegativeIntSchema.min(1).optional(),
+    supported_result_kinds: z.array(RecallTargetKindSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
   })
   .strict()
   .readonly();

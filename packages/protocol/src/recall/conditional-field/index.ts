@@ -22,6 +22,8 @@ export {
 } from "./common.js";
 export {
   AssociationCapContractSchema,
+  ClaimDemandSchema,
+  ClaimRequiredClaimSchema,
   EnumerationPolicySchema,
   GuardIntervalSchema,
   GuardKindSchema,
@@ -44,6 +46,8 @@ export {
   RequestBudgetSchema,
   ResultKindViewSchema,
   type AssociationCapContract,
+  type ClaimDemand,
+  type ClaimRequiredClaim,
   type EnumerationPolicy,
   type Guard,
   type GuardInterval,
@@ -62,6 +66,19 @@ export {
   type RequestBudget,
   type ResultKindView
 } from "./query.js";
+export {
+  HARD_IDENTITY_TRANSFER_ID,
+  HARD_IDENTITY_TRANSFER_VERSION,
+  IDENTITY_NORMALIZATION_ID,
+  AdmittedTransferSchema,
+  FieldGradeSchema,
+  TransferDirectionSchema,
+  capContractId,
+  capContractPreimage,
+  type AdmittedTransfer,
+  type FieldGrade,
+  type TransferDirection
+} from "./transfer.js";
 export {
   SNAPSHOT_PIN_NATIVE_WORK,
   PHYSICAL_COVERAGE_REGION_KINDS,
@@ -98,6 +115,7 @@ export {
   FieldValueSchema,
   MemoryEntryTargetSchema,
   ProductStateKeySchema,
+  RecallTargetKindSchema,
   RecallTargetRefSchema,
   SeedActivationSchema,
   SourceDeliveredSpanSchema,
@@ -126,6 +144,7 @@ export {
   type MemoryEntryTarget,
   type MemoryProductStateInput,
   type ProductStateKey,
+  type RecallTargetKind,
   type RecallTargetRef,
   type SeedActivation,
   type SourceDeliveredSpan,

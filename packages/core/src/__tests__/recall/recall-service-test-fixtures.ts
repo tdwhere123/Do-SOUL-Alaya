@@ -17,7 +17,7 @@ export async function createSourceBoundRecallFixture(
 ) {
   const { openSourceSlice, NOW } = await import("./conditional-field/vertical/source-slice.js");
   const { readersFor } = await import("./conditional-field-oracle/bound-producer.js");
-  const { RecallService } = await import("../../recall/recall-service.js");
+  const { RecallService, capableRecallConsumerDeclaration } = await import("../../recall/recall-service.js");
   const { MemoryService } = await import("../../memory/memory-service.js");
   const { createBoundedActiveConstraintsReader } = await import("../../../../../apps/core-daemon/src/runtime/recall-read-worker/active-constraints.js");
   const { SqliteClaimFormRepo } = await import("@do-soul/alaya-storage");
@@ -34,6 +34,8 @@ export async function createSourceBoundRecallFixture(
     }
   };
   const service = new RecallService(dependencies);
+  const recall = service.recall.bind(service);
+  service.recall = (params) => recall({ ...capableRecallConsumerDeclaration(), ...params });
   async function writeSource(input: {
     readonly objectId: string;
     readonly content: string;

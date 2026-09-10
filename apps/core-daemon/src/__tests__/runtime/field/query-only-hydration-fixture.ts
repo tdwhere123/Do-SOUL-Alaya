@@ -22,8 +22,10 @@ import {
   type WorkerTierWindowResult
 } from "../../../runtime/recall-read-worker/memory-client.js";
 import { runOperation } from "../../../runtime/recall-read-worker/dispatch.js";
-import type { RecallReadWorkerOperation } from
-  "../../../runtime/recall-read-worker/protocol.js";
+import {
+  RECALL_READ_WORKER_PROTOCOL_VERSION,
+  type RecallReadWorkerOperation
+} from "../../../runtime/recall-read-worker/protocol.js";
 import type { RecallReadWorkerRuntime } from
   "../../../runtime/recall-read-worker/runtime.js";
 import {
@@ -96,7 +98,11 @@ export function conditionalRecallPayload(queryText: string) {
     interpretation_clock: CLOCK, as_of: CLOCK, lifetime_now: CLOCK,
     expires_at: "2099-01-01T00:00:00.000Z",
     budget: { schema_version: 1 as const, work_units: 10_000, memory_bytes: 1_000_000,
-      page_budget: 100, finalization_reserve: 100, min_envelope: 10 } };
+      page_budget: 100, finalization_reserve: 100, min_envelope: 10 },
+    protocol_version: 1 as const,
+    supported_result_kinds: ["memory_entry", "source_evidence"] as const,
+    supports_source_evidence: true,
+    supports_product_updates: true };
 }
 
 async function openHydrationFixture(
@@ -164,7 +170,12 @@ export async function dispatchQueryOnly(
   operation: RecallReadWorkerOperation,
   payload: unknown
 ): Promise<unknown> {
-  const request = structuredClone({ id: 1, operation, payload });
+  const request = structuredClone({
+    protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
+    id: 1,
+    operation,
+    payload
+  });
   return structuredClone(await runOperation(runtime, request));
 }
 

@@ -11,14 +11,15 @@ import type {
   RecallServicePathPlasticityPort,
   RecallServiceSynthesisSearchPort
 } from "@do-soul/alaya-core";
-import type { InformationIndex } from "@do-soul/alaya-protocol";
 import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
 import type { RecallTemporalProjectionEnsurer } from "./recall-path-readers.js";
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
-import type {
-  RecallReadWorkerOperation,
-  RecallReadWorkerRequest,
-  RecallReadWorkerResponse
+import {
+  ConditionalFieldRecallPortResultSchema,
+  RECALL_READ_WORKER_PROTOCOL_VERSION,
+  type RecallReadWorkerOperation,
+  type RecallReadWorkerRequest,
+  type RecallReadWorkerResponse
 } from "../recall-read-worker/protocol.js";
 import {
   isPathAffinityOperation,
@@ -196,12 +197,13 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   };
 
   public readonly conditionalFieldPort: ConditionalFieldRecallPort = {
-    recall: async (input) => asConditionalFieldPortResult(
-      await this.request<InformationIndex | ConditionalFieldRecallPortResult>(
-        "conditionalField.recall",
-        input
-      )
-    )
+    recall: async (input) => {
+      const parsed = ConditionalFieldRecallPortResultSchema.parse(
+        await this.request("conditionalField.recall", input)
+      );
+      // IPC schema cannot import core receipt types; index and previews are already checked.
+      return parsed as ConditionalFieldRecallPortResult;
+    }
   };
 
   public constructor(input: {
@@ -370,7 +372,12 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         ...(consumeSuccess === undefined ? {} : { consumeSuccess })
       });
       try {
-        worker.postMessage({ id, operation, payload } satisfies RecallReadWorkerRequest);
+        worker.postMessage({
+          protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
+          id,
+          operation,
+          payload
+        } satisfies RecallReadWorkerRequest);
       } catch (error) {
         const pending = this.pending.get(id);
         this.pending.delete(id);
@@ -459,15 +466,6 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       this.pending.delete(id);
     }
   }
-}
-
-function asConditionalFieldPortResult(
-  value: InformationIndex | ConditionalFieldRecallPortResult
-): ConditionalFieldRecallPortResult {
-  if (typeof value === "object" && value !== null && "index" in value && "previews" in value) {
-    return value;
-  }
-  return { index: value, previews: {} };
 }
 
 function isSourceRuntimeUrl(url: string): boolean {

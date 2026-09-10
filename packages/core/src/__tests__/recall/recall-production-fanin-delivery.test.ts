@@ -65,7 +65,7 @@ describe("source-backed conditional association and evidence", () => {
     const result = await fixture.service.recall(request);
     const config = result.index.entries.find((entry) => entry.object_id === CONFIG);
     expect(config).toBeDefined();
-    expect(config?.association_milligrades).toBe(850);
+    expect(config?.association_milligrades).toBe(1000);
     expect(config?.claim).toBe("supported");
     expect(config?.explanation_ids.length).toBeGreaterThan(0);
     expect(result.index.explanations?.some((derivation) => derivation.leaf_ids.includes("relation-812")))

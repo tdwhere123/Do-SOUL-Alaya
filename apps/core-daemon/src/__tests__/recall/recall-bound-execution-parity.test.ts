@@ -70,6 +70,10 @@ describe("invokeBoundRecall shared input contract", () => {
       )
     };
     const request: SoulMemorySearchRequest = {
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
       query: "deployment rules",
       max_results: 5,
       scope_class: null,
@@ -156,6 +160,10 @@ describe("invokeBoundRecall shared input contract", () => {
     await runProductionBoundRecall({
       deps: { recallService } as unknown as RecallUsageHandlerDependencies,
       request: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules", max_results: 5, scope_class: null,
         dimension: null, domain_tags: null
       },
@@ -192,6 +200,10 @@ describe("invokeBoundRecall shared input contract", () => {
     await runProductionBoundRecall({
       deps: { recallService } as unknown as RecallUsageHandlerDependencies,
       request: {
+        protocol_version: 1,
+        supported_result_kinds: ["memory_entry", "source_evidence"],
+        supports_source_evidence: true,
+        supports_product_updates: true,
         query: "deployment rules",
         max_results: 5,
         scope_class: null,

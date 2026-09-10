@@ -46,11 +46,11 @@ export const MEM = Object.freeze({
 });
 
 export const STRENGTH_BY_KIND: Readonly<Record<string, number>> = Object.freeze({
-  observed_log: 950,
-  config_via_log: 850,
-  config_direct: 800,
-  uses_service: 900,
-  service_history: 550
+  observed_log: 1000,
+  config_via_log: 1000,
+  config_direct: 1000,
+  uses_service: 1000,
+  service_history: 1000
 });
 
 export const INAPPLICABLE_KIND = "unrelated";
