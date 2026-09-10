@@ -55,6 +55,7 @@ import {
 } from "./path-matching.js";
 import {
   routingDiscoveryEffect,
+  routingFrontierEffects,
   type RoutingDiscovery
 } from "./path-routing.js";
 import {
@@ -282,6 +283,7 @@ export function adjacencyEffectsForRows(
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: readonly FacetVector[];
+    readonly discoveries?: readonly RoutingDiscovery[];
   }>
 ): readonly CompiledAdjacencyEffect[] {
   const runtime = runtimeProgram(input.interpretation.program);
@@ -309,6 +311,11 @@ export function adjacencyEffectsForRows(
       effects.push(...effectsForLiveRow(automaton, row, from, input));
     }
   }
+  const origins = new Set<string>([
+    ...input.liveStates.map((state) => productSubjectId(state)),
+    ...(input.discoveries ?? []).map((row) => row.subject_id)
+  ]);
+  effects.push(...routingFrontierEffects(rows, input.overlay, origins));
   return Object.freeze(effects);
 }
 

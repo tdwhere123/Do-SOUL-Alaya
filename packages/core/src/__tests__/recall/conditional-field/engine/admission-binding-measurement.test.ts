@@ -577,6 +577,64 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(duplicated.discoveries).toEqual(absorbed.discoveries);
     expect(duplicated.transitions).toEqual([]);
   });
+
+  it("recursively discovers routing_only hops without minting products", () => {
+    const query = interpretation(relation("observed_log", "x", "y"));
+    const from = memoryProductStateKey({
+      workspace_id: "ws",
+      object_id: "node-a",
+      source_revision: "rev",
+      program_state: "accepting",
+      hypothesis_id: "h0",
+      binding_context: "unbound",
+      time_state: "as_of"
+    });
+    const hop = edge("node-a", "node-b", "uses_service", "route-ab");
+    const next = edge("node-b", "node-c", "uses_service", "route-bc");
+    const closed = adjacencyEffectsForRows([hop, next], {
+      interpretation: query,
+      asOf: AS_OF,
+      liveStates: [from],
+      overlay: RELATION_MILLIGRADES
+    });
+    expect(closed.some((effect) => effect.discovery?.subject_id === "node-b"
+      && effect.discovery.assertion_id === "route-ab")).toBe(true);
+    expect(closed.some((effect) => effect.discovery?.subject_id === "node-c"
+      && effect.discovery.assertion_id === "route-bc")).toBe(true);
+    expect(closed.every((effect) => effect.transition === undefined && effect.facet === undefined
+      && effect.derivation === undefined && effect.hyperedge === undefined)).toBe(true);
+    const fromFrontier = adjacencyEffectsForRows([next], {
+      interpretation: query,
+      asOf: AS_OF,
+      liveStates: [from],
+      overlay: RELATION_MILLIGRADES,
+      discoveries: [{
+        source_id: "node-a",
+        subject_id: "node-b",
+        predicate: "uses_service",
+        assertion_id: "route-ab"
+      }]
+    });
+    expect(fromFrontier.some((effect) => effect.discovery?.subject_id === "node-c")).toBe(true);
+    expect(fromFrontier.every((effect) => effect.transition === undefined)).toBe(true);
+    const observed = observeProgram(query.program, [
+      edge("seed", "node-a", "observed_log", "seed-a"),
+      hop,
+      next
+    ]);
+    expect(acceptedIds(observed)).toContain("node-a");
+    expect(acceptedIds(observed)).not.toContain("node-b");
+    expect(acceptedIds(observed)).not.toContain("node-c");
+    expect(semanticSubjects(observed)).not.toContain("node-b");
+    expect(semanticSubjects(observed)).not.toContain("node-c");
+    expect(observed.discoveries.some((row) => row.subject_id === "node-b" && row.assertion_id === "route-ab")).toBe(true);
+    expect(observed.discoveries.some((row) => row.subject_id === "node-c" && row.assertion_id === "route-bc")).toBe(true);
+    expect(observed.resume_subjects).toEqual(expect.arrayContaining(["node-b", "node-c"]));
+    expect(Object.keys(observed.pair_progress).some((key) => key.startsWith("node-c\0"))).toBe(true);
+    expect(observed.residuals.some((region) =>
+      region.kind === "discovery" && region.status === "exhausted"
+    )).toBe(true);
+  });
 });
 
 function observeProgram(
@@ -705,6 +763,15 @@ function acceptedIds(state: ReturnType<typeof observeField>): readonly string[] 
   return state.binding.snapshot.values
     .filter((value) => value.accepting && (value.milligrades ?? 0) > 0)
     .map((value) => productSubjectId(value.state));
+}
+
+function semanticSubjects(state: ReturnType<typeof observeField>): readonly string[] {
+  return [...new Set([
+    ...state.seen_identities.map((row) => productSubjectId(row)),
+    ...state.seeds.map((seed) => productSubjectId(seed.state)),
+    ...state.guaranteed_seeds.map((seed) => productSubjectId(seed.state)),
+    ...state.transitions.flatMap((item) => [productSubjectId(item.from), productSubjectId(item.to)])
+  ])];
 }
 
 function grades(state: ReturnType<typeof observeField>, objectId: string): number {

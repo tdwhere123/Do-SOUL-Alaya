@@ -283,7 +283,8 @@ function observeWithinMemory(
         state.seen_identities,
         input.as_of,
         sourceFacts,
-        state.facets
+        state.facets,
+        state.discoveries
       );
       if (effects.some((effect) => effect.unresolved_guard === true)) unresolvedGuard = true;
       if (effects.some((effect) => effect.missing_measurement === true)) missingMeasurement = true;
@@ -546,7 +547,8 @@ function transitionEffects(
   liveStates: FieldEngineState["seen_identities"],
   asOf: string,
   sourceFacts: ReadonlyMap<string, BoundSourceFacts>,
-  facets: FieldEngineState["facets"]
+  facets: FieldEngineState["facets"],
+  discoveries: FieldEngineState["discoveries"]
 ): readonly FieldObservationEffect[] {
   return adjacencyEffectsForRows(rows, {
     interpretation,
@@ -554,7 +556,8 @@ function transitionEffects(
     liveStates,
     overlay: RELATION_MILLIGRADES,
     sourceFacts,
-    facets
+    facets,
+    discoveries
   });
 }
 

@@ -1,4 +1,4 @@
-import type { AdjacencyRow, NamedKindOverlay } from "./path-matching.js";
+import { inactiveResolution, type AdjacencyRow, type NamedKindOverlay } from "./path-matching.js";
 
 export type RoutingDiscovery = Readonly<{
   readonly source_id: string;
@@ -42,6 +42,33 @@ export function routingDiscoveryEffect(
       assertion_id: row.assertionId
     }
   }];
+}
+
+export function routingFrontierEffects(
+  rows: readonly AdjacencyRow[],
+  overlay: NamedKindOverlay,
+  origins: ReadonlySet<string>
+): readonly RoutingDiscoveryEffect[] {
+  // Routing-only hops have no ProductState, so later hops cannot wait for a semantic `from`.
+  const frontier = new Set(origins);
+  const effects: RoutingDiscoveryEffect[] = [];
+  const emitted = new Set<string>();
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const row of rows) {
+      if (row.validity === undefined || inactiveResolution(row.resolutionKind)) continue;
+      if (emitted.has(row.assertionId) || !frontier.has(row.sourceObjectId)) continue;
+      const discovered = routingDiscoveryEffect(row, overlay);
+      if (discovered.length === 0) continue;
+      emitted.add(row.assertionId);
+      effects.push(...discovered);
+      if (frontier.has(row.targetObjectId)) continue;
+      frontier.add(row.targetObjectId);
+      grew = true;
+    }
+  }
+  return Object.freeze(effects);
 }
 
 export function mergeDiscoveries(

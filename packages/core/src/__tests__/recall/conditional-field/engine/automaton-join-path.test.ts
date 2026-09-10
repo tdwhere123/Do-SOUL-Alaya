@@ -364,6 +364,37 @@ describe("automaton, compatible join, and composed path identity", () => {
     expect(state.residuals.some((region) => region.kind === "discovery")).toBe(true);
   });
 
+  it("recursively discovers a second routing_only hop without minting products", () => {
+    const state = observeProgram(rel("observed_log", "x", "y"), [
+      edge("seed", "node-a", "observed_log", "seed-a"),
+      edge("node-a", "node-b", "uses_service", "route-ab"),
+      edge("node-b", "node-c", "uses_service", "route-bc")
+    ]);
+    expect(acceptedIds(state)).toContain("node-a");
+    expect(acceptedIds(state)).not.toContain("node-b");
+    expect(acceptedIds(state)).not.toContain("node-c");
+    expect(state.seen_identities.every((identity) =>
+      productSubjectId(identity) !== "node-b" && productSubjectId(identity) !== "node-c"
+    )).toBe(true);
+    expect(state.guaranteed_seeds.every((seed) =>
+      productSubjectId(seed.state) !== "node-b" && productSubjectId(seed.state) !== "node-c"
+    )).toBe(true);
+    expect(state.transitions.every((item) =>
+      productSubjectId(item.to) !== "node-b" && productSubjectId(item.to) !== "node-c"
+    )).toBe(true);
+    expect(state.discoveries.some((row) =>
+      row.subject_id === "node-b" && row.assertion_id === "route-ab"
+    )).toBe(true);
+    expect(state.discoveries.some((row) =>
+      row.subject_id === "node-c" && row.assertion_id === "route-bc"
+    )).toBe(true);
+    expect(state.resume_subjects).toEqual(expect.arrayContaining(["node-b", "node-c"]));
+    expect(Object.keys(state.pair_progress).some((key) => key.startsWith("node-c\0"))).toBe(true);
+    expect(state.residuals.some((region) =>
+      region.kind === "discovery" && region.status === "exhausted"
+    )).toBe(true);
+  });
+
   it("nextAdjacencyPair follows absorbed discovery subjects", () => {
     const progress = new Map<string, string | null>([
       [`${pairKey("seed", "observed_log")}:done`, "1"],
