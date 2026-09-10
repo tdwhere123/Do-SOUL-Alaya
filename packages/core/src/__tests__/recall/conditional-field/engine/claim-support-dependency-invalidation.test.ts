@@ -69,7 +69,7 @@ describe("claim support dependencies through reassessment and projection", () =>
     const before = assessUnknownCause(field(900), { as_of: NOW });
     expect(before.claims.get(targetKey(before))).toBe("supported");
     const revised = { ...before, observed_relations: [...before.observed_relations!].map((row) => ({ ...row,
-      validity: { kind: "closed" as const, valid_from: "2026-01-01T00:00:00.000Z", valid_to: "2026-02-01T00:00:00.000Z" }
+      validity: { kind: "bounded" as const, valid_from: "2026-01-01T00:00:00.000Z", valid_to: "2026-02-01T00:00:00.000Z" }
     })) };
     const fresh = assessUnknownCause({ ...revised, support_dependency_revision: undefined }, { as_of: NOW });
     expect(fresh.claims.get(targetKey(fresh))).toBe("unknown");

@@ -255,7 +255,9 @@ function question(questionId: string): RecallEvalQuestionResult {
     embeddingWarmup: null,
     queryEmbeddingWarmup: null,
     documentEmbeddingWarmupLatencyMs: null,
-    deliveredObjectIds: diagnostics.delivered_results.map((row) => row.object_id)
+    deliveredObjectIds: diagnostics.delivered_results
+      .map((row) => row.object_id)
+      .filter((id): id is string => id !== undefined)
   };
 }
 

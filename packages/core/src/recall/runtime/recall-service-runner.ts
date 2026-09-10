@@ -294,10 +294,10 @@ function projectFromField(
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       snapshot_id: state.snapshot_id,
       query_id: state.query_id,
-      seeds: state.seeds,
-      values: delta.accepted_states,
-      retained_transitions: state.transitions,
-      facets: state.facets
+      seeds: [...state.seeds],
+      values: [...delta.accepted_states],
+      retained_transitions: [...state.transitions],
+      facets: [...state.facets]
     };
   const ceilings = governanceManifestationCeilings(input.governance?.paths ?? []);
   const manifestationFor = (id: string) => input.governance === undefined ? "excerpt" as const
@@ -305,7 +305,6 @@ function projectFromField(
       && !input.governance.temporal_uncertain);
   let retained = state;
   let projectionProgress = resumeIndexProjection(state, snapshot);
-  let semanticEntries: readonly import("@do-soul/alaya-protocol").IndexEntry[] = [];
   const queryKey = fieldResumeKey(
     interpretation.query_id,
     interpretation.snapshot_id,
@@ -349,7 +348,6 @@ function projectFromField(
     delivered_product_ids: new Set(Object.keys(projectionProgress.delivered_entries)),
     delivered_entry_revisions: projectionProgress.delivered_entries,
     on_projection_progress: (offset) => { projectionProgress = { ...projectionProgress, offset }; },
-    on_semantic_entries: (entries) => { semanticEntries = entries; },
     explanation_progress: state.explanation_progress,
     on_explanation_progress: (progress, retainedBytes, work) => {
       payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
@@ -361,13 +359,12 @@ function projectFromField(
     claims: state.claims,
     claim_propositions: state.claim_propositions,
     transition_derivations: state.transition_derivations,
-    source_facts: state.source_facts,
     grounding_progress: state.grounding_progress,
     remaining_memory_bytes: payload.remainingMemoryBytes,
-    grounding_transitions: state.transitions,
-    grounding_seeds: state.seeds,
-    grounding_derivations: state.derivations,
-    projection_facets: state.facets,
+    grounding_transitions: [...state.transitions],
+    grounding_seeds: [...state.seeds],
+    grounding_derivations: [...state.derivations],
+    projection_facets: [...state.facets],
     on_grounding_progress: (progress, retainedBytes) => {
       payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
       retained = { ...retained, grounding_progress: progress, remaining_memory_bytes: payload.remainingMemoryBytes };
@@ -400,7 +397,7 @@ function projectFromField(
       ? {}
       : { interpretation_clock: interpretation.interpretation_clock }),
     payload_generation: interpretation.snapshot_id,
-    ...((state.derivations?.length ?? 0) === 0 ? {} : { derivations: state.derivations }),
+    ...((state.derivations?.length ?? 0) === 0 ? {} : { derivations: [...state.derivations] }),
     ...(state.support_work_status === undefined ? {} : { support_work_status: state.support_work_status }),
     ...(state.memory_exhausted || state.remaining_work.length > 0
       ? { resource_work: "open" as const }

@@ -89,13 +89,14 @@ describe("query-only field hydration equivalence", () => {
     try {
       await worker.ready();
       const recalled = await worker.conditionalFieldPort.recall(payload);
-      expect(recalled.index.entries.map(canonicalIndexEntryIdentity))
+      const index = "index" in recalled ? recalled.index : recalled;
+      expect(index.entries.map(canonicalIndexEntryIdentity))
         .toEqual(direct.index.entries.map(canonicalIndexEntryIdentity));
-      expect(recalled.index.entries.map((entry) => entry.target.kind).sort())
+      expect(index.entries.map((entry) => entry.target.kind).sort())
         .toEqual(["memory_entry", "source_evidence"]);
-      expect(recalled.index.entries.find((entry) => entry.target.kind === "memory_entry")?.object_id)
+      expect(index.entries.find((entry) => entry.target.kind === "memory_entry")?.object_id)
         .toBe(objectId);
-      expect(recalled.index.entries.find((entry) => entry.target.kind === "source_evidence")?.object_id)
+      expect(index.entries.find((entry) => entry.target.kind === "source_evidence")?.object_id)
         .toBeUndefined();
     } finally {
       await worker.close();

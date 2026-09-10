@@ -293,10 +293,10 @@ export function indexFromObserved(
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       snapshot_id: field.snapshot_id,
       query_id: field.query_id,
-      seeds: field.seeds,
-      values: delta.accepted_states,
-      retained_transitions: field.transitions,
-      facets: field.facets
+      seeds: [...field.seeds],
+      values: [...delta.accepted_states],
+      retained_transitions: [...field.transitions],
+      facets: [...field.facets]
     };
   return projectAcceptingIndex({
     snapshot,
@@ -309,7 +309,7 @@ export function indexFromObserved(
     roles: rolesFrom(field),
     claims: field.claims,
     claim_propositions: field.claim_propositions,
-    derivations: field.derivations,
+    derivations: [...field.derivations],
     transition_derivations: field.transition_derivations,
     support: field.support,
     expires_at: "2099-01-01T00:00:00.000Z",

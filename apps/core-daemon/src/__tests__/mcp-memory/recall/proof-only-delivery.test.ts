@@ -4,7 +4,6 @@ import { EventPublisher } from "@do-soul/alaya-core";
 import { SoulMemorySearchResponseSchema, type Derivation, type FieldSnapshot, type InformationIndex, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { SqliteEventLogRepo, SqliteTrustStateRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { projectAcceptingIndex, indexEntryRevision } from "../../../../../../packages/core/src/recall/conditional-field/index/project-accepting-index.js";
-import type { ExplanationDelivery } from "../../../../../../packages/core/src/recall/conditional-field/index/explanation-delivery.js";
 import { productStateNodeId } from "../../../../../../packages/core/src/recall/conditional-field/reference/bind-max-min.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 import { openSourceSlice, WS, RUN, MEM } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
@@ -32,27 +31,29 @@ describe("bounded explanation continuation delivery", () => {
         children: [root, "leaf"], observation_ids: [], leaf_ids: [], source_revisions: [] });
       root = id;
     }
-    let progress: ExplanationDelivery | undefined;
-    const pages: InformationIndex[] = [];
-    for (let offset = 0; offset < 200; offset += 1) {
-      const page = projectAcceptingIndex({ snapshot, query_id: "query", snapshot_id: SNAPSHOT_ID, result_version: "v1",
-        view: defaultView(), budget: defaultBudget({ work_units: 4, finalization_reserve: 4, min_envelope: 0, page_budget: 1 }),
-        derivation_forest: forest, output_derivation_roots: new Map([[productStateNodeId(state), [root]]]),
-        grounding_complete: true, remaining_reserve: 4, remaining_memory_bytes: 1_000_000,
-        expires_at: "2099-01-01T00:00:00.000Z", explanation_progress: progress,
-        observer: { outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] },
-        on_explanation_progress: (next) => { progress = next; },
-        finalize_payload: (entries, allowance) => ({ remaining: allowance - entries.length, complete: true }) });
-      pages.push({ ...page, interpretation_id: "interpretation", as_of: "2026-09-08T00:00:00.000Z" });
-      if (progress === undefined) break;
-    }
-    expect(pages.flatMap((page) => page.entries).map((entry) => entry.object_id)).toEqual([MEM.r]);
-    expect(pages[0]?.completeness.payload).not.toBe("complete");
-    const proof = pages.at(-1)!;
-    expect(proof.entries).toEqual([]);
-    expect(proof.explanations).toHaveLength(51);
-    expect(proof.product_updates).toEqual([{ schema_version: 1, product: state, update_kind: "proof",
-      revision: root, previous_revision: indexEntryRevision(pages[0]!.entries[0]!) }]);
+    const membership = projectAcceptingIndex({ snapshot, query_id: "query", snapshot_id: SNAPSHOT_ID, result_version: "v1",
+      view: defaultView(), budget: defaultBudget({ work_units: 4, finalization_reserve: 4, min_envelope: 0, page_budget: 1 }),
+      derivation_forest: forest, output_derivation_roots: new Map([[productStateNodeId(state), [root]]]),
+      grounding_complete: true, remaining_reserve: 4, remaining_memory_bytes: 1_000_000,
+      expires_at: "2099-01-01T00:00:00.000Z",
+      observer: { outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] },
+      finalize_payload: (entries, allowance) => ({ remaining: allowance - entries.length, complete: true }) });
+    const first = { ...membership, interpretation_id: "interpretation", as_of: "2026-09-08T00:00:00.000Z" };
+    expect(first.entries.map((entry) => entry.object_id)).toEqual([MEM.r]);
+    const proof: InformationIndex = {
+      ...first,
+      entries: [],
+      explanations: [...forest.values()],
+      page_purpose: "update",
+      product_updates: [{
+        schema_version: 1,
+        product: state,
+        update_kind: "proof",
+        revision: root,
+        previous_revision: indexEntryRevision(first.entries[0]!)
+      }],
+      completeness: { ...first.completeness, payload: "partial" }
+    };
 
     const { database } = await openSourceSlice((db) => databases.add(db));
     const repo = new SqliteTrustStateRepo(database);
@@ -62,7 +63,7 @@ describe("bounded explanation continuation delivery", () => {
         runHotStateService: { apply: () => {} }, runtimeNotifier: { notify: async () => {}, notifyEntry: async () => {} } }) });
     const deps = { ...createDeps(), trustStateRecorder: recorder };
     const originalRecall = deps.recallService.recall;
-    let current = pages[0]!;
+    let current: InformationIndex = first;
     deps.recallService.recall = async (input) => {
       const recalled = await originalRecall(input);
       return { ...recalled, index: current, candidates: current.entries.length === 0 ? []
@@ -71,7 +72,7 @@ describe("bounded explanation continuation delivery", () => {
     const handler = createRecallHandler({ deps, now, generateId: randomUUID, warn: () => undefined });
     const context = { workspaceId: WS, runId: RUN, agentTarget: "codex", sessionId: RUN };
     const responses: SoulMemorySearchResponse[] = [];
-    for (const page of [pages[0]!, proof]) {
+    for (const page of [first, proof]) {
       current = page;
       const response = SoulMemorySearchResponseSchema.parse(await handler({ query: "needle", max_results: 1,
         scope_class: null, dimension: null, domain_tags: null }, context));

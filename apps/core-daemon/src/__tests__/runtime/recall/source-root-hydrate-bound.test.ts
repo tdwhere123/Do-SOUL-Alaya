@@ -66,7 +66,7 @@ describe("worker source-root hydrate", () => {
       as_of: asOf,
       query: { interpretation_clock: asOf },
       authorized_scopes: ["project"]
-    } as ObserveConditionalFieldInput;
+    } as unknown as ObserveConditionalFieldInput;
     expect(sourceRootEligible(input, page.rows.find((row) => row.root_id === project.record_id)!)).toBe(true);
     expect(sourceRootEligible(input, page.rows.find((row) => row.root_id === other.record_id)!)).toBe(false);
     expect(sourceRootEligible(input, page.rows.find((row) => row.root_id === omitted.record_id)!)).toBe(false);
@@ -97,7 +97,7 @@ describe("worker source-root hydrate", () => {
       as_of: asOf,
       query: { interpretation_clock: asOf },
       authorized_scopes: []
-    } as ObserveConditionalFieldInput;
+    } as unknown as ObserveConditionalFieldInput;
     expect(sourceRootEligible(input, page.rows.find((row) => row.root_id === expired.record_id)!)).toBe(false);
     expect(sourceRootEligible(input, page.rows.find((row) => row.root_id === open.record_id)!)).toBe(true);
   });

@@ -1,7 +1,6 @@
 import { MaxMinWorkQueue, PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import { productSubjectId, type Derivation, type SeedActivation, type Transition } from "@do-soul/alaya-protocol";
 import { productStateNodeId } from "../reference/bind-max-min.js";
-import type { RetainedRows } from "./retained-sequence.js";
 import { incomingRules, type SharedRule } from "./dependency-equations.js";
 import { joinDerivation, leafDerivation, seedDerivationIdentity } from "./path-derivation.js";
 
@@ -29,10 +28,12 @@ export type GroundingProgress = Readonly<{
   retained_rule_references: number;
 }>;
 
+type GroundingRows<T> = Readonly<{ readonly length: number; at(index: number): T | undefined }>;
+
 type GroundingInput = Readonly<{
-  seeds: RetainedRows<SeedActivation>;
-  transitions: RetainedRows<Transition>;
-  derivations: RetainedRows<Derivation>;
+  seeds: GroundingRows<SeedActivation>;
+  transitions: GroundingRows<Transition>;
+  derivations: GroundingRows<Derivation>;
   transition_derivations: import("./path-derivation.js").DerivationRootLookup;
   allowance: number;
   memory_bytes?: number;

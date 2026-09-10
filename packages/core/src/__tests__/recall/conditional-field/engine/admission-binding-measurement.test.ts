@@ -196,7 +196,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
     expect(fieldActivationOf({})).toEqual({ kind: "unreachable" });
     expect(fieldActivationOf({ milligrades: 0 })).toEqual({ kind: "reachable", milligrades: 0 });
     expect(RawMeasurementSchema.parse({ status: "missing" }).status).toBe("missing");
-    expect(RawMeasurementSchema.parse({
+    const measured = RawMeasurementSchema.parse({
       status: "measured",
       producer_id: "p",
       model_id: "m",
@@ -206,7 +206,10 @@ describe("admission, binding, measurement, and evidence identities", () => {
       source_revision: "rev",
       query_digest: SNAPSHOT_ID,
       raw: 0
-    }).raw).toBe(0);
+    });
+    expect(measured.status).toBe("measured");
+    if (measured.status !== "measured") throw new Error("expected measured raw");
+    expect(measured.raw).toBe(0);
   });
 
   it("does not promote unresolved or epsilon discovery seeds onto the guaranteed list", () => {

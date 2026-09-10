@@ -248,7 +248,7 @@ async function setup() {
         readers: { ...native, lexical, source },
         ...(extra.interpretation_proposal === undefined
           ? {}
-          : { interpretation_proposal: extra.interpretation_proposal })
+          : { interpretation_proposal: extra.interpretation_proposal as never })
       }));
     }
   };

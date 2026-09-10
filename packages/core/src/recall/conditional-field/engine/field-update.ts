@@ -248,7 +248,7 @@ type MemoryQuota = {
 
 function absorbPageObservations(
   pageObservations: readonly TypedObservation[],
-  priorIds: Readonly<{ has(key: string): boolean }>,
+  _priorIds: Readonly<{ has(key: string): boolean }>,
   observations: RetainedRowDraft<TypedObservation>,
   seeds: SeedActivation[],
   guaranteedSeeds: SeedActivation[],

@@ -26,7 +26,6 @@ import { compareText } from "../../../shared/compare-text.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import { composedFacetPathId, facetBelongsToOutput } from "../engine/path-composition.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../engine/output-derivations.js";
-import type { BoundSourceFacts } from "../engine/binding-environment.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import {
   OFFSET_CURSOR,
@@ -79,7 +78,7 @@ export type AcceptingProjectionInput = Readonly<{
   readonly snapshot_id: string;
   readonly result_version: string;
   readonly budget: RequestBudget;
-  readonly roles?: ReadonlyMap<string, IndexRole>;
+  readonly roles?: Readonly<{ get(id: string): IndexRole | undefined }>;
   readonly claims?: ReadonlyMap<string, ClaimState>;
   readonly support?: readonly SupportRecord[];
   readonly page_offset?: number;
@@ -107,9 +106,10 @@ export type AcceptingProjectionInput = Readonly<{
   readonly interpretation_clock?: string;
   readonly model_id?: string;
   readonly derivations?: readonly Derivation[];
+  readonly derivation_forest?: ReadonlyMap<string, Derivation>;
+  readonly output_derivation_roots?: ReadonlyMap<string, readonly string[]>;
   readonly output_derivations?: Readonly<Record<string, readonly string[]>>;
-  readonly transition_derivations?: Readonly<Record<string, string>>;
-  readonly source_facts?: Readonly<Record<string, BoundSourceFacts>>;
+  readonly transition_derivations?: import("../engine/path-derivation.js").DerivationRootLookup;
   readonly grounding_progress?: GroundingProgress;
   readonly grounding_transitions?: FieldSnapshot["retained_transitions"];
   readonly grounding_seeds?: FieldSnapshot["seeds"];
@@ -216,7 +216,7 @@ function pageAcceptingIndex(
       : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
     const grounded = groundedOutputDerivations({ seeds: input.snapshot.seeds,
       transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
-      transition_derivations: input.transition_derivations, source_facts: input.source_facts,
+      transition_derivations: input.transition_derivations ?? {},
       progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
       allowance: groundingAllowance });
     input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
@@ -502,6 +502,8 @@ function indexEntryForValue(
       value,
       support: input.support,
       derivations: input.derivations,
+      derivation_forest: input.derivation_forest,
+      output_derivation_roots: input.output_derivation_roots,
       output_derivations: input.output_derivations,
       page_budget: input.budget.page_budget,
       expand_payload: expandPayload

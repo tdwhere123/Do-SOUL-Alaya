@@ -66,7 +66,7 @@ describe("bounded source metadata retention", () => {
 
   it("replaces a cached body with an object hint without exposing source references", () => {
     const payload = new BoundedIndexPayload({
-      sourceFacts: { memory: { object_id: "memory", content: "protected body", evidence_refs: ["private-ref"] } },
+      sourceFacts: new Map([["memory", { object_id: "memory", content: "protected body", evidence_refs: ["private-ref"] }]]),
       previewCache: { memory: "protected body" }, readers: {}, workspaceId: "workspace",
       remainingMemoryBytes: 1000, manifestationFor: () => "hint"
     });

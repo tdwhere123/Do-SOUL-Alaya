@@ -308,7 +308,7 @@ describe("post-turn extract Garden task", () => {
 
     await expect(harness.runScheduler()).resolves.toBeUndefined();
     expect(compile).toHaveBeenCalledTimes(1);
-    expect(String(compile.mock.calls[0]?.[0] ?? "")).not.toContain(tail);
+    expect(String(compile.mock.calls.at(0)?.at(0) ?? "")).not.toContain(tail);
     expect(harness.gardenTaskRepo.findById(taskId)).toMatchObject({
       status: "failed",
       last_error_text: expect.stringContaining("provider blew up")

@@ -2,7 +2,6 @@ import {
   MemoryDimension,
   ScopeClass,
   indexEntryCacheKey,
-  indexEntrySubjectId,
   indexMemoryObjectId,
   sameSourceEvidenceRoot,
   sourceEvidenceRootKey,

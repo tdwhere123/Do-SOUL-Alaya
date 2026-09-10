@@ -1,7 +1,6 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   SNAPSHOT_PIN_NATIVE_WORK,
-  productSubjectId,
   type CoverageRegion,
   type ObserverCursor,
   type QueryInterpretation,

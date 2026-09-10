@@ -92,9 +92,10 @@ export async function persistConditionalSource(database: StorageDatabase, object
 
 export function conditionalRecallPayload(queryText: string) {
   return { workspace_id: WORKSPACE_ID, query_text: queryText,
+    snapshot_id: `sha256:${"c".repeat(64)}`,
     interpretation_clock: CLOCK, as_of: CLOCK, lifetime_now: CLOCK,
     expires_at: "2099-01-01T00:00:00.000Z",
-    budget: { schema_version: 1, work_units: 10_000, memory_bytes: 1_000_000,
+    budget: { schema_version: 1 as const, work_units: 10_000, memory_bytes: 1_000_000,
       page_budget: 100, finalization_reserve: 100, min_envelope: 10 } };
 }
 

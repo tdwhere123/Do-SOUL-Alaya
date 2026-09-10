@@ -24,7 +24,7 @@ import { hashMemoryContent } from "../../../../../../packages/core/src/embedding
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
-import { createSourceBoundRecallFixture } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
+import { createSourceBoundRecallFixture, createTaskSurface } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { defaultBudget } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 
 const databases = new Set<StorageDatabase>();
@@ -63,7 +63,7 @@ describe("worker stored measurement producer", () => {
       await worker.ready();
       const service = new RecallService({ ...fixture.dependencies, now: () => NOW,
         readSnapshot: worker.readSnapshot, conditionalFieldPort: worker.conditionalFieldPort });
-      const request = { workspaceId: WORKSPACE, taskSurface: { display_name: QUERY_TEXT }, strategy: "chat" as const,
+      const request = { workspaceId: WORKSPACE, taskSurface: { ...createTaskSurface(), display_name: QUERY_TEXT }, strategy: "chat" as const,
         budget: { ...defaultBudget(), work_units: 10000, memory_bytes: 1000000, page_budget: 64 } };
       const rawOnly = await service.recall(request);
       expect(rawOnly.index?.entries.some((entry) => entry.object_id === OBJECT_B)).toBe(false);

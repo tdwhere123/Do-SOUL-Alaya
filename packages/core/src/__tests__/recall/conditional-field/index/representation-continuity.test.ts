@@ -462,7 +462,8 @@ function deploymentInput(
 }
 
 function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): AcceptingProjectionInput {
-  const roles = new Map([...overrides.roles ?? []].map(([id, role]) => [productStateNodeId(fieldValue(id, 1).state), role]));
+  const roles = new Map((overrides.roles instanceof Map ? [...overrides.roles] : [])
+    .map(([id, role]) => [productStateNodeId(fieldValue(id, 1).state), role]));
   const roots = (overrides.derivations ?? []).filter((node) => !(overrides.derivations ?? []).some((parent) => parent.children.includes(node.derivation_id)));
   return {
     snapshot: snapshotOf([]),

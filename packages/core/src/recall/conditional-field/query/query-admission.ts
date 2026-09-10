@@ -21,7 +21,6 @@ import {
 } from "@do-soul/alaya-protocol";
 import { interpretQuery } from "../reference/interpret-query.js";
 import {
-  identityFor,
   proposalBindsOriginalQuery,
   type QueryDenotationParts
 } from "./compile-query-identity.js";

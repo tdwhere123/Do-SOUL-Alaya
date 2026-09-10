@@ -50,10 +50,11 @@ export function promotionMeasurementDiagnostic(
     : [];
   const gold = buildGoldDiagnostics({
     goldMemoryIds: goldIds,
-    deliveredRankByIdentity: new Map(delivered.map((row) => [
-      buildObjectIdentityKey(row.object_kind ?? "memory_entry", row.object_id),
-      row.rank
-    ])),
+    deliveredRankByIdentity: new Map(delivered.flatMap((row) =>
+      row.object_id === undefined
+        ? []
+        : [[buildObjectIdentityKey(row.object_kind ?? "memory_entry", row.object_id), row.rank] as const]
+    )),
     activeConstraintRankByIdentity: new Map(),
     diagnostics: null
   });
