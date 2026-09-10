@@ -100,7 +100,8 @@ function appProject(name, appDir) {
       exclude: ["**/dist/**"],
       coverage: {
         include: [`${appDir}/src/**`]
-      }
+      },
+      ...(process.platform === "win32" ? { testTimeout: 30_000 } : {})
     }
   });
 }

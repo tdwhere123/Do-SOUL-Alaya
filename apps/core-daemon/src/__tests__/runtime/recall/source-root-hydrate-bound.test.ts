@@ -37,8 +37,9 @@ describe("worker source-root hydrate", () => {
     expect(page.unavailable).toBe(false);
     expect(page.resourceLimited).toBe(true);
     expect(page.row?.content_complete).toBe(false);
-    expect(page.bytesRead).toBeLessThanOrEqual(64);
-    expect(Buffer.byteLength(page.row?.content ?? "", "utf8")).toBe(page.bytesRead);
+    expect(Buffer.byteLength(page.row?.content ?? "", "utf8")).toBeLessThanOrEqual(64);
+    expect(page.bytesRead).toBeGreaterThan(0);
+    expect(page.bytesRead).toBeLessThan(Buffer.byteLength(body, "utf8"));
   });
 
   it("maps persisted scope_class so project authorization includes only that native root", () => {

@@ -151,7 +151,7 @@ function sourceRecord(body: string) {
     source_id: "src-1",
     source_version: "1",
     content_digest,
-    evidence_object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
+    evidence_object_id: null,
     recorded_at: CLOCK,
     event_time: null,
     valid_from: null,
