@@ -31,7 +31,7 @@ describe("SqlitePathPlasticityWatermarkRepo", () => {
     const migration = database.connection
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
-    expect(migration?.version).toBe(12);
+    expect(migration?.version).toBe(13);
 
     expect(repo.findByWorkspaceId("workspace-1")).toBeNull();
     const created = repo.upsert({
