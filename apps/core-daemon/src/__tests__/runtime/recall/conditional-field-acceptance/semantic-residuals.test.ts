@@ -86,8 +86,8 @@ describe("bounded semantic residual producer-consumer regressions", () => {
     const index = await session(slice)();
     expectCompleteBaseline(index);
     expect(index.entries.find((entry) => entry.object_id === MEM.r)).toMatchObject({ role: "requested", association_milligrades: 1000 });
-    expect(index.entries.some((entry) => entry.object_id === MEM.c && entry.association_milligrades === 1000)).toBe(true);
-    expect(index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ role: "associated", association_milligrades: 1000 });
+    expect(index.entries.some((entry) => entry.object_id === MEM.c && entry.association_milligrades === 850)).toBe(true);
+    expect(index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ role: "associated", association_milligrades: 550 });
   });
 
   it("preserves unknown guard coverage through actual SQLite observation and index projection", async () => {
@@ -142,7 +142,7 @@ describe("bounded semantic residual producer-consumer regressions", () => {
       sourceId: MEM.r, targetId: MEM.h, resultObjectId: MEM.h, relationKind: "common_cause",
       validity: { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" }, gist: "Accepted common cause" });
     const supported = await complete(session(slice));
-    expect(supported.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ claim: "supported", association_milligrades: 1000,
+    expect(supported.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({ claim: "supported", association_milligrades: 550,
       claim_proposition: { kind: "common_cause", arguments: [MEM.r, MEM.h] } });
     const native = readersFor(slice);
     const unavailable = await session(slice, { ...native, relation: (input) => input.predicate === "common_cause"

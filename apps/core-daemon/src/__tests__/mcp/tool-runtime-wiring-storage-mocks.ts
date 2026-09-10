@@ -54,7 +54,11 @@ export async function buildToolRuntimeWiringStorageMocks(params: {
       getStorageConnectionIdentity: () => hoisted.database
     }),
     SqliteEdgeProposalRepo: makeRepo(),
-    SqliteEvidenceCapsuleRepo: makeRepo(),
+    SqliteEvidenceCapsuleRepo: makeRepo({
+      boundedSourceReader: () => ({
+        page: () => ({ rows: [], truncated: false, committedThrough: null, nativeVisits: 0, bytesRead: 0 })
+      })
+    }),
     SqliteMemoryEntryRepo: vi.fn().mockImplementation(function SqliteMemoryEntryRepo() {
       return {
         getStorageConnectionIdentity: () => hoisted.database

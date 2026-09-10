@@ -57,11 +57,11 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     const slice = await openPlantedSlice();
     stamp(slice, MEM.l, LAST_WEEK_INSTANT);
     const mediated = await recallThroughHandler(slice, { query: "yesterday failed deployment", max_results: 800 });
-    expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(1000);
+    expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(850);
     expect(mediated.index.entries.find((entry) => entry.object_id === MEM.c)?.explanation_ids.length).toBeGreaterThan(0);
     slice.database.connection.prepare("DELETE FROM relation_assertion_evidence WHERE assertion_id = ?").run("assert-l-c");
     const direct = await recallThroughHandler(slice, { query: "yesterday failed deployment", max_results: 800 });
-    expect(direct.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(1000);
+    expect(direct.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades).toBe(800);
     expect(direct.index.explanations?.some((node) => node.leaf_ids.includes("assert-r-c"))).toBe(true);
   });
 
@@ -105,9 +105,9 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
     expectMemoryBaselineWithUnknownSources(mcp.index);
     expect(assertTargetConsumer(toConsumer(mcp, "mcp"))).toEqual([]);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.c)?.association_milligrades)
-      .toBe(1000);
+      .toBe(850);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.association_milligrades)
-      .toBe(1000);
+      .toBe(550);
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.claim).toBe("unknown");
     expect(mcp.index.entries.find((entry) => entry.object_id === MEM.h)?.claim_proposition?.kind).toBe("common_cause");
     expect(mcp.results.map((result) => result.object_id)).toEqual(

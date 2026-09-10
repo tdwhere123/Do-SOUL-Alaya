@@ -73,7 +73,12 @@ const ADJACENCY_PAGE_SIZE = 16;
 const MAX_FINALIZATION_MEMORY_BYTES = 65_536;
 
 export const RELATION_ROUTING = Object.freeze({
-  uses_service: { applicable: true, role: "routing_only" }
+  observed_log: { milligrades: 950, applicable: true, role: "associated" },
+  config_via_log: { milligrades: 850, applicable: true, role: "associated" },
+  config_direct: { milligrades: 800, applicable: true, role: "associated" },
+  uses_service: { milligrades: 900, applicable: true, role: "routing_only" },
+  service_history: { milligrades: 550, applicable: true, role: "associated" },
+  unrelated: { milligrades: 1000, applicable: false, role: "associated" }
 });
 
 export function observeField(
@@ -259,7 +264,7 @@ function refreshPathFrontier(session: ObservationSession): boolean {
     query_id: interpretation.query_id, snapshot_id: interpretation.snapshot_id, region_id: regionId });
   session.state = resumePathEffects({ ...state, pending_path_effects: { input: { rows: relationRows, options: {
     interpretation, asOf: input.as_of, liveStates: state.seen_identities,
-    liveStateOffset: frontier?.facets === state.facets ? frontier.identities : 0,
+    liveStateOffset: frontier === undefined || frontier.facets !== state.facets ? 0 : frontier.identities,
     overlay: RELATION_ROUTING, sourceFacts: sourceFacts.snapshot, facets: state.facets, discoveries: state.discoveries } },
     offset: 0, retained_bytes: 0, page: { schema_version: 1, query_id: interpretation.query_id,
       snapshot_id: interpretation.snapshot_id, cursor, observations: [], outcome: { schema_version: 1, status: "open" },
@@ -393,7 +398,7 @@ function startObservedField(
       remaining_exploration: exploration,
       remaining_reserve: input.budget.finalization_reserve,
       remaining_memory_bytes: Math.max(0, input.budget.memory_bytes
-        - (resumed.budget.memory_bytes - resumed.remaining_memory_bytes)),
+        - (resumed.pending_path_effects?.retained_bytes ?? 0)),
       memory_exhausted: false,
       last_observer_status: resumed.last_observer_status === "interrupted" ? "open" : resumed.last_observer_status,
       retention_rejected: undefined

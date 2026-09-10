@@ -41,14 +41,15 @@ function advancePathEffects(state: FieldEngineState): FieldEngineState {
   const finished = advanced.status === "complete";
   const prior = pending.input.options;
   const newFacets = applied.facets.length !== (prior.facets?.length ?? 0);
-  const semanticDelta = finished && (applied.seen_identities.length > prior.liveStates.length || newFacets
-    || applied.discoveries.length > (prior.discoveries?.length ?? 0));
-  const next = semanticDelta ? { input: { rows: pending.input.rows, options: { ...prior,
-    liveStates: applied.seen_identities, liveStateOffset: newFacets ? 0 : prior.liveStates.length,
-    facets: applied.facets, discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
-    page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
   const guards = state.observation_gaps?.guards === true || advanced.effects.some((effect) => effect.unresolved_guard === true);
   const measurements = state.observation_gaps?.measurements === true || advanced.effects.some((effect) => effect.missing_measurement === true);
+  const missingRevision = advanced.effects.some((effect) => effect.missing_target_revision === true);
+  const semanticDelta = finished && (applied.seen_identities.length > prior.liveStates.length || newFacets
+    || applied.discoveries.length > (prior.discoveries?.length ?? 0) || missingRevision);
+  const next = semanticDelta ? { input: { rows: pending.input.rows, options: { ...prior,
+    liveStates: applied.seen_identities, liveStateOffset: newFacets || missingRevision ? 0 : prior.liveStates.length,
+    facets: applied.facets, discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
+    page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
   return { ...applied, resume_subjects: subjects,
     ...(finished && !semanticDelta ? { path_effect_frontier: { identities: applied.seen_identities.length,
       facets: applied.facets, discoveries: applied.discoveries.length } } : {}),

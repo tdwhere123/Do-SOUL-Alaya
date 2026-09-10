@@ -86,6 +86,7 @@ export type FieldObservationEffect = Readonly<{
   readonly projected_cap?: ProjectedCap;
   readonly admitted_seed?: boolean;
   readonly unresolved_guard?: boolean;
+  readonly missing_target_revision?: boolean;
   readonly seed?: SeedActivation;
   readonly transition?: Transition;
   readonly facet?: FacetVector;

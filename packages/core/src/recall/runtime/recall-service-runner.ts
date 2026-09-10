@@ -264,8 +264,9 @@ function runCompiledConditionalFieldRecall(
   });
   let retained = field;
   const projected = projectFromField(assessUnknownCause(field, input), input, interpretation, (next) => { retained = next; });
-  const index = projected.entries.length === 0 && fieldProgress(retained) === fieldProgress(restored)
-    && (restored !== undefined || input.budget.work_units <= 1)
+  const unserviceable = input.budget.work_units <= 1 && projected.entries.length === 0;
+  const noProgress = projected.entries.length === 0 && fieldProgress(retained) === fieldProgress(restored);
+  const index = unserviceable || (noProgress && restored !== undefined && observationSettled(retained))
     ? { ...projected, continuation: null } : projected;
   if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
   // Keep resume under the request token so a last page (response continuation
@@ -278,7 +279,17 @@ function fieldProgress(state: FieldEngineState | undefined): string {
   return JSON.stringify([state?.observations.length ?? 0, state?.seeds.length ?? 0,
     state?.transitions.length ?? 0, state?.grounding_progress?.completed_work ?? 0,
     state?.resume_cursors ?? {}, state?.pair_progress ?? {}, state?.support_progress ?? {},
-    state?.projection_progress?.offset ?? 0, state?.projection_progress?.delivered_entries ?? {}]);
+    state?.projection_progress?.offset ?? 0, state?.projection_progress?.delivered_entries ?? {},
+    state?.seen_identities.length ?? 0, state?.pending_path_effects?.offset ?? 0,
+    state?.last_observer_status ?? null]);
+}
+
+function observationSettled(state: FieldEngineState): boolean {
+  return state.pending_path_effects === undefined
+    && state.last_observer_status !== "interrupted"
+    && state.last_observer_status !== "open"
+    && !state.memory_exhausted
+    && (state.remaining_work.length === 0);
 }
 
 function projectFromField(

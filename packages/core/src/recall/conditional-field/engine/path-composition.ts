@@ -552,7 +552,8 @@ function* effectsForAdvance(
   if (targetRevision === undefined) {
     yield { kind: "effect", effect: {
       observation_id: `revision:${row.assertionId}:${from.program_state}`,
-      unresolved_guard: true
+      unresolved_guard: true,
+      missing_target_revision: true
     } }; return;
   }
   const applicable = strength.applicable && decision === "true";
@@ -709,7 +710,8 @@ function attachHyperedgeFacet(effect: HyperedgeEffect): CompiledAdjacencyEffect 
   if (effect.unresolved_guard === true || effect.hyperedge === undefined) {
     return {
       observation_id: effect.observation_id,
-      unresolved_guard: true
+      unresolved_guard: true,
+      ...(effect.missing_target_revision === true ? { missing_target_revision: true } : {})
     };
   }
   return {

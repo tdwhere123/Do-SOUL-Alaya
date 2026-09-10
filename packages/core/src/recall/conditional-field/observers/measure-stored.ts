@@ -288,6 +288,7 @@ function enumerationBudget(input: ObserveConditionalFieldInput): number {
   const reserves = measurementWorkReserves(input);
   const perIdentity = 1 + reserves.pair + reserves.source;
   return Math.min(
+    512,
     pageLimit(input),
     Math.max(0, Math.floor((input.action.work_limit - reserves.lookup) / perIdentity))
   );

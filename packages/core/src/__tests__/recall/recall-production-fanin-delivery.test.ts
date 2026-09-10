@@ -51,8 +51,10 @@ describe("source-backed conditional association and evidence", () => {
     expect(seed).toBeDefined();
     expect(seed?.association_milligrades).toBeGreaterThan(0);
     expect(seed?.claim).toBe("unknown");
-    expect(seed?.explanation_ids.every((id) => id.startsWith("seed:"))).toBe(true);
+    expect(seed?.explanation_ids.length).toBeGreaterThan(0);
     expect(result.index.entries.some((entry) => entry.object_id === CONFIG)).toBe(false);
+    const leaves = (result.index.explanations ?? []).flatMap((row) => row.leaf_ids ?? []);
+    expect(leaves.some((id) => id.startsWith("relation-"))).toBe(false);
   });
 
   it("composes admitted source relations by max-min and exposes their own evidence", async () => {

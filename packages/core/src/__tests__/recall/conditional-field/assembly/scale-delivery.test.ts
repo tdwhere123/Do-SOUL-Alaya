@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { MemoryDimension, type InformationIndex, type RequestBudget } from "@do-soul/alaya-protocol";
+import { canonicalProductIdentityOfEntry, MemoryDimension, type InformationIndex, type RequestBudget } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { runConditionalFieldRecall, captureIndexPreviews } from "../../../../recall/runtime/recall-service-runner.js";
 import { toSourceObserverRow, type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
@@ -114,11 +114,13 @@ describe("native lexical delivery at corpus scale", () => {
     expect(new Set(revisions).size).toBe(revisions.length);
     for (const page of pages) expect(new Set(page.entries.map((entry) => (entry.object_id ?? ""))).size).toBe(page.entries.length);
     expect(delivered.length).toBeGreaterThan(new Set(delivered).size);
-    const latest = new Map(pages.flatMap((page) => page.entries.map((entry) => [(entry.object_id ?? ""), indexEntryRevision(entry)] as const)));
+    const latest = new Map(pages.flatMap((page) => page.entries.map((entry) => [(entry.object_id ?? ""), canonicalProductIdentityOfEntry(entry)] as const)));
     const complete = collectPages(readers, defaultBudget({ work_units: 10_000, finalization_reserve: 1_000,
       memory_bytes: 10_000_000, page_budget: 100 }), 10, query, "2026-09-07T00:00:00.000Z");
     expect(complete.at(-1)!.continuation).toBeNull();
-    for (const entry of complete.flatMap((page) => page.entries)) expect(latest.get((entry.object_id ?? ""))).toBe(indexEntryRevision(entry));
+    for (const entry of complete.flatMap((page) => page.entries)) {
+      expect(latest.get((entry.object_id ?? ""))).toBe(canonicalProductIdentityOfEntry(entry));
+    }
     expect(new Set(delivered).size).toBe(ids.length);
     expect(pages.some((page) => page.entries.length > 0 && page.completeness.observed_coverage === "interrupted")).toBe(true);
   });

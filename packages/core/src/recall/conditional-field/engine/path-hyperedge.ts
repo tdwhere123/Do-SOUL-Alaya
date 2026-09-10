@@ -54,6 +54,7 @@ export type HyperedgeEffect = Readonly<{
   readonly derivation?: Derivation;
   readonly derivations?: readonly Derivation[];
   readonly unresolved_guard?: boolean;
+  readonly missing_target_revision?: boolean;
 }>;
 
 type HyperedgeInput = Readonly<{
@@ -477,7 +478,8 @@ function* completionEffects(
   if (targetRevision === undefined) {
     return [{
       observation_id: `revision:${productSubjectId(from)}:${from.program_state}:${spec.target}`,
-      unresolved_guard: true
+      unresolved_guard: true,
+      missing_target_revision: true
     }];
   }
   const children = premises.map((premise) => premise.derivation);
