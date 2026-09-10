@@ -26,6 +26,18 @@ export interface BoundedEmbeddingReadReceipt {
   readonly truncated: boolean;
 }
 
+export interface EmbeddingProfileIdentity {
+  readonly providerKind: string;
+  readonly modelId: string;
+  readonly schemaVersion: number;
+}
+
+export type UniqueEmbeddingProfileLookup = Readonly<{
+  readonly status: "unique" | "missing" | "unavailable";
+  readonly profile?: EmbeddingProfileIdentity;
+  readonly rowVisits: number;
+}>;
+
 export const BOUNDED_EMBEDDING_INDEX_SQL = `CREATE INDEX IF NOT EXISTS idx_memory_embeddings_recall_profile_identity
   ON memory_embeddings(workspace_id, provider_kind, model_id, schema_version, vector_valid, object_id)`;
 
@@ -39,6 +51,48 @@ function validateProfile(workspaceId: string, profile: BoundedEmbeddingProfile):
     throw new StorageError("VALIDATION_FAILED", "Bounded embedding profile exceeds input capacity");
   }
 }
+
+export function readUniqueEmbeddingProfile(
+  db: StorageDatabase,
+  workspaceId: string,
+  modelId?: string
+): UniqueEmbeddingProfileLookup {
+  parseWorkspaceId(workspaceId);
+  const pinned = modelId === undefined ? undefined : parseModelId(modelId);
+  // Distinct identity only; ranking by object_id would pick a stale profile as the domain.
+  const rows = pinned === undefined
+    ? db.connection.prepare(`SELECT provider_kind, model_id, schema_version FROM memory_embeddings
+        WHERE workspace_id = ? AND vector_valid = 1
+        GROUP BY provider_kind, model_id, schema_version LIMIT 2`).all(workspaceId) as ProfileIdentityRow[]
+    : db.connection.prepare(`SELECT provider_kind, model_id, schema_version FROM memory_embeddings
+        WHERE workspace_id = ? AND vector_valid = 1 AND model_id = ?
+        GROUP BY provider_kind, model_id, schema_version LIMIT 2`).all(workspaceId, pinned) as ProfileIdentityRow[];
+  if (rows.length !== 1) {
+    return Object.freeze({
+      status: rows.length === 0 ? "missing" : "unavailable",
+      rowVisits: rows.length
+    });
+  }
+  const row = rows[0]!;
+  if (!Number.isSafeInteger(row.schema_version) || row.schema_version < 0) {
+    throw new StorageError("VALIDATION_FAILED", "Invalid bounded embedding profile");
+  }
+  return Object.freeze({
+    status: "unique",
+    profile: Object.freeze({
+      providerKind: parseProviderKind(row.provider_kind),
+      modelId: parseModelId(row.model_id),
+      schemaVersion: row.schema_version
+    }),
+    rowVisits: 1
+  });
+}
+
+type ProfileIdentityRow = Readonly<{
+  readonly provider_kind: string;
+  readonly model_id: string;
+  readonly schema_version: number;
+}>;
 
 export function readBoundedEmbeddingIds(
   db: StorageDatabase,

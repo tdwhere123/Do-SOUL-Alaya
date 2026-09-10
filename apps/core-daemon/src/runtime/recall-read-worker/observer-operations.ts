@@ -32,7 +32,8 @@ import {
 import { decodeValidEmbeddingBlob } from "../../../../../packages/storage/src/repos/memory/embedding-vector-validity.js";
 import {
   BOUNDED_EMBEDDING_INDEX_SQL,
-  readBoundedEmbeddingIds
+  readBoundedEmbeddingIds,
+  readUniqueEmbeddingProfile
 } from "../../../../../packages/storage/src/repos/memory/reads/memory-embedding-bounded-read.js";
 import { asPayload, readString } from "./payload-readers.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
@@ -224,11 +225,6 @@ type StoredVectorRow = Readonly<{
 
 function storedMeasurementReaders(database: StorageDatabase): Pick<ObserverReaders, "embeddingIds" | "measureStoredPair"> {
   database.connection.exec(BOUNDED_EMBEDDING_INDEX_SQL);
-  const profileOf = database.connection.prepare(
-    `SELECT provider_kind, model_id, schema_version FROM memory_embeddings
-     WHERE workspace_id = ? AND vector_valid = 1
-     ORDER BY object_id ASC LIMIT 1`
-  );
   const objectVector = database.connection.prepare(
     `SELECT object_id, provider_kind, model_id, schema_version, dimensions, content_hash, embedding_blob
      FROM memory_embeddings
@@ -244,39 +240,37 @@ function storedMeasurementReaders(database: StorageDatabase): Pick<ObserverReade
   return {
     embeddingIds: (input) => {
       const maxRows = Math.min(512, Math.max(0, input.maxRows));
-      if (maxRows === 0) {
+      const lookup = readUniqueEmbeddingProfile(database, input.workspaceId, input.modelId);
+      if (lookup.status !== "unique" || lookup.profile === undefined) {
         return {
           objectIds: [],
-          rowVisits: 0,
+          rowVisits: lookup.rowVisits,
+          metadataUtf8Bytes: 0,
+          truncated: false,
+          committedThrough: input.afterObjectId,
+          domainStatus: lookup.status
+        };
+      }
+      if (maxRows === 0) {
+        // Unique domain with no identity budget is interrupt, not missing.
+        return {
+          objectIds: [],
+          rowVisits: lookup.rowVisits,
           metadataUtf8Bytes: 0,
           truncated: true,
           committedThrough: input.afterObjectId
         };
       }
-      const profile = profileOf.get(input.workspaceId) as {
-        readonly provider_kind: string;
-        readonly model_id: string;
-        readonly schema_version: number;
-      } | undefined;
-      if (profile === undefined) {
-        return {
-          objectIds: [],
-          rowVisits: 0,
-          metadataUtf8Bytes: 0,
-          truncated: false,
-          committedThrough: input.afterObjectId
-        };
-      }
       const page = readBoundedEmbeddingIds(database, input.workspaceId, {
-        providerKind: profile.provider_kind,
-        modelId: profile.model_id,
-        schemaVersion: profile.schema_version,
+        providerKind: lookup.profile.providerKind,
+        modelId: lookup.profile.modelId,
+        schemaVersion: lookup.profile.schemaVersion,
         maxRows,
         maxMetadataUtf8Bytes: 256
       }, input.afterObjectId);
       return {
         objectIds: page.objectIds,
-        rowVisits: page.rowVisits,
+        rowVisits: lookup.rowVisits + page.rowVisits,
         metadataUtf8Bytes: page.metadataUtf8Bytes,
         truncated: page.truncated,
         committedThrough: page.committedThrough

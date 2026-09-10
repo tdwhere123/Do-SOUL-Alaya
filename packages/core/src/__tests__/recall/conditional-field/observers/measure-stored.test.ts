@@ -305,6 +305,94 @@ describe("stored pair measurement producer", () => {
     }]);
     expect(missing.measurements[0]?.raw).not.toEqual(expect.objectContaining({ raw: 0 }));
   });
+
+  it("forwards the request model pin to embeddingIds", () => {
+    const calls: Array<{ readonly modelId?: string }> = [];
+    observeConditionalField(measureInput({
+      embeddingIds: (input) => {
+        calls.push(input);
+        return {
+          objectIds: [],
+          rowVisits: 0,
+          metadataUtf8Bytes: 0,
+          truncated: false,
+          committedThrough: null
+        };
+      }
+    }, { model_id: "model-b-new" }));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.modelId).toBe("model-b-new");
+  });
+
+  it("forwards expected_model_id when model_id is absent", () => {
+    const calls: Array<{ readonly modelId?: string }> = [];
+    observeConditionalField(measureInput({
+      embeddingIds: (input) => {
+        calls.push(input);
+        return {
+          objectIds: [],
+          rowVisits: 0,
+          metadataUtf8Bytes: 0,
+          truncated: false,
+          committedThrough: null
+        };
+      }
+    }, { expected_model_id: "model-a-old" }));
+    expect(calls[0]?.modelId).toBe("model-a-old");
+  });
+
+  it("does not enumerate ids when the reader reports an unavailable mixed domain", () => {
+    const result = observeConditionalField(measureInput({
+      embeddingIds: () => ({
+        objectIds: ["min-object-a"],
+        rowVisits: 2,
+        metadataUtf8Bytes: 0,
+        truncated: false,
+        committedThrough: "min-object-a",
+        domainStatus: "unavailable"
+      })
+    }));
+    expect(result.page.observations.map((row) => row.object_id)).not.toContain("min-object-a");
+    expect(result.measurements?.[0]?.raw.status).toBe("unavailable");
+    expect(result.measurements?.[0]?.cap.status).toBe("inapplicable");
+  });
+
+  it("does not mint missing when enumeration is truncated empty", () => {
+    const result = observeConditionalField(measureInput({
+      embeddingIds: () => ({
+        objectIds: [],
+        rowVisits: 1,
+        metadataUtf8Bytes: 0,
+        truncated: true,
+        committedThrough: null
+      })
+    }));
+    expect(result.page.outcome.status).toBe("interrupted");
+    expect(result.measurements).toBeUndefined();
+    expect(measurementEffectsFor(result)).toEqual([]);
+  });
+
+  it("does not start pair reads when remaining work cannot pay them", () => {
+    let pairCalls = 0;
+    const result = observeConditionalField(measureInput({
+      embeddingIds: () => ({
+        objectIds: [OBJECT_ID, "emb-2"],
+        rowVisits: 8,
+        metadataUtf8Bytes: 0,
+        truncated: false,
+        committedThrough: "emb-2"
+      }),
+      measureStoredPair: () => {
+        pairCalls += 1;
+        return readyPair(vector(OBJECT_ID, new Float32Array([1, 0])), vector("query", new Float32Array([1, 0])));
+      },
+      source: memorySourceReader()
+    }, { work_limit: 8 }));
+    expect(pairCalls).toBe(0);
+    expect(result.page.observations).toHaveLength(0);
+    expect(result.page.outcome.status).toBe("interrupted");
+    expect(result.measurements).toBeUndefined();
+  });
 });
 
 function memorySourceReader(): NonNullable<ObserverReaders["source"]> {
@@ -343,7 +431,15 @@ function readyPair(object: StoredEmbeddingVector, query: StoredEmbeddingVector):
   };
 }
 
-function measureInput(readers: ObserverReaders) {
+function measureInput(
+  readers: ObserverReaders,
+  extra: Readonly<{
+    readonly model_id?: string;
+    readonly expected_model_id?: string;
+    readonly work_limit?: number;
+  }> = {}
+) {
+  const { work_limit, ...pin } = extra;
   return {
     lease: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -356,7 +452,7 @@ function measureInput(readers: ObserverReaders) {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       action: "measurement" as const,
       region_id: "binding",
-      work_limit: 16
+      work_limit: work_limit ?? 16
     },
     cursor: startObserverCursor({
       cursor_id: "binding",
@@ -367,7 +463,8 @@ function measureInput(readers: ObserverReaders) {
     query: interpretation(),
     workspace_id: "ws",
     readers,
-    seed_query: "seed"
+    seed_query: "seed",
+    ...pin
   };
 }
 

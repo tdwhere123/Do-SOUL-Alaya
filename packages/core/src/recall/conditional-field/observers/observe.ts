@@ -145,6 +145,7 @@ export type EmbeddingObserverPage = Readonly<{
   readonly metadataUtf8Bytes: number;
   readonly truncated: boolean;
   readonly committedThrough?: string | null;
+  readonly domainStatus?: "missing" | "unavailable";
 }>;
 
 export type ObserverReaders = Readonly<{
@@ -201,6 +202,7 @@ export type ObserverReaders = Readonly<{
     readonly workspaceId: string;
     readonly afterObjectId: string | null;
     readonly maxRows: number;
+    readonly modelId?: string;
   }>) => EmbeddingObserverPage;
   readonly measureStoredPair?: (input: Readonly<{
     readonly workspaceId: string;

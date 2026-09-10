@@ -116,41 +116,58 @@ export function observeStoredMeasurement(input: ObserveConditionalFieldInput): O
       "unavailable"
     )]);
   }
+  const modelId = input.model_id ?? input.expected_model_id;
   const page = embeddingIds({
     workspaceId: input.workspace_id,
     afterObjectId: input.cursor.committed_through,
-    maxRows: pageLimit(input)
+    maxRows: enumerationBudget(input),
+    ...(modelId === undefined || modelId.length === 0 ? {} : { modelId })
   });
+  const domainStatus = page.domainStatus;
+  const failClosed = domainStatus === "missing" || domainStatus === "unavailable";
+  const ids = failClosed ? [] : idsAffordableForPairs(input, page.objectIds, page.rowVisits);
+  const truncated = failClosed ? false : page.truncated || ids.length < page.objectIds.length;
   const collected = collectObserved(input, {
-    identities: page.objectIds,
-    truncated: page.truncated,
+    identities: ids,
+    truncated,
     nativeVisits: page.rowVisits,
     bytesRead: page.metadataUtf8Bytes,
     identityKind: "embedding",
-    commitThrough: page.committedThrough ?? page.objectIds.at(-1) ?? input.cursor.committed_through
+    commitThrough: failClosed || ids.length === 0
+      ? input.cursor.committed_through
+      : ids.at(-1) ?? input.cursor.committed_through
   });
-  return attachPairMeasurements(input, collected, page.objectIds);
+  if (failClosed) {
+    return withMeasurements(collected, [absentMeasurement(
+      `${input.action.region_id}:missing-measurement`,
+      domainStatus
+    )]);
+  }
+  if (collected.page.observations.length === 0) {
+    if (truncated || collected.page.outcome.status === "interrupted") return collected;
+    return withMeasurements(collected, [absentMeasurement(
+      `${input.action.region_id}:missing-measurement`,
+      page.objectIds.length === 0 ? "missing" : "unavailable"
+    )]);
+  }
+  return attachPairMeasurements(input, collected);
 }
 
 function attachPairMeasurements(
   input: ObserveConditionalFieldInput,
-  collected: ObserverActionResult,
-  enumeratedIds: readonly string[]
+  collected: ObserverActionResult
 ): ObserverActionResult {
   const digest = queryDigestOf(input);
   const measure = input.readers.measureStoredPair;
-  if (collected.page.observations.length === 0) {
-    const status = enumeratedIds.length === 0 ? "missing" : "unavailable";
-    return withMeasurements(collected, [absentMeasurement(
-      `${input.action.region_id}:missing-measurement`,
-      status
-    )]);
-  }
   const measurements: ObservationMeasurement[] = [];
   let extraWork = 0;
   let extraBytes = 0;
   const observations: TypedObservation[] = [];
+  const reserves = measurementWorkReserves(input);
   for (const observation of collected.page.observations) {
+    if (collected.work.native_visits + extraWork + reserves.pair + reserves.source > input.action.work_limit) {
+      break;
+    }
     const pair = measure?.({
       workspaceId: input.workspace_id,
       objectId: observation.object_id,
@@ -173,15 +190,55 @@ function attachPairMeasurements(
     measurements.push({ observation_id: observation.observation_id, raw, cap: INAPPLICABLE_CAP });
     observations.push(stampMeasuredObservation(observation, raw, pair, memory.revision));
   }
+  const nativeVisits = collected.work.native_visits + extraWork;
+  const truncated = observations.length < collected.page.observations.length;
   return withMeasurements({
-    page: { ...collected.page, observations },
+    page: {
+      ...collected.page,
+      observations,
+      ...(truncated ? { outcome: { ...collected.page.outcome, status: "interrupted" as const } } : {})
+    },
     work: {
-      work_units: collected.work.work_units + extraWork,
-      residual_work_units: collected.work.residual_work_units,
-      native_visits: collected.work.native_visits + extraWork,
+      work_units: nativeVisits,
+      residual_work_units: truncated ? Math.max(1, nativeVisits) : collected.work.residual_work_units,
+      native_visits: nativeVisits,
       bytes_read: collected.work.bytes_read + extraBytes
     }
   }, measurements);
+}
+
+function measurementWorkReserves(input: ObserveConditionalFieldInput): Readonly<{
+  readonly lookup: number;
+  readonly pair: number;
+  readonly source: number;
+}> {
+  const pair = input.readers.measureStoredPair === undefined ? 0 : 2;
+  return {
+    lookup: 1,
+    pair,
+    // Production source pays length, row, and revision; reserving 1 overshoots native visits.
+    source: pair === 0 || input.readers.source === undefined ? 0 : 3
+  };
+}
+
+function enumerationBudget(input: ObserveConditionalFieldInput): number {
+  const reserves = measurementWorkReserves(input);
+  const perIdentity = 1 + reserves.pair + reserves.source;
+  return Math.min(
+    pageLimit(input),
+    Math.max(0, Math.floor((input.action.work_limit - reserves.lookup) / perIdentity))
+  );
+}
+
+function idsAffordableForPairs(
+  input: ObserveConditionalFieldInput,
+  objectIds: readonly string[],
+  spent: number
+): readonly string[] {
+  const reserves = measurementWorkReserves(input);
+  const perId = reserves.pair + reserves.source;
+  if (perId === 0) return objectIds;
+  return objectIds.slice(0, Math.max(0, Math.floor((input.action.work_limit - spent) / perId)));
 }
 
 function stampMeasuredObservation(

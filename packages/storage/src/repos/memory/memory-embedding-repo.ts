@@ -1,5 +1,6 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { BOUNDED_EMBEDDING_INDEX_SQL, readBoundedEmbeddingIds, readBoundedEmbeddings,
+  readUniqueEmbeddingProfile,
   type BoundedEmbeddingProfile, type BoundedEmbeddingReadOptions } from "./reads/memory-embedding-bounded-read.js";
 import { StorageError } from "../../shared/errors.js";
 import { parseOptionalRow, parseRows, readRecord } from "../shared/parse-row.js";
@@ -120,6 +121,10 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
 
   public async listBoundedIdsByWorkspace(workspaceId: string, profile: BoundedEmbeddingProfile) {
     return readBoundedEmbeddingIds(this.db, workspaceId, profile);
+  }
+
+  public readUniqueRecallProfile(workspaceId: string, modelId?: string) {
+    return readUniqueEmbeddingProfile(this.db, workspaceId, modelId);
   }
 
   public async listBoundedByObjectIds(workspaceId: string, objectIds: readonly string[], options: BoundedEmbeddingReadOptions) {

@@ -74,6 +74,71 @@ describe("readBoundedEmbeddingIds cursor", () => {
   });
 });
 
+describe("readUniqueEmbeddingProfile", () => {
+  it("fails closed on mixed profiles and resolves a pinned model without min object_id", async () => {
+    const { database, workspaceId, repo } = await createRepoContext();
+    repo.prepareBoundedRecallIndex();
+    const firstId = "11111111-1111-4111-8111-111111111111";
+    const laterId = "22222222-2222-4222-8222-222222222222";
+    await repo.upsert(createEmbeddingRecord({
+      object_id: firstId,
+      workspace_id: workspaceId,
+      provider_kind: "openai",
+      model_id: "model-a-old"
+    }));
+    await repo.upsert(createEmbeddingRecord({
+      object_id: laterId,
+      workspace_id: workspaceId,
+      provider_kind: "openai",
+      model_id: "model-b-new"
+    }));
+    const mixed = repo.readUniqueRecallProfile(workspaceId);
+    expect(mixed.status).toBe("unavailable");
+    expect(mixed.profile).toBeUndefined();
+    const pinnedB = repo.readUniqueRecallProfile(workspaceId, "model-b-new");
+    expect(pinnedB.status).toBe("unique");
+    expect(pinnedB.profile).toEqual({
+      providerKind: "openai",
+      modelId: "model-b-new",
+      schemaVersion: 1
+    });
+    const pinnedA = repo.readUniqueRecallProfile(workspaceId, "model-a-old");
+    expect(pinnedA.profile?.modelId).toBe("model-a-old");
+    expect(pinnedA.profile?.modelId).not.toBe("model-b-new");
+    const missing = repo.readUniqueRecallProfile(workspaceId, "model-absent");
+    expect(missing.status).toBe("missing");
+    const enumeratedB = readBoundedEmbeddingIds(database, workspaceId, {
+      providerKind: pinnedB.profile!.providerKind,
+      modelId: pinnedB.profile!.modelId,
+      schemaVersion: pinnedB.profile!.schemaVersion,
+      maxRows: 16,
+      maxMetadataUtf8Bytes: 256
+    });
+    expect(enumeratedB.objectIds).toEqual([laterId]);
+    expect(enumeratedB.objectIds).not.toContain(firstId);
+  });
+
+  it("treats a single stored profile as the domain without ranking object_id", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+    repo.prepareBoundedRecallIndex();
+    await repo.upsert(createEmbeddingRecord({
+      object_id: "11111111-1111-4111-8111-111111111111",
+      workspace_id: workspaceId
+    }));
+    await repo.upsert(createEmbeddingRecord({
+      object_id: "22222222-2222-4222-8222-222222222222",
+      workspace_id: workspaceId
+    }));
+    const unique = repo.readUniqueRecallProfile(workspaceId);
+    expect(unique.status).toBe("unique");
+    expect(unique.profile).toEqual({
+      providerKind: "openai",
+      modelId: "text-embedding-3-small",
+      schemaVersion: 1
+    });
+  });
+});
+
 async function plantExtraEmbeddings(
   memoryRepo: Awaited<ReturnType<typeof createRepoContext>>["memoryRepo"],
   repo: SqliteMemoryEmbeddingRepo,

@@ -188,7 +188,7 @@ function observeWithinMemory(
       const adjacencyRows = Math.min(ADJACENCY_PAGE_SIZE, Math.floor((state.remaining_exploration - pinWork - 1) / seedUnitCost));
       const batchedRows = proposed.action === "seed" ? 4 * Math.max(0, seedRows)
         : proposed.action === "adjacency" ? 4 * Math.max(0, adjacencyRows)
-        : 4;
+        : 7; // Lookup + one stored pair; 4 cannot pay source revision visits.
       const action = { ...proposed, work_limit: Math.min(batchedRows + pinWork, state.remaining_exploration) };
       const minimum = (action.action === "seed" || action.action === "adjacency" ? 4 : 1) + pinWork;
       if (action.work_limit < minimum) {

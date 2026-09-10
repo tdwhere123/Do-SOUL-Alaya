@@ -5,6 +5,7 @@ import type { FieldObservationEffect } from "../conditional-field/engine/field-e
 export function measurementEffectsFor(result: ObserverActionResult): readonly FieldObservationEffect[] {
   const rows = result.measurements ?? [];
   if (rows.length === 0) {
+    if (result.page.outcome.status === "interrupted") return []; // Budget interrupt is not a missing profile.
     return [absentEffect(`${result.page.cursor.region_id}:missing-measurement`)];
   }
   return rows.map(effectFromMeasurement);
