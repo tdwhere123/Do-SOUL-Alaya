@@ -16,7 +16,10 @@ export type WorkerActualCost = Readonly<{
   readonly rss_sampling_method: typeof RSS_SAMPLING_METHOD;
 }>;
 
-export type WorkerExecutionReceipt = ConditionalFieldExecutionReceipt & WorkerActualCost;
+/** Worker pages sit beside core `actual`; overlaying them collides with `actual.native_visits`. */
+export type WorkerExecutionReceipt = ConditionalFieldExecutionReceipt & {
+  readonly worker: WorkerActualCost;
+};
 
 type NativeCostCounters = {
   native_visits: number;
@@ -39,7 +42,7 @@ export function withWorkerActualCost<T extends {
 }>(
   readers: ObserverReaders,
   run: (readers: ObserverReaders) => T
-): T {
+): Omit<T, "execution_receipt"> & { readonly execution_receipt: WorkerExecutionReceipt } {
   const counters: NativeCostCounters = { native_visits: 0, bytes_read: 0, row_visits: 0 };
   const started = performance.now();
   const rssBefore = process.memoryUsage().rss;
@@ -55,7 +58,7 @@ export function withWorkerActualCost<T extends {
   };
   return {
     ...result,
-    execution_receipt: { ...result.execution_receipt, ...cost } as T["execution_receipt"]
+    execution_receipt: { ...result.execution_receipt, worker: cost }
   };
 }
 
@@ -63,18 +66,21 @@ export function workerActualCostOf(
   receipt: ConditionalFieldExecutionReceipt | undefined
 ): WorkerActualCost {
   if (receipt === undefined) throw new Error("execution receipt missing");
-  const row = receipt as ConditionalFieldExecutionReceipt & Partial<WorkerActualCost>;
-  const nativeVisits = row.native_visits;
-  const bytesRead = row.bytes_read;
-  const rowVisits = row.row_visits;
-  const elapsedMs = row.elapsed_ms;
-  const rssBytes = row.rss_bytes;
+  const worker = (receipt as ConditionalFieldExecutionReceipt & {
+    readonly worker?: Partial<WorkerActualCost> | null;
+  }).worker;
+  const nativeVisits = worker?.native_visits;
+  const bytesRead = worker?.bytes_read;
+  const rowVisits = worker?.row_visits;
+  const elapsedMs = worker?.elapsed_ms;
+  const rssBytes = worker?.rss_bytes;
   if (
-    nativeVisits === undefined || bytesRead === undefined || rowVisits === undefined
+    worker == null
+    || nativeVisits === undefined || bytesRead === undefined || rowVisits === undefined
     || elapsedMs === undefined || rssBytes === undefined
     || !Number.isFinite(nativeVisits) || !Number.isFinite(bytesRead)
     || !Number.isFinite(rowVisits) || !Number.isFinite(elapsedMs)
-    || !Number.isFinite(rssBytes) || row.rss_sampling_method !== RSS_SAMPLING_METHOD
+    || !Number.isFinite(rssBytes) || worker.rss_sampling_method !== RSS_SAMPLING_METHOD
   ) {
     throw new Error("worker actual cost missing from execution receipt");
   }
@@ -84,7 +90,7 @@ export function workerActualCostOf(
     row_visits: rowVisits,
     elapsed_ms: elapsedMs,
     rss_bytes: rssBytes,
-    rss_sampling_method: row.rss_sampling_method
+    rss_sampling_method: worker.rss_sampling_method
   };
 }
 

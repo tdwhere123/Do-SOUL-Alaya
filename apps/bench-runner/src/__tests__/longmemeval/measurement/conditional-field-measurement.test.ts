@@ -89,17 +89,20 @@ describe("conditional target measurement evidence", () => {
     const input = fixture();
     const execution_receipt = {
       ...input.recallResult.execution_receipt,
-      native_visits: 9, bytes_read: 256, row_visits: 9, elapsed_ms: 3,
-      rss_bytes: process.memoryUsage().rss, rss_sampling_method: "process.memoryUsage().rss" as const
+      worker: {
+        native_visits: 9, bytes_read: 256, row_visits: 9, elapsed_ms: 3,
+        rss_bytes: process.memoryUsage().rss, rss_sampling_method: "process.memoryUsage().rss" as const
+      }
     };
     const measured = measureConditionalFieldResponse({
       ...input, recallResult: { ...input.recallResult, execution_receipt }
     });
     expect(measured?.status).toBe("validated");
     if (measured?.status !== "validated") throw new Error("validated measurement expected");
-    expect(measured.request.execution_receipt.native_visits).toBe(9);
-    expect(measured.request.execution_receipt.rss_sampling_method).toBe("process.memoryUsage().rss");
-    expect(measured.request.execution_receipt.native_visits).not.toBe(BUDGET.work_units);
+    expect(measured.request.execution_receipt.worker?.native_visits).toBe(9);
+    expect(measured.request.execution_receipt.worker?.rss_sampling_method).toBe("process.memoryUsage().rss");
+    expect(measured.request.execution_receipt.worker?.native_visits).not.toBe(BUDGET.work_units);
+    expect(measured.request.execution_receipt.native_visits).toBeUndefined();
   });
   it("rejects a result whose tagged target revision differs from its index entry", () => {
     const input = fixture();

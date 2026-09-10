@@ -26,7 +26,8 @@ export const ConditionalFieldRequestFiltersSchema = z.object(Filters).strict().r
 
 const NonNegInt = z.number().int().nonnegative();
 const NonNegMs = z.number().finite().nonnegative();
-// Nested `actual` is the core ledger snapshot; root visits/bytes/rss stay optional worker fields.
+// Nested `actual` is the core ledger snapshot. Sibling `worker` is instrumentation pages.
+// Root visits/bytes/rss stay optional worker wire fields and are never nested actual.
 const PhaseCost = z.object({
   exclusive_ms: NonNegMs, inclusive_ms: NonNegMs,
   native_visits: NonNegInt, native_rows: NonNegInt, native_bytes: NonNegInt,
@@ -45,6 +46,14 @@ const ActualReceipt = z.object({
     start_bytes: NonNegInt, after_projection_bytes: NonNegInt
   }).strict().readonly()
 }).strict().readonly();
+const WorkerReceipt = z.object({
+  native_visits: NonNegInt,
+  bytes_read: NonNegInt,
+  row_visits: NonNegInt,
+  elapsed_ms: z.number().finite().nonnegative(),
+  rss_bytes: NonNegInt,
+  rss_sampling_method: z.literal("process.memoryUsage().rss")
+}).strict().readonly();
 
 export const ConditionalFieldExecutionReceiptSchema = z.object({
   schema_version: z.literal(1), workspace_id: Id, requested_budget: RequestBudgetSchema,
@@ -60,6 +69,7 @@ export const ConditionalFieldExecutionReceiptSchema = z.object({
   elapsed_ms: z.number().finite().nonnegative().optional(),
   rss_bytes: NonNegInt.optional(),
   rss_sampling_method: z.literal("process.memoryUsage().rss").optional(),
+  worker: WorkerReceipt.optional(),
   actual: ActualReceipt.optional()
 }).strict().readonly().superRefine((receipt, context) => {
   const compiled = compileConditionalFieldQuery(receipt.compile_input);

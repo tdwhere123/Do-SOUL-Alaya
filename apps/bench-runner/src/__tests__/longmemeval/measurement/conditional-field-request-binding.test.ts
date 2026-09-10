@@ -36,8 +36,10 @@ function compileIdentityReceipt() {
 
 describe("conditional field execution receipt actual-cost encoding", () => {
   it("keeps compile-identity receipts valid when actual-cost fields are absent", () => {
-    expect(ConditionalFieldExecutionReceiptSchema.parse(compileIdentityReceipt()).native_visits)
-      .toBeUndefined();
+    const receipt = ConditionalFieldExecutionReceiptSchema.parse(compileIdentityReceipt());
+    expect(receipt.native_visits).toBeUndefined();
+    expect(receipt.worker).toBeUndefined();
+    expect(receipt.actual).toBeUndefined();
   });
 
   it("accepts optional measured visits, bytes, elapsed time and live RSS", () => {
@@ -90,6 +92,39 @@ describe("conditional field execution receipt actual-cost encoding", () => {
     expect(receipt.actual?.native_visits).toBe(4);
     expect(receipt.actual?.rss.method).toBe("process.memoryUsage().rss");
     expect(receipt.native_visits).toBe(4);
+  });
+
+  it("accepts nested worker pages without aliasing actual.native_visits", () => {
+    const phase = {
+      exclusive_ms: 0, inclusive_ms: 0, native_visits: 0, native_rows: 0, native_bytes: 0,
+      charged_retained_bytes: 0, joins: 0, relaxations: 0, state_creates: 0, pending_work: 0,
+      cache_hits: 0, cache_misses: 0
+    };
+    const receipt = ConditionalFieldExecutionReceiptSchema.parse({
+      ...compileIdentityReceipt(),
+      worker: {
+        native_visits: 1,
+        bytes_read: 0,
+        row_visits: 0,
+        elapsed_ms: 0.5,
+        rss_bytes: sampleBenchHandleRss().rss_bytes,
+        rss_sampling_method: BENCH_RSS_SAMPLING_METHOD
+      },
+      actual: {
+        native_visits: 4, native_rows: 4, native_bytes: 128, charged_retained_bytes: 64,
+        phases: {
+          compile: phase, observe: { ...phase, exclusive_ms: 1, inclusive_ms: 2, native_visits: 4 },
+          seed: phase, adjacency: phase, measurement: phase, solve: phase, index: phase, payload: phase
+        },
+        rss: {
+          method: "process.memoryUsage().rss", start_bytes: 1_000, after_projection_bytes: 1_100
+        }
+      }
+    });
+    expect(receipt.worker?.native_visits).toBe(1);
+    expect(receipt.actual?.native_visits).toBe(4);
+    expect(receipt.worker?.native_visits).not.toBe(receipt.actual?.native_visits);
+    expect(receipt.native_visits).toBeUndefined();
   });
 
   it("rejects a nested actual object that is missing required ledger fields", () => {

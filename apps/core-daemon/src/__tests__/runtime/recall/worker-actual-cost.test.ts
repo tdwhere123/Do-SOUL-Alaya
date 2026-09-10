@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryDimension, type InformationIndex, type RequestBudget } from "@do-soul/alaya-protocol";
-import type { ConditionalFieldRecallPortResult, ObserverReaders } from "@do-soul/alaya-core";
+import type {
+  ConditionalFieldRecallPortResult,
+  ObserverReaders,
+  RequestActualCost
+} from "@do-soul/alaya-core";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
 import { runConditionalFieldWorkerRecall } from "../../../runtime/recall-read-worker/observer-operations.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
@@ -48,6 +52,41 @@ describe("native worker actual cost", () => {
     expect(cost.rss_sampling_method).toBe(RSS_SAMPLING_METHOD);
     expect(cost.rss_bytes).toBeGreaterThan(0);
     expect(cost.elapsed_ms).toBeGreaterThanOrEqual(0);
+    expect(executed.execution_receipt).not.toHaveProperty("native_visits");
+    expect(executed.execution_receipt.worker.native_visits).toBe(4);
+  });
+
+  it("keeps actual.native_visits unchanged and distinct from worker pages", () => {
+    const actualVisits = 7;
+    const readers: ObserverReaders = {
+      sourceRoots: () => ({
+        rows: [], nativeVisits: 0, nativeBytes: 0, rowsRead: 0, bytesRead: 0, nativeWork: 1, truncated: false
+      })
+    };
+    const executed = withWorkerActualCost(readers, (instrumented) => {
+      instrumented.sourceRoots!({
+        workspaceId: WS, query: "needle", limit: 8, nativeLimit: 8, afterCursor: null
+      });
+      return {
+        execution_receipt: {
+          ...compileReceipt(defaultBudget({ work_units: 10_000 })),
+          actual: phaseSumActual(actualVisits)
+        }
+      };
+    });
+    const cost = workerActualCostOf(executed.execution_receipt);
+    expect(executed.execution_receipt.actual?.native_visits).toBe(actualVisits);
+    expect(cost.native_visits).toBe(1);
+    expect(executed.execution_receipt.actual?.native_visits).not.toBe(cost.native_visits);
+    expect(executed.execution_receipt).not.toHaveProperty("native_visits");
+    expect(executed.execution_receipt.worker.native_visits).toBe(1);
+  });
+
+  it("rejects workerActualCostOf when the receipt only has actual.native_visits", () => {
+    expect(() => workerActualCostOf({
+      ...compileReceipt(defaultBudget({ work_units: 10_000 })),
+      actual: phaseSumActual(7)
+    })).toThrow(/worker actual cost missing/);
   });
 
   it("charges nativeWork when nativeVisits is explicitly 0", () => {
@@ -81,6 +120,8 @@ describe("native worker actual cost", () => {
     expect(cost.native_visits).not.toBe(budget.work_units);
     expect(cost.native_visits).not.toBe(result.execution_receipt!.requested_budget.work_units);
     expect(cost.native_visits).not.toBe(result.execution_receipt!.compile_input.budget.work_units);
+    expect(result.execution_receipt!.actual).toBeDefined();
+    expect(result.execution_receipt).not.toHaveProperty("native_visits");
   });
 
   it("samples live process RSS via process.memoryUsage().rss", async () => {
@@ -268,6 +309,22 @@ function compileReceipt(budget: RequestBudget) {
     interpretation_id: "interp",
     snapshot_id: `sha256:${"a".repeat(64)}`,
     interpretation_clock: NOW
+  };
+}
+
+function phaseSumActual(native_visits: number): RequestActualCost {
+  const phase = {
+    exclusive_ms: 0, inclusive_ms: 0, native_visits: 0, native_rows: 0, native_bytes: 0,
+    charged_retained_bytes: 0, joins: 0, relaxations: 0, state_creates: 0, pending_work: 0,
+    cache_hits: 0, cache_misses: 0
+  };
+  return {
+    native_visits, native_rows: 0, native_bytes: 0, charged_retained_bytes: 0,
+    phases: {
+      compile: phase, observe: { ...phase, native_visits }, seed: phase, adjacency: phase,
+      measurement: phase, solve: phase, index: phase, payload: phase
+    },
+    rss: { method: "process.memoryUsage().rss", start_bytes: 1, after_projection_bytes: 1 }
   };
 }
 
