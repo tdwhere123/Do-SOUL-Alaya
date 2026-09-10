@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   InformationIndexSchema,
@@ -29,17 +28,29 @@ import {
 import { interpretationCoverageFor } from "../conditional-field/reference/interpret-query.js";
 import { type ObserverReaders } from "../conditional-field/observers/observe.js";
 import { projectFieldDelta, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
+import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
+import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
 import { captureEffectiveAsOf, normalizeQueryText } from "./recall-service-helpers.js";
 import type { RecallResult } from "./recall-service-types.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { BoundedIndexPayload } from "./index-payload.js";
-import { resumeIndexProjection, retainIndexDelivery } from "./index-continuation.js";
+import {
+  evictIssuedDeliveries,
+  issuedDeliveryRevoked,
+  rememberIssuedDelivery,
+  replayIssuedDelivery,
+  replayIssuedIndex,
+  resumeIndexProjection,
+  retainCommittedRevisions,
+  mergeCommittedRevisions
+} from "./index-continuation.js";
 import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
 import type { RecallExecutionContext, RecallExecutionParams } from "./recall-service-runner-types.js";
 import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
 import { assertRecallZeroLiveExtraction } from "./zero-live-extraction.js";
 import {
+  RELATION_MILLIGRADES,
   emptyField,
   observeField
 } from "./conditional-field-observe.js";
@@ -49,6 +60,7 @@ import { reserveSnapshotPinWork } from "./snapshot-pin-budget.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
 
 export type { RecallExecutionContext, RecallExecutionParams } from "./recall-service-runner-types.js";
+export { RELATION_MILLIGRADES };
 
 const RESULT_VERSION = "v1";
 const DEFAULT_WORK_UNITS = 10_000;
@@ -62,6 +74,10 @@ const FIELD_RESUME = new Map<string, Readonly<{ state: FieldEngineState; token_d
 const INDEX_PREVIEWS = new WeakMap<InformationIndex, ReadonlyMap<string, string>>();
 const INDEX_SOURCE_METADATA = new WeakMap<InformationIndex, Readonly<Record<string, RecallSourceMetadata>>>();
 const FIELD_SOURCE_PINS = new WeakMap<FieldEngineState, string>();
+const ISSUED_SURFACES = new Map<string, Readonly<{
+  readonly previews: ReadonlyMap<string, string>;
+  readonly metadata: Readonly<Record<string, RecallSourceMetadata>>;
+}>>();
 
 export type ConditionalFieldRecallRequest = Readonly<{
   readonly requested_budget?: RequestBudget;
@@ -236,7 +252,6 @@ function runCompiledConditionalFieldRecall(
   const projected = projectFromField(assessUnknownCause(field, input), input, interpretation, (next) => { retained = next; });
   const index = projected.entries.length === 0 && fieldProgress(retained) === fieldProgress(restored)
     && (restored !== undefined || input.budget.work_units <= 1)
-    && retained.pending_path_effects === undefined && !retained.memory_exhausted && retained.retention_rejected === undefined
     ? { ...projected, continuation: null } : projected;
   if (currentPin !== undefined) FIELD_SOURCE_PINS.set(retained, currentPin);
   rememberField(retained, index.continuation);
@@ -246,10 +261,7 @@ function runCompiledConditionalFieldRecall(
 function fieldProgress(state: FieldEngineState | undefined): string {
   return JSON.stringify([state?.observations.length ?? 0, state?.seeds.length ?? 0,
     state?.transitions.length ?? 0, state?.grounding_progress?.completed_work ?? 0,
-    state?.resume_cursors ?? {}, state?.pair_revision ?? 0, state?.pair_scan_offset ?? 0, state?.support_completed_work ?? 0,
-    state?.pending_path_effects?.completed_work ?? 0, state?.pending_path_effects?.offset ?? 0,
-    state?.explanation_completed_work ?? 0,
-    state?.solver_completed_work ?? 0,
+    state?.resume_cursors ?? {}, state?.pair_progress ?? {}, state?.support_progress ?? {},
     state?.projection_progress?.offset ?? 0, state?.projection_progress?.delivered_entries ?? {}]);
 }
 
@@ -284,7 +296,10 @@ function restoreField(
     continuation.interpretation_id
       ?? interpretationIdentity({ interpretation_clock: interpretation.interpretation_clock })
   ));
-  return retained?.token_digest === continuationDigest(continuation) ? retained.state : undefined;
+  if (retained === undefined) return undefined;
+  const digest = continuationDigest(continuation);
+  if (replayIssuedDelivery(digest) !== undefined) return retained.state;
+  return retained.token_digest === digest ? retained.state : undefined;
 }
 
 function continuationDigest(continuation: Continuation): string {
@@ -299,16 +314,17 @@ function projectFromField(
   interpretation: ReturnType<typeof compileConditionalFieldQuery>,
   retain?: (state: FieldEngineState) => void
 ): InformationIndex {
+  const delta = projectFieldDelta(state);
   const snapshot = state.binding.kind === "bound"
     ? state.binding.snapshot
     : {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       snapshot_id: state.snapshot_id,
       query_id: state.query_id,
-      seeds: [...state.seeds],
-      values: projectFieldDelta(state).accepted_states,
-      retained_transitions: [...state.transitions],
-      facets: [...state.facets]
+      seeds: state.seeds,
+      values: delta.accepted_states,
+      retained_transitions: state.transitions,
+      facets: state.facets
     };
   const ceilings = governanceManifestationCeilings(input.governance?.paths ?? []);
   const manifestationFor = (id: string) => input.governance === undefined ? "excerpt" as const
@@ -317,6 +333,30 @@ function projectFromField(
   let retained = state;
   let projectionProgress = resumeIndexProjection(state, snapshot);
   let semanticEntries: readonly import("@do-soul/alaya-protocol").IndexEntry[] = [];
+  const queryKey = fieldResumeKey(
+    interpretation.query_id,
+    interpretation.snapshot_id,
+    interpretationIdentity({ interpretation_clock: interpretation.interpretation_clock })
+  );
+  const requestDigest = input.continuation == null ? "root" : continuationDigest(input.continuation);
+  if (input.continuation == null) {
+    for (const digest of evictIssuedDeliveries(queryKey)) ISSUED_SURFACES.delete(digest);
+  }
+  const issued = input.continuation == null ? undefined : replayIssuedDelivery(requestDigest);
+  if (issued !== undefined) {
+    const eligible = new Set(snapshot.values
+      .filter((value) => value.accepting)
+      .map((value) => productStateNodeId(value.state)));
+    if (issuedDeliveryRevoked(issued, eligible)) {
+      return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
+    }
+    const replayed = replayIssuedIndex(issued);
+    const surface = ISSUED_SURFACES.get(requestDigest);
+    INDEX_PREVIEWS.set(replayed, surface?.previews ?? new Map());
+    INDEX_SOURCE_METADATA.set(replayed, surface?.metadata ?? {});
+    retain?.(retained);
+    return replayed;
+  }
   const payload = new BoundedIndexPayload({ sourceFacts: state.source_facts,
     previewCache: state.preview_cache, readers: input.readers, workspaceId: input.workspace_id,
     remainingMemoryBytes: state.remaining_memory_bytes, manifestationFor,
@@ -348,15 +388,17 @@ function projectFromField(
     claims: state.claims,
     claim_propositions: state.claim_propositions,
     transition_derivations: state.transition_derivations,
+    source_facts: state.source_facts,
     grounding_progress: state.grounding_progress,
+    remaining_memory_bytes: payload.remainingMemoryBytes,
     grounding_transitions: state.transitions,
     grounding_seeds: state.seeds,
     grounding_derivations: state.derivations,
     projection_facets: state.facets,
-    remaining_memory_bytes: payload.remainingMemoryBytes,
     on_grounding_progress: (progress, retainedBytes) => {
       payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
       retained = { ...retained, grounding_progress: progress, remaining_memory_bytes: payload.remainingMemoryBytes };
+      projectionProgress = resumeIndexProjection(retained, snapshot);
     },
     on_remaining_reserve: (remaining) => {
       retained = { ...retained, remaining_reserve: Math.min(state.remaining_reserve, remaining),
@@ -366,6 +408,7 @@ function projectFromField(
     expires_at: input.expires_at,
     as_of: input.as_of,
     lifetime_now: input.lifetime_now,
+    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
     payload_work_per_entry: 5,
     // Truncated source chunks stay retryable so payload_continuation can fetch the next offset.
     finalize_payload: (entries, allowance) => payload.finalize(entries, allowance),
@@ -384,12 +427,21 @@ function projectFromField(
       ? {}
       : { interpretation_clock: interpretation.interpretation_clock }),
     payload_generation: interpretation.snapshot_id,
+    ...((state.derivations?.length ?? 0) === 0 ? {} : { derivations: state.derivations }),
     ...(state.support_work_status === undefined ? {} : { support_work_status: state.support_work_status }),
     ...(state.memory_exhausted || state.remaining_work.length > 0
       ? { resource_work: "open" as const }
       : {})
   })), interpretation);
-  const delivery = retainIndexDelivery(projectionProgress, semanticEntries, state.projection_progress === undefined);
+  const committed = index.completeness.logical_index === "invalidated"
+    ? projectionProgress.delivered_entries
+    : index.continuation?.emitted_revisions
+      ?? mergeCommittedRevisions(projectionProgress.delivered_entries, index.entries);
+  const delivery = retainCommittedRevisions(
+    projectionProgress,
+    committed,
+    state.projection_progress === undefined
+  );
   if (delivery.bytes > payload.remainingMemoryBytes) index = { ...index, continuation: null };
   else {
     payload.remainingMemoryBytes -= delivery.bytes;
@@ -400,6 +452,14 @@ function projectFromField(
   index = payload.applyDeliveredSpans(index);
   INDEX_PREVIEWS.set(index, payload.previews);
   INDEX_SOURCE_METADATA.set(index, payload.sourceMetadata);
+  if (input.continuation != null && index.completeness.logical_index !== "invalidated"
+    && retained.projection_progress === delivery.progress) {
+    rememberIssuedDelivery({ query_key: queryKey, request_digest: requestDigest, index });
+    ISSUED_SURFACES.set(requestDigest, {
+      previews: payload.previews,
+      metadata: payload.sourceMetadata
+    });
+  }
   retained = { ...retained, preview_cache: Object.fromEntries(payload.previews),
     remaining_memory_bytes: payload.remainingMemoryBytes };
   retain?.(retained);
@@ -563,7 +623,10 @@ function annotatePublicIndex(
       enumeration_policy: index.continuation.enumeration_policy
         ?? interpretation.view.enumeration_policy,
       result_kind_view: index.continuation.result_kind_view
-        ?? interpretation.view.result_kind_view
+        ?? interpretation.view.result_kind_view,
+      ...(index.continuation.authorized_scopes === undefined ? {} : {
+        authorized_scopes: index.continuation.authorized_scopes
+      })
     };
   return { ...index, completeness, continuation, interpretation_id: interpretationId,
     as_of: interpretation.interpretation_clock };

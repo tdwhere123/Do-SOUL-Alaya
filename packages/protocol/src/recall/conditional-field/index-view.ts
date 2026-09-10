@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
+  BoundedString,
   IsoDatetimeStringSchema,
   NonNegativeIntSchema
 } from "../../shared/schema-primitives.js";
@@ -140,7 +141,8 @@ export const ContinuationSchema = z
     interpretation_clock: IsoDatetimeStringSchema.optional(),
     enumeration_policy: EnumerationPolicySchema.optional(),
     result_kind_view: ResultKindViewSchema.optional(),
-    authorized_scopes: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
+    authorized_scopes: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    emitted_revisions: z.record(BoundedString(4096), ConditionalFieldIdSchema).optional()
   })
   .strict()
   .readonly();

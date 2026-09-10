@@ -70,15 +70,15 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
     expect(valid.entries.map((entry) => entry.object_id)).toEqual(ids.slice(2));
   });
 
-  it("invalidates a consumed token without consuming the next page's retained state", async () => {
+  it("replays a lost page from the same request token without advancing the next page", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     const ids = await plantNeedles(slice, 6, 951);
     const first = runRecall(slice, { page_budget: 2 });
     const second = runRecall(slice, { page_budget: 2, continuation: first.continuation });
     expect(second.entries.map((entry) => entry.object_id)).toEqual(ids.slice(2, 4));
     const replay = runRecall(slice, { page_budget: 2, continuation: first.continuation });
-    expect(replay.entries).toEqual([]);
-    expect(replay.completeness.logical_index).toBe("invalidated");
+    expect(replay.page_purpose).toBe("retry");
+    expect(replay.entries.map((entry) => entry.object_id)).toEqual(second.entries.map((entry) => entry.object_id));
     const third = runRecall(slice, { page_budget: 2, continuation: second.continuation });
     expect(third.entries.map((entry) => entry.object_id)).toEqual(ids.slice(4));
     expect(third.continuation).toBeNull();

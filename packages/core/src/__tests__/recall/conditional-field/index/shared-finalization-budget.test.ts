@@ -84,18 +84,41 @@ describe("one allowance across grounding, projection, and payload", () => {
     expect(completed.index.completeness.logical_index).toBe("complete");
   });
 
-  it.each(["identity", "grade", "accepting"])("invalidates changed stateless projection prefix %s", (changed) => {
+  it("invalidates when an emitted product identity disappears", () => {
     const source = snapshot(7);
     const first = projectStateless(source, 3, 1);
     expect(first.index.continuation?.cursor).toMatch(/^p1/);
     const original = source.values[0]!;
-    const revised = changed === "identity" ? { ...original, state: { ...original.state, object_id: "changed-first" } }
-      : changed === "grade" ? { ...original, milligrades: 800 } : { ...original, accepting: false };
+    const revised = { ...original, state: { ...original.state, object_id: "changed-first" } };
     const result = projectStateless({ ...source, values: [revised, ...source.values.slice(1)] },
       3, 1, first.index.continuation);
     expect(result.index.completeness.logical_index).toBe("invalidated");
     expect(result.index.entries).toEqual([]);
     expect(result.index.continuation).toBeNull();
+  });
+
+  it("records a grade change of an emitted product as a typed update", () => {
+    const source = snapshot(7);
+    const first = projectStateless(source, 3, 1);
+    const original = source.values[0]!;
+    const result = projectStateless({ ...source, values: [{ ...original, milligrades: 800 }] },
+      3, 1, first.index.continuation);
+    expect(result.index.completeness.logical_index).not.toBe("invalidated");
+    expect(result.index.page_purpose).toBe("update");
+    expect(result.index.product_updates).toHaveLength(1);
+    expect(result.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-0"]);
+    expect(result.index.entries[0]?.association_milligrades).toBe(800);
+  });
+
+  it("does not replay a withdrawn product as a new membership slot", () => {
+    const source = snapshot(7);
+    const first = projectStateless(source, 3, 1);
+    const original = source.values[0]!;
+    const result = projectStateless({ ...source, values: [{ ...original, accepting: false }, ...source.values.slice(1)] },
+      3, 1, first.index.continuation);
+    expect(result.index.completeness.logical_index).not.toBe("invalidated");
+    expect(result.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-1"]);
+    expect(result.index.page_purpose).toBe("membership");
   });
 
   it("allows suffix growth behind an unchanged stateless prefix", () => {
@@ -105,18 +128,15 @@ describe("one allowance across grounding, projection, and payload", () => {
     expect(second.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-1"]);
   });
 
-  it("retains an unverified offset token when a smaller budget cannot replay its prefix", () => {
+  it("skips already-emitted products under a smaller budget instead of replaying the prefix", () => {
     const source = snapshot(7);
     const first = projectStateless(source, 20, 4);
     expect(first.index.completeness.logical_index).toBe("complete");
-    expect(first.index.continuation?.cursor).toMatch(/^o4\|/);
+    expect(first.index.continuation?.emitted_revisions).toBeDefined();
     const small = projectStateless(source, 2, 1, first.index.continuation);
-    expect(small.remaining).toBe(0);
-    expect(small.index.entries).toEqual([]);
-    expect(small.index.completeness).toMatchObject({ logical_index: "open", representation: "open" });
-    expect(small.index.continuation).toEqual(first.index.continuation);
+    expect(small.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-4"]);
     const resumed = projectStateless(source, 20, 7, small.index.continuation);
-    expect(resumed.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-4", "memory-5", "memory-6"]);
+    expect(resumed.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-5", "memory-6"]);
     expect(resumed.index.continuation).toBeNull();
     expect(resumed.index.completeness.logical_index).toBe("complete");
   });

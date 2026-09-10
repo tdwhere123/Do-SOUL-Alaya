@@ -1,9 +1,180 @@
-import { productStateKeyFromIndexEntry, type FieldSnapshot, type IndexEntry } from "@do-soul/alaya-protocol";
+import { createHash } from "node:crypto";
+import {
+  CONDITIONAL_FIELD_SCHEMA_VERSION,
+  canonicalIndexEntryIdentity,
+  productStateKeyFromIndexEntry,
+  reachableMilligradesOf,
+  type Continuation,
+  type EnumerationPolicy,
+  type FieldSnapshot,
+  type FieldValue,
+  type IndexEntry,
+  type InformationIndex,
+  type ProductUpdate,
+  type ProductUpdateKind
+} from "@do-soul/alaya-protocol";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
-import { indexEntryRevision } from "../conditional-field/index/project-accepting-index.js";
+import { compareText } from "../../shared/compare-text.js";
+import { stableStringify } from "../../shared/stable-stringify.js";
 
-type ProjectionProgress = NonNullable<FieldEngineState["projection_progress"]>;
+export type ProjectionProgress = NonNullable<FieldEngineState["projection_progress"]>;
+export type EmittedRevisions = Readonly<Record<string, string>>;
+
+export const OFFSET_CURSOR = /^offset-(\d+)$/u;
+export const RESUME_CURSOR = /^o(\d+)(?:\|(.*))?$/u;
+export const PROJECTION_CURSOR = /^p(\d+)(?:g(\d+))?(?:r(\d+))?(?:e(\d+))?$/u;
+
+const ISSUED_MAX = 32;
+const ISSUED_PAGES = new Map<string, IssuedDelivery>();
+
+export type IssuedDelivery = Readonly<{
+  readonly query_key: string;
+  readonly request_digest: string;
+  readonly delivery_id: string;
+  readonly member_ids: readonly string[];
+  readonly index: InformationIndex;
+}>;
+
+export function indexEntryRevision(entry: IndexEntry): string {
+  const { target, ...membership } = entry;
+  const { span: _span, ...root } = target.kind === "source_evidence" ? target : { ...target, span: undefined };
+  return createHash("sha256").update(stableStringify({ ...membership, target: root })).digest("hex");
+}
+
+export function productIdOfEntry(entry: IndexEntry): string {
+  return productStateNodeId(productStateKeyFromIndexEntry(entry));
+}
+
+export function compareIndexEntries(
+  left: IndexEntry,
+  right: IndexEntry,
+  policy: EnumerationPolicy
+): number {
+  if (policy === "associative") {
+    const grade = right.association_milligrades - left.association_milligrades;
+    if (grade !== 0) return grade;
+  }
+  return compareText(canonicalIndexEntryIdentity(left), canonicalIndexEntryIdentity(right));
+}
+
+export function sortIndexEntries(
+  entries: readonly IndexEntry[],
+  policy: EnumerationPolicy = "canonical"
+): IndexEntry[] {
+  return [...entries].sort((left, right) => compareIndexEntries(left, right, policy));
+}
+
+export function compareFieldValues(
+  left: FieldValue,
+  right: FieldValue,
+  policy: EnumerationPolicy
+): number {
+  if (policy === "associative") {
+    const leftGrade = reachableMilligradesOf(left) ?? -1;
+    const rightGrade = reachableMilligradesOf(right) ?? -1;
+    const grade = rightGrade - leftGrade;
+    if (grade !== 0) return grade;
+  }
+  return compareText(canonicalFieldIdentity(left), canonicalFieldIdentity(right));
+}
+
+export function sortFieldValues(
+  values: readonly FieldValue[],
+  policy: EnumerationPolicy
+): FieldValue[] {
+  return [...values].sort((left, right) => compareFieldValues(left, right, policy));
+}
+
+export function emittedRevisionsOf(input: Readonly<{
+  readonly delivered_product_ids?: ReadonlySet<string>;
+  readonly delivered_entry_revisions?: EmittedRevisions;
+  readonly prior_continuation?: Continuation | null;
+}>): EmittedRevisions {
+  return {
+    ...input.prior_continuation?.emitted_revisions,
+    ...input.delivered_entry_revisions
+  };
+}
+
+export function mergeCommittedRevisions(
+  prior: EmittedRevisions,
+  entries: readonly IndexEntry[]
+): Record<string, string> {
+  const next = { ...prior };
+  for (const entry of entries) {
+    next[productIdOfEntry(entry)] = indexEntryRevision(entry);
+  }
+  return next;
+}
+
+export function productUpdateFor(entry: IndexEntry, previousRevision: string | undefined): ProductUpdate {
+  return {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    product: productStateKeyFromIndexEntry(entry),
+    update_kind: updateKindFor(entry, previousRevision),
+    revision: indexEntryRevision(entry),
+    ...(previousRevision === undefined || previousRevision.length === 0
+      ? {}
+      : { previous_revision: previousRevision })
+  };
+}
+
+export function missingEmittedIdentities(
+  emitted: EmittedRevisions,
+  values: readonly FieldValue[]
+): readonly string[] {
+  if (Object.keys(emitted).length === 0) return [];
+  const present = new Set(values.map((value) => productStateNodeId(value.state)));
+  return Object.keys(emitted).filter((id) => !present.has(id));
+}
+
+export function encodeResumeCursor(count: number, emittedKeys: readonly string[]): string | null {
+  const cursor = `o${String(count)}|${identityDigest(emittedKeys)}`;
+  return cursor.length >= 1 && cursor.length <= 256 ? cursor : null;
+}
+
+export function resumeDigest(cursor: string): string | undefined {
+  const resume = RESUME_CURSOR.exec(cursor);
+  const suffix = resume?.[2];
+  return suffix === undefined || suffix.length === 0 ? undefined : suffix;
+}
+
+export function identityDigest(keys: readonly string[]): string {
+  return createHash("sha256").update(keys.join("\n")).digest("hex");
+}
+
+export function continuationCursorInvalid(input: Readonly<{
+  readonly page_offset?: number;
+  readonly view: Readonly<{ readonly enumeration_policy?: EnumerationPolicy }>;
+  readonly prior_continuation?: Continuation | null;
+}>): boolean {
+  if (input.page_offset !== undefined) return false;
+  const cursor = input.prior_continuation?.cursor;
+  if (cursor === undefined) return false;
+  const associative = (input.view.enumeration_policy ?? "canonical") === "associative";
+  const hasEmitted = input.prior_continuation?.emitted_revisions !== undefined;
+  if (associative && OFFSET_CURSOR.test(cursor) && !hasEmitted) return true;
+  if (associative && RESUME_CURSOR.test(cursor) && !hasEmitted) return true;
+  return !OFFSET_CURSOR.test(cursor) && !RESUME_CURSOR.test(cursor) && !PROJECTION_CURSOR.test(cursor);
+}
+
+export function continuationPolicyMismatch(input: Readonly<{
+  readonly view: Readonly<{
+    readonly enumeration_policy?: EnumerationPolicy;
+    readonly result_kind_view?: "mixed" | "memory_only" | "source_only";
+  }>;
+  readonly authorized_scopes?: readonly string[];
+  readonly prior_continuation?: Continuation | null;
+}>): boolean {
+  const prior = input.prior_continuation;
+  if (prior === undefined || prior === null) return false;
+  if ((prior.enumeration_policy ?? "canonical") !== (input.view.enumeration_policy ?? "canonical")) return true;
+  if ((prior.result_kind_view ?? "mixed") !== (input.view.result_kind_view ?? "mixed")) return true;
+  if (prior.authorized_scopes === undefined || input.authorized_scopes === undefined) return false;
+  return identityDigest([...(prior.authorized_scopes)].sort(compareText))
+    !== identityDigest([...input.authorized_scopes].sort(compareText));
+}
 
 export function resumeIndexProjection(state: FieldEngineState, snapshot: FieldSnapshot): ProjectionProgress {
   const references = [state.binding.kind === "bound" ? state.binding.values : snapshot.values,
@@ -14,8 +185,13 @@ export function resumeIndexProjection(state: FieldEngineState, snapshot: FieldSn
   const prior = state.projection_progress;
   const same = prior !== undefined && references.every((reference, index) => reference === prior.input_references[index]);
   const generation = (prior?.generation ?? 0) + (same ? 0 : 1);
-  return { revision: `projection-generation:${generation}`, input_references: references, generation,
-    offset: same ? prior!.offset : 0, delivered_entries: prior?.delivered_entries ?? {} };
+  return {
+    revision: `projection-generation:${generation}`,
+    input_references: references,
+    generation,
+    offset: same ? prior!.offset : 0,
+    delivered_entries: prior?.delivered_entries ?? {}
+  };
 }
 
 export function retainIndexDelivery(
@@ -26,10 +202,96 @@ export function retainIndexDelivery(
   const delivered = { ...progress.delivered_entries };
   let bytes = first ? 256 : 0;
   for (const entry of entries) {
-    const key = productStateNodeId(productStateKeyFromIndexEntry(entry));
+    const key = productIdOfEntry(entry);
     if (delivered[key] === undefined) bytes += 128 + Buffer.byteLength(key, "utf8");
-    // Open observation can refine an already emitted product; retain only its latest semantic revision.
     delivered[key] = indexEntryRevision(entry);
   }
   return { progress: { ...progress, delivered_entries: delivered }, bytes };
 }
+
+export function retainCommittedRevisions(
+  progress: ProjectionProgress,
+  committed: EmittedRevisions,
+  first: boolean
+): Readonly<{ progress: ProjectionProgress; bytes: number }> {
+  let bytes = first ? 256 : 0;
+  for (const [key, revision] of Object.entries(committed)) {
+    if (progress.delivered_entries[key] === undefined) bytes += 128 + Buffer.byteLength(key, "utf8");
+    else if (progress.delivered_entries[key] === revision) continue;
+  }
+  return { progress: { ...progress, delivered_entries: committed }, bytes };
+}
+
+export function rememberIssuedDelivery(input: Readonly<{
+  readonly query_key: string;
+  readonly request_digest: string;
+  readonly index: InformationIndex;
+}>): string {
+  const delivery_id = createHash("sha256").update(JSON.stringify([
+    input.request_digest, input.index.query_id, input.index.snapshot_id,
+    input.index.entries.map(productIdOfEntry)
+  ])).digest("hex").slice(0, 32);
+  ISSUED_PAGES.set(input.request_digest, {
+    query_key: input.query_key,
+    request_digest: input.request_digest,
+    delivery_id,
+    member_ids: input.index.entries.map(productIdOfEntry),
+    index: input.index
+  });
+  while (ISSUED_PAGES.size > ISSUED_MAX) {
+    const oldest = ISSUED_PAGES.keys().next().value;
+    if (oldest === undefined) break;
+    ISSUED_PAGES.delete(oldest);
+  }
+  return delivery_id;
+}
+
+export function replayIssuedDelivery(requestDigest: string): IssuedDelivery | undefined {
+  return ISSUED_PAGES.get(requestDigest);
+}
+
+export function evictIssuedDeliveries(queryKey: string): readonly string[] {
+  const removed: string[] = [];
+  for (const [digest, issued] of ISSUED_PAGES) {
+    if (issued.query_key === queryKey) {
+      ISSUED_PAGES.delete(digest);
+      removed.push(digest);
+    }
+  }
+  return removed;
+}
+
+export function issuedDeliveryRevoked(
+  issued: IssuedDelivery,
+  eligibleIds: ReadonlySet<string>
+): boolean {
+  return issued.member_ids.some((id) => !eligibleIds.has(id));
+}
+
+export function replayIssuedIndex(issued: IssuedDelivery): InformationIndex {
+  return { ...issued.index, page_purpose: "retry" };
+}
+
+function updateKindFor(entry: IndexEntry, previousRevision: string | undefined): ProductUpdateKind {
+  if (previousRevision === undefined || previousRevision.length === 0) return "proof";
+  if (entry.claim !== "unknown") return "claim";
+  if (entry.explanation_ids.length > 0) return "payload";
+  return "proof";
+}
+
+function canonicalFieldIdentity(value: FieldValue): string {
+  return canonicalIndexEntryIdentity({
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    target: value.state.target,
+    ...(value.state.target.kind === "memory_entry" ? { object_id: value.state.target.object_id } : {}),
+    hypothesis_id: value.state.hypothesis_id,
+    output_binding: value.state.binding_context,
+    program_state: value.state.program_state,
+    time_state: value.state.time_state,
+    role: "associated",
+    association_milligrades: reachableMilligradesOf(value) ?? 0,
+    claim: "unknown",
+    explanation_ids: []
+  });
+}
+

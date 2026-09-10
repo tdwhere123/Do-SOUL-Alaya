@@ -1,10 +1,7 @@
-import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  BOUNDED_DEFAULT_ARRAY_MAX,
   MILLIGRADE_BOTTOM,
   canonicalIndexEntryIdentity,
-  productStateKeyFromIndexEntry,
   productSubjectId,
   reachableMilligradesOf,
   type ClaimState,
@@ -29,10 +26,27 @@ import { compareText } from "../../../shared/compare-text.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import { composedFacetPathId, facetBelongsToOutput } from "../engine/path-composition.js";
 import { groundedOutputDerivations, type GroundingProgress } from "../engine/output-derivations.js";
-import { productStateNodeId, productIndexOrderKey } from "../reference/bind-max-min.js";
-import { traceDerivationForest } from "../engine/derivation-provenance.js";
-import { ExplanationDelivery, type ProjectedPage } from "./explanation-delivery.js";
-import type { RetainedRows } from "../engine/retained-sequence.js";
+import type { BoundSourceFacts } from "../engine/binding-environment.js";
+import { productStateNodeId } from "../reference/bind-max-min.js";
+import {
+  OFFSET_CURSOR,
+  PROJECTION_CURSOR,
+  RESUME_CURSOR,
+  continuationCursorInvalid,
+  continuationPolicyMismatch,
+  emittedRevisionsOf,
+  encodeResumeCursor,
+  identityDigest,
+  indexEntryRevision,
+  mergeCommittedRevisions,
+  missingEmittedIdentities,
+  productIdOfEntry,
+  productUpdateFor,
+  resumeDigest,
+  sortFieldValues,
+  sortIndexEntries,
+  type EmittedRevisions
+} from "../../runtime/index-continuation.js";
 import {
   admitIndexBudget,
   completenessForInterpretationStatus,
@@ -56,16 +70,16 @@ export {
   selectFeasibleWitnesses,
   witnessAttributionHandle
 } from "./explanation.js";
+export { indexEntryRevision } from "../../runtime/index-continuation.js";
 
 export type AcceptingProjectionInput = Readonly<{
   readonly snapshot: FieldSnapshot;
-  readonly ordered_values?: Readonly<{ size: number; at(index: number): FieldValue | undefined }>;
   readonly view: QueryView;
   readonly query_id: string;
   readonly snapshot_id: string;
   readonly result_version: string;
   readonly budget: RequestBudget;
-  readonly roles?: Readonly<{ get(id: string): IndexRole | undefined }>;
+  readonly roles?: ReadonlyMap<string, IndexRole>;
   readonly claims?: ReadonlyMap<string, ClaimState>;
   readonly support?: readonly SupportRecord[];
   readonly page_offset?: number;
@@ -73,13 +87,19 @@ export type AcceptingProjectionInput = Readonly<{
   readonly projection_generation?: number;
   readonly delivered_product_ids?: ReadonlySet<string>;
   readonly delivered_entry_revisions?: Readonly<Record<string, string>>;
+  readonly ordered_values?: Readonly<{ size: number; at(index: number): FieldValue | undefined }>;
   readonly on_projection_progress?: (offset: number) => void;
   readonly on_semantic_entries?: (entries: readonly IndexEntry[]) => void;
-  readonly explanation_progress?: ExplanationDelivery;
-  readonly on_explanation_progress?: (progress: ExplanationDelivery | undefined, retainedBytes: number, work: number) => void;
+  readonly explanation_progress?: import("./explanation-delivery.js").ExplanationDelivery;
+  readonly on_explanation_progress?: (
+    progress: import("./explanation-delivery.js").ExplanationDelivery | undefined,
+    retainedBytes: number,
+    work: number
+  ) => void;
   readonly expires_at?: string;
   readonly as_of?: string;
   readonly lifetime_now?: string;
+  readonly authorized_scopes?: readonly string[];
   readonly prior_continuation?: Continuation | null;
   readonly observer?: ObserverCoverage;
   readonly interpretation_status?: QueryInterpretationStatus;
@@ -87,15 +107,14 @@ export type AcceptingProjectionInput = Readonly<{
   readonly interpretation_clock?: string;
   readonly model_id?: string;
   readonly derivations?: readonly Derivation[];
-  readonly derivation_forest?: ReadonlyMap<string, Derivation>;
-  readonly output_derivation_roots?: ReadonlyMap<string, readonly string[]>;
   readonly output_derivations?: Readonly<Record<string, readonly string[]>>;
-  readonly transition_derivations?: import("../engine/path-derivation.js").DerivationRootLookup;
+  readonly transition_derivations?: Readonly<Record<string, string>>;
+  readonly source_facts?: Readonly<Record<string, BoundSourceFacts>>;
   readonly grounding_progress?: GroundingProgress;
-  readonly grounding_transitions?: RetainedRows<FieldSnapshot["retained_transitions"][number]>;
-  readonly grounding_seeds?: RetainedRows<FieldSnapshot["seeds"][number]>;
-  readonly grounding_derivations?: RetainedRows<Derivation>;
-  readonly projection_facets?: RetainedRows<FacetVector>;
+  readonly grounding_transitions?: FieldSnapshot["retained_transitions"];
+  readonly grounding_seeds?: FieldSnapshot["seeds"];
+  readonly grounding_derivations?: readonly Derivation[];
+  readonly projection_facets?: readonly FacetVector[];
   readonly grounding_complete?: boolean;
   readonly remaining_memory_bytes?: number;
   readonly on_grounding_progress?: (progress: GroundingProgress, retainedBytes: number) => void;
@@ -114,9 +133,6 @@ export type AcceptingProjectionInput = Readonly<{
   readonly payload_work?: "complete" | "open";
 }>;
 
-const OFFSET_CURSOR = /^offset-(\d+)$/u;
-const RESUME_CURSOR = /^o(\d+)(?:\|(.*))?$/u;
-const PROJECTION_CURSOR = /^p(\d+)(?:g(\d+))?(?:r(\d+))?(?:e(\d+))?$/u;
 const REPRESENTATION_POLICY = "construct_index_then_page_then_payload" as const;
 const MAX_PAYLOAD_MEMORY_BYTES = 16_384;
 
@@ -144,7 +160,7 @@ export function projectAcceptingIndex(input: AcceptingProjectionInput): Informat
     || continuationPolicyMismatch(input)) {
     return closedIndex(epochInput, representation, invalidatedCompleteness());
   }
-  if (input.ordered_values === undefined && (input.view.enumeration_policy ?? "canonical") === "associative") {
+  if ((input.view.enumeration_policy ?? "canonical") === "associative") {
     assertAssociativeMilligradeContract(input.snapshot.values);
   }
   const admission = input.interpretation_status === undefined
@@ -168,12 +184,20 @@ export function continueAcceptingIndex(
       result_version: previous.result_version
     }, previous.representation, invalidatedCompleteness());
   }
+  const emitted = previous.continuation.emitted_revisions
+    ?? input.delivered_entry_revisions
+    ?? {};
   return projectAcceptingIndex({
     ...input,
     query_id: previous.query_id,
     snapshot_id: previous.snapshot_id,
     result_version: previous.result_version,
     prior_continuation: previous.continuation,
+    delivered_entry_revisions: { ...input.delivered_entry_revisions, ...emitted },
+    delivered_product_ids: new Set([
+      ...input.delivered_product_ids ?? [],
+      ...Object.keys(emitted)
+    ]),
     interpretation_id: input.interpretation_id ?? previous.continuation.interpretation_id
   });
 }
@@ -182,9 +206,7 @@ function pageAcceptingIndex(
   input: AcceptingProjectionInput,
   representation: InformationIndex["representation"]
 ): InformationIndex {
-  if (input.explanation_progress !== undefined) return finalizeIndexPage(input, representation,
-    input.explanation_progress.page, input.remaining_reserve ?? input.budget.finalization_reserve, true);
-  if (input.transition_derivations !== undefined && input.output_derivations === undefined && input.output_derivation_roots === undefined) {
+  if (input.transition_derivations !== undefined && input.output_derivations === undefined) {
     const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
     const deliveryWork = 1 + (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1);
     // Preserve one delivery opportunity when grounding can still advance; smaller requests resume after grounding.
@@ -192,22 +214,27 @@ function pageAcceptingIndex(
     const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
     const payloadMemory = input.finalize_payload === undefined ? 0
       : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
-    const grounded = groundedOutputDerivations({ seeds: input.grounding_seeds ?? input.snapshot.seeds,
-      transitions: input.grounding_transitions ?? input.snapshot.retained_transitions,
-      derivations: input.grounding_derivations ?? input.derivations ?? [],
-      transition_derivations: input.transition_derivations,
+    const grounded = groundedOutputDerivations({ seeds: input.snapshot.seeds,
+      transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
+      transition_derivations: input.transition_derivations, source_facts: input.source_facts,
       progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
       allowance: groundingAllowance });
     input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
-    input = { ...input, derivation_forest: grounded.progress.forest, output_derivation_roots: grounded.progress.root_map, grounding_progress: grounded.progress,
+    input = { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
       grounding_complete: grounded.complete,
       ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
       remaining_reserve: allowance - grounded.work,
       ...(!grounded.complete ? { resource_work: "open" } : {}) };
   }
-  const projected = acceptingEntries(input);
-  const entries = sortEntries(projected.entries, input.view.enumeration_policy ?? "canonical");
-  if (continuationPrefixUnverified(input, entries, projected.truncated)) {
+  const policy = input.view.enumeration_policy ?? "canonical";
+  const emitted = emittedRevisionsOf(input);
+  const useEmittedSet = usesEmittedSet(input, policy);
+  if (useEmittedSet && missingEmittedIdentities(emitted, input.snapshot.values).length > 0) {
+    return closedIndex(input, representation, invalidatedCompleteness());
+  }
+  const projected = acceptingEntries(input, useEmittedSet ? emitted : undefined);
+  const entries = sortIndexEntries(projected.entries, policy);
+  if (!useEmittedSet && continuationPrefixUnverified(input, entries, projected.truncated)) {
     input.on_remaining_reserve?.(projected.remaining);
     return { ...closedIndex(input, representation, indexCompleteness(input, {
       total: entries.length, remaining: 1, omitted_payload: false,
@@ -215,85 +242,36 @@ function pageAcceptingIndex(
     })),
       continuation: input.prior_continuation ?? null };
   }
-  if (continuationSetMismatch(input, entries)) {
+  if (!useEmittedSet && continuationSetMismatch(input, entries)) {
     return closedIndex(input, representation, invalidatedCompleteness());
   }
   input.on_projection_progress?.(projected.next);
-  const offset = resolvePageOffset(input, entries.length);
-  const page = entries.slice(offset, offset + input.budget.page_budget);
-  const remaining = Math.max(projected.truncated ? 1 : 0, entries.length - offset - page.length);
-  return finalizeIndexPage(input, representation, { entries, page, offset, remaining,
-    next: projected.next, truncated: projected.truncated }, projected.remaining);
-}
-
-function finalizeIndexPage(input: AcceptingProjectionInput, representation: InformationIndex["representation"],
-  projected: ProjectedPage, allowance: number, proofOnly = false): InformationIndex {
-  const { entries, offset, remaining } = projected;
-  let page = proofOnly ? [] : projected.page;
-  let proofRemaining = allowance;
-  let explanations: readonly Derivation[];
-  let proofOmitted = false;
-  let proofOpen = false;
-  if (input.on_explanation_progress !== undefined && (input.explanation_progress !== undefined || input.derivation_forest !== undefined)) {
-    const cursor = input.explanation_progress ?? new ExplanationDelivery(projected, input.derivation_forest!);
-    const reserve = page.length * (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1);
-    const proof = cursor.advance(Math.max(0, allowance - reserve), input.remaining_memory_bytes ?? input.budget.memory_bytes);
-    proofRemaining -= proof.work;
-    if (!proof.complete && !proof.invalid && !proof.capacity_limited) {
-      input.on_explanation_progress(cursor, proof.bytes, proof.work);
-      input = { ...input, explanation_progress: cursor };
-      explanations = [];
-      proofOmitted = true;
-      proofOpen = true;
-    } else {
-      input.on_explanation_progress(undefined, proof.bytes - cursor.retainedBytes, proof.work);
-      explanations = proof.explanations;
-      proofOmitted = proof.invalid || proof.capacity_limited;
-      if (proofOmitted) page = page.map((entry) => ({ ...entry, explanation_ids: [] }));
-    }
-  } else if (input.derivation_forest !== undefined) {
-    const roots = page.flatMap((entry) => entry.explanation_ids);
-    // Traversal and serialization each pay their own node/edge visits.
-    const traced = traceDerivationForest({ forest: input.derivation_forest, roots,
-      maxVisits: Math.floor(Math.max(0, proofRemaining - page.length * (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1)) / 2) });
-    proofRemaining -= traced.work;
-    if (traced.complete && traced.traversal.nodes.size <= proofRemaining) {
-      explanations = [...traced.traversal.nodes.values()];
-      proofRemaining -= explanations.length;
-    } else {
-      explanations = [];
-      proofOmitted = roots.length > 0;
-      page = page.map((entry) => ({ ...entry, explanation_ids: [] }));
-    }
-  } else explanations = recoverExplanationForest(page.flatMap((entry) => entry.explanation_ids), input.derivations ?? []);
-  if (explanations.length > BOUNDED_DEFAULT_ARRAY_MAX) {
-    explanations = []; proofOmitted = true;
-    page = page.map((entry) => ({ ...entry, explanation_ids: [] }));
-  }
-  const proofUpdates = proofOnly && !proofOpen && !proofOmitted ? projected.page.flatMap((entry) =>
-    entry.explanation_ids.map((root) => ({ schema_version: 1 as const,
-      product: productStateKeyFromIndexEntry(entry), update_kind: "proof" as const,
-      revision: root, previous_revision: indexEntryRevision(entry) }))) : [];
-  if (proofUpdates.length > BOUNDED_DEFAULT_ARRAY_MAX) {
-    explanations = []; proofOmitted = true;
-  }
-  if (!proofOnly) input.on_semantic_entries?.(projected.page);
-  const finalized = input.finalize_payload?.(page, proofRemaining);
-  const retryPayload = finalized !== undefined && !finalized.complete && finalized.retryable !== false;
+  const offset = useEmittedSet ? 0 : resolvePageOffset(input, entries.length);
+  const members = useEmittedSet
+    ? projected.members
+    : entries.slice(offset, offset + input.budget.page_budget);
+  const updates = useEmittedSet ? projected.updates : [];
+  const remaining = useEmittedSet
+    ? Math.max(projected.truncated ? 1 : 0, projected.unemitted - members.length)
+    : Math.max(projected.truncated ? 1 : 0, entries.length - offset - members.length);
+  const prepared = members.length > 0 ? members : updates;
+  if (!useEmittedSet || members.length > 0) input.on_semantic_entries?.(prepared);
+  const finalized = input.finalize_payload?.(prepared, projected.remaining);
+  const retryPayload = finalized !== undefined && !finalized.complete;
   if (finalized !== undefined) input = { ...input, payload_work: finalized.complete ? "complete" : "open" };
-  input.on_remaining_reserve?.(finalized?.remaining ?? proofRemaining);
+  input.on_remaining_reserve?.(finalized?.remaining ?? projected.remaining);
+  const committed = !retryPayload;
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
-  const omittedPayload = mixedPayload || proofOmitted || input.payload_work === "open"
-    || (input.derivation_forest === undefined && input.explanation_progress === undefined && expandPayload && omittedStructuredPayload(
+  const omittedPayload = mixedPayload || input.payload_work === "open"
+    || (expandPayload && omittedStructuredPayload(
       input.support,
       input.derivations,
       input.budget.page_budget
     ));
-  const resourceOpen = projected.truncated || input.resource_work === "open" || proofOpen;
+  const resourceOpen = projected.truncated || input.resource_work === "open";
   const completeness = indexCompleteness(input, {
-    total: entries.length + (input.delivered_product_ids?.size
-      ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)),
+    total: members.length + updates.length + Object.keys(emitted).length,
     remaining,
     omitted_payload: omittedPayload,
     expand_payload: expandPayload,
@@ -301,23 +279,36 @@ function finalizeIndexPage(input: AcceptingProjectionInput, representation: Info
     ...(input.support_work_status === undefined ? {} : { explanation_work: input.support_work_status }),
     ...(resourceOpen ? { resource_work: "open" as const } : {})
   });
+  const committedRevisions = committed
+    ? mergeCommittedRevisions(emitted, [...members, ...updates])
+    : { ...emitted };
+  const nextOffset = retryPayload ? offset : offset + members.length;
+  const scanOffset = retryPayload
+    ? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)
+    : projected.truncated || useEmittedSet
+      || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     query_id: input.query_id,
     snapshot_id: input.snapshot_id,
     result_version: input.result_version,
-    entries: page,
-    explanations,
+    entries: prepared,
+    explanations: recoverExplanationForest(prepared.flatMap((entry) => entry.explanation_ids), input.derivations ?? []),
     completeness,
-    continuation: nextContinuation({ ...input, ...(resourceOpen || retryPayload ? { resource_work: "open" } : {}) },
-      remaining, retryPayload ? offset : offset + page.length, entries,
-      retryPayload ? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)
-        : projected.truncated || input.delivered_product_ids !== undefined
-          || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined),
+    continuation: nextContinuation({
+      ...input,
+      ...(resourceOpen || omittedPayload ? { resource_work: "open" } : {}),
+      delivered_entry_revisions: committedRevisions
+    }, remaining, nextOffset, useEmittedSet ? [...members, ...updates] : entries, scanOffset,
+      committedRevisions, useEmittedSet),
     representation,
-    page_purpose: proofOnly ? "payload" : "membership",
-    ...(proofOnly && !proofOpen && !proofOmitted ? { product_updates: proofUpdates } : {}),
-    order_status: remaining > 0 || resourceOpen || completeness.order_coverage !== "complete" ? "open" : "complete"
+    page_purpose: members.length > 0 ? "membership" : updates.length > 0 ? "update" : "membership",
+    ...(updates.length === 0 ? {} : {
+      product_updates: updates.map((entry) => productUpdateFor(entry, emitted[productIdOfEntry(entry)]))
+    }),
+    order_status: remaining > 0 || resourceOpen || completeness.order_coverage !== "complete"
+      ? "open"
+      : "complete"
   };
 }
 
@@ -336,76 +327,138 @@ function indexCompleteness(
   });
 }
 
+function usesEmittedSet(input: AcceptingProjectionInput, policy: EnumerationPolicy): boolean {
+  // Offset into a resorted list drops late stronger members; the continuation's
+  // emitted_revisions ledger is the projector's own resume state for every policy.
+  return policy === "associative"
+    || input.delivered_product_ids !== undefined
+    || input.delivered_entry_revisions !== undefined
+    || input.prior_continuation?.emitted_revisions !== undefined;
+}
+
 function acceptingEntries(
-  input: AcceptingProjectionInput
-): { readonly entries: IndexEntry[]; readonly truncated: boolean; readonly next: number; readonly remaining: number } {
+  input: AcceptingProjectionInput,
+  emitted?: EmittedRevisions
+): {
+  readonly entries: IndexEntry[];
+  readonly members: IndexEntry[];
+  readonly updates: IndexEntry[];
+  readonly unemitted: number;
+  readonly truncated: boolean;
+  readonly next: number;
+  readonly remaining: number;
+} {
   const entries: IndexEntry[] = [];
+  const members: IndexEntry[] = [];
+  const updates: IndexEntry[] = [];
   let allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
   let truncated = false;
   let groundingDeferred = false;
-  const start = input.projection_scan_offset
-    ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0);
-  const legacyValues = input.ordered_values === undefined
-    ? [...input.snapshot.values].sort((a, b) => compareText(valueSortKey(a), valueSortKey(b))) : undefined;
-  const values = input.ordered_values ?? { size: legacyValues!.length, at: (index: number) => legacyValues![index] };
+  const policy = input.view.enumeration_policy ?? "canonical";
+  const start = emitted !== undefined && Object.keys(emitted).length > 0
+    ? 0
+    : input.projection_scan_offset
+      ?? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0);
+  const sorted = sortFieldValues(input.snapshot.values, emitted === undefined ? "canonical" : policy);
+  const values = input.ordered_values !== undefined && emitted === undefined
+    ? input.ordered_values
+    : { size: sorted.length, at: (index: number) => sorted[index] };
   const payloadWork = input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1;
   const pageLimited = input.projection_scan_offset !== undefined || input.delivered_product_ids !== undefined
     || input.delivered_entry_revisions !== undefined || input.grounding_complete === false
     || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "")
     || allowance < values.size * (1 + payloadWork);
   const pageEnd = resolvePageOffset(input, values.size) + input.budget.page_budget;
-  if (input.budget.page_budget === 0 && pageLimited) {
-    return { entries, truncated: start < values.size, next: start, remaining: allowance };
+  if (input.budget.page_budget === 0) {
+    return {
+      entries, members, updates, unemitted: values.size,
+      truncated: start < values.size, next: start, remaining: allowance
+    };
   }
   let next = start;
   for (let index = start; index < values.size; index += 1) {
-    // Retained outputs own their payload reserve; another candidate may need
-    // the same reserve, so admission precedes reading either candidate.
-    if (allowance < 1 + payloadWork * (entries.length + 1)) { truncated = true; break; }
-    allowance -= 1;
-    const value = values.at(index)!;
-    if ((input.view.enumeration_policy ?? "canonical") === "associative") assertAssociativeMilligradeContract([value]);
-    if (input.delivered_entry_revisions === undefined && input.delivered_product_ids?.has(productStateNodeId(value.state))) { next += 1; continue; }
-    const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, input);
-    const entry = grounded ? indexEntryForValue(value, input) : null;
-    if (entry !== null && input.delivered_entry_revisions?.[productStateNodeId(value.state)] === indexEntryRevision(entry)) {
+    const value = values.at(index);
+    if (value === undefined) break;
+    const key = productStateNodeId(value.state);
+    if (emitted !== undefined) {
+      const prior = emitted[key];
+      if (prior !== undefined) {
+        const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, input);
+        const entry = grounded ? indexEntryForValue(value, input) : null;
+        if (entry === null || prior === indexEntryRevision(entry)) {
+          next += 1;
+          continue;
+        }
+        if (allowance < 1) { truncated = true; break; }
+        allowance -= 1;
+        if (updates.length < input.budget.page_budget) updates.push(entry);
+        next += 1;
+        continue;
+      }
+      if (input.delivered_product_ids?.has(key)) {
+        next += 1;
+        continue;
+      }
+    } else if (input.delivered_entry_revisions === undefined
+      && input.delivered_product_ids?.has(key)) {
       next += 1;
       continue;
     }
+    const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, input);
+    const entry = grounded ? indexEntryForValue(value, input) : null;
+    if (entry !== null && input.delivered_entry_revisions?.[key] === indexEntryRevision(entry)) {
+      next += 1;
+      continue;
+    }
+    const collected = emitted === undefined ? entries.length : members.length;
     const payloadReserve = input.finalize_payload === undefined ? 0
-      : (input.payload_work_per_entry ?? 1) * (entries.length + (value.accepting && grounded ? 1 : 0));
-    if (allowance < payloadReserve) {
+      : (input.payload_work_per_entry ?? 1) * (collected + (value.accepting && grounded ? 1 : 0));
+    if (allowance < 1 + payloadReserve) {
       truncated = true;
       break;
     }
+    allowance -= 1;
     if (!grounded) {
       groundingDeferred ||= value.accepting;
-      if (value.accepting && input.delivered_product_ids === undefined) break;
+      if (value.accepting && input.delivered_product_ids === undefined && emitted === undefined) break;
       next += 1;
       continue;
     }
-    if (entry !== null) entries.push(entry);
+    if (entry !== null) {
+      entries.push(entry);
+      if (emitted !== undefined && members.length < input.budget.page_budget) members.push(entry);
+    }
     next += 1;
+    if (emitted !== undefined) {
+      if (members.length >= input.budget.page_budget) {
+        truncated = truncated || next < values.size;
+        break;
+      }
+      continue;
+    }
     if (pageLimited && entries.length >= pageEnd && next < values.size) { truncated = true; break; }
   }
-  return { entries, truncated: truncated || groundingDeferred, next, remaining: allowance };
-}
-
-export function indexEntryRevision(entry: IndexEntry): string {
-  const { target, ...membership } = entry;
-  const { span: _span, ...root } = target.kind === "source_evidence" ? target : { ...target, span: undefined };
-  return createHash("sha256").update(stableStringify({ ...membership, target: root })).digest("hex");
+  const unemitted = emitted === undefined
+    ? Math.max(0, entries.length)
+    : members.length + (truncated ? 1 : 0);
+  return {
+    entries,
+    members: emitted === undefined ? entries : members,
+    updates,
+    unemitted,
+    truncated: truncated || groundingDeferred,
+    next,
+    remaining: allowance
+  };
 }
 
 function groundedSeedAccepts(value: FieldValue, input: AcceptingProjectionInput): boolean {
   const key = productStateNodeId(value.state);
-  if (input.grounding_progress !== undefined) return (input.grounding_progress.grades.get(key) ?? -1) >= (value.milligrades ?? 0)
-    && input.grounding_progress.root_map.has(key);
   const roots = new Set(input.output_derivations?.[key] ?? []);
   return input.derivations?.some((root) => roots.has(root.derivation_id) && root.kind === "leaf"
       && root.observation_ids.includes(productSubjectId(value.state))
       && (root.association_milligrades ?? 0) >= (value.milligrades ?? 0)) === true
-    && (input.grounding_seeds ?? input.snapshot.seeds).some((seed) => productStateNodeId(seed.state) === key
+    && input.snapshot.seeds.some((seed) => productStateNodeId(seed.state) === key
       && seed.milligrades >= (value.milligrades ?? 0));
 }
 
@@ -416,7 +469,6 @@ function indexEntryForValue(
   if (!value.accepting) return null;
   const milligrades = reachableMilligradesOf(value);
   if (milligrades === undefined) return null;
-  if (milligrades <= input.view.threshold_milligrades) return null;
   if (!facetsAccept(value, input)) return null;
   const kindView = input.view.result_kind_view ?? "mixed";
   if (kindView === "memory_only" && value.state.target.kind !== "memory_entry") return null;
@@ -450,8 +502,6 @@ function indexEntryForValue(
       value,
       support: input.support,
       derivations: input.derivations,
-      derivation_forest: input.derivation_forest,
-      output_derivation_roots: input.output_derivation_roots,
       output_derivations: input.output_derivations,
       page_budget: input.budget.page_budget,
       expand_payload: expandPayload
@@ -460,7 +510,7 @@ function indexEntryForValue(
 }
 
 function facetsAccept(value: FieldValue, input: AcceptingProjectionInput): boolean {
-  if ((input.projection_facets ?? input.snapshot.facets).length === 0) return true;
+  if (input.snapshot.facets.length === 0) return true;
   const vectors = facetsForCandidate(value, input);
   if (vectors.length === 0) return false;
   return evaluateFacetPredicate(
@@ -474,15 +524,14 @@ function facetsForCandidate(
   value: FieldValue,
   input: AcceptingProjectionInput
 ): readonly FacetVector[] {
-  const facets = input.projection_facets ?? input.snapshot.facets;
-  const seeds = (input.grounding_seeds ?? input.snapshot.seeds).filter((seed) => productStateNodeId(seed.state) === productStateNodeId(value.state));
+  const facets = input.snapshot.facets;
+  const seeds = input.snapshot.seeds.filter((seed) => productStateNodeId(seed.state) === productStateNodeId(value.state));
   return [...facets.filter((vector) => facetBelongsToOutput(vector.path_id, value.state)),
     ...seeds.map((seed) => ({ schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
       path_id: composedFacetPathId(seed.state, "seed"), coordinates: [seed.milligrades] }))];
 }
 
 function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): FacetMode {
-  if (input.relation_facet_modes === undefined) return input.view.facet_mode;
   for (const transition of input.snapshot.retained_transitions) {
     if (productStateNodeId(transition.to) !== productStateNodeId(value.state)) continue;
     const override = input.relation_facet_modes?.get(transition.relation_kind);
@@ -491,26 +540,20 @@ function facetModeForValue(value: FieldValue, input: AcceptingProjectionInput): 
   return input.view.facet_mode;
 }
 
-function sortEntries(entries: readonly IndexEntry[], policy: EnumerationPolicy = "canonical"): IndexEntry[] {
-  // Canonical order is full product identity. Associative uses guaranteed lower milligrades
-  // then exactly that canonical key. Membership is unchanged.
-  return [...entries].sort((left, right) => compareIndexEntries(left, right, policy));
-}
-
-function compareIndexEntries(
-  left: IndexEntry,
-  right: IndexEntry,
-  policy: EnumerationPolicy
-): number {
-  if (policy === "associative") {
-    const grade = right.association_milligrades - left.association_milligrades;
-    if (grade !== 0) return grade;
-  }
-  return compareText(canonicalIndexEntryIdentity(left), canonicalIndexEntryIdentity(right));
-}
-
 function valueSortKey(value: FieldValue): string {
-  return productIndexOrderKey(value.state);
+  return canonicalIndexEntryIdentity({
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    target: value.state.target,
+    ...(value.state.target.kind === "memory_entry" ? { object_id: value.state.target.object_id } : {}),
+    hypothesis_id: value.state.hypothesis_id,
+    output_binding: value.state.binding_context,
+    program_state: value.state.program_state,
+    time_state: value.state.time_state,
+    role: "associated",
+    association_milligrades: reachableMilligradesOf(value) ?? 0,
+    claim: "unknown",
+    explanation_ids: []
+  });
 }
 
 function entrySortKey(entry: IndexEntry): string {
@@ -528,19 +571,6 @@ function resolvePageOffset(input: AcceptingProjectionInput, total: number): numb
   const matched = OFFSET_CURSOR.exec(cursor);
   if (matched === null) return total;
   return Number(matched[1]);
-}
-
-function continuationCursorInvalid(input: AcceptingProjectionInput): boolean {
-  if (input.page_offset !== undefined) return false;
-  const cursor = input.prior_continuation?.cursor;
-  if (cursor === undefined) return false;
-  // Associative order is not an offset into a canonical scan. Progressive
-  // emitted-set pagination is CP08; an offset cursor under associative policy
-  // cannot be replayed without skipping or duplicating members.
-  if ((input.view.enumeration_policy ?? "canonical") === "associative" && OFFSET_CURSOR.test(cursor)) {
-    return true;
-  }
-  return !OFFSET_CURSOR.test(cursor) && !RESUME_CURSOR.test(cursor) && !PROJECTION_CURSOR.test(cursor);
 }
 
 function continuationSetMismatch(
@@ -577,7 +607,6 @@ function continuationPrefixUnverified(
 }
 
 function projectionPrefixIdentity(input: AcceptingProjectionInput, offset: number): string {
-  if (input.delivered_product_ids !== undefined) return `projection-${input.projection_generation ?? 0}-${offset}`;
   const prefix = [...input.snapshot.values].sort((a, b) => compareText(valueSortKey(a), valueSortKey(b)))
     .slice(0, offset).map((value) => stableStringify([value,
       input.roles?.get(productStateNodeId(value.state)) ?? "associated",
@@ -590,17 +619,22 @@ function nextContinuation(
   remaining: number,
   nextOffset: number,
   entries: readonly IndexEntry[],
-  projectionOffset?: number
+  projectionOffset: number | undefined,
+  committed: EmittedRevisions,
+  useEmittedSet: boolean
 ): Continuation | null {
   if (input.expires_at === undefined) return null;
   const observerOpen = input.observer?.outcome.status === "open"
     || input.observer?.outcome.status === "interrupted";
   if (remaining <= 0 && !observerOpen && input.resource_work !== "open" && input.support_work_status !== "open") return null;
+  const emittedKeys = Object.keys(committed).sort(compareText);
   const cursor = projectionOffset === undefined
-    ? encodeResumeCursor(nextOffset, entries.slice(0, nextOffset).map(entrySortKey))
+    ? encodeResumeCursor(
+      useEmittedSet ? emittedKeys.length : nextOffset,
+      useEmittedSet ? emittedKeys : entries.slice(0, nextOffset).map(entrySortKey)
+    )
     : `p${projectionOffset}g${input.grounding_progress?.completed_work ?? 0}`
-      + (input.projection_generation === undefined ? "" : `r${input.projection_generation}`)
-      + (input.explanation_progress === undefined ? "" : `e${input.explanation_progress.completedWork}`);
+      + (input.projection_generation === undefined ? "" : `r${input.projection_generation}`);
   if (cursor === null) return null;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -613,15 +647,18 @@ function nextContinuation(
     cursor,
     ...(input.interpretation_id === undefined ? {} : { interpretation_id: input.interpretation_id }),
     enumeration_policy: input.view.enumeration_policy ?? "canonical",
-    result_kind_view: input.view.result_kind_view ?? "mixed"
+    result_kind_view: input.view.result_kind_view ?? "mixed",
+    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    ...wireEmittedRevisions(committed)
   };
 }
 
-function continuationPolicyMismatch(input: AcceptingProjectionInput): boolean {
-  const prior = input.prior_continuation;
-  if (prior === undefined || prior === null) return false;
-  return (prior.enumeration_policy ?? "canonical") !== (input.view.enumeration_policy ?? "canonical")
-    || (prior.result_kind_view ?? "mixed") !== (input.view.result_kind_view ?? "mixed");
+function wireEmittedRevisions(committed: EmittedRevisions): { readonly emitted_revisions: EmittedRevisions } | {} {
+  const next: Record<string, string> = {};
+  for (const [id, revision] of Object.entries(committed)) {
+    if (revision.length > 0) next[id] = revision;
+  }
+  return Object.keys(next).length === 0 ? {} : { emitted_revisions: next };
 }
 
 function assertAssociativeMilligradeContract(values: readonly FieldValue[]): void {
@@ -635,21 +672,6 @@ function assertAssociativeMilligradeContract(values: readonly FieldValue[]): voi
       );
     }
   }
-}
-
-function encodeResumeCursor(offset: number, prefixKeys: readonly string[]): string | null {
-  const cursor = `o${String(offset)}|${identityDigest(prefixKeys)}`;
-  return cursor.length >= 1 && cursor.length <= 256 ? cursor : null;
-}
-
-function resumeDigest(cursor: string): string | undefined {
-  const resume = RESUME_CURSOR.exec(cursor);
-  const suffix = resume?.[2];
-  return suffix === undefined || suffix.length === 0 ? undefined : suffix;
-}
-
-function identityDigest(keys: readonly string[]): string {
-  return createHash("sha256").update(keys.join("\n")).digest("hex");
 }
 
 function resolveInterpretationId(input: AcceptingProjectionInput): string | undefined {
