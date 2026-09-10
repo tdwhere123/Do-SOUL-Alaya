@@ -103,7 +103,9 @@ describe("conditional-field result encoding", () => {
       representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
     };
     const results = encodeIndexResults(index, new Map([["memory-1", "too large"]]), 1);
-    expect(results).toEqual([]);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.object_id).toBe(index.entries[0]?.object_id);
+    expect(results[0]?.content_preview).toBe("[payload omitted]");
     expect(frameEncodedIndex(index, results).entries).toEqual(index.entries);
     expect(frameEncodedIndex(index, results).completeness.payload).toBe("omitted");
   });

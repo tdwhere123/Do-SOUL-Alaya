@@ -46,16 +46,17 @@ export function encodeIndexResults(
     const metadataBytes = evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0
       ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings }), "utf8");
     const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedTokens);
-    if (fitted === null) break;
-    // Emitting the bytes then flagging within_budget=false is not an allowance.
-    const usedThrough = usedTokens + fitted.tokenEstimate;
+    const omitted = fitted === null;
+    const content = omitted ? "[payload omitted]" : fitted.preview;
+    const tokenEstimate = omitted ? 0 : fitted.tokenEstimate;
+    const usedThrough = usedTokens + tokenEstimate;
     usedTokens = usedThrough;
     encoded.push({
       ...(objectId === undefined ? {} : { object_id: objectId }),
       object_kind: indexEntryObjectKind(entry),
-      target: deliveredTarget(entry.target, fitted.preview, retainedPreview !== undefined),
+      target: deliveredTarget(entry.target, content, !omitted && retainedPreview !== undefined),
       relevance_score: score,
-      content_preview: fitted.preview,
+      content_preview: content,
       evidence_pointers: evidencePointers,
       ...(stagedWarnings === undefined ? {} : { staged_warnings: stagedWarnings }),
       ...(entry.hypothesis_id === undefined ? {} : { hypothesis_id: entry.hypothesis_id }),
@@ -66,7 +67,7 @@ export function encodeIndexResults(
       source_channels: ["conditional_field"],
       score_factors: { activation: score, relevance: score },
       budget_state: {
-        token_estimate: fitted.tokenEstimate,
+        token_estimate: tokenEstimate,
         max_entries: index.representation.page_budget,
         max_total_tokens: maxTotalTokens,
         remaining_entries: Math.max(0, index.representation.page_budget - encoded.length),
@@ -82,7 +83,8 @@ export function frameEncodedIndex(
   index: InformationIndex,
   results: readonly MemorySearchResult[]
 ): InformationIndex {
-  let partialPayload = results.length < index.entries.length;
+  let partialPayload = results.length < index.entries.length
+    || results.some((row) => row.content_preview === "[payload omitted]");
   const entries = index.entries.map((entry, offset) => {
     if (entry.target.kind !== "source_evidence") return entry;
     const target = results[offset]?.target;
@@ -100,7 +102,9 @@ export function frameEncodedIndex(
     entries,
     completeness: {
       ...index.completeness,
-      payload: partialPayload ? (results.length < index.entries.length ? "omitted" : "partial") : index.completeness.payload,
+      payload: results.some((row) => row.content_preview === "[payload omitted]") || results.length < index.entries.length
+        ? "omitted"
+        : partialPayload ? "partial" : index.completeness.payload,
       transport: results.length < index.entries.length && index.completeness.transport === "complete" ? "partial" : index.completeness.transport
     }
   };

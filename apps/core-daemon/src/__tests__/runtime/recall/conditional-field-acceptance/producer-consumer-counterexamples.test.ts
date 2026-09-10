@@ -245,12 +245,14 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
       2_000
     );
     const framed = frameEncodedIndex(index, encoded);
-    const previewBytes = encoded.reduce((sum, row) => sum + Buffer.byteLength(row.content_preview, "utf8"), 0);
-    expect(encoded.length).toBeLessThan(30);
-    expect(previewBytes).toBeLessThanOrEqual(2_000);
+    const fittedBytes = encoded
+      .filter((row) => row.content_preview !== "[payload omitted]")
+      .reduce((sum, row) => sum + Buffer.byteLength(row.content_preview, "utf8"), 0);
+    expect(encoded.map((row) => row.object_id)).toEqual(entries.map((entry) => entry.object_id));
+    expect(encoded.some((row) => row.content_preview === "[payload omitted]")).toBe(true);
+    expect(fittedBytes).toBeLessThanOrEqual(2_000);
     expect(encoded.every((row) => row.budget_state.within_budget)).toBe(true);
     expect(framed.completeness.payload).toBe("omitted");
-    expect(framed.completeness.transport).toBe("partial");
     expect(framed.completeness.logical_index).toBe("complete");
   });
 

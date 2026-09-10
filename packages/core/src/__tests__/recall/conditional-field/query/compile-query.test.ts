@@ -542,7 +542,11 @@ describe("conditional-field query compiler", () => {
     };
     expect(continuationViewMismatch(canonicalContinuation, requestedAssociative.view)).toBe(true);
     expect(continuationViewMismatch(canonicalContinuation, associative.view)).toBe(false);
-    expect(continuationViewMismatch(canonicalContinuation, associative.view, ["private"])).toBe(false);
+    expect(continuationViewMismatch(canonicalContinuation, associative.view, ["private"])).toBe(true);
+    expect(continuationViewMismatch({
+      ...canonicalContinuation,
+      authorized_scopes: ["project"]
+    }, associative.view)).toBe(true);
     expect(continuationViewMismatch({
       ...canonicalContinuation,
       authorized_scopes: ["public"]

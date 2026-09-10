@@ -91,7 +91,8 @@ export function continuationViewMismatch(
     !== stableStringify([...(view.supported_result_kinds ?? [])].sort())) return true;
   if (stableStringify(continuation.cap_contracts ?? null) !== stableStringify(view.cap_contracts ?? null)) return true;
   if (stableStringify(continuation.claim_demands ?? null) !== stableStringify(view.claim_demands ?? null)) return true;
-  if (continuation.authorized_scopes === undefined || authorizedScopes === undefined) return false;
+  if (continuation.authorized_scopes === undefined && authorizedScopes === undefined) return false;
+  if (continuation.authorized_scopes === undefined || authorizedScopes === undefined) return true;
   return stableStringify([...(continuation.authorized_scopes)].sort())
     !== stableStringify([...authorizedScopes].sort());
 }

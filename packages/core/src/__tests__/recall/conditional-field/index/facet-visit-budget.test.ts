@@ -34,7 +34,7 @@ describe("facet collection visits against the request allowance", () => {
     expect(firstVisits).toBeLessThan(prepareRows);
     expect(firstVisits).not.toBe(1);
     expect(firstVisits).not.toBe(snapshot.facets.length);
-    const resumed = first.continuation === null ? first : projectAcceptingIndex(input(snapshot, {
+    const resumed = projectAcceptingIndex(input(snapshot, {
       remaining_reserve: 40,
       cost,
       projection_facet_index: retained,
@@ -44,6 +44,40 @@ describe("facet collection visits against the request allowance", () => {
     expect([...first.entries, ...resumed.entries].map((entry) => entry.object_id)).toContain("member");
     expect(cost.snapshot().native_visits).not.toBe(1);
     expect(cost.snapshot().native_visits).not.toBe(snapshot.facets.length);
+  });
+
+  it("does not admit an unindexed faceted product while the facet index is incomplete", () => {
+    const pass = productKey("pass");
+    const fail = productKey("fail");
+    const snapshot: FieldSnapshot = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      query_id: "query",
+      snapshot_id: SNAPSHOT_ID,
+      values: [fieldValue(pass, 1000), fieldValue(fail, 1000)],
+      seeds: [
+        { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state: pass, milligrades: 1000 },
+        { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state: fail, milligrades: 1000 }
+      ],
+      retained_transitions: [],
+      facets: [
+        {
+          schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+          path_id: composedFacetPathId(pass, "ok"),
+          coordinates: [900]
+        },
+        {
+          schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+          path_id: composedFacetPathId(fail, "bad"),
+          coordinates: [100]
+        }
+      ]
+    };
+    const index = projectAcceptingIndex(input(snapshot, {
+      remaining_reserve: 1,
+      view: { ...defaultView(), threshold_milligrades: 800 }
+    }));
+    expect(index.entries.map((entry) => entry.object_id)).not.toContain("fail");
+    expect(index.entries.map((entry) => entry.object_id)).not.toContain("pass");
   });
 
   it("does not treat an empty facet bag as a visit count of snapshot.seeds.length", () => {

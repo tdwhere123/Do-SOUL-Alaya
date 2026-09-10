@@ -454,6 +454,11 @@ function acceptingEntries(
     }
     const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, indexed);
     const entry = grounded ? indexEntryForValue(value, indexed) : null;
+    if (value.accepting && grounded && input.snapshot.facets.length > 0
+      && indexed.projection_facet_index?.complete !== true && !facetsAccept(value, indexed)) {
+      truncated = true;
+      break;
+    }
     if (entry !== null && input.delivered_entry_revisions?.[key] === indexEntryRevision(entry)) {
       next += 1; facet = { ...facet, scan_offset: 0 };
       continue;
@@ -565,8 +570,9 @@ function indexEntryForValue(
 
 function facetsAccept(value: FieldValue, input: AcceptingProjectionInput): boolean {
   if (input.snapshot.facets.length === 0) return true;
+  if (input.projection_facet_index?.complete !== true) return false;
   const vectors = facetsForCandidate(value, input);
-  if (vectors.length === 0) return input.projection_facet_index?.complete !== true;
+  if (vectors.length === 0) return false;
   return evaluateFacetPredicate(
     facetModeForValue(value, input),
     vectors,

@@ -184,7 +184,8 @@ export function continuationPolicyMismatch(input: Readonly<{
     !== stableStringify([...(input.view.supported_result_kinds ?? [])].sort(compareText))) return true;
   if (stableStringify(prior.cap_contracts ?? null) !== stableStringify(input.view.cap_contracts ?? null)) return true;
   if (stableStringify(prior.claim_demands ?? null) !== stableStringify(input.view.claim_demands ?? null)) return true;
-  if (prior.authorized_scopes === undefined || input.authorized_scopes === undefined) return false;
+  if (prior.authorized_scopes === undefined && input.authorized_scopes === undefined) return false;
+  if (prior.authorized_scopes === undefined || input.authorized_scopes === undefined) return true;
   return identityDigest([...(prior.authorized_scopes)].sort(compareText))
     !== identityDigest([...input.authorized_scopes].sort(compareText));
 }
