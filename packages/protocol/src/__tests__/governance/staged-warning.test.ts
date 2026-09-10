@@ -25,6 +25,12 @@ const baseCandidate = {
 const baseSearchResult = {
   object_id: "memory-1",
   object_kind: "memory_entry",
+  target: {
+    kind: "memory_entry" as const,
+    workspace_id: "ws",
+    object_id: "memory-1",
+    source_revision: "rev"
+  },
   relevance_score: 0.64,
   content_preview: "Prefer pnpm.",
   evidence_pointers: ["memory-1"],

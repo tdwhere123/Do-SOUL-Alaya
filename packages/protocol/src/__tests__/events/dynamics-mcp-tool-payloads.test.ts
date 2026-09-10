@@ -49,7 +49,9 @@ describe("MCP tool request/response schemas", () => {
           scope_class: ScopeClass.PROJECT,
           dimension: MemoryDimension.PROCEDURE,
           domain_tags: ["repo", "tooling"],
-          max_results: 20
+          max_results: 20,
+          enumeration_policy: "canonical",
+          result_kind_view: "mixed"
         }
       },
       {
@@ -125,6 +127,12 @@ describe("MCP tool request/response schemas", () => {
             {
               object_id: "memory-1",
               object_kind: "memory_entry",
+              target: {
+                kind: "memory_entry",
+                workspace_id: "ws",
+                object_id: "memory-1",
+                source_revision: "rev"
+              },
               relevance_score: 0.91,
               content_preview: "Use pnpm for monorepo commands.",
               evidence_pointers: ["evidence-1"],
