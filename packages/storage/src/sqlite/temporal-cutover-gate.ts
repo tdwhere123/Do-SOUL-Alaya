@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { EMPTY_RELATION_HISTORY_DIGEST } from "@do-soul/alaya-protocol";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
+import { openSqliteConnection } from "./open-sqlite-connection.js";
 
 type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
@@ -59,7 +60,7 @@ function assertTemporalDatabaseReady(
 ): void {
   let database: SqliteConnection | undefined;
   try {
-    database = new BetterSqlite3(filename, { readonly: true, fileMustExist: true });
+    database = openSqliteConnection(filename, { readonly: true, fileMustExist: true });
     assertCanonicalSchemaVersionTable(database);
     const versions = database.prepare("SELECT version FROM schema_version ORDER BY version ASC")
       .all() as ReadonlyArray<Readonly<{ version: unknown }>>;

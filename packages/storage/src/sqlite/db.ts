@@ -22,6 +22,7 @@ import {
 } from "./temporal-verified-bind-key.js";
 import { bindEmbeddingOverlayIfPresent } from "./embedding-overlay-bind.js";
 import { restrictSqliteFileModes } from "./sqlite-file-modes.js";
+import { openSqliteConnection } from "./open-sqlite-connection.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 import { registerRetainedSourceChunkDigest } from "./retained-source-chunk-digest.js";
 import { migrateRetainedSourceChunks } from "./retained-source-migration.js";
@@ -282,7 +283,7 @@ function openDatabase(filename: string): SqliteConnection {
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     }
 
-    const database = new BetterSqlite3(filename);
+    const database = openSqliteConnection(filename);
     restrictSqliteFileModes(filename);
     return database;
   } catch (error) {

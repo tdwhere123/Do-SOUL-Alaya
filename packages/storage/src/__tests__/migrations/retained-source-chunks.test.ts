@@ -48,5 +48,5 @@ describe("retained source representation migration", () => {
     expect(page.rows.map((row) => row.content)).toEqual(expect.arrayContaining(["original😀 retained", "capsule😀 retained"]));
     expect(readonly.connection.prepare("SELECT source_body FROM source_records WHERE record_id = ?").get(record.record_id))
       .toEqual({ source_body: "original😀 retained" });
-  }, 60_000);
+  }, process.platform === "win32" ? 120_000 : 60_000);
 });

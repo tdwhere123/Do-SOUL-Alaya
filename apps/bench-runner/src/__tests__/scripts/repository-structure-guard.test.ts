@@ -476,9 +476,13 @@ describe("repository structure guard", () => {
     const policyBytes = readFileSync(
       path.join(repoRoot, "scripts/ci/repository-structure-policy.json")
     );
-    expect(createHash("sha256").update(canonicalizeLf(policyBytes)).digest("hex")).toBe(
-      "134467a7e432737462b1f685f07901a5c42e959bf7919a39f8dbd40acb0f39f7"
-    );
+    const digest = createHash("sha256").update(canonicalizeLf(policyBytes)).digest("hex");
+    const pinned = "134467a7e432737462b1f685f07901a5c42e959bf7919a39f8dbd40acb0f39f7";
+    expect(
+      digest,
+      `repository-structure-policy.json digest changed (${pinned} -> ${digest}). ` +
+        "Update this pin in the same commit as the policy file; it locks S08 export pins and shrink-only inventories together."
+    ).toBe(pinned);
   });
 
   it("rejects production source outside workspace and artifact jurisdiction", async () => {
