@@ -84,10 +84,6 @@ export {
   type RecallConsumerCapability
 } from "./runtime/recall-consumer-compatibility.js";
 export { bindIssuedDeliveryId, issuedDeliveryIdOf } from "./runtime/index-continuation.js";
-export {
-  commitIssuedDelivery,
-  pendingIssuedDeliveryOf
-} from "./runtime/recall-index-commit.js";
 export type {
   ConditionalFieldExecutionReceipt,
   RequestActualCost

@@ -6,10 +6,8 @@ import {
   assertRecallConsumerCompatibility,
   captureIndexPreviews,
   captureIndexSourceMetadata,
-  commitIssuedDelivery,
   fieldContractSha256,
   issuedDeliveryIdOf,
-  pendingIssuedDeliveryOf,
   runConditionalFieldRecallWithReceipt,
   reserveSnapshotPinWork,
   snapshotIdFromPin,
@@ -102,23 +100,17 @@ export function runConditionalFieldWorkerRecall(
     ...(payload.supports_product_updates === undefined
       ? {}
       : { supports_product_updates: payload.supports_product_updates })
-  }));
+  }, { issue: "defer" }));
   const index = InformationIndexSchema.parse(executed.index);
   const previews = captureIndexPreviews(executed.index, readers, workspaceId);
   const source_metadata = captureIndexSourceMetadata(executed.index);
-  const pending = pendingIssuedDeliveryOf(executed.index);
   // Retry RPC lands in this worker heap, so the issued ledger stays here — not
   // the parent. Payload is already finalized in projectAcceptingIndex; preview
   // capture is this process's encode boundary. Parent encodeRecallResult /
   // encodeIndexResults only wrap tokens and keep every index.entries identity.
-  const issuedDeliveryId = pending === undefined
-    ? issuedDeliveryIdOf(executed.index)
-    : commitIssuedDelivery({
-      ...pending,
-      index,
-      previews,
-      metadata: source_metadata
-    });
+  const issuedDeliveryId = executed.issue?.({
+    index, previews, metadata: source_metadata
+  }) ?? issuedDeliveryIdOf(executed.index);
   return {
     execution_receipt: executed.execution_receipt,
     index,

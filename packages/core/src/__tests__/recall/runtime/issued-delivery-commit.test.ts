@@ -12,12 +12,14 @@ import {
   capableRecallConsumerDeclaration,
   captureIndexPreviews,
   captureIndexSourceMetadata,
-  commitIssuedDelivery,
   encodeRecallResult,
   issuedDeliveryIdOf,
-  pendingIssuedDeliveryOf,
   runConditionalFieldRecallWithReceipt
 } from "../../../recall/recall-service.js";
+import {
+  commitIssuedDelivery,
+  pendingIssuedDeliveryOf
+} from "../../../recall/runtime/recall-index-commit.js";
 import {
   productIdOfEntry,
   replayIssuedDelivery
@@ -141,9 +143,9 @@ describe("issued delivery commit", () => {
     for (const [index, id] of [MEM.r, MEM.c, MEM.h].entries()) {
       await slice.writeMemory(id, `needle ${index}`, MemoryDimension.FACT);
     }
-    const first = recall(slice, null);
+    const first = recall(slice, null, "defer");
     expect(first.index.continuation).not.toBeNull();
-    const second = recall(slice, first.index.continuation);
+    const second = recall(slice, first.index.continuation, "defer");
     const digest = first.index.continuation?.continuation_id;
     expect(digest).toBeDefined();
     expect(pendingIssuedDeliveryOf(second.index)).toBeDefined();
@@ -155,7 +157,8 @@ describe("issued delivery commit", () => {
 
 function recall(
   slice: Awaited<ReturnType<typeof openSourceSlice>>,
-  continuation: InformationIndex["continuation"]
+  continuation: InformationIndex["continuation"],
+  issue: "now" | "defer" = "now"
 ) {
   const budget = defaultBudget({
     work_units: 2_000, page_budget: 1, finalization_reserve: 20, min_envelope: 1
@@ -176,7 +179,7 @@ function recall(
     supports_source_evidence: true,
     supported_result_kinds: ["memory_entry", "source_evidence"],
     authorized_scopes: null
-  });
+  }, { issue });
 }
 
 function encodeAndIssue(executed: ReturnType<typeof runConditionalFieldRecallWithReceipt>) {

@@ -140,6 +140,7 @@ export async function executeRecall(
   let sourceMetadata: Readonly<Record<string, RecallSourceMetadata>> = {};
   let governance: BoundedActiveConstraintsResult | undefined;
   let executionReceipt: ConditionalFieldExecutionReceipt | undefined;
+  let issueDeferred: ReturnType<typeof runConditionalFieldRecallWithReceipt>["issue"];
   const index = await withRecallReadSnapshot(context.readSnapshot, async () => {
     const port = fieldDeps(context).conditionalFieldPort;
     const sent = buildRecallRequest(context, params);
@@ -157,23 +158,18 @@ export async function executeRecall(
       executionReceipt = recalled.execution_receipt;
       return recalled.index;
     }
-    const executed = runConditionalFieldRecallWithReceipt(request);
+    const executed = runConditionalFieldRecallWithReceipt(request, { issue: "defer" });
     const recalled = executed.index;
     executionReceipt = executed.execution_receipt;
+    issueDeferred = executed.issue;
     previews = captureIndexPreviews(recalled, request.readers, request.workspace_id);
     sourceMetadata = captureIndexSourceMetadata(recalled);
     return recalled;
   });
-  const pending = pendingIssuedDeliveryOf(index);
   const encoded = encodeRecallResult(index, previews, governance, sourceMetadata);
-  const issuedDeliveryId = pending === undefined
-    ? issuedDeliveryIdOf(index)
-    : commitIssuedDelivery({
-      ...pending,
-      index: encoded.index,
-      previews,
-      metadata: sourceMetadata
-    });
+  const issuedDeliveryId = issueDeferred?.({
+    index: encoded.index, previews, metadata: sourceMetadata
+  }) ?? issuedDeliveryIdOf(index);
   return {
     ...encoded,
     execution_receipt: executionReceipt,
@@ -185,8 +181,17 @@ export function runConditionalFieldRecall(input: ConditionalFieldRecallRequest):
   return runConditionalFieldRecallWithReceipt(input).index;
 }
 
-export function runConditionalFieldRecallWithReceipt(input: ConditionalFieldRecallRequest): Readonly<{
-  index: InformationIndex; execution_receipt: ConditionalFieldExecutionReceipt;
+export function runConditionalFieldRecallWithReceipt(
+  input: ConditionalFieldRecallRequest,
+  options?: Readonly<{ readonly issue?: "now" | "defer" }>
+): Readonly<{
+  readonly index: InformationIndex;
+  readonly execution_receipt: ConditionalFieldExecutionReceipt;
+  readonly issue?: (issued: Readonly<{
+    readonly index: InformationIndex;
+    readonly previews: ReadonlyMap<string, string>;
+    readonly metadata: Readonly<Record<string, RecallSourceMetadata>>;
+  }>) => string | undefined;
 }> {
   const cost = startRequestCost();
   const requestedBudget = input.requested_budget ?? input.budget;
@@ -222,13 +227,36 @@ export function runConditionalFieldRecallWithReceipt(input: ConditionalFieldReca
   const interpretation = cost.time("compile", () => compileConditionalFieldQuery(compileInput));
   const index = runCompiledConditionalFieldRecall(input, interpretation, cost);
   cost.markAfterProjection();
-  return { index, execution_receipt: {
-    schema_version: 1, workspace_id: input.workspace_id, requested_budget: requestedBudget,
+  const execution_receipt = {
+    schema_version: 1 as const, workspace_id: input.workspace_id, requested_budget: requestedBudget,
     compile_input: compileInput, query_id: interpretation.query_id,
     interpretation_id: interpretationIdentity({ interpretation_clock: input.interpretation_clock }),
     snapshot_id: input.snapshot_id, interpretation_clock: input.interpretation_clock,
     actual: cost.snapshot()
-  } };
+  };
+  if ((options?.issue ?? "now") === "defer") {
+    return { index, execution_receipt, issue: (issued) => issueRetainedIndex(index, issued) };
+  }
+  issueRetainedIndex(index);
+  return { index, execution_receipt };
+}
+
+function issueRetainedIndex(
+  retained: InformationIndex,
+  issued?: Readonly<{
+    readonly index: InformationIndex;
+    readonly previews: ReadonlyMap<string, string>;
+    readonly metadata: Readonly<Record<string, RecallSourceMetadata>>;
+  }>
+): string | undefined {
+  const pending = pendingIssuedDeliveryOf(retained);
+  if (pending === undefined) return issuedDeliveryIdOf(issued?.index ?? retained);
+  return commitIssuedDelivery({
+    ...pending,
+    index: issued?.index ?? retained,
+    previews: issued?.previews ?? captureIndexPreviews(retained, {}, ""),
+    metadata: issued?.metadata ?? captureIndexSourceMetadata(retained)
+  });
 }
 
 function runCompiledConditionalFieldRecall(
