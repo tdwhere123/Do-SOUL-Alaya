@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -9,7 +9,13 @@ import { describe, expect, it } from "vitest";
 import {
   RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE
 } from "@do-soul/alaya-core";
-import { initDatabase, prepareIndexedRecallProjection, SqliteMemoryEntryRepo } from "@do-soul/alaya-storage";
+import {
+  closeCachedDatabase,
+  initDatabase,
+  prepareIndexedRecallProjection,
+  SqliteMemoryEntryRepo
+} from "@do-soul/alaya-storage";
+import { removeTempDirectorySync } from "../../../../../../packages/storage/src/__tests__/temp-directory.js";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { runOperation } from "../../../runtime/recall-read-worker/dispatch.js";
 import {
@@ -60,6 +66,7 @@ describe("RecallReadWorkerClient", () => {
       // Parent must release the file before the worker opens it; Windows can
       // hang worker RPC while the parent still holds the same SQLite handle.
       database.close();
+      closeCachedDatabase(databasePath);
 
       const client = createRecallReadWorkerClient({
         databaseFilename: databasePath,
@@ -90,7 +97,8 @@ describe("RecallReadWorkerClient", () => {
       if (!database.isClosed()) {
         database.close();
       }
-      rmSync(directory, { recursive: true, force: true });
+      closeCachedDatabase(databasePath);
+      removeTempDirectorySync(directory);
     }
   }, 30_000);
 
@@ -121,7 +129,8 @@ describe("RecallReadWorkerClient", () => {
       }
     } finally {
       database.close();
-      rmSync(directory, { recursive: true, force: true });
+      closeCachedDatabase(database.filename);
+      removeTempDirectorySync(directory);
     }
   }, 30_000);
 
@@ -170,7 +179,7 @@ describe("RecallReadWorkerClient", () => {
       await expect(client.memoryRepo.findByWorkspaceId("workspace-1")).resolves.toEqual([]);
     } finally {
       await client?.close();
-      rmSync(directory, { recursive: true, force: true });
+      removeTempDirectorySync(directory);
     }
   }, 30_000);
 
@@ -200,7 +209,7 @@ describe("RecallReadWorkerClient", () => {
       );
     } finally {
       await client?.close();
-      rmSync(directory, { recursive: true, force: true });
+      removeTempDirectorySync(directory);
     }
   }, 30_000);
 
@@ -222,6 +231,7 @@ describe("RecallReadWorkerClient", () => {
         }));
       }
       database.close();
+      closeCachedDatabase(databasePath);
 
       const worker = new Worker(fileURLToPath(builtWorkerUrl), {
         execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
@@ -264,7 +274,8 @@ describe("RecallReadWorkerClient", () => {
       if (!database.isClosed()) {
         database.close();
       }
-      rmSync(directory, { recursive: true, force: true });
+      closeCachedDatabase(databasePath);
+      removeTempDirectorySync(directory);
     }
   }, 15_000);
 
@@ -274,6 +285,7 @@ describe("RecallReadWorkerClient", () => {
     const databasePath = join(directory, "alaya.db");
     const database = initDatabase({ filename: databasePath });
     database.close();
+    closeCachedDatabase(databasePath);
 
     const worker = new Worker(fileURLToPath(builtWorkerUrl), {
       execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
@@ -326,7 +338,8 @@ describe("RecallReadWorkerClient", () => {
       });
     } finally {
       await worker.terminate();
-      rmSync(directory, { recursive: true, force: true });
+      closeCachedDatabase(databasePath);
+      removeTempDirectorySync(directory);
     }
   }, 30_000);
 
@@ -336,6 +349,7 @@ describe("RecallReadWorkerClient", () => {
     const databasePath = join(directory, "alaya.db");
     const database = initDatabase({ filename: databasePath });
     database.close();
+    closeCachedDatabase(databasePath);
 
     const worker = new Worker(fileURLToPath(builtWorkerUrl), {
       execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
@@ -367,7 +381,8 @@ describe("RecallReadWorkerClient", () => {
       });
     } finally {
       await worker.terminate();
-      rmSync(directory, { recursive: true, force: true });
+      closeCachedDatabase(databasePath);
+      removeTempDirectorySync(directory);
     }
   }, 30_000);
 
@@ -383,7 +398,8 @@ describe("RecallReadWorkerClient", () => {
       })).rejects.toThrow();
     } finally {
       database.close();
-      rmSync(directory, { recursive: true, force: true });
+      closeCachedDatabase(database.filename);
+      removeTempDirectorySync(directory);
     }
   });
 
@@ -411,7 +427,8 @@ describe("RecallReadWorkerClient", () => {
       expect(result.execution_receipt?.compile_input?.view?.cap_contracts).toEqual([cap]);
     } finally {
       database.close();
-      rmSync(directory, { recursive: true, force: true });
+      closeCachedDatabase(database.filename);
+      removeTempDirectorySync(directory);
     }
   });
 
@@ -430,7 +447,8 @@ describe("RecallReadWorkerClient", () => {
       })).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
     } finally {
       database.close();
-      rmSync(directory, { recursive: true, force: true });
+      closeCachedDatabase(database.filename);
+      removeTempDirectorySync(directory);
     }
   });
 });

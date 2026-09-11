@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,6 +19,7 @@ import {
   SqliteWorkspaceRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { removeTempDirectorySync } from "../../../../../../packages/storage/src/__tests__/temp-directory.js";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { createMcpMemoryProposalWorkflow } from "../../../mcp-memory/proposal/proposal-workflow.js";
 import { createPrivacyEffectLookup } from "../../../mcp-memory/proposal/phases/privacy-hard-effect.js";
@@ -36,7 +37,7 @@ const tempDirectories = new Set<string>();
 afterEach(() => {
   for (const database of databases) database.close();
   databases.clear();
-  for (const directory of tempDirectories) rmSync(directory, { recursive: true, force: true });
+  for (const directory of tempDirectories) removeTempDirectorySync(directory);
   tempDirectories.clear();
 });
 

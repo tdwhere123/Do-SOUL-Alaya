@@ -30,6 +30,7 @@ import {
   withTemporalCutoverLease
 } from "../../runtime/temporal-cutover/lease.js";
 import { replaceStorageDbPathInToml } from "../../runtime/config/storage-pointer-file.js";
+import { removeTempDirectorySync } from "../../../../../packages/storage/src/__tests__/temp-directory.js";
 
 interface Fixture {
   readonly directory: string;
@@ -61,7 +62,7 @@ describe("temporal projection daemon cutover", () => {
   afterEach(() => {
     closeCachedDatabase(fixture.sourceFilename);
     closeCachedDatabase(fixture.candidateFilename);
-    fs.rmSync(fixture.directory, { recursive: true, force: true });
+    removeTempDirectorySync(fixture.directory);
   });
 
   it("journals a pointer-first cutover, selects the candidate, and verifies ordinary bootstrap", async () => {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -19,10 +19,12 @@ import {
   SqliteRelationAssertionRepo,
   SqliteRunRepo,
   SqliteWorkspaceRepo,
+  closeCachedDatabase,
   digestRelationFormationEventSource,
   initDatabase,
   isTemporalProjectionSelected
 } from "@do-soul/alaya-storage";
+import { removeTempDirectorySync } from "../../../../../../packages/storage/src/__tests__/temp-directory.js";
 import {
   createBoundRecallPathReadPorts,
   resolveRecallPathReadBind
@@ -57,7 +59,10 @@ afterEach(() => {
 
 afterAll(() => {
   if (fixtureScratch !== null) {
-    rmSync(fixtureScratch, { recursive: true, force: true });
+    if (fixtureDatabasePath !== null) {
+      closeCachedDatabase(fixtureDatabasePath);
+    }
+    removeTempDirectorySync(fixtureScratch);
   }
 });
 

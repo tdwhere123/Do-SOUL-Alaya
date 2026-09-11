@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,10 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import BetterSqlite3 from "better-sqlite3";
 import { withRecallReadSnapshot } from "@do-soul/alaya-core";
 import {
+  closeCachedDatabase,
   initDatabase,
   SqliteMemoryEntryRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { removeTempDirectorySync } from "../../../../../../packages/storage/src/__tests__/temp-directory.js";
 import { createSqliteConnectionReadSnapshot } from "../../../runtime/recall/sqlite-read-snapshot.js";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 
@@ -21,9 +23,10 @@ const tempDirs: string[] = [];
 afterEach(() => {
   for (const database of databases.splice(0, databases.length)) {
     if (!database.isClosed()) database.close();
+    closeCachedDatabase(database.filename);
   }
   for (const directory of tempDirs.splice(0, tempDirs.length)) {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectorySync(directory);
   }
 });
 
@@ -58,6 +61,7 @@ describe("recall read snapshot wiring", () => {
     }));
     const plantedId = "22222222-2222-4222-8222-222222222222";
     database.close();
+    closeCachedDatabase(filename);
 
     const client = createRecallReadWorkerClient({
       databaseFilename: filename,

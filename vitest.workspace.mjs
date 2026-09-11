@@ -101,7 +101,7 @@ function appProject(name, appDir) {
       coverage: {
         include: [`${appDir}/src/**`]
       },
-      ...(process.platform === "win32" ? { testTimeout: 30_000 } : {})
+      ...(process.platform === "win32" ? { testTimeout: 30_000, hookTimeout: 30_000 } : {})
     }
   });
 }

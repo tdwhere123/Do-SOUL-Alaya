@@ -1,5 +1,5 @@
 import { afterEach, expect, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -32,6 +32,7 @@ import {
   SqliteRunRepo,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
+import { removeTempDirectorySync } from "../../../../../../packages/storage/src/__tests__/temp-directory.js";
 import { createDaemonFieldComposition } from
   "../../../runtime/field/field-composition.js";
 
@@ -50,7 +51,7 @@ export function createPlantedHarness() {
   afterEach(() => {
     for (const database of tracked) database.close();
     tracked.clear();
-    for (const root of trackedRoots) rmSync(root, { recursive: true, force: true });
+    for (const root of trackedRoots) removeTempDirectorySync(root);
     trackedRoots.clear();
   });
   return {
