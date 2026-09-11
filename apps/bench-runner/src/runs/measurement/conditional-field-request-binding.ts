@@ -113,13 +113,14 @@ export function executionBindingMismatch(
     || receipt.interpretation_clock !== new Date(expected.referenceTime).toISOString()) return "interpretation_clock_mismatch";
   if (!sameBudget(receipt.requested_budget, expected.requestBudget)) return "request_budget_mismatch";
   if (expected.expectedIndexSnapshotId !== undefined && receipt.snapshot_id !== expected.expectedIndexSnapshotId) return "snapshot_mismatch";
+  if (expected.requestFilters === undefined) return null;
   const input = receipt.compile_input;
   const actual = { since: input.since, until: input.until, time_field: input.time_field,
     dimension_filter: input.dimension_filter, domain_tag_filter: input.domain_tag_filter,
     authorized_scopes: input.authorized_scopes,
     enumeration_policy: input.view?.enumeration_policy ?? input.enumeration_policy,
     result_kind_view: input.view?.result_kind_view ?? input.result_kind_view };
-  return normalizedFilters(actual) === normalizedFilters(expected.requestFilters ?? {}) ? null : "request_identity_mismatch";
+  return normalizedFilters(actual) === normalizedFilters(expected.requestFilters) ? null : "request_identity_mismatch";
 }
 
 function normalizedFilters(filters: ConditionalFieldRequestFilters): string {

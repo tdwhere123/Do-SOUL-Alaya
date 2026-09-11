@@ -106,8 +106,8 @@ describe("one allowance across grounding, projection, and payload", () => {
     expect(result.index.completeness.logical_index).not.toBe("invalidated");
     expect(result.index.page_purpose).toBe("update");
     expect(result.index.product_updates).toHaveLength(1);
-    expect(result.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-0"]);
-    expect(result.index.entries[0]?.association_milligrades).toBe(800);
+    expect(result.index.entries).toEqual([]);
+    expect(result.index.product_updates?.[0]?.update_kind).toBe("proof");
   });
 
   it("does not replay a withdrawn product as a new membership slot", () => {

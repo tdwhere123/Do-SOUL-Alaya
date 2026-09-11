@@ -290,7 +290,8 @@ function pageAcceptingIndex(
   const remaining = useEmittedSet
     ? Math.max(projected.truncated ? 1 : 0, projected.unemitted - members.length)
     : Math.max(projected.truncated ? 1 : 0, entries.length - offset - members.length);
-  const prepared = members.length > 0 ? members : updates;
+  // Typed updates are not a second membership exposure of the same product.
+  const prepared = members;
   if (!useEmittedSet || members.length > 0) input.on_semantic_entries?.(prepared);
   const finalized = input.finalize_payload?.(prepared, projected.remaining);
   const retryPayload = finalized !== undefined && !finalized.complete;
@@ -350,7 +351,10 @@ function pageAcceptingIndex(
     snapshot_id: input.snapshot_id,
     result_version: input.result_version,
     entries: prepared,
-    explanations: recoverExplanationForest(prepared.flatMap((entry) => entry.explanation_ids), input.derivations ?? []),
+    explanations: recoverExplanationForest(
+      (members.length > 0 ? members : updates).flatMap((entry) => entry.explanation_ids),
+      input.derivations ?? []
+    ),
     completeness: completenessWithOrder(completeness, order),
     continuation: nextContinuation({
       ...input,

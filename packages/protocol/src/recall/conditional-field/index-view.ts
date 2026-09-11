@@ -21,12 +21,13 @@ import {
 } from "./query.js";
 import { ResidualSemanticEffectSchema } from "./observer.js";
 import {
-  canonicalProductIdentity,
   memoryProductStateKey,
   productMemoryObjectId,
   ProductStateKeySchema,
   RecallTargetKindSchema,
   RecallTargetRefSchema,
+  sharedProductIdentity,
+  sourceEvidenceRootTarget,
   sourceProductStateKey,
   stableCanonicalStringify,
   type ProductStateKey,
@@ -268,9 +269,12 @@ function indexEntryTimeState(entry: IndexEntry): string {
 }
 
 export function canonicalIndexEntryIdentity(entry: IndexEntry): string {
+  const target = entry.target.kind === "source_evidence"
+    ? sourceEvidenceRootTarget(entry.target)
+    : entry.target;
   return stableCanonicalStringify({
     identity_version: "product-identity.v1",
-    target: entry.target,
+    target,
     hypothesis_id: entry.hypothesis_id,
     output_binding: entry.output_binding,
     program_state: indexEntryProgramState(entry),
@@ -399,7 +403,7 @@ export function indexEntryCacheKey(entry: IndexEntry): string {
 }
 
 export function canonicalProductIdentityOfEntry(entry: IndexEntry): string {
-  return canonicalProductIdentity(productStateKeyFromIndexEntry(entry));
+  return sharedProductIdentity(productStateKeyFromIndexEntry(entry));
 }
 
 export type { RecallTargetRef };

@@ -206,18 +206,27 @@ export function sourceFactsSatisfyFilters(
 }
 
 export function sourceTimestampOrder(left: string, right: string): number | undefined {
-  if (!IsoDatetimeStringSchema.safeParse(left).success || !IsoDatetimeStringSchema.safeParse(right).success) {
+  const normalizedLeft = normalizeUtcInstant(left);
+  const normalizedRight = normalizeUtcInstant(right);
+  if (!IsoDatetimeStringSchema.safeParse(normalizedLeft).success
+    || !IsoDatetimeStringSchema.safeParse(normalizedRight).success) {
     return undefined;
   }
-  const [leftWhole, leftFraction = ""] = left.slice(0, -1).split(".");
-  const [rightWhole, rightFraction = ""] = right.slice(0, -1).split(".");
-  const leftSeconds = leftWhole!.length === 16 ? `${leftWhole}:00` : leftWhole!;
-  const rightSeconds = rightWhole!.length === 16 ? `${rightWhole}:00` : rightWhole!;
-  const secondsOrder = compareText(leftSeconds, rightSeconds);
+  const [leftWhole, leftFraction = ""] = normalizedLeft.slice(0, -1).split(".");
+  const [rightWhole, rightFraction = ""] = normalizedRight.slice(0, -1).split(".");
+  const secondsOrder = compareText(leftWhole!, rightWhole!);
   if (secondsOrder !== 0) return secondsOrder;
   // Date.parse loses submillisecond distinctions that the public datetime schema permits.
   const width = Math.max(leftFraction.length, rightFraction.length);
   return compareText(leftFraction.padEnd(width, "0"), rightFraction.padEnd(width, "0"));
+}
+
+function normalizeUtcInstant(value: string): string {
+  // Zod 4 `datetime()` rejects minute-precision `YYYY-MM-DDTHH:MMZ`.
+  if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$/u.test(value)) {
+    return `${value.slice(0, -1)}:00Z`;
+  }
+  return value;
 }
 
 function timestampForSourceFilters(

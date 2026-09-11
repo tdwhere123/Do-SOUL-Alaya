@@ -4,6 +4,7 @@ import {
   HARD_IDENTITY_TRANSFER_VERSION,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
+  memoryProductStateKey,
   productSubjectId,
   retargetMemoryProduct,
   type Derivation,
@@ -119,7 +120,6 @@ export function* hyperedgeEffectSteps(
   const toProgramStates = input.toProgramStates ?? [ACCEPTING_PROGRAM_STATE];
   for (const from of input.liveStates) {
     yield { kind: "work" };
-    if (from.target.kind !== "memory_entry") continue;
     const grouped: (readonly PremiseAssignment[])[] = [];
     for (const premise of program.premises) {
       const assignments = yield* assignmentsForPremise(premise, from, rows, input);
@@ -246,7 +246,6 @@ function* walkCompiledPremise(
   rows: Iterable<AdjacencyRow>,
   input: HyperedgeInput
 ): PathComputation<readonly PremiseAssignment[]> {
-  if (from.target.kind !== "memory_entry") return [];
   yield { kind: "work", retained_bytes: 1024 + Buffer.byteLength(JSON.stringify(program), "utf8") * 8 };
   const automaton = compileProgramAutomaton(program);
   const starts = automaton.start.map((program_state) => ({ ...from, program_state }));
@@ -258,10 +257,10 @@ function* walkCompiledPremise(
   const observed = input.observedStates ?? input.liveStates;
   const retain = function* (node: ProductStateKey, assignment: PremiseAssignment, nextStates: readonly string[]): PathComputation<void> {
     const revision = observedTargetRevision(assignment.target_object_id, input.sourceFacts, observed);
-    if (revision === undefined || node.target.kind !== "memory_entry") return;
+    if (revision === undefined) return;
     for (const programState of nextStates) {
       yield { kind: "work", retained_bytes: 1024 };
-      const to = retargetMemoryProduct(node, { object_id: assignment.target_object_id, source_revision: revision,
+      const to = hyperedgeMemoryTo(node, { object_id: assignment.target_object_id, source_revision: revision,
         program_state: programState, binding_context: assignment.binding_context });
       const edge: Transition = { schema_version: 1, from: node, to, applicable: true,
         relation_kind: assignment.relation_kind, instance_id: assignment.instance_id ?? assignment.derivation.derivation_id,
@@ -403,7 +402,8 @@ function assignmentFromRow(
   if (decision !== "true") return undefined;
   const revisionId = row.source_revision
     ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision
-    ?? (from.target.kind === "memory_entry" ? from.target.source_revision : undefined);
+    // Source products pin identity by source_version; they have no memory source_revision.
+    ?? (from.target.kind === "memory_entry" ? from.target.source_revision : from.target.source_version);
   const strength = relationStrength(relation, input.overlay, row.predicate, {
     query_id: input.query_id,
     instance_id: row.assertionId,
@@ -500,6 +500,30 @@ function completionReservation(premises: readonly PremiseAssignment[]): number {
   return 2048 + premises.reduce((sum, premise) => sum + 128 + premise.derivations.length * 80, 0);
 }
 
+function hyperedgeMemoryTo(
+  from: ProductStateKey,
+  patch: Readonly<{
+    readonly object_id: string;
+    readonly source_revision: string;
+    readonly program_state: string;
+    readonly binding_context: string;
+  }>
+): ProductStateKey {
+  if (from.target.kind === "memory_entry") {
+    return retargetMemoryProduct(from, patch);
+  }
+  // retargetMemoryProduct is memory-only; source-rooted completions mint B from observed revision.
+  return memoryProductStateKey({
+    workspace_id: from.target.workspace_id,
+    object_id: patch.object_id,
+    source_revision: patch.source_revision,
+    program_state: patch.program_state,
+    hypothesis_id: from.hypothesis_id,
+    binding_context: patch.binding_context,
+    time_state: from.time_state
+  });
+}
+
 function* completionEffects(
   from: ProductStateKey,
   premises: readonly PremiseAssignment[],
@@ -517,12 +541,6 @@ function* completionEffects(
   toProgramStates: readonly string[],
   input: HyperedgeInput
 ): PathComputation<readonly HyperedgeEffect[]> {
-  if (from.target.kind !== "memory_entry") {
-    return [{
-      observation_id: `revision:${productSubjectId(from)}:${from.program_state}:${spec.target}`,
-      unresolved_guard: true
-    }];
-  }
   const targetRevision = observedTargetRevision(
     spec.target,
     input.sourceFacts,
@@ -545,7 +563,7 @@ function* completionEffects(
   const derivations: Derivation[] = [];
   for (const row of forest.values()) { yield { kind: "work", retained_bytes: 8 }; derivations.push(row); }
   return toProgramStates.map((programState) => {
-    const to: ProductStateKey = retargetMemoryProduct(from, {
+    const to: ProductStateKey = hyperedgeMemoryTo(from, {
       object_id: spec.target,
       program_state: programState,
       binding_context: spec.binding,

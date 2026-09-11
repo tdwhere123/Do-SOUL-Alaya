@@ -139,6 +139,10 @@ describe("alaya tools real-handler CLI/MCP parity", () => {
       index
     })) as typeof deps.recallService.recall;
     const args = {
+      protocol_version: 1,
+      supported_result_kinds: ["memory_entry", "source_evidence"],
+      supports_source_evidence: true,
+      supports_product_updates: true,
       query: "yesterday failed deployment",
       scope_class: null,
       dimension: null,
@@ -155,9 +159,15 @@ describe("alaya tools real-handler CLI/MCP parity", () => {
       args
     );
     const output = (mcpResult.structuredContent as { readonly output: Record<string, unknown> }).output;
-    expect(output["index"]).toEqual(index);
     expect(output["ranking_authority"]).toBeUndefined();
     expect(output["delivery_path"]).toBeUndefined();
+    expect(output["index"]).toMatchObject({
+      query_id: index.query_id,
+      snapshot_id: index.snapshot_id,
+      continuation: index.continuation,
+      entries: index.entries,
+      completeness: { ...index.completeness, payload: "omitted" }
+    });
     expect((output["results"] as readonly { readonly object_id: string }[]).map((row) => row.object_id))
       .toEqual(["c", "h"]);
   });

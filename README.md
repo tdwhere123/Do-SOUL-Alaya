@@ -28,7 +28,7 @@ Agent working copy: [`AGENTS.md`](AGENTS.md).
 
 ## Quickstart
 
-Requires Node 24+ and pnpm 9+. From a source checkout:
+Requires Node 24+ and pnpm 12.3.4 (see `packageManager`). From a source checkout:
 
 ```bash
 pnpm install

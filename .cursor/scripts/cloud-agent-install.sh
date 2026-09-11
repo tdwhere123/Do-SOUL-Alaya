@@ -10,7 +10,7 @@ nvm use 24
 node --version
 
 corepack enable
-corepack prepare pnpm@9.15.9 --activate
+corepack prepare pnpm@12.3.4 --activate
 export CI=true
 pnpm install --frozen-lockfile
 pnpm build

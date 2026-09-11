@@ -3,6 +3,29 @@ packages:
   - apps/inspector/*
   - packages/*
 
-onlyBuiltDependencies:
-  - better-sqlite3
-  - esbuild
+# pnpm 11+ ignores package.json#pnpm; overrides live here.
+overrides:
+  adm-zip: 0.6.0
+  browserslist: 4.28.9
+  fast-uri: 3.1.7
+  form-data: 4.0.6
+  hono: 4.13.7
+  ip-address: 10.7.0
+  nanoid: 3.3.19
+  postcss: 8.5.28
+  protobufjs: 7.6.6
+  sharp: 0.35.4
+  ws: 8.21.3
+  zod: 4.6.2
+
+# pnpm 11 defaults minimumReleaseAge to 1 day and rewrites this file
+# with per-package excludes. Exact pins already freeze versions.
+minimumReleaseAge: 0
+
+# pnpm 11 removed onlyBuiltDependencies. false = prebuilds/JS fallback,
+# matching the previous sqlite+esbuild-only allowlist.
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  onnxruntime-node: false
+  protobufjs: false

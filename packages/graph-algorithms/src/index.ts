@@ -16,6 +16,15 @@ export {
   type MaxMinTransition,
   type MaxMinWorkItem
 } from "./max-min-field.js";
+export {
+  evaluateBooleanHypergraph,
+  type BooleanHypergraphInput,
+  type BooleanHyperedge,
+  type UnaryBooleanEdge,
+  type AndBooleanHyperedge,
+  type OrBooleanHyperedge,
+  type IdentityBooleanEdge
+} from "./boolean-hypergraph.js";
 export { MaxMinWorkQueue } from "./max-min-work-queue.js";
 export { PersistentStringMap } from "./persistent-string-map.js";
 

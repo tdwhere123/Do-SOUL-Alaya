@@ -20,7 +20,7 @@ export function benchRequestFilters(options: BenchRecallOptions, policy?: Recall
   return {
     ...(since === undefined ? {} : { since }), ...(until === undefined ? {} : { until }),
     ...(options.timeFilter?.field === undefined ? {} : { time_field: options.timeFilter.field }),
-    ...(deterministic?.scope_filter === undefined ? {} : { authorized_scopes: deterministic.scope_filter }),
+    authorized_scopes: deterministic?.scope_filter ?? null,
     ...(!deterministic?.dimension_filter?.length ? {} : { dimension_filter: deterministic.dimension_filter }),
     ...(!deterministic?.domain_tag_filter?.length ? {} : { domain_tag_filter: deterministic.domain_tag_filter }),
     ...(options.enumeration_policy === undefined ? {} : { enumeration_policy: options.enumeration_policy }),

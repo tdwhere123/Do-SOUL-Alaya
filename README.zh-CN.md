@@ -28,7 +28,7 @@ Agent 工作副本：[`AGENTS.md`](AGENTS.md)。
 
 ## 快速开始
 
-需要 Node 24+ 与 pnpm 9+。在源码目录：
+需要 Node 24+ 与 pnpm 12.3.4（见 `packageManager`）。在源码目录：
 
 ```bash
 pnpm install
