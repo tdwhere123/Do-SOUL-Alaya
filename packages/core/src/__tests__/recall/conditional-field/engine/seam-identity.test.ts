@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { evaluateBooleanHypergraph } from "@do-soul/alaya-graph-algorithms";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   memoryProductStateKey,
@@ -218,6 +219,135 @@ describe("seam identity for transitions", () => {
       || (effect.hyperedge.to.target.kind === "memory_entry"
         && effect.hyperedge.to.target.source_revision !== "rev-a")
     )).toBe(true);
+  });
+
+  it("AND-joins a source_evidence seed onto B@rev-b and never inherits the source revision", () => {
+    const program = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      kind: "hyperedge" as const,
+      join: "and" as const,
+      premises: [relation("rel_a"), relation("rel_b")]
+    };
+    const from = sourceProductStateKey({
+      workspace_id: "ws",
+      root_kind: "source_record",
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: DIGEST,
+      evidence_object_id: null,
+      program_state: seedProgramStates(program)[0]!,
+      hypothesis_id: "h0",
+      binding_context: "unbound",
+      time_state: "as_of"
+    });
+    const overlay = {
+      rel_a: { milligrades: 800, applicable: true },
+      rel_b: { milligrades: 800, applicable: true }
+    };
+    const effects = adjacencyEffectsForRows(
+      [edge("rec-1", "mem-b", "rel_a"), edge("rec-1", "mem-b", "rel_b")],
+      {
+        interpretation: interpretation(program),
+        asOf: AS_OF,
+        liveStates: [from],
+        overlay,
+        sourceFacts: new Map([
+          ["mem-b", { object_id: "mem-b", source_revision: "rev-b" }]
+        ])
+      }
+    );
+    const completed = effects.find((effect) => effect.hyperedge !== undefined)?.hyperedge;
+    expect(completed).toBeDefined();
+    expect(completed?.from.target.kind).toBe("source_evidence");
+    expect(completed?.to.target).toEqual({
+      kind: "memory_entry",
+      workspace_id: "ws",
+      object_id: "mem-b",
+      source_revision: "rev-b"
+    });
+    expect(completed?.to.target.kind === "memory_entry"
+      && completed.to.target.source_revision).not.toBe("v1");
+  });
+
+  it("does not mint an AND product from a source_evidence seed when B's revision is unobserved", () => {
+    const program = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      kind: "hyperedge" as const,
+      join: "and" as const,
+      premises: [relation("rel_a"), relation("rel_b")]
+    };
+    const from = sourceProductStateKey({
+      workspace_id: "ws",
+      root_kind: "source_record",
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: DIGEST,
+      evidence_object_id: null,
+      program_state: seedProgramStates(program)[0]!,
+      hypothesis_id: "h0",
+      binding_context: "unbound",
+      time_state: "as_of"
+    });
+    const effects = adjacencyEffectsForRows(
+      [edge("rec-1", "mem-b", "rel_a"), edge("rec-1", "mem-b", "rel_b")],
+      {
+        interpretation: interpretation(program),
+        asOf: AS_OF,
+        liveStates: [from],
+        overlay: {
+          rel_a: { milligrades: 800, applicable: true },
+          rel_b: { milligrades: 800, applicable: true }
+        }
+      }
+    );
+    expect(effects.some((effect) => effect.hyperedge !== undefined)).toBe(false);
+    expect(effects.some((effect) => effect.unresolved_guard === true)).toBe(true);
+    expect(effects.some((effect) => effect.missing_target_revision === true)).toBe(true);
+  });
+
+  it("agrees with evaluateBooleanHypergraph that a source-rooted AND fires", () => {
+    const oracle = evaluateBooleanHypergraph({
+      nodeIds: ["p", "q", "t"],
+      seeds: new Map([["p", 800], ["q", 800]]),
+      edges: [{ kind: "and", from: ["p", "q"], to: "t", strength: 800 }],
+      bottom: 0,
+      top: 1000
+    });
+    expect(oracle.has("t")).toBe(true);
+    const program = {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      kind: "hyperedge" as const,
+      join: "and" as const,
+      premises: [relation("rel_a"), relation("rel_b")]
+    };
+    const from = sourceProductStateKey({
+      workspace_id: "ws",
+      root_kind: "source_record",
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: DIGEST,
+      evidence_object_id: null,
+      program_state: seedProgramStates(program)[0]!,
+      hypothesis_id: "h0",
+      binding_context: "unbound",
+      time_state: "as_of"
+    });
+    const effects = adjacencyEffectsForRows(
+      [edge("rec-1", "mem-b", "rel_a"), edge("rec-1", "mem-b", "rel_b")],
+      {
+        interpretation: interpretation(program),
+        asOf: AS_OF,
+        liveStates: [from],
+        overlay: {
+          rel_a: { milligrades: 800, applicable: true },
+          rel_b: { milligrades: 800, applicable: true }
+        },
+        sourceFacts: new Map([
+          ["mem-b", { object_id: "mem-b", source_revision: "rev-b" }]
+        ])
+      }
+    );
+    expect(effects.some((effect) => effect.hyperedge !== undefined)).toBe(oracle.has("t"));
   });
 
   it("still emits routing discovery from a source_evidence seed", () => {

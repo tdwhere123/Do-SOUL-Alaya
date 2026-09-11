@@ -324,7 +324,6 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
   for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
     yield { kind: "work", retained_bytes: 64 };
     const from = input.liveStates.at(index)!;
-    if (from.target.kind !== "memory_entry") continue;
     for (const advance of automaton.hyperedgeAdvances) {
       if (advance.from !== from.program_state) continue;
       for (const step of hyperedgeEffectSteps(rows, advance.hyperedge, {
