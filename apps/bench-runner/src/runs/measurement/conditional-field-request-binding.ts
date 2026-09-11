@@ -37,13 +37,14 @@ const PhaseCost = z.object({
 const ActualReceipt = z.object({
   native_visits: NonNegInt, native_rows: NonNegInt, native_bytes: NonNegInt,
   charged_retained_bytes: NonNegInt,
+  retained_states_current: NonNegInt, retained_bytes_current: NonNegInt,
   phases: z.object({
     compile: PhaseCost, observe: PhaseCost, seed: PhaseCost, adjacency: PhaseCost,
     measurement: PhaseCost, solve: PhaseCost, index: PhaseCost, payload: PhaseCost
   }).strict().readonly(),
   rss: z.object({
     method: z.literal("process.memoryUsage().rss"),
-    start_bytes: NonNegInt, after_projection_bytes: NonNegInt
+    start_bytes: NonNegInt, after_projection_bytes: NonNegInt, peak_bytes: NonNegInt
   }).strict().readonly()
 }).strict().readonly();
 const WorkerReceipt = z.object({

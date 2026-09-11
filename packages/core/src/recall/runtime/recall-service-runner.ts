@@ -62,6 +62,7 @@ import {
 } from "./recall-index-commit.js";
 import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
 import { startRequestCost, type RequestCostLedger } from "./request-cost-ledger.js";
+import { retainedFieldLevels, thisRequestObservedWork } from "./request-cost-engine-snapshot.js";
 import type {
   ConditionalFieldRecallRequest,
   RecallExecutionContext,
@@ -263,10 +264,8 @@ function runCompiledConditionalFieldRecall(
     ...(restored === undefined ? {} : { resume_field: restored }),
     ...(pin === undefined ? {} : { expected_source_revision: pin.source_revision })
   }));
-  cost.add("solve", { relaxations: field.solver_completed_work ?? 0 });
-  cost.add("observe", { pending_work: field.remaining_work.reduce((sum, row) => sum + row.units, 0),
-    state_creates: field.seen_identities.length,
-    charged_retained_bytes: Math.max(0, input.budget.memory_bytes - field.remaining_memory_bytes) });
+  // Max-min bind runs inside observe; lifetime solver_completed_work is not this request's solve work.
+  cost.add("observe", thisRequestObservedWork(restored, field, input.budget.memory_bytes));
   let retained = field;
   const projected = projectFromField(assessUnknownCause(field, input), input, interpretation, (next) => { retained = next; }, cost);
   const unserviceable = input.budget.work_units <= 1 && projected.entries.length === 0;
@@ -280,6 +279,7 @@ function runCompiledConditionalFieldRecall(
   // Keep resume under the request token so a last page (response continuation
   // null) can still replay the same issued delivery_id.
   rememberField(retained, index.continuation ?? input.continuation ?? null);
+  cost.recordRetainedLevels(retainedFieldLevels(retained, input.budget.memory_bytes));
   return index;
 }
 

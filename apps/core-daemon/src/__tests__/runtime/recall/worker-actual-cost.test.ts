@@ -191,6 +191,15 @@ describe("native worker actual cost", () => {
       expect(cost.native_visits).toBeLessThanOrEqual(pageBudget.work_units);
       expect(cost.rss_bytes).toBeGreaterThan(0);
     }
+    const later = pages.slice(1);
+    expect(later.length).toBeGreaterThan(0);
+    for (const page of later) {
+      const cost = workerActualCostOf(page.execution_receipt);
+      const actual = page.execution_receipt!.actual;
+      expect(cost.native_visits).toBeLessThanOrEqual(pageBudget.work_units);
+      expect(actual?.phases.observe.state_creates).toBe(0);
+      expect(actual?.phases.observe.relaxations).toBe(0);
+    }
   });
 
   it.each([0, 1, 3])("rejects an unserviceable %i-unit budget without consuming a never-sent product", async (work_units) => {
@@ -321,11 +330,12 @@ function phaseSumActual(native_visits: number): RequestActualCost {
   };
   return {
     native_visits, native_rows: 0, native_bytes: 0, charged_retained_bytes: 0,
+    retained_states_current: 0, retained_bytes_current: 0,
     phases: {
       compile: phase, observe: { ...phase, native_visits }, seed: phase, adjacency: phase,
       measurement: phase, solve: phase, index: phase, payload: phase
     },
-    rss: { method: "process.memoryUsage().rss", start_bytes: 1, after_projection_bytes: 1 }
+    rss: { method: "process.memoryUsage().rss", start_bytes: 1, after_projection_bytes: 1, peak_bytes: 1 }
   };
 }
 

@@ -238,6 +238,7 @@ function pageAcceptingIndex(
     const grounded = input.cost === undefined
       ? groundedOutputDerivations(groundingInput)
       : input.cost.time("solve", () => groundedOutputDerivations(groundingInput));
+    // Grounding forest work this page; field max-min is observed separately.
     input.cost?.add("solve", {
       relaxations: grounded.work,
       charged_retained_bytes: grounded.retained_bytes

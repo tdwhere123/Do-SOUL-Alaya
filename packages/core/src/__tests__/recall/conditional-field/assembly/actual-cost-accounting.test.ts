@@ -53,6 +53,9 @@ describe("conditional-field actual request cost", () => {
     expect(actual.rss.method).toBe(RSS_SAMPLE_METHOD);
     expect(actual.rss.start_bytes).toBeGreaterThan(0);
     expect(actual.rss.after_projection_bytes).toBeGreaterThan(0);
+    expect(actual.rss.peak_bytes)
+      .toBeGreaterThanOrEqual(Math.max(actual.rss.start_bytes, actual.rss.after_projection_bytes));
+    expect(actual.retained_states_current).toBe(actual.phases.observe.state_creates);
   });
 
   it.each([0, 1])("rejects an unserviceable %i-unit request without a replayable cursor", (work_units) => {
@@ -132,6 +135,7 @@ describe("conditional-field actual request cost", () => {
     expect(new Set(hits.map((entry) => entry.object_id)).size).toBe(1);
     expect(hits[0]?.association_milligrades).toBe(1000);
     const actual = requireActual(first.execution_receipt.actual);
+    expect(actual.phases.observe.relaxations).toBeLessThan(128);
     expect(actual.phases.solve.relaxations).toBeLessThan(128);
     expect(actual.native_visits).toBeLessThan(256);
   });
@@ -192,6 +196,124 @@ describe("conditional-field actual request cost", () => {
     const actual = requireActual(resumed.execution_receipt.actual);
     expect(actual.phases.payload.native_bytes).toBeGreaterThan(0);
     expect(actual.native_bytes).toBeGreaterThanOrEqual(actual.phases.payload.native_bytes);
+  });
+
+  it("charges solver and identity creates only for this request on a projection resume", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantHub(slice, 8);
+    const budget = defaultBudget({ page_budget: 1, work_units: 10_000, finalization_reserve: 512 });
+    const first = recall(readersFor(slice), budget);
+    expect(first.index.continuation).not.toBeNull();
+    const firstActual = requireActual(first.execution_receipt.actual);
+    expect(firstActual.phases.observe.relaxations).toBeGreaterThan(0);
+    expect(firstActual.phases.observe.state_creates).toBeGreaterThan(0);
+    expect(firstActual.retained_states_current).toBe(firstActual.phases.observe.state_creates);
+    const second = recall(readersFor(slice), budget, first.index.continuation);
+    const secondActual = requireActual(second.execution_receipt.actual);
+    expect(secondActual.phases.observe.relaxations).toBe(0);
+    expect(secondActual.phases.observe.state_creates).toBe(0);
+    expect(secondActual.retained_states_current).toBe(firstActual.retained_states_current);
+    expect(secondActual.retained_states_current).toBeGreaterThan(secondActual.phases.observe.state_creates);
+  });
+
+  it("does not bill remaining join units as performed adjacency joins", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantHub(slice, 24);
+    const tiny = defaultBudget({ work_units: 48, finalization_reserve: 12, min_envelope: 1, page_budget: 1 });
+    const first = recall(readersFor(slice), tiny);
+    const firstActual = requireActual(first.execution_receipt.actual);
+    expect(first.index.continuation).not.toBeNull();
+    const joinPhases = Object.entries(firstActual.phases)
+      .filter(([phase]) => phase !== "adjacency")
+      .reduce((sum, [, phase]) => sum + phase.joins, 0);
+    expect(joinPhases).toBe(0);
+    if (firstActual.phases.observe.pending_work > 0) {
+      expect(firstActual.phases.adjacency.joins).not.toBe(firstActual.phases.observe.pending_work);
+    }
+    const second = recall(readersFor(slice), tiny, first.index.continuation);
+    const secondActual = requireActual(second.execution_receipt.actual);
+    expect(secondActual.phases.adjacency.joins).toBeGreaterThanOrEqual(0);
+    const laterJoins = Object.entries(secondActual.phases)
+      .filter(([phase]) => phase !== "adjacency")
+      .reduce((sum, [, phase]) => sum + phase.joins, 0);
+    expect(laterJoins).toBe(0);
+  });
+
+  it("does not re-charge the original solve on an exact retry", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantHub(slice, 6);
+    const budget = defaultBudget({ page_budget: 1, work_units: 10_000, finalization_reserve: 512 });
+    const first = recall(readersFor(slice), budget);
+    expect(first.index.continuation).not.toBeNull();
+    const second = recall(readersFor(slice), budget, first.index.continuation);
+    expect(second.index.page_purpose).not.toBe("retry");
+    const retry = recall(readersFor(slice), budget, first.index.continuation);
+    expect(retry.index.page_purpose).toBe("retry");
+    const retryActual = requireActual(retry.execution_receipt.actual);
+    expect(retryActual.phases.observe.relaxations).toBe(0);
+    expect(retryActual.phases.observe.state_creates).toBe(0);
+    expect(retryActual.phases.solve.relaxations).toBe(0);
+  });
+
+  it("keeps a payload expansion page's solver and identity deltas at 0 when resuming", () => {
+    const firstChunk = hydrateUtf8Chunk(OVERSIZED, { offset: 0, byteLimit: 32 });
+    expect(firstChunk.status).toBe("chunk");
+    if (firstChunk.status !== "chunk") return;
+    const target: SourceEvidenceTarget = {
+      kind: "source_evidence",
+      workspace_id: "workspace",
+      root_kind: "source_record",
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: DIGEST,
+      evidence_object_id: null
+    };
+    const first = runConditionalFieldRecallWithReceipt({
+      workspace_id: "workspace",
+      query_text: "needle",
+      budget: defaultBudget({ page_budget: 4 }),
+      snapshot_id: SNAPSHOT_ID,
+      interpretation_clock: INTERPRETATION_CLOCK,
+      as_of: INTERPRETATION_CLOCK,
+      expires_at: FAR_FUTURE_EXPIRY,
+      result_kind_view: "source_only",
+      readers: sourceReaders([], false),
+      authorized_scopes: null
+    });
+    const firstActual = requireActual(first.execution_receipt.actual);
+    expect(firstActual.native_visits).toBeGreaterThan(0);
+    expect(firstActual.phases.payload.native_bytes).toBeGreaterThan(0);
+    const source = first.index.entries.find((entry) => entry.target.kind === "source_evidence");
+    expect(source?.target.kind).toBe("source_evidence");
+    if (source?.target.kind !== "source_evidence") return;
+    expect(first.index.continuation).not.toBeNull();
+    const startOffset = source.target.span?.content_end ?? firstChunk.end_offset;
+    const resumed = runConditionalFieldRecallWithReceipt({
+      workspace_id: "workspace",
+      query_text: "needle",
+      budget: defaultBudget({ page_budget: 4 }),
+      snapshot_id: SNAPSHOT_ID,
+      interpretation_clock: INTERPRETATION_CLOCK,
+      as_of: INTERPRETATION_CLOCK,
+      expires_at: FAR_FUTURE_EXPIRY,
+      result_kind_view: "source_only",
+      continuation: first.index.continuation,
+      payload_continuation: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        purpose: "payload_expansion",
+        target,
+        start_offset: startOffset,
+        byte_budget: 32
+      },
+      readers: sourceReaders([], true),
+      authorized_scopes: null
+    });
+    const actual = requireActual(resumed.execution_receipt.actual);
+    expect(actual.phases.observe.relaxations).toBe(0);
+    expect(actual.phases.observe.state_creates).toBe(0);
+    if (actual.retained_states_current > 0) {
+      expect(actual.phases.observe.state_creates).not.toBe(actual.retained_states_current);
+    }
   });
 });
 
