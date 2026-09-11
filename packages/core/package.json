@@ -28,8 +28,7 @@
     "@do-soul/alaya-graph-algorithms": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "@huggingface/transformers": "^4.2.0",
-    "@node-rs/jieba": "2.0.3",
-    "zod": "^4.6.2"
+    "@node-rs/jieba": "2.0.3"
   },
   "devDependencies": {
     "@do-soul/alaya-soul": "workspace:*",

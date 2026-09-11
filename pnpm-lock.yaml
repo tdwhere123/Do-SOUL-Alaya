@@ -330,9 +330,6 @@ importers:
       '@node-rs/jieba':
         specifier: 2.0.3
         version: 2.0.3
-      zod:
-        specifier: 4.6.2
-        version: 4.6.2
     devDependencies:
       '@do-soul/alaya-soul':
         specifier: workspace:*
