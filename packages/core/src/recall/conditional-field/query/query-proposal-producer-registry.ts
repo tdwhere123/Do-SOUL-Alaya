@@ -9,6 +9,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 export const QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION = "1";
+export const QUERY_PROPOSAL_CORE_PRODUCER_ID = "alaya.query.proposal.core.v1";
 
 export const QUERY_PROPOSAL_PRODUCER_CAPABILITIES = [
   "program",
@@ -36,38 +37,29 @@ export type QueryProposalProducerRecord = Readonly<{
 const FULL_GRAMMAR: readonly QueryProposalProgramKind[] = QUERY_PROPOSAL_PROGRAM_KINDS;
 const FULL_CAPABILITIES: readonly QueryProposalProducerCapability[] = QUERY_PROPOSAL_PRODUCER_CAPABILITIES;
 
-const BUILTIN_PRODUCER_IDS = [
-  "alaya.query.proposal.core.v1",
-  "compiler.ordinary.v1",
-  "compiler.test.v1",
-  "daemon.test.v1",
-  "source-test",
-  "discovery.test.v1",
-  "stored-rpc-preparation",
-  "guarded-preparation",
-  "stored-test-proposal",
-  "stored.cosine.pair.v1"
-] as const;
-
-function builtin(producerId: string, version = "1"): QueryProposalProducerRecord {
+export function queryProposalProducerRecord(
+  producerId: string,
+  extra: Omit<Partial<QueryProposalProducerRecord>, "producer_id"> = {}
+): QueryProposalProducerRecord {
   return {
     producer_id: producerId,
-    version,
-    capabilities: FULL_CAPABILITIES,
-    allowed_grammar: FULL_GRAMMAR
+    version: extra.version ?? "1",
+    capabilities: extra.capabilities ?? FULL_CAPABILITIES,
+    allowed_grammar: extra.allowed_grammar ?? FULL_GRAMMAR,
+    ...(extra.max_ast_depth === undefined ? {} : { max_ast_depth: extra.max_ast_depth }),
+    ...(extra.max_ast_nodes === undefined ? {} : { max_ast_nodes: extra.max_ast_nodes }),
+    ...(extra.max_total_guards === undefined ? {} : { max_total_guards: extra.max_total_guards }),
+    ...(extra.max_total_predicates === undefined ? {} : { max_total_predicates: extra.max_total_predicates }),
+    ...(extra.max_total_hypotheses === undefined ? {} : { max_total_hypotheses: extra.max_total_hypotheses }),
+    ...(extra.max_request_bytes === undefined ? {} : { max_request_bytes: extra.max_request_bytes })
   };
 }
-
-const BUILTIN_RECORDS: readonly QueryProposalProducerRecord[] = [
-  ...BUILTIN_PRODUCER_IDS.map((producerId) => builtin(producerId)),
-  builtin("compiler.test.v1", "2")
-];
 
 export class QueryProposalProducerRegistry {
   readonly policy_version = QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION;
   private readonly records: ReadonlyMap<string, QueryProposalProducerRecord>;
 
-  constructor(records: readonly QueryProposalProducerRecord[] = BUILTIN_RECORDS) {
+  constructor(records: readonly QueryProposalProducerRecord[] = PRODUCTION_RECORDS) {
     const map = new Map<string, QueryProposalProducerRecord>();
     for (const record of records) {
       map.set(recordKey(record.producer_id, record.version), record);
@@ -79,6 +71,10 @@ export class QueryProposalProducerRegistry {
     return this.records.get(recordKey(producerId, version));
   }
 }
+
+const PRODUCTION_RECORDS: readonly QueryProposalProducerRecord[] = [
+  queryProposalProducerRecord(QUERY_PROPOSAL_CORE_PRODUCER_ID)
+];
 
 export const defaultQueryProposalProducerRegistry = new QueryProposalProducerRegistry();
 

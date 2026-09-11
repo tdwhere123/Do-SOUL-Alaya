@@ -35,6 +35,7 @@ export {
   QueryBindingSchema,
   QueryHoleSchema,
   QueryHypothesisSchema,
+  QueryInterpretationProposalBodySchema,
   QueryInterpretationProposalSchema,
   QueryProposalInputLimitsSchema,
   StoredCosineAdmissionSchema,

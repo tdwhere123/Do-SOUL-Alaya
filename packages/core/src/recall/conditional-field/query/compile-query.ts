@@ -39,6 +39,7 @@ import {
   type QueryMemoryPort
 } from "./query-admission.js";
 import { admitQueryProposal } from "./query-proposal-admission.js";
+import type { QueryProposalProducerRegistry } from "./query-proposal-producer-registry.js";
 
 export {
   authorizedScopesMismatch,
@@ -77,6 +78,7 @@ type CompileCommon = Readonly<{
   readonly memory?: QueryMemoryPort;
   readonly authorized_scopes?: readonly string[] | null;
   readonly interpretation_proposal?: QueryInterpretationProposal;
+  readonly proposal_registry?: QueryProposalProducerRegistry;
 }>;
 
 export type TypedQueryCompileInput = CompileCommon & Readonly<{
@@ -180,7 +182,11 @@ function compileTyped(
       interpretation_clock: input.interpretation_clock
     });
   }
-  const proposal = admitQueryProposal(input.interpretation_proposal, stableStringify(program.data));
+  const proposal = admitQueryProposal(
+    input.interpretation_proposal,
+    stableStringify(program.data),
+    input.proposal_registry
+  );
   if (proposal.kind === "invalid") {
     return interpretationOf({
       query_id: fallbackQueryId(input.query_id, "malformed"),

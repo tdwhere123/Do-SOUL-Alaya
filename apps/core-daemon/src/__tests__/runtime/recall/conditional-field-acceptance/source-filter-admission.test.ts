@@ -136,7 +136,7 @@ describe("frozen source predicates through ordinary recall", () => {
       interpretation_proposal: {
         schema_version: 1,
         original_query_digest: digest,
-        producer_id: "daemon.test.v1",
+        producer_id: "alaya.query.proposal.core.v1",
         conditions: [{
           schema_version: 1,
           kind: "query_predicate",
@@ -152,7 +152,7 @@ describe("frozen source predicates through ordinary recall", () => {
       interpretation_proposal: {
         schema_version: 1,
         original_query_digest: digest,
-        producer_id: "daemon.test.v1"
+        producer_id: "alaya.query.proposal.core.v1"
       }
     });
     expect(encoded.provider_calls).toBe(0);
@@ -168,7 +168,7 @@ describe("frozen source predicates through ordinary recall", () => {
       interpretation_proposal: {
         schema_version: 1,
         original_query_digest: digest,
-        producer_id: "daemon.test.v1",
+        producer_id: "alaya.query.proposal.core.v1",
         conditions: [{
           schema_version: 1,
           kind: "query_predicate",
@@ -187,7 +187,7 @@ describe("frozen source predicates through ordinary recall", () => {
       interpretation_proposal: {
         schema_version: 1,
         original_query_digest: digest,
-        producer_id: "daemon.test.v1",
+        producer_id: "alaya.query.proposal.core.v1",
         conditions: [{
           schema_version: 1,
           kind: "query_predicate",

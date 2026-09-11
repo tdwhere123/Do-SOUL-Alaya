@@ -436,7 +436,7 @@ describe("stored pair measurement producer", () => {
         interpretation_proposal: {
           schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
           original_query_digest: DIGEST,
-          producer_id: "stored.cosine.pair.v1",
+          producer_id: "alaya.query.proposal.core.v1",
           stored_cosine_admission: {
             registry_version: "stored.cosine.admission.v1",
             join: "any",

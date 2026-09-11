@@ -527,7 +527,7 @@ describe("conditional-field query compiler", () => {
       interpretation_proposal: {
         schema_version: 1,
         original_query_digest: digest,
-        producer_id: "compiler.test.v1"
+        producer_id: "alaya.query.proposal.core.v1"
       }
     });
     expect(withProposal.query_id).not.toBe(associative.query_id);
@@ -540,7 +540,7 @@ describe("conditional-field query compiler", () => {
       interpretation_proposal: {
         schema_version: 1,
         original_query_digest: digestOriginalQuery("other query"),
-        producer_id: "compiler.test.v1"
+        producer_id: "alaya.query.proposal.core.v1"
       }
     });
     expect(unbound.status).toBe("malformed");
@@ -744,7 +744,7 @@ describe("conditional-field query compiler", () => {
       interpretation_proposal: {
         schema_version: 1,
         original_query_digest: digest,
-        producer_id: "compiler.test.v1",
+        producer_id: "alaya.query.proposal.core.v1",
         program: proposalProgram,
         conditions: [{
           schema_version: 1,
@@ -770,7 +770,7 @@ describe("conditional-field query compiler", () => {
       interpretation_proposal: {
         schema_version: 1,
         original_query_digest: digest,
-        producer_id: "compiler.test.v1"
+        producer_id: "alaya.query.proposal.core.v1"
       }
     });
     const wide = compileConditionalFieldQuery({
@@ -782,11 +782,11 @@ describe("conditional-field query compiler", () => {
       interpretation_proposal: {
         schema_version: 1,
         original_query_digest: digest,
-        producer_id: "compiler.test.v1"
+        producer_id: "alaya.query.proposal.core.v1"
       }
     });
     expect(narrow.query_id).toBe(wide.query_id);
-    expect(narrow.interpretation_proposal?.producer_id).toBe("compiler.test.v1");
+    expect(narrow.interpretation_proposal?.producer_id).toBe("alaya.query.proposal.core.v1");
   });
 });
 

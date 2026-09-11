@@ -337,7 +337,7 @@ export const QueryProposalInputLimitsSchema = z
   .strict()
   .readonly();
 
-const QueryInterpretationProposalBodySchema = z
+export const QueryInterpretationProposalBodySchema = z
   .object({
     schema_version: SchemaVersionSchema,
     original_query_digest: Sha256DigestSchema,
@@ -355,24 +355,15 @@ const QueryInterpretationProposalBodySchema = z
 
 export type QueryInterpretationProposal = z.infer<typeof QueryInterpretationProposalBodySchema>;
 
-export const QueryInterpretationProposalSchema: z.ZodType<QueryInterpretationProposal> = z
-  .unknown()
-  .transform((value, ctx) => {
-    const inspection = inspectQueryProposalStructure(value);
-    if (inspection.kind !== "ok") {
-      ctx.addIssue({ code: "custom", message: inspection.message });
-      return z.NEVER;
-    }
-    const parsed = QueryInterpretationProposalBodySchema.safeParse(value);
-    if (!parsed.success) {
-      ctx.addIssue({
-        code: "custom",
-        message: parsed.error.issues[0]?.message ?? "query interpretation proposal is invalid"
-      });
-      return z.NEVER;
-    }
-    return parsed.data;
-  });
+// Preprocess walks unknown JSON first; io:"input" JSON Schema still uses the object body.
+export const QueryInterpretationProposalSchema = z.preprocess((value, ctx) => {
+  const inspection = inspectQueryProposalStructure(value);
+  if (inspection.kind !== "ok") {
+    ctx.addIssue({ code: "custom", message: inspection.message });
+    return z.NEVER;
+  }
+  return value;
+}, QueryInterpretationProposalBodySchema);
 
 export const QueryInterpretationSchema = z
   .object({

@@ -7,6 +7,7 @@ import {
   inspectQueryProposalStructure
 } from "../../../recall/conditional-field/index.js";
 import { SoulMemorySearchRequestSchema } from "../../../surfaces/mcp-memory-search-types.js";
+import { soulToolJsonSchemas } from "../../../surfaces/mcp-types.js";
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
 
@@ -38,6 +39,18 @@ describe("query proposal structural budget", () => {
     }).success).toBe(false);
     const parsed = QueryInterpretationProposalSchema.parse(proposal({ schema_version: 1, kind: "epsilon" }));
     expect(parsed.producer_version).toBeUndefined();
+  });
+
+  it("advertises producer_id and ProposedGuard without verdict on the MCP catalog", () => {
+    const properties = soulToolJsonSchemas["soul.recall"]?.properties as
+      | Readonly<Record<string, unknown>>
+      | undefined;
+    const advertised = properties?.interpretation_proposal;
+    expect(advertised).toEqual(expect.objectContaining({ type: "object" }));
+    const encoded = JSON.stringify(advertised);
+    expect(encoded).toContain("\"producer_id\"");
+    expect(encoded).toContain("\"input_limits\"");
+    expect(encoded).not.toContain("\"verdict\"");
   });
 });
 

@@ -28,7 +28,7 @@ function sourceInput(reader: SqliteSourceRootRecallReader, needles: readonly str
   const query: QueryInterpretation = { schema_version: 1, query_id: "source-boundary", snapshot_id: SNAPSHOT_ID,
     status: "resolved", program: { schema_version: 1, kind: "epsilon" },
     view: { ...defaultView(), result_kind_view: "source_only" }, holes: [], hypotheses: [], source_guard: literal(needles[0]!),
-    interpretation_proposal: { schema_version: 1, original_query_digest: SNAPSHOT_ID, producer_id: "source-test",
+    interpretation_proposal: { schema_version: 1, original_query_digest: SNAPSHOT_ID, producer_id: "alaya.query.proposal.core.v1",
       conditions: needles.slice(1).map((needle) => {
         const { verdict: _verdict, ...rest } = literal(needle);
         return rest;

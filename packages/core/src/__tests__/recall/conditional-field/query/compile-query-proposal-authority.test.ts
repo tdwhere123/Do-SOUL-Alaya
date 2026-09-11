@@ -12,6 +12,11 @@ import {
   compileConditionalFieldQuery,
   digestOriginalQuery
 } from "../../../../recall/conditional-field/query/compile-query.js";
+import {
+  QUERY_PROPOSAL_CORE_PRODUCER_ID,
+  QueryProposalProducerRegistry,
+  queryProposalProducerRecord
+} from "../../../../recall/conditional-field/query/query-proposal-producer-registry.js";
 import { evaluateGuard } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import {
   INTERPRETATION_CLOCK,
@@ -117,18 +122,42 @@ describe("query proposal authority and AST budget", () => {
     });
     expect(forged.status).toBe("unsupported");
     expect(forged.program.kind).toBe("epsilon");
+    const fixtureId = compileOrdinaryProposal({
+      producer_id: "daemon.test.v1",
+      program: relationProgram({
+        schema_version: SCHEMA,
+        kind: "query_predicate",
+        predicate_name: "source.identity.v1",
+        variable: "t"
+      })
+    });
+    expect(fixtureId.status).toBe("unsupported");
+    expect(fixtureId.program.kind).toBe("epsilon");
   });
 
   it("changes query_id when producer_id or producer_version changes", () => {
-    const base = compileOrdinaryProposal({ producer_id: "compiler.test.v1" });
-    const otherProducer = compileOrdinaryProposal({ producer_id: "compiler.ordinary.v1" });
+    const registry = new QueryProposalProducerRegistry([
+      queryProposalProducerRecord(QUERY_PROPOSAL_CORE_PRODUCER_ID),
+      queryProposalProducerRecord(QUERY_PROPOSAL_CORE_PRODUCER_ID, { version: "2" }),
+      queryProposalProducerRecord("alaya.query.proposal.alt.v1")
+    ]);
+    const base = compileOrdinaryProposal({
+      producer_id: QUERY_PROPOSAL_CORE_PRODUCER_ID,
+      proposal_registry: registry
+    });
+    const otherProducer = compileOrdinaryProposal({
+      producer_id: "alaya.query.proposal.alt.v1",
+      proposal_registry: registry
+    });
     const defaultedVersion = compileOrdinaryProposal({
-      producer_id: "compiler.test.v1",
-      producer_version: "1"
+      producer_id: QUERY_PROPOSAL_CORE_PRODUCER_ID,
+      producer_version: "1",
+      proposal_registry: registry
     });
     const otherVersion = compileOrdinaryProposal({
-      producer_id: "compiler.test.v1",
-      producer_version: "2"
+      producer_id: QUERY_PROPOSAL_CORE_PRODUCER_ID,
+      producer_version: "2",
+      proposal_registry: registry
     });
     expect(base.status).not.toBe("unsupported");
     expect(otherProducer.status).not.toBe("unsupported");
@@ -136,6 +165,44 @@ describe("query proposal authority and AST budget", () => {
     expect(otherProducer.query_id).not.toBe(base.query_id);
     expect(defaultedVersion.query_id).toBe(base.query_id);
     expect(otherVersion.query_id).not.toBe(base.query_id);
+  });
+
+  it("rejects a registered producer that may not carry a program", () => {
+    const registry = new QueryProposalProducerRegistry([
+      queryProposalProducerRecord(QUERY_PROPOSAL_CORE_PRODUCER_ID, {
+        capabilities: ["conditions", "holes", "hypotheses", "stored_cosine_admission"]
+      })
+    ]);
+    const interpretation = compileOrdinaryProposal({
+      proposal_registry: registry,
+      program: relationProgram({
+        schema_version: SCHEMA,
+        kind: "query_predicate",
+        predicate_name: "source.identity.v1",
+        variable: "t"
+      })
+    });
+    expect(interpretation.status).toBe("unsupported");
+    expect(interpretation.program.kind).toBe("epsilon");
+  });
+
+  it("rejects a relation program when the producer grammar is epsilon only", () => {
+    const registry = new QueryProposalProducerRegistry([
+      queryProposalProducerRecord(QUERY_PROPOSAL_CORE_PRODUCER_ID, {
+        allowed_grammar: ["epsilon"]
+      })
+    ]);
+    const interpretation = compileOrdinaryProposal({
+      proposal_registry: registry,
+      program: relationProgram({
+        schema_version: SCHEMA,
+        kind: "query_predicate",
+        predicate_name: "source.identity.v1",
+        variable: "t"
+      })
+    });
+    expect(interpretation.status).toBe("unsupported");
+    expect(interpretation.program.kind).toBe("epsilon");
   });
 
   it("rejects oversize proposal programs without throwing", () => {
@@ -174,19 +241,22 @@ describe("query proposal authority and AST budget", () => {
 function compileOrdinaryProposal(
   extra: Partial<QueryInterpretationProposal> & {
     readonly producer_id?: string;
+    readonly proposal_registry?: QueryProposalProducerRegistry;
   } = {}
 ) {
+  const { proposal_registry, ...proposal } = extra;
   return compileConditionalFieldQuery({
     source: "ordinary",
     snapshot_id: SNAPSHOT_ID,
     budget: defaultBudget(),
     text: TEXT,
     interpretation_clock: INTERPRETATION_CLOCK,
+    ...(proposal_registry === undefined ? {} : { proposal_registry }),
     interpretation_proposal: {
       schema_version: SCHEMA,
       original_query_digest: digestOriginalQuery(TEXT),
-      producer_id: extra.producer_id ?? "compiler.test.v1",
-      ...extra
+      producer_id: extra.producer_id ?? QUERY_PROPOSAL_CORE_PRODUCER_ID,
+      ...proposal
     }
   });
 }

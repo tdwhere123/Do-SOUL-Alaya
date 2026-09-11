@@ -79,7 +79,11 @@ export function compileOrdinary(
     return ordinaryMalformed(input, snapshotId, view);
   }
   const classified = classifyOrdinaryRequest(input.text);
-  const proposal = admitQueryProposal(input.interpretation_proposal, input.text);
+  const proposal = admitQueryProposal(
+    input.interpretation_proposal,
+    input.text,
+    input.proposal_registry
+  );
   if (proposal.kind === "invalid") {
     return ordinaryMalformed(input, snapshotId, view);
   }
