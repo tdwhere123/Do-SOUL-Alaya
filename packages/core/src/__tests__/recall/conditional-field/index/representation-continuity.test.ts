@@ -42,20 +42,20 @@ describe("index representation continuity", () => {
       prior_continuation: first.continuation };
     expect(projectAcceptingIndex(continued).entries).toEqual([]);
     const stronger = projectAcceptingIndex({ ...continued, snapshot: snapshotOf([fieldValue("same", 900)]) });
-    expect(stronger.entries[0]?.association_milligrades).toBe(900);
-    ledger[key] = indexEntryRevision(stronger.entries[0]!);
+    expect(stronger.entries).toEqual([]);
+    expect(stronger.page_purpose).toBe("update");
+    expect(stronger.product_updates?.some((row) => row.update_kind === "proof")).toBe(true);
     const supported = projectAcceptingIndex({ ...continued, snapshot: snapshotOf([fieldValue("same", 900)]),
       claims: new Map([[key, "supported" as const]]) });
-    expect(supported.entries[0]?.claim).toBe("supported");
-    ledger[key] = indexEntryRevision(supported.entries[0]!);
+    expect(supported.entries).toEqual([]);
+    expect(supported.product_updates?.some((row) => row.update_kind === "claim")).toBe(true);
     const explainedInput = { ...continued, snapshot: snapshotOf([fieldValue("same", 900)]),
       claims: new Map([[key, "supported" as const]]), derivations: [leaf("same")],
       output_derivations: { [key]: [leaf("same").derivation_id] }, resource_work: undefined };
     const explained = projectAcceptingIndex(explainedInput);
-    expect(explained.entries).toHaveLength(1);
-    expect(explained.entries[0]?.explanation_ids.length).toBeGreaterThan(0);
+    expect(explained.entries).toEqual([]);
+    expect(explained.product_updates?.some((row) => row.update_kind === "payload")).toBe(true);
     expect(explained.continuation).toBeNull();
-    ledger[key] = indexEntryRevision(explained.entries[0]!);
     expect(projectAcceptingIndex(explainedInput).entries).toEqual([]);
   });
 
