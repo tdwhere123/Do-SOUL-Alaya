@@ -88,12 +88,21 @@ function relation(
     target_variable: target,
     facet_mode: "same_path",
     threshold_milligrades: 0,
-    guard: {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      kind: "query_predicate",
-      verdict,
-      time_scope: "none"
-    }
+    guard: verdict === "false"
+      ? {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        kind: "source_bound_entity",
+        verdict: "unresolved",
+        variable: target,
+        entity_id: "blocked-entity",
+        time_scope: "none"
+      }
+      : {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        kind: "query_predicate",
+        verdict,
+        time_scope: "none"
+      }
   };
 }
 

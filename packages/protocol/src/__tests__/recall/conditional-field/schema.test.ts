@@ -16,6 +16,7 @@ import {
   FieldGradeSchema,
   GuardKindSchema,
   GuardSchema,
+  ProposedGuardSchema,
   HARD_IDENTITY_TRANSFER_ID,
   HARD_IDENTITY_TRANSFER_VERSION,
   IDENTITY_NORMALIZATION_ID,
@@ -152,6 +153,12 @@ describe("conditional-field schemas", () => {
     });
     expect(program.kind).toBe("sequence");
     expect(GuardSchema.parse({ schema_version: 1, kind: "equality" }).verdict).toBe("unresolved");
+    expect(() => ProposedGuardSchema.parse({
+      schema_version: 1,
+      kind: "authorization",
+      verdict: "true"
+    })).toThrow();
+    expect(ProposedGuardSchema.parse({ schema_version: 1, kind: "authorization" })).not.toHaveProperty("verdict");
     expect(GuardKindSchema.options).toEqual([
       "equality",
       "source_bound_entity",

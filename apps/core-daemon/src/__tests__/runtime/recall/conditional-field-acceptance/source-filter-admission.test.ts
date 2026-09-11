@@ -140,7 +140,6 @@ describe("frozen source predicates through ordinary recall", () => {
         conditions: [{
           schema_version: 1,
           kind: "query_predicate",
-          verdict: "unresolved",
           predicate_name: "source.not_a_frozen_predicate.v1"
         }]
       }
@@ -173,7 +172,6 @@ describe("frozen source predicates through ordinary recall", () => {
         conditions: [{
           schema_version: 1,
           kind: "query_predicate",
-          verdict: "unresolved",
           predicate_name: "source.event_time.interval.v1",
           interval: {
             start: SINCE,
@@ -193,7 +191,6 @@ describe("frozen source predicates through ordinary recall", () => {
         conditions: [{
           schema_version: 1,
           kind: "query_predicate",
-          verdict: "unresolved",
           predicate_name: "source.event_time.interval.v1",
           interval: { start: SINCE, end: NOW, time_domain: "event_time" }
         }]

@@ -719,14 +719,22 @@ describe("conditional-field query compiler", () => {
   it("admits a digest-bound proposal onto the interpretation without erasing holes", () => {
     const text = "xyzzy unrelated request";
     const digest = digestOriginalQuery(text);
-    const proposalProgram = relation("observed_log", "s", "t", {
+    const proposalProgram = {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      kind: "query_predicate",
-      verdict: "unresolved",
-      variable: "t",
-      time_scope: "none",
-      predicate_name: "source.identity.v1"
-    });
+      kind: "relation" as const,
+      relation_kind: "observed_log",
+      source_variable: "s",
+      target_variable: "t",
+      facet_mode: "same_path" as const,
+      threshold_milligrades: 0,
+      guard: {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        kind: "query_predicate" as const,
+        variable: "t",
+        time_scope: "none" as const,
+        predicate_name: "source.identity.v1"
+      }
+    };
     const interpretation = compileConditionalFieldQuery({
       source: "ordinary",
       snapshot_id: SNAPSHOT_ID,
@@ -741,7 +749,6 @@ describe("conditional-field query compiler", () => {
         conditions: [{
           schema_version: 1,
           kind: "query_predicate",
-          verdict: "unresolved",
           predicate_name: "source.literal.nfc.v1",
           entity_id: "needle"
         }]
@@ -751,6 +758,7 @@ describe("conditional-field query compiler", () => {
     expect(interpretation.interpretation_proposal?.program).toEqual(proposalProgram);
     expect(interpretation.program.kind).toBe("relation");
     expect(collectRelations(interpretation.program)[0]?.guard.predicate_name).toBe("source.identity.v1");
+    expect(collectRelations(interpretation.program)[0]?.guard.verdict).toBe("unresolved");
     expect(interpretation.holes.some((hole) => hole.status !== "bound")).toBe(true);
     expect(interpretation.status).toBe("partial");
     const narrow = compileConditionalFieldQuery({

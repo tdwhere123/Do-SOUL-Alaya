@@ -29,7 +29,10 @@ function sourceInput(reader: SqliteSourceRootRecallReader, needles: readonly str
     status: "resolved", program: { schema_version: 1, kind: "epsilon" },
     view: { ...defaultView(), result_kind_view: "source_only" }, holes: [], hypotheses: [], source_guard: literal(needles[0]!),
     interpretation_proposal: { schema_version: 1, original_query_digest: SNAPSHOT_ID, producer_id: "source-test",
-      conditions: needles.slice(1).map(literal) } };
+      conditions: needles.slice(1).map((needle) => {
+        const { verdict: _verdict, ...rest } = literal(needle);
+        return rest;
+      }) } };
   return { workspace_id: "workspace-1", query, action: { schema_version: 1, action: "seed", region_id: "seed", work_limit: 16 },
     lease: { schema_version: 1, lease_id: "source-test", status: "active", snapshot_id: SNAPSHOT_ID, query_id: query.query_id },
     cursor: startObserverCursor({ cursor_id: "seed", region_id: "seed", snapshot_id: SNAPSHOT_ID, query_id: query.query_id }),

@@ -121,7 +121,6 @@ describe("source-root discovery admission", () => {
         conditions: [{
           schema_version: SCHEMA,
           kind: "equality",
-          verdict: "unresolved",
           variable: "c",
           equals_variable: "l",
           time_scope: "none"

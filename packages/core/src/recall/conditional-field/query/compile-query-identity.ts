@@ -6,9 +6,11 @@ import {
   type QueryHypothesis,
   type QueryInterpretationProposal,
   type QueryProgram,
+  type QueryProposalStructuralLimits,
   type QueryTimeWindow,
   type QueryView
 } from "@do-soul/alaya-protocol";
+import { QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION } from "./query-proposal-producer-registry.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 
 export type QueryDenotationParts = Readonly<{
@@ -22,6 +24,8 @@ export type QueryDenotationParts = Readonly<{
   readonly lexical_text?: string;
   readonly ordinary_request?: unknown;
   readonly interpretation_proposal?: QueryInterpretationProposal;
+  readonly proposal_registry_policy_version?: string;
+  readonly proposal_effective_limits?: QueryProposalStructuralLimits;
 }>;
 
 export function digestOriginalQuery(text: string): string {
@@ -50,9 +54,12 @@ export function identityFor(queryId: string | undefined, parts: QueryDenotationP
         : {
           original_query_digest: parts.interpretation_proposal.original_query_digest,
           producer_id: parts.interpretation_proposal.producer_id,
+          producer_version: parts.interpretation_proposal.producer_version ?? "1",
+          registry_policy_version: parts.proposal_registry_policy_version
+            ?? QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION,
           stored_cosine_admission: parts.interpretation_proposal.stored_cosine_admission ?? null,
           conditions: parts.interpretation_proposal.conditions ?? null,
-          input_limits: parts.interpretation_proposal.input_limits ?? null,
+          input_limits: parts.proposal_effective_limits ?? parts.interpretation_proposal.input_limits ?? null,
           program: parts.interpretation_proposal.program ?? null,
           holes: parts.interpretation_proposal.holes ?? null,
           hypotheses: parts.interpretation_proposal.hypotheses ?? null

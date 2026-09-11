@@ -33,16 +33,18 @@ import {
   admitBoundProposalFields,
   admitQueryPredicates,
   associativeCapDomainAdmission,
-  boundProposal,
   consumeMemoryIfNeeded,
   denotation,
+  denotationForAdmission,
   EPSILON,
   extraGuardsForAdmission,
   fallbackQueryId,
   incompatibleCapInterpretation,
   interpretationOf,
-  optionalWindow
+  optionalWindow,
+  proposalRejectedInterpretation
 } from "./query-admission.js";
+import { admitQueryProposal } from "./query-proposal-admission.js";
 
 const MAX_ORDINARY_TEXT = 4096;
 
@@ -77,9 +79,21 @@ export function compileOrdinary(
     return ordinaryMalformed(input, snapshotId, view);
   }
   const classified = classifyOrdinaryRequest(input.text);
-  const proposal = boundProposal(input.interpretation_proposal, input.text);
-  if (proposal === "invalid") {
+  const proposal = admitQueryProposal(input.interpretation_proposal, input.text);
+  if (proposal.kind === "invalid") {
     return ordinaryMalformed(input, snapshotId, view);
+  }
+  if (proposal.kind === "unsupported" || proposal.kind === "resource_rejected" || proposal.kind === "malformed") {
+    return proposalRejectedInterpretation({
+      admission: proposal,
+      query_id: queryId,
+      snapshot_id: snapshotId,
+      program: EPSILON,
+      view,
+      interpretation_clock: input.interpretation_clock,
+      authorized_scopes: input.authorized_scopes,
+      lexical_text: input.text
+    });
   }
   const relations = input.relations ?? proposeOrdinaryRelations(input.text);
   let interpreted: QueryInterpretation;
@@ -111,7 +125,7 @@ function finishOrdinary(
   snapshotId: string,
   view: QueryView,
   queryId: string | undefined,
-  proposal: NonNullable<OrdinaryLanguageCompileInput["interpretation_proposal"]> | undefined,
+  proposal: ReturnType<typeof admitQueryProposal>,
   relations: OrdinaryLanguageCompileInput["relations"],
   interpreted: QueryInterpretation
 ): QueryInterpretation {
@@ -119,10 +133,13 @@ function finishOrdinary(
     program: interpreted.program,
     holes: interpreted.holes,
     hypotheses: interpreted.hypotheses
-  }, proposal);
+  }, proposal.kind === "admitted" ? proposal : undefined);
   const predicates = admitQueryPredicates(
     admitted.program,
-    extraGuardsForAdmission(interpreted.source_guard, proposal)
+    extraGuardsForAdmission(
+      interpreted.source_guard,
+      proposal.kind === "admitted" ? proposal.conditions : []
+    )
   );
   if (predicates.kind === "malformed") {
     return ordinaryMalformed(input, snapshotId, view);
@@ -131,7 +148,7 @@ function finishOrdinary(
     ? [...admitted.holes, ...predicates.holes]
     : admitted.holes;
   return interpretationOf({
-    query_id: identityFor(queryId, denotation(proposal, {
+    query_id: identityFor(queryId, denotationForAdmission(proposal, {
       program: admitted.program,
       view: interpreted.view,
       hypotheses: admitted.hypotheses,
@@ -151,7 +168,7 @@ function finishOrdinary(
     source_guard: interpreted.source_guard,
     interpretation_clock: input.interpretation_clock,
     time_window: interpreted.time_window,
-    interpretation_proposal: proposal
+    interpretation_proposal: proposal.kind === "admitted" ? proposal.stored_proposal : undefined
   });
 }
 
