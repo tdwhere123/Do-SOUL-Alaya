@@ -73,7 +73,7 @@ describe("bench conditional field index response", () => {
     const rows = encodeBenchRecallResults(result, policy);
     const response = buildBenchRecallResponse("delivery", rows, result, budget);
     expect(rows).toEqual(encodeIndexResults(result.index, new Map(), policy.fine_assessment.budgets.max_total_tokens));
-    expect(response.index).toEqual(result.index);
+    expect(response.index).toEqual(frameEncodedIndex(result.index, rows));
     expect(response.results.map((row) => [row.object_id, row.hypothesis_id, row.output_binding,
       row.program_state, row.time_state])).toEqual([
       ["first", "h0", "first", "accept", "as_of"],
@@ -93,7 +93,7 @@ describe("bench conditional field index response", () => {
       budgets: { ...policy.fine_assessment.budgets, max_total_tokens: 2 } } };
     const rows = encodeBenchRecallResults(result, tight);
     const response = buildBenchRecallResponse("delivery", rows, result, budget);
-    expect(rows).toHaveLength(1);
+    expect(rows.map((row) => row.object_id)).toEqual(["first", "second"]);
     expect(response.index).toEqual(frameEncodedIndex(result.index, rows));
     expect(response.index?.entries).toHaveLength(2);
     expect(response.index?.completeness.payload).toBe("omitted");
@@ -127,7 +127,9 @@ describe("bench conditional field index response", () => {
     expect(result.index.entries[0]?.explanation_ids).toEqual([]);
     const tight = { ...policy, fine_assessment: { ...policy.fine_assessment,
       budgets: { ...policy.fine_assessment.budgets, max_total_tokens: 20 } } };
-    expect(encodeBenchRecallResults(result, tight)).toEqual([]);
+    const tightRows = encodeBenchRecallResults(result, tight);
+    expect(tightRows.map((row) => row.object_id)).toEqual(["first", "second"]);
+    expect(tightRows.every((row) => row.content_preview === "[payload omitted]")).toBe(true);
   });
 
   it.each([undefined, {}, { ...fixture().index, snapshot_id: "unbound" }])(

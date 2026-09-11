@@ -360,7 +360,8 @@ function finalizeConditionalFieldMeasurement(
     request: { query_text_sha256: sha256(input.queryText!), workspace_id: input.workspaceId!,
       reference_time: admitted.execution.interpretation_clock,
       snapshot_digest: input.snapshotDigest ?? null, expected_index_snapshot_id: admitted.execution.snapshot_id,
-      filters: input.requestFilters ?? {}, budget: admitted.budget, execution_receipt: admitted.execution },
+      filters: input.requestFilters ?? filtersFromReceipt(admitted.execution),
+      budget: admitted.budget, execution_receipt: admitted.execution },
     identity: { query_id: index.query_id, snapshot_id: index.snapshot_id,
       interpretation_id: index.interpretation_id ?? null, as_of: index.as_of ?? null, result_version: index.result_version },
     index_sha256: sha256(JSON.stringify(index)), completeness: index.completeness,
@@ -394,6 +395,24 @@ function finalizeConditionalFieldMeasurement(
     }
   });
   return validated.success ? validated.data : invalid("invalid_response");
+}
+
+function filtersFromReceipt(receipt: ConditionalFieldExecutionBinding) {
+  const input = receipt.compile_input;
+  return {
+    ...(input.since === undefined ? {} : { since: input.since }),
+    ...(input.until === undefined ? {} : { until: input.until }),
+    ...(input.time_field === undefined ? {} : { time_field: input.time_field }),
+    ...(input.dimension_filter === undefined ? {} : { dimension_filter: input.dimension_filter }),
+    ...(input.domain_tag_filter === undefined ? {} : { domain_tag_filter: input.domain_tag_filter }),
+    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    ...(input.enumeration_policy === undefined && input.view?.enumeration_policy === undefined
+      ? {}
+      : { enumeration_policy: input.view?.enumeration_policy ?? input.enumeration_policy }),
+    ...(input.result_kind_view === undefined && input.view?.result_kind_view === undefined
+      ? {}
+      : { result_kind_view: input.view?.result_kind_view ?? input.result_kind_view })
+  };
 }
 
 function omittedPrefixPage(

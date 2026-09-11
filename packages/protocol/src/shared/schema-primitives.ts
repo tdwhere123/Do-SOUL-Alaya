@@ -1,7 +1,17 @@
 import { z } from "zod";
 
 export const NonEmptyStringSchema = z.string().min(1).max(65536);
-export const IsoDatetimeStringSchema = z.string().min(1).max(64).datetime();
+const MINUTE_PRECISION_UTC = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$/u;
+const DatetimeString = z.string().min(1).max(64).datetime();
+
+// Zod 4 `datetime()` rejects `YYYY-MM-DDTHH:MMZ`. Expand to `:00Z` only to reuse calendar checks.
+export const IsoDatetimeStringSchema = z.union([
+  DatetimeString,
+  z.string().regex(MINUTE_PRECISION_UTC).refine(
+    (value) => DatetimeString.safeParse(`${value.slice(0, -1)}:00Z`).success,
+    { message: "Invalid ISO datetime" }
+  )
+]);
 export const NonNegativeIntSchema = z.number().int().nonnegative();
 export const PositiveIntSchema = z.number().int().positive();
 
