@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   InformationIndexSchema,
@@ -10,6 +10,7 @@ import {
   indexEntryCacheKey,
   indexEntryObjectKind,
   indexMemoryObjectId,
+  sharedProductIdentity,
   type Continuation,
   type BoundedActiveConstraintsResult,
   type InformationIndex,
@@ -24,9 +25,12 @@ import { interpretationCoverageFor } from "../conditional-field/reference/interp
 import { type ObserverReaders } from "../conditional-field/observers/observe.js";
 import { projectFieldDelta, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
-import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
 import { fieldProgressFingerprint } from "../conditional-field/index/facet-visit-accounting.js";
+import {
+  committedProductStatesOf,
+  committedRevisionsOf
+} from "../conditional-field/index/product-component-diff.js";
 import {
   captureEffectiveAsOf,
   normalizeQueryText,
@@ -39,11 +43,14 @@ import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { BoundedIndexPayload } from "./index-payload.js";
 import {
   bindIssuedDeliveryId,
-  continuationDigest,
   evictIssuedDeliveries,
+  facetIndexStillOpen,
   fieldResumeKey,
+  issuedContinuationForState,
   issuedDeliveryIdOf,
   issuedDeliveryRevoked,
+  mergeCommittedRevisions,
+  observationSettled,
   rememberField,
   rememberIssuedDelivery,
   replayIssuedDelivery,
@@ -51,7 +58,7 @@ import {
   restoreField,
   resumeIndexProjection,
   retainCommittedRevisions,
-  mergeCommittedRevisions
+  sealIssuedContinuation
 } from "./index-continuation.js";
 import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
 import { startRequestCost, type RequestCostLedger } from "./request-cost-ledger.js";
@@ -282,19 +289,6 @@ function runCompiledConditionalFieldRecall(
   return index;
 }
 
-function observationSettled(state: FieldEngineState): boolean {
-  return state.pending_path_effects === undefined
-    && state.last_observer_status !== "interrupted"
-    && state.last_observer_status !== "open"
-    && !state.memory_exhausted
-    && (state.remaining_work.length === 0);
-}
-
-function facetIndexStillOpen(state: FieldEngineState): boolean {
-  const facets = state.binding.kind === "bound" ? state.binding.snapshot.facets : state.facets;
-  return facets.length > 0 && state.projection_progress?.facet_index?.complete !== true;
-}
-
 function projectFromField(
   state: ReturnType<typeof observeField>,
   input: ConditionalFieldRecallRequest,
@@ -325,7 +319,7 @@ function projectFromField(
     interpretation.snapshot_id,
     interpretationIdentity({ interpretation_clock: interpretation.interpretation_clock })
   );
-  const requestDigest = input.continuation == null ? "root" : continuationDigest(input.continuation);
+  const requestDigest = input.continuation == null ? "root" : input.continuation.continuation_id;
   if (input.continuation == null) {
     for (const digest of evictIssuedDeliveries(queryKey)) ISSUED_SURFACES.delete(digest);
   }
@@ -333,7 +327,7 @@ function projectFromField(
   if (issued !== undefined) {
     const eligible = new Set(snapshot.values
       .filter((value) => value.accepting)
-      .map((value) => productStateNodeId(value.state)));
+      .map((value) => sharedProductIdentity(value.state)));
     if (issuedDeliveryRevoked(issued, eligible)) {
       return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
     }
@@ -365,6 +359,8 @@ function projectFromField(
     projection_facet_index: projectionProgress.facet_index,
     delivered_product_ids: new Set(Object.keys(projectionProgress.delivered_entries)),
     delivered_entry_revisions: projectionProgress.delivered_entries,
+    delivered_product_states: projectionProgress.delivered_products,
+    payload_expansion: input.payload_continuation?.purpose === "payload_expansion",
     on_projection_progress: (offset, facet) => {
       projectionProgress = { ...projectionProgress, offset,
         ...(facet === undefined ? {} : { facet_offset: facet.scan_offset, facet_index: facet.index }) };
@@ -409,7 +405,9 @@ function projectFromField(
         charged_retained_bytes: work.native_bytes, native_rows: entries.length });
       return result;
     }),
-    prior_continuation: input.continuation ?? null,
+    prior_continuation: input.continuation == null
+      ? null
+      : issuedContinuationForState(state) ?? input.continuation,
     observer: {
       outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: state.closure.observation },
       open_regions: state.residuals
@@ -432,26 +430,31 @@ function projectFromField(
   }))), interpretation);
   const committed = index.completeness.logical_index === "invalidated"
     ? projectionProgress.delivered_entries
-    : index.continuation?.emitted_revisions
+    : committedRevisionsOf(index)
       ?? mergeCommittedRevisions(projectionProgress.delivered_entries, index.entries);
   const delivery = retainCommittedRevisions(
     projectionProgress,
     committed,
-    state.projection_progress === undefined
+    state.projection_progress === undefined,
+    index.completeness.logical_index === "invalidated"
+      ? projectionProgress.delivered_products
+      : committedProductStatesOf(index)
   );
   if (delivery.bytes > payload.remainingMemoryBytes) index = { ...index, continuation: null };
   else {
     payload.remainingMemoryBytes -= delivery.bytes;
     retained = { ...retained, projection_progress: delivery.progress };
   }
-  if (index.continuation !== null) index = { ...index,
-    continuation: { ...index.continuation, continuation_id: randomUUID() } };
+  if (index.continuation !== null) {
+    index = { ...index, continuation: sealIssuedContinuation(index.continuation) };
+  }
   index = payload.applyDeliveredSpans(index);
   INDEX_PREVIEWS.set(index, payload.previews);
   INDEX_SOURCE_METADATA.set(index, payload.sourceMetadata);
   if (input.continuation != null && index.completeness.logical_index !== "invalidated"
     && retained.projection_progress === delivery.progress) {
-    rememberIssuedDelivery({ query_key: queryKey, request_digest: requestDigest, index });
+    rememberIssuedDelivery({ query_key: queryKey, request_digest: requestDigest, index,
+      request: input.continuation });
     ISSUED_SURFACES.set(requestDigest, {
       previews: payload.previews,
       metadata: payload.sourceMetadata

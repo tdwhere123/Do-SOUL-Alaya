@@ -1,6 +1,8 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  productStateKeyFromIndexEntry,
   reachableMilligradesOf,
+  sharedProductIdentity,
   type ClaimState,
   type Continuation,
   type Derivation,
@@ -11,6 +13,7 @@ import {
   type IndexEntry,
   type IndexRole,
   type InformationIndex,
+  type ProductStateKey,
   type QueryInterpretationStatus,
   type QueryView,
   type Proposition,
@@ -54,6 +57,16 @@ import {
 } from "./explanation.js";
 import { acceptingEntries } from "./project-accepting-entries.js";
 import {
+  bindCommittedDelivery,
+  committedProductStatesOf,
+  mergeCommittedProductStates,
+  pagePurposeFor,
+  productComponentState,
+  productUpdatesBetween,
+  type EmittedProductLedger
+} from "./product-component-diff.js";
+import { orderClosureFromProjection } from "./order-closure.js";
+import {
   continuationPrefixUnverified,
   continuationSetMismatch,
   nextContinuation,
@@ -93,6 +106,8 @@ export type AcceptingProjectionInput = Readonly<{
   readonly projection_generation?: number;
   readonly delivered_product_ids?: ReadonlySet<string>;
   readonly delivered_entry_revisions?: Readonly<Record<string, string>>;
+  readonly delivered_product_states?: EmittedProductLedger;
+  readonly payload_expansion?: boolean;
   readonly ordered_values?: Readonly<{ size: number; at(index: number): FieldValue | undefined }>;
   readonly on_projection_progress?: (offset: number, facet?: FacetVisitProgress) => void;
   readonly projection_facet_offset?: number;
@@ -181,6 +196,9 @@ export function continueAcceptingIndex(
   const emitted = previous.continuation.emitted_revisions
     ?? input.delivered_entry_revisions
     ?? {};
+  const products = committedProductStatesOf(previous)
+    ?? committedProductStatesOf(previous.continuation)
+    ?? {};
   return projectAcceptingIndex({
     ...input,
     query_id: previous.query_id,
@@ -188,6 +206,7 @@ export function continueAcceptingIndex(
     result_version: previous.result_version,
     prior_continuation: previous.continuation,
     delivered_entry_revisions: { ...input.delivered_entry_revisions, ...emitted },
+    delivered_product_states: { ...products, ...input.delivered_product_states },
     delivered_product_ids: new Set([
       ...input.delivered_product_ids ?? [],
       ...Object.keys(emitted)
@@ -300,14 +319,37 @@ function pageAcceptingIndex(
     ? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)
     : projected.truncated || useEmittedSet
       || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined;
-  return {
+  const ledger = input.delivered_product_states
+    ?? committedProductStatesOf(input.prior_continuation)
+    ?? {};
+  const productUpdates = [
+    ...retractionUpdates(projected.retracted, ledger),
+    ...updates.flatMap((entry) => componentUpdatesFor(entry, emitted, ledger))
+  ];
+  const committedProducts = mergeCommittedProductStates(
+    ledger, members, updates, projected.retracted
+  );
+  const order = orderClosureFromProjection({
+    view: input.view,
+    query_id: input.query_id,
+    snapshot_id: input.snapshot_id,
+    interpretation_id: input.interpretation_id,
+    observer: input.observer,
+    remaining,
+    resource_open: resourceOpen,
+    pending_semantic_work: omittedPayload || input.support_work_status === "open"
+      || input.payload_work === "open"
+  });
+  const index = {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     query_id: input.query_id,
     snapshot_id: input.snapshot_id,
     result_version: input.result_version,
     entries: prepared,
     explanations: recoverExplanationForest(prepared.flatMap((entry) => entry.explanation_ids), input.derivations ?? []),
-    completeness,
+    completeness: order.order_status === "complete"
+      ? { ...completeness, order_coverage: "complete" as const }
+      : completeness,
     continuation: nextContinuation({
       ...input,
       projection_facet_offset: projected.facet.scan_offset,
@@ -317,14 +359,50 @@ function pageAcceptingIndex(
     }, remaining, nextOffset, useEmittedSet ? [...members, ...updates] : entries, scanOffset,
       committedRevisions, useEmittedSet),
     representation,
-    page_purpose: members.length > 0 ? "membership" : updates.length > 0 ? "update" : "membership",
-    ...(updates.length === 0 ? {} : {
-      product_updates: updates.map((entry) => productUpdateFor(entry, emitted[productIdOfEntry(entry)]))
+    page_purpose: pagePurposeFor({
+      payload_expansion: input.payload_expansion === true,
+      member_count: members.length,
+      update_count: productUpdates.length
     }),
-    order_status: remaining > 0 || resourceOpen || completeness.order_coverage !== "complete"
-      ? "open"
-      : "complete"
+    ...(productUpdates.length === 0 ? {} : { product_updates: productUpdates }),
+    order_status: order.order_status
   };
+  bindCommittedDelivery(index, committedRevisions, committedProducts);
+  return index;
+}
+
+function componentUpdatesFor(
+  entry: IndexEntry,
+  emitted: Readonly<Record<string, string>>,
+  ledger: EmittedProductLedger
+): ReturnType<typeof productUpdatesBetween> {
+  const id = productIdOfEntry(entry);
+  const previous = ledger[id];
+  if (previous !== undefined) {
+    return productUpdatesBetween(
+      productStateKeyFromIndexEntry(entry),
+      previous,
+      productComponentState(entry)
+    );
+  }
+  return [productUpdateFor(entry, emitted[id])];
+}
+
+function retractionUpdates(
+  retracted: readonly ProductStateKey[],
+  ledger: EmittedProductLedger
+): ReturnType<typeof productUpdatesBetween> {
+  return retracted.flatMap((product) => {
+    const previous = ledger[sharedProductIdentity(product)] ?? {
+      membership_revision: "emitted",
+      proof_revision: "emitted",
+      claim_revision: "emitted",
+      explanation_revision: "emitted",
+      payload_revision: "emitted",
+      membership_present: true
+    };
+    return productUpdatesBetween(product, previous, { ...previous, membership_present: false });
+  });
 }
 
 function indexCompleteness(

@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  EMITTED_REVISIONS_MAX,
   canonicalIndexEntryIdentity,
   productStateKeyFromIndexEntry,
   reachableMilligradesOf,
+  sharedProductIdentity,
   type Continuation,
   type EnumerationPolicy,
   type FieldSnapshot,
@@ -14,13 +16,20 @@ import {
   type ProductUpdateKind
 } from "@do-soul/alaya-protocol";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
-import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
 import {
   authorizedScopesMismatch,
   interpretationIdentity
 } from "../conditional-field/query/compile-query-identity.js";
 import { compareText } from "../../shared/compare-text.js";
 import { stableStringify } from "../../shared/stable-stringify.js";
+import type { EmittedProductLedger } from "../conditional-field/index/product-component-diff.js";
+import {
+  continuationCapabilityMatches,
+  issuedContinuationTampered,
+  sealIssuedContinuation
+} from "./continuation-capability.js";
+
+export { sealIssuedContinuation };
 
 export type ProjectionProgress = NonNullable<FieldEngineState["projection_progress"]>;
 export type EmittedRevisions = Readonly<Record<string, string>>;
@@ -33,7 +42,11 @@ const ISSUED_MAX = 32;
 const FIELD_RESUME_MAX = 32;
 const ISSUED_PAGES = new Map<string, IssuedDelivery>();
 const INDEX_ISSUED_DELIVERY = new WeakMap<InformationIndex, string>();
-const FIELD_RESUME = new Map<string, Readonly<{ state: FieldEngineState; token_digest: string }>>();
+const FIELD_RESUME = new Map<string, Readonly<{
+  state: FieldEngineState;
+  token_digest: string;
+  issued: Continuation;
+}>>();
 
 export type IssuedDelivery = Readonly<{
   readonly query_key: string;
@@ -41,6 +54,7 @@ export type IssuedDelivery = Readonly<{
   readonly delivery_id: string;
   readonly member_ids: readonly string[];
   readonly index: InformationIndex;
+  readonly request?: Continuation;
 }>;
 
 export function indexEntryRevision(entry: IndexEntry): string {
@@ -50,7 +64,7 @@ export function indexEntryRevision(entry: IndexEntry): string {
 }
 
 export function productIdOfEntry(entry: IndexEntry): string {
-  return productStateNodeId(productStateKeyFromIndexEntry(entry));
+  return sharedProductIdentity(productStateKeyFromIndexEntry(entry));
 }
 
 export function compareIndexEntries(
@@ -98,10 +112,8 @@ export function emittedRevisionsOf(input: Readonly<{
   readonly delivered_entry_revisions?: EmittedRevisions;
   readonly prior_continuation?: Continuation | null;
 }>): EmittedRevisions {
-  return {
-    ...input.prior_continuation?.emitted_revisions,
-    ...input.delivered_entry_revisions
-  };
+  if (input.delivered_entry_revisions !== undefined) return input.delivered_entry_revisions;
+  return input.prior_continuation?.emitted_revisions ?? {};
 }
 
 export function mergeCommittedRevisions(
@@ -111,6 +123,11 @@ export function mergeCommittedRevisions(
   const next = { ...prior };
   for (const entry of entries) {
     next[productIdOfEntry(entry)] = indexEntryRevision(entry);
+  }
+  const keys = Object.keys(next);
+  if (keys.length <= EMITTED_REVISIONS_MAX) return next;
+  for (const key of keys.slice(0, keys.length - EMITTED_REVISIONS_MAX)) {
+    delete next[key];
   }
   return next;
 }
@@ -132,7 +149,7 @@ export function missingEmittedIdentities(
   values: readonly FieldValue[]
 ): readonly string[] {
   if (Object.keys(emitted).length === 0) return [];
-  const present = new Set(values.map((value) => productStateNodeId(value.state)));
+  const present = new Set(values.map((value) => sharedProductIdentity(value.state)));
   return Object.keys(emitted).filter((id) => !present.has(id));
 }
 
@@ -155,12 +172,16 @@ export function continuationCursorInvalid(input: Readonly<{
   readonly page_offset?: number;
   readonly view: Readonly<{ readonly enumeration_policy?: EnumerationPolicy }>;
   readonly prior_continuation?: Continuation | null;
+  readonly delivered_product_ids?: ReadonlySet<string>;
+  readonly delivered_entry_revisions?: EmittedRevisions;
 }>): boolean {
   if (input.page_offset !== undefined) return false;
   const cursor = input.prior_continuation?.cursor;
   if (cursor === undefined) return false;
   const associative = (input.view.enumeration_policy ?? "canonical") === "associative";
-  const hasEmitted = input.prior_continuation?.emitted_revisions !== undefined;
+  const serverLedger = input.delivered_entry_revisions !== undefined
+    || input.delivered_product_ids !== undefined;
+  const hasEmitted = input.prior_continuation?.emitted_revisions !== undefined || serverLedger;
   if (associative && OFFSET_CURSOR.test(cursor) && !hasEmitted) return true;
   if (associative && RESUME_CURSOR.test(cursor) && !hasEmitted) return true;
   return !OFFSET_CURSOR.test(cursor) && !RESUME_CURSOR.test(cursor) && !PROJECTION_CURSOR.test(cursor);
@@ -205,6 +226,7 @@ export function resumeIndexProjection(state: FieldEngineState, snapshot: FieldSn
     generation,
     offset: same ? prior!.offset : 0,
     delivered_entries: prior?.delivered_entries ?? {},
+    ...(prior?.delivered_products === undefined ? {} : { delivered_products: prior.delivered_products }),
     ...(same && prior?.facet_offset !== undefined ? { facet_offset: prior.facet_offset } : {}),
     ...(prior?.facet_index !== undefined ? { facet_index: prior.facet_index } : {})
   };
@@ -228,20 +250,29 @@ export function retainIndexDelivery(
 export function retainCommittedRevisions(
   progress: ProjectionProgress,
   committed: EmittedRevisions,
-  first: boolean
+  first: boolean,
+  products?: EmittedProductLedger
 ): Readonly<{ progress: ProjectionProgress; bytes: number }> {
   let bytes = first ? 256 : 0;
   for (const [key, revision] of Object.entries(committed)) {
     if (progress.delivered_entries[key] === undefined) bytes += 128 + Buffer.byteLength(key, "utf8");
     else if (progress.delivered_entries[key] === revision) continue;
   }
-  return { progress: { ...progress, delivered_entries: committed }, bytes };
+  return {
+    progress: {
+      ...progress,
+      delivered_entries: committed,
+      ...(products === undefined ? {} : { delivered_products: products })
+    },
+    bytes
+  };
 }
 
 export function rememberIssuedDelivery(input: Readonly<{
   readonly query_key: string;
   readonly request_digest: string;
   readonly index: InformationIndex;
+  readonly request?: Continuation | null;
 }>): string {
   const delivery_id = createHash("sha256").update(JSON.stringify([
     input.request_digest, input.index.query_id, input.index.snapshot_id,
@@ -252,7 +283,8 @@ export function rememberIssuedDelivery(input: Readonly<{
     request_digest: input.request_digest,
     delivery_id,
     member_ids: input.index.entries.map(productIdOfEntry),
-    index: input.index
+    index: input.index,
+    ...(input.request == null ? {} : { request: input.request })
   });
   while (ISSUED_PAGES.size > ISSUED_MAX) {
     const oldest = ISSUED_PAGES.keys().next().value;
@@ -319,12 +351,31 @@ export function rememberField(state: FieldEngineState, continuation: Continuatio
   );
   FIELD_RESUME.delete(key);
   if (continuation === null) return;
-  FIELD_RESUME.set(key, { state, token_digest: continuationDigest(continuation) });
+  FIELD_RESUME.set(key, {
+    state,
+    token_digest: continuationDigest(continuation),
+    issued: continuation
+  });
   while (FIELD_RESUME.size > FIELD_RESUME_MAX) {
     const oldest = FIELD_RESUME.keys().next().value;
     if (oldest === undefined) break;
     FIELD_RESUME.delete(oldest);
   }
+}
+
+export function issuedContinuationFor(
+  continuation: Continuation | null | undefined
+): Continuation | undefined {
+  if (continuation === undefined || continuation === null) return undefined;
+  return lookupResume(continuation)?.issued;
+}
+
+export function issuedContinuationForState(state: FieldEngineState): Continuation | undefined {
+  return FIELD_RESUME.get(fieldResumeKey(
+    state.query_id,
+    state.snapshot_id,
+    interpretationIdentity({ interpretation_clock: state.interpretation.interpretation_clock })
+  ))?.issued;
 }
 
 export function restoreField(
@@ -333,17 +384,45 @@ export function restoreField(
   interpretationId?: string
 ): FieldEngineState | undefined {
   if (continuation === undefined || continuation === null) return undefined;
-  const retained = FIELD_RESUME.get(fieldResumeKey(
+  if (!continuationCapabilityMatches(continuation)) return undefined;
+  const retained = lookupResume(continuation, interpretationClock, interpretationId);
+  if (retained === undefined) return undefined;
+  const replayed = replayIssuedDelivery(continuation.continuation_id);
+  if (replayed !== undefined) {
+    if (replayed.request !== undefined && issuedContinuationTampered(continuation, replayed.request)) {
+      return undefined;
+    }
+    return retained.state;
+  }
+  if (issuedContinuationTampered(continuation, retained.issued)) return undefined;
+  return retained.state;
+}
+
+export function observationSettled(state: FieldEngineState): boolean {
+  return state.pending_path_effects === undefined
+    && state.last_observer_status !== "interrupted"
+    && state.last_observer_status !== "open"
+    && !state.memory_exhausted
+    && state.remaining_work.length === 0;
+}
+
+export function facetIndexStillOpen(state: FieldEngineState): boolean {
+  const facets = state.binding.kind === "bound" ? state.binding.snapshot.facets : state.facets;
+  return facets.length > 0 && state.projection_progress?.facet_index?.complete !== true;
+}
+
+function lookupResume(
+  continuation: Continuation,
+  interpretationClock?: string,
+  interpretationId?: string
+): Readonly<{ state: FieldEngineState; token_digest: string; issued: Continuation }> | undefined {
+  return FIELD_RESUME.get(fieldResumeKey(
     continuation.query_id,
     continuation.snapshot_id,
     continuation.interpretation_id
       ?? interpretationId
       ?? interpretationIdentity({ interpretation_clock: interpretationClock })
   ));
-  if (retained === undefined) return undefined;
-  const digest = continuationDigest(continuation);
-  if (replayIssuedDelivery(digest) !== undefined) return retained.state;
-  return retained.token_digest === digest ? retained.state : undefined;
 }
 
 function updateKindFor(entry: IndexEntry, previousRevision: string | undefined): ProductUpdateKind {

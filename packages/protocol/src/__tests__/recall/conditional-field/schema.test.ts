@@ -11,6 +11,8 @@ import {
   FacetModeSchema,
   CompletenessStatusSchema,
   ConditionalFieldSha256DigestSchema,
+  ContinuationSchema,
+  EMITTED_REVISIONS_MAX,
   CoverageRegionKindSchema,
   CoverageRegionSchema,
   FieldGradeSchema,
@@ -503,6 +505,30 @@ describe("conditional-field transfer identity and request coverage", () => {
       argument_variables: ["r", "h"],
       required_claim: "supported"
     }).required_claim).toBe("supported");
+  });
+
+  it("bounds continuation emitted_revisions and accepts an optional capability", () => {
+    const snapshot_id = `sha256:${"b".repeat(64)}`;
+    const base = {
+      schema_version: 1 as const,
+      continuation_id: "page-1",
+      query_id: "q1",
+      snapshot_id,
+      result_version: "v1",
+      expires_at: "2099-01-01T00:00:00.000Z",
+      cursor: "offset-1"
+    };
+    expect(ContinuationSchema.parse({
+      ...base,
+      capability: "a".repeat(64),
+      emitted_revisions: { "product-1": "rev-1" }
+    }).capability).toBe("a".repeat(64));
+    expect(EMITTED_REVISIONS_MAX).toBe(4096);
+    const tooMany: Record<string, string> = {};
+    for (let index = 0; index <= EMITTED_REVISIONS_MAX; index += 1) {
+      tooMany[`product-${String(index)}`] = "rev";
+    }
+    expect(() => ContinuationSchema.parse({ ...base, emitted_revisions: tooMany })).toThrow();
   });
 
   it("accepts MCP request capability fields without changing the default kind view", () => {

@@ -1,12 +1,15 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_BOTTOM,
+  productStateKeyFromIndexEntry,
   productSubjectId,
   reachableMilligradesOf,
+  sharedProductIdentity,
   type FacetMode,
   type FacetVector,
   type FieldValue,
-  type IndexEntry
+  type IndexEntry,
+  type ProductStateKey
 } from "@do-soul/alaya-protocol";
 import { claimObligationAccepts } from "./claim-obligation.js";
 import {
@@ -30,6 +33,11 @@ import {
   mixedPayloadGeneration
 } from "./explanation.js";
 import type { AcceptingProjectionInput } from "./project-accepting-index.js";
+import {
+  committedProductStatesOf,
+  productComponentState,
+  productUpdatesBetween
+} from "./product-component-diff.js";
 
 export function evaluateSamePathPredicate(
   vectors: readonly FacetVector[],
@@ -55,6 +63,7 @@ export function acceptingEntries(
   readonly entries: IndexEntry[];
   readonly members: IndexEntry[];
   readonly updates: IndexEntry[];
+  readonly retracted: ProductStateKey[];
   readonly unemitted: number;
   readonly truncated: boolean;
   readonly next: number;
@@ -64,6 +73,7 @@ export function acceptingEntries(
   const entries: IndexEntry[] = [];
   const members: IndexEntry[] = [];
   const updates: IndexEntry[] = [];
+  const retracted: ProductStateKey[] = [];
   let allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
   let truncated = false;
   let groundingDeferred = false;
@@ -85,7 +95,7 @@ export function acceptingEntries(
   const scanOffset = input.projection_facet_offset ?? Number(cursorMatch?.[4] ?? 0);
   if (input.budget.page_budget === 0) {
     return {
-      entries, members, updates, unemitted: values.size,
+      entries, members, updates, retracted, unemitted: values.size,
       truncated: start < values.size, next: start, remaining: allowance,
       facet: accountFacetPreparation(input.snapshot.facets, input.snapshot.seeds, 0,
         input.projection_facet_index, scanOffset).facet
@@ -102,7 +112,7 @@ export function acceptingEntries(
   const indexed = { ...input, projection_facet_index: prepared.facet.index };
   if (prepared.truncated && allowance <= 0) {
     return {
-      entries, members, updates, unemitted: values.size,
+      entries, members, updates, retracted, unemitted: values.size,
       truncated: true, next: start, remaining: allowance, facet
     };
   }
@@ -110,13 +120,15 @@ export function acceptingEntries(
   for (let index = start; index < values.size; index += 1) {
     const value = values.at(index);
     if (value === undefined) break;
-    const key = productStateNodeId(value.state);
+    const key = sharedProductIdentity(value.state);
     if (emitted !== undefined) {
       const prior = emitted[key];
-      if (prior !== undefined) {
+      const previousState = input.delivered_product_states?.[key]
+        ?? committedProductStatesOf(input.prior_continuation)?.[key];
+      if (prior !== undefined && previousState?.membership_present !== false) {
         const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, input);
         const entry = grounded ? indexEntryForValue(value, indexed) : null;
-        if (entry === null || prior === indexEntryRevision(entry)) {
+        if (entry === null || productUnchanged(entry, prior, input, key)) {
           next += 1;
           continue;
         }
@@ -178,10 +190,14 @@ export function acceptingEntries(
   const unemitted = emitted === undefined
     ? Math.max(0, entries.length)
     : members.length + (truncated ? 1 : 0);
+  if (emitted !== undefined && input.budget.page_budget > 0) {
+    collectRetractions(emitted, values, indexed, retracted);
+  }
   return {
     entries,
     members: emitted === undefined ? entries : members,
     updates,
+    retracted,
     unemitted,
     truncated: truncated || groundingDeferred,
     next,
@@ -200,7 +216,41 @@ function groundedSeedAccepts(value: FieldValue, input: AcceptingProjectionInput)
       && seed.milligrades >= (value.milligrades ?? 0));
 }
 
-function indexEntryForValue(
+function productUnchanged(
+  entry: IndexEntry,
+  prior: string,
+  input: AcceptingProjectionInput,
+  key: string
+): boolean {
+  const previous = input.delivered_product_states?.[key]
+    ?? committedProductStatesOf(input.prior_continuation)?.[key];
+  if (previous === undefined) return prior === indexEntryRevision(entry);
+  return productUpdatesBetween(
+    productStateKeyFromIndexEntry(entry),
+    previous,
+    productComponentState(entry)
+  ).length === 0;
+}
+
+function collectRetractions(
+  emitted: EmittedRevisions,
+  values: Readonly<{ size: number; at(index: number): FieldValue | undefined }>,
+  input: AcceptingProjectionInput,
+  retracted: ProductStateKey[]
+): void {
+  const ledger = input.delivered_product_states
+    ?? committedProductStatesOf(input.prior_continuation)
+    ?? {};
+  for (let index = 0; index < values.size; index += 1) {
+    const value = values.at(index);
+    if (value === undefined) continue;
+    const key = sharedProductIdentity(value.state);
+    if (emitted[key] === undefined || ledger[key]?.membership_present === false) continue;
+    if (indexEntryForValue(value, input) === null) retracted.push(value.state);
+  }
+}
+
+export function indexEntryForValue(
   value: FieldValue,
   input: AcceptingProjectionInput
 ): IndexEntry | null {

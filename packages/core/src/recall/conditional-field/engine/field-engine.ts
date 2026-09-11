@@ -176,6 +176,7 @@ export type FieldEngineState = Readonly<{
     readonly generation: number;
     readonly offset: number;
     readonly delivered_entries: Readonly<Record<string, string>>;
+    readonly delivered_products?: Readonly<Record<string, import("../index/product-component-diff.js").ProductComponentState>>;
     readonly facet_offset?: number;
     readonly facet_index?: import("../index/facet-visit-accounting.js").FacetVisitIndex;
   }>;

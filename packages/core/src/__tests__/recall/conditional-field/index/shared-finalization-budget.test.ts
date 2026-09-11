@@ -119,6 +119,7 @@ describe("one allowance across grounding, projection, and payload", () => {
     expect(result.index.completeness.logical_index).not.toBe("invalidated");
     expect(result.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-1"]);
     expect(result.index.page_purpose).toBe("membership");
+    expect(result.index.product_updates?.map((update) => update.update_kind)).toEqual(["retraction"]);
   });
 
   it("allows suffix growth behind an unchanged stateless prefix", () => {

@@ -232,6 +232,7 @@ export {
   CompletenessReportSchema,
   CompletenessStatusSchema,
   ContinuationSchema,
+  EMITTED_REVISIONS_MAX,
   IndexEntrySchema,
   IndexRoleSchema,
   InformationIndexSchema,
