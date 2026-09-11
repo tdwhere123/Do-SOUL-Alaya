@@ -127,6 +127,7 @@ export type RemainingWork = Readonly<{
 
 export type CreateFieldInput = Readonly<{
   readonly interpretation: QueryInterpretation;
+  readonly authorized_scopes?: readonly string[] | null;
   readonly budget: RequestBudget;
   readonly roles?: ReadonlyMap<string, IndexRole>;
   readonly claims?: ReadonlyMap<string, ClaimState>;
@@ -144,6 +145,7 @@ export type FieldEngineState = Readonly<{
   readonly snapshot_id: string;
   readonly epoch: number;
   readonly interpretation: QueryInterpretation;
+  readonly authorized_scopes?: readonly string[] | null;
   readonly budget: RequestBudget;
   readonly remaining_exploration: number;
   readonly solver_completed_work?: number;
@@ -174,6 +176,7 @@ export type FieldEngineState = Readonly<{
     readonly generation: number;
     readonly offset: number;
     readonly delivered_entries: Readonly<Record<string, string>>;
+    readonly delivered_products?: Readonly<Record<string, import("../index/product-component-diff.js").ProductComponentState>>;
     readonly facet_offset?: number;
     readonly facet_index?: import("../index/facet-visit-accounting.js").FacetVisitIndex;
   }>;
@@ -245,6 +248,7 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     snapshot_id: interpretation.snapshot_id,
     epoch: 1,
     interpretation,
+    authorized_scopes: input.authorized_scopes,
     budget: input.budget,
     remaining_exploration: input.budget.work_units - input.budget.finalization_reserve,
     remaining_reserve: input.budget.finalization_reserve,
@@ -516,6 +520,7 @@ function rejectedField(
     snapshot_id: interpretation.snapshot_id,
     epoch: 1,
     interpretation,
+    authorized_scopes: input.authorized_scopes,
     budget: input.budget,
     remaining_exploration: 0,
     remaining_reserve: input.budget.finalization_reserve,

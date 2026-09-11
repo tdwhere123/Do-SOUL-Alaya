@@ -10,7 +10,8 @@ import {
   ConditionalFieldIdSchema,
   MilligradeSchema,
   SchemaVersionSchema,
-  Sha256DigestSchema
+  Sha256DigestSchema,
+  Sha256HexSchema
 } from "./common.js";
 import {
   AssociationCapContractSchema,
@@ -20,12 +21,13 @@ import {
 } from "./query.js";
 import { ResidualSemanticEffectSchema } from "./observer.js";
 import {
-  canonicalProductIdentity,
   memoryProductStateKey,
   productMemoryObjectId,
   ProductStateKeySchema,
   RecallTargetKindSchema,
   RecallTargetRefSchema,
+  sharedProductIdentity,
+  sourceEvidenceRootTarget,
   sourceProductStateKey,
   stableCanonicalStringify,
   type ProductStateKey,
@@ -38,6 +40,8 @@ export const IndexRoleSchema = z.enum(["requested", "associated", "routing_only"
 export const OrderStatusSchema = z.enum(["open", "certified_prefix", "complete", "partial"]);
 export const PagePurposeSchema = z.enum(["membership", "payload", "update", "retry"]);
 export const ProductUpdateKindSchema = z.enum(["proof", "claim", "payload", "retraction"]);
+/** Cumulative delivered products retained per continuation, not page width. */
+export const EMITTED_REVISIONS_MAX = 4096;
 
 export const IndexEntrySchema = z
   .object({
@@ -160,11 +164,19 @@ export const ContinuationSchema = z
     enumeration_policy: EnumerationPolicySchema.optional(),
     result_kind_view: ResultKindViewSchema.optional(),
     authorized_scopes: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable().optional(),
-    emitted_revisions: z.record(BoundedString(4096), ConditionalFieldIdSchema).optional(),
+    emitted_revisions: z.record(BoundedString(4096), ConditionalFieldIdSchema).superRefine((value, context) => {
+      if (Object.keys(value).length > EMITTED_REVISIONS_MAX) {
+        context.addIssue({
+          code: "custom",
+          message: `emitted_revisions must have at most ${String(EMITTED_REVISIONS_MAX)} entries`
+        });
+      }
+    }).optional(),
     cap_contracts: z.array(AssociationCapContractSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     claim_demands: z.array(ClaimDemandSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     protocol_version: NonNegativeIntSchema.min(1).optional(),
-    supported_result_kinds: z.array(RecallTargetKindSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional()
+    supported_result_kinds: z.array(RecallTargetKindSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    capability: Sha256HexSchema.optional()
   })
   .strict()
   .readonly();
@@ -248,20 +260,31 @@ export type ProductUpdateKind = z.infer<typeof ProductUpdateKindSchema>;
 export type ProductUpdate = z.infer<typeof ProductUpdateSchema>;
 export type PayloadContinuationRequest = z.infer<typeof PayloadContinuationRequestSchema>;
 
+function indexEntryProgramState(entry: IndexEntry): string {
+  return entry.program_state ?? "accepting";
+}
+
+function indexEntryTimeState(entry: IndexEntry): string {
+  return entry.time_state ?? "as_of";
+}
+
 export function canonicalIndexEntryIdentity(entry: IndexEntry): string {
+  const target = entry.target.kind === "source_evidence"
+    ? sourceEvidenceRootTarget(entry.target)
+    : entry.target;
   return stableCanonicalStringify({
     identity_version: "product-identity.v1",
-    target: entry.target,
+    target,
     hypothesis_id: entry.hypothesis_id,
     output_binding: entry.output_binding,
-    program_state: entry.program_state ?? "",
-    time_state: entry.time_state ?? ""
+    program_state: indexEntryProgramState(entry),
+    time_state: indexEntryTimeState(entry)
   });
 }
 
 export function productStateKeyFromIndexEntry(entry: IndexEntry): ProductStateKey {
-  const programState = entry.program_state ?? "accepting";
-  const timeState = entry.time_state ?? "as_of";
+  const programState = indexEntryProgramState(entry);
+  const timeState = indexEntryTimeState(entry);
   if (entry.target.kind === "memory_entry") {
     return memoryProductStateKey({
       workspace_id: entry.target.workspace_id,
@@ -280,6 +303,7 @@ export function productStateKeyFromIndexEntry(entry: IndexEntry): ProductStateKe
     source_version: entry.target.source_version,
     content_digest: entry.target.content_digest,
     evidence_object_id: entry.target.evidence_object_id,
+    ...(entry.target.span === undefined ? {} : { span: entry.target.span }),
     program_state: programState,
     hypothesis_id: entry.hypothesis_id,
     binding_context: entry.output_binding,
@@ -379,7 +403,7 @@ export function indexEntryCacheKey(entry: IndexEntry): string {
 }
 
 export function canonicalProductIdentityOfEntry(entry: IndexEntry): string {
-  return canonicalProductIdentity(productStateKeyFromIndexEntry(entry));
+  return sharedProductIdentity(productStateKeyFromIndexEntry(entry));
 }
 
 export type { RecallTargetRef };

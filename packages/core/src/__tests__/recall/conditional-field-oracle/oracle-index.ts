@@ -19,7 +19,12 @@ import {
   type RequestBudget
 } from "@do-soul/alaya-protocol";
 import {
-  evaluateFacets,
+  facetObligationsAccept,
+  queryRequiresFacetMeasurement
+} from "../../../recall/conditional-field/index/facet-obligation-join.js";
+import {
+  productKey,
+  productStateId,
   type EnumeratedField
 } from "./enumerate-simple-paths.js";
 import type { NativeReaderPage } from "./finite-worlds.js";
@@ -143,6 +148,11 @@ export function scheduleFairWork(input: Readonly<{
 }
 
 export function projectOracleIndex(input: IndexOracleInput): InformationIndex {
+  input = {
+    ...input,
+    roles: remapOracleMap(input.roles, input.field.accepting) ?? input.roles,
+    ...(input.claims === undefined ? {} : { claims: remapOracleMap(input.claims, input.field.accepting) })
+  };
   const representation = {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     policy: "construct_index_then_page_then_payload" as const,
@@ -288,7 +298,7 @@ function entryForValue(value: FieldValue, input: IndexOracleInput): IndexEntry |
   if (!value.accepting) return null;
   if ((value.milligrades ?? 0) <= input.view.threshold_milligrades) return null;
   if (!facetsAccept(value, input)) return null;
-  const role = input.roles.get(productSubjectId(value.state)) ?? "associated";
+  const role = input.roles.get(productStateId(value.state)) ?? "associated";
   if (role === "routing_only" && !input.view.include_routing_only) return null;
   if (!input.view.requested_roles.includes(role)) return null;
   return {
@@ -299,7 +309,7 @@ function entryForValue(value: FieldValue, input: IndexOracleInput): IndexEntry |
     output_binding: value.state.binding_context,
     role,
     association_milligrades: value.milligrades ?? 0,
-    claim: input.claims?.get(productSubjectId(value.state)) ?? "unknown",
+    claim: input.claims?.get(productStateId(value.state)) ?? "unknown",
     explanation_ids: [],
     program_state: value.state.program_state,
     time_state: value.state.time_state
@@ -307,13 +317,14 @@ function entryForValue(value: FieldValue, input: IndexOracleInput): IndexEntry |
 }
 
 function facetsAccept(value: FieldValue, input: IndexOracleInput): boolean {
+  if (!queryRequiresFacetMeasurement(input.view.facet_obligations)) return true;
   const facets = input.facets ?? [];
-  if (facets.length === 0) return true;
+  if (facets.length === 0) return false;
   const relationKind = input.retained_relation_kinds?.get(productSubjectId(value.state));
   const mode = relationKind === undefined
     ? input.view.facet_mode
     : (input.relation_facet_modes?.get(relationKind) ?? input.view.facet_mode);
-  return evaluateFacets(mode, facets, input.view.threshold_milligrades);
+  return facetObligationsAccept(input.view.facet_obligations, facets, mode);
 }
 
 function sortEntries(entries: readonly IndexEntry[]): IndexEntry[] {
@@ -321,6 +332,25 @@ function sortEntries(entries: readonly IndexEntry[]): IndexEntry[] {
     const compared = entryIdentity(left).localeCompare(entryIdentity(right));
     return compared;
   });
+}
+
+function remapOracleMap<T>(
+  map: ReadonlyMap<string, T> | undefined,
+  values: readonly FieldValue[]
+): Map<string, T> | undefined {
+  if (map === undefined) return undefined;
+  const nodeIds = new Set(values.map((value) => productStateId(value.state)));
+  const remapped = new Map<string, T>();
+  for (const [key, value] of map) {
+    if (nodeIds.has(key) || key.startsWith("{")) {
+      remapped.set(key, value);
+      continue;
+    }
+    const matches = values.filter((candidate) => productSubjectId(candidate.state) === key);
+    if (matches.length === 1) remapped.set(productStateId(matches[0]!.state), value);
+    else if (matches.length === 0 && key.length > 0) remapped.set(productStateId(productKey(key)), value);
+  }
+  return remapped;
 }
 
 function continuationInvalidated(input: IndexOracleInput): boolean {

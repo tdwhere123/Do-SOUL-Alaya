@@ -11,11 +11,14 @@ import {
   FacetModeSchema,
   CompletenessStatusSchema,
   ConditionalFieldSha256DigestSchema,
+  ContinuationSchema,
+  EMITTED_REVISIONS_MAX,
   CoverageRegionKindSchema,
   CoverageRegionSchema,
   FieldGradeSchema,
   GuardKindSchema,
   GuardSchema,
+  ProposedGuardSchema,
   HARD_IDENTITY_TRANSFER_ID,
   HARD_IDENTITY_TRANSFER_VERSION,
   IDENTITY_NORMALIZATION_ID,
@@ -26,6 +29,7 @@ import {
   ObserverStatusSchema,
   ProductStateKeySchema,
   QueryInterpretationSchema,
+  QueryFacetObligationSchema,
   QueryProgramSchema,
   QueryViewSchema,
   RepresentationDecisionSchema,
@@ -73,6 +77,7 @@ describe("conditional-field schemas", () => {
     });
     expect(view.facet_mode).toBe("same_path");
     expect(view.threshold_milligrades).toBe(0);
+    expect(view.facet_obligations).toBeUndefined();
     expect(view.enumeration_policy).toBe("canonical");
     expect(view.result_kind_view).toBe("mixed");
     expect(view.protocol_version).toBeUndefined();
@@ -97,6 +102,26 @@ describe("conditional-field schemas", () => {
       facet_mode: "same_path",
       threshold_milligrades: 0
     });
+    const obligation = QueryFacetObligationSchema.parse({
+      obligation_id: "ob-a",
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      requiredness: "required",
+      threshold_milligrades: 800,
+      version: "1"
+    });
+    expect(obligation.predicate).toBe("threshold");
+    expect(obligation.witness_compatibility).toBe("same_path");
+    const withObligations = QueryViewSchema.parse({
+      schema_version: 1,
+      requested_roles: ["associated"],
+      facet_obligations: [obligation]
+    });
+    expect(withObligations.facet_obligations).toHaveLength(1);
+    expect(() => QueryViewSchema.parse({
+      schema_version: 1,
+      requested_roles: ["associated"],
+      facet_obligations: [obligation, { ...obligation, domain_id: ASSOCIATION_DOMAIN_ID }]
+    })).toThrow();
   });
 
   it("requires closure product_state_sufficient and repeat count 1..8", () => {
@@ -152,6 +177,12 @@ describe("conditional-field schemas", () => {
     });
     expect(program.kind).toBe("sequence");
     expect(GuardSchema.parse({ schema_version: 1, kind: "equality" }).verdict).toBe("unresolved");
+    expect(() => ProposedGuardSchema.parse({
+      schema_version: 1,
+      kind: "authorization",
+      verdict: "true"
+    })).toThrow();
+    expect(ProposedGuardSchema.parse({ schema_version: 1, kind: "authorization" })).not.toHaveProperty("verdict");
     expect(GuardKindSchema.options).toEqual([
       "equality",
       "source_bound_entity",
@@ -474,6 +505,30 @@ describe("conditional-field transfer identity and request coverage", () => {
       argument_variables: ["r", "h"],
       required_claim: "supported"
     }).required_claim).toBe("supported");
+  });
+
+  it("bounds continuation emitted_revisions and accepts an optional capability", () => {
+    const snapshot_id = `sha256:${"b".repeat(64)}`;
+    const base = {
+      schema_version: 1 as const,
+      continuation_id: "page-1",
+      query_id: "q1",
+      snapshot_id,
+      result_version: "v1",
+      expires_at: "2099-01-01T00:00:00.000Z",
+      cursor: "offset-1"
+    };
+    expect(ContinuationSchema.parse({
+      ...base,
+      capability: "a".repeat(64),
+      emitted_revisions: { "product-1": "rev-1" }
+    }).capability).toBe("a".repeat(64));
+    expect(EMITTED_REVISIONS_MAX).toBe(4096);
+    const tooMany: Record<string, string> = {};
+    for (let index = 0; index <= EMITTED_REVISIONS_MAX; index += 1) {
+      tooMany[`product-${String(index)}`] = "rev";
+    }
+    expect(() => ContinuationSchema.parse({ ...base, emitted_revisions: tooMany })).toThrow();
   });
 
   it("accepts MCP request capability fields without changing the default kind view", () => {

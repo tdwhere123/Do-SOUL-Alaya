@@ -132,6 +132,8 @@ export type RelationObserverRow = Readonly<{
   readonly validity?: RelationValidity;
   readonly evidenceRefs?: readonly string[];
   readonly evidenceReceipts?: readonly Readonly<{ evidenceId: string; eventId: string; eventType: string; occurredAt: string }>[];
+  readonly sourceObservations?: readonly Readonly<{ source_id: string; source_sha256: string }>[];
+  readonly source_revision?: string;
   readonly resolutionKind?: string | null;
   readonly resolvedAt?: string | null;
   readonly source_event_id?: string;

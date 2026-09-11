@@ -587,7 +587,9 @@ function witness(id: string, premises: readonly string[], cost: number): Witness
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     witness_id: id,
-    premises,
+    premises: premises.map((premise) => premise.startsWith("{")
+      ? premise
+      : productStateNodeId(fieldValue(premise, 1).state)),
     cost,
     complete: true
   };

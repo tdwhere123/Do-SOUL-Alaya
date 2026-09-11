@@ -716,7 +716,8 @@ function edge(
     resultObjectId: targetObjectId,
     validity: VALIDITY,
     evidenceRefs: [`evidence-${assertionId}`],
-    evidenceReceipts: [{ evidenceId: `evidence-${assertionId}`, eventId: `event-${assertionId}`, eventType: "relation.evidence", occurredAt: AS_OF }]
+    evidenceReceipts: [{ evidenceId: `evidence-${assertionId}`, eventId: `event-${assertionId}`, eventType: "relation.evidence", occurredAt: AS_OF }],
+    sourceObservations: [{ source_id: `event-${assertionId}`, source_sha256: "rev" }]
   };
 }
 

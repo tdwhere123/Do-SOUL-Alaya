@@ -156,6 +156,24 @@ describe("SqliteRelationRecallReader cursor", () => {
     expect(concatenated).toEqual(ids);
     expect(new Set(concatenated).size).toBe(ids.length);
   });
+
+  it("returns formation source observations instead of only result_object_id", () => {
+    const database = openDatabase();
+    const [id] = plantAssertions(database, 1);
+    const digest = "a".repeat(64);
+    database.connection.prepare(`UPDATE relation_assertions SET formation_receipt_json = ? WHERE assertion_id = ?`).run(
+      JSON.stringify({
+        parameters: { result_object_id: "person-01" },
+        source_observations: [{ source_kind: "event_log_entry", source_id: "event-assert-01", source_sha256: digest }]
+      }),
+      id
+    );
+    const reader = new SqliteRelationRecallReader(database);
+    reader.prepareIndex();
+    const row = reader.read("workspace-1", "vega", "owns", 1).observations[0];
+    expect(row?.sourceObservations).toEqual([{ source_id: "event-assert-01", source_sha256: digest }]);
+    expect(row?.resultObjectId).toBe("person-01");
+  });
 });
 
 function openDatabase(): StorageDatabase {

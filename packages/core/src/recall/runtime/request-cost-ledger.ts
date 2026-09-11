@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import type { RetainedFieldLevels } from "./request-cost-engine-snapshot.js";
 
 export const REQUEST_COST_PHASES = [
   "compile",
@@ -23,6 +24,7 @@ export type RequestCostDelta = Readonly<{
   readonly joins?: number;
   readonly relaxations?: number;
   readonly state_creates?: number;
+  // Remaining worklist units, not executed work.
   readonly pending_work?: number;
   readonly cache_hits?: number;
   readonly cache_misses?: number;
@@ -48,11 +50,15 @@ export type RequestActualCost = Readonly<{
   readonly native_rows: number;
   readonly native_bytes: number;
   readonly charged_retained_bytes: number;
+  // Retained cardinality/bytes are levels; they must not roll into phase work sums.
+  readonly retained_states_current: number;
+  readonly retained_bytes_current: number;
   readonly phases: Readonly<Record<RequestCostPhase, RequestPhaseCost>>;
   readonly rss: Readonly<{
     readonly method: typeof RSS_SAMPLE_METHOD;
     readonly start_bytes: number;
     readonly after_projection_bytes: number;
+    readonly peak_bytes: number;
   }>;
 }>;
 
@@ -93,11 +99,19 @@ function emptyPhase(): MutablePhase {
 }
 
 export class RequestCostLedger {
-  private readonly startRss = process.memoryUsage().rss;
+  private readonly startRss: number;
   private afterProjectionRss: number | undefined;
+  private peakRss: number;
+  private retainedStatesCurrent = 0;
+  private retainedBytesCurrent = 0;
   private readonly phases = Object.fromEntries(
     REQUEST_COST_PHASES.map((phase) => [phase, emptyPhase()])
   ) as Record<RequestCostPhase, MutablePhase>;
+
+  public constructor() {
+    this.startRss = process.memoryUsage().rss;
+    this.peakRss = this.startRss;
+  }
 
   public time<T>(phase: RequestCostPhase, run: () => T): T {
     const started = performance.now();
@@ -123,7 +137,13 @@ export class RequestCostLedger {
   }
 
   public markAfterProjection(): void {
-    this.afterProjectionRss = process.memoryUsage().rss;
+    this.afterProjectionRss = this.sampleRss();
+  }
+
+  public recordRetainedLevels(levels: RetainedFieldLevels): void {
+    this.retainedStatesCurrent = levels.retained_states_current;
+    this.retainedBytesCurrent = levels.retained_bytes_current;
+    this.sampleRss();
   }
 
   public snapshot(): RequestActualCost {
@@ -157,18 +177,28 @@ export class RequestCostLedger {
       native_bytes += row.native_bytes;
       charged_retained_bytes += row.charged_retained_bytes;
     }
+    const afterProjection = this.afterProjectionRss ?? this.sampleRss();
     return {
       native_visits,
       native_rows,
       native_bytes,
       charged_retained_bytes,
+      retained_states_current: this.retainedStatesCurrent,
+      retained_bytes_current: this.retainedBytesCurrent,
       phases,
       rss: {
         method: RSS_SAMPLE_METHOD,
         start_bytes: this.startRss,
-        after_projection_bytes: this.afterProjectionRss ?? process.memoryUsage().rss
+        after_projection_bytes: afterProjection,
+        peak_bytes: Math.max(this.peakRss, afterProjection, this.startRss)
       }
     };
+  }
+
+  private sampleRss(): number {
+    const rss = process.memoryUsage().rss;
+    this.peakRss = Math.max(this.peakRss, rss);
+    return rss;
   }
 }
 

@@ -1,4 +1,4 @@
-import type { Guard, QueryInterpretation, QueryProgram } from "@do-soul/alaya-protocol";
+import type { QueryInterpretation, QueryProgram } from "@do-soul/alaya-protocol";
 import type { SourceRootObserverRow } from "./observe.js";
 
 const MAX_NORMALIZATION_TAIL = 8192;
@@ -101,7 +101,7 @@ function parseSourceStream(cursor: string | null): SourceStream | undefined {
 
 function sourceLiteralNeedles(query: QueryInterpretation): readonly string[] {
   const needles = new Set<string>();
-  const add = (guard: Guard | undefined): void => {
+  const add = (guard: { readonly predicate_name?: string; readonly entity_id?: string } | undefined): void => {
     if (guard?.predicate_name === "source.literal.nfc.v1" && guard.entity_id) needles.add(guard.entity_id.normalize("NFC"));
   };
   const visit = (node: QueryProgram): void => {

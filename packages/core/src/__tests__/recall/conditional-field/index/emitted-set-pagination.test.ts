@@ -101,8 +101,7 @@ describe("emitted-set pagination", () => {
     expect(update.product_updates).toHaveLength(1);
     expect(update.product_updates?.[0]?.update_kind).toBe("proof");
     expect(update.product_updates?.[0]?.product).toEqual(productStateKeyFromIndexEntry(first.entries[0]!));
-    expect(update.entries.map(objectId)).toEqual(["a"]);
-    expect(update.entries[0]?.association_milligrades).toBe(950);
+    expect(update.entries).toEqual([]);
     const membership = [first, second]
       .filter((page) => page.page_purpose === "membership")
       .flatMap((page) => page.entries);

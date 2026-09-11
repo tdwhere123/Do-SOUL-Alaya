@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { facetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
 import {
+  ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   InformationIndexSchema,
   QueryViewSchema,
   memoryProductStateKey,
+  productSubjectId,
   type ClaimState,
   type CoverageRegion,
   type FacetVector,
@@ -27,11 +29,12 @@ import {
 import {
   continueAcceptingIndex,
   evaluateFacetPredicate,
+  facetObligationsAccept,
   projectAcceptingIndex,
   selectFeasibleWitnesses,
   type AcceptingProjectionInput
 } from "../../../../recall/conditional-field/index/project-accepting-index.js";
-import { identityAssociationCap } from "../reference/deployment.fixture.js";
+import { facetObligation, identityAssociationCap, productIndexKey } from "../reference/deployment.fixture.js";
 
 const SNAPSHOT_ID = `sha256:${"c".repeat(64)}`;
 const OTHER_SNAPSHOT_ID = `sha256:${"e".repeat(64)}`;
@@ -249,30 +252,45 @@ describe("conditional-field production information index", () => {
   });
 
   it("rejects coordinate-wise max under same_path and honors a relation facet override", () => {
+    const named = [
+      { obligation_id: "ob-x", domain_id: ASSOCIATION_DOMAIN_ID },
+      { obligation_id: "ob-y", domain_id: ASSOCIATION_DOMAIN_ID }
+    ] as const;
     const vectors: FacetVector[] = [
-      { schema_version: 1, path_id: facetPathId(fieldValue("c", 1).state), coordinates: [900, 200] },
-      { schema_version: 1, path_id: "c", coordinates: [200, 900] }
+      { schema_version: 1, path_id: facetPathId(fieldValue("c", 1).state), obligations: named, coordinates: [900, 200] },
+      { schema_version: 1, path_id: `${facetPathId(fieldValue("c", 1).state)}:split`, obligations: named, coordinates: [200, 900] }
     ];
     expect(evaluateFacetPredicate("same_path", vectors, 800)).toBe(false);
     expect(evaluateFacetPredicate("independent", vectors, 800)).toBe(true);
+    const obligations = [
+      facetObligation({ obligation_id: "ob-x" }),
+      facetObligation({ obligation_id: "ob-y" })
+    ];
+    expect(facetObligationsAccept(obligations, vectors, "same_path")).toBe(false);
+    expect(facetObligationsAccept(obligations, vectors, "independent")).toBe(true);
     const samePath = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([fieldValue("c", 900)], { facets: vectors }),
-      view: defaultView({ facet_mode: "same_path", threshold_milligrades: 800 }),
+      view: defaultView({ facet_mode: "same_path", facet_obligations: obligations }),
       roles: new Map([["c", "associated"]])
     }));
     expect(samePath.entries).toEqual([]);
     const independent = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([fieldValue("c", 900)], { facets: vectors }),
-      view: defaultView({ facet_mode: "independent", threshold_milligrades: 800 }),
+      view: defaultView({ facet_mode: "independent", facet_obligations: obligations }),
       roles: new Map([["c", "associated"]])
     }));
-    expect(independent.entries).toEqual([]);
+    expect(independent.entries.map((entry) => entry.object_id)).toEqual(["c"]);
     const overridden = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([fieldValue("r", 900), fieldValue("c", 900)], {
-        facets: [{ schema_version: 1, path_id: facetPathId(fieldValue("c", 1).state), coordinates: [900] }],
+        facets: [{
+          schema_version: 1,
+          path_id: facetPathId(fieldValue("c", 1).state),
+          obligations: named,
+          coordinates: [900, 900]
+        }],
         retained_transitions: [transition("r", "c", "associated_config", 900)]
       }),
-      view: defaultView({ facet_mode: "same_path", threshold_milligrades: 800 }),
+      view: defaultView({ facet_mode: "same_path", facet_obligations: obligations }),
       roles: new Map([["r", "requested"], ["c", "associated"]]),
       relation_facet_modes: new Map([["associated_config", "independent"]])
     }));
@@ -280,25 +298,32 @@ describe("conditional-field production information index", () => {
   });
 
   it("evaluates same_path facets per candidate, not the global bag", () => {
-    const weak = { schema_version: 1, path_id: facetPathId(fieldValue("a", 1).state), coordinates: [900, 200] } as const;
-    const strong = { schema_version: 1, path_id: facetPathId(fieldValue("b", 1).state), coordinates: [900, 900] } as const;
+    const named = [
+      { obligation_id: "ob-x", domain_id: ASSOCIATION_DOMAIN_ID },
+      { obligation_id: "ob-y", domain_id: ASSOCIATION_DOMAIN_ID }
+    ] as const;
+    const obligations = [
+      facetObligation({ obligation_id: "ob-x" }),
+      facetObligation({ obligation_id: "ob-y" })
+    ];
+    const weak = { schema_version: 1, path_id: facetPathId(fieldValue("a", 1).state), obligations: named, coordinates: [900, 200] } as const;
+    const strong = { schema_version: 1, path_id: facetPathId(fieldValue("b", 1).state), obligations: named, coordinates: [900, 900] } as const;
     const index = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf([
         fieldValue("a", 900),
         fieldValue("b", 900)
       ], { facets: [weak, strong] }),
-      view: defaultView({ facet_mode: "same_path", threshold_milligrades: 800 }),
+      view: defaultView({ facet_mode: "same_path", facet_obligations: obligations }),
       roles: new Map([["a", "associated"], ["b", "associated"]])
     }));
     expect(index.entries.map((entry) => entry.object_id)).toEqual(["b"]);
+    const first = fieldValue("a", 900, { hypothesis_id: "h1" });
+    const second = fieldValue("b", 900, { hypothesis_id: "h2" });
     const dumped = projectAcceptingIndex(baseInput({
-      snapshot: snapshotOf([
-        fieldValue("a", 900, { hypothesis_id: "h1" }),
-        fieldValue("b", 900, { hypothesis_id: "h2" })
-      ]),
+      snapshot: snapshotOf([first, second]),
       support: [
         supportRecord([
-          { schema_version: 1, witness_id: "for-a", premises: ["a"], cost: 1, complete: true }
+          { schema_version: 1, witness_id: "for-a", premises: [productStateNodeId(first.state)], cost: 1, complete: true }
         ])
       ],
       roles: new Map([["a", "associated"], ["b", "associated"]])
@@ -307,10 +332,98 @@ describe("conditional-field production information index", () => {
     expect(dumped.entries.find((entry) => entry.object_id === "b")?.explanation_ids).toEqual([]);
   });
 
+  it("joins named facet obligations and does not treat empty facets as membership when required", () => {
+    const domain = ASSOCIATION_DOMAIN_ID;
+    const other = "other.domain.v1";
+    const named = (obligationId: string, domainId = domain) => (
+      [{ obligation_id: obligationId, domain_id: domainId }] as const
+    );
+    const member = fieldValue("c", 900);
+    const path = facetPathId(member.state);
+    const seedOnly = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([member], {
+        seeds: [{ schema_version: 1, state: member.state, milligrades: 900 }]
+      }),
+      view: defaultView({
+        facet_obligations: [facetObligation({ obligation_id: "ob-required" })]
+      }),
+      roles: new Map([["c", "associated"]])
+    }));
+    expect(seedOnly.entries).toEqual([]);
+    const wrongId = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([member], {
+        facets: [{ schema_version: 1, path_id: path, obligations: named("ob-b"), coordinates: [900] }]
+      }),
+      view: defaultView({
+        facet_obligations: [facetObligation({ obligation_id: "ob-a" })]
+      }),
+      roles: new Map([["c", "associated"]])
+    }));
+    expect(wrongId.entries).toEqual([]);
+    const wrongDomain = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([member], {
+        facets: [{ schema_version: 1, path_id: path, obligations: named("ob-a", other), coordinates: [900] }]
+      }),
+      view: defaultView({
+        facet_obligations: [facetObligation({ obligation_id: "ob-a" })]
+      }),
+      roles: new Map([["c", "associated"]])
+    }));
+    expect(wrongDomain.entries).toEqual([]);
+    const partial = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([member], {
+        facets: [{ schema_version: 1, path_id: path, obligations: named("ob-a"), coordinates: [900] }]
+      }),
+      view: defaultView({
+        facet_obligations: [
+          facetObligation({ obligation_id: "ob-a" }),
+          facetObligation({ obligation_id: "ob-b" })
+        ]
+      }),
+      roles: new Map([["c", "associated"]])
+    }));
+    expect(partial.entries).toEqual([]);
+    const unnamed = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([member], {
+        facets: [{ schema_version: 1, path_id: path, coordinates: [900] }]
+      }),
+      view: defaultView({
+        facet_obligations: [facetObligation({ obligation_id: "ob-a" })]
+      }),
+      roles: new Map([["c", "associated"]])
+    }));
+    expect(unnamed.entries).toEqual([]);
+    const noneRequired = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([member]),
+      view: defaultView(),
+      roles: new Map([["c", "associated"]])
+    }));
+    expect(noneRequired.entries.map((entry) => entry.object_id)).toEqual(["c"]);
+  });
+
+  it("does not apply a subject-keyed role or claim to a second product of the same subject", () => {
+    const first = fieldValue("c", 900, { hypothesis_id: "h1" });
+    const second = fieldValue("c", 400, { hypothesis_id: "h2" });
+    const index = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([first, second]),
+      roles: new Map([[productStateNodeId(first.state), "requested"]]),
+      claims: new Map([[productStateNodeId(first.state), "supported"]])
+    }));
+    expect(index.entries).toHaveLength(2);
+    expect(index.entries.find((entry) => entry.hypothesis_id === "h1")).toMatchObject({
+      role: "requested",
+      claim: "supported"
+    });
+    expect(index.entries.find((entry) => entry.hypothesis_id === "h2")).toMatchObject({
+      role: "associated",
+      claim: "unknown"
+    });
+  });
+
   it("keeps a cheaper complete witness and reports omitted payload without claiming transport failure", () => {
     const witnesses: Witness[] = [
-      { schema_version: 1, witness_id: "expensive", premises: ["r"], cost: 1200, complete: true },
-      { schema_version: 1, witness_id: "cheap", premises: ["r"], cost: 400, complete: true }
+      { schema_version: 1, witness_id: "expensive", premises: [productIndexKey("r")], cost: 1200, complete: true },
+      { schema_version: 1, witness_id: "cheap", premises: [productIndexKey("r")], cost: 400, complete: true }
     ];
     expect(selectFeasibleWitnesses(witnesses, 800).map((witness) => witness.witness_id))
       .toEqual(["cheap"]);
@@ -325,7 +438,7 @@ describe("conditional-field production information index", () => {
     const omitted = projectAcceptingIndex(deploymentInput({
       budget: defaultBudget({ page_budget: 100 }),
       support: [supportRecord([
-        { schema_version: 1, witness_id: "too-big", premises: ["r"], cost: 400, complete: true }
+        { schema_version: 1, witness_id: "too-big", premises: [productIndexKey("r")], cost: 400, complete: true }
       ])]
     }));
     expect(omitted.completeness.logical_index).toBe("complete");
@@ -491,8 +604,10 @@ function deploymentInput(
 }
 
 function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): AcceptingProjectionInput {
-  const roles = new Map((overrides.roles instanceof Map ? [...overrides.roles] : [])
-    .map(([id, role]) => [productStateNodeId(fieldValue(id, 1).state), role]));
+  const values = overrides.snapshot?.values ?? [];
+  const roles = remapSubjectKeyedMap(overrides.roles, values);
+  const claims = remapSubjectKeyedMap(overrides.claims, values);
+  const propositions = remapSubjectKeyedMap(overrides.claim_propositions, values);
   const roots = (overrides.derivations ?? []).filter((node) => !(overrides.derivations ?? []).some((parent) => parent.children.includes(node.derivation_id)));
   return {
     snapshot: emptySnapshot(),
@@ -503,8 +618,34 @@ function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): Accepting
     budget: defaultBudget(),
     ...overrides,
     roles,
+    ...(claims === undefined ? {} : { claims }),
+    ...(propositions === undefined ? {} : { claim_propositions: propositions }),
     output_derivations: overrides.output_derivations ?? Object.fromEntries((overrides.snapshot?.values ?? []).map((value) => [productStateNodeId(value.state), roots.map((root) => root.derivation_id)]))
   };
+}
+
+function remapSubjectKeyedMap<T>(
+  map: ReadonlyMap<string, T> | undefined,
+  values: readonly FieldValue[]
+): Map<string, T> | undefined {
+  if (map === undefined) return undefined;
+  const nodeIds = new Set(values.map((value) => productStateNodeId(value.state)));
+  const remapped = new Map<string, T>();
+  for (const [key, value] of map) {
+    if (nodeIds.has(key) || key.startsWith("{")) {
+      remapped.set(key, value);
+      continue;
+    }
+    const matches = values.filter((candidate) => productSubjectId(candidate.state) === key);
+    if (matches.length === 1) {
+      remapped.set(productStateNodeId(matches[0]!.state), value);
+      continue;
+    }
+    if (matches.length === 0) {
+      remapped.set(productStateNodeId(fieldValue(key, 1).state), value);
+    }
+  }
+  return remapped;
 }
 
 function deploymentSnapshot(): FieldSnapshot {

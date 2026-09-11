@@ -80,12 +80,14 @@ describe("conditional field execution receipt actual-cost encoding", () => {
       native_visits: 4,
       actual: {
         native_visits: 4, native_rows: 4, native_bytes: 128, charged_retained_bytes: 64,
+        retained_states_current: 2, retained_bytes_current: 64,
         phases: {
           compile: phase, observe: { ...phase, exclusive_ms: 1, inclusive_ms: 2, native_visits: 4 },
           seed: phase, adjacency: phase, measurement: phase, solve: phase, index: phase, payload: phase
         },
         rss: {
-          method: "process.memoryUsage().rss", start_bytes: 1_000, after_projection_bytes: 1_100
+          method: "process.memoryUsage().rss", start_bytes: 1_000, after_projection_bytes: 1_100,
+          peak_bytes: 1_100
         }
       }
     });
@@ -112,12 +114,14 @@ describe("conditional field execution receipt actual-cost encoding", () => {
       },
       actual: {
         native_visits: 4, native_rows: 4, native_bytes: 128, charged_retained_bytes: 64,
+        retained_states_current: 2, retained_bytes_current: 64,
         phases: {
           compile: phase, observe: { ...phase, exclusive_ms: 1, inclusive_ms: 2, native_visits: 4 },
           seed: phase, adjacency: phase, measurement: phase, solve: phase, index: phase, payload: phase
         },
         rss: {
-          method: "process.memoryUsage().rss", start_bytes: 1_000, after_projection_bytes: 1_100
+          method: "process.memoryUsage().rss", start_bytes: 1_000, after_projection_bytes: 1_100,
+          peak_bytes: 1_100
         }
       }
     });

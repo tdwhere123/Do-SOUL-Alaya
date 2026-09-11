@@ -117,11 +117,10 @@ describe("source-root discovery admission", () => {
       interpretation_proposal: {
         schema_version: SCHEMA,
         original_query_digest: SNAPSHOT_ID,
-        producer_id: "discovery.test.v1",
+        producer_id: "alaya.query.proposal.core.v1",
         conditions: [{
           schema_version: SCHEMA,
           kind: "equality",
-          verdict: "unresolved",
           variable: "c",
           equals_variable: "l",
           time_scope: "none"

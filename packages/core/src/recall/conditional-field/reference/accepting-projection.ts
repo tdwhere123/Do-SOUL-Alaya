@@ -27,6 +27,10 @@ import {
   completenessForInterpretationStatus,
   interpretationMayEmitCompleteEmpty
 } from "./interpret-query.js";
+import {
+  facetObligationsAccept,
+  queryRequiresFacetMeasurement
+} from "../index/facet-obligation-join.js";
 import { productStateNodeId } from "./bind-max-min.js";
 
 export type ObserverCoverage = Readonly<{
@@ -269,9 +273,7 @@ function indexEntryForValue(
   if (!value.accepting) return null;
   if ((value.milligrades ?? 0) <= input.view.threshold_milligrades) return null;
   if (!facetsAccept(value, input)) return null;
-  const role = input.roles?.get(productStateNodeId(value.state))
-    ?? input.roles?.get(productSubjectId(value.state))
-    ?? "associated";
+  const role = input.roles?.get(productStateNodeId(value.state)) ?? "associated";
   if (role === "routing_only" && !input.view.include_routing_only) return null;
   if (!input.view.requested_roles.includes(role)) return null;
   return {
@@ -290,11 +292,12 @@ function indexEntryForValue(
 }
 
 function facetsAccept(value: FieldValue, input: AcceptingProjectionInput): boolean {
-  if (input.snapshot.facets.length === 0) return true;
-  return evaluateFacetPredicate(
-    facetModeForValue(value, input),
+  if (!queryRequiresFacetMeasurement(input.view.facet_obligations)) return true;
+  if (input.snapshot.facets.length === 0) return false;
+  return facetObligationsAccept(
+    input.view.facet_obligations,
     input.snapshot.facets,
-    input.view.threshold_milligrades
+    facetModeForValue(value, input)
   );
 }
 

@@ -170,6 +170,18 @@ measurements cannot satisfy `all`. Without a declaration, measured raw values
 retain an inapplicable cap and do not create semantic seeds. Recall performs
 no embedding generation or provider calls.
 
+A query interpretation proposal is a candidate, not Core authority.
+`ProposedGuard` has no `verdict`; Core admission maps adopted guards to
+`unresolved` and re-evaluates authorization, equality, source-bound entity,
+binding, and time from current state. Programs and conditions are admitted
+only from the server-owned `QueryProposalProducerRegistry`. Unknown producer
+identity or grammar/capability mismatch is `unsupported` and does not execute
+or replace an epsilon program. Cosine admission stays on its own registry on
+the same proposal object. Transport inspects proposal JSON iteratively before
+recursive program decode (depth 32, 4096 AST nodes, 1024 guards/predicates,
+256 hypotheses). Semantic admission uses the tightest of server, producer, and
+declared AST limits and hashes those effective limits into `query_id`.
+
 Same-path labels travel together. Product-specific explanations preserve
 bindings and proposition identity. Association support is distinct from a
 causal claim: unavailable common-cause evidence stays unknown. A causal claim

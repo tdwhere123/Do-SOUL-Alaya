@@ -21,6 +21,15 @@ export {
   type Sha256Hex
 } from "./common.js";
 export {
+  FacetObligationPredicateSchema,
+  FacetObligationRequirednessSchema,
+  QueryFacetObligationListSchema,
+  QueryFacetObligationSchema,
+  type FacetObligationPredicate,
+  type FacetObligationRequiredness,
+  type QueryFacetObligation
+} from "./facet-obligation.js";
+export {
   AssociationCapContractSchema,
   ClaimDemandSchema,
   ClaimRequiredClaimSchema,
@@ -30,10 +39,14 @@ export {
   GuardSchema,
   GuardTimeScopeSchema,
   GuardVerdictSchema,
+  ProposedGuardSchema,
+  ProposedQueryProgramSchema,
   QueryBindingSchema,
   QueryHoleSchema,
   QueryHypothesisSchema,
+  QueryInterpretationProposalBodySchema,
   QueryInterpretationProposalSchema,
+  QueryProposalInputLimitsSchema,
   StoredCosineAdmissionSchema,
   StoredCosineObligationSchema,
   type StoredCosineAdmission,
@@ -54,18 +67,40 @@ export {
   type GuardKind,
   type GuardTimeScope,
   type GuardVerdict,
+  type ProposedGuard,
+  type ProposedQueryProgram,
   type QueryBinding,
   type QueryHole,
   type QueryHypothesis,
   type QueryInterpretation,
   type QueryInterpretationProposal,
+  type QueryProposalInputLimits,
   type QueryInterpretationStatus,
   type QueryProgram,
+  type QueryProgramNode,
   type QueryTimeWindow,
   type QueryView,
   type RequestBudget,
   type ResultKindView
 } from "./query.js";
+export {
+  QUERY_PROPOSAL_GUARD_KINDS,
+  QUERY_PROPOSAL_MAX_AST_DEPTH,
+  QUERY_PROPOSAL_MAX_AST_NODES,
+  QUERY_PROPOSAL_MAX_REQUEST_BYTES,
+  QUERY_PROPOSAL_MAX_TOTAL_GUARDS,
+  QUERY_PROPOSAL_MAX_TOTAL_HYPOTHESES,
+  QUERY_PROPOSAL_MAX_TOTAL_PREDICATES,
+  QUERY_PROPOSAL_PROGRAM_KINDS,
+  QUERY_PROPOSAL_TRANSPORT_LIMITS,
+  inspectQueryProposalStructure,
+  tightenQueryProposalLimits,
+  type QueryProposalGuardKind,
+  type QueryProposalProgramKind,
+  type QueryProposalStructuralLimits,
+  type QueryProposalStructureCounts,
+  type QueryProposalStructureInspection
+} from "./proposal-structure.js";
 export {
   HARD_IDENTITY_TRANSFER_ID,
   HARD_IDENTITY_TRANSFER_VERSION,
@@ -197,6 +232,7 @@ export {
   CompletenessReportSchema,
   CompletenessStatusSchema,
   ContinuationSchema,
+  EMITTED_REVISIONS_MAX,
   IndexEntrySchema,
   IndexRoleSchema,
   InformationIndexSchema,

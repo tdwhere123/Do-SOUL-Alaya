@@ -7,15 +7,18 @@ import {
   memoryProductStateKey,
   QueryViewSchema,
   type AssociationCapContract,
+  type ClaimState,
   type Guard,
   type IndexRole,
   type ProductStateKey,
+  type QueryFacetObligation,
   type QueryProgram,
   type QueryView,
   type RequestBudget,
   type SeedActivation,
   type Transition
 } from "@do-soul/alaya-protocol";
+import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 
 export const SNAPSHOT_ID = `sha256:${"c".repeat(64)}`;
 export const QUERY_ID = "failed-deployment";
@@ -60,6 +63,46 @@ export function productKey(
     binding_context: bindingContext,
     time_state: "as_of"
   });
+}
+
+export function productIndexKey(
+  objectId: string,
+  hypothesisId = "h0",
+  bindingContext = "default",
+  programState = "accepting"
+): string {
+  return productStateNodeId(productKey(objectId, hypothesisId, bindingContext, programState));
+}
+
+export function indexRoleMap(
+  entries: readonly (readonly [string, IndexRole])[]
+): Map<string, IndexRole> {
+  return new Map(entries.map(([id, role]) => [productIndexKey(id), role]));
+}
+
+export function indexClaimMap(
+  entries: readonly (readonly [string, ClaimState])[]
+): Map<string, ClaimState> {
+  return new Map(entries.map(([id, claim]) => [productIndexKey(id), claim]));
+}
+
+export function facetObligation(input: Readonly<{
+  readonly obligation_id: string;
+  readonly domain_id?: string;
+  readonly requiredness?: QueryFacetObligation["requiredness"];
+  readonly threshold_milligrades?: number;
+  readonly witness_compatibility?: QueryFacetObligation["witness_compatibility"];
+  readonly version?: string;
+}>): QueryFacetObligation {
+  return {
+    obligation_id: input.obligation_id,
+    domain_id: input.domain_id ?? ASSOCIATION_DOMAIN_ID,
+    predicate: "threshold",
+    requiredness: input.requiredness ?? "required",
+    threshold_milligrades: input.threshold_milligrades ?? 800,
+    witness_compatibility: input.witness_compatibility ?? "same_path",
+    version: input.version ?? "1"
+  };
 }
 
 export function yesterdayAnchorGuard(): Guard {

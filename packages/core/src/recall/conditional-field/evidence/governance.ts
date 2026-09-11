@@ -45,7 +45,11 @@ function governanceReason(
   if (observation.query_id !== context.query_id || observation.snapshot_id !== context.snapshot_id) {
     return "identity_mismatch";
   }
-  if (observation.source_revision !== context.source_revision) return "source_revision_mismatch";
+  if (observation.source_revision.length === 0) return "source_revision_mismatch";
+  const expectedRevision = context.source_revisions?.get(observation.source_id);
+  if (expectedRevision !== undefined && observation.source_revision !== expectedRevision) {
+    return "source_revision_mismatch";
+  }
   // Eligible paths and explanations cannot launder ineligible or protected sources.
   if (observation.access === "protected") return "protected_source";
   if (observation.access === "ineligible") return "ineligible_source";
@@ -86,28 +90,40 @@ function observationsFromAssertion(
 ): readonly EvidenceObservation[] {
   const sourceId = getPathAnchorBackingObjectId(assertion.anchors.source_anchor);
   const targetId = getPathAnchorBackingObjectId(assertion.anchors.target_anchor);
-  const sourceRevision = assertion.formation_receipt?.source_observations[0]?.source_sha256
-    ?? input.source_revision;
   const polarity = polarityForRelation(assertion.relation_kind);
   return assertion.evidence_receipts.flatMap((receipt, index) => {
     const lineageId = receipt.source_event_anchor.event_id;
-    return [sourceId, targetId].map((premiseId, premiseIndex) => observation({
-      observation_id: `${assertion.assertion_id}:${receipt.evidence_id}:${String(index)}:${String(premiseIndex)}`,
-      evidence_id: receipt.evidence_id,
-      source_id: sourceId,
-      source_revision: sourceRevision,
-      premise_id: premiseId,
-      proposition_id: assertion.assertion_id,
-      polarity,
-      access: resolveAccess(input.access, receipt.evidence_id, sourceId, targetId),
-      validity: assertion.validity,
-      lineage_id: lineageId,
-      independence_key: receipt.evidence_id,
-      path_governance: input.path_governance?.get(assertion.assertion_id),
-      path_lifecycle: input.path_lifecycle?.get(assertion.assertion_id),
-      context: input
-    }));
+    return [sourceId, targetId].map((premiseId, premiseIndex) => {
+      const formed = formationObservationFor(assertion, receipt.source_event_anchor.event_id, premiseId);
+      return observation({
+        observation_id: `${assertion.assertion_id}:${receipt.evidence_id}:${String(index)}:${String(premiseIndex)}`,
+        evidence_id: receipt.evidence_id,
+        source_id: formed?.source_id ?? premiseId,
+        source_revision: formed?.source_sha256 ?? "",
+        premise_id: premiseId,
+        proposition_id: assertion.assertion_id,
+        polarity,
+        access: resolveAccess(input.access, receipt.evidence_id, sourceId, targetId),
+        validity: assertion.validity,
+        lineage_id: lineageId,
+        independence_key: receipt.evidence_id,
+        path_governance: input.path_governance?.get(assertion.assertion_id),
+        path_lifecycle: input.path_lifecycle?.get(assertion.assertion_id),
+        context: input
+      });
+    });
   });
+}
+
+function formationObservationFor(
+  assertion: RelationAssertionRead,
+  eventId: string,
+  objectId: string
+): Readonly<{ readonly source_id: string; readonly source_sha256: string }> | undefined {
+  const observations = assertion.formation_receipt?.source_observations ?? [];
+  return observations.find((row) => row.source_id === eventId)
+    ?? observations.find((row) => row.source_id === objectId)
+    ?? (observations.length === 1 ? observations[0] : undefined);
 }
 
 function observationsFromClaim(
@@ -120,7 +136,7 @@ function observationsFromClaim(
     observation_id: `${claim.object_id}:${evidenceId}:${String(index)}`,
     evidence_id: evidenceId,
     source_id: sourceId,
-    source_revision: input.source_revision,
+    source_revision: "",
     premise_id: claim.object_id,
     proposition_id: claim.proposition_digest,
     polarity: polarityForRelation(claim.claim_kind),
@@ -145,7 +161,10 @@ function resolveAccess(
   const ids = targetId === undefined ? [evidenceId, sourceId] : [evidenceId, sourceId, targetId];
   if (ids.some((id) => access.get(id) === "protected")) return "protected";
   if (ids.some((id) => access.get(id) === "ineligible")) return "ineligible";
-  return access.get(evidenceId) ?? access.get(sourceId) ?? "eligible";
+  return access.get(evidenceId)
+    ?? access.get(sourceId)
+    ?? (targetId === undefined ? undefined : access.get(targetId))
+    ?? "ineligible";
 }
 
 function observation(input: {

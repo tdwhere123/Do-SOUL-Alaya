@@ -10,6 +10,7 @@ import {
   decodeSourceFilters,
   sourceFactsSatisfyFilters
 } from "../query/ordinary-language.js";
+import { admittedProposalConditions } from "../query/query-admission.js";
 import {
   classifyQueryPredicate,
   evaluateFrozenSourcePredicate,
@@ -160,7 +161,7 @@ function applicabilityFor(
 ): Guard {
   const extras = [
     ...(input.query.source_guard === undefined ? [] : [input.query.source_guard]),
-    ...(input.query.interpretation_proposal?.conditions ?? [])
+    ...admittedProposalConditions(input.query.interpretation_proposal)
   ];
   const authorization = evaluateAuthorization(
     input,

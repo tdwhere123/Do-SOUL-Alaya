@@ -337,12 +337,21 @@ function relation(kind: string, verdict: "true" | "false" | "unresolved" = "unre
     relation_kind: kind,
     source_variable: "s",
     target_variable: "t",
-    guard: {
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      kind: "query_predicate",
-      verdict,
-      time_scope: "none"
-    },
+    guard: verdict === "false"
+      ? {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        kind: "source_bound_entity",
+        verdict: "unresolved",
+        variable: "t",
+        entity_id: "blocked-entity",
+        time_scope: "none"
+      }
+      : {
+        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        kind: "query_predicate",
+        verdict,
+        time_scope: "none"
+      },
     facet_mode: "same_path",
     threshold_milligrades: 0
   };

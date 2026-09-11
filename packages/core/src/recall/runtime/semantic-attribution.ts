@@ -4,6 +4,7 @@ import { applyEvidenceEffect, type FieldEngineState } from "../conditional-field
 import { parseBindingContext } from "../conditional-field/engine/binding-environment.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
 import { assessEvidence, observationsFromOwners, type RelationAssertionRead } from "../conditional-field/evidence/assess-support.js";
+import type { EvidenceAccess } from "../conditional-field/evidence/types.js";
 import { prepareProductEvidence } from "../conditional-field/evidence/product-evidence.js";
 import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
 import type { RelationObserverRow } from "../conditional-field/observers/observe.js";
@@ -104,20 +105,24 @@ function evidenceDemandForProduct(state: FieldEngineState, value: FieldValue, as
   const { causeDemand, claimKind, arguments_ } = claimForProduct(state, value);
   const assertions: RelationAssertionRead[] = rows.flatMap((row) => {
     const receipts = row.evidenceReceipts ?? [];
+    const formation = formationReceiptFromRow(row);
     return row.validity === undefined ? [] : [{
       assertion_id: row.assertionId, relation_kind: row.predicate, validity: row.validity,
       anchors: { source_anchor: { kind: "object" as const, object_id: row.sourceObjectId }, target_anchor: { kind: "object" as const, object_id: row.targetObjectId } },
       evidence_receipts: receipts.map((receipt) => ({ evidence_id: receipt.evidenceId,
-        source_event_anchor: { event_id: receipt.eventId, event_type: receipt.eventType, occurred_at: receipt.occurredAt } }))
+        source_event_anchor: { event_id: receipt.eventId, event_type: receipt.eventType, occurred_at: receipt.occurredAt } })),
+      ...(formation === undefined ? {} : { formation_receipt: formation })
     }];
   });
   const id = `sha256:${createHash("sha256").update(JSON.stringify([claimKind, key])).digest("hex")}`;
   const associationId = `sha256:${createHash("sha256").update(JSON.stringify(["association", key])).digest("hex")}`;
-  const context = { query_id: state.query_id, snapshot_id: state.snapshot_id, source_revision: state.snapshot_id,
+  // Receipt ids are not scope principals; an explicit ineligible there would deny in-scope endpoints.
+  const accessIds = [...new Set(rows.flatMap((row) => [row.sourceObjectId, row.targetObjectId]))];
+  const context = { query_id: state.query_id, snapshot_id: state.snapshot_id,
     hypothesis_id: value.state.hypothesis_id, binding_context: value.state.binding_context, time_state: value.state.time_state,
     jurisdiction: "workspace", as_of: asOf,
     permitted_timeless_policy_ids: new Set(assertions.flatMap((assertion) => assertion.validity.kind === "timeless" ? [assertion.validity.governance_policy_id] : [])), assertions,
-    claims: [], access: new Map() };
+    claims: [], access: accessFromLiveFacts(state, accessIds) };
   const observations = observationsFromOwners(context).flatMap((observation) => {
     const row = rows.find((row) => row.assertionId === observation.proposition_id)!;
     return [
@@ -135,4 +140,28 @@ function evidenceDemandForProduct(state: FieldEngineState, value: FieldValue, as
   const required = observations.length + demands.length + demands.reduce((sum, demand) => sum + demand.templates.length * 2, 0);
   return { key, id, context, observations, demands, required,
     dependencyIds: rows.flatMap((row) => [row.assertionId, ...(row.evidenceReceipts ?? []).flatMap((receipt) => [receipt.evidenceId, receipt.eventId])]) };
+}
+
+function formationReceiptFromRow(row: RelationObserverRow): RelationAssertionRead["formation_receipt"] | undefined {
+  const observations = row.sourceObservations;
+  if (observations === undefined || observations.length === 0) return undefined;
+  return { source_observations: observations };
+}
+
+function accessFromLiveFacts(state: FieldEngineState, ids: readonly string[]): Map<string, EvidenceAccess> {
+  const access = new Map<string, EvidenceAccess>();
+  for (const id of ids) {
+    access.set(id, accessDecision(state.authorized_scopes, state.source_facts?.get(id)?.scope_class));
+  }
+  return access;
+}
+
+function accessDecision(
+  authorized: readonly string[] | null | undefined,
+  scopeClass: string | undefined
+): EvidenceAccess {
+  if (authorized === null) return "eligible";
+  if (authorized === undefined || authorized.length === 0) return "ineligible";
+  if (scopeClass !== undefined && authorized.includes(scopeClass)) return "eligible";
+  return "ineligible";
 }

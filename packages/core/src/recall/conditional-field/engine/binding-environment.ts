@@ -111,15 +111,12 @@ export function evaluateGuard(
     readonly targetId: string;
   }>
 ): GuardDecision {
-  if (guard.verdict === "false") return "false";
+  // Inbound verdict is an observer/output stamp, not a Core fact.
   const filters = decodeSourceFilters(guard.predicate_name);
   if (filters !== undefined) {
     const objectId = objectForFilters(guard, env, endpoints);
     const decision = sourceFactsSatisfyFilters(filters, objectId === undefined ? undefined : facts.get(objectId));
     if (decision !== "true") return decision;
-  }
-  if (guard.verdict === "true" && guard.kind !== "query_predicate" && guard.kind !== "interval_relation") {
-    return "true";
   }
   switch (guard.kind) {
     case "equality":
@@ -173,8 +170,6 @@ function evaluateAuthorization(
     readonly targetId: string;
   }>
 ): GuardDecision {
-  if (guard.verdict === "true") return "true";
-  if (guard.verdict === "false") return "false";
   const objectId = objectForFilters(guard, env, endpoints);
   if (objectId === undefined) return "unresolved";
   const scopeClass = facts.get(objectId)?.scope_class;
@@ -227,8 +222,7 @@ function evaluateQueryPredicate(
   if (classified.kind === "unknown") return "unresolved";
   const filters = decodeSourceFilters(guard.predicate_name);
   if (filters === undefined) {
-    if (guard.predicate_name === undefined) return guard.verdict === "false" ? "false" : "true";
-    if (guard.verdict !== "unresolved") return guard.verdict;
+    if (guard.predicate_name === undefined) return "true";
     const id = objectForFilters(guard, env, endpoints);
     const observed = id === undefined ? undefined : facts.get(id)?.predicates?.[guard.predicate_name];
     return observed === undefined ? "unresolved" : observed ? "true" : "false";

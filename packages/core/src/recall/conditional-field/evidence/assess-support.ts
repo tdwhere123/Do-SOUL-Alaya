@@ -64,7 +64,7 @@ export function assessEvidence(input: EvidenceAssessmentInput): EvidenceAssessme
   return {
     query_id: input.query_id,
     snapshot_id: input.snapshot_id,
-    source_revision: input.source_revision,
+    ...(input.source_revision === undefined ? {} : { source_revision: input.source_revision }),
     records,
     polarities,
     governance,

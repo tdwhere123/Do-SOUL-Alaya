@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   InformationIndexSchema,
@@ -10,6 +10,7 @@ import {
   indexEntryCacheKey,
   indexEntryObjectKind,
   indexMemoryObjectId,
+  sharedProductIdentity,
   type Continuation,
   type BoundedActiveConstraintsResult,
   type InformationIndex,
@@ -24,7 +25,6 @@ import { interpretationCoverageFor } from "../conditional-field/reference/interp
 import { type ObserverReaders } from "../conditional-field/observers/observe.js";
 import { projectFieldDelta, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
-import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
 import { projectAcceptingIndex } from "../conditional-field/index/project-accepting-index.js";
 import { fieldProgressFingerprint } from "../conditional-field/index/facet-visit-accounting.js";
 import {
@@ -39,22 +39,30 @@ import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { BoundedIndexPayload } from "./index-payload.js";
 import {
   bindIssuedDeliveryId,
-  continuationDigest,
   evictIssuedDeliveries,
+  facetIndexStillOpen,
   fieldResumeKey,
+  issuedContinuationForState,
   issuedDeliveryIdOf,
   issuedDeliveryRevoked,
+  observationSettled,
   rememberField,
-  rememberIssuedDelivery,
   replayIssuedDelivery,
   replayIssuedIndex,
   restoreField,
-  resumeIndexProjection,
-  retainCommittedRevisions,
-  mergeCommittedRevisions
+  resumeIndexProjection
 } from "./index-continuation.js";
+import {
+  attachIndexSurfaces,
+  captureIndexPreviews,
+  captureIndexSourceMetadata,
+  evictIssuedSurfaces,
+  replayIssuedSurfaces,
+  retainAndIssueIndex
+} from "./recall-index-commit.js";
 import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
 import { startRequestCost, type RequestCostLedger } from "./request-cost-ledger.js";
+import { retainedFieldLevels, thisRequestObservedWork } from "./request-cost-engine-snapshot.js";
 import type {
   ConditionalFieldRecallRequest,
   RecallExecutionContext,
@@ -90,13 +98,7 @@ const DEFAULT_MEMORY_BYTES = 1_000_000;
 const DEFAULT_RESERVE = 100;
 const DEFAULT_MIN_ENVELOPE = 10;
 const CONTINUATION_MS = 5 * 60_000;
-const INDEX_PREVIEWS = new WeakMap<InformationIndex, ReadonlyMap<string, string>>();
-const INDEX_SOURCE_METADATA = new WeakMap<InformationIndex, Readonly<Record<string, RecallSourceMetadata>>>();
 const FIELD_SOURCE_PINS = new WeakMap<FieldEngineState, string>();
-const ISSUED_SURFACES = new Map<string, Readonly<{
-  readonly previews: ReadonlyMap<string, string>;
-  readonly metadata: Readonly<Record<string, RecallSourceMetadata>>;
-}>>();
 
 export type ConditionalFieldRecallResult = RecallResult & Readonly<{
   readonly index: InformationIndex;
@@ -262,10 +264,8 @@ function runCompiledConditionalFieldRecall(
     ...(restored === undefined ? {} : { resume_field: restored }),
     ...(pin === undefined ? {} : { expected_source_revision: pin.source_revision })
   }));
-  cost.add("solve", { relaxations: field.solver_completed_work ?? 0 });
-  cost.add("observe", { pending_work: field.remaining_work.reduce((sum, row) => sum + row.units, 0),
-    state_creates: field.seen_identities.length,
-    charged_retained_bytes: Math.max(0, input.budget.memory_bytes - field.remaining_memory_bytes) });
+  // Max-min bind runs inside observe; lifetime solver_completed_work is not this request's solve work.
+  cost.add("observe", thisRequestObservedWork(restored, field, input.budget.memory_bytes));
   let retained = field;
   const projected = projectFromField(assessUnknownCause(field, input), input, interpretation, (next) => { retained = next; }, cost);
   const unserviceable = input.budget.work_units <= 1 && projected.entries.length === 0;
@@ -279,20 +279,8 @@ function runCompiledConditionalFieldRecall(
   // Keep resume under the request token so a last page (response continuation
   // null) can still replay the same issued delivery_id.
   rememberField(retained, index.continuation ?? input.continuation ?? null);
+  cost.recordRetainedLevels(retainedFieldLevels(retained, input.budget.memory_bytes));
   return index;
-}
-
-function observationSettled(state: FieldEngineState): boolean {
-  return state.pending_path_effects === undefined
-    && state.last_observer_status !== "interrupted"
-    && state.last_observer_status !== "open"
-    && !state.memory_exhausted
-    && (state.remaining_work.length === 0);
-}
-
-function facetIndexStillOpen(state: FieldEngineState): boolean {
-  const facets = state.binding.kind === "bound" ? state.binding.snapshot.facets : state.facets;
-  return facets.length > 0 && state.projection_progress?.facet_index?.complete !== true;
 }
 
 function projectFromField(
@@ -325,22 +313,19 @@ function projectFromField(
     interpretation.snapshot_id,
     interpretationIdentity({ interpretation_clock: interpretation.interpretation_clock })
   );
-  const requestDigest = input.continuation == null ? "root" : continuationDigest(input.continuation);
-  if (input.continuation == null) {
-    for (const digest of evictIssuedDeliveries(queryKey)) ISSUED_SURFACES.delete(digest);
-  }
+  const requestDigest = input.continuation == null ? "root" : input.continuation.continuation_id;
+  if (input.continuation == null) evictIssuedSurfaces(evictIssuedDeliveries(queryKey));
   const issued = input.continuation == null ? undefined : replayIssuedDelivery(requestDigest);
   if (issued !== undefined) {
     const eligible = new Set(snapshot.values
       .filter((value) => value.accepting)
-      .map((value) => productStateNodeId(value.state)));
+      .map((value) => sharedProductIdentity(value.state)));
     if (issuedDeliveryRevoked(issued, eligible)) {
       return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
     }
     const replayed = replayIssuedIndex(issued);
-    const surface = ISSUED_SURFACES.get(requestDigest);
-    INDEX_PREVIEWS.set(replayed, surface?.previews ?? new Map());
-    INDEX_SOURCE_METADATA.set(replayed, surface?.metadata ?? {});
+    const surface = replayIssuedSurfaces(requestDigest);
+    attachIndexSurfaces(replayed, surface?.previews ?? new Map(), surface?.metadata ?? {});
     retain?.(retained);
     return replayed;
   }
@@ -350,7 +335,7 @@ function projectFromField(
     ...(input.payload_continuation === undefined
       ? {}
       : { payloadContinuation: input.payload_continuation }) });
-  let index = annotatePublicIndex(InformationIndexSchema.parse(cost.time("index", () => projectAcceptingIndex({
+  const projected = cost.time("index", () => projectAcceptingIndex({
     snapshot,
     ordered_values: orderedProjectionValues(state),
     view: interpretation.view,
@@ -365,6 +350,8 @@ function projectFromField(
     projection_facet_index: projectionProgress.facet_index,
     delivered_product_ids: new Set(Object.keys(projectionProgress.delivered_entries)),
     delivered_entry_revisions: projectionProgress.delivered_entries,
+    delivered_product_states: projectionProgress.delivered_products,
+    payload_expansion: input.payload_continuation?.purpose === "payload_expansion",
     on_projection_progress: (offset, facet) => {
       projectionProgress = { ...projectionProgress, offset,
         ...(facet === undefined ? {} : { facet_offset: facet.scan_offset, facet_index: facet.index }) };
@@ -409,7 +396,9 @@ function projectFromField(
         charged_retained_bytes: work.native_bytes, native_rows: entries.length });
       return result;
     }),
-    prior_continuation: input.continuation ?? null,
+    prior_continuation: input.continuation == null
+      ? null
+      : issuedContinuationForState(state) ?? input.continuation,
     observer: {
       outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: state.closure.observation },
       open_regions: state.residuals
@@ -429,38 +418,20 @@ function projectFromField(
     ...(state.memory_exhausted || state.remaining_work.length > 0
       ? { resource_work: "open" as const }
       : {})
-  }))), interpretation);
-  const committed = index.completeness.logical_index === "invalidated"
-    ? projectionProgress.delivered_entries
-    : index.continuation?.emitted_revisions
-      ?? mergeCommittedRevisions(projectionProgress.delivered_entries, index.entries);
-  const delivery = retainCommittedRevisions(
+  }));
+  const committed = retainAndIssueIndex({
+    index: annotatePublicIndex(InformationIndexSchema.parse(projected), interpretation),
+    projected,
     projectionProgress,
-    committed,
-    state.projection_progress === undefined
-  );
-  if (delivery.bytes > payload.remainingMemoryBytes) index = { ...index, continuation: null };
-  else {
-    payload.remainingMemoryBytes -= delivery.bytes;
-    retained = { ...retained, projection_progress: delivery.progress };
-  }
-  if (index.continuation !== null) index = { ...index,
-    continuation: { ...index.continuation, continuation_id: randomUUID() } };
-  index = payload.applyDeliveredSpans(index);
-  INDEX_PREVIEWS.set(index, payload.previews);
-  INDEX_SOURCE_METADATA.set(index, payload.sourceMetadata);
-  if (input.continuation != null && index.completeness.logical_index !== "invalidated"
-    && retained.projection_progress === delivery.progress) {
-    rememberIssuedDelivery({ query_key: queryKey, request_digest: requestDigest, index });
-    ISSUED_SURFACES.set(requestDigest, {
-      previews: payload.previews,
-      metadata: payload.sourceMetadata
-    });
-  }
-  retained = { ...retained, preview_cache: Object.fromEntries(payload.previews),
-    remaining_memory_bytes: payload.remainingMemoryBytes };
-  retain?.(retained);
-  return index;
+    state: retained,
+    first_retention: state.projection_progress === undefined,
+    payload,
+    request: input,
+    queryKey,
+    requestDigest
+  });
+  retain?.(committed.retained);
+  return committed.index;
 }
 
 export function encodeRecallResult(
@@ -558,17 +529,7 @@ function candidatePlaneAttributes(
 
 const PAYLOAD_OMITTED_PREVIEW = "[payload omitted]";
 
-export function captureIndexPreviews(
-  index: InformationIndex,
-  _readers: ObserverReaders,
-  _workspaceId: string
-): Map<string, string> {
-  return new Map(INDEX_PREVIEWS.get(index) ?? []);
-}
-
-export function captureIndexSourceMetadata(index: InformationIndex): Readonly<Record<string, RecallSourceMetadata>> {
-  return INDEX_SOURCE_METADATA.get(index) ?? {};
-}
+export { captureIndexPreviews, captureIndexSourceMetadata };
 
 function portIndexAndPreviews(
   recalled: ConditionalFieldRecallPortResult

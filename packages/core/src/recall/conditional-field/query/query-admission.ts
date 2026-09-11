@@ -21,10 +21,12 @@ import {
 } from "@do-soul/alaya-protocol";
 import { capContractKey } from "../cap-contract.js";
 import { interpretQuery } from "../reference/interpret-query.js";
+import { identityFor, type QueryDenotationParts } from "./compile-query-identity.js";
 import {
-  proposalBindsOriginalQuery,
-  type QueryDenotationParts
-} from "./compile-query-identity.js";
+  admitProposedGuard,
+  type QueryProposalAdmission
+} from "./query-proposal-admission.js";
+import { QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION } from "./query-proposal-producer-registry.js";
 import { decodeSourceFilters, UNBOUND_BINDING_CONTEXT } from "./ordinary-language.js";
 import {
   classifyQueryPredicate,
@@ -161,22 +163,64 @@ export function fallbackQueryId(value: string | undefined, fallback: string): st
   return parsed?.success === true ? parsed.data : fallback;
 }
 
-export function boundProposal(
-  proposal: QueryInterpretationProposal | undefined,
-  originalQuery: string
-): QueryInterpretationProposal | undefined | "invalid" {
-  if (proposal === undefined) return undefined;
-  return proposalBindsOriginalQuery(proposal, originalQuery) ? proposal : "invalid";
-}
-
 export function denotation(
   proposal: QueryInterpretationProposal | undefined,
-  parts: Omit<QueryDenotationParts, "interpretation_proposal">
+  parts: Omit<QueryDenotationParts, "interpretation_proposal" | "proposal_registry_policy_version" | "proposal_effective_limits">,
+  extra?: Pick<QueryDenotationParts, "proposal_registry_policy_version" | "proposal_effective_limits">
 ): QueryDenotationParts {
   return {
     ...parts,
+    ...extra,
     ...(proposal === undefined ? {} : { interpretation_proposal: proposal })
   };
+}
+
+export function denotationForAdmission(
+  admission: QueryProposalAdmission,
+  parts: Omit<QueryDenotationParts, "interpretation_proposal" | "proposal_registry_policy_version" | "proposal_effective_limits">
+): QueryDenotationParts {
+  if (admission.kind === "absent" || admission.kind === "invalid") {
+    return denotation(undefined, parts);
+  }
+  return denotation(admission.stored_proposal, parts, {
+    proposal_registry_policy_version: QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION,
+    proposal_effective_limits: admission.effective_limits
+  });
+}
+
+export function proposalRejectedInterpretation(input: {
+  readonly admission: Extract<QueryProposalAdmission, { kind: "unsupported" | "resource_rejected" | "malformed" }>;
+  readonly query_id: string | undefined;
+  readonly snapshot_id: string;
+  readonly program: QueryProgram;
+  readonly view: QueryView;
+  readonly interpretation_clock?: string;
+  readonly source_guard?: Guard;
+  readonly time_window?: QueryTimeWindow;
+  readonly authorized_scopes?: readonly string[] | null;
+  readonly lexical_text?: string;
+  readonly ordinary_request?: unknown;
+}): QueryInterpretation {
+  return interpretationOf({
+    query_id: identityFor(input.query_id, denotationForAdmission(input.admission, {
+      program: input.program,
+      view: input.view,
+      source_guard: input.source_guard,
+      interpretation_clock: input.interpretation_clock,
+      time_window: input.time_window,
+      authorized_scopes: input.authorized_scopes,
+      lexical_text: input.lexical_text,
+      ordinary_request: input.ordinary_request
+    })),
+    status: input.admission.kind,
+    snapshot_id: input.snapshot_id,
+    program: input.program,
+    view: input.view,
+    source_guard: input.source_guard,
+    interpretation_clock: input.interpretation_clock,
+    time_window: input.time_window,
+    interpretation_proposal: input.admission.stored_proposal
+  });
 }
 
 export function associativeCapDomainAdmission(view: QueryView): "ok" | "incompatible" {
@@ -216,19 +260,19 @@ export function admitBoundProposalFields(
     readonly holes: readonly QueryHole[];
     readonly hypotheses: readonly QueryHypothesis[];
   }>,
-  proposal: QueryInterpretationProposal | undefined
+  admission: Extract<QueryProposalAdmission, { kind: "admitted" }> | undefined
 ): {
   readonly program: QueryProgram;
   readonly holes: readonly QueryHole[];
   readonly hypotheses: readonly QueryHypothesis[];
 } {
-  if (proposal === undefined) return base;
+  if (admission === undefined) return base;
   return {
-    program: proposal.program !== undefined && base.program.kind === "epsilon"
-      ? proposal.program
+    program: admission.program !== undefined && base.program.kind === "epsilon"
+      ? admission.program
       : base.program,
-    holes: mergeUniqueByHoleId(base.holes, proposal.holes),
-    hypotheses: mergeUniqueByHypothesisId(base.hypotheses, proposal.hypotheses)
+    holes: mergeUniqueByHoleId(base.holes, admission.holes),
+    hypotheses: mergeUniqueByHypothesisId(base.hypotheses, admission.hypotheses)
   };
 }
 
@@ -298,12 +342,18 @@ export function incompatibleCapInterpretation(input: {
 
 export function extraGuardsForAdmission(
   sourceGuard: Guard | undefined,
-  proposal: QueryInterpretationProposal | undefined
+  conditions: readonly Guard[] = []
 ): readonly Guard[] {
   return [
     ...(sourceGuard === undefined ? [] : [sourceGuard]),
-    ...(proposal?.conditions ?? [])
+    ...conditions
   ];
+}
+
+export function admittedProposalConditions(
+  proposal: QueryInterpretationProposal | undefined
+): readonly Guard[] {
+  return (proposal?.conditions ?? []).map(admitProposedGuard);
 }
 
 function admitPredicateName(

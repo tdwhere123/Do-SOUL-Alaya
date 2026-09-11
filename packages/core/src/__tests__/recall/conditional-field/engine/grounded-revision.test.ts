@@ -105,9 +105,10 @@ describe("grounded retained derivation revisions", () => {
 
   it("assesses many actual receipts across exploration allowances without spending finalization reserve", () => {
     const row = edge("seed", "end", "a");
-    let state = { ...field(rel("a"), [row]), observed_relations: [{ ...row, resultObjectId: "end",
+    let state = { ...field(rel("a"), [row]), authorized_scopes: null, observed_relations: [{ ...row, resultObjectId: "end",
       evidenceReceipts: Array.from({ length: 50 }, (_, index) => ({ evidenceId: `e${index}`, eventId: `event${index}`,
-        eventType: "relation.evidence", occurredAt: "2026-09-06T00:00:00.000Z" })) }] } as FieldEngineState;
+        eventType: "relation.evidence", occurredAt: "2026-09-06T00:00:00.000Z" })),
+      sourceObservations: [{ source_id: "event0", source_sha256: "rev" }] }] } as FieldEngineState;
     const initialReserve = state.remaining_reserve;
     for (let attempt = 0; attempt < 20; attempt += 1) {
       state = assessUnknownCause({ ...state, remaining_exploration: 30 }, { as_of: "2026-09-07T00:00:00.000Z" });
@@ -126,8 +127,9 @@ describe("grounded retained derivation revisions", () => {
     const row = edge("seed", "end", "a");
     const initial = field(rel("a"), [row]);
     const observed = { ...row, resultObjectId: "end", evidenceReceipts: [{ evidenceId: "e-context", eventId: "event-context",
-      eventType: "relation.evidence", occurredAt: "2026-09-06T00:00:00.000Z" }] };
-    const configured: FieldEngineState = { ...initial, observed_relations: [observed], interpretation: { ...initial.interpretation,
+      eventType: "relation.evidence", occurredAt: "2026-09-06T00:00:00.000Z" }],
+      sourceObservations: [{ source_id: "event-context", source_sha256: "rev" }] };
+    const configured: FieldEngineState = { ...initial, authorized_scopes: null, observed_relations: [observed], interpretation: { ...initial.interpretation,
       view: { ...initial.interpretation.view, claim_demands: [{ variable: "y", proposition_kind: "common_cause", argument_variables: ["x", "y"], required_claim: "any" }] } } };
     const unknown = assessUnknownCause(configured, { as_of: "2026-09-07T00:00:00.000Z" });
     expect(unknown.support.some((record) => record.claim === "supported")).toBe(true);

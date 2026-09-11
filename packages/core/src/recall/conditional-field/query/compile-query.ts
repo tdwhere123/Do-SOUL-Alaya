@@ -23,10 +23,9 @@ import {
   admitBoundProposalFields,
   admitQueryPredicates,
   associativeCapDomainAdmission,
-  boundProposal,
   consumeMemoryIfNeeded,
   defaultView,
-  denotation,
+  denotationForAdmission,
   EPSILON,
   explicitQueryId,
   extraGuardsForAdmission,
@@ -35,9 +34,12 @@ import {
   interpretationOf,
   optionalWindow,
   parseItems,
+  proposalRejectedInterpretation,
   requiredView,
   type QueryMemoryPort
 } from "./query-admission.js";
+import { admitQueryProposal } from "./query-proposal-admission.js";
+import type { QueryProposalProducerRegistry } from "./query-proposal-producer-registry.js";
 
 export {
   authorizedScopesMismatch,
@@ -76,6 +78,7 @@ type CompileCommon = Readonly<{
   readonly memory?: QueryMemoryPort;
   readonly authorized_scopes?: readonly string[] | null;
   readonly interpretation_proposal?: QueryInterpretationProposal;
+  readonly proposal_registry?: QueryProposalProducerRegistry;
 }>;
 
 export type TypedQueryCompileInput = CompileCommon & Readonly<{
@@ -179,8 +182,12 @@ function compileTyped(
       interpretation_clock: input.interpretation_clock
     });
   }
-  const proposal = boundProposal(input.interpretation_proposal, stableStringify(program.data));
-  if (proposal === "invalid") {
+  const proposal = admitQueryProposal(
+    input.interpretation_proposal,
+    stableStringify(program.data),
+    input.proposal_registry
+  );
+  if (proposal.kind === "invalid") {
     return interpretationOf({
       query_id: fallbackQueryId(input.query_id, "malformed"),
       status: "malformed",
@@ -190,14 +197,25 @@ function compileTyped(
       interpretation_clock: input.interpretation_clock
     });
   }
+  if (proposal.kind === "unsupported" || proposal.kind === "resource_rejected" || proposal.kind === "malformed") {
+    return proposalRejectedInterpretation({
+      admission: proposal,
+      query_id: queryId,
+      snapshot_id: snapshotId,
+      program: program.data,
+      view,
+      interpretation_clock: input.interpretation_clock,
+      authorized_scopes: input.authorized_scopes
+    });
+  }
   const admitted = admitBoundProposalFields({
     program: program.data,
     holes,
     hypotheses
-  }, proposal);
+  }, proposal.kind === "admitted" ? proposal : undefined);
   const predicates = admitQueryPredicates(
     admitted.program,
-    extraGuardsForAdmission(undefined, proposal)
+    extraGuardsForAdmission(undefined, proposal.kind === "admitted" ? proposal.conditions : [])
   );
   if (predicates.kind === "malformed") {
     return interpretationOf({
@@ -214,7 +232,7 @@ function compileTyped(
     ? [...admitted.holes, ...predicates.holes]
     : admitted.holes;
   return interpretationOf({
-    query_id: identityFor(queryId, denotation(proposal, {
+    query_id: identityFor(queryId, denotationForAdmission(proposal, {
       program: admitted.program,
       view,
       hypotheses: admitted.hypotheses,
@@ -230,7 +248,7 @@ function compileTyped(
     hypotheses: admitted.hypotheses,
     interpretation_clock: input.interpretation_clock,
     time_window: timeWindow,
-    interpretation_proposal: proposal
+    interpretation_proposal: proposal.kind === "admitted" ? proposal.stored_proposal : undefined
   });
 }
 

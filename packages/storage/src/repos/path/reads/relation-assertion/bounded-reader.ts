@@ -11,6 +11,7 @@ export interface RecallAssertionObservation {
   readonly validity: RelationValidity;
   readonly evidenceRefs: readonly string[];
   readonly evidenceReceipts: readonly Readonly<{ evidenceId: string; eventId: string; eventType: string; occurredAt: string }>[];
+  readonly sourceObservations: readonly Readonly<{ source_id: string; source_sha256: string }>[];
   readonly resolvedAt: string | null;
   readonly resolutionKind: string | null;
 }
@@ -27,7 +28,7 @@ SELECT a.assertion_id, a.workspace_id, a.relation_kind,
        json_extract(a.anchors_json, '$.source_anchor.object_id') AS source_id,
        json_extract(a.anchors_json, '$.target_anchor.object_id') AS target_id,
        json_extract(a.formation_receipt_json, '$.parameters.result_object_id') AS result_id,
-       a.validity_json, e.evidence_id, e.source_event_id, e.source_event_type, e.source_occurred_at, r.resolved_at, r.resolution_kind
+       a.formation_receipt_json, a.validity_json, e.evidence_id, e.source_event_id, e.source_event_type, e.source_occurred_at, r.resolved_at, r.resolution_kind
 FROM relation_assertions a
 JOIN relation_assertion_evidence e ON e.assertion_id = a.assertion_id
 LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id AND r.workspace_id = a.workspace_id
@@ -126,17 +127,35 @@ LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertio
       const id = String(row.assertion_id);
       const prior = grouped.get(id);
       const evidenceRefs = [...(prior?.evidenceRefs ?? []), String(row.evidence_id)];
+      const sourceObservations = prior?.sourceObservations ?? sourceObservationsFrom(row.formation_receipt_json);
       grouped.set(id, Object.freeze({ assertionId: id, workspaceId: String(row.workspace_id),
         predicate: String(row.relation_kind), sourceObjectId: String(row.source_id), targetObjectId: String(row.target_id),
         resultObjectId: String(row.result_id), validity: prior?.validity ?? RelationValiditySchema.parse(JSON.parse(String(row.validity_json))),
         evidenceRefs: Object.freeze(evidenceRefs), resolvedAt: row.resolved_at === null ? null : String(row.resolved_at),
         evidenceReceipts: Object.freeze([...(prior?.evidenceReceipts ?? []), { evidenceId: String(row.evidence_id),
           eventId: String(row.source_event_id), eventType: String(row.source_event_type), occurredAt: String(row.source_occurred_at) }]),
+        sourceObservations,
         resolutionKind: row.resolution_kind === null ? null : String(row.resolution_kind) }));
     }
     return Object.freeze([...grouped.values()]);
   }
 
+}
+
+function sourceObservationsFrom(raw: unknown): readonly Readonly<{ source_id: string; source_sha256: string }>[] {
+  try {
+    const parsed = JSON.parse(String(raw ?? "null")) as { readonly source_observations?: unknown };
+    if (!Array.isArray(parsed?.source_observations)) return Object.freeze([]);
+    return Object.freeze(parsed.source_observations.flatMap((row) => {
+      if (typeof row !== "object" || row === null) return [];
+      const sourceId = (row as { readonly source_id?: unknown }).source_id;
+      const digest = (row as { readonly source_sha256?: unknown }).source_sha256;
+      if (typeof sourceId !== "string" || typeof digest !== "string") return [];
+      return [{ source_id: sourceId, source_sha256: digest }];
+    }));
+  } catch {
+    return Object.freeze([]);
+  }
 }
 
 const RELATION_CURSOR_SEP = "\u001f";

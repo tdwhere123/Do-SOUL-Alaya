@@ -69,7 +69,7 @@ describe("worker stored measurement producer", () => {
       const rawOnly = await service.recall(request);
       expect(rawOnly.index?.entries.some((entry) => entry.object_id === OBJECT_B)).toBe(false);
       const measured = await service.recall({ ...request, interpretation_proposal: { schema_version: 1,
-        original_query_digest: digestOriginalQuery(QUERY_TEXT), producer_id: "stored-rpc-preparation",
+        original_query_digest: digestOriginalQuery(QUERY_TEXT), producer_id: "alaya.query.proposal.core.v1",
         stored_cosine_admission: admission([MODEL_B]) } });
       const entry = measured.index?.entries.find((candidate) => candidate.object_id === OBJECT_B);
       expect(entry?.target).toMatchObject({ kind: "memory_entry", workspace_id: WORKSPACE, object_id: OBJECT_B });
@@ -365,7 +365,7 @@ describe("worker stored measurement producer", () => {
     const interpretation = compileConditionalFieldQuery({ source: "ordinary", text: QUERY_TEXT,
       interpretation_clock: NOW, snapshot_id: snapshotIdFromPin(WORKSPACE, pin), budget: defaultBudget(),
       interpretation_proposal: { schema_version: 1, original_query_digest: digestOriginalQuery(QUERY_TEXT),
-        producer_id: "guarded-preparation", stored_cosine_admission: admission([MODEL_B]),
+        producer_id: "alaya.query.proposal.core.v1", stored_cosine_admission: admission([MODEL_B]),
         program: { schema_version: 1, kind: "relation", relation_kind: "observed_log", source_variable: "s", target_variable: "t",
           facet_mode: "same_path", threshold_milligrades: 0,
           guard: { schema_version: 1, kind: "query_predicate", verdict: "unresolved", variable: "s",
@@ -423,7 +423,7 @@ function compileForReaders(readers: ReturnType<typeof createConditionalFieldObse
     snapshot_id: snapshotIdFromPin(WORKSPACE, pin),
     budget: defaultBudget()
     , ...(declaration === undefined ? {} : { interpretation_proposal: { schema_version: 1 as const,
-      original_query_digest: digestOriginalQuery(QUERY_TEXT), producer_id: "stored-test-proposal",
+      original_query_digest: digestOriginalQuery(QUERY_TEXT), producer_id: "alaya.query.proposal.core.v1",
       stored_cosine_admission: declaration } })
   });
 }

@@ -27,6 +27,7 @@ export function identityContext(
     query_id: QUERY_ID,
     snapshot_id: SNAPSHOT_ID,
     source_revision: SOURCE_REVISION,
+    source_revisions: new Map([["src", SOURCE_REVISION]]),
     hypothesis_id: "h0",
     binding_context: "default",
     time_state: "as_of",

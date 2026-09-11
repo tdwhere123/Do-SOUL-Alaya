@@ -16,9 +16,11 @@ import {
   SoulMemorySearchRequestSchema,
   SoulReportContextUsageRequestSchema,
   SourceDeliveredSpanSchema,
+  canonicalIndexEntryIdentity,
   canonicalProductIdentity,
   indexEntryObjectKind,
   indexEntrySubjectId,
+  productStateKeyFromIndexEntry,
   memoryIndexEntry,
   memoryProductStateKey,
   retargetMemoryProduct,
@@ -146,6 +148,45 @@ describe("conditional-field product identity", () => {
     expect(indexEntryObjectKind(measuredSource)).toBe("source_evidence");
     expect(indexEntrySubjectId({ target: source.target })).toBe("rec-1");
     expect(indexEntryObjectKind({ target: source.target })).toBe("source_evidence");
+    const spanned = sourceIndexEntry({
+      workspace_id: "ws",
+      root_kind: "source_record",
+      root_id: "rec-1",
+      source_version: "v1",
+      content_digest: DIGEST,
+      evidence_object_id: null,
+      association_milligrades: 600,
+      program_state: "accepting",
+      time_state: "as_of"
+    });
+    const withSpan = {
+      ...spanned,
+      target: {
+        ...spanned.target,
+        kind: "source_evidence" as const,
+        span: SourceDeliveredSpanSchema.parse({
+          content_start: 0,
+          content_end: 12,
+          retained_extent: "excerpt",
+          content_complete: false,
+          original_complete: false
+        })
+      }
+    };
+    const reconstructed = productStateKeyFromIndexEntry(withSpan);
+    expect(reconstructed.target.kind).toBe("source_evidence");
+    if (reconstructed.target.kind === "source_evidence") {
+      expect(reconstructed.target.span).toEqual(withSpan.target.span);
+    }
+    expect(reconstructed.program_state).toBe("accepting");
+    expect(reconstructed.time_state).toBe("as_of");
+    const omitted = { ...spanned, program_state: undefined, time_state: undefined };
+    expect(productStateKeyFromIndexEntry(omitted).program_state).toBe("accepting");
+    expect(canonicalIndexEntryIdentity(omitted)).toBe(canonicalIndexEntryIdentity({
+      ...omitted,
+      program_state: "accepting",
+      time_state: "as_of"
+    }));
     expect(() => retargetMemoryProduct(sourceProductStateKey({
       workspace_id: "ws",
       root_kind: "source_record",
