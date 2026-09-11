@@ -258,13 +258,17 @@ describe("LocalOnnxEmbeddingClient", () => {
 
     try {
       await expect(client.embedTexts(["first"], { timeoutMs: 10 })).rejects.toThrow(/timed out/);
-      second = client.embedTexts(["second"], { timeoutMs: 1_000 });
+      // Second timeoutMs is the host-lock wait, not inference duration. A 1s
+      // budget expires before occupancy.finally (ROLLBACK/close) under
+      // coverage, so the successor never starts the extractor and waitFor
+      // cannot observe call #2.
+      second = client.embedTexts(["second"], { timeoutMs: 20_000 });
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(extractor).toHaveBeenCalledTimes(1);
 
       releases.shift()?.(output);
       await vi.waitFor(() => expect(extractor).toHaveBeenCalledTimes(2), {
-        timeout: 15_000,
+        timeout: 20_000,
         interval: 50
       });
       releases.shift()?.(output);
@@ -281,7 +285,7 @@ describe("LocalOnnxEmbeddingClient", () => {
       restoreEnv("ALAYA_LOCAL_ONNX_LOCK_PATH", previousLockPath);
       rmSync(root, { recursive: true, force: true });
     }
-  }, 20_000);
+  }, 30_000);
 
   it("uses the entry deadline while waiting for the host lock and never starts orphan work", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "alaya-embedding-wait-"));

@@ -205,6 +205,9 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
       return await waitForEmbeddingCaller(occupancy, deadline.signal);
     } finally {
       deadline.close();
+      // Occupancy keeps the host lock until a timed-out extractor settles;
+      // dropping it here would let lock `finally` become unhandledRejection.
+      void occupancy.catch(() => undefined);
     }
   }
 
@@ -355,10 +358,14 @@ function throwIfEmbeddingCancelled(signal: AbortSignal): void {
 
 function waitForEmbeddingCaller<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
-    const onAbort = () => reject(embeddingCancellationError(signal));
+    const onAbort = () => {
+      reject(embeddingCancellationError(signal));
+      // Caller timeout must not detach occupancy: lock `finally` still runs
+      // after the extractor settles and must not become unhandledRejection.
+      work.catch(() => undefined);
+    };
     if (signal.aborted) {
       onAbort();
-      work.catch(() => undefined);
       return;
     }
     signal.addEventListener("abort", onAbort, { once: true });
