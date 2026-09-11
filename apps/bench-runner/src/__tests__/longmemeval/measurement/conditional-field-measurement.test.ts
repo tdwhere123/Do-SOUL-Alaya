@@ -109,7 +109,8 @@ describe("conditional target measurement evidence", () => {
     const results = input.recallResult.results.map((result) => ({ ...result,
       target: { kind: "memory_entry" as const, workspace_id: "workspace", object_id: "gold", source_revision: "foreign-revision" }
     }));
-    expect(measureConditionalFieldResponse({ ...input, recallResult: { ...input.recallResult, results } })?.status).toBe("invalid");
+    expect(measureConditionalFieldResponse({ ...input, recallResult: { ...input.recallResult, results } }))
+      .toMatchObject({ status: "invalid", reason: "foreign_target_revision" });
   });
 
   it("rejects archived slots with foreign tagged target revisions", () => {
@@ -131,7 +132,7 @@ describe("conditional target measurement evidence", () => {
           completeness: { ...input.recallResult.index.completeness, logical_index: "complete" as const } } };
       expect(measureConditionalFieldResponse({ ...input, recallResult,
         deliveredResults: input.deliveredResults.slice(0, length) }))
-        .toMatchObject({ status: "invalid", reason: "result_index_mismatch" });
+        .toMatchObject({ status: "invalid", reason: "omitted_prefix_page" });
     }
   });
 
