@@ -56,7 +56,9 @@ import {
   attachIndexSurfaces,
   captureIndexPreviews,
   captureIndexSourceMetadata,
+  commitIssuedDelivery,
   evictIssuedSurfaces,
+  pendingIssuedDeliveryOf,
   replayIssuedSurfaces,
   retainAndIssueIndex
 } from "./recall-index-commit.js";
@@ -162,9 +164,18 @@ export async function executeRecall(
     sourceMetadata = captureIndexSourceMetadata(recalled);
     return recalled;
   });
-  const issuedDeliveryId = issuedDeliveryIdOf(index);
+  const pending = pendingIssuedDeliveryOf(index);
+  const encoded = encodeRecallResult(index, previews, governance, sourceMetadata);
+  const issuedDeliveryId = pending === undefined
+    ? issuedDeliveryIdOf(index)
+    : commitIssuedDelivery({
+      ...pending,
+      index: encoded.index,
+      previews,
+      metadata: sourceMetadata
+    });
   return {
-    ...encodeRecallResult(index, previews, governance, sourceMetadata),
+    ...encoded,
     execution_receipt: executionReceipt,
     ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId })
   };

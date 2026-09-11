@@ -6,6 +6,8 @@ import {
   type MemorySearchResult,
   type RecallTargetRef
 } from "@do-soul/alaya-protocol";
+import { buildQuestionDiagnostic } from "../../../diagnostics/diagnostics-question.js";
+import type { QuestionDiagnosticInput } from "../../../diagnostics/question-assembly.js";
 import {
   HISTORICAL_MEMORY_ANY_AT_K_CONTRACT,
   HISTORICAL_MEMORY_ANY_AT_K_DENOMINATOR,
@@ -112,6 +114,41 @@ describe("source gold join and mixed-kind first-exposure", () => {
         historical_memory_any_at_k: { hit_at_1: { status: "hit", value: true } }
       }
     });
+  });
+
+  it("does not score mixed-kind any_at_1 as hit when QuestionDiagnosticInput omits goldSourceUnits", () => {
+    const base = fixture([sourceTarget()]);
+    const input: QuestionDiagnosticInput = {
+      ...base,
+      questionId: "q-source-gold-omitted",
+      goldMemoryIds: ["rec-1"],
+      answerSessionIds: ["session"],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled"
+    };
+    expect(Object.hasOwn(input, "goldSourceUnits")).toBe(false);
+    const measured = measureConditionalFieldResponse(input);
+    expect(measured).toMatchObject({
+      status: "validated",
+      metrics: {
+        mixed_kind_first_exposure: { any_at_1: { status: "unavailable", value: null } }
+      }
+    });
+    expect(measured && "metrics" in measured ? measured.metrics.mixed_kind_first_exposure.any_at_1.status : null)
+      .not.toBe("hit");
+    const diagnostic = buildQuestionDiagnostic(input);
+    expect(diagnostic.conditional_field_measurement).toMatchObject({
+      status: "validated",
+      metrics: {
+        mixed_kind_first_exposure: { any_at_1: { status: "unavailable", value: null } }
+      }
+    });
+    const mixed = diagnostic.conditional_field_measurement;
+    expect(mixed && mixed.status === "validated" ? mixed.metrics.mixed_kind_first_exposure.any_at_1 : null)
+      .not.toEqual({ status: "hit", value: true });
   });
 
   it("marks mixed-kind Any@K unavailable when source gold is missing instead of scoring a miss", () => {

@@ -2,13 +2,19 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { MemoryDimension, type InformationIndex, type RequestBudget } from "@do-soul/alaya-protocol";
+import {
+  MemoryDimension,
+  sourceIndexEntry,
+  type InformationIndex,
+  type RequestBudget
+} from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldRecallPortResult,
   ObserverReaders,
   RequestActualCost
 } from "@do-soul/alaya-core";
 import { type StorageDatabase } from "@do-soul/alaya-storage";
+import { encodeIndexResults } from "../../../mcp-memory/recall/recall-result.js";
 import { runConditionalFieldWorkerRecall } from "../../../runtime/recall-read-worker/observer-operations.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import {
@@ -216,6 +222,26 @@ describe("native worker actual cost", () => {
     expect(cost.bytes_read).toBe(0);
   });
 
+  it("treats sequential first-page recalls with omitted continuation as independent observation epochs", async () => {
+    // Retrying that issued page request within the valid process lifetime
+    // replays the same page/delivery identity. A first request with
+    // continuation omitted is a new observation epoch, not an issued-page retry.
+    const slice = await openSourceSlice((database) => databases.add(database));
+    for (const [index, id] of [MEM.r, MEM.c, MEM.h].entries()) {
+      await slice.writeMemory(id, `needle ${index}`, MemoryDimension.FACT);
+    }
+    const budget = defaultBudget({
+      work_units: 2_000, page_budget: 1, finalization_reserve: 20, min_envelope: 1
+    });
+    const first = runConditionalFieldWorkerRecall(runtime(slice.database), payload(budget, "needle"));
+    const second = runConditionalFieldWorkerRecall(runtime(slice.database), payload(budget, "needle"));
+    expect(first.issued_delivery_id).toBeUndefined();
+    expect(second.issued_delivery_id).toBeUndefined();
+    expect(second.index.page_purpose).not.toBe("retry");
+    expect(first.execution_receipt!.actual?.phases.observe.state_creates).toBeGreaterThan(0);
+    expect(second.execution_receipt!.actual?.phases.observe.state_creates).toBeGreaterThan(0);
+  });
+
   it("replays the same delivery_id when retrying a last page with null continuation", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     for (const [index, id] of [MEM.r, MEM.c, MEM.h].entries()) {
@@ -239,6 +265,52 @@ describe("native worker actual cost", () => {
     expect(retry.issued_delivery_id).toBe(last.issued_delivery_id);
     expect(retry.index.entries.map((entry) => entry.object_id))
       .toEqual(last.index.entries.map((entry) => entry.object_id));
+  });
+
+  it("keeps every index.entries identity when encodeIndexResults omits preview", () => {
+    const digest = `sha256:${"a".repeat(64)}`;
+    const source = sourceIndexEntry({
+      workspace_id: WS, root_kind: "source_record", root_id: "rec-1", source_version: "v1",
+      content_digest: digest, evidence_object_id: null, association_milligrades: 700,
+      hypothesis_id: "h1", output_binding: "default", program_state: "matched", time_state: "current"
+    });
+    const memory = {
+      schema_version: 1 as const,
+      object_id: MEM.r,
+      target: { kind: "memory_entry" as const, workspace_id: WS, object_id: MEM.r, source_revision: "rev" },
+      hypothesis_id: "h0",
+      output_binding: "default",
+      role: "requested" as const,
+      association_milligrades: 850,
+      claim: "unknown" as const,
+      explanation_ids: [],
+      program_state: "matched",
+      time_state: "current"
+    };
+    const index = {
+      schema_version: 1 as const,
+      query_id: "needle",
+      snapshot_id: digest,
+      result_version: "v1",
+      entries: [memory, source],
+      completeness: {
+        schema_version: 1 as const, logical_index: "open" as const, observed_coverage: "open" as const,
+        transport: "complete" as const, payload: "complete" as const, representation: "complete" as const
+      },
+      continuation: null,
+      representation: {
+        schema_version: 1 as const, policy: "construct_index_then_page_then_payload" as const,
+        page_budget: 2, identity_tie_break: "serialization" as const
+      }
+    };
+    const encoded = encodeIndexResults(index, new Map());
+    expect(encoded).toHaveLength(index.entries.length);
+    expect(encoded.map((row) => row.object_id ?? row.target)).toEqual(
+      index.entries.map((entry) => entry.object_id ?? entry.target)
+    );
+    const sourceRow = encoded.find((row) => row.object_kind === "source_evidence");
+    expect(sourceRow).toBeDefined();
+    expect(sourceRow?.object_id).toBeUndefined();
   });
 });
 

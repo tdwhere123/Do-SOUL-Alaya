@@ -1,4 +1,4 @@
-import type { InformationIndex } from "@do-soul/alaya-protocol";
+import type { Continuation, InformationIndex } from "@do-soul/alaya-protocol";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import {
   bindCommittedDelivery,
@@ -23,6 +23,13 @@ const ISSUED_SURFACES = new Map<string, Readonly<{
   readonly previews: ReadonlyMap<string, string>;
   readonly metadata: Readonly<Record<string, RecallSourceMetadata>>;
 }>>();
+const PENDING_ISSUE = new WeakMap<InformationIndex, PendingIssuedDelivery>();
+
+export type PendingIssuedDelivery = Readonly<{
+  readonly query_key: string;
+  readonly request_digest: string;
+  readonly request: Continuation;
+}>;
 
 export function captureIndexPreviews(
   index: InformationIndex,
@@ -56,6 +63,32 @@ export function replayIssuedSurfaces(requestDigest: string): Readonly<{
 
 export function evictIssuedSurfaces(digests: readonly string[]): void {
   for (const digest of digests) ISSUED_SURFACES.delete(digest);
+}
+
+export function pendingIssuedDeliveryOf(index: InformationIndex): PendingIssuedDelivery | undefined {
+  return PENDING_ISSUE.get(index);
+}
+
+export function commitIssuedDelivery(input: Readonly<{
+  readonly query_key: string;
+  readonly request_digest: string;
+  readonly index: InformationIndex;
+  readonly request: Continuation;
+  readonly previews?: ReadonlyMap<string, string>;
+  readonly metadata?: Readonly<Record<string, RecallSourceMetadata>>;
+}>): string {
+  // Selected rows must already have survived encode/preview; retain only stages this.
+  const deliveryId = rememberIssuedDelivery({
+    query_key: input.query_key,
+    request_digest: input.request_digest,
+    index: input.index,
+    request: input.request
+  });
+  ISSUED_SURFACES.set(input.request_digest, {
+    previews: input.previews ?? INDEX_PREVIEWS.get(input.index) ?? new Map(),
+    metadata: input.metadata ?? INDEX_SOURCE_METADATA.get(input.index) ?? {}
+  });
+  return deliveryId;
 }
 
 export function retainAndIssueIndex(input: Readonly<{
@@ -105,15 +138,10 @@ export function retainAndIssueIndex(input: Readonly<{
   attachIndexSurfaces(index, input.payload.previews, input.payload.sourceMetadata);
   if (input.request.continuation != null && index.completeness.logical_index !== "invalidated"
     && retained.projection_progress === delivery.progress) {
-    rememberIssuedDelivery({
+    PENDING_ISSUE.set(index, {
       query_key: input.queryKey,
       request_digest: input.requestDigest,
-      index,
       request: input.request.continuation
-    });
-    ISSUED_SURFACES.set(input.requestDigest, {
-      previews: input.payload.previews,
-      metadata: input.payload.sourceMetadata
     });
   }
   retained = {

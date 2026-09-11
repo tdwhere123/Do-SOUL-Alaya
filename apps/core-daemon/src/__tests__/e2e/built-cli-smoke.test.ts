@@ -21,7 +21,7 @@ afterEach(async () => {
 
 describe("built CLI smoke", () => {
   it(
-    "exercises install, tools list, status, and doctor through bin/alaya.mjs",
+    "exercises install, tools list, status, soul.recall, and doctor through bin/alaya.mjs",
     async () => {
       await assertBuiltCliAvailable();
       const tempRoot = await mkdtemp(join(tmpdir(), "alaya-built-cli-"));
@@ -68,6 +68,48 @@ describe("built CLI smoke", () => {
         daemon: { up: true },
         trust: expect.arrayContaining([expect.objectContaining({ agent_target: "codex" })])
       });
+
+      const recall = await runBuiltCli(
+        [
+          "tools",
+          "call",
+          "soul.recall",
+          JSON.stringify({
+            protocol_version: 1,
+            supported_result_kinds: ["memory_entry", "source_evidence"],
+            supports_source_evidence: true,
+            query: "needle",
+            scope_class: null,
+            dimension: null,
+            domain_tags: null,
+            max_results: 5
+          }),
+          "--json"
+        ],
+        env
+      );
+      expect(recall.exitCode).toBe(0);
+      const recalled = parseJsonOutput<{
+        readonly index?: {
+          readonly entries?: ReadonlyArray<{
+            readonly object_id?: string;
+            readonly target?: { readonly kind?: string };
+          }>;
+        };
+        readonly results?: ReadonlyArray<{
+          readonly object_id?: string;
+          readonly object_kind?: string;
+        }>;
+      }>(recall.stdout);
+      expect(recalled.index).toEqual(expect.any(Object));
+      expect(Array.isArray(recalled.index?.entries)).toBe(true);
+      expect(Array.isArray(recalled.results)).toBe(true);
+      for (const row of recalled.results ?? []) {
+        if (row.object_kind === "source_evidence") expect(row.object_id).toBeUndefined();
+      }
+      for (const entry of recalled.index?.entries ?? []) {
+        if (entry.target?.kind === "source_evidence") expect(entry.object_id).toBeUndefined();
+      }
 
       const doctor = await runBuiltCli(["doctor", "--json"], env);
       expect(doctor.exitCode).toBe(75);
