@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   UsageReportSchema,
-  productSubjectId,
   sharedProductIdentity,
   type Derivation,
   type FieldValue,
@@ -164,9 +163,7 @@ function supportBelongsTo(record: SupportRecord, value: FieldValue): boolean {
     ...record.witnesses.flatMap((witness) => [...witness.premises])
   ]);
   return named.has(productStateNodeId(value.state))
-    || named.has(sharedProductIdentity(value.state))
-    || named.has(productSubjectId(value.state))
-    || named.has(value.state.hypothesis_id);
+    || named.has(sharedProductIdentity(value.state));
 }
 
 function derivationIsComplete(

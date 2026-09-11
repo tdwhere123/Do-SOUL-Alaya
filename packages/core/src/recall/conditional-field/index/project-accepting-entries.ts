@@ -9,6 +9,10 @@ import {
   type IndexEntry
 } from "@do-soul/alaya-protocol";
 import { claimObligationAccepts } from "./claim-obligation.js";
+import {
+  facetObligationsAccept,
+  queryRequiresFacetMeasurement
+} from "./facet-obligation-join.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import {
   accountFacetPreparation,
@@ -208,17 +212,14 @@ function indexEntryForValue(
   if (kindView === "memory_only" && value.state.target.kind !== "memory_entry") return null;
   if (kindView === "source_only" && value.state.target.kind !== "source_evidence") return null;
   const key = productStateNodeId(value.state);
-  const role = input.roles?.get(key)
-    ?? input.roles?.get(productSubjectId(value.state))
-    ?? "associated";
+  const role = input.roles?.get(key) ?? "associated";
   if (role === "routing_only" && !input.view.include_routing_only) return null;
   if (!input.view.requested_roles.includes(role)) return null;
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
-  const subjectId = productSubjectId(value.state);
-  const claim = input.claims?.get(key) ?? input.claims?.get(subjectId) ?? "unknown";
+  const claim = input.claims?.get(key) ?? "unknown";
   if (!claimObligationAccepts(value, input.view, claim)) return null;
-  const proposition = input.claim_propositions?.get(key) ?? input.claim_propositions?.get(subjectId);
+  const proposition = input.claim_propositions?.get(key);
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     target: value.state.target,
@@ -248,14 +249,15 @@ function indexEntryForValue(
 }
 
 function facetsAccept(value: FieldValue, input: AcceptingProjectionInput): boolean {
-  if (input.snapshot.facets.length === 0) return true;
+  if (!queryRequiresFacetMeasurement(input.view.facet_obligations)) return true;
+  if (input.snapshot.facets.length === 0) return false;
   if (input.projection_facet_index?.complete !== true) return false;
   const vectors = facetsForCandidate(value, input);
   if (vectors.length === 0) return false;
-  return evaluateFacetPredicate(
-    facetModeForValue(value, input),
+  return facetObligationsAccept(
+    input.view.facet_obligations,
     vectors,
-    input.view.threshold_milligrades
+    facetModeForValue(value, input)
   );
 }
 

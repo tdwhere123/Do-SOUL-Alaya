@@ -26,13 +26,14 @@ function field(grade: number): FieldEngineState {
   const row = { assertionId: "assertion-p", sourceObjectId: "a", targetObjectId: "b", resultObjectId: "b", predicate: "p",
     source_revision: "rev", validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" },
     evidenceReceipts: [{ evidenceId: "evidence-p", eventId: "event-p", eventType: "relation.evidence",
-      occurredAt: "2026-09-06T00:00:00.000Z" }] };
+      occurredAt: "2026-09-06T00:00:00.000Z" }],
+    sourceObservations: [{ source_id: "event-p", source_sha256: "rev" }] };
   const next = applyObserverPage(initial, { page: page(initial.query_id, "one"), effects: adjacencyEffectsForRows([row], {
     interpretation, asOf: NOW, liveStates: initial.seen_identities,
     sourceFacts: new Map(["a", "b"].map((object_id) => [object_id, { object_id, source_revision: "rev" }])),
     overlay: { p: { applicable: true, milligrades: 1000 } }
   }) });
-  return { ...next, observed_relations: [row] };
+  return { ...next, authorized_scopes: null, observed_relations: [row] };
 }
 
 function targetKey(state: FieldEngineState): string {

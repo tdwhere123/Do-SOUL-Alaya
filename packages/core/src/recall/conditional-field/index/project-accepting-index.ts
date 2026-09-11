@@ -72,6 +72,11 @@ export {
   evaluateFacetPredicate,
   evaluateSamePathPredicate
 } from "./project-accepting-entries.js";
+export {
+  facetObligationsAccept,
+  queryRequiresFacetMeasurement,
+  requiredFacetObligations
+} from "./facet-obligation-join.js";
 
 export type AcceptingProjectionInput = Readonly<{
   readonly snapshot: FieldSnapshot;

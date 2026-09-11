@@ -248,20 +248,28 @@ export type ProductUpdateKind = z.infer<typeof ProductUpdateKindSchema>;
 export type ProductUpdate = z.infer<typeof ProductUpdateSchema>;
 export type PayloadContinuationRequest = z.infer<typeof PayloadContinuationRequestSchema>;
 
+function indexEntryProgramState(entry: IndexEntry): string {
+  return entry.program_state ?? "accepting";
+}
+
+function indexEntryTimeState(entry: IndexEntry): string {
+  return entry.time_state ?? "as_of";
+}
+
 export function canonicalIndexEntryIdentity(entry: IndexEntry): string {
   return stableCanonicalStringify({
     identity_version: "product-identity.v1",
     target: entry.target,
     hypothesis_id: entry.hypothesis_id,
     output_binding: entry.output_binding,
-    program_state: entry.program_state ?? "",
-    time_state: entry.time_state ?? ""
+    program_state: indexEntryProgramState(entry),
+    time_state: indexEntryTimeState(entry)
   });
 }
 
 export function productStateKeyFromIndexEntry(entry: IndexEntry): ProductStateKey {
-  const programState = entry.program_state ?? "accepting";
-  const timeState = entry.time_state ?? "as_of";
+  const programState = indexEntryProgramState(entry);
+  const timeState = indexEntryTimeState(entry);
   if (entry.target.kind === "memory_entry") {
     return memoryProductStateKey({
       workspace_id: entry.target.workspace_id,
@@ -280,6 +288,7 @@ export function productStateKeyFromIndexEntry(entry: IndexEntry): ProductStateKe
     source_version: entry.target.source_version,
     content_digest: entry.target.content_digest,
     evidence_object_id: entry.target.evidence_object_id,
+    ...(entry.target.span === undefined ? {} : { span: entry.target.span }),
     program_state: programState,
     hypothesis_id: entry.hypothesis_id,
     binding_context: entry.output_binding,

@@ -46,7 +46,8 @@ export type GovernanceReason =
 export type EvidenceIdentityContext = Readonly<{
   readonly query_id: string;
   readonly snapshot_id: string;
-  readonly source_revision: string;
+  readonly source_revision?: string;
+  readonly source_revisions?: ReadonlyMap<string, string>;
   readonly hypothesis_id: string;
   readonly binding_context: string;
   readonly time_state: string;
@@ -117,7 +118,7 @@ export type PolarizedWitness = Witness & Readonly<{
 export type EvidenceAssessment = Readonly<{
   readonly query_id: string;
   readonly snapshot_id: string;
-  readonly source_revision: string;
+  readonly source_revision?: string;
   readonly records: readonly SupportRecord[];
   readonly polarities: Readonly<Record<string, EvidencePolarity>>;
   readonly governance: readonly GovernanceOutcome[];

@@ -21,6 +21,15 @@ export {
   type Sha256Hex
 } from "./common.js";
 export {
+  FacetObligationPredicateSchema,
+  FacetObligationRequirednessSchema,
+  QueryFacetObligationListSchema,
+  QueryFacetObligationSchema,
+  type FacetObligationPredicate,
+  type FacetObligationRequiredness,
+  type QueryFacetObligation
+} from "./facet-obligation.js";
+export {
   AssociationCapContractSchema,
   ClaimDemandSchema,
   ClaimRequiredClaimSchema,

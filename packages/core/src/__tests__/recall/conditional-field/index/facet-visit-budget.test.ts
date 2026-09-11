@@ -9,7 +9,7 @@ import { composedFacetPathId } from "../../../../recall/conditional-field/engine
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import type { FacetVisitIndex } from "../../../../recall/conditional-field/index/facet-visit-accounting.js";
 import { startRequestCost } from "../../../../recall/runtime/request-cost-ledger.js";
-import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
+import { defaultBudget, defaultView, facetObligation, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
 const EXPIRES_AT = "2099-01-01T00:00:00.000Z";
 
@@ -63,18 +63,20 @@ describe("facet collection visits against the request allowance", () => {
         {
           schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
           path_id: composedFacetPathId(pass, "ok"),
+          obligations: [{ obligation_id: "ob-pass", domain_id: "assoc.bottleneck.milligrade.v1" }],
           coordinates: [900]
         },
         {
           schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
           path_id: composedFacetPathId(fail, "bad"),
+          obligations: [{ obligation_id: "ob-pass", domain_id: "assoc.bottleneck.milligrade.v1" }],
           coordinates: [100]
         }
       ]
     };
     const index = projectAcceptingIndex(input(snapshot, {
       remaining_reserve: 1,
-      view: { ...defaultView(), threshold_milligrades: 800 }
+      view: { ...defaultView(), facet_obligations: [facetObligation({ obligation_id: "ob-pass" })] }
     }));
     expect(index.entries.map((entry) => entry.object_id)).not.toContain("fail");
     expect(index.entries.map((entry) => entry.object_id)).not.toContain("pass");

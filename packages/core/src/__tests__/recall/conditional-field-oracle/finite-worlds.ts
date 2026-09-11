@@ -1,4 +1,5 @@
 import {
+  ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   type ClaimState,
   type FacetVector,
@@ -11,9 +12,18 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   productKey,
+  productStateId,
   type OracleEdge,
   type OracleSeed
 } from "./enumerate-simple-paths.js";
+
+function rolesFor(entries: readonly (readonly [string, IndexRole])[]): Map<string, IndexRole> {
+  return new Map(entries.map(([id, role]) => [productStateId(productKey(id)), role]));
+}
+
+function claimsFor(entries: readonly (readonly [string, ClaimState])[]): Map<string, ClaimState> {
+  return new Map(entries.map(([id, claim]) => [productStateId(productKey(id)), claim]));
+}
 
 export const SNAPSHOT_ID = `sha256:${"b".repeat(64)}`;
 export const QUERY_ID = "failed-deployment";
@@ -39,7 +49,7 @@ export const OBJECT_OBSERVED_AT: Readonly<Record<string, string>> = Object.freez
   c: LAST_WEEK_INSTANT
 });
 
-export const DEPLOYMENT_ROLES: ReadonlyMap<string, IndexRole> = new Map([
+export const DEPLOYMENT_ROLES: ReadonlyMap<string, IndexRole> = rolesFor([
   ["r", "requested"],
   ["l", "associated"],
   ["c", "associated"],
@@ -48,7 +58,7 @@ export const DEPLOYMENT_ROLES: ReadonlyMap<string, IndexRole> = new Map([
   ["u", "associated"]
 ]);
 
-export const DEPLOYMENT_CLAIMS: ReadonlyMap<string, ClaimState> = new Map([
+export const DEPLOYMENT_CLAIMS: ReadonlyMap<string, ClaimState> = claimsFor([
   ["h", "unknown"],
   ["c", "unknown"]
 ]);
@@ -170,12 +180,12 @@ export function longChainWorld(hops: number, fanOut: number): FiniteWorld {
   for (let index = 0; index < hops; index += 1) {
     edges.push(edge(`n${index}`, `n${index + 1}`, "chain", 900, true, 10));
   }
-  const roles = new Map<string, IndexRole>([["n0", "requested"], ["s", "routing_only"]]);
+  const roles = rolesFor([["n0", "requested"], ["s", "routing_only"]]);
   for (let index = 0; index < fanOut; index += 1) {
     edges.push(edge("s", `h${index}`, "service_history", 550, true, 450));
-    roles.set(`h${index}`, "associated");
+    roles.set(productStateId(productKey(`h${index}`)), "associated");
   }
-  roles.set(`n${hops}`, "associated");
+  roles.set(productStateId(productKey(`n${hops}`)), "associated");
   return { id: "long-chain", seeds, edges, facets: [], roles, claims: new Map() };
 }
 
@@ -189,15 +199,42 @@ export function cyclicWorld(): FiniteWorld {
       edge("a", "c", "branch", 800, true, 200)
     ],
     facets: [],
-    roles: new Map([["a", "requested"], ["b", "associated"], ["c", "associated"]]),
+    roles: rolesFor([["a", "requested"], ["b", "associated"], ["c", "associated"]]),
     claims: new Map()
   };
 }
 
 export function samePathFacetVectors(): readonly FacetVector[] {
+  const named = [
+    { obligation_id: "ob-x", domain_id: ASSOCIATION_DOMAIN_ID },
+    { obligation_id: "ob-y", domain_id: ASSOCIATION_DOMAIN_ID }
+  ] as const;
   return [
-    { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, path_id: "p1", coordinates: [900, 200] },
-    { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, path_id: "p2", coordinates: [200, 900] }
+    { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, path_id: "p1", obligations: named, coordinates: [900, 200] },
+    { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, path_id: "p2", obligations: named, coordinates: [200, 900] }
+  ];
+}
+
+export function samePathFacetObligations(): QueryView["facet_obligations"] {
+  return [
+    {
+      obligation_id: "ob-x",
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      predicate: "threshold",
+      requiredness: "required",
+      threshold_milligrades: 800,
+      witness_compatibility: "same_path",
+      version: "1"
+    },
+    {
+      obligation_id: "ob-y",
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      predicate: "threshold",
+      requiredness: "required",
+      threshold_milligrades: 800,
+      witness_compatibility: "same_path",
+      version: "1"
+    }
   ];
 }
 
@@ -211,7 +248,7 @@ export function hypothesisWorld(): FiniteWorld {
     ],
     edges: [],
     facets: [],
-    roles: new Map([["c", "associated"]]),
+    roles: rolesFor([["c", "associated"]]),
     claims: new Map()
   };
 }

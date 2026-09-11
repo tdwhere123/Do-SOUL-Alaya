@@ -27,6 +27,7 @@ import {
   ObserverStatusSchema,
   ProductStateKeySchema,
   QueryInterpretationSchema,
+  QueryFacetObligationSchema,
   QueryProgramSchema,
   QueryViewSchema,
   RepresentationDecisionSchema,
@@ -74,6 +75,7 @@ describe("conditional-field schemas", () => {
     });
     expect(view.facet_mode).toBe("same_path");
     expect(view.threshold_milligrades).toBe(0);
+    expect(view.facet_obligations).toBeUndefined();
     expect(view.enumeration_policy).toBe("canonical");
     expect(view.result_kind_view).toBe("mixed");
     expect(view.protocol_version).toBeUndefined();
@@ -98,6 +100,26 @@ describe("conditional-field schemas", () => {
       facet_mode: "same_path",
       threshold_milligrades: 0
     });
+    const obligation = QueryFacetObligationSchema.parse({
+      obligation_id: "ob-a",
+      domain_id: ASSOCIATION_DOMAIN_ID,
+      requiredness: "required",
+      threshold_milligrades: 800,
+      version: "1"
+    });
+    expect(obligation.predicate).toBe("threshold");
+    expect(obligation.witness_compatibility).toBe("same_path");
+    const withObligations = QueryViewSchema.parse({
+      schema_version: 1,
+      requested_roles: ["associated"],
+      facet_obligations: [obligation]
+    });
+    expect(withObligations.facet_obligations).toHaveLength(1);
+    expect(() => QueryViewSchema.parse({
+      schema_version: 1,
+      requested_roles: ["associated"],
+      facet_obligations: [obligation, { ...obligation, domain_id: ASSOCIATION_DOMAIN_ID }]
+    })).toThrow();
   });
 
   it("requires closure product_state_sufficient and repeat count 1..8", () => {

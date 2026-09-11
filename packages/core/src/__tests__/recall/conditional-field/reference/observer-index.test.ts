@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   type CoverageRegion,
-  type IndexRole,
   type ObserverCursor
 } from "@do-soul/alaya-protocol";
 import {
@@ -20,6 +19,8 @@ import {
   SNAPSHOT_ID,
   defaultBudget,
   defaultView,
+  indexClaimMap,
+  indexRoleMap,
   deploymentSeeds,
   deploymentTransitions,
   productKey
@@ -158,13 +159,13 @@ describe("conditional-field observer and index contracts", () => {
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
       budget: defaultBudget(),
-      roles: new Map<string, IndexRole>([
+      roles: indexRoleMap([
         ["r", "requested"],
         ["l", "associated"],
         ["c", "associated"],
         ["h", "associated"]
       ]),
-      claims: new Map([["h", "unknown"]])
+      claims: indexClaimMap([["h", "unknown"]])
     });
     expect(index.completeness.logical_index).toBe("complete");
     expect(index.entries.find((entry) => (entry.object_id ?? "") === "h")?.claim).toBe("unknown");
@@ -187,7 +188,7 @@ describe("conditional-field observer and index contracts", () => {
       result_version: RESULT_VERSION,
       budget: defaultBudget({ page_budget: 2 }),
       expires_at: FAR_FUTURE_EXPIRY,
-      roles: new Map<string, IndexRole>([
+      roles: indexRoleMap([
         ["r", "requested"],
         ["l", "associated"],
         ["c", "associated"],
@@ -255,7 +256,7 @@ describe("conditional-field observer and index contracts", () => {
       result_version: RESULT_VERSION,
       budget: defaultBudget({ page_budget: 1 }),
       expires_at: FAR_FUTURE_EXPIRY,
-      roles: new Map([
+      roles: indexRoleMap([
         ["r", "requested"],
         ["l", "associated"],
         ["c", "associated"]
@@ -303,7 +304,7 @@ describe("conditional-field observer and index contracts", () => {
       budget: defaultBudget({ page_budget: 2 }),
       expires_at: "2026-01-01T00:00:00.000Z",
       as_of: "2026-09-06T00:00:00.000Z",
-      roles: new Map([["r", "requested"], ["c", "associated"]])
+      roles: indexRoleMap([["r", "requested"], ["c", "associated"]])
     });
     expect(expired.completeness.observed_coverage).toBe("invalidated");
     expect(expired.completeness.logical_index).not.toBe("complete");
@@ -324,7 +325,7 @@ describe("conditional-field observer and index contracts", () => {
         expires_at: FAR_FUTURE_EXPIRY,
         cursor: "offset-2"
       },
-      roles: new Map([["r", "requested"], ["c", "associated"]])
+      roles: indexRoleMap([["r", "requested"], ["c", "associated"]])
     });
     expect(revised.completeness.observed_coverage).toBe("invalidated");
     expect(revised.completeness.logical_index).not.toBe("complete");

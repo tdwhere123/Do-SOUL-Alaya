@@ -13,6 +13,7 @@ import {
   Sha256DigestSchema,
   type FacetMode
 } from "./common.js";
+import { QueryFacetObligationListSchema } from "./facet-obligation.js";
 import { RecallTargetKindSchema } from "./product-identity.js";
 import { inspectQueryProposalStructure } from "./proposal-structure.js";
 
@@ -94,6 +95,7 @@ export const QueryViewSchema = z
       .readonly(),
     include_routing_only: z.boolean().default(false),
     claim_demands: z.array(ClaimDemandSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    facet_obligations: QueryFacetObligationListSchema.optional(),
     facet_mode: FacetModeSchema.default("same_path"),
     threshold_milligrades: MilligradeSchema.default(0),
     enumeration_policy: EnumerationPolicySchema.default("canonical"),

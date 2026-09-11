@@ -410,6 +410,7 @@ function startObservedField(
     const restored: FieldEngineState = {
       ...resumed,
       interpretation,
+      authorized_scopes: input.authorized_scopes,
       budget: input.budget,
       remaining_exploration: exploration,
       remaining_reserve: input.budget.finalization_reserve,
@@ -423,7 +424,12 @@ function startObservedField(
     const { binding, ...pending } = restored;
     return bindEngineState({ ...pending, proven_binding: binding });
   }
-  return createConditionalField({ interpretation, budget: input.budget, residuals });
+  return createConditionalField({
+    interpretation,
+    budget: input.budget,
+    residuals,
+    authorized_scopes: input.authorized_scopes
+  });
 }
 
 export function cancelledField(state: FieldEngineState): FieldEngineState {
@@ -453,7 +459,8 @@ export function emptyField(
   return createConditionalField({
     interpretation,
     budget: input.budget,
-    residuals: openResiduals(false, false, sourceDomainCoverageOf(interpretation, input))
+    residuals: openResiduals(false, false, sourceDomainCoverageOf(interpretation, input)),
+    authorized_scopes: input.authorized_scopes
   });
 }
 

@@ -32,6 +32,7 @@ import {
   LAST_WEEK_INSTANT,
   longChainWorld,
   OBJECT_OBSERVED_AT,
+  samePathFacetObligations,
   samePathFacetVectors,
   YESTERDAY_INSTANT,
   yesterdayAnchorGuard
@@ -166,7 +167,7 @@ describe("conditional-field independent field oracle", () => {
     );
     const samePath = projectOracleIndex({
       field,
-      view: { ...defaultView(), facet_mode: "same_path", threshold_milligrades: 800 },
+      view: { ...defaultView(), facet_mode: "same_path", facet_obligations: samePathFacetObligations() },
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
@@ -177,7 +178,7 @@ describe("conditional-field independent field oracle", () => {
     expect(samePath.entries).toEqual([]);
     const independent = projectOracleIndex({
       field,
-      view: { ...defaultView(), facet_mode: "independent", threshold_milligrades: 800 },
+      view: { ...defaultView(), facet_mode: "independent", facet_obligations: samePathFacetObligations() },
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,

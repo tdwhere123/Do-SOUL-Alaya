@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PersistentStringMap, solveMaxMinField } from "@do-soul/alaya-graph-algorithms";
 import {
   productSubjectId,
+  ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_BOTTOM,
   type QueryInterpretation,
@@ -11,7 +12,7 @@ import {
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { type ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
-import { SNAPSHOT_ID, defaultBudget, defaultView } from "../reference/deployment.fixture.js";
+import { SNAPSHOT_ID, defaultBudget, defaultView, facetObligation } from "../reference/deployment.fixture.js";
 import {
   adjacencyKindsFor,
   alternativeMax,
@@ -267,11 +268,33 @@ describe("automaton, compatible join, and composed path identity", () => {
       snapshot: {
         ...state.binding.snapshot,
         facets: [
-          { schema_version: 1, path_id: composedFacetPathId(config.state, "weak"), coordinates: [900, 200] },
-          { schema_version: 1, path_id: composedFacetPathId(config.state, "strong"), coordinates: [200, 900] }
+          {
+            schema_version: 1,
+            path_id: composedFacetPathId(config.state, "weak"),
+            obligations: [
+              { obligation_id: "ob-x", domain_id: ASSOCIATION_DOMAIN_ID },
+              { obligation_id: "ob-y", domain_id: ASSOCIATION_DOMAIN_ID }
+            ],
+            coordinates: [900, 200]
+          },
+          {
+            schema_version: 1,
+            path_id: composedFacetPathId(config.state, "strong"),
+            obligations: [
+              { obligation_id: "ob-x", domain_id: ASSOCIATION_DOMAIN_ID },
+              { obligation_id: "ob-y", domain_id: ASSOCIATION_DOMAIN_ID }
+            ],
+            coordinates: [200, 900]
+          }
         ]
       },
-      view: { ...state.interpretation.view, threshold_milligrades: 800 },
+      view: {
+        ...state.interpretation.view,
+        facet_obligations: [
+          facetObligation({ obligation_id: "ob-x" }),
+          facetObligation({ obligation_id: "ob-y" })
+        ]
+      },
       query_id: "probe",
       snapshot_id: state.snapshot_id,
       result_version: "v1",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   productSubjectId,
+  ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   QueryInterpretationSchema,
   QueryProgramSchema,
@@ -40,6 +41,9 @@ import {
   YESTERDAY_START,
   defaultBudget,
   defaultView,
+  facetObligation,
+  indexClaimMap,
+  indexRoleMap,
   deploymentProgram,
   deploymentSeeds,
   deploymentTransitions,
@@ -97,14 +101,14 @@ describe("conditional-field reference binder", () => {
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
       budget: defaultBudget(),
-      roles: new Map([
+      roles: indexRoleMap([
         ["r", "requested"],
         ["l", "associated"],
         ["c", "associated"],
         ["s", "routing_only"],
         ["h", "associated"]
       ]),
-      claims: new Map([["h", "unknown"], ["c", "unknown"]])
+      claims: indexClaimMap([["h", "unknown"], ["c", "unknown"]])
     });
     const history = index.entries.find((entry) => entry.object_id === "h");
     expect(history?.association_milligrades).toBe(1000);
@@ -138,7 +142,7 @@ describe("conditional-field reference binder", () => {
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
       budget: defaultBudget(),
-      roles: new Map([["c", "associated"]])
+      roles: indexRoleMap([["c", "associated"]])
     });
     const rows = index.entries.filter((entry) => entry.object_id === "c");
     expect(rows).toHaveLength(3);
@@ -214,12 +218,20 @@ describe("conditional-field reference binder", () => {
   });
 
   it("rejects coordinate-wise max under same_path", () => {
+    const named = [
+      { obligation_id: "ob-x", domain_id: ASSOCIATION_DOMAIN_ID },
+      { obligation_id: "ob-y", domain_id: ASSOCIATION_DOMAIN_ID }
+    ] as const;
     const vectors: FacetVector[] = [
-      { schema_version: 1, path_id: "p1", coordinates: [900, 200] },
-      { schema_version: 1, path_id: "p2", coordinates: [200, 900] }
+      { schema_version: 1, path_id: "p1", obligations: named, coordinates: [900, 200] },
+      { schema_version: 1, path_id: "p2", obligations: named, coordinates: [200, 900] }
     ];
     expect(evaluateFacetPredicate("same_path", vectors, 800)).toBe(false);
     expect(evaluateFacetPredicate("independent", vectors, 800)).toBe(true);
+    const obligations = [
+      facetObligation({ obligation_id: "ob-x" }),
+      facetObligation({ obligation_id: "ob-y" })
+    ];
     const bound = bindMaxMinField({
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
@@ -231,22 +243,22 @@ describe("conditional-field reference binder", () => {
     if (bound.kind !== "bound") throw new Error("expected bound field");
     const samePath = projectAcceptingIndex({
       snapshot: bound.snapshot,
-      view: { ...defaultView(), facet_mode: "same_path", threshold_milligrades: 800 },
+      view: { ...defaultView(), facet_mode: "same_path", facet_obligations: obligations },
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
       budget: defaultBudget(),
-      roles: new Map([["c", "associated"]])
+      roles: indexRoleMap([["c", "associated"]])
     });
     expect(samePath.entries).toEqual([]);
     const independent = projectAcceptingIndex({
       snapshot: bound.snapshot,
-      view: { ...defaultView(), facet_mode: "independent", threshold_milligrades: 800 },
+      view: { ...defaultView(), facet_mode: "independent", facet_obligations: obligations },
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
       budget: defaultBudget(),
-      roles: new Map([["c", "associated"]])
+      roles: indexRoleMap([["c", "associated"]])
     });
     expect(independent.entries).toHaveLength(1);
     const related = bindMaxMinField({
@@ -260,12 +272,12 @@ describe("conditional-field reference binder", () => {
     if (related.kind !== "bound") throw new Error("expected bound field");
     const overridden = projectAcceptingIndex({
       snapshot: related.snapshot,
-      view: { ...defaultView(), facet_mode: "same_path", threshold_milligrades: 800 },
+      view: { ...defaultView(), facet_mode: "same_path", facet_obligations: obligations },
       query_id: QUERY_ID,
       snapshot_id: SNAPSHOT_ID,
       result_version: RESULT_VERSION,
       budget: defaultBudget(),
-      roles: new Map([["r", "requested"], ["c", "associated"]]),
+      roles: indexRoleMap([["r", "requested"], ["c", "associated"]]),
       relation_facet_modes: new Map([["associated_config", "independent"]])
     });
     expect(overridden.entries.some((entry) => entry.object_id === "c")).toBe(true);
@@ -342,7 +354,7 @@ describe("conditional-field reference binder", () => {
       result_version: RESULT_VERSION,
       budget: defaultBudget({ page_budget: 2, min_envelope: 10 }),
       expires_at: FAR_FUTURE_EXPIRY,
-      roles: new Map([
+      roles: indexRoleMap([
         ["r", "requested"],
         ["l", "associated"],
         ["c", "associated"],
@@ -361,7 +373,7 @@ describe("conditional-field reference binder", () => {
         budget: defaultBudget({ page_budget: 2, min_envelope: 10 }),
         expires_at: FAR_FUTURE_EXPIRY,
         page_offset: first.entries.length,
-        roles: new Map([
+        roles: indexRoleMap([
           ["r", "requested"],
           ["l", "associated"],
           ["c", "associated"],
@@ -504,7 +516,7 @@ function projectBound(bound: ReturnType<typeof bindDeployment>) {
     snapshot_id: SNAPSHOT_ID,
     result_version: RESULT_VERSION,
     budget: defaultBudget(),
-    roles: new Map([
+    roles: indexRoleMap([
       ["r", "requested"],
       ["l", "associated"],
       ["c", "associated"],

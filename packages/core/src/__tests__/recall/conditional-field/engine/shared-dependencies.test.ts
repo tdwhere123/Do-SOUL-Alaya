@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   memoryProductStateKey,
   productSubjectId,
@@ -33,7 +34,7 @@ import {
 import { recoverExplanationForest } from "../../../../recall/conditional-field/index/explanation.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
-import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
+import { defaultBudget, defaultView, facetObligation, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 import {
   enumerateSimplePaths,
   type OracleEdge,
@@ -215,7 +216,14 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
           ...samePathPair(right)
         ]
       },
-      view: { ...defaultView(), facet_mode: "independent", threshold_milligrades: 800 },
+      view: {
+        ...defaultView(),
+        facet_mode: "independent",
+        facet_obligations: [
+          facetObligation({ obligation_id: "ob-x" }),
+          facetObligation({ obligation_id: "ob-y" })
+        ]
+      },
       query_id: "cp06",
       snapshot_id: SNAPSHOT_ID,
       result_version: "v1",
@@ -488,9 +496,13 @@ function fieldValueOf(state: ProductStateKey, milligrades: number) {
 }
 
 function samePathPair(state: ProductStateKey): FacetVector[] {
+  const named = [
+    { obligation_id: "ob-x", domain_id: ASSOCIATION_DOMAIN_ID },
+    { obligation_id: "ob-y", domain_id: ASSOCIATION_DOMAIN_ID }
+  ] as const;
   return [
-    { schema_version: 1, path_id: composedFacetPathId(state, "left"), coordinates: [900, 200] },
-    { schema_version: 1, path_id: composedFacetPathId(state, "right"), coordinates: [200, 900] }
+    { schema_version: 1, path_id: composedFacetPathId(state, "left"), obligations: named, coordinates: [900, 200] },
+    { schema_version: 1, path_id: composedFacetPathId(state, "right"), obligations: named, coordinates: [200, 900] }
   ];
 }
 
