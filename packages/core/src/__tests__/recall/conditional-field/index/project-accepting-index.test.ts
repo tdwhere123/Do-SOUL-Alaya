@@ -605,9 +605,12 @@ function deploymentInput(
 
 function baseInput(overrides: Partial<AcceptingProjectionInput> = {}): AcceptingProjectionInput {
   const values = overrides.snapshot?.values ?? [];
-  const roles = remapSubjectKeyedMap(overrides.roles, values);
-  const claims = remapSubjectKeyedMap(overrides.claims, values);
-  const propositions = remapSubjectKeyedMap(overrides.claim_propositions, values);
+  const roles = remapSubjectKeyedMap(overrides.roles instanceof Map ? overrides.roles : undefined, values);
+  const claims = remapSubjectKeyedMap(overrides.claims instanceof Map ? overrides.claims : undefined, values);
+  const propositions = remapSubjectKeyedMap(
+    overrides.claim_propositions instanceof Map ? overrides.claim_propositions : undefined,
+    values
+  );
   const roots = (overrides.derivations ?? []).filter((node) => !(overrides.derivations ?? []).some((parent) => parent.children.includes(node.derivation_id)));
   return {
     snapshot: emptySnapshot(),

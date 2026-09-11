@@ -161,9 +161,13 @@ describe("conditional-field product identity", () => {
     });
     const withSpan = {
       ...spanned,
-      target: {
-        ...spanned.target,
-        kind: "source_evidence" as const,
+      target: sourceRecallTarget({
+        workspace_id: "ws",
+        root_kind: "source_record",
+        root_id: "rec-1",
+        source_version: "v1",
+        content_digest: DIGEST,
+        evidence_object_id: null,
         span: SourceDeliveredSpanSchema.parse({
           content_start: 0,
           content_end: 12,
@@ -171,7 +175,7 @@ describe("conditional-field product identity", () => {
           content_complete: false,
           original_complete: false
         })
-      }
+      })
     };
     const reconstructed = productStateKeyFromIndexEntry(withSpan);
     expect(reconstructed.target.kind).toBe("source_evidence");

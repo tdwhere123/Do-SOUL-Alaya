@@ -5,6 +5,7 @@ import {
   memoryProductStateKey,
   productStateKeyFromIndexEntry,
   sharedProductIdentity,
+  sourceRecallTarget,
   type FieldSnapshot,
   type FieldValue,
   type IndexEntry,
@@ -60,17 +61,21 @@ describe("product component diffs", () => {
     });
     const payloadNext = {
       ...payload,
-      target: {
-        ...payload.target,
-        kind: "source_evidence" as const,
+      target: sourceRecallTarget({
+        workspace_id: "ws",
+        root_kind: "source_record",
+        root_id: "src",
+        source_version: "rev",
+        content_digest: DIGEST,
+        evidence_object_id: null,
         span: {
           content_start: 8,
           content_end: 16,
-          retained_extent: "excerpt" as const,
+          retained_extent: "excerpt",
           content_complete: false,
           original_complete: false
         }
-      }
+      })
     };
     const claimAndProof = entry("a", { claim: "supported", association_milligrades: 950 });
 

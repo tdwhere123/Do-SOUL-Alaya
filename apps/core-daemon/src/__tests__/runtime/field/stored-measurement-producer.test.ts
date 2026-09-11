@@ -368,7 +368,7 @@ describe("worker stored measurement producer", () => {
         producer_id: "alaya.query.proposal.core.v1", stored_cosine_admission: admission([MODEL_B]),
         program: { schema_version: 1, kind: "relation", relation_kind: "observed_log", source_variable: "s", target_variable: "t",
           facet_mode: "same_path", threshold_milligrades: 0,
-          guard: { schema_version: 1, kind: "query_predicate", verdict: "unresolved", variable: "s",
+          guard: { schema_version: 1, kind: "query_predicate", variable: "s",
             predicate_name: "source.literal.nfc.v1", entity_id: "not-in-any-source" } } } });
     const observed = observeField(interpretation, { workspace_id: WORKSPACE, query_text: QUERY_TEXT,
       budget: defaultBudget(), as_of: NOW, readers: withoutLexicalHits(readers),

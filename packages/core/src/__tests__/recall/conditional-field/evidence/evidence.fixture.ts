@@ -44,7 +44,7 @@ export function observation(
   const context = identityContext();
   return {
     source_id: "src",
-    source_revision: context.source_revision,
+    source_revision: context.source_revision ?? SOURCE_REVISION,
     query_id: context.query_id,
     snapshot_id: context.snapshot_id,
     hypothesis_id: context.hypothesis_id,

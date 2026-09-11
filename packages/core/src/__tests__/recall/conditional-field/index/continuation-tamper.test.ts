@@ -111,7 +111,8 @@ function authoritativeMutations(issued: Continuation): Continuation[] {
     { ...issued, claim_demands: [{
       variable: "h",
       proposition_kind: "common_cause",
-      argument_variables: ["r", "h"]
+      argument_variables: ["r", "h"],
+      required_claim: "any"
     }] },
     { ...issued, protocol_version: 2 },
     { ...issued, supported_result_kinds: ["source_evidence"] },
