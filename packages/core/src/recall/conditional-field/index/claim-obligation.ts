@@ -4,19 +4,20 @@ import {
   type FieldValue,
   type QueryView
 } from "@do-soul/alaya-protocol";
-import { parseBindingContext } from "../engine/binding-environment.js";
+import { parseBindingContext, type BindingContextStore } from "../engine/binding-environment.js";
 
 export function claimObligationAccepts(
   value: FieldValue,
   view: QueryView,
-  claim: ClaimState
+  claim: ClaimState,
+  bindingContexts?: BindingContextStore
 ): boolean {
-  const env = parseBindingContext(value.state.binding_context);
+  const env = parseBindingContext(value.state.binding_context, bindingContexts);
   const subject = productSubjectId(value.state);
   for (const demand of view.claim_demands ?? []) {
     if (env.get(demand.variable) !== subject) continue;
     if (demand.required_claim === "any") continue;
-    if (demand.required_claim === "supported" && claim !== "supported") return false;
+    if (claim !== demand.required_claim) return false;
   }
   return true;
 }

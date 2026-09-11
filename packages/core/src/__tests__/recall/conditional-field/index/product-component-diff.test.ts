@@ -211,22 +211,6 @@ describe("product component diffs", () => {
     expect(second.page_purpose).toBe("membership");
   });
 
-  it("sets page_purpose from payload expansion rather than empty membership inference", () => {
-    const a = fieldValue("a", 600);
-    const first = projectAcceptingIndex(inputOf({
-      snapshot: snapshotOf([a]),
-      budget: budget({ page_budget: 1 }),
-      expires_at: EXPIRES_AT
-    }));
-    const expanded = continueAcceptingIndex(first, inputOf({
-      snapshot: snapshotOf([a]),
-      budget: budget({ page_budget: 1 }),
-      expires_at: EXPIRES_AT,
-      payload_expansion: true
-    }));
-    expect(expanded.entries).toEqual([]);
-    expect(expanded.page_purpose).toBe("payload");
-  });
 });
 
 function kinds(previous: IndexEntry, current: IndexEntry): string[] {

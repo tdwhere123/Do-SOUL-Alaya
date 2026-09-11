@@ -1,4 +1,4 @@
-import { RelationValiditySchema, type RelationValidity } from "@do-soul/alaya-protocol";
+import { compareUtcInstants, RelationValiditySchema, type RelationValidity } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
 
 export interface RecallAssertionObservation {
@@ -38,8 +38,16 @@ WHERE a.workspace_id = ? AND lower(json_extract(a.anchors_json, '$.source_anchor
 ORDER BY a.assertion_id, e.evidence_id
 LIMIT ?`;
 
+const UTC_COMPARISON_CONNECTIONS = new WeakSet<StorageDatabase["connection"]>();
+
 export class SqliteRelationRecallReader {
-  public constructor(private readonly db: StorageDatabase) {}
+  public constructor(private readonly db: StorageDatabase) {
+    if (!UTC_COMPARISON_CONNECTIONS.has(db.connection)) {
+      db.connection.function("alaya_utc_compare", { deterministic: true }, (left: unknown, right: unknown) =>
+        typeof left === "string" && typeof right === "string" ? compareUtcInstants(left, right) ?? null : null);
+      UTC_COMPARISON_CONNECTIONS.add(db.connection);
+    }
+  }
 
   public prepareIndex(): void {
     this.db.connection.exec(RELATION_RECALL_INDEX_SQL);
@@ -81,13 +89,13 @@ LEFT JOIN event_log resolution_event ON resolution_event.event_id = (
   SELECT event_id FROM event_log
   WHERE workspace_id = a.workspace_id AND entity_id = a.assertion_id
     AND event_type = 'relation.assertion_resolved'
-    AND json_extract(payload_json, '$.resolved_at') <= @asOf
+    AND alaya_utc_compare(json_extract(payload_json, '$.resolved_at'), @asOf) <= 0
   ORDER BY revision DESC LIMIT 1
 )
 LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id
-  AND r.workspace_id = a.workspace_id AND r.resolved_at <= @asOf`)
+  AND r.workspace_id = a.workspace_id AND alaya_utc_compare(r.resolved_at, @asOf) <= 0`)
         .replace("r.resolved_at, r.resolution_kind", "COALESCE(json_extract(resolution_event.payload_json, '$.resolved_at'), r.resolved_at) AS resolved_at, COALESCE(json_extract(resolution_event.payload_json, '$.resolution_kind'), r.resolution_kind) AS resolution_kind")
-        .replace("AND a.relation_kind = ?", "AND a.relation_kind = ? AND a.admitted_at <= @asOf");
+        .replace("AND a.relation_kind = ?", "AND a.relation_kind = ? AND alaya_utc_compare(a.admitted_at, @asOf) <= 0");
     }
     const tail = [...cursor.params, fetchLimit];
     const parameters = subject === null ? [workspaceId, predicate, ...tail] : [workspaceId, subject.toLowerCase(), predicate, ...tail];

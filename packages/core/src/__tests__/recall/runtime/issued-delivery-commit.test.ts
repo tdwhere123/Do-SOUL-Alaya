@@ -51,11 +51,10 @@ describe("issued delivery commit", () => {
     }
     const first = encodeAndIssue(recall(slice, null));
     const second = encodeAndIssue(recall(slice, null));
-    expect(first.issued_delivery_id).toBeUndefined();
-    expect(second.issued_delivery_id).toBeUndefined();
+    expect(first.issued_delivery_id).toBeDefined();
+    expect(second.issued_delivery_id).toBeDefined();
+    expect(first.issued_delivery_id).not.toBe(second.issued_delivery_id);
     expect(second.index.page_purpose).not.toBe("retry");
-    expect(pendingIssuedDeliveryOf(first.index)).toBeUndefined();
-    expect(pendingIssuedDeliveryOf(second.index)).toBeUndefined();
     expect(replayIssuedDelivery("root")).toBeUndefined();
     expect(first.execution_receipt.actual?.phases.observe.state_creates).toBeGreaterThan(0);
     expect(second.execution_receipt.actual?.phases.observe.state_creates).toBeGreaterThan(0);
@@ -145,6 +144,7 @@ describe("issued delivery commit", () => {
     }
     const first = recall(slice, null, "defer");
     expect(first.index.continuation).not.toBeNull();
+    encodeAndIssue(first);
     const second = recall(slice, first.index.continuation, "defer");
     const digest = first.index.continuation?.continuation_id;
     expect(digest).toBeDefined();
@@ -185,16 +185,9 @@ function recall(
 function encodeAndIssue(executed: ReturnType<typeof runConditionalFieldRecallWithReceipt>) {
   const previews = captureIndexPreviews(executed.index, {}, WS);
   const metadata = captureIndexSourceMetadata(executed.index);
-  const pending = pendingIssuedDeliveryOf(executed.index);
   const encoded = encodeRecallResult(executed.index, previews, undefined, metadata);
-  const issued_delivery_id = pending === undefined
-    ? issuedDeliveryIdOf(executed.index)
-    : commitIssuedDelivery({
-      ...pending,
-      index: encoded.index,
-      previews,
-      metadata
-    });
+  const issued_delivery_id = executed.issue?.({ index: encoded.index, previews, metadata })
+    ?? issuedDeliveryIdOf(executed.index);
   return { ...executed, index: encoded.index, issued_delivery_id };
 }
 

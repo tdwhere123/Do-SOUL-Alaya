@@ -4,9 +4,10 @@ import type { ObservationMeasurement } from "../conditional-field/observers/meas
 import type { FieldObservationEffect } from "../conditional-field/engine/field-engine.js";
 import { capContractId } from "../conditional-field/cap-contract.js";
 import { seedActivationsForObservation } from "../conditional-field/engine/path-composition.js";
+import type { BindingContextStore } from "../conditional-field/engine/binding-environment.js";
 
 export function measurementEffectsFor(result: ObserverActionResult, interpretation?: QueryInterpretation,
-  asOf = "", prior: Iterable<ObservationMeasurement> = []): readonly FieldObservationEffect[] {
+  asOf = "", prior: Iterable<ObservationMeasurement> = [], bindingContexts?: BindingContextStore): readonly FieldObservationEffect[] {
   const rows = result.measurements ?? [];
   if (rows.length === 0) {
     if (result.page.outcome.status === "interrupted") return []; // Budget interrupt is not a missing profile.
@@ -35,7 +36,7 @@ export function measurementEffectsFor(result: ObserverActionResult, interpretati
     const grade = admission.join === "all" ? Math.min(...grades) : Math.max(...grades);
     const contractId = projected[0]!.contract_id;
     for (const seed of seedActivationsForObservation({ ...observation, target: row.raw.referent,
-      association_milligrades: grade }, interpretation, asOf)) {
+      association_milligrades: grade }, interpretation, asOf, bindingContexts)) {
       effects.push({ observation_id: `${row.observation_id}:${seed.state.hypothesis_id}:${seed.state.program_state}`,
         seed: { ...seed, cap_contract_id: contractId }, admitted_seed: true });
     }

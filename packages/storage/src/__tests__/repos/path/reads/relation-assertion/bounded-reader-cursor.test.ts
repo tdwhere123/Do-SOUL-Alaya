@@ -12,6 +12,43 @@ afterEach(() => {
 });
 
 describe("SqliteRelationRecallReader cursor", () => {
+  it("admits assertions by precise UTC instant instead of timestamp text", () => {
+    const database = openDatabase(), [id] = plantAssertions(database, 1);
+    const reader = new SqliteRelationRecallReader(database);
+    database.connection.prepare("UPDATE relation_assertions SET admitted_at = ? WHERE assertion_id = ?")
+      .run("2026-09-09T00:00:00.0001Z", id);
+    const read = (stamp: string) => reader.read("workspace-1", "vega", "owns", 1, 1, null, stamp);
+    expect(read("2026-09-09T00:00Z").observations).toEqual([]);
+    expect(read("2026-09-09T00:00:00.000Z").observations).toEqual([]);
+    expect(read("2026-09-09T00:00:00.000100Z").observations.map((row) => row.assertionId)).toEqual([id]);
+    expect(read("2026-09-09T00:00:00.000099999Z").observations).toEqual([]);
+  });
+
+  it("reconstructs resolution history and current fallback at submillisecond boundaries", () => {
+    const database = openDatabase(), [id] = plantAssertions(database, 1);
+    const reader = new SqliteRelationRecallReader(database);
+    const append = database.connection.prepare(`INSERT INTO event_log
+      (event_id,event_type,entity_type,entity_id,workspace_id,run_id,caused_by,payload_json,created_at,revision)
+      VALUES (?, 'relation.assertion_resolved', 'relation_assertion', ?, 'workspace-1', NULL, 'test', ?, ?, ?)`);
+    for (const [revision, kind, stamp] of [[1, "contradicted", "2026-09-09T00:00:00.0001Z"],
+      [2, "retracted", "2026-09-09T00:00:00.0002Z"]] as const) {
+      append.run(`resolution-${revision}`, id, JSON.stringify({ assertion_id: id, resolution_kind: kind, resolved_at: stamp }), stamp, revision);
+    }
+    const read = (stamp: string) => reader.read("workspace-1", "vega", "owns", 1, 1, null, stamp).observations[0];
+    expect(read("2026-09-09T00:00Z")?.resolutionKind).toBeNull();
+    expect(read("2026-09-09T00:00:00.000100Z")?.resolutionKind).toBe("contradicted");
+    expect(read("2026-09-09T00:00:00.000150Z")?.resolutionKind).toBe("contradicted");
+    expect(read("2026-09-09T00:00:00.000200Z")?.resolutionKind).toBe("retracted");
+    database.connection.prepare(`INSERT INTO relation_assertion_resolution_current
+      (assertion_id,workspace_id,resolution_id,resolution_event_id,resolution_kind,resolved_at,reason)
+      VALUES (?, 'workspace-1', 'current-resolution', 'resolution-2', 'retracted', ?, 'test')`)
+      .run(id, "2026-09-09T00:00:00.0002Z");
+    database.connection.prepare("DELETE FROM event_log WHERE event_type = 'relation.assertion_resolved'").run();
+    expect(read("2026-09-09T00:00Z")?.resolutionKind).toBeNull();
+    expect(read("2026-09-09T00:00:00.000199Z")?.resolutionKind).toBeNull();
+    expect(read("2026-09-09T00:00:00.000200Z")?.resolutionKind).toBe("retracted");
+  });
+
   it("uses the prepared subject index without requiring it in SQL", () => {
     const database = openDatabase();
     plantAssertions(database, 3);

@@ -22,6 +22,7 @@ function advancePathEffects(state: FieldEngineState): FieldEngineState {
     state.remaining_memory_bytes + pending.retained_bytes);
   const retained = { ...pending, cursor, retained_bytes: advanced.retained_bytes, completed_work: advanced.completed_work };
   const prepared = { ...state, pending_path_effects: retained,
+    binding_contexts: cursor.bindingContexts?.snapshot() ?? state.binding_contexts,
     remaining_exploration: state.remaining_exploration - advanced.work,
     remaining_memory_bytes: Math.max(0, state.remaining_memory_bytes - (advanced.retained_bytes - pending.retained_bytes)) };
   if (advanced.status === "memory_exhausted") return interrupted(prepared, true);
@@ -47,15 +48,18 @@ function advancePathEffects(state: FieldEngineState): FieldEngineState {
   const semanticDelta = finished && (applied.seen_identities.length > prior.liveStates.length || newFacets
     || applied.discoveries.length > (prior.discoveries?.length ?? 0) || missingRevision);
   const next = semanticDelta ? { input: { rows: pending.input.rows, options: { ...prior,
+    bindingContexts: applied.binding_contexts,
     liveStates: applied.seen_identities, liveStateOffset: newFacets || missingRevision ? 0 : prior.liveStates.length,
     facets: applied.facets, discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
     page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
   return { ...applied, resume_subjects: subjects,
+    binding_context_bytes: finished ? applied.binding_contexts?.bytes : applied.binding_context_bytes,
     ...(finished && !semanticDelta ? { path_effect_frontier: { identities: applied.seen_identities.length,
       facets: applied.facets, discoveries: applied.discoveries.length } } : {}),
     observation_gaps: guards || measurements ? { guards, measurements } : state.observation_gaps,
     pending_path_effects: finished ? next : { ...retained, offset: advanced.offset, page: { ...page, observations: [] } },
-    remaining_memory_bytes: applied.remaining_memory_bytes + (finished ? advanced.retained_bytes : 0),
+    remaining_memory_bytes: applied.remaining_memory_bytes + (finished ? advanced.retained_bytes
+      - ((applied.binding_contexts?.bytes ?? 0) - (prior.bindingContexts?.bytes ?? 0)) : 0),
     ...(finished && !semanticDelta ? {} : { last_observer_status: "interrupted" as const,
       closure: { ...applied.closure, observation: "interrupted" as const, requested_index: "open" as const } }) };
 }

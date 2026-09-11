@@ -22,6 +22,7 @@ import {
   type TypedObservation
 } from "@do-soul/alaya-protocol";
 import type { PendingPathEffects } from "./path-effect-cursor.js";
+import { BindingContextStore, BindingContextResourceError, parseBindingContext } from "./binding-environment.js";
 import { RetainedSequence, type RetainedRows } from "./retained-sequence.js";
 import type { ProductEvidenceCursor } from "../evidence/product-evidence.js";
 import {
@@ -102,6 +103,7 @@ export type ObserverWorkUnits = Readonly<{
 }>;
 
 export type ObserverConsumption = Readonly<{
+  readonly binding_contexts?: BindingContextStore;
   readonly page: ObserverPage;
   readonly effects?: readonly FieldObservationEffect[];
   readonly work?: ObserverWorkUnits;
@@ -126,6 +128,7 @@ export type RemainingWork = Readonly<{
 }>;
 
 export type CreateFieldInput = Readonly<{
+  readonly binding_contexts?: BindingContextStore;
   readonly interpretation: QueryInterpretation;
   readonly authorized_scopes?: readonly string[] | null;
   readonly budget: RequestBudget;
@@ -141,6 +144,8 @@ export type CreateFieldInput = Readonly<{
 }>;
 
 export type FieldEngineState = Readonly<{
+  readonly binding_contexts?: BindingContextStore;
+  readonly binding_context_bytes?: number;
   readonly query_id: string;
   readonly snapshot_id: string;
   readonly epoch: number;
@@ -238,6 +243,9 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
   const seeds = mergeSeeds(input.seeds ?? []);
   const transitions = mergeTransitions(input.transitions ?? []);
   const identities = collectIdentities(seeds, transitions);
+  const bindingContexts = input.binding_contexts?.fork() ?? new BindingContextStore(input.budget.memory_bytes);
+  if (bindingContexts.bytes > input.budget.memory_bytes) throw new BindingContextResourceError("binding context memory exhausted");
+  for (const identity of identities) parseBindingContext(identity.binding_context, bindingContexts);
   const residuals = input.residuals ?? defaultOpenResiduals();
   const rejected = admitField(interpretation, input.budget);
   if (rejected !== undefined) {
@@ -252,7 +260,9 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     budget: input.budget,
     remaining_exploration: input.budget.work_units - input.budget.finalization_reserve,
     remaining_reserve: input.budget.finalization_reserve,
-    remaining_memory_bytes: input.budget.memory_bytes,
+    remaining_memory_bytes: input.budget.memory_bytes - bindingContexts.bytes,
+    binding_contexts: bindingContexts.snapshot(),
+    binding_context_bytes: bindingContexts.bytes,
     memory_exhausted: false,
     seen_identities: RetainedSequence.from(identities),
     identity_spool: [],
@@ -287,8 +297,25 @@ export function applyObserverPage(
   if (page.query_id !== state.query_id || page.snapshot_id !== state.snapshot_id) {
     return reviseEpoch(state, consumption);
   }
+  const bindingContexts = consumption.binding_contexts?.snapshot() ?? state.binding_contexts;
+  if (consumption.binding_contexts !== undefined && state.binding_contexts !== undefined
+    && !consumption.binding_contexts.extends(state.binding_contexts)) {
+    throw new BindingContextResourceError("binding recovery must extend the current field owner");
+  }
+  const bindingBytes = (bindingContexts?.bytes ?? 0) - (state.binding_contexts?.bytes ?? 0);
+  if (bindingBytes < 0) throw new BindingContextResourceError("binding recovery owner cannot shrink an active field");
+  if (bindingBytes > state.remaining_memory_bytes) return { ...state, memory_exhausted: true, retention_rejected: "memory" };
+  for (const effect of consumption.effects ?? []) {
+    const edge = effect.transition ?? effect.hyperedge;
+    for (const identity of [effect.seed?.state, edge?.from, edge?.to]) {
+      if (identity !== undefined) parseBindingContext(identity.binding_context, bindingContexts);
+    }
+  }
   const observedWork = consumption.work?.work_units ?? 0;
-  const reserved = { ...state, remaining_exploration: Math.max(0, state.remaining_exploration - observedWork) };
+  const reserved = { ...state, binding_contexts: bindingContexts,
+    binding_context_bytes: (state.binding_context_bytes ?? 0) + bindingBytes,
+    remaining_memory_bytes: state.remaining_memory_bytes - bindingBytes,
+    remaining_exploration: Math.max(0, state.remaining_exploration - observedWork) };
   const candidate = bindEngineState(absorbObservations(reserved, { ...consumption, work: { work_units: 0 } }));
   const workRejected = observedWork > state.remaining_exploration
     || retentionWorkUnits(candidate.remaining_work) > retentionWorkUnits(state.remaining_work);

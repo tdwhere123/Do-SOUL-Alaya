@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
+import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
+import type { ProgramAutomaton } from "./program-automaton.js";
 import {
   formatConditionalFieldDigest,
+  compareUtcInstants,
   sourceEvidenceRootKey,
   type RecallTargetRef,
   type Guard,
@@ -18,7 +21,70 @@ import {
 
 export const UNBOUND_BINDING = "unbound";
 
-const RECOVERED_BINDINGS = new Map<string, string>();
+export class BindingContextUnavailableError extends Error {}
+export class BindingContextResourceError extends Error {}
+
+export class BindingContextStore {
+  private rows = new PersistentStringMap<string>();
+  private baseRows = this.rows;
+  private retainedBytes = 0;
+  private sealed = false;
+  public get bytes(): number { return this.retainedBytes; }
+  public constructor(private limit: number) {}
+  public fork(availableBytes = Math.max(0, this.limit - this.bytes)): BindingContextStore {
+    const next = new BindingContextStore(this.bytes + availableBytes);
+    next.rows = this.rows;
+    next.baseRows = this.rows;
+    next.retainedBytes = this.bytes;
+    return next;
+  }
+  public setAvailableBytes(bytes: number): void { this.limit = this.bytes + Math.max(0, bytes); }
+  public snapshot(): BindingContextStore { const next = this.fork(); next.sealed = true; return next; }
+  public extends(owner: BindingContextStore): boolean { return this.rows === owner.rows || this.baseRows === owner.rows; }
+  public get(digest: string): string | undefined { return this.rows.get(digest); }
+  public retain(digest: string, packed: string): void {
+    if (this.sealed) throw new BindingContextResourceError("fork the retained field binding owner before extending it");
+    const prior = this.rows.get(digest);
+    if (prior !== undefined) {
+      if (prior !== packed) throw new BindingContextUnavailableError("binding digest collision");
+      return;
+    }
+    const bytes = 128 + 2 * (digest.length + packed.length);
+    if (this.bytes + bytes > this.limit) throw new BindingContextResourceError("binding context memory exhausted");
+    this.rows = this.rows.with(digest, packed);
+    this.retainedBytes += bytes;
+  }
+}
+
+export function seedBindingContext(
+  automaton: ProgramAutomaton | undefined, objectId: string,
+  hypothesisBindings: QueryHypothesis["bindings"] | undefined, programState: string,
+  bindingContexts?: BindingContextStore
+): string | undefined {
+  let env = new Map<string, string>();
+  for (const binding of hypothesisBindings ?? []) env.set(binding.variable, binding.value);
+  for (const variable of automaton?.sourceVariables.get(programState) ?? []) {
+    const next = unifyBinding(env, variable, objectId);
+    if (next === undefined) return undefined;
+    env = next;
+  }
+  return encodeBindingContext(env, bindingContexts);
+}
+
+export function alignOutgoingBinding(
+  binding: string, objectId: string, automaton: ProgramAutomaton, programState: string,
+  bindingContexts?: BindingContextStore
+): string | undefined {
+  let env = new Map(parseBindingContext(binding, bindingContexts));
+  for (const variable of automaton.localVariables.get(programState) ?? []) env.delete(variable);
+  for (const advance of automaton.advances) {
+    if (advance.from !== programState) continue;
+    const next = unifyBinding(env, advance.relation.source_variable, objectId);
+    if (next === undefined) return undefined;
+    env = next;
+  }
+  return encodeBindingContext(env, bindingContexts);
+}
 
 export type BoundSourceFacts = Readonly<{
   readonly object_id: string;
@@ -49,36 +115,49 @@ export function sourceFactKey(target: RecallTargetRef): string {
   return target.kind === "source_evidence" ? sourceEvidenceRootKey(target) : target.object_id;
 }
 
-export function parseBindingContext(context: string): Map<string, string> {
+export function parseBindingContext(context: string, owner?: BindingContextStore): Map<string, string> {
   const env = new Map<string, string>();
-  const packed = recoverBindingContext(context);
+  const packed = recoverBindingContext(context, owner);
   if (packed.length === 0 || packed === UNBOUND_BINDING || packed === "default") {
     return env;
   }
   for (const part of packed.split(";")) {
     const sep = part.indexOf("=");
     if (sep <= 0) continue;
-    env.set(part.slice(0, sep), part.slice(sep + 1));
+    env.set(unescapeBindingPart(part.slice(0, sep)), unescapeBindingPart(part.slice(sep + 1)));
   }
   return env;
 }
 
-export function encodeBindingContext(env: ReadonlyMap<string, string>): string {
+export function encodeBindingContext(env: ReadonlyMap<string, string>, owner?: BindingContextStore): string {
   if (env.size === 0) return UNBOUND_BINDING;
   const packed = [...env.entries()]
     .sort((left, right) => compareText(left[0], right[0]))
-    .map(([variable, value]) => `${variable}=${value}`)
+    .map(([variable, value]) => `${escapeBindingPart(variable)}=${escapeBindingPart(value)}`)
     .join(";");
   if (packed.length <= 256) return packed;
   const digest = formatConditionalFieldDigest(
-    createHash("sha256").update(packed, "utf8").digest("hex")
+    createHash("sha256").update(JSON.stringify(packed), "utf8").digest("hex")
   );
-  RECOVERED_BINDINGS.set(digest, packed);
+  if (owner === undefined) throw new BindingContextUnavailableError("long binding requires an execution owner");
+  owner.retain(digest, packed);
   return digest;
 }
 
-export function recoverBindingContext(context: string): string {
-  return RECOVERED_BINDINGS.get(context) ?? context;
+export function recoverBindingContext(context: string, owner?: BindingContextStore): string {
+  if (!/^sha256:[a-f0-9]{64}$/u.test(context)) return context;
+  const packed = owner?.get(context);
+  if (packed === undefined) throw new BindingContextUnavailableError("binding context is unavailable in this execution");
+  return packed;
+}
+
+function escapeBindingPart(value: string): string {
+  // Escape only delimiters and the escape marker, preserving arbitrary UTF-16 values.
+  return value.replace(/[%=;]/gu, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function unescapeBindingPart(value: string): string {
+  return value.replace(/%(?:25|3D|3B)/gu, (sequence) => String.fromCharCode(Number.parseInt(sequence.slice(1), 16)));
 }
 
 export function unifyBinding(
@@ -192,7 +271,10 @@ function evaluateIntervalGuard(
   if (objectId === undefined) return "unresolved";
   const at = facts.get(objectId)?.observed_at;
   if (at === undefined) return "unresolved";
-  return at >= interval.start && at < interval.end ? "true" : "false";
+  const startOrder = compareUtcInstants(at, interval.start);
+  const endOrder = compareUtcInstants(at, interval.end);
+  if (startOrder === undefined || endOrder === undefined) return "unresolved";
+  return startOrder >= 0 && endOrder < 0 ? "true" : "false";
 }
 
 function evaluateQueryPredicate(

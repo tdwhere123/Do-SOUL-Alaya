@@ -22,6 +22,7 @@ export async function runProductionBoundRecall(input: Readonly<{
   assertRecallConsumerCompatibility(input.request);
   const timeFilter = buildRecallTimeFilter(input.request);
   return await input.deps.recallService.recall({
+    defer_delivery: true,
     taskSurface: input.taskSurface,
     workspaceId: input.context.workspaceId,
     runId: input.context.runId,

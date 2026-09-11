@@ -11,6 +11,7 @@ import { runSynthesisOperation } from "./synthesis-operations.js";
 import { runPathOperation } from "./path-operations.js";
 import { runConditionalFieldWorkerRecall } from "./observer-operations.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
+import { settleWorkerDelivery } from "./prepared-delivery.js";
 
 const boundedConstraintsReaders = new WeakMap<RecallReadWorkerRuntime, ReturnType<typeof createBoundedActiveConstraintsReader>>();
 
@@ -31,6 +32,9 @@ export async function runOperation(
     );
   }
   const payload = asPayload(request.payload);
+  if (request.operation === "conditionalField.acknowledge" || request.operation === "conditionalField.discard") {
+    return settleWorkerDelivery(runtime, payload, request.operation === "conditionalField.discard");
+  }
   switch (request.operation) {
     case "ready":
       return null;

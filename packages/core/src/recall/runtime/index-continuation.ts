@@ -7,6 +7,8 @@ import {
   productStateKeyFromIndexEntry,
   reachableMilligradesOf,
   sharedProductIdentity,
+  sameSourceEvidenceRoot,
+  type RecallTargetRef,
   type Continuation,
   type EnumerationPolicy,
   type FieldSnapshot,
@@ -24,6 +26,7 @@ import {
 import { compareText } from "../../shared/compare-text.js";
 import { stableStringify } from "../../shared/stable-stringify.js";
 import type { EmittedProductLedger } from "../conditional-field/index/product-component-diff.js";
+import type { RecallSourceMetadata } from "./recall-service-results.js";
 import {
   continuationCapabilityMatches,
   issuedContinuationTampered,
@@ -56,6 +59,10 @@ export type IssuedDelivery = Readonly<{
   readonly member_ids: readonly string[];
   readonly index: InformationIndex;
   readonly request?: Continuation;
+  readonly surfaces?: Readonly<{
+    readonly previews: ReadonlyMap<string, string>;
+    readonly metadata: Readonly<Record<string, RecallSourceMetadata>>;
+  }>;
 }>;
 
 export function indexEntryRevision(entry: IndexEntry): string {
@@ -272,17 +279,16 @@ export function rememberIssuedDelivery(input: Readonly<{
   readonly request_digest: string;
   readonly index: InformationIndex;
   readonly request?: Continuation | null;
+  readonly surfaces?: IssuedDelivery["surfaces"];
 }>): string {
-  const delivery_id = createHash("sha256").update(JSON.stringify([
-    input.request_digest, input.index.query_id, input.index.snapshot_id,
-    input.index.entries.map(productIdOfEntry)
-  ])).digest("hex").slice(0, 32);
+  const delivery_id = preparedDeliveryId(input.request_digest, input.index);
   ISSUED_PAGES.set(input.request_digest, {
     query_key: input.query_key,
     request_digest: input.request_digest,
     delivery_id,
     member_ids: input.index.entries.map(productIdOfEntry),
     index: input.index,
+    surfaces: input.surfaces,
     ...(input.request == null ? {} : { request: input.request })
   });
   while (ISSUED_PAGES.size > ISSUED_MAX) {
@@ -292,6 +298,12 @@ export function rememberIssuedDelivery(input: Readonly<{
   }
   bindIssuedDeliveryId(input.index, delivery_id);
   return delivery_id;
+}
+
+export function preparedDeliveryId(requestDigest: string, index: InformationIndex): string {
+  return createHash("sha256").update(JSON.stringify([
+    requestDigest, index.query_id, index.snapshot_id, index.entries.map(productIdOfEntry)
+  ])).digest("hex").slice(0, 32);
 }
 
 export function bindIssuedDeliveryId(index: InformationIndex, deliveryId: string): void {
@@ -306,6 +318,19 @@ export function replayIssuedDelivery(requestDigest: string): IssuedDelivery | un
   return ISSUED_PAGES.get(requestDigest);
 }
 
+export function deliveredPayloadEntry(queryKey: string, target: RecallTargetRef): Readonly<{
+  readonly index: InformationIndex;
+  readonly entry: IndexEntry;
+}> | undefined {
+  for (const issued of [...ISSUED_PAGES.values()].reverse()) {
+    if (issued.query_key !== queryKey) continue;
+    const entry = issued.index.entries.find((candidate) => candidate.target.kind === "source_evidence"
+      && target.kind === "source_evidence" && sameSourceEvidenceRoot(candidate.target, target));
+    if (entry !== undefined) return { index: issued.index, entry };
+  }
+  return undefined;
+}
+
 export function evictIssuedDeliveries(queryKey: string): readonly string[] {
   const removed: string[] = [];
   for (const [digest, issued] of ISSUED_PAGES) {
@@ -315,6 +340,11 @@ export function evictIssuedDeliveries(queryKey: string): readonly string[] {
     }
   }
   return removed;
+}
+
+export function invalidateFieldDelivery(queryKey: string): void {
+  evictIssuedDeliveries(queryKey);
+  FIELD_RESUME.delete(queryKey);
 }
 
 export function issuedDeliveryRevoked(
@@ -360,6 +390,22 @@ export function rememberField(state: FieldEngineState, continuation: Continuatio
     if (oldest === undefined) break;
     FIELD_RESUME.delete(oldest);
   }
+}
+
+export function prepareFieldCommit(
+  state: FieldEngineState,
+  continuation: Continuation | null
+): () => void {
+  const key = fieldResumeKey(state.query_id, state.snapshot_id,
+    interpretationIdentity({ interpretation_clock: state.interpretation.interpretation_clock }));
+  const expected = FIELD_RESUME.get(key);
+  let committed = false;
+  return () => {
+    if (committed) return;
+    if (FIELD_RESUME.get(key) !== expected) throw new Error("stale prepared Recall delivery");
+    rememberField(state, continuation);
+    committed = true;
+  };
 }
 
 export function issuedContinuationFor(
@@ -446,4 +492,3 @@ function canonicalFieldIdentity(value: FieldValue): string {
     explanation_ids: []
   });
 }
-

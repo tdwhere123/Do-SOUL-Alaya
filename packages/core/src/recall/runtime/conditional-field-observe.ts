@@ -18,6 +18,7 @@ import { sourceFamilySettled } from "../conditional-field/observers/source-root-
 import { hasMeasurementProducer } from "../conditional-field/observers/measure-stored.js";
 import { measurementEffectsFor, measurementIsMissing } from "./measurement-effects.js";
 import { resumePathEffects } from "./pending-path-effects.js";
+import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
 import { bindEngineState } from "../conditional-field/engine/field-update.js";
 import { ObservedRelations } from "../conditional-field/engine/observed-relations.js";
 import { ObservationPairs, ObservationSubjects } from "../conditional-field/engine/observation-frontier.js";
@@ -252,8 +253,12 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
     && !sourceFamilySettled(observed.page.cursor.committed_through)) {
     session.sourceFamilyUnavailable = true;
   }
-  session.state = applyObserverPage({ ...session.state, resume_subjects: subjects.snapshot }, { page: observed.page,
-    effects: seedEffects(observed.page.observations, interpretation, input.as_of), work: observed.work,
+  const bindingContexts = forkBindingContexts(session.state);
+  let effects: readonly FieldObservationEffect[];
+  try { effects = seedEffects(observed.page.observations, interpretation, input.as_of, bindingContexts); }
+  catch (error) { return rejectBindingResource(session, error); }
+  session.state = applyObserverPage({ ...retainBindingContexts(session.state, bindingContexts), resume_subjects: subjects.snapshot }, { page: observed.page,
+    effects, work: observed.work,
     resume_cursors: resumeCursors(cursors, pairProgress) });
   if (session.state.retention_rejected !== undefined || session.state.memory_exhausted) return true;
   subjects.snapshot = session.state.resume_subjects;
@@ -278,7 +283,8 @@ function refreshPathFrontier(session: ObservationSession): boolean {
   session.state = resumePathEffects({ ...state, pending_path_effects: { input: { rows: relationRows, options: {
     interpretation, asOf: input.as_of, liveStates: state.seen_identities,
     liveStateOffset: frontier === undefined || frontier.facets !== state.facets ? 0 : frontier.identities,
-    overlay: RELATION_ROUTING, sourceFacts: sourceFacts.snapshot, facets: state.facets, discoveries: state.discoveries } },
+    overlay: RELATION_ROUTING, sourceFacts: sourceFacts.snapshot, facets: state.facets, discoveries: state.discoveries,
+    bindingContexts: state.binding_contexts } },
     offset: 0, retained_bytes: 0, page: { schema_version: 1, query_id: interpretation.query_id,
       snapshot_id: interpretation.snapshot_id, cursor, observations: [], outcome: { schema_version: 1, status: "open" },
       open_regions: [{ schema_version: 1, region_id: regionId, kind: "adjacency", status: "open" }] } } });
@@ -297,9 +303,12 @@ function consumeMeasurementPage(session: ObservationSession, action: Observation
   const observed = observeMeasurement(input, interpretation, lease, action, cursors);
   recordObserverWork(session, "measurement", observed);
   cursors.set(action.region_id, observed.page.cursor);
-  const effects = measurementEffectsFor(observed, interpretation, input.as_of, session.state.measurements);
+  const bindingContexts = forkBindingContexts(session.state);
+  let effects: readonly FieldObservationEffect[];
+  try { effects = measurementEffectsFor(observed, interpretation, input.as_of, session.state.measurements, bindingContexts); }
+  catch (error) { return rejectBindingResource(session, error); }
   session.missingMeasurement ||= measurementIsMissing(effects);
-  session.state = applyObserverPage(session.state, { page: observed.page, effects, work: observed.work,
+  session.state = applyObserverPage(retainBindingContexts(session.state, bindingContexts), { page: observed.page, effects, work: observed.work,
     resume_cursors: resumeCursors(cursors, pairProgress) });
   if (session.missingMeasurement) session.state = { ...session.state,
     observation_gaps: { guards: session.unresolvedGuard, measurements: true } };
@@ -347,7 +356,8 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   session.state = { ...session.state, remaining_exploration: Math.max(0, session.state.remaining_exploration - observed.work.work_units),
     pending_path_effects: { input: { rows: session.relationRows, options: {
       interpretation, asOf: input.as_of, liveStates: session.state.seen_identities, overlay: RELATION_ROUTING,
-      sourceFacts: sourceFacts.snapshot, facets: session.state.facets, discoveries: session.state.discoveries } },
+      sourceFacts: sourceFacts.snapshot, facets: session.state.facets, discoveries: session.state.discoveries,
+      bindingContexts: session.state.binding_contexts } },
       offset: 0, retained_bytes: 0,
       page: maskAdjacencyExhaustion(observed.page, hasOpenPairs(subjects, predicates, pairProgress, [], pairProgress.completed)) },
     resume_cursors: resumeCursors(cursors, pairProgress) };
@@ -415,7 +425,8 @@ function startObservedField(
       remaining_exploration: exploration,
       remaining_reserve: input.budget.finalization_reserve,
       remaining_memory_bytes: Math.max(0, input.budget.memory_bytes
-        - (resumed.pending_path_effects?.retained_bytes ?? 0)),
+        - (resumed.pending_path_effects?.retained_bytes ?? 0) - (resumed.binding_context_bytes ?? 0)),
+      binding_contexts: resumed.binding_contexts?.snapshot(),
       memory_exhausted: false,
       last_observer_status: resumed.last_observer_status === "interrupted" ? "open" : resumed.last_observer_status,
       retention_rejected: undefined
@@ -576,15 +587,31 @@ function loadStoredRelationKinds(
 export function seedEffects(
   observations: readonly TypedObservation[],
   interpretation: QueryInterpretation,
-  asOf: string
+  asOf: string,
+  bindingContexts?: BindingContextStore
 ): readonly FieldObservationEffect[] {
   return observations.flatMap((observation) =>
-    seedActivationsForObservation(observation, interpretation, asOf).map((seed) => ({
+    seedActivationsForObservation(observation, interpretation, asOf, bindingContexts).map((seed) => ({
       observation_id: `${observation.observation_id}:${seed.state.hypothesis_id}:${seed.state.program_state}`,
       seed,
       admitted_seed: true as const
     }))
   );
+}
+
+function forkBindingContexts(state: FieldEngineState): BindingContextStore {
+  return state.binding_contexts?.fork(state.remaining_memory_bytes) ?? new BindingContextStore(state.remaining_memory_bytes);
+}
+
+function retainBindingContexts(state: FieldEngineState, owner: BindingContextStore): FieldEngineState {
+  return { ...state, binding_contexts: owner.snapshot(), binding_context_bytes: owner.bytes,
+    remaining_memory_bytes: state.remaining_memory_bytes - owner.bytes + (state.binding_contexts?.bytes ?? 0) };
+}
+
+function rejectBindingResource(session: ObservationSession, error: unknown): true {
+  if (!(error instanceof BindingContextResourceError)) throw error;
+  session.state = { ...interruptObservedField(session.state), memory_exhausted: true, retention_rejected: "memory" };
+  return true;
 }
 
 function meterReaders(

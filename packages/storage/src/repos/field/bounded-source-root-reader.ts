@@ -146,6 +146,15 @@ export class SqliteSourceRootRecallReader {
     return this.read(workspaceId, target, DEFAULT_BYTE_LIMIT, 0);
   }
 
+  public isCurrentTarget(workspaceId: string, target: SourceEvidenceTarget): boolean {
+    // Usage must resolve aliases and retained revisions exactly as Recall does.
+    const offsets = target.span === undefined ? [0] : [target.span.content_start, target.span.content_end];
+    return offsets.every((offset) => {
+      const page = this.read(workspaceId, target, 1, offset);
+      return !page.unavailable && page.row !== null;
+    });
+  }
+
   public hydrate(
     workspaceId: string,
     target: SourceEvidenceTarget,

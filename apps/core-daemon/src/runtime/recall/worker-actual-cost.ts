@@ -1,6 +1,8 @@
 import { performance } from "node:perf_hooks";
+import { SNAPSHOT_PIN_NATIVE_WORK } from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldExecutionReceipt,
+  runConditionalFieldRecallWithReceipt,
   ObserverReaders
 } from "@do-soul/alaya-core";
 
@@ -39,6 +41,7 @@ type NativePage = Readonly<{
 
 export function withWorkerActualCost<T extends {
   readonly execution_receipt: ConditionalFieldExecutionReceipt;
+  readonly issue?: ReturnType<typeof runConditionalFieldRecallWithReceipt>["issue"];
 }>(
   readers: ObserverReaders,
   run: (readers: ObserverReaders) => T
@@ -56,9 +59,17 @@ export function withWorkerActualCost<T extends {
     rss_bytes: Math.max(rssBefore, rssAfter),
     rss_sampling_method: RSS_SAMPLING_METHOD
   };
+  const executionReceipt = { ...result.execution_receipt, worker: cost };
   return {
     ...result,
-    execution_receipt: { ...result.execution_receipt, worker: cost }
+    execution_receipt: executionReceipt,
+    ...(result.issue === undefined ? {} : { issue: ((issued) => {
+      try { return result.issue!(issued); }
+      finally { Object.assign(executionReceipt, result.execution_receipt, { worker: {
+        ...cost, native_visits: counters.native_visits, bytes_read: counters.bytes_read, row_visits: counters.row_visits,
+        elapsed_ms: performance.now() - started, rss_bytes: Math.max(rssBefore, process.memoryUsage().rss)
+      } }); }
+    }) as NonNullable<T["issue"]> })
   };
 }
 
@@ -100,6 +111,11 @@ function instrumentObserverReaders(
 ): ObserverReaders {
   return {
     ...readers,
+    ...(readers.snapshotPin === undefined ? {} : { snapshotPin: (workspaceId: string) => {
+      const pin = readers.snapshotPin!(workspaceId);
+      counters.native_visits += SNAPSHOT_PIN_NATIVE_WORK;
+      return pin;
+    } }),
     ...(readers.lexical === undefined ? {} : {
       lexical: (input) => chargeNativePage(counters, readers.lexical!(input))
     }),

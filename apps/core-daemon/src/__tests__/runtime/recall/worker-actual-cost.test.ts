@@ -16,6 +16,7 @@ import type {
 import { type StorageDatabase } from "@do-soul/alaya-storage";
 import { encodeIndexResults } from "../../../mcp-memory/recall/recall-result.js";
 import { runConditionalFieldWorkerRecall } from "../../../runtime/recall-read-worker/observer-operations.js";
+import { settleWorkerDelivery } from "../../../runtime/recall-read-worker/prepared-delivery.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import {
   RSS_SAMPLING_METHOD,
@@ -235,8 +236,9 @@ describe("native worker actual cost", () => {
     });
     const first = runConditionalFieldWorkerRecall(runtime(slice.database), payload(budget, "needle"));
     const second = runConditionalFieldWorkerRecall(runtime(slice.database), payload(budget, "needle"));
-    expect(first.issued_delivery_id).toBeUndefined();
-    expect(second.issued_delivery_id).toBeUndefined();
+    expect(first.issued_delivery_id).toBeDefined();
+    expect(second.issued_delivery_id).toBeDefined();
+    expect(first.issued_delivery_id).not.toBe(second.issued_delivery_id);
     expect(second.index.page_purpose).not.toBe("retry");
     expect(first.execution_receipt!.actual?.phases.observe.state_creates).toBeGreaterThan(0);
     expect(second.execution_receipt!.actual?.phases.observe.state_creates).toBeGreaterThan(0);
@@ -341,6 +343,7 @@ function collectPages(
     const page = runConditionalFieldWorkerRecall(worker, {
       ...payload(budget, query), ...extra, continuation
     });
+    settleWorkerDelivery(worker, { preparation_id: page.preparation_id, index: page.index, previews: page.previews }, false);
     pages.push(page);
     continuation = page.index.continuation;
     if (continuation === null) break;

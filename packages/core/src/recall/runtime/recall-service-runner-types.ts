@@ -56,6 +56,8 @@ export type ConditionalFieldRecallRequest = Readonly<{
 }>;
 
 export interface RecallExecutionParams {
+  readonly continuation?: Continuation | null;
+  readonly defer_delivery?: boolean;
   readonly taskSurface: Readonly<TaskObjectSurface>;
   readonly workspaceId: string;
   readonly strategy: NodeStrategy;

@@ -105,7 +105,7 @@ export class BoundedIndexPayload {
         if (hydrated.retryable) retryable = true;
         if (hydrated.ok) continue;
         complete = false;
-        if (hydrated.retryable || this.previews.has(cacheKey) || retainedContent === undefined) continue;
+        if (continued !== undefined || hydrated.retryable || this.previews.has(cacheKey) || retainedContent === undefined) continue;
         const preview = createContentPreview(retainedContent, "excerpt");
         const bytes = Buffer.byteLength(preview, "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) continue;

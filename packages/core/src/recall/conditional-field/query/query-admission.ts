@@ -27,7 +27,7 @@ import {
   type QueryProposalAdmission
 } from "./query-proposal-admission.js";
 import { QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION } from "./query-proposal-producer-registry.js";
-import { decodeSourceFilters, UNBOUND_BINDING_CONTEXT } from "./ordinary-language.js";
+import { decodeSourceFilters } from "./ordinary-language.js";
 import {
   classifyQueryPredicate,
   unsupportedPredicateHole,
@@ -90,16 +90,6 @@ export function collectRecoverableBindings(program: QueryProgram): readonly Quer
     });
   });
   return bindings;
-}
-
-export function recoverableBindingContext(bindings: readonly QueryBinding[]): string {
-  if (bindings.length === 0) return UNBOUND_BINDING_CONTEXT;
-  return [...bindings]
-    .sort((left, right) => left.variable === right.variable
-      ? left.value.localeCompare(right.value)
-      : left.variable.localeCompare(right.variable))
-    .map((binding) => `${binding.variable}=${binding.value}`)
-    .join(";");
 }
 
 export function consumeMemoryIfNeeded(

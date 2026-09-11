@@ -1,5 +1,6 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  compareUtcInstants,
   isRelationValidityActiveAt,
   type Guard,
   type QueryProgram,
@@ -43,6 +44,16 @@ function namedScopesExclude(principal: ScopePrincipal, scopeClass: string | unde
     && (scopeClass === undefined || !principal.scopes.includes(scopeClass));
 }
 
+function sourceValidityActiveAt(
+  row: Readonly<{ valid_from?: string | null; valid_to?: string | null }>,
+  asOf: string | undefined
+): boolean {
+  if (asOf === undefined) return true;
+  const lower = row.valid_from == null ? 0 : compareUtcInstants(asOf, row.valid_from);
+  const upper = row.valid_to == null ? -1 : compareUtcInstants(asOf, row.valid_to);
+  return lower !== undefined && upper !== undefined && lower >= 0 && upper < 0;
+}
+
 export function sourceRowEligible(
   input: ObserveConditionalFieldInput,
   row: SourceObserverRow | undefined
@@ -53,8 +64,7 @@ export function sourceRowEligible(
   if (row.lifecycle_state !== undefined && row.lifecycle_state !== "active") return false;
   if (row.retention_state === "tombstoned") return false;
   const asOf = input.as_of ?? input.query.interpretation_clock;
-  if (asOf !== undefined && ((row.valid_from != null && row.valid_from > asOf)
-    || (row.valid_to != null && row.valid_to <= asOf))) return false;
+  if (!sourceValidityActiveAt(row, asOf)) return false;
   return !namedScopesExclude(principal, row.scope_class);
 }
 
@@ -66,8 +76,7 @@ export function sourceRootEligible(
   if (principal.kind === "denied") return false;
   if (row.body_erased === true) return false;
   const asOf = input.as_of ?? input.query.interpretation_clock;
-  if (asOf !== undefined && ((row.valid_from != null && row.valid_from > asOf)
-    || (row.valid_to != null && row.valid_to <= asOf))) return false;
+  if (!sourceValidityActiveAt(row, asOf)) return false;
   return !namedScopesExclude(principal, row.scope_class);
 }
 
@@ -76,8 +85,9 @@ export function relationRowEligible(
   row: RelationObserverRow
 ): boolean {
   const asOf = input.as_of ?? input.query.interpretation_clock;
-  if (row.resolutionKind != null && (row.resolvedAt == null || asOf === undefined || row.resolvedAt <= asOf)) {
-    return false;
+  if (row.resolutionKind != null) {
+    const order = row.resolvedAt == null || asOf === undefined ? undefined : compareUtcInstants(row.resolvedAt, asOf);
+    if (order === undefined || order <= 0) return false;
   }
   if (row.validity === undefined) return false;
   if (asOf === undefined) return true;
@@ -305,8 +315,10 @@ function sourceRootFilters(
   if (filters.since !== undefined || filters.until !== undefined) {
     const stamp = root.event_time;
     if (stamp === undefined || stamp === null) return "unresolved";
-    if (filters.since !== undefined && stamp < filters.since) return "false";
-    if (filters.until !== undefined && stamp >= filters.until) return "false";
+    const sinceOrder = filters.since === undefined ? 0 : compareUtcInstants(stamp, filters.since);
+    const untilOrder = filters.until === undefined ? -1 : compareUtcInstants(stamp, filters.until);
+    if (sinceOrder === undefined || untilOrder === undefined) return "unresolved";
+    if (sinceOrder < 0 || untilOrder >= 0) return "false";
   }
   return "true";
 }
@@ -334,7 +346,10 @@ function evaluateInterval(guard: Guard, observedAt: string | undefined): Guard {
   if (observedAt === undefined || interval === undefined) {
     return { ...guard, verdict: "unresolved" };
   }
-  const inside = observedAt >= interval.start && observedAt < interval.end;
+  const startOrder = compareUtcInstants(observedAt, interval.start);
+  const endOrder = compareUtcInstants(observedAt, interval.end);
+  if (startOrder === undefined || endOrder === undefined) return { ...guard, verdict: "unresolved" };
+  const inside = startOrder >= 0 && endOrder < 0;
   return { ...guard, verdict: inside ? "true" : "false" };
 }
 

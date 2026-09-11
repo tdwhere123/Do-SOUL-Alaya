@@ -172,6 +172,7 @@ export {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_JSON_OBJECT_MAX_CHARS,
   BoundedJsonObjectSchema,
+  compareUtcInstants,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
   NonNegativeIntSchema,

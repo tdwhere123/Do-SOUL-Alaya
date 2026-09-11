@@ -9,12 +9,12 @@ import {
   collectRecoverableBindings,
   collectRelations,
   compileConditionalFieldQuery,
-  recoverableBindingContext,
   SERVICE_VARIABLE,
   sourceBoundEntityGuard,
   UNBOUND_BINDING_CONTEXT,
   USES_SERVICE_RELATION
 } from "../../../../recall/conditional-field/query/compile-query.js";
+import { encodeBindingContext } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import {
   completenessForInterpretationStatus,
   interpretationCoverageFor
@@ -24,6 +24,10 @@ import {
   SNAPSHOT_ID,
   defaultBudget
 } from "../reference/deployment.fixture.js";
+
+function bindingContext(program: QueryProgram): string {
+  return encodeBindingContext(new Map(collectRecoverableBindings(program).map(({ variable, value }) => [variable, value])));
+}
 
 describe("conditional-field query field coordinates", () => {
   it("keeps same-service history as association without a causal predicate", () => {
@@ -53,9 +57,9 @@ describe("conditional-field query field coordinates", () => {
     expect(collectRecoverableBindings(serviceA.program)).toEqual([
       binding(SERVICE_VARIABLE, "service-a")
     ]);
-    expect(recoverableBindingContext(collectRecoverableBindings(serviceA.program)))
+    expect(bindingContext(serviceA.program))
       .toBe(`${SERVICE_VARIABLE}=service-a`);
-    expect(recoverableBindingContext(collectRecoverableBindings(serviceA.program)))
+    expect(bindingContext(serviceA.program))
       .not.toMatch(/^sha256:/u);
     expect(serviceA.query_id).not.toBe(serviceB.query_id);
     expect(serviceA.query_id).not.toBe(provider.query_id);
@@ -70,7 +74,7 @@ describe("conditional-field query field coordinates", () => {
       && relation.guard.kind === "interval_relation"
     ))).toBe(true);
     expect(collectRecoverableBindings(ordinary.program)).toEqual([]);
-    expect(recoverableBindingContext([])).toBe(UNBOUND_BINDING_CONTEXT);
+    expect(encodeBindingContext(new Map())).toBe(UNBOUND_BINDING_CONTEXT);
     const lexical = compileOrdinary("deployment rules");
     expect(collectRelations(lexical.program).some((relation) => (
       relation.relation_kind === USES_SERVICE_RELATION
@@ -81,10 +85,9 @@ describe("conditional-field query field coordinates", () => {
     const left = compileTyped(usesServiceProgram("service-a"));
     const right = compileTyped(usesServiceProgram("service-b"));
     expect(left.query_id).not.toBe(right.query_id);
-    expect(recoverableBindingContext(collectRecoverableBindings(left.program)))
-      .not.toBe(recoverableBindingContext(collectRecoverableBindings(right.program)));
+    expect(bindingContext(left.program)).not.toBe(bindingContext(right.program));
     const hashedMerge = "sha256:" + "a".repeat(64);
-    expect(recoverableBindingContext(collectRecoverableBindings(left.program)))
+    expect(bindingContext(left.program))
       .not.toBe(hashedMerge);
   });
 

@@ -89,6 +89,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private readonly workerUrl: URL;
   private nextWorkerIndex = 0;
   private nextRequestId = 1;
+  private readonly deliveryOwners = new Map<string, Worker>();
   private readonly pending = new Map<
     number,
     {
@@ -197,10 +198,28 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   };
 
   public readonly conditionalFieldPort: ConditionalFieldRecallPort = {
+    acknowledge: async (preparationId, index, previews) => {
+      return await this.dispatchToWorker(this.deliveryOwner(preparationId), "conditionalField.acknowledge",
+        { preparation_id: preparationId, index, previews: Object.fromEntries(previews) });
+    },
+    discard: async (preparationId) => {
+      const owner = this.deliveryOwners.get(preparationId);
+      if (owner !== undefined && this.workers.includes(owner)) {
+        await this.dispatchToWorker(owner, "conditionalField.discard", { preparation_id: preparationId });
+      }
+      this.deliveryOwners.delete(preparationId);
+    },
     recall: async (input) => {
+      const preferred = input.continuation == null ? undefined : this.deliveryOwners.get(input.continuation.continuation_id);
+      const worker = this.snapshotSession.pinnedWorker()
+        ?? (preferred !== undefined && this.workers.includes(preferred) ? preferred : this.requireWorker("conditionalField.recall"));
       const parsed = ConditionalFieldRecallPortResultSchema.parse(
-        await this.request("conditionalField.recall", input)
+        await this.dispatchToWorker(worker, "conditionalField.recall", input)
       );
+      for (const key of [parsed.preparation_id, parsed.index.continuation?.continuation_id]) {
+        if (key !== undefined) this.deliveryOwners.set(key, worker);
+      }
+      while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
       // IPC schema cannot import core receipt types; index and previews are already checked.
       return parsed as ConditionalFieldRecallPortResult;
     }
@@ -229,6 +248,11 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     this.workers[0] = this.spawnWorker(0);
     this.snapshotSession = createRecallReadSnapshotSession({
       workerCount,
+      affinityWorkerIndex: (affinity) => {
+        const owner = this.deliveryOwners.get(affinity);
+        const index = owner === undefined ? -1 : this.workers.indexOf(owner);
+        return index < 0 ? undefined : index;
+      },
       getWorker: (index) => this.workerAt(index),
       dispatch: async (worker, operation) =>
         await this.dispatchToWorker(worker, operation, {})
@@ -397,10 +421,16 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     }
     const pinned = this.snapshotSession.pinnedWorker();
     if (pinned !== undefined) return pinned;
-    const index = isPathAffinityOperation(operation) || operation === "conditionalField.recall"
+    const index = isPathAffinityOperation(operation) || operation.startsWith("conditionalField.")
       ? 0
       : this.nextWorkerIndex++ % this.workers.length;
     return this.workerAt(index);
+  }
+
+  private deliveryOwner(preparationId: string): Worker {
+    const owner = this.deliveryOwners.get(preparationId);
+    if (owner === undefined || !this.workers.includes(owner)) throw new Error("Recall delivery worker unavailable");
+    return owner;
   }
 
   private workerAt(index: number): Worker {

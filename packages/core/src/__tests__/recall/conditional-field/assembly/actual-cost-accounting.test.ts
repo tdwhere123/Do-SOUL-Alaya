@@ -174,6 +174,7 @@ describe("conditional-field actual request cost", () => {
     const startOffset = source.target.span?.content_end ?? firstChunk.end_offset;
     calls.length = 0;
     const resumed = runConditionalFieldRecallWithReceipt({
+      continuation: first.index.continuation,
       workspace_id: "workspace",
       query_text: "needle",
       budget: defaultBudget({ page_budget: 4 }),

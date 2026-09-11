@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import type { SourceEvidenceTarget } from "@do-soul/alaya-protocol";
 import {
-  ContextUsageNotFoundError,
   ContextUsageValidationError,
   validateReportedRecallHits
 } from "../../../mcp-memory/usage/recall-usage-object-validation.js";
@@ -447,17 +447,9 @@ describe("recall usage evidence proof", () => {
     const deps = {
       ...createDeps(),
       fieldSource: {
-        findRecordById: vi.fn(async (workspaceId: string, recordId: string) => {
-          if (workspaceId !== context.workspaceId || recordId !== "rec-1") return null;
-          return {
-            workspace_id: context.workspaceId,
-            record_id: "rec-1",
-            source_version: "v1",
-            content_digest: digest,
-            evidence_object_id: null,
-            source_body: "retained"
-          };
-        })
+        isCurrentTarget: vi.fn(async (workspaceId: string, supplied: SourceEvidenceTarget) =>
+          workspaceId === context.workspaceId && supplied.root_id === "rec-1"
+            && supplied.source_version === "v1" && supplied.content_digest === digest)
       }
     };
     await expect(validateReportedRecallHits(deps, {
@@ -509,7 +501,7 @@ describe("recall usage evidence proof", () => {
     const deps = {
       ...createDeps(),
       fieldSource: {
-        findRecordById: vi.fn(async () => null)
+        isCurrentTarget: vi.fn(async () => false)
       }
     };
     await expect(validateReportedRecallHits(deps, {
@@ -520,7 +512,7 @@ describe("recall usage evidence proof", () => {
         target,
         usage_status: "used"
       }]
-    }, context.workspaceId, delivery)).rejects.toBeInstanceOf(ContextUsageNotFoundError);
+    }, context.workspaceId, delivery)).rejects.toBeInstanceOf(ContextUsageValidationError);
   });
 
   it("records source-evidence usage without object_id and rejects memory_entry without identity", async () => {
@@ -544,14 +536,7 @@ describe("recall usage evidence proof", () => {
     const deps = {
       ...createDeps(),
       fieldSource: {
-        findRecordById: vi.fn(async () => ({
-          workspace_id: context.workspaceId,
-          record_id: "rec-1",
-          source_version: "v1",
-          content_digest: digest,
-          evidence_object_id: null,
-          source_body: "retained"
-        }))
+        isCurrentTarget: vi.fn(async () => true)
       }
     };
     deps.trustStateRecorder.findDeliveryById = vi.fn(async () => ({
@@ -646,14 +631,7 @@ describe("recall usage evidence proof", () => {
     const deps = {
       ...createDeps(),
       fieldSource: {
-        findRecordById: vi.fn(async () => ({
-          workspace_id: context.workspaceId,
-          record_id: "rec-1",
-          source_version: "v1",
-          content_digest: digest,
-          evidence_object_id: null,
-          source_body: "short"
-        }))
+        isCurrentTarget: vi.fn(async () => false)
       }
     };
     await expect(validateReportedRecallHits(deps, {

@@ -1,5 +1,6 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  compareUtcInstants,
   GuardSchema,
   IsoDatetimeStringSchema,
   type FacetMode,
@@ -8,7 +9,6 @@ import {
   type QueryProgram,
   type QueryTimeWindow
 } from "@do-soul/alaya-protocol";
-import { compareText } from "../../../shared/compare-text.js";
 
 export const SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID = "failed-deployment";
 
@@ -197,36 +197,12 @@ export function sourceFactsSatisfyFilters(
   const stamp = timestampForSourceFilters(facts, filters);
   if (filters.since !== undefined || filters.until !== undefined) {
     if (stamp === undefined) return "unresolved";
-    const sinceOrder = filters.since === undefined ? 0 : sourceTimestampOrder(stamp, filters.since);
-    const untilOrder = filters.until === undefined ? 0 : sourceTimestampOrder(stamp, filters.until);
+    const sinceOrder = filters.since === undefined ? 0 : compareUtcInstants(stamp, filters.since);
+    const untilOrder = filters.until === undefined ? 0 : compareUtcInstants(stamp, filters.until);
     if (sinceOrder === undefined || untilOrder === undefined) return "unresolved";
     if (sinceOrder < 0 || untilOrder > 0) return "false";
   }
   return "true";
-}
-
-export function sourceTimestampOrder(left: string, right: string): number | undefined {
-  const normalizedLeft = normalizeUtcInstant(left);
-  const normalizedRight = normalizeUtcInstant(right);
-  if (!IsoDatetimeStringSchema.safeParse(normalizedLeft).success
-    || !IsoDatetimeStringSchema.safeParse(normalizedRight).success) {
-    return undefined;
-  }
-  const [leftWhole, leftFraction = ""] = normalizedLeft.slice(0, -1).split(".");
-  const [rightWhole, rightFraction = ""] = normalizedRight.slice(0, -1).split(".");
-  const secondsOrder = compareText(leftWhole!, rightWhole!);
-  if (secondsOrder !== 0) return secondsOrder;
-  // Date.parse loses submillisecond distinctions that the public datetime schema permits.
-  const width = Math.max(leftFraction.length, rightFraction.length);
-  return compareText(leftFraction.padEnd(width, "0"), rightFraction.padEnd(width, "0"));
-}
-
-function normalizeUtcInstant(value: string): string {
-  // Zod 4 `datetime()` rejects minute-precision `YYYY-MM-DDTHH:MMZ`.
-  if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$/u.test(value)) {
-    return `${value.slice(0, -1)}:00Z`;
-  }
-  return value;
 }
 
 function timestampForSourceFilters(

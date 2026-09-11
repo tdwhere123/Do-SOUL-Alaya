@@ -5,6 +5,7 @@ import {
   RelationAssertionResolutionSchema,
   RelationAssertionSchema,
   RelationValiditySchema,
+  compareUtcInstants,
   isRelationValidityActiveAt
 } from "../../index.js";
 
@@ -47,6 +48,20 @@ function assertionWith(validity: unknown) {
 }
 
 describe("RelationAssertion temporal contract", () => {
+  it("preserves fractional UTC order in validation and half-open validity", () => {
+    const start = "2026-09-09T00:00:00.0001Z", end = "2026-09-09T00:00:00.0002Z";
+    const bounded = RelationValiditySchema.parse({ kind: "bounded", valid_from: start, valid_to: end });
+    const open = RelationValiditySchema.parse({ kind: "open", valid_from: start });
+    expect(isRelationValidityActiveAt(open, "2026-09-09T00:00:00Z", new Set())).toBe(false);
+    expect(isRelationValidityActiveAt(bounded, "2026-09-09T00:00:00.000100Z", new Set())).toBe(true);
+    expect(isRelationValidityActiveAt(bounded, "2026-09-09T00:00:00.000150Z", new Set())).toBe(true);
+    expect(isRelationValidityActiveAt(bounded, "2026-09-09T00:00:00.000200Z", new Set())).toBe(false);
+    expect(RelationValiditySchema.safeParse({ kind: "bounded", valid_from: start, valid_to: "2026-09-09T00:00:00.000100Z" }).success).toBe(false);
+    expect(compareUtcInstants("2026-09-09T00:00Z", "2026-09-09T00:00:00.000000Z")).toBe(0);
+    expect(compareUtcInstants("2026-09-09T00:00:00.00000000001Z", "2026-09-09T00:00:00.00000000002Z")).toBe(-1);
+    expect(compareUtcInstants("invalid", start)).toBeUndefined();
+  });
+
   it("accepts only explicit bounded, open, or timeless validity", () => {
     const bounded = RelationValiditySchema.parse({
       kind: "bounded",

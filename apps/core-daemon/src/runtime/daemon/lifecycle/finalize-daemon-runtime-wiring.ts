@@ -1,4 +1,5 @@
 import type { AlayaDaemonRuntime } from "./daemon-runtime-types.js";
+import { SqliteSourceRootRecallReader } from "@do-soul/alaya-storage";
 import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
 import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
 import {
@@ -58,10 +59,7 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     },
     memoryEntryRepo: input.memoryEntryRepo,
     evidenceService: input.evidenceService,
-    fieldSource: {
-      findRecordById: (workspaceId: string, recordId: string) =>
-        input.fieldComposition.fieldRepos.records.findById(workspaceId, recordId)
-    },
+    fieldSource: new SqliteSourceRootRecallReader(input.fieldComposition.fieldRepos.records, input.evidenceCapsuleRepo),
     sourceAdmission: createSourceAdmissionPort({
       sha256: fieldContractSha256,
       stores: input.fieldComposition.stores

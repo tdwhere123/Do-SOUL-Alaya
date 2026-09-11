@@ -21,6 +21,7 @@ import {
   unifyBinding,
   type BoundSourceFacts
 } from "./binding-environment.js";
+import type { BindingContextStore } from "./binding-environment.js";
 
 export type AdjacencyRow = Readonly<{
   readonly assertionId: string;
@@ -114,17 +115,18 @@ function admitHardIdentityTransfer(admission: RelationTransferAdmission): Admitt
 export function unifyAdvance(
   from: ProductStateKey,
   relation: QueryRelation,
-  row: AdjacencyRow
+  row: AdjacencyRow,
+  bindingContexts?: BindingContextStore
 ): Readonly<{ readonly env: Map<string, string>; readonly binding: string }> | undefined {
   const source = unifyBinding(
-    parseBindingContext(from.binding_context),
+    parseBindingContext(from.binding_context, bindingContexts),
     relation.source_variable,
     row.sourceObjectId
   );
   if (source === undefined) return undefined;
   const target = unifyBinding(source, relation.target_variable, row.targetObjectId);
   if (target === undefined) return undefined;
-  return { env: target, binding: encodeBindingContext(target) };
+  return { env: target, binding: encodeBindingContext(target, bindingContexts) };
 }
 
 export function inactiveResolution(kind: string | null | undefined): boolean {

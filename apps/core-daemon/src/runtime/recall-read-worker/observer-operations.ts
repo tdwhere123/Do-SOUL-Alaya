@@ -29,6 +29,7 @@ import { withWorkerActualCost } from "../recall/worker-actual-cost.js";
 import { storedMeasurementReaders } from "./stored-measurement-readers.js";
 import type { ConditionalFieldRecallWorkerPayload } from "./protocol.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
+import { prepareWorkerDelivery } from "./prepared-delivery.js";
 
 const readersByRuntime = new WeakMap<RecallReadWorkerRuntime, ObserverReaders>();
 
@@ -104,18 +105,14 @@ export function runConditionalFieldWorkerRecall(
   const index = InformationIndexSchema.parse(executed.index);
   const previews = captureIndexPreviews(executed.index, readers, workspaceId);
   const source_metadata = captureIndexSourceMetadata(executed.index);
-  // Retry RPC lands in this worker heap, so the issued ledger stays here — not
-  // the parent. Payload is already finalized in projectAcceptingIndex; preview
-  // capture is this process's encode boundary. Parent encodeRecallResult /
-  // encodeIndexResults only wrap tokens and keep every index.entries identity.
-  const issuedDeliveryId = executed.issue?.({
-    index, previews, metadata: source_metadata
-  }) ?? issuedDeliveryIdOf(executed.index);
+  const issuedDeliveryId = executed.delivery_id ?? issuedDeliveryIdOf(executed.index);
+  const preparationId = prepareWorkerDelivery(runtime, executed, source_metadata);
   return {
     execution_receipt: executed.execution_receipt,
     index,
     previews: Object.fromEntries(previews),
     source_metadata,
+    preparation_id: preparationId,
     ...(issuedDeliveryId === undefined ? {} : { issued_delivery_id: issuedDeliveryId })
   };
 }

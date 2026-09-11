@@ -2,7 +2,7 @@ export interface RecallReadSnapshotPort {
   beginDeferred(): void | Promise<void>;
   commit(): void | Promise<void>;
   rollback(): void | Promise<void>;
-  isolate?<T>(work: () => Promise<T>): Promise<T>;
+  isolate?<T>(work: () => Promise<T>, affinity?: string): Promise<T>;
 }
 
 declare const activeRecallReadCapabilityBrand: unique symbol;
@@ -22,20 +22,22 @@ export function isActiveRecallReadCapability(
 
 export async function withRecallReadSnapshot<T>(
   snapshot: RecallReadSnapshotPort | undefined,
-  work: () => Promise<T>
+  work: () => Promise<T>,
+  affinity?: string
 ): Promise<T> {
-  return await withActiveRecallReadSnapshot(snapshot, async () => await work());
+  return await withActiveRecallReadSnapshot(snapshot, async () => await work(), affinity);
 }
 
 export async function withActiveRecallReadSnapshot<T>(
   snapshot: RecallReadSnapshotPort | undefined,
-  work: (capability: ActiveRecallReadCapability | undefined) => Promise<T>
+  work: (capability: ActiveRecallReadCapability | undefined) => Promise<T>,
+  affinity?: string
 ): Promise<T> {
   if (snapshot === undefined) {
     return await work(undefined);
   }
   const run = snapshot.isolate !== undefined
-    ? (inner: () => Promise<T>) => snapshot.isolate!(inner)
+    ? (inner: () => Promise<T>) => snapshot.isolate!(inner, affinity)
     : (inner: () => Promise<T>) => inner();
   return await run(async () => {
     await snapshot.beginDeferred();

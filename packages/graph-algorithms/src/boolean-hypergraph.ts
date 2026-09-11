@@ -48,9 +48,10 @@ export function evaluateBooleanHypergraph(
   const seeds = collectSeeds(nodeSet, input.seeds, input.bottom, top);
   const edges = legalEdges(nodeSet, input.edges, input.bottom, top);
   const byPremise = indexByPremise(edges);
+  const axioms = edges.filter((edge): edge is AndBooleanHyperedge => edge.kind === "and" && edge.from.length === 0);
   const values = new Map<string, number>();
   for (const grade of descendingGrades(seeds, edges, top)) {
-    for (const nodeId of closureAtGrade(grade, seeds, byPremise)) {
+    for (const nodeId of closureAtGrade(grade, seeds, byPremise, axioms)) {
       if (!values.has(nodeId)) values.set(nodeId, grade);
     }
   }
@@ -116,7 +117,7 @@ function legalEdges(
       });
       continue;
     }
-    if (edge.from.length === 0 || edge.from.some((nodeId) => !nodeIds.has(nodeId))) continue;
+    if (edge.from.some((nodeId) => !nodeIds.has(nodeId))) continue;
     legal.push({
       kind: edge.kind,
       from: [...edge.from],
@@ -146,7 +147,6 @@ function descendingGrades(
   edges: readonly BooleanHyperedge[],
   top: number
 ): readonly number[] {
-  if (seeds.size === 0) return [];
   const grades = new Set<number>();
   for (const value of seeds.values()) grades.add(value);
   for (const edge of edges) {
@@ -159,10 +159,16 @@ function descendingGrades(
 function closureAtGrade(
   grade: number,
   seeds: ReadonlyMap<string, number>,
-  byPremise: ReadonlyMap<string, readonly BooleanHyperedge[]>
+  byPremise: ReadonlyMap<string, readonly BooleanHyperedge[]>,
+  axioms: readonly AndBooleanHyperedge[]
 ): Set<string> {
   const on = new Set<string>();
   const pending: string[] = [];
+  for (const edge of axioms) {
+    if (edge.strength < grade || on.has(edge.to)) continue;
+    on.add(edge.to);
+    pending.push(edge.to);
+  }
   for (const [nodeId, value] of seeds) {
     if (value < grade) continue;
     on.add(nodeId);

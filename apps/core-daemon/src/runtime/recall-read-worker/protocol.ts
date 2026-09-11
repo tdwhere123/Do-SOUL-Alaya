@@ -55,6 +55,8 @@ export const RECALL_READ_WORKER_OPERATIONS = [
   "snapshot.commit",
   "snapshot.rollback",
   "conditionalField.recall",
+  "conditionalField.acknowledge",
+  "conditionalField.discard",
   "close"
 ] as const;
 
@@ -108,6 +110,7 @@ export const ConditionalFieldRecallPortResultSchema = z
     previews: z.record(z.string(), z.string()),
     source_metadata: z.record(z.string(), z.unknown()).optional(),
     issued_delivery_id: z.string().optional(),
+    preparation_id: z.string().optional(),
     execution_receipt: z.unknown().optional()
   })
   .strict()

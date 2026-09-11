@@ -93,6 +93,7 @@ export {
 } from "./facet-obligation-join.js";
 
 export type AcceptingProjectionInput = Readonly<{
+  readonly binding_contexts?: import("../engine/binding-environment.js").BindingContextStore;
   readonly snapshot: FieldSnapshot;
   readonly view: QueryView;
   readonly query_id: string;
@@ -108,7 +109,6 @@ export type AcceptingProjectionInput = Readonly<{
   readonly delivered_product_ids?: ReadonlySet<string>;
   readonly delivered_entry_revisions?: Readonly<Record<string, string>>;
   readonly delivered_product_states?: EmittedProductLedger;
-  readonly payload_expansion?: boolean;
   readonly ordered_values?: Readonly<{ size: number; at(index: number): FieldValue | undefined }>;
   readonly on_projection_progress?: (offset: number, facet?: FacetVisitProgress) => void;
   readonly projection_facet_offset?: number;
@@ -294,10 +294,8 @@ function pageAcceptingIndex(
   const prepared = members;
   if (!useEmittedSet || members.length > 0) input.on_semantic_entries?.(prepared);
   const finalized = input.finalize_payload?.(prepared, projected.remaining);
-  const retryPayload = finalized !== undefined && !finalized.complete;
   if (finalized !== undefined) input = { ...input, payload_work: finalized.complete ? "complete" : "open" };
   input.on_remaining_reserve?.(finalized?.remaining ?? projected.remaining);
-  const committed = !retryPayload;
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
   const omittedPayload = mixedPayload || input.payload_work === "open"
@@ -316,13 +314,9 @@ function pageAcceptingIndex(
     ...(input.support_work_status === undefined ? {} : { explanation_work: input.support_work_status }),
     ...(resourceOpen ? { resource_work: "open" as const } : {})
   });
-  const committedRevisions = committed
-    ? mergeCommittedRevisions(emitted, [...members, ...updates])
-    : { ...emitted };
-  const nextOffset = retryPayload ? offset : offset + members.length;
-  const scanOffset = retryPayload
-    ? Number(PROJECTION_CURSOR.exec(input.prior_continuation?.cursor ?? "")?.[1] ?? 0)
-    : projected.truncated || useEmittedSet
+  const committedRevisions = mergeCommittedRevisions(emitted, [...members, ...updates]);
+  const nextOffset = offset + members.length;
+  const scanOffset = projected.truncated || useEmittedSet
       || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined;
   const ledger = input.delivered_product_states
     ?? committedProductStatesOf(input.prior_continuation)
@@ -366,7 +360,6 @@ function pageAcceptingIndex(
       committedRevisions, useEmittedSet),
     representation,
     page_purpose: pagePurposeFor({
-      payload_expansion: input.payload_expansion === true,
       member_count: members.length,
       update_count: productUpdates.length
     }),

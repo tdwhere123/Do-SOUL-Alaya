@@ -10,6 +10,7 @@ export type RecallReadSnapshotOperation =
 export function createRecallReadSnapshotSession(input: {
   readonly workerCount: number;
   getWorker(index: number): Worker;
+  affinityWorkerIndex?(affinity: string): number | undefined;
   dispatch(worker: Worker, operation: RecallReadSnapshotOperation): Promise<unknown>;
 }): {
   readonly port: RecallReadSnapshotPort;
@@ -21,8 +22,9 @@ export function createRecallReadSnapshotSession(input: {
 
   return {
     port: {
-      isolate: async (work) => {
-        const index = await acquire(input.workerCount, held, waiters);
+      isolate: async (work, affinity) => {
+        const preferred = affinity === undefined ? undefined : input.affinityWorkerIndex?.(affinity);
+        const index = await acquire(input.workerCount, held, waiters, preferred);
         const worker = input.getWorker(index);
         try {
           return await als.run(worker, work);
@@ -55,10 +57,12 @@ function requirePinned(als: AsyncLocalStorage<Worker>): Worker {
 async function acquire(
   workerCount: number,
   held: Set<number>,
-  waiters: Array<() => void>
+  waiters: Array<() => void>,
+  preferred?: number
 ): Promise<number> {
   while (true) {
     for (let index = 0; index < workerCount; index += 1) {
+      if (preferred !== undefined && preferred !== index) continue;
       if (!held.has(index)) {
         held.add(index);
         return index;
@@ -76,5 +80,5 @@ function release(
   waiters: Array<() => void>
 ): void {
   held.delete(index);
-  waiters.shift()?.();
+  for (const notify of waiters.splice(0)) notify();
 }

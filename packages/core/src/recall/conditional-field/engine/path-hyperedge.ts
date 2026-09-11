@@ -20,7 +20,7 @@ import {
   joinHyperedgeOr,
   type HyperedgePremise
 } from "../reference/accepting-projection.js";
-import { decideGuards, encodeBindingContext, parseBindingContext, unifyBinding, type BoundSourceFacts } from "./binding-environment.js";
+import { decideGuards, encodeBindingContext, parseBindingContext, unifyBinding, type BoundSourceFacts, type BindingContextStore } from "./binding-environment.js";
 import { joinDerivation, leafDerivation } from "./path-derivation.js";
 import { groundedOutputDerivations } from "./output-derivations.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
@@ -65,6 +65,7 @@ export type HyperedgeEffect = Readonly<{
 }>;
 
 type HyperedgeInput = Readonly<{
+  readonly bindingContexts?: BindingContextStore;
   readonly query_id: string;
   readonly liveStates: RetainedRows<ProductStateKey>;
   readonly overlay: NamedKindOverlay;
@@ -217,6 +218,7 @@ function* nestedHyperedgeAssignments(
     liveStates: [from],
     overlay: input.overlay,
     sourceFacts: input.sourceFacts,
+    bindingContexts: input.bindingContexts,
     observedStates: input.observedStates ?? input.liveStates
   })) {
     if (step.kind === "work") { yield step; continue; }
@@ -281,9 +283,9 @@ function* walkCompiledPremise(
     if (visited.has(key)) continue;
     visited.set(key, node);
     yield { kind: "work", retained_bytes: Buffer.byteLength(key, "utf8") + 96 };
-    const env = parseBindingContext(node.binding_context);
+    const env = parseBindingContext(node.binding_context, input.bindingContexts);
     for (const variable of automaton.localVariables.get(node.program_state) ?? []) env.delete(variable);
-    const here = { ...node, binding_context: encodeBindingContext(env) };
+    const here = { ...node, binding_context: encodeBindingContext(env, input.bindingContexts) };
     for (const hyperedge of automaton.hyperedgeAdvances) {
       if (hyperedge.from !== node.program_state) continue;
       for (const step of hyperedgeEffectSteps(rows, hyperedge.hyperedge, {
@@ -291,6 +293,7 @@ function* walkCompiledPremise(
         liveStates: [here],
         overlay: input.overlay,
         sourceFacts: input.sourceFacts,
+        bindingContexts: input.bindingContexts,
         toProgramStates: hyperedge.to,
         observedStates: observed
       })) {
@@ -384,6 +387,7 @@ function assignmentFromRow(
     readonly query_id: string;
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
+    readonly bindingContexts?: BindingContextStore;
   }>
 ): PremiseAssignment | undefined {
   if (row.sourceObjectId !== productSubjectId(from)) return undefined;
@@ -391,7 +395,7 @@ function assignmentFromRow(
   if (row.validity === undefined || inactiveResolution(row.resolutionKind)) return undefined;
   const declared = input.overlay[row.predicate] ?? input.overlay[relation.relation_kind];
   if (declared?.applicable === false) return undefined;
-  const unified = unifyAdvance(from, relation, row);
+  const unified = unifyAdvance(from, relation, row, input.bindingContexts);
   if (unified === undefined) return undefined;
   const decision = decideGuards(
     [relation.guard],
@@ -474,7 +478,7 @@ function* andHyperedgeEffects(
   if (grouped.some((group) => group.length === 0)) return;
   for (const combo of cartesian(grouped)) {
     yield { kind: "work" };
-    const merged = mergeAssignments(combo);
+    const merged = mergeAssignments(combo, input.bindingContexts);
     if (merged === undefined) continue;
     const first = merged[0];
     if (first === undefined) continue;
@@ -594,21 +598,21 @@ function* completionEffects(
   });
 }
 
-function mergeAssignments(combo: readonly PremiseAssignment[]): PremiseAssignment[] | undefined {
+function mergeAssignments(combo: readonly PremiseAssignment[], bindingContexts?: BindingContextStore): PremiseAssignment[] | undefined {
   const first = combo[0];
   if (first === undefined) return undefined;
-  let env = parseBindingContext(first.binding_context);
+  let env = parseBindingContext(first.binding_context, bindingContexts);
   for (const other of combo.slice(1)) {
     if (other.hypothesis_id !== first.hypothesis_id || other.time_state !== first.time_state) {
       return undefined;
     }
-    for (const [variable, value] of parseBindingContext(other.binding_context)) {
+    for (const [variable, value] of parseBindingContext(other.binding_context, bindingContexts)) {
       const next = unifyBinding(env, variable, value);
       if (next === undefined) return undefined;
       env = next;
     }
   }
-  const merged = encodeBindingContext(env);
+  const merged = encodeBindingContext(env, bindingContexts);
   return combo.map((row) => ({ ...row, binding_context: merged }));
 }
 

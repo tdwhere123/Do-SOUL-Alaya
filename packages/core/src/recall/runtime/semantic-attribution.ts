@@ -91,7 +91,7 @@ export function rolesFrom(state: FieldEngineState): Readonly<{ get(id: string): 
 }
 
 function claimForProduct(state: FieldEngineState, value: FieldValue) {
-  const env = parseBindingContext(value.state.binding_context);
+  const env = parseBindingContext(value.state.binding_context, state.binding_contexts);
   const claimDemand = state.interpretation.view.claim_demands?.find((demand) => env.get(demand.variable) === productSubjectId(value.state));
   const causeDemand = claimDemand !== undefined;
   const claimKind = claimDemand?.proposition_kind ?? "association";

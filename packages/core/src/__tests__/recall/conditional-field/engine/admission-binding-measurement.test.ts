@@ -36,6 +36,7 @@ import {
 } from "../../../../recall/conditional-field/engine/path-composition.js";
 import {
   encodeBindingContext,
+  BindingContextStore,
   evaluateGuard,
   parseBindingContext,
   type BoundSourceFacts
@@ -169,10 +170,11 @@ describe("admission, binding, measurement, and evidence identities", () => {
       ["beta", "b".repeat(90)],
       ["gamma", "c".repeat(90)]
     ]);
-    const encoded = encodeBindingContext(env);
+    const owner = new BindingContextStore(10_000);
+    const encoded = encodeBindingContext(env, owner);
     expect(encoded.startsWith("sha256:")).toBe(true);
-    expect(parseBindingContext(encoded).get("alpha")).toBe("a".repeat(90));
-    expect(parseBindingContext(encoded).get("gamma")).toBe("c".repeat(90));
+    expect(parseBindingContext(encoded, owner).get("alpha")).toBe("a".repeat(90));
+    expect(parseBindingContext(encoded, owner).get("gamma")).toBe("c".repeat(90));
   });
 
   it("compiles yesterday failed deployment as the supported program", () => {

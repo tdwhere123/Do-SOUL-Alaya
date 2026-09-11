@@ -144,10 +144,10 @@ the full prior product, semantic revision and new explanation root. It adds
 witness exposure receipts without repeating object or source-span exposure.
 An unknown observation region retains its uncertainty while other open regions
 continue consuming their independently authorized work.
-Per-candidate facet and seed filtering still scans retained collections;
-those projection visits are not yet fully accounted by the finalization work
-counter. The bounded native, relaxation and retained-input mechanisms above
-do not establish a complete bound on every projection operation.
+Projection charges retained candidate and facet visits through the request
+cost ledger and resumes interrupted facet scans. Native, relaxation and
+projection counters describe their instrumented operations; they do not
+establish a bound on every process allocation or operating-system cost.
 
 Admitted immutable hard relation instances transfer at identity (1000).
 Relation names do not assign grades. Associative enumeration requires a
@@ -215,6 +215,23 @@ retained reader-process instance. Mutation generation changes invalidate stale
 state, including same-timestamp source edits. Reader expiry is a lifetime
 failure, independent of semantic `as_of`. Process loss invalidates continuation;
 durable cross-process resume is not advertised.
+
+Long binding recovery belongs to the retained field. Its immutable snapshots
+share unchanged storage; preparation extends a private fork and charges retained
+strings against the field memory budget. Missing recovery state fails closed.
+No process-global binding recovery table outlives the execution owner.
+
+Prepared pages advance retained field state only after delivery acknowledgment
+validates the current snapshot. The acknowledged page is immutable and
+replayable; the daemon persists its delivery receipt under a snapshot-generation
+check in the same transaction. Failed persistence can retry the same page and
+delivery identity. Bounded worker affinity routes continuation back to the
+owning process. Payload expansion
+requires an issued continuation and a source root already delivered in that
+query epoch. Its offset, end and byte cap are part of retry identity. Partial
+or omitted payload keeps the member delivered once while later payload work
+uses its own progress. Source pages retain an authorized payload continuation
+after membership ends so public response clipping cannot strand unread bytes.
 
 Observe authorization is a tri-state principal, not a default scope.
 Chat, analyze, and govern set `scope_filter: null`, which the runner maps to
@@ -311,10 +328,13 @@ dependencies or observer compatibility. Incompatible artifacts remain
 `NOT_REPLAYABLE` until separately prepared and verified; baseline execution is
 a separate action.
 
-The selected index has memory identities. Standalone evidence-capsule Recall
-delivery and artifact-kind semantic retrieval are unsupported live arms.
-Capsule storage, qualified User/Assistant projections, provenance and evidence
-support remain separate supported owners. Ready semantic artifacts remain
+The selected index carries typed memory and source-evidence identities.
+Retained source-record and evidence-capsule roots can be delivered without a
+memory entry. Source usage revalidates the current root version, retained
+content digest, active capsule alias and UTF-8 span through the same bounded
+root reader used by Recall. Artifact-kind semantic retrieval remains an
+unsupported live arm. Qualified User/Assistant projections, provenance and
+evidence support retain their separate owners. Ready semantic artifacts remain
 observable in storage with source-current publication/restart checks; an
 unsupported kind query does not claim those artifacts are absent. Ordinary
 memory-source recall continues without optional enrichment or provider work.

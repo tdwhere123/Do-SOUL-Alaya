@@ -16,6 +16,7 @@ import {
   captureIndexSourceMetadata,
   encodeRecallResult,
   runConditionalFieldRecall,
+  type ConditionalFieldRecallRequest,
   type ObserverReaders
 } from "../../../../recall/recall-service.js";
 import { BoundedIndexPayload } from "../../../../recall/runtime/index-payload.js";
@@ -151,7 +152,7 @@ describe("source payload encode", () => {
     if (firstChunk.status !== "chunk") return;
     const startOffset = firstChunk.end_offset;
     const calls: HydrateCall[] = [];
-    const index = runConditionalFieldRecall({
+    const request: ConditionalFieldRecallRequest = {
       workspace_id: "workspace",
       query_text: "needle",
       budget: defaultBudget(),
@@ -160,13 +161,6 @@ describe("source payload encode", () => {
       as_of: INTERPRETATION_CLOCK,
       expires_at: FAR_FUTURE_EXPIRY,
       result_kind_view: "source_only",
-      payload_continuation: {
-        schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-        purpose: "payload_expansion",
-        target: SOURCE_TARGET,
-        start_offset: startOffset,
-        byte_budget: 16
-      },
       readers: {
         sourceRoots: () => ({
           rows: [{
@@ -188,7 +182,13 @@ describe("source payload encode", () => {
         sourceRoot: hydrateReaders(calls).sourceRoot
       },
       authorized_scopes: null
-    });
+    };
+    const first = runConditionalFieldRecall({ ...request, readers: { ...request.readers,
+      sourceRoot: (input) => request.readers.sourceRoot!({ ...input, byteLimit: 32 }) } });
+    expect(first.continuation).not.toBeNull();
+    const index = runConditionalFieldRecall({ ...request, continuation: first.continuation,
+      payload_continuation: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+        purpose: "payload_expansion", target: SOURCE_TARGET, start_offset: startOffset, byte_budget: 16 } });
     const sourceEntryOnIndex = index.entries.find((entry) => entry.target.kind === "source_evidence");
     expect(sourceEntryOnIndex?.target.kind).toBe("source_evidence");
     if (sourceEntryOnIndex?.target.kind !== "source_evidence") return;

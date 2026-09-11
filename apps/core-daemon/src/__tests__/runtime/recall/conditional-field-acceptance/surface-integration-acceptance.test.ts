@@ -18,7 +18,7 @@ import {
   type PayloadContinuationRequest,
   type SoulMemorySearchResponse
 } from "@do-soul/alaya-protocol";
-import { EventPublisher, RecallService, fieldContractSha256 } from "@do-soul/alaya-core";
+import { EventPublisher, RecallService, fieldContractSha256, snapshotIdFromPin } from "@do-soul/alaya-core";
 import {
   continueAcceptingIndex,
   projectAcceptingIndex
@@ -26,7 +26,10 @@ import {
 import {
   SqliteEventLogRepo,
   SqliteFieldSourceRecordRepo,
+  SqliteSourceRootRecallReader,
+  SqliteEvidenceCapsuleRepo,
   SqliteTrustStateRepo,
+  SqliteIndexedRecallProjection,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../../../../runtime/recall-read-worker/observer-operations.js";
@@ -110,6 +113,8 @@ function recorderFor(database: StorageDatabase) {
   return new TrustStateRecorder({
     ready: true,
     clock: () => NOW,
+    currentSnapshotId: (workspaceId) => snapshotIdFromPin(workspaceId,
+      new SqliteIndexedRecallProjection(database.connection).observablePin(workspaceId)),
     repo: new SqliteTrustStateRepo(database),
     eventPublisher: new EventPublisher({
       eventLogRepo: new SqliteEventLogRepo(database),
@@ -133,9 +138,7 @@ function handlerFor(
     now,
     recallService: service,
     trustStateRecorder: recorderFor(database),
-    fieldSource: {
-      findRecordById: (workspaceId, recordId) => sourceRepo.findById(workspaceId, recordId)
-    }
+    fieldSource: new SqliteSourceRootRecallReader(sourceRepo, new SqliteEvidenceCapsuleRepo(database))
   });
 }
 
@@ -194,10 +197,10 @@ function milligradeValue(objectId: string, milligrades: number): FieldValue {
   };
 }
 
-function snapshotOf(values: readonly FieldValue[]): FieldSnapshot {
+function snapshotOf(values: readonly FieldValue[], snapshotId: string): FieldSnapshot {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    snapshot_id: `sha256:${"c".repeat(64)}`,
+    snapshot_id: snapshotId,
     query_id: "failed-deployment",
     seeds: [],
     values,
@@ -218,7 +221,7 @@ function openObserver(): NonNullable<Parameters<typeof projectAcceptingIndex>[0]
   };
 }
 
-function projectTypedUpdateIndex(): InformationIndex {
+function projectTypedUpdateIndex(snapshotId: string): InformationIndex {
   const a = milligradeValue("aaaaaaaa-aaaa-4aaa-8aaa-000000000201", 600);
   const b = milligradeValue("aaaaaaaa-aaaa-4aaa-8aaa-000000000202", 900);
   const budget = {
@@ -241,16 +244,16 @@ function projectTypedUpdateIndex(): InformationIndex {
     view,
     observer: openObserver(),
     query_id: "failed-deployment",
-    snapshot_id: `sha256:${"c".repeat(64)}`,
+    snapshot_id: snapshotId,
     result_version: "v1",
     budget,
     expires_at: "2099-01-01T00:00:00.000Z"
   };
-  const first = projectAcceptingIndex({ ...base, snapshot: snapshotOf([a]) });
-  const second = continueAcceptingIndex(first, { ...base, snapshot: snapshotOf([a, b]) });
+  const first = projectAcceptingIndex({ ...base, snapshot: snapshotOf([a], snapshotId) });
+  const second = continueAcceptingIndex(first, { ...base, snapshot: snapshotOf([a, b], snapshotId) });
   return continueAcceptingIndex(second, {
     ...base,
-    snapshot: snapshotOf([{ ...a, milligrades: 950 }, b])
+    snapshot: snapshotOf([{ ...a, milligrades: 950 }, b], snapshotId)
   });
 }
 
@@ -290,11 +293,8 @@ describe("CP09 worker MCP CLI surfaces", () => {
       deps: {
         ...createDeps(),
         trustStateRecorder: recorderFor(slice.database),
-        fieldSource: {
-          findRecordById: (workspaceId, recordId) =>
-            new SqliteFieldSourceRecordRepo(slice.database, fieldContractSha256)
-              .findById(workspaceId, recordId)
-        }
+        fieldSource: new SqliteSourceRootRecallReader(
+          new SqliteFieldSourceRecordRepo(slice.database, fieldContractSha256), new SqliteEvidenceCapsuleRepo(slice.database))
       },
       now: () => NOW,
       warn: () => undefined
@@ -323,7 +323,8 @@ describe("CP09 worker MCP CLI surfaces", () => {
 
   it("encodes a projector typed-update index through executeRecall, MCP, and CLI", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
-    const index = projectTypedUpdateIndex();
+    const index = projectTypedUpdateIndex(snapshotIdFromPin(WS,
+      new SqliteIndexedRecallProjection(slice.database.connection).observablePin(WS)));
     expect(index.page_purpose).toBe("update");
     expect(index.product_updates).toHaveLength(1);
     const { dependencies } = createDependencies();
@@ -492,7 +493,7 @@ describe("CP09 worker MCP CLI surfaces", () => {
     }
   });
 
-  it("replays a terminal last page with the same delivery_id", async () => {
+  it("replays the last source membership page and retains an independent payload continuation", async () => {
     const directory = await mkdtemp(join(tmpdir(), "alaya-cp09-last-page-"));
     directories.push(directory);
     const filename = join(directory, "field.sqlite");
@@ -510,7 +511,7 @@ describe("CP09 worker MCP CLI surfaces", () => {
       const first = await callRecall(handler, query);
       expect(first.index.continuation).not.toBeNull();
       const last = await callRecall(handler, { ...query, continuation: first.index.continuation });
-      expect(last.index.continuation).toBeNull();
+      expect(last.index.continuation).not.toBeNull();
       expect(last.results.length).toBeGreaterThan(0);
       const retry = await callRecall(handler, { ...query, continuation: first.index.continuation });
       expect(retry.page_purpose).toBe("retry");
@@ -518,6 +519,9 @@ describe("CP09 worker MCP CLI surfaces", () => {
       expect(retry.results.map((row) => row.object_id ?? row.target)).toEqual(
         last.results.map((row) => row.object_id ?? row.target)
       );
+      const finished = await callRecall(handler, { ...query, continuation: last.index.continuation });
+      expect(finished.results).toEqual([]);
+      expect(finished.index.continuation).toBeNull();
     } finally {
       await worker.close();
     }
@@ -616,11 +620,8 @@ describe("CP09 worker MCP CLI surfaces", () => {
         deps: {
           ...createDeps(),
           trustStateRecorder: recorderFor(slice.database),
-          fieldSource: {
-            findRecordById: (workspaceId, recordId) =>
-              new SqliteFieldSourceRecordRepo(slice.database, fieldContractSha256)
-                .findById(workspaceId, recordId)
-          }
+          fieldSource: new SqliteSourceRootRecallReader(
+            new SqliteFieldSourceRecordRepo(slice.database, fieldContractSha256), new SqliteEvidenceCapsuleRepo(slice.database))
         },
         now: () => NOW,
         warn: () => undefined
@@ -641,6 +642,7 @@ describe("CP09 worker MCP CLI surfaces", () => {
           query: SOURCE_BODY,
           max_results: 8,
           result_kind_view: "source_only",
+          continuation: sourceOnly.index.continuation,
           payload_continuation: {
             schema_version: 1,
             purpose: "payload_expansion",

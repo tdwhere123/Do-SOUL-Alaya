@@ -6,6 +6,7 @@ import {
 } from "@do-soul/alaya-core";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  SNAPSHOT_PIN_NATIVE_WORK,
   ControlPlaneObjectKind,
   RetentionPolicy,
   SoulMemorySearchResponseSchema,
@@ -63,6 +64,7 @@ export interface RecallUsageHandlerDependencies {
   readonly eventPublisher?: Pick<EventPublisher, "appendManyWithMutation">;
   readonly recallService: {
     recall(params: {
+      readonly defer_delivery?: boolean;
       readonly taskSurface: ReturnType<typeof TaskObjectSurfaceSchema.parse>;
       readonly workspaceId: string;
       readonly strategy: "chat" | "analyze" | "build" | "govern";
@@ -99,10 +101,14 @@ export interface RecallUsageHandlerDependencies {
       readonly provider_calls?: 0;
       readonly garden_enqueue?: 0;
       readonly issued_delivery_id?: string;
+      readonly execution_receipt?: import("@do-soul/alaya-core").ConditionalFieldExecutionReceipt;
+      readonly acknowledge_delivery?: (index: import("@do-soul/alaya-protocol").InformationIndex, previews: ReadonlyMap<string, string>) => Promise<void>;
+      readonly discard_delivery?: () => Promise<void>;
     }>>;
   };
   readonly trustStateRecorder: {
-    recordDelivery(input: Omit<ContextDeliveryRecord, "audit_event_id">): Promise<ContextDeliveryRecord>;
+    recordDelivery(input: Omit<ContextDeliveryRecord, "audit_event_id">,
+      condition?: Readonly<{ expected_snapshot_id: string; onSnapshotChecked?: () => void }>): Promise<ContextDeliveryRecord>;
     recordUsage(
       input: Omit<UsageProofRecord, "audit_event_id">,
       options?: Readonly<{
@@ -136,24 +142,10 @@ export interface RecallUsageHandlerDependencies {
     }> | null>;
   };
   readonly fieldSource?: {
-    findRecordById(
+    isCurrentTarget(
       workspaceId: string,
-      recordId: string
-    ): Promise<Readonly<{
-      readonly workspace_id: string;
-      readonly record_id: string;
-      readonly source_version: string;
-      readonly content_digest: string;
-      readonly evidence_object_id: string | null;
-      readonly source_body: string | null;
-    }> | null> | Readonly<{
-      readonly workspace_id: string;
-      readonly record_id: string;
-      readonly source_version: string;
-      readonly content_digest: string;
-      readonly evidence_object_id: string | null;
-      readonly source_body: string | null;
-    }> | null;
+      target: import("@do-soul/alaya-protocol").SourceEvidenceTarget
+    ): Promise<boolean> | boolean;
   };
   readonly sourceAdmission?: SourceAdmissionPort;
   readonly asyncSideEffectAudit?: {
@@ -206,29 +198,45 @@ async function executeRecall(
     taskSurface,
     policyOverride
   });
-  const encoded = encodeRecallHandlerResults(recallResult, policyOverride);
-  assertRecallProductUpdateCompatibility(request, encoded.index.product_updates);
-  const delivery = buildRecallDelivery(params, context, encoded.results, { ...recallResult, index: encoded.index });
-  const replayed = encoded.index.page_purpose === "retry"
-    ? await params.deps.trustStateRecorder.findDeliveryById(delivery.deliveryId)
-    : null;
-  if (replayed === null) {
-    await params.deps.trustStateRecorder.recordDelivery(delivery.record);
+  try {
+    const encoded = encodeRecallHandlerResults(recallResult, policyOverride);
+    assertRecallProductUpdateCompatibility(request, encoded.index.product_updates);
+    const delivery = buildRecallDelivery(params, context, encoded.results, { ...recallResult, index: encoded.index });
+    const response = buildRecallResponse(delivery.deliveryId, encoded.results, encoded.results.length,
+      { ...recallResult, index: encoded.index }, encoded.explainabilityPartial);
+    await recallResult.acknowledge_delivery?.(encoded.index, new Map(encoded.index.entries.map((entry, offset) =>
+      [indexEntryCacheKey(entry), encoded.results[offset]?.content_preview ?? "[payload omitted]"])));
+    const replayed = recallResult.issued_delivery_id === undefined ? null
+      : await params.deps.trustStateRecorder.findDeliveryById(delivery.deliveryId);
+    if (replayed === null) {
+      if (recallResult.acknowledge_delivery === undefined) await params.deps.trustStateRecorder.recordDelivery(delivery.record);
+      else await params.deps.trustStateRecorder.recordDelivery(delivery.record, {
+          expected_snapshot_id: encoded.index.snapshot_id,
+          onSnapshotChecked: () => recordDeliveryPinCost(recallResult)
+        });
+    }
+    await emitRecallDeliveredTelemetry(params, {
+      deliveryId: delivery.deliveryId,
+      query: request.query,
+      pointerCount: delivery.deliveredObjectIds.length,
+      latencyMs: Date.now() - recallStartedAt,
+      context
+    });
+    return response;
+  } catch (error) {
+    try { await recallResult.discard_delivery?.(); } catch { /* Preserve the original delivery failure. */ }
+    throw error;
   }
-  await emitRecallDeliveredTelemetry(params, {
-    deliveryId: delivery.deliveryId,
-    query: request.query,
-    pointerCount: delivery.deliveredObjectIds.length,
-    latencyMs: Date.now() - recallStartedAt,
-    context
-  });
-  return buildRecallResponse(
-    delivery.deliveryId,
-    encoded.results,
-    encoded.results.length,
-    { ...recallResult, index: encoded.index },
-    encoded.explainabilityPartial
-  );
+}
+
+function recordDeliveryPinCost(result: RecallServiceResult): void {
+  const receipt = result.execution_receipt;
+  if (receipt === undefined) return;
+  const actual = receipt.actual;
+  if (actual === undefined) return;
+  Object.assign(receipt, { actual: { ...actual, native_visits: actual.native_visits + SNAPSHOT_PIN_NATIVE_WORK,
+    phases: { ...actual.phases, index: { ...actual.phases.index,
+      native_visits: actual.phases.index.native_visits + SNAPSHOT_PIN_NATIVE_WORK } } } });
 }
 
 function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => string) {

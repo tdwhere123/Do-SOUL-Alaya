@@ -63,6 +63,7 @@ export interface TrustStatePersistenceRepoPort {
 }
 
 export interface TrustStateRecorderDependencies {
+  readonly currentSnapshotId?: (workspaceId: string) => string;
   readonly eventPublisher: TrustStateEventPublisherPort;
   readonly repo?: TrustStatePersistenceRepoPort;
   readonly clock?: () => string;
@@ -99,6 +100,7 @@ export class TrustStateRecorder {
   private readonly repo: TrustStatePersistenceRepoPort;
   private readonly clock: () => string;
   private ready: boolean;
+  private readonly currentSnapshotId?: (workspaceId: string) => string;
 
   // Counter maps are runtime projections. Daemon startup replays their
   // EventLog rows before markReady so status remains restart-stable.
@@ -111,6 +113,7 @@ export class TrustStateRecorder {
     this.repo = deps.repo ?? new InMemoryTrustStateRepo();
     this.clock = deps.clock ?? (() => new Date().toISOString());
     this.ready = deps.ready ?? false;
+    this.currentSnapshotId = deps.currentSnapshotId;
   }
 
   public markReady(): void {
@@ -134,7 +137,8 @@ export class TrustStateRecorder {
   }
 
   public async recordDelivery(
-    input: Omit<ContextDeliveryRecord, "audit_event_id">
+    input: Omit<ContextDeliveryRecord, "audit_event_id">,
+    condition?: Readonly<{ expected_snapshot_id: string; onSnapshotChecked?: () => void }>
   ): Promise<ContextDeliveryRecord> {
     this.assertReady();
 
@@ -163,6 +167,14 @@ export class TrustStateRecorder {
         }
       ],
       (entries) => {
+        if (condition !== undefined) {
+          let current: string | undefined;
+          if (draftRecord.workspace_id !== null && this.currentSnapshotId !== undefined) {
+            current = this.currentSnapshotId(draftRecord.workspace_id);
+            condition.onSnapshotChecked?.();
+          }
+          if (current !== condition.expected_snapshot_id) throw new Error("Recall source generation changed before delivery receipt");
+        }
         // invariant: audit_event_id mirrors the EventLog row created in the
         // same transaction.
         const auditEntry = requireAuditEntry(entries);

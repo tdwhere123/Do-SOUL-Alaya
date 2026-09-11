@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryDimension, type InformationIndex, type SoulMemorySearchResponse, type UsageReport } from "@do-soul/alaya-protocol";
-import { capableRecallConsumerDeclaration, EventPublisher, RecallService, attributeUsageReports } from "@do-soul/alaya-core";
-import { SqliteTrustStateRepo, SqliteEventLogRepo, SqliteMemoryEntryRepo, SqliteRunRepo, initDatabase, type StorageDatabase } from "@do-soul/alaya-storage";
+import { capableRecallConsumerDeclaration, EventPublisher, RecallService, attributeUsageReports, snapshotIdFromPin } from "@do-soul/alaya-core";
+import { SqliteTrustStateRepo, SqliteEventLogRepo, SqliteMemoryEntryRepo, SqliteRunRepo, SqliteIndexedRecallProjection, initDatabase, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders } from "../../../../runtime/recall-read-worker/observer-operations.js";
 import { createBoundedActiveConstraintsReader } from "../../../../runtime/recall-read-worker/active-constraints.js";
 import { createRecallReadWorkerClient } from "../../../../runtime/recall/recall-read-worker-client.js";
@@ -45,6 +45,8 @@ function serviceFor(database: StorageDatabase, now: () => string = () => NOW,
 
 function recorderFor(database: StorageDatabase) {
   return new TrustStateRecorder({ ready: true, clock: () => NOW,
+    currentSnapshotId: (workspaceId) => snapshotIdFromPin(workspaceId,
+      new SqliteIndexedRecallProjection(database.connection).observablePin(workspaceId)),
     repo: new SqliteTrustStateRepo(database),
     eventPublisher: new EventPublisher({ eventLogRepo: new SqliteEventLogRepo(database),
       runHotStateService: { apply: () => {} }, runtimeNotifier: { notify: async () => {}, notifyEntry: async () => {} } }) });

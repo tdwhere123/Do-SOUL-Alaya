@@ -213,7 +213,7 @@ describe("CP11 delivery falsifiers", () => {
     expect(index.order_status).not.toBe("certified_prefix");
   });
 
-  it("T01: zero-width and rejected payload do not consume never-sent product", () => {
+  it("T01: zero-width exposes no membership while omitted payload does not repeat an exposed product", () => {
     const values = [guaranteedFieldValue("a", 600), guaranteedFieldValue("b", 900)];
     const zero = projectAcceptingIndex(associativeInput({
       snapshot: snapshotOf(values), budget: defaultBudget({ page_budget: 0 }), expires_at: FAR_FUTURE_EXPIRY
@@ -226,7 +226,8 @@ describe("CP11 delivery falsifiers", () => {
       finalize_payload: (_entries, remaining) => ({ remaining, complete: false, retryable: false })
     });
     expect(rejected.entries.map(memberId)).toEqual(["b"]);
-    expect(rejected.continuation?.emitted_revisions).toBeUndefined();
+    expect(Object.keys(rejected.continuation?.emitted_revisions ?? {})).toHaveLength(1);
+    expect(rejected.completeness.payload).not.toBe("complete");
   });
 
   it("T02: issued retry is idempotent and a revoked identity cannot replay", () => {

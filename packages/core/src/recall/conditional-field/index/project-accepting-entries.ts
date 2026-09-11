@@ -273,7 +273,7 @@ export function indexEntryForValue(
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
   const claim = input.claims?.get(key) ?? "unknown";
-  if (!claimObligationAccepts(value, input.view, claim)) return null;
+  if (!claimObligationAccepts(value, input.view, claim, input.binding_contexts)) return null;
   const proposition = input.claim_propositions?.get(key);
   const guaranteed = guaranteedMilligradesOf(value);
   return {

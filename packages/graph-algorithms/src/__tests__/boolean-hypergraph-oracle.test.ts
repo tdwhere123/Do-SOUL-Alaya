@@ -10,6 +10,15 @@ import {
 import { enumerateMaxMinField } from "./max-min-enumerate.js";
 
 describe("evaluateBooleanHypergraph", () => {
+  it("treats empty conjunction as top before its cap and empty disjunction as unreachable", () => {
+    const values = evaluateBooleanHypergraph(graph(["axiom", "next", "zero", "absent"], [], [
+      { kind: "and", from: [], to: "axiom", strength: 700 },
+      { kind: "identity", from: "axiom", to: "next" },
+      { kind: "and", from: [], to: "zero", strength: 0 },
+      { kind: "or", from: [], to: "absent", strength: 1000 }
+    ]));
+    expect(values).toEqual(new Map([["axiom", 700], ["next", 700], ["zero", 0]]));
+  });
   it("omits unseeded nodes and keeps seeded milligrade 0", () => {
     const isolated = evaluateBooleanHypergraph(graph(["accepting"], [], []));
     expect(isolated.has("accepting")).toBe(false);

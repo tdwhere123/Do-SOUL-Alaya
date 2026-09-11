@@ -15,10 +15,12 @@ import {
   TaskSurfaceBuilder,
   ToolSpecService,
   ZeroDaySecurityLayer,
+  snapshotIdFromPin,
   type RuntimeNotifier
 } from "@do-soul/alaya-core";
 import {
   SqliteDriftLeaseRepo,
+  SqliteIndexedRecallProjection,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import {
@@ -174,6 +176,8 @@ function createConfigFoundation(
   const trustStateRecorder = createTrustStateRecorder({
     eventPublisher,
     repo: input.trustStateRepo,
+    currentSnapshotId: (workspaceId) => snapshotIdFromPin(workspaceId,
+      new SqliteIndexedRecallProjection(input.database.connection).observablePin(workspaceId)),
     clock: () => new Date().toISOString()
   });
   const toolSpecService = new ToolSpecService({ toolSpecRepo: input.toolSpecRepo });

@@ -61,7 +61,13 @@ describe("query-only field hydration equivalence", () => {
       "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
     const dispatched = await dispatchQueryOnly(fixture.queryOnlyRuntime,
       "conditionalField.recall", payload) as ConditionalFieldRecallPortResult;
-    expect(dispatched.index).toEqual(direct.index);
+    expect(dispatched.index.continuation).not.toBeNull();
+    expect(direct.index.continuation).not.toBeNull();
+    expect(dispatched.index).toEqual({ ...direct.index, continuation: {
+      ...direct.index.continuation,
+      continuation_id: dispatched.index.continuation!.continuation_id,
+      capability: dispatched.index.continuation!.capability
+    } });
     expect(dispatched.previews).toEqual(direct.previews);
     expect(dispatched.index.entries.map((entry) => entry.target.kind)).toEqual([
       "source_evidence",

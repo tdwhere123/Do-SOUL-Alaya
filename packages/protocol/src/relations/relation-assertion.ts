@@ -5,6 +5,7 @@ import {
   BoundedJsonObjectSchema,
   BoundedLabelSchema,
   BoundedReasonSchema,
+  compareUtcInstants,
   IsoDatetimeStringSchema
 } from "../shared/schema-primitives.js";
 import { PathAnchorRefSchema } from "./path-relation.js";
@@ -25,7 +26,8 @@ const BoundedRelationValiditySchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if (Date.parse(value.valid_from) >= Date.parse(value.valid_to)) {
+    const order = compareUtcInstants(value.valid_from, value.valid_to);
+    if (order === undefined || order >= 0) {
       context.addIssue({
         code: "custom",
         path: ["valid_to"],
@@ -216,12 +218,13 @@ export function isRelationValidityActiveAt(
   asOf: string,
   permittedTimelessPolicyIds: ReadonlySet<string>
 ): boolean {
-  const instant = Date.parse(IsoDatetimeStringSchema.parse(asOf));
+  const instant = IsoDatetimeStringSchema.parse(asOf);
   switch (validity.kind) {
     case "bounded":
-      return instant >= Date.parse(validity.valid_from) && instant < Date.parse(validity.valid_to);
+      return (compareUtcInstants(instant, validity.valid_from) ?? -1) >= 0
+        && (compareUtcInstants(instant, validity.valid_to) ?? 0) < 0;
     case "open":
-      return instant >= Date.parse(validity.valid_from);
+      return (compareUtcInstants(instant, validity.valid_from) ?? -1) >= 0;
     case "timeless":
       return permittedTimelessPolicyIds.has(validity.governance_policy_id);
   }

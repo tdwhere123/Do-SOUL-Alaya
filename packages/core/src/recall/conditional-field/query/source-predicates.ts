@@ -1,12 +1,13 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  compareUtcInstants,
   type Guard,
   type GuardInterval,
   type GuardVerdict,
   type QueryHole
 } from "@do-soul/alaya-protocol";
 import { sourceLiteralOccurs } from "../../../memory/evidence-create/source-utf8-hydrate.js";
-import { SOURCE_FILTER_PREDICATE, sourceTimestampOrder } from "./ordinary-language.js";
+import { SOURCE_FILTER_PREDICATE } from "./ordinary-language.js";
 
 export const FROZEN_SOURCE_PREDICATE_NAMES = [
   "source.identity.v1",
@@ -120,9 +121,9 @@ function eventTimeVerdict(
 ): GuardVerdict {
   const stamp = subject.event_time;
   if (stamp === undefined || stamp === null) return "unresolved";
-  if (interval === undefined) return sourceTimestampOrder(stamp, stamp) === undefined ? "unresolved" : "true";
-  const lower = sourceTimestampOrder(stamp, interval.start);
-  const upper = sourceTimestampOrder(stamp, interval.end);
+  if (interval === undefined) return compareUtcInstants(stamp, stamp) === undefined ? "unresolved" : "true";
+  const lower = compareUtcInstants(stamp, interval.start);
+  const upper = compareUtcInstants(stamp, interval.end);
   if (lower === undefined || upper === undefined) return "unresolved";
   return lower >= 0 && upper < 0 ? "true" : "false";
 }

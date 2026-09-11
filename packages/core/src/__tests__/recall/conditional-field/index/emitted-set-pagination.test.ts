@@ -180,7 +180,7 @@ describe("emitted-set pagination", () => {
     expect(next.entries.map(objectId)).toEqual(["b"]);
   });
 
-  it("does not consume a product when payload finalization rejects the page", () => {
+  it("keeps delivered membership when payload is omitted", () => {
     const input = associativeInput({
       snapshot: snapshotOf([guaranteedFieldValue("a", 600), guaranteedFieldValue("b", 900)]),
       budget: defaultBudget({ page_budget: 1 }),
@@ -192,12 +192,12 @@ describe("emitted-set pagination", () => {
       finalize_payload: (_entries, remaining) => ({ remaining, complete: false, retryable: false })
     });
     expect(rejected.entries.map(objectId)).toEqual(["b"]);
-    expect(rejected.continuation?.emitted_revisions).toBeUndefined();
+    expect(Object.keys(rejected.continuation?.emitted_revisions ?? {})).toHaveLength(1);
     const retried = continueAcceptingIndex(rejected, {
       ...input,
       finalize_payload: (_entries, remaining) => ({ remaining: remaining - 1, complete: true })
     });
-    expect(retried.entries.map(objectId)).toEqual(["b"]);
+    expect(retried.entries.map(objectId)).toEqual(["a"]);
   });
 
   it("invalidates continuation on policy, kind-view, and scope change", () => {

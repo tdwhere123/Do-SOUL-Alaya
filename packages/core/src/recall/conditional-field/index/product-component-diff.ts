@@ -146,11 +146,9 @@ export function mergeCommittedProductStates(
 }
 
 export function pagePurposeFor(input: Readonly<{
-  readonly payload_expansion: boolean;
   readonly member_count: number;
   readonly update_count: number;
 }>): PagePurpose {
-  if (input.payload_expansion) return "payload";
   if (input.member_count > 0) return "membership";
   if (input.update_count > 0) return "update";
   return "membership";

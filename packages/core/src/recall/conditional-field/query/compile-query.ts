@@ -52,7 +52,6 @@ export {
 export {
   collectRecoverableBindings,
   collectRelations,
-  recoverableBindingContext,
   type QueryMemoryPort,
   type QueryRelation
 } from "./query-admission.js";

@@ -12,6 +12,19 @@ export const IsoDatetimeStringSchema = z.union([
     { message: "Invalid ISO datetime" }
   )
 ]);
+
+export function compareUtcInstants(left: string, right: string): number | undefined {
+  if (!IsoDatetimeStringSchema.safeParse(left).success || !IsoDatetimeStringSchema.safeParse(right).success) return undefined;
+  const normalize = (value: string) => MINUTE_PRECISION_UTC.test(value) ? `${value.slice(0, -1)}:00Z` : value;
+  const [leftWhole, leftFraction = ""] = normalize(left).slice(0, -1).split(".");
+  const [rightWhole, rightFraction = ""] = normalize(right).slice(0, -1).split(".");
+  if (leftWhole !== rightWhole) return leftWhole! < rightWhole! ? -1 : 1;
+  // Date.parse discards fractional precision that the public datetime schema permits.
+  const width = Math.max(leftFraction.length, rightFraction.length);
+  const l = leftFraction.padEnd(width, "0"), r = rightFraction.padEnd(width, "0");
+  return l === r ? 0 : l < r ? -1 : 1;
+}
+
 export const NonNegativeIntSchema = z.number().int().nonnegative();
 export const PositiveIntSchema = z.number().int().positive();
 

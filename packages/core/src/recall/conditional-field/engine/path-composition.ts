@@ -37,9 +37,9 @@ import { productStateNodeId } from "../reference/bind-max-min.js";
 import {
   UNBOUND_BINDING,
   decideGuards,
-  encodeBindingContext,
-  parseBindingContext,
-  unifyBinding,
+  seedBindingContext,
+  alignOutgoingBinding,
+  type BindingContextStore,
   type BoundSourceFacts
 } from "./binding-environment.js";
 import { leafDerivation } from "./path-derivation.js";
@@ -203,7 +203,8 @@ export function seedProgramStates(program: QueryProgram): readonly string[] {
 export function seedActivationsForObservation(
   observation: TypedObservation,
   interpretation: QueryInterpretation,
-  asOf: string
+  asOf: string,
+  bindingContexts?: BindingContextStore
 ): readonly SeedActivation[] {
   if (observation.applicability.verdict !== "true") return [];
   if (!queryAdmitsGuaranteedSeed(interpretation)) return [];
@@ -225,7 +226,8 @@ export function seedActivationsForObservation(
         automaton,
         observation.object_id,
         hypothesis.bindings,
-        programState
+        programState,
+        bindingContexts
       );
       if (binding === undefined) continue;
       const state = productStateFromObservation(observation, {
@@ -296,6 +298,7 @@ export function adjacencyEffectsForRows(
 }
 
 export type AdjacencyEffectsInput = Readonly<{
+    readonly bindingContexts?: BindingContextStore;
     readonly interpretation: QueryInterpretation;
     readonly asOf: string;
     readonly liveStates: RetainedRows<ProductStateKey>;
@@ -313,7 +316,8 @@ export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input:
   if (initialBytes > memoryLimit) return undefined;
   // A pending computation owns this immutable input version. Producers replace
   // versions; retaining their references needs no eager element traversal.
-  return new PathEffectCursor(adjacencyEffectSteps(rows, input), initialBytes);
+  const bindingContexts = input.bindingContexts?.fork(memoryLimit - initialBytes);
+  return new PathEffectCursor(() => adjacencyEffectSteps(rows, { ...input, bindingContexts }), initialBytes, bindingContexts);
 }
 
 function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput): PathComputation<void> {
@@ -331,6 +335,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         liveStates: [from],
         overlay: input.overlay,
         sourceFacts: input.sourceFacts,
+        bindingContexts: input.bindingContexts,
         toProgramStates: advance.to,
         observedStates: input.liveStates
       })) yield step.kind === "work" ? step : { kind: "effect", effect: attachHyperedgeFacet(step.effect) };
@@ -347,6 +352,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         query_id: input.interpretation.query_id,
         overlay: input.overlay,
         sourceFacts: input.sourceFacts,
+        bindingContexts: input.bindingContexts,
         facets: input.facets,
         liveStates: input.liveStates
       });
@@ -516,6 +522,7 @@ function* effectsForLiveRow(
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: RetainedRows<FacetVector>;
     readonly liveStates: RetainedRows<ProductStateKey>;
+    readonly bindingContexts?: BindingContextStore;
   }>
 ): PathComputation<void> {
   if (from.target.kind !== "memory_entry") {
@@ -549,11 +556,12 @@ function* effectsForAdvance(
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: RetainedRows<FacetVector>;
     readonly liveStates: RetainedRows<ProductStateKey>;
+    readonly bindingContexts?: BindingContextStore;
   }>
 ): PathComputation<void> {
   const declared = input.overlay[row.predicate] ?? input.overlay[advance.relation.relation_kind];
   if (declared?.applicable === false) return;
-  const unified = unifyAdvance(from, advance.relation, row);
+  const unified = unifyAdvance(from, advance.relation, row, input.bindingContexts);
   if (unified === undefined) return;
   const decision = decideGuards(
     [advance.relation.guard],
@@ -600,7 +608,8 @@ function* effectsForAdvance(
       unified.binding,
       row.targetObjectId,
       automaton,
-      programState
+      programState,
+      input.bindingContexts
     );
     if (binding === undefined) continue;
     const to = retargetMemoryProduct(from, {
@@ -657,7 +666,8 @@ function* compiledEffects(
     source_revision: row.source_revision
   });
   for (const [index, facet] of vectors.entries()) {
-    yield { kind: "work", retained_bytes: 512 + Buffer.byteLength(JSON.stringify({ transition, derivation, facet }), "utf8") };
+    yield { kind: "work", retention: "effect_payload",
+      retained_bytes: 512 + Buffer.byteLength(JSON.stringify({ transition, derivation, facet }), "utf8") };
     yield { kind: "effect", effect: {
     observation_id: `adjacency:${row.assertionId}:${from.program_state}:${to.program_state}:${String(index)}`,
     transition,
@@ -713,46 +723,6 @@ function seedHypotheses(interpretation: QueryInterpretation): readonly {
     return [{ hypothesis_id: DEFAULT_HYPOTHESIS, bindings: undefined }];
   }
   return interpretation.hypotheses;
-}
-
-function seedBindingContext(
-  automaton: ProgramAutomaton | undefined,
-  objectId: string,
-  hypothesisBindings: QueryInterpretation["hypotheses"][number]["bindings"] | undefined,
-  programState: string
-): string | undefined {
-  const envSeed = new Map<string, string>();
-  for (const binding of hypothesisBindings ?? []) envSeed.set(binding.variable, binding.value);
-  let env = envSeed;
-  for (const variable of automaton?.sourceVariables.get(programState) ?? []) {
-    const next = unifyBinding(env, variable, objectId);
-    if (next === undefined) return undefined;
-    env = next;
-  }
-  return encodeBindingContext(env);
-}
-
-function alignOutgoingBinding(
-  binding: string,
-  objectId: string,
-  automaton: ProgramAutomaton,
-  programState: string
-): string | undefined {
-  let env = parseBindingContext(binding);
-  env = new Map(env);
-  for (const variable of automaton.localVariables.get(programState) ?? []) env.delete(variable);
-  for (const advance of automaton.advances) {
-    if (advance.from !== programState) continue;
-    const sourceVar = advance.relation.source_variable;
-    const bound = env.get(sourceVar);
-    if (bound !== undefined && bound !== objectId) {
-      return undefined;
-    }
-    const next = unifyBinding(env, sourceVar, objectId);
-    if (next === undefined) return undefined;
-    env = next;
-  }
-  return encodeBindingContext(env);
 }
 
 function attachHyperedgeFacet(effect: HyperedgeEffect): CompiledAdjacencyEffect {

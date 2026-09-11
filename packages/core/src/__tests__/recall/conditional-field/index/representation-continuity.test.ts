@@ -347,13 +347,14 @@ describe("index representation continuity", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("retries payload work at the same product cursor and charges its actual allowance", () => {
+  it("does not repeat delivered membership when payload was incomplete", () => {
     const input = baseInput({ snapshot: snapshotOf([fieldValue("cfg", 850)]), remaining_reserve: 2,
       expires_at: EXPIRES_AT, observer: { outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] } });
     const first = projectAcceptingIndex({ ...input, finalize_payload: (_entries, remaining) => ({ remaining, complete: false }) });
     expect(first.continuation).not.toBeNull();
     const resumed = continueAcceptingIndex(first, { ...input, finalize_payload: (_entries, remaining) => ({ remaining: remaining - 1, complete: true }) });
-    expect(resumed.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["cfg"]);
+    expect(first.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["cfg"]);
+    expect(resumed.entries).toEqual([]);
     expect(resumed.continuation).toBeNull();
     expect(resumed.completeness.payload).toBe("complete");
   });
