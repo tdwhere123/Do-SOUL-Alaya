@@ -71,11 +71,15 @@ const ZERO_PHASE = {
 function completeActual(native_visits: number, after_projection_bytes: number) {
   return {
     native_visits, native_rows: 0, native_bytes: 0, charged_retained_bytes: 0,
+    retained_states_current: 0, retained_bytes_current: 0,
     phases: {
       compile: ZERO_PHASE, observe: ZERO_PHASE, seed: ZERO_PHASE, adjacency: ZERO_PHASE,
       measurement: ZERO_PHASE, solve: ZERO_PHASE, index: ZERO_PHASE, payload: ZERO_PHASE
     },
-    rss: { method: "process.memoryUsage().rss" as const, start_bytes: 0, after_projection_bytes }
+    rss: {
+      method: "process.memoryUsage().rss" as const,
+      start_bytes: 0, after_projection_bytes, peak_bytes: after_projection_bytes
+    }
   };
 }
 
