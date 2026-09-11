@@ -116,11 +116,8 @@ function evidenceDemandForProduct(state: FieldEngineState, value: FieldValue, as
   });
   const id = `sha256:${createHash("sha256").update(JSON.stringify([claimKind, key])).digest("hex")}`;
   const associationId = `sha256:${createHash("sha256").update(JSON.stringify(["association", key])).digest("hex")}`;
-  const accessIds = rows.flatMap((row) => [
-    row.sourceObjectId,
-    row.targetObjectId,
-    ...(row.evidenceReceipts ?? []).map((receipt) => receipt.evidenceId)
-  ]);
+  // Receipt ids are not scope principals; an explicit ineligible there would deny in-scope endpoints.
+  const accessIds = [...new Set(rows.flatMap((row) => [row.sourceObjectId, row.targetObjectId]))];
   const context = { query_id: state.query_id, snapshot_id: state.snapshot_id,
     hypothesis_id: value.state.hypothesis_id, binding_context: value.state.binding_context, time_state: value.state.time_state,
     jurisdiction: "workspace", as_of: asOf,

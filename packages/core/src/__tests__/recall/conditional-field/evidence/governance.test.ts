@@ -253,4 +253,31 @@ describe("conditional-field evidence governance", () => {
     expect(closed.every((row) => row.access === "ineligible")).toBe(true);
     expect(evaluateGovernance(closed[0]!, identityContext()).reason).toBe("source_revision_mismatch");
   });
+
+  it("admits a formation observation when only source and target objects are in-scope", () => {
+    const mapped = observationsFromOwners({
+      ...identityContext(),
+      assertions: [{
+        assertion_id: "assert-named",
+        relation_kind: "associated_config",
+        evidence_receipts: [{
+          evidence_id: "e-named",
+          source_event_anchor: { event_id: "evt-named", event_type: "soul.signal.emitted", occurred_at: AS_OF }
+        }],
+        anchors: {
+          source_anchor: { kind: "object", object_id: "obj-a" },
+          target_anchor: { kind: "object", object_id: "obj-b" }
+        },
+        validity: OPEN_VALIDITY,
+        formation_receipt: {
+          source_observations: [{ source_id: "evt-named", source_sha256: SOURCE_REVISION }]
+        }
+      }],
+      claims: [],
+      access: new Map([["obj-a", "eligible"], ["obj-b", "eligible"]])
+    });
+    expect(mapped.some((row) => row.evidence_id === "e-named")).toBe(true);
+    expect(mapped.every((row) => row.access === "eligible")).toBe(true);
+    expect(mapped.every((row) => evaluateGovernance(row, identityContext()).admitted)).toBe(true);
+  });
 });

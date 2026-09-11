@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import { productSubjectId, type QueryInterpretation } from "@do-soul/alaya-protocol";
 import { applyObserverPage, createConditionalField, withdrawDerivationLeaves, type FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { adjacencyEffectsForRows, seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition.js";
+import type { BoundSourceFacts } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { assessUnknownCause } from "../../../../recall/runtime/semantic-attribution.js";
@@ -34,6 +36,16 @@ function field(grade: number): FieldEngineState {
     overlay: { p: { applicable: true, milligrades: 1000 } }
   }) });
   return { ...next, authorized_scopes: null, observed_relations: [row] };
+}
+
+function sourceFacts(
+  entries: readonly (readonly [string, string])[]
+): PersistentStringMap<BoundSourceFacts> {
+  let map = new PersistentStringMap<BoundSourceFacts>();
+  for (const [objectId, scopeClass] of entries) {
+    map = map.with(objectId, { object_id: objectId, source_revision: "rev", scope_class: scopeClass });
+  }
+  return map;
 }
 
 function targetKey(state: FieldEngineState): string {
@@ -94,5 +106,32 @@ describe("claim support dependencies through reassessment and projection", () =>
     const after = assessUnknownCause(withdrawDerivationLeaves(before, "cause-assertion"), { as_of: NOW });
     expect(targetKey(after)).toBe(key);
     expect(after.claims.get(key) ?? "unknown").toBe("unknown");
+  });
+
+  it("admits named-scope evidence when only source and target objects are in-scope", () => {
+    const named = {
+      ...field(900),
+      authorized_scopes: ["project"],
+      source_facts: sourceFacts([["a", "project"], ["b", "project"]])
+    };
+    const assessed = assessUnknownCause(named, { as_of: NOW });
+    expect(assessed.claims.get(targetKey(assessed))).toBe("supported");
+  });
+
+  it("keeps unrestricted local-daemon evidence eligible", () => {
+    const unrestricted = {
+      ...field(900),
+      authorized_scopes: null,
+      source_facts: sourceFacts([["a", "project"], ["b", "personal"]])
+    };
+    expect(assessUnknownCause(unrestricted, { as_of: NOW }).claims.get(targetKey(unrestricted))).toBe("supported");
+  });
+
+  it("fail-closes omitted or empty authorized_scopes even with in-scope objects", () => {
+    const facts = sourceFacts([["a", "project"], ["b", "project"]]);
+    const omitted = { ...field(900), authorized_scopes: undefined, source_facts: facts };
+    const empty = { ...field(900), authorized_scopes: [], source_facts: facts };
+    expect(assessUnknownCause(omitted, { as_of: NOW }).claims.get(targetKey(omitted)) ?? "unknown").toBe("unknown");
+    expect(assessUnknownCause(empty, { as_of: NOW }).claims.get(targetKey(empty)) ?? "unknown").toBe("unknown");
   });
 });
