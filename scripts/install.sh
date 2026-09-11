@@ -22,7 +22,7 @@
 #                   test-only: use local release assets instead of download
 #
 # What it does:
-#   1. checks node >= 24, ensures pnpm 9 (corepack); rejects pnpm major != 9
+#   1. checks node >= 24, ensures pnpm 12 (corepack); rejects pnpm major != 12
 #   2. resolves the requested release tag and validates strict semver shape
 #   3. downloads the release tarball + SHA256SUMS over HTTPS-pinned curl
 #   4. verifies sha256 (anchored match) + rejects unsafe paths inside tarball
@@ -90,13 +90,13 @@ if [ "$node_major" -lt 24 ]; then
 fi
 ok "node $(node -v)"
 
-# pnpm 9 enforced (lockfile is v9.0). If user has pnpm 8 in PATH, switch
-# to corepack-managed pnpm@9 inside this shell.
+# pnpm 12 is frozen via packageManager. PATH pnpm 12 is accepted; otherwise
+# switch to corepack-managed pnpm@12.3.4 inside this shell.
 need_corepack_switch=0
 if command -v pnpm >/dev/null 2>&1; then
   pnpm_major=$(pnpm --version 2>/dev/null | cut -d. -f1 || echo 0)
-  if [ "$pnpm_major" != "9" ]; then
-    info "found pnpm ${pnpm_major}; this project requires pnpm 9 (lockfile v9.0). switching..."
+  if [ "$pnpm_major" != "12" ]; then
+    info "found pnpm ${pnpm_major}; this project requires pnpm 12. switching..."
     need_corepack_switch=1
   fi
 else
@@ -104,15 +104,15 @@ else
 fi
 if [ "$need_corepack_switch" = "1" ]; then
   command -v corepack >/dev/null 2>&1 \
-    || err "pnpm 9 required but corepack is not available. Install pnpm 9 manually: npm install -g pnpm@9"
-  info "enabling pnpm 9 via corepack..."
+    || err "pnpm 12 required but corepack is not available. Install pnpm 12.3.4 manually: npm install -g pnpm@12.3.4"
+  info "enabling pnpm 12.3.4 via corepack..."
   corepack enable >/dev/null 2>&1 || warn "corepack enable failed (try: sudo corepack enable)"
-  corepack prepare pnpm@9 --activate >/dev/null 2>&1 \
-    || err "corepack prepare pnpm@9 failed; install pnpm 9 manually"
+  corepack prepare pnpm@12.3.4 --activate >/dev/null 2>&1 \
+    || err "corepack prepare pnpm@12.3.4 failed; install pnpm 12.3.4 manually"
 fi
 pnpm_major=$(pnpm --version 2>/dev/null | cut -d. -f1 || echo 0)
-[ "$pnpm_major" = "9" ] \
-  || err "pnpm 9 required (got: $(pnpm --version 2>/dev/null || echo 'none'))"
+[ "$pnpm_major" = "12" ] \
+  || err "pnpm 12 required (got: $(pnpm --version 2>/dev/null || echo 'none'))"
 ok "pnpm $(pnpm --version)"
 
 # sha256 checker

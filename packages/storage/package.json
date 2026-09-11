@@ -26,11 +26,11 @@
   },
   "dependencies": {
     "@do-soul/alaya-protocol": "workspace:*",
-    "@node-rs/jieba": "2.0.1",
-    "better-sqlite3": "12.9.0"
+    "@node-rs/jieba": "2.0.3",
+    "better-sqlite3": "13.0.3"
   },
   "devDependencies": {
     "@do-soul/alaya-soul": "workspace:*",
-    "@types/better-sqlite3": "^7.6.12"
+    "@types/better-sqlite3": "^9.6.0"
   }
 }
