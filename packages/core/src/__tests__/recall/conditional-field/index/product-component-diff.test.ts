@@ -85,6 +85,12 @@ describe("product component diffs", () => {
     expect(kinds(supported, entry("a", { claim: "refuted" }))).toEqual(["claim"]);
     expect(kinds(base, explained)).toEqual(["payload"]);
     expect(kinds(base, stronger)).toEqual(["proof"]);
+    expect(kinds(base, entry("a"))).toEqual([]);
+    expect(kinds(base, entry("a", { guaranteed_milligrades: 700 }))).toEqual(["proof"]);
+    expect(kinds(
+      entry("a", { guaranteed_milligrades: 700 }),
+      entry("a", { guaranteed_milligrades: 800 })
+    )).toEqual(["proof"]);
     expect(kinds(payload, payloadNext)).toEqual(["payload"]);
     expect(kinds(base, claimAndProof).sort()).toEqual(["claim", "proof"]);
   });

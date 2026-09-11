@@ -129,9 +129,11 @@ export function orderedProjectionValues(state: FieldEngineState): Readonly<{ siz
 }
 
 function valueBounds(grade: number, admitted: number | undefined, residualHigh: number | undefined,
-  invalidated: boolean): Pick<FieldValue, "low_milligrades" | "high_milligrades"> {
+  invalidated: boolean): Pick<FieldValue, "high_milligrades"> & Partial<Pick<FieldValue, "low_milligrades">> {
   return {
-    low_milligrades: invalidated ? MILLIGRADE_BOTTOM : admitted ?? MILLIGRADE_BOTTOM,
+    ...(invalidated
+      ? { low_milligrades: MILLIGRADE_BOTTOM }
+      : admitted === undefined ? {} : { low_milligrades: admitted }),
     high_milligrades: invalidated ? MILLIGRADE_TOP : residualHigh === undefined ? grade : Math.max(grade, residualHigh)
   };
 }

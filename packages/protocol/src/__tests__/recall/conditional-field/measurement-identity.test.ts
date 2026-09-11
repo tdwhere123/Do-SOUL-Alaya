@@ -5,6 +5,7 @@ import {
   ProjectedCapSchema,
   RawMeasurementSchema,
   fieldActivationOf,
+  guaranteedMilligradesOf,
   memoryRecallTarget,
   reachableMilligradesOf
 } from "../../../index.js";
@@ -77,5 +78,30 @@ describe("conditional-field measurement and activation", () => {
     expect(fieldActivationOf({ activation: { kind: "unreachable" } })).toEqual({ kind: "unreachable" });
     expect(reachableMilligradesOf({ milligrades: 0 })).toBe(0);
     expect(reachableMilligradesOf({ activation: { kind: "unreachable" } })).toBeUndefined();
+  });
+
+  it("reads guaranteed milligrades from activation.low, else low, else the index field", () => {
+    expect(guaranteedMilligradesOf({ milligrades: 900 })).toBeUndefined();
+    expect(guaranteedMilligradesOf({ milligrades: 0 })).toBeUndefined();
+    expect(guaranteedMilligradesOf({
+      milligrades: 900,
+      low_milligrades: 0
+    })).toBe(0);
+    expect(guaranteedMilligradesOf({
+      milligrades: 700,
+      low_milligrades: 700
+    })).toBe(700);
+    expect(guaranteedMilligradesOf({
+      milligrades: 900,
+      activation: { kind: "reachable", milligrades: 900, low: 0 }
+    })).toBe(0);
+    expect(guaranteedMilligradesOf({
+      activation: { kind: "reachable", milligrades: 900 },
+      low_milligrades: 600
+    })).toBe(600);
+    expect(guaranteedMilligradesOf({ guaranteed_milligrades: 700 })).toBe(700);
+    expect(guaranteedMilligradesOf({
+      activation: { kind: "unreachable" }
+    })).toBeUndefined();
   });
 });

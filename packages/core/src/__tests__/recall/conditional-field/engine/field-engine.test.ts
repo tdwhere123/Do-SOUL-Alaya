@@ -421,6 +421,7 @@ describe("conditional-field engine", () => {
     expect(paused.binding.guaranteed_complete).toBe(false);
     expect(paused.binding.solver_complete).toBe(false);
     expect(valueOf(paused, "n8")).toBe(900);
+    expect(lowOf(paused, "n8")).toBeUndefined();
     expect(paused.binding.guaranteed_values?.get(productStateNodeId(productKey("n0")))).toBe(900);
     expect(paused.binding.guaranteed_values?.has(productStateNodeId(productKey("n8")))).toBe(false);
     expect((paused.binding.guaranteed_worklist ?? paused.binding.remaining_worklist).length).toBeGreaterThan(0);
@@ -533,7 +534,7 @@ describe("conditional-field engine", () => {
     expect(ungated.binding.kind).toBe("bound");
     if (ungated.binding.kind === "bound") {
       expect(ungated.binding.solver_complete).toBe(true);
-      expect(lowOf(ungated, "r")).toBe(0);
+      expect(lowOf(ungated, "r")).toBeUndefined();
     }
     expect(later.guaranteed_seeds.length).toBeGreaterThan(0);
     expect(lowOf(later, "r")).toBe(850);

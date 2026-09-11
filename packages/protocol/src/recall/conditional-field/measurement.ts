@@ -115,3 +115,16 @@ export function reachableMilligradesOf(value: Readonly<{
   const activation = fieldActivationOf(value);
   return activation.kind === "reachable" ? activation.milligrades : undefined;
 }
+
+export function guaranteedMilligradesOf(value: Readonly<{
+  readonly activation?: FieldActivation;
+  readonly milligrades?: number;
+  readonly low_milligrades?: number;
+  readonly high_milligrades?: number;
+  readonly guaranteed_milligrades?: number;
+}>): number | undefined {
+  const activation = fieldActivationOf(value);
+  if (activation.kind === "reachable" && activation.low !== undefined) return activation.low;
+  if (value.low_milligrades !== undefined) return value.low_milligrades;
+  return value.guaranteed_milligrades;
+}

@@ -34,8 +34,8 @@ const EXPIRES_AT = "2099-01-01T00:00:00.000Z";
 
 describe("emitted-set pagination", () => {
   it("delivers late stronger B after A instead of offsetting into [B,A]", () => {
-    const a = fieldValue("a", 600);
-    const b = fieldValue("b", 900);
+    const a = guaranteedFieldValue("a", 600);
+    const b = guaranteedFieldValue("b", 900);
     const first = projectAcceptingIndex(associativeInput({
       snapshot: snapshotOf([a]),
       budget: defaultBudget({ page_budget: 1 }),
@@ -111,9 +111,9 @@ describe("emitted-set pagination", () => {
 
   it("keeps the same mixed-kind membership for canonical and associative order", () => {
     const members = [
-      fieldValue("z", 900),
-      fieldValue("a", 600),
-      sourceValue("src-root", 700)
+      fieldValue("a", 900, { low_milligrades: 0 }),
+      guaranteedFieldValue("z", 700),
+      sourceValue("src-root", 600, { low_milligrades: 600 })
     ];
     const canonical = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf(members),
@@ -126,7 +126,8 @@ describe("emitted-set pagination", () => {
     expect(new Set(canonical.entries.map(memberKey)))
       .toEqual(new Set(associative.entries.map(memberKey)));
     expect(canonical.entries.map(objectId)).not.toEqual(associative.entries.map(objectId));
-    expect(associative.entries.map((entry) => entry.association_milligrades)).toEqual([900, 700, 600]);
+    expect(associative.entries.map((entry) => entry.guaranteed_milligrades)).toEqual([700, 600, 0]);
+    expect(associative.entries.map(objectId)[0]).toBe("z");
     expect(canonical.entries.some((entry) => entry.target.kind === "source_evidence")).toBe(true);
     expect(associative.entries.find((entry) => entry.target.kind === "source_evidence")?.object_id)
       .toBeUndefined();
@@ -161,8 +162,8 @@ describe("emitted-set pagination", () => {
   });
 
   it("emits nothing and consumes no undispatched product when page width is 0", () => {
-    const a = fieldValue("a", 600);
-    const b = fieldValue("b", 900);
+    const a = guaranteedFieldValue("a", 600);
+    const b = guaranteedFieldValue("b", 900);
     const zero = projectAcceptingIndex(associativeInput({
       snapshot: snapshotOf([a, b]),
       budget: defaultBudget({ page_budget: 0 }),
@@ -181,7 +182,7 @@ describe("emitted-set pagination", () => {
 
   it("does not consume a product when payload finalization rejects the page", () => {
     const input = associativeInput({
-      snapshot: snapshotOf([fieldValue("a", 600), fieldValue("b", 900)]),
+      snapshot: snapshotOf([guaranteedFieldValue("a", 600), guaranteedFieldValue("b", 900)]),
       budget: defaultBudget({ page_budget: 1 }),
       expires_at: EXPIRES_AT,
       remaining_reserve: 10
@@ -354,6 +355,7 @@ function fieldValue(
   extras: Readonly<{
     readonly accepting?: boolean;
     readonly activation?: FieldValue["activation"];
+    readonly low_milligrades?: number;
   }> = {}
 ): FieldValue {
   return {
@@ -369,11 +371,27 @@ function fieldValue(
     }),
     milligrades,
     accepting: extras.accepting ?? true,
+    ...(extras.low_milligrades === undefined ? {} : { low_milligrades: extras.low_milligrades }),
     ...(extras.activation === undefined ? {} : { activation: extras.activation })
   };
 }
 
-function sourceValue(rootId: string, milligrades: number): FieldValue {
+function guaranteedFieldValue(
+  objectId: string,
+  milligrades: number,
+  extras: Readonly<{
+    readonly accepting?: boolean;
+    readonly activation?: FieldValue["activation"];
+  }> = {}
+): FieldValue {
+  return fieldValue(objectId, milligrades, { ...extras, low_milligrades: milligrades });
+}
+
+function sourceValue(
+  rootId: string,
+  milligrades: number,
+  extras: Readonly<{ readonly low_milligrades?: number }> = {}
+): FieldValue {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     state: {
@@ -393,7 +411,8 @@ function sourceValue(rootId: string, milligrades: number): FieldValue {
       time_state: "as_of"
     },
     milligrades,
-    accepting: true
+    accepting: true,
+    ...(extras.low_milligrades === undefined ? {} : { low_milligrades: extras.low_milligrades })
   };
 }
 

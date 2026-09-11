@@ -52,6 +52,7 @@ export const IndexEntrySchema = z
     output_binding: ConditionalFieldIdSchema,
     role: IndexRoleSchema,
     association_milligrades: MilligradeSchema,
+    guaranteed_milligrades: MilligradeSchema.optional(),
     claim: ClaimStateSchema,
     claim_proposition_id: ConditionalFieldIdSchema.optional(),
     claim_proposition: PropositionSchema.optional(),

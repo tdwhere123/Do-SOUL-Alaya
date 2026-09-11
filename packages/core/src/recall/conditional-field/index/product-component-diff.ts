@@ -67,7 +67,10 @@ export function productComponentState(entry: IndexEntry): ProductComponentState 
     proof_revision: digestOf({
       association_milligrades: entry.association_milligrades,
       role: entry.role,
-      target: root
+      target: root,
+      ...(entry.guaranteed_milligrades === undefined
+        ? {}
+        : { guaranteed_milligrades: entry.guaranteed_milligrades })
     }),
     claim_revision: digestOf({
       claim: entry.claim,

@@ -196,6 +196,7 @@ export {
   ProjectedCapSchema,
   RawMeasurementSchema,
   fieldActivationOf,
+  guaranteedMilligradesOf,
   reachableMilligradesOf,
   type FieldActivation,
   type ProjectedCap,

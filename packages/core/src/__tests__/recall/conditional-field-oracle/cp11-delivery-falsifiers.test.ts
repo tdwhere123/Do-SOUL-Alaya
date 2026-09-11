@@ -154,14 +154,20 @@ describe("CP11 delivery falsifiers", () => {
       nodeIds: ["p", "q", "t"], seeds: new Map([["p", 800], ["q", 800]]),
       edges: [{ kind: "and", from: ["p", "q"], to: "t", strength: 700 }], bottom: 0, top: 1000
     }).get("t")).toBe(700);
-    const members = [fieldValue("z", 900), fieldValue("a", 600), sourceValue("src-root", 700)];
+    const members = [
+      fieldValue("a", 900, { low_milligrades: 0 }),
+      guaranteedFieldValue("z", 700),
+      sourceValue("src-root", 600, { low_milligrades: 600 })
+    ];
     const canonical = projectAcceptingIndex(baseInput({ snapshot: snapshotOf(members), view: defaultView() }));
     const associative = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf(members), view: associativeView()
     }));
     expect(new Set(canonical.entries.map(memberId))).toEqual(new Set(associative.entries.map(memberId)));
     expect(canonical.entries.map(memberId)).not.toEqual(associative.entries.map(memberId));
-    expect(associative.entries.map((entry) => entry.association_milligrades)).toEqual([900, 700, 600]);
+    expect(associative.entries.map((entry) => entry.guaranteed_milligrades)).toEqual([700, 600, 0]);
+    expect(associative.entries[0]?.association_milligrades).toBe(700);
+    expect(associative.entries.map(memberId)[0]).toBe("z");
     expect(associative.entries.find((entry) => entry.target.kind === "source_evidence")?.object_id)
       .toBeUndefined();
   });
@@ -208,7 +214,7 @@ describe("CP11 delivery falsifiers", () => {
   });
 
   it("T01: zero-width and rejected payload do not consume never-sent product", () => {
-    const values = [fieldValue("a", 600), fieldValue("b", 900)];
+    const values = [guaranteedFieldValue("a", 600), guaranteedFieldValue("b", 900)];
     const zero = projectAcceptingIndex(associativeInput({
       snapshot: snapshotOf(values), budget: defaultBudget({ page_budget: 0 }), expires_at: FAR_FUTURE_EXPIRY
     }));
@@ -325,18 +331,32 @@ function snapshotOf(values: readonly FieldValue[]): FieldSnapshot {
   };
 }
 
-function fieldValue(objectId: string, milligrades: number): FieldValue {
+function fieldValue(
+  objectId: string,
+  milligrades: number,
+  extras: Readonly<{ readonly low_milligrades?: number }> = {}
+): FieldValue {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     state: memoryProductStateKey({
       workspace_id: "ws", object_id: objectId, source_revision: "rev",
       program_state: "accepting", hypothesis_id: "h0", binding_context: "default", time_state: "as_of"
     }),
-    milligrades, accepting: true
+    milligrades,
+    accepting: true,
+    ...(extras.low_milligrades === undefined ? {} : { low_milligrades: extras.low_milligrades })
   };
 }
 
-function sourceValue(rootId: string, milligrades: number): FieldValue {
+function guaranteedFieldValue(objectId: string, milligrades: number): FieldValue {
+  return fieldValue(objectId, milligrades, { low_milligrades: milligrades });
+}
+
+function sourceValue(
+  rootId: string,
+  milligrades: number,
+  extras: Readonly<{ readonly low_milligrades?: number }> = {}
+): FieldValue {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     state: sourceProductStateKey({
@@ -344,7 +364,9 @@ function sourceValue(rootId: string, milligrades: number): FieldValue {
       content_digest: DIGEST, evidence_object_id: null, program_state: "accepting",
       hypothesis_id: "h0", binding_context: "default", time_state: "as_of"
     }),
-    milligrades, accepting: true
+    milligrades,
+    accepting: true,
+    ...(extras.low_milligrades === undefined ? {} : { low_milligrades: extras.low_milligrades })
   };
 }
 

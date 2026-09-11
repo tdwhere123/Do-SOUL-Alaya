@@ -1,6 +1,7 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MILLIGRADE_BOTTOM,
+  guaranteedMilligradesOf,
   productStateKeyFromIndexEntry,
   productSubjectId,
   reachableMilligradesOf,
@@ -246,18 +247,22 @@ function collectRetractions(
     if (value === undefined) continue;
     const key = sharedProductIdentity(value.state);
     if (emitted[key] === undefined || ledger[key]?.membership_present === false) continue;
-    if (indexEntryForValue(value, input) === null) retracted.push(value.state);
+    if (indexEntryForValue(value, input) === null
+      && indexEntryForValue(value, input, { holdIncompleteFacets: true }) === null) {
+      retracted.push(value.state);
+    }
   }
 }
 
 export function indexEntryForValue(
   value: FieldValue,
-  input: AcceptingProjectionInput
+  input: AcceptingProjectionInput,
+  options?: Readonly<{ readonly holdIncompleteFacets?: boolean }>
 ): IndexEntry | null {
   if (!value.accepting) return null;
   const milligrades = reachableMilligradesOf(value);
   if (milligrades === undefined) return null;
-  if (!facetsAccept(value, input)) return null;
+  if (!facetsAccept(value, input, options?.holdIncompleteFacets === true)) return null;
   const kindView = input.view.result_kind_view ?? "mixed";
   if (kindView === "memory_only" && value.state.target.kind !== "memory_entry") return null;
   if (kindView === "source_only" && value.state.target.kind !== "source_evidence") return null;
@@ -270,6 +275,7 @@ export function indexEntryForValue(
   const claim = input.claims?.get(key) ?? "unknown";
   if (!claimObligationAccepts(value, input.view, claim)) return null;
   const proposition = input.claim_propositions?.get(key);
+  const guaranteed = guaranteedMilligradesOf(value);
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     target: value.state.target,
@@ -280,6 +286,7 @@ export function indexEntryForValue(
     time_state: value.state.time_state,
     role,
     association_milligrades: milligrades,
+    ...(guaranteed === undefined ? {} : { guaranteed_milligrades: guaranteed }),
     claim,
     ...(proposition === undefined ? {} : {
       claim_proposition_id: proposition.proposition_id,
@@ -298,10 +305,14 @@ export function indexEntryForValue(
   };
 }
 
-function facetsAccept(value: FieldValue, input: AcceptingProjectionInput): boolean {
+function facetsAccept(
+  value: FieldValue,
+  input: AcceptingProjectionInput,
+  holdIncompleteFacets = false
+): boolean {
   if (!queryRequiresFacetMeasurement(input.view.facet_obligations)) return true;
   if (input.snapshot.facets.length === 0) return false;
-  if (input.projection_facet_index?.complete !== true) return false;
+  if (input.projection_facet_index?.complete !== true) return holdIncompleteFacets;
   const vectors = facetsForCandidate(value, input);
   if (vectors.length === 0) return false;
   return facetObligationsAccept(

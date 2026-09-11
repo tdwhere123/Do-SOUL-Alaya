@@ -34,6 +34,10 @@ import {
   selectFeasibleWitnesses,
   type AcceptingProjectionInput
 } from "../../../../recall/conditional-field/index/project-accepting-index.js";
+import {
+  compareIndexEntries,
+  sortIndexEntries
+} from "../../../../recall/runtime/index-continuation.js";
 import { facetObligation, identityAssociationCap, productIndexKey } from "../reference/deployment.fixture.js";
 
 const SNAPSHOT_ID = `sha256:${"c".repeat(64)}`;
@@ -167,9 +171,18 @@ describe("conditional-field production information index", () => {
   });
 
   it("associative order uses guaranteed lower milligrades then the canonical product identity", () => {
+    const dual = [
+      fieldValue("z", 900, { low_milligrades: 0 }),
+      fieldValue("a", 600, { low_milligrades: 600 })
+    ];
+    const dualAssociative = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf(dual),
+      view: defaultView({ enumeration_policy: "associative" })
+    }));
+    expect(dualAssociative.entries.map((entry) => entry.object_id)).toEqual(["a", "z"]);
     const members = [
-      fieldValue("z", 900),
-      fieldValue("a", 600)
+      guaranteedFieldValue("z", 900),
+      guaranteedFieldValue("a", 600)
     ];
     const canonical = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf(members),
@@ -184,10 +197,24 @@ describe("conditional-field production information index", () => {
     expect(new Set(associative.entries.map((entry) => entry.object_id)))
       .toEqual(new Set(canonical.entries.map((entry) => entry.object_id)));
     const tied = projectAcceptingIndex(baseInput({
-      snapshot: snapshotOf([fieldValue("z", 700), fieldValue("a", 700)]),
+      snapshot: snapshotOf([
+        guaranteedFieldValue("z", 700),
+        guaranteedFieldValue("a", 700)
+      ]),
       view: defaultView({ enumeration_policy: "associative" })
     }));
     expect(tied.entries.map((entry) => entry.object_id)).toEqual(["a", "z"]);
+    const missingLow = fieldValue("z", 900);
+    const guaranteedPeer = guaranteedFieldValue("a", 600);
+    const omitted = projectAcceptingIndex(baseInput({
+      snapshot: snapshotOf([missingLow, guaranteedPeer]),
+      view: defaultView({ enumeration_policy: "associative" })
+    }));
+    expect(omitted.entries.find((entry) => entry.object_id === "z")?.guaranteed_milligrades)
+      .toBeUndefined();
+    expect(omitted.entries.find((entry) => entry.object_id === "z"))
+      .not.toHaveProperty("guaranteed_milligrades");
+    expect(omitted.entries.map((entry) => entry.object_id)).toEqual(["a", "z"]);
     const mismatched = projectAcceptingIndex(baseInput({
       snapshot: snapshotOf(members),
       view: defaultView({ enumeration_policy: "associative" }),
@@ -206,6 +233,15 @@ describe("conditional-field production information index", () => {
         : { ...associative.continuation, enumeration_policy: "canonical" }
     }));
     expect(mismatched.completeness.logical_index).toBe("invalidated");
+  });
+
+  it("sortIndexEntries uses guaranteed milligrades, not possible association milligrades", () => {
+    const highPossible = memoryIndex("z", 900, 0);
+    const fullyGuaranteed = memoryIndex("a", 700, 700);
+    expect(sortIndexEntries([highPossible, fullyGuaranteed], "associative").map((entry) => entry.object_id))
+      .toEqual(["a", "z"]);
+    expect(compareIndexEntries(fullyGuaranteed, highPossible, "associative")).toBeLessThan(0);
+    expect(compareIndexEntries(highPossible, fullyGuaranteed, "associative")).toBeGreaterThan(0);
   });
 
   it("does not collapse distinct hypotheses or bindings of one object", () => {
@@ -697,14 +733,48 @@ function snapshotOf(
 function fieldValue(
   objectId: string,
   milligrades: number,
-  extras: Partial<FieldValue["state"]> & { readonly accepting?: boolean } = {}
+  extras: Partial<FieldValue["state"]> & {
+    readonly accepting?: boolean;
+    readonly low_milligrades?: number;
+  } = {}
 ): FieldValue {
-  const { accepting, ...state } = extras;
+  const { accepting, low_milligrades, ...state } = extras;
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     state: productKey(objectId, state),
     milligrades,
-    accepting: accepting ?? (state.program_state === undefined || state.program_state === "accepting")
+    accepting: accepting ?? (state.program_state === undefined || state.program_state === "accepting"),
+    ...(low_milligrades === undefined ? {} : { low_milligrades })
+  };
+}
+
+function guaranteedFieldValue(
+  objectId: string,
+  milligrades: number,
+  extras: Partial<FieldValue["state"]> & { readonly accepting?: boolean } = {}
+): FieldValue {
+  return fieldValue(objectId, milligrades, { ...extras, low_milligrades: milligrades });
+}
+
+function memoryIndex(objectId: string, milligrades: number, guaranteed: number): IndexEntry {
+  return {
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    target: {
+      kind: "memory_entry",
+      workspace_id: "ws",
+      object_id: objectId,
+      source_revision: "rev"
+    },
+    object_id: objectId,
+    hypothesis_id: "h0",
+    output_binding: "default",
+    role: "associated",
+    association_milligrades: milligrades,
+    guaranteed_milligrades: guaranteed,
+    claim: "unknown",
+    explanation_ids: [],
+    program_state: "accepting",
+    time_state: "as_of"
   };
 }
 

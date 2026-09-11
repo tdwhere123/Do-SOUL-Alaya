@@ -262,7 +262,7 @@ function pageAcceptingIndex(
     : input.snapshot.values.length;
   const pageEnd = resolvePageOffset(input, scanSize) + input.budget.page_budget;
   const projected = acceptingEntries(input, useEmittedSet ? emitted : undefined, pageEnd);
-  const entries = sortIndexEntries(projected.entries, policy);
+  const entries = useEmittedSet ? projected.entries : sortIndexEntries(projected.entries, policy);
   if (!useEmittedSet && continuationPrefixUnverified(input, entries, projected.truncated)) {
     input.on_remaining_reserve?.(projected.remaining);
     return { ...closedIndex(input, representation, indexCompleteness(input, {

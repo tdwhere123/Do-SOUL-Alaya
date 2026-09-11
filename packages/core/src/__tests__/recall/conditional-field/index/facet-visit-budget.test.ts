@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  productStateKeyFromIndexEntry,
   type FacetVector,
   type FieldSnapshot,
   type FieldValue
 } from "@do-soul/alaya-protocol";
 import { composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition.js";
-import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
+import {
+  continueAcceptingIndex,
+  projectAcceptingIndex
+} from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import type { FacetVisitIndex } from "../../../../recall/conditional-field/index/facet-visit-accounting.js";
 import { startRequestCost } from "../../../../recall/runtime/request-cost-ledger.js";
 import { defaultBudget, defaultView, facetObligation, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
@@ -82,6 +86,80 @@ describe("facet collection visits against the request allowance", () => {
     expect(index.entries.map((entry) => entry.object_id)).not.toContain("pass");
   });
 
+  it("does not retract a still-accepting emitted member while required facets are incomplete", () => {
+    const member = productKey("member");
+    const other = productKey("other");
+    const first = projectAcceptingIndex(input({
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      query_id: "query",
+      snapshot_id: SNAPSHOT_ID,
+      values: [fieldValue(member, 1000), fieldValue(other, 1000)],
+      seeds: [
+        { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state: member, milligrades: 1000 },
+        { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state: other, milligrades: 1000 }
+      ],
+      retained_transitions: [],
+      facets: []
+    }, {}));
+    expect(first.entries.map((entry) => entry.object_id)).toEqual(["member"]);
+    expect(first.continuation).not.toBeNull();
+    const continued = continueAcceptingIndex(first, input({
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      query_id: "query",
+      snapshot_id: SNAPSHOT_ID,
+      values: [fieldValue(member, 1000), fieldValue(other, 1000)],
+      seeds: [
+        { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state: member, milligrades: 1000 },
+        { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state: other, milligrades: 1000 }
+      ],
+      retained_transitions: [],
+      facets: requiredFacets(member)
+    }, {
+      remaining_reserve: 5,
+      view: { ...defaultView(), facet_obligations: [facetObligation({ obligation_id: "ob-pass" })] }
+    }));
+    expect(continued.completeness.logical_index).not.toBe("complete");
+    expect(continued.product_updates?.filter((update) => update.update_kind === "retraction") ?? []).toEqual([]);
+  });
+
+  it("still retracts a committed member that lost membership while required facets are incomplete", () => {
+    const member = productKey("member");
+    const other = productKey("other");
+    const first = projectAcceptingIndex(input({
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      query_id: "query",
+      snapshot_id: SNAPSHOT_ID,
+      values: [fieldValue(member, 1000), fieldValue(other, 1000)],
+      seeds: [
+        { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state: member, milligrades: 1000 },
+        { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state: other, milligrades: 1000 }
+      ],
+      retained_transitions: [],
+      facets: []
+    }, {}));
+    expect(first.entries.map((entry) => entry.object_id)).toEqual(["member"]);
+    const withdrawn = { ...fieldValue(member, 1000), accepting: false };
+    const continued = continueAcceptingIndex(first, input({
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      query_id: "query",
+      snapshot_id: SNAPSHOT_ID,
+      values: [withdrawn, fieldValue(other, 1000)],
+      seeds: [
+        { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state: member, milligrades: 1000 },
+        { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, state: other, milligrades: 1000 }
+      ],
+      retained_transitions: [],
+      facets: requiredFacets(member)
+    }, {
+      remaining_reserve: 5,
+      view: { ...defaultView(), facet_obligations: [facetObligation({ obligation_id: "ob-pass" })] }
+    }));
+    expect(continued.completeness.logical_index).not.toBe("complete");
+    expect(continued.product_updates?.map((update) => update.update_kind)).toEqual(["retraction"]);
+    expect(continued.product_updates?.[0]?.product)
+      .toEqual(productStateKeyFromIndexEntry(first.entries[0]!));
+  });
+
   it("does not treat an empty facet bag as a visit count of snapshot.seeds.length", () => {
     const state = productKey("member");
     const snapshot: FieldSnapshot = {
@@ -120,6 +198,15 @@ function facetSnapshot(count: number): FieldSnapshot {
     retained_transitions: [],
     facets
   };
+}
+
+function requiredFacets(state: FieldValue["state"]): FacetVector[] {
+  return Array.from({ length: 20 }, (_, index) => ({
+    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+    path_id: composedFacetPathId(state, `route-${index}`),
+    obligations: [{ obligation_id: "ob-pass", domain_id: "assoc.bottleneck.milligrade.v1" }],
+    coordinates: [900]
+  }));
 }
 
 function fieldValue(state: FieldValue["state"], milligrades: number): FieldValue {

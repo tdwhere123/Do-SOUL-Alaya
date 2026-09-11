@@ -3,6 +3,7 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   EMITTED_REVISIONS_MAX,
   canonicalIndexEntryIdentity,
+  guaranteedMilligradesOf,
   productStateKeyFromIndexEntry,
   reachableMilligradesOf,
   sharedProductIdentity,
@@ -73,7 +74,7 @@ export function compareIndexEntries(
   policy: EnumerationPolicy
 ): number {
   if (policy === "associative") {
-    const grade = right.association_milligrades - left.association_milligrades;
+    const grade = (guaranteedMilligradesOf(right) ?? 0) - (guaranteedMilligradesOf(left) ?? 0);
     if (grade !== 0) return grade;
   }
   return compareText(canonicalIndexEntryIdentity(left), canonicalIndexEntryIdentity(right));
@@ -92,9 +93,7 @@ export function compareFieldValues(
   policy: EnumerationPolicy
 ): number {
   if (policy === "associative") {
-    const leftGrade = reachableMilligradesOf(left) ?? -1;
-    const rightGrade = reachableMilligradesOf(right) ?? -1;
-    const grade = rightGrade - leftGrade;
+    const grade = (guaranteedMilligradesOf(right) ?? 0) - (guaranteedMilligradesOf(left) ?? 0);
     if (grade !== 0) return grade;
   }
   return compareText(canonicalFieldIdentity(left), canonicalFieldIdentity(right));
