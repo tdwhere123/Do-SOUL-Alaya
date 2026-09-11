@@ -101,7 +101,9 @@ describe("bounded semantic residual producer-consumer regressions", () => {
     const program = (verdict: "true" | "false" | "unresolved"): QueryProgram => ({ schema_version: 1, kind: "relation",
       relation_kind: "observed_log", source_variable: "q", target_variable: "x", facet_mode: "same_path", threshold_milligrades: 0,
       guard: { schema_version: 1, kind: "query_predicate", verdict, variable: "x", time_scope: "none",
-        ...(verdict === "unresolved" ? { predicate_name: "log_has_proven_root_cause" } : {}) } });
+        ...(verdict === "unresolved" ? { predicate_name: "log_has_proven_root_cause" }
+          : verdict === "false" ? { predicate_name: "source.literal.nfc.v1", entity_id: "not-in-any-source" }
+            : {}) } });
     const absent = observeProgram(slice, program("unresolved"), { query_text: "yesterday failed deployment" });
     expect(absent.field.residuals.some((region) => region.kind === "guard" && region.status === "unknown")).toBe(true);
     expect(absent.field.closure).toMatchObject({ observation: "unknown", requested_index: "open" });
