@@ -62,6 +62,44 @@ function diagnostic(input = fixture(), hitAt5 = true) {
     degradationReason: null, embeddingMode: "disabled" });
 }
 
+const ZERO_PHASE = {
+  exclusive_ms: 0, inclusive_ms: 0, native_visits: 0, native_rows: 0, native_bytes: 0,
+  charged_retained_bytes: 0, joins: 0, relaxations: 0, state_creates: 0, pending_work: 0,
+  cache_hits: 0, cache_misses: 0
+};
+
+function completeActual(native_visits: number, after_projection_bytes: number) {
+  return {
+    native_visits, native_rows: 0, native_bytes: 0, charged_retained_bytes: 0,
+    phases: {
+      compile: ZERO_PHASE, observe: ZERO_PHASE, seed: ZERO_PHASE, adjacency: ZERO_PHASE,
+      measurement: ZERO_PHASE, solve: ZERO_PHASE, index: ZERO_PHASE, payload: ZERO_PHASE
+    },
+    rss: { method: "process.memoryUsage().rss" as const, start_bytes: 0, after_projection_bytes }
+  };
+}
+
+function completeWorker(native_visits: number, rss_bytes: number) {
+  return {
+    native_visits, bytes_read: 0, row_visits: 0, elapsed_ms: 0,
+    rss_bytes, rss_sampling_method: "process.memoryUsage().rss" as const
+  };
+}
+
+function measureWithReceipt(extra: {
+  readonly actual?: ReturnType<typeof completeActual>;
+  readonly worker?: ReturnType<typeof completeWorker>;
+}) {
+  const input = fixture();
+  return measureConditionalFieldResponse({
+    ...input,
+    recallResult: {
+      ...input.recallResult,
+      execution_receipt: { ...input.recallResult.execution_receipt, ...extra }
+    }
+  });
+}
+
 describe("conditional target measurement evidence", () => {
   it("preserves source-only identity through diagnostics, archived admission and reclassification", () => {
     const base = fixture();
@@ -356,5 +394,93 @@ describe("conditional target measurement evidence", () => {
     expect(measured.response_slots[0]?.object_kind).toBe("source_evidence");
     expect(measured.response_slots[0]?.object_id).toBeUndefined();
     expect(measured.entries[0]?.target).toEqual(target);
+  });
+
+  it("publishes work and memory from nested actual without copying requested budgets", () => {
+    const measured = measureWithReceipt({ actual: completeActual(7, 12345) });
+    expect(measured?.status).toBe("validated");
+    if (measured?.status !== "validated") throw new Error("validated measurement expected");
+    expect(measured.metrics.work).toEqual({
+      status: "measured", value: 7, unit: "native_visits", source: "actual"
+    });
+    expect(measured.metrics.memory).toEqual({
+      status: "measured", value: 12345, unit: "rss_bytes", source: "actual"
+    });
+    expect(measured.metrics.work.value).not.toBe(BUDGET.work_units);
+    expect(measured.metrics.memory.value).not.toBe(BUDGET.memory_bytes);
+    expect(measured.request.budget.work_units).toBe(10000);
+    expect(measured.request.budget.memory_bytes).toBe(1000000);
+  });
+
+  it("publishes work and memory from nested worker when actual is absent", () => {
+    const measured = measureWithReceipt({ worker: completeWorker(4, 8888) });
+    expect(measured?.status).toBe("validated");
+    if (measured?.status !== "validated") throw new Error("validated measurement expected");
+    expect(measured.metrics.work).toEqual({
+      status: "measured", value: 4, unit: "native_visits", source: "worker"
+    });
+    expect(measured.metrics.memory).toEqual({
+      status: "measured", value: 8888, unit: "rss_bytes", source: "worker"
+    });
+    expect(measured.metrics.work.value).not.toBe(BUDGET.work_units);
+    expect(measured.metrics.memory.value).not.toBe(BUDGET.memory_bytes);
+  });
+
+  it("prefers nested actual over sibling worker when both receipts are present", () => {
+    const measured = measureWithReceipt({
+      actual: completeActual(7, 12345), worker: completeWorker(4, 8888)
+    });
+    expect(measured?.status).toBe("validated");
+    if (measured?.status !== "validated") throw new Error("validated measurement expected");
+    expect(measured.metrics.work).toEqual({
+      status: "measured", value: 7, unit: "native_visits", source: "actual"
+    });
+    expect(measured.metrics.memory).toEqual({
+      status: "measured", value: 12345, unit: "rss_bytes", source: "actual"
+    });
+    expect(measured.metrics.work.value).not.toBe(4);
+    expect(measured.metrics.memory.value).not.toBe(8888);
+    expect(measured.request.execution_receipt.worker?.native_visits).toBe(4);
+  });
+
+  it("keeps work and memory unavailable when neither nested receipt is present", () => {
+    const measured = measureConditionalFieldResponse(fixture());
+    expect(measured?.status).toBe("validated");
+    if (measured?.status !== "validated") throw new Error("validated measurement expected");
+    expect(measured.request.execution_receipt.actual).toBeUndefined();
+    expect(measured.request.execution_receipt.worker).toBeUndefined();
+    expect(measured.metrics.work).toEqual({
+      status: "unavailable", value: null, reason: "response exposes no measured work receipt"
+    });
+    expect(measured.metrics.memory).toEqual({
+      status: "unavailable", value: null, reason: "response exposes no measured memory receipt"
+    });
+  });
+
+  it("rejects archived work or memory that does not equal the chosen receipt field", () => {
+    const measured = measureWithReceipt({ actual: completeActual(7, 12345) });
+    expect(measured?.status).toBe("validated");
+    if (measured?.status !== "validated") throw new Error("validated measurement expected");
+    expect(ConditionalFieldMeasurementSchema.safeParse({
+      ...measured,
+      metrics: {
+        ...measured.metrics,
+        work: { status: "measured", value: BUDGET.work_units, unit: "native_visits", source: "actual" }
+      }
+    }).success).toBe(false);
+    expect(ConditionalFieldMeasurementSchema.safeParse({
+      ...measured,
+      metrics: {
+        ...measured.metrics,
+        memory: { status: "measured", value: BUDGET.memory_bytes, unit: "rss_bytes", source: "worker" }
+      }
+    }).success).toBe(false);
+    expect(ConditionalFieldMeasurementSchema.safeParse({
+      ...measured,
+      metrics: {
+        ...measured.metrics,
+        work: { status: "unavailable", value: null, reason: "response exposes no measured work receipt" }
+      }
+    }).success).toBe(false);
   });
 });

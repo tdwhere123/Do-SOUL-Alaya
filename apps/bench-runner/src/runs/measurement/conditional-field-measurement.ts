@@ -61,6 +61,13 @@ const ResultSlot = z.object({
 const UnavailableMetric = z.object({
   status: z.literal("unavailable"), value: z.null(), reason: z.string()
 }).strict().readonly();
+const MeasuredMetric = z.object({
+  status: z.literal("measured"),
+  value: z.number().int().nonnegative(),
+  unit: z.enum(["native_visits", "rss_bytes"]),
+  source: z.enum(["actual", "worker"])
+}).strict().readonly();
+const CostMetric = z.discriminatedUnion("status", [UnavailableMetric, MeasuredMetric]);
 const InvalidReason = z.enum(["invalid_response", "missing_zero_call_evidence", "missing_request_binding",
   "missing_request_budget", "request_budget_mismatch", "unusable_source_state",
   "snapshot_mismatch", "interpretation_clock_mismatch", "continuation_identity_mismatch",
@@ -101,7 +108,7 @@ const ValidatedMeasurementBase = z.object({
     resolved_explanation_reference_count: z.number().int().nonnegative(),
     association_min: z.number().nullable(), association_max: z.number().nullable(),
     latency_ms: z.number().finite().nonnegative().nullable(),
-    work: UnavailableMetric, memory: UnavailableMetric,
+    work: CostMetric, memory: CostMetric,
     relationship_correctness: UnavailableMetric, explanation_correctness: UnavailableMetric,
     interpretation_correctness: UnavailableMetric, downstream_utilization: UnavailableMetric,
     mixed_kind_first_exposure: MixedKindFirstExposureMetricSchema,
@@ -160,7 +167,10 @@ const ValidatedMeasurement = ValidatedMeasurementBase.superRefine((value, contex
     mixed_kind_first_exposure: metrics.mixed_kind_first_exposure,
     historical_memory_any_at_k: metrics.historical_memory_any_at_k
   });
-  if (mismatch !== null || badIdentity || badContinuation || badSlots || badMetrics || badSource || badJoin) {
+  const expectedCost = receiptCostMetrics(receipt);
+  const badCost = !sameCostMetric(metrics.work, expectedCost.work)
+    || !sameCostMetric(metrics.memory, expectedCost.memory);
+  if (mismatch !== null || badIdentity || badContinuation || badSlots || badMetrics || badSource || badJoin || badCost) {
     context.addIssue({ code: "custom", message: "archived conditional measurement request, identity or slot join is inconsistent" });
   }
 });
@@ -374,8 +384,7 @@ function finalizeConditionalFieldMeasurement(
       association_min: associations.length === 0 ? null : Math.min(...associations),
       association_max: associations.length === 0 ? null : Math.max(...associations),
       latency_ms: input.recallLatencyMs ?? null,
-      work: unavailable("response exposes no measured work receipt"),
-      memory: unavailable("response exposes no measured memory receipt"),
+      ...receiptCostMetrics(admitted.execution),
       relationship_correctness: unavailable("independent relationship oracle not supplied"),
       explanation_correctness: unavailable("reference existence does not establish explanatory correctness"),
       interpretation_correctness: unavailable("independent interpretation oracle not supplied"),
@@ -424,6 +433,37 @@ function targetIdentity(target: RecallTargetRef): string {
   return target.kind === "source_evidence" ? `source_evidence:${sourceEvidenceRootKey(target)}` : stableCanonicalStringify(target);
 }
 function unavailable(reason: string) { return { status: "unavailable" as const, value: null, reason }; }
+function measured(value: number, unit: "native_visits" | "rss_bytes", source: "actual" | "worker") {
+  return { status: "measured" as const, value, unit, source };
+}
+// Nested actual is the ledger snapshot; sibling worker is instrumentation. Never copy requested budgets.
+function receiptCostMetrics(receipt: ConditionalFieldExecutionBinding) {
+  if (receipt.actual !== undefined) {
+    return {
+      work: measured(receipt.actual.native_visits, "native_visits", "actual"),
+      memory: measured(receipt.actual.rss.after_projection_bytes, "rss_bytes", "actual")
+    };
+  }
+  if (receipt.worker !== undefined) {
+    return {
+      work: measured(receipt.worker.native_visits, "native_visits", "worker"),
+      memory: measured(receipt.worker.rss_bytes, "rss_bytes", "worker")
+    };
+  }
+  return {
+    work: unavailable("response exposes no measured work receipt"),
+    memory: unavailable("response exposes no measured memory receipt")
+  };
+}
+function sameCostMetric(
+  published: z.infer<typeof CostMetric>, expected: z.infer<typeof CostMetric>
+): boolean {
+  if (expected.status === "unavailable") {
+    return published.status === "unavailable" && published.value === null;
+  }
+  return published.status === "measured" && published.value === expected.value
+    && published.unit === expected.unit && published.source === expected.source;
+}
 function sha256(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
