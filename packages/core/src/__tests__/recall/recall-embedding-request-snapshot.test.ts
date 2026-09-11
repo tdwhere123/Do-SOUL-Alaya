@@ -18,6 +18,8 @@ describe("conditional Recall request snapshot", () => {
         recall: async (request) => {
           expect(events).toEqual(["begin"]);
           expect(request.query_text).toBe("deployment checklist");
+          expect(Object.hasOwn(request, "authorized_scopes")).toBe(true);
+          expect(request.authorized_scopes).toBeNull();
           events.push("observe");
           return { index: runConditionalFieldRecall({ ...request, readers: {} }), previews: {} };
         }

@@ -153,6 +153,9 @@ describe("bench conditional field index response", () => {
     };
     expect(() => encodeBenchRecallResults(fixture(), policy, budget, { ...expected, requestFilters: {} }))
       .not.toThrow();
+    expect(() => encodeBenchRecallResults(fixture(), policy, budget, {
+      ...expected, requestFilters: { authorized_scopes: null }
+    })).toThrow(/differs from the invoked request/);
     const associative = fixture("associative");
     expect(() => encodeBenchRecallResults(associative, policy, budget, {
       ...expected, requestFilters: { enumeration_policy: "associative" }

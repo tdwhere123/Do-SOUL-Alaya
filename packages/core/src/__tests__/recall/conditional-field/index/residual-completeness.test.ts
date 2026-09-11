@@ -68,6 +68,7 @@ describe("residual influence and completeness", () => {
       query_text: "needle",
       budget: defaultBudget(),
       as_of: "2026-01-01T00:00:00.000Z",
+      authorized_scopes: null,
       readers: memoryOnlyReaders("r")
     });
     const source = mixed.residuals.find((region) => region.kind === "source_domain");
@@ -87,6 +88,7 @@ describe("residual influence and completeness", () => {
       query_text: "needle",
       budget: defaultBudget(),
       as_of: "2026-01-01T00:00:00.000Z",
+      authorized_scopes: null,
       readers: truncatedSourceReaders()
     });
     const truncatedSource = truncated.residuals.find((region) => region.kind === "source_domain");

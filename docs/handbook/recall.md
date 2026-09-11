@@ -204,6 +204,15 @@ state, including same-timestamp source edits. Reader expiry is a lifetime
 failure, independent of semantic `as_of`. Process loss invalidates continuation;
 durable cross-process resume is not advertised.
 
+Observe authorization is a tri-state principal, not a default scope.
+Chat, analyze, and govern set `scope_filter: null`, which the runner maps to
+`authorized_scopes: null` (key present): the unrestricted local-daemon
+principal, which admits every `scope_class`. Omitting the worker or CLI key is
+a forgotten payload and fail-closes (invalid index / no admission).
+`authorized_scopes: []` is an empty authorized set and admits none. A nonempty
+array keeps the named includes check. One-sided continuation omit still
+mismatches. Do not invent a workspace or project default.
+
 MCP and CLI share the runtime contract. `index` is authoritative. Required
 `results` remains a compatibility encoding in the same order, retaining
 product coordinates and `output_binding`. Preview delivery and page width

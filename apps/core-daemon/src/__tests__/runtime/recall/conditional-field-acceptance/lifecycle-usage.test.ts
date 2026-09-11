@@ -113,6 +113,7 @@ describe("conditional-field lifecycle and verified usage through actual consumer
       cursor: startObserverCursor({ cursor_id: "adj", region_id: "adj", query_id: query.query_id, snapshot_id: query.snapshot_id }),
       action: { schema_version: 1, region_id: "adj", action: "adjacency", work_limit: 7 }, page_limit: 1,
       workspace_id: WS, relation_subject: MEM.r, relation_kind: "config_direct", as_of: NOW,
+      authorized_scopes: null,
       readers: createConditionalFieldObserverReaders(slice.database, policies) });
     expect(observe([]).page.observations).toEqual([]);
     expect(observe(["accepted-policy"]).page.observations.map((row) => row.object_id)).toEqual([MEM.c]);

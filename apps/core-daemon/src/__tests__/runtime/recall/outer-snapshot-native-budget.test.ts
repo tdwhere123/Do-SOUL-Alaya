@@ -3,6 +3,7 @@ import { MemoryDimension, type RequestBudget } from "@do-soul/alaya-protocol";
 import { runConditionalFieldRecall, snapshotIdFromPin } from "@do-soul/alaya-core";
 import { SqliteIndexedRecallProjection, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createConditionalFieldObserverReaders, runConditionalFieldWorkerRecall } from "../../../runtime/recall-read-worker/observer-operations.js";
+import { ConditionalFieldRecallWorkerPayloadSchema } from "../../../runtime/recall-read-worker/protocol.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import { createBoundedActiveConstraintsReader } from "../../../runtime/recall-read-worker/active-constraints.js";
 import { MEM, WS, NOW, openSourceSlice } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
@@ -107,6 +108,22 @@ describe("outer recall snapshot native allowance", () => {
       .all(MEM.r, MEM.c) as { created_at: string }[];
     expect(rows.map((row) => row.created_at)).toEqual([NOW, NOW]);
   });
+
+  it("keeps explicit null unrestricted and fail-closes an omitted worker key", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await slice.writeMemory(MEM.r, "needle", MemoryDimension.FACT);
+    const base = payload(defaultBudget());
+    const parsedNull = ConditionalFieldRecallWorkerPayloadSchema.parse(base);
+    expect(parsedNull.authorized_scopes).toBeNull();
+    const { authorized_scopes: _scopes, ...omitted } = base;
+    const parsedOmitted = ConditionalFieldRecallWorkerPayloadSchema.parse(omitted);
+    expect(parsedOmitted.authorized_scopes).toBeUndefined();
+    const admitted = runConditionalFieldWorkerRecall(runtime(slice.database), parsedNull);
+    expect(admitted.index.entries.map((entry) => entry.object_id)).toContain(MEM.r);
+    const denied = runConditionalFieldWorkerRecall(runtime(slice.database), parsedOmitted);
+    expect(denied.index.entries).toEqual([]);
+    expect(denied.index.completeness.logical_index).toBe("invalidated");
+  });
 });
 
 function payload(budget: RequestBudget) {
@@ -116,7 +133,8 @@ function payload(budget: RequestBudget) {
     expires_at: "2027-01-01T00:00:00.000Z", lifetime_now: NOW,
     protocol_version: 1 as const,
     supports_source_evidence: true,
-    supported_result_kinds: ["memory_entry", "source_evidence"] as const
+    supported_result_kinds: ["memory_entry", "source_evidence"] as const,
+    authorized_scopes: null
   };
 }
 

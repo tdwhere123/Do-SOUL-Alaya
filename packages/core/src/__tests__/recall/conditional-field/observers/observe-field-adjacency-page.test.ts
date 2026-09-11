@@ -20,6 +20,7 @@ describe("observeField adjacency paging", () => {
       query_text: "seed",
       budget: defaultBudget(),
       as_of: AS_OF,
+      authorized_scopes: null,
       readers: readers(seedReads)
     });
     expect(seedReads.some((limit) => limit > 1)).toBe(true);

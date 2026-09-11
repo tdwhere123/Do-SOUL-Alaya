@@ -18,7 +18,7 @@ export type QueryDenotationParts = Readonly<{
   readonly hypotheses?: readonly QueryHypothesis[];
   readonly interpretation_clock?: string;
   readonly time_window?: QueryTimeWindow;
-  readonly authorized_scopes?: readonly string[];
+  readonly authorized_scopes?: readonly string[] | null;
   readonly lexical_text?: string;
   readonly ordinary_request?: unknown;
   readonly interpretation_proposal?: QueryInterpretationProposal;
@@ -37,7 +37,11 @@ export function identityFor(queryId: string | undefined, parts: QueryDenotationP
       hypotheses: parts.hypotheses ?? [],
       interpretation_clock: parts.interpretation_clock ?? null,
       time_window: parts.time_window ?? null,
-      authorized_scopes: [...(parts.authorized_scopes ?? [])].sort(),
+      authorized_scopes: parts.authorized_scopes === undefined
+        ? "omitted"
+        : parts.authorized_scopes === null
+          ? "unrestricted"
+          : [...parts.authorized_scopes].sort(),
       lexical_text: parts.lexical_text ?? "",
       ordinary_request: parts.ordinary_request ?? null,
       source_guard: parts.source_guard ?? null,
@@ -79,7 +83,7 @@ export function proposalBindsOriginalQuery(
 export function continuationViewMismatch(
   continuation: Continuation | null | undefined,
   view: QueryView,
-  authorizedScopes?: readonly string[]
+  authorizedScopes?: readonly string[] | null
 ): boolean {
   if (continuation === undefined || continuation === null) return false;
   const policy = continuation.enumeration_policy ?? "canonical";
@@ -91,8 +95,15 @@ export function continuationViewMismatch(
     !== stableStringify([...(view.supported_result_kinds ?? [])].sort())) return true;
   if (stableStringify(continuation.cap_contracts ?? null) !== stableStringify(view.cap_contracts ?? null)) return true;
   if (stableStringify(continuation.claim_demands ?? null) !== stableStringify(view.claim_demands ?? null)) return true;
-  if (continuation.authorized_scopes === undefined && authorizedScopes === undefined) return false;
-  if (continuation.authorized_scopes === undefined || authorizedScopes === undefined) return true;
-  return stableStringify([...(continuation.authorized_scopes)].sort())
-    !== stableStringify([...authorizedScopes].sort());
+  return authorizedScopesMismatch(continuation.authorized_scopes, authorizedScopes);
+}
+
+export function authorizedScopesMismatch(
+  left: readonly string[] | null | undefined,
+  right: readonly string[] | null | undefined
+): boolean {
+  if (left === undefined || right === undefined || left === null || right === null) {
+    return left !== right;
+  }
+  return stableStringify([...left].sort()) !== stableStringify([...right].sort());
 }

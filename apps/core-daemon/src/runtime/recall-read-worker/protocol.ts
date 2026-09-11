@@ -131,7 +131,7 @@ export const ConditionalFieldRecallWorkerPayloadSchema = z
     dimension_filter: z.array(z.string()).readonly().optional(),
     domain_tag_filter: z.array(z.string()).readonly().optional(),
     continuation: ContinuationSchema.nullable().optional(),
-    authorized_scopes: z.array(z.string()).readonly().optional(),
+    authorized_scopes: z.array(z.string()).readonly().nullable().optional(),
     governance: BoundedActiveConstraintsResultSchema.optional(),
     enumeration_policy: EnumerationPolicySchema.optional(),
     result_kind_view: ResultKindViewSchema.optional(),

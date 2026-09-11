@@ -198,7 +198,8 @@ function observeInput(program: QueryProgram): ObserveConditionalFieldInput {
     }),
     query: interpretation(program),
     workspace_id: "workspace-1",
-    readers: {}
+    readers: {},
+    authorized_scopes: null
   };
 }
 

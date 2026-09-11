@@ -426,7 +426,7 @@ function seedInput(input: Readonly<{
   readonly readers?: ObserveConditionalFieldInput["readers"];
   readonly cursor?: ObserveConditionalFieldInput["cursor"];
   readonly source_byte_limit?: number;
-  readonly authorized_scopes?: readonly string[];
+  readonly authorized_scopes?: readonly string[] | null;
   readonly seed_query?: string;
   readonly view?: "mixed" | "source_only";
   readonly actionWork?: number;
@@ -450,7 +450,7 @@ function seedInput(input: Readonly<{
     workspace_id: "workspace-1",
     seed_query: input.seed_query ?? NEEDLE,
     readers: input.readers ?? {},
-    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    authorized_scopes: input.authorized_scopes ?? null,
     ...(input.source_byte_limit === undefined ? {} : { source_byte_limit: input.source_byte_limit }),
     ...(input.page_limit === undefined ? {} : { page_limit: input.page_limit })
   };

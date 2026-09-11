@@ -103,7 +103,7 @@ export type AcceptingProjectionInput = Readonly<{
   readonly expires_at?: string;
   readonly as_of?: string;
   readonly lifetime_now?: string;
-  readonly authorized_scopes?: readonly string[];
+  readonly authorized_scopes?: readonly string[] | null;
   readonly prior_continuation?: Continuation | null;
   readonly observer?: ObserverCoverage;
   readonly interpretation_status?: QueryInterpretationStatus;

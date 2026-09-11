@@ -89,6 +89,14 @@ describe("TaskSurfaceBuilder", () => {
 
     expect(taskSurface.surface_kind).toBe("build");
   });
+  it("chat and analyze keep explicit null scope_filter rather than omitting the key", () => {
+    expect(Object.hasOwn(STRATEGY_RECALL_DEFAULTS.chat.coarse.deterministic_match, "scope_filter")).toBe(true);
+    expect(STRATEGY_RECALL_DEFAULTS.chat.coarse.deterministic_match.scope_filter).toBeNull();
+    expect(STRATEGY_RECALL_DEFAULTS.analyze.coarse.deterministic_match.scope_filter).toBeNull();
+    expect(STRATEGY_RECALL_DEFAULTS.govern.coarse.deterministic_match.scope_filter).toBeNull();
+    expect(STRATEGY_RECALL_DEFAULTS.build.coarse.deterministic_match.scope_filter).toEqual(["project"]);
+  });
+
   it("strategy defaults keep the keyword supplement enabled with a capped supplement budget", () => {
     expect(STRATEGY_RECALL_DEFAULTS.chat.coarse.semantic_supplement).toEqual({
       enabled: true,

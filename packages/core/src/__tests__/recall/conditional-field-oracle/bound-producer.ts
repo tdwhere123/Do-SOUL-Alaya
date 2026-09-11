@@ -194,7 +194,7 @@ export function produceField(
     readonly query_text?: string;
     readonly budget?: RequestBudget;
     readonly readers?: ObserverReaders;
-    readonly authorized_scopes?: readonly string[];
+    readonly authorized_scopes?: readonly string[] | null;
     readonly cancelled?: boolean;
   }> = {}
 ) {
@@ -212,7 +212,7 @@ export function produceField(
     budget,
     as_of: INTERPRETATION_CLOCK,
     readers: input.readers ?? readersFor(slice),
-    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    authorized_scopes: input.authorized_scopes ?? null,
     ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled })
   };
   if (interpretation.status === "resource_rejected" || interpretation.status === "malformed"
@@ -230,7 +230,7 @@ export function runRecall(
     readonly budget?: RequestBudget;
     readonly continuation?: InformationIndex["continuation"];
     readonly cancelled?: boolean;
-    readonly authorized_scopes?: readonly string[];
+    readonly authorized_scopes?: readonly string[] | null;
     readonly interpretation_clock?: string;
     readonly as_of?: string;
     readonly readers?: ObserverReaders;
@@ -250,7 +250,7 @@ export function runRecall(
     readers: input.readers ?? readersFor(slice),
     continuation: input.continuation ?? null,
     cancelled: input.cancelled === true,
-    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    authorized_scopes: input.authorized_scopes ?? null,
     ...(input.result_kind_view === undefined ? {} : { result_kind_view: input.result_kind_view })
   });
 }
@@ -274,7 +274,7 @@ export function observeProgram(
     budget,
     as_of: input.as_of ?? INTERPRETATION_CLOCK,
     readers: input.readers ?? readersFor(slice),
-    ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
+    authorized_scopes: input.authorized_scopes ?? null,
     ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled })
   };
   const field = observeField(interpretation, observeInput);

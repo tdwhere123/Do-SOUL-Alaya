@@ -59,6 +59,7 @@ export function localTargetRecall(input: LocalRecallInput, ports: {
     budget: defaultBudget(input.budget),
     readers,
     cancelled,
+    authorized_scopes: null,
     ...(input.continuation === undefined ? {} : { continuation: input.continuation })
   });
   return { index, membership: index.entries.map((entry) => entry.object_id),

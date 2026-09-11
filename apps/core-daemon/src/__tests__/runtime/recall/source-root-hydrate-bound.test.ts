@@ -97,9 +97,32 @@ describe("worker source-root hydrate", () => {
     const input = {
       as_of: asOf,
       query: { interpretation_clock: asOf },
-      authorized_scopes: []
+      authorized_scopes: null
     } as unknown as ObserveConditionalFieldInput;
     expect(sourceRootEligible(input, page.rows.find((row) => row.root_id === expired.record_id)!)).toBe(false);
     expect(sourceRootEligible(input, page.rows.find((row) => row.root_id === open.record_id)!)).toBe(true);
+  });
+
+  it("denies an empty authorized set and an omitted principal", () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
+    const open = records.insert({
+      ...hashedRecord("workspace-1", "open body", "src-open"),
+      valid_from: "2025-01-01T00:00:00.000Z",
+      valid_to: null
+    });
+    const page = createConditionalFieldObserverReaders(database).sourceRoots!({
+      workspaceId: "workspace-1",
+      limit: 8,
+      nativeLimit: 8,
+      afterCursor: null
+    });
+    const asOf = "2026-09-09T00:00:00.000Z";
+    const row = page.rows.find((item) => item.root_id === open.record_id)!;
+    const clock = { as_of: asOf, query: { interpretation_clock: asOf } };
+    expect(sourceRootEligible({ ...clock, authorized_scopes: [] } as unknown as ObserveConditionalFieldInput, row)).toBe(false);
+    expect(sourceRootEligible(clock as unknown as ObserveConditionalFieldInput, row)).toBe(false);
+    expect(sourceRootEligible({ ...clock, authorized_scopes: null } as unknown as ObserveConditionalFieldInput, row)).toBe(true);
   });
 });

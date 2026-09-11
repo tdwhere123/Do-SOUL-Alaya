@@ -102,7 +102,8 @@ export function conditionalRecallPayload(queryText: string) {
     protocol_version: 1 as const,
     supported_result_kinds: ["memory_entry", "source_evidence"] as const,
     supports_source_evidence: true,
-    supports_product_updates: true };
+    supports_product_updates: true,
+    authorized_scopes: null };
 }
 
 async function openHydrationFixture(

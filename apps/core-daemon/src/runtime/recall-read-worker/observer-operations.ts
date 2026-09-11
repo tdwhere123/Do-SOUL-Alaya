@@ -75,7 +75,7 @@ export function runConditionalFieldWorkerRecall(
     cancelled: payload.cancelled === true,
     ...(payload.authorized_scopes === undefined
       ? {}
-      : { authorized_scopes: payload.authorized_scopes }),
+      : { authorized_scopes: payload.authorized_scopes }), // null stays present; omitted stays omitted.
     ...(payload.enumeration_policy === undefined
       ? {}
       : { enumeration_policy: payload.enumeration_policy }),

@@ -201,6 +201,7 @@ function seedInput(
     query,
     workspace_id: "ws",
     seed_query: seedQuery,
+    authorized_scopes: null,
     readers: {
       sourceRoots: () => ({
         rows,
@@ -236,6 +237,7 @@ function observeInput(
     query: interpretation(program, extra),
     workspace_id: "ws",
     readers: {},
+    authorized_scopes: null,
     seed_query: NL_QUERY
   };
 }

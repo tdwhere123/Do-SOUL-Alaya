@@ -80,6 +80,7 @@ describe("conditional-field compiler and projection contracts", () => {
       query_text: "yesterday's failed deployment",
       budget: defaultBudget(),
       as_of: INTERPRETATION_CLOCK,
+      authorized_scopes: null,
       readers: sharedProviderWorld()
     });
     const values = field.binding.kind === "bound" ? field.binding.snapshot.values : [];

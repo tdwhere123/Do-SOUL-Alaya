@@ -28,7 +28,8 @@ function recall(metadata: boolean, memoryBytes = 1_000_000) {
       lexical: () => ({ ids: ["memory"], nativeVisits: 1, nativeBytes: 6,
         rowsRead: 1, bytesRead: 6, truncated: false }),
       source: () => ({ row, rowsRead: 1, bytesRead: Buffer.byteLength(JSON.stringify(row)), unavailable: false })
-    }
+    },
+    authorized_scopes: null
   });
 }
 

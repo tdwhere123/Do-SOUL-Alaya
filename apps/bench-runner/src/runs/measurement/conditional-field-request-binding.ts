@@ -17,7 +17,7 @@ const Filters = {
   time_field: z.enum(["created_at", "last_used_at"]).optional(),
   dimension_filter: z.array(Id).readonly().optional(),
   domain_tag_filter: z.array(Id).readonly().optional(),
-  authorized_scopes: z.array(Id).readonly().optional(),
+  authorized_scopes: z.array(Id).readonly().nullable().optional(),
   enumeration_policy: EnumerationPolicySchema.optional(),
   result_kind_view: ResultKindViewSchema.optional()
 };
@@ -126,7 +126,9 @@ function normalizedFilters(filters: ConditionalFieldRequestFilters): string {
     since: filters.since, until: filters.until, time_field: filters.time_field,
     dimension_filter: filters.dimension_filter === undefined ? undefined : [...filters.dimension_filter].sort(),
     domain_tag_filter: filters.domain_tag_filter === undefined ? undefined : [...filters.domain_tag_filter].sort(),
-    authorized_scopes: filters.authorized_scopes === undefined ? undefined : [...filters.authorized_scopes].sort(),
+    authorized_scopes: filters.authorized_scopes === undefined || filters.authorized_scopes === null
+      ? filters.authorized_scopes
+      : [...filters.authorized_scopes].sort(),
     enumeration_policy: filters.enumeration_policy ?? "canonical",
     result_kind_view: filters.result_kind_view ?? "mixed"
   });

@@ -103,6 +103,7 @@ function input(options: { readonly reverse?: boolean } = {}) {
     query_text: "seed",
     budget: defaultBudget(),
     as_of: AS_OF,
+    authorized_scopes: null,
     readers: readers(options.reverse === true)
   };
 }

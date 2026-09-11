@@ -249,7 +249,7 @@ export type ObserveConditionalFieldInput = Readonly<{
   readonly seed_query?: string;
   readonly relation_subject?: string | null;
   readonly relation_kind?: string;
-  readonly authorized_scopes?: readonly string[];
+  readonly authorized_scopes?: readonly string[] | null;
   readonly permitted_timeless_policy_ids?: readonly string[];
   readonly anchor_object_ids?: readonly string[];
   readonly object_observed_at?: Readonly<Record<string, string>>;

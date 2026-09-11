@@ -215,6 +215,7 @@ describe("stored pair measurement producer", () => {
       query_text: "seed",
       budget: defaultBudget(),
       as_of: INTERPRETATION_CLOCK,
+      authorized_scopes: null,
       readers: {
         lexical: () => ({
           ids: ["seed"],
@@ -558,6 +559,7 @@ function measureInput(
     workspace_id: "ws",
     readers,
     seed_query: "seed",
+    authorized_scopes: null,
     ...pin
   };
 }

@@ -38,7 +38,7 @@ describe("bounded path effect continuation", () => {
       }
     };
     const request = { workspace_id: "workspace-1", query_text: "a", as_of: AS_OF, readers,
-      budget: defaultBudget({ work_units: 10000, memory_bytes: 1000000 }) };
+      authorized_scopes: null, budget: defaultBudget({ work_units: 10000, memory_bytes: 1000000 }) };
     const observed = observeField(interpretation, { ...request, resume_field: state });
     expect(observed.pending_path_effects).toBeUndefined();
     expect(nativeRows).toBe(1);
@@ -83,7 +83,8 @@ describe("bounded path effect continuation", () => {
     let actual = state;
     for (let turn = 0; turn < 200; turn += 1) {
       actual = observeField(interpretation, { workspace_id: "workspace-1", query_text: "a", as_of: AS_OF, readers,
-        resume_field: actual, budget: defaultBudget({ work_units: 100, finalization_reserve: 20, memory_bytes: 1000000 }) });
+        authorized_scopes: null, resume_field: actual,
+        budget: defaultBudget({ work_units: 100, finalization_reserve: 20, memory_bytes: 1000000 }) });
       if (actual.pending_path_effects === undefined && actual.closure.observation === "exhausted") break;
     }
     expect(nativeRows).toBe(1);
@@ -135,7 +136,7 @@ describe("bounded path effect continuation", () => {
           bytesRead: rows.length, truncated: false, committedThrough: rows.at(-1)?.assertionId ?? afterAssertionId };
       }
     };
-    const request = { workspace_id: "workspace-1", query_text: "a", as_of: AS_OF, readers };
+    const request = { workspace_id: "workspace-1", query_text: "a", as_of: AS_OF, readers, authorized_scopes: null };
     let failed: FieldEngineState | undefined;
     for (let memory = 8000; memory < 60000; memory += 200) {
       const candidate = observeField(interpretation, { ...request, resume_field: state,

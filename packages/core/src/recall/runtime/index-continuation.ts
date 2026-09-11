@@ -15,7 +15,10 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
-import { interpretationIdentity } from "../conditional-field/query/compile-query-identity.js";
+import {
+  authorizedScopesMismatch,
+  interpretationIdentity
+} from "../conditional-field/query/compile-query-identity.js";
 import { compareText } from "../../shared/compare-text.js";
 import { stableStringify } from "../../shared/stable-stringify.js";
 
@@ -172,7 +175,7 @@ export function continuationPolicyMismatch(input: Readonly<{
     readonly cap_contracts?: Continuation["cap_contracts"];
     readonly claim_demands?: Continuation["claim_demands"];
   }>;
-  readonly authorized_scopes?: readonly string[];
+  readonly authorized_scopes?: readonly string[] | null;
   readonly prior_continuation?: Continuation | null;
 }>): boolean {
   const prior = input.prior_continuation;
@@ -184,10 +187,7 @@ export function continuationPolicyMismatch(input: Readonly<{
     !== stableStringify([...(input.view.supported_result_kinds ?? [])].sort(compareText))) return true;
   if (stableStringify(prior.cap_contracts ?? null) !== stableStringify(input.view.cap_contracts ?? null)) return true;
   if (stableStringify(prior.claim_demands ?? null) !== stableStringify(input.view.claim_demands ?? null)) return true;
-  if (prior.authorized_scopes === undefined && input.authorized_scopes === undefined) return false;
-  if (prior.authorized_scopes === undefined || input.authorized_scopes === undefined) return true;
-  return identityDigest([...(prior.authorized_scopes)].sort(compareText))
-    !== identityDigest([...input.authorized_scopes].sort(compareText));
+  return authorizedScopesMismatch(prior.authorized_scopes, input.authorized_scopes);
 }
 
 export function resumeIndexProjection(state: FieldEngineState, snapshot: FieldSnapshot): ProjectionProgress {

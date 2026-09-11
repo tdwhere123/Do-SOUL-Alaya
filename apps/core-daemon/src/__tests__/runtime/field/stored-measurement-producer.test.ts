@@ -128,6 +128,7 @@ describe("worker stored measurement producer", () => {
       query_text: QUERY_TEXT,
       budget: defaultBudget(),
       as_of: NOW,
+      authorized_scopes: null,
       readers
     });
     const measured = observed.measurements.find((row) =>
@@ -261,6 +262,7 @@ describe("worker stored measurement producer", () => {
       query: interpretation,
       workspace_id: WORKSPACE,
       readers: counted,
+      authorized_scopes: null,
       seed_query: QUERY_TEXT,
       model_id: MODEL_B
     });
@@ -278,7 +280,8 @@ describe("worker stored measurement producer", () => {
     const { readers } = await plantMixedProfiles();
     const interpretation = compileForReaders(readers, admission([MODEL_A, MODEL_B]));
     const observed = observeField(interpretation, { workspace_id: WORKSPACE, query_text: QUERY_TEXT,
-      budget: defaultBudget(), as_of: NOW, readers: withoutLexicalHits(readers) });
+      budget: defaultBudget(), as_of: NOW, readers: withoutLexicalHits(readers),
+      authorized_scopes: null });
     const objects = observed.seeds.filter((seed) => seed.state.target.kind === "memory_entry")
       .map((seed) => seed.state.target.kind === "memory_entry" ? seed.state.target.object_id : "");
     expect(objects).toContain(OBJECT_A);
@@ -302,6 +305,7 @@ describe("worker stored measurement producer", () => {
     const declaration = { ...admission([MODEL_B]), obligations: [{ ...obligation(MODEL_B), dimensions }] };
     const observed = observeField(compileForReaders(readers, declaration), { workspace_id: WORKSPACE,
       query_text: QUERY_TEXT, as_of: NOW, readers: withoutLexicalHits(readers),
+      authorized_scopes: null,
       budget: { ...defaultBudget(), work_units: 100000, memory_bytes: 1000000 } });
     expect(observed.seeds.some((seed) => seed.state.target.kind === "memory_entry"
       && seed.state.target.object_id === OBJECT_B)).toBe(true);
@@ -312,7 +316,8 @@ describe("worker stored measurement producer", () => {
     fixture.database.connection.prepare("UPDATE memory_entries SET content = ? WHERE object_id = ?").run("changed source", OBJECT_B);
     const interpretation = compileForReaders(readers, admission([MODEL_B]));
     const observed = observeField(interpretation, { workspace_id: WORKSPACE, query_text: QUERY_TEXT,
-      budget: defaultBudget(), as_of: NOW, readers: withoutLexicalHits(readers) });
+      budget: defaultBudget(), as_of: NOW, readers: withoutLexicalHits(readers),
+      authorized_scopes: null });
     expect(observed.seeds.some((seed) => seed.state.target.kind === "memory_entry" && seed.state.target.object_id === OBJECT_B)).toBe(false);
     expect(observed.measurements.some((row) => row.observation_id.includes(OBJECT_B) && row.raw.status === "unavailable")).toBe(true);
   });
@@ -324,7 +329,8 @@ describe("worker stored measurement producer", () => {
       schema_version: 1, dimensions: 2, embedding: new Float32Array([0.0000001, 1]), created_at: NOW, updated_at: NOW });
     const declaration = admission([MODEL_B], 0.000001);
     const observed = observeField(compileForReaders(readers, declaration), { workspace_id: WORKSPACE,
-      query_text: QUERY_TEXT, budget: defaultBudget(), as_of: NOW, readers: withoutLexicalHits(readers) });
+      query_text: QUERY_TEXT, budget: defaultBudget(), as_of: NOW, readers: withoutLexicalHits(readers),
+      authorized_scopes: null });
     const measured = observed.measurements.find((row) => row.raw.status === "measured" && row.raw.referent.kind === "memory_entry"
       && row.raw.referent.object_id === OBJECT_B);
     expect(measured?.raw.status).toBe("measured");
@@ -365,7 +371,8 @@ describe("worker stored measurement producer", () => {
           guard: { schema_version: 1, kind: "query_predicate", verdict: "unresolved", variable: "s",
             predicate_name: "source.literal.nfc.v1", entity_id: "not-in-any-source" } } } });
     const observed = observeField(interpretation, { workspace_id: WORKSPACE, query_text: QUERY_TEXT,
-      budget: defaultBudget(), as_of: NOW, readers: withoutLexicalHits(readers) });
+      budget: defaultBudget(), as_of: NOW, readers: withoutLexicalHits(readers),
+      authorized_scopes: null });
     expect(observed.measurements.some((row) => row.raw.status === "measured")).toBe(true);
     expect(observed.seeds.some((seed) => seed.state.target.kind === "memory_entry" && seed.state.target.object_id === OBJECT_B)).toBe(false);
   });
@@ -445,6 +452,7 @@ function observeWithReaders(
     query_text: QUERY_TEXT,
     budget: defaultBudget(),
     as_of: NOW,
+    authorized_scopes: null,
     readers,
     ...pin
   });

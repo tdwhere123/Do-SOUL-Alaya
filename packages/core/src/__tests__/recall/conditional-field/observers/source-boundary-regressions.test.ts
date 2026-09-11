@@ -33,7 +33,7 @@ function sourceInput(reader: SqliteSourceRootRecallReader, needles: readonly str
   return { workspace_id: "workspace-1", query, action: { schema_version: 1, action: "seed", region_id: "seed", work_limit: 16 },
     lease: { schema_version: 1, lease_id: "source-test", status: "active", snapshot_id: SNAPSHOT_ID, query_id: query.query_id },
     cursor: startObserverCursor({ cursor_id: "seed", region_id: "seed", snapshot_id: SNAPSHOT_ID, query_id: query.query_id }),
-    source_byte_limit: 8, page_limit: 1,
+    source_byte_limit: 8, page_limit: 1, authorized_scopes: null,
     readers: { sourceRoots: (input) => { const page = reader.page({ ...input, nativeByteLimit: 65536 }); return { ...page, rows: page.rows.map(toSourceRootObserverRow) }; } } };
 }
 

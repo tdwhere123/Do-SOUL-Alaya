@@ -166,7 +166,8 @@ function runLive(
     interpretation_clock: INTERPRETATION_CLOCK,
     as_of: INTERPRETATION_CLOCK,
     expires_at: FAR_FUTURE_EXPIRY,
-    readers: input.readers ?? readersFor(slice)
+    readers: input.readers ?? readersFor(slice),
+    authorized_scopes: null
   });
 }
 

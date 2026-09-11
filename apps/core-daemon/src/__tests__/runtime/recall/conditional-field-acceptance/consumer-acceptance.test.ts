@@ -226,7 +226,8 @@ describe("conditional-field MCP/CLI acceptance (real producers)", () => {
       interpretation_clock: INTERPRETATION_CLOCK,
       as_of: INTERPRETATION_CLOCK,
       expires_at: "2099-01-01T00:00:00.000Z",
-      readers: {}
+      readers: {},
+      authorized_scopes: null
     });
     expect(unavailable.completeness.logical_index).not.toBe("complete");
     expect(unavailable.completeness.observed_coverage).not.toBe("exhausted_empty");
@@ -420,7 +421,8 @@ function runProducer(
     expires_at: "2099-01-01T00:00:00.000Z",
     readers: readersFor(slice),
     continuation: input.continuation ?? null,
-    cancelled: input.cancelled === true
+    cancelled: input.cancelled === true,
+    authorized_scopes: null
   });
 }
 

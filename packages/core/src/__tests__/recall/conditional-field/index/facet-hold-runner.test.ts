@@ -66,7 +66,8 @@ function recall(readers: ObserverReaders, budget: RequestBudget, continuation: C
     as_of: CLOCK,
     expires_at: FAR_FUTURE_EXPIRY,
     readers,
-    continuation
+    continuation,
+    authorized_scopes: null
   });
 }
 

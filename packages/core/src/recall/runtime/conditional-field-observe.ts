@@ -60,7 +60,7 @@ export type ObserveFieldInput = Readonly<{
   readonly budget: import("@do-soul/alaya-protocol").RequestBudget;
   readonly as_of: string;
   readonly readers: ObserverReaders;
-  readonly authorized_scopes?: readonly string[];
+  readonly authorized_scopes?: readonly string[] | null;
   readonly cancelled?: boolean;
   readonly resume_cursors?: Readonly<Record<string, string | null>>;
   readonly resume_field?: FieldEngineState;
@@ -497,6 +497,7 @@ function observeMeasurement(
     readers: input.readers,
     seed_query: input.query_text,
     as_of: input.as_of,
+    authorized_scopes: input.authorized_scopes,
     ...pinExpectation(input)
   });
 }

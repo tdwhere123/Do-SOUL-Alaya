@@ -199,6 +199,7 @@ describe("conditional-field executeRecall assembly", () => {
       },
       workspace_id: WS,
       readers: readersFor(slice),
+      authorized_scopes: null,
       seed_query: "configuration change",
       anchor_object_ids: [MEM.r, MEM.c],
       object_observed_at: { [MEM.r]: YESTERDAY_INSTANT, [MEM.c]: LAST_WEEK_INSTANT },
@@ -218,7 +219,8 @@ describe("conditional-field executeRecall assembly", () => {
       interpretation_clock: INTERPRETATION_CLOCK,
       as_of: INTERPRETATION_CLOCK,
       expires_at: "2099-01-01T00:00:00.000Z",
-      readers: readersFor(slice)
+      readers: readersFor(slice),
+      authorized_scopes: null
     });
     expect(rules.completeness.logical_index).not.toBe("unavailable");
     expect(rules.entries.length).toBeGreaterThan(0);
@@ -230,7 +232,8 @@ describe("conditional-field executeRecall assembly", () => {
       interpretation_clock: INTERPRETATION_CLOCK,
       as_of: INTERPRETATION_CLOCK,
       expires_at: "2099-01-01T00:00:00.000Z",
-      readers: readersFor(slice)
+      readers: readersFor(slice),
+      authorized_scopes: null
     });
     expect(commands.completeness.logical_index).toBe("open");
     expect(commands.completeness.observed_coverage).toBe("unknown");
@@ -247,7 +250,8 @@ describe("conditional-field executeRecall assembly", () => {
       interpretation_clock: INTERPRETATION_CLOCK,
       as_of: INTERPRETATION_CLOCK,
       expires_at: "2099-01-01T00:00:00.000Z",
-      readers: {}
+      readers: {},
+      authorized_scopes: null
     });
     expect(index.completeness.logical_index).not.toBe("complete");
     expect(index.completeness.observed_coverage).not.toBe("exhausted_empty");
@@ -360,6 +364,7 @@ describe("conditional-field executeRecall assembly", () => {
       as_of: INTERPRETATION_CLOCK,
       expires_at: "2099-01-01T00:00:00.000Z",
       readers: readersFor(slice),
+      authorized_scopes: null,
       continuation: first.continuation === null
         ? null
         : {
@@ -400,7 +405,8 @@ describe("conditional-field executeRecall assembly", () => {
       interpretation_clock: INTERPRETATION_CLOCK,
       as_of: INTERPRETATION_CLOCK,
       expires_at: "2099-01-01T00:00:00.000Z",
-      readers: readersFor(slice)
+      readers: readersFor(slice),
+      authorized_scopes: null
     });
     expect(["open", "interrupted", "unknown"]).toContain(tiny.completeness.observed_coverage);
     expect(tiny.completeness.logical_index).not.toBe("complete");
@@ -431,6 +437,7 @@ function runRecall(
     readers: readersFor(slice),
     continuation: input.continuation ?? null,
     cancelled: input.cancelled === true,
+    authorized_scopes: null,
     ...(input.since === undefined ? {} : { since: input.since }),
     ...(input.dimension_filter === undefined ? {} : { dimension_filter: input.dimension_filter }),
     ...(input.domain_tag_filter === undefined ? {} : { domain_tag_filter: input.domain_tag_filter }),

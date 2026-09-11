@@ -24,7 +24,7 @@ describe("observer preparation under a small continuation allowance", () => {
     const retainedSeedVisits = vi.spyOn(field.seeds, "at");
     let nativeCalls = 0;
     const result = observeField(interpretation, { workspace_id: "workspace-1", query_text: "seed",
-      as_of: "2026-09-10T00:00:00.000Z", resume_field: field,
+      as_of: "2026-09-10T00:00:00.000Z", authorized_scopes: null, resume_field: field,
       budget: defaultBudget({ work_units: work, finalization_reserve: 0, min_envelope: 0, memory_bytes: 10_000_000 }),
       readers: { lexical: () => {
         nativeCalls += 1;
@@ -57,7 +57,8 @@ describe("observer preparation under a small continuation allowance", () => {
       sourceFacts: new Map(["fresh", "target"].map((object_id) => [object_id, { object_id, source_revision: "rev" }])) };
     const pending = createAdjacencyEffectCursor([edge], options);
     let native = 0;
-    const next = observeField(interpretation, { workspace_id: "workspace-1", query_text: "fresh", as_of: options.asOf, resume_field: field,
+    const next = observeField(interpretation, { workspace_id: "workspace-1", query_text: "fresh", as_of: options.asOf,
+      authorized_scopes: null, resume_field: field,
       budget: defaultBudget({ work_units: 25, finalization_reserve: 0, min_envelope: 0, memory_bytes: 10000000 }), readers: {
         lexical: () => { native += 1; return { ids: ["fresh"], rowsRead: 1, bytesRead: 5, nativeVisits: 1, nativeBytes: 5, truncated: false }; },
         source: ({ objectId }) => ({ row: { object_id: objectId, sourceRevision: "rev", content: "fresh", lifecycle_state: "active", scope_class: "project" },

@@ -45,7 +45,8 @@ describe("conditional-field resumable observers", () => {
       }),
       query: interpretation(),
       workspace_id: WS,
-      readers: {}
+      readers: {},
+      authorized_scopes: null
     }, {
       objectId: MEM.r,
       sourceRevision: "rev",
@@ -352,7 +353,7 @@ function observeInput(
     readonly query?: QueryInterpretation;
     readonly page_limit?: number;
     readonly readers?: ObserverReaders;
-    readonly authorized_scopes?: readonly string[];
+    readonly authorized_scopes?: readonly string[] | null;
     readonly anchor_object_ids?: readonly string[];
     readonly object_observed_at?: Readonly<Record<string, string>>;
   }
@@ -373,7 +374,7 @@ function observeInput(
     seed_query: overrides.seed_query,
     relation_subject: overrides.relation_subject,
     relation_kind: overrides.relation_kind,
-    authorized_scopes: overrides.authorized_scopes,
+    authorized_scopes: overrides.authorized_scopes ?? null,
     anchor_object_ids: overrides.anchor_object_ids,
     object_observed_at: overrides.object_observed_at,
     page_limit: overrides.page_limit

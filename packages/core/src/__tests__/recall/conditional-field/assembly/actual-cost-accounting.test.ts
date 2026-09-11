@@ -124,7 +124,8 @@ describe("conditional-field actual request cost", () => {
       interpretation_clock: INTERPRETATION_CLOCK,
       as_of: INTERPRETATION_CLOCK,
       expires_at: FAR_FUTURE_EXPIRY,
-      readers: readersFor(slice)
+      readers: readersFor(slice),
+      authorized_scopes: null
     });
     const pages = collect(readersFor(slice), budget, 20, first.index, "yesterday failed deployment", INTERPRETATION_CLOCK);
     const hits = pages.flatMap((page) => page.entries.filter((entry) => entry.object_id === MEM.c));
@@ -158,7 +159,8 @@ describe("conditional-field actual request cost", () => {
       as_of: INTERPRETATION_CLOCK,
       expires_at: FAR_FUTURE_EXPIRY,
       result_kind_view: "source_only",
-      readers: sourceReaders(calls, false)
+      readers: sourceReaders(calls, false),
+      authorized_scopes: null
     });
     const source = first.index.entries.find((entry) => entry.target.kind === "source_evidence");
     expect(source?.target.kind).toBe("source_evidence");
@@ -183,7 +185,8 @@ describe("conditional-field actual request cost", () => {
         start_offset: startOffset,
         byte_budget: 32
       },
-      readers: sourceReaders(calls, true)
+      readers: sourceReaders(calls, true),
+      authorized_scopes: null
     });
     expect(calls.some((call) => call.offset === startOffset)).toBe(true);
     const actual = requireActual(resumed.execution_receipt.actual);
@@ -203,7 +206,8 @@ function recall(readers: ObserverReaders, budget: RequestBudget, continuation: C
     as_of: CLOCK,
     expires_at: FAR_FUTURE_EXPIRY,
     readers,
-    continuation
+    continuation,
+    authorized_scopes: null
   });
 }
 
@@ -228,7 +232,8 @@ function collect(
       as_of: clock,
       expires_at: FAR_FUTURE_EXPIRY,
       readers,
-      continuation
+      continuation,
+      authorized_scopes: null
     });
     pages.push(next.index);
     continuation = next.index.continuation;

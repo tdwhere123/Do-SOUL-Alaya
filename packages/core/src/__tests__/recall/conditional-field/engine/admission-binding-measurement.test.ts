@@ -764,6 +764,7 @@ function input(
     query_text: "seed",
     budget: defaultBudget(),
     as_of: AS_OF,
+    authorized_scopes: null,
     readers
   };
 }
@@ -815,6 +816,7 @@ function observeInput(program: QueryProgram) {
     query: interpretation(program),
     workspace_id: "ws",
     readers: {},
+    authorized_scopes: null,
     seed_query: "needle"
   };
 }

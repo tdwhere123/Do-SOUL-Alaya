@@ -24,36 +24,50 @@ import type {
 
 const SCHEMA = CONDITIONAL_FIELD_SCHEMA_VERSION;
 
+type ScopePrincipal =
+  | { readonly kind: "unrestricted" }
+  | { readonly kind: "denied" }
+  | { readonly kind: "named"; readonly scopes: readonly string[] };
+
+function scopePrincipal(
+  authorized: readonly string[] | null | undefined
+): ScopePrincipal {
+  if (authorized === null) return { kind: "unrestricted" };
+  if (authorized === undefined || authorized.length === 0) return { kind: "denied" };
+  return { kind: "named", scopes: authorized };
+}
+
+function namedScopesExclude(principal: ScopePrincipal, scopeClass: string | undefined): boolean {
+  return principal.kind === "named"
+    && (scopeClass === undefined || !principal.scopes.includes(scopeClass));
+}
+
 export function sourceRowEligible(
   input: ObserveConditionalFieldInput,
   row: SourceObserverRow | undefined
 ): boolean {
+  const principal = scopePrincipal(input.authorized_scopes);
+  if (principal.kind === "denied") return false;
   if (row === undefined) return true;
   if (row.lifecycle_state !== undefined && row.lifecycle_state !== "active") return false;
   if (row.retention_state === "tombstoned") return false;
   const asOf = input.as_of ?? input.query.interpretation_clock;
   if (asOf !== undefined && ((row.valid_from != null && row.valid_from > asOf)
     || (row.valid_to != null && row.valid_to <= asOf))) return false;
-  const scopes = input.authorized_scopes ?? [];
-  if (scopes.length > 0 && (row.scope_class === undefined || !scopes.includes(row.scope_class))) {
-    return false;
-  }
-  return true;
+  return !namedScopesExclude(principal, row.scope_class);
 }
 
 export function sourceRootEligible(
   input: ObserveConditionalFieldInput,
   row: SourceRootObserverRow
 ): boolean {
+  const principal = scopePrincipal(input.authorized_scopes);
+  if (principal.kind === "denied") return false;
   if (row.body_erased === true) return false;
   const asOf = input.as_of ?? input.query.interpretation_clock;
   if (asOf !== undefined && ((row.valid_from != null && row.valid_from > asOf)
     || (row.valid_to != null && row.valid_to <= asOf))) return false;
-  const scopes = input.authorized_scopes ?? [];
-  if (scopes.length > 0) {
-    if (row.scope_class === undefined || !scopes.includes(row.scope_class)) return false;
-  }
-  return true;
+  return !namedScopesExclude(principal, row.scope_class);
 }
 
 export function relationRowEligible(
@@ -152,7 +166,8 @@ function applicabilityFor(
     input,
     [...collectGuards(input.query.program), ...extras],
     sourceRow,
-    sourceRoot
+    sourceRoot,
+    identityKind
   );
   if (authorization.verdict === "false") return authorization;
   if (sourceRow === undefined && sourceRoot === undefined && identityKind !== "embedding") {
@@ -184,20 +199,32 @@ function evaluateAuthorization(
   input: ObserveConditionalFieldInput,
   guards: readonly Guard[],
   sourceRow?: SourceObserverRow,
-  sourceRoot?: SourceRootObserverRow
+  sourceRoot?: SourceRootObserverRow,
+  identityKind?: "object" | "assertion" | "embedding"
 ): Guard {
   const authorization = guards.find((guard) => guard.kind === "authorization");
-  const scopes = input.authorized_scopes ?? [];
+  const principal = scopePrincipal(input.authorized_scopes);
+  if (principal.kind === "denied") {
+    return { schema_version: SCHEMA, kind: "authorization", verdict: "false" };
+  }
+  if (principal.kind === "unrestricted") {
+    return authorization === undefined
+      ? { schema_version: SCHEMA, kind: "query_predicate", verdict: "true" }
+      : { ...authorization, verdict: "true" };
+  }
   if (authorization !== undefined) {
     const scope = authorization.authorization_scope;
-    const allowed = scope === undefined || scopes.includes(scope);
+    const allowed = scope === undefined || principal.scopes.includes(scope);
     return { ...authorization, verdict: allowed ? "true" : "false" };
   }
-  if (scopes.length > 0) {
-    const scopeClass = sourceRoot?.scope_class ?? sourceRow?.scope_class;
-    if (scopeClass === undefined || !scopes.includes(scopeClass)) {
-      return { schema_version: SCHEMA, kind: "authorization", verdict: "false" };
-    }
+  const scopeClass = sourceRoot?.scope_class ?? sourceRow?.scope_class;
+  // Embedding ids are enumerated before source hydration; named-scope checks wait for the source row.
+  if (scopeClass === undefined && identityKind === "embedding"
+    && sourceRow === undefined && sourceRoot === undefined) {
+    return { schema_version: SCHEMA, kind: "query_predicate", verdict: "true" };
+  }
+  if (namedScopesExclude(principal, scopeClass)) {
+    return { schema_version: SCHEMA, kind: "authorization", verdict: "false" };
   }
   return { schema_version: SCHEMA, kind: "query_predicate", verdict: "true" };
 }

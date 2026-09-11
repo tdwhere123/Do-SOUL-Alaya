@@ -161,7 +161,8 @@ function collectPages(readers: ObserverReaders, budget: RequestBudget, maximum: 
     const index = runConditionalFieldRecall({ workspace_id: WS, query_text: query, budget,
       result_kind_view: "memory_only",
       snapshot_id: SNAPSHOT_ID, interpretation_clock: clock, as_of: clock,
-      expires_at: "2099-01-01T00:00:00.000Z", readers, continuation });
+      expires_at: "2099-01-01T00:00:00.000Z", readers, continuation,
+      authorized_scopes: null });
     pages.push(index);
     continuation = index.continuation;
     if (continuation === null) break;

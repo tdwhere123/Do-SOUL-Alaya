@@ -22,7 +22,7 @@ describe("residual semantics on incremental delivery", () => {
       seeds: [{ schema_version: 1, state: productKey("known"), milligrades: 400 }] });
     expect(initial.residuals.some((region) => region.kind === "source_domain")).toBe(false);
     const field = observeField(query, { workspace_id: "ws", query_text: "known", budget,
-      as_of: "2026-09-10T00:00:00.000Z", resume_field: initial, readers: {
+      as_of: "2026-09-10T00:00:00.000Z", authorized_scopes: null, resume_field: initial, readers: {
         lexical: () => ({ ids: ["known"], nativeVisits: 1, nativeBytes: 1, rowsRead: 1, bytesRead: 1, truncated: false }),
         source: () => ({ row: { object_id: "known", sourceRevision: "rev", lifecycle_state: "active" },
           rowsRead: 1, bytesRead: 1, unavailable: false })
@@ -96,6 +96,7 @@ describe("residual semantics on incremental delivery", () => {
       const pages: { truncated: boolean; cursor: string | null | undefined }[] = [];
       const field = observeField({ ...interpretation(), view: { ...defaultView(), result_kind_view: "source_only" } }, {
         workspace_id: "workspace-1", query_text: "source", as_of: "2026-09-10T00:00:00.000Z",
+        authorized_scopes: null,
         budget: defaultBudget({ work_units: 100_000, memory_bytes: 10_000_000, finalization_reserve: 2000 }),
         readers: { sourceRoots: (input) => {
           const page = reader.page({ ...input, limit: Math.min(input.limit, 1) });

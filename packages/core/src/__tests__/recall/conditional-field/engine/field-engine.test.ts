@@ -519,6 +519,7 @@ describe("conditional-field engine", () => {
       query_text: "needle",
       budget: defaultBudget(),
       as_of: "2026-01-01T00:00:00.000Z",
+      authorized_scopes: null,
       readers: liveSeedReaders("r")
     });
     expect(observed.guaranteed_seeds.length).toBeGreaterThan(0);

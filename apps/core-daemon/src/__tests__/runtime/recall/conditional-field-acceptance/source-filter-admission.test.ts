@@ -248,6 +248,7 @@ async function setup() {
         as_of: extra.source_observed_at ?? NOW,
         expires_at: "2099-01-01T00:00:00.000Z",
         readers: { ...native, lexical, source },
+        authorized_scopes: null,
         ...(extra.interpretation_proposal === undefined
           ? {}
           : { interpretation_proposal: extra.interpretation_proposal as never })

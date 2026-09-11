@@ -186,7 +186,8 @@ describe("source payload encode", () => {
           truncated: false
         }),
         sourceRoot: hydrateReaders(calls).sourceRoot
-      }
+      },
+      authorized_scopes: null
     });
     const sourceEntryOnIndex = index.entries.find((entry) => entry.target.kind === "source_evidence");
     expect(sourceEntryOnIndex?.target.kind).toBe("source_evidence");

@@ -40,6 +40,7 @@ import {
 } from "./query-admission.js";
 
 export {
+  authorizedScopesMismatch,
   continuationViewMismatch,
   digestOriginalQuery,
   identityFor,
@@ -73,7 +74,7 @@ type CompileCommon = Readonly<{
   readonly view?: QueryView;
   readonly query_id?: string;
   readonly memory?: QueryMemoryPort;
-  readonly authorized_scopes?: readonly string[];
+  readonly authorized_scopes?: readonly string[] | null;
   readonly interpretation_proposal?: QueryInterpretationProposal;
 }>;
 

@@ -135,7 +135,8 @@ function runLive(
     as_of: INTERPRETATION_CLOCK,
     expires_at: FAR_FUTURE_EXPIRY,
     result_kind_view: "memory_only",
-    readers: readersFor(slice)
+    readers: readersFor(slice),
+    authorized_scopes: null
   });
 }
 

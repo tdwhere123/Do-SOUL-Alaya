@@ -43,6 +43,7 @@ describe("bounded source resource consumer contract", () => {
     let nativeBytes = 0;
     const budget = { ...defaultBudget(), memory_bytes: 50_000 };
     observeField(query(), { workspace_id: "workspace-1", query_text: "NEEDLE", as_of: "2026-09-10T00:00:00.000Z",
+      authorized_scopes: null,
       budget, readers: { sourceRootMetadataByteLimit: 8192, sourceRoots: (input) => {
         const page = reader.page(input);
         nativeBytes += page.bytesRead + (page.metadataBytes ?? 0);
@@ -66,7 +67,7 @@ describe("bounded source resource consumer contract", () => {
       const result = observeConditionalField({ workspace_id: "workspace-1", query: interpretation,
         action: { schema_version: 1, action: "seed", region_id: "seed", work_limit: 100 }, cursor,
         lease: { schema_version: 1, lease_id: "source-test", status: "active", snapshot_id: SNAPSHOT_ID,
-          query_id: interpretation.query_id }, source_byte_limit: 8, page_limit: 20,
+          query_id: interpretation.query_id }, source_byte_limit: 8, page_limit: 20, authorized_scopes: null,
         readers: { sourceRoots: (input) => { const page = reader.page({ ...input, nativeByteLimit: 262144 });
           return { ...page, rows: page.rows.map(toSourceRootObserverRow) }; } } });
       for (const row of result.page.observations) if (row.applicability.verdict === "true") admitted.add(row.object_id);

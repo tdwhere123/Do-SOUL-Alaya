@@ -41,7 +41,7 @@ export type ConditionalFieldRecallRequest = Readonly<{
   readonly domain_tag_filter?: readonly string[];
   readonly continuation?: Continuation | null;
   readonly cancelled?: boolean;
-  readonly authorized_scopes?: readonly string[];
+  readonly authorized_scopes?: readonly string[] | null;
   readonly governance?: BoundedActiveConstraintsResult;
   readonly enumeration_policy?: EnumerationPolicy;
   readonly result_kind_view?: ResultKindView;

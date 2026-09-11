@@ -13,7 +13,7 @@ type GovernanceRequest = Readonly<{
   snapshot_id: string;
   budget: RequestBudget;
   cancelled?: boolean;
-  authorized_scopes?: readonly string[];
+  authorized_scopes?: readonly string[] | null;
 }>;
 
 export async function readRequestGovernance(
@@ -32,7 +32,7 @@ export async function readRequestGovernance(
   const result = await port.readBounded({
     workspaceId: input.workspace_id, asOf: input.as_of,
     ...(discoverSnapshot ? {} : { snapshotId: input.snapshot_id }),
-    authorizedScopes: input.authorized_scopes,
+    authorizedScopes: input.authorized_scopes ?? undefined,
     cap, nativeLimit, byteLimit
   });
   assertBoundedGovernance(result, input, nativeLimit, byteLimit, discoverSnapshot);
@@ -59,7 +59,7 @@ function assertBoundedGovernance(
     || (!discoverSnapshot && result.binding.snapshot_id !== input.snapshot_id)
     || !/^sha256:[0-9a-f]{64}$/.test(result.binding.snapshot_id)
     || JSON.stringify(result.binding.authorized_scopes)
-      !== JSON.stringify(normalizeActiveConstraintScopes(input.authorized_scopes))
+      !== JSON.stringify(normalizeActiveConstraintScopes(input.authorized_scopes ?? undefined))
     || counts.some((count) => !Number.isSafeInteger(count) || count < 0)
     || work.native_visits > nativeLimit || work.bytes_read > byteLimit || work.retained_bytes > byteLimit
     || (result.completeness !== "complete" && result.completeness !== "incomplete")
@@ -78,6 +78,6 @@ function unavailableGovernance(input: GovernanceRequest): BoundedActiveConstrain
     temporal_uncertain: true,
     work: { native_visits: 0, bytes_read: 0, retained_bytes: 0 },
     binding: { workspace_id: input.workspace_id, as_of: input.as_of, snapshot_id: input.snapshot_id,
-      authorized_scopes: normalizeActiveConstraintScopes(input.authorized_scopes) }
+      authorized_scopes: normalizeActiveConstraintScopes(input.authorized_scopes ?? undefined) }
   };
 }

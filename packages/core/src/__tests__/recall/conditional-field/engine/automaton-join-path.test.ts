@@ -590,6 +590,7 @@ function input(edges: readonly ReturnType<typeof edge>[]) {
     query_text: "seed",
     budget: defaultBudget(),
     as_of: AS_OF,
+    authorized_scopes: null,
     readers
   };
 }

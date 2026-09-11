@@ -211,6 +211,7 @@ describe("conditional-field observation revision lifecycle", () => {
       query,
       workspace_id: WS,
       seed_query: "needle",
+      authorized_scopes: null,
       readers: {
         lexical: () => ({
           ids,
@@ -330,7 +331,7 @@ function observeInput(
     seed_query: overrides.seed_query,
     relation_subject: overrides.relation_subject,
     relation_kind: overrides.relation_kind,
-    authorized_scopes: overrides.authorized_scopes,
+    authorized_scopes: overrides.authorized_scopes ?? null,
     anchor_object_ids: overrides.anchor_object_ids,
     object_observed_at: overrides.object_observed_at,
     page_limit: overrides.page_limit,

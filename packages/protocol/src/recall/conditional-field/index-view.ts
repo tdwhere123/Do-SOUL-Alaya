@@ -159,7 +159,7 @@ export const ContinuationSchema = z
     interpretation_clock: IsoDatetimeStringSchema.optional(),
     enumeration_policy: EnumerationPolicySchema.optional(),
     result_kind_view: ResultKindViewSchema.optional(),
-    authorized_scopes: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+    authorized_scopes: z.array(ConditionalFieldIdSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().nullable().optional(),
     emitted_revisions: z.record(BoundedString(4096), ConditionalFieldIdSchema).optional(),
     cap_contracts: z.array(AssociationCapContractSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     claim_demands: z.array(ClaimDemandSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),

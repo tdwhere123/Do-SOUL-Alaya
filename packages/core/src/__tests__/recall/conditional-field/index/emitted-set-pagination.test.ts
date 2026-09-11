@@ -225,6 +225,29 @@ describe("emitted-set pagination", () => {
       authorized_scopes: ["private"],
       expires_at: EXPIRES_AT
     })).completeness.logical_index).toBe("invalidated");
+    const unrestricted = projectAcceptingIndex(associativeInput({
+      snapshot: snapshotOf([fieldValue("a", 600)]),
+      budget: defaultBudget({ page_budget: 1 }),
+      expires_at: EXPIRES_AT,
+      authorized_scopes: null
+    }));
+    expect(projectAcceptingIndex(associativeInput({
+      snapshot: snapshotOf([fieldValue("a", 600)]),
+      prior_continuation: unrestricted.continuation,
+      expires_at: EXPIRES_AT
+    })).completeness.logical_index).toBe("invalidated");
+    expect(projectAcceptingIndex(associativeInput({
+      snapshot: snapshotOf([fieldValue("a", 600)]),
+      prior_continuation: unrestricted.continuation,
+      authorized_scopes: [],
+      expires_at: EXPIRES_AT
+    })).completeness.logical_index).toBe("invalidated");
+    expect(projectAcceptingIndex(associativeInput({
+      snapshot: snapshotOf([fieldValue("a", 600)]),
+      prior_continuation: unrestricted.continuation,
+      authorized_scopes: null,
+      expires_at: EXPIRES_AT
+    })).completeness.logical_index).not.toBe("invalidated");
   });
 
   it("replays the same issued page and invalidates a revoked retry without protected bytes", () => {

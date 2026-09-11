@@ -223,7 +223,8 @@ function runCompiledConditionalFieldRecall(
   interpretation: QueryInterpretation,
   cost: RequestCostLedger
 ): InformationIndex {
-  if (continuationEpochMismatch(input.continuation, interpretation, input.authorized_scopes)
+  if (input.authorized_scopes === undefined
+    || continuationEpochMismatch(input.continuation, interpretation, input.authorized_scopes)
     || (input.continuation != null && (
       input.continuation.snapshot_id !== input.snapshot_id
       || Date.parse(input.continuation.expires_at) <= Date.parse(input.lifetime_now ?? new Date().toISOString())
@@ -592,7 +593,7 @@ function interpretationIdOf(interpretation: QueryInterpretation): string {
 function continuationEpochMismatch(
   continuation: Continuation | null | undefined,
   interpretation: QueryInterpretation,
-  authorizedScopes?: readonly string[]
+  authorizedScopes?: readonly string[] | null
 ): boolean {
   if (continuation === undefined || continuation === null) return false;
   if (continuation.interpretation_id === undefined) return true;
@@ -674,6 +675,9 @@ function buildRecallRequest(
     readonly interpretationClock?: string;
   };
   const now = context.now();
+  const scopeFilter = (params.policyOverride ?? context.buildDefaultPolicy(
+    params.strategy, params.taskSurface.runtime_id, now
+  )).coarse_filter.deterministic_match.scope_filter;
   const queryText = extra.queryText ?? normalizeQueryText(params.taskSurface.display_name) ?? "";
   const pageBudget = extra.pageBudget
     ?? extra.budget?.page_budget
@@ -713,12 +717,7 @@ function buildRecallRequest(
     ...(params.timeFilter?.field === undefined ? {} : { time_field: params.timeFilter.field }),
     continuation: extra.continuation ?? null,
     cancelled: extra.cancelled === true,
-    ...(params.policyOverride?.coarse_filter.deterministic_match.scope_filter === undefined
-      || params.policyOverride.coarse_filter.deterministic_match.scope_filter === null
-      ? {}
-      : {
-        authorized_scopes: params.policyOverride.coarse_filter.deterministic_match.scope_filter
-      }),
+    ...(scopeFilter === undefined ? {} : { authorized_scopes: scopeFilter }),
     ...nullableStringList(
       params.policyOverride?.coarse_filter.deterministic_match.dimension_filter,
       "dimension_filter"

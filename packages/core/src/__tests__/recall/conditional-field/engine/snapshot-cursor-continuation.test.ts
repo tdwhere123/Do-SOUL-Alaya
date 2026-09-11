@@ -136,6 +136,7 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
       query,
       workspace_id: WS,
       seed_query: "needle",
+      authorized_scopes: null,
       readers: {
         lexical: () => ({
           ids: ["missing"],
@@ -203,6 +204,7 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
         query,
         workspace_id: WS,
         as_of: "2026-09-01T00:00:00.000Z",
+        authorized_scopes: null,
         relation_subject: MEM.r,
         page_limit: 1,
         relation_kind: "owns",
@@ -299,7 +301,8 @@ function runRecall(
     as_of: INTERPRETATION_CLOCK,
     expires_at: "2099-01-01T00:00:00.000Z",
     readers: readersFor(slice),
-    continuation: input.continuation ?? null
+    continuation: input.continuation ?? null,
+    authorized_scopes: null
   });
 }
 
