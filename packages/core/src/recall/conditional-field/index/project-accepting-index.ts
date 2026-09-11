@@ -59,6 +59,7 @@ import { acceptingEntries } from "./project-accepting-entries.js";
 import {
   bindCommittedDelivery,
   committedProductStatesOf,
+  committedRevisionsOf,
   mergeCommittedProductStates,
   pagePurposeFor,
   productComponentState,
@@ -193,8 +194,10 @@ export function continueAcceptingIndex(
       result_version: previous.result_version
     }, previous.representation, invalidatedCompleteness());
   }
-  const emitted = previous.continuation.emitted_revisions
+  const serverRevisions = committedRevisionsOf(previous);
+  const emitted = serverRevisions
     ?? input.delivered_entry_revisions
+    ?? previous.continuation.emitted_revisions
     ?? {};
   const products = committedProductStatesOf(previous)
     ?? committedProductStatesOf(previous.continuation)
@@ -205,7 +208,7 @@ export function continueAcceptingIndex(
     snapshot_id: previous.snapshot_id,
     result_version: previous.result_version,
     prior_continuation: previous.continuation,
-    delivered_entry_revisions: { ...input.delivered_entry_revisions, ...emitted },
+    delivered_entry_revisions: emitted,
     delivered_product_states: { ...products, ...input.delivered_product_states },
     delivered_product_ids: new Set([
       ...input.delivered_product_ids ?? [],
@@ -347,9 +350,7 @@ function pageAcceptingIndex(
     result_version: input.result_version,
     entries: prepared,
     explanations: recoverExplanationForest(prepared.flatMap((entry) => entry.explanation_ids), input.derivations ?? []),
-    completeness: order.order_status === "complete"
-      ? { ...completeness, order_coverage: "complete" as const }
-      : completeness,
+    completeness: completenessWithOrder(completeness, order),
     continuation: nextContinuation({
       ...input,
       projection_facet_offset: projected.facet.scan_offset,
@@ -388,19 +389,25 @@ function componentUpdatesFor(
   return [productUpdateFor(entry, emitted[id])];
 }
 
+function completenessWithOrder(
+  completeness: InformationIndex["completeness"],
+  order: ReturnType<typeof orderClosureFromProjection>
+): InformationIndex["completeness"] {
+  if (order.certificate === undefined) return completeness;
+  return {
+    ...completeness,
+    certificate_id: order.certificate.certificate_id,
+    ...(order.order_status === "complete" ? { order_coverage: "complete" as const } : {})
+  };
+}
+
 function retractionUpdates(
   retracted: readonly ProductStateKey[],
   ledger: EmittedProductLedger
 ): ReturnType<typeof productUpdatesBetween> {
   return retracted.flatMap((product) => {
-    const previous = ledger[sharedProductIdentity(product)] ?? {
-      membership_revision: "emitted",
-      proof_revision: "emitted",
-      claim_revision: "emitted",
-      explanation_revision: "emitted",
-      payload_revision: "emitted",
-      membership_present: true
-    };
+    const previous = ledger[sharedProductIdentity(product)];
+    if (previous === undefined) return [];
     return productUpdatesBetween(product, previous, { ...previous, membership_present: false });
   });
 }

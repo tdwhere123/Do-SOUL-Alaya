@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
+  InformationIndexSchema,
   memoryProductStateKey,
   productStateKeyFromIndexEntry,
+  sharedProductIdentity,
   type FieldSnapshot,
   type FieldValue,
   type IndexEntry,
@@ -14,9 +16,16 @@ import {
   type AcceptingProjectionInput
 } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import {
+  bindCommittedDelivery,
+  committedProductStatesOf,
+  committedRevisionsOf,
   productComponentState,
   productUpdatesBetween
 } from "../../../../recall/conditional-field/index/product-component-diff.js";
+import {
+  retainCommittedRevisions,
+  sealIssuedContinuation
+} from "../../../../recall/runtime/index-continuation.js";
 import { defaultView, productIndexKey } from "../reference/deployment.fixture.js";
 
 const SNAPSHOT_ID = `sha256:${"c".repeat(64)}`;
@@ -111,6 +120,84 @@ describe("product component diffs", () => {
     }));
     expect(risen.page_purpose).toBe("update");
     expect(risen.product_updates?.map((update) => update.update_kind).sort()).toEqual(["claim", "proof"]);
+  });
+
+  it("keeps claim+proof updates after parse and a sealed continuation echo", () => {
+    const a = fieldValue("a", 600);
+    const first = projectAcceptingIndex(inputOf({
+      snapshot: snapshotOf([a]),
+      budget: budget({ page_budget: 1 }),
+      expires_at: EXPIRES_AT
+    }));
+    const parsed = InformationIndexSchema.parse(first);
+    expect(committedProductStatesOf(parsed)).toBeUndefined();
+    const retained = retainFromProjected(first);
+    const sealed = sealIssuedContinuation(parsed.continuation!);
+    const echoed = JSON.parse(JSON.stringify(sealed)) as typeof sealed;
+    const second = projectAcceptingIndex(inputOf({
+      snapshot: snapshotOf([fieldValue("a", 950)]),
+      claims: new Map([[productIndexKey("a"), "supported"]]),
+      budget: budget({ page_budget: 1 }),
+      expires_at: EXPIRES_AT,
+      prior_continuation: echoed,
+      delivered_entry_revisions: retained.delivered_entries,
+      delivered_product_states: retained.delivered_products
+    }));
+    expect(second.product_updates?.map((update) => update.update_kind).sort()).toEqual(["claim", "proof"]);
+    expect(second.product_updates).toHaveLength(2);
+  });
+
+  it("keeps the prior membership revision on retraction after parse", () => {
+    const a = fieldValue("a", 600);
+    const b = fieldValue("b", 900);
+    const first = projectAcceptingIndex(inputOf({
+      snapshot: snapshotOf([a, b]),
+      budget: budget({ page_budget: 1 }),
+      expires_at: EXPIRES_AT
+    }));
+    const membershipRevision = productComponentState(first.entries[0]!).membership_revision;
+    const retained = retainFromProjected(first);
+    const parsed = InformationIndexSchema.parse(first);
+    const echoed = JSON.parse(JSON.stringify(sealIssuedContinuation(parsed.continuation!)));
+    const withdrawn = projectAcceptingIndex(inputOf({
+      snapshot: snapshotOf([{ ...a, accepting: false }, b]),
+      budget: budget({ page_budget: 1 }),
+      expires_at: EXPIRES_AT,
+      prior_continuation: echoed,
+      delivered_entry_revisions: retained.delivered_entries,
+      delivered_product_states: retained.delivered_products
+    }));
+    expect(withdrawn.product_updates?.map((update) => update.update_kind)).toEqual(["retraction"]);
+    expect(withdrawn.product_updates?.[0]?.previous_revision).toBe(membershipRevision);
+    expect(withdrawn.product_updates?.[0]?.previous_revision).not.toBe("emitted");
+  });
+
+  it("does not let client emitted_revisions extras suppress a server-unknown member", () => {
+    const a = fieldValue("a", 600);
+    const b = fieldValue("b", 900);
+    const first = projectAcceptingIndex(inputOf({
+      snapshot: snapshotOf([a, b]),
+      budget: budget({ page_budget: 1 }),
+      expires_at: EXPIRES_AT
+    }));
+    const forged = {
+      ...first,
+      continuation: {
+        ...first.continuation!,
+        emitted_revisions: {
+          ...first.continuation?.emitted_revisions,
+          [sharedProductIdentity(b.state)]: "forged-revision"
+        }
+      }
+    };
+    bindCommittedDelivery(forged, committedRevisionsOf(first)!, committedProductStatesOf(first)!);
+    const second = continueAcceptingIndex(forged, inputOf({
+      snapshot: snapshotOf([a, b]),
+      budget: budget({ page_budget: 1 }),
+      expires_at: EXPIRES_AT
+    }));
+    expect(second.entries.map((entry) => entry.object_id)).toEqual(["b"]);
+    expect(second.page_purpose).toBe("membership");
   });
 
   it("sets page_purpose from payload expansion rather than empty membership inference", () => {
@@ -208,6 +295,24 @@ function fieldValue(objectId: string, milligrades: number): FieldValue {
     milligrades,
     accepting: true
   };
+}
+
+function retainFromProjected(index: ReturnType<typeof projectAcceptingIndex>): NonNullable<
+  ReturnType<typeof retainCommittedRevisions>["progress"]
+> {
+  const revisions = committedRevisionsOf(index);
+  const products = committedProductStatesOf(index);
+  if (revisions === undefined || products === undefined) {
+    throw new Error("projected index must bind committed product state");
+  }
+  bindCommittedDelivery(InformationIndexSchema.parse(index), revisions, products);
+  return retainCommittedRevisions({
+    revision: "projection-generation:1",
+    input_references: [],
+    generation: 1,
+    offset: 0,
+    delivered_entries: {}
+  }, revisions, true, products).progress;
 }
 
 function budget(overrides: Partial<RequestBudget> = {}): RequestBudget {

@@ -109,6 +109,9 @@ describe("order closure evaluator", () => {
       }
     });
     expect(planted.order_status).toBe("complete");
+    expect(planted.completeness.order_coverage).toBe("complete");
+    expect(planted.completeness.certificate_id).toContain(":order:");
+    expect(planted.completeness.certificate_id).toContain("canonical-prefix");
   });
 });
 
