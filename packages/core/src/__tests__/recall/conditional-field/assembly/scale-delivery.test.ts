@@ -113,7 +113,10 @@ describe("native lexical delivery at corpus scale", () => {
     const revisions = pages.flatMap((page) => page.entries.map(indexEntryRevision));
     expect(new Set(revisions).size).toBe(revisions.length);
     for (const page of pages) expect(new Set(page.entries.map((entry) => (entry.object_id ?? ""))).size).toBe(page.entries.length);
-    expect(delivered.length).toBeGreaterThan(new Set(delivered).size);
+    // Typed updates are not new slots: earlier-sorting discoveries revise proof
+    // without re-listing the already-emitted identity in entries.
+    expect(pages.some((page) => (page.product_updates?.length ?? 0) > 0 || page.page_purpose === "update")).toBe(true);
+    expect(delivered.length).toBe(new Set(delivered).size);
     const latest = new Map(pages.flatMap((page) => page.entries.map((entry) => [(entry.object_id ?? ""), canonicalProductIdentityOfEntry(entry)] as const)));
     const complete = collectPages(readers, defaultBudget({ work_units: 10_000, finalization_reserve: 1_000,
       memory_bytes: 10_000_000, page_budget: 100 }), 10, query, "2026-09-07T00:00:00.000Z");
