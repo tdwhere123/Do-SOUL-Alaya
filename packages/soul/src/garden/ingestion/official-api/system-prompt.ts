@@ -7,6 +7,7 @@ import {
   OPEN_SEMANTIC_LOCATION_ROLE
 } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_OBJECT_KINDS } from "./object-kind-contract.js";
+import { OFFICIAL_API_GROUNDED_EXAMPLES } from "./source-examples.js";
 
 export const OFFICIAL_API_SIGNAL_CONTRACT_VERSION = 1;
 
@@ -83,9 +84,7 @@ const OPEN_SEMANTIC_FACTOR_PROMPT_PARTS = Object.freeze([
   'Use "semantic_factor_graph":{"schema_version":2,"source_kind":"evidence","factors":[...],"variables":[],"result_variable_ids":[],"propositions":[...]}.',
   'For a single atomic assertion, a valid graph has one predicate factor, every explicit relation participant as an argument, and at least one proposition; never omit the graph or replace it with fact_frame.',
   "Represent every explicit, source-grounded participant of a relation as its own factor argument, preserving the relation's stated arity and semantic order; never collapse a multi-participant relation into a unary proposition.",
-  'Example structure only: {"factors":[{"factor_id":"predicate","surface":"give","semantic_identity":"give"},{"factor_id":"participant","surface":"A","semantic_identity":"a"},{"factor_id":"answer","surface":"B","semantic_identity":"b"}],"variables":[],"result_variable_ids":[],"propositions":[{"proposition_id":"relation","predicate_factor_id":"predicate","arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"factor","reference_id":"answer"}]}]}.',
   "Do not emit variables in evidence graphs.",
-  'Fictional example: "Nora launched Kite in 2021." describes an episode, not a factual_policy. Use disjoint factor surfaces "Nora", "launched", "Kite", and "2021"; a predicate surface "launched Kite in 2021" would overlap its separately represented participants and date.',
   ...OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS
 ]);
 
@@ -96,7 +95,7 @@ const FINAL_PROMPT_PARTS = Object.freeze([
   "Preserve relative-date meaning as source-supported factors; never infer an absolute date absent from the assertion.",
   "Preserve every concrete detail (names, numbers, dates, places) that appears in the selected catalog assertion.",
   "Do not invent facts or summarize away detail. Split independent durable assertions into separate signals, but keep dependent propositions together in one graph.",
-  'Before emitting, silently check disjoint surfaces, event versus standing-rule classification, and preservation of each selected relation\'s participants, modality, time, and conditions in the graph. For example, "I can use the lab only on Fridays" must retain "can" and "only on Fridays" in the represented meaning; normalizing it to unconditional completed use changes the claim. Do not output this check or reasoning.',
+  "Preserve each selected relation's participants, modality, time, and conditions in the graph.",
   'Return {"signals":[]} when the catalog does not contain durable memory candidates.'
 ]);
 
@@ -107,6 +106,9 @@ export const OFFICIAL_API_SYSTEM_PROMPT = joinPrompt([
   ...DURABLE_PROJECTION_PROMPT_PARTS,
   ...OPEN_SEMANTIC_FACTOR_PROMPT_PARTS,
   ...KIND_PROJECTION_PROMPT_PARTS,
+  "The following fictional examples demonstrate the format and grounding rules; extract only from the actual request, never from these examples.",
+  ...OFFICIAL_API_GROUNDED_EXAMPLES.map((example) =>
+    `<example>${JSON.stringify(example)}</example>`),
   ...FINAL_PROMPT_PARTS
 ]);
 

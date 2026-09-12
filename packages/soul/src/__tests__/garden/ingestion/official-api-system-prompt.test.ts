@@ -3,6 +3,12 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { groundOpenSemanticFactorGraph } from "@do-soul/alaya-protocol";
+import { buildOfficialApiExtractionRequests, parseOfficialApiExtractionRequest } from
+  "../../../garden/ingestion/official-api/extraction-request.js";
+import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
+import { classifyOfficialApiRequestResult } from "../../../garden/ingestion/official-api/request-result.js";
+import { groundOfficialApiDraft } from "../../../garden/ingestion/official-api/source-grounding.js";
 import {
   OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
   OFFICIAL_API_SIGNAL_CONTRACT_VERSION,
@@ -11,6 +17,46 @@ import {
 } from "../../../garden/ingestion/compute-provider.js";
 
 describe("official API system prompt", () => {
+  it("embeds complete fictional examples accepted by the shared request parser and source grounding", () => {
+    const examples = [...OFFICIAL_API_SYSTEM_PROMPT.matchAll(/<example>(.*?)<\/example>/gu)]
+      .map((match) => JSON.parse(match[1]!) as { input: unknown; output: unknown });
+    expect(examples).toHaveLength(2);
+    const sources = ["In 2020, I opened a workshop and promised to lend tools.",
+      "I can borrow tools in the workshop only on Saturdays."];
+    examples.forEach((example, index) => {
+      const source = sources[index]!;
+      const request = parseOfficialApiExtractionRequest(example.input);
+      expect(request).toEqual(buildOfficialApiExtractionRequests(source, [])[0]);
+      const corpus = buildOfficialApiSourceCorpus(source, []);
+      const classified = classifyOfficialApiRequestResult(JSON.stringify(example.output), request, corpus);
+      expect(classified.status).toBe("completed_signals");
+      expect(classified.drafts).toHaveLength(1);
+      const grounded = groundOfficialApiDraft(classified.drafts[0]!, corpus);
+      expect(grounded.status).toBe("grounded");
+      expect(grounded.draft.semantic_factor_graph_projection).toBeUndefined();
+      expect(grounded.draft.matched_text).toBe(source);
+      const graph = groundOpenSemanticFactorGraph(grounded.draft.semantic_factor_graph, source);
+      expect(graph).not.toBeNull();
+      expect(graph!.propositions).toHaveLength(index === 0 ? 2 : 1);
+      if (index === 0) {
+        expect(grounded.draft.object_kind).toBe("episode");
+        expect(graph!.factors.map((factor) => factor.surface).sort()).toEqual([
+          "I", "opened", "a workshop", "2020", "promised", "to lend tools"
+        ].sort());
+        expect(grounded.draft.temporal_projection).toMatchObject({ time_source: "explicit", time_precision: "year",
+          event_time_start: "2020-01-01T00:00:00.000Z", event_time_end: "2021-01-01T00:00:00.000Z" });
+        expect(graph!.propositions.map((proposition) => proposition.arguments.at(-1)?.reference_id)).toEqual(["year", "year"]);
+      } else {
+        expect(graph!.factors.map((factor) => factor.surface).sort()).toEqual([
+          "I", "can", "borrow", "tools", "in the workshop", "only on Saturdays"
+        ].sort());
+        expect(graph!.propositions[0]!.arguments.map((argument) => argument.binding_identity))
+          .toEqual(["borrower", "modality", "resource", "location", "condition"]);
+        expect(grounded.draft.temporal_projection).toBeUndefined();
+      }
+    });
+  });
+
   it("requires quote-first evidence before distillation", () => {
     const quoteFirst = "For each signal, work quote-first, then distill.";
     const distill = "Then represent only what that quote entails in semantic_factor_graph.";
@@ -86,9 +132,7 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
       '"schema_version":2,"source_kind":"evidence"'
     );
-    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
-      '"arguments":[{"position":0,"binding_identity":"giver","reference_kind":"factor","reference_id":"participant"},{"position":1,"binding_identity":"recipient","reference_kind":"factor","reference_id":"answer"}]'
-    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain("Example structure only");
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain(
       '"arguments":[{"position":0,"binding_identity":"argument","reference_kind":"factor","reference_id":"f1"}]'
     );
@@ -152,7 +196,7 @@ describe("official API system prompt", () => {
     const g8Sha256 =
       "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
     const currentSha256Expected =
-      "3acdcd7051d7c98f2c307540c066b589fea9ccc50bcc584c411de36ec719734d";
+      "1775799d80bebde5797ded3a5fdddf209c96839489cde4a947518822110a76fd";
     const previousSha256 =
       "bf255feebdf99106871e33241f7bba3260e3f02874f0eefe36db803cc95d7705";
     const previous = resolveOfficialApiSystemPrompt(previousSha256);
