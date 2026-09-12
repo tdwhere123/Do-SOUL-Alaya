@@ -366,7 +366,7 @@ async function seedFixture(
     requiredQuestionWindow: { offset: 0, limit: 1 },
     extractorFactory: () => ({
       extract: async ({ userPrompt }) => {
-        const request = parseOfficialApiExtractionRequest(userPrompt);
+        const request = parseOfficialApiExtractionRequest(JSON.parse(userPrompt));
         const assertion = request.source_assertions.find((item) => item.text.includes("I check the platform near the main entrance."));
         return providerBackedExtractionResult(signalsEnvelope(assertion === undefined ? [] : [{
           matched: "I check the platform near the main entrance.",
