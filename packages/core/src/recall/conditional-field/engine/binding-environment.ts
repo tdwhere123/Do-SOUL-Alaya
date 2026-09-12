@@ -320,7 +320,7 @@ function objectForFilters(
   endpoints?: Readonly<{ readonly sourceId: string; readonly targetId: string }>
 ): string | undefined {
   if (guard.variable !== undefined) {
-    return env.get(guard.variable) ?? endpoints?.targetId;
+    return env.get(guard.variable);
   }
   return endpoints?.targetId ?? endpoints?.sourceId;
 }

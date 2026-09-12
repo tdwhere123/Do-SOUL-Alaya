@@ -1,3 +1,4 @@
+import { ExposureSlotSchema, FirstExposurePageSchema, firstExposureMismatch, type FirstExposurePage } from "./first-exposure-session.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
@@ -51,13 +52,7 @@ const Entry = z.object({
   explanation_ids: z.array(z.string()).readonly(),
   program_state: z.string().min(1), time_state: z.string().min(1)
 }).strict().readonly();
-const ResultSlot = z.object({
-  rank: z.number().int().positive(), object_id: z.string().optional(), object_kind: z.string(),
-  target: RecallTargetRefSchema,
-  index_entry_offset: z.number().int().nonnegative(),
-  hypothesis_id: z.string(), output_binding: z.string(),
-  program_state: z.string().min(1), time_state: z.string().min(1)
-}).strict().readonly();
+const ResultSlot = ExposureSlotSchema;
 const UnavailableMetric = z.object({
   status: z.literal("unavailable"), value: z.null(), reason: z.string()
 }).strict().readonly();
@@ -72,7 +67,7 @@ const InvalidReason = z.enum(["invalid_response", "missing_zero_call_evidence", 
   "missing_request_budget", "request_budget_mismatch", "unusable_source_state",
   "snapshot_mismatch", "interpretation_clock_mismatch", "continuation_identity_mismatch",
   "result_index_mismatch", "evaluated_slot_mismatch", "execution_receipt_invalid",
-  "request_identity_mismatch", "truncated_archive", "foreign_target_revision", "omitted_prefix_page"]);
+  "request_identity_mismatch", "truncated_archive", "foreign_target_revision", "omitted_prefix_page", "missing_first_exposure"]);
 
 const ValidatedMeasurementBase = z.object({
   schema_version: z.literal(1), status: z.literal("validated"),
@@ -94,6 +89,7 @@ const ValidatedMeasurementBase = z.object({
   evaluated_slots: z.array(ResultSlot).readonly(),
   response_slots: z.array(ResultSlot).readonly(),
   first_exposure_slots: z.array(ResultSlot).readonly(),
+  first_exposure_page: FirstExposurePageSchema,
   response_slot_count: z.number().int().nonnegative(),
   source_gold_units: z.array(SourceGoldUnitSchema).readonly(),
   gold_memory_ids: z.array(z.string()).readonly().optional(),
@@ -162,15 +158,19 @@ const ValidatedMeasurement = ValidatedMeasurementBase.superRefine((value, contex
     || !observedCoverageUsable(value.completeness.observed_coverage, value.completeness.logical_index, value.entries.length)
     || value.entries.length > value.request.budget.page_budget;
   const badJoin = firstExposureJoinMismatch({
-    first_exposure_slots: value.first_exposure_slots, evaluated_slots: value.evaluated_slots,
+    first_exposure_slots: value.first_exposure_slots, initial_exposure_slots: value.first_exposure_page.initial?.slots ?? [],
     source_gold_units: value.source_gold_units, gold_memory_ids: value.gold_memory_ids,
     mixed_kind_first_exposure: metrics.mixed_kind_first_exposure,
     historical_memory_any_at_k: metrics.historical_memory_any_at_k
   });
+  const badExposure = firstExposureMismatch(value.first_exposure_page, {
+    query_id: value.identity.query_id, snapshot_id: value.identity.snapshot_id,
+    interpretation_id: value.identity.interpretation_id, as_of: value.identity.as_of
+  }, value.evaluated_slots, value.first_exposure_page.delivery_id);
   const expectedCost = receiptCostMetrics(receipt);
   const badCost = !sameCostMetric(metrics.work, expectedCost.work)
     || !sameCostMetric(metrics.memory, expectedCost.memory);
-  if (mismatch !== null || badIdentity || badContinuation || badSlots || badMetrics || badSource || badJoin || badCost) {
+  if (mismatch !== null || badIdentity || badContinuation || badSlots || badMetrics || badSource || badJoin || badCost || badExposure) {
     context.addIssue({ code: "custom", message: "archived conditional measurement request, identity or slot join is inconsistent" });
   }
 });
@@ -226,6 +226,7 @@ interface AdmittedArchive {
   readonly garden_enqueue: 0;
   readonly slots: ResultSlotValue[];
   readonly evaluated: ResultSlotValue[];
+  readonly exposure: FirstExposurePage;
 }
 
 export function measureConditionalFieldResponse(input: ConditionalMeasurementInput): ConditionalFieldMeasurement | null {
@@ -238,7 +239,7 @@ function admitConditionalFieldArchive(
   input: ConditionalMeasurementInput
 ): AdmittedArchive | Extract<ConditionalFieldMeasurement, { status: "invalid" }> | null {
   if (!isRecord(input.recallResult) || !Object.hasOwn(input.recallResult, "index")) return null;
-  const { provider_calls, garden_enqueue, request_budget, execution_receipt, diagnostics: _diagnostics, ...payload } = input.recallResult;
+  const { provider_calls, garden_enqueue, request_budget, execution_receipt, first_exposure_page, diagnostics: _diagnostics, ...payload } = input.recallResult;
   const response = SoulMemorySearchResponseSchema.safeParse(payload);
   if (!response.success || response.data.index === undefined || response.data.protocol_version !== 1) {
     return invalid("invalid_response");
@@ -270,7 +271,12 @@ function admitConditionalFieldArchive(
       || result.object_kind !== slot.object_kind) return invalid("evaluated_slot_mismatch");
     evaluated.push(slot);
   }
-  return { status: "admitted", response: { ...response.data, index }, execution: execution.data,
+  const exposure = FirstExposurePageSchema.safeParse(first_exposure_page);
+  if (!exposure.success || exposure.data.page_purpose !== (index.page_purpose ?? "membership") || firstExposureMismatch(exposure.data, {
+    query_id: index.query_id, snapshot_id: index.snapshot_id,
+    interpretation_id: index.interpretation_id!, as_of: index.as_of!
+  }, evaluated, response.data.delivery_id)) return invalid("missing_first_exposure");
+  return { status: "admitted", exposure: exposure.data, response: { ...response.data, index }, execution: execution.data,
     budget: budget.data, provider_calls: 0, garden_enqueue: 0, slots, evaluated };
 }
 
@@ -325,7 +331,7 @@ function joinResponseSlots(
       || entry.program_state !== result.program_state || entry.time_state !== result.time_state) {
       return "result_index_mismatch";
     }
-    slots.push({ rank: offset + 1, ...(result.object_id === undefined ? {} : { object_id: result.object_id }),
+    slots.push({ rank: offset + 1, relevance_score: result.relevance_score, ...(result.object_id === undefined ? {} : { object_id: result.object_id }),
       object_kind: result.object_kind, target: result.target,
       index_entry_offset: offset, hypothesis_id: entry.hypothesis_id, output_binding: entry.output_binding,
       program_state: entry.program_state, time_state: entry.time_state });
@@ -351,7 +357,7 @@ function finalizeConditionalFieldMeasurement(
   const explanations = new Set((index.explanations ?? []).map((entry) => entry.derivation_id));
   const references = entries.flatMap((entry) => entry.explanation_ids);
   const associations = entries.map((entry) => entry.association_milligrades);
-  const firstExposure = admitted.evaluated;
+  const firstExposure = admitted.exposure.initial!.slots;
   const mixed = scoreMixedKindFirstExposure(firstExposure, sourceGold.data);
   const historical = scoreHistoricalMemoryAnyAtK(firstExposure, memoryGold.data);
   const validated = ValidatedMeasurement.safeParse({
@@ -369,7 +375,8 @@ function finalizeConditionalFieldMeasurement(
     // product_updates revise proof/payload; first-K Any@K stays on frozen membership slots.
     ...(index.product_updates === undefined ? {} : { product_updates: index.product_updates }),
     entries, declared_explanation_ids: [...explanations],
-    evaluated_slots: firstExposure, response_slots: admitted.slots, first_exposure_slots: firstExposure,
+    evaluated_slots: admitted.evaluated, response_slots: admitted.slots, first_exposure_slots: firstExposure,
+    first_exposure_page: admitted.exposure,
     response_slot_count: admitted.response.results.length,
     source_gold_units: sourceGold.data,
     ...(memoryGold.data === undefined ? {} : { gold_memory_ids: memoryGold.data }),

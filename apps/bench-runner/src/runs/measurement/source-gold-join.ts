@@ -107,13 +107,13 @@ export function scoreHistoricalMemoryAnyAtK(
 
 export function firstExposureJoinMismatch(input: Readonly<{
   readonly first_exposure_slots: readonly FirstExposureSlot[];
-  readonly evaluated_slots: readonly FirstExposureSlot[];
+  readonly initial_exposure_slots: readonly FirstExposureSlot[];
   readonly source_gold_units: readonly SourceGoldUnit[];
   readonly gold_memory_ids?: readonly string[];
   readonly mixed_kind_first_exposure: MixedKindFirstExposureMetric;
   readonly historical_memory_any_at_k: HistoricalMemoryAnyAtKMetric;
 }>): boolean {
-  if (JSON.stringify(input.first_exposure_slots) !== JSON.stringify(input.evaluated_slots)) return true;
+  if (JSON.stringify(input.first_exposure_slots) !== JSON.stringify(input.initial_exposure_slots)) return true;
   return JSON.stringify(scoreMixedKindFirstExposure(input.first_exposure_slots, input.source_gold_units))
       !== JSON.stringify(input.mixed_kind_first_exposure)
     || JSON.stringify(scoreHistoricalMemoryAnyAtK(input.first_exposure_slots, input.gold_memory_ids))

@@ -180,9 +180,9 @@ function scanAcceptingValues(scan: {
           next += 1;
           continue;
         }
-        if (allowance < 1) { truncated = true; break; }
+        if (allowance < 1 || updates.length >= input.budget.page_budget) { truncated = true; break; }
         allowance -= 1;
-        if (updates.length < input.budget.page_budget) updates.push(entry);
+        updates.push(entry);
         next += 1;
         continue;
       }

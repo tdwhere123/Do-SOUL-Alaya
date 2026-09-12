@@ -1,3 +1,5 @@
+import { FirstExposureSession } from "../../../runs/measurement/first-exposure-session.js";
+import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 import { compileConditionalFieldQuery, interpretationIdentity } from "@do-soul/alaya-core";
 import { InformationIndexSchema, type MemorySearchResult } from "@do-soul/alaya-protocol";
@@ -52,8 +54,14 @@ function fixture(ids = ["gold"] ) {
     object_id: row.object_id, target: row.target, object_kind: row.object_kind, rank: offset + 1, relevance_score: row.relevance_score
     , hypothesis_id: row.hypothesis_id, output_binding: row.output_binding, program_state: row.program_state, time_state: row.time_state
   }));
-  return { recallResult, deliveredResults, queryText: "deployment checklist", workspaceId: "workspace", referenceTime: NOW,
+  return { recallResult: { ...recallResult, first_exposure_page: new FirstExposureSession().record(SoulMemorySearchResponseSchema.parse({ delivery_id: recallResult.delivery_id, protocol_version: 1, index, results, total_count: results.length })) }, deliveredResults, queryText: "deployment checklist", workspaceId: "workspace", referenceTime: NOW,
     expectedIndexSnapshotId: SNAPSHOT, requestBudget: BUDGET, recallLatencyMs: 12 };
+}
+
+function initialPage<T extends ReturnType<typeof fixture>["recallResult"]>(response: T) {
+  const { provider_calls: _provider, garden_enqueue: _garden, request_budget: _budget,
+    execution_receipt: _execution, first_exposure_page: _exposure, ...payload } = response;
+  return { ...response, first_exposure_page: new FirstExposureSession().record(SoulMemorySearchResponseSchema.parse(payload)) };
 }
 
 function diagnostic(input = fixture(), hitAt5 = true) {
@@ -116,6 +124,7 @@ describe("conditional target measurement evidence", () => {
     const input = { ...base, deliveredResults: [delivered], recallResult: { ...base.recallResult,
       index: { ...base.recallResult.index, entries: [{ ...entry, target }] },
       results: [{ ...result, object_kind: "source_evidence", target }] } };
+    input.recallResult = initialPage(input.recallResult);
     const diagnostic = buildQuestionDiagnostic({ ...input, questionId: "source", goldMemoryIds: ["gold"], answerSessionIds: ["session"],
       hitAt1: false, hitAt5: false, hitAt10: false, degradationReason: null, embeddingMode: "disabled" });
     expect(diagnostic.conditional_field_measurement?.status).toBe("validated");
@@ -218,6 +227,7 @@ describe("conditional target measurement evidence", () => {
     const index = { ...input.recallResult.index, query_id,
       continuation: { ...input.recallResult.index.continuation!, query_id } };
     const scoped = { ...input, requestFilters, recallResult: { ...input.recallResult, index, execution_receipt } };
+    scoped.recallResult = initialPage(scoped.recallResult);
     expect(measureConditionalFieldResponse(scoped)?.status).toBe("validated");
     expect(measureConditionalFieldResponse({ ...scoped,
       requestFilters: { ...requestFilters, authorized_scopes: ["project", "workspace"] } })?.status).toBe("validated");
@@ -380,7 +390,7 @@ describe("conditional target measurement evidence", () => {
     };
     const measured = measureConditionalFieldResponse({
       ...input,
-      recallResult,
+      recallResult: initialPage(recallResult),
       deliveredResults: [{
         object_id: undefined,
         target,

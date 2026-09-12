@@ -1,3 +1,5 @@
+import { FirstExposureSession, initialScoringSlots } from "../../../runs/measurement/first-exposure-session.js";
+import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 import { compileConditionalFieldQuery, interpretationIdentity } from "@do-soul/alaya-core";
 import {
@@ -14,6 +16,7 @@ import {
   MIXED_KIND_FIRST_EXPOSURE_CONTRACT,
   SOURCE_GOLD_JOIN_DENOMINATOR,
   measureConditionalFieldResponse,
+  ConditionalFieldMeasurementSchema,
   type SourceGoldUnit
 } from "../../../runs/measurement/conditional-field-measurement.js";
 
@@ -78,7 +81,7 @@ function fixture(targets: readonly RecallTargetRef[]) {
     hypothesis_id: row.hypothesis_id, output_binding: row.output_binding,
     program_state: row.program_state, time_state: row.time_state
   }));
-  return { recallResult, deliveredResults, queryText: "deployment checklist", workspaceId: "workspace",
+  return { recallResult: { ...recallResult, first_exposure_page: new FirstExposureSession().record(SoulMemorySearchResponseSchema.parse({ delivery_id: recallResult.delivery_id, protocol_version: 1, index, results, total_count: results.length })) }, deliveredResults, queryText: "deployment checklist", workspaceId: "workspace",
     referenceTime: NOW, expectedIndexSnapshotId: SNAPSHOT, requestBudget: BUDGET, recallLatencyMs: 12 };
 }
 
@@ -171,28 +174,73 @@ describe("source gold join and mixed-kind first-exposure", () => {
     expect(measured.metrics.interpretation_correctness).toMatchObject({ status: "unavailable", value: null });
   });
 
-  it("freezes first-exposure slots and mixed-kind Any@K when a later page carries product_updates", () => {
+  it("keeps first-page Any@K across later membership, empty updates, payload and retries", () => {
     const first = fixture([sourceTarget({ root_id: "other-root" })]);
-    const before = measureConditionalFieldResponse({ ...first, goldSourceUnits: [SOURCE_GOLD] });
+    const session = new FirstExposureSession();
+    const index = first.recallResult.index;
+    const continuation = { schema_version: 1 as const, continuation_id: "issued", query_id: index.query_id,
+      snapshot_id: index.snapshot_id, result_version: index.result_version, cursor: "next",
+      expires_at: "2099-01-01T00:00:00.000Z", interpretation_id: index.interpretation_id,
+      interpretation_clock: index.as_of };
+    const firstResponse = { delivery_id: "first", protocol_version: 1, results: first.recallResult.results,
+      index: { ...index, continuation }, total_count: 1 };
+    const initial = session.record(SoulMemorySearchResponseSchema.parse(firstResponse));
+    const before = measureConditionalFieldResponse({ ...first, goldMemoryIds: ["gold"], goldSourceUnits: [SOURCE_GOLD],
+      recallResult: { ...first.recallResult, ...firstResponse, first_exposure_page: initial } });
     if (before?.status !== "validated") throw new Error("validated first page expected");
-    const update = sourceProductStateKey({
-      workspace_id: "workspace", root_kind: "source_record", root_id: "rec-1", source_version: "v1",
-      content_digest: DIGEST, evidence_object_id: null, program_state: "matched",
-      hypothesis_id: "h-update", binding_context: "binding0", time_state: "current"
-    });
-    const recallResult = {
-      ...first.recallResult,
-      index: { ...first.recallResult.index, page_purpose: "update" as const, product_updates: [{
-        schema_version: 1 as const, product: update, update_kind: "proof" as const, revision: "rev-2"
-      }] }
-    };
-    const after = measureConditionalFieldResponse({ ...first, recallResult, goldSourceUnits: [SOURCE_GOLD] });
-    if (after?.status !== "validated") throw new Error("validated update page expected");
-    expect(after.first_exposure_slots).toEqual(before.first_exposure_slots);
-    expect(after.metrics.mixed_kind_first_exposure).toEqual(before.metrics.mixed_kind_first_exposure);
-    expect(after.metrics.mixed_kind_first_exposure.any_at_1).toEqual({ status: "miss", value: false });
-    expect(after.product_updates).toHaveLength(1);
-    expect(after.evaluated_slots[0]?.target).toMatchObject({ root_id: "other-root" });
+    const donorInput = fixture([sourceTarget({ root_id: "other-root" }), memoryTarget("gold"), sourceTarget()]);
+    const donor = measureConditionalFieldResponse({ ...donorInput, goldMemoryIds: ["gold"], goldSourceUnits: [SOURCE_GOLD] });
+    if (donor?.status !== "validated") throw new Error("validated independent session expected");
+    expect(donor.identity).toEqual(before.identity);
+    expect(donor.metrics.historical_memory_any_at_k.hit_at_5).toEqual({ status: "hit", value: true });
+    expect(before.metrics.historical_memory_any_at_k.hit_at_5).toEqual({ status: "miss", value: false });
+    const update = sourceProductStateKey({ workspace_id: "workspace", root_kind: "source_record", root_id: "rec-1",
+      source_version: "v1", content_digest: DIGEST, evidence_object_id: null, program_state: "matched",
+      hypothesis_id: "h-update", binding_context: "binding0", time_state: "current" });
+    for (const purpose of ["membership", "update", "payload", "retry"] as const) {
+      const later = fixture(purpose === "update" ? [] : [sourceTarget()]);
+      const response = { delivery_id: `later-${purpose}`, protocol_version: 1, results: later.recallResult.results,
+        total_count: later.recallResult.results.length, index: { ...later.recallResult.index, page_purpose: purpose,
+          ...(purpose === "update" ? { product_updates: [{ schema_version: 1 as const, product: update,
+            update_kind: "proof" as const, revision: "rev-2" }] } : {}) } };
+      const page = session.record(SoulMemorySearchResponseSchema.parse(response), continuation);
+      const input = { ...later, goldMemoryIds: ["gold"], goldSourceUnits: [SOURCE_GOLD],
+        recallResult: { ...later.recallResult, ...response, first_exposure_page: page } };
+      expect(initialScoringSlots(input.recallResult)?.[0]?.target).toMatchObject({ root_id: "other-root" });
+      expect(() => initialScoringSlots({ ...input.recallResult, first_exposure_page: undefined })).toThrow(/first exposure/);
+      const after = measureConditionalFieldResponse(input);
+      if (after?.status !== "validated") throw new Error(`validated ${purpose} page expected: ${JSON.stringify(after)}`);
+      const splicedPage = { ...page, initial: donor.first_exposure_page.initial };
+      const splicedResponse = { ...input.recallResult, first_exposure_page: splicedPage };
+      expect(() => initialScoringSlots(splicedResponse)).toThrow(/first exposure/);
+      expect(measureConditionalFieldResponse({ ...input, recallResult: splicedResponse }))
+        .toMatchObject({ status: "invalid", reason: "missing_first_exposure" });
+      const archivedSplice = { ...after, first_exposure_page: splicedPage,
+        first_exposure_slots: donor.first_exposure_slots,
+        metrics: { ...after.metrics, historical_memory_any_at_k: donor.metrics.historical_memory_any_at_k,
+          mixed_kind_first_exposure: donor.metrics.mixed_kind_first_exposure } };
+      expect(ConditionalFieldMeasurementSchema.safeParse(JSON.parse(JSON.stringify(archivedSplice))).success).toBe(false);
+      expect(after.first_exposure_slots).toEqual(before.first_exposure_slots);
+      expect(after.metrics.mixed_kind_first_exposure).toEqual(before.metrics.mixed_kind_first_exposure);
+      expect(after.metrics.mixed_kind_first_exposure.any_at_1).toEqual({ status: "miss", value: false });
+      expect(after.evaluated_slots).toHaveLength(purpose === "update" ? 0 : 1);
+      expect(ConditionalFieldMeasurementSchema.parse(JSON.parse(JSON.stringify(after)))).toEqual(after);
+      expect(ConditionalFieldMeasurementSchema.safeParse({ ...after, first_exposure_page: {
+        ...page, initial: { ...page.initial, delivery_id: "tampered-original" }
+      } }).success).toBe(false);
+      expect(measureConditionalFieldResponse({ ...input, recallResult: { ...input.recallResult, first_exposure_page: undefined } }))
+        .toMatchObject({ status: "invalid", reason: "missing_first_exposure" });
+      expect(measureConditionalFieldResponse({ ...input, recallResult: { ...input.recallResult,
+        first_exposure_page: new FirstExposureSession().record(SoulMemorySearchResponseSchema.parse(response), continuation) } }))
+        .toMatchObject({ status: "invalid", reason: "missing_first_exposure" });
+    }
+    const retry = session.record(SoulMemorySearchResponseSchema.parse({ ...firstResponse,
+      index: { ...firstResponse.index, page_purpose: "retry" } }));
+    expect(retry.initial).toEqual(initial.initial);
+    expect(initialScoringSlots({ ...firstResponse, index: { ...firstResponse.index, page_purpose: "retry" },
+      first_exposure_page: retry })?.[0]?.target).toMatchObject({ root_id: "other-root" });
+    expect(measureConditionalFieldResponse({ ...first, recallResult: { ...first.recallResult, ...firstResponse,
+      index: { ...firstResponse.index, page_purpose: "retry" }, first_exposure_page: retry } })?.status).toBe("validated");
   });
 
   it("rejects truncated and foreign-target archives before scoring", () => {

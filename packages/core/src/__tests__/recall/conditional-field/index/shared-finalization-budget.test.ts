@@ -117,9 +117,12 @@ describe("one allowance across grounding, projection, and payload", () => {
     const result = projectStateless({ ...source, values: [{ ...original, accepting: false }, ...source.values.slice(1)] },
       3, 1, first.index.continuation);
     expect(result.index.completeness.logical_index).not.toBe("invalidated");
-    expect(result.index.entries.map((entry) => (entry.object_id ?? ""))).toEqual(["memory-1"]);
-    expect(result.index.page_purpose).toBe("membership");
+    expect(result.index.entries).toEqual([]);
+    expect(result.index.page_purpose).toBe("update");
     expect(result.index.product_updates?.map((update) => update.update_kind)).toEqual(["retraction"]);
+    const later = projectStateless({ ...source, values: [{ ...original, accepting: false }, ...source.values.slice(1)] },
+      3, 1, result.index.continuation);
+    expect(later.index.entries.map((entry) => entry.object_id)).toEqual(["memory-1"]);
   });
 
   it("allows suffix growth behind an unchanged stateless prefix", () => {

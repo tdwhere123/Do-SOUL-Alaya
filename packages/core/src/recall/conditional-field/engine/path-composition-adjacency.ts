@@ -27,17 +27,14 @@ import {
 import { PathEffectCursor, type PathComputation } from "./path-effect-cursor.js";
 import type { RetainedRows } from "./retained-sequence.js";
 import {
-  decideGuards,
   alignOutgoingBinding,
   type BindingContextStore,
   type BoundSourceFacts
 } from "./binding-environment.js";
 import {
   inactiveResolution,
-  observedTargetRevision,
   relationMatches,
-  relationStrength,
-  unifyAdvance,
+  admitRelationRow,
   type AdjacencyRow,
   type AdmittedRelationStrength,
   type NamedKindOverlay
@@ -242,53 +239,13 @@ function* effectsForAdvance(
     readonly bindingContexts?: BindingContextStore;
   }>
 ): PathComputation<void> {
-  const declared = input.overlay[row.predicate] ?? input.overlay[advance.relation.relation_kind];
-  if (declared?.applicable === false) return;
-  const unified = unifyAdvance(from, advance.relation, row, input.bindingContexts);
-  if (unified === undefined) return;
-  const decision = decideGuards(
-    [advance.relation.guard],
-    unified.env,
-    input.sourceFacts ?? new Map(),
-    { sourceId: row.sourceObjectId, targetId: row.targetObjectId }
-  );
-  if (decision === "false") return;
-  if (decision === "unresolved") { yield { kind: "effect", effect: {
-    observation_id: `guard:${row.assertionId}:${from.program_state}`,
-    unresolved_guard: true
-  } }; return; }
-  const targetRevision = observedTargetRevision(
-    row.targetObjectId,
-    input.sourceFacts,
-    input.liveStates
-  );
-  if (targetRevision === undefined) {
-    yield { kind: "effect", effect: {
-      observation_id: `revision:${row.assertionId}:${from.program_state}`,
-      unresolved_guard: true,
-      missing_target_revision: true
-    } }; return;
-  }
-  const revisionId = relationRevisionId(row, from, input.sourceFacts);
-  const strength = relationStrength(advance.relation, input.overlay, row.predicate, {
-    query_id: input.query_id,
-    instance_id: row.assertionId,
-    revision_id: revisionId,
-    hypothesis_id: from.hypothesis_id,
-    binding: unified.binding,
-    time_state: from.time_state
-  });
-  if (strength === undefined) {
-    yield { kind: "effect", effect: {
-      observation_id: `adjacency:${row.assertionId}:${from.hypothesis_id}:${from.program_state}`,
-      missing_measurement: true
-    } }; return;
-  }
-  if (strength.milligrades <= advance.relation.threshold_milligrades) return;
+  const admitted = yield* admitRelationRow(advance.relation, from, row, input);
+  if (admitted === undefined) return;
+  const { binding: unifiedBinding, targetRevision, revisionId, strength } = admitted;
   for (const programState of advance.to) {
     yield { kind: "work" };
     const binding = alignOutgoingBinding(
-      unified.binding,
+      unifiedBinding,
       row.targetObjectId,
       automaton,
       programState,
@@ -302,19 +259,8 @@ function* effectsForAdvance(
       source_revision: targetRevision
     });
     yield* compiledEffects({ ...row, source_revision: revisionId },
-      from, to, strength, decision, input.facets ?? []);
+      from, to, strength, "true", input.facets ?? []);
   }
-}
-
-function relationRevisionId(
-  row: AdjacencyRow,
-  from: ProductStateKey,
-  sourceFacts: ReadonlyMap<string, BoundSourceFacts> | undefined
-): string | undefined {
-  if (row.source_revision !== undefined && row.source_revision.length > 0) return row.source_revision;
-  const fact = sourceFacts?.get(row.sourceObjectId)?.source_revision;
-  if (fact !== undefined && fact.length > 0) return fact;
-  return from.target.kind === "memory_entry" ? from.target.source_revision : undefined;
 }
 
 function* compiledEffects(
@@ -366,7 +312,8 @@ function attachHyperedgeFacet(effect: HyperedgeEffect): CompiledAdjacencyEffect 
   if (effect.unresolved_guard === true || effect.hyperedge === undefined) {
     return {
       observation_id: effect.observation_id,
-      unresolved_guard: true,
+      ...(effect.unresolved_guard === true ? { unresolved_guard: true } : {}),
+      ...(effect.missing_measurement === true ? { missing_measurement: true } : {}),
       ...(effect.missing_target_revision === true ? { missing_target_revision: true } : {})
     };
   }

@@ -20,7 +20,7 @@ import {
   joinHyperedgeOr,
   type HyperedgePremise
 } from "../reference/accepting-projection.js";
-import { decideGuards, encodeBindingContext, parseBindingContext, unifyBinding, type BoundSourceFacts, type BindingContextStore } from "./binding-environment.js";
+import { encodeBindingContext, parseBindingContext, unifyBinding, type BoundSourceFacts, type BindingContextStore } from "./binding-environment.js";
 import { joinDerivation, leafDerivation } from "./path-derivation.js";
 import { groundedOutputDerivations } from "./output-derivations.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
@@ -36,8 +36,7 @@ import {
   inactiveResolution,
   observedTargetRevision,
   relationMatches,
-  relationStrength,
-  unifyAdvance,
+  admitRelationRow,
   type AdjacencyRow,
   type NamedKindOverlay
 } from "./path-matching.js";
@@ -62,6 +61,7 @@ export type HyperedgeEffect = Readonly<{
   readonly derivations?: readonly Derivation[];
   readonly unresolved_guard?: boolean;
   readonly missing_target_revision?: boolean;
+  readonly missing_measurement?: boolean;
 }>;
 
 type HyperedgeInput = Readonly<{
@@ -199,7 +199,7 @@ function* relationAssignments(
 ): PathComputation<readonly PremiseAssignment[]> {
   const found: PremiseAssignment[] = [];
   for (const row of rows) {
-    const assignment = assignmentFromRow(relation, from, row, input);
+    const assignment = yield* assignmentFromRow(relation, from, row, input);
     if (assignment !== undefined) found.push(assignment);
     yield { kind: "work", retained_bytes: assignment === undefined ? 0 : Buffer.byteLength(JSON.stringify(assignment), "utf8") };
   }
@@ -223,7 +223,7 @@ function* nestedHyperedgeAssignments(
   })) {
     if (step.kind === "work") { yield step; continue; }
     const effect = step.effect;
-    if (effect.hyperedge === undefined || effect.derivation === undefined) continue;
+    if (effect.hyperedge === undefined || effect.derivation === undefined) { yield step; continue; }
     const assigned = terminalAssignment(
       from,
       productSubjectId(effect.hyperedge.to),
@@ -259,7 +259,11 @@ function* walkCompiledPremise(
   const observed = input.observedStates ?? input.liveStates;
   const retain = function* (node: ProductStateKey, assignment: PremiseAssignment, nextStates: readonly string[]): PathComputation<void> {
     const revision = observedTargetRevision(assignment.target_object_id, input.sourceFacts, observed);
-    if (revision === undefined) return;
+    if (revision === undefined) {
+      yield { kind: "effect", effect: { observation_id: `revision:${assignment.observation_id}:${node.program_state}`,
+        unresolved_guard: true, missing_target_revision: true } };
+      return;
+    }
     for (const programState of nextStates) {
       yield { kind: "work", retained_bytes: 1024 };
       const to = hyperedgeMemoryTo(node, { object_id: assignment.target_object_id, source_revision: revision,
@@ -299,7 +303,7 @@ function* walkCompiledPremise(
       })) {
         if (step.kind === "work") { yield step; continue; }
         const effect = step.effect;
-        if (effect.hyperedge === undefined || effect.derivation === undefined) continue;
+        if (effect.hyperedge === undefined || effect.derivation === undefined) { yield step; continue; }
         const assignment = terminalAssignment(node, productSubjectId(effect.hyperedge.to), effect.hyperedge.strength_milligrades,
           effect.hyperedge.validity, effect.hyperedge.relation_kind, effect.hyperedge.to.binding_context);
         yield* retain(node, { ...assignment, derivation: effect.derivation, derivations: effect.derivations ?? [effect.derivation] }, hyperedge.to);
@@ -308,7 +312,7 @@ function* walkCompiledPremise(
     }
     for (const advance of advancesFor(automaton, node.program_state, () => true)) {
       for (const row of rows) {
-        const assignment = assignmentFromRow(advance.relation, here, row, input);
+        const assignment = yield* assignmentFromRow(advance.relation, here, row, input);
         yield { kind: "work", retained_bytes: assignment === undefined ? 0 : Buffer.byteLength(JSON.stringify(assignment), "utf8") };
         if (assignment === undefined) continue;
         yield* retain(node, assignment, advance.to);
@@ -379,7 +383,7 @@ function terminalAssignment(
   };
 }
 
-function assignmentFromRow(
+function* assignmentFromRow(
   relation: QueryRelation,
   from: ProductStateKey,
   row: AdjacencyRow,
@@ -388,36 +392,18 @@ function assignmentFromRow(
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly bindingContexts?: BindingContextStore;
+    readonly liveStates: Iterable<ProductStateKey>;
+    readonly observedStates?: Iterable<ProductStateKey>;
   }>
-): PremiseAssignment | undefined {
+): PathComputation<PremiseAssignment | undefined> {
   if (row.sourceObjectId !== productSubjectId(from)) return undefined;
   if (!relationMatches(relation.relation_kind, row.predicate)) return undefined;
   if (row.validity === undefined || inactiveResolution(row.resolutionKind)) return undefined;
-  const declared = input.overlay[row.predicate] ?? input.overlay[relation.relation_kind];
-  if (declared?.applicable === false) return undefined;
-  const unified = unifyAdvance(from, relation, row, input.bindingContexts);
-  if (unified === undefined) return undefined;
-  const decision = decideGuards(
-    [relation.guard],
-    unified.env,
-    input.sourceFacts ?? new Map(),
-    { sourceId: row.sourceObjectId, targetId: row.targetObjectId }
-  );
-  if (decision !== "true") return undefined;
-  const revisionId = row.source_revision
-    ?? input.sourceFacts?.get(row.sourceObjectId)?.source_revision
-    // Source products pin identity by source_version; they have no memory source_revision.
-    ?? (from.target.kind === "memory_entry" ? from.target.source_revision : from.target.source_version);
-  const strength = relationStrength(relation, input.overlay, row.predicate, {
-    query_id: input.query_id,
-    instance_id: row.assertionId,
-    revision_id: revisionId,
-    hypothesis_id: from.hypothesis_id,
-    binding: unified.binding,
-    time_state: from.time_state
+  const admitted = yield* admitRelationRow(relation, from, row, {
+    ...input, liveStates: input.observedStates ?? input.liveStates
   });
-  if (strength === undefined) return undefined;
-  if (strength.milligrades <= relation.threshold_milligrades) return undefined;
+  if (admitted === undefined) return;
+  const { binding, revisionId, strength } = admitted;
   const leafId = row.assertionId;
   const derivation = leafDerivation({
     derivation_id: `leaf:${leafId}`,
@@ -428,7 +414,7 @@ function assignmentFromRow(
   });
   return {
     hypothesis_id: from.hypothesis_id,
-    binding_context: unified.binding,
+    binding_context: binding,
     time_state: from.time_state,
     present: true,
     target_object_id: row.targetObjectId,

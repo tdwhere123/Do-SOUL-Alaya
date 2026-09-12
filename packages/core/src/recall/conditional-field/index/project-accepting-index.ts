@@ -14,6 +14,7 @@ import {
   type IndexRole,
   type InformationIndex,
   type ProductStateKey,
+  type ProductUpdate,
   type QueryInterpretationStatus,
   type QueryView,
   type Proposition,
@@ -292,12 +293,22 @@ function pageAcceptingIndex(
     });
   }
   const offset = useEmittedSet ? 0 : resolvePageOffset(input, entries.length);
-  const members = useEmittedSet
+  const candidateMembers = useEmittedSet
     ? projected.members
     : entries.slice(offset, offset + input.budget.page_budget);
-  const updates = useEmittedSet ? projected.updates : [];
+  const candidates = useEmittedSet ? projected.updates : [];
+  const ledger = input.delivered_product_states ?? committedProductStatesOf(input.prior_continuation) ?? {};
+  const pendingUpdates = [...retractionUpdates(projected.retracted, ledger),
+    ...candidates.flatMap((entry) => componentUpdatesFor(entry, emitted, ledger))];
+  // Retractions and retained refinements precede new exposure; only selected
+  // envelopes spend page width or advance the component ledger.
+  const productUpdates = pendingUpdates.slice(0, input.budget.page_budget);
+  const members = candidateMembers.slice(0, input.budget.page_budget - productUpdates.length);
+  const updates = candidates.filter((entry) => productUpdates.some((update) =>
+    sharedProductIdentity(update.product) === productIdOfEntry(entry)));
+  const deliveryPending = pendingUpdates.length - productUpdates.length + candidateMembers.length - members.length;
   const remaining = useEmittedSet
-    ? Math.max(projected.truncated ? 1 : 0, projected.unemitted - members.length)
+    ? Math.max(projected.truncated ? 1 : 0, projected.unemitted - members.length, deliveryPending)
     : Math.max(projected.truncated ? 1 : 0, entries.length - offset - members.length);
   // Typed updates are not a second membership exposure of the same product.
   const prepared = members;
@@ -307,7 +318,7 @@ function pageAcceptingIndex(
   input.on_remaining_reserve?.(finalized?.remaining ?? projected.remaining);
   return encodeAcceptingIndex({
     input, representation, projected, emitted, useEmittedSet, entries, members, updates,
-    remaining, offset, prepared
+    remaining, offset, prepared, productUpdates
   });
 }
 
@@ -323,8 +334,9 @@ function encodeAcceptingIndex(page: Readonly<{
   readonly remaining: number;
   readonly offset: number;
   readonly prepared: readonly IndexEntry[];
+  readonly productUpdates: readonly ProductUpdate[];
 }>): InformationIndex {
-  const { input, representation, projected, emitted, useEmittedSet, entries, members, updates, remaining, offset, prepared } = page;
+  const { input, representation, projected, emitted, useEmittedSet, entries, members, updates, remaining, offset, prepared, productUpdates } = page;
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
   const omittedPayload = mixedPayload || input.payload_work === "open"
@@ -343,20 +355,18 @@ function encodeAcceptingIndex(page: Readonly<{
     ...(input.support_work_status === undefined ? {} : { explanation_work: input.support_work_status }),
     ...(resourceOpen ? { resource_work: "open" as const } : {})
   });
-  const committedRevisions = mergeCommittedRevisions(emitted, [...members, ...updates]);
+
   const nextOffset = offset + members.length;
   const scanOffset = projected.truncated || useEmittedSet
       || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined;
   const ledger = input.delivered_product_states
     ?? committedProductStatesOf(input.prior_continuation)
     ?? {};
-  const productUpdates = [
-    ...retractionUpdates(projected.retracted, ledger),
-    ...updates.flatMap((entry) => componentUpdatesFor(entry, emitted, ledger))
-  ];
-  const committedProducts = mergeCommittedProductStates(
-    ledger, members, updates, projected.retracted
-  );
+  const committedProducts = mergeCommittedProductStates(ledger, members, updates, productUpdates);
+  const fullyDeliveredUpdates = updates.filter((entry) => productUpdatesBetween(
+    productStateKeyFromIndexEntry(entry), committedProducts[productIdOfEntry(entry)], productComponentState(entry)
+  ).length === 0);
+  const committedRevisions = mergeCommittedRevisions(emitted, [...members, ...fullyDeliveredUpdates]);
   const order = orderClosureFromProjection({
     view: input.view,
     query_id: input.query_id,

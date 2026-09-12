@@ -126,14 +126,30 @@ export function mergeCommittedProductStates(
   prior: EmittedProductLedger,
   members: readonly IndexEntry[],
   updates: readonly IndexEntry[],
-  retractions: readonly ProductStateKey[]
+  delivered: readonly ProductUpdate[]
 ): EmittedProductLedger {
   const next: Record<string, ProductComponentState> = { ...prior };
-  for (const entry of [...members, ...updates]) {
+  for (const entry of members) {
     next[sharedProductIdentity(productStateKeyFromIndexEntry(entry))] = productComponentState(entry);
   }
-  for (const product of retractions) {
-    const id = sharedProductIdentity(product);
+  for (const entry of updates) {
+    const id = sharedProductIdentity(productStateKeyFromIndexEntry(entry));
+    const current = productComponentState(entry);
+    const previous = next[id];
+    if (previous === undefined) continue;
+    const partial = { ...previous };
+    for (const [field, kind] of COMPONENT_KINDS) {
+      if (delivered.some((update) => sharedProductIdentity(update.product) === id
+        && update.update_kind === kind && update.revision === current[field]
+        && update.previous_revision === previous[field])) {
+        Object.assign(partial, { [field]: current[field] });
+      }
+    }
+    next[id] = partial;
+  }
+  for (const update of delivered) {
+    if (update.update_kind !== "retraction") continue;
+    const id = sharedProductIdentity(update.product);
     const previous = next[id];
     if (previous !== undefined) next[id] = retractedComponentState(previous);
   }

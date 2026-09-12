@@ -109,11 +109,73 @@ describe("product component diffs", () => {
       budget: budget({ page_budget: 1 }),
       expires_at: EXPIRES_AT
     }));
-    expect(withdrawn.entries.map((entry) => entry.object_id)).toEqual(["b"]);
-    expect(withdrawn.page_purpose).toBe("membership");
+    expect(withdrawn.entries).toEqual([]);
+    expect(withdrawn.page_purpose).toBe("update");
+    const later = continueAcceptingIndex(withdrawn, inputOf({ snapshot: snapshotOf([{ ...a, accepting: false }, b]),
+      budget: budget({ page_budget: 1 }), expires_at: EXPIRES_AT }));
+    expect(later.entries.map((entry) => entry.object_id)).toEqual(["b"]);
+    expect(later.product_updates ?? []).toEqual([]);
     expect(withdrawn.product_updates?.map((update) => update.update_kind)).toEqual(["retraction"]);
     expect(withdrawn.product_updates?.[0]?.product)
       .toEqual(productStateKeyFromIndexEntry(first.entries[0]!));
+  });
+
+  it("shares width zero and one across pending retractions, components and new members", () => {
+    const original = [fieldValue("a", 600), fieldValue("b", 600), fieldValue("c", 600), fieldValue("d", 600)];
+    const first = projectAcceptingIndex(inputOf({ snapshot: snapshotOf(original), budget: budget({ page_budget: 3 }),
+      expires_at: EXPIRES_AT }));
+    expect(first.entries.map((entry) => entry.object_id)).toEqual(["a", "b", "c"]);
+    const changed = { snapshot: snapshotOf([{ ...original[0]!, accepting: false }, { ...original[1]!, accepting: false },
+      fieldValue("c", 950), original[3]!]), claims: new Map([[productIndexKey("c"), "supported" as const]]),
+      expires_at: EXPIRES_AT };
+    const zero = continueAcceptingIndex(first, inputOf({ ...changed, budget: budget({ page_budget: 0 }) }));
+    expect(zero.entries).toEqual([]);
+    expect(zero.product_updates ?? []).toEqual([]);
+    expect(committedProductStatesOf(zero)).toEqual(committedProductStatesOf(first));
+    let prior = zero;
+    const updates: string[] = [];
+    const members: string[] = [];
+    for (let count = 0; count < 6 && prior.continuation !== null; count += 1) {
+      const next = continueAcceptingIndex(prior, inputOf({ ...changed, budget: budget({ page_budget: 1 }) }));
+      expect(next.entries.length + (next.product_updates?.length ?? 0)).toBeLessThanOrEqual(1);
+      const repeated = continueAcceptingIndex(prior, inputOf({ ...changed, budget: budget({ page_budget: 1 }) }));
+      expect(repeated.entries).toEqual(next.entries);
+      expect(repeated.product_updates).toEqual(next.product_updates);
+      updates.push(...(next.product_updates ?? []).map((update) => update.update_kind));
+      members.push(...next.entries.map((entry) => entry.object_id!));
+      prior = next;
+    }
+    expect(updates).toEqual(["retraction", "retraction", "proof", "claim"]);
+    expect(members).toEqual(["d"]);
+    const final = committedProductStatesOf(prior)!;
+    const id = (value: FieldValue) => sharedProductIdentity(value.state);
+    expect(final[id(original[0]!)]?.membership_present).toBe(false);
+    expect(final[id(original[1]!)]?.membership_present).toBe(false);
+    expect(final[id(original[2]!)]).toEqual(productComponentState({ ...first.entries[2]!,
+      claim: "supported", association_milligrades: 950 }));
+  });
+
+  it("retains every changed product after observation exhausts and closes after the final update", () => {
+    const first = projectAcceptingIndex(inputOf({ snapshot: snapshotOf([fieldValue("a", 600), fieldValue("b", 600)]),
+      budget: budget({ page_budget: 2 }), expires_at: EXPIRES_AT,
+      view: { ...defaultView(), result_kind_view: "memory_only" } }));
+    const changed = inputOf({ snapshot: snapshotOf([fieldValue("a", 950), fieldValue("b", 950)]),
+      budget: budget({ page_budget: 1 }), expires_at: EXPIRES_AT,
+      view: { ...defaultView(), result_kind_view: "memory_only" },
+      observer: { outcome: { schema_version: 1, status: "exhausted" }, open_regions: [
+        { schema_version: 1, region_id: "seed", kind: "seed", status: "exhausted", coverage_role: "required" },
+        { schema_version: 1, region_id: "adjacency", kind: "adjacency", status: "exhausted", coverage_role: "required" }
+      ] } });
+    const second = continueAcceptingIndex(first, changed);
+    expect(second.product_updates?.map((update) => update.product.target)).toEqual([first.entries[0]!.target]);
+    expect(second.entries).toEqual([]);
+    expect(second.continuation).not.toBeNull();
+    expect(second.completeness.transport).toBe("partial");
+    const last = continueAcceptingIndex(second, changed);
+    expect(last.product_updates?.map((update) => update.product.target)).toEqual([first.entries[1]!.target]);
+    expect(last.entries).toEqual([]);
+    expect(last.completeness.transport).toBe("complete");
+    expect(last.continuation).toBeNull();
   });
 
   it("does not hide a second component change behind kind priority", () => {
@@ -130,7 +192,11 @@ describe("product component diffs", () => {
       expires_at: EXPIRES_AT
     }));
     expect(risen.page_purpose).toBe("update");
-    expect(risen.product_updates?.map((update) => update.update_kind).sort()).toEqual(["claim", "proof"]);
+    expect(risen.product_updates?.map((update) => update.update_kind)).toEqual(["proof"]);
+    const later = continueAcceptingIndex(risen, inputOf({ snapshot: snapshotOf([fieldValue("a", 950)]),
+      claims: new Map([[productIndexKey("a"), "supported"]]), budget: budget({ page_budget: 1 }), expires_at: EXPIRES_AT }));
+    expect(later.product_updates?.map((update) => update.update_kind)).toEqual(["claim"]);
+    expect(later.entries).toEqual([]);
   });
 
   it("keeps claim+proof updates after parse and a sealed continuation echo", () => {
@@ -154,8 +220,13 @@ describe("product component diffs", () => {
       delivered_entry_revisions: retained.delivered_entries,
       delivered_product_states: retained.delivered_products
     }));
-    expect(second.product_updates?.map((update) => update.update_kind).sort()).toEqual(["claim", "proof"]);
-    expect(second.product_updates).toHaveLength(2);
+    expect(second.product_updates?.map((update) => update.update_kind)).toEqual(["proof"]);
+    const committed = retainFromProjected(second);
+    const third = projectAcceptingIndex(inputOf({ snapshot: snapshotOf([fieldValue("a", 950)]),
+      claims: new Map([[productIndexKey("a"), "supported"]]), budget: budget({ page_budget: 1 }), expires_at: EXPIRES_AT,
+      prior_continuation: JSON.parse(JSON.stringify(sealIssuedContinuation(second.continuation!))),
+      delivered_entry_revisions: committed.delivered_entries, delivered_product_states: committed.delivered_products }));
+    expect(third.product_updates?.map((update) => update.update_kind)).toEqual(["claim"]);
   });
 
   it("keeps the prior membership revision on retraction after parse", () => {

@@ -1,3 +1,4 @@
+import { initialScoringSlots } from "../../../runs/measurement/first-exposure-session.js";
 import { scoreAbstentionQuestion } from "../../../diagnostics/abstention.js";
 import { attachAbstentionConfidenceScore } from "../../../diagnostics/abstention-confidence.js";
 import {
@@ -47,6 +48,8 @@ export interface LongMemEvalHitScoringResult {
 export function resolveLongMemEvalHitVerdict(
   input: LongMemEvalHitScoringInput & { readonly isAbstention: boolean }
 ): LongMemEvalHitScoringResult {
+  const initial = initialScoringSlots(input.recallResult);
+  if (initial !== null) input = { ...input, results: initial, recallResult: undefined };
   if (!input.isAbstention) {
     return scoreLongMemEvalRecallHits(input);
   }
