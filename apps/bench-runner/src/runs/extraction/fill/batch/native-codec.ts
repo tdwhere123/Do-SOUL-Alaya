@@ -1,8 +1,20 @@
+import { isNativeGeminiRequestProfile, type NativeGeminiRequestProfile } from "../../request-profile.js";
+import { findProviderBinding } from "../../../provider/catalog.js";
+
 export interface GeminiGenerateContentSettings {
   readonly model: string;
-  readonly requestProfile: "provider-default-v1" | "gemini-2.5-nonthinking-v1";
+  readonly requestProfile: "provider-default-v1" | NativeGeminiRequestProfile;
   readonly maxOutputTokens: number;
 }
+
+export function isGeminiGenerateContentProfile(value: unknown): value is GeminiGenerateContentSettings["requestProfile"] {
+  return value === "provider-default-v1" || isNativeGeminiRequestProfile(value);
+}
+
+const THINKING_CONFIG: Record<NativeGeminiRequestProfile, object> = {
+  "gemini-2.5-nonthinking-v1": { thinkingBudget: 0 },
+  "gemini-3.1-minimal-v1": { thinkingLevel: "minimal" }
+};
 
 export function encodeGeminiGenerateContent(
   line: { readonly systemPrompt: string; readonly userPrompt: string },
@@ -14,8 +26,8 @@ export function encodeGeminiGenerateContent(
     contents: [{ role: "user", parts: [{ text: line.userPrompt }] }],
     generationConfig: {
       responseMimeType: "application/json", maxOutputTokens: settings.maxOutputTokens,
-      ...(settings.requestProfile === "gemini-2.5-nonthinking-v1" ? {
-        thinkingConfig: { thinkingBudget: 0 }
+      ...(isNativeGeminiRequestProfile(settings.requestProfile) ? {
+        thinkingConfig: THINKING_CONFIG[settings.requestProfile]
       } : {})
     }
   };
@@ -68,11 +80,11 @@ export function geminiUsage(response: Record<string, unknown>): {
 
 export function assertGeminiGenerateContentSettings(settings: GeminiGenerateContentSettings): void {
   if (!/^gemini-[a-zA-Z0-9._-]+$/u.test(settings.model) ||
-      !["provider-default-v1", "gemini-2.5-nonthinking-v1"].includes(settings.requestProfile) ||
-      (settings.requestProfile === "gemini-2.5-nonthinking-v1" &&
-        !["gemini-2.5-flash-lite", "gemini-2.5-flash"].includes(settings.model)) ||
+      !isGeminiGenerateContentProfile(settings.requestProfile) ||
+      (isNativeGeminiRequestProfile(settings.requestProfile) &&
+        findProviderBinding(settings.model)?.requestProfile !== settings.requestProfile) ||
       !Number.isSafeInteger(settings.maxOutputTokens) || settings.maxOutputTokens <= 0 ||
-      (["gemini-2.5-flash-lite", "gemini-2.5-flash"].includes(settings.model) &&
+      (findProviderBinding(settings.model) !== undefined &&
         settings.maxOutputTokens > 65_536)) {
     throw new Error("unsupported Gemini model/request profile/output settings");
   }

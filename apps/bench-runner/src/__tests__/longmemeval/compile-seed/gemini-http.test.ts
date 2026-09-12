@@ -1,3 +1,4 @@
+import { createGeminiBatchHttp } from "../../../runs/extraction/fill/batch/http.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
@@ -40,6 +41,35 @@ async function withServer(
 }
 
 describe("native Gemini interactive extraction", () => {
+  it("uses explicit minimal thinking for Flash-Lite 3.1 and normalizes OpenAI configuration with auth", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => response());
+    const nativeConfig = { ...config, model: "gemini-3.1-flash-lite",
+      requestProfile: "gemini-3.1-minimal-v1" as const,
+      providerUrl: "https://synthetic.invalid/v1beta/openai" };
+    await createGardenHttpExtractor(nativeConfig, { fetch: fetchImpl }).extract(input);
+    expect(String(fetchImpl.mock.calls[0]![0])).toBe("https://synthetic.invalid/v1beta/models/gemini-3.1-flash-lite:generateContent");
+    expect(fetchImpl.mock.calls[0]![1]?.headers).toMatchObject({ "x-goog-api-key": "synthetic-fixture-key" });
+    expect(JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string).generationConfig).toEqual({
+      responseMimeType: "application/json", maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: "minimal" }
+    });
+    const batch = createGeminiBatchHttp({ endpoint: nativeConfig.providerUrl, apiKey: nativeConfig.apiKey!,
+      timeoutMs: 1000, fetch: fetchImpl });
+    await batch.create(nativeConfig.model, "files/input", "fixture");
+    expect(String(fetchImpl.mock.calls[1]![0])).toBe("https://synthetic.invalid/v1beta/models/gemini-3.1-flash-lite:batchGenerateContent");
+    expect(fetchImpl.mock.calls[1]![1]?.headers).toMatchObject({ "x-goog-api-key": "synthetic-fixture-key" });
+    const probe = await probeProviderProtocol({ providerUrl: nativeConfig.providerUrl,
+      model: nativeConfig.model, apiKey: nativeConfig.apiKey!, fetchImpl });
+    expect(probe).toMatchObject({ profile: "gemini-3.1-minimal-v1", physical_calls: 1, usage_present: true });
+    const count = fetchImpl.mock.calls.length;
+    await expect(createGardenHttpExtractor({ ...nativeConfig, requestProfile: "gemini-2.5-nonthinking-v1" },
+      { fetch: fetchImpl }).extract(input)).rejects.toThrow("requires request profile");
+    await expect(createGardenHttpExtractor(nativeConfig, { fetch: fetchImpl }).extract({ ...input,
+      maxOutputTokens: 65537 })).rejects.toThrow("unsupported Gemini");
+    await expect(probeProviderProtocol({ providerUrl: nativeConfig.providerUrl, model: nativeConfig.model,
+      apiKey: nativeConfig.apiKey!, fetchImpl, framing: "sse" })).rejects.toThrow("JSON framing");
+    expect(fetchImpl).toHaveBeenCalledTimes(count);
+  });
+
   it("accepts the exact native output field in the expense authorization CLI", () => {
     const authority = parseAuthorizeExtractionArgs([
       "--extraction-action", "probe", "--extraction-probe-key", "a".repeat(64),

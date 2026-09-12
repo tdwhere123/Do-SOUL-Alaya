@@ -1,3 +1,4 @@
+import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
 import type {
   BenchSignalExtractor,
   BenchTransportFailureAttempt,
@@ -61,7 +62,7 @@ export function createGardenHttpExtractor(
     readonly fetch?: typeof fetch;
   }
 ): BenchSignalExtractor {
-  if (config.requestProfile === "gemini-2.5-nonthinking-v1") {
+  if (isNativeGeminiRequestProfile(config.requestProfile)) {
     return createGeminiHttpExtractor(config, deps?.fetch);
   }
   const resolvedDeps = resolveGardenHttpExtractorDeps(deps);

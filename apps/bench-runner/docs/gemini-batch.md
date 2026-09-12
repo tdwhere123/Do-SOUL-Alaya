@@ -8,10 +8,21 @@ readiness or benchmark accuracy.
 
 ## Cost planning
 
-The initial candidate is Gemini 2.5 Flash-Lite with thinking disabled. Official
-prices checked on 2026-09-12 were USD 0.05 per million input tokens and USD 0.20
-per million output tokens for Batch, half the corresponding interactive rates.
-These are planning observations, not a frozen execution price or quality claim.
+Official text prices checked on 2026-09-12, in USD per million tokens:
+
+| Model | Explicit profile | Batch input / output | Interactive input / output |
+| --- | --- | --- | --- |
+| Gemini 2.5 Flash-Lite | `gemini-2.5-nonthinking-v1` | 0.05 / 0.20 | 0.10 / 0.40 |
+| Gemini 3.1 Flash-Lite | `gemini-3.1-minimal-v1` | 0.125 / 0.75 | 0.25 / 1.50 |
+
+The 2.5 profile sends `thinkingBudget: 0`; the 3.1 profile sends
+`thinkingLevel: "minimal"`, which does not guarantee that thinking is disabled.
+Output charges and `maxOutputTokens` include thinking tokens. Both supported
+Flash-Lite models allow at most 65,536 output tokens. Prices are planning
+observations, not a frozen execution price or quality claim. See official
+[pricing](https://ai.google.dev/gemini-api/docs/pricing),
+[thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking), and
+[3.1 model limits](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite).
 
 Before bulk work, select named interactive probes and a small stratified Batch
 canary from source-only characteristics such as assertion count, request size,
@@ -27,9 +38,12 @@ windows. Keep query preparation in a separate budget.
 Use a fresh isolated cache root under `.do-it/bench-runs/`, with an explicitly
 selected raw dataset window and pinned metadata. Preserve historical roots.
 Set `OFFICIAL_API_GARDEN_PROVIDER_URL` to
-`https://generativelanguage.googleapis.com`, `OFFICIAL_API_GARDEN_MODEL` to
-`gemini-2.5-flash-lite` or `gemini-2.5-flash`, and
-`ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE` to `gemini-2.5-nonthinking-v1`.
+`https://generativelanguage.googleapis.com`; native `/v1beta` and configured
+`/v1beta/openai` suffixes also normalize to the same native API origin for both
+interactive and Batch requests, retaining key authentication.
+Set `OFFICIAL_API_GARDEN_MODEL` and `ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE`
+to the exact model/profile pair in the table. Gemini 2.5 Flash also uses the
+2.5 nonthinking profile. Model/profile changes create distinct request identities.
 `ALAYA_OFFICIAL_GARDEN_SECRET_REF` names the existing secret resolver reference;
 never put secret bytes in a receipt, command argument or run log.
 
@@ -85,6 +99,17 @@ observes known jobs and imports available output; it never dispatches new jobs.
 retained. `cancel` requests cancellation; acceptance is not evidence of zero
 cost or terminal cancellation.
 
+Bound each window with `--batch-request-limit N`. A new window takes the first
+N missing request keys in deterministic key order within the existing authority
+scope. For example, use 32 for an initial canary and explicitly named windows
+of 512 for subsequent missing work. This avoids constructing one oversized
+local plan and preserves the full dataset inventory. Keep the same window name
+and request limit on prepare/submit/resume/import; replay uses its original
+sealed selection, even after some shards are admitted. Completing a bounded
+window does not complete the full cache while selected source requests remain
+missing. A later window cannot overlap prior work until local accounting and
+import outcomes have closed.
+
 Creation is non-idempotent. If a response is lost, retain the unknown job and
 reconcile an independently identified remote job using both
 `--batch-local-job <id>` and `--batch-remote-job <batches/id>`. Remote metadata
@@ -124,3 +149,20 @@ Protocol references: [Batch guide](https://ai.google.dev/gemini-api/docs/batch-a
 [pricing](https://ai.google.dev/gemini-api/docs/pricing) and
 [quotas](https://ai.google.dev/gemini-api/docs/rate-limits).
 Rates and limits must be retrieved again for each paid execution contract.
+
+## Cache reuse while algorithms change
+
+Keep provider output and validated extraction shards separate from generated
+SQLite snapshots, field projections and evaluation artifacts. Raw shard keys
+bind model, request profile, system prompt and serialized source request.
+Parser and grounding semantics are additionally bound by the cache manifest.
+Increasing the selected question window does not itself change a shared
+source request's key, but the larger inventory needs its own valid authority.
+
+Changes limited to Recall evaluation or projection rules can rebuild derived
+artifacts from retained sources and compatible extraction without provider
+calls. Use the cache-only consumer and verify zero calls during that rebuild.
+Changing the extraction model, prompt, request partition, source identity or
+required proposal schema can invalidate reuse; retain old raw responses for
+inspection, but do not label them compatible or silently reinterpret a sealed
+manifest. Run a bounded subset first when those contracts may still change.

@@ -108,7 +108,12 @@ export function settleTransportOutcome(
   }
   const currentReservations = unresolved.slice(-currentReservationCount);
   const mappedFailures = mapTransportFailures(currentReservations, failures);
-  return applySettledOutcome(current, input, unresolved, mappedFailures);
+  const settled = applySettledOutcome(current, input, unresolved, mappedFailures);
+  // A bound terminal attempt releases its shard slot in this same durable
+  // transition. A newer outstanding attempt retains ownership of that slot.
+  return attemptOrdinal !== undefined && terminal
+    ? abandonPendingShard(settled, cacheKey, attemptOrdinal)
+    : settled;
 }
 
 function mapTransportFailures(

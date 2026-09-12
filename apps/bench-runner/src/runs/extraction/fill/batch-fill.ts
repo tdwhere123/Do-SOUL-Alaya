@@ -16,7 +16,7 @@ import { prepareBatchExtractionWorkset, type BatchExtractionWorkset } from "./ba
 import type { GeminiBatchInvocation, GeminiBatchPlan } from "./batch/contract.js";
 import { batchDigest, canonicalBatchPlan, MAX_BATCH_ARTIFACT_BYTES } from "./batch/plan.js";
 import { createGeminiBatchHttp } from "./batch/http.js";
-import { encodeGeminiGenerateContent } from "./batch/native-codec.js";
+import { encodeGeminiGenerateContent, isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import { executeGeminiBatchOperation } from "./batch/executor.js";
 
 interface BatchFillInput {
@@ -38,7 +38,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
   if (authority === undefined) throw new Error("Batch requires an extraction authority receipt");
   const route = resolveExtractionTransportRoute(input.prepared.config);
   const profile = input.prepared.config.requestProfile;
-  if (profile !== "provider-default-v1" && profile !== "gemini-2.5-nonthinking-v1") {
+  if (!isGeminiGenerateContentProfile(profile)) {
     throw new Error("Batch request profile is unsupported");
   }
   assertBatchExpenseScope(batch.limits, authority);
@@ -74,7 +74,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
       return ordinals;
     },
     recordLineOutcome: (key, outcome, usage, binding) => {
-      const settled = authority.recordTransportOutcome(key, { retryCount: 0, rateLimitRetries: 0,
+      authority.recordTransportOutcome(key, { retryCount: 0, rateLimitRetries: 0,
         successfulRequestCount: outcome === "success" ? 1 : 0,
         usageRequestCount: usage === undefined ? 0 : 1,
         ...(outcome === "success" ? {} : { terminalRetryClassification: "failure_non_retryable_response" }),
@@ -83,7 +83,6 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
           phase: outcome === "missing" ? "response_body" : "response_schema", httpStatus: null,
           fingerprint: batchDigest(JSON.stringify({ job: binding.jobId, key, outcome }))
         }], ...(usage === undefined ? {} : { usage }) }, binding.attemptOrdinal);
-      if (outcome !== "success" && settled === true) authority.abandonPendingShard(key, binding.attemptOrdinal);
     },
     importLine: (result) => importBatchLine(input, workset, result)
   });
@@ -117,9 +116,14 @@ function assertBatchExpenseScope(limits: NonNullable<ExtractionFillOptions["batc
 function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
   model: string, requestProfile: GeminiBatchPlan["requestProfile"]): GeminiBatchPlan {
   const window = input.options.batch!.window ?? "initial";
+  const requestLimit = input.options.batch!.requestLimit;
+  if (requestLimit !== undefined && (!Number.isSafeInteger(requestLimit) || requestLimit <= 0)) {
+    throw new Error("Batch request limit must be a positive safe integer");
+  }
   if (!/^[a-zA-Z0-9_-]{1,64}$/u.test(window)) throw new Error("invalid Batch window name");
   const identity = batchDigest(JSON.stringify({
     window,
+    ...(requestLimit === undefined ? {} : { requestLimit }),
     authority: input.authority!.receipt.receipt_digest,
     dataset: input.prepared.datasetRevision,
     requests: workset.requests.map(({ line }) => line), model, requestProfile,
@@ -141,8 +145,17 @@ function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
     return saved;
   }
   if (input.options.batch!.operation !== "prepare") throw new Error("Batch must be prepared before operation");
-  const plan = canonicalBatchPlan({ identity, model, requestProfile, lines: workset.lines,
-    limits: input.options.batch!.limits });
+  const lines = [...workset.lines].sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0)
+    .slice(0, requestLimit);
+  let plan: GeminiBatchPlan;
+  try {
+    plan = canonicalBatchPlan({ identity, model, requestProfile, lines, limits: input.options.batch!.limits });
+  } catch (cause) {
+    if (cause instanceof Error && cause.message === "Batch plan exceeds bounded artifact limit") {
+      throw new Error(`${cause.message}; prepare bounded windows with --batch-request-limit`, { cause });
+    }
+    throw cause;
+  }
   input.writeLease.assertOwned();
   publishBytesExclusiveDurable({ destination: path, bytes: Buffer.from(JSON.stringify(plan)),
     ownerIdentity: identity, temporaryDirectory: input.writeLease.stableRootPath });

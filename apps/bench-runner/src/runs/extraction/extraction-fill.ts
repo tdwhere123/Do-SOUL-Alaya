@@ -79,6 +79,7 @@ export {
 export interface ExtractionFillOptions {
   readonly batch?: {
     readonly window?: string;
+    readonly requestLimit?: number;
     readonly operation: import("./fill/batch/contract.js").GeminiBatchOperation;
     readonly limits: import("./fill/batch/contract.js").GeminiBatchLimits;
     readonly reconcile?: { readonly localJob: string; readonly remoteJob: string };

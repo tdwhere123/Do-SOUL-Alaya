@@ -1,3 +1,4 @@
+import type { GeminiGenerateContentSettings } from "./native-codec.js";
 import type { ExtractionCacheWriteLease } from "../manifest/fill-root-guard.js";
 
 export type GeminiBatchOperation = "prepare" | "submit" | "status" | "resume" | "import" | "cancel";
@@ -29,7 +30,7 @@ export interface GeminiBatchLimits {
 export interface GeminiBatchPlan {
   readonly identity: string;
   readonly model: string;
-  readonly requestProfile: "provider-default-v1" | "gemini-2.5-nonthinking-v1";
+  readonly requestProfile: GeminiGenerateContentSettings["requestProfile"];
   readonly lines: readonly GeminiBatchLine[];
   readonly limits: GeminiBatchLimits;
 }

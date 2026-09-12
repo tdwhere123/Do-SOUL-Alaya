@@ -24,3 +24,9 @@ export function isCurrentExtractionRequestProfile(
   return typeof value === "string" &&
     (CURRENT_EXTRACTION_REQUEST_PROFILES as readonly string[]).includes(value);
 }
+
+export type NativeGeminiRequestProfile = Extract<ExtractionRequestProfile, `gemini-${string}`>;
+
+export function isNativeGeminiRequestProfile(value: unknown): value is NativeGeminiRequestProfile {
+  return isExtractionRequestProfile(value) && value.startsWith("gemini-");
+}

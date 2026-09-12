@@ -196,10 +196,9 @@ function assertNewWindow(input: {
     }
     const activeKeys = new Set(prior.state.jobs.flatMap((job) => {
       if (!["succeeded", "failed", "cancelled", "expired"].includes(job.status)) return job.lineKeys;
-      if (job.outputFile !== undefined || job.status === "succeeded") {
-        return job.lineKeys.filter((key) => job.outcomes[key] === undefined);
-      }
-      return [];
+      // Remote termination is not local attempt/admission closure. Failed jobs
+      // without output also need import to settle their bound attempts first.
+      return job.submittedAt === undefined ? [] : job.lineKeys.filter((key) => job.outcomes[key] === undefined);
     }));
     for (const line of prior.plan.lines) {
       if (activeKeys.has(line.key) && (selectedKeys.has(line.key) ||

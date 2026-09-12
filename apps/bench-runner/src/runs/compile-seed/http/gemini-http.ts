@@ -1,3 +1,5 @@
+import { normalizeGeminiEndpoint } from "../../provider/gemini-endpoint.js";
+import { isNativeGeminiRequestProfile } from "../../extraction/request-profile.js";
 import type {
   BenchProviderUsage,
   BenchSignalExtractor,
@@ -71,8 +73,8 @@ function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: Extrac
   url: URL; body: string; timeoutMs: number;
 } {
   assertRequiredRequestProfile(config);
-  if (config.requestProfile !== "gemini-2.5-nonthinking-v1" || input.retryMode !== "disabled") {
-    throw new Error("Gemini interactive extraction requires its nonthinking profile and disabled retries");
+  if (!isNativeGeminiRequestProfile(config.requestProfile) || input.retryMode !== "disabled") {
+    throw new Error("Gemini interactive extraction requires its explicit native profile and disabled retries");
   }
   if (input.outputTokenField !== undefined && input.outputTokenField !== "maxOutputTokens") {
     throw new Error("Gemini output token field must be maxOutputTokens");
@@ -83,13 +85,7 @@ function prepareGeminiRequest(config: CompileSeedExtractionConfig, input: Extrac
     throw new Error("invalid Gemini interactive timeout");
   }
   const route = resolveExtractionTransportRoute(config);
-  const endpoint = new URL(route.providerUrl);
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname);
-  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash ||
-      !["/", "/v1beta", "/v1beta/"].includes(endpoint.pathname) ||
-      !(endpoint.protocol === "https:" || (endpoint.protocol === "http:" && loopback))) {
-    throw new Error("Gemini interactive endpoint must be an HTTPS origin or native v1beta route");
-  }
+  const endpoint = normalizeGeminiEndpoint(route.providerUrl);
   const body = JSON.stringify(encodeGeminiGenerateContent(input, {
     model: route.model, requestProfile: config.requestProfile, maxOutputTokens: input.maxOutputTokens
   }));

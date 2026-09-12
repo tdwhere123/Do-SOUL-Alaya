@@ -1,3 +1,4 @@
+import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
 import { executeProviderChatCompletion } from "@do-soul/alaya-engine-gateway";
 import { assertSourceBoundF3SealCurrent } from "@do-soul/alaya-soul";
 import type { ExtractionRequestProfile } from "../extraction/request-profile.js";
@@ -43,7 +44,7 @@ export async function probeProviderProtocol(
   };
   const model = resolveVendorModel(input.model);
   const framing = input.framing ?? "json";
-  if (binding.requestProfile === "gemini-2.5-nonthinking-v1") {
+  if (isNativeGeminiRequestProfile(binding.requestProfile)) {
     if (framing !== "json") throw new Error("Gemini protocol probe supports JSON framing only");
     const response = await createGeminiHttpExtractor({
       providerUrl: input.providerUrl, apiKey: input.apiKey, model,

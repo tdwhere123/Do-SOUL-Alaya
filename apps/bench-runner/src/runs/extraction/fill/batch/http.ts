@@ -1,3 +1,4 @@
+import { normalizeGeminiEndpoint } from "../../../provider/gemini-endpoint.js";
 import type { GeminiBatchHttp } from "./contract.js";
 import { MAX_BATCH_ARTIFACT_BYTES } from "./plan.js";
 import { record, resourceName } from "./native-codec.js";
@@ -9,13 +10,7 @@ export function createGeminiBatchHttp(input: {
   readonly timeoutMs: number;
   readonly maxResponseBytes?: number;
 }): GeminiBatchHttp {
-  const endpoint = new URL(input.endpoint ?? "https://generativelanguage.googleapis.com");
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname);
-  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash ||
-      endpoint.pathname !== "/" ||
-      !(endpoint.protocol === "https:" || (endpoint.protocol === "http:" && loopback))) {
-    throw new Error("Gemini Batch endpoint must be an HTTPS origin or loopback test origin");
-  }
+  const endpoint = normalizeGeminiEndpoint(input.endpoint ?? "https://generativelanguage.googleapis.com");
   const maxBytes = input.maxResponseBytes ?? MAX_BATCH_ARTIFACT_BYTES;
   if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0 ||
       !Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_BATCH_ARTIFACT_BYTES) {

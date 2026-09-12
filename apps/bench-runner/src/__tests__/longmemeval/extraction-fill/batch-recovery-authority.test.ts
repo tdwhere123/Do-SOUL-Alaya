@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
@@ -7,6 +8,7 @@ import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } fro
   "../../../runs/extraction/authority/receipt.js";
 import * as attemptLedger from "../../../runs/extraction/authority/attempt-ledger.js";
 import { accountedCost } from "../../../runs/extraction/fill/batch/executor.js";
+import { peelExtractionBatchFlags } from "../../../cli/extraction-fill/batch-flags.js";
 import type { GeminiBatchHttp, GeminiBatchLimits, GeminiBatchOperation } from
   "../../../runs/extraction/fill/batch/contract.js";
 import { buildAuthorityQuestion, buildGroundedSignalResponse, EXTRACTION_FILL_VARIANT,
@@ -77,12 +79,57 @@ async function setup(questionCount = 1) {
       return provider.malformed ? output.slice(0, -2) : output;
     }
   };
-  const run = (operation: GeminiBatchOperation, window = "initial") => runExtractionFill({
+  const run = (operation: GeminiBatchOperation, window = "initial", requestLimit?: number) => runExtractionFill({
     variant: EXTRACTION_FILL_VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
-    authorityReceiptPath: receiptPath, batch: { operation, limits, window }, batchHttp: http, log: () => undefined
+    authorityReceiptPath: receiptPath, batch: { operation, limits, window,
+      ...(requestLimit === undefined ? {} : { requestLimit }) }, batchHttp: http, log: () => undefined
   });
   return { run, provider, jobs, limits };
 }
+
+it("bounds fresh windows deterministically and preserves saved selection until the full scope is cached", async () => {
+  const { run } = await setup(2);
+  const all = await run("prepare", "inventory");
+  const keys = all.batchState!.jobs.flatMap((job) => job.lineKeys).sort();
+  expect(keys).toHaveLength(4);
+  await run("cancel", "inventory");
+  const canary = await run("prepare", "canary", 1);
+  expect(canary.batchState!.jobs.flatMap((job) => job.lineKeys)).toEqual(keys.slice(0, 1));
+  const path = join(cacheRoot, "gemini-batch-plan-canary.json");
+  const originalPlan = readFileSync(path, "utf8");
+  await run("submit", "canary", 1);
+  const partial = await run("resume", "canary", 1);
+  expect(partial.coverage).toBe(0.25);
+  expect(partial.manifest.fill_status).not.toBe("complete");
+  const replay = await run("import", "canary", 1);
+  expect(replay.batchState!.jobs.flatMap((job) => job.lineKeys)).toEqual(keys.slice(0, 1));
+  expect(readFileSync(path, "utf8")).toBe(originalPlan);
+  await expect(run("prepare", "canary", 2)).rejects.toThrow("settings changed");
+  await expect(run("import", "canary")).rejects.toThrow("settings changed");
+  const bulk = await run("prepare", "bulk", 2);
+  expect(bulk.batchState!.jobs.flatMap((job) => job.lineKeys)).toEqual(keys.slice(1, 3));
+  await run("submit", "bulk", 2); await run("resume", "bulk", 2);
+  await run("prepare", "final", 2); await run("submit", "final", 2);
+  const complete = await run("resume", "final", 2);
+  expect(complete.coverage).toBe(1);
+  expect(complete.manifest.fill_status).toBe("complete");
+  expect(complete.authorityTelemetry).toMatchObject({ attempts: 4, successfulShards: 4 });
+});
+
+it("parses bounded request windows and rejects invalid or repeated CLI limits", async () => {
+  const { limits, run } = await setup();
+  const path = join(cacheRoot, "limits.json");
+  writeFileSync(path, JSON.stringify(limits));
+  const base = ["--batch-operation", "prepare", "--batch-limits", path];
+  expect(peelExtractionBatchFlags([...base, "--batch-request-limit=32", "--batch-window", "canary", "remaining"]))
+    .toMatchObject({ rest: ["remaining"], batch: { requestLimit: 32, window: "canary" } });
+  for (const value of ["0", "-1", "1.5", "NaN", "9007199254740992"]) {
+    expect(() => peelExtractionBatchFlags([...base, "--batch-request-limit", value])).toThrow("positive integer");
+  }
+  expect(() => peelExtractionBatchFlags([...base, "--batch-request-limit=1", "--batch-request-limit=2"]))
+    .toThrow("only once");
+  await expect(run("prepare", "invalid", 0)).rejects.toThrow("positive safe integer");
+});
 
 it("settles mixed successful, provider-error, missing and truncated lines with conservative unknown charges", async () => {
   const { run, provider, limits } = await setup(2);
@@ -170,13 +217,50 @@ it("quarantines malformed output while settling old bound attempts so an explici
   expect(repaired.authorityTelemetry?.successfulShards).toBe(2);
 });
 
-it("importing an older terminal job cannot abandon a newer pending reservation for the same key", async () => {
-  const { run, provider } = await setup();
+it("blocks overlapping retries until a terminal job without output closes its local attempts", async () => {
+  const { run, provider, jobs } = await setup();
   await run("prepare"); await run("submit"); provider.state = "FAILED";
   await run("status");
+  await expect(run("prepare", "repair")).rejects.toThrow("overlaps pending");
+  await expect(run("submit", "repair")).rejects.toThrow("not prepared");
+  expect(jobs.size).toBe(1);
+  const closed = await run("import");
+  expect(closed.authorityTelemetry?.pendingKeys).toEqual([]);
+  expect(closed.authorityTelemetry?.unresolvedAttempts).toEqual([]);
   await run("prepare", "repair");
   const pending = await run("submit", "repair");
   const oldImport = await run("import");
   expect(oldImport.authorityTelemetry?.pendingKeys).toEqual(pending.authorityTelemetry?.pendingKeys);
   expect(oldImport.authorityTelemetry?.unresolvedAttempts.map((attempt) => attempt.attemptOrdinal)).toEqual([3, 4]);
+  provider.state = "SUCCEEDED";
+  const repaired = await run("resume", "repair");
+  expect(repaired.authorityTelemetry).toMatchObject({ attempts: 4, successfulShards: 2,
+    pendingKeys: [], unresolvedAttempts: [] });
+});
+
+it("atomically releases the terminal attempt slot before an interrupted callback can strand it", async () => {
+  const { run, provider } = await setup();
+  await run("prepare"); await run("submit"); provider.state = "FAILED";
+  const original = attemptLedger.openExtractionAttemptLedger;
+  let crash = true;
+  let interrupted: attemptLedger.ExtractionAttemptLedgerSnapshot | undefined;
+  vi.spyOn(attemptLedger, "openExtractionAttemptLedger").mockImplementation((input) => {
+    const ledger = original(input);
+    return { ...ledger, recordTransportOutcome: (...args) => {
+      const settled = ledger.recordTransportOutcome(...args);
+      if (crash) {
+        crash = false; interrupted = ledger.snapshot();
+        throw new Error("interrupted after terminal ledger publication");
+      }
+      return settled;
+    } };
+  });
+  await expect(run("resume")).rejects.toThrow("after terminal ledger publication");
+  expect(interrupted?.pendingKeys).toHaveLength(1);
+  expect(interrupted?.pendingKeys).toEqual(interrupted?.unresolvedAttempts.map((attempt) => attempt.cacheKey));
+  expect(interrupted?.telemetry.usageUnknownAttempts).toBe(2);
+  const reopened = await run("import");
+  expect(reopened.authorityTelemetry).toMatchObject({ attempts: 2, pendingKeys: [], unresolvedAttempts: [],
+    telemetry: { usageUnavailableRequests: 2, usageUnknownAttempts: 2,
+      terminalRetryClassifications: { failure_non_retryable_response: 2 } } });
 });
