@@ -48,7 +48,11 @@ export function openBatchState(input: {
   if (!boundedArtifactEntryExists(path)) {
     if (!input.prepare) throw new Error("Batch plan is not prepared");
     assertNewWindow(input);
-    publishArtifact(lease, `batch-plan-${plan.identity}.json`, JSON.stringify(plan));
+    // State publication commits admission. A plan left before that commit is
+    // only an orphan and must not freeze a stale missing-work selection.
+    replaceBytesDurable({ destination: join(lease.stableRootPath, `batch-plan-${plan.identity}.json`),
+      bytes: Buffer.from(JSON.stringify(plan)), ownerIdentity: lease.generation,
+      temporaryDirectory: lease.stableRootPath });
     for (const job of jobs) {
       // Exact input is published by the executor before any network operation.
       if (job.lineKeys.length === 0) throw new Error("empty Batch job");
@@ -88,6 +92,14 @@ export function openBatchState(input: {
     assertBatchJobState(actual);
   }
   return state;
+}
+
+export function isBatchPlanAdmitted(lease: ExtractionCacheWriteLease, plan: GeminiBatchPlan): boolean {
+  lease.assertOwned();
+  if (!boundedArtifactEntryExists(statePath(lease, plan))) return false;
+  const state = StateSchema.parse(JSON.parse(readArtifact(lease, `batch-state-${plan.identity}.json`)));
+  openBatchState({ lease, plan, endpoint: state.endpoint, prepare: false });
+  return true;
 }
 
 function recoverRemoteEvidence(lease: ExtractionCacheWriteLease, plan: GeminiBatchPlan, job: GeminiBatchJob): void {

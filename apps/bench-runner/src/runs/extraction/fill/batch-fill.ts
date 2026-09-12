@@ -10,7 +10,7 @@ import type { ExecutionExtractionAuthority } from "./fill-execution.js";
 import { inspectFillWindow, type PreparedExtractionFill } from "./fill-preparation.js";
 import { newFillStats, readFillRetryTelemetry } from "./fill-stats.js";
 import { buildFillManifest } from "./manifest/fill-manifest.js";
-import { publishBytesExclusiveDurable } from "./manifest/durable-exclusive-publication.js";
+import { replaceBytesDurable } from "./manifest/durable-exclusive-publication.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 import { prepareBatchExtractionWorkset, type BatchExtractionWorkset } from "./batch-workset.js";
 import type { GeminiBatchInvocation, GeminiBatchPlan } from "./batch/contract.js";
@@ -18,6 +18,7 @@ import { batchDigest, canonicalBatchPlan, MAX_BATCH_ARTIFACT_BYTES } from "./bat
 import { createGeminiBatchHttp } from "./batch/http.js";
 import { encodeGeminiGenerateContent, isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import { executeGeminiBatchOperation } from "./batch/executor.js";
+import { isBatchPlanAdmitted } from "./batch/store.js";
 
 interface BatchFillInput {
   readonly options: ExtractionFillOptions;
@@ -138,11 +139,13 @@ function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
         JSON.stringify(saved.limits) !== JSON.stringify(input.options.batch!.limits)) {
       throw new Error("Batch source/authority/settings changed since preparation");
     }
-    const requests = new Map(workset.requests.map(({ line }) => [line.key, JSON.stringify(line)]));
-    for (const line of saved.lines) {
-      if (requests.get(line.key) !== JSON.stringify(line)) throw new Error("Batch persisted request binding changed");
+    if (isBatchPlanAdmitted(input.writeLease, saved)) {
+      const requests = new Map(workset.requests.map(({ line }) => [line.key, JSON.stringify(line)]));
+      for (const line of saved.lines) {
+        if (requests.get(line.key) !== JSON.stringify(line)) throw new Error("Batch persisted request binding changed");
+      }
+      return saved;
     }
-    return saved;
   }
   if (input.options.batch!.operation !== "prepare") throw new Error("Batch must be prepared before operation");
   const lines = [...workset.lines].sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0)
@@ -157,7 +160,7 @@ function bindBatchPlan(input: BatchFillInput, workset: BatchExtractionWorkset,
     throw cause;
   }
   input.writeLease.assertOwned();
-  publishBytesExclusiveDurable({ destination: path, bytes: Buffer.from(JSON.stringify(plan)),
+  replaceBytesDurable({ destination: path, bytes: Buffer.from(JSON.stringify(plan)),
     ownerIdentity: identity, temporaryDirectory: input.writeLease.stableRootPath });
   return plan;
 }

@@ -7,6 +7,7 @@ import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } fr
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from
   "../../../runs/extraction/authority/receipt.js";
 import * as attemptLedger from "../../../runs/extraction/authority/attempt-ledger.js";
+import * as durablePublication from "../../../runs/extraction/fill/manifest/durable-exclusive-publication.js";
 import { accountedCost } from "../../../runs/extraction/fill/batch/executor.js";
 import { peelExtractionBatchFlags } from "../../../cli/extraction-fill/batch-flags.js";
 import type { GeminiBatchHttp, GeminiBatchLimits, GeminiBatchOperation } from
@@ -131,6 +132,36 @@ it("parses bounded request windows and rejects invalid or repeated CLI limits", 
   await expect(run("prepare", "invalid", 0)).rejects.toThrow("positive safe integer");
 });
 
+it.each(["overlap rejection", "interrupted state publication"] as const)(
+  "reselects currently missing requests after an unadmitted window survives %s", async (failure) => {
+    const { run } = await setup(2);
+    if (failure === "overlap rejection") {
+      await run("prepare", "first", 1); await run("submit", "first", 1);
+      await expect(run("prepare", "second", 1)).rejects.toThrow("overlap");
+    } else {
+      const original = durablePublication.replaceBytesDurable;
+      const interruption = vi.spyOn(durablePublication, "replaceBytesDurable").mockImplementation((input) => {
+        if (input.destination.includes("batch-state-")) throw new Error("interrupted before admission commit");
+        original(input);
+      });
+      await expect(run("prepare", "second", 1)).rejects.toThrow("before admission commit");
+      interruption.mockRestore();
+      await run("prepare", "first", 1); await run("submit", "first", 1);
+    }
+    await expect(run("prepare", "second", 2)).rejects.toThrow("settings changed");
+    const first = await run("resume", "first", 1);
+    const admitted = first.batchState!.jobs.flatMap((job) => job.lineKeys);
+    const second = await run("prepare", "second", 1);
+    const selected = second.batchState!.jobs.flatMap((job) => job.lineKeys);
+    expect(selected).toHaveLength(1);
+    expect(selected.some((key) => admitted.includes(key))).toBe(false);
+    await run("submit", "second", 1);
+    const completed = await run("resume", "second", 1);
+    expect(completed.authorityTelemetry).toMatchObject({ attempts: 2, successfulShards: 2,
+      pendingKeys: [], unresolvedAttempts: [] });
+    expect(completed.coverage).toBe(0.5);
+  });
+
 it("settles mixed successful, provider-error, missing and truncated lines with conservative unknown charges", async () => {
   const { run, provider, limits } = await setup(2);
   provider.results = ["valid", "error", "missing", "truncated"];
@@ -222,7 +253,7 @@ it("blocks overlapping retries until a terminal job without output closes its lo
   await run("prepare"); await run("submit"); provider.state = "FAILED";
   await run("status");
   await expect(run("prepare", "repair")).rejects.toThrow("overlaps pending");
-  await expect(run("submit", "repair")).rejects.toThrow("not prepared");
+  await expect(run("submit", "repair")).rejects.toThrow("must be prepared before operation");
   expect(jobs.size).toBe(1);
   const closed = await run("import");
   expect(closed.authorityTelemetry?.pendingKeys).toEqual([]);

@@ -155,7 +155,8 @@ Rates and limits must be retrieved again for each paid execution contract.
 Keep provider output and validated extraction shards separate from generated
 SQLite snapshots, field projections and evaluation artifacts. Raw shard keys
 bind model, request profile, system prompt and serialized source request.
-Parser and grounding semantics are additionally bound by the cache manifest.
+Parser and grounding compatibility must be validated against the exact code
+candidate before replay; the cache manifest does not pin their versions.
 Increasing the selected question window does not itself change a shared
 source request's key, but the larger inventory needs its own valid authority.
 
