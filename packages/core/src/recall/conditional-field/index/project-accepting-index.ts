@@ -162,6 +162,10 @@ export type AcceptingProjectionInput = Readonly<{
 const REPRESENTATION_POLICY = "construct_index_then_page_then_payload" as const;
 const MAX_PAYLOAD_MEMORY_BYTES = 16_384;
 
+function workIsOpen(status: "complete" | "open" | undefined): boolean {
+  return status === "open";
+}
+
 export function projectAcceptingIndex(input: AcceptingProjectionInput): InformationIndex {
   const representation = representationDecision(input.budget.page_budget);
   const interpretationId = resolveInterpretationId(input);
@@ -218,38 +222,43 @@ export function continueAcceptingIndex(
   });
 }
 
+function applyProjectionGrounding(input: AcceptingProjectionInput): AcceptingProjectionInput {
+  if (input.transition_derivations === undefined || input.output_derivations !== undefined) {
+    return input;
+  }
+  const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
+  const deliveryWork = 1 + (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1);
+  // Preserve one delivery opportunity when grounding can still advance; smaller requests resume after grounding.
+  const groundingAllowance = allowance > deliveryWork ? allowance - deliveryWork : allowance;
+  const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
+  const payloadMemory = input.finalize_payload === undefined ? 0
+    : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
+  const groundingInput = { seeds: input.snapshot.seeds,
+    transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
+    transition_derivations: input.transition_derivations ?? {},
+    progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
+    allowance: groundingAllowance };
+  const grounded = input.cost === undefined
+    ? groundedOutputDerivations(groundingInput)
+    : input.cost.time("solve", () => groundedOutputDerivations(groundingInput));
+  // Grounding forest work this page; field max-min is observed separately.
+  input.cost?.add("solve", {
+    relaxations: grounded.work,
+    charged_retained_bytes: grounded.retained_bytes
+  });
+  input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
+  return { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
+    grounding_complete: grounded.complete,
+    ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
+    remaining_reserve: allowance - grounded.work,
+    ...(!grounded.complete ? { resource_work: "open" } : {}) };
+}
+
 function pageAcceptingIndex(
   input: AcceptingProjectionInput,
   representation: InformationIndex["representation"]
 ): InformationIndex {
-  if (input.transition_derivations !== undefined && input.output_derivations === undefined) {
-    const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
-    const deliveryWork = 1 + (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1);
-    // Preserve one delivery opportunity when grounding can still advance; smaller requests resume after grounding.
-    const groundingAllowance = allowance > deliveryWork ? allowance - deliveryWork : allowance;
-    const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
-    const payloadMemory = input.finalize_payload === undefined ? 0
-      : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
-    const groundingInput = { seeds: input.snapshot.seeds,
-      transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
-      transition_derivations: input.transition_derivations ?? {},
-      progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
-      allowance: groundingAllowance };
-    const grounded = input.cost === undefined
-      ? groundedOutputDerivations(groundingInput)
-      : input.cost.time("solve", () => groundedOutputDerivations(groundingInput));
-    // Grounding forest work this page; field max-min is observed separately.
-    input.cost?.add("solve", {
-      relaxations: grounded.work,
-      charged_retained_bytes: grounded.retained_bytes
-    });
-    input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
-    input = { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
-      grounding_complete: grounded.complete,
-      ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
-      remaining_reserve: allowance - grounded.work,
-      ...(!grounded.complete ? { resource_work: "open" } : {}) };
-  }
+  input = applyProjectionGrounding(input);
   const policy = input.view.enumeration_policy ?? "canonical";
   const emitted = emittedRevisionsOf(input);
   const useEmittedSet = usesEmittedSet(input, policy);
@@ -296,6 +305,26 @@ function pageAcceptingIndex(
   const finalized = input.finalize_payload?.(prepared, projected.remaining);
   if (finalized !== undefined) input = { ...input, payload_work: finalized.complete ? "complete" : "open" };
   input.on_remaining_reserve?.(finalized?.remaining ?? projected.remaining);
+  return encodeAcceptingIndex({
+    input, representation, projected, emitted, useEmittedSet, entries, members, updates,
+    remaining, offset, prepared
+  });
+}
+
+function encodeAcceptingIndex(page: Readonly<{
+  readonly input: AcceptingProjectionInput;
+  readonly representation: InformationIndex["representation"];
+  readonly projected: ReturnType<typeof acceptingEntries>;
+  readonly emitted: ReturnType<typeof emittedRevisionsOf>;
+  readonly useEmittedSet: boolean;
+  readonly entries: IndexEntry[];
+  readonly members: readonly IndexEntry[];
+  readonly updates: readonly IndexEntry[];
+  readonly remaining: number;
+  readonly offset: number;
+  readonly prepared: readonly IndexEntry[];
+}>): InformationIndex {
+  const { input, representation, projected, emitted, useEmittedSet, entries, members, updates, remaining, offset, prepared } = page;
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
   const omittedPayload = mixedPayload || input.payload_work === "open"
@@ -336,8 +365,8 @@ function pageAcceptingIndex(
     observer: input.observer,
     remaining,
     resource_open: resourceOpen,
-    pending_semantic_work: omittedPayload || input.support_work_status === "open"
-      || input.payload_work === "open"
+    pending_semantic_work: omittedPayload || workIsOpen(input.support_work_status)
+      || workIsOpen(input.payload_work)
   });
   const index = {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

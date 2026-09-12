@@ -7,7 +7,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import { executeConversationToolOrThrow } from "../tool-runtime/tool-runtime.js";
 import { isBuiltinConversationToolId } from "../server/builtin-conversation-tool-specs.js";
-import type { DaemonMcpRuntimeRegistry } from "./mcp-runtime-registry.js";
+import {
+  classifyDaemonMcpListFailure,
+  type DaemonMcpRuntimeHealth,
+  type DaemonMcpRuntimeRegistry
+} from "./mcp-runtime-registry.js";
 import type {
   DaemonMcpCatalogEnvironmentSnapshot,
   DaemonMcpCatalogToolEntry,
@@ -204,16 +208,12 @@ function createDaemonMcpToolRuntimeExecutor(input: {
     }
     const binding = input.tool.runtimeBinding;
     return async ({ rawInput, writableRoots }) => {
-      const liveTools = await input.runtimeRegistry.listServerTools(input.serverName).catch(() => null);
-      if (liveTools === null) {
-        return {
-          ok: false,
-          code: "MCP_EXTERNAL_UNBOUND",
-          message: `External MCP tool ${input.tool.spec.tool_id} has no active daemon runtime binding.`
-        };
+      const listed = await listBoundServerTools(input.runtimeRegistry, input.serverName, input.tool.spec.tool_id);
+      if (!listed.ok) {
+        return listed;
       }
 
-      if (!liveTools.some((tool) => tool.name === input.tool.spec.name)) {
+      if (!listed.tools.some((tool) => tool.name === input.tool.spec.name)) {
         return {
           ok: false,
           code: "MCP_EXTERNAL_UNBOUND",
@@ -258,6 +258,47 @@ export async function executeExternalMcpTool(input: {
   return await runtimeExecutor({
     rawInput: input.rawInput,
     writableRoots: input.writableRoots
+  });
+}
+
+async function listBoundServerTools(
+  runtimeRegistry: DaemonMcpRuntimeRegistry,
+  serverName: string,
+  toolId: string
+): Promise<
+  | Readonly<{ readonly ok: true; readonly tools: readonly { readonly name: string }[] }>
+  | Readonly<{ readonly ok: false; readonly code: string; readonly message: string }>
+> {
+  try {
+    return { ok: true, tools: await runtimeRegistry.listServerTools(serverName) };
+  } catch (error) {
+    const code = classifyDaemonMcpListFailure(error);
+    const failure = code === "MCP_EXTERNAL_TIMEOUT" ? "timed out" : "transport failed";
+    return {
+      ok: false,
+      code,
+      message: `External MCP tool ${toolId} failed because listing tools from daemon runtime server ${serverName} ${failure}.`
+    };
+  }
+}
+
+export function readDaemonMcpCatalogHealth(
+  runtimeRegistry: Pick<DaemonMcpRuntimeRegistry, "listServerInfos"> &
+    Partial<Pick<DaemonMcpRuntimeRegistry, "getHealth">>
+): DaemonMcpRuntimeHealth {
+  if (typeof runtimeRegistry.getHealth === "function") {
+    return runtimeRegistry.getHealth();
+  }
+  return Object.freeze({
+    servers: Object.freeze(
+      runtimeRegistry.listServerInfos().map((server) =>
+        Object.freeze({
+          server_name: server.server_name,
+          status: server.status === "active" ? "active" as const : "inactive" as const,
+          last_error: null
+        })
+      )
+    )
   });
 }
 

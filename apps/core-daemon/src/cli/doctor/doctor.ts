@@ -1,5 +1,8 @@
 import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
-import type { WorkspaceBootstrapReconcileResult } from "@do-soul/alaya-core";
+import type {
+  EmbeddingQueryWarmupSummary,
+  WorkspaceBootstrapReconcileResult
+} from "@do-soul/alaya-core";
 import type { DaemonStartupStepRecord } from "../../runtime/daemon/lifecycle/daemon-runtime-types.js";
 import type { PathPlasticityLookupTelemetrySnapshot } from "../../garden/path-plasticity/path-plasticity-runtime.js";
 import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
@@ -80,7 +83,10 @@ export type GardenKeychainCheck =
     }>;
 
 interface RuntimeWiringStatus {
-  readonly request_token_source: "env" | "ephemeral";
+  readonly request_token_source: "env" | "ephemeral" | "rotated";
+  readonly daemon_socket: string | null;
+  readonly wildcard_bind_opt_in: boolean;
+  readonly request_token_workspaces: string | null;
 }
 
 export interface DoctorCommandDependencies {
@@ -93,6 +99,10 @@ export interface DoctorCommandDependencies {
    */
   readonly getRuntimeWiring?: () => RuntimeWiringStatus | Promise<RuntimeWiringStatus>;
   readonly getEmbeddingStatus?: (workspaceId: string) => Promise<EmbeddingStatus>;
+  readonly getQueryEmbeddingWarmup?: () =>
+    | EmbeddingQueryWarmupSummary
+    | null
+    | Promise<EmbeddingQueryWarmupSummary | null>;
   readonly getMcpHealth?: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
   readonly getGardenHealth?: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
   readonly getGardenCredentialProvenance?: () => Promise<GardenCredentialProvenance>;
@@ -202,6 +212,7 @@ export interface DoctorReport {
     workspace_id: string;
     embedding: EmbeddingStatus | null;
     configured: boolean;
+    query_embedding_warmup: EmbeddingQueryWarmupSummary | null;
   }>;
   readonly mcp: Readonly<{
     transport: "ready" | "not_ready";
@@ -302,7 +313,8 @@ async function buildDoctorReport(
     provider: {
       workspace_id: workspaceId,
       embedding: services.embeddingStatus,
-      configured: services.embeddingStatus?.provider_configured ?? true
+      configured: services.embeddingStatus?.provider_configured ?? true,
+      query_embedding_warmup: services.queryEmbeddingWarmup
     },
     mcp: services.mcp,
     garden: {
@@ -325,9 +337,15 @@ async function buildDoctorReport(
 
 function resolveRuntimeWiringFromEnv(env: NodeJS.ProcessEnv): RuntimeWiringStatus {
   const requestToken = env.ALAYA_REQUEST_TOKEN?.trim();
+  const daemonSocket = env.ALAYA_DAEMON_SOCKET?.trim();
+  const tokenWorkspaces = env.ALAYA_REQUEST_TOKEN_WORKSPACES?.trim();
   return {
     request_token_source:
-      requestToken !== undefined && requestToken.length > 0 ? "env" : "ephemeral"
+      requestToken !== undefined && requestToken.length > 0 ? "env" : "ephemeral",
+    daemon_socket: daemonSocket !== undefined && daemonSocket.length > 0 ? daemonSocket : null,
+    wildcard_bind_opt_in: env.ALAYA_ALLOW_WILDCARD_BIND === "1",
+    request_token_workspaces:
+      tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
   };
 }
 
@@ -351,10 +369,11 @@ async function readDoctorServices(
   workspaceId: string
 ) {
   const toolchainStatus = await deps.getToolchainStatus();
-  const [storage, storageGrowth, embeddingStatus, mcp, garden, gardenCredentialProvenance, gardenCompute, pathPlasticityLookupTelemetry, graphHealth] = await Promise.all([
+  const [storage, storageGrowth, embeddingStatus, queryEmbeddingWarmup, mcp, garden, gardenCredentialProvenance, gardenCompute, pathPlasticityLookupTelemetry, graphHealth] = await Promise.all([
     inspectStorage(toolchainStatus.db_path, deps.getSchemaSummary),
     inspectStorageGrowth(toolchainStatus.db_path),
     deps.getEmbeddingStatus ? await deps.getEmbeddingStatus(workspaceId) : null,
+    deps.getQueryEmbeddingWarmup ? await deps.getQueryEmbeddingWarmup() : null,
     deps.getMcpHealth ? await deps.getMcpHealth() : defaultDoctorMcpHealth(daemonReady),
     deps.getGardenHealth ? await deps.getGardenHealth() : defaultDoctorGardenHealth(daemonReady),
     deps.getGardenCredentialProvenance ? await deps.getGardenCredentialProvenance() : ({ kind: "none" } as const),
@@ -362,14 +381,17 @@ async function readDoctorServices(
     (await deps.getPathPlasticityLookupTelemetry?.()) ?? defaultPathPlasticityLookupTelemetry(),
     (await deps.getGraphHealth?.(workspaceId)) ?? createEmptyGraphHealthSnapshot(workspaceId)
   ]);
-  const runtimeWiring = deps.getRuntimeWiring
-    ? await deps.getRuntimeWiring()
-    : resolveRuntimeWiringFromEnv(process.env);
+  const runtimeWiring = withRuntimeWiringDefaults(
+    deps.getRuntimeWiring
+      ? await deps.getRuntimeWiring()
+      : resolveRuntimeWiringFromEnv(process.env)
+  );
   return {
     storage,
     storageGrowth,
     runtimeWiring,
     embeddingStatus,
+    queryEmbeddingWarmup,
     mcp,
     garden,
     gardenCredentialProvenance,
@@ -442,10 +464,7 @@ function buildDoctorChecks(
       services.storage.exists && services.storage.writable && services.storage.schema_ok !== false
         ? "pass"
         : "fail",
-    provider:
-      services.embeddingStatus === null || services.embeddingStatus.effective_mode !== "degraded"
-        ? "pass"
-        : "fail",
+    provider: resolveProviderCheck(services.embeddingStatus, services.queryEmbeddingWarmup),
     mcp: services.mcp.transport === "ready" ? "pass" : "fail",
     garden:
       services.garden.status === "healthy" && services.gardenCompute.keychain_check?.ok !== false
@@ -458,6 +477,30 @@ function buildDoctorChecks(
         ? "pass"
         : "fail"
   };
+}
+
+function withRuntimeWiringDefaults(
+  wiring: RuntimeWiringStatus
+): RuntimeWiringStatus {
+  return {
+    request_token_source: wiring.request_token_source,
+    daemon_socket: wiring.daemon_socket ?? null,
+    wildcard_bind_opt_in: wiring.wildcard_bind_opt_in === true,
+    request_token_workspaces: wiring.request_token_workspaces ?? null
+  };
+}
+
+function resolveProviderCheck(
+  embeddingStatus: EmbeddingStatus | null,
+  queryEmbeddingWarmup: EmbeddingQueryWarmupSummary | null
+): DoctorCheckStatus {
+  if (queryEmbeddingWarmup?.status === "failed" || queryEmbeddingWarmup?.status === "partial") {
+    return "fail";
+  }
+  if (embeddingStatus === null || embeddingStatus.effective_mode !== "degraded") {
+    return "pass";
+  }
+  return "fail";
 }
 
 function resolveBootstrapReconcileCheck(

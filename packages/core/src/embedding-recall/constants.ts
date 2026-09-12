@@ -16,7 +16,8 @@ export const MAX_EMBEDDING_REQUEST_TOTAL_BACKOFF_MS = 8_000;
 export const MAX_EMBEDDING_REQUEST_TOTAL_WALLCLOCK_MS = 30_000;
 export const EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS = 2_000;
 export const QUERY_EMBEDDING_WARMUP_BATCH_SIZE = 16;
-export const EMBEDDING_WORKSPACE_SCAN_CAP = 5_000;
+// Brute-force blob scan; 512 matches bounded embedding identity capacity.
+export const EMBEDDING_WORKSPACE_SCAN_CAP = 512;
 export const NO_STORED_VECTORS_DEGRADATION_REASON = "no_stored_vectors";
 export const EVIDENCE_DOCUMENT_MAX_OPERATOR_ID = "evidence_document_max_v1";
 

@@ -114,6 +114,40 @@ describe("POST /workspaces/:wsId/soul/search", () => {
     expect(handlerCalls[0]!.arguments.max_results).toBe(1);
   });
 
+  it("maps MCP handler failures through the public error catalog", async () => {
+    const secret = "sk-test-leaked-secret";
+    const app = new Hono();
+    registerSoulSearchRoutes(app, {
+      workspaceService: {
+        getById: vi.fn(async (wsId: string) => ({ workspace_id: wsId }))
+      },
+      mcpMemoryToolHandler: {
+        call: vi.fn(async () => ({
+          ok: false as const,
+          tool_name: "soul.recall",
+          error: {
+            code: "VALIDATION" as const,
+            message: `Invalid input: received "${secret}"`
+          }
+        }))
+      }
+    } as never);
+
+    const response = await app.request("/workspaces/ws-1/soul/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "anything" })
+    });
+    expect(response.status).toBe(400);
+    const bodyText = await response.text();
+    expect(bodyText).not.toContain(secret);
+    expect(bodyText).not.toContain("received");
+    expect(JSON.parse(bodyText)).toEqual({
+      success: false,
+      error: { code: "VALIDATION", message: "Invalid request." }
+    });
+  });
+
   it("rejects non-object body with 400", async () => {
     const { app, mcpMemoryToolHandler } = buildApp();
     const response = await app.request("/workspaces/ws-1/soul/search", {

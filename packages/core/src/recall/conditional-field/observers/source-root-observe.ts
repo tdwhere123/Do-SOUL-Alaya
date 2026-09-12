@@ -2,18 +2,20 @@ import { sourceRecallTarget, type TypedObservation } from "@do-soul/alaya-protoc
 import { buildTypedObservation, sourceRootEligible } from "./observation-admission.js";
 import { scanSourceLiterals } from "./source-literal-stream.js";
 import {
-  collectObserved,
   DEFAULT_SOURCE_BYTE_LIMIT,
-  finish,
-  pageLimit,
   SOURCE_IDENTITY_HYDRATE_RESERVE,
-  unavailableOrNotApplicable,
-  workReceipt,
   type ObserveConditionalFieldInput,
   type ObserverActionResult,
   type ObserverReaders,
   type SourceRootObserverRow
-} from "./observe.js";
+} from "./observe-ports.js";
+import {
+  collectObserved,
+  finish,
+  pageLimit,
+  unavailableOrNotApplicable,
+  workReceipt
+} from "./observe-collect.js";
 
 export function sourceFamilySettled(committed: string | null | undefined): boolean {
   return parseSeedCursor(committed ?? null).sourcesDone;

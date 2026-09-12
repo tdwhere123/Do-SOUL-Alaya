@@ -11,6 +11,7 @@ import {
   WorkerToolCallFinishedPayloadSchema,
   WorkerToolCallStartedPayloadSchema
 } from "@do-soul/alaya-protocol";
+import { bindEventPublisher, EventPublisherPropagationError } from "./event-publisher.js";
 import { RuntimeEventNormalizerState } from "./runtime-event-normalizer-state.js";
 
 export interface NormalizerEventLogRepoPort {
@@ -80,8 +81,7 @@ export class RuntimeEventNormalizer {
       return null;
     }
 
-    const entry = await this.appendNormalizedEntry(event, context);
-    await this.notifyNormalizedEntry(pendingKey, event, entry);
+    const entry = await this.appendNormalizedEntry(event, context, pendingKey);
     return entry;
   }
 
@@ -204,15 +204,28 @@ export class RuntimeEventNormalizer {
 
   private async appendNormalizedEntry(
     event: RuntimeEvent,
-    context: NormalizerContext
+    context: NormalizerContext,
+    pendingKey: string
   ): Promise<EventLogEntry> {
     try {
-      const entry = await this.dependencies.eventLogRepo.append(this.buildEntry(event, context));
+      const entry = await bindEventPublisher({
+        eventLogRepo: this.dependencies.eventLogRepo,
+        runtimeNotifier: {
+          notify: () => undefined,
+          notifyEntry: (published) => this.dependencies.runtimeNotifier.notifyEntry(published)
+        },
+        purpose: "RuntimeEventNormalizer"
+      }).publish(this.buildEntry(event, context));
       if (event.type === "session_finished") {
         this.state.markSessionFinishedAppended(event.session_id);
+        this.state.clearSessionState(event.session_id);
       }
       return entry;
     } catch (error) {
+      if (error instanceof EventPublisherPropagationError) {
+        this.retainPendingNotification(pendingKey, event, error.entry);
+        throw new RuntimeEventNormalizerPropagationError(error.entry, error);
+      }
       this.releaseReservedEvent(event);
       throw error;
     }
@@ -222,23 +235,6 @@ export class RuntimeEventNormalizer {
     if (event.type === "message_delta") {
       this.state.releaseMessageDelta(event.session_id, event.sequence);
       return;
-    }
-
-    if (event.type === "session_finished") {
-      this.state.clearSessionState(event.session_id);
-    }
-  }
-
-  private async notifyNormalizedEntry(
-    pendingKey: string,
-    event: RuntimeEvent,
-    entry: EventLogEntry
-  ): Promise<void> {
-    try {
-      await this.dependencies.runtimeNotifier.notifyEntry(entry);
-    } catch (error) {
-      this.retainPendingNotification(pendingKey, event, entry);
-      throw new RuntimeEventNormalizerPropagationError(entry, error);
     }
 
     if (event.type === "session_finished") {

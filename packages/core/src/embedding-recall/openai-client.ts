@@ -1,5 +1,12 @@
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import type { EmbeddingProviderPort } from "./types.js";
-import { AlayaError } from "@do-soul/alaya-protocol";
+import {
+  AlayaError,
+  assertPublicHttpProviderUrl,
+  isBlockedProviderHost,
+  parseHttpProviderUrl
+} from "@do-soul/alaya-protocol";
 import {
   DEFAULT_EMBEDDING_REQUEST_MAX_ATTEMPTS,
   DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS,
@@ -139,6 +146,9 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     this.apiKey = options.apiKey;
     this.modelId = resolveOpenAIEmbeddingModelId(options.model);
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? "https://api.openai.com/v1");
+    assertPublicHttpProviderUrl(this.baseUrl, {
+      allowPrivate: process.env.ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1"
+    });
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.maxAttempts = clampEmbeddingRequestAttempts(options.maxAttempts);
     this.retryDelayMs = clampEmbeddingRequestRetryDelayMs(options.retryDelayMs);
@@ -216,6 +226,7 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     texts: readonly string[],
     abortTimeoutMs: number
   ): Promise<Response> {
+    await assertResolvedPublicEmbeddingHost(this.baseUrl);
     const backstopMs =
       (Number.isFinite(abortTimeoutMs) && abortTimeoutMs > 0 ? abortTimeoutMs : 0) +
       this.transportBackstopMarginMs;
@@ -243,6 +254,7 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
               model: this.modelId,
               input: texts
             }),
+            redirect: "error",
             signal: attemptAbort.signal
           }),
           backstopMs,
@@ -364,4 +376,30 @@ function formatEmbeddingHost(baseUrl: string): string {
 
 function normalizeBaseUrl(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+async function assertResolvedPublicEmbeddingHost(baseUrl: string): Promise<void> {
+  if (process.env.ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1") {
+    return;
+  }
+  const host = parseHttpProviderUrl(baseUrl).hostname.replace(/^\[|\]$/gu, "");
+  if (isIP(host) !== 0) {
+    return;
+  }
+  let answers: readonly { readonly address: string }[];
+  try {
+    answers = await dnsLookup(host, { all: true });
+  } catch {
+    throw new Error("provider url host could not be resolved");
+  }
+  if (answers.length === 0) {
+    throw new Error("provider url host could not be resolved");
+  }
+  for (const answer of answers) {
+    if (isBlockedProviderHost(answer.address)) {
+      throw new Error(
+        "provider url must not target a private, loopback, link-local, or metadata host"
+      );
+    }
+  }
 }

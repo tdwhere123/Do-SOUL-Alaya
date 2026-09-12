@@ -38,6 +38,10 @@ import {
 import { createWarnLogger } from "./daemon-runtime-helpers.js";
 import { createConversationToolExecutor } from "../support/conversation-tool-executor.js";
 import type { RequestProtectionConfig } from "../../app.js";
+import {
+  applyRemoteBindTokenRotation,
+  type RequestProtectionEnvLike as RequestTokenProtectionEnvLike
+} from "../../request-token-binding.js";
 import type { AlayaConfigPaths } from "../../../cli/support/config-files.js";
 import type { DaemonStartupStepRecord } from "./daemon-runtime-types.js";
 import { parseEnv } from "../../../services/env-file/env-file-service.js";
@@ -59,10 +63,11 @@ const GARDEN_BACKLOG_SNAPSHOT_INTERVAL_MS = 60_000;
 
 type GlobalMemoryListFilters = Parameters<GlobalMemoryRepo["list"]>[0];
 
-type RequestProtectionEnvLike = Readonly<{
-  ALAYA_REQUEST_TOKEN?: string;
-  ALLOWED_ORIGIN?: string;
-}>;
+type RequestProtectionEnvLike = RequestTokenProtectionEnvLike &
+  Readonly<{
+    ALAYA_REQUEST_TOKEN?: string;
+    ALLOWED_ORIGIN?: string;
+  }>;
 
 export function createRequestProtection(
   env: RequestProtectionEnvLike = process.env,
@@ -79,7 +84,7 @@ export function createRequestProtection(
     warn?.("[daemon] ALAYA_REQUEST_TOKEN unset; generated ephemeral request token", { tokenSource });
   }
 
-  return Object.freeze({
+  const protection: RequestProtectionConfig = Object.freeze({
     allowedOrigin:
       allowedOrigin !== undefined && allowedOrigin.length > 0
         ? allowedOrigin
@@ -91,6 +96,13 @@ export function createRequestProtection(
     allowDesktopOriginlessRequests: true,
     tokenSource
   });
+  const rotated = applyRemoteBindTokenRotation(protection, env);
+  if (rotated.tokenSource === "rotated") {
+    warn?.("[daemon] unix-socket bind rotated request token; inspect/CLI use the rotated secret", {
+      tokenSource: "rotated"
+    });
+  }
+  return rotated;
 }
 
 export function recordStartupStep(

@@ -246,6 +246,21 @@ describe("Janitor", () => {
     expect(result.objects_affected).toHaveLength(JANITOR_CONSTANTS.BATCH_SIZE);
   });
 
+  it("fails hot index demotion when EventLog is not wired", async () => {
+    const { janitor, scheduler } = createJanitor({
+      hotCandidates: [
+        { memory_entry_id: "memory-1", last_access_at: null, activation_score: 0.1 }
+      ],
+      omitEventLogRepo: true
+    });
+
+    const result = await janitor.run(createTask({ task_kind: GardenTaskKind.HOT_INDEX_DEMOTION }));
+
+    expect(result.success).toBe(false);
+    expect(result.error_message).toContain("eventLogRepo");
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
+
   it("reports failure when a port throws", async () => {
     const failure = new Error("storage unavailable");
     const { scheduler, janitor } = createJanitor({
@@ -319,6 +334,26 @@ describe("Janitor", () => {
   });
 });
 
+function createPassthroughEventLogPort(): AuditorEventLogPort {
+  return {
+    append: vi.fn(),
+    appendManyWithMutation: vi.fn(
+      async <T>(
+        entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+        mutate: (rows: readonly EventLogEntry[]) => T
+      ): Promise<T> =>
+        mutate(
+          entries.map((entry, idx) => ({
+            ...entry,
+            event_id: `evt-${idx}`,
+            created_at: "2026-03-27T00:00:00.000Z",
+            revision: idx
+          }))
+        )
+    ) as AuditorEventLogPort["appendManyWithMutation"]
+  };
+}
+
 function createJanitor(options: {
   readonly expiredObjects?: readonly ExpiredControlPlaneObject[];
   readonly hotCandidates?: readonly HotDemotionCandidate[];
@@ -333,6 +368,7 @@ function createJanitor(options: {
     nowIso: string
   ) => Promise<readonly ExpiredControlPlaneObject[]>;
   readonly reportCompletion?: () => Promise<void>;
+  readonly omitEventLogRepo?: boolean;
 } = {}) {
   const cleanupPort = {
     findExpiredObjects:
@@ -357,6 +393,7 @@ function createJanitor(options: {
       tieringPort,
       scheduler,
       ...(options.retentionDecayPort === undefined ? {} : { retentionDecayPort: options.retentionDecayPort }),
+      ...(options.omitEventLogRepo === true ? {} : { eventLogRepo: createPassthroughEventLogPort() }),
       now: () => "2026-03-27T00:00:00.000Z"
     })
   };

@@ -63,9 +63,25 @@ type WarnPort = WarnLogger | ((message: string, meta: Record<string, unknown>) =
 
 const DEFAULT_MCP_RUNTIME_REQUEST_TIMEOUT_MS = 30_000;
 
+export type DaemonMcpListFailureCode = "MCP_EXTERNAL_TIMEOUT" | "MCP_EXTERNAL_TRANSPORT";
+
+export type DaemonMcpRuntimeServerHealth = Readonly<{
+  readonly server_name: string;
+  readonly status: "active" | "inactive";
+  readonly last_error: Readonly<{
+    readonly code: DaemonMcpListFailureCode;
+    readonly message: string;
+  }> | null;
+}>;
+
+export type DaemonMcpRuntimeHealth = Readonly<{
+  readonly servers: readonly DaemonMcpRuntimeServerHealth[];
+}>;
+
 export interface DaemonMcpRuntimeRegistry {
   close(): Promise<void>;
   listServerInfos(): readonly Readonly<McpServerInfo>[];
+  getHealth?(): DaemonMcpRuntimeHealth;
   refresh(input?: {
     readonly serverNames?: readonly string[];
   }): Promise<void>;
@@ -76,6 +92,18 @@ export interface DaemonMcpRuntimeRegistry {
     readonly toolName: string;
     readonly input: unknown;
   }): Promise< unknown>;
+}
+
+export function classifyDaemonMcpListFailure(error: unknown): DaemonMcpListFailureCode {
+  const code = readErrorCode(error);
+  if (code === "ETIMEDOUT" || code === "TIMEOUT" || code === "ERR_TIMEOUT") {
+    return "MCP_EXTERNAL_TIMEOUT";
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (/timed?\s*out/i.test(message) || /\btimeout\b/i.test(message)) {
+    return "MCP_EXTERNAL_TIMEOUT";
+  }
+  return "MCP_EXTERNAL_TRANSPORT";
 }
 
 export function createDaemonMcpRuntimeClientInfo(): DaemonMcpRuntimeClientInfo {
@@ -108,6 +136,7 @@ type DaemonMcpRuntimeRegistryState = {
   readonly clientHandles: Map<string, Promise<DaemonMcpRuntimeClientHandle>>;
   readonly toolCache: Map<string, readonly DaemonMcpListedTool[]>;
   readonly liveServerNames: Set<string>;
+  readonly lastErrorByServer: Map<string, DaemonMcpRuntimeServerHealth["last_error"]>;
   closePromise: Promise<void> | null;
   closed: boolean;
   readonly serverInfos: readonly Readonly<McpServerInfo>[];
@@ -119,6 +148,7 @@ export function createDaemonMcpRuntimeRegistry(input: DaemonMcpRuntimeRegistryIn
   return {
     close: () => closeRegistry(state),
     listServerInfos: () => listServerInfos(state),
+    getHealth: () => readRegistryHealth(state),
     refresh: (refreshInput) => refreshRegistry(state, refreshInput),
     getServerTools: (serverName) => readServerTools(state, serverName),
     listServerTools: (serverName) => listServerTools(state, serverName),
@@ -143,6 +173,7 @@ function createDaemonMcpRuntimeRegistryState(input: DaemonMcpRuntimeRegistryInpu
     clientHandles: new Map(),
     toolCache: new Map(),
     liveServerNames: new Set(),
+    lastErrorByServer: new Map(),
     closePromise: null,
     closed: false,
     serverInfos,
@@ -172,6 +203,7 @@ async function closePendingHandles(
   state.clientHandles.clear();
   state.toolCache.clear();
   state.liveServerNames.clear();
+  state.lastErrorByServer.clear();
 }
 
 function listServerInfos(state: DaemonMcpRuntimeRegistryState): readonly Readonly<McpServerInfo>[] {
@@ -334,13 +366,51 @@ async function refreshServerTools(state: DaemonMcpRuntimeRegistryState, serverNa
     if (state.clientHandles.get(serverName) === lease.pendingHandle) {
       state.toolCache.set(serverName, Object.freeze(listedTools.tools.map(toListedTool)));
       state.liveServerNames.add(serverName);
+      state.lastErrorByServer.delete(serverName);
     }
   } catch (error) {
+    recordServerListFailure(state, serverName, error);
     if (lease !== undefined) {
       await deactivateServer(state, serverName, lease.pendingHandle);
     }
     throw error;
   }
+}
+
+function recordServerListFailure(
+  state: DaemonMcpRuntimeRegistryState,
+  serverName: string,
+  error: unknown
+): void {
+  state.lastErrorByServer.set(
+    serverName,
+    Object.freeze({
+      code: classifyDaemonMcpListFailure(error),
+      message: error instanceof Error ? error.message : String(error)
+    })
+  );
+}
+
+function readRegistryHealth(state: DaemonMcpRuntimeRegistryState): DaemonMcpRuntimeHealth {
+  return Object.freeze({
+    servers: Object.freeze(
+      state.serverInfos.map((server) =>
+        Object.freeze({
+          server_name: server.server_name,
+          status: state.liveServerNames.has(server.server_name) ? "active" : "inactive",
+          last_error: state.lastErrorByServer.get(server.server_name) ?? null
+        })
+      )
+    )
+  });
+}
+
+function readErrorCode(error: unknown): string {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return "";
+  }
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" || typeof code === "number" ? String(code) : "";
 }
 
 function createRequestOptions(

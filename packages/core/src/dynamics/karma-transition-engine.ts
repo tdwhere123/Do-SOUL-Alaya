@@ -5,6 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import { scheduleAuditedAsyncSideEffect } from "../runtime/async-side-effect-auditor.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 import { CoreError } from "../shared/errors.js";
 
 import {
@@ -340,7 +341,12 @@ export class KarmaTransitionEngine {
   ): Promise<EventLogEntry[]> {
     const entries: EventLogEntry[] = [];
     for (const input of this.buildKarmaAuditInputs(applyResult, plan)) {
-      entries.push(await this.deps.eventLogRepo.append(input));
+      entries.push(
+        await bindEventPublisher({
+          eventLogRepo: this.deps.eventLogRepo,
+          purpose: "KarmaTransitionEngine"
+        }).publish(input)
+      );
     }
     return entries;
   }

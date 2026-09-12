@@ -15,6 +15,12 @@ import { z, type ZodTypeAny } from "zod";
 import { parseJsonBody } from "../shared/shared.js";
 import type { AppConfigService } from "../../services/config/config-service.js";
 import type { EnvironmentStatusService } from "../../services/status/environment-status-service.js";
+import {
+  grantAllowsProcessSecretPatch,
+  isProcessSecretPatchRequest,
+  REQUEST_TOKEN_GRANT_CONTEXT_KEY,
+  type RequestTokenGrant
+} from "../../runtime/request-token-binding.js";
 
 const ManifestationBudgetReadSchema = ManifestationBudgetConfigSchema.and(
   z.object({ source: z.enum(["default", "stored"]) }).readonly()
@@ -113,6 +119,10 @@ function registerRuntimeConfigRoutes(app: Hono, configService: AppConfigService)
   });
 
   app.patch("/config/runtime/embedding-supplement", async (context) => {
+    const forbidden = denyProcessSecretPatch(context);
+    if (forbidden !== null) {
+      return forbidden;
+    }
     const config = await configService.patchRuntimeEmbeddingConfig(
       await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
     );
@@ -125,6 +135,10 @@ function registerRuntimeConfigRoutes(app: Hono, configService: AppConfigService)
   });
 
   app.patch("/config/runtime/garden-compute", async (context) => {
+    const forbidden = denyProcessSecretPatch(context);
+    if (forbidden !== null) {
+      return forbidden;
+    }
     const config = await configService.patchRuntimeGardenComputeConfig(
       await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
     );
@@ -186,6 +200,18 @@ function jsonConfigPatchResponse<T extends ZodTypeAny>(
     bindStandardConfigPatchResponse(schema, data, { requiresDaemonRestart }),
     200
   );
+}
+
+function denyProcessSecretPatch(context: Context): Response | null {
+  if (!isProcessSecretPatchRequest(context.req.method, context.req.path)) {
+    return null;
+  }
+  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
+  // Route-only tests skip request protection; deny only when a grant is present.
+  if (grant === undefined || grantAllowsProcessSecretPatch(grant)) {
+    return null;
+  }
+  return context.json({ success: false, error: "Process-level secret patch is not allowed" }, 403);
 }
 
 async function requireWorkspace(workspaceService: WorkspaceService, workspaceId: string): Promise<string> {

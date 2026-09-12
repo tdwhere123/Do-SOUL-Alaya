@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDaemonLifecycleControls } from "../../../runtime/daemon/lifecycle/daemon-runtime-lifecycle.js";
+import { serveDaemonUnixSocket } from "../../../runtime/unix-socket-serve.js";
 
 type ExitMock = ReturnType<typeof vi.fn> & ((code?: number) => void);
 
@@ -45,6 +46,7 @@ function createControls(
       closeIdleConnections?(): void;
       closeAllConnections?(): void;
     };
+    unixSocketServe: typeof serveDaemonUnixSocket;
   }> = {}
 ) {
   const warn = vi.fn();
@@ -93,7 +95,8 @@ function createControls(
       tokenSource
     },
     processPort: overrides.processPort,
-    serverFactory: overrides.serverFactory
+    serverFactory: overrides.serverFactory,
+    unixSocketServe: overrides.unixSocketServe
   });
 
   return {
@@ -135,6 +138,38 @@ describe("createDaemonLifecycleControls", () => {
 
     expect(server.port).toBeGreaterThanOrEqual(0);
     await server.close();
+  });
+
+  it("binds the unix socket when ALAYA_DAEMON_SOCKET is set", async () => {
+    const unixSocketServe = vi.fn(async (
+      _fetch: Parameters<typeof serveDaemonUnixSocket>[0],
+      _socketPath: string
+    ) => ({
+      close(callback?: (error?: Error) => void) {
+        callback?.();
+      }
+    })) as unknown as typeof serveDaemonUnixSocket;
+    const previous = process.env.ALAYA_DAEMON_SOCKET;
+    process.env.ALAYA_DAEMON_SOCKET = "/tmp/alaya-lifecycle-test.sock";
+    try {
+      const { controls, warn } = createControls("env", { unixSocketServe });
+      const server = await controls.startHttpServer({ port: 0 });
+      expect(unixSocketServe).toHaveBeenCalledWith(
+        expect.any(Function),
+        "/tmp/alaya-lifecycle-test.sock"
+      );
+      expect(warn).toHaveBeenCalledWith(
+        "core daemon listening",
+        expect.objectContaining({ unix_socket: "/tmp/alaya-lifecycle-test.sock" })
+      );
+      await server.close();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ALAYA_DAEMON_SOCKET;
+      } else {
+        process.env.ALAYA_DAEMON_SOCKET = previous;
+      }
+    }
   });
 
   it("allows managed ephemeral request tokens when explicitly requested", async () => {
@@ -321,6 +356,7 @@ describe("createDaemonLifecycleControls", () => {
 
   it("forces idle and all connection shutdown when server close stalls", async () => {
     vi.useFakeTimers();
+    const processPort = createFakeSignalProcess();
     const closeIdleConnections = vi.fn();
     const closeAllConnections = vi.fn();
     function close(_callback?: (error?: Error) => void): void {}
@@ -329,7 +365,7 @@ describe("createDaemonLifecycleControls", () => {
       closeIdleConnections,
       closeAllConnections
     }));
-    const { controls, warn } = createControls("env", { serverFactory });
+    const { controls, warn } = createControls("env", { processPort, serverFactory });
 
     const server = await controls.startHttpServer({ port: 0 });
     const shutdownPromise = server.close();
@@ -340,9 +376,34 @@ describe("createDaemonLifecycleControls", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     await expect(shutdownPromise).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledWith(
-      "daemon HTTP server shutdown needed compatibility fallback",
+      "daemon HTTP server close timed out; forcing exit",
       expect.objectContaining({ result: "timed_out" })
     );
+    expect(processPort.exitCode).toBe(1);
+    expect(processPort.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("still force-exits on the injected process port when NODE_ENV is test", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "test";
+    const processPort = createFakeSignalProcess();
+    const { controls } = createControls("env", {
+      processPort,
+      serverFactory: vi.fn(() => ({
+        close(callback?: (error?: Error) => void) {
+          callback?.();
+        }
+      }))
+    });
+
+    try {
+      await controls.startHttpServer({ port: 0 });
+      processPort.emitSignal("SIGTERM");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(processPort.exit).toHaveBeenCalledWith(0);
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
   });
 
   it("forces process exit when signal shutdown exceeds the bounded timeout", async () => {

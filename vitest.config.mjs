@@ -11,8 +11,13 @@ const hasProjects = projects.length > 0;
 // so an uncapped run OOM-freezes the VM. Cap = workers that fit in RAM,
 // never above CPU count. D is GiB-of-headroom per worker; D=3.5 yields 2 on
 // 7.6 GiB and ~9 on a 32 GiB/32-vCPU CI box, so CI throughput is preserved.
+// Coverage v8 plus live daemon fixtures exceed 3 GiB/fork, so coverage
+// runs budget a whole box per worker.
 // cross-file ref: vitest.workspace.mjs (per-project defineProject members).
-const GIB_PER_WORKER = 3.5;
+const coverageRun = process.argv.some(
+  (arg) => arg === "--coverage.enabled" || arg.startsWith("--coverage.enabled=")
+);
+const GIB_PER_WORKER = coverageRun ? 7 : 3.5;
 
 function computeMaxWorkers() {
   const override = process.env.VITEST_MAX_WORKERS;

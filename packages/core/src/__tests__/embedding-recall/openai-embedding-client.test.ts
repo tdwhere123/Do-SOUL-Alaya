@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { OpenAIEmbeddingClient } from "../../embedding-recall/embedding-recall-service.js";
 
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
+    const answer = { address: "93.184.216.34", family: 4 };
+    return options?.all === true ? [answer] : answer;
+  })
+}));
+
 describe("OpenAIEmbeddingClient", () => {
   it("reports provider host and transport cause without including the secret", async () => {
     const transportError = new TypeError("fetch failed") as TypeError & {
@@ -56,6 +63,24 @@ describe("OpenAIEmbeddingClient", () => {
 
     expect(vi.mocked(fetchImpl).mock.calls[0]?.[0]).toBe("https://api.openai.com/v1/embeddings");
     expect(vi.mocked(fetchImpl).mock.calls[1]?.[0]).toBe("https://embedding.example.test/v1/embeddings");
+    expect(vi.mocked(fetchImpl).mock.calls[0]?.[1]).toMatchObject({ redirect: "error" });
+  });
+
+  it("rejects private and metadata embedding endpoints before fetch", () => {
+    expect(
+      () =>
+        new OpenAIEmbeddingClient({
+          apiKey: "sk-test-secret",
+          baseUrl: "http://169.254.169.254/v1"
+        })
+    ).toThrow(/private, loopback, link-local, or metadata/u);
+    expect(
+      () =>
+        new OpenAIEmbeddingClient({
+          apiKey: "sk-test-secret",
+          baseUrl: "http://127.0.0.1:11434/v1"
+        })
+    ).toThrow(/private, loopback, link-local, or metadata/u);
   });
 
   it("defaults the model when omitted but rejects an empty configured model", () => {

@@ -407,8 +407,13 @@ const modelCacheDir = defaultLocalOnnxCacheDir();
 const modelPresent = existsSync(
   path.join(modelCacheDir, "Xenova/paraphrase-multilingual-MiniLM-L12-v2/onnx/model_quantized.onnx")
 );
+const extraPresent = existsSync(
+  path.join(process.cwd(), "node_modules/@huggingface/transformers")
+) || existsSync(
+  path.join(process.cwd(), "packages/core/node_modules/@huggingface/transformers")
+);
 
-describe.runIf(modelPresent)("LocalOnnxEmbeddingClient (real model smoke)", () => {
+describe.runIf(modelPresent && extraPresent)("LocalOnnxEmbeddingClient (real model smoke)", () => {
   it("loads the ONNX model offline and emits normalized 384-dim vectors", async () => {
     const client = new LocalOnnxEmbeddingClient({ cacheDir: modelCacheDir });
     try {

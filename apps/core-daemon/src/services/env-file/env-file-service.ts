@@ -1,7 +1,9 @@
 import path from "node:path";
 import { CoreError } from "@do-soul/alaya-core";
 import {
+  assertPublicHttpProviderUrl,
   formatFileSecretRef,
+  isContainedFileSecretPath,
   parseSecretRefKeychainTarget,
   type RuntimeEmbeddingConfig,
   type RuntimeGardenComputeConfig
@@ -72,6 +74,7 @@ export function normalizeRuntimeEmbeddingConfigPatch(
     normalized,
     invalidPatch: invalidRuntimeEmbeddingPatch,
     platform,
+    secretsDir: paths.secretsDir,
     secretPath: path.join(paths.secretsDir, "openai")
   });
 }
@@ -88,6 +91,7 @@ export function normalizeRuntimeGardenComputeConfigPatch(
     normalized,
     invalidPatch: invalidRuntimeGardenComputePatch,
     platform,
+    secretsDir: paths.secretsDir,
     secretPath: path.join(paths.secretsDir, "official-garden")
   });
 }
@@ -136,7 +140,10 @@ function buildRuntimeEmbeddingConfigPatch(
   parsedPatch: RawRuntimeEmbeddingConfigPatch
 ): MutableRuntimeEmbeddingConfigPatch {
   const normalized: MutableRuntimeEmbeddingConfigPatch = {};
-  if (parsedPatch.provider_url !== undefined) normalized.provider_url = parsedPatch.provider_url;
+  if (parsedPatch.provider_url !== undefined) {
+    assertPatchedProviderUrl(parsedPatch.provider_url, invalidRuntimeEmbeddingPatch);
+    normalized.provider_url = parsedPatch.provider_url;
+  }
   if (parsedPatch.model_id !== undefined) normalized.model_id = parsedPatch.model_id;
   if (parsedPatch.embedding_enabled !== undefined) normalized.embedding_enabled = parsedPatch.embedding_enabled;
   return normalized;
@@ -147,7 +154,10 @@ function buildRuntimeGardenComputeConfigPatch(
 ): MutableRuntimeGardenComputeConfigPatch {
   const normalized: MutableRuntimeGardenComputeConfigPatch = {};
   if (parsedPatch.provider_kind !== undefined) normalized.provider_kind = parsedPatch.provider_kind;
-  if (parsedPatch.provider_url !== undefined) normalized.provider_url = parsedPatch.provider_url;
+  if (parsedPatch.provider_url !== undefined) {
+    assertPatchedProviderUrl(parsedPatch.provider_url, invalidRuntimeGardenComputePatch);
+    normalized.provider_url = parsedPatch.provider_url;
+  }
   if (parsedPatch.model_id !== undefined) normalized.model_id = parsedPatch.model_id;
   if (parsedPatch.enabled !== undefined) normalized.enabled = parsedPatch.enabled;
   return normalized;
@@ -158,10 +168,11 @@ function normalizeSecretControlledPatch<TNormalized extends { secret_ref?: strin
   readonly normalized: TNormalized;
   readonly invalidPatch: () => CoreError;
   readonly platform: NodeJS.Platform;
+  readonly secretsDir: string;
   readonly secretPath: string;
 }): Readonly<{ readonly patch: TNormalized; readonly pastedSecret: PastedSecret | null }> {
   if (input.parsedPatch.secret_ref_mode === undefined) {
-    return normalizeDirectSecretRef(input.parsedPatch, input.normalized, input.invalidPatch);
+    return normalizeDirectSecretRef(input.parsedPatch, input.normalized, input.invalidPatch, input.secretsDir);
   }
   if (input.parsedPatch.secret_ref === null) {
     input.normalized.secret_ref = null;
@@ -174,6 +185,7 @@ function normalizeSecretControlledPatch<TNormalized extends { secret_ref?: strin
     normalized: input.normalized,
     invalidPatch: input.invalidPatch,
     platform: input.platform,
+    secretsDir: input.secretsDir,
     secretPath: input.secretPath
   });
 }
@@ -181,13 +193,15 @@ function normalizeSecretControlledPatch<TNormalized extends { secret_ref?: strin
 function normalizeDirectSecretRef<TNormalized extends { secret_ref?: string | null }>(
   parsedPatch: SecretControlledPatchFields,
   normalized: TNormalized,
-  invalidPatch: () => CoreError
+  invalidPatch: () => CoreError,
+  secretsDir: string
 ): Readonly<{ readonly patch: TNormalized; readonly pastedSecret: PastedSecret | null }> {
   if (parsedPatch.secret_value !== undefined) {
     throw invalidPatch();
   }
   if (parsedPatch.secret_ref !== undefined) {
-    normalized.secret_ref = parsedPatch.secret_ref === null ? null : normalizeSecretRef(parsedPatch.secret_ref);
+    normalized.secret_ref =
+      parsedPatch.secret_ref === null ? null : normalizeSecretRef(parsedPatch.secret_ref, secretsDir);
   }
   return { patch: normalized, pastedSecret: null };
 }
@@ -205,6 +219,7 @@ function normalizeSecretModeValue<TNormalized extends { secret_ref?: string | nu
   readonly normalized: TNormalized;
   readonly invalidPatch: () => CoreError;
   readonly platform: NodeJS.Platform;
+  readonly secretsDir: string;
   readonly secretPath: string;
 }): Readonly<{ readonly patch: TNormalized; readonly pastedSecret: PastedSecret | null }> {
   if (input.secretMode === "env") {
@@ -212,7 +227,11 @@ function normalizeSecretModeValue<TNormalized extends { secret_ref?: string | nu
     return { patch: input.normalized, pastedSecret: null };
   }
   if (input.secretMode === "file") {
-    input.normalized.secret_ref = normalizeFileSecretRef(input.secretValue, input.invalidPatch);
+    input.normalized.secret_ref = normalizeFileSecretRef(
+      input.secretValue,
+      input.invalidPatch,
+      input.secretsDir
+    );
     return { patch: input.normalized, pastedSecret: null };
   }
   return normalizePastedSecretRef(input);
@@ -226,12 +245,16 @@ function normalizeEnvSecretRef(secretValue: string, invalidPatch: () => CoreErro
   return `env:${envName}`;
 }
 
-function normalizeFileSecretRef(secretValue: string, invalidPatch: () => CoreError): string {
-  const filePath = secretValue.trim();
-  if (!path.isAbsolute(filePath)) {
+function normalizeFileSecretRef(
+  secretValue: string,
+  invalidPatch: () => CoreError,
+  secretsDir: string
+): string {
+  const containedPath = resolveContainedFileSecretPath(secretValue.trim(), secretsDir);
+  if (containedPath === null) {
     throw invalidPatch();
   }
-  return formatFileSecretRef(filePath);
+  return formatFileSecretRef(containedPath);
 }
 
 function normalizePastedSecretRef<TNormalized extends { secret_ref?: string | null }>(input: {
@@ -355,7 +378,7 @@ async function patchRuntimeEmbeddingEnvFile(
   await writeTextAtomicLocked(paths.envPath, renderEnv(next), 0o600, generateTempId);
 }
 
-function normalizeSecretRef(value: string): string {
+function normalizeSecretRef(value: string, secretsDir: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith("env:")) {
     const envName = trimmed.slice("env:".length);
@@ -364,15 +387,47 @@ function normalizeSecretRef(value: string): string {
     }
   }
   if (trimmed.startsWith("file:")) {
-    const filePath = trimmed.slice("file:".length);
-    if (path.isAbsolute(filePath)) {
-      return trimmed;
+    const containedPath = resolveContainedFileSecretPath(trimmed.slice("file:".length), secretsDir);
+    if (containedPath !== null) {
+      return formatFileSecretRef(containedPath);
     }
   }
   if (trimmed.startsWith("keychain:") && parseSecretRefKeychainTarget(trimmed) !== null) {
     return trimmed;
   }
   throw invalidRuntimeEmbeddingPatch();
+}
+
+function assertPatchedProviderUrl(providerUrl: string | null, invalidPatch: () => CoreError): void {
+  if (providerUrl === null) {
+    return;
+  }
+  try {
+    assertPublicHttpProviderUrl(providerUrl, {
+      allowPrivate: process.env.ALAYA_ALLOW_PRIVATE_PROVIDER_URL === "1"
+    });
+  } catch {
+    throw invalidPatch();
+  }
+}
+
+function resolveContainedFileSecretPath(filePath: string, secretsDir: string): string | null {
+  if (!path.isAbsolute(filePath) || filePath.includes("\0")) {
+    return null;
+  }
+  const resolvedFile = path.resolve(filePath);
+  const resolvedRoot = path.resolve(secretsDir);
+  if (!isContainedFileSecretPath(resolvedFile, resolvedRoot)) {
+    return null;
+  }
+  const relative = path.relative(resolvedRoot, resolvedFile);
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return null;
+  }
+  if (relative.split(path.sep).includes("..")) {
+    return null;
+  }
+  return resolvedFile;
 }
 
 function invalidRuntimeEmbeddingPatch(): CoreError {

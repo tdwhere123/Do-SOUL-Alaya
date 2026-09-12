@@ -5,6 +5,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createReconciliationLlmDecisionPort, computeReconciliationRequestKeyForTest } from "../../ai/reconciliation-llm-decision.js";
 
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
+    const answer = { address: "93.184.216.34", family: 4 };
+    return options?.all === true ? [answer] : answer;
+  })
+}));
+
 // invariant: covers the disk-cached garden-LLM reconciliation decision
 // port — the null-credentials disable, the decision cache round trip,
 // and the content-anchored cache target (a cache hit resolves the

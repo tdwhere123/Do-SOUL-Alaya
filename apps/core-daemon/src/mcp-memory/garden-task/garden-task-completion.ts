@@ -103,12 +103,12 @@ function requireClaimedGardenTask(
   }
   if (row.status !== "claimed") {
     throw new GardenTaskValidationError(
-      `Garden task ${row.id} is not in claimed state (current: ${row.status}); claim it via garden.claim_task before completing.`
+      `Garden task is not in claimed state; claim it via garden.claim_task before completing: ${row.id}`
     );
   }
   if (row.claimed_by !== context.agentTarget) {
     throw new GardenTaskValidationError(
-      `Garden task ${row.id} is claimed by a different agent target; only the claimant may complete it.`
+      `Garden task is claimed by a different agent target; only the claimant may complete it: ${row.id}`
     );
   }
   return row;
@@ -144,14 +144,14 @@ function validateTaskResultEnvelope(
   if (row.kind === GardenTaskKind.EDGE_CLASSIFY) {
     if (candidateSignalsCount > 0) {
       throw new GardenTaskValidationError(
-        `Garden task ${row.id} is an edge_classify task; complete it with result_envelope.edge_verdict, not candidate_signals.`
+        `Garden task is an edge_classify task; complete it with result_envelope.edge_verdict, not candidate_signals: ${row.id}`
       );
     }
     return;
   }
   if (edgeVerdict !== undefined) {
     throw new GardenTaskValidationError(
-      `Garden task ${row.id} (${row.kind}) does not accept an edge_verdict; that result shape is only valid for edge_classify tasks.`
+      `Garden task does not accept an edge_verdict; that result shape is only valid for edge_classify tasks: ${row.id}`
     );
   }
   if (candidateSignalsCount > 0 && resolvedRunId === null) {
@@ -235,7 +235,7 @@ function assertCandidateSignalRetryCompatible(
     return;
   }
   throw new GardenTaskValidationError(
-    `Garden task ${row.id} candidate_signals changed after a previous partial completion attempt; retry with the original candidate signal envelope.`
+    `Garden task candidate_signals changed after a previous partial completion attempt; retry with the original candidate signal envelope: ${row.id}`
   );
 }
 
@@ -258,7 +258,7 @@ function beginCompletionAttemptIfNeeded(
   );
   if (!completionClaimStarted) {
     throw new GardenTaskValidationError(
-      `Garden task ${row.id} claim changed before candidate signal emission; retry after claiming the task again.`
+      `Garden task claim changed before candidate signal emission; retry after claiming the task again: ${row.id}`
     );
   }
 }
@@ -356,7 +356,7 @@ async function applyEdgeClassifyVerdict(
   const payloadPair = readEdgeClassifyPayloadPair(row.id, row.payload);
   if (verdict === undefined) {
     throw new GardenTaskValidationError(
-      `Garden task ${row.id} is an edge_classify task completed without a result_envelope.edge_verdict; report edge_type "none" for an explicit no-edge decision, or complete with status "failed" if no verdict can be produced.`
+      `Garden task is an edge_classify task completed without a result_envelope.edge_verdict; report edge_type "none" for an explicit no-edge decision, or complete with status "failed" if no verdict can be produced: ${row.id}`
     );
   }
   if (
@@ -364,7 +364,7 @@ async function applyEdgeClassifyVerdict(
     verdict.neighbor_object_id !== payloadPair.neighborObjectId
   ) {
     throw new GardenTaskValidationError(
-      `Garden task ${row.id} edge_verdict pair does not match the claimed task's source/neighbor memory pair.`
+      `Garden task edge_verdict pair does not match the claimed task's source/neighbor memory pair: ${row.id}`
     );
   }
   if (deps.edgeVerdictApplier === undefined) {

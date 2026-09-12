@@ -1,4 +1,5 @@
 import {
+  bindEventPublisher,
   ConflictDetectionService,
   EdgeAutoProducerService,
   PRODUCT_FORMATION_DEFAULTS,
@@ -35,10 +36,12 @@ type EdgeRuntimeWiring = Pick<
 type ReconciliationRuntimeWiring = Pick<
   CreateRecallMaterializationWiringInput,
   | "eventLogRepo"
+  | "eventPublisher"
   | "memoryEntryRepo"
   | "memoryService"
   | "rawConfigService"
   | "reconciliationLeaseRepo"
+  | "runtimeNotifier"
   | "runLookup"
   | "warn"
 >;
@@ -190,7 +193,13 @@ async function createReconciliationRuntime(
         await input.memoryService.update(objectId, fields, reason)
     },
     eventLog: {
-      append: (event) => input.eventLogRepo.append(event)
+      append: (event) =>
+        bindEventPublisher({
+          eventPublisher: input.eventPublisher,
+          eventLogRepo: input.eventLogRepo,
+          runtimeNotifier: input.runtimeNotifier,
+          purpose: "ReconciliationService"
+        }).publish(event)
     },
     runLookup: input.runLookup,
     llmDecision: llmDecisionPort ?? createRuleOnlyReconciliationDecisionPort(),

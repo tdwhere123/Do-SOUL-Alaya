@@ -161,12 +161,13 @@ function buildRequestInit(
   headers: HeadersInit | undefined,
   body: unknown
 ): RequestInit {
+  const token = getInspectorToken();
   return {
     ...rest,
     method,
     headers: {
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      ...(inspectorToken ? { "X-Alaya-Inspector-Token": inspectorToken } : {}),
+      ...(token ? { "X-Alaya-Inspector-Token": token } : {}),
       ...(headers ?? {})
     },
     body: body === undefined ? undefined : JSON.stringify(body)
@@ -206,12 +207,27 @@ async function fetchAttempt(
   try {
     return { kind: "response", response: await fetch(url, init) };
   } catch (err) {
+    // Caller abort is not a transient network fault; retrying it races the
+    // next query and marks a cancelled GET as network_error.
+    if (isAbortError(err) || init.signal?.aborted) {
+      throw err;
+    }
     if (attempt < maxAttempts) {
       await sleep(200 * Math.pow(5, attempt - 1));
       return { kind: "network_error", error: err };
     }
     throw err;
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  // jsdom's DOMException is not an Error subclass; name is the stable signal.
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    (error as { name: unknown }).name === "AbortError"
+  );
 }
 
 function shouldRetryResponse(response: Response, attempt: number, maxAttempts: number): boolean {

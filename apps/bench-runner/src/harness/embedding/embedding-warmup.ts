@@ -93,7 +93,7 @@ export async function drainEmbeddingWarmupPasses(
 }
 
 export interface BenchQueryEmbeddingWarmupSummary {
-  readonly status: "not_requested" | "ready";
+  readonly status: "not_requested" | "ready" | "partial" | "failed";
   readonly requested_count: number;
   readonly ready_count: number;
   readonly cache_hit_count: number;

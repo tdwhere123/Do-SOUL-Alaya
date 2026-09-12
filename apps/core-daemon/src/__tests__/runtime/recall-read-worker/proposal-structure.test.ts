@@ -40,7 +40,7 @@ function payload(program: unknown) {
     protocol_version: 1 as const,
     supports_source_evidence: true,
     supported_result_kinds: ["memory_entry", "source_evidence"] as const,
-    authorized_scopes: null,
+    authorized_scopes: { mode: "unrestricted" as const },
     interpretation_proposal: {
       schema_version: 1,
       original_query_digest: DIGEST,

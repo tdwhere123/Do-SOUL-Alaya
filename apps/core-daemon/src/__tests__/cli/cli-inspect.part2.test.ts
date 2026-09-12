@@ -92,7 +92,7 @@ function stubWorkspaceDaemonFetch(
     return Response.json(response.body, { status: response.status ?? 200 });
   });
   return {
-    url: "http://daemon.local",
+    url: "http://127.0.0.1:5173",
     requests,
     restore: () => {
       vi.stubGlobal("fetch", originalFetch);
@@ -125,7 +125,7 @@ describe("cli inspect", () => {
     const promise = command.handler(
       createContext({
         env: {
-          ALAYA_DAEMON_URL: "http://external-daemon.local",
+          ALAYA_DAEMON_URL: "http://127.0.0.1:5173",
           ALAYA_INSPECTOR_DAEMON_REQUEST_TOKEN: " explicit-external-token "
         }
       }),

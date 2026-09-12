@@ -90,6 +90,7 @@ describe("BenchTrendPage", () => {
       )
     );
 
+    const fetchMock = vi.mocked(fetch);
     renderBenchTrend();
 
     const panel = await screen.findByTestId("bench-trend-public");
@@ -98,5 +99,6 @@ describe("BenchTrendPage", () => {
     expect(panel.textContent).toContain("82.0%");
     expect(panel.textContent).toContain("130 ms");
     expect(panel.textContent).toContain("30.0%");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
   });
 });

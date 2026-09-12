@@ -4,6 +4,7 @@ import {
   type EventLogEntry,
   type SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
+import { bindEventPublisher } from "../../runtime/event-publisher.js";
 
 export async function appendSourceRecordAdmitted(
   eventLogRepo: {
@@ -12,7 +13,10 @@ export async function appendSourceRecordAdmitted(
   },
   record: SourceRecordIdentity
 ): Promise<void> {
-  await eventLogRepo.append({
+  await bindEventPublisher({
+    eventLogRepo,
+    purpose: "source-admission-audit"
+  }).publish({
     event_type: FieldGenerationEventType.SOUL_FIELD_SOURCE_RECORD_ADMITTED,
     entity_type: "source_record",
     entity_id: record.identity,

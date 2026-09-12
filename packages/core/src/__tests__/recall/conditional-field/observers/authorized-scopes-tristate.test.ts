@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ObserveConditionalFieldInput, SourceObserverRow, SourceRootObserverRow } from "../../../../recall/conditional-field/observers/observe.js";
-import { sourceRootEligible, sourceRowEligible } from "../../../../recall/conditional-field/observers/observation-admission.js";
+import {
+  parseAuthorizedScopesAdmission,
+  sourceRootEligible,
+  sourceRowEligible
+} from "../../../../recall/conditional-field/observers/observation-admission.js";
 import { continuationViewMismatch } from "../../../../recall/conditional-field/query/compile-query.js";
 import { runConditionalFieldRecall } from "../../../../recall/runtime/recall-service-runner.js";
 import { defaultBudget, defaultView, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
@@ -8,7 +12,7 @@ import { defaultBudget, defaultView, SNAPSHOT_ID } from "../reference/deployment
 const AS_OF = "2026-09-09T00:00:00.000Z";
 
 describe("authorized_scopes tri-state admission", () => {
-  it("admits every scope_class only for explicit null", () => {
+  it("typed null (not JSON null) remains unrestricted", () => {
     expect(sourceRowEligible(observe("null"), sourceRow("project"))).toBe(true);
     expect(sourceRowEligible(observe("null"), sourceRow("global_domain"))).toBe(true);
     expect(sourceRowEligible(observe("null"), sourceRow(undefined))).toBe(true);
@@ -48,6 +52,20 @@ describe("authorized_scopes tri-state admission", () => {
     });
     expect(index.entries).toEqual([]);
     expect(index.completeness.logical_index).toBe("invalidated");
+  });
+
+  it("does not flip denied to unrestricted when JSON turns a missing key into null", () => {
+    const omitted = JSON.parse("{}") as { readonly authorized_scopes?: unknown };
+    const jsonNull = JSON.parse("{\"authorized_scopes\":null}") as { readonly authorized_scopes?: unknown };
+    const deniedRoundtrip = JSON.parse(JSON.stringify({ authorized_scopes: { mode: "denied" } })) as {
+      readonly authorized_scopes?: unknown;
+    };
+    expect(parseAuthorizedScopesAdmission(omitted.authorized_scopes).mode).toBe("denied");
+    expect(parseAuthorizedScopesAdmission(jsonNull.authorized_scopes).mode).toBe("denied");
+    expect(parseAuthorizedScopesAdmission(deniedRoundtrip.authorized_scopes).mode).toBe("denied");
+    expect(parseAuthorizedScopesAdmission(JSON.parse(JSON.stringify({ mode: "unrestricted" }))).mode)
+      .toBe("unrestricted");
+    expect(parseAuthorizedScopesAdmission(JSON.parse("null")).mode).toBe("denied");
   });
 
   it("mismatches one-sided continuation omit, null, and empty without regressing named change", () => {

@@ -14,6 +14,7 @@ import {
   type VerificationBasis as VerificationBasisType,
   type VerifiedBy as VerifiedByType
 } from "@do-soul/alaya-protocol";
+import type { EventPublisher } from "../runtime/event-publisher.js";
 
 export const LOW_SIGNAL_REASONS = new Set<RevokeReasonType>([RevokeReason.REVIEW_OVERDUE, RevokeReason.NONE]);
 
@@ -90,6 +91,7 @@ export interface GreenServiceDependencies {
   readonly greenStatusRepo: GreenServiceGreenStatusRepoPort;
   readonly memoryRepo: GreenServiceMemoryRepoPort;
   readonly eventLogRepo: GreenServiceEventLogRepoPort;
+  readonly eventPublisher?: EventPublisher;
   readonly runtimeNotifier: GreenRuntimeNotifier;
   readonly statusResolver?: GreenServiceStatusResolverPort;
   readonly leaseService?: GreenServiceLeasePort;

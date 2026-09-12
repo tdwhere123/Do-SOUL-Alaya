@@ -68,7 +68,7 @@ describe("RecallReadWorkerClient evidence batch validation", () => {
           { queryText: "worker", limit: 5 },
           { queryText: "invalid", limit: Number.NaN }
         ])
-      ).rejects.toThrow("queries[1].limit must be a finite number");
+      ).rejects.toThrow(/limit/);
       const scalarField = await fixture.client.evidenceSearchPort.searchByKeywordField!(
         "workspace-1", "worker", 5
       );

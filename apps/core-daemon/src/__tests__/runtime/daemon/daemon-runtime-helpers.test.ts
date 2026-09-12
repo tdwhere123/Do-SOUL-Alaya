@@ -6,6 +6,7 @@ import {
   reconcileBootstrapPathsForAllWorkspaces,
   warnOnRejectedBackgroundTask
 } from "../../../runtime/daemon/lifecycle/daemon-runtime-helpers.js";
+import { exitLifecycleProcess } from "../../../runtime/daemon/lifecycle/daemon-signal-shutdown.js";
 
 type ExitMock = ReturnType<typeof vi.fn> & ((code?: number) => void);
 
@@ -191,6 +192,35 @@ describe("installUnhandledRejectionHandler", () => {
     expect(firstShutdown).toHaveBeenCalledTimes(1);
     expect(secondShutdown).toHaveBeenCalledTimes(1);
     expect(fakeProcess.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits even when NODE_ENV is test and processPort is the real process", () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "test";
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    try {
+      exitLifecycleProcess(process, 1);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockRestore();
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
+
+  it("does not restart shutdown when a second fatal arrives while the first is in-flight", async () => {
+    const fakeProcess = createFakeProcess();
+    const error = vi.fn();
+    const shutdown = vi.fn(async () => {
+      fakeProcess.emit("unhandledRejection", new Error("process.exit unexpectedly called with \"1\""));
+    });
+
+    installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown });
+    fakeProcess.emit("unhandledRejection", new Error("first fatal"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(fakeProcess.exit).toHaveBeenCalledTimes(1);
   });
 
   it("forces exit when fatal shutdown does not settle before the timeout", async () => {

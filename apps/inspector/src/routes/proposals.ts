@@ -56,8 +56,7 @@ function registerPendingProposalRoutes(app: Hono, options: InspectorProxyOptions
       body: bindReviewerIdentity(body, options),
       // Review is routed through the soul.* memory tool handler, which
       // returns a closed {success: false, error: {code, message}} envelope.
-      // Forward it verbatim so MCP / Inspector / CLI report identical
-      // error.code + error.message.
+      // Forward only catalog copy so MCP / Inspector / CLI share one public set.
       forwardStructuredError: true
     });
   });

@@ -42,10 +42,11 @@ export function createKnowledgeFoundation(
   const evidenceService = createEvidenceService(input, dynamicsServiceRef, gardenIntentPort);
   const governanceLeaseService = new GovernanceLeaseService({
     eventLogRepo: input.eventLogRepo,
+    eventPublisher,
     runLookup: input.runRepo
   });
-  const healthJournalService = createHealthJournalService(input);
-  const greenService = createGreenService(input, governanceLeaseService);
+  const healthJournalService = createHealthJournalService(input, eventPublisher);
+  const greenService = createGreenService(input, governanceLeaseService, eventPublisher);
   const dynamicsService = createDynamicsService(input, greenService, eventPublisher);
   dynamicsServiceRef.current = dynamicsService;
   const memoryService = createMemoryService(
@@ -129,22 +130,28 @@ function createEvidenceService(
   });
 }
 
-function createHealthJournalService(input: DaemonServiceFoundationInput) {
+function createHealthJournalService(
+  input: DaemonServiceFoundationInput,
+  eventPublisher: FoundationEventPublisher
+) {
   return new HealthJournalService({
     repo: input.healthJournalRepo,
     eventLogRepo: input.eventLogRepo,
+    eventPublisher,
     runtimeNotifier: input.runtimeNotifier
   });
 }
 
 function createGreenService(
   input: DaemonServiceFoundationInput,
-  governanceLeaseService: GovernanceLeaseService
+  governanceLeaseService: GovernanceLeaseService,
+  eventPublisher: FoundationEventPublisher
 ) {
   return new GreenService({
     greenStatusRepo: input.greenStatusRepo,
     memoryRepo: input.memoryEntryRepo,
     eventLogRepo: input.eventLogRepo,
+    eventPublisher,
     runtimeNotifier: input.runtimeNotifier,
     leaseService: governanceLeaseService,
     warn: input.warnLogger.warn

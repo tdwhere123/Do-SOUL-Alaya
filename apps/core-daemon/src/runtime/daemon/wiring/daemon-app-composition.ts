@@ -1,3 +1,4 @@
+import { bindEventPublisher } from "@do-soul/alaya-core";
 import {
   createApp,
   type CoreDaemonLifecycleState,
@@ -140,8 +141,7 @@ type CreateCoreDaemonAppInput = Readonly<{
 export function createCoreDaemonApp(input: CreateCoreDaemonAppInput): ReturnType<typeof createApp> {
   const services = {
     requestProtection: {
-      allowedOrigin: input.requestProtection.allowedOrigin,
-      requestToken: input.requestProtection.requestToken,
+      ...input.requestProtection,
       allowDesktopOriginlessRequests: !input.remoteDaemonOptInEnabled
     },
     routes: createRouteServices(input),
@@ -396,8 +396,12 @@ export function shouldEnableE2eEventTriggers(env: NodeJS.ProcessEnv): boolean {
 }
 
 function createE2eEventLogRepo(eventLogRepo: E2eEventLogInputPort): E2eEventLogRepo {
+  const publisher = bindEventPublisher({
+    eventLogRepo,
+    purpose: "e2eEventTriggers"
+  });
   return {
-    append: async (event) => await eventLogRepo.append(event)
+    append: async (event) => await publisher.publish(event)
   };
 }
 

@@ -74,9 +74,7 @@ export function runConditionalFieldWorkerRecall(
     ...(payload.domain_tag_filter === undefined ? {} : { domain_tag_filter: payload.domain_tag_filter }),
     continuation: payload.continuation ?? null,
     cancelled: payload.cancelled === true,
-    ...(payload.authorized_scopes === undefined
-      ? {}
-      : { authorized_scopes: payload.authorized_scopes }), // null stays present; omitted stays omitted.
+    ...authorizedScopesForRecall(payload.authorized_scopes),
     ...(payload.enumeration_policy === undefined
       ? {}
       : { enumeration_policy: payload.enumeration_policy }),
@@ -228,6 +226,30 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
     snapshotPin: (workspaceId) => projection.observablePin(workspaceId),
     ...storedMeasurementReaders(database)
   };
+}
+
+function authorizedScopesForRecall(
+  authorized: unknown
+): { readonly authorized_scopes?: readonly string[] | null } {
+  if (authorized !== null && typeof authorized === "object" && !Array.isArray(authorized)
+    && "mode" in authorized) {
+    const mode = (authorized as { readonly mode?: unknown }).mode;
+    if (mode === "unrestricted") return { authorized_scopes: null };
+    if (mode === "named") {
+      const scopes = (authorized as { readonly scopes?: unknown }).scopes;
+      if (Array.isArray(scopes) && scopes.every((scope) => typeof scope === "string") && scopes.length > 0) {
+        return { authorized_scopes: scopes };
+      }
+    }
+    return {};
+  }
+  if (Array.isArray(authorized)
+    && authorized.length > 0
+    && authorized.every((scope) => typeof scope === "string")) {
+    return { authorized_scopes: authorized };
+  }
+  // omitted / JSON null / [] must not become unrestricted
+  return {};
 }
 
 function readersFor(runtime: RecallReadWorkerRuntime): ObserverReaders {

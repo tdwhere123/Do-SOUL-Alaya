@@ -1,3 +1,4 @@
+import { exitLifecycleProcess, type LifecycleProcessPort, type LifecycleWarnLogger } from "./daemon-signal-shutdown.js";
 import { type LifecycleTimerPort, unrefTimer } from "./daemon-runtime-timing.js";
 
 export type CloseServerResult =
@@ -18,6 +19,26 @@ type ServerCloseOutcome =
 
 const SERVER_CLOSE_TIMEOUT_MS = 10_000;
 const SERVER_CLOSE_FORCE_GRACE_MS = 1_000;
+
+export function finalizeServerClose(
+  closeResult: CloseServerResult,
+  warnLogger: LifecycleWarnLogger,
+  processPort: LifecycleProcessPort
+): void {
+  if (closeResult === "timed_out") {
+    warnLogger.warn("daemon HTTP server close timed out; forcing exit", {
+      result: closeResult
+    });
+    processPort.exitCode = 1;
+    exitLifecycleProcess(processPort, 1);
+    return;
+  }
+  if (closeResult !== "closed") {
+    warnLogger.warn("daemon HTTP server shutdown needed compatibility fallback", {
+      result: closeResult
+    });
+  }
+}
 
 export async function closeServer(
   server: CloseableHttpServer,

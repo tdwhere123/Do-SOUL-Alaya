@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   BOUNDED_EVIDENCE_ARRAY_MAX,
@@ -9,6 +10,13 @@ import {
   IsoDatetimeStringSchema
 } from "../shared/schema-primitives.js";
 import { PathAnchorRefSchema } from "./path-relation.js";
+
+export {
+  TEMPORAL_RELATION_PROJECTION_POLICY_ID,
+  TEMPORAL_RELATION_PROJECTION_POLICY_SHA256,
+  TEMPORAL_RELATION_PROJECTION_PROFILES,
+  type TemporalRelationProjectionProfile
+} from "./relation-projection-policy.js";
 
 const relationAssertionResolutionValues = [
   "contradicted",
@@ -87,9 +95,16 @@ export const RelationAssertionEvidenceReceiptSchema = z
 
 const Sha256DigestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 
+export function emptyBytesSha256(): string {
+  return createHash("sha256").update(Buffer.alloc(0)).digest("hex");
+}
+
+export function emptyJsonArraySha256(): string {
+  return createHash("sha256").update("[]", "utf8").digest("hex");
+}
+
 // On-disk temporal bootstrap identity is SHA-256 of empty bytes, not a structured empty hash.
-export const EMPTY_RELATION_HISTORY_DIGEST =
-  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+export const EMPTY_RELATION_HISTORY_DIGEST = emptyBytesSha256();
 
 export const RelationFormationSourceKind = {
   EVENT_LOG_ENTRY: "event_log_entry",

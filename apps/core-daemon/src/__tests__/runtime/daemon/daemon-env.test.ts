@@ -22,6 +22,22 @@ describe("validateDaemonEnv", () => {
     });
   });
 
+  it("preserves unix-socket and token-binding keys used by createRequestProtection", () => {
+    expect(
+      validateDaemonEnv({
+        ALAYA_REQUEST_TOKEN: "daemon-token",
+        ALAYA_DAEMON_SOCKET: "/tmp/alaya.sock",
+        ALAYA_ALLOW_WILDCARD_BIND: "0",
+        ALAYA_REQUEST_TOKEN_WORKSPACES: "ws-a,ws-b"
+      })
+    ).toMatchObject({
+      ALAYA_REQUEST_TOKEN: "daemon-token",
+      ALAYA_DAEMON_SOCKET: "/tmp/alaya.sock",
+      ALAYA_ALLOW_WILDCARD_BIND: "0",
+      ALAYA_REQUEST_TOKEN_WORKSPACES: "ws-a,ws-b"
+    });
+  });
+
   it("rejects invalid daemon ports", () => {
     expect(() => validateDaemonEnv({ PORT: "70000" })).toThrowError(/PORT/);
   });

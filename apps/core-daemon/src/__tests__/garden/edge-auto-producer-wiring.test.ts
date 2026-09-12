@@ -63,7 +63,10 @@ describe("edge auto producer daemon wiring", () => {
       const enrichPendingRepo = new SqliteEnrichPendingRepo(database);
       const runtimeNotifier = {
         notify: async () => undefined,
-        notifyEntry: async (_entry: EventLogEntry) => undefined
+        notifyEntry: async (_entry: EventLogEntry) => undefined,
+        subscribeRun: () => ({ unsubscribe() { return; }, dispose() { return; } }),
+        subscribeWorkspace: () => ({ unsubscribe() { return; }, dispose() { return; } }),
+        subscribeEntries: () => ({ unsubscribe() { return; }, dispose() { return; } })
       };
       const eventPublisher = new EventPublisher({
         eventLogRepo,
@@ -126,6 +129,8 @@ describe("edge auto producer daemon wiring", () => {
       const warn = vi.fn();
       const edgeRuntime = await createEdgeAndReconciliationRuntime({
         eventLogRepo,
+        eventPublisher,
+        runtimeNotifier,
         memoryEntryRepo: memoryRepo,
         memoryService,
         pathRelationRepo,
@@ -256,7 +261,10 @@ describe("edge auto producer daemon wiring", () => {
       const reconciliationLeaseRepo = new SqliteReconciliationLeaseRepo(database);
       const runtimeNotifier = {
         notify: async () => undefined,
-        notifyEntry: async (_entry: EventLogEntry) => undefined
+        notifyEntry: async (_entry: EventLogEntry) => undefined,
+        subscribeRun: () => ({ unsubscribe() { return; }, dispose() { return; } }),
+        subscribeWorkspace: () => ({ unsubscribe() { return; }, dispose() { return; } }),
+        subscribeEntries: () => ({ unsubscribe() { return; }, dispose() { return; } })
       };
 
       await seedWorkspaceRun(workspaceRepo, runRepo);

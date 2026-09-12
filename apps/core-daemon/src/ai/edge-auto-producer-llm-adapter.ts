@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import type {
   EdgeAutoProducerLlmDecision,
   EdgeAutoProducerLlmPort
@@ -24,25 +23,19 @@ import { readGardenLlmJsonCache, writeGardenLlmJsonCache } from "./garden-llm-ca
  * - garden compute local path only (invariant: no new cloud dependency
  *   may be introduced here — caller resolves the garden secret_ref the
  *   same way the official-api garden provider does)
- * - on-disk decision cache keyed by sha256(model + new fact + neighbor
- *   fact + tags) so a credentialled run populates the cache and later
- *   runs reuse it with zero LLM calls
+ * - on-disk decision cache under DATA_DIR, keyed by sha256(model + new
+ *   fact + neighbor fact + tags), schema-versioned with a short TTL
  * - atomic temp-rename writes so a crash never leaves a truncated entry
- * - malformed / non-ok / timed-out responses degrade to null; the
- *   service then falls back to the local heuristic for that neighbor.
+ * - malformed / non-ok / timed-out responses degrade to null and are
+ *   not cached; the service then falls back to the local heuristic.
  *
  * see also: apps/core-daemon/src/ai/reconciliation-llm-decision.ts
  * see also: packages/core/src/relations/producers/edge-auto-producer-llm-port.ts
  *
  */
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const DECISION_CACHE_ROOT = resolve(
-  __dirname,
-  "../../../../docs/bench-history/datasets/edge-auto-producer-decisions"
-);
-
+const VERDICT_CACHE_SCHEMA_VERSION = 1;
+const VERDICT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const DECISION_REQUEST_TIMEOUT_MS = 60_000;
 
 const DECISION_SYSTEM_PROMPT = [
@@ -64,6 +57,7 @@ export interface EdgeAutoProducerLlmAdapterConfig {
 }
 
 interface CachedVerdict {
+  readonly schema_version: number;
   readonly model: string;
   readonly request_hash: string;
   readonly edge_type: "supports" | "derives_from" | "none";
@@ -81,6 +75,16 @@ export interface PairInput {
   readonly scopeClass: string;
 }
 
+export function resolveEdgeAutoProducerDecisionCacheRoot(
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const dataDir = env.DATA_DIR?.trim();
+  const root = dataDir !== undefined && dataDir.length > 0
+    ? resolve(dataDir)
+    : resolve(process.cwd(), "data");
+  return resolve(root, "cache", "edge-auto-producer-decisions");
+}
+
 /**
  * Build the disk-cached garden-LLM pair-classifier port. Returns null
  * when no garden credentials are configured — the caller then wires
@@ -91,6 +95,8 @@ export interface PairInput {
 export function createEdgeAutoProducerLlmPort(options: {
   readonly config: EdgeAutoProducerLlmAdapterConfig;
   readonly cacheRoot?: string;
+  readonly cacheTtlMs?: number;
+  readonly now?: () => number;
   readonly llmComplete?: (
     prompt: string,
     config: EdgeAutoProducerLlmAdapterConfig
@@ -100,14 +106,18 @@ export function createEdgeAutoProducerLlmPort(options: {
   if (config.apiKey === null) {
     return null;
   }
-  const cacheRoot = options.cacheRoot ?? DECISION_CACHE_ROOT;
+  const cache = {
+    root: options.cacheRoot ?? resolveEdgeAutoProducerDecisionCacheRoot(),
+    ttlMs: options.cacheTtlMs ?? VERDICT_CACHE_TTL_MS,
+    now: options.now ?? Date.now
+  };
   const llmComplete = options.llmComplete ?? requestVerdictFromGarden;
 
   return {
     classifyPair: async ({ newMemory, neighbor }) =>
       await classifyPairWithGardenCache(
         config,
-        cacheRoot,
+        cache,
         llmComplete,
         buildPairInput(newMemory, neighbor)
       )
@@ -163,23 +173,29 @@ function buildPairInput(
   };
 }
 
+interface VerdictCache {
+  readonly root: string;
+  readonly ttlMs: number;
+  readonly now: () => number;
+}
+
 async function classifyPairWithGardenCache(
   config: EdgeAutoProducerLlmAdapterConfig,
-  cacheRoot: string,
+  cache: VerdictCache,
   llmComplete: (prompt: string, config: EdgeAutoProducerLlmAdapterConfig) => Promise<string>,
   pair: PairInput
 ): Promise<EdgeAutoProducerLlmDecision | null> {
   const requestKey = computeRequestKey(config.model, pair);
-  const cached = await readCachedVerdict(cacheRoot, requestKey);
+  const cached = await readCachedVerdict(cache, requestKey);
   if (cached !== undefined) {
     return materializeDecision(cached.edge_type, cached.confidence, cached.rationale);
   }
-  return await requestAndCachePairVerdict(config, cacheRoot, llmComplete, pair, requestKey);
+  return await requestAndCachePairVerdict(config, cache, llmComplete, pair, requestKey);
 }
 
 async function requestAndCachePairVerdict(
   config: EdgeAutoProducerLlmAdapterConfig,
-  cacheRoot: string,
+  cache: VerdictCache,
   llmComplete: (prompt: string, config: EdgeAutoProducerLlmAdapterConfig) => Promise<string>,
   pair: PairInput,
   requestKey: string
@@ -199,13 +215,17 @@ async function requestAndCachePairVerdict(
     return null;
   }
   const parsed = parseVerdict(raw);
-  await writeCachedVerdict(cacheRoot, requestKey, {
+  if (parsed === null) {
+    return null;
+  }
+  await writeCachedVerdict(cache.root, requestKey, {
+    schema_version: VERDICT_CACHE_SCHEMA_VERSION,
     model: config.model,
     request_hash: requestKey,
     edge_type: parsed.edgeType,
     confidence: parsed.confidence,
     rationale: parsed.rationale,
-    decided_at: new Date().toISOString()
+    decided_at: new Date(cache.now()).toISOString()
   });
   return materializeDecision(parsed.edgeType, parsed.confidence, parsed.rationale);
 }
@@ -238,21 +258,32 @@ export function computeRequestKey(model: string, pair: PairInput): string {
   return hash.digest("hex");
 }
 
-async function readCachedVerdict(cacheRoot: string, requestKey: string): Promise<CachedVerdict | undefined> {
+async function readCachedVerdict(
+  cache: VerdictCache,
+  requestKey: string
+): Promise<CachedVerdict | undefined> {
   return readGardenLlmJsonCache({
-    cacheRoot,
+    cacheRoot: cache.root,
     requestKey,
     warningMessage: "[EdgeAutoProducer] verdict cache read failed; treating as miss",
     warningCode: "ALAYA_EDGE_AUTO_PRODUCER_CACHE_READ_FAILED",
-    parseEntry: parseCachedVerdictEntry
+    parseEntry: (parsed, key) => parseCachedVerdictEntry(parsed, key, cache.now(), cache.ttlMs)
   });
 }
 
-function parseCachedVerdictEntry(parsed: unknown, requestKey: string): CachedVerdict | undefined {
+function parseCachedVerdictEntry(
+  parsed: unknown,
+  requestKey: string,
+  nowMs: number,
+  ttlMs: number
+): CachedVerdict | undefined {
   if (typeof parsed !== "object" || parsed === null) {
     return undefined;
   }
   const record = parsed as Partial<CachedVerdict>;
+  if (record.schema_version !== VERDICT_CACHE_SCHEMA_VERSION) {
+    return undefined;
+  }
   if (
     record.edge_type !== "supports" &&
     record.edge_type !== "derives_from" &&
@@ -260,14 +291,22 @@ function parseCachedVerdictEntry(parsed: unknown, requestKey: string): CachedVer
   ) {
     return undefined;
   }
+  if (typeof record.decided_at !== "string") {
+    return undefined;
+  }
+  const decidedAtMs = Date.parse(record.decided_at);
+  if (!Number.isFinite(decidedAtMs) || nowMs - decidedAtMs > ttlMs) {
+    return undefined;
+  }
   const confidence = typeof record.confidence === "number" ? record.confidence : 0;
   return {
+    schema_version: VERDICT_CACHE_SCHEMA_VERSION,
     model: typeof record.model === "string" ? record.model : "",
     request_hash: typeof record.request_hash === "string" ? record.request_hash : requestKey,
     edge_type: record.edge_type,
     confidence,
     rationale: typeof record.rationale === "string" ? record.rationale : "",
-    decided_at: typeof record.decided_at === "string" ? record.decided_at : ""
+    decided_at: record.decided_at
   };
 }
 
@@ -279,17 +318,17 @@ function parseVerdict(rawJson: string): {
   edgeType: "supports" | "derives_from" | "none";
   confidence: number;
   rationale: string;
-} {
+} | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawJson);
   } catch {
     emitMalformedVerdictWarning("non-json", rawJson);
-    return { edgeType: "none", confidence: 0, rationale: "non-json response" };
+    return null;
   }
-  if (typeof parsed !== "object" || parsed === null) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     emitMalformedVerdictWarning("non-object", rawJson);
-    return { edgeType: "none", confidence: 0, rationale: "non-object response" };
+    return null;
   }
   const record = parsed as {
     readonly edge_type?: unknown;

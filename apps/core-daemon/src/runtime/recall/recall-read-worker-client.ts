@@ -28,6 +28,7 @@ import {
   normalizeWorkerCount,
   resolveDefaultWorkerUrl
 } from "../recall-read-worker/client-config.js";
+import { encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
 import { createTierWindowChunkConsumer } from "../recall-read-worker/tier-window-client.js";
 import {
   createWorkerMemoryRepo,
@@ -56,24 +57,31 @@ export function createRecallReadWorkerClient(input: {
   readonly workerCount?: number;
   readonly requestTimeoutMs?: number;
   readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
+  readonly allowDirectSqliteRecallReads?: boolean;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): RecallReadWorkerClient | null {
+  const allowDirect = input.allowDirectSqliteRecallReads === true;
   if (input.databaseFilename === ":memory:") {
-    return null;
-  }
-
-  // Source vitest must not inherit a leftover dist worker.
-  if (input.workerUrl === undefined && isSourceRuntimeUrl(import.meta.url)) {
+    if (!allowDirect) {
+      throw new Error("recall read worker cannot use :memory:; set allowDirectSqliteRecallReads");
+    }
     input.warn?.(
-      "recall read worker script unavailable in source runtime; using direct sqlite recall reads",
-      { reason: "worker_script_missing" }
+      "recall read worker degraded to direct sqlite because allowDirectSqliteRecallReads is set",
+      { reason: "direct_sqlite_recall_reads", database: ":memory:" }
     );
     return null;
   }
 
   const workerUrl = input.workerUrl ?? resolveDefaultWorkerUrl();
   if (workerUrl === null) {
-    throw new Error("recall read worker script is missing");
+    if (!allowDirect) {
+      throw new Error("recall read worker script is missing");
+    }
+    input.warn?.(
+      "recall read worker degraded to direct sqlite because allowDirectSqliteRecallReads is set",
+      { reason: "direct_sqlite_recall_reads", cause: "worker_script_missing" }
+    );
+    return null;
   }
 
   return new WorkerBackedRecallReadClient({ ...input, workerUrl });
@@ -214,7 +222,10 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       const worker = this.snapshotSession.pinnedWorker()
         ?? (preferred !== undefined && this.workers.includes(preferred) ? preferred : this.requireWorker("conditionalField.recall"));
       const parsed = ConditionalFieldRecallPortResultSchema.parse(
-        await this.dispatchToWorker(worker, "conditionalField.recall", input)
+        await this.dispatchToWorker(worker, "conditionalField.recall", {
+          ...input,
+          authorized_scopes: encodeAuthorizedScopesAdmission(input.authorized_scopes)
+        })
       );
       for (const key of [parsed.preparation_id, parsed.index.continuation?.continuation_id]) {
         if (key !== undefined) this.deliveryOwners.set(key, worker);
@@ -498,6 +509,4 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   }
 }
 
-function isSourceRuntimeUrl(url: string): boolean {
-  return url.includes("/src/runtime/");
-}
+

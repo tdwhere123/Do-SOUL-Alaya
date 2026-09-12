@@ -54,7 +54,7 @@ export function readExternalPostTurnPayload(
   const payload = parsePostTurnExtractTaskPayload(row.payload);
   if (payload.workspace_id !== context.workspaceId || payload.run_id !== resolvedRunId) {
     throw new GardenTaskValidationError(
-      `Garden task ${row.id} post-turn payload escaped the claimed workspace or run.`
+      `Garden task post-turn payload escaped the claimed workspace or run: ${row.id}`
     );
   }
   return payload;
@@ -89,7 +89,7 @@ async function finalizeExternalPostTurnEvidence(
     beforeReceive: async () => {
       if (params.deps.gardenTaskRepo!.refreshClaim(row.id, completionClaimedBy, params.now())) return;
       throw new GardenTaskValidationError(
-        `Garden task ${row.id} completion claim changed before candidate signal emission.`
+        `Garden task completion claim changed before candidate signal emission: ${row.id}`
       );
     }
   });

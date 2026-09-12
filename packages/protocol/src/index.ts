@@ -101,6 +101,7 @@ export * from "./recall/compute-routing.js";
 export * from "./lifecycle/consolidation-types.js";
 export * from "./surfaces/surface-drift.js";
 export * from "./surfaces/mcp-types.js";
+export * from "./surfaces/public-error-catalog.js";
 export * from "./governance/trust-state.js";
 export * from "./lifecycle/orphan-radar.js";
 export * from "./surfaces/slot.js";

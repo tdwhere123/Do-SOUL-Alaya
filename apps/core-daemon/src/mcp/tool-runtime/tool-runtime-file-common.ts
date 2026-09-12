@@ -1,5 +1,9 @@
+import { realpath as realpathCallback } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const realpathNative = promisify(realpathCallback.native);
 import type { FileToolError, FileToolErrorCode } from "@do-soul/alaya-protocol";
 
 export type FileSystemEntryResult =
@@ -154,5 +158,26 @@ function fdExecPath(fd: number): string {
 }
 
 export async function resolveOpenedFileRealPath(fd: number, resolvedPath: string): Promise<string> {
-  return process.platform === "linux" ? await realpath(fdExecPath(fd)) : await realpath(resolvedPath);
+  if (process.platform === "win32") {
+    const stats = await lstat(resolvedPath);
+    if (stats.isSymbolicLink()) {
+      const error = new Error(`Path is a reparse point: ${resolvedPath}`) as NodeJS.ErrnoException;
+      error.code = "ELOOP";
+      throw error;
+    }
+    // FILE_FLAG_OPEN_REPARSE_POINT only covers the last component. Intermediate
+    // directory junctions must be resolved via GetFinalPathNameByHandle.
+    return normalizeWindowsFinalPath(await realpathNative(resolvedPath));
+  }
+  return await realpath(fdExecPath(fd));
+}
+
+function normalizeWindowsFinalPath(finalPath: string): string {
+  if (finalPath.startsWith("\\\\?\\UNC\\")) {
+    return `\\\\${finalPath.slice("\\\\?\\UNC\\".length)}`;
+  }
+  if (finalPath.startsWith("\\\\?\\")) {
+    return finalPath.slice("\\\\?\\".length);
+  }
+  return finalPath;
 }

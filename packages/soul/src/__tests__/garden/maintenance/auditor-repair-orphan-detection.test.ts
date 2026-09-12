@@ -17,9 +17,13 @@ type HealablePointerRecord = Awaited<
 
 const randomUuidMock = vi.hoisted(() => vi.fn());
 
-vi.mock("node:crypto", () => ({
-  randomUUID: randomUuidMock
-}));
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return {
+    ...actual,
+    randomUUID: randomUuidMock
+  };
+});
 
 describe("Auditor 4B", () => {  it("dispatches pointer_healing and clears each supported ref kind", async () => {
     const pointerHealPort = {
@@ -144,7 +148,9 @@ describe("Auditor 4B", () => {  it("dispatches pointer_healing and clears each s
     const scheduler = {
       reportCompletion: vi.fn(async () => undefined)
     };
+    const eventLogRepo = createTransactionalEventLogRepo();
     const auditor = new Auditor({
+      eventLogRepo,
       evidenceCheckPort: { findMemoriesWithStaleEvidence: vi.fn(async () => []) },
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
       pointerHealPort: {

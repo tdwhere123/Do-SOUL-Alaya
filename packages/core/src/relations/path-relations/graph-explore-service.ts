@@ -17,6 +17,7 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { bindEventPublisher } from "../../runtime/event-publisher.js";
 import { parseObjectId } from "../../shared/validators.js";
 
 // invariant: soul.explore_graph reads the unified path plane, not
@@ -108,7 +109,10 @@ export class GraphExploreService {
     neighborCount: number,
     runId: string | null
   ): Promise<void> {
-    await this.dependencies.eventLogRepo.append({
+    await bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      purpose: "GraphExploreService"
+    }).publish({
       event_type: GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
       entity_type: "memory_entry",
       entity_id: parsed.memoryId,

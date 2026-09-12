@@ -242,6 +242,26 @@ describe("Auditor", () => {  it("assesses cold start and generates draft candida
   });
 });
 
+function createPassthroughEventLogPort(): NonNullable<AuditorDependencies["eventLogRepo"]> {
+  return {
+    append: vi.fn(),
+    appendManyWithMutation: vi.fn(
+      async <T>(
+        entries: readonly object[],
+        mutate: (rows: readonly object[]) => T
+      ): Promise<T> =>
+        mutate(
+          entries.map((entry, idx) => ({
+            ...entry,
+            event_id: `evt-${idx}`,
+            created_at: "2026-03-27T00:00:00.000Z",
+            revision: idx
+          }))
+        )
+    ) as NonNullable<AuditorDependencies["eventLogRepo"]>["appendManyWithMutation"]
+  };
+}
+
 function createAuditor(options: {
   readonly staleEntries?: readonly StaleMemoryEntry[];
   readonly brokenPointers?: readonly BrokenPointerRecord[];
@@ -252,6 +272,7 @@ function createAuditor(options: {
   readonly pendingPatternKeys?: readonly string[];
   readonly findBrokenPointers?: (workspaceId: string) => Promise<readonly BrokenPointerRecord[]>;
   readonly eventLogRepo?: AuditorDependencies["eventLogRepo"];
+  readonly omitEventLogRepo?: boolean;
   readonly revokeAffected?: number;
 } = {}) {
   const evidenceCheckPort = {
@@ -304,7 +325,9 @@ function createAuditor(options: {
       bootstrappingPort,
       scheduler,
       healthJournal,
-      eventLogRepo: options.eventLogRepo,
+      ...(options.omitEventLogRepo === true
+        ? {}
+        : { eventLogRepo: options.eventLogRepo ?? createPassthroughEventLogPort() }),
       now: () => "2026-03-27T00:00:00.000Z"
     }),
     evidenceCheckPort,

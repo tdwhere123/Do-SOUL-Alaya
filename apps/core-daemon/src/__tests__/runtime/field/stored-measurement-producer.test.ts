@@ -228,6 +228,7 @@ describe("worker stored measurement producer", () => {
     let pairCalls = 0;
     const counted = {
       ...readers,
+      measureStoredPairs: undefined,
       measureStoredPair: (input: Parameters<NonNullable<typeof readers.measureStoredPair>>[0]) => {
         pairCalls += 1;
         return readers.measureStoredPair!(input);
@@ -348,6 +349,45 @@ describe("worker stored measurement producer", () => {
       queryDigest: digestOriginalQuery(QUERY_TEXT), profile, byteLimit: 65536, workLimit: 100 });
     expect(retry.objectStatus).toBe("ready");
     expect(retry.queryStatus).toBe("ready");
+  });
+
+  it("batches pair vectors and reuses prepared statements across measurements", async () => {
+    const { readers, fixture } = await plantMixedProfiles();
+    const profile = obligation(MODEL_B);
+    const digest = digestOriginalQuery(QUERY_TEXT);
+    const prepared = fixture.database.connection.prepare.bind(fixture.database.connection);
+    let queryIdPrepares = 0;
+    fixture.database.connection.prepare = ((sql: string) => {
+      if (sql.includes("content_hash = ?") && sql.includes("ORDER BY object_id LIMIT 1")) {
+        queryIdPrepares += 1;
+      }
+      return prepared(sql);
+    }) as typeof fixture.database.connection.prepare;
+    const batched = (readers as typeof readers & {
+      readonly measureStoredPairs: (input: {
+        readonly workspaceId: string;
+        readonly objectIds: readonly string[];
+        readonly queryDigest: string;
+        readonly profile?: typeof profile;
+      }) => {
+        readonly byObjectId: Readonly<Record<string, NonNullable<ReturnType<NonNullable<typeof readers.measureStoredPair>>>>>;
+        readonly rowVisits: number;
+        readonly bytesRead: number;
+      };
+    }).measureStoredPairs({
+      workspaceId: WORKSPACE,
+      objectIds: [OBJECT_B, EXTRA_B[0]!],
+      queryDigest: digest,
+      profile
+    });
+    expect(queryIdPrepares).toBe(1);
+    expect(Object.keys(batched.byObjectId).sort()).toEqual([EXTRA_B[0], OBJECT_B].sort());
+    expect(batched.byObjectId[OBJECT_B]?.objectStatus).toBe("ready");
+    expect(batched.byObjectId[OBJECT_B]?.queryStatus).toBe("ready");
+    readers.measureStoredPair!({
+      workspaceId: WORKSPACE, objectId: OBJECT_B, queryDigest: digest, profile
+    });
+    expect(queryIdPrepares).toBe(1);
   });
 
   it("admits an authorized prepared measurement after reading the actual source scope", async () => {

@@ -147,6 +147,7 @@ describe("writeFile with an unresolvable writable root", () => {
       };
 
       expect(result.ok).toBe(false);
+      expect(result.code).toBe("ACCESS_DENIED");
       // The file was not written to (it remains pre-existing-content) and is not deleted
       await expect(readFile(outsideTarget, "utf8")).resolves.toBe("pre-existing-content");
     } finally {

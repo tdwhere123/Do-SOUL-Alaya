@@ -1,6 +1,14 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { vi } from "vitest";
+
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
+    const answer = { address: "93.184.216.34", family: 4 };
+    return options?.all === true ? [answer] : answer;
+  })
+}));
 
 // Unit tests use ephemeral temp cache roots with mock extractors; they are not
 // cache-only bench runs and should not require a committed extraction manifest.

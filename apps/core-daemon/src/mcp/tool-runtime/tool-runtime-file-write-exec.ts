@@ -1,13 +1,10 @@
 import { execFile } from "node:child_process";
-import { constants } from "node:fs";
 import {
-  open,
   readFile as fsReadFile,
-  realpath,
-  type FileHandle
+  realpath
 } from "node:fs/promises";
 import path from "node:path";
-import type { ExecShellToolInput } from "@do-soul/alaya-protocol";
+import type { ExecShellToolInput, FileToolError } from "@do-soul/alaya-protocol";
 import type { GitBindingValidationOptions } from "./tool-runtime-files.js";
 import {
   DEFAULT_EXEC_TIMEOUT_MS,
@@ -16,15 +13,14 @@ import {
   MAX_EXEC_OUTPUT_BYTES,
   MAX_EXEC_TIMEOUT_MS
 } from "./tool-runtime-file-constants.js";
+import { containedFdPath, openContained } from "./open-contained.js";
 import {
   createAccessDenied,
   createFileToolError,
   isPathWithinRoot,
   isNodeErrorWithCode,
-  mapFileSystemError,
   readFileSystemEntry,
   resolveContainedPath,
-  resolveOpenedFileRealPath,
   resolveRealWritableRoots,
   swallowBestEffortCleanup,
   type WorkspaceGitBindingStatus
@@ -32,10 +28,6 @@ import {
 export { writeFile } from "./tool-runtime-file-write.js";
 
 const EXEC_COMMAND_CONTAINMENT_MESSAGE = "Command must be a real non-symlink executable inside a writable root.";
-
-function fdExecPath(fd: number): string {
-  return process.platform === "linux" ? `/proc/self/fd/${fd}` : `/dev/fd/${fd}`;
-}
 
 function warnExecContainmentFailure(operation: string, error: unknown): void {
   process.emitWarning(`[ToolRuntime] exec containment ${operation} failed`, {
@@ -45,15 +37,6 @@ function warnExecContainmentFailure(operation: string, error: unknown): void {
       errno: isNodeErrorWithCode(error) ? error.code : "unknown"
     })
   });
-}
-
-function mapExecContainmentOpenError(error: unknown): ReturnType<typeof createAccessDenied> {
-  if (isNodeErrorWithCode(error)) {
-    if (error.code === "ENOSPC" || error.code === "EIO" || error.code === "EMFILE" || error.code === "ENFILE") {
-      return mapFileSystemError(error, "exec command", "READ_ERROR");
-    }
-  }
-  return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
 }
 
 export async function execShell(
@@ -124,7 +107,7 @@ type ContainedExecutableCommand =
       readonly execPath: string;
       readonly release: () => Promise<void>;
     }>
-  | ReturnType<typeof createAccessDenied>;
+  | FileToolError;
 
 async function openContainedExecutableForExec(
   command: string,
@@ -142,45 +125,33 @@ async function openContainedExecutableForExec(
     };
   }
 
-  const containedPath = resolveContainedPath(command, writableRoots);
-  if (!containedPath.ok) {
-    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
-  }
-
-  const realWritableRoots = await resolveRealWritableRoots(writableRoots);
-  if (realWritableRoots.length === 0) {
-    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
-  }
-
-  let handle: FileHandle;
-  try {
-    handle = await open(containedPath.resolvedPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch (error) {
-    warnExecContainmentFailure("open", error);
-    return mapExecContainmentOpenError(error);
-  }
-
-  try {
-    const stat = await handle.stat();
-    if (!stat.isFile() || !hasExecutableMode(stat.mode)) {
-      await handle.close();
-      return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+  const opened = await openContained(command, writableRoots, "file", {
+    onOpenError: (error) => {
+      warnExecContainmentFailure("open", error);
     }
-    const execPath = fdExecPath(handle.fd);
-    const fdRealPath = await realpath(execPath);
-    if (!realWritableRoots.some((root) => isPathWithinRoot(fdRealPath, root))) {
-      await handle.close();
+  });
+  if (!opened.ok) {
+    if (opened.code === "READ_ERROR") {
+      return opened;
+    }
+    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+  }
+
+  try {
+    const stat = await opened.handle.stat();
+    if (!hasExecutableMode(stat.mode)) {
+      await opened.handle.close();
       return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
     }
     return {
       ok: true,
-      execPath,
+      execPath: containedFdPath(opened.handle, opened.realPath),
       release: async () => {
-        await handle.close();
+        await opened.handle.close();
       }
     };
   } catch (error) {
-    await handle.close().catch(swallowBestEffortCleanup("close-exec-handle"));
+    await opened.handle.close().catch(swallowBestEffortCleanup("close-exec-handle"));
     warnExecContainmentFailure("validate", error);
     return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
   }

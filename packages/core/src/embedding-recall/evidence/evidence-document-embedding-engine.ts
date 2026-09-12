@@ -32,6 +32,11 @@ interface DocumentMiss {
   readonly text: string;
 }
 
+interface CachedDocumentVector {
+  readonly vector: Float32Array;
+  readonly persisted: Set<string>;
+}
+
 const DOCUMENT_ROLE = "evidence_document";
 
 export class EvidenceDocumentEmbeddingError extends Error {
@@ -45,9 +50,8 @@ export class EvidenceDocumentEmbeddingError extends Error {
 }
 
 export class EvidenceDocumentEmbeddingEngine {
-  private readonly cache = new Map<string, Float32Array>();
+  private readonly cache = new Map<string, CachedDocumentVector>();
   private readonly pending = new Map<string, Promise<Float32Array>>();
-  private readonly persistedKeys = new Set<string>();
   private readonly warn: (message: string, meta: Record<string, unknown>) => void;
 
   public constructor(
@@ -78,8 +82,7 @@ export class EvidenceDocumentEmbeddingEngine {
       const persistedCount = await this.persistMissing(
         input.workspaceId,
         documents,
-        embeddings,
-        this.persistedKeys
+        embeddings
       );
       return Object.freeze({
         embeddings: Object.freeze(embeddings),
@@ -128,7 +131,7 @@ export class EvidenceDocumentEmbeddingEngine {
         const document = documentsByIdentity.get(persistentKey(record));
         if (document === undefined) continue;
         this.putCached(document.cacheKey, record.embedding);
-        this.persistedKeys.add(persistentKey(document));
+        this.markPersisted(document.cacheKey, persistentKey(document));
       }
     } catch (error) {
       this.warnStoreFailure("read", workspaceId, error);
@@ -137,7 +140,7 @@ export class EvidenceDocumentEmbeddingEngine {
 
   private needsStoreLookup(document: PreparedDocument): boolean {
     return this.getCached(document.cacheKey) === null ||
-      !this.persistedKeys.has(persistentKey(document));
+      !this.isPersisted(document);
   }
 
   private resolveMisses(documents: readonly PreparedDocument[]): DocumentMiss[] {
@@ -178,11 +181,14 @@ export class EvidenceDocumentEmbeddingEngine {
   private async persistMissing(
     workspaceId: string,
     documents: readonly PreparedDocument[],
-    embeddings: readonly Float32Array[],
-    storedKeys: ReadonlySet<string>
+    embeddings: readonly Float32Array[]
   ): Promise<number> {
     if (this.store === undefined) return 0;
     const timestamp = this.now();
+    const storedKeys = new Set<string>();
+    for (const document of documents) {
+      if (this.isPersisted(document)) storedKeys.add(persistentKey(document));
+    }
     const records = uniqueMissingRecords(
       workspaceId,
       documents,
@@ -194,7 +200,13 @@ export class EvidenceDocumentEmbeddingEngine {
     if (records.length === 0) return 0;
     try {
       await this.store.upsertMany(records);
-      for (const record of records) this.persistedKeys.add(persistentKey(record));
+      const documentsByPersistentKey = new Map(
+        documents.map((document) => [persistentKey(document), document] as const)
+      );
+      for (const record of records) {
+        const document = documentsByPersistentKey.get(persistentKey(record));
+        if (document !== undefined) this.markPersisted(document.cacheKey, persistentKey(record));
+      }
       return records.length;
     } catch (error) {
       this.warnStoreFailure("write", workspaceId, error);
@@ -225,22 +237,34 @@ export class EvidenceDocumentEmbeddingEngine {
   }
 
   private getCached(key: string): Float32Array | null {
-    const vector = this.cache.get(key);
-    if (vector === undefined) return null;
+    const entry = this.cache.get(key);
+    if (entry === undefined) return null;
     this.cache.delete(key);
-    this.cache.set(key, vector);
-    return new Float32Array(vector);
+    this.cache.set(key, entry);
+    return new Float32Array(entry.vector);
   }
 
   private putCached(key: string, vector: Float32Array): void {
     if (this.capacity <= 0) return;
+    const existing = this.cache.get(key);
     this.cache.delete(key);
-    this.cache.set(key, new Float32Array(vector));
+    this.cache.set(key, {
+      vector: new Float32Array(vector),
+      persisted: existing?.persisted ?? new Set()
+    });
     while (this.cache.size > this.capacity) {
       const oldest = this.cache.keys().next().value as string | undefined;
       if (oldest === undefined) return;
       this.cache.delete(oldest);
     }
+  }
+
+  private isPersisted(document: PreparedDocument): boolean {
+    return this.cache.get(document.cacheKey)?.persisted.has(persistentKey(document)) === true;
+  }
+
+  private markPersisted(cacheKey: string, key: string): void {
+    this.cache.get(cacheKey)?.persisted.add(key);
   }
 
   private cacheKey(text: string): string {

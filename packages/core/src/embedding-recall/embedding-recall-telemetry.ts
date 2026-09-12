@@ -5,11 +5,13 @@ import {
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 import { toErrorMessage } from "./helpers.js";
 import type { EmbeddingRecallServiceDependencies } from "./types.js";
 
 export interface EmbeddingRecallTelemetryDependencies {
   readonly eventLogRepo: EmbeddingRecallServiceDependencies["eventLogRepo"];
+  readonly eventPublisher?: EmbeddingRecallServiceDependencies["eventPublisher"];
   readonly healthJournalRecorder: EmbeddingRecallServiceDependencies["healthJournalRecorder"];
   readonly provider: EmbeddingRecallServiceDependencies["provider"];
   readonly now: () => string;
@@ -29,7 +31,11 @@ export class EmbeddingRecallTelemetry {
     readonly fallbackCandidateCount: number;
   }): Promise<void> {
     try {
-      await this.deps.eventLogRepo.append({
+      await bindEventPublisher({
+        eventPublisher: this.deps.eventPublisher,
+        eventLogRepo: this.deps.eventLogRepo,
+        purpose: "EmbeddingRecallTelemetry"
+      }).publish({
         event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
         entity_type: "recall_embedding_supplement",
         entity_id: params.queryId,
@@ -91,7 +97,10 @@ export class EmbeddingRecallTelemetry {
     readonly entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
   }): Promise<void> {
     try {
-      await this.deps.eventLogRepo.append(params.entry);
+      await bindEventPublisher({
+        eventLogRepo: this.deps.eventLogRepo,
+        purpose: "EmbeddingRecallTelemetry"
+      }).publish(params.entry);
     } catch (error) {
       this.deps.warn("embedding supplement telemetry failed", {
         workspace_id: params.workspaceId,

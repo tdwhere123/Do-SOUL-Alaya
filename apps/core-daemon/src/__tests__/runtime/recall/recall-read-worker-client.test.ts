@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE
 } from "@do-soul/alaya-core";
@@ -23,7 +23,8 @@ import {
 } from "../../../runtime/recall-read-worker/protocol.js";
 import {
   conditionalRecallPayload,
-  createQueryOnlyRuntime
+  createQueryOnlyRuntime,
+  encodeWorkerRecallPayload
 } from "../field/query-only-hydration-fixture.js";
 import { identityAssociationCap } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 import {
@@ -33,16 +34,37 @@ import {
 } from "./recall-read-worker-client-fixture.js";
 
 describe("RecallReadWorkerClient", () => {
-  it("does not attach a leftover dist worker when default-constructed from source", async () => {
+  it("resolves the built worker from source instead of silently using direct sqlite", async () => {
     expect(existsSync(fileURLToPath(builtWorkerUrl))).toBe(true);
+    const directory = mkdtempSync(join(tmpdir(), "alaya-source-runtime-"));
+    const databasePath = join(directory, "alaya.db");
+    const database = initDatabase({ filename: databasePath });
+    database.close();
+    closeCachedDatabase(databasePath);
     const client = createRecallReadWorkerClient({
-      databaseFilename: join(tmpdir(), `alaya-source-runtime-${randomUUID()}.db`)
+      databaseFilename: databasePath
     });
     try {
-      expect(client).toBeNull();
+      expect(client).not.toBeNull();
     } finally {
       await client?.close();
+      removeTempDirectorySync(directory);
     }
+  });
+
+  it("refuses :memory: and a missing worker unless direct sqlite is explicit", () => {
+    expect(() => createRecallReadWorkerClient({ databaseFilename: ":memory:" }))
+      .toThrow(/allowDirectSqliteRecallReads/);
+    const warn = vi.fn();
+    expect(createRecallReadWorkerClient({
+      databaseFilename: ":memory:",
+      allowDirectSqliteRecallReads: true,
+      warn
+    })).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      "recall read worker degraded to direct sqlite because allowDirectSqliteRecallReads is set",
+      expect.objectContaining({ reason: "direct_sqlite_recall_reads" })
+    );
   });
 
   it("keeps the daemon event loop available during a file-backed SQLite recall read", async () => {
@@ -413,10 +435,10 @@ describe("RecallReadWorkerClient", () => {
         protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
         id: 1,
         operation: "conditionalField.recall",
-        payload: {
+        payload: encodeWorkerRecallPayload({
           ...conditionalRecallPayload("needle"),
           cap_contracts: [cap]
-        }
+        })
       }) as {
         readonly execution_receipt?: {
           readonly compile_input?: {
@@ -443,7 +465,7 @@ describe("RecallReadWorkerClient", () => {
         protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
         id: 1,
         operation: "conditionalField.recall",
-        payload: undeclared
+        payload: encodeWorkerRecallPayload(undeclared)
       })).rejects.toThrow(RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE);
     } finally {
       database.close();

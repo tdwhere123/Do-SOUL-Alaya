@@ -23,6 +23,7 @@ import type { RecallCandidate } from "../recall/recall-service.js";
 
 import { ContextLensProjectionBuilder } from "./context-lens-projection-builder.js";
 import { isExpired } from "../shared/time.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 import {
   MAX_LENS_STORE_SIZE,
   type AssembleResult,
@@ -122,7 +123,10 @@ export class ContextLensAssembler {
       contextLens = degradationApplication.contextLens;
       workingProjection = degradationApplication.workingProjection;
     }
-    await this.dependencies.eventLogRepo.append({
+    await bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      purpose: "ContextLensAssembler"
+    }).publish({
       event_type: RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
       entity_type: "context_lens",
       entity_id: contextLens.runtime_id,
@@ -247,7 +251,10 @@ export class ContextLensAssembler {
         params.activeOverrides
       );
       tokensAfterDegradation = workingProjection.total_token_estimate;
-      await this.dependencies.eventLogRepo.append({
+      await bindEventPublisher({
+        eventLogRepo: this.dependencies.eventLogRepo,
+        purpose: "ContextLensAssembler"
+      }).publish({
         event_type: BudgetEventType.SOUL_BUDGET_DEGRADED,
         entity_type: "context_lens",
         entity_id: contextLens.runtime_id,

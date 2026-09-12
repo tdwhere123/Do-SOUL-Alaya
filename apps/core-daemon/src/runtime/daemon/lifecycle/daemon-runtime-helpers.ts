@@ -315,9 +315,7 @@ function ensureUnhandledRejectionShutdown(
     .then(() => {
       if (processPort.exit !== undefined) {
         const exitCode = typeof processPort.exitCode === "number" ? processPort.exitCode : 1;
-        if (processPort !== process || process.env.NODE_ENV !== "test") {
-          processPort.exit(exitCode);
-        }
+        processPort.exit(exitCode);
       }
     });
 }
@@ -329,18 +327,26 @@ function handleFatalProcessError(
   shutdownFailureMessage: string,
   reason: unknown
 ): void {
+  // A second fatal during shutdown (vitest intercepting process.exit, or
+  // another rejection while the first shutdown is in-flight) must not clear
+  // the shutdown promise and re-exit — that loops until the heap dies.
+  const alreadySeen = processState[UNHANDLED_REJECTION_SEEN_KEY] === true;
   processState[UNHANDLED_REJECTION_SEEN_KEY] = true;
-  processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error(message, {
-    reason: formatUnknownErrorMessage(reason)
-  });
-  processPort.exitCode = 1;
-  processState[UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY] = undefined;
-  ensureUnhandledRejectionShutdown(processState, processPort);
-  if (processState[UNHANDLED_REJECTION_SHUTDOWN_KEY] === undefined) {
-    processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error(shutdownFailureMessage, {
-      error: "no shutdown handler installed"
+  if (!alreadySeen) {
+    processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error(message, {
+      reason: formatUnknownErrorMessage(reason)
     });
+    processPort.exitCode = 1;
+    processState[UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY] = undefined;
+    ensureUnhandledRejectionShutdown(processState, processPort);
+    if (processState[UNHANDLED_REJECTION_SHUTDOWN_KEY] === undefined) {
+      processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error(shutdownFailureMessage, {
+        error: "no shutdown handler installed"
+      });
+    }
+    return;
   }
+  processPort.exitCode = 1;
 }
 
 function ensureFatalShutdownForceExitTimer(
@@ -360,9 +366,7 @@ function ensureFatalShutdownForceExitTimer(
     );
     processPort.exitCode = 1;
     if (processPort.exit !== undefined) {
-      if (processPort !== process || process.env.NODE_ENV !== "test") {
-        processPort.exit(1);
-      }
+      processPort.exit(1);
     }
   }, timeoutMs);
   unrefTimer(timeout);

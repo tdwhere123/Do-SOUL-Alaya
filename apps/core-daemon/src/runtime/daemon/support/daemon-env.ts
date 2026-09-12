@@ -16,6 +16,9 @@ export type ValidatedDaemonEnv = Readonly<{
   readonly ALLOWED_ORIGIN?: string;
   readonly ALAYA_REQUEST_TOKEN?: string;
   readonly ALAYA_ALLOW_REMOTE_DAEMON?: string;
+  readonly ALAYA_ALLOW_WILDCARD_BIND?: string;
+  readonly ALAYA_DAEMON_SOCKET?: string;
+  readonly ALAYA_REQUEST_TOKEN_WORKSPACES?: string;
   readonly ALAYA_LOG_LEVEL?: string;
   readonly LOG_LEVEL?: string;
   readonly ALAYA_REVIEWER_TOKEN?: string;
@@ -49,6 +52,9 @@ function normalizeDaemonEnv(env: DaemonEnvLike) {
     allowedOrigin: readOptionalTrimmed(env.ALLOWED_ORIGIN),
     requestToken: readOptionalTrimmed(env.ALAYA_REQUEST_TOKEN),
     remoteOptIn: readOptionalTrimmed(env.ALAYA_ALLOW_REMOTE_DAEMON),
+    wildcardBindOptIn: readOptionalTrimmed(env.ALAYA_ALLOW_WILDCARD_BIND),
+    daemonSocket: readOptionalTrimmed(env.ALAYA_DAEMON_SOCKET),
+    requestTokenWorkspaces: readOptionalTrimmed(env.ALAYA_REQUEST_TOKEN_WORKSPACES),
     reviewerToken: readOptionalTrimmed(env.ALAYA_REVIEWER_TOKEN),
     reviewerIdentity: readOptionalTrimmed(env.ALAYA_REVIEWER_IDENTITY)
   };
@@ -59,6 +65,7 @@ function validateDaemonEnvInputs(input: ReturnType<typeof normalizeDaemonEnv>): 
   validateDaemonHost(input.daemonHost);
   validateAllowedOrigin(input.allowedOrigin);
   validateRemoteOptIn(input.remoteOptIn);
+  validateFlagOptIn("ALAYA_ALLOW_WILDCARD_BIND", input.wildcardBindOptIn);
   validateReviewerPair(input.reviewerToken, input.reviewerIdentity);
 }
 
@@ -101,10 +108,12 @@ function validateAllowedOrigin(allowedOrigin: string | undefined): void {
 }
 
 function validateRemoteOptIn(remoteOptIn: string | undefined): void {
-  if (remoteOptIn !== undefined && remoteOptIn !== "0" && remoteOptIn !== "1") {
-    throw new Error(
-      `Invalid daemon env ALAYA_ALLOW_REMOTE_DAEMON: expected "0" or "1", got ${remoteOptIn}`
-    );
+  validateFlagOptIn("ALAYA_ALLOW_REMOTE_DAEMON", remoteOptIn);
+}
+
+function validateFlagOptIn(label: string, value: string | undefined): void {
+  if (value !== undefined && value !== "0" && value !== "1") {
+    throw new Error(`Invalid daemon env ${label}: expected "0" or "1", got ${value}`);
   }
 }
 
@@ -138,6 +147,15 @@ function buildValidatedDaemonEnv(
     ...(normalized.remoteOptIn === undefined
       ? {}
       : { ALAYA_ALLOW_REMOTE_DAEMON: normalized.remoteOptIn }),
+    ...(normalized.wildcardBindOptIn === undefined
+      ? {}
+      : { ALAYA_ALLOW_WILDCARD_BIND: normalized.wildcardBindOptIn }),
+    ...(normalized.daemonSocket === undefined
+      ? {}
+      : { ALAYA_DAEMON_SOCKET: normalized.daemonSocket }),
+    ...(normalized.requestTokenWorkspaces === undefined
+      ? {}
+      : { ALAYA_REQUEST_TOKEN_WORKSPACES: normalized.requestTokenWorkspaces }),
     ...(env.ALAYA_LOG_LEVEL === undefined ? {} : { ALAYA_LOG_LEVEL: env.ALAYA_LOG_LEVEL }),
     ...(env.LOG_LEVEL === undefined ? {} : { LOG_LEVEL: env.LOG_LEVEL }),
     ...(normalized.reviewerToken === undefined

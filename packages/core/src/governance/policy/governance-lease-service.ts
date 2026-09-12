@@ -16,6 +16,7 @@ import {
   type PiercingCondition
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { bindEventPublisher, type EventPublisher } from "../../runtime/event-publisher.js";
 import { SYSTEM_ACTOR } from "../../shared/actors.js";
 import { addDuration, isExpired, readNow } from "../../shared/time.js";
 import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../../shared/validators.js";
@@ -49,6 +50,7 @@ export interface GovernanceLeaseServiceEventLogPort {
 
 export interface GovernanceLeaseServiceDependencies {
   readonly eventLogRepo: GovernanceLeaseServiceEventLogPort;
+  readonly eventPublisher?: EventPublisher;
   readonly runLookup: GovernanceRunWorkspaceLookup;
   readonly generateRuntimeId?: () => string;
   readonly now?: () => string;
@@ -93,7 +95,11 @@ export class GovernanceLeaseService {
     });
 
     this.clearExpiredAt(occurredAt);
-    await this.dependencies.eventLogRepo.append({
+    await bindEventPublisher({
+      eventPublisher: this.dependencies.eventPublisher,
+      eventLogRepo: this.dependencies.eventLogRepo,
+      purpose: "GovernanceLeaseService"
+    }).publish({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
       entity_type: "governance_lease",
       entity_id: lease.runtime_id,
@@ -123,7 +129,11 @@ export class GovernanceLeaseService {
     }
 
     const occurredAt = readNow(this.dependencies.now);
-    await this.dependencies.eventLogRepo.append({
+    await bindEventPublisher({
+      eventPublisher: this.dependencies.eventPublisher,
+      eventLogRepo: this.dependencies.eventLogRepo,
+      purpose: "GovernanceLeaseService"
+    }).publish({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
       entity_type: "governance_lease",
       entity_id: active.lease.runtime_id,
@@ -157,7 +167,11 @@ export class GovernanceLeaseService {
     }
 
     const occurredAt = readNow(this.dependencies.now);
-    await this.dependencies.eventLogRepo.append({
+    await bindEventPublisher({
+      eventPublisher: this.dependencies.eventPublisher,
+      eventLogRepo: this.dependencies.eventLogRepo,
+      purpose: "GovernanceLeaseService"
+    }).publish({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED,
       entity_type: "governance_lease",
       entity_id: active.runtime_id,

@@ -49,6 +49,7 @@ export function createDaemonEmbeddingRuntime(input: {
   readonly database: StorageDatabase;
   readonly configEnv: ReadonlyMap<string, string>;
   readonly eventLogRepo: EmbeddingRecallEventLogPort;
+  readonly eventPublisher?: EmbeddingRecallServiceDependencies["eventPublisher"];
   readonly healthJournalService: EmbeddingStatusDegradationSource &
     NonNullable<EmbeddingRecallServiceDependencies["healthJournalRecorder"]>;
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
@@ -163,6 +164,7 @@ function createEmbeddingRecallService(
       : { evidenceDocumentEmbeddingRepo: providerState.evidenceEmbeddingRepo }),
     provider: providerState.embeddingProvider,
     eventLogRepo: input.eventLogRepo,
+    ...(input.eventPublisher === undefined ? {} : { eventPublisher: input.eventPublisher }),
     healthJournalRecorder: input.healthJournalService,
     warn: input.warn
   });

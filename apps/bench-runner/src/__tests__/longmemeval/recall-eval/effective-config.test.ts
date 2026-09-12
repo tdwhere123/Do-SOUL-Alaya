@@ -95,12 +95,14 @@ describe("effective recall config identity", () => {
     for (const env of [
       { ALAYA_EMBEDDING_BACKFILL_CONCURRENCY: "6" },
       { ALAYA_EMBEDDING_RECALL_TIERS: "hot,warm" },
-      { ALAYA_EMBEDDING_WORKSPACE_SCAN_CAP: "5000" },
+      { ALAYA_EMBEDDING_WORKSPACE_SCAN_CAP: "512" },
       { ALAYA_PATHREL_CONTENT_STRENGTH: "off" },
       { ALAYA_PATHREL_CONTENT_STRENGTH: "0.75" }
     ]) {
-      expect(buildEffectiveRecallConfigIdentity(env, options).effective_config_sha256)
-        .toBe(base);
+      expect(
+        buildEffectiveRecallConfigIdentity(env, options).effective_config_sha256,
+        JSON.stringify(env)
+      ).toBe(base);
     }
     expect(buildEffectiveRecallConfigIdentity({
       ALAYA_EMBEDDING_BACKFILL_CONCURRENCY: "100"

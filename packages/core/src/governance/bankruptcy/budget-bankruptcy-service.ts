@@ -14,6 +14,7 @@ import {
   type RuntimeMode as RuntimeModeValue
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { bindEventPublisher } from "../../runtime/event-publisher.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import {
   buildBankruptcyDossier,
@@ -399,7 +400,10 @@ export class BudgetBankruptcyService {
     workspaceId: string,
     occurredAt: string
   ): Promise<EventLogEntry> {
-    return await this.dependencies.eventLogRepo.append({
+    return await bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      purpose: "BudgetBankruptcyService"
+    }).publish({
       event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
       entity_type: "bankruptcy_dossier",
       entity_id: artifacts.dossier.runtime_id,
@@ -436,7 +440,10 @@ export class BudgetBankruptcyService {
     occurredAt: string,
     causedBy: "system" | "user"
   ): Promise<EventLogEntry> {
-    return await this.dependencies.eventLogRepo.append({
+    return await bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      purpose: "BudgetBankruptcyService"
+    }).publish({
       event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED,
       entity_type: "bankruptcy_dossier",
       entity_id: entry.dossier.runtime_id,

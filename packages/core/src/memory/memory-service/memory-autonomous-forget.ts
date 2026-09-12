@@ -6,6 +6,7 @@ import {
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { bindEventPublisher } from "../../runtime/event-publisher.js";
 import { classifyMemoryImportance, isMemoryExplicitlyProtected } from "../../manifestation/importance-gate.js";
 import { parseObjectId } from "../../shared/validators.js";
 import type {
@@ -297,7 +298,14 @@ export class MemoryAutonomousForget {
     parsedReason: string,
     parsedCausedBy: TransitionCausedBy
   ): Promise<void> {
-    const skipEvent = await this.eventLogRepo.append({
+    await bindEventPublisher({
+      eventLogRepo: this.eventLogRepo,
+      runtimeNotifier: {
+        notify: () => undefined,
+        notifyEntry: (entry) => this.runtimeNotifier.notifyEntry(entry)
+      },
+      purpose: "MemoryAutonomousForget"
+    }).publish({
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -323,7 +331,6 @@ export class MemoryAutonomousForget {
         occurred_at: this.now()
       })
     });
-    await this.runtimeNotifier.notifyEntry(skipEvent);
   }
 
   // invariant: verdict_revoked leaves judged_useless rows tombstoned and
@@ -333,7 +340,14 @@ export class MemoryAutonomousForget {
     parsedReason: string,
     parsedCausedBy: TransitionCausedBy
   ): Promise<void> {
-    const skipEvent = await this.eventLogRepo.append({
+    await bindEventPublisher({
+      eventLogRepo: this.eventLogRepo,
+      runtimeNotifier: {
+        notify: () => undefined,
+        notifyEntry: (entry) => this.runtimeNotifier.notifyEntry(entry)
+      },
+      purpose: "MemoryAutonomousForget"
+    }).publish({
       event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
       entity_type: "memory_entry",
       entity_id: existing.object_id,
@@ -354,7 +368,6 @@ export class MemoryAutonomousForget {
         occurred_at: this.now()
       })
     });
-    await this.runtimeNotifier.notifyEntry(skipEvent);
   }
 
   // invariant: compressed physical delete requires a live preserving capsule at

@@ -28,6 +28,7 @@ import type {
   SignalServiceWarnPort
 } from "./signal-service-types.js";
 import { CoreError } from "../shared/errors.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 
 const SOURCE_GROUNDING_REDRIVE_LEASE_MS = 5 * 60 * 1000;
 
@@ -258,17 +259,19 @@ async function completeGenericDeferredMaterialization(input: {
   readonly signal: CandidateMemorySignal;
   readonly materialization: SignalMaterializationResult;
 }): Promise<SignalServiceReceiveResult> {
-  const materializedEvent = await input.dependencies.eventLogRepo.append(
-    buildSignalMaterializationEvent(input.signal, input.materialization)
-  );
+  const materializedEvent = await bindEventPublisher({
+    eventLogRepo: input.dependencies.eventLogRepo,
+    purpose: "SignalService"
+  }).publish(buildSignalMaterializationEvent(input.signal, input.materialization));
   const signal = await input.dependencies.signalRepo.updateState(
     input.signal.signal_id,
     SignalState.DEFERRED
   );
   await notifyCommittedEventBestEffort(materializedEvent, input.dependencies, input.warn);
-  const deferredEvent = await input.dependencies.eventLogRepo.append(
-    buildDeferredTriageEvent(input.signal, null)
-  );
+  const deferredEvent = await bindEventPublisher({
+    eventLogRepo: input.dependencies.eventLogRepo,
+    purpose: "SignalService"
+  }).publish(buildDeferredTriageEvent(input.signal, null));
   await notifyCommittedEventBestEffort(deferredEvent, input.dependencies, input.warn);
   return {
     signal,

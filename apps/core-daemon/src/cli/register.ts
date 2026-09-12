@@ -207,6 +207,8 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
     getBuildInfo: readBuildInfo,
     getToolchainStatus: async () => await runtime.services.environmentStatusService.getStatus(),
     getEmbeddingStatus: async (workspaceId) => await runtime.services.embeddingStatusService.getStatus(workspaceId),
+    getQueryEmbeddingWarmup: () =>
+      runtime.services.embeddingRecallService?.lastQueryEmbeddingWarmup() ?? null,
     getMcpHealth: async () => ({
       transport: "ready",
       enrolled_tools: runtime.services.daemonMcpCatalog.listEnrolledToolIds().length
@@ -220,9 +222,17 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
     },
     getGardenCredentialProvenance: async () =>
       await runtime.services.configService.getGardenCredentialProvenance(),
-    getRuntimeWiring: () => ({
-      request_token_source: runtime.requestProtection.tokenSource ?? "ephemeral"
-    }),
+    getRuntimeWiring: () => {
+      const daemonSocket = process.env.ALAYA_DAEMON_SOCKET?.trim();
+      const tokenWorkspaces = process.env.ALAYA_REQUEST_TOKEN_WORKSPACES?.trim();
+      return {
+        request_token_source: runtime.requestProtection.tokenSource ?? "ephemeral",
+        daemon_socket: daemonSocket !== undefined && daemonSocket.length > 0 ? daemonSocket : null,
+        wildcard_bind_opt_in: process.env.ALAYA_ALLOW_WILDCARD_BIND === "1",
+        request_token_workspaces:
+          tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
+      };
+    },
     getGardenCompute: async () => await resolveGardenComputeStatus(runtime),
     getGraphHealth: async (workspaceId) =>
       await runtime.services.graphHealthService.getStatus(workspaceId),

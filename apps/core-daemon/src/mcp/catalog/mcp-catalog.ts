@@ -13,7 +13,7 @@ import {
 } from "@do-soul/alaya-core";
 import { registerConversationToolSpecs, type ExternalConversationToolExecutor } from "../tool-runtime/tool-runtime.js";
 import { getBuiltinConversationToolSpecs } from "../server/builtin-conversation-tool-specs.js";
-import type { DaemonMcpRuntimeRegistry } from "./mcp-runtime-registry.js";
+import type { DaemonMcpRuntimeHealth, DaemonMcpRuntimeRegistry } from "./mcp-runtime-registry.js";
 import {
   defaultWarn,
   parseAllowedMcpServerNames,
@@ -29,6 +29,7 @@ import {
   executeExternalMcpTool,
   freezeToolSpecs,
   hasStringLookup,
+  readDaemonMcpCatalogHealth,
   type DaemonConversationToolRuntimeCatalog
 } from "./mcp-catalog-runtime.js";
 
@@ -39,6 +40,7 @@ export interface DaemonMcpCatalog {
   refresh(): Promise<void>;
   listAllowedServerNames(): readonly string[];
   listEnrolledToolIds(): readonly string[];
+  getHealth?(): DaemonMcpRuntimeHealth;
   listServerTools(server: Readonly<McpServerInfo>): Promise<readonly Readonly<ToolProviderToolSpec>[]>;
   hasTool(toolId: string): boolean;
   executeTool(input: {
@@ -226,6 +228,9 @@ export function createDaemonMcpCatalogFromEnv(input: {
     },
     listEnrolledToolIds() {
       return state.enrolledToolIds;
+    },
+    getHealth() {
+      return readDaemonMcpCatalogHealth(input.runtimeRegistry);
     },
     async listServerTools(server) {
       return state.toolCatalog.get(server.server_name) ?? [];

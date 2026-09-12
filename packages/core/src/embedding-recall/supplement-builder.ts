@@ -7,10 +7,13 @@ import {
 
 import type { EmbeddingRecallTelemetry } from "./embedding-recall-telemetry.js";
 import {
+  EMBEDDING_CONTENT_HASH_STALE_REASON,
+  isMemoryEmbeddingContentStale
+} from "./embedding-backfill-handler-shared.js";
+import {
   clamp01,
   cosineSimilarity,
   EMPTY_SUPPLEMENT_RESULT,
-  hashMemoryContent,
   isFiniteNonzeroVector,
   isProviderMatchedEmbedding,
   isUsableEmbeddingRecordVector
@@ -28,6 +31,7 @@ export interface SupplementBuilderDependencies {
   readonly now: () => string;
   readonly nowEpochMs: () => number;
   readonly telemetry: EmbeddingRecallTelemetry;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }
 
 export interface BuildSupplementFromQueryEmbeddingParams {
@@ -149,7 +153,13 @@ export class EmbeddingSupplementBuilder {
           return [];
         }
 
-        if (record.content_hash !== hashMemoryContent(memory.content)) {
+        if (isMemoryEmbeddingContentStale(record.content_hash, memory.content)) {
+          this.deps.warn?.("embedding stored vector is stale", {
+            workspace_id: params.workspaceId,
+            run_id: params.runId,
+            object_id: record.object_id,
+            reason: EMBEDDING_CONTENT_HASH_STALE_REASON
+          });
           return [];
         }
 

@@ -2,31 +2,44 @@ import { describe, expect, it } from "vitest";
 import type { OpenSemanticFactorGraphProposal } from "@do-soul/alaya-protocol";
 import {
   SELECTED_SOURCE_BOUND_F3_CAPABILITY,
-  SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256,
-  SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256,
-  SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
-  SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256,
-  assertSourceBoundF3SealCurrent,
   sourceBoundF3Seal
 } from "../../../../garden/extraction/semantic-factors/source-bound-seal.js";
 import { traceSourceBoundF3Proposal } from "../../../../garden/extraction/semantic-factors/source-bound-tracer.js";
 
 const SOURCE = "I learned to cook pasta.";
 
+const LOCKED_SOURCE_BOUND_F3_SEAL = {
+  evidence_prompt_sha256: "785cbdcc8645424b94cb9ed030508bf66413258b38fb05236e98ed979e83acac",
+  query_prompt_sha256: "25033bb695b7c5128661339f3547bb3aae1ba2c360d11917f03cde19d6e28b02",
+  evidence_request_template_sha256:
+    "67de86ee33c7315698963950647eef568c1ee864bb2508775009632c6e96d396",
+  query_request_template_sha256:
+    "649ea5aca1bcfc427433e708afe5428d44f070ab315deed1a9f614177de7db00"
+} as const;
+
 describe("source-bound F3 seal", () => {
   it("freezes identities-only as the smallest membership capability", () => {
-    assertSourceBoundF3SealCurrent();
     const seal = sourceBoundF3Seal();
     expect(seal.selected_capability).toBe("identities_only");
     expect(seal.membership_capability).toBe("identities_only");
     expect(seal.prompt_asks).toBe("identities_and_topology");
     expect(SELECTED_SOURCE_BOUND_F3_CAPABILITY).toBe("identities_only");
-    expect(seal.evidence_prompt_sha256).toBe(SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256);
-    expect(seal.query_prompt_sha256).toBe(SOURCE_BOUND_F3_QUERY_PROMPT_SHA256);
-    expect(seal.evidence_request_template_sha256)
-      .toBe(SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256);
-    expect(seal.query_request_template_sha256)
-      .toBe(SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256);
+    expect(
+      seal.evidence_prompt_sha256,
+      "source-bound F3 evidence prompt changed; bump this lock after reviewing the extraction contract"
+    ).toBe(LOCKED_SOURCE_BOUND_F3_SEAL.evidence_prompt_sha256);
+    expect(
+      seal.query_prompt_sha256,
+      "source-bound F3 query prompt changed; bump this lock after reviewing the extraction contract"
+    ).toBe(LOCKED_SOURCE_BOUND_F3_SEAL.query_prompt_sha256);
+    expect(
+      seal.evidence_request_template_sha256,
+      "source-bound F3 evidence request template changed; bump this lock after reviewing the extraction contract"
+    ).toBe(LOCKED_SOURCE_BOUND_F3_SEAL.evidence_request_template_sha256);
+    expect(
+      seal.query_request_template_sha256,
+      "source-bound F3 query request template changed; bump this lock after reviewing the extraction contract"
+    ).toBe(LOCKED_SOURCE_BOUND_F3_SEAL.query_request_template_sha256);
     expect(seal.evidence_operator_id)
       .toBe("garden_source_bound_open_semantic_factor_v3");
     expect(seal.query_operator_id).toBe("open_semantic_factor_query_compiler_v9");

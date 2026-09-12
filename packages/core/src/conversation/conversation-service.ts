@@ -46,6 +46,9 @@ export class ConversationService {
   public constructor(public readonly dependencies: ConversationServiceDependencies) {
     this.gardenComputeCoordinator = new GardenComputeCoordinator({
       eventLogRepo: dependencies.eventLogRepo,
+      ...(dependencies.eventPublisher === undefined
+        ? {}
+        : { eventPublisher: dependencies.eventPublisher }),
       gardenComputeProvider: dependencies.gardenComputeProvider,
       resolveGardenComputeProvider: dependencies.resolveGardenComputeProvider,
       signalReceiver: dependencies.signalReceiver,

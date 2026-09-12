@@ -81,6 +81,10 @@ export interface SessionOverrideRemediationWarnPort {
 
 export interface SessionOverrideRemediationEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): Promise<EventLogEntry>;
+  appendManyWithMutation<T>(
+    entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+    mutate: (entries: readonly EventLogEntry[]) => T
+  ): Promise<T>;
   hasSessionOverridePromotion(overrideId: string): Promise<boolean>;
   countDistinctAppliedSessionOverrideRuns(query: {
     readonly workspaceId: string;
@@ -230,7 +234,7 @@ export class SessionOverrideRemediation {
     outcome: PromotionOutcome,
     occurredAt: string
   ): Promise<void> {
-    await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_PROMOTED,
       entity_type: "session_override",
       entity_id: override.runtime_id,
@@ -244,7 +248,8 @@ export class SessionOverrideRemediation {
         promotion_outcome: outcome,
         occurred_at: occurredAt
       })
-    });
+    };
+    await this.dependencies.eventLogRepo.appendManyWithMutation([eventInput], (entries) => entries[0]);
   }
 
   private async hasPromotionAudit(overrideId: string): Promise<boolean> {

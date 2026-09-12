@@ -100,8 +100,10 @@ async function runSignalShutdown(input: {
   }
 }
 
+export function exitLifecycleProcess(processPort: LifecycleProcessPort, code: number): void {
+  processPort.exit(code);
+}
+
 function exitProcess(processPort: LifecycleProcessPort, code: number): void {
-  if (processPort !== process || process.env.NODE_ENV !== "test") {
-    processPort.exit(code);
-  }
+  exitLifecycleProcess(processPort, code);
 }

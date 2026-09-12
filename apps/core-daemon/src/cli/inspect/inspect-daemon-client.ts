@@ -32,7 +32,11 @@ export async function defaultCheckPortAvailable(port: number): Promise<boolean> 
 const INSPECT_DAEMON_FETCH_TIMEOUT_MS = 30_000;
 
 function fetchDaemon(url: URL, init?: RequestInit): Promise<Response> {
-  return fetch(url, { ...init, signal: AbortSignal.timeout(INSPECT_DAEMON_FETCH_TIMEOUT_MS) });
+  return fetch(url, {
+    ...init,
+    redirect: "error",
+    signal: AbortSignal.timeout(INSPECT_DAEMON_FETCH_TIMEOUT_MS)
+  });
 }
 
 export async function defaultProbeDaemon(url: string, auth?: DaemonRequestAuth): Promise<InspectDaemonProbeResult> {
@@ -123,6 +127,30 @@ export async function defaultGetWorkspaceById(
   return { status: "ok", workspace: coerceWorkspaceSummary(payload?.data) };
 }
 
+const LOOPBACK_DAEMON_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+
+export function assertInspectDaemonUrl(url: string, env: NodeJS.ProcessEnv = process.env): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`ALAYA_DAEMON_URL is not a valid URL: ${url}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("ALAYA_DAEMON_URL must use http or https");
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/gu, "").toLowerCase();
+  if (LOOPBACK_DAEMON_HOSTS.has(host)) {
+    return;
+  }
+  if (env.ALAYA_ALLOW_REMOTE_DAEMON === "1") {
+    return;
+  }
+  throw new Error(
+    `ALAYA_DAEMON_URL host "${parsed.hostname}" is not loopback. Set ALAYA_ALLOW_REMOTE_DAEMON=1 to allow a remote daemon.`
+  );
+}
+
 export async function ensureDaemonForInspector(
   ctx: AlayaCliContext,
   deps: InspectCommandDependencies,
@@ -131,6 +159,7 @@ export async function ensureDaemonForInspector(
 ): Promise<{ readonly url: string; readonly startedDaemon: InspectDaemonServer | null }> {
   const configuredUrl = ctx.env.ALAYA_DAEMON_URL?.trim();
   if (configuredUrl !== undefined && configuredUrl.length > 0) {
+    assertInspectDaemonUrl(configuredUrl, ctx.env);
     return { url: configuredUrl, startedDaemon: null };
   }
 

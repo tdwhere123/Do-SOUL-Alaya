@@ -451,7 +451,7 @@ it("keeps partial query warmup evidence when one provider batch fails", async ()
 
     expect(embedTexts).toHaveBeenCalledTimes(3);
     expect(warmup).toMatchObject({
-      status: "ready",
+      status: "partial",
       requested_count: 33,
       ready_count: 17,
       provider_requested_count: 33,

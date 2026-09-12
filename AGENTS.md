@@ -23,14 +23,70 @@ Memory Inspector is loopback tooling, not an agent surface. Public copy uses
 - Signal ingestion is dual-track: explicit candidate emission and post-turn
   Garden heuristic extraction.
 
-Required before code changes: `docs/handbook/invariants.md`. Other handbook
-files: `docs/handbook/README.md`.
+Required before code changes: [`docs/handbook/invariants.md`](docs/handbook/invariants.md).
+Use the [handbook index](docs/handbook/README.md) to find the relevant domain
+contract. Historical plans and worklogs are execution records, not current
+architecture authority.
+
+## Working scope
+
+- Preserve the user's goal, settled decisions, and authorization. Review and
+  discussion requests authorize inspection and reporting, not implementation.
+- Start with the relevant live path and expand inspection or changes only as
+  needed to resolve the cause and its affected consumers. Preserve unrelated
+  working-tree changes. Do not turn a local fix into repository-wide cleanup.
+- State material assumptions. Resolve questions from current code and contracts
+  where possible; ask when an unresolved choice changes the intended behavior
+  or authorization. Continue work already authorized without repeated approval.
 
 ## Code quality
 
-- State assumptions when scope is ambiguous; keep diffs surgical.
-- **Build + test** must pass (`pnpm build` + targeted vitest) before claiming done.
-- **Comments:** why-not-what only; no ticket, wave, or experiment labels in source.
+- **One semantic authority:** each policy, schema, identity, canonicalization,
+  digest material, state-transition rule, and side-effect contract must have one
+  authoritative definition and a clear owner. Locate that owner before adding
+  or changing a rule; trace the actual entry, producers, and affected consumers.
+- **Reuse semantics:** consumers must call, derive from, or adapt the authority
+  without redefining its rules. Different-looking code can duplicate a rule;
+  similar-looking code can serve different contracts. Sharing a hash function
+  does not unify independently defined digest inputs or canonicalization.
+- **No bypasses:** callers must use the entry that owns the applicable
+  authorization, validation, containment, transition, transaction, or audit.
+  Lower-level primitives belong behind that owner. Fix shared defects there
+  and check other reachable paths for bypasses, including alternate surfaces.
+- **Explicit states:** preserve distinctions that affect authorization, retry,
+  caching, recovery, or result meaning in types and boundary protocols. Failure,
+  unknown, unbound, valid-empty, partial, and ready are not interchangeable.
+  Define the meanings of `null`, `undefined`, and `[]`; adapters must preserve
+  them. Do not cache parse or transport failures as successful absence.
+- **Owned effects and recovery:** separate computation from effects while
+  preserving the domain's transaction, persistence, audit, and notification
+  order. Use the applicable write contract in `invariants.md` and
+  `architecture.md`; EventPublisher and receipt-first audit paths have distinct
+  ownership. For stateful changes, account for relevant partial commits,
+  concurrency, retries, cancellation, and the owner of recovery.
+- **Complete the replacement:** update affected consumers and remove superseded
+  implementations, entry points, exports, and obsolete tests within scope.
+  Required compatibility adapters must use the same authority and have a named
+  consumer and removal condition; do not retain a competing implementation.
+
+## Naming and comments
+
+- Name production and test files, directories, symbols, fixtures, and test
+  suites/cases for their domain responsibility, behavior, or failure condition.
+  A name must be understandable without reading the plan that created it.
+- Do not introduce plan titles, task/card/checkpoint IDs, wave labels,
+  experiment IDs, ticket IDs, or review-finding numbers into names or comments.
+  Keep task provenance in plans, worklogs, PR descriptions, or commit messages.
+  For example, use `worker-close-reopen.test.ts` instead of
+  `review-r3-fix-27.test.ts`. Actual protocol versions and externally required
+  identifiers remain part of their contracts; renaming them requires the
+  corresponding compatibility or migration work.
+- Comments explain non-obvious reasons, invariants, ordering, or constraints.
+  Regression test names describe the triggering condition and expected behavior.
+  Apply naming fixes within the task's scope; avoid unrelated rename campaigns.
+
+## Structure and size budgets
+
 - **One reason to change** per module, class, and function.
 - **Deep modules, not micro-files:** split only at a domain, phase, side-effect,
   or reuse boundary. Do not create one-use pass-through wrappers, single-call
@@ -45,9 +101,6 @@ files: `docs/handbook/README.md`.
   - The live `ci:repository-structure` check is authoritative: 500–799 lines
     require review, while handwritten source at 800+ lines fails. Generated,
     declarative, and test-support exceptions must remain explicitly classified.
-- **Phases, not piles:** separate DB access, computation, EventLog append, and
-  other side effects (`compute` → `apply` → `audit`). A function that mixes
-  them is a split candidate before you extend it.
 - **Layout:** flat is fine when names and ownership remain predictable. At
   roughly **10–12** sibling modules, review the directory; create a subfolder
   only for a real domain or phase boundary, not to reduce a file count. Do not
@@ -55,17 +108,35 @@ files: `docs/handbook/README.md`.
 - **Exports:** package-root barrels expose intended public consumers only.
   Avoid internal barrel chains that hide ownership or cycles. Temporary
   re-exports require a named consumer and removal gate.
-- **After you change code, re-check:** Can this block move into an existing
-  helper? Did you introduce parallel logic that should be one shared path?
-  Should scattered copies become one module instead of another near-duplicate file?
-- **Reuse before repeat:** If the same rule, transform, or port contract already
-  exists, extend or call it — do not fork a second home for the same truth.
 
-## Architecture (one line)
+## Verification and delivery
+
+- For code changes, `pnpm build` and targeted Vitest must pass before claiming
+  completion. Run relevant existing type, contract, and structure checks for
+  affected boundaries. For documentation-only changes, inspect the diff and
+  validate affected links and content; runtime build/tests are not required.
+- When changing behavior across socket, SQLite, worker, stdio, filesystem, or
+  shutdown boundaries, run at least one check through the actual affected
+  boundary with an observable result. Cover the changed success/failure or
+  recovery behavior; mock-only tests do not establish boundary correctness.
+- Use expectations independent of the implementation being checked. Reuse
+  existing tests and fixtures where suitable. Test count and coverage are not
+  evidence that the requested behavior works. Report what was checked and
+  any material gaps; rerun after relevant changes, not without a reason.
+- Local verification is the default. Remote push, PR creation, and CI follow
+  the user's authorized scope; finishing a worktree alone does not require
+  remote CI. Once authorized, follow the current candidate's CI result and
+  fix failures caused by the change. Distinguish local checks from remote CI
+  and bind CI claims to the checked commit. Merge and release require their
+  own authorization, which remains valid once given within its scope.
+
+## Architecture
 
 `@do-soul/alaya-protocol` → leaf types; `@do-soul/alaya-core` → truth
-boundary; EventLog → DB → broadcast; `apps/core-daemon` wires; Garden is
-fire-and-forget. Detail: `docs/handbook/architecture.md`.
+boundary; `apps/core-daemon` wires; Garden is fire-and-forget.
+EventPublisher-owned transitions are EventLog-first; receipt-first audit paths
+follow their own contract. Audit precedes notification. Detail:
+[`docs/handbook/architecture.md`](docs/handbook/architecture.md).
 
 Recall live runtime is the conditional-field route. Do not implement from
 flood / SliceKey / four-strategies prose. Owner: `docs/handbook/recall.md`.

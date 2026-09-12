@@ -6,11 +6,33 @@ import {
   HealthIssueResolutionState,
   HealthIssueSeverity,
   HealthIssueSuggestedAction,
+  type AuditorEventLogPort,
+  type EventLogEntry,
   type GardenTaskDescriptor,
   type HealthIssueCauseKindValue,
   type HealthIssueGroup
 } from "@do-soul/alaya-protocol";
 import { Auditor, type AuditorHealthIssueGroupPort } from "../../../garden/index.js";
+
+function passthroughEventLogRepo(): AuditorEventLogPort {
+  return {
+    append: vi.fn(),
+    appendManyWithMutation: vi.fn(
+      async <T>(
+        entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+        mutate: (rows: readonly EventLogEntry[]) => T
+      ): Promise<T> =>
+        mutate(
+          entries.map((entry, idx) => ({
+            ...entry,
+            event_id: `evt-${idx}`,
+            created_at: "2026-03-28T10:00:00.000Z",
+            revision: idx
+          }))
+        )
+    ) as AuditorEventLogPort["appendManyWithMutation"]
+  };
+}
 
 function createTask(overrides: Partial<GardenTaskDescriptor> = {}): GardenTaskDescriptor {
   return {
@@ -88,6 +110,7 @@ describe("Auditor HealthIssueGroup wiring", () => {
       },
       scheduler: { reportCompletion: vi.fn(async () => undefined) },
       healthIssueGroupPort: port,
+      eventLogRepo: passthroughEventLogRepo(),
       now: () => "2026-03-28T10:00:00.000Z"
     });
 
@@ -134,6 +157,7 @@ describe("Auditor HealthIssueGroup wiring", () => {
       },
       scheduler: { reportCompletion: vi.fn(async () => undefined) },
       healthIssueGroupPort: port,
+      eventLogRepo: passthroughEventLogRepo(),
       now: () => "2026-03-28T10:00:00.000Z"
     });
 
@@ -183,6 +207,7 @@ describe("Auditor HealthIssueGroup wiring", () => {
       },
       scheduler: { reportCompletion: vi.fn(async () => undefined) },
       healthIssueGroupPort: port,
+      eventLogRepo: passthroughEventLogRepo(),
       now: (() => {
         const stamps = ["2026-03-28T10:00:00.000Z", "2026-03-28T11:00:00.000Z"];
         let index = 0;
@@ -282,6 +307,7 @@ function createOrphanAuditor(
     },
     scheduler,
     healthIssueGroupPort,
+    eventLogRepo: passthroughEventLogRepo(),
     now: () => "2026-03-28T10:00:00.000Z"
   });
 }

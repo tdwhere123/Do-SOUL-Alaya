@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT,
@@ -163,6 +166,21 @@ describe("official API system prompt", () => {
     expect(g8).not.toContain("kind_projection");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("kind_projection");
     expect(resolveOfficialApiSystemPrompt("0".repeat(64))).toBeUndefined();
+  });
+
+  it("keys historical prompts by the hash of their read-only files", () => {
+    const directory = fileURLToPath(new URL(
+      "../../../garden/ingestion/official-api/historical-prompts/",
+      import.meta.url
+    ));
+    const files = readdirSync(directory).filter((name) => name.endsWith(".txt"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const name of files) {
+      const text = readFileSync(path.join(directory, name), "utf8");
+      const digest = sha256(text);
+      expect(digest).toBe(name.replace(/\.txt$/u, ""));
+      expect(resolveOfficialApiSystemPrompt(digest)).toBe(text);
+    }
   });
 
   it("defines a separately identified single-assertion coverage repair prompt", () => {

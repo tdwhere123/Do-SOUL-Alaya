@@ -244,11 +244,21 @@ function writeDoctorCoreSummary(stream: NodeJS.WritableStream, report: DoctorRep
   stream.write(`mcp transport: ${report.mcp.transport}\n`);
   stream.write(`garden status: ${report.garden.status}\n`);
   stream.write(`garden credential provenance: ${formatGardenCredentialProvenance(report.garden.credential_provenance)}\n`);
-  stream.write(`runtime wiring: request_token=${report.runtime_wiring.request_token_source}\n`);
+  stream.write(
+    `runtime wiring: request_token=${report.runtime_wiring.request_token_source}` +
+      ` daemon_socket=${report.runtime_wiring.daemon_socket ?? "none"}` +
+      ` wildcard_bind=${report.runtime_wiring.wildcard_bind_opt_in ? "yes" : "no"}` +
+      ` token_workspaces=${report.runtime_wiring.request_token_workspaces ?? "none"}\n`
+  );
   if (report.runtime_wiring.request_token_source === "ephemeral") {
     stream.write(
       "runtime wiring WARNING: ALAYA_REQUEST_TOKEN unset; using a process-generated" +
         " ephemeral request token (rotates each restart — set ALAYA_REQUEST_TOKEN for a stable token).\n"
+    );
+  }
+  if (report.runtime_wiring.wildcard_bind_opt_in) {
+    stream.write(
+      "runtime wiring WARNING: ALAYA_ALLOW_WILDCARD_BIND=1; wildcard TCP bind still requires loopback or ALAYA_DAEMON_SOCKET.\n"
     );
   }
 }
@@ -325,6 +335,17 @@ function writeRecallGraphSummary(stream: NodeJS.WritableStream, report: DoctorRe
       `embedding mode: ${report.provider.embedding.effective_mode} (provider_configured=${report.provider.embedding.provider_configured ? "yes" : "no"})\n`
     );
     writeLocalOnnxHostSingleFlightHint(stream);
+  }
+  if (report.provider.query_embedding_warmup !== null) {
+    stream.write(
+      `query embedding warmup: ${report.provider.query_embedding_warmup.status}` +
+        ` ready=${report.provider.query_embedding_warmup.ready_count}` +
+        ` requested=${report.provider.query_embedding_warmup.requested_count}` +
+        (report.provider.query_embedding_warmup.last_error === undefined
+          ? ""
+          : ` last_error=${report.provider.query_embedding_warmup.last_error}`) +
+        "\n"
+    );
   }
   if (report.bootstrap_reconcile !== undefined) {
     stream.write(`${formatBootstrapReconcileSummary(report.bootstrap_reconcile)}\n`);

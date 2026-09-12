@@ -1,9 +1,9 @@
 import {
-  ConditionalFieldRecallWorkerPayloadSchema,
   isRecallReadWorkerOperation,
   type RecallReadWorkerRequest
 } from "./protocol.js";
 import { asPayload } from "./payload-readers.js";
+import { parseWorkerOperationPayload, parseWorkerOperationResult } from "./operation-schemas.js";
 import { createBoundedActiveConstraintsReader, runWorkerActiveConstraints } from "./active-constraints.js";
 import { runMemoryOperation } from "./memory-operations.js";
 import { runEvidenceOperation } from "./evidence-operations.js";
@@ -25,17 +25,32 @@ export async function runOperation(
   if (runtime.closed && request.operation !== "close") {
     throw new Error("recall read worker database is closed");
   }
+  const parsedPayload = parseWorkerOperationPayload(request.operation, request.payload);
   if (request.operation === "conditionalField.recall") {
-    return runConditionalFieldWorkerRecall(
-      runtime,
-      ConditionalFieldRecallWorkerPayloadSchema.parse(request.payload)
+    return parseWorkerOperationResult(
+      request.operation,
+      runConditionalFieldWorkerRecall(
+        runtime,
+        parsedPayload as Parameters<typeof runConditionalFieldWorkerRecall>[1]
+      )
     );
   }
-  const payload = asPayload(request.payload);
+  const payload = asPayload(parsedPayload);
   if (request.operation === "conditionalField.acknowledge" || request.operation === "conditionalField.discard") {
-    return settleWorkerDelivery(runtime, payload, request.operation === "conditionalField.discard");
+    return parseWorkerOperationResult(
+      request.operation,
+      settleWorkerDelivery(runtime, payload, request.operation === "conditionalField.discard")
+    );
   }
-  switch (request.operation) {
+  return parseWorkerOperationResult(request.operation, await dispatchParsed(runtime, request.operation, payload));
+}
+
+async function dispatchParsed(
+  runtime: RecallReadWorkerRuntime,
+  operation: RecallReadWorkerRequest["operation"],
+  payload: Record<string, unknown>
+): Promise<unknown> {
+  switch (operation) {
     case "ready":
       return null;
     case "memory.findRecallTierWindow":
@@ -54,7 +69,7 @@ export async function runOperation(
     case "memory.findByEvidenceRefs":
     case "memory.findBoundEvidenceRefs":
     case "memory.findByIds":
-      return await runMemoryOperation(runtime, request.operation, payload);
+      return await runMemoryOperation(runtime, operation, payload);
     case "evidence.searchByKeyword":
     case "evidence.searchByKeywordField":
     case "evidence.searchManyByKeywordField":
@@ -62,16 +77,16 @@ export async function runOperation(
     case "evidence.findRecallQualifiedByIds":
     case "evidence.findRecallQualifiedFactKeysByIds":
     case "evidence.findSourceAnchorsByIds":
-      return await runEvidenceOperation(runtime, request.operation, payload);
+      return await runEvidenceOperation(runtime, operation, payload);
     case "synthesis.searchByKeyword":
     case "synthesis.searchByKeywordField":
     case "synthesis.searchManyByKeywordField":
     case "synthesis.findByIds":
-      return await runSynthesisOperation(runtime, request.operation, payload);
+      return await runSynthesisOperation(runtime, operation, payload);
     case "path.findByAnchors":
     case "path.findByTimeConcernWindowDigests":
     case "pathPlasticity.getStrengthByMemoryId":
-      return await runPathOperation(runtime, request.operation, payload);
+      return await runPathOperation(runtime, operation, payload);
     case "constraints.findActive":
       return await runWorkerActiveConstraints({
         payload,
@@ -105,7 +120,7 @@ export async function runOperation(
       runtime.closed = true;
       return null;
     default:
-      throwUnknownRecallReadWorkerOperation(request.operation);
+      throwUnknownRecallReadWorkerOperation(operation);
   }
 }
 

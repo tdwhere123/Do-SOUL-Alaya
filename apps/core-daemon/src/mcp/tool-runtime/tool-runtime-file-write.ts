@@ -1,7 +1,8 @@
 import { constants } from "node:fs";
-import { open, lstat, realpath, unlink, type FileHandle } from "node:fs/promises";
+import { realpath, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import type { WriteFileToolInput } from "@do-soul/alaya-protocol";
+import { containedNoFollowFlag, openContained } from "./open-contained.js";
 import {
   createAccessDenied,
   createFileToolError,
@@ -9,7 +10,6 @@ import {
   mapFileSystemError,
   readFileSystemEntry,
   resolveContainedPath,
-  resolveOpenedFileRealPath,
   resolveRealWritableRoots,
   swallowBestEffortCleanup
 } from "./tool-runtime-file-common.js";
@@ -22,7 +22,7 @@ export async function writeFile(
   if (!target.ok) {
     return target.error;
   }
-  return await writeContainedFile(input.content, target);
+  return await writeContainedFile(input.content, input.path, writableRoots, target.exists);
 }
 
 async function resolveWriteFileTarget(
@@ -86,54 +86,31 @@ async function resolveWriteFileTarget(
 
 async function writeContainedFile(
   content: string,
-  target: Readonly<{
-    readonly resolvedPath: string;
-    readonly exists: boolean;
-    readonly realWritableRoots: readonly string[];
-  }>
+  inputPath: string,
+  writableRoots: readonly string[],
+  exists: boolean
 ): Promise<unknown> {
-  let handle: FileHandle | undefined;
-  let newlyCreated = false;
+  const noFollow = containedNoFollowFlag();
+  const flags = exists
+    ? constants.O_RDWR | noFollow
+    : constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | noFollow;
+  const opened = await openContained(inputPath, writableRoots, "file", {
+    flags,
+    mode: 0o666,
+    errorCode: "WRITE_ERROR"
+  });
+  if (!opened.ok) {
+    return opened;
+  }
+
+  let handle: FileHandle | undefined = opened.handle;
+  const newlyCreated = !exists;
   try {
-    if (target.exists) {
-      try {
-        const linkStat = await lstat(target.resolvedPath);
-        if (linkStat.isSymbolicLink()) {
-          return createAccessDenied("Path is outside the workspace boundary.");
-        }
-      } catch (error) {
-        return mapFileSystemError(error, target.resolvedPath, "WRITE_ERROR");
-      }
-    }
-
     const buffer = Buffer.from(content, "utf8");
-    const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
-    if (target.exists) {
-      handle = await open(target.resolvedPath, constants.O_RDWR | noFollow, 0o666);
-    } else {
-      handle = await open(
-        target.resolvedPath,
-        constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | noFollow,
-        0o666
-      );
-      newlyCreated = true;
-    }
-
-    const openedFileRealPath = await resolveOpenedFileRealPath(handle.fd, target.resolvedPath);
-    if (!target.realWritableRoots.some((root) => isPathWithinRoot(openedFileRealPath, root))) {
-      await handle.close();
-      handle = undefined;
-      if (newlyCreated) {
-        await unlink(target.resolvedPath).catch(swallowBestEffortCleanup("unlink-new-file"));
-      }
-      return createAccessDenied("Path is outside the workspace boundary.");
-    }
-
     await handle.truncate(0);
     await handle.write(buffer, 0, buffer.length, 0);
     await handle.close();
     handle = undefined;
-
     return {
       ok: true,
       bytesWritten: buffer.byteLength
@@ -143,8 +120,8 @@ async function writeContainedFile(
       await handle.close().catch(swallowBestEffortCleanup("close-write-handle"));
     }
     if (newlyCreated) {
-      await unlink(target.resolvedPath).catch(swallowBestEffortCleanup("unlink-rolled-back-file"));
+      await unlink(opened.realPath).catch(swallowBestEffortCleanup("unlink-rolled-back-file"));
     }
-    return mapFileSystemError(error, target.resolvedPath, "WRITE_ERROR");
+    return mapFileSystemError(error, opened.realPath, "WRITE_ERROR");
   }
 }

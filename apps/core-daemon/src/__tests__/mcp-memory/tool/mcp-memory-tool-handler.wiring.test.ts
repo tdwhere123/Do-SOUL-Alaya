@@ -60,7 +60,7 @@ describe("mcp memory tool handler wiring", () => {
       tool_name: "soul.recall",
       error: {
         code: "VALIDATION",
-        message: "MCP tool soul.recall is denied by active zero-day policy deny-recall."
+        message: "Invalid request."
       }
     });
     expect(deps.recallService.recall).not.toHaveBeenCalled();

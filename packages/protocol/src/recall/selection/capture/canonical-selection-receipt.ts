@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { compareCodeUnits } from "../../field-contract/canonical-identity.js";
 import { CaptureExecutionSchema } from "./capture-execution.js";
@@ -11,8 +12,6 @@ const CANONICAL_CAPTURE_ALGORITHM_ID =
   "alaya.recall.shadow.safe-dominance-capture.v1" as const;
 export const CANONICAL_CAPTURE_ALGORITHM_VERSION =
   "safe-dominance-capture.v1.0.1" as const;
-export const CANONICAL_CAPTURE_IDENTITY_DIGEST =
-  "384af589ca9be6791147016463a44519aa9405a70d694cf38a1db9b8991913cd" as const;
 export const CANONICAL_CAPTURE_IDENTITY_BLOB_ID = "alaya.recall.shadow.identity.v1" as const;
 export const CANONICAL_CAPTURE_IDENTITY_BLOB = `${[
   CANONICAL_CAPTURE_IDENTITY_BLOB_ID,
@@ -31,6 +30,9 @@ export const CANONICAL_CAPTURE_IDENTITY_BLOB = `${[
   "Gamma_kinds: unscaled_remainder | Values_v | evidence_novelty_redundancy",
   `deterministic_tail: ${CANONICAL_CAPTURE_DETERMINISTIC_TAIL}`
 ].join("\n")}\n` as const;
+export const CANONICAL_CAPTURE_IDENTITY_DIGEST = createHash("sha256")
+  .update(CANONICAL_CAPTURE_IDENTITY_BLOB, "utf8")
+  .digest("hex");
 
 const Key = z.string().min(1);
 const ReceiptDigest = z.string().regex(/^sha256:[0-9a-f]{64}$/u);

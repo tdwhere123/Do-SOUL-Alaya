@@ -149,10 +149,8 @@ export interface JanitorDependencies {
   readonly dispositionSweepPort?: JanitorDispositionSweepPort;
   readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
   readonly retentionDecayPort?: JanitorRetentionDecayPort;
-  // Optional EventLog writer used to commit SOUL_MEMORY_TIER_CHANGED
-  // rows in the same SQLite transaction as the storage_tier UPDATE.
-  // When undefined the Janitor falls back to the bare UPDATE in legacy
-  // or narrow test paths.
+  // EventLog writer used to commit SOUL_MEMORY_TIER_CHANGED rows in the
+  // same SQLite transaction as the storage_tier UPDATE. Missing repo throws.
   readonly eventLogRepo?: AuditorEventLogPort;
   readonly now?: () => string;
 }
@@ -288,8 +286,7 @@ export class Janitor {
     mutate: () => void
   ): Promise<void> {
     if (this.eventLogRepo === undefined) {
-      mutate();
-      return;
+      throw new Error("Janitor EventLog-first mutation requires eventLogRepo");
     }
     await this.eventLogRepo.appendManyWithMutation(events, () => {
       mutate();

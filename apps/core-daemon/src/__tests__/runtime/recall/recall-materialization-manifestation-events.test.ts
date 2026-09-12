@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceRunEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
+import { EventPublisher } from "@do-soul/alaya-core";
 import {
   initDatabase,
   SqliteEventLogRepo,
@@ -32,11 +33,15 @@ describe("manifestation EventLog adapter", () => {
       return append(entry);
     });
 
-    const writer = createAtomicManifestationEventLogWriter(eventLogRepo);
-    expect(() => writer.appendAtomically([
+    const writer = createAtomicManifestationEventLogWriter(new EventPublisher({
+      eventLogRepo,
+      runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined },
+      runHotStateService: { apply: () => undefined }
+    }));
+    await expect(writer.appendAtomically([
       workspaceCreatedEntry("manifestation-ws-1"),
       workspaceCreatedEntry("manifestation-ws-2")
-    ])).toThrow("synthetic manifestation append failure");
+    ])).rejects.toThrow("synthetic manifestation append failure");
 
     await expect(
       eventLogRepo.queryByEntity("workspace", "manifestation-ws-1")

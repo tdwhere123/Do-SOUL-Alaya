@@ -36,7 +36,7 @@ const DocumentWarmupSchema = z.object({
   d2q_input: z.enum(["raw_content", "content_plus_hq"]).nullable()
 }).strict().readonly();
 const QueryWarmupSchema = z.object({
-  status: z.enum(["not_requested", "ready"]),
+  status: z.enum(["not_requested", "ready", "partial", "failed"]),
   requested_count: z.number().int().nonnegative(),
   ready_count: z.number().int().nonnegative(),
   cache_hit_count: z.number().int().nonnegative(),

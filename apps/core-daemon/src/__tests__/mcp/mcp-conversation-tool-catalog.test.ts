@@ -367,8 +367,9 @@ describe("daemon conversation tool catalog", () => {
         })
       ).resolves.toEqual({
         ok: false,
-        code: "MCP_EXTERNAL_UNBOUND",
-        message: "External MCP tool mcp__filesystem__read_file has no active daemon runtime binding."
+        code: "MCP_EXTERNAL_TRANSPORT",
+        message:
+          "External MCP tool mcp__filesystem__read_file failed because listing tools from daemon runtime server filesystem transport failed."
       });
     } finally {
       restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);

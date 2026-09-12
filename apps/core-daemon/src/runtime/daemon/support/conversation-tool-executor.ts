@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { CanonicalAliasService, StrongRefService, ToolGovernanceClient } from "@do-soul/alaya-core";
+import {
+  bindEventPublisher,
+  type CanonicalAliasService,
+  type EventPublisher,
+  type StrongRefService,
+  type ToolGovernanceClient
+} from "@do-soul/alaya-core";
 import type {
   SqliteEventLogRepo,
   SqliteToolExecutionRecordRepo
@@ -9,6 +15,7 @@ import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 export function createConversationToolExecutor(input: {
   readonly eventLogRepo: SqliteEventLogRepo;
   readonly runtimeNotifier: AlayaRuntimeNotifier;
+  readonly eventPublisher?: EventPublisher;
   readonly toolExecutionRecordRepo: SqliteToolExecutionRecordRepo;
   readonly toolGovernanceClient: ToolGovernanceClient;
   readonly targetRevalidateService: unknown;
@@ -39,6 +46,7 @@ async function executeConversationTool(
   input: {
     readonly eventLogRepo: SqliteEventLogRepo;
     readonly runtimeNotifier: AlayaRuntimeNotifier;
+    readonly eventPublisher?: EventPublisher;
     readonly toolExecutionRecordRepo: SqliteToolExecutionRecordRepo;
   },
   request: ToolExecutionRequest
@@ -47,9 +55,14 @@ async function executeConversationTool(
   const result = await request.handler({ writableRoots: [request.workspaceRoot] }, request.rawInput);
   const execution = createToolExecutionAuditRecord(request, startedAt, result);
 
-  await input.toolExecutionRecordRepo.insert(execution.record);
-  const event = await input.eventLogRepo.append(execution.event);
-  await input.runtimeNotifier.notifyEntry(event);
+  await bindEventPublisher({
+    eventPublisher: input.eventPublisher,
+    eventLogRepo: input.eventLogRepo,
+    runtimeNotifier: input.runtimeNotifier,
+    purpose: "conversation-tool-executor"
+  }).appendApplyThenPropagate(execution.event, async () => {
+    await input.toolExecutionRecordRepo.insert(execution.record);
+  });
 
   return { result };
 }

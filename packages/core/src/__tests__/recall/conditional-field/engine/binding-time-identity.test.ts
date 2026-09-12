@@ -101,7 +101,7 @@ describe("binding and temporal semantic identity", () => {
     const observed = buildTypedObservation(observerInput(timeGuard), { objectId: "C", sourceRevision: "rev",
       observationKey: "time", observedAt: stamp, identityKind: "assertion",
       sourceRow: { object_id: "C", sourceRevision: "rev", observed_at: stamp },
-      relation: { sourceObjectId: "seed", targetObjectId: "C", predicate: "observed_log" } });
+      relation: { assertionId: "edge", sourceObjectId: "seed", targetObjectId: "C", resultObjectId: "C", predicate: "observed_log" } });
     expect(observed?.applicability.verdict ?? "false").toBe(expected);
   });
 
@@ -117,11 +117,11 @@ describe("binding and temporal semantic identity", () => {
     expect(sourceRowEligible(input, { object_id: "C", sourceRevision: "rev", valid_from: "2026-09-09T00:00:00.000Z" })).toBe(true);
     expect(sourceRowEligible(input, { object_id: "C", sourceRevision: "rev", valid_to: "2026-09-09T00:00:00.000Z" })).toBe(false);
     expect(sourceRowEligible(input, { object_id: "C", sourceRevision: "rev", valid_from: "2026-09-09T00:00:00.0001Z" })).toBe(false);
-    const row = { sourceObjectId: "seed", targetObjectId: "C", predicate: "observed_log",
+    const row = { assertionId: "edge", sourceObjectId: "seed", targetObjectId: "C", resultObjectId: "C", predicate: "observed_log",
       validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00Z" }, resolutionKind: "retracted" as const };
     expect(relationRowEligible(input, { ...row, resolvedAt: "2026-09-09T00:00:00.000Z" })).toBe(false);
     expect(relationRowEligible(input, { ...row, resolvedAt: "2026-09-09T00:00:00.0001Z" })).toBe(true);
-    const future = { sourceObjectId: "seed", targetObjectId: "C", predicate: "observed_log",
+    const future = { assertionId: "edge", sourceObjectId: "seed", targetObjectId: "C", resultObjectId: "C", predicate: "observed_log",
       validity: { kind: "open" as const, valid_from: "2026-09-09T00:00:00.0001Z" } };
     expect(relationRowEligible(input, future)).toBe(false);
     expect(relationRowEligible({ ...input, as_of: "2026-09-09T00:00:00.000100Z" }, future)).toBe(true);

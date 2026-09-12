@@ -1,4 +1,5 @@
 import { soulToolJsonSchemas } from "@do-soul/alaya-protocol";
+import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
 
 export const ALAYA_MEMORY_TOOL_NAMES = Object.freeze([
   "soul.recall",
@@ -21,6 +22,16 @@ export const ALAYA_MEMORY_TOOL_NAMES = Object.freeze([
 
 export type AlayaMemoryToolName = (typeof ALAYA_MEMORY_TOOL_NAMES)[number];
 
+const soulToolSpecByName = new Map(soulToolDefs.map((spec) => [spec.name, spec]));
+if (soulToolDefs.length !== ALAYA_MEMORY_TOOL_NAMES.length) {
+  throw new Error("soulToolDefs / daemon catalog name count diverged");
+}
+for (const name of ALAYA_MEMORY_TOOL_NAMES) {
+  if (!soulToolSpecByName.has(name)) {
+    throw new Error(`soulToolDefs is missing ${name}`);
+  }
+}
+
 /**
  * MCP tool input schema. Derived from `@do-soul/alaya-protocol`
  * `soulToolJsonSchemas` (zod → JSON Schema) so external clients see the
@@ -40,44 +51,9 @@ export interface AlayaMemoryToolDefinition {
   }>;
 }
 
-const providerBaseDescriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
-  "soul.recall":
-    "WHEN: at the start of any turn that may benefit from prior memory (user preferences, past decisions, project context, or any \"do you remember / last time / we agreed\" reference). Recall a structured information index for the current task: association milligrades, completeness dimensions, unknown-cause claims, and a delivery id. `max_results` is the page budget, not a ranking cutoff. When the index cannot fit one packet, the response `index.continuation` can be sent back as request `continuation` to fetch the next page. Optional `since` / `until` are compiler hints. `recent_turn` is ignored for extraction; ordinary recall does not enqueue Garden work or call a missing embedding provider. Additive `index` carries the target view; older agents can keep using `results` in the same order. Optional `enumeration_policy` (`canonical` default, or `associative`), `result_kind_view` (`mixed` default, or `memory_only`/`source_only`), `interpretation_proposal`, and `payload_continuation` are request identity/view fields. Associative enumeration requires declared `cap_contracts`; absence is incompatible (unsupported-policy), not a D2 default. Results carry a tagged `target`; source-record-only rows use `object_kind` `source_evidence` and do not mint a memory id. Responses may include `page_purpose` and `product_updates`; retrying the same continuation replays the same `delivery_id`. Older consumers that cannot parse source targets must request `result_kind_view=memory_only` rather than dropping or recasting source rows.",
-  "soul.open_pointer":
-    "WHEN: a recall result preview is insufficient and you need the full content before citing it. Open a recalled memory object or evidence pointer by id. Read-only.",
-  "soul.emit_candidate_signal":
-    "WHEN: you observe a new durable signal worth memorizing — a preference, decision, constraint, handoff, conflict, synthesis, or evidence anchor. Emit a candidate memory signal so the governance loop can promote it to a durable proposal. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context. Use first-class source_memory_refs, supersedes_refs, exception_to_refs, contradicts_refs, and incompatible_with_refs when the signal should propose graph edges; do not put those graph hints only in raw_payload. (Language-agnostic. 当你检测到需要记忆的偏好、决定、约束、冲突或证据时，请触发此工具)",
-  "soul.propose_memory_update":
-    "WHEN: a durable memory update or source privacy deletion needs governance review. Submit a pending memory update or privacy_erase proposal; this does not directly mutate storage. An accepted privacy_erase irreversibly removes the source closure. Optional source_delivery_ids must reference recorded recall deliveries in the current trusted context.",
-  "soul.review_memory_proposal":
-    "WHEN: a human reviewer has explicitly approved or rejected a pending memory update or privacy erase proposal. Record the decision with an explicit governance trace; accepting privacy_erase irreversibly removes the source closure, while rejecting it does not erase. Requires reviewer_identity so the review record names who approved or rejected the change.",
-  "soul.list_pending_proposals":
-    "WHEN: you need to present the pending governance queue to the reviewer (read-only) before calling soul.review_memory_proposal. List proposals in the pending state for a workspace.",
-  "soul.propose_edge":
-    "WHEN: a human or attached agent wants to propose a memory graph relation for review. This creates a pending edge proposal only; it does not write durable memory. Accepted proposals mint a governed path relation.",
-  "soul.list_pending_edge_proposals":
-    "WHEN: you need to inspect pending memory graph relation proposals before review. Read-only; filters by edge_type, confidence, trigger source, and time.",
-  "soul.batch_review_edge_proposals":
-    "WHEN: a reviewer has explicitly accepted or rejected pending edge proposals. Accepting mints a governed path relation through the path-relation service.",
-  "soul.apply_override":
-    "WHEN: the user explicitly says the current assumption, tool, or behavior is wrong and must be replaced for this run. Apply an immediate session-only correction.",
-  "soul.explore_graph":
-    "WHEN: you need 1-hop graph neighbors of an existing memory entry to ground related context. Inspect memory path-relation neighbors. Read-only; does not create or mutate relations.",
-  "soul.report_context_usage":
-    "WHEN: you used recalled memory in your answer and need to close the delivery loop. Report whether recalled context for a delivery was used, skipped, or not applicable. Supports delivered-vs-used trust state. Usage trust weight is server-derived: a self-reported usage is always treated as automatic attribution and carries the lower path-plasticity weight. Include `turn_index` and `turn_digest.last_messages` (the turn's verbatim messages) so Alaya extracts durable candidates from this turn even when nothing was recalled.",
-  "soul.resolve":
-    "WHEN: a recalled pointer carries a `staged_warnings` entry and you have decided how to handle it (confirm / reject / correct / stale / defer / not_relevant). Resolve a staged warning attached to a recall result. `confirm` activates a draft claim_form (draft -> active); `reject` archives a non-draft claim_form or records the dismissal for a memory_entry; `correct` records the corrected proposition (downstream consumers pick it up from the audit row); `stale` transitions an active memory_entry to dormant; `defer` creates a deferred obligation that expires at `defer_until`; `not_relevant` records the dismissal without mutating the target. delivery_id MUST be the same delivery_id soul.recall returned for the pointer being resolved.",
-  "garden.list_pending_tasks":
-    "WHEN: you have spare capacity (idle between user turns, or operator asks to flush the garden queue) and the operator has set garden compute provider_kind=host_worker so the host CLI agent is the worker. List Garden background tasks pending for this workspace. Read-only. Use before garden.claim_task to scope what work the host can pick up. (当 garden compute 模式为 host_worker 时，CLI agent 在空闲间隙先 list 再 claim 抢任务)",
-  "garden.claim_task":
-    "WHEN: a pending Garden task should be picked up by this host (atomic claim). Returns already_claimed when another worker already grabbed it. The host (Codex / Claude Code / similar attached CLI agent) then runs its own sub-agent extraction on the task payload and posts the result back via garden.complete_task. Abandoned claims are reclaimed automatically after a stale timeout, so don't claim more than you'll actually run.",
-  "garden.complete_task":
-    "WHEN: the host finished its task work and is reporting the result back. Only the agent target that claimed the task can complete it. Candidate signals in the result_envelope flow into the same governance review queue host agents use via soul.emit_candidate_signal — they are NOT durable memory writes."
-});
-
 const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
   "soul.recall":
-    "Start memory-sensitive turns here; use the returned delivery_id later in soul.report_context_usage. Mixed or source_only views require protocol_version=1 and source_evidence support; undeclared mixed is a compatibility error rather than a later parse failure.",
+    "Optional `enumeration_policy` (`canonical` default, or `associative`), `result_kind_view` (`mixed` default, or `memory_only`/`source_only`), `interpretation_proposal`, and `payload_continuation` are request identity/view fields. Associative enumeration requires declared `cap_contracts`; absence is incompatible (unsupported-policy), not a D2 default. Results carry a tagged `target`; source-record-only rows use `object_kind` `source_evidence` and do not mint a memory id. Responses may include `page_purpose` and `product_updates`; retrying the same continuation replays the same `delivery_id`. Older consumers that cannot parse source targets must request `result_kind_view=memory_only` rather than dropping or recasting source rows. Start memory-sensitive turns here; use the returned delivery_id later in soul.report_context_usage. Mixed or source_only views require protocol_version=1 and source_evidence support; undeclared mixed is a compatibility error rather than a later parse failure.",
   "soul.open_pointer":
     "Use this before citing memory content so evidence is grounded in retrieved objects.",
   "soul.emit_candidate_signal":
@@ -107,24 +83,14 @@ const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.f
   "garden.complete_task": ""
 });
 
-const descriptionByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.freeze({
-  "soul.recall": `${providerBaseDescriptionByName["soul.recall"]} ${loopSuffixByName["soul.recall"]}`,
-  "soul.open_pointer": `${providerBaseDescriptionByName["soul.open_pointer"]} ${loopSuffixByName["soul.open_pointer"]}`,
-  "soul.emit_candidate_signal": `${providerBaseDescriptionByName["soul.emit_candidate_signal"]} ${loopSuffixByName["soul.emit_candidate_signal"]}`,
-  "soul.propose_memory_update": `${providerBaseDescriptionByName["soul.propose_memory_update"]} ${loopSuffixByName["soul.propose_memory_update"]}`,
-  "soul.review_memory_proposal": `${providerBaseDescriptionByName["soul.review_memory_proposal"]} ${loopSuffixByName["soul.review_memory_proposal"]}`,
-  "soul.list_pending_proposals": `${providerBaseDescriptionByName["soul.list_pending_proposals"]} ${loopSuffixByName["soul.list_pending_proposals"]}`,
-  "soul.propose_edge": `${providerBaseDescriptionByName["soul.propose_edge"]} ${loopSuffixByName["soul.propose_edge"]}`,
-  "soul.list_pending_edge_proposals": `${providerBaseDescriptionByName["soul.list_pending_edge_proposals"]} ${loopSuffixByName["soul.list_pending_edge_proposals"]}`,
-  "soul.batch_review_edge_proposals": `${providerBaseDescriptionByName["soul.batch_review_edge_proposals"]} ${loopSuffixByName["soul.batch_review_edge_proposals"]}`,
-  "soul.apply_override": `${providerBaseDescriptionByName["soul.apply_override"]} ${loopSuffixByName["soul.apply_override"]}`,
-  "soul.explore_graph": `${providerBaseDescriptionByName["soul.explore_graph"]} ${loopSuffixByName["soul.explore_graph"]}`,
-  "soul.report_context_usage": `${providerBaseDescriptionByName["soul.report_context_usage"]} ${loopSuffixByName["soul.report_context_usage"]}`,
-  "soul.resolve": `${providerBaseDescriptionByName["soul.resolve"]} ${loopSuffixByName["soul.resolve"]}`,
-  "garden.list_pending_tasks": providerBaseDescriptionByName["garden.list_pending_tasks"],
-  "garden.claim_task": providerBaseDescriptionByName["garden.claim_task"],
-  "garden.complete_task": providerBaseDescriptionByName["garden.complete_task"]
-});
+function catalogDescriptionFor(name: AlayaMemoryToolName): string {
+  const spec = soulToolSpecByName.get(name);
+  if (spec === undefined) {
+    throw new Error(`soulToolDefs is missing ${name}`);
+  }
+  const suffix = loopSuffixByName[name].trim();
+  return suffix.length === 0 ? spec.description : `${spec.description} ${suffix}`;
+}
 
 const readOnlyAnnotation = Object.freeze({
   readOnlyHint: true,
@@ -164,7 +130,7 @@ export function listAlayaMemoryTools(): readonly AlayaMemoryToolDefinition[] {
   return ALAYA_MEMORY_TOOL_NAMES.map((name) =>
     Object.freeze({
       name,
-      description: descriptionByName[name],
+      description: catalogDescriptionFor(name),
       inputSchema: soulToolJsonSchemas[name],
       annotations: annotationByToolName[name]
     })

@@ -21,7 +21,7 @@ import {
   inspectOfficialApiSemanticFactorGraphProjection,
   type OfficialApiSemanticFactorGraphProjectionAudit
 } from "./official-api/semantic-factor-projection.js";
-import { salvageRawSignalElements } from "./official-api/raw-signal-envelope.js";
+import { inspectRawOfficialApiSignalElements } from "./official-api/raw-signal-envelope.js";
 import {
   projectOfficialApiObjectKind,
   type OfficialApiObjectKindProjection
@@ -225,6 +225,14 @@ export interface OfficialApiSignalParseOptions {
   readonly requireSemanticFactorGraph?: boolean;
 }
 
+export type OfficialApiSignalEnvelopeRecoveryKind = "none" | "salvage";
+
+export interface OfficialApiSignalParseReceipt {
+  readonly drafts: readonly OfficialApiSignalDraft[];
+  readonly recoveryKind: OfficialApiSignalEnvelopeRecoveryKind;
+  readonly discardedCount: number;
+}
+
 type OfficialApiSignalEntryRejection =
   | "signal_entry_invalid"
   | "semantic_factor_graph_required";
@@ -247,6 +255,13 @@ export function parseOfficialApiSignals(
   content: string,
   options: OfficialApiSignalParseOptions = {}
 ): readonly OfficialApiSignalDraft[] {
+  return parseOfficialApiSignalsReceipt(content, options).drafts;
+}
+
+export function parseOfficialApiSignalsReceipt(
+  content: string,
+  options: OfficialApiSignalParseOptions = {}
+): OfficialApiSignalParseReceipt {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -256,10 +271,10 @@ export function parseOfficialApiSignals(
     // malformed key missing `":"`, or a max_tokens-truncated final element)
     // otherwise nukes every clean sibling signal. Degrade element-wise: walk
     // the `signals` array, JSON.parse each `{...}` independently, keep the
-    // valid entries, drop the corrupt one(s), and tolerate a truncated final
-    // element. This is the array-level analogue of the per-entry drop policy
-    // applied below after a successful parse — a sibling's corruption is not
-    // allowed to abort the turn's good signals.
+    // valid entries, and drop corrupt or truncated ones. Truncation is not
+    // repaired by inventing closers. This is the array-level analogue of the
+    // per-entry drop policy applied below after a successful parse — a
+    // sibling's corruption is not allowed to abort the turn's good signals.
     return salvageOfficialApiSignals(content, options);
   }
   // invariant: a malformed *envelope* (response is not an object, or has no
@@ -275,7 +290,8 @@ export function parseOfficialApiSignals(
 
   const drafts: OfficialApiSignalDraft[] = [];
   const rejections: OfficialApiSignalEntryRejection[] = [];
-  for (const candidate of envelope.signals.slice(0, OFFICIAL_API_SIGNAL_LIMIT)) {
+  const limited = envelope.signals.slice(0, OFFICIAL_API_SIGNAL_LIMIT);
+  for (const candidate of limited) {
     const inspected = inspectOfficialApiSignalEntry(candidate, options);
     if (inspected.draft === null) rejections.push(inspected.rejection);
     else drafts.push(inspected.draft);
@@ -283,7 +299,11 @@ export function parseOfficialApiSignals(
   if (envelope.signals.length > 0 && drafts.length === 0) {
     throw noValidOpenEntriesError(rejections);
   }
-  return Object.freeze(drafts);
+  return Object.freeze({
+    drafts: Object.freeze(drafts),
+    recoveryKind: "none",
+    discardedCount: rejections.length + Math.max(0, envelope.signals.length - limited.length)
+  });
 }
 
 // Element-wise salvage for a `{"signals":[...]}` envelope whose strict
@@ -294,15 +314,18 @@ export function parseOfficialApiSignals(
 // truncated first/only element) so the caller's existing failure attribution
 // (offline_fallbacks + recordExtractionFailureSource) still fires — a corrupt
 // degenerate body must NOT masquerade as an empty `{"signals":[]}` extraction.
-// see also: salvageRawSignalElements (string-aware balanced-brace walk).
+// Truncated tails are counted and dropped, never closed into fake JSON.
 function salvageOfficialApiSignals(
   content: string,
   options: OfficialApiSignalParseOptions
-): readonly OfficialApiSignalDraft[] {
+): OfficialApiSignalParseReceipt {
+  const inspection = inspectRawOfficialApiSignalElements(content);
   const drafts: OfficialApiSignalDraft[] = [];
-  for (const element of salvageRawSignalElements(content)) {
+  let discardedCount = inspection.truncated_final_element ? 1 : 0;
+  for (const element of inspection.elements) {
     if (drafts.length >= OFFICIAL_API_SIGNAL_LIMIT) {
-      break;
+      discardedCount += 1;
+      continue;
     }
     let candidate: unknown;
     try {
@@ -310,20 +333,28 @@ function salvageOfficialApiSignals(
     } catch {
       // A single corrupt element (bad escape / unescaped quote / malformed
       // key) — skip it, keep walking the clean siblings.
+      discardedCount += 1;
       continue;
     }
     if (!UnknownRecordSchema.safeParse(candidate).success) {
+      discardedCount += 1;
       continue;
     }
     const draft = parseOfficialApiSignalEntry(candidate, options);
     if (draft !== null) {
       drafts.push(draft);
+    } else {
+      discardedCount += 1;
     }
   }
   if (drafts.length === 0) {
     throw new Error("signals envelope unparseable and no element recoverable");
   }
-  return Object.freeze(drafts);
+  return Object.freeze({
+    drafts: Object.freeze(drafts),
+    recoveryKind: "salvage",
+    discardedCount
+  });
 }
 
 // Parse one entry of the official-API {"signals":[...]} envelope. Returns

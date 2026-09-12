@@ -93,7 +93,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly getEmbeddingProviderDimensions: () => number | null;
   readonly embeddingRecallService?: Pick<
     EmbeddingRecallService,
-    "warmQueryEmbeddings" | "coherentPairKeys"
+    "warmQueryEmbeddings" | "coherentPairKeys" | "lastQueryEmbeddingWarmup"
   >;
   // invariant: answers_with crystallizer is always-on when the HQ repo is
   // present; null hqRepo → no mint.

@@ -28,6 +28,7 @@ const packageJsonPaths = [
 
 const mismatches = [];
 const protocolIssues = [];
+let protocolVersion = null;
 for (const packageJsonPath of packageJsonPaths) {
   const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
   if (packageJson.name === PROTOCOL_PACKAGE) {
@@ -36,6 +37,8 @@ for (const packageJsonPath of packageJsonPaths) {
       !SEMVER_PATTERN.test(packageJson.version)
     ) {
       protocolIssues.push(`${packageJsonPath}: ${packageJson.version ?? "<missing>"}`);
+    } else {
+      protocolVersion = packageJson.version;
     }
     continue;
   }
@@ -52,6 +55,22 @@ if (protocolIssues.length > 0) {
   process.exit(1);
 }
 
+if (protocolVersion !== null) {
+  const changelogPath = "CHANGELOG.md";
+  if (!existsSync(changelogPath)) {
+    console.error(`${changelogPath} is required and must mention protocol ${protocolVersion}`);
+    process.exit(1);
+  }
+  const changelog = readFileSync(changelogPath, "utf8");
+  const protocolMarker = `protocol ${protocolVersion}`;
+  if (!changelog.includes(protocolMarker)) {
+    console.error(
+      `${changelogPath} must mention "${protocolMarker}" to match ${PROTOCOL_PACKAGE}@${protocolVersion}`
+    );
+    process.exit(1);
+  }
+}
+
 if (mismatches.length > 0) {
   console.error(`release tag ${tag} does not match package version ${expectedVersion}:`);
   for (const mismatch of mismatches) {
@@ -61,7 +80,7 @@ if (mismatches.length > 0) {
 }
 
 console.log(
-  `release version check ok: ${tag} matches ${packageJsonPaths.length - 1} app package.json files; ${PROTOCOL_PACKAGE} semver validated separately`
+  `release version check ok: ${tag} matches ${packageJsonPaths.length - 1} app package.json files; ${PROTOCOL_PACKAGE}@${protocolVersion} matches CHANGELOG.md`
 );
 
 function listPackageJsons(root) {

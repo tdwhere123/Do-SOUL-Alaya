@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { requestGardenChatCompletionContent } from "../../ai/garden-chat-completion.js";
 
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
+    const answer = { address: "93.184.216.34", family: 4 };
+    return options?.all === true ? [answer] : answer;
+  })
+}));
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();

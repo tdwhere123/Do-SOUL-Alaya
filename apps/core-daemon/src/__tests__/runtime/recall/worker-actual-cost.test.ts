@@ -370,7 +370,7 @@ function payload(budget: RequestBudget, query: string) {
     protocol_version: 1 as const,
     supports_source_evidence: true,
     supported_result_kinds: ["memory_entry", "source_evidence"] as const,
-    authorized_scopes: null
+    authorized_scopes: { mode: "unrestricted" as const }
   };
 }
 

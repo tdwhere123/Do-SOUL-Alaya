@@ -8,6 +8,7 @@ import {
   type GardenBacklogWarningTransition
 } from "@do-soul/alaya-protocol";
 import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 import {
   delay,
   normalizeStopTimeoutMs,
@@ -387,7 +388,10 @@ export class GardenBacklogTelemetryService {
       | typeof ComputeRecallGardenEventType.GARDEN_BACKLOG_WARNING,
     payload: Record<string, unknown>
   ): Promise<EventLogEntry> {
-    return await this.deps.eventLogRepo.append({
+    return await bindEventPublisher({
+      eventLogRepo: this.deps.eventLogRepo,
+      purpose: "GardenBacklogTelemetryService"
+    }).publish({
       event_type: eventType,
       entity_type: GARDEN_BACKLOG_ENTITY_TYPE,
       entity_id: GARDEN_BACKLOG_ENTITY_ID,
