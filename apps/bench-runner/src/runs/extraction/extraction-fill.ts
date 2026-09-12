@@ -80,6 +80,8 @@ export interface ExtractionFillOptions {
   readonly batch?: {
     readonly window?: string;
     readonly requestLimit?: number;
+    /** Campaign scheduling may not turn a prior failure into an implicit retry. */
+    readonly requireSuccessfulPredecessors?: boolean;
     readonly operation: import("./fill/batch/contract.js").GeminiBatchOperation;
     readonly limits: import("./fill/batch/contract.js").GeminiBatchLimits;
     readonly reconcile?: { readonly localJob: string; readonly remoteJob: string };

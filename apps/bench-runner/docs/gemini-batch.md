@@ -131,6 +131,64 @@ fallback. Query preparation has its own manifest and budget.
 
 ## Verification and interpretation
 
+### Rolling a bounded scope as an ordinary process
+
+`extraction-fill --batch-campaign /absolute/campaign.json` schedules named
+windows through the existing fill entry. Its manifest references the frozen
+Batch limits and extraction authority; it does not authorize additional spend:
+
+```json
+{
+  "version": 1,
+  "name": "bulk",
+  "limitsPath": "/absolute/batch-limits.json",
+  "requestLimit": 400,
+  "pollIntervalMs": 600000,
+  "fill": {
+    "variant": "longmemeval_s",
+    "offset": 0,
+    "limit": 100,
+    "cacheRoot": "/absolute/cache",
+    "dataDir": "/absolute/data",
+    "authorityReceiptPath": "/absolute/bulk-authority.json",
+    "targetSelectionReceiptPath": "/absolute/bulk-target.json",
+    "predecessorAuthorityReceiptPath": "/absolute/canary-authority.json"
+  }
+}
+```
+
+All paths must be absolute. The last predecessor reference is required only
+for an existing same-root continuation. The limits must allow at most 400
+requests per job and 8 million input/enqueued tokens. Each window must prepare
+at most one job. `maxJobs` remains the existing cumulative root job ceiling,
+so it must cover the authorized campaign, including previous accepted jobs.
+
+For a supervised or shell-background process, invoke Node explicitly with
+`--use-env-proxy` before the existing `bin/alaya-bench-runner.mjs` path. This
+avoids the CLI proxy bootstrap spawning another process, so the recorded PID
+belongs to the controller. Redirect stdout/stderr to the operator's run log.
+The controller emits its next check time and persists scheduling state under
+`cacheRoot/.batch-campaign/state.json`. Restarting the same command resumes the
+same window and never blindly repeats an ambiguous job creation. A completed
+restart revalidates shared cache coverage without new extraction.
+
+Unknown submissions, missing usage, failed/quarantined results, exhausted
+owner limits and fill errors stop the campaign. Restart does not clear a stop
+or open a retry window; inspect the existing job/authority artifacts and use
+the ordinary operator recovery route. Manifest/authority/limits changes are
+rejected. Neither scheduler state nor a successful remote job substitutes for
+the shared full-scope completion check.
+Completion here means the extraction cache is complete. The controller does
+not certify downstream semantic graphs, field formation or Recall readiness;
+the operator must settle those quality gates before authorizing campaign start.
+
+After a code revision changes, an existing ordinary 100Q authority cannot
+simply be reused. Use the existing explicit `select-extraction-target`
+same-root continuation with the previous target and authority, then
+`authorize-extraction` with the new target and previous authority. Its owner
+requires settled predecessor accounting, preserves compatible cached shards
+and forks the existing ledger; the controller does not copy or rewrite either.
+
 Successful job status alone cannot complete the cache. Every selected result
 must have an exact request/source binding and successful completion witness;
 foreign, duplicate, missing, malformed and truncated responses remain failed,

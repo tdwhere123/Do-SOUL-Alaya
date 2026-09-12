@@ -18,7 +18,7 @@ import { batchDigest, canonicalBatchPlan, MAX_BATCH_ARTIFACT_BYTES } from "./bat
 import { createGeminiBatchHttp } from "./batch/http.js";
 import { encodeGeminiGenerateContent, isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import { executeGeminiBatchOperation } from "./batch/executor.js";
-import { isBatchPlanAdmitted } from "./batch/store.js";
+import { isBatchPlanAdmitted, readRootBatchRuns } from "./batch/store.js";
 import { assertExtractionFillComplete } from "./fill-completion.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 
@@ -45,6 +45,14 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
     throw new Error("Batch request profile is unsupported");
   }
   assertBatchExpenseScope(batch.limits, authority);
+  if (batch.requireSuccessfulPredecessors && batch.operation === "prepare" &&
+      readRootBatchRuns(input.writeLease).some(({ state }) => state.jobs.some((job) =>
+        job.cancelRequested === true ||
+        Object.values(job.outcomes).some((outcome) => outcome.status !== "admitted") ||
+        (job.submittedAt !== undefined && (job.status !== "succeeded" || job.usageUnknown ||
+          job.usage === undefined || job.lineKeys.some((key) => job.outcomes[key]?.status !== "admitted")))))) {
+    throw new Error("Batch campaign requires successful, fully accounted predecessor jobs");
+  }
   const selected = authority.receipt.action === "probe" ? new Set([authority.receipt.probe_key!])
     : authority.receipt.catalog_refill === undefined ? undefined
       : new Set(authority.receipt.catalog_refill.keys);
