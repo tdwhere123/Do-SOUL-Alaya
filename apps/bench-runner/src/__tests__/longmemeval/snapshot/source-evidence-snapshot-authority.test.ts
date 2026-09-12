@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, parseOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import {
   buildGardenSourceTurnFallbackReceiptPreimage,
@@ -365,10 +365,14 @@ async function seedFixture(
     requiredExtractionTurns: keySpace.distinctExtractionTurns,
     requiredQuestionWindow: { offset: 0, limit: 1 },
     extractorFactory: () => ({
-      extract: async () => providerBackedExtractionResult(signalsEnvelope([{
+      extract: async ({ userPrompt }) => {
+        const request = parseOfficialApiExtractionRequest(userPrompt);
+        const assertion = request.source_assertions.find((item) => item.text.includes("I check the platform near the main entrance."));
+        return providerBackedExtractionResult(signalsEnvelope(assertion === undefined ? [] : [{
           matched: "I check the platform near the main entrance.",
-          distilled: "The user checks the platform near the main entrance."
-        }]))
+          distilled: "The user checks the platform near the main entrance.", assertionId: assertion.assertion_id
+        }]));
+      }
     })
   });
   const workspace = { ...daemon, detach: async () => undefined };

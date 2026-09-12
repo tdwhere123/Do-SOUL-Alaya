@@ -24,7 +24,7 @@ let pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks((roots) => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots));
 afterEach(() => vi.restoreAllMocks());
 
-type ResultKind = "valid" | "error" | "missing" | "truncated" | "foreign-quote" | "substring";
+type ResultKind = "valid" | "empty" | "error" | "missing" | "truncated" | "foreign-quote" | "substring";
 
 async function setup(questionCount = 1) {
   setExtractionCredentialFixture();
@@ -72,6 +72,7 @@ async function setup(questionCount = 1) {
         if (kind === "missing") return "";
         if (kind === "error") return JSON.stringify({ key: request.key, error: { code: 500, message: "synthetic" } });
         const raw = JSON.parse(buildGroundedSignalResponse(request.request.contents[0].parts[0].text));
+        if (kind === "empty") raw.signals = [];
         if (kind === "foreign-quote") raw.signals[0].matched_text = "I completed a foreign activity.";
         if (kind === "substring") raw.signals[0].matched_text = raw.signals[0].matched_text.replace(/^I /u, "");
         return JSON.stringify({ key: request.key, response: {
@@ -179,6 +180,22 @@ it("settles mixed successful, provider-error, missing and truncated lines with c
   expect(job.usageUnknown).toBe(true);
   expect(accountedCost(job, { plan: { identity: "a".repeat(64), model: "gemini-2.5-flash-lite",
     requestProfile: "gemini-2.5-nonthinking-v1", lines: [], limits } })).toBe(job.costBoundUsd);
+});
+
+it("admits a completed empty selection alongside grounded signals without another provider attempt", async () => {
+  const { run, provider } = await setup();
+  provider.results = ["empty", "valid"];
+  await run("prepare"); await run("submit");
+  const result = await run("resume");
+  expect(result.coverage).toBe(1);
+  expect(result.manifest.fill_status).toBe("complete");
+  expect(Object.values(result.batchState!.jobs[0]!.outcomes).map((outcome) => outcome.status))
+    .toEqual(["admitted", "admitted"]);
+  expect(result.authorityTelemetry).toMatchObject({ attempts: 2, successfulShards: 2,
+    telemetry: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } });
+  const replay = await run("import");
+  expect(replay.authorityTelemetry?.attempts).toBe(2);
+  expect(provider.downloads).toBe(1);
 });
 
 it("rejects a foreign quote before cache publication while admitting a valid source substring", async () => {

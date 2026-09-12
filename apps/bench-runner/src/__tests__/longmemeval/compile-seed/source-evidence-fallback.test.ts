@@ -408,19 +408,12 @@ describe("compile seed source evidence fallback", () => {
 });
 
 function createRunnerWithOneClaim(cacheRoot: string) {
-  return createCompileSeedRunner({
-    config: CREDENTIALLED_CONFIG,
-    cacheRoot,
-    allowLiveExtraction: true,
-    extractorFactory: () => ({
-      extract: async () => ({
-        ...providerBackedResult(""),
-        rawJson: signalsEnvelope([{
-          distilled: "The user takes the 7:15 train.",
-          matched: "I take the 7:15 train."
-        }])
-      })
-    })
+  return createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot, allowLiveExtraction: true,
+    extractorFactory: () => ({ extract: async ({ userPrompt }) => {
+      const assertion = JSON.parse(userPrompt).source_assertions[0];
+      return providerBackedResult(signalsEnvelope([{ distilled: assertion.text, matched: assertion.text,
+        assertionId: assertion.assertion_id }]));
+    } })
   });
 }
 

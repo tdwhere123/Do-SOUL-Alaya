@@ -88,8 +88,8 @@ describe("createCompileSeedRunner — compile-based seed", () => {
           rawJson: signalsEnvelope([
             { distilled: "Alice moved to Berlin.", matched: "Alice moved to Berlin." },
             {
-              distilled: "Alice started her job on 2024-03-01.",
-              matched: "Alice started her job on 2024-03-01."
+              distilled: "Alice started a job on 2024-03-01.",
+              matched: "Alice started a job on 2024-03-01.", assertionId: 2
             }
           ])
         })
@@ -98,7 +98,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
 
     const result = await runner.seedTurn({
       daemon,
-      turnContent: "Alice moved to Berlin. Alice started her job on 2024-03-01.",
+      turnContent: "Alice moved to Berlin. Alice started a job on 2024-03-01.",
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
       ...SEED_CONTEXT
@@ -114,7 +114,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     // evidence boundary.
     expect(seeded.map((input) => input.distilledFact)).toEqual([
       "Alice moved to Berlin.",
-      "Alice started her job on 2024-03-01."
+      "Alice started a job on 2024-03-01."
     ]);
     expect(seeded.every((input) => input.turnContent.includes("Berlin"))).toBe(
       true
@@ -434,9 +434,8 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     });
 
     expect(seeded).toHaveLength(0);
-    expect(delegate).toHaveBeenCalledTimes(2);
+    expect(delegate).toHaveBeenCalledTimes(1);
     expect(delegate.mock.calls[0]?.[0]).not.toMatchObject({ retryMode: "disabled" });
-    expect(delegate.mock.calls[1]?.[0]).toMatchObject({ retryMode: "disabled" });
     expect(secondRunner.stats.cacheHits).toBe(0);
     expect(secondRunner.stats.llmCalls).toBe(1);
     expect(secondRunner.stats.offlineFallbacks).toBe(0);

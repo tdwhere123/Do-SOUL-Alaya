@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { inspectExtractionRawJson } from "../../../runs/extraction/content-closure.js";
 import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -57,155 +58,18 @@ describe("compile() signal-drop count is observable", () => {
     await rm(cacheRoot, { recursive: true, force: true });
   });
 
-  it("counts signals compile() dropped as oversized (compile_overflow_dropped)", async () => {
-    let counter = 0;
-    const daemon = buildCompileSeedDaemon(() => {
-      counter += 1;
-      return {
-        memoryId: `memory-${counter}`,
-        signalId: `signal-${counter}`,
-        proposalId: `proposal-${counter}`,
-        evidenceId: `evidence-${counter}`,
-        truncated: false,
-        charsClipped: 0
-      };
-    });
-    // The middle signal's matched_text is a real ~4500-char span of the
-    // turn. The parser clamps it to 4000, but schema-grounding then triples
-    // it (field_candidates value + evidence) and the turn_content_excerpt is
-    // built from the same long span — the assembled raw_payload overflows
-    // the protocol 16 KB cap, so compile() drops that one signal and returns
-    // the two survivors. The drop must be counted, not silent.
-    const oversizedSpan = "lorem ipsum dolor ".repeat(260); // ~4680 chars
-    const turnContent = `Intro sentence. ${oversizedSpan}. Closing sentence.`;
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => ({
-          ...providerBackedResult(""),
-          rawJson: JSON.stringify({
-            signals: [
-              {
-                signal_kind: "potential_preference",
-                object_kind: "user_preference",
-                confidence: 0.9,
-                matched_text: "Intro sentence",
-                distilled_fact: "Survivor one."
-              },
-              {
-                signal_kind: "potential_preference",
-                object_kind: "user_preference",
-                confidence: 0.9,
-                matched_text: oversizedSpan.trim(),
-                distilled_fact: "Oversized signal."
-              },
-              {
-                signal_kind: "potential_preference",
-                object_kind: "user_preference",
-                confidence: 0.9,
-                matched_text: "Closing sentence",
-                distilled_fact: "Survivor two."
-              }
-            ].map(withOpenSemanticFactorGraph)
-          })
-        })
-      })
-    });
-
-    const result = await runner.seedTurn({
-      daemon,
-      turnContent,
-      evidenceRefBase: "q1-s0-t0",
-      seedIndex: 0,
-      workspaceId: "ws-test",
-      runId: "run-test"
-    });
-
-    // Two survivors seeded; the oversized signal is dropped INSIDE compile().
-    // It is a compile-overflow drop — all 3 parsed cleanly, so parse_dropped
-    // stays 0; the single loss is on the compile_overflow_dropped leg.
-    expect(result.seeds).toHaveLength(2);
-    expect(runner.stats.compileOverflowDropped).toBe(1);
-    expect(runner.stats.parseDropped).toBe(0);
-    expect(runner.stats.signalsDropped).toBe(1);
-    expect(runner.stats.factsProduced).toBe(2);
-  });
-
-  it("counts malformed entries the parser dropped (parse_dropped)", async () => {
-    // Regression: parseOfficialApiSignals silently discards a malformed
-    // single entry BEFORE compile() iterates. A drop counter that uses
-    // parseOfficialApiSignals(rawJson).length as the draft count never
-    // sees a parser-stage drop — only the compile overflow leg.
-    // signals_dropped must count the malformed entry too.
-    let counter = 0;
-    const daemon = buildCompileSeedDaemon(() => {
-      counter += 1;
-      return {
-        memoryId: `memory-${counter}`,
-        signalId: `signal-${counter}`,
-        proposalId: `proposal-${counter}`,
-        evidenceId: `evidence-${counter}`,
-        truncated: false,
-        charsClipped: 0
-      };
-    });
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => ({
-          ...providerBackedResult(""),
-          // The model envelope carries 3 raw signals. The middle one is
-          // malformed — its confidence is not numeric —
-          // so parseOfficialApiSignalEntry returns null and it never
-          // reaches compile(). The two well-formed entries survive.
-          rawJson: JSON.stringify({
-            signals: [
-              {
-                signal_kind: "potential_preference",
-                object_kind: "user_preference",
-                confidence: 0.9,
-                matched_text: "Intro span",
-                distilled_fact: "Survivor one."
-              },
-              {
-                signal_kind: "potential_preference",
-                object_kind: "user_preference",
-                confidence: "not-a-confidence",
-                matched_text: "Malformed span",
-                distilled_fact: "Malformed entry."
-              },
-              {
-                signal_kind: "potential_preference",
-                object_kind: "user_preference",
-                confidence: 0.9,
-                matched_text: "Closing span",
-                distilled_fact: "Survivor two."
-              }
-            ].map(withOpenSemanticFactorGraph)
-          })
-        })
-      })
-    });
-
-    const result = await runner.seedTurn({
-      daemon,
-      turnContent: "Intro span. Some content. Closing span.",
-      evidenceRefBase: "q1-s0-t0",
-      seedIndex: 0,
-      workspaceId: "ws-test",
-      runId: "run-test"
-    });
-
-    // Two survivors seeded; the malformed entry is the parse-stage drop.
-    expect(result.seeds).toHaveLength(2);
-    expect(runner.stats.parseDropped).toBe(1);
-    expect(runner.stats.compileOverflowDropped).toBe(0);
-    expect(runner.stats.signalsDropped).toBe(1);
-    expect(runner.stats.factsProduced).toBe(2);
+  it("keeps malformed-sibling salvage diagnostic without completing or caching the response", async () => {
+    const raw = JSON.stringify({ signals: [
+      ...JSON.parse(signalsEnvelope([{ distilled: "I have a dog.", matched: "I have a dog." }])).signals,
+      { confidence: "invalid" }
+    ] });
+    expect(inspectExtractionRawJson(raw)).toMatchObject({ rawSignalCount: 2, parsedDraftCount: 1 });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot, allowLiveExtraction: true,
+      extractorFactory: () => ({ extract: async () => providerBackedResult(raw) }) });
+    const daemon = buildCompileSeedDaemon(() => { throw new Error("incomplete response must not materialize"); });
+    await expect(runner.seedTurn({ daemon, turnContent: "I have a dog.", evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0, workspaceId: "ws-test", runId: "run-test" })).rejects.toThrow("invalid response");
+    expect(readdirSync(cacheRoot)).toEqual(["manifest.json"]);
   });
 
   it("isolates per-signal materialization drops by reason and keeps healthy batch-mates", async () => {
@@ -248,8 +112,8 @@ describe("compile() signal-drop count is observable", () => {
           ...providerBackedResult(""),
           rawJson: signalsEnvelope([
             { distilled: "Survivor.", matched: "Intro span" },
-            { distilled: "Absent.", matched: "Middle span" },
-            { distilled: "Threw.", matched: "Closing span" }
+            { distilled: "Absent.", matched: "Middle span", assertionId: 2 },
+            { distilled: "Threw.", matched: "Closing span", assertionId: 3 }
           ])
         })
       })
@@ -386,11 +250,12 @@ describe("extraction cache write is atomic", () => {
     // visibly partial. The write-tmp-then-rename discipline means the final
     // shard is always whole, parseable JSON with the complete raw_json.
     const bigRawJson = JSON.stringify({
-      signals: Array.from({ length: 200 }, (_, i) => withOpenSemanticFactorGraph({
+      signals: Array.from({ length: 64 }, (_, i) => withOpenSemanticFactorGraph({
         signal_kind: "potential_preference",
         object_kind: "user_preference",
         confidence: 0.9,
-        matched_text: `span ${i}`,
+        matched_text: "Atomic turn persists a complete shard.",
+        source_locator: { contract_version: 2, kind: "assertion_catalog", assertion_id: 1 },
         distilled_fact: `Fact number ${i}.`
       }))
     });

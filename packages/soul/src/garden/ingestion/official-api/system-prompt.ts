@@ -47,6 +47,7 @@ const GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
   "Do not return an empty signals array merely because a durable assertion uses narrative, list, template, or conversational wording.",
   "Before returning an empty signals array for a non-empty source_assertions catalog, inspect every catalog entry once more and emit any durable personal fact, preference, relationship, possession, past event, or ongoing condition that satisfies the same grounding and durability rules.",
   "Do not lower the durability threshold: transient tasks, procedures, and formatting instructions are not durable assertions unless they explicitly state a lasting preference or policy.",
+  "The catalog is a source inventory, not a claim that every entry deserves a memory. Omit questions, one-off requests, roleplay and invented scenarios. Do not turn an instruction to the assistant into the user's standing policy or preference. A comparison alone does not establish a like or dislike.",
   '"matched_text" is an exact verbatim substring containing the complete atomic assertion, not isolated keywords.',
   'When a synthesis signal cites existing evidence or memories by ID, include "evidence_refs" and "source_memory_refs" arrays.'
 ]);
@@ -64,6 +65,7 @@ export const OPEN_SEMANTIC_FACTOR_COMMON_PROMPT_PARTS = Object.freeze([
   "Argument positions start at 0 and are contiguous, and preserve the predicate's semantic argument order.",
   ...OPEN_SEMANTIC_STRUCTURAL_ROLE_PROMPT_PARTS,
   "Every factor must be used as a predicate or argument. Reuse one factor in multiple propositions when the same source phrase has the same meaning.",
+  "predicate_factor_id and factor reference_id must name existing factor_id values, never proposition_id values. An action is not its own actor: retain the explicitly stated speaker or participant instead of using the predicate or its object as a substitute.",
   "Do not emit alternative, explanatory, or otherwise unused nodes; an unreferenced factor or variable makes the entire graph invalid.",
   "Each factor or variable surface must own a non-overlapping exact source span; never emit a node for text contained inside another emitted node.",
   "Do not emit character spans; the runtime grounds exact surfaces and derives spans.",
@@ -89,6 +91,7 @@ const OPEN_SEMANTIC_FACTOR_PROMPT_PARTS = Object.freeze([
 const FINAL_PROMPT_PARTS = Object.freeze([
   "Inspect each source_assertions entry independently; the batch contains no hidden context and every assertion_id keeps its original catalog identity.",
   "Keep pronouns unresolved unless their antecedent is explicit inside the selected catalog assertion.",
+  'Unresolved does not mean omitted: an explicit "I" remains a participant factor with surface "I" and semantic_identity "i"; do not rename it to an inferred person or silently drop it.',
   "Preserve relative-date meaning as source-supported factors; never infer an absolute date absent from the assertion.",
   "Preserve every concrete detail (names, numbers, dates, places) that appears in the selected catalog assertion.",
   "Do not invent facts or summarize away detail. Split independent durable assertions into separate signals, but keep dependent propositions together in one graph.",

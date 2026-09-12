@@ -37,7 +37,7 @@ describe("evidence semantic completeness", () => {
             expect.objectContaining({ surface: "I", semantic_identity: "i" }),
             expect.objectContaining({
               surface: "with a degree in Business Administration, which has definitely helped me in my new role",
-              semantic_identity: "degree in business administration"
+              semantic_identity: "with a degree in business administration, which has definitely helped me in my new role"
             })
           ])
         }

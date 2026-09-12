@@ -1,3 +1,4 @@
+export { classifyOfficialApiRequestResult } from "./garden/ingestion/official-api/request-result.js";
 export {
   DEFAULT_SOUL_GRAPH_DEPTH,
   DEFAULT_SOUL_GRAPH_LIMIT,
@@ -260,3 +261,4 @@ export {
   defaultSourceEnrichmentProfile,
   semanticExtractionProfilesEqual
 } from "./garden/ingestion/official-api/semantic-artifact-identity.js";
+export { officialApiExtractionResponseSchema } from "./garden/ingestion/official-api/response-schema.js";

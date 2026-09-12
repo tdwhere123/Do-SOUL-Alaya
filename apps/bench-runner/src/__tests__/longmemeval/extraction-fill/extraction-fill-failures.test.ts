@@ -131,17 +131,12 @@ describe("runExtractionFill", () => {
     await writeFixtureDataset([
       buildAuthorityQuestion("q001", "alpha", "decoy")
     ]);
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      choices: [{ message: { content: buildGroundedSignalResponse(JSON.stringify({
-        schema_version: 2,
-        source_locator_contract_version: 2,
-        batch_contract_version: 1,
-        source_corpus_identity: "a".repeat(64),
-        batch_index: 0,
-        batch_count: 1,
-        source_assertions: [{ assertion_id: 1, text: "User: alpha" }]
-      })) } }]
-    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ choices: [{ message: {
+        content: buildGroundedSignalResponse(body.messages.at(-1).content)
+      } }] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
     vi.stubGlobal("fetch", fetchMock);
     const authorityReceiptPath = await writeLiveAuthorityReceipt();
 

@@ -149,7 +149,7 @@ describe("sealed MiMo shard conversion", () => {
     } as never)).toThrow(/loaded extraction authority/u);
   });
 
-  it("converts a sealed MiMo fixture when shard completion and transport metadata are complete", async () => {
+  it("refuses a historical MiMo prompt under the changed current prompt identity", async () => {
     const fixture = loadTurn(SINGLE_KEY);
     const installed = await installSealedMimoShard(SINGLE_KEY, roots);
     const unit = planOfficialApiSemanticWorkset(
@@ -169,9 +169,8 @@ describe("sealed MiMo shard conversion", () => {
       semanticContract: unit.semanticIdentity.contractId,
       expectedSystemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
-    expect(report.converted).toHaveLength(1);
-    expect(report.converted[0]?.state).toBe("provider_backed");
-    expect(report.unresolved).toEqual([]);
+    expect(report.converted).toEqual([]);
+    expect(report.unresolved).toEqual([{ reason: "legacy shard cache key does not match prompt, request, model, and profile" }]);
   });
 
   it("admits the same sealed raw through fill and warms Lazy F3 to zero calls", async () => {
