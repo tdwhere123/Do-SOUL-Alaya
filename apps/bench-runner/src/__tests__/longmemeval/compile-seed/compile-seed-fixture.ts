@@ -66,7 +66,7 @@ export const OFFLINE_CONFIG: CompileSeedExtractionConfig = {
 };
 
 export function signalsEnvelope(
-  facts: readonly { distilled: string; matched: string }[]
+  facts: readonly { distilled: string; matched: string; assertionId?: number }[]
 ): string {
   return JSON.stringify({
     signals: facts.map((fact) => withOpenSemanticFactorGraph({
@@ -78,7 +78,7 @@ export function signalsEnvelope(
       source_locator: {
         contract_version: 2,
         kind: "assertion_catalog",
-        assertion_id: 1
+        assertion_id: fact.assertionId ?? 1
       }
     }))
   });

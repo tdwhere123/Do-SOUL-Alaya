@@ -138,31 +138,11 @@ function semanticIdentityForSlot(
   graph: Readonly<OpenSemanticFactorGraph>
 ): string {
   const aligned = [...graph.factors]
-    .filter((factor) => spansOverlap(factor.source_span, slot.source_span))
+    .filter((factor) => factor.source_span[0] === slot.source_span[0] &&
+      factor.source_span[1] === slot.source_span[1])
     .sort((left, right) =>
-      alignmentClass(left.source_span, slot.source_span) -
-        alignmentClass(right.source_span, slot.source_span) ||
-      left.source_span[0] - right.source_span[0] ||
-      left.source_span[1] - right.source_span[1] ||
       left.factor_id.localeCompare(right.factor_id));
   return aligned[0]?.semantic_identity ?? normalizeMemoryObjectKeySurface(slot.surface);
-}
-
-function alignmentClass(
-  factor: readonly [number, number],
-  slot: readonly [number, number]
-): number {
-  if (factor[0] === slot[0] && factor[1] === slot[1]) return 0;
-  if (factor[0] >= slot[0] && factor[1] <= slot[1]) return 1;
-  if (slot[0] >= factor[0] && slot[1] <= factor[1]) return 2;
-  return 3;
-}
-
-function spansOverlap(
-  left: readonly [number, number],
-  right: readonly [number, number]
-): boolean {
-  return left[0] < right[1] && right[0] < left[1];
 }
 
 function sourceOccurrence(source: string, surface: string, expectedStart: number): number {

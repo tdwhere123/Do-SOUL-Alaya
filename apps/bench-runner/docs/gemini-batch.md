@@ -133,8 +133,12 @@ fallback. Query preparation has its own manifest and budget.
 
 Successful job status alone cannot complete the cache. Every selected result
 must have an exact request/source binding and successful completion witness;
-foreign, duplicate, missing, malformed, truncated and assertion-bearing empty
-responses remain failed, pending or quarantined. Local imports do not count as
+foreign, duplicate, missing, malformed and truncated responses remain failed,
+pending or quarantined. A complete, valid `signals: []` response records that
+extraction produced no candidates; a grounded subset may omit transient source
+instructions. Neither outcome proves exhaustive memory or field formation.
+Valid empty responses preserve provider completion and usage and do not trigger
+an automatic paid recheck. Local imports do not count as
 new provider requests. Original occurrence bindings survive request deduplication.
 
 Provider-free regression coverage includes actual CLI import and cache replay,
@@ -149,6 +153,14 @@ Protocol references: [Batch guide](https://ai.google.dev/gemini-api/docs/batch-a
 [pricing](https://ai.google.dev/gemini-api/docs/pricing) and
 [quotas](https://ai.google.dev/gemini-api/docs/rate-limits).
 Rates and limits must be retrieved again for each paid execution contract.
+
+Native source extraction uses a response JSON schema derived from the shared
+graph and source-locator shapes. Query and protocol probe envelopes do not
+inherit that schema. It constrains generation syntax and supported structural
+keywords, not source truth or semantic completeness; normal parsing, grounding
+and formation checks still apply. Optional projections remain independent.
+Freeze input limits from the complete encoded wire, including the schema;
+an earlier prompt-only byte bound may no longer cover a request.
 
 ## Cache reuse while algorithms change
 

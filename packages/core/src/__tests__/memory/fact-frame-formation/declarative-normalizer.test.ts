@@ -55,14 +55,31 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     ["I have a dog.", "have", "a dog"],
     ["I have Atlas.", "have", "Atlas"],
     ["I do yoga.", "do", "yoga"],
-    ["I had a red car.", "had", "a red car"]
+    ["I had a red car.", "had", "a red car"],
+    ["I have more important things to do with my time.", "have", "more important things to do with my time"],
+    ["She has fewer meetings today.", "has", "fewer meetings today"],
+    ["I have several old books.", "have", "several old books"],
+    ["I have enough time for running.", "have", "enough time for running"]
   ])("keeps a lexical auxiliary-shaped relation in %s", (assertion, relation, value) => {
     expect(normalizer.propose(assertion)?.fact_frame.slots).toEqual([
-      { role: "subject", text: "I" },
+      { role: "subject", text: assertion.split(" ")[0] },
       { role: "relation", text: relation },
       { role: "value", text: value }
     ]);
   });
+
+  it.each([
+    ["I have finished the report.", "finished"],
+    ["I have recently bought a red car.", "bought"],
+    ["She has been reading old books.", "reading"]
+  ])("retains a genuine perfect auxiliary in %s", (source, relation) => {
+    expect(normalizer.propose(source)?.fact_frame.slots.find((slot) => slot.role === "relation")?.text).toBe(relation);
+  });
+
+  it.each(["I have important things to do.", "I have orange garden tools.", "She has gone.", "She has finished."])(
+    "refuses an unsupported ambiguous have complement instead of inventing a relation: %s", (source) => {
+      expect(normalizer.propose(source)).toBeUndefined();
+    });
 
   it("forms a first-person frame after a leading prepositional adjunct", () => {
     const assertion =

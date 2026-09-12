@@ -103,7 +103,7 @@ describe("createCachingSignalExtractor provider execution", () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => ({
-        rawJson: signalsEnvelope([{ distilled: "Fact X.", matched: "X" }])
+        rawJson: signalsEnvelope([{ distilled: "I have a dog.", matched: "I have a dog." }])
       }))
     };
     const extractor = createCachingSignalExtractor({
@@ -157,7 +157,7 @@ describe("createCachingSignalExtractor provider execution", () => {
 describe("createCachingSignalExtractor replay", () => {
   it("serves a second extraction from the on-disk fixture with zero LLM calls", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
-    const rawJson = signalsEnvelope([{ distilled: "Fact X.", matched: "X" }]);
+    const rawJson = signalsEnvelope([{ distilled: "I have a dog.", matched: "I have a dog." }]);
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => providerBackedExtractionResult(rawJson))
     };
@@ -239,8 +239,8 @@ describe("createCachingSignalExtractor replay", () => {
 describe("createCachingSignalExtractor identity", () => {
   it("keys the cache on the prompt: a different user prompt is a fresh miss", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "s" });
-    const firstRaw = signalsEnvelope([{ distilled: "Fact A.", matched: "A" }]);
-    const secondRaw = signalsEnvelope([{ distilled: "Fact B.", matched: "B" }]);
+    const firstRaw = signalsEnvelope([{ distilled: "I have a dog.", matched: "I have a dog." }]);
+    const secondRaw = signalsEnvelope([{ distilled: "I have a cat.", matched: "I have a cat." }]);
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()

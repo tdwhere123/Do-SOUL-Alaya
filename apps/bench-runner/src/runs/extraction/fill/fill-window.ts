@@ -83,7 +83,9 @@ async function prepareDatasetWindow(
   const questions = dataset.questions.slice(offset, sliceEnd);
   const batchLimit = resolveQuestionBatchLimit(options.questionBatchLimit, questions.length);
   const windowKeySpace = inspectTurnContentKeySpace(questions);
-  const executionKeySpace = inspectTurnContentKeySpace(questions.slice(0, batchLimit));
+  const executionKeySpace = batchLimit === questions.length
+    ? windowKeySpace
+    : inspectTurnContentKeySpace(questions.slice(0, batchLimit));
   const distinctTurns = windowKeySpace.distinctTurnContents;
   const executionTurns = executionKeySpace.distinctTurnContents;
   return {

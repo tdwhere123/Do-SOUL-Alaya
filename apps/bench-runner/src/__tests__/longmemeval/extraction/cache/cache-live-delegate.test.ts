@@ -19,13 +19,11 @@ import {
   writeExtractionCacheTestManifest
 } from "../extraction-cache-test-fixture.js";
 import {
-  providerBackedResult,
-  signalsEnvelope
+  providerBackedResult
 } from "../../compile-seed/compile-seed-fixture.js";
 import {
   createHttpExtractor,
   extractionConfig,
-  failure,
   MODEL,
   readShard,
   REQUEST_PROFILE,
@@ -51,54 +49,25 @@ describe("extraction live delegate atomic persistence", () => {
     await rm(cacheRoot, { recursive: true, force: true });
   });
 
-  it("rechecks one strict empty result once and persists only the terminal response", async () => {
-    const terminalRaw = signalsEnvelope([{
-      distilled: "I completed the review today.",
-      matched: "I completed the review today."
-    }]);
-    const delegate: BenchSignalExtractor = {
-      extract: vi
-        .fn<BenchSignalExtractor["extract"]>()
-        .mockImplementationOnce(async (input) => {
-          await input.onTransportAttempt?.(input.abortSignal);
-          return providerBackedResult('{"signals":[]}');
-        })
-        .mockImplementationOnce(async (input) => {
-          await input.onTransportAttempt?.(input.abortSignal);
-          return providerBackedResult(terminalRaw);
-        })
-    };
-    const onTransportAttempt = vi.fn(async () => undefined);
+  it("persists a completed empty result once and reuses it without a paid recheck", async () => {
+    const usage = { inputTokens: 10, outputTokens: 1, totalTokens: 11 };
+    const delegate = { extract: vi.fn(async () => ({ ...providerBackedResult('{"signals":[]}'), usage })) };
     const onLiveExtractionOutcome = vi.fn();
-    const extractor = createCachingSignalExtractor({
-      delegate,
-      config: extractionConfig(),
-      cacheRoot,
-      onTransportAttempt,
-      onLiveExtractionOutcome
-    });
-
-    const result = await extractor.extract({
-      systemPrompt: SYSTEM_PROMPT,
-      userPrompt: userPromptWithAssertions()
-    });
-
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
-    expect(delegate.extract).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      retryMode: "disabled"
-    }));
-    expect(onTransportAttempt).toHaveBeenCalledTimes(2);
-    expect(onLiveExtractionOutcome).toHaveBeenCalledTimes(2);
-    expect(result.rawJson).toBe(terminalRaw);
-    const shard = readShard(cacheRoot);
-    expect(shard.raw_json).toBe(terminalRaw);
-    expect(shard.transport_provenance).toEqual({
-      provider_url_sha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
-      model: MODEL
-    });
+    const options = { delegate, config: extractionConfig(), cacheRoot, onLiveExtractionOutcome };
+    const request = { systemPrompt: SYSTEM_PROMPT, userPrompt: userPromptWithAssertions() };
+    const result = await createCachingSignalExtractor(options).extract(request);
+    expect(result).toMatchObject({ rawJson: '{"signals":[]}', usage });
+    expect(delegate.extract).toHaveBeenCalledOnce();
+    expect(onLiveExtractionOutcome).toHaveBeenCalledOnce();
+    expect(readShard(cacheRoot)).toMatchObject({ raw_json: '{"signals":[]}', response_metadata: {
+      usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11 }
+    } });
+    const replay = await createCachingSignalExtractor({ ...options, allowLiveExtraction: false }).extract(request);
+    expect(replay).toMatchObject({ rawJson: '{"signals":[]}', usage });
+    expect(delegate.extract).toHaveBeenCalledOnce();
   });
 
-  it("settles both strict-empty transports exactly once across a ledger reload", async () => {
+  it("settles a completed empty transport exactly once across a ledger reload", async () => {
     const ledgerInput = {
       cacheRoot,
       lineageDigest: "9".repeat(64),
@@ -129,12 +98,12 @@ describe("extraction live delegate atomic persistence", () => {
     });
 
     const expected = {
-      attempts: 2,
+      attempts: 1,
       successfulShards: 1,
       pendingKeys: [],
       unresolvedAttempts: [],
       transportFailures: [],
-      telemetry: { unresolvedTransportAttempts: 0, usageUnknownAttempts: 2 }
+      telemetry: { unresolvedTransportAttempts: 0, usageUnknownAttempts: 1 }
     };
     expect(ledger.snapshot()).toMatchObject(expected);
     expect(openExtractionAttemptLedger(ledgerInput).snapshot()).toMatchObject(expected);
@@ -276,99 +245,6 @@ describe("extraction live delegate atomic persistence", () => {
         fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u)
       }],
       telemetry: { rateLimitRetries: 1 }
-    });
-  });
-
-  it("accepts a second strict empty result without a third request", async () => {
-    const terminalRaw = '{ "signals": [] }\n';
-    const delegate: BenchSignalExtractor = {
-      extract: vi
-        .fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce({
-          ...providerBackedResult(""),
-          rawJson: '{"signals":[]}',
-          usage: { inputTokens: 10, outputTokens: 1, totalTokens: 11 }
-        })
-        .mockResolvedValueOnce({
-          ...providerBackedResult(""),
-          rawJson: terminalRaw,
-          usage: { inputTokens: 20, outputTokens: 2, totalTokens: 22 }
-        })
-    };
-    const onOutcome = vi.fn();
-
-    const result = await extractLiveDelegate({
-      delegate,
-      request: { systemPrompt: SYSTEM_PROMPT, userPrompt: userPromptWithAssertions() },
-      stats: undefined,
-      onFailure: vi.fn(),
-      onOutcome
-    });
-
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
-    expect(result.rawJson).toBe(terminalRaw);
-    expect(onOutcome).toHaveBeenCalledTimes(2);
-  });
-
-  it("fails a strict-empty recheck without returning the first result", async () => {
-    const terminalFailure = new Error("recheck transport failed");
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-        if (input.retryMode === "disabled") throw terminalFailure;
-        return providerBackedResult('{"signals":[]}');
-      })
-    };
-    const onFailure = vi.fn();
-
-    await expect(extractLiveDelegate({
-      delegate,
-      request: { systemPrompt: SYSTEM_PROMPT, userPrompt: userPromptWithAssertions() },
-      stats: undefined,
-      onFailure
-    })).rejects.toBe(terminalFailure);
-
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
-    expect(onFailure).toHaveBeenCalledOnce();
-  });
-
-  it("closes the first reservation when authority rejects the empty-result recheck", async () => {
-    const ledger = openExtractionAttemptLedger({
-      cacheRoot,
-      lineageDigest: "c".repeat(64),
-      cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
-      startingMissing: 1,
-      maximumAttempts: 1,
-      successfulShardCeiling: 1
-    });
-    const onTransportAttempt = vi.fn(async (cacheKey: string) => {
-      ledger.reserveAttempt(cacheKey);
-    });
-    const extractor = createCachingSignalExtractor({
-      delegate: {
-        extract: vi.fn(async (input) => {
-          await input.onTransportAttempt?.(input.abortSignal);
-          return providerBackedResult('{"signals":[]}');
-        })
-      },
-      config: extractionConfig(),
-      cacheRoot,
-      onTransportAttempt,
-      onLiveExtractionOutcome: ledger.recordTransportOutcome,
-      onLiveExtractionFailed: ledger.abandonPendingShard
-    });
-
-    await expect(extractor.extract({
-      systemPrompt: SYSTEM_PROMPT,
-      userPrompt: userPromptWithAssertions()
-    })).rejects.toThrow(/attempt ceiling exhausted/u);
-
-    expect(onTransportAttempt).toHaveBeenCalledTimes(2);
-    expect(ledger.snapshot()).toMatchObject({
-      attempts: 1,
-      successfulShards: 0,
-      pendingKeys: [],
-      unresolvedAttempts: [],
-      telemetry: { usageUnknownAttempts: 1 }
     });
   });
 

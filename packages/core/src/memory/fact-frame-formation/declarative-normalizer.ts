@@ -147,6 +147,7 @@ function readPredicate(
       qualifiers.push(token);
     } else if (AUXILIARIES.has(token.normalized) &&
         !isLexicalAuxiliaryRelation(tokens, index)) {
+      if (HAVE_FORMS.has(token.normalized) && !hasPerfectComplement(tokens, index + 1)) return null;
       index += 1;
       continue;
     } else if (PRE_RELATION_QUALIFIERS.has(token.normalized)) {
@@ -182,6 +183,7 @@ function isLexicalAuxiliaryRelation(
   }
   const valueLead = tokens[index + 1];
   if (valueLead === undefined) return false;
+  if (HAVE_FORMS.has(token.normalized) && hasPerfectComplement(tokens, index + 1)) return false;
   if (VALUE_LEADING_WORDS.has(valueLead.normalized) ||
       /^\p{Lu}/u.test(valueLead.text) || /^[#@]/u.test(valueLead.text)) {
     return true;
@@ -212,12 +214,20 @@ const AUXILIARIES: ReadonlySet<string> = new Set([
   "should", "was", "were", "will", "would"
 ]);
 const LEXICAL_AUXILIARY_RELATIONS: ReadonlySet<string> = new Set([
-  "do", "had", "have"
+  "do", "had", "has", "have"
 ]);
+const HAVE_FORMS: ReadonlySet<string> = new Set(["had", "has", "have"]);
 const VALUE_LEADING_WORDS: ReadonlySet<string> = new Set([
   "a", "an", "the", "my", "your", "his", "her", "its", "our", "their",
-  "this", "that", "some", "any", "one", "two"
+  "this", "that", "these", "those", "some", "any", "one", "two",
+  "more", "less", "fewer", "many", "much", "several", "enough", "no", "both", "each", "every"
 ]);
+function hasPerfectComplement(tokens: readonly FactFrameSourceToken[], start: number): boolean {
+  let index = start;
+  while (PRE_RELATION_QUALIFIERS.has(tokens[index]?.normalized ?? "")) index += 1;
+  const word = tokens[index]?.normalized ?? "";
+  return /^(?:[a-z]{3,}ed|been|had|done|gone|seen|known|taken|given|made|bought|brought|found|left|lost|read|sent|spent|told|written|won|heard|held|kept|felt|met|paid|put|run|built|caught|chosen|driven|eaten|fallen|forgotten|grown|learned|said|sold|shown|spoken|thought|understood|worn)$/u.test(word);
+}
 const PRE_RELATION_QUALIFIERS: ReadonlySet<string> = new Set([
   "already", "also", "always", "currently", "ever", "just", "never",
   "not", "originally", "personally", "really", "recently", "still",

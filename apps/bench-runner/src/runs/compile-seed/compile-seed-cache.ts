@@ -1,6 +1,6 @@
 import {
   parseOfficialApiExtractionRequest,
-  parseOfficialApiRequestSignals,
+  classifyOfficialApiRequestResult,
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
@@ -135,15 +135,7 @@ export function importExtractionResponse(input: {
     input.systemPrompt, extraction.canonical);
   if (key !== input.expectedCacheKey) throw new ExtractionCacheInvariantError("import request identity mismatch");
   try {
-    const inspection = inspectExtractionRawJson(result.rawJson);
-    const drafts = parseOfficialApiRequestSignals(result.rawJson, extraction.request, input.sourceCorpus);
-    const represented = new Set(drafts.map((draft) => draft.source_locator?.assertion_id));
-    if (extraction.request.source_assertions.length > 0 &&
-        (drafts.length === 0 || drafts.length !== inspection.rawSignalCount ||
-         drafts.some((draft) => draft.source_locator === undefined) ||
-         extraction.request.source_assertions.some((assertion) => !represented.has(assertion.assertion_id)))) {
-      throw new Error("import requires complete source-bound signal entries");
-    }
+    classifyOfficialApiRequestResult(result.rawJson, extraction.request, input.sourceCorpus);
   } catch (cause) {
     throw new ExtractionResponseAdmissionError("provider response failed request-bound admission", { cause });
   }
@@ -325,6 +317,7 @@ async function extractLiveWithLease(
   });
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
+  classifyOfficialApiRequestResult(result.rawJson, extractCacheInputIdentity(input.userPrompt).request);
   const inspection = persistExtraction(options, cacheRoot, cacheKey, result, true);
   recordLiveExtractionSuccess(options, cacheKey, stats, inspection);
   return result;
@@ -336,7 +329,7 @@ function withSemanticValidation(
   return {
     ...input,
     validateRawJson: (rawJson) => {
-      inspectExtractionRawJson(rawJson);
+      classifyOfficialApiRequestResult(rawJson, extractCacheInputIdentity(input.userPrompt).request);
       input.validateRawJson?.(rawJson);
     }
   };

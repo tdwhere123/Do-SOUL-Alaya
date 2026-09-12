@@ -228,7 +228,7 @@ it.each([
   expect(logs.some((message) => message.includes("provider-pressure backoff"))).toBe(false);
 });
 
-it("reports a first-pass 429 through a strict-empty cache recheck", async () => {
+it("reports recovered 429 pressure when accepting a completed empty result", async () => {
   const cacheRoot = await mkdtemp(join(tmpdir(), "fill-pool-empty-recheck-"));
   const stats = newFillStats();
   try {
@@ -242,7 +242,6 @@ it("reports a first-pass 429 through a strict-empty cache recheck", async () => 
     const delegate: BenchSignalExtractor = {
       extract: vi.fn<BenchSignalExtractor["extract"]>()
         .mockResolvedValueOnce(retryResult(1))
-        .mockResolvedValueOnce(retryResult(0))
     };
     await runExtractionPool({
       extractor: cachingExtractor(cacheRoot, delegate, stats),
@@ -253,52 +252,7 @@ it("reports a first-pass 429 through a strict-empty cache recheck", async () => 
       log: () => undefined
     });
 
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
-    expect(stats).toMatchObject({
-      rateLimitRetries: 1,
-      adaptiveConcurrencyBackoffs: 1,
-      adaptiveConcurrencyBackoffMs: 250
-    });
-  } finally {
-    await rm(cacheRoot, { recursive: true, force: true });
-  }
-});
-
-it("reports a first-pass 429 when the strict-empty recheck fails", async () => {
-  const cacheRoot = await mkdtemp(join(tmpdir(), "fill-pool-empty-recheck-failure-"));
-  const stats = newFillStats();
-  try {
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: "test-model",
-      providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-      requestProfile: "provider-default-v1",
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const terminalFailure = Object.assign(new Error("provider rejected recheck"), {
-      benchRetry: {
-        retryCount: 0,
-        rateLimitRetries: 0,
-        retryClassification: "failure_non_retryable_4xx" as const,
-        transportFailures: []
-      }
-    });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce(retryResult(1))
-        .mockRejectedValueOnce(terminalFailure)
-    };
-    await runExtractionPool({
-      extractor: cachingExtractor(cacheRoot, delegate, stats),
-      turns: groundedTurns(),
-      concurrency: 1,
-      requestedTurns: 1,
-      stats,
-      log: () => undefined,
-      tolerateProviderTaskFailures: true
-    });
-
-    expect(delegate.extract).toHaveBeenCalledTimes(2);
+    expect(delegate.extract).toHaveBeenCalledTimes(1);
     expect(stats).toMatchObject({
       rateLimitRetries: 1,
       adaptiveConcurrencyBackoffs: 1,

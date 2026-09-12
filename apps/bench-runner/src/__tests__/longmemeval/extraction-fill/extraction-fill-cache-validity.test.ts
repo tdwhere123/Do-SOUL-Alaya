@@ -11,7 +11,7 @@ import { readExtractionCacheManifest } from "../../../runs/extraction/cache/extr
 import {
   cacheFilePath,
   computeCacheKey,
-  inspectCachedExtraction
+  inspectCachedExtraction, inspectExtractionRawJson
 } from "../../../runs/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
@@ -56,7 +56,7 @@ describe("extraction-fill cache validity", () => {
     });
   });
 
-  it("keeps valid siblings when another signal entry is malformed", async () => {
+  it("retains parser salvage diagnostics but refuses incomplete cache admission", async () => {
     await writeDataset();
     const rawJson = JSON.stringify({
       signals: [42, {
@@ -89,21 +89,10 @@ describe("extraction-fill cache validity", () => {
         }
       }]
     });
-    const result = await fill(() => providerBackedExtractionResult(rawJson));
-    expect(result).toMatchObject({ coverage: 1, newlyExtracted: 2 });
-    const shard = JSON.parse(readFileSync(firstShardPath(), "utf8")) as {
-      readonly cache_key: string;
-    };
-    expect(inspectCachedExtraction(
-      cacheRoot,
-      shard.cache_key,
-      "fixture-model",
-      "provider-default-v1"
-    )).toMatchObject({
-      status: "hit",
-      rawSignalCount: 2,
-      parsedDraftCount: 1
-    });
+    expect(inspectExtractionRawJson(rawJson)).toMatchObject({ rawSignalCount: 2, parsedDraftCount: 1 });
+    await expect(fill(() => providerBackedExtractionResult(rawJson))).rejects.toMatchObject({ name: "ExtractionFillTaskError" });
+    expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({ cached_turns: 0, coverage: 0 });
+
   });
 
   it("replaces a semantically invalid existing shard during live fill", async () => {
@@ -119,9 +108,8 @@ describe("extraction-fill cache validity", () => {
     const result = await fill(delegate);
 
     expect(result).toMatchObject({ cacheHits: 1, newlyExtracted: 1 });
-    expect(delegate).toHaveBeenCalledTimes(2);
+    expect(delegate).toHaveBeenCalledTimes(1);
     expect(delegate.mock.calls[0]?.[0]).not.toMatchObject({ retryMode: "disabled" });
-    expect(delegate.mock.calls[1]?.[0]).toMatchObject({ retryMode: "disabled" });
     expect(JSON.parse(readFileSync(shardPath, "utf8"))).toMatchObject({
       raw_json: '{"signals":[]}'
     });

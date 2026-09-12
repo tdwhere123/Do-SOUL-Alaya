@@ -1,3 +1,4 @@
+export { classifyOfficialApiRequestResult } from "./ingestion/official-api/request-result.js";
 export {
   AUDITOR_CONSTANTS,
   Auditor,
@@ -298,3 +299,4 @@ export {
   type GardenSchedulerConfig,
   type GardenSchedulerEventLogPort
 } from "./scheduling/scheduler.js";
+export { officialApiExtractionResponseSchema } from "./ingestion/official-api/response-schema.js";

@@ -389,7 +389,7 @@ describe("legacy conversion snapshot authority reader", () => {
     } as never)).toThrow(/unavailable|authority|trust root/iu);
   });
 
-  it("converts the sealed MiMo fixture when completion and transport metadata are complete", async () => {
+  it("refuses a historical MiMo prompt under the changed current prompt identity", async () => {
     const cacheKey = "0c297b4cd1547986994b6f4acd44b7bfa1e40d5eba9c803e2c53cba93bafc295";
     const datasetRevision =
       "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442";
@@ -473,8 +473,7 @@ describe("legacy conversion snapshot authority reader", () => {
       semanticContract: unit.semanticIdentity.contractId,
       expectedSystemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
-    expect(report.converted).toHaveLength(1);
-    expect(report.converted[0]?.state).toBe("provider_backed");
-    expect(report.unresolved).toEqual([]);
+    expect(report.converted).toEqual([]);
+    expect(report.unresolved).toEqual([{ reason: "legacy shard cache key does not match prompt, request, model, and profile" }]);
   });
 });

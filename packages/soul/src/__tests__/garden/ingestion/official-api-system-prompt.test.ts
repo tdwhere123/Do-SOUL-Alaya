@@ -151,12 +151,12 @@ describe("official API system prompt", () => {
       "5ec2740bd63923305b376b240d5a219383f3cbfe8a7d9198d504f7f8de542326";
     const g8Sha256 =
       "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
-    const currentG19cSha256 =
-      "785cbdcc8645424b94cb9ed030508bf66413258b38fb05236e98ed979e83acac";
+    const currentSha256Expected =
+      "bf255feebdf99106871e33241f7bba3260e3f02874f0eefe36db803cc95d7705";
     const historical = resolveOfficialApiSystemPrompt(historicalSha256);
     const g8 = resolveOfficialApiSystemPrompt(g8Sha256);
 
-    expect(currentSha256).toBe(currentG19cSha256);
+    expect(currentSha256).toBe(currentSha256Expected);
     expect(resolveOfficialApiSystemPrompt(currentSha256)).toBe(OFFICIAL_API_SYSTEM_PROMPT);
     expect(historical).toBeDefined();
     expect(sha256(historical!)).toBe(historicalSha256);

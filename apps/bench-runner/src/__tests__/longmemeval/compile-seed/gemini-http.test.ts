@@ -6,6 +6,7 @@ import { createGardenHttpExtractor } from "../../../runs/compile-seed/compile-se
 import { probeProviderProtocol } from "../../../runs/provider/protocol-probe.js";
 import { parseAuthorizeExtractionArgs } from "../../../cli/extraction-authority/args.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
+import { buildOfficialApiExtractionRequest, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 
 const config: CompileSeedExtractionConfig = {
   model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1",
@@ -41,6 +42,38 @@ async function withServer(
 }
 
 describe("native Gemini interactive extraction", () => {
+  it("sends a source-only response schema across the native HTTP boundary", async () => {
+    const source = "I collect vintage postcards.";
+    const userPrompt = stringifyOfficialApiExtractionRequest(
+      buildOfficialApiExtractionRequest(source, [{ role: "user", content: source }])
+    );
+    let observed = false;
+    await withServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        const wire = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        const schema = wire.generationConfig.responseJsonSchema;
+        expect(schema.required).toEqual(["signals"]);
+        expect(schema.properties.signals.items.required).toEqual([
+          "object_kind", "confidence", "matched_text", "source_locator", "semantic_factor_graph"
+        ]);
+        expect(schema.properties.signals.items.properties.semantic_factor_graph.properties)
+          .toHaveProperty("propositions");
+        observed = true;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ candidates: [{ finishReason: "STOP",
+          content: { parts: [{ text: '{"signals":[]}' }] } }], usageMetadata: usage }));
+      });
+    }, async (origin) => {
+      const result = await createGardenHttpExtractor({ ...config, providerUrl: origin })
+        .extract({ ...input, userPrompt });
+      expect(result.rawJson).toBe('{"signals":[]}');
+      expect(result.usage?.totalTokens).toBe(33);
+    });
+    expect(observed).toBe(true);
+  });
+
   it("uses explicit minimal thinking for Flash-Lite 3.1 and normalizes OpenAI configuration with auth", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => response());
     const nativeConfig = { ...config, model: "gemini-3.1-flash-lite",

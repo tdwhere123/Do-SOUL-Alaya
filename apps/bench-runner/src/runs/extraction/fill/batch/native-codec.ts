@@ -1,5 +1,6 @@
 import { isNativeGeminiRequestProfile, type NativeGeminiRequestProfile } from "../../request-profile.js";
 import { findProviderBinding } from "../../../provider/catalog.js";
+import { officialApiExtractionResponseSchema } from "@do-soul/alaya-soul";
 
 export interface GeminiGenerateContentSettings {
   readonly model: string;
@@ -21,11 +22,13 @@ export function encodeGeminiGenerateContent(
   settings: GeminiGenerateContentSettings
 ): object {
   assertGeminiGenerateContentSettings(settings);
+  const responseJsonSchema = officialApiExtractionResponseSchema(line.userPrompt);
   return {
     systemInstruction: { parts: [{ text: line.systemPrompt }] },
     contents: [{ role: "user", parts: [{ text: line.userPrompt }] }],
     generationConfig: {
       responseMimeType: "application/json", maxOutputTokens: settings.maxOutputTokens,
+      ...(responseJsonSchema === undefined ? {} : { responseJsonSchema }),
       ...(isNativeGeminiRequestProfile(settings.requestProfile) ? {
         thinkingConfig: THINKING_CONFIG[settings.requestProfile]
       } : {})

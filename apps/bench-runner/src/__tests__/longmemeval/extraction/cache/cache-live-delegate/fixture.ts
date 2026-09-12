@@ -91,13 +91,13 @@ export function assertionBatchPrompt(assertionIds: readonly number[]): string {
     batch_count: 1,
     source_assertions: assertionIds.map((assertion_id) => ({
       assertion_id,
-      text: `User: assertion ${assertion_id}`
+      text: `I completed assertion ${assertion_id}.`
     }))
   });
 }
 
 export function cacheSignalResponse(assertionId: number): Response {
-  const matchedText = `User: assertion ${assertionId}`;
+  const matchedText = `I completed assertion ${assertionId}.`;
   const signal = withOpenSemanticFactorGraph({
     signal_kind: "potential_claim",
     object_kind: "open_semantic_observation",

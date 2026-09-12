@@ -145,8 +145,8 @@ describe("extraction cache key — load-bearing inputs only", () => {
 
   it("still misses when the turn_content itself changes", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
-    const firstRaw = signalsEnvelope([{ distilled: "Fact A.", matched: "A" }]);
-    const secondRaw = signalsEnvelope([{ distilled: "Fact B.", matched: "B" }]);
+    const firstRaw = signalsEnvelope([{ distilled: "Turn one.", matched: "Turn one." }]);
+    const secondRaw = signalsEnvelope([{ distilled: "Turn two.", matched: "Turn two." }]);
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
