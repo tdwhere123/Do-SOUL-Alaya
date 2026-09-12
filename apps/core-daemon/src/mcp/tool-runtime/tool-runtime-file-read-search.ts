@@ -6,7 +6,8 @@ import {
   createAccessDenied,
   createFileToolError,
   mapFileSystemError,
-  resolveContainedPath
+  resolveContainedPath,
+  resolveRealWritableRoots
 } from "./tool-runtime-file-common.js";
 import { containedFdPath, openContained } from "./open-contained.js";
 
@@ -77,7 +78,9 @@ export async function searchFiles(
     return createAccessDenied("Pattern is outside the workspace boundary.");
   }
 
-  if (patternEscapesWorkspace(input.pattern, opened.realPath, writableRoots)) {
+  const realWritableRoots = await resolveRealWritableRoots(writableRoots);
+  const containmentRoots = realWritableRoots.length > 0 ? realWritableRoots : writableRoots;
+  if (patternEscapesWorkspace(input.pattern, opened.realPath, containmentRoots)) {
     return createAccessDenied("Pattern is outside the workspace boundary.");
   }
 
@@ -90,13 +93,13 @@ export async function searchFiles(
   try {
     const matches: string[] = [];
     let escapedMatchFound = false;
-    await walkFiles(opened.realPath, writableRoots, async (absolutePath, relativePath) => {
+    await walkFiles(opened.realPath, containmentRoots, async (absolutePath, relativePath) => {
       const normalizedRelative = relativePath.split(path.sep).join("/");
       if (!patternRegex.test(normalizedRelative)) {
         return;
       }
 
-      const containedMatch = resolveContainedPath(absolutePath, writableRoots);
+      const containedMatch = resolveContainedPath(absolutePath, containmentRoots);
       if (!containedMatch.ok) {
         escapedMatchFound = true;
         return;

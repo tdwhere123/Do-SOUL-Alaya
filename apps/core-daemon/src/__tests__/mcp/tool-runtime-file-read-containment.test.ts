@@ -116,12 +116,14 @@ describe("read/list/search containment", () => {
       symlink(outsideFile, join(realRoot, "link.txt"))
     );
 
+    writeFileSync(join(realRoot, "note.txt"), "hello", "utf8");
     try {
       const result = (await searchFiles(
-        { pattern: "**/*", baseDir: realRoot },
+        { pattern: "*", baseDir: realRoot },
         [realRoot]
       )) as { ok: boolean; paths?: readonly string[] };
       expect(result.ok).toBe(true);
+      expect(result.paths ?? []).toContain("note.txt");
       expect(result.paths ?? []).not.toContain("link.txt");
     } finally {
       rmSync(outsideRoot, { recursive: true, force: true });

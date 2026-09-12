@@ -82,15 +82,15 @@ export async function openContained(
     );
   } catch (error) {
     await handle.close().catch(() => undefined);
-    return mapFileSystemError(error, containedPath.resolvedPath, errorCode);
+    return mapOpenContainedError(error, containedPath.resolvedPath, kind, errorCode);
   }
 }
 
 export function containedFdPath(handle: FileHandle, realPath: string): string {
-  if (process.platform === "win32") {
-    return realPath;
+  if (process.platform === "linux") {
+    return `/proc/self/fd/${handle.fd}`;
   }
-  return process.platform === "linux" ? `/proc/self/fd/${handle.fd}` : `/dev/fd/${handle.fd}`;
+  return realPath;
 }
 
 async function validateOpenedContained(

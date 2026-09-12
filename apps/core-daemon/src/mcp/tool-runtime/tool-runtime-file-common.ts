@@ -1,8 +1,9 @@
-import { realpath as realpathCallback } from "node:fs";
-import { lstat, realpath } from "node:fs/promises";
+import { fstat as fstatCallback, realpath as realpathCallback } from "node:fs";
+import { lstat, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+const fstat = promisify(fstatCallback);
 const realpathNative = promisify(realpathCallback.native);
 import type { FileToolError, FileToolErrorCode } from "@do-soul/alaya-protocol";
 
@@ -153,10 +154,6 @@ export async function resolveRealWritableRoots(
   ).filter((root): root is string => root !== null);
 }
 
-function fdExecPath(fd: number): string {
-  return process.platform === "linux" ? `/proc/self/fd/${fd}` : `/dev/fd/${fd}`;
-}
-
 export async function resolveOpenedFileRealPath(fd: number, resolvedPath: string): Promise<string> {
   if (process.platform === "win32") {
     const stats = await lstat(resolvedPath);
@@ -169,7 +166,26 @@ export async function resolveOpenedFileRealPath(fd: number, resolvedPath: string
     // directory junctions must be resolved via GetFinalPathNameByHandle.
     return normalizeWindowsFinalPath(await realpathNative(resolvedPath));
   }
-  return await realpath(fdExecPath(fd));
+  if (process.platform === "linux") {
+    return await realpath(`/proc/self/fd/${fd}`);
+  }
+  // Darwin/BSD: /dev/fd/N is a character device. realpath stays /dev/fd/N and
+  // would fail every containment check. Resolve the path string, then require
+  // the opened inode to still be that path so a swap-back cannot admit an
+  // outside fd.
+  return await resolveOpenedPathByIdentity(fd, resolvedPath);
+}
+
+async function resolveOpenedPathByIdentity(fd: number, resolvedPath: string): Promise<string> {
+  const opened = await fstat(fd);
+  const realPath = await realpath(resolvedPath);
+  const onDisk = await stat(realPath);
+  if (opened.dev !== onDisk.dev || opened.ino !== onDisk.ino) {
+    const error = new Error(`Opened path no longer matches ${resolvedPath}`) as NodeJS.ErrnoException;
+    error.code = "ELOOP";
+    throw error;
+  }
+  return realPath;
 }
 
 function normalizeWindowsFinalPath(finalPath: string): string {
