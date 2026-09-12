@@ -9,7 +9,7 @@ import {
   canonicalGovernanceSubject,
   type ClaimForm
 } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../../sqlite/db.js";
+import { closeCachedDatabase, initDatabase } from "../../../sqlite/db.js";
 import { SqliteClaimFormRepo } from "../../../repos/governance/claim-form-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 import { removeTempDirectorySync } from "../../temp-directory.js";
@@ -109,6 +109,7 @@ describe("SqliteClaimFormRepo", () => {
     ]);
 
     databases.delete(database);
+    closeCachedDatabase(database.filename);
     removeTempDirectorySync(tempDir, [database]);
   });
 

@@ -1,9 +1,10 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryDimension, type InformationIndex } from "@do-soul/alaya-protocol";
-import { type StorageDatabase } from "@do-soul/alaya-storage";
+import { closeCachedDatabase, type StorageDatabase } from "@do-soul/alaya-storage";
+import { removeTempDirectorySync } from "../../../../../../packages/storage/src/__tests__/temp-directory.js";
 import {
   runConditionalFieldRecall,
   toSourceObserverRow,
@@ -21,8 +22,13 @@ import { createSliceHarness, MEM } from "./harness.js";
 const databases = new Set<StorageDatabase>();
 const directories: string[] = [];
 afterEach(() => {
-  for (const db of databases) db.close(); databases.clear();
-  for (const path of directories) rmSync(path, { recursive: true, force: true }); directories.length = 0;
+  for (const db of databases) {
+    db.close();
+    closeCachedDatabase(db.filename);
+  }
+  databases.clear();
+  for (const path of directories) removeTempDirectorySync(path);
+  directories.length = 0;
 });
 
 it("measures bounded first/repeat/reopened local Recall including setup, final quality and delivery", async () => {
@@ -47,7 +53,9 @@ it("measures bounded first/repeat/reopened local Recall including setup, final q
   try {
     for (const stage of ["first-query-after-write", "repeat", "reopened-connection"] as const) {
       if (stage === "reopened-connection") {
-        databases.delete(slice.database); slice.database.close();
+        databases.delete(slice.database);
+        slice.database.close();
+        closeCachedDatabase(filename);
         const reopenStarted = performance.now();
         slice = await createSliceHarness((db) => databases.add(db), filename);
         reopenSetupMs = performance.now() - reopenStarted;

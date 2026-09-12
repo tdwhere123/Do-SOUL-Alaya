@@ -82,6 +82,12 @@ function packageProject(name, packageDir, options = {}) {
   });
 }
 
+// File-backed better-sqlite3 init/close/reopen on GitHub windows-latest
+// regularly exceeds 30s under NTFS I/O. hookTimeout must match or afterEach
+// rmSync aborts at Vitest's 10s default.
+const windowsSqliteTimeouts =
+  process.platform === "win32" ? { testTimeout: 60_000, hookTimeout: 60_000 } : {};
+
 function appProject(name, appDir) {
   const appRoot = path.resolve(rootDir, appDir);
   const testDir = path.resolve(rootDir, appDir, "src/__tests__");
@@ -101,7 +107,7 @@ function appProject(name, appDir) {
       coverage: {
         include: [`${appDir}/src/**`]
       },
-      ...(process.platform === "win32" ? { testTimeout: 30_000, hookTimeout: 30_000 } : {})
+      ...windowsSqliteTimeouts
     }
   });
 }
@@ -110,11 +116,11 @@ export default [
   packageProject("@do-soul/alaya-protocol", "packages/protocol"),
   packageProject("@do-soul/alaya-graph-algorithms", "packages/graph-algorithms"),
   packageProject("@do-soul/alaya-storage", "packages/storage", {
-    testTimeout: process.platform === "win32" ? 30_000 : 5_000
+    ...(process.platform === "win32" ? windowsSqliteTimeouts : { testTimeout: 5_000 })
   }),
   packageProject("@do-soul/alaya-core", "packages/core", {
     setupFiles: [path.resolve(rootDir, "packages/core/vitest.setup.ts")],
-    ...(process.platform === "win32" ? { testTimeout: 30_000 } : {})
+    ...windowsSqliteTimeouts
   }),
   packageProject("@do-soul/alaya-soul", "packages/soul"),
   packageProject("@do-soul/alaya-engine-gateway", "packages/engine-gateway"),
@@ -135,7 +141,9 @@ export default [
         setupFiles: [path.resolve(appRoot, "src/__tests__/vitest-setup.ts")],
         include: [testIncludeGlob(testDir)],
         exclude: ["**/dist/**"],
-        testTimeout: process.env.CI ? 30_000 : 5_000,
+        ...(process.platform === "win32"
+          ? windowsSqliteTimeouts
+          : { testTimeout: process.env.CI ? 30_000 : 5_000 }),
         coverage: {
           include: ["apps/bench-runner/src/**"]
         }

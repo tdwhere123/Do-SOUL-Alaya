@@ -29,7 +29,11 @@ function computeMaxWorkers() {
   }
   const totalGiB = os.totalmem() / 1024 ** 3;
   const parallelism = os.availableParallelism?.() ?? os.cpus().length;
-  return Math.max(1, Math.min(parallelism, Math.floor(totalGiB / GIB_PER_WORKER)));
+  // Windows GitHub runners are 4 vCPU / 16 GiB. RAM would allow 4 forks, but
+  // parallel better-sqlite3 file init on NTFS saturates I/O and pushes
+  // file-backed storage tests past the suite timeout. Cap CPU, not just RAM.
+  const cpuCap = process.platform === "win32" ? Math.min(2, parallelism) : parallelism;
+  return Math.max(1, Math.min(cpuCap, Math.floor(totalGiB / GIB_PER_WORKER)));
 }
 
 const maxWorkers = computeMaxWorkers();
