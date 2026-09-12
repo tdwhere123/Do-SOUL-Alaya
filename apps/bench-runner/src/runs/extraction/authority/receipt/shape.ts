@@ -1,6 +1,7 @@
 import {
   EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS,
-  expectedExtractionAuthorityLimits
+  expectedExtractionAuthorityLimits,
+  isExtractionOutputTokenField
 } from "../receipt-limits.js";
 
 export const LEGACY_RECEIPT_VERSION = 2;
@@ -49,8 +50,7 @@ export function isExtractionAuthorityReceiptLimits(value: unknown): boolean {
     isNonNegativeSafeInteger(value.successful_shard_ceiling) &&
     isNonNegativeSafeInteger(value.max_concurrency) &&
     isNonNegativeSafeInteger(value.max_output_tokens) &&
-    (value.output_token_field === "max_tokens" ||
-      value.output_token_field === "max_completion_tokens") &&
+    isExtractionOutputTokenField(value.output_token_field) &&
     isNonNegativeSafeInteger(value.disk_floor_bytes) &&
     value.no_progress_timeout_ms === EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS;
 }

@@ -1,3 +1,4 @@
+import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
 import type {
   BenchSignalExtractor,
   BenchTransportFailureAttempt,
@@ -17,6 +18,7 @@ import {
   type ProviderRequestProfile
 } from "@do-soul/alaya-engine-gateway";
 import { extractGardenHttpWithAssertionPartition } from "./http/garden-http-assertion-partition.js";
+import { createGeminiHttpExtractor } from "./http/gemini-http.js";
 import { wrapGardenHttpTransportError } from "./http/garden-http-terminal-error.js";
 import {
   EXTRACTION_REQUEST_TIMEOUT_MS,
@@ -51,7 +53,7 @@ export { extractContentFromChatCompletionBody } from "../extraction/chat-complet
 export { EXTRACTION_HTTP_MAX_RETRY_JITTER_MS } from "./http/garden-http-retry-policy.js";
 export { EXTRACTION_REQUEST_TIMEOUT_MS };
 
-// OpenAI-compatible live garden LLM delegate with bench-visible retry metadata.
+// Provider transport delegates retain bench-visible attempt metadata.
 export function createGardenHttpExtractor(
   config: CompileSeedExtractionConfig,
   deps?: {
@@ -60,6 +62,9 @@ export function createGardenHttpExtractor(
     readonly fetch?: typeof fetch;
   }
 ): BenchSignalExtractor {
+  if (isNativeGeminiRequestProfile(config.requestProfile)) {
+    return createGeminiHttpExtractor(config, deps?.fetch);
+  }
   const resolvedDeps = resolveGardenHttpExtractorDeps(deps);
   return {
     extract: async (input) => extractGardenHttpSignals(config, resolvedDeps, input)
@@ -319,6 +324,9 @@ function buildGardenHttpRequest(
   deps: GardenHttpExtractorDeps,
   input: GardenHttpExtractInput
 ): ProviderChatCompletionRequest {
+  if (input.outputTokenField === "maxOutputTokens") {
+    throw new Error("native Gemini output token field cannot be sent to chat completions");
+  }
   const transport = resolveExtractionTransportRoute(config);
   assertRequiredRequestProfile(config);
   return {

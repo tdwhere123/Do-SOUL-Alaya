@@ -23,6 +23,8 @@ packages must not depend on the bench runner.
 
 ## Commands
 
+For asynchronous Gemini extraction, see [the Batch runbook](docs/gemini-batch.md).
+
 ```bash
 pnpm --filter @do-soul/alaya-bench-runner run typecheck
 pnpm --filter @do-soul/alaya-bench-runner run test

@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
+import type { ExtractionOutputTokenField } from "../extraction/authority/receipt-limits.js";
 import type {
   ProviderRetryClassification,
   ProviderUsage
@@ -42,7 +43,7 @@ export interface BenchSignalExtractor extends SignalExtractor {
     /** Provider output-token ceiling when the selected profile supports it. */
     readonly maxOutputTokens?: number;
     /** Exact provider request field pre-registered in the authority receipt. */
-    readonly outputTokenField?: "max_tokens" | "max_completion_tokens";
+    readonly outputTokenField?: ExtractionOutputTokenField;
   }): Promise<Awaited<ReturnType<SignalExtractor["extract"]>> & {
     readonly rawJson: string;
     readonly extractorMeta?: BenchSignalExtractorMeta;

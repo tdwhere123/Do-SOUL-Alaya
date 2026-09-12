@@ -9,13 +9,23 @@ export const EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD =
 const DEFAULT_MAX_CONCURRENCY = 32;
 const MILLION = 1_000_000;
 
+export const EXTRACTION_OUTPUT_TOKEN_FIELDS = [
+  "max_tokens", "max_completion_tokens", "maxOutputTokens"
+] as const;
+export type ExtractionOutputTokenField = (typeof EXTRACTION_OUTPUT_TOKEN_FIELDS)[number];
+
+export function isExtractionOutputTokenField(value: unknown): value is ExtractionOutputTokenField {
+  return typeof value === "string" &&
+    (EXTRACTION_OUTPUT_TOKEN_FIELDS as readonly string[]).includes(value);
+}
+
 export interface ExtractionAuthorityReceiptLimits {
   readonly starting_missing: number;
   readonly maximum_attempts: number;
   readonly successful_shard_ceiling: number;
   readonly max_concurrency: number;
   readonly max_output_tokens: number;
-  readonly output_token_field: "max_tokens" | "max_completion_tokens";
+  readonly output_token_field: ExtractionOutputTokenField;
   readonly disk_floor_bytes: number;
   readonly no_progress_timeout_ms: typeof EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS;
 }
@@ -61,6 +71,9 @@ export function resolveExtractionAuthorityReceiptLimits(
   }
   assertConcurrency(input.maxConcurrency);
   assertOutputTokenCap(input.outputTokenCap.value);
+  if (!isExtractionOutputTokenField(input.outputTokenCap.field)) {
+    throw new Error("unsupported extraction output token field");
+  }
   assertDiskFloor(input.diskFloorBytes);
   return Object.freeze({
     starting_missing: missing,

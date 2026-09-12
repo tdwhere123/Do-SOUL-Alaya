@@ -2,7 +2,7 @@ export interface AuthorizeExtractionArgs {
   readonly action: "probe" | "fill";
   readonly outputPath: string;
   readonly outputTokenCap: number;
-  readonly outputTokenField: "max_tokens" | "max_completion_tokens";
+  readonly outputTokenField: ExtractionOutputTokenField;
   readonly inputPriceUsdPerMillion: number;
   readonly outputPriceUsdPerMillion: number;
   readonly maximumInputTokens: number;
@@ -30,7 +30,7 @@ function assertFlagAtMostOnce(args: ReadonlyArray<string>, flag: string): void {
 function readAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExtractionArgs {
   const action = requiredEnum(args, "--extraction-action", ["probe", "fill"] as const);
   const outputTokenField = requiredEnum(
-    args, "--extraction-output-token-field", ["max_tokens", "max_completion_tokens"] as const
+    args, "--extraction-output-token-field", EXTRACTION_OUTPUT_TOKEN_FIELDS
   );
   return {
     action,
@@ -134,3 +134,7 @@ function requiredEnum<T extends string>(
   }
   return value as T;
 }
+import {
+  EXTRACTION_OUTPUT_TOKEN_FIELDS,
+  type ExtractionOutputTokenField
+} from "../../runs/extraction/authority/receipt-limits.js";

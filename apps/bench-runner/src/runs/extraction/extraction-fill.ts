@@ -1,4 +1,5 @@
 import process from "node:process";
+import { executeExtractionBatchFill } from "./fill/batch-fill.js";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
@@ -76,6 +77,14 @@ export {
   EXTRACTION_FILL_MAX_CONCURRENCY
 } from "./fill/policy/fill-concurrency.js";
 export interface ExtractionFillOptions {
+  readonly batch?: {
+    readonly window?: string;
+    readonly requestLimit?: number;
+    readonly operation: import("./fill/batch/contract.js").GeminiBatchOperation;
+    readonly limits: import("./fill/batch/contract.js").GeminiBatchLimits;
+    readonly reconcile?: { readonly localJob: string; readonly remoteJob: string };
+  };
+  readonly batchHttp?: import("./fill/batch/contract.js").GeminiBatchHttp;
   readonly variant: LongMemEvalVariant;
   readonly limit?: number;
   readonly offset?: number;
@@ -106,6 +115,7 @@ export interface ExtractionFillOptions {
   readonly semanticMaxFailures?: number;
 }
 export interface ExtractionFillResult extends FillRetryTelemetry {
+  readonly batchState?: import("./fill/batch/contract.js").GeminiBatchState;
   readonly requestedTurns: number;
   readonly cacheHits: number;
   readonly newlyExtracted: number;
@@ -176,12 +186,13 @@ export async function runExtractionFill(
 
 export function freezeExtractionFillOptions(options: ExtractionFillOptions): ExtractionFillOptions {
   const {
-    extractorFactory, log, signal, semanticTransport, semanticTransportPolicy,
+    extractorFactory, log, signal, semanticTransport, semanticTransportPolicy, batchHttp,
     cacheKeyAllowlist, ...cloneable
   } = options;
   return Object.freeze({
     ...structuredClone(cloneable),
     ...(extractorFactory === undefined ? {} : { extractorFactory }),
+    ...(batchHttp === undefined ? {} : { batchHttp }),
     ...(log === undefined ? {} : { log }),
     ...(signal === undefined ? {} : { signal }),
     ...(semanticTransport === undefined ? {} : { semanticTransport }),
@@ -241,6 +252,10 @@ async function runLockedExtractionFill(
   const prepared = await prepareLockedExtractionFill({
     options, cacheRoot, concurrency, log, expansion, authority, writeLease, executionAuthority
   });
+  if (options.batch !== undefined) {
+    return executeExtractionBatchFill({ options, prepared, cacheRoot, writeLease,
+      authority: executionAuthority });
+  }
   const stats = newFillStats();
   const tolerateProviderTaskFailures = resolveProviderTaskFailureTolerance({
     requested: options.tolerateProviderTaskFailures === true,

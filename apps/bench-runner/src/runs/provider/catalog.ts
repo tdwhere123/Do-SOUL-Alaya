@@ -13,6 +13,24 @@ export interface ProviderBinding {
  */
 export const PROVIDER_BINDINGS: readonly ProviderBinding[] = [
   {
+    id: "gemini-3.1-flash-lite",
+    aliases: [],
+    requestProfile: "gemini-3.1-minimal-v1",
+    probeCallCeiling: 2
+  },
+  {
+    id: "gemini-2.5-flash-lite",
+    aliases: [],
+    requestProfile: "gemini-2.5-nonthinking-v1",
+    probeCallCeiling: 2
+  },
+  {
+    id: "gemini-2.5-flash",
+    aliases: [],
+    requestProfile: "gemini-2.5-nonthinking-v1",
+    probeCallCeiling: 2
+  },
+  {
     id: "mimo-v2.5",
     aliases: ["Mimo-V2.5", "mimo-v2-flash"],
     requestProfile: "mimo-v2.5-nonthinking-v1",

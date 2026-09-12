@@ -34,6 +34,7 @@ import {
 import { buildOfficialCandidateSignal } from "./official-api/signal-payload.js";
 import {
   groundOfficialApiDraft,
+  assertOfficialApiRequestGrounding,
   rejectOfficialApiDraftGrounding
 } from "./official-api/source-grounding.js";
 import { buildOfficialApiSourceCorpus } from "../triage/grounding/source-locator.js";
@@ -388,14 +389,14 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
             timeoutMs: requestTimeoutMs,
             abortSignal: signal,
             validateRawJson: (value: string) => {
-              parseBoundedBatchSignals(value, request);
+              parseOfficialApiRequestSignals(value, request);
             }
           }),
         { budgetMs: this.wallClockBudgetMs }
       );
       rawJson = response.rawJson;
       extractorMeta = response.extractorMeta ?? null;
-      return parseBoundedBatchSignals(rawJson, request);
+      return parseOfficialApiRequestSignals(rawJson, request);
     } catch (error) {
       return this.handleRequestFailure(error, { rawJson, userPrompt, context, extractorMeta });
     }
@@ -441,9 +442,10 @@ const REQUIRE_GRAPH_FOR_MEMBERSHIP: Readonly<Record<SourceBoundF3Capability, boo
   identities_and_topology: true
 };
 
-function parseBoundedBatchSignals(
+export function parseOfficialApiRequestSignals(
   rawJson: string,
-  request: OfficialApiExtractionRequest
+  request: OfficialApiExtractionRequest,
+  sourceCorpus?: string
 ): readonly OfficialApiSignalDraft[] {
   // Membership is identities-only: keep grounded surfaces even when the
   // prompt-asked topology is missing or rejected. Topology is required only
@@ -457,6 +459,9 @@ function parseBoundedBatchSignals(
     source_locator !== undefined && !allowedIds.has(source_locator.assertion_id)
   )) {
     throw new Error("official API signal locator is outside its bounded assertion batch");
+  }
+  if (sourceCorpus !== undefined) {
+    assertOfficialApiRequestGrounding(request, drafts, sourceCorpus);
   }
   return drafts;
 }

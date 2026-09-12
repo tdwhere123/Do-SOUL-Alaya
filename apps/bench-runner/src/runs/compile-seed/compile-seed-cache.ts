@@ -1,5 +1,6 @@
 import {
   parseOfficialApiExtractionRequest,
+  parseOfficialApiRequestSignals,
   stringifyOfficialApiExtractionRequest,
   type OfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
@@ -113,6 +114,51 @@ export function createCachingSignalExtractor(
   };
 }
 
+/** Admit a retained provider result without dispatching or accounting a new call. */
+export class ExtractionResponseAdmissionError extends Error {}
+
+export function importExtractionResponse(input: {
+  readonly config: CachingSignalExtractorOptions["config"];
+  readonly cacheRoot: string;
+  readonly writeLease: ExtractionCacheWriteLease;
+  readonly systemPrompt: string;
+  readonly userPrompt: string;
+  readonly expectedCacheKey: string;
+  readonly sourceCorpus: string;
+  readonly result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>;
+}): void {
+  const { writeLease: lease, cacheRoot, result } = input;
+  lease.assertOwned();
+  lease.assertRoot(cacheRoot);
+  const extraction = extractCacheInputIdentity(input.userPrompt);
+  const key = computeCacheKey(input.config.model, input.config.requestProfile,
+    input.systemPrompt, extraction.canonical);
+  if (key !== input.expectedCacheKey) throw new ExtractionCacheInvariantError("import request identity mismatch");
+  try {
+    const inspection = inspectExtractionRawJson(result.rawJson);
+    const drafts = parseOfficialApiRequestSignals(result.rawJson, extraction.request, input.sourceCorpus);
+    const represented = new Set(drafts.map((draft) => draft.source_locator?.assertion_id));
+    if (extraction.request.source_assertions.length > 0 &&
+        (drafts.length === 0 || drafts.length !== inspection.rawSignalCount ||
+         drafts.some((draft) => draft.source_locator === undefined) ||
+         extraction.request.source_assertions.some((assertion) => !represented.has(assertion.assertion_id)))) {
+      throw new Error("import requires complete source-bound signal entries");
+    }
+  } catch (cause) {
+    throw new ExtractionResponseAdmissionError("provider response failed request-bound admission", { cause });
+  }
+  const options = { config: input.config };
+  const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
+  const existing = inspectPrimaryShard(options, cacheRoot, key);
+  if (existing.status === "hit") {
+    if (existing.rawJson !== result.rawJson) throw new ExtractionCacheInvariantError("import conflicts with admitted response");
+    return;
+  }
+  persistExtraction(options, cacheRoot, key, result, true);
+  lease.assertOwned();
+  assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
+}
+
 async function extractWithCache(
   options: CachingSignalExtractorOptions,
   cacheRoot: string,
@@ -204,7 +250,7 @@ function recordCacheHit(
 }
 
 function inspectPrimaryShard(
-  options: CachingSignalExtractorOptions,
+  options: Pick<CachingSignalExtractorOptions, "config" | "rawShardInspector">,
   cacheRoot: string,
   cacheKey: string
 ) {
@@ -306,7 +352,7 @@ function markLiveExtractionStarted(
 }
 
 function persistExtraction(
-  options: CachingSignalExtractorOptions,
+  options: Pick<CachingSignalExtractorOptions, "config">,
   cacheRoot: string,
   cacheKey: string,
   result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>,
@@ -366,7 +412,7 @@ function withAuthorityAttemptHook(
 }
 
 function assertWriteIdentity(
-  options: CachingSignalExtractorOptions,
+  options: Pick<CachingSignalExtractorOptions, "config">,
   cacheRoot: string,
   systemPrompt: string,
   expectedManifestSha?: string

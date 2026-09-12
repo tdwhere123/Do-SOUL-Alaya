@@ -1,4 +1,8 @@
 import {
+  isExtractionOutputTokenField,
+  type ExtractionOutputTokenField
+} from "../receipt-limits.js";
+import {
   assertExtractionPreservedValidClosure,
   type ExtractionPreservedValidClosure
 } from "../repair/preserved-valid-closure.js";
@@ -37,7 +41,7 @@ export interface ExtractionTransportAuthorityTerms {
   readonly successful_shard_ceiling: number;
   readonly max_concurrency: number;
   readonly max_output_tokens: number;
-  readonly output_token_field: "max_tokens" | "max_completion_tokens";
+  readonly output_token_field: ExtractionOutputTokenField;
   readonly disk_floor_bytes: number;
   readonly no_progress_timeout_ms: number;
   readonly input_usd_per_million: number;
@@ -129,8 +133,7 @@ function isSuccessfulKeyClosure(value: unknown, expectedCount: number): boolean 
 function isTransportAuthorityTerms(value: unknown): value is ExtractionTransportAuthorityTerms {
   if (!isRecord(value) || value.action !== "fill" ||
       !isDigest(value.target_selection_digest) ||
-      (value.output_token_field !== "max_tokens" &&
-       value.output_token_field !== "max_completion_tokens")) return false;
+      !isExtractionOutputTokenField(value.output_token_field)) return false;
   return [
     value.starting_missing,
     value.maximum_attempts,
