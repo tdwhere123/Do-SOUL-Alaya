@@ -7,6 +7,8 @@ import { probeProviderProtocol } from "../../../runs/provider/protocol-probe.js"
 import { parseAuthorizeExtractionArgs } from "../../../cli/extraction-authority/args.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { buildOfficialApiExtractionRequest, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
+import * as soul from "@do-soul/alaya-soul";
+import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 
 const config: CompileSeedExtractionConfig = {
   model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1",
@@ -47,6 +49,10 @@ describe("native Gemini interactive extraction", () => {
     const userPrompt = stringifyOfficialApiExtractionRequest(
       buildOfficialApiExtractionRequest(source, [{ role: "user", content: source }])
     );
+    const originalSchema = soul.officialApiExtractionResponseSchema(userPrompt);
+    const originalSnapshot = structuredClone(originalSchema);
+    const expectedSchema = JSON.parse(JSON.stringify(originalSchema));
+    expectedSchema.properties.signals.items.additionalProperties = true;
     let observed = false;
     await withServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -54,6 +60,9 @@ describe("native Gemini interactive extraction", () => {
       req.on("end", () => {
         const wire = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         const schema = wire.generationConfig.responseJsonSchema;
+        expect(schema).toEqual(expectedSchema);
+        expect(schema.properties.signals.items.additionalProperties).toBe(true);
+        expect(schema.additionalProperties).toBe(false);
         expect(schema.required).toEqual(["signals"]);
         expect(schema.properties.signals.items.required).toEqual([
           "object_kind", "confidence", "matched_text", "source_locator", "semantic_factor_graph"
@@ -72,6 +81,42 @@ describe("native Gemini interactive extraction", () => {
       expect(result.usage?.totalTokens).toBe(33);
     });
     expect(observed).toBe(true);
+    expect(originalSchema).toEqual(originalSnapshot);
+    expect(soul.officialApiExtractionResponseSchema(userPrompt)).toEqual(originalSnapshot);
+  });
+
+  it("normalizes only empty additional-property schemas without changing other constraints or property names", () => {
+    const shared = {
+      type: "object", additionalProperties: {},
+      properties: {
+        additionalProperties: {},
+        projections: { type: "object", additionalProperties: { type: "string" } },
+        rows: { type: "array", items: { anyOf: [
+          { type: "object", additionalProperties: {} }, { type: "integer", enum: [1, 2] }
+        ] } }
+      },
+      required: ["rows"], examples: [{ additionalProperties: {} }]
+    };
+    const snapshot = structuredClone(shared);
+    const providerSchema = vi.spyOn(soul, "officialApiExtractionResponseSchema").mockReturnValue(shared);
+    try {
+      const wire = encodeGeminiGenerateContent(input, { model: config.model,
+        requestProfile: "gemini-2.5-nonthinking-v1", maxOutputTokens: 1024 });
+      expect(wire).toEqual({
+        systemInstruction: { parts: [{ text: input.systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: input.userPrompt }] }],
+        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 1024,
+          thinkingConfig: { thinkingBudget: 0 }, responseJsonSchema: {
+            ...snapshot, additionalProperties: true, properties: {
+              ...snapshot.properties, rows: { type: "array", items: { anyOf: [
+                { type: "object", additionalProperties: true }, { type: "integer", enum: [1, 2] }
+              ] } }
+            }
+          }
+        }
+      });
+      expect(shared).toEqual(snapshot);
+    } finally { providerSchema.mockRestore(); }
   });
 
   it("uses explicit minimal thinking for Flash-Lite 3.1 and normalizes OpenAI configuration with auth", async () => {

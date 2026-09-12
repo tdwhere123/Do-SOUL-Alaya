@@ -28,12 +28,34 @@ export function encodeGeminiGenerateContent(
     contents: [{ role: "user", parts: [{ text: line.userPrompt }] }],
     generationConfig: {
       responseMimeType: "application/json", maxOutputTokens: settings.maxOutputTokens,
-      ...(responseJsonSchema === undefined ? {} : { responseJsonSchema }),
+      ...(responseJsonSchema === undefined ? {} : { responseJsonSchema: normalizeGeminiSchema(responseJsonSchema) }),
       ...(isNativeGeminiRequestProfile(settings.requestProfile) ? {
         thinkingConfig: THINKING_CONFIG[settings.requestProfile]
       } : {})
     }
   };
+}
+
+function normalizeGeminiSchema(schema: unknown): unknown {
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) return schema;
+  return Object.fromEntries(Object.entries(schema).map(([key, value]) => {
+    // Visit schema positions only: property names and annotation data are not keywords.
+    if (key === "additionalProperties" && typeof value === "object" && value !== null &&
+        !Array.isArray(value) && Object.keys(value).length === 0) return [key, true];
+    if (["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"].includes(key) &&
+        typeof value === "object" && value !== null && !Array.isArray(value)) {
+      return [key, Object.fromEntries(Object.entries(value).map(([name, child]) =>
+        [name, normalizeGeminiSchema(child)]))];
+    }
+    if (["allOf", "anyOf", "oneOf", "prefixItems"].includes(key) && Array.isArray(value)) {
+      return [key, value.map(normalizeGeminiSchema)];
+    }
+    if (["items", "additionalProperties", "contains", "not", "if", "then", "else",
+      "propertyNames", "unevaluatedProperties", "unevaluatedItems"].includes(key)) {
+      return [key, normalizeGeminiSchema(value)];
+    }
+    return [key, structuredClone(value)];
+  }));
 }
 
 export function decodeGeminiGenerateContent(value: unknown): {
