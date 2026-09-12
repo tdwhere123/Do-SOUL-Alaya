@@ -152,12 +152,24 @@ describe("official API system prompt", () => {
     const g8Sha256 =
       "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
     const currentSha256Expected =
+      "3acdcd7051d7c98f2c307540c066b589fea9ccc50bcc584c411de36ec719734d";
+    const previousSha256 =
       "bf255feebdf99106871e33241f7bba3260e3f02874f0eefe36db803cc95d7705";
+    const previous = resolveOfficialApiSystemPrompt(previousSha256);
+    const previousRepairSha256 =
+      "b212a6fdc0abb6a440035cefe7c3da856ae04908290faa8524194549e1091aaa";
+    const previousRepair = resolveOfficialApiSystemPrompt(previousRepairSha256);
     const historical = resolveOfficialApiSystemPrompt(historicalSha256);
     const g8 = resolveOfficialApiSystemPrompt(g8Sha256);
 
     expect(currentSha256).toBe(currentSha256Expected);
     expect(resolveOfficialApiSystemPrompt(currentSha256)).toBe(OFFICIAL_API_SYSTEM_PROMPT);
+    expect(previous).toBeDefined();
+    expect(sha256(previous!)).toBe(previousSha256);
+    expect(previous).not.toBe(OFFICIAL_API_SYSTEM_PROMPT);
+    expect(previousRepair).toBeDefined();
+    expect(sha256(previousRepair!)).toBe(previousRepairSha256);
+    expect(previousRepair).not.toBe(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT);
     expect(historical).toBeDefined();
     expect(sha256(historical!)).toBe(historicalSha256);
     expect(historical).not.toContain('"fact_frame"');
