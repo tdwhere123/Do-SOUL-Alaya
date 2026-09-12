@@ -136,8 +136,8 @@ describe("api-key-cipher", () => {
 
     const encrypted = encryptApiKeyAtRest("sk-live-secret-value");
     const durableId = fs.readFileSync(durablePath, "utf8").trim();
-    expect(encrypted.startsWith("$alaya$v1$")).toBe(true);
-    expect(encrypted.startsWith("$alaya$v1$g")).toBe(false);
+    expect(encrypted).toMatch(/^\$alaya\$v1\$[A-Za-z0-9_-]+$/u);
+    expect(decryptApiKeyAtRest(encrypted)).toBe("sk-live-secret-value");
 
     expect(rotateApiKeyCipherGeneration()).toBe(2);
     expect(fs.readFileSync(durablePath, "utf8").trim()).toBe(durableId);
