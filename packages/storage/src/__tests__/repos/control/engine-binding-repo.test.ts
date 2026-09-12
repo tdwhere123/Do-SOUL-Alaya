@@ -3,13 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EngineProvider, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../../sqlite/db.js";
+import { closeCachedDatabase, initDatabase } from "../../../sqlite/db.js";
 import { SqliteEngineBindingRepo } from "../../../repos/control/engine-binding-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
 import {
   __setApiKeyCipherKeyMaterialForTests,
   isEncryptedApiKeyAtRest
 } from "../../../repos/control/api-key-cipher.js";
+import { removeTempDirectorySync } from "../../temp-directory.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -260,8 +261,9 @@ describe("SqliteEngineBindingRepo", () => {
       if (database !== undefined) {
         database.close();
         databases.delete(database);
+        closeCachedDatabase(tempFile);
       }
-      fs.rmSync(tempDir, { recursive: true, force: true });
+      removeTempDirectorySync(tempDir);
     }
   });
 });

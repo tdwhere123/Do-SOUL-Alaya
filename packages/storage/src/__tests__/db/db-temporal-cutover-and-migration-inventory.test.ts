@@ -10,6 +10,7 @@ import {
   initDatabase,
   readSchemaMigrationLedger
 } from "../../sqlite/db.js";
+import { removeTempDirectorySync } from "../temp-directory.js";
 
 interface TempContext {
   readonly directory: string;
@@ -21,10 +22,6 @@ function createTempDatabasePath(): TempContext {
   return { directory, filename: path.join(directory, "alaya.db") };
 }
 
-function cleanupTempDirectory(directory: string): void {
-  fs.rmSync(directory, { recursive: true, force: true });
-}
-
 describe("temporal cutover startup gate", () => {
   let context: TempContext;
 
@@ -34,7 +31,7 @@ describe("temporal cutover startup gate", () => {
 
   afterEach(() => {
     closeCachedDatabase(context.filename);
-    cleanupTempDirectory(context.directory);
+    removeTempDirectorySync(context.directory);
   });
 
   it("refuses a complete pre-temporal source before a runtime open can mutate it", () => {
@@ -47,7 +44,7 @@ describe("temporal cutover startup gate", () => {
 
     expect(readFileSha256(context.filename)).toBe(before);
     expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(6);
-  }, 30_000);
+  }, process.platform === "win32" ? 60_000 : 30_000);
 
   it("fresh bootstrap records a verified empty temporal generation", () => {
     const database = initDatabase({ filename: context.filename });

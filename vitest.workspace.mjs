@@ -110,7 +110,12 @@ export default [
   packageProject("@do-soul/alaya-protocol", "packages/protocol"),
   packageProject("@do-soul/alaya-graph-algorithms", "packages/graph-algorithms"),
   packageProject("@do-soul/alaya-storage", "packages/storage", {
-    testTimeout: process.platform === "win32" ? 30_000 : 5_000
+    // File-backed initDatabase + close/reopen regularly exceeds 30s on a busy
+    // Windows runner; sibling sqlite probes already use 60s. hookTimeout must
+    // match or afterEach rmSync aborts at Vitest's 10s default.
+    ...(process.platform === "win32"
+      ? { testTimeout: 60_000, hookTimeout: 60_000 }
+      : { testTimeout: 5_000 })
   }),
   packageProject("@do-soul/alaya-core", "packages/core", {
     setupFiles: [path.resolve(rootDir, "packages/core/vitest.setup.ts")],
