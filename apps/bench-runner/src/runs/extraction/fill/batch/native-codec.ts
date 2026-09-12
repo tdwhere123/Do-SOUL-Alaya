@@ -38,7 +38,9 @@ export function encodeGeminiGenerateContent(
 
 function normalizeGeminiSchema(schema: unknown): unknown {
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) return schema;
-  return Object.fromEntries(Object.entries(schema).map(([key, value]) => {
+  // Nested array upper bounds can make Gemini reject generation schemas; the
+  // rejection threshold is unknown. Local admission still owns cardinality limits.
+  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== "maxItems").map(([key, value]) => {
     // Visit schema positions only: property names and annotation data are not keywords.
     if (key === "additionalProperties" && typeof value === "object" && value !== null &&
         !Array.isArray(value) && Object.keys(value).length === 0) return [key, true];

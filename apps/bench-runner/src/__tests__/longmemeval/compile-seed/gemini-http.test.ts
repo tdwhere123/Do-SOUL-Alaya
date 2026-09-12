@@ -9,6 +9,7 @@ import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/com
 import { buildOfficialApiExtractionRequest, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import * as soul from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
+import { OpenSemanticFactorGraphProposalSchema } from "@do-soul/alaya-protocol";
 
 const config: CompileSeedExtractionConfig = {
   model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1",
@@ -53,6 +54,14 @@ describe("native Gemini interactive extraction", () => {
     const originalSnapshot = structuredClone(originalSchema);
     const expectedSchema = JSON.parse(JSON.stringify(originalSchema));
     expectedSchema.properties.signals.items.additionalProperties = true;
+    expect(expectedSchema.properties.signals.maxItems).toBe(64);
+    delete expectedSchema.properties.signals.maxItems;
+    const graphProperties = expectedSchema.properties.signals.items.properties.semantic_factor_graph.properties;
+    for (const name of ["factors", "variables", "propositions", "result_variable_ids"]) {
+      expect(graphProperties[name].maxItems).toBeGreaterThan(0);
+      delete graphProperties[name].maxItems;
+    }
+    delete graphProperties.propositions.items.properties.arguments.maxItems;
     let observed = false;
     await withServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -85,17 +94,18 @@ describe("native Gemini interactive extraction", () => {
     expect(soul.officialApiExtractionResponseSchema(userPrompt)).toEqual(originalSnapshot);
   });
 
-  it("normalizes only empty additional-property schemas without changing other constraints or property names", () => {
+  it("adapts generation array bounds and empty additional-property schemas without changing other constraints or property names", () => {
     const shared = {
       type: "object", additionalProperties: {},
       properties: {
         additionalProperties: {},
+        maxItems: { type: "integer", maximum: 12 },
         projections: { type: "object", additionalProperties: { type: "string" } },
-        rows: { type: "array", items: { anyOf: [
+        rows: { type: "array", minItems: 1, maxItems: 32, items: { anyOf: [
           { type: "object", additionalProperties: {} }, { type: "integer", enum: [1, 2] }
         ] } }
       },
-      required: ["rows"], examples: [{ additionalProperties: {} }]
+      required: ["rows"], examples: [{ additionalProperties: {}, maxItems: 32 }]
     };
     const snapshot = structuredClone(shared);
     const providerSchema = vi.spyOn(soul, "officialApiExtractionResponseSchema").mockReturnValue(shared);
@@ -108,7 +118,7 @@ describe("native Gemini interactive extraction", () => {
         generationConfig: { responseMimeType: "application/json", maxOutputTokens: 1024,
           thinkingConfig: { thinkingBudget: 0 }, responseJsonSchema: {
             ...snapshot, additionalProperties: true, properties: {
-              ...snapshot.properties, rows: { type: "array", items: { anyOf: [
+              ...snapshot.properties, rows: { type: "array", minItems: 1, items: { anyOf: [
                 { type: "object", additionalProperties: true }, { type: "integer", enum: [1, 2] }
               ] } }
             }
@@ -117,6 +127,26 @@ describe("native Gemini interactive extraction", () => {
       });
       expect(shared).toEqual(snapshot);
     } finally { providerSchema.mockRestore(); }
+  });
+
+  it("retains local signal and graph cardinality rejection after adapting generation schemas", () => {
+    const source = "I collect vintage postcards.";
+    const request = buildOfficialApiExtractionRequest(source, []);
+    const signal = { object_kind: "user_preference", confidence: 0.9, matched_text: source,
+      source_locator: { contract_version: 2, kind: "assertion_catalog", assertion_id: 1 } };
+    expect(() => soul.classifyOfficialApiRequestResult(JSON.stringify({
+      signals: Array.from({ length: 65 }, () => signal)
+    }), request)).toThrow("rejected signal entries");
+    const graph = OpenSemanticFactorGraphProposalSchema.safeParse({
+      schema_version: 2, source_kind: "evidence", variables: [], result_variable_ids: [],
+      factors: Array.from({ length: 33 }, (_, index) => ({ factor_id: `f${index}`,
+        surface: "collect", semantic_identity: "collect" })),
+      propositions: [{ proposition_id: "p", predicate_factor_id: "f0", arguments: [
+        { position: 0, binding_identity: "collector", reference_kind: "factor", reference_id: "f1" }
+      ] }]
+    });
+    expect(graph.success).toBe(false);
+    expect(graph.error?.issues).toContainEqual(expect.objectContaining({ code: "too_big", path: ["factors"] }));
   });
 
   it("uses explicit minimal thinking for Flash-Lite 3.1 and normalizes OpenAI configuration with auth", async () => {

@@ -121,6 +121,7 @@ describe("durable Gemini Batch HTTP extraction", () => {
     await run("submit", { plan: sourcePlan });
     const batchBody = JSON.parse(uploads[0]!.trim()).request;
     expect(batchBody.generationConfig.responseJsonSchema.properties.signals.items.additionalProperties).toBe(true);
+    expect(batchBody.generationConfig.responseJsonSchema.properties.signals).not.toHaveProperty("maxItems");
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ candidates: [{
       finishReason: "STOP", content: { parts: [{ text: '{"signals":[]}' }] }
     }] }));
