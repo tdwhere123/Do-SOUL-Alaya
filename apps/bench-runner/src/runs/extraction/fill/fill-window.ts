@@ -20,6 +20,7 @@ interface ExtractionFillWindow {
   readonly executionTurns: readonly string[];
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
+  readonly occurrenceExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
   readonly executionRequestedTurns: number;
   readonly windowUniqueCacheKeys: number;
@@ -56,6 +57,7 @@ function prepareExpansionWindow(
     executionTurns: turnContents,
     distinctExtractionTurns: expansion.nextTurns,
     executionExtractionTurns: expansion.nextTurns,
+    occurrenceExtractionTurns: keySpace.occurrenceExtractionTurns,
     requestedTurns: keySpace.distinctExtractionRequestCount,
     executionRequestedTurns: keySpace.distinctExtractionRequestCount,
     windowUniqueCacheKeys: keySpace.distinctExtractionRequestCount,
@@ -89,6 +91,7 @@ async function prepareDatasetWindow(
     executionTurns,
     distinctExtractionTurns: windowKeySpace.distinctExtractionTurns,
     executionExtractionTurns: executionKeySpace.distinctExtractionTurns,
+    occurrenceExtractionTurns: windowKeySpace.occurrenceExtractionTurns,
     requestedTurns: windowKeySpace.distinctExtractionRequestCount,
     executionRequestedTurns: executionKeySpace.distinctExtractionRequestCount,
     windowUniqueCacheKeys: windowKeySpace.distinctExtractionRequestCount,

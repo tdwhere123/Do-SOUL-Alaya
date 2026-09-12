@@ -90,6 +90,7 @@ export {
   inspectOfficialApiSemanticFactorGraphProjection,
   projectOfficialApiSemanticFactorGraph,
   parseOfficialApiSignals,
+  parseOfficialApiRequestSignals,
   parseOfficialApiExtractionRequest,
   buildOfficialApiExtractionRequest,
   buildOfficialApiExtractionRequests,

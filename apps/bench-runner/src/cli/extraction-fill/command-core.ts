@@ -3,6 +3,7 @@ import { ExtractionFillTaskError } from "../../runs/extraction/fill/fill-pool.js
 import type { runExtractionFill } from "../../runs/extraction/extraction-fill.js";
 import type { ParsedFlags } from "../cli-options.js";
 import type { ExtractionFillLazyFlags } from "./lazy-field-flags.js";
+import type { ExtractionBatchOptions } from "./batch-flags.js";
 import type { readR3SpendApproval } from "../../datasets/longmemeval/promotion/r3-spend-approval.js";
 import { pct } from "../result-format.js";
 import { countTerminalProviderFailures } from "../../runs/extraction/fill/fill-stats.js";
@@ -22,7 +23,8 @@ export interface ExtractionFillCommandDependencies {
 export async function runExtractionFillCommand(
   opts: ParsedFlags,
   deps: ExtractionFillCommandDependencies,
-  lazy: ExtractionFillLazyFlags = {}
+  lazy: ExtractionFillLazyFlags = {},
+  batch?: ExtractionBatchOptions
 ): Promise<number> {
   try {
     if (opts.extractionPredecessorAuthority !== undefined &&
@@ -41,6 +43,7 @@ export async function runExtractionFillCommand(
       deps.signalSource,
       (signal) => deps.runExtractionFill({
         variant: opts.variant,
+        ...(batch === undefined ? {} : { batch }),
         ...(opts.limit === undefined ? {} : { limit: opts.limit }),
         ...(opts.offset === undefined ? {} : { offset: opts.offset }),
         ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
@@ -82,6 +85,7 @@ export async function runExtractionFillCommand(
       })
     );
     process.stdout.write(renderResult(result));
+    if (result.batchState !== undefined) process.stdout.write(`${JSON.stringify(result.batchState)}\n`);
     return 0;
   } catch (error) {
     return handleExtractionFillError(error);

@@ -1,13 +1,10 @@
-export const EXTRACTION_REQUEST_PROFILES = [
-  "provider-default-v1",
-  "deepseek-v4-nonthinking-v1",
-  "mimo-v2.5-nonthinking-v1"
-] as const;
+import { LONGMEMEVAL_EXTRACTION_REQUEST_PROFILES } from "@do-soul/alaya-eval/authority";
 
-export const CURRENT_EXTRACTION_REQUEST_PROFILES = [
-  "provider-default-v1",
-  "mimo-v2.5-nonthinking-v1"
-] as const;
+export const EXTRACTION_REQUEST_PROFILES = LONGMEMEVAL_EXTRACTION_REQUEST_PROFILES;
+
+export const CURRENT_EXTRACTION_REQUEST_PROFILES = Object.freeze(
+  EXTRACTION_REQUEST_PROFILES.filter((profile) => profile !== "deepseek-v4-nonthinking-v1")
+);
 
 export type ExtractionRequestProfile =
   (typeof EXTRACTION_REQUEST_PROFILES)[number];

@@ -222,10 +222,11 @@ export function openExtractionAttemptLedger(input: {
   readonly maximumAttempts?: number; readonly successfulShardCeiling?: number;
 }): {
   readonly reserveAttempt: (cacheKey: string) => void;
-  readonly abandonPendingShard: (cacheKey: string) => void;
+  readonly reserveAttemptOrdinal: (cacheKey: string) => number;
+  readonly abandonPendingShard: (cacheKey: string, attemptOrdinal?: number) => void;
   readonly commitSuccessfulShard: (cacheKey: string) => void;
   readonly commitDeterministicShard: (cacheKey: string) => void;
-  readonly recordTransportOutcome: (cacheKey: string, input: ExtractionTransportOutcome) => void;
+  readonly recordTransportOutcome: (cacheKey: string, input: ExtractionTransportOutcome, attemptOrdinal?: number) => boolean;
   readonly snapshot: () => ExtractionAttemptLedgerSnapshot;
 } {
   const expected = createExpectedRecord(input);
@@ -244,9 +245,16 @@ export function openExtractionAttemptLedger(input: {
     current = next;
     persistAttemptLedgerRecord(path, current, input.publicationTemporaryDirectory);
   };
+  const reserveAttemptOrdinal = (cacheKey: string): number => {
+    update(reserveTransportAttempt(current, cacheKey));
+    return current.attempts;
+  };
   return {
-    reserveAttempt: (cacheKey) => update(reserveTransportAttempt(current, cacheKey)),
-    abandonPendingShard: (cacheKey) => update(abandonPendingShard(current, cacheKey)),
+    reserveAttempt: (cacheKey) => {
+      reserveAttemptOrdinal(cacheKey);
+    },
+    reserveAttemptOrdinal,
+    abandonPendingShard: (cacheKey, attemptOrdinal) => update(abandonPendingShard(current, cacheKey, attemptOrdinal)),
     commitSuccessfulShard: (cacheKey) => {
       const shard = requireValidShard(input.cacheRoot, cacheKey, current.cache_identity);
       update(commitProviderBackedShard(current, shard));
@@ -262,8 +270,12 @@ export function openExtractionAttemptLedger(input: {
       }
       update(commitDeterministicShard(current, shard));
     },
-    recordTransportOutcome: (cacheKey, outcome) =>
-      update(settleTransportOutcome(current, cacheKey, outcome)),
+    recordTransportOutcome: (cacheKey, outcome, attemptOrdinal) => {
+      const next = settleTransportOutcome(current, cacheKey, outcome, attemptOrdinal);
+      if (next === current) return false;
+      update(next);
+      return true;
+    },
     snapshot: () => toSnapshot(current, path)
   };
 }

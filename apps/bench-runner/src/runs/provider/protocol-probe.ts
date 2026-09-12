@@ -2,6 +2,7 @@ import { executeProviderChatCompletion } from "@do-soul/alaya-engine-gateway";
 import { assertSourceBoundF3SealCurrent } from "@do-soul/alaya-soul";
 import type { ExtractionRequestProfile } from "../extraction/request-profile.js";
 import { requireProviderBinding, resolveVendorModel } from "./catalog.js";
+import { createGeminiHttpExtractor } from "../compile-seed/http/gemini-http.js";
 
 export interface ProviderProtocolProbeInput {
   readonly providerUrl: string;
@@ -42,6 +43,23 @@ export async function probeProviderProtocol(
   };
   const model = resolveVendorModel(input.model);
   const framing = input.framing ?? "json";
+  if (binding.requestProfile === "gemini-2.5-nonthinking-v1") {
+    if (framing !== "json") throw new Error("Gemini protocol probe supports JSON framing only");
+    const response = await createGeminiHttpExtractor({
+      providerUrl: input.providerUrl, apiKey: input.apiKey, model,
+      requestProfile: binding.requestProfile
+    }, fetchImpl).extract({
+      systemPrompt: "Return JSON only.", userPrompt: "{\"probe\":true}",
+      timeoutMs: 20_000, maxOutputTokens: 256, outputTokenField: "maxOutputTokens",
+      retryMode: "disabled", validateRawJson: (raw) => { JSON.parse(raw); }
+    });
+    return {
+      profile: binding.requestProfile, model, framing, physical_calls: physicalCalls,
+      json_object: response.rawJson.trim().startsWith("{"),
+      usage_present: response.usage !== undefined,
+      finish_reason: response.responseMetadata?.finishReason ?? null, f3_seal_current: true
+    };
+  }
   const execution = await executeProviderChatCompletion({
     providerUrl: input.providerUrl,
     apiKey: input.apiKey,

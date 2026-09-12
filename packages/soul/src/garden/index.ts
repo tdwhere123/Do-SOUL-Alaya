@@ -63,6 +63,7 @@ export {
   officialApiSemanticWorksetFromUnits,
   planOfficialApiSemanticWorkset,
   planOfficialApiTransport,
+  parseOfficialApiRequestSignals,
   materializeOfficialApiTransportResponse,
   type GardenCompileContext,
   type GardenComputeProvider,

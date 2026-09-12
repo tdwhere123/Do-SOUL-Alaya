@@ -32,6 +32,7 @@ export interface TurnContentKeySpace {
   readonly distinctExtractionRequestCount: number;
   readonly distinctTurnContents: readonly string[];
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
+  readonly occurrenceExtractionTurns?: readonly LongMemEvalExtractionTurn[];
 }
 
 export function inspectTurnContentKeySpace(
@@ -40,6 +41,7 @@ export function inspectTurnContentKeySpace(
   let turnOccurrences = 0;
   let distinctExtractionRequestCount = 0;
   const distinct = new Map<string, LongMemEvalExtractionTurn>();
+  const occurrences: LongMemEvalExtractionTurn[] = [];
   for (const question of questions) {
     for (const [sessionIndex, session] of question.haystack_sessions.entries()) {
       for (const [roundIndex, round] of pairSessionIntoRounds(session).entries()) {
@@ -52,13 +54,12 @@ export function inspectTurnContentKeySpace(
         );
         const requests = buildOfficialApiExtractionRequests(normalized, turnMessages);
         turnOccurrences += 1;
+        const occurrence = Object.freeze({ turnContent: normalized, turnMessages });
+        occurrences.push(occurrence);
         const identity = JSON.stringify(requests.map(stringifyOfficialApiExtractionRequest));
         if (distinct.has(identity)) continue;
         distinctExtractionRequestCount += requests.length;
-        distinct.set(identity, Object.freeze({
-          turnContent: normalized,
-          turnMessages
-        }));
+        distinct.set(identity, occurrence);
       }
     }
   }
@@ -67,7 +68,8 @@ export function inspectTurnContentKeySpace(
     turnOccurrences,
     distinctExtractionRequestCount,
     distinctTurnContents: Object.freeze(distinctExtractionTurns.map((turn) => turn.turnContent)),
-    distinctExtractionTurns
+    distinctExtractionTurns,
+    occurrenceExtractionTurns: Object.freeze(occurrences)
   });
 }
 

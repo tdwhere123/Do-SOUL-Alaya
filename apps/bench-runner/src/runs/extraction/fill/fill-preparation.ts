@@ -48,6 +48,7 @@ export interface PreparedExtractionFill {
   readonly executionTurns: readonly string[];
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
+  readonly occurrenceExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
   readonly executionRequestedTurns: number;
   readonly datasetRevision: string;
@@ -65,6 +66,7 @@ export interface InspectedExtractionFill {
   readonly executionTurns: readonly string[];
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
+  readonly occurrenceExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
   readonly executionRequestedTurns: number;
   readonly datasetRevision: string;
@@ -114,6 +116,7 @@ function adoptInspectedExtractionFill(
     executionTurns: inspected.executionTurns,
     distinctExtractionTurns: inspected.distinctExtractionTurns,
     executionExtractionTurns: inspected.executionExtractionTurns,
+    occurrenceExtractionTurns: inspected.occurrenceExtractionTurns,
     requestedTurns: inspected.requestedTurns,
     executionRequestedTurns: inspected.executionRequestedTurns,
     datasetRevision: inspected.datasetRevision,
@@ -147,6 +150,7 @@ export async function inspectExtractionFillPreparation(
     executionTurns: window.executionTurns,
     distinctExtractionTurns: window.distinctExtractionTurns,
     executionExtractionTurns: window.executionExtractionTurns,
+    occurrenceExtractionTurns: window.occurrenceExtractionTurns,
     requestedTurns: window.requestedTurns,
     executionRequestedTurns: window.executionRequestedTurns,
     datasetRevision: window.datasetRevision,
@@ -195,6 +199,7 @@ export function pinInspectedExtractionFill(
     executionTurns: inspected.executionTurns,
     distinctExtractionTurns: inspected.distinctExtractionTurns,
     executionExtractionTurns: inspected.executionExtractionTurns,
+    occurrenceExtractionTurns: inspected.occurrenceExtractionTurns,
     requestedTurns: inspected.requestedTurns,
     executionRequestedTurns: inspected.executionRequestedTurns,
     datasetRevision: inspected.datasetRevision,

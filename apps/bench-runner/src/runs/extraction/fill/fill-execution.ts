@@ -63,13 +63,15 @@ export interface CompleteFillManifestSupplement {
 export interface ExecutionExtractionAuthority {
   readonly receipt: ExtractionAuthorityReceipt;
   readonly reserveAttempt: (cacheKey: string, signal?: AbortSignal) => Promise<void>;
-  readonly abandonPendingShard: (cacheKey: string) => void;
+  readonly reserveAttemptOrdinal?: (cacheKey: string, signal?: AbortSignal) => Promise<number>;
+  readonly abandonPendingShard: (cacheKey: string, attemptOrdinal?: number) => void;
   readonly commitSuccessfulShard: (cacheKey: string) => void;
   readonly commitDeterministicShard: (cacheKey: string) => void;
   readonly recordTransportOutcome: (
     cacheKey: string,
-    outcome: ExtractionLiveTransportOutcome
-  ) => void;
+    outcome: ExtractionLiveTransportOutcome,
+    attemptOrdinal?: number
+  ) => void | boolean;
   readonly snapshot: () => ExtractionAttemptLedgerSnapshot | undefined;
 }
 

@@ -78,17 +78,21 @@ function createLedgerExecutionAuthority(
     : catalogRefillScopeKeys(receipt.catalog_refill);
   const ledger = openReceiptAttemptLedger(receipt, cacheRoot);
   assertCatalogRefillLedgerIsCurrent(receipt, ledger.snapshot());
+  const reserveAttemptOrdinal = async (cacheKey: string, signal?: AbortSignal): Promise<number> => {
+    assertScopeKeyAllowed(repairKeys, catalogRefillKeys, cacheKey);
+    assertTarget();
+    assertAuthorityDiskFloor(cacheRoot, receipt.limits.disk_floor_bytes);
+    signal?.throwIfAborted();
+    assertTarget();
+    assertAuthorityDiskFloor(cacheRoot, receipt.limits.disk_floor_bytes);
+    return ledger.reserveAttemptOrdinal(cacheKey);
+  };
   return {
     receipt,
     reserveAttempt: async (cacheKey, signal) => {
-      assertScopeKeyAllowed(repairKeys, catalogRefillKeys, cacheKey);
-      assertTarget();
-      assertAuthorityDiskFloor(cacheRoot, receipt.limits.disk_floor_bytes);
-      signal?.throwIfAborted();
-      assertTarget();
-      assertAuthorityDiskFloor(cacheRoot, receipt.limits.disk_floor_bytes);
-      ledger.reserveAttempt(cacheKey);
+      await reserveAttemptOrdinal(cacheKey, signal);
     },
+    reserveAttemptOrdinal,
     abandonPendingShard: ledger.abandonPendingShard,
     commitSuccessfulShard: ledger.commitSuccessfulShard,
     commitDeterministicShard: receipt.catalog_refill === undefined

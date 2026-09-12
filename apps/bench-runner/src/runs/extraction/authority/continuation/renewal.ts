@@ -1,4 +1,7 @@
 import type {
+  ExtractionOutputTokenField
+} from "../receipt-limits.js";
+import type {
   ExtractionTransportAuthorityTerms,
   SameRootExtractionContinuation
 } from "./contract.js";
@@ -13,7 +16,7 @@ interface TransportAuthorityReceipt {
     successful_shard_ceiling: number;
     max_concurrency: number;
     max_output_tokens: number;
-    output_token_field: "max_tokens" | "max_completion_tokens";
+    output_token_field: ExtractionOutputTokenField;
     disk_floor_bytes: number;
     no_progress_timeout_ms: number;
   }>;

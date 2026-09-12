@@ -8,6 +8,7 @@ import { runEmitEmbeddingCacheOverlayCommand } from
   "./emit-embedding-cache-overlay/command.js";
 import { runProviderPreflightCommand } from "./provider-preflight/command.js";
 import { peelExtractionFillLazyFlags } from "./extraction-fill/lazy-field-flags.js";
+import { peelExtractionBatchFlags } from "./extraction-fill/batch-flags.js";
 import {
   runExtractionFillCommand,
   runFetchLocomoCommand,
@@ -32,7 +33,7 @@ Usage:
     --edge-plane  drain the BULK_ENRICH edge pass before recall (cumulative modes only). OFF by default to keep embedding ON/OFF corpora comparable.
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path> [--concurrency N]
   alaya-bench-runner extraction-fill [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--extraction-initial-concurrency N] [--question-batch-limit N] [--tolerate-provider-task-failures] [--data-dir <path>] [--extraction-cache-root <path>] --extraction-authority <receipt.json> [--extraction-predecessor-authority <receipt.json>] [--extraction-target-selection <receipt.json>] [--pinned-meta-root <path>] [--r3-spend-approval <json>] [--ingestion-mode precomputed_full|lazy_field] [--semantic-artifact-root <path>] [--semantic-max-calls N] [--semantic-max-failures N]
-  alaya-bench-runner authorize-extraction [--variant oracle|s|m] [--limit N] [--offset N] [--question-batch-limit N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] [--pinned-meta-root <path>] --extraction-action probe|fill --extraction-receipt-out <receipt.json> --extraction-output-token-cap N --extraction-output-token-field max_tokens|max_completion_tokens --extraction-input-price-usd-per-million N --extraction-output-price-usd-per-million N --extraction-max-input-tokens N --extraction-disk-floor-bytes N [--extraction-probe-key <sha256>] [--extraction-predecessor-authority <receipt.json>] [--extraction-target-selection <receipt.json>] [--repair-invalid-shards]
+  alaya-bench-runner authorize-extraction [--variant oracle|s|m] [--limit N] [--offset N] [--question-batch-limit N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] [--pinned-meta-root <path>] --extraction-action probe|fill --extraction-receipt-out <receipt.json> --extraction-output-token-cap N --extraction-output-token-field max_tokens|max_completion_tokens|maxOutputTokens --extraction-input-price-usd-per-million N --extraction-output-price-usd-per-million N --extraction-max-input-tokens N --extraction-disk-floor-bytes N [--extraction-probe-key <sha256>] [--extraction-predecessor-authority <receipt.json>] [--extraction-target-selection <receipt.json>] [--repair-invalid-shards]
   alaya-bench-runner select-extraction-target --variant s --offset 0 --limit 100 --extraction-cache-root <target-root> (--cache-audit-receipt <audit-receipt.json> | --materialization-receipt <receipt.json> | --retired-source-rebuild-operator <operator> | --predecessor-target-selection <receipt.json> --extraction-predecessor-authority <receipt.json> [--adopt-existing-child-target-selection <receipt.json> --adopt-existing-child-authority <receipt.json>]) --target-selection-out <receipt.json> [--data-dir <path>] [--pinned-meta-root <path>]
   alaya-bench-runner recall-eval --snapshot <db> [--embedding-cache-overlay <receipt.json>] [--experiment [--seed-extraction-system-prompt <txt>] [--rebuild-evidence-search-projections [--backfill-missing-fact-frame-formations|--fact-frame-retrofit-ledger <ndjson>]] [--warm-derived-snapshot-receipt <json>]] [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--policy-shape stress|chat] [--data-dir <path>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
   alaya-bench-runner emit-embedding-cache-overlay --snapshot <db> --receipt <json>
@@ -43,6 +44,8 @@ Usage:
   alaya-bench-runner provider-preflight --mode probe|probe-sse --provider-route <url> [--model <id>]
   alaya-bench-runner provider-preflight --mode retire-obsolete --extraction-cache-root <dir> --expected-path <dir> --profile <profile> [--confirm-retire]
     Replay requires the canonical sealed request manifest and a credentialless environment. Probe requires credentials and a catalog binding. Retire-obsolete is a path/lock preflight and does not delete.
+  alaya-bench-runner extraction-fill [ordinary fill options] --batch-operation prepare|submit|status|resume|import|cancel --batch-limits <json> [--batch-window <name>] [--batch-local-job <id> --batch-remote-job <batches/id>]
+    Gemini uses --extraction-output-token-field maxOutputTokens when creating its extraction authority. Batch prices, input/output caps and root spending remain receipt-bound. A named window selects missing work; resume never submits new jobs.
   alaya-bench-runner --help
 
 Variants:
@@ -136,8 +139,10 @@ function commandFlagCompatibilityError(
 
 function dispatchExtractionFill(rest: ReadonlyArray<string>): number | Promise<number> {
   let peeled;
+  let batch;
   try {
-    peeled = peelExtractionFillLazyFlags(rest);
+    batch = peelExtractionBatchFlags(rest);
+    peeled = peelExtractionFillLazyFlags(batch.rest);
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner: ${err instanceof Error ? err.message : String(err)}\n`
@@ -151,7 +156,7 @@ function dispatchExtractionFill(rest: ReadonlyArray<string>): number | Promise<n
     process.stderr.write(`alaya-bench-runner: ${compatibilityError}\n`);
     return 2;
   }
-  return runExtractionFillCommand(opts, undefined, peeled.lazy);
+  return runExtractionFillCommand(opts, undefined, peeled.lazy, batch.batch);
 }
 
 function parseCommandFlags(rest: ReadonlyArray<string>): ParsedFlags | null {

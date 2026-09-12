@@ -23,6 +23,7 @@ import {
   resolveExtractionRequestPlanBudget
 } from "./policy/provider-request-plan-budget.js";
 import { inspectExtractionRawJson } from "../content-closure.js";
+import type { ExtractionOutputTokenField } from "../authority/receipt-limits.js";
 
 export { EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS };
 
@@ -64,7 +65,7 @@ interface ExtractionPoolInput {
   readonly transport?: {
     readonly retryMode: "default" | "disabled";
     readonly maxOutputTokens: number;
-    readonly outputTokenField: "max_tokens" | "max_completion_tokens";
+    readonly outputTokenField: ExtractionOutputTokenField;
   };
   /** Leaves failed provider tasks missing so a later fill can retry them. */
   readonly tolerateProviderTaskFailures?: boolean;

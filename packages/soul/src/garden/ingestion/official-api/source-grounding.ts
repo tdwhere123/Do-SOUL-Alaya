@@ -13,6 +13,23 @@ import {
 } from "../../triage/grounding/preference-profile.js";
 import { projectOfficialApiSemanticFactorGraph } from "./semantic-factor-projection.js";
 import type { OfficialApiSourceTrustRejection } from "./source-trust.js";
+import { buildOfficialApiSourceAssertions } from "../../triage/grounding/source-locator.js";
+import { computeOfficialApiSourceCorpusIdentity, type OfficialApiExtractionRequest } from "./extraction-request.js";
+
+export function assertOfficialApiRequestGrounding(request: OfficialApiExtractionRequest,
+  drafts: readonly OfficialApiSignalDraft[], sourceCorpus: string): void {
+  if (computeOfficialApiSourceCorpusIdentity(sourceCorpus) !== request.source_corpus_identity) {
+    throw new Error("official API request source corpus identity mismatch");
+  }
+  const catalog = new Map(buildOfficialApiSourceAssertions(sourceCorpus)
+    .map((assertion) => [assertion.assertion_id, assertion.text]));
+  if (request.source_assertions.some((assertion) => catalog.get(assertion.assertion_id) !== assertion.text)) {
+    throw new Error("official API request assertion differs from its source corpus");
+  }
+  if (drafts.some((draft) => groundOfficialApiDraft(draft, sourceCorpus).status === "rejected")) {
+    throw new Error("official API response is not grounded in its bound source assertion");
+  }
+}
 
 interface OfficialApiSourceGroundingProposal {
   readonly version: 1;

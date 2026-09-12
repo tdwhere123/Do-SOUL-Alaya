@@ -65,9 +65,12 @@ export function reserveTransportAttempt(
 
 export function abandonPendingShard(
   current: ExtractionAttemptLedgerRecord,
-  cacheKey: string
+  cacheKey: string,
+  attemptOrdinal?: number
 ): ExtractionAttemptLedgerRecord {
   assertCacheKey(cacheKey);
+  if (attemptOrdinal !== undefined && current.unresolved_attempts.some((attempt) =>
+    attempt.cache_key === cacheKey && attempt.attempt_ordinal !== attemptOrdinal)) return current;
   if (!current.pending_keys.includes(cacheKey)) return current;
   return { ...current, pending_keys: current.pending_keys.filter((key) => key !== cacheKey) };
 }
@@ -75,12 +78,22 @@ export function abandonPendingShard(
 export function settleTransportOutcome(
   current: ExtractionAttemptLedgerRecord,
   cacheKey: string,
-  input: ExtractionTransportOutcome
+  input: ExtractionTransportOutcome,
+  attemptOrdinal?: number
 ): ExtractionAttemptLedgerRecord {
   assertCacheKey(cacheKey);
   assertOutcome(input);
+  if (attemptOrdinal !== undefined) {
+    if (!Number.isSafeInteger(attemptOrdinal) || attemptOrdinal < 1 || attemptOrdinal > current.attempts) {
+      throw new ExtractionAttemptLimitError("transport outcome has an invalid attempt ordinal");
+    }
+    const reserved = current.unresolved_attempts.find((item) => item.attempt_ordinal === attemptOrdinal);
+    if (reserved === undefined) return current;
+    if (reserved.cache_key !== cacheKey) throw new ExtractionAttemptLimitError("transport attempt key mismatch");
+  }
   const unresolved = current.unresolved_attempts.filter(
-    (reservation) => reservation.cache_key === cacheKey
+    (reservation) => reservation.cache_key === cacheKey &&
+      (attemptOrdinal === undefined || reservation.attempt_ordinal === attemptOrdinal)
   );
   const failures = input.transportFailures ?? [];
   const terminal = input.terminalRetryClassification !== undefined;
@@ -95,7 +108,7 @@ export function settleTransportOutcome(
   }
   const currentReservations = unresolved.slice(-currentReservationCount);
   const mappedFailures = mapTransportFailures(currentReservations, failures);
-  return applySettledOutcome(current, cacheKey, input, unresolved, mappedFailures);
+  return applySettledOutcome(current, input, unresolved, mappedFailures);
 }
 
 function mapTransportFailures(
@@ -128,7 +141,6 @@ function mapTransportFailures(
 
 function applySettledOutcome(
   current: ExtractionAttemptLedgerRecord,
-  cacheKey: string,
   input: ExtractionTransportOutcome,
   unresolved: readonly ExtractionAttemptReservationRecord[],
   failures: readonly ExtractionTransportFailureRecord[]
@@ -145,9 +157,8 @@ function applySettledOutcome(
   const usage = input.usage;
   return {
     ...current,
-    unresolved_attempts: current.unresolved_attempts.filter(
-      (reservation) => reservation.cache_key !== cacheKey
-    ),
+    unresolved_attempts: current.unresolved_attempts.filter((reservation) =>
+      !unresolved.some((settled) => settled.attempt_ordinal === reservation.attempt_ordinal)),
     transport_failures: [...current.transport_failures, ...failures]
       .sort((left, right) => left.attempt_ordinal - right.attempt_ordinal),
     telemetry: {
