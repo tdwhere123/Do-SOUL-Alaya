@@ -120,6 +120,7 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     const proposal = normalizer.propose(assertion);
 
     expect(proposal?.fact_frame.slots).toEqual([
+      { role: "qualifier", text: "By the way," },
       { role: "subject", text: "I" },
       { role: "relation", text: "took" },
       { role: "value", text: "my niece to the Natural History Museum on 2/8" }
@@ -132,6 +133,7 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     const assertion = "Speaking of my Italian roots, I still cook pasta on Sundays";
 
     expect(normalizer.propose(assertion)?.fact_frame.slots).toEqual([
+      { role: "qualifier", text: "Speaking of my Italian roots," },
       { role: "subject", text: "I" },
       { role: "qualifier", text: "still" },
       { role: "relation", text: "cook" },
@@ -143,6 +145,7 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     expect(normalizer.propose(
       "Speaking of which, I still cook pasta on Sundays"
     )?.fact_frame.slots).toEqual([
+      { role: "qualifier", text: "Speaking of which," },
       { role: "subject", text: "I" },
       { role: "qualifier", text: "still" },
       { role: "relation", text: "cook" },
@@ -154,6 +157,7 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     expect(normalizer.propose(
       "To be honest, I prefer quiet rooms at night."
     )?.fact_frame.slots).toEqual([
+      { role: "qualifier", text: "To be honest," },
       { role: "subject", text: "I" },
       { role: "relation", text: "prefer" },
       { role: "value", text: "quiet rooms at night" }
@@ -163,6 +167,7 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
   it("treats determiner that as NP material rather than a complementizer", () => {
     expect(normalizer.propose("On that day I visited the museum.")?.fact_frame.slots)
       .toEqual([
+        { role: "qualifier", text: "On that day" },
         { role: "subject", text: "I" },
         { role: "relation", text: "visited" },
         { role: "value", text: "the museum" }
@@ -173,6 +178,7 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     const assertion = "By the way, I've been listening to audiobooks during my commute.";
 
     expect(normalizer.propose(assertion)?.fact_frame.slots).toEqual([
+      { role: "qualifier", text: "By the way," },
       { role: "subject", text: "I" },
       { role: "relation", text: "listening" },
       { role: "value", text: "to audiobooks during my commute" }
@@ -242,6 +248,7 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     expect(normalizer.propose(
       "By the way, last Saturday, I slept in until 9:00 AM, which was really nice"
     )?.fact_frame.slots).toEqual([
+      { role: "qualifier", text: "By the way, last Saturday," },
       { role: "subject", text: "I" },
       { role: "relation", text: "slept" },
       { role: "value", text: "in until 9:00 AM, which was really nice" }
@@ -249,6 +256,7 @@ describe("RuleBasedEvidenceFactFrameNormalizer", () => {
     expect(normalizer.propose(
       "By the way, today I sold homemade baked goods at the Farmers' Market."
     )?.fact_frame.slots).toEqual([
+      { role: "qualifier", text: "By the way, today" },
       { role: "subject", text: "I" },
       { role: "relation", text: "sold" },
       { role: "value", text: "homemade baked goods at the Farmers' Market" }

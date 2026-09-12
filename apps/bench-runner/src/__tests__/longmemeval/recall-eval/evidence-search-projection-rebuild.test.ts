@@ -1,6 +1,6 @@
 import { copyFile, readFile, symlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { evidenceFactFrameFormationCapturePreimage } from "@do-soul/alaya-protocol";
+import { EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID, evidenceFactFrameFormationCapturePreimage } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { materializeEvidenceFactFrameFormation } from "@do-soul/alaya-core";
 import {
@@ -359,16 +359,17 @@ describe("receipt-v2 evidence search projection rebuild", () => {
       ]);
   });
 
-  it("rejects a historical modal-free capture and rolls back the working-copy rebuild", async () => {
+  it.each(["I can use Atlas.", "Without the badge I can use Atlas.", "I do not use Atlas."])(
+    "rejects a historical incomplete capture and rolls back the working-copy rebuild: %s", async (source) => {
     const fixture = await createSourceFixture([{
       signalId: "signal-historical-modal",
       evidenceId: "30000000-0000-4000-8000-000000000005",
-      messages: [message("u1", "user", "I can use Atlas.")]
+      messages: [message("u1", "user", source)]
     }]);
     const workingDbPath = join(fixture.root, "historical-modal.db");
     await copyFile(fixture.sourceDbPath, workingDbPath);
     await rebuildEvidenceSearchProjectionsOnWorkingCopy({ workingDbPath });
-    seedFormedCapture(workingDbPath, fixture.evidenceIds[0]!, true);
+    seedHistoricalIncompleteCapture(workingDbPath, fixture.evidenceIds[0]!);
     const before = readProjectionRows(workingDbPath);
     await expect(rebuildEvidenceSearchProjectionsOnWorkingCopy({ workingDbPath }))
       .rejects.toMatchObject({ name: "EvidenceSearchProjectionRebuildError",
@@ -426,7 +427,7 @@ describe("receipt-v2 evidence search projection rebuild", () => {
   });
 });
 
-function seedFormedCapture(dbPath: string, evidenceObjectId: string, historicalModal = false): void {
+function seedFormedCapture(dbPath: string, evidenceObjectId: string): void {
   const db = initDatabase({ filename: dbPath, temporalMode: "candidate" });
   try {
     const owner = db.connection.prepare(`
@@ -448,28 +449,36 @@ function seedFormedCapture(dbPath: string, evidenceObjectId: string, historicalM
           schema_version: 1,
           slots: [
             { role: "subject", text: "I" },
-            ...(historicalModal ? [{ role: "qualifier" as const, text: "can" }] : []),
             { role: "relation", text: "use" },
             { role: "value", text: "Atlas" }
           ]
         }
       }
     });
-    const { capture_digest: _digest, ...body } = formation.capture;
-    const historicalBody = { ...body,
-      producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v1",
-      fact_frame: { ...formation.capture.fact_frame!, slots: formation.capture.fact_frame!.slots
-        .filter((slot) => slot.role !== "qualifier") } };
-    const retained = historicalModal ? { ...formation, capture: { ...historicalBody,
-      capture_digest: `sha256:${createHash("sha256")
-        .update(evidenceFactFrameFormationCapturePreimage(historicalBody)).digest("hex")}` } } : formation;
     db.connection.transaction(() => {
-      insertFormation(db, evidenceObjectId, owner, retained);
+      insertFormation(db, evidenceObjectId, owner, formation);
       insertFactKeys(db, evidenceObjectId, owner, formation.searchProjections);
     })();
   } finally {
     db.close();
   }
+}
+
+function seedHistoricalIncompleteCapture(dbPath: string, evidenceObjectId: string): void {
+  const db = initDatabase({ filename: dbPath, temporalMode: "candidate" });
+  try {
+    const owner = db.connection.prepare("SELECT workspace_id, source_hash FROM evidence_capsules WHERE object_id = ?")
+      .get(evidenceObjectId) as { workspace_id: string; source_hash: string };
+    const body = { schema_version: 1 as const, operator_id: EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID,
+      status: "formed" as const, producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v2",
+      source_hash: owner.source_hash, fact_frame: { schema_version: 1 as const, slots: [
+        { role: "subject" as const, text: "I" }, { role: "relation" as const, text: "use" },
+        { role: "value" as const, text: "Atlas" }
+      ] } };
+    const capture = { ...body, capture_digest: `sha256:${createHash("sha256")
+      .update(evidenceFactFrameFormationCapturePreimage(body)).digest("hex")}` };
+    insertFormation(db, evidenceObjectId, owner, { capture, searchProjections: [] });
+  } finally { db.close(); }
 }
 
 function insertFormation(

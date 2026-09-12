@@ -14,7 +14,7 @@ import {
 } from "../../shared/fact-frame-grammar/source-text.js";
 
 export const RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID =
-  "rule_based_evidence_fact_frame_normalizer_v2";
+  "rule_based_evidence_fact_frame_normalizer_v3";
 
 export interface EvidenceFactFrameProposalNormalizer {
   readonly operator_id: string;
@@ -25,6 +25,7 @@ type SubjectSpan = Readonly<{
   readonly text: string;
   readonly nextIndex: number;
   readonly modalQualifier?: FactFrameSourceToken;
+  readonly prefix?: string;
 }>;
 
 export class RuleBasedEvidenceFactFrameNormalizer
@@ -38,15 +39,15 @@ implements EvidenceFactFrameProposalNormalizer {
     const assertion = sourceAssertion.trim();
     const tokens = tokenizeFactFrameSource(assertion);
     const subject = readInitialSubject(assertion, tokens);
-    if (subject === null) return undefined;
+    if (subject == null) return undefined;
     const predicate = readPredicate(tokens, subject.nextIndex, subject.modalQualifier);
-    if (!predicate.supported) return undefined;
+    if (!predicate.supported || 3 + predicate.qualifiers.length + (subject.prefix === undefined ? 0 : 1) >
+        ASSOCIATIVE_FACT_FRAME_SLOT_LIMIT) return undefined;
     const relation = tokens[predicate.relationIndex];
     const valueStart = predicate.relationIndex + 1;
     if (relation === undefined || valueStart >= tokens.length ||
         !isRelationToken(tokens, predicate.relationIndex)) return undefined;
-    if (valueStartsFiniteClause(tokens, valueStart) ||
-        valueContainsDelimitedClause(assertion, tokens, valueStart)) {
+    if (valueContainsFiniteClauseBoundary(assertion, tokens, valueStart)) {
       return undefined;
     }
     const value = sliceFactFrameTokens(assertion, tokens, valueStart, tokens.length);
@@ -58,6 +59,7 @@ implements EvidenceFactFrameProposalNormalizer {
       fact_frame: {
         schema_version: 1,
         slots: [
+          ...(subject.prefix === undefined ? [] : [slot("qualifier", subject.prefix)]),
           slot("subject", subject.text),
           ...predicate.qualifiers.map((token) => slot("qualifier", token.text)),
           slot("relation", relation.text),
@@ -68,25 +70,29 @@ implements EvidenceFactFrameProposalNormalizer {
   }
 }
 
-function valueStartsFiniteClause(
-  tokens: readonly FactFrameSourceToken[],
-  valueStart: number
-): boolean {
-  return AUXILIARIES.has(tokens[valueStart]?.normalized ?? "");
-}
-
-function valueContainsDelimitedClause(
+function valueContainsFiniteClauseBoundary(
   source: string,
   tokens: readonly FactFrameSourceToken[],
   valueStart: number
 ): boolean {
+  if (AUXILIARIES.has(tokens[valueStart]?.normalized ?? "")) return true;
   for (let index = valueStart + 1; index < tokens.length; index += 1) {
+    if (isInsideQuotation(source, tokens[index]!.start)) continue;
     const subject = readSubject(source, tokens, index);
-    if (subject === null || !readPredicate(tokens, subject.nextIndex, subject.modalQualifier).supported) continue;
+    if (subject === null) continue;
+    const predicate = readPredicate(tokens, subject.nextIndex, subject.modalQualifier);
+    const explicitFiniteHead = predicate.qualifiers.length > 0 ||
+      AUXILIARIES.has(tokens[subject.nextIndex]?.normalized ?? "");
+    if (!explicitFiniteHead && !isRelationToken(tokens, predicate.relationIndex)) continue;
     const previous = tokens[index - 1];
-    if (previous !== undefined && /[,;:!?]/u.test(
+    // "The user account" can be a coordinated object; an explicit predicate head
+    // such as "the user cannot ..." instead proves the supported finite clause.
+    const finiteSubject = subject.nextIndex === index + 1 || explicitFiniteHead;
+    const coordinatedClause = finiteSubject &&
+      (previous?.normalized === "and" || previous?.normalized === "but");
+    if (previous !== undefined && (coordinatedClause || /[,;:!?]/u.test(
       source.slice(previous.end, tokens[index]!.start)
-    )) return true;
+    ))) return true;
   }
   return false;
 }
@@ -96,34 +102,70 @@ Readonly<EvidenceFactFrameProposalNormalizer> = Object.freeze(
   new RuleBasedEvidenceFactFrameNormalizer()
 );
 
-/** Explicit proposals and retained captures cannot omit supported source modality. */
-export function factFramePreservesSourceModality(source: string, frame: Readonly<AssociativeFactFrame>): boolean {
+/** All formation paths retain the obligations recognized by the source grammar. */
+export function factFramePreservesSourceObligations(source: string, frame: Readonly<AssociativeFactFrame>): boolean {
   const assertion = source.trim();
   const tokens = tokenizeFactFrameSource(assertion);
-  const subject = readInitialSubject(assertion, tokens);
-  if (subject === null) {
-    return !tokens.some((token) => isModalQualifier(token) ||
-      /^(?:i|you|he|she|it|we|they)['\u2019](?:d|ll)$/u.test(token.normalized));
-  }
+  const located = readInitialSubject(assertion, tokens);
+  const subject = located === null ? readExplicitSubjectAnchor(assertion, tokens, frame) : located;
+  if (subject == null) return false;
   const predicate = readPredicate(tokens, subject.nextIndex, subject.modalQualifier);
-  if (!predicate.qualifiers.some(isModalQualifier)) return true;
-  const canonical = RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER.propose(assertion);
-  if (canonical === undefined) return false;
-  const qualifiers = (value: Readonly<AssociativeFactFrame>) =>
-    value.slots.filter((slot) => slot.role === "qualifier").map((slot) => slot.text);
-  const actual = qualifiers(frame);
+  if (valueContainsFiniteClauseBoundary(assertion, tokens, predicate.relationIndex + 1)) return false;
+  if (predicate.qualifiers.length > MAX_QUALIFIERS) return false;
+  const required = [...(subject.prefix === undefined ? [] : [subject.prefix]),
+    ...predicate.qualifiers.map((token) => token.text)];
+  const actual = frame.slots.filter((slot) => slot.role === "qualifier").map((slot) => slot.text);
   let cursor = 0;
-  return qualifiers(canonical.fact_frame).every((required) => {
-    const index = actual.indexOf(required, cursor);
+  return required.every((qualifier) => {
+    const index = actual.indexOf(qualifier, cursor);
     if (index < 0) return false;
     cursor = index + 1;
     return true;
   });
 }
 
-function readInitialSubject(source: string, tokens: readonly FactFrameSourceToken[]): SubjectSpan | null {
-  return readSubject(source, tokens, skipLeadingAdjunctSpan(tokens,
-    (index) => readSubject(source, tokens, index) !== null));
+/** Explicit frames can locate an existing source-start subject without teaching the normalizer new NPs. */
+function readExplicitSubjectAnchor(source: string, tokens: readonly FactFrameSourceToken[],
+  frame: Readonly<AssociativeFactFrame>): SubjectSpan | undefined {
+  const subject = frame.slots.find((slot) => slot.role === "subject");
+  if (subject === undefined || tokens[0]?.start !== 0 || !source.startsWith(subject.text)) return undefined;
+  const nextIndex = tokens.findIndex((token) => token.start >= subject.text.length);
+  if (nextIndex < 1 || tokens[nextIndex - 1]!.end > subject.text.length ||
+      tokens.slice(0, nextIndex).some((token) => isPredicateQualifier(token) ||
+        /^(?:i|you|he|she|it|we|they)['\u2019](?:d|ll)$/u.test(token.normalized))) return undefined;
+  return { text: subject.text, nextIndex };
+}
+
+/** null: unrecognized subject; undefined: located subject crosses an unsupported boundary. */
+function readInitialSubject(source: string, tokens: readonly FactFrameSourceToken[]): SubjectSpan | null | undefined {
+  // An unclosed quotation cannot hide the rest of the source from clause checks.
+  if (isInsideQuotation(source, source.length)) return undefined;
+  const start = skipLeadingAdjunctSpan(tokens, (index) => readSubject(source, tokens, index) !== null);
+  const subject = readSubject(source, tokens, start);
+  if (subject === null) return null;
+  if (isInsideQuotation(source, tokens[start]!.start)) return undefined;
+  const prefix = source.slice(0, tokens[start]!.start).trim();
+  if (prefix.length > MAX_SLOT_TEXT_LENGTH) return undefined;
+  return { ...subject, ...(prefix.length === 0 ? {} : { prefix }) };
+}
+
+function isInsideQuotation(source: string, offset: number): boolean {
+  let closing: string | undefined;
+  for (let index = 0; index < offset; index += 1) {
+    const character = source[index]!;
+    // Apostrophes inside words belong to contractions/possessives, not quotations.
+    if ((character === "'" || character === "’") &&
+        /[\p{L}\p{N}]/u.test(source[index - 1] ?? "") && /[\p{L}\p{N}]/u.test(source[index + 1] ?? "")) continue;
+    if (closing !== undefined) {
+      if (character === closing) closing = undefined;
+    } else if (character === "'" && /[\p{L}\p{N}]/u.test(source[index - 1] ?? "")) {
+      // A trailing apostrophe outside a quotation is a possessive, e.g. parents'.
+      continue;
+    } else if (character === '"' || character === "'") closing = character;
+    else if (character === "“") closing = "”";
+    else if (character === "‘") closing = "’";
+  }
+  return closing !== undefined;
 }
 
 function readSubject(
@@ -178,7 +220,7 @@ function readPredicate(
   let index = start;
   while (index < tokens.length) {
     const token = tokens[index]!;
-    if (isModalQualifier(token) || NEGATIVE_AUXILIARY_PATTERN.test(token.normalized)) {
+    if (isPredicateQualifier(token)) {
       qualifiers.push(token);
     } else if (AUXILIARIES.has(token.normalized) &&
         !isLexicalAuxiliaryRelation(tokens, index)) {
@@ -187,8 +229,6 @@ function readPredicate(
       }
       index += 1;
       continue;
-    } else if (PRE_RELATION_QUALIFIERS.has(token.normalized)) {
-      qualifiers.push(token);
     } else {
       break;
     }
@@ -201,6 +241,11 @@ function readPredicate(
 function isModalQualifier(token: FactFrameSourceToken): boolean {
   return MODALS.has(token.normalized) || NEGATIVE_MODAL_PATTERN.test(token.normalized) ||
     /^['\u2019]ll$/u.test(token.normalized);
+}
+
+function isPredicateQualifier(token: FactFrameSourceToken): boolean {
+  return isModalQualifier(token) || NEGATIVE_AUXILIARY_PATTERN.test(token.normalized) ||
+    PRE_RELATION_QUALIFIERS.has(token.normalized);
 }
 
 function isRelationToken(

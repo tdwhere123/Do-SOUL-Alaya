@@ -95,15 +95,17 @@ describe("evidence fact-frame formation", () => {
 
     expect(result.capture.status).toBe("formed");
     expect(result.capture.fact_frame?.slots).toEqual([
+      { role: "qualifier", text: "By the way," },
       { role: "subject", text: "I" },
       { role: "relation", text: "took" },
       { role: "value", text: "my niece to the Natural History Museum on 2/8" }
     ]);
     expect(result.searchProjections.map(({ content }) => content)).toEqual([
+      "By the way, I took my niece to the Natural History Museum on 2/8",
       "I took my niece to the Natural History Museum on 2/8",
-      "took my niece to the Natural History Museum on 2/8",
-      "I my niece to the Natural History Museum on 2/8",
-      "I took"
+      "By the way, took my niece to the Natural History Museum on 2/8",
+      "By the way, I my niece to the Natural History Museum on 2/8",
+      "By the way, I took"
     ]);
     expect(result.searchProjections.every(
       (projection) => projection.projection_kind === "fact_key"
@@ -129,7 +131,7 @@ describe("evidence fact-frame formation", () => {
     expect(normalized.capture).toMatchObject({ status: "unavailable", producer_operator_id: null });
     expect(injected.capture).toMatchObject({
       status: "formed",
-      producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v2"
+      producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v3"
     });
     expect(upstream.capture.producer_operator_id)
       .toBe("structured_formation_parser_v1");
