@@ -19,6 +19,8 @@ import { createGeminiBatchHttp } from "./batch/http.js";
 import { encodeGeminiGenerateContent, isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import { executeGeminiBatchOperation } from "./batch/executor.js";
 import { isBatchPlanAdmitted } from "./batch/store.js";
+import { assertExtractionFillComplete } from "./fill-completion.js";
+import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 
 interface BatchFillInput {
   readonly options: ExtractionFillOptions;
@@ -90,12 +92,17 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
   if (batch.operation === "import" || batch.operation === "resume") await importEmptyRequests(input, workset);
   input.writeLease.assertOwned();
   const completion = inspectFillWindow(input.cacheRoot, input.prepared.config, input.prepared.distinctExtractionTurns);
-  const unresolved = state.jobs.some((job) => job.lineKeys.some((key) => job.outcomes[key]?.status !== "admitted"));
+  let status: "complete" | "in_progress" = "complete";
+  try { assertExtractionFillComplete(completion); }
+  catch (cause) {
+    if (!(cause instanceof ExtractionCacheInvariantError)) throw cause;
+    status = "in_progress";
+  }
   const manifest = buildFillManifest({ config: input.prepared.config, variant: input.prepared.variant,
     existingManifest: readExtractionCacheManifestIdentity(input.cacheRoot)?.manifest,
     datasetRevision: input.prepared.datasetRevision, windowOffset: input.prepared.windowOffset,
     windowLimit: input.prepared.windowLimit, completion,
-    status: !unresolved && completion.missingTurns === 0 && completion.invalidTurns === 0 ? "complete" : "in_progress" });
+    status });
   writeExtractionCacheManifest(input.cacheRoot, manifest);
   return { requestedTurns: input.prepared.requestedTurns, cacheHits: workset.cachedRequests.length,
     newlyExtracted: 0, coverage: completion.coverage, manifest, batchState: state,

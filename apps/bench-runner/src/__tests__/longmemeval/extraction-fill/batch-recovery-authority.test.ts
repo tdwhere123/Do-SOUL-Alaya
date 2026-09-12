@@ -1,6 +1,9 @@
 import { join } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
+import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { preflightExtractionCache } from "../../../runs/compile-seed/compile-seed-preflight.js";
+import { inspectTurnContentKeySpace } from "../../../runs/extraction/turn-contents.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
   "../../../runs/extraction/authority/inspection.js";
@@ -204,6 +207,25 @@ it("reimporting an older quarantined window cannot settle a newer same-key retry
   expect(oldImport.authorityTelemetry?.unresolvedAttempts).toEqual(reserved);
   expect(oldImport.authorityTelemetry?.pendingKeys).toEqual([failed]);
   expect(oldImport.authorityTelemetry?.telemetry).toEqual(retry.authorityTelemetry?.telemetry);
+  provider.state = "SUCCEEDED";
+  provider.results = ["valid"];
+  const repaired = await run("resume", "repair");
+  expect(repaired.manifest.fill_status).toBe("complete");
+  const required = inspectTurnContentKeySpace([buildAuthorityQuestion("q0", "alpha0", "decoy0")]);
+  for (const operation of ["status", "import"] as const) {
+    const historical = await run(operation);
+    expect(historical.coverage).toBe(1);
+    expect(historical.manifest.fill_status).toBe("complete");
+    expect(historical.batchState!.jobs[0]!.outcomes[failed]?.status).toBe("quarantined");
+    expect(() => preflightExtractionCache({ cacheRoot,
+      config: { model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1",
+        providerUrl: "https://fixture-provider.invalid", apiKey: null },
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT, requireManifest: true,
+      requiredExtractionTurns: required.distinctExtractionTurns,
+      requiredTurnContents: required.distinctTurnContents,
+      requiredQuestionWindow: { offset: 0, limit: 1 }, liveExtractionPossible: false
+    })).not.toThrow();
+  }
 });
 
 it("restarts after ledger settlement before job outcome persistence without recounting usage", async () => {
