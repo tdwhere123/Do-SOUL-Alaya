@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT, OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, OfficialApiGardenProvider, resolveOfficialApiSystemPrompt } from "@do-soul/alaya-soul";
 import {
   createCachingSignalExtractor,
   createCompileSeedRunner,
@@ -47,6 +47,23 @@ describe("canonical extraction request cache identity", () => {
 
   afterEach(async () => {
     await rm(cacheRoot, { recursive: true, force: true });
+  });
+
+  it("keeps retained historical extraction identity distinct from current guidance", () => {
+    const retainedPrompt = resolveOfficialApiSystemPrompt(
+      "bf255feebdf99106871e33241f7bba3260e3f02874f0eefe36db803cc95d7705"
+    );
+    expect(retainedPrompt).toBeDefined();
+    const input = { turnContent: "I prefer jasmine tea." };
+    const retainedKeys = computeSourceTurnCacheKeys(
+      "test-model", "provider-default-v1", retainedPrompt!, input
+    );
+    const currentKeys = computeSourceTurnCacheKeys(
+      "test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, input
+    );
+    expect(retainedKeys).toHaveLength(1);
+    expect(currentKeys).toHaveLength(1);
+    expect(currentKeys[0]).not.toBe(retainedKeys[0]);
   });
 
   it("derives one raw cache key for each bounded assertion batch", () => {
