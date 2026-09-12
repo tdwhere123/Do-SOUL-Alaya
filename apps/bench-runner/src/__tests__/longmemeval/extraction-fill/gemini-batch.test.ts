@@ -109,12 +109,12 @@ describe("durable Gemini Batch HTTP extraction", () => {
     writeFileSync(path, JSON.stringify(state));
   }
 
-  it("uploads the same normalized source schema body used by interactive extraction", async () => {
+  it.each(["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"] as const)("uploads the same %s normalized source schema body used by interactive extraction", async (requestProfile) => {
     const source = "I collect vintage postcards.";
     const userPrompt = stringifyOfficialApiExtractionRequest(
       buildOfficialApiExtractionRequest(source, [{ role: "user", content: source }])
     );
-    const base = plan();
+    const base = { ...plan(), model: "gemini-3.1-flash-lite", requestProfile };
     const line = { ...base.lines[0]!, userPrompt, requestSha256: batchDigest(userPrompt) };
     const sourcePlan = { ...base, lines: [line] };
     await run("prepare", { plan: sourcePlan });
@@ -130,6 +130,14 @@ describe("durable Gemini Batch HTTP extraction", () => {
       .extract({ systemPrompt: line.systemPrompt, userPrompt, retryMode: "disabled",
         maxOutputTokens: base.limits.maxOutputTokens, outputTokenField: "maxOutputTokens" });
     expect(JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string)).toEqual(batchBody);
+    metadataOverride = { model: "models/gemini-3.1-flash-lite" };
+    state = "BATCH_STATE_SUCCEEDED";
+    output = result(line.key);
+    const imported = await run("resume", { plan: sourcePlan });
+    expect(imported.jobs[0]?.usage).toEqual({ inputTokens: 10, outputTokens: 7, totalTokens: 17 });
+    expect(accountedCost(imported.jobs[0]!, { plan: sourcePlan })).toBeCloseTo(
+      (10 * sourcePlan.limits.inputUsdPerMillion + 7 * sourcePlan.limits.outputUsdPerMillion) / 1_000_000
+    );
   });
 
   it("uploads exact files, creates once, resumes and admits shuffled results idempotently", async () => {

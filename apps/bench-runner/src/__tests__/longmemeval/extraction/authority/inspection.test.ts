@@ -21,6 +21,24 @@ const writeFixtureDataset = registerExtractionFillHooks((roots) => {
 });
 
 describe("no-network extraction authority inspection", () => {
+  it("binds distinct minimal and low request inventories without a provider call", async () => {
+    await writeFixtureDataset([buildExtractionFillQuestion("q001", "User: alpha", "User: beta")]);
+    vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gemini-3.1-flash-lite");
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const observed: string[][] = [];
+    for (const profile of ["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"] as const) {
+      vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", profile);
+      const inspection = await inspectExtractionAuthority({ variant: EXTRACTION_FILL_VARIANT,
+        cacheRoot, dataDir, pinnedMetaRoot, revision: "a".repeat(40), action: "fill" });
+      expect(inspection.observation.extraction.requestProfile).toBe(profile);
+      observed.push([...inspection.missingKeys]);
+    }
+    expect(observed[0]).toHaveLength(2);
+    expect(observed[1]).toHaveLength(2);
+    expect(observed[0]!.filter((key) => observed[1]!.includes(key))).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("binds a receipt revision to tracked and untracked worktree content", () => {
     const input = {
       head: "a".repeat(40),

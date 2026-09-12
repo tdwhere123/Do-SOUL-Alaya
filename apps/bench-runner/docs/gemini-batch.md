@@ -17,6 +17,11 @@ Official text prices checked on 2026-09-12, in USD per million tokens:
 
 The 2.5 profile sends `thinkingBudget: 0`; the 3.1 profile sends
 `thinkingLevel: "minimal"`, which does not guarantee that thinking is disabled.
+The optional `gemini-3.1-low-v1` profile selects `thinkingLevel: "low"` on the
+same model; minimal remains the default. These profiles have distinct cache
+identities and require matching extraction authority. Switching profiles does
+not relabel existing raw results. The [Gemini 3 guide](https://ai.google.dev/gemini-api/docs/gemini-3)
+lists both levels; neither is a fixed thinking-token allowance.
 Output charges and `maxOutputTokens` include thinking tokens. Both supported
 Flash-Lite models allow at most 65,536 output tokens. Prices are planning
 observations, not a frozen execution price or quality claim. See official

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import {
   findProviderBinding,
+  supportsProviderRequestProfile,
   resolveVendorModel
 } from "../provider/catalog.js";
 
@@ -32,9 +33,9 @@ export function assertRequiredRequestProfile(
 ): void {
   const vendor = resolveVendorModel(config.transportModel ?? config.model);
   const binding = findProviderBinding(vendor);
-  if (binding !== undefined && config.requestProfile !== binding.requestProfile) {
+  if (binding !== undefined && !supportsProviderRequestProfile(vendor, config.requestProfile)) {
     throw new Error(
-      `model ${binding.id} requires request profile ${binding.requestProfile}`
+      `model ${binding.id} requires request profile ${binding.supportedRequestProfiles.join(" or ")}`
     );
   }
 }

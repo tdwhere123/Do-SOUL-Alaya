@@ -1,5 +1,5 @@
 import { isNativeGeminiRequestProfile, type NativeGeminiRequestProfile } from "../../request-profile.js";
-import { findProviderBinding } from "../../../provider/catalog.js";
+import { findProviderBinding, supportsProviderRequestProfile } from "../../../provider/catalog.js";
 import { officialApiExtractionResponseSchema } from "@do-soul/alaya-soul";
 
 export interface GeminiGenerateContentSettings {
@@ -14,7 +14,8 @@ export function isGeminiGenerateContentProfile(value: unknown): value is GeminiG
 
 const THINKING_CONFIG: Record<NativeGeminiRequestProfile, object> = {
   "gemini-2.5-nonthinking-v1": { thinkingBudget: 0 },
-  "gemini-3.1-minimal-v1": { thinkingLevel: "minimal" }
+  "gemini-3.1-minimal-v1": { thinkingLevel: "minimal" },
+  "gemini-3.1-low-v1": { thinkingLevel: "low" }
 };
 
 export function encodeGeminiGenerateContent(
@@ -109,7 +110,7 @@ export function assertGeminiGenerateContentSettings(settings: GeminiGenerateCont
   if (!/^gemini-[a-zA-Z0-9._-]+$/u.test(settings.model) ||
       !isGeminiGenerateContentProfile(settings.requestProfile) ||
       (isNativeGeminiRequestProfile(settings.requestProfile) &&
-        findProviderBinding(settings.model)?.requestProfile !== settings.requestProfile) ||
+        !supportsProviderRequestProfile(settings.model, settings.requestProfile)) ||
       !Number.isSafeInteger(settings.maxOutputTokens) || settings.maxOutputTokens <= 0 ||
       (findProviderBinding(settings.model) !== undefined &&
         settings.maxOutputTokens > 65_536)) {

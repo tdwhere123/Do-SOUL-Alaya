@@ -12,6 +12,13 @@ import { assertRequiredRequestProfile } from
 const MIMO = requireProviderBinding("mimo-v2.5");
 
 describe("provider catalog", () => {
+  it("keeps minimal default while accepting low only for the same Flash-Lite 3.1 model", () => {
+    expect(requireProviderBinding("gemini-3.1-flash-lite").requestProfile).toBe("gemini-3.1-minimal-v1");
+    for (const requestProfile of ["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"] as const) {
+      expect(() => assertRequiredRequestProfile({ model: "gemini-3.1-flash-lite", requestProfile })).not.toThrow();
+      expect(() => assertRequiredRequestProfile({ model: "gemini-2.5-flash-lite", requestProfile })).toThrow();
+    }
+  });
   it("remaps vendor aliases through the binding table", () => {
     expect(resolveVendorModel("Mimo-V2.5")).toBe(MIMO.id);
     expect(resolveVendorModel("mimo-v2-flash")).toBe(MIMO.id);
