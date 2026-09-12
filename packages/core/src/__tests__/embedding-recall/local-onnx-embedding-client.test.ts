@@ -242,7 +242,7 @@ describe("LocalOnnxEmbeddingClient", () => {
     }
   });
 
-  it.skipIf(process.platform === "win32")("retains the host inference lock until a timed-out extractor actually settles", async () => {
+  it.skipIf(process.platform !== "linux")("retains the host inference lock until a timed-out extractor actually settles", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "alaya-embedding-timeout-"));
     const previousEnabled = process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT;
     const previousLockPath = process.env.ALAYA_LOCAL_ONNX_LOCK_PATH;
