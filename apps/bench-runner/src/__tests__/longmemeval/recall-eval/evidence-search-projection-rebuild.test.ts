@@ -1,4 +1,6 @@
 import { copyFile, readFile, symlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { evidenceFactFrameFormationCapturePreimage } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { materializeEvidenceFactFrameFormation } from "@do-soul/alaya-core";
 import {
@@ -357,6 +359,23 @@ describe("receipt-v2 evidence search projection rebuild", () => {
       ]);
   });
 
+  it("rejects a historical modal-free capture and rolls back the working-copy rebuild", async () => {
+    const fixture = await createSourceFixture([{
+      signalId: "signal-historical-modal",
+      evidenceId: "30000000-0000-4000-8000-000000000005",
+      messages: [message("u1", "user", "I can use Atlas.")]
+    }]);
+    const workingDbPath = join(fixture.root, "historical-modal.db");
+    await copyFile(fixture.sourceDbPath, workingDbPath);
+    await rebuildEvidenceSearchProjectionsOnWorkingCopy({ workingDbPath });
+    seedFormedCapture(workingDbPath, fixture.evidenceIds[0]!, true);
+    const before = readProjectionRows(workingDbPath);
+    await expect(rebuildEvidenceSearchProjectionsOnWorkingCopy({ workingDbPath }))
+      .rejects.toMatchObject({ name: "EvidenceSearchProjectionRebuildError",
+        report: expect.objectContaining({ rejected_owner_count: 1 }) });
+    expect(readProjectionRows(workingDbPath)).toEqual(before);
+  });
+
   it("rejects a restore target that aliases the source snapshot", async () => {
     const fixture = await createSourceFixture([{
       signalId: "signal-alias",
@@ -407,7 +426,7 @@ describe("receipt-v2 evidence search projection rebuild", () => {
   });
 });
 
-function seedFormedCapture(dbPath: string, evidenceObjectId: string): void {
+function seedFormedCapture(dbPath: string, evidenceObjectId: string, historicalModal = false): void {
   const db = initDatabase({ filename: dbPath, temporalMode: "candidate" });
   try {
     const owner = db.connection.prepare(`
@@ -429,14 +448,23 @@ function seedFormedCapture(dbPath: string, evidenceObjectId: string): void {
           schema_version: 1,
           slots: [
             { role: "subject", text: "I" },
+            ...(historicalModal ? [{ role: "qualifier" as const, text: "can" }] : []),
             { role: "relation", text: "use" },
             { role: "value", text: "Atlas" }
           ]
         }
       }
     });
+    const { capture_digest: _digest, ...body } = formation.capture;
+    const historicalBody = { ...body,
+      producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v1",
+      fact_frame: { ...formation.capture.fact_frame!, slots: formation.capture.fact_frame!.slots
+        .filter((slot) => slot.role !== "qualifier") } };
+    const retained = historicalModal ? { ...formation, capture: { ...historicalBody,
+      capture_digest: `sha256:${createHash("sha256")
+        .update(evidenceFactFrameFormationCapturePreimage(historicalBody)).digest("hex")}` } } : formation;
     db.connection.transaction(() => {
-      insertFormation(db, evidenceObjectId, owner, formation);
+      insertFormation(db, evidenceObjectId, owner, retained);
       insertFactKeys(db, evidenceObjectId, owner, formation.searchProjections);
     })();
   } finally {

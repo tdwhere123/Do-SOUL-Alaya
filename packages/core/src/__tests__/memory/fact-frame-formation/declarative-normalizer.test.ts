@@ -8,6 +8,39 @@ import {
 const normalizer = new RuleBasedEvidenceFactFrameNormalizer();
 
 describe("RuleBasedEvidenceFactFrameNormalizer", () => {
+  it.each(["can", "cannot", "could", "may", "might", "must", "shall", "should", "will", "would",
+    "can't", "can’t", "won't", "wouldn’t"])("preserves %s as a source-exact obligation instead of an asserted action", (modal) => {
+    const source = `I ${modal} finish the report.`;
+    const proposal = normalizer.propose(source);
+    expect(proposal?.fact_frame.slots).toEqual([
+      { role: "subject", text: "I" }, { role: "qualifier", text: modal },
+      { role: "relation", text: "finish" }, { role: "value", text: "the report" }
+    ]);
+    expect(groundAssociativeFactFrame(proposal?.fact_frame, source)).toEqual(proposal?.fact_frame);
+  });
+
+  it.each(["'", "’"])("preserves the source-exact %sll suffix and refuses ambiguous %sd", (apostrophe) => {
+    const source = `I${apostrophe}ll finish the report.`;
+    const proposal = normalizer.propose(source);
+    expect(proposal?.fact_frame.slots).toEqual([
+      { role: "subject", text: "I" }, { role: "qualifier", text: `${apostrophe}ll` },
+      { role: "relation", text: "finish" }, { role: "value", text: "the report" }
+    ]);
+    expect(groundAssociativeFactFrame(proposal?.fact_frame, source)).toEqual(proposal?.fact_frame);
+    expect(normalizer.propose(`I${apostrophe}d finish the report.`)).toBeUndefined();
+    expect(normalizer.propose(`I${apostrophe}d finished the report.`)).toBeUndefined();
+  });
+
+  it("keeps modal negation and fails closed instead of dropping overflowing qualifiers", () => {
+    expect(normalizer.propose("I can not finish the report.")?.fact_frame.slots).toEqual([
+      { role: "subject", text: "I" }, { role: "qualifier", text: "can" },
+      { role: "qualifier", text: "not" }, { role: "relation", text: "finish" },
+      { role: "value", text: "the report" }
+    ]);
+    expect(normalizer.propose("I can not currently finish the report.")).toBeUndefined();
+    expect(normalizer.propose("I'll not currently finish the report.")).toBeUndefined();
+  });
+
   it("forms a source-exact first-person declarative frame", () => {
     const assertion = "I bought a bookshelf from Target.";
     const proposal = normalizer.propose(assertion);

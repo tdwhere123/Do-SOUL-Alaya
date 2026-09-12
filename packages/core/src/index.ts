@@ -66,7 +66,12 @@ export * from "./memory/object-keys/write-service.js";
 export * from "./memory/object-keys/retrofit/retrofit.js";
 export * from "./semantic/open-semantic-factor-formation.js";
 export * from "./semantic/open-semantic-factor-extraction-port.js";
-export * from "./memory/fact-frame-formation/declarative-normalizer.js";
+export {
+  RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID,
+  RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
+  RuleBasedEvidenceFactFrameNormalizer,
+  type EvidenceFactFrameProposalNormalizer
+} from "./memory/fact-frame-formation/declarative-normalizer.js";
 export * from "./tooling/extension-registry-service.js";
 export * from "./shared/file-path.js";
 export * from "./recall/runtime/global-memory-recall-port.js";

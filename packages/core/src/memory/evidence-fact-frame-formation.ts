@@ -13,7 +13,7 @@ import {
   type EvidenceFactFrameFormationStatus,
   type EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
-import type { EvidenceFactFrameProposalNormalizer } from
+import { factFramePreservesSourceModality, type EvidenceFactFrameProposalNormalizer } from
   "./fact-frame-formation/declarative-normalizer.js";
 
 export type MaterializedEvidenceFactFrameFormation = Readonly<{
@@ -52,7 +52,7 @@ export function materializeEvidenceFactFrameFormation(params: Readonly<{
     return emptyFormation("rejected", sourceHash, normalized.expectedProducer);
   }
   const frame = groundAssociativeFactFrame(parsed.data.fact_frame, assertion);
-  if (frame === null) {
+  if (frame === null || !factFramePreservesSourceModality(assertion, frame)) {
     return emptyFormation("rejected", sourceHash, parsed.data.producer_operator_id);
   }
   const capture = createCapture({
@@ -122,7 +122,8 @@ export function replayEvidenceFactFrameFormationCapture(params: Readonly<{
   }
   const assertion = normalizeText(params.sourceAssertion);
   if (assertion === null || sourceHash === null ||
-      groundAssociativeFactFrame(capture.fact_frame, assertion) === null) {
+      groundAssociativeFactFrame(capture.fact_frame, assertion) === null ||
+      !factFramePreservesSourceModality(assertion, capture.fact_frame)) {
     throw new Error("formed fact-frame capture is not grounded in its evidence assertion");
   }
   return Object.freeze({
