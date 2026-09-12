@@ -15,6 +15,8 @@ import { decodeGeminiGenerateContent, encodeGeminiGenerateContent } from
 import type { GeminiBatchInvocation, GeminiBatchPlan } from
   "../../../runs/extraction/fill/batch/contract.js";
 import * as batchStore from "../../../runs/extraction/fill/batch/store.js";
+import { buildOfficialApiExtractionRequest, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
+import { createGardenHttpExtractor } from "../../../runs/compile-seed/compile-seed-http.js";
 
 describe("durable Gemini Batch HTTP extraction", () => {
   let root: string;
@@ -106,6 +108,28 @@ describe("durable Gemini Batch HTTP extraction", () => {
     change(state.jobs[0]);
     writeFileSync(path, JSON.stringify(state));
   }
+
+  it("uploads the same normalized source schema body used by interactive extraction", async () => {
+    const source = "I collect vintage postcards.";
+    const userPrompt = stringifyOfficialApiExtractionRequest(
+      buildOfficialApiExtractionRequest(source, [{ role: "user", content: source }])
+    );
+    const base = plan();
+    const line = { ...base.lines[0]!, userPrompt, requestSha256: batchDigest(userPrompt) };
+    const sourcePlan = { ...base, lines: [line] };
+    await run("prepare", { plan: sourcePlan });
+    await run("submit", { plan: sourcePlan });
+    const batchBody = JSON.parse(uploads[0]!.trim()).request;
+    expect(batchBody.generationConfig.responseJsonSchema.properties.signals.items.additionalProperties).toBe(true);
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ candidates: [{
+      finishReason: "STOP", content: { parts: [{ text: '{"signals":[]}' }] }
+    }] }));
+    await createGardenHttpExtractor({ model: base.model, requestProfile: base.requestProfile,
+      providerUrl: "https://synthetic.invalid", apiKey: "synthetic-key" }, { fetch: fetchImpl })
+      .extract({ systemPrompt: line.systemPrompt, userPrompt, retryMode: "disabled",
+        maxOutputTokens: base.limits.maxOutputTokens, outputTokenField: "maxOutputTokens" });
+    expect(JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string)).toEqual(batchBody);
+  });
 
   it("uploads exact files, creates once, resumes and admits shuffled results idempotently", async () => {
     await run("prepare");
