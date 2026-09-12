@@ -10,6 +10,7 @@ import { buildOfficialApiExtractionRequest, stringifyOfficialApiExtractionReques
 import * as soul from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 import { OpenSemanticFactorGraphProposalSchema } from "@do-soul/alaya-protocol";
+import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
 
 const config: CompileSeedExtractionConfig = {
   model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1",
@@ -45,6 +46,37 @@ async function withServer(
 }
 
 describe("native Gemini interactive extraction", () => {
+  it("changes only thinking level on the actual wire and keeps minimal and low cache identities distinct", async () => {
+    const wires: unknown[] = [];
+    await withServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        expect(req.url).toBe("/v1beta/models/gemini-3.1-flash-lite:generateContent");
+        wires.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ candidates: [{ finishReason: "STOP",
+          content: { parts: [{ thought: true, text: "private synthetic thought" }, { text: '{"signals":[]}' }] } }],
+          usageMetadata: usage }));
+      });
+    }, async (origin) => {
+      for (const requestProfile of ["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"] as const) {
+        const result = await createGardenHttpExtractor({ ...config, model: "gemini-3.1-flash-lite",
+          providerUrl: origin, requestProfile }).extract(input);
+        expect(result.rawJson).toBe('{"signals":[]}');
+        expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 23, totalTokens: 33 });
+      }
+    });
+    expect(wires).toEqual(["minimal", "low"].map((thinkingLevel) => ({
+      systemInstruction: { parts: [{ text: input.systemPrompt }] },
+      contents: [{ role: "user", parts: [{ text: input.userPrompt }] }],
+      generationConfig: { responseMimeType: "application/json", maxOutputTokens: input.maxOutputTokens,
+        thinkingConfig: { thinkingLevel } }
+    })));
+    expect(computeCacheKey("gemini-3.1-flash-lite", "gemini-3.1-low-v1", input.systemPrompt, input.userPrompt))
+      .not.toBe(computeCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1", input.systemPrompt, input.userPrompt));
+  });
+
   it("sends a source-only response schema across the native HTTP boundary", async () => {
     const source = "I collect vintage postcards.";
     const userPrompt = stringifyOfficialApiExtractionRequest(

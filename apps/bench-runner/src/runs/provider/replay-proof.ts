@@ -12,6 +12,7 @@ import {
 } from "../extraction/request-profile.js";
 import {
   findProviderBinding,
+  supportsProviderRequestProfile,
   isObsoleteRequestProfile,
   resolveVendorModel
 } from "./catalog.js";
@@ -38,9 +39,9 @@ export async function proveProviderZeroCallReplay(input: {
   }
   const binding = findProviderBinding(input.request.model);
   if (binding !== undefined) {
-    if (input.request.requestProfile !== binding.requestProfile) {
+    if (!supportsProviderRequestProfile(input.request.model, input.request.requestProfile)) {
       throw new Error(
-        `provider replay requires request profile ${binding.requestProfile} for ${binding.id}`
+        `provider replay requires request profile ${binding.supportedRequestProfiles.join(" or ")} for ${binding.id}`
       );
     }
     if (resolveVendorModel(input.request.model) !== binding.id) {

@@ -3,7 +3,9 @@ import type { ExtractionRequestProfile } from "../extraction/request-profile.js"
 export interface ProviderBinding {
   readonly id: string;
   readonly aliases: readonly string[];
+  /** Default for model-only protocol probes; explicit extraction uses the supported set. */
   readonly requestProfile: ExtractionRequestProfile;
+  readonly supportedRequestProfiles: readonly ExtractionRequestProfile[];
   readonly probeCallCeiling: number;
 }
 
@@ -16,24 +18,28 @@ export const PROVIDER_BINDINGS: readonly ProviderBinding[] = [
     id: "gemini-3.1-flash-lite",
     aliases: [],
     requestProfile: "gemini-3.1-minimal-v1",
+    supportedRequestProfiles: ["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"],
     probeCallCeiling: 2
   },
   {
     id: "gemini-2.5-flash-lite",
     aliases: [],
     requestProfile: "gemini-2.5-nonthinking-v1",
+    supportedRequestProfiles: ["gemini-2.5-nonthinking-v1"],
     probeCallCeiling: 2
   },
   {
     id: "gemini-2.5-flash",
     aliases: [],
     requestProfile: "gemini-2.5-nonthinking-v1",
+    supportedRequestProfiles: ["gemini-2.5-nonthinking-v1"],
     probeCallCeiling: 2
   },
   {
     id: "mimo-v2.5",
     aliases: ["Mimo-V2.5", "mimo-v2-flash"],
     requestProfile: "mimo-v2.5-nonthinking-v1",
+    supportedRequestProfiles: ["mimo-v2.5-nonthinking-v1"],
     probeCallCeiling: 3
   }
 ];
@@ -65,6 +71,10 @@ export function requireProviderBinding(model: string): ProviderBinding {
     throw new Error(`no provider binding registered for model ${model}`);
   }
   return binding;
+}
+
+export function supportsProviderRequestProfile(model: string, profile: string): boolean {
+  return findProviderBinding(model)?.supportedRequestProfiles.some((supported) => supported === profile) ?? false;
 }
 
 export function isObsoleteRequestProfile(
