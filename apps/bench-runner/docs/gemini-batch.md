@@ -243,11 +243,14 @@ required proposal schema can invalidate reuse; retain old raw responses for
 inspection, but do not label them compatible or silently reinterpret a sealed
 manifest. Run a bounded subset first when those contracts may still change.
 
-The fact-frame normalizer v2 preserves supported source modal qualifiers.
+The fact-frame normalizer v3 preserves supported leading source prefixes and
+predicate qualifiers, including modality and negation. It refuses a matrix
+subject located inside quoted text and supported finite-clause coordination
+that a single frame cannot represent. Ordinary quoted values remain eligible.
 Its operator identity changes the extraction replay formation digest, without
 changing raw extraction shard keys. Re-form derived generations from compatible
 raw extraction before using this behavior. A historical capture that omitted a
-required modal fails Core replay; the existing projection rebuild reports the
+required source obligation fails Core replay; the existing projection rebuild reports the
 invalid owner and rolls back the entire working-copy transaction. It does not
 silently repair that capture or continue with partial projections.
 Existing SQLite certificates are not retrospectively revoked: Storage verifies

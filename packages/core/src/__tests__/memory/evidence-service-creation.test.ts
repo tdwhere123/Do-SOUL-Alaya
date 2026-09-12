@@ -130,7 +130,7 @@ describe("EvidenceService creation", () => {
     ]));
     expect(assertion.create.mock.calls[0]?.[2]).toMatchObject({
       status: "formed",
-      producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v2"
+      producer_operator_id: "rule_based_evidence_fact_frame_normalizer_v3"
     });
   });
 

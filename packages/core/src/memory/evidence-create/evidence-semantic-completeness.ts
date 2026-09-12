@@ -16,7 +16,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { materializeOpenSemanticFactorFormation } from
   "../../semantic/open-semantic-factor-formation.js";
-import { factFramePreservesSourceModality } from "../fact-frame-formation/declarative-normalizer.js";
+import { factFramePreservesSourceObligations } from "../fact-frame-formation/declarative-normalizer.js";
 
 export { EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID } from
   "@do-soul/alaya-protocol";
@@ -193,7 +193,7 @@ function buildObligation(
 ): EvidenceObligation | null {
   const slots = capture.fact_frame?.slots;
   if (slots === null || slots === undefined) return null;
-  if (!factFramePreservesSourceModality(source, capture.fact_frame!)) return null;
+  if (!factFramePreservesSourceObligations(source, capture.fact_frame!)) return null;
   const grounded = groundSlots(source, slots);
   if (grounded === null) return null;
   const subject = onlyRole(grounded, "subject");
