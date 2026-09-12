@@ -327,17 +327,35 @@ describe("LocalOnnxEmbeddingClient", () => {
     process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
     process.env.ALAYA_LOCAL_ONNX_LOCK_PATH = path.join(root, "inference.lock");
     let finishLoad: (extractor: LocalOnnxFeatureExtractor) => void = () => undefined;
+    let markLoadStarted: () => void = () => undefined;
+    const loadStarted = new Promise<void>((resolve) => {
+      markLoadStarted = resolve;
+    });
     const extractor = vi.fn(stubExtractor([[dimRow(2)]]).extractor);
     const client = new LocalOnnxEmbeddingClient({
-      pipelineLoader: () => new Promise((resolve) => { finishLoad = resolve; })
+      pipelineLoader: () => {
+        markLoadStarted();
+        return new Promise((resolve) => {
+          finishLoad = resolve;
+        });
+      }
     });
     const secondLoader = vi.fn(async () => stubExtractor([[dimRow(3)]]).extractor);
     const second = new LocalOnnxEmbeddingClient({ pipelineLoader: secondLoader });
     let waiting: Promise<readonly Float32Array[]> | null = null;
     try {
-      await expect(client.embedTexts(["loading"], { timeoutMs: 15 })).rejects.toThrow(/timed out/);
-      waiting = second.embedTexts(["next"], { timeoutMs: 1_000 });
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      // Windows SQLite lock acquire often exceeds a 15ms entry deadline, so
+      // abort only after the loader has started and the host lock is held.
+      const controller = new AbortController();
+      const pending = client.embedTexts(["loading"], {
+        timeoutMs: 30_000,
+        signal: controller.signal
+      });
+      await loadStarted;
+      controller.abort(new Error("Local ONNX embedding timed out after 15 ms."));
+      await expect(pending).rejects.toThrow(/timed out/);
+      waiting = second.embedTexts(["next"], { timeoutMs: 5_000 });
+      await new Promise((resolve) => setTimeout(resolve, 50));
       expect(secondLoader).not.toHaveBeenCalled();
       finishLoad(extractor);
       await expect(waiting).resolves.toHaveLength(1);
