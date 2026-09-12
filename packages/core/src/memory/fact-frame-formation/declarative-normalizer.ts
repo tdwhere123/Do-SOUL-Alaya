@@ -1,5 +1,7 @@
 import {
   EvidenceFactFrameFormationProposalSchema,
+  ASSOCIATIVE_FACT_FRAME_SLOT_LIMIT,
+  type AssociativeFactFrame,
   type AssociativeFactSlot,
   type EvidenceFactFrameFormationProposal
 } from "@do-soul/alaya-protocol";
@@ -12,7 +14,7 @@ import {
 } from "../../shared/fact-frame-grammar/source-text.js";
 
 export const RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID =
-  "rule_based_evidence_fact_frame_normalizer_v1";
+  "rule_based_evidence_fact_frame_normalizer_v2";
 
 export interface EvidenceFactFrameProposalNormalizer {
   readonly operator_id: string;
@@ -22,6 +24,7 @@ export interface EvidenceFactFrameProposalNormalizer {
 type SubjectSpan = Readonly<{
   readonly text: string;
   readonly nextIndex: number;
+  readonly modalQualifier?: FactFrameSourceToken;
 }>;
 
 export class RuleBasedEvidenceFactFrameNormalizer
@@ -34,14 +37,10 @@ implements EvidenceFactFrameProposalNormalizer {
   ): Readonly<EvidenceFactFrameFormationProposal> | undefined {
     const assertion = sourceAssertion.trim();
     const tokens = tokenizeFactFrameSource(assertion);
-    const subjectStart = skipLeadingAdjunctSpan(
-      tokens,
-      (index) => readSubject(assertion, tokens, index) !== null
-    );
-    const subject = readSubject(assertion, tokens, subjectStart);
+    const subject = readInitialSubject(assertion, tokens);
     if (subject === null) return undefined;
-    const predicate = readPredicate(tokens, subject.nextIndex);
-    if (predicate === null) return undefined;
+    const predicate = readPredicate(tokens, subject.nextIndex, subject.modalQualifier);
+    if (!predicate.supported) return undefined;
     const relation = tokens[predicate.relationIndex];
     const valueStart = predicate.relationIndex + 1;
     if (relation === undefined || valueStart >= tokens.length ||
@@ -83,7 +82,7 @@ function valueContainsDelimitedClause(
 ): boolean {
   for (let index = valueStart + 1; index < tokens.length; index += 1) {
     const subject = readSubject(source, tokens, index);
-    if (subject === null || readPredicate(tokens, subject.nextIndex) === null) continue;
+    if (subject === null || !readPredicate(tokens, subject.nextIndex, subject.modalQualifier).supported) continue;
     const previous = tokens[index - 1];
     if (previous !== undefined && /[,;:!?]/u.test(
       source.slice(previous.end, tokens[index]!.start)
@@ -96,6 +95,36 @@ export const RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER:
 Readonly<EvidenceFactFrameProposalNormalizer> = Object.freeze(
   new RuleBasedEvidenceFactFrameNormalizer()
 );
+
+/** Explicit proposals and retained captures cannot omit supported source modality. */
+export function factFramePreservesSourceModality(source: string, frame: Readonly<AssociativeFactFrame>): boolean {
+  const assertion = source.trim();
+  const tokens = tokenizeFactFrameSource(assertion);
+  const subject = readInitialSubject(assertion, tokens);
+  if (subject === null) {
+    return !tokens.some((token) => isModalQualifier(token) ||
+      /^(?:i|you|he|she|it|we|they)['\u2019](?:d|ll)$/u.test(token.normalized));
+  }
+  const predicate = readPredicate(tokens, subject.nextIndex, subject.modalQualifier);
+  if (!predicate.qualifiers.some(isModalQualifier)) return true;
+  const canonical = RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER.propose(assertion);
+  if (canonical === undefined) return false;
+  const qualifiers = (value: Readonly<AssociativeFactFrame>) =>
+    value.slots.filter((slot) => slot.role === "qualifier").map((slot) => slot.text);
+  const actual = qualifiers(frame);
+  let cursor = 0;
+  return qualifiers(canonical.fact_frame).every((required) => {
+    const index = actual.indexOf(required, cursor);
+    if (index < 0) return false;
+    cursor = index + 1;
+    return true;
+  });
+}
+
+function readInitialSubject(source: string, tokens: readonly FactFrameSourceToken[]): SubjectSpan | null {
+  return readSubject(source, tokens, skipLeadingAdjunctSpan(tokens,
+    (index) => readSubject(source, tokens, index) !== null));
+}
 
 function readSubject(
   source: string,
@@ -128,26 +157,34 @@ function contractedPronounSubject(
   const suffix = token.normalized.slice(apostropheIndex + 1);
   return SUBJECT_PRONOUNS.has(subject.toLowerCase()) &&
     SUBJECT_AUXILIARY_CONTRACTIONS.has(suffix)
-    ? Object.freeze({ text: subject, nextIndex: start + 1 })
+    ? Object.freeze({ text: subject, nextIndex: start + 1,
+      ...(suffix === "ll" ? { modalQualifier: Object.freeze({
+        text: token.text.slice(apostropheIndex), normalized: token.normalized.slice(apostropheIndex),
+        start: token.start + apostropheIndex, end: token.end
+      }) } : {}) })
     : null;
 }
 
 function readPredicate(
   tokens: readonly FactFrameSourceToken[],
-  start: number
+  start: number,
+  contractedModal?: FactFrameSourceToken
 ): Readonly<{
   readonly qualifiers: readonly FactFrameSourceToken[];
   readonly relationIndex: number;
-}> | null {
-  const qualifiers: FactFrameSourceToken[] = [];
+  readonly supported: boolean;
+}> {
+  const qualifiers: FactFrameSourceToken[] = contractedModal === undefined ? [] : [contractedModal];
   let index = start;
   while (index < tokens.length) {
     const token = tokens[index]!;
-    if (NEGATIVE_AUXILIARY_PATTERN.test(token.normalized)) {
+    if (isModalQualifier(token) || NEGATIVE_AUXILIARY_PATTERN.test(token.normalized)) {
       qualifiers.push(token);
     } else if (AUXILIARIES.has(token.normalized) &&
         !isLexicalAuxiliaryRelation(tokens, index)) {
-      if (HAVE_FORMS.has(token.normalized) && !hasPerfectComplement(tokens, index + 1)) return null;
+      if (HAVE_FORMS.has(token.normalized) && !hasPerfectComplement(tokens, index + 1)) {
+        return Object.freeze({ qualifiers: Object.freeze(qualifiers), relationIndex: index, supported: false });
+      }
       index += 1;
       continue;
     } else if (PRE_RELATION_QUALIFIERS.has(token.normalized)) {
@@ -156,9 +193,14 @@ function readPredicate(
       break;
     }
     index += 1;
-    if (qualifiers.length > MAX_QUALIFIERS) return null;
   }
-  return Object.freeze({ qualifiers: Object.freeze(qualifiers), relationIndex: index });
+  return Object.freeze({ qualifiers: Object.freeze(qualifiers), relationIndex: index,
+    supported: qualifiers.length <= MAX_QUALIFIERS });
+}
+
+function isModalQualifier(token: FactFrameSourceToken): boolean {
+  return MODALS.has(token.normalized) || NEGATIVE_MODAL_PATTERN.test(token.normalized) ||
+    /^['\u2019]ll$/u.test(token.normalized);
 }
 
 function isRelationToken(
@@ -201,17 +243,19 @@ function slot(
 }
 
 const MAX_SLOT_TEXT_LENGTH = 512;
-const MAX_QUALIFIERS = 2;
+const MAX_QUALIFIERS = Math.min(2, ASSOCIATIVE_FACT_FRAME_SLOT_LIMIT - 3);
 const SUBJECT_PRONOUNS: ReadonlySet<string> = new Set([
   "i", "you", "he", "she", "it", "we", "they"
 ]);
 const SUBJECT_AUXILIARY_CONTRACTIONS: ReadonlySet<string> = new Set([
-  "d", "ll", "m", "re", "ve"
+  "ll", "m", "re", "ve"
+]);
+const MODALS: ReadonlySet<string> = new Set([
+  "can", "cannot", "could", "may", "might", "must", "shall", "should", "will", "would"
 ]);
 const AUXILIARIES: ReadonlySet<string> = new Set([
-  "am", "are", "be", "been", "being", "can", "could", "did", "do",
-  "does", "had", "has", "have", "is", "may", "might", "must", "shall",
-  "should", "was", "were", "will", "would"
+  ...MODALS, "am", "are", "be", "been", "being", "did", "do",
+  "does", "had", "has", "have", "is", "was", "were"
 ]);
 const LEXICAL_AUXILIARY_RELATIONS: ReadonlySet<string> = new Set([
   "do", "had", "has", "have"
@@ -237,4 +281,5 @@ const RELATION_STOP_WORDS: ReadonlySet<string> = new Set([
   "a", "an", "and", "but", "for", "from", "in", "of", "on", "or",
   "the", "to", "with"
 ]);
-const NEGATIVE_AUXILIARY_PATTERN = /n't$/u;
+const NEGATIVE_MODAL_PATTERN = /^(?:ca|could|may|might|must|sha|should|wo|would)n['\u2019]t$/u;
+const NEGATIVE_AUXILIARY_PATTERN = /n['\u2019]t$/u;
