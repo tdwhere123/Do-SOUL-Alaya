@@ -71,8 +71,15 @@ export async function runBatchCampaign(manifestPath: string, options: {
     save();
     while (state.status === "running") {
       options.signal?.throwIfAborted();
-      if (state.nextCheckAt > Date.now()) await delay(state.nextCheckAt - Date.now(), undefined,
-        options.signal === undefined ? {} : { signal: options.signal });
+      if (state.nextCheckAt > Date.now()) {
+        try {
+          await delay(state.nextCheckAt - Date.now(), undefined,
+            options.signal === undefined ? {} : { signal: options.signal });
+        } catch (cause) {
+          options.signal?.throwIfAborted();
+          throw cause;
+        }
+      }
       options.signal?.throwIfAborted();
       // Intent is durable before prepare, upload/create, poll or import. A crash
       // repeats the same owner operation on the same admitted window/job.

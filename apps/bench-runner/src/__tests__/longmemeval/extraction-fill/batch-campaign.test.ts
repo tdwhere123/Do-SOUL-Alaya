@@ -149,6 +149,28 @@ it("restarts an accepted job after SIGKILL without resubmission, fills remaining
   expect(fixture.provider.downloads).toBe(2);
 }, 45_000);
 
+it("preserves SIGTERM exit status while waiting and resumes the accepted job", async () => {
+  const fixture = await setup();
+  const manifest = JSON.parse(readFileSync(fixture.manifestPath, "utf8"));
+  manifest.pollIntervalMs = 5_000;
+  writeFileSync(fixture.manifestPath, JSON.stringify(manifest));
+  fixture.provider.complete = false;
+  const first = launch(fixture.manifestPath);
+  await vi.waitFor(() => {
+    expect(fixture.provider.creates).toBe(1);
+    expect(state().phase).toBe("resume");
+    expect(state().nextCheckAt).toBeGreaterThan(Date.now());
+  }, { timeout: 20_000 });
+  first.child.kill("SIGTERM");
+  expect((await first.closed)[0], first.output()).toBe(143);
+  expect(state().status).toBe("running");
+  fixture.provider.complete = true;
+  const resumed = launch(fixture.manifestPath);
+  expect((await resumed.closed)[0], resumed.output()).toBe(0);
+  expect(state().status).toBe("complete");
+  expect(fixture.provider.creates).toBe(2);
+}, 45_000);
+
 it.each([{ unknown: true }, { usageMissing: true }, { foreignQuote: true }, { maxUsd: 0 }])(
   "stops durably without opening a retry window for %j", async (options) => {
     const fixture = await setup(options);
