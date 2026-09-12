@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { serveDaemonUnixSocket } from "../../runtime/unix-socket-serve.js";
 
 describe("serveDaemonUnixSocket", () => {
-  it("listens on a unix socket path", async () => {
+  it.skipIf(process.platform === "win32")("listens on a unix socket path", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "alaya-unix-socket-"));
     const socketPath = path.join(dir, "alaya.sock");
     const server = await serveDaemonUnixSocket(async () => new Response("ok"), socketPath);
@@ -20,7 +20,7 @@ describe("serveDaemonUnixSocket", () => {
     }
   });
 
-  it("refuses to steal a live unix socket", async () => {
+  it.skipIf(process.platform === "win32")("refuses to steal a live unix socket", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "alaya-unix-socket-live-"));
     const socketPath = path.join(dir, "alaya.sock");
     const first = await serveDaemonUnixSocket(async () => new Response("ok"), socketPath);
