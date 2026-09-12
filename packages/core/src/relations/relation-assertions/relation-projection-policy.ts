@@ -1,42 +1,19 @@
-import { createHash } from "node:crypto";
 import {
   PathRelationSchema,
+  TEMPORAL_RELATION_PROJECTION_PROFILES,
   isRelationValidityActiveAt,
-  type PathGovernanceClass,
   type PathRelation,
   type RelationAssertion,
   type RelationAssertionResolution
 } from "@do-soul/alaya-protocol";
 
-type ProjectionProfile = Readonly<{
-  readonly governanceClass: PathGovernanceClass;
-  readonly recallBias: number;
-  readonly salience: number;
-  readonly strength: number;
-}>;
-
-const projectionProfiles: Readonly<Record<string, ProjectionProfile>> = Object.freeze({
-  answers_with: { governanceClass: "recall_allowed", recallBias: 0.5, salience: 0.5, strength: 0.5 },
-  coheres_with: { governanceClass: "hint_only", recallBias: 0.5, salience: 0.3, strength: 0.3 },
-  co_recalled: { governanceClass: "attention_only", recallBias: 0.5, salience: 0.3, strength: 0.3 },
-  contradicts: { governanceClass: "recall_allowed", recallBias: -0.4, salience: 0.9, strength: 0.9 },
-  derives_from: { governanceClass: "attention_only", recallBias: 0.5, salience: 0.5, strength: 0.5 },
-  exception_to: { governanceClass: "recall_allowed", recallBias: 0, salience: 0.9, strength: 0.9 },
-  incompatible_with: { governanceClass: "recall_allowed", recallBias: -0.3, salience: 0.9, strength: 0.9 },
-  shares_entity: { governanceClass: "hint_only", recallBias: 0.5, salience: 0.2, strength: 0.2 },
-  signal_graph_ref: { governanceClass: "recall_allowed", recallBias: 0.5, salience: 0.6, strength: 0.6 },
-  supersedes: { governanceClass: "recall_allowed", recallBias: -0.5, salience: 0.9, strength: 0.9 },
-  supports: { governanceClass: "attention_only", recallBias: 0.5, salience: 0.5, strength: 0.5 },
-  time_concern: { governanceClass: "recall_allowed", recallBias: 0.7, salience: 0.6, strength: 0.4 }
-});
-
-export const TEMPORAL_RELATION_PROJECTION_POLICY_ID = "relation-path-projection-v1";
-export const TEMPORAL_RELATION_PROJECTION_POLICY_SHA256 = createHash("sha256")
-  .update(JSON.stringify(projectionProfiles))
-  .digest("hex");
+export {
+  TEMPORAL_RELATION_PROJECTION_POLICY_ID,
+  TEMPORAL_RELATION_PROJECTION_POLICY_SHA256
+} from "@do-soul/alaya-protocol";
 
 export function supportsTemporalRelationProjection(relationKind: string): boolean {
-  return projectionProfiles[relationKind] !== undefined;
+  return TEMPORAL_RELATION_PROJECTION_PROFILES[relationKind] !== undefined;
 }
 
 export function buildTemporalPathProjection(input: Readonly<{
@@ -45,7 +22,7 @@ export function buildTemporalPathProjection(input: Readonly<{
   readonly asOf: string;
   readonly permittedTimelessPolicyIds: ReadonlySet<string>;
 }>): Readonly<PathRelation> | null {
-  const profile = projectionProfiles[input.assertion.relation_kind];
+  const profile = TEMPORAL_RELATION_PROJECTION_PROFILES[input.assertion.relation_kind];
   if (profile === undefined || hasResolutionAtOrBefore(input.resolutions, input.asOf)) {
     return null;
   }

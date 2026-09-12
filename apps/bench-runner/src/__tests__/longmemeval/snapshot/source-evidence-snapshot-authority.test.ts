@@ -71,14 +71,15 @@ interface AuthorityFixture {
 type SeededAuthorityFixture = Omit<AuthorityFixture, "extraction">;
 let root: string | undefined;
 let fixture: AuthorityFixture;
+const AUTHORITY_HOOK_TIMEOUT_MS = process.platform === "win32" ? 60_000 : 15_000;
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "source-evidence-authority-base-"));
   fixture = await buildAuthorityFixture(root);
-});
+}, AUTHORITY_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   if (root !== undefined) await rm(root, { recursive: true, force: true });
-});
+}, AUTHORITY_HOOK_TIMEOUT_MS);
 
 describe("source evidence snapshot authority", () => {
   it("accepts a receipt-bound direct evidence snapshot", () => {

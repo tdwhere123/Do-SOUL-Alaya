@@ -83,7 +83,7 @@ export interface ClaimServiceDependencies {
   readonly eventLogRepo: ClaimServiceEventLogRepoPort;
   readonly runtimeNotifier: ClaimRuntimeNotifierPort;
   readonly canonicalAliasService?: Pick<CanonicalAliasService, "planGovernanceSubjectCanonicalization">;
-  readonly eventPublisher?: Pick<EventPublisher, "appendManyWithMutation">;
+  readonly eventPublisher?: Pick<EventPublisher, "appendManyWithMutation" | "publish">;
   readonly slotService?: ClaimServiceSlotServicePort;
   readonly effectDecisionStore?: EffectDecisionStore;
   readonly generateObjectId?: () => string;

@@ -3,9 +3,12 @@ import {
   resolveEmbeddingWorkspaceScanCap
 } from "../constants.js";
 import {
+  EMBEDDING_CONTENT_HASH_STALE_REASON,
+  isMemoryEmbeddingContentStale
+} from "../embedding-backfill-handler-shared.js";
+import {
   clamp01,
   createCosineBatchScorer,
-  hashMemoryContent,
   isFiniteNonzeroVector,
   isProviderMatchedEmbedding,
   isUsableEmbeddingRecordVector,
@@ -238,7 +241,13 @@ export class RequestScoreSnapshotBuilder {
       if (poolMemory === undefined && !workspaceObjectIds.has(record.object_id)) {
         continue;
       }
-      if (poolMemory !== undefined && record.content_hash !== hashMemoryContent(poolMemory.content)) {
+      if (poolMemory !== undefined && isMemoryEmbeddingContentStale(record.content_hash, poolMemory.content)) {
+        this.deps.warn("embedding stored vector is stale", {
+          workspace_id: params.workspaceId,
+          run_id: params.runId,
+          object_id: record.object_id,
+          reason: EMBEDDING_CONTENT_HASH_STALE_REASON
+        });
         continue;
       }
       const similarity = clamp01(scoreCosine(record.embedding));

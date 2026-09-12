@@ -133,7 +133,7 @@ export function readEdgeClassifyPayloadPair(taskId: string, payload: unknown): {
   const parsed = EdgeClassifyTaskPayloadSchema.safeParse(payload);
   if (!parsed.success) {
     throw new GardenTaskValidationError(
-      `Garden task ${taskId} has malformed EDGE_CLASSIFY payload; cannot apply host-worker verdict.`
+      `Garden task has malformed EDGE_CLASSIFY payload; cannot apply host-worker verdict: ${taskId}`
     );
   }
   return {

@@ -1,3 +1,5 @@
+import { joinFusedScoresOntoResults, enrichAbstentionConfidence } from "../../../datasets/longmemeval/runner/runner-scoring.js";
+import { exposureSlots, FirstExposureSession } from "../../../runs/measurement/first-exposure-session.js";
 import { randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { AlayaDaemonRuntime } from "@do-soul/alaya";
@@ -138,6 +140,7 @@ export function createBenchDaemonOps(
 function createBenchRecallOperation(
   input: BenchDaemonOpsInput
 ): BenchDaemonHandle["recall"] {
+  const exposureSession = new FirstExposureSession();
   return async (
     query: string,
     opts: BenchRecallOptions = {}
@@ -204,7 +207,9 @@ function createBenchRecallOperation(
       runId: input.activeContext.runId,
       workspaceId: input.activeContext.workspaceId
     });
-    return buildBenchRecallResponse(delivery.deliveryId, results, recallResult, requestBudget);
+    const response = buildBenchRecallResponse(delivery.deliveryId, results, recallResult, requestBudget);
+    return { ...response, first_exposure_page: exposureSession.record(response, opts.continuation,
+      enrichAbstentionConfidence(joinFusedScoresOntoResults(exposureSlots(response), response, input.embeddingMode))) };
   };
 }
 

@@ -1,4 +1,4 @@
-import { open, readdir } from "node:fs/promises";
+import { readdir, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import type { ListDirectoryToolInput, ReadFileToolInput, SearchFilesToolInput } from "@do-soul/alaya-protocol";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_RESULTS } from "./tool-runtime-file-constants.js";
@@ -6,76 +6,31 @@ import {
   createAccessDenied,
   createFileToolError,
   mapFileSystemError,
-  readFileSystemEntry,
-  resolveContainedPath
+  resolveContainedPath,
+  resolveRealWritableRoots
 } from "./tool-runtime-file-common.js";
-
-function isPathWithinRoot(candidate: string, root: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
+import { containedFdPath, openContained } from "./open-contained.js";
 
 export async function readFile(
   input: ReadFileToolInput,
   writableRoots: readonly string[]
 ): Promise<unknown> {
-  const containedPath = resolveContainedPath(input.path, writableRoots, {
-    basePath: writableRoots[0]
-  });
-
-  if (!containedPath.ok) {
-    return containedPath;
-  }
-
   const maxBytes =
     Number.isInteger(input.maxBytes) && (input.maxBytes as number) > 0
       ? (input.maxBytes as number)
       : DEFAULT_MAX_BYTES;
-  const entry = await readFileSystemEntry(containedPath.resolvedPath);
-
-  if (!entry.ok) {
-    return entry;
+  const opened = await openContained(input.path, writableRoots, "file", {
+    basePath: writableRoots[0]
+  });
+  if (!opened.ok) {
+    return opened;
   }
-
-  if (!entry.stats.isFile()) {
-    return createFileToolError("READ_ERROR", `Path is not a file: ${containedPath.resolvedPath}`);
-  }
-
-  if (entry.stats.size > maxBytes) {
-    return createFileToolError("SIZE_EXCEEDED", `File exceeds the ${maxBytes}-byte limit.`);
-  }
-
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    handle = await open(containedPath.resolvedPath, "r");
-    const chunks: Buffer[] = [];
-    let totalBytesRead = 0;
-    while (totalBytesRead <= maxBytes) {
-      const remainingBytes = maxBytes + 1 - totalBytesRead;
-      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, remainingBytes));
-      const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null);
-      if (bytesRead === 0) {
-        break;
-      }
-
-      totalBytesRead += bytesRead;
-      if (totalBytesRead > maxBytes) {
-        return createFileToolError("SIZE_EXCEEDED", `File exceeds the ${maxBytes}-byte limit.`);
-      }
-
-      chunks.push(chunk.subarray(0, bytesRead));
-    }
-
-    const content = Buffer.concat(chunks, totalBytesRead).toString("utf8");
-    return {
-      ok: true,
-      content,
-      bytesRead: totalBytesRead
-    };
+    return await readOpenedRegularFile(opened.handle, maxBytes);
   } catch (error) {
-    return mapFileSystemError(error, containedPath.resolvedPath);
+    return mapFileSystemError(error, opened.realPath);
   } finally {
-    await handle?.close().catch(() => undefined);
+    await opened.handle.close().catch(() => undefined);
   }
 }
 
@@ -83,25 +38,14 @@ export async function listDirectory(
   input: ListDirectoryToolInput,
   writableRoots: readonly string[]
 ): Promise<unknown> {
-  const containedPath = resolveContainedPath(input.path, writableRoots, {
+  const opened = await openContained(input.path, writableRoots, "directory", {
     basePath: writableRoots[0]
   });
-
-  if (!containedPath.ok) {
-    return containedPath;
+  if (!opened.ok) {
+    return opened;
   }
-
-  const entry = await readFileSystemEntry(containedPath.resolvedPath);
-  if (!entry.ok) {
-    return entry;
-  }
-
-  if (!entry.stats.isDirectory()) {
-    return createFileToolError("READ_ERROR", `Path is not a directory: ${containedPath.resolvedPath}`);
-  }
-
   try {
-    const entries = await readdir(containedPath.resolvedPath, { withFileTypes: true });
+    const entries = await readdir(containedFdPath(opened.handle, opened.realPath), { withFileTypes: true });
     return {
       ok: true,
       entries: entries
@@ -112,7 +56,9 @@ export async function listDirectory(
         .sort((left, right) => left.name.localeCompare(right.name))
     };
   } catch (error) {
-    return mapFileSystemError(error, containedPath.resolvedPath);
+    return mapFileSystemError(error, opened.realPath);
+  } finally {
+    await opened.handle.close().catch(() => undefined);
   }
 }
 
@@ -120,31 +66,21 @@ export async function searchFiles(
   input: SearchFilesToolInput,
   writableRoots: readonly string[]
 ): Promise<unknown> {
-  const containedPath = resolveContainedPath(input.baseDir, writableRoots, {
+  const opened = await openContained(input.baseDir, writableRoots, "directory", {
     basePath: writableRoots[0]
   });
-
-  if (!containedPath.ok) {
-    return containedPath;
+  if (!opened.ok) {
+    return opened;
   }
-
-  const entry = await readFileSystemEntry(containedPath.resolvedPath);
-  if (!entry.ok) {
-    return entry;
-  }
-
-  if (!entry.stats.isDirectory()) {
-    return createFileToolError(
-      "READ_ERROR",
-      `Base directory is not a directory: ${containedPath.resolvedPath}`
-    );
-  }
+  await opened.handle.close().catch(() => undefined);
 
   if (!isPatternSupported(input.pattern)) {
     return createAccessDenied("Pattern is outside the workspace boundary.");
   }
 
-  if (patternEscapesWorkspace(input.pattern, containedPath.resolvedPath, writableRoots)) {
+  const realWritableRoots = await resolveRealWritableRoots(writableRoots);
+  const containmentRoots = realWritableRoots.length > 0 ? realWritableRoots : writableRoots;
+  if (patternEscapesWorkspace(input.pattern, opened.realPath, containmentRoots)) {
     return createAccessDenied("Pattern is outside the workspace boundary.");
   }
 
@@ -157,13 +93,13 @@ export async function searchFiles(
   try {
     const matches: string[] = [];
     let escapedMatchFound = false;
-    await walkFiles(containedPath.resolvedPath, async (absolutePath, relativePath) => {
+    await walkFiles(opened.realPath, containmentRoots, async (absolutePath, relativePath) => {
       const normalizedRelative = relativePath.split(path.sep).join("/");
       if (!patternRegex.test(normalizedRelative)) {
         return;
       }
 
-      const containedMatch = resolveContainedPath(absolutePath, writableRoots);
+      const containedMatch = resolveContainedPath(absolutePath, containmentRoots);
       if (!containedMatch.ok) {
         escapedMatchFound = true;
         return;
@@ -181,35 +117,70 @@ export async function searchFiles(
       paths: matches.sort((left, right) => left.localeCompare(right)).slice(0, maxResults)
     };
   } catch (error) {
-    return mapFileSystemError(error, containedPath.resolvedPath);
+    return mapFileSystemError(error, opened.realPath);
   }
+}
+
+async function readOpenedRegularFile(handle: FileHandle, maxBytes: number): Promise<unknown> {
+  const stat = await handle.stat();
+  if (stat.size > maxBytes) {
+    return createFileToolError("SIZE_EXCEEDED", `File exceeds the ${maxBytes}-byte limit.`);
+  }
+  const chunks: Buffer[] = [];
+  let totalBytesRead = 0;
+  while (totalBytesRead <= maxBytes) {
+    const remainingBytes = maxBytes + 1 - totalBytesRead;
+    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, remainingBytes));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null);
+    if (bytesRead === 0) {
+      break;
+    }
+    totalBytesRead += bytesRead;
+    if (totalBytesRead > maxBytes) {
+      return createFileToolError("SIZE_EXCEEDED", `File exceeds the ${maxBytes}-byte limit.`);
+    }
+    chunks.push(chunk.subarray(0, bytesRead));
+  }
+  return {
+    ok: true,
+    content: Buffer.concat(chunks, totalBytesRead).toString("utf8"),
+    bytesRead: totalBytesRead
+  };
 }
 
 async function walkFiles(
   root: string,
+  writableRoots: readonly string[],
   visit: (absolutePath: string, relativePath: string) => Promise<void>
 ): Promise<void> {
-  const queue: readonly string[] = [root];
-  const mutableQueue = [...queue];
+  const mutableQueue = [root];
   while (mutableQueue.length > 0) {
     const current = mutableQueue.shift();
     if (current === undefined) {
       break;
     }
-
-    const entries = await readdir(current, { withFileTypes: true });
-    for (const entry of entries) {
-      const absolute = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        mutableQueue.push(absolute);
-        continue;
+    const opened = await openContained(current, writableRoots, "directory");
+    if (!opened.ok) {
+      continue;
+    }
+    try {
+      const entries = await readdir(containedFdPath(opened.handle, opened.realPath), { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isSymbolicLink() || entry.name === "." || entry.name === "..") {
+          continue;
+        }
+        const absolute = path.join(opened.realPath, entry.name);
+        if (entry.isDirectory()) {
+          mutableQueue.push(absolute);
+          continue;
+        }
+        if (!entry.isFile()) {
+          continue;
+        }
+        await visit(absolute, path.relative(root, absolute));
       }
-
-      if (!entry.isFile()) {
-        continue;
-      }
-
-      await visit(absolute, path.relative(root, absolute));
+    } finally {
+      await opened.handle.close().catch(() => undefined);
     }
   }
 }

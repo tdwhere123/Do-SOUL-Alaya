@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
-import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
+import {
+  applyRemoteBindTokenRotation,
+  authorizeProtectedRequest,
+  REQUEST_TOKEN_GRANT_CONTEXT_KEY,
+  type RequestTokenGrant,
+  type WorkspaceTokenBinding
+} from "./request-token-binding.js";
 import {
   isProtectedRequest,
   registerRateLimitMiddleware,
@@ -75,8 +81,14 @@ export interface RequestProtectionConfig {
   readonly allowedOrigin: string;
   readonly requestToken: string;
   readonly allowDesktopOriginlessRequests?: boolean;
-  readonly tokenSource?: "env" | "ephemeral";
+  readonly tokenSource?: "env" | "ephemeral" | "rotated";
+  readonly boundWorkspaceIds?: readonly string[];
+  readonly allowProcessSecretPatch?: boolean;
+  readonly workspaceTokens?: readonly WorkspaceTokenBinding[];
 }
+
+export type { RequestTokenGrant, WorkspaceTokenBinding };
+export { REQUEST_TOKEN_GRANT_CONTEXT_KEY };
 
 export interface CoreDaemonServices {
   readonly logger?: ErrorLoggerPort;
@@ -143,14 +155,18 @@ export function createApp(
   lifecycle?: CoreDaemonLifecycleState
 ): Hono {
   const app = new Hono();
-  const requestProtection = resolveRequestProtectionSettings(services.requestProtection);
+  const protectionConfig =
+    services.requestProtection === undefined
+      ? undefined
+      : applyRemoteBindTokenRotation(services.requestProtection, process.env);
+  const requestProtection = resolveRequestProtectionSettings(protectionConfig);
   const bodyLimits = createRequestBodyLimits();
 
   registerRequestIdMiddleware(app);
   registerDrainMiddleware(app, lifecycle);
   registerSecurityHeadersMiddleware(app);
   registerCorsMiddleware(app, requestProtection.allowedOrigin);
-  registerProtectedRequestMiddleware(app, services.requestProtection, requestProtection);
+  registerProtectedRequestMiddleware(app, protectionConfig, requestProtection);
   registerRateLimitMiddleware(app, services.rateLimit);
   registerFileUploadLimitMiddleware(app, bodyLimits.fileUploadBodyLimit);
   registerRequestBodyLimitMiddleware(app);
@@ -301,29 +317,22 @@ function registerProtectedRequestMiddleware(
       return context.json({ success: false, error: "Origin is not allowed" }, 403);
     }
 
-    const tokenError = validateRequestTokenHeader(
-      context.req.header("x-request-token"),
-      requestProtection.requestToken
-    );
-    if (tokenError !== null) {
-      return context.json({ success: false, error: tokenError }, 403);
+    const authorized = authorizeProtectedRequest({
+      providedToken: context.req.header("x-request-token"),
+      protection: requestProtection,
+      method: context.req.method,
+      path: context.req.path
+    });
+    if (authorized.ok === false) {
+      return context.json({ success: false, error: authorized.error }, 403);
     }
+    const requestScopedContext = context as typeof context & {
+      set(name: string, value: RequestTokenGrant): void;
+    };
+    requestScopedContext.set(REQUEST_TOKEN_GRANT_CONTEXT_KEY, authorized.grant);
 
     await next();
   });
-}
-
-function validateRequestTokenHeader(
-  providedRequestTokenHeader: string | undefined,
-  expectedRequestToken: string
-): string | null {
-  const providedRequestToken = providedRequestTokenHeader?.trim();
-  if (providedRequestToken === undefined || providedRequestToken.length === 0) {
-    return "X-Request-Token is required";
-  }
-  return matchesRequestToken(providedRequestToken, expectedRequestToken)
-    ? null
-    : "Invalid X-Request-Token";
 }
 
 function registerFileUploadLimitMiddleware(
@@ -459,8 +468,4 @@ function isAllowedProtectedRequest(
   }
 
   return origin === undefined && localOperatorRequest;
-}
-
-function matchesRequestToken(provided: string, expected: string): boolean {
-  return constantTimeTokenEqual(provided, expected);
 }

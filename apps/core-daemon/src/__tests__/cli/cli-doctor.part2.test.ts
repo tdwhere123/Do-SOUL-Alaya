@@ -346,6 +346,70 @@ describe("doctor CLI", () => {
     expect(result.exitCode).toBe(64);
   });
 
+  it("fails the provider check when query embedding warmup failed", async () => {
+    const harness = createDoctorHarness({
+      getQueryEmbeddingWarmup: () => ({
+        status: "failed",
+        requested_count: 2,
+        ready_count: 0,
+        cache_hit_count: 0,
+        provider_requested_count: 2,
+        missing_count: 2,
+        provider_kind: "openai",
+        model_id: "text-embedding-3-small",
+        last_error: "provider down"
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+    await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1"]);
+
+    expect(jsonResult.json).toMatchObject({
+      overall: "degraded",
+      checks: {
+        provider: "fail"
+      },
+      provider: {
+        query_embedding_warmup: {
+          status: "failed"
+        }
+      }
+    });
+    expect(harness.stdoutText()).toContain("query embedding warmup: failed");
+  });
+
+  it("fails the provider check when query embedding warmup is partial", async () => {
+    const harness = createDoctorHarness({
+      getQueryEmbeddingWarmup: () => ({
+        status: "partial",
+        requested_count: 4,
+        ready_count: 2,
+        cache_hit_count: 0,
+        provider_requested_count: 4,
+        missing_count: 2,
+        provider_kind: "openai",
+        model_id: "text-embedding-3-small",
+        last_error: "provider temporarily unreachable"
+      })
+    });
+
+    const jsonResult = await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1", "--json"]);
+    await harness.bridge.dispatch(["doctor", "--workspace", "workspace-1"]);
+
+    expect(jsonResult.json).toMatchObject({
+      overall: "degraded",
+      checks: {
+        provider: "fail"
+      },
+      provider: {
+        query_embedding_warmup: {
+          status: "partial"
+        }
+      }
+    });
+    expect(harness.stdoutText()).toContain("query embedding warmup: partial");
+  });
+
   it("fails the provider check when embedding status is degraded", async () => {
     const harness = createDoctorHarness({
       getEmbeddingStatus: async (workspaceId) => ({

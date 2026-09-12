@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "../../app.js";
 import { closeDaemonSqliteWriteQueue } from "../../startup/database.js";
-import { closeServer, type CloseableHttpServer } from "./daemon-server-close.js";
+import { closeServer, finalizeServerClose, type CloseableHttpServer } from "./daemon-server-close.js";
 import {
   clearSignalShutdownTimeout,
   installSignalShutdownHandler,
@@ -14,12 +14,18 @@ import {
   delay,
   type LifecycleTimerPort
 } from "./daemon-runtime-timing.js";
-import { resolveDaemonHostFromEnv, warnIfRemoteDaemonListening } from "../../server-options.js";
+import {
+  resolveDaemonHostFromEnv,
+  resolveDaemonListenPolicy,
+  warnIfRemoteDaemonListening
+} from "../../server-options.js";
+import { serveDaemonUnixSocket } from "../../unix-socket-serve.js";
 import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
 import type { EmbeddingBackfillMode } from "../../../garden/scheduler/scheduler-runtime-types.js";
 
 type DaemonAppFetch = Parameters<typeof serve>[0]["fetch"];
 type DaemonServerFactory = (options: Parameters<typeof serve>[0]) => CloseableHttpServer;
+type UnixSocketServe = typeof serveDaemonUnixSocket;
 
 type GardenRuntimeLifecycle = Readonly<{
   backgroundManager: Readonly<{
@@ -57,11 +63,13 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   intervalsToClear?: ReadonlyArray<NodeJS.Timeout>;
   processPort?: LifecycleProcessPort;
   serverFactory?: DaemonServerFactory;
+  unixSocketServe?: UnixSocketServe;
   timerPort?: LifecycleTimerPort;
 }>;
 
 type LifecycleState = {
   server: CloseableHttpServer | null;
+  unixServer: CloseableHttpServer | null;
   backgroundStarted: boolean;
   startupBackgroundPass: Promise<void> | null;
   startupBackgroundPassFailure: unknown | null;
@@ -89,6 +97,7 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
 }> {
   const state: LifecycleState = {
     server: null,
+    unixServer: null,
     backgroundStarted: false,
     startupBackgroundPass: null,
     startupBackgroundPassFailure: null,
@@ -215,7 +224,8 @@ function createHttpServerStarter(
     ensureServerNotRunning(state);
     logEphemeralTokenStartup(input, options);
 
-    const hostname = options.hostname ?? resolveDaemonHostFromEnv(process.env);
+    const policy = resolveDaemonListenPolicy(process.env);
+    const hostname = options.hostname ?? (policy.kind === "unix" ? policy.tcpHost : policy.host);
     const port = options.port ?? parsePort(process.env.PORT, 3000);
     const serverFactory = input.serverFactory ?? serve;
     state.server = serverFactory({
@@ -223,12 +233,23 @@ function createHttpServerStarter(
       hostname,
       port
     });
+    if (policy.kind === "unix") {
+      const unixServe = input.unixSocketServe ?? serveDaemonUnixSocket;
+      try {
+        state.unixServer = await Promise.resolve(unixServe(input.app.fetch, policy.path));
+      } catch (error) {
+        const tcp = state.server;
+        state.server = null;
+        tcp?.close();
+        throw error;
+      }
+    }
     installSignalShutdownHandlersOnce(state, input, shutdown);
     warnIfRemoteDaemonListening(process.env, hostname, (message) => {
       input.warnLogger.warn(message, {});
       process.stderr.write(`${message}\n`);
     });
-    logListeningAddress(input, hostname, port);
+    logListeningAddress(input, hostname, port, policy.kind === "unix" ? policy.path : undefined);
     return Object.freeze({ hostname, port, close: shutdown });
   };
 }
@@ -299,12 +320,14 @@ function installSignalShutdownHandlersOnce(
 function logListeningAddress(
   input: CreateDaemonLifecycleControlsInput,
   hostname: string,
-  port: number
+  port: number,
+  unixSocketPath?: string
 ): void {
   input.warnLogger.warn("core daemon listening", {
     host: hostname,
     port,
-    url: `http://${hostname}:${port}`
+    url: `http://${hostname}:${port}`,
+    ...(unixSocketPath === undefined ? {} : { unix_socket: unixSocketPath })
   });
 }
 
@@ -389,13 +412,15 @@ async function closeRuntimeResources(
   });
   clearLifecycleIntervals(input.intervalsToClear);
 
+  if (state.unixServer !== null) {
+    const unixCloseResult = await closeServer(state.unixServer, timerPort);
+    finalizeServerClose(unixCloseResult, input.warnLogger, processPort);
+    state.unixServer = null;
+  }
+
   if (state.server !== null) {
     const closeResult = await closeServer(state.server, timerPort);
-    if (closeResult !== "closed") {
-      input.warnLogger.warn("daemon HTTP server shutdown needed compatibility fallback", {
-        result: closeResult
-      });
-    }
+    finalizeServerClose(closeResult, input.warnLogger, processPort);
     state.server = null;
   }
 

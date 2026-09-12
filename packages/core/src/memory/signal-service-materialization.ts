@@ -23,6 +23,7 @@ import type {
   SignalServiceWarnPort,
   SignalTriageResult
 } from "./signal-service-types.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 
 export interface MaterializationAttempt {
   readonly materializingSignal: CandidateMemorySignal;
@@ -168,9 +169,10 @@ async function appendMaterializationEvent(
   triagedSignal: CandidateMemorySignal,
   materialization: SignalMaterializationResult
 ): Promise<EventLogEntry> {
-  return await dependencies.eventLogRepo.append(
-    buildSignalMaterializationEvent(triagedSignal, materialization)
-  );
+  return await bindEventPublisher({
+    eventLogRepo: dependencies.eventLogRepo,
+    purpose: "SignalService"
+  }).publish(buildSignalMaterializationEvent(triagedSignal, materialization));
 }
 
 async function completeFailedMaterialization(

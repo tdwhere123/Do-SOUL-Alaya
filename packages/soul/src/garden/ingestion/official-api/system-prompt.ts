@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   OPEN_SEMANTIC_DURATION_ROLE,
   OPEN_SEMANTIC_LOCATION_ROLE
@@ -15,12 +18,6 @@ const ENVELOPE_PROMPT_PARTS = Object.freeze([
   "Do not repeat source text outside matched_text or semantic_factor_graph surfaces.",
   'Each non-empty signal must include "object_kind", "confidence", "matched_text", "source_locator", and "semantic_factor_graph".',
   'A signal without semantic_factor_graph is invalid. object_kind is bounded routing metadata only; it is not a semantic role or an ontology.'
-]);
-
-const HISTORICAL_ENVELOPE_PROMPT_PARTS = Object.freeze([
-  "You extract candidate durable memory signals from a single operator turn.",
-  'Return strict JSON only with shape {"signals":[...]} and no markdown.',
-  'Each signal must include "signal_kind", "object_kind", "confidence", "matched_text", "distilled_fact", and "source_locator".'
 ]);
 
 const CURRENT_CONFIDENCE_PROMPT_PARTS = Object.freeze([
@@ -52,26 +49,6 @@ const GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
   "Do not lower the durability threshold: transient tasks, procedures, and formatting instructions are not durable assertions unless they explicitly state a lasting preference or policy.",
   '"matched_text" is an exact verbatim substring containing the complete atomic assertion, not isolated keywords.',
   'When a synthesis signal cites existing evidence or memories by ID, include "evidence_refs" and "source_memory_refs" arrays.'
-]);
-
-const HISTORICAL_GROUNDED_SIGNAL_PROMPT_PARTS = Object.freeze([
-  'Use only supported signal kinds such as "potential_preference" and "potential_claim".',
-  'Use "source_locator":{"contract_version":2,"kind":"assertion_catalog","assertion_id":N} for every signal.',
-  "Return only assertion_id from the provided source_assertions catalog for evidence selection; never invent or rewrite a catalog assertion.",
-  "Only User source spans may support durable memory; server-derived source_assertions contain only User content, and source_assertions contain only assertions the runtime can ground without unresolved references. Assistant spans are context only and never appear in source_assertions.",
-  "For each signal, work quote-first, then distill.",
-  "First copy the shortest contiguous exact substring that contains the complete atomic assertion and every explicit local antecedent needed to resolve its references into matched_text; preserve capitalization, punctuation, spacing, and wording.",
-  "Then write distilled_fact using only what that quote entails.",
-  "Do not use surrounding text to add facts or guess unresolved references.",
-  "Do not return an empty signals array merely because a durable assertion uses narrative, list, template, or conversational wording.",
-  "Before returning an empty signals array for a non-empty source_assertions catalog, inspect every catalog entry once more and emit any durable personal fact, preference, relationship, possession, past event, or ongoing condition that satisfies the same grounding and durability rules.",
-  "Do not lower the durability threshold: transient tasks, procedures, and formatting instructions are not durable assertions unless they explicitly state a lasting preference or policy.",
-  '"matched_text" is an exact verbatim substring containing the complete atomic assertion, not isolated keywords.',
-  '"distilled_fact" must be a self-contained declarative sentence carrying exactly one assertion.',
-  'When a synthesis signal cites existing evidence or memories by ID, include "evidence_refs" and "source_memory_refs" arrays.',
-  'When a signal has an event or valid-time fact, include optional "temporal_projection" with "projection_schema_version":1, ISO "event_time_start"/"event_time_end", ISO "valid_from"/"valid_to", "time_precision", and "time_source".',
-  "For relative dates, omit absolute temporal_projection dates; the runtime resolves them from source observation.",
-  'When a signal is a durable preference, include optional "preference_profile" with "projection_schema_version":1, "subject", "predicate", "object", "category", and "polarity".'
 ]);
 
 export const OPEN_SEMANTIC_STRUCTURAL_ROLE_PROMPT_PARTS = Object.freeze([
@@ -118,34 +95,6 @@ const FINAL_PROMPT_PARTS = Object.freeze([
   'Return {"signals":[]} when the catalog does not contain durable memory candidates.'
 ]);
 
-const HISTORICAL_FINAL_PROMPT_PARTS = Object.freeze([
-  'Include "canonical_entities": an array of at most 3 lowercase canonical names for the entities or subjects the distilled_fact is about, resolving pronouns and aliases so the SAME real-world entity always yields the SAME string across turns.',
-  "Resolve pronouns and non-temporal references in distilled_fact using only the turn text.",
-  "Preserve relative-date wording exactly; never infer an absolute date absent from the turn text.",
-  "Preserve every concrete detail (names, numbers, dates, places) that appears in the turn.",
-  "Do not invent facts and do not summarize away detail; split compound statements into separate signals.",
-  'Return {"signals":[]} when the turn does not contain durable memory candidates.'
-]);
-
-const HISTORICAL_PROMPT_5EC274 = joinPrompt([
-  ...HISTORICAL_ENVELOPE_PROMPT_PARTS,
-  ...HISTORICAL_GROUNDED_SIGNAL_PROMPT_PARTS,
-  ...HISTORICAL_FINAL_PROMPT_PARTS
-]);
-const HISTORICAL_PROMPT_5EC274_SHA256 =
-  "5ec2740bd63923305b376b240d5a219383f3cbfe8a7d9198d504f7f8de542326";
-
-const HISTORICAL_PROMPT_C3D83273 = joinPrompt([
-  ...ENVELOPE_PROMPT_PARTS,
-  ...CURRENT_CONFIDENCE_PROMPT_PARTS,
-  ...GROUNDED_SIGNAL_PROMPT_PARTS,
-  ...DURABLE_PROJECTION_PROMPT_PARTS,
-  ...OPEN_SEMANTIC_FACTOR_PROMPT_PARTS,
-  ...FINAL_PROMPT_PARTS
-]);
-const HISTORICAL_PROMPT_C3D83273_SHA256 =
-  "c3d8327375c4942e4fbe66c4c3173780dc329cd3afc513e7e7c18af7651646f8";
-
 export const OFFICIAL_API_SYSTEM_PROMPT = joinPrompt([
   ...ENVELOPE_PROMPT_PARTS,
   ...CURRENT_CONFIDENCE_PROMPT_PARTS,
@@ -174,22 +123,36 @@ export function resolveOfficialApiSystemPrompt(
 }
 
 function createPromptRegistry(): ReadonlyMap<string, string> {
-  const currentSha256 = sha256(OFFICIAL_API_SYSTEM_PROMPT);
-  if (sha256(HISTORICAL_PROMPT_5EC274) !== HISTORICAL_PROMPT_5EC274_SHA256) {
-    throw new Error("historical official API system prompt identity drifted");
-  }
-  if (sha256(HISTORICAL_PROMPT_C3D83273) !== HISTORICAL_PROMPT_C3D83273_SHA256) {
-    throw new Error("historical official API system prompt identity drifted");
-  }
   return new Map([
-    [currentSha256, OFFICIAL_API_SYSTEM_PROMPT],
+    [sha256(OFFICIAL_API_SYSTEM_PROMPT), OFFICIAL_API_SYSTEM_PROMPT],
     [
       sha256(OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT),
       OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT
     ],
-    [HISTORICAL_PROMPT_5EC274_SHA256, HISTORICAL_PROMPT_5EC274],
-    [HISTORICAL_PROMPT_C3D83273_SHA256, HISTORICAL_PROMPT_C3D83273]
+    ...loadHistoricalOfficialApiSystemPrompts()
   ]);
+}
+
+function loadHistoricalOfficialApiSystemPrompts(): ReadonlyArray<readonly [string, string]> {
+  const directory = resolveHistoricalPromptDirectory();
+  return fs.readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".txt"))
+    .map((entry) => {
+      const text = fs.readFileSync(path.join(directory, entry.name), "utf8");
+      return [sha256(text), text] as const;
+    });
+}
+
+function resolveHistoricalPromptDirectory(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.join(here, "historical-prompts"),
+    path.join(here, "../../../../src/garden/ingestion/official-api/historical-prompts")
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  throw new Error("historical official API system prompt files are missing");
 }
 
 function joinPrompt(parts: readonly string[]): string {

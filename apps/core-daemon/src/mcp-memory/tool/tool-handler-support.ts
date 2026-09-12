@@ -1,4 +1,8 @@
-import { CandidateMemorySignalMemoryRefKeys } from "@do-soul/alaya-protocol";
+import {
+  CandidateMemorySignalMemoryRefKeys,
+  isZodValidationError,
+  toPublicToolError
+} from "@do-soul/alaya-protocol";
 import type { AlayaMemoryToolName } from "./tool-catalog.js";
 import { McpToolError } from "./mcp-tool-error.js";
 import type {
@@ -34,12 +38,12 @@ export function ok<K extends AlayaMemoryToolName>(
 export function fail(
   toolName: string,
   code: McpMemoryToolErrorCode,
-  message: string
+  message?: string
 ): McpMemoryToolCallResult {
   return Object.freeze({
     ok: false,
     tool_name: toolName,
-    error: Object.freeze({ code, message })
+    error: toPublicToolError(code, message)
   });
 }
 
@@ -125,8 +129,10 @@ function classifyMcpToolErrorCode(
 }
 
 export function sanitizeError(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message.trim();
+  // Zod `received` and generic Error.message can contain pasted secrets.
+  if (isZodValidationError(error) || (error instanceof Error && error.name === "ZodError")) {
+    return toPublicToolError("VALIDATION").message;
   }
-  return "MCP memory tool call failed.";
+  const candidate = error instanceof Error ? error.message : undefined;
+  return toPublicToolError(classifyError(error), candidate).message;
 }

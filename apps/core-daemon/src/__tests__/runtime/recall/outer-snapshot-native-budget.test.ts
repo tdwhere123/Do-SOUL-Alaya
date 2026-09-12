@@ -31,7 +31,7 @@ describe("outer recall snapshot native allowance", () => {
     });
     expect(governance.completeness).toBe("complete");
     const result = runConditionalFieldWorkerRecall(runtime(slice.database), {
-      ...payload(defaultBudget()), governance
+      ...workerPayload(defaultBudget()), governance
     });
     expect(result.index.entries.map((entry) => entry.object_id)).toContain(MEM.r);
     expect(executed).not.toHaveBeenCalled();
@@ -46,7 +46,7 @@ describe("outer recall snapshot native allowance", () => {
     const executed = vi.spyOn(slice.database.connection, "exec");
     const pin = vi.spyOn(SqliteIndexedRecallProjection.prototype, "observablePin");
     const index = readers === undefined
-      ? runConditionalFieldWorkerRecall(runtime(slice.database), request).index
+      ? runConditionalFieldWorkerRecall(runtime(slice.database), workerPayload(request.budget)).index
       : runConditionalFieldRecall({ ...request, readers });
     expect(index.entries).toEqual([]);
     expect(index.completeness.logical_index).not.toBe("complete");
@@ -66,7 +66,7 @@ describe("outer recall snapshot native allowance", () => {
       let failure;
       try {
         index = readers === undefined
-          ? runConditionalFieldWorkerRecall(runtime(slice.database), request).index
+          ? runConditionalFieldWorkerRecall(runtime(slice.database), workerPayload(request.budget)).index
           : runConditionalFieldRecall({ ...request, readers });
       } catch (error) {
         failure = error;
@@ -92,7 +92,10 @@ describe("outer recall snapshot native allowance", () => {
       const snapshot_id = snapshotIdFromPin(WS, slice.indexProjection.observablePin(WS));
       const request = { ...payload(defaultBudget()), snapshot_id };
       return route === "direct" ? runConditionalFieldRecall({ ...request, readers })
-        : runConditionalFieldWorkerRecall(runtime(slice.database), request).index;
+        : runConditionalFieldWorkerRecall(
+          runtime(slice.database),
+          { ...workerPayload(request.budget), snapshot_id }
+        ).index;
     };
     const before = run();
     expect(before.entries.map((entry) => entry.object_id)).toContain(MEM.r);
@@ -109,20 +112,28 @@ describe("outer recall snapshot native allowance", () => {
     expect(rows.map((row) => row.created_at)).toEqual([NOW, NOW]);
   });
 
-  it("keeps explicit null unrestricted and fail-closes an omitted worker key", async () => {
+  it("fail-closes JSON null and an omitted worker key instead of treating them as unrestricted", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
     await slice.writeMemory(MEM.r, "needle", MemoryDimension.FACT);
     const base = payload(defaultBudget());
-    const parsedNull = ConditionalFieldRecallWorkerPayloadSchema.parse(base);
-    expect(parsedNull.authorized_scopes).toBeNull();
+    expect(() => ConditionalFieldRecallWorkerPayloadSchema.parse(base)).toThrow();
     const { authorized_scopes: _scopes, ...omitted } = base;
     const parsedOmitted = ConditionalFieldRecallWorkerPayloadSchema.parse(omitted);
     expect(parsedOmitted.authorized_scopes).toBeUndefined();
-    const admitted = runConditionalFieldWorkerRecall(runtime(slice.database), parsedNull);
-    expect(admitted.index.entries.map((entry) => entry.object_id)).toContain(MEM.r);
+    const deniedNull = runConditionalFieldWorkerRecall(
+      runtime(slice.database),
+      { ...omitted, authorized_scopes: null } as unknown as typeof parsedOmitted
+    );
+    expect(deniedNull.index.entries).toEqual([]);
+    expect(deniedNull.index.completeness.logical_index).toBe("invalidated");
     const denied = runConditionalFieldWorkerRecall(runtime(slice.database), parsedOmitted);
     expect(denied.index.entries).toEqual([]);
     expect(denied.index.completeness.logical_index).toBe("invalidated");
+    const admitted = runConditionalFieldWorkerRecall(runtime(slice.database), {
+      ...omitted,
+      authorized_scopes: { mode: "unrestricted" }
+    });
+    expect(admitted.index.entries.map((entry) => entry.object_id)).toContain(MEM.r);
   });
 });
 
@@ -135,6 +146,13 @@ function payload(budget: RequestBudget) {
     supports_source_evidence: true,
     supported_result_kinds: ["memory_entry", "source_evidence"] as const,
     authorized_scopes: null
+  };
+}
+
+function workerPayload(budget: RequestBudget) {
+  return {
+    ...payload(budget),
+    authorized_scopes: { mode: "unrestricted" as const }
   };
 }
 

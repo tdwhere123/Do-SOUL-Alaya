@@ -14,6 +14,7 @@ import {
   type IndexRole,
   type InformationIndex,
   type ProductStateKey,
+  type ProductUpdate,
   type QueryInterpretationStatus,
   type QueryView,
   type Proposition,
@@ -162,6 +163,10 @@ export type AcceptingProjectionInput = Readonly<{
 const REPRESENTATION_POLICY = "construct_index_then_page_then_payload" as const;
 const MAX_PAYLOAD_MEMORY_BYTES = 16_384;
 
+function workIsOpen(status: "complete" | "open" | undefined): boolean {
+  return status === "open";
+}
+
 export function projectAcceptingIndex(input: AcceptingProjectionInput): InformationIndex {
   const representation = representationDecision(input.budget.page_budget);
   const interpretationId = resolveInterpretationId(input);
@@ -218,38 +223,43 @@ export function continueAcceptingIndex(
   });
 }
 
+function applyProjectionGrounding(input: AcceptingProjectionInput): AcceptingProjectionInput {
+  if (input.transition_derivations === undefined || input.output_derivations !== undefined) {
+    return input;
+  }
+  const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
+  const deliveryWork = 1 + (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1);
+  // Preserve one delivery opportunity when grounding can still advance; smaller requests resume after grounding.
+  const groundingAllowance = allowance > deliveryWork ? allowance - deliveryWork : allowance;
+  const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
+  const payloadMemory = input.finalize_payload === undefined ? 0
+    : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
+  const groundingInput = { seeds: input.snapshot.seeds,
+    transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
+    transition_derivations: input.transition_derivations ?? {},
+    progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
+    allowance: groundingAllowance };
+  const grounded = input.cost === undefined
+    ? groundedOutputDerivations(groundingInput)
+    : input.cost.time("solve", () => groundedOutputDerivations(groundingInput));
+  // Grounding forest work this page; field max-min is observed separately.
+  input.cost?.add("solve", {
+    relaxations: grounded.work,
+    charged_retained_bytes: grounded.retained_bytes
+  });
+  input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
+  return { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
+    grounding_complete: grounded.complete,
+    ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
+    remaining_reserve: allowance - grounded.work,
+    ...(!grounded.complete ? { resource_work: "open" } : {}) };
+}
+
 function pageAcceptingIndex(
   input: AcceptingProjectionInput,
   representation: InformationIndex["representation"]
 ): InformationIndex {
-  if (input.transition_derivations !== undefined && input.output_derivations === undefined) {
-    const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
-    const deliveryWork = 1 + (input.finalize_payload === undefined ? 0 : input.payload_work_per_entry ?? 1);
-    // Preserve one delivery opportunity when grounding can still advance; smaller requests resume after grounding.
-    const groundingAllowance = allowance > deliveryWork ? allowance - deliveryWork : allowance;
-    const availableMemory = input.remaining_memory_bytes ?? input.budget.memory_bytes;
-    const payloadMemory = input.finalize_payload === undefined ? 0
-      : Math.min(MAX_PAYLOAD_MEMORY_BYTES, Math.floor(availableMemory / 4));
-    const groundingInput = { seeds: input.snapshot.seeds,
-      transitions: input.snapshot.retained_transitions, derivations: input.derivations ?? [],
-      transition_derivations: input.transition_derivations ?? {},
-      progress: input.grounding_progress, memory_bytes: availableMemory - payloadMemory,
-      allowance: groundingAllowance };
-    const grounded = input.cost === undefined
-      ? groundedOutputDerivations(groundingInput)
-      : input.cost.time("solve", () => groundedOutputDerivations(groundingInput));
-    // Grounding forest work this page; field max-min is observed separately.
-    input.cost?.add("solve", {
-      relaxations: grounded.work,
-      charged_retained_bytes: grounded.retained_bytes
-    });
-    input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
-    input = { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,
-      grounding_complete: grounded.complete,
-      ...(grounded.work > 0 && input.delivered_product_ids !== undefined ? { projection_scan_offset: 0 } : {}),
-      remaining_reserve: allowance - grounded.work,
-      ...(!grounded.complete ? { resource_work: "open" } : {}) };
-  }
+  input = applyProjectionGrounding(input);
   const policy = input.view.enumeration_policy ?? "canonical";
   const emitted = emittedRevisionsOf(input);
   const useEmittedSet = usesEmittedSet(input, policy);
@@ -283,12 +293,22 @@ function pageAcceptingIndex(
     });
   }
   const offset = useEmittedSet ? 0 : resolvePageOffset(input, entries.length);
-  const members = useEmittedSet
+  const candidateMembers = useEmittedSet
     ? projected.members
     : entries.slice(offset, offset + input.budget.page_budget);
-  const updates = useEmittedSet ? projected.updates : [];
+  const candidates = useEmittedSet ? projected.updates : [];
+  const ledger = input.delivered_product_states ?? committedProductStatesOf(input.prior_continuation) ?? {};
+  const pendingUpdates = [...retractionUpdates(projected.retracted, ledger),
+    ...candidates.flatMap((entry) => componentUpdatesFor(entry, emitted, ledger))];
+  // Retractions and retained refinements precede new exposure; only selected
+  // envelopes spend page width or advance the component ledger.
+  const productUpdates = pendingUpdates.slice(0, input.budget.page_budget);
+  const members = candidateMembers.slice(0, input.budget.page_budget - productUpdates.length);
+  const updates = candidates.filter((entry) => productUpdates.some((update) =>
+    sharedProductIdentity(update.product) === productIdOfEntry(entry)));
+  const deliveryPending = pendingUpdates.length - productUpdates.length + candidateMembers.length - members.length;
   const remaining = useEmittedSet
-    ? Math.max(projected.truncated ? 1 : 0, projected.unemitted - members.length)
+    ? Math.max(projected.truncated ? 1 : 0, projected.unemitted - members.length, deliveryPending)
     : Math.max(projected.truncated ? 1 : 0, entries.length - offset - members.length);
   // Typed updates are not a second membership exposure of the same product.
   const prepared = members;
@@ -296,6 +316,27 @@ function pageAcceptingIndex(
   const finalized = input.finalize_payload?.(prepared, projected.remaining);
   if (finalized !== undefined) input = { ...input, payload_work: finalized.complete ? "complete" : "open" };
   input.on_remaining_reserve?.(finalized?.remaining ?? projected.remaining);
+  return encodeAcceptingIndex({
+    input, representation, projected, emitted, useEmittedSet, entries, members, updates,
+    remaining, offset, prepared, productUpdates
+  });
+}
+
+function encodeAcceptingIndex(page: Readonly<{
+  readonly input: AcceptingProjectionInput;
+  readonly representation: InformationIndex["representation"];
+  readonly projected: ReturnType<typeof acceptingEntries>;
+  readonly emitted: ReturnType<typeof emittedRevisionsOf>;
+  readonly useEmittedSet: boolean;
+  readonly entries: IndexEntry[];
+  readonly members: readonly IndexEntry[];
+  readonly updates: readonly IndexEntry[];
+  readonly remaining: number;
+  readonly offset: number;
+  readonly prepared: readonly IndexEntry[];
+  readonly productUpdates: readonly ProductUpdate[];
+}>): InformationIndex {
+  const { input, representation, projected, emitted, useEmittedSet, entries, members, updates, remaining, offset, prepared, productUpdates } = page;
   const mixedPayload = mixedPayloadGeneration(input.snapshot_id, input.payload_generation);
   const expandPayload = input.expand_payload !== false && !mixedPayload;
   const omittedPayload = mixedPayload || input.payload_work === "open"
@@ -314,20 +355,18 @@ function pageAcceptingIndex(
     ...(input.support_work_status === undefined ? {} : { explanation_work: input.support_work_status }),
     ...(resourceOpen ? { resource_work: "open" as const } : {})
   });
-  const committedRevisions = mergeCommittedRevisions(emitted, [...members, ...updates]);
+
   const nextOffset = offset + members.length;
   const scanOffset = projected.truncated || useEmittedSet
       || PROJECTION_CURSOR.test(input.prior_continuation?.cursor ?? "") ? projected.next : undefined;
   const ledger = input.delivered_product_states
     ?? committedProductStatesOf(input.prior_continuation)
     ?? {};
-  const productUpdates = [
-    ...retractionUpdates(projected.retracted, ledger),
-    ...updates.flatMap((entry) => componentUpdatesFor(entry, emitted, ledger))
-  ];
-  const committedProducts = mergeCommittedProductStates(
-    ledger, members, updates, projected.retracted
-  );
+  const committedProducts = mergeCommittedProductStates(ledger, members, updates, productUpdates);
+  const fullyDeliveredUpdates = updates.filter((entry) => productUpdatesBetween(
+    productStateKeyFromIndexEntry(entry), committedProducts[productIdOfEntry(entry)], productComponentState(entry)
+  ).length === 0);
+  const committedRevisions = mergeCommittedRevisions(emitted, [...members, ...fullyDeliveredUpdates]);
   const order = orderClosureFromProjection({
     view: input.view,
     query_id: input.query_id,
@@ -336,8 +375,8 @@ function pageAcceptingIndex(
     observer: input.observer,
     remaining,
     resource_open: resourceOpen,
-    pending_semantic_work: omittedPayload || input.support_work_status === "open"
-      || input.payload_work === "open"
+    pending_semantic_work: omittedPayload || workIsOpen(input.support_work_status)
+      || workIsOpen(input.payload_work)
   });
   const index = {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

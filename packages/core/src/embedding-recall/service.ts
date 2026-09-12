@@ -93,6 +93,9 @@ export class EmbeddingRecallService {
     });
     this.telemetry = new EmbeddingRecallTelemetry({
       eventLogRepo: dependencies.eventLogRepo,
+      ...(dependencies.eventPublisher === undefined
+        ? {}
+        : { eventPublisher: dependencies.eventPublisher }),
       healthJournalRecorder: dependencies.healthJournalRecorder,
       provider: dependencies.provider,
       now: this.now,
@@ -145,6 +148,10 @@ export class EmbeddingRecallService {
     readonly queryTexts: readonly string[];
   }): Promise<EmbeddingQueryWarmupSummary> {
     return this.queryEngine.warmQueryEmbeddings(params);
+  }
+
+  public lastQueryEmbeddingWarmup(): EmbeddingQueryWarmupSummary | null {
+    return this.queryEngine.lastQueryEmbeddingWarmup();
   }
 
   public async hasStoredVectors(params: {

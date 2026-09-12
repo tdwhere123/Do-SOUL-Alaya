@@ -4,12 +4,38 @@ export type JsonRecoveryKind =
   | "trailing_strip"
   | "balanced_close";
 
-export function parseOrRecoverJson(rawText: string): {
+export interface ParseOrRecoverJsonOptions {
+  readonly allowBalancedClose?: boolean;
+}
+
+export interface JsonRecoveryInspection {
+  readonly rawJson: string;
+  readonly recoveryKind: JsonRecoveryKind;
+  readonly discardedCount: number;
+}
+
+export function parseOrRecoverJson(
+  rawText: string,
+  options: ParseOrRecoverJsonOptions = {}
+): {
   readonly rawJson: string;
   readonly recoveryKind: JsonRecoveryKind;
 } | null {
+  const inspected = inspectJsonRecovery(rawText);
+  if (inspected === null) {
+    return null;
+  }
+  // Invented closers are not a successful parse unless a caller explicitly
+  // opts in; truncation should retry instead.
+  if (inspected.recoveryKind === "balanced_close" && options.allowBalancedClose !== true) {
+    return null;
+  }
+  return { rawJson: inspected.rawJson, recoveryKind: inspected.recoveryKind };
+}
+
+export function inspectJsonRecovery(rawText: string): JsonRecoveryInspection | null {
   if (isParsableJsonObject(rawText)) {
-    return { rawJson: rawText, recoveryKind: "none" };
+    return { rawJson: rawText, recoveryKind: "none", discardedCount: 0 };
   }
 
   // Strategy 1: strip a leading ```json (or any language tag) fence and a
@@ -17,7 +43,7 @@ export function parseOrRecoverJson(rawText: string): {
   // wrap JSON in a markdown code block even with response_format=json_object.
   const markdownStripped = stripMarkdownFence(rawText);
   if (markdownStripped !== null && isParsableJsonObject(markdownStripped)) {
-    return { rawJson: markdownStripped, recoveryKind: "markdown_strip" };
+    return { rawJson: markdownStripped, recoveryKind: "markdown_strip", discardedCount: 0 };
   }
 
   // Strategy 2: strip any text after the first balanced top-level JSON
@@ -28,19 +54,14 @@ export function parseOrRecoverJson(rawText: string): {
     markdownStripped ?? rawText
   );
   if (trailingStripped !== null && isParsableJsonObject(trailingStripped)) {
-    return { rawJson: trailingStripped, recoveryKind: "trailing_strip" };
+    return { rawJson: trailingStripped, recoveryKind: "trailing_strip", discardedCount: 0 };
   }
 
-  // Strategy 3: close unbalanced brackets at the END of the buffer. A
-  // max_tokens-truncated response loses its closing `]` or `}`. We close
-  // them in the order they were opened so the resulting body is parseable.
-  // Only runs after the above strategies fail, so a malformed-but-complete
-  // body never gets a fake close appended.
   const balancedClosed = closeUnbalancedBrackets(
     markdownStripped ?? rawText
   );
   if (balancedClosed !== null && isParsableJsonObject(balancedClosed)) {
-    return { rawJson: balancedClosed, recoveryKind: "balanced_close" };
+    return { rawJson: balancedClosed, recoveryKind: "balanced_close", discardedCount: 1 };
   }
 
   return null;
@@ -125,10 +146,8 @@ function stripTrailingText(rawText: string): string | null {
   return null;
 }
 
-// Append missing `}` / `]` in the order they were opened so a truncated
-// JSON tail becomes parseable. Respects strings and escapes so brackets
-// inside string literals are not mis-counted. Returns null when the body
-// has no brackets to close (no `{` or `[` seen).
+// Detect a truncated tail by inventing closers for inspection only.
+// parseOrRecoverJson does not treat this as success unless opted in.
 function closeUnbalancedBrackets(rawText: string): string | null {
   const trimmed = rawText.trim();
   if (trimmed.length === 0) {

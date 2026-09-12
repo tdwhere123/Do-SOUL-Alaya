@@ -14,6 +14,7 @@ import {
   type TransitionCausedBy as TransitionCausedByType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 import { parseObjectId } from "../shared/validators.js";
 
 export type SlotElectionDecision = "new_slot_created" | "auto_won" | "contested" | "no_change";
@@ -315,7 +316,7 @@ export class SlotService {
       flip_conditions: defaultFlipConditions,
       workspace_id: claim.workspace_id
     });
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: SlotEventType.SOUL_SLOT_CREATED,
       entity_type: "slot",
       entity_id: slot.object_id,
@@ -332,15 +333,12 @@ export class SlotService {
         scope_class: slot.scope_class,
         winner_claim_id: slot.winner_claim_id
       })
+    };
+    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async (event) => {
+      const created = await this.dependencies.slotRepo.create(slot);
+      deferredNotifyEvents?.push(event);
+      return created;
     });
-
-    const created = await this.dependencies.slotRepo.create(slot);
-    if (deferredNotifyEvents !== undefined) {
-      deferredNotifyEvents.push(event);
-    } else {
-      await this.dependencies.runtimeNotifier.notifyEntry(event);
-    }
-    return created;
   }
 
   private async changeWinner(
@@ -352,7 +350,7 @@ export class SlotService {
   ): Promise<Readonly<Slot>> {
     const now = this.now();
     const parsedCausedBy = parseTransitionCausedBy(causedBy);
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: SlotEventType.SOUL_SLOT_WINNER_CHANGED,
       entity_type: "slot",
       entity_id: slot.object_id,
@@ -371,15 +369,20 @@ export class SlotService {
         evidence_refs: null,
         occurred_at: now
       })
+    };
+    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async (event) => {
+      const updated = await this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, now, now);
+      deferredNotifyEvents?.push(event);
+      return updated;
     });
+  }
 
-    const updated = await this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, now, now);
-    if (deferredNotifyEvents !== undefined) {
-      deferredNotifyEvents.push(event);
-    } else {
-      await this.dependencies.runtimeNotifier.notifyEntry(event);
-    }
-    return updated;
+  private eventPublisher() {
+    return bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
+      purpose: "SlotService"
+    });
   }
 }
 

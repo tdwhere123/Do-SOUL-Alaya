@@ -6,14 +6,19 @@ import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { closeCachedDatabase, readSchemaMigrationLedger } from "../../sqlite/db.js";
 import { prepareTemporalCandidate } from "../../sqlite/temporal-offline-candidate.js";
+import { removeTempDirectorySync } from "../temp-directory.js";
 
 const MIGRATIONS_DIRECTORY = fileURLToPath(new URL("../../migrations", import.meta.url));
 const temporaryDirectories: string[] = [];
-const TEMPORAL_CANDIDATE_TIMEOUT_MS = 15_000;
+const fixtureFilenames: string[] = [];
+const TEMPORAL_CANDIDATE_TIMEOUT_MS = process.platform === "win32" ? 60_000 : 15_000;
 
 afterEach(() => {
+  for (const filename of fixtureFilenames.splice(0)) {
+    closeCachedDatabase(filename);
+  }
   for (const directory of temporaryDirectories.splice(0)) {
-    fs.rmSync(directory, { recursive: true, force: true });
+    removeTempDirectorySync(directory);
   }
 });
 
@@ -56,9 +61,12 @@ function createFixture(): {
 } {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-temporal-ledger-"));
   temporaryDirectories.push(directory);
+  const sourceFilename = path.join(directory, "legacy.db");
+  const candidateFilename = path.join(directory, "candidate.db");
+  fixtureFilenames.push(sourceFilename, candidateFilename);
   return {
-    sourceFilename: path.join(directory, "legacy.db"),
-    candidateFilename: path.join(directory, "candidate.db"),
+    sourceFilename,
+    candidateFilename,
     receiptFilename: path.join(directory, "receipt.json")
   };
 }

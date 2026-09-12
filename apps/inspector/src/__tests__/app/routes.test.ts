@@ -74,7 +74,7 @@ describe("inspector routes", () => {
 
     await authenticatedRequest(app, "/api/config/ws1/soul");
     await authenticatedRequest(app, "/api/config/ws1/embedding-supplement");
-    await authenticatedRequest(app, "/api/config/runtime/embedding-supplement", {
+    const embeddingPatch = await authenticatedRequest(app, "/api/config/runtime/embedding-supplement", {
       method: "PATCH",
       body: JSON.stringify({
         secret_ref_mode: "paste",
@@ -83,7 +83,7 @@ describe("inspector routes", () => {
       headers: { "content-type": "application/json" }
     });
     await authenticatedRequest(app, "/api/config/ws1/garden-compute");
-    await authenticatedRequest(app, "/api/config/runtime/garden-compute", {
+    const gardenPatch = await authenticatedRequest(app, "/api/config/runtime/garden-compute", {
       method: "PATCH",
       body: JSON.stringify({
         provider_kind: "official_api",
@@ -92,6 +92,10 @@ describe("inspector routes", () => {
       }),
       headers: { "content-type": "application/json" }
     });
+    expect(embeddingPatch.status).toBe(403);
+    expect(gardenPatch.status).toBe(403);
+    await expect(embeddingPatch.json()).resolves.toEqual({ error: "runtime_secret_patch_forbidden" });
+    await expect(gardenPatch.json()).resolves.toEqual({ error: "runtime_secret_patch_forbidden" });
     await authenticatedRequest(app, "/api/config/ws1/manifestation-budget");
     await authenticatedRequest(app, "/api/config/ws1/manifestation-budget", {
       method: "PATCH",
@@ -113,17 +117,7 @@ describe("inspector routes", () => {
     expect(calls).toEqual([
       { url: "http://daemon.local/workspaces/ws1/config/soul", method: "GET", body: null },
       { url: "http://daemon.local/config/runtime/embedding-supplement", method: "GET", body: null },
-      {
-        url: "http://daemon.local/config/runtime/embedding-supplement",
-        method: "PATCH",
-        body: "{\"secret_ref_mode\":\"paste\",\"secret_value\":\"sk-test-plaintext-secret\"}"
-      },
       { url: "http://daemon.local/config/runtime/garden-compute", method: "GET", body: null },
-      {
-        url: "http://daemon.local/config/runtime/garden-compute",
-        method: "PATCH",
-        body: "{\"provider_kind\":\"official_api\",\"secret_ref_mode\":\"env\",\"secret_value\":\"ALAYA_OFFICIAL_GARDEN_API_KEY\"}"
-      },
       {
         url: "http://daemon.local/workspaces/ws1/config/manifestation-budget",
         method: "GET",

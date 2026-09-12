@@ -61,13 +61,13 @@ describe("proposal review error parity", () => {
 
     expect(mcp.ok).toBe(false);
     expect(mcp.error.code).toBe("VALIDATION");
-    expect(mcp.error.message).toBe(message);
+    expect(mcp.error.message).toBe("Invalid request.");
 
     expect(inspector.body.error?.code).toBe(mcp.error.code);
     expect(inspector.body.error?.message).toBe(mcp.error.message);
 
     expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
     expect(cli.stderr).toContain("VALIDATION");
-    expect(cli.stderr).toContain(message);
+    expect(cli.stderr).toContain("Invalid request.");
   });
 });

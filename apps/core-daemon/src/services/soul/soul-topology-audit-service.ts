@@ -1,3 +1,4 @@
+import { bindEventPublisher } from "@do-soul/alaya-core";
 import {
   GraphAuditorEventType,
   parseGraphAuditorEventPayload,
@@ -21,7 +22,10 @@ export class SoulTopologyAuditService {
   ): Promise<EventLogEntry> {
     const workspaceId = topology.workspace_id;
 
-    return await this.deps.eventLogRepo.append({
+    return await bindEventPublisher({
+      eventLogRepo: this.deps.eventLogRepo,
+      purpose: "SoulTopologyAuditService"
+    }).publish({
       event_type: GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
       entity_type: "workspace",
       entity_id: workspaceId,

@@ -33,6 +33,58 @@ function observerInput(guard: Guard): ObserveConditionalFieldInput {
 }
 
 describe("binding and temporal semantic identity", () => {
+  it.each([
+    { schema_version: 1, kind: "authorization", verdict: "unresolved", authorization_scope: "project" },
+    { schema_version: 1, kind: "query_predicate", verdict: "unresolved", predicate_name: "source.literal.nfc.v1", entity_id: "needle" }
+  ] satisfies Guard[])("keeps an explicit missing binding unresolved for $kind", (guard) => {
+    const facts = new Map([["end", { object_id: "end", scope_class: "project", content: "needle" }]]);
+    const env = new Map([["x", "seed"], ["y", "end"]]);
+    const endpoints = { sourceId: "seed", targetId: "end" };
+    expect(evaluateGuard({ ...guard, variable: "missing" }, env, facts, endpoints)).toBe("unresolved");
+    expect(evaluateGuard({ ...guard, variable: "y" }, env, facts, endpoints)).toBe("true");
+    expect(evaluateGuard(guard, env, facts, endpoints)).toBe("true");
+  });
+
+  it.each(["relation", "and", "nested", "alternative", "sequence"] as const)(
+    "preserves unresolved associated time through %s premises", (shape) => {
+      const step = relation(timeGuard);
+      const nested: QueryProgram = { schema_version: 1, kind: "hyperedge", join: "and", premises: [step] };
+      const premise: QueryProgram = shape === "nested" ? nested
+        : shape === "alternative" ? { schema_version: 1, kind: "alternative", options: [step] }
+        : shape === "sequence" ? { schema_version: 1, kind: "sequence", steps: [step] } : step;
+      const program: QueryProgram = shape === "relation" ? step
+        : { schema_version: 1, kind: "hyperedge", join: "and", premises: [premise] };
+      const query = compile(program);
+      const seeds = seedActivationsForObservation(observation("seed"), query, INTERPRETATION_CLOCK);
+      const rows = [{ sourceObjectId: "seed", targetObjectId: "end", predicate: "observed_log", assertionId: "edge",
+        validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00Z" } }];
+      const effects = (observed_at?: string) => adjacencyEffectsForRows(rows, {
+        interpretation: query, asOf: INTERPRETATION_CLOCK, liveStates: seeds.map((seed) => seed.state), overlay: {},
+        sourceFacts: new Map([["seed", { object_id: "seed", source_revision: "rev" }],
+          ["end", { object_id: "end", source_revision: "rev", observed_at }]])
+      });
+      expect(effects().some((effect) => effect.unresolved_guard)).toBe(true);
+      expect(effects().some((effect) => effect.transition || effect.hyperedge)).toBe(false);
+      expect(effects("2026-09-09T00:00:00Z").some((effect) => effect.transition || effect.hyperedge)).toBe(true);
+      expect(effects("2026-09-08T00:00:00Z").some((effect) => effect.unresolved_guard)).toBe(false);
+    }
+  );
+
+  it.each(["relation", "nested"] as const)("preserves missing revision and transfer evidence in %s", (shape) => {
+    const step = relation({ schema_version: 1, kind: "query_predicate", verdict: "unresolved", time_scope: "none" });
+    const query = compile(shape === "relation" ? step : { schema_version: 1, kind: "hyperedge", join: "and",
+      premises: [{ schema_version: 1, kind: "hyperedge", join: "and", premises: [step] }] });
+    const seeds = seedActivationsForObservation(observation("seed"), query, INTERPRETATION_CLOCK);
+    const effects = (assertionId: string, targetRevision?: string) => adjacencyEffectsForRows([
+      { sourceObjectId: "seed", targetObjectId: "end", predicate: "observed_log", assertionId,
+        validity: { kind: "open", valid_from: "2026-01-01T00:00:00Z" } }
+    ], { interpretation: query, asOf: INTERPRETATION_CLOCK, overlay: {}, liveStates: seeds.map((seed) => seed.state),
+      sourceFacts: new Map([["end", { object_id: "end", source_revision: targetRevision }]]) });
+    expect(effects("edge").some((effect) => effect.missing_target_revision)).toBe(true);
+    expect(effects("", "rev").some((effect) => effect.missing_measurement)).toBe(true);
+    expect(effects("", "rev").some((effect) => effect.transition || effect.hyperedge)).toBe(false);
+  });
+
   it.each(["A;y=B", "a=b;c%3B", "中文;角色=😀%", "\ud800;=", "long;=".repeat(100)])(
     "round-trips binding values without creating variables: %s", (value) => {
       const env = new Map([["x;=", value], ["y%3B", "tail"]]);
@@ -101,7 +153,7 @@ describe("binding and temporal semantic identity", () => {
     const observed = buildTypedObservation(observerInput(timeGuard), { objectId: "C", sourceRevision: "rev",
       observationKey: "time", observedAt: stamp, identityKind: "assertion",
       sourceRow: { object_id: "C", sourceRevision: "rev", observed_at: stamp },
-      relation: { sourceObjectId: "seed", targetObjectId: "C", predicate: "observed_log" } });
+      relation: { assertionId: "edge", sourceObjectId: "seed", targetObjectId: "C", resultObjectId: "C", predicate: "observed_log" } });
     expect(observed?.applicability.verdict ?? "false").toBe(expected);
   });
 
@@ -117,11 +169,11 @@ describe("binding and temporal semantic identity", () => {
     expect(sourceRowEligible(input, { object_id: "C", sourceRevision: "rev", valid_from: "2026-09-09T00:00:00.000Z" })).toBe(true);
     expect(sourceRowEligible(input, { object_id: "C", sourceRevision: "rev", valid_to: "2026-09-09T00:00:00.000Z" })).toBe(false);
     expect(sourceRowEligible(input, { object_id: "C", sourceRevision: "rev", valid_from: "2026-09-09T00:00:00.0001Z" })).toBe(false);
-    const row = { sourceObjectId: "seed", targetObjectId: "C", predicate: "observed_log",
+    const row = { assertionId: "edge", sourceObjectId: "seed", targetObjectId: "C", resultObjectId: "C", predicate: "observed_log",
       validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00Z" }, resolutionKind: "retracted" as const };
     expect(relationRowEligible(input, { ...row, resolvedAt: "2026-09-09T00:00:00.000Z" })).toBe(false);
     expect(relationRowEligible(input, { ...row, resolvedAt: "2026-09-09T00:00:00.0001Z" })).toBe(true);
-    const future = { sourceObjectId: "seed", targetObjectId: "C", predicate: "observed_log",
+    const future = { assertionId: "edge", sourceObjectId: "seed", targetObjectId: "C", resultObjectId: "C", predicate: "observed_log",
       validity: { kind: "open" as const, valid_from: "2026-09-09T00:00:00.0001Z" } };
     expect(relationRowEligible(input, future)).toBe(false);
     expect(relationRowEligible({ ...input, as_of: "2026-09-09T00:00:00.000100Z" }, future)).toBe(true);

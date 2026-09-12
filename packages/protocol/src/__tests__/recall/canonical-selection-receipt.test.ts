@@ -3,15 +3,23 @@ import { describe, expect, it } from "vitest";
 import {
   assertCanonicalSelectionReceiptClosure,
   createCanonicalSelectionReceipt,
+  CANONICAL_CAPTURE_IDENTITY,
   CANONICAL_CAPTURE_IDENTITY_BLOB,
   CANONICAL_CAPTURE_IDENTITY_DIGEST,
   verifyCanonicalSelectionReceipt
 } from "../../recall/selection/capture/canonical-selection-receipt.js";
 import { canonicalJson } from "../../recall/selection/capture/canonical-json.js";
 
+const LOCKED_CANONICAL_CAPTURE_IDENTITY_DIGEST =
+  "384af589ca9be6791147016463a44519aa9405a70d694cf38a1db9b8991913cd";
+
 describe("canonical selection receipt", () => {
-  it("owns an identity blob whose bytes match the published digest", () => {
-    expect(sha256(CANONICAL_CAPTURE_IDENTITY_BLOB)).toBe(CANONICAL_CAPTURE_IDENTITY_DIGEST);
+  it("computes the identity digest from the blob and keeps it stable", () => {
+    expect(CANONICAL_CAPTURE_IDENTITY_DIGEST).toBe(sha256(CANONICAL_CAPTURE_IDENTITY_BLOB));
+    expect(
+      CANONICAL_CAPTURE_IDENTITY_DIGEST,
+      "canonical capture identity blob changed; bump this lock after reviewing the algorithm contract"
+    ).toBe(LOCKED_CANONICAL_CAPTURE_IDENTITY_DIGEST);
   });
   it("binds the exact body and rejects a recomposed digest", () => {
     const receipt = createCanonicalSelectionReceipt(failedBody(), sha256);
@@ -90,11 +98,7 @@ function failedBody() {
   return {
     schema_version: 1 as const,
     ranking_authority: "prefix_sk" as const,
-    identity: {
-      algorithm_id: "alaya.recall.shadow.safe-dominance-capture.v1" as const,
-      version: "safe-dominance-capture.v1.0.1" as const,
-      digest: "384af589ca9be6791147016463a44519aa9405a70d694cf38a1db9b8991913cd" as const
-    },
+    identity: CANONICAL_CAPTURE_IDENTITY,
     execution: { status: "fail_closed" as const, reason: "invalid_state" as const },
     field_membership: { e0_keys: ["a"], e1_keys: ["a"], eligible_keys: [] },
     observations_by_candidate_key: null,

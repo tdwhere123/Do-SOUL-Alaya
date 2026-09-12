@@ -1,4 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
+    const answer = { address: "93.184.216.34", family: 4 };
+    return options?.all === true ? [answer] : answer;
+  })
+}));
 import { createHash } from "node:crypto";
 import {
   DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS,
@@ -32,6 +39,7 @@ describe("provider chat completion", () => {
         enable_thinking: false
       });
       expect(body.stream).toBeUndefined();
+      expect(init?.redirect).toBe("error");
       return new Response(JSON.stringify({
         choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
         usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 }

@@ -1,4 +1,4 @@
-import { CoreError } from "@do-soul/alaya-core";
+import { bindEventPublisher, CoreError } from "@do-soul/alaya-core";
 import {
   FileApprovalEventType,
   parseFileApprovalEventPayload,
@@ -58,7 +58,14 @@ async function resolveSoulApproval(
   const approvalEvents = await dependencies.eventLogRepo.queryByEntity("approval", input.approvalId);
   const approvalState = getApprovalState(approvalEvents, input.approvalId);
   const resolvedAt = now();
-  const entry = await dependencies.eventLogRepo.append({
+  const entry = await bindEventPublisher({
+    eventLogRepo: dependencies.eventLogRepo,
+    runtimeNotifier: {
+      notify: () => undefined,
+      notifyEntry: (event) => dependencies.runtimeNotifier.notifyEntry(event)
+    },
+    purpose: "SoulApprovalService"
+  }).publish({
     event_type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
     entity_type: "approval",
     entity_id: input.approvalId,
@@ -80,8 +87,6 @@ async function resolveSoulApproval(
       run_id: run.run_id
     }
   });
-
-  await dependencies.runtimeNotifier.notifyEntry(entry);
 
   return {
     approval_id: input.approvalId,

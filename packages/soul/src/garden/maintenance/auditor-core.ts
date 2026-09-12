@@ -120,7 +120,10 @@ export abstract class AuditorCore {
   ): Promise<T> {
     const eventLogRepo = this.dependencies.eventLogRepo;
     if (eventLogRepo === undefined) {
-      return mutate(null);
+      throw new AlayaError(
+        "EVENT_LOG_REQUIRED",
+        "Auditor EventLog-first mutation requires eventLogRepo"
+      );
     }
 
     return await eventLogRepo.appendManyWithMutation([entry], ([eventLogEntry]) =>

@@ -12,6 +12,8 @@ export type RemediationClaimCreate =
   SessionOverrideRemediationDependencies["claimService"]["create"];
 export type RemediationEventLogAppend =
   SessionOverrideRemediationDependencies["eventLogRepo"]["append"];
+export type RemediationEventLogAppendManyWithMutation =
+  SessionOverrideRemediationDependencies["eventLogRepo"]["appendManyWithMutation"];
 export type RemediationHasSessionOverridePromotion =
   SessionOverrideRemediationDependencies["eventLogRepo"]["hasSessionOverridePromotion"];
 export type RemediationCountDistinctAppliedSessionOverrideRuns =
@@ -24,11 +26,7 @@ export type RemediationWarn = NonNullable<SessionOverrideRemediationDependencies
 export interface RemediationTestDeps {
   readonly memoryService: { readonly create: Mock<RemediationMemoryCreate> };
   readonly claimService: { readonly create: Mock<RemediationClaimCreate> };
-  readonly eventLogRepo: {
-    readonly append: Mock<RemediationEventLogAppend>;
-    readonly hasSessionOverridePromotion: Mock<RemediationHasSessionOverridePromotion>;
-    readonly countDistinctAppliedSessionOverrideRuns: Mock<RemediationCountDistinctAppliedSessionOverrideRuns>;
-  };
+  readonly eventLogRepo: SessionOverrideRemediationDependencies["eventLogRepo"];
   readonly warn: Mock<RemediationWarn>;
   readonly targetObjectResolver?: { readonly resolveDimension: Mock<RemediationResolveDimension> };
 }
@@ -43,6 +41,16 @@ export function createDeps(
 ): RemediationTestDeps {
   const storedEvents: EventLogEntry[] = [];
   const warn = vi.fn<RemediationWarn>();
+  const append = vi.fn<RemediationEventLogAppend>(async (event) => {
+    const stored: EventLogEntry = {
+      event_id: `event-${storedEvents.length + 1}`,
+      created_at: "2026-03-24T00:00:00.000Z",
+      revision: 0,
+      ...event
+    };
+    storedEvents.push(stored);
+    return stored;
+  });
 
   const deps = {
     memoryService: {
@@ -58,16 +66,19 @@ export function createDeps(
       }))
     },
     eventLogRepo: {
-      append: vi.fn<RemediationEventLogAppend>(async (event) => {
-        const stored: EventLogEntry = {
-          event_id: `event-${storedEvents.length + 1}`,
-          created_at: "2026-03-24T00:00:00.000Z",
-          revision: 0,
-          ...event
-        };
-        storedEvents.push(stored);
-        return stored;
-      }),
+      append,
+      appendManyWithMutation: vi.fn(
+        async <T>(
+          entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+          mutate: (rows: readonly EventLogEntry[]) => T
+        ): Promise<T> => {
+          const persisted: EventLogEntry[] = [];
+          for (const entry of entries) {
+            persisted.push(await append(entry));
+          }
+          return mutate(persisted);
+        }
+      ) as RemediationEventLogAppendManyWithMutation,
       hasSessionOverridePromotion:
         overrides.hasSessionOverridePromotion ??
         vi.fn<RemediationHasSessionOverridePromotion>(async (overrideId) =>

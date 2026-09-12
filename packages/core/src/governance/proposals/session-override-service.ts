@@ -10,6 +10,7 @@ import {
   type SessionOverride
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { bindEventPublisher } from "../../runtime/event-publisher.js";
 import { isExpired } from "../../shared/time.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import { EventLogBackedCache } from "../cache/event-log-backed-cache.js";
@@ -124,7 +125,10 @@ export class SessionOverrideService {
     occurredAt: string,
     override: Readonly<SessionOverride>
   ): Promise<void> {
-    await this.dependencies.eventLogRepo.append({
+    await bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      purpose: "SessionOverrideService"
+    }).publish({
       event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED,
       entity_type: "session_override",
       entity_id: override.runtime_id,

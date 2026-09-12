@@ -197,7 +197,7 @@ export class ClaimService {
     contestedBy: string | null,
     deferredNotificationEvents?: EventLogEntry[]
   ): Promise<void> {
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: MemoryGovernanceEventType.SOUL_CLAIM_CONTESTED,
       entity_type: "claim_form",
       entity_id: claim.object_id,
@@ -212,12 +212,20 @@ export class ClaimService {
         contested_by: contestedBy,
         triage_result: "deferred"
       })
-    });
+    };
+    const event = await this.requireEventPublisher().appendManyWithMutation(
+      [eventInput],
+      (entries) => {
+        const entry = entries[0];
+        if (entry === undefined) {
+          throw new CoreError("CONFLICT", "Claim contested audit was not appended atomically");
+        }
+        return entry;
+      }
+    );
 
     if (deferredNotificationEvents !== undefined) {
       deferredNotificationEvents.push(event);
-    } else {
-      await this.dependencies.runtimeNotifier.notifyEntry(event);
     }
   }
 

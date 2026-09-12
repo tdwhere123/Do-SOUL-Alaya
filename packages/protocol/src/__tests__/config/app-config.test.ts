@@ -243,7 +243,19 @@ describe("app config schemas", () => {
         },
         mcp: {
           enrolled_tools: 2,
-          allowed_servers: ["filesystem"]
+          allowed_servers: ["filesystem"],
+          catalog_health: {
+            servers: [
+              {
+                server_name: "filesystem",
+                status: "inactive",
+                last_error: {
+                  code: "MCP_EXTERNAL_TIMEOUT",
+                  message: "listTools timed out"
+                }
+              }
+            ]
+          }
         }
       })
     ).toMatchObject({

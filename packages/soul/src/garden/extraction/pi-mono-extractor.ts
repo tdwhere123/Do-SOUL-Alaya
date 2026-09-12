@@ -1,5 +1,5 @@
 import { SignalExtractorError } from "./pi-mono-errors.js";
-import { parseOrRecoverJson, type JsonRecoveryKind } from "./pi-mono-json-recovery.js";
+import { inspectJsonRecovery, parseOrRecoverJson, type JsonRecoveryKind } from "./pi-mono-json-recovery.js";
 import { readTextContent, requestJsonPayload, selectModel } from "./pi-mono-transport.js";
 
 export { SignalExtractorError } from "./pi-mono-errors.js";
@@ -20,10 +20,10 @@ export interface SignalExtractor {
 }
 
 // invariant: per-extract-call observability surface for the diagnostic dump
-// and the bench seed report. recoveryKind records which tryRecoverJson branch
-// (markdown / trailing / balanced) salvaged the body, or "none" when the
-// model returned strict JSON. Retry fields are an opaque execution receipt
-// from the injected transport; Soul never derives provider retry policy.
+// and the bench seed report. recoveryKind records which parseOrRecoverJson /
+// inspectJsonRecovery path salvaged the body, or "none" when the model
+// returned strict JSON. Retry fields are an opaque execution receipt from the
+// injected transport; Soul never derives provider retry policy.
 export interface SignalExtractorMeta {
   readonly recoveryKind: JsonRecoveryKind;
   readonly retryCount: number;
@@ -203,6 +203,14 @@ function recoverAttemptJson(
   if (recovered !== null) {
     return recovered;
   }
+  const inspected = inspectJsonRecovery(rawText);
+  if (inspected?.recoveryKind === "balanced_close") {
+    throw new SignalExtractorError(
+      "invalid_json",
+      "Signal extractor returned truncated JSON.",
+      { retryClassification: "failure_truncated_response" }
+    );
+  }
   throw new SignalExtractorError(
     "invalid_json",
     "Signal extractor returned invalid JSON.",
@@ -211,8 +219,13 @@ function recoverAttemptJson(
 }
 
 function normalizeConsumerFailure(error: SignalExtractorError): SignalExtractorError {
-  if (error.kind !== "invalid_json" ||
-      error.retryClassification === "failure_non_retryable_response") return error;
+  if (error.kind !== "invalid_json") return error;
+  if (
+    error.retryClassification === "failure_non_retryable_response" ||
+    error.retryClassification === "failure_truncated_response"
+  ) {
+    return error;
+  }
   return new SignalExtractorError(error.kind, error.message, {
     cause: (error as { readonly cause?: unknown }).cause,
     retryCount: error.retryCount,

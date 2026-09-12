@@ -175,7 +175,10 @@ describe("H02 — sealed slice private working copy", () => {
         await nativeSession.recall(payload) as Awaited<ReturnType<typeof recallRecallEvalPagerChild>>;
     if (nativeSession === null) await openRecallEvalPagerChild(buildOpenPayload(dataDirRoot));
     else await nativeSession.open(buildOpenPayload(dataDirRoot));
-    const base = buildRecallPayload("paged", WORKSPACE_A, TOKEN_A);
+    const plain = buildRecallPayload("paged", WORKSPACE_A, TOKEN_A);
+    const goldId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
+    const base = { ...plain, question: { ...plain.question, answerSessionIds: ["answer"],
+      sidecar: [{ objectId: goldId, objectKind: "memory_entry" as const, sessionId: "answer", hasAnswer: true }] } };
     const budget = { schema_version: 1 as const, work_units: 10_000, memory_bytes: 1_000_000,
       page_budget: 1, finalization_reserve: 100, min_envelope: 10 };
     const completePack = await recallPage({
@@ -197,6 +200,8 @@ describe("H02 — sealed slice private working copy", () => {
       throw new Error(`first target page ${first.status}:${first.reason}`);
     }
     expect(first.entries).toHaveLength(1);
+    expect(indexEntrySubjectId(first.entries[0]!)).not.toBe(goldId);
+    expect(first.metrics.historical_memory_any_at_k.hit_at_1).toEqual({ status: "miss", value: false });
     expect(first.continuation).not.toBeNull();
     expect(first.request.budget).toEqual(budget);
     const workingPath = workingAlayaDbPath(pagerSwitchWorkingDataDir(dataDirRoot, 2, WORKSPACE_A));
@@ -212,6 +217,12 @@ describe("H02 — sealed slice private working copy", () => {
         throw new Error(`continued target page ${page.status}:${page.reason}`);
       }
       expect(page.identity).toEqual(first.identity);
+      expect(page.entries.length + (page.product_updates?.length ?? 0)).toBeLessThanOrEqual(1);
+      expect(page.first_exposure_slots).toEqual(first.first_exposure_slots);
+      expect(page.first_exposure_page.initial).toEqual(first.first_exposure_page.initial);
+      expect(page.metrics.historical_memory_any_at_k).toEqual(first.metrics.historical_memory_any_at_k);
+      expect(pack.hitAt1).toBe(firstPack.hitAt1);
+      expect(pack.diagnostics.hit_at_1).toBe(firstPack.diagnostics.hit_at_1);
       expect(page.request.budget).toEqual(budget);
       expect(pack.embeddingWarmup).toBeNull();
       expect(pack.queryEmbeddingWarmup).toBeNull();

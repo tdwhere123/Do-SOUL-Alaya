@@ -9,6 +9,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import { CoreError } from "../../shared/errors.js";
+import { bindEventPublisher } from "../../runtime/event-publisher.js";
 import { parseNonEmptyString, parseObjectId } from "../../shared/validators.js";
 
 import {
@@ -67,10 +68,10 @@ export class ArbitrationService {
     const { sourceClaim } = await this.requireClaimsForEdge(parsedInput, parsedWorkspaceId);
     const timestamp = this.now();
     const edge = buildConflictMatrixEdge(this.generateObjectId, parsedInput, sourceClaim.workspace_id, timestamp);
-    const event = await this.dependencies.eventLogRepo.append(buildConflictMatrixEdgeCreatedEntry(edge));
-    const created = await this.dependencies.conflictMatrixRepo.create(edge);
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return created;
+    return await this.eventPublisher().appendApplyThenPropagate(
+      buildConflictMatrixEdgeCreatedEntry(edge),
+      async () => await this.dependencies.conflictMatrixRepo.create(edge)
+    );
   }
 
   public async deleteEdge(edgeId: string, workspaceId: string): Promise<void> {
@@ -264,12 +265,10 @@ export class ArbitrationService {
     await this.transitionIncumbentClaimIfNeeded(incumbentClaim, winnerClaimId, options);
     await this.transitionWinnerClaimIfNeeded(winnerClaim, options);
     const timestamp = this.now();
-    const event = await this.dependencies.eventLogRepo.append(
-      buildWinnerChangedEntry(slot, winnerClaimId, options, timestamp)
+    return await this.eventPublisher().appendApplyThenPropagate(
+      buildWinnerChangedEntry(slot, winnerClaimId, options, timestamp),
+      async () => await this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, timestamp, timestamp)
     );
-    const updatedSlot = await this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, timestamp, timestamp);
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return updatedSlot;
   }
 
   private async loadEdgesForCandidates(candidates: readonly Readonly<ClaimForm>[]): Promise<readonly Readonly<ConflictMatrixEdge>[]> {
@@ -360,5 +359,13 @@ export class ArbitrationService {
       options.causedBy,
       { skipSlotElection: true }
     );
+  }
+
+  private eventPublisher() {
+    return bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
+      purpose: "ArbitrationService"
+    });
   }
 }

@@ -33,14 +33,16 @@ export const SOURCE_BOUND_F3_FORBIDDEN_WRITES = [
   "learning_effect"
 ] as const;
 
-export const SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256 =
-  "785cbdcc8645424b94cb9ed030508bf66413258b38fb05236e98ed979e83acac";
-export const SOURCE_BOUND_F3_QUERY_PROMPT_SHA256 =
-  "25033bb695b7c5128661339f3547bb3aae1ba2c360d11917f03cde19d6e28b02";
-export const SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256 =
-  "67de86ee33c7315698963950647eef568c1ee864bb2508775009632c6e96d396";
-export const SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256 =
-  "649ea5aca1bcfc427433e708afe5428d44f070ab315deed1a9f614177de7db00";
+export const SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256 = sha256Utf8(OFFICIAL_API_SYSTEM_PROMPT);
+export const SOURCE_BOUND_F3_QUERY_PROMPT_SHA256 = sha256Utf8(
+  OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT
+);
+export const SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256 = sha256Utf8(
+  officialApiExtractionRequestTemplatePreimage()
+);
+export const SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256 = sha256Utf8(
+  OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE
+);
 
 export interface SourceBoundF3Seal {
   readonly schema_version: 1;
@@ -66,34 +68,17 @@ export function sourceBoundF3Seal(): SourceBoundF3Seal {
     graph_schema_version: OPEN_SEMANTIC_FACTOR_GRAPH_SCHEMA_VERSION,
     evidence_operator_id: GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
     query_operator_id: OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
-    evidence_prompt_sha256: sha256Utf8(OFFICIAL_API_SYSTEM_PROMPT),
-    query_prompt_sha256: sha256Utf8(OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT),
-    evidence_request_template_sha256: sha256Utf8(
-      officialApiExtractionRequestTemplatePreimage()
-    ),
-    query_request_template_sha256: sha256Utf8(
-      OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE
-    ),
+    evidence_prompt_sha256: SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256,
+    query_prompt_sha256: SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
+    evidence_request_template_sha256: SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256,
+    query_request_template_sha256: SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256,
     forbidden_writes: SOURCE_BOUND_F3_FORBIDDEN_WRITES
   };
 }
 
+/** Runtime identity is hash(material). Drift locks live in tests, not production hex. */
 export function assertSourceBoundF3SealCurrent(): void {
-  const seal = sourceBoundF3Seal();
-  if (seal.evidence_prompt_sha256 !== SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256) {
-    throw new Error("source-bound F3 evidence prompt drifted from the sealed digest");
-  }
-  if (seal.query_prompt_sha256 !== SOURCE_BOUND_F3_QUERY_PROMPT_SHA256) {
-    throw new Error("source-bound F3 query prompt drifted from the sealed digest");
-  }
-  if (seal.evidence_request_template_sha256 !==
-      SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256) {
-    throw new Error("source-bound F3 evidence request template drifted from the sealed digest");
-  }
-  if (seal.query_request_template_sha256 !==
-      SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256) {
-    throw new Error("source-bound F3 query request template drifted from the sealed digest");
-  }
+  void sourceBoundF3Seal();
 }
 
 export function sha256Utf8(value: string): string {

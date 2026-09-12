@@ -240,6 +240,24 @@ export class EventPublisher {
     return entry;
   }
 
+  /**
+   * EventLog-first when apply cannot join the EventLog transaction (async repo
+   * ports). Prefer appendManyWithMutation when apply is synchronous.
+   */
+  public async appendApplyThenPropagate<T>(
+    eventInput: EventPublisherInput,
+    apply: (entry: EventLogEntry) => T | Promise<T>
+  ): Promise<T> {
+    const entry = await this.appendToEventLog(eventInput);
+    const result = await apply(entry);
+    try {
+      await this.propagate(entry);
+    } catch (propagateError) {
+      await this.reportPostCommitPropagationFailure(entry, propagateError, [entry]);
+    }
+    return result;
+  }
+
   private async appendToEventLog(
     eventInput: EventPublisherInput
   ): Promise<EventLogEntry> {
@@ -349,4 +367,53 @@ export function appendEventLogSynchronously(
     throw new EventLogSyncAppendRequiredError();
   }
   return entry;
+}
+
+const INERT_HOT_STATE: RunHotStateApplierPort = { apply: () => undefined };
+const INERT_NOTIFIER: RuntimeNotifier = {
+  notify: () => undefined,
+  notifyEntry: () => undefined
+};
+
+export type LegacyEventLogAppendPort = Pick<EventPublisherEventLogRepoPort, "append"> &
+  Partial<EventPublisherEventLogRepoPort>;
+
+/**
+ * Production services take EventPublisher. Daemon wiring that still injects a
+ * raw EventLog repo is adapted here so append+notify cannot skip propagate.
+ */
+export function bindEventPublisher(input: {
+  readonly eventPublisher?: EventPublisher;
+  readonly eventLogRepo?: LegacyEventLogAppendPort | { readonly append?: LegacyEventLogAppendPort["append"] };
+  readonly runtimeNotifier?: Partial<RuntimeNotifier>;
+  readonly runHotStateService?: RunHotStateApplierPort;
+  readonly purpose: string;
+}): EventPublisher {
+  if (input.eventPublisher !== undefined) {
+    return input.eventPublisher;
+  }
+  const eventLogRepo = input.eventLogRepo;
+  if (eventLogRepo?.append === undefined) {
+    throw new CoreError("CONFLICT", `${input.purpose} requires an event publisher`);
+  }
+  // Spreading a class instance drops prototype methods and unbinds `this`.
+  return new EventPublisher({
+    eventLogRepo: adaptLegacyEventLogRepo(eventLogRepo as LegacyEventLogAppendPort),
+    runtimeNotifier: { ...INERT_NOTIFIER, ...input.runtimeNotifier },
+    runHotStateService: input.runHotStateService ?? INERT_HOT_STATE
+  });
+}
+
+function adaptLegacyEventLogRepo(repo: LegacyEventLogAppendPort): EventPublisherEventLogRepoPort {
+  return {
+    append: (event) => repo.append(event),
+    deleteById: (id) => {
+      repo.deleteById?.(id);
+    },
+    transactional: <T>(fn: () => T): T =>
+      repo.transactional !== undefined ? repo.transactional(fn) : fn(),
+    ...(repo.getStorageConnectionIdentity === undefined
+      ? {}
+      : { getStorageConnectionIdentity: () => repo.getStorageConnectionIdentity!() })
+  };
 }

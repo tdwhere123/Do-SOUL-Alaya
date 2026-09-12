@@ -17,10 +17,10 @@ const PROJECTS = [
 
 const extraArgs = process.argv.slice(2);
 const isWindows = process.platform === "win32";
-const childEnv = createChildEnv();
 const coverageEnabled = extraArgs.some(
   (arg) => arg === "--coverage.enabled" || arg.startsWith("--coverage.enabled=")
 );
+const childEnv = createChildEnv();
 const hasCoverageReportsDirectoryArg = extraArgs.some(
   (arg) =>
     arg === "--coverage.reportsDirectory" || arg.startsWith("--coverage.reportsDirectory=")
@@ -107,6 +107,14 @@ function createChildEnv() {
     if (key.startsWith("npm_")) {
       delete env[key];
     }
+  }
+  // vitest.config.mjs budgets ~3.5 GiB/worker (~7 GiB under coverage). Node's
+  // default old-space is ~2 GiB and coverage + live daemon fixtures exceed it.
+  if (!/(?:^|\s)--max-old-space-size=/.test(env.NODE_OPTIONS ?? "")) {
+    const heapMb = coverageEnabled ? 6144 : 3584;
+    env.NODE_OPTIONS = [env.NODE_OPTIONS, `--max-old-space-size=${heapMb}`]
+      .filter((part) => part !== undefined && part.length > 0)
+      .join(" ");
   }
   return env;
 }

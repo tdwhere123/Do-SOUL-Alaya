@@ -8,6 +8,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   EventPublisher,
+  bindEventPublisher,
   type EventPublisherEventLogRepoPort,
   type EventPublisherInput
 } from "../../runtime/event-publisher.js";
@@ -402,6 +403,77 @@ describe("EventPublisher wiring (fake EventLog repo)", () => {
       "notify",
       "notify"
     ]);
+  });
+
+  it("bindEventPublisher throws when neither publisher nor EventLog repo is provided", () => {
+    expect(() => bindEventPublisher({ purpose: "TestService" })).toThrow(/requires an event publisher/);
+  });
+
+  it("bindEventPublisher keeps class-instance EventLog `this` across append", async () => {
+    const recorded: string[] = [];
+    const entry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: WorkerStateChangedPayloadSchema.parse({
+        workerId: "worker-1",
+        state: "active",
+        previousState: "init"
+      })
+    });
+    class ClassEventLogRepo {
+      public constructor(private readonly stored: EventLogEntry) {}
+      public append(): EventLogEntry {
+        recorded.push(`bound:${this.stored.event_id}`);
+        return this.stored;
+      }
+      public deleteById(): void {}
+      public transactional<T>(fn: () => T): T {
+        return fn();
+      }
+    }
+    const publisher = bindEventPublisher({
+      eventLogRepo: new ClassEventLogRepo(entry),
+      purpose: "TestService"
+    });
+    await expect(publisher.publish(toEventInput(entry))).resolves.toEqual(entry);
+    expect(recorded).toEqual(["bound:evt_worker-1"]);
+  });
+
+  it("appendApplyThenPropagate appends, applies, then notifies", async () => {
+    const recorded: string[] = [];
+    const entry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: WorkerStateChangedPayloadSchema.parse({
+        workerId: "worker-1",
+        state: "active",
+        previousState: "init"
+      })
+    });
+    const publisher = bindEventPublisher({
+      eventLogRepo: createSingleEntryRepo(entry, recorded),
+      runtimeNotifier: {
+        notify: vi.fn(),
+        notifyEntry: vi.fn(async () => {
+          recorded.push("notify");
+        })
+      },
+      purpose: "TestService"
+    });
+    const result = await publisher.appendApplyThenPropagate(toEventInput(entry), async () => {
+      recorded.push("apply");
+      return "saved";
+    });
+    expect(result).toBe("saved");
+    expect(recorded).toEqual(["append", "apply", "notify"]);
   });
 });
 

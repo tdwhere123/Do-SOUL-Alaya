@@ -31,13 +31,7 @@ function registerEmbeddingSupplementRoutes(app: Hono, options: InspectorProxyOpt
   });
 
   app.patch("/api/config/runtime/embedding-supplement", async (context) => {
-    const forbidden = assertInspectorWorkspace(context, options, options.workspaceId);
-    if (forbidden !== null) return forbidden;
-    return await proxyDaemonJson(context, options, {
-      method: "PATCH",
-      path: "/config/runtime/embedding-supplement",
-      body: await context.req.json()
-    });
+    return denyInspectorRuntimeSecretPatch(context);
   });
 }
 
@@ -52,13 +46,7 @@ function registerGardenComputeRoutes(app: Hono, options: InspectorProxyOptions):
   });
 
   app.patch("/api/config/runtime/garden-compute", async (context) => {
-    const forbidden = assertInspectorWorkspace(context, options, options.workspaceId);
-    if (forbidden !== null) return forbidden;
-    return await proxyDaemonJson(context, options, {
-      method: "PATCH",
-      path: "/config/runtime/garden-compute",
-      body: await context.req.json()
-    });
+    return denyInspectorRuntimeSecretPatch(context);
   });
 }
 
@@ -96,6 +84,12 @@ function registerEmbeddingStatusRoute(app: Hono, options: InspectorProxyOptions)
       path: `/workspaces/${encodeURIComponent(context.req.param("workspaceId"))}/embedding-status`
     });
   });
+}
+
+function denyInspectorRuntimeSecretPatch(context: Context): Response {
+  // Inspector sessions are workspace-scoped loopback tooling and must not
+  // mutate process-level secrets through the daemon runtime PATCH surface.
+  return context.json({ error: "runtime_secret_patch_forbidden" }, 403);
 }
 
 function registerConfigSection(

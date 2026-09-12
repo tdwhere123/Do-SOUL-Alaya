@@ -64,4 +64,26 @@ describe("inspector server startup", () => {
     expect(stderrChunks.join("")).toBe("inspector_workspace_id_missing\n");
     expect(process.exitCode).toBe(2);
   });
+
+  it("refuses to start with a non-loopback daemon URL", async () => {
+    const stderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    stderr.on("data", (chunk) => stderrChunks.push(chunk.toString()));
+
+    await expect(
+      startInspectorServer({
+        env: {
+          ALAYA_INSPECTOR_TOKEN: "token",
+          ALAYA_DAEMON_URL: "http://evil.example:5173",
+          ALAYA_INSPECTOR_WORKSPACE_ID: "ws-1",
+          ALAYA_INSPECTOR_LAUNCH_CODE: "launch"
+        },
+        stderr,
+        stdout: new PassThrough()
+      })
+    ).rejects.toThrow("inspector_daemon_url_not_loopback");
+
+    expect(stderrChunks.join("")).toBe("inspector_daemon_url_not_loopback\n");
+    expect(process.exitCode).toBe(2);
+  });
 });

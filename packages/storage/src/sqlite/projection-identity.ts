@@ -1,3 +1,5 @@
+import { emptyBytesSha256, emptyJsonArraySha256 } from "@do-soul/alaya-protocol";
+
 export type ProjectionIdentity = Readonly<{
   readonly projection_count: number;
   readonly projection_digest: string;
@@ -7,11 +9,6 @@ export type ProjectionIdentity = Readonly<{
   readonly projection_policy_id: string;
   readonly projection_policy_sha256: string;
 }>;
-
-const BOOTSTRAP_EMPTY_PROJECTION_DIGEST =
-  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-const CORE_EMPTY_PROJECTION_DIGEST =
-  "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
 
 export function isCompatibleProjectionIdentity(
   left: ProjectionIdentity,
@@ -37,6 +34,5 @@ function hasMatchingProjectionMetadata(
 }
 
 function isEmptyProjectionDigest(digest: string): boolean {
-  return digest === BOOTSTRAP_EMPTY_PROJECTION_DIGEST ||
-    digest === CORE_EMPTY_PROJECTION_DIGEST;
+  return digest === emptyBytesSha256() || digest === emptyJsonArraySha256();
 }

@@ -1,4 +1,5 @@
 import { serve, type ServerType } from "@hono/node-server";
+import { assertInspectorDaemonUrl } from "../routes/shared.js";
 import { createInspectorApp } from "./app.js";
 
 export interface InspectorServerOptions {
@@ -33,6 +34,13 @@ export async function startInspectorServer(options: InspectorServerOptions = {})
     stderr.write("inspector_daemon_url_missing\n");
     process.exitCode = 2;
     throw new Error("inspector_daemon_url_missing");
+  }
+  try {
+    assertInspectorDaemonUrl(daemonUrl, env);
+  } catch {
+    stderr.write("inspector_daemon_url_not_loopback\n");
+    process.exitCode = 2;
+    throw new Error("inspector_daemon_url_not_loopback");
   }
   const workspaceId = env.ALAYA_INSPECTOR_WORKSPACE_ID?.trim();
   if (!workspaceId) {
@@ -71,6 +79,7 @@ if (process.argv[1] !== undefined && process.argv[1].endsWith("/server.js")) {
       (error.message === "inspector_token_missing" ||
         error.message === "inspector_launch_code_missing" ||
         error.message === "inspector_daemon_url_missing" ||
+        error.message === "inspector_daemon_url_not_loopback" ||
         error.message === "inspector_workspace_id_missing");
     if (!isStartupConfigError) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

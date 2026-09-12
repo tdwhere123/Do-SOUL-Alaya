@@ -191,6 +191,15 @@ export function hashMemoryContent(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
+export const EMBEDDING_CONTENT_HASH_STALE_REASON = "embedding_content_hash_stale";
+
+export function isMemoryEmbeddingContentStale(
+  storedContentHash: string,
+  memoryContent: string
+): boolean {
+  return storedContentHash !== hashMemoryContent(memoryContent);
+}
+
 export async function sleepBackfillRetry(delayMs: number): Promise<void> {
   if (delayMs <= 0) {
     return;

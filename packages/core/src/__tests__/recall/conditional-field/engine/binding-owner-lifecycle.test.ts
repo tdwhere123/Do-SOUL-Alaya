@@ -78,10 +78,18 @@ describe("execution-owned binding recovery", () => {
     const requestBudget = { ...budget, finalization_reserve: 100, min_envelope: 10 };
     const interpretation = compileConditionalFieldQuery({ source: "typed", program: query.program, budget: requestBudget,
       snapshot_id: SNAPSHOT_ID, authorized_scopes: null, interpretation_clock: "2026-09-10T00:00:00Z",
-      view: { schema_version: 1, requested_roles: ["requested", "associated"], result_kind_view: "memory_only" } });
-    const rows = Array.from({ length: 16 }, (_, i) => ({ assertionId: "e".repeat(250) + String(i).padStart(2, "0"),
-      sourceObjectId: "a", targetObjectId: i === 15 ? "B".repeat(256) : `short-${i}`, predicate: "p",
-      validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00Z" } }));
+      view: { ...defaultView(), result_kind_view: "memory_only" } });
+    const rows = Array.from({ length: 16 }, (_, i) => {
+      const targetObjectId = i === 15 ? "B".repeat(256) : `short-${i}`;
+      return {
+        assertionId: "e".repeat(250) + String(i).padStart(2, "0"),
+        sourceObjectId: "a",
+        targetObjectId,
+        resultObjectId: targetObjectId,
+        predicate: "p",
+        validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00Z" }
+      };
+    });
     const owner = new BindingContextStore(53_000);
     const cursor = createAdjacencyEffectCursor(rows, { interpretation, asOf: "2026-09-10T00:00:00Z",
       liveStates: seedProgramStates(query.program).map((state) => productKey("a", "h0", "x=a", state)),
@@ -98,7 +106,7 @@ describe("execution-owned binding recovery", () => {
     expect(restarted.retained_bytes).toBeGreaterThanOrEqual(payloadBytes + 15 * 64);
     expect(restarted.retained_bytes).toBeLessThan(failed.retained_bytes);
     let offset = 0, completedWork = cached.completed_work;
-    const effects = [];
+    const effects: Array<(typeof cached.effects)[number]> = [];
     let complete = false;
     for (let i = 0; i < 2_000 && !complete; i++) {
       const next = cursor.advance(offset, 1, 1_000_000);
@@ -119,7 +127,7 @@ describe("execution-owned binding recovery", () => {
     const requestBudget = { ...budget, finalization_reserve: 100, min_envelope: 10 };
     const interpretation = compileConditionalFieldQuery({ source: "typed", program: query.program, budget: requestBudget,
       snapshot_id: SNAPSHOT_ID, authorized_scopes: null, interpretation_clock: "2026-09-10T00:00:00Z",
-      view: { schema_version: 1, requested_roles: ["requested", "associated"], result_kind_view: "memory_only" } });
+      view: { ...defaultView(), result_kind_view: "memory_only" } });
     const target = "B".repeat(256);
     const readers: ObserverReaders = {
       lexical: () => ({ ids: ["a"], nativeVisits: 1, nativeBytes: 1, rowsRead: 1, bytesRead: 1, truncated: false }),
@@ -127,7 +135,7 @@ describe("execution-owned binding recovery", () => {
         rowsRead: 1, bytesRead: 1, unavailable: false }),
       relation: ({ subject, predicate, afterAssertionId }) => {
         const observations = subject === "a" && predicate === "p" && afterAssertionId === null
-          ? [{ assertionId: "edge", sourceObjectId: "a", targetObjectId: target, predicate: "p",
+          ? [{ assertionId: "edge", sourceObjectId: "a", targetObjectId: target, resultObjectId: target, predicate: "p",
             validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00Z" } }] : [];
         return { observations, nativeVisits: observations.length, nativeBytes: observations.length, rowsRead: observations.length,
           bytesRead: observations.length, truncated: false, committedThrough: observations.at(-1)?.assertionId ?? afterAssertionId };
@@ -157,7 +165,7 @@ describe("execution-owned binding recovery", () => {
         rowsRead: 1, bytesRead: 1, unavailable: false }),
       relation: ({ subject, predicate, afterAssertionId }) => {
         const observations = subject === "a" && predicate === "p" && afterAssertionId === null
-          ? [{ assertionId: "edge", sourceObjectId: "a", targetObjectId: "b", predicate: "p",
+          ? [{ assertionId: "edge", sourceObjectId: "a", targetObjectId: "b", resultObjectId: "b", predicate: "p",
             validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00Z" } }] : [];
         return { observations, nativeVisits: observations.length, nativeBytes: observations.length, rowsRead: observations.length,
           bytesRead: observations.length, truncated: false, committedThrough: observations.at(-1)?.assertionId ?? afterAssertionId };
@@ -216,8 +224,8 @@ describe("execution-owned binding recovery", () => {
     const target = effects.find((effect) => effect.transition !== undefined)?.transition?.to;
     expect(target).toBeDefined();
     expect(parseBindingContext(target!.binding_context, owner).get("y")).toBe("b");
-    const value = { state: target!, lower: 1000, upper: 1000 } as Parameters<typeof claimObligationAccepts>[0];
-    const view = { ...defaultView(), claim_demands: [{ variable: "y", required_claim: "supported" as const }] };
+    const value = { schema_version: 1 as const, state: target!, lower: 1000, upper: 1000, accepting: true } as unknown as Parameters<typeof claimObligationAccepts>[0];
+    const view = { ...defaultView(), claim_demands: [{ variable: "y", proposition_kind: "bound", argument_variables: ["y"], required_claim: "supported" as const }] };
     expect(claimObligationAccepts(value, view, "supported", owner)).toBe(true);
     expect(claimObligationAccepts(value, view, "unknown", owner)).toBe(false);
     expect(() => claimObligationAccepts(value, view, "supported")).toThrow(BindingContextUnavailableError);

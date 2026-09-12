@@ -22,6 +22,7 @@ import {
   type WorkerTierWindowResult
 } from "../../../runtime/recall-read-worker/memory-client.js";
 import { runOperation } from "../../../runtime/recall-read-worker/dispatch.js";
+import { encodeAuthorizedScopesAdmission } from "../../../runtime/recall-read-worker/operation-schemas.js";
 import {
   RECALL_READ_WORKER_PROTOCOL_VERSION,
   type RecallReadWorkerOperation
@@ -166,6 +167,20 @@ export function createQueryOnlyRuntime(database: StorageDatabase): RecallReadWor
   };
 }
 
+export function encodeWorkerRecallPayload(payload: unknown): unknown {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+  const record = payload as Record<string, unknown>;
+  if (!Object.hasOwn(record, "authorized_scopes")) {
+    return payload;
+  }
+  return {
+    ...record,
+    authorized_scopes: encodeAuthorizedScopesAdmission(record.authorized_scopes as never)
+  };
+}
+
 export async function dispatchQueryOnly(
   runtime: RecallReadWorkerRuntime,
   operation: RecallReadWorkerOperation,
@@ -175,7 +190,7 @@ export async function dispatchQueryOnly(
     protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
     id: 1,
     operation,
-    payload
+    payload: operation === "conditionalField.recall" ? encodeWorkerRecallPayload(payload) : payload
   });
   return structuredClone(await runOperation(runtime, request));
 }

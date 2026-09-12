@@ -10,6 +10,7 @@ import {
   type RetentionState
 } from "@do-soul/alaya-protocol";
 
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 import type {
   DynamicsEventLogInput,
   DynamicsServiceEventLogRepoPort,
@@ -114,21 +115,30 @@ export async function appendRetentionUpdatedEvent(
   eventLogRepo: DynamicsServiceEventLogRepoPort,
   audit: RetentionUpdatedAudit
 ): Promise<EventLogEntry> {
-  return await eventLogRepo.append(buildRetentionUpdatedEventInput(audit));
+  return await bindEventPublisher({
+    eventLogRepo,
+    purpose: "dynamics-audit"
+  }).publish(buildRetentionUpdatedEventInput(audit));
 }
 
 export async function appendStateChangedEvent(
   eventLogRepo: DynamicsServiceEventLogRepoPort,
   audit: StateChangedAudit
 ): Promise<EventLogEntry> {
-  return await eventLogRepo.append(buildStateChangedEventInput(audit));
+  return await bindEventPublisher({
+    eventLogRepo,
+    purpose: "dynamics-audit"
+  }).publish(buildStateChangedEventInput(audit));
 }
 
 export async function appendManifestationChangedEvent(
   eventLogRepo: DynamicsServiceEventLogRepoPort,
   audit: ManifestationChangedAudit
 ): Promise<EventLogEntry> {
-  return await eventLogRepo.append(buildManifestationChangedEventInput(audit));
+  return await bindEventPublisher({
+    eventLogRepo,
+    purpose: "dynamics-audit"
+  }).publish(buildManifestationChangedEventInput(audit));
 }
 
 export async function broadcastEvents(

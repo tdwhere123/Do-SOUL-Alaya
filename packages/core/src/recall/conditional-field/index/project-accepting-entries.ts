@@ -118,7 +118,54 @@ export function acceptingEntries(
     };
   }
   let next = start;
-  for (let index = start; index < values.size; index += 1) {
+  ({ next, truncated, groundingDeferred, allowance, facet } = scanAcceptingValues({
+    input: indexed, emitted, pageEnd, pageLimited, values, start, next, truncated,
+    groundingDeferred, allowance, facet, entries, members, updates
+  }));
+  const unemitted = emitted === undefined
+    ? Math.max(0, entries.length)
+    : members.length + (truncated ? 1 : 0);
+  if (emitted !== undefined && input.budget.page_budget > 0) {
+    collectRetractions(emitted, values, indexed, retracted);
+  }
+  return {
+    entries,
+    members: emitted === undefined ? entries : members,
+    updates,
+    retracted,
+    unemitted,
+    truncated: truncated || groundingDeferred,
+    next,
+    remaining: allowance,
+    facet
+  };
+}
+
+function scanAcceptingValues(scan: {
+  readonly input: AcceptingProjectionInput;
+  readonly emitted: EmittedRevisions | undefined;
+  readonly pageEnd: number;
+  readonly pageLimited: boolean;
+  readonly values: { readonly size: number; at(index: number): FieldValue | undefined };
+  start: number;
+  next: number;
+  truncated: boolean;
+  groundingDeferred: boolean;
+  allowance: number;
+  facet: FacetVisitProgress;
+  readonly entries: IndexEntry[];
+  readonly members: IndexEntry[];
+  readonly updates: IndexEntry[];
+}): {
+  next: number;
+  truncated: boolean;
+  groundingDeferred: boolean;
+  allowance: number;
+  facet: FacetVisitProgress;
+} {
+  const { input, emitted, pageEnd, pageLimited, values, entries, members, updates } = scan;
+  let { next, truncated, groundingDeferred, allowance, facet } = scan;
+  for (let index = scan.start; index < values.size; index += 1) {
     const value = values.at(index);
     if (value === undefined) break;
     const key = sharedProductIdentity(value.state);
@@ -128,14 +175,14 @@ export function acceptingEntries(
         ?? committedProductStatesOf(input.prior_continuation)?.[key];
       if (prior !== undefined && previousState?.membership_present !== false) {
         const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, input);
-        const entry = grounded ? indexEntryForValue(value, indexed) : null;
+        const entry = grounded ? indexEntryForValue(value, input) : null;
         if (entry === null || productUnchanged(entry, prior, input, key)) {
           next += 1;
           continue;
         }
-        if (allowance < 1) { truncated = true; break; }
+        if (allowance < 1 || updates.length >= input.budget.page_budget) { truncated = true; break; }
         allowance -= 1;
-        if (updates.length < input.budget.page_budget) updates.push(entry);
+        updates.push(entry);
         next += 1;
         continue;
       }
@@ -148,10 +195,10 @@ export function acceptingEntries(
       next += 1;
       continue;
     }
-    const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, indexed);
-    const entry = grounded ? indexEntryForValue(value, indexed) : null;
+    const grounded = input.grounding_complete !== false || groundedSeedAccepts(value, input);
+    const entry = grounded ? indexEntryForValue(value, input) : null;
     if (value.accepting && grounded && input.snapshot.facets.length > 0
-      && indexed.projection_facet_index?.complete !== true && !facetsAccept(value, indexed)) {
+      && input.projection_facet_index?.complete !== true && !facetsAccept(value, input)) {
       truncated = true;
       break;
     }
@@ -188,23 +235,7 @@ export function acceptingEntries(
     }
     if (pageLimited && entries.length >= pageEnd && next < values.size) { truncated = true; break; }
   }
-  const unemitted = emitted === undefined
-    ? Math.max(0, entries.length)
-    : members.length + (truncated ? 1 : 0);
-  if (emitted !== undefined && input.budget.page_budget > 0) {
-    collectRetractions(emitted, values, indexed, retracted);
-  }
-  return {
-    entries,
-    members: emitted === undefined ? entries : members,
-    updates,
-    retracted,
-    unemitted,
-    truncated: truncated || groundingDeferred,
-    next,
-    remaining: allowance,
-    facet
-  };
+  return { next, truncated, groundingDeferred, allowance, facet };
 }
 
 function groundedSeedAccepts(value: FieldValue, input: AcceptingProjectionInput): boolean {

@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { readPublicStructuredErrorEnvelope } from "@do-soul/alaya-protocol";
 import {
   DEFAULT_INSPECTOR_DAEMON_TIMEOUT_MS,
   INSPECTOR_CORRELATION_ID_HEADER,
@@ -17,6 +18,31 @@ export interface InspectorProxyOptions {
   readonly daemonRequestToken?: string;
   readonly reviewerToken?: string;
   readonly reviewerIdentity?: string;
+}
+
+const LOOPBACK_DAEMON_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+
+export function assertInspectorDaemonUrl(
+  daemonUrl: string,
+  env: NodeJS.ProcessEnv = process.env
+): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(daemonUrl);
+  } catch {
+    throw new Error("inspector_daemon_url_not_loopback");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("inspector_daemon_url_not_loopback");
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/gu, "").toLowerCase();
+  if (LOOPBACK_DAEMON_HOSTS.has(host)) {
+    return;
+  }
+  if (env.ALAYA_ALLOW_REMOTE_DAEMON === "1") {
+    return;
+  }
+  throw new Error("inspector_daemon_url_not_loopback");
 }
 
 
@@ -47,10 +73,9 @@ interface ProxyDaemonRequest {
   readonly method: "GET" | "PATCH" | "POST";
   readonly path: string;
   readonly body?: unknown;
-  // Opt in to forwarding the daemon's {success: false, error:
-  // {code, message}} envelope verbatim on 4xx/5xx so cross-surface
-  // parity holds for soul.* tools whose error messages are closed-set
-  // workflow strings. Default is sanitise.
+  // Opt in to forwarding a closed {success: false, error:
+  // {code, message}} envelope on 4xx/5xx. Unknown codes or messages
+  // are dropped so Inspector never echoes raw daemon copy. Default is sanitise.
   readonly forwardStructuredError?: boolean;
 }
 
@@ -209,43 +234,18 @@ function daemonUnavailableResponse(context: Context, requestId: string | undefin
 async function tryReadStructuredErrorEnvelope(
   response: Response,
   didTimeout: () => boolean
-): Promise<
-  { readonly success: false; readonly error: { readonly code: string; readonly message: string } } | null | "timeout"
-> {
+): Promise<ReturnType<typeof readPublicStructuredErrorEnvelope> | "timeout"> {
   const payload = await readDaemonJson(response, didTimeout);
   if (payload === "timeout") {
     return "timeout";
   }
-  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
-    return null;
-  }
-  const candidate = payload as { readonly success?: unknown; readonly error?: unknown };
-  if (candidate.success !== false) {
-    return null;
-  }
-  const error = candidate.error;
-  if (error === null || typeof error !== "object" || Array.isArray(error)) {
-    return null;
-  }
-  const errorObject = error as { readonly code?: unknown; readonly message?: unknown };
-  if (typeof errorObject.code !== "string" || errorObject.code.trim().length === 0) {
-    return null;
-  }
-  if (typeof errorObject.message !== "string") {
-    return null;
-  }
-  return {
-    success: false,
-    error: { code: errorObject.code, message: errorObject.message }
-  };
+  return readPublicStructuredErrorEnvelope(payload);
 }
 
 async function readStructuredErrorWithTimeout(
   response: Response,
   timeout: DaemonTimeoutHandle
-): Promise<
-  { readonly success: false; readonly error: { readonly code: string; readonly message: string } } | null | "timeout"
-> {
+): Promise<ReturnType<typeof readPublicStructuredErrorEnvelope> | "timeout"> {
   return await Promise.race([
     tryReadStructuredErrorEnvelope(response, timeout.didTimeout),
     timeout.timeout
@@ -269,6 +269,7 @@ async function fetchDaemonJson(input: {
       method: input.method,
       headers: input.headers,
       body: input.body,
+      redirect: "error",
       signal: input.signal
     });
   } catch (error) {

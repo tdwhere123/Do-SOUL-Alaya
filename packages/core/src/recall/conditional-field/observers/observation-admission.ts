@@ -26,10 +26,53 @@ import type {
 
 const SCHEMA = CONDITIONAL_FIELD_SCHEMA_VERSION;
 
+export type AuthorizedScopesAdmission =
+  | { readonly mode: "unrestricted" }
+  | { readonly mode: "denied" }
+  | { readonly mode: "named"; readonly scopes: readonly string[] };
+
 type ScopePrincipal =
   | { readonly kind: "unrestricted" }
   | { readonly kind: "denied" }
   | { readonly kind: "named"; readonly scopes: readonly string[] };
+
+export function encodeAuthorizedScopesAdmission(
+  authorized: readonly string[] | null | undefined
+): AuthorizedScopesAdmission {
+  if (authorized === null) return { mode: "unrestricted" };
+  if (authorized === undefined || authorized.length === 0) return { mode: "denied" };
+  return { mode: "named", scopes: Object.freeze([...authorized]) };
+}
+
+export function parseAuthorizedScopesAdmission(value: unknown): AuthorizedScopesAdmission {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as { readonly mode?: unknown; readonly scopes?: unknown };
+    if (record.mode === "unrestricted") return { mode: "unrestricted" };
+    if (record.mode === "denied") return { mode: "denied" };
+    if (record.mode === "named") {
+      const scopes = record.scopes;
+      if (Array.isArray(scopes) && scopes.length > 0 && scopes.every((scope) => typeof scope === "string")) {
+        return { mode: "named", scopes: Object.freeze([...scopes]) };
+      }
+    }
+    return { mode: "denied" };
+  }
+  // JSON null / omitted / [] must not become unrestricted.
+  if (value === null || value === undefined) return { mode: "denied" };
+  if (Array.isArray(value)) {
+    if (value.length === 0 || value.some((scope) => typeof scope !== "string")) return { mode: "denied" };
+    return { mode: "named", scopes: Object.freeze([...value]) };
+  }
+  return { mode: "denied" };
+}
+
+export function legacyAuthorizedScopesFromAdmission(
+  admission: AuthorizedScopesAdmission
+): { readonly authorized_scopes?: readonly string[] | null } {
+  if (admission.mode === "unrestricted") return { authorized_scopes: null };
+  if (admission.mode === "denied") return {};
+  return { authorized_scopes: admission.scopes };
+}
 
 function scopePrincipal(
   authorized: readonly string[] | null | undefined

@@ -16,6 +16,7 @@ import {
   hardIdentityCapContractId
 } from "../cap-contract.js";
 import {
+  decideGuards,
   encodeBindingContext,
   parseBindingContext,
   unifyBinding,
@@ -146,4 +147,54 @@ export function observedTargetRevision(
     }
   }
   return undefined;
+}
+
+/** Both unary transfers and hyperedge premises preserve unresolved admission. */
+export function* admitRelationRow(
+  relation: QueryRelation,
+  from: ProductStateKey,
+  row: AdjacencyRow,
+  input: Readonly<{
+    query_id: string;
+    overlay: NamedKindOverlay;
+    sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
+    bindingContexts?: BindingContextStore;
+    liveStates: Iterable<ProductStateKey>;
+  }>
+): import("./path-effect-cursor.js").PathComputation<Readonly<{
+  binding: string;
+  targetRevision: string;
+  revisionId: string;
+  strength: AdmittedRelationStrength;
+}> | undefined> {
+  if (overlayBlocksTransfer(input.overlay, row.predicate, relation.relation_kind)) return;
+  const unified = unifyAdvance(from, relation, row, input.bindingContexts);
+  if (unified === undefined) return;
+  const decision = decideGuards([relation.guard], unified.env, input.sourceFacts ?? new Map(),
+    { sourceId: row.sourceObjectId, targetId: row.targetObjectId });
+  if (decision === "false") return;
+  if (decision === "unresolved") {
+    yield { kind: "effect", effect: { observation_id: `guard:${row.assertionId}:${from.program_state}`, unresolved_guard: true } };
+    return;
+  }
+  const targetRevision = observedTargetRevision(row.targetObjectId, input.sourceFacts, input.liveStates);
+  if (targetRevision === undefined) {
+    yield { kind: "effect", effect: { observation_id: `revision:${row.assertionId}:${from.program_state}`,
+      unresolved_guard: true, missing_target_revision: true } };
+    return;
+  }
+  const fact = input.sourceFacts?.get(row.sourceObjectId)?.source_revision;
+  const revisionId = row.source_revision || fact
+    || (from.target.kind === "memory_entry" ? from.target.source_revision : from.target.source_version);
+  const strength = relationStrength(relation, input.overlay, row.predicate, {
+    query_id: input.query_id, instance_id: row.assertionId, revision_id: revisionId,
+    hypothesis_id: from.hypothesis_id, binding: unified.binding, time_state: from.time_state
+  });
+  if (strength === undefined) {
+    yield { kind: "effect", effect: { observation_id: `adjacency:${row.assertionId}:${from.hypothesis_id}:${from.program_state}`,
+      missing_measurement: true } };
+    return;
+  }
+  if (strength.milligrades <= relation.threshold_milligrades) return;
+  return { binding: unified.binding, targetRevision, revisionId, strength };
 }

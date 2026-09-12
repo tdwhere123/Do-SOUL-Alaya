@@ -9,6 +9,7 @@ import {
   type HealthJournalRecordPort
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
+import { bindEventPublisher, type EventPublisher } from "../runtime/event-publisher.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface HealthJournalServiceRepoPort {
@@ -42,6 +43,7 @@ export interface HealthJournalServiceRuntimeNotifierPort {
 export interface HealthJournalServiceDependencies {
   readonly repo: HealthJournalServiceRepoPort;
   readonly eventLogRepo: HealthJournalServiceEventLogPort;
+  readonly eventPublisher?: EventPublisher;
   readonly runtimeNotifier?: HealthJournalServiceRuntimeNotifierPort;
   readonly generateEntryId?: () => string;
   readonly now?: () => string;
@@ -63,7 +65,7 @@ export class HealthJournalService implements HealthJournalRecordPort {
     const entryId = parseNonEmptyString(this.generateEntryId(), "entry_id");
     const normalizedEntry = normalizeRecordInput(entry);
 
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
       entity_type: "health_journal",
       entity_id: entryId,
@@ -76,19 +78,28 @@ export class HealthJournalService implements HealthJournalRecordPort {
         workspace_id: normalizedEntry.workspace_id,
         occurred_at: createdAt
       })
+    };
+    await bindEventPublisher({
+      eventPublisher: this.dependencies.eventPublisher,
+      eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier === undefined
+        ? undefined
+        : {
+            notify: () => undefined,
+            notifyEntry: (entry) => this.dependencies.runtimeNotifier!.notifyEntry(entry)
+          },
+      purpose: "HealthJournalService"
+    }).appendApplyThenPropagate(eventInput, async () => {
+      await this.dependencies.repo.append({
+        entry_id: entryId,
+        event_kind: normalizedEntry.event_kind,
+        workspace_id: normalizedEntry.workspace_id,
+        run_id: normalizedEntry.run_id,
+        summary: normalizedEntry.summary,
+        detail_json: normalizedEntry.detail_json,
+        created_at: createdAt
+      });
     });
-
-    await this.dependencies.repo.append({
-      entry_id: entryId,
-      event_kind: normalizedEntry.event_kind,
-      workspace_id: normalizedEntry.workspace_id,
-      run_id: normalizedEntry.run_id,
-      summary: normalizedEntry.summary,
-      detail_json: normalizedEntry.detail_json,
-      created_at: createdAt
-    });
-
-    await this.dependencies.runtimeNotifier?.notifyEntry(event);
   }
 
   public async getRecentEvents(

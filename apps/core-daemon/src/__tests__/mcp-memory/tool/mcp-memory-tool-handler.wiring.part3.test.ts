@@ -115,7 +115,7 @@ describe("mcp memory tool handler wiring", () => {
       ok: false,
       error: {
         code: "VALIDATION",
-        message: "Per-anchor usage references object_id that was not delivered: mem2"
+        message: "Invalid request."
       }
     });
   });

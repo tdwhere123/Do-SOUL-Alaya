@@ -15,6 +15,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import type { SignalServiceReceiveResult } from "../memory/signal-service.js";
+import type { EventPublisher } from "../runtime/event-publisher.js";
 
 export { RuntimeMode };
 export type {
@@ -116,6 +117,7 @@ export interface ConversationServiceDependencies {
   readonly runRepo: ConversationRunRepoPort;
   readonly workspaceRepo: ConversationWorkspaceRepoPort;
   readonly eventLogRepo: ConversationEventLogRepoPort;
+  readonly eventPublisher?: EventPublisher;
   readonly gardenComputeProvider: ConversationGardenComputeProviderPort;
   readonly resolveGardenComputeProvider?: ConversationGardenComputeProviderResolverPort;
   readonly signalReceiver: ConversationSignalReceiverPort;

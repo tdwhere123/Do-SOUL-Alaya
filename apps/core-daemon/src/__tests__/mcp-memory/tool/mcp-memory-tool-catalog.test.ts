@@ -4,6 +4,7 @@ import {
   hasAlayaMemoryToolName,
   listAlayaMemoryTools
 } from "../../../mcp-memory/tool/tool-catalog.js";
+import { soulToolJsonSchemas } from "@do-soul/alaya-protocol";
 import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
 
 describe("mcp memory tool catalog", () => {
@@ -46,19 +47,25 @@ describe("mcp memory tool catalog", () => {
     expect(hasAlayaMemoryToolName("memory.recall")).toBe(false);
   });
 
-  it("stays aligned with provider-neutral model-visible specs without importing them at runtime", () => {
+  it("generates descriptions from soulToolDefs and only appends a daemon loop suffix", () => {
     const daemonCatalog = listAlayaMemoryTools();
 
     expect(daemonCatalog.map((tool) => tool.name)).toEqual(soulToolDefs.map((tool) => tool.name));
     expect(new Set(daemonCatalog.map((tool) => tool.name)).size).toBe(daemonCatalog.length);
     for (const tool of daemonCatalog) {
-      const providerDescription = soulToolDefs.find((spec) => spec.name === tool.name)?.description;
-      expect(providerDescription).toBeDefined();
-      expect(
-        tool.description === providerDescription ||
-          tool.description.startsWith(`${providerDescription} `)
-      ).toBe(true);
+      const spec = soulToolDefs.find((candidate) => candidate.name === tool.name);
+      expect(spec).toBeDefined();
+      const providerDescription = spec?.description ?? "";
+      expect(tool.description === providerDescription || tool.description.startsWith(`${providerDescription} `)).toBe(
+        true
+      );
     }
+    const recall = daemonCatalog.find((tool) => tool.name === "soul.recall");
+    const recallSpec = soulToolDefs.find((spec) => spec.name === "soul.recall");
+    expect(recallSpec).toBeDefined();
+    expect(recallSpec?.parametersSchema).toBeDefined();
+    expect(recall?.inputSchema).toEqual(soulToolJsonSchemas["soul.recall"]);
+    expect(recall?.description.startsWith(`${recallSpec?.description} `)).toBe(true);
     expect(daemonCatalog.find((tool) => tool.name === "soul.propose_memory_update")?.description).toContain(
       "pending proposal"
     );
@@ -77,9 +84,8 @@ describe("mcp memory tool catalog", () => {
     expect(daemonCatalog.find((tool) => tool.name === "garden.claim_task")?.description).toContain(
       "already_claimed"
     );
-    const recallSpec = soulToolDefs.find((spec) => spec.name === "soul.recall")?.description ?? "";
-    expect(recallSpec).toContain("information index");
-    expect(recallSpec).toContain("`recent_turn` is ignored for extraction");
-    expect(recallSpec).not.toContain("ranked candidates");
+    expect(recallSpec?.description).toContain("information index");
+    expect(recallSpec?.description).toContain("`recent_turn` is ignored for extraction");
+    expect(recallSpec?.description).not.toContain("ranked candidates");
   });
 });

@@ -60,7 +60,7 @@ describe("proposal review error parity", () => {
 
     expect(mcp.ok).toBe(false);
     expect(mcp.error.code).toBe("NOT_FOUND");
-    const expectedMessage = "Proposal not found: prop-1";
+    const expectedMessage = "Proposal not found.";
     expect(mcp.error.message).toBe(expectedMessage);
 
     expect(inspector.body.error?.code).toBe(mcp.error.code);

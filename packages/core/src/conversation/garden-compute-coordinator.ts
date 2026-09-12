@@ -17,6 +17,8 @@ import {
   type Workspace
 } from "@do-soul/alaya-protocol";
 
+import { bindEventPublisher, type EventPublisher } from "../runtime/event-publisher.js";
+import { CoreError } from "../shared/errors.js";
 import {
   createGardenMaterializationBatchStats,
   getErrorMessage,
@@ -48,6 +50,7 @@ interface CompletedProviderCallEvent {
 
 export interface GardenComputeCoordinatorDependencies {
   readonly eventLogRepo: ConversationEventLogRepoPort;
+  readonly eventPublisher?: EventPublisher;
   readonly gardenComputeProvider: ConversationGardenComputeProviderPort;
   readonly resolveGardenComputeProvider?: ConversationGardenComputeProviderResolverPort;
   readonly signalReceiver: ConversationSignalReceiverPort;
@@ -181,17 +184,13 @@ export class GardenComputeCoordinator {
     },
     gardenComputeProvider: ConversationGardenComputeProviderPort
   ): Promise<GardenProviderCallTelemetry | null> {
-    if (typeof this.deps.eventLogRepo.append !== "function") {
-      return null;
-    }
-
     const startedAtEpochMs = Date.now();
     const startedAt = new Date(startedAtEpochMs).toISOString();
     const callId = `garden-provider-call-${randomUUID()}`;
     const modelId = resolveGardenProviderModelId(gardenComputeProvider.provider_kind, input.modelRef);
 
     try {
-      await this.deps.eventLogRepo.append({
+      await this.appendGardenEvent({
         event_type: ComputeRecallGardenEventType.COMPUTE_PROVIDER_CALL_STARTED,
         entity_type: "compute_provider_call",
         entity_id: callId,
@@ -209,6 +208,9 @@ export class GardenComputeCoordinator {
         })
       });
     } catch (error) {
+      if (isMissingGardenEventPublisher(error)) {
+        throw error;
+      }
       this.deps.warn("Garden provider call start event failed.", {
         workspace_id: input.workspace.workspace_id,
         run_id: input.run.run_id,
@@ -234,7 +236,7 @@ export class GardenComputeCoordinator {
     providerCall: GardenProviderCallTelemetry | null,
     gardenComputeProvider: ConversationGardenComputeProviderPort
   ): Promise<TrustedGardenSourceObservation | null> {
-    if (providerCall === null || typeof this.deps.eventLogRepo.append !== "function") {
+    if (providerCall === null) {
       return null;
     }
 
@@ -272,7 +274,7 @@ export class GardenComputeCoordinator {
     const latencyMs = Math.max(0, Date.now() - providerCall.startedAtEpochMs);
 
     try {
-      const entry = await this.deps.eventLogRepo.append!({
+      const entry = await this.appendGardenEvent({
         event_type: ComputeRecallGardenEventType.COMPUTE_PROVIDER_CALL_COMPLETED,
         entity_type: "compute_provider_call",
         entity_id: providerCall.callId,
@@ -292,6 +294,9 @@ export class GardenComputeCoordinator {
       });
       return { entry, latencyMs };
     } catch (error) {
+      if (isMissingGardenEventPublisher(error)) {
+        throw error;
+      }
       this.deps.warn("Garden provider call completion event failed.", {
         workspace_id: input.workspace.workspace_id,
         run_id: input.run.run_id,
@@ -312,7 +317,7 @@ export class GardenComputeCoordinator {
     gardenComputeProvider: ConversationGardenComputeProviderPort,
     error: unknown
   ): Promise<void> {
-    if (providerCall === null || typeof this.deps.eventLogRepo.append !== "function") {
+    if (providerCall === null) {
       return;
     }
 
@@ -322,7 +327,7 @@ export class GardenComputeCoordinator {
     const errorMessage = getErrorMessage(error);
 
     try {
-      await this.deps.eventLogRepo.append({
+      await this.appendGardenEvent({
         event_type: ComputeRecallGardenEventType.COMPUTE_PROVIDER_CALL_FAILED,
         entity_type: "compute_provider_call",
         entity_id: providerCall.callId,
@@ -343,6 +348,9 @@ export class GardenComputeCoordinator {
         })
       });
     } catch (appendError) {
+      if (isMissingGardenEventPublisher(appendError)) {
+        throw appendError;
+      }
       this.deps.warn("Garden provider call failure event failed.", {
         workspace_id: input.workspace.workspace_id,
         run_id: input.run.run_id,
@@ -362,6 +370,19 @@ export class GardenComputeCoordinator {
       errorKind,
       errorMessage
     });
+  }
+
+  private async appendGardenEvent(
+    event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+  ): Promise<EventLogEntry> {
+    if (this.deps.eventPublisher === undefined && typeof this.deps.eventLogRepo.append !== "function") {
+      throw new CoreError("CONFLICT", "GardenComputeCoordinator requires an event publisher");
+    }
+    return await bindEventPublisher({
+      eventPublisher: this.deps.eventPublisher,
+      eventLogRepo: this.deps.eventLogRepo,
+      purpose: "GardenComputeCoordinator"
+    }).publish(event);
   }
 
   private async recordProviderCallJournal(input: {
@@ -465,4 +486,12 @@ function createTrustedGardenSourceObservation(input: {
   } catch {
     return null;
   }
+}
+
+function isMissingGardenEventPublisher(error: unknown): boolean {
+  return (
+    error instanceof CoreError &&
+    error.code === "CONFLICT" &&
+    error.message.includes("event publisher")
+  );
 }

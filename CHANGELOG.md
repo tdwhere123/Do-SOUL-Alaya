@@ -7,24 +7,30 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 4.0.0 conditional-field candidate
+## Unreleased — protocol 4.8.1
 
-`SoulMemorySearchResponse.strategy_mix` is removed from the unreleased 4.0.0
-target payload and rejected by the strict response schema; it is not a
+Published `@do-soul/alaya-protocol` is **4.8.1** (`packages/protocol/package.json`).
+`AlayaStatusSchema.mcp.catalog_health` is an additive optional field.
+GitHub `releases/latest` is a published tarball and is **not** this source tree;
+pin `ALAYA_VERSION` or install from a checkout. Local ONNX embeddings
+(`@huggingface/transformers`) are an optional extra, not a default install.
+
+`SoulMemorySearchResponse.strategy_mix` is removed from the protocol 4.8.0
+payload and rejected by the strict response schema; it is not a
 deprecated parseable sibling field.
 `SoulMemorySearchResponse.delivery_path`,
 `SoulMemorySearchResponse.ranking_authority`, and
 `SoulMemorySearchRequest.recent_turn` are deprecated and remain parseable.
 The target emits `index` and never executes a legacy selector or enqueues
-extraction from Recall. Under invariant §25, removal is planned no earlier
-than 4.2.0, conditional on deprecation shipping in 4.1.0 first. This unreleased
-candidate does not count as a published minor deprecation interval.
+extraction from Recall. Under invariant §25, deprecated parseable fields
+remain until a published minor deprecation interval has elapsed; they stay
+parseable in protocol 4.8.0.
 
 Active constraints remain a separate governed response, read within the same
 snapshot and request allowance. `active_constraints_count` is nullable when
 bounded or historical observation cannot establish an exact total;
 `active_constraints_completeness` states that limitation. This is part of the
-unreleased 4.0.0 semantic cutover, not an additional published version.
+protocol 4.8.0 semantic cutover, not an additional published version.
 Source evidence pointers and supplied governance warnings remain visible at
 their supported granularity. Hint-only output omits source bodies and pointers.
 
@@ -37,7 +43,8 @@ usage reports and historical records retain their supported meaning.
 
 The version and public-schema snapshots describe the local candidate only.
 Migration packaging, activation, and release remain separate work; no public
-symbol is removed by this repair.
+symbol is removed by this repair. Non-protocol workspace packages stay aligned
+at `0.3.11`.
 
 ## v0.3.11 — 2026-06-04 (implementation checkpoint; not a published 500q-gated release)
 

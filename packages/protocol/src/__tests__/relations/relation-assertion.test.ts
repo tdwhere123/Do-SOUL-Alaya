@@ -6,6 +6,8 @@ import {
   RelationAssertionSchema,
   RelationValiditySchema,
   compareUtcInstants,
+  emptyBytesSha256,
+  emptyJsonArraySha256,
   isRelationValidityActiveAt
 } from "../../index.js";
 
@@ -174,8 +176,16 @@ describe("RelationAssertion temporal contract", () => {
   });
 
   it("names the persisted empty relation-history digest as SHA-256 of empty bytes", () => {
-    expect(EMPTY_RELATION_HISTORY_DIGEST).toBe(
+    expect(emptyBytesSha256()).toBe(
       createHash("sha256").update(Buffer.alloc(0)).digest("hex")
     );
+    expect(EMPTY_RELATION_HISTORY_DIGEST).toBe(emptyBytesSha256());
+  });
+
+  it("hashes an empty JSON array independently of empty bytes", () => {
+    expect(emptyJsonArraySha256()).toBe(
+      createHash("sha256").update("[]", "utf8").digest("hex")
+    );
+    expect(emptyJsonArraySha256()).not.toBe(emptyBytesSha256());
   });
 });

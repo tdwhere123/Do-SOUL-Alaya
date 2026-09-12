@@ -25,8 +25,13 @@ export interface QueryEmbeddingEngineDependencies {
 // workspace-neighbor recall paths.
 export class QueryEmbeddingEngine {
   private readonly queryEmbeddingCache = new Map<string, Float32Array>();
+  private lastWarmupSummary: EmbeddingQueryWarmupSummary | null = null;
 
   public constructor(private readonly deps: QueryEmbeddingEngineDependencies) {}
+
+  public lastQueryEmbeddingWarmup(): EmbeddingQueryWarmupSummary | null {
+    return this.lastWarmupSummary;
+  }
 
   public prepareQueryEmbedding(params: {
     readonly workspaceId: string;
@@ -118,15 +123,17 @@ export class QueryEmbeddingEngine {
   }): Promise<EmbeddingQueryWarmupSummary> {
     const uniqueQueryTexts = this.uniqueQueryTexts(params.queryTexts);
     if (uniqueQueryTexts.length === 0) {
-      return this.emptyWarmupSummary();
+      return this.rememberWarmup(this.emptyWarmupSummary());
     }
     if (!this.deps.provider.isAvailable) {
-      return this.unavailableWarmupSummary(uniqueQueryTexts.length);
+      return this.rememberWarmup(this.unavailableWarmupSummary(uniqueQueryTexts.length));
     }
 
     const missingQueryTexts = this.missingQueryTexts(uniqueQueryTexts);
     const lastError = await this.warmMissingQueryTexts(missingQueryTexts);
-    return this.completedWarmupSummary(uniqueQueryTexts, missingQueryTexts, lastError);
+    return this.rememberWarmup(
+      this.completedWarmupSummary(uniqueQueryTexts, missingQueryTexts, lastError)
+    );
   }
 
   private uniqueQueryTexts(queryTexts: readonly string[]): readonly string[] {
@@ -202,7 +209,7 @@ export class QueryEmbeddingEngine {
       (queryText) => this.getCachedQueryEmbedding(this.queryCacheKey(queryText)) !== null
     ).length;
     return Object.freeze({
-      status: "ready",
+      status: resolveCompletedWarmupStatus(queryTexts.length, readyCount, lastError),
       requested_count: queryTexts.length,
       ready_count: readyCount,
       cache_hit_count: queryTexts.length - missingQueryTexts.length,
@@ -212,6 +219,11 @@ export class QueryEmbeddingEngine {
       model_id: this.deps.provider.modelId,
       ...(lastError === undefined ? {} : { last_error: lastError })
     });
+  }
+
+  private rememberWarmup(summary: EmbeddingQueryWarmupSummary): EmbeddingQueryWarmupSummary {
+    this.lastWarmupSummary = summary;
+    return summary;
   }
 
   // Degradation recording stays in the caller so this stays a pure resolver.
@@ -251,4 +263,18 @@ export class QueryEmbeddingEngine {
       this.queryEmbeddingCache.delete(oldestKey);
     }
   }
+}
+
+function resolveCompletedWarmupStatus(
+  requestedCount: number,
+  readyCount: number,
+  lastError: string | undefined
+): "ready" | "partial" | "failed" {
+  if (readyCount === 0 && lastError !== undefined) {
+    return "failed";
+  }
+  if (readyCount > 0 && readyCount < requestedCount) {
+    return "partial";
+  }
+  return "ready";
 }

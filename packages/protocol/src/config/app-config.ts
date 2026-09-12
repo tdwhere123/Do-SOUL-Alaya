@@ -5,6 +5,13 @@ import {
   NonEmptyStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
+import { assertPublicHttpProviderUrl } from "./provider-url.js";
+
+export {
+  assertPublicHttpProviderUrl,
+  isBlockedProviderHost,
+  parseHttpProviderUrl
+} from "./provider-url.js";
 
 export const APP_CONFIG_VERSION = 1 as const;
 const AppConfigVersionSchema = z.literal(APP_CONFIG_VERSION);
@@ -64,9 +71,13 @@ export const ToolchainStatusSchema = z
   })
   .readonly();
 
+const RuntimeProviderUrlSchema = NonEmptyStringSchema.nullable().superRefine(
+  refineHttpProviderUrl
+);
+
 export const RuntimeEmbeddingConfigSchema = makeVersionedConfigSchema({
-  provider_url: NonEmptyStringSchema.nullable(),
-  secret_ref: NonEmptyStringSchema.nullable(),
+  provider_url: RuntimeProviderUrlSchema,
+  secret_ref: NonEmptyStringSchema.nullable().superRefine(refineNullableRuntimeSecretRef),
   model_id: NonEmptyStringSchema.nullable(),
   embedding_enabled: z.boolean()
 });
@@ -122,6 +133,26 @@ export function isAbsoluteFileSecretRefPath(filePath: string): boolean {
   return filePath.startsWith("\\\\");
 }
 
+export function isSafeFileSecretRefPath(filePath: string): boolean {
+  if (!isAbsoluteFileSecretRefPath(filePath) || filePath.includes("\0")) {
+    return false;
+  }
+  return !filePath.split(/[\\/]/u).includes("..");
+}
+
+export function isContainedFileSecretPath(filePath: string, secretsDir: string): boolean {
+  if (!isSafeFileSecretRefPath(filePath) || secretsDir.includes("\0") || !isAbsoluteFileSecretRefPath(secretsDir)) {
+    return false;
+  }
+  const file = normalizeAbsoluteSecretPath(filePath);
+  const root = normalizeAbsoluteSecretPath(secretsDir);
+  if (file === null || root === null || file === root) {
+    return false;
+  }
+  const prefix = root.endsWith("/") ? root : `${root}/`;
+  return file.startsWith(prefix);
+}
+
 export function formatFileSecretRef(absolutePath: string): string {
   return `${SECRET_REF_FILE_PREFIX}${absolutePath.replace(/\\/g, "/")}`;
 }
@@ -150,27 +181,9 @@ const RuntimeSecretRefSchema = z
   .min(1)
   .max(4096)
   .superRefine((value, context) => {
-    if (value.startsWith(SECRET_REF_ENV_PREFIX)) {
-      const envName = value.slice(SECRET_REF_ENV_PREFIX.length);
-      if (ENV_SECRET_REF_NAME_PATTERN.test(envName)) {
-        return;
-      }
+    if (isRuntimeSecretRefGrammar(value)) {
+      return;
     }
-
-    if (value.startsWith(SECRET_REF_FILE_PREFIX)) {
-      const filePath = value.slice(SECRET_REF_FILE_PREFIX.length);
-      if (isAbsoluteFileSecretRefPath(filePath)) {
-        return;
-      }
-    }
-
-    if (value.startsWith(SECRET_REF_KEYCHAIN_PREFIX)) {
-      const segments = value.slice(SECRET_REF_KEYCHAIN_PREFIX.length).split(":");
-      if (segments.length === 2 && segments[0] !== "" && segments[1] !== "") {
-        return;
-      }
-    }
-
     context.addIssue({
       code: "custom",
       message: 'secret_ref must use "env:NAME", "file:/path", or "keychain:service:account".'
@@ -182,7 +195,7 @@ export const RuntimeGardenProviderKindSchema = z.enum(["official_api", "local_he
 export const RuntimeGardenComputeConfigSchema = makeVersionedConfigSchema({
   provider_kind: RuntimeGardenProviderKindSchema,
   model_id: NonEmptyStringSchema.nullable(),
-  provider_url: NonEmptyStringSchema.nullable(),
+  provider_url: RuntimeProviderUrlSchema,
   secret_ref: RuntimeSecretRefSchema.nullable(),
   enabled: z.boolean()
 });
@@ -208,7 +221,28 @@ export const AlayaStatusSchema = z
     mcp: z
       .object({
         enrolled_tools: NonNegativeIntSchema,
-        allowed_servers: z.array(NonEmptyStringSchema).readonly()
+        allowed_servers: z.array(NonEmptyStringSchema).readonly(),
+        catalog_health: z
+          .object({
+            servers: z
+              .array(
+                z
+                  .object({
+                    server_name: NonEmptyStringSchema,
+                    status: z.enum(["active", "inactive"]),
+                    last_error: z
+                      .object({
+                        code: z.enum(["MCP_EXTERNAL_TIMEOUT", "MCP_EXTERNAL_TRANSPORT"]),
+                        message: NonEmptyStringSchema
+                      })
+                      .nullable()
+                  })
+                  .readonly()
+              )
+              .readonly()
+          })
+          .readonly()
+          .optional()
       })
       .readonly()
   })
@@ -248,3 +282,66 @@ export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
   env_vars: {},
   worktree_enabled: false
 };
+
+function refineHttpProviderUrl(value: string | null, context: z.RefinementCtx): void {
+  if (value === null) {
+    return;
+  }
+  try {
+    assertPublicHttpProviderUrl(value);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "provider url is invalid"
+    });
+  }
+}
+
+function refineNullableRuntimeSecretRef(value: string | null, context: z.RefinementCtx): void {
+  if (value === null || isRuntimeSecretRefGrammar(value)) {
+    return;
+  }
+  context.addIssue({
+    code: "custom",
+    message: 'secret_ref must use "env:NAME", "file:/path", or "keychain:service:account".'
+  });
+}
+
+function isRuntimeSecretRefGrammar(value: string): boolean {
+  if (value.startsWith(SECRET_REF_ENV_PREFIX)) {
+    return ENV_SECRET_REF_NAME_PATTERN.test(value.slice(SECRET_REF_ENV_PREFIX.length));
+  }
+  if (value.startsWith(SECRET_REF_FILE_PREFIX)) {
+    return isSafeFileSecretRefPath(value.slice(SECRET_REF_FILE_PREFIX.length));
+  }
+  if (value.startsWith(SECRET_REF_KEYCHAIN_PREFIX)) {
+    const segments = value.slice(SECRET_REF_KEYCHAIN_PREFIX.length).split(":");
+    return segments.length === 2 && segments[0] !== "" && segments[1] !== "";
+  }
+  return false;
+}
+
+function normalizeAbsoluteSecretPath(input: string): string | null {
+  const slashPath = input.replace(/\\/gu, "/");
+  const windowsDrive = /^([A-Za-z]:)(\/.*)$/u.exec(slashPath);
+  const drive = windowsDrive?.[1]?.toLowerCase() ?? "";
+  const rest = windowsDrive?.[2] ?? slashPath;
+  if (!rest.startsWith("/")) {
+    return null;
+  }
+  const segments: string[] = [];
+  for (const segment of rest.split("/")) {
+    if (segment === "" || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      if (segments.length === 0) {
+        return null;
+      }
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return `${drive}/${segments.join("/")}`;
+}

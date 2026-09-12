@@ -217,6 +217,39 @@ describe("EvidenceDocumentEmbeddingEngine", () => {
     ]);
   });
 
+  it("re-persists an identity after vector-cache eviction when SQLite no longer has it", async () => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map((text) => vectorFor(text))
+    );
+    const records: EvidenceDocumentEmbeddingRecord[] = [];
+    const store = createStore(records);
+    const engine = new EvidenceDocumentEmbeddingEngine(
+      createProvider({ embedTexts }),
+      1,
+      store
+    );
+
+    await engine.embedDocuments({
+      workspaceId: "workspace-1",
+      documents: [{ ownerObjectId: "object-a", documentIdentity: "owner", content: "keep-a" }]
+    }, 5_000);
+    await engine.embedDocuments({
+      workspaceId: "workspace-1",
+      documents: [{ ownerObjectId: "object-b", documentIdentity: "owner", content: "keep-b" }]
+    }, 5_000);
+    records.splice(0, records.length);
+
+    const restored = await engine.embedDocuments({
+      workspaceId: "workspace-1",
+      documents: [{ ownerObjectId: "object-a", documentIdentity: "owner", content: "keep-a" }]
+    }, 5_000);
+
+    expect(restored.inferenceCalls).toBe(1);
+    expect(store.upsertMany).toHaveBeenCalledTimes(3);
+    expect(records).toHaveLength(1);
+    expect(records[0]?.ownerObjectId).toBe("object-a");
+  });
+
   it("reuses a document persisted by a previous engine instance", async () => {
     const embedTexts = vi.fn(async (texts: readonly string[]) =>
       texts.map((text) => vectorFor(text))

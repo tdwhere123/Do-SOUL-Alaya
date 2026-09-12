@@ -78,7 +78,7 @@ describe("external post-turn evidence finalization", () => {
     enqueuePostTurnTask(harness, taskId);
     await claimTask(harness, taskId);
 
-    await expect(completeTask(harness, taskId, [])).rejects.toThrow("completion event unavailable");
+    await expect(completeTask(harness, taskId, [])).rejects.toThrow("MCP memory tool call failed.");
     await claimTask(harness, taskId);
     await expect(completeTask(harness, taskId, [candidateSignal()])).rejects.toThrow(
       "candidate_signals changed after a previous partial completion attempt"

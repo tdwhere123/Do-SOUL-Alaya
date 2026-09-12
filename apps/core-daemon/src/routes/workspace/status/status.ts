@@ -8,6 +8,16 @@ export interface StatusRouteServices {
   readonly mcp: {
     listAllowedServerNames(): readonly string[];
     listEnrolledToolIds(): readonly string[];
+    getHealth?(): {
+      readonly servers: readonly {
+        readonly server_name: string;
+        readonly status: "active" | "inactive";
+        readonly last_error: {
+          readonly code: "MCP_EXTERNAL_TIMEOUT" | "MCP_EXTERNAL_TRANSPORT";
+          readonly message: string;
+        } | null;
+      }[];
+    };
   };
   readonly clock?: () => string;
   readonly probeDatabase?: () => boolean;
@@ -33,7 +43,10 @@ export function buildAlayaStatus(services: StatusRouteServices): AlayaStatus {
     },
     mcp: {
       enrolled_tools: services.mcp.listEnrolledToolIds().length,
-      allowed_servers: services.mcp.listAllowedServerNames()
+      allowed_servers: services.mcp.listAllowedServerNames(),
+      ...(typeof services.mcp.getHealth === "function"
+        ? { catalog_health: services.mcp.getHealth() }
+        : {})
     }
   });
 }

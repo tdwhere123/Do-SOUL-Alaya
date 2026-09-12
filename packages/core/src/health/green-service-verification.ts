@@ -24,6 +24,7 @@ import {
   type GreenWarnPort
 } from "./green-service-ports.js";
 import { readConsecutiveNoGo, writeConsecutiveNoGo } from "./green-service-consecutive-no-go.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 
 export interface GreenVerificationInput {
   readonly targetObjectId: string;
@@ -83,7 +84,11 @@ export async function runGreenVerification(
     micro_correction_hint: hint,
     necessary_patch: input.necessaryPatch
   });
-  const event = await input.dependencies.eventLogRepo.append({
+  await bindEventPublisher({
+    eventLogRepo: input.dependencies.eventLogRepo,
+    runtimeNotifier: input.dependencies.runtimeNotifier,
+    purpose: "GreenService"
+  }).publish({
     event_type: GreenGovernanceEventType.SOUL_VERIFICATION_COMPLETED,
     entity_type: "verification_result",
     entity_id: verificationResult.runtime_id,
@@ -99,8 +104,6 @@ export async function runGreenVerification(
       occurred_at: input.timestamp
     })
   });
-
-  await input.dependencies.runtimeNotifier.notifyEntry(event);
   return verificationResult;
 }
 

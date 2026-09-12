@@ -2,6 +2,7 @@ import type {
   CandidateMemorySignal,
   ConversationMessage
 } from "@do-soul/alaya-protocol";
+import { CoreError } from "@do-soul/alaya-core";
 import { buildGardenTurnEvidenceFallback } from "@do-soul/alaya-soul";
 import { buildGardenTaskEvidenceFallbackSignalId } from "../support/task-signal-id.js";
 import {
@@ -100,12 +101,18 @@ async function receiveEvidenceFallback(
     turnMessages: input.turnMessages
   });
   if (signal === null) {
-    throw new Error(`Garden task ${input.taskId} evidence fallback source content was empty.`);
+    throw new CoreError(
+      "VALIDATION",
+      `Garden task evidence fallback source content was empty: ${input.taskId}`
+    );
   }
   await input.beforeReceive?.();
   const received = await input.signalReceiver.receiveSignal(signal);
   if (!await input.signalReceiver.hasCreatedEvidence(received)) {
-    throw new Error(`Garden task ${input.taskId} evidence fallback did not create durable evidence.`);
+    throw new CoreError(
+      "VALIDATION",
+      `Garden task evidence fallback did not create durable evidence: ${input.taskId}`
+    );
   }
   signalIds.push(received.signal.signal_id);
 }

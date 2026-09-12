@@ -18,6 +18,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 
 import { GreenGrantGuard } from "./green-grant-guard.js";
 import {
@@ -124,7 +125,7 @@ export class GreenService {
       last_transition_at: timestamp,
       workspace_id: workspaceId
     });
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: GreenGovernanceEventType.SOUL_GREEN_GRANTED,
       entity_type: "green_status",
       entity_id: status.object_id,
@@ -140,11 +141,10 @@ export class GreenService {
         workspace_id: workspaceId,
         occurred_at: timestamp
       })
-    });
-
-    const saved = await this.dependencies.greenStatusRepo.upsert(status);
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return saved;
+    };
+    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async () =>
+      await this.dependencies.greenStatusRepo.upsert(status)
+    );
   }
 
   public async pierce(params: {
@@ -178,7 +178,7 @@ export class GreenService {
       revoke_reason: params.reason,
       last_transition_at: timestamp
     });
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: GreenGovernanceEventType.SOUL_GREEN_PIERCED,
       entity_type: "green_status",
       entity_id: next.object_id,
@@ -192,11 +192,10 @@ export class GreenService {
         workspace_id: workspaceId,
         occurred_at: timestamp
       })
-    });
-
-    const saved = await this.dependencies.greenStatusRepo.upsert(next);
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return saved;
+    };
+    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async () =>
+      await this.dependencies.greenStatusRepo.upsert(next)
+    );
   }
 
   public async setGrace(params: {
@@ -226,7 +225,7 @@ export class GreenService {
       valid_until: params.until,
       last_transition_at: timestamp
     });
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: GreenGovernanceEventType.SOUL_GREEN_GRACE_ENTERED,
       entity_type: "green_status",
       entity_id: next.object_id,
@@ -243,11 +242,10 @@ export class GreenService {
         workspace_id: workspaceId,
         occurred_at: timestamp
       })
-    });
-
-    const saved = await this.dependencies.greenStatusRepo.upsert(next);
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return saved;
+    };
+    return await this.eventPublisher().appendApplyThenPropagate(eventInput, async () =>
+      await this.dependencies.greenStatusRepo.upsert(next)
+    );
   }
 
   public async reevaluate(params: {
@@ -318,5 +316,17 @@ export class GreenService {
 
   public async findAll(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]> {
     return await this.dependencies.greenStatusRepo.findByWorkspaceId(parseNonEmptyString(workspaceId, "workspaceId"));
+  }
+
+  private eventPublisher() {
+    return bindEventPublisher({
+      eventPublisher: this.dependencies.eventPublisher,
+      eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: {
+        notify: () => undefined,
+        notifyEntry: (entry) => this.dependencies.runtimeNotifier.notifyEntry(entry)
+      },
+      purpose: "GreenService"
+    });
   }
 }

@@ -197,6 +197,7 @@ function createConversationServiceDependencies(
     readonly runRepo: SqliteRunRepo;
     readonly workspaceRepo: SqliteWorkspaceRepo;
     readonly eventLogRepo: SqliteEventLogRepo;
+    readonly eventPublisher: EventPublisher;
     readonly signalService: SignalService;
     readonly contextLensAssembler: ConversationContextLensAssemblerPort;
     readonly governanceLeaseService: GovernanceLeaseService;
@@ -210,6 +211,7 @@ function createConversationServiceDependencies(
     runRepo: input.runRepo,
     workspaceRepo: input.workspaceRepo,
     eventLogRepo: input.eventLogRepo,
+    eventPublisher: input.eventPublisher,
     gardenComputeProvider: computeRoutingService.getDefaultProvider(),
     resolveGardenComputeProvider: {
       resolve: (modelRef) => computeRoutingService.resolveProvider(modelRef)

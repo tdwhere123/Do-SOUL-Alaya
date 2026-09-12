@@ -206,8 +206,10 @@ Logical-index completeness is a coverage certificate that remaining
 counterfactual influence is none. Observer `exhausted` is an execution fact
 and does not by itself prove that certificate. Memory-path exhaustion does
 not make source-only results irrelevant. A page or top set does not prove
-the logical index complete. Narrow pages keep the accepting products and
-explanation forest available through continuation; budget exhaustion must
+the logical index complete. Each page shares one envelope allowance across membership entries and typed
+product updates. Only delivered component revisions advance the retained ledger;
+pending components and retractions remain resumable. Narrow pages keep the
+accepting products and explanation forest available through continuation; budget exhaustion must
 not be reported as a complete empty result.
 
 Continuation is bound to query, snapshot, model/interpretation identity and a
@@ -309,7 +311,12 @@ interpretation identities, live source snapshot, and original request budget.
 The worker transports that receipt through the same result boundary. Measurement
 checks the independently supplied request against it and reuses the compiler's
 identity rules. Archived measurement admission repeats identity and ordered
-product-slot checks. These unsigned local receipts detect inconsistent or stale
+product-slot checks. The bench Recall handle freezes initial membership and
+scoring slots under session, delivery, query, snapshot, and interpretation
+identity. Later membership, update, payload, and retry pages retain those first-K
+inputs while recording their current results and cost separately. A continuation
+or archive without initial-exposure evidence is unscorable; it cannot start a
+new first-K measurement. These unsigned local receipts detect inconsistent or stale
 bindings; they do not authenticate an artifact whose entire evidence was forged.
 Payload omission that leaves fewer compatibility results than index entries is
 unscorable, while the response retains its original index and omission status.

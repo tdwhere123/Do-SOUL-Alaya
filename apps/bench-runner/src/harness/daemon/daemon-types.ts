@@ -111,6 +111,7 @@ export interface BenchDaemonHandle {
     readonly garden_enqueue: 0;
     readonly request_budget: NonNullable<ConditionalFieldRecallParams["budget"]>;
     readonly execution_receipt: ConditionalFieldExecutionReceipt;
+    readonly first_exposure_page?: import("../../runs/measurement/first-exposure-session.js").FirstExposurePage;
   }>;
   warmEmbeddingCache(
     objectIds: readonly string[],

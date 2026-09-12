@@ -41,23 +41,22 @@ describe("pi-mono-extractor JSON recovery (Phase A.3)", () => {
     });
   });
 
-  it("closes unbalanced trailing brackets on a truncated envelope", async () => {
-    // Truncated mid-array: missing the closing "]}" and a dangling comma.
+  it("rejects a truncated envelope instead of inventing closers", async () => {
     const truncated = '{"signals":[{"signal_kind":"potential_claim","object_kind":"u","confidence":0.5,"matched_text":"x"},';
+    const complete = vi.fn(async () => createAssistantMessage(truncated));
     const extractor = createPiMonoExtractor({
       apiKey: "sk-test",
       model: "gpt-4.1-mini",
-      complete: vi.fn(async () => createAssistantMessage(truncated)),
+      complete,
       getModel: vi.fn(() => createModel())
     });
-    const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
-    const parsed = JSON.parse(result.rawJson) as { signals: unknown[] };
-    expect(parsed.signals).toHaveLength(1);
-    expect(result.extractorMeta).toEqual({
-      recoveryKind: "balanced_close",
-      retryCount: 0,
-      retryClassification: "success_first_try"
-    });
+    await expect(extractor.extract({ systemPrompt: "s", userPrompt: "t" }))
+      .rejects.toMatchObject({
+        name: "SignalExtractorError",
+        kind: "invalid_json",
+        retryClassification: "failure_truncated_response"
+      });
+    expect(complete).toHaveBeenCalledTimes(1);
   });
 
   it("returns recoveryKind=none when the body is already strict JSON", async () => {

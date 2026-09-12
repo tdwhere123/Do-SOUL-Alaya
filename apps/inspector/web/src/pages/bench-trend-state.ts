@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { apiFetch } from "../api";
+import { useApiQuery } from "../hooks/useApiQuery";
 import {
   BENCH_ORDER,
   type BenchKey,
@@ -16,40 +17,23 @@ export interface BenchTrendState {
 }
 
 export function useBenchTrendState(): BenchTrendState {
-  const [data, setData] = useState<BenchTrendData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const load = useBenchTrendLoader(setData, setError, setLoading);
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const fetchTrend = useCallback(async (signal: AbortSignal) => {
+    const response = await apiFetch<BenchTrendResponse>("/bench-trend", {
+      params: { limit: "30" },
+      signal
+    });
+    return response.data;
+  }, []);
+  const { data, error, loading, refetch } = useApiQuery(fetchTrend, []);
+  const load = useCallback(async () => {
+    await refetch();
+  }, [refetch]);
   return {
     benches: useVisibleBenches(data),
     error,
     loading,
     load
   };
-}
-
-function useBenchTrendLoader(
-  setData: (data: BenchTrendData) => void,
-  setError: (error: string | null) => void,
-  setLoading: (loading: boolean) => void
-) {
-  return useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await apiFetch<BenchTrendResponse>("/bench-trend", {
-        params: { limit: "30" }
-      });
-      setData(response.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [setData, setError, setLoading]);
 }
 
 function useVisibleBenches(data: BenchTrendData | null): readonly VisibleBenchTrend[] {

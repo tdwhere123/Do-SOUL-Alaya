@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 # Do-SOUL Alaya local installer.
 #
-# Recommended tag-pinned usage:
-#   ALAYA_VERSION=v0.3.5
+# Recommended tag-pinned usage (required to match a specific tree):
+#   ALAYA_VERSION=v0.3.11
 #   INSTALLER="$(mktemp)"
 #   curl -fsSL -o "$INSTALLER" "https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/${ALAYA_VERSION}/scripts/install.sh"
 #   ALAYA_VERSION="$ALAYA_VERSION" bash "$INSTALLER"
 #
 # Pipe shortcut (env vars MUST come after the pipe so `bash` sees them,
 # not `curl`; the downloaded script still verifies the release tarball):
-#   curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh | ALAYA_VERSION=v0.3.5 bash
+#   curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh | ALAYA_VERSION=v0.3.11 bash
 #   curl -fsSL ... | ALAYA_HOME=/opt/alaya ALAYA_BIN_DIR=/usr/local/bin bash
 #
 # Environment overrides:
-#   ALAYA_VERSION   default: latest GitHub release tag (e.g. v0.3.5)
+#   ALAYA_VERSION   GitHub release tag (e.g. v0.3.11). When unset, this script
+#                   follows GitHub releases/latest — a published tarball, NOT
+#                   git HEAD and NOT this source tree's package.json version.
+#                   Pin ALAYA_VERSION to install a matching tag, or run
+#                   `pnpm install && pnpm build` from a source checkout.
 #   ALAYA_HOME      default: $HOME/.local/share/do-soul-alaya
 #   ALAYA_BIN_DIR   default: $HOME/.local/bin
 #   ALAYA_REPO      default: tdwhere123/Do-SOUL-Alaya
@@ -29,6 +33,13 @@
 #   5. extracts to a STAGING dir and runs pnpm install + pnpm build there
 #   6. on success, atomically swaps STAGING -> $ALAYA_HOME (old install -> .bak)
 #   7. symlinks $ALAYA_HOME/bin/alaya.mjs into $ALAYA_BIN_DIR/alaya
+#
+# Local ONNX embeddings are an optional extra (~640MiB). Default pnpm install
+# does not pull @huggingface/transformers. After install:
+#   pnpm add @huggingface/transformers --filter @do-soul/alaya-core
+#   node scripts/fetch-local-embedding-model.mjs
+# Inspector SPA is still compiled by `pnpm build` (apps/inspector/web); this
+# installer does not ship a separate prebuilt Inspector tarball.
 set -euo pipefail
 
 REPO="${ALAYA_REPO:-tdwhere123/Do-SOUL-Alaya}"
@@ -127,6 +138,9 @@ fi
 # --- resolve version ------------------------------------------------------
 VERSION_TAG="${ALAYA_VERSION:-}"
 if [ -z "$VERSION_TAG" ]; then
+  warn "ALAYA_VERSION is unset. GitHub releases/latest is a published tarball,"
+  warn "not this source tree and not git HEAD. Pin ALAYA_VERSION=vX.Y.Z to match"
+  warn "package.json, or install from a checkout: pnpm install && pnpm build."
   info "resolving latest release tag from github.com/${REPO}..."
   api_resp="$(curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 \
     "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null)" \
@@ -243,6 +257,12 @@ esac
 
 bold ""
 bold "Installed Do-SOUL Alaya ${VERSION_TAG}."
+info ""
+info "This install came from GitHub Releases, not git HEAD."
+info "Local ONNX embeddings are optional; default install skips @huggingface/transformers."
+info "To enable local_onnx after this install:"
+info "  pnpm add @huggingface/transformers --filter @do-soul/alaya-core"
+info "  node ${ALAYA_HOME}/scripts/fetch-local-embedding-model.mjs"
 info ""
 info "Next steps:"
 info "  alaya doctor          # verify runtime"

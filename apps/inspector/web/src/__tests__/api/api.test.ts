@@ -128,6 +128,32 @@ describe("apiFetch", () => {
     });
   });
 
+  it("does not retry AbortError on GET", async () => {
+    const abortError = new DOMException("The operation was aborted.", "AbortError");
+    fetchMock.mockRejectedValue(abortError);
+    await expect(apiFetch("/status")).rejects.toBe(abortError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries GET once on a thrown network error", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    await expect(apiFetch<{ ok: boolean }>("/status")).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends the sessionStorage inspector token when the in-memory copy is empty", async () => {
+    setInspectorToken("");
+    sessionStorage.setItem("alaya-inspector-token", "stored-token");
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    await apiFetch("/status");
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init as RequestInit).headers).toMatchObject({
+      "X-Alaya-Inspector-Token": "stored-token"
+    });
+  });
+
   it("throws a friendly schema error instead of surfacing raw ZodError", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: true, data: "not-an-object" }), { status: 200 })

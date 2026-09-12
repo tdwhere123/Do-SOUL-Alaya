@@ -6,6 +6,13 @@ import {
   type ProviderAttemptFailure
 } from "../../provider/chat-completion/index.js";
 
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
+    const answer = { address: "93.184.216.34", family: 4 };
+    return options?.all === true ? [answer] : answer;
+  })
+}));
+
 const REQUEST = {
   providerUrl: "https://provider.test/v1",
   apiKey: "secret",

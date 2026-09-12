@@ -449,6 +449,43 @@ describe("stored pair measurement producer", () => {
     expect(result.page.outcome.status).not.toBe("invalidated");
   });
 
+  it("loads stored pairs in one batch instead of N+1 measureStoredPair calls", () => {
+    const object = vector(OBJECT_ID, new Float32Array([1, 0]));
+    const query = vector("query", new Float32Array([1, 0]));
+    let pairCalls = 0;
+    let batchCalls = 0;
+    const result = observeConditionalField(measureInput({
+      embeddingIds: () => ({
+        objectIds: [OBJECT_ID, "emb-2"],
+        rowVisits: 1,
+        metadataUtf8Bytes: 8,
+        truncated: false,
+        committedThrough: "emb-2"
+      }),
+      measureStoredPair: () => {
+        pairCalls += 1;
+        return readyPair(object, query);
+      },
+      measureStoredPairs: (input) => {
+        batchCalls += 1;
+        expect(input.objectIds).toEqual([OBJECT_ID, "emb-2"]);
+        return {
+          byObjectId: {
+            [OBJECT_ID]: readyPair(object, query),
+            "emb-2": readyPair(vector("emb-2", new Float32Array([1, 0])), query)
+          },
+          rowVisits: 4,
+          bytesRead: 32
+        };
+      },
+      source: memorySourceReader()
+    } as ObserverReaders, { work_limit: 64 }));
+    expect(batchCalls).toBe(1);
+    expect(pairCalls).toBe(0);
+    expect(result.measurements).toHaveLength(2);
+    expect(result.measurements?.every((row) => row.raw.status === "measured")).toBe(true);
+  });
+
   it("does not start pair reads when remaining work cannot pay them", () => {
     let pairCalls = 0;
     const result = observeConditionalField(measureInput({

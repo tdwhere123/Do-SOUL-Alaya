@@ -1,10 +1,13 @@
 # Runtime Snapshot
 
-Package version is `0.3.11`. The live Recall entry is the conditional field
-in [`recall.md`](recall.md). This file is readiness vocabulary and dated
-snapshots. It is **not** a KPI-promotion or merge-readiness claim. The
-2026-08-29 query-proof table and S14–S20 rows below are **historical
-receipts**, not live target authority.
+Package version is `0.3.11`. GitHub `releases/latest` is a published
+tarball and can lag this handbook; it is **not** git HEAD. Install from
+this checkout (`pnpm install && pnpm build`) or pin `ALAYA_VERSION`.
+The live Recall entry is the conditional field in [`recall.md`](recall.md).
+This file is readiness vocabulary and dated snapshots. It is **not** a
+KPI-promotion or merge-readiness claim. The 2026-08-29 query-proof table
+and S14–S20 rows below are **historical receipts**, not live target
+authority.
 
 Recall algorithm (live vs historical): [`recall.md`](recall.md).
 

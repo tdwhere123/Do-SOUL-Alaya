@@ -1,4 +1,5 @@
 import type { EmbeddingProviderPort } from "./embedding-recall-service.js";
+import { importLocalOnnxTransformers } from "./local-onnx.js";
 import { withLocalOnnxHostSingleFlight } from "./local-onnx-host-single-flight.js";
 import {
   LocalOnnxEmbeddingIpcSession,
@@ -140,7 +141,7 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     this.cacheDir = options.cacheDir === undefined
       ? defaultLocalOnnxCacheDir()
       : options.cacheDir;
-    const importer = options.transformersImporter ?? importTransformers;
+    const importer = options.transformersImporter ?? importLocalOnnxTransformers;
     this.pipelineLoader = options.pipelineLoader ?? ((modelId, cacheDir, loaderOptions) =>
       defaultLocalOnnxPipelineLoader(modelId, cacheDir, loaderOptions, importer));
     this.now = options.now ?? (() => Date.now());
@@ -453,21 +454,6 @@ function restoreOptionalEnvPath(
 ): void {
   if (value === undefined) delete env[key];
   else env[key] = value;
-}
-
-async function importTransformers(): Promise<LocalOnnxEmbeddingTransformersModule> {
-  try {
-    return (await import("@huggingface/transformers")) as LocalOnnxEmbeddingTransformersModule;
-  } catch (error) {
-    // Surface a packaging failure distinctly from an unreadable model artifact.
-    if ((error as { code?: string }).code === "ERR_MODULE_NOT_FOUND") {
-      throw new Error(
-        "@huggingface/transformers is required for the local ONNX embedding provider.",
-        { cause: error }
-      );
-    }
-    throw error;
-  }
 }
 
 async function defaultLocalOnnxPipelineLoader(

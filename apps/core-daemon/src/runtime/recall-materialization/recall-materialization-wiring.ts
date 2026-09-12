@@ -2,8 +2,8 @@ import {
   DeferredObligationService,
   RelationAssertionService,
   ResolutionService,
-  appendEventLogSynchronously,
   fieldContractSha256,
+  type EventPublisher,
   type GlobalMemoryRecallSubscription,
   type ManifestationResolverEventLogWriterPort
 } from "@do-soul/alaya-core";
@@ -47,12 +47,14 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
   });
   const bindTemporalPathReads = pathReadBind === "temporal";
   const directPathReadPorts = createDirectRecallPathReadPorts(input, bindTemporalPathReads);
+  const allowDirectSqliteRecallReads = input.database.filename === ":memory:";
   const recallReadWorkerClient = createRecallReadWorkerClient({
     databaseFilename: input.database.filename,
     pathReadBind,
     ...(bindTemporalPathReads
       ? { prepareTemporalProjection: directPathReadPorts.ensureTemporalProjection }
       : {}),
+    ...(allowDirectSqliteRecallReads ? { allowDirectSqliteRecallReads: true } : {}),
     warn: input.warn
   });
   const recallReadWorkerReady = recallReadWorkerClient?.ready() ?? Promise.resolve();
@@ -110,6 +112,23 @@ function createGlobalMemoryRuntime(input: CreateRecallMaterializationWiringInput
   };
 }
 
+function recallReadSnapshotOrThrow(
+  input: CreateRecallMaterializationWiringInput,
+  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>
+) {
+  if (recallReadWorkerClient?.readSnapshot !== undefined) {
+    return recallReadWorkerClient.readSnapshot;
+  }
+  if (input.database.filename !== ":memory:") {
+    throw new Error("recall read worker is required; observe must not fall back to silent direct sqlite");
+  }
+  input.warn("recall observe using explicit direct sqlite because the database is :memory:", {
+    reason: "direct_sqlite_recall_reads",
+    database: ":memory:"
+  });
+  return createSqliteConnectionReadSnapshot(input.database.connection);
+}
+
 function createRecallReadRuntime(
   input: CreateRecallMaterializationWiringInput,
   recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>,
@@ -128,8 +147,7 @@ function createRecallReadRuntime(
       input,
       embeddingRuntime,
       recallSearchRuntime,
-      readSnapshot: recallReadWorkerClient?.readSnapshot
-        ?? createSqliteConnectionReadSnapshot(input.database.connection)
+      readSnapshot: recallReadSnapshotOrThrow(input, recallReadWorkerClient)
     })
   };
 }
@@ -239,6 +257,7 @@ function createEmbeddingRuntimeWithWarmupObserver(input: CreateRecallMaterializa
     database: input.database,
     configEnv: input.configEnv,
     eventLogRepo: input.eventLogRepo,
+    eventPublisher: input.eventPublisher,
     healthJournalService: input.healthJournalService,
     memoryEntryRepo: input.memoryEntryRepo,
     warn: input.warn
@@ -285,12 +304,11 @@ function createDirectRecallPathReadPorts(
 }
 
 export function createAtomicManifestationEventLogWriter(
-  eventLogRepo: Pick<CreateRecallMaterializationWiringInput["eventLogRepo"], "append" | "transactional">
+  eventPublisher: EventPublisher
 ): ManifestationResolverEventLogWriterPort {
   return {
-    appendAtomically: (entries) => eventLogRepo.transactional(() =>
-      entries.map((entry) => appendEventLogSynchronously(eventLogRepo, entry))
-    )
+    appendAtomically: (entries) =>
+      eventPublisher.appendManyWithMutation(entries, (committed) => committed)
   };
 }
 

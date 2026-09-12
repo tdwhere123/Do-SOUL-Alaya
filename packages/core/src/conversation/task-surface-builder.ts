@@ -16,6 +16,7 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 
 export type NodeStrategy = "chat" | "analyze" | "build" | "govern";
 
@@ -187,7 +188,10 @@ export class TaskSurfaceBuilder {
       display_name: displayName,
       context_refs: Object.freeze([...(params.contextRefs ?? [])])
     });
-    await this.dependencies.eventLogRepo.append({
+    await bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      purpose: "TaskSurfaceBuilder"
+    }).publish({
       event_type: RecallContextEventType.SOUL_TASK_SURFACE_CREATED,
       entity_type: "task_object_surface",
       entity_id: runtimeId,

@@ -37,6 +37,7 @@ import type {
   SignalServiceWarnPort
 } from "./signal-service-types.js";
 import { CoreError } from "../shared/errors.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 import {
   appendMemoryEventLogSynchronously,
   runEventLogTransaction
@@ -318,7 +319,10 @@ export class SignalService {
     signal: CandidateMemorySignal,
     emittedInput: ReturnType<typeof buildSignalEmittedEventInput>
   ): Promise<SignalServiceReceiveResult> {
-    const emittedEvent = await this.dependencies.eventLogRepo.append(emittedInput);
+    const emittedEvent = await bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      purpose: "SignalService"
+    }).publish(emittedInput);
     const storedSignal = await this.dependencies.signalRepo.create(signal);
     if (emittedEvent.run_id !== null) {
       await this.dependencies.runtimeNotifier.notifyEntry(emittedEvent);

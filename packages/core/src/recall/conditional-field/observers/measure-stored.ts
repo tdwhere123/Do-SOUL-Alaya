@@ -11,16 +11,19 @@ import { digestOriginalQuery } from "../query/compile-query-identity.js";
 import {
   collectObserved,
   pageLimit,
-  unavailableOrNotApplicable,
+  unavailableOrNotApplicable
+} from "./observe-collect.js";
+import {
   type ObserveConditionalFieldInput,
   type ObserverActionResult,
   type SourceObserverRow
-} from "./observe.js";
+} from "./observe-ports.js";
 import { buildTypedObservation } from "./observation-admission.js";
 
 export const STORED_COSINE_PRODUCER_ID = "stored.cosine.pair.v1";
 export const COSINE_DOMAIN_ID = "cosine.unit.v1";
 export const COSINE_NORMALIZATION_ID = "l2.dot.v1";
+const STORED_PAIR_SLOT_BYTES = 2 * (16384 * 4 + 2048) + 2304;
 
 export const INAPPLICABLE_CAP: ProjectedCap = Object.freeze({ status: "inapplicable" });
 
@@ -49,6 +52,26 @@ export type ObservationMeasurement = Readonly<{
   readonly raw: RawMeasurement;
   readonly cap: ProjectedCap;
 }>;
+
+export type MeasureStoredPairsInput = Readonly<{
+  readonly workspaceId: string;
+  readonly objectIds: readonly string[];
+  readonly queryDigest: string;
+  readonly profile?: ObserveConditionalFieldInput["measurement_profile"];
+  readonly byteLimit?: number;
+  readonly workLimit?: number;
+}>;
+
+export type StoredPairsMeasurement = Readonly<{
+  readonly byObjectId: Readonly<Record<string, StoredPairMeasurement>>;
+  readonly rowVisits: number;
+  readonly bytesRead: number;
+  readonly resourceLimited?: boolean;
+}>;
+
+type PairReaders = ObserveConditionalFieldInput["readers"] & {
+  readonly measureStoredPairs?: (input: MeasureStoredPairsInput) => StoredPairsMeasurement;
+};
 
 export function hasMeasurementProducer(readers: ObserveConditionalFieldInput["readers"]): boolean {
   return readers.embeddingIds !== undefined || readers.measureStoredPair !== undefined;
@@ -195,62 +218,65 @@ function attachPairMeasurements(
 ): ObserverActionResult {
   const digest = queryDigestOf(input);
   const measure = input.readers.measureStoredPair;
-  const measurements: ObservationMeasurement[] = [];
-  let extraWork = 0;
-  let extraBytes = 0;
-  let computeWork = 0;
-  const observations: TypedObservation[] = [];
+  const measureMany = (input.readers as PairReaders).measureStoredPairs;
   const reserves = measurementWorkReserves(input);
+  const affordable: TypedObservation[] = [];
   for (const observation of collected.page.observations) {
-    if (collected.work.native_visits + extraWork + computeWork + reserves.pair + reserves.source > input.action.work_limit) {
+    if (collected.work.native_visits + affordable.length * (reserves.pair + reserves.source) + reserves.pair + reserves.source
+      > input.action.work_limit) {
       break;
     }
-    const pair = measure?.({
+    affordable.push(observation);
+  }
+  let batch = measureMany === undefined || affordable.length === 0
+    ? undefined
+    : measureMany({
       workspaceId: input.workspace_id,
-      objectId: observation.object_id,
+      objectIds: affordable.map((observation) => observation.object_id),
       queryDigest: digest,
       profile: input.measurement_profile,
-      byteLimit: 2 * (16384 * 4 + 2048) + 2304,
-      workLimit: input.action.work_limit - collected.work.native_visits - extraWork - computeWork - reserves.source
+      byteLimit: STORED_PAIR_SLOT_BYTES * affordable.length,
+      workLimit: input.action.work_limit - collected.work.native_visits - reserves.source
     });
-    extraWork += pair?.rowVisits ?? 0;
-    extraBytes += pair?.bytesRead ?? 0;
-    if (pair?.resourceLimited) break;
+  if (batch?.resourceLimited === true && Object.keys(batch.byObjectId).length === 0) {
+    batch = undefined;
+  }
+  const measurements: ObservationMeasurement[] = [];
+  let extraWork = batch?.rowVisits ?? 0;
+  let extraBytes = batch?.bytesRead ?? 0;
+  let computeWork = 0;
+  const observations: TypedObservation[] = [];
+  const serial = batch === undefined ? collected.page.observations : affordable;
+  for (const observation of serial) {
+    if (batch === undefined
+      && collected.work.native_visits + extraWork + computeWork + reserves.pair + reserves.source > input.action.work_limit) {
+      break;
+    }
+    const pair = batch === undefined
+      ? measure?.({
+        workspaceId: input.workspace_id,
+        objectId: observation.object_id,
+        queryDigest: digest,
+        profile: input.measurement_profile,
+        byteLimit: STORED_PAIR_SLOT_BYTES,
+        workLimit: input.action.work_limit - collected.work.native_visits - extraWork - computeWork - reserves.source
+      })
+      : batch.byObjectId[observation.object_id];
+    if (batch === undefined) {
+      extraWork += pair?.rowVisits ?? 0;
+      extraBytes += pair?.bytesRead ?? 0;
+    }
+    if (pair?.resourceLimited === true || (batch?.resourceLimited === true && pair === undefined)) break;
     const memory = pairNeedsMemoryRevision(pair)
       ? memoryProductRevision(input, observation.object_id)
       : { rowVisits: 0, bytesRead: 0 };
     extraWork += memory.rowVisits;
     extraBytes += memory.bytesRead;
     if (collected.work.native_visits + extraWork + computeWork + (pair?.object?.dimensions ?? 0) > input.action.work_limit) break;
-    const fresh = pair?.object == null || memory.contentHash === pair.object.content_hash;
-    if (fresh && memory.revision !== undefined && pairNeedsMemoryRevision(pair) && compatibleSpaces(pair!.object!, pair!.query!)) {
-      computeWork += pair!.object!.dimensions;
-    }
-    let raw: RawMeasurement = fresh ? rawMeasurementFromPair({
-      workspaceId: input.workspace_id,
-      objectId: observation.object_id,
-      queryDigest: digest,
-      pair,
-      sourceRevision: memory.revision
-    }) : { status: "unavailable" };
-    const profile = input.measurement_profile;
-    if (raw.status === "measured") {
-      if (profile !== undefined) raw = { ...raw, obligation_id: profile.obligation_id };
-    }
-    const cap: ProjectedCap = raw.status === "measured" && typeof raw.raw === "number" && profile !== undefined
-      && raw.producer_id === profile.producer_id && raw.provider_kind === profile.provider_kind && raw.model_id === profile.model_id
-      && raw.schema_version === profile.schema_version && raw.dimensions === profile.dimensions
-      && raw.domain === profile.domain && raw.normalization === profile.normalization && raw.raw >= profile.raw_threshold
-      ? { status: "projected", domain_id: ASSOCIATION_DOMAIN_ID, transfer_id: profile.transfer_id,
-        transfer_version: profile.transfer_version, milligrades: Math.floor(500 * (Math.max(-1, Math.min(1, raw.raw)) + 1)) }
-      : INAPPLICABLE_CAP;
-    const observationId = profile === undefined ? observation.observation_id : `${observation.observation_id}:${profile.obligation_id}`;
-    measurements.push({ observation_id: observationId, raw, cap });
-    const admitted = raw.status !== "measured" ? null : buildTypedObservation(input, {
-      objectId: observation.object_id, sourceRevision: raw.referent.kind === "memory_entry" ? raw.referent.source_revision : observation.source_revision,
-      sourceRow: memory.row, target: raw.referent, observationKey: observationId, identityKind: "object" });
-    observations.push({ ...stampMeasuredObservation(observation, raw, pair, memory.revision), observation_id: observationId,
-      applicability: admitted?.applicability ?? { ...observation.applicability, verdict: "false" } });
+    const attached = attachOnePair(input, observation, digest, pair, memory);
+    computeWork += attached.computeWork;
+    measurements.push(attached.measurement);
+    observations.push(attached.observation);
   }
   const nativeVisits = collected.work.native_visits + extraWork;
   const truncated = observations.length < collected.page.observations.length;
@@ -268,6 +294,55 @@ function attachPairMeasurements(
       bytes_read: collected.work.bytes_read + extraBytes
     }
   }, measurements);
+}
+
+function attachOnePair(
+  input: ObserveConditionalFieldInput,
+  observation: TypedObservation,
+  digest: string,
+  pair: StoredPairMeasurement | undefined,
+  memory: ReturnType<typeof memoryProductRevision>
+): Readonly<{
+  readonly measurement: ObservationMeasurement;
+  readonly observation: TypedObservation;
+  readonly computeWork: number;
+}> {
+  const fresh = pair?.object == null || memory.contentHash === pair.object.content_hash;
+  const computeWork = fresh && memory.revision !== undefined && pairNeedsMemoryRevision(pair)
+    && compatibleSpaces(pair!.object!, pair!.query!)
+    ? pair!.object!.dimensions
+    : 0;
+  let raw: RawMeasurement = fresh ? rawMeasurementFromPair({
+    workspaceId: input.workspace_id,
+    objectId: observation.object_id,
+    queryDigest: digest,
+    pair,
+    sourceRevision: memory.revision
+  }) : { status: "unavailable" };
+  const profile = input.measurement_profile;
+  if (raw.status === "measured" && profile !== undefined) raw = { ...raw, obligation_id: profile.obligation_id };
+  const cap: ProjectedCap = raw.status === "measured" && typeof raw.raw === "number" && profile !== undefined
+    && raw.producer_id === profile.producer_id && raw.provider_kind === profile.provider_kind && raw.model_id === profile.model_id
+    && raw.schema_version === profile.schema_version && raw.dimensions === profile.dimensions
+    && raw.domain === profile.domain && raw.normalization === profile.normalization && raw.raw >= profile.raw_threshold
+    ? { status: "projected", domain_id: ASSOCIATION_DOMAIN_ID, transfer_id: profile.transfer_id,
+      transfer_version: profile.transfer_version, milligrades: Math.floor(500 * (Math.max(-1, Math.min(1, raw.raw)) + 1)) }
+    : INAPPLICABLE_CAP;
+  const observationId = profile === undefined ? observation.observation_id : `${observation.observation_id}:${profile.obligation_id}`;
+  const admitted = raw.status !== "measured" ? null : buildTypedObservation(input, {
+    objectId: observation.object_id,
+    sourceRevision: raw.referent.kind === "memory_entry" ? raw.referent.source_revision : observation.source_revision,
+    sourceRow: memory.row, target: raw.referent, observationKey: observationId, identityKind: "object"
+  });
+  return {
+    measurement: { observation_id: observationId, raw, cap },
+    observation: {
+      ...stampMeasuredObservation(observation, raw, pair, memory.revision),
+      observation_id: observationId,
+      applicability: admitted?.applicability ?? { ...observation.applicability, verdict: "false" }
+    },
+    computeWork
+  };
 }
 
 function measurementWorkReserves(input: ObserveConditionalFieldInput): Readonly<{

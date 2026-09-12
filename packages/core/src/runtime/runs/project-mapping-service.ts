@@ -12,6 +12,7 @@ import {
   type ProjectMappingState as ProjectMappingStateType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { bindEventPublisher } from "../event-publisher.js";
 import { ProjectMappingAnchorEnsurer } from "./project-mapping-anchor-ensurer.js";
 import {
   findStrictConfirmationMappingIds,
@@ -139,7 +140,7 @@ export class ProjectMappingService {
 
     // EventLog-first is intentional: project-mapping writes are at-least-once. If repo persistence
     // fails after append, reconciliation should treat the EventLog as the source of truth.
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED,
       entity_type: ObjectKind.PROJECT_MAPPING_ANCHOR,
       entity_id: anchor.object_id,
@@ -153,10 +154,19 @@ export class ProjectMappingService {
         initial_state: ProjectMappingState.SUGGESTED,
         suggested_at: timestamp
       })
+    };
+    await bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier === undefined
+        ? undefined
+        : {
+            notify: () => undefined,
+            notifyEntry: (entry) => this.dependencies.runtimeNotifier!.notifyEntry(entry)
+          },
+      purpose: "ProjectMappingService"
+    }).appendApplyThenPropagate(eventInput, async () => {
+      await this.dependencies.projectMappingRepo.create(anchor);
     });
-
-    await this.dependencies.projectMappingRepo.create(anchor);
-    await this.dependencies.runtimeNotifier?.notifyEntry(event);
 
     return anchor;
   }
@@ -340,7 +350,7 @@ export class ProjectMappingService {
 
     // EventLog-first is intentional: project-mapping transitions are at-least-once. If repo
     // persistence fails after append, recovery should replay from the EventLog entry.
-    const event = await this.dependencies.eventLogRepo.append({
+    const eventInput = {
       event_type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
       entity_type: ObjectKind.PROJECT_MAPPING_ANCHOR,
       entity_id: anchor.object_id,
@@ -356,15 +366,24 @@ export class ProjectMappingService {
         accepted_by: options.acceptedBy,
         transitioned_at: transitionedAt
       })
+    };
+    await bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier === undefined
+        ? undefined
+        : {
+            notify: () => undefined,
+            notifyEntry: (entry) => this.dependencies.runtimeNotifier!.notifyEntry(entry)
+          },
+      purpose: "ProjectMappingService"
+    }).appendApplyThenPropagate(eventInput, async () => {
+      await this.dependencies.projectMappingRepo.updateState(
+        anchor.object_id,
+        options.targetState,
+        options.acceptedBy,
+        transitionedAt
+      );
     });
-
-    await this.dependencies.projectMappingRepo.updateState(
-      anchor.object_id,
-      options.targetState,
-      options.acceptedBy,
-      transitionedAt
-    );
-    await this.dependencies.runtimeNotifier?.notifyEntry(event);
 
     return Object.freeze({
       ...anchor,

@@ -38,6 +38,13 @@ export function useInspectorLaunchState(): InspectorLaunchState {
   useCommandPaletteHotkey(paletteOpen, togglePalette);
 
   useEffect(() => {
+    setUnauthorizedHandler(() => setSessionExpired(true));
+    return () => {
+      setUnauthorizedHandler(null);
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     void bootstrapInspectorSession(readLaunchParams(searchParams, location.hash), {
       cancelled: () => cancelled,
@@ -45,10 +52,8 @@ export function useInspectorLaunchState(): InspectorLaunchState {
       setAuthError,
       setReady
     });
-    setUnauthorizedHandler(() => setSessionExpired(true));
     return () => {
       cancelled = true;
-      setUnauthorizedHandler(null);
     };
   }, [location.hash, location.search, navigate, searchParams, setSearchParams]);
 

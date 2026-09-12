@@ -75,12 +75,11 @@ describe("inspector routes", () => {
       fetchImpl: async () => Response.json({ error: `validation failed: ${plaintext}` }, { status: 400 })
     });
 
-    const response = await authenticatedRequest(app, "/api/config/runtime/embedding-supplement", {
+    const response = await authenticatedRequest(app, "/api/config/ws1/manifestation-budget", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        secret_ref_mode: "paste",
-        secret_value: plaintext
+        stance_bias_cap: 8
       })
     });
 
@@ -103,12 +102,11 @@ describe("inspector routes", () => {
       }
     });
 
-    const response = await authenticatedRequest(app, "/api/config/runtime/embedding-supplement", {
+    const response = await authenticatedRequest(app, "/api/config/ws1/manifestation-budget", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        secret_ref_mode: "paste",
-        secret_value: plaintext
+        stance_bias_cap: 8
       })
     });
 

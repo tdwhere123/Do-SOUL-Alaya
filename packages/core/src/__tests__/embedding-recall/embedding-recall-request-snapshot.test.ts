@@ -9,6 +9,8 @@ import {
   resetCoreConfigForTests
 } from "../../runtime/config/index.js";
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
+import { EmbeddingSupplementBuilder } from "../../embedding-recall/supplement-builder.js";
+import type { EmbeddingRecallTelemetry } from "../../embedding-recall/embedding-recall-telemetry.js";
 import {
   createEmbeddingRecord,
   createMemoryEntry,
@@ -41,6 +43,13 @@ describe("EmbeddingRecallService request score snapshot", () => {
     ]);
     expect(Object.keys(snapshot.poolScoresByObjectId).sort()).toEqual(["pool-cold", "pool-hot"]);
     expect(snapshot.poolScoresByObjectId[fixture.stale.object_id]).toBeUndefined();
+    expect(fixture.warn).toHaveBeenCalledWith(
+      "embedding stored vector is stale",
+      expect.objectContaining({
+        object_id: fixture.stale.object_id,
+        reason: "embedding_content_hash_stale"
+      })
+    );
     const poolCapture = snapshot.fieldChannelCaptures?.find(({ channel }) =>
       channel.channel_id === "object_embedding_pool");
     const workspaceCapture = snapshot.fieldChannelCaptures?.find(({ channel }) =>
@@ -63,6 +72,44 @@ describe("EmbeddingRecallService request score snapshot", () => {
       observations: [],
       unseen_upper_bound: 1
     });
+  });
+
+  it("warns and drops a stale stored vector instead of silently skipping it in the live supplement path", async () => {
+    const warn = vi.fn();
+    const memory = createMemoryEntry({ object_id: "pool-stale", content: "Current memory." });
+    const builder = new EmbeddingSupplementBuilder({
+      provider: createProvider(),
+      now: () => "2026-07-14T00:00:00.000Z",
+      nowEpochMs: () => 0,
+      telemetry: {
+        appendTelemetrySafely: vi.fn(async () => undefined),
+        recordDegraded: vi.fn(async () => undefined)
+      } as unknown as EmbeddingRecallTelemetry,
+      warn
+    });
+    const result = await builder.buildSupplementFromQueryEmbedding({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryId: "q1",
+      queryEmbedding: new Float32Array([1, 0]),
+      storedVectors: [createEmbeddingRecord({
+        object_id: memory.object_id,
+        content_hash: hashMemoryContent("Outdated memory."),
+        embedding: new Float32Array([1, 0])
+      })],
+      eligibleMemories: [memory],
+      baseCandidateIds: [],
+      maxSupplement: 2
+    });
+    expect(result.supplementaryEntries).toEqual([]);
+    expect(result.similarityHintsByObjectId).toEqual({});
+    expect(warn).toHaveBeenCalledWith(
+      "embedding stored vector is stale",
+      expect.objectContaining({
+        object_id: memory.object_id,
+        reason: "embedding_content_hash_stale"
+      })
+    );
   });
 
   it("normalizes one query once while scoring multiple records", async () => {
@@ -459,15 +506,17 @@ function createHydrationFixture() {
     .mockReturnValueOnce(200)
     .mockReturnValueOnce(205);
   const append = createEventAppendSpy();
+  const warn = vi.fn();
   const service = new EmbeddingRecallService({
     embeddingRepo: { listByWorkspace, listByObjectIds },
     provider: createProvider({ embedTexts }),
     eventLogRepo: { append, queryByEntity: vi.fn(async () => []) },
     generateQueryId: () => "request-score-snapshot",
     now: () => "2026-07-14T00:00:00.000Z",
-    nowEpochMs
+    nowEpochMs,
+    warn
   });
-  return { ...memories, listByWorkspace, listByObjectIds, embedTexts, append, service };
+  return { ...memories, listByWorkspace, listByObjectIds, embedTexts, append, warn, service };
 }
 
 function prepareHydrationSnapshot(fixture: ReturnType<typeof createHydrationFixture>) {

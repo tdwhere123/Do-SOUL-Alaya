@@ -4,6 +4,7 @@ import {
   ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   InformationIndexSchema,
+  SoulMemorySearchResponseSchema,
   memoryProductStateKey,
   productStateKeyFromIndexEntry,
   sourceProductStateKey,
@@ -22,6 +23,7 @@ import {
   measureConditionalFieldResponse,
   type SourceGoldUnit
 } from "../../../../../../apps/bench-runner/src/runs/measurement/conditional-field-measurement.js";
+import { FirstExposureSession } from "../../../../../../apps/bench-runner/src/runs/measurement/first-exposure-session.js";
 import { hydrateUtf8Chunk } from "../../../memory/evidence-create/source-utf8-hydrate.js";
 import { sourceRowEligible } from "../../../recall/conditional-field/observers/observation-admission.js";
 import type { ObserveConditionalFieldInput } from "../../../recall/conditional-field/observers/observe.js";
@@ -285,33 +287,53 @@ describe("CP11 delivery falsifiers", () => {
 
   it("M02: product_updates cannot rewrite first-exposure slots or mixed-kind Any@K", () => {
     const first = goldFixture([sourceTarget({ root_id: "other-root" })]);
-    const before = measureConditionalFieldResponse({ ...first, goldSourceUnits: [SOURCE_GOLD] });
+    const session = new FirstExposureSession();
+    const index = first.recallResult.index;
+    const continuation = {
+      schema_version: 1 as const, continuation_id: "issued", query_id: index.query_id,
+      snapshot_id: index.snapshot_id, result_version: index.result_version, cursor: "next",
+      expires_at: FAR_FUTURE_EXPIRY, interpretation_id: index.interpretation_id,
+      interpretation_clock: index.as_of
+    };
+    const initialResponse = {
+      delivery_id: "first", protocol_version: 1, results: first.recallResult.results,
+      index: { ...index, continuation }, total_count: first.recallResult.total_count
+    };
+    const before = measureConditionalFieldResponse({
+      ...first, goldSourceUnits: [SOURCE_GOLD], recallResult: {
+        ...first.recallResult, ...initialResponse,
+        first_exposure_page: session.record(SoulMemorySearchResponseSchema.parse(initialResponse))
+      }
+    });
     if (before?.status !== "validated") throw new Error("validated first page expected");
+    const updateResponse = {
+      delivery_id: "update", protocol_version: 1, results: [], total_count: 0,
+      index: {
+        ...index, entries: [], page_purpose: "update" as const,
+        product_updates: [{
+          schema_version: 1 as const,
+          product: sourceProductStateKey({
+            workspace_id: "workspace", root_kind: "source_record", root_id: "rec-1",
+            source_version: "v1", content_digest: DIGEST, evidence_object_id: null,
+            program_state: "matched", hypothesis_id: "h-update", binding_context: "binding0",
+            time_state: "current"
+          }),
+          update_kind: "proof" as const, revision: "rev-2"
+        }]
+      }
+    };
     const after = measureConditionalFieldResponse({
-      ...first,
-      recallResult: {
-        ...first.recallResult,
-        index: {
-          ...first.recallResult.index, page_purpose: "update" as const,
-          product_updates: [{
-            schema_version: 1 as const,
-            product: sourceProductStateKey({
-              workspace_id: "workspace", root_kind: "source_record", root_id: "rec-1",
-              source_version: "v1", content_digest: DIGEST, evidence_object_id: null,
-              program_state: "matched", hypothesis_id: "h-update", binding_context: "binding0",
-              time_state: "current"
-            }),
-            update_kind: "proof" as const, revision: "rev-2"
-          }]
-        }
-      },
-      goldSourceUnits: [SOURCE_GOLD]
+      ...first, deliveredResults: [], goldSourceUnits: [SOURCE_GOLD], recallResult: {
+        ...first.recallResult, ...updateResponse,
+        first_exposure_page: session.record(SoulMemorySearchResponseSchema.parse(updateResponse), continuation)
+      }
     });
     if (after?.status !== "validated") throw new Error("validated update page expected");
     expect(after.first_exposure_slots).toEqual(before.first_exposure_slots);
     expect(after.metrics.mixed_kind_first_exposure).toEqual(before.metrics.mixed_kind_first_exposure);
     expect(after.product_updates).toHaveLength(1);
-    expect(after.evaluated_slots[0]?.target).toMatchObject({ root_id: "other-root" });
+    expect(after.evaluated_slots).toEqual([]);
+    expect(after.first_exposure_slots[0]?.target).toMatchObject({ root_id: "other-root" });
   });
 });
 
@@ -474,7 +496,12 @@ function goldFixture(targets: readonly RecallTargetRef[]) {
     }
   };
   return {
-    recallResult,
+    recallResult: {
+      ...recallResult,
+      first_exposure_page: new FirstExposureSession().record(SoulMemorySearchResponseSchema.parse({
+        delivery_id: recallResult.delivery_id, protocol_version: 1, index, results, total_count: results.length
+      }))
+    },
     deliveredResults: results.slice(0, 10).map((row, offset) => ({
       ...(row.object_id === undefined ? {} : { object_id: row.object_id }),
       target: row.target, object_kind: row.object_kind, rank: offset + 1,

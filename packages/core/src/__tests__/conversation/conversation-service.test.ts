@@ -268,7 +268,7 @@ describe("ConversationService", () => {
     }));
   });
 
-  it("drops a Garden receipt when the daemon cannot append its completion event", async () => {
+  it("fails Garden compile when EventLog append is missing instead of silently dropping receipts", async () => {
     const signalReceiver = {
       receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
         signal,
@@ -276,7 +276,7 @@ describe("ConversationService", () => {
         materialization: null
       }))
     };
-    const { service } = createService({
+    const { service, dependencies } = createService({
       eventLogRepo: {
         queryConversationMessageEventsByRun: vi.fn(async () => [])
       },
@@ -300,9 +300,15 @@ describe("ConversationService", () => {
     });
     await flushBackgroundTasks();
 
-    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(expect.objectContaining({
-      source_observation: null
-    }));
+    expect(signalReceiver.receiveSignal).not.toHaveBeenCalled();
+    expect(dependencies.warn).toHaveBeenCalledWith(
+      "Garden compile failed.",
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: expect.stringContaining("event publisher")
+        })
+      })
+    );
   });
 
   it("drops a Garden receipt when completion event append fails", async () => {

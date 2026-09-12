@@ -66,6 +66,19 @@ describe("Auditor", () => {  it("exposes the auditor role and tier", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
+  it("fails evidence staleness when EventLog is not wired", async () => {
+    const { auditor, scheduler } = createAuditor({
+      staleEntries: [{ memory_entry_id: "memory-1", stale_evidence_refs: ["evidence-1"] }],
+      omitEventLogRepo: true
+    });
+
+    const result = await auditor.run(createTask({ task_kind: GardenTaskKind.EVIDENCE_STALENESS_CHECK }));
+
+    expect(result.success).toBe(false);
+    expect(result.error_message).toContain("eventLogRepo");
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
+
   // revoke + renew + grace_request commit a green-governance EventLog
   // row in the same SQLite transaction as the underlying SQL UPDATE.
   // The mock eventLogRepo captures the (events, mutate) pair so we can
@@ -296,6 +309,26 @@ describe("Auditor", () => {  it("exposes the auditor role and tier", () => {
 
 });
 
+function createPassthroughEventLogPort(): NonNullable<AuditorDependencies["eventLogRepo"]> {
+  return {
+    append: vi.fn(),
+    appendManyWithMutation: vi.fn(
+      async <T>(
+        entries: readonly object[],
+        mutate: (rows: readonly object[]) => T
+      ): Promise<T> =>
+        mutate(
+          entries.map((entry, idx) => ({
+            ...entry,
+            event_id: `evt-${idx}`,
+            created_at: "2026-03-27T00:00:00.000Z",
+            revision: idx
+          }))
+        )
+    ) as NonNullable<AuditorDependencies["eventLogRepo"]>["appendManyWithMutation"]
+  };
+}
+
 function createAuditor(options: {
   readonly staleEntries?: readonly StaleMemoryEntry[];
   readonly brokenPointers?: readonly BrokenPointerRecord[];
@@ -306,6 +339,7 @@ function createAuditor(options: {
   readonly pendingPatternKeys?: readonly string[];
   readonly findBrokenPointers?: (workspaceId: string) => Promise<readonly BrokenPointerRecord[]>;
   readonly eventLogRepo?: AuditorDependencies["eventLogRepo"];
+  readonly omitEventLogRepo?: boolean;
   readonly revokeAffected?: number;
 } = {}) {
   const evidenceCheckPort = {
@@ -358,7 +392,9 @@ function createAuditor(options: {
       bootstrappingPort,
       scheduler,
       healthJournal,
-      eventLogRepo: options.eventLogRepo,
+      ...(options.omitEventLogRepo === true
+        ? {}
+        : { eventLogRepo: options.eventLogRepo ?? createPassthroughEventLogPort() }),
       now: () => "2026-03-27T00:00:00.000Z"
     }),
     evidenceCheckPort,

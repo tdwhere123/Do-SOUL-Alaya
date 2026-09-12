@@ -52,8 +52,8 @@ describe("concurrent sqlite tail latency", () => {
     expect(result.interleavedReadSamplesMs.length).toBe(16);
     expect(Number.isFinite(result.blockingRatioP99)).toBe(true);
     db.close();
-    // Windows CI runners can spend >15s on this blocking probe under load.
-  }, 60_000);
+    // Windows CI runners can spend well over 15s on this blocking probe under load.
+  }, process.platform === "win32" ? 120_000 : 60_000);
 
   it.skipIf(process.platform === "win32")(
     "worker payload writes leave the main-thread event loop responsive vs sync writes",

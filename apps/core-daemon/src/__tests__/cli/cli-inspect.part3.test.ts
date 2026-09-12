@@ -92,7 +92,7 @@ function stubWorkspaceDaemonFetch(
     return Response.json(response.body, { status: response.status ?? 200 });
   });
   return {
-    url: "http://daemon.local",
+    url: "http://127.0.0.1:5173",
     requests,
     restore: () => {
       vi.stubGlobal("fetch", originalFetch);

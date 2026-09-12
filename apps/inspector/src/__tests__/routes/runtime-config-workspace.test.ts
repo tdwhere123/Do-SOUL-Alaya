@@ -60,22 +60,22 @@ describe("inspector runtime config workspace guard (I1)", () => {
     const embedding = await authenticatedRequest(app, "/api/config/runtime/embedding-supplement", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ enabled: true })
+      body: JSON.stringify({ embedding_enabled: true })
     });
     const garden = await authenticatedRequest(app, "/api/config/runtime/garden-compute", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ provider: "default" })
+      body: JSON.stringify({ enabled: true })
     });
 
-    expect(embedding.status).toBe(500);
-    expect(garden.status).toBe(500);
-    await expect(embedding.json()).resolves.toEqual({ error: "workspace_binding_missing" });
-    await expect(garden.json()).resolves.toEqual({ error: "workspace_binding_missing" });
+    expect(embedding.status).toBe(403);
+    expect(garden.status).toBe(403);
+    await expect(embedding.json()).resolves.toEqual({ error: "runtime_secret_patch_forbidden" });
+    await expect(garden.json()).resolves.toEqual({ error: "runtime_secret_patch_forbidden" });
     expect(calls).toEqual([]);
   });
 
-  it("proxies PATCH runtime embedding-supplement and garden-compute for the bound workspace", async () => {
+  it("rejects PATCH runtime embedding-supplement and garden-compute for a bound Inspector session", async () => {
     const calls: Array<{ readonly url: string; readonly method: string }> = [];
     const app = createBoundApp(async (input, init) => {
       calls.push({ url: String(input), method: init?.method ?? "GET" });
@@ -85,19 +85,41 @@ describe("inspector runtime config workspace guard (I1)", () => {
     const embedding = await authenticatedRequest(app, "/api/config/runtime/embedding-supplement", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ enabled: true })
+      body: JSON.stringify({ embedding_enabled: true })
     });
     const garden = await authenticatedRequest(app, "/api/config/runtime/garden-compute", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ provider: "default" })
+      body: JSON.stringify({ enabled: true })
     });
 
-    expect(embedding.status).toBe(200);
-    expect(garden.status).toBe(200);
-    expect(calls).toEqual([
-      { url: `${DAEMON_URL}/config/runtime/embedding-supplement`, method: "PATCH" },
-      { url: `${DAEMON_URL}/config/runtime/garden-compute`, method: "PATCH" }
-    ]);
+    expect(embedding.status).toBe(403);
+    expect(garden.status).toBe(403);
+    await expect(embedding.json()).resolves.toEqual({ error: "runtime_secret_patch_forbidden" });
+    await expect(garden.json()).resolves.toEqual({ error: "runtime_secret_patch_forbidden" });
+    expect(calls).toEqual([]);
+  });
+
+  it("does not forward a private provider_url on Inspector runtime PATCH", async () => {
+    const calls: string[] = [];
+    const app = createBoundApp(async (input) => {
+      calls.push(String(input));
+      return Response.json({ success: true, data: { ok: true } });
+    });
+
+    const embedding = await authenticatedRequest(app, "/api/config/runtime/embedding-supplement", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider_url: "http://169.254.169.254/latest/meta-data/" })
+    });
+    const garden = await authenticatedRequest(app, "/api/config/runtime/garden-compute", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider_url: "http://127.0.0.1:11434/v1" })
+    });
+
+    expect(embedding.status).toBe(403);
+    expect(garden.status).toBe(403);
+    expect(calls).toEqual([]);
   });
 });

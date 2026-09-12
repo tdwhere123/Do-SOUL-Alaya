@@ -18,9 +18,13 @@ type EventLogOrphanRecord = Awaited<
 
 const randomUuidMock = vi.hoisted(() => vi.fn());
 
-vi.mock("node:crypto", () => ({
-  randomUUID: randomUuidMock
-}));
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return {
+    ...actual,
+    randomUUID: randomUuidMock
+  };
+});
 
 describe("Auditor 4B", () => {  it("persists orphan radar records through the configured port and emits the orphan reported event", async () => {
     randomUuidMock.mockReset();

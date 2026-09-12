@@ -135,6 +135,7 @@ export interface EmbeddingRecallServiceDependencies {
   readonly evidenceDocumentEmbeddingRepo?: EvidenceDocumentEmbeddingRepoPort;
   readonly provider: EmbeddingProviderPort;
   readonly eventLogRepo: EmbeddingRecallEventLogPort;
+  readonly eventPublisher?: import("../runtime/event-publisher.js").EventPublisher;
   readonly healthJournalRecorder?: HealthJournalRecordPort;
   readonly generateQueryId?: () => string;
   readonly now?: () => string;
@@ -339,7 +340,7 @@ export interface MaterializeEmbeddingSupplementFromSnapshotParams {
 }
 
 export interface EmbeddingQueryWarmupSummary {
-  readonly status: "not_requested" | "ready";
+  readonly status: "not_requested" | "ready" | "partial" | "failed";
   readonly requested_count: number;
   readonly ready_count: number;
   readonly cache_hit_count: number;

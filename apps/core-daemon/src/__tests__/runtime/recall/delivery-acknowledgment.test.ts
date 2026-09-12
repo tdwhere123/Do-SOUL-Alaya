@@ -81,6 +81,9 @@ it("replays the same confirmed page and delivery id after public persistence fai
     expect(replay.delivery_id).toBe(second.delivery_id);
     expect(replay.results).toEqual(second.results);
     expect(replay.page_purpose).toBe("retry");
+    for (const page of [first, second, replay]) {
+      expect(page.index!.entries.length + (page.index!.product_updates?.length ?? 0)).toBeLessThanOrEqual(1);
+    }
   } finally {
     await client.close();
     closeCachedDatabase(filename);

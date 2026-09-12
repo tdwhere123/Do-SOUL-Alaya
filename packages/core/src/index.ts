@@ -107,6 +107,7 @@ export { createProjectionEraseBarrier } from
   "./recall/field/retrieval/projection/generation-erase.js";
 export * from "./governance/reconciliation/reconciliation-service.js";
 export * from "./recall/recall-service.js";
+export { encodeAuthorizedScopesAdmission } from "./recall/conditional-field/observers/observation-admission.js";
 export { reserveSnapshotPinWork } from "./recall/runtime/snapshot-pin-budget.js";
 export * from "./recall/query/recall-query-probes.js";
 export * from "./recall/field/field-identity.js";
