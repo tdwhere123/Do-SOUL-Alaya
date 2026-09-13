@@ -1,4 +1,5 @@
 import process from "node:process";
+import { runSourceSnapshotCommand } from "./source-snapshot/command.js";
 import { runMergeLongMemEvalCommand } from "./merge.js";
 import { parseFlags, type ParsedFlags } from "./cli-options.js";
 import { runAuthorizeExtractionCommand } from "./extraction-authority/command.js";
@@ -25,6 +26,8 @@ Operator benches are LongMemEval-S (\`s\`) and LoCoMo. Dataset files still
 include oracle|s|m; \`s\` is the operator bench.
 
 Usage:
+  alaya-bench-runner source-snapshot prepare --snapshot <db> --data-dir-root <isolated-dir> --limit N --recorded-at <ISO> [--offset N] [--data-dir <path>] [--pinned-meta-root <path>] [--producer-commit <full-sha>]
+  alaya-bench-runner source-snapshot inspect --snapshot <db> --question-id <id> --query <text> [--max-results N] [--max-pages N]
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
   alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--expected-reconciliation-basis rule_only|garden_llm] [--qa] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
     --qa  end-to-end QA accuracy (answer-LLM + LLM-judge over delivered recall). OFF by default. ON => 2 provider chat calls/question (costs money). Needs ALAYA_QA_PROVIDER_URL / ALAYA_QA_API_KEY / ALAYA_QA_MODEL; optional ALAYA_QA_JUDGE_MODEL.
@@ -91,6 +94,7 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   if (command === "extraction-fill") {
     return dispatchExtractionFill(rest);
   }
+  if (command === "source-snapshot") return runSourceSnapshotCommand(rest);
   const opts = parseCommandFlags(rest);
   if (opts === null) return 2;
   const compatibilityError = commandFlagCompatibilityError(command, opts);

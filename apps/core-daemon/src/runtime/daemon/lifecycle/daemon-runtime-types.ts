@@ -10,6 +10,7 @@ import type { RecallUtilizationService } from "../../../services/status/recall-u
 import type { TrustStateRecorder } from "../../../trust/state.js";
 import type {
   AnswerCoRelevancePairSourcePort,
+  AuditedSourceAdmission,
   EmbeddingRecallService,
   PathRelationProposalService,
   RecallService,
@@ -128,6 +129,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly relationAssertionAdmissionPort: RelationAssertionAdmissionPort;
   readonly relationProjectionCheckpoint: RelationProjectionCheckpointPort;
   readonly fieldProjectionCheckpoint: FieldProjectionCheckpointPort;
+  readonly sourceRecordAdmission: AuditedSourceAdmission;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;

@@ -348,9 +348,19 @@ describe("admission, binding, measurement, and evidence identities", () => {
       || missingVector.last_observer_status === "unknown").toBe(true);
   });
 
-  it("wired embeddingIds emit missing_measurement effects instead of empty completion", () => {
+  it("declared stored measurements remain unknown when profiles or producers are missing", () => {
+    const required: QueryInterpretation = { ...interpretation(relation("observed_log", "x", "y")),
+      interpretation_proposal: { schema_version: 1, original_query_digest: "sha256:" + "a".repeat(64),
+        producer_id: "alaya.query.proposal.core.v1", stored_cosine_admission: {
+          registry_version: "stored.cosine.admission.v1", join: "any", obligations: [{
+            obligation_id: "stored-fixture", producer_id: "stored.cosine.pair.v1", model_id: "stored-fixture",
+            provider_kind: "openai", schema_version: 1, dimensions: 2, domain: "cosine.unit.v1",
+            normalization: "l2.dot.v1", raw_threshold: 0.5, transfer_id: "policy.cosine.linear.milligrade.v1",
+            transfer_version: "1", policy_defined: true
+          }]
+        } } };
     const observed = observeField(
-      interpretation(relation("observed_log", "x", "y")),
+      required,
       {
         ...input([], {}),
         readers: {
@@ -370,7 +380,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
     )).toBe(true);
     expect(observed.closure.observation).toBe("unknown");
     const emptyPage = observeField(
-      interpretation(relation("observed_log", "x", "y")),
+      required,
       {
         ...input([], {}),
         readers: {
@@ -389,9 +399,11 @@ describe("admission, binding, measurement, and evidence identities", () => {
       region.kind === "binding" && region.status === "unknown"
     )).toBe(true);
     expect(emptyPage.closure.observation).toBe("unknown");
+    const noProducer = observeField(required, input([], {}));
+    expect(noProducer.residuals.some((region) => region.kind === "binding" && region.status === "unknown")).toBe(true);
   });
 
-  it("produces measured raw from a stored pair without using cosine as cap milligrades", () => {
+  it("does not schedule an available stored pair without an admitted measurement premise", () => {
     const body = "retained fixture content";
     const content = `sha256:${createHash("sha256").update(body).digest("hex")}`;
     const object = {
@@ -428,23 +440,9 @@ describe("admission, binding, measurement, and evidence identities", () => {
       }
     };
     const observed = observeField(interpretation(relation("observed_log", "x", "y")), request);
-    expect(observed.observations.some((observation) =>
-      observation.object_id === "emb-1" && observation.association_milligrades === undefined
-    )).toBe(true);
-    expect(observed.residuals.some((region) =>
-      region.kind === "binding" && region.status === "unknown"
-    )).toBe(false);
-    const measured = observed.observations.find((observation) => observation.object_id === "emb-1");
-    expect(measured?.association_milligrades).not.toBe(1);
-    expect(measured?.association_milligrades).not.toBe(950);
-    const retained = observed.measurements.find((row) =>
-      row.raw.status === "measured" && row.raw.referent.kind === "memory_entry"
-        && row.raw.referent.object_id === "emb-1"
-    );
-    expect(retained?.raw.status).toBe("measured");
-    if (retained?.raw.status !== "measured") throw new Error("expected retained measured raw");
-    expect(retained.raw.raw).toBe(1);
-    expect(retained.cap.status).toBe("inapplicable");
+    expect(observed.observations.some((observation) => observation.object_id === "emb-1")).toBe(false);
+    expect(observed.residuals.some((region) => region.kind === "binding")).toBe(false);
+    expect([...observed.measurements]).toEqual([]);
   });
 
   it("engine frozen identity can transfer on bound source facts", () => {

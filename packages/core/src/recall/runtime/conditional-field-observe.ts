@@ -11,7 +11,7 @@ import {
   type ObserverReaders,
   type SourceObserverPage
 } from "../conditional-field/observers/observe.js";
-import { hasMeasurementProducer } from "../conditional-field/observers/measure-stored.js";
+import { requiresStoredMeasurement } from "../conditional-field/observers/measure-stored.js";
 import { resumePathEffects } from "./pending-path-effects.js";
 import { bindEngineState } from "../conditional-field/engine/field-update.js";
 import { ObservedRelations } from "../conditional-field/engine/observed-relations.js";
@@ -67,7 +67,7 @@ export function observeField(
   input: ObserveFieldInput
 ): FieldEngineState {
   const residuals = openResiduals(
-    hasMeasurementProducer(input.readers),
+    requiresStoredMeasurement(interpretation),
     interpretationNeedsGuardWork(interpretation),
     sourceDomainCoverageOf(interpretation, input)
   );

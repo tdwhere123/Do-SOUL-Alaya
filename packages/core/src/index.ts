@@ -52,6 +52,8 @@ export {
   createSourceAdmissionPort,
   retainedSourceSpeaker
 } from "./memory/evidence-create/source-admission.js";
+export { createAuditedSourceAdmission, type AuditedSourceAdmission } from "./memory/evidence-create/audited-source-admission.js";
+export { deriveAddressableSpanViews } from "./memory/evidence-create/source-span-views.js";
 export { createProjectionGenerationReceipt } from
   "./recall/field/retrieval/projection/generation-identity.js";
 export * from "./recall/field/retrieval/projection/generation-lifecycle.js";

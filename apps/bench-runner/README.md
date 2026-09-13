@@ -30,3 +30,52 @@ pnpm --filter @do-soul/alaya-bench-runner run typecheck
 pnpm --filter @do-soul/alaya-bench-runner run test
 pnpm --filter @do-soul/alaya-bench-runner run build
 ```
+
+## Original source snapshots
+
+`source-snapshot prepare` imports every original message in a pinned
+LongMemEval-S window through mandatory audited Core source admission. It does
+not extract, create memories or capsules, call providers, or score answers.
+Use an isolated import directory and an output under `.do-it/bench-runs/`:
+
+```bash
+node apps/bench-runner/bin/alaya-bench-runner.mjs source-snapshot prepare \
+  --snapshot .do-it/bench-runs/source-records/source.db \
+  --data-dir-root .do-it/bench-runs/source-records/import \
+  --data-dir /absolute/path/to/dataset --pinned-meta-root /absolute/path/to/pins \
+  --offset 0 --limit 100 --recorded-at 2026-09-13T00:00:00.000Z
+
+node apps/bench-runner/bin/alaya-bench-runner.mjs source-snapshot inspect \
+  --snapshot .do-it/bench-runs/source-records/source.db \
+  --question-id QUESTION_ID --query 'Original question text' \
+  --max-results 20 --max-pages 100
+```
+
+The source artifact has an explicit `source_records` manifest and a
+`.sources.json` occurrence sidecar. Message roles, identities and UTF-8 bodies
+remain original, including empty messages. Session observation dates and each
+question's interpretation clock are retained separately from import
+`recorded_at`; raw event times and validity remain unknown. Inspect passes the
+frozen question clock through the existing MCP `source_observed_at` input,
+restores a private copy, and returns actual `source_only` worker pages. A partial
+interpretation is usable: an unguarded epsilon program enumerates authorized
+sources, while its interpretation hole remains open. This is not evidence that
+those sources semantically answer the question.
+
+Inspect follows continuations up to `--max-pages`. `continuation_state` reports
+exhaustion or the inspection page limit; returned tokens belong to that closed
+inspection session and cannot be resumed afterward. Native index completeness
+is returned without upgrading unknown, unavailable or partial states.
+
+Preparation uses deferred projection admission and one final owned checkpoint.
+Record/span admission is atomic; audit or checkpoint failure prevents a ready
+manifest but may leave committed records. Retry with the same dataset window,
+output path and `recorded_at` to recover those identities. Retired sources cannot
+be revived. A validated existing artifact is reused only when those inputs
+match, and keeps its original producer commit. The CLI resolves that commit
+from its source checkout; an installed build outside a checkout requires the
+explicit `--producer-commit FULL_SHA` provenance declaration.
+
+Source artifacts cannot enter the existing post-extraction snapshot reader.
+That domain still requires complete current cache authority and `answers_with`
+formation; source preparation does not satisfy those enhancement prerequisites.

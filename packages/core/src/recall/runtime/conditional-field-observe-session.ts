@@ -14,7 +14,7 @@ import {
   type SourceObserverPage
 } from "../conditional-field/observers/observe.js";
 import { sourceFamilySettled } from "../conditional-field/observers/source-root-observe.js";
-import { hasMeasurementProducer } from "../conditional-field/observers/measure-stored.js";
+import { hasMeasurementProducer, requiresStoredMeasurement } from "../conditional-field/observers/measure-stored.js";
 import { measurementEffectsFor, measurementIsMissing } from "./measurement-effects.js";
 import { resumePathEffects } from "./pending-path-effects.js";
 import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
@@ -170,8 +170,13 @@ function refreshPathFrontier(session: ObservationSession): boolean {
 
 function consumeMeasurementPage(session: ObservationSession, action: ObservationAction): boolean {
   const { input, interpretation, lease, cursors, pairProgress } = session;
+  if (!requiresStoredMeasurement(interpretation)) {
+    session.state = closeRegion(session.state, interpretation, action, cursors, "exhausted");
+    return false;
+  }
   if (!hasMeasurementProducer(input.readers)) {
-    session.state = closeRegion(session.state, interpretation, action, cursors, session.missingMeasurement ? "unknown" : "exhausted");
+    session.missingMeasurement = true;
+    session.state = closeRegion(session.state, interpretation, action, cursors, "unknown");
     return false;
   }
   const observed = observeMeasurement(input, interpretation, lease, action, cursors);

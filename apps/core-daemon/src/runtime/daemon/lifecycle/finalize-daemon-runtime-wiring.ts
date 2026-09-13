@@ -4,6 +4,7 @@ import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
 import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
 import {
   createSourceAdmissionPort,
+  createAuditedSourceAdmission,
   fieldContractSha256,
   HqAnswerOverlapPairSource
 } from "@do-soul/alaya-core";
@@ -239,6 +240,11 @@ function createMemoryHqExports(input: FinalizeDaemonRuntimeWiringInput) {
 
 function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
   return {
+    sourceRecordAdmission: createAuditedSourceAdmission({
+      sha256: fieldContractSha256,
+      stores: input.fieldComposition.stores,
+      eventLogRepo: input.eventLogRepo
+    }),
     environmentStatusService: input.environmentStatusService,
     embeddingStatusService: input.embeddingStatusService,
     embeddingProviderWarmup: input.embeddingProviderWarmup,

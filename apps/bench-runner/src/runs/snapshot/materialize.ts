@@ -443,7 +443,7 @@ function snapshotConsumerQuestionIdDigest(
   throw new Error("legacy snapshot digest is not supported");
 }
 
-function atomicWriteJson(filePath: string, value: unknown): void {
+export function atomicWriteJson(filePath: string, value: unknown): void {
   mkdirSync(dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.${randomUUID()}.tmp`;
   writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");

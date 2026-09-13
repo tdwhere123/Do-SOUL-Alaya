@@ -77,6 +77,12 @@ export function hasMeasurementProducer(readers: ObserveConditionalFieldInput["re
   return readers.embeddingIds !== undefined || readers.measureStoredPair !== undefined;
 }
 
+export function requiresStoredMeasurement(query: ObserveConditionalFieldInput["query"]): boolean {
+  // A reader capability does not add a semantic premise to an ordinary query.
+  // Only the admitted declaration makes this stored-measurement domain required.
+  return query.interpretation_proposal?.stored_cosine_admission !== undefined;
+}
+
 export function queryDigestOf(input: ObserveConditionalFieldInput): string {
   return digestOriginalQuery(input.seed_query ?? input.query.query_id);
 }

@@ -76,13 +76,26 @@ describe("worker stored measurement producer", () => {
       expect(measured.candidates.find((result) => result.object_id === OBJECT_B)?.target).toEqual(entry?.target);
       expect(measured.execution_receipt?.compile_input.interpretation_proposal?.stored_cosine_admission)
         .toEqual(admission([MODEL_B]));
+      expect(measured.provider_calls).toBe(0);
+      expect(measured.garden_enqueue).toBe(0);
+      const missingRequest = { ...request, budget: { ...request.budget, page_budget: 1 },
+        interpretation_proposal: { schema_version: 1 as const,
+          original_query_digest: digestOriginalQuery(QUERY_TEXT), producer_id: "alaya.query.proposal.core.v1",
+          stored_cosine_admission: admission(["unavailable-profile"]) } };
+      let missing = await service.recall(missingRequest);
+      expect(missing.index?.completeness.logical_index).toBe("open");
+      expect(missing.index?.continuation).not.toBeNull();
+      while (missing.index?.continuation != null) {
+        missing = await service.recall({ ...missingRequest, continuation: missing.index.continuation });
+        expect(missing.index?.completeness.logical_index).toBe("open");
+      }
     } finally {
       await worker.close();
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  it("observeField retains measured raw from worker stored-pair readers without live fetch or Garden", async () => {
+  it("observeField retains declared measured raw from worker stored-pair readers without live fetch or Garden", async () => {
     const fixture = await createSourceBoundRecallFixture((database) => databases.add(database));
     await fixture.writeMemory(QUERY_ID, QUERY_TEXT, MemoryDimension.FACT);
     await fixture.writeMemory(OBJECT_ID, "opaque archival payload", MemoryDimension.FACT);
@@ -121,7 +134,9 @@ describe("worker stored measurement producer", () => {
       text: QUERY_TEXT,
       interpretation_clock: NOW,
       snapshot_id: snapshotIdFromPin("workspace-1", pin),
-      budget: defaultBudget()
+      budget: defaultBudget(), interpretation_proposal: { schema_version: 1,
+        original_query_digest: digestOriginalQuery(QUERY_TEXT), producer_id: "alaya.query.proposal.core.v1",
+        stored_cosine_admission: admission(["stored-fixture"]) }
     });
     const observed = observeField(interpretation, {
       workspace_id: "workspace-1",
@@ -140,7 +155,7 @@ describe("worker stored measurement producer", () => {
     if (measured?.raw.status !== "measured") throw new Error("expected observeField retained measured raw");
     expect(Number.isFinite(measured.raw.raw as number)).toBe(true);
     expect(measured.raw.raw).toBe(1);
-    expect(measured.cap.status).toBe("inapplicable");
+    expect(measured.cap.status).toBe("projected");
     expect(measured.raw.raw).not.toBe(950);
     expect(digestOriginalQuery(QUERY_TEXT)).toBe(hashMemoryContent(QUERY_TEXT));
     expect(observed.measurements.every((row) =>
@@ -179,7 +194,7 @@ describe("worker stored measurement producer", () => {
     expect(measuredB).toContain(OBJECT_B);
     expect(measuredB).not.toContain(OBJECT_A);
     expect(measuredB).not.toContain(QUERY_A);
-    expect(observedB.measurements.every((row) => row.cap.status === "inapplicable")).toBe(true);
+    expect(observedB.measurements.some((row) => row.cap.status === "projected")).toBe(true);
     const observedA = observeWithReaders(readers, { model_id: MODEL_A });
     const measuredA = measuredObjectIds(observedA);
     expect(measuredA).toContain(OBJECT_A);
@@ -203,11 +218,8 @@ describe("worker stored measurement producer", () => {
     expect(unpinned.domainStatus).toBe("unavailable");
     const observed = observeWithReaders(readers);
     expect(measuredObjectIds(observed)).toEqual([]);
-    expect(observed.measurements.some((row) => row.raw.status === "unavailable")).toBe(true);
-    expect(observed.measurements.every((row) => row.raw.status !== "missing")).toBe(true);
-    expect(observed.residuals.some((region) =>
-      region.kind === "binding" && region.status === "unknown"
-    )).toBe(true);
+    expect([...observed.measurements]).toEqual([]);
+    expect(observed.residuals.some((region) => region.kind === "binding")).toBe(false);
     expect(fixture.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get())
       .toEqual(beforeGarden);
   });
@@ -487,7 +499,7 @@ function observeWithReaders(
   readers: ReturnType<typeof createConditionalFieldObserverReaders>,
   pin: Readonly<{ readonly model_id?: string }> = {}
 ) {
-  return observeField(compileForReaders(readers), {
+  return observeField(compileForReaders(readers, pin.model_id === undefined ? undefined : admission([pin.model_id])), {
     workspace_id: WORKSPACE,
     query_text: QUERY_TEXT,
     budget: defaultBudget(),

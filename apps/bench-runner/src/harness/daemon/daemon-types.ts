@@ -101,6 +101,7 @@ export interface BenchDaemonHandle {
   readonly workspaceId: string;
   readonly runId: string;
   readonly dataDir: string;
+  importSourceRecord(input: Omit<import("@do-soul/alaya-protocol").SourceAdmissionRequest, "workspace_id" | "evidence_object_id">): Promise<import("@do-soul/alaya-protocol").SourceAdmissionResult>;
   dispatchCli(argv: readonly string[]): Promise<{ exitCode: number; json?: unknown }>;
   recall(
     query: string,
@@ -328,6 +329,7 @@ export interface BenchDaemonHandle {
 export interface BenchWorkspaceHandle {
   readonly workspaceId: string;
   readonly runId: string;
+  importSourceRecord: BenchDaemonHandle["importSourceRecord"];
   recall: BenchDaemonHandle["recall"];
   warmEmbeddingCache: BenchDaemonHandle["warmEmbeddingCache"];
   warmQueryEmbeddingCache: BenchDaemonHandle["warmQueryEmbeddingCache"];
