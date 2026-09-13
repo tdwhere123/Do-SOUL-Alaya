@@ -235,7 +235,14 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
 
   it("rejects file secret refs when the referenced file is missing", async () => {
     const savedSecretRef = process.env.ALAYA_OPENAI_SECRET_REF;
-    process.env.ALAYA_OPENAI_SECRET_REF = "file:/tmp/alaya-bench-missing-openai-secret";
+    const savedConfigDir = process.env.ALAYA_CONFIG_DIR;
+    // Containment rejects paths outside secretsDir as malformed; this
+    // missing file stays inside that root so the ENOENT mapping is tested.
+    const configDir = await mkdtemp(join(tmpdir(), "alaya-bench-secrets-"));
+    tmpRoots.push(configDir);
+    const missingSecret = join(configDir, "secrets", "missing-openai-secret");
+    process.env.ALAYA_CONFIG_DIR = configDir;
+    process.env.ALAYA_OPENAI_SECRET_REF = `file:${missingSecret}`;
 
     try {
       await expect(
@@ -249,6 +256,8 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
     } finally {
       if (savedSecretRef === undefined) delete process.env.ALAYA_OPENAI_SECRET_REF;
       else process.env.ALAYA_OPENAI_SECRET_REF = savedSecretRef;
+      if (savedConfigDir === undefined) delete process.env.ALAYA_CONFIG_DIR;
+      else process.env.ALAYA_CONFIG_DIR = savedConfigDir;
     }
   });
 
