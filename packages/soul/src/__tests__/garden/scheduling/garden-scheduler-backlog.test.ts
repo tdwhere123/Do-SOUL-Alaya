@@ -4,7 +4,11 @@ import {
   GardenTaskDescriptorSchema,
   GardenTaskKind,
   GardenTier} from "@do-soul/alaya-protocol";
-import { GardenScheduler, InMemoryGardenTaskRepo } from "../../../garden/scheduling/scheduler.js";
+import {
+  GardenScheduler,
+  InMemoryGardenTaskRepo,
+  MAX_PENDING_BACKLOG_WARNING_TRANSITIONS
+} from "../../../garden/scheduling/scheduler.js";
 
 import {
   createTask,
@@ -123,5 +127,76 @@ describe("GardenScheduler", () => {  it("does not remove a tier-violation task w
 
     expect(parseSpy).not.toHaveBeenCalled();
     parseSpy.mockRestore();
+  });
+});
+
+describe("GardenScheduler backlog transition bound", () => {
+  it("keeps unacked backlog warning transitions bounded across repeated arm/clear flips", async () => {
+    const eventLog = {
+      append: vi.fn(async () => undefined),
+      appendManyAtomic: vi.fn(async () => undefined)
+    };
+    const repo = new InMemoryGardenTaskRepo(eventLog);
+    const scheduler = new GardenScheduler(
+      eventLog,
+      {
+        now: () => "2026-04-23T08:00:00.000Z",
+        backlogWarningThresholds: {
+          warning_queue_depth: 0,
+          warning_rearm_depth: 1
+        }
+      },
+      null,
+      repo
+    );
+
+    for (let index = 0; index < MAX_PENDING_BACKLOG_WARNING_TRANSITIONS + 8; index += 1) {
+      scheduler.enqueue(
+        createTask({
+          task_id: `task-flip-${index}`,
+          required_tier: GardenTier.TIER_0,
+          priority: 40
+        })
+      );
+      await scheduler.dispatchNext(GardenRole.JANITOR);
+    }
+
+    let pending = 0;
+    let current = scheduler.peekBacklogWarningTransition();
+    while (current !== null) {
+      pending += 1;
+      expect(scheduler.acknowledgeBacklogWarningTransition(current.transition_id)).toBe(true);
+      current = scheduler.peekBacklogWarningTransition();
+    }
+    expect(pending).toBe(MAX_PENDING_BACKLOG_WARNING_TRANSITIONS);
+  });
+
+  it("removes completed in-memory garden tasks so the repo stays bounded", async () => {
+    const eventLog = {
+      append: vi.fn(async () => undefined)
+    };
+    const repo = new InMemoryGardenTaskRepo(eventLog);
+
+    for (let index = 0; index < 20; index += 1) {
+      const taskId = `task-done-${index}`;
+      repo.enqueue({
+        id: taskId,
+        workspace_id: "workspace-1",
+        role: GardenRole.JANITOR,
+        kind: GardenTaskKind.TTL_CLEANUP,
+        payload: createTask({ task_id: taskId }),
+        created_at: "2026-03-27T00:00:00.000Z"
+      });
+      await repo.claimAtomic(taskId, "worker-a", "2026-03-27T00:01:00.000Z");
+      await repo.completeWithEvents(
+        taskId,
+        { status: "completed", completed_at: "2026-03-27T00:02:00.000Z" },
+        [],
+        "worker-a"
+      );
+      expect(repo.findById(taskId)).toBeNull();
+    }
+
+    expect(repo.countBacklog()).toEqual([]);
   });
 });

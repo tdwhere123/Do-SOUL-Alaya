@@ -65,7 +65,9 @@ export class GardenComputeCoordinator {
   public constructor(private readonly deps: GardenComputeCoordinatorDependencies) {}
 
   public triggerCompile(input: GardenCompileInput): void {
-    void this.runCompile(input);
+    void this.runCompile(input).catch((error: unknown) => {
+      this.deps.warn("Garden compile crashed.", { error });
+    });
   }
 
   private async runCompile(input: GardenCompileInput): Promise<void> {
@@ -98,13 +100,21 @@ export class GardenComputeCoordinator {
     readonly signals: readonly CandidateMemorySignal[];
     readonly sourceObservation: TrustedGardenSourceObservation | null;
   }>> {
-    const signals = await provider.compile(input.userMessage.content, {
+    const sourceObservedAt = input.userMessage.created_at;
+    const compileContext = {
       workspace_id: input.workspace.workspace_id,
       run_id: input.run.run_id,
       surface_id: input.run.current_surface_id ?? null,
-      turn_messages: [input.userMessage, input.assistantMessage]
-    });
-    const sourceObservation = await this.recordProviderCallCompleted(input, providerCall, provider);
+      turn_messages: [input.userMessage, input.assistantMessage],
+      ...(sourceObservedAt === undefined ? {} : { source_observed_at: sourceObservedAt })
+    };
+    const signals = await provider.compile(input.userMessage.content, compileContext);
+    const sourceObservation = await this.recordProviderCallCompleted(
+      input,
+      providerCall,
+      provider,
+      sourceObservedAt
+    );
     return Object.freeze({ signals, sourceObservation });
   }
 
@@ -234,7 +244,8 @@ export class GardenComputeCoordinator {
       readonly workspace: Workspace;
     },
     providerCall: GardenProviderCallTelemetry | null,
-    gardenComputeProvider: ConversationGardenComputeProviderPort
+    gardenComputeProvider: ConversationGardenComputeProviderPort,
+    sourceObservedAt: string | undefined
   ): Promise<TrustedGardenSourceObservation | null> {
     if (providerCall === null) {
       return null;
@@ -253,7 +264,8 @@ export class GardenComputeCoordinator {
       entry: completed.entry,
       input,
       providerCall,
-      providerKind: gardenComputeProvider.provider_kind
+      providerKind: gardenComputeProvider.provider_kind,
+      sourceObservedAt
     });
     if (completed.entry !== null && sourceObservation === null) {
       this.deps.warn("Garden provider completion receipt was unverifiable.", {
@@ -458,8 +470,9 @@ function createTrustedGardenSourceObservation(input: {
   readonly input: { readonly run: Run; readonly workspace: Workspace };
   readonly providerCall: GardenProviderCallTelemetry;
   readonly providerKind: GardenProviderKind;
+  readonly sourceObservedAt: string | undefined;
 }): TrustedGardenSourceObservation | null {
-  if (input.entry === null) return null;
+  if (input.entry === null || input.sourceObservedAt === undefined) return null;
   try {
     const payload = ComputeProviderCallCompletedPayloadSchema.parse(input.entry.payload_json);
     if (
@@ -479,7 +492,7 @@ function createTrustedGardenSourceObservation(input: {
       return null;
     }
     return {
-      observed_at: payload.completed_at,
+      observed_at: input.sourceObservedAt,
       authority: "trusted_host_event",
       source_event_id: input.entry.event_id
     };

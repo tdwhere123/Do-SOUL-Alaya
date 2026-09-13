@@ -6,10 +6,12 @@ import {
   HealthIssueSeverity,
   HealthIssueSuggestedAction,
   MemoryDimension,
+  MemoryGovernanceEventType,
   SoulAuditorPointerHealedPayloadSchema,
   SoulGreenGraceRequestedPayloadSchema,
   SoulGreenRenewedPayloadSchema,
   SoulGreenRevokedPayloadSchema,
+  SoulProposalCreatedPayloadSchema,
   type AuditorPointerHealPort,
   type GardenTaskDescriptor,
   type GardenTaskResult
@@ -269,6 +271,23 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
         continue;
       }
 
+      await this.appendEventLogAndMutate(
+        {
+          event_type: MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
+          entity_type: "proposal",
+          entity_id: pattern.pattern_key,
+          workspace_id: task.workspace_id,
+          run_id: task.run_id,
+          caused_by: this.role,
+          payload_json: SoulProposalCreatedPayloadSchema.parse({
+            object_id: pattern.pattern_key,
+            object_kind: "proposal",
+            workspace_id: task.workspace_id,
+            run_id: task.run_id
+          })
+        },
+        () => undefined
+      );
       const candidate = await this.dependencies.bootstrappingPort.createSynthesisCandidate(
         task.workspace_id,
         pattern.pattern_key

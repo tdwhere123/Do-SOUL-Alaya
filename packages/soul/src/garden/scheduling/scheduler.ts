@@ -56,6 +56,8 @@ export type {
   GardenTaskStatus
 } from "./scheduler-types.js";
 
+export const MAX_PENDING_BACKLOG_WARNING_TRANSITIONS = 32;
+
 const IN_PROCESS_GARDEN_CLAIMANT = "in-process";
 const IN_PROCESS_GARDEN_TASK_KINDS: ReadonlySet<GardenTaskDescriptor["task_kind"]> =
   new Set<GardenTaskDescriptor["task_kind"]>(
@@ -391,6 +393,9 @@ export class GardenScheduler {
 
     this.warningArmed = transition === "arm";
     const snapshot = this.buildBacklogSnapshot(observedAt);
+    if (this.pendingBacklogWarningTransitions.length >= MAX_PENDING_BACKLOG_WARNING_TRANSITIONS) {
+      this.pendingBacklogWarningTransitions.shift();
+    }
     this.pendingBacklogWarningTransitions.push({
       transition_id: this.nextBacklogWarningTransitionId,
       transition,

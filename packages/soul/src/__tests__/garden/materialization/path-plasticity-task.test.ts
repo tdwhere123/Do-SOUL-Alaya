@@ -8,10 +8,10 @@ import {
 import { Librarian } from "../../../garden/maintenance/librarian.js";
 import {
   PATH_PLASTICITY_NO_MUTATION_RESULT,
-  PATH_PLASTICITY_TASK_DEFAULTS,
   createAttributionOnlyPathPlasticityPort,
-  resolvePathPlasticitySinceIso,
-  resolvePathPlasticityUntilIso,
+  parsePathPlasticityRevisionCursor,
+  resolvePathPlasticitySinceRevision,
+  resolvePathPlasticityUntilRevision,
   runPathPlasticityWithinBudget,
   type PathPlasticityComputePort,
   type PathPlasticityComputeResult,
@@ -87,7 +87,7 @@ describe("Librarian.path_plasticity_update", () => {
       markProcessed
     });
 
-    const result = await librarian.run(createTask());
+    const result = await librarian.run(createTask({ target_object_refs: ["10", "40"] }));
 
     expect(result.success).toBe(true);
     expect(result.role).toBe(GardenRole.LIBRARIAN);
@@ -104,22 +104,20 @@ describe("Librarian.path_plasticity_update", () => {
     expect(computeAndApplyPlasticity).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: "workspace-1",
-        sinceIso: new Date(Date.parse(NOW_ISO) - PATH_PLASTICITY_TASK_DEFAULTS.DEFAULT_LOOKBACK_MS).toISOString(),
-        untilIso: NOW_ISO
+        sinceRevision: 10,
+        untilRevision: 40
       })
     );
     expect(markProcessed).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
-      processedThroughIso: NOW_ISO,
+      processedThroughRevision: 40,
       processedAuditEventId: null
     });
     expect(clearPendingWorkspace).toHaveBeenCalledWith("workspace-1");
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  it("uses explicit lower and upper watermarks embedded in target_object_refs", async () => {
-    const explicitSince = "2026-05-03T00:00:00.000Z";
-    const explicitUntil = "2026-05-04T11:59:00.000Z";
+  it("uses explicit EventLog revision cursors embedded in target_object_refs", async () => {
     const computeAndApplyPlasticity = vi.fn(async () => ({
       reinforced: 0,
       weakened: 0,
@@ -132,17 +130,64 @@ describe("Librarian.path_plasticity_update", () => {
       markProcessed
     });
 
-    await librarian.run(createTask({ target_object_refs: [explicitSince, explicitUntil] }));
+    await librarian.run(createTask({ target_object_refs: ["12", "40"] }));
 
     expect(computeAndApplyPlasticity).toHaveBeenCalledWith(
-      expect.objectContaining({ sinceIso: explicitSince, untilIso: explicitUntil })
+      expect.objectContaining({ sinceRevision: 12, untilRevision: 40 })
     );
     expect(markProcessed).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
-      processedThroughIso: explicitUntil,
+      processedThroughRevision: 40,
       processedAuditEventId: null
     });
     expect(clearPendingWorkspace).toHaveBeenCalledWith("workspace-1");
+  });
+
+  it("does not treat wall-clock ISO refs as a monotonic watermark", async () => {
+    const computeAndApplyPlasticity = vi.fn(async () => ({
+      reinforced: 0,
+      weakened: 0,
+      retired: 0,
+      affectedPathIds: []
+    }));
+    const markProcessed = vi.fn(async () => undefined);
+    const { librarian } = createLibrarian({ computeAndApplyPlasticity, markProcessed });
+
+    const result = await librarian.run(createTask({
+      target_object_refs: ["2026-05-03T00:00:00.000Z", "2026-05-04T11:59:00.000Z"]
+    }));
+
+    expect(result.success).toBe(true);
+    expect(result.audit_entries[0]).toMatch(/EventLog revision cursor is missing/);
+    expect(computeAndApplyPlasticity).not.toHaveBeenCalled();
+    expect(markProcessed).not.toHaveBeenCalled();
+  });
+
+  it("does not drop later events or double-count when compute sees clock skew", async () => {
+    const seen: Array<{ readonly sinceRevision: number; readonly untilRevision: number }> = [];
+    const computeAndApplyPlasticity = vi.fn(async (params: {
+      readonly sinceRevision: number;
+      readonly untilRevision: number;
+    }) => {
+      seen.push({ sinceRevision: params.sinceRevision, untilRevision: params.untilRevision });
+      return { reinforced: 1, weakened: 0, retired: 0, affectedPathIds: ["path-1"] };
+    });
+    const markProcessed = vi.fn(async () => undefined);
+    const { librarian } = createLibrarian({ computeAndApplyPlasticity, markProcessed });
+
+    await librarian.run(createTask({ target_object_refs: ["10", "20"] }));
+    await librarian.run(createTask({ target_object_refs: ["20", "25"] }));
+
+    expect(seen).toEqual([
+      { sinceRevision: 10, untilRevision: 20 },
+      { sinceRevision: 20, untilRevision: 25 }
+    ]);
+    expect(markProcessed).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      processedThroughRevision: 20
+    }));
+    expect(markProcessed).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      processedThroughRevision: 25
+    }));
   });
 
   it("soft-skips path_plasticity_update when the optional plasticity port is not configured", async () => {
@@ -157,25 +202,14 @@ describe("Librarian.path_plasticity_update", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  it("resolvePathPlasticitySinceIso ignores a non-ISO target ref and falls back to the default lookback", () => {
-    const since = resolvePathPlasticitySinceIso(["not-an-iso-string"], NOW_ISO);
-    expect(since).toBe(
-      new Date(Date.parse(NOW_ISO) - PATH_PLASTICITY_TASK_DEFAULTS.DEFAULT_LOOKBACK_MS).toISOString()
-    );
-  });
-
-  it("resolvePathPlasticitySinceIso accepts an empty target_object_refs and falls back to the default lookback", () => {
-    const since = resolvePathPlasticitySinceIso([], NOW_ISO);
-    expect(since).toBe(
-      new Date(Date.parse(NOW_ISO) - PATH_PLASTICITY_TASK_DEFAULTS.DEFAULT_LOOKBACK_MS).toISOString()
-    );
-  });
-
-  it("resolvePathPlasticityUntilIso accepts target_object_refs[1] and otherwise falls back to now", () => {
-    expect(resolvePathPlasticityUntilIso(["2026-05-03T00:00:00.000Z", "2026-05-04T11:00:00.000Z"], NOW_ISO)).toBe(
-      "2026-05-04T11:00:00.000Z"
-    );
-    expect(resolvePathPlasticityUntilIso(["2026-05-03T00:00:00.000Z", "not-iso"], NOW_ISO)).toBe(NOW_ISO);
+  it("parsePathPlasticityRevisionCursor accepts integer cursors and rejects wall-clock ISO", () => {
+    expect(parsePathPlasticityRevisionCursor("40")).toBe(40);
+    expect(parsePathPlasticityRevisionCursor("2026-05-03T00:00:00.000Z")).toBeUndefined();
+    expect(parsePathPlasticityRevisionCursor("not-a-cursor")).toBeUndefined();
+    expect(resolvePathPlasticitySinceRevision(["12", "40"])).toBe(12);
+    expect(resolvePathPlasticitySinceRevision([])).toBe(0);
+    expect(resolvePathPlasticityUntilRevision(["12", "40"], 0)).toBe(40);
+    expect(resolvePathPlasticityUntilRevision(["12", "not-a-cursor"], 7)).toBe(7);
   });
 
   it("propagates a port failure as a task failure result and clears the pending marker", async () => {
@@ -184,7 +218,7 @@ describe("Librarian.path_plasticity_update", () => {
     });
     const { librarian, scheduler, clearPendingWorkspace } = createLibrarian({ computeAndApplyPlasticity });
 
-    const result = await librarian.run(createTask());
+    const result = await librarian.run(createTask({ target_object_refs: ["0", "10"] }));
 
     expect(result.success).toBe(false);
     expect(result.error_message).toMatch(/plasticity service exploded/);
@@ -206,7 +240,7 @@ describe("Librarian.path_plasticity_update", () => {
       { pathPlasticityBudgetMs: 5 }
     );
 
-    const result = await librarian.run(createTask());
+    const result = await librarian.run(createTask({ target_object_refs: ["0", "10"] }));
 
     expect(result.success).toBe(false);
     expect(result.error_message).toBe("path_plasticity_update timed out after 5ms");
@@ -235,13 +269,13 @@ describe("Librarian.path_plasticity_update", () => {
       { pathPlasticityBudgetMs: 5 }
     );
 
-    const result = await librarian.run(createTask());
+    const result = await librarian.run(createTask({ target_object_refs: ["0", "10"] }));
 
     expect(result.success).toBe(true);
     expect(result.objects_affected).toEqual(["path-post-commit-1"]);
     expect(markProcessed).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
-      processedThroughIso: NOW_ISO,
+      processedThroughRevision: 10,
       processedAuditEventId: null
     });
     expect(clearPendingWorkspace).toHaveBeenCalledWith("workspace-1");
@@ -257,8 +291,8 @@ describe("createAttributionOnlyPathPlasticityPort", () => {
 
     const result = await port.computeAndApplyPlasticity({
       workspaceId: "workspace-1",
-      sinceIso: "2026-05-03T12:00:00.000Z",
-      untilIso: NOW_ISO,
+      sinceRevision: 10,
+      untilRevision: 40,
       onMutationBoundaryEntered
     });
 

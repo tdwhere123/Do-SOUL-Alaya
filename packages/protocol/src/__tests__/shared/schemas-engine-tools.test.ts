@@ -350,5 +350,21 @@ describe("ConversationMessageSchema", () => {
   it("rejects a missing message id", () => {
     expect(ConversationMessageSchema.safeParse({ role: "user", content: "hello" }).success).toBe(false);
   });
+
+  it("accepts an optional source created_at and rejects an invalid timestamp", () => {
+    const value = {
+      message_id: "msg_user_1",
+      role: "user",
+      content: "hello",
+      created_at: "2026-04-29T00:00:00.000Z"
+    };
+    expect(ConversationMessageSchema.parse(value)).toEqual(value);
+    expect(ConversationMessageSchema.safeParse({
+      message_id: "msg_user_1",
+      role: "user",
+      content: "hello",
+      created_at: "not-a-timestamp"
+    }).success).toBe(false);
+  });
 });
 

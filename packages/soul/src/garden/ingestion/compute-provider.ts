@@ -124,6 +124,19 @@ export interface GardenCompileContext {
   readonly source_observed_at?: string;
 }
 
+function resolveGardenCompileSourceObservedAtRaw(
+  context: GardenCompileContext
+): string | undefined {
+  const fromContext = context.source_observed_at?.trim();
+  if (fromContext) return fromContext;
+  for (const message of context.turn_messages) {
+    if (message.role !== "user") continue;
+    const fromMessage = message.created_at?.trim();
+    if (fromMessage) return fromMessage;
+  }
+  return undefined;
+}
+
 export interface GardenComputeProvider {
   readonly provider_kind: GardenProviderKind;
   compile(turnContent: string, context: GardenCompileContext): Promise<readonly CandidateMemorySignal[]>;
@@ -265,7 +278,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
 
     const sourceCorpus = buildOfficialApiSourceCorpus(normalizedTurnContent, context.turn_messages);
     const drafts = await this.requestSignals(normalizedTurnContent, context);
-    const createdAt = normalizeSourceObservedAt(context.source_observed_at) ?? this.now();
+    const createdAt = this.now();
+    const sourceObservedAtRaw = resolveGardenCompileSourceObservedAtRaw(context);
 
     const signals: CandidateMemorySignal[] = [];
     for (const draft of drafts) {
@@ -274,7 +288,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         context,
         normalizedTurnContent,
         sourceCorpus,
-        createdAt
+        createdAt,
+        sourceObservedAtRaw
       );
       if (signal !== null) {
         signals.push(signal);
@@ -306,18 +321,20 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     context: GardenCompileContext,
     normalizedTurnContent: string,
     sourceCorpus: string,
-    createdAt: string
+    createdAt: string,
+    sourceObservedAtRaw: string | undefined
   ): CandidateMemorySignal | null {
     const { groundingSourceText, grounding } = groundDraftForContext(
       draft, context, normalizedTurnContent, sourceCorpus
     );
     const groundedDraft = grounding.draft;
     const confidence = clampConfidence(groundedDraft.confidence);
+    const sourceObservedAt = normalizeSourceObservedAt(sourceObservedAtRaw);
     const temporalSelection = grounding.status === "grounded"
       ? inspectObservedTemporalProjection(
           groundedDraft.matched_text,
           groundedDraft.temporal_projection,
-          context.source_observed_at,
+          sourceObservedAtRaw,
           groundedDraft.temporal_projection_audit
         )
       : undefined;
@@ -337,7 +354,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         providerKind: this.provider_kind,
         signalId: this.generateSignalId(),
         createdAt,
-        sourceObservedAt: normalizeSourceObservedAt(context.source_observed_at) ?? createdAt,
+        sourceObservedAt: sourceObservedAt ?? createdAt,
         sourceGrounding: grounding.audit
       }));
     } catch (error) {

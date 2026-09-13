@@ -120,12 +120,7 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
       const row = this.rows.find((candidate) => candidate.id === taskId);
       if (row === undefined || row.status !== "pending") return false;
       await this.appendTaskEvents([...precedingEvents, completionEvent]);
-      assertReplaced(replaceRow(this.rows, row, {
-        ...row,
-        status: "failed",
-        completed_at: completedAt,
-        last_error_text: lastErrorText
-      }), taskId);
+      removeRow(this.rows, row);
       return true;
     });
   }
@@ -153,12 +148,7 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
         throw new Error(`Garden task ${taskId} is not claimed by the expected worker.`);
       }
       await this.appendTaskEvents(events);
-      assertReplaced(replaceRow(this.rows, row, {
-        ...row,
-        status: result.status,
-        completed_at: result.completed_at,
-        last_error_text: result.last_error_text ?? null
-      }), taskId);
+      removeRow(this.rows, row);
     });
   }
 
@@ -339,6 +329,14 @@ export function replaceRow(
     return true;
   }
   return false;
+}
+
+function removeRow(rows: InMemoryGardenTaskRow[], row: InMemoryGardenTaskRow): void {
+  const index = rows.indexOf(row);
+  if (index < 0) {
+    throw new Error(`Garden task ${row.id} row reference is stale; mutation cannot be applied.`);
+  }
+  rows.splice(index, 1);
 }
 
 // A false replaceRow means the reference is stale/shallow-copied — never silently drop the write.

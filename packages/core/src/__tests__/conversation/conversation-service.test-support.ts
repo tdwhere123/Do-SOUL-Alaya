@@ -153,12 +153,14 @@ export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Ca
 export function createMessage(
   messageId: string,
   role: ConversationMessage["role"],
-  content: string
+  content: string,
+  createdAt: string | null = "2026-04-29T00:00:00.000Z"
 ): ConversationMessage {
   return {
     message_id: messageId,
     role,
-    content
+    content,
+    ...(createdAt === null ? {} : { created_at: createdAt })
   };
 }
 

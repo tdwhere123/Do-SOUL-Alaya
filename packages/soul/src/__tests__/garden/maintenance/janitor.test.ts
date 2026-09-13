@@ -66,6 +66,50 @@ describe("Janitor", () => {
     expect(result.objects_affected).toHaveLength(JANITOR_CONSTANTS.BATCH_SIZE);
   });
 
+  it("fails closed on ttl cleanup mutation when eventLogRepo is missing", async () => {
+    const { cleanupPort, janitor } = createJanitor({
+      omitEventLogRepo: true,
+      expiredObjects: [
+        { object_kind: "handoff_record", object_id: "handoff-1", expires_at: "2026-03-20T00:00:00.000Z" }
+      ]
+    });
+
+    const result = await janitor.run(createTask({ task_kind: GardenTaskKind.TTL_CLEANUP }));
+
+    expect(result.success).toBe(false);
+    expect(result.error_message).toMatch(/eventLogRepo/);
+    expect(cleanupPort.removeExpiredObjects).not.toHaveBeenCalled();
+  });
+
+  it("does not remove expired objects when the ttl EventLog append fails", async () => {
+    const appendManyWithMutation = vi.fn(async () => {
+      throw new Error("event log crashed");
+    });
+    const { cleanupPort, janitor } = createJanitor({
+      expiredObjects: [
+        { object_kind: "gap_record", object_id: "gap-1", expires_at: "2026-03-20T00:00:00.000Z" }
+      ]
+    });
+    const janitorWithFailingLog = new Janitor({
+      cleanupPort,
+      tieringPort: {
+        findHotDemotionCandidates: vi.fn(async () => []),
+        demoteToWarm: vi.fn()
+      },
+      scheduler: { reportCompletion: vi.fn(async () => undefined) },
+      eventLogRepo: {
+        append: vi.fn(),
+        appendManyWithMutation: appendManyWithMutation as AuditorEventLogPort["appendManyWithMutation"]
+      },
+      now: () => "2026-03-27T00:00:00.000Z"
+    });
+
+    const result = await janitorWithFailingLog.run(createTask({ task_kind: GardenTaskKind.TTL_CLEANUP }));
+
+    expect(result.success).toBe(false);
+    expect(cleanupPort.removeExpiredObjects).not.toHaveBeenCalled();
+  });
+
   it("runs hot index demotion with threshold criteria and demotes candidate ids", async () => {
     const { tieringPort, scheduler, janitor } = createJanitor({
       hotCandidates: [
@@ -126,6 +170,7 @@ describe("Janitor", () => {
         demoteToWarm: vi.fn(async () => undefined)
       },
       scheduler,
+      eventLogRepo: createPassthroughEventLogPort(),
       now: () => "2026-03-27T00:00:00.000Z"
     });
     scheduler.enqueue(createTask({ task_id: "task-janitor", task_kind: GardenTaskKind.TTL_CLEANUP }));

@@ -155,11 +155,7 @@ describe("InMemoryGardenTaskRepo concurrency", () => {
     ]);
 
     expect(results.filter(Boolean)).toHaveLength(1);
-    expect(repo.findById("task-1")).toMatchObject({
-      status: "failed",
-      claimed_by: null,
-      last_error_text: "invalid envelope"
-    });
+    expect(repo.findById("task-1")).toBeNull();
     expect(eventLog.append).toHaveBeenCalledTimes(1);
   });
 
@@ -219,7 +215,7 @@ describe("InMemoryGardenTaskRepo concurrency", () => {
 
     await expect(failure).resolves.toBe(true);
     await expect(claim).resolves.toBe("already-claimed");
-    expect(repo.findById("task-1")).toMatchObject({ status: "failed", claimed_by: null });
+    expect(repo.findById("task-1")).toBeNull();
     expect(eventLog.append).toHaveBeenCalledTimes(1);
   });
 
@@ -252,7 +248,7 @@ describe("InMemoryGardenTaskRepo concurrency", () => {
     releaseAppend();
 
     await expect(failure).resolves.toBe(true);
-    expect(repo.findById("task-1")).toMatchObject({ status: "failed" });
+    expect(repo.findById("task-1")).toBeNull();
   });
 
   it("reserves an audit-only completion id before yielding to the event log", async () => {
@@ -320,7 +316,7 @@ describe("InMemoryGardenTaskRepo concurrency", () => {
 
     await expect(completion).resolves.toBeUndefined();
     await expect(release).resolves.toBe(false);
-    expect(repo.findById("task-1")).toMatchObject({ status: "completed" });
+    expect(repo.findById("task-1")).toBeNull();
     expect(eventLog.append).toHaveBeenCalledTimes(1);
   });
 

@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { BoundedContentSchema, BoundedIdSchema } from "../shared/schema-primitives.js";
+import {
+  BoundedContentSchema,
+  BoundedIdSchema,
+  IsoDatetimeStringSchema
+} from "../shared/schema-primitives.js";
 
 const conversationMessageRoleValues = ["user", "assistant"] as const;
 
@@ -10,7 +14,9 @@ export const ConversationMessageSchema = z.object({
   role: ConversationMessageRoleSchema,
   content: BoundedContentSchema,
   /** IDs of files attached to this message. Only present for user messages with uploads. */
-  file_ids: z.array(BoundedIdSchema).readonly().optional()
+  file_ids: z.array(BoundedIdSchema).readonly().optional(),
+  // Source observation time for the utterance. Omitted means unknown — never fill with ingestion clock.
+  created_at: IsoDatetimeStringSchema.optional()
 }).strict().readonly();
 
 export type ConversationMessageRole = z.infer<typeof ConversationMessageRoleSchema>;

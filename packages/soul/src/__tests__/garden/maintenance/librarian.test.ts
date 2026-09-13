@@ -242,7 +242,7 @@ describe("Librarian", () => {
     const result = await librarian.run(
       createTask({
         task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
-        target_object_refs: ["2026-03-26T00:00:00.000Z", "2026-03-27T00:00:00.000Z"]
+        target_object_refs: ["10", "40"]
       })
     );
 
@@ -255,13 +255,13 @@ describe("Librarian", () => {
     expect(computeAndApplyPlasticity).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: "workspace-1",
-        sinceIso: "2026-03-26T00:00:00.000Z",
-        untilIso: "2026-03-27T00:00:00.000Z"
+        sinceRevision: 10,
+        untilRevision: 40
       })
     );
     expect(markProcessed).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
-      processedThroughIso: "2026-03-27T00:00:00.000Z",
+      processedThroughRevision: 40,
       processedAuditEventId: null
     });
     expect(clearPendingWorkspace).toHaveBeenCalledWith("workspace-1");

@@ -61,6 +61,43 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     expect(extractor.extract).toHaveBeenCalledTimes(1);
   });
 
+  it("uses the user message source time rather than the compile clock", async () => {
+    const sourceTime = "2026-04-01T10:00:00.000Z";
+    const compileTime = "2026-04-01T12:00:00.000Z";
+    const extractor = createOpenSemanticExtractor(JSON.stringify({
+      signals: [
+        {
+          signal_kind: "potential_preference",
+          object_kind: "user_preference",
+          confidence: 0.9,
+          matched_text: "Call me Ash",
+          distilled_fact: "Call me Ash.",
+          reason: "naming_preference"
+        }
+      ]
+    }));
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor,
+      now: () => compileTime,
+      generateSignalId: () => "signal-source-time"
+    });
+
+    const [signal] = await provider.compile("Call me Ash.", {
+      ...createContext(),
+      turn_messages: [{
+        message_id: "msg-user",
+        role: "user",
+        content: "Call me Ash.",
+        created_at: sourceTime
+      }]
+    });
+
+    expect(signal).toBeDefined();
+    expect(signal?.created_at).toBe(compileTime);
+    expect(signal?.created_at).not.toBe(sourceTime);
+  });
+
 
   it("instructs the model to emit one open semantic graph per signal", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("semantic_factor_graph");
