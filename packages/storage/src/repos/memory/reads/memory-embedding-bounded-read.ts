@@ -1,9 +1,29 @@
 import type { StorageDatabase } from "../../../sqlite/db.js";
+import { DynamicPreparedStatementCache } from "../../../sqlite/dynamic-prepared-statement-cache.js";
+import { withSqliteBusyRetry } from "../../../sqlite/open-readonly.js";
 import { StorageError } from "../../../shared/errors.js";
-import { parseRows } from "../../shared/parse-row.js";
+import {
+  parseOptionalRow,
+  parseRows,
+  readIntegerField,
+  readNonNegativeIntField,
+  readRecord,
+  readSqliteBooleanIntField,
+  type RowParser
+} from "../../shared/parse-row.js";
 import { MemoryEmbeddingRowParser } from "../../shared/sqlite-row-schemas.js";
 import { parseMemoryEmbeddingRow, parseModelId, parseObjectId, parseProviderKind, parseWorkspaceId } from "../mappers/memory-embedding-mappers.js";
 import type { MemoryEmbeddingRecord } from "../memory-embedding-repo.js";
+
+const statementCaches = new WeakMap<StorageDatabase, DynamicPreparedStatementCache>();
+
+function statementsFor(db: StorageDatabase): DynamicPreparedStatementCache {
+  const existing = statementCaches.get(db);
+  if (existing !== undefined) return existing;
+  const created = new DynamicPreparedStatementCache(db, () => db.reopenIfClosed());
+  statementCaches.set(db, created);
+  return created;
+}
 
 export interface BoundedEmbeddingProfile {
   readonly providerKind: string;
@@ -61,23 +81,28 @@ export function readUniqueEmbeddingProfile(
   const pinned = modelId === undefined ? undefined : parseModelId(modelId);
   const predicate = pinned === undefined ? "" : " AND model_id = $model";
   const args = { workspace: workspaceId, ...(pinned === undefined ? {} : { model: pinned }) };
-  const first = db.connection.prepare(`SELECT
+  const statements = statementsFor(db);
+  const first = withSqliteBusyRetry(() => parseOptionalRow(
+    statements.prepare(`SELECT
     CASE WHEN octet_length(provider_kind) + octet_length(model_id) <= 2048 THEN provider_kind ELSE NULL END AS provider_kind,
     CASE WHEN octet_length(provider_kind) + octet_length(model_id) <= 2048 THEN model_id ELSE NULL END AS model_id,
     schema_version FROM memory_embeddings
     WHERE workspace_id = $workspace AND vector_valid = 1 ${predicate}
-    ORDER BY model_id, provider_kind, schema_version LIMIT 1`).get(args) as ProfileIdentityRow | undefined;
+    ORDER BY model_id, provider_kind, schema_version LIMIT 1`).all(args)[0],
+    ProfileIdentityRowParser,
+    "embedding profile identity row"
+  )) ?? undefined;
   if (first !== undefined && (first.provider_kind === null || first.model_id === null)) {
     return { status: "unavailable", rowVisits: 1, metadataUtf8Bytes: 0 };
   }
   const metadataUtf8Bytes = first === undefined ? 0 : Buffer.byteLength(first.provider_kind!, "utf8") + Buffer.byteLength(first.model_id!, "utf8");
-  const second = first === undefined ? undefined : db.connection.prepare(`
+  const second = first === undefined ? undefined : withSqliteBusyRetry(() => statements.prepare(`
     SELECT 1 FROM memory_embeddings
     WHERE workspace_id = $workspace AND vector_valid = 1 ${predicate}
       AND (model_id, provider_kind, schema_version) > ($afterModel, $afterProvider, $afterSchema)
-    ORDER BY model_id, provider_kind, schema_version LIMIT 1`).get({ ...args,
+    ORDER BY model_id, provider_kind, schema_version LIMIT 1`).all({ ...args,
     afterModel: first.model_id, afterProvider: first.provider_kind, afterSchema: first.schema_version
-  });
+  })[0]);
   if (first === undefined || second !== undefined) {
     return Object.freeze({
       status: first === undefined ? "missing" : "unavailable",
@@ -105,6 +130,26 @@ type ProfileIdentityRow = Readonly<{
   readonly schema_version: number;
 }>;
 
+const ProfileIdentityRowParser: RowParser<ProfileIdentityRow> = {
+  parse(value: unknown): ProfileIdentityRow {
+    const record = readRecord(value, "embedding profile identity row");
+    return {
+      provider_kind: readNullableIdentityField(record, "provider_kind"),
+      model_id: readNullableIdentityField(record, "model_id"),
+      schema_version: readIntegerField(record, "schema_version")
+    };
+  }
+};
+
+function readNullableIdentityField(record: Record<string, unknown>, field: string): string | null {
+  const value = record[field];
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") {
+    throw new StorageError("VALIDATION_FAILED", `Failed to validate ${field}.`);
+  }
+  return value;
+}
+
 export function readBoundedEmbeddingIds(
   db: StorageDatabase,
   workspaceId: string,
@@ -118,7 +163,8 @@ export function readBoundedEmbeddingIds(
   validateProfile(workspaceId, profile);
   if (profile.maxRows === 0) return Object.freeze({ objectIds: Object.freeze([]), rowVisits: 0, metadataUtf8Bytes: 0, filteredRows: 0, truncated: true, committedThrough: afterObjectId });
   // The indexed canonical prefix owns the native visit cap; downstream source admission owns lifecycle and tier.
-  const rows = db.connection.prepare(`WITH candidates AS MATERIALIZED (
+  const rows = withSqliteBusyRetry(() => parseRows(
+    statementsFor(db).prepare(`WITH candidates AS MATERIALIZED (
     SELECT e.object_id AS object_id FROM memory_embeddings e INDEXED BY idx_memory_embeddings_recall_profile_identity
     WHERE e.workspace_id = ? AND e.provider_kind = ? AND e.model_id = ? AND e.schema_version = ? AND e.vector_valid = 1
       AND e.object_id > ?
@@ -127,8 +173,10 @@ export function readBoundedEmbeddingIds(
     CASE WHEN octet_length(object_id) <= ? THEN object_id ELSE NULL END AS object_id,
     CASE WHEN octet_length(object_id) <= ? THEN octet_length(object_id) ELSE 0 END AS metadata_bytes
     FROM candidates ORDER BY candidates.object_id`).all(workspaceId, profile.providerKind, profile.modelId,
-    profile.schemaVersion, afterObjectId ?? "", profile.maxRows, profile.maxMetadataUtf8Bytes, profile.maxMetadataUtf8Bytes) as
-    { object_id: string | null; metadata_bytes: number }[];
+    profile.schemaVersion, afterObjectId ?? "", profile.maxRows, profile.maxMetadataUtf8Bytes, profile.maxMetadataUtf8Bytes),
+    BoundedEmbeddingIdRowParser,
+    "bounded embedding id row"
+  ));
   const firstInvalid = rows.findIndex((row) => row.object_id === null);
   const objectIds = rows.slice(0, firstInvalid < 0 ? rows.length : firstInvalid).map((row) => row.object_id!);
   const filteredRows = rows.length - objectIds.length;
@@ -145,7 +193,38 @@ export function readBoundedEmbeddingIds(
 
 const METADATA_COLUMNS = ["object_id", "workspace_id", "content_hash", "provider_kind", "model_id", "created_at", "updated_at"] as const;
 const META_BYTES = METADATA_COLUMNS.map((column) => `octet_length(e.${column})`).join(" + ");
+const META_BYTES_UNQUALIFIED = METADATA_COLUMNS.map((column) => `octet_length(${column})`).join(" + ");
 const PAYLOAD_COLUMNS = [...METADATA_COLUMNS, "schema_version", "dimensions", "embedding_blob"] as const;
+
+const BoundedEmbeddingIdRowParser: RowParser<{ object_id: string | null; metadata_bytes: number }> = {
+  parse(value: unknown): { object_id: string | null; metadata_bytes: number } {
+    const record = readRecord(value, "bounded embedding id row");
+    return {
+      object_id: readNullableIdentityField(record, "object_id"),
+      metadata_bytes: readNonNegativeIntField(record, "metadata_bytes")
+    };
+  }
+};
+
+const BoundedEmbeddingEligibleRowParser: RowParser<{
+  readonly eligible: number;
+  readonly metadata_bytes: number;
+  readonly vector_bytes: number;
+}> = {
+  parse(value: unknown): {
+    readonly eligible: number;
+    readonly metadata_bytes: number;
+    readonly vector_bytes: number;
+  } {
+    const record = readRecord(value, "bounded memory embedding row");
+    return {
+      ...record,
+      eligible: readSqliteBooleanIntField(record, "eligible"),
+      metadata_bytes: readNonNegativeIntField(record, "metadata_bytes"),
+      vector_bytes: readNonNegativeIntField(record, "vector_bytes")
+    };
+  }
+};
 
 export function readBoundedEmbeddings(db: StorageDatabase, workspaceId: string, objectIds: readonly string[], options: BoundedEmbeddingReadOptions):
   BoundedEmbeddingReadReceipt & { readonly records: readonly Readonly<MemoryEmbeddingRecord>[]; readonly vectorBytes: number } {
@@ -166,16 +245,22 @@ export function readBoundedEmbeddings(db: StorageDatabase, workspaceId: string, 
   const eligibleSql = `e.vector_valid = 1 AND e.provider_kind = $provider AND e.model_id = $model AND e.schema_version = $schema
     AND e.dimensions = $dimensions AND typeof(e.embedding_blob) = 'blob' AND length(e.embedding_blob) = $vectorBytes
     AND (${META_BYTES}) <= $metadataBytes`;
-  const projected = PAYLOAD_COLUMNS.map((column) => `CASE WHEN ${eligibleSql} THEN e.${column} ELSE NULL END AS ${column}`).join(", ");
+  const projected = PAYLOAD_COLUMNS.map((column) => `CASE WHEN is_eligible THEN ${column} ELSE NULL END AS ${column}`).join(", ");
   // Lazy CASE masks payload at the single indexed owner read, without a second table hydration.
-  const rows = db.connection.prepare(`SELECT CASE WHEN ${eligibleSql} THEN 1 ELSE 0 END AS eligible, ${projected},
-    CASE WHEN ${eligibleSql} THEN (${META_BYTES}) ELSE 0 END AS metadata_bytes,
-    CASE WHEN ${eligibleSql} THEN length(e.embedding_blob) ELSE 0 END AS vector_bytes
+  const rows = withSqliteBusyRetry(() => parseRows(
+    statementsFor(db).prepare(`WITH eligible AS (
+    SELECT e.*, (${eligibleSql}) AS is_eligible
     FROM json_each($ids) ids CROSS JOIN memory_embeddings e ON e.object_id = ids.value
-    WHERE e.workspace_id = $workspace ORDER BY e.object_id`).all({ provider: options.providerKind, model: options.modelId,
+    WHERE e.workspace_id = $workspace
+  ) SELECT CASE WHEN is_eligible THEN 1 ELSE 0 END AS eligible, ${projected},
+    CASE WHEN is_eligible THEN (${META_BYTES_UNQUALIFIED}) ELSE 0 END AS metadata_bytes,
+    CASE WHEN is_eligible THEN length(embedding_blob) ELSE 0 END AS vector_bytes
+    FROM eligible ORDER BY object_id`).all({ provider: options.providerKind, model: options.modelId,
     schema: options.schemaVersion, dimensions: options.expectedDimensions, vectorBytes: options.maxVectorBytes,
-    metadataBytes: options.maxMetadataUtf8Bytes, ids: JSON.stringify(selected), workspace: workspaceId }) as
-    { eligible: number; metadata_bytes: number; vector_bytes: number }[];
+    metadataBytes: options.maxMetadataUtf8Bytes, ids: JSON.stringify(selected), workspace: workspaceId }),
+    BoundedEmbeddingEligibleRowParser,
+    "bounded memory embedding row"
+  ));
   const eligible = rows.filter((row) => row.eligible === 1);
   const records = parseRows(eligible, MemoryEmbeddingRowParser, "bounded memory embedding row").map(parseMemoryEmbeddingRow);
   const filteredRows = rows.length - records.length;

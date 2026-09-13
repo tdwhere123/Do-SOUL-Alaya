@@ -48,7 +48,7 @@ describe("projection generation copy and pointer switch", () => {
     if (retained instanceof Promise) throw new Error("event log append must stay synchronous in this copy probe");
     const shadow = generations.insert(hashedGeneration("workspace-1", "event-1", "shadow"));
     const second = generations.insert(hashedGeneration("workspace-1", "event-2", "shadow"));
-    expect(readSchemaMigrationLedger(filename).at(-1)).toBe(13);
+    expect(readSchemaMigrationLedger(filename).at(-1)).toBe(15);
     expect(readSchemaMigrationLedger(filename)).toContain(13);
     original.close();
     tracked.delete(original);

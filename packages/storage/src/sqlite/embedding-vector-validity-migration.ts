@@ -1,11 +1,30 @@
 import type { SqliteConnection } from "./db.js";
 import { isValidEmbeddingBlob } from "../repos/memory/embedding-vector-validity.js";
+import {
+  parseRows,
+  readBufferField,
+  readNonEmptyStringField,
+  readPositiveIntField,
+  readRecord,
+  type RowParser
+} from "../repos/shared/parse-row.js";
 
 interface StoredEmbeddingProbe {
   readonly object_id: string;
   readonly dimensions: number;
   readonly embedding_blob: Buffer;
 }
+
+const StoredEmbeddingProbeParser: RowParser<StoredEmbeddingProbe> = {
+  parse(value: unknown): StoredEmbeddingProbe {
+    const record = readRecord(value, "stored embedding probe");
+    return {
+      object_id: readNonEmptyStringField(record, "object_id"),
+      dimensions: readPositiveIntField(record, "dimensions"),
+      embedding_blob: readBufferField(record, "embedding_blob")
+    };
+  }
+};
 
 export function migrateEmbeddingVectorValidity(database: SqliteConnection): void {
   // Keyset pages keep peak BLOB retention bounded; the one-time scan is linear
@@ -23,7 +42,7 @@ export function migrateEmbeddingVectorValidity(database: SqliteConnection): void
   database.prepare("UPDATE memory_embeddings SET vector_valid = 0").run();
   let cursor = "";
   while (true) {
-    const rows = readPage.all(cursor) as StoredEmbeddingProbe[];
+    const rows = parseRows(readPage.all(cursor), StoredEmbeddingProbeParser, "stored embedding probe");
     if (rows.length === 0) break;
     for (const row of rows) {
       if (isValidEmbeddingBlob(row.embedding_blob, row.dimensions)) {

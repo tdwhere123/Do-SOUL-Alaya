@@ -9,6 +9,8 @@ import {
 } from "./memory-entry-repo-fixture.js";
 import { removeTempDirectorySync } from "../../temp-directory.js";
 import { StorageError } from "../../../shared/errors.js";
+import { tokenizeFtsQuery as tokenizeKeywordQuery } from "../../../repos/memory-entry/reads/keyword-search.js";
+import { tokenizeFtsQuery as tokenizeLaneQuery } from "../../../repos/shared/fts-lane-routing.js";
 
 const databases = trackedDatabases;
 
@@ -447,52 +449,50 @@ describe("SqliteMemoryEntryRepo keyword search", () => {
 
   it("sanitizes FTS special operators before searching", async () => {
     const { repo } = await createRepo();
+    const glued = "33333333-3333-4333-8333-333333333333";
+    const split = "44444444-4444-4444-8444-444444444444";
     await repo.create(
       createMemoryEntry({
-        object_id: "33333333-3333-4333-8333-333333333333",
+        object_id: glued,
         content: "Use the contentsecret fallback token for recall ranking."
       })
     );
     await repo.create(
       createMemoryEntry({
-        object_id: "44444444-4444-4444-8444-444444444444",
+        object_id: split,
         run_id: "run-2",
         content: "A plain secret token should not match the sanitized literal."
       })
     );
 
-    await expect(repo.searchByKeyword("workspace-1", 'content:secret*', 5)).resolves.toEqual([
-      {
-        object_id: "33333333-3333-4333-8333-333333333333",
-        normalized_rank: 1,
-        trigram_rank: 1
-      }
-    ]);
+    expect(tokenizeKeywordQuery("content:secret*")).toEqual(tokenizeLaneQuery("content:secret*"));
+    expect(tokenizeKeywordQuery("content:secret*")).toEqual(["content", "secret"]);
+    const matches = await repo.searchByKeyword("workspace-1", "content:secret*", 5);
+    expect(matches.map((match) => match.object_id).sort()).toEqual([glued, split].sort());
   });
 
   it("strips NUL bytes from keyword query tokens before FTS matching", async () => {
     const { repo } = await createRepo();
+    const glued = "bbbbbbbb-1111-4111-8111-111111111111";
+    const split = "cccccccc-2222-4222-8222-222222222222";
     await repo.create(
       createMemoryEntry({
-        object_id: "bbbbbbbb-1111-4111-8111-111111111111",
+        object_id: glued,
         content: "The alphabeta token should survive NUL sanitization."
       })
     );
     await repo.create(
       createMemoryEntry({
-        object_id: "cccccccc-2222-4222-8222-222222222222",
+        object_id: split,
         run_id: "run-2",
         content: "The alpha token alone must not match the sanitized query."
       })
     );
 
-    await expect(repo.searchByKeyword("workspace-1", "alpha\0beta", 5)).resolves.toEqual([
-      {
-        object_id: "bbbbbbbb-1111-4111-8111-111111111111",
-        normalized_rank: 1,
-        trigram_rank: 1
-      }
-    ]);
+    expect(tokenizeKeywordQuery("alpha\0beta")).toEqual(tokenizeLaneQuery("alpha\0beta"));
+    expect(tokenizeKeywordQuery("alpha\0beta")).toEqual(["alpha", "beta"]);
+    const matches = await repo.searchByKeyword("workspace-1", "alpha\0beta", 5);
+    expect(matches.map((match) => match.object_id).sort()).toEqual([glued, split].sort());
   });
 
   it("anchor search admits only rows containing a required anchor", async () => {

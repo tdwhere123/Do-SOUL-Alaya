@@ -72,6 +72,35 @@ describe("readBoundedEmbeddingIds cursor", () => {
     expect(empty.objectIds).toEqual([]);
     expect(empty.truncated).toBe(false);
   });
+
+  it("does not prepare bounded id SQL once per page", async () => {
+    const { database, workspaceId, memoryRepo, repo } = await createRepoContext();
+    repo.prepareBoundedRecallIndex();
+    await plantExtraEmbeddings(memoryRepo, repo, workspaceId, 6);
+    const profile = {
+      providerKind: "openai",
+      modelId: "text-embedding-3-small",
+      schemaVersion: 1,
+      maxRows: 2,
+      maxMetadataUtf8Bytes: 256
+    };
+    const originalPrepare = database.connection.prepare.bind(database.connection);
+    let prepareCount = 0;
+    database.connection.prepare = ((sql: string, ...args: unknown[]) => {
+      prepareCount += 1;
+      return originalPrepare(sql, ...(args as []));
+    }) as typeof database.connection.prepare;
+    const first = readBoundedEmbeddingIds(database, workspaceId, profile);
+    const afterFirst = prepareCount;
+    let after = first.committedThrough;
+    for (let step = 0; step < 3; step += 1) {
+      const page = readBoundedEmbeddingIds(database, workspaceId, profile, after);
+      after = page.committedThrough;
+      if (!page.truncated) break;
+    }
+    expect(afterFirst).toBeGreaterThan(0);
+    expect(prepareCount).toBe(afterFirst);
+  });
 });
 
 describe("readUniqueEmbeddingProfile", () => {

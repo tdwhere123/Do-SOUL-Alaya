@@ -453,6 +453,8 @@ CREATE TABLE evidence_fact_frame_formations (
   evidence_object_id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
   schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+  -- Literal must match EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID
+  -- (packages/protocol/src/evidence/associative-fact-frame.ts).
   operator_id TEXT NOT NULL CHECK (
     operator_id = 'evidence_fact_frame_formation_v1'
   ),
