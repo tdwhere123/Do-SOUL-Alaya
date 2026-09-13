@@ -128,6 +128,9 @@ export function absorbObservations(
     transitionRoots: state.transition_derivations,
     facetIds: index.facets,
     discoveryIds: index.discoveries,
+    unresolvedSeeds: state.unresolved_seed_count ?? 0,
+    // Observation ids are namespaced by their immutable action region id.
+    seedPage: state.residuals.some((region) => region.kind === "seed" && region.region_id === consumption.page.cursor.region_id),
     withdrawn: new Set(state.withdrawn_leaves ?? [])
   };
   const effectSeedIds = new Set(
@@ -204,7 +207,10 @@ export function absorbObservations(
     }) : state.support,
     seen_identities: state.seen_identities,
     identity_spool: RetainedSequence.from(state.identity_spool).concat(collectIdentities(seedDelta.additions, transitionDelta.additions)),
-    residuals: admitDiscoveryResidual(residuals, mergedDiscoveries, memoryExhausted, absorbedNewDiscoveries),
+    unresolved_seed_count: quota.unresolvedSeeds,
+    residuals: admitDiscoveryResidual(residuals, mergedDiscoveries, memoryExhausted, absorbedNewDiscoveries)
+      .map((region) => region.kind === "guard" && quota.unresolvedSeeds !== (state.unresolved_seed_count ?? 0)
+        ? { ...region, status: "open" as const } : region),
     last_observer_status: memoryExhausted ? "interrupted" : consumption.page.outcome.status,
     resume_cursors: consumption.resume_cursors ?? state.resume_cursors
   };
@@ -233,6 +239,8 @@ export function residualWorkRegions(residuals: readonly CoverageRegion[]): FairW
 }
 
 type MemoryQuota = {
+  unresolvedSeeds: number;
+  seedPage: boolean;
   remaining: number;
   exhausted: boolean;
   remainingWork: RemainingWork[];
@@ -259,13 +267,15 @@ function absorbPageObservations(
     const priorOffset = quota.observationOffsets.get(observation.observation_id) ?? -1;
     const prior = priorOffset < 0 ? undefined : observations.at(priorOffset);
     if (prior !== undefined && (prior.source_revision !== observation.source_revision
-      || prior.applicability.verdict === "true" || observation.applicability.verdict !== "true")) continue;
+      || prior.applicability.verdict !== "unresolved" || observation.applicability.verdict === "unresolved")) continue;
     if (!retainPayload(observation, quota)) continue;
     if (priorOffset < 0) {
       quota.observationOffsets = quota.observationOffsets.with(observation.observation_id, observations.length);
       observations.push(observation);
     }
     else observations.replace(priorOffset, observation);
+    if (quota.seedPage) quota.unresolvedSeeds += Number(observation.applicability.verdict === "unresolved")
+      - Number(prior?.applicability.verdict === "unresolved");
     if (effectSeedIds.has(observation.observation_id)) continue;
     if (observation.association_milligrades === undefined) continue;
     const seed = seedFromObservation(observation, productStateFromObservation(observation));

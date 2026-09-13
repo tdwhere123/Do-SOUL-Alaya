@@ -9,6 +9,7 @@ import {
   type QueryProgram,
   type QueryTimeWindow
 } from "@do-soul/alaya-protocol";
+import { failedDeploymentVerdict } from "./source-event.js";
 
 export const SUPPORTED_FAILED_DEPLOYMENT_QUERY_ID = "failed-deployment";
 
@@ -179,30 +180,42 @@ export function sourceFactsSatisfyFilters(
     readonly last_used_at?: string | null;
     readonly observed_at?: string;
     readonly content?: string;
+    readonly content_complete?: boolean;
+    readonly root_kind?: string;
+    readonly original_complete?: boolean;
+    readonly content_start?: number;
+    readonly event_time?: string | null;
   }> | undefined
 ): "true" | "false" | "unresolved" {
   if (facts === undefined) return "unresolved";
+  let unresolved = false;
+  const root = facts.root_kind !== undefined;
   if (filters.event_kind === "failed_deployment") {
-    if (facts.content === undefined) return "unresolved";
-    if (!sourceIsFailedDeployment(facts.content)) return "false";
+    // Governed memory reads are whole rows; native roots must prove both the
+    // original context and the current read complete, not merely an excerpt.
+    const complete = root ? facts.original_complete === true && facts.content_complete === true &&
+      (facts.content_start ?? 0) === 0 : facts.content_complete;
+    const verdict = failedDeploymentVerdict(facts.content, complete);
+    if (verdict === "false") return "false";
+    unresolved ||= verdict === "unresolved";
   }
   if (filters.dimension_filter !== undefined && filters.dimension_filter.length > 0) {
-    if (facts.dimension === undefined) return "unresolved";
-    if (!filters.dimension_filter.includes(facts.dimension)) return "false";
+    if (root || facts.dimension === undefined) unresolved = true;
+    else if (!filters.dimension_filter.includes(facts.dimension)) return "false";
   }
   if (filters.domain_tag_filter !== undefined && filters.domain_tag_filter.length > 0) {
     const tags = facts.domain_tags ?? [];
-    if (!filters.domain_tag_filter.some((tag) => tags.includes(tag))) return "false";
+    if (root) unresolved = true;
+    else if (!filters.domain_tag_filter.some((tag) => tags.includes(tag))) return "false";
   }
   const stamp = timestampForSourceFilters(facts, filters);
   if (filters.since !== undefined || filters.until !== undefined) {
-    if (stamp === undefined) return "unresolved";
-    const sinceOrder = filters.since === undefined ? 0 : compareUtcInstants(stamp, filters.since);
-    const untilOrder = filters.until === undefined ? 0 : compareUtcInstants(stamp, filters.until);
-    if (sinceOrder === undefined || untilOrder === undefined) return "unresolved";
-    if (sinceOrder < 0 || untilOrder > 0) return "false";
+    const sinceOrder = filters.since === undefined ? 0 : stamp === undefined ? undefined : compareUtcInstants(stamp, filters.since);
+    const untilOrder = filters.until === undefined ? 0 : stamp === undefined ? undefined : compareUtcInstants(stamp, filters.until);
+    if ((sinceOrder !== undefined && sinceOrder < 0) || (untilOrder !== undefined && untilOrder > 0)) return "false";
+    unresolved ||= stamp === undefined || sinceOrder === undefined || untilOrder === undefined;
   }
-  return "true";
+  return unresolved ? "unresolved" : "true";
 }
 
 function timestampForSourceFilters(
@@ -210,9 +223,12 @@ function timestampForSourceFilters(
     readonly created_at?: string;
     readonly last_used_at?: string | null;
     readonly observed_at?: string;
+    readonly root_kind?: string;
+    readonly event_time?: string | null;
   }>,
   filters: OrdinarySourceFilters
 ): string | undefined {
+  if (facts.root_kind !== undefined) return filters.time_field === undefined ? facts.event_time ?? undefined : undefined;
   if (filters.time_field === "last_used_at") return facts.last_used_at ?? undefined;
   if (filters.time_field === "created_at") return facts.created_at;
   return facts.observed_at;
@@ -283,12 +299,6 @@ export function supportedFailedDeploymentProgram(anchorGuard: Guard): QueryProgr
       }
     ]
   };
-}
-
-export function sourceIsFailedDeployment(content: string): boolean {
-  const normalized = normalizeOrdinaryText(content);
-  return /\b(?:failed|unsuccessful) deploy(?:ment)?\b|\bdeployment (?:failed|failure)\b/u.test(normalized)
-    && !/\b(?:not|never) (?:a )?(?:failed|unsuccessful) deploy/u.test(normalized);
 }
 
 export function ordinaryRemainder(text: string): string {

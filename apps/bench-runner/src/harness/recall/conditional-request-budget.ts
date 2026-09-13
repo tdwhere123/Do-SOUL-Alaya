@@ -24,6 +24,7 @@ export function benchRequestFilters(options: BenchRecallOptions, policy?: Recall
     ...(!deterministic?.dimension_filter?.length ? {} : { dimension_filter: deterministic.dimension_filter }),
     ...(!deterministic?.domain_tag_filter?.length ? {} : { domain_tag_filter: deterministic.domain_tag_filter }),
     ...(options.enumeration_policy === undefined ? {} : { enumeration_policy: options.enumeration_policy }),
+    ...(options.cap_contracts === undefined ? {} : { cap_contracts: options.cap_contracts }),
     ...(options.result_kind_view === undefined ? {} : { result_kind_view: options.result_kind_view })
   };
 }

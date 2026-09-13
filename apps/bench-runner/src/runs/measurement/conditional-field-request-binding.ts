@@ -5,9 +5,10 @@ import {
   QueryViewSchema,
   RequestBudgetSchema,
   ResultKindViewSchema,
+  capContractId,
   type RequestBudget
 } from "@do-soul/alaya-protocol";
-import { compileConditionalFieldQuery, interpretationIdentity } from "@do-soul/alaya-core";
+import { compileConditionalFieldQuery, interpretationIdentity, fieldContractSha256 } from "@do-soul/alaya-core";
 
 const Id = z.string().min(1);
 const Digest = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
@@ -22,7 +23,9 @@ const Filters = {
   result_kind_view: ResultKindViewSchema.optional()
 };
 
-export const ConditionalFieldRequestFiltersSchema = z.object(Filters).strict().readonly();
+export const ConditionalFieldRequestFiltersSchema = z.object({ ...Filters,
+  cap_contracts: QueryViewSchema.unwrap().shape.cap_contracts
+}).strict().readonly();
 
 const NonNegInt = z.number().int().nonnegative();
 const NonNegMs = z.number().finite().nonnegative();
@@ -119,6 +122,7 @@ export function executionBindingMismatch(
     dimension_filter: input.dimension_filter, domain_tag_filter: input.domain_tag_filter,
     authorized_scopes: input.authorized_scopes,
     enumeration_policy: input.view?.enumeration_policy ?? input.enumeration_policy,
+    cap_contracts: input.view?.cap_contracts,
     result_kind_view: input.view?.result_kind_view ?? input.result_kind_view };
   return normalizedFilters(actual) === normalizedFilters(expected.requestFilters) ? null : "request_identity_mismatch";
 }
@@ -132,6 +136,7 @@ function normalizedFilters(filters: ConditionalFieldRequestFilters): string {
       ? filters.authorized_scopes
       : [...filters.authorized_scopes].sort(),
     enumeration_policy: filters.enumeration_policy ?? "canonical",
+    cap_contracts: filters.cap_contracts?.map((contract) => capContractId(contract, fieldContractSha256)).sort(),
     result_kind_view: filters.result_kind_view ?? "mixed"
   });
 }

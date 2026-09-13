@@ -105,6 +105,17 @@ the same legal membership. Source records and retained capsule text have
 bounded discovery and UTF-8 payload readers through the ordinary worker route.
 Record-only roots remain deliverable after optional memory formation fails.
 
+Mandatory original-source imports use Core `createAuditedSourceAdmission`,
+which composes existing source identity/span validation inside the formation
+store transaction and then appends the receipt-first source audit. A failed
+audit can leave a committed identity; retry repeats audit without reviving a
+tombstone. Daemon workspace bindings and projection checkpoints remain the
+applicable effect owners. Bench exposes this through its
+[source snapshot operations](../../apps/bench-runner/README.md#original-source-snapshots),
+separate from post-extraction artifacts. A known zero-byte source has an
+`[empty source]` display preview; raw bodies, span identities and source evidence
+remain unchanged, and missing payload stays distinct.
+
 Retained source bodies remain authoritative. Write transactions maintain a
 derived projection of UTF-8-aligned chunks of at most 4 KiB, with a digest bound
 to root kind, workspace, revision, original digest and offset. Migration builds
@@ -166,9 +177,13 @@ before policy transfer `policy.cosine.linear.milligrade.v1` version `1` maps
 cosine `c` to `floor(500 * (clamp(c, -1, 1) + 1))`. This is a declared policy,
 not a probability or an empirical calibration. The declaration combines named
 obligations with explicit `any` (maximum) or `all` (minimum); missing required
-measurements cannot satisfy `all`. Without a declaration, measured raw values
-retain an inapplicable cap and do not create semantic seeds. Recall performs
-no embedding generation or provider calls.
+measurements cannot satisfy `all`. Without a declaration, ordinary Recall does
+not schedule stored measurements or introduce binding obligations merely
+because readers exist. The explicit raw-measurement primitive retains an
+inapplicable cap without a declaration and cannot create semantic seeds.
+Observation pages report their actual region; query planning owns the required
+regions. A declared measurement with a missing producer or input remains unknown.
+Recall performs no embedding generation or provider calls.
 
 A query interpretation proposal is a candidate, not Core authority.
 `ProposedGuard` has no `verdict`; Core admission maps adopted guards to
@@ -345,6 +360,19 @@ evidence support retain their separate owners. Ready semantic artifacts remain
 observable in storage with source-current publication/restart checks; an
 unsupported kind query does not claim those artifacts are absent. Ordinary
 memory-source recall continues without optional enrichment or provider work.
+
+The finite max/min result assumes legal admitted premises; it does not prove
+that a natural-language event predicate or model identity is correct. Source
+retention, single-frame graph conformance, source-wide semantic coverage and
+query-relative index completeness are separate claims. Unsupported enrichment
+holds its dependent mode, while independent ready source modes remain usable.
+The shared failed-deployment producer recognizes only complete unquoted event
+records in its bounded grammar; conditional, reported, multi-sentence, partial
+or excerpt-only sources remain unresolved for that predicate. Exact retained
+literal retrieval does not require this event interpretation. This producer's
+whole-record limit is not an algorithm requirement for global unique parsing.
+Packed source-filter time bounds are inclusive; typed event-time and relation
+intervals remain half-open, and event time never substitutes for creation time.
 
 Finite max-min oracles establish only their stated finite reference properties.
 Real SQLite, worker, MCP/CLI, continuation and attribution tests establish the

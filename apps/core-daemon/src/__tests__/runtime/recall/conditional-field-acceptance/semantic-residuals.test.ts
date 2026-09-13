@@ -47,9 +47,11 @@ function session(slice: Awaited<ReturnType<typeof planted>>, readers: ObserverRe
 const key = (entry: InformationIndex["entries"][number]) => JSON.stringify([entry.object_id, entry.hypothesis_id,
   entry.output_binding, entry.program_state, entry.time_state]);
 
-function expectCompleteBaseline(index: InformationIndex): void {
-  expect(index.completeness).toMatchObject({ logical_index: "complete", observed_coverage: "complete",
-    transport: "complete", representation: "complete" });
+function expectUnresolvedLogInterpretation(index: InformationIndex): void {
+  // The in-window log is reachable through its relation, but its prose does
+  // not decide whether it independently denotes another failed deployment.
+  expect(index.completeness).toMatchObject({ logical_index: "open", observed_coverage: "unknown",
+    transport: "open", representation: "complete" });
   expect(index.continuation).toBeNull();
 }
 
@@ -88,7 +90,11 @@ describe("bounded semantic residual producer-consumer regressions", () => {
   it("delivers the independently admitted requested deployment alongside its associated outputs", async () => {
     const slice = await planted();
     const index = await session(slice)();
-    expectCompleteBaseline(index);
+    const query = compileConditionalFieldQuery({ source: "ordinary", text: "yesterday failed deployment",
+      interpretation_clock: INTERPRETATION_CLOCK, snapshot_id: SNAPSHOT_ID, budget: defaultBudget() });
+    const observed = observeProgram(slice, query.program, { query_text: "yesterday failed deployment" });
+    expect(observed.field.observations.find((row) => row.object_id === MEM.l)?.applicability.verdict).toBe("unresolved");
+    expectUnresolvedLogInterpretation(index);
     expect(index.entries.find((entry) => entry.object_id === MEM.r)).toMatchObject({ role: "requested", association_milligrades: 1000 });
     expect(index.entries.some((entry) => entry.object_id === MEM.c && entry.association_milligrades === 1000)).toBe(true);
     expect(index.entries.find((entry) => entry.object_id === MEM.h)).toMatchObject({
@@ -120,7 +126,7 @@ describe("bounded semantic residual producer-consumer regressions", () => {
   it("one-entry MCP pages recover exactly the wide page's grounded forests", async () => {
     const slice = await planted();
     const wide = await session(slice)();
-    expectCompleteBaseline(wide);
+    expectUnresolvedLogInterpretation(wide);
     const read = session(slice);
     const entries: InformationIndex["entries"][number][] = [];
     const forest = new Map<string, NonNullable<InformationIndex["explanations"]>[number]>();
@@ -132,7 +138,7 @@ describe("bounded semantic residual producer-consumer regressions", () => {
       entries.push(...page.entries);
       for (const node of page.explanations ?? []) forest.set(node.derivation_id, node);
       continuation = page.continuation;
-      if (continuation === null) { expect(page.completeness.payload).toBe("complete"); break; }
+      if (continuation === null) { expect(page.completeness.payload).toBe("open"); break; }
     }
     expect(continuation).toBeNull();
     expect(entries.map(key).sort()).toEqual(wide.entries.map(key).sort());
@@ -143,8 +149,15 @@ describe("bounded semantic residual producer-consumer regressions", () => {
 
   it("observes actual demanded causal receipts and respects retraction and unavailable capability", async () => {
     const slice = await planted();
+    // The log was recorded today about yesterday's deployment. It is outside
+    // the seed window, while its existing open relation validity is unchanged.
+    stamp(slice, MEM.l, INTERPRETATION_CLOCK);
     const absent = await session(slice)();
-    expectCompleteBaseline(absent);
+    expect(absent.completeness).toMatchObject({ logical_index: "complete", observed_coverage: "complete",
+      transport: "complete", representation: "complete" });
+    expect(absent.continuation).toBeNull();
+    expect(absent.entries.find((entry) => entry.object_id === MEM.r)?.role).toBe("requested");
+    expect(absent.entries.some((entry) => entry.object_id === MEM.c)).toBe(true);
     expect(absent.entries.find((entry) => entry.object_id === MEM.h)?.claim).toBe("unknown");
     await slice.admitRelation({ evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000887", assertionId: "assert-cause-live",
       sourceId: MEM.r, targetId: MEM.h, resultObjectId: MEM.h, relationKind: "common_cause",
@@ -157,7 +170,7 @@ describe("bounded semantic residual producer-consumer regressions", () => {
       ? { observations: [], nativeVisits: 0, nativeBytes: 0, rowsRead: 0, bytesRead: 0, truncated: false, unavailable: true }
       : native.relation!(input) })();
     expect(unavailable.completeness.observed_coverage).toBe("unknown");
-    expect(unavailable.completeness.logical_index).not.toBe("complete");
+    expect(unavailable.completeness.logical_index).toBe("open");
     await slice.relations.resolve({ assertionId: "assert-cause-live", workspaceId: WS, runId: null, causedBy: "test",
       resolutionKind: "retracted", reason: "source correction", resolvedAt: INTERPRETATION_CLOCK });
     const readRetracted = session(slice);
@@ -168,7 +181,8 @@ describe("bounded semantic residual producer-consumer regressions", () => {
       retractedEntries.push(...retracted.entries);
     }
     expect(retracted.continuation).toBeNull();
-    expect(retracted.completeness.logical_index).toBe("complete");
+    expect(retracted.completeness).toMatchObject({ logical_index: "complete", observed_coverage: "complete",
+      transport: "complete", representation: "complete" });
     expect(retractedEntries.find((entry) => entry.object_id === MEM.h)).toMatchObject({
       role: "associated", association_milligrades: 1000, claim: "unknown"
     });

@@ -11,7 +11,12 @@ export function encodeRecallResult(
   sourceMetadata: Readonly<Record<string, RecallSourceMetadata>> = {}
 ): ConditionalFieldRecallResult {
   const ceilings = governanceManifestationCeilings(governance?.paths ?? []);
-  const excerpts = index.entries.map((entry) => encodedPreview(previews, entry));
+  const excerpts = index.entries.map((entry) => {
+    const preview = encodedPreview(previews, entry);
+    // The public preview is a display field. Preserve a hydrated empty source
+    // distinctly from unavailable payload without altering stored source bytes.
+    return entry.target.kind === "source_evidence" && preview === "" ? "[empty source]" : preview;
+  });
   const hydrated = excerpts.filter((excerpt) => excerpt !== undefined).length;
   const payload = index.entries.length === 0
     ? index.completeness.payload

@@ -7,9 +7,23 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 4.8.1
+## Unreleased — protocol 4.9.0
 
-Published `@do-soul/alaya-protocol` is **4.8.1** (`packages/protocol/package.json`).
+Bench adds provider-free `source-snapshot prepare` and `inspect` operations.
+Original messages enter native source records through mandatory atomic Core
+admission and receipt-first audit, then a deferred projection checkpoint and a
+separate source-record artifact. Existing post-extraction snapshot gates remain
+unchanged. Empty source previews are displayed explicitly without changing raw
+source bytes. Core exposes the intended admission service and native span-view
+builder to the Bench consumer; non-protocol package versions remain 0.3.11.
+
+Protocol 4.9.0 adds `groundEvidenceFactFrameObligation` for shared Core formation
+and Protocol verification. Ordered grounding, argument positions, wire schemas,
+receipt/operator identities and existing receipt bytes are unchanged. Recall
+now admits failed-deployment events through one bounded tri-state owner and
+retains unresolved seed premises until their current observation is settled.
+
+Source `@do-soul/alaya-protocol` is **4.9.0** (`packages/protocol/package.json`).
 `AlayaStatusSchema.mcp.catalog_health` is an additive optional field.
 GitHub `releases/latest` is a published tarball and is **not** this source tree;
 pin `ALAYA_VERSION` or install from a checkout. Local ONNX embeddings

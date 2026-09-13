@@ -210,7 +210,11 @@ describe("stored pair measurement producer", () => {
   });
 
   it("keeps a missing query embedding residual unknown on the field", () => {
-    const observed = observeField(interpretation(), {
+    const observed = observeField({ ...interpretation(), interpretation_proposal: {
+      schema_version: 1, original_query_digest: DIGEST, producer_id: "alaya.query.proposal.core.v1",
+      stored_cosine_admission: { registry_version: "stored.cosine.admission.v1", join: "any",
+        obligations: [cosineObligation("required", "stored-fixture")] }
+    } }, {
       workspace_id: "ws",
       query_text: "seed",
       budget: defaultBudget(),

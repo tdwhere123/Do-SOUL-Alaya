@@ -46,6 +46,25 @@ const VALIDITY = { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z"
 const OTHER_SNAPSHOT = `sha256:${"d".repeat(64)}`;
 
 describe("conditional-field engine", () => {
+  it.each(["true", "false"] as const)("settles a retained unresolved seed to %s without clearing other candidates", (verdict) => {
+    const candidate = (id: string, value: "true" | "false" | "unresolved") => {
+      const row = observation(id, id, 1000);
+      return { ...row, applicability: { ...row.applicability, verdict: value } };
+    };
+    let state = applyObserverPage(createEmptyField(), { page: page({ observations: [
+      candidate("a", "unresolved"), candidate("b", "unresolved") ] }) });
+    expect(state.unresolved_seed_count).toBe(2);
+    state = applyObserverPage(state, { page: page({ observations: [] }) });
+    expect(state.unresolved_seed_count).toBe(2);
+    state = applyObserverPage(state, { page: page({ observations: [candidate("a", verdict)] }) });
+    expect(state.unresolved_seed_count).toBe(1);
+    expect(state.observations.find((row) => row.object_id === "a")?.applicability.verdict).toBe(verdict);
+    state = applyObserverPage(state, { page: page({ observations: [candidate("a", "unresolved"), candidate("b", "false")] }) });
+    expect(state.unresolved_seed_count).toBe(0);
+    expect(state.seen_identities.some((row) => productSubjectId(row) === "b")).toBe(false);
+    expect(state.guaranteed_seeds.some((row) => productSubjectId(row.state) === "a")).toBe(verdict === "true");
+  });
+
   it("binds the deployment graph at milligrade min/max without common cause", () => {
     const state = createDeploymentField();
     expect(valueOf(state, "c")).toBe(1000);

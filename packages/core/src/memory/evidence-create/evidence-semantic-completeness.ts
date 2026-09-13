@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type {
-  AssociativeFactSlotRole,
   EvidenceFactFrameFormationCapture,
   OpenSemanticFactorFormationCapture,
   OpenSemanticFactorGraph
@@ -9,6 +8,7 @@ import {
   EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
   EvidenceOsfSemanticCompletenessReceiptSchema,
   evidenceFactFrameGraphIsComplete,
+  groundEvidenceFactFrameObligation,
   evidenceOsfSemanticCompletenessPreimage,
   normalizeMemoryObjectKeySurface,
   verifyEvidenceOsfSemanticCompleteness,
@@ -27,12 +27,7 @@ export const FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID =
 const GARDEN_SOURCE_BOUND_OSF_PRODUCER_OPERATOR_ID =
   "garden_source_bound_open_semantic_factor_v3";
 
-type GroundedObligationSlot = Readonly<{
-  readonly role: AssociativeFactSlotRole;
-  readonly surface: string;
-  readonly source_span: readonly [number, number];
-  readonly position: number | null;
-}>;
+type GroundedObligationSlot = NonNullable<EvidenceOsfSemanticCompletenessReceipt["predicate"]>;
 
 export type { EvidenceOsfSemanticCompletenessReceipt } from "@do-soul/alaya-protocol";
 
@@ -191,52 +186,9 @@ function buildObligation(
   source: string,
   capture: Readonly<EvidenceFactFrameFormationCapture>
 ): EvidenceObligation | null {
-  const slots = capture.fact_frame?.slots;
-  if (slots === null || slots === undefined) return null;
-  if (!factFramePreservesSourceObligations(source, capture.fact_frame!)) return null;
-  const grounded = groundSlots(source, slots);
-  if (grounded === null) return null;
-  const subject = onlyRole(grounded, "subject");
-  const predicate = onlyRole(grounded, "relation");
-  const value = onlyRole(grounded, "value");
-  if (subject === null || predicate === null || value === null) return null;
-  const constraints = grounded.filter(({ role }) => role === "qualifier" || role === "time");
-  const argumentSlots = [subject, ...constraints, value].map((slot, position) =>
-    Object.freeze({ ...slot, position }));
-  return Object.freeze({
-    predicate: Object.freeze({ ...predicate, position: null }),
-    arguments: Object.freeze(argumentSlots)
-  });
-}
-
-function groundSlots(
-  source: string,
-  slots: NonNullable<EvidenceFactFrameFormationCapture["fact_frame"]>["slots"]
-): readonly GroundedObligationSlot[] | null {
-  let cursor = 0;
-  const grounded = slots.map((slot) => {
-    const start = source.indexOf(slot.text, cursor);
-    if (start < 0) return null;
-    const end = start + slot.text.length;
-    cursor = end;
-    return Object.freeze({
-      role: slot.role,
-      surface: slot.text,
-      source_span: Object.freeze([start, end]) as readonly [number, number],
-      position: null
-    });
-  });
-  return grounded.some((slot) => slot === null)
-    ? null
-    : Object.freeze(grounded as GroundedObligationSlot[]);
-}
-
-function onlyRole(
-  slots: readonly GroundedObligationSlot[],
-  role: "subject" | "relation" | "value"
-): GroundedObligationSlot | null {
-  const matches = slots.filter((slot) => slot.role === role);
-  return matches.length === 1 ? matches[0]! : null;
+  if (capture.fact_frame === null ||
+    !factFramePreservesSourceObligations(source, capture.fact_frame)) return null;
+  return groundEvidenceFactFrameObligation(source, capture.fact_frame);
 }
 
 function receipt(

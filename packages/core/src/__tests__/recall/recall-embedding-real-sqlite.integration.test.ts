@@ -5,6 +5,7 @@ import { readBoundedEmbeddingIds } from "../../../../storage/src/repos/memory/re
 import { capableRecallConsumerDeclaration, RecallService } from "../../recall/recall-service.js";
 import { hashMemoryContent } from "../embedding-recall/embedding-recall-test-helpers.js";
 import { createSourceBoundRecallFixture, createTaskSurface } from "./recall-service-test-fixtures.js";
+import { digestOriginalQuery } from "../../recall/conditional-field/query/compile-query.js";
 
 const databases = new Set<StorageDatabase>();
 afterEach(() => {
@@ -49,11 +50,21 @@ async function createFixture(seedVectors: boolean) {
   return { ...fixture, service, embeddingIds };
 }
 
-async function recall(service: RecallService, workspaceId = "workspace-1") {
+async function recall(service: RecallService, workspaceId = "workspace-1", requireMeasurement = false) {
   return service.recall({
     ...capableRecallConsumerDeclaration(),
     workspaceId, taskSurface: { ...createTaskSurface(), display_name: "kubernetes" },
-    queryText: "kubernetes", strategy: "chat", pageBudget: 800
+    queryText: "kubernetes", strategy: "chat", pageBudget: 800,
+    ...(requireMeasurement ? { interpretation_proposal: {
+      schema_version: 1 as const, original_query_digest: digestOriginalQuery("kubernetes"),
+      producer_id: "alaya.query.proposal.core.v1",
+      stored_cosine_admission: { registry_version: "stored.cosine.admission.v1" as const, join: "any" as const,
+        obligations: [{ obligation_id: "persisted-vector", producer_id: "stored.cosine.pair.v1" as const,
+          provider_kind: "openai", model_id: "stored-fixture", schema_version: 1, dimensions: 2,
+          domain: "cosine.unit.v1" as const, normalization: "l2.dot.v1" as const, raw_threshold: 0,
+          transfer_id: "policy.cosine.linear.milligrade.v1" as const, transfer_version: "1" as const,
+          policy_defined: true as const }] }
+    } } : {})
   });
 }
 
@@ -61,7 +72,7 @@ describe("conditional Recall with real SQLite stored embeddings", () => {
   it("enumerates persisted workspace vectors without promoting vector-only objects or calling a provider", async () => {
     const fixture = await createFixture(true);
     const before = fixture.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get();
-    const result = await recall(fixture.service);
+    const result = await recall(fixture.service, "workspace-1", true);
     expect(fixture.embeddingIds).toHaveBeenCalled();
     expect(result.provider_calls).toBe(0);
     const observedIds = fixture.embeddingIds.mock.results.flatMap((result) =>
@@ -77,11 +88,12 @@ describe("conditional Recall with real SQLite stored embeddings", () => {
 
   it("retains lexical source availability when no stored vectors or optional measurement capability exists", async () => {
     const fixture = await createFixture(false);
-    const withEmptyStore = await recall(fixture.service);
+    const withEmptyStore = await recall(fixture.service, "workspace-1", true);
     const withoutCapability = await recall(new RecallService(fixture.dependencies));
     expect(withEmptyStore.index.entries.map((entry) => entry.object_id))
       .toEqual(withoutCapability.index.entries.map((entry) => entry.object_id));
     expect(withEmptyStore.index.entries.some((entry) => entry.object_id === LEXICAL_ID)).toBe(true);
+    expect(fixture.embeddingIds).toHaveBeenCalled();
     expect(fixture.embeddingIds.mock.results.every((result) =>
       result.type === "return" && result.value.objectIds.length === 0)).toBe(true);
   });

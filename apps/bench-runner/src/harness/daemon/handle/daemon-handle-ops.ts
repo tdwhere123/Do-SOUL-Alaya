@@ -104,6 +104,7 @@ export function createBenchDaemonOps(
 ): Pick<
   BenchDaemonHandle,
   | "recall"
+  | "importSourceRecord"
   | "warmEmbeddingCache"
   | "warmQueryEmbeddingCache"
   | "runEdgePlanePassIfConfigured"
@@ -119,6 +120,9 @@ export function createBenchDaemonOps(
 > {
   const seedOps = createBenchSeedOperations(input);
   return {
+    importSourceRecord: (request) => input.activeRuntime.services.sourceRecordAdmission.admit({
+      ...request, workspace_id: input.activeContext.workspaceId, evidence_object_id: null
+    }, { workspaceId: input.activeContext.workspaceId }),
     recall: createBenchRecallOperation(input),
     warmEmbeddingCache: createWarmEmbeddingCacheOperation(input),
     warmQueryEmbeddingCache: createWarmQueryEmbeddingCacheOperation(input),
@@ -184,6 +188,7 @@ function createBenchRecallOperation(
       ...(opts.until === undefined ? {} : { until: opts.until }),
       ...(opts.timeFilter === undefined ? {} : { timeFilter: opts.timeFilter }),
       ...(opts.enumeration_policy === undefined ? {} : { enumeration_policy: opts.enumeration_policy }),
+      ...(opts.cap_contracts === undefined ? {} : { cap_contracts: opts.cap_contracts }),
       ...(opts.result_kind_view === undefined ? {} : { result_kind_view: opts.result_kind_view }),
       protocol_version: 1,
       supports_source_evidence: true,

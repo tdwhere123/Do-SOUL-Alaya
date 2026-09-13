@@ -14,7 +14,7 @@ import {
   type SourceObserverPage
 } from "../conditional-field/observers/observe.js";
 import { sourceFamilySettled } from "../conditional-field/observers/source-root-observe.js";
-import { hasMeasurementProducer } from "../conditional-field/observers/measure-stored.js";
+import { hasMeasurementProducer, requiresStoredMeasurement } from "../conditional-field/observers/measure-stored.js";
 import { measurementEffectsFor, measurementIsMissing } from "./measurement-effects.js";
 import { resumePathEffects } from "./pending-path-effects.js";
 import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
@@ -94,7 +94,8 @@ export function runObservationRounds(session: ObservationSession): FieldEngineSt
         if (phaseTime(session, "measurement", () => consumeMeasurementPage(session, action))) return session.state;
       } else if (action.action === "relation") {
         session.state = closeRegion(session.state, interpretation, action, session.cursors,
-          session.unresolvedGuard || session.missingMeasurement ? "unknown" : "exhausted");
+          session.unresolvedGuard || session.missingMeasurement || (session.state.unresolved_seed_count ?? 0) > 0
+            ? "unknown" : "exhausted");
       } else {
         if (incompleteObserver(session.state.last_observer_status)) break;
         if (phaseTime(session, "adjacency", () => consumeAdjacencyPage(session, action))) return session.state;
@@ -116,7 +117,8 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   const observed = observeSeed(input, interpretation, lease, action, cursors, observedAt);
   recordObserverWork(session, "seed", observed);
   cursors.set(action.region_id, observed.page.cursor);
-  const seedIds = observed.page.observations.filter((row) => row.target?.kind !== "source_evidence").map((row) => row.object_id);
+  const seedIds = observed.page.observations.filter((row) => row.target?.kind !== "source_evidence" &&
+    row.applicability.verdict !== "false").map((row) => row.object_id);
   addSubjects(subjects, seedIds);
   recordObservedAt(input, seedIds, observedAt, sourceFacts);
   recordSourceRootFacts(observed.source_roots ?? [], observed.page.observations, sourceFacts);
@@ -168,8 +170,13 @@ function refreshPathFrontier(session: ObservationSession): boolean {
 
 function consumeMeasurementPage(session: ObservationSession, action: ObservationAction): boolean {
   const { input, interpretation, lease, cursors, pairProgress } = session;
+  if (!requiresStoredMeasurement(interpretation)) {
+    session.state = closeRegion(session.state, interpretation, action, cursors, "exhausted");
+    return false;
+  }
   if (!hasMeasurementProducer(input.readers)) {
-    session.state = closeRegion(session.state, interpretation, action, cursors, session.missingMeasurement ? "unknown" : "exhausted");
+    session.missingMeasurement = true;
+    session.state = closeRegion(session.state, interpretation, action, cursors, "unknown");
     return false;
   }
   const observed = observeMeasurement(input, interpretation, lease, action, cursors);
@@ -577,4 +584,3 @@ export function sourceDomainSettleCoverage(session: ObservationSession): SourceD
     settled
   };
 }
-

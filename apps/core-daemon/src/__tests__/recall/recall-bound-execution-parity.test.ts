@@ -15,6 +15,7 @@ import { createTaskSurface } from
 import { runProductionBoundRecall } from "../../mcp-memory/recall/recall-bound-service.js";
 import type { RecallUsageHandlerDependencies } from "../../mcp-memory/recall/recall-usage-handlers.js";
 import { invokeBoundRecall, type BoundRecallInvokeParams } from "../../recall/recall-bound-execution.js";
+import { HARD_IDENTITY_CAP_CONTRACT } from "../../../../../packages/core/src/recall/conditional-field/cap-contract.js";
 
 function makeSharedPolicy(): RecallPolicy {
   const taskSurfaceId = randomUUID();
@@ -40,7 +41,8 @@ describe("invokeBoundRecall shared input contract", () => {
     const options = {
       queryText: "needle", interpretationClock: "2026-09-06T00:00:00.000Z",
       since: "2020-01-01T00:00:00.000Z", until: "2026-09-06T00:00:00.000Z",
-      timeFilter: { field: "last_used_at" as const }, budget, cancelled: true, continuation: null
+      timeFilter: { field: "last_used_at" as const }, budget, cancelled: true, continuation: null,
+      cap_contracts: [HARD_IDENTITY_CAP_CONTRACT]
     };
     await invokeBoundRecall({
       sideEffectMode: "benchmark", recallService: { recall }, taskSurface: createTaskSurface(),

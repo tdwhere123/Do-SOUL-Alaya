@@ -50,6 +50,23 @@ afterEach(() => {
 });
 
 describe("verified assertion evidence qualification", () => {
+  it.each(["missing", "reordered"] as const)("rejects a resealed %s frame obligation before SQLite writes", async (mutation) => {
+    const { repo } = await createEvidenceCapsuleRepo();
+    const capsule = assertionCapsule("cccccccc-1111-4111-8111-cccccccccccc");
+    const semantic = semanticFactorFormationCapture();
+    const frame = factFrameFormationCapture(capsule);
+    const { receipt_digest: _digest, ...body } = semanticCompletenessReceipt(frame, semantic);
+    const changed = { ...body, arguments: mutation === "missing"
+      ? body.arguments.slice(0, 2)
+      : [body.arguments[0]!, body.arguments[2]!, body.arguments[1]!].map((slot, position) => ({ ...slot, position })) };
+    const material = { ...changed, arity: changed.arguments.length };
+    const receipt = { ...material, receipt_digest: `sha256:${createHash("sha256")
+      .update(evidenceOsfSemanticCompletenessPreimage(material), "utf8").digest("hex")}` };
+    await expect(repo.create(capsule, buildAssociativeFactKeyProjections(FACT_FRAME), frame, semantic, receipt))
+      .rejects.toThrow("completeness receipt mismatch");
+    await expect(repo.findById(capsule.object_id)).resolves.toBeNull();
+  });
+
   it("qualifies without a turn-fallback receipt", async () => {
     const { database, repo } = await createEvidenceCapsuleRepo();
     const capsule = assertionCapsule("cccccccc-cccc-4ccc-8ccc-cccccccccccc");

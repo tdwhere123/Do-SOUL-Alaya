@@ -58,7 +58,7 @@ describe("source-root speaker and evidence bind", () => {
     expect(evaluateFrozenSourcePredicate("source.role.v1", roleGuard, userRow)).toBe("true");
     expect(evaluateFrozenSourcePredicate("source.role.v1", roleGuard, assistantRow)).toBe("false");
     expect(observeRole(userRow)?.applicability.verdict).toBe("true");
-    expect(observeRole(assistantRow)).toBeNull();
+    expect(observeRole(assistantRow)?.applicability.verdict).toBe("false");
   });
 
   it("pins evidence_link true on a verified bind and false on record-only", () => {
@@ -79,7 +79,7 @@ describe("source-root speaker and evidence bind", () => {
     expect(evaluateFrozenSourcePredicate("source.evidence_link.v1", linkGuard, boundRow)).toBe("true");
     expect(evaluateFrozenSourcePredicate("source.evidence_link.v1", linkGuard, recordOnlyRow)).toBe("false");
     expect(observeLink(boundRow)?.applicability.verdict).toBe("true");
-    expect(observeLink(recordOnlyRow)).toBeNull();
+    expect(observeLink(recordOnlyRow)?.applicability.verdict).toBe("false");
   });
 
   it("copies speaker and verified evidence onto observed source facts", () => {

@@ -287,12 +287,14 @@ export function finish(args: Readonly<{
 function coverageRegions(action: ObserverAction, status: ObserverStatus): readonly CoverageRegion[] {
   const currentKind = regionKind(action.action);
   const currentStatus: ObserverStatus = status === "exhausted" ? "exhausted" : openOrStatus(status);
-  return (["seed", "adjacency", "guard", "binding"] as const).map((kind) => ({
+  // Query planning owns required regions. A reader page reports only the
+  // region it observed; it cannot introduce unrelated guard/measurement work.
+  return [{
     schema_version: SCHEMA,
-    region_id: kind === currentKind ? action.region_id : kind,
-    kind,
-    status: status === "invalidated" ? "invalidated" : (kind === currentKind ? currentStatus : "open")
-  }));
+    region_id: action.region_id,
+    kind: currentKind,
+    status: status === "invalidated" ? "invalidated" : currentStatus
+  }];
 }
 
 function openOrStatus(status: ObserverStatus): ObserverStatus {

@@ -7,6 +7,7 @@ import {
   type SnapshotReadLease
 } from "@do-soul/alaya-protocol";
 import { buildTypedObservation } from "../../../../recall/conditional-field/observers/observation-admission.js";
+import { encodeSourceFilters } from "../../../../recall/conditional-field/query/ordinary-language.js";
 import {
   observeConditionalField,
   startObserverCursor,
@@ -24,6 +25,19 @@ const ROOT_BODY = "deployment to service-x failed at 12:01";
 const LATER_NEEDLE = "needle-only-after-first-chunk";
 
 describe("source-root discovery admission", () => {
+  it.each([
+    { original_complete: true },
+    { content_complete: true },
+    { original_complete: true, content_complete: true, content_start: 10 }
+  ])("keeps event admission unresolved without an original whole-body read: %j", (completeness) => {
+    const root = sourceRoot({ content: "deployment failed", ...completeness });
+    const observation = buildTypedObservation(observeInput(relation("observed_log", "r", "l", {
+      kind: "query_predicate", predicate_name: encodeSourceFilters({ event_kind: "failed_deployment" }), variable: "r"
+    })), { objectId: root.root_id, sourceRevision: root.revision, observationKey: root.root_id,
+      sourceRoot: root, identityKind: "object" });
+    expect(observation?.applicability.verdict).toBe("unresolved");
+  });
+
   it("nominates a source root that does not contain the full NL query", () => {
     const root = sourceRoot({ content: ROOT_BODY, content_complete: true });
     const observed = observeConditionalField(seedInput(
@@ -78,7 +92,7 @@ describe("source-root discovery admission", () => {
       [root],
       NL_QUERY
     ));
-    expect(observed.page.observations.some((row) => row.object_id === root.root_id)).toBe(false);
+    expect(observed.page.observations.find((row) => row.object_id === root.root_id)?.applicability.verdict).toBe("false");
     expect(observed.page.outcome.status).toBe("exhausted");
   });
 
@@ -94,7 +108,7 @@ describe("source-root discovery admission", () => {
       [root],
       NL_QUERY
     ));
-    expect(observed.page.observations.some((row) => row.object_id === root.root_id)).toBe(false);
+    expect(observed.page.observations.find((row) => row.object_id === root.root_id)?.applicability.verdict).toBe("false");
     expect(observed.page.outcome.status).toBe("exhausted");
   });
 
