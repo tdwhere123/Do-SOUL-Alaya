@@ -11,6 +11,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   capableRecallConsumerDeclaration,
+  createAuditedSourceAdmission,
+  deriveAddressableSpanViews,
+  fieldContractSha256,
   compileConditionalFieldQuery,
   RecallService,
   snapshotIdFromPin
@@ -22,7 +25,8 @@ import {
 } from "../../../../../../packages/core/src/recall/conditional-field/observers/observe.js";
 import { observeField } from "../../../../../../packages/core/src/recall/runtime/conditional-field-observe.js";
 import { hashMemoryContent } from "../../../../../../packages/core/src/embedding-recall/helpers.js";
-import type { StorageDatabase } from "@do-soul/alaya-storage";
+import { SqliteEventLogRepo, type StorageDatabase } from "@do-soul/alaya-storage";
+import { composeField } from "./source-field-harness.js";
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { createSourceBoundRecallFixture, createTaskSurface } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
@@ -53,6 +57,83 @@ const NOW = "2026-09-06T12:00:00.000Z";
 const WORKSPACE = "workspace-1";
 
 describe("worker stored measurement producer", () => {
+  it("preserves unequal stored cosine grades and membership across canonical and associative native pages", async () => {
+    const fixture = await createSourceBoundRecallFixture((database) => databases.add(database));
+    fixture.storage.memoryEmbeddingRepo.prepareBoundedRecallIndex();
+    const vectors = [
+      { id: QUERY_ID, content: QUERY_TEXT, vector: [1, 0], grade: 1000 },
+      { id: OBJECT_A, content: "orthogonal archival payload", vector: [0, 1], grade: 500 },
+      { id: OBJECT_B, content: "aligned archival payload", vector: [1, 0], grade: 1000 },
+      { id: EXTRA_B[0], content: "opposite archival payload", vector: [-1, 0], grade: 0 }
+    ];
+    for (const item of vectors) {
+      await fixture.writeMemory(item.id, item.content, MemoryDimension.FACT);
+      await fixture.storage.memoryEmbeddingRepo.upsert({ object_id: item.id, workspace_id: WORKSPACE,
+        content_hash: hashMemoryContent(item.content), provider_kind: "openai", model_id: MODEL_B,
+        schema_version: 1, dimensions: 2, embedding: new Float32Array(item.vector), created_at: NOW, updated_at: NOW });
+    }
+    const directory = await mkdtemp(join(tmpdir(), "alaya-unequal-measurement-rpc-"));
+    const field = composeField(fixture.database);
+    await createAuditedSourceAdmission({ stores: field.stores, sha256: fieldContractSha256,
+      eventLogRepo: new SqliteEventLogRepo(fixture.database) }).admit({
+      workspace_id: WORKSPACE, source_id: "independent-source", source_version: "1", content_bytes: QUERY_TEXT,
+      evidence_object_id: null, recorded_at: NOW, event_time: null, valid_from: null, valid_to: null,
+      speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(QUERY_TEXT)
+    }, { workspaceId: WORKSPACE });
+    const filename = join(directory, "source.sqlite");
+    await fixture.database.connection.backup(filename);
+    const worker = createRecallReadWorkerClient({ databaseFilename: filename, workerCount: 1,
+      workerUrl: new URL("../../../../dist/runtime/recall/recall-read-worker.js", import.meta.url) })!;
+    try {
+      await worker.ready();
+      const service = new RecallService({ ...fixture.dependencies, now: () => NOW,
+        readSnapshot: worker.readSnapshot, conditionalFieldPort: worker.conditionalFieldPort });
+      const request = { ...capableRecallConsumerDeclaration(), workspaceId: WORKSPACE,
+        taskSurface: { ...createTaskSurface(), display_name: QUERY_TEXT }, strategy: "chat" as const,
+        interpretationClock: NOW, result_kind_view: "memory_only" as const,
+        cap_contracts: [{ domain_id: "assoc.bottleneck.milligrade.v1", normalization: "l2.dot.v1",
+          transfer_id: "policy.cosine.linear.milligrade.v1", transfer_version: "1" }],
+        budget: { ...defaultBudget(), work_units: 100000, memory_bytes: 4000000, page_budget: 1 },
+        interpretation_proposal: { schema_version: 1 as const, original_query_digest: digestOriginalQuery(QUERY_TEXT),
+          producer_id: "alaya.query.proposal.core.v1", stored_cosine_admission: admission([MODEL_B], -1) } };
+      const snapshots = new Set<string>();
+      for (const enumeration_policy of ["canonical", "associative"] as const) {
+        const complete = await service.recall({ ...request, enumeration_policy,
+          budget: { ...request.budget, page_budget: 64 } });
+        snapshots.add(complete.index.snapshot_id);
+        expect(complete.index.completeness.order_coverage).toBe("complete");
+        expect(complete.index.continuation).toBeNull();
+        expect(complete.index.entries.map((entry) => entry.object_id)).toEqual(enumeration_policy === "canonical"
+          ? [QUERY_ID, OBJECT_A, OBJECT_B, EXTRA_B[0]] : [QUERY_ID, OBJECT_B, OBJECT_A, EXTRA_B[0]]);
+        const entries = [];
+        let page = await service.recall({ ...request, enumeration_policy });
+        const snapshot = page.index.snapshot_id;
+        for (let count = 0; ; count++) {
+          expect(page.index.snapshot_id).toBe(snapshot);
+          snapshots.add(page.index.snapshot_id);
+          expect(page.execution_receipt?.compile_input.interpretation_clock).toBe(NOW);
+          expect(page.execution_receipt?.compile_input.view?.cap_contracts).toEqual(request.cap_contracts);
+          expect(page.provider_calls).toBe(0);
+          expect(page.garden_enqueue).toBe(0);
+          entries.push(...page.index.entries);
+          if (page.index.continuation === null) break;
+          expect(count).toBeLessThan(20);
+          page = await service.recall({ ...request, enumeration_policy, continuation: page.index.continuation });
+        }
+        expect(entries).toHaveLength(4);
+        expect(new Set(entries.map((entry) => entry.object_id))).toEqual(new Set(vectors.map((item) => item.id)));
+        for (const item of vectors) {
+          expect(entries.find((entry) => entry.object_id === item.id)).toMatchObject({
+            association_milligrades: item.grade, guaranteed_milligrades: item.grade, claim: "unknown", time_state: NOW });
+        }
+        expect(page.index.completeness.logical_index).toBe("complete");
+        expect(page.index.completeness.order_coverage).toBe("complete");
+        expect(page.index.completeness.interpretation_coverage).toBe("open");
+      }
+      expect(snapshots.size).toBe(1);
+    } finally { await worker.close(); await rm(directory, { recursive: true, force: true }); }
+  });
+
   it("delivers an admitted prepared measurement through a real worker RPC and keeps raw-only discovery out", async () => {
     const { fixture } = await plantMixedProfiles();
     const directory = await mkdtemp(join(tmpdir(), "alaya-prepared-measurement-rpc-"));

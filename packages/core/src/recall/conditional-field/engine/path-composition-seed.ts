@@ -187,22 +187,21 @@ export function seedActivationsForObservation(
   return Object.freeze(seeds);
 }
 
+export function selectSeedActivation(prior: SeedActivation | undefined, incoming: SeedActivation): SeedActivation {
+  if (prior === undefined) return incoming;
+  if ((prior.cap_contract_id ?? "") === (incoming.cap_contract_id ?? "")) {
+    return incoming.milligrades > prior.milligrades ? incoming : prior;
+  }
+  return isHardIdentityContractId(prior.cap_contract_id) && !isHardIdentityContractId(incoming.cap_contract_id)
+    ? incoming : prior;
+}
+
 export function mergeSeeds(seeds: readonly SeedActivation[]): readonly SeedActivation[] {
   const best = new Map<string, SeedActivation>();
   for (const seed of seeds) {
     const nodeId = productStateNodeId(seed.state);
     const prior = best.get(nodeId);
-    if (prior === undefined) {
-      best.set(nodeId, seed);
-      continue;
-    }
-    if ((prior.cap_contract_id ?? "") === (seed.cap_contract_id ?? "")) {
-      if (seed.milligrades > prior.milligrades) best.set(nodeId, seed);
-      continue;
-    }
-    if (isHardIdentityContractId(prior.cap_contract_id) && !isHardIdentityContractId(seed.cap_contract_id)) {
-      best.set(nodeId, seed);
-    }
+    best.set(nodeId, selectSeedActivation(prior, seed));
   }
   return Object.freeze(sortSeeds([...best.values()]));
 }

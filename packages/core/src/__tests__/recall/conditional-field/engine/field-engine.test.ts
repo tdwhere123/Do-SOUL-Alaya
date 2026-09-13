@@ -23,6 +23,7 @@ import {
   proposeFieldWork
 } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { bindEngineState } from "../../../../recall/conditional-field/engine/field-update.js";
+import { capContractId, HARD_IDENTITY_CAP_CONTRACT } from "../../../../recall/conditional-field/cap-contract.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import {
   samePathAccepts,
@@ -241,6 +242,43 @@ describe("conditional-field engine", () => {
     expect(state.seen_identities.length).toBeLessThan(9);
     expect(state.closure.requested_index).not.toBe("complete");
     expect(proposeFieldWork(state).actions).toHaveLength(0);
+  });
+
+  it.each([1000, 500, 0])("rebinds both bounds when hard activation becomes soft grade %s", (grade) => {
+    const hard = { ...seed(productKey("r"), 1000), cap_contract_id: capContractId(HARD_IDENTITY_CAP_CONTRACT) };
+    const soft = { ...seed(productKey("r"), grade), cap_contract_id: capContractId({
+      domain_id: ASSOCIATION_DOMAIN_ID, normalization: "l2.dot.v1",
+      transfer_id: "policy.cosine.linear.milligrade.v1", transfer_version: "1" }) };
+    const numeric = createConditionalField({ interpretation: interpretation(), budget: defaultBudget(), seeds: [hard] });
+    const replacement = { page: page({ observations: [{ ...observation("soft-admission", "r", grade), source_revision: "rev" }] }),
+      effects: [{ observation_id: "soft-admission", seed: soft, admitted_seed: true }] };
+    const numericReplaced = applyObserverPage(numeric, replacement);
+    expect(numericReplaced.binding.kind).toBe("bound");
+    if (numericReplaced.binding.kind !== "bound") return;
+    expect(numericReplaced.binding.snapshot.values[0]).toMatchObject({
+      milligrades: grade, low_milligrades: grade, cap_contract_id: soft.cap_contract_id });
+    const initial = createConditionalField({ interpretation: interpretation(), budget: defaultBudget(),
+      seeds: [hard], transitions: [
+        { ...edge(productKey("r"), productKey("c"), "observed_log", 1000, true), cap_contract_id: hard.cap_contract_id },
+        { ...edge(productKey("r"), productKey("s"), "observed_log", 900, true), cap_contract_id: soft.cap_contract_id }
+      ] });
+    expect(valueOf(initial, "r")).toBe(1000);
+    expect(valueOf(initial, "c")).toBe(1000);
+    expect(activationOf(initial, "s")).toEqual({ kind: "unreachable" });
+    const replaced = applyObserverPage(initial, replacement);
+    expect(replaced.seeds.at(0)).toEqual(soft);
+    expect(replaced.guaranteed_seeds.at(0)).toEqual(soft);
+    expect(replaced.binding.kind).toBe("bound");
+    if (replaced.binding.kind !== "bound") return;
+    expect(activationOf(replaced, "c")).toEqual({ kind: "unreachable" });
+    for (const [id, expected] of [["r", grade], ["s", Math.min(grade, 900)]] as const) {
+      expect(replaced.binding.snapshot.values.find((value) => productSubjectId(value.state) === id)).toMatchObject({
+        milligrades: expected, low_milligrades: expected });
+    }
+    const duplicate = applyObserverPage(replaced, { page: page({ observations: [{ ...observation("later-hard-observation", "r", 1000), source_revision: "rev" }] }),
+      effects: [{ observation_id: "later-hard-observation", seed: hard, admitted_seed: true }] });
+    expect(duplicate.seeds.at(0)).toEqual(soft);
+    expect(valueOf(duplicate, "r")).toBe(grade);
   });
 
   it("does not let duplicate observations manufacture association strength", () => {
