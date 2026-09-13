@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_RELATION_HISTORY_DIGEST,
@@ -5,6 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST } from "../../../path-graph/relation-assertions/legacy-empty-history-digest.js";
 import { buildRelationProjection } from "../../../relations/relation-assertions/relation-projection-builder.js";
+import { stableStringify } from "../../../shared/stable-stringify.js";
 
 const asOf = "2026-07-17T01:30:00.000Z";
 const earlierAsOf = "2026-07-16T12:00:00.000Z";
@@ -24,6 +26,17 @@ describe("relation history digest", () => {
     expect(projection.generation.asOf).toBe(earlierAsOf);
     expect(projection.generation.historyDigest).not.toBe(EMPTY_RELATION_HISTORY_DIGEST);
     expect(projection.generation.historyDigest).not.toBe(LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST);
+  });
+
+  it("keeps the structured-empty history digest as a non-recomputable freeze", () => {
+    expect(LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST).toBe(
+      "d9327aacd57129254839ac80dcf2b0cb97efb4f5cb844c83073b22f4d400ea74"
+    );
+    const liveEmpty = createHash("sha256")
+      .update(stableStringify({ assertions: [], resolutions: [] }), "utf8")
+      .digest("hex");
+    expect(LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST).not.toBe(liveEmpty);
+    expect(LEGACY_STRUCTURED_EMPTY_HISTORY_DIGEST).not.toBe(EMPTY_RELATION_HISTORY_DIGEST);
   });
 });
 

@@ -22,5 +22,6 @@
     }
   },
   "include": ["src"],
+  "exclude": ["src/__tests__/app/spa-dist-entry.test.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

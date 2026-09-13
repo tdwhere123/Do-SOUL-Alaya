@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { RELATION_ASSERTION_SCHEMA_GENERATION } from "@do-soul/alaya-protocol";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -86,6 +87,29 @@ describe("temporal cutover startup gate", () => {
 
     expect(() => initDatabase({ filename: context.filename })).toThrow(
       /Temporal relation schema is missing, unknown, or mixed/
+    );
+
+    expect(readFileSha256(context.filename)).toBe(before);
+  });
+
+  it("names actual and expected generation values when a generation column drifts", () => {
+    const database = initDatabase({ filename: context.filename });
+    database.close();
+
+    const tamper = new BetterSqlite3(context.filename);
+    try {
+      tamper.prepare(
+        "UPDATE temporal_schema_state SET assertion_schema_generation = 'relation_assertion_v1' WHERE state_id = 1"
+      ).run();
+    } finally {
+      tamper.close();
+    }
+    const before = readFileSha256(context.filename);
+
+    expect(() => initDatabase({ filename: context.filename })).toThrow(
+      new RegExp(
+        `assertion_schema_generation actual="relation_assertion_v1" expected="${RELATION_ASSERTION_SCHEMA_GENERATION}"`
+      )
     );
 
     expect(readFileSha256(context.filename)).toBe(before);

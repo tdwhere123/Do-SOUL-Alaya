@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { PathGovernanceClass } from "./path-relation.js";
 
 export type TemporalRelationProjectionProfile = Readonly<{
@@ -26,6 +25,6 @@ export const TEMPORAL_RELATION_PROJECTION_PROFILES: Readonly<
 });
 
 export const TEMPORAL_RELATION_PROJECTION_POLICY_ID = "relation-path-projection-v1";
-export const TEMPORAL_RELATION_PROJECTION_POLICY_SHA256 = createHash("sha256")
-  .update(JSON.stringify(TEMPORAL_RELATION_PROJECTION_PROFILES))
-  .digest("hex");
+// SHA-256 of JSON.stringify(TEMPORAL_RELATION_PROJECTION_PROFILES). Literal keeps this leaf free of node:crypto.
+export const TEMPORAL_RELATION_PROJECTION_POLICY_SHA256 =
+  "f68603e497a8d762e5d0ed96e8cd9608475794ccef92c6c3fbc37b76daea7ee7";

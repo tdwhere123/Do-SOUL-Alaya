@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { canonicalJson } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../../shared/stable-stringify.js";
 
 describe("stableStringify", () => {
@@ -11,7 +12,9 @@ describe("stableStringify", () => {
     const reverse = { [decomposed]: 2, [composed]: 1 };
 
     expect(stableStringify(forward)).toBe(stableStringify(reverse));
-    expect(stableStringify(forward)).toBe(`{${decomposed}:2,${composed}:1}`);
+    expect(stableStringify(forward)).toBe(
+      `{${JSON.stringify(decomposed)}:2,${JSON.stringify(composed)}:1}`
+    );
   });
 
   it("canonicalizes nested objects independently", () => {
@@ -28,7 +31,7 @@ describe("stableStringify", () => {
 
     expect(stableStringify(forward)).toBe(stableStringify(reverse));
     expect(stableStringify(forward)).toBe(
-      `{${decomposed}:{${decomposed}:4,${composed}:3},${composed}:{${decomposed}:2,${composed}:1}}`
+      `{${JSON.stringify(decomposed)}:{${JSON.stringify(decomposed)}:4,${JSON.stringify(composed)}:3},${JSON.stringify(composed)}:{${JSON.stringify(decomposed)}:2,${JSON.stringify(composed)}:1}}`
     );
   });
 
@@ -41,7 +44,13 @@ describe("stableStringify", () => {
       `[${JSON.stringify(composed)},${JSON.stringify(decomposed)}]`
     );
     expect(stableStringify([{ [composed]: 1, [decomposed]: 2 }, { z: 1, a: 2 }])).toBe(
-      `[{${decomposed}:2,${composed}:1},{a:2,z:1}]`
+      `[{${JSON.stringify(decomposed)}:2,${JSON.stringify(composed)}:1},{"a":2,"z":1}]`
     );
+  });
+
+  it("matches protocol canonicalJson for mixed-case and empty keys", () => {
+    const value = { a: 1, B: 2, "": 0 };
+    expect(stableStringify(value)).toBe(canonicalJson(value));
+    expect(stableStringify(value)).toBe('{"":0,"B":2,"a":1}');
   });
 });
