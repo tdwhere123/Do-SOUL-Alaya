@@ -110,8 +110,8 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
 
   public async failPendingWithCompletionEvent(
     taskId: string,
-    completedAt: string,
-    lastErrorText: string,
+    _completedAt: string,
+    _lastErrorText: string,
     completionEvent: GardenTaskEventInput,
     precedingEvents: readonly GardenTaskEventInput[] = []
   ): Promise<boolean> {
@@ -127,7 +127,7 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
 
   public async completeWithEvents(
     taskId: string,
-    result: {
+    _result: {
       readonly status: Extract<GardenTaskStatus, "completed" | "failed">;
       readonly completed_at: string;
       readonly last_error_text?: string;

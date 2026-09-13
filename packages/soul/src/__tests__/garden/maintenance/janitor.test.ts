@@ -85,7 +85,7 @@ describe("Janitor", () => {
     const appendManyWithMutation = vi.fn(async () => {
       throw new Error("event log crashed");
     });
-    const { cleanupPort, janitor } = createJanitor({
+    const { cleanupPort } = createJanitor({
       expiredObjects: [
         { object_kind: "gap_record", object_id: "gap-1", expires_at: "2026-03-20T00:00:00.000Z" }
       ]
