@@ -48,6 +48,8 @@ export interface GardenComputeStatus {
     | { readonly kind: "embedding-fallback" }
     | { readonly kind: "none" };
   readonly routing_decision: "official_api" | "local_heuristics" | "host_worker";
+  readonly schema_ok?: boolean;
+  readonly degraded_reason?: string | null;
   // Present only when the active Garden secret_ref is keychain:<service>:<account>.
   readonly keychain_check?: GardenKeychainCheck;
   // Present only under the host_worker product default. Surfaces whether
@@ -103,8 +105,8 @@ export interface DoctorCommandDependencies {
     | EmbeddingQueryWarmupSummary
     | null
     | Promise<EmbeddingQueryWarmupSummary | null>;
-  readonly getMcpHealth?: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
-  readonly getGardenHealth?: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
+  readonly getMcpHealth: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
+  readonly getGardenHealth: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
   readonly getGardenCredentialProvenance?: () => Promise<GardenCredentialProvenance>;
   // see also: WorkspaceService.reconcileBootstrapPaths; idempotent re-plant
   // for workspaces created before migration 042.
@@ -203,10 +205,12 @@ export interface DoctorReport {
   readonly storage: Readonly<{
     db_path: string;
     exists: boolean;
+    readable: boolean;
     writable: boolean;
     schema_ok: boolean | null;
     schema_version_persisted: number | null;
     schema_version_expected: number | null;
+    error_code: string | null;
   }>;
   readonly provider: Readonly<{
     workspace_id: string;
@@ -221,6 +225,7 @@ export interface DoctorReport {
   readonly garden: Readonly<{
     status: "healthy" | "degraded";
     last_pass_at: string | null;
+    schema_ok: boolean;
     credential_provenance: GardenCredentialProvenance;
   }>;
   readonly garden_compute: GardenComputeStatus;
@@ -297,7 +302,7 @@ async function buildDoctorReport(
     args.workspaceId,
     deps.defaultWorkspaceId
   ).workspaceId;
-  const services = await readDoctorServices(deps, startup.ready, workspaceId);
+  const services = await readDoctorServices(deps, workspaceId);
   const bootstrapReconcileSummary = args.reconcileBootstrap
     ? await runBootstrapReconcile(deps.reconcileBootstrapPaths, workspaceId)
     : null;
@@ -319,6 +324,7 @@ async function buildDoctorReport(
     mcp: services.mcp,
     garden: {
       ...services.garden,
+      schema_ok: services.gardenCompute.schema_ok !== false,
       credential_provenance: services.gardenCredentialProvenance
     },
     garden_compute: services.gardenCompute,
@@ -365,7 +371,6 @@ function readDoctorStartup(
 
 async function readDoctorServices(
   deps: DoctorCommandDependencies,
-  daemonReady: boolean,
   workspaceId: string
 ) {
   const toolchainStatus = await deps.getToolchainStatus();
@@ -374,8 +379,8 @@ async function readDoctorServices(
     inspectStorageGrowth(toolchainStatus.db_path),
     deps.getEmbeddingStatus ? await deps.getEmbeddingStatus(workspaceId) : null,
     deps.getQueryEmbeddingWarmup ? await deps.getQueryEmbeddingWarmup() : null,
-    deps.getMcpHealth ? await deps.getMcpHealth() : defaultDoctorMcpHealth(daemonReady),
-    deps.getGardenHealth ? await deps.getGardenHealth() : defaultDoctorGardenHealth(daemonReady),
+    await deps.getMcpHealth(),
+    await deps.getGardenHealth(),
     deps.getGardenCredentialProvenance ? await deps.getGardenCredentialProvenance() : ({ kind: "none" } as const),
     deps.getGardenCompute ? await deps.getGardenCompute() : defaultDoctorGardenCompute(),
     (await deps.getPathPlasticityLookupTelemetry?.()) ?? defaultPathPlasticityLookupTelemetry(),
@@ -401,18 +406,38 @@ async function readDoctorServices(
   };
 }
 
-function defaultDoctorMcpHealth(daemonReady: boolean) {
-  return {
-    transport: daemonReady ? "ready" : "not_ready",
-    enrolled_tools: 0
-  } as const;
+export const GARDEN_SCHEDULER_INTERVAL_MS = 60_000;
+export const GARDEN_STALE_PASS_INTERVALS = 2;
+
+export function assessMcpCatalogTransport(
+  health: Readonly<{
+    readonly servers: readonly {
+      readonly status: "active" | "inactive";
+      readonly last_error: unknown;
+    }[];
+  }>
+): "ready" | "not_ready" {
+  const failed = health.servers.some(
+    (server) => server.status !== "active" || server.last_error !== null
+  );
+  return failed ? "not_ready" : "ready";
 }
 
-function defaultDoctorGardenHealth(daemonReady: boolean) {
-  return {
-    status: daemonReady ? "healthy" : "degraded",
-    last_pass_at: null
-  } as const;
+export function assessGardenPassHealth(
+  lastPassAt: string | null,
+  nowMs: number = Date.now()
+): "healthy" | "degraded" {
+  if (lastPassAt === null) {
+    return "degraded";
+  }
+  const passedAt = Date.parse(lastPassAt);
+  if (!Number.isFinite(passedAt)) {
+    return "degraded";
+  }
+  if (nowMs - passedAt > GARDEN_STALE_PASS_INTERVALS * GARDEN_SCHEDULER_INTERVAL_MS) {
+    return "degraded";
+  }
+  return "healthy";
 }
 
 function defaultDoctorGardenCompute(): GardenComputeStatus {
@@ -461,13 +486,18 @@ function buildDoctorChecks(
   return {
     runtime: daemonReady ? "pass" : "fail",
     storage:
-      services.storage.exists && services.storage.writable && services.storage.schema_ok !== false
+      services.storage.exists &&
+      services.storage.readable &&
+      services.storage.writable &&
+      services.storage.schema_ok !== false
         ? "pass"
         : "fail",
     provider: resolveProviderCheck(services.embeddingStatus, services.queryEmbeddingWarmup),
     mcp: services.mcp.transport === "ready" ? "pass" : "fail",
     garden:
-      services.garden.status === "healthy" && services.gardenCompute.keychain_check?.ok !== false
+      services.garden.status === "healthy" &&
+      services.gardenCompute.keychain_check?.ok !== false &&
+      services.gardenCompute.schema_ok !== false
         ? "pass"
         : "fail",
     bootstrap_reconcile: resolveBootstrapReconcileCheck(bootstrapReconcileSummary),

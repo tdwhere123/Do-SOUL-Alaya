@@ -5,7 +5,11 @@ import { cors } from "hono/cors";
 import {
   applyRemoteBindTokenRotation,
   authorizeProtectedRequest,
+  extractWorkspaceIdFromQuery,
+  extractWorkspaceIdFromUnknown,
+  isWorkspaceGrantDenied,
   REQUEST_TOKEN_GRANT_CONTEXT_KEY,
+  WORKSPACE_TOKEN_DENIED_MESSAGE,
   type RequestTokenGrant,
   type WorkspaceTokenBinding
 } from "./request-token-binding.js";
@@ -170,6 +174,7 @@ export function createApp(
   registerRateLimitMiddleware(app, services.rateLimit);
   registerFileUploadLimitMiddleware(app, bodyLimits.fileUploadBodyLimit);
   registerRequestBodyLimitMiddleware(app);
+  registerJsonWorkspaceBindingMiddleware(app);
 
   registerErrorHandler(app, services.logger ?? createWarnLogger());
   registerLivenessRoute(app);
@@ -317,11 +322,13 @@ function registerProtectedRequestMiddleware(
       return context.json({ success: false, error: "Origin is not allowed" }, 403);
     }
 
+    const queryWorkspaceId = extractWorkspaceIdFromQuery(context.req.query("workspace_id"));
     const authorized = authorizeProtectedRequest({
       providedToken: context.req.header("x-request-token"),
       protection: requestProtection,
       method: context.req.method,
-      path: context.req.path
+      path: context.req.path,
+      workspaceIds: queryWorkspaceId === null ? [] : [queryWorkspaceId]
     });
     if (authorized.ok === false) {
       return context.json({ success: false, error: authorized.error }, 403);
@@ -372,6 +379,37 @@ function registerLivenessRoute(app: Hono): void {
   app.get(LIVENESS_PATH, (context) =>
     context.json({ status: "ok", service: "alaya-core-daemon" }, 200)
   );
+}
+
+function registerJsonWorkspaceBindingMiddleware(app: Hono): void {
+  app.use("*", async (context, next) => {
+    const requestScopedContext = context as typeof context & {
+      get(name: string): RequestTokenGrant | undefined;
+    };
+    const grant = requestScopedContext.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY);
+    if (grant === undefined || !isJsonWorkspaceBindingMethod(context.req.method)) {
+      await next();
+      return;
+    }
+    const contentType = context.req.header("content-type") ?? "";
+    if (!contentType.toLowerCase().includes("application/json")) {
+      await next();
+      return;
+    }
+    try {
+      const bodyWorkspaceId = extractWorkspaceIdFromUnknown(await context.req.raw.clone().json());
+      if (bodyWorkspaceId !== null && isWorkspaceGrantDenied(grant, bodyWorkspaceId)) {
+        return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
+      }
+    } catch {
+      // Invalid JSON is a route-validation concern, not a token-binding bypass.
+    }
+    await next();
+  });
+}
+
+function isJsonWorkspaceBindingMethod(method: string): boolean {
+  return method === "POST" || method === "PUT" || method === "PATCH";
 }
 
 function registerConfiguredRoutes(app: Hono, routes: CoreDaemonRouteServices | undefined): void {

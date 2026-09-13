@@ -361,7 +361,17 @@ function createSoulRouteServices(input: CreateCoreDaemonAppInput) {
       startupStepsProvider: () => input.startupSteps.map((step) => step.step),
       principalCodingEngineAvailableProvider: () => input.principalCodingEngineAvailable,
       mcp: input.mcp,
-      probeDatabase: input.probeDatabase
+      probeDatabase: input.probeDatabase,
+      isDraining: () => input.lifecycleState.drainState.isDraining,
+      getGardenComputeDegradedReason: async () => {
+        if (input.configService === undefined) {
+          return null;
+        }
+        const config = await input.configService.getRuntimeGardenComputeConfig();
+        return "degraded_reason" in config && typeof config.degraded_reason === "string"
+          ? config.degraded_reason
+          : null;
+      }
     }
   };
 }
@@ -390,9 +400,10 @@ function createOptionalRouteServices(input: CreateCoreDaemonAppInput) {
 }
 
 export function shouldEnableE2eEventTriggers(env: NodeJS.ProcessEnv): boolean {
-  const nodeEnv = env.NODE_ENV?.trim().toLowerCase();
-  const isTestOrE2e = nodeEnv === "test" || nodeEnv === "e2e";
-  return isTestOrE2e && env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1";
+  if (env.NODE_ENV?.trim().toLowerCase() === "production") {
+    return false;
+  }
+  return env.ALAYA_ENABLE_E2E_EVENT_TRIGGERS === "1";
 }
 
 function createE2eEventLogRepo(eventLogRepo: E2eEventLogInputPort): E2eEventLogRepo {

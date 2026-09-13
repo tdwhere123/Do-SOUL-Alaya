@@ -87,6 +87,16 @@ export interface AlayaDaemonRuntimeServices {
     listAllowedServerNames(): readonly string[];
     listEnrolledToolIds(): readonly string[];
     refresh(): Promise<void>;
+    getHealth(): {
+      readonly servers: readonly {
+        readonly server_name: string;
+        readonly status: "active" | "inactive";
+        readonly last_error: {
+          readonly code: "MCP_EXTERNAL_TIMEOUT" | "MCP_EXTERNAL_TRANSPORT";
+          readonly message: string;
+        } | null;
+      }[];
+    };
   }>;
   readonly environmentStatusService: EnvironmentStatusService;
   readonly embeddingStatusService: EmbeddingStatusService;

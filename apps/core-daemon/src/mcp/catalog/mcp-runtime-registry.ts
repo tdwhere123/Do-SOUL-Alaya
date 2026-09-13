@@ -65,6 +65,11 @@ const DEFAULT_MCP_RUNTIME_REQUEST_TIMEOUT_MS = 30_000;
 
 export type DaemonMcpListFailureCode = "MCP_EXTERNAL_TIMEOUT" | "MCP_EXTERNAL_TRANSPORT";
 
+export const MCP_EXTERNAL_ERROR_MESSAGES = Object.freeze({
+  MCP_EXTERNAL_TIMEOUT: "External MCP server timed out.",
+  MCP_EXTERNAL_TRANSPORT: "External MCP server transport failed."
+} as const satisfies Readonly<Record<DaemonMcpListFailureCode, string>>);
+
 export type DaemonMcpRuntimeServerHealth = Readonly<{
   readonly server_name: string;
   readonly status: "active" | "inactive";
@@ -81,7 +86,7 @@ export type DaemonMcpRuntimeHealth = Readonly<{
 export interface DaemonMcpRuntimeRegistry {
   close(): Promise<void>;
   listServerInfos(): readonly Readonly<McpServerInfo>[];
-  getHealth?(): DaemonMcpRuntimeHealth;
+  getHealth(): DaemonMcpRuntimeHealth;
   refresh(input?: {
     readonly serverNames?: readonly string[];
   }): Promise<void>;
@@ -382,11 +387,17 @@ function recordServerListFailure(
   serverName: string,
   error: unknown
 ): void {
+  const code = classifyDaemonMcpListFailure(error);
+  state.warn("MCP runtime list failed", {
+    serverName,
+    code,
+    error: error instanceof Error ? error.message : String(error)
+  });
   state.lastErrorByServer.set(
     serverName,
     Object.freeze({
-      code: classifyDaemonMcpListFailure(error),
-      message: error instanceof Error ? error.message : String(error)
+      code,
+      message: MCP_EXTERNAL_ERROR_MESSAGES[code]
     })
   );
 }

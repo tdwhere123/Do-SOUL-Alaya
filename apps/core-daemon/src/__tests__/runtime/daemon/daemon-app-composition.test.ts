@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { shouldEnableE2eEventTriggers } from "../../../runtime/daemon/wiring/daemon-app-composition.js";
 
 describe("shouldEnableE2eEventTriggers", () => {
-  it("enables the test routes only in test/e2e when explicitly requested", () => {
+  it("enables only with the explicit switch and never in production", () => {
     expect(
       shouldEnableE2eEventTriggers({
         NODE_ENV: "test",
@@ -20,7 +20,7 @@ describe("shouldEnableE2eEventTriggers", () => {
         NODE_ENV: "development",
         ALAYA_ENABLE_E2E_EVENT_TRIGGERS: "1"
       })
-    ).toBe(false);
+    ).toBe(true);
     expect(
       shouldEnableE2eEventTriggers({
         NODE_ENV: "production",

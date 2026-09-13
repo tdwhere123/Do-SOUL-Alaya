@@ -84,7 +84,10 @@ function isLiveUnixSocket(socketPath: string): Promise<boolean> {
   });
 }
 
-function listenUnixPath(server: Server, socketPath: string): Promise<void> {
+export function waitForServerListening(server: Server): Promise<void> {
+  if (server.listening) {
+    return Promise.resolve();
+  }
   return new Promise((resolve, reject) => {
     const onError = (error: Error): void => {
       server.off("listening", onListening);
@@ -96,8 +99,19 @@ function listenUnixPath(server: Server, socketPath: string): Promise<void> {
     };
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen(socketPath);
+    // listen() may finish between the `listening` check and these handlers.
+    if (server.listening) {
+      server.off("error", onError);
+      server.off("listening", onListening);
+      resolve();
+    }
   });
+}
+
+function listenUnixPath(server: Server, socketPath: string): Promise<void> {
+  const ready = waitForServerListening(server);
+  server.listen(socketPath);
+  return ready;
 }
 
 function closeServer(server: Server): Promise<void> {

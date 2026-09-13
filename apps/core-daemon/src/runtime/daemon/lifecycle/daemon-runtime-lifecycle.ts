@@ -1,3 +1,4 @@
+import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "../../app.js";
 import { closeDaemonSqliteWriteQueue } from "../../startup/database.js";
@@ -19,7 +20,7 @@ import {
   resolveDaemonListenPolicy,
   warnIfRemoteDaemonListening
 } from "../../server-options.js";
-import { serveDaemonUnixSocket } from "../../unix-socket-serve.js";
+import { serveDaemonUnixSocket, waitForServerListening } from "../../unix-socket-serve.js";
 import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
 import type { EmbeddingBackfillMode } from "../../../garden/scheduler/scheduler-runtime-types.js";
 
@@ -220,7 +221,6 @@ function createHttpServerStarter(
 ): (options?: AlayaDaemonListenOptions) => Promise<AlayaDaemonServer> {
   return async (options: AlayaDaemonListenOptions = {}) => {
     validateEphemeralTokenPolicy(input.requestProtection, options);
-    startBackgroundServices();
     ensureServerNotRunning(state);
     logEphemeralTokenStartup(input, options);
 
@@ -228,11 +228,18 @@ function createHttpServerStarter(
     const hostname = options.hostname ?? (policy.kind === "unix" ? policy.tcpHost : policy.host);
     const port = options.port ?? parsePort(process.env.PORT, 3000);
     const serverFactory = input.serverFactory ?? serve;
-    state.server = serverFactory({
+    const tcpServer = serverFactory({
       fetch: input.app.fetch,
       hostname,
       port
     });
+    try {
+      await waitForTcpServerListening(tcpServer);
+    } catch (error) {
+      tcpServer.close();
+      throw error;
+    }
+    state.server = tcpServer;
     if (policy.kind === "unix") {
       const unixServe = input.unixSocketServe ?? serveDaemonUnixSocket;
       try {
@@ -244,6 +251,7 @@ function createHttpServerStarter(
         throw error;
       }
     }
+    startBackgroundServices();
     installSignalShutdownHandlersOnce(state, input, shutdown);
     warnIfRemoteDaemonListening(process.env, hostname, (message) => {
       input.warnLogger.warn(message, {});
@@ -481,6 +489,20 @@ export function createCoreDaemonLifecycleState(): CoreDaemonLifecycleState {
     drainState: { isDraining: false },
     inFlight: { count: 0 }
   };
+}
+
+function waitForTcpServerListening(server: CloseableHttpServer): Promise<void> {
+  if (!isListenableHttpServer(server)) {
+    return Promise.resolve();
+  }
+  return waitForServerListening(server);
+}
+
+function isListenableHttpServer(server: CloseableHttpServer): server is CloseableHttpServer & Server {
+  return (
+    typeof (server as Server).once === "function" &&
+    typeof (server as Server).off === "function"
+  );
 }
 
 function parsePort(value: string | undefined, fallback: number): number {

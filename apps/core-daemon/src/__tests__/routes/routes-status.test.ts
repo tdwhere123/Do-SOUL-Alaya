@@ -10,6 +10,7 @@ describe("status route", () => {
     registerStatusRoutes(app, {
       startupStepsProvider: () => ["database", "http-app"],
       principalCodingEngineAvailableProvider: () => true,
+      probeDatabase: () => true,
       mcp: {
         listAllowedServerNames: () => ["filesystem"],
         listEnrolledToolIds: () => ["tool.exec_shell", "tool.write_file"],
@@ -84,6 +85,7 @@ describe("status route", () => {
     registerStatusRoutes(app, {
       startupStepsProvider: () => ["database", "http-app"],
       principalCodingEngineAvailableProvider: () => true,
+      probeDatabase: () => true,
       mcp: {
         listAllowedServerNames: () => ["filesystem"],
         listEnrolledToolIds: () => ["tool.exec_shell"],
@@ -96,5 +98,9 @@ describe("status route", () => {
     const body = await response.json() as { success: boolean; data: unknown };
     const status = AlayaStatusSchema.parse(body.data);
     expect(status.mcp.catalog_health?.servers[0]?.last_error?.code).toBe("MCP_EXTERNAL_TIMEOUT");
+    expect(status.mcp.catalog_health?.servers[0]?.last_error?.message).toBe(
+      "External MCP server timed out."
+    );
+    expect(JSON.stringify(status)).not.toContain("timed out after 10ms");
   });
 });

@@ -158,12 +158,34 @@ describe("secrets resolver", () => {
     const secretPath = path.join(dir, "provider-token");
     await writeFile(secretPath, "resolved-file-value\n", "utf8");
 
-    const result = resolveSecretRef(`file:${secretPath}`);
+    const result = resolveSecretRef(`file:${secretPath}`, createReader({
+      secretsDir: dir,
+      readFile: (filePath) => {
+        if (filePath !== secretPath) {
+          throw Object.assign(new Error("missing"), { code: "ENOENT" });
+        }
+        return "resolved-file-value\n";
+      }
+    }));
 
     expect(result).toEqual({
       ref: `file:${secretPath}`,
       value: "resolved-file-value",
       origin: "file"
+    });
+  });
+
+  it("rejects absolute file refs outside the secrets directory", () => {
+    const result = resolveSecretRef(
+      "file:/etc/hostname",
+      createReader({
+        secretsDir: "/var/lib/alaya/secrets"
+      })
+    );
+
+    expect(result).toMatchObject({
+      kind: "malformed",
+      ref: "file:/etc/hostname"
     });
   });
 
@@ -294,6 +316,7 @@ function createReader(overrides: Partial<SecretRefReader> = {}): SecretRefReader
     readKeychain: () => {
       throw new Error("unexpected readKeychain call");
     },
+    secretsDir: "/tmp",
     ...overrides
   };
 }

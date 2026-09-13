@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { createServer } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDaemonLifecycleControls } from "../../../runtime/daemon/lifecycle/daemon-runtime-lifecycle.js";
 import { serveDaemonUnixSocket } from "../../../runtime/unix-socket-serve.js";
@@ -138,6 +139,24 @@ describe("createDaemonLifecycleControls", () => {
 
     expect(server.port).toBeGreaterThanOrEqual(0);
     await server.close();
+  });
+
+  it("rejects TCP start when the listen port is already bound", async () => {
+    const blocker = createServer();
+    await new Promise<void>((resolve, reject) => {
+      blocker.once("error", reject);
+      blocker.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = blocker.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    const { controls } = createControls("env");
+    try {
+      await expect(controls.startHttpServer({ port, hostname: "127.0.0.1" })).rejects.toMatchObject({
+        code: "EADDRINUSE"
+      });
+    } finally {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
+    }
   });
 
   it("binds the unix socket when ALAYA_DAEMON_SOCKET is set", async () => {

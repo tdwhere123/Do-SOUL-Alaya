@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
+  isContainedFileSecretPath,
   parseSecretRefKeychainTarget,
   SECRET_REF_ENV_PREFIX,
   SECRET_REF_FILE_PREFIX,
   SECRET_REF_KEYCHAIN_PREFIX
 } from "@do-soul/alaya-protocol";
+import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "../cli/support/config-files.js";
 import { readPlatformKeychainSecret, type KeychainReadError } from "./keychain/index.js";
 
 export type SecretRef = string;
@@ -14,6 +16,7 @@ export interface SecretRefReader {
   readonly readEnv: (name: string) => string | undefined;
   readonly readFile: (filePath: string) => string;
   readonly readKeychain: (service: string, account: string) => string | KeychainReadError;
+  readonly secretsDir?: string;
 }
 
 export interface ResolvedSecret {
@@ -39,7 +42,10 @@ const ENV_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const defaultSecretRefReader: SecretRefReader = {
   readEnv: (name) => process.env[name],
   readFile: (filePath) => readFileSync(filePath, "utf8"),
-  readKeychain: (service, account) => readPlatformKeychainSecret(service, account)
+  readKeychain: (service, account) => readPlatformKeychainSecret(service, account),
+  get secretsDir() {
+    return resolveConfiguredSecretsDir();
+  }
 };
 
 export function resolveSecretRef(
@@ -106,6 +112,17 @@ function resolveFileRef(ref: SecretRef, reader: SecretRefReader): ResolvedSecret
       kind: "malformed",
       ref,
       reason: "File secret ref must use an absolute path (file:/abs/path)."
+    };
+  }
+
+  const secretsDir = reader.secretsDir ?? resolveConfiguredSecretsDir();
+  const resolvedFile = path.resolve(filePath);
+  const resolvedSecretsDir = path.resolve(secretsDir);
+  if (!isContainedFileSecretPath(resolvedFile, resolvedSecretsDir)) {
+    return {
+      kind: "malformed",
+      ref,
+      reason: "File secret ref must resolve inside the configured secrets directory."
     };
   }
 
@@ -178,6 +195,10 @@ function resolveKeychainRef(ref: SecretRef, reader: SecretRefReader): ResolvedSe
     value,
     origin: "keychain"
   };
+}
+
+function resolveConfiguredSecretsDir(): string {
+  return resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env })).secretsDir;
 }
 
 function isNodeErrorWithCode(error: unknown): error is NodeJS.ErrnoException & { readonly code: string } {

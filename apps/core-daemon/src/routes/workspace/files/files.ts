@@ -16,6 +16,12 @@ import {
   type AsyncSideEffectAuditEventLogPort
 } from "@do-soul/alaya-core";
 import type { FileRepo } from "@do-soul/alaya-storage";
+import {
+  isWorkspaceGrantDenied,
+  REQUEST_TOKEN_GRANT_CONTEXT_KEY,
+  WORKSPACE_TOKEN_DENIED_MESSAGE,
+  type RequestTokenGrant
+} from "../../../runtime/request-token-binding.js";
 
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
@@ -132,6 +138,8 @@ async function uploadFile(context: Context, services: FileRouteServices): Promis
   const scope = await resolveScope(services, upload.requestedRunId, upload.requestedWorkspaceId);
   const mismatch = rejectWorkspaceRunMismatch(context, upload, scope);
   if (mismatch !== null) return mismatch;
+  const forbidden = denyUnauthorizedWorkspace(context, scope.workspace_id);
+  if (forbidden !== null) return forbidden;
   const record = buildFileRecord(upload.file, upload.normalizedMimeType, scope);
   const absolutePath = join(services.filesDirectory, record.storage_path);
   await mkdir(services.filesDirectory, { recursive: true, mode: 0o700 });
@@ -216,6 +224,8 @@ async function downloadFile(context: Context, services: FileRouteServices): Prom
   } catch (error) {
     return mapLookupErrorToResponse(context, error, "workspace");
   }
+  const forbidden = denyUnauthorizedWorkspace(context, workspaceId);
+  if (forbidden !== null) return forbidden;
   const record = await services.fileRepo.findById(fileId);
   if (record === null || record.workspace_id !== workspaceId) {
     return fileNotFound(context);
@@ -295,6 +305,17 @@ function getUploadedFile(value: UploadBodyValue | UploadBodyValue[] | undefined)
   }
 
   return null;
+}
+
+function denyUnauthorizedWorkspace(context: Context, workspaceId: string | null): Response | null {
+  if (workspaceId === null) {
+    return null;
+  }
+  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
+  if (!isWorkspaceGrantDenied(grant, workspaceId)) {
+    return null;
+  }
+  return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
 }
 
 async function resolveScope(

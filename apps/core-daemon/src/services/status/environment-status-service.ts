@@ -8,18 +8,18 @@ export interface EnvironmentStatusService {
   getStatus(): Promise<ToolchainStatus>;
 }
 
-export function createEnvironmentStatusService(dependencies?: {
+export function createEnvironmentStatusService(dependencies: {
+  readonly getDatabasePath: () => string;
   readonly toolNames?: readonly string[];
   readonly probeTool?: (toolName: string) => Promise<boolean>;
   readonly countActiveWorktrees?: () => Promise<number | null>;
-  readonly getDatabasePath?: () => string;
   readonly getFilesDirectory?: () => string;
 }): EnvironmentStatusService {
-  const toolNames = dependencies?.toolNames ?? ["git", "node", "pnpm", "rg"];
-  const probeTool = dependencies?.probeTool ?? defaultProbeTool;
-  const countActiveWorktrees = dependencies?.countActiveWorktrees ?? defaultCountActiveWorktrees;
-  const getDatabasePath = dependencies?.getDatabasePath ?? (() => "./data/alaya.db");
-  const getFilesDirectory = dependencies?.getFilesDirectory ?? (() => "./data/files");
+  const toolNames = dependencies.toolNames ?? ["git", "node", "pnpm", "rg"];
+  const probeTool = dependencies.probeTool ?? defaultProbeTool;
+  const countActiveWorktrees = dependencies.countActiveWorktrees ?? defaultCountActiveWorktrees;
+  const getDatabasePath = dependencies.getDatabasePath;
+  const getFilesDirectory = dependencies.getFilesDirectory ?? (() => "./data/files");
 
   return {
     getStatus: async (): Promise<ToolchainStatus> => {

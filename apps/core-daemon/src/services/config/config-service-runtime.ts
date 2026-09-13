@@ -311,11 +311,15 @@ function patchStoredRuntimeGardenComputeConfig(
   );
 }
 
+type RuntimeGardenComputeConfigView = RuntimeGardenComputeConfig & {
+  readonly degraded_reason?: string | null;
+};
+
 function parseGardenComputeConfigWithLegacyFallback(
   input: unknown,
   source: string,
   warn: (message: string) => void
-): RuntimeGardenComputeConfig {
+): RuntimeGardenComputeConfigView {
   const normalizedInput = normalizeLegacyConfigVersion(input, CURRENT_CONFIG_VERSION);
   const direct = RuntimeGardenComputeConfigSchema.safeParse(normalizedInput);
   if (direct.success) {
@@ -325,16 +329,18 @@ function parseGardenComputeConfigWithLegacyFallback(
     .map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`)
     .join("; ");
   warn(
-    `${source}: rejected by schema (${issues}); dropping secret_ref and falling back to local_heuristics. ` +
-      "Re-run `alaya install --keychain` (or fix the offending env/SQL value) to restore Garden compute."
+    `${source}: rejected by schema (${issues}); Garden compute is degraded until the config is repaired.`
   );
-  const fallbackBase = isRecord(normalizedInput) ? normalizedInput : {};
-  return RuntimeGardenComputeConfigSchema.parse({
-    ...fallbackBase,
-    config_version: CURRENT_CONFIG_VERSION,
-    secret_ref: null,
-    enabled: false,
-    provider_kind: "local_heuristics"
+  return Object.freeze({
+    ...RuntimeGardenComputeConfigSchema.parse({
+      config_version: CURRENT_CONFIG_VERSION,
+      secret_ref: null,
+      enabled: false,
+      provider_kind: "local_heuristics",
+      model_id: null,
+      provider_url: null
+    }),
+    degraded_reason: "schema_invalid"
   });
 }
 

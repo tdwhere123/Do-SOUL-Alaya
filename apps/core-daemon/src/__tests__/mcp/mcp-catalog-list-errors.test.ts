@@ -147,10 +147,66 @@ describe("daemon MCP catalog listServerTools failures", () => {
           status: "inactive",
           last_error: {
             code: "MCP_EXTERNAL_TIMEOUT",
-            message: "MCP runtime connection timed out after 10ms"
+            message: "External MCP server timed out."
           }
         })
       ]
+    });
+  });
+
+  it("returns the classified list timeout when execute runs after the server is inactive", async () => {
+    enrollBuiltinBoundFilesystemTool();
+    const live = { current: true };
+    const lastError = {
+      current: null as null | {
+        readonly code: "MCP_EXTERNAL_TIMEOUT" | "MCP_EXTERNAL_TRANSPORT";
+        readonly message: string;
+      }
+    };
+    const catalog = createDaemonMcpCatalogFromEnv({
+      now: () => "2026-04-21T00:00:00.000Z",
+      runtimeRegistry: {
+        refresh: vi.fn(async () => undefined),
+        listServerInfos: vi.fn(() => [
+          {
+            server_name: "filesystem",
+            transport_type: "stdio" as const,
+            status: live.current ? ("active" as const) : ("inactive" as const),
+            registered_at: "2026-04-21T00:00:00.000Z"
+          }
+        ]),
+        getHealth: vi.fn(() => ({
+          servers: [
+            {
+              server_name: "filesystem",
+              status: live.current ? ("active" as const) : ("inactive" as const),
+              last_error: lastError.current
+            }
+          ]
+        })),
+        getServerTools: vi.fn(() => []),
+        listServerTools: vi.fn(async () => [{ name: "filesystem.read_file", description: "Read file" }]),
+        callTool: vi.fn(async () => ({ content: [] })),
+        close: vi.fn(async () => undefined)
+      } as Parameters<typeof createDaemonMcpCatalogFromEnv>[0]["runtimeRegistry"]
+    });
+
+    live.current = false;
+    lastError.current = {
+      code: "MCP_EXTERNAL_TIMEOUT",
+      message: "External MCP server timed out."
+    };
+
+    await expect(
+      catalog.executeTool({
+        toolId: "mcp__filesystem__read_file",
+        rawInput: { path: "README.md" },
+        writableRoots: ["/workspace/project"]
+      })
+    ).resolves.toEqual({
+      ok: false,
+      code: "MCP_EXTERNAL_TIMEOUT",
+      message: "External MCP server timed out."
     });
   });
 });

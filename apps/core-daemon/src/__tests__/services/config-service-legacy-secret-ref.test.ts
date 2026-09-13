@@ -45,6 +45,19 @@ describe("config-service legacy secret_ref compatibility", () => {
     expect(harness.warn).not.toHaveBeenCalled();
   });
 
+  it("marks official-api schema failures as explicit degraded local_heuristics", async () => {
+    const harness = await createHarness({
+      dotenv: "ALAYA_GARDEN_PROVIDER_KIND=official_api\nALAYA_OFFICIAL_GARDEN_SECRET_REF=not-a-valid-prefix\n"
+    });
+
+    const config = await harness.configService.getRuntimeGardenComputeConfig();
+
+    expect(config.provider_kind).toBe("local_heuristics");
+    expect(config.enabled).toBe(false);
+    expect(config.degraded_reason).toBe("schema_invalid");
+    expect(harness.warn).toHaveBeenCalled();
+  });
+
   it("keeps an .env-derived legacy keychain ref visible for doctor/runtime diagnostics", async () => {
     const harness = await createHarness({
       dotenv: "ALAYA_OFFICIAL_GARDEN_SECRET_REF=keychain:alaya:--openai\n"

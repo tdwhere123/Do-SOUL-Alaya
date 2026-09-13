@@ -17,6 +17,7 @@ import {
   rejectUnexpectedRequestBody,
   writeListPaginationHeaders
 } from "../shared/shared.js";
+import { validateWorkspaceRootPath } from "./git-binding/workspace-git-binding-path-validation.js";
 import {
   buildWorkspaceGitBindingResponse,
   getWorkspaceGitBindingStatus,
@@ -55,7 +56,7 @@ function registerWorkspaceCrudRoutes(app: Hono, services: WorkspaceRouteServices
       await parseJsonBody(context.req.json.bind(context.req))
     );
     const workspace = await services.workspaceService.create(
-      await withValidatedRepoPath(createInput, services.gitBindingValidation)
+      await withValidatedWorkspacePaths(createInput, services.gitBindingValidation)
     );
     return context.json({ success: true, data: workspace }, 201);
   });
@@ -93,7 +94,7 @@ function registerWorkspaceCrudRoutes(app: Hono, services: WorkspaceRouteServices
 function registerWorkspaceEngineBindingRoutes(app: Hono, services: WorkspaceRouteServices): void {
   app.get("/workspaces/:id/engine-binding", async (context) => {
     const binding = await services.engineBindingService.getWorkspaceBinding(context.req.param("id"));
-    return context.json({ success: true, data: binding }, 200);
+    return context.json({ success: true, data: redactEngineBindingSecret(binding) }, 200);
   });
 
   app.put("/workspaces/:id/engine-binding", async (context) => {
@@ -289,6 +290,32 @@ function parseWorkspaceGitBindingUpdate(input: unknown) {
   } catch (error) {
     throw new CoreError("VALIDATION", "Invalid request body", { cause: error });
   }
+}
+
+async function withValidatedWorkspacePaths(
+  input: ReturnType<typeof parseWorkspaceCreateInput>,
+  validationOptions: GitBindingValidationOptions | undefined
+) {
+  const rootValidation = await validateWorkspaceRootPath(input.root_path, validationOptions);
+  if (!rootValidation.ok) {
+    throw new CoreError("VALIDATION", rootValidation.detail);
+  }
+
+  const withRoot = {
+    ...input,
+    root_path: rootValidation.repo_path
+  };
+  return await withValidatedRepoPath(withRoot, validationOptions);
+}
+
+function redactEngineBindingSecret<T extends { readonly api_key?: string }>(
+  binding: T | null
+): Omit<T, "api_key"> | null {
+  if (binding === null) {
+    return null;
+  }
+  const { api_key: _apiKey, ...redacted } = binding;
+  return redacted;
 }
 
 async function withValidatedRepoPath(

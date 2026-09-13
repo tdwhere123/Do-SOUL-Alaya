@@ -214,6 +214,11 @@ describe("install keychain migration", () => {
         active_worktrees: 0,
         tools: {}
       }),
+      getMcpHealth: async () => ({ transport: "ready", enrolled_tools: 0 }),
+      getGardenHealth: async () => ({
+        status: "healthy",
+        last_pass_at: new Date().toISOString()
+      }),
       getGardenCompute: () => ({
         provider_kind: persisted.provider_kind,
         model_id: persisted.model_id,

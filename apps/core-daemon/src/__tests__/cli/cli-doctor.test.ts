@@ -275,6 +275,10 @@ describe("doctor CLI", () => {
         files_dir: "/tmp/files"
       }),
       getMcpHealth: async () => ({ transport: "ready", enrolled_tools: 9 }),
+      getGardenHealth: async () => ({
+        status: "healthy",
+        last_pass_at: "2026-05-07T00:00:00.000Z"
+      }),
       getGardenCompute: async () => ({
         provider_kind: "local_heuristics",
         model_id: null,
