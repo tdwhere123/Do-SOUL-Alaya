@@ -152,7 +152,9 @@ it("restarts an accepted job after SIGKILL without resubmission, fills remaining
   expect(fixture.provider.downloads).toBe(2);
 }, 45_000);
 
-it("preserves SIGTERM exit status while waiting and resumes the accepted job", async () => {
+// SIGTERM is not a process-group signal on Windows; child.kill does not map to exit 143.
+it.skipIf(process.platform === "win32")(
+  "preserves SIGTERM exit status while waiting and resumes the accepted job", async () => {
   const fixture = await setup();
   const manifest = JSON.parse(readFileSync(fixture.manifestPath, "utf8"));
   manifest.pollIntervalMs = 5_000;
@@ -172,7 +174,8 @@ it("preserves SIGTERM exit status while waiting and resumes the accepted job", a
   expect((await resumed.closed)[0], resumed.output()).toBe(0);
   expect(state().status).toBe("complete");
   expect(fixture.provider.creates).toBe(2);
-}, 45_000);
+  }, 45_000
+);
 
 it.each([{ unknown: true }, { usageMissing: true }, { foreignQuote: true }, { maxUsd: 0 }])(
   "stops durably without opening a retry window for %j", async (options) => {
