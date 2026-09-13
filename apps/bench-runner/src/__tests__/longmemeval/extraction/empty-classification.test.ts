@@ -65,7 +65,7 @@ describe("extraction empty envelope classification", () => {
     });
     const request = buildOfficialApiExtractionRequests(
       "I moved to Berlin.",
-      [{ message_id: "m0", role: "user", content: "I moved to Berlin." }]
+      [{ role: "user", content: "I moved to Berlin." }]
     )[0]!;
     const stats = newFillStats();
     const extractor = createCachingSignalExtractor({
@@ -141,7 +141,7 @@ describe("extraction empty envelope classification", () => {
     });
     const request = buildOfficialApiExtractionRequests(
       "I moved to Berlin.",
-      [{ message_id: "m0", role: "user", content: "I moved to Berlin." }]
+      [{ role: "user", content: "I moved to Berlin." }]
     )[0]!;
     const ledger = openExtractionAttemptLedger({
       cacheRoot,
@@ -189,7 +189,7 @@ describe("extraction empty envelope classification", () => {
     });
     const request = buildOfficialApiExtractionRequests(
       "I moved to Berlin.",
-      [{ message_id: "m0", role: "user", content: "I moved to Berlin." }]
+      [{ role: "user", content: "I moved to Berlin." }]
     )[0]!;
     const stats = newFillStats();
     const extractor = createCachingSignalExtractor({
