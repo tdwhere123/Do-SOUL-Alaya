@@ -1,4 +1,5 @@
 import {
+  DEFAULT_SQLITE_BUSY_RETRY_LIMIT,
   DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS,
   withSqliteBusyRetry
 } from "./sqlite-busy-retry.js";
@@ -34,6 +35,7 @@ export function applySqliteWritePragmas(
       connection.pragma(`analysis_limit = ${options.analysisLimit}`);
     }
   }, {
+    retryLimit: DEFAULT_SQLITE_BUSY_RETRY_LIMIT,
     budgetMs: options.busyTimeoutMs,
     sleepMs: DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS
   });

@@ -100,6 +100,15 @@ describe("openReadOnlyDatabase busy timeout", () => {
     })).toBe("ready");
     expect(attempts).toBe(3);
   });
+
+  it("does not retry a generic resource-busy message", () => {
+    let attempts = 0;
+    expect(() => withSqliteBusyRetry(() => {
+      attempts += 1;
+      throw new Error("EBUSY: resource busy");
+    })).toThrow(/resource busy/);
+    expect(attempts).toBe(1);
+  });
 });
 
 describe("openReadOnlyDatabase open retry", () => {

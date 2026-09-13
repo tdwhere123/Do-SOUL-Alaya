@@ -119,7 +119,7 @@ function spawnInitDatabaseProcess(
            } catch (error) {
              const message = error instanceof Error ? error.message : String(error);
              const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
-             if (Date.now() >= deadline || !/sqlite_busy|sqlite_locked|database is locked|\\bbusy\\b/i.test(message + " " + cause)) {
+             if (Date.now() >= deadline || !/sqlite_busy|sqlite_locked|database is locked/i.test(message + " " + cause)) {
                throw error;
              }
              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);

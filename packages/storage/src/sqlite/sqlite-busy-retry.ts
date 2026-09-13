@@ -1,6 +1,6 @@
 const SQLITE_BUSY_PRIMARY_CODE = 5;
 const SQLITE_LOCKED_PRIMARY_CODE = 6;
-const DEFAULT_SQLITE_BUSY_RETRY_LIMIT = 5;
+export const DEFAULT_SQLITE_BUSY_RETRY_LIMIT = 5;
 export const DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS = 20;
 
 export interface SqliteBusyRetryOptions {
@@ -15,18 +15,22 @@ export function withSqliteBusyRetry<T>(
   options?: SqliteBusyRetryOptions
 ): T {
   const sleepMs = options?.sleepMs ?? DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS;
-  const retryLimit = options?.retryLimit ?? (
-    options?.budgetMs === undefined ? DEFAULT_SQLITE_BUSY_RETRY_LIMIT : Number.POSITIVE_INFINITY
-  );
+  const retryLimit = options?.retryLimit ?? DEFAULT_SQLITE_BUSY_RETRY_LIMIT;
   const deadline = options?.budgetMs === undefined ? undefined : Date.now() + options.budgetMs;
   let lastError: unknown;
   for (let attempt = 0; attempt < retryLimit; attempt += 1) {
+    // Check before the call: sqlite busy_timeout waits inside operation().
+    if (attempt > 0 && deadline !== undefined && Date.now() >= deadline) {
+      throw lastError;
+    }
     try {
       return operation();
     } catch (error) {
       lastError = error;
-      const timeLeft = deadline === undefined || Date.now() < deadline;
-      if (!isSqliteBusyError(error) || attempt === retryLimit - 1 || !timeLeft) {
+      if (!isSqliteBusyError(error) || attempt === retryLimit - 1) {
+        throw error;
+      }
+      if (deadline !== undefined && Date.now() >= deadline) {
         throw error;
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, sleepMs);
@@ -52,7 +56,8 @@ export function isSqliteBusyError(error: unknown): boolean {
       }
     }
     const message = current instanceof Error ? current.message : String(current);
-    if (/sqlite_busy|sqlite_locked|database is locked|\bbusy\b/i.test(message)) {
+    // Do not match generic "busy": Windows sharing / "resource busy" never clear.
+    if (/sqlite_busy|sqlite_locked|database is locked/i.test(message)) {
       return true;
     }
     current = typeof current === "object" && current !== null && "cause" in current

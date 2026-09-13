@@ -5,6 +5,7 @@ import { StorageError } from "../shared/errors.js";
 import { LruCache } from "./lru-cache.js";
 import { applySqliteWritePragmas } from "./apply-sqlite-write-pragmas.js";
 import {
+  DEFAULT_SQLITE_BUSY_RETRY_LIMIT,
   DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS,
   isSqliteBusyError,
   withSqliteBusyRetry
@@ -48,6 +49,8 @@ export interface InitDatabaseOptions {
 
 const MAX_DATABASE_CACHE_ENTRIES = 32;
 const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
+/** Probe open must not inherit better-sqlite3's 5s default under nested retry. */
+const UNINITIALIZED_DATABASE_PROBE_TIMEOUT_MS = 50;
 const MAX_SQLITE_BUSY_TIMEOUT_MS = 2_147_483_647;
 const MEMORY_ENTRY_ENUM_CHECK_MIGRATION_VERSION = 14;
 const EMBEDDING_VECTOR_VALIDITY_MIGRATION_VERSION = 15;
@@ -220,13 +223,6 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
       bindEmbeddingOverlayIfPresent(cached.connection, filename);
       return cached;
     }
-    return withSqliteBusyRetry(
-      () => initializeUncachedDatabase(filename, options, busyTimeoutMs),
-      {
-        budgetMs: busyTimeoutMs,
-        sleepMs: DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS
-      }
-    );
   }
 
   return initializeUncachedDatabase(filename, options, busyTimeoutMs);
@@ -456,6 +452,7 @@ function applyMigrationBatch(
         }
       }).immediate();
     }, {
+      retryLimit: DEFAULT_SQLITE_BUSY_RETRY_LIMIT,
       budgetMs: busyTimeoutMs,
       sleepMs: DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS
     });
@@ -507,7 +504,11 @@ function isUninitializedDatabaseFile(filename: string): boolean {
   }
   let database: SqliteConnection | undefined;
   try {
-    database = openSqliteConnection(filename, { readonly: true, fileMustExist: true });
+    database = openSqliteConnection(filename, {
+      readonly: true,
+      fileMustExist: true,
+      timeout: UNINITIALIZED_DATABASE_PROBE_TIMEOUT_MS
+    });
     const table = database.prepare(
       "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'"
     ).get() as { readonly count: number };
@@ -522,8 +523,7 @@ function isUninitializedDatabaseFile(filename: string): boolean {
     if (isSqliteNoSuchTableError(error)) {
       return true;
     }
-    // Let initDatabase wait for a peer IMMEDIATE lock instead of treating busy
-    // as "initialized" and fail-closing the runtime temporal gate.
+    // Do not treat a lock as "initialized" and fail-close the runtime gate.
     if (isSqliteBusyError(error)) {
       throw error;
     }
