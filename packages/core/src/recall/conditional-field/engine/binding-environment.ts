@@ -93,6 +93,8 @@ export type BoundSourceFacts = Readonly<{
   readonly source_revision?: string;
   readonly content?: string;
   readonly content_complete?: boolean;
+  readonly original_complete?: boolean;
+  readonly content_start?: number;
   readonly literal_verdicts?: Readonly<Record<string, "true" | "false" | "unresolved">>;
   readonly role?: string;
   readonly event_time?: string | null;
@@ -192,11 +194,16 @@ export function evaluateGuard(
 ): GuardDecision {
   // Inbound verdict is an observer/output stamp, not a Core fact.
   const filters = decodeSourceFilters(guard.predicate_name);
-  if (filters !== undefined) {
-    const objectId = objectForFilters(guard, env, endpoints);
-    const decision = sourceFactsSatisfyFilters(filters, objectId === undefined ? undefined : facts.get(objectId));
-    if (decision !== "true") return decision;
-  }
+  const objectId = objectForFilters(guard, env, endpoints);
+  const filtered = filters === undefined ? "true" : sourceFactsSatisfyFilters(filters, objectId === undefined ? undefined : facts.get(objectId));
+  const decision = evaluateGuardKind(guard, env, facts, endpoints);
+  if (filtered === "false" || decision === "false") return "false";
+  return filtered === "unresolved" || decision === "unresolved" ? "unresolved" : "true";
+}
+
+function evaluateGuardKind(guard: Guard, env: ReadonlyMap<string, string>,
+  facts: ReadonlyMap<string, BoundSourceFacts>,
+  endpoints?: Readonly<{ sourceId: string; targetId: string }>): GuardDecision {
   switch (guard.kind) {
     case "equality":
       return evaluateEquality(guard, env);
@@ -293,6 +300,8 @@ function evaluateQueryPredicate(
       root_kind: bound.root_kind,
       source_version: bound.source_revision,
       content: bound.content,
+      content_complete: bound.content_complete,
+      literal_verdicts: bound.literal_verdicts,
       role: bound.role,
       event_time: bound.event_time,
       evidence_object_id: bound.evidence_object_id,

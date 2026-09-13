@@ -35,7 +35,18 @@ export * from "./memory/envelope.js";
 export * from "./memory/base-types.js";
 export * from "./governance/governance-subject.js";
 export * from "./evidence/evidence-capsule.js";
-export * from "./evidence/associative-fact-frame.js";
+export {
+  ASSOCIATIVE_FACT_FRAME_SCHEMA_VERSION, ASSOCIATIVE_FACT_FRAME_SLOT_LIMIT,
+  AssociativeFactSlotRoleSchema, AssociativeFactSlotSchema, AssociativeFactFrameSchema,
+  EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID, EvidenceFactFrameFormationStatusSchema,
+  EvidenceFactFrameFormationProposalSchema, EvidenceFactFrameFormationCaptureSchema,
+  evidenceFactFrameFormationCapturePreimage, verifyEvidenceFactFrameFormationCapture,
+  groundAssociativeFactFrame, buildAssociativeFactKeyProjections, buildAttributedAssociativeFactKeyProjections,
+  type AssociativeFactSlotRole, type AssociativeFactSlot, type AssociativeFactFrame,
+  type AssociativeFactKeyProjectionForm, type AttributedAssociativeFactKeyProjection,
+  type EvidenceFactFrameFormationStatus, type EvidenceFactFrameFormationProposal,
+  type EvidenceFactFrameFormationCapture, type EvidenceFactFrameFormationCaptureBody
+} from "./evidence/associative-fact-frame.js";
 export * from "./relations/open-semantic-factor-graph.js";
 export * from "./recall/open-semantic-factor-activation-state.js";
 export * from "./relations/open-semantic-structural-role.js";

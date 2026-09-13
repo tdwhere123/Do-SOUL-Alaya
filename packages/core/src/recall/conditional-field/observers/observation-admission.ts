@@ -163,7 +163,8 @@ export function buildTypedObservation(
     args.sourceRoot,
     args.relation
   );
-  if (applicability.verdict === "false") return null;
+  if (applicability.verdict === "false" &&
+    (input.action.action !== "seed" || applicability.kind === "authorization")) return null;
   const relationKind = args.relation?.predicate ?? (
     args.identityKind === "assertion" ? input.relation_kind : undefined
   );
@@ -296,19 +297,19 @@ function evaluateApplicableGuard(
   if (guard.kind === "interval_relation") {
     if (!appliesTimeGuard(input, guard, objectId)) return undefined;
     const filters = decodeSourceFilters(guard.predicate_name);
+    let filtered: Guard | undefined;
     if (filters !== undefined && (filters.event_kind === undefined || input.action.action === "seed")) {
       const verdict = sourceRoot === undefined
         ? sourceFactsSatisfyFilters(filters, sourceRow)
         : sourceRootFilters(filters, sourceRoot);
-      if (verdict !== "true") return { ...guard, verdict };
+      filtered = { ...guard, verdict };
     }
     const stamp = sourceRoot === undefined
       ? (input.object_observed_at?.[objectId] ?? observedAt ?? sourceRow?.observed_at)
       : (sourceRoot.event_time ?? undefined);
-    if (sourceRoot !== undefined && stamp === undefined) {
-      return { ...guard, verdict: "unresolved" };
-    }
-    return evaluateInterval(guard, stamp);
+    const interval = sourceRoot !== undefined && stamp === undefined
+      ? { ...guard, verdict: "unresolved" as const } : evaluateInterval(guard, stamp);
+    return andObserverDecisions([filtered, interval]);
   }
   if (!guardBindsSubject(guard, subject)) return undefined;
   if (guard.kind === "query_predicate") {
@@ -344,26 +345,7 @@ function sourceRootFilters(
   filters: NonNullable<ReturnType<typeof decodeSourceFilters>>,
   root: SourceRootObserverRow
 ): "true" | "false" | "unresolved" {
-  if (filters.dimension_filter !== undefined || filters.domain_tag_filter !== undefined) {
-    return "unresolved";
-  }
-  if (filters.time_field === "created_at" || filters.time_field === "last_used_at") {
-    return "unresolved";
-  }
-  if (filters.event_kind === "failed_deployment") {
-    if (root.content === undefined) return "unresolved";
-    const normalized = root.content.normalize("NFC").toLowerCase();
-    if (!/failed|unsuccessful|deployment|deploy/u.test(normalized)) return "false";
-  }
-  if (filters.since !== undefined || filters.until !== undefined) {
-    const stamp = root.event_time;
-    if (stamp === undefined || stamp === null) return "unresolved";
-    const sinceOrder = filters.since === undefined ? 0 : compareUtcInstants(stamp, filters.since);
-    const untilOrder = filters.until === undefined ? -1 : compareUtcInstants(stamp, filters.until);
-    if (sinceOrder === undefined || untilOrder === undefined) return "unresolved";
-    if (sinceOrder < 0 || untilOrder >= 0) return "false";
-  }
-  return "true";
+  return sourceFactsSatisfyFilters(filters, { ...root, root_kind: root.kind });
 }
 
 function appliesTimeGuard(

@@ -339,7 +339,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
       sourceRoot: sourceRoot({ evidence_object_id: null }),
       identityKind: "object"
     });
-    expect(linked).toBeNull();
+    expect(linked?.applicability.verdict).toBe("false");
     const missingVector = observeField(interpretation(relation("observed_log", "x", "y")), input([], {}));
     expect(missingVector.last_observer_status === undefined
       || missingVector.last_observer_status === "exhausted"

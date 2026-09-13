@@ -205,7 +205,7 @@ describe("conditional-field executeRecall assembly", () => {
       object_observed_at: { [MEM.r]: YESTERDAY_INSTANT, [MEM.c]: LAST_WEEK_INSTANT },
       page_limit: 16
     });
-    expect(seed.page.observations.some((observation) => observation.object_id === MEM.c)).toBe(false);
+    expect(seed.page.observations.find((observation) => observation.object_id === MEM.c)?.applicability.verdict).toBe("false");
   });
 
   it("ordinary language outside failed-deployment still returns a source-backed index", async () => {

@@ -14,6 +14,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { sourceRootEligible } from "../../../../recall/conditional-field/observers/observation-admission.js";
+import { encodeSourceFilters, sourceFactsSatisfyFilters } from "../../../../recall/conditional-field/query/ordinary-language.js";
 import {
   observeConditionalField,
   startObserverCursor,
@@ -23,6 +24,8 @@ import {
   type SourceRootObserverRow
 } from "../../../../recall/conditional-field/observers/observe.js";
 import { defaultView } from "../../../../recall/conditional-field/query/query-admission.js";
+import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
+import { defaultBudget } from "../reference/deployment.fixture.js";
 import {
   fieldSha256,
   hashedRecord,
@@ -41,6 +44,78 @@ afterEach(() => {
 });
 
 describe("source-root seam membership", () => {
+  it.each([true, false])("settles SQLite literal streaming to complete when found=%s", (found) => {
+    const { reader } = plantedBody("a".repeat(65_536) + (found ? NEEDLE : "no match"));
+    const query = { ...interpretation({ schema_version: SCHEMA, kind: "epsilon" }, "source_only"),
+      source_guard: { schema_version: SCHEMA, kind: "query_predicate" as const, verdict: "unresolved" as const,
+        predicate_name: "source.literal.nfc.v1", entity_id: NEEDLE } };
+    const native = readerFor(reader);
+    const input = { workspace_id: "workspace-1", query_text: NEEDLE,
+      authorized_scopes: null, budget: defaultBudget({ memory_bytes: 4_000_000 }),
+      as_of: "2026-09-06T00:00:00.000Z", readers: native };
+    let reads = 0;
+    const paused = observeField(query, { ...input, readers: { ...native, sourceRoots: (request) =>
+      reads++ === 0 ? native.sourceRoots!(request) : { ...sourcePage([], true, request.afterCursor ?? null), resourceLimited: true } } });
+    expect(paused.unresolved_seed_count).toBe(1);
+    expect(paused.closure.requested_index).toBe("open");
+    const field = observeField(query, { ...input, resume_field: paused });
+    expect(field.unresolved_seed_count).toBe(0);
+    expect(field.residuals.find((region) => region.kind === "guard")?.status).toBe("exhausted");
+    expect(field.guaranteed_seeds.length > 0).toBe(found);
+    expect(field.closure.requested_index).toBe("complete");
+  });
+
+  it.each(["source_guard", "proposal"] as const)("keeps epsilon %s coverage open for an unknown source role", (location) => {
+    const { reader } = plantedBody(NEEDLE);
+    const guard: Guard = { schema_version: SCHEMA, kind: "query_predicate", verdict: "unresolved",
+      predicate_name: "source.role.v1", entity_id: "user" };
+    const query: QueryInterpretation = { ...interpretation({ schema_version: SCHEMA, kind: "epsilon" }, "source_only"),
+      ...(location === "source_guard" ? { source_guard: guard } : { interpretation_proposal: {
+        schema_version: SCHEMA, original_query_digest: SNAPSHOT_ID, producer_id: "alaya.query.proposal.core.v1",
+        conditions: [guard] } }) };
+    const field = observeField(query, { workspace_id: "workspace-1", query_text: NEEDLE,
+      authorized_scopes: null, budget: defaultBudget(), as_of: "2026-09-06T00:00:00.000Z", readers: readerFor(reader) });
+    expect(field.unresolved_seed_count).toBe(1);
+    expect(field.guaranteed_seeds).toHaveLength(0);
+    expect(field.closure.requested_index).toBe("open");
+  });
+
+  it("keeps a partial event body unresolved even when its visible prefix is positive", () => {
+    const { reader, record } = plantedBody("deployment failed" + " ".repeat(65_536) + " only in the manual");
+    const observed = observeConditionalField(seedInput({
+      program: relation("observed_log", { predicate_name: encodeSourceFilters({ event_kind: "failed_deployment" }) }),
+      readers: readerFor(reader), seed_query: "deployment failed", source_byte_limit: 65_536
+    }));
+    expect(observed.page.observations.find((row) => row.object_id === record.record_id)?.applicability.verdict)
+      .toBe("unresolved");
+  });
+
+  it("uses inclusive packed time bounds for roots and memories while typed intervals stay half-open", () => {
+    const stamp = "2026-09-06T00:00:00.000Z";
+    const { reader, record } = plantedBody(NEEDLE, stamp);
+    const filters = { since: stamp, until: stamp };
+    const packed = observeConditionalField(seedInput({
+      program: relation("observed_log", { predicate_name: encodeSourceFilters(filters) }), readers: readerFor(reader)
+    }));
+    expect(packed.page.observations.find((row) => row.object_id === record.record_id)?.applicability.verdict).toBe("true");
+    expect(sourceFactsSatisfyFilters(filters, { observed_at: stamp })).toBe("true");
+    const program = relation("observed_log", { predicate_name: "source.event_time.interval.v1" });
+    const typed = observeConditionalField(seedInput({ program: { ...program, guard: { ...program.guard,
+      interval: { start: "2026-09-05T00:00:00.000Z", end: stamp, time_domain: "event_time" } } }, readers: readerFor(reader) }));
+    expect(typed.page.observations.find((row) => row.object_id === record.record_id)?.applicability.verdict).toBe("false");
+  });
+
+  it("finds the literal in a complete capsule excerpt without certifying its omitted event scope", async () => {
+    const { reader, capsuleId } = await plantedCapsuleAmongRecords("deployment failed", 0);
+    const literal = observeConditionalField(seedInput({ program: literalProgram("deployment failed"),
+      readers: readerFor(reader), seed_query: "deployment failed" }));
+    expect(literal.page.observations.find((row) => row.object_id === capsuleId)?.applicability.verdict).toBe("true");
+    const event = observeConditionalField(seedInput({ program: relation("observed_log", {
+      predicate_name: encodeSourceFilters({ event_kind: "failed_deployment" }) }),
+      readers: readerFor(reader), seed_query: "deployment failed" }));
+    expect(event.page.observations.find((row) => row.object_id === capsuleId)?.applicability.verdict).toBe("unresolved");
+  });
+
   it("finds a needle only in bytes after 64KiB on continuation", () => {
     const { reader, record } = plantedBody("a".repeat(65_536) + NEEDLE);
     const first = observeConditionalField(seedInput({
@@ -325,11 +400,11 @@ describe("source-root seam membership", () => {
   });
 });
 
-function plantedBody(body: string) {
+function plantedBody(body: string, eventTime: string | null = null) {
   const database = openFieldDatabase();
   tracked.add(database);
   const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
-  const record = records.insert(hashedRecord("workspace-1", body, "src-oversize"));
+  const record = records.insert({ ...hashedRecord("workspace-1", body, "src-oversize"), event_time: eventTime });
   return {
     reader: new SqliteSourceRootRecallReader(records, new SqliteEvidenceCapsuleRepo(database)),
     record

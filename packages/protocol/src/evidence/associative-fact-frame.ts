@@ -139,13 +139,23 @@ export function groundAssociativeFactFrame(
 ): Readonly<AssociativeFactFrame> | null {
   const parsed = AssociativeFactFrameSchema.safeParse(proposal);
   if (!parsed.success || !hasRequiredRoles(parsed.data.slots)) return null;
+  return groundAssociativeFactFrameSlots(parsed.data, sourceAssertion) === null ? null : parsed.data;
+}
+
+/** Locate frame slots in their declared source order without interpreting them. */
+export function groundAssociativeFactFrameSlots(frame: AssociativeFactFrame,
+  source: string): readonly Readonly<{ role: AssociativeFactSlotRole; surface: string;
+    source_span: readonly [number, number] }>[] | null {
   let cursor = 0;
-  for (const slot of parsed.data.slots) {
-    const index = sourceAssertion.indexOf(slot.text, cursor);
-    if (index < 0) return null;
-    cursor = index + slot.text.length;
+  const grounded = [];
+  for (const slot of frame.slots) {
+    const start = source.indexOf(slot.text, cursor);
+    if (start < 0) return null;
+    cursor = start + slot.text.length;
+    grounded.push(Object.freeze({ role: slot.role, surface: slot.text,
+      source_span: Object.freeze([start, cursor]) as readonly [number, number] }));
   }
-  return parsed.data;
+  return Object.freeze(grounded);
 }
 
 export function buildAssociativeFactKeyProjections(

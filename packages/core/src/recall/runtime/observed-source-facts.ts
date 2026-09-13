@@ -77,6 +77,8 @@ export function recordSourceRootFacts(
       }),
       ...(row?.content === undefined ? {} : { content: row.content }),
       content_complete: row?.content_complete === true,
+      original_complete: row?.original_complete === true,
+      ...(row?.content_start === undefined ? {} : { content_start: row.content_start }),
       ...(row?.literal_verdicts === undefined ? {} : { literal_verdicts: row.literal_verdicts }),
       ...(row?.role === undefined ? {} : { role: row.role }),
       ...(row?.event_time === undefined || row.event_time === null

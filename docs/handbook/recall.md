@@ -346,6 +346,19 @@ observable in storage with source-current publication/restart checks; an
 unsupported kind query does not claim those artifacts are absent. Ordinary
 memory-source recall continues without optional enrichment or provider work.
 
+The finite max/min result assumes legal admitted premises; it does not prove
+that a natural-language event predicate or model identity is correct. Source
+retention, single-frame graph conformance, source-wide semantic coverage and
+query-relative index completeness are separate claims. Unsupported enrichment
+holds its dependent mode, while independent ready source modes remain usable.
+The shared failed-deployment producer recognizes only complete unquoted event
+records in its bounded grammar; conditional, reported, multi-sentence, partial
+or excerpt-only sources remain unresolved for that predicate. Exact retained
+literal retrieval does not require this event interpretation. This producer's
+whole-record limit is not an algorithm requirement for global unique parsing.
+Packed source-filter time bounds are inclusive; typed event-time and relation
+intervals remain half-open, and event time never substitutes for creation time.
+
 Finite max-min oracles establish only their stated finite reference properties.
 Real SQLite, worker, MCP/CLI, continuation and attribution tests establish the
 specific producer-consumer cases they exercise. Neither set establishes dataset

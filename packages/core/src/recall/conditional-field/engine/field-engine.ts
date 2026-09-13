@@ -167,6 +167,7 @@ export type FieldEngineState = Readonly<{
   readonly measurements: RetainedRows<FieldMeasurement>;
   readonly observed_relations?: import("./observed-relations.js").ObservedRelationRows;
   readonly observation_gaps?: Readonly<{ guards: boolean; measurements: boolean }>;
+  readonly unresolved_seed_count?: number;
   readonly pending_path_effects?: PendingPathEffects;
   readonly path_effect_frontier?: Readonly<{ identities: number; facets: RetainedRows<FacetVector>; discoveries: number }>;
   readonly source_facts?: PersistentStringMap<BoundSourceFacts>;

@@ -68,7 +68,7 @@ export function observeField(
 ): FieldEngineState {
   const residuals = openResiduals(
     hasMeasurementProducer(input.readers),
-    programNeedsGuardWork(interpretation.program),
+    interpretationNeedsGuardWork(interpretation),
     sourceDomainCoverageOf(interpretation, input)
   );
   const initial = startObservedField(interpretation, input, residuals);
@@ -248,11 +248,14 @@ function sourceDomainCoverageOf(
   };
 }
 
-function programNeedsGuardWork(program: QueryInterpretation["program"]): boolean {
-  return collectRelations(program).some((relation) =>
+function interpretationNeedsGuardWork(interpretation: QueryInterpretation): boolean {
+  if (interpretation.source_guard !== undefined ||
+    (interpretation.interpretation_proposal?.conditions?.length ?? 0) > 0) return true;
+  return collectRelations(interpretation.program).some((relation) =>
     relation.guard.kind === "equality"
     || relation.guard.kind === "source_bound_entity"
-    || (relation.guard.kind === "interval_relation" && relation.guard.time_scope === "associated")
+    || relation.guard.kind === "query_predicate"
+    || relation.guard.kind === "interval_relation"
   );
 }
 

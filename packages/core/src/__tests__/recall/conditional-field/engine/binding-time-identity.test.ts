@@ -7,6 +7,7 @@ import { compileConditionalFieldQuery } from "../../../../recall/conditional-fie
 import { buildTypedObservation, sourceRowEligible, relationRowEligible } from "../../../../recall/conditional-field/observers/observation-admission.js";
 import { startObserverCursor, type ObserveConditionalFieldInput } from "../../../../recall/conditional-field/observers/observe.js";
 import { defaultBudget, SNAPSHOT_ID, INTERPRETATION_CLOCK } from "../reference/deployment.fixture.js";
+import { encodeSourceFilters, sourceFactsSatisfyFilters } from "../../../../recall/conditional-field/query/ordinary-language.js";
 
 const interval = { start: "2026-09-09T00:00:00Z", end: "2026-09-09T00:00:01Z", time_domain: "event_time" as const };
 const timeGuard: Guard = { schema_version: 1, kind: "interval_relation", variable: "y", verdict: "unresolved", time_scope: "associated", interval };
@@ -33,6 +34,28 @@ function observerInput(guard: Guard): ObserveConditionalFieldInput {
 }
 
 describe("binding and temporal semantic identity", () => {
+  it("preserves partial literal and original-context facts at binding admission", () => {
+    const env = new Map([["x", "root"]]);
+    const literal: Guard = { schema_version: 1, kind: "query_predicate", verdict: "unresolved",
+      variable: "x", predicate_name: "source.literal.nfc.v1", entity_id: "needle" };
+    const partial = { object_id: "root", root_kind: "evidence_capsule", content: "deployment failed", content_complete: false };
+    expect(evaluateGuard(literal, env, new Map([["root", partial]]))).toBe("unresolved");
+    expect(evaluateGuard(literal, env, new Map([["root", { ...partial, literal_verdicts: { needle: "true" as const } }]]))).toBe("true");
+    const event = { ...literal, predicate_name: encodeSourceFilters({ event_kind: "failed_deployment" }) };
+    expect(evaluateGuard(event, env, new Map([["root", { ...partial, content_complete: true }]]))).toBe("unresolved");
+  });
+
+  it("lets known false metadata and interval conjuncts dominate unknown event meaning", () => {
+    const facts = { object_id: "root", content: "If deployment failed, roll back", dimension: "fact",
+      observed_at: "2026-09-08T00:00:00Z" };
+    expect(sourceFactsSatisfyFilters({ event_kind: "failed_deployment", dimension_filter: ["episode"] }, facts)).toBe("false");
+    const guard = { ...timeGuard, predicate_name: encodeSourceFilters({ event_kind: "failed_deployment" }) };
+    expect(evaluateGuard(guard, new Map([["y", "root"]]), new Map([["root", facts]]))).toBe("false");
+    expect(sourceFactsSatisfyFilters({ event_kind: "failed_deployment", since: interval.start }, {
+      ...facts, root_kind: "evidence_capsule", original_complete: false, event_time: facts.observed_at
+    })).toBe("false");
+  });
+
   it.each([
     { schema_version: 1, kind: "authorization", verdict: "unresolved", authorization_scope: "project" },
     { schema_version: 1, kind: "query_predicate", verdict: "unresolved", predicate_name: "source.literal.nfc.v1", entity_id: "needle" }

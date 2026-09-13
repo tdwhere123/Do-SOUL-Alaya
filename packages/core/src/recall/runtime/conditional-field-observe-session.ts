@@ -94,7 +94,8 @@ export function runObservationRounds(session: ObservationSession): FieldEngineSt
         if (phaseTime(session, "measurement", () => consumeMeasurementPage(session, action))) return session.state;
       } else if (action.action === "relation") {
         session.state = closeRegion(session.state, interpretation, action, session.cursors,
-          session.unresolvedGuard || session.missingMeasurement ? "unknown" : "exhausted");
+          session.unresolvedGuard || session.missingMeasurement || (session.state.unresolved_seed_count ?? 0) > 0
+            ? "unknown" : "exhausted");
       } else {
         if (incompleteObserver(session.state.last_observer_status)) break;
         if (phaseTime(session, "adjacency", () => consumeAdjacencyPage(session, action))) return session.state;
@@ -116,7 +117,8 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   const observed = observeSeed(input, interpretation, lease, action, cursors, observedAt);
   recordObserverWork(session, "seed", observed);
   cursors.set(action.region_id, observed.page.cursor);
-  const seedIds = observed.page.observations.filter((row) => row.target?.kind !== "source_evidence").map((row) => row.object_id);
+  const seedIds = observed.page.observations.filter((row) => row.target?.kind !== "source_evidence" &&
+    row.applicability.verdict !== "false").map((row) => row.object_id);
   addSubjects(subjects, seedIds);
   recordObservedAt(input, seedIds, observedAt, sourceFacts);
   recordSourceRootFacts(observed.source_roots ?? [], observed.page.observations, sourceFacts);
@@ -577,4 +579,3 @@ export function sourceDomainSettleCoverage(session: ObservationSession): SourceD
     settled
   };
 }
-

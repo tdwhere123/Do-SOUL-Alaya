@@ -2,8 +2,8 @@ import { z } from "zod";
 import {
   AssociativeFactFrameSchema,
   AssociativeFactSlotRoleSchema,
+  groundAssociativeFactFrameSlots,
   type AssociativeFactFrame,
-  type AssociativeFactSlotRole,
   type EvidenceFactFrameFormationCapture
 } from "../associative-fact-frame.js";
 import {
@@ -54,7 +54,7 @@ export function evidenceFactFrameGraphIsComplete(input: Readonly<{
   if (!frame.success) return false;
   const graph = groundedGraph(input.graph, input.source_text);
   if (graph === null || graph.propositions.length !== 1) return false;
-  const obligation = frameObligation(input.source_text, frame.data);
+  const obligation = groundEvidenceFactFrameObligation(input.source_text, frame.data);
   return obligation !== null && graphMatchesObligation(graph, obligation);
 }
 
@@ -90,36 +90,11 @@ function receiptMatchesSource(
   source: string,
   capture: EvidenceFactFrameFormationCapture
 ): boolean {
-  const frameSlots = capture.fact_frame?.slots ?? [];
-  const grounded = groundFrameSlots(source, frameSlots);
-  if (grounded === null || receipt.predicate === null) return false;
-  const subjects = grounded.filter(({ role }) => role === "subject");
-  const relations = grounded.filter(({ role }) => role === "relation");
-  const values = grounded.filter(({ role }) => role === "value");
-  if (subjects.length !== 1 || relations.length !== 1 || values.length !== 1) return false;
-  const argumentsInOrder = [subjects[0]!, ...grounded.filter(({ role }) =>
-    role === "qualifier" || role === "time"), values[0]!];
-  return slotEqual(receipt.predicate, { ...relations[0]!, position: null }) &&
-    receipt.arguments.length === argumentsInOrder.length &&
-    receipt.arguments.every((slot, position) => slotEqual(slot, {
-      ...argumentsInOrder[position]!, position
-    }));
-}
-
-function groundFrameSlots(
-  source: string,
-  slots: readonly Readonly<{ readonly role: AssociativeFactSlotRole; readonly text: string }>[]
-): readonly Readonly<{ readonly role: AssociativeFactSlotRole; readonly surface: string;
-  readonly source_span: readonly [number, number] }>[] | null {
-  let cursor = 0;
-  const grounded = slots.map(({ role, text }) => {
-    const start = source.indexOf(text, cursor);
-    if (start < 0) return null;
-    cursor = start + text.length;
-    return Object.freeze({ role, surface: text,
-      source_span: Object.freeze([start, cursor]) as readonly [number, number] });
-  });
-  return grounded.some((slot) => slot === null) ? null : grounded as NonNullable<typeof grounded[number]>[];
+  if (capture.fact_frame === null || receipt.predicate === null) return false;
+  const obligation = groundEvidenceFactFrameObligation(source, capture.fact_frame);
+  return obligation !== null && slotEqual(receipt.predicate, obligation.predicate) &&
+    receipt.arguments.length === obligation.arguments.length &&
+    receipt.arguments.every((slot, index) => slotEqual(slot, obligation.arguments[index]!));
 }
 
 type EvidenceGraphObligation = Readonly<{
@@ -127,11 +102,11 @@ type EvidenceGraphObligation = Readonly<{
   arguments: EvidenceOsfSemanticCompletenessReceipt["arguments"];
 }>;
 
-function frameObligation(
+export function groundEvidenceFactFrameObligation(
   source: string,
   frame: AssociativeFactFrame
 ): EvidenceGraphObligation | null {
-  const grounded = groundFrameSlots(source, frame.slots);
+  const grounded = groundAssociativeFactFrameSlots(frame, source);
   if (grounded === null) return null;
   const relations = grounded.filter(({ role }) => role === "relation");
   const subjects = grounded.filter(({ role }) => role === "subject");
