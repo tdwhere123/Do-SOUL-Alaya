@@ -51,8 +51,16 @@ node apps/bench-runner/bin/alaya-bench-runner.mjs source-snapshot inspect \
   --max-results 20 --max-pages 100
 ```
 
-The source artifact has an explicit `source_records` manifest and a
-`.sources.json` occurrence sidecar. Message roles, identities and UTF-8 bodies
+The version-2 source artifact has an explicit `source_records` manifest and a
+`.sources.json` index of ordered, content-addressed `.sources.SHA256.json`
+message shards. Each shard is limited to 8 MiB; the index is limited to 16 MiB.
+Preparation and inspection retain one shard at a time rather than serializing
+all source spans into a single string. The index binds every shard's digest,
+byte length and message count, and inspection still validates every native
+record and span identity. Copy the DB, manifest, index and all referenced shards
+together. Version-1 source artifacts must be prepared again in a fresh isolated
+directory; the earlier post-extraction artifact format is unchanged.
+Message roles, identities and UTF-8 bodies
 remain original, including empty messages. Session observation dates and each
 question's interpretation clock are retained separately from import
 `recorded_at`; raw event times and validity remain unknown. Inspect passes the
@@ -69,10 +77,12 @@ is returned without upgrading unknown, unavailable or partial states.
 
 Preparation uses deferred projection admission and one final owned checkpoint.
 Record/span admission is atomic; audit or checkpoint failure prevents a ready
-manifest but may leave committed records. Retry with the same dataset window,
+manifest but may leave committed records and unsealed shards. Retry with the same dataset window,
 output path and `recorded_at` to recover those identities. Retired sources cannot
 be revived. A validated existing artifact is reused only when those inputs
-match, and keeps its original producer commit. The CLI resolves that commit
+match, and keeps its original producer commit. Unreferenced shards from an
+interrupted attempt are retained but do not belong to the sealed artifact.
+The CLI resolves that commit
 from its source checkout; an installed build outside a checkout requires the
 explicit `--producer-commit FULL_SHA` provenance declaration.
 

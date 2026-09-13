@@ -13,7 +13,7 @@ import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
 import { checkpointAndCopyBenchDb } from "../freeze/db-copy.js";
 import { withSnapshotPublishLock } from "../freeze/publish-lock.js";
 import { hashRegularFileNoFollow, readRegularFileNoFollow } from "../bound-file.js";
-import { SourceRecordsDatasetSchema, SourceRecordsManifestSchema, validateSourceRecordsSidecar, inspectSourceRecordsArtifact,
+import { SourceRecordsDatasetSchema, SourceRecordsManifestSchema, createSourceRecordsSidecarWriter, inspectSourceRecordsArtifact,
   sealSourceRecordsManifest, sourceRecordsManifestPath, sourceRecordsSidecarPath,
   type SourceRecordsDataset, type SourceRecordsSidecar, type SourceRecordsManifest } from "./contract.js";
 
@@ -49,15 +49,14 @@ export async function prepareSourceRecordsSnapshot(input: PrepareSourceRecordsIn
     const daemon = await startBenchDaemon({ dataDirRoot, embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
     let sidecar: SourceRecordsSidecar;
     try {
-      sidecar = await importMessages(daemon, loaded.questions, dataset, input.recordedAt);
+      sidecar = await importMessages(daemon, loaded.questions, dataset, input.recordedAt, snapshotPath);
       await daemon.checkpointFieldProjection();
     } finally {
       await daemon.shutdown();
     }
     checkpointAndCopyBenchDb(join(dataDirRoot, BENCH_DAEMON_DB_FILENAME), snapshotPath);
-    atomicWriteJson(sourceRecordsSidecarPath(snapshotPath), sidecar);
-    const manifest = sealSourceRecordsManifest({ schema_version: 1, artifact_domain: "source_records", dataset,
-      recorded_at: input.recordedAt, message_count: sidecar.messages.length, producer_commit: input.producerCommit,
+    const manifest = sealSourceRecordsManifest({ schema_version: 2, artifact_domain: "source_records", dataset,
+      recorded_at: input.recordedAt, message_count: sidecar.message_count, producer_commit: input.producerCommit,
       db_sha256: hashRegularFileNoFollow(snapshotPath), sidecar_sha256: hashRegularFileNoFollow(sourceRecordsSidecarPath(snapshotPath)) });
     atomicWriteJson(sourceRecordsManifestPath(snapshotPath), manifest);
     return inspectSourceRecordsArtifact(snapshotPath).manifest;
@@ -79,8 +78,12 @@ function bindPreparation(dataDir: string, snapshotPath: string, dataset: SourceR
 }
 
 async function importMessages(daemon: BenchDaemonHandle, questions: readonly LongMemEvalQuestion[],
-  dataset: SourceRecordsDataset, recordedAt: string): Promise<SourceRecordsSidecar> {
-  const messages: SourceRecordsSidecar["messages"] = [];
+  dataset: SourceRecordsDataset, recordedAt: string, snapshotPath: string): Promise<SourceRecordsSidecar> {
+  const writer = createSourceRecordsSidecarWriter(snapshotPath, {
+    schema_version: 2, artifact_domain: "source_records", dataset, recorded_at: recordedAt,
+    questions: questions.map((question) => ({ question_id: question.question_id,
+      interpretation_clock: requireLongMemEvalTimestamp(question.question_date) }))
+  });
   for (const question of questions) {
     const identity = buildLongMemEvalQuestionRuntimeIdentity(question.question_id);
     const workspace = await daemon.attachWorkspace(identity);
@@ -97,7 +100,7 @@ async function importMessages(daemon: BenchDaemonHandle, questions: readonly Lon
             const admitted = await workspace.importSourceRecord({ source_id: message.message_id, source_version: dataset.sha256,
               content_bytes: message.content, recorded_at: recordedAt, event_time: null, valid_from: null, valid_to: null,
               speaker: message.role, scope_class: "project", spans: deriveAddressableSpanViews(message.content) });
-            messages.push({ question_id: question.question_id, session_id: sessionId,
+            writer.append({ question_id: question.question_id, session_id: sessionId,
               session_index: sessionIndex, round_index: roundIndex, message_id: message.message_id,
               message_index: round.messageIndices[index]!, source_observed_at: sourceObservedAt,
               role: message.role, content_state: message.content.length === 0 ? "empty" : "retained", ...admitted });
@@ -108,7 +111,5 @@ async function importMessages(daemon: BenchDaemonHandle, questions: readonly Lon
       await workspace.detach();
     }
   }
-  return validateSourceRecordsSidecar({ schema_version: 1, artifact_domain: "source_records", dataset, recorded_at: recordedAt,
-    questions: questions.map((question) => ({ question_id: question.question_id,
-      interpretation_clock: requireLongMemEvalTimestamp(question.question_date) })), messages });
+  return writer.finish();
 }
