@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   AssociationCapContractSchema,
+  AuthorizedScopesAdmissionSchema,
   ClaimDemandSchema,
   ContinuationSchema,
   EnumerationPolicySchema,
@@ -96,7 +97,7 @@ export const BoundedActiveConstraintsResultSchema = z
         workspace_id: z.string(),
         as_of: z.string(),
         snapshot_id: z.string(),
-        authorized_scopes: z.array(z.string()).readonly()
+        authorized_scopes: AuthorizedScopesAdmissionSchema
       })
       .strict()
       .readonly()
@@ -134,19 +135,7 @@ export const ConditionalFieldRecallWorkerPayloadSchema = z
     dimension_filter: z.array(z.string()).readonly().optional(),
     domain_tag_filter: z.array(z.string()).readonly().optional(),
     continuation: ContinuationSchema.nullable().optional(),
-    authorized_scopes: z
-      .union([
-        z.array(z.string()).readonly(),
-        z.object({ mode: z.literal("unrestricted") }).strict(),
-        z.object({ mode: z.literal("denied") }).strict(),
-        z
-          .object({
-            mode: z.literal("named"),
-            scopes: z.array(z.string()).min(1).readonly()
-          })
-          .strict()
-      ])
-      .optional(),
+    authorized_scopes: AuthorizedScopesAdmissionSchema.optional(),
     governance: BoundedActiveConstraintsResultSchema.optional(),
     enumeration_policy: EnumerationPolicySchema.optional(),
     result_kind_view: ResultKindViewSchema.optional(),

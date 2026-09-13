@@ -60,7 +60,7 @@ describe("RecallReadWorkerClient tier window IPC", () => {
         workspaceId: "malformed",
         tier: "hot",
         limit: 1
-      })).rejects.toThrow("invalid recall tier window chunk");
+      })).rejects.toThrow(/recall-tier-window-chunk/u);
       await expect(client.memoryRepo.findRecallTierWindow!({
         workspaceId: "healthy",
         tier: "hot",

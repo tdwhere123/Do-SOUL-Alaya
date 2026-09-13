@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { AuthorizedScopesAdmissionSchema } from "@do-soul/alaya-protocol";
 import type { ObserveConditionalFieldInput, SourceObserverRow, SourceRootObserverRow } from "../../../../recall/conditional-field/observers/observe.js";
 import {
-  parseAuthorizedScopesAdmission,
+  authorizedScopesFromAdmission,
+  encodeAuthorizedScopesAdmission,
   sourceRootEligible,
   sourceRowEligible
 } from "../../../../recall/conditional-field/observers/observation-admission.js";
@@ -60,12 +62,20 @@ describe("authorized_scopes tri-state admission", () => {
     const deniedRoundtrip = JSON.parse(JSON.stringify({ authorized_scopes: { mode: "denied" } })) as {
       readonly authorized_scopes?: unknown;
     };
-    expect(parseAuthorizedScopesAdmission(omitted.authorized_scopes).mode).toBe("denied");
-    expect(parseAuthorizedScopesAdmission(jsonNull.authorized_scopes).mode).toBe("denied");
-    expect(parseAuthorizedScopesAdmission(deniedRoundtrip.authorized_scopes).mode).toBe("denied");
-    expect(parseAuthorizedScopesAdmission(JSON.parse(JSON.stringify({ mode: "unrestricted" }))).mode)
+    expect(encodeAuthorizedScopesAdmission(omitted.authorized_scopes as undefined).mode).toBe("denied");
+    expect(() => AuthorizedScopesAdmissionSchema.parse(jsonNull.authorized_scopes)).toThrow();
+    expect(AuthorizedScopesAdmissionSchema.parse(deniedRoundtrip.authorized_scopes).mode).toBe("denied");
+    expect(AuthorizedScopesAdmissionSchema.parse(JSON.parse(JSON.stringify({ mode: "unrestricted" }))).mode)
       .toBe("unrestricted");
-    expect(parseAuthorizedScopesAdmission(JSON.parse("null")).mode).toBe("denied");
+    expect(() => AuthorizedScopesAdmissionSchema.parse(JSON.parse("null"))).toThrow();
+  });
+
+  it("maps admission onto the internal request without collapsing omitted and null", () => {
+    expect(authorizedScopesFromAdmission({ mode: "unrestricted" })).toEqual({ authorized_scopes: null });
+    expect(authorizedScopesFromAdmission({ mode: "denied" })).toEqual({});
+    expect(authorizedScopesFromAdmission(undefined)).toEqual({});
+    expect(authorizedScopesFromAdmission({ mode: "named", scopes: ["project"] }))
+      .toEqual({ authorized_scopes: ["project"] });
   });
 
   it("mismatches one-sided continuation omit, null, and empty without regressing named change", () => {

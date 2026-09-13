@@ -11,6 +11,8 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
+  type AuthorizedScopesAdmission,
+  type BoundedActiveConstraintsRequest,
   type MemoryEntry,
   type ClaimForm,
   type PathRelation
@@ -27,8 +29,9 @@ import { SqliteWorkspaceRepo } from "../../../../repos/runtime/workspace-repo.js
 
 const databases = new Set<StorageDatabase>();
 
-const boundedRequest = {
+const boundedRequest: BoundedActiveConstraintsRequest & { snapshotId: string } = {
   workspaceId: "workspace-1", asOf: "2026-05-19T00:00:00.000Z", snapshotId: "snapshot-1",
+  authorizedScopes: { mode: "unrestricted" },
   cap: 20, nativeLimit: 128, byteLimit: 65536
 };
 
@@ -40,12 +43,19 @@ describe("bounded active constraints snapshot", () => {
     await memoryRepo.create(project);
     await memoryRepo.create(createMemoryEntry({ object_id: globalId, scope_class: "global_core", content: "secret ".repeat(3000) }));
     claimFormRepo.create(createActiveClaim({ source_object_refs: [project.object_id, globalId] }));
-    const result = readBounded(database, { authorizedScopes: ["project", "project"] });
-    expect(result).toMatchObject({ total_count: 1, completeness: "complete", binding: { authorized_scopes: ["project"] } });
+    const result = readBounded(database, { authorizedScopes: { mode: "named", scopes: ["project", "project"] } });
+    expect(result).toMatchObject({
+      total_count: 1, completeness: "complete", binding: { authorized_scopes: { mode: "named", scopes: ["project"] } }
+    });
     expect(result.constraints.map((row) => row.object_id)).toEqual([project.object_id]);
     expect(result.work.bytes_read).toBeLessThan(10000);
-    expect(readBounded(database, { authorizedScopes: ["global_domain"] })).toMatchObject({
-      constraints: [], total_count: 0, completeness: "complete", binding: { authorized_scopes: ["global_domain"] }
+    expect(readBounded(database, { authorizedScopes: { mode: "named", scopes: ["global_domain"] } })).toMatchObject({
+      constraints: [], total_count: 0, completeness: "complete",
+      binding: { authorized_scopes: { mode: "named", scopes: ["global_domain"] } }
+    });
+    expect(readBounded(database, { authorizedScopes: { mode: "denied" } })).toMatchObject({
+      constraints: [], total_count: 0, completeness: "complete",
+      binding: { authorized_scopes: { mode: "denied" } }
     });
     expect(readBounded(database).completeness).toBe("incomplete");
   });
@@ -100,6 +110,22 @@ describe("bounded active constraints snapshot", () => {
     expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(2048);
   });
 
+  it("denies omitted empty and named-project while unrestricted still hydrates global_core", async () => {
+    const { database, memoryRepo, claimFormRepo } = await createRepos();
+    const globalId = "10000000-0000-4000-8000-000000000009";
+    await memoryRepo.create(createMemoryEntry({
+      object_id: globalId, scope_class: ScopeClass.GLOBAL_CORE, content: "global core constraint"
+    }));
+    claimFormRepo.create(createActiveClaim({ source_object_refs: [globalId] }));
+    const seen = (admission: AuthorizedScopesAdmission | undefined) =>
+      readBounded(database, { authorizedScopes: admission }).constraints.map((row) => row.object_id);
+    expect(seen({ mode: "unrestricted" })).toEqual([globalId]);
+    expect(seen({ mode: "denied" })).toEqual([]);
+    expect(seen(undefined)).toEqual([]);
+    expect(seen({ mode: "named", scopes: ["project"] })).toEqual([]);
+    expect(seen({ mode: "named", scopes: ["global_core"] })).toEqual([globalId]);
+  });
+
   it("reports the uncapped known count when cap is zero", async () => {
     const { database, memoryRepo, claimFormRepo } = await createRepos();
     await memoryRepo.create(createMemoryEntry());
@@ -108,7 +134,10 @@ describe("bounded active constraints snapshot", () => {
   });
 });
 
-function readBounded(database: StorageDatabase, overrides: Partial<typeof boundedRequest> & { authorizedScopes?: readonly string[] } = {}) {
+function readBounded(
+  database: StorageDatabase,
+  overrides: Partial<BoundedActiveConstraintsRequest & { snapshotId: string }> = {}
+) {
   const paths = new SqliteGovernancePathReader(database);
   paths.prepareIndex();
   return readBoundedActiveConstraints(database, { ...boundedRequest, ...overrides }, (input) => paths.read(input));

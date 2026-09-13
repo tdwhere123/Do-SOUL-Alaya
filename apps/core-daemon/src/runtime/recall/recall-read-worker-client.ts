@@ -1,5 +1,5 @@
 import { Worker } from "node:worker_threads";
-import type { PathAnchorRef } from "@do-soul/alaya-protocol";
+import { indexEntryCacheKey, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldRecallPort,
   ConditionalFieldRecallPortResult,
@@ -15,12 +15,12 @@ import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
 import type { RecallTemporalProjectionEnsurer } from "./recall-path-readers.js";
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
 import {
-  ConditionalFieldRecallPortResultSchema,
   RECALL_READ_WORKER_PROTOCOL_VERSION,
   type RecallReadWorkerOperation,
   type RecallReadWorkerRequest,
   type RecallReadWorkerResponse
 } from "../recall-read-worker/protocol.js";
+import { parseWorkerOperationResult } from "../recall-read-worker/operation-schemas.js";
 import {
   isPathAffinityOperation,
   isRecallReadWorkerResponse,
@@ -106,6 +106,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       readonly timeout: ReturnType<typeof setTimeout>;
       readonly worker: Worker;
       readonly consumeSuccess?: (value: unknown) => SuccessConsumption;
+      readonly operation: RecallReadWorkerOperation;
     }
   >();
   private closed = false;
@@ -207,8 +208,11 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
 
   public readonly conditionalFieldPort: ConditionalFieldRecallPort = {
     acknowledge: async (preparationId, index, previews) => {
-      return await this.dispatchToWorker(this.deliveryOwner(preparationId), "conditionalField.acknowledge",
-        { preparation_id: preparationId, index, previews: Object.fromEntries(previews) });
+      return await this.dispatchToWorker(this.deliveryOwner(preparationId), "conditionalField.acknowledge", {
+        preparation_id: preparationId,
+        issued_entry_ids: index.entries.map(indexEntryCacheKey),
+        previews: Object.fromEntries(previews)
+      });
     },
     discard: async (preparationId) => {
       const owner = this.deliveryOwners.get(preparationId);
@@ -221,18 +225,15 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       const preferred = input.continuation == null ? undefined : this.deliveryOwners.get(input.continuation.continuation_id);
       const worker = this.snapshotSession.pinnedWorker()
         ?? (preferred !== undefined && this.workers.includes(preferred) ? preferred : this.requireWorker("conditionalField.recall"));
-      const parsed = ConditionalFieldRecallPortResultSchema.parse(
-        await this.dispatchToWorker(worker, "conditionalField.recall", {
-          ...input,
-          authorized_scopes: encodeAuthorizedScopesAdmission(input.authorized_scopes)
-        })
-      );
+      const parsed = await this.dispatchToWorker(worker, "conditionalField.recall", {
+        ...input,
+        authorized_scopes: encodeAuthorizedScopesAdmission(input.authorized_scopes)
+      }) as ConditionalFieldRecallPortResult;
       for (const key of [parsed.preparation_id, parsed.index.continuation?.continuation_id]) {
         if (key !== undefined) this.deliveryOwners.set(key, worker);
       }
       while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
-      // IPC schema cannot import core receipt types; index and previews are already checked.
-      return parsed as ConditionalFieldRecallPortResult;
+      return parsed;
     }
   };
 
@@ -404,6 +405,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         },
         timeout,
         worker,
+        operation,
         ...(consumeSuccess === undefined ? {} : { consumeSuccess })
       });
       try {
@@ -469,8 +471,10 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     }
     if (message.ok) {
       let consumed: SuccessConsumption | undefined;
+      let parsed: unknown;
       try {
-        consumed = pending.consumeSuccess?.(message.result);
+        parsed = parseWorkerOperationResult(pending.operation, message.result);
+        consumed = pending.consumeSuccess?.(parsed);
       } catch (error) {
         this.pending.delete(message.id);
         pending.reject(error);
@@ -479,7 +483,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       }
       if (consumed !== undefined && !consumed.done) return;
       this.pending.delete(message.id);
-      pending.resolve(consumed?.value ?? message.result);
+      pending.resolve(consumed?.value ?? parsed);
       return;
     }
     this.pending.delete(message.id);

@@ -1,10 +1,11 @@
 import {
   PathRelationSchema,
   SoulActiveConstraintSchema,
-  normalizeActiveConstraintScopes,
+  normalizeActiveConstraintAdmission,
   type BoundedActiveConstraintsResult,
   type RequestBudget
 } from "@do-soul/alaya-protocol";
+import { encodeAuthorizedScopesAdmission } from "../conditional-field/observers/observation-admission.js";
 import type { RecallServiceActiveConstraintsPort } from "./recall-service-ports.js";
 
 type GovernanceRequest = Readonly<{
@@ -25,17 +26,20 @@ export async function readRequestGovernance(
   const nativeLimit = Math.min(256, Math.floor(Math.max(0,
     input.budget.work_units - input.budget.finalization_reserve - input.budget.min_envelope) / 4));
   const byteLimit = Math.min(65_536, Math.floor(input.budget.memory_bytes / 4));
-  const empty = unavailableGovernance(input);
+  const authorizedScopes = normalizeActiveConstraintAdmission(
+    encodeAuthorizedScopesAdmission(input.authorized_scopes)
+  );
+  const empty = unavailableGovernance(input, authorizedScopes);
   if (input.cancelled || port?.readBounded === undefined || nativeLimit < 3 || byteLimit < 2048) {
     return { governance: empty, budget: input.budget };
   }
   const result = await port.readBounded({
     workspaceId: input.workspace_id, asOf: input.as_of,
     ...(discoverSnapshot ? {} : { snapshotId: input.snapshot_id }),
-    authorizedScopes: input.authorized_scopes ?? undefined,
+    authorizedScopes,
     cap, nativeLimit, byteLimit
   });
-  assertBoundedGovernance(result, input, nativeLimit, byteLimit, discoverSnapshot);
+  assertBoundedGovernance(result, input, authorizedScopes, nativeLimit, byteLimit, discoverSnapshot);
   return {
     governance: result,
     budget: {
@@ -49,6 +53,7 @@ export async function readRequestGovernance(
 function assertBoundedGovernance(
   result: BoundedActiveConstraintsResult,
   input: GovernanceRequest,
+  authorizedScopes: ReturnType<typeof normalizeActiveConstraintAdmission>,
   nativeLimit: number,
   byteLimit: number,
   discoverSnapshot: boolean
@@ -58,8 +63,7 @@ function assertBoundedGovernance(
   if (result.binding.workspace_id !== input.workspace_id || result.binding.as_of !== input.as_of
     || (!discoverSnapshot && result.binding.snapshot_id !== input.snapshot_id)
     || !/^sha256:[0-9a-f]{64}$/.test(result.binding.snapshot_id)
-    || JSON.stringify(result.binding.authorized_scopes)
-      !== JSON.stringify(normalizeActiveConstraintScopes(input.authorized_scopes ?? undefined))
+    || JSON.stringify(result.binding.authorized_scopes) !== JSON.stringify(authorizedScopes)
     || counts.some((count) => !Number.isSafeInteger(count) || count < 0)
     || work.native_visits > nativeLimit || work.bytes_read > byteLimit || work.retained_bytes > byteLimit
     || (result.completeness !== "complete" && result.completeness !== "incomplete")
@@ -72,12 +76,15 @@ function assertBoundedGovernance(
   for (const path of result.paths) PathRelationSchema.parse(path);
 }
 
-function unavailableGovernance(input: GovernanceRequest): BoundedActiveConstraintsResult {
+function unavailableGovernance(
+  input: GovernanceRequest,
+  authorizedScopes: ReturnType<typeof normalizeActiveConstraintAdmission>
+): BoundedActiveConstraintsResult {
   return {
     constraints: [], total_count: null, completeness: "incomplete", paths: [],
     temporal_uncertain: true,
     work: { native_visits: 0, bytes_read: 0, retained_bytes: 0 },
     binding: { workspace_id: input.workspace_id, as_of: input.as_of, snapshot_id: input.snapshot_id,
-      authorized_scopes: normalizeActiveConstraintScopes(input.authorized_scopes ?? undefined) }
+      authorized_scopes: authorizedScopes }
   };
 }

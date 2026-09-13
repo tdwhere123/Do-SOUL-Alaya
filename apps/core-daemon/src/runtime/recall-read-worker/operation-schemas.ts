@@ -1,11 +1,16 @@
 import { z } from "zod";
-import { encodeAuthorizedScopesAdmission as encodeCoreAuthorizedScopesAdmission } from "@do-soul/alaya-core";
 import {
-  InformationIndexSchema,
+  AuthorizedScopesAdmissionSchema,
+  EvidenceCapsuleSchema,
   MemoryDimensionSchema,
+  MemoryEntrySchema,
   PathAnchorRefSchema,
+  PathRelationSchema,
   ScopeClassSchema,
-  StorageTierSchema
+  SoulActiveConstraintSchema,
+  StorageTierSchema,
+  SynthesisCapsuleSchema,
+  type BoundedActiveConstraintsRequest
 } from "@do-soul/alaya-protocol";
 import {
   BoundedActiveConstraintsResultSchema,
@@ -14,19 +19,7 @@ import {
   type RecallReadWorkerOperation
 } from "./protocol.js";
 
-export const AuthorizedScopesAdmissionSchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("unrestricted") }).strict(),
-  z.object({ mode: z.literal("denied") }).strict(),
-  z.object({
-    mode: z.literal("named"),
-    scopes: z.array(z.string()).min(1).readonly()
-  }).strict()
-]);
-
-export type AuthorizedScopesAdmission = z.infer<typeof AuthorizedScopesAdmissionSchema>;
-
-const EmptyObjectSchema = z.object({}).passthrough();
-const WorkspaceIdSchema = z.object({ workspaceId: z.string() }).strict();
+const EmptyObjectSchema = z.object({}).strict();
 const KeywordSearchSchema = z.object({
   workspaceId: z.string(),
   queryText: z.string(),
@@ -50,7 +43,7 @@ const KeywordBatchSchema = z.object({
     limit: z.number(),
     refinement_depths: z.array(z.number().int().positive()).readonly().optional()
   }).strict()).readonly()
-}).passthrough();
+}).strict();
 const ObjectIdsSchema = z.object({
   workspaceId: z.string(),
   objectIds: z.array(z.string()).readonly()
@@ -65,20 +58,35 @@ const PageSchema = z.object({
 }).strict();
 const AcknowledgeSchema = z.object({
   preparation_id: z.string(),
-  index: InformationIndexSchema,
+  issued_entry_ids: z.array(z.string()).readonly(),
   previews: z.record(z.string(), z.string())
 }).strict();
 const DiscardSchema = z.object({
   preparation_id: z.string()
 }).strict();
 
-const PAYLOAD_SCHEMAS: Record<RecallReadWorkerOperation, z.ZodType> = {
+export const BoundedRequestSchema = z.object({
+  workspaceId: z.string(),
+  asOf: z.string(),
+  snapshotId: z.string().optional(),
+  authorizedScopes: AuthorizedScopesAdmissionSchema.optional(),
+  cap: z.number().nullable().optional(),
+  nativeLimit: z.number(),
+  byteLimit: z.number()
+}).strict();
+
+type BoundedRequestPayload = z.infer<typeof BoundedRequestSchema>;
+type BoundedPayloadFitsRequest = BoundedRequestPayload extends BoundedActiveConstraintsRequest ? true : false;
+const boundedPayloadFitsRequest: BoundedPayloadFitsRequest = true;
+void boundedPayloadFitsRequest;
+
+const PAYLOAD_SCHEMAS = {
   ready: EmptyObjectSchema,
   close: EmptyObjectSchema,
   "snapshot.beginDeferred": EmptyObjectSchema,
   "snapshot.commit": EmptyObjectSchema,
   "snapshot.rollback": EmptyObjectSchema,
-  "conditionalField.recall": z.unknown(),
+  "conditionalField.recall": ConditionalFieldRecallWorkerPayloadSchema,
   "conditionalField.acknowledge": AcknowledgeSchema,
   "conditionalField.discard": DiscardSchema,
   "memory.findByWorkspaceId": z.object({
@@ -120,7 +128,7 @@ const PAYLOAD_SCHEMAS: Record<RecallReadWorkerOperation, z.ZodType> = {
   }).strict(),
   "memory.searchManyByKeywordWithinObjectIds": KeywordBatchSchema.extend({
     objectIds: z.array(z.string()).readonly()
-  }),
+  }).strict(),
   "memory.searchByAnchorWithinObjectIds": z.object({
     workspaceId: z.string(),
     anchorTokens: z.array(z.string()).readonly(),
@@ -183,38 +191,111 @@ const PAYLOAD_SCHEMAS: Record<RecallReadWorkerOperation, z.ZodType> = {
     cap: z.number().nullable().optional(),
     asOf: z.string().optional()
   }).strict(),
-  "constraints.readBounded": z.object({
-    workspaceId: z.string(),
-    asOf: z.string(),
-    snapshotId: z.string().optional(),
-    authorizedScopes: z.array(z.string()).readonly().optional(),
-    cap: z.number().nullable().optional(),
-    nativeLimit: z.number(),
-    byteLimit: z.number()
-  }).strict()
-};
+  "constraints.readBounded": BoundedRequestSchema
+} satisfies Record<RecallReadWorkerOperation, z.ZodTypeAny>;
 
-const RESULT_SCHEMAS: Partial<Record<RecallReadWorkerOperation, z.ZodType>> = {
+const KeywordHitSchema = z.object({
+  object_id: z.string(),
+  normalized_rank: z.number(),
+  trigram_rank: z.number().optional(),
+  object_key_rank: z.number().optional(),
+  matched_fts_lanes: z.array(z.string()).readonly().optional(),
+  matched_projection: z.unknown().optional(),
+  rank: z.number().optional(),
+  source_id: z.string().optional()
+}).strict();
+const KeywordHitsSchema = z.array(KeywordHitSchema).readonly();
+const KeywordFieldResultSchema = z.object({
+  matches: KeywordHitsSchema,
+  lanes: z.array(z.unknown()).readonly(),
+  lexical_raw_rank: z.unknown().optional(),
+  lexical_raw_rank_receipt: z.unknown().optional(),
+  refinement_levels: z.array(z.unknown()).readonly().optional()
+}).strict();
+const MemoryEntriesSchema = z.array(MemoryEntrySchema).readonly();
+const PathRelationsSchema = z.array(PathRelationSchema).readonly();
+const QualifiedEvidenceSchema = z.array(z.object({
+  capsule: EvidenceCapsuleSchema,
+  verified_user_projection: z.boolean(),
+  matched_projection: z.unknown().optional(),
+  matched_fact_key_forms: z.array(z.unknown()).readonly().optional(),
+  matched_fact_frame: z.unknown().optional(),
+  fact_frame_formation: z.unknown().optional(),
+  semantic_factor_formation: z.unknown().optional(),
+  kind_projection_drafts: z.array(z.unknown()).readonly().optional()
+}).strict()).readonly();
+const SourceAnchorSchema = z.object({
+  evidence_object_id: z.string(),
+  artifact_ref: z.string()
+}).strict();
+const RecallTierWindowCursorSchema = z.object({
+  created_at: z.string(),
+  object_id: z.string()
+}).strict();
+const RecallTierWindowResultSchema = z.object({
+  memories: z.array(z.unknown()).readonly(),
+  next_cursor: RecallTierWindowCursorSchema.nullable(),
+  truncated: z.boolean()
+}).strict();
+export const RecallTierWindowChunkSchema = RecallTierWindowResultSchema.extend({
+  kind: z.literal("recall-tier-window-chunk"),
+  done: z.boolean()
+}).strict();
+
+const RESULT_SCHEMAS = {
   ready: z.null(),
   close: z.null(),
   "snapshot.beginDeferred": z.null(),
   "snapshot.commit": z.null(),
   "snapshot.rollback": z.null(),
   "conditionalField.recall": ConditionalFieldRecallPortResultSchema,
-  "constraints.readBounded": BoundedActiveConstraintsResultSchema,
+  // Receipt fields are owned by core; this boundary only requires the version tag.
+  "conditionalField.acknowledge": z.union([
+    z.null(),
+    z.object({ schema_version: z.number() }).passthrough()
+  ]),
+  "conditionalField.discard": z.null(),
+  "memory.findByWorkspaceId": MemoryEntriesSchema,
+  "memory.findRecallTierWindow": z.union([RecallTierWindowChunkSchema, RecallTierWindowResultSchema]),
+  "memory.findByEventTimeWindow": MemoryEntriesSchema,
+  "memory.findByDimension": MemoryEntriesSchema,
+  "memory.findByScopeClass": MemoryEntriesSchema,
+  "memory.searchByKeyword": KeywordHitsSchema,
+  "memory.searchByKeywordField": KeywordFieldResultSchema,
+  "memory.searchByKeywordWithinObjectIds": KeywordHitsSchema,
+  "memory.searchByKeywordWithinTier": KeywordHitsSchema,
+  "memory.searchManyByKeywordWithinObjectIds": z.array(KeywordHitsSchema).readonly(),
+  "memory.searchByAnchorWithinObjectIds": KeywordHitsSchema,
+  "memory.searchByAnchorWithinTier": KeywordHitsSchema,
+  "memory.searchByAnchorField": KeywordFieldResultSchema,
+  "memory.findByEvidenceRefs": MemoryEntriesSchema,
+  "memory.findBoundEvidenceRefs": z.array(z.string()).readonly(),
+  "memory.findByIds": MemoryEntriesSchema,
+  "evidence.searchByKeyword": KeywordHitsSchema,
+  "evidence.searchByKeywordField": KeywordFieldResultSchema,
+  "evidence.searchManyByKeywordField": z.array(KeywordFieldResultSchema).readonly(),
+  "evidence.findByIds": z.array(EvidenceCapsuleSchema).readonly(),
+  "evidence.findRecallQualifiedByIds": QualifiedEvidenceSchema,
+  "evidence.findRecallQualifiedFactKeysByIds": QualifiedEvidenceSchema,
+  "evidence.findSourceAnchorsByIds": z.array(SourceAnchorSchema).readonly(),
+  "synthesis.searchByKeyword": KeywordHitsSchema,
+  "synthesis.searchByKeywordField": KeywordFieldResultSchema,
+  "synthesis.searchManyByKeywordField": z.array(KeywordFieldResultSchema).readonly(),
+  "synthesis.findByIds": z.array(SynthesisCapsuleSchema).readonly(),
+  "path.findByAnchors": PathRelationsSchema,
+  "path.findByTimeConcernWindowDigests": PathRelationsSchema,
+  "pathPlasticity.getStrengthByMemoryId": z.array(z.tuple([z.string(), z.number()])).readonly(),
   "constraints.findActive": z.object({
-    constraints: z.array(z.unknown()).readonly(),
+    constraints: z.array(SoulActiveConstraintSchema).readonly(),
     total_count: z.number()
-  }).passthrough()
-};
+  }).strict(),
+  "constraints.readBounded": BoundedActiveConstraintsResultSchema
+} satisfies Record<RecallReadWorkerOperation, z.ZodTypeAny>;
 
 export function parseWorkerOperationPayload(
   operation: RecallReadWorkerOperation,
   payload: unknown
 ): unknown {
-  if (operation === "conditionalField.recall") {
-    return parseConditionalFieldRecallPayload(payload);
-  }
   return PAYLOAD_SCHEMAS[operation].parse(payload ?? {});
 }
 
@@ -222,32 +303,11 @@ export function parseWorkerOperationResult(
   operation: RecallReadWorkerOperation,
   result: unknown
 ): unknown {
-  const schema = RESULT_SCHEMAS[operation];
-  return schema === undefined ? z.unknown().parse(result) : schema.parse(result);
+  return RESULT_SCHEMAS[operation].parse(result);
 }
 
 export function parseConditionalFieldRecallPayload(payload: unknown) {
-  const record = EmptyObjectSchema.parse(payload ?? {});
-  const rest: Record<string, unknown> = { ...record };
-  const admission = rest.authorized_scopes;
-  delete rest.authorized_scopes;
-  if (admission !== undefined && admission !== null && typeof admission === "object" && !Array.isArray(admission)) {
-    rest.authorized_scopes = AuthorizedScopesAdmissionSchema.parse(admission);
-  } else if (admission === null) {
-    AuthorizedScopesAdmissionSchema.parse(admission);
-  } else if (Array.isArray(admission)) {
-    if (admission.length > 0 && admission.every((scope) => typeof scope === "string")) {
-      rest.authorized_scopes = admission;
-    }
-  }
-  return ConditionalFieldRecallWorkerPayloadSchema.parse(rest);
+  return ConditionalFieldRecallWorkerPayloadSchema.parse(payload ?? {});
 }
 
-export function encodeAuthorizedScopesAdmission(
-  authorized: readonly string[] | null | undefined | AuthorizedScopesAdmission
-): AuthorizedScopesAdmission {
-  if (authorized !== null && typeof authorized === "object" && !Array.isArray(authorized) && "mode" in authorized) {
-    return AuthorizedScopesAdmissionSchema.parse(authorized);
-  }
-  return encodeCoreAuthorizedScopesAdmission(authorized);
-}
+export type WorkerBoundedRequest = BoundedRequestPayload;

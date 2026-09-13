@@ -2,6 +2,7 @@ import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   compareUtcInstants,
   isRelationValidityActiveAt,
+  type AuthorizedScopesAdmission,
   type Guard,
   type QueryProgram,
   type RecallTargetRef,
@@ -26,10 +27,7 @@ import type {
 
 const SCHEMA = CONDITIONAL_FIELD_SCHEMA_VERSION;
 
-export type AuthorizedScopesAdmission =
-  | { readonly mode: "unrestricted" }
-  | { readonly mode: "denied" }
-  | { readonly mode: "named"; readonly scopes: readonly string[] };
+export type { AuthorizedScopesAdmission };
 
 type ScopePrincipal =
   | { readonly kind: "unrestricted" }
@@ -44,42 +42,20 @@ export function encodeAuthorizedScopesAdmission(
   return { mode: "named", scopes: Object.freeze([...authorized]) };
 }
 
-export function parseAuthorizedScopesAdmission(value: unknown): AuthorizedScopesAdmission {
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    const record = value as { readonly mode?: unknown; readonly scopes?: unknown };
-    if (record.mode === "unrestricted") return { mode: "unrestricted" };
-    if (record.mode === "denied") return { mode: "denied" };
-    if (record.mode === "named") {
-      const scopes = record.scopes;
-      if (Array.isArray(scopes) && scopes.length > 0 && scopes.every((scope) => typeof scope === "string")) {
-        return { mode: "named", scopes: Object.freeze([...scopes]) };
-      }
-    }
-    return { mode: "denied" };
-  }
-  // JSON null / omitted / [] must not become unrestricted.
-  if (value === null || value === undefined) return { mode: "denied" };
-  if (Array.isArray(value)) {
-    if (value.length === 0 || value.some((scope) => typeof scope !== "string")) return { mode: "denied" };
-    return { mode: "named", scopes: Object.freeze([...value]) };
-  }
-  return { mode: "denied" };
-}
-
-export function legacyAuthorizedScopesFromAdmission(
-  admission: AuthorizedScopesAdmission
+export function authorizedScopesFromAdmission(
+  admission: AuthorizedScopesAdmission | undefined
 ): { readonly authorized_scopes?: readonly string[] | null } {
+  if (admission == null || admission.mode === "denied") return {};
   if (admission.mode === "unrestricted") return { authorized_scopes: null };
-  if (admission.mode === "denied") return {};
   return { authorized_scopes: admission.scopes };
 }
 
 function scopePrincipal(
   authorized: readonly string[] | null | undefined
 ): ScopePrincipal {
-  if (authorized === null) return { kind: "unrestricted" };
-  if (authorized === undefined || authorized.length === 0) return { kind: "denied" };
-  return { kind: "named", scopes: authorized };
+  const admission = encodeAuthorizedScopesAdmission(authorized);
+  if (admission.mode === "named") return { kind: "named", scopes: admission.scopes };
+  return { kind: admission.mode };
 }
 
 function namedScopesExclude(principal: ScopePrincipal, scopeClass: string | undefined): boolean {

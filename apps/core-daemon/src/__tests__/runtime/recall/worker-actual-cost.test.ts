@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   MemoryDimension,
+  indexEntryCacheKey,
   sourceIndexEntry,
   type InformationIndex,
   type RequestBudget
@@ -343,7 +344,11 @@ function collectPages(
     const page = runConditionalFieldWorkerRecall(worker, {
       ...payload(budget, query), ...extra, continuation
     });
-    settleWorkerDelivery(worker, { preparation_id: page.preparation_id, index: page.index, previews: page.previews }, false);
+    settleWorkerDelivery(worker, {
+      preparation_id: page.preparation_id,
+      issued_entry_ids: page.index.entries.map(indexEntryCacheKey),
+      previews: page.previews
+    }, false);
     pages.push(page);
     continuation = page.index.continuation;
     if (continuation === null) break;
