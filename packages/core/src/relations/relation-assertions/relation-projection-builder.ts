@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import {
   EMPTY_RELATION_HISTORY_DIGEST,
+  RELATION_ASSERTION_EVENT_CONTRACT_GENERATION,
+  RELATION_ASSERTION_SCHEMA_GENERATION,
+  RELATION_PATH_PROJECTION_SCHEMA_GENERATION,
   type RelationAssertion,
   type RelationAssertionResolution
 } from "@do-soul/alaya-protocol";
@@ -14,9 +17,9 @@ import {
 } from "./relation-projection-policy.js";
 import type { RelationAssertionProjectionResult } from "./relation-assertion-service-types.js";
 
-const ASSERTION_SCHEMA_GENERATION = "relation_assertion_v2";
-const ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v2";
-const PROJECTION_SCHEMA_GENERATION = "relation_path_projection_v1";
+const ASSERTION_SCHEMA_GENERATION = RELATION_ASSERTION_SCHEMA_GENERATION;
+const ASSERTION_EVENT_CONTRACT_GENERATION = RELATION_ASSERTION_EVENT_CONTRACT_GENERATION;
+const PROJECTION_SCHEMA_GENERATION = RELATION_PATH_PROJECTION_SCHEMA_GENERATION;
 
 type RelationHistoryOperatorOptions = Readonly<{
   readonly activate: boolean;

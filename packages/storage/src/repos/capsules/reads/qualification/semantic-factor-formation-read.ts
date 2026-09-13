@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 import {
   EvidenceOsfSemanticCompletenessReceiptSchema,
+  sourceTextDigest,
   verifyEvidenceOsfSemanticCompleteness,
   verifyOpenSemanticFactorFormationCapture,
   type EvidenceFactFrameFormationCapture,
   type OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
+
+export { sourceTextDigest };
 
 export interface StoredSemanticFactorFormationColumns {
   readonly semantic_formation_workspace_id: string | null;
@@ -42,7 +45,7 @@ export function readStoredSemanticFactorFormation(
     throw new Error("stored semantic factor formation is not evidence-owned");
   }
   if (capture.source_sha256 !== null &&
-      capture.source_sha256 !== sourceDigest(expectedSourceText)) {
+      capture.source_sha256 !== sourceTextDigest(expectedSourceText, sha256)) {
     throw new Error("semantic factor formation source does not match its evidence");
   }
   if (capture.status === "formed" && !hasCertifiedCompleteness(
@@ -79,10 +82,6 @@ function hasCertifiedCompleteness(
 
 function parseGraph(value: string | null): unknown {
   return value === null ? null : JSON.parse(value) as unknown;
-}
-
-function sourceDigest(source: string | null): string | null {
-  return source === null ? null : `sha256:${sha256(source)}`;
 }
 
 function sha256(value: string): string {

@@ -87,7 +87,7 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       }
     }
     const payload = { source_object_id: objectId, source_revision: source.revision, profile: canonicalProfile };
-    const id = `semantic:${digest(JSON.stringify([workspaceId, objectId, source.revision, canonicalProfile]))}`;
+    const id = semanticEnrichmentTaskId(workspaceId, objectId, source.revision, canonicalProfile);
     const existing = this.garden.findById(id);
     if (existing) {
       if (existing.workspace_id !== workspaceId || existing.payload_json !== JSON.stringify(payload)) {
@@ -489,6 +489,24 @@ export class SqliteSemanticArtifactRepo implements SemanticArtifactRepositoryPor
       ON CONFLICT(workspace_id,object_id) DO UPDATE SET task_id=excluded.task_id`)
       .run(workspaceId, objectId, taskId);
   }
+}
+
+function semanticEnrichmentTaskId(
+  workspaceId: string,
+  objectId: string,
+  revision: string,
+  profile: SemanticExtractionProfile
+): string {
+  return `semantic:${digest(JSON.stringify([
+    workspaceId,
+    objectId,
+    revision,
+    profile.capability,
+    profile.model,
+    profile.requestProfile,
+    profile.promptRevision,
+    profile.outputSchema
+  ]))}`;
 }
 
 function profilesEqual(left: SemanticExtractionProfile, right: SemanticExtractionProfile): boolean {
