@@ -49,7 +49,7 @@ export interface InitDatabaseOptions {
 
 const MAX_DATABASE_CACHE_ENTRIES = 32;
 const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
-/** Probe open must not inherit better-sqlite3's 5s default under nested retry. */
+/** Default 5s constructor timeout would spend openSqliteConnection's 2s budget on one wait. */
 const UNINITIALIZED_DATABASE_PROBE_TIMEOUT_MS = 50;
 const MAX_SQLITE_BUSY_TIMEOUT_MS = 2_147_483_647;
 const MEMORY_ENTRY_ENUM_CHECK_MIGRATION_VERSION = 14;
@@ -236,19 +236,31 @@ function initializeUncachedDatabase(
   let temporalMode = resolveTemporalDatabaseMode(filename, options.temporalMode);
   // A peer still creating this file looks like "exists" to existsSync, but it
   // is not a legacy source. Empty/unledgers stay on the fresh-bootstrap path.
-  if (
-    options.temporalMode === undefined &&
-    filename !== ":memory:" &&
-    temporalMode === "runtime" &&
-    isUninitializedDatabaseFile(filename)
-  ) {
-    temporalMode = "fresh-bootstrap";
+  if (options.temporalMode === undefined && filename !== ":memory:" && temporalMode === "runtime") {
+    const uninitialized = withSqliteBusyRetry(
+      () => isUninitializedDatabaseFile(filename),
+      {
+        retryLimit: DEFAULT_SQLITE_BUSY_RETRY_LIMIT,
+        budgetMs: busyTimeoutMs,
+        sleepMs: DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS
+      }
+    );
+    if (uninitialized) {
+      temporalMode = "fresh-bootstrap";
+    }
   }
 
   if (filename !== ":memory:" && temporalMode === "runtime") {
     // This readonly gate must happen before openDatabase() or any PRAGMA can
     // mutate a legacy source database. Candidate conversion is offline-only.
-    assertRuntimeTemporalDatabaseReady(filename, knownMigrationMaxVersion());
+    withSqliteBusyRetry(
+      () => assertRuntimeTemporalDatabaseReady(filename, knownMigrationMaxVersion()),
+      {
+        retryLimit: DEFAULT_SQLITE_BUSY_RETRY_LIMIT,
+        budgetMs: busyTimeoutMs,
+        sleepMs: DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS
+      }
+    );
   }
 
   const database = openDatabase(filename);
@@ -498,7 +510,7 @@ function applyMigrationIfPending(
   }
 }
 
-function isUninitializedDatabaseFile(filename: string): boolean {
+export function isUninitializedDatabaseFile(filename: string): boolean {
   if (!fs.existsSync(filename)) {
     return true;
   }

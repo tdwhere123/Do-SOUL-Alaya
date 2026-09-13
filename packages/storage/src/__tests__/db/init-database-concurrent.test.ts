@@ -31,6 +31,9 @@ function createFilename(): string {
 }
 
 const distInitModule = fileURLToPath(new URL("../../../dist/sqlite/db.js", import.meta.url));
+const distBusyRetryModule = fileURLToPath(
+  new URL("../../../dist/sqlite/sqlite-busy-retry.js", import.meta.url)
+);
 
 describe("initDatabase concurrent migration", () => {
   it("lets a second file-backed initDatabase observe the applied ledger without throwing", () => {
@@ -47,14 +50,15 @@ describe("initDatabase concurrent migration", () => {
     expect(maxVersion.max_version).toBe(15);
   });
 
-  it.skipIf(!existsSync(distInitModule))(
+  it.skipIf(!existsSync(distInitModule) || !existsSync(distBusyRetryModule))(
     "lets two processes initialize the same file without a migration throw",
     async () => {
       const filename = createFilename();
       const moduleUrl = pathToFileURL(distInitModule).href;
+      const busyRetryUrl = pathToFileURL(distBusyRetryModule).href;
       const [first, second] = await Promise.all([
-        spawnInitDatabaseProcess(filename, moduleUrl),
-        spawnInitDatabaseProcess(filename, moduleUrl)
+        spawnInitDatabaseProcess(filename, moduleUrl, busyRetryUrl),
+        spawnInitDatabaseProcess(filename, moduleUrl, busyRetryUrl)
       ]);
       expect(first.status, first.stderr).toBe(0);
       expect(second.status, second.stderr).toBe(0);
@@ -100,7 +104,8 @@ describe("initDatabase uninitialized-file probe", () => {
 
 function spawnInitDatabaseProcess(
   filename: string,
-  moduleUrl: string
+  moduleUrl: string,
+  busyRetryUrl: string
 ): Promise<{ readonly status: number; readonly stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -109,6 +114,7 @@ function spawnInitDatabaseProcess(
         "--input-type=module",
         "-e",
         `import { initDatabase } from ${JSON.stringify(moduleUrl)};
+         import { isSqliteBusyError } from ${JSON.stringify(busyRetryUrl)};
          const filename = ${JSON.stringify(filename)};
          const deadline = Date.now() + 5_000;
          for (;;) {
@@ -117,9 +123,7 @@ function spawnInitDatabaseProcess(
              database.close();
              break;
            } catch (error) {
-             const message = error instanceof Error ? error.message : String(error);
-             const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
-             if (Date.now() >= deadline || !/sqlite_busy|sqlite_locked|database is locked/i.test(message + " " + cause)) {
+             if (Date.now() >= deadline || !isSqliteBusyError(error)) {
                throw error;
              }
              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
