@@ -1,4 +1,9 @@
 import { computeOfficialApiSourceCorpusIdentity } from "./extraction-request.js";
+import { buildOfficialApiSourceCorpus } from "../../triage/grounding/source-locator.js";
+
+function exampleSourceCorpusIdentity(source: string): string {
+  return computeOfficialApiSourceCorpusIdentity(buildOfficialApiSourceCorpus(source, []));
+}
 
 /** Fictional source-grounded examples; never an extraction source or runtime policy. */
 export const OFFICIAL_API_GROUNDED_EXAMPLES = [
@@ -7,8 +12,8 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
       "schema_version": 2,
       "source_locator_contract_version": 2,
       "batch_contract_version": 1,
-      "source_corpus_identity": computeOfficialApiSourceCorpusIdentity(
-        "User: In 2020, I opened a workshop and promised to lend tools.\nUser: In 2020, I opened a workshop"
+      "source_corpus_identity": exampleSourceCorpusIdentity(
+        "In 2020, I opened a workshop and promised to lend tools."
       ),
       "batch_index": 0,
       "batch_count": 1,
@@ -142,8 +147,8 @@ export const OFFICIAL_API_GROUNDED_EXAMPLES = [
       "schema_version": 2,
       "source_locator_contract_version": 2,
       "batch_contract_version": 1,
-      "source_corpus_identity": computeOfficialApiSourceCorpusIdentity(
-        "User: I can borrow tools in the workshop only on Saturdays."
+      "source_corpus_identity": exampleSourceCorpusIdentity(
+        "I can borrow tools in the workshop only on Saturdays."
       ),
       "batch_index": 0,
       "batch_count": 1,

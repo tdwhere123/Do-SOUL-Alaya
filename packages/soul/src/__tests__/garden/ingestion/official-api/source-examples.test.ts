@@ -1,19 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { computeOfficialApiSourceCorpusIdentity } from
-  "../../../../garden/ingestion/official-api/extraction-request.js";
+import {
+  buildOfficialApiExtractionRequests,
+  computeOfficialApiSourceCorpusIdentity
+} from "../../../../garden/ingestion/official-api/extraction-request.js";
 import { OFFICIAL_API_GROUNDED_EXAMPLES } from
   "../../../../garden/ingestion/official-api/source-examples.js";
+import { buildOfficialApiSourceCorpus } from
+  "../../../../garden/triage/grounding/source-locator.js";
+
+const EXAMPLE_SOURCES = [
+  "In 2020, I opened a workshop and promised to lend tools.",
+  "I can borrow tools in the workshop only on Saturdays."
+] as const;
 
 describe("official API grounded examples", () => {
-  it("derives each example corpus identity from its assertion texts", () => {
-    expect(OFFICIAL_API_GROUNDED_EXAMPLES.length).toBeGreaterThan(0);
-    for (const example of OFFICIAL_API_GROUNDED_EXAMPLES) {
-      const sourceCorpus = example.input.source_assertions
-        .map((assertion) => assertion.text)
-        .join("\n");
+  it("derives each example corpus identity from the extraction source corpus", () => {
+    expect(OFFICIAL_API_GROUNDED_EXAMPLES).toHaveLength(EXAMPLE_SOURCES.length);
+    OFFICIAL_API_GROUNDED_EXAMPLES.forEach((example, index) => {
+      const source = EXAMPLE_SOURCES[index]!;
       expect(example.input.source_corpus_identity).toBe(
-        computeOfficialApiSourceCorpusIdentity(sourceCorpus)
+        computeOfficialApiSourceCorpusIdentity(buildOfficialApiSourceCorpus(source, []))
       );
-    }
+      expect(example.input).toEqual(buildOfficialApiExtractionRequests(source, [])[0]);
+    });
   });
 });
