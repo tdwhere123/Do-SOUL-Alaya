@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { assertValidEmbeddingBatch } from "@do-soul/alaya-core";
-import { hashMemoryContent } from "../../../../../../packages/core/src/embedding-recall/helpers.js";
+import { assertValidEmbeddingBatch, hashMemoryContent } from "@do-soul/alaya-core";
 import { bindEmbeddingOverlayIfPresent } from "@do-soul/alaya-storage";
 import type { BenchEmbeddingWarmupSummary } from "../daemon-types.js";
 import { embeddingInputIdentityForSchemaVersion } from "../../strict-treatment-config.js";
