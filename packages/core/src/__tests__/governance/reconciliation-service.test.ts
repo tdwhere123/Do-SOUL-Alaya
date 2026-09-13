@@ -3,7 +3,7 @@ import { type MemoryEntry } from "@do-soul/alaya-protocol";
 import { PreWriteRecallService } from "../../governance/reconciliation/pre-write-recall-service.js";
 import { ReconciliationService } from "../../governance/reconciliation/reconciliation-service.js";
 
-import { DecideFn, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
+import { authorizedDurableRewrite, DecideFn, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
 import { requireAt, mockCallAt } from "../helpers/defined.js";
 
 describe("ReconciliationService", () => {
@@ -441,6 +441,7 @@ it("LLM UPDATE write failure without a visible mutation degrades to ADD", async 
     });
     const { deps } = createDeps([neighbor], {
       thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: authorizedDurableRewrite,
       memoryUpdate: {
         update: async () => {
           throw new Error("memory entry is archived");
@@ -463,6 +464,71 @@ it("LLM UPDATE write failure without a visible mutation degrades to ADD", async 
     expect(decision.kind).toBe("add");
     expect(decision.runConflictScan).toBe(true);
     expect(driven.appliedVerdicts).toEqual(["update", "add"]);
+  });
+
+it("LLM UPDATE without rewrite authorization leaves the target row content and updated_at unchanged", async () => {
+    const originalUpdatedAt = "2026-05-16T00:00:00.000Z";
+    const neighbor = createMemoryEntry({
+      object_id: "memory-neighbor",
+      content: "The user lives in Berlin city center",
+      domain_tags: ["residence"],
+      updated_at: originalUpdatedAt
+    });
+    const { deps, update } = createDeps([neighbor], {
+      thresholds: { similarityFloor: 0.2 }
+    });
+    deps.llmDecision.decide = vi.fn<DecideFn>(async () => ({
+      kind: "update",
+      targetObjectId: "memory-neighbor",
+      reason: "refines"
+    }));
+    const service = new ReconciliationService(deps);
+
+    const driven = drive(service, {
+      incomingContent: "The user lives in Berlin since 2019",
+      incomingDomainTags: ["residence"]
+    });
+    const decision = await driven.decision;
+
+    expect(decision.kind).toBe("add");
+    expect(decision.runConflictScan).toBe(true);
+    expect(driven.appliedVerdicts).toEqual(["add"]);
+    expect(update).not.toHaveBeenCalled();
+    expect(neighbor.content).toBe("The user lives in Berlin city center");
+    expect(neighbor.updated_at).toBe(originalUpdatedAt);
+    expect(neighbor.domain_tags).toEqual(["residence"]);
+  });
+
+it("LLM UPDATE is demoted when rewrite authorization throws", async () => {
+    const neighbor = createMemoryEntry({
+      object_id: "memory-neighbor",
+      content: "The user lives in Berlin city center",
+      updated_at: "2026-05-16T00:00:00.000Z"
+    });
+    const { deps, update } = createDeps([neighbor], {
+      thresholds: { similarityFloor: 0.2 },
+      rewriteAuthorization: {
+        allowsDurableRewrite: async () => {
+          throw new Error("proof lookup failed");
+        }
+      }
+    });
+    deps.llmDecision.decide = vi.fn<DecideFn>(async () => ({
+      kind: "update",
+      targetObjectId: "memory-neighbor",
+      reason: "refines"
+    }));
+    const service = new ReconciliationService(deps);
+
+    const decision = await drive(service, {
+      incomingContent: "The user lives in Berlin since 2019",
+      incomingDomainTags: ["bench-seed"]
+    }).decision;
+
+    expect(decision.kind).toBe("add");
+    expect(update).not.toHaveBeenCalled();
+    expect(neighbor.content).toBe("The user lives in Berlin city center");
+    expect(neighbor.updated_at).toBe("2026-05-16T00:00:00.000Z");
   });
 
 it("LLM UPDATE with an invalid target degrades to ADD", async () => {

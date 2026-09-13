@@ -24,6 +24,7 @@ import {
   type ReconciliationMemoryRepoPort,
   type ReconciliationMemoryProjectionFields,
   type ReconciliationMemoryUpdatePort,
+  type ReconciliationRewriteAuthorizationPort,
   type ReconciliationServiceDependencies,
   type ReconciliationVerdictApplier
 } from "./reconciliation-service-internal.js";
@@ -46,6 +47,7 @@ export type {
   ReconciliationMemoryRepoPort,
   ReconciliationMemoryProjectionFields,
   ReconciliationMemoryUpdatePort,
+  ReconciliationRewriteAuthorizationPort,
   ReconciliationServiceDependencies,
   ReconciliationServiceThresholds,
   ReconciliationVerdictApplier
@@ -196,6 +198,7 @@ export class ReconciliationService {
   private readonly memoryUpdate: ReconciliationMemoryUpdatePort;
   private readonly eventLog: ReconciliationEventLogPort;
   private readonly runLookup: GovernanceRunWorkspaceLookup;
+  private readonly rewriteAuthorization?: ReconciliationRewriteAuthorizationPort;
   private readonly warnFn?: (message: string, meta: Record<string, unknown>) => void;
 
   public constructor(deps: ReconciliationServiceDependencies) {
@@ -212,6 +215,7 @@ export class ReconciliationService {
     this.memoryUpdate = deps.memoryUpdate;
     this.eventLog = deps.eventLog;
     this.runLookup = deps.runLookup;
+    this.rewriteAuthorization = deps.rewriteAuthorization;
     this.warnFn = deps.warn;
     this.decider = new ReconciliationDecider({
       preWriteRecall: deps.preWriteRecall,
@@ -271,26 +275,12 @@ export class ReconciliationService {
     const decision = await this.decider.decide(input);
 
     if (decision.kind === "update" && decision.survivingObjectId !== undefined) {
-      // router creates the evidence_capsule, then the in-place rewrite runs under the lock.
-      const { incomingEvidenceRef } = await applyVerdict(decision);
-      const applied = await this.applyUpdate(
-        input.workspaceId,
+      return await this.applyUpdateDecision(
+        input,
+        decision,
         decision.survivingObjectId,
-        input.incomingContent.trim(),
-        input.incomingDomainTags,
-        incomingEvidenceRef,
-        input.incomingProjectionFields
+        applyVerdict
       );
-      if (applied) {
-        return decision;
-      }
-      const degraded = addDecision(
-        decision.bestSimilarity,
-        true,
-        "LLM UPDATE could not be applied — added with conflict scan"
-      );
-      await applyVerdict(degraded);
-      return degraded;
     }
 
     if (decision.kind === "noop" && decision.survivingObjectId !== undefined) {
@@ -308,6 +298,78 @@ export class ReconciliationService {
     // ADD (or an update/noop with no target): router creates the row under the lock.
     await applyVerdict(decision);
     return decision;
+  }
+
+  private async applyUpdateDecision(
+    input: ReconciliationInput,
+    decision: ReconciliationDecision,
+    targetObjectId: string,
+    applyVerdict: ReconciliationVerdictApplier
+  ): Promise<ReconciliationDecision> {
+    if (!(await this.durableRewriteAuthorized(input.workspaceId, targetObjectId))) {
+      return await this.demoteUpdateToCandidate(input, decision, applyVerdict);
+    }
+    const { incomingEvidenceRef } = await applyVerdict(decision);
+    const applied = await this.applyUpdate(
+      input.workspaceId,
+      targetObjectId,
+      input.incomingContent.trim(),
+      input.incomingDomainTags,
+      incomingEvidenceRef,
+      input.incomingProjectionFields
+    );
+    if (applied) {
+      return decision;
+    }
+    const degraded = addDecision(
+      decision.bestSimilarity,
+      true,
+      "LLM UPDATE could not be applied — added with conflict scan"
+    );
+    await applyVerdict(degraded);
+    return degraded;
+  }
+
+  private async demoteUpdateToCandidate(
+    input: ReconciliationInput,
+    decision: ReconciliationDecision,
+    applyVerdict: ReconciliationVerdictApplier
+  ): Promise<ReconciliationDecision> {
+    this.warn("reconciliation LLM UPDATE demoted to candidate — model output cannot mutate truth", {
+      workspace_id: input.workspaceId,
+      signal_id: input.signalId,
+      target_object_id: decision.survivingObjectId ?? null,
+      nominated_reason: decision.reason
+    });
+    const demoted = addDecision(
+      decision.bestSimilarity,
+      true,
+      "LLM UPDATE demoted to candidate — model output cannot mutate truth"
+    );
+    await applyVerdict(demoted);
+    return demoted;
+  }
+
+  private async durableRewriteAuthorized(
+    workspaceId: string,
+    targetObjectId: string
+  ): Promise<boolean> {
+    if (this.rewriteAuthorization === undefined) {
+      return false;
+    }
+    try {
+      return await this.rewriteAuthorization.allowsDurableRewrite({
+        workspaceId,
+        targetObjectId
+      });
+    } catch (error) {
+      this.warn("reconciliation rewrite authorization failed — refusing durable rewrite", {
+        workspace_id: workspaceId,
+        object_id: targetObjectId,
+        error: errorMessage(error)
+      });
+      return false;
+    }
   }
 
   private async applyUpdate(
