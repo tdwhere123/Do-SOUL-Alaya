@@ -149,8 +149,15 @@ describe("bounded semantic residual producer-consumer regressions", () => {
 
   it("observes actual demanded causal receipts and respects retraction and unavailable capability", async () => {
     const slice = await planted();
+    // The log was recorded today about yesterday's deployment. It is outside
+    // the seed window, while its existing open relation validity is unchanged.
+    stamp(slice, MEM.l, INTERPRETATION_CLOCK);
     const absent = await session(slice)();
-    expectUnresolvedLogInterpretation(absent);
+    expect(absent.completeness).toMatchObject({ logical_index: "complete", observed_coverage: "complete",
+      transport: "complete", representation: "complete" });
+    expect(absent.continuation).toBeNull();
+    expect(absent.entries.find((entry) => entry.object_id === MEM.r)?.role).toBe("requested");
+    expect(absent.entries.some((entry) => entry.object_id === MEM.c)).toBe(true);
     expect(absent.entries.find((entry) => entry.object_id === MEM.h)?.claim).toBe("unknown");
     await slice.admitRelation({ evidenceId: "bbbbbbbb-bbbb-4bbb-8bbb-000000000887", assertionId: "assert-cause-live",
       sourceId: MEM.r, targetId: MEM.h, resultObjectId: MEM.h, relationKind: "common_cause",
@@ -163,7 +170,7 @@ describe("bounded semantic residual producer-consumer regressions", () => {
       ? { observations: [], nativeVisits: 0, nativeBytes: 0, rowsRead: 0, bytesRead: 0, truncated: false, unavailable: true }
       : native.relation!(input) })();
     expect(unavailable.completeness.observed_coverage).toBe("unknown");
-    expect(unavailable.completeness.logical_index).not.toBe("complete");
+    expect(unavailable.completeness.logical_index).toBe("open");
     await slice.relations.resolve({ assertionId: "assert-cause-live", workspaceId: WS, runId: null, causedBy: "test",
       resolutionKind: "retracted", reason: "source correction", resolvedAt: INTERPRETATION_CLOCK });
     const readRetracted = session(slice);
@@ -174,7 +181,8 @@ describe("bounded semantic residual producer-consumer regressions", () => {
       retractedEntries.push(...retracted.entries);
     }
     expect(retracted.continuation).toBeNull();
-    expectUnresolvedLogInterpretation(retracted);
+    expect(retracted.completeness).toMatchObject({ logical_index: "complete", observed_coverage: "complete",
+      transport: "complete", representation: "complete" });
     expect(retractedEntries.find((entry) => entry.object_id === MEM.h)).toMatchObject({
       role: "associated", association_milligrades: 1000, claim: "unknown"
     });
