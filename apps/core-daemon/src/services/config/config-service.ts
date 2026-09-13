@@ -28,8 +28,10 @@ import {
   getRuntimeEmbeddingConfig,
   getRuntimeGardenComputeConfig,
   patchRuntimeEmbeddingConfig,
-  patchRuntimeGardenComputeConfig
+  patchRuntimeGardenComputeConfig,
+  type RuntimeGardenComputeConfigView
 } from "./config-service-runtime.js";
+export type { RuntimeGardenComputeConfigView } from "./config-service-runtime.js";
 import {
   buildManifestationBudgetChangeSummary,
   defaultManifestationBudgetConfig
@@ -47,7 +49,7 @@ export interface AppConfigService {
   getRuntimeEmbeddingConfig(): Promise<RuntimeEmbeddingConfig>;
   patchRuntimeEmbeddingConfig(patch: unknown): Promise<RuntimeEmbeddingConfig>;
   getGardenCredentialProvenance(): Promise<GardenCredentialProvenance>;
-  getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;
+  getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfigView>;
   patchRuntimeGardenComputeConfig(patch: unknown): Promise<RuntimeGardenComputeConfig>;
 }
 

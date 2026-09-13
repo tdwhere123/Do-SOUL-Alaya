@@ -4,9 +4,13 @@ import {
   extractWorkspaceIdFromPath,
   WORKSPACE_TOKEN_DENIED_MESSAGE
 } from "../../runtime/request-token-binding.js";
+import type { FileRouteServices } from "../../routes/workspace/files/files.js";
+import type { ProjectMappingRouteServices } from "../../routes/workspace/project-mapping.js";
 import {
   globalMemoryRouteServices,
-  runRouteServices
+  routeServices,
+  runRouteServices,
+  workspaceServiceStub
 } from "../support/route-service-stubs.js";
 
 const PROCESS_TOKEN = "process-token";
@@ -32,7 +36,7 @@ describe("request token workspace scope", () => {
         boundWorkspaceIds: ["wsA"]
       },
       routes: {
-        files: {
+        files: routeServices<FileRouteServices>({
           workspaceService: {
             getById: vi.fn(async (workspaceId: string) => ({ workspace_id: workspaceId }))
           },
@@ -49,15 +53,15 @@ describe("request token workspace scope", () => {
             notifyEntry: vi.fn()
           },
           filesDirectory: "/tmp/files"
-        },
-        projectMapping: {
-          workspaceService: {
+        }),
+        projectMapping: routeServices<ProjectMappingRouteServices>({
+          workspaceService: workspaceServiceStub({
             getById: vi.fn(async (workspaceId: string) => ({ workspace_id: workspaceId }))
-          },
+          }),
           projectMappingService: {
             findByWorkspace: vi.fn(async () => [])
           }
-        },
+        }),
         globalMemory: globalMemoryRouteServices({
           workspaceService: {
             getById: vi.fn(async (workspaceId: string) => ({ workspace_id: workspaceId }))

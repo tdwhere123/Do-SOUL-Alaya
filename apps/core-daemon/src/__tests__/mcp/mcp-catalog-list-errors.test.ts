@@ -47,7 +47,16 @@ function createCatalog(listServerTools: () => Promise<readonly { readonly name: 
       getServerTools: vi.fn(() => []),
       listServerTools,
       callTool: vi.fn(async () => ({ content: [] })),
-      close: vi.fn(async () => undefined)
+      close: vi.fn(async () => undefined),
+      getHealth: vi.fn(() => ({
+        servers: [
+          {
+            server_name: "filesystem",
+            status: "active" as const,
+            last_error: null
+          }
+        ]
+      }))
     } as Parameters<typeof createDaemonMcpCatalogFromEnv>[0]["runtimeRegistry"]
   });
 }

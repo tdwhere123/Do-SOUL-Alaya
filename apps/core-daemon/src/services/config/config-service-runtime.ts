@@ -85,7 +85,7 @@ export async function getRuntimeGardenComputeConfig(
   repo: ConfigRepo,
   paths: AlayaConfigPaths,
   warn: (message: string) => void
-): Promise<RuntimeGardenComputeConfig> {
+): Promise<RuntimeGardenComputeConfigView> {
   const persisted = repo.getParsed(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, {
     parse: (value) => parseGardenComputeConfigWithLegacyFallback(value, "garden-compute config", warn)
   });
@@ -311,7 +311,7 @@ function patchStoredRuntimeGardenComputeConfig(
   );
 }
 
-type RuntimeGardenComputeConfigView = RuntimeGardenComputeConfig & {
+export type RuntimeGardenComputeConfigView = RuntimeGardenComputeConfig & {
   readonly degraded_reason?: string | null;
 };
 

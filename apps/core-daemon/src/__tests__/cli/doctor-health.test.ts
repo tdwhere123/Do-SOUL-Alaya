@@ -21,6 +21,15 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 
 const mockedAccess = vi.mocked(access);
 
+const STARTUP_STEPS = [
+  "database",
+  "repositories",
+  "core-services",
+  "garden-runtime",
+  "mcp-tooling",
+  "http-app"
+] as const;
+
 describe("doctor MCP and Garden health", () => {
   it("treats inactive catalog servers and last_error as not ready", () => {
     expect(
@@ -50,14 +59,10 @@ describe("doctor MCP and Garden health", () => {
 
   it("exits non-zero for an inactive catalog and stale Garden pass", async () => {
     const daemon = {
-      startupSteps: [
-        "database",
-        "repositories",
-        "core-services",
-        "garden-runtime",
-        "mcp-tooling",
-        "http-app"
-      ].map((step) => ({ step, completedAt: "2026-05-05T00:00:00.000Z" }))
+      startupSteps: STARTUP_STEPS.map((step) => ({
+        step,
+        completedAt: "2026-05-05T00:00:00.000Z"
+      }))
     };
     const bridge = createAlayaCliBridge(daemon, {
       stdout: new PassThrough(),
@@ -94,14 +99,10 @@ describe("doctor MCP and Garden health", () => {
 
   it("reports garden schema_ok false when compute config is degraded", async () => {
     const daemon = {
-      startupSteps: [
-        "database",
-        "repositories",
-        "core-services",
-        "garden-runtime",
-        "mcp-tooling",
-        "http-app"
-      ].map((step) => ({ step, completedAt: "2026-05-05T00:00:00.000Z" }))
+      startupSteps: STARTUP_STEPS.map((step) => ({
+        step,
+        completedAt: "2026-05-05T00:00:00.000Z"
+      }))
     };
     const bridge = createAlayaCliBridge(daemon, {
       stdout: new PassThrough(),

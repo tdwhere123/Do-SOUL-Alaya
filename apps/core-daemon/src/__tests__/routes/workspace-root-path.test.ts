@@ -49,17 +49,20 @@ describe("workspace root_path validation", () => {
     const workspaceRoot = path.join(allowedRoot, "project");
     await mkdir(workspaceRoot);
     const resolvedRoot = await realpath(workspaceRoot);
-    const create = vi.fn(async (input: { readonly root_path: string }) => ({
-      workspace_id: "ws-1",
-      name: "legal",
-      root_path: input.root_path,
-      workspace_kind: "docs_only",
-      repo_path: null,
-      default_engine_binding: null,
-      workspace_state: "active",
-      created_at: "2026-05-05T00:00:00.000Z",
-      archived_at: null
-    }));
+    const create = vi.fn(async (input: unknown) => {
+      const rootPath = (input as { readonly root_path: string }).root_path;
+      return {
+        workspace_id: "ws-1",
+        name: "legal",
+        root_path: rootPath,
+        workspace_kind: "docs_only" as const,
+        repo_path: null,
+        default_engine_binding: null,
+        workspace_state: "active" as const,
+        created_at: "2026-05-05T00:00:00.000Z",
+        archived_at: null
+      };
+    });
     const app = new Hono();
     registerErrorHandler(app, { error() {} });
     registerWorkspaceRoutes(app, workspaceRouteServices({
