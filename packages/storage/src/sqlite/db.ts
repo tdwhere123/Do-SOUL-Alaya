@@ -414,6 +414,8 @@ function applyMigrationBatch(
   if (rebuildsMemoryEntries) {
     // PRAGMA foreign_keys is a no-op inside a transaction; DROP/rename of
     // memory_entries needs incoming FKs disabled for the official rebuild.
+    // Do not fail-closed on pre-existing FK violations: this batch only
+    // adds enum CHECKs. Illegal enum rows still fail the rebuilt CHECK.
     database.pragma("foreign_keys = OFF");
   }
   try {
@@ -424,15 +426,6 @@ function applyMigrationBatch(
         applyMigrationIfPending(database, migrationsDirectory, statements, fileName, temporalMode);
       }
     }).immediate();
-    if (rebuildsMemoryEntries) {
-      const violations = database.pragma("foreign_key_check") as readonly unknown[];
-      if (violations.length > 0) {
-        throw new StorageError(
-          "MIGRATION_FAILED",
-          `Failed to apply memory entry enum CHECKs: foreign key check found ${violations.length} violation(s).`
-        );
-      }
-    }
   } catch (error) {
     if (error instanceof StorageError) throw error;
     throw new StorageError(

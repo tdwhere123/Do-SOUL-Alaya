@@ -1,3 +1,7 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import BetterSqlite3 from "better-sqlite3";
 import {
   DecayProfileSchema,
   ForgetDispositionSchema,
@@ -14,13 +18,23 @@ import {
   TimeSource
 } from "@do-soul/alaya-protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { initDatabase } from "../../sqlite/db.js";
+import { StorageDatabase, initDatabase } from "../../sqlite/db.js";
+import { migrateLegacyPathRelationsToTemporalCandidate } from "../../sqlite/temporal-cutover-gate.js";
+import { applyBaselineSql } from "./apply-baseline.js";
+import { removeTempDirectorySync } from "../temp-directory.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
+const directories: string[] = [];
 
 afterEach(() => {
   for (const database of databases) database.close();
   databases.clear();
+  while (directories.length > 0) {
+    const directory = directories.pop();
+    if (directory !== undefined) {
+      removeTempDirectorySync(directory);
+    }
+  }
 });
 
 function openMemoryDatabase(): ReturnType<typeof initDatabase> {
@@ -96,5 +110,51 @@ describe("memory_entries enum CHECKs", () => {
       "SELECT dimension, storage_tier FROM memory_entries WHERE object_id = 'mem-legal'"
     ).get() as { readonly dimension: string; readonly storage_tier: string };
     expect(stored).toEqual({ dimension: "fact", storage_tier: "hot" });
+  });
+
+  it("applies enum CHECKs on upgrade even when an unrelated FK violation already exists", () => {
+    const directory = mkdtempSync(join(tmpdir(), "alaya-enum-check-fk-"));
+    directories.push(directory);
+    const filename = join(directory, "alaya.db");
+    const old = new StorageDatabase(filename, new BetterSqlite3(filename));
+    applyBaselineSql(old.connection, 13);
+    migrateLegacyPathRelationsToTemporalCandidate(old.connection, { selectionRequired: false });
+    old.connection.exec(
+      "CREATE TABLE schema_version(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+    );
+    for (let version = 1; version <= 13; version += 1) {
+      old.connection.prepare("INSERT INTO schema_version VALUES (?, ?)").run(
+        version,
+        "2026-09-01T00:00:00.000Z"
+      );
+    }
+    old.connection.pragma("foreign_keys = OFF");
+    old.connection.prepare(`
+      INSERT INTO memory_embeddings (
+        object_id, workspace_id, content_hash, provider_kind, model_id,
+        schema_version, dimensions, embedding_blob, created_at, updated_at
+      ) VALUES (
+        'missing-memory', 'missing-workspace', 'sha256:dead', 'openai', 'fixture',
+        1, 1, ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z'
+      )
+    `).run(Buffer.alloc(4));
+    old.connection.pragma("foreign_keys = ON");
+    old.close({ optimize: false });
+
+    const migrated = initDatabase({ filename });
+    databases.add(migrated);
+    expect(
+      migrated.connection.prepare("SELECT MAX(version) AS version FROM schema_version").get()
+    ).toEqual({ version: 15 });
+    const insert = migrated.connection.prepare(`
+      INSERT INTO memory_entries (
+        object_id, created_at, updated_at, created_by,
+        dimension, source_kind, formation_kind, scope_class, content,
+        workspace_id, run_id, storage_tier
+      ) VALUES (?, '2026-09-13T00:00:00.000Z', '2026-09-13T00:00:00.000Z', 'test',
+        ?, 'compiler', 'explicit', 'project', 'content', 'workspace-1', 'run-1', ?)
+    `);
+    expect(() => insert.run("mem-illegal-dimension", "not-a-dimension", "hot")).toThrow(/CHECK/i);
+    insert.run("mem-legal", "fact", "hot");
   });
 });
