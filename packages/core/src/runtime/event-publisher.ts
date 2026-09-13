@@ -378,9 +378,15 @@ const INERT_NOTIFIER: RuntimeNotifier = {
 export type LegacyEventLogAppendPort = Pick<EventPublisherEventLogRepoPort, "append"> &
   Partial<EventPublisherEventLogRepoPort>;
 
+export const EVENT_PUBLISHER_ADAPTER_FALLBACK_CODE = "ALAYA_EVENT_PUBLISHER_ADAPTER_FALLBACK";
+
 /**
  * Production services take EventPublisher. Daemon wiring that still injects a
  * raw EventLog repo is adapted here so append+notify cannot skip propagate.
+ *
+ * Remove this adapter once every production bindEventPublisher call site
+ * injects runtimeNotifier and runHotStateService, or passes eventPublisher.
+ * Inert fallbacks hide "no subscribers" from "notifier never wired".
  */
 export function bindEventPublisher(input: {
   readonly eventPublisher?: EventPublisher;
@@ -395,6 +401,22 @@ export function bindEventPublisher(input: {
   const eventLogRepo = input.eventLogRepo;
   if (eventLogRepo?.append === undefined) {
     throw new CoreError("CONFLICT", `${input.purpose} requires an event publisher`);
+  }
+  const missingNotifier = input.runtimeNotifier === undefined;
+  const missingHotState = input.runHotStateService === undefined;
+  if (missingNotifier || missingHotState) {
+    process.emitWarning(
+      `${input.purpose} EventPublisher adapter fell back to inert notifier/hot-state; EventLog rows will not wake subscribers`,
+      {
+        type: "AlayaEventPublisherAdapterWarning",
+        code: EVENT_PUBLISHER_ADAPTER_FALLBACK_CODE,
+        detail: JSON.stringify({
+          purpose: input.purpose,
+          missingNotifier,
+          missingHotState
+        })
+      }
+    );
   }
   // Spreading a class instance drops prototype methods and unbinds `this`.
   return new EventPublisher({

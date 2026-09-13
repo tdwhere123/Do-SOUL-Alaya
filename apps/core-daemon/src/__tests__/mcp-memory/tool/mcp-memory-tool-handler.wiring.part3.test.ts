@@ -9,6 +9,7 @@ import {
   createMcpMemoryToolHandler,
   type McpMemoryToolHandlerDependencies
 } from "../../../mcp-memory/tool/tool-handler.js";
+import { ToolValidationError } from "../../../mcp-memory/tool/mcp-tool-error.js";
 
 import {
   context,
@@ -93,9 +94,9 @@ describe("mcp memory tool handler wiring", () => {
   it("maps trust-state usage validation failures to MCP validation errors", async () => {
     const deps = createDeps();
     deps.trustStateRecorder.recordUsage = vi.fn(async () => {
-      const error = new Error("Per-anchor usage references object_id that was not delivered: mem2");
-      (error as Error & { code: "VALIDATION" }).code = "VALIDATION";
-      throw error;
+      throw new ToolValidationError(
+        "Per-anchor usage references object_id that was not delivered: mem2"
+      );
     });
     const handler = createMcpMemoryToolHandler(deps);
 

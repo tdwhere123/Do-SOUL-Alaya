@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { assertValidEmbeddingBatch } from "@do-soul/alaya-core";
+import { assertValidEmbeddingBatch, hashMemoryContent } from "@do-soul/alaya-core";
 import { bindEmbeddingOverlayIfPresent } from "@do-soul/alaya-storage";
 import type { BenchEmbeddingWarmupSummary } from "../daemon-types.js";
 import { embeddingInputIdentityForSchemaVersion } from "../../strict-treatment-config.js";
@@ -127,10 +126,6 @@ function hasValidEmbeddingBlob(blob: Uint8Array, dimensions: number): boolean {
   } catch {
     return false;
   }
-}
-
-function hashMemoryContent(content: string): string {
-  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
 function ratio(count: number, total: number): number {

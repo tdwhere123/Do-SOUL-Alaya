@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
-  assertSourceBoundF3SealCurrent,
   sourceBoundF3Seal
 } from "@do-soul/alaya-soul";
 import type { DiagnosticLoopRequest } from
@@ -17,7 +16,6 @@ export function canonicalReplayContractDigests(): {
   readonly schemaDigest: string;
   readonly operatorDigest: string;
 } {
-  assertSourceBoundF3SealCurrent();
   const seal = sourceBoundF3Seal();
   return {
     schemaDigest: digest({

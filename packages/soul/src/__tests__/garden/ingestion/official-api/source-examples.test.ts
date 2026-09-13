@@ -1,0 +1,27 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildOfficialApiExtractionRequests,
+  computeOfficialApiSourceCorpusIdentity
+} from "../../../../garden/ingestion/official-api/extraction-request.js";
+import { OFFICIAL_API_GROUNDED_EXAMPLES } from
+  "../../../../garden/ingestion/official-api/source-examples.js";
+import { buildOfficialApiSourceCorpus } from
+  "../../../../garden/triage/grounding/source-locator.js";
+
+const EXAMPLE_SOURCES = [
+  "In 2020, I opened a workshop and promised to lend tools.",
+  "I can borrow tools in the workshop only on Saturdays."
+] as const;
+
+describe("official API grounded examples", () => {
+  it("derives each example corpus identity from the extraction source corpus", () => {
+    expect(OFFICIAL_API_GROUNDED_EXAMPLES).toHaveLength(EXAMPLE_SOURCES.length);
+    OFFICIAL_API_GROUNDED_EXAMPLES.forEach((example, index) => {
+      const source = EXAMPLE_SOURCES[index]!;
+      expect(example.input.source_corpus_identity).toBe(
+        computeOfficialApiSourceCorpusIdentity(buildOfficialApiSourceCorpus(source, []))
+      );
+      expect(example.input).toEqual(buildOfficialApiExtractionRequests(source, [])[0]);
+    });
+  });
+});

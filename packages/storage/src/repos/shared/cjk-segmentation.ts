@@ -9,6 +9,9 @@ import { readErrorMessage } from "@do-soul/alaya-protocol";
  * symlink; the surface here is intentionally minimal so the two copies
  * can diverge if storage ever needs an FTS-specific segmenter knob.
  *
+ * Delete this copy when a protocol (or other jointly reachable) owner exists
+ * and FTS tokenization can import it without violating package direction.
+ *
  * Fail-soft: if @node-rs/jieba cannot load on this host, the helper emits a
  * structured process warning and returns the input as a single element so
  * `tokenizeFtsQuery` callers never throw.

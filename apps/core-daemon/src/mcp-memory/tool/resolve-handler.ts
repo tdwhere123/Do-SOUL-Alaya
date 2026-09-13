@@ -8,6 +8,7 @@ import {
   matchesDeliveryContext,
   resolveDeliveredTargetSources
 } from "./resolution-delivery-scope.js";
+import { McpToolError } from "./mcp-tool-error.js";
 
 // invariant: trusted MCP call context fields the handler binds onto
 // the protocol-stripped agent-facing request before calling
@@ -69,11 +70,9 @@ export interface SoulResolveHandlerDependencies {
   readonly now?: () => string;
 }
 
-export class SoulResolveScopeError extends Error {
-  public readonly code: "VALIDATION" | "NEEDS_CONTEXT";
+export class SoulResolveScopeError extends McpToolError {
   public constructor(code: "VALIDATION" | "NEEDS_CONTEXT", message: string) {
-    super(message);
-    this.code = code;
+    super(code, message);
     this.name = "SoulResolveScopeError";
   }
 }

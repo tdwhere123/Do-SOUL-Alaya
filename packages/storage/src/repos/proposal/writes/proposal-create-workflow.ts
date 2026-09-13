@@ -1,11 +1,12 @@
 import {
+  deepFreeze,
   PrivacyEraseReasonCodeSchema,
   type EventLogEntry,
   type MemoryProposalOperation,
   type Proposal
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
-import { deepFreeze } from "../../shared/deep-freeze.js";
+import { isUniqueConstraintError } from "../../garden/garden-task-errors.js";
 import { insertEventLogEntry } from "../../runtime/writes/event-log-writer.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import {
@@ -281,18 +282,3 @@ function insertProposal(
   );
 }
 
-function isUniqueConstraintError(error: unknown): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {
-    const codeValue = (current as { readonly code?: unknown }).code;
-    const messageValue = (current as { readonly message?: unknown }).message;
-    if (typeof codeValue === "string" && codeValue.startsWith("SQLITE_CONSTRAINT")) {
-      return true;
-    }
-    if (typeof messageValue === "string" && messageValue.includes("UNIQUE constraint failed")) {
-      return true;
-    }
-    current = (current as { readonly cause?: unknown }).cause;
-  }
-  return false;
-}

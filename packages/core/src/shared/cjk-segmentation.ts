@@ -19,6 +19,9 @@ import { CJK_INTERROGATIVE_FALLBACK_ATOMS } from
  * surface piece.
  * Recall paths therefore never throw on a missing jieba.
  *
+ * Storage cannot import core, so packages/storage keeps a sibling copy.
+ * Delete that copy when a protocol (or other jointly reachable) owner exists.
+ *
  * Lifecycle: the jieba instance + dict are loaded exactly once on the
  * first successful `segmentCjkRun` call, then cached for the process. A
  * load failure is also cached so subsequent calls fall through to the
