@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CoreError } from "@do-soul/alaya-core";
 import {
   McpToolError,
   ToolNotFoundError,
@@ -43,5 +44,11 @@ describe("McpToolError", () => {
   it("does not classify a duck-typed code as a tool error", () => {
     const error = Object.assign(new Error("spoof"), { code: "VALIDATION" });
     expect(classifyError(error)).toBe("INTERNAL");
+  });
+
+  it("classifies CoreError VALIDATION and NOT_FOUND by instanceof AlayaError", () => {
+    expect(classifyError(new CoreError("VALIDATION", "denied by policy"))).toBe("VALIDATION");
+    expect(classifyError(new CoreError("NOT_FOUND", "missing"))).toBe("NOT_FOUND");
+    expect(classifyError(new CoreError("CONFLICT", "lost race"))).toBe("INTERNAL");
   });
 });

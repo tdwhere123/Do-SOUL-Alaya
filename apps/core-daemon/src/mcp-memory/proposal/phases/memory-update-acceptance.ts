@@ -4,6 +4,7 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type { McpMemoryToolCallContext } from "../../tool/tool-handler-types.js";
 import type { McpMemoryProposalWorkflowDependencies } from "../proposal-workflow.js";
+import { normalizeResolutionError } from "../proposal-workflow-reviewer.js";
 
 export async function prepareAcceptedMemoryUpdate(input: Readonly<{
   readonly deps: McpMemoryProposalWorkflowDependencies;
@@ -40,7 +41,11 @@ export async function prepareAcceptedMemoryUpdate(input: Readonly<{
   if (target === null) {
     throw input.createError("NOT_FOUND", `Target memory object not found: ${targetObjectId}`);
   }
-  await memoryService.validateUpdate(targetObjectId, proposedChanges);
+  try {
+    await memoryService.validateUpdate(targetObjectId, proposedChanges);
+  } catch (error) {
+    throw normalizeResolutionError(error);
+  }
   return {
     kind: "memory_update",
     memoryUpdate: {

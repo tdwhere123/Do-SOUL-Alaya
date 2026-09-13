@@ -1,4 +1,5 @@
 import {
+  AlayaError,
   CandidateMemorySignalMemoryRefKeys,
   isZodValidationError,
   toPublicToolError
@@ -98,6 +99,9 @@ export function classifyError(error: unknown): "VALIDATION" | "UNAVAILABLE" | "N
   if (error instanceof McpToolError) {
     return classifyMcpToolErrorCode(error.code);
   }
+  if (error instanceof AlayaError) {
+    return classifyMcpToolErrorCode(error.code);
+  }
   if (error instanceof Error && error.name === "ZodError") {
     return "VALIDATION";
   }
@@ -105,7 +109,7 @@ export function classifyError(error: unknown): "VALIDATION" | "UNAVAILABLE" | "N
 }
 
 function classifyMcpToolErrorCode(
-  code: McpMemoryToolErrorCode
+  code: string
 ): "VALIDATION" | "UNAVAILABLE" | "NOT_FOUND" | "NEEDS_CONTEXT" | "INTERNAL" {
   if (
     code === "VALIDATION" ||
