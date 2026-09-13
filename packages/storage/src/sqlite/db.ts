@@ -5,6 +5,11 @@ import { StorageError } from "../shared/errors.js";
 import { LruCache } from "./lru-cache.js";
 import { applySqliteWritePragmas } from "./apply-sqlite-write-pragmas.js";
 import {
+  DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS,
+  isSqliteBusyError,
+  withSqliteBusyRetry
+} from "./sqlite-busy-retry.js";
+import {
   TEMPORAL_OFFLINE_MIGRATION_VERSION,
   assertCanonicalSchemaVersionTable,
   assertOrderedSafeMigrationVersions,
@@ -203,6 +208,35 @@ export function readSchemaMigrationLedger(
 export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase {
   const filename = options.filename ?? ":memory:";
   const busyTimeoutMs = normalizeBusyTimeoutMs(options.busyTimeoutMs);
+
+  if (filename !== ":memory:") {
+    const cached = databaseCache.get(filename);
+    if (cached !== undefined) {
+      assertCachedBusyTimeoutCompatible(cached, options.busyTimeoutMs);
+      const cachedMode = resolveTemporalDatabaseMode(filename, options.temporalMode);
+      if (cachedMode === "runtime") {
+        assertRuntimeTemporalDatabaseReady(filename, knownMigrationMaxVersion());
+      }
+      bindEmbeddingOverlayIfPresent(cached.connection, filename);
+      return cached;
+    }
+    return withSqliteBusyRetry(
+      () => initializeUncachedDatabase(filename, options, busyTimeoutMs),
+      {
+        budgetMs: busyTimeoutMs,
+        sleepMs: DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS
+      }
+    );
+  }
+
+  return initializeUncachedDatabase(filename, options, busyTimeoutMs);
+}
+
+function initializeUncachedDatabase(
+  filename: string,
+  options: InitDatabaseOptions,
+  busyTimeoutMs: number
+): StorageDatabase {
   let temporalMode = resolveTemporalDatabaseMode(filename, options.temporalMode);
   // A peer still creating this file looks like "exists" to existsSync, but it
   // is not a legacy source. Empty/unledgers stay on the fresh-bootstrap path.
@@ -215,21 +249,10 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
     temporalMode = "fresh-bootstrap";
   }
 
-  if (filename !== ":memory:") {
-    const cached = databaseCache.get(filename);
-    if (cached !== undefined) {
-      assertCachedBusyTimeoutCompatible(cached, options.busyTimeoutMs);
-      if (temporalMode === "runtime") {
-        assertRuntimeTemporalDatabaseReady(filename, knownMigrationMaxVersion());
-      }
-      bindEmbeddingOverlayIfPresent(cached.connection, filename);
-      return cached;
-    }
-    if (temporalMode === "runtime") {
-      // This readonly gate must happen before openDatabase() or any PRAGMA can
-      // mutate a legacy source database. Candidate conversion is offline-only.
-      assertRuntimeTemporalDatabaseReady(filename, knownMigrationMaxVersion());
-    }
+  if (filename !== ":memory:" && temporalMode === "runtime") {
+    // This readonly gate must happen before openDatabase() or any PRAGMA can
+    // mutate a legacy source database. Candidate conversion is offline-only.
+    assertRuntimeTemporalDatabaseReady(filename, knownMigrationMaxVersion());
   }
 
   const database = openDatabase(filename);
@@ -238,7 +261,7 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
     configureDatabaseConnection(database, busyTimeoutMs);
     registerRetainedSourceChunkDigest(database);
     restrictSqliteFileModes(filename);
-    runMigrations(database, temporalMode);
+    runMigrations(database, temporalMode, busyTimeoutMs);
     bindEmbeddingOverlayIfPresent(database, filename);
   } catch (error) {
     database.close();
@@ -306,7 +329,11 @@ function openDatabase(filename: string): SqliteConnection {
   }
 }
 
-function runMigrations(database: SqliteConnection, temporalMode: TemporalDatabaseMode): void {
+function runMigrations(
+  database: SqliteConnection,
+  temporalMode: TemporalDatabaseMode,
+  busyTimeoutMs: number
+): void {
   const migrationsDirectory = resolveMigrationsDirectory();
   const migrationFiles = listMigrationFiles(migrationsDirectory);
   assertContiguousMigrationFileVersions(migrationFiles);
@@ -331,9 +358,9 @@ function runMigrations(database: SqliteConnection, temporalMode: TemporalDatabas
   }
 
   // Keep 1..13 atomic so a concurrent opener never observes a pre-temporal ledger.
-  applyMigrationBatch(database, migrationsDirectory, beforeRebuild, temporalMode, false);
-  applyMigrationBatch(database, migrationsDirectory, rebuild, temporalMode, true);
-  applyMigrationBatch(database, migrationsDirectory, afterRebuild, temporalMode, false);
+  applyMigrationBatch(database, migrationsDirectory, beforeRebuild, temporalMode, false, busyTimeoutMs);
+  applyMigrationBatch(database, migrationsDirectory, rebuild, temporalMode, true, busyTimeoutMs);
+  applyMigrationBatch(database, migrationsDirectory, afterRebuild, temporalMode, false, busyTimeoutMs);
 }
 
 function ensureSchemaVersionTable(database: SqliteConnection): void {
@@ -406,7 +433,8 @@ function applyMigrationBatch(
   migrationsDirectory: string,
   fileNames: readonly string[],
   temporalMode: TemporalDatabaseMode,
-  rebuildsMemoryEntries: boolean
+  rebuildsMemoryEntries: boolean,
+  busyTimeoutMs: number
 ): void {
   if (fileNames.length === 0) {
     return;
@@ -419,13 +447,18 @@ function applyMigrationBatch(
     database.pragma("foreign_keys = OFF");
   }
   try {
-    database.transaction(() => {
-      ensureSchemaVersionTable(database);
-      const statements = prepareMigrationStatements(database);
-      for (const fileName of fileNames) {
-        applyMigrationIfPending(database, migrationsDirectory, statements, fileName, temporalMode);
-      }
-    }).immediate();
+    withSqliteBusyRetry(() => {
+      database.transaction(() => {
+        ensureSchemaVersionTable(database);
+        const statements = prepareMigrationStatements(database);
+        for (const fileName of fileNames) {
+          applyMigrationIfPending(database, migrationsDirectory, statements, fileName, temporalMode);
+        }
+      }).immediate();
+    }, {
+      budgetMs: busyTimeoutMs,
+      sleepMs: DEFAULT_SQLITE_BUSY_RETRY_SLEEP_MS
+    });
   } catch (error) {
     if (error instanceof StorageError) throw error;
     throw new StorageError(
@@ -488,6 +521,11 @@ function isUninitializedDatabaseFile(filename: string): boolean {
   } catch (error) {
     if (isSqliteNoSuchTableError(error)) {
       return true;
+    }
+    // Let initDatabase wait for a peer IMMEDIATE lock instead of treating busy
+    // as "initialized" and fail-closing the runtime temporal gate.
+    if (isSqliteBusyError(error)) {
+      throw error;
     }
     // Open/query failure is not proof the ledger is empty. Keep runtime so
     // assertRuntimeTemporalDatabaseReady fail-closes instead of applying v7.

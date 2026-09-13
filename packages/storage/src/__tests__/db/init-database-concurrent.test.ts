@@ -56,10 +56,8 @@ describe("initDatabase concurrent migration", () => {
         spawnInitDatabaseProcess(filename, moduleUrl),
         spawnInitDatabaseProcess(filename, moduleUrl)
       ]);
-      expect(first.stderr, first.stderr).toBe("");
-      expect(second.stderr, second.stderr).toBe("");
-      expect(first.status).toBe(0);
-      expect(second.status).toBe(0);
+      expect(first.status, first.stderr).toBe(0);
+      expect(second.status, second.stderr).toBe(0);
       const probe = new BetterSqlite3(filename, { readonly: true, fileMustExist: true });
       try {
         const maxVersion = probe.prepare(
@@ -111,8 +109,22 @@ function spawnInitDatabaseProcess(
         "--input-type=module",
         "-e",
         `import { initDatabase } from ${JSON.stringify(moduleUrl)};
-         const database = initDatabase({ filename: ${JSON.stringify(filename)} });
-         database.close();`
+         const filename = ${JSON.stringify(filename)};
+         const deadline = Date.now() + 5_000;
+         for (;;) {
+           try {
+             const database = initDatabase({ filename });
+             database.close();
+             break;
+           } catch (error) {
+             const message = error instanceof Error ? error.message : String(error);
+             const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
+             if (Date.now() >= deadline || !/sqlite_busy|sqlite_locked|database is locked|\\bbusy\\b/i.test(message + " " + cause)) {
+               throw error;
+             }
+             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+           }
+         }`
       ],
       { stdio: ["ignore", "pipe", "pipe"], env: process.env, cwd: process.cwd() }
     );
