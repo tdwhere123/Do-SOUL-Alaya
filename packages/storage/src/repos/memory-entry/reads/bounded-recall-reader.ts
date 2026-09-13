@@ -48,6 +48,13 @@ const LexicalRecallRowParser: RowParser<{ readonly object_id: string; readonly r
   }
 };
 
+const LexicalAfterRowIdParser: RowParser<{ readonly rowid: number }> = {
+  parse(value: unknown): { readonly rowid: number } {
+    const record = readRecord(value, "lexical after rowid");
+    return { rowid: readIntegerField(record, "rowid") };
+  }
+};
+
 const RevisionRowParser: RowParser<{ readonly revision: number }> = {
   parse(value: unknown): { readonly revision: number } {
     const record = readRecord(value, "source revision row");
@@ -159,7 +166,7 @@ function lexicalAfterRowId(
   if (afterObjectId === null || afterObjectId === "") return 0;
   if (/^[0-9]+$/u.test(afterObjectId)) return Number(afterObjectId);
   const row = parseCachedRows(
-    statements, LEXICAL_AFTER_ROWID_SQL, [afterObjectId], LexicalRecallRowParser, "lexical after rowid"
+    statements, LEXICAL_AFTER_ROWID_SQL, [afterObjectId], LexicalAfterRowIdParser, "lexical after rowid"
   )[0];
   return row?.rowid ?? 0;
 }

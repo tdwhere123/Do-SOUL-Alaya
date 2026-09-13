@@ -118,6 +118,19 @@ describe("SqliteMemoryRecallReader lexical cursor", () => {
     expect(new Set([...first.ids, ...second.ids]).size).toBe(ids.length);
   });
 
+  it("resumes lexical paging from a non-numeric object id", async () => {
+    const { database, repo } = await createRepo();
+    const ids = await plantNeedles(repo, 4);
+    const reader = new SqliteMemoryRecallReader(database);
+    const first = reader.lexical("workspace-1", "needle", 2, 2);
+    expect(first.ids).toEqual(ids.slice(0, 2));
+    const afterObjectId = first.ids.at(-1) ?? null;
+    expect(afterObjectId).not.toMatch(/^[0-9]+$/u);
+    const second = reader.lexical("workspace-1", "needle", 2, 2, afterObjectId);
+    expect(second.ids).toEqual(ids.slice(2));
+    expect([...first.ids, ...second.ids]).toEqual(ids);
+  });
+
   it("does not prepare lexical SQL once per page", async () => {
     const { database, repo } = await createRepo();
     await plantNeedles(repo, 8);

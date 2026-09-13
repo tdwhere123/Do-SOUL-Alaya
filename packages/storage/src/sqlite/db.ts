@@ -481,7 +481,7 @@ function isUninitializedDatabaseFile(filename: string): boolean {
   }
   let database: SqliteConnection | undefined;
   try {
-    database = new BetterSqlite3(filename, { readonly: true, fileMustExist: true });
+    database = openSqliteConnection(filename, { readonly: true, fileMustExist: true });
     const table = database.prepare(
       "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'"
     ).get() as { readonly count: number };
@@ -492,8 +492,13 @@ function isUninitializedDatabaseFile(filename: string): boolean {
       readonly count: number;
     };
     return ledger.count === 0;
-  } catch {
-    return true;
+  } catch (error) {
+    if (isSqliteNoSuchTableError(error)) {
+      return true;
+    }
+    // Open/query failure is not proof the ledger is empty. Keep runtime so
+    // assertRuntimeTemporalDatabaseReady fail-closes instead of applying v7.
+    return false;
   } finally {
     database?.close();
   }
