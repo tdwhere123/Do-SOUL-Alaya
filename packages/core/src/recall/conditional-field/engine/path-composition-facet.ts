@@ -6,7 +6,7 @@ import {
   type FacetVector,
   type ProductStateKey
 } from "@do-soul/alaya-protocol";
-import { evaluateFacetPredicate } from "../reference/accepting-projection.js";
+import { evaluateFacetPredicate } from "./facet-predicates.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import type { PathComputation } from "./path-effect-cursor.js";
 import type { RetainedRows } from "./retained-sequence.js";

@@ -12,7 +12,7 @@ import type {
   EmbeddingVectorRecord,
   PreparedEmbeddingQuerySnapshot
 } from "./types.js";
-import { NO_STORED_VECTORS_DEGRADATION_REASON } from "./constants.js";
+import { NO_STORED_VECTORS_DEGRADATION_REASON, resolveEmbeddingWorkspaceScanCap } from "./constants.js";
 
 interface PoolScoringParams {
   readonly workspaceId: string;
@@ -159,13 +159,15 @@ export function computeCoherentPairKeys(
     }
   }
 
+  const scanCap = resolveEmbeddingWorkspaceScanCap();
+  const boundedIds = objectIds.length <= scanCap ? objectIds : objectIds.slice(0, scanCap);
   const coherent = new Set<string>();
-  for (let i = 0; i < objectIds.length; i += 1) {
-    const vecA = vectorsByObjectId.get(objectIds[i]!);
+  for (let i = 0; i < boundedIds.length; i += 1) {
+    const vecA = vectorsByObjectId.get(boundedIds[i]!);
     if (vecA === undefined) {
       continue;
     }
-    collectCoherentPairsForVector(coherent, vectorsByObjectId, objectIds, i, vecA, floor);
+    collectCoherentPairsForVector(coherent, vectorsByObjectId, boundedIds, i, vecA, floor);
   }
   return coherent;
 }

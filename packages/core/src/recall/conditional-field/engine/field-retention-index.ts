@@ -27,8 +27,7 @@ export function indexFieldRetention(state: Pick<FieldEngineState, "observations"
   for (const rows of [state.observations, state.measurements, state.seeds, state.transitions, state.derivations, state.facets, state.discoveries]) {
     for (const row of rows) payloads = payloads.with(JSON.stringify(row), true);
   }
-  let observations = new PersistentStringMap<number>();
-  state.observations.forEach((row, index) => { observations = observations.with(row.observation_id, index); });
+  const observations = indexObservationOffsets(state.observations);
   let measurements = new PersistentStringMap<true>();
   for (const row of state.measurements) measurements = measurements.with(row.observation_id, true);
   let transitions = new PersistentStringMap<true>();
@@ -49,6 +48,32 @@ export function indexFieldRetention(state: Pick<FieldEngineState, "observations"
     derivations: RetainedSequence.from(state.derivations), facets: RetainedSequence.from(state.facets), discoveries: RetainedSequence.from(state.discoveries) },
     payloads, observations, measurements, transitions, ruleRevisions, derivations, facets, discoveries,
     seeds: seedOffsets(state.seeds), guaranteedSeeds: seedOffsets(state.guaranteed_seeds) };
+}
+
+export function indexObservationOffsets(
+  observations: Readonly<{ forEach(callback: (row: { readonly observation_id: string }, index: number) => void): void }>
+): PersistentStringMap<number> {
+  let offsets = new PersistentStringMap<number>();
+  observations.forEach((row, index) => { offsets = offsets.with(row.observation_id, index); });
+  return offsets;
+}
+
+export function lookupIndexedObservation<T>(
+  observationId: string,
+  offsets: PersistentStringMap<number>,
+  rows: Readonly<{ at(index: number): T | undefined }>
+): T | undefined {
+  const exact = offsets.get(observationId);
+  if (exact !== undefined) return rows.at(exact);
+  // Observation ids are namespaced by region; walk parent prefixes instead of scanning the page.
+  let prefix = observationId;
+  while (true) {
+    const cut = prefix.lastIndexOf(":");
+    if (cut <= 0) return undefined;
+    prefix = prefix.slice(0, cut);
+    const offset = offsets.get(prefix);
+    if (offset !== undefined) return rows.at(offset);
+  }
 }
 
 function seedOffsets(seeds: RetainedRows<SeedActivation>): PersistentStringMap<number> {

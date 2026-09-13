@@ -15,7 +15,18 @@ import {
   type ResidualSemanticEffect,
   type ResultKindView
 } from "@do-soul/alaya-protocol";
+import {
+  interpretationCoverageOf,
+  interpretationMayEmitCompleteEmpty
+} from "../engine/interpretation-coverage.js";
 import { aggregateObserverStatus } from "../reference/accepting-projection.js";
+
+export {
+  completenessForInterpretationStatus,
+  interpretationCoverage,
+  interpretationCoverageOf,
+  interpretationMayEmitCompleteEmpty
+} from "../engine/interpretation-coverage.js";
 import {
   classifyResidualInfluence,
   coverageRoleOf,
@@ -117,32 +128,6 @@ export function resourceRejectedCompleteness(): CompletenessReport {
 
 export function invalidatedCompleteness(): CompletenessReport {
   return uniformCompleteness("invalidated");
-}
-
-export function completenessForInterpretationStatus(
-  status: QueryInterpretationStatus
-): CompletenessReport | undefined {
-  if (status === "resource_rejected") return resourceRejectedCompleteness();
-  if (status === "unsupported" || status === "malformed") {
-    return uniformCompleteness("unavailable");
-  }
-  return undefined;
-}
-
-export function interpretationMayEmitCompleteEmpty(
-  status: QueryInterpretationStatus
-): boolean {
-  return status === "resolved";
-}
-
-export function interpretationCoverageOf(
-  status: QueryInterpretationStatus | undefined
-): CompletenessStatus | undefined {
-  if (status === undefined) return undefined;
-  if (status === "resolved") return "complete";
-  if (status === "hypotheses" || status === "partial") return "open";
-  if (status === "resource_rejected") return "resource_rejected";
-  return "unavailable";
 }
 
 export function continuationInvalidated(input: Readonly<{

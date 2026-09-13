@@ -7,9 +7,9 @@ import {
 import {
   advanceObserverCursor,
   mapNativeReaderPage,
-  projectAcceptingIndex,
   resumeIdsAfterCursor
 } from "../../../../recall/conditional-field/reference/accepting-projection.js";
+import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
 import { bindMaxMinField } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { scheduleFairWork } from "../../../../recall/conditional-field/reference/schedule-fair-work.js";
 import {

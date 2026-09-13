@@ -119,12 +119,7 @@ export {
   authorizedScopesFromAdmission
 } from "./recall/conditional-field/observers/observation-admission.js";
 export { reserveSnapshotPinWork } from "./recall/runtime/snapshot-pin-budget.js";
-export * from "./recall/query/recall-query-probes.js";
 export * from "./recall/field/field-identity.js";
-export * from "./recall/field/finite-field-seal.js";
-export * from "./recall/field/finite-field-capture.js";
-export * from "./recall/field/object-embedding-field-capture.js";
-export * from "./recall/field/evidence-semantic-field-capture.js";
 export * from "./shared/query-fact-frame-extraction-port.js";
 export * from "./shared/query-fact-frame-extraction-rules.js";
 export {
@@ -134,7 +129,6 @@ export {
 } from "./recall/field/query-attribution/query-fact-frame-attribution-producer.js";
 export * from "./shared/cjk-segmentation.js";
 export * from "./shared/entity-extraction-port.js";
-export * from "./shared/entity-extraction-rules.js";
 export {
   assertRecallZeroLiveExtraction,
   refuseRecallCampaignLiveExtraction,
